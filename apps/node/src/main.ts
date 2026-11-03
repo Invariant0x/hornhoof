@@ -13,7 +13,7 @@ import { connect } from './connection.js';
 import { agentUser, builtinAdapters, secureNode, userFor, type JobUser } from './isolation.js';
 import { machineLoad } from './load.js';
 import { adapterFor, programFor } from './providers/index.js';
-import { runJob, type ProviderAdapter, type RunResult } from './runner.js';
+import { runJob, type ProviderAdapter, type RunInput, type RunResult } from './runner.js';
 import { applyCredential, dropCredential, giveUpLease, heldCredential, holdsLease, isSpare, takeLease } from './credentials.js';
 import { nodeIdentity, seal, unseal } from './keys.js';
 import { LOGIN_KEY, LoginTerminal, type LoginSetup } from './login.js';
@@ -29,6 +29,7 @@ import { agyProgram, claudeProgram, codexProgram, kimiProgram, type TermProgram 
 import { Tmux } from './terminal/tmux.js';
 import { procOwner, type OwnerFactory } from './terminal/peer.js';
 import { macOwner, type Command } from './terminal/mac-peer.js';
+import { ProgramUpdates, readInstalledVersion } from './program-updates.js';
 
 export const VERSION: string = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
@@ -79,6 +80,7 @@ type RunOptions = {
   leaseCheckMs?: number;
   /* Installs the plan's program when it is missing: as the node starts, and before a turn in a session or a sign-in. */
   install?: () => Promise<void>;
+  programs?: ProgramUpdates;
   /* The user test runs run as, on a node that runs as root; none runs them as the node, as its agents run there. */
   testUser?: JobUser | null;
   /* Runs a part of a test run; tests pass a fake. */
@@ -98,7 +100,7 @@ function merged(known: Limits | null, news: Limits): Limits {
 }
 
 /* The node's life: stay connected, run jobs, report the sign-in state and the limits, clean up when removed. */
-export async function runNode({ dir, adapter, builtin, terminal, login: loginSetup, log = console.log, loginCheckMs = LOGIN_CHECK_MS, learnMs = LEARN_MS, limitsMs = LIMITS_MS, loadMs = LOAD_MS, leaseCheckMs = LEASE_CHECK_MS, install, testUser = null, runPart = runTests }: RunOptions): Promise<{ stop(): void }> {
+export async function runNode({ dir, adapter, builtin, terminal, login: loginSetup, log = console.log, loginCheckMs = LOGIN_CHECK_MS, learnMs = LEARN_MS, limitsMs = LIMITS_MS, loadMs = LOAD_MS, leaseCheckMs = LEASE_CHECK_MS, install, programs = new ProgramUpdates([]), testUser = null, runPart = runTests }: RunOptions): Promise<{ stop(): void }> {
   if (!builtin && isRemoved(dir)) {
     log('This node was removed in Hornhoof.');
     return { stop() {} };
@@ -154,7 +156,8 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   const emit = (m: NodeMessage) => {
     if (m.type === 'job.done') keep(m.jobId, m);
     if (m.type === 'tests.done') keepTest(m.partId, m);
-    if (!send?.(m) && m.type !== 'job.done' && m.type !== 'tests.done') outbox.push(m);
+    const current = withPrograms(m, programs);
+    if (!send?.(current) && m.type !== 'job.done' && m.type !== 'tests.done') outbox.push(current);
   };
   const keep = (jobId: string, m: NodeMessage) => {
     unconfirmed.set(jobId, m);
@@ -213,10 +216,11 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   /* Which account and plan the program is signed in to, read at the start, after a sign-in and with the limits. */
   const readAccount = async () => (single?.account ? await single.account().catch(() => null) : null);
   let account = await readAccount();
+  const tellStatus = () => emit({ type: 'status', loggedIn, limits, ...(models ? { models } : {}), account });
   const status = async () => {
     /* A program that cannot list its models now keeps those it listed before. */
     models = await readModels().catch(() => models);
-    emit({ type: 'status', loggedIn, limits, ...(models ? { models } : {}), account });
+    tellStatus();
   };
 
   /* How busy the machine is, which Hornhoof weighs when it picks a machine for a test run. */
@@ -232,7 +236,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       /* Finished jobs Hornhoof has not confirmed still count as running, so the server does not give up on them. */
       const typed = host?.typedJobs() ?? [];
       const tests = [...testing.keys(), ...unconfirmedTests.keys()];
-      next({ type: 'hello', version: VERSION, loggedIn, running: [...running.keys(), ...typed, ...unconfirmed.keys()], ...(models ? { models } : {}), terminals: Boolean(host), work: Boolean(testUser), ...(testUser ? {} : { noRuns: NO_RUNS }), load: load(), tests, skillFiles: true, publicKey: keyPair.recipient, account, boot });
+      next({ type: 'hello', version: VERSION, loggedIn, running: [...running.keys(), ...typed, ...unconfirmed.keys()], ...(models ? { models } : {}), terminals: Boolean(host), work: Boolean(testUser), ...(testUser ? {} : { noRuns: NO_RUNS }), load: load(), tests, skillFiles: true, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot() });
       for (const m of outbox.splice(0)) emit(m);
       for (const m of unconfirmed.values()) next(m);
       for (const m of unconfirmedTests.values()) next(m);
@@ -241,6 +245,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     onMessage: m => void handle(m).catch(err => log(`A message from Hornhoof failed: ${message(err)}`)),
     onRefused: () => log('Hornhoof does not know this machine any more. Run the install command from Hornhoof again to reconnect.'),
   });
+  void programs.update(tellStatus).catch(err => log(`Could not update the programs: ${message(err)}`));
 
   async function handle(m: ServerMessage) {
     if (m.type === 'remove') {
@@ -260,8 +265,8 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       stop();
       return;
     }
-    if (m.type === 'job.ack') return void unconfirmed.delete(m.jobId);
-    if (m.type === 'tests.ack') return void unconfirmedTests.delete(m.partId);
+    if (acknowledged(m, unconfirmed, unconfirmedTests)) return;
+    if (m.type === 'programs.update') return programs.update(tellStatus);
     if (m.type === 'tests.cancel') return void testing.get(m.partId)?.stop.abort();
     if (m.type === 'tests.run') {
       if (stopped || testing.has(m.partId) || unconfirmedTests.has(m.partId)) return;
@@ -411,6 +416,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     emit({ type: 'job.started', jobId: m.jobId });
     let done: Awaited<ReturnType<typeof runJob>>;
     try {
+      await programs.ready(signal);
       const chosen = pick(m);
       await learn([m.toolToken, m.secret, m.workspace?.repo?.token]);
       /* An agent's turn runs in its session; a test job, with no agent, runs as before. */
@@ -421,19 +427,20 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
         } catch (err) {
           return { ok: false, sessionId: null, result: '', output: `Could not install the program: ${message(err)}`, error: 'agent_failed', limits: null };
         }
-        return host.run({ key: input.agentKey, program: terminal.program, bin: terminal.bin, home: terminal.home, signedOut: terminal.signedOut, input });
+        const version = async () => { await programs.ready(input.signal); return programs.version(terminal.program.kind); };
+        return host.run({ key: input.agentKey, program: terminal.program, bin: terminal.bin, home: terminal.home, signedOut: terminal.signedOut, input, version });
       };
       const tracked: ProviderAdapter = {
         ...chosen,
         run: async input => {
-          const res = await runIn(input);
+          const res = await runUnlessStopped(input, () => runIn(input));
           if (res.limits) limits = merged(limits, res.limits);
           return res;
         },
       };
       let seq = 0;
       const onEvent = (event: AgentEvent) => emit({ type: 'job.event', jobId: m.jobId, seq: seq++, event });
-      done = await runJob(tracked, m, dir, { hidden, signal, toolsUrl, onEvent, untimed: Boolean(host && terminal && m.workspace?.key) });
+      done = await runJob(tracked, m, dir, { hidden, signal, toolsUrl, onEvent, beforeRun: () => programs.ready(signal), untimed: Boolean(host && terminal && m.workspace?.key) });
     } catch (err) {
       done = { type: 'job.done', jobId: m.jobId, ok: false, sessionId: null, result: '', tail: message(err), error: 'agent_failed' };
     }
@@ -516,6 +523,28 @@ const machineOnly: ProviderAdapter = {
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
+/* Replayed status messages describe the current installation, never an earlier queued phase. */
+function withPrograms(message: NodeMessage, programs: ProgramUpdates): NodeMessage {
+  return message.type === 'status' ? { ...message, programs: programs.snapshot() } : message;
+}
+
+function acknowledged(message: ServerMessage, jobs: Map<string, NodeMessage>, tests: Map<string, NodeMessage>): message is Extract<ServerMessage, { type: 'job.ack' | 'tests.ack' }> {
+  if (message.type === 'job.ack') {
+    jobs.delete(message.jobId);
+    return true;
+  }
+  if (message.type === 'tests.ack') {
+    tests.delete(message.partId);
+    return true;
+  }
+  return false;
+}
+
+function runUnlessStopped(input: RunInput, run: () => Promise<RunResult>): Promise<RunResult> {
+  if (input.signal?.aborted) return Promise.resolve({ ok: false, sessionId: input.sessionId, result: 'Stopped.', output: 'Stopped.', error: 'cancelled', limits: null });
+  return run();
+}
+
 /* The agent program for a personal node lives in /data/tools, its sign-in in /data/home. On a node that runs as root the
    program runs as the agents' user, who also make their folders and work in their repositories. */
 function personal(dir: string, provider: ProviderId, user: JobUser | null = null, fs: AgentFs = ownFs): ProviderAdapter {
@@ -529,12 +558,24 @@ const installing = new Map<string, Promise<void>>();
 function ensureInstalled(tools: string, provider: ProviderId, adapter: ProviderAdapter): Promise<void> {
   const path = join(tools, 'bin', programFor(provider).bin);
   if (existsSync(path)) return Promise.resolve();
+  return updateInstalled(tools, provider, adapter);
+}
+
+function updateInstalled(tools: string, provider: ProviderId, adapter: ProviderAdapter): Promise<void> {
+  const path = join(tools, 'bin', programFor(provider).bin);
   let pending = installing.get(path);
   if (!pending) {
     pending = adapter.install().finally(() => installing.delete(path));
     installing.set(path, pending);
   }
   return pending;
+}
+
+function managedUpdates(tools: string, programs: { provider: ProviderId; adapter: ProviderAdapter }[]): ProgramUpdates {
+  return new ProgramUpdates(programs.flatMap(({ provider, adapter }) => {
+    const id = programFor(provider).bin;
+    return id === 'agy' ? [] : [{ id, install: () => updateInstalled(tools, provider, adapter), readVersion: () => readInstalledVersion(tools, id) }];
+  }));
 }
 
 function withInstall(adapter: ProviderAdapter, tools: string, provider: ProviderId): ProviderAdapter {
@@ -666,7 +707,9 @@ async function run(dir: string, builtinMode: boolean, io: Io): Promise<number | 
     const provider = state?.provider ?? 'claude';
     const fs = user ? agentFs(user) : ownFs;
     const adapter = personal(dir, provider, user, fs);
-    return runNode({ dir, adapter: withInstall(adapter, tools, provider), install: () => ensureInstalled(tools, provider, adapter), log, testUser, ...terminalFor(dir, provider, user, fs) });
+    const programs = managedUpdates(tools, [{ provider, adapter }]);
+    const install = () => ensureInstalled(tools, provider, adapter);
+    return runNode({ dir, adapter: withInstall(adapter, tools, provider), install, programs, log, testUser, ...terminalFor(dir, provider, user, fs) });
   }
 
   const server = process.env.HORNHOOF_SERVER;
@@ -678,11 +721,8 @@ async function run(dir: string, builtinMode: boolean, io: Io): Promise<number | 
   /* Each API key gets its own home and, as root, its own user, so two keys never share settings or files. */
   const builtinPick = builtinAdapters(dir, tools);
   const pick = (job: JobRun) => withInstall(builtinPick(job), tools, job.provider);
-  /* Install both programs right away, so the first check does not wait for npm. */
-  for (const provider of ['anthropic_api', 'openai_api'] as const) {
-    ensureInstalled(tools, provider, adapterFor(provider, { home: dir, tools })).catch(err => log(`Could not install ${programFor(provider).name}: ${message(err)}`));
-  }
-  return runNode({ dir, adapter: pick, builtin: { server, key }, log, testUser: userFor(dir, 'tests') });
+  const managed = (['anthropic_api', 'openai_api'] as const).map(provider => ({ provider, adapter: adapterFor(provider, { home: dir, tools }) }));
+  return runNode({ dir, adapter: pick, programs: managedUpdates(tools, managed), builtin: { server, key }, log, testUser: userFor(dir, 'tests') });
 }
 
 /* One command line. A running node answers its handle and keeps the process up; the others answer an exit code. */

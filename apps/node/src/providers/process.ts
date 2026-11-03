@@ -238,7 +238,7 @@ export function tokensIn(path: string): string[] {
 /* Installs an agent program into tools with npm; a failure carries the last lines npm printed. */
 export async function installPackage(tools: string, pkg: string): Promise<void> {
   /* npm keeps its cache with the programs: in the agents' home it would leave files they cannot change. */
-  const done = await runProgram({ bin: 'npm', args: ['install', '-g', '--prefix', tools, pkg], env: childEnv(tools, { npm_config_cache: join(tools, '.npm-cache') }), timeoutMs: 10 * 60_000 });
+  const done = await runProgram({ bin: 'npm', args: ['install', '-g', '--prefix', tools, `${pkg}@latest`], env: childEnv(tools, { npm_config_cache: join(tools, '.npm-cache') }), timeoutMs: 10 * 60_000 });
   if (done.code === 0) return;
   const last = stripEscapes(done.output).trim().split('\n').slice(-5).join('\n');
   throw new Error(done.timedOut ? 'npm did not finish within 10 minutes.' : last || `npm ended with code ${done.code}.`);

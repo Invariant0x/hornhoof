@@ -77,11 +77,22 @@ RUN set -e; ub=/opt/hornhoof/ub; mkdir -p $ub /opt/hornhoof/bin /opt/hornhoof/ru
   chmod -R a+rX /opt/hornhoof
 
 FROM node:22.23.4-bookworm-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da
+ARG TARGETARCH
+ARG GH_VERSION=2.103.3
+ARG GH_AMD64_SHA256=4c806978ffce1cec70853302a56d70ac6da4f19bae7adca4e1a8ab00633dd91d
+ARG GH_ARM64_SHA256=ee32df2323c8847f5fac6cb6b4b69ca75828e9329a8f22f677021f7b3306ce63
 COPY --from=browser /opt/browser-packages /opt/browser-packages
 # procps gives agents ps and free, python-is-python3 the python that scripts call, and python3-pil Pillow for image checks.
 RUN apt-get update \
   && apt-get install -y --no-install-recommends git ca-certificates curl ripgrep jq file tmux procps python3 python3-venv python-is-python3 python3-pil $(cat /opt/browser-packages) \
-  && rm -rf /var/lib/apt/lists/*
+  && rm -rf /var/lib/apt/lists/* \
+  && arch="${TARGETARCH:-$(dpkg --print-architecture)}" \
+  && case "$arch" in amd64) sha="$GH_AMD64_SHA256" ;; arm64) sha="$GH_ARM64_SHA256" ;; *) exit 1 ;; esac \
+  && curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${arch}.tar.gz" -o /tmp/gh.tar.gz \
+  && echo "$sha  /tmp/gh.tar.gz" | sha256sum -c - \
+  && tar -xzf /tmp/gh.tar.gz --no-same-owner -C /usr/local/bin --strip-components=2 "gh_${GH_VERSION}_linux_${arch}/bin/gh" \
+  && rm -f /tmp/gh.tar.gz \
+  && gh --version
 COPY --from=quality /opt/hornhoof/ub /opt/hornhoof/ub
 COPY --from=quality /opt/hornhoof/rules /opt/hornhoof/rules
 COPY --from=quality /opt/hornhoof/superpowers /opt/hornhoof/superpowers

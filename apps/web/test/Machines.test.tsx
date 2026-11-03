@@ -36,6 +36,42 @@ const fact = (within_: HTMLElement, label: string) => within(within_).getByText(
 afterEach(() => localStorage.clear());
 
 describe('Machines', () => {
+  it.each([['en', 'Agent programs'], ['ru', 'Программы агентов']])('shows reported program versions on the machine card in %s', async (language, heading) => {
+    localStorage.setItem('hh-lang', language);
+    lists({ 'GET /api/machines': [200, { machines: [{ ...MACHINES[0]!, programs: [{ id: 'claude', version: '2.1.0', updating: false, failed: false }] }], builtin: null }] });
+    render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
+    const mac = await openCard('ivan-mbp');
+    expect(within(mac).getByRole('heading', { name: heading })).toBeInTheDocument();
+    expect(fact(mac, 'Claude Code')).toBe('2.1.0');
+  });
+
+  it('retains an active add-plan command after refreshing program versions', async () => {
+    const command = { id: '3'.repeat(64), kind: 'add', plans: ['Kimi'], machineId: 'm1', machine: 'ivan-mbp', command: `${COMMAND}-ADD`, expiresAt: new Date(Date.now() + 3600_000).toISOString() };
+    const calls = lists({
+      'GET /api/machines': [200, { machines: [{ ...MACHINES[0]!, programs: [{ id: 'claude', version: '2.1.0', updating: false, failed: false }] }], builtin: null }],
+      'GET /api/nodes/commands': [200, { commands: [command] }],
+      'POST /api/machines/m1/programs/update': [202, { updating: true }],
+    });
+    render(<Machines me={ME} />);
+    const mac = await screen.findByRole('article', { name: 'ivan-mbp' });
+    expect(await within(mac).findByText(command.command)).toBeInTheDocument();
+    const update = within(mac).getByRole('button', { name: 'Update programs' });
+    await userEvent.setup().click(update);
+    await vi.waitFor(() => expect(calls.filter(c => c.method === 'GET' && c.path === '/api/nodes/commands').length).toBeGreaterThanOrEqual(2));
+    await vi.waitFor(() => expect(update).toBeEnabled());
+    expect(within(mac).getByText(command.command)).toBeInTheDocument();
+    expect(calls.some(c => c.path.endsWith('/hide'))).toBe(false);
+  });
+
+  it('updates programs on the virtual built-in card through its own action', async () => {
+    const calls = lists({ 'POST /api/machines/builtin/programs/update': [202, { updating: true }] },
+      { ...BUILTIN, programs: [{ id: 'codex', version: '3.0.0', updating: false, failed: false }] });
+    render(<Machines me={ME} />);
+    const builtin = await openCard('Built-in node');
+    await userEvent.setup().click(within(builtin).getByRole('button', { name: 'Update programs' }));
+    expect(calls).toContainEqual({ method: 'POST', path: '/api/machines/builtin/programs/update', body: undefined });
+  });
+
   it.each([
     ['en', 'Priority', 'The company server runs here', 'Built-in node'],
     ['ru', 'Приоритет', 'Здесь работает сервер компании', 'Встроенная нода'],
@@ -136,7 +172,8 @@ describe('Machines', () => {
     expect(meter(own, 'Processor').querySelector('.g-f')?.textContent).toBe('4 cores');
     expect(meter(own, 'Memory').textContent).toBe('Memory2.5GB freeof 8 GB');
     expect(meter(own, 'Disk').querySelector('b')?.textContent).toBe('unknown');
-    expect(within(own).queryByRole('button')).not.toBeInTheDocument();
+    expect(within(own).getAllByRole('button')).toHaveLength(1);
+    expect(within(own).getByRole('button', { name: 'Update programs' })).toBeDisabled();
     expect(within(own).getByTitle('The company server runs on this machine now')).toHaveTextContent('Company server here');
     expect(within(box).queryByText('Company server here')).not.toBeInTheDocument();
   });

@@ -18,6 +18,7 @@ import { nodeCommandRoutes } from './command-routes.js';
 import { disconnectMachines } from './disconnect.js';
 import { BUILTIN, nodeIdentity } from './hub.js';
 import { builtinMachine, liveNode, settlePlans } from './nodes.js';
+import { machineProgramState, machineProgramRoutes, programsFor } from './programs.js';
 
 const JoinBody = z.object({
   code: z.string().min(1).max(200),
@@ -51,6 +52,7 @@ async function keyNode(tx: Db, at: { companyId: string; machineId: string; subsc
 
 export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db, config, hub } = ctx;
+  machineProgramRoutes(app, ctx, ownMachine);
   /* The installer calls this with the code from the command. The code is the only credential, and it works once. */
   app.post('/api/nodes/join', async (req, reply) => {
     const body = JoinBody.parse(req.body);
@@ -174,7 +176,8 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     /* What runs on each machine now: the employees whose program lives there, busy while a turn of theirs runs, and the
        parts of test and work runs it takes. A company key's employees are on the built-in node. */
     const placed = await runningAgents(ctx, me);
-    const serverMachine = me.scopeKind === 'company' ? await builtinMachine(db, config.hostId, me.companyId) : null;
+    const programHost = await builtinMachine(db, config.hostId, me.companyId);
+    const serverMachine = me.scopeKind === 'company' ? programHost : null;
     const parts = await db
       .select({ machineId: testParts.machineId, builtin: testParts.builtin, run: testRuns.number, kind: testRuns.kind, task: tasks.number, part: testParts.part, parts: testRuns.parts, agent: agents.name, startedAt: testParts.startedAt })
       .from(testParts)
@@ -198,6 +201,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
               load: together([hub.loadOf(BUILTIN)]),
               running: running(a => Boolean(a.builtin), p => p.builtin),
               machine: serverMachine,
+              programs: programsFor(hub, [BUILTIN]),
             }
           : null,
       machines: rows.map(m => ({
@@ -208,6 +212,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
         kind: m.kind,
         owner: { id: m.ownerId, name: m.ownerName },
         ...machineState(hub, on(m.id).map(n => n.id)),
+        ...machineProgramState(hub, on(m.id).map(n => n.id), m.id, programHost),
         lastSeenAt: latest(on(m.id).map(n => n.lastSeenAt)),
         plans: on(m.id).flatMap(n => (n.subscriptionId && n.provider ? [{ id: n.subscriptionId, provider: n.provider, status: n.status, online: hub.isOnline(nodeIdentity(n.id)) }] : [])),
         lendsTests: m.lendsTests,

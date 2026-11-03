@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { runNode } from '../src/main.js';
+import { ProgramUpdates } from '../src/program-updates.js';
 import { TerminalHost } from '../src/terminal/host.js';
 import { claudeProgram } from '../src/terminal/programs.js';
 import { Tmux } from '../src/terminal/tmux.js';
@@ -58,7 +59,124 @@ const hasTmux = (() => {
   }
 })();
 
+describe('reporting managed programs', () => {
+  it('reports startup and explicit updates without stopping an active job, and coalesces requests', async () => {
+    const server = await fakeServer();
+    let version = '1.0.0';
+    const releases: (() => void)[] = [];
+    const programs = new ProgramUpdates([{ id: 'claude', readVersion: () => version, install: async () => {
+      await new Promise<void>(resolve => releases.push(resolve));
+      version = `${releases.length + 1}.0.0`;
+    } }]);
+    let finishJob: (() => void) | undefined;
+    let cancelled = false;
+    const running = { ...adapter, run: async (input: RunInput) => {
+      input.signal?.addEventListener('abort', () => { cancelled = true; });
+      await new Promise<void>(resolve => { finishJob = resolve; });
+      return adapter.run(input);
+    } };
+    const node = await runNode({ dir: nodeDir(server.url), adapter: running, programs, log: () => {} });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    expect(server.received[0]).toMatchObject({ programs: [{ id: 'claude', version: '1.0.0', updating: true, failed: false }] });
+    releases[0]!();
+    await server.wait(() => server.received.some(m => m.type === 'status' && JSON.stringify(m.programs).includes('2.0.0')));
+    server.send({ type: 'job.run', jobId: 'active-update', subscriptionId: 's1', provider: 'claude', prompt: 'finish this', sessionId: null, model: null, timeoutMs: 20000, secret: null, instructions: null, toolToken: null });
+    await server.wait(() => finishJob !== undefined);
+    server.send({ type: 'programs.update' });
+    server.send({ type: 'programs.update' });
+    server.send({ type: 'agent.say', agentKey: 'none', text: 'barrier', ref: 'updates-queued' });
+    await server.wait(() => server.received.some(m => m.type === 'agent.said' && m.ref === 'updates-queued'));
+    expect(releases).toHaveLength(2);
+    expect(server.received.filter(m => m.type === 'status').at(-1)).toMatchObject({ programs: [{ version: '2.0.0', updating: true, failed: false }] });
+    releases[1]!();
+    await server.wait(() => server.received.some(m => m.type === 'status' && JSON.stringify(m.programs).includes('3.0.0')));
+    expect(cancelled).toBe(false);
+    expect(server.received.some(m => m.type === 'job.done' && m.jobId === 'active-update')).toBe(false);
+    finishJob!();
+    await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'active-update'));
+    expect(server.received.find(m => m.type === 'job.done' && m.jobId === 'active-update')).toMatchObject({ ok: true, result: 'ready' });
+  });
+
+  it('reports an update failure without npm output and permits an explicit retry', async () => {
+    const server = await fakeServer();
+    let version = '1.0.0';
+    let attempts = 0;
+    const programs = new ProgramUpdates([{ id: 'claude', readVersion: () => version, install: async () => {
+      if (++attempts === 1) throw new Error('private npm credential');
+      version = '2.0.0';
+    } }]);
+    const node = await runNode({ dir: nodeDir(server.url), adapter, programs, log: () => {} });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    expect(server.received[0]).toMatchObject({ programs: [{ version: '1.0.0', updating: false, failed: true }] });
+    expect(JSON.stringify(server.received)).not.toContain('private npm credential');
+    server.send({ type: 'programs.update' });
+    await server.wait(() => server.received.some(m => m.type === 'status' && JSON.stringify(m.programs).includes('2.0.0')));
+    expect(server.received.filter(m => m.type === 'status').at(-1)).toMatchObject({ programs: [{ version: '2.0.0', updating: false, failed: false }] });
+  });
+
+  it('does not replay a delivered live event when its connection comes back', async () => {
+    const server = await fakeServer();
+    const node = await runNode({ dir: nodeDir(server.url), log: () => {}, adapter: {
+      ...adapter, run: async input => { input.onEvent?.({ kind: 'text', text: 'Delivered once.' }); return adapter.run(input); },
+    } });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    server.send({ type: 'job.run', jobId: 'delivered', subscriptionId: 's1', provider: 'claude', prompt: 'Say once.', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
+    await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'delivered'));
+    expect(server.received.filter(m => m.type === 'job.event' && m.jobId === 'delivered')).toHaveLength(1);
+    server.drop();
+    await server.wait(() => server.received.filter(m => m.type === 'hello').length === 2, 6000);
+    server.send({ type: 'agent.say', agentKey: 'none', text: 'barrier', ref: 'reconnected' });
+    await server.wait(() => server.received.some(m => m.type === 'agent.said' && m.ref === 'reconnected'));
+    expect(server.received.filter(m => m.type === 'job.event' && m.jobId === 'delivered')).toHaveLength(1);
+  });
+
+  it('replays current snapshots after hello and reconnect instead of older queued update states', async () => {
+    const server = await fakeServer();
+    let installed = 1;
+    const programs = new ProgramUpdates([{ id: 'codex', readVersion: () => `${installed}.0.0`, install: async () => { installed++; } }]);
+    const node = await runNode({ dir: nodeDir(server.url), adapter, programs, log: () => {} });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    await server.wait(() => server.received.filter(m => m.type === 'status').length >= 2);
+    const snapshot = [{ id: 'codex', version: '2.0.0', updating: false, failed: false }];
+    expect(server.received[0]).toMatchObject({ programs: snapshot });
+    for (const status of server.received.filter(m => m.type === 'status')) expect(status.programs).toEqual(snapshot);
+    server.drop();
+    await programs.update();
+    await server.wait(() => server.received.filter(m => m.type === 'hello').length === 2, 6000);
+    const hello = server.received.findLastIndex(m => m.type === 'hello');
+    expect(server.received[hello]).toMatchObject({ programs: [{ id: 'codex', version: '3.0.0', updating: false, failed: false }] });
+    for (const status of server.received.slice(hello + 1).filter(m => m.type === 'status')) expect(status.programs).toEqual(programs.snapshot());
+  });
+});
+
 describe('a node that runs agents in terminals', () => {
+  it.each([
+    ['a personal node without an agent session', true, null],
+    ['an API agent workspace without a terminal', false, 'api-agent'],
+  ] as const)('keeps the runtime timeout for %s', async (_name, terminal, key) => {
+    const server = await fakeServer();
+    const dir = nodeDir(server.url);
+    let release!: () => void;
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    const tmux = new Tmux({ socket: `hh-program-timeout-${process.pid}`, env: { PATH: process.env.PATH ?? '', HOME: dir } });
+    const node = await runNode({ dir, log: () => {}, adapter: { ...adapter, run: async input => { await pending; return adapter.run(input); } },
+      ...(terminal ? { terminal: { tmux, program: claudeProgram, bin: new URL('./fakes/fake-term.mjs', import.meta.url).pathname, home: join(dir, 'home'), signedOut: /not logged in/i } } : {}),
+    });
+    onTestFinished(() => node.stop());
+    try {
+      await server.wait(() => server.received.some(m => m.type === 'hello'));
+      server.send({ type: 'job.run', jobId: 'runtime-timeout', subscriptionId: 's1', provider: 'claude', prompt: 'Use a runtime timeout.', sessionId: null, model: null, timeoutMs: 80, secret: null, instructions: null, toolToken: null, ...(key ? { workspace: { key, repo: null } } : {}) });
+      await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'runtime-timeout'));
+      expect(server.received.find(m => m.type === 'job.done' && m.jobId === 'runtime-timeout')).toMatchObject({ ok: false, error: 'timeout' });
+    } finally {
+      release();
+    }
+  });
+
   it.skipIf(!hasTmux)('passes the live word budget to the host and accepts older servers without it', async () => {
     const server = await fakeServer();
     const dir = nodeDir(server.url);
@@ -401,6 +519,75 @@ describe('runNode', () => {
     ]);
     expect(server.received.find(m => m.type === 'job.event')).toMatchObject({ jobId: 'j1', event: { kind: 'text', text: 'Hello' } });
     expect(seen!.tools).toEqual({ url: `${server.url}/mcp`, token: 'tool-token-0123456789' });
+  });
+
+  it('waits at headless launch if an update starts during job preparation', async () => {
+    const server = await fakeServer();
+    let releaseInstall!: () => void;
+    let releasePreparation!: () => void;
+    const install = new Promise<void>(resolve => { releaseInstall = resolve; });
+    const preparation = new Promise<void>(resolve => { releasePreparation = resolve; });
+    let installs = 0;
+    let preparing = false;
+    let prepared = 0;
+    let blockPreparation = false;
+    const launches: boolean[] = [];
+    const programs = new ProgramUpdates([{ id: 'claude', readVersion: () => '1.0.0', install: async () => { if (++installs > 1) await install; } }]);
+    const node = await runNode({ dir: nodeDir(server.url), programs, log: () => {}, adapter: {
+      ...adapter,
+      secrets: async () => { if (blockPreparation) { preparing = true; await preparation; } prepared++; return []; },
+      run: async input => { launches.push(programs.snapshot()[0]!.updating); return adapter.run(input); },
+    } });
+    onTestFinished(() => node.stop());
+    try {
+      await server.wait(() => server.received.some(m => m.type === 'hello'));
+      await programs.ready();
+      prepared = 0;
+      blockPreparation = true;
+      server.send({ type: 'job.run', jobId: 'late-update', subscriptionId: 's1', provider: 'claude', prompt: 'Wait for the programs.', sessionId: null, model: null, timeoutMs: 100, secret: null, instructions: null, toolToken: null });
+      await server.wait(() => preparing);
+      server.send({ type: 'programs.update' });
+      await server.wait(() => installs === 2);
+      blockPreparation = false;
+      releasePreparation();
+      await server.wait(() => prepared >= 2);
+      await new Promise(resolve => setTimeout(resolve, 200));
+      expect(server.received.some(m => m.type === 'job.done' && m.jobId === 'late-update')).toBe(false);
+      expect(launches).toEqual([]);
+    } finally {
+      releasePreparation();
+      releaseInstall();
+    }
+    await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'late-update'));
+    expect(launches).toEqual([false]);
+    expect(server.received.find(m => m.type === 'job.done' && m.jobId === 'late-update')).toMatchObject({ ok: true });
+  });
+
+  it('does not run a job cancelled while its program update is pending', async () => {
+    const server = await fakeServer();
+    let release!: () => void;
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    const programs = new ProgramUpdates([{ id: 'claude', install: () => pending, readVersion: () => '1.0.0' }]);
+    const started: string[] = [];
+    const node = await runNode({ dir: nodeDir(server.url), programs, log: () => {}, adapter: {
+      ...adapter, run: async input => { started.push(input.prompt); return adapter.run(input); },
+    } });
+    onTestFinished(() => node.stop());
+    try {
+      await server.wait(() => server.received.some(m => m.type === 'hello'));
+      server.send({ type: 'job.run', jobId: 'waiting-update', subscriptionId: 's1', provider: 'claude', prompt: 'Do not run this.', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
+      await server.wait(() => server.received.some(m => m.type === 'job.started'));
+      expect(started).toEqual([]);
+      server.send({ type: 'job.cancel', jobId: 'waiting-update' });
+      server.send({ type: 'agent.say', agentKey: 'unused', text: 'barrier', ref: 'after-cancel' });
+      await server.wait(() => server.received.some(m => m.type === 'agent.said' && m.ref === 'after-cancel'));
+      await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'waiting-update'));
+      expect(server.received.find(m => m.type === 'job.done' && m.jobId === 'waiting-update')).toMatchObject({ ok: false, error: 'cancelled' });
+      expect(started).toEqual([]);
+      expect(programs.snapshot()[0]?.updating).toBe(true);
+    } finally {
+      release();
+    }
   });
 
   it('calls a running job off when Hornhoof asks and ignores ids it does not run', async () => {

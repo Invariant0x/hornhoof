@@ -33,6 +33,7 @@ export type ErrorReason =
   | 'code_used'
   | 'machine_unknown'
   | 'machine_offline'
+  | 'programs_unavailable'
   | 'other_machine'
   | 'already_on_machine'
   | 'already_connected'

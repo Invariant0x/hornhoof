@@ -9,7 +9,7 @@ import { antigravityAdapter } from './antigravity.js';
 type Options = { home: string; tools: string; bin?: string; secret?: string | null; user?: JobUser | null; plugins?: string[] };
 
 /* The program each provider runs on: its file in tools/bin and the name people know it by. */
-export function programFor(provider: ProviderId): { bin: string; name: string } {
+export function programFor(provider: ProviderId): { bin: 'claude' | 'codex' | 'kimi' | 'agy'; name: string } {
   if (provider === 'codex' || provider === 'openai_api') return { bin: 'codex', name: 'Codex' };
   if (provider === 'kimi') return { bin: 'kimi', name: 'Kimi Code' };
   if (provider === 'antigravity') return { bin: 'agy', name: 'Antigravity CLI' };
