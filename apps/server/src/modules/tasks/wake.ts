@@ -11,7 +11,7 @@ import { answerDirectly, brokeDown, CLOSED, GATE_ROUNDS, handOver, lastMove, lea
 import { wakeQueued, wakesLeft } from './outbox.js';
 import { carriedTasks, continueOnce, doneIfRecorded } from './endings.js';
 import { afterRestart } from './restarts.js';
-import { clearTurnProgram } from './silent.js';
+import { clearTurnProgram, failedProgramData } from './silent.js';
 import { settle, tell } from './turns.js';
 
 export { SILENT_TURNS, startWork } from './engine.js';
@@ -512,7 +512,7 @@ async function checkHeld(ctx: Ctx, job: typeof jobs.$inferSelect & { agentId: st
 /* A finished turn: a failure or a stop goes into the conversation, a turn a node restart cut off on a task runs once more
    or calls Operations, a turn that left a task it carried where it was is caught, then the next turn goes out. */
 export async function afterJob(ctx: Ctx, jobId: string): Promise<void> {
-  clearTurnProgram(ctx, jobId);
+  const program = clearTurnProgram(ctx, jobId);
   const [job] = await ctx.db
     .select({ companyId: jobs.companyId, agentId: jobs.agentId, kind: jobs.kind, status: jobs.status, error: jobs.error, taskId: jobs.taskId, startedAt: jobs.startedAt, finishedAt: jobs.finishedAt })
     .from(jobs)
@@ -521,7 +521,7 @@ export async function afterJob(ctx: Ctx, jobId: string): Promise<void> {
   const recorded = job.status === 'failed' && (await doneIfRecorded(ctx, jobId, job));
   if (job.status === 'failed' && !recorded) {
     const stopped = job.error === 'cancelled';
-    await appendEvent(ctx, { companyId: job.companyId, agentId: job.agentId, jobId, kind: stopped ? 'stopped' : 'failed', data: stopped ? {} : { error: job.error } });
+    await appendEvent(ctx, { companyId: job.companyId, agentId: job.agentId, jobId, kind: stopped ? 'stopped' : 'failed', data: stopped ? {} : failedProgramData(job.error, program) });
   }
   if (job.taskId) await afterTaskTurn(ctx, jobId, { ...job, agentId: job.agentId, taskId: job.taskId });
   await explainEnded(ctx, jobId);

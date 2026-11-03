@@ -1,4 +1,4 @@
-import { QUIET_ALARM_MS, type ProgramState } from '@hornhoof/protocol';
+import { PROGRAM_SCREEN_MAX, QUIET_ALARM_MS, type NodeMessage, type ProgramState } from '@hornhoof/protocol';
 import { and, asc, eq, inArray, isNotNull, isNull, ne, or, sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentEvents, agents, departments, jobs, tasks } from '../../db/schema.js';
@@ -23,6 +23,9 @@ export type TurnAlarm = {
 
 type Agent = typeof agents.$inferSelect;
 type Job = typeof jobs.$inferSelect;
+type ProgramReport = Extract<NodeMessage, { type: 'job.program' }>;
+type GoneProgram = { state: 'gone'; exitCode: number | null; signal: string | null; screen: string | null };
+type StoredProgram = { program: TurnProgram; gone: GoneProgram | null };
 type SilentTurn = {
   job: Job;
   agent: Agent;
@@ -31,7 +34,7 @@ type SilentTurn = {
   alarm: TurnAlarm;
 };
 
-const turnPrograms = new WeakMap<Ctx, Map<string, TurnProgram>>();
+const turnPrograms = new WeakMap<Ctx, Map<string, StoredProgram>>();
 const turnAlarms = new WeakMap<Ctx, Map<string, TurnAlarm>>();
 const alertedTurns = new WeakMap<Ctx, Set<string>>();
 const silentChains = new WeakMap<Ctx, Promise<void>>();
@@ -50,7 +53,7 @@ function alertedSet(ctx: Ctx): Set<string> {
 
 export async function recordJobProgram(
   ctx: Ctx,
-  msg: { jobId: string; state: ProgramState; since: number; tool?: string; screenAt: number },
+  msg: ProgramReport,
   now: Date,
   scope: SQL,
 ): Promise<void> {
@@ -59,25 +62,35 @@ export async function recordJobProgram(
     .from(jobs)
     .where(and(eq(jobs.id, msg.jobId), eq(jobs.status, 'running'), eq(jobs.kind, 'conversation'), scope));
   if (!job) return;
-  mapOf(turnPrograms, ctx).set(job.id, {
-    state: msg.state,
-    since: msg.since,
-    tool: msg.tool ?? null,
-    screenAt: msg.screenAt,
-    reportedAt: now.getTime(),
-  });
+  mapOf(turnPrograms, ctx).set(job.id, { program: programOf(msg, now), gone: goneProgram(msg) });
   ctx.bus.publish(job.companyId, { type: 'org' });
 }
 
-export function clearTurnProgram(ctx: Ctx, jobId: string): void {
+const programOf = (msg: ProgramReport, now: Date): TurnProgram => ({ state: msg.state, since: msg.since, tool: msg.tool ?? null, screenAt: msg.screenAt, reportedAt: now.getTime() });
+
+function goneProgram(msg: ProgramReport): GoneProgram | null {
+  if (msg.state !== 'gone') return null;
+  return { state: 'gone', exitCode: msg.exitCode ?? null, signal: msg.signal ?? null, screen: msg.screen?.slice(-PROGRAM_SCREEN_MAX) || null };
+}
+
+/* Take the end's details before clearing the live state; they belong to the failed event, not to the next turn. */
+export function clearTurnProgram(ctx: Ctx, jobId: string): GoneProgram | null {
+  const gone = mapOf(turnPrograms, ctx).get(jobId)?.gone ?? null;
   mapOf(turnPrograms, ctx).delete(jobId);
   mapOf(turnAlarms, ctx).delete(jobId);
+  return gone;
+}
+
+export function failedProgramData(error: string | null, program: GoneProgram | null): { error: string | null; program?: GoneProgram; text?: string } {
+  if (!program) return { error };
+  const text = `No program. Exit code: ${program.exitCode ?? 'no data'}. Signal: ${program.signal ?? 'no data'}. Last screen:\n${program.screen ?? 'no data'}`;
+  return { error, program, text };
 }
 
 export function agentProgramState(ctx: Ctx, runningJobId: string | null | undefined): { program: TurnProgram | null; alarm: TurnAlarm | null } {
   if (!runningJobId) return { program: null, alarm: null };
   return {
-    program: mapOf(turnPrograms, ctx).get(runningJobId) ?? null,
+    program: mapOf(turnPrograms, ctx).get(runningJobId)?.program ?? null,
     alarm: mapOf(turnAlarms, ctx).get(runningJobId) ?? null,
   };
 }
@@ -122,7 +135,7 @@ async function findSilentTurns(ctx: Ctx, now: Date): Promise<SilentTurn[]> {
   const nowMs = now.getTime();
   const silent: SilentTurn[] = [];
   for (const { job, agent, task } of rows) {
-    const program = programs.get(job.id) ?? null;
+    const program = programs.get(job.id)?.program ?? null;
     const alarm = alarmForTurn(job, program, nowMs);
     updateTurnAlarm(ctx, job, alarm);
     if (alarm) silent.push({ job, agent, task: task?.id ? task : null, program, alarm });
