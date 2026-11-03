@@ -53,18 +53,21 @@ ARG MUTATOR_COMMIT=a5a0cb803b66e0cdb8bf471b3b08af701d424a41
 ARG ECC_COMMIT=91b5f6a371f7b06d2c3e0c208147c559e11f022c
 ARG SUPERPOWERS_COMMIT=bb92a77741419a4ab5f06e711a283343f1ada0c3
 ARG TREE_SITTER="tree-sitter==0.26.0 tree-sitter-language-pack==1.22.1"
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl python3 python3-venv && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl patch python3 python3-venv && rm -rf /var/lib/apt/lists/*
+COPY apps/node/quality/ /tmp/hornhoof-quality/
 RUN set -e; ub=/opt/hornhoof/ub; mkdir -p $ub /opt/hornhoof/bin /opt/hornhoof/rules /tmp/ecc; \
   fetch() { mkdir -p "$2"; curl -fsSL "https://codeload.github.com/$1/tar.gz/$3" | tar -xz --strip-components=1 -C "$2"; }; \
   fetch unclebob/crapper $ub/crapper $CRAPPER_COMMIT; \
   fetch unclebob/dryer $ub/dryer $DRYER_COMMIT; \
   fetch unclebob/mutator $ub/mutator $MUTATOR_COMMIT; \
+  patch --directory=$ub/mutator --strip=1 < /tmp/hornhoof-quality/mutator-worker-modules.patch; \
   for tool in crapper dryer mutator; do \
     python3 -m venv $ub/$tool/.venv; \
     $ub/$tool/.venv/bin/pip install --no-cache-dir $TREE_SITTER $([ $tool = mutator ] && echo $ub/crapper) $ub/$tool; \
     printf '#!/bin/sh\nexec %s "$@"\n' $ub/$tool/$tool > /opt/hornhoof/bin/$tool; chmod 755 /opt/hornhoof/bin/$tool; \
     /opt/hornhoof/bin/$tool --help > /dev/null; \
   done; \
+  $ub/mutator/.venv/bin/python /tmp/hornhoof-quality/test_mutator_workers.py; \
   $ub/crapper/.venv/bin/python -c "import tree_sitter_language_pack as p; p.download(['clojure', 'go', 'java', 'javascript', 'python', 'rust', 'tsx', 'typescript'])"; \
   fetch affaan-m/ECC /tmp/ecc $ECC_COMMIT; \
   cp -R /tmp/ecc/rules/. /opt/hornhoof/rules/; cp /tmp/ecc/LICENSE /opt/hornhoof/rules/LICENSE; rm -rf /tmp/ecc; \

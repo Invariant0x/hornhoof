@@ -1,0 +1,29 @@
+--- a/src/mutator/workers.py
++++ b/src/mutator/workers.py
+@@ -267,12 +267,25 @@
+     destination.write_bytes(original)
+ 
+ 
++def worker_modules(root: Path, relative: str) -> set[str]:
++    """Keep JS/TS bootstrap modules inside Vite's worker root too.
++
++    Test setup and configuration can load modules that no test imports.
++    A symlink to one of them resolves outside the worker and Vitest refuses
++    it before running any tests, which looks like a killed mutant.
++    """
++
++    if Path(relative).suffix in _EXTENSIONS:
++        return {source.relative_to(root).as_posix() for source in _source_files(root)}
++    return importers_of(root, relative)
++
++
+ def create_workers(
+     base: Path, root: Path, relative: str, original: bytes, count: int
+ ) -> list[Path]:
+     created = []
+     first = relative.split("/", 1)[0]
+-    importers = importers_of(root, relative)
++    importers = worker_modules(root, relative)
+     for index in range(count):
+         worker = base / f"worker-{index}"
+         worker.mkdir(parents=True, exist_ok=True)
