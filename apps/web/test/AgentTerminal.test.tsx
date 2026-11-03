@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
@@ -21,11 +21,19 @@ type FakeTerminal = {
   written: string[];
   cols: number;
   rows: number;
+  selection: string;
   buffer: { active: { viewportY: number; baseY: number; cursorY: number } };
   element: HTMLElement;
   wrapped: Set<number>;
   markers: Marker[];
+  _core: {
+    _selectionService: { enabled: boolean; shouldForceSelection(e: MouseEvent): boolean; enable(): void; disable(): void };
+    coreMouseService: { _protocols: Record<string, { events: number }>; fireProtocol(events: number): void };
+  };
   type(data: string): void;
+  pressKey(init: KeyboardEventInit): KeyboardEvent;
+  selectText(text: string): void;
+  clearSelection(): void;
   resized(cols: number, rows: number): void;
   disposed: boolean;
 };
@@ -36,6 +44,7 @@ vi.mock('@xterm/xterm', () => ({
     written: string[] = [];
     cols = 100;
     rows = 30;
+    selection = '';
     disposed = false;
     /* The history above the screen, and the line the view starts at: at the bottom when they are equal. */
     /* Rows that go on the line above them, as xterm wraps a line longer than the terminal is wide. */
@@ -46,16 +55,77 @@ vi.mock('@xterm/xterm', () => ({
     element = Object.assign(document.createElement('div'), { innerHTML: '<div class="xterm-viewport"></div>' });
     private onKeys: ((d: string) => void)[] = [];
     private onSize: ((s: { cols: number; rows: number }) => void)[] = [];
+    private onSelect: (() => void)[] = [];
+    private keyHandler: ((e: KeyboardEvent) => boolean) | null = null;
+    private onProto: ((events: number) => void)[] = [];
+    _core = {
+      _selectionService: {
+        enabled: true,
+        shouldForceSelection: (e: MouseEvent) => e.shiftKey,
+        enable: () => {
+          this._core._selectionService.enabled = true;
+          this.element.classList.remove('enable-mouse-events');
+        },
+        disable: () => {
+          this._core._selectionService.enabled = false;
+          this.element.classList.add('enable-mouse-events');
+        },
+      },
+      coreMouseService: {
+        _protocols: { NONE: { events: 0 }, X10: { events: 1 }, VT200: { events: 19 }, DRAG: { events: 23 }, ANY: { events: 31 } },
+        onProtocolChange: (fn: (events: number) => void) => {
+          this.onProto.push(fn);
+          return { dispose() {} };
+        },
+        fireProtocol: (events: number) => {
+          if (events) this._core._selectionService.disable();
+          else this._core._selectionService.enable();
+          for (const fn of this.onProto) fn(events);
+        },
+      },
+    };
     constructor(options: Record<string, unknown>) {
       this.options = options;
       terms.push(this as unknown as FakeTerminal);
     }
     loadAddon() {}
     /* xterm syncs its scroll area on a timer once it opens and on the next frame after a reset, and does not cancel them. */
-    open() {
+    open(parent?: HTMLElement) {
+      parent?.appendChild(this.element);
       setTimeout(() => this.synced('open'));
     }
     focus() {}
+    hasSelection() {
+      return this.selection.length > 0;
+    }
+    getSelection() {
+      return this.selection;
+    }
+    clearSelection() {
+      this.selection = '';
+      for (const fn of this.onSelect) fn();
+    }
+    selectText(text: string) {
+      this.selection = text;
+      for (const fn of this.onSelect) fn();
+    }
+    onSelectionChange(fn: () => void) {
+      this.onSelect.push(fn);
+      return { dispose() {} };
+    }
+    attachCustomKeyEventHandler(fn: (e: KeyboardEvent) => boolean) {
+      this.keyHandler = fn;
+    }
+    pressKey(init: KeyboardEventInit) {
+      const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
+      if (this.keyHandler && !this.keyHandler(event)) return event;
+      if (event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey && (event.key === 'c' || event.key === 'C' || event.code === 'KeyC')) {
+        this.type('\x03');
+      } else if (event.key === 'Escape') {
+        this.type('\x1b');
+      }
+      return event;
+    }
     scrollToBottom() {
       moves.push('scrollToBottom');
       this.buffer.active.viewportY = this.buffer.active.baseY;
@@ -437,5 +507,93 @@ describe("an agent's live terminal in its window", () => {
     expect(await screen.findByText('Hello from the log')).toBeInTheDocument();
     expect(FakeSocket.all).toHaveLength(0);
     expect(screen.queryByRole('button', { name: 'Log' })).not.toBeInTheDocument();
+  });
+
+  it('copies selected text on selection, Cmd+C, Ctrl+Shift+C and Ctrl+C without sending ^C or Escape to the program, and keeps Ctrl+C without selection', async () => {
+    const copied: string[] = [];
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: vi.fn((text: string) => { copied.push(text); return Promise.resolve(); }) },
+    });
+    open();
+    const ws = await socket();
+    ws.opened();
+    const term = terms[0]!;
+
+    /* Selecting with the mouse copies at once and never sends keys to the session. */
+    term.selectText('selected line');
+    expect(copied).toEqual(['selected line']);
+    expect(ws.sent).toEqual([]);
+
+    /* Cmd+C, Ctrl+Shift+C and Ctrl+C with a selection copy the selection and send nothing to the program. */
+    term.pressKey({ key: 'c', code: 'KeyC', metaKey: true });
+    term.pressKey({ key: 'C', code: 'KeyC', ctrlKey: true, shiftKey: true });
+    term.pressKey({ key: 'c', code: 'KeyC', ctrlKey: true });
+    expect(copied).toEqual(['selected line', 'selected line', 'selected line', 'selected line']);
+    expect(ws.sent).toEqual([]);
+
+    /* Without a selection, Cmd+C and Ctrl+Shift+C still send nothing, while Ctrl+C sends ^C as before. */
+    term.clearSelection();
+    term.pressKey({ key: 'c', code: 'KeyC', metaKey: true });
+    term.pressKey({ key: 'C', code: 'KeyC', ctrlKey: true, shiftKey: true });
+    expect(ws.sent).toEqual([]);
+    term.pressKey({ key: 'c', code: 'KeyC', ctrlKey: true });
+    expect(ws.sent).toEqual([{ type: 'input', data: '\x03' }]);
+  });
+
+  it('copies from the right-click menu in English and Russian without sending ^C or Escape, and keeps mouse drag for selection while wheel still scrolls', async () => {
+    const user = userEvent.setup();
+    const copied: string[] = [];
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: vi.fn((text: string) => { copied.push(text); return Promise.resolve(); }) },
+    });
+    const { calls } = open(true, { busy: true, runningJobId: 'j1' });
+    const ws = await socket();
+    ws.opened();
+    const term = terms[0]!;
+
+    /* Even when tmux or the program turns mouse tracking on, plain mouse drags select text while wheel events still go through. */
+    term._core.coreMouseService.fireProtocol(23);
+    expect(term._core._selectionService.enabled).toBe(true);
+    expect(term._core._selectionService.shouldForceSelection(new MouseEvent('mousedown'))).toBe(true);
+    expect(term._core.coreMouseService._protocols.DRAG!.events).toBe(16);
+    term.type('\x1b[<0;10;5M');
+    term.type('\x1b[<32;12;5M');
+    term.type('\x1b[<0;12;5m');
+    term.type('\x1b[<64;10;5M');
+    expect(ws.sent).toEqual([{ type: 'input', data: '\x1b[<64;10;5M' }]);
+    ws.sent.length = 0;
+
+    /* Right-click opens Copy, clicking it copies the selection and closes the menu, and Escape on an open menu neither stops the agent nor sends Escape. */
+    term.selectText('from right click');
+    copied.length = 0;
+    fireEvent.contextMenu(term.element);
+    const copyBtn = screen.getByRole('button', { name: 'Copy' });
+    await user.click(copyBtn);
+    expect(copied).toEqual(['from right click']);
+    expect(screen.queryByRole('button', { name: 'Copy' })).not.toBeInTheDocument();
+
+    fireEvent.contextMenu(term.element);
+    expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('button', { name: 'Copy' })).not.toBeInTheDocument();
+    expect(ws.sent).toEqual([]);
+    expect(calls.some(c => c.method === 'POST' && c.path === '/api/agents/orchestrator/stop')).toBe(false);
+
+    cleanup();
+    terms.length = 0;
+    FakeSocket.all = [];
+    localStorage.setItem('hh-lang', 'ru');
+    open();
+    const wsRu = await socket();
+    wsRu.opened();
+    const termRu = terms[0]!;
+    termRu.selectText('русский текст');
+    copied.length = 0;
+    fireEvent.contextMenu(termRu.element);
+    await user.click(screen.getByRole('button', { name: 'Копировать' }));
+    expect(copied).toEqual(['русский текст']);
+    localStorage.removeItem('hh-lang');
   });
 });
