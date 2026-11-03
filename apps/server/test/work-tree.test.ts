@@ -59,13 +59,41 @@ function waitingFacts(): TreeFacts {
   ];
   return baseFacts({ tasks, turns: [
     { id: 'head-job', taskId: 'head-task', agentId: 'head', createdAt: at(0), startedAt: at(0), finishedAt: null, status: 'running',
-      history: [{ at: at(0), program: { state: 'idle', since: at(0).getTime(), tool: null }, alarm: null }] },
+      history: [{ at: at(0), program: { state: 'gone', since: at(0).getTime(), tool: null }, alarm: null }] },
     { id: 'mira-job', taskId: 'mira-task', agentId: 'mira', createdAt: at(1), startedAt: at(1), finishedAt: at(10), status: 'done',
       history: [{ at: at(1), program: { state: 'thinking', since: at(1).getTime(), tool: null }, alarm: null }] },
   ] });
 }
 
 describe('workTree', () => {
+  it('keeps a quiet idle program ordinary without attributing a problem to its waiting worker', () => {
+    const facts = waitingFacts();
+    facts.turns![0]!.history[0]!.program!.state = 'idle';
+    const tree = workTree(facts, at(40));
+    expect(tree.lines.find(line => line.taskId === 'head-task')!.segments).toEqual([
+      { kind: 'stall', from: iso(0), to: null, program: { state: 'idle', since: at(0).getTime(), tool: null } },
+    ]);
+    expect(tree.time.find(time => time.agent.id === 'head')).toMatchObject({ stall: 2400, lost: 0, alarm: 0 });
+    expect(tree.waiting).toEqual([]);
+    expect(tree.idle.filter(wait => wait.agent.id === 'mira' && wait.waitsForAgent)).toEqual([]);
+  });
+
+  it('attributes a recorded idle alarm to its waiting worker and ends the wait when the alarm clears', () => {
+    const facts = waitingFacts();
+    facts.turns![0]!.history[0]!.program!.state = 'idle';
+    const alarm = { reason: 'program_stalled' as const, since: at(0).getTime() };
+    facts.turns![0]!.history.push({ at: at(30), program: { state: 'idle', since: at(0).getTime(), tool: null }, alarm });
+    const tree = workTree(facts, at(40));
+    expect(tree.waiting).toEqual([
+      { agent: { id: 'mira', name: 'Mira' }, waitsForAgent: { id: 'head', name: 'Nika' }, from: iso(10), kind: 'stall', taskId: 'mira-task', number: 110, title: 'Checkout' },
+    ]);
+    expect(tree.time.find(time => time.agent.id === 'head')).toMatchObject({ alarm: 2400, lost: 0 });
+    facts.turns![0]!.history.push({ at: at(35), program: { state: 'idle', since: at(0).getTime(), tool: null }, alarm: null });
+    const cleared = workTree(facts, at(40));
+    expect(cleared.waiting).toEqual([]);
+    expect(cleared.idle).toContainEqual(expect.objectContaining({ agent: { id: 'mira', name: 'Mira' }, from: iso(10), to: iso(35), waitsForAgent: { id: 'head', name: 'Nika' } }));
+  });
+
   it('shows an explicit external wait as ordinary waiting until its deadline', () => {
     const externalWait = { reason: 'Image build', since: iso(20), until: iso(60) };
     const facts = baseFacts({ tasks: [{ id: 't1', number: 1, title: 'Checkout', status: 'working', parentId: null, executorAgentId: 'head', after: [],
@@ -87,7 +115,7 @@ describe('workTree', () => {
       { taskId: 'r90', agentId: 'head', kind: 'created', text: '', data: { turnReview: true, panel: ['mira'] }, createdAt: at(10) },
       { taskId: 'r90', agentId: 'mira', kind: 'verdict', text: '', data: { pass: true, findings: 0 }, createdAt: at(20) },
     ], turns: [
-      { id: 'head-job', taskId: null, agentId: 'head', createdAt: at(0), startedAt: at(0), finishedAt: null, status: 'running', history: [{ at: at(0), program: { state: 'idle', since: at(0).getTime(), tool: null }, alarm: null }] },
+      { id: 'head-job', taskId: null, agentId: 'head', createdAt: at(0), startedAt: at(0), finishedAt: null, status: 'running', history: [{ at: at(0), program: { state: 'gone', since: at(0).getTime(), tool: null }, alarm: null }] },
       { id: 'review-message', taskId: 'r90', agentId: 'head', createdAt: at(20), startedAt: null, finishedAt: null, status: 'queued', history: [] },
     ] });
     const tree = workTree(facts, at(40));
@@ -111,7 +139,7 @@ describe('workTree', () => {
     expect(workTree(facts, at(40)).waiting).toEqual([]);
     facts.turns!.at(-1)!.finishedAt = at(25);
     facts.turns!.at(-1)!.status = 'done';
-    facts.turns![0]!.history.push({ at: at(40), program: { state: 'idle', since: at(40).getTime(), tool: null }, alarm: null });
+    facts.turns![0]!.history.push({ at: at(40), program: { state: 'gone', since: at(40).getTime(), tool: null }, alarm: null });
     const later = workTree(facts, at(60));
     expect(later.waiting).toEqual([expect.objectContaining({ agent: { id: 'mira', name: 'Mira' }, from: iso(40) })]);
     expect(later.idle.filter(i => i.agent.id === 'mira' && i.waitsForAgent).map(i => [i.from, i.to])).toEqual([
@@ -124,7 +152,7 @@ describe('workTree', () => {
     const facts = waitingFacts();
     facts.turns![0]!.history = [
       { at: at(0), program: { state: 'thinking', since: at(0).getTime(), tool: null }, alarm: null },
-      { at: at(30), program: { state: 'idle', since: at(30).getTime(), tool: null }, alarm: null },
+      { at: at(30), program: { state: 'gone', since: at(30).getTime(), tool: null }, alarm: null },
     ];
     for (const [start, end] of [[20, 40], [50, 55]]) facts.turns!.push({ id: `next-${start}`, agentId: 'mira', taskId: null,
       createdAt: at(start!), startedAt: at(start!), finishedAt: at(end!), status: 'done', history: [] });
@@ -151,7 +179,7 @@ describe('workTree', () => {
       { ...task('waiting', 3, 'mira', 10), status: 'waiting', after: ['upstream'] },
       { ...task('external', 4, 'ostap', 5), externalWait: { reason: 'Image build', since: iso(15), until: iso(60) } },
     ], turns: [{ id: 'timur-job', agentId: 'timur', taskId: 'upstream', createdAt: at(0), startedAt: at(0), finishedAt: null, status: 'running',
-      history: [{ at: at(0), program: { state: 'idle', since: at(0).getTime(), tool: null }, alarm: null }] }] });
+      history: [{ at: at(0), program: { state: 'gone', since: at(0).getTime(), tool: null }, alarm: null }] }] });
     const expected = [expect.objectContaining({ agent: { id: 'mira', name: 'Mira' }, waitsForAgent: { id: 'timur', name: 'Timur' }, from: iso(10), kind: 'after', taskId: 'waiting', number: 3 })];
     expect(workTree(facts, at(40)).waiting).toEqual(expected);
     facts.tasks[1]!.externalWait = { reason: 'Earlier wait', since: iso(20), until: iso(40) };
