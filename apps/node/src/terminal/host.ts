@@ -66,6 +66,7 @@ type Turn = {
   opened?: Deferred<void>;
   /* A turn that only starts the program, until the program has its tools. A person who types meanwhile takes its place. */
   starting?: boolean;
+  observed?: ObservedProgram;
 };
 type JobError = RunResult['error'];
 type LiveWords = { turn: Turn; text: string; deadline: number };
@@ -211,6 +212,7 @@ const DEFAULTS = { readyMs: 120_000, pollMs: 500, openMs: 8000, toolsMs: 15_000,
 const defined = (opts: Options): Partial<Options> => Object.fromEntries(Object.entries(opts).filter(([, value]) => value !== undefined));
 /* When the host last looked at the program, and the tool it ran then. */
 type Look = { at: number; call: Pending | null };
+type ObservedProgram = { watch: ProgramWatch; look: Look };
 /* A program may change how a prompt's lines and spaces look, not its words. */
 const flat = (text: string) => text.replace(/\s+/g, ' ').trim();
 
@@ -501,9 +503,7 @@ export class TerminalHost {
   /* Waits for the turn to end: the program says so, a person stops it, the program is gone, or it waits for what to type
      in a turn whose end was lost on the way. */
   private async turnEnd(a: Agent, job: TermJob, ended: Deferred<string>): Promise<RunResult> {
-    const watch = new ProgramWatch(job.input.jobId, job.program.kind, m => this.opts.send(m), this.reportMs);
-    /* The first look comes a while into the turn, or as the program calls a tool: one that just took its prompt is at work. */
-    const look: Look = { at: Date.now(), call: null };
+    const { watch, look } = this.observeProgram(a, job.input.jobId);
     for (;;) {
       this.drain(a);
       const message = await Promise.race([ended.promise, sleep(this.pollMs).then(() => null)]);
@@ -513,6 +513,11 @@ export class TerminalHost {
       if (!(await this.opts.tmux.alive(a.name))) return await this.programGone(a, job, watch);
       if (await this.lostEnd(a, watch, look)) this.endUnsaid(a);
     }
+  }
+
+  /* Both entry paths follow the same program state and lost-end clock. Every opened turn has a running program. */
+  private observeProgram(a: Agent, jobId: string | null | undefined): ObservedProgram {
+    return { watch: new ProgramWatch(jobId, a.program!.kind, m => this.opts.send(m), this.reportMs, () => this.opts.secrets()), look: { at: Date.now(), call: null } };
   }
 
   /* The program said the turn ended: stopped by a person, failed, or with its answer, which the turn waits to read. */
@@ -551,17 +556,24 @@ export class TerminalHost {
      lookMs, and tells Hornhoof. True once it waited for what to type for lostMs of Hornhoof's turn: the word that the turn
      ended was lost on the way. */
   private async lostEnd(a: Agent, watch: ProgramWatch, look: Look): Promise<boolean> {
+    const turn = a.turn;
     const now = Date.now();
     const call = a.calls.values().next().value ?? null;
     if (call === look.call && now - look.at < this.lookMs && !watch.due(now)) return false;
     Object.assign(look, { at: now, call });
-    watch.look(now, await this.opts.tmux.screen(a.name, 0, true), call, Boolean(a.took && a.busy));
+    const screen = await this.opts.tmux.screen(a.name, 0, true);
+    if (a.turn !== turn) return false;
+    watch.look(now, screen, call, Boolean(a.took && a.busy));
     return watch.idleFor(now) >= this.lostMs;
   }
 
   /* Hornhoof hears that the turn's program is gone, how it ended and what it showed last, without the secrets. */
   private async toldGone(a: Agent, watch: ProgramWatch, screen: string): Promise<void> {
     const ended = (await this.opts.tmux.exitSnapshot(a.name))?.programOutput;
+    this.reportGone(watch, ended, screen);
+  }
+
+  private reportGone(watch: ProgramWatch, ended: ProgramOutput | undefined, screen: string): void {
     const secrets = this.opts.secrets();
     watch.gone(Date.now(), ended ? { code: ended.code, signal: signalName(ended.signal) } : null, redact(plainOutput(redact(screen, secrets)), secrets));
   }
@@ -571,7 +583,9 @@ export class TerminalHost {
   private endUnsaid(a: Agent): void {
     this.log(`Agent ${a.key} (${a.program?.kind}): end seen without hook. The program waited for what to type ${Math.round(this.lostMs / 1000)} s into Hornhoof's turn, which ends with its last answer.`);
     a.busy = false;
-    a.ended?.resolve(a.lastText ?? '');
+    const message = a.lastText ?? '';
+    this.finishTyped(a, message);
+    a.ended?.resolve(message);
   }
 
   private async failedTurn(a: Agent, job: TermJob, error: RunResult['error'], output?: string): Promise<RunResult> {
@@ -600,24 +614,38 @@ export class TerminalHost {
 
   private async look(a: Agent): Promise<void> {
     this.drain(a);
-    if (a.turn && !a.turn.typed) return;
+    const turn = a.turn;
+    if (turn && !turn.typed) return;
     const alive = await this.opts.tmux.alive(a.name);
-    if (a.turn && !a.turn.typed) return;
-    if (!alive) {
-      /* What the program logged before it ended, as words a person typed into Codex, comes first. */
-      this.drain(a);
-      await this.endedTyped(a);
-    }
+    if (a.turn !== turn) return;
+    if (alive) return this.lookTyped(a, turn);
+    /* What the program logged before it ended, as words a person typed into Codex, comes first. */
+    this.drain(a);
+    await this.endedTyped(a);
+  }
+
+  private async lookTyped(a: Agent, turn: Turn | null): Promise<void> {
+    const observed = turn?.observed;
+    if (!observed) return;
+    const lost = await this.lostEnd(a, observed.watch, observed.look);
+    if (lost && a.turn === turn) this.endUnsaid(a);
   }
 
   private async endedTyped(a: Agent): Promise<void> {
     const turn = a.turn;
-    const ended = turn?.typed ? await this.opts.tmux.exitSnapshot(a.name) : null;
+    const ended = turn?.typed ? await this.typedExit(a, turn) : null;
     if (a.turn !== turn) return;
     a.busy = false;
     this.programEnded(a);
     this.finishTyped(a, '', exitError(ended?.output ?? null, a.signedOut, 'agent_failed'), ended?.output ?? '', ended?.programOutput);
     this.unwatch(a);
+  }
+
+  private async typedExit(a: Agent, turn: Turn) {
+    const ended = await this.opts.tmux.exitSnapshot(a.name);
+    const screen = ended?.output ?? await this.screen(a.key);
+    if (a.turn === turn) this.reportGone(turn.observed!.watch, ended?.programOutput, screen);
+    return ended;
   }
 
   /* A person cleared the conversation in Claude Code, which goes on in a new session with a log of its own; or Kimi Code
@@ -941,6 +969,7 @@ export class TerminalHost {
     a.lastText = null;
     a.stepSaid = false;
     const turn: Turn = { jobId: null, onEvent: () => {}, typed: true, seq: 0, ref: randomUUID(), early: [], over: null, opened: deferred() };
+    turn.observed = this.observeProgram(a, null);
     a.turn = turn;
     a.unopened.push(turn);
     this.watch(a);
@@ -972,14 +1001,19 @@ export class TerminalHost {
     }
     const early = turn.early ?? [];
     turn.early = null;
+    this.bindTyped(a, turn, m, early);
+    turn.opened?.resolve();
+    if (turn.over) this.typedDone(turn, turn.over.message, turn.over.error, turn.over.sessionId, turn.over.output, turn.over.programOutput);
+  }
+
+  private bindTyped(a: Agent, turn: Turn, m: Msg<'turn.opened'>, early: AgentEvent[]): void {
     if (m.jobId && m.toolToken) {
       turn.jobId = m.jobId;
       turn.toolToken = m.toolToken;
+      turn.observed!.watch.bind(m.jobId, Date.now());
       if (a.turn === turn) this.bridge.setToken(a.key, m.toolToken);
       for (const e of early) this.typedEvent(turn, e);
     }
-    turn.opened?.resolve();
-    if (turn.over) this.typedDone(turn, turn.over.message, turn.over.error, turn.over.sessionId, turn.over.output, turn.over.programOutput);
   }
 
   private finishTyped(a: Agent, message: string, error: JobError = null, output = '', programOutput?: ProgramOutput): void {

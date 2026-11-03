@@ -1,5 +1,6 @@
 import { PROGRAM_SCREEN_MAX, type NodeMessage, type ProgramExit, type ProgramState } from '@hornhoof/protocol';
 import { stripEscapes } from '../providers/process.js';
+import { redact } from '../redact.js';
 import { atEmptyPrompt } from './input.js';
 import type { TermProgram } from './programs.js';
 
@@ -46,6 +47,17 @@ export function lastScreen(screen: string): string {
    and whether the screen moved. */
 export const REPORT_MS = 60_000;
 
+type Diagnostics = Pick<Extract<NodeMessage, { type: 'job.program' }>, 'tool' | 'exitCode' | 'signal' | 'screen'>;
+
+/* Diagnostic strings are untrusted, including tool names. Mask every field before applying the wire limits; clipping
+   first could leave part of a known secret that no longer matches the whole value. */
+function diagnostics(fields: Diagnostics, secrets: string[]): Diagnostics {
+  const clean = Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, typeof value === 'string' ? redact(value, secrets) : value])) as Diagnostics;
+  if (clean.tool !== undefined) clean.tool = clean.tool.slice(0, 100);
+  if (clean.screen !== undefined) clean.screen = lastScreen(clean.screen);
+  return clean;
+}
+
 /* Follows what a turn's program does, look by look, and tells Hornhoof each change of its state or tool at once, and the
    same again once a minute while nothing changes. A turn without a job tells nobody. */
 export class ProgramWatch {
@@ -55,13 +67,22 @@ export class ProgramWatch {
   private tool: string | undefined;
   private since = 0;
   private toldAt = -Infinity;
+  private ended: Diagnostics = {};
 
   constructor(
-    private readonly jobId: string | null | undefined,
+    private jobId: string | null | undefined,
     private readonly kind: Kind,
     private readonly send: (m: NodeMessage) => void,
     private readonly reportMs = REPORT_MS,
+    private readonly secrets: () => string[] = () => [],
   ) {}
+
+  /* A typed turn may have changed state or ended before the server named its job. Only that confirmed id goes out,
+     with the latest observation, including a gone program's diagnostics. */
+  bind(jobId: string, now: number): void {
+    this.jobId = jobId;
+    this.tell(now);
+  }
 
   look(now: number, screen: string | null, pending: Pending | null, running: boolean): ProgramState {
     if (screen !== this.screen) Object.assign(this, { screen, screenAt: now });
@@ -74,7 +95,7 @@ export class ProgramWatch {
 
   /* Takes what the program does now, and whether it changed: a tool's state began when the program called it. */
   private changed(now: number, state: ProgramState, call: Pending | null): boolean {
-    const tool = call?.name.slice(0, 100);
+    const tool = call?.name;
     if (state === this.state && tool === this.tool) return false;
     Object.assign(this, { state, tool, since: call?.at ?? now });
     return true;
@@ -84,7 +105,8 @@ export class ProgramWatch {
   gone(now: number, exit: ProgramExit | null, screen: string): void {
     if (this.screen !== null) Object.assign(this, { screen: null, screenAt: now });
     this.changed(now, 'gone', null);
-    this.tell(now, { exitCode: exit?.code ?? null, signal: exit?.signal ?? null, screen: lastScreen(screen) });
+    this.ended = { exitCode: exit?.code ?? null, signal: exit?.signal ?? null, screen };
+    this.tell(now);
   }
 
   /* Hornhoof is due to hear again what the program does, once it heard it first. */
@@ -97,9 +119,10 @@ export class ProgramWatch {
     return this.state === 'idle' ? now - this.since : 0;
   }
 
-  private tell(now: number, ended: Pick<Extract<NodeMessage, { type: 'job.program' }>, 'exitCode' | 'signal' | 'screen'> = {}): void {
+  private tell(now: number): void {
     this.toldAt = now;
     if (!this.jobId || !this.state) return;
-    this.send({ type: 'job.program', jobId: this.jobId, state: this.state, since: this.since, ...(this.tool ? { tool: this.tool } : {}), screenAt: this.screenAt, ...ended });
+    const detail = diagnostics({ ...(this.tool ? { tool: this.tool } : {}), ...this.ended }, this.secrets());
+    this.send({ type: 'job.program', jobId: this.jobId, state: this.state, since: this.since, screenAt: this.screenAt, ...detail });
   }
 }
