@@ -629,7 +629,7 @@ export const en = {
     header: 'Who it is, written by Hornhoof',
     length: (length: string, max: string) => `Instructions: ${length} characters of ${max}. Every turn sends all of them to the program.`,
     reset: 'Reset to template',
-    resetAsk: (name: string) => `Reset ${name} to the template? Its own prompt and skill changes are lost.`,
+    resetAsk: (name: string) => `Reset ${name} to the template? Its own prompt, skill changes and effort choice are lost.`,
     yesReset: 'Yes, reset',
     remove: 'Remove from the company',
     removeAsk: (name: string) => `Remove ${name} from the company? Its conversation stays in the history.`,

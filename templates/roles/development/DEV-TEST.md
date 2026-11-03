@@ -5,6 +5,7 @@ kind: member
 title: { en: "Test engineer", ru: "Инженер по тестированию" }
 description: { en: "Finds what the tests miss and writes the tests that would catch it.", ru: "Находит, чего не ловят тесты, и пишет тесты, которые это поймают." }
 tier: standard
+effort: high
 perProduct: false
 default: false
 order: 50

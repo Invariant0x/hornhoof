@@ -617,7 +617,7 @@ export const ru: Messages = {
     length: (length: string, max: string) => `Инструкции: ${length} знаков из ${max}. Каждый ход отправляет их программе целиком.`,
     header: 'Кто это, пишет Hornhoof',
     reset: 'Вернуть к шаблону',
-    resetAsk: (name: string) => `Вернуть ${name} к шаблону? Свой промпт и изменения навыков пропадут.`,
+    resetAsk: (name: string) => `Вернуть ${name} к шаблону? Свой промпт, изменения навыков и выбранное усилие пропадут.`,
     yesReset: 'Да, вернуть',
     remove: 'Убрать из компании',
     removeAsk: (name: string) => `Убрать ${name} из компании? Переписка останется в истории.`,

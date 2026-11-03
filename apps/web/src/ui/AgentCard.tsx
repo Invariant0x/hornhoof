@@ -2,7 +2,7 @@ import { useEffect, useId, useState } from 'react';
 import { api } from '../api';
 import { errorText, useLanguage, useT } from '../i18n';
 import { cutLine } from '../restarts';
-import { effortsOf } from '@hornhoof/protocol/efforts';
+import { effortsOf, ORCHESTRATOR_EFFORT } from '@hornhoof/protocol/efforts';
 import { defaultEffort, PROVIDER_NAMES } from '../providers';
 import type { AgentCardView, Me, Part, SubView } from '../types';
 import { TimerSettings } from './TimerSettings';
@@ -186,7 +186,8 @@ export function AgentCard({ me, agentId, onClose, onTerminal }: Props) {
   const subs = card.subscription && !runs ? [{ subscription: card.subscription, models: [] }, ...card.runsOn] : card.runsOn;
   const models = runs?.models ?? [];
   const efforts = effortsOf(models, card.model);
-  const usual = card.subscription && defaultEffort(card.subscription.provider, models, card.model);
+  const roleEffort = orchestrator ? ORCHESTRATOR_EFFORT : card.role?.effort;
+  const usual = card.subscription && defaultEffort(card.subscription.provider, models, card.model, roleEffort);
   const effortName = (level: string) => t.agent.efforts[level] ?? level;
   const where = [card.department?.name, card.product?.name].filter(Boolean).join(', ');
   const dirty = rawDraft !== null ? rawDraft !== card.raw : Object.keys(drafts).length > 0;

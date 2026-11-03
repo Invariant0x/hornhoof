@@ -5,6 +5,7 @@ kind: member
 title: { en: "Design system designer", ru: "Дизайнер дизайн-системы" }
 description: { en: "Builds and maintains the shared tokens, components, themes and the design system document.", ru: "Создает и поддерживает общие токены, компоненты, темы и описание дизайн-системы." }
 tier: standard
+effort: high
 perProduct: false
 default: true
 order: 20

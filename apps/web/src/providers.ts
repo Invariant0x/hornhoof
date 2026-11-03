@@ -1,4 +1,4 @@
-import { effortsOf, topEffort } from '@hornhoof/protocol/efforts';
+import { effortFor, effortsOf } from '@hornhoof/protocol/efforts';
 import type { ModelOption, ProviderId } from './types';
 
 /* Product names stay as they are in every language. */
@@ -15,11 +15,10 @@ export const PROGRAM_NAMES: Record<ProviderId, string> = {
 export const PLAN_PROVIDERS = ['claude', 'codex', 'kimi', 'glm', 'antigravity'] as const;
 export type PlanProvider = (typeof PLAN_PROVIDERS)[number];
 
-/* The level the Default runs at, when Hornhoof knows it: Kimi and Codex at the most their model takes, Claude Code's
-   Default model, Opus 5.5, at medium, else the model's own. */
-export function defaultEffort(provider: ProviderId, models: ModelOption[], model: string): string | null {
-  const top = topEffort(provider, effortsOf(models, model));
-  if (top) return top;
+/* Default follows the role's fitted level, else the model's own default where Hornhoof knows it. */
+export function defaultEffort(provider: ProviderId, models: ModelOption[], model: string, roleEffort?: string): string | null {
+  const fitted = effortFor(null, effortsOf(models, model), roleEffort);
+  if (fitted) return fitted;
   if (!model && (provider === 'claude' || provider === 'anthropic_api')) return 'medium';
   return models.find(m => m.id === model)?.defaultEffort ?? null;
 }

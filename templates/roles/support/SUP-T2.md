@@ -5,6 +5,7 @@ kind: member
 title: { en: "Second-line support", ru: "Вторая линия поддержки" }
 description: { en: "Investigates escalated tickets, reproduces problems and writes bug reports and billing cases.", ru: "Разбирает эскалированные обращения, воспроизводит проблемы и готовит отчеты об ошибках и по платежным вопросам." }
 tier: standard
+effort: high
 perProduct: false
 default: true
 order: 30

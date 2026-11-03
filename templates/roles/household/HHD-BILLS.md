@@ -5,6 +5,7 @@ kind: member
 title: { en: "Bills helper", ru: "Помощник по счетам" }
 description: { en: "Tracks the home's bills and subscriptions and reminds a person in time, paying nothing itself.", ru: "Ведет счета и подписки дома и вовремя напоминает человеку, ничего не оплачивая само." }
 tier: standard
+effort: medium
 perProduct: false
 default: true
 order: 30

@@ -1,7 +1,7 @@
 import { API_MODELS } from '@hornhoof/protocol';
 import { asc, eq, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished } from 'vitest';
 import { MAX_INSTRUCTIONS, OLD_NODE_INSTRUCTIONS, parseServerMessage } from '@hornhoof/protocol';
 import { agentChanges, agents, departments, jobs, people, proposals, subscriptions } from '../src/db/schema.js';
 import { instructionsOf, renderInstructions } from '../src/modules/agents/instructions.js';
@@ -66,7 +66,7 @@ describe('the employee card', () => {
       id: brunoId,
       kind: 'worker',
       name: 'Bruno',
-      role: { id: 'DEV-BE', title: { en: 'Backend engineer' } },
+      role: { id: 'DEV-BE', title: { en: 'Backend engineer' }, effort: 'xhigh' },
       department: { id: dev.id, name: 'Development' },
       product: null,
       model: 'claude-sonnet-5-5',
@@ -112,7 +112,7 @@ describe('the employee card', () => {
     expect((await patch(app, ceo, brunoId, { effort: null })).json().effort).toBeNull();
   });
 
-  it('shows the effort each employee runs at on the map: Kimi at its most unless set, the others as set', async () => {
+  it('shows the fitted role effort on the map for Kimi unless a person picks a level', async () => {
     const { app, db, ceo, oleg, brunoId } = await company();
     const kimi = (await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['kimi'] }, ...as(oleg) })).json().subscriptions[0].id as string;
     await db.update(subscriptions).set({ status: 'ready', models: [{ id: 'kimi-code/k3', name: 'K3', efforts: ['low', 'high', 'max'], defaultEffort: 'high' }] }).where(eq(subscriptions.id, kimi));
@@ -122,19 +122,31 @@ describe('the employee card', () => {
     /* Another provider's levels may differ, so a move goes back to its default. */
     const moved = (await patch(app, ceo, brunoId, { subscription: kimi })).json();
     expect(moved).toMatchObject({ effort: null, model: '' });
-    expect(await effortOnMap()).toBe('max');
+    expect(await effortOnMap()).toBe('high');
     await patch(app, ceo, brunoId, { model: 'kimi-code/k3', effort: 'low' });
     expect(await effortOnMap()).toBe('low');
   });
 
-  it('shows a Codex employee on the map at the most its model takes unless set', async () => {
+  it('shows a Codex employee on the map at its role effort unless set', async () => {
     const { app, db, ceo, codex, brunoId } = await company();
-    await db.update(subscriptions).set({ models: [{ id: 'gpt-6.1-sol', name: 'Sol', efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: 'medium' }] }).where(eq(subscriptions.id, codex));
+    await db.update(subscriptions).set({ models: [{ id: 'gpt-6.1-sol', name: 'Sol', efforts: ['low', 'medium', 'high', 'xhigh', 'ultra'], defaultEffort: 'medium' }] }).where(eq(subscriptions.id, codex));
     const effortOnMap = async () => (await app.inject({ url: '/api/org', ...as(ceo) })).json().departments[0].employees[0].effort;
     expect((await patch(app, ceo, brunoId, { subscription: codex })).statusCode).toBe(200);
     expect(await effortOnMap()).toBe('xhigh');
     await patch(app, ceo, brunoId, { model: 'gpt-6.1-sol', effort: 'low' });
     expect(await effortOnMap()).toBe('low');
+  });
+
+  it('shows no level for a model with no known efforts, and its own default for a role without one', async () => {
+    const { app, db, ceo, codex, brunoId } = await company();
+    const org = async () => (await app.inject({ url: '/api/org', ...as(ceo) })).json();
+    expect((await org()).orchestrator.effort).toBe('xhigh');
+    await patch(app, ceo, brunoId, { subscription: codex });
+    expect((await org()).departments[0].employees[0].effort).toBeNull();
+    app.ctx.templates.roles.set('DEV-BE', { ...app.ctx.templates.roles.get('DEV-BE')!, effort: undefined });
+    await db.update(subscriptions).set({ models: [{ id: 'gpt-6.1-sol', name: 'Sol', efforts: ['low', 'high', 'max'], defaultEffort: 'low' }] }).where(eq(subscriptions.id, codex));
+    await patch(app, ceo, brunoId, { model: 'gpt-6.1-sol' });
+    expect((await org()).departments[0].employees[0].effort).toBe('low');
   });
 
   it('refuses a model the subscription cannot run, and a subscription that cannot serve the department', async () => {
@@ -242,13 +254,27 @@ describe('the employee card', () => {
   });
 
   it('resets an employee to its template', async () => {
-    const { app, ceo, brunoId, role } = await company();
-    await patch(app, ceo, brunoId, { base: 'Mine.', skills: { 'dev-debugging': false }, skillText: { 'hh-report-to-head': 'Report briefly.' } });
+    const { app, db, ceo, teamKey, brunoId, role } = await company();
+    await patch(app, ceo, brunoId, { effort: 'max', base: 'Mine.', skills: { 'dev-debugging': false }, skillText: { 'hh-report-to-head': 'Report briefly.' } });
     const res = await app.inject({ method: 'POST', url: `/api/agents/${brunoId}/reset`, ...as(ceo) });
     expect(res.statusCode).toBe(200);
     expect(res.json().parts[1]).toMatchObject({ text: role.body, overridden: false });
     expect(res.json().skills.filter((s: { on: boolean }) => s.on).map((s: { id: string }) => s.id)).toEqual(role.skills.filter(s => s.on).map(s => s.id));
-    expect(res.json().changes[0].field).toBe('reset');
+    expect(res.json().effort).toBeNull();
+    expect(res.json()).toMatchObject({ model: 'claude-sonnet-5-5', subscription: { id: teamKey } });
+    expect((await db.select().from(agents).where(eq(agents.id, brunoId)))[0]!.effort).toBeNull();
+    expect(res.json().changes[0]).toMatchObject({ field: 'reset', before: { effort: 'max' }, after: { effort: null } });
+  });
+
+  it('refreshes the map after resetting an effort to the role', async () => {
+    const { app, ceo, dev, brunoId } = await company();
+    await patch(app, ceo, brunoId, { effort: 'low' });
+    const heard: string[] = [];
+    onTestFinished(app.ctx.bus.subscribe(dev.companyId, message => heard.push(message.type)));
+    expect((await app.inject({ method: 'POST', url: `/api/agents/${brunoId}/reset`, ...as(ceo) })).statusCode).toBe(200);
+    expect(heard).toContain('org');
+    const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
+    expect(org.departments[0].employees[0].effort).toBe('xhigh');
   });
 
   it('lets people of the department change its employees, and only the whole company remove them', async () => {
@@ -312,7 +338,7 @@ describe('the employee card', () => {
     const { app, ceo, brunoId, role } = await company();
     const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
     expect(org.departments[0].employees).toEqual([
-      { id: brunoId, name: 'Bruno', roleId: 'DEV-BE', title: role.title, kind: 'worker', model: 'claude-sonnet-5-5', modelName: 'Claude Sonnet 5.5', provider: 'anthropic_api', effort: 'medium', state: 'sleeping', status: 'idle', on: true, task: null, timer: null, context: null },
+      { id: brunoId, name: 'Bruno', roleId: 'DEV-BE', title: role.title, kind: 'worker', model: 'claude-sonnet-5-5', modelName: 'Claude Sonnet 5.5', provider: 'anthropic_api', effort: 'xhigh', state: 'sleeping', status: 'idle', on: true, task: null, timer: null, context: null },
     ]);
   });
 
