@@ -5,6 +5,8 @@
    without the schema library. */
 
 export const RETURN_MS = 300_000;
+/* A gate sent work back to its executor; distinct from a result handed to the head. */
+export const REWORK_MS = 600_000;
 
 export type LineState = 'blue' | 'yellow' | 'quiet';
 

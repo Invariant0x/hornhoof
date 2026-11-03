@@ -14,6 +14,7 @@ import { workingCount } from '../events/store.js';
 import { machineOf } from '../nodes/nodes.js';
 import { pendingFor, visibleDecisions } from '../tasks/decisions.js';
 import { mapLines, type MapLine } from './map-state.js';
+import { reworkTimes } from './rework.js';
 import { personViews } from '../people/views.js';
 import { subView } from '../subscriptions/views.js';
 
@@ -196,6 +197,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
        between agents on a department's card. */
     const ways = bus.channels(me.companyId, Date.now(), goesOn);
     const map = await mapLines(db, me.companyId);
+    const reworks = await reworkTimes(db, me.companyId, map.serverNow, reach);
     const linesOf = reachedLines(map.lines, reach, allAgents, depts);
     const inside = (id: string) =>
       ways.flatMap(w =>
@@ -244,6 +246,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
             .map(t => ({ id: t.id, name: t.name, about: t.about, stage: t.stage, gate: t.gate })),
           live: inside(d.id),
           workLines: linesOf('member', d.id),
+          reworkAt: reworks.get(d.id) ?? null,
         })),
     };
   });

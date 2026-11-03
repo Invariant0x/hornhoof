@@ -7,16 +7,16 @@ import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agentEvents, agents, companies, departments, jobs, mapReturns, people, subscriptions } from '../src/db/schema.js';
+import { agentEvents, agents, companies, departments, jobs, mapReturns, people, subscriptions, taskEvents } from '../src/db/schema.js';
 import { GONE_ALONG, pump } from '../src/modules/conversation/queue.js';
 import { recordMapReturn, workStarts } from '../src/modules/org/map-state.js';
-import { ask, brokeDown, comment, createTask, loadTask, report, startWork, submit, verdict } from '../src/modules/tasks/engine.js';
+import { ask, brokeDown, comment, createTask, leaveWork, loadTask, report, startWork, submit, verdict } from '../src/modules/tasks/engine.js';
 import { agentState } from '../src/modules/conversation/queue.js';
 import { afterJob, wakeAll } from '../src/modules/tasks/wake.js';
 import type { Db } from '../src/db/client.js';
 import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
-type Org = { serverNow: string; workLines: WorkLine[]; departments: { id: string; workLines: WorkLine[] }[] };
+type Org = { serverNow: string; workLines: WorkLine[]; departments: { id: string; workLines: WorkLine[]; reworkAt: string | null }[] };
 
 /* Development with Hana at its head, Bruno and Felix who build, and Rita who reviews; the orchestrator gives Hana the
    department's work. Everyone is on the company key. */
@@ -68,6 +68,47 @@ function stateOf(org: Org, up: { id: string }, down: { id: string }): string {
 }
 
 describe('lines between a head and its employees', () => {
+  it('reports no rework when work has not been returned, including after a hand-in', async () => {
+    const { ctx, bruno, rita, member, org, dev } = await company();
+    const task = await member('Checkout API', bruno.id, [rita.id]);
+    expect((await org()).departments.find(d => d.id === dev.id)!.reworkAt).toBeNull();
+    await submit(ctx, bruno.id, task.id, { summary: 'Handed in', evidence: 'Tests pass' });
+    expect((await org()).departments.find(d => d.id === dev.id)!.reworkAt).toBeNull();
+  });
+
+  it('reports the actual rework event time only in its department, and drops it after ten minutes', async () => {
+    const { app, ceo, ctx, db, bruno, rita, member, org, dev, sales } = await company();
+    const task = await member('Checkout API', bruno.id, [rita.id]);
+    await submit(ctx, bruno.id, task.id, { summary: 'Handed in', evidence: 'Tests pass' });
+    await verdict(ctx, rita.id, task.id, { pass: false, comment: 'Handle retries.' });
+    const [event] = await db.select().from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'verdict')));
+    const snapshot = await org();
+    expect(snapshot.departments.find(d => d.id === dev.id)!.reworkAt).toBe(event!.createdAt.toISOString());
+    expect(snapshot.departments.find(d => d.id === sales.id)!.reworkAt).toBeNull();
+    const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [sales.id] } });
+    expect((await org(maria)).departments.find(d => d.id === dev.id)!.reworkAt).toBeNull();
+    /* A log written before the explicit rework marker still has its completed review round. */
+    await db.update(taskEvents).set({ data: { pass: false, stage: 1, round: 0 } }).where(eq(taskEvents.id, event!.id));
+    expect((await org()).departments.find(d => d.id === dev.id)!.reworkAt).toBe(event!.createdAt.toISOString());
+    await db.update(taskEvents).set({ createdAt: new Date(Date.parse(snapshot.serverNow) - 600_000) }).where(eq(taskEvents.id, event!.id));
+    expect((await org()).departments.find(d => d.id === dev.id)!.reworkAt).toBeNull();
+  });
+
+  it('starts the rework clock when the panel finishes, even if its last reviewer leaves', async () => {
+    const { ctx, db, acme, hana, bruno, rita, hire, member, org, dev } = await company();
+    const [ceo] = await db.select().from(people);
+    const [codex] = await db.insert(subscriptions).values({ companyId: acme.id, provider: 'codex', kind: 'personal', label: 'Codex', ownerPersonId: ceo!.id, status: 'ready' }).returning();
+    const rex = await hire('Rex', 'worker', 'DEV-REV', dev.id, { subscriptionId: codex!.id });
+    const task = await member('Checkout API', bruno.id, [rita.id]);
+    await submit(ctx, bruno.id, task.id, { summary: 'Handed in', evidence: 'Tests pass' });
+    await verdict(ctx, rita.id, task.id, { pass: false, comment: 'Handle retries.' });
+    expect((await org()).departments.find(d => d.id === dev.id)!.reworkAt).toBeNull();
+    await db.update(taskEvents).set({ createdAt: new Date(Date.now() - 900_000) }).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'verdict')));
+    await leaveWork(ctx, { agentId: hana.id }, rex);
+    const [event] = await db.select().from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'updated')));
+    expect((await org()).departments.find(d => d.id === dev.id)!.reworkAt).toBe(event!.createdAt.toISOString());
+  });
+
   it('run blue while an employee works on its task, and yellow once it hands the work in', async () => {
     const { ctx, bruno, hana, member, run, end, org } = await company();
     const api = await member('Checkout API', bruno.id);

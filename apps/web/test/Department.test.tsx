@@ -341,9 +341,28 @@ describe('Department view', () => {
     const schema = screen.getByRole('region', { name: 'Department schema' });
     expect(within(schema).getByText('Code reviewer')).toBeInTheDocument();
     expect(within(schema).getByText('last gate')).toBeInTheDocument();
-    expect(within(schema).getByText('Sent back for rework')).toBeInTheDocument();
+    expect(within(schema).queryByText('Sent back for rework')).not.toBeInTheDocument();
+    expect(schema.querySelectorAll('.wires .rl, .wires .rah')).toHaveLength(0);
     expect(within(schema).getByText('Report to the head')).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Head' })).toHaveTextContent('1 of 3 agents working, 2 roles, 1 gate');
+  });
+
+  it('shows a real rework for the remaining ten minutes, including after reloading', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    onTestFinished(() => { vi.useRealTimers(); });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const [dev] = DEV_ORG.departments;
+    const reviewer = { ...dev!.roles[1]!, id: 'DEV-REV', kind: 'member' as const, gate: 1 };
+    const rita = { ...dev!.employees[1]!, id: 'b2', name: 'Rita', roleId: 'DEV-REV' };
+    const at = Date.now();
+    const org = { ...DEV_ORG, serverNow: new Date(at).toISOString(), departments: [{ ...dev!, reworkAt: new Date(at - 9 * 60_000).toISOString(), roles: [...dev!.roles, reviewer], employees: [...dev!.employees, rita] }] };
+    shell({}, org);
+    await flyIn(user);
+    expect(screen.getByText('Sent back for rework')).toBeVisible();
+    expect(document.querySelectorAll('.dview .wires .rl').length).toBeGreaterThan(0);
+    await act(() => vi.advanceTimersByTimeAsync(60_000));
+    expect(screen.queryByText('Sent back for rework')).not.toBeInTheDocument();
+    expect(document.querySelectorAll('.dview .wires .rl, .dview .wires .rah')).toHaveLength(0);
   });
 
   it('hires through the orchestrator', async () => {

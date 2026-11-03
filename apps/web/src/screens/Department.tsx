@@ -16,6 +16,7 @@ import { RepoSettings } from '../ui/RepoSettings';
 import { byState, TaskRow } from '../ui/TaskRow';
 import { LiveWay, Pulse, pulseSeconds, toD, useReducedMotion, type Point } from '../ui/wires';
 import { useWorkLines } from '../ui/work-lines';
+import { useRework } from '../ui/use-rework';
 import { TreeView } from './TreeView';
 import { SpeedPanel } from './SpeedPanel';
 import { arrowD, CH, CW, CY, FT, FW, HH, HW, PH, PW, schemaLayout, stepPaths, type Line, type Schema } from './schema';
@@ -345,6 +346,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
   /* The line from the head to each employee: blue while it works on the head's task, yellow for five minutes after it gave
      a result back, as the server keeps them. */
   const stateOf = useWorkLines(d.workLines, serverNow);
+  const rework = useRework(d.reworkAt, serverNow);
   const stageOf = (id: string) => s.frames.find(f => f.members.some(m => m.e.id === id))?.stage ?? -1;
   /* A message runs amber up to the head and back from a gate, cyan down and on. */
   const wayTone = (from: string, to: string) => (to === s.head?.id || stageOf(to) < stageOf(from) ? 'a' : 'c');
@@ -527,7 +529,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
             {s.gates.map(g => (
               <path key={g.x} className="gd" d={`M ${g.x} ${CY - 7} L ${g.x + 7} ${CY} L ${g.x} ${CY + 7} L ${g.x - 7} ${CY} Z`} />
             ))}
-            {lines('rl')}
+            {rework && lines('rl')}
             {s.report && <Wire l={{ cls: 'pl', pts: s.report.pts, arrow: true }} />}
             <MemberLines s={s} toMember={paths.toMember} stateOf={stateOf} still={still} />
             {shots.map(x => (
@@ -539,7 +541,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
               {g.last ? t.dept.lastGate : t.dept.gate(g.n)}
             </span>
           ))}
-          {s.back && (
+          {rework && s.back && (
             <span className="llab ret" style={{ left: s.back[0], top: s.back[1] }}>
               {t.dept.sentBackLine}
             </span>
