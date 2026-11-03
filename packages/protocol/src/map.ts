@@ -7,6 +7,8 @@
 export const RETURN_MS = 300_000;
 /* A gate sent work back to its executor; distinct from a result handed to the head. */
 export const REWORK_MS = 600_000;
+/* A running turn with no event for this long is an alarm: the server's watch raises it, and the map marks the agent. */
+export const QUIET_ALARM_MS = 1_800_000;
 
 export type LineState = 'blue' | 'yellow' | 'quiet';
 
