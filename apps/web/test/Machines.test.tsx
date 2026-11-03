@@ -220,7 +220,12 @@ describe('Machines', () => {
   });
 
   it('connects a machine without a plan and shows its command', async () => {
-    const calls = lists({ 'POST /api/machines/command': [201, { command: COMMAND }] });
+    const id = 'm'.repeat(64);
+    const expiresAt = new Date(Date.now() + 3600_000).toISOString();
+    const calls = lists({
+      'POST /api/machines/command': [201, { id, command: COMMAND, expiresAt }],
+      [`POST /api/nodes/commands/${id}/hide`]: [204],
+    });
     const user = userEvent.setup();
     render(<Machines me={ME} />);
     await user.click(await screen.findByRole('button', { name: 'Connect a machine' }));
@@ -228,12 +233,20 @@ describe('Machines', () => {
     expect(await screen.findByText(COMMAND)).toBeInTheDocument();
     expect(screen.getByText(/joins without a plan/)).toBeInTheDocument();
     expect(screen.getByText("Hornhoof will run tests of the company's code on this machine. People with access to this Hornhoof can start them.")).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Done' }));
+    expect(screen.getByText(/^The command works once, until .+\. The nodes keep running in the background after the terminal is closed\.$/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(calls).toContainEqual({ method: 'POST', path: `/api/nodes/commands/${id}/hide`, body: undefined });
     expect(screen.queryByText(COMMAND)).not.toBeInTheDocument();
   });
 
   it("adds one of the person's plans to a machine of theirs and shows the command to run there", async () => {
-    const calls = lists({ 'POST /api/machines/m1/plans': [201, { command: COMMAND }] });
+    const id = 'a'.repeat(64);
+    const expiresAt = new Date(Date.now() + 3600_000).toISOString();
+    const calls = lists({
+      'POST /api/machines/m1/plans': [201, { id, command: COMMAND, expiresAt }],
+      [`POST /api/nodes/commands/${id}/hide`]: [204],
+    });
     const user = userEvent.setup();
     render(<Machines me={ME} />);
     const mac = await openCard('ivan-mbp');
@@ -245,8 +258,55 @@ describe('Machines', () => {
     expect(calls.find(c => c.method === 'POST')).toEqual({ method: 'POST', path: '/api/machines/m1/plans', body: { subscription: 's-kimi' } });
     expect(await screen.findByText(COMMAND)).toBeInTheDocument();
     expect(screen.getByText(/^Run this in a terminal on ivan-mbp\./)).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Done' }));
+    expect(within(mac).getByText(/^The command works once, until .+\. The nodes keep running in the background after the terminal is closed\.$/)).toBeInTheDocument();
+    expect(within(mac).getByRole('button', { name: 'Copy' })).toBeInTheDocument();
+    await user.click(within(mac).getByRole('button', { name: 'Cancel' }));
+    expect(calls).toContainEqual({ method: 'POST', path: `/api/nodes/commands/${id}/hide`, body: undefined });
     expect(screen.queryByText(COMMAND)).not.toBeInTheDocument();
+  });
+
+  it('keeps machine and add-plan commands visible across tab switches and reloads with expiry, Copy and Cancel, and removes them on join, expiry or Cancel', async () => {
+    const expiresAt = new Date(Date.now() + 3600_000).toISOString();
+    const machineCmd = { id: '1'.repeat(64), kind: 'machine' as const, plans: [], machineId: null, machine: null, command: `${COMMAND}-MACHINE`, expiresAt };
+    const addCmd = { id: '2'.repeat(64), kind: 'add' as const, plans: ['Kimi'], machineId: 'm1', machine: 'ivan-mbp', command: `${COMMAND}-ADD`, expiresAt };
+    let active = [machineCmd, addCmd];
+    const calls = lists({
+      'GET /api/nodes/commands': () => [200, { commands: active }],
+      [`POST /api/nodes/commands/${machineCmd.id}/hide`]: () => {
+        active = active.filter(c => c.id !== machineCmd.id);
+        return [204];
+      },
+      [`POST /api/nodes/commands/${addCmd.id}/hide`]: () => {
+        active = active.filter(c => c.id !== addCmd.id);
+        return [204];
+      },
+    });
+    const user = userEvent.setup();
+    const first = render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
+    expect(await screen.findByText(machineCmd.command)).toBeInTheDocument();
+    expect(await screen.findByText(addCmd.command)).toBeInTheDocument();
+
+    /* Switching tabs and returning, or reloading the page, keeps both commands visible. */
+    first.unmount();
+    localStorage.setItem('hh-lang', 'ru');
+    const inRu = render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
+    expect(await screen.findByText(machineCmd.command)).toBeInTheDocument();
+    expect(await screen.findByText(addCmd.command)).toBeInTheDocument();
+    expect(screen.getAllByText(/^Команда сработает один раз, до .+\. Ноды продолжат работать в фоне и после закрытия терминала\.$/)).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: 'Копировать' })).toHaveLength(2);
+    const cancels = screen.getAllByRole('button', { name: 'Отменить' });
+    expect(cancels).toHaveLength(2);
+    await user.click(cancels[0]!);
+    expect(calls).toContainEqual({ method: 'POST', path: `/api/nodes/commands/${machineCmd.id}/hide`, body: undefined });
+    await vi.waitFor(() => expect(screen.queryByText(machineCmd.command)).not.toBeInTheDocument());
+    expect(screen.getByText(addCmd.command)).toBeInTheDocument();
+
+    /* After the machine joins by the add-plan command or it expires, reload hides it too. */
+    active = [];
+    inRu.unmount();
+    render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
+    await screen.findByRole('table');
+    expect(screen.queryByText(addCmd.command)).not.toBeInTheDocument();
   });
 
   it('disconnects a machine after a confirm', async () => {
