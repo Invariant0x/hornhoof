@@ -2,7 +2,7 @@ import { parseNodeMessage, type NodeLoad, type NodeMessage, type ProgramInfo, ty
 import type { WebSocket } from 'ws';
 
 /* Who is on the other end of a socket: one node on a machine, or the built-in node that runs every API key. */
-export type NodeIdentity = { kind: 'node'; nodeId: string } | { kind: 'builtin' };
+export type NodeIdentity = { kind: 'node'; nodeId: string; keyHash?: string } | { kind: 'builtin' };
 
 export const BUILTIN: NodeIdentity = { kind: 'builtin' };
 
@@ -23,12 +23,15 @@ const MISSED_PINGS = 3;
    terminals: the node said it runs agents in sessions people can watch. work: it runs parts of any work, not only of
    test runs. load: how busy its machine was when it last said. skillFiles: it writes a turn's skills as files. noRuns: why
    it takes no part of any run. build: the node build its image is, none from a node built by hand or from before. */
-type Entry = { socket: WebSocket; missed: number; greeted: boolean; terminals: boolean; work: boolean; load: SaidLoad | null; skillFiles: boolean; noRuns: string | null; programs: ProgramInfo[] | null; build: string | null };
+type Entry = { socket: WebSocket; keyHash: string | null; missed: number; greeted: boolean; terminals: boolean; work: boolean; load: SaidLoad | null; skillFiles: boolean; noRuns: string | null; programs: ProgramInfo[] | null; build: string | null };
 
 /* A node's load and when it said it. */
 export type SaidLoad = NodeLoad & { at: number };
 
 export type TerminalMessage = Extract<NodeMessage, { type: 'term.data' | 'term.exit' | 'term.program' }>;
+
+const isTerminalFrame = (msg: NodeMessage): msg is TerminalMessage =>
+  msg.type === 'term.data' || msg.type === 'term.exit' || msg.type === 'term.program';
 
 type HubOptions = {
   pingMs: number;
@@ -54,7 +57,8 @@ export class NodeHub {
   attach(id: NodeIdentity, socket: WebSocket): void {
     const key = keyOf(id);
     this.sockets.get(key)?.socket.close(4000, 'Replaced by a newer connection.');
-    const entry: Entry = { socket, missed: 0, greeted: false, terminals: false, work: false, load: null, skillFiles: false, noRuns: null, programs: null, build: null };
+    const keyHash = id.kind === 'node' ? (id.keyHash ?? null) : null;
+    const entry: Entry = { socket, keyHash, missed: 0, greeted: false, terminals: false, work: false, load: null, skillFiles: false, noRuns: null, programs: null, build: null };
     this.sockets.set(key, entry);
     this.away.delete(key);
     const report = (err: unknown) => this.opts.onError?.(err);
@@ -64,19 +68,7 @@ export class NodeHub {
       entry.missed = 0;
     });
     socket.on('message', data => {
-      const msg = parseNodeMessage(String(data));
-      this.capturePrograms(entry, msg);
-      if (msg?.type === 'term.data' || msg?.type === 'term.exit' || msg?.type === 'term.program') {
-        try {
-          this.opts.onTerminal?.(id, msg);
-        } catch (err) {
-          report(err);
-        }
-        return;
-      }
-      /* A message before it may wait for this word, as a finished job waits for words typed into another agent's turn. */
-      if (msg?.type === 'agent.said') return void this.opts.onMessage(id, msg).catch(report);
-      if (msg) chain = chain.then(() => this.opts.onMessage(id, msg)).catch(report);
+      chain = this.onFrame(id, key, entry, String(data), chain);
     });
     socket.on('close', () => {
       if (this.sockets.get(key) === entry) {
@@ -86,6 +78,33 @@ export class NodeHub {
       chain = chain.then(() => this.opts.onClose(id)).catch(report);
     });
     socket.on('error', report);
+  }
+
+  private forwardTerminal(id: NodeIdentity, msg: TerminalMessage): void {
+    try {
+      this.opts.onTerminal?.(id, msg);
+    } catch (err) {
+      this.opts.onError?.(err);
+    }
+  }
+
+  private onFrame(id: NodeIdentity, key: string, entry: Entry, raw: string, chain: Promise<void>): Promise<void> {
+    if (this.sockets.get(key) !== entry) return chain;
+    const msg = parseNodeMessage(raw);
+    if (!msg) return chain;
+    this.capturePrograms(entry, msg);
+    if (isTerminalFrame(msg)) {
+      this.forwardTerminal(id, msg);
+      return chain;
+    }
+    const deliver = () => (this.sockets.get(key) === entry ? this.opts.onMessage(id, msg) : Promise.resolve());
+    const report = (err: unknown) => this.opts.onError?.(err);
+    /* A message before it may wait for this word, as a finished job waits for words typed into another agent's turn. */
+    if (msg.type === 'agent.said') {
+      void deliver().catch(report);
+      return chain;
+    }
+    return chain.then(deliver).catch(report);
   }
 
   isOnline(id: NodeIdentity): boolean {
@@ -181,8 +200,16 @@ export class NodeHub {
   }
 
   /* 4001 tells the node it was disconnected in Hornhoof and should not reconnect with this key. */
-  close(nodeId: string, code = 4001): void {
-    this.sockets.get(nodeId)?.socket.close(code, 'Disconnected in Hornhoof.');
+  close(nodeId: string, code = 4001, keyHash?: string): void {
+    this.dropSocket(nodeId, code, keyHash);
+  }
+
+  private dropSocket(nodeId: string, code: number, keyHash?: string): void {
+    const entry = this.sockets.get(nodeId);
+    if (!entry || (keyHash && entry.keyHash !== keyHash)) return;
+    this.sockets.delete(nodeId);
+    this.away.set(nodeId, Date.now());
+    entry.socket.close(code, 'Disconnected in Hornhoof.');
   }
 
   stop(): void {
