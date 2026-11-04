@@ -28,6 +28,7 @@ export const InviteBody = z.object({
 const AcceptBody = z.object({ password: z.string().min(10).max(200) });
 
 export const PersonPatch = z.object({
+  name: z.string().trim().min(1).max(80).optional(),
   title: z.string().trim().max(80).optional(),
   access: AccessInput.optional(),
   status: z.enum(['active', 'disabled']).optional(),
@@ -238,6 +239,7 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (body.access) await checkAccess(db, me.companyId, body.access);
 
     const changes: Partial<typeof people.$inferInsert> = {};
+    if (body.name !== undefined) changes.name = body.name;
     if (body.title !== undefined) changes.title = body.title;
     /* A person who never set a password goes back to waiting for their invite. */
     if (body.status) changes.status = body.status === 'active' && !target.passwordHash ? 'invited' : body.status;

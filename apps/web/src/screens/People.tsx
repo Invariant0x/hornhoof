@@ -273,7 +273,8 @@ export function People({ me }: { me: Me }) {
             </tr>
           </thead>
           <tbody>
-            {people.map(p => {
+            {people.map(row => {
+              const p = row.id === me.person.id ? { ...row, name: me.person.name } : row;
               const { manageable, titleOnly, deputy } = rightsOn(me, p);
               return (
                 <tr key={p.id} className={p.status}>
