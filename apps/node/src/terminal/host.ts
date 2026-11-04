@@ -1462,8 +1462,10 @@ export class TerminalHost {
       a.busy = true;
       return;
     }
+    const prompt = String(data.lastUserInput ?? '');
+    if (a.typing !== null) a.turn?.words?.taken(prompt);
     a.typing = null;
-    await this.prompted(a, String(data.lastUserInput ?? ''));
+    await this.prompted(a, prompt);
   }
 
   private async prompted(a: Agent, prompt: string): Promise<void> {

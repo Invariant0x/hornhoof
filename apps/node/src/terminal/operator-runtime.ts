@@ -14,7 +14,7 @@ type Source = {
   press(key: string, value: 'Enter' | 'Up' | 'Down' | 'Left' | 'Right' | 'Tab'): Promise<void>;
   secrets(): string[];
 };
-type Target = { identity: OperatorIdentity; control: OperatorControl; generation: number; physical: boolean; pasted: boolean; started: boolean; active: boolean; recorded: boolean; taken: boolean; assignment: OperatorDelivery | null; caseId: string | null; revision: number; deadline: number | null; failed: string | null; intentional?: 'cancelled' | 'update' | 'restart' | 'offline' | 'completed' };
+type Target = { identity: OperatorIdentity; control: OperatorControl; generation: number; physical: boolean; pasted: boolean; started: boolean; active: boolean; recorded: boolean; taken: boolean; assignment: OperatorDelivery | null; caseId: string | null; deadline: number | null; failed: string | null; intentional?: 'cancelled' | 'update' | 'restart' | 'offline' | 'completed' };
 
 /* Runtime glue stays outside the terminal host's provider logic; evidence and the key guard share one input lane. */
 export class OperatorRuntime {
@@ -34,12 +34,13 @@ export class OperatorRuntime {
     if (!target || !reuse) {
       const identity = { agentKey: key, jobId, instance: randomUUID() };
       const control = new OperatorControl({ file: join(this.options.dir, `actions-${key}.json`), now: this.now, current: () => this.current(key), capture: () => this.source.capture(key), press: value => this.source.press(key, value), lane: run => this.serial(key, run), secrets: this.source.secrets });
-      target = { identity, control, generation: 0, physical: reuse, pasted: reuse, started: reuse, active: reuse, recorded: false, taken: false, assignment: null, caseId: null, revision: -1, deadline: null, failed: null };
+      target = { identity, control, generation: 0, physical: reuse, pasted: reuse, started: reuse, active: reuse, recorded: false, taken: false, assignment: null, caseId: null, deadline: null, failed: null };
       this.targets.set(key, target);
     }
+    if (target.identity.jobId !== jobId || target.assignment?.id !== metadata.id) { target.caseId = null; target.deadline = null; target.failed = null; }
     target.identity = { ...target.identity, jobId };
     target.assignment = metadata; target.recorded = false; target.taken = false;
-    target.failed = null; target.generation++; target.intentional = undefined;
+    target.generation++; target.intentional = undefined;
     if (words) this.observer.attempt(target.identity, metadata, 'assignment', words);
     if (reuse && !target.physical) target.physical = true;
   }
@@ -117,9 +118,8 @@ export class OperatorRuntime {
       return;
     }
     if (frame.type === 'program.operator_case') {
-      target.control.openCase(frame);
-      if (frame.instance !== target.identity.instance || frame.jobId !== target.identity.jobId || frame.revision <= target.revision) return;
-      target.revision = frame.revision;
+      const accepted = target.control.openCase(frame);
+      if (!accepted || frame.instance !== target.identity.instance || frame.jobId !== target.identity.jobId) return;
       target.caseId = frame.case;
       target.deadline = Math.min(target.deadline ?? Infinity, this.now() + frame.remainingMs);
       if (frame.disposition === 'revoke') target.failed ??= 'operator_case_closed';

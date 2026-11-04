@@ -40,13 +40,14 @@ export class OperatorControl {
     for (const action of Object.values(this.state.actions)) if (action.result === 'requested') { action.result = 'unknown'; action.reason = 'action_unknown'; }
   }
 
-  openCase(command: CaseCommand): void {
+  openCase(command: CaseCommand): boolean {
     const old = this.state.cases[command.case];
-    if (old && old.revision >= command.revision) return;
+    if (old && old.revision >= command.revision) return false;
     const deadline = this.now() + Math.min(command.remainingMs, OPERATOR_CASE_MS);
     this.state.cases[command.case] = { instance: command.instance, agentKey: command.agentKey, jobId: command.jobId, digest: hash(command.capability), revision: command.revision, deadline: old ? Math.min(old.deadline, deadline) : deadline, revoked: command.disposition === 'revoke', readOnly: command.readOnly ?? false, actions: old?.actions ?? 0, lastRead: old?.lastRead ?? null };
     this.snapshot = null;
     this.save();
+    return true;
   }
 
   screen(command: ScreenCommand): Promise<OperatorScreen> {
@@ -90,12 +91,13 @@ export class OperatorControl {
     this.save();
     const refusal = await this.beforeKey(command);
     if (refusal) return this.complete(command, 'refused', refusal);
-    this.snapshot!.used = true;
     try {
       /* press launches send-keys synchronously before yielding. No await may separate this final evidence check. */
-      const final = this.caseRefusal(command) ?? this.keyRefusal(this.options.current(), '');
+      const final = this.keyCaseRefusal(command) ?? this.keyRefusal(this.options.current(), '');
       if (final) return this.complete(command, 'refused', final);
-      if (this.options.current()?.generation !== this.snapshot!.generation) return this.complete(command, 'refused', 'snapshot_stale');
+      const snapshot = this.snapshot;
+      if (!snapshot || snapshot.used || snapshot.token !== command.snapshot || this.options.current()?.generation !== snapshot.generation) return this.complete(command, 'refused', 'snapshot_stale');
+      snapshot.used = true;
       await this.options.press(parsed.data);
       return this.complete(command, 'applied', null);
     } catch {
@@ -114,9 +116,13 @@ export class OperatorControl {
     try { pane = await this.options.capture(); } catch { return 'node_unavailable'; }
     const cells = operatorCells(pane.cells, this.options.secrets());
     const after = this.options.current();
-    const denied = this.caseRefusal(command) ?? this.keyRefusal(after, cells);
+    const denied = this.keyCaseRefusal(command) ?? this.keyRefusal(after, cells);
     if (denied) return denied;
-    return snap.generation !== after?.generation || snap.hash !== hash(cells) ? 'snapshot_stale' : null;
+    return this.snapshot !== snap || snap.generation !== after?.generation || snap.hash !== hash(cells) ? 'snapshot_stale' : null;
+  }
+
+  private keyCaseRefusal(command: KeyCommand): OperatorError | null {
+    return this.caseRefusal(command) ?? (this.state.cases[command.case]?.readOnly ? 'operator_forbidden' : null);
   }
 
   private cached(command: KeyCommand, digest: string, old: State['actions'][string]): OperatorKeyResult {

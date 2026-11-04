@@ -38,3 +38,19 @@ it('returns explicit no_program responses without creating a program for an unkn
   await c.runtime.message({ type: 'program.key_send', ...command, snapshot: randomUUID(), generation: 0, action: randomUUID(), key: 'Enter' });
   expect(c.sent.at(-1)).toMatchObject({ type: 'program.key_result', result: 'refused', reason: 'no_program' });
 });
+
+it('uses revisions per case and gives a new job its own fixed case deadline', async () => {
+  const c = fixture();
+  const previous = { type: 'program.operator_case' as const, ...c.identity, case: randomUUID(), capability: randomUUID(), remainingMs: 10, disposition: 'open' as const, revision: 5 };
+  await c.runtime.message(previous);
+  await c.runtime.message({ ...previous, revision: 6, disposition: 'revoke' });
+  c.at(20);
+  const jobId = randomUUID();
+  c.runtime.begin(c.identity.agentKey, jobId, { id: randomUUID(), ordinal: 2 }, 'Next words.', true);
+  const identity = c.runtime.identity(c.identity.agentKey)!;
+  await c.runtime.message({ ...previous, ...identity, case: randomUUID(), revision: 1, remainingMs: 600000 });
+  c.at(600019); c.runtime.tick();
+  expect(c.runtime.failure(c.identity.agentKey)).toBeNull();
+  c.at(600020); c.runtime.tick();
+  expect(c.runtime.failure(c.identity.agentKey)).toBe('operator_timeout');
+});

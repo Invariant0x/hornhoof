@@ -62,6 +62,20 @@ describe('operator key capability', () => {
     expect(c.pressed).toEqual([]);
   });
 
+  it('refuses a key if the case becomes read-only while capture is awaited', async () => {
+    const c = fixture();
+    let readOnly = false;
+    const control = new OperatorControl({ ...c.options, capture: async () => {
+      const pane = await c.options.capture();
+      if (readOnly) control.openCase({ ...opened, revision: 2, readOnly: true });
+      return pane;
+    } });
+    const screen = await control.screen(c.screenCommand);
+    readOnly = true;
+    expect(await control.key(c.keyCommand(screen.snapshot!))).toMatchObject({ result: 'refused', reason: 'operator_forbidden' });
+    expect(c.pressed).toEqual([]);
+  });
+
   it('returns the same refusal and reason when an action is repeated', async () => {
     const c = fixture(); const screen = await c.control.screen(c.screenCommand);
     const command = c.keyCommand(screen.snapshot!, 2);
