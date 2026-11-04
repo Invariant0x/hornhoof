@@ -117,4 +117,17 @@ describe('what the build runs', () => {
     const lock = json('package-lock.json').packages;
     expect(lock['node_modules/@vitest/coverage-v8']).toMatchObject({ version: lock['node_modules/vitest'].version, dev: true });
   });
+
+  /* @resvg/resvg-js ships prebuilt Alpine binaries per CPU; deps runs on the builder platform and must pick TARGETARCH. */
+  it('installs server production modules for the target CPU and copies bundled operator fonts on build', () => {
+    const dockerfile = read('Dockerfile');
+    expect(dockerfile).toContain('FROM --platform=$BUILDPLATFORM node:22.23.4-alpine@');
+    expect(dockerfile).toMatch(/AS deps\nARG TARGETARCH\n/);
+    expect(dockerfile).toContain('npm ci --omit=dev --cpu="$cpu" --workspace apps/server --workspace packages/protocol');
+    const serverPkg = JSON.parse(read('apps/server/package.json'));
+    expect(serverPkg.scripts.build).toContain('dist/modules/program-operator/fonts');
+    expect(read('THIRD_PARTY.md')).toContain('DejaVu Sans Mono');
+    expect(read('THIRD_PARTY.md')).toContain('@resvg/resvg-js');
+    expect(read('apps/server/src/modules/program-operator/fonts/LICENSE')).toContain('Bitstream Vera Fonts Copyright');
+  });
 });
