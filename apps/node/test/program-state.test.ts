@@ -39,7 +39,7 @@ describe('what a program reports about its work', () => {
     expect(programState(SCREENS[kind].working, { name, at: 1000 }, true)).toBe(state);
   });
 
-  it.each(KINDS)('reports %s gone when there is no program', kind => {
+  it.each(KINDS)('reports %s gone when there is no program', () => {
     expect(programState(null, bash, true)).toBe('gone');
     expect(programState(null, null, false)).toBe('gone');
   });

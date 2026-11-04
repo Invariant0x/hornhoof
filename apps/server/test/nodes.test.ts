@@ -106,7 +106,7 @@ describe('POST /api/nodes/join', () => {
   });
 
   it('puts a plan on one machine only when two commands for it join at once', async () => {
-    const { app, db, ceo, code, ids } = await connected(['claude']);
+    const { app, db, code, ids } = await connected(['claude']);
     const extra = await legacyCopy(db, code);
     const both = await Promise.all([join(app, code), join(app, extra, { machineId: 'other-machine-01', hostname: 'ivan-laptop' })]);
     expect(both.map(r => r.statusCode).sort()).toEqual([200, 410]);

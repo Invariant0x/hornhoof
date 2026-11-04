@@ -250,7 +250,8 @@ describe('POST /api/setup', () => {
     const res = await app.inject({ method: 'POST', url: '/api/setup', payload: SETUP });
     expect(res.statusCode).toBe(409);
     expect(res.json().error.code).toBe('conflict');
-    const { code: _, ...withoutCode } = SETUP;
+    const withoutCode: Partial<typeof SETUP> = { ...SETUP };
+    delete withoutCode.code;
     expect((await app.inject({ method: 'POST', url: '/api/setup', payload: withoutCode })).statusCode).toBe(409);
   });
 
