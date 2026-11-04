@@ -17,6 +17,13 @@ describe('orchestrator instructions', () => {
     expect(ORCHESTRATOR_INSTRUCTIONS).not.toContain('Hornhoof cannot put people or agents into departments yet');
   });
 
+  it('knows Operations is always there, with four roles Hornhoof keeps filled and a plan the operator takes itself', () => {
+    for (const words of ['one item for every template but Operations', 'its head, Task watchdog, Weak point collector and Program operator', 'Hornhoof hires whoever of the four is missing', 'stay ticked on a card', 'cannot be fired, only switched off', 'takes the first subscription that may serve Operations by itself']) {
+      expect(ORCHESTRATOR_INSTRUCTIONS).toContain(words);
+    }
+    expect(ORCHESTRATOR_INSTRUCTIONS).not.toContain('Operations is always ticked');
+  });
+
   it('does what people ask himself, with the tools for every screen', () => {
     for (const words of ['"build_structure"', '"hire"', '"change_employee"', '"message_employee"', '"answer_request"', '"update_task"', '"view"', '"database"', 'cannot be undone']) {
       expect(ORCHESTRATOR_INSTRUCTIONS).toContain(words);
