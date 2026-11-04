@@ -12,7 +12,7 @@ describe('version', () => {
     expect(version.statusCode).toBe(200);
     expect(version.json()).toEqual({ version: '9.9.9', commit: 'abc1234def', migrations });
     const health = await app.inject({ method: 'GET', url: '/api/health' });
-    expect(health.json()).toEqual({ ok: true, version: '9.9.9', commit: 'abc1234def' });
+    expect(health.json()).toEqual({ ok: true, version: '9.9.9', commit: 'abc1234def', mode: 'lead' });
   });
 
   it('falls back to the product version and a local build', async () => {
