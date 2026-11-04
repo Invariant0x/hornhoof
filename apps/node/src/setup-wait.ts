@@ -8,6 +8,8 @@ export const SETUP_CHECK_MS = 60_000;
 export class SetupWait {
   needed = false;
   private lookedAt = -Infinity;
+  private looking = false;
+  private look: Promise<boolean> | null = null;
 
   constructor(
     private readonly program: Pick<ProviderAdapter, 'setupNeeded'> | null,
@@ -19,17 +21,28 @@ export class SetupWait {
   async check(loggedIn: boolean): Promise<boolean> {
     const was = this.needed;
     this.lookedAt = this.now();
-    this.needed = loggedIn && Boolean(await this.program?.setupNeeded?.().catch(() => false));
+    this.needed = loggedIn && (await this.lookOnce());
     return this.needed !== was;
   }
 
+  /* One look at a time: one that starts agy can outlast the ticks and sign-ins that ask meanwhile, which take its answer. */
+  private lookOnce(): Promise<boolean> {
+    this.look ??= (async () => Boolean(await this.program?.setupNeeded?.()))().catch(() => false).finally(() => (this.look = null));
+    return this.look;
+  }
+
   /* While signed out, or now and then while waiting for the setup: whether it found the program signed in by looking
-     again, and whether either changed. */
+     again, and whether either changed. One look at a time: a look that starts agy can outlast the ticks that ask. */
   async recheck(loggedIn: boolean, signedIn: () => Promise<boolean>): Promise<{ signedIn: boolean; changed: boolean }> {
-    if (loggedIn && (!this.needed || this.now() - this.lookedAt < this.everyMs)) return { signedIn: false, changed: false };
-    const found = !loggedIn && (await signedIn());
-    const changed = await this.check(loggedIn || found);
-    return { signedIn: found, changed: changed || found };
+    if (this.looking || (loggedIn && (!this.needed || this.now() - this.lookedAt < this.everyMs))) return { signedIn: false, changed: false };
+    this.looking = true;
+    try {
+      const found = !loggedIn && (await signedIn());
+      const changed = await this.check(loggedIn || found);
+      return { signedIn: found, changed: changed || found };
+    } finally {
+      this.looking = false;
+    }
   }
 
   /* A turn that ended on the setup, which saw it as a look would. */
