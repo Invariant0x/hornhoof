@@ -133,7 +133,9 @@ describe.skipIf(!hasTmux)("Antigravity and Hornhoof's tools", () => {
     await until(when);
     stop.abort();
     const stopped = Date.now();
-    expect(await run).toMatchObject({ ok: false, error: 'cancelled' });
+    const result = await run;
+    expect(result).toMatchObject({ ok: false, error: 'cancelled' });
+    expect(result.failure).toBeUndefined();
     expect(Date.now() - stopped).toBeLessThan(1500);
     expect(turns(key)).toEqual([]);
     expect(sent.filter(k => k === '-l /mcp')).toHaveLength(panels);
