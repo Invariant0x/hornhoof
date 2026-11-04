@@ -11,6 +11,7 @@ import { Requests, wordsAnswer } from '../ui/Requests';
 import { StaffCard } from '../ui/StaffCard';
 import { StructureCard } from '../ui/StructureCard';
 import { TaskRow } from '../ui/TaskRow';
+import { TurnProgress } from '../ui/TurnProgress';
 
 type Props = {
   decisions: Decisions | undefined;
@@ -105,7 +106,6 @@ function TaskTree({ tasks, rows, under = null }: { tasks: TaskLine[]; rows: Rows
 /* One turn: its number and state, the short title and main point, the words it came from on click, then its tasks. */
 function Turn({ turn, tasks, rows }: { turn: TurnView; tasks: TaskLine[]; rows: Rows }) {
   const t = useT();
-  const share = turn.tasks.total ? Math.round((turn.tasks.done / turn.tasks.total) * 100) : 0;
   const head = (
     <>
       <div className="turn-name">
@@ -119,12 +119,7 @@ function Turn({ turn, tasks, rows }: { turn: TurnView; tasks: TaskLine[]; rows: 
       {turn.status === 'planned' ? (
         <small className="turn-wait">{t.tasks.plannedTasks(turn.tasks.total)}</small>
       ) : (
-        <div className="turn-progress">
-          <span className="turn-track" aria-hidden="true">
-            <i style={{ width: `${share}%` }} />
-          </span>
-          <small>{t.tasks.turnProgress(turn.tasks.done, turn.tasks.total)}</small>
-        </div>
+        <TurnProgress tasks={turn.tasks} />
       )}
     </>
   );

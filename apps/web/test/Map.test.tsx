@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
@@ -6,7 +6,7 @@ import { orchestratorStatus, deptLayout, pulsePath, MapScreen } from '../src/scr
 import type { SubView } from '../src/types';
 import { LanguageProvider } from '../src/i18n';
 import type { Department, Employee, Me } from '../src/types';
-import { DEV_ORG, ME, mockApi, ORG, ORG_WITH_TEAMS, PEOPLE, SUBS } from './api-mock';
+import { DEV_ORG, FINISHED_TURN, ME, mockApi, ORG, ORG_WITH_TEAMS, PEOPLE, PLANNED_TURN, SUBS, TASKS, TURN } from './api-mock';
 import { fakeStream } from './fake-stream';
 
 const claude = SUBS[0]!;
@@ -626,15 +626,81 @@ describe('Map', () => {
     expect(screen.getByRole('button', { name: /Support/ })).toHaveTextContent('No agents yet');
   });
 
-  it("shows the company's turn under the hub, between the traces", async () => {
-    mockApi({ 'GET /api/org': [200, { ...ORG_WITH_TEAMS, turn: { id: 'u3', number: 3, goal: 'Take payments' } }] });
-    const { container } = render(<MapScreen {...PROPS} />);
-    const turn = await screen.findByText('Turn 3');
-    expect(turn.closest('.hub-turn')).toHaveTextContent('Turn 3Take payments');
+  it.each(['en', 'ru'] as const)("shows the tracker progress under the hub in %s, between the traces", async language => {
+    localStorage.setItem('hh-lang', language);
+    onTestFinished(() => localStorage.removeItem('hh-lang'));
+    mockApi({
+      'GET /api/org': [200, { ...ORG_WITH_TEAMS, turn: { id: TURN.id, number: TURN.number, goal: TURN.goal } }],
+      'GET /api/turns': [200, { turns: [FINISHED_TURN, PLANNED_TURN, TURN] }],
+      'GET /api/tasks?status=all': [200, { tasks: [{ ...TASKS[0]!, status: 'done' }, { ...TASKS[1]!, status: 'working' }] }],
+    });
+    const { container } = render(<LanguageProvider><MapScreen {...PROPS} /></LanguageProvider>);
+    const text = language === 'en' ? '2 of 5 tasks done' : 'Готово 2 из 5 задач';
+    await screen.findByText(text);
     /* Traces to the lower rows leave the hub 84 to each side of its middle (600); the turn stays between them. */
     const box = container.querySelector('.hub-turn') as HTMLElement;
+    expect(box.querySelector('b')).toHaveTextContent(language === 'en' ? 'Turn 3' : 'Ход 3');
+    expect(box).not.toHaveTextContent(TURN.goal);
+    expect(box.title).toContain(TURN.title);
+    expect(box.title).toContain(TURN.goal);
+    expect(within(box).getByRole('progressbar', { name: text })).toHaveAttribute('aria-valuenow', '40');
     expect(parseFloat(box.style.left)).toBeGreaterThanOrEqual(600 - 84);
     expect(parseFloat(box.style.left) + parseFloat(box.style.width)).toBeLessThanOrEqual(600 + 84);
+  });
+
+  it('updates progress when tasks close or are added without reopening the map', async () => {
+    const stream = fakeStream();
+    let tasks = { done: 2, total: 5 };
+    mockApi({
+      'GET /api/org': [200, { ...ORG, turn: { id: TURN.id, number: TURN.number, goal: TURN.goal } }],
+      'GET /api/turns': () => [200, { turns: [{ ...TURN, tasks }] }],
+    });
+    render(<MapScreen {...PROPS} />);
+    await screen.findByText('2 of 5 tasks done');
+    tasks = { done: 3, total: 5 };
+    stream.send({ type: 'task' });
+    await screen.findByText('3 of 5 tasks done');
+    tasks = { done: 3, total: 7 };
+    stream.send({ type: 'task' });
+    expect(await screen.findByRole('progressbar', { name: '3 of 7 tasks done' })).toHaveAttribute('aria-valuenow', '43');
+  });
+
+  it('keeps the map usable while its tracker numbers load', async () => {
+    let finish!: (reply: [number, unknown]) => void;
+    const pending = new Promise<[number, unknown]>(resolve => { finish = resolve; });
+    mockApi({
+      'GET /api/org': [200, { ...ORG, turn: { id: TURN.id, number: TURN.number, goal: TURN.goal } }],
+      'GET /api/turns': () => pending,
+    });
+    render(<MapScreen {...PROPS} />);
+    await screen.findByText('agents working');
+    expect(screen.queryByRole('progressbar')).toBeNull();
+    await act(async () => finish([200, { turns: [TURN] }]));
+    await screen.findByRole('progressbar', { name: '2 of 5 tasks done' });
+  });
+
+  it('reports a tracker failure without replacing the rest of the map', async () => {
+    mockApi({
+      'GET /api/org': [200, { ...ORG, turn: { id: TURN.id, number: TURN.number, goal: TURN.goal } }],
+      'GET /api/turns': [503, { error: { code: 'unavailable', message: 'Progress unavailable.' } }],
+    });
+    render(<MapScreen {...PROPS} />);
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect(screen.getByText('agents working')).toBeInTheDocument();
+  });
+
+  it.each(['none', 'closed', 'planned'] as const)('omits the hub turn when the tracker has %s', async state => {
+    const stream = fakeStream();
+    let turns = [TURN];
+    mockApi({
+      'GET /api/org': [200, { ...ORG, turn: { id: TURN.id, number: TURN.number, goal: TURN.goal } }],
+      'GET /api/turns': () => [200, { turns }],
+    });
+    const { container } = render(<MapScreen {...PROPS} />);
+    await screen.findByText('2 of 5 tasks done');
+    turns = state === 'none' ? [] : [{ ...TURN, status: state }];
+    stream.send({ type: 'task' });
+    await waitFor(() => expect(container.querySelector('.hub-turn')).toBeNull());
   });
 
   it('tells when the orchestrator has no subscription', async () => {
