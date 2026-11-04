@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import type { Db } from '../src/db/client.js';
-import { agents, companies, departments, jobs, nodeCodes, nodes, subscriptions, tasks, teams, testParts, testRuns } from '../src/db/schema.js';
+import { agents, companies, departments, jobs, nodeCodes, nodes, people, personAccess, subscriptions, tasks, teams, testParts, testRuns } from '../src/db/schema.js';
 import { as, invitePerson, SETUP, setUpCompany, TEST_API_KEY, testApp } from './helpers.js';
 
 const COMMAND = /^curl -fsSL http:\/\/localhost:8080\/install\.sh \| bash -s -- --join ([A-Za-z0-9_-]{43})$/;
@@ -351,6 +351,26 @@ describe('PATCH /api/subscriptions/:id', () => {
 });
 
 describe('GET /api/subscriptions', () => {
+  it('lists only plans and related places of the session company', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const [otherCompany] = await db.insert(companies).values({ name: 'Other company', singleton: false }).returning();
+    const [otherPerson] = await db.insert(people).values({ companyId: otherCompany!.id, name: 'Other person', email: 'other@example.test', title: '', status: 'active', scopeKind: 'listed' }).returning();
+    const [otherDept] = await db.insert(departments).values({ companyId: otherCompany!.id, name: 'Other department', roleCode: 'OTHER' }).returning();
+    const [otherTeam] = await db.insert(teams).values({ companyId: otherCompany!.id, departmentId: otherDept!.id, name: 'Other team' }).returning();
+    await db.insert(personAccess).values({ companyId: otherCompany!.id, personId: otherPerson!.id, departmentId: otherDept!.id, teamId: otherTeam!.id });
+    const [otherSub] = await db.insert(subscriptions).values({ companyId: otherCompany!.id, ownerPersonId: otherPerson!.id, provider: 'claude', kind: 'personal', label: 'Other plan', status: 'ready' }).returning();
+
+    const rows = await list(app, ceo);
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ label: 'Orchestrator', owner: { name: 'Ivan' } });
+    expect(rows.map((s: { id: string }) => s.id)).not.toContain(otherSub!.id);
+    for (const secret of ['Other person', 'Other plan', 'Other department', 'Other team']) {
+      expect(JSON.stringify(rows)).not.toContain(secret);
+    }
+  });
+
   it('lists the agents of a plan in map order, with work and only the tasks the viewer reaches', async () => {
     const { app, db, ceo, maria, marketing, development } = await companyWithMaria();
     const sub = (await connect(app, maria, ['claude'])).json().subscriptions[0];
