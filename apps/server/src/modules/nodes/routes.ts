@@ -8,7 +8,7 @@ import { requirePerson } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
 import { agents, machines, nodeCodes, nodes, people, subscriptions, tasks, testParts, testRuns, type Provider } from '../../db/schema.js';
-import { ApiError } from '../../errors.js';
+import { ApiError, loggable } from '../../errors.js';
 import { runningAgents } from '../agents/running.js';
 import { publicUrl } from '../link/link.js';
 import { machineNodes, machineState, together } from '../testruns/load.js';
@@ -17,6 +17,7 @@ import { createInstallCommand } from './command.js';
 import { nodeCommandRoutes } from './command-routes.js';
 import { disconnectMachines } from './disconnect.js';
 import { BUILTIN, nodeIdentity, type NodeHub } from './hub.js';
+import { nodeImageOfBuild } from './image.js';
 import { builtinMachine, liveNode, otherBuild, settlePlans } from './nodes.js';
 import { machineProgramState, machineProgramRoutes, programsFor } from './programs.js';
 
@@ -254,12 +255,20 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { lendsTests };
   });
 
+  const nodeImage = nodeImageOfBuild({
+    image: config.image,
+    commit: config.commit,
+    digestOf: async tag => (await ctx.updates.siblings(tag)).node,
+    onError: err => app.log.warn({ error: loggable(err) }, "Could not read this build's node image from the registry, so install.sh names it by its tag."),
+  });
+
+  /* Every command that installs or updates a node runs this script, so the machine gets the node of this server's build. */
   app.get('/install.sh', async (_req, reply) => {
     const script = await readFile(config.installScript, 'utf8');
     const server = await publicUrl(db, config);
     return reply
       .type('text/plain; charset=utf-8')
       .header('cache-control', 'no-cache')
-      .send(script.replaceAll('__HORNHOOF_SERVER__', server));
+      .send(script.replaceAll('__HORNHOOF_SERVER__', server).replaceAll('__HORNHOOF_NODE_IMAGE__', await nodeImage()));
   });
 }

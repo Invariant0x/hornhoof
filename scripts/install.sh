@@ -17,14 +17,21 @@
 # Several companies can share a computer: each node carries the address of the server it works for, and an
 # update or an uninstall touches only that server's nodes.
 #
-# The server fills in its own address when it serves this file. The script arrives through a pipe, so every
-# question is read from the terminal. It runs on the bash that ships with macOS (3.2).
+# The server fills in its own address when it serves this file, and the node image of its own build: by digest, by its
+# commit's tag while the registry cannot say which digest, or "local" for a build CI did not make, which has no image
+# published. A script downloaded on its own and a local build take the latest image; HORNHOOF_NODE_IMAGE comes before
+# them all. The script arrives through a pipe, so every question is read from the terminal. It runs on the bash that
+# ships with macOS (3.2).
 set -euo pipefail
 
 SERVER="${HORNHOOF_SERVER:-__HORNHOOF_SERVER__}"
 TTY="${HORNHOOF_TTY:-/dev/tty}"
 STATE_DIR="${HORNHOOF_HOME:-$HOME/.hornhoof}"
-IMAGE="${HORNHOOF_NODE_IMAGE:-ghcr.io/invariant0x/hornhoof-node:latest}"
+BUILD_IMAGE="__HORNHOOF_NODE_IMAGE__"
+case "$BUILD_IMAGE" in
+  __HORNHOOF_* | local) IMAGE="${HORNHOOF_NODE_IMAGE:-ghcr.io/invariant0x/hornhoof-node:latest}" ;;
+  *) IMAGE="${HORNHOOF_NODE_IMAGE:-$BUILD_IMAGE}" ;;
+esac
 COMPOSE_URL="${HORNHOOF_COMPOSE_URL:-}"
 APP_IMAGE="${HORNHOOF_APP_IMAGE:-ghcr.io/invariant0x/hornhoof}"
 BASE_DIR="${HORNHOOF_DIR:-$HOME/hornhoof}"
@@ -259,10 +266,15 @@ check_server() {
 }
 
 pull_image() {
+  if [ "$BUILD_IMAGE" = local ] && [ -z "${HORNHOOF_NODE_IMAGE:-}" ]; then
+    say "This Hornhoof is a local build with no node image published for it, so this machine gets the latest node image, which may not match it."
+  fi
   say "Getting the node image $IMAGE."
   if ! "${DOCKER[@]}" pull "$IMAGE" > /dev/null; then
     if "${DOCKER[@]}" image inspect "$IMAGE" > /dev/null 2>&1; then
       say "Using the local image."
+    elif [ "$IMAGE" = "$BUILD_IMAGE" ]; then
+      fail "Could not download $IMAGE, the node image of this Hornhoof's build. Check the internet connection. If this Hornhoof was updated in the last few minutes, the image may not be published yet. Then run this command again."
     else
       fail "Could not download $IMAGE. Check the internet connection, then run this command again."
     fi
