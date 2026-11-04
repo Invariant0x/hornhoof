@@ -116,10 +116,11 @@ function LastFailure({ failure, when }: { failure: AgentCardView['failure'] | un
   const today = new Date(failure.at).toDateString() === new Date().toDateString();
   const line = today ? t.agent.lastFailed(clockAt(failure.at), t.failures[failure.kind]) : t.agent.lastFailedOn(when(failure.at), t.failures[failure.kind]);
   const text = clip(failure.text, FAILURE_TEXT_MAX);
-  return text ? (
+  return text || failure.tail ? (
     <details className="ac-failure">
       <summary title={text}>{line}</summary>
-      <pre>{text}</pre>
+      {text && <pre>{text}</pre>}
+      {failure.tail && <pre>{failure.tail === 'No output.' ? t.agent.noOutput : failure.tail}</pre>}
     </details>
   ) : (
     <p className="ac-failure">{line}</p>
