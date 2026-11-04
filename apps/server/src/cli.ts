@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { isLinkName } from '@hornhoof/protocol/link';
 import { eq } from 'drizzle-orm';
 import { loadConfig, type Config } from './config.js';
-import { createDb, type Db } from './db/client.js';
+import { APP_NAME, openDb, type Db } from './db/client.js';
 import { companies, people } from './db/schema.js';
 import { ApiError } from './errors.js';
 import { linkOf, publicUrl, saveLink, writeTunnelSettings } from './modules/link/link.js';
@@ -90,7 +90,7 @@ const entry = process.argv[1] ? realpathSync(process.argv[1]) : '';
 if (entry === fileURLToPath(import.meta.url)) {
   const config = loadConfig(process.env);
   if (!config.databaseUrl) throw new Error('DATABASE_URL is not set.');
-  const db = await createDb(config.databaseUrl);
+  const db = openDb(config.databaseUrl, APP_NAME);
   const read = async () => {
     let text = '';
     for await (const chunk of process.stdin) text += String(chunk);

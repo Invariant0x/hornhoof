@@ -3,9 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/main.ts",
+    "dev": "tsx src/migrate.ts && tsx watch src/main.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/main.js",
+    "start": "node dist/migrate.js && node dist/main.js",
     "pretest": "npm run build -w @hornhoof/protocol",
     "test": "vitest run"
   },

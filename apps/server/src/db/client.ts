@@ -12,20 +12,43 @@ export type Db = PgDatabase<PgQueryResultHKT, typeof schema>;
 
 export const MIGRATIONS = fileURLToPath(new URL('../../drizzle', import.meta.url));
 
+export const APP_NAME = 'hornhoof-app';
+export const MIGRATE_NAME = 'hornhoof-migrate';
+export const KEEPER_NAME = 'hornhoof-keeper';
+
 /* pg reports an idle connection the database dropped, as when Postgres restarts, as an error on the pool. Without a
-   listener Node ends the whole server; with one the pool opens a fresh connection for the next query. */
-export function openPool(url: string, onDropped: (err: Error) => void): pg.Pool {
-  const pool = new pg.Pool({ connectionString: url });
+   listener Node ends the whole server; with one the pool opens a fresh connection for the next query. The name shows
+   in pg_stat_activity, so each process can be told apart there. */
+export function openPool(url: string, onDropped: (err: Error) => void, name: string, opts: { statementTimeoutMs?: number } = {}): pg.Pool {
+  const pool = new pg.Pool({
+    connectionString: url,
+    application_name: name,
+    ...(opts.statementTimeoutMs === undefined ? {} : { statement_timeout: opts.statementTimeoutMs }),
+  });
   pool.on('error', onDropped);
   return pool;
 }
 
-export async function createDb(url: string): Promise<Db> {
-  const pool = openPool(url, err => console.warn(`Lost a database connection, will open another: ${err.message}`));
-  const db = drizzle(pool, { schema });
-  await migrate(db, { migrationsFolder: MIGRATIONS });
-  await applyMissingMigrations(db, { migrationsFolder: MIGRATIONS });
-  return db;
+const warnDropped = (err: Error) => console.warn(`Lost a database connection, will open another: ${err.message}`);
+
+/* The app and the CLI only read the schema; the migrate entry point is the one place that changes it. */
+export function openDb(url: string, name: string, opts: { statementTimeoutMs?: number } = {}): Db {
+  return drizzle(openPool(url, warnDropped, name, opts), { schema });
+}
+
+/* Runs on a pool with no timeouts, since a migration may take as long as it needs. Answers how many migrations the
+   database has recorded. */
+export async function migrateDb(url: string): Promise<number> {
+  const pool = openPool(url, warnDropped, MIGRATE_NAME);
+  try {
+    const db = drizzle(pool, { schema });
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await applyMissingMigrations(db, { migrationsFolder: MIGRATIONS });
+    const { rows } = await pool.query<{ count: string }>('SELECT count(*) FROM drizzle.__drizzle_migrations');
+    return Number(rows[0]!.count);
+  } finally {
+    await pool.end();
+  }
 }
 
 /* Merged branches can put an unrecorded migration below Drizzle's newest timestamp. */
