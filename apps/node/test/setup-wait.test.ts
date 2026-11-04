@@ -47,14 +47,16 @@ describe('the first setup a plan waits for, as the node tells Hornhoof of it', (
 
   /* Only a sign-in it found by looking again is news: one it was told of may have gone while it looked. */
   it('looks again only while signed out or waiting, and says what it found and when either changed', async () => {
-    const ready = new SetupWait(program());
+    const agy = program();
+    const ready = new SetupWait(agy);
     expect(await ready.recheck(true, signedIn())).toEqual({ signedIn: false, changed: false });
+    expect(agy.asked).toBe(0);
 
     const out = new SetupWait(program(false));
     expect(await out.recheck(false, signedIn(false))).toEqual({ signedIn: false, changed: false });
     expect(await out.recheck(false, signedIn(true))).toEqual({ signedIn: true, changed: true });
 
-    const waiting = new SetupWait(program(true, true, false));
+    const waiting = new SetupWait(program(true, true, false), 0);
     expect(await waiting.check(true)).toBe(true);
     expect(await waiting.recheck(true, signedIn())).toEqual({ signedIn: false, changed: false });
     expect(await waiting.recheck(true, signedIn())).toEqual({ signedIn: false, changed: true });
@@ -63,5 +65,31 @@ describe('the first setup a plan waits for, as the node tells Hornhoof of it', (
     const both = new SetupWait(program(true));
     expect(await both.recheck(false, signedIn(true))).toEqual({ signedIn: true, changed: true });
     expect(both.field()).toEqual({ setupNeeded: true });
+  });
+
+  /* Looking at agy's setup means starting agy, so while the plan waits the node looks once a minute at most. A turn that met
+     the setup saw it as a look would, and a sign-in found by looking is looked at at once. */
+  it('looks again at a setup it waits for once a minute at most, a turn that met it counting as a look', async () => {
+    let now = 0;
+    const agy = program(true, false);
+    const wait = new SetupWait(agy, 60_000, () => now);
+    expect(await wait.check(true)).toBe(true);
+    now = 59_999;
+    expect(await wait.recheck(true, signedIn())).toEqual({ signedIn: false, changed: false });
+    expect(agy.asked).toBe(1);
+    now = 60_000;
+    expect(await wait.recheck(true, signedIn())).toEqual({ signedIn: false, changed: true });
+    expect([agy.asked, wait.needed]).toEqual([2, false]);
+
+    now = 110_000;
+    wait.met({ kind: 'setup' });
+    now = 169_999;
+    expect(await wait.recheck(true, signedIn())).toEqual({ signedIn: false, changed: false });
+    expect([agy.asked, wait.needed]).toEqual([2, true]);
+
+    const out = new SetupWait(program(true), 60_000, () => now);
+    expect(await out.check(false)).toBe(false);
+    expect(await out.recheck(false, signedIn(true))).toEqual({ signedIn: true, changed: true });
+    expect(out.needed).toBe(true);
   });
 });

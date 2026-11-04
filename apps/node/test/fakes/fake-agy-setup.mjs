@@ -1,8 +1,9 @@
 // Plays agy 1.4.12's first-run setup from the screens recorded in fixtures/agy-tui: the colors, where Enter takes the
-// scheme and goes on, then its terms, where every key is kept in FAKE_LOG. A test turns it on with FAKE_AGY_SETUP, which
-// holds what agy's settings.json holds once the setup is passed (SETUP_PASSED of src/providers/antigravity.ts). agy shows
-// the setup until the file holds that; Done (Down twice, then Enter) writes it, as a person who accepts the terms does,
-// and a second Ctrl+C closes agy with nothing saved.
+// scheme and goes on, then its terms, where every key is kept in FAKE_LOG. A test turns it on with FAKE_AGY_SETUP, a file
+// of this fake's own: agy shows the setup until it is there. Done (Down twice, then Enter) passes it, as a person who
+// accepts the terms does, and a second Ctrl+C closes agy with nothing saved. As agy 1.4.12 did on a machine where a person
+// chose Done, its settings.json then holds what it held before, {} where there was none, and nothing in it says the setup
+// is passed.
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
@@ -32,9 +33,8 @@ function settings() {
 
 /* Resolves once the setup is passed, at once when it was passed before or the test did not turn it on. */
 export function firstRun() {
-  const passed = JSON.parse(process.env.FAKE_AGY_SETUP ?? 'null');
-  const saved = settings();
-  if (!passed || Object.entries(passed).every(([key, value]) => saved[key] === value)) return Promise.resolve();
+  const passed = process.env.FAKE_AGY_SETUP;
+  if (!passed || existsSync(passed)) return Promise.resolve();
   return new Promise(resolve => {
     let step = 'colors';
     /* On the terms: 0 the box, 1 Previous, 2 Done. */
@@ -55,7 +55,8 @@ export function firstRun() {
     const done = () => {
       step = null;
       mkdirSync(dirname(file()), { recursive: true });
-      writeFileSync(file(), JSON.stringify({ ...settings(), ...passed }, null, 2) + '\n');
+      writeFileSync(file(), JSON.stringify(settings()) + '\n');
+      writeFileSync(passed, '');
       process.stdin.off('data', read);
       resolve();
     };

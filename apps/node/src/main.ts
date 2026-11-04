@@ -18,7 +18,7 @@ import { applyCredential, dropCredential, giveUpLease, heldCredential, holdsLeas
 import { nodeIdentity, seal, unseal } from './keys.js';
 import { LOGIN_KEY, LoginTerminal, type LoginSetup } from './login.js';
 import { dataDir, isRemoved, markRemoved, readState, rememberSession, writeState, type NodeState } from './state.js';
-import { SetupWait } from './setup-wait.js';
+import { SETUP_CHECK_MS, SetupWait } from './setup-wait.js';
 import { partFiles, runTests } from './tests.js';
 import { SIGNED_OUT as AGY_SIGNED_OUT } from './providers/antigravity.js';
 import { SIGNED_OUT as CLAUDE_SIGNED_OUT } from './providers/claude.js';
@@ -79,6 +79,8 @@ type RunOptions = {
   builtin?: { server: string; key: string };
   log?: (line: string) => void;
   loginCheckMs?: number;
+  /* How often the node looks again at a first setup the plan waits for. */
+  setupCheckMs?: number;
   learnMs?: number;
   limitsMs?: number;
   /* How often the node says how busy its machine is. */
@@ -108,7 +110,7 @@ function merged(known: Limits | null, news: Limits): Limits {
 }
 
 /* The node's life: stay connected, run jobs, report the sign-in state and the limits, clean up when removed. */
-export async function runNode({ dir, adapter, builtin, terminal, login: loginSetup, log: writeLog = console.log, loginCheckMs = LOGIN_CHECK_MS, learnMs = LEARN_MS, limitsMs = LIMITS_MS, loadMs = LOAD_MS, leaseCheckMs = LEASE_CHECK_MS, install, programs = new ProgramUpdates([]), testUser = null, runPart = runTests, build }: RunOptions): Promise<{ stop(reason?: NodeStopReason): void }> {
+export async function runNode({ dir, adapter, builtin, terminal, login: loginSetup, log: writeLog = console.log, loginCheckMs = LOGIN_CHECK_MS, setupCheckMs = SETUP_CHECK_MS, learnMs = LEARN_MS, limitsMs = LIMITS_MS, loadMs = LOAD_MS, leaseCheckMs = LEASE_CHECK_MS, install, programs = new ProgramUpdates([]), testUser = null, runPart = runTests, build }: RunOptions): Promise<{ stop(reason?: NodeStopReason): void }> {
   if (!builtin && isRemoved(dir)) {
     writeLog('This node was removed in Hornhoof.');
     return { stop() {} };
@@ -161,7 +163,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     return single.loggedIn();
   };
   let loggedIn = await signedInHere();
-  const setup = new SetupWait(single);
+  const setup = new SetupWait(single, setupCheckMs);
   await setup.check(loggedIn);
   let limits: Limits | null = null;
   let stopped = false;

@@ -2,7 +2,7 @@
 // Plays agy's own terminal from the recorded screens, hooks and transcript. Login keeps its own recorded flow.
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { firstRun } from './fake-agy-setup.mjs';
@@ -38,8 +38,10 @@ class AgyTerminal {
     this.id = args.includes('--conversation') ? args[args.indexOf('--conversation') + 1] : randomUUID();
     this.log = join(process.env.HOME, '.gemini', 'antigravity-cli', 'brain', this.id, '.system_generated', 'logs', 'transcript_full.jsonl');
     mkdirSync(dirname(this.log), { recursive: true });
-    this.hooks = JSON.parse(readFileSync(join(process.cwd(), '.agents', 'hooks.json'), 'utf8')).hornhoof;
-    trace({ argv: args, home: process.env.HOME, agentsMd: readFileSync('AGENTS.md', 'utf8'), hooks: this.hooks });
+    /* agy starts in any folder; only an agent's folder has Hornhoof's hooks and rules. */
+    const own = file => (existsSync(file) ? readFileSync(file, 'utf8') : null);
+    this.hooks = JSON.parse(own(join(process.cwd(), '.agents', 'hooks.json')) ?? '{}').hornhoof;
+    trace({ argv: args, home: process.env.HOME, agentsMd: own('AGENTS.md'), hooks: this.hooks });
     rawKeys();
     this.display();
     readKeys(key => this.key(key));
