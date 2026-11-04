@@ -92,13 +92,18 @@ async function currentStanding(ctx: Pick<Ctx, 'db'>, jobId: string | undefined):
 }
 
 /* The next turn keeps a hidden record of the words, but never restores a person or click the original no longer answers. */
-export async function repeatedTurn(ctx: Pick<Ctx, 'db'>, job: Pick<Standing, 'id'> | undefined, source?: TurnWords | null): Promise<RepeatedTurn> {
+export async function repeatedTurn(ctx: Pick<Ctx, 'db'>, job: Pick<Standing, 'id'> | undefined, source?: TurnWords | null, unheardFrom?: string): Promise<RepeatedTurn> {
   const current = await currentStanding(ctx, job?.id);
   if (!current?.agentId) return EMPTY_REPEATED;
   const said = await wordsForTurn(ctx, current.agentId, current.id);
   return {
     createdBy: current.createdBy,
     answersCeo: current.answersCeo,
-    repeated: repeatedWords(said, turnPrincipal(current, said), turnClick(current, said), source),
+    repeated: withUnheardFrom(repeatedWords(said, turnPrincipal(current, said), turnClick(current, said), source), unheardFrom),
   };
+}
+
+/* Words repeated because the program never took them name the turn they were typed into, to go on in its session. */
+function withUnheardFrom(words: TurnWords, unheardFrom?: string): TurnWords {
+  return unheardFrom ? { ...words, data: { ...(words.data as Record<string, unknown>), unheardFrom } } : words;
 }

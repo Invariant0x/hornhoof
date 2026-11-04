@@ -96,12 +96,14 @@ describe('words the program never took', () => {
     expect((await c.events()).some(e => (e.data as { text?: string }).text === LINE)).toBe(true);
     expect(c.sent.mock.calls.some(([, m]) => m.type === 'agent.say')).toBe(false);
     await handleNodeMessage(c.ctx, BUILTIN, { type: 'job.done', jobId: c.job.id, ok: true, sessionId: null, result: '', tail: '', error: null, wordsWaiting: true });
+    expect(await c.jobOf(next!.id)).toMatchObject({ status: 'queued' });
+    await handleNodeMessage(c.ctx, BUILTIN, { type: 'agent.words_settled', agentKey: c.agent.id, jobId: c.job.id });
     expect(await c.jobOf(next!.id)).toMatchObject({ status: 'running' });
   });
 
   it('ignores words reported by another node', async () => {
     const c = await atWork();
-    await c.send(TEXT, new Date(), nodeIdentity('another-node'));
+    await c.send(TEXT, new Date(), nodeIdentity('00000000-0000-4000-8000-000000000001'));
     expect(await c.turnsOf()).toHaveLength(1);
     expect(await c.events()).toEqual([]);
   });
