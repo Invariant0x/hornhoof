@@ -33,6 +33,20 @@ describe('the node image', () => {
     expect(runtime.indexOf('gh --version')).toBeLessThan(runtime.indexOf('USER node'));
   });
 
+  it('installs ShellCheck in the runtime stage at a pinned version with verified per-arch SHA-256 and checks shellcheck --version', () => {
+    const version = runtime.match(/ARG SHELLCHECK_VERSION=(\d+\.\d+\.\d+)\n/)?.[1];
+    const amd64Sha = runtime.match(/ARG SHELLCHECK_AMD64_SHA256=([0-9a-f]{64})\n/)?.[1];
+    const arm64Sha = runtime.match(/ARG SHELLCHECK_ARM64_SHA256=([0-9a-f]{64})\n/)?.[1];
+    expect(version).toBe('0.11.0');
+    expect(amd64Sha).toBe('b7af85e41cc99489dcc21d66c6d5f3685138f06d34651e6d34b42ec6d54fe6f6');
+    expect(arm64Sha).toBe('68a8133197a50beb8803f8d42f9908d1af1c5540d4bb05fdfca8c1fa47decefc');
+    expect(amd64Sha).not.toBe(arm64Sha);
+    expect(runtime).toContain('https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.${sc_arch}.tar.gz');
+    expect(runtime).toContain('echo "$sc_sha  /tmp/shellcheck.tar.gz" | sha256sum -c -');
+    expect(runtime).toContain('shellcheck --version');
+    expect(runtime.indexOf('shellcheck --version')).toBeLessThan(runtime.indexOf('USER node'));
+  });
+
   it("keeps the agent programs on the PATH of a login shell, which Debian's /etc/profile sets again", () => {
     const profile = runtime.match(/> \/etc\/profile\.d\/([\w-]+\.sh)/);
     expect(profile).not.toBeNull();
