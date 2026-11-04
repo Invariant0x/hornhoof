@@ -60,6 +60,9 @@ describe("a program's first setup that only the plan's owner passes", () => {
     send(job('j1'));
     await wait(() => received.some(m => m.type === 'job.done' && m.jobId === 'j1'));
     expect(received.find(m => m.type === 'job.done')).toMatchObject({ ok: false, failure: { kind: 'setup' } });
+    /* The status that goes before the end of the turn says so already, so Hornhoof sends the plan no turns there meanwhile. */
+    const done = received.findIndex(m => m.type === 'job.done' && m.jobId === 'j1');
+    expect(received.slice(0, done).filter(m => m.type === 'status').at(-1)).toMatchObject({ loggedIn: true, setupNeeded: true });
     await wait(() => last()?.setupNeeded === true);
     await new Promise(r => setTimeout(r, 200));
     expect(last()).toMatchObject({ loggedIn: true, setupNeeded: true });

@@ -466,7 +466,9 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     /* The end counts as running from here, so a hello while the limits are read does not give the job up. */
     keep(m.jobId, done);
     running.delete(m.jobId);
-    /* The limits the turn brought go first, so Hornhoof knows of a plan at its limit when it hears the job ended. */
+    /* A first setup the turn met, which only the plan's owner may pass, and the limits the turn brought go first, so
+       Hornhoof knows of a plan that waits for its owner or is at its limit when it hears the job ended. */
+    setup.met(done.failure);
     await status();
     emit(done);
     await renewedCodex().catch(() => {});
@@ -476,15 +478,14 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       if (held) refused = digestOf(held);
       void status();
     }
-    /* The program met a first setup only the plan's owner may pass: the plan's turns wait for it. */
-    if (setup.met(done.failure)) void status();
   }
 
-  /* While signed out or waiting for the first setup, look again now and then, so the person sees Ready soon after. */
+  /* While signed out or waiting for the first setup, look again now and then, so the person sees Ready soon after. Only a
+     sign-in found by looking changes it: a turn may have found it gone meanwhile. */
   const checkLogin = async () => {
     if (stopped || !single) return;
     const now = await setup.recheck(loggedIn, signedInHere);
-    loggedIn = now.loggedIn;
+    loggedIn ||= now.signedIn;
     if (now.changed) void status();
   };
   const timer = setInterval(() => void checkLogin(), loginCheckMs);
