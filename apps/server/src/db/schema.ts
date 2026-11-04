@@ -646,8 +646,12 @@ export const attachments = pgTable(
   {
     id: id(),
     companyId: companyId(),
-    jobId: uuid('job_id').notNull().references(() => jobs.id),
+    /* The agent's turn that put it here; a person's picture has none. */
+    jobId: uuid('job_id').references(() => jobs.id),
+    /* The agent that put it here, or the one a person sends it to. */
     agentId: uuid('agent_id').notNull().references(() => agents.id),
+    /* The person who sends it to that agent with a message. */
+    personId: uuid('person_id').references(() => people.id),
     requestId: uuid('request_id').references(() => requests.id),
     operatorCaseId: uuid('operator_case_id').references((): AnyPgColumn => programOperatorCases.id),
     /* The task a file was put on, and the file's name there; a picture has neither. */
@@ -658,7 +662,7 @@ export const attachments = pgTable(
     size: integer('size').notNull(),
     createdAt: createdAt(),
   },
-  t => [index('attachments_request_id').on(t.requestId), index('attachments_job_id').on(t.jobId), index('attachments_task_id').on(t.taskId), index('attachments_operator_case_id').on(t.operatorCaseId)],
+  t => [index('attachments_request_id').on(t.requestId), index('attachments_job_id').on(t.jobId), index('attachments_task_id').on(t.taskId), index('attachments_person_id').on(t.personId), index('attachments_operator_case_id').on(t.operatorCaseId)],
 );
 
 /* A physical agent program, distinct from the provider session it resumes. */

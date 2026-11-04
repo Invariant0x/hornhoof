@@ -7,6 +7,7 @@ import { filesOf, picturesOf } from '../src/modules/tasks/attachments.js';
 import { ask, createTask } from '../src/modules/tasks/engine.js';
 import { as } from './helpers.js';
 import { operatorCompany } from './program-operator-company.js';
+import { ownPictures } from '../src/modules/conversation/pictures.js';
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7ioAAAAASUVORK5CYII=', 'base64');
 
@@ -169,4 +170,13 @@ it('keeps case pictures out of node work-file downloads even with an accidental 
   await c.db.update(attachments).set({ taskId: task.id, name }).where(eq(attachments.id, c.picture.id));
   const res = await c.app.inject({ method: 'GET', url: `/api/parts/${part!.id}/files/${name}`, headers: { authorization: `Bearer ${token}` } });
   expect(res.statusCode).toBe(404);
+});
+
+it('keeps case pictures out of ordinary incoming-message pictures even with an accidental person link', async () => {
+  const c = await fixture();
+  const [person] = await c.db.select().from(people).where(eq(people.id, c.sub.ownerPersonId));
+  await c.db.update(attachments).set({ personId: person!.id }).where(eq(attachments.id, c.picture.id));
+  await expect(ownPictures(c.ctx, person!, c.agent.id, [c.picture.id])).rejects.toMatchObject({ status: 404, reason: 'attachment_unknown' });
+  expect((await c.fetchPicture(c.operatorTurn.token, c.picture.id, 'message')).statusCode).toBe(404);
+  expect((await c.fetchPicture(c.operatorTurn.token)).statusCode).toBe(200);
 });

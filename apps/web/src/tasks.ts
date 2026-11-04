@@ -79,8 +79,8 @@ export function useImprovements(company: boolean) {
 }
 
 /* The company's turns: the last finished ones, the running one and the planned ones, in number order. */
-export function useTurns() {
-  const { data, failure, load } = useLive('/api/turns', (b: { turns: TurnView[] }) => b.turns, m => m.type === 'org' || m.type === 'task');
+export function useTurns(enabled = true) {
+  const { data, failure, load } = useLive(enabled ? '/api/turns' : null, (b: { turns: TurnView[] }) => b.turns, m => m.type === 'org' || m.type === 'task');
   return { turns: data, failure, load };
 }
 

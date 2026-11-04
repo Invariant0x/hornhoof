@@ -49,6 +49,8 @@ describe('web app serving', () => {
       expect(res.headers['x-frame-options']).toBe('DENY');
       expect(res.headers['content-security-policy']).toContain("frame-ancestors 'none'");
       expect(res.headers['content-security-policy']).toContain("script-src 'self';");
+      /* A picture at the line shows from the browser's memory until it goes. */
+      expect(res.headers['content-security-policy']).toContain("img-src 'self' data: blob:;");
       expect(res.headers['x-content-type-options']).toBe('nosniff');
     }
   });
