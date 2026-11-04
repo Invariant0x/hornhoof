@@ -6,6 +6,7 @@ import { accessOf, canReach, type Spot } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
 import { agents, departments, people, subscriptions, SUBSCRIPTION_STATUSES, teams, type Provider, type ScopeKind } from '../../db/schema.js';
 import { deptName } from '../departments/templates.js';
+import { holderOf, isOperations, isRequiredRole, REQUIRED_OPERATIONS_ROLES } from '../operations/required.js';
 import type { Role } from '../templates/load.js';
 
 const Id = z.string().trim().min(1).max(80);
@@ -175,6 +176,19 @@ export async function checkStaff(ctx: Pick<Ctx, 'db' | 'templates'>, companyId: 
   return null;
 }
 
+/* A card for Operations lists the roles it must have, ticked, whatever the agent sent. */
+export function withRequiredRoles(dept: Dept, people: StaffLine[]): StaffLine[] {
+  if (!isOperations(dept)) return people;
+  const absent = REQUIRED_OPERATIONS_ROLES.filter(role => !people.some(line => line.role === role));
+  return [...absent.map(role => ({ role, checked: true })), ...people.map(line => (isRequiredRole(line.role) ? { ...line, checked: true } : line))];
+}
+
+/* Whether a role is one Operations must have, and who holds it now: what a card shows beside the role. */
+export async function requiredState(db: Db, dept: Dept): Promise<(role: string) => { required: boolean; holder: string | null }> {
+  const staff = await db.select({ name: agents.name, kind: agents.kind, roleKey: agents.roleKey }).from(agents).where(and(eq(agents.departmentId, dept.id), isNull(agents.removedAt)));
+  return role => ({ required: isRequiredRole(role), holder: holderOf(staff, role)?.name ?? null });
+}
+
 /* What the orchestrator reads before proposing a roster. */
 export async function staffingOptions(ctx: Pick<Ctx, 'db' | 'templates'>, companyId: string, dept: Dept) {
   const products = await ctx.db.select().from(departments).where(eq(departments.parentId, dept.id)).orderBy(asc(departments.position));
@@ -182,10 +196,11 @@ export async function staffingOptions(ctx: Pick<Ctx, 'db' | 'templates'>, compan
     .select({ id: agents.id, name: agents.name, role: agents.roleKey, kind: agents.kind, product: agents.productId, model: agents.model })
     .from(agents)
     .where(and(eq(agents.departmentId, dept.id), isNull(agents.removedAt)));
+  const state = await requiredState(ctx.db, dept);
   return {
     department: { id: dept.id, name: deptName(dept), products: products.map(p => ({ id: p.id, name: deptName(p) })), employees },
     roster: dept.templateKey
-      ? ctx.templates.roster(dept.templateKey).map(r => ({ role: r.id, title: r.title.en, kind: r.kind, tier: r.tier, perProduct: r.perProduct, inDefault: r.inDefault, timer: r.timer, skills: r.skills }))
+      ? ctx.templates.roster(dept.templateKey).map(r => ({ role: r.id, title: r.title.en, kind: r.kind, tier: r.tier, perProduct: r.perProduct, inDefault: r.inDefault, timer: r.timer, skills: r.skills, ...state(r.id) }))
       : [],
     subscriptions: (await servingSubscriptions(ctx, companyId, spotIn(dept))).map(({ id, provider, label, owner, models }) => ({ id, provider, label, owner, models })),
   };

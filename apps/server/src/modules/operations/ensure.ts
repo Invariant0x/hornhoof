@@ -2,14 +2,14 @@ import { and, asc, eq, isNull, max } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import type { Ctx } from '../../app.js';
 import { agentChanges, agents, companies, departments, jobs } from '../../db/schema.js';
-import { loggable } from '../../errors.js';
+import { ApiError, loggable } from '../../errors.js';
 import { orchestratorOf, pump } from '../conversation/queue.js';
 import { hireEmployee, type Hired, type HiredBy } from '../departments/hire.js';
 import { appendEvent, listEvents } from '../events/store.js';
 import type { Tx } from '../tasks/engine.js';
 import { resumeAgent } from '../tasks/wake.js';
 import { placeableSubscriptions, spotIn } from '../tools/staff.js';
-import { missingRoles, PROGRAM_OPERATOR_ROLE } from './required.js';
+import { holderOf, holds, isOperations, leftOut, missingRoles, PROGRAM_OPERATOR_ROLE, REQUIRED_OPERATIONS_ROLES } from './required.js';
 
 /* How often Hornhoof looks again, for what no request tells it: an owner switched off, access taken away, a crash. */
 const CHECK_MS = 5 * 60_000;
@@ -32,8 +32,7 @@ async function createOperations(tx: Tx, companyId: string) {
 async function hireMissing(ctx: Ctx, tx: Tx, companyId: string): Promise<{ departmentId: string; hired: Hired[] }> {
   await lockCompany(tx, companyId);
   const dept = (await operationsOf(tx, companyId)) ?? (await createOperations(tx, companyId));
-  const staff = await tx.select({ kind: agents.kind, roleKey: agents.roleKey }).from(agents).where(and(eq(agents.departmentId, dept.id), isNull(agents.removedAt)));
-  const missing = missingRoles(staff);
+  const missing = missingRoles(await staffOf(tx, dept.id));
   const hired: Hired[] = [];
   if (!missing.length) return { departmentId: dept.id, hired };
   const [plan] = await placeableSubscriptions({ db: tx }, companyId, spotIn(dept));
@@ -43,6 +42,43 @@ async function hireMissing(ctx: Ctx, tx: Tx, companyId: string): Promise<{ depar
     hired.push(await hireEmployee(ctx, tx, { companyId, departmentId: dept.id }, { role: id, name: role.title.en, model: '', subscription: plan?.id ?? null, skills }, HORNHOOF));
   }
   return { departmentId: dept.id, hired };
+}
+
+const staffOf = (tx: Tx, departmentId: string) =>
+  tx.select({ id: agents.id, name: agents.name, kind: agents.kind, roleKey: agents.roleKey }).from(agents).where(and(eq(agents.departmentId, departmentId), isNull(agents.removedAt)));
+
+export type Present = { role: string; name: string };
+
+/* What a card may hire into a department, under the company's lock when it is Operations, which has to end up with its
+   required roles whatever the request said. A line of an applied proposal for a role someone holds by now is not a hire:
+   Hornhoof may have filled it since the card was shown. Without a proposal it is a replacement someone asked for. */
+export async function linesToHire<L extends { role: string }>(ctx: Pick<Ctx, 'templates'>, tx: Tx, dept: typeof departments.$inferSelect, lines: L[], fromProposal: boolean): Promise<{ lines: L[]; present: Present[] }> {
+  if (!isOperations(dept)) return { lines, present: [] };
+  await lockCompany(tx, dept.companyId);
+  const staff = await staffOf(tx, dept.id);
+  const left = leftOut(staff, lines);
+  if (left.length) {
+    const titles = left.map(role => ctx.templates.roles.get(role)!.title.en).join(', ');
+    throw new ApiError(400, 'validation', `Operations must always have ${titles}. Keep them on the card.`, 'staff_invalid');
+  }
+  if (!fromProposal) return { lines, present: [] };
+  const present = lines.flatMap(line => {
+    const holder = holderOf(staff, line.role);
+    return holder ? [{ role: line.role, name: holder.name }] : [];
+  });
+  return { lines: lines.filter(line => !holderOf(staff, line.role)), present };
+}
+
+/* The last employee in a role Operations must have stays. Switching it off is another thing, and allowed. */
+export async function checkRemoval(ctx: Pick<Ctx, 'templates'>, tx: Tx, agent: { id: string; companyId: string; departmentId: string | null; name: string; kind: string; roleKey: string | null }): Promise<void> {
+  const role = REQUIRED_OPERATIONS_ROLES.find(id => holds(agent, id));
+  if (!role || !agent.departmentId) return;
+  const [dept] = await tx.select().from(departments).where(eq(departments.id, agent.departmentId));
+  if (!dept || !isOperations(dept)) return;
+  await lockCompany(tx, agent.companyId);
+  if ((await staffOf(tx, dept.id)).some(employee => employee.id !== agent.id && holds(employee, role))) return;
+  const title = ctx.templates.roles.get(role)!.title.en;
+  throw new ApiError(409, 'conflict', `Operations must always have a ${title}, and ${agent.name} is the last one. Switch ${agent.name} off instead, or have a replacement in place first.`, 'required_role');
 }
 
 /* The orchestrator sees who came in his window. Before his conversation begins there is nobody to tell, and a line there

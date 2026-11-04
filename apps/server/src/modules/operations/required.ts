@@ -17,3 +17,9 @@ export type Holder = { kind: string; roleKey: string | null };
 export const holds = (employee: Holder, role: RequiredRole) => (role === 'OPS-HEAD' ? employee.kind === 'head' : employee.roleKey === role);
 
 export const missingRoles = (staff: Holder[]): RequiredRole[] => REQUIRED_OPERATIONS_ROLES.filter(role => !staff.some(employee => holds(employee, role)));
+
+/* The required roles nobody holds that these lines do not hire either. */
+export const leftOut = (staff: Holder[], lines: { role: string }[]): RequiredRole[] => missingRoles(staff).filter(role => !lines.some(line => line.role === role));
+
+/* Who holds a role, by name, when it is required and someone does. */
+export const holderOf = <E extends Holder & { name: string }>(staff: E[], role: string): E | undefined => (isRequiredRole(role) ? staff.find(employee => holds(employee, role)) : undefined);

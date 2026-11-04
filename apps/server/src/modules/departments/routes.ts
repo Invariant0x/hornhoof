@@ -17,8 +17,9 @@ import { enqueueTurn, orchestratorOf, orchestratorState } from '../conversation/
 import { appendEvent } from '../events/store.js';
 import type { Tx } from '../tasks/engine.js';
 import { backOn } from '../tasks/wake.js';
-import { checkStaff, departmentOf, HireLine, runsTier, servingSubscriptions, spotIn } from '../tools/staff.js';
+import { checkStaff, departmentOf, HireLine, requiredState, runsTier, servingSubscriptions, spotIn } from '../tools/staff.js';
 import { BuildItem, checkItems, inPlaces, isNew, type TeamChange } from '../tools/structure.js';
+import { linesToHire, type Present } from '../operations/ensure.js';
 import { hireEmployee, type Hired } from './hire.js';
 import { repoView } from './repository.js';
 import { deptName, TEMPLATE_TEXT } from './templates.js';
@@ -61,10 +62,11 @@ function builtNote(created: Created[], removed: Removed[]): string {
 }
 
 /* What he reads after the CEO hired people, so he goes on from there. */
-function staffedNote(department: string, hired: Hired[]): string {
+function staffedNote(department: string, hired: Hired[], present: Present[]): string {
   return [
     'Hornhoof applied the CEO\'s click.',
-    `Hired in ${department}: ${hired.map(h => `${h.name} (${h.title})`).join(', ')}.`,
+    hired.length ? `Hired in ${department}: ${hired.map(h => `${h.name} (${h.title})`).join(', ')}.` : `Nobody new in ${department}.`,
+    ...(present.length ? [`Already there, so not hired again: ${present.map(p => p.name).join(', ')}.`] : []),
     'Continue in the CEO\'s language: say who is there now in a line or two. The department takes tasks now, through its head.',
   ].join('\n');
 }
@@ -328,6 +330,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (!dept) throw new ApiError(404, 'not_found', 'This department does not exist.', 'department_unknown');
     const products = await db.select().from(departments).where(eq(departments.parentId, dept.id)).orderBy(asc(departments.position));
     const serving = await servingSubscriptions(ctx, me.companyId, spotIn(dept));
+    const state = await requiredState(db, dept);
     const roles = (dept.templateKey ? ctx.templates.roster(dept.templateKey) : []).map(role => ({
       id: role.id,
       title: role.title,
@@ -337,6 +340,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
       inDefault: role.inDefault,
       skills: role.skills.filter(s => s.on).map(s => s.id),
       subscription: serving.find(s => runsTier(s.provider, role.tier))?.id ?? null,
+      ...state(role.id),
     }));
     const people: HireLine[] = [];
     for (const role of roles.filter(r => r.inDefault)) {
@@ -368,9 +372,10 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
         if (!taken) throw new ApiError(409, 'conflict', 'This card was already applied or replaced by a newer one.', 'proposal_closed');
         agentId = taken.agentId;
       }
-      const problem = await checkStaff({ db: tx, templates: ctx.templates }, me.companyId, dept, body.people);
+      const { lines, present } = await linesToHire(ctx, tx, dept, body.people, Boolean(body.proposalId));
+      const problem = await checkStaff({ db: tx, templates: ctx.templates }, me.companyId, dept, lines);
       if (problem) throw invalid(problem);
-      const heads = body.people.filter(l => ctx.templates.roles.get(l.role)!.kind === 'head');
+      const heads = lines.filter(l => ctx.templates.roles.get(l.role)!.kind === 'head');
       if (heads.length > 1) throw invalid(`${deptName(dept)} can have one head; the card has ${heads.length}.`);
       if (heads.length) {
         const [head] = await tx.select({ name: agents.name }).from(agents).where(and(eq(agents.departmentId, dept.id), eq(agents.kind, 'head'), isNull(agents.removedAt)));
@@ -378,8 +383,8 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
       }
 
       const hired: Hired[] = [];
-      for (const line of body.people) hired.push(await hireEmployee(ctx, tx, { companyId: me.companyId, departmentId: dept.id }, line, changedBy(me)));
-      return { hired, agentId };
+      for (const line of lines) hired.push(await hireEmployee(ctx, tx, { companyId: me.companyId, departmentId: dept.id }, line, changedBy(me)));
+      return { hired, present, agentId };
     }));
 
     const orchestrator = await orchestratorOf(ctx, me.companyId);
@@ -389,7 +394,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
         companyId: me.companyId,
         agentId,
         kind: 'applied',
-        data: { proposalId: body.proposalId ?? null, kind: 'staff', department: dept.id, hired: result.hired.map(({ id, name, role }) => ({ id, name, role })), ...forWhom(on) },
+        data: { proposalId: body.proposalId ?? null, kind: 'staff', department: dept.id, hired: result.hired.map(({ id, name, role }) => ({ id, name, role })), ...(result.present.length ? { present: result.present } : {}), ...forWhom(on) },
         personId: personOf(me),
       });
     }
@@ -397,10 +402,10 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     ctx.bus.publish(me.companyId, { type: 'requests', spot: { departmentId: null } });
     ctx.bus.publish(me.companyId, { type: 'pulse', from: { kind: 'orchestrator' }, to: { kind: 'department', id: dept.id } });
     if (agentId && !me.via && (await orchestratorState(ctx, me.companyId)).ready) {
-      await enqueueTurn(ctx, { companyId: me.companyId, agentId, prompt: staffedNote(deptName(dept), result.hired), createdBy: null });
+      await enqueueTurn(ctx, { companyId: me.companyId, agentId, prompt: staffedNote(deptName(dept), result.hired, result.present), createdBy: null });
     }
     reply.code(201);
-    return { hired: result.hired.map(h => h.id) };
+    return { hired: result.hired.map(h => h.id), present: result.present };
   });
 
   teamRoutes(app, ctx);
