@@ -22,7 +22,7 @@ He runs the company the way the CEO does in the screens. So you can just tell hi
 - invite people;
 - manage subscriptions, machines, updates and the public link.
 
-Each of these goes through the same check as the CEO's click. What is refused to the CEO is refused to him too. For example, nobody can fire the orchestrator or disable the owner.
+Each of these goes through the same check as the CEO's click. What is refused to the CEO is refused to him too. For example, nobody can fire the orchestrator, disable the owner or remove the last employee in a role Operations must have.
 
 ## Who can give him orders?
 

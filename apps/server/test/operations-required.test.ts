@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { COMPANY_TEMPLATES, COMPANY_TEMPLATE_KEYS } from '@hornhoof/protocol';
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
@@ -5,7 +7,7 @@ import type { Db } from '../src/db/client.js';
 import { agentChanges, agentEvents, agents, companies, departments, jobs, people, subscriptions } from '../src/db/schema.js';
 import { FIRST_TURN } from '../src/modules/conversation/prompt.js';
 import { checkOperations, ensureOperations } from '../src/modules/operations/ensure.js';
-import { REQUIRED_OPERATIONS_ROLES } from '../src/modules/operations/required.js';
+import { PROGRAM_OPERATOR_ROLE, REQUIRED_OPERATIONS_ROLES } from '../src/modules/operations/required.js';
 import { appOn, as, connectNode, createTestDb, listen, sessionFrom, SETUP, statements, testApp, until } from './helpers.js';
 
 const FOUR = ['OPS-BUGS', 'OPS-HEAD', 'OPS-PROGRAM', 'OPS-WATCH'];
@@ -46,6 +48,15 @@ describe('the required roles of Operations', () => {
       const listed = template.departments.find(d => d.template === 'operations')!.staff.map(line => line.role);
       for (const role of REQUIRED_OPERATIONS_ROLES) expect(listed, `${template.key}: ${role}`).toContain(role);
     }
+  });
+});
+
+describe('the program operator role', () => {
+  /* Part A of the feature keeps this constant in the protocol. Until its module is merged there is nothing to compare. */
+  const contract = fileURLToPath(new URL('../../../packages/protocol/src/program-operator.ts', import.meta.url));
+
+  it.runIf(existsSync(contract))('is the one the protocol names', () => {
+    expect(readFileSync(contract, 'utf8')).toContain(`PROGRAM_OPERATOR_ROLE = '${PROGRAM_OPERATOR_ROLE}'`);
   });
 });
 
