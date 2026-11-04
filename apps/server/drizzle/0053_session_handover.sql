@@ -1,0 +1,1 @@
+ALTER TABLE "sessions" ADD COLUMN "before_host_cookie" boolean DEFAULT true NOT NULL;

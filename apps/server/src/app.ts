@@ -43,6 +43,8 @@ import { addSecurityHeaders, hasWebApp, serveWebApp, webAppRoutes } from './web.
 
 export type { Db } from './db/client.js';
 import { fromOwnPages } from './auth/origin.js';
+import { handOverSession } from './auth/session.js';
+import { overLink } from './auth/tunnel.js';
 import type { AgentSql } from './db/agent-sql.js';
 import type { Db } from './db/client.js';
 
@@ -68,11 +70,19 @@ declare module 'fastify' {
     /* For tests and the few places outside a route that need the same context. */
     ctx: Ctx;
   }
+  interface FastifyRequest {
+    /* The request came over the public link: its session cookie is the __Host- one. Set by the first onRequest hook. */
+    overLink: boolean;
+  }
 }
 
 export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   const app = Fastify({ logger: deps.logger ?? false, logController: new LogController({ disableRequestLogging: true }) });
   const web = hasWebApp(deps.config.webDist);
+  app.decorateRequest('overLink', false);
+  app.addHook('onRequest', async req => {
+    req.overLink = await overLink(req, deps.config);
+  });
   addSecurityHeaders(app);
   registerErrorHandling(app, web ? webAppRoutes : undefined);
   const ctx = { ...deps, log: app.log, bus: new EventBus(), terminals: new TerminalRelay() } as Ctx;
@@ -101,6 +111,8 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   app.addHook('onReady', async () => ctx.links.sync());
   await app.register(cookie);
   await app.register(websocket, SOCKET_OPTIONS);
+  /* Needs the cookies, so after the cookie plugin; a socket upgrade is skipped by the hand-over itself. */
+  app.addHook('onRequest', async (req, reply) => handOverSession(req, reply, deps.db, deps.config));
   /* After the socket plugin, so a refused socket is closed by it. */
   app.addHook('onRequest', fromOwnPages(deps.config, deps.db));
   if (web) await serveWebApp(app, deps.config.webDist);

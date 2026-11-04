@@ -13,6 +13,7 @@ import { buildApp, type Deps } from '../src/app.js';
 import { loadConfig, type Config } from '../src/config.js';
 import { agentRole, grantsFor, readerGrantsFor, readerRole, type AgentSql } from '../src/db/agent-sql.js';
 import type { Db } from '../src/db/client.js';
+import { LINK_SESSION_COOKIE } from '../src/auth/session.js';
 import * as schema from '../src/db/schema.js';
 import { setupCode } from '../src/modules/setup/code.js';
 import { ask, createTask } from '../src/modules/tasks/engine.js';
@@ -97,10 +98,12 @@ export async function appOn(client: PGlite, env: NodeJS.ProcessEnv = {}, logger?
   return { app, db, config };
 }
 
+const isSessionCookie = (cookie: { name: string }) => cookie.name === 'hh_session' || cookie.name === LINK_SESSION_COOKIE;
+
 export function sessionFrom(res: LightMyRequestResponse): string {
-  const cookie = res.cookies.find(c => c.name === 'hh_session');
-  if (!cookie) throw new Error(`No session cookie in a ${res.statusCode} response.`);
-  return cookie.value;
+  const [value] = res.cookies.filter(isSessionCookie).map(cookie => cookie.value).filter(Boolean);
+  if (!value) throw new Error(`No session cookie in a ${res.statusCode} response.`);
+  return value;
 }
 
 /* Runs first-run setup and returns the CEO's session token. */
@@ -109,6 +112,16 @@ export async function setUpCompany(app: FastifyInstance): Promise<string> {
 }
 
 export const as = (token: string) => ({ cookies: { hh_session: token } });
+
+/* The tunnel container's address in tests: start the app with testApp({ TUNNEL_HOST: TUNNEL }). */
+export const TUNNEL = '192.0.2.10';
+
+/* A request that came over https through the tunnel container, as a visitor of the public link sends it. */
+export const viaLink = (token?: string) => ({
+  remoteAddress: TUNNEL,
+  headers: { 'x-forwarded-proto': 'https' },
+  cookies: (token ? { [LINK_SESSION_COOKIE]: token } : {}) as Record<string, string>,
+});
 
 type Access = { whole: true } | { departments?: string[]; teams?: string[] };
 
