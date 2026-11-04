@@ -10,6 +10,7 @@ import { ApiError, type ErrorReason } from '../../errors.js';
 import { onAgent, programNode, pump, pumpWaiting } from '../conversation/queue.js';
 import { deptName } from '../departments/templates.js';
 import { machineOf } from '../nodes/nodes.js';
+import { checkRemoval } from '../operations/ensure.js';
 import { subViews, type IsOnline, type SubView } from '../subscriptions/views.js';
 import { agentFailureState, type FailureState } from '../tasks/failures.js';
 import { CLOSED, dropGate } from '../tasks/engine.js';
@@ -414,6 +415,7 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
         throw new ApiError(409, 'conflict', `${agent.name} works on ${list}. Wait until they are done or cancel them, then remove ${agent.name}.`, 'agent_has_tasks');
       }
       await db.transaction(async tx => {
+        await checkRemoval(ctx, tx, agent);
         await tx.update(agents).set({ removedAt: new Date() }).where(eq(agents.id, agent.id));
         await tx
           .update(jobs)
