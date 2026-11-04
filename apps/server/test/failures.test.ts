@@ -12,6 +12,7 @@ import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { taskWakeOf } from '../src/modules/tasks/wake-state.js';
 import { shortReason } from '../src/modules/tasks/failures.js';
+import { originalPromptOf } from '../src/modules/conversation/requested-prompt.js';
 
 const failure = (kind: Failure['kind'], retryable = true): Failure => ({ kind, retryable, text: 'The provider said no this time.' });
 const MIN = 60_000;
@@ -152,7 +153,7 @@ describe('named turn failures', () => {
     if (kind) expect((await c.log(c.task.id)).some(e => e.kind === 'continued')).toBe(false);
   });
 
-  it.each(['overloaded', 'network', 'cut', 'rate_limited', 'unknown'] as const)('keeps %s, records why and waits a minute before continuing', async kind => {
+  it.each(['overloaded', 'network', 'cut', 'rate_limited', 'tools', 'unknown'] as const)('keeps %s, records why and waits a minute before continuing', async kind => {
     const c = await atWork();
     const at = new Date();
     await c.fail(c.first.id, failure(kind), at);
@@ -412,6 +413,39 @@ describe('a retry of a retry', () => {
     expect(prompt).toContain(`The last try failed (unknown): ${reason ?? 'the program gave no reason'}`);
   });
 
+  it('goes back past a turn a node restart ran once more, to the work of the first try', async () => {
+    const c = await atWork();
+    const first = await c.jobOf(c.first.id);
+    const turn = async (prompt: string, link: { continueOf: string } | { retryOf: string }) =>
+      (await c.db.insert(jobs).values({ companyId: first.companyId, agentId: first.agentId, subscriptionId: first.subscriptionId, taskId: first.taskId, timeoutMs: first.timeoutMs, prompt, requestedPrompt: prompt, status: 'failed', ...link }).returning())[0]!;
+    const retried = await turn('The last try failed (network): fetch failed', { continueOf: first.id });
+    const restarted = await turn('Your last turn was cut off. Hornhoof runs it once more.\n\nThe last try failed (network): fetch failed', { retryOf: retried.id });
+    expect(await originalPromptOf(c.ctx, restarted)).toBe(first.requestedPrompt);
+    const after = await turn('The last try failed (unknown): The program did not show its prompt within 120 s.', { continueOf: restarted.id });
+    expect(await originalPromptOf(c.ctx, after)).toBe(first.requestedPrompt);
+  });
+
+  it('says what the first try was asked once a turn a node restart ran once more fails too', async () => {
+    const c = await atWork();
+    const asked = (await c.jobOf(c.first.id)).requestedPrompt!;
+    /* The node comes back without the turn, so Hornhoof runs it once more with a note before what it was asked. */
+    await handleNodeMessage(c.ctx, BUILTIN, { type: 'hello', version: '0.5.2', loggedIn: true, running: [] });
+    await pump(c.ctx, c.agent.id);
+    const restarted = (await c.turnsOf())[1]!;
+    expect(restarted).toMatchObject({ retryOf: c.first.id, status: 'running' });
+    expect(restarted.requestedPrompt).toContain('was cut off');
+    /* That try never takes its prompt, so the next one cannot go on in its session and says what the turn was asked. */
+    const clock = vi.spyOn(Date, 'now');
+    onTestFinished(() => clock.mockRestore());
+    await neverTook(c, restarted.id, 'The program did not show its prompt within 120 s.', new Date(Date.now()));
+    const next = (await c.turnsOf())[2]!;
+    clock.mockReturnValue(+next.notBefore!);
+    await pump(c.ctx, c.agent.id);
+    const what = (await c.jobOf(next.id)).prompt.split('The turn that ended was asked:')[1]!.trim();
+    expect(what.startsWith(asked)).toBe(true);
+    expect(what).not.toContain('was cut off');
+  });
+
   it('says what a conversation outside any task was asked once, after a retry that did not go on either', async () => {
     const c = await failureCompany();
     const clock = vi.spyOn(Date, 'now');
@@ -437,5 +471,7 @@ it('gives the first line of a failure as its reason, short, and none for a scree
   expect(shortReason('  The provider said   no.\nMore lines.')).toBe('The provider said no.');
   expect(shortReason(`${'a'.repeat(300)}`)).toBe('a'.repeat(300));
   expect(shortReason(`${'a'.repeat(301)}`)).toBe(`${'a'.repeat(299)}…`);
-  for (const screen of ['    ▄▀▀▄\n Welcome', '╭────╮\n│ > │', '', '> terminal']) expect(shortReason(screen)).toBe('the program gave no reason');
+  for (const screen of ['    ▄▀▀▄\n Welcome', '╭────╮\n│ > │', '', '> terminal', '✻ Welcome to Claude Code!', 'Welcome to Antigravity CLI! ▄▀▀▄', 'Choose your color scheme: ╭────╮']) expect(shortReason(screen)).toBe('the program gave no reason');
+  /* A provider's own words may start with a code, a bracket or a quote. */
+  for (const reason of ['429 Resource has been exhausted', '[ERROR] stream closed', '{"error":{"code":503}}', '"model" is not available', "(no output)", "'gemini-4' is not a model", '`agy` exited with 1']) expect(shortReason(reason)).toBe(reason);
 });
