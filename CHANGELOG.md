@@ -5,6 +5,49 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.6.0] - 2026-11-04
+
+Turn 6: one agent window you can open from anywhere, with the agent's current
+task beside its terminal; side panels on the left; a work tree you can move and
+zoom.
+
+### Added
+
+- Open the same agent window by clicking an agent on the map, in the work tree,
+  in Subscriptions or in Machines, also for an agent that is asleep, and write to
+  it from there.
+- Open the task the agent is working on now with Task in the window header. On a
+  wide screen it opens to the left of the terminal; on a narrow one it takes the
+  terminal's place, and you can go back to the terminal.
+- Close, minimize and maximize the agent window with the three buttons in its
+  corner. A minimized window waits as a thin strip at the right edge and slides
+  back out when you click it.
+- Move and zoom the work tree with the same gestures and buttons as the map.
+
+### Changed
+
+- Every side panel other than the agent window, Speed included, now opens on the
+  left, in the same place.
+- Agents you cannot open are shown as plain names in Subscriptions and Machines
+  instead of buttons that led to an empty window.
+- Developers, code reviewers and security engineers now install a project's
+  dependencies before they run its checks, so they no longer lose turns on tools
+  that seem to be missing.
+- The node image includes ShellCheck 0.11.0, so agents can check shell scripts.
+
+### Fixed
+
+- Task in the agent window opens the agent's actual current task, also for the
+  orchestrator and for employees of a product.
+- Pressing Escape to close a side panel, the account menu or a dialog no longer
+  stops a busy agent.
+- A minimized agent window no longer hides the live line of a department or
+  keeps room for itself on the map.
+- Ctrl+O right after new messages appear folds or unfolds the log instead of
+  being lost.
+- If the company could not be loaded, opening an agent from Subscriptions or
+  Machines now shows the error instead of doing nothing.
+
 ## [0.5.1] - 2026-11-04
 
 An urgent fix: a message that reached an agent during its turn no longer comes
