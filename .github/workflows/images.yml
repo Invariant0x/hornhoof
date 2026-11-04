@@ -24,22 +24,22 @@ permissions:
   contents: read
 
 jobs:
-  # While the repository is private, the tests run on Ivan's home server, in three parts at once: GitHub gives a
-  # private repository a machine with two processors, where the suite took half an hour. Before the repository goes
-  # public, pull requests go back to GitHub's machines: code from a fork must never run on Ivan's computers.
+  # The tests run on GitHub's machines in four parts at once, two workers in each: on one machine with two processors,
+  # which GitHub gives a private repository, the suite took half an hour.
   test:
-    runs-on: [self-hosted, home-api]
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        part: [1, 2, 3]
+        part: [1, 2, 3, 4]
     env:
-      PART: ${{ matrix.part }}/3
+      PART: ${{ matrix.part }}/4
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
+          cache: npm
       - id: install
         run: |
           npm ci --prefer-offline --no-audit --no-fund
@@ -60,15 +60,15 @@ jobs:
       - name: Server
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         working-directory: apps/server
-        run: npx vitest run --shard="$PART" --maxWorkers=3
+        run: npx vitest run --shard="$PART" --maxWorkers=2
       - name: Node
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         working-directory: apps/node
-        run: npx vitest run --shard="$PART" --maxWorkers=3
+        run: npx vitest run --shard="$PART" --maxWorkers=2
       - name: Web
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         working-directory: apps/web
-        run: npx vitest run --shard="$PART" --maxWorkers=3
+        run: npx vitest run --shard="$PART" --maxWorkers=2
 
   images:
     needs: test
