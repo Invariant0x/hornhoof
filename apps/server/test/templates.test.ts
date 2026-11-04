@@ -198,6 +198,15 @@ describe('templates', () => {
     expect(roles.filter(r => r.timer).map(r => r.id).sort()).toEqual(['OPS-BUGS', 'OPS-WATCH']);
   });
 
+  it('tells the watchdog that a machine getting ready for an update waits and has not hung, while a silent program there is still silent', () => {
+    const body = templates.skills.get('ops-task-watch')?.body ?? '';
+    const rule = body.split('\n').find(line => line.includes('machineDrain')) ?? '';
+    expect(rule).toMatch(/waiting or restarting/);
+    expect(rule).toMatch(/do not nudge/);
+    expect(rule).toMatch(/not offline/);
+    expect(rule).toMatch(/silent program there is still silent/);
+  });
+
   it('has a program operator in operations that Hornhoof calls: one for the company, with no timer, on its own procedure', () => {
     const operator = templates.roles.get('OPS-PROGRAM')!;
     expect(operator).toMatchObject({ department: 'operations', kind: 'member', tier: 'standard', perProduct: false, inDefault: true, timer: null });
