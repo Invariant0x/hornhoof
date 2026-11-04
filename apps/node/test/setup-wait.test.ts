@@ -28,6 +28,42 @@ describe('the first setup a plan waits for, as the node tells Hornhoof of it', (
     expect([wait.needed, wait.field()]).toEqual([true, { setupNeeded: true }]);
   });
 
+  it('looks once at a time, though a look that starts agy outlasts the ticks that ask for one', async () => {
+    let answer: (needed: boolean) => void = () => {};
+    const agy = { asked: 0, setupNeeded() { this.asked++; return new Promise<boolean>(r => (answer = r)); } };
+    const wait = new SetupWait(agy);
+    let signIns = 0;
+    const signedIn = async () => (signIns++, true);
+    const first = wait.recheck(false, signedIn);
+    await new Promise(r => setTimeout(r, 0));
+    expect(await wait.recheck(false, signedIn)).toEqual({ signedIn: false, changed: false });
+    expect([signIns, agy.asked]).toEqual([1, 1]);
+    answer(false);
+    expect(await first).toEqual({ signedIn: true, changed: true });
+    /* Once that look is over, the next tick looks again. */
+    const next = wait.recheck(false, signedIn);
+    await new Promise(r => setTimeout(r, 0));
+    answer(false);
+    expect(await next).toEqual({ signedIn: true, changed: true });
+    expect([signIns, agy.asked]).toEqual([2, 2]);
+  });
+
+  it('shares a look that runs with a sign-in that asks meanwhile, rather than start agy twice', async () => {
+    let answer: (needed: boolean) => void = () => {};
+    const agy = { asked: 0, setupNeeded() { this.asked++; return new Promise<boolean>(r => (answer = r)); } };
+    const wait = new SetupWait(agy);
+    const tick = wait.check(true);
+    const signIn = wait.check(true);
+    expect(agy.asked).toBe(1);
+    answer(true);
+    expect([await tick, await signIn, wait.needed]).toEqual([true, true, true]);
+    /* The next one looks again. */
+    const later = wait.check(true);
+    expect(agy.asked).toBe(2);
+    answer(false);
+    expect([await later, wait.needed]).toEqual([true, false]);
+  });
+
   it('does not wait for a program that cannot tell, or that has no such setup', async () => {
     const unreadable = new SetupWait(program(new Error('settings unreadable')));
     expect([await unreadable.check(true), unreadable.needed]).toEqual([false, false]);
