@@ -4,11 +4,13 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import type { AddressInfo } from 'node:net';
 import { hostname, tmpdir, uptime } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { buildOf, runNode } from '../src/main.js';
 import { prepareNodeStop } from '../src/lifecycle.js';
 import { ProgramUpdates } from '../src/program-updates.js';
+import { antigravityAdapter } from '../src/providers/antigravity.js';
 import { TerminalHost } from '../src/terminal/host.js';
 import { claudeProgram } from '../src/terminal/programs.js';
 import { Tmux } from '../src/terminal/tmux.js';
@@ -263,10 +265,14 @@ describe('a node that runs agents in terminals', () => {
     const words = { type: 'agent.say', agentKey: 'agent-1', text: 'Use the new schema.' };
     server.send({ ...words, ref: 'budget', within: 15_000 });
     await server.wait(() => server.received.some(m => m.type === 'agent.said' && m.ref === 'budget'));
-    expect(say).toHaveBeenLastCalledWith('agent-1', words.text, 15_000);
+    expect(say).toHaveBeenLastCalledWith('agent-1', words.text, 15_000, undefined);
     server.send({ ...words, ref: 'older' });
     await server.wait(() => server.received.some(m => m.type === 'agent.said' && m.ref === 'older'));
-    expect(say).toHaveBeenLastCalledWith('agent-1', words.text, undefined);
+    expect(say).toHaveBeenLastCalledWith('agent-1', words.text, undefined, undefined);
+    const operatorDelivery = { id: '10000000-0000-4000-8000-000000000001', ordinal: 3 };
+    server.send({ ...words, ref: 'operator', operatorDelivery });
+    await server.wait(() => server.received.some(m => m.type === 'agent.said' && m.ref === 'operator'));
+    expect(say).toHaveBeenLastCalledWith('agent-1', words.text, undefined, operatorDelivery);
   });
 
   it.skipIf(!hasTmux)("says so, runs an agent's turn in its session, shows the session and keeps test jobs as they were", async () => {
@@ -455,6 +461,68 @@ describe('runNode', () => {
     const statuses = server.received.filter(m => m.type === 'status').map(m => (m.limits as { windows: { utilization: number }[] }).windows[0]!.utilization);
     expect(statuses.slice(0, 2)).toEqual([0.1, 0.25]);
     expect(asked).toBeGreaterThanOrEqual(3);
+  });
+
+  it('reports Antigravity limits on schedule and after a job, and invents no reached limit when the source fails', async () => {
+    const server = await fakeServer();
+    const dir = nodeDir(server.url);
+    writeState(dir, { server: server.url, subscriptionId: 's1', provider: 'antigravity', key: 'node-key-1234567890' });
+    const home = join(dir, 'home');
+    const tools = join(dir, 'tools');
+    const bin = fileURLToPath(new URL('./fakes/agy', import.meta.url));
+    const usageWith = (fiveHourRemaining: number) => JSON.stringify({
+      status: 'SUCCESS',
+      command: {
+        name: 'usage',
+        data: {
+          groups: [{
+            name: 'Gemini Models',
+            buckets: [
+              { id: 'gemini-5h', window: '5h', remaining_fraction: fiveHourRemaining, reset_time: '2026-11-04T21:41:44Z' },
+              { id: 'gemini-weekly', window: 'weekly', remaining_fraction: 0.6, reset_time: '2026-11-10T00:41:44Z' },
+            ],
+          }],
+        },
+      },
+    });
+    const agy = antigravityAdapter({ home, tools, bin, person: () => null });
+    /* Avoid spawning tmux setup checks during a non-terminal limits test. */
+    const node = await runNode({ dir, adapter: { ...agy, setupNeeded: async () => false }, log: () => {}, limitsMs: 60 });
+    onTestFinished(() => {
+      delete process.env.FAKE_LIMITS_MODE;
+      node.stop();
+    });
+
+    await server.wait(() => server.received.some(m => m.type === 'status' && m.limits !== null));
+    expect(server.received.filter(m => m.type === 'status').at(-1)!.limits).toEqual({
+      status: 'allowed',
+      windows: [
+        { name: 'five_hour', utilization: 1 - 0.6985989809036255, resetsAt: '2026-11-04T21:41:44.000Z' },
+        { name: 'seven_day', utilization: 1 - 0.6328346133232117, resetsAt: '2026-11-10T00:41:44.000Z' },
+      ],
+      complete: true,
+    });
+
+    /* A broken source leaves the node running and never fabricates status: rejected. */
+    process.env.FAKE_LIMITS_MODE = 'fail';
+    await new Promise(r => setTimeout(r, 150));
+    expect(server.received.filter(m => m.type === 'status').every(m => (m.limits as { status?: string } | null)?.status !== 'rejected')).toBe(true);
+    delete process.env.FAKE_LIMITS_MODE;
+
+    /* A job updates the limits right away before reporting job.done. */
+    writeFileSync(join(home, 'fake-agy-usage.json'), usageWith(0.25));
+    const statusesBefore = server.received.filter(m => m.type === 'status').length;
+    server.send({ type: 'job.run', jobId: 'j-agy', subscriptionId: 's1', provider: 'antigravity', prompt: 'say ready', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
+    await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'j-agy'));
+    expect(server.received.filter(m => m.type === 'status').length).toBeGreaterThan(statusesBefore);
+    expect(server.received.filter(m => m.type === 'status').at(-1)!.limits).toEqual({
+      status: 'allowed',
+      windows: [
+        { name: 'five_hour', utilization: 0.75, resetsAt: '2026-11-04T21:41:44.000Z' },
+        { name: 'seven_day', utilization: 0.4, resetsAt: '2026-11-10T00:41:44.000Z' },
+      ],
+      complete: true,
+    });
   });
 
   it('keeps the windows it knew when a turn tells only some of them, and takes a full list as it is', async () => {

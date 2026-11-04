@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./program-operator": {
+      "types": "./dist/program-operator.d.ts",
+      "default": "./dist/program-operator.js"
+    },
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"

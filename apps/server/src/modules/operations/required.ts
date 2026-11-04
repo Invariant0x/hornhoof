@@ -1,5 +1,6 @@
-/* The employee who looks at a program stopped on a screen nobody planned for. */
-export const PROGRAM_OPERATOR_ROLE = 'OPS-PROGRAM';
+import { PROGRAM_OPERATOR_ROLE } from '@hornhoof/protocol/program-operator';
+
+export { PROGRAM_OPERATOR_ROLE };
 
 /* Who Operations always has, in every company: people cannot leave them out of a card or remove the last one, and
    Hornhoof hires whoever is missing. */

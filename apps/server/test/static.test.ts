@@ -62,3 +62,26 @@ describe('web app serving', () => {
     expect((await app.inject({ url: '/api/health' })).json()).toMatchObject({ ok: true });
   });
 });
+
+
+describe('screen deep links', () => {
+  it('serves the same uncached index for GET and HEAD on screen and nested paths', async () => {
+    const { app } = await testApp({ WEB_DIST: fakeDist() });
+    const paths = [
+      '/tasks', '/tasks/301', '/people/p1', '/departments/d1', '/machines/m1', '/subscriptions',
+      '/improvements', '/versions', '/profile', '/settings', '/about', '/tasks/301/review/comment', '/tasks/301?person=p1',
+    ];
+    for (const path of paths) {
+      const get = await app.inject({ method: 'GET', url: path, headers: { accept: 'text/html' } });
+      const head = await app.inject({ method: 'HEAD', url: path, headers: { accept: 'text/html' } });
+      expect(get.statusCode, path).toBe(200);
+      expect(get.headers['content-type'], path).toMatch(/text\/html/);
+      expect(get.headers['cache-control'], path).toBe('no-cache');
+      expect(get.body, path).toBe('<!doctype html><title>Hornhoof</title><div id="root"></div>');
+      expect(head.statusCode, path).toBe(200);
+      expect(head.headers['content-type'], path).toMatch(/text\/html/);
+      expect(head.headers['cache-control'], path).toBe('no-cache');
+      expect(head.body, path).toBe('');
+    }
+  });
+});

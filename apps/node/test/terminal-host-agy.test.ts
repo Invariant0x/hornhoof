@@ -1,4 +1,4 @@
-import { readFileSync, statSync } from 'node:fs';
+import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { NodeMessage } from '@hornhoof/protocol';
@@ -26,6 +26,14 @@ describe.skipIf(!hasTmux)("Antigravity's own terminal", () => {
     const first = agyJob('g1', 'hello', { model: 'gemini-4-argon', effort: 'high', env: { FAKE_LOG: log } });
     const res = await host.run(first);
     expect(res).toMatchObject({ ok: true, result: 'FINISHED', sessionId: expect.any(String), error: null });
+    expect(res.limits).toEqual({
+      status: 'allowed',
+      windows: [
+        { name: 'five_hour', utilization: 1 - 0.6985989809036255, resetsAt: '2026-11-04T21:41:44.000Z' },
+        { name: 'seven_day', utilization: 1 - 0.6328346133232117, resetsAt: '2026-11-10T00:41:44.000Z' },
+      ],
+      complete: true,
+    });
     expect(first.events).toEqual([
       { kind: 'tool', name: 'run_command', input: 'sleep 8; echo slept' },
       { kind: 'tool_result', ok: true, summary: expect.stringContaining('slept') }, { kind: 'text', text: 'FINISHED' },
@@ -177,5 +185,22 @@ describe.skipIf(!hasTmux)("Antigravity's own terminal", () => {
     const failed = await host.run(agyJob('fail', 'FAIL'));
     expect(failed).toMatchObject({ ok: false, error: 'agent_failed', output: expect.stringContaining('invalid model selection') });
     expect(await host.run(agyJob('fail', 'next', { sessionId: failed.sessionId }))).toMatchObject({ ok: true, result: 'FINISHED' });
+  });
+
+  it('keeps the turn whole and invents no reached limit when reading Antigravity limits fails', async () => {
+    await start();
+    const agentHome = join(home, 'agy', 'broken-limits');
+    mkdirSync(agentHome, { recursive: true });
+    writeFileSync(join(agentHome, '.fake-limits-mode'), 'fail');
+    const first = await host.run(agyJob('broken-limits', 'hello'));
+    expect(first).toMatchObject({ ok: true, result: 'FINISHED', error: null, limits: null });
+    writeFileSync(join(agentHome, '.fake-limits-mode'), 'bad_json');
+    const second = await host.run(agyJob('broken-limits', 'Also say BANANA.', { sessionId: first.sessionId }));
+    expect(second).toMatchObject({ ok: true, result: 'BANANA', error: null, limits: null });
+
+    /* A rejecting limits reader also leaves the turn whole and invents no reached limit. */
+    const rejecting = { ...agyProgram, limits: () => Promise.reject(new Error('boom')) };
+    const third = await host.run({ ...agyJob('rejecting-limits', 'hello'), program: rejecting });
+    expect(third).toMatchObject({ ok: true, result: 'FINISHED', error: null, limits: null });
   });
 });
