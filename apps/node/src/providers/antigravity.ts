@@ -26,20 +26,25 @@ export function agySetupStep(screen: string): AgySetupStep | null {
   return SETUP_COLORS.test(screen) ? 'colors' : null;
 }
 
-/* After an Enter on the colors, how long agy has to show its terms before the node presses again: an Enter must never
-   land on the terms, where it ticks or unticks the box. */
-export const COLORS_WAIT_MS = 5000;
-
-/* The node answers the colors itself: Enter takes the scheme agy offers first. The terms it leaves alone. Returns the step
-   the screen shows. */
-export async function pastColors(screen: string, enter: () => Promise<void>, last: { at: number }, now = Date.now()): Promise<AgySetupStep | null> {
+/* The node answers the colors itself, once for each agy: Enter takes the scheme agy offers first. It never presses again,
+   as an Enter must never land on the terms, where it ticks or unticks the box, and a second one would if agy were slow to
+   show them. The terms it leaves alone. Returns the step the screen shows. */
+export async function pastColors(screen: string, enter: () => Promise<void>, pressed: { at: number }, now = Date.now()): Promise<AgySetupStep | null> {
   const step = agySetupStep(screen);
-  if (step === 'colors' && now - last.at >= COLORS_WAIT_MS) {
-    last.at = now;
+  if (step === 'colors' && pressed.at === -Infinity) {
+    pressed.at = now;
     await enter();
   }
   return step;
 }
+
+/* How long agy has to show its terms after the node took its colors. An agy that still shows the colors then did not take
+   the Enter, and the node starts it anew rather than press again. */
+export const COLORS_WAIT_MS = 10_000;
+export const colorsNotTaken = (step: AgySetupStep | null, pressed: { at: number }, now = Date.now()): boolean => step === 'colors' && now - pressed.at >= COLORS_WAIT_MS;
+
+/* Why a turn ends at agy's colors. */
+export const COLORS_NOT_TAKEN = 'Antigravity CLI did not take the colors of its first-run setup. The next turn starts it again.';
 
 /* Why a turn ends at agy's terms. */
 export const SETUP_NEEDED =
