@@ -1,35 +1,54 @@
 import type { NodeMessage } from '@hornhoof/protocol';
-import { and, asc, eq, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, isNull, ne, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agentEvents, agents, jobs, subscriptions } from '../../db/schema.js';
 import { sameNode, type NodeIdentity } from '../nodes/hub.js';
+import { jobsOf } from '../nodes/messages.js';
 import { notifyFailure } from '../tasks/failures.js';
 import { logTurnFact } from '../tasks/turn-log.js';
-import { enqueueTurn, nodeOfAgent, onAgent, pump, settleWords } from './queue.js';
-import { repeatedTurn, UNHEARD_NOTE, wordsForTurn } from './turn-words.js';
+import { enqueueTurn, nodeOfAgent, onAgent, pump } from './queue.js';
+import { repeatedTurn, UNHEARD_NOTE, wordsForTurn, type TurnWords } from './turn-words.js';
 
 const HOUR_MS = 3_600_000;
 type Job = typeof jobs.$inferSelect;
 
 /* Words that were already sent keep their sender, and wait for the next turn instead of trying live again. */
 export async function unheard(ctx: Ctx, node: NodeIdentity, msg: Extract<NodeMessage, { type: 'agent.unheard' }>, now: Date): Promise<void> {
-  if (!z.uuid().safeParse(msg.agentKey).success) return;
-  const owner = await nodeOfAgent(ctx, msg.agentKey);
-  if (!owner || !sameNode(owner, node)) return;
-  const [agent] = await ctx.db.select().from(agents).where(and(eq(agents.id, msg.agentKey), isNull(agents.removedAt)));
-  if (!agent) return;
-  const [original] = msg.jobId ? await ctx.db.select().from(jobs).where(and(eq(jobs.id, msg.jobId), eq(jobs.agentId, agent.id))) : [];
-  if (msg.jobId && !original) return;
+  const received = await unheardFrom(ctx, node, msg);
+  if (!received) return;
+  const { agent, original } = received;
   const source = original ? (await wordsForTurn(ctx, agent.id, original.id, msg.text))[0] ?? null : null;
-  const next = await enqueueTurn(ctx, { companyId: agent.companyId, agentId: agent.id, prompt: msg.text, ...await repeatedTurn(ctx, original, source) });
+  const next = await repeatWords(ctx, agent, original, source, msg.text);
   const [job] = original ? [original] : await ctx.db.select().from(jobs).where(eq(jobs.id, next));
   await onAgent(ctx, agent.id, async () => {
     await logTurnFact(ctx, job!, UNHEARD_NOTE, { unheardAt: now.toISOString() });
     await repeatedUnheard(ctx, job!, agent.name, now);
-    if (original) settleWords(ctx, agent.id, original.id, original.status === 'running');
   });
   await pump(ctx, agent.id);
+}
+
+async function unheardFrom(ctx: Ctx, node: NodeIdentity, msg: Extract<NodeMessage, { type: 'agent.unheard' }>) {
+  if (!z.uuid().safeParse(msg.agentKey).success) return null;
+  const origin = await wordsOrigin(ctx, node, msg.agentKey, msg.jobId);
+  if (!origin) return null;
+  const [agent] = await ctx.db.select().from(agents).where(and(eq(agents.id, msg.agentKey), isNull(agents.removedAt)));
+  if (!agent) return null;
+  return { agent, ...origin };
+}
+
+async function wordsOrigin(ctx: Ctx, node: NodeIdentity, agentId: string, jobId: string | null) {
+  if (jobId === null) {
+    const owner = await nodeOfAgent(ctx, agentId);
+    return owner && sameNode(owner, node) ? { original: undefined } : null;
+  }
+  if (!z.uuid().safeParse(jobId).success) return null;
+  const [original] = await ctx.db.select().from(jobs).where(and(eq(jobs.id, jobId), eq(jobs.agentId, agentId), ne(jobs.status, 'queued'), jobsOf(node, ctx)));
+  return original ? { original } : null;
+}
+
+async function repeatWords(ctx: Ctx, agent: { id: string; companyId: string }, original: Job | undefined, source: TurnWords | null, text: string): Promise<string> {
+  return enqueueTurn(ctx, { companyId: agent.companyId, agentId: agent.id, prompt: text, ...await repeatedTurn(ctx, original, source, original?.id) });
 }
 
 async function repeatedUnheard(ctx: Ctx, job: Job, name: string, now: Date): Promise<void> {

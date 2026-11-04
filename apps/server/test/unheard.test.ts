@@ -83,7 +83,7 @@ describe('words the program never took', () => {
 
   it('ignores words reported by another node', async () => {
     const c = await atWork();
-    await c.send(TEXT, new Date(), nodeIdentity('another-node'));
+    await c.send(TEXT, new Date(), nodeIdentity('00000000-0000-4000-8000-000000000001'));
     expect(await c.turnsOf()).toHaveLength(1);
     expect(await c.events()).toEqual([]);
   });

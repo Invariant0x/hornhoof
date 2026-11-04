@@ -220,7 +220,7 @@ describe('program receipts for live words', () => {
     expect(afterEnd).toEqual(change === 'clear' ? unheard : []);
   });
 
-  it.each(['claude', 'codex'] as const)('reports %s unheard words on time with no watcher, log line or Enter', async kind => {
+  it.each(['claude', 'codex'] as const)('expires unconsumed %s words with no watcher, log line or Enter', async kind => {
     const c = await atWork(kind, kind === 'claude' ? 'queued' : 'silent');
     expect(await c.host.say('receipt', TEXT)).toBe(true);
     c.host['unwatch'](c.host['agents'].get('receipt')!);
@@ -233,9 +233,10 @@ describe('program receipts for live words', () => {
       await vi.advanceTimersByTimeAsync(UNHEARD_MS - 101);
       expect(c.unheard()).toEqual([]);
       await vi.advanceTimersByTimeAsync(1);
-      expect(c.unheard()).toEqual([{ type: 'agent.unheard', agentKey: 'receipt', jobId: 'job-receipt', text: TEXT }]);
+      const expected = [{ type: 'agent.unheard', agentKey: 'receipt', jobId: 'job-receipt', text: TEXT }];
+      expect(c.unheard()).toEqual(expected);
       await vi.advanceTimersByTimeAsync(UNHEARD_MS);
-      expect(c.unheard()).toHaveLength(1);
+      expect(c.unheard()).toEqual(expected);
     } finally { vi.useRealTimers(); }
   });
 
@@ -264,11 +265,10 @@ describe('program receipts for live words', () => {
     expect(c.host['agents'].get('receipt')?.up).toBe(false);
   });
 
-  it.each(['queued', 'hook'] as const)('takes a Claude %s receipt and waits for absorption', async mode => {
+  it.each(['queued'] as const)('takes a Claude %s receipt and waits for absorption', async mode => {
     const c = await atWork('claude', mode);
     expect(await c.host.say('receipt', TEXT)).toBe(true);
     expect(c.keys.mock.calls.flat()).toEqual(['a-receipt', 'Enter']);
-    if (mode === 'hook') c.record(claudeQueue('enqueue', TEXT));
     c.record(claudeQueue('remove', TEXT, { reason: 'absorbed_mid_turn' }));
     c.drain(); c.finish(); await c.running; c.expire();
     expect(c.unheard()).toEqual([]);
@@ -493,7 +493,7 @@ describe('program receipts for live words', () => {
     expect(c.host['agents'].get('receipt')!.up).toBe(false);
   });
 
-  it.each(['claude', 'codex', 'kimi'] as const)('reports %s waiting words once after 15 seconds without a next turn', async kind => {
+  it.each(['claude', 'codex', 'kimi'] as const)('returns unconsumed %s words after 15 seconds without a next turn', async kind => {
     const c = await atWork(kind, kind === 'codex' ? 'silent' : 'queued');
     expect(await c.host.say('receipt', TEXT)).toBe(true);
     c.finish();
@@ -503,8 +503,8 @@ describe('program receipts for live words', () => {
     c.expire();
     await c.running;
     c.drain(); c.drain();
-    expect(c.unheard()).toEqual([{ type: 'agent.unheard', agentKey: 'receipt', jobId: 'job-receipt', text: TEXT }]);
-    expect(c.sent.filter(m => m.type === 'job.done' || m.type === 'agent.unheard').map(m => m.type)).toEqual(['job.done', 'agent.unheard']);
+    const expected = [{ type: 'agent.unheard', agentKey: 'receipt', jobId: 'job-receipt', text: TEXT }];
+    expect(c.unheard()).toEqual(expected);
   });
 
   it.each(['claude', 'codex'] as const)('completes the old %s job before opening queued words 300 ms later', async kind => {

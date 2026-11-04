@@ -45,8 +45,17 @@ function promptedInput(kind: 'claude' | 'codex', screen: string): string | null 
   const marker = kind === 'claude' ? '❯' : '›';
   const prompt = [...screen.matchAll(new RegExp(`^[ \\t]*${marker}[ \\t]?(.*)$`, 'gm'))].at(-1);
   if (!prompt) return null;
-  const below = screen.slice(prompt.index + prompt[0].length).split(/\n[ \t]*(?:\n|[─━═╰└])/, 1)[0]!;
+  const rest = screen.slice(prompt.index + prompt[0].length);
+  /* An unfinished box may hide the rest of a person's draft. Wait for its closing rule before typing. */
+  const above = screen.slice(0, prompt.index).trimEnd();
+  if (kind === 'claude' && /(?:^|\n)[ \t]*[─━═]{2,}[ \t]*$/.test(above)) return framedInput(prompt[1]!, rest);
+  const below = rest.split(/\n[ \t]*[─━═╰└]/, 1)[0]!;
   return `${prompt[1]}${below}`.trim();
+}
+
+function framedInput(first: string, rest: string): string | null {
+  const end = rest.search(/\n[ \t]*[─━═]{2,}/);
+  return end < 0 ? null : `${first}${rest.slice(0, end)}`.trim();
 }
 
 /* Only the current input counts; earlier prompts belong to the conversation above it. */

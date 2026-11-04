@@ -5,7 +5,7 @@ import * as protocol from '../src/index.js';
 
 const LIMITS = { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.38, resetsAt: '2026-10-29T21:30:00.000Z' }] };
 
-it('shares the 15 second window for a program to start queued words after a turn ends', () => {
+it('shares the 15 second receipt wait for unconfirmed words after a turn ends', () => {
   expect(protocol.UNHEARD_MS).toBe(15_000);
 });
 
@@ -36,6 +36,11 @@ const SERVER: ServerMessage[] = [
 ];
 
 describe('node messages', () => {
+  it('carries settled words for their original agent and job', () => {
+    const message = { type: 'agent.words_settled', agentKey: 'agent-1', jobId: 'job-1' };
+    expect(parseNodeMessage(JSON.stringify(message))).toEqual(message);
+    expect(parseNodeMessage(JSON.stringify({ ...message, jobId: null }))).toBeNull();
+  });
   it('carries waiting words on a job end and still accepts older nodes', () => {
     const done = { type: 'job.done', jobId: 'job-1', ok: true, sessionId: null, result: '', tail: '', error: null };
     for (const message of [done, { ...done, wordsWaiting: true }, { ...done, wordsWaiting: false }]) {

@@ -1,7 +1,8 @@
 import { and, inArray } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, machines, nodes, testParts } from '../../db/schema.js';
-import { pump } from '../conversation/queue.js';
+import { clearNodeWords, pump } from '../conversation/queue.js';
+import { nodeIdentity } from './hub.js';
 import { loseParts } from '../testruns/runs.js';
 import { failOpenJobs } from './messages.js';
 import { liveNode, settlePlans } from './nodes.js';
@@ -23,7 +24,7 @@ export async function disconnectMachines(ctx: Ctx, machineIds: string[]): Promis
     return { ids: gone.map(n => n.id), moved: moved.map(a => a.id) };
   });
   /* The nodes lose their keys first, so the turns that end here send no next turn to the leaving ones. */
-  for (const id of ids) ctx.hub.close(id, 4001);
+  for (const id of ids) { clearNodeWords(ctx, nodeIdentity(id)); ctx.hub.close(id, 4001); }
   if (ids.length) await failOpenJobs(ctx, inArray(jobs.nodeId, ids), 'machine_disconnected');
   await loseParts(ctx, inArray(testParts.machineId, machineIds), 'machine_disconnected');
   for (const id of moved) await pump(ctx, id);

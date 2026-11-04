@@ -5,7 +5,7 @@ import type { Ctx } from '../../app.js';
 import { agents, jobs, machines, nodes, planCredentials, subscriptions, tasks } from '../../db/schema.js';
 import { said } from '../conversation/live.js';
 import { unheard } from '../conversation/unheard.js';
-import { holdForWords, nodeOfAgent, onAgent, pumpWaiting, refusedLimits, startProgram } from '../conversation/queue.js';
+import { clearNodeWords, holdForWords, nodeOfAgent, onAgent, pumpWaiting, refusedLimits, startProgram, wordsSettled } from '../conversation/queue.js';
 import { workStarts } from '../org/map-state.js';
 import { startWork } from '../tasks/engine.js';
 import { programRestarted } from '../tasks/program-restarts.js';
@@ -25,7 +25,7 @@ const OPEN_JOBS = ['queued', 'running'] as const;
 const completionValue = (value: unknown, stopped: string | null): SQL => sql`case when ${jobs.error} = 'cancelled' then ${stopped} else ${value ?? null} end`;
 
 /* A node may only touch the jobs sent to it; the built-in node those of API keys. */
-function jobsOf(id: NodeIdentity, ctx: Ctx): SQL {
+export function jobsOf(id: NodeIdentity, ctx: Ctx): SQL {
   if (id.kind === 'node') return eq(jobs.nodeId, id.nodeId);
   return inArray(jobs.subscriptionId, ctx.db.select({ id: subscriptions.id }).from(subscriptions).where(eq(subscriptions.kind, 'api_key')));
 }
@@ -52,7 +52,7 @@ async function jobEnded(ctx: Ctx, id: NodeIdentity, msg: Extract<NodeMessage, { 
       .where(and(eq(jobs.id, msg.jobId), inArray(jobs.status, OPEN_JOBS), jobsOf(id, ctx)))
       .returning({ companyId: jobs.companyId, agentId: jobs.agentId, kind: jobs.kind });
     if (msg.wordsWaiting) for (const job of finished) {
-      if (job.agentId && job.kind === 'conversation') holdForWords(ctx, job.agentId, msg.jobId, now);
+      if (job.agentId && job.kind === 'conversation') holdForWords(ctx, job.agentId, msg.jobId, id, now);
     }
     return finished;
   };
@@ -122,12 +122,20 @@ const builtinCut = (ctx: Ctx, id: NodeIdentity, msg: Hello, now: Date) =>
 const nodeCut = (ctx: Ctx, nodeId: string, row: { node: typeof nodes.$inferSelect; host: string | null }, msg: Hello, now: Date) =>
   interruptionOf(ctx, { id: nodeId, name: row.host || 'a machine with no name', machine: { id: row.node.machineId, name: row.host }, said: { version: row.node.version, boot: row.node.boot } }, msg, now);
 
+async function wordMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage, now: Date): Promise<void> {
+  if (msg.type === 'agent.said') said(ctx, id, msg.ref, msg.ok);
+  if (msg.type === 'agent.unheard') await unheard(ctx, id, msg, now);
+  if (msg.type === 'agent.words_settled') await wordsSettled(ctx, id, msg.agentKey, msg.jobId);
+}
+
 export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage, now = new Date()): Promise<void> {
   if (!(await hasCurrentKey(ctx, id))) return;
+  await wordMessage(ctx, id, msg, now);
   const { db } = ctx;
-  // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- term.* messages are routed by the terminal hub
+  // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- Terminal and live word messages have their own handlers.
   switch (msg.type) {
     case 'hello': {
+      clearNodeWords(ctx, id);
       let cut = await builtinCut(ctx, id, msg, now);
       if (id.kind === 'node') {
         const [row] = await db
@@ -256,12 +264,6 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       return;
     case 'agent.restarted':
       await programRestarted(ctx, id, msg);
-      return;
-    case 'agent.said':
-      said(ctx, id, msg.ref, msg.ok);
-      return;
-    case 'agent.unheard':
-      await unheard(ctx, id, msg, now);
       return;
     case 'agent.hook_rejected':
       await hookRejected(ctx, id, msg, jobsOf(id, ctx));

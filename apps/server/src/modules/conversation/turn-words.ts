@@ -25,12 +25,16 @@ export async function wordsForTurn(ctx: Pick<Ctx, 'db'>, agentId: string, jobId:
 }
 
 /* The next turn keeps a hidden record of the words, but never restores a person the original no longer answers. */
-export async function repeatedTurn(ctx: Pick<Ctx, 'db'>, job: Standing | undefined, source?: TurnWords | null): Promise<RepeatedTurn> {
+export async function repeatedTurn(ctx: Pick<Ctx, 'db'>, job: Standing | undefined, source?: TurnWords | null, unheardFrom?: string): Promise<RepeatedTurn> {
   const last = job?.agentId ? (await wordsForTurn(ctx, job.agentId, job.id))[0] : undefined;
   const personId = job?.decisionInputPending ? null : last ? last.personId : job?.createdBy ?? null;
   const words = source === undefined ? last ?? { personId, data: {} } : source;
   return {
     createdBy: job?.createdBy ?? null, answersCeo: job?.answersCeo ?? false,
-    repeated: { personId: words?.personId === personId ? personId : null, data: words?.data ?? {} },
+    repeated: { personId: words?.personId === personId ? personId : null, data: repeatedData(words?.data ?? {}, unheardFrom) },
   };
+}
+
+function repeatedData(data: unknown, unheardFrom?: string): unknown {
+  return unheardFrom ? { ...data as Record<string, unknown>, unheardFrom } : data;
 }
