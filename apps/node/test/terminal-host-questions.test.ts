@@ -34,7 +34,12 @@ describe.skipIf(!hasTmux)('operator questions from the program', () => {
       expect(screen).toMatchObject({ keysAllowed: true, state: 'awaiting_input' });
       if (screen?.type !== 'program.screen') throw new Error('Screen is missing.');
       const press = vi.spyOn(tmux, 'keys').mockResolvedValue();
-      const command = { type: 'program.key_send' as const, ...incident, generation: screen.generation, snapshot: screen.snapshot!, action: randomUUID(), key: 'Enter' as const };
+      const input = { ...incident, generation: screen.generation, snapshot: screen.snapshot!, action: randomUUID(), key: 'Enter' as const };
+      await host.operatorMessage({ type: 'program.key_prepare', ...input });
+      const prepared = sent.find(f => f.type === 'program.key_prepared' && f.action === input.action);
+      expect(prepared).toMatchObject({ result: 'ok' });
+      if (prepared?.type !== 'program.key_prepared') throw new Error('Key preparation is missing.');
+      const command = { type: 'program.key_send' as const, ...input, lease: prepared.lease! };
       await host.operatorMessage(command);
       expect(sent.at(-1)).toMatchObject({ type: 'program.key_result', result: 'applied' });
       expect(press).toHaveBeenCalledTimes(1);
@@ -62,6 +67,38 @@ describe.skipIf(!hasTmux)('operator questions from the program', () => {
       await host['hook'](key, 'tool', { tool_name: 'Read', tool_use_id: 'next' });
       now += 30000; host.operatorTick();
       expect(sent.some(f => f.type === 'program.operator_needed')).toBe(false);
+    } finally { abort.abort(); await running; }
+  });
+
+  it.each(['allowed', 'denied'] as const)('answers the native permission menu with %s and the real tmux program continues', async decision => {
+    const sent: OperatorNodeMessage[] = []; let now = 0;
+    const key = randomUUID(), jobId = randomUUID();
+    await setUp({ pollMs: 25, operator: { dir: join(home, `operator-${key}`), now: () => now, connected: () => true, send: frame => { sent.push(frame); return true; } } });
+    const abort = new AbortController();
+    const running = host.run({ ...job(key, 'PERMISSION_MENU', { jobId, signal: abort.signal }), operatorDelivery: { id: randomUUID(), ordinal: 1 } });
+    try {
+      await until(() => sent.some(f => f.type === 'program.question' && f.phase === 'asked'));
+      now = 30000; host.operatorTick();
+      const needed = sent.find(f => f.type === 'program.operator_needed' && f.reason === 'question_waiting');
+      if (needed?.type !== 'program.operator_needed') throw new Error('No question case.');
+      const incident = { agentKey: key, jobId, instance: needed.instance, case: randomUUID(), capability: randomUUID() };
+      await host.operatorMessage({ type: 'program.operator_case', ...incident, disposition: 'open', revision: 1, remainingMs: 600000, reason: 'question_waiting', questionId: needed.questionId });
+      for (const keyPress of decision === 'denied' ? ['Down', 'Enter'] as const : ['Enter'] as const) {
+        const request = randomUUID();
+        await host.operatorMessage({ type: 'program.screen_get', ...incident, request });
+        const screen = sent.find(f => f.type === 'program.screen' && f.request === request);
+        expect(screen).toMatchObject({ keysAllowed: true });
+        if (screen?.type !== 'program.screen') throw new Error('No current screen.');
+        const input = { ...incident, snapshot: screen.snapshot!, generation: screen.generation, action: randomUUID(), key: keyPress };
+        await host.operatorMessage({ type: 'program.key_prepare', ...input });
+        const prepared = sent.find(f => f.type === 'program.key_prepared' && f.action === input.action);
+        if (prepared?.type !== 'program.key_prepared' || !prepared.lease) throw new Error('Key preparation refused.');
+        await host.operatorMessage({ type: 'program.key_send', ...input, lease: prepared.lease });
+        expect(sent).toContainEqual(expect.objectContaining({ type: 'program.key_result', action: input.action, result: 'applied' }));
+        if (keyPress === 'Down') { await until(async () => (await tmux.screen(`a-${key}`)).includes('> No')); now += 1001; }
+      }
+      expect(await running).toMatchObject({ ok: true, result: `echo: Permission ${decision}.` });
+      expect(sent).toContainEqual(expect.objectContaining({ type: 'program.question', phase: 'cleared', question: expect.objectContaining({ id: needed.questionId }) }));
     } finally { abort.abort(); await running; }
   });
 });

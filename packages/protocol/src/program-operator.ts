@@ -8,6 +8,8 @@ export const FIRST_ACTIVITY_MS = 300_000;
 export const STARTUP_EXIT_MS = 60_000;
 export const QUESTION_WAIT_MS = 30_000;
 export const OPERATOR_SNAPSHOT_MS = 30_000;
+export const OPERATOR_KEY_MS = 2000;
+export const OPERATOR_PROTECTED_SCREEN = 'Protected program screen [hidden]. Only the subscription owner may respond.';
 export const OPERATOR_MAX_KEYS = 20;
 export const OPERATOR_CELLS_BYTES = 65_536;
 export const OPERATOR_PICTURE_BYTES = 1_048_576;
@@ -38,6 +40,7 @@ export const OperatorNodeMessages = [
   z.object({ type: z.literal('program.question'), ...evidence, question: OperatorQuestion, questionOrdinal: z.number().int().positive(), phase: z.enum(['asked', 'cleared']), elapsedMs: count }).strict(),
   z.object({ type: z.literal('program.screen'), ...identity, request: z.uuid(), result: z.enum(['ok', 'refused']), reason: OperatorError.nullable(), snapshot: opaque.nullable(), generation: count, state: z.enum(['pre_work', 'working', 'awaiting_input', 'gone', 'unknown']), keysAllowed: z.boolean(), protected: z.boolean(), cols: z.number().int().min(1).max(512), rows: z.number().int().min(1).max(256), cells: z.string().max(OPERATOR_CELLS_BYTES).refine(value => new TextEncoder().encode(value).length <= OPERATOR_CELLS_BYTES) }).strict(),
   z.object({ type: z.literal('program.key_result'), ...identity, action: z.uuid(), result: z.enum(['applied', 'refused', 'unknown']), reason: OperatorError.nullable() }).strict(),
+  z.object({ type: z.literal('program.key_prepared'), ...identity, action: z.uuid(), result: z.enum(['ok', 'refused']), reason: OperatorError.nullable(), lease: z.uuid().nullable() }).strict(),
   z.object({ type: z.literal('program.recovery_ready'), ...evidence, case: z.uuid() }).strict(),
 ] as const;
 
@@ -46,11 +49,15 @@ export type OperatorNodeMessage = z.infer<typeof OperatorNodeMessage>;
 export type OperatorEvidence = Extract<OperatorNodeMessage, { evidenceId: string }>;
 export type OperatorScreen = Extract<OperatorNodeMessage, { type: 'program.screen' }>;
 export type OperatorKeyResult = Extract<OperatorNodeMessage, { type: 'program.key_result' }>;
+export type OperatorKeyPrepared = Extract<OperatorNodeMessage, { type: 'program.key_prepared' }>;
+
+const keyInput = { ...identity, case: z.uuid(), capability: opaque, snapshot: opaque, generation: count, action: z.uuid(), key: OperatorKey };
 
 export const OperatorServerMessages = [
   z.object({ type: z.literal('program.screen_get'), ...identity, request: z.uuid(), case: z.uuid(), capability: opaque }).strict(),
-  z.object({ type: z.literal('program.key_send'), ...identity, case: z.uuid(), capability: opaque, snapshot: opaque, generation: count, action: z.uuid(), key: OperatorKey }).strict(),
-  z.object({ type: z.literal('program.operator_case'), ...identity, case: z.uuid(), capability: opaque, disposition: z.enum(['open', 'revoke']), remainingMs: count.max(OPERATOR_CASE_MS), revision: count, readOnly: z.boolean().optional(), reason: OperatorReason.optional(), questionId: z.uuid().nullable().optional() }).strict(),
+  z.object({ type: z.literal('program.key_prepare'), ...keyInput }).strict(),
+  z.object({ type: z.literal('program.key_send'), ...keyInput, lease: z.uuid(), withinMs: z.number().int().min(1).max(OPERATOR_KEY_MS).optional() }).strict(),
+  z.object({ type: z.literal('program.operator_case'), ...identity, case: z.uuid(), capability: opaque, disposition: z.enum(['open', 'revoke']), remainingMs: count.max(OPERATOR_CASE_MS), revision: count, readOnly: z.boolean().optional(), reason: OperatorReason.optional(), questionId: z.uuid().nullable().optional(), closedBecause: z.string().min(1).max(100).optional() }).strict(),
   z.object({ type: z.literal('program.evidence_ack'), evidenceId: z.uuid() }).strict(),
 ] as const;
 
@@ -58,7 +65,7 @@ export const OperatorServerMessage = z.discriminatedUnion('type', OperatorServer
 export type OperatorServerMessage = z.infer<typeof OperatorServerMessage>;
 
 /* Additive metadata is validated independently of the older transport schemas. */
-export const OperatorDeliveryMetadata = z.object({ operatorDelivery: OperatorDelivery.optional() });
+export const OperatorDeliveryMetadata = z.object({ operatorDelivery: OperatorDelivery.optional(), operatorSourceDelivery: OperatorDelivery.optional() });
 type DeliveryMetadata = z.infer<typeof OperatorDeliveryMetadata>;
 export type ProgramNodeMessage = Exclude<NodeMessage, { type: 'hello' | 'agent.unheard' }>
   | (Extract<NodeMessage, { type: 'hello' }> & { programOperatorV1?: boolean })

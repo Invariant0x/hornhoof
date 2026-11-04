@@ -7,7 +7,7 @@ import { readOperatorStore, writeOperatorStore } from './operator-storage.js';
 const Identity = z.object({ agentKey: z.uuid(), jobId: z.uuid().nullable(), instance: z.uuid() });
 export type OperatorIdentity = z.infer<typeof Identity>;
 const Question = z.object({ data: OperatorQuestion, jobId: z.uuid().nullable(), at: z.number(), ordinal: z.number().int().positive(), alarmed: z.boolean() });
-const Instance = Identity.extend({ at: z.number(), startedAt: z.number().nullable(), active: z.boolean(), exited: z.boolean(), ordinal: z.number().int().nonnegative(), phases: z.array(z.enum(['attempt', 'started', 'failed'])), alarmed: z.boolean(), question: Question.nullable().default(null), questionOrdinal: z.number().int().nonnegative().default(0) });
+const Instance = Identity.extend({ at: z.number(), startedAt: z.number().nullable(), active: z.boolean(), exited: z.boolean(), ordinal: z.number().int().nonnegative(), phases: z.array(z.enum(['attempt', 'started', 'failed'])), alarmed: z.boolean(), question: Question.nullable().default(null), questionOrdinal: z.number().int().nonnegative().default(0), recovered: z.array(z.uuid()).default([]) });
 const Delivery = Identity.extend({ id: z.uuid(), ordinal: z.number().int().positive(), kind: z.enum(['assignment', 'live']), digest: z.string(), at: z.number(), receiptAt: z.number().nullable(), active: z.boolean(), outcome: z.enum(['pending', 'taken', 'not_taken', 'cancelled']), phases: z.array(z.enum(['attempt', 'queued', 'taken', 'activity', 'not_taken', 'cancelled'])), alarms: z.array(z.string()) });
 const StoredEvidence = OperatorNodeMessage.refine((frame): frame is OperatorEvidence => 'evidenceId' in frame);
 const Store = z.object({ instances: z.record(z.string(), Instance), deliveries: z.record(z.string(), Delivery), outbox: z.array(StoredEvidence) });
@@ -22,7 +22,8 @@ const MAX_PENDING = 4096;
 
 /* Only identities, hashes and bounded facts reach disk; program words and screens stay out of this outbox. */
 export class OperatorObserver {
-  private readonly state: Store;
+  private state: Store;
+  private staged: { facts: OperatorEvidence[]; changed: boolean } | null = null;
   private readonly now: () => number;
 
   constructor(private readonly options: Options) {
@@ -31,61 +32,77 @@ export class OperatorObserver {
   }
 
   launch(identity: OperatorIdentity, phase: 'attempt' | 'started' | 'failed'): void {
-    const instance = this.instance(identity);
-    if (instance.phases.includes(phase)) return;
-    if (!instance.phases.length) instance.at = this.now();
-    instance.phases.push(phase);
-    if (phase === 'started') instance.startedAt = this.now();
-    this.emit(instance, { type: 'program.launch', ...this.identity(instance), phase, elapsedMs: this.elapsed(instance.at) });
+    this.transition(() => {
+      if (this.state.instances[identity.instance]?.phases.includes(phase)) return;
+      this.room(1);
+      const instance = this.instance(identity);
+      if (!instance.phases.length) instance.at = this.now();
+      instance.phases.push(phase);
+      if (phase === 'started') instance.startedAt = this.now();
+      this.emit(instance, { type: 'program.launch', ...this.identity(instance), phase, elapsedMs: this.elapsed(instance.at) });
+    });
   }
 
   attempt(identity: OperatorIdentity, metadata: OperatorDelivery, kind: 'assignment' | 'live', words: string): void {
-    const digest = createHash('sha256').update(words).digest('hex');
-    const old = this.state.deliveries[metadata.id];
-    if (old) {
-      if (old.digest !== digest || old.agentKey !== identity.agentKey || old.ordinal !== metadata.ordinal || old.kind !== kind) throw new Error('A delivery identity cannot be reused for different words.');
-      return;
-    }
-    this.instance(identity);
-    if (Object.keys(this.state.deliveries).length >= MAX_PENDING) throw new Error('Program delivery history must be acknowledged before more input.');
-    const delivery: Delivery = { ...identity, ...metadata, kind, digest, at: this.now(), receiptAt: null, active: false, outcome: 'pending', phases: [], alarms: [] };
-    this.state.deliveries[metadata.id] = delivery;
-    this.deliveryFact(delivery, 'attempt');
+    this.transition(() => {
+      const digest = createHash('sha256').update(words).digest('hex');
+      const old = this.state.deliveries[metadata.id];
+      if (old) {
+        if (old.digest !== digest || old.agentKey !== identity.agentKey || old.ordinal !== metadata.ordinal || old.kind !== kind) throw new Error('A delivery identity cannot be reused for different words.');
+        return;
+      }
+      this.room(1);
+      if (Object.keys(this.state.deliveries).length >= MAX_PENDING) throw new Error('Program delivery history must be acknowledged before more input.');
+      this.instance(identity);
+      const delivery: Delivery = { ...identity, ...metadata, kind, digest, at: this.now(), receiptAt: null, active: false, outcome: 'pending', phases: [], alarms: [] };
+      this.state.deliveries[metadata.id] = delivery;
+      this.deliveryFact(delivery, 'attempt');
+    });
   }
 
   receipt(id: string, phase: 'queued' | 'taken'): void {
-    const delivery = this.state.deliveries[id];
-    if (!delivery || delivery.outcome === 'cancelled' || delivery.phases.includes(phase)) return;
-    if (phase === 'queued' && delivery.phases.includes('taken')) return;
-    delivery.receiptAt ??= this.now();
-    if (phase === 'taken') delivery.outcome = 'taken';
-    this.deliveryFact(delivery, phase);
+    this.transition(() => {
+      const delivery = this.state.deliveries[id];
+      if (!delivery || delivery.outcome === 'cancelled' || delivery.phases.includes(phase)) return;
+      if (phase === 'queued' && delivery.phases.includes('taken')) return;
+      this.room(1);
+      delivery.receiptAt ??= this.now();
+      if (phase === 'taken') delivery.outcome = 'taken';
+      this.deliveryFact(delivery, phase);
+    });
   }
 
   activity(identity: OperatorIdentity): void {
-    const instance = this.state.instances[identity.instance];
-    if (!instance || instance.exited) return;
-    this.clearQuestion(instance);
-    instance.active = true;
-    for (const delivery of Object.values(this.state.deliveries)) {
-      if (delivery.instance !== identity.instance || delivery.jobId !== identity.jobId || delivery.active) continue;
-      delivery.active = true;
-      this.deliveryFact(delivery, 'activity');
-    }
-    this.save();
+    this.transition(() => {
+      const instance = this.state.instances[identity.instance];
+      if (!instance || instance.exited) return;
+      const deliveries = Object.values(this.state.deliveries).filter(delivery => delivery.instance === identity.instance && delivery.jobId === identity.jobId && !delivery.active);
+      if (instance.active && !instance.question && !deliveries.length) return;
+      this.room(Number(Boolean(instance.question)) + deliveries.length);
+      this.clearQuestion(instance);
+      instance.active = true;
+      for (const delivery of deliveries) {
+        delivery.active = true;
+        this.deliveryFact(delivery, 'activity');
+      }
+      this.save();
+    });
   }
 
   finalize(id: string, outcome: 'not_taken' | 'cancelled'): void {
-    const delivery = this.state.deliveries[id];
-    if (!delivery || delivery.outcome !== 'pending') return;
-    delivery.outcome = outcome;
-    this.deliveryFact(delivery, outcome);
+    this.transition(() => {
+      const delivery = this.state.deliveries[id];
+      if (!delivery || delivery.outcome !== 'pending') return;
+      this.room(1);
+      delivery.outcome = outcome;
+      this.deliveryFact(delivery, outcome);
+    });
   }
 
   tick(): void {
     if (!this.options.connected()) return;
-    for (const instance of Object.values(this.state.instances)) this.checkQuestion(instance);
-    for (const delivery of Object.values(this.state.deliveries)) this.checkDelivery(delivery);
+    for (const id of Object.keys(this.state.instances)) this.transition(() => this.checkQuestion(this.state.instances[id]!));
+    for (const id of Object.keys(this.state.deliveries)) this.transition(() => this.checkDelivery(this.state.deliveries[id]!));
   }
 
   private checkDelivery(delivery: Delivery): void {
@@ -98,68 +115,109 @@ export class OperatorObserver {
   }
 
   exit(identity: OperatorIdentity, exit: Exit, cause?: ExitCause): void {
-    const instance = this.state.instances[identity.instance];
-    if (!instance || instance.exited) return;
-    this.clearQuestion(instance);
-    instance.exited = true;
-    const elapsedMs = this.elapsed(instance.startedAt ?? instance.at);
-    if (!cause && !instance.active && !instance.alarmed && elapsedMs <= STARTUP_EXIT_MS) {
-      instance.alarmed = true;
-      this.emit(instance, { type: 'program.operator_needed', ...this.identity(identity), reason: 'startup_exit', deliveryId: null, evidenceKey: identity.instance, elapsedMs, sinceLaunchMs: elapsedMs, exit });
-    }
-    for (const delivery of Object.values(this.state.deliveries)) {
-      if (delivery.instance !== identity.instance) continue;
-      this.finalize(delivery.id, cause ? 'cancelled' : 'not_taken');
-    }
-    this.save();
+    this.transition(() => {
+      const instance = this.state.instances[identity.instance];
+      if (!instance || instance.exited) return;
+      const elapsedMs = this.elapsed(instance.startedAt ?? instance.at);
+      const startup = this.startupExit(instance, cause, elapsedMs);
+      const pending = Object.values(this.state.deliveries).filter(delivery => delivery.instance === identity.instance && delivery.outcome === 'pending');
+      this.room(Number(Boolean(instance.question)) + Number(startup) + pending.length);
+      this.clearQuestion(instance);
+      instance.exited = true;
+      if (startup) {
+        instance.alarmed = true;
+        this.emit(instance, { type: 'program.operator_needed', ...this.identity(identity), reason: 'startup_exit', deliveryId: null, evidenceKey: identity.instance, elapsedMs, sinceLaunchMs: elapsedMs, exit });
+      }
+      for (const delivery of pending) {
+        this.finalize(delivery.id, cause ? 'cancelled' : 'not_taken');
+      }
+      this.save();
+    });
   }
 
   replay(): void {
     if (this.options.connected()) for (const fact of this.state.outbox) this.options.send(fact);
   }
 
+  retire(): void {
+    for (const instance of Object.values(this.state.instances)) if (!instance.exited) this.exit(instance, { code: null, signal: null }, 'offline');
+  }
+
+  recordedSource(id: string): boolean {
+    const delivery = this.state.deliveries[id];
+    return Boolean(delivery && (delivery.kind === 'live' ? delivery.outcome === 'taken' : delivery.receiptAt !== null));
+  }
+
+  recoveryReady(identity: OperatorIdentity, caseId: string): void {
+    this.transition(() => {
+      const instance = this.instance(identity);
+      if (instance.recovered.includes(caseId) || instance.exited) return;
+      this.room(1);
+      instance.recovered.push(caseId);
+      this.emit(instance, { type: 'program.recovery_ready', ...identity, case: caseId });
+    });
+  }
+
   ack(evidenceId: string): void {
-    this.state.outbox = this.state.outbox.filter(fact => fact.evidenceId !== evidenceId);
-    this.prune();
-    this.save();
+    if (!this.state.outbox.some(fact => fact.evidenceId === evidenceId)) return;
+    this.transition(() => {
+      this.state.outbox = this.state.outbox.filter(fact => fact.evidenceId !== evidenceId);
+      this.prune();
+      this.save();
+    });
   }
 
   private prune(): void {
+    this.pruneDeliveries();
+    const used = new Set([...Object.values(this.state.deliveries).map(delivery => delivery.instance), ...this.state.outbox.map(fact => fact.instance)]);
+    for (const instance of Object.values(this.state.instances)) if (instance.exited && !used.has(instance.instance)) delete this.state.instances[instance.instance];
+  }
+
+  private pruneDeliveries(): void {
     const unacked = new Set(this.state.outbox.flatMap(fact => fact.type === 'program.delivery' ? [fact.deliveryId] : []));
     const deliveries = Object.values(this.state.deliveries).sort((a, b) => a.at - b.at);
     let excess = deliveries.length - MAX_PENDING / 2;
     for (const delivery of deliveries) {
       if (excess <= 0) break;
-      if (unacked.has(delivery.id) || delivery.outcome === 'pending') continue;
-      if (delivery.kind === 'assignment' && !delivery.active && delivery.outcome !== 'cancelled') continue;
+      if (!this.prunableDelivery(delivery, unacked)) continue;
       delete this.state.deliveries[delivery.id];
       excess--;
     }
-    const used = new Set([...Object.values(this.state.deliveries).map(delivery => delivery.instance), ...this.state.outbox.map(fact => fact.instance)]);
-    for (const instance of Object.values(this.state.instances)) if (instance.exited && !used.has(instance.instance)) delete this.state.instances[instance.instance];
+  }
+
+  private prunableDelivery(delivery: Delivery, unacked: Set<string>): boolean {
+    if (unacked.has(delivery.id) || delivery.outcome === 'pending') return false;
+    return delivery.kind !== 'assignment' || delivery.active || delivery.outcome === 'cancelled';
+  }
+
+  private startupExit(instance: Instance, cause: ExitCause | undefined, elapsedMs: number): boolean {
+    return !cause && !instance.active && !instance.alarmed && elapsedMs <= STARTUP_EXIT_MS;
   }
 
   private alarm(delivery: Delivery, reason: OperatorReason): void {
     if (delivery.alarms.includes(reason)) return;
+    this.room(1);
     delivery.alarms.push(reason);
     const instance = this.state.instances[delivery.instance]!;
     this.emit(instance, { type: 'program.operator_needed', ...this.identity(delivery), reason, deliveryId: delivery.id, evidenceKey: delivery.id, elapsedMs: this.elapsed(delivery.at), sinceLaunchMs: this.elapsed(instance.startedAt ?? instance.at), exit: null });
   }
 
-  question(identity: OperatorIdentity, input: OperatorQuestion | null): void {
-    const instance = this.instance(identity);
-    if (instance.exited) return;
-    const incoming = input && OperatorQuestion.parse(input);
-    if (incoming && incoming.id === instance.question?.data.id) {
-      if (JSON.stringify(incoming) !== JSON.stringify(instance.question?.data)) throw new Error('A question identity cannot change its request.');
-      return;
-    }
-    this.room(Number(Boolean(instance.question)) + Number(Boolean(incoming)));
-    this.clearQuestion(instance);
-    if (!incoming) return;
-    const question = { data: incoming, jobId: identity.jobId, at: this.now(), ordinal: ++instance.questionOrdinal, alarmed: false };
-    instance.question = question;
-    this.questionFact(instance, question, 'asked');
+  question(identity: OperatorIdentity, input: OperatorQuestion | null, elapsedMs = 0): void {
+    this.transition(() => {
+      const instance = this.instance(identity);
+      if (instance.exited) return;
+      const incoming = input && OperatorQuestion.parse(input);
+      if (incoming && incoming.id === instance.question?.data.id) {
+        if (JSON.stringify(incoming) !== JSON.stringify(instance.question?.data)) throw new Error('A question identity cannot change its request.');
+        return;
+      }
+      this.room(Number(Boolean(instance.question)) + Number(Boolean(incoming)));
+      this.clearQuestion(instance);
+      if (!incoming) return;
+      const question = { data: incoming, jobId: identity.jobId, at: this.now() - Math.max(0, elapsedMs), ordinal: ++instance.questionOrdinal, alarmed: false };
+      instance.question = question;
+      this.questionFact(instance, question, 'asked');
+    });
   }
 
   private clearQuestion(instance: Instance): void {
@@ -188,6 +246,7 @@ export class OperatorObserver {
 
   private deliveryFact(delivery: Delivery, phase: Delivery['phases'][number]): void {
     if (delivery.phases.includes(phase)) return;
+    this.room(1);
     delivery.phases.push(phase);
     this.emit(this.state.instances[delivery.instance]!, { type: 'program.delivery', ...this.identity(delivery), deliveryId: delivery.id, deliveryOrdinal: delivery.ordinal, kind: delivery.kind, phase, elapsedMs: this.elapsed(delivery.at), wordsDigest: delivery.digest });
   }
@@ -196,17 +255,35 @@ export class OperatorObserver {
     if (this.state.outbox.length >= MAX_PENDING) throw new Error('The program evidence outbox is full.');
     const fact = StoredEvidence.parse({ ...frame, evidenceId: randomUUID(), ordinal: instance.ordinal++ });
     this.state.outbox.push(fact);
+    this.staged!.facts.push(fact);
     this.save();
-    if (this.options.connected()) this.options.send(fact);
   }
 
   private identity(value: OperatorIdentity): OperatorIdentity { return { agentKey: value.agentKey, jobId: value.jobId, instance: value.instance }; }
   private instance(identity: OperatorIdentity): Instance {
-    return this.state.instances[identity.instance] ??= { ...identity, at: this.now(), startedAt: null, active: false, exited: false, ordinal: 0, phases: [], alarmed: false, question: null, questionOrdinal: 0 };
+    return this.state.instances[identity.instance] ??= { ...identity, at: this.now(), startedAt: null, active: false, exited: false, ordinal: 0, phases: [], alarmed: false, question: null, questionOrdinal: 0, recovered: [] };
   }
   private elapsed(at: number): number { return Math.max(0, Math.floor(this.now() - at)); }
 
-  private save(): void {
-    writeOperatorStore(this.options.file, this.state);
+  private save(): void { this.staged!.changed = true; }
+
+  /* Helpers stage one complete local transition. Only its durable snapshot may publish evidence. */
+  private transition(change: () => void): void {
+    if (this.staged) { change(); return; }
+    const previous = this.state;
+    const staged = { facts: [] as OperatorEvidence[], changed: false };
+    this.state = structuredClone(previous);
+    this.staged = staged;
+    try {
+      change();
+      if (staged.changed) writeOperatorStore(this.options.file, this.state);
+      else this.state = previous;
+    } catch (error) {
+      this.state = previous;
+      throw error;
+    } finally {
+      this.staged = null;
+    }
+    if (this.options.connected()) for (const fact of staged.facts) this.options.send(fact);
   }
 }

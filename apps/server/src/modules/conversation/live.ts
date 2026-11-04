@@ -6,6 +6,8 @@ import { ApiError } from '../../errors.js';
 import { identityOf, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { incomingEnvelope } from '../events/parties.js';
 import { addressed } from './prompt.js';
+import { cancelUnattemptedLive, cancelUnsentDelivery, reserveDelivery, wordsDigest } from '../program-operator/deliveries.js';
+import { liveInputOf, rememberLiveInput } from '../program-operator/input.js';
 
 /* How long Hornhoof waits for the node to say the words went in before it gives them the agent's next turn. */
 const SAY_WAIT_MS = 15_000;
@@ -47,7 +49,7 @@ export async function sayLive(
   if (!ctx.hub.hasTerminals(node)) return missedLive(required);
   const message = await liveEnvelope(ctx, running.companyId, agentId, source);
   await before(running.id);
-  if (await waitForWords(ctx, node, agentId, addressed(text, message))) return running.id;
+  if (await waitForWords(ctx, node, agentId, addressed(text, message), running, source)) return running.id;
   return missedLive(required);
 }
 
@@ -56,24 +58,35 @@ function missedLive(required: boolean): null {
   return null;
 }
 
-function waitForWords(ctx: Ctx, node: NodeIdentity, agentId: string, text: string): Promise<boolean> {
+async function waitForWords(ctx: Ctx, node: NodeIdentity, agentId: string, text: string, running: { id: string; companyId: string }, source?: MessageSource): Promise<boolean> {
   const ref = randomUUID();
+  const digest = wordsDigest(text);
+  const previous = liveInputOf(source?.data, agentId);
+  const operatorDelivery = node.kind === 'node' && ctx.hub.hasProgramOperator(node)
+    ? previous?.jobId === running.id && previous.digest === digest ? previous.delivery : await reserveDelivery(ctx.db, { companyId: running.companyId, agentId, jobId: running.id, nodeId: node.nodeId, kind: 'live', words: text, reference: `live:${ref}` }) : undefined;
+  if (operatorDelivery) rememberLiveInput(source?.data, agentId, { delivery: operatorDelivery, jobId: running.id, digest });
   const deadline = Date.now() + SAY_WAIT_MS;
   const map = waiting.get(ctx) ?? new Map<string, Waiting>();
   waiting.set(ctx, map);
-  return new Promise<boolean>(done => {
+  let sent = false;
+  let refused = false;
+  const went = await new Promise<boolean>(done => {
     const timer = setTimeout(() => done(false), SAY_WAIT_MS);
     const end = (went: boolean) => {
       clearTimeout(timer);
       done(went && Date.now() < deadline);
     };
-    map.set(ref, { node, done: end });
+    map.set(ref, { node, done: went => { refused = !went; end(went); } });
     try {
-      if (!ctx.hub.send(node, { type: 'agent.say', agentKey: agentId, text, ref, within: SAY_WAIT_MS - SAY_MARGIN_MS })) end(false);
+      sent = ctx.hub.send(node, { type: 'agent.say', agentKey: agentId, text, ref, within: SAY_WAIT_MS - SAY_MARGIN_MS, ...(operatorDelivery ? { operatorDelivery } : {}) });
+      if (!sent) end(false);
     } catch {
       end(false);
     }
   }).finally(() => map.delete(ref));
+  if (!sent && operatorDelivery) await cancelUnsentDelivery(ctx.db, operatorDelivery);
+  else if (refused && operatorDelivery) await cancelUnattemptedLive(ctx.db, operatorDelivery);
+  return went;
 }
 
 /* The node's word on words Hornhoof sent it to type. */

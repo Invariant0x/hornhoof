@@ -15,3 +15,7 @@ it('does not treat a foreign turn, child agent, empty thought, error, status or 
   expect(ownThought('kimi', { type: 'context.append_loop_event', agentId: 'main', event }, 'new')).toBe(false);
   for (const payload of [{ type: 'task_started' }, { type: 'token_count' }, { type: 'item_completed', item: { type: 'UserMessage', content: 'Words.' } }, { type: 'item_completed', turn_id: 'old', item: { type: 'Reasoning', summary_text: ['Reason.'] } }, { type: 'item_completed', item: { type: 'Reasoning', summary_text: [''] } }]) expect(ownThought('codex', { type: 'event_msg', payload }, 'new')).toBe(false);
 });
+
+it('does not infer private thought activity for a provider without an authenticated thought record', () => {
+  expect(ownThought('antigravity', { type: 'assistant', message: { content: [{ type: 'thinking', thinking: 'Reason.' }] } })).toBe(false);
+});

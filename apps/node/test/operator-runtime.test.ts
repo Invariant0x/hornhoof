@@ -35,8 +35,23 @@ it('returns explicit no_program responses without creating a program for an unkn
   const command = { ...c.identity, agentKey: randomUUID(), case: randomUUID(), capability: randomUUID() };
   await c.runtime.message({ type: 'program.screen_get', ...command, request: randomUUID() });
   expect(c.sent.at(-1)).toMatchObject({ type: 'program.screen', result: 'refused', reason: 'no_program' });
-  await c.runtime.message({ type: 'program.key_send', ...command, snapshot: randomUUID(), generation: 0, action: randomUUID(), key: 'Enter' });
+  await c.runtime.message({ type: 'program.key_send', ...command, snapshot: randomUUID(), generation: 0, action: randomUUID(), key: 'Enter', lease: randomUUID() });
   expect(c.sent.at(-1)).toMatchObject({ type: 'program.key_result', result: 'refused', reason: 'no_program' });
+  await c.runtime.message({ type: 'program.key_prepare', ...command, snapshot: randomUUID(), generation: 0, action: randomUUID(), key: 'Enter' });
+  expect(c.sent.at(-1)).toMatchObject({ type: 'program.key_prepared', result: 'refused', reason: 'no_program', lease: null });
+});
+
+it('inherits recorded source words without treating an unrecorded live attempt as taken', () => {
+  const c = fixture(), key = c.identity.agentKey, source = { id: randomUUID(), ordinal: 2 };
+  c.runtime.live(key, source, 'Original live words.');
+  expect(c.runtime.inheritSource(key, source)).toBe(false);
+  c.runtime.receipt(key, source, 'queued');
+  expect(c.runtime.inheritSource(key, source)).toBe(false);
+  c.runtime.receipt(key, source, 'taken');
+  c.runtime.begin(key, randomUUID(), { id: randomUUID(), ordinal: 3 }, 'Original live words.', true);
+  expect(c.runtime.inheritSource(key, source)).toBe(true);
+  expect(c.runtime.recorded(key)).toBe(true);
+  expect(c.sent).toContainEqual(expect.objectContaining({ type: 'program.delivery', phase: 'cancelled', deliveryOrdinal: 3 }));
 });
 
 it('uses revisions per case and gives a new job its own fixed case deadline', async () => {
@@ -75,4 +90,43 @@ it('stops question timers on cancellation and on process restoration', () => {
   c.runtime.intentional(c.identity.agentKey, 'cancelled');
   c.at(30000); c.runtime.tick();
   expect(c.sent.some(f => f.type === 'program.operator_needed' && f.reason === 'question_waiting')).toBe(false);
+});
+
+it('retains the pre-work case after escalation and reports readiness once only after owner input', async () => {
+  const c = fixture();
+  const command = { type: 'program.operator_case' as const, ...c.identity, case: randomUUID(), capability: randomUUID(), remainingMs: 600000, disposition: 'open' as const, revision: 1, reason: 'assignment_unrecorded' as const };
+  await c.runtime.message(command);
+  await c.runtime.message({ ...command, revision: 2, disposition: 'revoke', closedBecause: 'operator_unavailable' });
+  c.runtime.recoveryReady(c.identity.agentKey, true);
+  expect(c.sent.some(f => f.type === 'program.recovery_ready')).toBe(false);
+  c.runtime.ownerInput(c.identity.agentKey);
+  c.runtime.recoveryReady(c.identity.agentKey, true); c.runtime.recoveryReady(c.identity.agentKey, true);
+  expect(c.sent.filter(f => f.type === 'program.recovery_ready')).toEqual([expect.objectContaining({ case: command.case, ...c.identity })]);
+  expect(c.runtime.failureDetail(c.identity.agentKey)).toContain(command.case);
+  expect(c.runtime.failureDetail(c.identity.agentKey)).toContain('operator_unavailable');
+});
+
+it('binds an early typed-turn question to the new confirmed job without restarting its native clock', () => {
+  const c = fixture(), key = c.identity.agentKey, jobId = randomUUID();
+  c.runtime.suspend(key);
+  c.runtime.activity(key);
+  const question = { id: randomUUID(), kind: 'permission' as const, tool: 'Bash', text: 'Read ./tmp/mine?', callId: 'early' };
+  c.runtime.question(key, question);
+  c.at(30000); c.runtime.tick();
+  expect(c.sent.some(f => f.type === 'program.question')).toBe(false);
+  c.runtime.begin(key, jobId, undefined, '', true); c.runtime.tick();
+  expect(c.sent.filter(f => f.type === 'program.operator_needed' && f.reason === 'question_waiting')).toEqual([expect.objectContaining({ jobId, questionId: question.id, elapsedMs: 30000 })]);
+  expect(c.sent.filter(f => f.type === 'program.question')).toEqual([expect.objectContaining({ jobId, question })]);
+});
+
+it('uses native completion to give the next assignment its own pre-work state', async () => {
+  const c = fixture(), key = c.identity.agentKey;
+  c.runtime.started(key); c.runtime.activity(key); c.runtime.intentional(key, 'completed');
+  c.runtime.begin(key, randomUUID(), { id: randomUUID(), ordinal: 2 }, 'Next assignment.', true);
+  const identity = c.runtime.identity(key)!;
+  const incident = { ...identity, case: randomUUID(), capability: randomUUID() };
+  await c.runtime.message({ type: 'program.operator_case', ...incident, disposition: 'open', revision: 1, remainingMs: 600000, reason: 'assignment_unrecorded' });
+  const request = randomUUID();
+  await c.runtime.message({ type: 'program.screen_get', ...incident, request });
+  expect(c.sent.find(f => f.type === 'program.screen' && f.request === request)).toMatchObject({ state: 'pre_work', keysAllowed: true });
 });

@@ -42,7 +42,7 @@ describe('bounded program operator protocol', () => {
   it('permits one menu key and forbids Escape, control chords, text and paste', () => {
     for (const key of ['Enter', 'Up', 'Down', 'Left', 'Right', 'Tab']) expect(OperatorKey.parse(key)).toBe(key);
     for (const key of ['Escape', 'C-c', 'C-d', 'Ctrl-C', 'hello', '\n', ['Enter', 'Tab']]) expect(OperatorKey.safeParse(key).success).toBe(false);
-    const command = { type: 'program.key_send', ...identity, case: id, capability: id, snapshot: id, generation: 1, action: id, key: 'Enter' };
+    const command = { type: 'program.key_send', ...identity, case: id, capability: id, snapshot: id, generation: 1, action: id, key: 'Enter', lease: id };
     expect(OperatorServerMessage.parse(command)).toEqual(command);
     expect(OperatorServerMessage.safeParse({ ...command, text: 'accept' }).success).toBe(false);
   });

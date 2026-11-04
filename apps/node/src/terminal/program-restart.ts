@@ -87,6 +87,7 @@ export class TurnWords {
   }
 
   pending(): string[] { return [...this.original, ...this.words.filter(word => this.waiting(word)).map(word => word.text)]; }
+  originalPending(): boolean { return this.original.length > 0; }
   replay(text: string): void { this.replayed = text; this.endedAt = null; }
   end(now: number): void { this.endedAt ??= now; }
 

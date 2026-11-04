@@ -1,8 +1,9 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { OperatorEvidence, OperatorQuestion } from '@hornhoof/protocol/program-operator';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as storage from '../src/terminal/operator-storage.js';
 import { OperatorObserver } from '../src/terminal/operator-observer.js';
 
 const agentKey = '10000000-0000-4000-8000-000000000001';
@@ -11,7 +12,7 @@ const instance = '10000000-0000-4000-8000-000000000003';
 const deliveryId = '10000000-0000-4000-8000-000000000004';
 const identity = { agentKey, jobId, instance };
 const folders: string[] = [];
-afterEach(() => { for (const folder of folders.splice(0)) rmSync(folder, { recursive: true, force: true }); });
+afterEach(() => { vi.restoreAllMocks(); for (const folder of folders.splice(0)) rmSync(folder, { recursive: true, force: true }); });
 
 function fixture() {
   const folder = mkdtempSync(join(tmpdir(), 'hh-operator-'));
@@ -129,4 +130,224 @@ describe('program delivery evidence', () => {
     const c = fixture(); c.attempt(); c.observer.activity(identity); c.at(60000); c.observer.tick();
     expect(c.alarms()).toEqual([expect.objectContaining({ reason: 'assignment_unrecorded' })]);
   });
+});
+
+function fullOutbox(c: ReturnType<typeof fixture>, spare = 0): OperatorObserver {
+  const state = JSON.parse(readFileSync(c.options.file, 'utf8')) as { outbox: OperatorEvidence[] };
+  const fact = state.outbox[0]!;
+  state.outbox = Array.from({ length: 4096 - spare }, (_, index) => ({ ...fact, evidenceId: `20000000-0000-4000-8000-${String(index).padStart(12, '0')}` }));
+  writeFileSync(c.options.file, JSON.stringify(state));
+  return new OperatorObserver(c.options);
+}
+
+function freeOutbox(observer: OperatorObserver, c: ReturnType<typeof fixture>): void {
+  const state = JSON.parse(readFileSync(c.options.file, 'utf8')) as { outbox: OperatorEvidence[] };
+  for (const fact of state.outbox.slice(0, 4)) observer.ack(fact.evidenceId);
+}
+
+describe('bounded evidence backpressure', () => {
+  it.each(['launch', 'attempt', 'receipt', 'finalize', 'alarm', 'activity', 'exit'] as const)('keeps %s retryable without consuming state at capacity', operation => {
+    const c = fixture(); c.attempt();
+    const observer = fullOutbox(c);
+    const delivery = { id: '10000000-0000-4000-8000-000000000009', ordinal: 2 };
+    const run = () => {
+      if (operation === 'launch') observer.launch(identity, 'failed');
+      if (operation === 'attempt') observer.attempt(identity, delivery, 'live', 'never persisted words');
+      if (operation === 'receipt') observer.receipt(deliveryId, 'taken');
+      if (operation === 'finalize') observer.finalize(deliveryId, 'not_taken');
+      if (operation === 'alarm') { c.at(60000); observer.tick(); }
+      if (operation === 'activity') observer.activity(identity);
+      if (operation === 'exit') observer.exit(identity, { code: 1, signal: null });
+    };
+    const before = readFileSync(c.options.file, 'utf8');
+    expect(run).toThrow(/outbox is full/);
+    expect(readFileSync(c.options.file, 'utf8') === before).toBe(true);
+    freeOutbox(observer, c);
+    const count = c.sent.length;
+    run();
+    expect(c.sent.length).toBeGreaterThan(count);
+    expect(readFileSync(c.options.file, 'utf8')).not.toContain('never persisted words');
+    const restored = new OperatorObserver(c.options);
+    const expected = c.sent.slice(count).map(fact => fact.evidenceId);
+    const replayStart = c.sent.length;
+    restored.replay();
+    expect(c.sent.slice(replayStart).map(fact => fact.evidenceId)).toEqual(expect.arrayContaining(expected));
+  });
+
+  it.each(['activity', 'exit'] as const)('reserves all facts before a multi-fact %s', operation => {
+    const c = fixture(); c.attempt();
+    c.observer.question(identity, { id: deliveryId, kind: 'permission', tool: 'Bash', text: 'Continue?', callId: null });
+    const observer = fullOutbox(c, 1);
+    const run = () => operation === 'activity' ? observer.activity(identity) : observer.exit(identity, { code: 1, signal: null });
+    const before = readFileSync(c.options.file, 'utf8');
+    expect(run).toThrow(/outbox is full/);
+    expect(readFileSync(c.options.file, 'utf8') === before).toBe(true);
+    freeOutbox(observer, c);
+    const count = c.sent.length;
+    run();
+    const facts = c.sent.slice(count);
+    expect(facts).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'program.question', phase: 'cleared' }), expect.objectContaining({ type: 'program.delivery', phase: operation === 'activity' ? 'activity' : 'not_taken' })]));
+  });
+});
+
+type ObserverDisk = { instances: Record<string, { exited: boolean; active: boolean; ordinal: number; question: { data: OperatorQuestion } | null }>; deliveries: Record<string, { outcome: string; active: boolean }>; outbox: OperatorEvidence[] };
+const question: OperatorQuestion = { id: deliveryId, kind: 'permission', tool: 'Bash', text: 'Continue?', callId: null };
+const nextQuestion = { ...question, id: '10000000-0000-4000-8000-000000000008' };
+const secondDelivery = { id: '10000000-0000-4000-8000-000000000009', ordinal: 2 };
+function disk(c: ReturnType<typeof fixture>): ObserverDisk { return JSON.parse(readFileSync(c.options.file, 'utf8')) as ObserverDisk; }
+function compoundFixture() {
+  const c = fixture(); c.attempt();
+  c.observer.attempt(identity, secondDelivery, 'live', 'second delivery words');
+  c.observer.question(identity, question);
+  return c;
+}
+
+describe('atomic durable observer transitions', () => {
+  it.each(['exit', 'activity', 'question'] as const)('commits the complete %s snapshot once before publishing any of its facts', operation => {
+    const c = compoundFixture(); const snapshots: ObserverDisk[] = [];
+    const write = storage.writeOperatorStore;
+    vi.spyOn(storage, 'writeOperatorStore').mockImplementation((file, state) => {
+      snapshots.push(structuredClone(state) as ObserverDisk);
+      write(file, state);
+    });
+    const sentBefore = c.sent.length;
+    if (operation === 'exit') c.observer.exit(identity, { code: 1, signal: null });
+    if (operation === 'activity') c.observer.activity(identity);
+    if (operation === 'question') c.observer.question(identity, nextQuestion);
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0]).toEqual(disk(c));
+    const committed = snapshots[0]!;
+    const facts = c.sent.slice(sentBefore);
+    expect(facts).toEqual(committed.outbox.slice(-facts.length));
+    expect(facts[0]).toMatchObject({ type: 'program.question', phase: 'cleared' });
+    if (operation === 'exit') {
+      expect(committed.instances[instance]!.exited).toBe(true);
+      expect(Object.values(committed.deliveries).map(row => row.outcome)).toEqual(['not_taken', 'not_taken']);
+      expect(facts.filter(fact => fact.type === 'program.delivery' && fact.phase === 'not_taken')).toHaveLength(2);
+    }
+    if (operation === 'activity') {
+      expect(committed.instances[instance]!.active).toBe(true);
+      expect(Object.values(committed.deliveries).every(row => row.active)).toBe(true);
+      expect(facts.filter(fact => fact.type === 'program.delivery' && fact.phase === 'activity')).toHaveLength(2);
+    }
+    if (operation === 'question') {
+      expect(committed.instances[instance]!.question?.data.id).toBe(nextQuestion.id);
+      expect(facts[1]).toMatchObject({ type: 'program.question', phase: 'asked', question: nextQuestion });
+    }
+  });
+
+  it.each(['launch', 'attempt', 'receipt', 'finalize', 'alarm', 'activity', 'exit', 'question', 'recovery', 'ack'] as const)('rolls back a failed %s commit without publishing or consuming the pending identity', operation => {
+    const c = compoundFixture(); const before = disk(c); const sentBefore = [...c.sent];
+    const run = () => {
+      if (operation === 'launch') c.observer.launch(identity, 'failed');
+      if (operation === 'attempt') c.observer.attempt(identity, { ...secondDelivery, id: nextQuestion.id, ordinal: 3 }, 'live', 'retry these exact words');
+      if (operation === 'receipt') c.observer.receipt(deliveryId, 'taken');
+      if (operation === 'finalize') c.observer.finalize(deliveryId, 'not_taken');
+      if (operation === 'alarm') { c.at(60000); c.observer.tick(); }
+      if (operation === 'activity') c.observer.activity(identity);
+      if (operation === 'exit') c.observer.exit(identity, { code: 1, signal: null });
+      if (operation === 'question') c.observer.question(identity, nextQuestion);
+      if (operation === 'recovery') c.observer.recoveryReady(identity, nextQuestion.id);
+      if (operation === 'ack') c.observer.ack(before.outbox[0]!.evidenceId);
+    };
+    vi.spyOn(storage, 'writeOperatorStore').mockImplementationOnce(() => { throw new Error('injected durable write failure'); });
+    expect(run).toThrow('injected durable write failure');
+    expect(c.sent).toEqual(sentBefore);
+    expect(disk(c)).toEqual(before);
+    c.observer.replay();
+    expect(c.sent.slice(sentBefore.length).map(fact => fact.evidenceId)).toEqual(before.outbox.map(fact => fact.evidenceId));
+    c.sent.splice(sentBefore.length);
+    run();
+    const committed = disk(c);
+    if (operation === 'ack') expect(committed.outbox.map(fact => fact.evidenceId)).not.toContain(before.outbox[0]!.evidenceId);
+    else {
+      expect(c.sent.length).toBeGreaterThan(sentBefore.length);
+      expect(c.sent[sentBefore.length]!.ordinal).toBe(before.instances[instance]!.ordinal);
+    }
+    const count = c.sent.length;
+    new OperatorObserver(c.options).replay();
+    expect(c.sent.slice(count).map(fact => fact.evidenceId)).toEqual(committed.outbox.map(fact => fact.evidenceId));
+  });
+
+  it('persists every terminal fact before its transport callback can inspect or acknowledge the exited snapshot', () => {
+    const c = compoundFixture(); const observed: ObserverDisk[] = [];
+    const observer = new OperatorObserver({ ...c.options, send: fact => { observed.push(disk(c)); c.sent.push(fact); return true; } });
+    observer.exit(identity, { code: 1, signal: null });
+    for (const state of observed) {
+      expect(Object.values(state.deliveries).map(row => row.outcome)).toEqual(['not_taken', 'not_taken']);
+      expect(state.outbox.filter(fact => fact.type === 'program.delivery' && fact.phase === 'not_taken')).toHaveLength(2);
+    }
+    expect(observed.length).toBeGreaterThan(0);
+  });
+});
+
+it('preserves the native question clock when its confirmed job binds after an early typed-turn request', () => {
+  const c = fixture(); c.at(10000);
+  c.observer.question(identity, question, 10000);
+  c.at(29999); c.observer.tick(); expect(c.alarms()).toEqual([]);
+  c.at(30000); c.observer.tick();
+  expect(c.alarms()).toEqual([expect.objectContaining({ reason: 'question_waiting', elapsedMs: 30000 })]);
+});
+
+it('does not write or flush duplicate activity, observations, or acknowledgements', () => {
+  const c = fixture(); c.attempt(); c.observer.receipt(deliveryId, 'taken');
+  c.observer.activity(identity); c.observer.recoveryReady(identity, nextQuestion.id);
+  const acknowledged = c.sent[0]!.evidenceId; c.observer.ack(acknowledged);
+  const write = vi.spyOn(storage, 'writeOperatorStore');
+  c.observer.activity(identity); c.observer.activity(identity);
+  c.observer.launch(identity, 'started'); c.attempt(); c.observer.receipt(deliveryId, 'taken');
+  c.observer.finalize(deliveryId, 'not_taken'); c.observer.question(identity, null);
+  c.observer.recoveryReady(identity, nextQuestion.id); c.observer.ack(acknowledged); c.observer.tick();
+  expect(write).not.toHaveBeenCalled();
+});
+
+it('prunes only acknowledged settled delivery history and unused exited instances', () => {
+  const c = fixture(); c.attempt('live'); c.observer.receipt(deliveryId, 'taken');
+  const stored = JSON.parse(readFileSync(c.options.file, 'utf8')) as {
+    instances: Record<string, { exited: boolean; instance: string }>;
+    deliveries: Record<string, { id: string; at: number; outcome: string; kind: string }>;
+  };
+  const original = stored.deliveries[deliveryId]!;
+  const id = (index: number) => `40000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
+  original.at = 0;
+  for (let index = 1; index <= 2050; index++) stored.deliveries[id(index)] = { ...original, id: id(index), at: index };
+  stored.deliveries[id(1)]!.outcome = 'pending';
+  stored.deliveries[id(2)]!.kind = 'assignment';
+  stored.instances[id(9)] = { ...stored.instances[instance]!, instance: id(9), exited: true };
+  writeFileSync(c.options.file, JSON.stringify(stored));
+  const observer = new OperatorObserver(c.options);
+  observer.ack(c.sent[0]!.evidenceId);
+  const committed = disk(c);
+  expect(Object.keys(committed.deliveries)).toHaveLength(2048);
+  expect(committed.deliveries[deliveryId]).toBeDefined();
+  expect(committed.deliveries[id(1)]).toMatchObject({ outcome: 'pending' });
+  expect(committed.deliveries[id(2)]).toBeDefined();
+  for (const index of [3, 4, 5]) expect(committed.deliveries[id(index)]).toBeUndefined();
+  expect(committed.instances[id(9)]).toBeUndefined();
+});
+
+it('retires old physical programs once, cancels their pending deliveries and stops their timers', () => {
+  const c = compoundFixture(); c.observer.retire();
+  expect(disk(c).instances[instance]!.exited).toBe(true);
+  expect(Object.values(disk(c).deliveries).map(row => row.outcome)).toEqual(['cancelled', 'cancelled']);
+  const write = vi.spyOn(storage, 'writeOperatorStore'); c.observer.retire(); c.at(600000); c.observer.tick();
+  expect(write).not.toHaveBeenCalled(); expect(c.alarms()).toEqual([]);
+});
+
+it('keeps a committed multi-fact transition replayable when the transport callback throws', () => {
+  const c = compoundFixture();
+  const observer = new OperatorObserver({ ...c.options, send: () => { throw new Error('transport unavailable'); } });
+  expect(() => observer.exit(identity, { code: 1, signal: null })).toThrow('transport unavailable');
+  expect(Object.values(disk(c).deliveries).map(row => row.outcome)).toEqual(['not_taken', 'not_taken']);
+  const count = c.sent.length; new OperatorObserver(c.options).replay();
+  expect(c.sent.slice(count).map(fact => fact.evidenceId)).toEqual(disk(c).outbox.map(fact => fact.evidenceId));
+});
+
+it('requires an assignment receipt or live taken receipt before inheriting a recorded source', () => {
+  const c = fixture(); expect(c.observer.recordedSource(deliveryId)).toBe(false);
+  c.attempt(); expect(c.observer.recordedSource(deliveryId)).toBe(false);
+  c.observer.receipt(deliveryId, 'queued'); expect(c.observer.recordedSource(deliveryId)).toBe(true);
+  c.observer.attempt(identity, secondDelivery, 'live', 'live source');
+  c.observer.receipt(secondDelivery.id, 'queued'); expect(c.observer.recordedSource(secondDelivery.id)).toBe(false);
+  c.observer.receipt(secondDelivery.id, 'taken'); expect(c.observer.recordedSource(secondDelivery.id)).toBe(true);
 });

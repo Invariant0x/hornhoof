@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { z } from 'zod';
-import type { OperatorDelivery, OperatorNodeMessage, OperatorQuestion, OperatorServerMessage } from '@hornhoof/protocol/program-operator';
+import type { OperatorDelivery, OperatorNodeMessage, OperatorQuestion, OperatorReason, OperatorServerMessage } from '@hornhoof/protocol/program-operator';
 import { OperatorControl, type OperatorProgram } from './operator-control.js';
 import { OperatorObserver, type OperatorIdentity } from './operator-observer.js';
 
@@ -14,7 +14,7 @@ type Source = {
   press(key: string, value: 'Enter' | 'Up' | 'Down' | 'Left' | 'Right' | 'Tab'): Promise<void>;
   secrets(): string[];
 };
-type Target = { identity: OperatorIdentity; control: OperatorControl; generation: number; physical: boolean; pasted: boolean; started: boolean; active: boolean; recorded: boolean; taken: boolean; assignment: OperatorDelivery | null; caseId: string | null; deadline: number | null; failed: string | null; intentional?: 'cancelled' | 'update' | 'restart' | 'offline' | 'completed' };
+type Target = { identity: OperatorIdentity; control: OperatorControl; generation: number; physical: boolean; pasted: boolean; started: boolean; active: boolean; recorded: boolean; taken: boolean; assignment: OperatorDelivery | null; caseId: string | null; caseReason: OperatorReason | null; ownerTouched: boolean; bound: boolean; idle: boolean; pendingActivity: boolean; pendingQuestion: { data: OperatorQuestion; at: number } | null; deadline: number | null; failed: string | null; intentional?: 'cancelled' | 'update' | 'restart' | 'offline' | 'completed' };
 
 /* Runtime glue stays outside the terminal host's provider logic; evidence and the key guard share one input lane. */
 export class OperatorRuntime {
@@ -26,27 +26,53 @@ export class OperatorRuntime {
   constructor(private readonly options: OperatorOptions, private readonly source: Source) {
     this.now = options.now ?? (() => performance.timeOrigin + performance.now());
     this.observer = new OperatorObserver({ file: join(options.dir, 'evidence.json'), send: options.send, connected: options.connected, now: this.now });
+    this.observer.retire();
   }
 
   begin(key: string, jobId: string | null, metadata: OperatorDelivery | undefined, words: string, reuse: boolean): void {
     if (!z.uuid().safeParse(key).success || !z.uuid().safeParse(jobId).success) return;
     let target = this.targets.get(key);
     if (!target || !reuse) {
-      const identity = { agentKey: key, jobId, instance: randomUUID() };
-      const control = new OperatorControl({ file: join(this.options.dir, `actions-${key}.json`), now: this.now, current: () => this.current(key), capture: () => this.source.capture(key), press: value => this.source.press(key, value), lane: run => this.serial(key, run), secrets: this.source.secrets });
-      target = { identity, control, generation: 0, physical: reuse, pasted: reuse, started: reuse, active: reuse, recorded: false, taken: false, assignment: null, caseId: null, deadline: null, failed: null };
+      target = this.createTarget(key, jobId, reuse);
       this.targets.set(key, target);
     }
-    if (target.identity.jobId !== jobId || target.assignment?.id !== metadata?.id) { target.caseId = null; target.deadline = null; target.failed = null; }
+    this.bindTarget(target, jobId, metadata);
+    if (words && metadata) this.observer.attempt(target.identity, metadata, 'assignment', words);
+    this.restorePending(target);
+    if (reuse && !target.physical) target.physical = true;
+  }
+
+  private createTarget(key: string, jobId: string | null, reuse: boolean): Target {
+    const identity = { agentKey: key, jobId, instance: randomUUID() };
+    const control = new OperatorControl({ file: join(this.options.dir, `actions-${key}.json`), now: this.now, current: () => this.current(key), capture: () => this.source.capture(key), press: value => this.source.press(key, value), lane: run => this.serial(key, run), secrets: this.source.secrets });
+    return { identity, control, generation: 0, physical: reuse, pasted: reuse, started: reuse, active: reuse, recorded: false, taken: false, assignment: null, caseId: null, caseReason: null, ownerTouched: false, bound: true, idle: false, pendingActivity: false, pendingQuestion: null, deadline: null, failed: null };
+  }
+
+  private bindTarget(target: Target, jobId: string | null, metadata: OperatorDelivery | undefined): void {
+    if (target.identity.jobId !== jobId || target.assignment?.id !== metadata?.id) { target.caseId = null; target.caseReason = null; target.ownerTouched = false; target.deadline = null; target.failed = null; }
+    if (target.idle) { target.pasted = false; target.started = false; target.active = false; }
+    target.bound = true; target.idle = false;
     target.identity = { ...target.identity, jobId };
     target.assignment = metadata ?? null; target.recorded = false; target.taken = false;
     target.generation++; target.intentional = undefined;
-    if (words && metadata) this.observer.attempt(target.identity, metadata, 'assignment', words);
-    if (reuse && !target.physical) target.physical = true;
+  }
+
+  private restorePending(target: Target): void {
+    const pendingQuestion = target.pendingQuestion, pendingActivity = target.pendingActivity;
+    target.pendingQuestion = null; target.pendingActivity = false;
+    if (pendingActivity) this.observer.activity(target.identity);
+    if (pendingQuestion) this.observer.question(target.identity, pendingQuestion.data, Math.max(0, this.now() - pendingQuestion.at));
   }
 
   enabled(key: string): boolean { return this.targets.has(key); }
   identity(key: string): OperatorIdentity | null { return this.targets.get(key)?.identity ?? null; }
+
+  suspend(key: string): void {
+    const target = this.targets.get(key); if (!target) return;
+    this.observer.question(target.identity, null);
+    target.bound = false; target.idle = false; target.pendingActivity = false; target.pendingQuestion = null;
+    target.pasted = false; target.started = false; target.active = false; target.generation++;
+  }
 
   launch(key: string, phase: 'attempt' | 'started' | 'failed'): void {
     const target = this.targets.get(key); if (!target) return;
@@ -62,13 +88,15 @@ export class OperatorRuntime {
   activity(key: string): void {
     const target = this.targets.get(key); if (!target) return;
     target.active = true; target.generation++;
-    this.observer.activity(target.identity);
+    if (target.bound) this.observer.activity(target.identity);
+    else target.pendingActivity = true;
   }
 
   question(key: string, question: OperatorQuestion | null): void {
     const target = this.targets.get(key); if (!target) return;
     target.generation++;
-    this.observer.question(target.identity, question);
+    if (target.bound) this.observer.question(target.identity, question);
+    else if (!question || target.pendingQuestion?.data.id !== question.id) target.pendingQuestion = question ? { data: question, at: this.now() } : null;
   }
 
   receipt(key: string, metadata: OperatorDelivery | undefined, phase: 'queued' | 'taken' | 'not_taken' | 'cancelled'): void {
@@ -89,6 +117,41 @@ export class OperatorRuntime {
 
   recorded(key: string): boolean { return this.targets.get(key)?.recorded ?? false; }
 
+  inheritSource(key: string, metadata: OperatorDelivery | undefined): boolean {
+    if (!metadata || !this.observer.recordedSource(metadata.id)) return false;
+    const target = this.targets.get(key); if (!target) return false;
+    target.recorded = true;
+    if (target.assignment) this.observer.finalize(target.assignment.id, 'cancelled');
+    return true;
+  }
+
+  failureDetail(key: string): string | null {
+    const target = this.targets.get(key), reason = this.failure(key);
+    return reason ? `${reason}; case ${target?.caseId ?? 'not yet assigned'}` : null;
+  }
+
+  recovering(key: string): boolean {
+    const target = this.targets.get(key);
+    return Boolean(target?.failed && target.caseId && target.caseReason === 'assignment_unrecorded' && !target.recorded && !target.started && !target.active && target.physical);
+  }
+
+  ownerInput(key: string): void {
+    const target = this.targets.get(key); if (!target) return;
+    target.ownerTouched ||= this.recovering(key);
+    target.generation++;
+  }
+
+  recoveryReady(key: string, ready: boolean): void {
+    const target = this.targets.get(key);
+    if (!target || !ready || !target.ownerTouched || !this.recovering(key) || this.awaitingNativeInput(key)) return;
+    this.observer.recoveryReady(target.identity, target.caseId!);
+  }
+
+  private awaitingNativeInput(key: string): boolean {
+    const source = this.source.current(key);
+    return Boolean(source?.runningTool || source?.retrying || source?.wait);
+  }
+
   failure(key: string): string | null {
     const target = this.targets.get(key);
     if (!target || target.recorded || target.active || target.started) return null;
@@ -98,8 +161,9 @@ export class OperatorRuntime {
   intentional(key: string, cause: NonNullable<Target['intentional']>): void {
     const target = this.targets.get(key); if (!target) return;
     target.intentional = cause; target.generation++;
-    this.observer.question(target.identity, null);
-    if (cause === 'cancelled' && target.assignment) this.observer.finalize(target.assignment.id, 'cancelled');
+    target.idle = cause === 'completed';
+    this.question(key, null);
+    if (target.bound && cause === 'cancelled' && target.assignment) this.observer.finalize(target.assignment.id, 'cancelled');
   }
 
   exited(key: string, exit: { code: number | null; signal: string | null }): void {
@@ -119,21 +183,32 @@ export class OperatorRuntime {
     if (frame.type === 'program.evidence_ack') { this.observer.ack(frame.evidenceId); return; }
     const target = this.targets.get(frame.agentKey);
     if (!target) {
-      const identity = { agentKey: frame.agentKey, jobId: frame.jobId, instance: frame.instance };
-      if (frame.type === 'program.screen_get') this.options.send({ type: 'program.screen', ...identity, request: frame.request, result: 'refused', reason: 'no_program', snapshot: null, generation: 0, state: 'unknown', keysAllowed: false, protected: false, cols: 1, rows: 1, cells: '' });
-      if (frame.type === 'program.key_send') this.options.send({ type: 'program.key_result', ...identity, action: frame.action, result: 'refused', reason: 'no_program' });
+      this.missingProgram(frame);
       return;
     }
     if (frame.type === 'program.operator_case') {
-      const accepted = target.control.openCase(frame);
-      if (!accepted || frame.instance !== target.identity.instance || frame.jobId !== target.identity.jobId) return;
-      target.caseId = frame.case;
-      target.deadline = Math.min(target.deadline ?? Infinity, this.now() + frame.remainingMs);
-      if (frame.disposition === 'revoke') target.failed ??= 'operator_case_closed';
+      this.updateCase(target, frame);
       return;
     }
-    if (frame.type === 'program.screen_get') this.options.send(await target.control.screen(frame));
+    if (frame.type === 'program.key_prepare') this.options.send(target.control.prepare(frame));
+    else if (frame.type === 'program.screen_get') this.options.send(await target.control.screen(frame));
     else this.options.send(await target.control.key(frame));
+  }
+
+  private missingProgram(frame: Exclude<OperatorServerMessage, { type: 'program.evidence_ack' }>): void {
+    const identity = { agentKey: frame.agentKey, jobId: frame.jobId, instance: frame.instance };
+    if (frame.type === 'program.screen_get') this.options.send({ type: 'program.screen', ...identity, request: frame.request, result: 'refused', reason: 'no_program', snapshot: null, generation: 0, state: 'unknown', keysAllowed: false, protected: false, cols: 1, rows: 1, cells: '' });
+    if (frame.type === 'program.key_send') this.options.send({ type: 'program.key_result', ...identity, action: frame.action, result: 'refused', reason: 'no_program' });
+    if (frame.type === 'program.key_prepare') this.options.send({ type: 'program.key_prepared', ...identity, action: frame.action, result: 'refused', reason: 'no_program', lease: null });
+  }
+
+  private updateCase(target: Target, frame: Extract<OperatorServerMessage, { type: 'program.operator_case' }>): void {
+    const accepted = target.control.openCase(frame);
+    if (!accepted || frame.instance !== target.identity.instance || frame.jobId !== target.identity.jobId) return;
+    target.caseId = frame.case;
+    target.caseReason = frame.reason ?? target.caseReason;
+    target.deadline = Math.min(target.deadline ?? Infinity, this.now() + frame.remainingMs);
+    if (frame.disposition === 'revoke') target.failed ??= frame.closedBecause ?? 'operator_case_closed';
   }
 
   serial<T>(key: string, run: () => Promise<T>): Promise<T> {
@@ -147,6 +222,6 @@ export class OperatorRuntime {
   private current(key: string): OperatorProgram | null {
     const target = this.targets.get(key), source = this.source.current(key);
     if (!target || !source) return null;
-    return { ...source, ...target.identity, generation: target.generation, alive: source.alive && target.physical, pasted: source.pasted || target.pasted, turnStarted: source.turnStarted || target.started, active: source.active || target.active };
+    return { ...source, ...target.identity, jobId: target.bound ? target.identity.jobId : null, generation: target.generation, alive: source.alive && target.physical, pasted: source.pasted || target.pasted, turnStarted: source.turnStarted || target.started, active: source.active || target.active };
   }
 }
