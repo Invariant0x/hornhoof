@@ -1,10 +1,23 @@
-import { cut, parseServerMessage, type NodeDisconnectCause, type NodeMessage, type NodeReconnect, type ServerMessage } from '@hornhoof/protocol';
+import { cut, parseServerMessage, type NodeDisconnectCause, type NodeReconnect } from '@hornhoof/protocol';
+import { OperatorDeliveryMetadata, OperatorServerMessage, type ProgramNodeMessage, type ProgramServerMessage } from '@hornhoof/protocol/program-operator';
 import { Agent as HttpAgent } from 'node:http';
 import { Agent as HttpsAgent } from 'node:https';
 import type { LookupFunction } from 'node:net';
 import { networkInterfaces } from 'node:os';
 import WebSocket from 'ws';
 import { nodeLog } from './node-log.js';
+
+export function parseOperatorServerMessage(raw: string): ProgramServerMessage | null {
+  try {
+    const value: unknown = JSON.parse(raw);
+    const operator = OperatorServerMessage.safeParse(value);
+    if (operator.success) return operator.data;
+    const base = parseServerMessage(raw);
+    if (base?.type !== 'job.run' && base?.type !== 'agent.say') return base;
+    const metadata = OperatorDeliveryMetadata.safeParse(value);
+    return metadata.success ? { ...base, ...metadata.data } : null;
+  } catch { return null; }
+}
 
 export const DEFAULT_BACKOFF = { firstMs: 1_000, maxMs: 30_000 } as const;
 /* Bidirectional frames every 15 s keep home NAT mappings (30-60 s idle expiry) warm; 35 s silence catches two missed pings
@@ -21,8 +34,9 @@ export type ConnectOptions = {
   url: string;
   key: string;
   log?(line: string): void;
-  onOpen(send: (m: NodeMessage) => boolean): void;
-  onMessage(m: ServerMessage): void;
+  onOpen(send: (m: ProgramNodeMessage) => boolean): void;
+  onMessage(m: ProgramServerMessage): void;
+  onClose?(): void;
   /* Hornhoof does not know this key any more: the machine was disconnected there. */
   onRefused?(): void;
   backoff?: { firstMs: number; maxMs: number };
@@ -272,7 +286,7 @@ function resolveHooks({
   return { now, random, readAddresses, scheduleRetry, createSocket };
 }
 
-function sendFrame(ws: WebSocket, m: NodeMessage): boolean {
+function sendFrame(ws: WebSocket, m: ProgramNodeMessage): boolean {
   if (ws.readyState !== WebSocket.OPEN) return false;
   ws.send(JSON.stringify(m));
   return true;
@@ -311,6 +325,11 @@ class ConnectionSession {
     const { log, key } = this.opts;
     if (!log) return;
     safeCall(() => log(cleanSingleLine(line, key, 500)));
+  }
+
+  private notifyClosed(): void {
+    const { onClose } = this.opts;
+    if (onClose) safeCall(() => onClose(), err => this.log(`Close handler failed: ${errMessage(err)}`));
   }
 
   private notifyRefused(): void {
@@ -419,7 +438,7 @@ class ConnectionSession {
     this.checkHealth(at);
   }
 
-  private makeSender(ws: WebSocket, report: NodeReconnect | null, state: { sent: boolean }): (m: NodeMessage) => boolean {
+  private makeSender(ws: WebSocket, report: NodeReconnect | null, state: { sent: boolean }): (m: ProgramNodeMessage) => boolean {
     return m => {
       const ok = sendFrame(ws, m);
       if (ok && report && !state.sent && m.type === 'hello') {
@@ -429,7 +448,7 @@ class ConnectionSession {
     };
   }
 
-  private invokeOnOpen(attempt: Attempt, send: (m: NodeMessage) => boolean): boolean {
+  private invokeOnOpen(attempt: Attempt, send: (m: ProgramNodeMessage) => boolean): boolean {
     let ok = true;
     safeCall(
       () => this.opts.onOpen(send),
@@ -476,7 +495,7 @@ class ConnectionSession {
   private handleMessage(ws: WebSocket, data: WebSocket.RawData): void {
     if (!this.isCurrent(ws)) return;
     this.touchInbound();
-    const msg = parseServerMessage(String(data));
+    const msg = parseOperatorServerMessage(String(data));
     if (msg) safeCall(() => this.opts.onMessage(msg), err => this.log(`Message handler failed: ${errMessage(err)}`));
   }
 
@@ -507,6 +526,7 @@ class ConnectionSession {
     if (!this.isCurrent(ws)) return;
     this.clearSocketTimers();
     this.active = null;
+    this.notifyClosed();
     const reason = nonEmpty(cleanSingleLine(rawReason.toString('utf8'), this.opts.key, 200));
     const cause = causeFromClose(code, attempt);
     this.log(disconnectLogLine(cause, code, reason || attempt.error));
@@ -563,6 +583,7 @@ class ConnectionSession {
     const current = this.active;
     this.active = null;
     if (!current) return;
+    this.notifyClosed();
     if (current.ws.readyState === WebSocket.CONNECTING) safeCall(() => current.ws.terminate());
     else safeCall(() => current.ws.close());
   }

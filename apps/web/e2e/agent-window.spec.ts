@@ -104,7 +104,14 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
       await window.getByRole('button', { name: words.minimize }).click();
       await expect(window).toBeHidden();
       const strip = page.getByRole('button', { name: words.restore });
-      expect((await box(strip)).width).toBeLessThanOrEqual(36);
+      const stripPlace = await box(strip);
+      if (width === 1440) expect(stripPlace.width).toBeLessThanOrEqual(36);
+      else {
+        /* In a row at the foot of a phone's screen. */
+        expect(stripPlace.height).toBeLessThanOrEqual(44);
+        expect(stripPlace.y + stripPlace.height).toBeGreaterThanOrEqual(898);
+        expect(stripPlace.x + stripPlace.width).toBeLessThanOrEqual(width);
+      }
       await capture('strip');
       await nav.getByRole('button', { name: words.subscriptions, exact: true }).click();
       await expect(page.getByRole('heading', { name: words.subscriptions, exact: true })).toBeVisible();

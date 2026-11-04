@@ -98,26 +98,23 @@ describe('words the program never took', () => {
     expect((await c.events()).some(e => (e.data as { text?: string }).text === LINE)).toBe(true);
   });
 
-  it('tells Operations once for three entries within an hour, with the agent, program and three times', async () => {
+  it('keeps legacy requeues but does not infer a program operator reason from three log entries', async () => {
     const c = await atWork();
     const at = new Date('2026-11-03T10:10:00Z');
     const times = [0, 10, 20, 30].map(minutes => new Date(+at + minutes * 60_000));
     await c.send(TEXT, times[0]); await c.send(TEXT, times[1]);
     expect(await c.turnsOf(c.watcher.id)).toHaveLength(0);
     await c.send(TEXT, times[2]); await c.send(TEXT, times[3]);
-    const messages = await c.turnsOf(c.watcher.id);
-    expect(messages).toHaveLength(1);
-    expect(messages[0]!.prompt).toContain(c.agent.name);
-    expect(messages[0]!.prompt).toContain(c.sub.provider);
-    for (const time of times.slice(0, 3)) expect(messages[0]!.prompt).toContain(time.toISOString());
+    expect(await c.turnsOf(c.watcher.id)).toEqual([]);
+    expect((await c.events()).filter(event => (event.data as { text?: string }).text === LINE)).toHaveLength(4);
   });
 
-  it('does not count entries older than an hour', async () => {
+  it('does not use wall-clock gaps between bare unheard reports as program evidence', async () => {
     const c = await atWork();
     const at = new Date('2026-11-03T10:10:00Z');
     for (const minutes of [0, 61, 62]) await c.send(TEXT, new Date(+at + minutes * 60_000));
     expect(await c.turnsOf(c.watcher.id)).toHaveLength(0);
     await c.send(TEXT, new Date(+at + 63 * 60_000));
-    expect(await c.turnsOf(c.watcher.id)).toHaveLength(1);
+    expect(await c.turnsOf(c.watcher.id)).toHaveLength(0);
   });
 });

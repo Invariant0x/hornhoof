@@ -1226,7 +1226,7 @@ export async function ask(ctx: Live, agentId: string, taskId: string, q: Ask): P
     const shown = await tx
       .update(attachments)
       .set({ requestId: request!.id })
-      .where(and(inArray(attachments.id, pictures), eq(attachments.agentId, agentId), isNull(attachments.requestId)))
+      .where(and(inArray(attachments.id, pictures), eq(attachments.agentId, agentId), isNull(attachments.requestId), isNull(attachments.operatorCaseId)))
       .returning({ id: attachments.id });
     if (shown.length !== pictures.length) throw refuse(409, 'task_changed', 'A picture was shown meanwhile. Send it again with hh-attach.');
   });
@@ -1334,7 +1334,7 @@ async function checkPictures(db: Db, companyId: string, agentId: string, ids: st
   const rows = await db
     .select({ id: attachments.id, companyId: attachments.companyId, agentId: attachments.agentId, personId: attachments.personId, requestId: attachments.requestId, taskId: attachments.taskId })
     .from(attachments)
-    .where(inArray(attachments.id, ids));
+    .where(and(inArray(attachments.id, ids), isNull(attachments.operatorCaseId)));
   for (const id of ids) {
     const found = rows.find(r => r.id === id);
     if (!found || found.companyId !== companyId || found.agentId !== agentId || found.personId) throw refuse(400, 'task_invalid', `${id} is not a picture you sent. Send it with hh-attach and use the id it prints.`);
