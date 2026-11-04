@@ -184,7 +184,8 @@ export type OrchestratorState = {
   limitUntil?: string | null;
   /* The plan used the share set for tasks until then; task turns wait, people's messages still go. */
   budgetUntil?: string | null;
-  reason: 'no_subscription' | 'waiting_machine' | 'needs_login' | 'needs_setup' | 'node_outdated' | 'machine_offline' | 'browser_failed' | null;
+  reason: 'no_subscription' | 'waiting_machine' | 'needs_login' | 'needs_setup' | 'node_outdated' | 'machine_offline' | null;
+  browserError?: string | null;
   busy: boolean;
   runningJobId: string | null;
   queued: number;

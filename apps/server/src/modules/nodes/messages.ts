@@ -161,7 +161,7 @@ async function updatePlanStatus(ctx: Ctx, nodeId: string, msg: Extract<NodeMessa
 async function handleNodeStatus(ctx: Ctx, id: NodeIdentity, msg: Extract<NodeMessage, { type: 'status' }>, now: Date): Promise<void> {
   const unblocked = ctx.hub.noteStatus(id, msg.noRuns, msg.browserError);
   const ready = id.kind === 'node' ? await updatePlanStatus(ctx, id.nodeId, msg, now) : false;
-  if (ready || unblocked) await pumpWaiting(ctx);
+  if (ready) await pumpWaiting(ctx);
   if (unblocked) await pumpTests(ctx);
 }
 

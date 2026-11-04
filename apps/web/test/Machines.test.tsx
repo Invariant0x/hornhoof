@@ -412,19 +412,32 @@ describe('Machines', () => {
   });
 
   it.each([
-    ['en', 'Browser failed', 'The browser for checks did not start (libnss3.so missing). Run the install command on this machine again without --join, or check the node logs.', 'Built-in node'],
-    ['ru', 'Браузер не запустился', 'Браузер для проверок не запустился (libnss3.so missing). Выполните на этой машине команду установки еще раз без --join или посмотрите журнал ноды.', 'Встроенная нода'],
-  ])('marks a machine whose browser check failed with the named reason in its row and its card in %s', async (language, mark, note, builtinName) => {
+    ['en', 'Browser failed', 'The browser for checks did not start (libnss3.so missing). Run the install command on this machine again without --join, or check the node logs.', 'Built-in node', 'Plans'],
+    ['ru', 'Браузер не запустился', 'Браузер для проверок не запустился (libnss3.so missing). Выполните на этой машине команду установки еще раз без --join или посмотрите журнал ноды.', 'Встроенная нода', 'Подписки'],
+  ])('marks a machine whose browser check failed with the named reason in its row and its card in %s', async (language, mark, note, builtinName, plansHeader) => {
     localStorage.setItem('hh-lang', language);
-    lists({ 'GET /api/machines': [200, { machines: [{ ...MACHINES[0]!, browserError: 'libnss3.so missing' }, { ...MACHINES[1]!, browserError: null }], builtin: { ...BUILTIN, browserError: 'libnss3.so missing' } }] });
+    const offlineWithPlan = { ...MACHINES[1]!, id: 'm3', hostname: 'spare-box', plans: [{ id: 's-kimi', provider: 'kimi' as const, status: 'ready' as const, online: true }] };
+    const macPlans = [...MACHINES[0]!.plans, { id: 's-glm', provider: 'glm' as const, status: 'ready' as const, online: false }];
+    lists({ 'GET /api/machines': [200, { machines: [{ ...MACHINES[0]!, plans: macPlans, browserError: 'libnss3.so missing' }, { ...MACHINES[1]!, browserError: null }, offlineWithPlan], builtin: { ...BUILTIN, browserError: 'libnss3.so missing' } }] });
     render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
     await screen.findByRole('table');
     const row = screen.getByRole('row', { name: 'ivan-mbp' });
     expect(within(row).getByTitle(note)).toHaveTextContent(mark);
-    expect(row.querySelectorAll('.marks > span.dim')).toHaveLength(2);
+    const marks = row.querySelectorAll('.marks > span');
+    expect(marks[0]).not.toHaveClass('dim');
+    expect(marks[1]).toHaveClass('dim');
+    expect(marks[2]).toHaveClass('dim');
+    expect(screen.getByRole('row', { name: 'spare-box' }).querySelector('.marks > span')).toHaveClass('dim');
+    expect(screen.getByRole('row', { name: 'build-box' }).querySelector('.marks')).toHaveTextContent(/^0$/);
     expect(within(screen.getByRole('row', { name: 'build-box' })).queryByText(mark)).not.toBeInTheDocument();
     expect(within(screen.getByRole('row', { name: builtinName })).getByTitle(note)).toHaveTextContent(mark);
     expect(within(card('ivan-mbp')).getByText(note, { selector: 'p' })).toBeInTheDocument();
+    const plansSort = within(screen.getByRole('columnheader', { name: plansHeader })).getByRole('button');
+    await userEvent.click(plansSort);
+    expect(plansSort.closest('th')).toHaveAttribute('aria-sort', 'descending');
+    const order = screen.getAllByRole('row').filter(r => r.classList.contains('rm')).map(r => r.getAttribute('aria-label'));
+    expect(order[0]).toBe('ivan-mbp');
+    expect(order.at(-1)).toBe('build-box');
   });
 
   it('marks no machine when the server does not tell builds apart', async () => {
