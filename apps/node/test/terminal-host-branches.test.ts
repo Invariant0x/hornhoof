@@ -301,3 +301,56 @@ describe('stop hook branches before extraction', () => {
     expect(await c.finished).toBe('Native answer');
   });
 });
+
+describe('program reports and invocation hooks', () => {
+  it.each(['question', 'tool', 'none'] as const)('reports the pending %s through the program watcher', async pending => {
+    const c = fixture();
+    vi.spyOn(c.tmux, 'screen').mockResolvedValue('diagnostic screen');
+    c.agent.calls.set('first', { name: 'Bash', at: 10 });
+    c.agent.calls.set('second', { name: 'Read', at: 20 });
+    if (pending === 'question') c.agent.question = { name: 'Permission', at: 30, asking: true };
+    if (pending === 'none') c.agent.calls.clear();
+    const { watch, look } = c.host['observeProgram']('job');
+    look.at = -Infinity;
+    await c.host['reportProgram'](c.agent, watch, look);
+    const report = c.sent.find(message => message.type === 'job.program');
+    expect(report).toMatchObject({ type: 'job.program', jobId: 'job', state: pending === 'question' ? 'asking' : pending === 'tool' ? 'tool' : 'thinking' });
+    if (pending === 'none') expect(report).not.toHaveProperty('tool');
+    else expect(report).toMatchObject({ tool: pending === 'question' ? 'Permission' : 'Bash', since: pending === 'question' ? 30 : 10 });
+  });
+
+  it('does not send a report from a former turn after its screen arrives', async () => {
+    const c = fixture();
+    let resolve!: (screen: string) => void;
+    vi.spyOn(c.tmux, 'screen').mockReturnValue(new Promise(done => { resolve = done; }));
+    const { watch, look } = c.host['observeProgram']('job');
+    look.at = -Infinity;
+    const reporting = c.host['reportProgram'](c.agent, watch, look);
+    c.agent.turn = { ...c.agent.turn!, jobId: 'next' };
+    resolve('former screen');
+    await reporting;
+    expect(c.sent).toEqual([]);
+  });
+
+  it.each(['claude', 'codex', 'kimi'] as const)('ignores native agy invocation fields for %s', async kind => {
+    const c = fixture(kind);
+    c.agent.busy = false;
+    await c.host['hook']('branches', 'invocation', { conversationId: 'other', invocationNum: 0, lastUserInput: 'Wrong program' });
+    expect(c.agent.sessionId).toBe('old');
+    expect(c.agent.busy).toBe(false);
+    expect(c.sent).toEqual([]);
+  });
+
+  it('keeps an intermediate agy invocation in the same turn without resetting its cursor', async () => {
+    const c = fixture('antigravity');
+    c.agent.busy = false;
+    c.agent.agyCursor = { file: 'current-recording', offset: 23 };
+    c.agent.typing = 'pending';
+    await c.host['hook']('branches', 'invocation', { conversationId: 'new', invocationNum: 1 });
+    expect(c.agent.sessionId).toBe('new');
+    expect(c.agent.busy).toBe(true);
+    expect(c.agent.agyCursor).toEqual({ file: 'current-recording', offset: 23 });
+    expect(c.agent.typing).toBe('pending');
+    expect(c.sent).toEqual([]);
+  });
+});
