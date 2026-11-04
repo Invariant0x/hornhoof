@@ -16,6 +16,8 @@ import { PeopleBridgeMasks, peopleMask, PeopleWires } from '../ui/PeopleWires';
 import { LiveWay, Pulse, motionSpeed, pulseSeconds, toD, useReducedMotion, type Point } from '../ui/wires';
 import { useWorkLines } from '../ui/work-lines';
 import { AgentState } from '../ui/AgentState';
+import { TurnProgress } from '../ui/TurnProgress';
+import { useTurns } from '../tasks';
 import { clock } from './Subscriptions';
 
 /* World coordinates, laid out like the prototype: people on top, the orchestrator in the middle, departments in two columns around him. */
@@ -93,6 +95,27 @@ const busY = (n: number) => chipsTop(n) + CHIP_H + 14;
 
 /* The company's turn sits right under the hub, between the traces that leave it downwards, in two lines at most. */
 const TURN_TOP = CY + HUB + 10, TURN_W = 2 * BEND - 16, TURN_H = 56;
+
+/* Only a running turn needs the tracker's numbers; the rest of the map stays independent of their request. */
+function HubTurn({ current }: { current: Org['turn'] }) {
+  const t = useT();
+  const { turns, failure } = useTurns(!!current);
+  const style = { left: CX - TURN_W / 2, top: TURN_TOP, width: TURN_W };
+  if (!current) return null;
+  if (failure !== null) {
+    const message = errorText(t, failure);
+    return <div className="hub-turn" style={style} title={current.goal}>
+      <b>{t.tasks.turn(current.number)}</b>
+      <small className="hub-turn-error" role="alert" title={message}>{message}</small>
+    </div>;
+  }
+  const turn = turns?.find(row => row.status === 'open');
+  if (!turn) return null;
+  return <div className="hub-turn" style={style} title={`${turn.title}\n${turn.goal}`}>
+    <b>{t.tasks.turn(turn.number)}</b>
+    <TurnProgress tasks={turn.tasks} />
+  </div>;
+}
 
 const chipsWidth = (n: number) => n * CHIP_W + Math.max(0, n - 1) * CHIP_GAP;
 const chipCenters = (n: number) => rowCenters(n, CHIP_W, CHIP_GAP);
@@ -564,12 +587,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
           </div>
         )}
 
-        {org.turn && (
-          <p className="hub-turn" style={{ left: CX - TURN_W / 2, top: TURN_TOP, width: TURN_W }} title={org.turn.goal}>
-            <b>{t.tasks.turn(org.turn.number)}</b>
-            <span>{org.turn.goal}</span>
-          </p>
-        )}
+        <HubTurn current={org.turn} />
 
         {depts.length === 0 && (
           <div className="start" style={{ left: CX - 260, top: BELOW + (org.turn ? TURN_H : 0) }}>

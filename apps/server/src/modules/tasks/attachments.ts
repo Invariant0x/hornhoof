@@ -1,5 +1,5 @@
 import { Readable } from 'node:stream';
-import { and, asc, count, desc, eq, inArray, isNotNull, lt, or, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lt, or, sql } from 'drizzle-orm';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -10,6 +10,7 @@ import { agents, attachments, departments, requests, tasks, turns, type RequestO
 import { ApiError } from '../../errors.js';
 import { canOpenAgent } from '../agents/running.js';
 import { jobOf, type ToolJob } from '../tools/job.js';
+import { agentCasePicture, personCasePicture, sendCasePicture } from '../program-operator/attachments.js';
 import { refuse, taskSpot, type Task } from './engine.js';
 import { taskByRef } from './views.js';
 
@@ -66,7 +67,7 @@ export async function filesOf(db: Db, taskId: string): Promise<{ id: string; nam
   const rows = await db
     .select({ id: attachments.id, name: attachments.name, size: attachments.size, agentId: attachments.agentId, at: attachments.createdAt })
     .from(attachments)
-    .where(eq(attachments.taskId, taskId))
+    .where(and(eq(attachments.taskId, taskId), isNull(attachments.operatorCaseId)))
     .orderBy(desc(attachments.createdAt));
   const newest = new Map<string, (typeof rows)[number] & { name: string }>();
   for (const r of rows) if (r.name !== null && !newest.has(r.name)) newest.set(r.name, { ...r, name: r.name });
@@ -98,7 +99,7 @@ export async function commitUrl(db: Db, task: Pick<Task, 'departmentId' | 'produ
 export async function picturesOf(db: Db, rows: { id: string; options: RequestOption[] }[]): Promise<Map<string, string[]>> {
   const ids = rows.map(r => r.id);
   const found = ids.length
-    ? await db.select({ id: attachments.id, requestId: attachments.requestId }).from(attachments).where(inArray(attachments.requestId, ids)).orderBy(asc(attachments.createdAt))
+    ? await db.select({ id: attachments.id, requestId: attachments.requestId }).from(attachments).where(and(inArray(attachments.requestId, ids), isNull(attachments.operatorCaseId))).orderBy(asc(attachments.createdAt))
     : [];
   return new Map(rows.map(r => [r.id, found.filter(a => a.requestId === r.id && !r.options.some(o => o.image === a.id)).map(a => a.id)]));
 }
@@ -145,13 +146,15 @@ export async function checkRoom(ctx: Pick<Ctx, 'db' | 'config'>, companyId: stri
 }
 
 /* Sends a task file in pieces, so the server never holds a whole one. */
-export function sendFile(db: Db, reply: FastifyReply, found: { id: string; name: string | null; length: number }) {
+export async function sendFile(db: Db, reply: FastifyReply, found: { id: string; name: string | null; length: number }) {
+  const [ordinary] = await db.select({ id: attachments.id }).from(attachments).where(and(eq(attachments.id, found.id), isNull(attachments.operatorCaseId)));
+  if (!ordinary) throw new ApiError(404, 'not_found', 'There is no such file.', 'attachment_unknown');
   async function* pieces(id: string, length: number) {
     for (let at = 0; at < length; at += PIECE_BYTES) {
       const [piece] = await db
         .select({ bytes: sql<Uint8Array>`substring(${attachments.bytes} from ${at + 1} for ${PIECE_BYTES})` })
         .from(attachments)
-        .where(eq(attachments.id, id));
+        .where(and(eq(attachments.id, id), isNull(attachments.operatorCaseId)));
       if (!piece) throw new Error('The file was removed while it was being sent.');
       yield Buffer.from(piece.bytes);
     }
@@ -177,7 +180,7 @@ async function messagePicture(db: Db, job: ToolJob, id: string) {
   const [found] = await db
     .select({ id: attachments.id, name: attachments.name, length: sql<number>`octet_length(${attachments.bytes})`.mapWith(Number) })
     .from(attachments)
-    .where(and(eq(attachments.id, id), eq(attachments.agentId, job.agentId), isNotNull(attachments.personId)));
+    .where(and(eq(attachments.id, id), eq(attachments.companyId, job.companyId), eq(attachments.agentId, job.agentId), isNotNull(attachments.personId), isNull(attachments.operatorCaseId)));
   return found && { ...found, name: `${found.id.slice(0, 8)}-${found.name ?? 'picture'}` };
 }
 
@@ -216,6 +219,7 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/attachments/file', async (req, reply) => {
     const job = await jobOf(ctx, req);
     const { task: ref, file } = FetchQuery.parse(req.query);
+    if (ref.startsWith('operator-case:')) return sendCasePicture(reply, await agentCasePicture(db, job, ref, file));
     if (ref === MESSAGE_FILES) {
       const picture = await messagePicture(db, job, file);
       if (!picture) throw new ApiError(404, 'not_found', `You have no picture ${file}. A picture goes only to the agent it was sent to.`, 'attachment_unknown');
@@ -227,7 +231,7 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
       ? await db
           .select({ id: attachments.id, name: attachments.name, length: sql<number>`octet_length(${attachments.bytes})`.mapWith(Number) })
           .from(attachments)
-          .where(and(eq(attachments.taskId, task.id), byId ? or(eq(attachments.id, file), eq(attachments.name, file)) : eq(attachments.name, file)))
+          .where(and(eq(attachments.taskId, task.id), isNull(attachments.operatorCaseId), byId ? or(eq(attachments.id, file), eq(attachments.name, file)) : eq(attachments.name, file)))
           .orderBy(desc(attachments.createdAt))
           .limit(1)
       : [];
@@ -240,13 +244,15 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/attachments/:id', async (req, reply) => {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
+    const [picture] = await db.select({ operatorCaseId: attachments.operatorCaseId }).from(attachments).where(and(eq(attachments.id, id), eq(attachments.companyId, me.companyId)));
+    if (picture?.operatorCaseId) return sendCasePicture(reply, await personCasePicture(db, me, id));
     const [found] = await db
       .select({ mediaType: attachments.mediaType, bytes: attachments.bytes, personId: attachments.personId, agent: agents, task: tasks })
       .from(attachments)
       .innerJoin(agents, eq(agents.id, attachments.agentId))
       .leftJoin(requests, eq(requests.id, attachments.requestId))
       .leftJoin(tasks, eq(tasks.id, requests.taskId))
-      .where(and(eq(attachments.id, id), eq(attachments.companyId, me.companyId)));
+      .where(and(eq(attachments.id, id), eq(attachments.companyId, me.companyId), isNull(attachments.operatorCaseId)));
     const reach = await accessOf(db, me);
     const shows = found && (found.personId ? await canOpenAgent(ctx, reach, found.agent) : found.task && canReach(reach, taskSpot(found.task)));
     if (!shows) throw new ApiError(404, 'not_found', 'There is no such picture.', 'attachment_unknown');

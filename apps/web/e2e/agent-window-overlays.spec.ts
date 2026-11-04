@@ -9,6 +9,15 @@ async function activate(button: Locator) {
   await button.press('Enter');
 }
 
+/* A strip takes no room from what is on a wide screen. On a phone the row of strips takes the foot of the screen, so the same
+   picture stands half the row higher. */
+async function expectPlaceBesideStrip(picture: Locator, alone: Awaited<ReturnType<typeof box>>, width: number) {
+  const { y, ...rest } = await box(picture);
+  const { y: aloneY, ...same } = alone;
+  expect(rest).toEqual(same);
+  expect(y).toBeCloseTo(aloneY - (width > 760 ? 0 : 22));
+}
+
 for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] as const) for (const width of [1440, 375]) {
   test(`overlays and minimized layout in ${lang}, ${theme}, ${width}px`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: 1000 });
@@ -87,7 +96,7 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
     await expect(main).not.toHaveClass(/with-window/);
     await expect(department.locator('.ticker')).toBeVisible();
     await fit.click();
-    expect(await box(world)).toEqual(withoutWindow);
+    await expectPlaceBesideStrip(world, withoutWindow, width);
     if (width > 760) expect(withWindow).not.toEqual(withoutWindow);
     await page.screenshot({ path: info.outputPath(`department-minimized-${lang}-${theme}-${width}.png`) });
     const restore = page.getByRole('button', { name: en ? 'Restore Bruno, Developer' : 'Развернуть: Bruno, Разработчик', exact: true });
@@ -103,7 +112,7 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
     await department.locator('.crumbs button').click();
     await expect(department).toHaveCount(0);
     await page.locator('.map').getByRole('button', { name: fitName, exact: true }).click();
-    expect(await box(mapWorld)).toEqual(mapWithoutWindow);
+    await expectPlaceBesideStrip(mapWorld, mapWithoutWindow, width);
     await restore.click();
     await expect(main).toHaveClass(/with-window/);
     if (width > 760) expect(await box(mapWorld)).not.toEqual(mapWithoutWindow);

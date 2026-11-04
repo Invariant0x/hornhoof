@@ -1,4 +1,4 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -26,7 +26,7 @@ export async function ownPictures(ctx: Pick<Ctx, 'db'>, me: Person, agentId: str
     : await ctx.db
         .select({ id: attachments.id, name: attachments.name })
         .from(attachments)
-        .where(and(inArray(attachments.id, wanted), eq(attachments.agentId, agentId), eq(attachments.personId, me.id)));
+        .where(and(inArray(attachments.id, wanted), eq(attachments.companyId, me.companyId), eq(attachments.agentId, agentId), eq(attachments.personId, me.id), isNull(attachments.operatorCaseId)));
   const pictures = wanted.flatMap(id => found.filter(p => p.id === id).map(p => ({ id: p.id, name: p.name ?? 'picture' })));
   if (pictures.length !== wanted.length) throw new ApiError(404, 'not_found', 'A picture of this message is not there. Add it again.', 'attachment_unknown');
   return pictures;

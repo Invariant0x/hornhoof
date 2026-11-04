@@ -47,11 +47,27 @@ describe('the tracker', () => {
     expect(within(turn).getByRole('heading', { name: 'Payments' })).toBeInTheDocument();
     expect(turn).toHaveTextContent('Take card payments in the shop.');
     expect(turn).toHaveTextContent('2 of 5 tasks done');
+    expect(within(turn).getByRole('progressbar', { name: '2 of 5 tasks done' })).toHaveAttribute('aria-valuenow', '40');
     expect(within(turn).getByRole('button', { name: /#12/ })).toHaveTextContent('In review');
     for (const name of ['Start turn', 'Close turn']) expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
     /* Decision text fields stay in the waiting section. */
     const waiting = screen.getByRole('region', { name: 'Waiting for you' });
     for (const box of screen.queryAllByRole('textbox')) expect(waiting).toContainElement(box);
+  });
+
+  it.each([
+    { done: 0, total: 0, percent: '0' },
+    { done: 1, total: 3, percent: '33' },
+    { done: 17, total: 17, percent: '100' },
+  ])('shows server progress $done/$total independently of the listed task rows', async ({ done, total, percent }) => {
+    const user = userEvent.setup();
+    shell({ 'GET /api/turns': [200, { turns: [{ ...TURN, tasks: { done, total } }] }], [`GET ${ALL}`]: [200, { tasks: [] }] });
+    await openTasks(user);
+    const progress = screen.getByRole('progressbar', { name: `${done} of ${total} tasks done` });
+    expect(progress).toHaveAttribute('aria-valuenow', percent);
+    expect(progress).toHaveAttribute('aria-valuemin', '0');
+    expect(progress).toHaveAttribute('aria-valuemax', '100');
+    expect(progress.querySelector('i')).toHaveStyle({ width: `${percent}%` });
   });
 
   it("shows the words a turn came from on click", async () => {

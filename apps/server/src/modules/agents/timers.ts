@@ -13,6 +13,7 @@ import { checkExternalWaits } from '../tasks/external-wait.js';
 import { moveLeases } from '../subscriptions/lease.js';
 import { checkTestTimes } from '../testruns/runs.js';
 import type { AgentRow } from './find.js';
+import { checkOperatorHealth } from '../program-operator/health.js';
 
 export { checkSilentTurns, SILENT_TURN_MS };
 
@@ -115,6 +116,7 @@ async function sendWaiting(ctx: Ctx): Promise<void> {
 export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) => (err: unknown) => void): Promise<void> {
   await checkExternalWaits(ctx, now).catch(failed('ending external task waits failed'));
   await checkWaitHealth(ctx, now).catch(failed('checking task waits failed'));
+  await checkOperatorHealth(ctx, now).catch(failed('checking program operator cases failed'));
   await Promise.all([
     timerTick(ctx, now, failed('timer round failed')).catch(failed('timer tick failed')),
     wakeLeftBehind(ctx).catch(failed('queueing left-behind turns failed')),
@@ -132,6 +134,7 @@ export function startTimers(app: FastifyInstance, ctx: Ctx): void {
   app.addHook('onReady', async () => {
     await checkExternalWaits(ctx).catch(failed('ending external task waits failed'));
     await checkWaitHealth(ctx).catch(failed('checking task waits failed'));
+    await checkOperatorHealth(ctx).catch(failed('restoring program operator cases failed'));
     void wakeLeftBehind(ctx).catch(failed('queueing left-behind turns failed'));
     void dropOldFiles(ctx.db, new Date()).catch(failed('removing the files of old turns failed'));
   });

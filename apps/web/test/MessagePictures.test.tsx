@@ -5,6 +5,7 @@ import { LanguageProvider } from '../src/i18n';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import { AgentWindow } from '../src/screens/AgentWindow';
+import { AgentWindows, useAgentWindows } from '../src/screens/AgentWindows';
 import type { EventView } from '../src/types';
 import { CARD, ME, mockApi, ORG } from './api-mock';
 
@@ -27,7 +28,7 @@ const dragged = (...files: File[]) => ({ dataTransfer: { types: ['Files'], files
 const copied = (files: File[], text = '') => ({ clipboardData: { files, types: [...(files.length ? ['Files'] : []), ...(text ? ['text/plain'] : [])], getData: (type: string) => (type === 'text/plain' ? text : '') } });
 const uploaded = (id: string, name = 'screen.png') => [201, { id, name }] as [number, unknown];
 
-function open(routes: Record<string, unknown> = {}, state: object = READY, events: EventView[] = []) {
+function open(routes: Record<string, unknown> = {}, state: object = READY, events: EventView[] = [], window = <AgentWindow me={ME} org={ORG} agentId="orchestrator" onClose={vi.fn()} />) {
   const calls = mockApi({
     [`GET ${AGENT}`]: [200, { ...CARD, id: ORG.orchestrator!.id, kind: 'orchestrator', name: 'Orchestrator' }],
     [`GET ${AGENT}/events?after=0`]: [200, { events, state }],
@@ -37,12 +38,18 @@ function open(routes: Record<string, unknown> = {}, state: object = READY, event
   });
   const { unmount } = render(
     <LanguageProvider>
-      <AgentWindow me={ME} org={ORG} agentId="orchestrator" onClose={vi.fn()} />
+      {window}
     </LanguageProvider>,
   );
   const messages = () => calls.filter(c => c.method === 'POST' && c.path === `${AGENT}/messages`).map(c => c.body);
   const uploads = () => calls.filter(c => c.method === 'POST' && c.path.startsWith(`${AGENT}/pictures`)).map(c => c.path);
   return { calls, messages, uploads, unmount };
+}
+
+/* Minimizing a window belongs to what holds the windows. */
+function HeldWindow() {
+  const windows = useAgentWindows('orchestrator');
+  return <AgentWindows windows={windows} onOpen={windows.open} me={ME} org={ORG} staff={null} requests={[]} onRequestsChanged={vi.fn()} />;
 }
 
 const windowBox = () => screen.getByRole('complementary');
@@ -274,7 +281,7 @@ describe('a picture pasted into the window', () => {
 
   it('is not taken by a window that is minimized', async () => {
     const user = userEvent.setup();
-    open();
+    open({}, READY, [], <HeldWindow />);
     await line();
     await user.click(screen.getByRole('button', { name: en.window.minimize }));
     expect(fireEvent.paste(document.body, copied([png()]))).toBe(true);

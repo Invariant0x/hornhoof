@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { randomUUID } from 'node:crypto';
+import { join } from 'node:path';
+import type { OperatorNodeMessage } from '@hornhoof/protocol/program-operator';
 import { RESTART_AFTER_MS } from '@hornhoof/protocol/map';
-import { hasTmux, host, tmux, sent, setUp, codexJob, until } from './terminal-host-helpers.js';
+import { hasTmux, home, host, tmux, sent, setUp, codexJob, until } from './terminal-host-helpers.js';
 
 describe.skipIf(!hasTmux)('restarting a silent program in the same turn', () => {
   afterEach(async () => { vi.restoreAllMocks(); await host?.stop(); });
@@ -63,6 +66,22 @@ describe.skipIf(!hasTmux)('restarting a silent program in the same turn', () => 
     expect(await host.restart('two-held', 'job-two', 'Continue.')).toEqual({ ok: true, reason: null });
     clock.mockRestore();
     expect(await running).toMatchObject({ ok: true, result: 'echo: Continue.\n\nSecond message.' });
+  });
+
+  it('gives an explicit restart a new physical instance without an operator alarm', async () => {
+    const frames: OperatorNodeMessage[] = []; let elapsed = 0;
+    const key = randomUUID(), jobId = randomUUID();
+    await setUp({ pollMs: 25, operator: { dir: join(home, `operator-${key}`), now: () => elapsed, connected: () => true, send: frame => { frames.push(frame); return true; } } });
+    const running = host.run({ ...codexJob(key, 'HANG', { jobId, agentKey: key }), operatorDelivery: { id: randomUUID(), ordinal: 1 } });
+    await until(() => host['agents'].get(key)?.took === true);
+    const now = Date.now.bind(Date);
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now() + RESTART_AFTER_MS.codex! + 1000);
+    expect(await host.restart(key, jobId, 'Continue.')).toMatchObject({ ok: true });
+    clock.mockRestore();
+    expect(await running).toMatchObject({ ok: true });
+    expect(new Set(frames.filter(f => f.type === 'program.launch' && f.phase === 'attempt').map(f => f.instance)).size).toBe(2);
+    elapsed = 8 * 3600000; host.operatorTick();
+    expect(frames.filter(f => f.type === 'program.operator_needed')).toEqual([]);
   });
 
 });

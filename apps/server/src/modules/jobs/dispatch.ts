@@ -1,4 +1,5 @@
 import type { SkillFile, Workspace } from '@hornhoof/protocol';
+import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
 import { eq } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { decryptSecret } from '../../crypto/secrets.js';
@@ -30,6 +31,8 @@ type JobToSend = {
   guidance?: string | null;
   /* The agent's skills, which the node writes as files. */
   skills?: SkillFile[];
+  operatorDelivery?: OperatorDelivery;
+  operatorSourceDelivery?: OperatorDelivery;
 };
 
 /* Sends a job to its node. A personal plan's node signs in itself; an API key travels with the job to the built-in node. */
@@ -52,6 +55,8 @@ export async function dispatchJob(ctx: Ctx, job: JobToSend): Promise<boolean> {
     secret,
     instructions: job.instructions,
     toolToken: job.toolToken,
+    ...(job.operatorDelivery ? { operatorDelivery: job.operatorDelivery } : {}),
+    ...(job.operatorSourceDelivery ? { operatorSourceDelivery: job.operatorSourceDelivery } : {}),
     ...(job.workspace ? { workspace: job.workspace } : {}),
     ...(job.context ? { context: job.context } : {}),
     ...(job.guidance ? { guidance: job.guidance } : {}),
