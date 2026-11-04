@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { errorText, useT } from '../i18n';
 import type { AccessInput, Me, Org, PersonView } from '../types';
@@ -200,6 +200,13 @@ export function People({ me }: { me: Me }) {
     void load();
   }, [load]);
 
+  const previousName = useRef(me.person.name);
+  useEffect(() => {
+    if (previousName.current === me.person.name) return;
+    previousName.current = me.person.name;
+    setPeople(list => list?.map(p => p.id === me.person.id ? { ...p, name: me.person.name } : p) ?? null);
+  }, [me.person.id, me.person.name]);
+
   const replace = (person: PersonView) => setPeople(list => list?.map(p => (p.id === person.id ? person : p)) ?? null);
 
   async function run(action: () => Promise<void>) {
@@ -273,8 +280,7 @@ export function People({ me }: { me: Me }) {
             </tr>
           </thead>
           <tbody>
-            {people.map(row => {
-              const p = row.id === me.person.id ? { ...row, name: me.person.name } : row;
+            {people.map(p => {
               const { manageable, titleOnly, deputy } = rightsOn(me, p);
               return (
                 <tr key={p.id} className={p.status}>

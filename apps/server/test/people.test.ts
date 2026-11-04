@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import type { Db } from '../src/db/client.js';
@@ -194,6 +194,8 @@ describe('PATCH /api/people/:id', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.json().person).toMatchObject({ name: 'Lisa', email: 'olga@acme.com', title: 'Head of marketing', access: { whole: false, departments: [{ id: departmentId }] } });
+    const audit = await db.execute(sql`select person_id, actor_id, field, before, after, created_at from person_changes`) as { rows: { person_id: string; actor_id: string; field: string; before: string; after: string; created_at: string }[] };
+    expect(audit.rows).toEqual([{ person_id: olga.id, actor_id: olga.id, field: 'name', before: 'Olga', after: 'Lisa', created_at: expect.any(String) }]);
     expect((await app.inject({ url: '/api/me', ...as(olga.token) })).json().person.name).toBe('Lisa');
     expect((await app.inject({ url: '/api/people', ...as(olga.token) })).json().people.find((p: { id: string }) => p.id === olga.id).name).toBe('Lisa');
     expect((await app.inject({ method: 'PATCH', url: `/api/people/${owner!.id}`, payload: { name: 'Changed by Olga' }, ...as(olga.token) })).statusCode).toBe(403);

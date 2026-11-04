@@ -291,6 +291,22 @@ export const agentChanges = pgTable(
   t => [index('agent_changes_agent_id').on(t.agentId)],
 );
 
+/* A person's own rename: who changed it, when, and the name before and after. */
+export const personChanges = pgTable(
+  'person_changes',
+  {
+    id: id(),
+    companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
+    personId: uuid('person_id').notNull().references(() => people.id, { onDelete: 'cascade' }),
+    actorId: uuid('actor_id').references(() => people.id, { onDelete: 'set null' }),
+    field: text('field', { enum: ['name'] }).notNull(),
+    before: text('before').notNull(),
+    after: text('after').notNull(),
+    createdAt: createdAt(),
+  },
+  t => [index('person_changes_person_id').on(t.personId), index('person_changes_company_id').on(t.companyId)],
+);
+
 /* The departments and teams a listed person reaches. */
 export const personAccess = pgTable(
   'person_access',

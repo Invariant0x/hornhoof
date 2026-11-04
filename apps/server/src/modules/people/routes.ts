@@ -9,7 +9,7 @@ import { changedBy, personColumns, requireCompanyScope, requirePerson, startSess
 import { hashToken, newToken } from '../../crypto/tokens.js';
 import type { Db } from '../../db/client.js';
 import { isUniqueViolation } from '../../db/errors.js';
-import { agentChanges, agents, companies, invites, machines, people, sessions, subscriptions } from '../../db/schema.js';
+import { agentChanges, agents, companies, invites, machines, people, personChanges, sessions, subscriptions } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { onAgent } from '../conversation/queue.js';
 import { publicUrl } from '../link/link.js';
@@ -247,6 +247,9 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
 
     const person = await db.transaction(async tx => {
       if (Object.keys(changes).length) await tx.update(people).set(changes).where(eq(people.id, id));
+      if (id === me.id && body.name !== undefined && body.name !== target.name) {
+        await tx.insert(personChanges).values({ companyId: me.companyId, personId: id, actorId: me.id, field: 'name', before: target.name, after: body.name });
+      }
       if (body.access) await saveAccess(tx, target, body.access);
       if (changes.status === 'disabled') await tx.delete(sessions).where(eq(sessions.personId, id));
       const [row] = await tx.select(personColumns).from(people).where(eq(people.id, id));
