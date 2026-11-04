@@ -1,9 +1,9 @@
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { Db } from '../src/db/client.js';
 import { agentChanges, agents, companies, departments, jobs, people, subscriptions, tasks, teams } from '../src/db/schema.js';
-import { ensureOperations } from '../src/modules/operations/ensure.js';
-import { as, invitePerson, sessionFrom, SETUP, testApp } from './helpers.js';
+import { ensureOperations, placeOperator } from '../src/modules/operations/ensure.js';
+import { as, invitePerson, sessionFrom, SETUP, testApp, withoutOperations } from './helpers.js';
 
 /* A company whose Operations has no plan yet, and an empty Development to tell it from. */
 async function company() {
@@ -135,6 +135,31 @@ describe("the program operator's plan", () => {
     await addKey(c);
     await ensureOperations(c.app.ctx, c.companyId);
     expect(await operator(c.db)).toMatchObject({ subscriptionId: second, model: 'claude-sonnet-5-5' });
+  });
+
+  it('tells the map only when the operator changes plan', async () => {
+    const c = await company();
+    const told = vi.spyOn(c.app.ctx.bus, 'publish');
+    const orgs = () => told.mock.calls.filter(([, event]) => event.type === 'org').length;
+    await placeOperator(c.app.ctx, c.companyId);
+    expect(orgs()).toBe(0);
+    const key = await addPlan(c);
+    await placeOperator(c.app.ctx, c.companyId);
+    expect((await operator(c.db)).subscriptionId).toBe(key);
+    expect(orgs()).toBe(1);
+    await placeOperator(c.app.ctx, c.companyId);
+    expect(orgs()).toBe(1);
+  });
+
+  it('tells no map with no operator on, or with no Operations', async () => {
+    const c = await company();
+    const told = vi.spyOn(c.app.ctx.bus, 'publish');
+    await addPlan(c);
+    await c.db.update(agents).set({ switchedOffAt: new Date() }).where(eq(agents.id, (await operator(c.db)).id));
+    await placeOperator(c.app.ctx, c.companyId);
+    await withoutOperations(c.db);
+    await placeOperator(c.app.ctx, c.companyId);
+    expect(told).not.toHaveBeenCalled();
   });
 
   it('leaves an operator who is switched off without a plan', async () => {

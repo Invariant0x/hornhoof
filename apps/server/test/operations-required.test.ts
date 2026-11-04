@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { COMPANY_TEMPLATES, COMPANY_TEMPLATE_KEYS } from '@hornhoof/protocol';
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { Db } from '../src/db/client.js';
 import { agentChanges, agentEvents, agents, companies, departments, jobs, people, subscriptions } from '../src/db/schema.js';
 import { FIRST_TURN } from '../src/modules/conversation/prompt.js';
@@ -168,13 +168,28 @@ describe('a company that lives already', () => {
     expect(after.filter(a => a.kind === 'head')).toHaveLength(1);
   });
 
-  it('creates Operations when it has none', async () => {
+  it('creates Operations when it has none, first in a company without departments', async () => {
     const { app, db, companyId } = await company();
     await staffedLike(db, companyId, () => false);
     await db.delete(departments).where(eq(departments.companyId, companyId));
     await ensureOperations(app.ctx, companyId);
-    expect(await opsDepartments(db)).toHaveLength(1);
+    const [ops] = await opsDepartments(db);
+    expect(ops!.position).toBe(0);
     expect(await roles(db)).toEqual(FOUR);
+  });
+
+  it('puts an Operations it creates after the departments the company has', async () => {
+    const { app, db, companyId } = await company();
+    await staffedLike(db, companyId, () => false);
+    await db.delete(departments).where(eq(departments.companyId, companyId));
+    await db.insert(departments).values({ companyId, templateKey: 'sales', roleCode: 'SAL', position: 0 });
+    await ensureOperations(app.ctx, companyId);
+    expect((await opsDepartments(db))[0]!.position).toBe(1);
+    await staffedLike(db, companyId, () => false);
+    await db.delete(departments).where(eq(departments.templateKey, 'operations'));
+    await db.update(departments).set({ position: 4 }).where(eq(departments.templateKey, 'sales'));
+    await ensureOperations(app.ctx, companyId);
+    expect((await opsDepartments(db))[0]!.position).toBe(5);
   });
 
   it('counts an old head with no role key as the head, and does not break the one head rule', async () => {
@@ -246,9 +261,9 @@ describe('a company that lives already', () => {
   it('tells the orchestrator in his window who came, once his conversation has begun', async () => {
     const { app, db, companyId } = await company();
     const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
-    await db.insert(agentEvents).values({ companyId, agentId: orchestrator!.id, kind: 'text', data: { text: 'Hello' } });
     await staffedLike(db, companyId, a => a.kind === 'head');
-    await db.insert(agentEvents).values({ companyId, agentId: orchestrator!.id, kind: 'text', data: { text: 'Hello' } });
+    /* The very first thing in his window counts. */
+    await db.insert(agentEvents).values({ companyId, agentId: orchestrator!.id, seq: 1, kind: 'text', data: { text: 'Hello' } });
     await ensureOperations(app.ctx, companyId);
     const told = await db.select().from(agentEvents).where(eq(agentEvents.kind, 'applied'));
     expect(told).toHaveLength(1);
@@ -258,13 +273,23 @@ describe('a company that lives already', () => {
     expect(await db.select().from(agentEvents).where(eq(agentEvents.kind, 'applied'))).toHaveLength(1);
   });
 
-  it('changes nothing when Operations is whole', async () => {
+  it('changes nothing and tells no map when Operations is whole', async () => {
     const { app, db, companyId } = await company();
     const before = await staff(db);
     const seen = statements();
+    const told = vi.spyOn(app.ctx.bus, 'publish');
     await ensureOperations(app.ctx, companyId);
     expect(await staff(db)).toEqual(before);
     expect(seen.filter(s => /^(insert|update|delete)/i.test(s.sql))).toEqual([]);
+    expect(told).not.toHaveBeenCalled();
+  });
+
+  it('tells the map when it hires someone', async () => {
+    const { app, db, companyId } = await company();
+    await staffedLike(db, companyId, a => a.kind === 'head');
+    const told = vi.spyOn(app.ctx.bus, 'publish');
+    await ensureOperations(app.ctx, companyId);
+    expect(told).toHaveBeenCalledWith(companyId, { type: 'org' });
   });
 
   it('goes on with the rest of the check when one company fails, and reports it', async () => {

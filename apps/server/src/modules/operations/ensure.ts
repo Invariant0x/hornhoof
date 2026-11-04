@@ -8,7 +8,7 @@ import { hireEmployee, type Hired, type HiredBy } from '../departments/hire.js';
 import { appendEvent, listEvents } from '../events/store.js';
 import type { Tx } from '../tasks/engine.js';
 import { resumeAgent } from '../tasks/wake.js';
-import { placeableSubscriptions, spotIn } from '../tools/staff.js';
+import { placeableSubscriptions, spotIn, type Serving } from '../tools/staff.js';
 import { holderOf, holds, isOperations, leftOut, missingRoles, PROGRAM_OPERATOR_ROLE, REQUIRED_OPERATIONS_ROLES } from './required.js';
 
 /* How often Hornhoof looks again, for what no request tells it: an owner switched off, access taken away, a crash. */
@@ -89,44 +89,46 @@ async function tellOrchestrator(ctx: Ctx, companyId: string, department: string,
   await appendEvent(ctx, { companyId, agentId: orchestrator.id, kind: 'applied', data: { proposalId: null, kind: 'staff', department, hired: hired.map(({ id, name, role }) => ({ id, name, role })) } });
 }
 
-/* Each operator that is on stands on a plan that may serve it, or waits for one: a plan it has stays while it may serve,
-   one it may not is taken off once no turn runs on it, and the next that may serve takes its place. Returns who changed,
-   and among them who got a plan. */
-async function placeOperators(tx: Tx, companyId: string): Promise<{ changed: boolean; placed: string[] }> {
+type Operator = typeof agents.$inferSelect;
+
+/* Whether an operator stays on its plan: one that may serve it, or one that may not with a turn running on it, which
+   nobody stops. */
+async function staysOnPlan(tx: Tx, operator: Operator, plans: Serving[]): Promise<boolean> {
+  if (!operator.subscriptionId) return false;
+  if (plans.some(p => p.id === operator.subscriptionId)) return true;
+  const [running] = await tx.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, operator.id), eq(jobs.status, 'running'))).limit(1);
+  return Boolean(running);
+}
+
+/* Each operator that is on stands on a plan that may serve it, or waits for one: one it may not stand on is taken off once
+   no turn runs on it, and the next that may serve takes its place. Returns who moved, and to which plan if any. */
+async function placeOperators(tx: Tx, companyId: string): Promise<{ id: string; plan: string | null }[]> {
   await lockCompany(tx, companyId);
   const dept = await operationsOf(tx, companyId);
-  const placed: string[] = [];
-  if (!dept) return { changed: false, placed };
+  if (!dept) return [];
   const operators = await tx
     .select()
     .from(agents)
     .where(and(eq(agents.departmentId, dept.id), eq(agents.roleKey, PROGRAM_OPERATOR_ROLE), isNull(agents.removedAt), isNull(agents.switchedOffAt)));
-  if (!operators.length) return { changed: false, placed };
   const plans = await placeableSubscriptions({ db: tx }, companyId, spotIn(dept));
-  let changed = false;
+  const plan = plans[0]?.id ?? null;
+  const moved: { id: string; plan: string | null }[] = [];
   for (const operator of operators) {
-    if (operator.subscriptionId && plans.some(p => p.id === operator.subscriptionId)) continue;
-    if (operator.subscriptionId) {
-      const [running] = await tx.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, operator.id), eq(jobs.status, 'running'))).limit(1);
-      if (running) continue;
-    }
-    const next = plans[0]?.id ?? null;
-    if (next === operator.subscriptionId) continue;
+    if (plan === operator.subscriptionId || (await staysOnPlan(tx, operator, plans))) continue;
     /* Another plan may not know its model, so it starts on the Default. */
-    await tx.update(agents).set({ subscriptionId: next, model: '', effort: null }).where(eq(agents.id, operator.id));
-    await tx.insert(agentChanges).values({ companyId, agentId: operator.id, ...HORNHOOF, field: 'subscription', before: operator.subscriptionId, after: next });
-    changed = true;
-    if (next) placed.push(operator.id);
+    await tx.update(agents).set({ subscriptionId: plan, model: '', effort: null }).where(eq(agents.id, operator.id));
+    await tx.insert(agentChanges).values({ companyId, agentId: operator.id, ...HORNHOOF, field: 'subscription', before: operator.subscriptionId, after: plan });
+    moved.push({ id: operator.id, plan });
   }
-  return { changed, placed };
+  return moved;
 }
 
 /* Gives a waiting operator the first plan that may serve it, and moves one off a plan that no longer may. No one is asked. */
 export async function placeOperator(ctx: Ctx, companyId: string): Promise<void> {
-  const { changed, placed } = await ctx.db.transaction(tx => placeOperators(tx, companyId));
-  if (changed) ctx.bus.publish(companyId, { type: 'org' });
+  const moved = await ctx.db.transaction(tx => placeOperators(tx, companyId));
+  if (moved.length) ctx.bus.publish(companyId, { type: 'org' });
   /* Turns that waited for a plan can go now, with the tasks it missed while it had none. */
-  for (const id of placed) {
+  for (const { id } of moved.filter(m => m.plan)) {
     await resumeAgent(ctx, id);
     await pump(ctx, id);
   }
