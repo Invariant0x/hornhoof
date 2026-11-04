@@ -19,6 +19,7 @@
     "test:release": "node --test scripts/test/*.test.mjs",
     "typecheck:tests": "npm run build -w @hornhoof/protocol && tsc -p apps/server/tsconfig.eslint.json --noEmit && tsc -p apps/node/tsconfig.eslint.json --noEmit && tsc -p packages/protocol/tsconfig.eslint.json --noEmit",
     "test": "node scripts/check-release.mjs --local && npm run test:release && npm run typecheck:tests && npm test --workspaces --if-present",
+    "test:real": "npm run build -w @hornhoof/protocol && npm run test:real -w @hornhoof/server",
     "build": "npm run build --workspaces --if-present",
     "dev": "npm run dev -w apps/server"
   },
