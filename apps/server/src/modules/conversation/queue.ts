@@ -770,7 +770,7 @@ export async function orchestratorOf(ctx: Ctx, companyId: string) {
 
 export async function orchestratorState(ctx: Ctx, companyId: string): Promise<AgentState> {
   const agent = await orchestratorOf(ctx, companyId);
-  if (!agent) return { ready: false, limitUntil: null, budgetUntil: null, reason: 'no_subscription', busy: false, runningJobId: null, queued: 0, terminal: false, program: null, alarm: null, retry: null, failure: null };
+  if (!agent) return { ready: false, limitUntil: null, budgetUntil: null, reason: 'no_subscription', busy: false, runningJobId: null, queued: 0, terminal: false, program: null, alarm: null, retry: null, failure: null, obsolete: null };
   return agentState(ctx, agent.id);
 }
 
