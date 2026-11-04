@@ -7,7 +7,7 @@ import { hashToken, newToken } from '../../crypto/tokens.js';
 import { agents, jobs, nodes, people, subscriptions, tasks, turns } from '../../db/schema.js';
 import { dispatchJob } from '../jobs/dispatch.js';
 import { turnsHeld } from '../updates/drain.js';
-import { alsoKept, deliverLive, inputKept, turnStarted } from './decision-context.js';
+import { alsoKept, deliverLockedInput, inputKept, turnStarted, withInputLock } from './decision-context.js';
 import { BUILTIN, identityOf, nodeIdentity, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { liveNode, planNodes, type NodeRow } from '../nodes/nodes.js';
 import { appendEvent, earlierTalk, messageForJob, publishWorking, type WithEvent } from '../events/store.js';
@@ -294,17 +294,22 @@ async function showMessage(ctx: Ctx, t: Turn, jobId: string, kept: WithEvent): P
 /* Stores the turn, then sends it if he is free. A message for an agent at work goes into the turn it runs instead, and a
    turn that took the CEO's message answers the CEO from then on. */
 export async function enqueueTurn(ctx: Ctx, t: Turn): Promise<string> {
-  const message = !t.taskId && !t.repeated ? t.message : undefined;
+  const jobId = await withInputLock(ctx, t.agentId, () => insertOrDeliverTurn(ctx, t));
+  await pump(ctx, t.agentId);
+  return jobId;
+}
+
+/* Direct messages need the node's receipt, including when their topic is a task. The caller owns the input lock. */
+export async function insertOrDeliverTurn(ctx: Ctx, t: Turn, required = false): Promise<string> {
+  const message = t.repeated ? undefined : t.message;
   const into = message
-    ? await deliverLive(ctx, t.agentId, t.prompt, { source: { personId: message.personId, data: message } }, async (jobId, kept) => {
+    ? await deliverLockedInput(ctx, t.agentId, t.prompt, { source: { personId: message.personId, data: message }, required }, async (jobId, kept) => {
         if (await isCeo(ctx, message.personId)) await ctx.db.update(jobs).set({ answersCeo: true }).where(eq(jobs.id, jobId));
         await showMessage(ctx, t, jobId, kept);
       })
     : null;
   if (into) return into;
-  const jobId = await insertTurn(ctx, t);
-  await pump(ctx, t.agentId);
-  return jobId;
+  return insertTurn(ctx, t);
 }
 
 /* A person typed into the agent's terminal while no turn ran, or while the program started. The turn is theirs and runs

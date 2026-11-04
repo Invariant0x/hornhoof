@@ -352,20 +352,25 @@ async function queueWake(ctx: Ctx, w: Wake): Promise<boolean> {
   }
   /* One at a time per agent, so two moves at once still queue one turn. */
   return onAgent(ctx, agent.id, async () => {
-    const waiting = await waitingTaskTurn(db, agent.id, task.id);
-    if (waiting) {
-      /* A run's result is not in the task, so the turn that waits carries it along. */
-      if (w.why === 'tests' || w.why === 'work') {
-        const text = wakePrompt(agent, task, w);
-        await db.update(jobs).set({ prompt: sql`${jobs.prompt} || ${`\n\n${text}`}` }).where(eq(jobs.id, waiting.id));
-        await appendEvent(ctx, { companyId: agent.companyId, agentId: agent.id, jobId: waiting.id, kind: 'message', data: { text, task: { id: task.id, number: task.number } } });
-      }
-      return false;
-    }
-    const prompt = wakePrompt(agent, task, w);
-    await insertTurn(ctx, { companyId: agent.companyId, agentId: agent.id, prompt, createdBy: null, taskId: task.id, message: { personId: null, text: prompt, task: { id: task.id, number: task.number }, taskWake: taskWakeOf(task, w) } });
-    return true;
+    return keepTaskWake(ctx, agent, task, w);
   });
+}
+
+async function keepTaskWake(ctx: Ctx, agent: typeof agents.$inferSelect, task: Task, w: Wake): Promise<boolean> {
+  const { db } = ctx;
+  const waiting = await waitingTaskTurn(db, agent.id, task.id);
+  if (waiting) {
+    /* Keep new words even when a turn on this task is already waiting. */
+    if (LIVE_WAKES.includes(w.why)) {
+      const text = wakePrompt(agent, task, w);
+      await db.update(jobs).set({ prompt: sql`${jobs.prompt} || ${`\n\n${text}`}` }).where(eq(jobs.id, waiting.id));
+      await appendEvent(ctx, { companyId: agent.companyId, agentId: agent.id, jobId: waiting.id, kind: 'message', data: { text, task: { id: task.id, number: task.number }, taskWake: taskWakeOf(task, w) } });
+    }
+    return true;
+  }
+  const prompt = wakePrompt(agent, task, w);
+  await insertTurn(ctx, { companyId: agent.companyId, agentId: agent.id, prompt, createdBy: null, taskId: task.id, message: { personId: null, text: prompt, task: { id: task.id, number: task.number }, taskWake: taskWakeOf(task, w) } });
+  return true;
 }
 
 /* The open task the agent holds after a turn about this one: the task itself, or the task it gave this one out from. */

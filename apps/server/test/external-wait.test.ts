@@ -1,8 +1,9 @@
+import type { ServerMessage } from '@hornhoof/protocol';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, companies, departments, jobs, requests, subscriptions, tasks } from '../src/db/schema.js';
+import { agentEvents, agents, companies, departments, jobs, requests, subscriptions, tasks } from '../src/db/schema.js';
 import { cancel, createTask, silentTurn, updateTask } from '../src/modules/tasks/engine.js';
 import { checkLiveness, wakeAll } from '../src/modules/tasks/wake.js';
 import { agentProgramState, checkSilentTurns } from '../src/modules/tasks/silent.js';
@@ -10,6 +11,7 @@ import { minuteRound } from '../src/modules/agents/timers.js';
 import { keepWakes, wakesLeft } from '../src/modules/tasks/outbox.js';
 import { discardStaleTurn } from '../src/modules/tasks/wake-state.js';
 import { checkExternalWaits, waitFor } from '../src/modules/tasks/external-wait.js';
+import { insertTurn } from '../src/modules/conversation/queue.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
 import { as, connectNode, listen, mcp, setUpCompany, testApp, until } from './helpers.js';
 
@@ -51,7 +53,11 @@ async function fixture(env?: NodeJS.ProcessEnv) {
 async function messaging() {
   const c = await fixture({ NODE_KEY });
   const node = await connectNode(c.url, NODE_KEY);
-  node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [] });
+  node.ws.on('message', raw => {
+    const message = JSON.parse(String(raw)) as ServerMessage;
+    if (message.type === 'agent.say') node.send({ type: 'agent.said', ref: message.ref, ok: true });
+  });
+  node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], terminals: true });
   await until(() => c.ctx.hub.isReady(identityOf(c.sub, null)!));
   return { ...c, node };
 }
@@ -259,9 +265,8 @@ describe('external task wait', () => {
     expect(c.ctx.bus.channels(c.company.id)).not.toContainEqual(expect.objectContaining({
       from: { kind: 'department', id: c.department.id }, to: { kind: 'department', id: c.department.id },
     }));
-    const turns = await c.db.select().from(jobs).where(eq(jobs.taskId, task.id));
-    expect(turns).toHaveLength(1);
-    expect(turns[0]!.prompt).toContain('Images are ready.');
+    const messages = await c.db.select().from(agentEvents).where(eq(agentEvents.agentId, c.worker.id));
+    expect(messages.filter(e => e.kind === 'message').map(e => e.data)).toContainEqual(expect.objectContaining({ text: 'Images are ready.', task: { id: task.id, number: task.number } }));
   });
 
   it.each(['head', 'orchestrator'] as const)('keeps the wait on a %s message without task, even when its text names the task', async sender => {
@@ -315,14 +320,11 @@ describe('external task wait', () => {
     expect(await c.read(child.id)).toMatchObject({ status: 'cancelled', externalWait: null });
   });
 
-  it('keeps a task message current when work starts, but drops it after reassignment', async () => {
-    const c = await messaging();
+  it('keeps a queued task message current when work starts, but drops it after reassignment', async () => {
+    const c = await fixture();
     const task = await c.task();
-    await c.wait(task.number, 'Images', new Date(Date.now() + 3_600_000).toISOString());
-    const result = await (await c.tools(c.head.id)).callTool({ name: 'message_employee', arguments: { employee: c.worker.id, task: task.number, text: 'Images are ready.' } });
-    expect(result.isError).toBeFalsy();
-    const [job] = await c.db.select().from(jobs).where(eq(jobs.taskId, task.id));
-    expect(job).toBeDefined();
+    const id = await insertTurn(c.ctx, { companyId: c.company.id, agentId: c.worker.id, taskId: task.id, prompt: 'Images are ready.', createdBy: null, message: { personId: null, text: 'Images are ready.', taskWake: { why: 'message', status: task.status, stage: 0, merging: false } } });
+    const [job] = await c.db.select().from(jobs).where(eq(jobs.id, id));
     await c.db.update(tasks).set({ status: 'working', version: sql`${tasks.version} + 1` }).where(eq(tasks.id, task.id));
     expect(await discardStaleTurn(c.db, job!)).toBe(false);
     await c.db.update(tasks).set({ assigneeAgentId: c.peer.id }).where(eq(tasks.id, task.id));
@@ -330,11 +332,9 @@ describe('external task wait', () => {
   });
 
   it('refuses a new wait while an unread task message is queued', async () => {
-    const c = await messaging();
+    const c = await fixture();
     const task = await c.task();
-    await c.tools();
-    const sent = await (await c.tools(c.head.id)).callTool({ name: 'message_employee', arguments: { employee: c.worker.id, task: task.number, text: 'Images are already ready.' } });
-    expect(sent.isError).toBeFalsy();
+    await insertTurn(c.ctx, { companyId: c.company.id, agentId: c.worker.id, taskId: task.id, prompt: 'Images are already ready.', createdBy: null, message: { personId: null, text: 'Images are already ready.', taskWake: { why: 'message', status: task.status, stage: 0, merging: false } } });
     const result = await c.wait(task.number, 'Images', new Date(Date.now() + 3_600_000).toISOString());
     expect(result.isError).toBe(true);
     expect(result.content[0]!.text).toContain('message');
@@ -412,6 +412,7 @@ describe('external task wait', () => {
     ]);
     expect(sent.isError).toBeFalsy();
     expect((await c.read(task.id)).externalWait).toBeNull();
-    expect(await c.db.select().from(jobs).where(eq(jobs.taskId, task.id))).toHaveLength(1);
+    const messages = await c.db.select().from(agentEvents).where(eq(agentEvents.agentId, c.worker.id));
+    expect(messages.filter(e => e.kind === 'message').map(e => e.data)).toContainEqual(expect.objectContaining({ text: 'Images are ready.', task: { id: task.id, number: task.number } }));
   });
 });
