@@ -1,3 +1,5 @@
+import type { IncomingMessage } from 'node:http';
+import type { Socket } from 'node:net';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -133,8 +135,10 @@ describe('before sign-in', () => {
 });
 
 /* What the upgrade request of a socket carries as the address it came from, the way a real connection does. */
-const upgradeFrom = (origin: Origin) =>
-  origin === 'link' ? { socket: { remoteAddress: TUNNEL }, headers: viaLink().headers } : { socket: { remoteAddress: '127.0.0.1' }, headers: {} };
+const upgradeFrom = (origin: Origin): Partial<IncomingMessage> => {
+  const socket = { remoteAddress: origin === 'link' ? TUNNEL : '127.0.0.1' } as Socket;
+  return { socket, headers: origin === 'link' ? viaLink().headers : {} };
+};
 
 describe('sockets before sign-in', () => {
   it('refuses every socket route without a session before anything is sent, locally and over the link', async () => {
