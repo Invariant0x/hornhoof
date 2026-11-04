@@ -24,11 +24,12 @@ export const SECRET: Record<string, string[]> = {
   departments: ['repo_token_enc'],
 };
 /* Who people are and what they reach, and the subscriptions, machines and nodes the company runs on: the orchestrator's
-   role reads them, and they change only through the tools the CEO alone may ask for. Test and work runs too, as they
+   role reads them, and they change only through the tools the CEO alone may ask for. The history of the nodes' connections,
+   which only Hornhoof writes, so that it can be believed. Test and work runs too, as they
    carry a repository's token and the task's files to the machines lent to them. And what waits for people's decisions
    with the logs that say who wrote and who decided: a request closes only through answer_request, in a turn of a person
    who may take it, and a forged message would make a turn answer someone else. */
-const READ_ONLY = ['people', 'person_access', 'subscriptions', 'machines', 'nodes', 'test_runs', 'test_parts', 'requests', 'proposals', 'agent_events', 'task_events'];
+const READ_ONLY = ['people', 'person_access', 'subscriptions', 'machines', 'nodes', 'node_connections', 'test_runs', 'test_parts', 'requests', 'proposals', 'agent_events', 'task_events'];
 /* An employee's fields that give it tools, a place or the machine its turns and their tokens go to: they change only by
    hiring and on its card, which make the CEO's checks. A head's department is held by a trigger, as a column right
    cannot tell a head from a worker. */
