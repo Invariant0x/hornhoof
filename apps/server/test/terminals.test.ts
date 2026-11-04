@@ -5,6 +5,8 @@ import WebSocket from 'ws';
 import { asc, eq } from 'drizzle-orm';
 import { agents, companies, departments, jobs, people, requests, subscriptions, tasks } from '../src/db/schema.js';
 import { decisionPrincipal } from '../src/modules/conversation/decision-context.js';
+import { enqueueTurn, openTypedTurn } from '../src/modules/conversation/queue.js';
+import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { approvalAsked, as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
@@ -139,6 +141,50 @@ describe("writing to an agent whose terminal the person only watches", () => {
     expect(said.statusCode).toBe(202);
     const run = await next(builtin, 'job.run');
     expect(run.prompt).toContain('From Maria to Bruno');
+    expect(await jobOf(app, said.json().jobId)).toEqual({ createdBy: mariaId, answersCeo: false });
+  });
+
+  describe.each([
+    ['a CEO delegate mark without the whole company', { scopeKind: 'listed' as const }],
+    ['a CEO delegate who is switched off', { status: 'disabled' as const }],
+    ['a CEO delegate who has not come in yet', { status: 'invited' as const }],
+  ])('gives no answers_ceo to %s', (_, change) => {
+    it('on a turn their message opens or goes into', async () => {
+      const { app, builtin, db, orchestratorId, lisaId } = await withDelegate();
+      await db.update(people).set(change).where(eq(people.id, lisaId));
+      const [agent] = await db.select().from(agents).where(eq(agents.id, orchestratorId));
+      const message = { companyId: agent!.companyId, agentId: orchestratorId, prompt: 'Hi', createdBy: lisaId, message: { personId: lisaId, text: 'Hi' } };
+      const first = await enqueueTurn(app.ctx, message);
+      await next(builtin, 'job.run');
+      expect(await jobOf(app, first)).toEqual({ createdBy: lisaId, answersCeo: false });
+      const delivered = enqueueTurn(app.ctx, message);
+      const words = await next(builtin, 'agent.say');
+      builtin.send({ type: 'agent.said', ref: words.ref, ok: true });
+      expect(await delivered).toBe(first);
+      expect(await jobOf(app, first)).toEqual({ createdBy: lisaId, answersCeo: false });
+    });
+
+    it('on a turn they type', async () => {
+      const { app, db, orchestratorId, lisaId } = await withDelegate();
+      await db.update(people).set(change).where(eq(people.id, lisaId));
+      const opened = await openTypedTurn(app.ctx, BUILTIN, orchestratorId, 'Typed words', lisaId);
+      expect(await jobOf(app, opened!.jobId)).toEqual({ createdBy: lisaId, answersCeo: false });
+    });
+  });
+
+  it('turns a switched off CEO delegate away from the window, and opens no turn', async () => {
+    const { app, db, lisa, lisaId } = await withDelegate();
+    const before = (await db.select().from(jobs)).length;
+    await db.update(people).set({ status: 'disabled' }).where(eq(people.id, lisaId));
+    expect((await say(app, lisa, 'orchestrator', 'Hi')).statusCode).toBe(401);
+    expect(await db.select().from(jobs)).toHaveLength(before);
+  });
+
+  it('gives a person with a department and a CEO delegate mark no answers_ceo in the window, as anyone of the department', async () => {
+    const { app, db, bruno, maria, mariaId } = await withEmployees();
+    await db.update(people).set({ isCeoDelegate: true }).where(eq(people.id, mariaId));
+    const said = await say(app, maria, bruno.id, 'Please check the cart');
+    expect(said.statusCode).toBe(202);
     expect(await jobOf(app, said.json().jobId)).toEqual({ createdBy: mariaId, answersCeo: false });
   });
 
