@@ -60,7 +60,7 @@ it('preserves an earlier cause and keeps automatic notices separate from action 
   const existing = { eventId: 99, source: 'work' as const };
   const wakes: Wake[] = [{ agentId: actor.agentId, taskId: task.id, why: 'comment', cause: existing }];
   recordCause(wakes, { kind: 'comment', actor, text: 'A newer comment.' }, 103, task);
-  expect(wakes[0]!.cause).toBe(existing);
+  expect(wakes[0]!.cause).toEqual({ eventId: 99, source: 'work' });
   const automatic: Wake[] = [{ agentId: actor.agentId, taskId: task.id, why: 'go_on' }];
   recordCause(automatic, { kind: 'comment', actor }, 104, task);
   expect(automatic[0]!.cause).toBeUndefined();
