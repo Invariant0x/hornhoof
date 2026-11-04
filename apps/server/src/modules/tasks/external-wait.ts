@@ -9,6 +9,8 @@ import { wakeAll } from './wake.js';
 import { enqueueTurn, insertOrDeliverTurn, onAgent, pump, type TurnMessage } from '../conversation/queue.js';
 import { withInputLock } from '../conversation/decision-context.js';
 import { messageNotDelivered } from '../conversation/live.js';
+import { recordWaitNotice, requestedWaitNotice } from './wait-notices.js';
+import { checkWaitHealth } from './wait-monitor.js';
 import { checkedWaitTarget } from './wait-target.js';
 import { taskByRef } from './views.js';
 import type { Actor } from './engine.js';
@@ -33,8 +35,11 @@ function waitOf(input: z.infer<typeof WaitInput>, now: Date): ExternalWait {
 }
 
 /* A holder can end its turn while an external system works; the task keeps its workflow status. */
-export function waitFor(ctx: Ctx, agentId: string, taskId: string, input: z.infer<typeof WaitInput>, now?: Date): Promise<Moved> {
-  return onAgent(ctx, agentId, () => placeWait(ctx, agentId, taskId, input, now ?? new Date()));
+export async function waitFor(ctx: Ctx, agentId: string, taskId: string, input: z.infer<typeof WaitInput>, now?: Date): Promise<Moved> {
+  const at = now ?? new Date();
+  const moved = await onAgent(ctx, agentId, () => placeWait(ctx, agentId, taskId, input, at));
+  await checkWaitHealth(ctx, at);
+  return moved;
 }
 
 async function placeWait(ctx: Ctx, agentId: string, taskId: string, input: z.infer<typeof WaitInput>, now: Date): Promise<Moved> {
@@ -52,7 +57,8 @@ async function placeWait(ctx: Ctx, agentId: string, taskId: string, input: z.inf
   const wait = waitOf(input, now);
   const on = await checkedWaitTarget(ctx, task.companyId, agentId, wait.on);
   const externalWait = { ...wait, ...(on ? { on } : {}) };
-  const row = await move(ctx, task, { externalWait, silent: 0 }, { kind: 'updated', actor: { agentId }, text: `Waiting for "${externalWait.reason}" until ${externalWait.until}.`, data: { externalWait } });
+  const notice = await requestedWaitNotice(ctx, { ...task, externalWait, version: task.version + 1 }, agentId);
+  const row = await move(ctx, task, { externalWait, silent: 0 }, { kind: 'updated', actor: { agentId }, text: `Waiting for "${externalWait.reason}" until ${externalWait.until}.`, data: { externalWait } }, async tx => { if (notice) await recordWaitNotice(tx, notice); });
   return { task: row, wakes: [] };
 }
 
