@@ -5,6 +5,7 @@ import type { Ctx } from '../../app.js';
 import { agentEvents, agents, departments, jobs, nodes, tasks } from '../../db/schema.js';
 import { enqueueTurn, liveSubscription } from '../conversation/queue.js';
 import { headOf } from './failures.js';
+import { sameProgram } from './program-history.js';
 import { programRestartStatus } from './program-restarts.js';
 import { logTurnFact } from './turn-log.js';
 import { stopStaleProgram } from './stale-program.js';
@@ -77,7 +78,7 @@ async function replaceProgram(ctx: Ctx, job: HistoryJob, msg: ProgramReport, now
   const programs = mapOf(turnPrograms, ctx), previous = programs.get(job.id);
   const program = programOf(msg, now);
   programs.set(job.id, { program, gone: goneProgram(msg) });
-  if (previous?.program.state !== program.state) await keepProgramChange(ctx, job, program, mapOf(turnAlarms, ctx).get(job.id) ?? null, now);
+  if (!sameProgram(previous?.program, program)) await keepProgramChange(ctx, job, program, mapOf(turnAlarms, ctx).get(job.id) ?? null, now);
 }
 
 const programOf = (msg: ProgramReport, now: Date): TurnProgram => ({ state: msg.state, since: msg.since, tool: msg.tool ?? null, screenAt: msg.screenAt, signAt: msg.signAt ?? null, retry: msg.retry ?? null, reportedAt: now.getTime() });
