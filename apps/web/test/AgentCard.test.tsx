@@ -8,13 +8,12 @@ import { CARD, ME, mockApi, TEAM_KEY } from './api-mock';
 
 function open(routes: Record<string, unknown> = {}, me: Me = ME) {
   const calls = mockApi({ 'GET /api/agents/b1': [200, CARD], ...(routes as Record<string, [number, unknown]>) });
-  const onTerminal = vi.fn();
   render(
     <LanguageProvider>
-      <AgentCard me={me} agentId="b1" onClose={() => {}} onTerminal={onTerminal} />
+      <AgentCard me={me} agentId="b1" onClose={() => {}} />
     </LanguageProvider>,
   );
-  return { calls, onTerminal };
+  return { calls };
 }
 
 const patched = (body: unknown): [number, AgentCardView] => [200, { ...CARD, ...(body as Partial<AgentCardView>) }];
@@ -104,6 +103,22 @@ describe('AgentCard', () => {
     }
   });
 
+  it('shows an obsolete wake calmly in English and Russian without a failure', async () => {
+    const at = new Date().setHours(14, 2, 0, 0);
+    for (const [lang, expected] of [
+      ['en', 'Wake-up became obsolete: the task moved on'],
+      ['ru', 'Побудка устарела: задача ушла дальше'],
+    ] as const) {
+      localStorage.setItem('hh-lang', lang);
+      open({ 'GET /api/agents/b1': [200, { ...CARD, obsolete: { at } }] });
+      const line = await screen.findByText(expected);
+      expect(line).toHaveClass('ac-obsolete');
+      expect(screen.queryByText(/Last turn failed|Последний ход не удался/)).not.toBeInTheDocument();
+      cleanup();
+      localStorage.removeItem('hh-lang');
+    }
+  });
+
   it('shows only the clock time when the last turn failed today, and the date with the time when it failed earlier, in English and Russian', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date(2026, 10, 3, 16, 0));
@@ -160,7 +175,7 @@ describe('AgentCard', () => {
     mockApi({ 'GET /api/agents/b1': [200, { ...CARD, retry }] });
     const card = (live?: Parameters<typeof AgentCard>[0]['live']) => (
       <LanguageProvider>
-        <AgentCard me={ME} agentId="b1" live={live} onClose={() => {}} onTerminal={() => {}} />
+        <AgentCard me={ME} agentId="b1" live={live} onClose={() => {}} />
       </LanguageProvider>
     );
     const { rerender } = render(card());
@@ -404,16 +419,9 @@ describe('AgentCard', () => {
 
   it('names an employee once when it is called after its role', async () => {
     open({ 'GET /api/agents/b1': [200, { ...CARD, name: 'Backend engineer' }] });
-    const card = await screen.findByRole('complementary', { name: 'Backend engineer' });
+    const card = await screen.findByRole('complementary', { name: 'Card: Backend engineer' });
     expect(within(card).getByRole('heading', { level: 3 })).toHaveTextContent('Backend engineer');
     expect(within(card).queryByText('Backend engineer', { selector: 'p' })).not.toBeInTheDocument();
-  });
-
-  it('opens the terminal', async () => {
-    const user = userEvent.setup();
-    const { onTerminal } = open();
-    await user.click(await screen.findByRole('button', { name: 'Open terminal' }));
-    expect(onTerminal).toHaveBeenCalled();
   });
 
   it('only shows the card to someone who cannot change it', async () => {

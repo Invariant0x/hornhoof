@@ -15,11 +15,11 @@ export const SUB: SubView = {
   limits: null, budget: null, isOrchestrator: false, accounts: [], tier: null, accountsDiffer: false, signedInOnce: true, leaseMachine: null,
 };
 const MACHINE: MachineView = { id: 'm1', hostname: 'test-machine', os: 'linux', arch: 'x86_64', owner: { id: 'p1', name: 'Ivan' }, online: true, lastSeenAt: null, plans: [{ id: 's1', provider: 'codex', status: 'ready', online: true }], load: null, lendsTests: true, running: { agents: [], parts: [] } };
-const CARD: AgentCardView = { id: 'b1', currentTask: null, kind: 'worker', name: 'Bruno', role: { id: 'DEV-ENG', title: ROLE, description: ROLE }, department: { id: 'd2', name: 'Development' }, product: null, model: '', effort: null, subscription: SUB, machine: null, state: 'sleeping', retry: null, failure: null, skills: [], parts: [], raw: '', instructions: { length: 0, max: 200_000 }, runsOn: [], changes: [], interrupted: [], timer: null, canEdit: false };
+export const CARD: AgentCardView = { id: 'b1', currentTask: null, kind: 'worker', name: 'Bruno', role: { id: 'DEV-ENG', title: ROLE, description: ROLE }, department: { id: 'd2', name: 'Development' }, product: null, model: '', effort: null, subscription: SUB, machine: null, state: 'sleeping', retry: null, failure: null, skills: [], parts: [], raw: '', instructions: { length: 0, max: 200_000 }, runsOn: [], changes: [], interrupted: [], timer: null, canEdit: false };
 const DETAIL: TaskDetail = { ...TASKS[0]!, body: 'The task details stay beside the terminal on a wide screen.', parent: null, after: [], executor: TASKS[0]!.assignee, gates: [], createdBy: null, subtasks: [], requests: [], log: [{ kind: 'comment', text: 'The checkout form is being checked.', data: {}, by: { kind: 'agent', id: 'b1', name: 'Bruno' }, at: '2026-11-04T00:00:00Z' }] };
 
 /* canType: whether this person types into the terminal, as the owner of its plan; so by default. orchestrator: the company's, for its window. */
-export type AgentFixture = { awake: boolean; hasTask: boolean; messages: unknown[]; connections: number; events?: EventView[]; productOnly?: boolean; privateAgent?: boolean; orgFailure?: boolean; canType?: boolean; orchestrator?: Org['orchestrator'] };
+export type AgentFixture = { awake: boolean; hasTask: boolean; messages: unknown[]; connections: number; events?: EventView[]; productOnly?: boolean; privateAgent?: boolean; orgFailure?: boolean; head?: boolean; sent?: string[]; canType?: boolean; orchestrator?: Org['orchestrator'] };
 
 export async function serveAgentWindow(page: Page, live: AgentFixture): Promise<void> {
   await serveApi(page);
@@ -37,7 +37,8 @@ export async function serveAgentWindow(page: Page, live: AgentFixture): Promise<
       '/api/subscriptions': { subscriptions: [{ ...SUB, agents: listed }] },
       '/api/machines': { machines: [{ ...MACHINE, running: { agents: listed, parts: [] } }] },
       '/api/nodes/commands': { commands: [] },
-      '/api/agents/b1': { ...CARD, product: live.productOnly ? { id: 'p2', name: 'Checkout' } : null, currentTask: live.hasTask ? { id: 't1', number: 1, title: 'Checkout step 1' } : null },
+      '/api/agents/b1': { ...CARD, kind: live.head ? 'head' : 'worker', product: live.productOnly ? { id: 'p2', name: 'Checkout' } : null, currentTask: live.hasTask ? { id: 't1', number: 1, title: 'Checkout step 1' } : null },
+      '/api/departments/d2/notebook': { notes: [{ number: 1, text: 'Review every merge.', by: { kind: 'agent', id: 'b1', name: 'Bruno' }, updatedAt: '2026-11-04T00:00:00.000Z' }] },
       '/api/tasks/t1': { task: DETAIL },
       '/api/tasks?status=open&department=d2': { tasks: [] },
     };
@@ -56,6 +57,7 @@ export async function serveAgentWindow(page: Page, live: AgentFixture): Promise<
   });
   await page.routeWebSocket('**/api/agents/b1/terminal*', ws => {
     live.connections++;
+    ws.onMessage(message => { live.sent?.push(String(message)); });
     ws.send(JSON.stringify({ type: 'ready', write: live.canType ?? true }));
     ws.send(JSON.stringify({ type: 'program', running: true }));
     ws.send(JSON.stringify({ type: 'data', data: 'Bruno is checking the checkout.\r\n> ' }));

@@ -243,17 +243,27 @@ describe('AgentWindow', () => {
     expect(await screen.findByText("Hornhoof on Ivan's machine is out of date. Run the install command there again.")).toBeInTheDocument();
   });
 
-  it('explains when the browser for checks failed on a personal or built-in machine', async () => {
+  it('warns that browser checks cannot run on a personal or built-in machine while keeping the message input open', async () => {
     const mac = { ...SUBS[1]!, kind: 'personal' as const, owner: { id: 'p1', name: 'Ivan' } };
-    const view = open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, ready: false, reason: 'browser_failed' } }] }, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: mac } });
-    expect(await screen.findByText("The browser for checks did not start on Ivan's machine. Open Machines to see why.")).toBeInTheDocument();
+    const view = open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, browserError: 'libnss3.so missing' } }] }, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: mac } });
+    expect(await screen.findByText("Browser checks cannot run on Ivan's machine right now (libnss3.so missing).")).toBeInTheDocument();
+    expect(screen.getByLabelText('Write to the orchestrator')).not.toBeDisabled();
     view.unmount();
     const key = { ...SUBS[0]!, kind: 'api_key' as const };
-    const builtin = open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, ready: false, reason: 'browser_failed' } }] }, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: key } });
-    expect(await screen.findByText('The browser for checks did not start on the built-in machine. Open Machines to see why.')).toBeInTheDocument();
+    const builtin = open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, browserError: 'libnss3.so missing' } }] }, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: key } });
+    expect(await screen.findByText('Browser checks cannot run on the built-in machine right now (libnss3.so missing).')).toBeInTheDocument();
+    expect(screen.getByLabelText('Write to the orchestrator')).not.toBeDisabled();
     builtin.unmount();
-    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, ready: false, reason: 'browser_failed' } }] }, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: null } });
-    expect(await screen.findByText('The browser for checks did not start on the built-in machine. Open Machines to see why.')).toBeInTheDocument();
+    localStorage.setItem('hh-lang', 'ru');
+    try {
+      const ruPersonal = open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, browserError: 'libnss3.so missing' } }] }, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: mac } });
+      expect(await screen.findByText('Браузерные проверки на машине (владелец Ivan) сейчас не пойдут (libnss3.so missing).')).toBeInTheDocument();
+      ruPersonal.unmount();
+      open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, browserError: 'libnss3.so missing' } }] }, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: null } });
+      expect(await screen.findByText('Браузерные проверки на встроенной машине сейчас не пойдут (libnss3.so missing).')).toBeInTheDocument();
+    } finally {
+      localStorage.removeItem('hh-lang');
+    }
   });
 
   it('names the machine he runs on', async () => {
@@ -646,13 +656,14 @@ describe('AgentWindow', () => {
     expect(screen.queryByText('Hiring for Development')).not.toBeInTheDocument();
   });
 
-  it('opens the company notebook from his window, and back to his conversation', async () => {
+  it('opens the company notebook beside his conversation, which stays, and closes it again', async () => {
     const user = userEvent.setup();
     open({ 'GET /api/notebook': [200, { notes: [{ number: 1, text: 'Turns stay small.', by: { kind: 'orchestrator' }, updatedAt: '2026-10-31T02:00:00Z' }] }] });
     await user.click(await screen.findByRole('button', { name: 'Notebook' }));
     expect(await screen.findByText('Turns stay small.')).toBeInTheDocument();
-    expect(screen.queryByRole('log')).not.toBeInTheDocument();
+    expect(screen.getByRole('log')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Notebook' }));
+    expect(screen.queryByText('Turns stay small.')).not.toBeInTheDocument();
     expect(screen.getByRole('log')).toBeInTheDocument();
   });
 
