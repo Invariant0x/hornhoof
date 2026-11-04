@@ -63,13 +63,13 @@ export async function departmentOf(db: Db, companyId: string, id: string): Promi
 type Sub = typeof subscriptions.$inferSelect;
 type Owner = { id: string; name: string; scopeKind: ScopeKind; status: string };
 
-/* Connected subscriptions the test accepts: ready, or signed out and waiting for a new login. */
+/* Connected subscriptions the test accepts: ready, or waiting for a new login or for the first setup of their program. */
 async function connected(db: Db, companyId: string, accept: (sub: Sub, owner: Owner) => boolean | Promise<boolean>): Promise<Serving[]> {
   const rows = await db
     .select({ sub: subscriptions, owner: { id: people.id, name: people.name, scopeKind: people.scopeKind, status: people.status } })
     .from(subscriptions)
     .innerJoin(people, eq(people.id, subscriptions.ownerPersonId))
-    .where(and(eq(subscriptions.companyId, companyId), isNull(subscriptions.removedAt), inArray(subscriptions.status, ['ready', 'needs_login'])))
+    .where(and(eq(subscriptions.companyId, companyId), isNull(subscriptions.removedAt), inArray(subscriptions.status, ['ready', 'needs_login', 'needs_setup'])))
     .orderBy(asc(subscriptions.createdAt));
   const out: Serving[] = [];
   for (const { sub, owner } of rows) {

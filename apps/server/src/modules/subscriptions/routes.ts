@@ -6,7 +6,7 @@ import type { Ctx } from '../../app.js';
 import { requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
 import { encryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
-import { agents, departments, jobs, machines, nodes, people, planCredentials, subscriptions, teams, testParts } from '../../db/schema.js';
+import { agents, departments, jobs, machines, nodes, people, planCredentials, subscriptions, teams, testParts, type SUBSCRIPTION_STATUSES } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { runningAgents } from '../agents/running.js';
 import { servesWholeCompany } from '../tools/staff.js';
@@ -68,7 +68,7 @@ const connectedAlready = () =>
 type ExistingPlan = {
   id: string;
   provider: Plan;
-  status: 'waiting_machine' | 'needs_login' | 'ready';
+  status: (typeof SUBSCRIPTION_STATUSES)[number];
   removedAt: Date | null;
 };
 

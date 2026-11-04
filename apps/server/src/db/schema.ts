@@ -143,7 +143,8 @@ export const nodeCodes = pgTable('node_codes', {
   createdAt: createdAt(),
 }, t => [index('node_codes_active_owner').on(t.personId).where(sql`${t.usedAt} is null`)]);
 
-export const SUBSCRIPTION_STATUSES = ['waiting_machine', 'needs_login', 'ready'] as const;
+/* needs_setup: signed in, but its program waits for a first setup only the plan's owner may pass on the machine. */
+export const SUBSCRIPTION_STATUSES = ['waiting_machine', 'needs_login', 'needs_setup', 'ready'] as const;
 
 export const subscriptions = pgTable(
   'subscriptions',
@@ -179,7 +180,8 @@ export const subscriptions = pgTable(
   t => [index('subscriptions_owner_person_id').on(t.ownerPersonId)],
 );
 
-export const NODE_STATUSES = ['needs_login', 'ready'] as const;
+export const NODE_STATUSES = ['needs_login', 'needs_setup', 'ready'] as const;
+export type NodeStatus = (typeof NODE_STATUSES)[number];
 
 /* One node on one machine: a personal plan's, signed in on that machine by itself, or the machine's own, which has no
    plan and takes only test runs. One plan runs on as many of its owner's machines as they add it to. The key is the

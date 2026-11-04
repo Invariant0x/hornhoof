@@ -1,7 +1,7 @@
 import type { Account, Limits } from '@hornhoof/protocol';
 import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
-import { agents, departments, nodes, people, personAccess, subscriptions, teams, type Provider, type SUBSCRIPTION_STATUSES } from '../../db/schema.js';
+import { agents, departments, nodes, people, personAccess, subscriptions, teams, type NodeStatus, type Provider, type SUBSCRIPTION_STATUSES } from '../../db/schema.js';
 import { WHOLE_COMPANY } from '../people/views.js';
 import { deptName } from '../departments/templates.js';
 import { BUILTIN, nodeIdentity, type NodeIdentity } from '../nodes/hub.js';
@@ -21,7 +21,7 @@ export type SubView = {
   owner: { id: string; name: string };
   place: Place;
   /* The machines the plan runs on, oldest first, with its state on each. */
-  machines: { id: string; hostname: string; status: 'needs_login' | 'ready'; online: boolean }[];
+  machines: { id: string; hostname: string; status: NodeStatus; online: boolean }[];
   limits: Limits | null;
   budget: number | null;
   isOrchestrator: boolean;
