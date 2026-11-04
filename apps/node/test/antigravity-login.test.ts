@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { antigravityAdapter, agySettings, ownTerminal, type Person } from '../src/providers/antigravity.js';
+import { antigravityAdapter, agySettings, ownTerminal, SETUP_PASSED, type Person } from '../src/providers/antigravity.js';
 import type { Tmux } from '../src/terminal/tmux.js';
 
 const hasTmux = (() => {
@@ -80,14 +80,19 @@ describe("Antigravity CLI's first-run setup", () => {
     const file = agySettings(home);
     expect(file).toBe(join(home, '.gemini', 'antigravity-cli', 'settings.json'));
     mkdirSync(dirname(file), { recursive: true });
-    for (const [settings, needed] of [['{"colorScheme":"dark"}', true], ['{"consumerOnboardingComplete":false}', true], ['{"consumerOnboardingComplete":"true"}', true], ['{ not json', true], ['{"colorScheme":"dark","consumerOnboardingComplete":true}', false]] as const) {
+    /* What the node reads as passed, among other settings, and that mark with each of its parts missing or written as text. */
+    const passed = JSON.stringify({ colorScheme: 'dark', ...SETUP_PASSED });
+    const short = Object.entries(SETUP_PASSED).flatMap(([key, value]) => [{ ...SETUP_PASSED, [key]: undefined }, { ...SETUP_PASSED, [key]: JSON.stringify(value) }]);
+    /* An empty mark would count any settings as passed. */
+    expect(Object.keys(SETUP_PASSED)).not.toEqual([]);
+    for (const [settings, needed] of [['{"colorScheme":"dark"}', true], ['{ not json', true], ...short.map(s => [JSON.stringify(s), true] as const), [passed, false]] as const) {
       writeFileSync(file, settings);
       expect(await adapter.setupNeeded!()).toBe(needed);
       expect(readFileSync(file, 'utf8')).toBe(settings);
     }
     /* An agent owns that home and could link the file elsewhere; a link is not read. */
     const other = join(dir, 'other.json');
-    writeFileSync(other, '{"consumerOnboardingComplete":true}');
+    writeFileSync(other, JSON.stringify(SETUP_PASSED));
     rmSync(file);
     symlinkSync(other, file);
     expect(await adapter.setupNeeded!()).toBe(true);
@@ -111,6 +116,7 @@ describe.skipIf(!hasTmux)("Antigravity CLI's first-run setup on the owner's term
     writeFileSync(join(home, 'fake-signed-in'), '');
     const log = join(dir, 'agy.log');
     process.env.FAKE_LOG = log;
+    process.env.FAKE_AGY_SETUP = JSON.stringify(SETUP_PASSED);
     const output = new PassThrough();
     let printed = '';
     output.on('data', c => (printed += c));
@@ -133,7 +139,7 @@ describe.skipIf(!hasTmux)("Antigravity CLI's first-run setup on the owner's term
     expect(shown).toContain('Terms of Service & Data Use');
     expect(s.printed()).toContain('terms of service');
     expect(s.keys()).toEqual([{ setup: 'colors', key: 'enter' }, { setup: 'terms', key: 'down' }, { setup: 'terms', key: 'down' }, { setup: 'terms', key: 'enter' }]);
-    expect(JSON.parse(readFileSync(agySettings(s.home), 'utf8'))).toEqual({ consumerOnboardingComplete: true });
+    expect(JSON.parse(readFileSync(agySettings(s.home), 'utf8'))).toEqual(SETUP_PASSED);
     expect(await s.adapter.setupNeeded!()).toBe(false);
     /* The hidden screen is gone. */
     expect(() => execFileSync('tmux', ['-L', 'hh-login', 'list-sessions'], { stdio: 'ignore' })).toThrow();
