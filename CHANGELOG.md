@@ -5,6 +5,32 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.6.2] - 2026-11-04
+
+Words typed into a running turn are no longer lost or delivered twice, and a turn keeps answering the CEO when Hornhoof
+or another agent writes into it.
+
+### Fixed
+
+- Live words stay with the turn they were typed into until the program's own record shows it took them, also across a
+  restart of the program. Words it never took come back as unheard and go with its next turn, in the same session.
+- A paste of several lines is erased from the input box only when the box still shows exactly what the paste left
+  there, so the words are neither sent twice nor wiped while a person types.
+- The next turn waits for the words of the one before at most 15 seconds after it ended, and stops waiting when the
+  machine reconnects, disconnects or no longer runs the agent.
+- Notices from Hornhoof and messages from other agents no longer take computer access away from the CEO or the CEO's
+  deputy in a turn they started.
+
+### Changed
+
+- The agent doing a task, the agent it is assigned to and the reviewers at its gate can all write about it to other
+  employees.
+
+### Before you update
+
+- Update the server first, then the nodes: a node from 0.6.2 tells the server when a finished turn's words settled, and
+  an older server does not know that message.
+
 ## [0.6.1] - 2026-11-04
 
 Urgent fixes for Antigravity: a new machine no longer fails every turn at its
