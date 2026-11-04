@@ -535,6 +535,7 @@ export const en = {
     nodeOutdated: (owner: string) => `Hornhoof on ${owner}'s machine is out of date. Run the install command there again.`,
     limitUntil: (at: string) => `The plan is at its limit. Turns wait until ${at} and go on by themselves then.`,
     budgetUntil: (at: string) => `The plan used the share set for tasks. Task turns wait until ${at}; messages from people still go.`,
+    machineDrain: 'The machine is finishing its work before an update. New turns wait and go on by themselves after it.',
     failed: {
       timeout: 'The orchestrator did not finish within 15 minutes.',
       not_logged_in: 'The orchestrator\'s subscription is signed out on its machine. Sign in again, then write once more.',

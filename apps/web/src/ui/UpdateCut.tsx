@@ -38,7 +38,7 @@ export function UpdateCut({ cut, updates }: { cut: Cut; updates: Updates }) {
 
   return (
     <div className="dialog-back" onPointerDown={e => e.target === e.currentTarget && dropCut()}>
-      <div className="dialog" role="alertdialog" aria-modal="true" aria-labelledby="update-cut-title" aria-describedby="update-cut-text" tabIndex={-1} ref={box}>
+      <div className="dialog update-cut" role="alertdialog" aria-modal="true" aria-labelledby="update-cut-title" aria-describedby="update-cut-text" tabIndex={-1} ref={box}>
         <header><h2 id="update-cut-title">{t.updates.cutTitle}</h2></header>
         <p id="update-cut-text">{t.updates.cutText(cut.turns)}</p>
         {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
