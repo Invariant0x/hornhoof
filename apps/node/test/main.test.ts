@@ -24,9 +24,12 @@ const adapter: ProviderAdapter = {
   run: async () => ({ ok: true, sessionId: 'sess-9', result: 'ready', output: '', error: null, limits: { status: 'allowed', windows: [] } }),
 };
 
-async function fakeServer() {
-  const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });
+/* acks: it says in its upgrade answer that it confirms numbered messages, as a server of this build does. port: the one
+   a server of the same node listened on before. */
+async function fakeServer({ acks = false, port = 0 }: { acks?: boolean; port?: number } = {}) {
+  const server = new WebSocketServer({ port, host: '127.0.0.1' });
   onTestFinished(() => server.close());
+  if (acks) server.on('headers', headers => headers.push('Hornhoof-Acks: 1'));
   await new Promise(r => server.once('listening', r));
   const received: { type: string; [k: string]: unknown }[] = [];
   let socket: WebSocket | null = null;
@@ -39,7 +42,14 @@ async function fakeServer() {
     while (!check() && Date.now() < end) await new Promise(r => setTimeout(r, 10));
     expect(check()).toBe(true);
   };
-  return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, received, send: (m: object) => socket!.send(JSON.stringify(m)), drop: () => socket!.terminate(), wait };
+  return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, received, send: (m: object) => socket!.send(JSON.stringify(m)), drop: () => socket!.terminate(), wait,
+    port: (server.address() as AddressInfo).port,
+    /* The server goes away, as an app that is restarting does. */
+    stop: () => {
+      for (const client of server.clients) client.terminate();
+      return new Promise<void>(done => server.close(() => done()));
+    },
+  };
 }
 
 function nodeDir(server: string) {
@@ -283,7 +293,7 @@ describe('a node that runs agents in terminals', () => {
     server.send({ ...run, jobId: 'j1', prompt: 'hi', workspace: { key: 'agent-1', repo: null } });
     await server.wait(() => server.received.some(m => m.type === 'job.done'), 15000);
     expect(server.received.find(m => m.type === 'job.done')).toMatchObject({ jobId: 'j1', ok: true, result: 'echo: hi' });
-    expect(server.received).toContainEqual({ type: 'job.event', jobId: 'j1', seq: 0, event: { kind: 'text', text: 'echo: hi' } });
+    expect(server.received).toContainEqual(expect.objectContaining({ type: 'job.event', jobId: 'j1', seq: 0, event: { kind: 'text', text: 'echo: hi' } }));
 
     server.send({ type: 'term.open', termId: 't1', agentKey: 'agent-1', cols: 90, rows: 30, write: false });
     await server.wait(() => server.received.some(m => m.type === 'term.data' && String(m.data).includes('echo: hi')), 8000);
@@ -773,6 +783,132 @@ describe('runNode', () => {
     server.send({ type: 'tests.cancel', partId: 'p2' });
     await server.wait(() => server.received.some(m => m.type === 'tests.done' && m.partId === 'p2'));
     expect(server.received.find(m => m.type === 'tests.done' && m.partId === 'p2')).toMatchObject({ ok: false, error: 'cancelled' });
+  });
+
+  describe('numbered messages', () => {
+    const run = { type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null };
+    const numbered = (server: Awaited<ReturnType<typeof fakeServer>>, from = 0) => server.received.slice(from).filter(m => typeof m.n === 'number');
+    const helloCount = (server: Awaited<ReturnType<typeof fakeServer>>) => server.received.filter(m => m.type === 'hello').length;
+
+    /* A program that says two things and then, once the test lets it, ends. */
+    function gated() {
+      let open!: () => void;
+      const gate = new Promise<void>(r => (open = r));
+      const talking: ProviderAdapter = {
+        ...adapter,
+        run: async input => {
+          input.onEvent?.({ kind: 'text', text: 'first' });
+          await gate;
+          input.onEvent?.({ kind: 'text', text: 'second' });
+          return adapter.run(input);
+        },
+      };
+      return { adapter: talking, open };
+    }
+
+    it('sends numbered messages again until the server confirms them', async () => {
+      const server = await fakeServer({ acks: true });
+      const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, run: async input => (input.onEvent?.({ kind: 'text', text: 'a' }), input.onEvent?.({ kind: 'text', text: 'b' }), adapter.run(input)) }, log: () => {} });
+      onTestFinished(() => node.stop());
+      await server.wait(() => server.received.some(m => m.type === 'hello'));
+      server.send(run);
+      await server.wait(() => server.received.some(m => m.type === 'job.done'));
+      const first = numbered(server);
+      expect(first.map(m => [m.type, m.n])).toEqual([['job.started', 1], ['job.event', 2], ['job.event', 3], ['job.done', 4]]);
+
+      const seen = server.received.length;
+      server.drop();
+      await server.wait(() => helloCount(server) === 2, 5000);
+      await server.wait(() => numbered(server, seen).length === 4);
+      expect(numbered(server, seen)).toEqual(first);
+      expect(server.received[seen]).toMatchObject({ type: 'hello', stream: expect.any(String) });
+      expect(server.received[0]).toMatchObject({ stream: server.received[seen]!.stream });
+
+      server.send({ type: 'ack', upto: 4 });
+      await new Promise(r => setTimeout(r, 50));
+      const before = server.received.length;
+      server.drop();
+      await server.wait(() => helloCount(server) === 3, 5000);
+      await new Promise(r => setTimeout(r, 150));
+      expect(numbered(server, before)).toEqual([]);
+      expect(server.received[before]).toMatchObject({ type: 'hello', running: [] });
+    });
+
+    it('keeps its messages through its own restart', async () => {
+      const first = await fakeServer({ acks: true });
+      const dir = nodeDir(first.url);
+      const talking = gated();
+      const node = await runNode({ dir, adapter: talking.adapter, log: () => {} });
+      onTestFinished(() => node.stop());
+      await first.wait(() => first.received.some(m => m.type === 'hello'));
+      first.send(run);
+      await first.wait(() => first.received.some(m => m.type === 'job.event'));
+      const stream = String(first.received[0]!.stream);
+      await first.stop();
+      talking.open();
+      await vi.waitFor(() => expect(readFileSync(join(dir, 'outbox.jsonl'), 'utf8')).toContain('"second"'), { timeout: 3000 });
+      node.stop();
+
+      const second = await fakeServer({ acks: true, port: first.port });
+      const again = await runNode({ dir, adapter, log: () => {} });
+      onTestFinished(() => again.stop());
+      await second.wait(() => second.received.some(m => m.type === 'job.done'));
+      expect(second.received[0]).toMatchObject({ type: 'hello', stream });
+      expect(numbered(second).map(m => [m.type, m.n])).toEqual([['job.started', 1], ['job.event', 2], ['job.event', 3], ['job.done', 4]]);
+      expect(numbered(second)[2]).toMatchObject({ event: { text: 'second' } });
+    });
+
+    it('talks to a server of the build before', async () => {
+      const first = await fakeServer();
+      const talking = gated();
+      const node = await runNode({ dir: nodeDir(first.url), adapter: talking.adapter, log: () => {} });
+      onTestFinished(() => node.stop());
+      await first.wait(() => first.received.some(m => m.type === 'hello'));
+      first.send(run);
+      await first.wait(() => first.received.some(m => m.type === 'job.event'));
+      expect(first.received[0]).toMatchObject({ type: 'hello' });
+      await first.stop();
+      /* The node must see its socket gone first: what a server that confirms nothing was sent is given up. */
+      await new Promise(r => setTimeout(r, 200));
+      talking.open();
+      await new Promise(r => setTimeout(r, 200));
+
+      const second = await fakeServer({ port: first.port });
+      await second.wait(() => second.received.some(m => m.type === 'job.done'), 6000);
+      expect(numbered(second).map(m => m.type)).toEqual(['job.event', 'job.done']);
+      expect(second.received[0]).toMatchObject({ type: 'hello', running: ['j1'] });
+
+      const before = second.received.length;
+      second.drop();
+      await second.wait(() => helloCount(second) === 2, 6000);
+      await second.wait(() => numbered(second, before).length > 0);
+      await new Promise(r => setTimeout(r, 100));
+      expect(numbered(second, before).map(m => m.type)).toEqual(['job.done']);
+
+      second.send({ type: 'job.ack', jobId: 'j1' });
+      await new Promise(r => setTimeout(r, 50));
+      const last = second.received.length;
+      second.drop();
+      await second.wait(() => helloCount(second) === 3, 6000);
+      await new Promise(r => setTimeout(r, 150));
+      expect(numbered(second, last)).toEqual([]);
+    });
+
+    it('does not run a part again whose end waits for its ack', async () => {
+      const server = await fakeServer({ acks: true });
+      const ran: string[] = [];
+      const runPart: typeof runTests = async m => (ran.push(m.partId), { type: 'tests.done', partId: m.partId, ok: true, exitCode: 0, error: null, commit: null, log: '' });
+      const node = await runNode({ dir: nodeDir(server.url), adapter, log: () => {}, runPart, testUser: { uid: 20001, gid: 20001 } });
+      onTestFinished(() => node.stop());
+      await server.wait(() => server.received.some(m => m.type === 'hello'));
+      const part = { type: 'tests.run', partId: 'p1', repo: { url: 'https://github.com/acme/shop.git', token: '' }, branch: null, task: 3, command: 'npm test', part: 1, parts: 1, timeoutMs: 60000 };
+      server.send(part);
+      await server.wait(() => server.received.some(m => m.type === 'tests.done'));
+      server.send(part);
+      await new Promise(r => setTimeout(r, 150));
+      expect(ran).toEqual(['p1']);
+      expect(server.received.filter(m => m.type === 'tests.started')).toHaveLength(1);
+    });
   });
 
   it('stays idle once removed', async () => {

@@ -5,13 +5,14 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:
 import { hostname, uptime } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { LOAD_MS, NodeBuild, type AgentEvent, type CredKind, type Limits, type NodeLoad, type NodeMessage, type NodeStopReason, type ProviderId, type ServerMessage } from '@hornhoof/protocol';
+import { isNumbered, LOAD_MS, NodeBuild, type AgentEvent, type CredKind, type Limits, type NodeLoad, type NodeMessage, type NodeStopReason, type ProviderId, type ServerMessage } from '@hornhoof/protocol';
 import { SIGNIN_ERRORS } from '@hornhoof/protocol/signin';
 import { agentFs, ownFs, type AgentFs } from './agent-fs.js';
 import { bootFacts } from './boot.js';
 import { connect } from './connection.js';
 import { agentUser, builtinAdapters, secureNode, userFor, type JobUser } from './isolation.js';
 import { machineLoad } from './load.js';
+import { endId, isEnd, Outbox, type Entry } from './outbox.js';
 import { adapterFor, programFor } from './providers/index.js';
 import { runJob, type ProviderAdapter, type RunInput, type RunResult } from './runner.js';
 import { applyCredential, dropCredential, giveUpLease, heldCredential, holdsLease, isSpare, takeLease } from './credentials.js';
@@ -48,7 +49,6 @@ const LIMITS_MS = 5 * 60_000;
 /* How long a removal waits for called-off jobs to stop before it deletes their folders. */
 const STOP_WAIT_MS = 5_000;
 /* How many unconfirmed job ends a node keeps for a server that does not confirm them. */
-const MAX_UNCONFIRMED = 50;
 
 type JobRun = Extract<ServerMessage, { type: 'job.run' }>;
 type Recipient = { nodeId: string; publicKey: string };
@@ -136,12 +136,13 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   /* Each running job with the way to call it off and the promise of its end, and the same for parts of test runs. */
   const running = new Map<string, { stop: AbortController; done: Promise<void> }>();
   const testing = new Map<string, { stop: AbortController; done: Promise<void> }>();
-  /* Messages that could not be sent while offline. They go out right after the next hello. */
-  const outbox: NodeMessage[] = [];
-  /* Ends of jobs Hornhoof has not confirmed: a socket can drop with one on its way. They count as running and go again
-     after each hello. A server that never confirms keeps only the last few. */
-  const unconfirmed = new Map<string, NodeMessage>();
-  const unconfirmedTests = new Map<string, NodeMessage>();
+  /* The messages that change the company's data, numbered and kept in the volume until Hornhoof confirms them, so a
+     restart of the node or of Hornhoof loses none. A job's end counts as running until then. */
+  const outbox = new Outbox(dir, { onError: err => writeLog(`The outbox could not be written: ${message(err)}`) });
+  /* Messages that cannot be sent while offline and are worth nothing late wait here, and go out right after the next hello. */
+  const waiting: NodeMessage[] = [];
+  /* Whether Hornhoof confirms numbered messages: with the server that does not, what was sent is dropped at once. */
+  let confirmed = false;
   let send: ((m: NodeMessage) => boolean) | null = null;
   /* The kind of sign-in Hornhoof hands this plan, and what that sign-in was when the plan's program refused it: until
      it changes, the node stays signed out, so turns do not go round on a sign-in that no longer works. */
@@ -164,18 +165,19 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   let stopped = false;
 
   const emit = (m: NodeMessage) => {
-    if (m.type === 'job.done') keep(m.jobId, m);
-    if (m.type === 'tests.done') keepTest(m.partId, m);
     const current = withPrograms(m, programs);
-    if (!send?.(current) && m.type !== 'job.done' && m.type !== 'tests.done') outbox.push(current);
+    if (isNumbered(current)) return void sendNumbered(current);
+    if (!send?.(current)) waiting.push(current);
   };
-  const keep = (jobId: string, m: NodeMessage) => {
-    unconfirmed.set(jobId, m);
-    if (unconfirmed.size > MAX_UNCONFIRMED) unconfirmed.delete(unconfirmed.keys().next().value!);
+  /* An end is numbered when its turn comes, after the messages of its job; the rest are numbered as they are made. */
+  const sendNumbered = (m: NodeMessage) => {
+    if (isEnd(m)) outbox.hold(m);
+    const entry = isEnd(m) ? outbox.number(endId(m)) : outbox.add(m);
+    if (entry) deliver(entry);
   };
-  const keepTest = (partId: string, m: NodeMessage) => {
-    unconfirmedTests.set(partId, m);
-    if (unconfirmedTests.size > MAX_UNCONFIRMED) unconfirmedTests.delete(unconfirmedTests.keys().next().value!);
+  /* A message that cannot go out now stays numbered in the outbox and goes after the next hello. */
+  const deliver = (entry: Entry) => {
+    if (send?.(entry.msg) && !confirmed && !isEnd(entry.msg)) outbox.dropSent(entry.n);
   };
   /* Values no screen shows: the node's key, the programs' tokens and each turn's tokens. */
   const learn = async (more: (string | null | undefined)[] = []) => {
@@ -240,23 +242,32 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     url: state.server.replace(/^http/, 'ws') + '/api/nodes/socket',
     key: state.key,
     log,
-    onOpen(next) {
+    onOpen(next, acks) {
       send = next;
+      confirmed = acks;
       host?.closeViews();
       login?.closeViews();
       /* Finished jobs Hornhoof has not confirmed still count as running, so the server does not give up on them. */
       const typed = host?.typedJobs() ?? [];
-      const tests = [...testing.keys(), ...unconfirmedTests.keys()];
-      next({ type: 'hello', version: VERSION, loggedIn, running: [...running.keys(), ...typed, ...unconfirmed.keys()], ...(models ? { models } : {}), terminals: Boolean(host), work: Boolean(testUser), ...(testUser ? {} : { noRuns: NO_RUNS }), load: load(), tests, skillFiles: true, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
-      for (const m of outbox.splice(0)) emit(m);
-      for (const m of unconfirmed.values()) next(m);
-      for (const m of unconfirmedTests.values()) next(m);
+      const tests = [...testing.keys(), ...outbox.doneParts()];
+      next({ type: 'hello', version: VERSION, stream: outbox.stream, loggedIn, running: [...running.keys(), ...typed, ...outbox.doneJobs()], ...(models ? { models } : {}), terminals: Boolean(host), work: Boolean(testUser), ...(testUser ? {} : { noRuns: NO_RUNS }), load: load(), tests, skillFiles: true, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
+      for (const m of waiting.splice(0)) emit(m);
+      sendPending(next);
     },
     /* One message that fails is logged; it never ends the node with all its runs. */
     onMessage: m => void handle(m).catch(err => log(`A message from Hornhoof failed: ${message(err)}`)),
     onRefused: () => log('Hornhoof does not know this machine any more. Run the install command from Hornhoof again to reconnect.'),
   });
   void programs.update(tellStatus).catch(err => log(`Could not update the programs: ${message(err)}`));
+
+  /* Everything numbered that Hornhoof has not confirmed, in order, ends that were still held included. A server that
+     confirms nothing gets it once. */
+  function sendPending(next: (m: NodeMessage) => boolean) {
+    for (const id of outbox.held()) outbox.number(id);
+    const pending = outbox.pending();
+    for (const entry of pending) next(entry.msg);
+    if (!confirmed && pending.length) outbox.dropSent(pending[pending.length - 1]!.n);
+  }
 
   async function handle(m: ServerMessage) {
     if (m.type === 'remove') {
@@ -276,13 +287,11 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       stop();
       return;
     }
-    /* The node does not number its messages yet, so a confirmation has nothing to drop. */
-    if (m.type === 'ack') return;
-    if (acknowledged(m, unconfirmed, unconfirmedTests)) return;
+    if (acknowledged(m, outbox)) return;
     if (m.type === 'programs.update') return programs.update(tellStatus);
     if (m.type === 'tests.cancel') return void testing.get(m.partId)?.stop.abort();
     if (m.type === 'tests.run') {
-      if (stopped || testing.has(m.partId) || unconfirmedTests.has(m.partId)) return;
+      if (stopped || testing.has(m.partId) || outbox.doneParts().includes(m.partId)) return;
       const controller = new AbortController();
       const done = testOne(m, controller.signal);
       testing.set(m.partId, { stop: controller, done });
@@ -418,13 +427,13 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   async function testOne(m: TestRun, signal: AbortSignal) {
     if (!testUser) {
       const refused: TestsDone = { type: 'tests.done', partId: m.partId, ok: false, exitCode: null, error: 'failed', commit: null, log: NO_RUNS };
-      keepTest(m.partId, refused);
+      outbox.hold(refused);
       testing.delete(m.partId);
       return emit(refused);
     }
     emit({ type: 'tests.started', partId: m.partId });
     const done = await runPart(m, { dir, user: testUser, hidden: [...known], signal, files });
-    keepTest(m.partId, done);
+    outbox.hold(done);
     testing.delete(m.partId);
     emit(done);
   }
@@ -462,7 +471,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       done = { type: 'job.done', jobId: m.jobId, ok: false, sessionId: null, result: '', tail: message(err), error: 'agent_failed' };
     }
     /* The end counts as running from here, so a hello while the limits are read does not give the job up. */
-    keep(m.jobId, done);
+    outbox.hold(done);
     running.delete(m.jobId);
     /* The limits the turn brought go first, so Hornhoof knows of a plan at its limit when it hears the job ended. */
     await status();
@@ -517,6 +526,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     clearInterval(renewing);
     void host?.stop();
     void login?.shutdown();
+    outbox.close();
     /* Let the last message leave before the socket closes. */
     setTimeout(() => conn.close(), 50);
   }
@@ -546,16 +556,13 @@ function withPrograms(message: NodeMessage, programs: ProgramUpdates): NodeMessa
   return message.type === 'status' ? { ...message, programs: programs.snapshot() } : message;
 }
 
-function acknowledged(message: ServerMessage, jobs: Map<string, NodeMessage>, tests: Map<string, NodeMessage>): message is Extract<ServerMessage, { type: 'job.ack' | 'tests.ack' }> {
-  if (message.type === 'job.ack') {
-    jobs.delete(message.jobId);
-    return true;
-  }
-  if (message.type === 'tests.ack') {
-    tests.delete(message.partId);
-    return true;
-  }
-  return false;
+/* What Hornhoof confirms goes out of the outbox: numbers up to one, or a job's or a part's end. */
+function acknowledged(message: ServerMessage, outbox: Outbox): message is Extract<ServerMessage, { type: 'ack' | 'job.ack' | 'tests.ack' }> {
+  if (message.type === 'ack') outbox.ack(message.upto);
+  else if (message.type === 'job.ack') outbox.ackJob(message.jobId);
+  else if (message.type === 'tests.ack') outbox.ackPart(message.partId);
+  else return false;
+  return true;
 }
 
 function runUnlessStopped(input: RunInput, run: () => Promise<RunResult>): Promise<RunResult> {

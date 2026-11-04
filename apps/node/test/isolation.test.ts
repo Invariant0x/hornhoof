@@ -82,6 +82,19 @@ describe('secureNode', () => {
   });
 });
 
+describe('secureNode and the outbox', () => {
+  it('makes outbox.jsonl root-owned when it exists, and leaves it alone when it does not', () => {
+    const user = { uid: 1000, gid: 1000 };
+    const missing = ['/data/node.json', '/data/sessions.json', '/data/users.json', '/data/login-url', '/data/removed', '/data/tools', '/data/.hh-recordings'];
+    const owned = fakeOps({ '/data/outbox.jsonl': 1000 }, missing);
+    secureNode('/data', user, owned.ops);
+    expect(owned.calls).toContain('chown1 /data/outbox.jsonl 0:0');
+    const absent = fakeOps({}, [...missing, '/data/outbox.jsonl']);
+    secureNode('/data', user, absent.ops);
+    expect(absent.calls.join('\n')).not.toContain('outbox.jsonl');
+  });
+});
+
 describe('prepareFolder', () => {
   it('hands the folder to the user and closes it to everyone else', () => {
     const { ops, calls } = fakeOps();
