@@ -276,6 +276,8 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       stop();
       return;
     }
+    /* The node does not number its messages yet, so a confirmation has nothing to drop. */
+    if (m.type === 'ack') return;
     if (acknowledged(m, unconfirmed, unconfirmedTests)) return;
     if (m.type === 'programs.update') return programs.update(tellStatus);
     if (m.type === 'tests.cancel') return void testing.get(m.partId)?.stop.abort();
