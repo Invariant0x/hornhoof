@@ -6,11 +6,27 @@ import { agentEvents, agents, jobs, subscriptions } from '../../db/schema.js';
 import { sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { notifyFailure } from '../tasks/failures.js';
 import { logTurnFact } from '../tasks/turn-log.js';
-import { enqueueTurn, nodeOfAgent, onAgent, pump, settleWords } from './queue.js';
+import { withInputLock } from './decision-context.js';
+import { insertTurn, nodeOfAgent, onAgent, pump, settleWords } from './queue.js';
 import { repeatedTurn, UNHEARD_NOTE, wordsForTurn } from './turn-words.js';
 
 const HOUR_MS = 3_600_000;
 type Job = typeof jobs.$inferSelect;
+
+function storeUnheard(ctx: Ctx, companyId: string, agentId: string, text: string, original: Job | undefined): Promise<string> {
+  return withInputLock(ctx, agentId, async () => {
+    const [source] = original ? await wordsForTurn(ctx, agentId, original.id, text) : [];
+    return insertTurn(ctx, { companyId, agentId, prompt: text, ...(await repeatedTurn(ctx, original, source || null)) });
+  });
+}
+
+function recordUnheard(ctx: Ctx, agent: typeof agents.$inferSelect, job: Job, original: Job | undefined, now: Date): Promise<void> {
+  return onAgent(ctx, agent.id, async () => {
+    await logTurnFact(ctx, job, UNHEARD_NOTE, { unheardAt: now.toISOString() });
+    await repeatedUnheard(ctx, job, agent.name, now);
+    if (original) settleWords(ctx, agent.id, original.id, original.status === 'running');
+  });
+}
 
 /* Words that were already sent keep their sender, and wait for the next turn instead of trying live again. */
 export async function unheard(ctx: Ctx, node: NodeIdentity, msg: Extract<NodeMessage, { type: 'agent.unheard' }>, now: Date): Promise<void> {
@@ -21,14 +37,9 @@ export async function unheard(ctx: Ctx, node: NodeIdentity, msg: Extract<NodeMes
   if (!agent) return;
   const [original] = msg.jobId ? await ctx.db.select().from(jobs).where(and(eq(jobs.id, msg.jobId), eq(jobs.agentId, agent.id))) : [];
   if (msg.jobId && !original) return;
-  const source = original ? (await wordsForTurn(ctx, agent.id, original.id, msg.text))[0] ?? null : null;
-  const next = await enqueueTurn(ctx, { companyId: agent.companyId, agentId: agent.id, prompt: msg.text, ...await repeatedTurn(ctx, original, source) });
+  const next = await storeUnheard(ctx, agent.companyId, agent.id, msg.text, original);
   const [job] = original ? [original] : await ctx.db.select().from(jobs).where(eq(jobs.id, next));
-  await onAgent(ctx, agent.id, async () => {
-    await logTurnFact(ctx, job!, UNHEARD_NOTE, { unheardAt: now.toISOString() });
-    await repeatedUnheard(ctx, job!, agent.name, now);
-    if (original) settleWords(ctx, agent.id, original.id, original.status === 'running');
-  });
+  await recordUnheard(ctx, agent, job!, original, now);
   await pump(ctx, agent.id);
 }
 

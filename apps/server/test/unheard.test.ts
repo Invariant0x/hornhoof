@@ -21,19 +21,18 @@ async function atWork() {
 }
 
 describe('words the program never took', () => {
-  it.each(['pending', 'agent', 'person', 'unknown'] as const)('does not restore an older CEO principal after %s words', async after => {
+  it.each(['pending', 'person', 'unknown'] as const)('does not restore an older CEO principal after %s words', async after => {
     const c = await failureCompany();
     const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     const id = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: orchestrator!.id, prompt: 'Work', createdBy: c.sub.ownerPersonId, answersCeo: true });
     const source = await appendEvent(c.ctx, { companyId: c.companyId, agentId: orchestrator!.id, jobId: id, kind: 'message', personId: c.sub.ownerPersonId, data: { text: 'Approve it.' } });
     expect(await decisionPrincipal(c.db, id)).toMatchObject({ personId: c.sub.ownerPersonId });
     if (after === 'pending') await c.db.update(jobs).set({ decisionInputPending: true }).where(eq(jobs.id, id));
-    if (after === 'agent') await appendEvent(c.ctx, { companyId: c.companyId, agentId: orchestrator!.id, jobId: id, kind: 'message', data: { text: 'Wait for the review.', from: 'agent', by: c.head.id } });
     if (after === 'person') {
       const [person] = await c.db.insert(people).values({ companyId: c.companyId, name: 'Zed', email: 'zed@acme.com', status: 'active', scopeKind: 'company' }).returning();
       await appendEvent(c.ctx, { companyId: c.companyId, agentId: orchestrator!.id, jobId: id, kind: 'typed', personId: person!.id, data: {} });
     }
-    if (after === 'pending' || after === 'agent') expect(await decisionPrincipal(c.db, id)).toBeNull();
+    if (after === 'pending') expect(await decisionPrincipal(c.db, id)).toBeNull();
     const text = after === 'unknown' ? 'Words that were never saved.' : addressed('Approve it.', source.message!);
     await handleNodeMessage(c.ctx, BUILTIN, { type: 'agent.unheard', agentKey: orchestrator!.id, jobId: id, text });
     const next = (await c.turnsOf(orchestrator!.id)).find(j => j.id !== id)!;
@@ -41,6 +40,22 @@ describe('words the program never took', () => {
     await pump(c.ctx, orchestrator!.id);
     expect(await c.jobOf(next.id)).toMatchObject({ status: 'running' });
     expect(await decisionPrincipal(c.db, next.id)).toBeNull();
+  });
+
+  it('keeps the CEO principal for unheard CEO words when an agent message or Hornhoof notice arrived after them', async () => {
+    const c = await failureCompany();
+    const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    const id = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: orchestrator!.id, prompt: 'Work', createdBy: c.sub.ownerPersonId, answersCeo: true });
+    const source = await appendEvent(c.ctx, { companyId: c.companyId, agentId: orchestrator!.id, jobId: id, kind: 'message', personId: c.sub.ownerPersonId, data: { text: 'Approve it.' } });
+    await appendEvent(c.ctx, { companyId: c.companyId, agentId: orchestrator!.id, jobId: id, kind: 'message', data: { text: 'Wait for the review.', from: 'agent', by: c.head.id } });
+    await appendEvent(c.ctx, { companyId: c.companyId, agentId: orchestrator!.id, jobId: id, kind: 'message', data: { text: 'Ada took an improvement into work: "Logs".' } });
+    expect(await decisionPrincipal(c.db, id)).toMatchObject({ personId: c.sub.ownerPersonId });
+    await handleNodeMessage(c.ctx, BUILTIN, { type: 'agent.unheard', agentKey: orchestrator!.id, jobId: id, text: addressed('Approve it.', source.message!) });
+    const next = (await c.turnsOf(orchestrator!.id)).find(j => j.id !== id)!;
+    await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, id));
+    await pump(c.ctx, orchestrator!.id);
+    expect(await c.jobOf(next.id)).toMatchObject({ status: 'running' });
+    expect(await decisionPrincipal(c.db, next.id)).toMatchObject({ personId: c.sub.ownerPersonId });
   });
 
   it('keeps the CEO and the envelope of live words without showing them twice', async () => {
@@ -75,10 +90,13 @@ describe('words the program never took', () => {
     const c = await atWork();
     await c.send();
     const turns = await c.turnsOf();
+    const next = turns.find(t => t.prompt === TEXT);
     expect(turns.filter(t => t.prompt === TEXT)).toHaveLength(1);
-    expect(turns.find(t => t.prompt === TEXT)?.status).toBe('queued');
+    expect(next?.status).toBe('queued');
     expect((await c.events()).some(e => (e.data as { text?: string }).text === LINE)).toBe(true);
     expect(c.sent.mock.calls.some(([, m]) => m.type === 'agent.say')).toBe(false);
+    await handleNodeMessage(c.ctx, BUILTIN, { type: 'job.done', jobId: c.job.id, ok: true, sessionId: null, result: '', tail: '', error: null, wordsWaiting: true });
+    expect(await c.jobOf(next!.id)).toMatchObject({ status: 'running' });
   });
 
   it('ignores words reported by another node', async () => {
@@ -96,6 +114,11 @@ describe('words the program never took', () => {
     await c.send(TEXT, new Date(), BUILTIN, null);
     expect((await c.turnsOf()).filter(t => t.prompt === TEXT)).toHaveLength(1);
     expect((await c.events()).some(e => (e.data as { text?: string }).text === LINE)).toBe(true);
+    const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    await handleNodeMessage(c.ctx, BUILTIN, { type: 'agent.unheard', agentKey: orchestrator!.id, jobId: null, text: TEXT }, new Date());
+    const [unlinked] = await c.turnsOf(orchestrator!.id);
+    expect(unlinked).toMatchObject({ createdBy: null, answersCeo: false });
+    expect(await decisionPrincipal(c.db, unlinked!.id)).toBeNull();
   });
 
   it('tells Operations once for three entries within an hour, with the agent, program and three times', async () => {

@@ -116,25 +116,39 @@ describe('a program starts a turn with its queued live words', () => {
     expect(await c.jobOf(c.next)).toMatchObject({ status: 'running' });
   });
 
-  it.each(['pending', 'agent', 'person'] as const)('does not restore an older CEO principal after %s words', async after => {
+  it.each(['pending', 'person'] as const)('does not restore an older CEO principal after %s words', async after => {
     const c = await failureCompany();
     const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     const [before] = await c.db.insert(jobs).values({ companyId: c.companyId, agentId: orchestrator!.id, subscriptionId: c.sub.id, kind: 'conversation', prompt: 'work', status: 'running', timeoutMs: 1000, createdBy: c.sub.ownerPersonId, answersCeo: true }).returning();
     const source = await appendEvent(c.ctx, { companyId: c.companyId, agentId: orchestrator!.id, jobId: before!.id, kind: 'message', personId: c.sub.ownerPersonId, data: { text: 'Approve it.' } });
     expect(await decisionPrincipal(c.db, before!.id)).toMatchObject({ personId: c.sub.ownerPersonId });
     if (after === 'pending') await c.db.update(jobs).set({ decisionInputPending: true }).where(eq(jobs.id, before!.id));
-    if (after === 'agent') await appendEvent(c.ctx, { companyId: c.companyId, agentId: orchestrator!.id, jobId: before!.id, kind: 'message', data: { text: 'Wait for the review.', from: 'agent', by: c.head.id } });
     if (after === 'person') {
       const [person] = await c.db.insert(people).values({ companyId: c.companyId, name: 'Zed', email: 'zed@acme.com', status: 'active', scopeKind: 'company' }).returning();
       await appendEvent(c.ctx, { companyId: c.companyId, agentId: orchestrator!.id, jobId: before!.id, kind: 'typed', personId: person!.id, data: {} });
     }
-    if (after === 'pending' || after === 'agent') expect(await decisionPrincipal(c.db, before!.id)).toBeNull();
+    if (after === 'pending') expect(await decisionPrincipal(c.db, before!.id)).toBeNull();
     await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, before!.id));
     await handleNodeMessage(c.ctx, BUILTIN, { type: 'turn.open', agentKey: orchestrator!.id, text: addressed('Approve it.', source.message!), queuedFrom: before!.id, ref: 'queued' });
     const next = (await c.turnsOf(orchestrator!.id)).find(j => j.id !== before!.id)!;
     expect(await c.jobOf(next.id)).toMatchObject({ status: 'running' });
     expect(await decisionPrincipal(c.db, next.id)).toBeNull();
     expect(await messageForJob(c.ctx, { id: next.id, companyId: c.companyId, agentId: orchestrator!.id })).toEqual(source.message);
+  });
+
+  it('keeps the CEO principal for queued CEO words when an agent message or Hornhoof notice arrived after them', async () => {
+    const c = await failureCompany();
+    const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    const [before] = await c.db.insert(jobs).values({ companyId: c.companyId, agentId: orchestrator!.id, subscriptionId: c.sub.id, kind: 'conversation', prompt: 'work', status: 'running', timeoutMs: 1000, createdBy: c.sub.ownerPersonId, answersCeo: true }).returning();
+    const source = await appendEvent(c.ctx, { companyId: c.companyId, agentId: orchestrator!.id, jobId: before!.id, kind: 'message', personId: c.sub.ownerPersonId, data: { text: 'Approve it.' } });
+    await appendEvent(c.ctx, { companyId: c.companyId, agentId: orchestrator!.id, jobId: before!.id, kind: 'message', data: { text: 'Wait for the review.', from: 'agent', by: c.head.id } });
+    await appendEvent(c.ctx, { companyId: c.companyId, agentId: orchestrator!.id, jobId: before!.id, kind: 'message', data: { text: 'Ada took an improvement into work: "Logs".' } });
+    expect(await decisionPrincipal(c.db, before!.id)).toMatchObject({ personId: c.sub.ownerPersonId });
+    await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, before!.id));
+    await handleNodeMessage(c.ctx, BUILTIN, { type: 'turn.open', agentKey: orchestrator!.id, text: addressed('Approve it.', source.message!), queuedFrom: before!.id, ref: 'queued' });
+    const next = (await c.turnsOf(orchestrator!.id)).find(j => j.id !== before!.id)!;
+    expect(await c.jobOf(next.id)).toMatchObject({ status: 'running' });
+    expect(await decisionPrincipal(c.db, next.id)).toMatchObject({ personId: c.sub.ownerPersonId });
   });
 
   it.each(['person', 'agent'] as const)('keeps the queued %s author without another message or sent copy', async author => {
@@ -174,11 +188,12 @@ describe('a program starts a turn with its queued live words', () => {
     expect(c.sent.mock.calls.map(([, m]) => m).filter(m => m.type === 'turn.opened').every(m => m.jobId === null)).toBe(true);
   });
 
-  it('opens queued words while the original job is still reporting its end, before another turn can be sent', async () => {
+  it('opens queued words once while the original job is still reporting its end, before another turn can be sent', async () => {
     const c = await queuedWords();
     await c.db.update(jobs).set({ status: 'running', finishedAt: null }).where(eq(jobs.id, c.before.id));
-    await c.open();
-    const opened = c.sent.mock.calls.map(([, m]) => m).find(m => m.type === 'turn.opened');
-    expect(opened).toMatchObject({ jobId: expect.any(String) });
+    await Promise.all([c.open(), c.open()]);
+    const opened = c.sent.mock.calls.map(([, m]) => m).filter(m => m.type === 'turn.opened');
+    expect(opened.filter(m => m.jobId !== null)).toHaveLength(1);
+    expect(opened.filter(m => m.jobId === null)).toHaveLength(1);
   });
 });
