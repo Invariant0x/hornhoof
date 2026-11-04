@@ -1,5 +1,5 @@
 import type { ExternalWait } from '@hornhoof/protocol/waits';
-import { COMPANY_TEMPLATE_KEYS, CRED_KINDS, MACHINE_KINDS, RUN_KINDS, TEMPLATE_KEYS, type Account, type Boot, type Failure, type Limits, type ModelOption, type NodeExit } from '@hornhoof/protocol';
+import { COMPANY_TEMPLATE_KEYS, CRED_KINDS, MACHINE_KINDS, RUN_KINDS, TEMPLATE_KEYS, type Account, type Boot, type Failure, type Limits, type ModelOption, type NodeExit, type NodeReconnect } from '@hornhoof/protocol';
 import { sql } from 'drizzle-orm';
 import { bigint, bigserial, boolean, check, customType, index, integer, jsonb, pgTable, primaryKey, real, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
 
@@ -207,6 +207,35 @@ export const nodes = pgTable(
     createdAt: createdAt(),
   },
   t => [unique('nodes_machine_plan').on(t.machineId, t.subscriptionId).nullsNotDistinct(), index('nodes_subscription_id').on(t.subscriptionId)],
+);
+
+export const NODE_CONNECTION_ACTORS = ['server', 'node', 'network'] as const;
+export const NODE_CONNECTION_CAUSES = ['missed_pongs', 'node_closed', 'socket_error', 'replaced', 'server_close', 'server_stop', 'abnormal_close'] as const;
+
+/* What the server saw of one physical node's connection. The next connection fills the disconnect's offline time, and a
+   returning newer node adds what it saw to the same disconnect. */
+export const nodeConnectionEvents = pgTable(
+  'node_connection_events',
+  {
+    id: id(),
+    companyId: companyId(),
+    machineId: uuid('machine_id').notNull().references(() => machines.id),
+    nodeId: uuid('node_id').notNull().references(() => nodes.id),
+    kind: text('kind', { enum: ['connected', 'disconnected'] }).notNull(),
+    happenedAt: timestamp('happened_at', { withTimezone: true }).notNull().defaultNow(),
+    actor: text('actor', { enum: NODE_CONNECTION_ACTORS }),
+    cause: text('cause', { enum: NODE_CONNECTION_CAUSES }),
+    closeCode: integer('close_code'),
+    closeReason: text('close_reason'),
+    error: text('error'),
+    offlineMs: bigint('offline_ms', { mode: 'number' }),
+    nodeReport: jsonb('node_report').$type<NodeReconnect>(),
+  },
+  t => [
+    index('node_connection_events_happened_at').on(t.happenedAt),
+    index('node_connection_events_machine_time').on(t.machineId, t.happenedAt),
+    index('node_connection_events_node_time').on(t.nodeId, t.happenedAt),
+  ],
 );
 
 /* A plan's sign-in sealed to one of its nodes. Hornhoof cannot open it: only that node's private key does. */

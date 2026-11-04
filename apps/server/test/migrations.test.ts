@@ -1045,3 +1045,43 @@ describe('migration 0046', () => {
     expect((await db.execute(sql`select failure->>'kind' as kind, not_before > restarted_at as waits from jobs`)).rows).toEqual([{ kind: 'network', waits: true }]);
   });
 });
+
+
+describe('migration 0058', () => {
+  it('creates empty node connection history on a fresh install', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    const columns = await db.execute<{ column_name: string }>(sql`select column_name from information_schema.columns where table_name = 'node_connection_events' order by column_name`);
+    expect(columns.rows.map(row => row.column_name)).toEqual([
+      'actor', 'cause', 'close_code', 'close_reason', 'company_id', 'error', 'happened_at', 'id', 'kind', 'machine_id', 'node_id', 'node_report', 'offline_ms',
+    ]);
+    expect((await db.execute(sql`select count(*)::int as n from node_connection_events`)).rows).toEqual([{ n: 0 }]);
+  });
+
+  it('upgrades an existing node without inventing connection history', async () => {
+    const source = new PGlite();
+    onTestFinished(() => source.close());
+    let db = drizzle(source);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0057_message_pictures') });
+    const one = async (statement: Parameters<typeof db.execute>[0]) => (await db.execute<{ id: string }>(statement)).rows[0]!.id;
+    const company = await one(sql`insert into companies (name) values ('Demo') returning id`);
+    const person = await one(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Lisa', 'lisa@example.test', 'active', 'company') returning id`);
+    const machine = await one(sql`insert into machines (company_id, person_id, machine_key, hostname) values (${company}, ${person}, 'home-key', 'home-api') returning id`);
+    await db.execute(sql`insert into nodes (company_id, machine_id, key_hash, status) values (${company}, ${machine}, 'old-hash', 'ready')`);
+    const before = (await db.execute(sql`select to_jsonb(n) as data from nodes n`)).rows;
+    const copy = new PGlite({ loadDataDir: await source.dumpDataDir('none') });
+    onTestFinished(() => copy.close());
+    db = drizzle(copy);
+
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+
+    expect((await db.execute(sql`select to_jsonb(n) as data from nodes n`)).rows).toEqual(before);
+    expect((await db.execute(sql`select count(*)::int as n from node_connection_events`)).rows).toEqual([{ n: 0 }]);
+    const node = await one(sql`select id from nodes`);
+    await db.execute(sql`insert into node_connection_events (company_id, machine_id, node_id, kind) values (${company}, ${machine}, ${node}, 'connected')`);
+    expect((await db.execute(sql`select kind from node_connection_events`)).rows).toEqual([{ kind: 'connected' }]);
+  });
+});
