@@ -400,7 +400,7 @@ type Continuation = { sessionId: string | null; originalPrompt: string | null };
 /* The turn this one goes on from: its session, when it can go on there, on the same plan and node with the same
    instructions; otherwise what that turn was asked. */
 async function continuedFrom(ctx: Ctx, jobId: string, on: On, instructionsHash: string): Promise<Continuation> {
-  const [from] = await ctx.db.select({ subscriptionId: jobs.subscriptionId, nodeId: jobs.nodeId, sessionId: jobs.sessionId, instructionsHash: jobs.instructionsHash, prompt: jobs.prompt, requestedPrompt: jobs.requestedPrompt, continueOf: jobs.continueOf }).from(jobs).where(eq(jobs.id, jobId));
+  const [from] = await ctx.db.select({ subscriptionId: jobs.subscriptionId, nodeId: jobs.nodeId, sessionId: jobs.sessionId, instructionsHash: jobs.instructionsHash, prompt: jobs.prompt, requestedPrompt: jobs.requestedPrompt, continueOf: jobs.continueOf, retryOf: jobs.retryOf }).from(jobs).where(eq(jobs.id, jobId));
   if (!from) return { sessionId: null, originalPrompt: null };
   const goesOn = from.subscriptionId === on.subscriptionId && from.nodeId === on.nodeId && from.instructionsHash === instructionsHash;
   return { sessionId: goesOn ? from.sessionId : null, originalPrompt: await originalPromptOf(ctx, from) };

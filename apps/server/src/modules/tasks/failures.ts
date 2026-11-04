@@ -26,7 +26,7 @@ const OWNER_STEP: Partial<Record<FailureKind, string>> = {
   setup: "The turn waits for the plan owner to pass its program's first setup on its machine, as for a sign-in.",
 };
 
-const passing = (f: Failure | null) => !!f && (['overloaded', 'network', 'cut', 'rate_limited'].includes(f.kind) || (f.kind === 'unknown' && f.retryable));
+const passing = (f: Failure | null) => !!f && (['overloaded', 'network', 'cut', 'rate_limited', 'tools'].includes(f.kind) || (f.kind === 'unknown' && f.retryable));
 
 /* Count only this continuation's unbroken chain, never an unrelated turn of the same agent. */
 async function passingAttempts(ctx: Ctx, job: Job, history?: ReadonlyMap<string, Job>): Promise<number> {
@@ -121,10 +121,11 @@ async function sendFailureMessage(ctx: Ctx, job: Job, agentId: string, text: str
   await enqueueTurn(ctx, { companyId: job.companyId, agentId, prompt: text, createdBy: null, message: { personId: null, text, failureCase: caseId } });
 }
 
-/* What a retry says of a failure: its first line. A program's screen, which older nodes gave as the reason, says none. */
+/* What a retry says of a failure: its first line. A program's screen, which older nodes gave as the reason, says none: a
+   line drawn with boxes or blocks, or one that starts with no word, number, bracket or quote. */
 export function shortReason(text: string): string {
   const line = text.trim().split('\n', 1)[0]!.replace(/\s+/g, ' ').trim();
-  if (!/^\p{L}/u.test(line)) return 'the program gave no reason';
+  if (!/^[\p{L}\p{N}[{("'`]/u.test(line) || /[\u2500-\u259f]/u.test(line)) return 'the program gave no reason';
   return line.length > 300 ? `${line.slice(0, 299)}…` : line;
 }
 
