@@ -246,7 +246,7 @@ describe("a Codex plan's lease on a node", () => {
     next = auth(2);
     server.send({ ...JOB, jobId: 'j1' });
     await server.wait(() => sealedCount(server.received) === 2);
-    const renewed = server.received.filter(m => m.type === 'cred.sealed')[1] as { kind: string; version: number; envelopes: { nodeId: string; sealed: string }[] };
+    const renewed = server.received.filter((m): m is { type: string; kind: string; version: number; envelopes: { nodeId: string; sealed: string }[] } => m.type === 'cred.sealed')[1];
     expect(renewed).toMatchObject({ kind: 'codex_auth', version: 5 });
     expect(new TextDecoder().decode(await unseal(renewed.envelopes.find(e => e.nodeId === 'n-peer')!.sealed, peer.identity))).toBe(auth(2));
     next = null;

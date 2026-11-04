@@ -68,7 +68,7 @@ describe('a person who speaks to an agent directly', () => {
   it("tells a stuck agent how to go on by typing into its terminal, and the task goes on", async () => {
     const c = await stuck();
     expect(await c.db.select({ status: tasks.status }).from(tasks).where(eq(tasks.id, c.task.id))).toEqual([{ status: 'waiting' }]);
-    expect(await typedTurn(c.ctx, identityOf(c.sub, null), c.bruno.id, 'Run the tests first, then submit.', c.ceo.id)).not.toBeNull();
+    expect(await typedTurn(c.ctx, identityOf(c.sub, null)!, c.bruno.id, 'Run the tests first, then submit.', c.ceo.id)).not.toBeNull();
     expect(await requestsOf(c)).toEqual([{ kind: 'stuck', status: 'answered', answer: 'Run the tests first, then submit.', answeredBy: c.ceo.id }]);
     expect(await c.db.select({ status: tasks.status, silent: tasks.silent }).from(tasks).where(eq(tasks.id, c.task.id))).toEqual([{ status: 'working', silent: 0 }]);
     /* After the typed turn the task's own turn follows, so a typed turn that goes nowhere still leaves the task watched. */
@@ -82,7 +82,7 @@ describe('a person who speaks to an agent directly', () => {
     const [sales] = await c.db.insert(departments).values({ companyId: c.dev.companyId, templateKey: 'sales', roleCode: 'SAL' }).returning();
     const [maria] = await c.db.insert(people).values({ companyId: c.dev.companyId, name: 'Maria', email: 'maria@acme.com', status: 'active', scopeKind: 'listed' }).returning();
     await c.db.insert(personAccess).values({ companyId: c.dev.companyId, personId: maria!.id, departmentId: sales!.id });
-    expect(await typedTurn(c.ctx, identityOf(c.sub, null), c.bruno.id, 'Skip the tests.', maria!.id)).not.toBeNull();
+    expect(await typedTurn(c.ctx, identityOf(c.sub, null)!, c.bruno.id, 'Skip the tests.', maria!.id)).not.toBeNull();
     expect(await requestsOf(c)).toEqual([{ kind: 'stuck', status: 'open', answer: null, answeredBy: null }]);
     expect(await c.db.select({ status: tasks.status }).from(tasks).where(eq(tasks.id, c.task.id))).toEqual([{ status: 'waiting' }]);
   });
@@ -607,7 +607,7 @@ describe('waking agents for their tasks', () => {
 });
 
 const NODE_KEY = 'k'.repeat(40);
-type Run = { type: 'job.run'; jobId: string; prompt: string; workspace?: { key: string; repo: { url: string; branch: string; token: string } | null } | null };
+type Run = { type: 'job.run'; jobId: string; prompt: string; workspace?: { key: string; repo: { url: string; branch: string; token: string; author: { name: string; email: string } | null } | null } | null };
 
 async function nextRun(node: FakeNode): Promise<Run> {
   const m = await node.next();
@@ -695,13 +695,13 @@ describe('a head', () => {
 
   /* Hana, a head with a turn running, so that what wakes her waits and goes out in one turn. */
   async function busyHead() {
-    const { ctx, db, builtin, ceo, dev, companyId } = await withRepositories();
+    const { ctx, db, builtin, dev, companyId } = await withRepositories();
     const [sub] = await db.select().from(subscriptions);
     const staff = async (name: string, kind: 'head' | 'worker', roleKey: string) =>
       (await db.insert(agents).values({ companyId, kind, name, roleKey, departmentId: dev.id, model: '', subscriptionId: sub!.id }).returning())[0]!;
     const head = await staff('Hana', 'head', 'DEV-HEAD');
     const [busy] = await db.insert(jobs).values({ companyId, subscriptionId: sub!.id, agentId: head.id, kind: 'conversation', prompt: 'Plan the turn.', timeoutMs: 900000, status: 'running', startedAt: new Date() }).returning();
-    const held = async (title: string) => (await createTask(ctx, { personId: ceo.id }, { title, brief: '', body: '', departmentId: dev.id, assigneeAgentId: head.id })).task;
+    const held = async (title: string) => (await createTask(ctx, { personId: sub!.ownerPersonId! }, { title, brief: '', body: '', departmentId: dev.id, assigneeAgentId: head.id })).task;
     /* What woke her goes out in one turn, which ends as the test says. */
     const together = async (taskIds: string[], ended: { status: 'done' | 'failed'; error?: string }, during: () => Promise<unknown> = async () => {}, why: 'assigned' | 'done' = 'assigned') => {
       await wakeAll(ctx, taskIds.map(taskId => ({ agentId: head.id, taskId, why })));
@@ -837,7 +837,7 @@ async function busyQueue() {
   const c = await company({ NODE_KEY });
   const builtin = await connectNode(await listen(c.app), NODE_KEY);
   builtin.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [] });
-  await until(() => c.ctx.hub.isReady(identityOf(c.sub, null)));
+  await until(() => c.ctx.hub.isReady(identityOf(c.sub, null)!));
   const hold = async (agentId: string) => (await c.db.insert(jobs).values({ companyId: c.dev.companyId, subscriptionId: c.sub.id, agentId, kind: 'conversation', prompt: 'A long turn.', timeoutMs: 900000, status: 'running', startedAt: new Date() }).returning())[0]!;
   const busy = await hold(c.bruno.id);
   const release = async (id = busy.id) => {

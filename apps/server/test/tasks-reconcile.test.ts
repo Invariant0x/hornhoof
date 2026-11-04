@@ -102,7 +102,7 @@ describe('turns on a machine that went away', () => {
 
     await handleNodeMessage(c.ctx, BUILTIN, { type: 'hello', version: '0.5.0', loggedIn: true, running: [job.id] });
     expect(c.send).toHaveBeenCalledWith(BUILTIN, { type: 'job.cancel', jobId: job.id });
-    await handleNodeMessage(c.ctx, BUILTIN, { type: 'job.event', jobId: job.id, event: { kind: 'text', text: 'Too late.' } });
+    await handleNodeMessage(c.ctx, BUILTIN, { type: 'job.event', jobId: job.id, seq: 0, event: { kind: 'text', text: 'Too late.' } });
     await handleNodeMessage(c.ctx, BUILTIN, { type: 'job.done', jobId: job.id, ok: true, result: 'Done.', tail: '', error: null, sessionId: 'late-session' });
     expect((await c.turnsOf(c.bruno.id)).find(j => j.id === job.id)).toMatchObject({ status: 'failed', error: 'machine_offline', result: null, sessionId: null });
     expect(await c.db.select().from(agentEvents).where(eq(agentEvents.jobId, job.id))).toHaveLength(1);

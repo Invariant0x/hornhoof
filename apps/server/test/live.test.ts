@@ -61,7 +61,7 @@ describe('words for a live turn', () => {
     await vi.advanceTimersByTimeAsync(1);
     await pending;
     expect(done).toHaveBeenCalledWith(null);
-    expect(15_000 - message.within).toBeGreaterThanOrEqual(5_000);
+    expect(15_000 - message.within!).toBeGreaterThanOrEqual(5_000);
   });
 
   it('returns no turn on timeout and ignores a late answer for that ref', async () => {

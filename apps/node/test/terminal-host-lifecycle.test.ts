@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { jobDone } from '../src/runner.js';
 import { findKimiWire, findRollout } from '../src/terminal/programs.js';
-import retry from './fixtures/kimi-retry.json';
+import retry from './fixtures/kimi-retry.json' with { type: 'json' };
 import { hasTmux, host, sent, tmux, home, setUp, job, codexJob, kimiJob, until, typeTurn, done } from './terminal-host-helpers.js';
 
 const jobs = { claude: job, codex: codexJob, kimi: kimiJob };

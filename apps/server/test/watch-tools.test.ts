@@ -37,13 +37,13 @@ async function company(skills: string[]) {
 
 
 type Result = { content: { text: string }[]; isError?: boolean };
-const call = async (client: Client, name: string, args: object = {}) => (await client.callTool({ name, arguments: args })) as Result;
+const call = async (client: Client, name: string, args: Record<string, unknown> = {}) => (await client.callTool({ name, arguments: args })) as Result;
 const names = async (client: Client) => (await client.listTools()).tools.map(t => t.name);
 
 describe('tools a skill grants', () => {
   it('exposes node restart evidence to the failure collector separately from agent output', async () => {
     const { app, db, acme, sub, bruno, task } = await company(['ops-failure-review']);
-    const interruption = { cause: 'container' as const, at: new Date().toISOString(), task: task.number, node: { id: null, name: 'the built-in node' }, machine: { id: 'machine-id', name: 'a-host' }, diagnosis: { kind: 'planned', reason: 'hornhoof_update', startedAt: null, at: null, log: 'Stopping node: hornhoof_update.' } };
+    const interruption = { cause: 'container' as const, at: new Date().toISOString(), task: task.number, node: { id: null, name: 'the built-in node' }, machine: { id: 'machine-id', name: 'a-host' }, diagnosis: { kind: 'planned' as const, reason: 'hornhoof_update' as const, startedAt: null, at: null, log: 'Stopping node: hornhoof_update.' } };
     await db.insert(jobs).values({ companyId: acme.id, subscriptionId: sub.id, agentId: bruno.id, taskId: task.id, kind: 'conversation', prompt: 'Check.', timeoutMs: 1, status: 'failed', error: 'machine_restarted', tail: 'Last agent output.', interruption, finishedAt: new Date() });
     const result = JSON.parse((await call(await mcp(app, TOKEN), 'failures')).content[0]!.text);
     expect(result.failed).toEqual([expect.objectContaining({ agent: 'Bruno', error: 'machine_restarted', tail: 'Last agent output.', interruption })]);
@@ -172,9 +172,9 @@ describe('tools a skill grants', () => {
   });
 
   it("tell a failure collector how the turn ended that a blocked task went out in along with another task", async () => {
-    const { app, db, ceo, dev, acme, sub, hana } = await company(['ops-failure-review']);
+    const { app, db, dev, acme, sub, hana } = await company(['ops-failure-review']);
     const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000);
-    const held = async (title: string) => (await createTask(app.ctx, { personId: ceo.id }, { title, brief: '', body: '', departmentId: dev.id, assigneeAgentId: hana.id, executor: true })).task;
+    const held = async (title: string) => (await createTask(app.ctx, { personId: sub.ownerPersonId! }, { title, brief: '', body: '', departmentId: dev.id, assigneeAgentId: hana.id, executor: true })).task;
     const [payments, refunds] = [await held('Payments'), await held('Refunds')];
     const restarted = ago(25);
     await db.insert(jobs).values([

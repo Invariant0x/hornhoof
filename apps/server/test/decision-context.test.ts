@@ -48,14 +48,14 @@ async function company() {
     .returning();
   const { task } = await createTask(ctx, { agentId: hana.id }, { title: 'Checkout', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: bruno.id, executor: true, gates: [] });
   /* Words into the orchestrator's turn, kept as the window keeps them. */
-  const wrote = async (personId: string | null, text = 'Go on.', extra: object = {}) =>
+  const wrote = async (personId: string | null, text = 'Go on.', extra: Record<string, unknown> = {}) =>
     (await appendEvent(ctx, { companyId: acme!.id, agentId: orchestrator!.id, jobId: job!.id, kind: 'message', data: { text, ...extra }, personId })).seq;
   const asking = async (q: Parameters<typeof ask>[3]) => (await ask(ctx, bruno.id, task.id, q)).request;
   const open = async (id: string) => (await db.select().from(requests).where(eq(requests.id, id)))[0]!.status === 'open';
   return { app, db, ctx, acme: acme!, sub: sub!, orchestrator: orchestrator!, dev: dev!, hana, bruno, task, job: job!, tokens, ids, wrote, asking, open };
 }
 
-const call = async (client: Client, name: string, args: object) => (await client.callTool({ name, arguments: args })) as Result;
+const call = async (client: Client, name: string, args: Record<string, unknown>) => (await client.callTool({ name, arguments: args })) as Result;
 const text = (r: Result) => r.content[0]!.text;
 
 describe('the person an orchestrator turn answers', () => {
@@ -128,7 +128,7 @@ describe('tools only the CEO asks for, in a turn', () => {
   it('go by the person the turn answers now: after a person without the right wrote, they change nobody and nothing', async () => {
     const c = await ceoTurn();
     await c.wrote(c.ids.zed, 'Disable Dave.');
-    const asked: [string, object][] = [
+    const asked: [string, Record<string, unknown>][] = [
       ['change_person', { person: c.ids.dave, status: 'disabled' }],
       ['invite_again', { person: c.ids.dave }],
       ['invite_person', { name: 'Eve', email: 'eve@acme.com', title: '', access: { whole: true } }],

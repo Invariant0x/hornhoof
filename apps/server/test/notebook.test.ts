@@ -100,7 +100,7 @@ describe("the company's notebook", () => {
     await client.connect(new StreamableHTTPClientTransport(url, { requestInit: { headers: { Authorization: `Bearer ${TOKEN}` } } }));
     onTestFinished(() => client.close());
     type Result = { content: { text: string }[]; isError?: boolean };
-    const call = async (name: string, args: object) => (await client.callTool({ name, arguments: args })) as Result;
+    const call = async (name: string, args: Record<string, unknown>) => (await client.callTool({ name, arguments: args })) as Result;
     expect(JSON.parse((await call('remember', { text: 'The CEO wants turns small.' })).content[0]!.text)).toMatchObject({ note: { number: 1 } });
     await call('remember', { text: 'Design reviews go to Oleg.' });
     expect((await call('rewrite_note', { note: 1, text: 'The CEO wants small turns.' })).isError).toBeFalsy();
@@ -249,7 +249,7 @@ describe("a department's notebook", () => {
       await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${(app.server.address() as AddressInfo).port}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${token}` } } }));
       onTestFinished(() => client.close());
       type Result = { content: { text: string }[]; isError?: boolean };
-      return { names: async () => (await client.listTools()).tools.map(t => t.name), call: async (name: string, args: object = {}) => (await client.callTool({ name, arguments: args })) as Result };
+      return { names: async () => (await client.listTools()).tools.map(t => t.name), call: async (name: string, args: Record<string, unknown> = {}) => (await client.callTool({ name, arguments: args })) as Result };
     };
     const head = await connect(tokens[hana.id]!);
     expect(await head.names()).toEqual(expect.arrayContaining(['notebook', 'remember', 'rewrite_note', 'forget']));

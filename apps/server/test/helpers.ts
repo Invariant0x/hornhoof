@@ -5,7 +5,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import type { NodeMessage, ServerMessage } from '@hornhoof/protocol';
 import { PGlite } from '@electric-sql/pglite';
 import { eq } from 'drizzle-orm';
-import { drizzle, PglitePreparedQuery } from 'drizzle-orm/pglite';
+import { drizzle, PglitePreparedQuery, type PgliteDatabase } from 'drizzle-orm/pglite';
 import WebSocket from 'ws';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import { inject, onTestFinished, vi } from 'vitest';
@@ -31,12 +31,13 @@ export const SETUP = {
 
 /* Every test database starts from a copy of the one global-setup.ts migrated for the run. */
 let migrated: Blob | undefined;
+type TestDb = PgliteDatabase<typeof schema> & { $client: PGlite };
 
-async function openTestDb(): Promise<{ client: PGlite; db: Db }> {
+async function openTestDb(): Promise<{ client: PGlite; db: TestDb }> {
   migrated ??= new Blob([readFileSync(inject('migratedDataDir'))]);
   const client = new PGlite({ loadDataDir: migrated });
   const db = drizzle(client, { schema });
-  return { client, db: db as unknown as Db };
+  return { client, db };
 }
 
 /* The statements the database runs from now on, in order, with their values. PGlite has one connection, so two moves
@@ -54,7 +55,7 @@ export function statements(): { sql: string; params: unknown[] }[] {
 }
 
 /* Each PGlite is a whole Postgres in WASM memory, so it closes when its test ends. Call these inside a test. */
-export async function createTestDb(): Promise<Db> {
+export async function createTestDb(): Promise<TestDb> {
   const { client, db } = await openTestDb();
   onTestFinished(() => client.close());
   return db;

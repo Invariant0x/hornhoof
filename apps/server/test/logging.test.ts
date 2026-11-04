@@ -25,7 +25,7 @@ describe('error logging', () => {
       if (warning.code === 'FSTDEP023') warnings.push(warning.message);
     };
     process.on('warning', collect);
-    onTestFinished(() => process.off('warning', collect));
+    onTestFinished(() => { process.off('warning', collect); });
     const { app } = await testApp();
     expect((await app.inject({ url: '/api/health' })).statusCode).toBe(200);
     await new Promise<void>(resolve => setImmediate(resolve));

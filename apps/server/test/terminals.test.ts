@@ -149,7 +149,7 @@ describe("an agent's live terminal", () => {
     const [acme] = await db.select().from(companies);
     const [running] = await db
       .insert(jobs)
-      .values({ companyId: acme!.id, subscriptionId: agent!.subscriptionId, agentId: orchestratorId, kind: 'conversation', prompt: 'A long turn.', timeoutMs: 900000, status: 'running', startedAt: new Date() })
+      .values({ companyId: acme!.id, subscriptionId: agent!.subscriptionId!, agentId: orchestratorId, kind: 'conversation', prompt: 'A long turn.', timeoutMs: 900000, status: 'running', startedAt: new Date() })
       .returning();
     const [ceoRow] = await db.select().from(people);
     const [mine] = await db.insert(subscriptions).values({ companyId: acme!.id, provider: 'claude', kind: 'personal', label: 'Claude', ownerPersonId: ceoRow!.id, status: 'ready' }).returning();
@@ -313,10 +313,10 @@ describe('starting an agent for someone who opens its window to talk', () => {
     const [dept] = await db.insert(departments).values({ companyId: orchestrator!.companyId, templateKey: 'development', roleCode: 'DEV' }).returning();
     const [bruno] = await db
       .insert(agents)
-      .values({ companyId: orchestrator!.companyId, kind: 'worker', name: 'Bruno', roleKey: 'DEV-BE', departmentId: dept!.id, model: '', subscriptionId: orchestrator!.subscriptionId, switchedOffAt: new Date() })
+      .values({ companyId: orchestrator!.companyId, kind: 'worker', name: 'Bruno', roleKey: 'DEV-BE', departmentId: dept!.id, model: '', subscriptionId: orchestrator!.subscriptionId!, switchedOffAt: new Date() })
       .returning();
     const [task] = await db.insert(tasks).values({ companyId: orchestrator!.companyId, number: 1, title: 'Checkout API', assigneeAgentId: bruno!.id }).returning();
-    await db.insert(jobs).values({ companyId: orchestrator!.companyId, subscriptionId: orchestrator!.subscriptionId, agentId: bruno!.id, taskId: task!.id, kind: 'conversation', prompt: 'Do #1.', timeoutMs: 900000 });
+    await db.insert(jobs).values({ companyId: orchestrator!.companyId, subscriptionId: orchestrator!.subscriptionId!, agentId: bruno!.id, taskId: task!.id, kind: 'conversation', prompt: 'Do #1.', timeoutMs: 900000 });
     builtin.send({ type: 'agent.start', agentKey: bruno!.id });
     expect(await next(builtin, 'job.run')).toMatchObject({ prompt: '' });
   });

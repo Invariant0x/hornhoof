@@ -69,7 +69,7 @@ const lastRun = () => logged().filter(l => l.argv)[logged().filter(l => l.argv).
 describe('program updates managed by the node', () => {
   it('disables Claude Code self-updates even when the machine enables them', async () => {
     vi.stubEnv('DISABLE_AUTOUPDATER', '0');
-    onTestFinished(() => vi.unstubAllEnvs());
+    onTestFinished(() => { vi.unstubAllEnvs(); });
     expect(await adapter('claude').run(input())).toMatchObject({ ok: true });
     expect(lastRun().env.DISABLE_AUTOUPDATER).toBe('1');
   });
@@ -77,7 +77,7 @@ describe('program updates managed by the node', () => {
   it('disables Kimi self-updates for both current and older programs', async () => {
     vi.stubEnv('KIMI_CODE_NO_AUTO_UPDATE', '0');
     vi.stubEnv('KIMI_CLI_NO_AUTO_UPDATE', '0');
-    onTestFinished(() => vi.unstubAllEnvs());
+    onTestFinished(() => { vi.unstubAllEnvs(); });
     expect(await adapter('kimi').run(input())).toMatchObject({ ok: true });
     expect(lastRun().env).toMatchObject({ KIMI_CODE_NO_AUTO_UPDATE: '1', KIMI_CLI_NO_AUTO_UPDATE: '1' });
   });
