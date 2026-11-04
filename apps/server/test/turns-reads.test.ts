@@ -197,8 +197,7 @@ describe('the people\'s words a turn keeps, over a long history', () => {
   it('ignores legacy words without an event id when finding unaccounted words', async () => {
     const h = await conversation();
     const message = await h.say('Fresh point', Date.now(), true);
-    const legacy: Partial<typeof message> = { ...message };
-    delete legacy.id;
+    const legacy = { by: message.by, text: message.text, at: message.at };
     await h.db.insert(turns).values({ companyId: h.companyId, number: 1, goal: '', messages: [legacy] });
     expect(await h.db.transaction(tx => newWords(tx, h.by(), 1))).toEqual([message]);
   });

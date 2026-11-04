@@ -2,7 +2,7 @@ import { appendFileSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import failures from './fixtures/terminal-api-failures.json';
+import failures from './fixtures/terminal-api-failures.json' with { type: 'json' };
 import { SIGNED_OUT as CODEX_SIGNED_OUT } from '../src/providers/codex.js';
 import { SCREEN_SIGNED_OUT as KIMI_SIGNED_OUT } from '../src/providers/kimi.js';
 import { claudeStatusContext, claudeStatusLimits, claudeUsageLimits, codexRollout, kimiUsageLimits, kimiWire, LineTail } from '../src/terminal/transcripts.js';

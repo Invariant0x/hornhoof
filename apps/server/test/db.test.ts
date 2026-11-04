@@ -113,8 +113,9 @@ describe('test databases', () => {
   let opened: { closed: boolean } | undefined;
 
   it('opens one for the test', async () => {
-    opened = (await createTestDb()).$client;
-    expect(opened.closed).toBe(false);
+    const client = (await createTestDb()).$client;
+    opened = client;
+    expect(client.closed).toBe(false);
   });
 
   it('closes it once that test ends', () => {

@@ -31,7 +31,7 @@ async function company({ updater = true, env = {} as NodeJS.ProcessEnv } = {}) {
   await until(async () => (await db.select().from(subscriptions))[0]!.status === 'ready');
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
   const [sub] = await db.select().from(subscriptions);
-  await until(() => app.ctx.hub.isReady(identityOf(sub!, null)));
+  await until(() => app.ctx.hub.isReady(identityOf(sub!, null)!));
   const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
   /* A turn that answers the CEO is one the CEO started. */
   const running = (token: string, answersCeo: boolean) =>
@@ -42,7 +42,7 @@ async function company({ updater = true, env = {} as NodeJS.ProcessEnv } = {}) {
 
 
 type Result = { content: { type: string; text: string }[]; isError?: boolean };
-const call = async (client: Client, name: string, args: object) => (await client.callTool({ name, arguments: args })) as Result;
+const call = async (client: Client, name: string, args: Record<string, unknown>) => (await client.callTool({ name, arguments: args })) as Result;
 const text = (res: Result) => res.content[0]!.text;
 const settings = (control: string) => JSON.parse(readFileSync(join(control, 'computer.json'), 'utf8'));
 const lines = async (db: Awaited<ReturnType<typeof company>>['db'], agentId: string) =>

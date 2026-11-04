@@ -206,7 +206,7 @@ describe('timers', () => {
     expect(events.state.program).toEqual(expectedProgram);
     expect(events.state.alarm).toBeNull();
 
-    await handleNodeMessage(app.ctx, BUILTIN, { type: 'job.done', jobId: turn!.id, ok: true, result: 'Done.' }, at(4));
+    await handleNodeMessage(app.ctx, BUILTIN, { type: 'job.done', jobId: turn!.id, ok: true, result: 'Done.', sessionId: null, tail: '', error: null }, at(4));
     const afterCard = (await app.inject({ url: `/api/agents/${bruno!.id}`, ...as(ceo) })).json();
     expect(afterCard.program).toBeNull();
     expect(afterCard.alarm).toBeNull();

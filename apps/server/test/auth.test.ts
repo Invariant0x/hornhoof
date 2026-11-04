@@ -140,7 +140,7 @@ describe('sessions', () => {
   it('last 30 days, with a cookie only the browser sends back over https', async () => {
     const { app, db } = await testApp({ PUBLIC_URL: 'https://hq.acme.com' });
     vi.useFakeTimers({ toFake: ['Date'] });
-    onTestFinished(() => vi.useRealTimers());
+    onTestFinished(() => { vi.useRealTimers(); });
     const start = new Date('2026-11-01T10:00:00Z');
     vi.setSystemTime(start);
     const res = await app.inject({ method: 'POST', url: '/api/setup', payload: SETUP });

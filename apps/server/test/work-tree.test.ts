@@ -264,7 +264,7 @@ describe('workTree', () => {
       turns: [
         { id: 'c7c49849', taskId: 't0', agentId: 'head', createdAt: start, startedAt: start, finishedAt: stopped, status: 'failed',
           history: [{ at: new Date('2026-11-03T06:41:06.000Z'), program: null, alarm: { reason: 'program_stalled', since } }] },
-        ...queued.map((time, i) => ({ id: `queued-${i}`, taskId: `t${i + 1}`, agentId: 'head', createdAt: new Date(time), startedAt: null, finishedAt: null, status: 'queued', history: [] })),
+        ...queued.map((time, i) => ({ id: `queued-${i}`, taskId: `t${i + 1}`, agentId: 'head', createdAt: new Date(time), startedAt: null, finishedAt: null, status: 'queued' as const, history: [] })),
       ],
     });
     const tree = workTree(facts, stopped);

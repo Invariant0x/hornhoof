@@ -40,7 +40,7 @@ async function company() {
   /* A running turn of the agent: its token, for uploads and for Hornhoof's tools. */
   const turn = async (agent: { id: string }) => {
     const token = `tool-token-${++n}-0123456789abcdef0123456789`;
-    await db.insert(jobs).values({ companyId, subscriptionId: sub!.id, agentId: agent.id, kind: 'task', prompt: 'go', timeoutMs: 900000, status: 'running', startedAt: new Date(), toolTokenHash: hashToken(token) });
+    await db.insert(jobs).values({ companyId, subscriptionId: sub!.id, agentId: agent.id, kind: 'conversation', prompt: 'go', timeoutMs: 900000, status: 'running', startedAt: new Date(), toolTokenHash: hashToken(token) });
     return { token, tools: await mcp(app, token) };
   };
   const upload = (token: string | null, body: Buffer) =>
@@ -57,7 +57,7 @@ async function mcp(app: FastifyInstance, token: string): Promise<Client> {
 }
 
 type Res = { content: { text: string }[]; isError?: boolean };
-const call = async (c: Client, name: string, args: object) => (await c.callTool({ name, arguments: args })) as Res;
+const call = async (c: Client, name: string, args: Record<string, unknown>) => (await c.callTool({ name, arguments: args })) as Res;
 
 describe('pictures, links and choices in requests', () => {
   it('takes a picture from a running turn and refuses anything else', async () => {

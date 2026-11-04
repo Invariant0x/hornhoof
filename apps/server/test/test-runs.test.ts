@@ -46,7 +46,7 @@ async function company(env: NodeJS.ProcessEnv = {}) {
       .values({ companyId, subscriptionId: sub!.id, agentId: agent.id, taskId, kind: 'conversation', prompt: 'go', timeoutMs: 900000, status: 'running', startedAt: new Date(Date.now() - 1000), toolTokenHash: hashToken(token) })
       .returning();
     const client = await mcp(app, token);
-    const call = async (name: string, args: object = {}) => {
+    const call = async (name: string, args: Record<string, unknown> = {}) => {
       const res = (await client.callTool({ name, arguments: args })) as Res;
       return { text: res.content[0]!.text, error: res.isError === true };
     };

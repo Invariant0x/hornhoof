@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { SIGNED_OUT } from '../src/providers/antigravity.js';
 import { FAILURE, failure } from '../src/terminal/failures.js';
 import { jobDone } from '../src/runner.js';
-import rows from './fixtures/failure-kinds.json';
+import rows from './fixtures/failure-kinds.json' with { type: 'json' };
 
 describe('program failure kinds from captured and documented signals', () => {
   it.each(rows)('$program $kind: $raw', ({ program, raw, kind, retryable }) => {

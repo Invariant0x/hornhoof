@@ -28,7 +28,7 @@ async function withOrchestrator() {
   return { app, db, ceo, builtin, acme: acme!, orchestrator: orchestrator! };
 }
 
-const build = (app: Awaited<ReturnType<typeof testApp>>['app'], token: string, payload: unknown) => app.inject({ method: 'POST', url: '/api/departments/build', payload, ...as(token) });
+const build = (app: Awaited<ReturnType<typeof testApp>>['app'], token: string, payload: Record<string, unknown>) => app.inject({ method: 'POST', url: '/api/departments/build', payload, ...as(token) });
 
 async function nextPrompt(node: FakeNode): Promise<string> {
   const m = await node.next();

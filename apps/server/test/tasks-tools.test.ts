@@ -43,7 +43,7 @@ async function company() {
 }
 
 type Res = { content: { text: string }[]; isError?: boolean };
-const call = async (c: Client, name: string, args: object) => (await c.callTool({ name, arguments: args })) as Res;
+const call = async (c: Client, name: string, args: Record<string, unknown>) => (await c.callTool({ name, arguments: args })) as Res;
 const text = (r: Res) => r.content[0]!.text;
 
 describe('task tools', () => {

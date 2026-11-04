@@ -52,7 +52,7 @@ async function messaging() {
   const c = await fixture({ NODE_KEY });
   const node = await connectNode(c.url, NODE_KEY);
   node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [] });
-  await until(() => c.ctx.hub.isReady(identityOf(c.sub, null)));
+  await until(() => c.ctx.hub.isReady(identityOf(c.sub, null)!));
   return { ...c, node };
 }
 
