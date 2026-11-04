@@ -26,6 +26,10 @@
     "./signin": {
       "types": "./dist/signin.d.ts",
       "default": "./dist/signin.js"
+    },
+    "./waits": {
+      "types": "./dist/waits.d.ts",
+      "default": "./dist/waits.js"
     }
   },
   "types": "./dist/index.d.ts",

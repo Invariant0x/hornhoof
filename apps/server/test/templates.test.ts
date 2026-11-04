@@ -14,6 +14,12 @@ const roles = [...templates.roles.values()];
 const skills = [...templates.skills.values()];
 
 describe('templates', () => {
+  it('teaches every department head not to repeat a task report in a separate message', () => {
+    for (const role of roles.filter(r => r.kind === 'head')) {
+      const instructions = renderInstructions(templates, { id: 'a', companyId: 'c', kind: 'head', name: 'Hana', roleKey: role.id, skills: role.skills.filter(s => s.on).map(s => s.id), overrides: {}, templateHashes: {} } as Parameters<typeof renderInstructions>[1], { company: 'Acme', department: 'Work', product: null });
+      expect(instructions.text, role.id).toContain('Do not send the orchestrator a separate message repeating a task report');
+    }
+  });
   it('teaches heads and members to end a turn with wait_for for external events, and the orchestrator to bind readiness messages to a task', () => {
     for (const id of ['hh-lead-tasks', 'hh-task-flow']) {
       const body = templates.skills.get(id)!.body;

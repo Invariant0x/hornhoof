@@ -150,15 +150,14 @@ function account(run: Run, task: Pick<Task, 'number'>, parts: Part[], files: Set
    machine's owner reaches; the built-in node reaches every repository. works: its node runs parts of any work, not only
    of test runs. */
 export type Place = { key: string; node: NodeIdentity; name: string; machineId: string | null; nodeId: string | null; builtin: boolean; lent: boolean; busy: boolean; running: number; load: NodeLoad | null; access: Access | null; works: boolean };
+export type BrowserHeldPlace = { name: string; lent: boolean; access: Access | null; works: boolean; browserError: string };
 
 const partPlace = (ctx: Ctx, part: Pick<Part, 'builtin' | 'machineId' | 'nodeId' | 'computer'>): ComputerPlace => {
   const id = nodeOf(part);
   return { key: part.builtin ? 'builtin' : (part.machineId ?? ''), load: id ? ctx.hub.loadOf(id) : null, computer: part.computer };
 };
 
-export async function placesOf(ctx: Ctx, companyId: string): Promise<Place[]> {
-  const { db, hub } = ctx;
-  const running = (await db.select({ computer: testParts.computer, machineId: testParts.machineId, builtin: testParts.builtin, nodeId: testParts.nodeId }).from(testParts).where(eq(testParts.status, 'running'))).map(p => partPlace(ctx, p));
+async function companyComputers(db: Ctx['db'], companyId: string) {
   const rows = await db
     .select({ machine: machines, owner: people })
     .from(machines)
@@ -172,6 +171,13 @@ export async function placesOf(ctx: Ctx, companyId: string): Promise<Place[]> {
     .leftJoin(subscriptions, eq(subscriptions.id, nodes.subscriptionId))
     .where(and(eq(nodes.companyId, companyId), liveNode, isNull(subscriptions.removedAt)))
     .orderBy(asc(nodes.createdAt), asc(nodes.id));
+  return { rows, live };
+}
+
+export async function placesOf(ctx: Ctx, companyId: string): Promise<Place[]> {
+  const { db, hub } = ctx;
+  const running = (await db.select({ computer: testParts.computer, machineId: testParts.machineId, builtin: testParts.builtin, nodeId: testParts.nodeId }).from(testParts).where(eq(testParts.status, 'running'))).map(p => partPlace(ctx, p));
+  const { rows, live } = await companyComputers(db, companyId);
   const places: Place[] = [];
   for (const { machine, owner } of rows) {
     /* Only nodes that say how busy they are know test runs, and only those with a user of their own for runs take them. */
@@ -203,13 +209,35 @@ export async function placesOf(ctx: Ctx, companyId: string): Promise<Place[]> {
   return places.map(p => ({ ...p, ...computerState(p, running, reports, ctx.config.runsPerHost) }));
 }
 
+export async function browserHeldPlaces(ctx: Ctx, companyId: string): Promise<BrowserHeldPlace[]> {
+  const { db, hub } = ctx;
+  const { rows, live } = await companyComputers(db, companyId);
+  const held: BrowserHeldPlace[] = [];
+  for (const { machine, owner } of rows) {
+    const mine = live.filter(n => n.machineId === machine.id).map(n => nodeIdentity(n.id));
+    const browserError = mine.map(id => hub.browserHoldOf(id)).find((err): err is string => err !== null);
+    if (!browserError) continue;
+    held.push({ name: machine.hostname, lent: machine.lendsTests, access: await accessOf(db, owner), works: mine.some(id => hub.runsWork(id)), browserError });
+  }
+  const builtinError = hub.browserHoldOf(BUILTIN);
+  if (builtinError) held.push({ name: BUILTIN_NAME, lent: true, access: null, works: hub.runsWork(BUILTIN), browserError: builtinError });
+  return held;
+}
+
+export async function browserHoldReason(ctx: Ctx, companyId: string, run: Pick<Run, 'kind'>, department: Department | null): Promise<string | null> {
+  const held = (await browserHeldPlaces(ctx, companyId)).filter(p => mayTake(p, run, department));
+  if (!held.length) return null;
+  return `Playwright Chromium failed to start on ${held.map(p => `${p.name} (${p.browserError})`).join('; ')}.`;
+}
+
 /* The machine's owner reaches the department a run is for; a run for no department only someone who sees the whole
    company. */
 export const reaches = (place: Pick<Place, 'access'>, d: Department | null) =>
   place.access === null || (d ? canReach(place.access, { departmentId: d.id, parentId: d.parentId }) : place.access.whole);
 
 /* Whether a place may take a part of this run at all, busy or not. */
-const mayTake = (place: Place, run: Pick<Run, 'kind'>, d: Department | null) => place.lent && reaches(place, d) && (run.kind !== 'work' || place.works);
+export const mayTake = (place: Pick<Place, 'lent' | 'access' | 'works'>, run: Pick<Run, 'kind'>, d: Department | null) =>
+  place.lent && reaches(place, d) && (run.kind !== 'work' || place.works);
 
 /* What a run's parts need: the repository they clone, if any, and the department whose people's machines may take
    them. None when the repository is gone. */
@@ -490,6 +518,10 @@ export async function startRun(ctx: Ctx, job: ToolJob, input: RunInput, kind: Ru
   const [open] = await db.select({ n: count() }).from(testRuns).where(and(eq(testRuns.agentId, job.agentId), eq(testRuns.status, 'running')));
   if (Number(open?.n ?? 0) >= OPEN_RUNS) throw refuse(409, 'task_invalid', `You have ${OPEN_RUNS} runs going on already. Wait for one to end, or stop one with stop_tests or stop_work.`);
   const department = found?.department ?? (await targetOf(ctx, { kind, branch: null, departmentId: task.productId ?? task.departmentId }))?.department ?? null;
+  if (!(await placesOf(ctx, job.companyId)).some(p => mayTake(p, { kind }, department))) {
+    const heldReason = await browserHoldReason(ctx, job.companyId, { kind }, department);
+    if (heldReason) throw refuse(409, 'browser_failed', heldReason);
+  }
   const run = await db.transaction(async tx => {
     /* Numbers go up one by one per company, so starting a run waits on the company row. */
     await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, job.companyId)).for('update');

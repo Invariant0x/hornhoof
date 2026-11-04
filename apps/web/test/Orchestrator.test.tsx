@@ -55,14 +55,14 @@ describe('AgentWindow', () => {
   it("sends a correction of the orchestrator's card to the live terminal's own line", async () => {
     const user = userEvent.setup();
     const card = ev(1, 'proposal', { proposalId: 'pr1', brief: 'Acme.', items: [{ template: 'operations', checked: true, note: '' }] });
-    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [card], state: { ...READY, terminal: true } }] });
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [card], state: { ...READY, terminal: true, canType: true } }] });
     await user.click(await screen.findByRole('button', { name: 'Correct in words' }));
     expect(screen.getByRole('textbox', { name: 'Terminal input' })).toHaveFocus();
   });
 
   it('leaves typing to the live terminal, which has its own line, and keeps the line in the log', async () => {
     const user = userEvent.setup();
-    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, terminal: true } }] });
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, terminal: true, canType: true } }] });
     expect(await screen.findByTestId('live-terminal')).toBeInTheDocument();
     expect(screen.queryByRole('textbox', { name: 'Write to the orchestrator' })).not.toBeInTheDocument();
     expect(screen.queryByText('Enter to send, Shift+Enter for a new line')).not.toBeInTheDocument();
@@ -243,17 +243,27 @@ describe('AgentWindow', () => {
     expect(await screen.findByText("Hornhoof on Ivan's machine is out of date. Run the install command there again.")).toBeInTheDocument();
   });
 
-  it('explains when the browser for checks failed on a personal or built-in machine', async () => {
+  it('warns that browser checks cannot run on a personal or built-in machine while keeping the message input open', async () => {
     const mac = { ...SUBS[1]!, kind: 'personal' as const, owner: { id: 'p1', name: 'Ivan' } };
-    const view = open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, ready: false, reason: 'browser_failed' } }] }, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: mac } });
-    expect(await screen.findByText("The browser for checks did not start on Ivan's machine. Open Machines to see why.")).toBeInTheDocument();
+    const view = open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, browserError: 'libnss3.so missing' } }] }, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: mac } });
+    expect(await screen.findByText("Browser checks cannot run on Ivan's machine right now (libnss3.so missing).")).toBeInTheDocument();
+    expect(screen.getByLabelText('Write to the orchestrator')).not.toBeDisabled();
     view.unmount();
     const key = { ...SUBS[0]!, kind: 'api_key' as const };
-    const builtin = open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, ready: false, reason: 'browser_failed' } }] }, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: key } });
-    expect(await screen.findByText('The browser for checks did not start on the built-in machine. Open Machines to see why.')).toBeInTheDocument();
+    const builtin = open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, browserError: 'libnss3.so missing' } }] }, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: key } });
+    expect(await screen.findByText('Browser checks cannot run on the built-in machine right now (libnss3.so missing).')).toBeInTheDocument();
+    expect(screen.getByLabelText('Write to the orchestrator')).not.toBeDisabled();
     builtin.unmount();
-    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, ready: false, reason: 'browser_failed' } }] }, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: null } });
-    expect(await screen.findByText('The browser for checks did not start on the built-in machine. Open Machines to see why.')).toBeInTheDocument();
+    localStorage.setItem('hh-lang', 'ru');
+    try {
+      const ruPersonal = open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, browserError: 'libnss3.so missing' } }] }, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: mac } });
+      expect(await screen.findByText('Браузерные проверки на машине (владелец Ivan) сейчас не пойдут (libnss3.so missing).')).toBeInTheDocument();
+      ruPersonal.unmount();
+      open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, browserError: 'libnss3.so missing' } }] }, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: null } });
+      expect(await screen.findByText('Браузерные проверки на встроенной машине сейчас не пойдут (libnss3.so missing).')).toBeInTheDocument();
+    } finally {
+      localStorage.removeItem('hh-lang');
+    }
   });
 
   it('names the machine he runs on', async () => {
@@ -267,7 +277,7 @@ describe('AgentWindow', () => {
     const command = 'curl -fsSL https://hq.acme.com/install.sh | bash -s -- --join CODE123';
     const shown: ShownCommand = { id: 'a'.repeat(64), kind: 'add', plans: ['Claude'], machine: 'ivan-laptop', command, expiresAt: '2026-11-02T10:00:00Z' };
     const { calls } = open({
-      [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, terminal: true } }],
+      [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, terminal: true, canType: true } }],
       'GET /api/nodes/commands': [200, { commands: [shown] }],
       [`POST /api/nodes/commands/${shown.id}/hide`]: [204],
     });
@@ -322,7 +332,7 @@ describe('AgentWindow', () => {
     it("shows the CEO the orchestrator's request next to his terminal and opens access for a day with one click", async () => {
       const user = userEvent.setup();
       const { calls } = open({
-        [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, terminal: true } }],
+        [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, terminal: true, canType: true } }],
         'GET /api/computer': [200, ASKED],
         'POST /api/computer/open': [200, OPEN],
       });
@@ -582,7 +592,7 @@ describe('AgentWindow', () => {
   it('shows nothing of an employee before it knows whether to open a terminal or a conversation', async () => {
     mockApi({
       'GET /api/agents/b1': [200, CARD],
-      'GET /api/agents/b1/events?after=0': [200, { events: [], state: { ...READY, terminal: true } }],
+      'GET /api/agents/b1/events?after=0': [200, { events: [], state: { ...READY, terminal: true, canType: true } }],
     });
     render(
       <LanguageProvider>
@@ -646,13 +656,14 @@ describe('AgentWindow', () => {
     expect(screen.queryByText('Hiring for Development')).not.toBeInTheDocument();
   });
 
-  it('opens the company notebook from his window, and back to his conversation', async () => {
+  it('opens the company notebook beside his conversation, which stays, and closes it again', async () => {
     const user = userEvent.setup();
     open({ 'GET /api/notebook': [200, { notes: [{ number: 1, text: 'Turns stay small.', by: { kind: 'orchestrator' }, updatedAt: '2026-10-31T02:00:00Z' }] }] });
     await user.click(await screen.findByRole('button', { name: 'Notebook' }));
     expect(await screen.findByText('Turns stay small.')).toBeInTheDocument();
-    expect(screen.queryByRole('log')).not.toBeInTheDocument();
+    expect(screen.getByRole('log')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Notebook' }));
+    expect(screen.queryByText('Turns stay small.')).not.toBeInTheDocument();
     expect(screen.getByRole('log')).toBeInTheDocument();
   });
 
@@ -698,7 +709,7 @@ describe('messages between agents and people', () => {
   it("shows the orchestrator's messages each as one line naming who wrote to whom, the text folded and opened by a click", async () => {
     open({ [`GET ${EVENTS}?after=0`]: [200, { events: ORCHESTRATOR_LOG, state: READY }] });
     const david = await screen.findByRole('button', { name: 'Message from David AI (CEO assistant) to the orchestrator' });
-    expect(screen.getByRole('button', { name: 'Hornhoof notice to the orchestrator' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Hornhoof, recorded service message to the orchestrator' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Message from Dana (Head of development) to the orchestrator' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Message to Dana (Head of development) from the orchestrator' })).toBeInTheDocument();
     /* Folded: the text is not on the screen, and the agent's own words to the person are. */
@@ -716,7 +727,7 @@ describe('messages between agents and people', () => {
 
   it('opens every folded message with Ctrl+O and folds them again with it', async () => {
     open({ [`GET ${EVENTS}?after=0`]: [200, { events: ORCHESTRATOR_LOG, state: READY }] });
-    await screen.findByRole('button', { name: 'Hornhoof notice to the orchestrator' });
+    await screen.findByRole('button', { name: 'Hornhoof, recorded service message to the orchestrator' });
     ctrlO();
     for (const text of [/Take #78 into work/, /David AI took an improvement into work/, /#49 is blocked/, /Give #78 to a developer/]) expect(screen.getByText(text)).toBeInTheDocument();
     ctrlO(screen.getByRole('textbox', { name: 'Write to the orchestrator' }));
@@ -726,7 +737,7 @@ describe('messages between agents and people', () => {
 
   it('takes Ctrl+O while the focus is still on the map that opened the window, but not while one types elsewhere', async () => {
     open({ [`GET ${EVENTS}?after=0`]: [200, { events: ORCHESTRATOR_LOG, state: READY }] });
-    await screen.findByRole('button', { name: 'Hornhoof notice to the orchestrator' });
+    await screen.findByRole('button', { name: 'Hornhoof, recorded service message to the orchestrator' });
     const chip = document.body.appendChild(document.createElement('button'));
     const field = document.body.appendChild(document.createElement('input'));
     onTestFinished(() => { chip.remove(); field.remove(); });
@@ -753,7 +764,7 @@ describe('messages between agents and people', () => {
     ]);
     const first = await screen.findByRole('button', { name: 'Сообщение от Dana (Руководитель разработки) для Bruno (Бэкенд-разработчик)' });
     expect(screen.getByRole('button', { name: 'Сообщение для людей от Bruno (Бэкенд-разработчик)' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Уведомление Hornhoof для Bruno (Бэкенд-разработчик)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Hornhoof, сохраненное служебное сообщение для Bruno (Бэкенд-разработчик)' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Сообщение для оркестратора от Bruno (Бэкенд-разработчик)' })).toBeInTheDocument();
     expect(screen.queryByText('Возьми #83.')).not.toBeInTheDocument();
     fireEvent.click(first);
@@ -761,7 +772,7 @@ describe('messages between agents and people', () => {
   });
 
   it('leaves the whole window and Ctrl+O to the live terminal, even with messages that name who wrote to whom', async () => {
-    open({ [`GET ${EVENTS}?after=0`]: [200, { events: ORCHESTRATOR_LOG, state: { ...READY, terminal: true } }] });
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events: ORCHESTRATOR_LOG, state: { ...READY, terminal: true, canType: true } }] });
     expect(await screen.findByTestId('live-terminal')).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Messages' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Message from David AI (CEO assistant) to the orchestrator' })).not.toBeInTheDocument();
@@ -822,5 +833,112 @@ describe("who takes the orchestrator's card", () => {
     expect(await screen.findByRole('button', { name: 'Correct in words' })).toBeInTheDocument();
     expect(screen.queryByText(LOCKED)).not.toBeInTheDocument();
     expect(asked).toBe(2);
+  });
+});
+
+describe('writing to an agent whose live terminal the person only watches', () => {
+  const WATCHING = { ...READY, terminal: true, canType: false };
+  const LISA: Me = { ...ME, person: { ...ME.person, id: 'p2', name: 'Lisa', isOwner: false, isCeoDelegate: true }, canDecideCompany: true };
+  const MARIA: Me = { ...ME, person: { ...ME.person, id: 'p3', name: 'Maria', isOwner: false, scopeKind: 'listed' }, canDecideCompany: false };
+  const employee = (me: Me, routes: Record<string, unknown>) => {
+    const calls = mockApi({ 'GET /api/agents/b1': [200, CARD], ...(routes as Record<string, [number, unknown]>) });
+    render(<LanguageProvider><AgentWindow me={me} org={DEV_ORG} agentId="b1" onClose={() => {}} /></LanguageProvider>);
+    return calls;
+  };
+
+  it('gives the CEO delegate a line under the orchestrator\'s terminal, ready to type in, that writes to it', async () => {
+    const user = userEvent.setup();
+    const calls = mockApi({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: WATCHING }], 'POST /api/agents/orchestrator/start': [200, { started: false }], 'POST /api/agents/orchestrator/messages': [202, { jobId: 'j1' }] });
+    render(<LanguageProvider><AgentWindow me={LISA} org={ORG} agentId="orchestrator" onClose={() => {}} /></LanguageProvider>);
+    expect(await screen.findByTestId('live-terminal')).toBeInTheDocument();
+    const line = screen.getByRole('textbox', { name: 'Write to the orchestrator' });
+    expect(line).toHaveFocus();
+    expect(screen.getByText('Enter to send, Shift+Enter for a new line')).toBeInTheDocument();
+    await user.type(line, 'Please check the release{Enter}');
+    expect(calls).toContainEqual({ method: 'POST', path: '/api/agents/orchestrator/messages', body: { text: 'Please check the release' } });
+    expect(line).toHaveValue('');
+    expect(screen.getByTestId('live-terminal')).toBeInTheDocument();
+  });
+
+  it('gives a person with the department a line under the terminal of an employee on someone else\'s plan', async () => {
+    const user = userEvent.setup();
+    const calls = employee(MARIA, { 'GET /api/agents/b1/events?after=0': [200, { events: [], state: WATCHING }], 'POST /api/agents/b1/messages': [202, { jobId: 'j1' }] });
+    expect(await screen.findByTestId('live-terminal')).toBeInTheDocument();
+    await user.type(screen.getByRole('textbox', { name: 'Write to Bruno' }), 'Please check the cart{Enter}');
+    expect(calls).toContainEqual({ method: 'POST', path: '/api/agents/b1/messages', body: { text: 'Please check the cart' } });
+  });
+
+  it('keeps the line and shows why while the agent cannot answer', async () => {
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...WATCHING, ready: false, reason: 'machine_offline' } }] });
+    expect(await screen.findByRole('textbox', { name: 'Write to the orchestrator' })).toBeDisabled();
+    expect(screen.getByTestId('live-terminal')).toBeInTheDocument();
+    expect(screen.getByText('The built-in machine is offline')).toBeInTheDocument();
+  });
+
+  it('keeps the words and says why when the server turns the message down', async () => {
+    const user = userEvent.setup();
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: WATCHING }], 'POST /api/agents/orchestrator/messages': [403, { error: { code: 'forbidden', message: 'No.', reason: 'company_scope_only' } }] });
+    const line = await screen.findByRole('textbox', { name: 'Write to the orchestrator' });
+    await user.type(line, 'Please check{Enter}');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Only people with access to the whole company can do this.');
+    expect(line).toHaveValue('Please check');
+  });
+
+  it("sends a correction of the orchestrator's card to the line, since the terminal takes no keys from them", async () => {
+    const user = userEvent.setup();
+    const card = ev(1, 'proposal', { proposalId: 'pr1', brief: 'Acme.', items: [{ template: 'operations', checked: true, note: '' }] });
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [card], state: WATCHING }] });
+    await user.click(await screen.findByRole('button', { name: 'Correct in words' }));
+    expect(screen.getByRole('textbox', { name: 'Write to the orchestrator' })).toHaveFocus();
+  });
+
+  it('leaves the owner of the plan with the terminal alone, and focus stays in it', async () => {
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, terminal: true, canType: true } }] });
+    expect(await screen.findByTestId('live-terminal')).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: 'Write to the orchestrator' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Enter to send, Shift+Enter for a new line')).not.toBeInTheDocument();
+  });
+
+  it('takes the line away from someone who loses access while the window is open', async () => {
+    const stream = fakeStream();
+    let allowed = true;
+    mockApi({
+      [`GET ${EVENTS}?after=0`]: () => (allowed ? [200, { events: [], state: WATCHING }] : [403, { error: { code: 'forbidden', message: 'No.', reason: 'company_scope_only' } }]),
+      'POST /api/agents/orchestrator/start': [200, { started: false }],
+    });
+    render(<LanguageProvider><AgentWindow me={LISA} org={ORG} agentId="orchestrator" onClose={() => {}} /></LanguageProvider>);
+    expect(await screen.findByRole('textbox', { name: 'Write to the orchestrator' })).toBeInTheDocument();
+    allowed = false;
+    await act(async () => stream.send({ type: 'reconnected' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Only people with access to the whole company can do this.');
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('live-terminal')).not.toBeInTheDocument();
+  });
+
+  it('keeps the line through a failure that says nothing of access', async () => {
+    const stream = fakeStream();
+    let down = false;
+    mockApi({
+      [`GET ${EVENTS}?after=0`]: () => (down ? [503, { error: { code: 'internal', message: 'Down.' } }] : [200, { events: [], state: WATCHING }]),
+      'POST /api/agents/orchestrator/start': [200, { started: false }],
+    });
+    render(<LanguageProvider><AgentWindow me={LISA} org={ORG} agentId="orchestrator" onClose={() => {}} /></LanguageProvider>);
+    expect(await screen.findByRole('textbox', { name: 'Write to the orchestrator' })).toBeInTheDocument();
+    down = true;
+    await act(async () => stream.send({ type: 'reconnected' }));
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Write to the orchestrator' })).toBeInTheDocument();
+  });
+
+  it.each([
+    ['orchestrator', 'company_scope_only', 'Only people with access to the whole company can do this.'],
+    ['b1', 'not_your_department', 'This employee works in a department you do not have access to.'],
+  ])('shows no line and no terminal to someone the server turns away from %s', async (agentId, reason, words) => {
+    const refused: [number, unknown] = [403, { error: { code: 'forbidden', message: 'No.', reason } }];
+    mockApi({ [`GET /api/agents/${agentId}/events?after=0`]: refused, [`GET /api/agents/${agentId}`]: refused, 'POST /api/agents/orchestrator/start': refused });
+    render(<LanguageProvider><AgentWindow me={MARIA} org={agentId === 'b1' ? DEV_ORG : ORG} agentId={agentId} onClose={() => {}} /></LanguageProvider>);
+    expect(await screen.findByRole('alert')).toHaveTextContent(words);
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('live-terminal')).not.toBeInTheDocument();
   });
 });

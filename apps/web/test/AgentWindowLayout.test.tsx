@@ -21,6 +21,7 @@ function company(hasTask = true, busy = false, events: EventView[] = []) {
     'GET /api/updates': [200, { current: { version: '0.5.1', commit: 'abc1234', migrations: 1 }, available: false, latest: null, versions: [], updater: { present: false, status: null, waiting: null } }],
     'GET /api/link': [200, { link: null, domain: 'hornhoof.org' }],
     'POST /api/agents/b1/stop': [200, {}],
+    'DELETE /api/agents/b1': [200, {}],
   });
   return { calls, org, card };
 }
@@ -72,12 +73,13 @@ describe('agent window task and controls', () => {
     const event: EventView = { seq: 1, kind: 'message', data: { text: 'Release verified.' }, jobId: 'j1', person: null, at: '2026-11-04T14:00:00Z', message };
     company(true, false, [event]);
     const window = await openEmployee(userEvent.setup());
-    await within(window).findByRole('button', { name: 'Message from Hana via Hornhoof to Bruno' });
-    stream.send({ type: 'agent_event', agentId: 'b1', event: { ...event, message: { ...message, revision: 1, senders: [message.from, { ...message.from, id: 'h2', name: 'Rita' }] } } });
+    fireEvent.click(await within(window).findByRole('button', { name: 'Message from Hana via Hornhoof to Bruno' }));
+    stream.send({ type: 'agent_event', agentId: 'b1', event: { ...event, seq: 2, message: { ...message, originSeq: 1, revision: 1, senders: [message.from, { ...message.from, id: 'h2', name: 'Rita' }] } } });
     expect(await within(window).findByRole('button', { name: 'Message from Hana, Rita via Hornhoof to Bruno' })).toBeInTheDocument();
     stream.send({ type: 'agent_event', agentId: 'b1', event });
     expect(await within(window).findByRole('button', { name: 'Message from Hana, Rita via Hornhoof to Bruno' })).toBeInTheDocument();
     expect(within(window).queryByRole('button', { name: 'Message from Hana via Hornhoof to Bruno' })).not.toBeInTheDocument();
+    expect(within(window).getByText('Release verified.')).toBeVisible();
   });
 
   it.each(['Department tasks', 'About the department', 'Speed', 'Account', 'About', 'Settings', 'Versions'])('keeps Escape with %s instead of stopping the busy agent', async name => {
@@ -133,7 +135,19 @@ describe('agent window task and controls', () => {
     expect(input).toHaveValue('Keep this draft');
   });
 
-  it('explains why an employee without a task cannot open it, in Russian', async () => {
+  it('closes the window with the card when the employee is removed from the company', async () => {
+    const { calls } = company();
+    const user = userEvent.setup();
+    const window = await openEmployee(user);
+    await user.click(within(window).getByRole('button', { name: 'Card' }));
+    const card = await within(window).findByRole('complementary', { name: 'Card: Bruno' });
+    await user.click(await within(card).findByRole('button', { name: 'Remove from the company' }));
+    await user.click(within(card).getByRole('button', { name: 'Yes, remove' }));
+    await waitFor(() => expect(window).not.toBeInTheDocument());
+    expect(calls).toContainEqual({ method: 'DELETE', path: '/api/agents/b1', body: undefined });
+  });
+
+  it('shows an employee without a task only its switched off button, in Russian', async () => {
     company(false);
     localStorage.setItem('hh-lang', 'ru');
     const user = userEvent.setup();
@@ -142,9 +156,27 @@ describe('agent window task and controls', () => {
     await user.click(await screen.findByRole('button', { name: /Bruno/ }));
     const button = await screen.findByRole('button', { name: 'Нет задачи' });
     expect(button).toBeDisabled();
-    expect(button).toHaveAttribute('aria-describedby');
-    expect(screen.getByRole('status')).toHaveTextContent('У агента сейчас нет задачи.');
+    expect(button).toHaveAttribute('title', 'Нет задачи');
+    expect(button).not.toHaveAttribute('aria-describedby');
+    expect(screen.queryByText('У агента сейчас нет задачи.')).not.toBeInTheDocument();
     expect(screen.queryByRole('complementary', { name: '#12 Checkout API' })).not.toBeInTheDocument();
+  });
+
+  it('adds no line to the header while the card is on its way', async () => {
+    mockApi({
+      'GET /api/org': [200, DEV_ORG],
+      'GET /api/requests': [200, decisions([])],
+      'GET /api/agents/b1': () => new Promise(() => {}),
+      'GET /api/agents/b1/events?after=0': [200, { events: [], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 } }],
+    });
+    const user = userEvent.setup();
+    render(<LanguageProvider><Shell me={ME} onSignOut={() => {}} /></LanguageProvider>);
+    await user.click(await screen.findByRole('button', { name: /Development/ }));
+    await user.click(await screen.findByRole('button', { name: /Bruno/ }));
+    const button = await screen.findByRole('button', { name: 'No task' });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute('title', 'No task');
+    expect(button.closest('.t-bar')?.querySelector('p')).toBeNull();
   });
 
   it('minimizes to a restore button while the rest of the app works, preserving the window size and draft', async () => {

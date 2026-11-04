@@ -1,3 +1,4 @@
+import { NotificationSchema } from '@hornhoof/protocol';
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -10,7 +11,7 @@ const Party = z.object({
   role: LangText.nullable(), department: z.object({ id: z.string(), name: LangText }).nullable(),
   agentKind: z.enum(['orchestrator', 'head', 'worker']).optional(),
 });
-export const MessageEnvelopeSchema = z.object({ direction: z.enum(['in', 'out']), from: Party, to: Party });
+export const MessageEnvelopeSchema = z.object({ direction: z.enum(['in', 'out']), from: Party, to: Party, notification: NotificationSchema.optional(), senders: z.array(Party).optional(), revision: z.number().int().nonnegative().optional(), originSeq: z.number().int().positive().optional() });
 export type MessageParty = z.infer<typeof Party>;
 export type MessageEnvelope = z.infer<typeof MessageEnvelopeSchema>;
 export type PartyContext = Pick<Ctx, 'db' | 'templates'>;
@@ -51,6 +52,8 @@ const field = (data: unknown, key: string): unknown => data && typeof data === '
 /* Sender identity comes from stored ids and authenticated callers, never from the words of the message. */
 export async function incomingEnvelope(ctx: PartyContext, companyId: string, agentId: string, personId: string | null | undefined, data: unknown): Promise<MessageEnvelope> {
   const to = await agentParty(ctx, companyId, agentId);
+  const notice = field(data, 'notification');
+  if (notice !== undefined) return noticeEnvelope(data, to);
   if (personId) return { direction: 'in', from: await personParty(ctx, companyId, personId), to };
   const by = field(data, 'by');
   if (field(data, 'from') === 'agent' && typeof by === 'string') return { direction: 'in', from: await agentParty(ctx, companyId, by), to };
@@ -58,7 +61,14 @@ export async function incomingEnvelope(ctx: PartyContext, companyId: string, age
     const [agent] = await ctx.db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, companyId), eq(agents.kind, 'orchestrator')));
     if (agent) return { direction: 'in', from: await agentParty(ctx, companyId, agent.id), to };
   }
-  return { direction: 'in', from: HORNHOOF, to };
+  return { direction: 'in', from: HORNHOOF, to, notification: { source: 'service', tasks: [] } };
+}
+
+function noticeEnvelope(data: unknown, to: MessageParty): MessageEnvelope {
+  const notification = NotificationSchema.parse(field(data, 'notification'));
+  const actor = Party.optional().parse(field(data, 'actor'));
+  const senders = z.array(Party).optional().parse(field(data, 'senders'));
+  return { direction: 'in', from: actor ?? HORNHOOF, to, notification, ...(senders ? { senders } : {}) };
 }
 
 /* The envelope is kept in the existing JSON payload; old rows and their data stay unchanged. */

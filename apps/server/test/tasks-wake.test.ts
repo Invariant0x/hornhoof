@@ -333,7 +333,7 @@ describe("Hornhoof's note that a task stands still", () => {
     const { wakes } = await updateTask(c.ctx, c.head.id, c.task.id, { executor: c.kai.id });
     expect(await requestsOf(c)).toEqual([{ kind: 'stuck', status: 'withdrawn' }]);
     expect(await taskOf(c, c.task.id)).toEqual({ status: 'open', silent: 0 });
-    expect(wakes).toEqual([{ agentId: c.kai.id, taskId: c.task.id, why: 'assigned' }]);
+    expect(wakes).toEqual([{ agentId: c.kai.id, taskId: c.task.id, why: 'assigned', cause: { actor: { agentId: c.head.id }, action: 'rewrote work', eventId: expect.any(Number), task: { id: c.task.id, number: c.task.number } } }]);
   });
 
   it('goes away when the executor hands its work in after all', async () => {
@@ -870,10 +870,10 @@ describe('obsolete task turns', () => {
     expect(c.builtin.queued()).toBe(0);
     for (const [i, task] of [first!, second!, merge!].entries()) {
       const [stale] = await c.db.select().from(jobs).where(eq(jobs.id, queued[i]!.id));
-      expect(stale).toMatchObject({ status: 'failed', error: 'stale', startedAt: null });
+      expect(stale).toMatchObject({ status: 'obsolete', error: 'stale', startedAt: null });
       expect(stale!.result).toContain(`#${task.number}`);
       expect((await c.db.select().from(agentEvents).where(and(eq(agentEvents.jobId, stale!.id), eq(agentEvents.kind, 'stopped')))).map(e => e.data)).toEqual([
-        { reason: 'stale', text: stale!.result, failure: stale!.failure, tail: 'No output.', program: null, task: { id: task.id, number: task.number } },
+        { reason: 'obsolete', text: stale!.result, tail: 'No output.', program: null, task: { id: task.id, number: task.number } },
       ]);
     }
   });
@@ -936,7 +936,7 @@ describe('obsolete task turns', () => {
     await c.db.update(tasks).set(set).where(eq(tasks.id, task.id));
     await c.release();
     expect(c.builtin.queued()).toBe(0);
-    expect((await c.db.select().from(jobs).where(eq(jobs.id, queued!.id)))[0]).toMatchObject({ status: 'failed', error: 'stale', startedAt: null });
+    expect((await c.db.select().from(jobs).where(eq(jobs.id, queued!.id)))[0]).toMatchObject({ status: 'obsolete', error: 'stale', startedAt: null });
   });
 
   it('drops a review from a previous stage even when the same reviewer is on the next panel', async () => {

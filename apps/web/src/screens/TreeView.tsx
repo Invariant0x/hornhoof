@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type RefObject } from 'react';
-import { useT } from '../i18n';
+import { taskWaitText } from '../ui/task-wait';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type RefObject, type UIEvent } from 'react';
+import { useLanguage, useT } from '../i18n';
 import type { Department, DepartmentTree, TreeAgent } from '../types';
 import { Pulse, motionSpeed, toD, useReducedMotion } from '../ui/wires';
 import {
-  idleClass, treeClock, treeLayout, trunkBranch, reviewsOf, rowTaskNumber, statePriority,
-  type TreeLayout, type TreeBadge, type TreeMark, type TreePick, type TreeRow, type TreeTarget,
+  idleClass, plateHeight, plateKey, plateRoom, treeClock, treeLayout, trunkBranch, reviewsOf, rowTaskNumber, statePriority,
+  type PlateHeights, type TreeLayout, type TreeBadge, type TreeMark, type TreePick, type TreeRow, type TreeTarget,
 } from './tree';
 import { TreeCardBody, TreeWho } from './TreeCard';
 import { segmentText } from './tree-state';
@@ -70,23 +71,14 @@ function badgeText(t: ReturnType<typeof useT>, badge: TreeBadge): string {
   return segmentText(t, { ...badge, to: null }, new Date(Date.parse(badge.from) + badge.minutes * 60_000).toISOString());
 }
 
-function badgeWidth(text: string, badge: TreeBadge, phone: boolean): number {
-  if (phone) return 156;
+function badgeWidth(text: string, badge: TreeBadge): number {
   return Math.ceil(text.length * 6.7 + 14 + (badge.kind === 'after' ? 0 : 12));
 }
 
-function BadgeCopy({ text, x, y, width, phone }: { text: string; x: number; y: number; width: number; phone: boolean }) {
-  if (phone) return <foreignObject x={x} y={y - 20} width={width} height="40"><div className="bdg-copy">{text}</div></foreignObject>;
-  return <text className="bdg-t" x={x} y={y + .5}>{text}</text>;
-}
-
-const badgeHalf = (phone: boolean) => phone ? 24 : 10;
-
-function Badge({ badge: b, phone }: { badge: TreeBadge; phone: boolean }) {
+function Badge({ badge: b }: { badge: TreeBadge }) {
   const t = useT();
   const text = badgeText(t, b);
-  const width = badgeWidth(text, b, phone), x = b.x, y = b.y;
-  const half = badgeHalf(phone);
+  const width = badgeWidth(text, b), x = b.x, y = b.y, half = 10;
   const points = [
     `${x},${y - half}`, `${x + width - 5},${y - half}`, `${x + width},${y - half + 5}`,
     `${x + width},${y + half}`, `${x + 5},${y + half}`, `${x},${y + half - 5}`,
@@ -97,7 +89,7 @@ function Badge({ badge: b, phone }: { badge: TreeBadge; phone: boolean }) {
       <polygon points={points} />
       {b.kind === 'stall' && <path className="bdg-i" d={`M${x + 8.5} ${y - 3.5}v7M${x + 12.5} ${y - 3.5}v7`} />}
       {b.kind === 'person' && <text className="bdg-q" x={x + 10.5} y={y}>?</text>}
-      <BadgeCopy text={text} x={x + (b.kind === 'after' ? 7 : 19)} y={y} width={width - 26} phone={phone} />
+      <text className="bdg-t" x={x + (b.kind === 'after' ? 7 : 19)} y={y + .5}>{text}</text>
     </g>
   );
 }
@@ -187,7 +179,7 @@ function LaneState({ agent, department, now }: { agent: TreeAgent; department: D
 }
 
 function ExternalWaitState({ wait }: { wait: NonNullable<DepartmentTree['lines'][number]['externalWait']> }) {
-  const text = useT().dept.tree.externalWaiting(wait.reason, treeClock(wait.until));
+  const text = taskWaitText(useT(), wait, treeClock(wait.until));
   return <span className="ast calm" title={text}>{text}</span>;
 }
 
@@ -212,23 +204,23 @@ function RowTask({ row, tree }: { row: TreeRow; tree: DepartmentTree }) {
   return <>{number !== undefined && `#${number}`}<span className="tv-title"> {rowTitle(row, tree, L)}</span></>;
 }
 
-function shortTask(row: TreeRow, noTask: string): string {
-  const number = rowTaskNumber(row);
-  return number === undefined ? noTask : `#${number}`;
+/* An employee named after its role says it once. */
+function LaneRole({ agent, department }: { agent: TreeAgent; department: Department }) {
+  const { language } = useLanguage(), employee = department.employees.find(e => e.id === agent.id);
+  const role = employee?.title?.[language];
+  return role && role !== employee?.name ? <small className="tv-role">{role}</small> : null;
 }
 
 function Label({ row, tree, department }: { row: TreeRow; tree: DepartmentTree; department: Department }) {
-  const L = useT().dept.tree;
   if (!row.agent) return <b>{row.type === 'main' ? trunkBranch(department) : tree.turn!.branch}</b>;
   return <>
-    <span className="r1"><b><TreeWho agent={row.agent} department={department} /></b><small className="tv-task">{shortTask(row, L.noTask)}</small></span>
+    <span className="r1"><b><TreeWho agent={row.agent} department={department} /></b><LaneRole agent={row.agent} department={department} /></span>
     <span className="r2"><RowTask row={row} tree={tree} /></span>
     <LaneDescription agent={row.agent} department={department} tree={tree} line={row.line} />
   </>;
 }
 
 type CanvasProps = Pick<Props, 'tree' | 'department'> & {
-  phone: boolean;
   layout: TreeLayout;
   selected: TreePick | null;
   select(pick: TreePick, e: MouseEvent): void;
@@ -300,7 +292,7 @@ function Graph(props: CanvasProps) {
         {['main', 'turn', 'segment', 'bridge', 'fork', 'merge'].map(kind => graphPaths(layout, kind)
           .map((p, i) => <path key={`${kind}${i}`} className={`${p.cls}${p.dim ? ' dn' : ''}`} d={toD(p.points)} />))}
         {layout.marks.map((m, i) => <g key={i} className={m.dim ? 'dn' : undefined}><Mark m={m} /></g>)}
-        {layout.badges.map(b => <Badge key={b.row} badge={b} phone={props.phone} />)}
+        {layout.badges.map(b => <Badge key={b.row} badge={b} />)}
         {layout.pulses.map((pts, i) => <Pulse key={i} pts={pts} speed={motionSpeed(60, still)} />)}
         <rect className="g-now-chip" x={layout.nowX - 25} y="4" width="50" height="18" />
         <text className="g-now-t" x={layout.nowX} y="13.5">{treeClock(tree.now)}</text>
@@ -316,15 +308,31 @@ function labelClass(row: TreeRow, selected: TreePick | null): string {
   return `lchip${trunk}${on ? ' on' : ''}`;
 }
 
-function Labels({ layout, tree, department, selected, select }: CanvasProps) {
+/* A plate's text decides its height and its row follows. Moving and zooming resize no plate; a new text or font does. */
+function useMeasuredPlates(labs: RefObject<HTMLDivElement | null>, keys: string, onPlates: (heights: PlateHeights) => void) {
+  useLayoutEffect(() => {
+    const plates = [...labs.current!.querySelectorAll<HTMLElement>('.lchip')];
+    const measure = () => onPlates(Object.fromEntries(plates.map(plate => [plate.dataset.row!, plate.offsetHeight])));
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    plates.forEach(plate => observer.observe(plate));
+    return () => observer.disconnect();
+  }, [labs, keys, onPlates]);
+}
+
+function Labels({ layout, tree, department, selected, select, onPlates }: CanvasProps & { onPlates(heights: PlateHeights): void }) {
+  const labs = useRef<HTMLDivElement>(null), rows = layout.rows.filter(r => r.pick);
+  useMeasuredPlates(labs, rows.map(plateKey).join(), onPlates);
   return (
-    <div className="tv-labs" style={{ width: layout.labelWidth, height: layout.height }}>
-      {layout.rows.filter(r => r.pick).map((r, i) => (
+    <div className="tv-labs" ref={labs} style={{ width: layout.labelWidth, height: layout.height }}>
+      {rows.map(r => (
         <button
           type="button"
-          key={i}
+          key={plateKey(r)}
+          data-row={plateKey(r)}
           className={labelClass(r, selected)}
-          style={{ top: r.y + (r.agent ? 6 : 4), height: r.h - (r.agent ? 12 : 8) }}
+          style={{ top: r.y + plateRoom(r), minHeight: plateHeight(r) }}
           onClick={e => select(r.pick!, e)}
         >
           <span className="in"><Label row={r} tree={tree} department={department} /></span>
@@ -429,27 +437,31 @@ function FloatingCard({ selection, card, box, tree, department, onOpenTask, onCl
   );
 }
 
-function fitBadges(layout: TreeLayout, t: ReturnType<typeof useT>, phone: boolean): TreeLayout {
-  return { ...layout, width: Math.max(layout.width, ...layout.badges.map(b => b.x + badgeWidth(badgeText(t, b), b, phone) + 12)) };
+/* A row can be clicked as far as the drawing goes. */
+function fitBadges(layout: TreeLayout, t: ReturnType<typeof useT>): TreeLayout {
+  const width = Math.max(layout.width, ...layout.badges.map(b => b.x + badgeWidth(badgeText(t, b), b) + 12));
+  return { ...layout, width, targets: layout.targets.map(hit => hit.round || hit.segment ? hit : { ...hit, width }) };
 }
 
 export function TreeView(props: Props) {
   const { tree, department } = props, t = useT();
   const root = useRef<HTMLDivElement>(null), scroll = useRef<HTMLDivElement>(null);
   const box = useTreeBox(root);
-  const layout = useMemo(() => fitBadges(treeLayout(tree, { ...box, agentOrder: department.employees.map(e => e.id) }, 1), t, box.phone), [tree, department, box, t]);
-  const { view, zoomAt, handlers, dragged, fit } = useTreeNavigation(scroll, layout, box, !!tree.turn);
+  const [plates, setPlates] = useState<PlateHeights>({});
+  const onPlates = useCallback((next: PlateHeights) => setPlates(old => JSON.stringify(old) === JSON.stringify(next) ? old : next), []);
+  const layout = useMemo(() => fitBadges(treeLayout(tree, { ...box, plates, agentOrder: department.employees.map(e => e.id) }, 1), t), [tree, department, box, plates, t]);
+  const { view, zoomAt, handlers, dragged, fit, onScroll } = useTreeNavigation(scroll, layout, box, !!tree.turn);
   const { selection, card, select, close } = useTreeSelection(root);
-  const canvas = { layout, tree, department, phone: box.phone, selected: selection?.pick ?? null, select };
+  const canvas = { layout, tree, department, selected: selection?.pick ?? null, select };
   return (
     <>
       <div className="tview" ref={root}>
         {!tree.turn ? <p className="tv-empty glass">{t.dept.treeNoTurn}</p> : (
           <>
-            <div className="tv-scroll" ref={scroll} role="region" aria-label={t.dept.treeCanvas} {...handlers}
+            <div className="tv-scroll" ref={scroll} role="region" aria-label={t.dept.treeCanvas} {...handlers} onScroll={onScroll}
               onClickCapture={e => ignoreDraggedClick(e, dragged)}>
               <div className="tv-in" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})` }}>
-                <Labels {...canvas} />
+                <Labels {...canvas} onPlates={onPlates} />
                 <Graph {...canvas} />
               </div>
             </div>
@@ -463,27 +475,32 @@ export function TreeView(props: Props) {
   );
 }
 
+/* The tree opens at its natural size from its root, and zooms out as far as showing all of it. */
 function useTreeNavigation(viewport: RefObject<HTMLDivElement | null>, layout: TreeLayout, box: { width: number; height: number }, ready: boolean) {
-  const [minZoom, setMinZoom] = useState(CANVAS_ZOOM_LIMITS.min);
-  const pan = usePanZoom(viewport, ready, { min: minZoom, max: CANVAS_ZOOM_LIMITS.max });
+  const width = layout.labelWidth + layout.width;
+  const whole = Math.min(1, (box.width - 24) / width, (box.height - 24) / layout.height);
+  const [floor, setFloor] = useState(CANVAS_ZOOM_LIMITS.min);
+  if (whole < floor) setFloor(whole);
+  const pan = usePanZoom(viewport, ready, { min: floor, max: CANVAS_ZOOM_LIMITS.max });
   const { setView } = pan;
-  const placed = useRef(''), frame = `${box.width}:${box.height}:${ready}`;
-  const width = layout.labelWidth + layout.width, height = layout.height;
-  const fit = useCallback(() => {
-    if (viewport.current) {
-      viewport.current.scrollLeft = 0;
-      viewport.current.scrollTop = 0;
-    }
-    const k = Math.min(1, (box.width - 24) / width, (box.height - 24) / height);
-    setMinZoom(Math.min(CANVAS_ZOOM_LIMITS.min, k));
+  const placed = useRef(''), frame = `${box.width}:${ready}`;
+  const place = useCallback((k: number) => {
     setView({ k, x: Math.max(12, (box.width - width * k) / 2), y: 12, smooth: false });
-  }, [viewport, width, height, box.width, box.height, setView]);
+  }, [width, box.width, setView]);
   useLayoutEffect(() => {
     if (placed.current === frame) return;
     placed.current = frame;
-    fit();
-  }, [fit, frame]);
-  return { ...pan, fit };
+    place(1);
+  }, [place, frame]);
+  /* Keyboard focus scrolls a clipped row into view: that becomes a move like a drag, so zoom keeps its anchor. */
+  const onScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
+    const el = event.currentTarget, dx = el.scrollLeft, dy = el.scrollTop;
+    if (!dx && !dy) return;
+    el.scrollLeft = 0;
+    el.scrollTop = 0;
+    setView(v => ({ ...v, x: v.x - dx, y: v.y - dy, smooth: false }));
+  }, [setView]);
+  return { ...pan, fit: () => place(whole), onScroll };
 }
 
 function ignoreDraggedClick(event: MouseEvent, dragged: () => boolean): void {

@@ -6,6 +6,7 @@ import { isHidden } from './visibility';
 export type AgentMessageView = NonNullable<EventView['message']>;
 /* A message event that names who wrote to whom; older ones without it show as they did. */
 export type MessageEvent = EventView & { kind: 'message'; message: AgentMessageView };
+export const messageKey = (event: EventView): number => event.message?.originSeq ?? event.seq;
 export const isMessage = (e: EventView): e is MessageEvent => e.kind === 'message' && Boolean(e.message);
 type Folding = { opened: ReadonlySet<number>; toggle(seq: number): void };
 
@@ -19,15 +20,17 @@ export function partyName(t: Messages, language: Language, p: MessageParty): str
   return role && role.toLocaleLowerCase(language) !== p.name.toLocaleLowerCase(language) ? `${p.name} (${role})` : p.name;
 }
 
+function serviceLine(t: Messages, language: Language, m: AgentMessageView, to: string): string {
+  const n = m.notification;
+  return t.window.noticeSource(t.notificationSources[n?.source ?? 'service'], n?.tasks.map(t => `#${t.number}`).join(', ') ?? '', n?.detail?.[language] ?? '', to);
+}
+
 /* "Message from … to …" for what came in, "Message to … from …" for what went out, and a notice for what Hornhoof said. */
 export function messageLine(t: Messages, language: Language, m: AgentMessageView): string {
   const from = partyName(t, language, m.from);
   const to = partyName(t, language, m.to);
   if (m.direction === 'out') return t.window.messageTo(to, from);
-  if (m.from.kind === 'hornhoof') {
-    const n = m.notification;
-    return t.window.noticeSource(t.notificationSources[n?.source ?? 'service'], n?.tasks.map(t => `#${t.number}`).join(', ') ?? '', n?.detail?.[language] ?? '', to);
-  }
+  if (m.from.kind === 'hornhoof') return serviceLine(t, language, m, to);
   const senders = m.senders?.length ? m.senders.map(p => partyName(t, language, p)).join(', ') : from;
   return m.notification ? t.window.messageVia(senders, to) : t.window.messageFrom(from, to);
 }
@@ -98,5 +101,6 @@ const textOf = (data: unknown) => {
 };
 
 export function EventMessage({ event, folding }: { event: MessageEvent; folding: Folding }) {
-  return <AgentMessage message={event.message} text={textOf(event.data)} open={folding.opened.has(event.seq)} onToggle={() => folding.toggle(event.seq)} />;
+  const key = messageKey(event);
+  return <AgentMessage message={event.message} text={textOf(event.data)} open={folding.opened.has(key)} onToggle={() => folding.toggle(key)} />;
 }

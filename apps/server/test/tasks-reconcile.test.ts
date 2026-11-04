@@ -80,6 +80,32 @@ const waitingCases: { why: string; hold(c: Company, task: Task): Promise<unknown
 ];
 
 describe('turns on a machine that went away', () => {
+  it('keeps running and queued conversations through a 60-second disconnect and accepts the result after return', async () => {
+    const c = await company();
+    const task = await c.task({ status: 'working' });
+    const running = await c.job({ taskId: task.id, status: 'running', startedAt: new Date(c.at.getTime() + MIN) });
+    const queued = await c.job({ taskId: task.id, prompt: 'Wait for the current turn.' });
+    c.ready.mockReturnValue(false);
+    await handleNodeClose(c.ctx, BUILTIN);
+    const away = c.ctx.hub.awaySince(BUILTIN)!;
+
+    await c.round(new Date(away + MIN));
+    expect((await c.turnsOf(c.bruno.id)).find(j => j.id === running.id)).toMatchObject({ status: 'running', error: null });
+    expect((await c.turnsOf(c.bruno.id)).find(j => j.id === queued.id)).toMatchObject({ status: 'queued', error: null });
+
+    await handleNodeMessage(c.ctx, BUILTIN, { type: 'hello', version: '0.6.1', loggedIn: true, running: [running.id] });
+    await handleNodeMessage(c.ctx, BUILTIN, { type: 'job.event', jobId: running.id, seq: 0, event: { kind: 'text', text: 'Kept while away.' } });
+    await handleNodeMessage(c.ctx, BUILTIN, { type: 'job.done', jobId: running.id, ok: true, result: 'Done after return.', tail: 'Kept while away.', error: null, sessionId: 'back-session' });
+
+    expect((await c.turnsOf(c.bruno.id)).find(j => j.id === running.id)).toMatchObject({ status: 'done', result: 'Done after return.', sessionId: 'back-session', error: null });
+    expect((await c.turnsOf(c.bruno.id)).find(j => j.id === queued.id)).toMatchObject({ status: 'queued', error: null });
+    expect(await c.db.select().from(agentEvents).where(and(eq(agentEvents.jobId, running.id), eq(agentEvents.kind, 'failed')))).toEqual([]);
+    const { agentFailureState } = await import('../src/modules/tasks/failures.js');
+    expect((await agentFailureState(c.ctx, c.bruno.id)).failure).toBeNull();
+    expect(c.send).not.toHaveBeenCalledWith(BUILTIN, { type: 'job.cancel', jobId: running.id });
+    expect(c.send).toHaveBeenCalledWith(BUILTIN, { type: 'job.ack', jobId: running.id });
+  });
+
   it('fails a running conversation after five minutes away and continues through the failed-turn path once', async () => {
     const c = await company();
     const task = await c.task({ status: 'working' });
@@ -99,6 +125,8 @@ describe('turns on a machine that went away', () => {
     expect(failed).toHaveLength(1);
     expect(failed[0]!.data).toEqual({ error: 'machine_offline' });
     expect(await c.turnsOf(c.bruno.id)).toHaveLength(2);
+    const { agentFailureState } = await import('../src/modules/tasks/failures.js');
+    expect((await agentFailureState(c.ctx, c.bruno.id)).failure).toBeNull();
 
     await handleNodeMessage(c.ctx, BUILTIN, { type: 'hello', version: '0.5.0', loggedIn: true, running: [job.id] });
     expect(c.send).toHaveBeenCalledWith(BUILTIN, { type: 'job.cancel', jobId: job.id });

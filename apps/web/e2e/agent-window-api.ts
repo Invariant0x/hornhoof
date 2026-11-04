@@ -9,16 +9,17 @@ const EMPLOYEE: Employee = {
   context: null, program: null, alarm: null, retry: null, failure: null,
 };
 const AGENT: RunningAgent = { id: 'b1', canOpen: true, name: 'Bruno', title: ROLE, department: { id: 'd2', name: 'Development' }, provider: 'codex', busy: false, since: null, task: null, withCeo: false };
-const SUB: SubView = {
+export const SUB: SubView = {
   id: 's1', provider: 'codex', kind: 'personal', label: 'Codex', status: 'ready', online: true, last4: null, owner: { id: 'p1', name: 'Ivan' },
   place: { kind: 'company', id: null, name: 'Whole company' }, machines: [{ id: 'm1', hostname: 'test-machine', status: 'ready', online: true }],
   limits: null, budget: null, isOrchestrator: false, accounts: [], tier: null, accountsDiffer: false, signedInOnce: true, leaseMachine: null,
 };
 const MACHINE: MachineView = { id: 'm1', hostname: 'test-machine', os: 'linux', arch: 'x86_64', owner: { id: 'p1', name: 'Ivan' }, online: true, lastSeenAt: null, plans: [{ id: 's1', provider: 'codex', status: 'ready', online: true }], load: null, lendsTests: true, running: { agents: [], parts: [] } };
-const CARD: AgentCardView = { id: 'b1', currentTask: null, kind: 'worker', name: 'Bruno', role: { id: 'DEV-ENG', title: ROLE, description: ROLE }, department: { id: 'd2', name: 'Development' }, product: null, model: '', effort: null, subscription: SUB, machine: null, state: 'sleeping', retry: null, failure: null, skills: [], parts: [], raw: '', instructions: { length: 0, max: 200_000 }, runsOn: [], changes: [], interrupted: [], timer: null, canEdit: false };
+export const CARD: AgentCardView = { id: 'b1', currentTask: null, kind: 'worker', name: 'Bruno', role: { id: 'DEV-ENG', title: ROLE, description: ROLE }, department: { id: 'd2', name: 'Development' }, product: null, model: '', effort: null, subscription: SUB, machine: null, state: 'sleeping', retry: null, failure: null, skills: [], parts: [], raw: '', instructions: { length: 0, max: 200_000 }, runsOn: [], changes: [], interrupted: [], timer: null, canEdit: false };
 const DETAIL: TaskDetail = { ...TASKS[0]!, body: 'The task details stay beside the terminal on a wide screen.', parent: null, after: [], executor: TASKS[0]!.assignee, gates: [], createdBy: null, subtasks: [], requests: [], log: [{ kind: 'comment', text: 'The checkout form is being checked.', data: {}, by: { kind: 'agent', id: 'b1', name: 'Bruno' }, at: '2026-11-04T00:00:00Z' }] };
 
-export type AgentFixture = { awake: boolean; hasTask: boolean; messages: unknown[]; connections: number; events?: EventView[]; productOnly?: boolean; privateAgent?: boolean; orgFailure?: boolean };
+/* canType: whether this person types into the terminal, as the owner of its plan; so by default. orchestrator: the company's, for its window. */
+export type AgentFixture = { awake: boolean; hasTask: boolean; messages: unknown[]; connections: number; events?: EventView[]; productOnly?: boolean; privateAgent?: boolean; orgFailure?: boolean; head?: boolean; sent?: string[]; canType?: boolean; orchestrator?: Org['orchestrator'] };
 
 export async function serveAgentWindow(page: Page, live: AgentFixture): Promise<void> {
   await serveApi(page);
@@ -28,7 +29,7 @@ export async function serveAgentWindow(page: Page, live: AgentFixture): Promise<
     const employee = { ...EMPLOYEE, task: live.hasTask ? EMPLOYEE.task : null };
     const agent = { ...AGENT, busy: live.awake };
     const listed = live.privateAgent ? [agent, { ...agent, id: 'private', name: 'Private agent', canOpen: false, task: null }] : [agent];
-    const org: Org = { company: ME.company, orchestrator: null, agents: { total: 1, working: Number(live.awake) }, people: [], departments: [{ id: 'd2', name: 'Development', templateKey: null, roleCode: 'DEV', about: '', agents: { total: 1, working: Number(live.awake) }, products: [], teams: [], people: [], employees: [employee], roles: [{ id: 'DEV-ENG', title: ROLE, description: ROLE, kind: 'member', gate: null }] }] };
+    const org: Org = { company: ME.company, orchestrator: live.orchestrator ?? null, agents: { total: 1, working: Number(live.awake) }, people: [], departments: [{ id: 'd2', name: 'Development', templateKey: null, roleCode: 'DEV', about: '', agents: { total: 1, working: Number(live.awake) }, products: [], teams: [], people: [], employees: [employee], roles: [{ id: 'DEV-ENG', title: ROLE, description: ROLE, kind: 'member', gate: null }] }] };
     const routes: Record<string, unknown> = {
       '/api/org': org,
       '/api/version': { version: '0.5.0', commit: 'b77ce08' },
@@ -36,7 +37,8 @@ export async function serveAgentWindow(page: Page, live: AgentFixture): Promise<
       '/api/subscriptions': { subscriptions: [{ ...SUB, agents: listed }] },
       '/api/machines': { machines: [{ ...MACHINE, running: { agents: listed, parts: [] } }] },
       '/api/nodes/commands': { commands: [] },
-      '/api/agents/b1': { ...CARD, product: live.productOnly ? { id: 'p2', name: 'Checkout' } : null, currentTask: live.hasTask ? { id: 't1', number: 1, title: 'Checkout step 1' } : null },
+      '/api/agents/b1': { ...CARD, kind: live.head ? 'head' : 'worker', product: live.productOnly ? { id: 'p2', name: 'Checkout' } : null, currentTask: live.hasTask ? { id: 't1', number: 1, title: 'Checkout step 1' } : null },
+      '/api/departments/d2/notebook': { notes: [{ number: 1, text: 'Review every merge.', by: { kind: 'agent', id: 'b1', name: 'Bruno' }, updatedAt: '2026-11-04T00:00:00.000Z' }] },
       '/api/tasks/t1': { task: DETAIL },
       '/api/tasks?status=open&department=d2': { tasks: [] },
     };
@@ -47,7 +49,7 @@ export async function serveAgentWindow(page: Page, live: AgentFixture): Promise<
     if (path === '/api/org' && live.orgFailure) return route.fulfill({ status: 503, json: { error: { code: 'internal', message: 'Company temporarily unavailable' } } });
     if (url.pathname === '/api/agents/b1/events') {
       const after = Number(url.searchParams.get('after') ?? 0);
-      return route.fulfill({ json: { events: (live.events ?? []).filter(e => e.seq > after), state: { ready: true, reason: null, busy: live.awake, runningJobId: live.awake ? 'j1' : null, queued: 0, terminal: live.awake } } });
+      return route.fulfill({ json: { events: (live.events ?? []).filter(e => e.seq > after), state: { ready: true, reason: null, busy: live.awake, runningJobId: live.awake ? 'j1' : null, queued: 0, terminal: live.awake, canType: live.canType ?? true } } });
     }
     if (path === '/api/agents/b1/messages') { live.messages.push(route.request().postDataJSON()); return route.fulfill({ json: { queued: true } }); }
     if (path in routes) return route.fulfill({ json: routes[path] });
@@ -55,7 +57,8 @@ export async function serveAgentWindow(page: Page, live: AgentFixture): Promise<
   });
   await page.routeWebSocket('**/api/agents/b1/terminal*', ws => {
     live.connections++;
-    ws.send(JSON.stringify({ type: 'ready', write: true }));
+    ws.onMessage(message => { live.sent?.push(String(message)); });
+    ws.send(JSON.stringify({ type: 'ready', write: live.canType ?? true }));
     ws.send(JSON.stringify({ type: 'program', running: true }));
     ws.send(JSON.stringify({ type: 'data', data: 'Bruno is checking the checkout.\r\n> ' }));
   });

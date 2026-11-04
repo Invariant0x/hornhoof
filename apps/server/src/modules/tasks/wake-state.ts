@@ -1,6 +1,6 @@
 import { lastBytes, type Failure } from '@hornhoof/protocol';
 import type { TurnProgram } from '@hornhoof/protocol/map';
-import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Db } from '../../db/client.js';
 import { agentEvents, agents, jobs, taskEvents, tasks, TASK_STATUSES } from '../../db/schema.js';
@@ -150,16 +150,23 @@ function staleFailure(task: Task, run: string, status: 'queued' | 'running', pro
   return { kind: 'unknown', text, retryable: false };
 }
 
+async function logObsolete(db: Store, task: Task, agentId: string, wake: string, jobId: string): Promise<void> {
+  const [agent] = await db.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId));
+  const text = `Wake-up became obsolete: the task moved on. ${agent!.name}: ${wake}.`;
+  await db.insert(taskEvents).values({ companyId: task.companyId, taskId: task.id, agentId, kind: 'wake_obsolete', text, data: { wake, job: jobId } });
+}
+
 export async function recordStale(db: Store, jobId: string, agentId: string, task: Task, run: string, status: 'queued' | 'running', program: StaleProgram | null = null): Promise<boolean> {
   const failure = staleFailure(task, run, status, program);
-  const text = failure.text;
+  const text = status === 'queued' ? `Wake-up became obsolete: task #${task.number} moved on. ${failure.text}` : failure.text;
   const tail = staleOutput('');
-  const [ended] = await db.update(jobs).set({ status: 'failed', error: 'stale', result: text, failure, tail, finishedAt: new Date() })
+  const [ended] = await db.update(jobs).set({ status: status === 'queued' ? 'obsolete' : 'failed', error: 'stale', result: text, failure: status === 'queued' ? null : failure, tail, finishedAt: new Date() })
     .where(and(eq(jobs.id, jobId), eq(jobs.status, status))).returning({ id: jobs.id });
   if (!ended) return false;
-  await db.insert(agentEvents).values({ companyId: task.companyId, agentId, jobId, kind: 'stopped', data: { reason: 'stale', text, failure, tail, program, task: { id: task.id, number: task.number } } });
+  const reason = status === 'queued' ? 'obsolete' : 'stale';
+  await db.insert(agentEvents).values({ companyId: task.companyId, agentId, jobId, kind: 'stopped', data: { reason, text, ...(status === 'running' ? { failure } : {}), tail, program, task: { id: task.id, number: task.number } } });
   /* A running turn was already logged by repeatWake; queued work reaches this path directly. */
-  if (status === 'queued') await logSkipped(db, task, agentId, run, jobId);
+  if (status === 'queued') await logObsolete(db, task, agentId, run, jobId);
   return true;
 }
 
@@ -175,9 +182,9 @@ export async function discardStaleTurns(db: Store, waiting: readonly TaskTurn[])
 /* An old step must not swallow a new wake merely because both name the same agent and task. */
 export async function waitingTaskTurn(db: Db, agentId: string, taskId: string): Promise<{ id: string } | undefined> {
   const waiting = await db.select({ id: jobs.id, agentId: jobs.agentId, taskId: jobs.taskId }).from(jobs)
-    .where(and(eq(jobs.agentId, agentId), eq(jobs.taskId, taskId), eq(jobs.status, 'queued'))).orderBy(asc(jobs.createdAt));
+    .where(and(eq(jobs.agentId, agentId), eq(jobs.taskId, taskId), eq(jobs.status, 'queued'), sql`not exists (select 1 from agent_events e where e.job_id = ${jobs.id} and e.data->>'report' is not null)`)).orderBy(asc(jobs.createdAt));
   await discardStaleTurns(db, waiting);
   const [current] = await db.select({ id: jobs.id }).from(jobs)
-    .where(and(eq(jobs.agentId, agentId), eq(jobs.taskId, taskId), eq(jobs.status, 'queued'))).limit(1);
+    .where(and(eq(jobs.agentId, agentId), eq(jobs.taskId, taskId), eq(jobs.status, 'queued'), sql`not exists (select 1 from agent_events e where e.job_id = ${jobs.id} and e.data->>'report' is not null)`)).limit(1);
   return current;
 }

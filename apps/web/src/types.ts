@@ -1,3 +1,4 @@
+import type { ExternalWait } from '@hornhoof/protocol/waits';
 import type { Notification } from '@hornhoof/protocol';
 import type { FailureKind, Limits, ModelOption, NodeLoad, ProgramInfo, ProviderId, TemplateKey } from '@hornhoof/protocol';
 import type { RoleEffort } from '@hornhoof/protocol/efforts';
@@ -97,6 +98,7 @@ export type ProgramView = TurnProgram;
 
 /* The latest failed turn of an agent, as /api/org and /api/agents/:id give it; at is Unix epoch milliseconds. */
 export type TurnFailure = { kind: FailureKind; text: string; at: number; tail?: string };
+export type TurnObsolete = { at: number };
 
 /* An employee as the map lists it: the head first, then members in the order they were hired. */
 export type Employee = {
@@ -128,6 +130,7 @@ export type Employee = {
   retry: TurnRetry | null;
   /* Its latest failed turn, or null. */
   failure: TurnFailure | null;
+  obsolete?: TurnObsolete | null;
 };
 
 /* A role a department's employees hold, in its template's order; gate: where it stands among the default gates. */
@@ -181,12 +184,15 @@ export type OrchestratorState = {
   limitUntil?: string | null;
   /* The plan used the share set for tasks until then; task turns wait, people's messages still go. */
   budgetUntil?: string | null;
-  reason: 'no_subscription' | 'waiting_machine' | 'needs_login' | 'needs_setup' | 'node_outdated' | 'machine_offline' | 'browser_failed' | null;
+  reason: 'no_subscription' | 'waiting_machine' | 'needs_login' | 'needs_setup' | 'node_outdated' | 'machine_offline' | null;
+  browserError?: string | null;
   busy: boolean;
   runningJobId: string | null;
   queued: number;
   /* Its node shows the agent's live terminal; older nodes do not. */
   terminal?: boolean;
+  /* This person types into that terminal, as the owner of the agent's plan. The agent's own window gets it. */
+  canType?: boolean;
 };
 
 /* One part of an agent's instructions: who it is (written by Hornhoof), its role, or a skill between markers. */
@@ -219,6 +225,7 @@ export type AgentCardView = {
   alarm?: TurnAlarm | null;
   retry: TurnRetry | null;
   failure: TurnFailure | null;
+  obsolete?: TurnObsolete | null;
   skills: CardSkill[];
   parts: Part[];
   raw: string;
@@ -276,7 +283,7 @@ export type EventView = {
   jobId: string | null;
   person: { id: string; name: string } | null;
   at: string;
-  message?: { direction: 'in' | 'out'; from: MessageParty; to: MessageParty; notification?: Notification; senders?: MessageParty[]; revision?: number };
+  message?: { direction: 'in' | 'out'; from: MessageParty; to: MessageParty; notification?: Notification; senders?: MessageParty[]; revision?: number; originSeq?: number };
 };
 
 /* What the browser hears live from /api/stream. */
@@ -504,7 +511,7 @@ export type BuiltinView = { online: boolean; load: NodeLoad | null; running: Run
 
 export type JobView = {
   id: string;
-  status: 'queued' | 'running' | 'done' | 'failed';
+  status: 'queued' | 'running' | 'done' | 'failed' | 'obsolete';
   result: string | null;
   tail: string;
   error: string | null;
@@ -532,7 +539,7 @@ export type UpdatesView = {
 export type NoteView = { number: number; text: string; by: { kind: 'orchestrator' } | { kind: 'person' | 'agent'; id: string; name: string } | null; updatedAt: string };
 
 export type SegmentKind = 'work' | 'after' | 'person' | 'stall' | 'lost' | 'alarm' | 'queued' | 'unknown';
-export type ExternalWait = { reason: string; since: string; until: string };
+export type { ExternalWait } from '@hornhoof/protocol/waits';
 export type TreeSegment = { kind: SegmentKind; from: string; to: string | null; program?: Pick<TurnProgram, 'state' | 'since' | 'tool'>; alarm?: TurnAlarm; waitsForAgent?: TreeAgent; externalWait?: ExternalWait };
 export type TreeMove = { kind: string; at: string; text: string };
 export type TreeAgent = { id: string; name: string };
