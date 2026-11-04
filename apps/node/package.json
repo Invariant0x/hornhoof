@@ -9,7 +9,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "pretest": "npm run build -w @hornhoof/protocol",
-    "test": "vitest run"
+    "test": "vitest run",
+    "lint:part": "eslint"
   },
   "dependencies": {
     "@hornhoof/protocol": "*",
