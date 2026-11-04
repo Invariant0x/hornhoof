@@ -2,7 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { cut, lastBytes, repoFolder, type Account, type AgentEvent, type Failure, type JobError, type Limits, type ModelOption, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
 import { agentFs, ownFs, type AgentFs } from './agent-fs.js';
-import { ensureRepoBrowser } from './browser.js';
+import { ensureRepoBrowser, writeBrowserError } from './browser.js';
 import type { JobUser } from './isolation.js';
 import { redact } from './redact.js';
 import { plainOutput, programEnded, signalName, type ProgramOutput } from './program-exit.js';
@@ -182,7 +182,9 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
     if (repo) {
       const repoDir = join(workDir, repoFolder(repo.url));
       const owner = adapter.owner ? adapter.owner.user : null;
-      await (prepareRepoBrowser ? prepareRepoBrowser(repoDir) : ensureRepoBrowser(dir, repoDir, owner, owner));
+      await (prepareRepoBrowser ? prepareRepoBrowser(repoDir) : ensureRepoBrowser(dir, repoDir, owner, owner)).catch((err: unknown) =>
+        writeBrowserError(dir, message(err).replace(/^Playwright Chromium could not start:\s*/, '')),
+      );
     }
     /* hh-attach sends the turn's pictures with its token. The name has no KEY, SECRET or TOKEN in it, so Codex passes it on. */
     const attachEnv = tools ? { HH_ATTACH_URL: tools.url.replace(/\/mcp$/, '/api/attachments'), HH_ATTACH_PASS: tools.token } : undefined;

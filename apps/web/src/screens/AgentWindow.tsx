@@ -68,9 +68,12 @@ const PLAN_WAITS: Partial<Record<NonNullable<OrchestratorState['reason']>, (t: M
 function reasonText(t: Messages, reason: OrchestratorState['reason'], sub: SubView | null): string {
   const waits = reason && sub ? PLAN_WAITS[reason]?.(t, sub) : undefined;
   if (waits) return waits;
-  if (reason === 'browser_failed') return sub?.kind === 'personal' ? t.window.browserFailed(sub.owner.name) : t.window.builtinBrowserFailed;
   if (reason === 'machine_offline') return sub?.kind === 'personal' ? t.map.machineOffline(sub.owner.name) : t.window.builtinOffline;
   return t.map.needsSubscription;
+}
+
+function browserWarning(t: Messages, reason: string, sub: SubView | null): string {
+  return sub?.kind === 'personal' ? t.window.browserFailed(sub.owner.name, reason) : t.window.builtinBrowserFailed(reason);
 }
 
 function failedText(t: Messages, data: unknown, employee: boolean): string {
@@ -616,6 +619,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard, o
       )}
       {!notebook && known && <ComputerStrip machines={computer ? [computer] : []} onChange={next => mounted.current && setComputer(next)} onFailure={err => mounted.current && setFailure(err)} />}
       {known && !ready && <p className="t-why">{reasonText(t, state.reason, sub)}</p>}
+      {known && state.browserError && <p className="t-why">{browserWarning(t, state.browserError, sub)}</p>}
       {known && state?.limitUntil && <p className="t-why">{t.window.limitUntil(clock(language, state.limitUntil)!)}</p>}
       {known && !state?.limitUntil && state?.budgetUntil && <p className="t-why">{t.window.budgetUntil(clock(language, state.budgetUntil)!)}</p>}
       {/* A live terminal has its own line to type in; the log needs this one. */}
