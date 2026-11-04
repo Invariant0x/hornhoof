@@ -250,6 +250,12 @@ export class Tmux {
     for (const recording of this.recordings.all()) this.recordings.remove(recording.name);
   }
 
+  /* The terminal the node's own process runs in, attached to the session: the person who ran the install command sees the
+     program's screen and answers it. It lets go when the session ends. */
+  attachHere(name: string) {
+    return spawn('tmux', [...this.base(), 'attach', '-t', `=${name}`], { env: { ...this.env, TERM: process.env.TERM ?? 'xterm-256color' }, uid: this.user?.uid, gid: this.user?.gid, stdio: 'inherit' });
+  }
+
   /* A viewer: a terminal of its own size attached to the session, read-only unless the person may type. */
   attach(name: string, cols: number, rows: number, write: boolean) {
     const inner = `stty cols ${cols} rows ${rows}; exec tmux ${this.base().join(' ')} attach${write ? '' : ' -r'} -t '=${name}'`;

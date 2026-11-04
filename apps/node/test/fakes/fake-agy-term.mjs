@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { firstRun } from './fake-agy-setup.mjs';
 import { rawKeys, readKeys } from './keys.mjs';
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -134,4 +135,8 @@ class AgyTerminal {
 }
 
 if (!process.argv.includes('--dangerously-skip-permissions')) await import('./fake-agy-login.mjs');
-else new AgyTerminal();
+else {
+  /* agy asks for its first-run setup before anything else on a machine where nobody passed it. */
+  if (process.env.FAKE_AGY_SETUP) await firstRun();
+  new AgyTerminal();
+}

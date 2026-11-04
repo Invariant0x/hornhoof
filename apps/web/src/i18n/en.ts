@@ -698,6 +698,7 @@ export const en = {
     rate_limited: 'too many requests',
     usage_limit: 'plan limit reached',
     auth: 'sign-in needed',
+    setup: 'first setup needed',
     network: 'network error',
     cut: 'answer cut off',
     refused: 'refused by the provider',
