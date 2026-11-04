@@ -10,7 +10,7 @@ import { continuationNote } from './endings.js';
 import { operationsWatchers, pickOpsRecipient } from './silent.js';
 import { logTurnFact } from './turn-log.js';
 import { repeatWake } from './wake-state.js';
-import { requestedPromptOf } from '../conversation/requested-prompt.js';
+import { originalPromptOf } from '../conversation/requested-prompt.js';
 
 const RETRY_MINUTES = [1, 2, 5, 10];
 type Job = typeof jobs.$inferSelect;
@@ -121,14 +121,21 @@ async function sendFailureMessage(ctx: Ctx, job: Job, agentId: string, text: str
   await enqueueTurn(ctx, { companyId: job.companyId, agentId, prompt: text, createdBy: null, message: { personId: null, text, failureCase: caseId } });
 }
 
+/* What a retry says of a failure: its first line. A program's screen, which older nodes gave as the reason, says none. */
+export function shortReason(text: string): string {
+  const line = text.trim().split('\n', 1)[0]!.replace(/\s+/g, ' ').trim();
+  if (!/^\p{L}/u.test(line)) return 'the program gave no reason';
+  return line.length > 300 ? `${line.slice(0, 299)}…` : line;
+}
+
 async function retryTurn(ctx: Ctx, job: Job, at: Date | null, next: string, taskTurn?: TaskTurn): Promise<void> {
   if (!job.agentId) return;
   const [agent] = taskTurn ? [taskTurn.agent] : await ctx.db.select().from(agents).where(eq(agents.id, job.agentId));
   const task = taskTurn?.task;
   if (!agent) return;
-  const why = `The last try failed (${job.failure!.kind}): ${job.failure!.text.replace(/\s+/g, ' ').trim()}`;
+  const why = `The last try failed (${job.failure!.kind}): ${shortReason(job.failure!.text)}`;
   const note = task ? `${continuationNote(job, task)}\n${why}` : why;
-  const prompt = task ? note : `${note}\n\n${requestedPromptOf(job)}`;
+  const prompt = task ? note : `${note}\n\n${await originalPromptOf(ctx, job)}`;
   const id = await onAgent(ctx, agent.id, async () => {
     const [existing] = await ctx.db.select({ id: jobs.id }).from(jobs).where(eq(jobs.continueOf, job.id)).limit(1);
     if (existing) return existing.id;

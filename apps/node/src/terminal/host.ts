@@ -512,7 +512,15 @@ export class TerminalHost {
     const screen = await this.screen(job.key);
     /* Its screen says why, which the loader would hide. */
     this.showViews(a);
+    await this.whyNotReady(a, job, screen);
     return await this.failedTurn(a, job, job.signedOut.test(screen) ? 'not_logged_in' : 'agent_failed', screen);
+  }
+
+  /* A program still there that never showed its prompt fails its turn saying so in short, for the retry to say; its screen
+     goes with the turn's output. One that met a failure, ended or is signed out says that instead. */
+  private async whyNotReady(a: Agent, job: TermJob, screen: string): Promise<void> {
+    if (a.failure || job.signedOut.test(screen) || !(await this.opts.tmux.alive(a.name))) return;
+    a.failure = failure('unknown', `The program did not show its prompt within ${Math.round(this.readyMs / 1000)} s.`, true);
   }
 
   /* What each program needs in its folders before it starts. A person's first message into a new Kimi session, or into
@@ -556,7 +564,9 @@ export class TerminalHost {
       a.busy = false;
       /* Its input still holds the prompt, so the next turn starts the program anew, resuming the session. */
       a.hash = null;
-      return await this.failedTurn(a, job, 'agent_failed', `The program did not take Hornhoof's prompt within ${Math.round(this.readyMs / 1000)} s.\n\n${await this.screen(job.key)}`);
+      const why = `The program did not take Hornhoof's prompt within ${Math.round(this.readyMs / 1000)} s.`;
+      a.failure = failure('unknown', why, true);
+      return await this.failedTurn(a, job, 'agent_failed', `${why}\n\n${await this.screen(job.key)}`);
     }
     return null;
   }

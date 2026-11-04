@@ -11,7 +11,10 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     const failed = await host.run(kimiJob('k4', 'FAIL'));
     expect(failed).toMatchObject({ ok: false, error: 'agent_failed' });
     expect(failed.output).toContain('The plan ran out.');
-    expect(await host.run(kimiJob('k5', 'hello', { env: { FAKE_SIGNED_OUT: '1' } }))).toMatchObject({ ok: false, error: 'not_logged_in' });
+    const out = await host.run(kimiJob('k5', 'hello', { env: { FAKE_SIGNED_OUT: '1' } }));
+    expect(out).toMatchObject({ ok: false, error: 'not_logged_in' });
+    /* Its sign-in is why, not a prompt that never showed. */
+    expect(out.failure?.text).not.toContain('did not show its prompt');
   });
 
   it('ends the loader of a view whose program could not start, so the person sees why on its screen', async () => {
