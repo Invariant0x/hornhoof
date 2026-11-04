@@ -15,6 +15,13 @@ describe('the node image', () => {
     expect(dockerfile).toContain('$ub/mutator/.venv/bin/python /tmp/hornhoof-quality/test_mutator_workers.py;');
   });
 
+  it("checks in the quality stage, with each tool's own Python, that the tools read a part of a run as a project", () => {
+    const quality = dockerfile.slice(0, dockerfile.lastIndexOf('\nFROM '));
+    expect(quality).toContain('$ub/crapper/.venv/bin/python /tmp/hornhoof-quality/test_part_paths.py CrapperPaths;');
+    expect(quality).toContain('$ub/dryer/.venv/bin/python /tmp/hornhoof-quality/test_part_paths.py DryerPaths;');
+    expect(quality).toContain('$ub/mutator/.venv/bin/python /tmp/hornhoof-quality/test_part_paths.py MutatorPaths;');
+  });
+
   it('carries the everyday programs agents reach for in a shell', () => {
     for (const program of ['git', 'curl', 'ripgrep', 'tmux', 'procps', 'jq', 'file', 'python3', 'python-is-python3', 'python3-pil']) expect(installed).toContain(program);
   });
