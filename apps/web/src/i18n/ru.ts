@@ -499,6 +499,7 @@ export const ru: Messages = {
     mapButton: 'Карта',
     speed: 'Скорость',
     treeNoTurn: 'Сейчас нет открытого хода.',
+    treeCanvas: 'Дерево работы',
     tree: {
       treeAria: (n: number) => `Дерево хода ${n}`,
       noTask: 'Нет задачи',

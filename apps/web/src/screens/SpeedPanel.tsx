@@ -5,7 +5,7 @@ import { segmentText } from './tree-state';
 import { TreeWho } from './TreeCard';
 import { agentSegments, idleClass, currentTaskNumber, SEGMENT_CLASS, secondsBetween, treeClock } from './tree';
 
-type Props = { tree: DepartmentTree; department: Department; onAgent(id: string, top: number): void };
+type Props = { tree: DepartmentTree; department: Department; onAgent(id: string): void };
 const amount = ({ work, after, person, stall, lost = 0, alarm = 0, queued = 0, unknown = 0 }: AgentTime) => [work, after + person, stall, lost + alarm, queued, unknown];
 
 function Strip({ tree, agent }: { tree: DepartmentTree; agent: TreeAgent }) {
@@ -52,7 +52,7 @@ function SpeedRow({ time, tree, department, onAgent }: Props & { time: AgentTime
       <button
         type="button"
         className="spl-r"
-        onClick={e => onAgent(time.agent.id, e.currentTarget.getBoundingClientRect().top)}
+        onClick={() => onAgent(time.agent.id)}
       >
         <span className="who">
           <b><TreeWho agent={time.agent} department={department} /></b>
@@ -112,7 +112,7 @@ function IdleItem({ idle, tree, department, onAgent }: Props & { idle: IdleStret
       <button
         type="button"
         className={`idle ${idleClass(idle.kind)}`}
-        onClick={e => onAgent(idle.agent.id, e.currentTarget.getBoundingClientRect().top)}
+        onClick={() => onAgent(idle.agent.id)}
       >
         <span className="ih">
           <b><TreeWho agent={idle.agent} department={department} /></b>

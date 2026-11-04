@@ -3,7 +3,7 @@ import { api } from '../api';
 import { deptLabel, LANGUAGES, useLanguage, useT } from '../i18n';
 import { liveOf, useOrg } from '../org';
 import { currentTheme, setTheme, type Theme } from '../theme';
-import type { Me } from '../types';
+import type { Me, Org } from '../types';
 import { AgentCard } from '../ui/AgentCard';
 import { LogoMark } from '../ui/icons';
 import { UpdateBanner } from '../ui/UpdateBanner';
@@ -25,10 +25,21 @@ import { Tasks } from './Tasks';
 import { Versions } from './Versions';
 
 type Tab = 'map' | 'tasks' | 'people' | 'subscriptions' | 'machines' | 'improvements';
-/* The right panel: an agent's terminal or its card, or a task. agentId is 'orchestrator' or an employee's id. */
+/* The agent window is on the right, settings and tasks on the left. agentId is 'orchestrator' or an employee's id. */
 type Panel = { kind: 'window' | 'card'; agentId: string } | { kind: 'task'; taskId: string } | null;
 const TABS: Tab[] = ['map', 'tasks', 'people', 'subscriptions', 'machines'];
 const THEMES: Theme[] = ['light', 'dark'];
+
+function mapPanels(panel: Panel) {
+  return { windowOpen: panel?.kind === 'window', leftPanelOpen: panel !== null && panel.kind !== 'window' };
+}
+
+function useAgentWindowOpener(org: Org | null, setPanel: (panel: Panel) => void) {
+  const orchestratorId = org?.orchestrator?.id;
+  return useCallback((agentId: string) => {
+    setPanel({ kind: 'window', agentId: agentId === orchestratorId ? 'orchestrator' : agentId });
+  }, [orchestratorId, setPanel]);
+}
 type AccountDialogName = 'about' | 'versions' | 'settings';
 
 function AccountDialog({ active, me, updates, onClose }: { active: AccountDialogName | null; me: Me; updates: Updates; onClose: () => void }) {
@@ -181,9 +192,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   const [deptId, setDeptId] = useState<string | null>(null);
   const [staff, setStaff] = useState<StaffAsk | null>(null);
   const { org } = useOrg(panel !== null || deptId !== null);
-  const openAgent = useCallback((agentId: string) => {
-    setPanel({ kind: 'window', agentId: agentId === org?.orchestrator?.id ? 'orchestrator' : agentId });
-  }, [org?.orchestrator?.id]);
+  const openAgent = useAgentWindowOpener(org, setPanel);
   const dept = deptId ? org?.departments.find(d => d.id === deptId) : undefined;
   /* A department removed while its view was open closes the view. */
   useEffect(() => {
@@ -273,7 +282,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
         {tab === 'map' && (
           <MapScreen
             me={me}
-            windowOpen={panel !== null}
+            {...mapPanels(panel)}
             onOpenOrchestrator={() => openAgent('orchestrator')}
             inside={!!dept}
             onOpenDepartment={setDeptId}

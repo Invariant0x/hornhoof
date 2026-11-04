@@ -1,9 +1,9 @@
 import { Fragment, type ReactNode } from 'react';
 import { useT } from '../i18n';
-import type { Department, DepartmentTree, TreeAgent, TreeLine, TreeSegment } from '../types';
-import { segmentText, segmentTone } from './tree-state';
+import type { Department, DepartmentTree, TreeAgent } from '../types';
 import { ProviderMark } from '../ui/icons';
-import { currentSegment, secondsBetween, treeClock, trunkBranch, reviewsOf, type TreePick } from './tree';
+import { treeClock, trunkBranch, reviewsOf, type TreePick } from './tree';
+import { useOpenAgent } from './AgentWindowContext';
 
 type Props = { tree: DepartmentTree; department: Department; pick: TreePick; onOpenTask(id: string): void };
 
@@ -30,109 +30,27 @@ function Details({ pairs }: { pairs: [string, ReactNode][] }) {
   );
 }
 
-function LineTimes({ segments, now }: { segments: TreeSegment[]; now: string }) {
-  const L = useT().dept.tree;
-  const count = (kind: TreeSegment['kind']) => segments
-    .filter(s => s.kind === kind)
-    .reduce((n, s) => n + secondsBetween(s.from, s.to ?? now), 0) / 60;
-  return (
-    <p className="times">
-      <span>{L.tWork} <b>{L.dur(count('work'))}</b></span>
-      <span>{L.tWait} <b>{L.dur(count('after') + count('person'))}</b></span>
-      <span>{L.tStall} <b>{L.dur(count('stall'))}</b></span>
-      <span>{L.tInterrupted} <b>{L.dur(count('lost') + count('alarm'))}</b></span>
-      <span>{L.tQueued} <b>{L.dur(count('queued'))}</b></span>
-      <span>{L.tUnknown} <b>{L.dur(count('unknown'))}</b></span>
-    </p>
-  );
-}
-
-function lineState(line: TreeLine, tree: DepartmentTree, t: ReturnType<typeof useT>): string {
-  const L = t.dept.tree;
-  if (line.mergedAt) return L.st.done(tree.turn!.branch);
-  if (line.doneAt) return L.st.doneSal;
-  const segment = currentSegment(line.segments, tree.now);
-  if (segment?.kind === 'after' && !segment.waitsForAgent && !segment.externalWait) return line.waitsFor.map(L.st.after).join(', ');
-  return segmentText(t, segment, tree.now);
-}
-
-function lineStateClass(line: TreeLine, segment: TreeSegment | undefined): string {
-  return line.mergedAt || line.doneAt ? 'ok' : segmentTone(segment);
-}
-
-function WorkCard({ tree, department, line, onOpenTask }: Omit<Props, 'pick'> & { line: TreeLine }) {
-  const t = useT(), L = t.dept.tree, s = currentSegment(line.segments, tree.now);
-  const last = line.moves.filter(m => m.at <= tree.now).sort((a, b) => b.at.localeCompare(a.at))[0];
-  const moves: Record<string, string> = L.mv;
-  const branch = tree.repository && line.branch ? `${line.branch} → ${tree.turn!.branch}` : L.noRepo;
-  const pairs: [string, ReactNode][] = [
-    [L.cWho, <TreeWho agent={line.agent} department={department} />],
-    [L.cNow, <span className={`tstate ${lineStateClass(line, s)}`}>{lineState(line, tree, t)}</span>],
-    [L.cBranch, branch],
-    [L.cLast, last
-      ? `${treeClock(last.at)}, ${moves[last.kind] ?? last.kind}${last.text ? `: ${last.text}` : ''}`
-      : treeClock(line.createdAt)],
-  ];
-  if (line.live || line.lastActionAt) pairs.push([L.cAgent, line.live ? L.agentNow : L.agentQuiet(treeClock(line.lastActionAt!))]);
-  if (line.doneAt) pairs.push([L.cWhen, L.doneAt(treeClock(line.doneAt))]);
-  if (line.part) pairs.push([L.cPart, `#${line.part.number} ${line.part.title}`]);
-  const question = line.moves.filter(m => m.kind === 'asked').at(-1)?.text;
-  return (
-    <>
-      <h4><b>#{line.number}</b> {line.title}</h4>
-      <Details pairs={pairs} />
-      {s?.kind === 'stall' && <p className="say a">{L.stallSay}</p>}
-      {s?.kind === 'person' && question && <p className="say p">{question}</p>}
-      {s?.kind === 'after' && <p className="say">{line.waitsFor.map(L.afterSay).join(' ')}</p>}
-      <LineTimes segments={line.segments} now={tree.now} />
-      <div className="acts">
-        <button type="button" className="btn ghost" onClick={() => onOpenTask(line.taskId)}>{L.openTask}</button>
-      </div>
-    </>
-  );
-}
-
 function selectedReview(tree: DepartmentTree, pick: TreePick) {
   return reviewsOf(tree).find(r => r.taskId === pick.taskId) ?? tree.review!;
 }
 
 function ReviewCard({ tree, department, pick, onOpenTask }: Props) {
-  const L = useT().dept.tree, review = selectedReview(tree, pick);
-  const reviewer = review.reviewers.find(r => r.agent.id === pick.agentId);
-  const pairs: [string, ReactNode][] = [[L.cWhat, L.reviewWhat(tree.turn!.branch)]];
-  if (reviewer) {
-    const verdict = reviewer.verdict;
-    pairs.unshift(
-      [L.cWho, <TreeWho agent={reviewer.agent} department={department} />],
-      [L.cNow, verdict
-        ? L.verdict(verdict.pass, verdict.findings)
-        : L.st.review(L.dur(secondsBetween(review.openedAt, tree.now) / 60))],
-    );
-    if (verdict) {
-      const duration = L.dur(secondsBetween(review.openedAt, verdict.at) / 60);
-      const interval = L.idleClosed(treeClock(review.openedAt), treeClock(verdict.at));
-      pairs.push([L.cChecked, `${duration}, ${interval}`]);
-    }
-  } else {
-    const said = review.reviewers.filter(r => r.verdict);
-    pairs.push(
-      [L.cOpened, L.reviewOpened(treeClock(review.openedAt))],
-      [L.cWho, review.reviewers.map(r => (
-        <span key={r.agent.id}><TreeWho agent={r.agent} department={department} /> </span>
-      ))],
-      [L.cSaid, L.said(said.length, review.reviewers.length)],
-      [L.cFound, said.reduce((n, r) => n + (r.verdict!.findings ?? 0), 0)],
-    );
-  }
+  const L = useT().dept.tree, review = selectedReview(tree, pick), openAgent = useOpenAgent();
+  const said = review.reviewers.filter(r => r.verdict);
+  const pairs: [string, ReactNode][] = [
+    [L.cWhat, L.reviewWhat(tree.turn!.branch)],
+    [L.cOpened, L.reviewOpened(treeClock(review.openedAt))],
+    [L.cWho, review.reviewers.map(r => (
+      <Fragment key={r.agent.id}><button type="button" className="linkish" onClick={() => openAgent(r.agent.id)}><TreeWho agent={r.agent} department={department} /></button>{' '}</Fragment>
+    ))],
+    [L.cSaid, L.said(said.length, review.reviewers.length)],
+    [L.cFound, said.reduce((n, r) => n + (r.verdict!.findings ?? 0), 0)],
+  ];
   return (
     <>
       <h4><b>#{review.number}</b> {L.reviewH(tree.turn!.number)}</h4>
       <Details pairs={pairs} />
-      {!reviewer && (
-        <p className="say a">
-          {L.reviewSay(department.employees.find(e => e.id === review.head.id)?.name ?? review.head.name)}
-        </p>
-      )}
+      <p className="say a">{L.reviewSay(department.employees.find(e => e.id === review.head.id)?.name ?? review.head.name)}</p>
       <button type="button" className="btn ghost" onClick={() => onOpenTask(review.taskId)}>{L.openTask}</button>
     </>
   );
@@ -153,51 +71,11 @@ function TurnCard({ tree, department }: Pick<Props, 'tree' | 'department'>) {
   );
 }
 
-function MoveCard({ tree, department, pick, line, onOpenTask }: Props & { line: TreeLine }) {
-  const L = useT().dept.tree, turn = tree.turn!;
-  const move = pick.moveIndex == null ? undefined : line.moves[pick.moveIndex];
-  const moves: Record<string, string> = L.mv;
-  const title = pick.kind === 'merge' ? L.mergeH(line.number, turn.branch) : moves[move?.kind ?? ''] ?? move?.kind;
-  const pairs: [string, ReactNode][] = [
-    [L.cWhen, treeClock(move?.at ?? line.mergedAt!)],
-    [L.cWho, <TreeWho agent={line.agent} department={department} />],
-    [L.cTask, `#${line.number} ${line.title}`],
-  ];
-  return (
-    <>
-      <h4>{title}</h4>
-      <Details pairs={pairs} />
-      <p className="say">{pick.kind === 'merge' ? L.mergeSay(turn.branch) : move?.text}</p>
-      <button type="button" className="btn ghost" onClick={() => onOpenTask(line.taskId)}>{L.openTask}</button>
-    </>
-  );
-}
-
-function pickedActivity(tree: DepartmentTree, pick: TreePick) {
-  const activity = (tree.activity ?? []).find(a => a.jobId === pick.jobId);
-  return activity ? { ...activity, segment: activity.segments[pick.segmentIndex ?? 0] } : null;
-}
-
-function ActivityCard({ tree, department, pick, onOpenTask }: Props) {
-  const t = useT(), L = t.dept.tree, activity = pickedActivity(tree, pick);
-  if (!activity?.segment) return null;
-  const { segment, task } = activity;
-  const when = segment.to ? L.idleClosed(treeClock(segment.from), treeClock(segment.to)) : L.idleOpen(treeClock(segment.from)) + L.idleGoing;
-  return <>
-    <h4><TreeWho agent={activity.agent} department={department} /></h4>
-    <Details pairs={[[L.cWhat, task ? `#${task.number} ${task.title}` : L.noTask],
-      [L.cNow, <span className={`tstate ${segmentTone(segment)}`}>{segmentText(t, segment, segment.to ?? tree.now)}</span>], [L.cWhen, when]]} />
-    {task && <div className="acts"><button type="button" className="btn ghost" onClick={() => onOpenTask(task.id)}>{L.openTask}</button></div>}
-  </>;
-}
-
 const isReviewPick = (pick: TreePick) => pick.kind === 'review' || pick.kind === 'reviewer';
 
 export function TreeCardBody(props: Props) {
   const { tree, pick, department } = props, L = useT().dept.tree;
-  const line = tree.lines.find(l => l.taskId === pick.taskId);
   if (isReviewPick(pick)) return reviewsOf(tree).length > 0 && <ReviewCard {...props} />;
-  if (pick.kind === 'activity') return <ActivityCard {...props} />;
   if (pick.kind === 'main') {
     return (
       <>
@@ -207,7 +85,5 @@ export function TreeCardBody(props: Props) {
     );
   }
   if (pick.kind === 'turn') return <TurnCard tree={tree} department={department} />;
-  if (!line) return null;
-  if (pick.kind === 'line') return <WorkCard {...props} line={line} />;
-  return <MoveCard {...props} line={line} />;
+  return null;
 }

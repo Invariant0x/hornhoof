@@ -279,7 +279,7 @@ function Actions({ task, onChanged }: { task: TaskDetail; onChanged: () => void 
   );
 }
 
-/* One task in the right panel, kept fresh from the live stream. */
+/* One task in the left panel, kept fresh from the live stream. */
 /* Escape closes the panel before what lies under it, such as a department's tasks, which leave an Escape it took alone. */
 function useEscapeCloses(onClose: () => void): void {
   useEffect(() => {

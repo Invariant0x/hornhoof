@@ -213,6 +213,22 @@ describe('Map', () => {
     expect(container.querySelector('.zoom .zv')).toHaveTextContent('120%');
   });
 
+  it.each([375, 1440])('fits the company clear of a left panel at %ipx', async width => {
+    mockApi({ 'GET /api/org': [200, ORG_WITH_TEAMS] });
+    const { container } = render(<MapScreen {...PROPS} leftPanelOpen />);
+    await screen.findByText('Marketing');
+    const map = container.querySelector<HTMLElement>('.map')!;
+    Object.defineProperties(map, { clientWidth: { value: width }, clientHeight: { value: 900 } });
+    fireEvent.click(screen.getByRole('button', { name: 'Show everything' }));
+    const world = container.querySelector<HTMLElement>('.world')!;
+    const match = /translate\(([^p]+)px, [^p]+px\) scale\(([^)]+)\)/.exec(world.style.transform)!;
+    for (const department of world.querySelectorAll<HTMLElement>('.dept')) {
+      const x = Number(match[1]) + parseFloat(department.style.left) * Number(match[2]);
+      expect(x).toBeGreaterThanOrEqual(width === 1440 ? 464 : 32);
+      expect(x + parseFloat(department.style.width) * Number(match[2])).toBeLessThanOrEqual(width - 32);
+    }
+  });
+
   it('keeps the people above the top row however many rows there are', async () => {
     const many = { ...ORG_WITH_TEAMS, departments: Array.from({ length: 8 }, (_, i) => ({ ...ORG_WITH_TEAMS.departments[0]!, id: `d${i}`, name: `Dept ${i}` })) };
     mockApi({ 'GET /api/org': [200, many] });

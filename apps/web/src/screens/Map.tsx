@@ -8,7 +8,7 @@ import { departmentPeople, mapPeople, useOrg, wholeCompanyPeople, type MapPerson
 import type { Department, Employee, EmployeeStatus, Endpoint, Me, Org, SubView } from '../types';
 import { accessText } from '../ui/AccessPicker';
 import { Bar, percent } from '../ui/Bar';
-import { usePanZoom, ZoomBar } from '../ui/canvas';
+import { CANVAS_ZOOM_LIMITS, LEFT_PANEL_COVER, canvasSpace, usePanZoom, ZoomBar } from '../ui/canvas';
 import { Edge } from '../ui/Edge';
 import { LogoMark, PersonIcon } from '../ui/icons';
 import { PersonButton } from '../ui/PersonButton';
@@ -30,9 +30,9 @@ const BELOW = CY + HUB + GAP;
 /* Where a department trace turns: 84 out on the diagonal, and the inner side of each column. */
 const BEND = 84, INNER = 210;
 const GAUGE_SEGMENTS = 24;
-const MIN_K = 0.3, MAX_K = 2.5;
+const { min: MIN_K, max: MAX_K } = CANVAS_ZOOM_LIMITS;
 /* The orchestrator's window covers the right of a wide screen; Fit keeps the company clear of it. */
-const WINDOW_W = 672, NARROW = 760;
+const WINDOW_W = 672;
 const PULSE_SPEED = 100;
 /* How long a pulse waits for its end to appear on the map. */
 const HOLD_MS = 5000;
@@ -337,10 +337,10 @@ function DeptPeopleChips({ org, chips, byId, onOpen }: { org: Org; chips: Person
 }
 
 /* onOpenDecisions: a person's card opens the decisions screen showing theirs. */
-type Props = { me: Me; windowOpen: boolean; onOpenOrchestrator(): void; inside?: boolean; onOpenDepartment?(id: string): void; onOpenDecisions?(personId: string): void };
+type Props = { me: Me; windowOpen: boolean; leftPanelOpen?: boolean; onOpenOrchestrator(): void; inside?: boolean; onOpenDepartment?(id: string): void; onOpenDecisions?(personId: string): void };
 
 /* inside: a department's view is open over the map, which stays flown into it until the view closes. */
-export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, onOpenDepartment, onOpenDecisions }: Props) {
+export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchestrator, inside = false, onOpenDepartment, onOpenDecisions }: Props) {
   const t = useT();
   const { language } = useLanguage();
   const still = useReducedMotion();
@@ -429,12 +429,12 @@ export function MapScreen({ me, windowOpen, onOpenOrchestrator, inside = false, 
     const { x0, y0, x1, y1 } = contentBounds(org);
     /* The header floats over the top of the map and the zoom over the bottom. */
     const padX = 32, padTop = 76, padBottom = 72;
-    const width = el.clientWidth - (windowOpen && el.clientWidth > NARROW ? WINDOW_W : 0);
+    const { left, width } = canvasSpace(el.clientWidth, leftPanelOpen ? LEFT_PANEL_COVER : 0, windowOpen ? WINDOW_W : 0);
     const room = el.clientHeight - padTop - padBottom;
     const k = Math.min((width - padX * 2) / (x1 - x0), room / (y1 - y0), 1.15);
     setMinZoom(Math.min(MIN_K, k));
-    setView({ k, x: (width - (x1 - x0) * k) / 2 - x0 * k, y: padTop + (room - (y1 - y0) * k) / 2 - y0 * k, smooth: true });
-  }, [org, windowOpen, inside, setView]);
+    setView({ k, x: left + (width - (x1 - x0) * k) / 2 - x0 * k, y: padTop + (room - (y1 - y0) * k) / 2 - y0 * k, smooth: true });
+  }, [org, windowOpen, leftPanelOpen, inside, setView]);
 
   useEffect(() => {
     fit();
