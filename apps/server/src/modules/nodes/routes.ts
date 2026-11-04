@@ -207,6 +207,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
               running: running(a => Boolean(a.builtin), p => p.builtin),
               machine: serverMachine,
               programs: programsFor(hub, [BUILTIN]),
+              browserError: hub.browserErrorOf(BUILTIN),
             }
           : null,
       machines: rows.map(m => ({

@@ -244,6 +244,38 @@ describe('runJob', () => {
     const done = await runJob(adapter, job(), dir, { signal: stop.signal });
     expect(done).toMatchObject({ ok: false, error: 'cancelled', result: 'Stopped.' });
   });
+
+  it('prepares the repository lockfile browser before the first turn and fails clearly when Chromium cannot start', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
+    const prepared: string[] = [];
+    const adapter = fakeAdapter(async () => {
+      prepared.push('agent-ran');
+      return ok();
+    });
+    const repo = { url: 'https://github.com/acme/shop.git', branch: 'main', token: '' };
+    const git = async () => '';
+    const done = await runJob(adapter, job({ workspace: { key: 'dev-1', repo } }), dir, {
+      git,
+      prepareRepoBrowser: async repoDir => {
+        prepared.push(repoDir);
+      },
+    });
+    expect(done.ok).toBe(true);
+    expect(prepared).toEqual([join(dir, 'work', 'agents', 'dev-1', 'shop'), 'agent-ran']);
+
+    const broken = await runJob(adapter, job({ jobId: 'job-2', workspace: { key: 'dev-1', repo } }), dir, {
+      git,
+      prepareRepoBrowser: async () => {
+        throw new Error('Playwright Chromium could not start: libnss3.so missing');
+      },
+    });
+    expect(broken).toMatchObject({
+      ok: false,
+      error: 'agent_failed',
+      tail: expect.stringContaining('Playwright Chromium could not start: libnss3.so missing'),
+    });
+    expect(prepared).toHaveLength(2);
+  });
 });
 
 describe('jobDone', () => {

@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -344,5 +344,29 @@ describe('unknown commands', () => {
     const res = await run(['dance']);
     expect(res.code).toBe(1);
     expect(res.err).toContain('run [--builtin]');
+  });
+});
+
+describe('browser status and prepare-browser command', () => {
+  it('reports browser_failed with the named cause in status when browser-error is present', async () => {
+    await run(['set-key'], `${SERVER} node-1 machine ${KEY}\n`);
+    expect((await run(['status'])).out.trim()).toBe('ready');
+    writeFileSync(join(data, 'browser-error'), 'libnss3.so: cannot open shared object file\n');
+    expect((await run(['status'])).out.trim()).toBe('browser_failed: libnss3.so: cannot open shared object file');
+  });
+
+  it('skips non-Playwright repositories cleanly in prepare-browser and exits 1 when preparation fails', async () => {
+    const repo = mkdtempSync(join(tmpdir(), 'hh-cmd-repo-'));
+    onTestFinished(() => rmSync(repo, { recursive: true, force: true }));
+    writeFileSync(join(repo, 'package-lock.json'), JSON.stringify({ packages: { 'node_modules/vitest': { version: '5.0.5' } } }));
+    const res = await run(['prepare-browser', repo]);
+    expect(res.code).toBe(0);
+    expect(res.out.trim()).toBe('not_needed');
+
+    writeFileSync(join(repo, 'package-lock.json'), JSON.stringify({ packages: { 'node_modules/@playwright/test': { version: '99.99.99' } } }));
+    vi.stubEnv('PATH', '/nonexistent-hh-bin');
+    const failed = await run(['prepare-browser', repo]);
+    expect(failed.code).toBe(1);
+    expect(failed.err).toContain('Playwright Chromium could not start:');
   });
 });

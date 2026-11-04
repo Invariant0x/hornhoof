@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { closeSync, constants, fchownSync, fstatSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { JobUser } from '../isolation.js';
 import type { LoginIo } from '../runner.js';
 import type { ProgramExit } from '../program-exit.js';
@@ -14,6 +14,8 @@ const KILL_GRACE_MS = 2000;
 export function childEnv(tools: string, extra: Record<string, string>): NodeJS.ProcessEnv {
   const env = agentEnv(process.env);
   env.PATH = `${tools}/bin:${process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin'}`;
+  env.PLAYWRIGHT_BROWSERS_PATH = join(dirname(tools), 'browsers');
+  env.PLAYWRIGHT_SKIP_BROWSER_GC = '1';
   return { ...env, ...extra };
 }
 

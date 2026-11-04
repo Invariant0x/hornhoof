@@ -554,6 +554,14 @@ describe('install.sh', () => {
     for (const run of r.calls.filter(c => c.startsWith('docker run -d'))) expect(run).toContain(`--label hornhoof.server=${SERVER}`);
   });
 
+  it('surfaces a named browser launch failure in the node summary without prompting for sign-in again', () => {
+    const name = 'hornhoof-claude-1c07dac4';
+    const r = install({ args: [], env: { STUB_CONTAINERS: `${name}=${SERVER}`, STUB_STATUS: 'browser_failed: libnss3.so missing' } });
+    expect(r.code).toBe(0);
+    expect(r.calls.some(c => c.includes(' login'))).toBe(false);
+    expect(r.out).toContain(`Claude: browser did not start (libnss3.so missing), see docker logs ${name}`);
+  });
+
   it('removes only this server\'s nodes on --uninstall when another company has nodes here too', () => {
     const r = install({ args: ['--uninstall'], tty: 'y\nn\n', env: { STUB_CONTAINERS: `hornhoof-claude-1c07dac4=${SERVER} hornhoof-codex-9f1e2d3c=https://other.example.test` } });
     expect(r.code).toBe(0);
