@@ -48,6 +48,22 @@ describe('a task', () => {
     expect(panel).not.toHaveTextContent('Server fallback.');
   });
 
+  it.each([
+    ['en', 'Wake-up became obsolete: the task moved on. Bruno: merge.'],
+    ['ru', 'Побудка устарела: задача ушла дальше. Bruno: слияние.'],
+  ])('shows an obsolete wake in the task log in %s', async (language, expected) => {
+    localStorage.setItem('hh-lang', language);
+    const user = userEvent.setup();
+    const log = [{ kind: 'wake_obsolete', text: 'Server fallback.', data: { wake: 'merge', job: null }, by: { kind: 'agent' as const, id: 'b1', name: 'Bruno' }, at: '2026-11-03T21:00:00.000Z' }];
+    shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, log } }] });
+    await user.click(await screen.findByRole('button', { name: /^(Tasks|Задачи)/ }));
+    await user.click(await screen.findByRole('button', { name: /#12/ }));
+    const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
+    const logList = within(panel).getByRole('list', { name: language === 'ru' ? 'Журнал' : 'Log' });
+    expect(within(logList).getByRole('listitem')).toHaveTextContent(expected);
+    expect(panel).not.toHaveTextContent('Server fallback.');
+  });
+
   it.each(['en', 'ru'])('shows an external wait with its reason and deadline in %s, then clears it after a comment', async language => {
     localStorage.setItem('hh-lang', language);
     const user = userEvent.setup();

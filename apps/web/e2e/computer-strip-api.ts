@@ -47,7 +47,7 @@ async function addMachines(page: Page, others: ComputerView[]) {
 }
 
 /* The window of the orchestrator with its terminal, and /api/computer as the server keeps it, changed by the buttons. */
-export async function openWindow(page: Page, { lang, theme, width }: Settings, first: ComputerView, others: ComputerView[] = []) {
+export async function openWindow(page: Page, { lang, theme, width }: Settings, first: ComputerView, others: ComputerView[] = [], extra: Record<string, unknown> = {}) {
   await page.setViewportSize({ width, height: 900 });
   await page.addInitScript(({ lang, theme }) => {
     localStorage.setItem('hh-lang', lang);
@@ -69,6 +69,7 @@ export async function openWindow(page: Page, { lang, theme, width }: Settings, f
       return route.fulfill({ json: view });
     }
     if (path === '/api/computer') return route.fulfill({ json: view });
+    if (path in extra) return route.fulfill({ json: extra[path] });
     if (path === '/api/nodes/commands') return route.fulfill({ json: { commands: [] } });
     if (path === '/api/version') return route.fulfill({ json: { version: '0.5.0', commit: 'b77ce08' } });
     if (path === '/api/updates') return route.fulfill({ json: { current: { version: '0.5.0', commit: 'b77ce08' }, available: false, latest: null, updater: { status: null, waiting: null } } });

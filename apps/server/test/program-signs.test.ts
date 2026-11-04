@@ -38,6 +38,8 @@ describe('silence measured by signs of life', () => {
     expect(stale).toMatchObject({ status: 'failed', error: 'stale', tail: 'No output.', failure: { kind: 'unknown', retryable: false } });
     expect(stale.failure!.text).toContain('Program state: tool (Bash)');
     expect(stale.failure!.text).toContain(`Last sign of life: ${new Date(signAt).toISOString()}`);
+    expect(stale.result).toBe(stale.failure!.text);
+    expect(stale.result).not.toContain('Wake-up became obsolete');
 
     const lines = Array.from({ length: 205 }, (_, i) => `line ${i + 1}`);
     lines[204] = 'last [hidden] line';

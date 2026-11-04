@@ -38,6 +38,7 @@ export type ErrorReason =
   | 'already_on_machine'
   | 'already_connected'
   | 'no_node_online'
+  | 'browser_failed'
   | 'signin_unsupported'
   | 'needs_login'
   | 'needs_setup'

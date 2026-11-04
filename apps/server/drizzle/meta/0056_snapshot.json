@@ -1,5 +1,5 @@
 {
-  "id": "7d05fea8-c2d5-4966-bf1a-ee92c422a6d3",
+  "id": "c0c5de9f-5300-4042-9455-a30c0d890161",
   "prevId": "1d1c2374-be90-4445-af76-883fe2eee06b",
   "version": "7",
   "dialect": "postgresql",
@@ -690,19 +690,13 @@
           "name": "job_id",
           "type": "uuid",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "agent_id": {
           "name": "agent_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
-        },
-        "person_id": {
-          "name": "person_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
         },
         "request_id": {
           "name": "request_id",
@@ -793,21 +787,6 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
-        },
-        "attachments_person_id": {
-          "name": "attachments_person_id",
-          "columns": [
-            {
-              "expression": "person_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
         }
       },
       "foreignKeys": {
@@ -843,19 +822,6 @@
           "tableTo": "agents",
           "columnsFrom": [
             "agent_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "attachments_person_id_people_id_fk": {
-          "name": "attachments_person_id_people_id_fk",
-          "tableFrom": "attachments",
-          "tableTo": "people",
-          "columnsFrom": [
-            "person_id"
           ],
           "columnsTo": [
             "id"

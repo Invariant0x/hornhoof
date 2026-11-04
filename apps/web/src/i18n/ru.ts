@@ -512,6 +512,7 @@ export const ru: Messages = {
     pickByHand: 'Выбрать отделы вручную',
     connectForStaff: 'Подключите подписку, и оркестратор предложит сотрудников для этих отделов.',
     card: 'Карточка',
+    cardOf: name => `Карточка: ${name}`,
     notebook: 'Блокнот',
     showLog: 'Журнал',
     showTerminal: 'Терминал',
@@ -548,8 +549,8 @@ export const ru: Messages = {
     limitUntil: at => `Лимит подписки исчерпан. Ходы ждут до ${at} и потом продолжатся сами.`,
     budgetUntil: at => `Подписка израсходовала долю, отведенную задачам. Ходы по задачам ждут до ${at}, сообщения людей идут как обычно.`,
     builtinOffline: 'Встроенная машина не в сети',
-    builtinBrowserFailed: 'На встроенной машине не запустился браузер для проверок. Причина указана в разделе Машины.',
-    browserFailed: owner => `На машине (владелец ${owner}) не запустился браузер для проверок. Причина указана в разделе Машины.`,
+    builtinBrowserFailed: reason => `Браузерные проверки на встроенной машине сейчас не пойдут (${reason}).`,
+    browserFailed: (owner, reason) => `Браузерные проверки на машине (владелец ${owner}) сейчас не пойдут (${reason}).`,
     failed: {
       timeout: 'Оркестратор не закончил за 15 минут.',
       not_logged_in: 'На машине выполнен выход из подписки оркестратора. Войдите снова и напишите еще раз.',
@@ -764,9 +765,9 @@ export const ru: Messages = {
     unknown: 'неизвестная ошибка',
   },
   agent: {
-    openTerminal: 'Открыть терминал',
     lastFailed: (at: string, kind: string) => `Последний ход не удался в ${at}: ${kind}`,
     lastFailedOn: (when: string, kind: string) => `Последний ход не удался ${when}: ${kind}`,
+    obsolete: 'Побудка устарела: задача ушла дальше',
     noOutput: 'Вывода не было.',
     runsOn: 'Где работает',
     onMachine: (host: string) => `Работает на машине ${host}`,
@@ -923,6 +924,7 @@ export const ru: Messages = {
     questions: 'Вопросы',
     log: 'Журнал',
     skippedRun: (by, run) => `Запуск пропущен: задача уже закрыта. ${by}: ${run}.`,
+    obsoleteRun: (by, run) => `Побудка устарела: задача ушла дальше. ${by}: ${run}.`,
     skippedJob: job => `Ход ${job}.`,
     skippedRuns: {
       task: 'работа по задаче', restart: 'возобновление после перезапуска', continue: 'продолжение после выхода программы', merge: 'слияние',
