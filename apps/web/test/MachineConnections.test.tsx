@@ -73,6 +73,8 @@ describe('what the card of a machine says of its connection', () => {
     ['en', 3, 400, '3 drops in the last 24 hours, under a second on average. Most often: the network cut the connection.'],
     ['ru', 3, 400, 'За сутки 3 обрыва, в среднем меньше секунды. Чаще всего: сеть оборвала соединение.'],
     ['en', 2, 59_500, '2 drops in the last 24 hours, 60 s on average. Most often: the network cut the connection.'],
+    ['en', 2, 60_000, '2 drops in the last 24 hours, 1 min on average. Most often: the network cut the connection.'],
+    ['en', 2, 1000, '2 drops in the last 24 hours, 1 s on average. Most often: the network cut the connection.'],
   ] as const)('words counts and lengths in %s: %i drops, %i ms', async (language, drops, averageMs, text) => {
     mockApi({ [`GET ${PATH}`]: [200, history({ summary: { drops, averageMs, cause: 'network' } })] });
     show(language);
@@ -216,6 +218,18 @@ describe('the drops the card of a machine lists', () => {
     expect(line).toHaveTextContent('<b>Bad frame</b>');
     expect(line).toHaveTextContent('Invalid WebSocket frame');
     expect(line.querySelector('b b')).toBeNull();
+  });
+
+  it('writes no empty line when there is nothing more to say of a drop', async () => {
+    mockApi({ [`GET ${PATH}`]: [200, history({ events: [event({}, [nodeDrop({ closeCode: null })])] })] });
+    show();
+    expect((await row()).querySelector('small')).toBeNull();
+  });
+
+  it('gives a code of zero, which is one', async () => {
+    mockApi({ [`GET ${PATH}`]: [200, history({ events: [event({}, [nodeDrop({ closeCode: 0 })])] })] });
+    show();
+    expect(await row()).toHaveTextContent('code 0');
   });
 
   it('gives no code it does not know', async () => {
@@ -378,6 +392,35 @@ describe('how the card of a machine keeps its history fresh', () => {
     errors.mockRestore();
   });
 
+  it('takes no late answer about the machine it showed before', async () => {
+    let answer!: (value: [number, unknown]) => void;
+    mockApi({
+      [`GET ${PATH}`]: () => new Promise(done => (answer = done)),
+      'GET /api/machines/m2/connections': [200, history({ summary: { drops: 2, averageMs: 1000, cause: 'server_stopped' } })],
+    });
+    const view = show();
+    await act(async () => {});
+    view.rerender(<LanguageProvider><MachineConnections id="m2" hostname="build-box" online /></LanguageProvider>);
+    await screen.findByText(/^2 drops/);
+    await act(async () => answer([200, history()]));
+    expect(screen.getByText(/^2 drops/)).toBeInTheDocument();
+    expect(screen.queryByText(/^5 drops/)).toBeNull();
+  });
+
+  it('takes no late failure about the machine it showed before', async () => {
+    let answer!: (value: [number, unknown]) => void;
+    mockApi({
+      [`GET ${PATH}`]: () => new Promise(done => (answer = done)),
+      'GET /api/machines/m2/connections': [200, history({ summary: { drops: 2, averageMs: 1000, cause: 'server_stopped' } })],
+    });
+    const view = show();
+    await act(async () => {});
+    view.rerender(<LanguageProvider><MachineConnections id="m2" hostname="build-box" online /></LanguageProvider>);
+    await screen.findByText(/^2 drops/);
+    await act(async () => answer([500, { error: { code: 'internal', message: 'Something failed.' } }]));
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
   it('shows the history of the machine it is given when that changes', async () => {
     mockApi({
       [`GET ${PATH}`]: [200, history()],
@@ -411,6 +454,20 @@ describe('the machines screen and the history of a machine', () => {
     expect(await within(card).findByText(/^5 drops in the last 24 hours/)).toBeInTheDocument();
     expect(within(card).getByRole('heading', { name: heading.en })).toBeInTheDocument();
     expect(calls.filter(c => c.path === PATH)).toHaveLength(1);
+  });
+
+  it('looks again the moment the screen hears the machine went away', async () => {
+    vi.useFakeTimers();
+    let online = true;
+    const calls = lists({ 'GET /api/machines': () => [200, { machines: MACHINES.map(m => ({ ...m, online: m.id === 'm1' ? online : m.online })), builtin: BUILTIN }] });
+    render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    fireEvent.click(screen.getByRole('button', { name: 'Open the card of ivan-mbp' }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(calls.filter(c => c.path === PATH)).toHaveLength(1);
+    online = false;
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(calls.filter(c => c.path === PATH)).toHaveLength(2);
   });
 
   it('has none for the built-in node, which has no machine of its own', async () => {
