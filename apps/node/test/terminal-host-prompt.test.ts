@@ -17,14 +17,18 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     const late = new Promise(r => setTimeout(() => r('still waiting'), 8000));
     const res = await Promise.race([turn, late]);
     expect(res).toMatchObject({ ok: false, error: 'agent_failed', failure: { kind: 'unknown', retryable: true } });
+    /* The reason is short, for the retry to say; the screen stays with the turn's output. */
+    expect((res as { failure: { text: string } }).failure.text).toBe("The program did not take Hornhoof's prompt within 2 s.");
     expect((res as { output: string }).output).toContain('did not take');
+    expect((res as { output: string }).output).toContain(await host.screen('a14'));
   });
 
   it('retries a node-made failure when the live program never showed it is ready', async () => {
     await setUp({ readyMs: 500 });
     const res = await host.run(job('late-start', 'hello', { env: { FAKE_SECRET: SECRET, FAKE_START_MS: '60000' } }));
     expect(await tmux.alive('a-late-start')).toBe(true);
-    expect(res).toMatchObject({ ok: false, error: 'agent_failed', failure: { kind: 'unknown', retryable: true } });
+    expect(res).toMatchObject({ ok: false, error: 'agent_failed', failure: { kind: 'unknown', retryable: true, text: 'The program did not show its prompt within 1 s.' } });
+    expect((res as { output: string }).output).toBe(await host.screen('late-start'));
   });
 
   it('keeps a node-made startup failure as crash when the program exited', async () => {
