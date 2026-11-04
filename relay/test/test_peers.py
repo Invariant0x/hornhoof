@@ -825,10 +825,12 @@ class FrpsWireSession:
         return self.resp is not None and not self.resp.get('error')
 
     def close(self) -> None:
+        # On Linux close() sends nothing while the reader thread blocks in recv(); shutdown() tells frps at once.
         try:
-            self.sock.close()
+            self.sock.shutdown(socket.SHUT_RDWR)
         except OSError:
             pass
+        self.sock.close()
 
 
 class NativeLoginTakeoverTests(unittest.TestCase):
