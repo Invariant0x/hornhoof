@@ -64,16 +64,17 @@ describe('POST /api/setup with a company template', () => {
     expect(top.map(d => d.templateKey).sort()).toEqual(['development', 'operations']);
     const dev = top.find(d => d.templateKey === 'development')!;
     expect(depts.filter(d => d.parentId === dev.id).map(d => d.name).sort()).toEqual(['Product 1', 'Product 2', 'Product 3']);
-    /* A template brings no one, so the only agent is the orchestrator. */
-    expect((await db.select().from(agents).where(eq(agents.companyId, company!.id))).map(a => a.kind)).toEqual(['orchestrator']);
+    /* A template hires no one of its own: only the orchestrator and the four Operations always has. */
+    const staff = await db.select().from(agents).where(eq(agents.companyId, company!.id));
+    expect(staff.map(a => a.roleKey ?? a.kind).sort()).toEqual(['OPS-BUGS', 'OPS-HEAD', 'OPS-PROGRAM', 'OPS-WATCH', 'orchestrator']);
   });
 
-  it('starts empty and stores no template when none is picked', async () => {
+  it('starts with only Operations and stores no template when none is picked', async () => {
     const { app, db } = await fresh();
     await app.inject({ method: 'POST', url: '/api/setup', payload: SETUP });
     const [company] = await db.select().from(companies);
     expect(company!.template).toBeNull();
-    expect(await db.select().from(departments).where(eq(departments.companyId, company!.id))).toEqual([]);
+    expect((await db.select().from(departments).where(eq(departments.companyId, company!.id))).map(d => d.templateKey)).toEqual(['operations']);
   });
 
   it('refuses a template that is not one of the ready-made ones', async () => {

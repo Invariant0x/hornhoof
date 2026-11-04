@@ -1,0 +1,44 @@
+import { MAX_INSTRUCTIONS } from '@hornhoof/protocol';
+import type { Ctx } from '../../app.js';
+import { agentChanges, agents } from '../../db/schema.js';
+import { ApiError } from '../../errors.js';
+import { placeOf, renderInstructions } from '../agents/instructions.js';
+import type { Tx } from '../tasks/engine.js';
+import type { HireLine } from '../tools/staff.js';
+
+export type Hired = { id: string; name: string; role: string; title: string };
+
+/* Who a hire is by: a person, the orchestrator for one, or Hornhoof itself, which is neither. */
+export type HiredBy = { personId: string | null; byOrchestrator: boolean };
+
+/* One employee joins a department, with its role's kind, template hashes and timer, and a record of who hired it. */
+export async function hireEmployee(ctx: Pick<Ctx, 'templates'>, tx: Tx, place: { companyId: string; departmentId: string }, line: HireLine, by: HiredBy): Promise<Hired> {
+  const role = ctx.templates.roles.get(line.role)!;
+  const hashes = Object.fromEntries([[role.id, role.hash], ...line.skills.map(id => [id, ctx.templates.skills.get(id)!.hash])]);
+  const [agent] = await tx
+    .insert(agents)
+    .values({
+      companyId: place.companyId,
+      kind: role.kind === 'head' ? 'head' : 'worker',
+      name: line.name,
+      model: line.model,
+      departmentId: place.departmentId,
+      productId: line.product,
+      teamId: line.team,
+      subscriptionId: line.subscription,
+      roleKey: role.id,
+      skills: line.skills,
+      templateHashes: hashes,
+      /* A role that watches the company wakes on its timer from the hire on. */
+      ...(role.timer ? { timerMinutes: role.timer.minutes, timerOrder: role.timer.order, timerForWork: role.timer.forWork, timerAt: new Date() } : {}),
+      createdBy: by.personId,
+    })
+    .returning();
+  /* A turn carries the instructions whole, so a hire whose skills make them too long would never run. A head's
+     notebook has room of its own on top, as on the employee's card. */
+  if (renderInstructions(ctx.templates, agent!, await placeOf(tx, agent!)).text.length > MAX_INSTRUCTIONS) {
+    throw new ApiError(400, 'validation', `${line.name}'s instructions would be longer than ${MAX_INSTRUCTIONS} characters. Turn some skills off.`, 'instructions_too_long');
+  }
+  await tx.insert(agentChanges).values({ companyId: place.companyId, agentId: agent!.id, ...by, field: 'hired', before: null, after: line });
+  return { id: agent!.id, name: line.name, role: role.id, title: role.title.en };
+}
