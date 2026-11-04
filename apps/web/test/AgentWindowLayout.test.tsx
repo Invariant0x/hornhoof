@@ -17,6 +17,9 @@ function company(hasTask = true, busy = false, events: EventView[] = []) {
     'GET /api/agents/b1/events?after=0': [200, { events, state: { ready: true, reason: null, busy, runningJobId: busy ? 'j1' : null, queued: 0 } }],
     'GET /api/tasks/t12': [200, { task: TASK_DETAIL }],
     'GET /api/tasks?status=open': [200, { tasks: [] }],
+    'GET /api/updates': [200, { current: { version: '0.5.1', commit: 'abc1234', migrations: 1 }, available: false, latest: null, versions: [], updater: { present: false, status: null, waiting: null } }],
+    'GET /api/link': [200, { link: null, domain: 'hornhoof.org' }],
+    'POST /api/agents/b1/stop': [200, {}],
   });
   return { calls, org };
 }
@@ -31,6 +34,42 @@ async function openEmployee(user: ReturnType<typeof userEvent.setup>) {
 afterEach(() => localStorage.clear());
 
 describe('agent window task and controls', () => {
+  it.each(['Department tasks', 'About the department', 'Speed', 'Account', 'About', 'Settings', 'Versions'])('keeps Escape with %s instead of stopping the busy agent', async name => {
+    const { calls } = company(true, true);
+    const user = userEvent.setup();
+    const window = await openEmployee(user);
+    if (['Account', 'About', 'Settings', 'Versions'].includes(name)) {
+      await user.click(screen.getByRole('button', { name: 'Account' }));
+      if (name !== 'Account') await user.click(screen.getByRole('button', { name: name === 'Settings' ? 'Share access' : name }));
+    } else await user.click(screen.getByRole('button', { name }));
+    const surface = name === 'Account' ? screen.getByRole('button', { name: 'Log out' })
+      : ['About', 'Settings', 'Versions'].includes(name) ? await screen.findByRole('dialog')
+      : await screen.findByRole('complementary', { name });
+    await user.keyboard('{Escape}');
+    expect(surface).not.toBeInTheDocument();
+    expect(calls.filter(c => c.path.endsWith('/stop'))).toHaveLength(0);
+    expect(window).toBeVisible();
+    await user.keyboard('{Escape}');
+    expect(calls.filter(c => c.path.endsWith('/stop'))).toHaveLength(1);
+  });
+
+  it('closes the account dialog before the drawer underneath on separate Escapes', async () => {
+    const { calls } = company(true, true);
+    const user = userEvent.setup();
+    await openEmployee(user);
+    await user.click(screen.getByRole('button', { name: 'Speed' }));
+    const drawer = screen.getByRole('complementary', { name: 'Speed' });
+    await user.click(screen.getByRole('button', { name: 'Account' }));
+    await user.click(screen.getByRole('button', { name: 'About' }));
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(drawer).toBeVisible();
+    expect(calls.filter(c => c.path.endsWith('/stop'))).toHaveLength(0);
+    await user.keyboard('{Escape}');
+    expect(drawer).not.toBeInTheDocument();
+    expect(calls.filter(c => c.path.endsWith('/stop'))).toHaveLength(0);
+  });
+
   it('opens the current task with its existing details and log, and returns to the conversation without losing a draft', async () => {
     company();
     const user = userEvent.setup();
@@ -82,6 +121,26 @@ describe('agent window task and controls', () => {
     await user.click(within(window).getByRole('button', { name: 'Close' }));
     expect(window).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Restore Bruno/ })).not.toBeInTheDocument();
+  });
+
+  it('returns the department ticker and layout space while minimized, including reopening the same agent', async () => {
+    company();
+    const user = userEvent.setup();
+    const window = await openEmployee(user);
+    const main = screen.getByRole('main');
+    expect(main).toHaveClass('with-window');
+    expect(main.querySelector('.dview .ticker')).not.toBeInTheDocument();
+    await user.click(within(window).getByRole('button', { name: 'Minimize' }));
+    expect(main).not.toHaveClass('with-window');
+    expect(main.querySelector('.dview .ticker')).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Restore Bruno, Backend engineer' }));
+    expect(main).toHaveClass('with-window');
+    expect(main.querySelector('.dview .ticker')).not.toBeInTheDocument();
+    await user.click(within(window).getByRole('button', { name: 'Minimize' }));
+    await user.click(within(screen.getByRole('region', { name: 'Members' })).getByRole('button', { name: /Bruno/ }));
+    expect(main).toHaveClass('with-window');
+    expect(window).toBeVisible();
+    expect(main.querySelector('.dview .ticker')).not.toBeInTheDocument();
   });
 
   it('closes a task that no longer belongs to the employee when the live company changes', async () => {

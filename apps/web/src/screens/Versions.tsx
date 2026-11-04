@@ -5,6 +5,7 @@ import type { Updates } from '../updates';
 import { UpdateProgress } from '../ui/UpdateProgress';
 import { buildText, versionText } from '../ui/VersionMark';
 import { updateTargetText, versionedStatus } from '../ui/UpdateVersion';
+import { takeEscape } from '../ui/escape';
 
 /* The builds Hornhoof can run, the one it runs, and the update under way or the last one's end. */
 export function Versions({ updates, onClose }: { updates: Updates; onClose: () => void }) {
@@ -18,9 +19,12 @@ export function Versions({ updates, onClose }: { updates: Updates; onClose: () =
 
   useEffect(() => {
     box.current?.focus();
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
+    const onKey = (e: KeyboardEvent) => {
+      if (!takeEscape(e)) return;
+      onClose();
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
   }, [onClose]);
 
   async function act(run: () => Promise<void>) {

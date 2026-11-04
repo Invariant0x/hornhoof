@@ -23,6 +23,7 @@ import { TreeView } from './TreeView';
 import { useOpenAgent } from './AgentWindowContext';
 import { SpeedPanel } from './SpeedPanel';
 import { arrowD, CH, CW, CY, FT, FW, HH, HW, PH, PW, schemaLayout, stepPaths, type Frame, type Line, type Schema } from './schema';
+import { takeEscape } from '../ui/escape';
 
 export { employeeGroups };
 
@@ -326,7 +327,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
   useEffect(() => {
     if (!drawer) return;
     /* An Escape the task panel over the drawer took closes only that panel. */
-    const close = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented) setDrawer(null); };
+    const close = (e: KeyboardEvent) => { if (takeEscape(e)) setDrawer(null); };
     document.addEventListener('keydown', close);
     return () => document.removeEventListener('keydown', close);
   }, [drawer]);
