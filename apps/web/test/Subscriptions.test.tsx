@@ -73,6 +73,14 @@ describe('Subscriptions', () => {
     expect(rowOf('Antigravity').querySelector('.blk-fix')?.textContent).toContain(fix);
   });
 
+  it('names the machine that waits for the first setup when that machine is offline', async () => {
+    const machines = [{ ...MACHINE, id: 'm2', hostname: 'b-host', status: 'needs_login' as const }, { ...MACHINE, hostname: 'a-host', status: 'needs_setup' as const, online: false }];
+    lists({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[1]!, id: 's-agy', provider: 'antigravity', label: 'Antigravity', status: 'needs_setup', machines }] }] });
+    render(<Subscriptions me={ME} />);
+    await openAll();
+    expect(rowOf('Antigravity').querySelector('.blk-fix')?.textContent).toContain('It needs its first setup on a-host, and the machine is offline.');
+  });
+
   it('omits the sign-in line while waiting for the login', async () => {
     lists({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[1]!, signedInOnce: true, machines: [MACHINE, { ...SUBS[1]!.machines[0]!, id: 'login', hostname: 'laptop' }] }] }] });
     render(<Subscriptions me={ME} />);
@@ -151,16 +159,17 @@ describe('Subscriptions', () => {
     lists({ 'GET /api/subscriptions': [200, { subscriptions: [
       { ...SUBS[0]!, limits }, SUBS[1]!, SUBS[2]!, { ...SUBS[3]!, online: false },
       { ...SUBS[0]!, id: 'off', provider: 'glm', online: false },
+      { ...SUBS[1]!, id: 's-agy', provider: 'antigravity', label: 'Antigravity', status: 'needs_setup', machines: [{ ...MACHINE, status: 'needs_setup' }] },
     ] }] });
     render(<Subscriptions me={ME} />);
     await screen.findByRole('table');
     const order = () => screen.getAllByRole('row').filter(r => r.classList.contains('rm')).map(r => r.getAttribute('aria-label'));
-    expect(order()).toEqual(['Anthropic key ending 9f3a', 'GLM', 'Codex', 'Claude', 'Kimi']);
+    expect(order()).toEqual(['Anthropic key ending 9f3a', 'GLM', 'Codex', 'Antigravity', 'Claude', 'Kimi']);
     expect(within(screen.getByRole('row', { name: 'Claude' })).getByText(/^until /)).toBeInTheDocument();
     const header = within(screen.getByRole('columnheader', { name: 'Status' })).getByRole('button');
     expect(header.closest('th')).toHaveAttribute('aria-sort', 'ascending');
     await userEvent.click(header);
-    expect(order()).toEqual(['Kimi', 'Claude', 'Codex', 'GLM', 'Anthropic key ending 9f3a']);
+    expect(order()).toEqual(['Kimi', 'Claude', 'Antigravity', 'Codex', 'GLM', 'Anthropic key ending 9f3a']);
     await openAll();
     expect(within(rowOf('Claude')).getByText(/^Until .+Its agents wait until then\.$/)).toBeInTheDocument();
     expect(rowOf('Claude').querySelector('.card-h .until')).not.toBeInTheDocument();

@@ -132,8 +132,9 @@ function fixWords(t: Messages, s: SubView): string {
 
 /* A plan signed in on its machine whose program asks its owner there to accept its terms, which nobody else may do. */
 function setupWords(t: Messages, s: SubView): string {
-  const there = s.machines.find(m => m.online && m.status === 'needs_setup');
-  return there ? t.cards.notes.setup(there.hostname, s.owner.name, PROGRAM_NAMES[s.provider]) : t.cards.notes.setupOffline(s.machines[0]?.hostname ?? '');
+  const there = s.machines.find(m => m.status === 'needs_setup');
+  if (!there?.online) return t.cards.notes.setupOffline(there?.hostname ?? '');
+  return t.cards.notes.setup(there.hostname, s.owner.name, PROGRAM_NAMES[s.provider]);
 }
 
 function PlanAccount({ sub: s }: { sub: SubView }) {
