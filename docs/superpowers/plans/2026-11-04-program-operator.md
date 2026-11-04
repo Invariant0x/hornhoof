@@ -104,7 +104,7 @@
 - [x] Run security review of every capability boundary, action idempotency, sensitive-screen path, attachment authorization and durable evidence path. Record residual visual-classification risk plainly.
 - [x] Run focused coverage, crapper <10 for new feature modules/helpers and dryer at 0.8. The head relayed the CEO update on 2026-11-04: mutation testing now belongs to turn review. Existing bounded results are retained; no further mutator run is required for submission.
 - [x] Run protocol/server/node tsc, lint, typecheck:tests and all affected suites after final changes; retain complete output. Whole-branch independent review, fix blocking findings with red/green tests.
-- [ ] Push task-245, submit the evidence, merge fresh turn-7 after resolving peer changes and submit the merge. Keep main untouched.
+- [x] Push task-245, submit the evidence, merge fresh turn-7 after resolving peer changes and submit the merge. Keep main untouched.
 
 
 ## Updated Brief: Cause 5 (2026-11-04 17:46 UTC)
