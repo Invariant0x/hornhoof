@@ -506,6 +506,7 @@ export const ru: Messages = {
     pickByHand: 'Выбрать отделы вручную',
     connectForStaff: 'Подключите подписку, и оркестратор предложит сотрудников для этих отделов.',
     card: 'Карточка',
+    cardOf: name => `Карточка: ${name}`,
     notebook: 'Блокнот',
     showLog: 'Журнал',
     showTerminal: 'Терминал',
@@ -758,7 +759,6 @@ export const ru: Messages = {
     unknown: 'неизвестная ошибка',
   },
   agent: {
-    openTerminal: 'Открыть терминал',
     lastFailed: (at: string, kind: string) => `Последний ход не удался в ${at}: ${kind}`,
     lastFailedOn: (when: string, kind: string) => `Последний ход не удался ${when}: ${kind}`,
     obsolete: 'Побудка устарела: задача ушла дальше',

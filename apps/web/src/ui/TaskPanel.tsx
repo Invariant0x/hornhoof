@@ -9,6 +9,7 @@ import type { AgentRef, TaskDetail, TaskLogLine, WaitingRequest } from '../types
 import { Field } from './Field';
 import { Markdown } from './Markdown';
 import { Requests, wordsAnswer } from './Requests';
+import { PanelFrame } from './SidePanels';
 
 const field = (data: unknown, key: string): unknown => (data && typeof data === 'object' && key in data ? (data as Record<string, unknown>)[key] : undefined);
 
@@ -310,24 +311,9 @@ export function TaskPanel({ taskId, onClose, onOpen, active = true, ...waiting }
   const title = task ? `#${task.number} ${task.title}` : t.tasks.heading;
   useEscapeCloses(onClose, active);
   return (
-    <aside className="acard tpanel" aria-label={title} aria-busy={!task && failure === null}>
-      <div className="t-bar">
-        <span className="lights" aria-hidden="true">
-          <i />
-          <i />
-          <i />
-        </span>
-        <span>{task ? `#${task.number}` : ''}</span>
-        <button type="button" aria-label={t.window.close} onClick={onClose}>
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M6 6l12 12M18 6L6 18" />
-          </svg>
-        </button>
-      </div>
-      <div className="ac-body">
-        {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
-        {task && <TaskBody task={task} onOpen={onOpen} onChanged={load} waiting={waiting} />}
-      </div>
-    </aside>
+    <PanelFrame label={title} heading={task ? `#${task.number}` : ''} busy={!task && failure === null} onClose={onClose}>
+      {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
+      {task && <TaskBody task={task} onOpen={onOpen} onChanged={load} waiting={waiting} />}
+    </PanelFrame>
   );
 }

@@ -646,13 +646,14 @@ describe('AgentWindow', () => {
     expect(screen.queryByText('Hiring for Development')).not.toBeInTheDocument();
   });
 
-  it('opens the company notebook from his window, and back to his conversation', async () => {
+  it('opens the company notebook beside his conversation, which stays, and closes it again', async () => {
     const user = userEvent.setup();
     open({ 'GET /api/notebook': [200, { notes: [{ number: 1, text: 'Turns stay small.', by: { kind: 'orchestrator' }, updatedAt: '2026-10-31T02:00:00Z' }] }] });
     await user.click(await screen.findByRole('button', { name: 'Notebook' }));
     expect(await screen.findByText('Turns stay small.')).toBeInTheDocument();
-    expect(screen.queryByRole('log')).not.toBeInTheDocument();
+    expect(screen.getByRole('log')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Notebook' }));
+    expect(screen.queryByText('Turns stay small.')).not.toBeInTheDocument();
     expect(screen.getByRole('log')).toBeInTheDocument();
   });
 

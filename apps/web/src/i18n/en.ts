@@ -479,6 +479,7 @@ export const en = {
     pickByHand: 'Pick departments by hand',
     connectForStaff: 'Connect a subscription, and the orchestrator offers employees for these departments.',
     card: 'Card',
+    cardOf: (name: string) => `Card: ${name}`,
     notebook: 'Notebook',
     showLog: 'Log',
     showTerminal: 'Terminal',
@@ -731,7 +732,6 @@ export const en = {
     unknown: 'unknown error',
   } satisfies Record<FailureKind, string>,
   agent: {
-    openTerminal: 'Open terminal',
     lastFailed: (at: string, kind: string) => `Last turn failed at ${at}: ${kind}`,
     lastFailedOn: (when: string, kind: string) => `Last turn failed on ${when}: ${kind}`,
     obsolete: 'Wake-up became obsolete: the task moved on',
