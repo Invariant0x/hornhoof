@@ -371,8 +371,18 @@ describe('updates', () => {
       expect(screen.queryByRole('progressbar', { name: 'Update progress' })).not.toBeInTheDocument();
     });
 
+    it('starts nothing and asks nothing when the refusal does not say how many', async () => {
+      const calls = server([409, { error: { code: 'conflict', message: 'Running turns would stop.', reason: 'turns_would_stop' } }]);
+      const user = userEvent.setup();
+      render(<Shell me={ME} onSignOut={() => {}} />);
+      await user.click(await screen.findByRole('button', { name: 'Update' }));
+      expect(await screen.findByRole('alert')).toBeInTheDocument();
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+      expect(posts(calls)).toHaveLength(1);
+    });
+
     it('still shows any other refusal in the banner', async () => {
-      server([409, { error: { code: 'conflict', message: 'An update is running already.', reason: 'update_running' } }]);
+      server([409, { error: { code: 'conflict', message: 'An update is running already.', reason: 'update_running', details: { turns: 2 } } }]);
       const user = userEvent.setup();
       render(<Shell me={ME} onSignOut={() => {}} />);
       await user.click(await screen.findByRole('button', { name: 'Update' }));
