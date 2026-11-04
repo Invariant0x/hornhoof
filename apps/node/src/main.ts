@@ -18,6 +18,7 @@ import { applyCredential, dropCredential, giveUpLease, heldCredential, holdsLeas
 import { nodeIdentity, seal, unseal } from './keys.js';
 import { LOGIN_KEY, LoginTerminal, type LoginSetup } from './login.js';
 import { dataDir, isRemoved, markRemoved, readState, rememberSession, writeState, type NodeState } from './state.js';
+import { SetupWait } from './setup-wait.js';
 import { partFiles, runTests } from './tests.js';
 import { SIGNED_OUT as AGY_SIGNED_OUT } from './providers/antigravity.js';
 import { SIGNED_OUT as CLAUDE_SIGNED_OUT } from './providers/claude.js';
@@ -160,10 +161,8 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     return single.loggedIn();
   };
   let loggedIn = await signedInHere();
-  /* A signed-in program can still wait for a first setup only the plan's owner may pass, such as agy's terms. Its turns
-     wait for it as for a sign-in. */
-  const setupHere = async (): Promise<boolean> => loggedIn && Boolean(await single?.setupNeeded?.().catch(() => false));
-  let setupNeeded = await setupHere();
+  const setup = new SetupWait(single);
+  await setup.check(loggedIn);
   let limits: Limits | null = null;
   let stopped = false;
 
@@ -230,7 +229,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   /* Which account and plan the program is signed in to, read at the start, after a sign-in and with the limits. */
   const readAccount = async () => (single?.account ? await single.account().catch(() => null) : null);
   let account = await readAccount();
-  const tellStatus = () => emit({ type: 'status', loggedIn, ...(setupNeeded ? { setupNeeded } : {}), limits, ...(models ? { models } : {}), account });
+  const tellStatus = () => emit({ type: 'status', loggedIn, ...setup.field(), limits, ...(models ? { models } : {}), account });
   const status = async () => {
     /* A program that cannot list its models now keeps those it listed before. */
     models = await readModels().catch(() => models);
@@ -251,7 +250,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       /* Finished jobs Hornhoof has not confirmed still count as running, so the server does not give up on them. */
       const typed = host?.typedJobs() ?? [];
       const tests = [...testing.keys(), ...unconfirmedTests.keys()];
-      next({ type: 'hello', version: VERSION, loggedIn, ...(setupNeeded ? { setupNeeded } : {}), running: [...running.keys(), ...typed, ...unconfirmed.keys()], ...(models ? { models } : {}), terminals: Boolean(host), work: Boolean(testUser), ...(testUser ? {} : { noRuns: NO_RUNS }), load: load(), tests, skillFiles: true, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
+      next({ type: 'hello', version: VERSION, loggedIn, ...setup.field(), running: [...running.keys(), ...typed, ...unconfirmed.keys()], ...(models ? { models } : {}), terminals: Boolean(host), work: Boolean(testUser), ...(testUser ? {} : { noRuns: NO_RUNS }), load: load(), tests, skillFiles: true, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
       for (const m of outbox.splice(0)) emit(m);
       for (const m of unconfirmed.values()) next(m);
       for (const m of unconfirmedTests.values()) next(m);
@@ -412,7 +411,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   async function signedInNow() {
     await learn();
     loggedIn = await signedInHere();
-    setupNeeded = await setupHere();
+    await setup.check(loggedIn);
     account = await readAccount();
     await status();
   }
@@ -478,19 +477,15 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       void status();
     }
     /* The program met a first setup only the plan's owner may pass: the plan's turns wait for it. */
-    if (done.failure?.kind === 'setup') {
-      setupNeeded = true;
-      void status();
-    }
+    if (setup.met(done.failure)) void status();
   }
 
   /* While signed out or waiting for the first setup, look again now and then, so the person sees Ready soon after. */
   const checkLogin = async () => {
-    if (stopped || !single || (loggedIn && !setupNeeded)) return;
-    const was = `${loggedIn} ${setupNeeded}`;
-    loggedIn = loggedIn || (await signedInHere());
-    setupNeeded = await setupHere();
-    if (`${loggedIn} ${setupNeeded}` !== was) void status();
+    if (stopped || !single) return;
+    const now = await setup.recheck(loggedIn, signedInHere);
+    loggedIn = now.loggedIn;
+    if (now.changed) void status();
   };
   const timer = setInterval(() => void checkLogin(), loginCheckMs);
   timer.unref();
