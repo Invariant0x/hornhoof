@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { chmodSync, lchownSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lchownSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { AgentEvent, ModelOption } from '@hornhoof/protocol';
+import type { AgentEvent, Limits, ModelOption } from '@hornhoof/protocol';
 import { asAgent, type JobUser } from '../isolation.js';
 import type { LoginIo, ProviderAdapter, RunInput, RunResult } from '../runner.js';
 import { withProgramExit } from '../program-exit.js';
@@ -177,6 +177,115 @@ export function agyInput(parameters: unknown): string {
   return isRecord(parameters) && typeof parameters.CommandLine === 'string' ? parameters.CommandLine : inputText(parameters);
 }
 
+export const AGY_LIMITS_WAIT_MS = 15_000;
+const AGY_WINDOWS: Record<string, string> = {
+  '5h': 'five_hour',
+  '1d': 'one_day',
+  '24h': 'one_day',
+  daily: 'one_day',
+  '7d': 'seven_day',
+  weekly: 'seven_day',
+  month: 'month',
+  monthly: 'month',
+};
+const WINDOW_ORDER = ['five_hour', 'one_day', 'seven_day', 'month'];
+const UNIT_MINS: Record<string, number> = { m: 1, h: 60, d: 1440 };
+
+type AgyWindow = { name: string; utilization: number; resetsAt: string | null };
+
+function agySpanName(key: string): string | null {
+  const span = /^(\d+)([mhd])$/.exec(key);
+  const mins = span ? Number(span[1]) * UNIT_MINS[span[2]!]! : 0;
+  return mins > 0 && Number.isFinite(mins) ? `${mins}_minutes` : null;
+}
+
+function cleanWindowKey(key: string): string | null {
+  return key.replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40) || null;
+}
+
+function agyWindowName(raw: unknown): string | null {
+  const key = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  if (!key) return null;
+  return AGY_WINDOWS[key] ?? (/^\d+[mhd]$/.test(key) ? agySpanName(key) : cleanWindowKey(key));
+}
+
+function agyBucketUsed(bucket: Record<string, unknown>): number | null {
+  if (bucket.disabled === true) return 1;
+  const left = bucket.remaining_fraction;
+  return typeof left === 'number' && Number.isFinite(left) ? Math.min(1, Math.max(0, 1 - left)) : null;
+}
+
+function agyResetTime(raw: unknown): string | null {
+  const at = typeof raw === 'string' ? new Date(raw) : null;
+  return at && !Number.isNaN(at.getTime()) ? at.toISOString() : null;
+}
+
+function agyBucket(entry: unknown): AgyWindow | null {
+  if (!isRecord(entry)) return null;
+  const name = agyWindowName(entry.window);
+  const utilization = agyBucketUsed(entry);
+  return name && utilization !== null ? { name, utilization, resetsAt: agyResetTime(entry.reset_time) } : null;
+}
+
+function laterReset(current: string | null, next: string | null): boolean {
+  return next !== null && (current === null || Date.parse(next) > Date.parse(current));
+}
+
+function fullerWindow(current: AgyWindow, next: AgyWindow): AgyWindow {
+  if (next.utilization !== current.utilization) return next.utilization > current.utilization ? next : current;
+  return current.utilization >= 1 && laterReset(current.resetsAt, next.resetsAt) ? next : current;
+}
+
+function agyUsageGroups(page: unknown): unknown[] | null {
+  const parsed = typeof page === 'string' ? objectLine(page) : page;
+  if (!isRecord(parsed) || parsed.status !== 'SUCCESS' || !isRecord(parsed.command)) return null;
+  const data = parsed.command.name === 'usage' && isRecord(parsed.command.data) ? parsed.command.data : null;
+  return data && Array.isArray(data.groups) ? data.groups : null;
+}
+
+function windowRank(name: string): number {
+  const at = WINDOW_ORDER.indexOf(name);
+  return at >= 0 ? at : WINDOW_ORDER.length;
+}
+
+function collectAgyWindows(groups: unknown[]): AgyWindow[] {
+  const byName = new Map<string, AgyWindow>();
+  for (const group of groups) {
+    const buckets = isRecord(group) && Array.isArray(group.buckets) ? group.buckets : [];
+    for (const entry of buckets) {
+      const w = agyBucket(entry);
+      if (w) byName.set(w.name, byName.has(w.name) ? fullerWindow(byName.get(w.name)!, w) : w);
+    }
+  }
+  return [...byName.values()].sort((a, b) => windowRank(a.name) - windowRank(b.name)).slice(0, 8);
+}
+
+/* The plan's limits from `agy --print=/usage --output-format json`: each group's remaining share and reset time turned
+   into used shares by window, with the fuller group speaking for each window. */
+export function agyUsageLimits(page: unknown): Limits | null {
+  const groups = agyUsageGroups(page);
+  const windows = groups ? collectAgyWindows(groups) : [];
+  if (!windows.length) return null;
+  return { status: windows.some(w => w.utilization >= 1) ? 'rejected' : 'allowed', windows, complete: true };
+}
+
+export type AgyLimitsOptions = { bin?: string; home: string; tools: string; user?: JobUser | null; timeoutMs?: number; signal?: AbortSignal };
+
+/* Asks agy for the plan's quota buckets in an empty folder of its home, so no repository rules or MCP servers load. */
+export async function agyPlanLimits({ bin: givenBin, home, tools, user = null, timeoutMs = AGY_LIMITS_WAIT_MS, signal }: AgyLimitsOptions): Promise<Limits | null> {
+  const bin = givenBin ?? join(tools, 'bin', 'agy');
+  if (!existsSync(bin)) return null;
+  try {
+    const cwd = agentDir(join(ensureDir(home), '.hh-limits'), user);
+    const env = childEnv(tools, { HOME: home, AGY_CLI_DISABLE_AUTO_UPDATE: 'true' });
+    const lines: string[] = [];
+    const done = await runProgram({ bin, args: ['--print=/usage', '--output-format', 'json'], env, cwd, timeoutMs, signal, user, onLine: line => void lines.push(line) });
+    return done.code === 0 && !done.timedOut ? agyUsageLimits(lines.join('\n')) : null;
+  } catch {
+    return null;
+  }
+}
+
 /* agy keeps its sign-in in a file when the machine has no keyring, as in a node; where, it does not say. These are the
    files of its own folders whose names say they hold a token or a secret. */
 function tokenFiles(home: string): string[] {
@@ -342,6 +451,10 @@ export function antigravityAdapter({ home, tools, bin = join(tools, 'bin', 'agy'
       const done = await runProgram({ bin, args: ['models'], env: env(), timeoutMs: 30_000, user });
       if (done.code === 0) listed = agyModels(done.output);
       return listed;
+    },
+
+    async limits() {
+      return agyPlanLimits({ bin, home, tools, user });
     },
 
     async login(io) {
