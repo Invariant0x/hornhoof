@@ -10,6 +10,7 @@ import { SIGNIN_ERRORS } from '@hornhoof/protocol/signin';
 import { agentFs, ownFs, type AgentFs } from './agent-fs.js';
 import { bootFacts } from './boot.js';
 import { connect } from './connection.js';
+import type { OperatorServerMessage, ProgramNodeMessage, ProgramServerMessage } from '@hornhoof/protocol/program-operator';
 import { agentUser, builtinAdapters, secureNode, userFor, type JobUser } from './isolation.js';
 import { machineLoad } from './load.js';
 import { adapterFor, programFor } from './providers/index.js';
@@ -51,7 +52,7 @@ const STOP_WAIT_MS = 5_000;
 /* How many unconfirmed job ends a node keeps for a server that does not confirm them. */
 const MAX_UNCONFIRMED = 50;
 
-type JobRun = Extract<ServerMessage, { type: 'job.run' }>;
+type JobRun = Extract<ProgramServerMessage, { type: 'job.run' }>;
 type Recipient = { nodeId: string; publicKey: string };
 
 const digestOf = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
@@ -145,7 +146,8 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
      after each hello. A server that never confirms keeps only the last few. */
   const unconfirmed = new Map<string, NodeMessage>();
   const unconfirmedTests = new Map<string, NodeMessage>();
-  let send: ((m: NodeMessage) => boolean) | null = null;
+  let send: ((m: ProgramNodeMessage) => boolean) | null = null;
+  let operatorOnline = false;
   /* The kind of sign-in Hornhoof hands this plan, and what that sign-in was when the plan's program refused it: until
      it changes, the node stays signed out, so turns do not go round on a sign-in that no longer works. */
   const planProvider = builtin ? null : (state as NodeState).provider;
@@ -192,6 +194,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   const host = terminal
     ? new TerminalHost({
         tmux: terminal.tmux,
+        operator: { dir: join(dir, 'program-operator'), send: frame => send?.(frame) ?? false, connected: () => operatorOnline },
         hornhoof: state.server,
         send: m => (m.type === 'term.data' || m.type === 'term.exit' ? void send?.(m) : emit(m)),
         secrets: () => [...known],
@@ -247,23 +250,27 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     log,
     onOpen(next) {
       send = next;
+      operatorOnline = true;
       host?.closeViews();
       login?.closeViews();
       /* Finished jobs Hornhoof has not confirmed still count as running, so the server does not give up on them. */
       const typed = host?.typedJobs() ?? [];
       const tests = [...testing.keys(), ...unconfirmedTests.keys()];
-      next({ type: 'hello', version: VERSION, loggedIn, ...setup.field(), running: [...running.keys(), ...typed, ...unconfirmed.keys()], ...(models ? { models } : {}), terminals: Boolean(host), work: Boolean(testUser), ...(testUser ? {} : { noRuns: NO_RUNS }), load: load(), tests, skillFiles: true, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
+      next({ type: 'hello', version: VERSION, loggedIn, ...setup.field(), running: [...running.keys(), ...typed, ...unconfirmed.keys()], ...(models ? { models } : {}), terminals: Boolean(host), programOperatorV1: Boolean(host), work: Boolean(testUser), ...(testUser ? {} : { noRuns: NO_RUNS }), load: load(), tests, skillFiles: true, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
+      host?.operatorReplay();
       for (const m of outbox.splice(0)) emit(m);
       for (const m of unconfirmed.values()) next(m);
       for (const m of unconfirmedTests.values()) next(m);
     },
     /* One message that fails is logged; it never ends the node with all its runs. */
     onMessage: m => void handle(m).catch(err => log(`A message from Hornhoof failed: ${message(err)}`)),
+    onClose: () => { operatorOnline = false; },
     onRefused: () => log('Hornhoof does not know this machine any more. Run the install command from Hornhoof again to reconnect.'),
   });
   void programs.update(tellStatus).catch(err => log(`Could not update the programs: ${message(err)}`));
 
-  async function handle(m: ServerMessage) {
+  async function handle(m: ProgramServerMessage) {
+    if (isOperatorCommand(m)) return host?.operatorMessage(m);
     if (m.type === 'remove') {
       /* Only personal subscriptions are removed this way; the built-in node stays. */
       if (builtin || stopped) return;
@@ -312,7 +319,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       case 'turn.opened':
         return host?.opened(m);
       case 'agent.say': {
-        const ok = host ? await host.say(m.agentKey, m.text, m.within).catch(() => false) : false;
+        const ok = host ? await host.say(m.agentKey, m.text, m.within, m.operatorDelivery).catch(() => false) : false;
         return void send?.({ type: 'agent.said', ref: m.ref, ok });
       }
       case 'agent.restart': {
@@ -449,7 +456,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
           return { ok: false, sessionId: null, result: '', output: `Could not install the program: ${message(err)}`, error: 'agent_failed', limits: null };
         }
         const version = async () => { await programs.ready(input.signal); return programs.version(terminal.program.kind); };
-        return host.run({ key: input.agentKey, program: terminal.program, bin: terminal.bin, home: terminal.home, signedOut: terminal.signedOut, input, version });
+        return host.run({ key: input.agentKey, program: terminal.program, bin: terminal.bin, home: terminal.home, signedOut: terminal.signedOut, input, version, operatorDelivery: m.operatorDelivery });
       };
       const tracked: ProviderAdapter = {
         ...chosen,
@@ -816,3 +823,5 @@ if (isEntry()) {
     process.exit(1);
   });
 }
+
+const isOperatorCommand = (frame: ProgramServerMessage): frame is OperatorServerMessage => frame.type.startsWith('program.');

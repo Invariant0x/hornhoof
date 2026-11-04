@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { NodeMessage, ServerMessage } from './index.js';
 
 export const PROGRAM_OPERATOR_ROLE = 'OPS-PROGRAM';
 export const OPERATOR_CASE_MS = 600_000;
@@ -54,3 +55,11 @@ export type OperatorServerMessage = z.infer<typeof OperatorServerMessage>;
 
 /* Additive metadata is validated independently of the older transport schemas. */
 export const OperatorDeliveryMetadata = z.object({ operatorDelivery: OperatorDelivery.optional() });
+type DeliveryMetadata = z.infer<typeof OperatorDeliveryMetadata>;
+export type ProgramNodeMessage = Exclude<NodeMessage, { type: 'hello' | 'agent.unheard' }>
+  | (Extract<NodeMessage, { type: 'hello' }> & { programOperatorV1?: boolean })
+  | (Extract<NodeMessage, { type: 'agent.unheard' }> & DeliveryMetadata)
+  | OperatorNodeMessage;
+export type ProgramServerMessage = Exclude<ServerMessage, { type: 'job.run' | 'agent.say' }>
+  | (Extract<ServerMessage, { type: 'job.run' | 'agent.say' }> & DeliveryMetadata)
+  | OperatorServerMessage;

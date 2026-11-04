@@ -30,8 +30,9 @@ export class OperatorObserver {
   }
 
   launch(identity: OperatorIdentity, phase: 'attempt' | 'started' | 'failed'): void {
-    const instance = this.state.instances[identity.instance] ??= { ...identity, at: this.now(), startedAt: null, active: false, exited: false, ordinal: 0, phases: [], alarmed: false };
+    const instance = this.instance(identity);
     if (instance.phases.includes(phase)) return;
+    if (!instance.phases.length) instance.at = this.now();
     instance.phases.push(phase);
     if (phase === 'started') instance.startedAt = this.now();
     this.emit(instance, { type: 'program.launch', ...this.identity(instance), phase, elapsedMs: this.elapsed(instance.at) });
@@ -44,7 +45,7 @@ export class OperatorObserver {
       if (old.digest !== digest || old.agentKey !== identity.agentKey || old.ordinal !== metadata.ordinal || old.kind !== kind) throw new Error('A delivery identity cannot be reused for different words.');
       return;
     }
-    if (!this.state.instances[identity.instance]) throw new Error('The delivery has no program instance.');
+    this.instance(identity);
     if (Object.keys(this.state.deliveries).length >= MAX_PENDING) throw new Error('Program delivery history must be acknowledged before more input.');
     const delivery: Delivery = { ...identity, ...metadata, kind, digest, at: this.now(), receiptAt: null, active: false, outcome: 'pending', phases: [], alarms: [] };
     this.state.deliveries[metadata.id] = delivery;
@@ -156,6 +157,9 @@ export class OperatorObserver {
   }
 
   private identity(value: OperatorIdentity): OperatorIdentity { return { agentKey: value.agentKey, jobId: value.jobId, instance: value.instance }; }
+  private instance(identity: OperatorIdentity): Instance {
+    return this.state.instances[identity.instance] ??= { ...identity, at: this.now(), startedAt: null, active: false, exited: false, ordinal: 0, phases: [], alarmed: false };
+  }
   private elapsed(at: number): number { return Math.max(0, Math.floor(this.now() - at)); }
 
   private save(): void {
