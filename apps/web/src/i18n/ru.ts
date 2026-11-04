@@ -421,6 +421,7 @@ export const ru: Messages = {
     noTask: 'Нет задачи',
     noTaskWhy: 'У агента сейчас нет задачи.',
     backToTerminal: 'К терминалу',
+    backToConversation: 'К переписке',
     minimize: 'Свернуть',
     fullScreen: 'На весь экран',
     restoreSize: 'Обычный размер',

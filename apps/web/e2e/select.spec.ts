@@ -126,6 +126,7 @@ const ORG_VIEW: Org = {
 };
 
 const BRUNO_CARD: AgentCardView = {
+  currentTask: null,
   id: 'b1',
   kind: 'worker',
   name: 'Bruno',

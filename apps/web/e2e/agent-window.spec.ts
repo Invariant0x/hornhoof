@@ -162,6 +162,6 @@ test('the mobile task leaves the hidden conversation unchanged by Ctrl+O', async
   await expect(page.getByRole('heading', { name: 'Checkout step 1' })).toBeVisible();
   await expect(window.locator('.agent-conversation')).toBeHidden();
   await page.keyboard.press('Control+o');
-  await window.getByRole('button', { name: 'Back to terminal' }).click();
+  await window.getByRole('button', { name: 'Back to conversation' }).click();
   await expect(notice).toHaveAttribute('aria-expanded', 'false');
 });

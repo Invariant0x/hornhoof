@@ -437,6 +437,7 @@ export const en = {
     noTask: 'No task',
     noTaskWhy: 'This agent has no current task.',
     backToTerminal: 'Back to terminal',
+    backToConversation: 'Back to conversation',
     minimize: 'Minimize',
     fullScreen: 'Full screen',
     restoreSize: 'Restore size',

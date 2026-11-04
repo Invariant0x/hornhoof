@@ -27,7 +27,7 @@ export async function serveTree(page: Page, live: { during: boolean }) {
 
 
 function agentCard(employee: Employee): AgentCardView {
-  return { id: employee.id, name: employee.name, kind: employee.kind, role: null, department: { id: 'd2', name: 'Development' },
+  return { currentTask: employee.task ? { id: employee.task.id, number: employee.task.number, title: employee.task.title } : null, id: employee.id, name: employee.name, kind: employee.kind, role: null, department: { id: 'd2', name: 'Development' },
     product: null, model: '', effort: null, subscription: null, machine: null, state: employee.state, retry: null, failure: null, skills: [], parts: [],
     raw: '', instructions: { length: 0, max: 200_000 }, runsOn: [], changes: [], interrupted: [], canEdit: false, timer: null };
 }

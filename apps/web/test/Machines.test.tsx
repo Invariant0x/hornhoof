@@ -12,7 +12,7 @@ const GIB = 1024 ** 3;
 const BUILTIN: BuiltinView = {
   online: true,
   load: { cpus: 4, load: 0.5, memFree: 2.5 * GIB, memTotal: 8 * GIB, tests: 0, jobs: 1 },
-  running: { agents: [{ id: 'o1', name: 'Orchestrator', busy: false, title: null, department: null, provider: 'anthropic_api', since: null, task: null, withCeo: false }], parts: [] },
+  running: { agents: [{ id: 'o1', canOpen: true, name: 'Orchestrator', busy: false, title: null, department: null, provider: 'anthropic_api', since: null, task: null, withCeo: false }], parts: [] },
 };
 
 const lists = (extra: Parameters<typeof mockApi>[0] = {}, builtin: BuiltinView | null = BUILTIN) =>

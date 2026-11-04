@@ -37,6 +37,7 @@ const LOG: EventView[] = [
 
 function open(routes: Record<string, unknown> = {}, org: Org = ORG) {
   const calls = mockApi({
+    'GET /api/agents/orchestrator': [200, { ...CARD, id: ORG.orchestrator!.id, kind: 'orchestrator', name: 'Orchestrator' }],
     [`GET ${EVENTS}?after=0`]: [200, { events: [], state: READY }],
     'POST /api/agents/orchestrator/start': [200, { started: false }],
     ...(routes as Record<string, [number, unknown]>),

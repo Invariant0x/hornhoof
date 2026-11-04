@@ -196,6 +196,7 @@ export type RestartCause = 'server' | 'update' | 'machine' | 'container' | 'prog
 
 export type AgentCardView = {
   id: string;
+  currentTask: { id: string; number: number; title: string } | null;
   kind: 'orchestrator' | 'head' | 'worker';
   name: string;
   role: { id: string; title: Lang; description: Lang; effort?: RoleEffort } | null;
@@ -467,6 +468,7 @@ export type MachineView = {
    runs it takes, of tests or of other work. */
 export type RunningAgent = {
   id: string;
+  canOpen: boolean;
   name: string;
   busy: boolean;
   title: Lang | null;

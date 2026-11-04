@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
-import { deptLabel, LANGUAGES, useLanguage, useT } from '../i18n';
+import { deptLabel, errorText, LANGUAGES, useLanguage, useT } from '../i18n';
 import { liveOf, useOrg } from '../org';
 import { currentTheme, setTheme, type Theme } from '../theme';
 import type { Me, Org } from '../types';
@@ -191,6 +191,14 @@ function agentPanelFor(panel: Panel, org: Org | null) {
   return { ...panel, agentId };
 }
 
+function AgentWindowError({ panel, org, failure }: { panel: Panel; org: Org | null; failure: unknown }) {
+  const t = useT();
+  const message = useRef<HTMLParagraphElement>(null);
+  useEffect(() => { message.current?.focus(); }, [panel, org, failure]);
+  if (panel?.kind !== 'window' || org || failure === null) return null;
+  return <p ref={message} tabIndex={-1} className="alert" role="alert">{errorText(t, failure)}</p>;
+}
+
 /* welcome: setup just finished, so the orchestrator's window opens at once. */
 export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: boolean; onSignOut: () => void }) {
   const t = useT();
@@ -201,7 +209,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   const [panel, setPanel] = useState<Panel>(welcome && company ? { kind: 'window', agentId: 'orchestrator' } : null);
   const [deptId, setDeptId] = useState<string | null>(null);
   const [staff, setStaff] = useState<StaffAsk | null>(null);
-  const { org } = useOrg(panel !== null || deptId !== null);
+  const { org, failure: orgFailure } = useOrg(panel !== null || deptId !== null);
   const openAgent = useAgentOpener(setPanel);
   const dept = deptId ? org?.departments.find(d => d.id === deptId) : undefined;
   /* A department removed while its view was open closes the view. */
@@ -289,6 +297,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
       </header>
       {company && <UpdateBanner updates={updates} onDetails={() => setAccountDialog('versions')} />}
       <main className={`body${tab === 'map' ? '' : ' page'}${panel ? ` with-${panel.kind}` : ''}`}>
+        <AgentWindowError panel={panel} org={org} failure={orgFailure} />
         {tab === 'map' && (
           <MapScreen
             me={me}
