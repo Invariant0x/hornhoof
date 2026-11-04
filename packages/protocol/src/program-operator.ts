@@ -45,7 +45,7 @@ export type OperatorKeyResult = Extract<OperatorNodeMessage, { type: 'program.ke
 export const OperatorServerMessages = [
   z.object({ type: z.literal('program.screen_get'), ...identity, request: z.uuid(), case: z.uuid(), capability: opaque }).strict(),
   z.object({ type: z.literal('program.key_send'), ...identity, case: z.uuid(), capability: opaque, snapshot: opaque, generation: count, action: z.uuid(), key: OperatorKey }).strict(),
-  z.object({ type: z.literal('program.operator_case'), ...identity, case: z.uuid(), capability: opaque, disposition: z.enum(['open', 'revoke']), remainingMs: count.max(OPERATOR_CASE_MS), revision: count }).strict(),
+  z.object({ type: z.literal('program.operator_case'), ...identity, case: z.uuid(), capability: opaque, disposition: z.enum(['open', 'revoke']), remainingMs: count.max(OPERATOR_CASE_MS), revision: count, readOnly: z.boolean().optional() }).strict(),
   z.object({ type: z.literal('program.evidence_ack'), evidenceId: z.uuid() }).strict(),
 ] as const;
 

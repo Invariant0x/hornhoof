@@ -50,6 +50,7 @@ describe('bounded program operator protocol', () => {
   it('bounds capability lifetimes and revisions and acknowledges individual evidence facts', () => {
     const open = { type: 'program.operator_case', ...identity, case: id, capability: id, disposition: 'open', remainingMs: 600000, revision: 1 };
     expect(OperatorServerMessage.parse(open)).toEqual(open);
+    expect(OperatorServerMessage.parse({ ...open, readOnly: true })).toEqual({ ...open, readOnly: true });
     expect(OperatorServerMessage.safeParse({ ...open, remainingMs: 600001 }).success).toBe(false);
     expect(OperatorServerMessage.safeParse({ ...open, revision: -1 }).success).toBe(false);
     expect(OperatorServerMessage.parse({ type: 'program.evidence_ack', evidenceId: id })).toEqual({ type: 'program.evidence_ack', evidenceId: id });
