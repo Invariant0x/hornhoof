@@ -3,6 +3,7 @@ export const claudeQueue: (operation: string, text: string, extra?: Record<strin
   operation: string;
   content: string;
 } & Record<string, unknown>;
+export const claudePasted: (text: string) => string;
 export const userMessage: (text: string, turnId?: string) => {
   type: string;
   payload: {
