@@ -36,8 +36,9 @@ const RETRY_MAX_MS = 10_000;
 const NO_TERMINAL = 4404;
 const NO_ACCESS = 4403;
 
-/* path: the view's address on the server, such as /api/agents/<id>/terminal; the terminal's size goes after it. */
-type Props = { path: string; program: string; onGone(): void };
+/* path: the view's address on the server, such as /api/agents/<id>/terminal; the terminal's size goes after it.
+   watching: this person types elsewhere, so the terminal leaves the focus there as it opens. */
+type Props = { path: string; program: string; onGone(): void; watching?: boolean };
 type Size = { cols: number; rows: number };
 type Frame = { type: string; data?: string; write?: boolean; running?: boolean };
 type Send = (m: unknown) => void;
@@ -347,7 +348,7 @@ function disposeLater(term: Terminal) {
 }
 
 /* A live terminal: an agent's session on the node, or a plan's sign-in, as it is, with the person's keys going back to it. */
-export function AgentTerminal({ path, program, onGone }: Props) {
+export function AgentTerminal({ path, program, onGone, watching = false }: Props) {
   const t = useT();
   const box = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -356,6 +357,8 @@ export function AgentTerminal({ path, program, onGone }: Props) {
   const [menu, setMenu] = useState<MenuState | null>(null);
   const gone = useRef(onGone);
   gone.current = onGone;
+  const leavesFocus = useRef(watching);
+  leavesFocus.current = watching;
 
   useEffect(() => {
     const term = new Terminal(OPTIONS);
@@ -369,7 +372,7 @@ export function AgentTerminal({ path, program, onGone }: Props) {
     const view = connectView(term, path, setUp, () => gone.current());
     forward(term, view.send);
     const unfit = keepFitted(term, fit, box.current!);
-    term.focus();
+    if (!leavesFocus.current) term.focus();
     return () => {
       termRef.current = null;
       view.end();
