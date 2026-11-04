@@ -6,7 +6,7 @@ import { discardStaleTurn, discardStaleTurns, repeatedTurn, repeatWake, taskForW
 import { wakeAll, wakePrompt } from '../src/modules/tasks/wake.js';
 import { createTestDb, statements, testApp } from './helpers.js';
 
-async function fixture(existing?: Awaited<ReturnType<typeof createTestDb>>) {
+async function fixture(existing?: Awaited<ReturnType<typeof testApp>>['db']) {
   const db = existing ?? await createTestDb();
   const [company] = await db.insert(companies).values({ name: 'Acme' }).returning();
   const [owner] = await db.insert(people).values({ companyId: company!.id, name: 'Ivan', email: 'ivan@acme.test', status: 'active', scopeKind: 'company', isOwner: true }).returning();

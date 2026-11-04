@@ -31,7 +31,7 @@ async function company() {
   let n = 0;
   const turn = async (agent: { id: string }) => {
     const token = `tool-token-${++n}-0123456789abcdef0123456789`;
-    await db.insert(jobs).values({ companyId, subscriptionId: sub!.id, agentId: agent.id, kind: 'task', prompt: 'go', timeoutMs: 900000, status: 'running', startedAt: new Date(), toolTokenHash: hashToken(token) });
+    await db.insert(jobs).values({ companyId, subscriptionId: sub!.id, agentId: agent.id, kind: 'conversation', prompt: 'go', timeoutMs: 900000, status: 'running', startedAt: new Date(), toolTokenHash: hashToken(token) });
     return mcp(app, token);
   };
   const log = async () => (await db.select({ kind: taskEvents.kind }).from(taskEvents).where(eq(taskEvents.taskId, task.id))).map(e => e.kind);
@@ -48,7 +48,7 @@ async function mcp(app: FastifyInstance, token: string): Promise<Client> {
 }
 
 type Res = { content: { text: string }[]; isError?: boolean };
-const call = async (c: Client, name: string, args: object) => (await c.callTool({ name, arguments: args })) as Res;
+const call = async (c: Client, name: string, args: Record<string, unknown>) => (await c.callTool({ name, arguments: args })) as Res;
 
 describe('a text that carries a file', () => {
   it('is a long run of base64 or hex, on one line or wrapped', () => {

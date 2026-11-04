@@ -37,7 +37,7 @@ describe('named turn failures', () => {
     const c = await failureCompany();
     const { task } = await createTask(c.ctx, { agentId: c.head.id }, { title: 'Checkout', brief: '', body: 'Work', departmentId: c.dev.id, assigneeAgentId: c.agent.id, executor: true, gates: [] });
     const text = 'Keep my task message and its author.';
-    const id = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.agent.id, taskId: task.id, prompt: text, createdBy: c.sub.ownerPersonId, message: { personId: c.sub.ownerPersonId, text, taskWake: taskWakeOf(task, { why: 'message' }) } });
+    const id = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.agent.id, taskId: task.id, prompt: text, createdBy: c.sub.ownerPersonId, message: { personId: c.sub.ownerPersonId, text, taskWake: taskWakeOf(task, { why: 'message' as Parameters<typeof taskWakeOf>[1]['why'] }) } });
     await c.fail(id);
     const retry = (await c.turnsOf()).find(j => j.continueOf === id)!;
     expect(retry).toMatchObject({ createdBy: c.sub.ownerPersonId, answersCeo: true });

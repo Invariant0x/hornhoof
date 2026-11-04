@@ -118,7 +118,7 @@ describe('a plan sign-in in a terminal on the node', () => {
   it.skipIf(!hasTmux)('stopped half way ends only the sign-in: agents keep their sessions and nothing is kept', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-login-'));
     const agents = new Tmux({ socket: socketName('agents'), env: { PATH: process.env.PATH ?? '', HOME: dir } });
-    onTestFinished(() => agents.run(['kill-server']).catch(() => {}));
+    onTestFinished(async () => { await agents.run(['kill-server']).catch(() => {}); });
     const terminal = { tmux: agents, program: claudeProgram, bin: join(FAKES, 'claude'), home: join(dir, 'home'), signedOut: /not logged in/i };
     const { server, home, tmux } = await node('claude', {}, dir, { terminal });
     await agents.launch('a-agent', { cwd: dir, command: ['sleep', '30'], cols: 80, rows: 24 });

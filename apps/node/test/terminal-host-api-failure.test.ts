@@ -2,7 +2,7 @@ import { appendFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SIGNED_OUT } from '../src/providers/codex.js';
 import { findRollout } from '../src/terminal/programs.js';
-import failures from './fixtures/terminal-api-failures.json';
+import failures from './fixtures/terminal-api-failures.json' with { type: 'json' };
 import { hasTmux, host, tmux, setUp, codexJob, kimiJob, done, typeTurn, until } from './terminal-host-helpers.js';
 
 const job = (program: string, prompt: string, sessionId: string | null = null) =>

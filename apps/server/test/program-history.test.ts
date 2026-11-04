@@ -24,7 +24,7 @@ describe('turn program history', () => {
     const c = await running();
     const report = async (state: 'thinking' | 'tool' | 'idle' | 'gone', minute: number) => recordJobProgram(c.app.ctx, {
       type: 'job.program', jobId: c.job.id, state, since: c.at(minute).getTime(), screenAt: c.at(minute).getTime(),
-      tool: state === 'tool' ? 'Bash' : null, screen: 'Private terminal text.',
+      ...(state === 'tool' ? { tool: 'Bash' } : {}), screen: 'Private terminal text.',
     }, c.at(minute), eq(jobs.id, c.job.id));
     await report('thinking', 0);
     await report('thinking', 1);
@@ -94,7 +94,7 @@ it('still reduces six reports to four points when two reports repeat the same st
     ['thinking', 0, 0], ['thinking', 0, 1], ['tool', 2, 2], ['tool', 2, 3], ['idle', 4, 4], ['gone', 5, 5],
   ] as const) {
     await recordJobProgram(c.app.ctx, { type: 'job.program', jobId: c.job.id, state,
-      tool: state === 'tool' ? 'Bash' : null, since: c.at(since).getTime(), screenAt: c.at(observed).getTime(),
+      ...(state === 'tool' ? { tool: 'Bash' } : {}), since: c.at(since).getTime(), screenAt: c.at(observed).getTime(),
       screen: 'Private terminal text.',
     }, c.at(observed), eq(jobs.id, c.job.id));
   }

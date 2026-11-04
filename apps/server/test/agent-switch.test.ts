@@ -27,7 +27,7 @@ async function company() {
   const [acme] = await db.select().from(companies);
   const companyId = acme!.id;
   const [sub] = await db.select().from(subscriptions);
-  await until(() => app.ctx.hub.isReady(identityOf(sub!, null)));
+  await until(() => app.ctx.hub.isReady(identityOf(sub!, null)!));
   const [dev] = await db.insert(departments).values({ companyId, templateKey: 'development', roleCode: 'DEV' }).returning();
   const hire = async (name: string, kind: 'head' | 'worker', roleKey: string) =>
     (await db.insert(agents).values({ companyId, kind, name, roleKey, departmentId: dev!.id, model: '', subscriptionId: sub!.id }).returning())[0]!;
@@ -66,7 +66,7 @@ async function mcp(app: FastifyInstance, token: string): Promise<Client> {
 }
 
 type Res = { content: { text: string }[]; isError?: boolean };
-const call = async (c: Client, name: string, args: object) => (await c.callTool({ name, arguments: args })) as Res;
+const call = async (c: Client, name: string, args: Record<string, unknown>) => (await c.callTool({ name, arguments: args })) as Res;
 const text = (r: Res) => r.content[0]!.text;
 const work = (department: string, title: string) => ({ department, title, brief: `${title} brief`, body: `${title} body` });
 

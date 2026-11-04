@@ -297,7 +297,7 @@ describe('a node that runs agents in terminals', () => {
     const server = await fakeServer();
     const dir = nodeDir(server.url);
     const tmux = new Tmux({ socket: `hh-install-${process.pid}`, env: { PATH: process.env.PATH ?? '', HOME: dir } });
-    onTestFinished(() => tmux.run(['kill-server']).catch(() => {}));
+    onTestFinished(async () => { await tmux.run(['kill-server']).catch(() => {}); });
     const fake = new URL('./fakes/fake-term.mjs', import.meta.url).pathname;
     let installs = 0;
     const install = async () => {

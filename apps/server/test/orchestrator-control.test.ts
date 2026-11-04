@@ -32,7 +32,7 @@ async function company(env: NodeJS.ProcessEnv = {}) {
   const [acme] = await db.select().from(companies);
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
   const [sub] = await db.select().from(subscriptions);
-  await until(() => app.ctx.hub.isReady(identityOf(sub!, null)));
+  await until(() => app.ctx.hub.isReady(identityOf(sub!, null)!));
   const [dev] = await db.insert(departments).values({ companyId: acme!.id, templateKey: 'development', roleCode: 'DEV' }).returning();
   const hire = async (name: string, kind: 'head' | 'worker', roleKey: string) =>
     (await db.insert(agents).values({ companyId: acme!.id, kind, name, roleKey, departmentId: dev!.id, model: '', subscriptionId: sub!.id }).returning())[0]!;
@@ -49,7 +49,7 @@ async function company(env: NodeJS.ProcessEnv = {}) {
 
 
 type Result = { content: { type: string; text: string }[]; isError?: boolean };
-const call = async (client: Client, name: string, args: object) => (await client.callTool({ name, arguments: args })) as Result;
+const call = async (client: Client, name: string, args: Record<string, unknown>) => (await client.callTool({ name, arguments: args })) as Result;
 const text = (res: Result) => res.content[0]!.text;
 
 describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {

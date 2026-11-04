@@ -709,9 +709,9 @@ describe("an employee's conversation", () => {
     ['codex', 'DEV-BE', ['low', 'high', 'xhigh', 'ultra'], 'xhigh'],
     ['kimi', 'DEV-SEC', ['low', 'high', 'max'], 'high'],
     ['antigravity', 'DEV-BE', [], null],
-  ])('runs a %s employee with role %s at its fitted effort', async (provider, roleKey, efforts, expected) => {
+  ] as const)('runs a %s employee with role %s at its fitted effort', async (provider, roleKey, efforts, expected) => {
     const { app, db, ceo, builtin, bruno } = await withEmployee();
-    const model = { id: 'test-model', name: 'Test model', efforts };
+    const model = { id: 'test-model', name: 'Test model', efforts: [...efforts] };
     await db.update(subscriptions).set({ provider, models: efforts.length ? [model] : [] }).where(eq(subscriptions.id, bruno.subscriptionId!));
     await db.update(agents).set({ roleKey, model: model.id }).where(eq(agents.id, bruno.id));
     await sayTo(app, ceo, bruno.id, 'Hello');

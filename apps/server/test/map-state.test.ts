@@ -425,7 +425,7 @@ async function online() {
     const client = new Client({ name: 'test', version: '0.0.0' });
     await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${(c.app.server.address() as AddressInfo).port}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${token}` } } }));
     onTestFinished(() => client.close());
-    const call = async (name: string, args: object) => (await client.callTool({ name, arguments: args })) as { content: { text: string }[]; isError?: boolean };
+    const call = async (name: string, args: Record<string, unknown>) => (await client.callTool({ name, arguments: args })) as { content: { text: string }[]; isError?: boolean };
     return { job, call };
   };
   return { ...c, tools, builtin };
@@ -596,7 +596,7 @@ describe('the lines of a company with a long history', () => {
       .insert(turns)
       .values(Array.from({ length: 50 }, (_, i) => ({ companyId: acme.id, number: i + 1, goal: `Goal ${i + 1}`, status: 'closed' as const })))
       .returning({ id: turns.id });
-    const statusOf = (i: number) => (i % 50 === 0 ? 'blocked' : i % 50 === 1 ? 'planned' : i % 2 ? 'done' : 'cancelled');
+    const statusOf = (i: number): 'blocked' | 'planned' | 'done' | 'cancelled' => (i % 50 === 0 ? 'blocked' : i % 50 === 1 ? 'planned' : i % 2 ? 'done' : 'cancelled');
     for (let from = 0; from < 2000; from += 500) {
       await db.insert(tasks).values(
         Array.from({ length: 500 }, (_, k) => {

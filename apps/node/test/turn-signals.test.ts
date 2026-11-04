@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { TurnEnds, hookCalls, claudeEnd } from '../src/terminal/turn-signals.js';
 import { kimiWire } from '../src/terminal/transcripts.js';
 import { ProgramWatch, programState } from '../src/terminal/program-state.js';
-import hooks from './fixtures/turn-hooks.json';
-import retry from './fixtures/kimi-retry.json';
+import hooks from './fixtures/turn-hooks.json' with { type: 'json' };
+import retry from './fixtures/kimi-retry.json' with { type: 'json' };
 
 describe('one end from two channels', () => {
   it.each([['done', 'failed'], ['failed', 'done']] as const)('keeps the first %s end and diagnoses a later %s once', (first, later) => {

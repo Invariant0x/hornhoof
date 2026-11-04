@@ -35,7 +35,7 @@ async function company() {
   let node = await connectNode(url, NODE_KEY);
   node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], boot: boot('2026-11-03T00:00:00.000Z') });
   await until(async () => (await db.select().from(subscriptions))[0]!.status === 'ready');
-  await until(() => app.ctx.hub.isReady(identityOf(sub!, null)));
+  await until(() => app.ctx.hub.isReady(identityOf(sub!, null)!));
   const dept = async (templateKey: 'development' | 'operations', roleCode: string) => (await db.insert(departments).values({ companyId, templateKey, roleCode }).returning())[0]!;
   const [dev, ops] = [await dept('development', 'DEV'), await dept('operations', 'OPS')];
   const hire = async (name: string, kind: 'head' | 'worker', roleKey: string, departmentId: string) =>
@@ -127,12 +127,12 @@ describe('a turn cut off by a node restart', () => {
 
   it('adds the current repository and catch-up once when it repeats the requested work', async () => {
     const c = await company();
-    await c.db.update(departments).set({ repoUrl: 'https://example.com/checkout.git', repoBranch: 'main' }).where(eq(departments.id, c.task.departmentId));
+    await c.db.update(departments).set({ repoUrl: 'https://example.com/checkout.git', repoBranch: 'main' }).where(eq(departments.id, c.task.departmentId!));
     await c.db.insert(agentEvents).values({ companyId: c.companyId, agentId: c.bruno.id, kind: 'text', data: { text: 'Earlier checkout discussion.' } });
     const first = await c.brunoAtWork();
     expect(first.prompt.match(/Earlier in this conversation/g)).toHaveLength(1);
     expect(first.prompt.match(/Your repository /g)).toHaveLength(1);
-    await c.db.update(departments).set({ repoBranch: 'checkout' }).where(eq(departments.id, c.task.departmentId));
+    await c.db.update(departments).set({ repoBranch: 'checkout' }).where(eq(departments.id, c.task.departmentId!));
 
     const retry = await nextRun(await c.restart(boot('2026-11-03T00:11:00.000Z')));
 

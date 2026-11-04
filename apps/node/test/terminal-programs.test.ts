@@ -285,6 +285,9 @@ describe('Kimi Code in a terminal', () => {
       mkdir: path => (done.push(`mkdir ${path}`), ownFs.mkdir(path)),
       read: path => (done.push(`read ${path}`), ownFs.read(path)),
       write: (path, data) => (done.push(`write ${path}`), ownFs.write(path, data)),
+      kind: ownFs.kind,
+      remove: ownFs.remove,
+      copy: ownFs.copy,
       stop() {},
     };
     const home = mkdtempSync(join(tmpdir(), 'hh-claude-'));

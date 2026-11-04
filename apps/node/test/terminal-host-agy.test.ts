@@ -1,6 +1,7 @@
 import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { NodeMessage } from '@hornhoof/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SIGNED_OUT } from '../src/providers/antigravity.js';
 import type { TermJob } from '../src/terminal/host.js';
@@ -132,7 +133,7 @@ describe.skipIf(!hasTmux)("Antigravity's own terminal", () => {
     void run.then(() => { ended = true; });
     await until(() => turn.events.some(e => e.kind === 'text' && e.text === 'FINISHED'));
     const keys = vi.spyOn(tmux, 'keys');
-    const reports = () => sent.filter(m => m.type === 'job.program' && m.jobId === 'job-lost');
+    const reports = () => sent.filter((m): m is Extract<NodeMessage, { type: 'job.program' }> => m.type === 'job.program' && m.jobId === 'job-lost');
     /* The final transcript read updates signAt before the next report publishes it. */
     const afterAnswer = reports().length;
     await until(() => reports().length > afterAnswer);

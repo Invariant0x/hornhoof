@@ -262,7 +262,7 @@ describe('program updates at node startup', () => {
     installFake(provider);
     writeFileSync(join(bin, 'tmux'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
     vi.stubEnv('PATH', `${bin}:${process.env.PATH ?? ''}`);
-    onTestFinished(() => vi.unstubAllEnvs());
+    onTestFinished(() => { vi.unstubAllEnvs(); });
     const node = await command(['run'], io().io);
     if (typeof node === 'number') throw new Error(`run ended with ${node}`);
     onTestFinished(() => node.stop());

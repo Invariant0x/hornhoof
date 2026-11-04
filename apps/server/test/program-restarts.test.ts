@@ -29,9 +29,9 @@ async function stuck(provider: 'claude' | 'codex' | 'kimi' | 'antigravity' = 'co
   onTestFinished(() => server.close());
   registerWatchTools(server, c.ctx, { id: 'watcher-job', companyId: c.companyId, agentId: c.watcher.id, agentKind: 'worker' }, new Set<Grant>(['agents', 'restart_program']));
   const run = async (): Promise<Result> => {
-    const entry = registered.mock.calls.find(([name]) => name === 'restart_program');
+    const entry = (registered.mock.calls as [string, unknown, unknown][]).find(([name]) => name === 'restart_program');
     expect(entry, 'the skill grants the restart_program tool').toBeDefined();
-    return (entry![2] as unknown as Handler)({ employee: c.agent.id });
+    return (entry![2] as Handler)({ employee: c.agent.id });
   };
   const answer = (ok: boolean, reason: string | null = null) => {
     c.sent.mockImplementation((to, msg) => {
@@ -188,8 +188,8 @@ describe('restart_program', () => {
 
   it('gives the agents tool the program, failure, waiting retry and checked restart reason', async () => {
     const c = await stuck();
-    const entry = c.registered.mock.calls.find(([name]) => name === 'agents')!;
-    const all = JSON.parse((await (entry[2] as unknown as () => Promise<Result>)()).content[0]!.text);
+    const entry = (c.registered.mock.calls as [string, unknown, unknown][]).find(([name]) => name === 'agents')!;
+    const all = JSON.parse((await (entry[2] as () => Promise<Result>)()).content[0]!.text);
     expect(all.find((a: { id: string }) => a.id === c.agent.id)).toMatchObject({ program: { state: 'thinking', signAt: expect.any(Number), retry: null }, failure: null, retry: null, restart: { allowed: true, reason: null } });
   });
 });
@@ -217,7 +217,7 @@ describe('restart safety after the request', () => {
   it.each([false, true])('applies a late restart answer with ok %s after the tool has returned', async ok => {
     const c = await stuck();
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-    onTestFinished(() => vi.useRealTimers());
+    onTestFinished(() => { vi.useRealTimers(); });
     const result = c.run();
     for (let n = 0; !c.sent.mock.calls.some(([, m]) => m.type === 'agent.restart') && n < 2000; n++) await new Promise<void>(r => setImmediate(r));
     expect(c.sent.mock.calls.some(([, m]) => m.type === 'agent.restart')).toBe(true);
@@ -253,7 +253,7 @@ describe('restart safety after the request', () => {
   it('keeps an unanswered restart counted after 15 seconds and reports the uncertainty', async () => {
     const c = await stuck();
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-    onTestFinished(() => vi.useRealTimers());
+    onTestFinished(() => { vi.useRealTimers(); });
     const result = c.run();
     /* Real immediate turns let the database finish before advancing the reply deadline. */
     for (let n = 0; !c.sent.mock.calls.some(([, m]) => m.type === 'agent.restart') && n < 2000; n++) await new Promise<void>(r => setImmediate(r));

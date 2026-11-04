@@ -51,7 +51,7 @@ async function mcp(app: FastifyInstance, token: string): Promise<Client> {
 }
 
 type Result = { content: { text: string }[]; isError?: boolean };
-const call = async (client: Client, name: string, args: object = {}) => (await client.callTool({ name, arguments: args })) as Result;
+const call = async (client: Client, name: string, args: Record<string, unknown> = {}) => (await client.callTool({ name, arguments: args })) as Result;
 const names = async (client: Client) => (await client.listTools()).tools.map(t => t.name);
 const waiting = (db: Awaited<ReturnType<typeof company>>['db'], agentId: string) =>
   db.select().from(jobs).where(and(eq(jobs.agentId, agentId), inArray(jobs.status, ['queued', 'running'])));

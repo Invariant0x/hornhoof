@@ -24,7 +24,7 @@ async function company() {
   const node: FakeNode = await connectNode(url, NODE_KEY);
   node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [] });
   await until(async () => (await db.select().from(subscriptions))[0]!.status === 'ready');
-  await until(() => app.ctx.hub.isReady(identityOf(sub!, null)));
+  await until(() => app.ctx.hub.isReady(identityOf(sub!, null)!));
   const dept = async (templateKey: 'development' | 'operations', roleCode: string) => (await db.insert(departments).values({ companyId, templateKey, roleCode }).returning())[0]!;
   const [dev, ops] = [await dept('development', 'DEV'), await dept('operations', 'OPS')];
   const hire = async (name: string, kind: 'head' | 'worker', roleKey: string, departmentId: string) =>
@@ -98,12 +98,12 @@ describe("a turn whose program ended without the work done", () => {
 
   it.each([null, 'bruno-session'])('adds current queue context once when continuing work from session %s anew', async sessionId => {
     const c = await company();
-    await c.db.update(departments).set({ repoUrl: 'https://example.com/checkout.git', repoBranch: 'main' }).where(eq(departments.id, c.task.departmentId));
+    await c.db.update(departments).set({ repoUrl: 'https://example.com/checkout.git', repoBranch: 'main' }).where(eq(departments.id, c.task.departmentId!));
     await c.db.insert(agentEvents).values({ companyId: c.companyId, agentId: c.bruno.id, kind: 'text', data: { text: 'Earlier checkout discussion.' } });
     const work = await c.brunoAtWork();
     expect(work.prompt.match(/Earlier in this conversation/g)).toHaveLength(1);
     expect(work.prompt.match(/Your repository /g)).toHaveLength(1);
-    await c.db.update(departments).set({ repoBranch: 'checkout' }).where(eq(departments.id, c.task.departmentId));
+    await c.db.update(departments).set({ repoBranch: 'checkout' }).where(eq(departments.id, c.task.departmentId!));
     await c.db.update(agents).set({ overrides: { base: 'Write the test first, then the code.' } }).where(eq(agents.id, c.bruno.id));
 
     await c.failed(work, { code: 1, signal: null }, { sessionId });
@@ -216,7 +216,7 @@ describe("a turn whose program ended without the work done", () => {
     await wakeAll(c.ctx, [{ agentId: c.hana.id, taskId: refunds.id, why: 'assigned' }]);
     await c.db.update(agents).set({ overrides: { base: 'Write the test first, then the code.' } }).where(eq(agents.id, c.hana.id));
     /* The old assignment is outside the bounded catch-up history. */
-    await c.db.insert(agentEvents).values(Array.from({ length: 25 }, (_, i) => ({ companyId: c.companyId, agentId: c.hana.id, jobId: work.jobId, kind: 'text', data: { text: `Planning step ${i}.` } })));
+    await c.db.insert(agentEvents).values(Array.from({ length: 25 }, (_, i) => ({ companyId: c.companyId, agentId: c.hana.id, jobId: work.jobId, kind: 'text' as const, data: { text: `Planning step ${i}.` } })));
     await c.failed(work, { code: 1, signal: null }, { sessionId: 'hana-session' });
     const more = await c.nextTurn(c.hana.id, 1);
     expect(await c.jobOf(more.jobId)).toMatchObject({ taskId: refunds.id });
