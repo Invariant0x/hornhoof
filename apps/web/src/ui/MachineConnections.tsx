@@ -43,6 +43,12 @@ function sawOf(t: Messages, event: MachineDrop): string | null {
   return parts.length ? text.saw(parts.join(', ')) : null;
 }
 
+function backText(t: Messages, offlineMs: number | null): string {
+  const text = t.machines.connection;
+  if (offlineMs === null) return text.notBack;
+  return offlineMs < SECOND ? text.backAtOnce : text.back(lengthOf(t, offlineMs));
+}
+
 function Drop({ event }: { event: MachineDrop }) {
   const t = useT();
   const { language } = useLanguage();
@@ -59,7 +65,7 @@ function Drop({ event }: { event: MachineDrop }) {
   const saw = sawOf(t, event);
   return (
     <li className={event.offlineMs === null ? 'away' : undefined}>
-      <span className="conn-when"><b>{when}</b><span>{event.offlineMs === null ? text.notBack : text.back(lengthOf(t, event.offlineMs))}</span></span>
+      <span className="conn-when"><b>{when}</b><span>{backText(t, event.offlineMs)}</span></span>
       <span>{sentence(text.causes[event.cause])}</span>
       {facts.length > 0 && <small>{facts.join(', ')}</small>}
       {saw && <small>{saw}</small>}

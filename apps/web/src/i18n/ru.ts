@@ -447,6 +447,7 @@ export const ru: Messages = {
       many: (n, average, cause) => `За сутки ${n} ${plural('ru', n, { one: 'обрыв', few: 'обрыва', many: 'обрывов', other: 'обрыва' })}${average ? `, в среднем ${average}` : ''}. Чаще всего: ${cause}.`,
       list: machine => `Последние обрывы ${machine}`,
       back: length => `вернулась через ${length}`,
+      backAtOnce: 'вернулась сразу',
       notBack: 'еще не вернулась',
       code: code => `код ${code}`,
       together: n => `соединений: ${n}`,

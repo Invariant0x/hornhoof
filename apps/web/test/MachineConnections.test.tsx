@@ -157,6 +157,17 @@ describe('the drops the card of a machine lists', () => {
     expect(line).toHaveTextContent(code);
   });
 
+  it.each([
+    ['en', 999, 'back at once'],
+    ['ru', 999, 'вернулась сразу'],
+    ['en', 1000, 'back after 1 s'],
+    ['ru', 1000, 'вернулась через 1 с'],
+  ] as const)('says one that was over within a second was over at once, in %s, at %i ms', async (language, offlineMs, text) => {
+    mockApi({ [`GET ${PATH}`]: [200, history({ events: [event({ offlineMs })] })] });
+    show(language);
+    expect(await row()).toHaveTextContent(text);
+  });
+
   it('names its list by the machine', async () => {
     mockApi({ [`GET ${PATH}`]: [200, history()] });
     show();

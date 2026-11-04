@@ -417,6 +417,7 @@ export const en = {
       many: (n: number, average: string | null, cause: string) => `${n} drops in the last 24 hours${average ? `, ${average} on average` : ''}. Most often: ${cause}.`,
       list: (machine: string) => `Latest drops of ${machine}`,
       back: (length: string) => `back after ${length}`,
+      backAtOnce: 'back at once',
       notBack: 'not back yet',
       code: (code: number) => `code ${code}`,
       together: (n: number) => `${n} connections`,
