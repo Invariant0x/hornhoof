@@ -727,25 +727,45 @@ export class TerminalHost {
      named its session, whose log the host finds once Kimi writes it; or Antigravity named its conversation. */
   private follow(a: Agent, sessionId: string): void {
     if (!sessionId || sessionId === a.sessionId) return;
-    if (a.sessionId) {
-      this.drain(a);
-      this.reportUnheard(a, true);
-      a.cleared.add(a.sessionId);
-    }
+    this.leaveSession(a);
     a.sessionId = sessionId;
     a.enqueuedWords = [];
     a.dequeued = false;
-    if (a.program?.kind === 'claude') a.tail = new LineTail(claudeTranscript(a.home, realpathSync(a.workDir), sessionId));
-    if (a.program?.kind === 'kimi' || a.program?.kind === 'antigravity') {
-      if (a.program.kind === 'kimi') a.tail = null;
-      else {
+    this.followSessionLog(a, sessionId);
+  }
+
+  private leaveSession(a: Agent): void {
+    if (!a.sessionId) return;
+    this.drain(a);
+    this.reportUnheard(a, true);
+    a.cleared.add(a.sessionId);
+  }
+
+  private followSessionLog(a: Agent, sessionId: string): void {
+    switch (a.program?.kind) {
+      case 'claude':
+        a.tail = new LineTail(claudeTranscript(a.home, realpathSync(a.workDir), sessionId));
+        return;
+      case 'kimi':
+        a.tail = null;
+        this.keepNamedContext(a, sessionId);
+        return;
+      case 'antigravity': {
         const file = agyTranscript(a.home, sessionId);
         a.agyRead = agySteps();
         a.tail = file ? new LineTail(file) : null;
+        this.keepNamedContext(a, sessionId);
+        return;
       }
-      if (a.keep) void keepContext(this.fs, a.workDir, sessionId, a.keep).catch(() => {});
-      a.keep = null;
+      case 'codex':
+      case undefined:
+        return;
     }
+  }
+
+  private keepNamedContext(a: Agent, sessionId: string): void {
+    if (a.keep) void keepContext(this.fs, a.workDir, sessionId, a.keep).catch(() => {});
+    a.keep = null;
   }
 
   /* Programs that do not log their plan's limits are asked after a turn, for a while. */
@@ -888,19 +908,20 @@ export class TerminalHost {
   }
 
   private tailFor(a: Agent): LineTail | null {
+    if (a.program?.kind === 'antigravity') a.agyRead = agySteps();
+    const file = this.transcriptFile(a);
+    return file ? new LineTail(file, { fromEnd: true }) : null;
+  }
+
+  private transcriptFile(a: Agent): string | null {
+    if (!a.program || !a.sessionId) return null;
     /* The program names its folder by the real path, without links. */
-    if (a.program?.kind === 'claude' && a.sessionId) return new LineTail(claudeTranscript(a.home, realpathSync(a.workDir), a.sessionId), { fromEnd: true });
-    if (a.program?.kind === 'codex' && a.sessionId) {
-      const found = findRollout(a.home, a.workDir, 0, a.sessionId);
-      return found ? new LineTail(found.file, { fromEnd: true }) : null;
+    switch (a.program.kind) {
+      case 'claude': return claudeTranscript(a.home, realpathSync(a.workDir), a.sessionId);
+      case 'codex': return findRollout(a.home, a.workDir, 0, a.sessionId)?.file ?? null;
+      case 'antigravity': return agyTranscript(a.home, a.sessionId);
+      case 'kimi': return findKimiWire(a.home, a.sessionId);
     }
-    if (a.program?.kind === 'antigravity') {
-      a.agyRead = agySteps();
-      const file = a.sessionId ? agyTranscript(a.home, a.sessionId) : null;
-      return file ? new LineTail(file, { fromEnd: true }) : null;
-    }
-    const wire = a.program?.kind === 'kimi' && a.sessionId ? findKimiWire(a.home, a.sessionId) : null;
-    return wire ? new LineTail(wire, { fromEnd: true }) : null;
   }
 
   /* What the program wrote to its log since last time: events for the turn, Codex's limits, session and turn end. */
@@ -1173,28 +1194,48 @@ export class TerminalHost {
       case 'invocation':
         await this.invocation(a, data);
         return;
-      case 'stop': {
-        this.drain(a);
-        if (typeof data.session_id === 'string') this.follow(a, data.session_id);
-        const id = typeof data.turn_id === 'string' ? data.turn_id : undefined;
-        if (data.stopped === true) return this.interrupted(a, id);
-        const failed = data.hook_event_name === 'StopFailure' || Boolean(data.error) || Boolean(data.error_type);
-        if (failed) {
-          const raw = isRecord(data.agy_error) ? data.agy_error : a.program?.kind === 'antigravity' ? agyError(this.agyOutput(a), data.error) ?? data : data;
-          const detail = a.program ? FAILURE[a.program.kind](raw) : failure('unknown', String(data.error));
-          return this.turnFailed(a, detail.text, detail, id);
-        }
-        if (a.program?.kind === 'kimi') {
-          const turn = a.turn;
-          await this.settleWire(a, turn);
-          if (a.turn !== turn || turn?.ending) return;
-        }
-        if (a.program?.kind === 'antigravity') return this.agyStopped(a);
-        const message = a.program?.kind === 'kimi' ? a.lastText ?? '' : String(data.last_assistant_message ?? '');
-        this.endTurn(a, { status: 'done', message }, id);
-        return;
-      }
+      case 'stop':
+        return this.stoppedHook(a, data);
     }
+  }
+
+  private async stoppedHook(a: Agent, data: Record<string, unknown>): Promise<void> {
+    this.drain(a);
+    if (typeof data.session_id === 'string') this.follow(a, data.session_id);
+    const id = typeof data.turn_id === 'string' ? data.turn_id : undefined;
+    if (data.stopped === true) return this.interrupted(a, id);
+    const detail = this.stopFailure(a, data);
+    if (detail) return this.turnFailed(a, detail.text, detail, id);
+    await this.successfulStop(a, data, id);
+  }
+
+  private stopFailure(a: Agent, data: Record<string, unknown>): Failure | null {
+    const failed = data.hook_event_name === 'StopFailure' || Boolean(data.error) || Boolean(data.error_type);
+    if (!failed) return null;
+    const raw = this.stopFailureData(a, data);
+    return a.program ? FAILURE[a.program.kind](raw) : failure('unknown', String(data.error));
+  }
+
+  private stopFailureData(a: Agent, data: Record<string, unknown>): Record<string, unknown> {
+    if (isRecord(data.agy_error)) return data.agy_error;
+    return a.program?.kind === 'antigravity' ? agyError(this.agyOutput(a), data.error) ?? data : data;
+  }
+
+  private async successfulStop(a: Agent, data: Record<string, unknown>, id: string | undefined): Promise<void> {
+    if (a.program?.kind === 'kimi' && !(await this.kimiStopCurrent(a))) return;
+    this.completeStop(a, data, id);
+  }
+
+  private completeStop(a: Agent, data: Record<string, unknown>, id: string | undefined): void {
+    if (a.program?.kind === 'antigravity') return this.agyStopped(a);
+    const message = a.program?.kind === 'kimi' ? a.lastText ?? '' : String(data.last_assistant_message ?? '');
+    this.endTurn(a, { status: 'done', message }, id);
+  }
+
+  private async kimiStopCurrent(a: Agent): Promise<boolean> {
+    const turn = a.turn;
+    await this.settleWire(a, turn);
+    return a.turn === turn && !turn?.ending;
   }
 
   private async invocation(a: Agent, data: Record<string, unknown>): Promise<void> {
