@@ -1108,26 +1108,21 @@ summary.turn-head:focus-visible { outline: 2px solid var(--cyan); outline-offset
 .tview .tv-in { display: flex; width: max-content; transform-origin: 0 0; }
 .tview .tv-labs { position: relative; z-index: 3; flex: none; background: linear-gradient(to right, var(--bg) calc(100% - 12px), transparent); }
 .tview .tv-in > svg { display: block; flex: none; }
-.tview .lchip { --cut: 8px; position: absolute; left: 0; right: 10px; display: block; padding: 1px; border: 0; background: var(--line2); cursor: pointer; text-align: left; clip-path: polygon(0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, var(--cut) 100%, 0 calc(100% - var(--cut))); }
-.tview .lchip > .in { display: flex; flex-direction: column; justify-content: center; gap: 1px; height: 100%; padding: 0 10px; background: var(--hud); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); clip-path: inherit; }
+.tview .lchip { --cut: 8px; position: absolute; left: 0; right: 10px; display: grid; box-sizing: border-box; padding: 1px; border: 0; background: var(--line2); cursor: pointer; text-align: left; clip-path: polygon(0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, var(--cut) 100%, 0 calc(100% - var(--cut))); }
+.tview .lchip > .in { display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 7px 12px; background: var(--hud); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); clip-path: inherit; }
 .tview .lchip:hover { background: var(--muted); }
 .tview .lchip:has(.ast.alarm) { background: var(--red); }
 .tview .lchip.on { background: var(--cyan); }
 .tview .lchip.on > .in { background: color-mix(in srgb, var(--cyan) 10%, var(--surface)); }
 .tview .lchip:focus-visible { outline: none; background: var(--cyan); }
-.tview .lchip .r1 { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.tview .lchip .r1 b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--f-display); font-size: 13.5px; font-weight: 600; }
-.tview .tv-task { display: none; flex: none; font-size: 10px; color: var(--muted); }
-.tview .lchip .r2 { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tview .lchip .ast { align-self: flex-start; max-width: 100%; box-sizing: border-box; overflow: hidden; text-overflow: ellipsis; padding: 0 4px; font-size: 10.5px; line-height: 13px; }
-/* A phone's lane label is narrow: what the agent does takes the task's line and wraps. */
-@media (max-width: 760px) {
-  .tview .tv-task { display: inline; }
-  .tview .lchip > .in:has(.ast) { padding: 0 6px; }
-  .tview .lchip .in:has(.ast) .r2 { display: none; }
-  .tview .lchip .ast { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; }
-}
-.tview .lchip.tk b { font-family: var(--f-mono); font-size: 13px; font-weight: 600; }
+/* Nothing on a plate is cut or smaller on a small screen: long text wraps and the plate grows. */
+.tview .lchip .r1 { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 6px; min-width: 0; }
+.tview .lchip .r1 b { min-width: 0; overflow-wrap: anywhere; font-family: var(--f-display); font-size: 13.5px; font-weight: 600; }
+.tview .tv-role { min-width: 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.tview .lchip .r2 { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.tview .lchip .ast { align-self: flex-start; max-width: 100%; box-sizing: border-box; white-space: normal; overflow-wrap: anywhere; }
+.tview .lchip.tk > .in { padding-block: 4px; }
+.tview .lchip.tk b { font-family: var(--f-mono); font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
 .tview .lchip.tk.turn b { color: var(--cyan-ink); }
 .tview .g-hr { stroke: var(--line); stroke-width: 1; stroke-dasharray: 2 5; }
 .tview .g-hl { fill: var(--muted); font-family: var(--f-body); font-size: 11px; font-variant-numeric: tabular-nums; text-anchor: middle; }
@@ -1181,9 +1176,6 @@ summary.turn-head:focus-visible { outline: 2px solid var(--cyan); outline-offset
 .tview .bdg.a .bdg-t { fill: var(--amber-ink); }
 .tview .bdg.p .bdg-t, .tview .bdg.p .bdg-q { fill: var(--pink-ink); }
 .tview .bdg.m .bdg-t { fill: var(--muted); font-weight: 500; }
-.tview .bdg-copy { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; font-size: 11.5px; line-height: 13px; color: var(--muted); }
-.tview .bdg.bad .bdg-copy { color: var(--red); }
-.tview .bdg.p .bdg-copy { color: var(--pink-ink); }
 .tview .bdg-i { stroke: var(--amber); stroke-width: 2; stroke-linecap: round; }
 .tview .bdg-q { font-family: var(--f-body); font-size: 11.5px; font-weight: 700; text-anchor: middle; dominant-baseline: central; }
 .tview .pt { fill: var(--cyan); }
@@ -1288,14 +1280,10 @@ summary.turn-head:focus-visible { outline: 2px solid var(--cyan); outline-offset
   .tview { top: 116px; right: 16px; bottom: var(--tree-bottom, 228px); }
   .tview .tv-card { position: fixed; left: 0 !important; right: 0; top: auto !important; bottom: 0; width: auto; }
   .tview .tv-card-in { max-height: min(440px, 76vh); }
-  .tview .lgd-b span, .tview .tv-title { display: none; }
+  .tview .lgd-b span { display: none; }
   .dv-drawer.spd .spl-r { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px 6px; }
   .dv-drawer.spd .spl-r .who small { display: none; }
   .dv-drawer.spd .sum dd { font-size: 15px; }
-}
-@media (max-width: 420px) {
-  .tview .lchip .r1 b { font-size: 12.5px; }
-  .tview .lchip .r2 { font-size: 11px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .tview .hd-d, .tview .hd-c.ps, .tview .ring.br { animation: none; }

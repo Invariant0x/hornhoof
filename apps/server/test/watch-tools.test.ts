@@ -1,7 +1,9 @@
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { and, eq, inArray } from 'drizzle-orm';
+import type { ServerMessage } from '@hornhoof/protocol';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
+import type { Db } from '../src/db/client.js';
 import { agentEvents, agents, companies, departments, jobs, requests, subscriptions, tasks } from '../src/db/schema.js';
 import { blocked, createTask } from '../src/modules/tasks/engine.js';
 import { as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until } from './helpers.js';
@@ -19,7 +21,12 @@ async function company(skills: string[]) {
   const ceo = await setUpCompany(app);
   const builtin = await connectNode(url, NODE_KEY);
   onTestFinished(() => builtin.close());
-  builtin.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [] });
+  /* Repeated nudges use live input after the first one opens the recipient's turn. */
+  builtin.ws.on('message', data => {
+    const message = JSON.parse(String(data)) as ServerMessage;
+    if (message.type === 'agent.say') builtin.send({ type: 'agent.said', ref: message.ref, ok: true });
+  });
+  builtin.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [], terminals: true });
   const [acme] = await db.select().from(companies);
   const [sub] = await db.select().from(subscriptions);
   const [ops] = await db.insert(departments).values({ companyId: acme!.id, templateKey: 'operations', roleCode: 'OPS' }).returning();
@@ -40,6 +47,12 @@ async function company(skills: string[]) {
 type Result = { content: { text: string }[]; isError?: boolean };
 const call = async (client: Client, name: string, args: Record<string, unknown> = {}) => (await client.callTool({ name, arguments: args })) as Result;
 const names = async (client: Client) => (await client.listTools()).tools.map(t => t.name);
+
+async function messagesFrom(db: Db, agentId: string): Promise<string[]> {
+  const rows = await db.select({ text: sql<string>`${agentEvents.data}->>'text'` }).from(agentEvents)
+    .where(and(eq(agentEvents.kind, 'message'), sql`${agentEvents.data}->>'by' = ${agentId}`));
+  return rows.map(row => row.text).sort();
+}
 
 describe('tools a skill grants', () => {
   it('exposes node restart evidence to the failure collector separately from agent output', async () => {
@@ -121,19 +134,44 @@ describe('tools a skill grants', () => {
   });
 
   it('send at most ten messages in one turn', async () => {
-    const { app, hana, bruno } = await company(['ops-task-watch']);
+    const { app, db, wendy, hana, bruno } = await company(['ops-task-watch']);
     const client = await mcp(app, TOKEN);
-    for (let i = 0; i < 10; i++) expect((await call(client, 'message_employee', { employee: i % 2 ? hana.id : bruno.id, text: `Nudge ${i}.` })).isError).toBeFalsy();
+    for (let i = 0; i < 10; i++) {
+      const result = await call(client, 'message_employee', { employee: i % 2 ? hana.id : bruno.id, text: `Nudge ${i}.` });
+      expect(result.isError, `Message ${i + 1}: ${result.content[0]!.text}`).toBeFalsy();
+    }
     const more = await call(client, 'message_employee', { employee: hana.id, text: 'One more.' });
     expect([more.isError, more.content[0]!.text]).toEqual([true, 'One turn sends at most 10 messages. Go on in your next round.']);
+    expect(await messagesFrom(db, wendy.id)).toEqual(Array.from({ length: 10 }, (_, i) => `Nudge ${i}.`));
+  });
+
+  it('shares the ten-message quota between employee messages and reports to the orchestrator', async () => {
+    const { app, db, wendy, bruno } = await company(['ops-task-watch']);
+    await db.update(agents).set({ kind: 'head' }).where(eq(agents.id, wendy.id));
+    const client = await mcp(app, TOKEN);
+    for (let i = 0; i < 10; i++) {
+      const name = i % 2 ? 'tell_orchestrator' : 'message_employee';
+      const result = await call(client, name, { text: `Report ${i}.`, ...(i % 2 ? {} : { employee: bruno.id }) });
+      expect(result.isError, `Message ${i + 1}: ${result.content[0]!.text}`).toBeFalsy();
+    }
+    for (const name of ['message_employee', 'tell_orchestrator']) {
+      const more = await call(client, name, { text: 'One more.', ...(name === 'message_employee' ? { employee: bruno.id } : {}) });
+      expect([more.isError, more.content[0]!.text]).toEqual([true, 'One turn sends at most 10 messages. Go on in your next round.']);
+    }
+    expect(await messagesFrom(db, wendy.id)).toEqual(Array.from({ length: 10 }, (_, i) => `Report ${i}.`));
   });
 
   it('keep to ten messages when a turn sends several at once', async () => {
-    const { app, hana, bruno } = await company(['ops-task-watch']);
+    const { app, db, wendy, hana, bruno } = await company(['ops-task-watch']);
     const client = await mcp(app, TOKEN);
-    for (let i = 0; i < 9; i++) await call(client, 'message_employee', { employee: bruno.id, text: `Nudge ${i}.` });
+    for (let i = 0; i < 9; i++) expect((await call(client, 'message_employee', { employee: bruno.id, text: `Nudge ${i}.` })).isError).toBeFalsy();
     const last = await Promise.all([1, 2, 3].map(i => call(client, 'message_employee', { employee: hana.id, text: `At once ${i}.` })));
     expect(last.filter(r => !r.isError)).toHaveLength(1);
+    expect(last.filter(r => r.isError).map(r => r.content[0]!.text)).toEqual([
+      'One turn sends at most 10 messages. Go on in your next round.',
+      'One turn sends at most 10 messages. Go on in your next round.',
+    ]);
+    expect(await messagesFrom(db, wendy.id)).toHaveLength(10);
   });
 
   it('count what a turn sent before Hornhoof restarted', async () => {

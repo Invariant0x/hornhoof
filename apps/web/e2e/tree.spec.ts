@@ -27,7 +27,7 @@ for (const lang of ['en', 'ru'] as const) {
           const graph = page.getByRole('group', { name: lang === 'en' ? 'Tree of turn 4' : 'Дерево хода 4' });
           await expect(graph).toBeVisible();
           const labs = page.locator('.tv-labs');
-          if (width === 375) await expect(labs.getByRole('button', { name: /Ostap/ }).getByText('#140', { exact: true })).toBeVisible();
+          await expect(labs.getByRole('button', { name: /Ostap/ })).toContainText('#140 Checkout step 140');
           await expect(labs.getByRole('button', { name: /Bruno/ })).toHaveCount(1);
           await expect(labs.getByRole('button', { name: /Vera/ })).toHaveCount(1);
           await expect(labs.getByRole('button', { name: /Gleb/ })).toHaveCount(1);
