@@ -63,13 +63,18 @@ for (const lang of ['en', 'ru'] as const) {
         page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
         const live = { state: STATES[0]! };
         await serveAgent(page, live);
+        await page.goto('/');
+        await page.getByRole('button', { name: lang === 'en' ? /Development/ : /Разработка/ }).click();
+        const chip = page.getByRole('region', { name: lang === 'en' ? 'Members' : 'Сотрудники' }).getByRole('button', { name: /Bruno/ });
+        await chip.click();
+        await page.getByRole('button', { name: lang === 'en' ? 'Card' : 'Карточка', exact: true }).click();
+        const card = page.getByRole('complementary', { name: 'Bruno', exact: true });
         for (const state of STATES) {
-          live.state = state;
-          await page.goto('/');
-          await page.getByRole('button', { name: lang === 'en' ? /Development/ : /Разработка/ }).click();
-          await page.getByRole('region', { name: lang === 'en' ? 'Members' : 'Сотрудники' }).getByRole('button', { name: /Bruno/ }).click();
-          await page.getByRole('button', { name: lang === 'en' ? 'Card' : 'Карточка', exact: true }).click();
-          const card = page.getByRole('complementary', { name: 'Bruno', exact: true });
+          if (live.state !== state) {
+            live.state = state;
+            await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+          }
+          await expect(chip).toContainText(state[lang]);
           const line = card.getByText(state[lang], { exact: true });
           await expect(line).toBeVisible();
           await expect(line).toHaveClass(state.red ? /alarm/ : /work/);
