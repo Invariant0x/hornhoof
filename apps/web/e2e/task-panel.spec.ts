@@ -19,7 +19,13 @@ async function openPage(page: Page, heading: string, ...buttons: (string | RegEx
   for (const name of buttons) await page.getByRole('button', { name }).click();
   await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible();
 }
-const openTasks = (page: Page) => openPage(page, 'Tasks', /^Tasks/);
+async function openTasks(page: Page) {
+  await openPage(page, 'Tasks', /^Tasks/);
+  await expect(page.getByText('Nothing waits for you.')).toBeVisible();
+  await expect(page.getByRole('combobox', { name: 'Department' })).toBeVisible();
+  await expect(row(page, 1)).toBeVisible();
+  await page.evaluate(() => document.fonts.ready);
+}
 const openImprovements = (page: Page) => openPage(page, 'Improvements', 'Account', 'Improvements');
 
 const row = (page: Page, n: number) => page.getByRole('button', { name: new RegExp(`^#${n} Checkout step ${n}(?!\\d)`) });
@@ -27,7 +33,10 @@ const panelOf = (page: Page, n: number) => page.getByRole('complementary', { nam
 
 /* What scrolls on a page is its main part under the header, not the document. */
 const pageScroll = (page: Page) => page.getByRole('main').evaluate(el => el.scrollTop);
-const scrollPage = (page: Page, top: number) => page.getByRole('main').evaluate((el, y) => el.scrollTo(0, y), top);
+async function scrollPage(page: Page, top: number) {
+  await page.getByRole('main').evaluate((el, y) => el.scrollTo(0, y), top);
+  await expect.poll(() => pageScroll(page)).toBe(top);
+}
 
 /* Each panel that opens over a page: the page, what on it must keep its width and place, and how the panel opens. */
 const PANELS: { name: string; go: (page: Page) => Promise<void>; content: (page: Page) => Locator; open: (page: Page) => Promise<Locator> }[] = [

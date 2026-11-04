@@ -10,9 +10,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TerminalHost } from '../src/terminal/host.js';
 import { jobDone } from '../src/runner.js';
 import { claudeTranscript } from '../src/terminal/programs.js';
-import { restartRefusal } from '../src/terminal/program-restart.js';
+import { restartRefusal, TurnWords } from '../src/terminal/program-restart.js';
 import { Tmux } from '../src/terminal/tmux.js';
-import { claudeQueue, kimiSteer, userMessage } from './fakes/word-receipts.mjs';
+import { claudePasted, claudeQueue, kimiSteer, userMessage } from './fakes/word-receipts.mjs';
 import { codexJob, job, kimiJob, until } from './terminal-host-helpers.js';
 
 const SESSION = 'c3b66b04-872b-4fbe-a3a4-058a026ef20a';
@@ -21,7 +21,7 @@ const runHook = promisify(execFile);
 const TEXT = 'From Hornhoof:\n\nKeep these exact words.';
 const cleanups: (() => Promise<void>)[] = [];
 type Kind = 'claude' | 'codex' | 'kimi';
-type Mode = 'taken' | 'queued' | 'silent' | 'lost' | 'hook' | 'bridge';
+type Mode = 'taken' | 'queued' | 'pasted' | 'silent' | 'lost' | 'hook' | 'bridge';
 
 async function atWork(kind: Kind, mode: Mode) {
   const home = realpathSync(mkdtempSync(join(tmpdir(), 'hh-receipts-')));
@@ -62,7 +62,7 @@ async function atWork(kind: Kind, mode: Mode) {
         else await host['hook']('receipt', 'prompt', { prompt: text });
       } else if (kind === 'claude' && mode !== 'silent') {
         if (mode === 'hook') await host['hook']('receipt', 'prompt', { prompt: text });
-        else record(claudeQueue('enqueue', text));
+        else record(claudeQueue('enqueue', mode === 'pasted' ? claudePasted(text) : text));
       } else if (kind === 'codex' && mode === 'taken') record(userMessage(text));
       else if (kind === 'kimi' && key === 'C-s' && mode !== 'silent') {
         if (mode === 'bridge') {
@@ -360,6 +360,43 @@ describe('program receipts for live words', () => {
     await until(() => c.sent.some(m => m.type === 'job.done' && m.jobId === 'second'));
     c.expire();
     expect(c.unheard()).toEqual([]);
+  });
+
+  it('takes Claude words it records as pasted content, and never hands them out again', async () => {
+    const c = await atWork('claude', 'pasted');
+    expect(await c.host.say('receipt', TEXT)).toBe(true);
+    c.record(claudeQueue('remove', claudePasted(TEXT), { reason: 'absorbed_mid_turn' }));
+    c.finish(); await c.running; c.expire();
+    expect(c.unheard()).toEqual([]);
+    expect(c.sent.find(m => m.type === 'job.done')).not.toMatchObject({ wordsWaiting: true });
+  });
+
+  it("matches Claude's paste wrapper only around the words, never tags inside them", () => {
+    const quoted = (id: string) => `Pasted by the CEO:\n<pasted_content id="${id}">\nThe same words.\n</pasted_content id="${id}">`;
+    const words = new TurnWords();
+    words.add(quoted('1'), 'job-receipt');
+    expect(words.takeQueued(quoted('2'))).toBeNull();
+    expect(words.takeQueued(claudePasted(quoted('2')))).toBeNull();
+    expect(words.takeQueued(claudePasted(quoted('1')))).toEqual({ jobId: 'job-receipt', text: quoted('1') });
+  });
+
+  it('still matches words that are a whole paste block when the program records them as they are', () => {
+    const block = '<pasted_content id="1">\nThe CEO pasted only this.\n</pasted_content id="1">';
+    const words = new TurnWords();
+    words.add(block, 'job-receipt');
+    expect(words.takeQueued(block)).toEqual({ jobId: 'job-receipt', text: block });
+  });
+
+  it("opens Claude's own turn on pasted words with their job and Hornhoof's words", async () => {
+    const c = await atWork('claude', 'pasted');
+    expect(await c.host.say('receipt', TEXT)).toBe(true);
+    c.finish();
+    c.record(claudeQueue('dequeue', claudePasted(TEXT)));
+    c.record({ type: 'user', message: { role: 'user', content: claudePasted(TEXT) } });
+    c.drain();
+    await c.running;
+    await until(() => c.sent.some(m => m.type === 'turn.open'));
+    expect(c.sent.find(m => m.type === 'turn.open')).toMatchObject({ type: 'turn.open', text: TEXT, queuedFrom: 'job-receipt' });
   });
 
   it.each(['silent', 'lost'] as const)('retries Claude %s words once, says false and erases input', async mode => {
