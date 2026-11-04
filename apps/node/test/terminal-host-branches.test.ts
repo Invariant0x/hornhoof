@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { AgentEvent, NodeMessage } from '@hornhoof/protocol';
@@ -22,7 +22,7 @@ const until = async (check: () => boolean) => {
 };
 
 function fixture(kind: Kind | null = 'claude') {
-  const home = mkdtempSync(join(tmpdir(), 'hh-host-branches-'));
+  const home = realpathSync(mkdtempSync(join(tmpdir(), 'hh-host-branches-')));
   folders.push(home);
   const workDir = join(home, 'work');
   mkdirSync(workDir);
