@@ -16,6 +16,7 @@ import { SortTable, type TableColumn } from '../ui/SortTable';
 import { planStateOnMachine, subName } from '../ui/subscription';
 import { useNow } from '../ui/reset';
 import { ProgramVersions } from '../ui/ProgramVersions';
+import { RouteUnavailable, unavailableFailure, type CardRoute } from './RouteUnavailable';
 
 const REFRESH_MS = 5000;
 const GIB = 1024 ** 3;
@@ -287,7 +288,7 @@ function MachineDetails({ row, subs, me, now, controls }: { row: MachineRow; sub
   );
 }
 
-export function Machines({ me }: { me: Me }) {
+export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRoute) {
   const t = useT();
   const { language } = useLanguage();
   const now = useNow();
@@ -390,6 +391,8 @@ export function Machines({ me }: { me: Me }) {
   const online = (machines ?? []).filter(m => m.online || (m === host && builtin!.online)).length + (apart?.online ? 1 : 0);
   const activeCommand = liveCommand(command, now);
   const openIds = openCommandIds(addCommands, now);
+  const rows = machineRows(machines ?? [], builtin, subs, t.machines.builtin);
+  if (unavailableFailure(failure) || (selected && machines && !rows.some(row => row.id === selected))) return <RouteUnavailable onHome={onHome} />;
 
   return (
     <section className="people machines">
@@ -420,7 +423,9 @@ export function Machines({ me }: { me: Me }) {
       {machines && machines.length === 0 && !builtin && <p className="muted">{t.machines.noMachines}</p>}
       {machines && (machines.length > 0 || builtin) && (
         <SortTable
-          rows={machineRows(machines, builtin, subs, t.machines.builtin)}
+          rows={rows}
+          selectedId={selected}
+          onSelect={onSelect}
           columns={machineColumns(t, language)}
           name={row => row.hostname}
           openIds={openIds}

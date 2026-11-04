@@ -1,3 +1,4 @@
+import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 import { useEffect, useRef, useState } from 'react';
 import { api, ApiFailure } from '../api';
 import { errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
@@ -374,7 +375,7 @@ function SubscriptionDetails({ sub: s, me, controls, now }: PlanProps & { now: n
   );
 }
 
-export function Subscriptions({ me }: { me: Me }) {
+export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
   const t = useT();
   const { language } = useLanguage();
   const now = useNow();
@@ -394,7 +395,7 @@ export function Subscriptions({ me }: { me: Me }) {
     };
   }, []);
 
-  const { subs, setSubs, commands, load, connected, newCommand: requestCommand, dismissCommand } = usePlanCommands(live, setFailure);
+  const { subs, setSubs, commands, load, connected, newCommand: requestCommand, dismissCommand, failure: readFailure } = usePlanCommands(live, setFailure);
   const newCommand = (sub: SubView) => run(() => requestCommand(sub));
   const onConnected = (shown: ActiveCommand, added: SubView[]) => { setConnecting(false); connected(shown, added); };
 
@@ -458,6 +459,8 @@ export function Subscriptions({ me }: { me: Me }) {
       await api.del(`/api/subscriptions/${sub.id}`);
       await load();
     });
+
+  if (unavailableFailure(readFailure)) return <RouteUnavailable onHome={onHome} />;
 
   return (
     <section className="people subs">

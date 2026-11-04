@@ -2,6 +2,11 @@ import { summary, type Messages } from './en';
 import { plural } from './plural';
 
 export const ru: Messages = {
+  routes: {
+    unavailable: 'Не найдено или нет доступа',
+    explanation: 'Возможно, страница перемещена или у вас нет к ней доступа.',
+    home: 'На карту',
+  },
   notificationSources: {
     assigned: 'поручение задачи',
     review: 'проверка на воротах',

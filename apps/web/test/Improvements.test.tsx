@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Shell } from '../src/screens/Shell';
 import type { Improvement, Me } from '../src/types';
-import { decisions, DEV_ORG, ME, mockApi, TASK_DETAIL } from './api-mock';
+import { decisions, DEV_ORG, ME, mockApi, TASK_DETAIL, TASKS } from './api-mock';
 import { fakeStream } from './fake-stream';
 
 const base = { seen: 1, result: null, at: '2026-10-31T09:00:00.000Z', updatedAt: '2026-10-31T09:00:00.000Z', decidedBy: null };
@@ -54,6 +54,8 @@ function shell(routes: Record<string, unknown> = {}, me: Me = ME, onSignOut: () 
     'GET /api/org': [200, DEV_ORG],
     'GET /api/requests': [200, decisions([])],
     'GET /api/improvements': [200, { improvements: IMPROVEMENTS }],
+    'GET /api/tasks?status=all': [200, { tasks: TASKS }],
+    'GET /api/turns': [200, { turns: [] }],
     ...(routes as Record<string, [number, unknown]>),
   });
   render(
@@ -177,13 +179,16 @@ describe('improvements', () => {
     const taken = within(screen.getByRole('region', { name: 'In work' })).getByRole('article', { name: 'Let reviewers run the tests without asking' });
     expect(within(taken).getByText('Related tasks')).toBeInTheDocument();
     const firstLink = within(taken).getByRole('button', { name: '#12 Checkout API' });
-    const secondLink = within(taken).getByRole('button', { name: '#13 Refunds' });
+    expect(within(taken).getByRole('button', { name: '#13 Refunds' })).toBeInTheDocument();
     const done = within(screen.getByRole('region', { name: 'Done' })).getByRole('article', { name: 'Move security to Kimi' });
     expect(within(done).getAllByRole('button', { name: /^#/ })).toHaveLength(1);
     await user.click(firstLink);
     expect(await screen.findByRole('complementary', { name: '#12 Checkout API' })).toBeInTheDocument();
-    await user.click(secondLink);
+    expect(location.pathname).toBe('/tasks/t12');
+    await openImprovements(user);
+    await user.click(screen.getByRole('button', { name: '#13 Refunds' }));
     expect(await screen.findByRole('complementary', { name: '#13 Refunds' })).toBeInTheDocument();
+    expect(location.pathname).toBe('/tasks/t13');
   });
 
   it('keeps taken out of the open count and shows Take only for open improvements', async () => {
@@ -314,6 +319,7 @@ describe('improvements', () => {
     await user.keyboard('{Enter}');
     const improvements = await screen.findByRole('button', { name: 'Improvements, 1 to decide' });
     const versions = screen.getByRole('button', { name: 'Versions' });
+    const profile = screen.getByRole('button', { name: 'Settings' });
     const shareAccess = screen.getByRole('button', { name: 'Share access' });
     const about = screen.getByRole('button', { name: 'About' });
     const logout = screen.getByRole('button', { name: 'Log out' });
@@ -321,6 +327,8 @@ describe('improvements', () => {
     expect(improvements).toHaveFocus();
     await user.tab();
     expect(versions).toHaveFocus();
+    await user.tab();
+    expect(profile).toHaveFocus();
     await user.tab();
     expect(shareAccess).toHaveFocus();
     await user.tab();
