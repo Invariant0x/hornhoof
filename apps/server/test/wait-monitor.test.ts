@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agents, jobs, tasks, turns } from '../src/db/schema.js';
+import { agents, departments, jobs, requests, tasks, testRuns, turns } from '../src/db/schema.js';
 import { minuteRound } from '../src/modules/agents/timers.js';
 import { checkWaitHealth } from '../src/modules/tasks/wait-monitor.js';
 import { waitCompany } from './wait-company.js';
@@ -43,6 +43,17 @@ describe('waiting cycles', () => {
     if (length === 3) expect(notices[0]!.data).toMatchObject({ text: expect.stringContaining('Result from Cora') });
   });
 
+  it('reports a recreated cycle as a new incident', async () => {
+    const c = await cycle(2);
+    await checkWaitHealth(c.ctx, c.now);
+    const task = (await c.db.select().from(tasks).where(eq(tasks.id, c.work[0]!.id)))[0]!;
+    await c.db.update(tasks).set({ version: task.version + 1, externalWait: { ...task.externalWait!, reason: 'Acceptance after retry' } }).where(eq(tasks.id, task.id));
+    await checkWaitHealth(c.ctx, new Date(c.now.getTime() + MINUTE));
+    const notices = await c.messages(c.orchestrator.id);
+    expect(notices).toHaveLength(2);
+    expect(notices[1]!.data).toMatchObject({ text: expect.stringContaining('Acceptance after retry') });
+  });
+
   it('does not call a chain ending at an external event a cycle', async () => {
     const c = await cycle(2);
     await c.db.update(tasks).set({ externalWait: { reason: 'Machine', since: c.now.toISOString(), until: new Date(c.now.getTime() + 60 * MINUTE).toISOString() } }).where(eq(tasks.id, c.work[1]!.id));
@@ -52,6 +63,21 @@ describe('waiting cycles', () => {
 });
 
 describe('quiet departments', () => {
+  it('does not treat a turn that never started as recent work', async () => {
+    const c = await quietDepartment();
+    await c.db.insert(jobs).values({ companyId: c.companyId, agentId: c.agent.id, subscriptionId: c.sub.id, kind: 'conversation', prompt: 'Unsent', status: 'failed', error: 'send_failed', finishedAt: c.now, timeoutMs: 1000 });
+    await checkWaitHealth(c.ctx, c.now);
+    expect(await c.messages(c.watcher.id)).toHaveLength(1);
+  });
+
+  it('counts running work on a department task assigned outside the department', async () => {
+    const c = await quietDepartment();
+    await c.db.update(tasks).set({ assigneeAgentId: c.orchestrator.id }).where(eq(tasks.id, c.taskRow.id));
+    await c.run(c.orchestrator.id, c.taskRow.id);
+    await checkWaitHealth(c.ctx, c.now);
+    expect(await c.messages(c.watcher.id)).toEqual([]);
+  });
+
   it('checks quiet waits in the minute round', async () => {
     const c = await quietDepartment();
     const errors: unknown[] = [];
@@ -115,4 +141,31 @@ describe('quiet departments', () => {
     await checkWaitHealth(c.ctx, c.now);
     expect(await c.messages(c.watcher.id)).toHaveLength(1);
   });
+  it.each(['blocked', 'waiting', 'prerequisite', 'person', 'run'] as const)('recognizes a %s wait without an external timer', async kind => {
+    const c = await quietDepartment();
+    await c.db.update(tasks).set({ externalWait: null, ...(kind === 'blocked' || kind === 'waiting' ? { status: kind } : {}) }).where(eq(tasks.id, c.taskRow.id));
+    if (kind === 'prerequisite') {
+      const prerequisite = await c.task();
+      await c.db.update(tasks).set({ departmentId: c.watcher.departmentId }).where(eq(tasks.id, prerequisite.id));
+      await c.db.update(tasks).set({ after: [prerequisite.id] }).where(eq(tasks.id, c.taskRow.id));
+    }
+    if (kind === 'person') await c.db.insert(requests).values({ companyId: c.companyId, taskId: c.taskRow.id, agentId: c.agent.id, kind: 'question', text: 'Confirm acceptance.' });
+    if (kind === 'run') {
+      const run = await c.run();
+      await c.db.update(jobs).set({ status: 'done', finishedAt: new Date(c.now.getTime() - 16 * MINUTE) }).where(eq(jobs.id, run.job.id));
+      await c.db.insert(testRuns).values({ companyId: c.companyId, taskId: c.taskRow.id, agentId: c.agent.id, jobId: run.job.id, number: 1, command: 'npm test', timeoutMs: 3_600_000 });
+    }
+    await checkWaitHealth(c.ctx, c.now);
+    expect(await c.messages(c.watcher.id)).toHaveLength(1);
+  });
+
+  it('counts work in a descendant department as work', async () => {
+    const c = await quietDepartment();
+    const [child] = await c.db.insert(departments).values({ companyId: c.companyId, parentId: c.dev.id, name: 'API', roleCode: 'API' }).returning();
+    await c.db.update(agents).set({ departmentId: child!.id }).where(eq(agents.id, c.agent.id));
+    await c.run();
+    await checkWaitHealth(c.ctx, c.now);
+    expect(await c.messages(c.watcher.id)).toEqual([]);
+  });
+
 });

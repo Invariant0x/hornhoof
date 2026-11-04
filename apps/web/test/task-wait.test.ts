@@ -24,6 +24,12 @@ describe('named wait labels', () => {
     expect(segmentText(ru, segment(named), wait.since)).toBe(`ждет: Acceptance; событие: ${russian}, до 16:30`);
   });
 
+  it.each([undefined, ''])('names an employee when its saved name is missing or empty', name => {
+    const named = { ...wait, on: { kind: 'employee', employee: 'head', name } as const };
+    expect(segmentText(en, segment(named), wait.since)).toBe('waits for an employee: Acceptance, until 16:30');
+    expect(segmentText(ru, segment(named), wait.since)).toBe('ждет: Acceptance; сотрудник: сотрудник, до 16:30');
+  });
+
   it('retains both legacy labels', () => {
     expect(segmentText(en, segment(wait), wait.since)).toBe('waits: Acceptance, until 16:30');
     expect(segmentText(ru, segment(wait), wait.since)).toBe('ждет: Acceptance, до 16:30');
