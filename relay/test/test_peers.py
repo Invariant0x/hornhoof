@@ -25,7 +25,8 @@ if __package__:
 else:
     from harness import Stack, _request, _wait
 
-ROOT = Path(__file__).resolve().parents[2]
+# Not resolve(): a mutator worker symlinks this file, and its own copy of relay.py must be the one that loads.
+ROOT = Path(__file__).absolute().parents[2]
 M8 = '3f2a9c1b'
 
 

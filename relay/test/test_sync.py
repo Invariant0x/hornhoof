@@ -168,8 +168,10 @@ class SyncTests(unittest.TestCase):
     def test_r2_4_unknown_frps(self) -> None:
         tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sync-nodash-'))
         with Stack(tmp, dashboard=False) as stack:
-            binding = stack.bind('acme')
-            status, body = stack.api('POST', '/api/v1/links/acme/sync', POST, key=binding['key'])
+            binding = stack.bind()
+            name = binding['name']
+            post = dict(POST, client=f'{name}-aaaaaaaa-link')
+            status, body = stack.api('POST', f'/api/v1/links/{name}/sync', post, key=binding['key'])
             self.assertEqual(status, 503, body)
             self.assertEqual(body['error'], 'unknown')
             self.assertIsNone(self.stored(stack))
