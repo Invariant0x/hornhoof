@@ -1,9 +1,9 @@
-import { render, screen, within } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useRef } from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
-import { framedPanel, SidePanelRow, useSidePanels, type SidePanel } from '../src/ui/SidePanels';
+import { framedPanel, SidePanelRow, usePanelsCover, useSidePanels, type SidePanel } from '../src/ui/SidePanels';
 
 const NOTE: SidePanel = framedPanel('note', 'Note', 'M0 0', <label>Text<textarea aria-label="Note text" /></label>);
 const OTHER: SidePanel = framedPanel('other', 'Other', 'M0 0', 'What the other says');
@@ -36,6 +36,101 @@ function show(panels: SidePanel[], props: { active?: boolean; onEscape?(): void 
 }
 
 const toggle = (id: string) => screen.getByRole('button', { name: `Toggle ${id}` });
+
+/* A window that says whether its open panels cover what stands under them. theme.css does the placing, so the test sets where
+   each part ends up. */
+function CoveringWindow({ open }: { open: boolean }) {
+  const row = useRef<HTMLDivElement>(null);
+  const under = useRef<HTMLDivElement>(null);
+  const covered = usePanelsCover(row, under, open);
+  return (
+    <>
+      <div ref={row} data-testid="row" />
+      <div ref={under} data-testid="under" />
+      <p role="status">{covered ? 'covered' : 'in sight'}</p>
+    </>
+  );
+}
+
+function placeAt(places: { row: number; left: number; width: number }) {
+  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+    const right = (this as HTMLElement).dataset.testid === 'row' ? places.row : places.left + places.width;
+    return { left: places.left, right, width: places.width } as DOMRect;
+  });
+}
+
+class FakeResizeObserver {
+  static all: FakeResizeObserver[] = [];
+  watched: Element[] = [];
+  gone = false;
+  constructor(private tell: () => void) {
+    FakeResizeObserver.all.push(this);
+  }
+  observe(el: Element) {
+    this.watched.push(el);
+  }
+  disconnect() {
+    this.gone = true;
+  }
+  resized() {
+    act(() => this.tell());
+  }
+}
+
+describe('what open panels cover', () => {
+  const status = () => screen.getByRole('status').textContent;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    FakeResizeObserver.all = [];
+  });
+
+  it('is nothing while the row ends where what is under it begins, or left of that', () => {
+    placeAt({ row: 100, left: 100, width: 500 });
+    render(<CoveringWindow open />);
+    expect(status()).toBe('in sight');
+  });
+
+  it('is what is under the row once the row reaches over it', () => {
+    placeAt({ row: 101, left: 100, width: 500 });
+    render(<CoveringWindow open />);
+    expect(status()).toBe('covered');
+  });
+
+  it('is what has made way for the panels, wherever the row ends', () => {
+    placeAt({ row: 0, left: 100, width: 0 });
+    render(<CoveringWindow open />);
+    expect(status()).toBe('covered');
+  });
+
+  it('is nothing with no panel open, wherever things stand, and asks the page nothing', () => {
+    vi.stubGlobal('ResizeObserver', FakeResizeObserver);
+    placeAt({ row: 900, left: 100, width: 500 });
+    render(<CoveringWindow open={false} />);
+    expect(status()).toBe('in sight');
+    expect(FakeResizeObserver.all).toEqual([]);
+  });
+
+  it('follows the row and what is under it as they change size, and the screen', () => {
+    vi.stubGlobal('ResizeObserver', FakeResizeObserver);
+    const places = { row: 100, left: 100, width: 500 };
+    placeAt(places);
+    const { unmount } = render(<CoveringWindow open />);
+    const [watch] = FakeResizeObserver.all;
+    expect(watch!.watched).toEqual([screen.getByTestId('row'), screen.getByTestId('under')]);
+    expect(status()).toBe('in sight');
+    places.row = 400;
+    watch!.resized();
+    expect(status()).toBe('covered');
+    places.row = 100;
+    act(() => { window.dispatchEvent(new Event('resize')); });
+    expect(status()).toBe('in sight');
+    unmount();
+    expect(watch!.gone).toBe(true);
+    places.row = 400;
+    expect(() => window.dispatchEvent(new Event('resize'))).not.toThrow();
+  });
+});
 
 describe('side panels', () => {
   it('opens a panel with one line in a list, in the usual frame with its name and a close button', async () => {

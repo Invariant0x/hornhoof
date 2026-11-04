@@ -66,6 +66,57 @@ describe('shareable workspace', () => {
     expect(tab('People')).toHaveAttribute('aria-current', 'page');
   });
 
+  it('keeps the department under its task through close, history and related tasks', async () => {
+    fixture({
+      'GET /api/tasks?status=open&department=d2': [200, { tasks: TASKS }],
+      'GET /api/tasks/t10': [200, { task: { ...TASK_DETAIL, id: 't10', number: 10, title: 'Payments', parent: null } }],
+    });
+    history.replaceState(null, '', '/departments/d2');
+    render(<Shell me={ME} onSignOut={() => {}} />);
+    const user = userEvent.setup();
+    const department = await screen.findByRole('heading', { name: 'Development' });
+    await user.click(screen.getByRole('button', { name: 'Department tasks' }));
+    await user.click(await within(screen.getByRole('region', { name: 'Tasks' })).findByRole('button', { name: /#12 Checkout API/ }));
+    const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
+    expect(location.pathname).toBe('/tasks/t12');
+    expect(department).toBeVisible();
+    const comment = within(panel).getByRole('textbox', { name: 'Comment' });
+    await user.type(comment, 'Keep this task draft');
+    await user.click(screen.getByRole('button', { name: 'Account' }));
+    await user.click(screen.getByRole('button', { name: 'About' }));
+    await screen.findByRole('dialog', { name: 'About Hornhoof' });
+    expect(department).toBeVisible();
+    expect(panel).toBeVisible();
+    await user.keyboard('{Escape}');
+    expect(location.pathname).toBe('/tasks/t12');
+    expect(comment).toHaveValue('Keep this task draft');
+    await user.click(within(panel).getByRole('button', { name: 'Close' }));
+    expect(location.pathname).toBe('/departments/d2');
+    expect(department).toBeVisible();
+    await act(async () => {
+      const popped = new Promise<void>(resolve => globalThis.window.addEventListener('popstate', () => resolve(), { once: true }));
+      history.back();
+      await popped;
+    });
+    expect(location.pathname).toBe('/tasks/t12');
+    expect(department).toBeVisible();
+    await user.click(within(await screen.findByRole('complementary', { name: '#12 Checkout API' })).getByRole('button', { name: '#10 Payments' }));
+    const parent = await screen.findByRole('complementary', { name: '#10 Payments' });
+    expect(department).toBeVisible();
+    await user.click(within(parent).getByRole('button', { name: 'Close' }));
+    expect(location.pathname).toBe('/departments/d2');
+  });
+
+  it('closes a directly shared task to its task list', async () => {
+    fixture();
+    history.replaceState(null, '', '/tasks/t12');
+    render(<Shell me={ME} onSignOut={() => {}} />);
+    const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
+    expect(screen.getByRole('heading', { name: 'Tasks' })).toBeVisible();
+    await userEvent.setup().click(within(panel).getByRole('button', { name: 'Close' }));
+    expect(location.pathname).toBe('/tasks');
+  });
+
   it('retains the local deep link after login and ignores an external return parameter', async () => {
     let signedIn = false;
     fixture({ 'GET /api/me': () => signedIn ? [200, ME] : [401, signedOut], 'POST /api/auth/login': () => { signedIn = true; return [200, { person: ME.person }]; } });

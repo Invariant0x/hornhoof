@@ -52,7 +52,17 @@ describe('workspace addresses', () => {
   it('ignores an external dialog background in a browser history entry', () => {
     history.replaceState({ hhBackground: 'https://outside.example' }, '', '/about');
     const { result } = renderHook(() => useRoute());
-    act(() => result.current.navigate(result.current.background));
+    act(() => result.current.closeOverlay());
+    expect(location.pathname).toBe('/');
+    expect(location.host).toBe('localhost:3000');
+  });
+
+  it('keeps nested return paths local and ignores malformed underlays', () => {
+    history.replaceState({ hhBackground: '/tasks/t12', hhUnderlays: ['https://outside.example', 8] }, '', '/about');
+    const { result } = renderHook(() => useRoute());
+    act(() => result.current.closeOverlay());
+    expect(location.pathname).toBe('/tasks/t12');
+    act(() => result.current.closeOverlay());
     expect(location.pathname).toBe('/');
     expect(location.host).toBe('localhost:3000');
   });

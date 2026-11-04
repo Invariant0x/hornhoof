@@ -14,9 +14,10 @@ it('preserves existing company, job, event and attachment data when adding empty
   await cp(MIGRATIONS, previous, { recursive: true });
   const journalFile = join(previous, 'meta', '_journal.json');
   const journal = JSON.parse(await readFile(journalFile, 'utf8')) as { entries: { tag: string }[] };
-  const operator = journal.entries.at(-1)!;
-  expect(operator.tag).toMatch(/^\d{4}_program_operator$/);
-  journal.entries.pop();
+  const at = journal.entries.findIndex(entry => /^\d{4}_program_operator$/.test(entry.tag));
+  expect(at).toBeGreaterThan(-1);
+  const operator = journal.entries[at]!;
+  journal.entries.splice(at);
   await writeFile(journalFile, JSON.stringify(journal));
   const db = drizzle(client);
   await migrate(db, { migrationsFolder: previous });

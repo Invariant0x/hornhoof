@@ -74,3 +74,21 @@ The independent review reproduced a machine card hidden by search after Back and
 - Thirty screenshots attached to #302 cover all language/theme/viewport combinations. The per-turn upload cap stopped the remaining 19 images and the raw evidence archive; local artifacts are retained.
 
 Delivery concerns: large existing components remain above CRAP 10; Shell grew from CC50 to CC80 (CRAP80.7). Server fallback and real server authorization are verified by #303 and #291, respectively, rather than these mocked browser fixtures. Existing jsdom canvas warnings remain.
+
+## Routing follow-up, task #332
+
+The follow-up is based on `turn-7@7b1980e1`, including #292. It corrects the document reload assertion in `hub-turn.spec.ts`, retains the page underneath a routed task, and keeps the department drawer and task comment mounted beneath an account dialog. History stores safe local background paths for both layers. Direct task links still close to the task list. The People and Tasks fixtures now answer their list APIs successfully instead of relying on the former treatment of 404 responses.
+
+Release note for 0.7.0: Changing a main tab closes the task and changes the address; Back reopens it, and closing a task opened from an improvement or department returns there.
+
+Verification:
+
+- RED: all eight hub-turn scenarios reported five navigations instead of one; four task-panel scenarios failed. New unit assertions reproduced the missing improvement/department and the lost comment under About.
+- `npm test -w apps/web -- test/Routing.test.tsx test/routes.test.tsx test/Improvements.test.tsx test/AgentWindowLayout.test.tsx test/Department.test.tsx test/Shell.test.tsx test/AgentWindows.test.tsx test/Tasks.test.tsx test/TaskPanel.test.tsx --maxWorkers=1`: 283 passed. The same selected files passed with V8 coverage. Changed executable lines: routes 19/19, Shell 13/13.
+- `HORNHOOF_BROWSER_PORT=4193 npm run test:browser -w apps/web -- e2e/routes.spec.ts e2e/hub-turn.spec.ts e2e/task-panel.spec.ts --workers=2`: 93 passed after integration and source restoration. The eight new matrix cases cover both task origins, nested About, retained comment drafts, Escape, history and close destinations in EN/RU, light/dark and 1440/375. Sixteen corresponding screenshots are retained with the task evidence.
+- `npm run typecheck:tests`, `npx --no-install tsc -p apps/web/tsconfig.json --noEmit`, ESLint on the ten changed TS/TSX files and `git diff --check`: exit 0.
+- Four deliberate fault checks failed at the expected assertions: missing task background, dropped nested context, Escape closing the task under About, and document reload on tab navigation. The reload reached the document identity assertion and failed because its original context no longer existed. Source restoration was checked with SHA-256 before the final green runs.
+- Crapper using fresh LCOV with only SF paths normalized: new functions at most CRAP 8; the existing Shell remains CC85, coverage 95.6%, CRAP85.6. Dryer at 0.8 found no duplicate candidates.
+- Independent read-only review reproduced the nested dialog defect and rechecked the fix in Chromium for both origins and direct tasks, including Back/Forward and reload of the nested history entry. No remaining blocking findings; console/page errors were empty.
+
+An initial coverage run with unrestricted workers contended with browser and type checks and was stopped. Its browser timeout is not counted as a pass; the integrated runs above completed with the original assertion and time limits. Existing jsdom canvas warnings and Shell complexity remain delivery concerns. Hosting fallback and real server authorization remain owned by #303 and #291.

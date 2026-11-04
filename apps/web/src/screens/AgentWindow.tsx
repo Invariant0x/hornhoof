@@ -20,7 +20,7 @@ import { StaffCard } from '../ui/StaffCard';
 import { StructureCard } from '../ui/StructureCard';
 import { orchestratorStatus } from './Map';
 import { clock } from './Subscriptions';
-import { AgentWindowLayout, type WindowPlace } from './AgentWindowLayout';
+import { AgentWindowLayout, WordButton, type WindowPlace } from './AgentWindowLayout';
 
 /* The most events the server sends at a time. */
 const PAGE = 500;
@@ -30,6 +30,7 @@ const POLL_MS = 15_000;
 const CATCH_UP_MS = 300;
 const NOTEBOOK_ICON = 'M6 4h11v16H6zM9 4v16M12 9h3M12 13h3';
 const CARD_ICON = 'M4 7h10M18 7h2M4 17h4M12 17h8M14 4v6M8 14v6';
+const STOP_ICON = 'M7 7h10v10H7z';
 
 type Applied = {
   proposalId: string | null;
@@ -590,11 +591,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
 
   return (
     <AgentWindowLayout currentTask={card?.currentTask} box={box} terminal={terminal} title={title} onClose={onClose} agentState={card?.state} place={place} requests={requests} onRequestsChanged={onRequestsChanged} panels={sidePanels} toolbar={<>
-        {terminal && state?.busy && (
-          <button className="btn small ghost" type="button" onClick={stop}>
-            {t.window.stop}
-          </button>
-        )}
+        {terminal && state?.busy && <WordButton label={t.window.stop} icon={STOP_ICON} onClick={stop} />}
         {hasTerminal && (
           <button type="button" aria-label={asLog ? t.window.showTerminal : t.window.showLog} title={asLog ? t.window.showTerminal : t.window.showLog} onClick={() => setAsLog(v => !v)}>
             <svg viewBox="0 0 24 24" aria-hidden="true">

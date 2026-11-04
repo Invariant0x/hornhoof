@@ -192,18 +192,20 @@ function AgentWindowError({ shown, org, failure }: { shown: string | null; org: 
 /* welcome: setup just finished, so the orchestrator's window opens at once. */
 export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: boolean; onSignOut: () => void }) {
   const t = useT();
-  const { route, navigate, background } = useRoute();
+  const { route, navigate, backgrounds, closeOverlay } = useRoute();
   const accountDialog = dialogOf(route);
-  const tab = route.kind === 'department' || accountDialog ? 'map' : route.kind;
-  const taskId = route.kind === 'tasks' ? route.id ?? null : null;
-  const deptId = route.kind === 'department' ? route.id : null;
+  const contentRoute = accountDialog ? backgrounds[0]! : route;
+  const taskId = contentRoute.kind === 'tasks' ? contentRoute.id ?? null : null;
+  const pageRoute = taskId ? backgrounds[accountDialog ? 1 : 0] ?? { kind: 'tasks' } as const : contentRoute;
+  const tab = pageRoute.kind === 'department' ? 'map' : pageRoute.kind;
+  const deptId = pageRoute.kind === 'department' ? pageRoute.id : null;
   const goHome = () => navigate({ kind: 'map' });
   const openAccount = (kind: AccountDialogName) => navigate({ kind }, route);
   const [menu, setMenu] = useState(false);
   const [selfName, setSelfName] = useState(me.person.name);
   const currentMe = { ...me, person: { ...me.person, name: selfName } };
   const company = me.person.scopeKind === 'company';
-  const denied = !company && ['improvements', 'settings', 'versions'].includes(route.kind);
+  const denied = !company && ['improvements', 'settings', 'versions'].some(kind => kind === route.kind || kind === pageRoute.kind);
   /* The orchestrator's window opens over the map, for people who see the whole company. */
   const windows = useAgentWindows(welcome && company ? 'orchestrator' : null);
   /* A task's panel stands on the left, on its own: it and a window on the screen take each other's place. */
@@ -216,13 +218,13 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
     if (taskId) hideWindow();
   }, [taskId, hideWindow]);
   const openAgent = useCallback((agentId: string) => {
-    if (taskId) navigate({ kind: 'tasks' });
+    if (taskId) navigate(pageRoute);
     openWindow(agentId);
-  }, [openWindow, taskId, navigate]);
+  }, [openWindow, taskId, navigate, pageRoute]);
   const openTask = useCallback((id: string) => {
     hideWindow();
-    navigate({ kind: 'tasks', id });
-  }, [hideWindow, navigate]);
+    navigate({ kind: 'tasks', id }, pageRoute);
+  }, [hideWindow, navigate, pageRoute]);
   const shownPanel = windows.shown ? 'window' : taskId ? 'task' : null;
   const dept = deptId ? org?.departments.find(d => d.id === deptId) : undefined;
   const missingDepartment = deptId !== null && (unavailableFailure(orgFailure) || (org !== null && !dept));
@@ -341,7 +343,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
             onHome={goHome}
             decisions={decisions.all}
             onDecisionsChanged={decisions.load}
-            personId={route.kind === 'tasks' ? route.personId ?? null : null}
+            personId={pageRoute.kind === 'tasks' ? pageRoute.personId ?? null : null}
             onClearPerson={() => navigate({ kind: 'tasks' })}
             selected={taskId}
             onOpenTask={openTask}
@@ -349,9 +351,9 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
             onOpenOrchestrator={company ? () => openAgent('orchestrator') : undefined}
           />
         )}
-        {route.kind === 'people' && <People me={currentMe} selected={route.id ?? null} onSelect={id => navigate(id ? { kind: 'people', id } : { kind: 'people' })} onHome={goHome} />}
+        {pageRoute.kind === 'people' && <People me={currentMe} selected={pageRoute.id ?? null} onSelect={id => navigate(id ? { kind: 'people', id } : { kind: 'people' })} onHome={goHome} />}
         {tab === 'subscriptions' && <Subscriptions me={me} onHome={goHome} />}
-        {route.kind === 'machines' && <Machines me={me} selected={route.id ?? null} onSelect={id => navigate(id ? { kind: 'machines', id } : { kind: 'machines' })} onHome={goHome} />}
+        {pageRoute.kind === 'machines' && <Machines me={me} selected={pageRoute.id ?? null} onSelect={id => navigate(id ? { kind: 'machines', id } : { kind: 'machines' })} onHome={goHome} />}
         {tab === 'improvements' && company && <Improvements improvements={improvements} failure={improvementsFailure} onChanged={loadImprovements} onTask={openTask} onHome={goHome} />}
       </main>
       <AgentWindows windows={windows} onOpen={openAgent} me={me} org={org} staff={staff} requests={decisions.requests} onRequestsChanged={decisions.load} />
@@ -359,7 +361,8 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
         <TaskPanel
           key={taskId}
           taskId={taskId}
-          onClose={() => navigate({ kind: 'tasks' })}
+          active={!accountDialog && !menu}
+          onClose={() => navigate(pageRoute)}
           onOpen={openTask}
           onHome={goHome}
           requests={decisions.requestsOf(taskId)}
@@ -367,7 +370,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
           onOpenAgent={openAgent}
         />
       )}
-      <AccountDialog active={!company && (accountDialog === 'settings' || accountDialog === 'versions') ? null : accountDialog} me={currentMe} updates={updates} onHome={goHome} onRenamed={setSelfName} onClose={() => { navigate(background); accountButton.current?.focus(); }} />
+      <AccountDialog active={!company && (accountDialog === 'settings' || accountDialog === 'versions') ? null : accountDialog} me={currentMe} updates={updates} onHome={goHome} onRenamed={setSelfName} onClose={() => { closeOverlay(); accountButton.current?.focus(); }} />
     </div>
     </AgentWindowContext>
   );

@@ -103,3 +103,14 @@ for (const lang of ['en', 'ru'] as const) {
     }
   }
 }
+
+/* A stream a mock ended brings the browser back within seconds, and on each return the whole app fetches what it missed: pages
+   then keep working on their own, and tests time out on a busy machine. It has to stay open. */
+test('an idle page keeps its stream and asks for nothing again', async ({ page }) => {
+  const { errors } = await openTree(page, 'en', 'dark', 1440);
+  const asked: string[] = [];
+  page.on('request', r => asked.push(new URL(r.url()).pathname));
+  await page.waitForTimeout(5000);
+  expect(asked.filter(path => path === '/api/stream' || path === '/api/org')).toEqual([]);
+  expect(errors).toEqual([]);
+});

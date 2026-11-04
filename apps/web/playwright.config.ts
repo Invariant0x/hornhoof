@@ -12,8 +12,16 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   reporter: 'list',
-  /* Match UTC clock fixtures regardless of the host timezone. */
-  use: { baseURL: `http://localhost:${PORT}`, trace: 'retain-on-failure', timezoneId: 'UTC' },
+  use: {
+    baseURL: `http://localhost:${PORT}`,
+    /* Without a GPU every frame is drawn on the CPU, so a page kept rendering takes a whole core from the tests around it, idle
+       or not. Running animations and a trace's screenshots each keep it rendering. A failure still keeps the trace's DOM
+       snapshots, and e2e/motion.spec.ts asks for motion where it checks motion. */
+    reducedMotion: 'reduce',
+    trace: { mode: 'retain-on-failure', screenshots: false },
+    /* Match UTC clock fixtures regardless of the host timezone. */
+    timezoneId: 'UTC',
+  },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'], channel: process.env.PLAYWRIGHT_CHANNEL } }],
   /* A browser check owns its server; another checkout can have different code or live edits. */
   webServer: { command: `vite --mode browser-test --port ${PORT} --strictPort`, url: `http://localhost:${PORT}`, reuseExistingServer: false },
