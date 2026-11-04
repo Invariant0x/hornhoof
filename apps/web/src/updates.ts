@@ -38,6 +38,18 @@ function turnsCut(err: unknown): number | null {
   return typeof turns === 'number' ? turns : null;
 }
 
+/* confirmTurns: how many turns the person agreed to stop; the server asks again if more would. The answer is the update
+   that started, or how many turns stand in its way. */
+async function askServer(version: string, whenIdle: boolean, confirmTurns?: number): Promise<{ id: string } | { turns: number }> {
+  try {
+    return await api.post<{ id: string }>('/api/updates', { version, whenIdle, ...(confirmTurns === undefined ? {} : { confirmTurns }) });
+  } catch (err) {
+    const turns = turnsCut(err);
+    if (turns === null) throw err;
+    return { turns };
+  }
+}
+
 function requestedBuild(view: UpdatesView | null, tag: string): Version {
   const build = tag === 'latest' ? view?.latest : view?.versions.find(b => b.tag === tag);
   if (!build) return { version: tag };
@@ -91,7 +103,6 @@ export function useUpdates(enabled: boolean): Updates {
 
   const dropCut = useCallback(() => setCut(null), []);
 
-  /* confirmTurns: how many turns the person agreed to stop; the server asks again if more would. */
   const ask = async (version: string, whenIdle: boolean, confirmTurns?: number) => {
     /* A second click before the answer would ask the updater twice. */
     if (askingNow.current) return;
@@ -99,14 +110,11 @@ export function useUpdates(enabled: boolean): Updates {
     setAsking(true);
     try {
       const target = requestedBuild(view, version);
-      const { id } = await api.post<{ id: string }>('/api/updates', { version, whenIdle, ...(confirmTurns === undefined ? {} : { confirmTurns }) });
+      const answer = await askServer(version, whenIdle, confirmTurns);
+      if ('turns' in answer) return setCut({ version, turns: answer.turns });
       setCut(null);
-      if (!whenIdle) setSent({ id, ...target });
+      if (!whenIdle) setSent({ id: answer.id, ...target });
       await load();
-    } catch (err) {
-      const turns = turnsCut(err);
-      if (turns === null) throw err;
-      setCut({ version, turns });
     } finally {
       askingNow.current = false;
       setAsking(false);
