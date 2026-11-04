@@ -80,11 +80,11 @@ export function AgentWindowLayout({ currentTask, title, terminal, box, toolbar, 
   return <>
     <aside ref={box} className={classes} aria-label={title} tabIndex={-1} hidden={minimized}>
       <div className="t-bar">
+        <WindowControls full={full} onFull={() => setFull(v => !v)} onMinimize={() => setMinimized(true)} onClose={onClose} />
         <span className="agent-window-title">{title}</span>
         {toolbar}
         <TaskToggle current={current} taskId={taskId} onTask={setTaskId} panelId={taskPanelId} button={taskButton} />
         {taskId && <button className="btn small ghost agent-task-back" type="button" onClick={closeTask}>{terminal ? t.window.backToTerminal : t.window.backToConversation}</button>}
-        <WindowControls full={full} onFull={() => setFull(v => !v)} onMinimize={() => setMinimized(true)} onClose={onClose} />
       </div>
       <div className="agent-workspace">
         <div id={taskPanelId} className="agent-task-slot">

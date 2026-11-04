@@ -1485,7 +1485,7 @@ summary.turn-head:focus-visible { outline: 2px solid var(--cyan); outline-offset
 .orch[hidden] { display: none; }
 .orch > .t-bar { height: auto; min-height: 38px; flex-wrap: wrap; gap: 4px; padding: 2px 6px; }
 .orch .agent-window-title { min-width: 60px; text-align: left; padding-left: 6px; }
-.window-controls { display: flex; gap: 4px; margin-left: auto; }
+.window-controls { display: flex; flex: none; gap: 4px; }
 .window-controls button { width: 26px; height: 26px; border-radius: 50%; background: var(--surface2); }
 .window-controls .window-close { color: var(--pink); }
 .window-controls .window-minimize { color: var(--amber-ink); }

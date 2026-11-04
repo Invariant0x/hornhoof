@@ -27,6 +27,7 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
       return route.fulfill({ json: {} });
     });
     await page.route('**/api/link', route => route.fulfill({ json: { link: null, domain: 'hornhoof.org' } }));
+    await page.route('**/api/link/names/acme', route => route.fulfill({ json: { name: 'acme', free: true } }));
     await page.route('**/api/updates', route => route.fulfill({ json: {
       current: { version: '0.5.1', commit: 'abc1234', migrations: 1 }, available: false, latest: null,
       versions: [], error: null, checkedAt: null, updater: { present: false, status: null, waiting: null },
