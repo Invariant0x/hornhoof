@@ -43,7 +43,8 @@ export type AgentState = FailureState & {
   limitUntil: string | null;
   /* Its plan used the share set for tasks until then: task turns wait, people's own messages still go. */
   budgetUntil: string | null;
-  reason: 'no_subscription' | 'waiting_machine' | 'needs_login' | 'needs_setup' | 'node_outdated' | 'machine_offline' | 'browser_failed' | null;
+  reason: 'no_subscription' | 'waiting_machine' | 'needs_login' | 'needs_setup' | 'node_outdated' | 'machine_offline' | null;
+  browserError: string | null;
   busy: boolean;
   runningJobId: string | null;
   queued: number;
@@ -473,16 +474,14 @@ function outdated(version: string | null, need = CONVERSATION_NODE): boolean {
 /* moves: the agent has not been on this node until now, or leaves the machine it was on for the built-in node. */
 type Placement = { node: NodeIdentity; nodeId: string | null; moves: boolean };
 
-const readyForTurns = (ctx: Ctx, id: NodeIdentity): boolean => ctx.hub.isReady(id) && !ctx.hub.browserErrorOf(id);
-
 /* Where the agent's next turn goes. A company key's to the built-in node. A plan's to the node its program is on while
    that one is signed in, connected and new enough, so its folder, session and terminal go on there; otherwise to the
    freest of the plan's nodes that is, unless the agent has work in progress on its own and waits for it. None while no
    node can take it. */
 async function placement(ctx: Ctx, agent: { id: string; nodeId: string | null }, sub: { id: string; kind: 'personal' | 'api_key' }, need = CONVERSATION_NODE): Promise<Placement | null> {
-  if (sub.kind === 'api_key') return readyForTurns(ctx, BUILTIN) ? { node: BUILTIN, nodeId: null, moves: agent.nodeId !== null } : null;
+  if (sub.kind === 'api_key') return ctx.hub.isReady(BUILTIN) ? { node: BUILTIN, nodeId: null, moves: agent.nodeId !== null } : null;
   const all = await planNodes(ctx.db, [sub.id]);
-  const able = all.filter(n => n.status === 'ready' && !outdated(n.version, need) && readyForTurns(ctx, nodeIdentity(n.id)));
+  const able = all.filter(n => n.status === 'ready' && !outdated(n.version, need) && ctx.hub.isReady(nodeIdentity(n.id)));
   const stays = all.some(n => n.id === agent.nodeId) && (await holdsWork(ctx, agent.id));
   const pick = able.find(n => n.id === agent.nodeId) ?? (stays ? null : await freest(ctx, able));
   return pick ? { node: nodeIdentity(pick.id), nodeId: pick.id, moves: pick.id !== agent.nodeId } : null;
@@ -770,26 +769,19 @@ export async function orchestratorOf(ctx: Ctx, companyId: string) {
 
 export async function orchestratorState(ctx: Ctx, companyId: string): Promise<AgentState> {
   const agent = await orchestratorOf(ctx, companyId);
-  if (!agent) return { ready: false, limitUntil: null, budgetUntil: null, reason: 'no_subscription', busy: false, runningJobId: null, queued: 0, terminal: false, program: null, alarm: null, retry: null, failure: null, obsolete: null };
+  if (!agent) return { ready: false, limitUntil: null, budgetUntil: null, reason: 'no_subscription', browserError: null, busy: false, runningJobId: null, queued: 0, terminal: false, program: null, alarm: null, retry: null, failure: null, obsolete: null };
   return agentState(ctx, agent.id);
 }
-
-const nodeWaitReason = (ctx: Ctx, n: NodeRow, need: number[]): AgentState['reason'] => {
-  if (n.status !== 'ready') return n.status;
-  if (outdated(n.version, need)) return 'node_outdated';
-  if (!ctx.hub.isReady(nodeIdentity(n.id))) return 'machine_offline';
-  return ctx.hub.browserErrorOf(nodeIdentity(n.id)) ? 'browser_failed' : null;
-};
 
 /* Why the agent's turns cannot go out now, or null when they can: a plan's go out while one of its machines can take them,
    and otherwise wait for what its own machine waits for, or one of the plan's that is online, or its first. One with work
    in progress waits for its own machine alone. */
 async function waitsFor(ctx: Ctx, agent: { id: string; productId: string | null; departmentId: string | null; nodeId: string | null }, sub: { id: string; kind: 'personal' | 'api_key' }): Promise<AgentState['reason']> {
-  if (sub.kind === 'api_key') return !ctx.hub.isReady(BUILTIN) ? 'machine_offline' : ctx.hub.browserErrorOf(BUILTIN) ? 'browser_failed' : null;
+  if (sub.kind === 'api_key') return ctx.hub.isReady(BUILTIN) ? null : 'machine_offline';
   const all = await planNodes(ctx.db, [sub.id]);
   if (!all.length) return 'waiting_machine';
   const need = all.some(n => outdated(n.version, REPOSITORY_NODE)) && (await repoFor(ctx, agent)) ? REPOSITORY_NODE : CONVERSATION_NODE;
-  const why = (n: NodeRow): AgentState['reason'] => nodeWaitReason(ctx, n, need);
+  const why = (n: NodeRow): AgentState['reason'] => (n.status !== 'ready' ? n.status : outdated(n.version, need) ? 'node_outdated' : ctx.hub.isReady(nodeIdentity(n.id)) ? null : 'machine_offline');
   const own = all.find(n => n.id === agent.nodeId);
   if (own && why(own) !== null && (await holdsWork(ctx, agent.id))) return why(own);
   if (all.some(n => why(n) === null)) return null;
@@ -807,11 +799,13 @@ export async function agentState(ctx: Ctx, agentId: string): Promise<AgentState>
      its next turn would go to, where the window starts it. */
   const shown = (await programNode(ctx, agentId))?.node ?? (sub && agent ? ((await placement(ctx, agent, sub))?.node ?? null) : null);
   const terminal = Boolean(shown && ctx.hub.hasTerminals(shown));
+  const browserError = shown ? ctx.hub.browserErrorOf(shown) : null;
   return {
     ready: reason === null,
     limitUntil: sub ? limitUntil(sub.limits) : null,
     budgetUntil: sub ? budgetUntil(sub.limits, sub.budget) : null,
     reason,
+    browserError,
     busy: Boolean(running),
     runningJobId: running?.id ?? null,
     queued: Number(waiting?.n ?? 0),

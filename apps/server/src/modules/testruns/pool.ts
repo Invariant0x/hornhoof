@@ -8,7 +8,7 @@ import { builtinMachine } from '../nodes/nodes.js';
 import { availableMemory } from './capacity.js';
 import { machineNodes, machineState, together } from './load.js';
 import { loaded } from './pick.js';
-import { commandFor, lostLine, needOf, placesOf, reaches, targetOf, type Place } from './runs.js';
+import { browserHoldReason, commandFor, lostLine, mayTake, needOf, placesOf, reaches, targetOf, type Place } from './runs.js';
 
 type Run = typeof testRuns.$inferSelect;
 type Row = { part: typeof testParts.$inferSelect; run: Run; task: number; agent: string };
@@ -40,6 +40,10 @@ async function whyWaits(ctx: Ctx, places: Place[], run: Run, targets: Map<string
   if (!targets.has(run.id)) targets.set(run.id, await targetOf(ctx, run));
   const target = targets.get(run.id)!;
   if (!target) return 'Its repository is gone: it ends with the next round.';
+  if (!places.some(p => mayTake(p, run, target.department))) {
+    const heldReason = await browserHoldReason(ctx, run.companyId, run, target.department);
+    if (heldReason) return heldReason;
+  }
   const lent = places.filter(p => p.lent);
   if (!lent.length) return 'No computer lent to runs is online.';
   const reach = lent.filter(p => reaches(p, target.department));
