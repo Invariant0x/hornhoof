@@ -27,6 +27,7 @@ const SECURITY_HEADERS = {
     "frame-ancestors 'none'",
   ].join('; '),
   'x-content-type-options': 'nosniff',
+  'x-robots-tag': 'noindex, nofollow',
 };
 
 export function addSecurityHeaders(app: FastifyInstance): void {

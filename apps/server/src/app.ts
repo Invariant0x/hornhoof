@@ -43,13 +43,20 @@ import { addSecurityHeaders, hasWebApp, serveWebApp, webAppRoutes } from './web.
 
 export type { Db } from './db/client.js';
 import { fromOwnPages } from './auth/origin.js';
-import { handOverSession } from './auth/session.js';
+import { handOverSession, requirePerson } from './auth/session.js';
 import { overLink } from './auth/tunnel.js';
 import type { AgentSql } from './db/agent-sql.js';
 import type { Db } from './db/client.js';
 
-/* logger is off unless given: tests stay quiet, main.ts turns it on so errors reach the container log. */
-export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logger']; agentSql?: AgentSql | null };
+/* logger is off unless given: tests stay quiet, main.ts turns it on so errors reach the container log. onRoute is called
+   for every route before any is added; a test uses it to ask each route what it tells a stranger. */
+export type Deps = {
+  db: Db;
+  config: Config;
+  logger?: FastifyServerOptions['logger'];
+  agentSql?: AgentSql | null;
+  onRoute?: (route: { method: string | string[]; url: string }) => void;
+};
 
 /* What routes get: the deps, the live node connections, the live stream to browsers, the terminals people watch, the
    check for newer builds, access to the computer the server runs on and the company's public link. */
@@ -76,9 +83,22 @@ declare module 'fastify' {
   }
 }
 
+/* The few routes that answer without a session. Over the link they say nothing a stranger could use to tell which
+   company or which build is behind the name. */
+function publicRoutes(app: FastifyInstance, { config, db }: Deps): void {
+  const { version, commit, migrations } = config;
+  app.get('/api/health', async req => (req.overLink ? { ok: true } : { ok: true, version, commit }));
+  app.get('/api/version', async req => {
+    if (req.overLink) await requirePerson(req, db);
+    return { version, commit, migrations };
+  });
+  app.get('/robots.txt', async (_req, reply) => reply.type('text/plain; charset=utf-8').send('User-agent: *\nDisallow: /\n'));
+}
+
 export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   const app = Fastify({ logger: deps.logger ?? false, logController: new LogController({ disableRequestLogging: true }) });
   const web = hasWebApp(deps.config.webDist);
+  if (deps.onRoute) app.addHook('onRoute', deps.onRoute);
   app.decorateRequest('overLink', false);
   app.addHook('onRequest', async req => {
     req.overLink = await overLink(req, deps.config);
@@ -116,9 +136,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   /* After the socket plugin, so a refused socket is closed by it. */
   app.addHook('onRequest', fromOwnPages(deps.config, deps.db));
   if (web) await serveWebApp(app, deps.config.webDist);
-  const { version, commit, migrations } = deps.config;
-  app.get('/api/health', async () => ({ ok: true, version, commit }));
-  app.get('/api/version', async () => ({ version, commit, migrations }));
+  publicRoutes(app, deps);
   setupRoutes(app, ctx);
   authRoutes(app, deps);
   peopleRoutes(app, ctx);

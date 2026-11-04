@@ -50,6 +50,7 @@ describe('web app serving', () => {
       expect(res.headers['content-security-policy']).toContain("frame-ancestors 'none'");
       expect(res.headers['content-security-policy']).toContain("script-src 'self';");
       expect(res.headers['x-content-type-options']).toBe('nosniff');
+      expect(res.headers['x-robots-tag']).toBe('noindex, nofollow');
     }
   });
 
