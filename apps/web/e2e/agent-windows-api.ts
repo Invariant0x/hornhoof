@@ -156,6 +156,17 @@ export async function openCompany(page: Page, { lang, theme, width }: Settings, 
   };
 }
 
+/* A picture from the clipboard, pasted with the focus nowhere in particular. */
+export const pastePicture = (page: Page, name: string) =>
+  page.evaluate(async name => {
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 40;
+    const blob = await new Promise<Blob>(done => canvas.toBlob(made => done(made!), 'image/png'));
+    const clipboardData = new DataTransfer();
+    clipboardData.items.add(new File([blob], name, { type: 'image/png' }));
+    document.body.dispatchEvent(new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }));
+  }, name);
+
 /* The strips stand on the screen and clear of each other, and big enough for a finger. */
 export async function expectStripsApart(page: Page, strips: Locator[]) {
   const rects = await Promise.all(strips.map(box));

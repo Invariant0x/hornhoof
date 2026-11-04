@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { box } from './api';
-import { expectStripsApart, openCompany, overlaps } from './agent-windows-api';
+import { expectStripsApart, openCompany, overlaps, pastePicture } from './agent-windows-api';
 import { SETTINGS } from './computer-strip-api';
 
 for (const settings of SETTINGS) {
@@ -168,6 +168,22 @@ for (const width of [1440, 375]) {
     expect(errors).toEqual([]);
   });
 }
+
+test('a picture pasted beside a strip goes to the window on the screen only, and waits there through its own strip', async ({ page }) => {
+  const { errors, windowOf, stripOf, openEmployee, minimize } = await openCompany(page, { lang: 'en', theme: 'dark', width: 1440 });
+  await openEmployee('Bruno');
+  await minimize('Bruno');
+  await openEmployee('Clara');
+  await pastePicture(page, 'screen.png');
+  const pasted = (name: string) => windowOf(name).getByRole('img', { name: 'screen.png', exact: true });
+  await expect(pasted('Clara')).toBeVisible();
+  await stripOf('Bruno').click();
+  await expect(windowOf('Bruno')).toBeVisible();
+  await expect(pasted('Bruno')).toHaveCount(0);
+  await stripOf('Clara').click();
+  await expect(pasted('Clara')).toBeVisible();
+  expect(errors).toEqual([]);
+});
 
 test('a task opened from a screen takes the window aside and leaves its strip', async ({ page }) => {
   const { words, errors, tab, windowOf, stripOf, openOrchestrator } = await openCompany(page, { lang: 'en', theme: 'dark', width: 1440 });
