@@ -793,3 +793,21 @@ export const publicLinks = pgTable('public_links', {
   tunnelEnc: text('tunnel_enc').notNull(),
   createdAt: createdAt(),
 });
+
+/* Wait requests and observations survive a restart until accepted into the recipient's work queue. */
+export const waitNotices = pgTable('wait_notices', {
+  id: id(),
+  companyId: companyId(),
+  agentId: uuid('agent_id').notNull().references(() => agents.id),
+  dedupKey: text('dedup_key').notNull(),
+  message: jsonb('message').$type<import('../modules/tasks/wait-notice-types.js').WaitNoticeMessage>().notNull(),
+  guard: jsonb('guard').$type<import('../modules/tasks/wait-notice-types.js').WaitNoticeGuard>().notNull(),
+  createdAt: createdAt(),
+  leaseId: uuid('lease_id'),
+  leaseUntil: timestamp('lease_until', { withTimezone: true }),
+  deliveredAt: timestamp('delivered_at', { withTimezone: true }),
+  cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+}, t => [
+  unique('wait_notices_dedup').on(t.companyId, t.dedupKey),
+  index('wait_notices_pending').on(t.createdAt).where(sql`${t.deliveredAt} IS NULL AND ${t.cancelledAt} IS NULL`),
+]);
