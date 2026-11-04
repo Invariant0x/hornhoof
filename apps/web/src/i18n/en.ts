@@ -951,6 +951,7 @@ export const en = {
     stepOf: (n: number, total: number, step: string) => `Step ${n} of ${total}: ${step}`,
     starting: 'Getting the update ready',
     restarting: 'Hornhoof is restarting. The page reloads by itself.',
+    maintenance: 'Maintenance: Hornhoof is installing the update and takes no changes until it ends.',
     steps: { backup: 'saving the database', pull: 'downloading', install: 'installing', health: 'waiting for the new server', rollback: 'going back', finished: 'finished' },
     result: (s: { state: string; version: string }, current: string) =>
       s.state === 'done'
@@ -974,6 +975,9 @@ export const en = {
     missing: 'The updater is not running. Run the install command for this server again to add it.',
   },
   errors: {
+    maintenance: 'Hornhoof is installing an update and takes no changes until it ends. Try again in a few minutes.',
+    read_only: 'Hornhoof only reads on this machine now, so nothing was changed.',
+    starting: 'Hornhoof is starting. Try again in a few seconds.',
     command_active: 'There is an active command for this place. Use it or wait until it expires.',
     codes: {
       validation: 'Check the fields and try again.',

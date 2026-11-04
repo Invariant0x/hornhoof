@@ -64,6 +64,16 @@ describe('errorText', () => {
     expect(errorText(ru, new ApiFailure(401, 'unauthorized', 'Wrong email or password.', 'wrong_password'))).toBe(ru.errors.wrong_password);
   });
 
+  it('words the reasons of maintenance, read-only and starting in both languages', () => {
+    const answer = (reason: string) => new ApiFailure(503, 'unavailable', 'x', reason);
+    expect(errorText(en, answer('maintenance'))).toBe('Hornhoof is installing an update and takes no changes until it ends. Try again in a few minutes.');
+    expect(errorText(ru, answer('maintenance'))).toBe('Hornhoof ставит обновление и не принимает изменений, пока оно не закончится. Попробуйте через несколько минут.');
+    expect(errorText(en, answer('read_only'))).toBe('Hornhoof only reads on this machine now, so nothing was changed.');
+    expect(errorText(ru, answer('read_only'))).toBe('Сейчас Hornhoof на этой машине только читает, поэтому ничего не изменилось.');
+    expect(errorText(en, answer('starting'))).toBe('Hornhoof is starting. Try again in a few seconds.');
+    expect(errorText(ru, answer('starting'))).toBe('Hornhoof запускается. Попробуйте еще раз через несколько секунд.');
+  });
+
   it('tells a person who tried too often to wait, in both languages', () => {
     const err = new ApiFailure(429, 'too_many', 'Too many attempts. Wait up to 15 minutes, then try again.', 'too_many_attempts');
     /* A sign-in past the softer cap per email waits up to an hour. */

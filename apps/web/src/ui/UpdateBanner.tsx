@@ -51,7 +51,7 @@ export function UpdateBanner({ updates, onDetails }: { updates: Updates; onDetai
   if (updates.starting || status?.state === 'running') {
     body = (
       <>
-        <UpdateProgress version={updateTargetText(updates)} step={updates.starting ? null : status!.step} starting={updates.starting} offline={updates.offline} />
+        <UpdateProgress version={updateTargetText(updates)} step={updates.starting ? null : status!.step} starting={updates.starting} offline={updates.offline} maintenance={updates.maintenance} />
         <button className="btn small ghost" type="button" onClick={onDetails}>{t.updates.details}</button>
       </>
     );

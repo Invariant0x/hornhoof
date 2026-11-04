@@ -48,7 +48,7 @@ The link, like `https://acme.hornhoof.org`, lets people open your company from a
 
 - It is optional. Untick "Open Hornhoof on the internet" at setup, or remove the link in Settings, and people open Hornhoof only from your own network.
 - Your server opens the tunnel itself, over an encrypted connection to hornhoof.org whose certificate it checks.
-- The tunnel carries traffic only to the Hornhoof app, never to anything else on your network, whatever hornhoof.org asks for.
+- The tunnel ends in the keeper, a container next to the app, which passes its traffic to the Hornhoof app only, never to anything else on your network, whatever hornhoof.org asks for.
 - hornhoof.org has no accounts and holds none of your company's data. For each link it keeps only the name, a hash of its key, when and from which address the link was made, and when its tunnel was last seen. For a company on several machines it also keeps which machine holds the link, and one flag that says whether the company's copy is up to date.
 - The browser's https connection ends at hornhoof.org. It opens each request to see which company it is for, passes it on through that company's tunnel, and keeps no copy. If you want no one in between, use your own domain with your own TLS, as [the install guide](guide/install.md#how-do-people-open-it-from-other-computers) shows.
 - Traffic between your machines that goes through hornhoof.org is encrypted from one machine to the other, so hornhoof.org sees only encrypted bytes.
