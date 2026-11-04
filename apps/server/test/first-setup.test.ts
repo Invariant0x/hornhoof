@@ -1,6 +1,6 @@
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agents, jobs, machines, nodes, subscriptions } from '../src/db/schema.js';
+import { agentEvents, agents, jobs, machines, nodes, subscriptions } from '../src/db/schema.js';
 import { agentState, enqueueTurn, pump } from '../src/modules/conversation/queue.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
@@ -28,6 +28,8 @@ describe("a program's first setup that only the plan's owner passes", () => {
     expect(await c.jobOf(turn)).toMatchObject({ error: 'agent_failed', failure: { kind: 'setup' } });
     expect((await c.turnsOf())[1]).toMatchObject({ status: 'queued', continueOf: turn, notBefore: null });
     expect(await agentFailureState(c.ctx, c.agent.id)).toMatchObject({ retry: null, failure: { kind: 'setup' } });
+    const facts = (await c.db.select().from(agentEvents).where(eq(agentEvents.jobId, turn))).map(e => (e.data as { text?: string }).text);
+    expect(facts).toContain("The last try failed (setup): The terms wait for the owner.. The turn waits for the plan owner to pass its program's first setup on its machine, as for a sign-in.");
     expect([await c.nodeStatus(), await c.planStatus()]).toEqual(['needs_setup', 'needs_setup']);
     expect((await agentState(c.ctx, c.agent.id)).reason).toBe('needs_setup');
     await pump(c.ctx, c.agent.id);
