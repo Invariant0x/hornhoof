@@ -23,7 +23,7 @@ const PUT_GRACE_MS = 60_000;
 const DRAIN_MS = 2_000;
 
 type Options = {
-  /* The node's data folder: each part runs in tests/<part> inside it. */
+  /* The node's data folder: each part runs in runs/<part> inside it. */
   dir: string;
   /* The test runs' own user on a node that runs as root, which reaches neither the node's keys nor the agents' folders. */
   user: JobUser | null;
@@ -197,6 +197,21 @@ function remove(path: string): void {
   }
 }
 
+/* Where a node runs its parts. crapper, dryer and mutator take a file for a test when any folder on its absolute path is
+   called test, tests, spec or the like, so under such a folder they find no source in a part and still exit 0: none on the
+   way here may have such a name. quality/test_part_paths.py checks the tools against this path in the image. */
+const partsFolder = (dir: string) => join(dir, 'runs');
+
+/* Older nodes ran their parts in tests/. No part runs there any more and a part's log never lived in its folder, so what a
+   restart left there is of no use. */
+export function removeOldParts(dir: string, log: (line: string) => void): void {
+  try {
+    remove(join(dir, 'tests'));
+  } catch (err) {
+    log(`The old folder of test runs could not be removed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 const within = (ms: number) => (ms >= 60_000 ? `${Math.round(ms / 60_000)} min` : `${Math.round(ms / 1000)} s`);
 
 /* The branch named after the task: task-<n> itself, or the only one that starts with task-<n>-. */
@@ -307,7 +322,8 @@ function commandEnv(base: NodeJS.ProcessEnv, msg: TestRun, inbox: string, outbox
 export async function runTests(msg: TestRun, { dir, user, hidden, signal, proc = '/proc', cpus, env: hostEnv, files, prepareRepoBrowser }: Options): Promise<TestsDone> {
   const deadline = Date.now() + msg.timeoutMs;
   const work = msg.kind === 'work';
-  const root = join(dir, 'tests', msg.partId);
+  const parts = partsFolder(dir);
+  const root = join(parts, msg.partId);
   /* Where the command runs: the clone, or for work without a repository an empty folder that holds the task's files. */
   const repo = join(root, msg.repo ? 'repo' : 'work');
   const inbox = msg.repo ? join(root, 'in') : repo;
@@ -325,13 +341,13 @@ export async function runTests(msg: TestRun, { dir, user, hidden, signal, proc =
     return ended.stopped;
   };
   try {
-    mkdirSync(join(dir, 'tests'), { recursive: true });
+    mkdirSync(parts, { recursive: true });
     remove(root);
     const folders = partFolders(root, msg);
     prepareFolder(folders.own, null);
     chmodSync(folders.own, 0o755);
     for (const folder of folders.user) prepareFolder(folder, user);
-    if (user) ensurePasswd(user, join(dir, 'tests'));
+    if (user) ensurePasswd(user, parts);
     const base = { PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin', HOME: join(root, 'home'), TMPDIR: join(root, 'tmp'), LANG: 'C.UTF-8', ...browserEnv(dir) };
     const source = msg.repo;
     /* Git reads no settings but its own here, and gets the token only through the helper, for the repository's host. */
