@@ -125,6 +125,10 @@ export const ru: Messages = {
     issues: 'Сообщить об ошибке или предложить идею', copyright: 'Copyright (c) 2026 Ivan Korol',
     versionFailed: 'Не удалось загрузить версию сервера. Закройте окно и откройте снова, чтобы повторить.',
   },
+  profile: {
+    title: 'Настройки',
+    nameRequired: 'Введите свое имя.',
+  },
   settings: {
     menu: 'Общий доступ',
     title: 'Общий доступ',
