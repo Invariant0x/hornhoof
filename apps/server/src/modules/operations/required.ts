@@ -1,0 +1,19 @@
+/* The employee who looks at a program stopped on a screen nobody planned for. */
+export const PROGRAM_OPERATOR_ROLE = 'OPS-PROGRAM';
+
+/* Who Operations always has, in every company: people cannot leave them out of a card or remove the last one, and
+   Hornhoof hires whoever is missing. */
+export const REQUIRED_OPERATIONS_ROLES = ['OPS-HEAD', 'OPS-WATCH', 'OPS-BUGS', PROGRAM_OPERATOR_ROLE] as const;
+export type RequiredRole = (typeof REQUIRED_OPERATIONS_ROLES)[number];
+
+export const isRequiredRole = (role: string): role is RequiredRole => (REQUIRED_OPERATIONS_ROLES as readonly string[]).includes(role);
+
+type Dept = { templateKey: string | null; parentId: string | null };
+export const isOperations = (dept: Dept) => dept.templateKey === 'operations' && !dept.parentId;
+
+export type Holder = { kind: string; roleKey: string | null };
+
+/* An old head with no role key of its own holds the head's place all the same. */
+export const holds = (employee: Holder, role: RequiredRole) => (role === 'OPS-HEAD' ? employee.kind === 'head' : employee.roleKey === role);
+
+export const missingRoles = (staff: Holder[]): RequiredRole[] => REQUIRED_OPERATIONS_ROLES.filter(role => !staff.some(employee => holds(employee, role)));

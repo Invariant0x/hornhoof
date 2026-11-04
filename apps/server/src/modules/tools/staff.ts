@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach, type Spot } from '../../auth/access.js';
 import type { Db } from '../../db/client.js';
-import { agents, departments, people, subscriptions, teams, type Provider, type ScopeKind } from '../../db/schema.js';
+import { agents, departments, people, subscriptions, SUBSCRIPTION_STATUSES, teams, type Provider, type ScopeKind } from '../../db/schema.js';
 import { deptName } from '../departments/templates.js';
 import type { Role } from '../templates/load.js';
 
@@ -63,14 +63,17 @@ export async function departmentOf(db: Db, companyId: string, id: string): Promi
 type Sub = typeof subscriptions.$inferSelect;
 type Owner = { id: string; name: string; scopeKind: ScopeKind; status: string };
 
-/* Connected subscriptions the test accepts: ready, or waiting for a new login or for the first setup of their program. */
-async function connected(db: Db, companyId: string, accept: (sub: Sub, owner: Owner) => boolean | Promise<boolean>): Promise<Serving[]> {
+/* Ready, or waiting for a new login or for the first setup of their program. */
+const CONNECTED = ['ready', 'needs_login', 'needs_setup'] as const;
+
+/* Subscriptions in these states the test accepts, oldest first. */
+async function connected(db: Db, companyId: string, accept: (sub: Sub, owner: Owner) => boolean | Promise<boolean>, statuses: readonly Sub['status'][] = CONNECTED): Promise<Serving[]> {
   const rows = await db
     .select({ sub: subscriptions, owner: { id: people.id, name: people.name, scopeKind: people.scopeKind, status: people.status } })
     .from(subscriptions)
     .innerJoin(people, eq(people.id, subscriptions.ownerPersonId))
-    .where(and(eq(subscriptions.companyId, companyId), isNull(subscriptions.removedAt), inArray(subscriptions.status, ['ready', 'needs_login', 'needs_setup'])))
-    .orderBy(asc(subscriptions.createdAt));
+    .where(and(eq(subscriptions.companyId, companyId), isNull(subscriptions.removedAt), inArray(subscriptions.status, [...statuses])))
+    .orderBy(asc(subscriptions.createdAt), asc(subscriptions.id));
   const out: Serving[] = [];
   for (const { sub, owner } of rows) {
     if (sub.kind === 'personal' && owner.status === 'disabled') continue;
@@ -80,19 +83,34 @@ async function connected(db: Db, companyId: string, accept: (sub: Sub, owner: Ow
   return out;
 }
 
-/* Personal plans of people who reach the place, and API keys for it, the department holding it, or any department. */
-export async function servingSubscriptions(ctx: Pick<Ctx, 'db'>, companyId: string, spot: Spot): Promise<Serving[]> {
-  const { db } = ctx;
+/* Whether a subscription may serve the place: a personal plan of someone who reaches it, or an API key for it, the
+   department holding it, or any department. */
+async function servesPlace(db: Db, spot: Spot): Promise<(sub: Sub, owner: Owner) => Promise<boolean>> {
   const places = [spot.departmentId, spot.parentId].filter((id): id is string => Boolean(id));
   const teamIds = places.length ? (await db.select({ id: teams.id }).from(teams).where(inArray(teams.departmentId, places))).map(t => t.id) : [];
+  return async (sub, owner) => {
+    if (sub.kind === 'personal') return canReach(await accessOf(db, owner), spot);
+    return sub.targetKind === 'any' || (sub.targetKind === 'department' && places.includes(sub.targetId ?? '')) || (sub.targetKind === 'team' && teamIds.includes(sub.targetId ?? ''));
+  };
+}
+
+/* What a person or the orchestrator picks from for the place. */
+export async function servingSubscriptions(ctx: Pick<Ctx, 'db'>, companyId: string, spot: Spot): Promise<Serving[]> {
+  const { db } = ctx;
+  const serves = await servesPlace(db, spot);
   const wide = new Set<string>();
   const serving = await connected(db, companyId, async (sub, owner) => {
-    if (sub.kind === 'personal') return canReach(await accessOf(db, owner), spot);
     if (sub.targetKind === 'any') wide.add(sub.id);
-    return sub.targetKind === 'any' || (sub.targetKind === 'department' && places.includes(sub.targetId ?? '')) || (sub.targetKind === 'team' && teamIds.includes(sub.targetId ?? ''));
+    return serves(sub, owner);
   });
   /* Keys for any department come last, so a new employee starts on what was bought for its place when there is one. */
   return [...serving.filter(s => !wide.has(s.id)), ...serving.filter(s => wide.has(s.id))];
+}
+
+/* What Hornhoof may put an employee on by itself, oldest first: a plan still waiting for its machine counts, since the
+   queue waits until it runs, and access stays as it is for anyone else. */
+export async function placeableSubscriptions(ctx: Pick<Ctx, 'db'>, companyId: string, spot: Spot): Promise<Serving[]> {
+  return connected(ctx.db, companyId, await servesPlace(ctx.db, spot), SUBSCRIPTION_STATUSES);
 }
 
 /* The orchestrator works for the whole company: a plan of someone who sees all of it, or a key not tied to a department. */

@@ -1,4 +1,4 @@
-import { DEPARTMENT_TEMPLATES, MAX_INSTRUCTIONS, type TemplateKey } from '@hornhoof/protocol';
+import { DEPARTMENT_TEMPLATES, type TemplateKey } from '@hornhoof/protocol';
 import { and, asc, eq, inArray, isNotNull, isNull, max, or } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -12,7 +12,6 @@ import { agentChanges, agents, companies, departments, personAccess, proposals, 
 import { encryptSecret } from '../../crypto/secrets.js';
 import { Repo } from '@hornhoof/protocol';
 import { ApiError } from '../../errors.js';
-import { placeOf, renderInstructions } from '../agents/instructions.js';
 import { delegationOf, lockedFor, stillDecides, type Delegation } from '../conversation/decision-context.js';
 import { enqueueTurn, orchestratorOf, orchestratorState } from '../conversation/queue.js';
 import { appendEvent } from '../events/store.js';
@@ -20,6 +19,7 @@ import type { Tx } from '../tasks/engine.js';
 import { backOn } from '../tasks/wake.js';
 import { checkStaff, departmentOf, HireLine, runsTier, servingSubscriptions, spotIn } from '../tools/staff.js';
 import { BuildItem, checkItems, inPlaces, isNew, type TeamChange } from '../tools/structure.js';
+import { hireEmployee, type Hired } from './hire.js';
 import { repoView } from './repository.js';
 import { deptName, TEMPLATE_TEXT } from './templates.js';
 
@@ -59,8 +59,6 @@ function builtNote(created: Created[], removed: Removed[]): string {
   lines.push('Continue in the CEO\'s language: say what is there now in a line or two, then offer to staff the new departments, one department at a time.');
   return lines.join('\n');
 }
-
-type Hired = { id: string; name: string; role: string; title: string };
 
 /* What he reads after the CEO hired people, so he goes on from there. */
 function staffedNote(department: string, hired: Hired[]): string {
@@ -380,36 +378,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
       }
 
       const hired: Hired[] = [];
-      for (const line of body.people) {
-        const role = ctx.templates.roles.get(line.role)!;
-        const hashes = Object.fromEntries([[role.id, role.hash], ...line.skills.map(id => [id, ctx.templates.skills.get(id)!.hash])]);
-        const [agent] = await tx
-          .insert(agents)
-          .values({
-            companyId: me.companyId,
-            kind: role.kind === 'head' ? 'head' : 'worker',
-            name: line.name,
-            model: line.model,
-            departmentId: dept.id,
-            productId: line.product,
-            teamId: line.team,
-            subscriptionId: line.subscription,
-            roleKey: role.id,
-            skills: line.skills,
-            templateHashes: hashes,
-            /* A role that watches the company wakes on its timer from the hire on. */
-            ...(role.timer ? { timerMinutes: role.timer.minutes, timerOrder: role.timer.order, timerForWork: role.timer.forWork, timerAt: new Date() } : {}),
-            createdBy: personOf(me),
-          })
-          .returning();
-        /* A turn carries the instructions whole, so a hire whose skills make them too long would never run. A head's
-           notebook has room of its own on top, as on the employee's card. */
-        if (renderInstructions(ctx.templates, agent!, await placeOf(tx, agent!)).text.length > MAX_INSTRUCTIONS) {
-          throw new ApiError(400, 'validation', `${line.name}'s instructions would be longer than ${MAX_INSTRUCTIONS} characters. Turn some skills off.`, 'instructions_too_long');
-        }
-        await tx.insert(agentChanges).values({ companyId: me.companyId, agentId: agent!.id, ...changedBy(me), field: 'hired', before: null, after: line });
-        hired.push({ id: agent!.id, name: line.name, role: role.id, title: role.title.en });
-      }
+      for (const line of body.people) hired.push(await hireEmployee(ctx, tx, { companyId: me.companyId, departmentId: dept.id }, line, changedBy(me)));
       return { hired, agentId };
     }));
 
