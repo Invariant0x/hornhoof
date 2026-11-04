@@ -55,6 +55,18 @@ export const sessions = pgTable(
   t => [index('sessions_person_id').on(t.personId)],
 );
 
+/* One row per sign-in try that was let through, kept an hour. Only SHA-256 hashes of the email and the address are stored. */
+export const signInAttempts = pgTable(
+  'sign_in_attempts',
+  {
+    id: id(),
+    emailHash: text('email_hash').notNull(),
+    addressHash: text('address_hash').notNull(),
+    at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  t => [index('sign_in_attempts_email').on(t.emailHash, t.at), index('sign_in_attempts_address').on(t.addressHash, t.at), index('sign_in_attempts_at').on(t.at)],
+);
+
 export const invites = pgTable(
   'invites',
   {
