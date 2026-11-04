@@ -40,14 +40,19 @@ function withQuietSign(say: Messages['dept']['now'], line: string, signAt: numbe
   return signAt !== null && now - signAt > QUIET_SIGN_MS ? say.noSign(line, minutes(now, signAt)) : line;
 }
 
+function retryText(say: Messages['dept']['now'], retry: ProgramView['retry'] | undefined): string {
+  if (!retry) return say.retrying;
+  const next = retry.nextAt === null ? null : clockAt(retry.nextAt);
+  return say.retryAttempt(retry.attempt, retry.max, next);
+}
+
 /* Historical segments keep only the program's state, age and tool; live reports also carry its retry and last sign. */
 export function programLine(say: Messages['dept']['now'], p: Pick<ProgramView, 'state' | 'since' | 'tool'> & Partial<Pick<ProgramView, 'signAt' | 'retry'>>, now: number): Line {
   if (p.state === 'thinking') return { tone: 'work', text: withQuietSign(say, say.thinking(minutes(now, p.since)), p.signAt ?? null, now) };
   if (p.state === 'tool') return { tone: 'work', text: say.tool(p.tool ?? '', minutes(now, p.since)) };
   if (p.state === 'asking') return { tone: 'person', text: say.asking };
   if (p.state === 'retrying') {
-    const base = p.retry ? say.retryAttempt(p.retry.attempt, p.retry.max, p.retry.nextAt === null ? null : clockAt(p.retry.nextAt)) : say.retrying;
-    return { tone: 'work', text: withQuietSign(say, base, p.signAt ?? null, now) };
+    return { tone: 'work', text: withQuietSign(say, retryText(say, p.retry), p.signAt ?? null, now) };
   }
   if (p.state === 'gone') return { tone: 'calm', text: say.gone };
   return { tone: 'calm', text: say.idle };
