@@ -72,7 +72,7 @@ function accountEmail(s: SubView): string | null {
 /* The shares of a plan's limits tasks may be given. */
 const SHARES = [90, 80, 70, 60, 50];
 
-const STATUS_ORDER = ['builtin_offline', 'offline', 'needs_login', 'limit', 'waiting_machine', 'ready'];
+const STATUS_ORDER = ['builtin_offline', 'offline', 'needs_login', 'needs_setup', 'limit', 'waiting_machine', 'ready'];
 
 function SubscriptionStatus({ sub, now, showUntil = false }: { sub: SubView; now: number; showUntil?: boolean }) {
   const t = useT();
@@ -121,12 +121,19 @@ function limitLine(t: Messages, language: Language, s: SubView, now: number): st
   return at && duration ? t.cards.notes.limit(at, duration) : t.cards.notes.limitUnknown;
 }
 
-/* What keeps a plan that is not ready from working, and where: it waits for its machine, or for its sign-in on a machine
-   that is online, or on one that is not. */
+/* What keeps a plan that is not ready from working, and where: it waits for its machine, for the first setup of its
+   program, or for its sign-in on a machine that is online, or on one that is not. */
 function fixWords(t: Messages, s: SubView): string {
   if (s.status === 'waiting_machine') return t.cards.notes.waiting(s.owner.name);
+  if (s.status === 'needs_setup') return setupWords(t, s);
   const online = s.machines.find(m => m.online);
   return online ? t.cards.notes.login(online.hostname, s.owner.name) : t.cards.notes.loginOffline(s.machines[0]?.hostname ?? '');
+}
+
+/* A plan signed in on its machine whose program asks its owner there to accept its terms, which nobody else may do. */
+function setupWords(t: Messages, s: SubView): string {
+  const there = s.machines.find(m => m.online && m.status === 'needs_setup');
+  return there ? t.cards.notes.setup(there.hostname, s.owner.name, PROGRAM_NAMES[s.provider]) : t.cards.notes.setupOffline(s.machines[0]?.hostname ?? '');
 }
 
 function PlanAccount({ sub: s }: { sub: SubView }) {

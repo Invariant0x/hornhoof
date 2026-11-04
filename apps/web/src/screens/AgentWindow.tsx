@@ -56,10 +56,17 @@ function visible(events: EventView[]): LogEvent[] {
 
 const named = (t: Messages, d: { template: TemplateKey | null; name: string | null }) => d.name ?? (d.template ? t.templates[d.template].name : '');
 
+/* Why the agent cannot answer, for the reasons that name its plan. */
+const PLAN_WAITS: Partial<Record<NonNullable<OrchestratorState['reason']>, (t: Messages, sub: SubView) => string>> = {
+  waiting_machine: (t, sub) => t.map.waitingMachine(sub.owner.name),
+  needs_login: (t, sub) => t.map.waitingLogin(PROVIDER_NAMES[sub.provider]),
+  needs_setup: (t, sub) => t.map.waitingSetup(PROVIDER_NAMES[sub.provider]),
+  node_outdated: (t, sub) => t.window.nodeOutdated(sub.owner.name),
+};
+
 function reasonText(t: Messages, reason: OrchestratorState['reason'], sub: SubView | null): string {
-  if (reason === 'waiting_machine' && sub) return t.map.waitingMachine(sub.owner.name);
-  if (reason === 'needs_login' && sub) return t.map.waitingLogin(PROVIDER_NAMES[sub.provider]);
-  if (reason === 'node_outdated' && sub) return t.window.nodeOutdated(sub.owner.name);
+  const waits = reason && sub ? PLAN_WAITS[reason]?.(t, sub) : undefined;
+  if (waits) return waits;
   if (reason === 'machine_offline') return sub?.kind === 'personal' ? t.map.machineOffline(sub.owner.name) : t.window.builtinOffline;
   return t.map.needsSubscription;
 }

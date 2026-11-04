@@ -44,12 +44,17 @@ const FLASH_MS = 1400;
 
 export type DeptSpot = { x: number; y: number; w: number; h: number; path: Point[] };
 
+/* What a plan that is not ready waits for: its owner's machine, the login or the first setup of its program. */
+function planWaits(t: Messages, sub: SubView): string {
+  if (sub.status === 'waiting_machine') return t.map.waitingMachine(sub.owner.name);
+  return sub.status === 'needs_setup' ? t.map.waitingSetup(PROVIDER_NAMES[sub.provider]) : t.map.waitingLogin(PROVIDER_NAMES[sub.provider]);
+}
+
 /* limitAt: the time his plan's limit resets, while it is at it. */
 export function orchestratorStatus(t: Messages, sub: SubView | null, limitAt: string | null = null): string {
   if (!sub) return t.map.needsSubscription;
   if (sub.kind !== 'api_key') {
-    if (sub.status === 'waiting_machine') return t.map.waitingMachine(sub.owner.name);
-    if (sub.status === 'needs_login') return t.map.waitingLogin(PROVIDER_NAMES[sub.provider]);
+    if (sub.status !== 'ready') return planWaits(t, sub);
     if (!sub.online) return t.map.machineOffline(sub.owner.name);
   }
   if (limitAt) return t.map.waitingLimit(limitAt);

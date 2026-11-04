@@ -3,9 +3,9 @@ import type { SubView } from '../src/types';
 import { box, serveApi } from './api';
 
 /* The card of a plan that does not work is one block across it. The plan the CEO saw, ready on the Mac but with nodes too
-   old for the sign-in from Hornhoof, turns into that block once Sign in finds them, and a plan waiting for its sign-in or
-   for its machine is that block from the start, the latter with its install command. A working plan keeps its three
-   blocks. In a real browser, as jsdom lays out nothing. */
+   old for the sign-in from Hornhoof, turns into that block once Sign in finds them, and a plan waiting for its sign-in, for
+   its owner to accept its program's terms on the machine, or for its machine is that block from the start, the last with
+   its install command. A working plan keeps its three blocks. In a real browser, as jsdom lays out nothing. */
 
 const MAC = '0xs-MacBook-Pro.local';
 const UPDATE = 'curl -fsSL https://hq.acme.com/install.sh | bash';
@@ -19,6 +19,8 @@ const READY: SubView = {
   accounts: [{ nodeId: 'n1', hostname: MAC, tier: 'pro' }], tier: 'Pro', accountsDiffer: false, signedInOnce: false, leaseMachine: null, agents: [],
 };
 const LOGIN: SubView = { ...READY, id: 's-claude', provider: 'claude', label: 'Claude', status: 'needs_login', tier: null, accounts: [], machines: [{ id: 'm2', hostname: MAC, status: 'needs_login', online: true }] };
+/* Signed in on a new machine, where agy asks its owner to accept its terms. */
+const SETUP: SubView = { ...READY, id: 's-agy', provider: 'antigravity', label: 'Antigravity', status: 'needs_setup', tier: null, accounts: [], machines: [{ id: 'm3', hostname: 'a-host', status: 'needs_setup', online: true }] };
 /* Connected a moment ago: its install command has not been run yet, and Done has closed the block at the top. */
 const WAITING: SubView = { ...READY, id: 's-kimi', provider: 'kimi', label: 'Kimi', status: 'waiting_machine', online: false, tier: null, accounts: [], machines: [] };
 const INSTALL = 'curl -fsSL https://hq.acme.com/install.sh | bash -s -- --join DEMO_ONLY';
@@ -27,15 +29,17 @@ const EXPIRED: SubView = { ...WAITING, id: 's-glm', provider: 'glm', label: 'GLM
 const installCommand = () => ({ id: 'c'.repeat(64), kind: 'plans', subscriptionIds: [WAITING.id], dismissedSubscriptionIds: [WAITING.id], plans: ['Kimi'], machine: null, command: INSTALL, expiresAt: new Date(Date.now() + 21 * 3600_000 + 60_000).toISOString() });
 
 const WORDS = {
-  en: { tab: 'Subscriptions', open: 'Open the card of ', signIn: 'Sign in to Codex', old: `The nodes on ${MAC} are older`, lifetime: 'Valid for 21 more hours.', fresh: 'New command for GLM' },
-  ru: { tab: 'Подписки', open: 'Открыть карточку ', signIn: 'Войти в Codex', old: `Ноды на ${MAC} старше`, lifetime: 'Действует еще 21 ч.', fresh: 'Новая команда для GLM' },
+  en: { tab: 'Subscriptions', open: 'Open the card of ', signIn: 'Sign in to Codex', old: `The nodes on ${MAC} are older`, lifetime: 'Valid for 21 more hours.', fresh: 'New command for GLM',
+    setup: 'On a-host, Antigravity asks its owner to accept its terms. Only Ivan can do it, by running the install command on that machine again.' },
+  ru: { tab: 'Подписки', open: 'Открыть карточку ', signIn: 'Войти в Codex', old: `Ноды на ${MAC} старше`, lifetime: 'Действует еще 21 ч.', fresh: 'Новая команда для GLM',
+    setup: 'На a-host Antigravity просит владельца принять его условия. Это может сделать только Ivan: снова запустить на этой машине команду установки.' },
 };
 
 async function servePlans(page: Page) {
   await serveApi(page);
   await page.route('**/api/version', route => route.fulfill({ json: { version: '0.5.0', commit: 'task-189' } }));
   await page.route('**/api/updates', route => route.fulfill({ json: { current: { version: '0.5.0', commit: 'task-189' }, available: false, latest: null, updater: { status: null, waiting: null } } }));
-  await page.route('**/api/subscriptions', route => route.fulfill({ json: { subscriptions: [READY, LOGIN, WAITING, EXPIRED] } }));
+  await page.route('**/api/subscriptions', route => route.fulfill({ json: { subscriptions: [READY, LOGIN, SETUP, WAITING, EXPIRED] } }));
   await page.route('**/api/nodes/commands', route => route.fulfill({ json: { commands: [installCommand()] } }));
   await page.route('**/api/subscriptions/s-codex/signin', route => route.fulfill({ status: 409, json: OLD }));
 }
@@ -78,6 +82,7 @@ for (const lang of ['en', 'ru'] as const) {
         await page.getByRole('button', { name: `${words.open}Claude` }).click();
         await page.getByRole('button', { name: `${words.open}Kimi` }).click();
         await page.getByRole('button', { name: `${words.open}GLM` }).click();
+        await page.getByRole('button', { name: `${words.open}Antigravity` }).click();
         const codex = page.getByRole('article', { name: 'Codex, Ivan' });
         const claude = page.getByRole('article', { name: 'Claude, Ivan' });
         const kimi = page.getByRole('article', { name: 'Kimi, Ivan' });
@@ -90,6 +95,13 @@ for (const lang of ['en', 'ru'] as const) {
         /* Waiting for its sign-in: one block from the start. */
         await across(claude);
         await claude.screenshot({ path: info.outputPath(`189-login-${lang}-${theme}-${width}.png`) });
+
+        /* Waiting for its owner to accept agy's terms on the machine: one block from the start, saying where and who. */
+        const agy = page.getByRole('article', { name: 'Antigravity, Ivan' });
+        await expect(agy.getByText(words.setup)).toBeVisible();
+        await across(agy);
+        await agy.scrollIntoViewIfNeeded();
+        await agy.screenshot({ path: info.outputPath(`224-setup-${lang}-${theme}-${width}.png`) });
 
         /* Waiting for its machine: one block from the start, with the install command, Copy and how long it works. */
         await expect(kimi.getByText(INSTALL)).toBeVisible();
