@@ -1288,7 +1288,8 @@ export class TerminalHost {
     let queuedFrom: string | null = null;
     for (const words of a.waitingWords) {
       const taken = words.takeQueued(text);
-      if (taken) { queuedFrom = taken.jobId; break; }
+      /* Hornhoof finds its words by what it typed, not by how the program recorded them. */
+      if (taken) { queuedFrom = taken.jobId; text = taken.text; break; }
     }
     const start = a.starting;
     a.fresh = false;

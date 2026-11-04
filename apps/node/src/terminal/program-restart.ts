@@ -41,6 +41,12 @@ export function resumeCommand(kind: TermProgram['kind'], original: string[], ses
 
 
 const flat = (text: string) => text.replace(/\s+/g, ' ').trim();
+/* Claude Code keeps words pasted over several lines inside one pair of pasted_content tags, in its queue and in what it
+   took. Only that outer pair goes: tags inside the words are theirs. */
+const PASTED = /^\s*<pasted_content id="([^"]*)">\n?([\s\S]*?)\n?<\/pasted_content(?: id="\1")?>\s*$/;
+const recorded = (text: string) => PASTED.exec(text)?.[2] ?? text;
+/* Whether the program's record is these words: as they are, or inside Claude's paste wrapper. */
+const same = (words: string, got: string) => flat(words) === flat(got) || flat(words) === flat(recorded(got));
 type WordState = 'waiting' | 'queued' | 'held' | 'taken' | 'discarded';
 export type WordReceipt = { text: string; jobId: string | null; state: WordState; accepted: boolean; sources: Set<string> };
 
@@ -87,7 +93,7 @@ export class TurnWords {
   }
 
   queued(text: string, source: string): boolean {
-    const word = this.words.find(word => this.waiting(word) && flat(word.text) === flat(text) && !word.sources.has(source));
+    const word = this.words.find(word => this.waiting(word) && same(word.text, text) && !word.sources.has(source));
     if (!word) return false;
     word.sources.add(source);
     word.state = 'queued';
@@ -95,25 +101,26 @@ export class TurnWords {
   }
 
   taken(text: string): boolean {
-    if (this.replayed !== null && flat(this.replayed) === flat(text)) {
+    if (this.replayed !== null && same(this.replayed, text)) {
       for (const word of this.words) if (this.waiting(word)) word.state = 'taken';
       this.replayed = null;
       this.clear();
       return true;
     }
-    const original = this.original.findIndex(word => flat(word) === flat(text));
+    const original = this.original.findIndex(word => same(word, text));
     if (original >= 0) { this.original.splice(original, 1); return true; }
-    const word = this.words.find(word => this.waiting(word) && flat(word.text) === flat(text));
+    const word = this.words.find(word => this.waiting(word) && same(word.text, text));
     if (!word) return false;
     word.state = 'taken';
     return true;
   }
 
-  takeQueued(text: string): { jobId: string | null } | null {
-    const word = this.words.find(word => this.waiting(word) && flat(word.text) === flat(text));
+  /* The words Hornhoof typed, as it typed them, with the turn they were typed into. */
+  takeQueued(text: string): { jobId: string | null; text: string } | null {
+    const word = this.words.find(word => this.waiting(word) && same(word.text, text));
     if (!word) return null;
     word.state = 'taken';
-    return { jobId: word.jobId };
+    return { jobId: word.jobId, text: word.text };
   }
 
   bind(jobId: string): void {

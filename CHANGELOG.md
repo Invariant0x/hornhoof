@@ -5,6 +5,18 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.5.1] - 2026-11-04
+
+An urgent fix: a message that reached an agent during its turn no longer comes
+to it a second time.
+
+### Fixed
+
+- Count a message as delivered when the agent reads it during a turn in Claude
+  Code. Claude Code records words pasted over several lines in its own wrapper,
+  the node did not recognize them, and Hornhoof gave the agent the same message
+  again as a new turn.
+
 ## [0.5.0] - 2026-11-04
 
 Turn 5: one work tree for the whole turn, closed tasks that stay quiet, clearer
