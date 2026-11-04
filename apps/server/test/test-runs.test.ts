@@ -540,6 +540,30 @@ describe('a test run', () => {
     expect(JSON.parse((await call('test_run', { run: 1 })).text)).toMatchObject({ parts: [{ status: 'passed', machine: 'ivan-mac', ranAgain: ['ann-pc restarted and lost it'] }] });
   });
 
+  it('keeps a part through a 60-second disconnect and accepts its result after return', async () => {
+    const c = await company();
+    const ivan = await c.machine(c.ceo, 'ivan-mac');
+    const { job, call } = await c.turn(c.bruno);
+    await call('run_tests', { command: 'make test' });
+    const started = await nextOf(ivan.node, 'tests.run');
+    ivan.node.close();
+    await until(() => !c.app.ctx.hub.isOnline({ kind: 'node', nodeId: ivan.nodeId }));
+
+    await checkTestTimes(c.app.ctx, new Date(Date.now() + 60_000));
+    expect(JSON.parse((await call('test_run', { run: 1 })).text)).toMatchObject({ status: 'running', parts: [{ status: 'running' }] });
+
+    const back = await connectNode(c.url, ivan.key);
+    back.send({ type: 'hello', version: '0.6.1', loggedIn: true, running: [job.id], load: idle(), tests: [started.partId], work: true });
+    await until(() => c.app.ctx.hub.isReady({ kind: 'node', nodeId: ivan.nodeId }));
+    back.send(done(started));
+    await nextOf(back, 'tests.ack');
+
+    const result = JSON.parse((await call('test_run', { run: 1 })).text);
+    expect(result).toMatchObject({ status: 'passed', parts: [{ status: 'passed' }] });
+    expect(result.parts[0].ranAgain).toBeUndefined();
+    expect(await gets(back, 'tests.cancel')).toBe(false);
+  });
+
   it('runs a part again once its machine is away for 3 minutes, at most twice, then fails it and says where it was lost', async () => {
     const c = await company();
     const ivan = await c.machine(c.ceo, 'ivan-mac');
