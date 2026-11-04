@@ -119,29 +119,43 @@ function buildOf(env: NodeJS.ProcessEnv, set: z.infer<typeof Env>): Pick<Config,
   };
 }
 
+/* Folders and scripts, each with the place the image keeps it. */
+function placesOf(env: NodeJS.ProcessEnv): Pick<Config, 'webDist' | 'installScript' | 'controlDir' | 'templatesDir'> {
+  return {
+    webDist: env.WEB_DIST || DEFAULT_WEB_DIST,
+    installScript: env.INSTALL_SCRIPT || DEFAULT_INSTALL_SCRIPT,
+    controlDir: env.HORNHOOF_CONTROL_DIR || '/control',
+    templatesDir: env.TEMPLATES_DIR || DEFAULT_TEMPLATES,
+  };
+}
+
+/* Intervals and limits, with their defaults. */
+function limitsOf(set: z.infer<typeof Env>): Pick<Config, 'port' | 'nodePingMs' | 'streamPingMs' | 'runsPerHost' | 'taskFilesBytes'> {
+  return {
+    port: set.PORT ?? 8080,
+    nodePingMs: set.NODE_PING_MS ?? 20000,
+    streamPingMs: set.STREAM_PING_MS ?? 25000,
+    runsPerHost: set.MAX_RUNS_PER_HOST,
+    taskFilesBytes: (set.TASK_FILES_MB ?? 2048) * 1024 * 1024,
+  };
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv): Config {
   const secret = secretOf(env);
   const set = checkedEnv(env);
   const publicUrl = (set.PUBLIC_URL ?? 'http://localhost:8080').replace(/\/+$/, '');
   return {
     ...buildOf(env, set),
+    ...placesOf(env),
+    ...limitsOf(set),
     databaseUrl: env.DATABASE_URL || undefined,
     secret,
     publicUrl,
-    port: set.PORT ?? 8080,
     secureCookies: publicUrl.startsWith('https://'),
-    webDist: env.WEB_DIST || DEFAULT_WEB_DIST,
-    installScript: env.INSTALL_SCRIPT || DEFAULT_INSTALL_SCRIPT,
     nodeKey: nodeKeyOf(env),
-    nodePingMs: set.NODE_PING_MS ?? 20000,
-    streamPingMs: set.STREAM_PING_MS ?? 25000,
-    runsPerHost: set.MAX_RUNS_PER_HOST,
-    controlDir: env.HORNHOOF_CONTROL_DIR || '/control',
-    templatesDir: env.TEMPLATES_DIR || DEFAULT_TEMPLATES,
     relayUrl: (set.RELAY_URL ?? 'https://hornhoof.org').replace(/\/+$/, ''),
     tunnelHost: set.TUNNEL_HOST,
     keeper: set.HORNHOOF_KEEPER === 'on',
-    taskFilesBytes: (set.TASK_FILES_MB ?? 2048) * 1024 * 1024,
     hostId: set.HORNHOOF_HOST_ID ?? null,
   };
 }
