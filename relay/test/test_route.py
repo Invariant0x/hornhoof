@@ -425,13 +425,13 @@ class DashboardContractTests(unittest.TestCase):
         # racing registrations would both get through.
         t = self.relay.now()
         self.relay.db().execute("INSERT INTO routes (name, generation, client, run_id, type, state, since) "
-                                "VALUES ('acme', 1, 'acme-c1-link', 'r1', 'http', 'pending', ?)", (t,))
+                                "VALUES ('acme', 1, 'acme-a1b2c3d4-link', 'r1', 'http', 'pending', ?)", (t,))
         self.server.records['/api/proxy/http/acme'] = _record(200, {'status': 'offline', 'clientID': 'acme-c0-link'})
         body = self.relay.route_of('acme')
         self.assertEqual(body['state'], 'held')
         self.assertEqual(body['generation'], 1)
         self._bind('acme', 'k')
-        reason = self.relay.plugin('NewProxy', self._newproxy_content('acme', 'k', 'acme-c2-link'))
+        reason = self.relay.plugin('NewProxy', self._newproxy_content('acme', 'k', 'acme-d4c3b2a1-link'))
         self.assertEqual(reason, {'reject': True, 'reject_reason': 'router config conflict: acme is held'})
         row = self.relay.db().execute("SELECT generation, state FROM routes WHERE name = 'acme'").fetchone()
         self.assertEqual((row[0], row[1]), (1, 'pending'))
@@ -446,7 +446,7 @@ class DashboardContractTests(unittest.TestCase):
 
         def run():
             entered.set()
-            result.append(self.relay.plugin('NewProxy', self._newproxy_content('acme', 'k', 'acme-c1-link')))
+            result.append(self.relay.plugin('NewProxy', self._newproxy_content('acme', 'k', 'acme-a1b2c3d4-link')))
 
         worker = threading.Thread(target=run)
         worker.start()
@@ -503,7 +503,7 @@ class DashboardContractTests(unittest.TestCase):
         try:
             result = []
             worker = threading.Thread(target=lambda: result.append(
-                self.relay.plugin('NewProxy', self._newproxy_content('acme', 'k', 'acme-c1-link'))))
+                self.relay.plugin('NewProxy', self._newproxy_content('acme', 'k', 'acme-a1b2c3d4-link'))))
             started = time.monotonic()
             worker.start()
             worker.join(timeout=8)
@@ -535,7 +535,7 @@ class DashboardContractTests(unittest.TestCase):
         try:
             result = []
             worker = threading.Thread(target=lambda: result.append(
-                self.relay.plugin('Login', {'metas': {'name': 'acme', 'key': 'k'}, 'run_id': 'r1'})))
+                self.relay.plugin('Login', {'metas': {'name': 'acme', 'key': 'k'}})))
             started = time.monotonic()
             worker.start()
             worker.join(timeout=8)
