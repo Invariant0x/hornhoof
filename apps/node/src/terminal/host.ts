@@ -621,7 +621,7 @@ export class TerminalHost {
   private async reportProgram(a: Agent, watch: ProgramWatch, look: Look): Promise<void> {
     const turn = a.turn;
     const now = Date.now();
-    const call = a.question ?? a.calls.values().next().value ?? null;
+    const call = this.pendingCall(a);
     if (call === look.call && a.retry === look.retry && now - look.at < this.lookMs && !watch.due(now)) return;
     Object.assign(look, { at: now, call, retry: a.retry });
     const screen = await this.opts.tmux.screen(a.name, 0, true);
@@ -629,6 +629,10 @@ export class TerminalHost {
     watch.look(now, screen, call, Boolean(a.took && a.busy), a.signAt, a.retry);
     if (this.atInterruption(a, screen)) this.interrupted(a);
     this.agyFailed(a);
+  }
+
+  private pendingCall(a: Agent): Pending | null {
+    return a.question ?? a.calls.values().next().value ?? null;
   }
 
   private agyOutput(a: Agent): string {

@@ -51,25 +51,33 @@ function tail(fd, limit, io = { write: writeSync, truncate: ftruncateSync }) {
 
 if (require.main === module) record();
 
+function captureArguments(args) {
+  const [file, ready, flush, bytes, socket, session, position] = args;
+  const limit = Number(bytes);
+  if (!file || !ready || !flush || !socket || !session || !position || !Number.isSafeInteger(limit) || limit <= 0) throw new Error('Invalid output capture arguments.');
+  return { file, ready, flush, limit, socket, session, position };
+}
+
+function positionPublisher(fd) {
+  return ({ generation, end, size }) => {
+    const data = Buffer.alloc(24);
+    data.writeDoubleBE(generation, 0);
+    data.writeDoubleBE(end, 8);
+    data.writeDoubleBE(size, 16);
+    /* Mark a write before its bytes change; publish its even generation only after both bounds are complete. */
+    const parts = generation % 2 ? [[0, 8], [8, 16]] : [[8, 16], [0, 8]];
+    for (const [at, length] of parts) {
+      for (let done = 0; done < length;) done += writeSync(fd, data, at + done, length - done, at + done);
+    }
+  };
+}
+
 function record() {
-const [file, ready, flush, bytes, socket, session, position] = process.argv.slice(2);
-const limit = Number(bytes);
-if (!file || !ready || !flush || !socket || !session || !position || !Number.isSafeInteger(limit) || limit <= 0) throw new Error('Invalid output capture arguments.');
+const { file, ready, flush, limit, socket, session, position } = captureArguments(process.argv.slice(2));
 const fd = openSync(file, constants.O_WRONLY | constants.O_NOFOLLOW);
 const readyFd = openSync(ready, constants.O_WRONLY | constants.O_NOFOLLOW);
-
 const positionFd = openSync(position, constants.O_WRONLY | constants.O_NOFOLLOW);
-const publish = ({ generation, end, size }) => {
-  const data = Buffer.alloc(24);
-  data.writeDoubleBE(generation, 0);
-  data.writeDoubleBE(end, 8);
-  data.writeDoubleBE(size, 16);
-  /* Mark a write before its bytes change; publish its even generation only after both bounds are complete. */
-  const parts = generation % 2 ? [[0, 8], [8, 16]] : [[8, 16], [0, 8]];
-  for (const [at, length] of parts) {
-    for (let done = 0; done < length;) done += writeSync(positionFd, data, at + done, length - done, at + done);
-  }
-};
+const publish = positionPublisher(positionFd);
 publish({ generation: 0, end: 0, size: 0 });
 const keep = tail(fd, limit, { write: writeSync, truncate: ftruncateSync, publish });
 let closed = false;

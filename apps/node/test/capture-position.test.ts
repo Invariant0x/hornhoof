@@ -3,6 +3,7 @@ import * as fs from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { runInNewContext } from 'node:vm';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -46,7 +47,7 @@ function recorder(changeArgs: (args: string[]) => string[] = args => args) {
     require: load, module, Buffer,
     process: { argv: ['node', 'hh-capture.cjs', ...changeArgs([output, ready, flush, '4', 'socket', 'session', position])], stdin, once: () => {} },
     setInterval: () => ({ unref: () => {} }),
-  });
+  }, { filename: fileURLToPath(new URL('../hh-capture.cjs', import.meta.url)) });
   return { stdin, writes, output, position, ready };
 }
 
@@ -64,6 +65,14 @@ describe('recorder cursor publication', () => {
     expect(fs.readFileSync(c.ready, 'utf8')).toBe('ready');
     expect(fs.readFileSync(c.position)).toEqual(Buffer.alloc(24));
     expect(c.writes.map(write => write.at)).toEqual([8, 11, 14, 17, 20, 23, 0, 3, 6]);
+  });
+
+  it('accepts the smallest positive byte limit and retains its final byte', () => {
+    const c = recorder(args => args.map((value, at) => at === 3 ? '1' : value));
+    c.stdin.emit('data', Buffer.from('abc'));
+    expect(fs.readFileSync(c.output, 'utf8')).toBe('c');
+    const position = fs.readFileSync(c.position);
+    expect([position.readDoubleBE(0), position.readDoubleBE(8), position.readDoubleBE(16)]).toEqual([2, 3, 1]);
   });
 
   it('marks append and rotation busy before publishing both bounds, including short writes', () => {
