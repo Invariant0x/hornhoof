@@ -89,6 +89,21 @@ describe('AgentCard', () => {
     expect(bareLine).toHaveClass('ac-failure');
   });
 
+  it('shows the stale reason and says when the program gave no output in English and Russian', async () => {
+    const at = new Date().setHours(14, 2, 0, 0);
+    const text = 'Stale queued wake. Program state: not started. Last sign of life: no data.';
+    for (const [lang, noOutput] of [['en', 'No output.'], ['ru', 'Вывода не было.']] as const) {
+      localStorage.setItem('hh-lang', lang);
+      open({ 'GET /api/agents/b1': [200, { ...CARD, failure: { kind: 'unknown', text, at, tail: 'No output.' } }] });
+      const summary = await screen.findByText(/Last turn failed|Последний ход не удался/);
+      const details = summary.closest('details');
+      expect(details?.querySelector('pre')).toHaveTextContent(text);
+      expect(details).toHaveTextContent(noOutput);
+      cleanup();
+      localStorage.removeItem('hh-lang');
+    }
+  });
+
   it('shows only the clock time when the last turn failed today, and the date with the time when it failed earlier, in English and Russian', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date(2026, 10, 3, 16, 0));
