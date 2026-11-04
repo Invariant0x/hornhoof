@@ -1155,13 +1155,19 @@ async function unblockByComment(ctx: Live, actor: Actor, task: Task, text: strin
 
 async function resumeByComment(ctx: Live, actor: Actor, task: Task, text: string): Promise<Moved | null> {
   if (!task.externalWait || !task.assigneeAgentId || actor.agentId === task.assigneeAgentId || CLOSED.includes(task.status)) return null;
-  const wakes: Wake[] = [{ agentId: task.assigneeAgentId, taskId: task.id, why: 'comment', text }];
+  const wakes = commentWakes(task, actor, text);
   return { task: await move(ctx, task, { externalWait: null, silent: 0 }, { kind: 'comment', actor, text, data: { externalWait: null } }, undefined, wakes), wakes };
 }
 
+function commentWakes(task: Task, actor: Actor, text: string): Wake[] {
+  if (CLOSED.includes(task.status)) return [];
+  const recipients = new Set(task.status === 'review' ? [task.assigneeAgentId, ...task.panel] : [task.assigneeAgentId]);
+  recipients.delete(actor.agentId ?? null);
+  return [...recipients].filter((id): id is string => id !== null).map(agentId => ({ agentId, taskId: task.id, why: 'comment', text }));
+}
+
 async function logComment(ctx: Live, actor: Actor, task: Task, text: string): Promise<Moved> {
-  const wake = actor.personId && task.assigneeAgentId && !CLOSED.includes(task.status);
-  const wakes: Wake[] = wake ? [{ agentId: task.assigneeAgentId!, taskId: task.id, why: 'comment', text }] : [];
+  const wakes = commentWakes(task, actor, text);
   await ctx.db.transaction(async tx => {
     await note(tx, task, { kind: 'comment', actor, text });
     await keepWakes(tx, task.companyId, wakes);

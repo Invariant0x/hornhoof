@@ -1,6 +1,6 @@
 import { WaitOnInput } from '@hornhoof/protocol/waits';
 import { z } from 'zod';
-import { and, eq, isNotNull, lte, notInArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, lte, notInArray, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentEvents, jobs, pendingWakes, tasks, type ExternalWait } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
@@ -43,10 +43,10 @@ async function placeWait(ctx: Ctx, agentId: string, taskId: string, input: z.inf
   await waitingTaskTurn(ctx.db, agentId, taskId);
   const [message] = await ctx.db.select({ id: jobs.id }).from(jobs).innerJoin(agentEvents, eq(agentEvents.jobId, jobs.id)).where(and(
     eq(jobs.agentId, agentId), eq(jobs.taskId, taskId), eq(jobs.status, 'queued'), eq(agentEvents.kind, 'message'),
-    sql`${agentEvents.data}->'taskWake'->>'why' in ('message', 'comment')`,
+    sql`${agentEvents.data}->'taskWake'->>'why' in ('message', 'comment', 'unblocked')`,
   )).limit(1);
   const [comment] = await ctx.db.select({ id: pendingWakes.id }).from(pendingWakes).where(and(
-    eq(pendingWakes.agentId, agentId), eq(pendingWakes.taskId, taskId), eq(pendingWakes.why, 'comment'),
+    eq(pendingWakes.agentId, agentId), eq(pendingWakes.taskId, taskId), inArray(pendingWakes.why, ['comment', 'unblocked']),
   )).limit(1);
   if (message || comment) throw refuse(409, 'task_invalid', `A message on #${task.number} waits for you. End this turn and read it before waiting.`);
   const wait = waitOf(input, now);

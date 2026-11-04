@@ -331,7 +331,7 @@ export async function stopTurns(ctx: Ctx, taskIds: string[], keep?: string): Pro
 }
 
 /* Wakes that bring the agent new words on its task, which a turn on that task takes in while it runs. */
-const LIVE_WAKES: WakeWhy[] = ['comment', 'answered', 'updated', 'tests', 'work'];
+const LIVE_WAKES: WakeWhy[] = ['comment', 'unblocked', 'answered', 'updated', 'tests', 'work'];
 /* Wakes that would set the holder to work on its task, held back while the task waits for the tasks it comes after. */
 const TO_WORK: WakeWhy[] = ['assigned', 'updated', 'comment', 'answered', 'unblocked', 'reminder', 'go_on', 'subtasks'];
 
