@@ -718,6 +718,16 @@ describe('runNode', () => {
     server.send({ type: 'job.cancel', jobId: 'j1' });
   });
 
+  it('removes the folder older nodes ran their parts in as it comes up', async () => {
+    const server = await fakeServer();
+    const dir = nodeDir(server.url);
+    mkdirSync(join(dir, 'tests', 'part-0'), { recursive: true });
+    const node = await runNode({ dir, adapter, log: () => {} });
+    onTestFinished(() => node.stop());
+    expect(existsSync(join(dir, 'tests'))).toBe(false);
+    expect(existsSync(join(dir, 'work', 'file'))).toBe(true);
+  });
+
   it('offers no part of any run without a user of its own for them, says why, and turns down a part sent anyway', async () => {
     const server = await fakeServer();
     const ran: string[] = [];

@@ -33,3 +33,16 @@ The example's line numbers belong to turn 5; select the current changed
 lines when checking another revision. This example intentionally bypasses
 coverage to reproduce a known equivalent `useState(0)` to `useState(1)`
 mutation. Normal task checks should reuse their scoped coverage report.
+
+## Where a part of a run lies
+
+crapper and dryer take a file for a test when any folder on its absolute path
+is called `test`, `tests`, `spec`, `specs` or `__tests__`, and mutator asks
+crapper. Under such a folder they find no source and still exit 0, which reads
+like a clean result. A node therefore runs its parts in `<data>/runs/<part>`,
+and these tools need no patch for it.
+
+The image runs `test_part_paths.py` with each tool's own Python before the
+quality stage can finish, and `../test/tests-run.test.ts` holds the path in that
+file to the node's code. A clone of your own under such a folder still has this
+problem.

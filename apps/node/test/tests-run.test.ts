@@ -1,12 +1,12 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { MAX_RUN_FILES, TEST_LOG_BYTES, type ServerMessage } from '@hornhoof/protocol';
 import { describe, expect, it, onTestFinished } from 'vitest';
-import { clearShared, partFiles, partFolders, putOutputs, runTests, type PartFiles } from '../src/tests.js';
+import { clearShared, partFiles, partFolders, putOutputs, removeOldParts, runTests, type PartFiles } from '../src/tests.js';
 
 type TestRun = Extract<ServerMessage, { type: 'tests.run' }>;
 
@@ -40,7 +40,23 @@ describe('a part of a test run on a node', () => {
     const done = await runTests(run(url, { command: 'cat marker.txt; ls -a ..' }), { dir, user: null, hidden: [] });
     expect(done).toMatchObject({ type: 'tests.done', partId: 'part-1', ok: true, exitCode: 0, error: null, commit: commits['task-12-checkout'] });
     expect(done.log).toContain('task-12-checkout\n');
-    expect(readdirSync(join(dir, 'tests'))).toEqual([]);
+    expect(readdirSync(join(dir, 'runs'))).toEqual([]);
+  });
+
+  it('runs in runs/<part> of the data folder, with its home and temporary folder there', async () => {
+    const { url } = origin();
+    const dir = realpathSync(nodeDir());
+    const done = await runTests(run(url, { command: 'pwd; echo "$HOME"; echo "$TMPDIR"' }), { dir, user: null, hidden: [] });
+    const root = join(dir, 'runs', 'part-1');
+    expect(done.log).toContain(`${join(root, 'repo')}\n${join(root, 'home')}\n${join(root, 'tmp')}\n`);
+  });
+
+  it('runs where the image checks that the quality tools read its sources as sources', async () => {
+    const { url } = origin();
+    const dir = realpathSync(nodeDir());
+    const done = await runTests(run(url, { command: 'pwd' }), { dir, user: null, hidden: [] });
+    const repo = relative(dir, done.log.split('\n').find(line => line.startsWith(dir))!);
+    expect(readFileSync(new URL('../quality/test_part_paths.py', import.meta.url), 'utf8')).toContain(`PART_REPO = Path("/data/${repo}")`);
   });
 
   it('exposes PLAYWRIGHT_BROWSERS_PATH on /data/browsers and prepares the repository browser before running the check', async () => {
@@ -108,7 +124,7 @@ describe('a part of a test run on a node', () => {
     expect(done).toMatchObject({ ok: false, error: 'timeout', exitCode: null });
     expect(Date.now() - started).toBeLessThan(15_000);
     expect(done.log).toMatch(/did not finish within 1 s|did not finish within 2 s/);
-    expect(readdirSync(join(dir, 'tests'))).toEqual([]);
+    expect(readdirSync(join(dir, 'runs'))).toEqual([]);
   });
 
   it('stops when Hornhoof calls it off', async () => {
@@ -139,7 +155,7 @@ describe('a part of a test run on a node', () => {
     const dir = nodeDir();
     const done = await runTests(run(join(tmpdir(), 'no-such-repo-hh')), { dir, user: null, hidden: [] });
     expect(done).toMatchObject({ ok: false, error: 'clone_failed' });
-    expect(existsSync(join(dir, 'tests', 'part-1'))).toBe(false);
+    expect(existsSync(join(dir, 'runs', 'part-1'))).toBe(false);
   });
 
   it("caps Vitest workers at half the machine's cores unless already set", async () => {
@@ -177,9 +193,50 @@ const stalled: PartFiles = {
   put: (_partId, _name, _bytes, signal) => new Promise((_, reject) => signal?.addEventListener('abort', () => reject(new Error('aborted')))),
 };
 
+describe('the folder older nodes ran their parts in', () => {
+  it('goes with what parts left there, read-only folders too, and nothing else goes', () => {
+    const dir = nodeDir();
+    const left = join(dir, 'tests', 'part-0', 'repo');
+    mkdirSync(left, { recursive: true });
+    writeFileSync(join(left, 'marker.txt'), 'left\n');
+    chmodSync(left, 0o555);
+    mkdirSync(join(dir, 'runs', 'part-1'), { recursive: true });
+    const lines: string[] = [];
+    removeOldParts(dir, line => lines.push(line));
+    expect(readdirSync(dir)).toEqual(['runs']);
+    expect(readdirSync(join(dir, 'runs'))).toEqual(['part-1']);
+    expect(lines).toEqual([]);
+  });
+
+  it('is no trouble on a node that never had it', () => {
+    const lines: string[] = [];
+    removeOldParts(nodeDir(), line => lines.push(line));
+    expect(lines).toEqual([]);
+  });
+
+  it('is said, not thrown, when it cannot go', () => {
+    const file = join(nodeDir(), 'file');
+    writeFileSync(file, '');
+    const lines: string[] = [];
+    removeOldParts(file, line => lines.push(line));
+    expect(lines).toEqual([expect.stringMatching(/^The old folder of test runs could not be removed: .+/)]);
+  });
+});
+
 describe('a part of other work on a node', () => {
   const work = (over: Partial<TestRun> = {}): TestRun => ({
     type: 'tests.run', kind: 'work', partId: 'part-1', repo: null, branch: null, task: 12, command: 'true', part: 1, parts: 1, timeoutMs: 60_000, ...over,
+  });
+
+  it('runs in runs/<part> of the data folder, beside a clone too, with its folders there', async () => {
+    const dir = realpathSync(nodeDir());
+    const root = join(dir, 'runs', 'part-1');
+    const command = 'pwd; echo "$HH_IN"; echo "$HH_OUT"';
+    const alone = await runTests(work({ command }), { dir, user: null, hidden: [], files: taskFiles().files });
+    expect(alone.log).toContain(`${join(root, 'work')}\n${join(root, 'work')}\n${join(root, 'out')}\n`);
+    const { url } = origin();
+    const cloned = await runTests(work({ command, repo: { url, token: '' }, branch: 'task-12-checkout' }), { dir, user: null, hidden: [], files: taskFiles().files });
+    expect(cloned.log).toContain(`${join(root, 'repo')}\n${join(root, 'in')}\n${join(root, 'out')}\n`);
   });
 
   it("runs in an empty folder with the task's files in it, and puts what it leaves in its output folder on the task", async () => {
@@ -193,7 +250,7 @@ describe('a part of other work on a node', () => {
     expect(done.log).toContain('same');
     expect(done.log).toMatch(/Put on the task: copy\.csv/);
     expect(put).toEqual([{ partId: 'part-1', name: 'copy.csv', text: 'a,b\n' }]);
-    expect(readdirSync(join(dir, 'tests'))).toEqual([]);
+    expect(readdirSync(join(dir, 'runs'))).toEqual([]);
   });
 
   it('leaves out of the task what is not a plain file, a named pipe too, without waiting on it', async () => {
@@ -222,7 +279,7 @@ describe('a part of other work on a node', () => {
     expect(stopped.log).not.toContain('RAN');
     const late = await runTests(work({ files: ['data.csv'], command: 'echo RAN', timeoutMs: 300 }), { dir, user: null, hidden: [], files: stalled });
     expect(late).toMatchObject({ ok: false, error: 'timeout' });
-    expect(readdirSync(join(dir, 'tests'))).toEqual([]);
+    expect(readdirSync(join(dir, 'runs'))).toEqual([]);
   });
 
   it('stops putting what it made on the task when the part is stopped meanwhile', async () => {
@@ -233,11 +290,11 @@ describe('a part of other work on a node', () => {
     const result = await done;
     expect(result.log).toMatch(/Stopped before a\.txt went on the task\./);
     expect(result.log).not.toMatch(/Put on the task|b\.txt (went|could)/);
-    expect(readdirSync(join(dir, 'tests'))).toEqual([]);
+    expect(readdirSync(join(dir, 'runs'))).toEqual([]);
   });
 
   it("keeps the part's folder the node's, and gives its user only the folders inside it", () => {
-    const root = '/n/tests/part-1';
+    const root = '/n/runs/part-1';
     expect(partFolders(root, work())).toEqual({ own: root, user: ['home', 'tmp', 'out', 'work'].map(f => join(root, f)) });
     expect(partFolders(root, work({ repo: { url: 'https://x/y.git', token: '' } }))).toEqual({ own: root, user: ['home', 'tmp', 'out', 'in', 'repo'].map(f => join(root, f)) });
     expect(partFolders(root, work({ kind: undefined, repo: { url: 'https://x/y.git', token: '' } }))).toEqual({ own: root, user: ['home', 'tmp', 'repo'].map(f => join(root, f)) });
@@ -273,7 +330,7 @@ describe('a part of other work on a node', () => {
     expect(done).toMatchObject({ ok: false, error: 'files_failed', exitCode: null });
     expect(done.log).toContain('gone.csv');
     expect(done.log).not.toContain('RAN');
-    expect(readdirSync(join(dir, 'tests'))).toEqual([]);
+    expect(readdirSync(join(dir, 'runs'))).toEqual([]);
   });
 
   it('puts only plain files from the output folder, at most the most a part may, also when the command failed', async () => {
