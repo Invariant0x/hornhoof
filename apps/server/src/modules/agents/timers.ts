@@ -134,7 +134,9 @@ export function startTimers(app: FastifyInstance, ctx: Ctx): void {
     void checkExternalWaits(ctx).catch(failed('ending external task waits failed'));
     void wakeLeftBehind(ctx).catch(failed('queueing left-behind turns failed'));
     void dropOldFiles(ctx.db, new Date()).catch(failed('removing the files of old turns failed'));
-    timer = setInterval(() => (round = minuteRound(ctx, new Date(), failed)), TICK_MS);
+    timer = setInterval(() => {
+      round = minuteRound(ctx, new Date(), failed);
+    }, TICK_MS);
     timer.unref();
   };
   const leave = async () => {
