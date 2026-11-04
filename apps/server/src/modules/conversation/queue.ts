@@ -793,15 +793,18 @@ export async function orchestratorState(ctx: Ctx, companyId: string): Promise<Ag
   return agentState(ctx, agent.id);
 }
 
+/* A node that waits or restarts for an update is not away: it comes back by itself, and its turns wait in line for it. */
+const notAway = (ctx: Ctx, node: NodeIdentity): boolean => ctx.hub.isReady(node) || nodeHeld(ctx, node);
+
 /* Why the agent's turns cannot go out now, or null when they can: a plan's go out while one of its machines can take them,
    and otherwise wait for what its own machine waits for, or one of the plan's that is online, or its first. One with work
    in progress waits for its own machine alone. */
 async function waitsFor(ctx: Ctx, agent: { id: string; productId: string | null; departmentId: string | null; nodeId: string | null }, sub: { id: string; kind: 'personal' | 'api_key' }): Promise<AgentState['reason']> {
-  if (sub.kind === 'api_key') return ctx.hub.isReady(BUILTIN) || nodeHeld(ctx, BUILTIN) ? null : 'machine_offline';
+  if (sub.kind === 'api_key') return notAway(ctx, BUILTIN) ? null : 'machine_offline';
   const all = await planNodes(ctx.db, [sub.id]);
   if (!all.length) return 'waiting_machine';
   const need = all.some(n => outdated(n.version, REPOSITORY_NODE)) && (await repoFor(ctx, agent)) ? REPOSITORY_NODE : CONVERSATION_NODE;
-  const why = (n: NodeRow): AgentState['reason'] => (n.status !== 'ready' ? n.status : outdated(n.version, need) ? 'node_outdated' : ctx.hub.isReady(nodeIdentity(n.id)) || nodeHeld(ctx, nodeIdentity(n.id)) ? null : 'machine_offline');
+  const why = (n: NodeRow): AgentState['reason'] => (n.status !== 'ready' ? n.status : outdated(n.version, need) ? 'node_outdated' : notAway(ctx, nodeIdentity(n.id)) ? null : 'machine_offline');
   const own = all.find(n => n.id === agent.nodeId);
   if (own && why(own) !== null && (await holdsWork(ctx, agent.id))) return why(own);
   if (all.some(n => why(n) === null)) return null;
@@ -809,7 +812,8 @@ async function waitsFor(ctx: Ctx, agent: { id: string; productId: string | null;
 }
 
 /* The update its next turn waits for: of its own machine or, with that one away, of the one its plan has left. */
-async function drainInTheWay(ctx: Ctx, agent: { nodeId: string | null }, sub: { id: string; kind: 'personal' | 'api_key' }, shown: NodeIdentity | null): Promise<MachineDrain | null> {
+async function drainInTheWay(ctx: Ctx, agent: { nodeId: string | null } | undefined, sub: { id: string; kind: 'personal' | 'api_key' } | null, shown: NodeIdentity | null): Promise<MachineDrain | null> {
+  if (!agent || !sub) return null;
   if (sub.kind === 'api_key') return nodeDrain(ctx, BUILTIN);
   const plan = (await planNodes(ctx.db, [sub.id])).map(n => nodeIdentity(n.id));
   const own = agent.nodeId ? [nodeIdentity(agent.nodeId)] : [];
@@ -825,14 +829,13 @@ export async function agentState(ctx: Ctx, agentId: string): Promise<AgentState>
   const reason: AgentState['reason'] = !sub || !agent ? 'no_subscription' : await waitsFor(ctx, agent, sub);
   /* The terminal the window opens is of the machine the program is on, or for one not on a machine yet, of the machine
      its next turn would go to, where the window starts it. */
-  const shown = (await programNode(ctx, agentId))?.node ?? (sub && agent ? ((await placement(ctx, agent, sub))?.node ?? null) : null);
+  const place = sub && agent ? await placement(ctx, agent, sub) : null;
+  const shown = (await programNode(ctx, agentId))?.node ?? place?.node ?? null;
   const terminal = Boolean(shown && ctx.hub.hasTerminals(shown));
   const browserError = shown ? ctx.hub.browserErrorOf(shown) : null;
-  const available = sub && agent ? await placement(ctx, agent, sub) : null;
-  const drain = !available && reason === null && sub && agent ? await drainInTheWay(ctx, agent, sub, shown) : null;
   return {
     ready: reason === null,
-    machineDrain: drain,
+    machineDrain: place || reason !== null ? null : await drainInTheWay(ctx, agent, sub, shown),
     limitUntil: sub ? limitUntil(sub.limits, sub.limitsUpdatedAt) : null,
     budgetUntil: sub ? budgetUntil(sub.limits, sub.budget, sub.limitsUpdatedAt) : null,
     reason,
