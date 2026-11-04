@@ -13,7 +13,7 @@ const waiting = (provider: keyof typeof names): SubView => ({
 });
 
 async function prepare(page: Page, language: 'en' | 'ru', theme: string) {
-  await page.clock.install({ time: START });
+  await page.clock.install({ time: START - 60_000 });
   await page.addInitScript(({ language, theme }) => {
     localStorage.setItem('hh-lang', language); localStorage.setItem('hh-theme', theme);
   }, { language, theme });
@@ -24,7 +24,7 @@ async function prepare(page: Page, language: 'en' | 'ru', theme: string) {
   const make = (rows: SubView[]) => {
     const id = String(++serial).padStart(64, '0');
     const command: ShownCommand = { id, kind: 'plans', subscriptionIds: rows.map(s => s.id), dismissedSubscriptionIds: [], plans: rows.map(s => s.label), machine: null,
-      command: `curl -fsSL https://demo.example.test/install.sh | bash -s -- --join DEMO_ONLY_${serial}`, expiresAt: new Date(START + 21 * 3600_000 + 60_000).toISOString() };
+      command: `curl -fsSL https://demo.example.test/install.sh | bash -s -- --join DEMO_ONLY_${serial}`, expiresAt: new Date(START + 21 * 3600_000).toISOString() };
     commands.push(command);
     return { ...command, subscriptions: rows };
   };
@@ -79,6 +79,7 @@ for (const language of ['en', 'ru'] as const) for (const theme of ['light', 'dar
     await page.setViewportSize({ width, height: 900 });
     const data = await prepare(page, language, theme);
     await page.goto('/');
+    await page.clock.pauseAt(START);
     await tab(page, t, 'subscriptions');
     await connect(page, t, 'Claude');
     const top = page.getByRole('region', { name: t.subs.commandHeading('Claude'), exact: true });
@@ -141,6 +142,7 @@ test('three plans keep their own row commands when two top blocks are closed', a
   await page.setViewportSize({ width: 375, height: 900 });
   await prepare(page, 'en', 'dark');
   await page.goto('/');
+  await page.clock.pauseAt(START);
   await tab(page, en, 'subscriptions');
   for (const name of ['Claude', 'Codex', 'Kimi']) await connect(page, en, name);
   for (const name of ['Claude', 'Codex']) await page.getByRole('region', { name: en.subs.commandHeading(name), exact: true }).getByRole('button', { name: 'Done', exact: true }).click();
