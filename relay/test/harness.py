@@ -2,9 +2,10 @@
 
 import base64
 from collections.abc import Callable
-from contextlib import ExitStack
+from contextlib import ExitStack, suppress
 from dataclasses import dataclass
 import functools
+import glob
 import http.client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -28,6 +29,7 @@ ROOT = Path(__file__).absolute().parents[2]
 BIN = Path(__file__).absolute().parent / '.bin'
 PUBLIC_TIMEOUT = 10
 CADDY_RELOADED = 'successfully reloaded config from file'
+LOST_PORT = re.compile(r'listen tcp [^ ]*:(\d+): bind: address already in use')
 SAME_AS_HOST = object()
 TEST_CERTIFICATE_CONFIG = """
 [req]
@@ -239,6 +241,30 @@ class _Process:
         self._finish(kill=True)
 
 
+def _process_of_socket(inode: str) -> str:
+    link = f'socket:[{inode}]'
+    for fd in glob.glob('/proc/[0-9]*/fd/*'):
+        with suppress(OSError):
+            if os.readlink(fd) == link:
+                pid = fd.split('/')[2]
+                return f'pid {pid} ({Path(f"/proc/{pid}/comm").read_text().strip()})'
+    return 'a process this user cannot see'
+
+
+def _holders_of(port: int) -> list[str]:
+    """Who holds a port, from the kernel's tables, on Linux. A process that lost the port cannot say."""
+    tables = [Path('/proc/net/tcp'), Path('/proc/net/tcp6')]
+    sockets = [line.split() for table in tables if table.exists() for line in table.read_text().splitlines()[1:]]
+    return [f'port {port} is held by {_process_of_socket(fields[9])}, TCP state {fields[3]}'
+            for fields in sockets if int(fields[1].split(':')[1], 16) == port]
+
+
+def _startup_failure(process: _Process) -> str:
+    log = process.log()
+    holders = [holder for port in LOST_PORT.findall(log) for holder in _holders_of(int(port))]
+    return '\n'.join(['Local process exited during startup:', log, *holders])
+
+
 class Client(_Process):
     def started(self, proxy: str, within: float = 15) -> bool:
         pattern = re.compile(r'\[' + re.escape(proxy) + r'\]\s+start proxy success\b')
@@ -275,6 +301,7 @@ class Stack:
         self.api_port = self.dash_port if dashboard else self._free_port()
         self.http_port = self._free_port()
         self.https_port = self._free_port()
+        self.echo_port = self._free_port()
         self.env = dict(os.environ, **{
             'RELAY_DB': str(self.tmp / 'relay.db'),
             'RELAY_PORT': str(self.relay_port),
@@ -300,9 +327,10 @@ class Stack:
         try:
             _ensure_binaries('frp.sh')
             (self.tmp / 'Caddyfile').write_text('@reserved host www.hornhoof.org\n')
-            self.echo = ThreadingHTTPServer(('127.0.0.1', 0), _Echo)
+            # A picked port, not bind(0), which may draw any free port, and the ports picked above stay free until their
+            # owners start. A run lost frps to that draw.
+            self.echo = ThreadingHTTPServer(('127.0.0.1', self.echo_port), _Echo)
             self.echo.daemon_threads = True
-            self.echo_port = self.echo.server_port
             self.echo_thread = threading.Thread(target=self.echo.serve_forever, daemon=True)
             self.echo_thread.start()
             self._start_relay()
@@ -350,7 +378,7 @@ class Stack:
     def _wait_ready(process: _Process, answers: Callable[[], bool]) -> None:
         def ready():
             if process.process.poll() is not None:
-                raise RuntimeError('Local process exited during startup:\n' + process.log())
+                raise RuntimeError(_startup_failure(process))
             return answers()
 
         if not _wait(ready, 15):
