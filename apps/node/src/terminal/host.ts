@@ -525,6 +525,8 @@ export class TerminalHost {
     const env = { ...lasting(input.env), ...spec.env };
     const scratch = this.opts.tmux.scratch();
     await this.opts.tmux.launch(a.name, { cwd: input.workDir, command: this.asAgent(spec.command), cols: this.cols, rows: this.rows, envFile: envFile(scratch, env), outputDir: scratch });
+    /* The program starts as its launch ends, once the one before it is gone: what it does counts from then. */
+    a.startedAt = Date.now();
     this.watch(a);
     if (await this.ready(a, job)) {
       this.programIs(a, true);
