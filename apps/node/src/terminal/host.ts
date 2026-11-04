@@ -4,7 +4,7 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { TERM_CHUNK, UNHEARD_MS, type AgentEvent, type Failure, type Limits, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
-import { agyRules, pastColors, SETUP_NEEDED } from '../providers/antigravity.js';
+import { agyRules, COLORS_NOT_TAKEN, colorsNotTaken, pastColors, SETUP_NEEDED } from '../providers/antigravity.js';
 import { claudeEvents, claudeInterrupted } from '../providers/claude.js';
 import type { ProgramRetry } from '@hornhoof/protocol/map';
 import { contentText, isRecord } from '../providers/events.js';
@@ -887,13 +887,15 @@ export class TerminalHost {
     return null;
   }
 
-  /* agy's first-run setup: the node takes the colors agy offers first and goes on. Its terms are the plan owner's alone to
-     accept, so the node presses nothing on them: the turn ends saying why, and the next start runs agy anew rather than
-     typing into them. True when the turn ends. */
+  /* agy's first-run setup: the node takes the colors agy offers first, once, and goes on. Its terms are the plan owner's
+     alone to accept, so the node presses nothing on them: the turn ends saying why, and the next start runs agy anew rather
+     than typing into them. An agy that did not take the colors ends the turn too, to be started anew. True when the turn
+     ends. */
   private async agyFirstRun(a: Agent, colors: { at: number }): Promise<boolean> {
     const step = await pastColors(await this.opts.tmux.screen(a.name, 0), () => this.opts.tmux.keys(a.name, 'Enter'), colors);
-    if (step !== 'terms') return false;
-    a.failure = failure('setup', SETUP_NEEDED, false);
+    const stuck = colorsNotTaken(step, colors);
+    if (step !== 'terms' && !stuck) return false;
+    a.failure = stuck ? failure('unknown', COLORS_NOT_TAKEN, true) : failure('setup', SETUP_NEEDED, false);
     a.hash = null;
     return true;
   }
