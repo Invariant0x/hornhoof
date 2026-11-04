@@ -48,6 +48,24 @@ describe('the input shown by a terminal program', () => {
     expect(inputOf('codex', 'OpenAI Codex\n› \nUse the new schema.\n')).toBe('Use the new schema.');
   });
 
+  it('requires a closing rule for a Claude box at the top of the screen', () => {
+    const draft = '──\n❯ First line.\nSecond line.';
+    expect(inputOf('claude', draft)).toBeNull();
+    expect(atEmptyPrompt('claude', draft)).toBe(false);
+  });
+
+  it('preserves line breaks inside a closed Claude input box', () => {
+    expect(inputOf('claude', '──\n❯ First line.\nSecond line.\n──\nStatus')).toBe('First line.\nSecond line.');
+  });
+
+  it('reads an unframed Claude prompt without waiting for a closing rule', () => {
+    expect(inputOf('claude', 'Claude Code\n❯ First line.\nSecond line.')).toBe('First line.\nSecond line.');
+  });
+
+  it('reads a Codex prompt below a rule without waiting for a closing rule', () => {
+    expect(inputOf('codex', '──\n› First line.\nSecond line.')).toBe('First line.\nSecond line.');
+  });
+
   it('returns null for a missing input or another program\'s marker', () => {
     expect(inputOf('codex', 'Program is loading.')).toBeNull();
     expect(inputOf('kimi', '❯ \n')).toBeNull();
