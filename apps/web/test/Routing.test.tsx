@@ -34,6 +34,12 @@ describe('shareable workspace', () => {
   });
 
   it.each([
+    ['/tasks', 'heading', 'Tasks'],
+    ['/people', 'heading', 'People'],
+    ['/subscriptions', 'heading', 'Subscriptions'],
+    ['/machines', 'heading', 'Machines'],
+    ['/improvements', 'heading', 'Improvements'],
+    ['/versions', 'dialog', 'Versions'],
     ['/tasks/t12', 'complementary', '#12 Checkout API'],
     ['/people/p2', 'heading', 'Edit Maria'],
     ['/machines/m1', 'article', 'ivan-mbp'],
@@ -149,5 +155,47 @@ describe('shareable workspace', () => {
     render(<App />);
     expect(await screen.findByRole('heading', { name: 'Not found or no access' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Go to the map' })).toBeInTheDocument();
+  });
+
+  it('shows the history-selected machine even when the current search excludes it', async () => {
+    fixture();
+    history.replaceState(null, '', '/machines/m1');
+    render(<Shell me={ME} onSignOut={() => {}} />);
+    const user = userEvent.setup();
+    await screen.findByRole('article', { name: 'ivan-mbp' });
+    await user.click(screen.getByRole('button', { name: 'Open the card of build-box' }));
+    await user.type(screen.getByRole('searchbox'), 'build-box');
+    await act(async () => {
+      const popped = new Promise<void>(resolve => globalThis.window.addEventListener('popstate', () => resolve(), { once: true }));
+      history.back();
+      await popped;
+    });
+    expect(location.pathname).toBe('/machines/m1');
+    expect(screen.getByRole('article', { name: 'ivan-mbp' })).toBeVisible();
+  });
+
+  it('closes a revisited account dialog to the section stored in that history entry', async () => {
+    fixture();
+    const user = userEvent.setup();
+    render(<Shell me={ME} onSignOut={() => {}} />);
+    await user.click(tab('People'));
+    await user.click(screen.getByRole('button', { name: 'Account' }));
+    await user.click(screen.getByRole('button', { name: 'About' }));
+    await screen.findByRole('dialog', { name: 'About Hornhoof' });
+    await user.keyboard('{Escape}');
+    await user.click(tab('Machines'));
+    await user.click(screen.getByRole('button', { name: 'Account' }));
+    await user.click(screen.getByRole('button', { name: 'Settings' }));
+    await screen.findByRole('dialog', { name: 'Settings' });
+    await user.keyboard('{Escape}');
+    await act(async () => {
+      const popped = new Promise<void>(resolve => globalThis.window.addEventListener('popstate', () => resolve(), { once: true }));
+      history.go(-4);
+      await popped;
+    });
+    expect(location.pathname).toBe('/about');
+    await screen.findByRole('dialog', { name: 'About Hornhoof' });
+    await user.keyboard('{Escape}');
+    expect(location.pathname).toBe('/people');
   });
 });

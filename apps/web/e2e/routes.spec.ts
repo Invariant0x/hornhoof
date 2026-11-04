@@ -188,3 +188,48 @@ test('an inaccessible task never retains the previous task while its answer is d
   await expect(page.getByRole('heading', { name: 'Not found or no access', exact: true })).toBeVisible();
   expect(flashes).toEqual([]);
 });
+
+test('history keeps a selected machine visible through a different search', async ({ page }) => {
+  await serveRoutes(page);
+  await page.route('**/api/machines', route => route.fulfill({ json: { machines: ['alpha', 'beta'].map((name, i) => ({
+    id: `m${i + 1}`, hostname: `${name}-box`, owner: { id: 'p1', name: 'Ivan' }, os: 'linux', arch: 'x86_64',
+    online: false, lastSeenAt: null, load: null, plans: [], lendsTests: true, running: { agents: [], parts: [] },
+  })) } }));
+  await page.goto('/machines/m1');
+  await expect(page.getByRole('article', { name: 'alpha-box', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Open the card of beta-box', exact: true }).click();
+  await page.getByRole('searchbox').fill('beta-box');
+  await page.goBack();
+  await expect(page).toHaveURL(/\/machines\/m1$/);
+  await expect(page.getByRole('article', { name: 'alpha-box', exact: true })).toBeVisible();
+});
+
+test('closing a history-revisited dialog returns to its own section', async ({ page }) => {
+  await serveRoutes(page);
+  await page.goto('/people');
+  await page.getByRole('button', { name: 'Account', exact: true }).click();
+  await page.getByRole('button', { name: 'About', exact: true }).click();
+  await page.keyboard.press('Escape');
+  await page.getByRole('navigation').getByRole('button', { name: 'Machines', exact: true }).click();
+  await page.getByRole('button', { name: 'Account', exact: true }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.keyboard.press('Escape');
+  await page.evaluate(() => history.go(-4));
+  await expect(page).toHaveURL(/\/about$/);
+  await expect(page.getByRole('dialog', { name: 'About Hornhoof', exact: true })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page).toHaveURL(/\/people$/);
+});
+
+for (const [path, api] of [['/versions', '/api/updates'], ['/settings', '/api/link']]) {
+  test(`a denied ${path} dialog offers a visible way home`, async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 900 });
+    await serveRoutes(page);
+    await page.route(`**${api}`, route => route.fulfill({ status: 403, json: { error: { code: 'forbidden' } } }));
+    await page.goto(path!);
+    const dialog = page.getByRole('dialog', { name: 'Not found or no access', exact: true });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('button', { name: 'Go to the map', exact: true }).click();
+    await expect(page).toHaveURL(/\/$/);
+  });
+}

@@ -192,14 +192,13 @@ function AgentWindowError({ shown, org, failure }: { shown: string | null; org: 
 /* welcome: setup just finished, so the orchestrator's window opens at once. */
 export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: boolean; onSignOut: () => void }) {
   const t = useT();
-  const { route, navigate } = useRoute();
+  const { route, navigate, background } = useRoute();
   const accountDialog = dialogOf(route);
   const tab = route.kind === 'department' || accountDialog ? 'map' : route.kind;
   const taskId = route.kind === 'tasks' ? route.id ?? null : null;
   const deptId = route.kind === 'department' ? route.id : null;
-  const background = useRef<Route>({ kind: 'map' });
   const goHome = () => navigate({ kind: 'map' });
-  const openAccount = (kind: AccountDialogName) => { background.current = route; navigate({ kind }); };
+  const openAccount = (kind: AccountDialogName) => navigate({ kind }, route);
   const [menu, setMenu] = useState(false);
   const [selfName, setSelfName] = useState(me.person.name);
   const currentMe = { ...me, person: { ...me.person, name: selfName } };
@@ -368,7 +367,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
           onOpenAgent={openAgent}
         />
       )}
-      <AccountDialog active={!company && (accountDialog === 'settings' || accountDialog === 'versions') ? null : accountDialog} me={currentMe} updates={updates} onHome={goHome} onRenamed={setSelfName} onClose={() => { navigate(background.current); accountButton.current?.focus(); }} />
+      <AccountDialog active={!company && (accountDialog === 'settings' || accountDialog === 'versions') ? null : accountDialog} me={currentMe} updates={updates} onHome={goHome} onRenamed={setSelfName} onClose={() => { navigate(background); accountButton.current?.focus(); }} />
     </div>
     </AgentWindowContext>
   );

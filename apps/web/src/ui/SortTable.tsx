@@ -91,7 +91,7 @@ export function SortTable<T extends { id: string }>({ rows, columns, name, initi
   const held = rows.some(r => open.has(r.id));
   const ordered = orderRows(sorted, order, held);
   const needle = query.trim().toLocaleLowerCase(language);
-  const visible = ordered.filter(row => (!needle || search?.text(row).toLocaleLowerCase(language).includes(needle)) && matchesFilters(row, filters, selected));
+  const visible = ordered.filter(row => row.id === selectedId || ((!needle || search?.text(row).toLocaleLowerCase(language).includes(needle)) && matchesFilters(row, filters, selected)));
   const filtered = Boolean(needle || Object.values(selected).some(values => values.length));
 
   /* Record additions and removals after each refresh, keeping all surviving cards and their places. */

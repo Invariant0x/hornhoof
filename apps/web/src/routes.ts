@@ -51,17 +51,25 @@ export function routePath(route: Route): string {
   return person && validId(person) ? `${base}?person=${person}` : base;
 }
 
+function backgroundOf(state: unknown): Route {
+  if (!state || typeof state !== 'object' || !('hhBackground' in state) || typeof state.hhBackground !== 'string') return { kind: 'map' };
+  const route = parseRoute(state.hhBackground);
+  return route.kind === 'unavailable' ? { kind: 'map' } : route;
+}
+
+const currentEntry = () => ({ route: parseRoute(location.pathname + location.search), background: backgroundOf(history.state) });
+
 export function useRoute() {
-  const [route, setRoute] = useState<Route>(() => parseRoute(location.pathname + location.search));
+  const [entry, setEntry] = useState(currentEntry);
   useEffect(() => {
-    const pop = () => setRoute(parseRoute(location.pathname + location.search));
+    const pop = () => setEntry(currentEntry());
     window.addEventListener('popstate', pop);
     return () => window.removeEventListener('popstate', pop);
   }, []);
-  const navigate = useCallback((next: Route) => {
+  const navigate = useCallback((next: Route, background?: Route) => {
     const path = routePath(next);
-    if (path !== location.pathname + location.search) history.pushState(null, '', path);
-    setRoute(parseRoute(path));
+    if (path !== location.pathname + location.search) history.pushState(background ? { hhBackground: routePath(background) } : null, '', path);
+    setEntry(currentEntry());
   }, []);
-  return { route, navigate };
+  return { ...entry, navigate };
 }

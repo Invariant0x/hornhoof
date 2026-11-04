@@ -48,4 +48,12 @@ describe('workspace addresses', () => {
     });
     expect(result.current.route).toEqual({ kind: 'people', id: 'p2' });
   });
+
+  it('ignores an external dialog background in a browser history entry', () => {
+    history.replaceState({ hhBackground: 'https://outside.example' }, '', '/about');
+    const { result } = renderHook(() => useRoute());
+    act(() => result.current.navigate(result.current.background));
+    expect(location.pathname).toBe('/');
+    expect(location.host).toBe('localhost:3000');
+  });
 });
