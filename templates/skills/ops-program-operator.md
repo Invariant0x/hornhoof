@@ -18,5 +18,5 @@ When the program asks whether it may use a tool, you decide it yourself:
 - Allow what is harmless: reading, commands inside the agent's working folder and its temporary folder, and deleting its own temporary folder.
 - Deny deleting or writing outside the working folder, system paths, secrets, network access to unfamiliar addresses, and anything you are not sure of. Report it with outcome denied: the head of that agent's department gets what was asked and the picture of the screen.
 - Consents, sign-in, passwords, payment and plans: never answer them, however the question is worded. Signal the orchestrator as in step 3.
-- Take a fresh program_screen before every key, and give program_keys what was asked, what you chose and why: it goes into the agent's journal.
+- Take a fresh program_screen before every key. Give program_keys the key and your reason; Hornhoof records what was asked automatically. For the final Enter, also set decision to allowed or denied according to what you chose and say why. Navigate with arrows or Tab without a decision, then read a fresh screen before Enter. The question, choice and reason go into the agent's journal.
 - A question about the work itself, like which way to go or what matters more, is no screen of the program. Leave it alone: it goes to a person through ask_person.

@@ -1,6 +1,24 @@
 import { randomUUID } from 'node:crypto';
-import { parseNodeMessage, type ConnectionEnd, type NodeLoad, type NodeMessage, type ProgramInfo, type ServerMessage } from '@hornhoof/protocol';
+import { parseNodeMessage, type ConnectionEnd, type NodeLoad, type NodeMessage, type ProgramInfo } from '@hornhoof/protocol';
+import { OperatorDeliveryMetadata, OperatorNodeMessage, type ProgramNodeMessage, type ProgramServerMessage } from '@hornhoof/protocol/program-operator';
 import type { WebSocket } from 'ws';
+import { z } from 'zod';
+
+export function parseOperatorNodeMessage(raw: string): ProgramNodeMessage | null {
+  try {
+    const value: unknown = JSON.parse(raw);
+    const operator = OperatorNodeMessage.safeParse(value);
+    if (operator.success) return operator.data;
+    const base = parseNodeMessage(raw);
+    if (base?.type === 'hello') {
+      const extension = z.object({ programOperatorV1: z.boolean().optional() }).safeParse(value);
+      return extension.success ? { ...base, ...extension.data } : null;
+    }
+    if (base?.type !== 'agent.unheard') return base;
+    const metadata = OperatorDeliveryMetadata.safeParse(value);
+    return metadata.success ? { ...base, ...metadata.data } : null;
+  } catch { return null; }
+}
 
 /* Who is on the other end of a socket: one node on a machine, or the built-in node that runs every API key. */
 export type NodeIdentity = { kind: 'node'; nodeId: string; keyHash?: string } | { kind: 'builtin' };
@@ -35,19 +53,19 @@ export type LinkEnd = { link: string; at: Date; cause: ConnectionEnd; code: numb
    image is, none from a node built by hand or from before. link: this connection in the node's history. chain: what this
    socket has to do one after another, as job.started is stored before job.done. ending: what the server knows of why the
    socket is closing. ended: the end of the connection is on its way to the history. */
-type Entry = { link: string; chain: Promise<void>; ending: { cause: ConnectionEnd; at: Date; error: string | null } | null; ended: boolean; socket: WebSocket; keyHash: string | null; missed: number; greeted: boolean; terminals: boolean; work: boolean; load: SaidLoad | null; skillFiles: boolean; noRuns: string | null; browserError: string | null; programs: ProgramInfo[] | null; build: string | null };
+type Entry = { programOperatorV1?: boolean; link: string; chain: Promise<void>; ending: { cause: ConnectionEnd; at: Date; error: string | null } | null; ended: boolean; socket: WebSocket; keyHash: string | null; missed: number; greeted: boolean; terminals: boolean; work: boolean; load: SaidLoad | null; skillFiles: boolean; noRuns: string | null; browserError: string | null; programs: ProgramInfo[] | null; build: string | null };
 
 /* A node's load and when it said it. */
 export type SaidLoad = NodeLoad & { at: number };
 
 export type TerminalMessage = Extract<NodeMessage, { type: 'term.data' | 'term.exit' | 'term.program' }>;
 
-const isTerminalFrame = (msg: NodeMessage): msg is TerminalMessage =>
+const isTerminalFrame = (msg: ProgramNodeMessage): msg is TerminalMessage =>
   msg.type === 'term.data' || msg.type === 'term.exit' || msg.type === 'term.program';
 
 type HubOptions = {
   pingMs: number;
-  onMessage(id: NodeIdentity, msg: NodeMessage): Promise<void>;
+  onMessage(id: NodeIdentity, msg: ProgramNodeMessage): Promise<void>;
   /* A screen goes straight to the people watching, without waiting behind the node's other messages. */
   onTerminal?(id: NodeIdentity, msg: TerminalMessage): void;
   onClose(id: NodeIdentity): Promise<void>;
@@ -129,7 +147,7 @@ export class NodeHub {
 
   private onFrame(id: NodeIdentity, key: string, entry: Entry, raw: string, chain: Promise<void>): Promise<void> {
     if (this.sockets.get(key) !== entry) return chain;
-    const msg = parseNodeMessage(raw);
+    const msg = parseOperatorNodeMessage(raw);
     if (!msg) return chain;
     this.capturePrograms(entry, msg);
     if (isTerminalFrame(msg)) {
@@ -139,7 +157,7 @@ export class NodeHub {
     const deliver = () => (this.sockets.get(key) === entry ? this.opts.onMessage(id, msg) : Promise.resolve());
     const report = (err: unknown) => this.opts.onError?.(err);
     /* A message before it may wait for this word, as a finished job waits for words typed into another agent's turn. */
-    if (msg.type === 'agent.said') {
+    if (msg.type === 'agent.said' || msg.type === 'program.screen' || msg.type === 'program.key_result' || msg.type === 'program.key_prepared') {
       void deliver().catch(report);
       return chain;
     }
@@ -238,9 +256,10 @@ export class NodeHub {
   }
 
   /* Program metadata belongs to this socket, including before an asynchronous hello handler finishes. */
-  private capturePrograms(entry: Entry, message: NodeMessage | null): void {
+  private capturePrograms(entry: Entry, message: ProgramNodeMessage | null): void {
     if (message?.type !== 'hello' && message?.type !== 'status') return;
     entry.programs = message.programs ?? entry.programs;
+    if (message.type === 'hello') entry.programOperatorV1 = message.programOperatorV1 === true;
   }
 
   programsOf(id: NodeIdentity): ProgramInfo[] | null {
@@ -272,7 +291,11 @@ export class NodeHub {
     return this.sockets.get(keyOf(id))?.skillFiles === true;
   }
 
-  send(id: NodeIdentity, msg: ServerMessage): boolean {
+  hasProgramOperator(id: NodeIdentity): boolean {
+    return this.hasTerminals(id) && this.sockets.get(keyOf(id))?.programOperatorV1 === true;
+  }
+
+  send(id: NodeIdentity, msg: ProgramServerMessage): boolean {
     const entry = this.sockets.get(keyOf(id));
     if (entry?.socket.readyState !== 1) return false;
     entry.socket.send(JSON.stringify(msg));

@@ -9,6 +9,7 @@ import { repeatedTurn } from '../conversation/turn-words.js';
 import { continuationNote } from './endings.js';
 import { operationsWatchers, pickOpsRecipient } from './silent.js';
 import { logTurnFact } from './turn-log.js';
+import { operatorHandledFailure } from '../program-operator/recovery.js';
 import { repeatWake } from './wake-state.js';
 import { originalPromptOf } from '../conversation/requested-prompt.js';
 
@@ -157,6 +158,7 @@ async function retryTurn(ctx: Ctx, job: Job, at: Date | null, next: string, task
 export async function afterFailure(ctx: Ctx, jobId: string): Promise<boolean> {
   const [job] = await ctx.db.select().from(jobs).where(eq(jobs.id, jobId));
   if (job?.status !== 'failed' || !job.failure || !job.agentId) return false;
+  if (await operatorHandledFailure(ctx, jobId)) return true;
   const taskTurn = await failureTaskTurn(ctx, job);
   if (taskTurn === null) return true;
   return applyFailure(ctx, job, job.failure, taskTurn);

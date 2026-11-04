@@ -933,7 +933,7 @@ describe('migration 0056', () => {
   });
 });
 
-describe('migration 0058', () => {
+describe('migration 0059', () => {
   const tableOf = (db: PgliteDatabase) =>
     db.execute<{ column_name: string; is_nullable: string }>(sql`select column_name, is_nullable from information_schema.columns where table_name = 'node_connections' order by column_name`);
   const COLUMNS = [
@@ -964,7 +964,7 @@ describe('migration 0058', () => {
     const source = new PGlite();
     onTestFinished(() => source.close());
     let db = drizzle(source);
-    await migrate(db, { migrationsFolder: await migrationsUpTo('0057_message_pictures') });
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0058_program_operator') });
     const one = async (statement: Parameters<typeof db.execute>[0]) => (await db.execute<{ id: string }>(statement)).rows[0]!.id;
     const company = await one(sql`insert into companies (name) values ('Demo') returning id`);
     const person = await one(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Lisa', 'lisa@example.test', 'active', 'company') returning id`);
@@ -1035,8 +1035,8 @@ describe('migration 0057', () => {
     await migrate(db, { migrationsFolder: MIGRATIONS });
     await migrate(db, { migrationsFolder: MIGRATIONS });
 
-    expect((await db.execute(sql`select to_jsonb(a) - 'person_id' as data from attachments a`)).rows).toEqual(before);
-    expect((await db.execute(sql`select person_id from attachments`)).rows).toEqual([{ person_id: null }]);
+    expect((await db.execute(sql`select to_jsonb(a) - 'person_id' - 'operator_case_id' as data from attachments a`)).rows).toEqual(before);
+    expect((await db.execute(sql`select person_id, operator_case_id from attachments`)).rows).toEqual([{ person_id: null, operator_case_id: null }]);
     await db.execute(sql`insert into attachments (company_id, agent_id, person_id, name, media_type, bytes, size) values (${company}, ${agent}, ${person}, 'screen.png', 'image/png', '\\x89504e47', 4)`);
     expect((await db.execute(sql`select name from attachments where job_id is null and person_id = ${person}`)).rows).toEqual([{ name: 'screen.png' }]);
   });

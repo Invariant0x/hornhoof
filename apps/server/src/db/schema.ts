@@ -1,5 +1,7 @@
 import type { ExternalWait } from '@hornhoof/protocol/waits';
-import { COMPANY_TEMPLATE_KEYS, CONNECTION_ENDS, CRED_KINDS, MACHINE_KINDS, RUN_KINDS, TEMPLATE_KEYS, type Account, type Boot, type Failure, type Limits, type NodeReconnect, type ModelOption, type NodeExit } from '@hornhoof/protocol';
+import { COMPANY_TEMPLATE_KEYS, CONNECTION_ENDS, CRED_KINDS, MACHINE_KINDS, RUN_KINDS, TEMPLATE_KEYS, type Account, type Boot, type Failure, type Limits, type ModelOption, type NodeExit, type NodeReconnect } from '@hornhoof/protocol';
+import type { OperatorError, OperatorQuestion, OperatorReason } from '@hornhoof/protocol/program-operator';
+import type { MessageParty } from '../modules/events/parties.js';
 import { sql } from 'drizzle-orm';
 import { bigint, bigserial, boolean, check, customType, index, integer, jsonb, pgTable, primaryKey, real, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
 
@@ -435,6 +437,9 @@ export const agentEvents = pgTable(
     index('agent_events_failure_case').on(sql`(data->>'failureCase')`).where(sql`data->>'failureCase' is not null`),
     index('agent_events_report_window').on(t.agentId, t.createdAt).where(sql`data->>'report' is not null or data->>'from' = 'agent'`),
     index('agent_events_operations_pending').on(sql`(data->>'operationsPending')`).where(sql`data->>'operationsPending' is not null`),
+    uniqueIndex('agent_events_operator_evidence').on(t.companyId, sql`(data->>'operatorEvidenceId')`).where(sql`data->>'operatorEvidenceId' is not null`),
+    uniqueIndex('agent_events_operator_ordinal').on(t.companyId, sql`(data->'operatorEvidence'->>'instance')`, sql`(data->'operatorEvidence'->>'ordinal')`).where(sql`data->>'operatorEvidenceId' is not null`),
+    index('agent_events_operator_instance').on(t.agentId, sql`(data->'operatorEvidence'->>'instance')`).where(sql`data->>'operatorEvidenceId' is not null`),
   ],
 );
 
@@ -673,6 +678,7 @@ export const attachments = pgTable(
     /* The person who sends it to that agent with a message. */
     personId: uuid('person_id').references(() => people.id),
     requestId: uuid('request_id').references(() => requests.id),
+    operatorCaseId: uuid('operator_case_id').references((): AnyPgColumn => programOperatorCases.id),
     /* The task a file was put on, and the file's name there; a picture has neither. */
     taskId: uuid('task_id').references(() => tasks.id),
     name: text('name'),
@@ -681,8 +687,105 @@ export const attachments = pgTable(
     size: integer('size').notNull(),
     createdAt: createdAt(),
   },
-  t => [index('attachments_request_id').on(t.requestId), index('attachments_job_id').on(t.jobId), index('attachments_task_id').on(t.taskId), index('attachments_person_id').on(t.personId)],
+  t => [index('attachments_request_id').on(t.requestId), index('attachments_job_id').on(t.jobId), index('attachments_task_id').on(t.taskId), index('attachments_person_id').on(t.personId), index('attachments_operator_case_id').on(t.operatorCaseId)],
 );
+
+/* A physical agent program, distinct from the provider session it resumes. */
+export const programInstances = pgTable('program_instances', {
+  id: uuid('id').primaryKey(),
+  companyId: companyId(),
+  agentId: uuid('agent_id').notNull().references(() => agents.id),
+  nodeId: uuid('node_id').notNull().references(() => nodes.id),
+  launched: boolean('launched').notNull().default(false),
+  active: boolean('active').notNull().default(false),
+  exited: boolean('exited').notNull().default(false),
+  createdAt: createdAt(),
+}, t => [index('program_instances_agent_id').on(t.agentId)]);
+
+/* Words stay in conversation records. This identity and digest survive dispatch, fallback and reconnect. */
+export const programDeliveries = pgTable('program_deliveries', {
+  id: id(),
+  companyId: companyId(),
+  agentId: uuid('agent_id').notNull().references(() => agents.id),
+  jobId: uuid('job_id').notNull().references(() => jobs.id),
+  nodeId: uuid('node_id').notNull().references(() => nodes.id),
+  instance: uuid('program_instance_id').references(() => programInstances.id),
+  ordinal: integer('ordinal').notNull(),
+  reference: text('reference').notNull(),
+  kind: text('kind', { enum: ['assignment', 'live'] }).notNull(),
+  digest: text('digest').notNull(),
+  sourceDeliveryId: uuid('source_delivery_id').references((): AnyPgColumn => programDeliveries.id),
+  attemptedAt: timestamp('attempted_at', { withTimezone: true }),
+  receiptAt: timestamp('receipt_at', { withTimezone: true }),
+  firstActivityAt: timestamp('first_activity_at', { withTimezone: true }),
+  finishedAt: timestamp('finished_at', { withTimezone: true }),
+  outcome: text('outcome', { enum: ['pending', 'taken', 'not_taken', 'cancelled'] }).notNull().default('pending'),
+  createdAt: createdAt(),
+}, t => [unique('program_deliveries_ordinal').on(t.agentId, t.ordinal), unique('program_deliveries_reference').on(t.agentId, t.reference), index('program_deliveries_job_id').on(t.jobId)]);
+
+export type OperatorCaseEvidence = { reason: OperatorReason; evidenceKey: string; deliveryId: string | null };
+export type OperatorCaseSnapshot = { token: string; generation: number; at: string; keysAllowed: boolean; state: string; cols: number; rows: number };
+
+/* One investigation per physical program; its original deadline never moves after a read or key. */
+export const programOperatorCases = pgTable('program_operator_cases', {
+  id: id(),
+  companyId: companyId(),
+  agentId: uuid('agent_id').notNull().references(() => agents.id),
+  jobId: uuid('job_id').notNull().references(() => jobs.id),
+  nodeId: uuid('node_id').notNull().references(() => nodes.id),
+  instance: uuid('program_instance_id').notNull().references(() => programInstances.id),
+  reason: text('reason').$type<OperatorReason>().notNull(),
+  evidenceKey: text('evidence_key').notNull(),
+  deliveryId: uuid('delivery_id').references(() => programDeliveries.id),
+  evidence: jsonb('evidence').$type<OperatorCaseEvidence[]>().notNull().default([]),
+  status: text('status', { enum: ['open', 'resolved', 'escalated'] }).notNull().default('open'),
+  capability: text('capability').notNull(),
+  revision: integer('revision').notNull().default(1),
+  readOnly: boolean('read_only').notNull().default(false),
+  operatorAgentId: uuid('operator_agent_id').references(() => agents.id),
+  operatorJobId: uuid('operator_job_id').references(() => jobs.id),
+  escalationJobId: uuid('escalation_job_id').references(() => jobs.id),
+  openedAt: timestamp('opened_at', { withTimezone: true }).notNull().defaultNow(),
+  deadlineAt: timestamp('deadline_at', { withTimezone: true }).notNull(),
+  escalatedAt: timestamp('escalated_at', { withTimezone: true }),
+  resolution: jsonb('resolution').$type<{ outcome: string; text: string; image: string | null; actor?: MessageParty; question?: OperatorQuestion }>(),
+  recoveryHold: boolean('recovery_hold').notNull().default(false),
+  continuationJobId: uuid('continuation_job_id').references(() => jobs.id),
+  snapshot: jsonb('snapshot').$type<OperatorCaseSnapshot>(),
+  pictureId: uuid('picture_id').references((): AnyPgColumn => attachments.id),
+}, t => [unique('program_operator_case_evidence').on(t.companyId, t.agentId, t.instance, t.reason, t.evidenceKey), uniqueIndex('program_operator_case_open').on(t.agentId, t.instance).where(sql`${t.status} = 'open'`), index('program_operator_case_deadline').on(t.deadlineAt).where(sql`${t.status} = 'open'`), index('program_operator_case_hold').on(t.agentId).where(sql`${t.recoveryHold}`)]);
+
+/* Supplementary reasons are consumed too; replay cannot reopen a resolved investigation through another cause. */
+export const programOperatorSignals = pgTable('program_operator_signals', {
+  companyId: companyId(),
+  agentId: uuid('agent_id').notNull().references(() => agents.id),
+  instance: uuid('program_instance_id').notNull().references(() => programInstances.id),
+  reason: text('reason').$type<OperatorReason>().notNull(),
+  evidenceKey: text('evidence_key').notNull(),
+  caseId: uuid('case_id').notNull().references(() => programOperatorCases.id),
+}, t => [primaryKey({ columns: [t.agentId, t.instance, t.reason, t.evidenceKey] })]);
+
+/* An uncertain key stays unknown. Neither reconnect nor a repeated tool call resends an execution intent. */
+export const programOperatorActions = pgTable('program_operator_actions', {
+  id: uuid('id').primaryKey(),
+  companyId: companyId(),
+  caseId: uuid('case_id').notNull().references(() => programOperatorCases.id),
+  operatorAgentId: uuid('operator_agent_id').notNull().references(() => agents.id),
+  operatorJobId: uuid('operator_job_id').notNull().references(() => jobs.id),
+  actorName: text('actor_name').notNull(),
+  agentId: uuid('agent_id').notNull().references(() => agents.id),
+  jobId: uuid('job_id').notNull().references(() => jobs.id),
+  instance: uuid('program_instance_id').notNull().references(() => programInstances.id),
+  snapshot: text('snapshot').notNull(),
+  generation: integer('generation').notNull(),
+  key: text('key').notNull(),
+  reason: text('reason').notNull(),
+  digest: text('digest').notNull(),
+  result: text('result', { enum: ['requested', 'applied', 'refused', 'unknown'] }).notNull(),
+  error: text('error').$type<OperatorError>(),
+  requestedAt: createdAt(),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+}, t => [index('program_operator_actions_case_id').on(t.caseId)]);
 
 export const TEST_RUN_STATUSES = ['running', 'passed', 'failed', 'stopped'] as const;
 

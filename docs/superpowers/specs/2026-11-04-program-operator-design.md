@@ -3,6 +3,8 @@
 Task #243, independent Codex proposal for #234. Design only; no product implementation.
 Source baseline: `6ae552b6` (Hornhoof 0.6.1). References below identify existing code at that commit. Proposed names and defaults are decisions in this note, not claims about existing APIs.
 
+Implementation authority is the rewritten task #245 of 2026-11-04 17:46 UTC. Its overrides include `OPS-PROGRAM`, tool registration through `tools/watch.ts`, five invocation reasons, and guarded decisions on current permission questions. Part B owns staffing and `tools/mcp.ts`. This original proposal is retained for design context; the [implementation plan](../plans/2026-11-04-program-operator.md) records the selected contract.
+
 ## Decision
 
 Keep program evidence on the node and recovery cases on the server. A case permits investigation; it never grants permission to interrupt a running program. Add two operator controls, `program_screen` and `program_keys`, with a second guard at the node. Hire `OPS-OPER` as a normal Operations employee. Reconcile the required Operations staff through application logic, not company-specific SQL migrations.
