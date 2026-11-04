@@ -29,7 +29,10 @@ case "$1" in
     else
       [ "${STUB_IMAGE_LOCAL:-0}" = 1 ] || exit 1
     fi ;;
-  inspect) [ "${!#}" = nodecid ] && [ -n "${STUB_NODE_RUNNING:-}" ] && id_of "$STUB_NODE_RUNNING" ;;
+  # STUB_STOPPED words are containers that exist and do not run.
+  inspect)
+    if [ "${3:-}" = '{{.State.Running}}' ]; then case " ${STUB_STOPPED:-} " in *" ${!#} "*) echo false ;; *) echo true ;; esac; exit 0; fi
+    [ "${!#}" = nodecid ] && [ -n "${STUB_NODE_RUNNING:-}" ] && id_of "$STUB_NODE_RUNNING" ;;
   # STUB_CONTAINERS words are "name" or "name=server", the server label of a node.
   # The server's own command line in its container: STUB_SETUP_LINK is the setup link of a server not set up yet.
   compose)
@@ -41,6 +44,8 @@ case "$1" in
     esac ;;
   ps) for n in ${STUB_CONTAINERS:-}; do name=${n%%=*}; server=''; case "$n" in *=*) server=${n#*=} ;; esac; echo "$name id-of-$name $server"; done ;;
   run)
+    # STUB_WAIT_UPDATE is what the node's wait-update ends with.
+    WORD=wait-update; if has "$@"; then exit "${STUB_WAIT_UPDATE:-0}"; fi
     WORD=set-key; if has "$@"; then IFS= read -r line; printf 'stdin %s\n' "$line" >> "$STUB_LOG"; fi
     WORD=-d; if has "$@"; then [ "${STUB_RUN:-ok}" = fail ] && { echo "docker: Error response from daemon: port is already allocated" >&2; exit 1; }; echo "0123456789ab"; fi ;;
   exec)

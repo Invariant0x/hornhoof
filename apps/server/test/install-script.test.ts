@@ -210,6 +210,70 @@ describe('install.sh', () => {
     expect(r.calls.some(call => call.startsWith('docker run -d'))).toBe(true);
   });
 
+  describe('replacing a node that may have work', () => {
+    const name = 'hornhoof-claude-1c07dac4';
+    const update = (env: Record<string, string> = {}, args: string[] = []) => install({ args, env: { STUB_CONTAINERS: `${name}=${SERVER}`, ...env } });
+    const touched = (calls: string[]) => calls.filter(c => c.includes('prepare-stop') || c.startsWith('docker stop') || c.startsWith('docker rm') || c.startsWith('docker run -d'));
+
+    it('lets its work end first, asking from the new image with the node volume, read-only', () => {
+      const r = update();
+      expect(r.code).toBe(0);
+      const asked = r.calls.findIndex(c => c.startsWith('docker run --rm') && c.endsWith(`${IMAGE} wait-update`));
+      expect(asked).toBeGreaterThanOrEqual(0);
+      expect(r.calls[asked]).toContain(`-v ${name}:/data:ro`);
+      expect(asked).toBeLessThan(indexOf(r.calls, `docker exec ${name} node /app/apps/node/dist/main.js prepare-stop node_update`));
+    });
+
+    it('reaches a server on this computer the way the node does', () => {
+      const r = install({ args: [], env: { HORNHOOF_SERVER: 'http://localhost:8080', STUB_CONTAINERS: `${name}=http://localhost:8080` } });
+      expect(r.calls.find(c => c.endsWith('wait-update'))).toContain('--add-host host.docker.internal:host-gateway');
+    });
+
+    it('leaves the node and its turns on a server from before this wait, and says why', () => {
+      const r = update({ STUB_WAIT_UPDATE: '3' });
+      expect(r.code).toBe(1);
+      expect(touched(r.calls)).toEqual([]);
+      expect(r.out).toContain('Update the Hornhoof server first, then run this command again.');
+      expect(r.out).toContain(`${name} stays as it is`);
+      expect(r.out).not.toContain('There are no Hornhoof nodes on this machine yet');
+    });
+
+    it('leaves the node and its turns when it cannot learn when the node is free', () => {
+      const r = update({ STUB_WAIT_UPDATE: '1' });
+      expect(r.code).toBe(1);
+      expect(touched(r.calls)).toEqual([]);
+      expect(r.out).toContain('--urgent');
+    });
+
+    it('goes on to the other nodes when one stays, and still ends with a failure', () => {
+      const other = 'hornhoof-kimi-22222222';
+      const r = install({ args: [], env: { STUB_CONTAINERS: `${name}=${SERVER} ${other}=${SERVER}`, STUB_WAIT_UPDATE: '1', STUB_STOPPED: other } });
+      expect(r.code).toBe(1);
+      expect(r.calls).toContain(`docker rm -f ${other}`);
+      expect(r.calls).not.toContain(`docker rm -f ${name}`);
+    });
+
+    it('asks nothing for an urgent security update, which goes as before', () => {
+      const r = update({}, ['--urgent']);
+      expect(r.code).toBe(0);
+      expect(r.calls.some(c => c.endsWith('wait-update'))).toBe(false);
+      expect(r.calls).toContain(`docker rm -f ${name}`);
+    });
+
+    it('asks nothing for a stopped node, which has no work to end', () => {
+      const r = update({ STUB_STOPPED: name });
+      expect(r.code).toBe(0);
+      expect(r.calls.some(c => c.endsWith('wait-update'))).toBe(false);
+      expect(r.calls).toContain(`docker rm -f ${name}`);
+    });
+
+    it('asks nothing for a node joined now', () => {
+      const r = install();
+      expect(r.code).toBe(0);
+      expect(r.calls.some(c => c.endsWith('wait-update'))).toBe(false);
+    });
+  });
+
   it('passes bash -n', () => {
     expect(spawnSync('bash', ['-n', SCRIPT]).status).toBe(0);
   });
@@ -947,7 +1011,7 @@ describe('install.sh', () => {
     expect(r.calls).not.toContain('docker compose up -d --no-build');
     expect(r.calls.some(c => c.startsWith('docker rm -f hornhoof-claude') || c.startsWith('docker run -d'))).toBe(false);
 
-    /* When the node image did change, compose recreates the built-in node as before. */
+    /* When the node image did change, the node finishes what it runs: the updater replaces it when the server says so. */
     const changed = install({
       args: ['server'],
       tty: '',
@@ -955,15 +1019,84 @@ describe('install.sh', () => {
         HORNHOOF_DIR: dir,
         HORNHOOF_VERSION: '0.4.2',
         STUB_NODE_RUNNING: 'ghcr.io/invariant0x/hornhoof-node:0.4.1',
+        STUB_CONTAINERS: 'hornhoof-claude-1c07dac4=http://localhost:8080',
       },
     });
     expect(changed.code).toBe(0);
-    expect(changed.calls).toContain('docker compose up -d --no-build');
-    const intent = indexOf(changed.calls, 'docker exec nodecid node /app/apps/node/dist/main.js prepare-stop hornhoof_update');
-    const stopped = indexOf(changed.calls, 'docker stop --time 5 nodecid');
+    expect(changed.calls).toContain('docker compose up -d --no-build db app tunnel updater');
+    expect(changed.calls.filter(c => c.includes('prepare-stop') || c.startsWith('docker stop') || c.startsWith('docker rm -f hornhoof-') || c.startsWith('docker run -d'))).toEqual([]);
+    expect(changed.out).toContain('The updater replaces the built-in node');
+  });
+
+  it('starts every service on a new server, where no node runs yet', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-server-'));
+    writeFileSync(join(dir, '.env'), 'HORNHOOF_SECRET=s\nNODE_KEY=k\nPUBLIC_URL=http://localhost:8080\nHORNHOOF_VERSION=0.4.0\n');
+    const r = install({ args: ['server'], tty: '', env: { HORNHOOF_DIR: dir, HORNHOOF_VERSION: '0.4.2' } });
+    expect(r.code).toBe(0);
+    expect(r.calls).toContain('docker compose up -d --no-build');
+    expect(r.out).not.toContain('The updater replaces the built-in node');
+  });
+
+  it('stops the built-in node gracefully and replaces it now for an urgent security update', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-server-'));
+    writeFileSync(join(dir, '.env'), 'HORNHOOF_SECRET=s\nNODE_KEY=k\nPUBLIC_URL=http://localhost:8080\nHORNHOOF_VERSION=0.4.0\n');
+    const urgent = install({ args: ['server', '--urgent'], tty: '', env: { HORNHOOF_DIR: dir, HORNHOOF_VERSION: '0.4.2', STUB_NODE_RUNNING: 'ghcr.io/invariant0x/hornhoof-node:0.4.1' } });
+    expect(urgent.code).toBe(0);
+    expect(urgent.calls).toContain('docker compose up -d --no-build');
+    const intent = indexOf(urgent.calls, 'docker exec nodecid node /app/apps/node/dist/main.js prepare-stop hornhoof_update');
+    const stopped = indexOf(urgent.calls, 'docker stop --time 5 nodecid');
     expect(intent).toBeGreaterThanOrEqual(0);
     expect(stopped).toBeGreaterThan(intent);
-    expect(indexOf(changed.calls, 'docker compose up -d --no-build')).toBeGreaterThan(stopped);
+    expect(indexOf(urgent.calls, 'docker compose up -d --no-build')).toBeGreaterThan(stopped);
+  });
+
+  describe('run by an updater, with a new node image', () => {
+    const oldNode = 'ghcr.io/invariant0x/hornhoof-node:0.6.1';
+    const newNode = `ghcr.io/invariant0x/hornhoof-node@sha256:${'c'.repeat(64)}`;
+    const personal = 'hornhoof-claude-1c07dac4';
+    function fromUpdater(env: Record<string, string> = {}) {
+      const dir = mkdtempSync(join(tmpdir(), 'hh-server-'));
+      writeFileSync(join(dir, '.env'), 'HORNHOOF_SECRET=s\nNODE_KEY=k\nPUBLIC_URL=http://localhost:8081\nHORNHOOF_PORT=8081\nHORNHOOF_VERSION=0.6.1\n');
+      const compose = join(dir, 'brought.yaml');
+      writeFileSync(compose, 'services: {app: {}}\n');
+      const r = install({
+        args: ['server'],
+        tty: '',
+        env: {
+          /* The line the updater of 0.6.1 runs a new build's installer with. */
+          HORNHOOF_FROM_UPDATER: '1', HORNHOOF_PULLED: '1', HORNHOOF_SERVER_DIR: dir, HORNHOOF_VERSION: '0.7.0', HORNHOOF_COMPOSE_FILE: compose,
+          HORNHOOF_APP_REF: `ghcr.io/invariant0x/hornhoof@sha256:${'b'.repeat(64)}`, HORNHOOF_NODE_REF: newNode, HORNHOOF_UPDATER_REF: `ghcr.io/invariant0x/hornhoof-updater@sha256:${'f'.repeat(64)}`,
+          STUB_NODE_RUNNING: oldNode,
+          STUB_CONTAINERS: `${personal}=http://localhost:8081`,
+          ...env,
+        },
+      });
+      return { ...r, env: readFileSync(join(dir, '.env'), 'utf8') };
+    }
+    const replaced = (calls: string[]) => calls.filter(c => c.includes('prepare-stop') || c.startsWith('docker stop') || c.startsWith('docker rm') || c.startsWith('docker run -d'));
+
+    it('goes from 0.6.1 to 0.7.0 with the app alone: the nodes and their turns stay on the old image', () => {
+      const r = fromUpdater();
+      expect(r.code).toBe(0);
+      expect(r.calls).toContain('docker compose up -d --no-build db app tunnel');
+      expect(replaced(r.calls)).toEqual([]);
+      expect(r.env).toContain(`HORNHOOF_NODE_REF=${newNode}`);
+    });
+
+    it('replaces the built-in node and those on this computer once the server said they are free', () => {
+      const r = fromUpdater({ HORNHOOF_NODES_FREE: '1' });
+      expect(r.code).toBe(0);
+      expect(r.calls).toContain('docker compose up -d --no-build db app node tunnel');
+      expect(r.calls).toContain('docker exec nodecid node /app/apps/node/dist/main.js prepare-stop hornhoof_update');
+      expect(r.calls).toContain(`docker exec ${personal} node /app/apps/node/dist/main.js prepare-stop hornhoof_update`);
+      expect(r.calls).toContain(`docker rm -f ${personal}`);
+    });
+
+    it('starts a built-in node that does not run, which has no work to wait for', () => {
+      const r = fromUpdater({ STUB_NODE_RUNNING: '' });
+      expect(r.code).toBe(0);
+      expect(r.calls).toContain('docker compose up -d --no-build db app node tunnel');
+    });
   });
 
   it('refuses a server name it cannot use as a folder', () => {
