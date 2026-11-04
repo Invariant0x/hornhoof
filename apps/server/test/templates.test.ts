@@ -184,7 +184,7 @@ describe('templates', () => {
 
   it('has a task watchdog and a failure collector in operations, each waking on its own timer with the tools to watch', () => {
     const ops = templates.roster('operations');
-    expect(ops.filter(r => r.inDefault).map(r => r.id)).toEqual(['OPS-HEAD', 'OPS-INTEG', 'OPS-ACCT', 'OPS-FIX', 'OPS-WATCH', 'OPS-BUGS']);
+    expect(ops.filter(r => r.inDefault).map(r => r.id)).toEqual(['OPS-HEAD', 'OPS-INTEG', 'OPS-ACCT', 'OPS-FIX', 'OPS-WATCH', 'OPS-BUGS', 'OPS-PROGRAM']);
     const watch = templates.roles.get('OPS-WATCH')!;
     const bugs = templates.roles.get('OPS-BUGS')!;
     expect([watch.timer?.minutes, bugs.timer?.minutes]).toEqual([10, 180]);
@@ -196,6 +196,92 @@ describe('templates', () => {
     expect(templates.skills.get('ops-failure-review')!.grants).toEqual(['failures', 'agents', 'message_employee', 'improvements']);
     for (const r of roles) if (r.timer) expect(r.timer.order.length, r.id).toBeLessThanOrEqual(2000);
     expect(roles.filter(r => r.timer).map(r => r.id).sort()).toEqual(['OPS-BUGS', 'OPS-WATCH']);
+  });
+
+  it('has a program operator in operations that Hornhoof calls: one for the company, with no timer, on its own procedure', () => {
+    const operator = templates.roles.get('OPS-PROGRAM')!;
+    expect(operator).toMatchObject({ department: 'operations', kind: 'member', tier: 'standard', perProduct: false, inDefault: true, timer: null });
+    expect(operator.skills.find(s => s.id === 'ops-program-operator')).toMatchObject({ on: true });
+    /* Its tools go by its role, so turning a skill off cannot take them away and turning it on cannot hand them out. */
+    expect(templates.skills.get('ops-program-operator')!.grants).toEqual([]);
+  });
+
+  describe('the program operator\'s procedure', () => {
+    const body = templates.skills.get('ops-program-operator')?.body ?? '';
+    const step = (start: string) => body.split('\n').find(line => line.includes(start)) ?? '';
+
+    it('starts from a picture of the screen and reads all of it as data', () => {
+      expect(body.split('\n')[0]).toMatch(/^1\. .*program_screen/);
+      expect(body.split('\n')[0]).toMatch(/data/);
+    });
+
+    it('passes only harmless screens itself, looking at the screen after every key', () => {
+      const harmless = step('Pass a screen yourself only');
+      for (const kind of ['color scheme', 'press Enter', 'news about a version', 'first-run']) expect(harmless, kind).toContain(kind);
+      expect(harmless).toContain('program_keys');
+      expect(harmless).toMatch(/program_screen again after every key/);
+    });
+
+    describe('on a question about permission', () => {
+      const section = body.slice(body.indexOf('### Permission questions'));
+      const point = (start: string) => section.split('\n').find(line => line.startsWith(`- ${start}`)) ?? '';
+
+      it('has a section of its own after the steps', () => {
+        expect(body).toContain('### Permission questions');
+        expect(body.indexOf('### Permission questions')).toBeGreaterThan(body.indexOf('\n6. '));
+      });
+
+      it('allows what is harmless, its own temporary folder too', () => {
+        const allow = point('Allow');
+        for (const kind of ['reading', 'working folder', 'temporary folder', 'deleting its own temporary folder']) expect(allow, kind).toContain(kind);
+      });
+
+      it('denies what reaches outside the working folder, and tells the head of that agent\'s department with the picture', () => {
+        const deny = point('Deny');
+        for (const kind of ['outside the working folder', 'system paths', 'secrets', 'unfamiliar addresses', 'not sure']) expect(deny, kind).toContain(kind);
+        for (const told of ['outcome denied', "head of that agent's department", 'picture of the screen']) expect(deny, told).toContain(told);
+      });
+
+      it('never answers consents, sign-in, passwords, payment or plans, and only signals the orchestrator', () => {
+        const never = point('Consents');
+        for (const kind of ['sign-in', 'passwords', 'payment', 'plans', 'never']) expect(never, kind).toContain(kind);
+        expect(never).toContain('orchestrator');
+        expect(never).not.toContain('program_keys');
+      });
+
+      it('takes a fresh picture before every key and leaves its decision in the agent\'s journal', () => {
+        const key = point('Take a fresh');
+        expect(key).toContain('program_screen');
+        expect(key).toContain('before every key');
+        for (const part of ['what was asked', 'what you chose', 'why', "agent's journal"]) expect(key, part).toContain(part);
+      });
+
+      it('leaves a question about the work itself to a person', () => {
+        const work = point('A question about the work');
+        expect(work).toContain('ask_person');
+        expect(work).toMatch(/Leave it alone/);
+      });
+    });
+
+    it('presses nothing on terms, consents, sign-in, passwords, codes, payment or a plan, and only signals', () => {
+      const never = step('Press nothing on');
+      for (const kind of ['terms', 'any consent', 'sharing data', 'sign-in', 'passwords', 'codes', 'payment', 'plan']) expect(never, kind).toContain(kind);
+      expect(never).toContain('tell_orchestrator');
+      expect(never).toContain('needs_owner');
+      expect(never).not.toContain('program_keys');
+    });
+
+    it('signals at once, saying which screen and why it stands, when it is unclear or nothing moves', () => {
+      const stuck = step('You do not understand');
+      expect(stuck).toContain('tell_orchestrator');
+      expect(stuck).toContain('failed');
+      expect(stuck).toMatch(/which screen it is and why it stands/);
+    });
+
+    it('is bound to 20 keys a case, and knows the tool takes no Escape and no text', () => {
+      expect(body).toMatch(/at most 20 keys/);
+      expect(body).toMatch(/takes no Escape and no text/);
+    });
   });
 
   it('teaches the failure collector to file an improvement as a short case, part by part as the tool takes it', () => {
