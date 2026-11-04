@@ -248,12 +248,12 @@ describe('connection history events', () => {
       close(code: number, reason: string) {
         closed.push(code);
         this.readyState = 3;
-        this.emit('close', code, Buffer.from(reason));
+        socket.emit('close', code, Buffer.from(reason));
       },
       ping() {},
       terminate() {
         this.readyState = 3;
-        this.emit('close', 1006, Buffer.alloc(0));
+        socket.emit('close', 1006, Buffer.alloc(0));
       },
     });
     return socket;

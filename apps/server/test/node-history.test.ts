@@ -83,7 +83,7 @@ describe('node connection history', () => {
     await pruneNodeConnectionHistory(db, now);
     const rows = await db.execute<{ n: number; oldest: string }>(sql`select count(*)::int as n,
       to_char(min(happened_at) at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as oldest from node_connection_events where machine_id = ${machineId}`);
-    expect(rows.rows).toEqual([{ n: 2000, oldest: '2026-11-15T09:26:41Z' }]);
+    expect((rows as { rows: { n: number; oldest: string }[] }).rows).toEqual([{ n: 2000, oldest: '2026-11-15T09:26:41Z' }]);
   });
 });
 

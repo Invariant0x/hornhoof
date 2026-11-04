@@ -141,7 +141,10 @@ describe('node socket', () => {
     expect(disconnected).toMatchObject({ actor: 'node', cause: 'node_closed', closeCode: 1005, nodeReport: report });
     expect(disconnected.offlineMs).toBeGreaterThanOrEqual(0);
     expect(events.find(event => event.kind === 'connected')!.offlineMs).toBe(disconnected.offlineMs);
-    expect(logged.mock.calls.some(([fields, message]) => fields.machine === 'ivan-mac' && fields.cause === 'node_closed' && fields.closeCode === 1005 && message === 'A node disconnected.')).toBe(true);
+    expect(logged.mock.calls.some(call => {
+      const [fields, message] = call as [{ machine: string; cause: string; closeCode: number }, string];
+      return fields.machine === 'ivan-mac' && fields.cause === 'node_closed' && fields.closeCode === 1005 && message === 'A node disconnected.';
+    })).toBe(true);
     expect(JSON.stringify(logged.mock.calls)).not.toContain(key);
     second.close();
   });
