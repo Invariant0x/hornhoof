@@ -87,6 +87,19 @@ describe('what the history of a machine says', () => {
     expect(events[1]!.drops[1]).toMatchObject({ nodeId: 'b', cause: 'missed_pongs', at: ago(49, 30), back: ago(48, 30), offlineMs: 60_000 });
   });
 
+  it('reads a node that drops again as another drop, however soon, and what follows as part of the newest', () => {
+    const rows = [
+      ended('a', ago(100), ago(50)),
+      ended('a', ago(49, 59), ago(49, 50), 'node_closed'),
+      ended('b', ago(100), ago(49, 45)),
+      open('a', ago(49, 40)),
+      open('b', ago(49, 39)),
+    ];
+    const { summary, events } = connectionHistory(rows, NOW);
+    expect(summary.drops).toBe(2);
+    expect(events.map(e => [e.cause, e.drops.map(d => d.nodeId)])).toEqual([['node_closed', ['a', 'b']], ['network', ['a']]]);
+  });
+
   it('keeps a drop open while one of its nodes is away, and leaves it out of the average', () => {
     const rows = [...drop('a', 50, 30), ended('b', ago(100), ago(50)), ...drop('a', 10, 10)];
     const { summary, events } = connectionHistory(rows, NOW);

@@ -15,6 +15,7 @@ import { providerFilter, type FilterGroup } from '../ui/TableTools';
 import { SortTable, type TableColumn } from '../ui/SortTable';
 import { planStateOnMachine, subName } from '../ui/subscription';
 import { useNow } from '../ui/reset';
+import { MachineConnections } from '../ui/MachineConnections';
 import { ProgramVersions } from '../ui/ProgramVersions';
 
 const REFRESH_MS = 5000;
@@ -283,6 +284,7 @@ function MachineDetails({ row, subs, me, now, controls }: { row: MachineRow; sub
         <PlansOnMachine row={row} subs={subs} />
         {m && <MachineSettings machine={m} editable={editable} addable={addable} busy={Boolean(shown || picking)} controls={controls} />}
       </section>
+      {m && <MachineConnections key={m.id} id={m.id} hostname={m.hostname} online={row.online} />}
     </CardFrame>
   );
 }

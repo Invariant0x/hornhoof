@@ -1,7 +1,7 @@
 import type { ConnectionEnd, NodeDisconnectCause, NodeReconnect } from '@hornhoof/protocol';
 
-/* What the nodes of a machine lost within this time of the first of them is one drop: a router going down takes them all,
-   and the server notices each within a round of its pings. */
+/* What different nodes of a machine lost within this time of the first of them is one drop: a router going down takes them
+   all, and the server notices each within a round of its pings. A node that drops again has dropped again. */
 const SAME_DROP_MS = 60_000;
 const SUMMARY_MS = 24 * 60 * 60 * 1000;
 const LISTED = 50;
@@ -73,7 +73,7 @@ function machineDrops(rows: ConnectionRow[]): MachineDrop[] {
   const together: NodeDrop[][] = [];
   for (const drop of sorted) {
     const last = together.at(-1);
-    if (last && drop.at.getTime() - last[0]!.at.getTime() <= SAME_DROP_MS) last.push(drop);
+    if (last && drop.at.getTime() - last[0]!.at.getTime() <= SAME_DROP_MS && !last.some(d => d.nodeId === drop.nodeId)) last.push(drop);
     else together.push([drop]);
   }
   return together.map(machineDrop).reverse();

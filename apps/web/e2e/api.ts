@@ -75,6 +75,7 @@ export async function serveApi(page: Page) {
     const path = url.pathname + url.search;
     if (path === '/api/stream') return route.fulfill({ status: 200, contentType: 'text/event-stream', body: ': quiet\n\n' });
     if (path in ROUTES) return route.fulfill(json(ROUTES[path]));
+    if (/^\/api\/machines\/[^/]+\/connections$/.test(path)) return route.fulfill(json({ summary: { drops: 0, averageMs: null, cause: null }, events: [] }));
     const task = TASKS.find(x => path === `/api/tasks/${x.id}`);
     if (task) return route.fulfill(json({ task: detail(task) }));
     return route.fulfill(json({ error: { code: 'not_found', message: 'Not found.' } }, 404));
