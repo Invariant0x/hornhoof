@@ -1,19 +1,19 @@
 import type { NodeReconnect } from '@hornhoof/protocol';
 import { asc, eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { companies, machines, nodeConnectionEvents, nodes, people } from '../src/db/schema.js';
+import { companies, departments, machines, nodeConnectionEvents, nodes, people } from '../src/db/schema.js';
 import { attachNodeReconnect, pruneNodeConnectionHistory, recordNodeConnection } from '../src/modules/nodes/history.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
-import { setUpCompany, testApp } from './helpers.js';
+import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
 
 async function companyWithNode() {
   const { app, db } = await testApp();
-  await setUpCompany(app);
+  const ceo = await setUpCompany(app);
   const [company] = await db.select().from(companies);
   const [owner] = await db.select().from(people);
   const [machine] = await db.insert(machines).values({ companyId: company!.id, personId: owner!.id, machineKey: 'home-0001-abcd', hostname: 'home-api' }).returning();
   const [node] = await db.insert(nodes).values({ companyId: company!.id, machineId: machine!.id, keyHash: 'node-key-hash' }).returning();
-  return { app, db, companyId: company!.id, machineId: machine!.id, nodeId: node!.id };
+  return { app, db, ceo, companyId: company!.id, machineId: machine!.id, nodeId: node!.id };
 }
 
 const reconnect: NodeReconnect = {
@@ -84,5 +84,64 @@ describe('node connection history', () => {
     const rows = await db.execute<{ n: number; oldest: string }>(sql`select count(*)::int as n,
       to_char(min(happened_at) at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as oldest from node_connection_events where machine_id = ${machineId}`);
     expect(rows.rows).toEqual([{ n: 2000, oldest: '2026-11-15T09:26:41Z' }]);
+  });
+});
+
+
+describe('machine connection history API', () => {
+  it('summarizes 24 hours and returns server and node observations together', async () => {
+    const { app, db, ceo, companyId, machineId, nodeId } = await companyWithNode();
+    const now = Date.now();
+    const at = (secondsAgo: number) => new Date(now - secondsAgo * 1000);
+    const stored = { companyId, machineId, nodeId };
+    await db.insert(nodeConnectionEvents).values([
+      { ...stored, kind: 'disconnected', happenedAt: at(90_000), actor: 'network', cause: 'abnormal_close', offlineMs: 5000 },
+      { ...stored, kind: 'disconnected', happenedAt: at(10_800), actor: 'network', cause: 'abnormal_close', closeCode: 1006, closeReason: 'reset', offlineMs: 40_000, nodeReport: reconnect },
+      { ...stored, kind: 'connected', happenedAt: at(10_760), offlineMs: 40_000 },
+      { ...stored, kind: 'disconnected', happenedAt: at(7200), actor: 'network', cause: 'abnormal_close', offlineMs: 20_000 },
+      { ...stored, kind: 'connected', happenedAt: at(7180), offlineMs: 20_000 },
+      { ...stored, kind: 'disconnected', happenedAt: at(3600), actor: 'server', cause: 'missed_pongs', offlineMs: 60_000 },
+      { ...stored, kind: 'connected', happenedAt: at(3540), offlineMs: 60_000 },
+    ]);
+
+    const response = await app.inject({ url: `/api/machines/${machineId}/connection-history`, ...as(ceo) });
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.summary).toMatchObject({ disconnects: 3, averageOfflineMs: 40_000, topCause: 'abnormal_close' });
+    expect(body.events).toHaveLength(7);
+    expect(body.events[0]).toMatchObject({ kind: 'connected', offlineMs: 60_000 });
+    const reported = body.events.find((event: { nodeReport: NodeReconnect | null }) => event.nodeReport !== null);
+    expect(reported).toMatchObject({ kind: 'disconnected', actor: 'network', cause: 'abnormal_close', closeCode: 1006, closeReason: 'reset', offlineMs: 40_000, nodeReport: reconnect });
+
+    const [latestConnection] = await db.select({ id: nodeConnectionEvents.id }).from(nodeConnectionEvents).where(eq(nodeConnectionEvents.kind, 'connected')).orderBy(sql`happened_at desc`).limit(1);
+    await db.delete(nodeConnectionEvents).where(eq(nodeConnectionEvents.id, latestConnection!.id));
+    await db.update(nodeConnectionEvents).set({ offlineMs: null, happenedAt: new Date(Date.now() - 600_000) }).where(eq(nodeConnectionEvents.cause, 'missed_pongs'));
+    const ongoing = await app.inject({ url: `/api/machines/${machineId}/connection-history`, ...as(ceo) });
+    expect(ongoing.json().summary.averageOfflineMs).toBeGreaterThanOrEqual(220_000);
+    expect(ongoing.json().summary.averageOfflineMs).toBeLessThan(225_000);
+  });
+
+  it('lets a listed person read only their own machine history', async () => {
+    const { app, db, ceo, companyId, machineId } = await companyWithNode();
+    const [department] = await db.insert(departments).values({ companyId, templateKey: 'development', roleCode: 'DEV' }).returning();
+    const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@example.test', access: { departments: [department!.id] } });
+    const denied = await app.inject({ url: `/api/machines/${machineId}/connection-history`, ...as(maria) });
+    expect(denied.statusCode).toBe(403);
+    expect(denied.body).not.toContain('home-api');
+
+    const [owner] = await db.select({ id: people.id }).from(people).where(eq(people.email, 'maria@example.test'));
+    const [own] = await db.insert(machines).values({ companyId, personId: owner!.id, machineKey: 'maria-key', hostname: 'maria-pc' }).returning();
+    const allowed = await app.inject({ url: `/api/machines/${own!.id}/connection-history`, ...as(maria) });
+    expect(allowed.statusCode).toBe(200);
+    expect(allowed.json()).toMatchObject({ summary: { disconnects: 0, averageOfflineMs: null, topCause: null }, events: [] });
+  });
+
+  it('does not expose a machine of another company', async () => {
+    const { app, db, ceo, machineId } = await companyWithNode();
+    const [other] = await db.insert(companies).values({ name: 'Other', singleton: false }).returning();
+    await db.update(machines).set({ companyId: other!.id }).where(eq(machines.id, machineId));
+    const response = await app.inject({ url: `/api/machines/${machineId}/connection-history`, ...as(ceo) });
+    expect(response.statusCode).toBe(404);
+    expect(response.body).not.toContain('abnormal_close');
   });
 });
