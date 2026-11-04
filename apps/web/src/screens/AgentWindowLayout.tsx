@@ -17,15 +17,10 @@ type Props = Waiting & {
   onClose(): void;
 };
 
-type CurrentTask = { id: string | null; why: string };
-
-function TaskToggle({ current, taskId, onTask, panelId, button }: { current: CurrentTask; taskId: string | null; onTask(id: string | null): void; panelId: string; button: Ref<HTMLButtonElement> }) {
+function TaskToggle({ currentId, taskId, onTask, panelId, button }: { currentId: string | null; taskId: string | null; onTask(id: string | null): void; panelId: string; button: Ref<HTMLButtonElement> }) {
   const t = useT();
-  const explanationId = useId();
-  return <>
-    <button ref={button} className="btn small ghost" type="button" disabled={!current.id} aria-disabled={!current.id} aria-expanded={taskId !== null} aria-controls={panelId} aria-describedby={current.id ? undefined : explanationId} title={current.id ? t.window.task : current.why} onClick={() => onTask(taskId ? null : current.id)}>{current.id ? t.window.task : t.window.noTask}</button>
-    {!current.id && <p className="t-why agent-task-explanation" id={explanationId} role="status">{current.why}</p>}
-  </>;
+  const [label, other] = currentId ? [t.window.task, t.window.noTask] : [t.window.noTask, t.window.task];
+  return <button ref={button} className="btn small ghost agent-task-toggle" data-other={other} type="button" disabled={!currentId} aria-disabled={!currentId} aria-expanded={taskId !== null} aria-controls={panelId} title={label} onClick={() => onTask(taskId ? null : currentId)}>{label}</button>;
 }
 
 const windowClasses = (terminal: boolean, hasTask: boolean, full: boolean): string => ['orch', terminal && 'term', hasTask && 'with-agent-task', full && 'fullscreen'].filter(Boolean).join(' ');
@@ -66,14 +61,14 @@ function useMinimized(openRequest: number | undefined, onChange?: (minimized: bo
 /* Hiding keeps the live terminal, drafts, task and previous size until the window is restored. */
 export function AgentWindowLayout({ currentTask, title, terminal, box, toolbar, children, openRequest, onMinimizedChange, onClose, ...waiting }: Props) {
   const t = useT();
-  const current: CurrentTask = { id: currentTask?.id ?? null, why: currentTask === undefined ? t.common.loading : t.window.noTaskWhy };
+  const currentId = currentTask?.id ?? null;
   const [taskId, setTaskId] = useState<string | null>(null);
   const { minimized, setMinimized } = useMinimized(openRequest, onMinimizedChange);
   const [full, setFull] = useState(false);
   const taskButton = useRef<HTMLButtonElement>(null);
   const restoreButton = useRef<HTMLButtonElement>(null);
   const taskPanelId = useId();
-  useEffect(() => { setTaskId(null); }, [current.id]);
+  useEffect(() => { setTaskId(null); }, [currentId]);
   useWindowFocus(minimized, box, restoreButton);
   const closeTask = () => { setTaskId(null); taskButton.current?.focus(); };
   const classes = windowClasses(terminal, taskId !== null, full);
@@ -83,7 +78,7 @@ export function AgentWindowLayout({ currentTask, title, terminal, box, toolbar, 
         <WindowControls full={full} onFull={() => setFull(v => !v)} onMinimize={() => setMinimized(true)} onClose={onClose} />
         <span className="agent-window-title">{title}</span>
         {toolbar}
-        <TaskToggle current={current} taskId={taskId} onTask={setTaskId} panelId={taskPanelId} button={taskButton} />
+        <TaskToggle currentId={currentId} taskId={taskId} onTask={setTaskId} panelId={taskPanelId} button={taskButton} />
         {taskId && <button className="btn small ghost agent-task-back" type="button" onClick={closeTask}>{terminal ? t.window.backToTerminal : t.window.backToConversation}</button>}
       </div>
       <div className="agent-workspace">
