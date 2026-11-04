@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { once } from 'node:events';
 import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -87,6 +88,15 @@ describe.skipIf(!hasTmux)('tmux sessions for agents', () => {
     const root = (await tmux.run(['list-keys', '-T', 'root'])).trim().split('\n');
     expect(root).toHaveLength(1);
     expect(root[0]).toContain('WheelUpPane');
+  });
+
+  /* The install command's own terminal shows agy's terms to the person who runs it. A session that is gone by then leaves
+     that terminal at once, untouched. */
+  it("lets go of the node's own terminal at once when the session it would show is gone", async () => {
+    await tmux.launch('shown', { cwd: tmpdir(), command: ['sleep', '30'], cols: 80, rows: 24 });
+    const [code] = await once(tmux.attachHere('gone'), 'exit');
+    expect(code).toBe(1);
+    expect(await tmux.alive('shown')).toBe(true);
   });
 
   it('starts the program again in the same session, with the env from a file it removes', async () => {

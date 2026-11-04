@@ -250,8 +250,10 @@ function setupPassed(home: string): boolean {
 /* The person who runs the install command, on agy's session: they see its screen and answer it, until the session ends.
    None without a terminal of their own. */
 export type Person = (io: LoginIo) => ((tmux: Tmux, session: string) => Promise<void>) | null;
+/* Whether the command reads the terminal of the node's own process, the one the person who runs it sits at. */
+export const ownTerminal = (input: NodeJS.ReadableStream, stdin: NodeJS.ReadableStream & { isTTY?: boolean }): boolean => input === stdin && stdin.isTTY === true;
 const onOwnTerminal: Person = io =>
-  io.input === process.stdin && process.stdin.isTTY
+  ownTerminal(io.input, process.stdin)
     ? (tmux, session) => new Promise(resolve => tmux.attachHere(session).once('exit', () => resolve()).once('error', () => resolve()))
     : null;
 

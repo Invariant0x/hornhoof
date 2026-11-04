@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { antigravityAdapter, agySettings, type Person } from '../src/providers/antigravity.js';
+import { antigravityAdapter, agySettings, ownTerminal, type Person } from '../src/providers/antigravity.js';
 import type { Tmux } from '../src/terminal/tmux.js';
 
 const hasTmux = (() => {
@@ -94,6 +94,14 @@ describe("Antigravity CLI's first-run setup", () => {
   });
 });
 
+it("shows agy's terms only on the terminal of the person who runs the install command", () => {
+  const tty = Object.assign(new PassThrough(), { isTTY: true });
+  expect(ownTerminal(tty, tty)).toBe(true);
+  expect(ownTerminal(new PassThrough(), tty)).toBe(false);
+  const pipe = new PassThrough();
+  expect(ownTerminal(pipe, pipe)).toBe(false);
+});
+
 describe.skipIf(!hasTmux)("Antigravity CLI's first-run setup on the owner's terminal", () => {
   /* agy signed in on a machine where nobody passed its setup, and the person who runs the install command there. */
   function setUp(answer: ReturnType<Person>) {
@@ -139,5 +147,13 @@ describe.skipIf(!hasTmux)("Antigravity CLI's first-run setup on the owner's term
     await expect(s.done).rejects.toThrow(/closed before its terms were accepted/);
     expect(s.keys()).toEqual([{ setup: 'colors', key: 'enter' }, { setup: 'terms', key: 'ctrl-c' }, { setup: 'terms', key: 'ctrl-c' }]);
     expect(await s.adapter.setupNeeded!()).toBe(true);
+  });
+
+  it("stops, and closes agy, when the person's terminal is gone while agy still shows its terms", async () => {
+    const s = setUp(async () => {});
+    await expect(s.done).rejects.toThrow(/before its terms were accepted/);
+    expect(s.keys()).toEqual([{ setup: 'colors', key: 'enter' }]);
+    expect(await s.adapter.setupNeeded!()).toBe(true);
+    expect(() => execFileSync('tmux', ['-L', 'hh-login', 'list-sessions'], { stdio: 'ignore' })).toThrow();
   });
 });
