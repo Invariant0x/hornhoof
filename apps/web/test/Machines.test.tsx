@@ -172,7 +172,10 @@ describe('Machines', () => {
     expect(meter(own, 'Processor').querySelector('.g-f')?.textContent).toBe('4 cores');
     expect(meter(own, 'Memory').textContent).toBe('Memory2.5GB freeof 8 GB');
     expect(meter(own, 'Disk').querySelector('b')?.textContent).toBe('unknown');
-    expect(within(own).getAllByRole('button')).toHaveLength(1);
+    expect(within(own).getAllByRole('button')).toEqual([
+      within(own).getByRole('button', { name: 'Update programs' }),
+      within(own).getByRole('button', { name: 'Open Orchestrator' }),
+    ]);
     expect(within(own).getByRole('button', { name: 'Update programs' })).toBeDisabled();
     expect(within(own).getByTitle('The company server runs on this machine now')).toHaveTextContent('Company server here');
     expect(within(box).queryByText('Company server here')).not.toBeInTheDocument();
