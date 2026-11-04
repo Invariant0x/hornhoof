@@ -1,4 +1,7 @@
 import { eq } from 'drizzle-orm';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import { agents, companies, departments, jobs, nodes as nodeRows, subscriptions, tasks } from '../src/db/schema.js';
@@ -51,6 +54,27 @@ async function nextRun(node: FakeNode): Promise<Run> {
 const finish = (node: FakeNode, run: Run, sessionId: string) => node.send({ type: 'job.done', jobId: run.jobId, ok: true, sessionId, result: 'ok', tail: '', error: null });
 
 describe('agents of one plan on several machines', () => {
+  it('places new work on another node of the same plan while its current node waits for an update', async () => {
+    const { app, db, ceo, nodes, mac, lap, bruno } = await planOnTwoMachines({ HORNHOOF_CONTROL_DIR: mkdtempSync(join(tmpdir(), 'hh-placement-drain-')) });
+    await db.update(agents).set({ nodeId: nodes.mac.nodeId }).where(eq(agents.id, bruno.id));
+    const response = await app.inject({ method: 'POST', url: '/api/nodes/update', headers: { authorization: `Bearer ${nodes.mac.key}` }, payload: {} });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().ready).toBe(true);
+    await write(app, ceo, bruno.id, 'Use the available machine');
+    const sent = await nextRun(lap);
+    expect(sent.prompt).toContain('Use the available machine');
+    expect(mac.queued()).toBe(0);
+    expect((await db.select().from(agents).where(eq(agents.id, bruno.id)))[0]!.nodeId).toBe(nodes.laptop.nodeId);
+  });
+
+  it('queues messages with machineDrain while every node of a plan waits for an update', async () => {
+    const { app, ceo, nodes, mac, lap, bruno } = await planOnTwoMachines({ HORNHOOF_CONTROL_DIR: mkdtempSync(join(tmpdir(), 'hh-placement-drain-')) });
+    for (const node of [nodes.mac, nodes.laptop]) await app.inject({ method: 'POST', url: '/api/nodes/update', headers: { authorization: `Bearer ${node.key}` }, payload: {} });
+    await write(app, ceo, bruno.id, 'Wait for the update');
+    expect(await state(app, ceo, bruno.id)).toMatchObject({ ready: true, reason: null, machineDrain: { state: 'restarting' } });
+    expect(mac.queued() + lap.queued()).toBe(0);
+  });
+
   it('starts each new employee on the machine of its plan with the fewest agents, and keeps it there', async () => {
     const { app, db, ceo, nodes, mac, lap, bruno, vera } = await planOnTwoMachines();
     await write(app, ceo, bruno.id, 'Hi');

@@ -1,5 +1,5 @@
 import { combineReport, reportDelay } from './report-notices.js';
-import type { Notification } from '@hornhoof/protocol';
+import type { MachineDrain, Notification } from '@hornhoof/protocol';
 import type { MessageParty } from '../events/parties.js';
 import { effortFor, effortsOf, MAX_INSTRUCTIONS, modelsFor, OLD_NODE_INSTRUCTIONS, ORCHESTRATOR_EFFORT, UNHEARD_MS, type Limits } from '@hornhoof/protocol';
 import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lte, ne, or, sql } from 'drizzle-orm';
@@ -9,7 +9,7 @@ import { loggable } from '../../errors.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
 import { agents, jobs, nodes, subscriptions, tasks, turns } from '../../db/schema.js';
 import { dispatchJob } from '../jobs/dispatch.js';
-import { turnsHeld } from '../updates/drain.js';
+import { nodeDrain, nodeHeld, turnsHeld } from '../updates/drain.js';
 import { actingCeo, alsoKept, deliverLockedInput, inputKept, turnStarted, withInputLock } from './decision-context.js';
 import { BUILTIN, identityOf, nodeIdentity, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { liveNode, planNodes, type NodeRow } from '../nodes/nodes.js';
@@ -39,6 +39,7 @@ export const TURN_TIMEOUT_MS = 2 * 3_600_000;
 
 export type AgentState = FailureState & {
   ready: boolean;
+  machineDrain: MachineDrain | null;
   /* Its plan is at its limit until then: its turns wait in line, and people may still write to it. */
   limitUntil: string | null;
   /* Its plan used the share set for tasks until then: task turns wait, people's own messages still go. */
@@ -479,10 +480,10 @@ type Placement = { node: NodeIdentity; nodeId: string | null; moves: boolean };
    freest of the plan's nodes that is, unless the agent has work in progress on its own and waits for it. None while no
    node can take it. */
 async function placement(ctx: Ctx, agent: { id: string; nodeId: string | null }, sub: { id: string; kind: 'personal' | 'api_key' }, need = CONVERSATION_NODE): Promise<Placement | null> {
-  if (sub.kind === 'api_key') return ctx.hub.isReady(BUILTIN) ? { node: BUILTIN, nodeId: null, moves: agent.nodeId !== null } : null;
+  if (sub.kind === 'api_key') return ctx.hub.isReady(BUILTIN) && !nodeHeld(ctx, BUILTIN) ? { node: BUILTIN, nodeId: null, moves: agent.nodeId !== null } : null;
   const all = await planNodes(ctx.db, [sub.id]);
-  const able = all.filter(n => n.status === 'ready' && !outdated(n.version, need) && ctx.hub.isReady(nodeIdentity(n.id)));
-  const stays = all.some(n => n.id === agent.nodeId) && (await holdsWork(ctx, agent.id));
+  const able = all.filter(n => n.status === 'ready' && !outdated(n.version, need) && ctx.hub.isReady(nodeIdentity(n.id)) && !nodeHeld(ctx, nodeIdentity(n.id)));
+  const stays = all.some(n => n.id === agent.nodeId && !nodeHeld(ctx, nodeIdentity(n.id))) && (await holdsWork(ctx, agent.id));
   const pick = able.find(n => n.id === agent.nodeId) ?? (stays ? null : await freest(ctx, able));
   return pick ? { node: nodeIdentity(pick.id), nodeId: pick.id, moves: pick.id !== agent.nodeId } : null;
 }
@@ -769,7 +770,7 @@ export async function orchestratorOf(ctx: Ctx, companyId: string) {
 
 export async function orchestratorState(ctx: Ctx, companyId: string): Promise<AgentState> {
   const agent = await orchestratorOf(ctx, companyId);
-  if (!agent) return { ready: false, limitUntil: null, budgetUntil: null, reason: 'no_subscription', browserError: null, busy: false, runningJobId: null, queued: 0, terminal: false, program: null, alarm: null, retry: null, failure: null, obsolete: null };
+  if (!agent) return { ready: false, machineDrain: null, limitUntil: null, budgetUntil: null, reason: 'no_subscription', browserError: null, busy: false, runningJobId: null, queued: 0, terminal: false, program: null, alarm: null, retry: null, failure: null, obsolete: null };
   return agentState(ctx, agent.id);
 }
 
@@ -777,11 +778,11 @@ export async function orchestratorState(ctx: Ctx, companyId: string): Promise<Ag
    and otherwise wait for what its own machine waits for, or one of the plan's that is online, or its first. One with work
    in progress waits for its own machine alone. */
 async function waitsFor(ctx: Ctx, agent: { id: string; productId: string | null; departmentId: string | null; nodeId: string | null }, sub: { id: string; kind: 'personal' | 'api_key' }): Promise<AgentState['reason']> {
-  if (sub.kind === 'api_key') return ctx.hub.isReady(BUILTIN) ? null : 'machine_offline';
+  if (sub.kind === 'api_key') return ctx.hub.isReady(BUILTIN) || nodeHeld(ctx, BUILTIN) ? null : 'machine_offline';
   const all = await planNodes(ctx.db, [sub.id]);
   if (!all.length) return 'waiting_machine';
   const need = all.some(n => outdated(n.version, REPOSITORY_NODE)) && (await repoFor(ctx, agent)) ? REPOSITORY_NODE : CONVERSATION_NODE;
-  const why = (n: NodeRow): AgentState['reason'] => (n.status !== 'ready' ? n.status : outdated(n.version, need) ? 'node_outdated' : ctx.hub.isReady(nodeIdentity(n.id)) ? null : 'machine_offline');
+  const why = (n: NodeRow): AgentState['reason'] => (n.status !== 'ready' ? n.status : outdated(n.version, need) ? 'node_outdated' : ctx.hub.isReady(nodeIdentity(n.id)) || nodeHeld(ctx, nodeIdentity(n.id)) ? null : 'machine_offline');
   const own = all.find(n => n.id === agent.nodeId);
   if (own && why(own) !== null && (await holdsWork(ctx, agent.id))) return why(own);
   if (all.some(n => why(n) === null)) return null;
@@ -800,8 +801,13 @@ export async function agentState(ctx: Ctx, agentId: string): Promise<AgentState>
   const shown = (await programNode(ctx, agentId))?.node ?? (sub && agent ? ((await placement(ctx, agent, sub))?.node ?? null) : null);
   const terminal = Boolean(shown && ctx.hub.hasTerminals(shown));
   const browserError = shown ? ctx.hub.browserErrorOf(shown) : null;
+  const available = sub && agent ? await placement(ctx, agent, sub) : null;
+  const first = !available && sub?.kind === 'personal' ? (await planNodes(ctx.db, [sub.id])).find(n => nodeHeld(ctx, nodeIdentity(n.id))) : null;
+  const heldNode = shown ?? (sub?.kind === 'api_key' ? BUILTIN : agent?.nodeId ? nodeIdentity(agent.nodeId) : first ? nodeIdentity(first.id) : null);
+  const drain = !available && heldNode ? nodeDrain(ctx, heldNode) : null;
   return {
     ready: reason === null,
+    machineDrain: drain,
     limitUntil: sub ? limitUntil(sub.limits) : null,
     budgetUntil: sub ? budgetUntil(sub.limits, sub.budget) : null,
     reason,

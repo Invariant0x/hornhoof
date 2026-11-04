@@ -18,7 +18,7 @@ export type UpdaterView = { present: boolean; status: UpdaterStatus | null; wait
 /* What the app asks the updater for: the image tag to install, the digest of the exact build the app read for it, the
    digests of the node and updater images of its commit, empty for one the build does not have, and the version people
    see. */
-export type UpdateRequest = { id: string; version: string; commit?: string; tag: string; digest: string; nodeDigest: string; updaterDigest: string };
+export type UpdateRequest = { id: string; version: string; commit?: string; tag: string; digest: string; nodeDigest: string; updaterDigest: string; immediate?: boolean; urgent?: boolean };
 
 function controlJson<T>(dir: string, name: string): T | null {
   try { return JSON.parse(readFileSync(join(dir, name), 'utf8')) as T; }

@@ -2,6 +2,7 @@ import type { NodeLoad, NodeMessage, RunKind, Workspace } from '@hornhoof/protoc
 import { and, asc, count, eq, inArray, isNull, like, max, notInArray, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
+import { nodeHeld } from '../updates/drain.js';
 import { accessOf, canReach, type Access } from '../../auth/access.js';
 import { agents, attachments, companies, departments, jobs, machines, nodes, people, subscriptions, tasks, testParts, testRuns, type LostRun } from '../../db/schema.js';
 import { loggable } from '../../errors.js';
@@ -182,7 +183,7 @@ export async function placesOf(ctx: Ctx, companyId: string): Promise<Place[]> {
   for (const { machine, owner } of rows) {
     /* Only nodes that say how busy they are know test runs, and only those with a user of their own for runs take them. */
     const ready = live
-      .filter(n => n.machineId === machine.id && hub.isReady(nodeIdentity(n.id)) && hub.loadOf(nodeIdentity(n.id)) !== null && hub.noRunsOf(nodeIdentity(n.id)) === null)
+      .filter(n => n.machineId === machine.id && !nodeHeld(ctx, nodeIdentity(n.id)) && hub.isReady(nodeIdentity(n.id)) && hub.loadOf(nodeIdentity(n.id)) !== null && hub.noRunsOf(nodeIdentity(n.id)) === null)
       .map(n => n.id);
     if (!ready.length) continue;
     /* A node that runs work takes test runs too. */
@@ -202,7 +203,7 @@ export async function placesOf(ctx: Ctx, companyId: string): Promise<Place[]> {
       works: hub.runsWork(nodeIdentity(node)),
     });
   }
-  if (hub.isReady(BUILTIN) && hub.loadOf(BUILTIN) && hub.noRunsOf(BUILTIN) === null) {
+  if (!nodeHeld(ctx, BUILTIN) && hub.isReady(BUILTIN) && hub.loadOf(BUILTIN) && hub.noRunsOf(BUILTIN) === null) {
     places.push({ key: 'builtin', node: BUILTIN, name: BUILTIN_NAME, machineId: null, nodeId: null, builtin: true, lent: true, busy: false, running: 0, load: together([hub.loadOf(BUILTIN)]), access: null, works: hub.runsWork(BUILTIN) });
   }
   const reports = [...live.map(n => hub.loadOf(nodeIdentity(n.id))), hub.loadOf(BUILTIN)];
@@ -291,7 +292,7 @@ async function giveOut(ctx: Ctx): Promise<void> {
       .where(and(eq(testParts.id, part.id), eq(testParts.status, 'queued')))
       .returning();
     if (!taken) continue;
-    const sent = ctx.hub.send(place.node, {
+    const sent = !nodeHeld(ctx, place.node) && ctx.hub.send(place.node, {
       type: 'tests.run',
       partId: part.id,
       ...(run.kind === 'work' ? { kind: 'work' as const, files: run.files } : {}),

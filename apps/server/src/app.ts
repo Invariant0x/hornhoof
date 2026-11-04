@@ -34,6 +34,8 @@ import { ComputerAccess } from './modules/computer/access.js';
 import { computerRoutes } from './modules/computer/routes.js';
 import { archOf, registry } from './modules/updates/registry.js';
 import { updateRoutes } from './modules/updates/routes.js';
+import { startNodeDrains } from './modules/updates/node-drain.js';
+import { nodeUpdateRoutes } from './modules/updates/node-routes.js';
 import { attachmentRoutes } from './modules/tasks/attachments.js';
 import { partFileRoutes } from './modules/testruns/files.js';
 import { poolRoutes } from './modules/testruns/pool.js';
@@ -115,6 +117,8 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   subscriptionRoutes(app, ctx);
   signinRoutes(app, ctx);
   nodeRoutes(app, ctx);
+  startNodeDrains(app, ctx);
+  nodeUpdateRoutes(app, ctx);
   nodeSocket(app, ctx);
   jobRoutes(app, ctx);
   streamRoutes(app, ctx);
