@@ -9,7 +9,7 @@ import { answerDirectly } from '../tasks/engine.js';
 import { wakeAll } from '../tasks/wake.js';
 import { listEvents } from '../events/store.js';
 import { FIRST_TURN, FIRST_TURN_TEMPLATE, turnPrompt } from './prompt.js';
-import { agentState, insertTurn, onAgent, pump } from './queue.js';
+import { agentState, insertTurn, onAgent, pump, typesInTerminal } from './queue.js';
 import { cancelJob } from '../tasks/wake.js';
 import { queueTaskMessage, TaskReference } from '../tasks/external-wait.js';
 
@@ -30,9 +30,9 @@ export function conversationRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
 
   app.get('/api/agents/:id/events', async req => {
-    const { agent } = await agentFor(ctx, req);
+    const { me, agent } = await agentFor(ctx, req);
     const { after } = EventsQuery.parse(req.query);
-    return { events: await listEvents(db, agent.id, after), state: await agentState(ctx, agent.id) };
+    return { events: await listEvents(db, agent.id, after), state: { ...(await agentState(ctx, agent.id)), canType: await typesInTerminal(ctx, agent.id, me.id) } };
   });
 
   app.post('/api/agents/:id/messages', async (req, reply) => {

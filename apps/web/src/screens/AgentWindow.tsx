@@ -1,6 +1,6 @@
 import { commandBlockOpen } from '../ui/CommandBox';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { api } from '../api';
+import { api, ApiFailure } from '../api';
 import { deptLabel, errorText, useLanguage, useT, type Messages } from '../i18n';
 import { useStream } from '../live';
 import { PROGRAM_NAMES, PROVIDER_NAMES } from '../providers';
@@ -142,8 +142,9 @@ function stopOnEscape(e: globalThis.KeyboardEvent, box: HTMLElement | null, stop
   if (e.key === 'Escape' && !e.defaultPrevented && !box?.hidden) stop();
 }
 
-/* An agent's window: its live terminal when its node shows one, or its conversation as a log with a line to write to it;
-   and the orchestrator's cards. */
+/* An agent's window: its live terminal when its node shows one, or its conversation as a log; a line to write to it for
+   anyone who cannot type into that terminal; and the orchestrator's cards. Whoever reaches this window may write: the
+   server opens the agent's conversation and takes a message by the same rule. */
 export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard, openRequest, onMinimizedChange, requests = [], onRequestsChanged = () => {} }: Props) {
   const t = useT();
   const { language } = useLanguage();
@@ -240,7 +241,11 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard, o
         if (res.events.length < PAGE) break;
       }
     } catch (err) {
-      if (mounted.current) setFailure(err);
+      if (mounted.current) {
+        setFailure(err);
+        /* The server no longer lets this person reach the agent: nothing of it stays open, its line to write included. */
+        if (err instanceof ApiFailure && err.status === 403) setState(null);
+      }
     }
     await loadCommands();
   }, [loadCommands, merge, path]);
@@ -370,6 +375,13 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard, o
 
   const hasTerminal = Boolean(state?.terminal) && !noTerminal;
   const terminal = hasTerminal && !asLog;
+  /* Only the owner of the agent's plan types into its live terminal, which has its own line. */
+  const hasLine = !terminal || !state?.canType;
+  /* Someone the terminal takes no keys from starts in the line under it. */
+  const lineUnderTerminal = known && terminal && hasLine;
+  useEffect(() => {
+    if (lineUnderTerminal) input.current?.focus();
+  }, [lineUnderTerminal]);
   /* One card at a time: his newest proposal until it is applied, below his latest line. */
   const shown = visible(events);
   const messages = shown.filter(isMessage);
@@ -578,7 +590,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard, o
         </div>
       )}
       {!notebook && known && terminal && (
-        <AgentTerminal path={`/api/agents/${agentId}/terminal`} program={sub ? PROGRAM_NAMES[sub.provider] : 'Claude'} onGone={() => setNoTerminal(true)} />
+        <AgentTerminal path={`/api/agents/${agentId}/terminal`} program={sub ? PROGRAM_NAMES[sub.provider] : 'Claude'} onGone={() => setNoTerminal(true)} watching={hasLine} />
       )}
       {!notebook && known && terminal && hasCards && (
         <div className="t-cards">
@@ -619,8 +631,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard, o
       {known && !ready && <p className="t-why">{reasonText(t, state.reason, sub)}</p>}
       {known && state?.limitUntil && <p className="t-why">{t.window.limitUntil(clock(language, state.limitUntil)!)}</p>}
       {known && !state?.limitUntil && state?.budgetUntil && <p className="t-why">{t.window.budgetUntil(clock(language, state.budgetUntil)!)}</p>}
-      {/* A live terminal has its own line to type in; the log needs this one. */}
-      {known && !terminal && (
+      {known && hasLine && (
         <form
           className="t-in"
           onSubmit={e => {
@@ -637,7 +648,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard, o
       )}
       <div className="t-st">
         {known && <span>{where}</span>}
-        {known && !terminal && <span>{t.window.hint}</span>}
+        {known && hasLine && <span>{t.window.hint}</span>}
       </div>
     </AgentWindowLayout>
   );
