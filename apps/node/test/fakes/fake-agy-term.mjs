@@ -188,6 +188,21 @@ class AgyTerminal {
   }
 }
 
+if (process.argv.includes('--print=/usage') && process.argv.includes('--output-format')) {
+  const modeFile = join(process.env.HOME ?? '', '.fake-limits-mode');
+  const mode = existsSync(modeFile) ? readFileSync(modeFile, 'utf8').trim() : '';
+  if (mode === 'fail') {
+    process.stderr.write('error: failed to fetch usage\n');
+    process.exit(1);
+  }
+  if (mode === 'bad_json') {
+    process.stdout.write('not json\n');
+    process.exit(0);
+  }
+  const custom = join(process.env.HOME ?? '', '.fake-agy-usage.json');
+  process.stdout.write(existsSync(custom) ? readFileSync(custom) : readFileSync(new URL('../fixtures/agy-usage.json', import.meta.url)));
+  process.exit(0);
+}
 if (!process.argv.includes('--dangerously-skip-permissions')) await import('./fake-agy-login.mjs');
 else {
   /* agy asks for its first-run setup before anything else on a machine where nobody passed it. */
