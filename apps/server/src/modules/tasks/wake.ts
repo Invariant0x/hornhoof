@@ -2,7 +2,7 @@ import { and, asc, count, desc, eq, gt, gte, inArray, isNotNull, isNull, ne, not
 import type { Ctx } from '../../app.js';
 import { loggable } from '../../errors.js';
 import { agentChanges, agentEvents, agents, jobs, requests, subscriptions, taskEvents, tasks, testRuns } from '../../db/schema.js';
-import { agentState, conversationOf, insertTurn, limitUntil, liveSubscription, onAgent, openTypedTurn, orchestratorOf, pump, refusedLimits, UNSENT } from '../conversation/queue.js';
+import { agentState, conversationOf, insertTurn, limitUntil, liveSubscription, onAgent, openTypedTurn, orchestratorOf, pump, refusedLimits, UNSENT, type TurnMessage } from '../conversation/queue.js';
 import { deliverLive } from '../conversation/decision-context.js';
 import { quote } from '../conversation/prompt.js';
 import { appendEvent, publishWorking } from '../events/store.js';
@@ -15,6 +15,7 @@ import { afterRestart } from './restarts.js';
 import { clearTurnProgram, failedProgramData } from './silent.js';
 import { afterFailure } from './failures.js';
 import { settle, tell } from './turns.js';
+import { wakeNotice } from './notification.js';
 
 export { SILENT_TURNS, startWork } from './engine.js';
 
@@ -219,7 +220,7 @@ export async function wakeAll(ctx: Ctx, wakes: Wake[]): Promise<void> {
         await wakeQueued(ctx.db, w);
         continue;
       }
-      const key = `${w.agentId}:${w.taskId}`;
+      const key = `${w.agentId}:${w.taskId}:${w.why}:${w.cause?.eventId ?? ""}`;
       const queued = !seen.has(key) && (await queueWake(ctx, w));
       seen.add(key);
       await wakeQueued(ctx.db, w);
@@ -271,10 +272,12 @@ async function explainRequest(ctx: Ctx, w: Wake): Promise<void> {
     `${what}\n\nBefore a person answers, find out what it needs: read the task with "task", and ask ${asker} with "message_employee" when its words are not enough. ` +
     `Then call "explain_request" with request ${request.id} and a few lines for the person, in the CEO's language and plain words without IT terms: ` +
     'which task and what for, what is needed from them and why, and the ways to go with what each leads to. Do not answer it yourself unless the CEO told you how.';
-  const message = { personId: null, text, task: { id: task.id, number: task.number }, request: request.id };
+  const cause = request.kind === 'stuck' ? w.cause : { actor: { agentId: request.agentId }, action: 'asked people', task: { id: task.id, number: task.number } };
+  const notice = await wakeNotice(ctx, task, { ...w, cause });
+  const message = { personId: null, text, task: { id: task.id, number: task.number }, request: request.id, ...notice };
   /* The request names the turn that explains it, so people see the orchestrator is on it. */
-  const into = await deliverLive(ctx, w.agentId, text, {}, (jobId, kept) =>
-    appendEvent(ctx, { companyId: task.companyId, agentId: w.agentId, jobId, kind: 'message', data: { text, task: { id: task.id, number: task.number }, request: request.id } }, kept).then(() => {}),
+  const into = await deliverLive(ctx, w.agentId, text, { source: { data: message } }, (jobId, kept) =>
+    appendEvent(ctx, { companyId: task.companyId, agentId: w.agentId, jobId, kind: 'message', data: message }, kept).then(() => {}),
   );
   if (!into) await insertTurn(ctx, { companyId: task.companyId, agentId: w.agentId, prompt: text, createdBy: null, message });
   ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
@@ -342,34 +345,36 @@ async function queueWake(ctx: Ctx, w: Wake): Promise<boolean> {
   const task = await taskForWake(db, w);
   if (!task) return false;
   if (TO_WORK.includes(w.why) && w.agentId === task.assigneeAgentId && (await openAfter(db, task)).length) return false;
+  const notice = await wakeNotice(ctx, task, w);
+  const prompt = notice.action + wakePrompt(agent, task, w) + (notice.report && w.text?.trim() !== notice.report ? `\n\n${quote(notice.report)}` : '');
+  const reportContext = notice.report ? notice.action + wakePrompt(agent, task, { ...w, ...(w.text?.trim() === notice.report ? { text: undefined } : {}) }) : undefined;
+  const data = { text: prompt, task: { id: task.id, number: task.number }, taskWake: taskWakeOf(task, w), ...notice, reportContext };
   /* New words on the task the agent works on right now go into that turn. */
   if (LIVE_WAKES.includes(w.why)) {
-    const text = wakePrompt(agent, task, w);
-    const into = await deliverLive(ctx, agent.id, text, { taskId: task.id }, (jobId, kept) =>
-      appendEvent(ctx, { companyId: agent.companyId, agentId: agent.id, jobId, kind: 'message', data: { text, task: { id: task.id, number: task.number } } }, kept).then(() => {}),
+    const text = prompt;
+    const into = await deliverLive(ctx, agent.id, text, { taskId: task.id, source: { data } }, (jobId, kept) =>
+      appendEvent(ctx, { companyId: agent.companyId, agentId: agent.id, jobId, kind: 'message', data }, kept).then(() => {}),
     );
     if (into) return false;
   }
   /* One at a time per agent, so two moves at once still queue one turn. */
   return onAgent(ctx, agent.id, async () => {
-    return keepTaskWake(ctx, agent, task, w);
+    return keepTaskWake(ctx, agent, task, w, data);
   });
 }
 
-async function keepTaskWake(ctx: Ctx, agent: typeof agents.$inferSelect, task: Task, w: Wake): Promise<boolean> {
+async function keepTaskWake(ctx: Ctx, agent: typeof agents.$inferSelect, task: Task, w: Wake, data: Omit<TurnMessage, 'personId'>): Promise<boolean> {
   const { db } = ctx;
-  const waiting = await waitingTaskTurn(db, agent.id, task.id);
+  const waiting = data.report ? null : await waitingTaskTurn(db, agent.id, task.id);
   if (waiting) {
-    /* Keep new words even when a turn on this task is already waiting. */
-    if (LIVE_WAKES.includes(w.why)) {
-      const text = wakePrompt(agent, task, w);
-      await db.update(jobs).set({ prompt: sql`${jobs.prompt} || ${`\n\n${text}`}` }).where(eq(jobs.id, waiting.id));
-      await appendEvent(ctx, { companyId: agent.companyId, agentId: agent.id, jobId: waiting.id, kind: 'message', data: { text, task: { id: task.id, number: task.number }, taskWake: taskWakeOf(task, w) } });
+    /* Keep new words and their provenance with the turn that already waits. */
+    if (LIVE_WAKES.includes(w.why) || w.cause?.actor) {
+      await db.update(jobs).set({ prompt: sql`${jobs.prompt} || ${`\n\n${data.text}`}` }).where(eq(jobs.id, waiting.id));
+      await appendEvent(ctx, { companyId: agent.companyId, agentId: agent.id, jobId: waiting.id, kind: 'message', data });
     }
     return true;
   }
-  const prompt = wakePrompt(agent, task, w);
-  await insertTurn(ctx, { companyId: agent.companyId, agentId: agent.id, prompt, createdBy: null, taskId: task.id, message: { personId: null, text: prompt, task: { id: task.id, number: task.number }, taskWake: taskWakeOf(task, w) } });
+  await insertTurn(ctx, { companyId: agent.companyId, agentId: agent.id, prompt: data.text, createdBy: null, taskId: task.id, message: { personId: null, ...data } });
   return true;
 }
 

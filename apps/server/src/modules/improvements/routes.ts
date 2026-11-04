@@ -1,3 +1,4 @@
+import { notificationMessage } from '../events/notifications.js';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -38,7 +39,8 @@ export function improvementRoutes(app: FastifyInstance, ctx: Ctx): void {
     const taken = await moveImprovement(ctx, me.companyId, id, 'open', { status: 'taken', decidedBy: me.id, result: null });
     const prompt = takenPrompt(me.name, taken);
     try {
-      await enqueueTurn(ctx, { companyId: me.companyId, agentId: orchestrator.id, prompt, createdBy: me.id, message: { personId: null, text: prompt } });
+      const message = await notificationMessage(ctx, me.companyId, 'improvement', prompt, { actor: { personId: me.id } });
+      await enqueueTurn(ctx, { companyId: me.companyId, agentId: orchestrator.id, prompt: message.text, createdBy: me.id, message });
     } catch (err) {
       /* Undone only when no turn was stored: a stored one is the orchestrator's to finish and close. */
       if (!(err instanceof NoSubscription)) throw err;

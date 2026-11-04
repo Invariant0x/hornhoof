@@ -71,7 +71,7 @@ async function queueDueRound(ctx: Ctx, id: string, now: Date): Promise<string | 
     return false;
   }
   const prompt = roundPrompt(agent);
-  const jobId = await insertTurn(ctx, { companyId: agent.companyId, agentId: id, prompt, createdBy: null, message: { personId: null, text: prompt, timer: true } });
+  const jobId = await insertTurn(ctx, { companyId: agent.companyId, agentId: id, prompt, createdBy: null, message: { personId: null, text: prompt, timer: true, notification: { source: 'timer', tasks: [], detail: { en: agent.name, ru: agent.name } } } });
   await db.update(agents).set({ timerAt: now }).where(eq(agents.id, id));
   return jobId;
 }
