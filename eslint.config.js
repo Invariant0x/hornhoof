@@ -1,5 +1,15 @@
 import tseslint from 'typescript-eslint';
 
+/* The tsconfig that checks the files of each workspace. A file reaches only its own: eslint keeps every TypeScript
+   program it builds until it exits, and the four together need more than the 2 GB node allows by default on a machine
+   with less than 15 GB of memory. That is also why `npm run lint` runs one eslint for each workspace. */
+const tsconfigs = {
+  'packages/protocol': 'tsconfig.eslint.json',
+  'apps/node': 'tsconfig.eslint.json',
+  'apps/server': 'tsconfig.eslint.json',
+  'apps/web': 'tsconfig.json',
+};
+
 export default [
   {
     ignores: [
@@ -22,10 +32,7 @@ export default [
     ],
     languageOptions: {
       parser: tseslint.parser,
-      parserOptions: {
-        project: ['./packages/*/tsconfig.eslint.json', './apps/*/tsconfig.eslint.json', './apps/web/tsconfig.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
+      parserOptions: { tsconfigRootDir: import.meta.dirname },
     },
     plugins: {
       '@typescript-eslint': tseslint.plugin,
@@ -38,6 +45,10 @@ export default [
       '@typescript-eslint/switch-exhaustiveness-check': 'error',
     },
   },
+  ...Object.entries(tsconfigs).map(([workspace, tsconfig]) => ({
+    files: [`${workspace}/{src,test,e2e}/**/*.{ts,tsx}`, `${workspace}/*.config.ts`],
+    languageOptions: { parserOptions: { project: [`./${workspace}/${tsconfig}`] } },
+  })),
   {
     files: ['scripts/**/*.mjs'],
     languageOptions: { globals: { process: 'readonly' } },

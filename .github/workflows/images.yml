@@ -48,8 +48,6 @@ jobs:
       # Every check runs even when one before it failed, so one run shows all that is wrong.
       - name: Lint, release checks, protocol and scripts
         if: ${{ !cancelled() && steps.install.outcome == 'success' && matrix.part == 1 }}
-        env:
-          NODE_OPTIONS: --max-old-space-size=4096
         run: |
           npm run lint
           npm run typecheck:tests

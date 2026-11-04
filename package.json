@@ -14,7 +14,7 @@
   },
   "scripts": {
     "prepare": "node -e \"const fs=require('node:fs');if(fs.existsSync('node_modules/@vitest/coverage-v8'))for(const w of['packages/protocol','apps/node','apps/server','apps/web']){fs.mkdirSync(w+'/node_modules/@vitest',{recursive:true});fs.rmSync(w+'/node_modules/@vitest/coverage-v8',{recursive:true,force:true});fs.symlinkSync('../../../../node_modules/@vitest/coverage-v8',w+'/node_modules/@vitest/coverage-v8')}\"",
-    "lint": "npm run build -w @hornhoof/protocol && eslint",
+    "lint": "npm run build -w @hornhoof/protocol && eslint --ignore-pattern \"apps/**\" --ignore-pattern \"packages/**\" && npm run lint --workspaces",
     "release:version": "node scripts/release-version.mjs",
     "test:release": "node --test scripts/test/*.test.mjs",
     "typecheck:tests": "npm run build -w @hornhoof/protocol && tsc -p apps/server/tsconfig.eslint.json --noEmit && tsc -p apps/node/tsconfig.eslint.json --noEmit && tsc -p packages/protocol/tsconfig.eslint.json --noEmit",
