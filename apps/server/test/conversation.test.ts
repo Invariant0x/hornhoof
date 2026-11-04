@@ -2,7 +2,7 @@ import { MAX_INSTRUCTIONS, OLD_NODE_INSTRUCTIONS } from '@hornhoof/protocol';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
-import { agents, companies, departments, jobs, people, subscriptions, turns } from '../src/db/schema.js';
+import { agents, companies, departments, jobs, people, subscriptions, tasks, turns } from '../src/db/schema.js';
 import { renderInstructions } from '../src/modules/agents/instructions.js';
 import { FIRST_TURN, FIRST_TURN_TEMPLATE, ORCHESTRATOR_INSTRUCTIONS } from '../src/modules/conversation/prompt.js';
 import { enqueueTurn, pumpWaiting } from '../src/modules/conversation/queue.js';
@@ -55,6 +55,34 @@ describe('the orchestrator\'s conversation', () => {
     const run = await nextRun(builtin);
     expect(run.prompt).toContain('Read this immediately.');
     expect(run.prompt).not.toContain('Report.');
+  });
+
+  it('keeps an idle queue safe while people pass held task turns', async () => {
+    const { app, db, ceo, builtin } = await live();
+    await pumpWaiting(app.ctx);
+    expect(await quiet(builtin)).toBe(0);
+    const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    await db.update(agents).set({ switchedOffAt: new Date() }).where(eq(agents.id, orchestrator!.id));
+    const [task] = await db.insert(tasks).values({ companyId: orchestrator!.companyId, number: 1, title: 'Held task', status: 'working', assigneeAgentId: orchestrator!.id }).returning();
+    const held = await enqueueTurn(app.ctx, { companyId: orchestrator!.companyId, agentId: orchestrator!.id, taskId: task!.id, prompt: 'Held task work.', createdBy: null });
+    await say(app, ceo, 'Person goes now.');
+    expect((await nextRun(builtin)).prompt).toContain('Person goes now.');
+    expect((await db.select().from(jobs).where(eq(jobs.id, held)))[0]!.status).toBe('queued');
+  });
+
+  it('schedules a queued service report for its combining deadline', async () => {
+    const { app, db } = await live();
+    const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    const now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+    const schedule = vi.spyOn(globalThis, 'setTimeout');
+    try {
+      await enqueueTurn(app.ctx, { companyId: orchestrator!.companyId, agentId: orchestrator!.id, createdBy: null, prompt: 'Report.', message: { personId: null, text: 'Report.', report: 'Report.', notification: { source: 'reported', tasks: [] } } });
+      expect(schedule.mock.calls.some(([, delay]) => delay === 10_000)).toBe(true);
+    } finally {
+      clock.mockRestore();
+      schedule.mockRestore();
+    }
   });
 
   it('starts a typed person message with its sender, role and recipient', async () => {
