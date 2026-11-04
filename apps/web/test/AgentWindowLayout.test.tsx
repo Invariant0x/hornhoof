@@ -72,12 +72,13 @@ describe('agent window task and controls', () => {
     const event: EventView = { seq: 1, kind: 'message', data: { text: 'Release verified.' }, jobId: 'j1', person: null, at: '2026-11-04T14:00:00Z', message };
     company(true, false, [event]);
     const window = await openEmployee(userEvent.setup());
-    await within(window).findByRole('button', { name: 'Message from Hana via Hornhoof to Bruno' });
-    stream.send({ type: 'agent_event', agentId: 'b1', event: { ...event, message: { ...message, revision: 1, senders: [message.from, { ...message.from, id: 'h2', name: 'Rita' }] } } });
+    fireEvent.click(await within(window).findByRole('button', { name: 'Message from Hana via Hornhoof to Bruno' }));
+    stream.send({ type: 'agent_event', agentId: 'b1', event: { ...event, seq: 2, message: { ...message, originSeq: 1, revision: 1, senders: [message.from, { ...message.from, id: 'h2', name: 'Rita' }] } } });
     expect(await within(window).findByRole('button', { name: 'Message from Hana, Rita via Hornhoof to Bruno' })).toBeInTheDocument();
     stream.send({ type: 'agent_event', agentId: 'b1', event });
     expect(await within(window).findByRole('button', { name: 'Message from Hana, Rita via Hornhoof to Bruno' })).toBeInTheDocument();
     expect(within(window).queryByRole('button', { name: 'Message from Hana via Hornhoof to Bruno' })).not.toBeInTheDocument();
+    expect(within(window).getByText('Release verified.')).toBeVisible();
   });
 
   it.each(['Department tasks', 'About the department', 'Speed', 'Account', 'About', 'Settings', 'Versions'])('keeps Escape with %s instead of stopping the busy agent', async name => {

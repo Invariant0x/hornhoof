@@ -279,7 +279,7 @@ async function dispatchAlarm(ctx: Ctx, s: SilentTurn, to: Agent, now: Date, case
     agentId: to.id,
     prompt: text,
     createdBy: null,
-    message: { personId: null, text, ...(task ? { task } : {}), silentJob: caseId, silentReason: s.alarm.reason },
+    message: { personId: null, text, ...(task ? { task } : {}), silentJob: caseId, silentReason: s.alarm.reason, notification: { source: 'program_alarm', tasks: task ? [task] : [], detail: { en: `${s.agent.name}: ${s.alarm.reason}`, ru: `${s.agent.name}: ${s.alarm.reason}` } } },
   });
   alertedSet(ctx).add(caseId);
   await logTurnFact(ctx, s.job, `${to.name} was told about the silent program: ${text}`, { silentCase: caseId, to: to.id });

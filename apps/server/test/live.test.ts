@@ -35,7 +35,7 @@ describe('words for a live turn', () => {
     const message = await c.message;
     said(c.ctx, BUILTIN, message.ref, true);
     expect(await pending).toBe(c.run.id);
-    expect(message.text).toBe('From Hornhoof to Orchestrator:\n\nKeep the service instructions.');
+    expect(message.text).toBe('From Hornhoof, recorded service message to Orchestrator:\n\nKeep the service instructions.');
   });
 
   it('gives the node a relative budget independent of the server clock', async () => {

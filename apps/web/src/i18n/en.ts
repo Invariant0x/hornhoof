@@ -89,8 +89,8 @@ export const en = {
   about: {
     menu: 'About', title: 'About Hornhoof', close: 'Close',
     description: 'A company where people and agents work together.',
-    version: 'Version', developer: 'Developer', license: 'License', code: 'Source code', contact: 'Contact', website: 'Website',
-    issues: 'Report a bug or suggest an idea', copyright: 'Copyright (c) 2026 Ivan Korol',
+    version: 'Version', license: 'License', code: 'Source code', contact: 'Contact', website: 'Website',
+    issues: 'Report a bug or suggest an idea', author: 'Author — Ivan Korol, © 2026',
     versionFailed: 'The server version could not be loaded. Close this window and open it again to retry.',
   },
   profile: {
@@ -595,6 +595,10 @@ export const en = {
       tStall: 'idle',
       tInterrupted: 'interrupted', tQueued: 'queued', tUnknown: 'No data',
       externalWaiting: (reason: string, until: string) => `waits: ${reason}, until ${until}`,
+      waitingOnEmployee: (name: string, reason: string, until: string) => `waits for ${name}: ${reason}, until ${until}`,
+      waitingOnEvent: (event: string, reason: string, until: string) => `waits for ${event}: ${reason}, until ${until}`,
+      waitEmployee: 'an employee',
+      waitEvents: { time: 'time', ceo: 'the CEO', machine: 'a machine', other: 'an external event' },
       noData: 'no data',
       lostSince: (at: string) => `turn end lost since ${at}: waiting for input`,
       interruptedSince: (at: string) => `interrupted since ${at}`,
