@@ -72,7 +72,9 @@ type ExistingPlan = {
   removedAt: Date | null;
 };
 
-const isProtectedPlan = (s: ExistingPlan, busy: ReadonlySet<string | null>) => s.removedAt === null && (s.status === 'ready' || busy.has(s.id));
+/* A plan signed in on its machine: ready there, or waiting for its owner to pass its program's first setup there. */
+const SIGNED_IN = new Set<ExistingPlan['status']>(['ready', 'needs_setup']);
+const isProtectedPlan = (s: ExistingPlan, busy: ReadonlySet<string | null>) => s.removedAt === null && (SIGNED_IN.has(s.status) || busy.has(s.id));
 
 async function clearPlanNodes(tx: Db, resetIds: string[]): Promise<string[]> {
   if (!resetIds.length) return [];

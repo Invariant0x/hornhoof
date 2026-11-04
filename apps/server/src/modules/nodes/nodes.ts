@@ -18,13 +18,14 @@ export async function hasCurrentKey(ctx: { db: Db; hub: NodeHub }, id: NodeIdent
 
 export const NODE_STALE_MS = 24 * 60 * 60 * 1000;
 
-/* Clears ready on nodes that have not been heard from for more than 24 hours and settles their plans. */
+/* Clears the sign-in of nodes that have not been heard from for more than 24 hours, ready or waiting for their program's
+   first setup, and settles their plans. */
 export async function expireStaleNodes(db: Db, now = new Date()): Promise<void> {
   const cutoff = new Date(now.getTime() - NODE_STALE_MS);
   const stale = await db
     .update(nodes)
     .set({ status: 'needs_login' })
-    .where(and(eq(nodes.status, 'ready'), lte(nodes.lastSeenAt, cutoff)))
+    .where(and(inArray(nodes.status, ['ready', 'needs_setup']), lte(nodes.lastSeenAt, cutoff)))
     .returning({ subscriptionId: nodes.subscriptionId });
   await settlePlans(db, stale.map(n => n.subscriptionId));
 }
