@@ -322,6 +322,7 @@ export const en = {
       limit: (at: string, duration: string) => `Until ${at}, in ${duration}. Its agents wait until then.`,
       limitUnknown: 'Its agents wait until the limit resets.',
       login: (host: string, owner: string) => `On ${host}. Only ${owner} can sign in.`,
+      loginOffline: (host: string) => `It needs a sign-in on ${host}, and the machine is offline.`,
       waiting: (owner: string) => `${owner} has not run the install command yet.`,
     },
   },

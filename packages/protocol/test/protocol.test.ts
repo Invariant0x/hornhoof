@@ -102,7 +102,7 @@ describe('server messages', () => {
   });
 
   it('give null for a job without a timeout or an unknown provider', () => {
-    const { timeoutMs: _, ...noTimeout } = SERVER[0] as Extract<ServerMessage, { type: 'job.run' }>;
+    const noTimeout = { ...SERVER[0], timeoutMs: undefined };
     expect(parseServerMessage(JSON.stringify(noTimeout))).toBeNull();
     expect(parseServerMessage(JSON.stringify({ ...SERVER[0], provider: 'gemini' }))).toBeNull();
     expect(parseServerMessage('null')).toBeNull();
@@ -233,8 +233,8 @@ describe('job.run', () => {
   });
 
   it('needs instructions and a tool token, even when they are null', () => {
-    const { instructions: _, ...noInstructions } = SERVER[0] as Extract<ServerMessage, { type: 'job.run' }>;
-    const { toolToken: __, ...noToken } = SERVER[0] as Extract<ServerMessage, { type: 'job.run' }>;
+    const noInstructions = { ...SERVER[0], instructions: undefined };
+    const noToken = { ...SERVER[0], toolToken: undefined };
     expect(parseServerMessage(JSON.stringify(noInstructions))).toBeNull();
     expect(parseServerMessage(JSON.stringify(noToken))).toBeNull();
   });
@@ -368,7 +368,11 @@ describe('models', () => {
 
   it("knows the level each model runs at when nobody picked one, as its program's docs give it", () => {
     /* Claude Code: high, but medium on the 5.5 models, and its Default model is Opus 5.5. A node's older list has no defaults. */
-    const old = CLAUDE_ALIASES.map(({ defaultEffort: _, ...m }) => m);
+    const old = CLAUDE_ALIASES.map(model => {
+      const legacy = { ...model };
+      delete legacy.defaultEffort;
+      return legacy;
+    });
     expect(['fable', 'opus', 'sonnet', 'haiku', ''].map(m => defaultEffortOf('claude', old, m))).toEqual(['high', 'medium', 'medium', 'medium', 'medium']);
     expect(['claude-fable-5-1', 'claude-opus-5-5', ''].map(m => defaultEffortOf('anthropic_api', API_MODELS.anthropic_api, m))).toEqual(['high', 'medium', 'medium']);
     /* Codex says it per model; its Default model and GLM's say nothing. */

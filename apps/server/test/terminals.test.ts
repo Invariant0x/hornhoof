@@ -579,7 +579,7 @@ describe('who typed into the terminal, for the decisions of a turn', () => {
   });
 
   it("makes the person who presses Enter in the orchestrator's running turn its last word, before the keys go on", async () => {
-    const { app, db, url, ceo, builtin, orchestratorId } = await live();
+    const { app, db, url, ceo, builtin } = await live();
     await app.inject({ method: 'POST', url: '/api/agents/orchestrator/start', ...as(ceo) });
     const greeting = await next(builtin, 'job.run');
     /* Hornhoof's greeting is no person's word. */
