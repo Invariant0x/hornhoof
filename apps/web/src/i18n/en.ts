@@ -90,7 +90,7 @@ export const en = {
     menu: 'About', title: 'About Hornhoof', close: 'Close',
     description: 'A company where people and agents work together.',
     version: 'Version', license: 'License', code: 'Source code', contact: 'Contact', website: 'Website',
-    issues: 'Report a bug or suggest an idea', author: 'Author — Ivan Korol, © 2026',
+    issues: 'Report a bug or suggest an idea', author: 'Author: Ivan Korol, © 2026',
     versionFailed: 'The server version could not be loaded. Close this window and open it again to retry.',
   },
   profile: {
