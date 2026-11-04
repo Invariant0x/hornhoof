@@ -1330,6 +1330,15 @@ summary.turn-head:focus-visible { outline: 2px solid var(--cyan); outline-offset
 .blk-facts { grid-area: facts; }
 .blk-run { grid-area: run; }
 .blk-side { grid-area: side; }
+.blk-link { grid-column: 1 / -1; }
+.conn-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px 32px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); }
+.conn-list li { display: grid; gap: 2px; align-content: start; min-width: 0; padding-left: 10px; border-left: 3px solid var(--line2); font-size: 13px; overflow-wrap: anywhere; }
+.conn-list li.away { border-left-color: var(--amber-ink); }
+.conn-list small { font-size: 12.5px; color: var(--muted); }
+.conn-when { display: flex; flex-wrap: wrap; gap: 0 10px; }
+.conn-when span { color: var(--muted); }
+.conn-list li.away .conn-when span { color: var(--amber-ink); }
+.blk-link > .btn { justify-self: start; }
 .blk h4 { font-size: 14px; }
 .blk-side .machine-actions { margin-top: 4px; }
 /* A plan that does not work has one block, filling the card whatever its columns and rows, so no empty row leaves a gap. */
