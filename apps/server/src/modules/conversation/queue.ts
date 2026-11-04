@@ -818,8 +818,9 @@ export async function agentState(ctx: Ctx, agentId: string): Promise<AgentState>
   const browserError = shown ? ctx.hub.browserErrorOf(shown) : null;
   const available = sub && agent ? await placement(ctx, agent, sub) : null;
   const first = !available && sub?.kind === 'personal' ? (await planNodes(ctx.db, [sub.id])).find(n => nodeHeld(ctx, nodeIdentity(n.id))) : null;
-  const heldNode = shown ?? (sub?.kind === 'api_key' ? BUILTIN : agent?.nodeId ? nodeIdentity(agent.nodeId) : first ? nodeIdentity(first.id) : null);
-  const drain = !available && heldNode ? nodeDrain(ctx, heldNode) : null;
+  /* Its turn waits for the update of its own machine or, with that one away, of the one the plan has left. */
+  const heldNode = [shown, sub?.kind === 'api_key' ? BUILTIN : null, agent?.nodeId ? nodeIdentity(agent.nodeId) : null, first ? nodeIdentity(first.id) : null].find(node => node && nodeDrain(ctx, node));
+  const drain = !available && reason === null && heldNode ? nodeDrain(ctx, heldNode) : null;
   return {
     ready: reason === null,
     machineDrain: drain,

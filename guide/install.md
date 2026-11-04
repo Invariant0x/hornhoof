@@ -21,7 +21,7 @@ It goes through these steps:
 
 ## How do I update it?
 
-Run the same line again. It keeps the existing `.env`. [Updates](updates.md) says how Hornhoof offers a new version by itself.
+Run the same line again. It keeps the existing `.env`. The new server starts at once, and its nodes follow when what they run has finished; with `--urgent` after `server` they go along now, which stops what they run. [Updates](updates.md) says how Hornhoof offers a new version by itself.
 
 ## How much of my Mac does it take?
 

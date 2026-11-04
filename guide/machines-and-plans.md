@@ -59,7 +59,7 @@ Agents that share one subscription still share that user and its sign-in. So the
 
 ## Update or remove the nodes on a machine
 
-- To update the nodes on a machine later, run `curl -fsSL <your Hornhoof address>/install.sh | bash` on it. They move to the node image of your server's own build, so update the server first to get newer nodes.
+- To update the nodes on a machine later, run `curl -fsSL <your Hornhoof address>/install.sh | bash` on it. They move to the node image of your server's own build, so update the server first to get newer nodes. The command waits for what each node runs to finish, and tells you what it waits for; if you stop it, nothing changes. For a security update, end the command with `bash -s -- --urgent` instead of `bash` to replace them now, which stops what they run.
 - To remove them, end the same command with `bash -s -- --uninstall`.
 
 ## Update agent programs
