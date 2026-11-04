@@ -35,6 +35,37 @@ async function openEmployee(user: ReturnType<typeof userEvent.setup>) {
 afterEach(() => localStorage.clear());
 
 describe('agent window task and controls', () => {
+  it('starts the header with Close, Minimize and Full screen in keyboard order and keeps their actions', async () => {
+    company();
+    const user = userEvent.setup();
+    const window = await openEmployee(user);
+    const [close, minimize, full] = within(window).getAllByRole('button');
+    expect(close).toHaveAccessibleName('Close');
+    expect(minimize).toHaveAccessibleName('Minimize');
+    expect(full).toHaveAccessibleName('Full screen');
+    close!.focus();
+    await user.keyboard('{Tab}');
+    expect(minimize).toHaveFocus();
+    await user.keyboard('{Enter}');
+    expect(window).not.toBeVisible();
+    expect(screen.getByRole('button', { name: 'Restore Bruno, Backend engineer' })).toHaveFocus();
+    await user.keyboard('{Enter}');
+    expect(window).toBeVisible();
+    expect(window).toHaveFocus();
+    close!.focus();
+    await user.keyboard('{Tab}{Tab}');
+    expect(full).toHaveFocus();
+    await user.keyboard('{Enter}');
+    expect(full).toHaveAccessibleName('Restore size');
+    expect(full).toHaveAttribute('aria-pressed', 'true');
+    await user.keyboard('{Enter}');
+    expect(full).toHaveAccessibleName('Full screen');
+    expect(full).toHaveAttribute('aria-pressed', 'false');
+    close!.focus();
+    await user.keyboard('{Enter}');
+    expect(window).not.toBeInTheDocument();
+  });
+
   it('updates a coalesced report in place when another sender joins the same event', async () => {
     const stream = fakeStream();
     const message: NonNullable<EventView['message']> = { direction: 'in', from: { kind: 'agent', id: 'h1', name: 'Hana', role: null, department: null }, to: { kind: 'agent', id: 'b1', name: 'Bruno', role: null, department: null }, notification: { source: 'reported', tasks: [{ id: 't1', number: 223 }] } };

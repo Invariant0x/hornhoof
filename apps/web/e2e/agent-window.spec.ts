@@ -1,4 +1,4 @@
-import { expect, test, type Page, type TestInfo } from '@playwright/test';
+import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { box } from './api';
 import { serveAgentWindow, type AgentFixture } from './agent-window-api';
 
@@ -35,6 +35,29 @@ async function checkSurface(page: Page, errors: string[]) {
   expect(errors).toEqual([]);
 }
 
+async function checkLeftControls(window: Locator, labels: string[]) {
+  const header = window.locator(':scope > .t-bar');
+  const frame = await box(header);
+  const controls = await Promise.all(labels.map(label => box(header.getByRole('button', { name: label, exact: true }))));
+  const [close, minimize, full] = controls;
+  expect(close!.x - frame.x).toBeLessThanOrEqual(12);
+  expect(close!.x).toBeGreaterThanOrEqual(frame.x);
+  expect(close!.x + close!.width).toBeLessThanOrEqual(minimize!.x);
+  expect(minimize!.x + minimize!.width).toBeLessThanOrEqual(full!.x);
+  expect(controls.map(control => control.y)).toEqual([close!.y, close!.y, close!.y]);
+  expect(full!.x + full!.width).toBeLessThanOrEqual((await box(header.locator('.agent-window-title'))).x);
+  for (const button of await header.locator('button').all()) {
+    const rect = await box(button);
+    expect(rect.x).toBeGreaterThanOrEqual(frame.x);
+    expect(rect.x + rect.width).toBeLessThanOrEqual(frame.x + frame.width);
+    for (const control of controls) {
+      if (rect.x === control.x && rect.y === control.y) continue;
+      const overlaps = rect.x < control.x + control.width && rect.x + rect.width > control.x && rect.y < control.y + control.height && rect.y + rect.height > control.y;
+      expect(overlaps).toBe(false);
+    }
+  }
+}
+
 for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] as const) for (const width of [1440, 375]) {
   const settings = { lang, theme, width };
   test.describe(`one agent window in ${lang}, ${theme}, at ${width}px`, () => {
@@ -43,6 +66,7 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
       await openFromMap(page, lang);
       await expect(window).toBeVisible();
       await expect(window.locator('.xterm-screen')).toBeVisible();
+      await checkLeftControls(window, [words.close, words.minimize, words.full]);
       await capture('map');
       const normal = await box(window);
       const connections = live.connections;
@@ -65,6 +89,7 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
         await expect(window.locator('.t-term')).toBeHidden();
         expect((await box(task)).width).toBeLessThanOrEqual(width);
       }
+      await checkLeftControls(window, [words.close, words.minimize, words.full]);
       await capture('task');
       if (width === 1440) await about.click();
       await window.getByRole('button', { name: words.back }).click();
@@ -74,6 +99,7 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
       await window.getByRole('button', { name: words.full, exact: true }).click();
       const full = await box(window);
       expect(full).toMatchObject({ x: 0, y: 0, width, height: 900 });
+      await checkLeftControls(window, [words.close, words.minimize, words.size]);
       await capture('fullscreen');
       await window.getByRole('button', { name: words.minimize }).click();
       await expect(window).toBeHidden();
@@ -84,9 +110,13 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
       await expect(page.getByRole('heading', { name: words.subscriptions, exact: true })).toBeVisible();
       await strip.click();
       expect(await box(window)).toEqual(full);
+      await expect(strip).toBeHidden();
+      await expect(window).toBeFocused();
+      await checkLeftControls(window, [words.close, words.minimize, words.size]);
       expect(live.connections).toBe(connections);
       await window.getByRole('button', { name: words.size, exact: true }).click();
       expect(await box(window)).toMatchObject({ width: normal.width });
+      await checkLeftControls(window, [words.close, words.minimize, words.full]);
       await window.getByRole('button', { name: words.close, exact: true }).click();
       await expect(window).toHaveCount(0);
       await checkSurface(page, errors);
@@ -156,7 +186,7 @@ test('the mobile task leaves the hidden conversation unchanged by Ctrl+O', async
   await page.getByRole('button', { name: /Development/ }).click();
   await page.getByRole('region', { name: 'Members' }).getByRole('button', { name: /Bruno/ }).click();
   const window = page.getByRole('complementary', { name: 'Bruno, Developer' });
-  const notice = window.getByRole('button', { name: 'Hornhoof notice to Bruno' });
+  const notice = window.getByRole('button', { name: 'Hornhoof, recorded service message to Bruno' });
   await expect(notice).toHaveAttribute('aria-expanded', 'false');
   await window.getByRole('button', { name: 'Task', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Checkout step 1' })).toBeVisible();
