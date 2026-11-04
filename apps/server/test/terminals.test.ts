@@ -155,6 +155,40 @@ describe("writing to an agent whose terminal the person only watches", () => {
     expect(await db.select().from(jobs)).toHaveLength(turnsBefore);
   });
 
+  it('tells the window who types into the terminal, as the terminal itself says', async () => {
+    const { app, url, builtin, zed, lisa } = await withDelegate();
+    for (const [person, owner] of [[zed, true], [lisa, false]] as const) {
+      expect((await state(app, person)).canType).toBe(owner);
+      const screen = await watch(url, person);
+      expect((await next(builtin, 'term.open')).write).toBe(owner);
+      await until(() => screen.frames.length > 0);
+      expect(screen.frames[0]).toEqual({ type: 'ready', write: owner });
+    }
+  });
+
+  it('tells a person with the department of an employee on another plan that they cannot type', async () => {
+    const { app, bruno, zed, maria } = await withEmployees();
+    const typing = async (person: string) => (await app.inject({ url: `/api/agents/${bruno.id}/events`, ...as(person) })).json().state.canType;
+    expect(await typing(maria)).toBe(false);
+    expect(await typing(zed)).toBe(true);
+  });
+
+  it('goes by the plan the running turn is on when the agent moved to another plan mid-turn', async () => {
+    const { app, db, url, builtin, ceo, zed, orchestratorId } = await lent();
+    const [agent] = await db.select().from(agents).where(eq(agents.id, orchestratorId));
+    const [running] = await db.insert(jobs).values({ companyId: agent!.companyId, subscriptionId: agent!.subscriptionId!, agentId: orchestratorId, kind: 'conversation', prompt: 'A long turn.', timeoutMs: 900000, status: 'running', startedAt: new Date() }).returning();
+    const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
+    const [mine] = await db.insert(subscriptions).values({ companyId: agent!.companyId, provider: 'claude', kind: 'personal', label: 'Claude', ownerPersonId: owner!.id, status: 'ready' }).returning();
+    await db.update(agents).set({ subscriptionId: mine!.id }).where(eq(agents.id, orchestratorId));
+    expect((await state(app, zed)).canType).toBe(true);
+    expect((await state(app, ceo)).canType).toBe(false);
+    await watch(url, zed);
+    expect((await next(builtin, 'term.open')).write).toBe(true);
+    await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, running!.id));
+    expect((await state(app, zed)).canType).toBe(false);
+    expect((await state(app, ceo)).canType).toBe(true);
+  });
+
   it("still takes keys from the subscription's owner alone", async () => {
     const { url, builtin, zed, lisa } = await withDelegate();
     const watching = await watch(url, lisa);

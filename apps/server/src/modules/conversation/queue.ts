@@ -189,10 +189,9 @@ export async function liveSubscription(ctx: Ctx, agentId: string) {
 /* A node and the owner of the subscription it runs: the person who may type into the agent's terminal there. */
 export type ProgramNode = { node: NodeIdentity; ownerPersonId: string };
 
-/* The node that holds the agent's program now: the one its running turn went out to, since that turn goes on there when
-   the agent moves, or else its own while that is a live node of its plan. A company key's agents are on the built-in
-   node. */
-export async function programNode(ctx: Ctx, agentId: string): Promise<ProgramNode | null> {
+/* The plan that holds the agent's program now, with the node it is on: the one its running turn went out to, since that
+   turn goes on there when the agent moves, or else its own and its live node there. */
+async function programPlan(ctx: Ctx, agentId: string) {
   const [running] = await ctx.db
     .select({ kind: subscriptions.kind, ownerPersonId: subscriptions.ownerPersonId, nodeId: jobs.nodeId })
     .from(jobs)
@@ -207,9 +206,19 @@ export async function programNode(ctx: Ctx, agentId: string): Promise<ProgramNod
         .innerJoin(subscriptions, and(eq(subscriptions.id, agents.subscriptionId), isNull(subscriptions.removedAt)))
         .leftJoin(nodes, and(eq(nodes.id, agents.nodeId), eq(nodes.subscriptionId, agents.subscriptionId), liveNode))
         .where(eq(agents.id, agentId));
+  return own;
+}
+
+/* The node that holds the agent's program now. A company key's agents are on the built-in node. */
+export async function programNode(ctx: Ctx, agentId: string): Promise<ProgramNode | null> {
+  const own = await programPlan(ctx, agentId);
   const node = own && identityOf(own, own.nodeId);
   return node ? { node, ownerPersonId: own.ownerPersonId } : null;
 }
+
+/* Whether the person types into the agent's terminal: its plan is theirs. Anyone else who reaches the agent writes through
+   Hornhoof. */
+export const typesInTerminal = async (ctx: Ctx, agentId: string, personId: string): Promise<boolean> => (await programPlan(ctx, agentId))?.ownerPersonId === personId;
 
 export const nodeOfAgent = async (ctx: Ctx, agentId: string) => (await programNode(ctx, agentId))?.node ?? null;
 
