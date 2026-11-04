@@ -454,6 +454,13 @@ export type TurnView = {
 
 export type Machine = { id: string; hostname: string };
 
+/* A machine that waits for its work to end before an update restarts it, was put off because it did not end in time, or
+   restarts for the update now. */
+export type MachineDrain =
+  | { state: 'waiting'; turnsLeft: number; partsLeft: number; until: string }
+  | { state: 'postponed'; turnsLeft: number; partsLeft: number; retryAt: string }
+  | { state: 'restarting'; since: string };
+
 export type MachineView = {
   id: string;
   hostname: string;
@@ -476,6 +483,8 @@ export type MachineView = {
   otherBuild?: { server: string; nodes: (string | null)[] } | null;
   /* Why Playwright's browser failed to start on the machine, or null when it is ready. */
   browserError?: string | null;
+  /* Older servers omit it; null while no update waits on the machine. */
+  drain?: MachineDrain | null;
 };
 
 /* What runs on a machine now: the employees whose program is there, busy while a turn of theirs runs, and the parts of
@@ -508,7 +517,7 @@ export type ShownCommand = { id: string; kind: 'machine' | 'plans' | 'add'; plan
 
 /* The node that comes with the server, for those who see the whole company. */
 /* machine: the company's machine it runs on, when the server is on one; the pool counts that computer once. */
-export type BuiltinView = { online: boolean; load: NodeLoad | null; running: Running; machine?: Machine | null; programs?: ProgramInfo[] | null; browserError?: string | null };
+export type BuiltinView = { online: boolean; load: NodeLoad | null; running: Running; machine?: Machine | null; programs?: ProgramInfo[] | null; browserError?: string | null; drain?: MachineDrain | null };
 
 export type JobView = {
   id: string;

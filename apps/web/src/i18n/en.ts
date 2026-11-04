@@ -425,6 +425,14 @@ export const en = {
     olderBuild: 'an older one',
     browserFailed: 'Browser failed',
     browserFailedNote: (reason: string) => `The browser for checks did not start (${reason}). Run the install command on this machine again without --join, or check the node logs.`,
+    /* A machine that waits for its work to end before an update restarts it. */
+    drainMark: { waiting: 'Waiting to update', postponed: 'Update postponed', restarting: 'Updating' },
+    drainWaiting: (turns: number, parts: number, until: string) => {
+      const left = [turns > 0 || parts === 0 ? `${turns} ${plural('en', turns, { one: 'turn', other: 'turns' })}` : '', parts > 0 ? `${parts} ${plural('en', parts, { one: 'run part', other: 'run parts' })}` : ''].filter(Boolean).join(' and ');
+      return `Waiting for agents to finish before the update: ${left} left, until ${until}`;
+    },
+    drainPostponed: (at: string) => `The update is postponed: agents did not finish in time. Next try at ${at}`,
+    drainRestarting: 'Updating now: the machine restarts and takes work again by itself',
   },
   notebook: {
     title: 'Notebook',
@@ -1009,6 +1017,10 @@ export const en = {
     goBack: (version: string) => `Go back to ${version}`,
     pastMigration: 'Going back past a database change may not start. If it does not, update to the newest version again.',
     missing: 'The updater is not running. Run the install command for this server again to add it.',
+    /* An update now would stop the turns that run. */
+    cutTitle: 'Update now?',
+    cutText: (n: number) => (n === 1 ? '1 agent turn is running. If you update now, it stops midway, and Hornhoof starts it again after the update.' : `${n} agent turns are running. If you update now, they stop midway, and Hornhoof starts them again after the update.`),
+    cutYes: 'Update now',
   },
   errors: {
     command_active: 'There is an active command for this place. Use it or wait until it expires.',

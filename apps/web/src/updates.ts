@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api } from './api';
+import { api, ApiFailure } from './api';
 import type { UpdatesView } from './types';
 import type { Version } from './ui/VersionMark';
 
@@ -9,6 +9,9 @@ export const page = { reload: () => window.location.reload() };
 const POLL_MS = 5 * 60_000;
 /* While an update waits or runs, and while the server restarts. */
 const BUSY_POLL_MS = 2_000;
+
+/* An update asked for now that would stop this many turns, which waits for the person to say yes. */
+export type UpdateCut = { version: string; turns: number };
 
 export type Updates = {
   view: UpdatesView | null;
@@ -20,10 +23,20 @@ export type Updates = {
   offline: boolean;
   /* An update is being asked for and the server has not answered yet. */
   asking: boolean;
+  cut: UpdateCut | null;
   check(): Promise<void>;
   update(version: string, whenIdle: boolean): Promise<void>;
   callOff(): Promise<void>;
+  confirmCut(): Promise<void>;
+  dropCut(): void;
 };
+
+/* How many turns the server says an update now would stop, when that is why it refused. */
+function turnsCut(err: unknown): number | null {
+  if (!(err instanceof ApiFailure) || err.reason !== 'turns_would_stop') return null;
+  const turns = err.details?.turns;
+  return typeof turns === 'number' ? turns : null;
+}
 
 function requestedBuild(view: UpdatesView | null, tag: string): Version {
   const build = tag === 'latest' ? view?.latest : view?.versions.find(b => b.tag === tag);
@@ -37,6 +50,7 @@ export function useUpdates(enabled: boolean): Updates {
   const [sent, setSent] = useState<(Version & { id: string }) | null>(null);
   const [offline, setOffline] = useState(false);
   const [asking, setAsking] = useState(false);
+  const [cut, setCut] = useState<UpdateCut | null>(null);
   const boot = useRef<string | null>(null);
   const busyNow = useRef(false);
   const askingNow = useRef(false);
@@ -75,6 +89,30 @@ export function useUpdates(enabled: boolean): Updates {
     return () => clearInterval(timer);
   }, [enabled, busy, load]);
 
+  const dropCut = useCallback(() => setCut(null), []);
+
+  /* confirmTurns: how many turns the person agreed to stop; the server asks again if more would. */
+  const ask = async (version: string, whenIdle: boolean, confirmTurns?: number) => {
+    /* A second click before the answer would ask the updater twice. */
+    if (askingNow.current) return;
+    askingNow.current = true;
+    setAsking(true);
+    try {
+      const target = requestedBuild(view, version);
+      const { id } = await api.post<{ id: string }>('/api/updates', { version, whenIdle, ...(confirmTurns === undefined ? {} : { confirmTurns }) });
+      setCut(null);
+      if (!whenIdle) setSent({ id, ...target });
+      await load();
+    } catch (err) {
+      const turns = turnsCut(err);
+      if (turns === null) throw err;
+      setCut({ version, turns });
+    } finally {
+      askingNow.current = false;
+      setAsking(false);
+    }
+  };
+
   return {
     view,
     busy,
@@ -82,25 +120,16 @@ export function useUpdates(enabled: boolean): Updates {
     target: sent,
     offline,
     asking,
+    cut,
     check: async () => take(await api.post<UpdatesView>('/api/updates/check')),
-    update: async (version, whenIdle) => {
-      /* A second click before the answer would ask the updater twice. */
-      if (askingNow.current) return;
-      askingNow.current = true;
-      setAsking(true);
-      try {
-        const target = requestedBuild(view, version);
-        const { id } = await api.post<{ id: string }>('/api/updates', { version, whenIdle });
-        if (!whenIdle) setSent({ id, ...target });
-        await load();
-      } finally {
-        askingNow.current = false;
-        setAsking(false);
-      }
-    },
+    update: (version, whenIdle) => ask(version, whenIdle),
     callOff: async () => {
       await api.del('/api/updates');
       await load();
     },
+    confirmCut: async () => {
+      if (cut) await ask(cut.version, false, cut.turns);
+    },
+    dropCut,
   };
 }

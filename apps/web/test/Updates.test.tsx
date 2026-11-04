@@ -235,7 +235,7 @@ describe('updates', () => {
   it('gives the time of the last check as the chosen language writes it', () => {
     localStorage.setItem('hh-lang', 'ru');
     const view = updates();
-    const idle: Updates = { view, busy: false, starting: false, target: null, offline: false, asking: false, check: async () => {}, update: async () => {}, callOff: async () => {} };
+    const idle: Updates = { view, busy: false, starting: false, target: null, offline: false, asking: false, cut: null, check: async () => {}, update: async () => {}, callOff: async () => {}, confirmCut: async () => {}, dropCut: () => {} };
     render(
       <LanguageProvider>
         <Versions updates={idle} onClose={() => {}} />
@@ -253,5 +253,131 @@ describe('updates', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Check now' }));
     expect(calls.some(c => c.method === 'POST' && c.path === '/api/updates/check')).toBe(true);
     expect(await within(dialog).findByText('Could not check for updates.')).toBeInTheDocument();
+  });
+
+  describe('updating now while turns run', () => {
+    const wouldStop = (turns: number): [number, unknown] => [409, { error: { code: 'conflict', reason: 'turns_would_stop', message: 'Running turns would stop.', details: { turns } } }];
+    const posts = (calls: ReturnType<typeof mockApi>) => calls.filter(c => c.method === 'POST' && c.path === '/api/updates');
+
+    /* The server answers with the next reply each time an update is asked for; a started one shows as running. */
+    function server(...answers: [number, unknown?][]) {
+      let view = updates();
+      return mockApi({
+        'GET /api/org': [200, ORG],
+        'GET /api/updates': () => [200, view],
+        'POST /api/updates': () => {
+          const answer = answers.shift()!;
+          if (answer[0] === 202) view = updates({}, { status: status('running', 'pull') });
+          return answer;
+        },
+      });
+    }
+
+    it('says how many turns would stop and starts nothing until the person agrees', async () => {
+      const calls = server(wouldStop(3), [202, { id: 'u1' }]);
+      const user = userEvent.setup();
+      render(<Shell me={ME} onSignOut={() => {}} />);
+      await user.click(await screen.findByRole('button', { name: 'Update' }));
+      const ask = await screen.findByRole('alertdialog', { name: 'Update now?' });
+      expect(ask).toHaveTextContent('3 agent turns are running. If you update now, they stop midway, and Hornhoof starts them again after the update.');
+      expect(posts(calls)).toHaveLength(1);
+      expect(screen.queryByRole('progressbar', { name: 'Update progress' })).not.toBeInTheDocument();
+      await user.click(within(ask).getByRole('button', { name: 'Update now' }));
+      expect(posts(calls).at(-1)!.body).toEqual({ version: 'latest', whenIdle: false, confirmTurns: 3 });
+      expect(await screen.findByRole('progressbar', { name: 'Update progress' })).toBeInTheDocument();
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    });
+
+    it('words one turn as one', async () => {
+      server(wouldStop(1));
+      const user = userEvent.setup();
+      render(<Shell me={ME} onSignOut={() => {}} />);
+      await user.click(await screen.findByRole('button', { name: 'Update' }));
+      expect(await screen.findByRole('alertdialog')).toHaveTextContent('1 agent turn is running. If you update now, it stops midway, and Hornhoof starts it again after the update.');
+    });
+
+    it.each([
+      [2, 'Идут 2 хода агентов. Если обновить сейчас, они оборвутся на середине, а после обновления Hornhoof запустит их заново.'],
+      [5, 'Идут 5 ходов агентов. Если обновить сейчас, они оборвутся на середине, а после обновления Hornhoof запустит их заново.'],
+      [1, 'Идет 1 ход агента. Если обновить сейчас, он оборвется на середине, а после обновления Hornhoof запустит его заново.'],
+    ])('asks in Russian about %i turns', async (turns, text) => {
+      localStorage.setItem('hh-lang', 'ru');
+      server(wouldStop(turns));
+      const user = userEvent.setup();
+      render(<LanguageProvider><Shell me={ME} onSignOut={() => {}} /></LanguageProvider>);
+      await user.click(await screen.findByRole('button', { name: 'Обновить' }));
+      const ask = await screen.findByRole('alertdialog', { name: 'Обновить сейчас?' });
+      expect(ask).toHaveTextContent(text);
+      expect(within(ask).getByRole('button', { name: 'Обновить сейчас' })).toBeInTheDocument();
+    });
+
+    it('goes nowhere when the person cancels', async () => {
+      const calls = server(wouldStop(3));
+      const user = userEvent.setup();
+      render(<Shell me={ME} onSignOut={() => {}} />);
+      await user.click(await screen.findByRole('button', { name: 'Update' }));
+      const ask = await screen.findByRole('alertdialog');
+      expect(ask).toHaveFocus();
+      await user.click(within(ask).getByRole('button', { name: 'Cancel' }));
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+      expect(posts(calls)).toHaveLength(1);
+      expect(screen.getByRole('button', { name: 'Update' })).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Update' })).toHaveFocus();
+    });
+
+    it('asks again with the new number when more turns started meanwhile', async () => {
+      const calls = server(wouldStop(3), wouldStop(5), [202, { id: 'u1' }]);
+      const user = userEvent.setup();
+      render(<Shell me={ME} onSignOut={() => {}} />);
+      await user.click(await screen.findByRole('button', { name: 'Update' }));
+      await user.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Update now' }));
+      expect(await screen.findByText(/^5 agent turns are running/)).toBeInTheDocument();
+      await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Update now' }));
+      expect(posts(calls).at(-1)!.body).toEqual({ version: 'latest', whenIdle: false, confirmTurns: 5 });
+      expect(posts(calls)).toHaveLength(3);
+    });
+
+    it('asks nothing when no turn would stop', async () => {
+      const calls = server([202, { id: 'u1' }]);
+      const user = userEvent.setup();
+      render(<Shell me={ME} onSignOut={() => {}} />);
+      await user.click(await screen.findByRole('button', { name: 'Update' }));
+      expect(await screen.findByRole('progressbar', { name: 'Update progress' })).toBeInTheDocument();
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+      expect(posts(calls)[0]!.body).toEqual({ version: 'latest', whenIdle: false });
+    });
+
+    it('asks before installing from Versions too, and Escape leaves Versions open', async () => {
+      const calls = server(wouldStop(2));
+      const user = userEvent.setup();
+      render(<Shell me={ME} onSignOut={() => {}} />);
+      const versions = await openVersions(user);
+      await user.click(within(versions).getAllByRole('button', { name: 'Install' })[0]!);
+      expect(await screen.findByRole('alertdialog')).toHaveTextContent(/^Update now\?2 agent turns are running/);
+      await user.keyboard('{Escape}');
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+      expect(screen.getByRole('dialog', { name: 'Versions' })).toBeInTheDocument();
+      expect(posts(calls)).toHaveLength(1);
+    });
+
+    it('keeps the question open and says what went wrong when the update cannot start', async () => {
+      server(wouldStop(3), [503, { error: { code: 'unavailable', message: 'The updater is not running. Run install.sh server again to update.', reason: 'updater_missing' } }]);
+      const user = userEvent.setup();
+      render(<Shell me={ME} onSignOut={() => {}} />);
+      await user.click(await screen.findByRole('button', { name: 'Update' }));
+      const ask = await screen.findByRole('alertdialog');
+      await user.click(within(ask).getByRole('button', { name: 'Update now' }));
+      expect(await within(ask).findByRole('alert')).toHaveTextContent(/updater is not running/i);
+      expect(screen.queryByRole('progressbar', { name: 'Update progress' })).not.toBeInTheDocument();
+    });
+
+    it('still shows any other refusal in the banner', async () => {
+      server([409, { error: { code: 'conflict', message: 'An update is running already.', reason: 'update_running' } }]);
+      const user = userEvent.setup();
+      render(<Shell me={ME} onSignOut={() => {}} />);
+      await user.click(await screen.findByRole('button', { name: 'Update' }));
+      expect(await screen.findByRole('alert')).toBeInTheDocument();
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    });
   });
 });
