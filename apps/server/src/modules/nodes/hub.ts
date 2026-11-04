@@ -96,13 +96,48 @@ export class NodeHub {
     this.queue(entry, { kind: 'disconnected', at: new Date(), ...end });
   }
 
+  private replace(previous: Entry): void {
+    this.finish(previous, { actor: 'server', cause: 'replaced', closeCode: 4000, closeReason: 'Replaced by a newer connection.', error: null });
+    previous.socket.close(4000, 'Replaced by a newer connection.');
+  }
+
+  private endOf(entry: Entry, code: number, reason: Buffer): CloseEvent {
+    if (entry.end) return { ...entry.end, closeCode: code, closeReason: String(reason) };
+    const nodeClosed = code === 1000 || code === 1001 || code === 1005;
+    return { actor: nodeClosed ? 'node' : 'network', cause: nodeClosed ? 'node_closed' : 'abnormal_close', closeCode: code, closeReason: String(reason), error: null };
+  }
+
+  private closed(entry: Entry, code: number, reason: Buffer): void {
+    const key = keyOf(entry.id);
+    if (this.sockets.get(key) === entry) {
+      this.sockets.delete(key);
+      this.away.set(key, Date.now());
+    }
+    this.finish(entry, this.endOf(entry, code, reason));
+    entry.chain = entry.chain.then(() => this.opts.onClose(entry.id)).catch(err => this.opts.onError?.(err));
+  }
+
+  private listen(entry: Entry): void {
+    const { id, socket } = entry;
+    const key = keyOf(id);
+    socket.on('pong', () => {
+      entry.missed = 0;
+    });
+    /* Messages run one after another, so job.started is stored before job.done. */
+    socket.on('message', data => {
+      entry.chain = this.onFrame(id, key, entry, String(data), entry.chain);
+    });
+    socket.on('close', (code: number, reason: Buffer) => this.closed(entry, code, reason));
+    socket.on('error', (err: unknown) => {
+      entry.end ??= { actor: 'network', cause: 'socket_error', closeCode: null, closeReason: null, error: err instanceof Error ? err.message : String(err) };
+      this.opts.onError?.(err);
+    });
+  }
+
   attach(id: NodeIdentity, socket: WebSocket): void {
     const key = keyOf(id);
     const previous = this.sockets.get(key);
-    if (previous) {
-      this.finish(previous, { actor: 'server', cause: 'replaced', closeCode: 4000, closeReason: 'Replaced by a newer connection.', error: null });
-      previous.socket.close(4000, 'Replaced by a newer connection.');
-    }
+    if (previous) this.replace(previous);
     const keyHash = id.kind === 'node' ? (id.keyHash ?? null) : null;
     const entry: Entry = {
       id, socket, keyHash, missed: 0, greeted: false, terminals: false, work: false, load: null, skillFiles: false, noRuns: null,
@@ -111,28 +146,7 @@ export class NodeHub {
     this.sockets.set(key, entry);
     this.away.delete(key);
     this.queue(entry, { kind: 'connected', at: new Date() });
-    const report = (err: unknown) => this.opts.onError?.(err);
-    socket.on('pong', () => {
-      entry.missed = 0;
-    });
-    /* Messages run one after another, so job.started is stored before job.done. */
-    socket.on('message', data => {
-      entry.chain = this.onFrame(id, key, entry, String(data), entry.chain);
-    });
-    socket.on('close', (code: number, reason: Buffer) => {
-      if (this.sockets.get(key) === entry) {
-        this.sockets.delete(key);
-        this.away.set(key, Date.now());
-      }
-      this.finish(entry, entry.end
-        ? { ...entry.end, closeCode: code, closeReason: String(reason) }
-        : { actor: code === 1000 || code === 1001 || code === 1005 ? 'node' : 'network', cause: code === 1000 || code === 1001 || code === 1005 ? 'node_closed' : 'abnormal_close', closeCode: code, closeReason: String(reason), error: null });
-      entry.chain = entry.chain.then(() => this.opts.onClose(id)).catch(report);
-    });
-    socket.on('error', (err: unknown) => {
-      entry.end ??= { actor: 'network', cause: 'socket_error', closeCode: null, closeReason: null, error: err instanceof Error ? err.message : String(err) };
-      report(err);
-    });
+    this.listen(entry);
   }
 
   private forwardTerminal(id: NodeIdentity, msg: TerminalMessage): void {

@@ -106,6 +106,25 @@ describe('Machines', () => {
     expect(await within(mac).findByText(/Last 24 hours: 5 disconnects/)).toBeInTheDocument();
   });
 
+  it('explains the node watchdog, sleep and offline durations', async () => {
+    const report = HISTORY.events[1]!.nodeReport!;
+    const event = HISTORY.events[1]!;
+    lists({ 'GET /api/machines/m1/connection-history': [200, {
+      summary: { ...HISTORY.summary, disconnects: 1, averageOfflineMs: 7_200_000, topCause: 'missed_pongs' },
+      events: [
+        { ...event, id: 'hours', cause: 'missed_pongs', offlineMs: 7_200_000, nodeReport: { ...report, cause: 'watchdog_timeout', error: null, attempts: 1, watchdogTimedOut: true, clockJumpMs: 3_600_000, networkChanged: false } },
+        { ...event, id: 'minutes', offlineMs: 120_000, nodeReport: null },
+        { ...event, id: 'moment', offlineMs: 500, nodeReport: null },
+      ],
+    }] });
+    render(<Machines me={ME} />);
+    const mac = await openCard('ivan-mbp');
+    expect(await within(mac).findByText(/average offline 2 h/)).toBeInTheDocument();
+    expect(within(mac).getByText('The machine reported: the connection watchdog timed out; 1 attempt; the machine slept or its clock jumped by 1 h.')).toBeInTheDocument();
+    expect(within(mac).getByText(/offline for 2 min$/)).toBeInTheDocument();
+    expect(within(mac).getByText(/offline for less than a second$/)).toBeInTheDocument();
+  });
+
   it.each([['en', 'Agent programs'], ['ru', 'Программы агентов']])('shows reported program versions on the machine card in %s', async (language, heading) => {
     localStorage.setItem('hh-lang', language);
     lists({ 'GET /api/machines': [200, { machines: [{ ...MACHINES[0]!, programs: [{ id: 'claude', version: '2.1.0', updating: false, failed: false }] }], builtin: null }] });

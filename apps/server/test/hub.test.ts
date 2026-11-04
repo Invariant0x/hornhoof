@@ -48,7 +48,7 @@ describe('the node hub', () => {
     expect(hub.awaySince(other)).toBe(first);
     hub.attach(node, Object.assign(new EventEmitter(), { readyState: 1, close() {}, ping() {} }) as unknown as WebSocket);
     expect(hub.awaySince(node)).toBeNull();
-    hub.stop();
+    void hub.stop();
   });
 
   it('keeps the build a node said in its hello, and says none for a node it does not know', () => {
@@ -59,7 +59,7 @@ describe('the node hub', () => {
     hub.greet(node, true, true, false, null, 'c0ffee'.padEnd(40, '0'));
     expect(hub.buildOf(node)).toBe('c0ffee'.padEnd(40, '0'));
     expect(hub.buildOf({ kind: 'node', nodeId: 'n2' })).toBeNull();
-    hub.stop();
+    void hub.stop();
   });
 
   it('evicts a closed socket immediately, leaves a newer key hash open and drops frames from a closed or replaced socket', async () => {
@@ -175,7 +175,7 @@ describe('live program metadata in the hub', () => {
       await vi.advanceTimersByTimeAsync(1000);
       expect(terminate).toHaveBeenCalledOnce();
     } finally {
-      hub.stop();
+      void hub.stop();
       vi.useRealTimers();
     }
   });

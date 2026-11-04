@@ -14,28 +14,13 @@ function duration(t: Messages, ms: number): string {
 }
 
 function cause(t: Messages, key: string | null): string {
-  switch (key) {
-    case 'missed_pongs': return t.machines.connectionCauses.missed_pongs;
-    case 'node_closed': return t.machines.connectionCauses.node_closed;
-    case 'socket_error': return t.machines.connectionCauses.socket_error;
-    case 'replaced': return t.machines.connectionCauses.replaced;
-    case 'server_close': return t.machines.connectionCauses.server_close;
-    case 'server_stop': return t.machines.connectionCauses.server_stop;
-    case 'abnormal_close': return t.machines.connectionCauses.abnormal_close;
-    default: return key ?? t.machines.unknown;
-  }
+  if (key === null) return t.machines.unknown;
+  if (key in t.machines.connectionCauses) return t.machines.connectionCauses[key as keyof Messages['machines']['connectionCauses']];
+  return key;
 }
 
 function nodeCause(t: Messages, report: NonNullable<MachineConnectionEvent['nodeReport']>): string {
-  switch (report.cause) {
-    case 'watchdog_timeout': return t.machines.connectionNodeCauses.watchdog_timeout;
-    case 'server_close': return t.machines.connectionNodeCauses.server_close;
-    case 'socket_error': return t.machines.connectionNodeCauses.socket_error;
-    case 'dns_error': return t.machines.connectionNodeCauses.dns_error;
-    case 'handshake_timeout': return t.machines.connectionNodeCauses.handshake_timeout;
-    case 'http_rejected': return t.machines.connectionNodeCauses.http_rejected;
-    case 'abnormal_close': return t.machines.connectionNodeCauses.abnormal_close;
-  }
+  return t.machines.connectionNodeCauses[report.cause];
 }
 
 function reportText(t: Messages, report: NonNullable<MachineConnectionEvent['nodeReport']>): string {
@@ -54,9 +39,34 @@ function eventText(t: Messages, event: MachineConnectionEvent): string {
   return [sentence, event.closeCode === null ? null : t.machines.connectionCode(event.closeCode), offline].filter(Boolean).join(', ');
 }
 
-export function MachineConnectionHistory({ machineId }: { machineId: string }) {
+function Summary({ summary }: { summary: MachineConnectionHistory['summary'] }) {
+  const t = useT();
+  if (summary.disconnects === 0) return <p className="connection-summary">{t.machines.connectionQuiet}</p>;
+  return <p className="connection-summary">{t.machines.connectionSummary(
+    t.machines.connectionDisconnects(summary.disconnects),
+    duration(t, summary.averageOfflineMs ?? 0),
+    cause(t, summary.topCause),
+  )}</p>;
+}
+
+function Events({ events }: { events: MachineConnectionEvent[] }) {
   const t = useT();
   const { language } = useLanguage();
+  if (events.length === 0) return <p className="part-note">{t.machines.connectionEmpty}</p>;
+  const dates = new Intl.DateTimeFormat(language, { dateStyle: 'short', timeStyle: 'medium' });
+  return <ul className="connection-events" aria-label={t.machines.connection}>{events.map(event => (
+    <li key={event.id}>
+      <div className="connection-event">
+        <span>{eventText(t, event)}</span>
+        <time dateTime={event.happenedAt}>{dates.format(new Date(event.happenedAt))}</time>
+      </div>
+      {event.nodeReport && <p className="connection-report">{reportText(t, event.nodeReport)}</p>}
+    </li>
+  ))}</ul>;
+}
+
+export function MachineConnectionHistory({ machineId }: { machineId: string }) {
+  const t = useT();
   const [view, setView] = useState<MachineConnectionHistory | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -70,31 +80,11 @@ export function MachineConnectionHistory({ machineId }: { machineId: string }) {
     return () => { live = false; };
   }, [machineId]);
 
-  const dates = new Intl.DateTimeFormat(language, { dateStyle: 'short', timeStyle: 'medium' });
   return (
     <Part title={t.machines.connection}>
       {!view && !failed && <p className="part-note" role="status">{t.machines.connectionLoading}</p>}
       {failed && <p className="machine-note" role="alert">{t.machines.connectionError}</p>}
-      {view && <>
-        {view.summary.disconnects === 0
-          ? <p className="connection-summary">{t.machines.connectionQuiet}</p>
-          : <p className="connection-summary">{t.machines.connectionSummary(
-              t.machines.connectionDisconnects(view.summary.disconnects),
-              duration(t, view.summary.averageOfflineMs ?? 0),
-              cause(t, view.summary.topCause),
-            )}</p>}
-        {view.events.length === 0
-          ? <p className="part-note">{t.machines.connectionEmpty}</p>
-          : <ul className="connection-events" aria-label={t.machines.connection}>{view.events.map(event => (
-              <li key={event.id}>
-                <div className="connection-event">
-                  <span>{eventText(t, event)}</span>
-                  <time dateTime={event.happenedAt}>{dates.format(new Date(event.happenedAt))}</time>
-                </div>
-                {event.nodeReport && <p className="connection-report">{reportText(t, event.nodeReport)}</p>}
-              </li>
-            ))}</ul>}
-      </>}
+      {view && <><Summary summary={view.summary} /><Events events={view.events} /></>}
     </Part>
   );
 }
