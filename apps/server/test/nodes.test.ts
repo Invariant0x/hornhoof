@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import { agents, departments, companies, jobs, nodeCodes, nodes, people, subscriptions, tasks, testParts, testRuns } from '../src/db/schema.js';
 import { hashToken } from '../src/crypto/tokens.js';
+import { receiveNodeMessage } from '../src/modules/nodes/lifecycle.js';
 import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until } from './helpers.js';
 
 const MACHINE = { machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' };
@@ -111,6 +112,80 @@ describe('POST /api/nodes/join', () => {
     const both = await Promise.all([join(app, code), join(app, extra, { machineId: 'other-machine-01', hostname: 'ivan-laptop' })]);
     expect(both.map(r => r.statusCode).sort()).toEqual([200, 410]);
     expect(await db.select().from(nodes).where(eq(nodes.subscriptionId, ids[0]!))).toHaveLength(1);
+  });
+
+  it('closes the old node socket on plan reconnect or re-join and rejects messages from a revoked key so it never receives replacement jobs or tool tokens', async () => {
+    const { app, db, ceo, code, ids } = await connected(['codex']);
+    const url = await listen(app);
+    const subId = ids[0]!;
+    const first = (await join(app, code, { machineId: 'mac-0001-abcd', hostname: 'machine-a' })).json().nodes[0];
+    const oldSocket = await connectNode(url, first.key);
+
+    const reconnected = (await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['codex'] }, ...as(ceo) })).json();
+    await receiveNodeMessage(app.ctx, { kind: 'node', nodeId: first.nodeId, keyHash: hashToken(first.key) }, { type: 'hello', version: '0.9.0', loggedIn: true, running: [] });
+    await receiveNodeMessage(app.ctx, { kind: 'builtin' }, { type: 'hello', version: '0.9.0', loggedIn: true, running: [] });
+    const second = (await join(app, codeOf(reconnected.command), { machineId: 'mac-0002-efgh', hostname: 'machine-b' })).json().nodes[0];
+    expect(second.nodeId).toBe(first.nodeId);
+    expect(second.key).not.toBe(first.key);
+
+    oldSocket.send({ type: 'hello', version: '0.9.0', loggedIn: true, running: [] });
+    await receiveNodeMessage(app.ctx, { kind: 'node', nodeId: first.nodeId, keyHash: hashToken(first.key) }, { type: 'hello', version: '0.9.0', loggedIn: true, running: [] });
+    await receiveNodeMessage(app.ctx, { kind: 'node', nodeId: first.nodeId, keyHash: hashToken(first.key) }, { type: 'status', loggedIn: true, limits: null });
+    expect((await db.select().from(nodes).where(eq(nodes.id, second.nodeId)))[0]).toMatchObject({ status: 'needs_login', keyHash: hashToken(second.key) });
+    expect(await oldSocket.closed).toBe(4001);
+
+    const [company] = await db.select().from(companies);
+    const [dev] = await db.insert(departments).values({ companyId: company!.id, templateKey: 'development', roleCode: 'DEV' }).returning();
+    const [bruno] = await db
+      .insert(agents)
+      .values({ companyId: company!.id, kind: 'worker', name: 'Bruno', roleKey: 'DEV-BE', departmentId: dev!.id, model: '', subscriptionId: subId })
+      .returning();
+    const refused = await app.inject({ method: 'POST', url: `/api/agents/${bruno!.id}/messages`, payload: { text: 'Hello Bruno' }, ...as(ceo) });
+    expect(refused.statusCode).toBe(409);
+    expect(oldSocket.queued()).toBe(0);
+
+    const newSocket = await connectNode(url, second.key);
+    const boot = { startedAt: '2026-11-03T20:00:00.000Z', machineUpAt: '2026-11-01T00:00:00.000Z', container: 'new-container' };
+    newSocket.send({ type: 'hello', version: '0.9.0', loggedIn: true, running: [], boot });
+    await until(async () => (await db.select().from(nodes).where(eq(nodes.id, second.nodeId)))[0]!.status === 'ready');
+    await receiveNodeMessage(
+      app.ctx,
+      { kind: 'node', nodeId: second.nodeId, keyHash: hashToken(first.key) },
+      { type: 'node.stopping', startedAt: boot.startedAt, exit: { kind: 'planned', reason: 'node_update', startedAt: boot.startedAt, at: '2026-11-03T20:59:59.000Z', log: 'stop' } },
+    );
+    expect((await db.select().from(nodes).where(eq(nodes.id, second.nodeId)))[0]!.boot).toEqual(boot);
+    await receiveNodeMessage(
+      app.ctx,
+      { kind: 'node', nodeId: second.nodeId, keyHash: hashToken(second.key) },
+      { type: 'node.stopping', startedAt: boot.startedAt, exit: { kind: 'planned', reason: 'node_update', startedAt: boot.startedAt, at: '2026-11-03T20:59:59.000Z', log: 'stop' } },
+    );
+    expect((await db.select().from(nodes).where(eq(nodes.id, second.nodeId)))[0]!.boot).toMatchObject({ ...boot, stopped: expect.objectContaining({ kind: 'planned' }) });
+    await receiveNodeMessage(app.ctx, { kind: 'node', nodeId: second.nodeId }, { type: 'status', loggedIn: true, limits: null });
+    const sent = await app.inject({ method: 'POST', url: `/api/agents/${bruno!.id}/messages`, payload: { text: 'Hello Bruno' }, ...as(ceo) });
+    expect(sent.statusCode).toBe(202);
+    const Dispatched = await newSocket.next();
+    expect(Dispatched).toMatchObject({ type: 'job.run', toolToken: expect.any(String) });
+    expect(oldSocket.queued()).toBe(0);
+
+    /* Removing the subscription, reconnecting it and joining again also closes the previous socket and revokes its key. */
+    expect((await app.inject({ method: 'DELETE', url: `/api/subscriptions/${subId}`, ...as(ceo) })).statusCode).toBe(204);
+    expect(await newSocket.next()).toEqual({ type: 'remove' });
+    const thirdConnect = (await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['codex'] }, ...as(ceo) })).json();
+    expect(await newSocket.closed).toBe(4001);
+    const thirdJoin = (await join(app, codeOf(thirdConnect.command), { machineId: 'mac-0001-abcd', hostname: 'machine-a' })).json();
+    const third = thirdJoin.nodes[0];
+    await receiveNodeMessage(app.ctx, { kind: 'node', nodeId: third.nodeId, keyHash: hashToken(second.key) }, { type: 'hello', version: '0.9.0', loggedIn: true, running: [] });
+    expect((await db.select().from(nodes).where(eq(nodes.id, third.nodeId)))[0]).toMatchObject({ status: 'needs_login', keyHash: hashToken(third.key) });
+
+    /* Disconnecting the machine and re-joining on the same machine re-keys the same node row and rejects the old key. */
+    const thirdSocket = await connectNode(url, third.key);
+    expect((await app.inject({ method: 'POST', url: `/api/machines/${thirdJoin.machine.id}/disconnect`, ...as(ceo) })).statusCode).toBe(204);
+    expect(await thirdSocket.closed).toBe(4001);
+    const fourthCmd = (await app.inject({ method: 'POST', url: `/api/subscriptions/${subId}/command`, ...as(ceo) })).json();
+    const fourth = (await join(app, codeOf(fourthCmd.command), { machineId: 'mac-0001-abcd', hostname: 'machine-a' })).json().nodes[0];
+    expect(fourth.nodeId).toBe(third.nodeId);
+    await receiveNodeMessage(app.ctx, { kind: 'node', nodeId: fourth.nodeId, keyHash: hashToken(third.key) }, { type: 'hello', version: '0.9.0', loggedIn: true, running: [] });
+    expect((await db.select().from(nodes).where(eq(nodes.id, fourth.nodeId)))[0]).toMatchObject({ status: 'needs_login', keyHash: hashToken(fourth.key) });
   });
 });
 

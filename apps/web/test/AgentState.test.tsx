@@ -2,8 +2,10 @@ import { QUIET_SIGN_MS } from '@hornhoof/protocol/map';
 import { cleanup, render } from '@testing-library/react';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
+import { en } from '../src/i18n/en';
+import { ru } from '../src/i18n/ru';
 import type { FailureKind, ProgramRetry, ProgramView, TurnRetry } from '../src/types';
-import { AgentState, type AgentLive } from '../src/ui/AgentState';
+import { AgentState, programLine, type AgentLive } from '../src/ui/AgentState';
 
 const clock = (hours: number, minutes: number) => new Date(2026, 10, 3, hours, minutes).getTime();
 const NOW = clock(14, 0);
@@ -46,6 +48,25 @@ function shown(lang: 'en' | 'ru', agent: AgentLive): HTMLElement | null {
 }
 
 describe('AgentState', () => {
+  it.each([
+    ['thinking', 'work', 'thinking 5 min', 'думает 5 мин'],
+    ['tool', 'work', 'Bash running 5 min', 'Bash работает 5 мин'],
+    ['asking', 'person', 'asking', 'спрашивает'],
+    ['retrying', 'work', 'retrying', 'повторяет запрос'],
+    ['gone', 'calm', 'no program', 'программы нет'],
+    ['idle', 'calm', 'waiting for input', 'ждет ввода'],
+  ] as const)('keeps the historical %s line without live sign or retry fields', (state, tone, enText, ruText) => {
+    const p = { state, since: NOW - 5 * 60_000, tool: 'Bash' };
+    expect(programLine(en.dept.now, p, NOW)).toEqual({ tone, text: enText });
+    expect(programLine(ru.dept.now, p, NOW)).toEqual({ tone, text: ruText });
+  });
+
+  it('keeps a tool with no recorded name and an age below one minute', () => {
+    const p = { state: 'tool' as const, since: NOW, tool: null };
+    expect(programLine(en.dept.now, p, NOW)).toEqual({ tone: 'work', text: ' running <1 min' });
+    expect(programLine(ru.dept.now, p, NOW)).toEqual({ tone: 'work', text: ' работает <1 мин' });
+  });
+
   it('says the program retry with and without max and next time, in English and Russian', () => {
     freezeClock();
     const nextAt = clock(14, 5);

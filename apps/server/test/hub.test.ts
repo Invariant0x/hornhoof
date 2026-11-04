@@ -61,6 +61,61 @@ describe('the node hub', () => {
     expect(hub.buildOf({ kind: 'node', nodeId: 'n2' })).toBeNull();
     hub.stop();
   });
+
+  it('evicts a closed socket immediately, leaves a newer key hash open and drops frames from a closed or replaced socket', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>(done => (release = done));
+    const handled: string[] = [];
+    const terms: string[] = [];
+    const errors: unknown[] = [];
+    const hub = new NodeHub({
+      pingMs: 60_000,
+      onClose: async () => {},
+      onError: err => errors.push(err),
+      onTerminal: (_id, msg) => {
+        if (msg.termId === 'boom') throw new Error('terminal failed');
+        terms.push(msg.termId);
+      },
+      onMessage: async (_id, msg: NodeMessage) => {
+        if (msg.type === 'hello') await gate;
+        handled.push(msg.type);
+      },
+    });
+    onTestFinished(() => hub.stop());
+    const closedCodes: number[] = [];
+    const oldSocket = Object.assign(new EventEmitter(), { readyState: 1, close(code: number) { closedCodes.push(code); }, ping() {} });
+    const oldId = { kind: 'node' as const, nodeId: 'n1', keyHash: 'old-hash' };
+    hub.attach(oldId, oldSocket as unknown as WebSocket);
+    oldSocket.emit('message', JSON.stringify({ type: 'term.data', termId: 't1', data: 'hi' }));
+    oldSocket.emit('message', JSON.stringify({ type: 'term.data', termId: 'boom', data: 'hi' }));
+    expect(terms).toEqual(['t1']);
+    expect(errors).toHaveLength(1);
+
+    oldSocket.emit('message', JSON.stringify({ type: 'hello', version: '0.9.0', loggedIn: true, running: [] }));
+    oldSocket.emit('message', JSON.stringify({ type: 'status', loggedIn: true, limits: null }));
+    await Promise.resolve();
+    hub.close('n1', 4001, 'wrong-hash');
+    expect(closedCodes).toEqual([]);
+    expect(hub.isOnline(oldId)).toBe(true);
+
+    hub.close('n1', 4001, 'old-hash');
+    expect(closedCodes).toEqual([4001]);
+    expect(hub.isOnline(oldId)).toBe(false);
+    expect(hub.awaySince(oldId)).not.toBeNull();
+    oldSocket.emit('message', JSON.stringify({ type: 'agent.said', ref: 'r1', ok: true }));
+    oldSocket.emit('message', JSON.stringify({ type: 'term.data', termId: 't2', data: 'late' }));
+    release();
+    await new Promise(r => setTimeout(r, 20));
+    expect(handled).toEqual(['hello']);
+    expect(terms).toEqual(['t1']);
+
+    const newSocket = Object.assign(new EventEmitter(), { readyState: 1, close(code: number) { closedCodes.push(code); }, ping() {} });
+    const newId = { kind: 'node' as const, nodeId: 'n1', keyHash: 'new-hash' };
+    hub.attach(newId, newSocket as unknown as WebSocket);
+    hub.close('n1', 4001, 'old-hash');
+    expect(hub.isOnline(newId)).toBe(true);
+    expect(closedCodes).toEqual([4001]);
+  });
 });
 
 

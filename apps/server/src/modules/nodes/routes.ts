@@ -16,7 +16,7 @@ import { pumpTests } from '../testruns/runs.js';
 import { createInstallCommand } from './command.js';
 import { nodeCommandRoutes } from './command-routes.js';
 import { disconnectMachines } from './disconnect.js';
-import { BUILTIN, nodeIdentity } from './hub.js';
+import { BUILTIN, nodeIdentity, type NodeHub } from './hub.js';
 import { builtinMachine, liveNode, otherBuild, settlePlans } from './nodes.js';
 import { machineProgramState, machineProgramRoutes, programsFor } from './programs.js';
 
@@ -48,6 +48,10 @@ async function keyNode(tx: Db, at: { companyId: string; machineId: string; subsc
     .onConflictDoUpdate({ target: [nodes.machineId, nodes.subscriptionId], set: { keyHash, status: 'needs_login' }, setWhere: isNull(nodes.keyHash) })
     .returning({ id: nodes.id });
   return node?.id ?? null;
+}
+
+function closeJoined(hub: NodeHub, made: { nodeId: string }[]): void {
+  for (const node of made) hub.close(node.nodeId, 4001);
 }
 
 export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
@@ -126,6 +130,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
       await settlePlans(tx, made.map(n => n.subscriptionId));
       return { machine: { id: machine!.id }, nodes: made };
     });
+    closeJoined(hub, joined.nodes);
 
     /* One line per node: the installer names its container after the node. */
     if (req.headers.accept?.includes('text/plain')) {
