@@ -19,6 +19,7 @@ Each machine's card adds:
 - its owner, system, processor, memory, load and free disk;
 - its plans;
 - the employees and test parts on it now.
+- when it waits for its work to end before an update, how many turns are left and until when.
 
 On a Mac, Docker runs in a smaller system of its own. So the card shows what Hornhoof can use there, and says when that is less than the Mac has. What a node of an older build does not tell shows as unknown.
 
