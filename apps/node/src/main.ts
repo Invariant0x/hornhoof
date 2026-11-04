@@ -20,7 +20,7 @@ import { nodeIdentity, seal, unseal } from './keys.js';
 import { LOGIN_KEY, LoginTerminal, type LoginSetup } from './login.js';
 import { dataDir, isRemoved, markRemoved, readState, rememberSession, writeState, type NodeState } from './state.js';
 import { SETUP_CHECK_MS, SetupWait } from './setup-wait.js';
-import { partFiles, runTests } from './tests.js';
+import { partFiles, removeOldParts, runTests } from './tests.js';
 import { SIGNED_OUT as AGY_SIGNED_OUT } from './providers/antigravity.js';
 import { SIGNED_OUT as CLAUDE_SIGNED_OUT } from './providers/claude.js';
 import { SIGNED_OUT as CODEX_SIGNED_OUT } from './providers/codex.js';
@@ -134,6 +134,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   const known = new Set(hidden);
   const life = nodeLifecycle({ dir, startedAt: boot.startedAt, secrets: () => [...known], write: writeLog });
   const log = life.log;
+  removeOldParts(dir, log);
   const toolsUrl = `${state.server}/mcp`;
   /* The task's files a part of work takes in and puts back. */
   const files = partFiles(state.server, state.key);
