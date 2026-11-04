@@ -40,7 +40,7 @@ export type AgentState = FailureState & {
   limitUntil: string | null;
   /* Its plan used the share set for tasks until then: task turns wait, people's own messages still go. */
   budgetUntil: string | null;
-  reason: 'no_subscription' | 'waiting_machine' | 'needs_login' | 'node_outdated' | 'machine_offline' | null;
+  reason: 'no_subscription' | 'waiting_machine' | 'needs_login' | 'needs_setup' | 'node_outdated' | 'machine_offline' | null;
   busy: boolean;
   runningJobId: string | null;
   queued: number;
@@ -758,7 +758,7 @@ async function waitsFor(ctx: Ctx, agent: { id: string; productId: string | null;
   if (!all.length) return 'waiting_machine';
   const need = all.some(n => outdated(n.version, REPOSITORY_NODE)) && (await repoFor(ctx, agent)) ? REPOSITORY_NODE : CONVERSATION_NODE;
   const why = (n: NodeRow): AgentState['reason'] =>
-    n.status === 'needs_login' ? 'needs_login' : outdated(n.version, need) ? 'node_outdated' : !ctx.hub.isReady(nodeIdentity(n.id)) ? 'machine_offline' : null;
+    n.status !== 'ready' ? n.status : outdated(n.version, need) ? 'node_outdated' : !ctx.hub.isReady(nodeIdentity(n.id)) ? 'machine_offline' : null;
   const own = all.find(n => n.id === agent.nodeId);
   if (own && why(own) !== null && (await holdsWork(ctx, agent.id))) return why(own);
   if (all.some(n => why(n) === null)) return null;

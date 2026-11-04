@@ -1,4 +1,4 @@
-import type { Failure } from '@hornhoof/protocol';
+import type { Failure, FailureKind } from '@hornhoof/protocol';
 import type { TurnRetry } from '@hornhoof/protocol/map';
 import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
@@ -17,6 +17,14 @@ type Job = typeof jobs.$inferSelect;
 type TaskTurn = Parameters<typeof turnAgain>[1];
 export type LastFailure = { kind: Failure['kind']; text: string; at: number };
 export type FailureState = { retry: TurnRetry | null; failure: LastFailure | null };
+
+/* Failures that hold the turn until the plan can take it again: its limit resets, or its owner signs in or passes the
+   program's first setup on its machine. */
+const HELD = new Set<FailureKind>(['usage_limit', 'auth', 'setup']);
+const OWNER_STEP: Partial<Record<FailureKind, string>> = {
+  auth: 'The turn waits for the plan owner to sign in on its machine.',
+  setup: "The turn waits for the plan owner to pass its program's first setup on its machine, as for a sign-in.",
+};
 
 const passing = (f: Failure | null) => !!f && (['overloaded', 'network', 'cut', 'rate_limited'].includes(f.kind) || (f.kind === 'unknown' && f.retryable));
 
@@ -143,7 +151,7 @@ export async function afterFailure(ctx: Ctx, jobId: string): Promise<boolean> {
 
 async function applyFailure(ctx: Ctx, job: Job, failure: Failure, taskTurn?: TaskTurn): Promise<boolean> {
   if (passing(failure)) await retryPassingFailure(ctx, job, taskTurn);
-  else if (failure.kind === 'usage_limit' || failure.kind === 'auth') await holdFailedTurn(ctx, job, taskTurn);
+  else if (HELD.has(failure.kind)) await holdFailedTurn(ctx, job, taskTurn);
   else if (failure.kind === 'crash') {
     await logTurnFact(ctx, job, `The program crashed: ${failure.text}. Hornhoof checks whether it can go on once.`);
     if (job.taskId) return false;
@@ -175,7 +183,7 @@ async function retryPassingFailure(ctx: Ctx, job: Job, taskTurn?: TaskTurn): Pro
 async function holdFailedTurn(ctx: Ctx, job: Job, taskTurn?: TaskTurn): Promise<void> {
   const [plan] = await ctx.db.select().from(subscriptions).where(eq(subscriptions.id, job.subscriptionId));
   const reset = limitUntil(plan?.limits ?? null);
-  const next = job.failure!.kind === 'auth' ? 'The turn waits for the plan owner to sign in on its machine.' : `The plan holds its turns until its usage limit resets${reset ? ` at ${reset}` : ''}, then this turn goes on.`;
+  const next = OWNER_STEP[job.failure!.kind] ?? `The plan holds its turns until its usage limit resets${reset ? ` at ${reset}` : ''}, then this turn goes on.`;
   await retryTurn(ctx, job, null, next, taskTurn);
 }
 

@@ -9,7 +9,7 @@ import { agents, jobs, subscriptions } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { cancelJob } from '../tasks/wake.js';
 import { BUILTIN, nodeIdentity } from '../nodes/hub.js';
-import { planNodes } from '../nodes/nodes.js';
+import { planNodes, type NodeRow } from '../nodes/nodes.js';
 import { dispatchJob, TEST_PROMPT, TEST_TIMEOUT_MS } from './dispatch.js';
 import { jobView, publicJob } from './views.js';
 
@@ -24,6 +24,12 @@ async function mayRead(db: Db, me: Person, view: NonNullable<Awaited<ReturnType<
 
 const notOwner = () => new ApiError(403, 'forbidden', 'Only the owner can do this.', 'not_owner');
 const offline = () => new ApiError(409, 'conflict', 'The machine for this subscription is offline. Start it and try again.', 'machine_offline');
+/* Why none of a plan's machines that are online can run its test: none is signed in, or its program waits for the first
+   setup its owner passes there. */
+const notReady = (online: NodeRow[]) =>
+  online.some(n => n.status === 'needs_setup')
+    ? new ApiError(409, 'conflict', "Finish the first setup of this subscription's program on its machine first.", 'needs_setup')
+    : new ApiError(409, 'conflict', 'Sign in to this subscription on its machine first.', 'needs_login');
 
 export function jobRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db, hub } = ctx;
@@ -39,7 +45,7 @@ export function jobRoutes(app: FastifyInstance, ctx: Ctx): void {
     const online = sub.kind === 'api_key' ? [] : (await planNodes(db, [sub.id])).filter(n => hub.isOnline(nodeIdentity(n.id)));
     if (sub.kind === 'api_key' ? !hub.isOnline(BUILTIN) : !online.length) throw offline();
     const node = online.find(n => n.status === 'ready');
-    if (sub.kind === 'personal' && !node) throw new ApiError(409, 'conflict', 'Sign in to this subscription on its machine first.', 'needs_login');
+    if (sub.kind === 'personal' && !node) throw notReady(online);
 
     const nodeId = node?.id ?? null;
     const [job] = await db

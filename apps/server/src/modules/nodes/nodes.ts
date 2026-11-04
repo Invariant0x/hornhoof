@@ -1,7 +1,7 @@
 import { and, asc, eq, inArray, isNotNull, isNull, lte, sql } from 'drizzle-orm';
 import { hashToken } from '../../crypto/tokens.js';
 import type { Db } from '../../db/client.js';
-import { machines, nodes, subscriptions } from '../../db/schema.js';
+import { machines, nodes, subscriptions, SUBSCRIPTION_STATUSES, type NodeStatus } from '../../db/schema.js';
 import { nodeIdentity, type NodeHub, type NodeIdentity } from './hub.js';
 
 /* A node that still has its key: its machine is connected and Hornhoof has not taken the node back. */
@@ -50,7 +50,7 @@ const columns = {
   hostname: machines.hostname,
 };
 
-export type NodeRow = { id: string; machineId: string; subscriptionId: string | null; status: 'needs_login' | 'ready'; version: string | null; lastSeenAt: Date | null; hostname: string };
+export type NodeRow = { id: string; machineId: string; subscriptionId: string | null; status: NodeStatus; version: string | null; lastSeenAt: Date | null; hostname: string };
 
 /* The live nodes of these plans, oldest first, with the names of their machines. */
 export async function planNodes(db: Db, subscriptionIds: string[]): Promise<NodeRow[]> {
@@ -83,15 +83,16 @@ export async function machineOf(db: Db, node: NodeIdentity | null): Promise<{ id
   return row ?? null;
 }
 
-/* A plan's state from its nodes: waiting for a machine while none is left, ready while one is signed in, needing a
-   sign-in otherwise. Works inside a transaction too. */
+/* A plan's state from its nodes: waiting for a machine while none is left, ready while one is signed in and set up,
+   waiting for its program's first setup while one is signed in, needing a sign-in otherwise. Works inside a transaction
+   too. */
 export async function settlePlans(db: Db, subscriptionIds: (string | null)[]): Promise<void> {
   const ids = [...new Set(subscriptionIds.filter((id): id is string => id !== null))];
   if (!ids.length) return;
-  const of = (status?: 'ready') =>
+  const of = (status?: 'ready' | 'needs_setup') =>
     sql`exists (select 1 from ${nodes} where ${nodes.subscriptionId} = ${subscriptions.id} and ${nodes.keyHash} is not null${status ? sql` and ${nodes.status} = ${status}` : sql``})`;
   await db
     .update(subscriptions)
-    .set({ status: sql<'ready' | 'needs_login' | 'waiting_machine'>`case when ${of('ready')} then 'ready' when ${of()} then 'needs_login' else 'waiting_machine' end` })
+    .set({ status: sql<(typeof SUBSCRIPTION_STATUSES)[number]>`case when ${of('ready')} then 'ready' when ${of('needs_setup')} then 'needs_setup' when ${of()} then 'needs_login' else 'waiting_machine' end` })
     .where(and(inArray(subscriptions.id, ids), eq(subscriptions.kind, 'personal')));
 }

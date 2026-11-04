@@ -2,7 +2,7 @@ import { lastBytes, type NodeMessage } from '@hornhoof/protocol';
 import { and, eq, inArray, isNull, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { agents, jobs, machines, nodes, planCredentials, subscriptions, tasks } from '../../db/schema.js';
+import { agents, jobs, machines, nodes, planCredentials, subscriptions, tasks, type NodeStatus } from '../../db/schema.js';
 import { said } from '../conversation/live.js';
 import { unheard } from '../conversation/unheard.js';
 import { holdForWords, nodeOfAgent, onAgent, pumpWaiting, refusedLimits, startProgram } from '../conversation/queue.js';
@@ -105,11 +105,19 @@ const exitOf = (exit?: { code: number | null; signal: string | null }) => ({ exi
 
 type Hello = Extract<NodeMessage, { type: 'hello' }>;
 
+/* What a node says of its plan's program: signed out, signed in but waiting for a first setup only the plan's owner may
+   pass, or ready. */
+const statusOf = (msg: { loggedIn: boolean; setupNeeded?: boolean }): NodeStatus => (!msg.loggedIn ? 'needs_login' : msg.setupNeeded ? 'needs_setup' : 'ready');
+
+/* What a failed turn says its node waits for before the next turn could fail the same way: a sign-in, or the first setup. */
+const waitOf = (msg: Extract<NodeMessage, { type: 'job.done' }>): NodeStatus | null =>
+  msg.error === 'not_logged_in' || msg.failure?.kind === 'auth' ? 'needs_login' : msg.failure?.kind === 'setup' ? 'needs_setup' : null;
+
 /* What a node's hello changes in its row: what it runs, whether it is signed in, and what it says of itself when it says it. */
 const helloRow = (msg: Hello, now: Date) => ({
   version: msg.version,
   lastSeenAt: now,
-  status: msg.loggedIn ? ('ready' as const) : ('needs_login' as const),
+  status: statusOf(msg),
   ...(msg.publicKey ? { publicKey: msg.publicKey } : {}),
   ...(msg.account !== undefined ? { account: msg.account } : {}),
   ...(msg.boot ? { boot: msg.boot } : {}),
@@ -168,9 +176,10 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
     }
     case 'status': {
       if (id.kind !== 'node') return;
+      const status = statusOf(msg);
       const [node] = await db
         .update(nodes)
-        .set({ status: msg.loggedIn ? 'ready' : 'needs_login', lastSeenAt: now, ...(msg.account !== undefined ? { account: msg.account } : {}) })
+        .set({ status, lastSeenAt: now, ...(msg.account !== undefined ? { account: msg.account } : {}) })
         .where(and(eq(nodes.id, id.nodeId), liveNode))
         .returning({ plan: nodes.subscriptionId });
       if (!node?.plan) return;
@@ -183,8 +192,8 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
           .where(and(eq(subscriptions.id, node.plan), isNull(subscriptions.removedAt)));
       }
       await settlePlans(db, [node.plan]);
-      /* A signed-in subscription may have turns waiting for it. */
-      if (msg.loggedIn) await pumpWaiting(ctx);
+      /* A ready subscription may have turns waiting for it. */
+      if (status === 'ready') await pumpWaiting(ctx);
       return;
     }
     /* A node of a plan sealed the sign-in it holds for the plan's other nodes. */
@@ -226,9 +235,11 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
     case 'job.done': {
       const finished = await jobEnded(ctx, id, msg, now);
       for (const { companyId } of finished) await publishWorking(ctx, companyId);
-      /* The login ran out on this machine: it waits for one before the next turn could go out and fail too. */
-      if (finished.length && (msg.error === 'not_logged_in' || msg.failure?.kind === 'auth') && id.kind === 'node') {
-        const [node] = await db.update(nodes).set({ status: 'needs_login' }).where(eq(nodes.id, id.nodeId)).returning({ plan: nodes.subscriptionId });
+      /* The login ran out on this machine, or its program asks for its first setup: the machine waits for that before the
+         next turn could go out and fail too. */
+      const waits = waitOf(msg);
+      if (finished.length && waits && id.kind === 'node') {
+        const [node] = await db.update(nodes).set({ status: waits }).where(eq(nodes.id, id.nodeId)).returning({ plan: nodes.subscriptionId });
         await settlePlans(db, [node?.plan ?? null]);
       }
       /* A program that stopped at the plan's usage limit holds the plan's turns, as a plan that says so itself does, and the

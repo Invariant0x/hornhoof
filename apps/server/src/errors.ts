@@ -40,6 +40,7 @@ export type ErrorReason =
   | 'no_node_online'
   | 'signin_unsupported'
   | 'needs_login'
+  | 'needs_setup'
   | 'job_unknown'
   | 'too_many_attempts'
   | 'tool_token_invalid'
