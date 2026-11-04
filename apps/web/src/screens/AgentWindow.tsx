@@ -388,13 +388,14 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard, o
   /* Someone the terminal takes no keys from starts in the line under it. */
   const lineUnderTerminal = known && terminal && hasLine;
   const hadLine = useRef(false);
-  useEffect(() => {
+  /* In the commit the line comes or goes, so that no key falls between. */
+  useLayoutEffect(() => {
     if (lineUnderTerminal) input.current?.focus();
     /* The line was there for a picture: back to where this person types. */
     else if (hadLine.current) focusLine();
     hadLine.current = lineUnderTerminal;
   }, [lineUnderTerminal]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (hasPictures) input.current?.focus();
   }, [hasPictures]);
   /* One card at a time: his newest proposal until it is applied, below his latest line. */

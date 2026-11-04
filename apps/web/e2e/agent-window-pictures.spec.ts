@@ -1,4 +1,4 @@
-import { expect, test, type JSHandle, type Locator, type Page } from '@playwright/test';
+import { expect, test, type JSHandle, type Locator, type Page, type Route } from '@playwright/test';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import type { EventView } from '../src/types';
@@ -62,11 +62,11 @@ async function serve(page: Page, viewer: Viewer, settings: Settings): Promise<Se
     if (url.pathname === '/api/agents/b1/events') return route.fulfill({ json: { events: events.b1!.filter(e => e.seq > after), state } });
     return route.fallback();
   });
-  /* For the whole context: a picture opens large in a tab of its own. */
-  await page.context().route(/\/api\/attachments\/pic\d+$/, route => {
-    const shown = /pic(\d+)$/.exec(route.request().url())!;
-    return route.fulfill({ contentType: 'image/png', body: server.uploads[Number(shown[1]) - 1]!.bytes });
-  });
+  const picture = /\/api\/attachments\/pic(\d+)$/;
+  const show = (route: Route) => route.fulfill({ contentType: 'image/png', body: server.uploads[Number(picture.exec(route.request().url())![1]) - 1]!.bytes });
+  /* A picture opens large in a tab of its own, which the page's routes do not reach. */
+  await page.route(picture, show);
+  await page.context().route(picture, show);
   await page.routeWebSocket('**/api/agents/*/terminal*', ws => {
     ws.onMessage(raw => {
       const frame = JSON.parse(String(raw)) as { type: string; data?: string };
