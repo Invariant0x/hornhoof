@@ -185,9 +185,10 @@ describe('a turn cut off by a node restart', () => {
     const retry = await nextRun(again);
     await c.restart(boot('2026-11-03T00:20:00.000Z', 'c0ffee000002'));
     await until(async () => (await c.jobOf(retry.jobId)).status === 'failed');
-    expect((await c.jobOf(retry.jobId)).interruption).toMatchObject({ cause: 'container', task: c.task.number });
+    const cut = (await c.jobOf(retry.jobId)).interruption!;
+    expect(cut).toMatchObject({ cause: 'container', task: c.task.number });
     /* Nothing more of Bruno's on the task: the two turns, and the task stays his. */
-    await new Promise(r => setTimeout(r, 100));
+    await until(async () => (await c.turnsOf(c.rob.id)).length === 1);
     expect((await c.turnsOf(c.bruno.id)).map(j => j.id)).toEqual([first.jobId, retry.jobId]);
     const [held] = await c.db.select().from(tasks).where(eq(tasks.id, c.task.id));
     expect(held).toMatchObject({ assigneeAgentId: c.bruno.id, executorAgentId: c.bruno.id });
@@ -195,7 +196,7 @@ describe('a turn cut off by a node restart', () => {
     /* Rob hears who, which task, where, both causes and when, from Hornhoof. */
     const [call] = await c.turnsOf(c.rob.id);
     expect(call).toBeDefined();
-    for (const said of ['Bruno', `#${c.task.number}`, 'the built-in node', first.jobId, retry.jobId, '2026-11-03', 'started again', 'created again']) expect(call!.prompt).toContain(said);
+    for (const said of ['Bruno', `#${c.task.number}`, 'the built-in node', first.jobId, retry.jobId, cut.at.slice(0, 10), 'started again', 'created again']) expect(call!.prompt).toContain(said);
     const [shown] = await c.db.select().from(agentEvents).where(and(eq(agentEvents.jobId, call!.id), eq(agentEvents.kind, 'message')));
     expect(shown!.data).not.toHaveProperty('from');
     expect(shown!.personId).toBeNull();
