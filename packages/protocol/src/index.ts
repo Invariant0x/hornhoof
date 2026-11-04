@@ -348,6 +348,12 @@ export const ProgramExit = z.object({ code: z.number().int().nullable(), signal:
 export type ProgramExit = z.infer<typeof ProgramExit>;
 const BrowserError = z.string().min(1).max(300);
 
+/* How the server saw a node's connection end: the node stopped answering its pings, the node closed it, it was cut with no
+   word from either side, the socket failed, a newer connection of the same node took its place, the server stopped, or the
+   node was taken off its machine in Hornhoof. */
+export const CONNECTION_ENDS = ['missed_pongs', 'node_closed', 'network', 'socket_error', 'replaced', 'server_stopped', 'disconnected'] as const;
+export type ConnectionEnd = (typeof CONNECTION_ENDS)[number];
+
 export const NODE_DISCONNECT_CAUSES = [
   'watchdog_timeout',
   'server_close',

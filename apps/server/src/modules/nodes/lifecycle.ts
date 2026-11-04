@@ -2,6 +2,7 @@ import type { NodeMessage } from '@hornhoof/protocol';
 import { and, eq, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { nodes } from '../../db/schema.js';
+import { nodeReported } from './connections.js';
 import type { NodeIdentity } from './hub.js';
 import { handleNodeMessage } from './messages.js';
 import { hasCurrentKey, liveNode } from './nodes.js';
@@ -17,5 +18,6 @@ async function stopping(ctx: Ctx, id: NodeIdentity, msg: Extract<NodeMessage, { 
 
 export async function receiveNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage): Promise<void> {
   if (msg.type === 'node.stopping') return stopping(ctx, id, msg);
+  if (msg.type === 'node.reconnect') return nodeReported(ctx, id, msg);
   return handleNodeMessage(ctx, id, msg);
 }

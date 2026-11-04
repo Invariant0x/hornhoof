@@ -1,5 +1,5 @@
 import type { ExternalWait } from '@hornhoof/protocol/waits';
-import { COMPANY_TEMPLATE_KEYS, CRED_KINDS, MACHINE_KINDS, RUN_KINDS, TEMPLATE_KEYS, type Account, type Boot, type Failure, type Limits, type ModelOption, type NodeExit } from '@hornhoof/protocol';
+import { COMPANY_TEMPLATE_KEYS, CONNECTION_ENDS, CRED_KINDS, MACHINE_KINDS, RUN_KINDS, TEMPLATE_KEYS, type Account, type Boot, type Failure, type Limits, type NodeReconnect, type ModelOption, type NodeExit } from '@hornhoof/protocol';
 import { sql } from 'drizzle-orm';
 import { bigint, bigserial, boolean, check, customType, index, integer, jsonb, pgTable, primaryKey, real, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
 
@@ -207,6 +207,31 @@ export const nodes = pgTable(
     createdAt: createdAt(),
   },
   t => [unique('nodes_machine_plan').on(t.machineId, t.subscriptionId).nullsNotDistinct(), index('nodes_subscription_id').on(t.subscriptionId)],
+);
+
+/* Each connection of a node, from when it came to how it ended; a node that stays connected has an open one. How long the
+   node was away is the time to its next one. A connection's end and cause come together. report: what the node itself said
+   of this drop once it was back; a node from before says nothing. */
+export const nodeConnections = pgTable(
+  'node_connections',
+  {
+    id: id(),
+    companyId: companyId(),
+    machineId: uuid('machine_id').notNull().references(() => machines.id),
+    nodeId: uuid('node_id').notNull().references(() => nodes.id, { onDelete: 'cascade' }),
+    connectedAt: timestamp('connected_at', { withTimezone: true }).notNull(),
+    disconnectedAt: timestamp('disconnected_at', { withTimezone: true }),
+    cause: text('cause', { enum: CONNECTION_ENDS }),
+    closeCode: integer('close_code'),
+    closeReason: text('close_reason'),
+    error: text('error'),
+    report: jsonb('report').$type<NodeReconnect>(),
+  },
+  t => [
+    index('node_connections_machine').on(t.machineId, t.connectedAt),
+    index('node_connections_node').on(t.nodeId, t.connectedAt),
+    check('node_connections_end_has_cause', sql`(${t.disconnectedAt} IS NULL) = (${t.cause} IS NULL)`),
+  ],
 );
 
 /* A plan's sign-in sealed to one of its nodes. Hornhoof cannot open it: only that node's private key does. */

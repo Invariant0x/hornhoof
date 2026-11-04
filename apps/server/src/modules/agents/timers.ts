@@ -4,6 +4,7 @@ import type { Ctx } from '../../app.js';
 import { agents, jobs, tasks } from '../../db/schema.js';
 import { loggable } from '../../errors.js';
 import { agentState, insertTurn, liveSubscription, onAgent, pump, pumpWaiting, STOPPED_ON_PURPOSE } from '../conversation/queue.js';
+import { dropOldConnections, serverStarted } from '../nodes/connections.js';
 import { dropOldFiles } from '../tasks/attachments.js';
 import { reconcile } from '../tasks/reconcile.js';
 import { checkSilentTurns, SILENT_TURN_MS } from '../tasks/silent.js';
@@ -111,7 +112,7 @@ async function sendWaiting(ctx: Ctx): Promise<void> {
 }
 
 /* What Hornhoof does every minute: due rounds, turns that task moves kept and nobody queued, turns left waiting though
-   their agent is free, files of turns closed a month ago, test run times and Codex plans to move. */
+   their agent is free, files of turns closed a month ago, the old history of node connections, test run times and Codex plans to move. */
 export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) => (err: unknown) => void): Promise<void> {
   await checkExternalWaits(ctx, now).catch(failed('ending external task waits failed'));
   await checkWaitHealth(ctx, now).catch(failed('checking task waits failed'));
@@ -121,6 +122,7 @@ export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) =>
     reconcile(ctx, now).catch(failed('recovering stalled task turns failed')),
     sendWaiting(ctx).catch(failed('sending waiting turns failed')),
     dropOldFiles(ctx.db, now).catch(failed('removing the files of old turns failed')),
+    dropOldConnections(ctx.db, now).catch(failed('removing the old history of node connections failed')),
     checkTestTimes(ctx).catch(failed('checking test run times failed')),
     moveLeases(ctx, now).catch(failed('moving Codex plans to another machine failed')),
   ]);
@@ -130,6 +132,7 @@ export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) =>
 export function startTimers(app: FastifyInstance, ctx: Ctx): void {
   const failed = (what: string) => (err: unknown) => app.log.error({ error: loggable(err) }, what);
   app.addHook('onReady', async () => {
+    await serverStarted(ctx.db).catch(failed('ending the node connections of the last run failed'));
     await checkExternalWaits(ctx).catch(failed('ending external task waits failed'));
     await checkWaitHealth(ctx).catch(failed('checking task waits failed'));
     void wakeLeftBehind(ctx).catch(failed('queueing left-behind turns failed'));

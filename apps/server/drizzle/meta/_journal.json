@@ -400,6 +400,13 @@
       "when": 1793820129763,
       "tag": "0057_message_pictures",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1793825455293,
+      "tag": "0058_node_connections",
+      "breakpoints": true
     }
   ]
 }
