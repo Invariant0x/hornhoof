@@ -1,5 +1,5 @@
 import type { Locator, Page } from '@playwright/test';
-import type { Decisions, Improvement, Me, Org, TaskDetail, TaskLine, TurnView } from '../src/types';
+import type { AgentCardView, Decisions, Improvement, Me, Org, TaskDetail, TaskLine, TurnView } from '../src/types';
 
 /* A company with one department and a running turn of enough tasks to scroll, answered in the page as the server would. */
 export const ME: Me = {
@@ -59,6 +59,12 @@ const ROUTES: Record<string, unknown> = {
   '/api/turns': { turns: [TURN] },
   '/api/tasks?status=all': { tasks: TASKS },
   '/api/improvements': { improvements: [IMPROVEMENT] },
+  '/api/agents/orchestrator': {
+    id: 'a1', kind: 'orchestrator', name: 'Orchestrator', role: null, department: null, product: null, team: null, teams: [],
+    model: 'claude-opus-5-5', effort: null, subscription: null, machine: null, state: 'needs_subscription', currentTask: null,
+    program: null, alarm: null, retry: null, failure: null, skills: [], parts: [], raw: '', instructions: { length: 0, max: 200_000 },
+    runsOn: [], changes: [], interrupted: [], canEdit: true, timer: null,
+  } satisfies AgentCardView,
   '/api/agents/orchestrator/events?after=0': { events: [], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 } },
 };
 
