@@ -312,6 +312,7 @@ export const ru: Messages = {
       limit: (at, duration) => `До ${at}, еще ${duration}. До тех пор ее агенты ждут.`,
       limitUnknown: 'Ее агенты ждут, пока лимит обновится.',
       login: (host, owner) => `На ${host}. Войти может только владелец: ${owner}.`,
+      loginOffline: host => `Нужен вход на ${host}, а машина не в сети.`,
       waiting: owner => `Владелец (${owner}) еще не выполнил команду установки.`,
     },
   },
