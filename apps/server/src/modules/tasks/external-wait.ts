@@ -1,5 +1,6 @@
+import { WaitOnInput } from '@hornhoof/protocol/waits';
 import { z } from 'zod';
-import { and, eq, isNotNull, lte, notInArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, lte, notInArray, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentEvents, jobs, pendingWakes, tasks, type ExternalWait } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
@@ -8,6 +9,9 @@ import { wakeAll } from './wake.js';
 import { enqueueTurn, insertOrDeliverTurn, onAgent, pump, type TurnMessage } from '../conversation/queue.js';
 import { withInputLock } from '../conversation/decision-context.js';
 import { messageNotDelivered } from '../conversation/live.js';
+import { recordWaitNotice, requestedWaitNotice } from './wait-notices.js';
+import { checkWaitHealth } from './wait-monitor.js';
+import { checkedWaitTarget } from './wait-target.js';
 import { taskByRef } from './views.js';
 import type { Actor } from './engine.js';
 import { taskWakeOf, waitingTaskTurn } from './wake-state.js';
@@ -16,8 +20,9 @@ export const EXTERNAL_WAIT_MS = 2 * 3_600_000;
 export const TaskReference = z.union([z.number().int().positive(), z.string().max(40)]).describe('The task number, like 12 or "#12", or its id.');
 export const MESSAGE_TASK_HINT = ' With task, the message concerns that task and ends its external wait. Without task, it leaves waits unchanged.';
 export const WaitInput = z.object({
-  reason: z.string().trim().min(1).max(600).regex(/^[^\r\n\u2028\u2029]+$/).describe('One line naming the external event you wait for.'),
+  reason: z.string().trim().min(1).max(600).regex(/^[^\r\n\u2028\u2029]+$/).describe('One line naming what you need from the employee or external event.'),
   until: z.iso.datetime({ offset: true }).describe('An ISO date and time in the future, at most two hours from now.'),
+  on: WaitOnInput.optional().describe('Who you wait for: an employee, or time, the CEO, a machine or another external event. Omitted means an external event.'),
 });
 
 function waitOf(input: z.infer<typeof WaitInput>, now: Date): ExternalWait {
@@ -26,12 +31,15 @@ function waitOf(input: z.infer<typeof WaitInput>, now: Date): ExternalWait {
   const until = new Date(parsed.data.until);
   const delay = until.getTime() - now.getTime();
   if (delay <= 0 || delay > EXTERNAL_WAIT_MS) throw refuse(400, 'task_invalid', 'The wait must end in the future, at most two hours from now.');
-  return { reason: parsed.data.reason, since: now.toISOString(), until: until.toISOString() };
+  return { reason: parsed.data.reason, since: now.toISOString(), until: until.toISOString(), ...(parsed.data.on ? { on: parsed.data.on } : {}) };
 }
 
 /* A holder can end its turn while an external system works; the task keeps its workflow status. */
-export function waitFor(ctx: Ctx, agentId: string, taskId: string, input: z.infer<typeof WaitInput>, now?: Date): Promise<Moved> {
-  return onAgent(ctx, agentId, () => placeWait(ctx, agentId, taskId, input, now ?? new Date()));
+export async function waitFor(ctx: Ctx, agentId: string, taskId: string, input: z.infer<typeof WaitInput>, now?: Date): Promise<Moved> {
+  const at = now ?? new Date();
+  const moved = await onAgent(ctx, agentId, () => placeWait(ctx, agentId, taskId, input, at));
+  await checkWaitHealth(ctx, at);
+  return moved;
 }
 
 async function placeWait(ctx: Ctx, agentId: string, taskId: string, input: z.infer<typeof WaitInput>, now: Date): Promise<Moved> {
@@ -40,14 +48,17 @@ async function placeWait(ctx: Ctx, agentId: string, taskId: string, input: z.inf
   await waitingTaskTurn(ctx.db, agentId, taskId);
   const [message] = await ctx.db.select({ id: jobs.id }).from(jobs).innerJoin(agentEvents, eq(agentEvents.jobId, jobs.id)).where(and(
     eq(jobs.agentId, agentId), eq(jobs.taskId, taskId), eq(jobs.status, 'queued'), eq(agentEvents.kind, 'message'),
-    sql`${agentEvents.data}->'taskWake'->>'why' in ('message', 'comment')`,
+    sql`${agentEvents.data}->'taskWake'->>'why' in ('message', 'comment', 'unblocked')`,
   )).limit(1);
   const [comment] = await ctx.db.select({ id: pendingWakes.id }).from(pendingWakes).where(and(
-    eq(pendingWakes.agentId, agentId), eq(pendingWakes.taskId, taskId), eq(pendingWakes.why, 'comment'),
+    eq(pendingWakes.agentId, agentId), eq(pendingWakes.taskId, taskId), inArray(pendingWakes.why, ['comment', 'unblocked']),
   )).limit(1);
   if (message || comment) throw refuse(409, 'task_invalid', `A message on #${task.number} waits for you. End this turn and read it before waiting.`);
-  const externalWait = waitOf(input, now);
-  const row = await move(ctx, task, { externalWait, silent: 0 }, { kind: 'updated', actor: { agentId }, text: `Waiting for "${externalWait.reason}" until ${externalWait.until}.`, data: { externalWait } });
+  const wait = waitOf(input, now);
+  const on = await checkedWaitTarget(ctx, task.companyId, agentId, wait.on);
+  const externalWait = { ...wait, ...(on ? { on } : {}) };
+  const notice = await requestedWaitNotice(ctx, { ...task, externalWait, version: task.version + 1 }, agentId);
+  const row = await move(ctx, task, { externalWait, silent: 0 }, { kind: 'updated', actor: { agentId }, text: `Waiting for "${externalWait.reason}" until ${externalWait.until}.`, data: { externalWait } }, async tx => { if (notice) await recordWaitNotice(tx, notice); });
   return { task: row, wakes: [] };
 }
 
@@ -115,11 +126,11 @@ function taskTurn(task: Task, message: TurnMessage): { message: TurnMessage; tas
   return { taskId: task.id, message: { ...message, task: { id: task.id, number: task.number }, taskWake: { ...taskWakeOf(task, { why: 'comment' }), why: 'message' } } };
 }
 
-async function expireWait(ctx: Ctx, task: Task): Promise<boolean> {
+export async function expireWait(ctx: Ctx, task: Task, unavailable?: string): Promise<boolean> {
   if (!task.externalWait || !task.assigneeAgentId) return false;
-  const wakes: Wake[] = [{ agentId: task.assigneeAgentId, taskId: task.id, why: 'wait_ended', text: task.externalWait.reason, version: task.version + 1 }];
+  const wakes: Wake[] = [{ agentId: task.assigneeAgentId, taskId: task.id, why: 'wait_ended', text: task.externalWait.reason, ...(unavailable ? { note: unavailable } : {}), version: task.version + 1 }];
   try {
-    await move(ctx, task, { externalWait: null, silent: 0 }, { kind: 'updated', actor: { agentId: task.assigneeAgentId }, text: `The wait for "${task.externalWait.reason}" ended.`, data: { externalWait: null, reason: task.externalWait.reason } }, undefined, wakes);
+    await move(ctx, task, { externalWait: null, silent: 0 }, { kind: 'updated', actor: { agentId: task.assigneeAgentId }, text: unavailable ?? `The wait for "${task.externalWait.reason}" ended.`, data: { externalWait: null, reason: task.externalWait.reason }, ...(unavailable ? { automatic: 'wait_unavailable' as const } : {}) }, undefined, wakes);
   } catch (error) {
     if (error instanceof ApiError && error.reason === 'task_changed') return false;
     throw error;

@@ -1,3 +1,4 @@
+import { taskWaitText } from '../ui/task-wait';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type RefObject, type UIEvent } from 'react';
 import { useLanguage, useT } from '../i18n';
 import type { Department, DepartmentTree, TreeAgent } from '../types';
@@ -178,7 +179,7 @@ function LaneState({ agent, department, now }: { agent: TreeAgent; department: D
 }
 
 function ExternalWaitState({ wait }: { wait: NonNullable<DepartmentTree['lines'][number]['externalWait']> }) {
-  const text = useT().dept.tree.externalWaiting(wait.reason, treeClock(wait.until));
+  const text = taskWaitText(useT(), wait, treeClock(wait.until));
   return <span className="ast calm" title={text}>{text}</span>;
 }
 

@@ -1,0 +1,2 @@
+ALTER TABLE "pending_wakes" ADD COLUMN "cause" jsonb;--> statement-breakpoint
+CREATE INDEX "agent_events_report_window" ON "agent_events" USING btree ("agent_id","created_at") WHERE data->>'report' is not null or data->>'from' = 'agent';

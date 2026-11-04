@@ -6,8 +6,8 @@ import { addressed } from './prompt.js';
 
 export const UNHEARD_NOTE = 'Words sent into the running turn were not taken by the program. They go with its next turn.';
 
-/* Sent copies and Hornhoof's visible facts are no words into a turn. */
-export const incomingWords = sql`coalesce(${agentEvents.data}->'_message'->>'direction', 'in') <> 'out' and coalesce(${agentEvents.data}->>'turnFact', 'false') <> 'true'`;
+/* Sent copies, visible facts and coalesced lines with a separate input receipt are no words into a turn. */
+export const incomingWords = sql`coalesce(${agentEvents.data}->'_message'->>'direction', 'in') <> 'out' and coalesce(${agentEvents.data}->>'turnFact', 'false') <> 'true' and coalesce(${agentEvents.data}->>'inputShadow', 'false') <> 'true'`;
 export type TurnWords = { personId: string | null; data: unknown };
 type Standing = Pick<typeof jobs.$inferSelect, 'id' | 'agentId' | 'createdBy' | 'answersCeo' | 'decisionInputPending'>;
 export type RepeatedTurn = { createdBy: string | null; answersCeo: boolean; repeated: TurnWords };
