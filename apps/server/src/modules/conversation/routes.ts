@@ -8,6 +8,7 @@ import { agentFor } from '../agents/find.js';
 import { answerDirectly } from '../tasks/engine.js';
 import { wakeAll } from '../tasks/wake.js';
 import { listEvents } from '../events/store.js';
+import { isOperations } from '../operations/required.js';
 import { FIRST_TURN, FIRST_TURN_TEMPLATE, turnPrompt } from './prompt.js';
 import { agentState, insertTurn, onAgent, pump } from './queue.js';
 import { cancelJob } from '../tasks/wake.js';
@@ -68,9 +69,10 @@ export function conversationRoutes(app: FastifyInstance, ctx: Ctx): void {
       const [open] = await db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agent.id), eq(jobs.kind, 'conversation'), inArray(jobs.status, ['queued', 'running']))).limit(1);
       if (open) return false;
       const [company] = await db.select({ template: companies.template }).from(companies).where(eq(companies.id, me.companyId)).limit(1);
-      const [dept] = await db.select({ id: departments.id }).from(departments).where(eq(departments.companyId, me.companyId)).limit(1);
-      /* A company built by hand gets no greeting (its build already enqueued a turn); one from a template is greeted so he offers to staff it. */
-      if (dept && !company?.template) return false;
+      const depts = await db.select({ templateKey: departments.templateKey, parentId: departments.parentId }).from(departments).where(eq(departments.companyId, me.companyId));
+      /* A company built by hand gets no greeting (its build already enqueued a turn); one from a template is greeted so he
+         offers to staff it. The Operations every company starts with is no building. */
+      if (depts.some(d => !isOperations(d)) && !company?.template) return false;
       await insertTurn(ctx, { companyId: me.companyId, agentId: agent.id, prompt: company?.template ? FIRST_TURN_TEMPLATE : FIRST_TURN, createdBy: me.id });
       return true;
     });

@@ -3,11 +3,13 @@ import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import type { Db } from '../src/db/client.js';
 import { agentChanges, agentEvents, agents, companies, departments, jobs, people, subscriptions } from '../src/db/schema.js';
+import { FIRST_TURN } from '../src/modules/conversation/prompt.js';
 import { checkOperations, ensureOperations } from '../src/modules/operations/ensure.js';
 import { REQUIRED_OPERATIONS_ROLES } from '../src/modules/operations/required.js';
-import { appOn, createTestDb, SETUP, statements, testApp } from './helpers.js';
+import { appOn, as, connectNode, createTestDb, listen, sessionFrom, SETUP, statements, testApp, until } from './helpers.js';
 
 const FOUR = ['OPS-BUGS', 'OPS-HEAD', 'OPS-PROGRAM', 'OPS-WATCH'];
+const NODE_KEY = 'k'.repeat(40);
 
 async function opsDepartments(db: Db) {
   return db.select().from(departments).where(and(eq(departments.templateKey, 'operations'), isNull(departments.parentId)));
@@ -59,6 +61,33 @@ describe('a new company', () => {
     const top = await db.select().from(departments);
     expect(top.map(d => [d.templateKey, d.name, d.roleCode])).toEqual([['operations', null, 'OPS']]);
     expect(await roles(db)).toEqual(FOUR);
+  });
+
+  it('with no template still gets the orchestrator\'s greeting and his interview, with only the Operations it starts with', async () => {
+    const { app, db } = await testApp({ NODE_KEY });
+    const url = await listen(app);
+    const ceo = sessionFrom(await app.inject({ method: 'POST', url: '/api/setup', payload: SETUP }));
+    expect(await opsDepartments(db)).toHaveLength(1);
+    const node = await connectNode(url, NODE_KEY);
+    node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [] });
+    await until(async () => (await app.inject({ url: '/api/agents/orchestrator/events', ...as(ceo) })).json().state.ready);
+    const start = await app.inject({ method: 'POST', url: '/api/agents/orchestrator/start', ...as(ceo) });
+    expect(start.json()).toEqual({ started: true });
+    let run = await node.next();
+    while (run.type !== 'job.run') run = await node.next();
+    expect(run.prompt).toContain(FIRST_TURN);
+  });
+
+  it('built by hand on top of Operations gets no greeting: its build already told him', async () => {
+    const { app, db } = await testApp({ NODE_KEY });
+    const url = await listen(app);
+    const ceo = sessionFrom(await app.inject({ method: 'POST', url: '/api/setup', payload: SETUP }));
+    const node = await connectNode(url, NODE_KEY);
+    node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [] });
+    await until(async () => (await app.inject({ url: '/api/agents/orchestrator/events', ...as(ceo) })).json().state.ready);
+    await db.insert(departments).values({ companyId: (await db.select().from(companies))[0]!.id, templateKey: 'support', roleCode: 'SUP', position: 5 });
+    const start = await app.inject({ method: 'POST', url: '/api/agents/orchestrator/start', ...as(ceo) });
+    expect(start.json()).toEqual({ started: false });
   });
 
   it('hires each role as an ordinary hire: its kind, its skills, its timer, its template hashes', async () => {

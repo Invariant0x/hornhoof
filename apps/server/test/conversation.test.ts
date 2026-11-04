@@ -94,7 +94,7 @@ describe('the orchestrator\'s conversation', () => {
   it('does not start over a company that already has departments', async () => {
     const { app, db, ceo, builtin } = await live();
     const [acme] = await db.select().from(companies);
-    await db.insert(departments).values({ companyId: acme!.id, name: null, templateKey: 'operations', roleCode: 'OPS' });
+    await db.insert(departments).values({ companyId: acme!.id, name: null, templateKey: 'support', roleCode: 'SUP' });
     expect((await start(app, ceo)).json()).toEqual({ started: false });
     expect(await quiet(builtin)).toBe(0);
   });

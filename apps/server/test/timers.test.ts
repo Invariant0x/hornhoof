@@ -6,7 +6,7 @@ import { minuteRound, timerTick } from '../src/modules/agents/timers.js';
 import { agentState, insertTurn, onAgent } from '../src/modules/conversation/queue.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
-import { as, connectNode, listen, setUpCompany, testApp, until } from './helpers.js';
+import { as, connectNode, listen, sessionFrom, SETUP, testApp, until } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
 
@@ -14,21 +14,15 @@ const NODE_KEY = 'k'.repeat(40);
 async function company() {
   const { app, db } = await testApp({ NODE_KEY });
   const url = await listen(app);
-  const ceo = await setUpCompany(app);
+  const ceo = sessionFrom(await app.inject({ method: 'POST', url: '/api/setup', payload: SETUP }));
   const builtin = await connectNode(url, NODE_KEY);
   onTestFinished(() => builtin.close());
   builtin.send({ type: 'hello', version: '0.3.0', loggedIn: true, running: [] });
-  await app.inject({ method: 'POST', url: '/api/departments/build', payload: { items: [{ template: 'operations' }] }, ...as(ceo) });
-  const [ops] = await db.select().from(departments).where(isNull(departments.parentId));
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
-  const role = app.ctx.templates.roles.get('OPS-HEAD')!;
-  const hired = await app.inject({
-    method: 'POST',
-    url: `/api/departments/${ops!.id}/staff`,
-    payload: { people: [{ role: 'OPS-HEAD', name: 'Wanda', model: '', subscription: orchestrator!.subscriptionId, skills: role.skills.filter(s => s.on).map(s => s.id) }] },
-    ...as(ceo),
-  });
-  const wandaId = hired.json().hired[0] as string;
+  /* Wanda heads the Operations it starts with; the others rest, so each test's rounds are its own. */
+  const [wanda] = await db.update(agents).set({ name: 'Wanda' }).where(eq(agents.kind, 'head')).returning();
+  await db.update(agents).set({ switchedOffAt: new Date() }).where(eq(agents.kind, 'worker'));
+  const wandaId = wanda!.id;
   await until(async () => (await agentState(app.ctx, wandaId)).ready);
   return { app, db, ceo, wandaId, builtin, orchestrator: orchestrator! };
 }
