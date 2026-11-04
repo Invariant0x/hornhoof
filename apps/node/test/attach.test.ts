@@ -19,6 +19,11 @@ async function hub(status = 201) {
     req.on('end', () => {
       got.push({ url: req.url, auth: req.headers.authorization, type: req.headers['content-type'], bytes: Buffer.concat(parts) });
       if (req.method === 'GET') {
+        if (req.url === '/api/attachments/file?task=message&file=4f0c8b7e-1111-4222-8333-444455556666') {
+          res.writeHead(200, { 'content-type': 'image/png', 'x-file-name': encodeURIComponent('4f0c8b7e-screen.png') });
+          res.end('a picture');
+          return;
+        }
         const found = req.url === '/api/attachments/file?task=12&file=build+log.txt';
         res.writeHead(found ? 200 : 404, found ? { 'content-type': 'application/octet-stream', 'x-file-name': encodeURIComponent('../build log.txt') } : { 'content-type': 'application/json' });
         res.end(found ? 'all green' : JSON.stringify({ error: { message: 'Task 12 has no file other.txt.' } }));
@@ -91,6 +96,17 @@ describe('hh-fetch', () => {
     expect(r.out.trim()).toBe('build log.txt');
     expect(readFileSync(join(dir, 'build log.txt'), 'utf8')).toBe('all green');
     expect(got[0]).toMatchObject({ url: '/api/attachments/file?task=12&file=build+log.txt', auth: 'Bearer tool-token-0123456789' });
+  });
+
+  it('downloads a picture that came with a message, as the message says', async () => {
+    const { url, got } = await hub();
+    const dir = mkdtempSync(join(tmpdir(), 'hh-fetch-'));
+    const r = await fetchFile(['message', '4f0c8b7e-1111-4222-8333-444455556666'], { HH_ATTACH_URL: url, HH_ATTACH_PASS: 'tool-token-0123456789' }, dir);
+    expect(r.code).toBe(0);
+    expect(got[0]).toMatchObject({ url: '/api/attachments/file?task=message&file=4f0c8b7e-1111-4222-8333-444455556666', auth: 'Bearer tool-token-0123456789' });
+    expect(r.out.trim()).toBe('4f0c8b7e-screen.png');
+    expect(readFileSync(join(dir, '4f0c8b7e-screen.png'), 'utf8')).toBe('a picture');
+    expect((await fetchFile(['message'], { HH_ATTACH_URL: url, HH_ATTACH_PASS: 't' })).err).toContain('hh-fetch message ID');
   });
 
   it('saves it where it is told, into a folder or as a file', async () => {
