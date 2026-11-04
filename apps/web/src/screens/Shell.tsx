@@ -23,12 +23,17 @@ import { Settings } from './Settings';
 import { Subscriptions } from './Subscriptions';
 import { Tasks } from './Tasks';
 import { Versions } from './Versions';
+import { takeEscape } from '../ui/escape';
 
 type Tab = 'map' | 'tasks' | 'people' | 'subscriptions' | 'machines' | 'improvements';
 /* The agent window is on the right, settings and tasks on the left. agentId is 'orchestrator' or an employee's id. */
 type Panel = { kind: 'window' | 'card'; agentId: string; request?: number } | { kind: 'task'; taskId: string } | null;
 const TABS: Tab[] = ['map', 'tasks', 'people', 'subscriptions', 'machines'];
 const THEMES: Theme[] = ['light', 'dark'];
+
+function visiblePanel(panel: Panel, minimized: boolean): Panel {
+  return panel?.kind === 'window' && minimized ? null : panel;
+}
 
 function mapPanels(panel: Panel) {
   return { windowOpen: panel?.kind === 'window', leftPanelOpen: panel !== null && panel.kind !== 'window' };
@@ -207,6 +212,8 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   const company = me.person.scopeKind === 'company';
   /* The orchestrator's window opens over the map, for people who see the whole company. */
   const [panel, setPanel] = useState<Panel>(welcome && company ? { kind: 'window', agentId: 'orchestrator' } : null);
+  const [minimized, setMinimized] = useState(false);
+  const shownPanel = visiblePanel(panel, minimized);
   const [deptId, setDeptId] = useState<string | null>(null);
   const [staff, setStaff] = useState<StaffAsk | null>(null);
   const { org, failure: orgFailure } = useOrg(panel !== null || deptId !== null);
@@ -234,17 +241,17 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   useEffect(() => {
     if (!menu) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
+      if (!takeEscape(e)) return;
       setMenu(false);
       accountButton.current?.focus();
     };
     const onDown = (e: PointerEvent) => {
       if (!account.current?.contains(e.target as Node)) setMenu(false);
     };
-    document.addEventListener('keydown', onKey);
+    document.addEventListener('keydown', onKey, true);
     document.addEventListener('pointerdown', onDown);
     return () => {
-      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('keydown', onKey, true);
       document.removeEventListener('pointerdown', onDown);
     };
   }, [menu]);
@@ -296,12 +303,12 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
         </div>
       </header>
       {company && <UpdateBanner updates={updates} onDetails={() => setAccountDialog('versions')} />}
-      <main className={`body${tab === 'map' ? '' : ' page'}${panel ? ` with-${panel.kind}` : ''}`}>
+      <main className={`body${tab === 'map' ? '' : ' page'}${shownPanel ? ` with-${shownPanel.kind}` : ''}`}>
         <AgentWindowError panel={panel} org={org} failure={orgFailure} />
         {tab === 'map' && (
           <MapScreen
             me={me}
-            {...mapPanels(panel)}
+            {...mapPanels(shownPanel)}
             onOpenOrchestrator={() => openAgent('orchestrator')}
             inside={!!dept}
             onOpenDepartment={setDeptId}
@@ -315,7 +322,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
             deputies={org?.people ?? []}
             selected={agentPanel?.agentId ?? null}
             selectedTask={panel?.kind === 'task' ? panel.taskId : null}
-            panel={panel?.kind ?? null}
+            panel={shownPanel?.kind ?? null}
             serverNow={org?.serverNow}
             onBack={() => setDeptId(null)}
             onOpen={openAgent}
@@ -351,6 +358,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
           org={org}
           agentId={agentPanel.agentId}
           openRequest={agentPanel.request}
+          onMinimizedChange={setMinimized}
           requests={decisions.requests}
           onRequestsChanged={decisions.load}
           staff={agentPanel.agentId === 'orchestrator' ? staff : null}

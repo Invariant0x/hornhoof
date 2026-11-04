@@ -1,6 +1,7 @@
 import { useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useT } from '../i18n';
 import { useVersionState, versionText } from '../ui/VersionMark';
+import { takeEscape } from '../ui/escape';
 
 function keepFocus(event: ReactKeyboardEvent<HTMLDivElement>): void {
   if (event.key !== 'Tab') return;
@@ -22,9 +23,12 @@ export function About({ onClose }: { onClose: () => void }) {
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
     box.current?.focus();
-    const onKey = (event: KeyboardEvent) => event.key === 'Escape' && onClose();
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
+    const onKey = (event: KeyboardEvent) => {
+      if (!takeEscape(event)) return;
+      onClose();
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
   }, [onClose]);
 
   return (

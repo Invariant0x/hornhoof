@@ -13,6 +13,7 @@ type Props = Waiting & {
   toolbar: ReactNode;
   children: ReactNode;
   openRequest?: number;
+  onMinimizedChange?(minimized: boolean): void;
   onClose(): void;
 };
 
@@ -55,18 +56,24 @@ function useWindowFocus(minimized: boolean, box: RefObject<HTMLElement | null>, 
   }, [minimized, box, restore]);
 }
 
+function useMinimized(openRequest: number | undefined, onChange?: (minimized: boolean) => void) {
+  const [minimized, setMinimized] = useState(false);
+  useEffect(() => { setMinimized(false); }, [openRequest]);
+  useEffect(() => { onChange?.(minimized); }, [minimized, onChange]);
+  return { minimized, setMinimized };
+}
+
 /* Hiding keeps the live terminal, drafts, task and previous size until the window is restored. */
-export function AgentWindowLayout({ currentTask, title, terminal, box, toolbar, children, openRequest, onClose, ...waiting }: Props) {
+export function AgentWindowLayout({ currentTask, title, terminal, box, toolbar, children, openRequest, onMinimizedChange, onClose, ...waiting }: Props) {
   const t = useT();
   const current: CurrentTask = { id: currentTask?.id ?? null, why: currentTask === undefined ? t.common.loading : t.window.noTaskWhy };
   const [taskId, setTaskId] = useState<string | null>(null);
-  const [minimized, setMinimized] = useState(false);
+  const { minimized, setMinimized } = useMinimized(openRequest, onMinimizedChange);
   const [full, setFull] = useState(false);
   const taskButton = useRef<HTMLButtonElement>(null);
   const restoreButton = useRef<HTMLButtonElement>(null);
   const taskPanelId = useId();
   useEffect(() => { setTaskId(null); }, [current.id]);
-  useEffect(() => { setMinimized(false); }, [openRequest]);
   useWindowFocus(minimized, box, restoreButton);
   const closeTask = () => { setTaskId(null); taskButton.current?.focus(); };
   const classes = windowClasses(terminal, taskId !== null, full);

@@ -74,7 +74,7 @@ function failedText(t: Messages, data: unknown, employee: boolean): string {
 export type StaffAsk = { id: string; name: string; at: number };
 
 /* agentId: 'orchestrator' or an employee's id. staff: the CEO's "+ Hire", for the orchestrator's window only. */
-type Props = { me: Me; org: Org; agentId: string; staff?: StaffAsk | null; onClose(): void; onCard?(): void; openRequest?: number; requests?: WaitingRequest[]; onRequestsChanged?(): void };
+type Props = { me: Me; org: Org; agentId: string; staff?: StaffAsk | null; onClose(): void; onCard?(): void; openRequest?: number; onMinimizedChange?(minimized: boolean): void; requests?: WaitingRequest[]; onRequestsChanged?(): void };
 
 type CardRight = { id: string; canAnswer: boolean };
 
@@ -136,7 +136,7 @@ function stopOnEscape(e: globalThis.KeyboardEvent, box: HTMLElement | null, stop
 
 /* An agent's window: its live terminal when its node shows one, or its conversation as a log with a line to write to it;
    and the orchestrator's cards. */
-export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard, openRequest, requests = [], onRequestsChanged = () => {} }: Props) {
+export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard, openRequest, onMinimizedChange, requests = [], onRequestsChanged = () => {} }: Props) {
   const t = useT();
   const { language } = useLanguage();
   const orchestrator = agentId === 'orchestrator';
@@ -311,8 +311,8 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard, o
   useEffect(() => {
     if (!state?.busy) return;
     const onKey = (e: globalThis.KeyboardEvent) => stopOnEscape(e, box.current, stop);
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
   }, [state?.busy, stop]);
 
   /* Until its state and card come, the window cannot tell a terminal from a conversation, nor whether the agent can work. */
@@ -528,7 +528,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard, o
   }
 
   return (
-    <AgentWindowLayout currentTask={card?.currentTask} box={box} terminal={terminal} title={title} onClose={onClose} openRequest={openRequest} requests={requests} onRequestsChanged={onRequestsChanged} toolbar={<>
+    <AgentWindowLayout currentTask={card?.currentTask} box={box} terminal={terminal} title={title} onClose={onClose} openRequest={openRequest} onMinimizedChange={onMinimizedChange} requests={requests} onRequestsChanged={onRequestsChanged} toolbar={<>
         {terminal && state?.busy && (
           <button className="btn small ghost" type="button" onClick={stop}>
             {t.window.stop}

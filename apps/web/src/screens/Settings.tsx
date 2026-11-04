@@ -5,6 +5,7 @@ import { errorText, useT } from '../i18n';
 import type { Me } from '../types';
 import { CopyButton } from '../ui/CopyButton';
 import { blocks, LinkName, type NameCheck, type NameState } from '../ui/LinkName';
+import { takeEscape } from '../ui/escape';
 
 type Link = { name: string; url: string };
 type Loaded = { link: Link | null; domain: string };
@@ -24,9 +25,12 @@ export function Settings({ me, onClose }: { me: Me; onClose: () => void }) {
 
   useEffect(() => {
     box.current?.focus();
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
+    const onKey = (e: KeyboardEvent) => {
+      if (!takeEscape(e)) return;
+      onClose();
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
   }, [onClose]);
 
   useEffect(() => {
