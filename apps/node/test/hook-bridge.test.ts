@@ -1,19 +1,20 @@
 import { spawn } from 'node:child_process';
 import { request } from 'node:http';
-import { existsSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Bridge } from '../src/terminal/bridge.js';
-import { fromAgent } from '../src/terminal/peer.js';
+import { fromAgent, socketOf, type Peer } from '../src/terminal/peer.js';
+import { procFixture } from './terminal-proc-fixture.js';
 
 type Rejection = { key: string | null; event: string; reason: string };
 const close: (() => void)[] = [];
 afterEach(() => { close.splice(0).forEach(fn => fn()); vi.restoreAllMocks(); });
 const post = (url: string, id = 'one-call', pid = String(process.pid)) => fetch(url + '/stop', { method: 'POST', headers: { 'x-hh-call': id, 'x-hh-pid': pid }, body: '{"last_assistant_message":"Done."}' });
 
-async function opened(onHook: ConstructorParameters<typeof Bridge>[1], owns: ConstructorParameters<typeof Bridge>[2] = null) {
+async function opened(onHook: ConstructorParameters<typeof Bridge>[1], owns: ConstructorParameters<typeof Bridge>[2] = null, fixture?: ReturnType<typeof procFixture>) {
   const rejected: Rejection[] = [];
-  const bridge = new Bridge('http://127.0.0.1:9', onHook, owns, { rejected: (key, event, reason) => rejected.push({ key, event, reason }) });
+  const bridge = new Bridge('http://127.0.0.1:9', onHook, owns, { proc: fixture?.proc, rejected: (key, event, reason) => rejected.push({ key, event, reason }) });
   await bridge.start();close.push(() => bridge.stop());
+  fixture?.listen(bridge, () => process.pid, () => process.pid);
   return { bridge, url: bridge.agent('agent-1').hookUrl, rejected };
 }
 
@@ -26,9 +27,10 @@ describe('hook delivery through the bridge', () => {
     expect(heard).toEqual([{ event: 'invocation', body }]);
   });
 
-  it.skipIf(!existsSync('/proc/net/tcp'))('accepts a legacy caller without a pid and denies malformed pid hints', async () => {
+  it('accepts a legacy caller without a pid and denies malformed pid hints', async () => {
     let calls = 0;
-    const b = await opened(() => { calls++; }, fromAgent(async () => [process.pid]));
+    const fixture = procFixture('agent-1');
+    const b = await opened(() => { calls++; }, fromAgent(async () => [process.pid], fixture.proc), fixture);
     expect((await fetch(b.url + '/stop', { method: 'POST', body: '{}' })).status).toBe(200);
     for (const pid of ['zero', '0', '-1', '1.5', '99999999999']) expect((await post(b.url, 'invalid-pid', pid)).status).toBe(403);
     expect(calls).toBe(1);
@@ -71,23 +73,36 @@ describe('hook delivery through the bridge', () => {
     expect(await (await second).text()).toBe('accepted');
   });
 
-  it.skipIf(!existsSync('/proc/net/tcp'))('finishes a verified stop after its caller closes the connection during the pane check', async () => {
+  it('finishes a verified stop after its caller closes the connection during the pane check', async () => {
     let checking!: () => void;const checked = new Promise<void>(r => checking = r);
     let finish!: () => void;const pause = new Promise<void>(r => finish = r);
     const heard: unknown[] = [];
-    const owns = fromAgent(async () => { checking();await pause;return [process.pid]; });
-    const b = await opened((_key, event, body) => void heard.push({ event, body }), owns);
+    const fixture = procFixture('agent-1');
+    const owns = fromAgent(async () => { checking();await pause;return [process.pid]; }, fixture.proc);
+    const b = await opened((_key, event, body) => void heard.push({ event, body }), owns, fixture);
+    const proof: Peer = { port: 0, bridgePort: 0, pid: process.pid };
+    const closed = new Promise<void>(resolve => b.bridge['server']!.once('connection', socket => {
+      proof.port = socket.remotePort!;proof.bridgePort = socket.localPort!;
+      socket.once('close', () => resolve());
+    }));
     const call = request(b.url + '/stop', { method: 'POST', headers: { 'x-hh-pid': String(process.pid), 'x-hh-call': 'closed-call' } });
     call.on('error', () => {});call.end('{"last_assistant_message":"Done."}');
-    await checked;call.destroy();finish();
+    await checked;
+    proof.acceptedInode = await socketOf(fixture.proc, proof);
+    expect(proof.acceptedInode).not.toBeNull();
+    call.destroy();await closed;
+    expect(await socketOf(fixture.proc, proof)).toBeNull();
+    expect(await fromAgent(async () => [process.pid], fixture.proc)('agent-1', proof)).toBe(false);
+    finish();
     await vi.waitFor(() => expect(heard).toEqual([{ event: 'stop', body: { last_assistant_message: 'Done.' } }]));
   });
 
-  it.skipIf(!existsSync('/proc/net/tcp'))('rejects a real caller claiming the pid of another agent, including retries', async () => {
+  it('rejects a real caller claiming the pid of another agent, including retries', async () => {
     const victim = spawn('node', ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
     close.push(() => void victim.kill('SIGKILL'));
     const heard: string[] = [];
-    const b = await opened(key => void heard.push(key), fromAgent(async key => key === 'agent-1' ? [victim.pid!] : [process.pid]));
+    const fixture = procFixture('agent-1');
+    const b = await opened(key => void heard.push(key), fromAgent(async key => key === 'agent-1' ? [victim.pid!] : [process.pid], fixture.proc), fixture);
     expect((await post(b.bridge.agent('agent-2').hookUrl)).status).toBe(200);
     for (let i = 0; i < 3; i++) expect((await post(b.url, 'borrowed-call', String(victim.pid))).status).toBe(403);
     expect(heard).toEqual(['agent-2']);
