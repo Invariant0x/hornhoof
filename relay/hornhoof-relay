@@ -2,9 +2,9 @@
 # Operator commands for the Hornhoof relay. Run as root on the droplet.
 #   hornhoof-relay list                 every binding, when it was made and last seen
 #   hornhoof-relay add <name>           a binding made by us (no rate limit); prints {name, key} once, keep it secret
-#   hornhoof-relay ban <name> [reason]  block a name now: 410 at once, its tunnel dropped within 90 s, nobody can take it
+#   hornhoof-relay ban <name> [reason]  answer 410 at once; its tunnel can never log in or register again
 #   hornhoof-relay unban <name>
-#   hornhoof-relay release <name>       free a name (its tunnel is dropped within 90 s)
+#   hornhoof-relay release <name>       free a name once its old tunnel is gone
 set -eu
 relay() { runuser -u hornhoof-relay -- /usr/bin/python3 /usr/local/lib/hornhoof-relay/relay.py admin "$@"; }
 relay "$@"

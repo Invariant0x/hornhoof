@@ -18,8 +18,9 @@ import threading
 import time
 
 
-ROOT = Path(__file__).resolve().parents[2]
-BIN = Path(__file__).resolve().parent / '.bin'
+# Not resolve(): a mutator worker symlinks this file, and its own copy of relay.py must be the one that runs.
+ROOT = Path(__file__).absolute().parents[2]
+BIN = Path(__file__).absolute().parent / '.bin'
 
 
 @functools.lru_cache(maxsize=1)

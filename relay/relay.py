@@ -2,15 +2,16 @@
 """Hornhoof relay: hands out <name>.hornhoof.org links and checks every tunnel that frps lets in.
 
 Public API (Caddy sends https://hornhoof.org/api/* here):
-  GET    /api/v1/names/{name}      -> 200 {name, free, reason?: taken|reserved|invalid}
-  POST   /api/v1/bindings          {name?} -> 201 {name, url, key, tunnel}
+  GET    /api/v1/names/{name}      -> 200 {name, free, reason?: taken|reserved|invalid}, 503 if unknown
+  POST   /api/v1/bindings          {name?} -> 201 {name, url, key, tunnel}, 409 taken, 503 if unknown
   DELETE /api/v1/bindings/{name}   Authorization: Bearer <key> -> 204 (404 once the name belongs to a new owner)
   GET    /api/v1/links/{name}/route Authorization: Bearer <key> -> 200 {state, client, since, generation, ...}
   POST   /api/v1/links/{name}/sync  Authorization: Bearer <key> {client, generation, state, copy, epoch} -> 200 {sync}
+  POST   /api/v1/links/{name}/key   Authorization: Bearer <key> -> 200 {key} (R6.1)
   POST   /api/v1/links/{name}/visitor-key Authorization: Bearer <key> -> 200 {visitorKey} (R6.2)
   GET    /api/v1/health            -> 200 {ok, frps, relayStarted} while frps takes logins, else 503
 frps plugin (local only): POST /frp/handler?op=Login|NewProxy|Ping
-Admin (as the service user): relay.py admin list|show|ban|unban|release|banned-caddy ...
+Admin (as the service user): relay.py admin list|add|ban|unban|release|banned-caddy ...
 
 Standard library only. State: SQLite in /var/lib/hornhoof-relay/relay.db. Keys are stored as SHA-256 hashes.
 """
@@ -62,6 +63,7 @@ EVICTION_BOUND_S = 30
 PLUGIN_CALL_S = 1.0
 
 LABEL = re.compile(r'^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$')
+CONTENT_LENGTH = re.compile(r'[0-9]{1,18}')
 RANDOM_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789'
 # A network client's id: <link>-<machine8>-<kind> (R1.3, R1.4, R5.1).
 CLIENT = re.compile(r'^(?P<link>[a-z0-9-]{1,63})-(?P<m8>[0-9a-f]{8})-(?P<kind>link|peer|visit)$')
@@ -133,6 +135,12 @@ def init_db() -> None:
             key_hash TEXT NOT NULL,
             created_at INTEGER NOT NULL
         )''', ())
+    write('''CREATE TABLE IF NOT EXISTS ping_keys (
+            name TEXT NOT NULL,
+            key_hash TEXT NOT NULL,
+            link_hash TEXT NOT NULL,
+            PRIMARY KEY (name, key_hash)
+        )''', ())
 
 
 _reserved = {'mtime': None, 'names': frozenset()}
@@ -155,9 +163,19 @@ def reserved_names() -> frozenset:
     return _reserved['names']
 
 
+def declared_body_length(headers) -> int | None:
+    """The bytes a request's one Content-Length promises, 0 with none, None when it cannot be trusted."""
+    values = headers.get_all('Content-Length', [])
+    if not values:
+        return 0
+    if len(values) > 1 or not CONTENT_LENGTH.fullmatch(values[0]):
+        return None
+    return int(values[0])
+
+
 def check_name(name: str):
     """None when the name can be bound, else 'invalid', 'reserved' or 'taken'. A banned name counts as reserved."""
-    if not LABEL.match(name) or name[2:4] == '--':
+    if not LABEL.fullmatch(name) or name[2:4] == '--':
         return 'invalid'
     if name in reserved_names():
         return 'reserved'
@@ -373,6 +391,19 @@ def frps_route(name: str) -> tuple[str, str | None, str | None]:
     return 'absent', None, None
 
 
+def name_live(name: str) -> bool:
+    """R1.5: a freed name waits for its old route; an unknown dashboard raises."""
+    return frps_route(name)[0] == 'online'
+
+
+def requested_name_reason(name: str) -> str | None:
+    """Check local restrictions first, then whether frps still serves a freed name."""
+    reason = check_name(name)
+    if reason is None and name_live(name):
+        return 'taken'
+    return reason
+
+
 def check_route_holder(name: str, row, status: str, client_id: str | None, proxy_type: str | None) -> None:
     """An online route must match the relay's own record, else the answer is unknown, never empty (R2.3).
 
@@ -489,26 +520,30 @@ def sync_holder(name: str, body: dict) -> bool:
             and route['generation'] == body['generation'])
 
 
-def store_sync(name: str, body: dict) -> bool:
-    """Commit only while the checked registration still holds; never overwrite a newer epoch."""
+def store_sync(name: str, body: dict, link_hash: str) -> bool:
+    """Commit only while the checked registration still holds and the authorizing binding still
+    exists, so that a post in flight across a release cannot reach the name's next owner; never
+    overwrite a newer epoch."""
     write('INSERT INTO sync (name, state, copy, epoch, generation, at) '
           'SELECT name, ?, ?, ?, generation, ? FROM routes '
           "WHERE name = ? AND generation = ? AND client = ? AND state = 'held' "
+          'AND EXISTS (SELECT 1 FROM bindings WHERE name = ? AND key_hash = ?) '
           'ON CONFLICT(name) DO UPDATE SET state = excluded.state, copy = excluded.copy, '
           'epoch = excluded.epoch, generation = excluded.generation, at = excluded.at '
           'WHERE excluded.epoch > sync.epoch',
-          (body['state'], body['copy'], body['epoch'], now(), name, body['generation'], body['client']))
+          (body['state'], body['copy'], body['epoch'], now(), name, body['generation'], body['client'],
+           name, link_hash))
     return db().execute('SELECT changes()').fetchone()[0] == 1
 
 
-def set_sync(name: str, body: dict) -> tuple[str | None, dict | None]:
+def set_sync(name: str, body: dict, link_hash: str) -> tuple[str | None, dict | None]:
     """Serialize the frps holder check and committed write against the name's registrations."""
     with route_lock(name):
         if not sync_holder(name, body):
             return 'not_holder', None
         if body['epoch'] <= sync_of(name)['epoch']:
             return 'stale_epoch', None
-        if not store_sync(name, body):
+        if not store_sync(name, body, link_hash):
             return 'not_holder', None
         return None, sync_of(name)
 
@@ -839,6 +874,34 @@ def tunnel_info(name: str, key: str) -> dict:
     }
 
 
+def creation_wait(ip: str, t: int) -> int:
+    """0 while this address and everyone together have room in their hourly limits, else seconds to wait."""
+    write('DELETE FROM creations WHERE at < ?', (t - 3600,))
+    conn = db()
+    mine, oldest = conn.execute('SELECT COUNT(*), MIN(at) FROM creations WHERE ip = ?', (ip,)).fetchone()
+    if mine >= BIND_PER_IP_HOUR:
+        return max(oldest + 3600 - t, 1)
+    total = conn.execute('SELECT COUNT(*) FROM creations').fetchone()[0]
+    return 600 if total >= BIND_ALL_HOUR else 0
+
+
+def random_free_name() -> str:
+    """A fresh name has no old route, so only check_name can refuse it (R1.5)."""
+    while True:
+        name = ''.join(secrets.choice(RANDOM_ALPHABET) for _ in range(24))
+        if check_name(name) is None:
+            return name
+
+
+def store_new_binding(name: str, ip: str, t: int) -> str:
+    """Store the binding and count its creation; the key leaves here once and only its hash stays."""
+    key = secrets.token_urlsafe(32)
+    write('INSERT INTO bindings (name, key_hash, created_at, created_ip) VALUES (?, ?, ?, ?)',
+          (name, key_hash(key), t, ip))
+    write('INSERT INTO creations (ip, at) VALUES (?, ?)', (ip, t))
+    return key
+
+
 @contextlib.contextmanager
 def transaction():
     """One BEGIN IMMEDIATE..COMMIT block; every statement, including BEGIN and
@@ -860,8 +923,13 @@ def transaction():
         raise
 
 
+# What belongs to one binding's lifetime and goes with it. The routes row stays: the generation only grows across
+# owners, so an old holder's generation can never match a new owner's.
+BINDING_LIFETIME_TABLES = ('visitor_keys', 'ping_keys', 'sync')
+
+
 def release_binding(name: str, expected_hash: str | None = None) -> bool:
-    """Drop a binding and its visitor credentials in one transaction (C2).
+    """Drop a binding and everything of its lifetime in one transaction (C2).
 
     Separate deletes would let a concurrent visitor-key issuer plant a credential for the
     name between them. The HTTP DELETE passes the hash of the key that authorized it: the
@@ -873,15 +941,17 @@ def release_binding(name: str, expected_hash: str | None = None) -> bool:
     """
     with transaction():
         if expected_hash is None:
-            write('DELETE FROM visitor_keys WHERE name = ?', (name,))
+            for table in BINDING_LIFETIME_TABLES:
+                write(f'DELETE FROM {table} WHERE name = ?', (name,))
             write('DELETE FROM bindings WHERE name = ?', (name,))
         else:
             # The guarded release requires the authorizing hash and a currently
             # unblocked binding: a DELETE in flight when the operator bans the
             # name must not erase the ban (C2 concurrent ban).
-            write('DELETE FROM visitor_keys WHERE name = ? AND EXISTS '
-                  '(SELECT 1 FROM bindings WHERE name = ? AND key_hash = ? AND banned_at IS NULL)',
-                  (name, name, expected_hash))
+            for table in BINDING_LIFETIME_TABLES:
+                write(f'DELETE FROM {table} WHERE name = ? AND EXISTS '
+                      '(SELECT 1 FROM bindings WHERE name = ? AND key_hash = ? AND banned_at IS NULL)',
+                      (name, name, expected_hash))
             write('DELETE FROM bindings WHERE name = ? AND key_hash = ? AND banned_at IS NULL',
                   (name, expected_hash))
         return db().execute('SELECT changes()').fetchone()[0] == 1
@@ -909,6 +979,47 @@ def store_visitor_key(name: str, visitor_hash: str, link_hash: str) -> bool:
           'created_at = excluded.created_at',
           (name, visitor_hash, now(), name, link_hash))
     return db().execute('SELECT changes()').fetchone()[0] == 1
+
+
+def store_link_key(name: str, new_hash: str, link_hash: str) -> bool:
+    """R6.1: rotate only the authorizing, unblocked binding, preserving live Ping.
+
+    The hash comparison prevents an in-flight request from changing a later owner's
+    key or overwriting another rotation. Retired hashes authorize only Ping from
+    frps's already authenticated sessions, tied to this binding's current hash.
+    A release deletes them.
+    """
+    with transaction():
+        write('UPDATE bindings SET key_hash = ? WHERE name = ? AND key_hash = ? AND banned_at IS NULL',
+              (new_hash, name, link_hash))
+        if db().execute('SELECT changes()').fetchone()[0] != 1:
+            return False
+        retain_ping_keys(name, new_hash, link_hash)
+        return True
+
+
+def retain_ping_keys(name: str, new_hash: str, link_hash: str) -> None:
+    """Keep prior login hashes usable only for heartbeats in this binding lifetime.
+
+    Both statements run in the key rotation's transaction. No retired credential
+    becomes a public API credential or authorizes a Login or registration.
+    """
+    write('UPDATE ping_keys SET link_hash = ? WHERE name = ? AND link_hash = ?',
+          (new_hash, name, link_hash))
+    write('INSERT INTO ping_keys (name, key_hash, link_hash) VALUES (?, ?, ?) '
+          'ON CONFLICT(name, key_hash) DO UPDATE SET link_hash = excluded.link_hash',
+          (name, link_hash, new_hash))
+
+
+def ping_key_matches(name: str | None, key: object) -> bool:
+    """A retired link hash serves only this still-bound, unblocked lifetime's Ping."""
+    if not isinstance(key, str) or not key:
+        return False
+    row = db().execute('SELECT 1 FROM ping_keys AS p JOIN bindings AS b '
+                       'ON b.name = p.name AND b.key_hash = p.link_hash '
+                       'WHERE p.name = ? AND p.key_hash = ? AND b.banned_at IS NULL',
+                       (name, key_hash(key))).fetchone()
+    return row is not None
 
 
 def visitor_hash_matches(name: str, visitor: str) -> bool:
@@ -992,10 +1103,18 @@ def call_metas(op: str, content: dict) -> dict:
     return metas if isinstance(metas, dict) else {}
 
 
+def authenticate_call(op: str, metas: dict) -> tuple[str | None, str | None, str | None]:
+    """Live sessions retain their heartbeat after rotation; all other ops need the current key."""
+    name, kind, reason = authenticate(metas)
+    if op == 'Ping' and reason is not None and ping_key_matches(name, metas.get('key')):
+        return name, 'link', None
+    return name, kind, reason
+
+
 def plugin_decide(op: str, content: dict) -> dict:
     """Authenticate the session, then the op's own rule; a refusal rejects, else the call passes."""
     metas = call_metas(op, content)
-    name, kind, reason = authenticate(metas)
+    name, kind, reason = authenticate_call(op, metas)
     if reason is None and op == 'Login':
         reason = login_reason(name, kind, content, metas)
     elif reason is None and op == 'NewProxy':
@@ -1016,10 +1135,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def handle_one_request(self):
         """A busy store answers 503 instead of dropping the connection mid-request."""
+        self.body_read = False
         try:
             super().handle_one_request()
         except WriteBusy:
             self.error(503, 'busy', 'The relay store is busy, try again.', {'Retry-After': '1'})
+        except FrpsUnknown:
+            self.error(503, 'unknown', 'The relay cannot tell whether the route is live.')
 
     def client_ip(self) -> str:
         fwd = self.headers.get('X-Forwarded-For')
@@ -1028,6 +1150,9 @@ class Handler(BaseHTTPRequestHandler):
     def send_json(self, status: int, body=None, headers=None) -> None:
         data = b'' if body is None else json.dumps(body).encode()
         self.send_response(status)
+        if self.request_bytes_may_remain():
+            # send_header also ends the connection after this answer. The header tells Caddy not to reuse it.
+            self.send_header('Connection', 'close')
         if body is not None:
             self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(data)))
@@ -1037,14 +1162,29 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def request_bytes_may_remain(self) -> bool:
+        """Whether this request can leave bytes on the connection, which would be read as the next request.
+
+        Such a request would come from 127.0.0.1 with no X-Forwarded-For, which handle_plugin and client_ip
+        trust, so no route may leave one. Transfer-Encoding is never decoded, so its body is never read.
+        """
+        if 'Transfer-Encoding' in self.headers:
+            return True
+        return not self.body_read and declared_body_length(self.headers) != 0
+
     def error(self, status: int, code: str, message: str, headers=None) -> None:
         self.send_json(status, {'error': code, 'message': message}, headers)
 
     def read_json(self):
-        length = int(self.headers.get('Content-Length') or 0)
-        if length > MAX_BODY:
-            raise ValueError('body too large')
+        """The request's JSON, or ValueError for a body it cannot read in full, so that no route acts on one."""
+        length = declared_body_length(self.headers)
+        if 'Transfer-Encoding' in self.headers or length is None or length > MAX_BODY:
+            raise ValueError('the body cannot be read')
         raw = self.rfile.read(length) if length else b''
+        if len(raw) < length:
+            # read() returns short without raising when the client hangs up mid-body.
+            raise ValueError('the body was cut short')
+        self.body_read = True
         return json.loads(raw) if raw.strip() else {}
 
     def path_parts(self):
@@ -1075,7 +1215,7 @@ class Handler(BaseHTTPRequestHandler):
         wait = name_checks.allow(self.client_ip())
         if wait:
             return self.error(429, 'rate_limited', 'Too many checks, try again later.', {'Retry-After': str(wait)})
-        reason = check_name(name)
+        reason = requested_name_reason(name)
         body = {'name': name, 'free': reason is None}
         if reason:
             body['reason'] = reason
@@ -1115,7 +1255,7 @@ class Handler(BaseHTTPRequestHandler):
         if not valid_sync_body(body):
             return self.error(400, 'invalid', 'Send client, generation, state, copy and epoch.')
         try:
-            conflict, record = set_sync(name, body)
+            conflict, record = set_sync(name, body, key_hash(self.bearer_key()))
         except FrpsUnknown:
             return self.error(503, 'unknown', 'The relay cannot tell whether the route is live.')
         if conflict is not None:
@@ -1126,13 +1266,27 @@ class Handler(BaseHTTPRequestHandler):
         """R6.2: hand out a new visitor key, replacing the one before; the relay stores its
         hash only and never logs or answers with the key again. The store lands only while
         the binding with the authorizing key still exists (C2)."""
+        self.key_answer(name, visitor=True)
+
+    def key_answer(self, name: str, visitor: bool = False) -> None:
+        """R6.1, R6.2: hand out a fresh key once, committing its hash before answering.
+
+        The body is read before the commit: the answer is the only copy of the key, and closing a
+        connection over unread bytes can reset it, which would leave the company with no key.
+        """
         if not self.authorize_link(name):
             return
-        visitor_key = secrets.token_urlsafe(32)
-        if not store_visitor_key(name, key_hash(visitor_key), key_hash(self.bearer_key())):
+        try:
+            self.read_json()
+        except ValueError:
+            return self.error(400, 'invalid', 'The body is not valid JSON.')
+        field, store, label = (('visitorKey', store_visitor_key, 'visitor') if visitor
+                               else ('key', store_link_key, 'link'))
+        new_key = secrets.token_urlsafe(32)
+        if not store(name, key_hash(new_key), key_hash(self.bearer_key())):
             return self.error(404, 'not_found', f'There is no binding {name}.')
-        log_line(f'new visitor key for {name}')
-        self.send_json(200, {'visitorKey': visitor_key})
+        log_line(f'new {label} key for {name}')
+        self.send_json(200, {field: new_key})
 
     def health_answer(self):
         """GET /api/v1/health (R4.1): 200 only while frps takes logins, else 503; never a guess."""
@@ -1174,52 +1328,63 @@ class Handler(BaseHTTPRequestHandler):
             return self.handle_plugin()
         if parts == ['api', 'v1', 'bindings']:
             return self.create_binding()
-        if parts[:3] == ['api', 'v1', 'links'] and len(parts) == 5 and parts[4] == 'sync':
-            return self.sync_answer(parts[3].lower())
-        if parts[:3] == ['api', 'v1', 'links'] and len(parts) == 5 and parts[4] == 'visitor-key':
-            return self.visitor_key_answer(parts[3].lower())
+        if parts[:3] == ['api', 'v1', 'links'] and len(parts) == 5:
+            answer = {'sync': self.sync_answer, 'visitor-key': self.visitor_key_answer,
+                      'key': self.key_answer}.get(parts[4])
+            if answer is not None:
+                return answer(parts[3].lower())
         self.error(404, 'not_found', 'Not found.')
 
-    def create_binding(self):
+    def binding_body(self) -> dict | None:
+        """The request's JSON object with a usable name field, or None once its refusal went out."""
         if (self.headers.get('Content-Type') or '').split(';')[0].strip().lower() != 'application/json':
-            return self.error(415, 'unsupported_media_type', 'Send the body as application/json.')
+            self.error(415, 'unsupported_media_type', 'Send the body as application/json.')
+            return None
         try:
             body = self.read_json()
         except (ValueError, json.JSONDecodeError):
-            return self.error(400, 'invalid', 'The body is not valid JSON.')
+            self.error(400, 'invalid', 'The body is not valid JSON.')
+            return None
         if not isinstance(body, dict):
-            return self.error(400, 'invalid', 'The body must be a JSON object.')
+            self.error(400, 'invalid', 'The body must be a JSON object.')
+            return None
         name = body.get('name')
         if name is not None and (not isinstance(name, str) or name == ''):
-            return self.error(400, 'invalid', 'name must be a non-empty string, or left out for a random one.')
+            self.error(400, 'invalid', 'name must be a non-empty string, or left out for a random one.')
+            return None
+        return body
+
+    def name_to_bind(self, requested: str | None) -> str | None:
+        """The name this binding gets, or None once its refusal went out; only a requested name can be refused."""
+        if requested is None:
+            return random_free_name()
+        name = requested.lower()
+        reason = requested_name_reason(name)
+        if reason == 'invalid':
+            self.error(400, 'invalid', 'Use lowercase letters, digits and hyphens, 1-63 characters, '
+                                       'no hyphen at either end and none in the 3rd and 4th place.')
+            return None
+        if reason:
+            self.error(409, reason, f'{name}.{DOMAIN} is {reason}.')
+            return None
+        return name
+
+    def create_binding(self):
+        """POST /api/v1/bindings: one lock holds the limits, the name and the store together."""
+        body = self.binding_body()
+        if body is None:
+            return
         ip = self.client_ip()
         with create_lock:
             t = now()
-            conn = db()
-            write('DELETE FROM creations WHERE at < ?', (t - 3600,))
-            mine = conn.execute('SELECT COUNT(*), MIN(at) FROM creations WHERE ip = ?', (ip,)).fetchone()
-            total = conn.execute('SELECT COUNT(*) FROM creations').fetchone()[0]
-            if mine[0] >= BIND_PER_IP_HOUR or total >= BIND_ALL_HOUR:
-                wait = (mine[1] + 3600 - t) if mine[0] >= BIND_PER_IP_HOUR else 600
+            wait = creation_wait(ip, t)
+            if wait:
                 return self.error(429, 'rate_limited', 'Too many new links from this address, try again later.',
-                                  {'Retry-After': str(max(wait, 1))})
+                                  {'Retry-After': str(wait)})
+            name = self.name_to_bind(body.get('name'))
             if name is None:
-                while True:
-                    name = ''.join(secrets.choice(RANDOM_ALPHABET) for _ in range(24))
-                    if check_name(name) is None:
-                        break
-            else:
-                name = name.lower()
-                reason = check_name(name)
-                if reason == 'invalid':
-                    return self.error(400, 'invalid', 'Use lowercase letters, digits and hyphens, 1-63 characters, '
-                                                      'no hyphen at either end and none in the 3rd and 4th place.')
-                if reason:
-                    return self.error(409, reason, f'{name}.{DOMAIN} is {reason}.')
-            key = secrets.token_urlsafe(32)
-            write('INSERT INTO bindings (name, key_hash, created_at, created_ip) VALUES (?, ?, ?, ?)',
-                  (name, key_hash(key), t, ip))
-            write('INSERT INTO creations (ip, at) VALUES (?, ?)', (ip, t))
+                return
+            key = store_new_binding(name, ip, t)
         log_line(f'bound {name} for {ip}')
         self.send_json(201, {'name': name, 'url': f'https://{name}.{DOMAIN}', 'key': key,
                              'tunnel': tunnel_info(name, key)})

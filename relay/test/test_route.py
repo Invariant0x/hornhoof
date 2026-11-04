@@ -20,7 +20,8 @@ if __package__:
 else:
     from harness import Stack, _request, _wait
 
-ROOT = Path(__file__).resolve().parents[2]
+# Not resolve(): a mutator worker symlinks this file, and its own copy of relay.py must be the one that loads.
+ROOT = Path(__file__).absolute().parents[2]
 SUCCESS = re.compile(r'\[acme\]\s+start proxy success\b')
 # A refusal is one of these documented reasons; anything else in an outcome is a failure.
 REFUSALS = frozenset({'router config conflict: acme is held', 'relay error: frps does not answer',
@@ -180,12 +181,13 @@ localPort = {self.stack.echo_port}{extra}
         self.assertEqual(body['error'], 'not_found')
         tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-route-nodash-'))
         with Stack(tmp, dashboard=False) as stack:
-            binding = stack.bind('acme')
-            status, body = stack.api('GET', '/api/v1/links/acme/route', key=binding['key'])
+            binding = stack.bind()
+            name = binding['name']
+            status, body = stack.api('GET', f'/api/v1/links/{name}/route', key=binding['key'])
             self.assertEqual(status, 503)
             self.assertEqual(body['error'], 'unknown')
-            client = stack.client('acme', binding['key'])
-            self.assertFalse(client.started('acme', within=2), client.log())
+            client = stack.client(name, binding['key'])
+            self.assertFalse(client.started(name, within=2), client.log())
             self.assertIn('relay error: frps does not answer', client.log())
 
     def test_r2_3_online_route_without_a_row_is_unknown(self):
