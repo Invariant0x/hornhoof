@@ -8,7 +8,7 @@
     "start": "node dist/main.js",
     "pretest": "npm run build -w @hornhoof/protocol",
     "test": "vitest run",
-    "lint": "eslint"
+    "lint:part": "eslint"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.5",

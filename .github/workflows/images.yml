@@ -48,6 +48,9 @@ jobs:
       # Every check runs even when one before it failed, so one run shows all that is wrong.
       - name: Lint, release checks, protocol and scripts
         if: ${{ !cancelled() && steps.install.outcome == 'success' && matrix.part == 1 }}
+        env:
+          # The limit node sets by itself on a machine with less than 15 GB of memory: what outgrows it fails here too.
+          NODE_OPTIONS: --max-old-space-size=2048
         run: |
           npm run lint
           npm run typecheck:tests
