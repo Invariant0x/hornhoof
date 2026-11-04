@@ -63,11 +63,11 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/org', async req => {
     const me = await requirePerson(req, db);
     const [company] = await db.select({ id: companies.id, name: companies.name }).from(companies).where(eq(companies.id, me.companyId));
-    const allAgents = await db.select().from(agents).where(isNull(agents.removedAt));
-    const subs = new Map((await db.select({ id: subscriptions.id, provider: subscriptions.provider, models: subscriptions.models, limits: subscriptions.limits }).from(subscriptions)).map(s => [s.id, s]));
+    const allAgents = await db.select().from(agents).where(and(eq(agents.companyId, me.companyId), isNull(agents.removedAt)));
+    const subs = new Map((await db.select({ id: subscriptions.id, provider: subscriptions.provider, models: subscriptions.models, limits: subscriptions.limits }).from(subscriptions).where(eq(subscriptions.companyId, me.companyId))).map(s => [s.id, s]));
     const orchestrator = allAgents.find(a => a.kind === 'orchestrator');
-    const active = await db.select(personColumns).from(people).where(ne(people.status, 'disabled')).orderBy(asc(people.createdAt));
-    const depts = await db.select().from(departments).orderBy(asc(departments.position), asc(departments.createdAt));
+    const active = await db.select(personColumns).from(people).where(and(eq(people.companyId, me.companyId), ne(people.status, 'disabled'))).orderBy(asc(people.createdAt));
+    const depts = await db.select().from(departments).where(eq(departments.companyId, me.companyId)).orderBy(asc(departments.position), asc(departments.createdAt));
     /* What each department works on now: its newest open task without an executor (the head's), else its newest open one.
        Only for people who reach the department; the rest see that it exists, not what it does. */
     const reach = await accessOf(db, me);
@@ -83,14 +83,14 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
     const [open] = await db.select({ id: turns.id, number: turns.number, title: turns.title, goal: turns.goal }).from(turns).where(and(eq(turns.companyId, me.companyId), eq(turns.status, 'open')));
     /* The map shows the turn's short name. */
     const turn = open && { id: open.id, number: open.number, goal: open.title || open.goal };
-    const allTeams = await db.select().from(teams).orderBy(asc(teams.stage), asc(teams.createdAt));
+    const allTeams = await db.select().from(teams).where(eq(teams.companyId, me.companyId)).orderBy(asc(teams.stage), asc(teams.createdAt));
     const topDepts = depts.filter(d => !d.parentId);
     /* A listed person counts each place as its top-level department: a product as the department holding it, a team as its department. */
     const topOf = (deptId: string | undefined) => {
       const d = depts.find(x => x.id === deptId);
       return d?.parentId ?? d?.id;
     };
-    const access = await db.select().from(personAccess);
+    const access = await db.select().from(personAccess).where(eq(personAccess.companyId, me.companyId));
     const homes = new Map(
       active.map(p => {
         const reached = new Set(access.filter(a => a.personId === p.id).map(a => topOf(a.departmentId ?? allTeams.find(t => t.id === a.teamId)?.departmentId)));

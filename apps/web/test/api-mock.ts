@@ -138,9 +138,9 @@ export const ROSTER: Roster = {
     { role: 'DEV-BE', name: 'Backend engineer', product: null, model: '', subscription: 's-key', skills: ['hh-report-to-head', 'dev-tdd'] },
   ],
   roles: [
-    { id: 'DEV-HEAD', title: HEAD_TITLE, kind: 'head', tier: 'deep', perProduct: false, skills: ['hh-report-to-head', 'hh-break-down'], subscription: 's-key' },
-    { id: 'DEV-BE', title: BE_TITLE, kind: 'member', tier: 'standard', perProduct: false, skills: ['hh-report-to-head', 'dev-tdd'], subscription: 's-key' },
-    { id: 'DEV-FE', title: { en: 'Frontend engineer', ru: 'Фронтенд-разработчик' }, kind: 'member', tier: 'standard', perProduct: true, skills: ['hh-report-to-head'], subscription: 's-key' },
+    { id: 'DEV-HEAD', title: HEAD_TITLE, kind: 'head', tier: 'deep', perProduct: false, skills: ['hh-report-to-head', 'hh-break-down'], subscription: 's-key', required: false, holder: null },
+    { id: 'DEV-BE', title: BE_TITLE, kind: 'member', tier: 'standard', perProduct: false, skills: ['hh-report-to-head', 'dev-tdd'], subscription: 's-key', required: false, holder: null },
+    { id: 'DEV-FE', title: { en: 'Frontend engineer', ru: 'Фронтенд-разработчик' }, kind: 'member', tier: 'standard', perProduct: true, skills: ['hh-report-to-head'], subscription: 's-key', required: false, holder: null },
   ],
   products: [{ id: 'pd1', name: 'Mascot' }],
   subscriptions: SERVING,

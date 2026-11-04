@@ -18,6 +18,7 @@ import { BUILTIN, nodeIdentity } from '../nodes/hub.js';
 import { liveNode, planNodes } from '../nodes/nodes.js';
 import { CRED_KIND, deliver, storeEnvelopes } from './credentials.js';
 import { failOpenJobs } from '../nodes/messages.js';
+import { tryPlaceOperator } from '../operations/ensure.js';
 import { loseParts } from '../testruns/runs.js';
 import { subView, subViews, type IsOnline } from './views.js';
 
@@ -185,6 +186,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
       return sub!.id;
     });
     if (target.kind === 'orchestrator') await orchestratorBack(orchestratorBefore);
+    await tryPlaceOperator(ctx, me.companyId);
 
     reply.code(201);
     return { subscription: await subView(db, online, id, me) };
@@ -202,6 +204,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
       return { ids, removedNodes, command: await createInstallCommand(tx, config, me, { companyId: me.companyId, personId: me.id, subscriptionIds: ids }) };
     });
     for (const id of removedNodes) hub.close(id, 4001);
+    await tryPlaceOperator(ctx, me.companyId);
     const views = (await subViews(db, online, undefined, me)).filter(s => ids.includes(s.id));
     reply.code(201);
     return { subscriptions: views, ...command };
@@ -287,6 +290,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
     /* An offline node hears it at its next hello. The built-in node keeps running for other keys, so it stops just this key's jobs. */
     if (sub.kind === 'personal') for (const id of gone) hub.send(nodeIdentity(id), { type: 'remove' });
     else for (const jobId of ended) hub.send(BUILTIN, { type: 'job.cancel', jobId });
+    await tryPlaceOperator(ctx, sub.companyId);
     return reply.code(204).send();
   });
 }
