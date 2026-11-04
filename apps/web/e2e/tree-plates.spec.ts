@@ -175,6 +175,13 @@ for (const lang of ['en', 'ru'] as const) {
         await expectNoPlatesTouch(labs);
         await expectLinesFollowPlates(page, full);
 
+        /* Keyboard focus brings a plate below the screen into view, as a move of the tree. */
+        const below = of('Oleg');
+        await below.focus();
+        await expect.poll(async () => inFrame(frame, await box(below)), { message: 'the focused plate is on the screen', timeout: 30_000 }).toBe(true);
+        await expect.poll(() => page.locator('.tv-scroll').evaluate(el => [el.scrollLeft, el.scrollTop]), { message: 'the tree moved, its frame did not stay scrolled', timeout: 30_000 }).toEqual([0, 0]);
+        expect.soft(inFrame(frame, await box(below)), 'the focused plate stays on the screen after the move').toBe(true);
+
         /* Show everything still fits the whole tree on the screen. */
         await page.locator('.dview').getByRole('button', { name: lang === 'en' ? 'Show everything' : 'Показать все', exact: true }).click();
         expect.soft(inFrame(frame, await box(page.locator('.tv-in'))), 'the whole tree fits').toBe(true);
@@ -195,6 +202,18 @@ for (const lang of ['en', 'ru'] as const) {
     }
   }
 }
+
+test("a young turn opens with its fork on a phone's screen", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.addInitScript(() => localStorage.setItem('hh-lang', 'en'));
+  const full = fullDepartment(), now = new Date(Date.parse(full.tree.turn!.startedAt) + 60_000).toISOString();
+  await serveTree(page, { during: true });
+  await page.route('**/api/org', route => route.fulfill({ json: { ...full.org, serverNow: now } }));
+  await page.route('**/api/departments/d2/tree', route => route.fulfill({ json: { tree: { ...full.tree, now } } }));
+  await open(page, 'en');
+  await expect(page.locator('.dview .zv')).toHaveText('100%');
+  expect(inFrame(await box(page.locator('.tv-scroll')), await box(page.locator('svg[role="group"] .via.k'))), 'the fork of the turn is on the screen').toBe(true);
+});
 
 test('a department without a repository opens at 100% from its first plate', async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });

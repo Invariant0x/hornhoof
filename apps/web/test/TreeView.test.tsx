@@ -25,9 +25,9 @@ function position(world: HTMLElement) {
 describe('Tree plates', () => {
   const agent = DEV_TREE.lines[0]!.agent.id;
   const rowHeight = (row: string) => Number(document.querySelector(`rect.rowhit[data-row="${row}"][x="0"]`)!.getAttribute('height'));
-  afterEach(() => { delete (HTMLElement.prototype as { offsetHeight?: number }).offsetHeight; });
+  afterEach(() => { vi.restoreAllMocks(); });
   function plateHeights(height: (row: string) => number) {
-    Object.defineProperty(HTMLElement.prototype, 'offsetHeight', { configurable: true, get(this: HTMLElement) { return height(this.dataset.row ?? ''); } });
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) { return height(this.dataset.row ?? ''); });
   }
 
   it('gives a row the height its plate takes on the page', () => {
@@ -104,6 +104,19 @@ describe('Tree plates', () => {
     show();
     const line = DEV_TREE.lines[0]!;
     expect(document.querySelector(`.lchip[data-row="${agent}"] .r2`)).toHaveTextContent(`#${line.number} ${line.title}`);
+  });
+
+  it('lets a row be clicked as far as the drawing goes, past a long badge too', () => {
+    vi.stubGlobal('innerWidth', 375);
+    const world = show(), svg = world.querySelector('svg[role="group"]')!;
+    const rows = [...svg.querySelectorAll('rect.rowhit[x="0"]')];
+    expect(rows.length).toBeGreaterThan(2);
+    for (const row of rows) expect(row.getAttribute('width')).toBe(svg.getAttribute('width'));
+    const parts = [...svg.querySelectorAll('rect.rowhit:not([x="0"])')], marks = [...svg.querySelectorAll('circle.hit')];
+    expect(parts.length).toBeGreaterThan(0);
+    for (const part of parts) expect(Number(part.getAttribute('x')) + Number(part.getAttribute('width'))).toBeLessThanOrEqual(Number(svg.getAttribute('width')));
+    expect(marks.length).toBeGreaterThan(0);
+    for (const mark of marks) expect(mark.getAttribute('r')).toBe('10');
   });
 
   it('draws what an agent waits for in one line, a phone too, and makes room for it', () => {
@@ -225,30 +238,49 @@ describe('Tree navigation', () => {
     expect(position(world)).toEqual(fitted);
   });
 
-  it('fits again after keyboard focus scrolls a clipped row into view', async () => {
-    const user = userEvent.setup();
-    show();
-    const viewport = screen.getByRole('region', { name: 'Work tree' });
+  it('turns the scroll of keyboard focus into a move, so zoom keeps its anchor', () => {
+    const world = show(), viewport = screen.getByRole('region', { name: 'Work tree' });
+    const [x, y, k] = position(world);
     viewport.scrollLeft = 180;
     viewport.scrollTop = 250;
-    await user.click(screen.getByRole('button', { name: 'Show everything' }));
+    fireEvent.scroll(viewport);
     expect([viewport.scrollLeft, viewport.scrollTop]).toEqual([0, 0]);
+    expect(position(world)).toEqual([x - 180, y - 250, k]);
+    fireEvent.scroll(viewport);
+    expect(position(world)).toEqual([x - 180, y - 250, k]);
+    fireEvent.wheel(viewport, { deltaY: -100, clientX: 200, clientY: 150 });
+    const [wx, wy, wk] = position(world);
+    expect((200 - wx) / wk).toBeCloseTo((200 - (x - 180)) / k);
+    expect((150 - wy) / wk).toBeCloseTo((150 - (y - 250)) / k);
   });
 
-  it('opens from the root again after keyboard focus scrolled a row into view', () => {
+  it('keeps the chosen view when only the height of the viewport changes', async () => {
     const measurements: (() => void)[] = [];
     vi.stubGlobal('ResizeObserver', class {
       constructor(measure: () => void) { measurements.push(measure); }
       observe() {}
       disconnect() {}
     });
-    show();
-    const viewport = screen.getByRole('region', { name: 'Work tree' });
-    viewport.scrollLeft = 180;
-    viewport.scrollTop = 250;
-    Object.defineProperty(document.querySelector('.tview'), 'clientWidth', { value: 600 });
+    const user = userEvent.setup(), world = show();
+    await user.click(screen.getByRole('button', { name: 'Zoom in' }));
+    const chosen = position(world);
+    Object.defineProperty(document.querySelector('.tview'), 'clientHeight', { value: 300 });
     act(() => measurements.forEach(measure => measure()));
-    expect([viewport.scrollLeft, viewport.scrollTop]).toEqual([0, 0]);
+    expect(position(world)).toEqual(chosen);
+    await user.click(screen.getByRole('button', { name: 'Show everything' }));
+    expect(position(world)[2]).toBeCloseTo(276 / Number(world.querySelector('svg[role="group"]')!.getAttribute('height')));
+  });
+
+  it('never zooms in on Zoom out when a smaller tree arrives while far zoomed out', async () => {
+    vi.stubGlobal('innerWidth', 375);
+    const user = userEvent.setup(), long = { ...DEV_TREE, now: '2026-10-31T09:00:00.000Z' }, { rerender } = render(view(long));
+    const world = document.querySelector<HTMLElement>('.tv-in')!;
+    await user.click(screen.getByRole('button', { name: 'Show everything' }));
+    const far = position(world)[2];
+    expect(far).toBeLessThan(.3);
+    rerender(view({ ...DEV_TREE, lines: DEV_TREE.lines.slice(0, 1), idle: [], waiting: [], activity: [], reviews: [], review: null }));
+    await user.click(screen.getByRole('button', { name: 'Zoom out' }));
+    expect(position(world)[2]).toBeLessThanOrEqual(far);
   });
 
   it('does not open a branch after dragging it, and still opens it from the keyboard', async () => {

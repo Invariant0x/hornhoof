@@ -127,6 +127,12 @@ describe('work tree layout', () => {
     expect(treeLayout(DEV_TREE, box, 1.25).scale).toBeCloseTo(l.scale * 1.25);
   });
 
+  it.each([0, 1, 12, 60])("keeps a young turn's fork beside the plates on a phone's screen, %i minutes in", elapsed => {
+    const now = new Date(Date.parse(DEV_TREE.turn!.startedAt) + elapsed * 60_000).toISOString();
+    const layout = treeLayout({ ...DEV_TREE, now, lines: [], reviews: [], review: null, waiting: [], activity: [], idle: [] }, { width: 343, phone: true }, 1);
+    expect(layout.x(DEV_TREE.turn!.startedAt) + 4).toBeLessThanOrEqual(343 - 12 - layout.labelWidth);
+  });
+
   it('gives plates the same room on a phone and on a desktop', () => {
     expect(treeLayout(DEV_TREE, { ...box, width: 375, phone: true }, 1).labelWidth).toBe(250);
     expect(treeLayout(DEV_TREE, box, 1).labelWidth).toBe(250);

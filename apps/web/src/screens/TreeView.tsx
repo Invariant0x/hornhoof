@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type RefObject, type UIEvent } from 'react';
 import { useLanguage, useT } from '../i18n';
 import type { Department, DepartmentTree, TreeAgent } from '../types';
 import { Pulse, motionSpeed, toD, useReducedMotion } from '../ui/wires';
@@ -436,8 +436,10 @@ function FloatingCard({ selection, card, box, tree, department, onOpenTask, onCl
   );
 }
 
+/* A row can be clicked as far as the drawing goes. */
 function fitBadges(layout: TreeLayout, t: ReturnType<typeof useT>): TreeLayout {
-  return { ...layout, width: Math.max(layout.width, ...layout.badges.map(b => b.x + badgeWidth(badgeText(t, b), b) + 12)) };
+  const width = Math.max(layout.width, ...layout.badges.map(b => b.x + badgeWidth(badgeText(t, b), b) + 12));
+  return { ...layout, width, targets: layout.targets.map(hit => hit.round || hit.segment ? hit : { ...hit, width }) };
 }
 
 export function TreeView(props: Props) {
@@ -447,7 +449,7 @@ export function TreeView(props: Props) {
   const [plates, setPlates] = useState<PlateHeights>({});
   const onPlates = useCallback((next: PlateHeights) => setPlates(old => JSON.stringify(old) === JSON.stringify(next) ? old : next), []);
   const layout = useMemo(() => fitBadges(treeLayout(tree, { ...box, plates, agentOrder: department.employees.map(e => e.id) }, 1), t), [tree, department, box, plates, t]);
-  const { view, zoomAt, handlers, dragged, fit } = useTreeNavigation(scroll, layout, box, !!tree.turn);
+  const { view, zoomAt, handlers, dragged, fit, onScroll } = useTreeNavigation(scroll, layout, box, !!tree.turn);
   const { selection, card, select, close } = useTreeSelection(root);
   const canvas = { layout, tree, department, selected: selection?.pick ?? null, select };
   return (
@@ -455,7 +457,7 @@ export function TreeView(props: Props) {
       <div className="tview" ref={root}>
         {!tree.turn ? <p className="tv-empty glass">{t.dept.treeNoTurn}</p> : (
           <>
-            <div className="tv-scroll" ref={scroll} role="region" aria-label={t.dept.treeCanvas} {...handlers}
+            <div className="tv-scroll" ref={scroll} role="region" aria-label={t.dept.treeCanvas} {...handlers} onScroll={onScroll}
               onClickCapture={e => ignoreDraggedClick(e, dragged)}>
               <div className="tv-in" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})` }}>
                 <Labels {...canvas} onPlates={onPlates} />
@@ -476,22 +478,28 @@ export function TreeView(props: Props) {
 function useTreeNavigation(viewport: RefObject<HTMLDivElement | null>, layout: TreeLayout, box: { width: number; height: number }, ready: boolean) {
   const width = layout.labelWidth + layout.width;
   const whole = Math.min(1, (box.width - 24) / width, (box.height - 24) / layout.height);
-  const pan = usePanZoom(viewport, ready, { min: Math.min(CANVAS_ZOOM_LIMITS.min, whole), max: CANVAS_ZOOM_LIMITS.max });
+  const [floor, setFloor] = useState(CANVAS_ZOOM_LIMITS.min);
+  if (whole < floor) setFloor(whole);
+  const pan = usePanZoom(viewport, ready, { min: floor, max: CANVAS_ZOOM_LIMITS.max });
   const { setView } = pan;
-  const placed = useRef(''), frame = `${box.width}:${box.height}:${ready}`;
+  const placed = useRef(''), frame = `${box.width}:${ready}`;
   const place = useCallback((k: number) => {
-    if (viewport.current) {
-      viewport.current.scrollLeft = 0;
-      viewport.current.scrollTop = 0;
-    }
     setView({ k, x: Math.max(12, (box.width - width * k) / 2), y: 12, smooth: false });
-  }, [viewport, width, box.width, setView]);
+  }, [width, box.width, setView]);
   useLayoutEffect(() => {
     if (placed.current === frame) return;
     placed.current = frame;
     place(1);
   }, [place, frame]);
-  return { ...pan, fit: () => place(whole) };
+  /* Keyboard focus scrolls a clipped row into view: that becomes a move like a drag, so zoom keeps its anchor. */
+  const onScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
+    const el = event.currentTarget, dx = el.scrollLeft, dy = el.scrollTop;
+    if (!dx && !dy) return;
+    el.scrollLeft = 0;
+    el.scrollTop = 0;
+    setView(v => ({ ...v, x: v.x - dx, y: v.y - dy, smooth: false }));
+  }, [setView]);
+  return { ...pan, fit: () => place(whole), onScroll };
 }
 
 function ignoreDraggedClick(event: MouseEvent, dragged: () => boolean): void {
