@@ -93,6 +93,10 @@ export const en = {
     issues: 'Report a bug or suggest an idea', copyright: 'Copyright (c) 2026 Ivan Korol',
     versionFailed: 'The server version could not be loaded. Close this window and open it again to retry.',
   },
+  profile: {
+    title: 'Settings',
+    nameRequired: 'Enter your name.',
+  },
   settings: {
     menu: 'Share access',
     title: 'Share access',
@@ -488,13 +492,18 @@ export const en = {
     /* Access to the computer the server runs on, which the orchestrator asks for and the CEO opens for a day. The machine
        is its name when that computer joined as a machine, else computerServer. */
     computerServer: "the server's computer",
+    computerServerName: "The server's computer",
     computerAsks: (machine: string) => `The orchestrator asks for access to ${machine}`,
     computerWhat: (machine: string) => `For a day it runs commands as root on ${machine}, and each one shows in this window. Access closes by itself after a day, or when you close it.`,
-    computerOpen: 'Open access for a day',
+    computerOpen: 'Open for a day',
     computerNotNow: 'Not now',
     computerAccess: (machine: string) => `Access to ${machine}`,
     computerOpenUntil: (machine: string, at: string) => `The orchestrator can run commands on ${machine} until ${at}. The company server runs there, so this shows wherever you open Hornhoof.`,
     computerClose: 'Close access',
+    computerUntil: (at: string) => `access until ${at}`,
+    computerMore: (machine: string) => `More about access to ${machine}`,
+    computerOthers: (count: number) => `Other machines with access: ${count}`,
+    computerOthersCount: (count: number) => `${count} more`,
     computerAsked: (reason: string, machine: string) => `Asked for access to ${machine}: ${reason}`,
     computerOpened: (who: string, at: string, machine: string) => `${who} opened access to ${machine} until ${at}`,
     computerClosed: (who: string, machine: string) => `${who} closed access to ${machine}`,

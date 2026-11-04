@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Settings } from '../src/screens/Settings';
+import { Profile } from '../src/screens/Profile';
 import { Shell } from '../src/screens/Shell';
 import { ME, mockApi, ORG } from './api-mock';
 import { decl } from './css';
@@ -103,6 +104,35 @@ describe('Share access', () => {
     render(<Settings me={ME} onClose={() => {}} />);
     await user.click(await screen.findByRole('button', { name: 'Open on the internet' }));
     expect(await screen.findByText('This link is taken already. Pick another name.')).toBeInTheDocument();
+  });
+});
+
+describe('your own name', () => {
+  it('saves a trimmed name and reports the new name to the shell', async () => {
+    const calls = mockApi({ 'PATCH /api/people/p1': [200, { person: { ...ME.person, name: 'Lisa' } }] });
+    const renamed: string[] = [];
+    const user = userEvent.setup();
+    render(<Profile me={ME} onClose={() => {}} onRenamed={name => renamed.push(name)} />);
+    const field = await screen.findByLabelText('Name');
+    await user.clear(field);
+    await user.type(field, '  Lisa  ');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(calls.find(c => c.method === 'PATCH')).toEqual({ method: 'PATCH', path: '/api/people/p1', body: { name: 'Lisa' } });
+    expect(renamed).toEqual(['Lisa']);
+  });
+
+  it('shows empty and server name errors by the field', async () => {
+    mockApi({ 'PATCH /api/people/p1': [403, { error: { code: 'forbidden', message: 'You cannot change this name.', reason: 'rename_failed' } }] });
+    const user = userEvent.setup();
+    render(<Profile me={ME} onClose={() => {}} />);
+    const field = await screen.findByLabelText('Name');
+    await user.clear(field);
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    const form = field.closest('form')!;
+    expect(await within(form).findByText('Enter your name.')).toBeInTheDocument();
+    await user.type(field, 'Lisa');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(await within(form).findByText('You cannot change this name.')).toBeInTheDocument();
   });
 });
 
