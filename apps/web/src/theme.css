@@ -525,6 +525,12 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .facts dd small { display: block; font-size: 12.5px; color: var(--muted); margin-top: 2px; }
 .machine-note { font-size: 12.5px; padding-left: 10px; border-left: 3px solid var(--amber-ink); }
+.connection-summary { margin: 0; font-size: 13.5px; line-height: 1.5; }
+.connection-events { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; max-height: 320px; overflow: auto; }
+.connection-event { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; align-items: start; font-size: 12.5px; line-height: 1.45; }
+.connection-event > span { min-width: 0; overflow-wrap: anywhere; }
+.connection-event time { color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+.connection-report { margin: 3px 0 0; padding-left: 10px; border-left: 2px solid var(--line); color: var(--muted); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
 .machine-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .machine-actions .lend { margin-right: 4px; }
 @media (max-width: 760px) {
@@ -533,6 +539,7 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 @media (max-width: 420px) {
   .facts { grid-template-columns: 1fr; gap: 0; }
   .facts dd { margin-bottom: 8px; }
+  .connection-event { grid-template-columns: 1fr; }
 }
 /* About is a small window: small type and tight lines, in two columns on a phone too. */
 .dialog.about { gap: 8px; width: min(420px, 100%); padding: 12px 16px 14px; font-size: 13px; }

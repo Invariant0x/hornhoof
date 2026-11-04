@@ -15,8 +15,32 @@ const BUILTIN: BuiltinView = {
   running: { agents: [{ id: 'o1', canOpen: true, name: 'Orchestrator', busy: false, title: null, department: null, provider: 'anthropic_api', since: null, task: null, withCeo: false }], parts: [] },
 };
 
+const EMPTY_HISTORY = { summary: { since: '2026-11-03T10:00:00.000Z', disconnects: 0, averageOfflineMs: null, topCause: null }, events: [] };
+
 const lists = (extra: Parameters<typeof mockApi>[0] = {}, builtin: BuiltinView | null = BUILTIN) =>
-  mockApi({ 'GET /api/subscriptions': [200, { subscriptions: SUBS }], 'GET /api/machines': [200, { machines: MACHINES, builtin }], ...extra });
+  mockApi({
+    'GET /api/subscriptions': [200, { subscriptions: SUBS }],
+    'GET /api/machines': [200, { machines: MACHINES, builtin }],
+    'GET /api/machines/m1/connection-history': [200, EMPTY_HISTORY],
+    'GET /api/machines/m2/connection-history': [200, EMPTY_HISTORY],
+    ...extra,
+  });
+
+const HISTORY = {
+  summary: { since: '2026-11-03T10:00:00.000Z', disconnects: 5, averageOfflineMs: 40_000, topCause: 'abnormal_close' },
+  events: [
+    { id: 'e2', nodeId: 'n1', kind: 'connected', happenedAt: '2026-11-04T10:00:40.000Z', actor: null, cause: null, closeCode: null, closeReason: null, error: null, offlineMs: 40_000, nodeReport: null },
+    {
+      id: 'e1', nodeId: 'n1', kind: 'disconnected', happenedAt: '2026-11-04T10:00:00.000Z', actor: 'network', cause: 'abnormal_close',
+      closeCode: 1006, closeReason: 'abnormal', error: null, offlineMs: 40_000,
+      nodeReport: {
+        disconnectedAt: '2026-11-04T10:00:00.000Z', reconnectedAt: '2026-11-04T10:00:40.000Z', offlineMs: 40_000,
+        attempts: 3, cause: 'dns_error', closeCode: 1006, closeReason: 'abnormal', errorCode: 'ENOTFOUND', error: 'DNS lookup failed',
+        dnsFailed: true, watchdogTimedOut: false, clockJumpMs: null, networkChanged: true,
+      },
+    },
+  ],
+};
 
 const card = (name: string) => {
   const existing = screen.queryByRole('article', { name });
@@ -36,6 +60,52 @@ const fact = (within_: HTMLElement, label: string) => within(within_).getByText(
 afterEach(() => localStorage.clear());
 
 describe('Machines', () => {
+  it.each([
+    ['en', 'Last 24 hours: 5 disconnects, average offline 40 s. Most often: the network ended the connection.', 'The network ended the connection, code 1006, offline for 40 s', 'The machine reported: DNS lookup failed; 3 attempts; network changed.'],
+    ['ru', 'За сутки: 5 обрывов, в среднем офлайн 40 с. Чаще всего: сеть оборвала соединение.', 'Сеть оборвала соединение, код 1006, офлайн 40 с', 'Машина сообщила: DNS lookup failed; 3 попытки; сеть изменилась.'],
+  ])('shows the daily connection summary and both sides of a disconnect in %s', async (language, summary, disconnect, report) => {
+    localStorage.setItem('hh-lang', language);
+    lists({ 'GET /api/machines/m1/connection-history': [200, HISTORY] });
+    render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
+    const mac = await openCard('ivan-mbp');
+    expect(await within(mac).findByText(summary)).toBeInTheDocument();
+    expect(within(mac).getByText(disconnect)).toBeInTheDocument();
+    expect(within(mac).getByText(report)).toBeInTheDocument();
+    expect(within(mac).getByText(language === 'en' ? 'Connected, offline for 40 s' : 'Подключена, офлайн 40 с')).toBeInTheDocument();
+  });
+
+  it.each([
+    ['en', 'No disconnects in the last 24 hours.', 'No connections recorded yet. They will appear after the machine connects.'],
+    ['ru', 'За сутки обрывов не было.', 'Подключений пока не записано. Они появятся после подключения машины.'],
+  ])('shows an empty connection history in %s', async (language, quiet, empty) => {
+    localStorage.setItem('hh-lang', language);
+    lists();
+    render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
+    const mac = await openCard('ivan-mbp');
+    expect(await within(mac).findByText(quiet)).toBeInTheDocument();
+    expect(within(mac).getByText(empty)).toBeInTheDocument();
+  });
+
+  it('keeps the machine card usable when connection history fails to load', async () => {
+    lists({ 'GET /api/machines/m1/connection-history': [500, { error: { code: 'internal', message: 'Failed.' } }] });
+    render(<Machines me={ME} />);
+    const mac = await openCard('ivan-mbp');
+    expect(await within(mac).findByText('Could not load connection history. Close and open the machine card to try again.')).toBeInTheDocument();
+    expect(fact(mac, 'Owner')).toBe('Ivan');
+  });
+
+  it('shows connection history loading without blocking the machine card', async () => {
+    let answer!: (reply: [number, typeof HISTORY]) => void;
+    const waiting = new Promise<[number, typeof HISTORY]>(resolve => { answer = resolve; });
+    lists({ 'GET /api/machines/m1/connection-history': () => waiting });
+    render(<Machines me={ME} />);
+    const mac = await openCard('ivan-mbp');
+    expect(await within(mac).findByText('Loading connection history...')).toBeInTheDocument();
+    expect(fact(mac, 'Owner')).toBe('Ivan');
+    answer([200, HISTORY]);
+    expect(await within(mac).findByText(/Last 24 hours: 5 disconnects/)).toBeInTheDocument();
+  });
+
   it.each([['en', 'Agent programs'], ['ru', 'Программы агентов']])('shows reported program versions on the machine card in %s', async (language, heading) => {
     localStorage.setItem('hh-lang', language);
     lists({ 'GET /api/machines': [200, { machines: [{ ...MACHINES[0]!, programs: [{ id: 'claude', version: '2.1.0', updating: false, failed: false }] }], builtin: null }] });

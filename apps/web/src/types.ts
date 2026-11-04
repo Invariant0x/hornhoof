@@ -1,6 +1,6 @@
 import type { ExternalWait } from '@hornhoof/protocol/waits';
 import type { Notification } from '@hornhoof/protocol';
-import type { FailureKind, Limits, ModelOption, NodeLoad, ProgramInfo, ProviderId, TemplateKey } from '@hornhoof/protocol';
+import type { FailureKind, Limits, ModelOption, NodeLoad, NodeReconnect, ProgramInfo, ProviderId, TemplateKey } from '@hornhoof/protocol';
 import type { RoleEffort } from '@hornhoof/protocol/efforts';
 import type { ProgramRetry, TurnAlarm, TurnProgram, TurnRetry, WorkLine } from '@hornhoof/protocol/map';
 
@@ -476,6 +476,25 @@ export type MachineView = {
   otherBuild?: { server: string; nodes: (string | null)[] } | null;
   /* Why Playwright's browser failed to start on the machine, or null when it is ready. */
   browserError?: string | null;
+};
+
+export type MachineConnectionEvent = {
+  id: string;
+  nodeId: string;
+  kind: 'connected' | 'disconnected';
+  happenedAt: string;
+  actor: 'server' | 'node' | 'network' | null;
+  cause: string | null;
+  closeCode: number | null;
+  closeReason: string | null;
+  error: string | null;
+  offlineMs: number | null;
+  nodeReport: NodeReconnect | null;
+};
+
+export type MachineConnectionHistory = {
+  summary: { since: string; disconnects: number; averageOfflineMs: number | null; topCause: string | null };
+  events: MachineConnectionEvent[];
 };
 
 /* What runs on a machine now: the employees whose program is there, busy while a turn of theirs runs, and the parts of

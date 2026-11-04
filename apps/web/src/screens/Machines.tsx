@@ -16,6 +16,7 @@ import { SortTable, type TableColumn } from '../ui/SortTable';
 import { planStateOnMachine, subName } from '../ui/subscription';
 import { useNow } from '../ui/reset';
 import { ProgramVersions } from '../ui/ProgramVersions';
+import { MachineConnectionHistory } from '../ui/MachineConnectionHistory';
 
 const REFRESH_MS = 5000;
 const GIB = 1024 ** 3;
@@ -276,6 +277,7 @@ function MachineDetails({ row, subs, me, now, controls }: { row: MachineRow; sub
         {m && <Part title={t.cards.ownerSystem}><Facts items={[[t.machines.owner, m.owner.name], [t.machines.system, `${SYSTEMS[m.os] ?? m.os}, ${m.arch}`]]} /></Part>}
         {m && row.server && <Part title={t.cards.priority}><p className="server-priority"><b>1</b><span>{t.cards.serverHere}</span></p></Part>}
         <ProgramVersions id={row.id} online={row.online} programs={row.programs} canUpdate={editable} onUpdated={controls.refresh} />
+        {m && <MachineConnectionHistory machineId={m.id} />}
       </section>
       <RunningNow title={t.machines.runningNow} label={t.machines.runningOn(row.hostname)} agents={row.running.agents} parts={row.running.parts} online={row.online} me={me} />
       <section className="blk blk-side">
