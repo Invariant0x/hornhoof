@@ -45,16 +45,17 @@ The relay logs each link made or freed with the address it came from. frps logs 
 
 ## Run the tests
 
-You need Python 3.12 or newer, Git, curl and tar, on macOS or Linux. The tests use only Python's standard library. The first run downloads frps and frpc 0.71.1 from their release and checks the archive's SHA-256 before using it.
+You need Python 3.12 or newer, Git, curl, tar and openssl, on macOS or Linux. The tests use only Python's standard library. The first run downloads frps and frpc 0.71.1 from their release and checks the archive's SHA-256 before using it, and does the same for Caddy 2.11.8 with its SHA-512.
 
 From this folder:
 
 ```sh
 sh relay/test/frp.sh
+sh relay/test/caddy.sh
 python3 -m unittest discover -s relay/test -v
 ```
 
-The tests start their own relay, frps, frpc and small web server on local ports, then stop them. They never connect to the public relay. The publication checks read tracked files and files Git would add, respecting `.gitignore`. If `EDGE_PRIVATE_WORDS` names a file, or `~/.hornhoof-edge/private-words` exists, they also check that none of its private values appears in those files.
+The tests start their own relay, frps, frpc, Caddy and small web server on local ports, then stop them. They never connect to the public relay. The publication checks read tracked files and files Git would add, respecting `.gitignore`. If `EDGE_PRIVATE_WORDS` names a file, or `~/.hornhoof-edge/private-words` exists, they also check that none of its private values appears in those files.
 
 ## What is where
 
