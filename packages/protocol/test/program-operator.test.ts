@@ -55,4 +55,17 @@ describe('bounded program operator protocol', () => {
     expect(OperatorServerMessage.safeParse({ ...open, revision: -1 }).success).toBe(false);
     expect(OperatorServerMessage.parse({ type: 'program.evidence_ack', evidenceId: id })).toEqual({ type: 'program.evidence_ack', evidenceId: id });
   });
+
+  it('binds a thirty-second asking case and its permission capability to one durable program question', () => {
+    const question = { id, kind: 'permission', tool: 'Bash', text: 'Remove the agent temporary folder?', callId: 'call-1' };
+    const asked = { type: 'program.question', ...evidence, question, questionOrdinal: 1, phase: 'asked', elapsedMs: 0 };
+    expect(OperatorNodeMessage.parse(asked)).toEqual(asked);
+    expect(OperatorNodeMessage.parse({ ...asked, phase: 'cleared', elapsedMs: 29999 })).toMatchObject({ phase: 'cleared' });
+    const needed = { type: 'program.operator_needed', ...evidence, reason: 'question_waiting', questionId: id, deliveryId: null, evidenceKey: id, elapsedMs: 30000, sinceLaunchMs: 31000, exit: null };
+    expect(OperatorNodeMessage.parse(needed)).toEqual(needed);
+    expect(OperatorNodeMessage.safeParse({ ...needed, questionId: undefined }).success).toBe(false);
+    const capability = { type: 'program.operator_case', ...identity, case: id, capability: id, disposition: 'open', remainingMs: 600000, revision: 1, reason: 'question_waiting', questionId: id };
+    expect(OperatorServerMessage.parse(capability)).toEqual(capability);
+    expect(OperatorNodeMessage.safeParse({ ...asked, question: { ...question, text: 'a'.repeat(4097) } }).success).toBe(false);
+  });
 });

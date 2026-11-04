@@ -54,3 +54,25 @@ it('uses revisions per case and gives a new job its own fixed case deadline', as
   c.at(600020); c.runtime.tick();
   expect(c.runtime.failure(c.identity.agentKey)).toBe('operator_timeout');
 });
+
+it('observes questions in a typed job without inventing an assignment attempt', () => {
+  const c = fixture();
+  const key = randomUUID(), jobId = randomUUID();
+  c.runtime.begin(key, jobId, undefined, '', false);
+  c.runtime.launch(key, 'started');
+  const question = { id: randomUUID(), kind: 'permission' as const, tool: 'Bash', text: 'Remove my temporary folder?', callId: 'q' };
+  c.runtime.question(key, question);
+  c.at(29999); c.runtime.tick();
+  expect(c.sent.filter(f => f.type === 'program.operator_needed' && f.agentKey === key)).toEqual([]);
+  c.at(30000); c.runtime.tick();
+  expect(c.sent.filter(f => f.type === 'program.operator_needed' && f.agentKey === key)).toEqual([expect.objectContaining({ reason: 'question_waiting', questionId: question.id, jobId })]);
+  expect(c.sent.filter(f => f.type === 'program.delivery' && f.agentKey === key)).toEqual([]);
+});
+
+it('stops question timers on cancellation and on process restoration', () => {
+  const c = fixture();
+  c.runtime.question(c.identity.agentKey, { id: randomUUID(), kind: 'permission', tool: 'Bash', text: 'Allow?', callId: null });
+  c.runtime.intentional(c.identity.agentKey, 'cancelled');
+  c.at(30000); c.runtime.tick();
+  expect(c.sent.some(f => f.type === 'program.operator_needed' && f.reason === 'question_waiting')).toBe(false);
+});

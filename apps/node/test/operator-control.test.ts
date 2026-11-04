@@ -53,6 +53,48 @@ describe('operator key capability', () => {
     expect(await c.control.key(c.keyCommand(screen.snapshot!))).toMatchObject({ result: 'applied' });
   });
 
+  it.each(['permission', 'menu'] as const)('allows the current %s question only with its cause-five capability', async kind => {
+    const c = fixture();
+    const id = randomUUID();
+    c.program.turnStarted = c.program.active = c.program.runningTool = true;
+    c.program.wait = { id, kind };
+    c.cells('Permission request for Bash. Remove the agent temporary folder? Yes / No');
+    c.control.openCase({ ...opened, revision: 2, reason: 'question_waiting', questionId: id });
+    const screen = await c.control.screen(c.screenCommand);
+    expect(screen).toMatchObject({ keysAllowed: true, state: 'awaiting_input', protected: false });
+    expect(await c.control.key(c.keyCommand(screen.snapshot!))).toMatchObject({ result: 'applied' });
+    expect(c.pressed).toEqual(['Enter']);
+  });
+
+  it('refuses a question key after that question stopped being current, including an awaited-capture race', async () => {
+    const c = fixture();
+    const id = randomUUID();
+    c.program.active = c.program.turnStarted = true;
+    c.program.wait = { id, kind: 'permission' };
+    c.control.openCase({ ...opened, revision: 2, reason: 'question_waiting', questionId: id });
+    let continued = false;
+    const control = new OperatorControl({ ...c.options, capture: async () => {
+      const pane = await c.options.capture();
+      if (continued) { c.program.wait = null; c.program.generation++; }
+      return pane;
+    } });
+    const screen = await control.screen(c.screenCommand);
+    expect(screen.keysAllowed).toBe(true);
+    continued = true;
+    expect(await control.key(c.keyCommand(screen.snapshot!))).toMatchObject({ result: 'refused' });
+    expect(c.pressed).toEqual([]);
+  });
+
+  it('leaves a work decision to people even if a question capability names its id', async () => {
+    const c = fixture(); const id = randomUUID();
+    c.program.wait = { id, kind: 'work' };
+    c.control.openCase({ ...opened, revision: 2, reason: 'question_waiting', questionId: id });
+    const screen = await c.control.screen(c.screenCommand);
+    expect(screen.keysAllowed).toBe(false);
+    expect(await c.control.key(c.keyCommand(screen.snapshot!))).toMatchObject({ result: 'refused' });
+    expect(c.pressed).toEqual([]);
+  });
+
   it('keeps an observation-only incident read-only even at a harmless input wait', async () => {
     const c = fixture(); c.program.wait = { id: 'question-1', kind: 'harmless' };
     c.control.openCase({ ...opened, revision: 2, readOnly: true });
@@ -106,11 +148,11 @@ describe('operator key capability', () => {
     expect(c.pressed).toEqual([]);
   });
 
-  it('does not treat an unknown or permission event as a harmless asking state', async () => {
+  it('does not treat an unbound permission event as a cause-five capability', async () => {
     const c = fixture(); c.program.wait = { id: 'permission-1', kind: 'permission' };
     const screen = await c.control.screen(c.screenCommand);
     expect(screen.keysAllowed).toBe(false);
-    expect(await c.control.key(c.keyCommand(screen.snapshot!))).toMatchObject({ result: 'refused', reason: 'protected_screen' });
+    expect(await c.control.key(c.keyCommand(screen.snapshot!))).toMatchObject({ result: 'refused', reason: 'input_not_proven' });
   });
 
   it('rejects Escape even if called directly without the transport parser', async () => {

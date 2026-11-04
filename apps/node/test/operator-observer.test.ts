@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { OperatorEvidence } from '@hornhoof/protocol/program-operator';
+import type { OperatorEvidence, OperatorQuestion } from '@hornhoof/protocol/program-operator';
 import { afterEach, describe, expect, it } from 'vitest';
 import { OperatorObserver } from '../src/terminal/operator-observer.js';
 
@@ -28,6 +28,36 @@ function fixture() {
 }
 
 describe('program delivery evidence', () => {
+  it('calls once at thirty seconds of the same authenticated question and does not restart its clock on a repeated observation', () => {
+    const c = fixture();
+    const question: OperatorQuestion = { id: deliveryId, kind: 'permission', tool: 'Bash', text: 'Remove the agent temporary folder?', callId: 'call-1' };
+    c.observer.question(identity, null);
+    c.observer.question(identity, question);
+    c.at(29999); c.observer.question(identity, question); c.observer.tick();
+    expect(c.alarms()).toEqual([]);
+    c.at(30000); c.observer.tick(); c.at(60000); c.observer.tick();
+    expect(c.alarms()).toEqual([expect.objectContaining({ reason: 'question_waiting', questionId: deliveryId, evidenceKey: deliveryId, elapsedMs: 30000 })]);
+    const restored = new OperatorObserver(c.options); restored.replay(); restored.tick();
+    const alarmIds = c.alarms().map(fact => fact.evidenceId);
+    expect(new Set(alarmIds).size).toBe(1);
+  });
+
+  it('cancels the asking clock on an answer or new own event and leaves work decisions to people', () => {
+    const c = fixture();
+    const question: OperatorQuestion = { id: deliveryId, kind: 'permission', tool: 'Bash', text: 'Remove the agent temporary folder?', callId: null };
+    c.observer.question(identity, question);
+    c.at(29999); c.observer.question(identity, null); c.at(60000); c.observer.tick();
+    c.observer.question(identity, null);
+    expect(c.alarms()).toEqual([]);
+    c.observer.question(identity, { ...question, id: '10000000-0000-4000-8000-000000000005' });
+    c.at(61000); c.observer.activity(identity); c.at(120000); c.observer.tick();
+    expect(c.alarms()).toEqual([]);
+    c.observer.question(identity, { ...question, id: '10000000-0000-4000-8000-000000000006', kind: 'work', tool: 'AskUserQuestion' });
+    c.at(240000); c.observer.tick();
+    expect(c.alarms()).toEqual([]);
+    expect(c.sent.filter(fact => fact.type === 'program.question' && fact.phase === 'cleared')).toHaveLength(2);
+  });
+
   it('starts the assignment clock at attempt and calls exactly once at 60 seconds without a receipt', () => {
     const c = fixture(); c.attempt();
     c.at(59999); c.observer.tick(); expect(c.alarms()).toEqual([]);

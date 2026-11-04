@@ -1,12 +1,13 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
-import { ASSIGNMENT_RECEIPT_MS, FIRST_ACTIVITY_MS, OperatorNodeMessage, STARTUP_EXIT_MS, type OperatorDelivery, type OperatorEvidence, type OperatorReason } from '@hornhoof/protocol/program-operator';
+import { ASSIGNMENT_RECEIPT_MS, FIRST_ACTIVITY_MS, OperatorNodeMessage, OperatorQuestion, QUESTION_WAIT_MS, STARTUP_EXIT_MS, type OperatorDelivery, type OperatorEvidence, type OperatorReason } from '@hornhoof/protocol/program-operator';
 import { z } from 'zod';
 import { readOperatorStore, writeOperatorStore } from './operator-storage.js';
 
 const Identity = z.object({ agentKey: z.uuid(), jobId: z.uuid().nullable(), instance: z.uuid() });
 export type OperatorIdentity = z.infer<typeof Identity>;
-const Instance = Identity.extend({ at: z.number(), startedAt: z.number().nullable(), active: z.boolean(), exited: z.boolean(), ordinal: z.number().int().nonnegative(), phases: z.array(z.enum(['attempt', 'started', 'failed'])), alarmed: z.boolean() });
+const Question = z.object({ data: OperatorQuestion, jobId: z.uuid().nullable(), at: z.number(), ordinal: z.number().int().positive(), alarmed: z.boolean() });
+const Instance = Identity.extend({ at: z.number(), startedAt: z.number().nullable(), active: z.boolean(), exited: z.boolean(), ordinal: z.number().int().nonnegative(), phases: z.array(z.enum(['attempt', 'started', 'failed'])), alarmed: z.boolean(), question: Question.nullable().default(null), questionOrdinal: z.number().int().nonnegative().default(0) });
 const Delivery = Identity.extend({ id: z.uuid(), ordinal: z.number().int().positive(), kind: z.enum(['assignment', 'live']), digest: z.string(), at: z.number(), receiptAt: z.number().nullable(), active: z.boolean(), outcome: z.enum(['pending', 'taken', 'not_taken', 'cancelled']), phases: z.array(z.enum(['attempt', 'queued', 'taken', 'activity', 'not_taken', 'cancelled'])), alarms: z.array(z.string()) });
 const StoredEvidence = OperatorNodeMessage.refine((frame): frame is OperatorEvidence => 'evidenceId' in frame);
 const Store = z.object({ instances: z.record(z.string(), Instance), deliveries: z.record(z.string(), Delivery), outbox: z.array(StoredEvidence) });
@@ -64,6 +65,7 @@ export class OperatorObserver {
   activity(identity: OperatorIdentity): void {
     const instance = this.state.instances[identity.instance];
     if (!instance || instance.exited) return;
+    this.clearQuestion(instance);
     instance.active = true;
     for (const delivery of Object.values(this.state.deliveries)) {
       if (delivery.instance !== identity.instance || delivery.jobId !== identity.jobId || delivery.active) continue;
@@ -82,6 +84,7 @@ export class OperatorObserver {
 
   tick(): void {
     if (!this.options.connected()) return;
+    for (const instance of Object.values(this.state.instances)) this.checkQuestion(instance);
     for (const delivery of Object.values(this.state.deliveries)) this.checkDelivery(delivery);
   }
 
@@ -97,6 +100,7 @@ export class OperatorObserver {
   exit(identity: OperatorIdentity, exit: Exit, cause?: ExitCause): void {
     const instance = this.state.instances[identity.instance];
     if (!instance || instance.exited) return;
+    this.clearQuestion(instance);
     instance.exited = true;
     const elapsedMs = this.elapsed(instance.startedAt ?? instance.at);
     if (!cause && !instance.active && !instance.alarmed && elapsedMs <= STARTUP_EXIT_MS) {
@@ -142,6 +146,46 @@ export class OperatorObserver {
     this.emit(instance, { type: 'program.operator_needed', ...this.identity(delivery), reason, deliveryId: delivery.id, evidenceKey: delivery.id, elapsedMs: this.elapsed(delivery.at), sinceLaunchMs: this.elapsed(instance.startedAt ?? instance.at), exit: null });
   }
 
+  question(identity: OperatorIdentity, input: OperatorQuestion | null): void {
+    const instance = this.instance(identity);
+    if (instance.exited) return;
+    const incoming = input && OperatorQuestion.parse(input);
+    if (incoming && incoming.id === instance.question?.data.id) {
+      if (JSON.stringify(incoming) !== JSON.stringify(instance.question?.data)) throw new Error('A question identity cannot change its request.');
+      return;
+    }
+    this.room(Number(Boolean(instance.question)) + Number(Boolean(incoming)));
+    this.clearQuestion(instance);
+    if (!incoming) return;
+    const question = { data: incoming, jobId: identity.jobId, at: this.now(), ordinal: ++instance.questionOrdinal, alarmed: false };
+    instance.question = question;
+    this.questionFact(instance, question, 'asked');
+  }
+
+  private clearQuestion(instance: Instance): void {
+    const question = instance.question;
+    if (!question) return;
+    this.room(1);
+    instance.question = null;
+    this.questionFact(instance, question, 'cleared');
+  }
+
+  private questionFact(instance: Instance, question: z.infer<typeof Question>, phase: 'asked' | 'cleared'): void {
+    this.emit(instance, { type: 'program.question', ...this.identity(instance), jobId: question.jobId, question: question.data, questionOrdinal: question.ordinal, phase, elapsedMs: this.elapsed(question.at) });
+  }
+
+  private checkQuestion(instance: Instance): void {
+    const question = instance.question;
+    if (instance.exited || !question || question.alarmed || question.data.kind === 'work' || this.elapsed(question.at) < QUESTION_WAIT_MS) return;
+    this.room(1);
+    question.alarmed = true;
+    this.emit(instance, { type: 'program.operator_needed', ...this.identity(instance), jobId: question.jobId, reason: 'question_waiting', deliveryId: null, questionId: question.data.id, evidenceKey: question.data.id, elapsedMs: this.elapsed(question.at), sinceLaunchMs: this.elapsed(instance.startedAt ?? instance.at), exit: null });
+  }
+
+  private room(count: number): void {
+    if (this.state.outbox.length + count > MAX_PENDING) throw new Error('The program evidence outbox is full.');
+  }
+
   private deliveryFact(delivery: Delivery, phase: Delivery['phases'][number]): void {
     if (delivery.phases.includes(phase)) return;
     delivery.phases.push(phase);
@@ -158,7 +202,7 @@ export class OperatorObserver {
 
   private identity(value: OperatorIdentity): OperatorIdentity { return { agentKey: value.agentKey, jobId: value.jobId, instance: value.instance }; }
   private instance(identity: OperatorIdentity): Instance {
-    return this.state.instances[identity.instance] ??= { ...identity, at: this.now(), startedAt: null, active: false, exited: false, ordinal: 0, phases: [], alarmed: false };
+    return this.state.instances[identity.instance] ??= { ...identity, at: this.now(), startedAt: null, active: false, exited: false, ordinal: 0, phases: [], alarmed: false, question: null, questionOrdinal: 0 };
   }
   private elapsed(at: number): number { return Math.max(0, Math.floor(this.now() - at)); }
 

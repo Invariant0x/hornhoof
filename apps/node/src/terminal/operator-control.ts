@@ -1,23 +1,23 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { OPERATOR_CASE_MS, OPERATOR_CELLS_BYTES, OPERATOR_MAX_KEYS, OPERATOR_SNAPSHOT_MS, OperatorError, OperatorKey, type OperatorKeyResult, type OperatorScreen, type OperatorServerMessage } from '@hornhoof/protocol/program-operator';
+import { OPERATOR_CASE_MS, OPERATOR_CELLS_BYTES, OPERATOR_MAX_KEYS, OPERATOR_SNAPSHOT_MS, OperatorError, OperatorKey, OperatorReason, type OperatorKeyResult, type OperatorScreen, type OperatorServerMessage } from '@hornhoof/protocol/program-operator';
 import { z } from 'zod';
 import { redact } from '../redact.js';
 import type { OperatorIdentity } from './operator-observer.js';
 import { readOperatorStore, writeOperatorStore } from './operator-storage.js';
 
-export type OperatorProgram = OperatorIdentity & { generation: number; agentProgram: boolean; alive: boolean; pasted: boolean; turnStarted: boolean; active: boolean; runningTool: boolean; retrying: boolean; wait: { id: string; kind: 'harmless' | 'permission' | 'unknown' } | null };
+export type OperatorProgram = OperatorIdentity & { generation: number; agentProgram: boolean; alive: boolean; pasted: boolean; turnStarted: boolean; active: boolean; runningTool: boolean; retrying: boolean; wait: { id: string; kind: 'harmless' | 'permission' | 'menu' | 'protected' | 'work' | 'unknown' } | null };
 type CaseCommand = Extract<OperatorServerMessage, { type: 'program.operator_case' }>;
 type ScreenCommand = Extract<OperatorServerMessage, { type: 'program.screen_get' }>;
 type KeyCommand = Omit<Extract<OperatorServerMessage, { type: 'program.key_send' }>, 'key'> & { key: unknown };
 type Pane = { cols: number; rows: number; cells: string };
 type Options = { file: string; current(): OperatorProgram | null; capture(): Promise<Pane>; press(key: OperatorKey): Promise<void>; lane<T>(run: () => Promise<T>): Promise<T>; secrets(): string[]; now?(): number };
-const Case = z.object({ instance: z.uuid(), agentKey: z.uuid(), jobId: z.uuid().nullable(), digest: z.string(), revision: z.number(), deadline: z.number(), revoked: z.boolean(), readOnly: z.boolean().default(false), actions: z.number(), lastRead: z.number().nullable() });
+const Case = z.object({ instance: z.uuid(), agentKey: z.uuid(), jobId: z.uuid().nullable(), digest: z.string(), revision: z.number(), deadline: z.number(), revoked: z.boolean(), readOnly: z.boolean().default(false), reason: OperatorReason.nullable().default(null), questionId: z.uuid().nullable().default(null), actions: z.number(), lastRead: z.number().nullable() });
 const Action = z.object({ digest: z.string(), result: z.enum(['requested', 'applied', 'refused', 'unknown']), reason: OperatorError.nullable() });
 const State = z.object({ cases: z.record(z.string(), Case), actions: z.record(z.string(), Action) });
 type State = z.infer<typeof State>;
 type Snapshot = { token: string; case: string; instance: string; generation: number; hash: string; at: number; used: boolean; protected: boolean };
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
-const sensitive = /terms|conditions|consent|privacy|telemetry|data.?sharing|sign.?in|log.?in|password|verification|one.time|two.factor|payment|billing|credit.card|purchase|upgrade|permission|authoriz|authenticat|token|api.?key|credential|qr.?code|услови|согласи|парол|войти|вход|код подтверж|оплат|тариф|передач.{0,25}данн/iu;
+const sensitive = /terms|conditions|consent|privacy|telemetry|data.?sharing|sign.?in|log.?in|password|verification|one.time|two.factor|payment|billing|credit.card|purchase|upgrade|authenticat|access.?token|auth.?token|\btoken\s*:|api.?key|credential|qr.?code|услови|согласи|парол|войти|вход|код подтверж|оплат|тариф|передач.{0,25}данн/iu;
 
 /* Keep SGR styling only. OSC links/clipboard and other terminal controls cannot become picture content or input. */
 export function operatorCells(cells: string, secrets: string[]): string {
@@ -44,7 +44,7 @@ export class OperatorControl {
     const old = this.state.cases[command.case];
     if (old && old.revision >= command.revision) return false;
     const deadline = this.now() + Math.min(command.remainingMs, OPERATOR_CASE_MS);
-    this.state.cases[command.case] = { instance: command.instance, agentKey: command.agentKey, jobId: command.jobId, digest: hash(command.capability), revision: command.revision, deadline: old ? Math.min(old.deadline, deadline) : deadline, revoked: command.disposition === 'revoke', readOnly: command.readOnly ?? false, actions: old?.actions ?? 0, lastRead: old?.lastRead ?? null };
+    this.state.cases[command.case] = { instance: command.instance, agentKey: command.agentKey, jobId: command.jobId, digest: hash(command.capability), revision: command.revision, deadline: old ? Math.min(old.deadline, deadline) : deadline, revoked: command.disposition === 'revoke', readOnly: command.readOnly ?? false, reason: command.reason ?? null, questionId: command.questionId ?? null, actions: old?.actions ?? 0, lastRead: old?.lastRead ?? null };
     this.snapshot = null;
     this.save();
     return true;
@@ -63,7 +63,7 @@ export class OperatorControl {
       const cells = operatorCells(pane.cells, this.options.secrets());
       if (Buffer.byteLength(cells) > OPERATOR_CELLS_BYTES || pane.cols < 1 || pane.cols > 512 || pane.rows < 1 || pane.rows > 256) return this.noScreen(command, 'input_not_proven');
       const after = this.options.current();
-      const forbidden = this.caseRefusal(command) ?? (row.readOnly ? 'operator_forbidden' : this.keyRefusal(after, cells));
+      const forbidden = this.caseRefusal(command) ?? (row.readOnly ? 'operator_forbidden' : this.keyRefusal(after, cells, this.state.cases[command.case]));
       const changed = after?.generation !== current.generation;
       const token = randomUUID();
       this.snapshot = { token, case: command.case, instance: command.instance, generation: current.generation, hash: hash(cells), at: this.now(), used: false, protected: this.protected(after, cells) };
@@ -93,7 +93,7 @@ export class OperatorControl {
     if (refusal) return this.complete(command, 'refused', refusal);
     try {
       /* press launches send-keys synchronously before yielding. No await may separate this final evidence check. */
-      const final = this.keyCaseRefusal(command) ?? this.keyRefusal(this.options.current(), '');
+      const final = this.keyCaseRefusal(command) ?? this.keyRefusal(this.options.current(), '', this.state.cases[command.case]);
       if (final) return this.complete(command, 'refused', final);
       const snapshot = this.snapshot;
       if (!snapshot || snapshot.used || snapshot.token !== command.snapshot || this.options.current()?.generation !== snapshot.generation) return this.complete(command, 'refused', 'snapshot_stale');
@@ -108,7 +108,7 @@ export class OperatorControl {
   private async beforeKey(command: KeyCommand): Promise<OperatorError | null> {
     const snap = this.snapshot;
     const state = this.options.current();
-    const busy = this.keyRefusal(state, '');
+    const busy = this.keyRefusal(state, '', this.state.cases[command.case]);
     if (busy) return busy;
     if (!snap || snap.used || snap.case !== command.case || snap.instance !== command.instance || snap.token !== command.snapshot || snap.generation !== command.generation || snap.generation !== state?.generation || this.now() - snap.at >= OPERATOR_SNAPSHOT_MS) return 'snapshot_stale';
     if (snap.protected) return 'protected_screen';
@@ -116,7 +116,7 @@ export class OperatorControl {
     try { pane = await this.options.capture(); } catch { return 'node_unavailable'; }
     const cells = operatorCells(pane.cells, this.options.secrets());
     const after = this.options.current();
-    const denied = this.keyCaseRefusal(command) ?? this.keyRefusal(after, cells);
+    const denied = this.keyCaseRefusal(command) ?? this.keyRefusal(after, cells, this.state.cases[command.case]);
     if (denied) return denied;
     return this.snapshot !== snap || snap.generation !== after?.generation || snap.hash !== hash(cells) ? 'snapshot_stale' : null;
   }
@@ -141,13 +141,16 @@ export class OperatorControl {
   }
 
   private protected(program: OperatorProgram | null, cells: string): boolean {
-    return program?.wait?.kind === 'permission' || sensitive.test(cells.replace(/\x1b\[[0-9;]*m/g, ''));
+    return program?.wait?.kind === 'protected' || cells.includes('[hidden]') || sensitive.test(cells.replace(/\x1b\[[0-9;]*m/g, ''));
   }
 
-  private keyRefusal(program: OperatorProgram | null, cells: string): OperatorError | null {
+  private keyRefusal(program: OperatorProgram | null, cells: string, incident?: z.infer<typeof Case>): OperatorError | null {
     if (this.protected(program, cells)) return 'protected_screen';
     if (!program?.agentProgram || !program.alive) return 'no_program';
-    if (program.runningTool || program.retrying) return 'program_busy';
+    if (incident?.reason === 'question_waiting' && incident.questionId !== program.wait?.id) return 'snapshot_stale';
+    if (program.retrying) return 'program_busy';
+    if (program.wait?.kind === 'permission' || program.wait?.kind === 'menu') return incident?.reason === 'question_waiting' && incident.questionId === program.wait.id ? null : 'input_not_proven';
+    if (program.runningTool) return 'program_busy';
     if (program.wait?.kind === 'harmless') return null;
     if (program.wait) return 'input_not_proven';
     return program.pasted || program.turnStarted || program.active ? 'program_busy' : null;
@@ -156,7 +159,7 @@ export class OperatorControl {
   private stage(program: OperatorProgram | null): OperatorScreen['state'] {
     if (!program?.agentProgram) return 'unknown';
     if (!program.alive) return 'gone';
-    if (program.wait?.kind === 'harmless') return 'awaiting_input';
+    if (program.wait) return 'awaiting_input';
     return this.keyRefusal(program, '') ? 'working' : 'pre_work';
   }
 

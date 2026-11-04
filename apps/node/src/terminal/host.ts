@@ -4,7 +4,7 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { TERM_CHUNK, UNHEARD_MS, type AgentEvent, type Failure, type Limits, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
-import type { OperatorDelivery, OperatorServerMessage } from '@hornhoof/protocol/program-operator';
+import type { OperatorDelivery, OperatorQuestion, OperatorServerMessage } from '@hornhoof/protocol/program-operator';
 import { agyRules, COLORS_NOT_TAKEN, colorsNotTaken, pastColors, SETUP_NEEDED } from '../providers/antigravity.js';
 import { claudeEvents, claudeInterrupted } from '../providers/claude.js';
 import type { ProgramRetry } from '@hornhoof/protocol/map';
@@ -32,6 +32,7 @@ import { envFile, type Tmux } from './tmux.js';
 import { OperatorRuntime, type OperatorOptions } from './operator-runtime.js';
 import { ownThought } from './operator-activity.js';
 import type { OperatorProgram } from './operator-control.js';
+import { operatorQuestion } from './operator-question.js';
 
 /* An agent's turn in its terminal: which program, where it keeps its sign-in, and what the runner hands every program. */
 export type TermJob = { key: string; program: TermProgram; bin: string; home: string; signedOut: RegExp; input: RunInput; version?: () => Promise<string | null>; operatorDelivery?: OperatorDelivery };
@@ -160,6 +161,7 @@ type Agent = {
   calls: Map<string, Pending>;
   closedCalls: Set<string>;
   question: Pending | null;
+  operatorQuestion?: OperatorQuestion | null;
   ends: TurnEnds;
   signAt: number;
   retry: ProgramRetry | null;
@@ -371,7 +373,7 @@ export class TerminalHost {
   private operatorState(key: string): Omit<OperatorProgram, 'agentKey' | 'jobId' | 'instance' | 'generation'> | null {
     const a = this.agents.get(key); if (!a) return null;
     this.drain(a);
-    const wait = a.question ? { id: `${a.question.at}:${a.question.name}`, kind: a.question.name === 'AskUserQuestion' ? 'harmless' as const : a.question.name === 'Permission' ? 'permission' as const : 'unknown' as const } : null;
+    const wait = a.operatorQuestion ? { id: a.operatorQuestion.id, kind: a.operatorQuestion.kind } : null;
     return { agentProgram: Boolean(a.program && a.hash), alive: true, pasted: false, turnStarted: a.took === true, active: false, runningTool: [...a.calls.values()].some(call => call.name !== 'AskUserQuestion'), retrying: Boolean(a.retry || a.restarting), wait };
   }
 
@@ -965,6 +967,7 @@ export class TerminalHost {
   }
 
   private beginTurn(a: Agent): void {
+    this.clearQuestion(a);
     a.ends.begin();
     a.programTurnId = undefined;
     a.calls.clear();
@@ -988,6 +991,7 @@ export class TerminalHost {
     const decision = a.ends.end(end.status, this.stoppable(a) || Boolean(blocked && a.turn), id);
     if (decision.conflict) this.log(`Agent ${a.key} (${a.program?.kind}): turn end channels disagree. The first end was kept.`);
     if (!decision.accept) return;
+    this.clearQuestion(a);
     this.operator?.intentional(a.key, end.status === 'stopped' ? 'cancelled' : 'completed');
     if (a.turn) this.endWords(a, a.turn);
     a.busy = false;
@@ -1169,7 +1173,7 @@ export class TerminalHost {
       }
       const raw = isRecord(data) ? data : {};
       this.receivedWords(a, raw);
-      if (a.program && activeTurn(a) && ownThought(a.program.kind, raw, a.programTurnId)) this.operator?.activity(a.key);
+      if (a.program && activeTurn(a) && ownThought(a.program.kind, raw, a.programTurnId)) this.ownActivity(a);
       if (a.program?.kind === 'antigravity') {
         this.agyNews(a, data);
         continue;
@@ -1258,13 +1262,28 @@ export class TerminalHost {
   private mergeCalls(a: Agent, calls: ReturnType<typeof hookCalls>): void {
     if (calls.began.length || calls.ended.length) a.retry = null;
     for (const id of calls.ended) {
-      if (a.calls.get(id)?.name === a.question?.name) a.question = null;
+      if (!a.closedCalls.has(id)) this.ownActivity(a);
       a.calls.delete(id);
       a.closedCalls.add(id);
     }
     for (const { id, name } of calls.began) {
-      if (!a.calls.has(id) && !a.closedCalls.has(id)) a.calls.set(id, { name, at: Date.now() });
+      if (!a.calls.has(id) && !a.closedCalls.has(id)) {
+        this.ownActivity(a);
+        a.calls.set(id, { name, at: Date.now() });
+      }
     }
+  }
+
+  private clearQuestion(a: Agent): void {
+    if (!a.operatorQuestion) return;
+    a.operatorQuestion = null;
+    a.question = null;
+    this.operator?.question(a.key, null);
+  }
+
+  private ownActivity(a: Agent): void {
+    this.clearQuestion(a);
+    this.operator?.activity(a.key);
   }
 
   private agyNews(a: Agent, data: unknown): void {
@@ -1328,7 +1347,7 @@ export class TerminalHost {
   private emit(a: Agent, event: AgentEvent): void {
     const turn = activeTurn(a);
     if (!turn) return;
-    if (event.kind === 'text' || event.kind === 'tool') this.operator?.activity(a.key);
+    if (event.kind === 'text') this.ownActivity(a);
     if (event.kind === 'text') { a.lastText = event.text; a.retry = null; }
     if (!turn.typed) return turn.onEvent(event);
     this.typedEvent(turn, event);
@@ -1353,11 +1372,14 @@ export class TerminalHost {
       case 'toolfail':
       case 'ask':
         if (!this.stoppable(a)) return;
+        this.drain(a);
         this.operator?.changed(a.key);
-        if (event === 'tool' || event === 'ask') this.operator?.activity(a.key);
         this.mergeCalls(a, hookCalls(event, data));
-        if (event === 'ask') a.question = { name: String(data.tool_name ?? 'Permission'), at: Date.now(), asking: true };
-        if ((event === 'tooldone' || event === 'toolfail') && a.question?.name === data.tool_name) a.question = null;
+        if (event === 'ask') {
+          a.operatorQuestion = operatorQuestion(data, this.opts.secrets(), a.operatorQuestion);
+          a.question = { name: String(data.tool_name ?? 'Permission'), at: Date.now(), asking: true };
+          this.operator?.question(a.key, a.operatorQuestion);
+        } else if ((event === 'tooldone' || event === 'toolfail') && a.question?.name === data.tool_name) this.clearQuestion(a);
         return;
       case 'interrupt':
         this.drain(a);
@@ -1555,6 +1577,7 @@ export class TerminalHost {
   private bindTyped(a: Agent, turn: Turn, m: Msg<'turn.opened'>, early: AgentEvent[]): void {
     if (m.jobId && m.toolToken) {
       turn.jobId = m.jobId;
+      if (a.turn === turn) this.operator?.begin(a.key, m.jobId, undefined, '', true);
       turn.words?.bind(m.jobId);
       turn.toolToken = m.toolToken;
       turn.observed!.watch.bind(m.jobId, Date.now());

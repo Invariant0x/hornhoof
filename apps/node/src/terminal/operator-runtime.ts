@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { z } from 'zod';
-import type { OperatorDelivery, OperatorNodeMessage, OperatorServerMessage } from '@hornhoof/protocol/program-operator';
+import type { OperatorDelivery, OperatorNodeMessage, OperatorQuestion, OperatorServerMessage } from '@hornhoof/protocol/program-operator';
 import { OperatorControl, type OperatorProgram } from './operator-control.js';
 import { OperatorObserver, type OperatorIdentity } from './operator-observer.js';
 
@@ -29,7 +29,7 @@ export class OperatorRuntime {
   }
 
   begin(key: string, jobId: string | null, metadata: OperatorDelivery | undefined, words: string, reuse: boolean): void {
-    if (!metadata || !z.uuid().safeParse(key).success || !jobId) return;
+    if (!z.uuid().safeParse(key).success || !z.uuid().safeParse(jobId).success) return;
     let target = this.targets.get(key);
     if (!target || !reuse) {
       const identity = { agentKey: key, jobId, instance: randomUUID() };
@@ -37,11 +37,11 @@ export class OperatorRuntime {
       target = { identity, control, generation: 0, physical: reuse, pasted: reuse, started: reuse, active: reuse, recorded: false, taken: false, assignment: null, caseId: null, deadline: null, failed: null };
       this.targets.set(key, target);
     }
-    if (target.identity.jobId !== jobId || target.assignment?.id !== metadata.id) { target.caseId = null; target.deadline = null; target.failed = null; }
+    if (target.identity.jobId !== jobId || target.assignment?.id !== metadata?.id) { target.caseId = null; target.deadline = null; target.failed = null; }
     target.identity = { ...target.identity, jobId };
-    target.assignment = metadata; target.recorded = false; target.taken = false;
+    target.assignment = metadata ?? null; target.recorded = false; target.taken = false;
     target.generation++; target.intentional = undefined;
-    if (words) this.observer.attempt(target.identity, metadata, 'assignment', words);
+    if (words && metadata) this.observer.attempt(target.identity, metadata, 'assignment', words);
     if (reuse && !target.physical) target.physical = true;
   }
 
@@ -63,6 +63,12 @@ export class OperatorRuntime {
     const target = this.targets.get(key); if (!target) return;
     target.active = true; target.generation++;
     this.observer.activity(target.identity);
+  }
+
+  question(key: string, question: OperatorQuestion | null): void {
+    const target = this.targets.get(key); if (!target) return;
+    target.generation++;
+    this.observer.question(target.identity, question);
   }
 
   receipt(key: string, metadata: OperatorDelivery | undefined, phase: 'queued' | 'taken' | 'not_taken' | 'cancelled'): void {
@@ -92,6 +98,7 @@ export class OperatorRuntime {
   intentional(key: string, cause: NonNullable<Target['intentional']>): void {
     const target = this.targets.get(key); if (!target) return;
     target.intentional = cause; target.generation++;
+    this.observer.question(target.identity, null);
     if (cause === 'cancelled' && target.assignment) this.observer.finalize(target.assignment.id, 'cancelled');
   }
 
