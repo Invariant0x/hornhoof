@@ -91,6 +91,8 @@ export type ErrorReason =
   | 'repo_invalid'
   | 'attachment_invalid'
   | 'attachment_unknown'
+  | 'picture_invalid'
+  | 'picture_too_big'
   | 'relay_unreachable'
   | 'link_taken'
   | 'link_reserved'
