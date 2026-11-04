@@ -14,6 +14,8 @@ export type Registry = { latest(): Promise<Build | null>; versions(): Promise<Bu
 const INDEX_TYPES = ['application/vnd.oci.image.index.v1+json', 'application/vnd.docker.distribution.manifest.list.v2+json'];
 const MANIFEST_TYPES = ['application/vnd.oci.image.manifest.v1+json', 'application/vnd.docker.distribution.manifest.v2+json'];
 const SEMVER = /^(\d+)\.(\d+)\.(\d+)$/;
+/* A commit as CI names it: every image of a build is pushed under this tag. */
+export const FULL_SHA = /^[0-9a-f]{40}$/;
 /* The Versions dialog lists this many; older ones stay reachable by their tag. */
 const MAX_VERSIONS = 20;
 const MAX_TAG_PAGES = 20;

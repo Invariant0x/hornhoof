@@ -131,6 +131,17 @@ async function candidate(ctx: Ctx, turn: ReportTurn, report: string): Promise<St
   return rows[0];
 }
 
+async function storeGroupInput(tx: Tx, turn: ReportTurn, row: Stored, group: Group, into?: string) {
+  /* A fresh stream sequence also makes live input newer than any earlier personal instruction. */
+  const [record] = await tx.update(agentEvents).set({ seq: sql`nextval(pg_get_serial_sequence('agent_events', 'seq'))`, data: messageData({ ...group.data, ...(into ? { inputShadow: true } : {}) }, group.message), ...(into ? { jobId: into } : {}) }).where(eq(agentEvents.id, row.event.id)).returning({ seq: agentEvents.seq, createdAt: agentEvents.createdAt });
+  const receipt = into ? (await tx.insert(agentEvents).values({ companyId: turn.companyId, agentId: turn.agentId, jobId: into, kind: 'typed', personId: null, data: messageData({ ...group.data, inputShadow: false, text: group.prompt }, group.message) }).returning({ seq: agentEvents.seq, createdAt: agentEvents.createdAt }))[0]! : record!;
+  return receipt;
+}
+
+async function keepReceipts(tx: Tx, receipt: Parameters<WithEvent>[1], ...callbacks: (WithEvent | undefined)[]): Promise<void> {
+  for (const keep of callbacks) await keep?.(tx, receipt);
+}
+
 async function saveGroup(ctx: Ctx, turn: ReportTurn, row: Stored, input: TurnMessage, incoming: MessageEnvelope, report: string, into?: string, kept?: WithEvent): Promise<boolean> {
   const stored = await ctx.db.transaction(async tx => {
     const [current] = await tx.select({ event: agentEvents, job: jobs }).from(agentEvents).innerJoin(jobs, eq(jobs.id, agentEvents.jobId))
@@ -140,11 +151,8 @@ async function saveGroup(ctx: Ctx, turn: ReportTurn, row: Stored, input: TurnMes
     if (!group) return false;
     const set = jobFields(group.prompt, input, into);
     await tx.update(jobs).set(set).where(eq(jobs.id, current.job.id));
-    /* A fresh stream sequence also makes live input newer than any earlier personal instruction. */
-    const [record] = await tx.update(agentEvents).set({ seq: sql`nextval(pg_get_serial_sequence('agent_events', 'seq'))`, data: messageData({ ...group.data, ...(into ? { inputShadow: true } : {}) }, group.message), ...(into ? { jobId: into } : {}) }).where(eq(agentEvents.id, row.event.id)).returning({ seq: agentEvents.seq, createdAt: agentEvents.createdAt });
-    const receipt = into ? (await tx.insert(agentEvents).values({ companyId: turn.companyId, agentId: turn.agentId, jobId: into, kind: 'typed', personId: null, data: messageData({ ...group.data, inputShadow: false, text: group.prompt }, group.message) }).returning({ seq: agentEvents.seq, createdAt: agentEvents.createdAt }))[0]! : record!;
-    await kept?.(tx, receipt);
-    await turn.withMessage?.(tx, receipt);
+    const receipt = await storeGroupInput(tx, turn, current, group, into);
+    await keepReceipts(tx, receipt, kept, turn.withMessage);
     return true;
   });
   if (stored) await publishEvent(ctx, turn.companyId, turn.agentId, row.event.id);

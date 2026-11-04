@@ -121,9 +121,7 @@ export async function messageForJob(ctx: Pick<Ctx, 'db' | 'templates'>, job: { i
     .where(and(eq(agentEvents.jobId, job.id), or(eq(agentEvents.kind, 'message'), and(eq(agentEvents.kind, 'typed'), sql`${agentEvents.data}->'_message' is not null`)))).orderBy(asc(agentEvents.seq)).limit(1);
   const saved = row && readMessage(row.data).message;
   const message = saved ?? await incomingEnvelope(ctx, job.companyId, job.agentId, row?.personId, row?.data);
-  const original = job.retryOf ?? job.continueOf;
-  if (!original) return message;
-  return { direction: 'in', from: HORNHOOF, to: message.to, notification: { source: job.retryOf ? 'machine' : 'go_on', tasks: message.notification?.tasks ?? [], detail: { en: `after turn ${original}`, ru: `после хода ${original}` } } };
+  return automaticMessage(message, job);
 }
 
 /* Agents with a job running right now. */
@@ -152,4 +150,10 @@ export async function earlierTalk(db: Db, agentId: string, limit = 20): Promise<
 /* How many agents work right now, for the map's counter. */
 export async function publishWorking(ctx: Pick<Ctx, 'db' | 'bus'>, companyId: string): Promise<void> {
   ctx.bus.publish(companyId, { type: 'working', working: await workingCount(ctx.db, companyId) });
+}
+
+function automaticMessage(message: MessageEnvelope, job: { retryOf?: string | null; continueOf?: string | null }): MessageEnvelope {
+  const original = job.retryOf ?? job.continueOf;
+  if (!original) return message;
+  return { direction: 'in', from: HORNHOOF, to: message.to, notification: { source: job.retryOf ? 'machine' : 'go_on', tasks: message.notification?.tasks ?? [], detail: { en: `after turn ${original}`, ru: `после хода ${original}` } } };
 }

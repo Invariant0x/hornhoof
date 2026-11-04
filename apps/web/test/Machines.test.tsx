@@ -411,6 +411,22 @@ describe('Machines', () => {
     expect(within(screen.getByRole('row', { name: 'ivan-mbp' })).getByTitle(note.replace('3fe094e', `3fe094e, ${language === 'en' ? 'an older one' : 'старая'}`))).toHaveTextContent(mark);
   });
 
+  it.each([
+    ['en', 'Browser failed', 'The browser for checks did not start (libnss3.so missing). Run the install command on this machine again without --join, or check the node logs.', 'Built-in node'],
+    ['ru', 'Браузер не запустился', 'Браузер для проверок не запустился (libnss3.so missing). Выполните на этой машине команду установки еще раз без --join или посмотрите журнал ноды.', 'Встроенная нода'],
+  ])('marks a machine whose browser check failed with the named reason in its row and its card in %s', async (language, mark, note, builtinName) => {
+    localStorage.setItem('hh-lang', language);
+    lists({ 'GET /api/machines': [200, { machines: [{ ...MACHINES[0]!, browserError: 'libnss3.so missing' }, { ...MACHINES[1]!, browserError: null }], builtin: { ...BUILTIN, browserError: 'libnss3.so missing' } }] });
+    render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
+    await screen.findByRole('table');
+    const row = screen.getByRole('row', { name: 'ivan-mbp' });
+    expect(within(row).getByTitle(note)).toHaveTextContent(mark);
+    expect(row.querySelectorAll('.marks > span.dim')).toHaveLength(2);
+    expect(within(screen.getByRole('row', { name: 'build-box' })).queryByText(mark)).not.toBeInTheDocument();
+    expect(within(screen.getByRole('row', { name: builtinName })).getByTitle(note)).toHaveTextContent(mark);
+    expect(within(card('ivan-mbp')).getByText(note, { selector: 'p' })).toBeInTheDocument();
+  });
+
   it('marks no machine when the server does not tell builds apart', async () => {
     lists();
     render(<Machines me={ME} />);

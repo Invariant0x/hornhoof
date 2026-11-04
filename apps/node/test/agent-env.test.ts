@@ -58,4 +58,12 @@ describe('the environment inherited by agent programs', () => {
     for (const key of Object.keys(chosen)) vi.stubEnv(key, 'machine-setting');
     expect(childEnv('/tools', chosen)).toMatchObject(chosen);
   });
+
+  it("points Playwright at the node's persistent browsers folder and disables cache garbage collection", () => {
+    vi.stubEnv('PLAYWRIGHT_BROWSERS_PATH', '/opt/ms-playwright');
+    expect(childEnv('/data/tools', {})).toMatchObject({
+      PLAYWRIGHT_BROWSERS_PATH: '/data/browsers',
+      PLAYWRIGHT_SKIP_BROWSER_GC: '1',
+    });
+  });
 });
