@@ -6,8 +6,8 @@ import { agents, jobs, machines, nodes, programDeliveries, subscriptions } from 
 import { reserveDelivery } from '../src/modules/program-operator/deliveries.js';
 import { failureCompany } from './failure-company.js';
 
-export async function operatorCompany(withOperator = false) {
-  const c = await failureCompany();
+export async function operatorCompany(withOperator = false, env: NodeJS.ProcessEnv = {}) {
+  const c = await failureCompany(env);
   await c.db.update(subscriptions).set({ kind: 'personal', provider: 'codex' }).where(eq(subscriptions.id, c.sub.id));
   const [machine] = await c.db.insert(machines).values({ companyId: c.companyId, personId: c.sub.ownerPersonId, machineKey: randomUUID(), hostname: 'Node' }).returning();
   const [node] = await c.db.insert(nodes).values({ companyId: c.companyId, machineId: machine!.id, subscriptionId: c.sub.id, keyHash: randomUUID(), status: 'ready', version: '0.6.1' }).returning();
