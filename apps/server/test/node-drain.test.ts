@@ -5,7 +5,7 @@ import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, companies, departments, jobs, machines, nodes, people, subscriptions } from '../src/db/schema.js';
+import { agents, companies, departments, jobs, machines, nodes, people, subscriptions, tasks } from '../src/db/schema.js';
 import { nodeDrain } from '../src/modules/updates/node-drain.js';
 import { as, connectNode, listen, setUpCompany, TEST_SECRET, testApp, until } from './helpers.js';
 
@@ -62,6 +62,25 @@ describe('planned node updates', () => {
     expect((await f.db.select().from(jobs).where(eq(jobs.id, f.job.id)))[0]).toMatchObject({ status: 'running', error: null });
     await f.db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, f.job.id));
     await until(async () => (await f.prepare()).json().ready === true, 5000);
+  });
+
+  it('names the machine and the turn on it to the head of Operations, and no turn elsewhere', async () => {
+    const f = await fixture({ NODE_DRAIN_MS: '50', NODE_UPDATE_RETRY_MS: '3600000' });
+    const [ops] = await f.db.insert(departments).values({ companyId: f.company.id, templateKey: 'operations', roleCode: 'OPS' }).returning();
+    const [head] = await f.db.insert(agents).values({ companyId: f.company.id, departmentId: ops!.id, subscriptionId: f.agent.subscriptionId, kind: 'head', model: '', roleKey: 'OPS-HEAD', name: 'Operations' }).returning();
+    const { key, nodeId } = await serverHostNode(f);
+    const [task] = await f.db.insert(tasks).values({ companyId: f.company.id, number: 501, title: 'A long one', body: '', createdByAgentId: f.agent.id }).returning();
+    const [turn] = await f.db.insert(jobs).values({ companyId: f.company.id, subscriptionId: f.job.subscriptionId, agentId: f.agent.id, nodeId, taskId: task!.id, kind: 'conversation', prompt: 'On the machine', status: 'running', startedAt: new Date(), timeoutMs: 900_000 }).returning();
+    const asMachine = () => f.app.inject({ method: 'POST', url: '/api/nodes/update', headers: { authorization: `Bearer ${key}` }, payload: {} });
+    await asMachine();
+    await until(async () => (await asMachine()).json().drain.state === 'postponed');
+    await until(async () => (await f.db.select().from(jobs).where(eq(jobs.agentId, head!.id))).length === 1);
+    const [notice] = await f.db.select().from(jobs).where(eq(jobs.agentId, head!.id));
+    expect(notice!.prompt).toContain('server-host');
+    expect(notice!.prompt).toContain(`${turn!.id} (#${task!.number})`);
+    expect(notice!.prompt).toContain('No running work was stopped');
+    expect(notice!.prompt).toContain('Run parts: none');
+    expect(notice!.prompt).not.toContain(f.job.id);
   });
 
   it('keeps asking within the lease while postponed, so the machine still says so until the retry', async () => {

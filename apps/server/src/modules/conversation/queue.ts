@@ -479,6 +479,8 @@ function outdated(version: string | null, need = CONVERSATION_NODE): boolean {
   return false;
 }
 
+const takesTurns = (ctx: Ctx, n: NodeRow, need: number[]): boolean => n.status === 'ready' && !outdated(n.version, need) && ctx.hub.isReady(nodeIdentity(n.id));
+
 /* moves: the agent has not been on this node until now, or leaves the machine it was on for the built-in node. */
 type Placement = { node: NodeIdentity; nodeId: string | null; moves: boolean };
 
@@ -490,8 +492,9 @@ async function placement(ctx: Ctx, agent: { id: string; nodeId: string | null; r
   const held = (node: NodeIdentity) => nodeHeldFrom(ctx, node, agent.roleKey);
   if (sub.kind === 'api_key') return ctx.hub.isReady(BUILTIN) && !held(BUILTIN) ? { node: BUILTIN, nodeId: null, moves: agent.nodeId !== null } : null;
   const all = await planNodes(ctx.db, [sub.id]);
-  const able = all.filter(n => n.status === 'ready' && !outdated(n.version, need) && ctx.hub.isReady(nodeIdentity(n.id)) && !held(nodeIdentity(n.id)));
-  const stays = all.some(n => n.id === agent.nodeId && !held(nodeIdentity(n.id))) && (await holdsWork(ctx, agent.id));
+  const free = all.filter(n => !held(nodeIdentity(n.id)));
+  const able = free.filter(n => takesTurns(ctx, n, need));
+  const stays = free.some(n => n.id === agent.nodeId) && (await holdsWork(ctx, agent.id));
   const pick = able.find(n => n.id === agent.nodeId) ?? (stays ? null : await freest(ctx, able));
   return pick ? { node: nodeIdentity(pick.id), nodeId: pick.id, moves: pick.id !== agent.nodeId } : null;
 }
@@ -804,6 +807,14 @@ async function waitsFor(ctx: Ctx, agent: { id: string; productId: string | null;
   return why(own ?? all.find(n => ctx.hub.isOnline(nodeIdentity(n.id))) ?? all[0]!);
 }
 
+/* The update its next turn waits for: of its own machine or, with that one away, of the one its plan has left. */
+async function drainInTheWay(ctx: Ctx, agent: { nodeId: string | null }, sub: { id: string; kind: 'personal' | 'api_key' }, shown: NodeIdentity | null): Promise<MachineDrain | null> {
+  if (sub.kind === 'api_key') return nodeDrain(ctx, BUILTIN);
+  const plan = (await planNodes(ctx.db, [sub.id])).map(n => nodeIdentity(n.id));
+  const own = agent.nodeId ? [nodeIdentity(agent.nodeId)] : [];
+  return [...(shown ? [shown] : []), ...own, ...plan].map(node => nodeDrain(ctx, node)).find(Boolean) ?? null;
+}
+
 /* Whether the agent can answer now and, if not, why; what it is doing and how many turns wait. */
 export async function agentState(ctx: Ctx, agentId: string): Promise<AgentState> {
   const [running] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
@@ -817,10 +828,7 @@ export async function agentState(ctx: Ctx, agentId: string): Promise<AgentState>
   const terminal = Boolean(shown && ctx.hub.hasTerminals(shown));
   const browserError = shown ? ctx.hub.browserErrorOf(shown) : null;
   const available = sub && agent ? await placement(ctx, agent, sub) : null;
-  const first = !available && sub?.kind === 'personal' ? (await planNodes(ctx.db, [sub.id])).find(n => nodeHeld(ctx, nodeIdentity(n.id))) : null;
-  /* Its turn waits for the update of its own machine or, with that one away, of the one the plan has left. */
-  const heldNode = [shown, sub?.kind === 'api_key' ? BUILTIN : null, agent?.nodeId ? nodeIdentity(agent.nodeId) : null, first ? nodeIdentity(first.id) : null].find(node => node && nodeDrain(ctx, node));
-  const drain = !available && reason === null && heldNode ? nodeDrain(ctx, heldNode) : null;
+  const drain = !available && reason === null && sub && agent ? await drainInTheWay(ctx, agent, sub, shown) : null;
   return {
     ready: reason === null,
     machineDrain: drain,

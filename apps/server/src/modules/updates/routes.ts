@@ -20,6 +20,34 @@ const HELD_AFTER_MS = 10 * 60_000;
 
 type Waiting = { companyId: string; request: UpdateRequest; stop: () => void };
 
+/* An update now stops the turns that run, on this server's computer in any company, so it goes only for as many as the
+   person saw. */
+async function requireConfirmed(ctx: Ctx, confirmed: number): Promise<void> {
+  const work = await Promise.all((await serverNodes(ctx)).map(node => drainWork(ctx, node)));
+  const turns = work.reduce((n, w) => n + w.turnsLeft, 0);
+  if (turns > confirmed) throw new ApiError(409, 'conflict', 'Confirm how many running turns this update will stop.', 'turns_would_stop', { turns });
+}
+
+function requireFreeUpdater(ctx: Ctx): void {
+  if (!ctx.updater.present()) {
+    throw new ApiError(503, 'unavailable', 'The updater is not running. Run install.sh server again to update.', 'updater_missing');
+  }
+  if (ctx.updater.status()?.state === 'running') throw new ApiError(409, 'conflict', 'An update is running already.', 'update_running');
+}
+
+async function publishedBuild(ctx: Ctx, wanted: string): Promise<Build> {
+  if (!ctx.updates.state().checkedAt) await ctx.updates.now();
+  const { latest, versions } = ctx.updates.state();
+  const build = wanted === 'latest' ? latest : versions.find(v => v.tag === wanted);
+  if (!build) throw new ApiError(400, 'validation', `There is no published build ${wanted}.`, 'version_unknown');
+  return build;
+}
+
+function howFast(body: z.infer<typeof UpdateBody>): Pick<UpdateRequest, 'urgent' | 'immediate'> {
+  if (body.urgent) return { urgent: true };
+  return body.whenIdle ? {} : { immediate: true };
+}
+
 /* The running build summary is for every signed-in person. Published builds and update controls
    are for people who see the whole company. */
 export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
@@ -115,25 +143,12 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/updates', async (req, reply) => {
     const me = await companyPerson(req);
     const body = UpdateBody.parse(req.body);
-    if (!body.whenIdle && !body.urgent) {
-      const work = await Promise.all((await serverNodes(ctx)).map(node => drainWork(ctx, node)));
-      const turns = work.reduce((n, w) => n + w.turnsLeft, 0);
-      if (turns > (body.confirmTurns ?? 0)) throw new ApiError(409, 'conflict', 'Confirm how many running turns this update will stop.', 'turns_would_stop', { turns });
-    }
-    if (!ctx.updater.present()) {
-      throw new ApiError(503, 'unavailable', 'The updater is not running. Run install.sh server again to update.', 'updater_missing');
-    }
-    if (ctx.updater.status()?.state === 'running') throw new ApiError(409, 'conflict', 'An update is running already.', 'update_running');
-    if (!ctx.updates.state().checkedAt) await ctx.updates.now();
-    const { latest, versions } = ctx.updates.state();
-    const build = body.version === 'latest' ? latest : versions.find(v => v.tag === body.version);
-    if (!build) throw new ApiError(400, 'validation', `There is no published build ${body.version}.`, 'version_unknown');
-    const request = await requestFor(build, randomUUID());
-    if (body.urgent) request.urgent = true;
-    else if (!body.whenIdle) request.immediate = true;
+    if (!body.whenIdle && !body.urgent) await requireConfirmed(ctx, body.confirmTurns ?? 0);
+    requireFreeUpdater(ctx);
+    const request = { ...(await requestFor(await publishedBuild(ctx, body.version), randomUUID())), ...howFast(body) };
     callOff();
-    if (body.whenIdle && !body.urgent) await sendWhenIdle(me.companyId, request);
-    else send(request);
+    if (request.urgent || request.immediate) send(request);
+    else await sendWhenIdle(me.companyId, request);
     return reply.code(202).send({ id: request.id });
   });
 

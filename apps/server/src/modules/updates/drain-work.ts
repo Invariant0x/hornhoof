@@ -14,18 +14,34 @@ export async function drainWork(ctx: Ctx, node: NodeIdentity) {
   return { turns, parts, turnsLeft: turns.filter(t => t.kind === 'conversation').length, partsLeft: parts.length };
 }
 
-export async function drainPostponed(ctx: Ctx, node: NodeIdentity, retryAt: string, work: Awaited<ReturnType<typeof drainWork>>): Promise<void> {
-  const [machine] = node.kind === 'node' ? await ctx.db.select({ hostname: machines.hostname }).from(nodes).innerJoin(machines, eq(machines.id, nodes.machineId)).where(eq(nodes.id, node.nodeId)) : [];
-  const name = machine?.hostname || 'the built-in node';
-  const affected = new Set([...work.turns, ...work.parts].map(t => t.companyId));
-  for (const companyId of affected) {
-    const ops = ctx.db.select({ id: departments.id }).from(departments).where(and(eq(departments.companyId, companyId), eq(departments.templateKey, 'operations')));
-    const [head] = await ctx.db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, companyId), eq(agents.kind, 'head'), inArray(agents.departmentId, ops), isNull(agents.removedAt)));
+type Work = Awaited<ReturnType<typeof drainWork>>;
+
+async function machineName(ctx: Ctx, node: NodeIdentity): Promise<string> {
+  if (node.kind === 'builtin') return 'the built-in node';
+  const [machine] = await ctx.db.select({ hostname: machines.hostname }).from(nodes).innerJoin(machines, eq(machines.id, nodes.machineId)).where(eq(nodes.id, node.nodeId));
+  return machine?.hostname || 'a machine';
+}
+
+async function headOfOperations(ctx: Ctx, companyId: string): Promise<string | null> {
+  const ops = ctx.db.select({ id: departments.id }).from(departments).where(and(eq(departments.companyId, companyId), eq(departments.templateKey, 'operations')));
+  const [head] = await ctx.db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, companyId), eq(agents.kind, 'head'), inArray(agents.departmentId, ops), isNull(agents.removedAt)));
+  return head?.id ?? null;
+}
+
+function postponedText(name: string, retryAt: string, work: Work, companyId: string): string {
+  const turns = work.turns.filter(t => t.companyId === companyId).map(t => `${t.id}${t.task ? ` (#${t.task})` : ''}`).join(', ') || 'none';
+  const parts = work.parts.filter(t => t.companyId === companyId).map(t => t.id).join(', ') || 'none';
+  return `Hornhoof postponed the planned update of ${name}: its waiting deadline expired. No running work was stopped. Turns: ${turns}. Run parts: ${parts}. It will try again at ${retryAt}.`;
+}
+
+/* Each company with work on the node hears of its own work, and only of that. */
+export async function drainPostponed(ctx: Ctx, node: NodeIdentity, retryAt: string, work: Work): Promise<void> {
+  const name = await machineName(ctx, node);
+  for (const companyId of new Set([...work.turns, ...work.parts].map(t => t.companyId))) {
+    const head = await headOfOperations(ctx, companyId);
     if (!head) continue;
-    const turns = work.turns.filter(t => t.companyId === companyId).map(t => `${t.id}${t.task ? ` (#${t.task})` : ''}`).join(', ') || 'none';
-    const parts = work.parts.filter(t => t.companyId === companyId).map(t => t.id).join(', ') || 'none';
-    const text = `Hornhoof postponed the planned update of ${name}: its waiting deadline expired. No running work was stopped. Turns: ${turns}. Run parts: ${parts}. It will try again at ${retryAt}.`;
-    await enqueueTurn(ctx, { companyId, agentId: head.id, prompt: text, createdBy: null, message: { personId: null, text, notification: { source: 'machine', tasks: [], detail: { en: name, ru: name } } } });
+    const text = postponedText(name, retryAt, work, companyId);
+    await enqueueTurn(ctx, { companyId, agentId: head, prompt: text, createdBy: null, message: { personId: null, text, notification: { source: 'machine', tasks: [], detail: { en: name, ru: name } } } });
   }
 }
 

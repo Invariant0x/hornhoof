@@ -20,6 +20,11 @@ function saying(drain: MachineDrain): string {
   return `The wait ran out with ${work} still running. Nothing was stopped, Operations was told, and it tries again at ${drain.retryAt}.`;
 }
 
+function sayOnce(io: Io, line: string, said: string): string {
+  if (line !== said) io.stdout.write(line + '\n');
+  return line;
+}
+
 async function ask(server: string, key: string): Promise<Asked> {
   try {
     const res = await fetch(`${server}/api/nodes/update`, { method: 'POST', headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' }, body: '{}', signal: AbortSignal.timeout(ASK_MS) });
@@ -46,12 +51,10 @@ export async function waitUpdate(dir: string, io: Io, sleep = (ms: number) => ne
   for (;;) {
     const asked = await ask(state.server, state.key);
     if (asked.kind === 'too_old') return SERVER_TOO_OLD;
-    if (asked.kind === 'answer' && asked.answer.ready) return 0;
     if (asked.kind === 'answer') {
+      if (asked.answer.ready) return 0;
       tries = 0;
-      const line = saying(asked.answer.drain);
-      if (line !== said) io.stdout.write(line + '\n');
-      said = line;
+      said = sayOnce(io, saying(asked.answer.drain), said);
       await sleep(asked.answer.pollAfterMs);
       continue;
     }
