@@ -7,6 +7,8 @@ export default defineConfig({
   server: { proxy: { '/api': { target: 'http://localhost:8080', ws: true } } },
   test: {
     environment: 'jsdom',
+    /* UTC fixtures keep exact clock assertions independent of the host timezone. */
+    env: { TZ: 'UTC' },
     setupFiles: ['./test/setup.ts'],
     include: ['test/**/*.test.ts', 'test/**/*.test.tsx'],
     testTimeout: 20000,
