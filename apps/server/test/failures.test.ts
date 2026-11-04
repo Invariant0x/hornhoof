@@ -5,6 +5,7 @@ import { agentEvents, agents, jobs, tasks } from '../src/db/schema.js';
 import { decisionPrincipal } from '../src/modules/conversation/decision-context.js';
 import { said } from '../src/modules/conversation/live.js';
 import { enqueueTurn, GONE_ALONG, insertTurn, pump } from '../src/modules/conversation/queue.js';
+import { appendEvent, messageForJob } from '../src/modules/events/store.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import { cancelJob, wakeAll } from '../src/modules/tasks/wake.js';
 import { failureCompany } from './failure-company.js';
@@ -131,6 +132,34 @@ describe('named turn failures', () => {
     await c.fail(id, failure('overloaded'));
     const messages = await c.db.select().from(agentEvents).where(and(eq(agentEvents.agentId, c.agent.id), eq(agentEvents.kind, 'message')));
     expect(messages.filter(e => (e.data as { text: string }).text.includes(prompt))).toHaveLength(1);
+  });
+
+  it('keeps an employee message envelope and a CEO principal across conversation retries', async () => {
+    const c = await failureCompany();
+    const id = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.agent.id, prompt: 'Check the logs.', createdBy: null, message: { personId: null, text: 'Check the logs.', from: 'agent', by: c.head.id, name: c.head.name } });
+    const original = await messageForJob(c.ctx, { id, companyId: c.companyId, agentId: c.agent.id });
+    expect(original).toMatchObject({ direction: 'in', from: { kind: 'agent', id: c.head.id } });
+    await c.fail(id, failure('overloaded'));
+    const retry = (await c.turnsOf()).find(j => j.continueOf === id)!;
+    expect(await messageForJob(c.ctx, { id: retry.id, companyId: c.companyId, agentId: c.agent.id })).toEqual(original);
+
+    const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    const silent = await insertTurn(c.ctx, { companyId: c.companyId, agentId: orchestrator!.id, prompt: '', createdBy: c.sub.ownerPersonId, answersCeo: true });
+    await c.db.update(jobs).set({ status: 'running', startedAt: new Date() }).where(eq(jobs.id, silent));
+    await c.fail(silent, failure('overloaded'));
+    const silentRetry = (await c.turnsOf(orchestrator!.id)).find(j => j.continueOf === silent)!;
+    await c.db.update(jobs).set({ notBefore: new Date(Date.now() - 1) }).where(eq(jobs.id, silentRetry.id));
+    await pump(c.ctx, orchestrator!.id);
+    expect(await decisionPrincipal(c.db, silentRetry.id)).toMatchObject({ personId: c.sub.ownerPersonId });
+
+    const withNotice = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: orchestrator!.id, prompt: 'Approve it.', createdBy: c.sub.ownerPersonId, message: { personId: c.sub.ownerPersonId, text: 'Approve it.' } });
+    await appendEvent(c.ctx, { companyId: c.companyId, agentId: orchestrator!.id, jobId: withNotice, kind: 'message', data: { text: 'Checks passed.', from: 'agent', by: c.head.id } });
+    await c.fail(withNotice, failure('overloaded'));
+    const noticeRetry = (await c.turnsOf(orchestrator!.id)).find(j => j.continueOf === withNotice)!;
+    await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, silentRetry.id));
+    await c.db.update(jobs).set({ notBefore: new Date(Date.now() - 1) }).where(eq(jobs.id, noticeRetry.id));
+    await pump(c.ctx, orchestrator!.id);
+    expect(await decisionPrincipal(c.db, noticeRetry.id)).toMatchObject({ personId: c.sub.ownerPersonId });
   });
 
   it.each([undefined, 'network', 'refused'] as const)('checks carried tasks after %s without changing the own task follow-up', async kind => {

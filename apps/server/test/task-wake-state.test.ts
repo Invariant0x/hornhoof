@@ -73,6 +73,7 @@ describe('task wake policy in the database', () => {
       { why: 'turn_review', initial: { status: 'review', stage: 1, panel: [c.reviewer.id] }, next: { stage: 2 }, receiver: c.reviewer.id, stale: true },
       { why: 'review', initial: { panel: [c.reviewer.id] }, receiver: c.reviewer.id, stale: true },
       { why: 'review', initial: { status: 'review', stage: 1, panel: [c.worker.id] }, receiver: c.reviewer.id, stale: true },
+      { why: 'comment', initial: { stage: 0, panel: [c.reviewer.id] }, receiver: c.reviewer.id, stale: true },
       { why: 'updated', next: { assigneeAgentId: c.head.id }, stale: true },
       { why: 'comment', stale: false },
       ...(['done', 'reported', 'reviewed', 'review_passed'] as const).map(why => ({ why, next: { status: 'done' as const, closedAt: new Date() }, receiver: c.head.id, stale: false })),
@@ -220,5 +221,23 @@ describe('task wake policy in the database', () => {
     expect(await discardStaleTurn(c.db, alert)).toBe(false);
     await c.db.update(tasks).set({ status: 'done', closedAt: new Date() }).where(eq(tasks.id, blocked.id));
     expect(await discardStaleTurn(c.db, alert)).toBe(true);
+  });
+
+  it('keeps a direct task message to another employee until the task is cancelled', async () => {
+    const c = await fixture();
+    const task = await c.task({ externalWait: { reason: 'CI', since: new Date().toISOString(), until: new Date(Date.now() + 60_000).toISOString() } });
+    const direct = await c.job(task, c.head.id);
+    await c.db.insert(agentEvents).values({
+      companyId: task.companyId,
+      agentId: c.head.id,
+      jobId: direct.id,
+      kind: 'message',
+      data: { text: 'Update for head.', task: { id: task.id, number: task.number }, taskWake: { ...taskWakeOf(task, { why: 'comment' }), why: 'message', to: c.head.id } },
+    });
+    expect(await discardStaleTurn(c.db, direct)).toBe(false);
+    await c.db.update(tasks).set({ status: 'done', closedAt: new Date(), externalWait: null }).where(eq(tasks.id, task.id));
+    expect(await discardStaleTurn(c.db, direct)).toBe(false);
+    await c.db.update(tasks).set({ status: 'cancelled' }).where(eq(tasks.id, task.id));
+    expect(await discardStaleTurn(c.db, direct)).toBe(true);
   });
 });

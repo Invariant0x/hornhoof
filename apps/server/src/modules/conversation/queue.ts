@@ -7,7 +7,7 @@ import { hashToken, newToken } from '../../crypto/tokens.js';
 import { agents, jobs, nodes, people, subscriptions, tasks, turns } from '../../db/schema.js';
 import { dispatchJob } from '../jobs/dispatch.js';
 import { turnsHeld } from '../updates/drain.js';
-import { alsoKept, deliverLive, inputKept, turnStarted } from './decision-context.js';
+import { alsoKept, deliverLive, inputKept, turnStarted, withInputLock } from './decision-context.js';
 import { BUILTIN, identityOf, nodeIdentity, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { liveNode, planNodes, type NodeRow } from '../nodes/nodes.js';
 import { appendEvent, earlierTalk, messageForJob, publishWorking, type WithEvent } from '../events/store.js';
@@ -23,8 +23,8 @@ import { logTurnFact } from '../tasks/turn-log.js';
 import { addressed, preface } from './prompt.js';
 import { requestedPromptOf } from './requested-prompt.js';
 import { ABOUT_AS_FREE, freedom } from '../testruns/pick.js';
-import { queuedInput } from './queued-input.js';
-import { repeatedTurn, UNHEARD_NOTE, type TurnWords } from './turn-words.js';
+import { queuedInput, queuedUsed } from './queued-input.js';
+import { repeatedTurn, UNHEARD_NOTE, type RepeatedTurn, type TurnWords } from './turn-words.js';
 
 /* Workers compact their conversation at half a million tokens, which keeps their turns quick; heads and the orchestrator
    keep the whole window, since they hold the department's and the company's picture. */
@@ -307,63 +307,107 @@ export async function enqueueTurn(ctx: Ctx, t: Turn): Promise<string> {
   return jobId;
 }
 
+type QueuedTurn = NonNullable<Awaited<ReturnType<typeof queuedInput>>>;
+type OpenedQueued = QueuedTurn & { repeated: RepeatedTurn };
+type AgentTarget = { agent: typeof agents.$inferSelect; sub: NonNullable<Awaited<ReturnType<typeof liveSubscription>>> };
+
+async function agentOnNode(ctx: Ctx, node: NodeIdentity, agentId: string): Promise<AgentTarget | null> {
+  const [agent] = await ctx.db.select().from(agents).where(and(eq(agents.id, agentId), isNull(agents.removedAt)));
+  const sub = agent ? await liveSubscription(ctx, agent.id) : null;
+  const at = sub ? await nodeOfAgent(ctx, agentId) : null;
+  return agent && sub && at && sameNode(at, node) ? { agent, sub } : null;
+}
+
+async function insertRunningTurn(
+  ctx: Ctx,
+  node: NodeIdentity,
+  target: AgentTarget,
+  text: string,
+  personId: string | null,
+  repeated: RepeatedTurn | null,
+): Promise<{ jobId: string; token: string }> {
+  const [last] = await ctx.db
+    .select({ hash: jobs.instructionsHash })
+    .from(jobs)
+    .where(and(conversationOf(target.agent.id), eq(jobs.subscriptionId, target.sub.id), isNotNull(jobs.instructionsHash)))
+    .orderBy(desc(jobs.startedAt))
+    .limit(1);
+  const token = newToken();
+  const [job] = await ctx.db
+    .insert(jobs)
+    .values({
+      companyId: target.agent.companyId,
+      subscriptionId: target.sub.id,
+      nodeId: node.kind === 'node' ? node.nodeId : null,
+      agentId: target.agent.id,
+      kind: 'conversation',
+      status: 'running',
+      startedAt: new Date(),
+      prompt: text,
+      timeoutMs: TURN_TIMEOUT_MS,
+      createdBy: repeated ? repeated.createdBy : personId,
+      answersCeo: repeated ? repeated.answersCeo : await isCeo(ctx, personId),
+      toolTokenHash: hashToken(token),
+      instructionsHash: last ? last.hash : null,
+    })
+    .returning({ id: jobs.id });
+  return { jobId: job!.id, token };
+}
+
+async function appendOpenedWords(
+  ctx: Ctx,
+  companyId: string,
+  agentId: string,
+  jobId: string,
+  text: string,
+  personId: string | null,
+  queued: OpenedQueued | null,
+): Promise<void> {
+  if (queued) {
+    const { repeated } = queued.repeated;
+    await appendEvent(ctx, { companyId, agentId, jobId, kind: 'typed', personId: repeated.personId, data: { ...(repeated.data as object), queuedEvent: queued.seq } });
+    await logTurnFact(ctx, queued.job, UNHEARD_NOTE);
+    settleWords(ctx, agentId, queued.job.id, queued.job.status === 'running');
+    return;
+  }
+  if (text.trim()) await appendEvent(ctx, { companyId, agentId, jobId, kind: 'message', data: { text }, personId });
+}
+
+async function storeTypedTurn(
+  ctx: Ctx,
+  node: NodeIdentity,
+  agentId: string,
+  text: string,
+  personId: string | null,
+  queuedFrom: string | undefined,
+  queued: QueuedTurn | null,
+): Promise<{ jobId: string; token: string } | null> {
+  const target = await agentOnNode(ctx, node, agentId);
+  if (!target || (queued && (await queuedUsed(ctx, agentId, queued.seq)))) return null;
+  const openedQueued: OpenedQueued | null = queued ? { ...queued, repeated: await repeatedTurn(ctx, queued.job, queued.source) } : null;
+  /* A turn that only started the program is over once the person types: their turn takes its place. */
+  await ctx.db
+    .update(jobs)
+    .set({ status: 'done', result: '', finishedAt: new Date() })
+    .where(and(conversationOf(agentId), eq(jobs.status, 'running'), eq(jobs.prompt, ''), isNull(jobs.taskId)));
+  const [running] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
+  /* A program's queued turn can start before the old job's end has reached Hornhoof. It holds the line meanwhile. */
+  if (running && running.id !== queuedFrom) return null;
+  const opened = await insertRunningTurn(ctx, node, target, text, personId, openedQueued ? openedQueued.repeated : null);
+  await appendOpenedWords(ctx, target.agent.companyId, agentId, opened.jobId, text, personId, openedQueued);
+  await publishWorking(ctx, target.agent.companyId);
+  return opened;
+}
+
 /* A person typed into the agent's terminal while no turn ran, or while the program started. The turn is theirs and runs
    from now on the node that shows the session, which goes on with the instructions it was started with: their hash stays,
    so the next turn resumes it. Without a person's keys, only known live words the program queued may open a turn. */
 export async function openTypedTurn(ctx: Ctx, node: NodeIdentity, agentId: string, text: string, personId: string | null, queuedFrom?: string): Promise<{ jobId: string; token: string } | null> {
   if ((!personId && !queuedFrom) || !z.uuid().safeParse(agentId).success) return null;
-  const opened = await onAgent(ctx, agentId, async () => {
-    const { db } = ctx;
-    const [agent] = await db.select().from(agents).where(and(eq(agents.id, agentId), isNull(agents.removedAt)));
-    const sub = agent ? await liveSubscription(ctx, agent.id) : null;
-    const at = sub ? await nodeOfAgent(ctx, agentId) : null;
-    if (!agent || !sub || !at || !sameNode(at, node)) return null;
-    const queued = queuedFrom ? await queuedInput(ctx, agentId, queuedFrom, text) : null;
-    if (queuedFrom && !queued) return null;
-    const repeated = queued ? await repeatedTurn(ctx, queued.job, queued.source) : null;
-    /* A turn that only started the program is over once the person types: their turn takes its place. */
-    await db
-      .update(jobs)
-      .set({ status: 'done', result: '', finishedAt: new Date() })
-      .where(and(conversationOf(agentId), eq(jobs.status, 'running'), eq(jobs.prompt, ''), isNull(jobs.taskId)));
-    const [running] = await db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
-    /* A program's queued turn can start before the old job's end has reached Hornhoof. It holds the line meanwhile. */
-    if (running && running.id !== queuedFrom) return null;
-    const [last] = await db
-      .select({ hash: jobs.instructionsHash })
-      .from(jobs)
-      .where(and(conversationOf(agentId), eq(jobs.subscriptionId, sub.id), isNotNull(jobs.instructionsHash)))
-      .orderBy(desc(jobs.startedAt))
-      .limit(1);
-    const token = newToken();
-    const [job] = await db
-      .insert(jobs)
-      .values({
-        companyId: agent.companyId,
-        subscriptionId: sub.id,
-        nodeId: node.kind === 'node' ? node.nodeId : null,
-        agentId,
-        kind: 'conversation',
-        status: 'running',
-        startedAt: new Date(),
-        prompt: text,
-        timeoutMs: TURN_TIMEOUT_MS,
-        createdBy: repeated ? repeated.createdBy : personId,
-        answersCeo: repeated ? repeated.answersCeo : await isCeo(ctx, personId),
-        toolTokenHash: hashToken(token),
-        instructionsHash: last?.hash ?? null,
-      })
-      .returning({ id: jobs.id });
-    if (queued && repeated) {
-      await appendEvent(ctx, { companyId: agent.companyId, agentId, jobId: job!.id, kind: 'typed', personId: repeated.repeated.personId, data: { ...queued.source.data as object, queuedEvent: queued.seq } });
-      await logTurnFact(ctx, queued.job, UNHEARD_NOTE);
-      settleWords(ctx, agentId, queued.job.id, queued.job.status === 'running');
-    }
-    else if (text.trim()) await appendEvent(ctx, { companyId: agent.companyId, agentId, jobId: job!.id, kind: 'message', data: { text }, personId });
-    await publishWorking(ctx, agent.companyId);
-    return { jobId: job!.id, token };
-  });
-  return opened;
+  const queued = queuedFrom ? await queuedInput(ctx, agentId, queuedFrom, text) : null;
+  if (queuedFrom && !queued) return null;
+  const run = () => onAgent(ctx, agentId, () => storeTypedTurn(ctx, node, agentId, text, personId, queuedFrom, queued));
+  return queued ? withInputLock(ctx, agentId, run) : run();
 }
 
 /* Someone who may type opened the window of an agent whose program does not run: a turn that types nothing starts it on

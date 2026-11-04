@@ -5,6 +5,15 @@ import { agentEvents, jobs } from '../../db/schema.js';
 import { readMessage } from '../events/parties.js';
 import { wordsForTurn } from './turn-words.js';
 
+export async function queuedUsed(ctx: Ctx, agentId: string, seq: number): Promise<boolean> {
+  const [used] = await ctx.db
+    .select({ id: agentEvents.id })
+    .from(agentEvents)
+    .where(and(eq(agentEvents.agentId, agentId), sql`${agentEvents.data}->>'queuedEvent' = ${String(seq)}`))
+    .limit(1);
+  return Boolean(used);
+}
+
 /* A program may open only words kept in the turn they were sent to, each message once. */
 export async function queuedInput(ctx: Ctx, agentId: string, jobId: string, text: string) {
   const [job] = await ctx.db.select().from(jobs).where(and(eq(jobs.id, jobId), eq(jobs.agentId, agentId)));
@@ -13,8 +22,7 @@ export async function queuedInput(ctx: Ctx, agentId: string, jobId: string, text
   for (const event of messages) {
     const { message } = readMessage(event.data);
     if (!message) continue;
-    const [used] = await ctx.db.select({ id: agentEvents.id }).from(agentEvents).where(and(eq(agentEvents.agentId, agentId), sql`${agentEvents.data}->>'queuedEvent' = ${String(event.seq)}`)).limit(1);
-    if (!used) return { seq: event.seq, source: event, job };
+    if (!(await queuedUsed(ctx, agentId, event.seq))) return { seq: event.seq, source: event, job };
   }
   return null;
 }
