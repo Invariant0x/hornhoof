@@ -109,6 +109,13 @@ describe('one report per recipient', () => {
     expect(notices[0]!.message?.notification?.tasks.map(t => t.number)).toEqual([first.number, second.number]);
     expect(notices[0]!.message?.senders?.map(p => p.name)).toEqual(['Hana', 'Bruno']);
     expect((notices[0]!.data as { text: string }).text.match(/Release verified\./g)).toHaveLength(1);
+    const text = (notices[0]!.data as { text: string }).text;
+    expect(text).toContain(`Hana reported work done on #${first.number}`);
+    expect(text).toContain(`Hana reported work done on #${second.number}`);
+    expect(notices[0]!.message!.revision).toBe(2);
+    const [queued] = await c.db.select().from(jobs).where(eq(jobs.id, notices[0]!.jobId!));
+    expect(queued!.notBefore).toBeNull();
+    expect((await listEvents(c.db, c.head.id, 0)).filter(e => e.message?.direction === 'out')).toEqual([]);
   });
   it('keeps different reports separate', async () => {
     const c = await fixture();
@@ -283,6 +290,7 @@ it('keeps other queued words when a direct report is combined and delivered live
   expect(spoken[0]).toContain('Keep the separate instruction.');
   expect(spoken[0]!.match(/Release verified\./g)).toHaveLength(1);
   expect(await wordsForTurn(c.app.ctx, orchestrator.id, run!.id, spoken[0])).toHaveLength(1);
+  expect(await wordsForTurn(c.app.ctx, orchestrator.id, run!.id)).toHaveLength(1);
   vi.restoreAllMocks();
 });
 
@@ -309,15 +317,18 @@ it('updates a delivered copy for known tasks without another input or changing t
   const original = (await c.notices(c.orchestrator.id))[0]!;
   await appendEvent(c.app.ctx, { companyId: c.orchestrator.companyId, agentId: c.orchestrator.id, jobId: c.run.id, kind: 'message', personId: c.ceo.id, data: { text: 'A newer personal instruction.' } });
   await wakeAll(c.app.ctx, (await report(c.app.ctx, c.head.id, c.first.id, { done: true, summary: c.text })).wakes);
+  await enqueueTurn(c.app.ctx, { companyId: c.orchestrator.companyId, agentId: c.orchestrator.id, createdBy: null, prompt: c.text, message: { personId: null, from: 'agent', by: c.worker.id, text: c.text, task: { id: c.first.id, number: c.first.number } } });
   const notices = (await c.notices(c.orchestrator.id)).filter(e => e.message!.from.kind !== 'person');
   expect(notices).toHaveLength(1);
   expect(notices[0]!.message!.notification!.tasks).toEqual([{ id: c.first.id, number: c.first.number }]);
   expect(notices[0]!.message!.senders!.map(p => p.name)).toEqual(['Bruno', 'Hana']);
   expect(notices[0]!.message!.originSeq).toBe(original.seq);
+  expect(notices[0]!.message!.revision).toBe(2);
   expect(notices[0]!.seq).toBeGreaterThan(original.seq);
   expect(c.spoken).toHaveLength(1);
   expect((await decisionPrincipal(c.db, c.run.id))!.personId).toBe(c.ceo.id);
   expect(await wordsForTurn(c.app.ctx, c.orchestrator.id, c.run.id, c.spoken[0])).toHaveLength(1);
+  expect(await wordsForTurn(c.app.ctx, c.orchestrator.id, c.run.id)).toHaveLength(2);
   vi.restoreAllMocks();
 });
 
