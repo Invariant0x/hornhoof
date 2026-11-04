@@ -52,6 +52,17 @@ describe("a program's first setup that only the plan's owner passes", () => {
     await wait(() => last()?.loggedIn === true && last()?.setupNeeded === undefined);
   });
 
+  it('takes a sign-in it finds by looking again while signed out, and then waits for the setup', async () => {
+    const setup = { pending: true };
+    const signed = { in: false };
+    const { received, wait, last } = await node({ ...program(setup), loggedIn: async () => signed.in });
+    expect(received.find(m => m.type === 'hello')).toMatchObject({ loggedIn: false });
+    expect(received.find(m => m.type === 'hello')).not.toHaveProperty('setupNeeded');
+    signed.in = true;
+    await wait(() => last()?.loggedIn === true);
+    expect(last()).toMatchObject({ loggedIn: true, setupNeeded: true });
+  });
+
   it('holds the node after a turn met it, until the owner passed it', async () => {
     const setup = { pending: false };
     const { received, send, wait, last } = await node(program(setup));
@@ -66,6 +77,11 @@ describe("a program's first setup that only the plan's owner passes", () => {
     await wait(() => last()?.setupNeeded === true);
     await new Promise(r => setTimeout(r, 200));
     expect(last()).toMatchObject({ loggedIn: true, setupNeeded: true });
+    /* Looking again while it waits leaves the sign-in as it was: a turn now still finds the node signed in. */
+    send(job('j2'));
+    await wait(() => received.some(m => m.type === 'job.done' && m.jobId === 'j2'));
+    const second = received.findIndex(m => m.type === 'job.done' && m.jobId === 'j2');
+    expect(received.slice(0, second).filter(m => m.type === 'status').at(-1)).toMatchObject({ loggedIn: true, setupNeeded: true });
     setup.pending = false;
     await wait(() => last()?.setupNeeded === undefined);
     expect(last()).toMatchObject({ loggedIn: true });
