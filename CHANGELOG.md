@@ -5,6 +5,20 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.5.2] - 2026-11-04
+
+An urgent fix: Antigravity on a new machine no longer fails every turn at its
+first-run setup.
+
+### Fixed
+
+- Antigravity no longer fails every turn on a machine where it never ran. The
+  node picks its colors itself and never accepts its terms or the consent to
+  use interactions data for a person: the plan shows "Waiting for the first
+  setup", its agents wait without spending retries, and its owner accepts the
+  terms by running the install command on that machine again. The choice stays
+  on the node's volume across updates.
+
 ## [0.5.1] - 2026-11-04
 
 An urgent fix: a message that reached an agent during its turn no longer comes
