@@ -126,11 +126,11 @@ function taskTurn(task: Task, message: TurnMessage): { message: TurnMessage; tas
   return { taskId: task.id, message: { ...message, task: { id: task.id, number: task.number }, taskWake: { ...taskWakeOf(task, { why: 'comment' }), why: 'message' } } };
 }
 
-async function expireWait(ctx: Ctx, task: Task): Promise<boolean> {
+export async function expireWait(ctx: Ctx, task: Task, unavailable?: string): Promise<boolean> {
   if (!task.externalWait || !task.assigneeAgentId) return false;
-  const wakes: Wake[] = [{ agentId: task.assigneeAgentId, taskId: task.id, why: 'wait_ended', text: task.externalWait.reason, version: task.version + 1 }];
+  const wakes: Wake[] = [{ agentId: task.assigneeAgentId, taskId: task.id, why: 'wait_ended', text: task.externalWait.reason, ...(unavailable ? { note: unavailable } : {}), version: task.version + 1 }];
   try {
-    await move(ctx, task, { externalWait: null, silent: 0 }, { kind: 'updated', actor: { agentId: task.assigneeAgentId }, text: `The wait for "${task.externalWait.reason}" ended.`, data: { externalWait: null, reason: task.externalWait.reason } }, undefined, wakes);
+    await move(ctx, task, { externalWait: null, silent: 0 }, { kind: 'updated', actor: { agentId: task.assigneeAgentId }, text: unavailable ?? `The wait for "${task.externalWait.reason}" ended.`, data: { externalWait: null, reason: task.externalWait.reason }, ...(unavailable ? { automatic: 'wait_unavailable' as const } : {}) }, undefined, wakes);
   } catch (error) {
     if (error instanceof ApiError && error.reason === 'task_changed') return false;
     throw error;

@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agents, departments, jobs, requests, tasks, testRuns, turns } from '../src/db/schema.js';
 import { minuteRound } from '../src/modules/agents/timers.js';
+import { quietDepartment as observeQuiet, waitCycles } from '../src/modules/tasks/wait-observations.js';
 import { checkWaitHealth } from '../src/modules/tasks/wait-monitor.js';
 import { waitCompany } from './wait-company.js';
 
@@ -40,7 +41,15 @@ describe('waiting cycles', () => {
     expect(notices).toHaveLength(1);
     expect(notices[0]).toMatchObject({ data: { notification: { source: 'wait_cycle', tasks: expect.arrayContaining(c.work.map(t => ({ id: t.id, number: t.number }))) } } });
     for (const employee of [c.agent, c.head]) expect(notices[0]!.data).toMatchObject({ text: expect.stringContaining(`Result from ${employee.name}`) });
+    expect(notices[0]!.data).toMatchObject({ text: expect.stringContaining(`${c.agent.name} on #${c.work[0]!.number} waits for ${c.head.name}: Result from ${c.head.name}`) });
     if (length === 3) expect(notices[0]!.data).toMatchObject({ text: expect.stringContaining('Result from Cora') });
+  });
+
+  it('excludes an employee edge whose deadline is exactly now', async () => {
+    const c = await cycle(2);
+    const [task] = await c.db.select().from(tasks).where(eq(tasks.id, c.work[0]!.id));
+    await c.db.update(tasks).set({ externalWait: { ...task!.externalWait!, until: c.now.toISOString() } }).where(eq(tasks.id, task!.id));
+    expect(await waitCycles(c.ctx, c.now)).toEqual([]);
   });
 
   it('reports a recreated cycle as a new incident', async () => {
@@ -95,6 +104,7 @@ describe('quiet departments', () => {
     const notices = await c.messages(c.watcher.id);
     expect(notices).toHaveLength(1);
     expect(notices[0]).toMatchObject({ data: { notification: { source: 'department_quiet', tasks: [{ id: c.taskRow.id, number: c.taskRow.number }] }, text: expect.stringContaining('Machine run') } });
+    expect(notices[0]!.data).toMatchObject({ text: expect.stringContaining('department development') });
   });
 
   it('sends the quiet-department call directly to the orchestrator without an active OPS-WATCH', async () => {
@@ -166,6 +176,31 @@ describe('quiet departments', () => {
     await c.run();
     await checkWaitHealth(c.ctx, c.now);
     expect(await c.messages(c.watcher.id)).toEqual([]);
+  });
+
+  it('keeps unrelated department descendants outside its quiet scope', async () => {
+    const c = await quietDepartment();
+    const [other] = await c.db.insert(departments).values({ companyId: c.companyId, parentId: c.watcher.departmentId, name: 'Other', roleCode: 'OTHER' }).returning();
+    const [employee] = await c.db.insert(agents).values({ companyId: c.companyId, departmentId: other!.id, kind: 'worker', roleKey: 'OPS-WATCH', name: 'Owen', model: '', subscriptionId: c.sub.id }).returning();
+    await c.run(employee!.id);
+    await checkWaitHealth(c.ctx, c.now);
+    expect(await c.messages(c.watcher.id)).toHaveLength(1);
+  });
+
+  it('does not manufacture an observation at an expired wait boundary', async () => {
+    const c = await quietDepartment();
+    await c.db.update(tasks).set({ externalWait: { reason: 'Machine', since: new Date(c.now.getTime() - 900_000).toISOString(), until: c.now.toISOString() } }).where(eq(tasks.id, c.taskRow.id));
+    expect(await observeQuiet(c.ctx, c.turn.id, c.dev.id, c.now)).toBeNull();
+    expect(await waitCycles(c.ctx, c.now)).toEqual([]);
+  });
+
+  it('defers a quiet observation if no watcher or orchestrator is enabled', async () => {
+    const c = await quietDepartment();
+    await c.db.update(agents).set({ switchedOffAt: c.now }).where(eq(agents.id, c.watcher.id));
+    await c.db.update(agents).set({ switchedOffAt: c.now }).where(eq(agents.id, c.orchestrator.id));
+    await expect(checkWaitHealth(c.ctx, c.now)).resolves.toBeUndefined();
+    expect(await c.messages(c.watcher.id)).toEqual([]);
+    expect(await c.messages(c.orchestrator.id)).toEqual([]);
   });
 
 });

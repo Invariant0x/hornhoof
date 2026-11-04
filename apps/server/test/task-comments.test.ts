@@ -15,7 +15,7 @@ describe('comments use the employee input path', () => {
     const head = await c.run(c.head.id);
     const result = await head.client.callTool({ name: 'comment', arguments: { task: task.number, text: 'Submit the work.' } });
     expect(result.isError).toBeFalsy();
-    expect((await c.messages(c.agent.id))[0]).toMatchObject({ jobId: worker.job.id, data: { text: expect.stringContaining('Submit the work.') } });
+    expect((await c.messages(c.agent.id))[0]).toMatchObject({ jobId: worker.job.id, message: { from: { id: c.head.id }, notification: { source: 'comment' } }, data: { actor: { id: c.head.id }, text: expect.stringContaining('Submit the work.') } });
   });
 
   it('takes a comment that unblocks the executor into the same running turn', async () => {

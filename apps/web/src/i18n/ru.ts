@@ -43,6 +43,7 @@ export const ru: Messages = {
     limit: 'лимит тарифа',
     turn_fact: 'состояние хода записано',
     wait_requested: 'сотрудник ждет тебя',
+    wait_unavailable: 'сотрудник ожидания недоступен',
     wait_cycle: 'круг ожиданий',
     department_quiet: 'тихий отдел',
     service: 'сохраненное служебное сообщение',

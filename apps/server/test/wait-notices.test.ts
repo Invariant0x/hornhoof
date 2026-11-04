@@ -56,7 +56,7 @@ describe('wait recipient notices', () => {
     expect(rows[0]!.deliveredAt).not.toBeNull();
   });
 
-  it.each(['changed', 'expired'])('discards a pending %s request before queue acceptance', async state => {
+  it.each(['changed', 'replaced', 'expired'])('discards a pending %s request before queue acceptance', async state => {
     const c = await waitCompany();
     const task = await c.task();
     const now = new Date();
@@ -64,6 +64,7 @@ describe('wait recipient notices', () => {
     await c.db.update(tasks).set({ externalWait: wait }).where(eq(tasks.id, task.id));
     const notice = (await requestedWaitNotice(c.ctx, { ...task, externalWait: wait }, c.agent.id))!;
     await recordWaitNotice(c.db, notice);
+    if (state === 'replaced') await c.db.update(tasks).set({ externalWait: { ...wait, reason: 'A different acceptance' }, version: task.version + 1 }).where(eq(tasks.id, task.id));
     if (state === 'changed') await c.db.update(tasks).set({ externalWait: null, version: task.version + 1 }).where(eq(tasks.id, task.id));
     await deliverWaitNotices(c.ctx, new Date(now.getTime() + (state === 'expired' ? 60_000 : 1)));
     expect(await c.messages(c.head.id)).toEqual([]);
