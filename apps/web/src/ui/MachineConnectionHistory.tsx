@@ -25,6 +25,7 @@ function nodeCause(t: Messages, report: NonNullable<MachineConnectionEvent['node
 
 function reportText(t: Messages, report: NonNullable<MachineConnectionEvent['nodeReport']>): string {
   const details = [report.error ?? nodeCause(t, report), t.machines.connectionAttempts(report.attempts)];
+  if (report.dnsFailed && report.cause !== 'dns_error') details.push(t.machines.connectionNodeCauses.dns_error);
   if (report.watchdogTimedOut && report.cause !== 'watchdog_timeout') details.push(t.machines.connectionNodeCauses.watchdog_timeout);
   if (report.clockJumpMs) details.push(t.machines.connectionClockJump(duration(t, report.clockJumpMs)));
   if (report.networkChanged) details.push(t.machines.connectionNetworkChanged);

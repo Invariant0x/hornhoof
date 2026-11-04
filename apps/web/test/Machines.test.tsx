@@ -112,15 +112,17 @@ describe('Machines', () => {
     lists({ 'GET /api/machines/m1/connection-history': [200, {
       summary: { ...HISTORY.summary, disconnects: 1, averageOfflineMs: 7_200_000, topCause: 'missed_pongs' },
       events: [
-        { ...event, id: 'hours', cause: 'missed_pongs', offlineMs: 7_200_000, nodeReport: { ...report, cause: 'watchdog_timeout', error: null, attempts: 1, watchdogTimedOut: true, clockJumpMs: 3_600_000, networkChanged: false } },
+        { ...event, id: 'hours', cause: 'missed_pongs', offlineMs: 7_200_000, nodeReport: { ...report, cause: 'watchdog_timeout', error: null, attempts: 1, dnsFailed: false, watchdogTimedOut: true, clockJumpMs: 3_600_000, networkChanged: false } },
         { ...event, id: 'minutes', offlineMs: 120_000, nodeReport: null },
         { ...event, id: 'moment', offlineMs: 500, nodeReport: null },
+        { ...event, id: 'dns', nodeReport: { ...report, cause: 'socket_error', error: 'read failed', attempts: 2, dnsFailed: true, watchdogTimedOut: false, clockJumpMs: null, networkChanged: false } },
       ],
     }] });
     render(<Machines me={ME} />);
     const mac = await openCard('ivan-mbp');
     expect(await within(mac).findByText(/average offline 2 h/)).toBeInTheDocument();
     expect(within(mac).getByText('The machine reported: the connection watchdog timed out; 1 attempt; the machine slept or its clock jumped by 1 h.')).toBeInTheDocument();
+    expect(within(mac).getByText('The machine reported: read failed; 2 attempts; DNS failed.')).toBeInTheDocument();
     expect(within(mac).getByText(/offline for 2 min$/)).toBeInTheDocument();
     expect(within(mac).getByText(/offline for less than a second$/)).toBeInTheDocument();
   });
