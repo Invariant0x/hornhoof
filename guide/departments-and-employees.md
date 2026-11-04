@@ -31,6 +31,16 @@ On the map, a department's card has one square per employee, in the same colors.
 
 When he cannot answer, the card comes from the department's default roster. Roles and their skills come from the templates in `templates/`.
 
+## Who is always in Operations?
+
+Every company has Operations, with its head, a task watchdog, a weak point collector and a program operator. Hornhoof hires whoever of the four is missing by itself, when the company is set up and after an update. It leaves everyone else in the department as they are.
+
+On a staff card for Operations these four stay ticked. Someone who already holds the role is shown by name and is not hired again.
+
+The last employee in each of the four cannot be removed. Switch it off for a while instead, or hire a replacement first. A department has one head, so its head has no replacement: change its model or its instructions, or switch it off.
+
+The program operator starts on the oldest subscription that may serve Operations. When there is none yet it waits, and the first that may serve Operations goes to it without a question, even one still waiting for its machine. A subscription you pick for it yourself stays as long as it may serve Operations. When it no longer may, the operator moves to the next one after its current turn ends.
+
 ## What is in an employee's window?
 
 Click an employee to open its window, with its terminal or its log. A small mark next to its name says whether it works in Claude, Codex, Kimi, GLM or Antigravity.
@@ -61,6 +71,16 @@ Everyone else who reaches the employee watches the terminal and writes in the li
 "Log" shows the conversation as Hornhoof keeps it, and "Stop" ends the running turn. Employees on company API keys show the log.
 
 ![An employee's terminal](../.github/assets/terminal.gif)
+
+## Show an employee a picture
+
+Drag a picture into the window of the orchestrator or of an employee, or paste it with Cmd+V or Ctrl+V. The picture button by the message line picks one from your files, on a phone too. It works with the terminal and with the log. Whoever may write to the employee may send it a picture; the server turns away anyone else.
+
+- A small preview waits at the line, and its cross takes the picture back. The owner of the employee's plan, who types into the terminal, gets the line for as long as a picture waits in it.
+- One message carries up to 10 pictures, with words or without them.
+- A picture is a PNG, JPEG or WebP of at most 3 MB. Your browser first makes a bigger one smaller. Anything else is turned away, and the window says why.
+- The employee reads each file's name and the command that downloads it, `hh-fetch message ID`, in any program. Only that employee can download it.
+- The log shows the picture next to your message, for everyone who can open this window, and a click opens it large. The terminal shows only the words. Hornhoof keeps a picture for 30 days.
 
 ## How does Hornhoof follow Antigravity?
 

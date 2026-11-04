@@ -71,6 +71,9 @@ RUN set -e; ub=/opt/hornhoof/ub; mkdir -p $ub /opt/hornhoof/bin /opt/hornhoof/ru
     /opt/hornhoof/bin/$tool --help > /dev/null; \
   done; \
   $ub/mutator/.venv/bin/python /tmp/hornhoof-quality/test_mutator_workers.py; \
+  $ub/crapper/.venv/bin/python /tmp/hornhoof-quality/test_part_paths.py CrapperPaths; \
+  $ub/dryer/.venv/bin/python /tmp/hornhoof-quality/test_part_paths.py DryerPaths; \
+  $ub/mutator/.venv/bin/python /tmp/hornhoof-quality/test_part_paths.py MutatorPaths; \
   $ub/crapper/.venv/bin/python -c "import tree_sitter_language_pack as p; p.download(['clojure', 'go', 'java', 'javascript', 'python', 'rust', 'tsx', 'typescript'])"; \
   fetch affaan-m/ECC /tmp/ecc $ECC_COMMIT; \
   cp -R /tmp/ecc/rules/. /opt/hornhoof/rules/; cp /tmp/ecc/LICENSE /opt/hornhoof/rules/LICENSE; rm -rf /tmp/ecc; \

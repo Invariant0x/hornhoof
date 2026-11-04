@@ -42,11 +42,13 @@ function skillsOf(role: RoleOption, line: StaffLine): string[] {
 
 function rowsOf(roster: Roster, lines: StaffLine[]): Row[] {
   const serving = new Set(roster.subscriptions.map(s => s.id));
-  return lines.flatMap(line => {
+  /* A card older than a required role still has to show it. */
+  const absent = roster.roles.filter(r => r.required && !lines.some(l => l.role === r.id)).map(r => ({ role: r.id }));
+  return [...absent, ...lines].flatMap((line: StaffLine) => {
     const role = roster.roles.find(r => r.id === line.role);
     if (!role) return [];
     const picked = line.subscription !== undefined ? line.subscription : role.subscription;
-    return [{ line, role, checked: line.checked ?? true, subscription: picked && serving.has(picked) ? picked : null, model: line.model ?? '' }];
+    return [{ line, role, checked: role.required || (line.checked ?? true), subscription: picked && serving.has(picked) ? picked : null, model: line.model ?? '' }];
   });
 }
 
@@ -84,14 +86,16 @@ export function StaffCard({ department, proposal, onCorrect, onDone, onHide, loc
     const product = roster?.products.find(p => p.id === r.line.product);
     return product ? `${r.role.title[language]} (${product.name})` : r.role.title[language];
   };
-  const chosen = rows.filter(r => r.checked);
+  const chosen = rows.filter(r => r.checked && !r.role.holder);
+  /* A proposal sends all it ticks: the server skips who came since, says so and closes the card. By hand, who is there is no hire. */
+  const sending = proposal ? rows.filter(r => r.checked) : chosen;
   const update = (i: number, change: Partial<Row>) => setRows(list => list.map((r, j) => (j === i ? { ...r, ...change } : r)));
 
   async function hire() {
     setBusy(true);
     setFailure(null);
     try {
-      const people = chosen.map(r => ({ role: r.role.id, name: nameOf(r), product: r.line.product ?? null, model: r.model, subscription: r.subscription, skills: skillsOf(r.role, r.line) }));
+      const people = sending.map(r => ({ role: r.role.id, name: nameOf(r), product: r.line.product ?? null, model: r.model, subscription: r.subscription, skills: skillsOf(r.role, r.line) }));
       await api.post(`/api/departments/${department.id}/staff`, proposal ? { proposalId: proposal.id, people } : { people });
       setSent(true);
       onDone?.();
@@ -111,17 +115,20 @@ export function StaffCard({ department, proposal, onCorrect, onDone, onHide, loc
         const name = nameOf(r);
         const sub = roster?.subscriptions.find(s => s.id === r.subscription);
         const off = frozenBy(sent, locked) || !r.checked;
+        const { required, holder } = r.role;
         return (
           <div key={i} className="staff-row">
-            <label>
-              <input type="checkbox" checked={r.checked} disabled={frozenBy(sent, locked)} onChange={e => update(i, { checked: e.target.checked })} />
+            <label className={required ? 'lock' : ''}>
+              <input type="checkbox" checked={r.checked} disabled={frozenBy(sent, locked) || required} onChange={e => update(i, { checked: e.target.checked })} />
               <span>
                 <b>{name}</b>
                 {r.role.kind === 'head' && <em className="t-card-tag">{t.dept.head}</em>}
+                {required && <em className="t-card-tag">{t.staff.required}</em>}
                 {r.line.name && <small>{r.role.title[language]}</small>}
+                {holder && <small>{t.staff.present(holder)}</small>}
               </span>
             </label>
-            <div className="staff-pick">
+            {!holder && <div className="staff-pick">
               <select aria-label={t.staff.runsOnOf(name)} value={r.subscription ?? ''} disabled={off} onChange={e => update(i, { subscription: e.target.value || null, model: '' })}>
                 <option value="">{t.agent.noSubscription}</option>
                 {byProvider(roster?.subscriptions ?? [], s => s.provider).map(([p, subs]) => (
@@ -142,7 +149,7 @@ export function StaffCard({ department, proposal, onCorrect, onDone, onHide, loc
                   </option>
                 ))}
               </select>
-            </div>
+            </div>}
           </div>
         );
       })}
@@ -153,8 +160,8 @@ export function StaffCard({ department, proposal, onCorrect, onDone, onHide, loc
       )}
       <div className="f">
         <Decides locked={locked}>
-          <button className="btn" type="button" disabled={!roster || sent || busy || !chosen.length} onClick={() => void hire()}>
-            {t.staff.hire(chosen.length)}
+          <button className="btn" type="button" disabled={!roster || sent || busy || !sending.length} onClick={() => void hire()}>
+            {proposal && !chosen.length && sending.length ? t.staff.closeCard : t.staff.hire(chosen.length)}
           </button>
           {!sent && proposal && onCorrect && (
             <button className="btn ghost" type="button" onClick={onCorrect}>
@@ -167,7 +174,7 @@ export function StaffCard({ department, proposal, onCorrect, onDone, onHide, loc
             {t.card.hide}
           </button>
         )}
-        {sent && <span className="t-card-state">{t.staff.hired}</span>}
+        {sent && <span className="t-card-state">{chosen.length ? t.staff.hired : t.card.applied}</span>}
       </div>
     </div>
   );

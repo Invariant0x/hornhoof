@@ -322,6 +322,17 @@ describe('company templates', () => {
       expect(operations!.staff.some(line => line.role === 'OPS-HEAD'), `${template.key} operations head`).toBe(true);
     }
   });
+
+  it('staff Operations in full in all nine, one of each required role, and keep their other roles', () => {
+    const required = ['OPS-BUGS', 'OPS-HEAD', 'OPS-PROGRAM', 'OPS-WATCH'];
+    const others: Record<string, string[]> = { project: [], startup: [], studio: ['OPS-INTEG'], corporation: ['OPS-FIX', 'OPS-INTEG'], security: ['OPS-INTEG'], opensource: [], agency: ['OPS-FIX', 'OPS-INTEG'], lab: [], home: [] };
+    expect(Object.keys(others).sort()).toEqual([...COMPANY_TEMPLATE_KEYS].sort());
+    for (const template of COMPANY_TEMPLATES) {
+      const { staff } = template.departments.find(d => d.template === 'operations')!;
+      expect(staff.map(line => line.role).sort(), template.key).toEqual([...required, ...others[template.key]!].sort());
+      expect(staff.every(line => line.count === 1), template.key).toBe(true);
+    }
+  });
 });
 
 describe('lastBytes', () => {

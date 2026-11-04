@@ -104,8 +104,23 @@ export function sessionFrom(res: LightMyRequestResponse): string {
 }
 
 /* Runs first-run setup and returns the CEO's session token. */
+/* Takes away the Operations every company gets at its setup, for a test that stages the departments it needs itself. */
+export async function withoutOperations(db: Db): Promise<void> {
+  const ops = await db.select({ id: schema.departments.id }).from(schema.departments).where(eq(schema.departments.templateKey, 'operations'));
+  for (const { id } of ops) {
+    const staff = await db.select({ id: schema.agents.id }).from(schema.agents).where(eq(schema.agents.departmentId, id));
+    for (const agent of staff) await db.delete(schema.agentChanges).where(eq(schema.agentChanges.agentId, agent.id));
+    await db.delete(schema.agents).where(eq(schema.agents.departmentId, id));
+    await db.delete(schema.departments).where(eq(schema.departments.id, id));
+  }
+}
+
+/* A company with its orchestrator and nothing else, for a test about something other than Operations. A test about what
+   people really get calls /api/setup itself. */
 export async function setUpCompany(app: FastifyInstance): Promise<string> {
-  return sessionFrom(await app.inject({ method: 'POST', url: '/api/setup', payload: SETUP }));
+  const token = sessionFrom(await app.inject({ method: 'POST', url: '/api/setup', payload: SETUP }));
+  await withoutOperations(app.ctx.db);
+  return token;
 }
 
 export const as = (token: string) => ({ cookies: { hh_session: token } });

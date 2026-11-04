@@ -83,8 +83,8 @@ async function historicalTasks(c: Conversation, turnIds: Map<number, string>, st
   );
 }
 
-async function history() {
-  const c = await conversation();
+async function history(given?: Awaited<ReturnType<typeof conversation>>) {
+  const c = given ?? (await conversation());
   const start = Date.now() - (TURNS + 2) * DAY;
   /* What people wrote since the open turn began, the last of it the message the orchestrator answers now. */
   const messages = await c.sayMany(historicalWords(start, Date.now() - 60_000));
@@ -222,8 +222,9 @@ describe('the people\'s words a turn keeps, over a long history', () => {
   });
 
   it('are the same as before for every number of words, also for a run that answered a message long ago', async () => {
+    const c = await conversation();
     const ran = statements();
-    const h = await history();
+    const h = await history(c);
     const fixtureQueries = ran.splice(0).length;
     /* Bound the fixture and oracle work without relying on the machine's wall-clock speed. */
     expect(fixtureQueries, 'history setup query budget').toBeLessThanOrEqual(32);

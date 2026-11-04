@@ -8,6 +8,7 @@ import { PROGRAM_NAMES, PROVIDER_NAMES } from '../providers';
 import type { AgentCardView, ComputerView, DecidedBy, Decisions, EventView, Me, OrchestratorState, Org, ShownCommand, StaffLine, StructureItem, SubView, TemplateKey, WaitingRequest } from '../types';
 import { EventMessage, isMessage, messageKey, useFolding } from '../ui/AgentMessage';
 import { AgentCard } from '../ui/AgentCard';
+import { AddPicture, PictureTray, SentPictures, useDraftPictures, usePictureDrop } from '../ui/MessagePictures';
 import { AgentTerminal } from '../ui/AgentTerminal';
 import { CommandCard } from '../ui/CommandCard';
 import { CEO_DECIDES } from '../ui/DecidedBy';
@@ -339,6 +340,8 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, openReque
 
   /* Until its state and card come, the window cannot tell a terminal from a conversation, nor whether the agent can work. */
   const known = state !== null && (orchestrator || card !== null);
+  const pictures = useDraftPictures(path);
+  const dragging = usePictureDrop(box, known, state?.ready ?? false, pictures.add);
 
   useLayoutEffect(() => {
     const el = log.current;
@@ -359,16 +362,19 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, openReque
 
   async function send() {
     const body = text.trim();
-    if (!body || !state?.ready) return;
+    const withPictures = pictures.drafts.length > 0;
+    if ((!body && !withPictures) || !state?.ready || pictures.sending) return;
     setText('');
     setFailure(null);
     try {
-      await api.post(`${path}/messages`, { text: body });
+      await pictures.deliver(ids => api.post(`${path}/messages`, ids.length ? { text: body, pictures: ids } : { text: body }));
       void catchUp();
     } catch (err) {
       /* The person may have started the next message meanwhile; that one stays. */
       setText(now => now || body);
-      setFailure(err);
+      /* Next to the pictures it is about, which stay. */
+      if (withPictures) pictures.setRefused(err);
+      else setFailure(err);
     }
   }
 
@@ -380,13 +386,23 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, openReque
 
   const hasTerminal = Boolean(state?.terminal) && !noTerminal;
   const terminal = hasTerminal && !asLog;
-  /* Only the owner of the agent's plan types into its live terminal, which has its own line. */
-  const hasLine = !terminal || !state?.canType;
+  const hasPictures = pictures.drafts.length > 0;
+  /* Only the owner of the agent's plan types into its live terminal, which has its own line; a picture needs this one,
+     and stays there with the words beside it until they went. */
+  const hasLine = !terminal || !state?.canType || hasPictures || text.trim() !== '';
   /* Someone the terminal takes no keys from starts in the line under it. */
   const lineUnderTerminal = known && terminal && hasLine;
-  useEffect(() => {
+  const hadLine = useRef(false);
+  /* In the commit the line comes or goes, so that no key falls between. */
+  useLayoutEffect(() => {
     if (lineUnderTerminal) input.current?.focus();
+    /* The line was there for a picture: back to where this person types. */
+    else if (hadLine.current) focusLine();
+    hadLine.current = lineUnderTerminal;
   }, [lineUnderTerminal]);
+  useLayoutEffect(() => {
+    if (hasPictures) input.current?.focus();
+  }, [hasPictures]);
   /* One card at a time: his newest proposal until it is applied, below his latest line. */
   const shown = visible(events);
   const messages = shown.filter(isMessage);
@@ -400,9 +416,9 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, openReque
   const staffDept = staffing && org.departments.find(d => d.id === staffing.department);
   const ready = state?.ready ?? false;
   const existing = org.departments.flatMap(d => (d.templateKey ? [d.templateKey] : []));
-  /* The by-hand card builds the structure of a company that has none; a company that already has departments (made
-     from a template, or built earlier) is past that, so it does not offer more departments. */
-  const empty = !org.departments.length;
+  /* The by-hand card builds the structure of a company that has none but the Operations every company starts with; a
+     company that has other departments (made from a template, or built earlier) is past that, so it does not offer more. */
+  const empty = org.departments.every(d => d.templateKey === 'operations');
   const byHand = orchestrator && !open && !staffByHand && empty && (manual ?? (state !== null && !ready));
   const offerByHand = orchestrator && !open && !byHand && !staffByHand && !state?.busy && !state?.queued && empty;
   /* A company that has departments but no orchestrator yet waits for a subscription, so he can staff them. */
@@ -463,11 +479,17 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, openReque
     // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- proposal and typed events are not rendered as log lines
     switch (e.kind) {
       case 'message':
-        if (isMessage(e)) return <EventMessage event={e} folding={folding} />;
         return (
-          <div className="t-u">
-            &gt; <em>{e.person?.name ?? author(field(e.data, 'from'), field(e.data, 'name'))}:</em> {field(e.data, 'text')}
-          </div>
+          <>
+            {isMessage(e) ? (
+              <EventMessage event={e} folding={folding} />
+            ) : (
+              <div className="t-u">
+                &gt; <em>{e.person?.name ?? author(field(e.data, 'from'), field(e.data, 'name'))}:</em> {field(e.data, 'text')}
+              </div>
+            )}
+            <SentPictures data={e.data} />
+          </>
         );
       case 'text':
         return (
@@ -628,6 +650,16 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, openReque
       {known && state.browserError && <p className="t-why">{browserWarning(t, state.browserError, sub)}</p>}
       {known && state?.limitUntil && <p className="t-why">{t.window.limitUntil(clock(language, state.limitUntil)!)}</p>}
       {known && !state?.limitUntil && state?.budgetUntil && <p className="t-why">{t.window.budgetUntil(clock(language, state.budgetUntil)!)}</p>}
+      {dragging && (
+        <div className="t-drop" role="status">
+          {t.window.dropPictures}
+        </div>
+      )}
+      {known && pictures.refused !== null && (
+        <p className="alert t-refused" role="alert">
+          {errorText(t, pictures.refused)}
+        </p>
+      )}
       {known && hasLine && (
         <form
           className="t-in"
@@ -636,11 +668,13 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, openReque
             void send();
           }}
         >
+          <PictureTray drafts={pictures.drafts} sending={pictures.sending} onRemove={d => { pictures.remove(d); input.current?.focus(); }} onBroken={pictures.notPicture} />
           <span aria-hidden="true">&gt;</span>
           <label className="sr" htmlFor={`input-${agentId}`}>
             {placeholder}
           </label>
           <textarea id={`input-${agentId}`} ref={input} rows={1} value={text} placeholder={placeholder} disabled={!ready} onChange={e => setText(e.target.value)} onKeyDown={onKeyDown} />
+          <AddPicture id={`picture-${agentId}`} disabled={!ready} onFiles={pictures.add} />
         </form>
       )}
       <div className="t-st">

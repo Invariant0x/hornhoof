@@ -8,26 +8,32 @@ import { agentFor } from '../agents/find.js';
 import { answerDirectly } from '../tasks/engine.js';
 import { wakeAll } from '../tasks/wake.js';
 import { listEvents } from '../events/store.js';
+import { isOperations } from '../operations/required.js';
+import { ownPictures, pictureRoutes, PICTURES_PER_MESSAGE, withPictures, type MessagePicture } from './pictures.js';
 import { FIRST_TURN, FIRST_TURN_TEMPLATE, turnPrompt } from './prompt.js';
 import { agentState, insertTurn, onAgent, pump, typesInTerminal } from './queue.js';
 import { cancelJob } from '../tasks/wake.js';
 import { queueTaskMessage, TaskReference } from '../tasks/external-wait.js';
 
 const EventsQuery = z.object({ after: z.coerce.number().int().min(0).default(0) });
-const MessageBody = z.object({ text: z.string().trim().min(1).max(4000), task: TaskReference.optional() });
+const MessageBody = z
+  .object({ text: z.string().trim().max(4000).default(''), task: TaskReference.optional(), pictures: z.array(z.uuid()).max(PICTURES_PER_MESSAGE).default([]) })
+  .refine(m => m.text || m.pictures.length, 'Write something or add a picture.');
 
-function writtenBy(me: Awaited<ReturnType<typeof agentFor>>['me'], text: string) {
+function writtenBy(me: Awaited<ReturnType<typeof agentFor>>['me'], text: string, pictures: MessagePicture[]) {
   if (me.via) return {
     actor: { agentId: me.via },
     turn: { prompt: turnPrompt({ name: 'Orchestrator', title: '' }, text), createdBy: null, message: { personId: null, text, from: 'orchestrator' as const } },
   };
-  return { actor: { personId: me.id }, turn: { prompt: turnPrompt(me, text), createdBy: me.id, message: { personId: me.id, text } } };
+  return { actor: { personId: me.id }, turn: { prompt: turnPrompt(me, withPictures(text, pictures)), createdBy: me.id, message: { personId: me.id, text, ...(pictures.length ? { pictures } : {}) } } };
 }
 
 /* Every agent's window: its conversation, what it is doing, writing to it and stopping it. The orchestrator is for people
    who see the whole company; an employee for people who reach its department. */
 export function conversationRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
+
+  pictureRoutes(app, ctx);
 
   app.get('/api/agents/:id/events', async req => {
     const { me, agent } = await agentFor(ctx, req);
@@ -37,15 +43,18 @@ export function conversationRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.post('/api/agents/:id/messages', async (req, reply) => {
     const { me, agent } = await agentFor(ctx, req);
-    const { text, task: ref } = MessageBody.parse(req.body);
+    const { text, task: ref, pictures: ids } = MessageBody.parse(req.body);
     if (me.via === agent.id) throw new ApiError(400, 'validation', 'This is your own conversation. Write to people in your answer.');
+    const pictures = await ownPictures(ctx, me, agent.id, ids);
     if (!(await agentState(ctx, agent.id)).ready) {
       throw agent.kind === 'orchestrator'
         ? new ApiError(409, 'conflict', 'The orchestrator cannot answer right now. See the window for what to do.', 'orchestrator_not_ready')
         : new ApiError(409, 'conflict', 'This employee cannot answer right now. See the window for what to do.', 'agent_not_ready');
     }
-    const { actor, turn } = writtenBy(me, text);
-    const jobId = await queueTaskMessage(ctx, { companyId: me.companyId, agentId: agent.id, task: ref, actor, text }, { companyId: me.companyId, agentId: agent.id, ...turn });
+    /* Pictures alone read as their names wherever the words of a message show. */
+    const words = text || pictures.map(p => p.name).join(', ');
+    const { actor, turn } = writtenBy(me, words, pictures);
+    const jobId = await queueTaskMessage(ctx, { companyId: me.companyId, agentId: agent.id, task: ref, actor, text: words }, { companyId: me.companyId, agentId: agent.id, ...turn });
     ctx.bus.publish(me.companyId, {
       type: 'pulse',
       from: me.via ? { kind: 'orchestrator' } : { kind: 'person', id: me.id },
@@ -68,9 +77,10 @@ export function conversationRoutes(app: FastifyInstance, ctx: Ctx): void {
       const [open] = await db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agent.id), eq(jobs.kind, 'conversation'), inArray(jobs.status, ['queued', 'running']))).limit(1);
       if (open) return false;
       const [company] = await db.select({ template: companies.template }).from(companies).where(eq(companies.id, me.companyId)).limit(1);
-      const [dept] = await db.select({ id: departments.id }).from(departments).where(eq(departments.companyId, me.companyId)).limit(1);
-      /* A company built by hand gets no greeting (its build already enqueued a turn); one from a template is greeted so he offers to staff it. */
-      if (dept && !company?.template) return false;
+      const depts = await db.select({ templateKey: departments.templateKey, parentId: departments.parentId }).from(departments).where(eq(departments.companyId, me.companyId));
+      /* A company built by hand gets no greeting (its build already enqueued a turn); one from a template is greeted so he
+         offers to staff it. The Operations every company starts with is no building. */
+      if (depts.some(d => !isOperations(d)) && !company?.template) return false;
       await insertTurn(ctx, { companyId: me.companyId, agentId: agent.id, prompt: company?.template ? FIRST_TURN_TEMPLATE : FIRST_TURN, createdBy: me.id, message: { personId: null, text: company?.template ? FIRST_TURN_TEMPLATE : FIRST_TURN, notification: { source: 'first_turn', tasks: [] } } });
       return true;
     });

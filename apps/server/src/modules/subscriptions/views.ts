@@ -39,7 +39,7 @@ export type SubView = {
 export type PlanAccount = { nodeId: string; hostname: string; tier: string | null; email?: string | null };
 
 /* Who asks for the view: the address of a plan's account goes to its owner and to people who see the whole company. */
-export type Viewer = { id: string; scopeKind: string; isOwner?: boolean; via?: string };
+export type Viewer = { id: string; companyId: string; scopeKind: string; isOwner?: boolean; via?: string };
 
 /* The tier all these accounts are on, and whether they are on different accounts or tiers. */
 export function agreed(accounts: Account[]): { tier: string | null; differ: boolean } {
@@ -91,18 +91,20 @@ const shownNode = <T extends { status: string }>(up: T[]): T | undefined => up.f
 export async function subViews(db: Db, isOnline: IsOnline, id?: string, viewer: Viewer | null = null): Promise<SubView[]> {
   await expireStaleNodes(db);
   const live = isNull(subscriptions.removedAt);
+  const companyId = viewer?.companyId;
   const rows = await db
     .select(columns)
     .from(subscriptions)
     .innerJoin(people, eq(people.id, subscriptions.ownerPersonId))
-    .where(id ? and(live, eq(subscriptions.id, id)) : live)
+    .where(and(live, id ? eq(subscriptions.id, id) : undefined, companyId ? eq(subscriptions.companyId, companyId) : undefined))
     .orderBy(asc(subscriptions.createdAt));
   const deptRows = await db
     .select({ id: departments.id, name: departments.name, templateKey: departments.templateKey })
     .from(departments)
+    .where(companyId ? eq(departments.companyId, companyId) : undefined)
     .orderBy(asc(departments.position), asc(departments.createdAt));
   const depts = new Map(deptRows.map(d => [d.id, deptName(d)]));
-  const teamDept = new Map((await db.select({ id: teams.id, departmentId: teams.departmentId }).from(teams)).map(t => [t.id, t.departmentId]));
+  const teamDept = new Map((await db.select({ id: teams.id, departmentId: teams.departmentId }).from(teams).where(companyId ? eq(teams.companyId, companyId) : undefined)).map(t => [t.id, t.departmentId]));
   const listedOwners = [...new Set(rows.filter(r => r.kind === 'personal' && r.ownerScopeKind !== 'company').map(r => r.ownerId))];
   const access = listedOwners.length ? await db.select().from(personAccess).where(inArray(personAccess.personId, listedOwners)) : [];
   /* Each listed owner's departments, in the map's order. */
@@ -110,7 +112,7 @@ export async function subViews(db: Db, isOnline: IsOnline, id?: string, viewer: 
     const mine = new Set(access.filter(a => a.personId === ownerId).map(a => a.departmentId ?? teamDept.get(a.teamId ?? '')));
     return deptRows.filter(d => mine.has(d.id)).map(d => d.id);
   };
-  const [orchestrator] = await db.select({ subscriptionId: agents.subscriptionId }).from(agents).where(eq(agents.kind, 'orchestrator'));
+  const [orchestrator] = await db.select({ subscriptionId: agents.subscriptionId }).from(agents).where(and(eq(agents.kind, 'orchestrator'), companyId ? eq(agents.companyId, companyId) : undefined));
   const allNodes = await planNodes(db, rows.filter(r => r.kind === 'personal').map(r => r.id));
   const told = allNodes.length ? await db.select({ id: nodes.id, account: nodes.account }).from(nodes).where(inArray(nodes.id, allNodes.map(n => n.id))) : [];
   const accountOf = new Map(told.map(n => [n.id, n.account]));

@@ -6,7 +6,7 @@ import { agents, departments, jobs, people, subscriptions, tasks } from '../../d
 import { deptName } from '../departments/templates.js';
 import { taskSpot } from '../tasks/engine.js';
 
-async function canOpenAgent(ctx: Ctx, reach: Access, agent: typeof agents.$inferSelect): Promise<boolean> {
+export async function canOpenAgent(ctx: Ctx, reach: Access, agent: typeof agents.$inferSelect): Promise<boolean> {
   return agent.kind === 'orchestrator' ? reach.whole : canReach(reach, await agentSpot(ctx.db, agent));
 }
 
