@@ -162,11 +162,16 @@ describe('tools a skill grants', () => {
   });
 
   it('keep to ten messages when a turn sends several at once', async () => {
-    const { app, hana, bruno } = await company(['ops-task-watch']);
+    const { app, db, wendy, hana, bruno } = await company(['ops-task-watch']);
     const client = await mcp(app, TOKEN);
     for (let i = 0; i < 9; i++) expect((await call(client, 'message_employee', { employee: bruno.id, text: `Nudge ${i}.` })).isError).toBeFalsy();
     const last = await Promise.all([1, 2, 3].map(i => call(client, 'message_employee', { employee: hana.id, text: `At once ${i}.` })));
     expect(last.filter(r => !r.isError)).toHaveLength(1);
+    expect(last.filter(r => r.isError).map(r => r.content[0]!.text)).toEqual([
+      'One turn sends at most 10 messages. Go on in your next round.',
+      'One turn sends at most 10 messages. Go on in your next round.',
+    ]);
+    expect(await messagesFrom(db, wendy.id)).toHaveLength(10);
   });
 
   it('count what a turn sent before Hornhoof restarted', async () => {
