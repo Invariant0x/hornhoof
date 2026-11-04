@@ -787,4 +787,49 @@ describe('runNode', () => {
     node.stop();
     expect(lines).toEqual(['This node was removed in Hornhoof.']);
   });
+
+  it('checks Playwright Chromium before greeting Hornhoof, logs and reports a named failure, and clears it once healthy', async () => {
+    const server = await fakeServer();
+    const dir = nodeDir(server.url);
+    const lines: string[] = [];
+    let currentError: string | null = 'libnss3.so: cannot open shared object file';
+    const node = await runNode({
+      dir,
+      adapter,
+      testUser: { uid: 20001, gid: 20001 },
+      log: line => lines.push(line),
+      checkBrowser: async () => currentError,
+      browserCheckMs: 40,
+    });
+    onTestFinished(() => node.stop());
+
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    const hello = server.received.find(m => m.type === 'hello')!;
+    expect(hello).toMatchObject({
+      type: 'hello',
+      browserError: 'libnss3.so: cannot open shared object file',
+      noRuns: expect.stringContaining('libnss3.so: cannot open shared object file'),
+      nodeLog: expect.stringContaining('Playwright Chromium could not start: libnss3.so: cannot open shared object file'),
+    });
+    expect(lines.some(line => line.includes('Playwright Chromium could not start: libnss3.so'))).toBe(true);
+    expect(readFileSync(join(dir, 'browser-error'), 'utf8').trim()).toBe('libnss3.so: cannot open shared object file');
+
+    server.send({ type: 'tests.run', partId: 'p-broken', repo: { url: 'https://github.com/acme/shop.git', token: '' }, branch: null, task: 3, command: 'npm test', part: 1, parts: 1, timeoutMs: 60000 });
+    await server.wait(() => server.received.some(m => m.type === 'tests.done' && m.partId === 'p-broken'));
+    expect(server.received.find(m => m.type === 'tests.done' && m.partId === 'p-broken')).toMatchObject({
+      ok: false,
+      error: 'failed',
+      log: 'Playwright Chromium could not start: libnss3.so: cannot open shared object file',
+    });
+
+    currentError = null;
+    await server.wait(() => server.received.some(m => m.type === 'status' && m.browserError === null));
+    expect(server.received.findLast(m => m.type === 'status')).toMatchObject({
+      type: 'status',
+      browserError: null,
+      noRuns: null,
+    });
+    expect(lines).toContain('Playwright Chromium is ready.');
+    expect(existsSync(join(dir, 'browser-error'))).toBe(false);
+  });
 });

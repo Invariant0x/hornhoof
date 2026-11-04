@@ -505,6 +505,7 @@ describe('GET /install.sh', () => {
     expect(res.headers['cache-control']).toBe('no-cache');
     expect(res.body).toContain('http://localhost:8080');
     expect(res.body).not.toContain('__HORNHOOF_SERVER__');
+    expect(res.body).not.toContain('__HORNHOOF_NODE_IMAGE__');
   });
 });
 

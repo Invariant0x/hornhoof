@@ -100,7 +100,7 @@ export const asAgent = (argv: string[], user: JobUser): string[] => ['setpriv', 
 export function secureNode(dir: string, user: JobUser, ops: FolderOps = REAL_OPS): void {
   if (ops.owner(dir) !== 0) ops.chown(dir, 0, 0);
   ops.chmod(dir, 0o755);
-  for (const file of ['node.json', 'sessions.json', 'users.json', 'login-url', 'removed']) {
+  for (const file of ['node.json', 'sessions.json', 'users.json', 'login-url', 'removed', 'browser-error']) {
     const path = join(dir, file);
     if (ops.exists(path) && ops.owner(path) !== 0) ops.chown(path, 0, 0);
   }
@@ -111,7 +111,7 @@ export function secureNode(dir: string, user: JobUser, ops: FolderOps = REAL_OPS
   for (const sub of ['home', 'work']) prepareFolder(join(dir, sub), user, ops);
 }
 
-type SystemFiles = { passwd: string; group: string };
+export type SystemFiles = { passwd: string; group: string };
 const SYSTEM_FILES: SystemFiles = { passwd: '/etc/passwd', group: '/etc/group' };
 
 function hasId(file: string, id: number): boolean {

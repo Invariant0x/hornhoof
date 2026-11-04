@@ -64,11 +64,11 @@ Coverage for crapper is `npx vitest run --coverage` in the part's folder after `
 What only a real browser shows, such as where a panel lies over a page, is tested with Playwright in `apps/web/e2e`. These tests are not part of `npm test`. After a change to how the screens are laid out, run them:
 
 ```sh
-npx playwright install --only-shell chromium
+npx playwright install chromium
 npm run test:browser -w apps/web
 ```
 
-The first line downloads the browser once. A Hornhoof node already has it.
+The first line downloads the browser once on your own machine. A Hornhoof worker node prepares the lockfile's Chromium in `/data/browsers` automatically before handing out tasks.
 
 A change to the database schema gets a new migration from `npx drizzle-kit generate` in `apps/server`. Never edit a migration that is already on `main`.
 
