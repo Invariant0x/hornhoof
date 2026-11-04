@@ -1,13 +1,13 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agentEvents, agents, companies, jobs, people, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
-import { lastMove, type Task, type WakeWhy } from '../src/modules/tasks/engine.js';
+import { cancel, lastMove, type Task, type WakeWhy } from '../src/modules/tasks/engine.js';
 import { discardStaleTurn, discardStaleTurns, repeatedTurn, repeatWake, taskForWake, taskWakeOf, waitingTaskTurn } from '../src/modules/tasks/wake-state.js';
-import { wakePrompt } from '../src/modules/tasks/wake.js';
-import { createTestDb, statements } from './helpers.js';
+import { wakeAll, wakePrompt } from '../src/modules/tasks/wake.js';
+import { createTestDb, statements, testApp } from './helpers.js';
 
-async function fixture() {
-  const db = await createTestDb();
+async function fixture(existing?: Awaited<ReturnType<typeof createTestDb>>) {
+  const db = existing ?? await createTestDb();
   const [company] = await db.insert(companies).values({ name: 'Acme' }).returning();
   const [owner] = await db.insert(people).values({ companyId: company!.id, name: 'Ivan', email: 'ivan@acme.test', status: 'active', scopeKind: 'company', isOwner: true }).returning();
   const [sub] = await db.insert(subscriptions).values({ companyId: company!.id, provider: 'anthropic_api', kind: 'api_key', label: 'Key', ownerPersonId: owner!.id, status: 'ready' }).returning();
@@ -20,10 +20,41 @@ async function fixture() {
   const task = async (set: Partial<Task> = {}) => (await db.insert(tasks).values({ companyId: company!.id, number: ++number, title: 'Checkout', createdByAgentId: head!.id, executorAgentId: worker!.id, assigneeAgentId: worker!.id, ...set }).returning())[0]!;
   const job = async (t: Task | null, agentId: string | null = worker!.id) => (await db.insert(jobs).values({ companyId: company!.id, subscriptionId: sub!.id, agentId, taskId: t?.id ?? null, kind: 'conversation', prompt: 'Work.', timeoutMs: 1000 }).returning())[0]!;
   const message = async (id: string, t: Task, why: WakeWhy, agentId = worker!.id) => db.insert(agentEvents).values({ companyId: company!.id, agentId, jobId: id, kind: 'message', data: { text: 'A task wake.', taskWake: taskWakeOf(t, { why }) } });
-  return { db, head: head!, worker: worker!, reviewer: reviewer!, task, job, message };
+  return { db, owner: owner!, sub: sub!, head: head!, worker: worker!, reviewer: reviewer!, task, job, message };
 }
 
 describe('task wake policy in the database', () => {
+  it.each(['agent', 'person'] as const)('notifies the creator of a dependent task about a cancelled prerequisite (%s)', async creator => {
+    const { app, db } = await testApp();
+    const c = await fixture(db);
+    await db.update(agents).set({ subscriptionId: c.sub.id }).where(eq(agents.id, c.head.id));
+    const [orchestrator] = await db.insert(agents).values({ companyId: c.head.companyId, kind: 'orchestrator', name: 'Owen', model: '', subscriptionId: c.sub.id }).returning();
+    const receiver = creator === 'agent' ? c.head.id : orchestrator!.id;
+    const previous = await c.task();
+    const dependent = await c.task({ title: 'Waiting checkout', after: [previous.id], createdByAgentId: creator === 'agent' ? c.head.id : null, createdByPersonId: creator === 'person' ? c.owner.id : null });
+    const moved = await cancel(app.ctx, { personId: c.owner.id }, previous.id, 'Changed plans.');
+    expect(moved.wakes).toContainEqual(expect.objectContaining({ agentId: receiver, taskId: dependent.id, why: 'after_cancelled' }));
+
+    await wakeAll(app.ctx, moved.wakes);
+
+    const queued = await db.select().from(jobs).where(and(eq(jobs.taskId, dependent.id), eq(jobs.agentId, receiver)));
+    expect(queued).toMatchObject([{ agentId: receiver, taskId: dependent.id, status: 'queued' }]);
+    expect(queued[0]!.prompt).toContain('cancelled');
+    expect(await discardStaleTurn(db, queued[0]!)).toBe(false);
+    expect(await taskForWake(db, { agentId: c.worker.id, taskId: dependent.id, why: 'after_cancelled' })).toBeNull();
+    await db.update(tasks).set({ createdByAgentId: c.reviewer.id, createdByPersonId: null }).where(eq(tasks.id, dependent.id));
+    expect(await discardStaleTurn(db, queued[0]!)).toBe(true);
+  });
+
+  it('rejects missing and removed orchestrators for a human-created dependent task', async () => {
+    const c = await fixture();
+    const task = await c.task({ createdByAgentId: null, createdByPersonId: c.owner.id });
+    const wake = { agentId: c.worker.id, taskId: task.id, why: 'after_cancelled' as const };
+    expect(await taskForWake(c.db, wake)).toBeNull();
+    const [orchestrator] = await c.db.insert(agents).values({ companyId: task.companyId, kind: 'orchestrator', name: 'Owen', model: '', removedAt: new Date() }).returning();
+    expect(await taskForWake(c.db, { ...wake, agentId: orchestrator!.id })).toBeNull();
+  });
+
   it('keeps current actions and rejects work for closed tasks, other holders, and other phases', async () => {
     const c = await fixture();
     const cases: { why: WakeWhy; initial?: Partial<Task>; next?: Partial<Task>; receiver?: string; stale: boolean }[] = [
