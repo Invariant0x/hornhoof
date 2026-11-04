@@ -118,7 +118,8 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     image: env.HORNHOOF_IMAGE || 'ghcr.io/invariant0x/hornhoof',
     registryUrl: set.REGISTRY_URL,
     updateCheckMs: set.UPDATE_CHECK_MS ?? 1800000,
-    /* 99% of the turns that ended well took less, by a week of them on 2026-11-04; a held node works again after that. */
+    /* Just under the 99th percentile of the turns that ended well, 5438 s in a week of them on 2026-11-04, and a turn has
+       run for a while when the wait starts; a held node works again after that. */
     nodeDrainMs: set.NODE_DRAIN_MS ?? 5_400_000,
     /* Long enough for 90% of the turns that waited for the node to run and end before it holds them again. */
     nodeUpdateRetryMs: set.NODE_UPDATE_RETRY_MS ?? 900_000,

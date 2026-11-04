@@ -45,8 +45,8 @@ Files: updates/routes.ts and control.ts, node update command, scripts/install.sh
 
 ### 3. Evidence and delivery
 
-- [ ] Record duration measurements, default wait/retry rationale, and the update paths found in the source. Distinguish source evidence from the historical incident.
-- [ ] Push task-299; run changed-area tests and checks on a free Linux machine with npm ci.
+- [x] Record duration measurements, default wait/retry rationale, and the update paths found in the source. Distinguish source evidence from the historical incident.
+- [x] Push task-299; run changed-area tests and checks on a free Linux machine with npm ci.
 - [ ] Read full logs, run crapper and dryer on the changed files, review the complete diff.
 - [ ] Submit with exact branch/commit/evidence, then merge into fresh turn-7 as #299 directs.
 
@@ -59,3 +59,17 @@ Files: updates/routes.ts and control.ts, node update command, scripts/install.sh
 - Taken over from 07296884 on 2026-11-04 after its model outage; its shell work was never pushed and was redone here.
 - Replaced waiting before the install with app first, nodes after, for every release. The order the head agreed for the first release then needs no branch of its own: an updater from before starts the app alone, and the updater it starts replaces the nodes. A failed update touches no node, so going back cuts no turn.
 - Measured turn lengths (7 days, done, n=1710): p50 34 s, p90 887 s, p95 1674 s, p99 5438 s, max 11798 s. Wait 90 minutes, retry 15 minutes.
+- Why these: 90 minutes (5400 s) stands just under the p99 of turns that ended well (5438 s), and a turn that started before the wait has already run part of its length. 15 minutes (900 s) stands just over their p90 (887 s), so most of the work the node took back while postponed ends before it holds again.
+- Update paths in the source, before this task:
+  - Machines: `updateCommand` in nodes/command.ts gives `curl .../install.sh | bash`; `node_mode` goes over `existing_nodes` and `start_node` stops and removes each node at once.
+  - Server: updates/routes.ts writes request.json; updater.sh `install` runs `install.sh server`; `start_server_services` calls `prepare_builtin_stop` and compose recreates the node; `sweep_nodes` calls `start_node` for the other nodes on that computer.
+  - `program-updates.ts` updates agent programs and restarts no container.
+- Not proved: what started the cuts of 2026-11-04 16:10. The texts "restarted, Hornhoof updated it" and "its container was created again" come from tasks/restarts.ts and fit the paths above, but only a log of Operations or of that computer can name who ran the update. Nobody gave one.
+- Order of a release, for its notes:
+  1. The app goes first: a running node on another image stays on it and its turns go on. This also holds for an updater from before, such as 0.6.1, which starts the new installer without saying the nodes are free.
+  2. The new updater then asks the server with the built-in node's key. The server keeps new work off the nodes on that computer, and work goes to another free node of the plan or waits.
+  3. When the last turn and run part end, the installer of the running build replaces the nodes, and each takes work again with its new boot.
+  4. At the deadline nothing stops: Operations hears with the machine and its turns, the node works again, and the wait repeats 15 minutes later.
+  5. Other machines move when someone runs the install command there. It waits the same way. Against a server from before this wait it leaves the node as it is and says to update the server first.
+  6. `urgent` in the API and `--urgent` for install.sh replace the nodes at once, as before.
+- A failed update touches no node, so going back cuts no turn.
