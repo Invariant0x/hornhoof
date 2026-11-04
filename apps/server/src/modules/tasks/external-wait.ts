@@ -1,3 +1,4 @@
+import { WaitOnInput } from '@hornhoof/protocol/waits';
 import { z } from 'zod';
 import { and, eq, isNotNull, lte, notInArray, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
@@ -8,6 +9,7 @@ import { wakeAll } from './wake.js';
 import { enqueueTurn, insertOrDeliverTurn, onAgent, pump, type TurnMessage } from '../conversation/queue.js';
 import { withInputLock } from '../conversation/decision-context.js';
 import { messageNotDelivered } from '../conversation/live.js';
+import { checkedWaitTarget } from './wait-target.js';
 import { taskByRef } from './views.js';
 import type { Actor } from './engine.js';
 import { taskWakeOf, waitingTaskTurn } from './wake-state.js';
@@ -16,8 +18,9 @@ export const EXTERNAL_WAIT_MS = 2 * 3_600_000;
 export const TaskReference = z.union([z.number().int().positive(), z.string().max(40)]).describe('The task number, like 12 or "#12", or its id.');
 export const MESSAGE_TASK_HINT = ' With task, the message concerns that task and ends its external wait. Without task, it leaves waits unchanged.';
 export const WaitInput = z.object({
-  reason: z.string().trim().min(1).max(600).regex(/^[^\r\n\u2028\u2029]+$/).describe('One line naming the external event you wait for.'),
+  reason: z.string().trim().min(1).max(600).regex(/^[^\r\n\u2028\u2029]+$/).describe('One line naming what you need from the employee or external event.'),
   until: z.iso.datetime({ offset: true }).describe('An ISO date and time in the future, at most two hours from now.'),
+  on: WaitOnInput.optional().describe('Who you wait for: an employee, or time, the CEO, a machine or another external event. Omitted means an external event.'),
 });
 
 function waitOf(input: z.infer<typeof WaitInput>, now: Date): ExternalWait {
@@ -26,7 +29,7 @@ function waitOf(input: z.infer<typeof WaitInput>, now: Date): ExternalWait {
   const until = new Date(parsed.data.until);
   const delay = until.getTime() - now.getTime();
   if (delay <= 0 || delay > EXTERNAL_WAIT_MS) throw refuse(400, 'task_invalid', 'The wait must end in the future, at most two hours from now.');
-  return { reason: parsed.data.reason, since: now.toISOString(), until: until.toISOString() };
+  return { reason: parsed.data.reason, since: now.toISOString(), until: until.toISOString(), ...(parsed.data.on ? { on: parsed.data.on } : {}) };
 }
 
 /* A holder can end its turn while an external system works; the task keeps its workflow status. */
@@ -46,7 +49,9 @@ async function placeWait(ctx: Ctx, agentId: string, taskId: string, input: z.inf
     eq(pendingWakes.agentId, agentId), eq(pendingWakes.taskId, taskId), eq(pendingWakes.why, 'comment'),
   )).limit(1);
   if (message || comment) throw refuse(409, 'task_invalid', `A message on #${task.number} waits for you. End this turn and read it before waiting.`);
-  const externalWait = waitOf(input, now);
+  const wait = waitOf(input, now);
+  const on = await checkedWaitTarget(ctx, task.companyId, agentId, wait.on);
+  const externalWait = { ...wait, ...(on ? { on } : {}) };
   const row = await move(ctx, task, { externalWait, silent: 0 }, { kind: 'updated', actor: { agentId }, text: `Waiting for "${externalWait.reason}" until ${externalWait.until}.`, data: { externalWait } });
   return { task: row, wakes: [] };
 }

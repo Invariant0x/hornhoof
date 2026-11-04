@@ -1,3 +1,4 @@
+import type { ExternalWait } from '@hornhoof/protocol/waits';
 import { COMPANY_TEMPLATE_KEYS, CRED_KINDS, MACHINE_KINDS, RUN_KINDS, TEMPLATE_KEYS, type Account, type Boot, type Failure, type Limits, type ModelOption, type NodeExit } from '@hornhoof/protocol';
 import { sql } from 'drizzle-orm';
 import { bigint, bigserial, boolean, check, customType, index, integer, jsonb, pgTable, primaryKey, real, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
@@ -443,7 +444,7 @@ export const turns = pgTable(
 
 export const TASK_STATUSES = ['planned', 'open', 'working', 'review', 'waiting', 'blocked', 'done', 'cancelled'] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
-export type ExternalWait = { reason: string; since: string; until: string };
+export type { ExternalWait } from '@hornhoof/protocol/waits';
 
 /* A piece of work: the title and brief for people, the body every agent reads as the current truth, and its gates. */
 export const tasks = pgTable(
