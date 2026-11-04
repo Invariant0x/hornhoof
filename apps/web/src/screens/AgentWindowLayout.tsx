@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, type ReactNode, type Ref, type RefO
 import { createPortal } from 'react-dom';
 import { useT } from '../i18n';
 import type { AgentCardView, WaitingRequest } from '../types';
-import { SidePanelRow, useSidePanels, type SidePanel, type WindowPanel } from '../ui/SidePanels';
+import { SidePanelRow, usePanelsCover, useSidePanels, type SidePanel, type WindowPanel } from '../ui/SidePanels';
 import { TaskPanel } from '../ui/TaskPanel';
 import { useOpenAgent } from './AgentWindowContext';
 
@@ -27,6 +27,7 @@ export type WindowPlace = { minimized: boolean; dock: HTMLElement | null; onMini
 const ALONE: WindowPlace = { minimized: false, dock: null, onMinimize() {}, onRestore() {} };
 
 const TASK_PANEL = 'task';
+const BACK_ICON = 'M15 6l-6 6 6 6';
 
 function TaskToggle({ currentId, open, onToggle, panelsId }: { currentId: string | null; open: boolean; onToggle(opener: HTMLElement): void; panelsId: string }) {
   const t = useT();
@@ -48,6 +49,11 @@ function WindowControls({ full, onFull, onMinimize, onClose }: { full: boolean; 
     <button className="window-minimize" type="button" aria-label={t.window.minimize} title={t.window.minimize} onClick={onMinimize}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12" /></svg></button>
     <button className="window-full" type="button" aria-label={fullLabel} title={fullLabel} aria-pressed={full} onClick={onFull}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 10V6h4M14 6h4v4M18 14v4h-4M10 18H6v-4" /></svg></button>
   </div>;
+}
+
+/* A button of the bar that says what it does, or shows only its icon where the bar has no room for the words. */
+export function WordButton({ label, icon, onClick }: { label: string; icon: string; onClick(): void }) {
+  return <button className="btn small ghost bar-word" type="button" aria-label={label} title={label} onClick={onClick}><svg viewBox="0 0 24 24" aria-hidden="true"><path d={icon} /></svg><span>{label}</span></button>;
 }
 
 /* The agent's task as a panel of its window. Links in it open others in its place. Escape is the panels' own here. */
@@ -100,6 +106,8 @@ export function AgentWindowLayout({ currentTask, title, terminal, box, toolbar, 
   const panelsId = useId();
   const stack = useSidePanels([...panels, ...task.panels], box, !minimized);
   const newest = stack.shown.at(-1);
+  const conversation = useRef<HTMLDivElement>(null);
+  const covered = usePanelsCover(stack.row, conversation, newest !== undefined);
   const toStrip = useWindowFocus(minimized, box, restoreButton);
   const classes = windowClasses(terminal, newest !== undefined, full);
   return <>
@@ -107,14 +115,14 @@ export function AgentWindowLayout({ currentTask, title, terminal, box, toolbar, 
       <div className="t-bar">
         <WindowControls full={full} onFull={() => setFull(v => !v)} onMinimize={() => { toStrip.current = true; place.onMinimize(); }} onClose={onClose} />
         <span className="agent-window-title">{title}</span>
+        {newest && covered && <WordButton label={terminal ? t.window.backToTerminal : t.window.backToConversation} icon={BACK_ICON} onClick={() => stack.close(newest.id)} />}
         {toolbar}
         {panels.map(panel => <PanelToggle key={panel.id} panel={panel} open={stack.isOpen(panel.id)} onToggle={opener => stack.toggle(panel.id, opener)} panelsId={panelsId} />)}
         <TaskToggle currentId={currentId} open={stack.isOpen(TASK_PANEL)} onToggle={opener => { task.showCurrent(); stack.toggle(TASK_PANEL, opener); }} panelsId={panelsId} />
-        {newest && <button className="btn small ghost agent-task-back" type="button" onClick={() => stack.close(newest.id)}>{terminal ? t.window.backToTerminal : t.window.backToConversation}</button>}
       </div>
       <div className="agent-workspace">
         <SidePanelRow stack={stack} id={panelsId} />
-        <div className="agent-conversation">{children}</div>
+        <div ref={conversation} className="agent-conversation">{children}</div>
       </div>
     </aside>
     {minimized && dock && createPortal(<AgentStrip title={title} state={agentState} button={restoreButton} onRestore={place.onRestore} onClose={onClose} />, dock)}

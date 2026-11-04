@@ -14,9 +14,10 @@ it('preserves existing company, job, event and attachment data when adding empty
   await cp(MIGRATIONS, previous, { recursive: true });
   const journalFile = join(previous, 'meta', '_journal.json');
   const journal = JSON.parse(await readFile(journalFile, 'utf8')) as { entries: { tag: string }[] };
-  const operator = journal.entries.at(-1)!;
-  expect(operator.tag).toMatch(/^\d{4}_program_operator$/);
-  journal.entries.pop();
+  const at = journal.entries.findIndex(entry => /^\d{4}_program_operator$/.test(entry.tag));
+  expect(at).toBeGreaterThan(-1);
+  const operator = journal.entries[at]!;
+  journal.entries.splice(at);
   await writeFile(journalFile, JSON.stringify(journal));
   const db = drizzle(client);
   await migrate(db, { migrationsFolder: previous });
@@ -42,10 +43,11 @@ it('preserves existing company, job, event and attachment data when adding empty
   await migrate(db, { migrationsFolder: MIGRATIONS });
   await migrate(db, { migrationsFolder: MIGRATIONS });
   for (const [index, table] of tables.entries()) {
-    const excluded = table === 'attachments' ? " - 'operator_case_id'" : '';
+    const excluded = table === 'attachments' ? " - 'operator_case_id'" : table === 'subscriptions' ? " - 'limits_updated_at'" : '';
     expect((await client.query(`select to_jsonb(t)${excluded} as row from ${table} t`)).rows, table).toEqual(before[index]!.rows);
   }
   expect((await client.query('select operator_case_id from attachments')).rows).toEqual([{ operator_case_id: null }, { operator_case_id: null }]);
+  expect((await client.query('select limits_updated_at from subscriptions')).rows).toEqual([{ limits_updated_at: null }]);
   expect((await client.query("select person_id, job_id, size, encode(bytes, 'hex') as payload from attachments where job_id is null")).rows).toEqual([{ person_id: '00000000-0000-4000-8000-000000000005', job_id: null, size: 3, payload: '040506' }]);
   for (const table of ['program_instances', 'program_deliveries', 'program_operator_cases', 'program_operator_signals', 'program_operator_actions']) {
     expect((await client.query(`select * from ${table}`)).rows, table).toEqual([]);

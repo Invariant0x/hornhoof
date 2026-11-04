@@ -95,6 +95,16 @@ One plan can run on several machines of its owner this way.
 
 Disconnecting a machine stops everything on it. A plan that runs nowhere else waits for a machine again.
 
+## Why did my machine drop off?
+
+Open the machine's card on the Machines screen. **Connection to the server** sums up the last 24 hours in plain words, such as "5 drops in the last 24 hours, 40 s on average. Most often: the network cut the connection.", and lists the latest drops: when each one happened, how long the machine was away, why, and the close code.
+
+- Each plan on a machine has its own connection, so a router going down breaks them all at once. Connections that break within a minute of each other count as one drop.
+- **The machine saw** is what the machine itself reported once it was back, such as a failed DNS lookup, how many tries it took, sleep or a change of network. A machine on an older build reports nothing, and only what the server saw is shown.
+- Taking a plan or a machine off in Hornhoof is not a drop.
+- The card is for the machine's owner and for people who see the whole company. The built-in node has no history here, as it has no machine of its own; its connections go to the server's log.
+- Hornhoof keeps this history for 14 days and at most 2000 connections per machine. The orchestrator can read it from the database, table `node_connections`, and only Hornhoof writes it.
+
 ## Can the orchestrator make these commands?
 
 Yes, when the CEO asks. The command then shows on the CEO's screen, as a card in the orchestrator's window. The orchestrator itself gets only a line saying that it is there.

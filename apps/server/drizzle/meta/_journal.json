@@ -411,8 +411,15 @@
     {
       "idx": 59,
       "version": "7",
-      "when": 1793831833904,
-      "tag": "0059_limits_freshness",
+      "when": 1793827153964,
+      "tag": "0059_node_connections",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1793834945588,
+      "tag": "0060_limits_freshness",
       "breakpoints": true
     }
   ]

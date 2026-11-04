@@ -1,3 +1,4 @@
+import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 import type { LineState } from '@hornhoof/protocol/map';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { deptLabel, errorText, useLanguage, useT, type Messages } from '../i18n';
@@ -365,10 +366,10 @@ function DeptPeopleChips({ org, chips, byId, onOpen }: { org: Org; chips: Person
 }
 
 /* onOpenDecisions: a person's card opens the decisions screen showing theirs. */
-type Props = { me: Me; windowOpen: boolean; leftPanelOpen?: boolean; onOpenOrchestrator(): void; inside?: boolean; onOpenDepartment?(id: string): void; onOpenDecisions?(personId: string): void };
+type Props = { me: Me; windowOpen: boolean; leftPanelOpen?: boolean; onOpenOrchestrator(): void; inside?: boolean; onOpenDepartment?(id: string): void; onOpenDecisions?(personId: string): void; onHome?: () => void };
 
 /* inside: a department's view is open over the map, which stays flown into it until the view closes. */
-export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchestrator, inside = false, onOpenDepartment, onOpenDecisions }: Props) {
+export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchestrator, inside = false, onOpenDepartment, onOpenDecisions, onHome }: Props) {
   const t = useT();
   const { language } = useLanguage();
   const still = useReducedMotion();
@@ -491,6 +492,7 @@ export function MapScreen({ me, windowOpen, leftPanelOpen = false, onOpenOrchest
     timers.current.add(timer);
   }
 
+  if (unavailableFailure(failure)) return <RouteUnavailable onHome={onHome} />;
   if (failure !== null) return <p className="alert map-failure" role="alert">{errorText(t, failure)}</p>;
   if (!org) return <div className="map" aria-busy="true" />;
 

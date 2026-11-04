@@ -15,6 +15,7 @@ import { improvementRoutes } from './modules/improvements/routes.js';
 import { jobRoutes } from './modules/jobs/routes.js';
 import { PublicLinks } from './modules/link/link.js';
 import { linkRoutes } from './modules/link/routes.js';
+import { nodeConnected, nodeDisconnected, serverStopping } from './modules/nodes/connections.js';
 import { NodeHub } from './modules/nodes/hub.js';
 import { handleNodeClose } from './modules/nodes/messages.js';
 import { receiveNodeMessage } from './modules/nodes/lifecycle.js';
@@ -83,8 +84,12 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
     onMessage: (id, msg) => receiveNodeMessage(ctx, id, msg),
     onTerminal: (id, msg) => ctx.terminals.fromNode(id, msg),
     onClose: id => handleNodeClose(ctx, id),
+    onConnected: (id, link, at) => nodeConnected(ctx, id, link, at),
+    onDisconnected: (id, end) => nodeDisconnected(ctx, id, end),
     onError: err => app.log.error({ error: loggable(err) }, 'A node message failed.'),
   });
+  /* Before the socket plugin's, which closes the sockets, and while the database still answers. */
+  app.addHook('preClose', async () => serverStopping(ctx).catch(err => app.log.error({ error: loggable(err) }, 'Writing that the server stopped into the history of node connections failed.')));
   app.addHook('onClose', async () => ctx.hub.stop());
   app.addHook('onClose', async () => ctx.agentSql?.close());
   const { config } = deps;

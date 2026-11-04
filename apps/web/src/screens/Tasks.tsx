@@ -1,3 +1,4 @@
+import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 import { useRef, useState } from 'react';
 import { deptLabel, errorText, useT } from '../i18n';
 import { mapPeople, useOrg } from '../org';
@@ -14,6 +15,7 @@ import { TaskRow } from '../ui/TaskRow';
 import { TurnProgress } from '../ui/TurnProgress';
 
 type Props = {
+  onHome?: () => void;
   decisions: Decisions | undefined;
   onDecisionsChanged: () => void;
   /* Opened from a person's card: only that person's decisions show until the filter is taken off. */
@@ -287,7 +289,7 @@ function WaitingForYou({ decisions, personId, onClearPerson, ...rest }: Waiting)
 
 /* The tracker shows the work and changes nothing by itself: what waits for the person, then the turns as the orchestrator
    laid them out, the running one first, the planned ones in order and the finished ones folded away. */
-export function Tasks({ decisions, onDecisionsChanged, personId, onClearPerson, selected, onOpenTask, onOpenAgent, onOpenOrchestrator }: Props) {
+export function Tasks({ decisions, onDecisionsChanged, personId, onClearPerson, selected, onOpenTask, onOpenAgent, onOpenOrchestrator, onHome }: Props) {
   const t = useT();
   const { org } = useOrg();
   const [department, setDepartment] = useState<string | null>(null);
@@ -297,6 +299,7 @@ export function Tasks({ decisions, onDecisionsChanged, personId, onClearPerson, 
   const place = (p: TaskLine['department']) => placeName(t, org, p);
   const rows: Rows = { selected, onOpenTask, place: task => [place(task.department), task.product?.name].filter(Boolean).join(' / ') };
   const broken = failure ?? turnsFailure;
+  if (unavailableFailure(broken)) return <RouteUnavailable onHome={onHome} />;
 
   return (
     <section className="tasks">

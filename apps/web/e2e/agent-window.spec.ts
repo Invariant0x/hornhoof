@@ -91,8 +91,12 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
       }
       await checkLeftControls(window, [words.close, words.minimize, words.full]);
       await capture('task');
-      if (width === 1440) await about.click();
-      await window.getByRole('button', { name: words.back }).click();
+      if (width === 1440) {
+        /* Beside the terminal there is nothing to go back to. */
+        await about.click();
+        await expect(window.getByRole('button', { name: words.back })).toHaveCount(0);
+        await task.getByRole('button', { name: words.close, exact: true }).click();
+      } else await window.getByRole('button', { name: words.back }).click();
       await expect(task).toBeHidden();
       await expect(window.locator('.xterm-screen')).toBeVisible();
       expect(live.connections).toBe(connections);
