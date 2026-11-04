@@ -48,6 +48,13 @@ describe('loadConfig', () => {
     }
   });
 
+  it('runs behind a keeper only when HORNHOOF_KEEPER says on', () => {
+    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET }).keeper).toBe(false);
+    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, HORNHOOF_KEEPER: '' }).keeper).toBe(false);
+    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, HORNHOOF_KEEPER: 'on' }).keeper).toBe(true);
+    expect(() => loadConfig({ HORNHOOF_SECRET: TEST_SECRET, HORNHOOF_KEEPER: 'yes' })).toThrow('HORNHOOF_KEEPER must be on, or not set.');
+  });
+
   it('knows the tunnel container by a plain host name', () => {
     expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET }).tunnelHost).toBeUndefined();
     expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, TUNNEL_HOST: 'tunnel' }).tunnelHost).toBe('tunnel');
