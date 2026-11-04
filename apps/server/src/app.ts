@@ -39,6 +39,7 @@ import { poolRoutes } from './modules/testruns/pool.js';
 import { taskRoutes } from './modules/tasks/routes.js';
 import { TerminalRelay } from './modules/terminals/relay.js';
 import { terminalRoutes } from './modules/terminals/routes.js';
+import { Challenges, challengeRoutes } from './modules/tls/challenges.js';
 import { addSecurityHeaders, hasWebApp, serveWebApp, webAppRoutes } from './web.js';
 
 export type { Db } from './db/client.js';
@@ -59,7 +60,7 @@ export type Deps = {
 };
 
 /* What routes get: the deps, the live node connections, the live stream to browsers, the terminals people watch, the
-   check for newer builds, access to the computer the server runs on and the company's public link. */
+   check for newer builds, access to the computer the server runs on, the company's public link and its ACME answers. */
 export type Ctx = Deps & {
   log: FastifyBaseLogger;
   hub: NodeHub;
@@ -70,6 +71,7 @@ export type Ctx = Deps & {
   computer: ComputerAccess;
   templates: Templates;
   links: PublicLinks;
+  challenges: Challenges;
 };
 
 declare module 'fastify' {
@@ -126,6 +128,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   ctx.computer = new ComputerAccess(config.controlDir, ctx.updater);
   ctx.templates = loadTemplates(config.templatesDir);
   ctx.links = new PublicLinks(ctx);
+  ctx.challenges = new Challenges();
   app.addHook('onReady', async () => ctx.updates.start());
   app.addHook('onClose', async () => ctx.updates.stop());
   app.addHook('onReady', async () => ctx.links.sync());
@@ -162,5 +165,6 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   partFileRoutes(app, ctx);
   poolRoutes(app, ctx);
   linkRoutes(app, ctx);
+  challengeRoutes(app, ctx.challenges);
   return app;
 }
