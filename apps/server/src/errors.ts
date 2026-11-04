@@ -91,7 +91,10 @@ export type ErrorReason =
   | 'relay_unreachable'
   | 'link_taken'
   | 'link_reserved'
-  | 'link_invalid';
+  | 'link_invalid'
+  | 'maintenance'
+  | 'read_only'
+  | 'starting';
 
 /* details: what the web shows with the reason's words, such as the machines it names and a command to run there. */
 export class ApiError extends Error {
