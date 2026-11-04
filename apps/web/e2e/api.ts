@@ -73,7 +73,9 @@ export async function serveApi(page: Page) {
   await page.route('**/api/**', route => {
     const url = new URL(route.request().url());
     const path = url.pathname + url.search;
-    if (path === '/api/stream') return route.fulfill({ status: 200, contentType: 'text/event-stream', body: ': quiet\n\n' });
+    /* A stream with nothing to say stays open. An answer would end it: the browser reconnects within seconds, and on each
+       reconnect the whole app fetches what it missed, which keeps every page in every test busy. */
+    if (path === '/api/stream') return;
     if (path in ROUTES) return route.fulfill(json(ROUTES[path]));
     const task = TASKS.find(x => path === `/api/tasks/${x.id}`);
     if (task) return route.fulfill(json({ task: detail(task) }));

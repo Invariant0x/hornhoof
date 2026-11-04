@@ -49,6 +49,14 @@ for (const who of PEOPLE) {
 
       await page.setViewportSize({ width: 1100, height: 900 });
       await expect(back).toBeVisible();
+      /* A department's panel takes the window's width alone, which leaves room for the row beside it. */
+      if (who === 'employee') {
+        const about = page.getByRole('button', { name: s.lang === 'en' ? 'About the department' : 'Об отделе', exact: true });
+        await about.click();
+        await expect(back).toHaveCount(0);
+        await about.click();
+        await expect(back).toBeVisible();
+      }
       await page.setViewportSize({ width: s.width, height: 900 });
       await expect(back).toHaveCount(0);
 
