@@ -1222,7 +1222,11 @@ export class TerminalHost {
   }
 
   private async successfulStop(a: Agent, data: Record<string, unknown>, id: string | undefined): Promise<void> {
-    if (a.program?.kind === 'kimi' && !(await this.kimiStopCurrent(a))) return;
+    if (a.program?.kind === 'kimi') {
+      const turn = a.turn;
+      await this.settleWire(a, turn);
+      if (!this.stopIsCurrent(a, turn)) return;
+    }
     this.completeStop(a, data, id);
   }
 
@@ -1232,9 +1236,7 @@ export class TerminalHost {
     this.endTurn(a, { status: 'done', message }, id);
   }
 
-  private async kimiStopCurrent(a: Agent): Promise<boolean> {
-    const turn = a.turn;
-    await this.settleWire(a, turn);
+  private stopIsCurrent(a: Agent, turn: Turn | null): boolean {
     return a.turn === turn && !turn?.ending;
   }
 

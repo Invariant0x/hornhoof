@@ -254,6 +254,20 @@ describe('stop hook branches before extraction', () => {
     expect(c.agent.busy).toBe(false);
   });
 
+  it('does not end a new turn queued between a wire check and its Stop continuation', async () => {
+    const c = fixture('kimi');
+    const next = { ...c.agent.turn!, jobId: 'next' };
+    c.agent.turn = null;
+    const stopping = c.host['hook']('branches', 'stop', {});
+    queueMicrotask(() => {
+      c.host['beginTurn'](c.agent);
+      c.agent.turn = next;
+      c.agent.ends.started('next');
+    });
+    await stopping;
+    expect(next.ending).toBeUndefined();
+  });
+
   it.each([null, 'Wire answer'])('bounds a missing Kimi wire end and keeps its last text %j', async answer => {
     const c = fixture('kimi');
     c.agent.lastText = answer;
