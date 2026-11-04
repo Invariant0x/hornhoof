@@ -39,26 +39,29 @@ describe('the first setup a plan waits for, as the node tells Hornhoof of it', (
 
   it('is known from a turn that met it, and from no other failure', () => {
     const wait = new SetupWait(program());
-    expect([wait.met(null), wait.met(undefined), wait.met({ kind: 'auth' }), wait.needed]).toEqual([false, false, false, false]);
-    expect([wait.met({ kind: 'setup' }), wait.field()]).toEqual([true, { setupNeeded: true }]);
+    for (const other of [null, undefined, { kind: 'auth' }]) wait.met(other);
+    expect(wait.needed).toBe(false);
+    wait.met({ kind: 'setup' });
+    expect(wait.field()).toEqual({ setupNeeded: true });
   });
 
-  it('looks again only while signed out or waiting, and says when either changed', async () => {
+  /* Only a sign-in it found by looking again is news: one it was told of may have gone while it looked. */
+  it('looks again only while signed out or waiting, and says what it found and when either changed', async () => {
     const ready = new SetupWait(program());
-    expect(await ready.recheck(true, signedIn())).toEqual({ loggedIn: true, changed: false });
+    expect(await ready.recheck(true, signedIn())).toEqual({ signedIn: false, changed: false });
 
     const out = new SetupWait(program(false));
-    expect(await out.recheck(false, signedIn(false))).toEqual({ loggedIn: false, changed: false });
-    expect(await out.recheck(false, signedIn(true))).toEqual({ loggedIn: true, changed: true });
+    expect(await out.recheck(false, signedIn(false))).toEqual({ signedIn: false, changed: false });
+    expect(await out.recheck(false, signedIn(true))).toEqual({ signedIn: true, changed: true });
 
     const waiting = new SetupWait(program(true, true, false));
     expect(await waiting.check(true)).toBe(true);
-    expect(await waiting.recheck(true, signedIn())).toEqual({ loggedIn: true, changed: false });
-    expect(await waiting.recheck(true, signedIn())).toEqual({ loggedIn: true, changed: true });
+    expect(await waiting.recheck(true, signedIn())).toEqual({ signedIn: false, changed: false });
+    expect(await waiting.recheck(true, signedIn())).toEqual({ signedIn: false, changed: true });
     expect(waiting.field()).toEqual({});
 
     const both = new SetupWait(program(true));
-    expect(await both.recheck(false, signedIn(true))).toEqual({ loggedIn: true, changed: true });
+    expect(await both.recheck(false, signedIn(true))).toEqual({ signedIn: true, changed: true });
     expect(both.field()).toEqual({ setupNeeded: true });
   });
 });

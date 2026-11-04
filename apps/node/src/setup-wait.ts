@@ -14,19 +14,18 @@ export class SetupWait {
     return this.needed !== was;
   }
 
-  /* While signed out or waiting for the setup: whether the program is signed in now, and whether either changed. */
-  async recheck(loggedIn: boolean, signedIn: () => Promise<boolean>): Promise<{ loggedIn: boolean; changed: boolean }> {
-    if (loggedIn && !this.needed) return { loggedIn, changed: false };
-    const now = loggedIn || (await signedIn());
-    const changed = await this.check(now);
-    return { loggedIn: now, changed: changed || now !== loggedIn };
+  /* While signed out or waiting for the setup: whether it found the program signed in by looking again, and whether either
+     changed. */
+  async recheck(loggedIn: boolean, signedIn: () => Promise<boolean>): Promise<{ signedIn: boolean; changed: boolean }> {
+    if (loggedIn && !this.needed) return { signedIn: false, changed: false };
+    const found = !loggedIn && (await signedIn());
+    const changed = await this.check(loggedIn || found);
+    return { signedIn: found, changed: changed || found };
   }
 
-  /* A turn that ended on the setup. True when it did. */
-  met(failure: { kind: string } | null | undefined): boolean {
-    if (failure?.kind !== 'setup') return false;
-    this.needed = true;
-    return true;
+  /* A turn that ended on the setup. */
+  met(failure: { kind: string } | null | undefined): void {
+    if (failure?.kind === 'setup') this.needed = true;
   }
 
   /* What the node's hello and status say of it. */
