@@ -1,5 +1,6 @@
 import { UNHEARD_MS, type ProgramState } from '@hornhoof/protocol';
 import { RESTART_AFTER_MS } from '@hornhoof/protocol/map';
+import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
 import { contentText, isRecord } from '../providers/events.js';
 import type { TermProgram } from './programs.js';
 
@@ -48,7 +49,8 @@ const recorded = (text: string) => PASTED.exec(text)?.[2] ?? text;
 /* Whether the program's record is these words: as they are, or inside Claude's paste wrapper. */
 const same = (words: string, got: string) => flat(words) === flat(got) || flat(words) === flat(recorded(got));
 type WordState = 'waiting' | 'queued' | 'held' | 'taken' | 'discarded';
-export type WordReceipt = { text: string; jobId: string | null; state: WordState; accepted: boolean; sources: Set<string> };
+export type WordReceipt = { text: string; jobId: string | null; state: WordState; accepted: boolean; sources: Set<string>; operatorDelivery?: OperatorDelivery };
+type ReceiptHooks = { preserveOriginal?: boolean; original?(phase: 'queued' | 'taken'): void; word?(word: WordReceipt, phase: 'queued' | 'taken' | 'not_taken'): void };
 
 /* Claude can omit the words from a removal; its queue belongs to the program, across turns. */
 export function claudeWordReceipt(line: Record<string, unknown>, enqueued: string[]): { state: 'queued' | 'taken'; text: string } | null {
@@ -71,19 +73,21 @@ export class TurnWords {
   private replayed: string | null = null;
   private endedAt: number | null = null;
 
-  constructor(words: string[] = []) { this.original = words; }
+  constructor(words: string[] = [], private readonly receipts: ReceiptHooks = {}) { this.original = words; }
 
-  add(text: string, jobId: string | null = null): WordReceipt {
-    const word: WordReceipt = { text, jobId, state: 'waiting', accepted: false, sources: new Set() };
+  add(text: string, jobId: string | null = null, operatorDelivery?: OperatorDelivery): WordReceipt {
+    const word: WordReceipt = { text, jobId, state: 'waiting', accepted: false, sources: new Set(), ...(operatorDelivery ? { operatorDelivery } : {}) };
     this.words.push(word);
     return word;
   }
 
   clear(): void {
+    if (this.receipts.preserveOriginal) return;
     this.original = [];
   }
 
   pending(): string[] { return [...this.original, ...this.words.filter(word => this.waiting(word)).map(word => word.text)]; }
+  originalPending(): boolean { return this.original.length > 0; }
   replay(text: string): void { this.replayed = text; this.endedAt = null; }
   end(now: number): void { this.endedAt ??= now; }
 
@@ -93,45 +97,58 @@ export class TurnWords {
   }
 
   queued(text: string, source: string): boolean {
+    if (this.receipts.original && this.original.some(word => same(word, text))) { this.receipts.original('queued'); return true; }
     const word = this.words.find(word => this.waiting(word) && same(word.text, text) && !word.sources.has(source));
     if (!word) return false;
     word.sources.add(source);
     word.state = 'queued';
+    this.receipts.word?.(word, 'queued');
     return true;
   }
 
   taken(text: string): boolean {
     if (this.replayed !== null && same(this.replayed, text)) {
-      for (const word of this.words) if (this.waiting(word)) word.state = 'taken';
+      for (const word of this.words) if (this.waiting(word)) { word.state = 'taken'; this.receipts.word?.(word, 'taken'); }
+      if (this.original.length) this.receipts.original?.('taken');
       this.replayed = null;
-      this.clear();
+      this.original = [];
       return true;
     }
-    const original = this.original.findIndex(word => same(word, text));
-    if (original >= 0) { this.original.splice(original, 1); return true; }
+    if (this.takeOriginal(text)) return true;
     const word = this.words.find(word => this.waiting(word) && same(word.text, text));
     if (!word) return false;
     word.state = 'taken';
+    this.receipts.word?.(word, 'taken');
+    return true;
+  }
+
+  takeOriginal(text: string): boolean {
+    const original = this.original.findIndex(word => same(word, text));
+    if (original < 0) return false;
+    this.original.splice(original, 1);
+    this.receipts.original?.('taken');
     return true;
   }
 
   /* The words Hornhoof typed, as it typed them, with the turn they were typed into. */
-  takeQueued(text: string): { jobId: string | null; text: string } | null {
+  takeQueued(text: string): { jobId: string | null; text: string; operatorDelivery?: OperatorDelivery } | null {
     const word = this.words.find(word => this.waiting(word) && same(word.text, text));
     if (!word) return null;
     word.state = 'taken';
-    return { jobId: word.jobId, text: word.text };
+    this.receipts.word?.(word, 'taken');
+    return { jobId: word.jobId, text: word.text, ...(word.operatorDelivery ? { operatorDelivery: word.operatorDelivery } : {}) };
   }
 
   bind(jobId: string): void {
     for (const word of this.words) word.jobId ??= jobId;
   }
 
-  unheard(now: number, gone = false): { text: string; jobId: string | null }[] {
+  unheard(now: number, gone = false): { text: string; jobId: string | null; operatorDelivery?: OperatorDelivery }[] {
     if (!gone && (this.endedAt === null || now - this.endedAt < UNHEARD_MS)) return [];
     return this.words.filter(word => word.accepted && this.waiting(word)).map(word => {
       word.state = 'discarded';
-      return { text: word.text, jobId: word.jobId };
+      this.receipts.word?.(word, 'not_taken');
+      return { text: word.text, jobId: word.jobId, ...(word.operatorDelivery ? { operatorDelivery: word.operatorDelivery } : {}) };
     });
   }
 
