@@ -16,6 +16,15 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
       expect(auths).toEqual(['Bearer tok-turn']);
     }));
 
+  it('keeps a start going until the program it starts anew lists its tools, whatever the one before it listed', () =>
+    withTools(async () => {
+      expect(await host.run(job('a44', '', { env: { FAKE_SECRET: SECRET, FAKE_MCP_LIST_MS: '10' } }))).toMatchObject({ ok: true });
+      /* Another launch starts it anew, and this one lists its tools only later. */
+      const start = Date.now();
+      expect(await host.run(job('a44', '', { env: { FAKE_SECRET: SECRET, FAKE_MCP_LIST_MS: '1500' } }))).toMatchObject({ ok: true });
+      expect(Date.now() - start).toBeGreaterThanOrEqual(1500);
+    }));
+
   it('gives a person who types while their program starts a turn of their own, once the program has its tools', () =>
     withTools(async auths => {
       const starting = host.run(job('a43', '', { env: { FAKE_SECRET: SECRET, FAKE_MCP_LIST_MS: '700' } }));

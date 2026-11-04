@@ -2,7 +2,7 @@ import { stripEscapes } from '../providers/process.js';
 import type { TermProgram } from './programs.js';
 
 /* Dim text is a suggestion, or a marker in Codex's history, rather than input a person typed. */
-function withoutDim(screen: string): string {
+export function withoutDim(screen: string): string {
   let dim = false;
   const text = screen.split(/(\x1b\[[0-9;]*m)/).map(part => {
     const codes = part.match(/^\x1b\[([0-9;]*)m$/);
