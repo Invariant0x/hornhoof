@@ -35,6 +35,8 @@ When he cannot answer, the card comes from the department's default roster. Role
 
 Click an employee to open its window, with its terminal or its log. A small mark next to its name says whether it works in Claude, Codex, Kimi, GLM or Antigravity.
 
+Minimize a window and it waits as a strip at the edge of the screen, with the agent's name and state, on every screen. Opening another agent does the same to the window you had open, so any number of strips can stand one after another; on a phone they stand in a row at the bottom. Click a strip to bring its window back as you left it. Only its cross closes it. An agent has one window, so opening the same agent again brings back its strip. Strips last until you reload the page.
+
 "Card" in the window shows:
 
 - where the employee runs, and on which model;

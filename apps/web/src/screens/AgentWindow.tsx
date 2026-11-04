@@ -89,6 +89,11 @@ function failedText(t: Messages, data: unknown, employee: boolean): string {
 /* A department the CEO asked to staff: at says when, so asking again about the same department counts. */
 export type StaffAsk = { id: string; name: string; at: number };
 
+/* Until its card comes the company names an agent: a strip with no name could not be told from the others. */
+function listedName(org: Org, agentId: string): string {
+  return org.departments.flatMap(d => d.employees).find(e => e.id === agentId)?.name ?? '';
+}
+
 /* agentId: 'orchestrator' or an employee's id. staff: the CEO's "+ Hire", for the orchestrator's window only. */
 type Props = { me: Me; org: Org; agentId: string; staff?: StaffAsk | null; onClose(): void; place?: WindowPlace; requests?: WaitingRequest[]; onRequestsChanged?(): void };
 
@@ -192,9 +197,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   const model = orchestrator ? org.orchestrator?.model : card?.model;
   const machine = orchestrator ? org.orchestrator?.machine : card?.machine;
   const role = card?.role?.title[language];
-  /* Until its card comes the company names it: a strip with no name could not be told from the others. */
-  const listed = org.departments.flatMap(d => d.employees).find(e => e.id === agentId)?.name ?? '';
-  const title = orchestrator ? t.window.title : card ? [card.name, role !== card.name && role].filter(Boolean).join(', ') : listed;
+  const title = orchestrator ? t.window.title : card ? [card.name, role !== card.name && role].filter(Boolean).join(', ') : listedName(org, agentId);
   const placeholder = orchestrator ? t.window.placeholder : t.window.writeTo(card?.name ?? '');
 
   /* Every agent's current task comes from its card; the company supplies the orchestrator's other details. */
