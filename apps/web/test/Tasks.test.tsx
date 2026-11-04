@@ -404,7 +404,7 @@ describe('the decisions of one person', () => {
     expect(within(waiting).getByRole('button', { name: 'Create departments (1)' })).toBeInTheDocument();
     const computer = within(waiting).getByRole('region', { name: "The orchestrator asks for access to the server's computer" });
     expect(computer).toHaveTextContent('Inspect disk space.');
-    await user.click(within(computer).getByRole('button', { name: 'Open access for a day' }));
+    await user.click(within(computer).getByRole('button', { name: 'Open for a day' }));
     expect(calls.some(c => c.method === 'POST' && c.path === '/api/computer/open')).toBe(true);
     expect(await screen.findByRole('button', { name: 'Tasks, 3 waiting for you' })).toBeInTheDocument();
     expect(within(waiting).queryByRole('region', { name: /asks for access/ })).not.toBeInTheDocument();
@@ -422,7 +422,7 @@ describe('the decisions of one person', () => {
     const waiting = screen.getByRole('region', { name: 'Waiting for you' });
     expect(within(waiting).getByRole('heading', { name: 'Hiring for Development' })).toBeInTheDocument();
     expect(within(waiting).getByText('Hire a reviewer.')).toBeInTheDocument();
-    await user.click(within(waiting).getByRole('button', { name: 'Open access for a day' }));
+    await user.click(within(waiting).getByRole('button', { name: 'Open for a day' }));
     expect(await within(waiting).findByRole('alert')).toHaveTextContent('The updater is not running.');
   });
 

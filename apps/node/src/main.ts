@@ -3,12 +3,13 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { hostname, uptime } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LOAD_MS, NodeBuild, type AgentEvent, type CredKind, type Limits, type NodeLoad, type NodeMessage, type NodeStopReason, type ProviderId, type ServerMessage } from '@hornhoof/protocol';
 import { SIGNIN_ERRORS } from '@hornhoof/protocol/signin';
 import { agentFs, ownFs, type AgentFs } from './agent-fs.js';
 import { bootFacts } from './boot.js';
+import { prepareAndVerifyBrowser, readBrowserError, startupBrowserCheck, writeBrowserError } from './browser.js';
 import { connect } from './connection.js';
 import { agentUser, builtinAdapters, secureNode, userFor, type JobUser } from './isolation.js';
 import { machineLoad } from './load.js';
@@ -40,6 +41,7 @@ export const VERSION: string = JSON.parse(readFileSync(new URL('../package.json'
 export const buildOf = (env: NodeJS.ProcessEnv): string | undefined => NodeBuild.safeParse(env.HORNHOOF_NODE_BUILD).data;
 
 const LOGIN_CHECK_MS = 10_000;
+const BROWSER_CHECK_MS = 60_000;
 /* How often a Codex plan's holder looks whether Codex renewed its sign-in between turns. */
 const LEASE_CHECK_MS = 60_000;
 /* How often a node with terminals reads its program's tokens again: a program signs in again or renews them between turns. */
@@ -95,6 +97,9 @@ type RunOptions = {
   runPart?: typeof runTests;
   /* The node build it says in its hello; none from a node built by hand. */
   build?: string;
+  /* Verifies that Playwright Chromium launches before Hornhoof hands tasks or runs to this node. */
+  checkBrowser?: () => Promise<string | null>;
+  browserCheckMs?: number;
 };
 
 /* A complete list of the plan's windows replaces what the node knew. A partial one, such as the single window a turn
@@ -110,7 +115,7 @@ function merged(known: Limits | null, news: Limits): Limits {
 }
 
 /* The node's life: stay connected, run jobs, report the sign-in state and the limits, clean up when removed. */
-export async function runNode({ dir, adapter, builtin, terminal, login: loginSetup, log: writeLog = console.log, loginCheckMs = LOGIN_CHECK_MS, setupCheckMs = SETUP_CHECK_MS, learnMs = LEARN_MS, limitsMs = LIMITS_MS, loadMs = LOAD_MS, leaseCheckMs = LEASE_CHECK_MS, install, programs = new ProgramUpdates([]), testUser = null, runPart = runTests, build }: RunOptions): Promise<{ stop(reason?: NodeStopReason): void }> {
+export async function runNode({ dir, adapter, builtin, terminal, login: loginSetup, log: writeLog = console.log, loginCheckMs = LOGIN_CHECK_MS, setupCheckMs = SETUP_CHECK_MS, learnMs = LEARN_MS, limitsMs = LIMITS_MS, loadMs = LOAD_MS, leaseCheckMs = LEASE_CHECK_MS, install, programs = new ProgramUpdates([]), testUser = null, runPart = runTests, build, checkBrowser = async () => null, browserCheckMs = BROWSER_CHECK_MS }: RunOptions): Promise<{ stop(reason?: NodeStopReason): void }> {
   if (!builtin && isRemoved(dir)) {
     writeLog('This node was removed in Hornhoof.');
     return { stop() {} };
@@ -231,7 +236,13 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   /* Which account and plan the program is signed in to, read at the start, after a sign-in and with the limits. */
   const readAccount = async () => (single?.account ? await single.account().catch(() => null) : null);
   let account = await readAccount();
-  const tellStatus = () => emit({ type: 'status', loggedIn, ...setup.field(), limits, ...(models ? { models } : {}), account });
+  let browserError = await checkBrowser().catch(err => message(err));
+  writeBrowserError(dir, browserError);
+  if (browserError) log(`Playwright Chromium could not start: ${browserError}`);
+  const noRunsNow = (): string | null =>
+    !testUser ? NO_RUNS : browserError ? `Playwright Chromium could not start: ${browserError}` : null;
+  const tellStatus = () =>
+    emit({ type: 'status', loggedIn, ...setup.field(), limits, ...(models ? { models } : {}), account, browserError, noRuns: noRunsNow() });
   const status = async () => {
     /* A program that cannot list its models now keeps those it listed before. */
     models = await readModels().catch(() => models);
@@ -252,7 +263,8 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       /* Finished jobs Hornhoof has not confirmed still count as running, so the server does not give up on them. */
       const typed = host?.typedJobs() ?? [];
       const tests = [...testing.keys(), ...unconfirmedTests.keys()];
-      next({ type: 'hello', version: VERSION, loggedIn, ...setup.field(), running: [...running.keys(), ...typed, ...unconfirmed.keys()], ...(models ? { models } : {}), terminals: Boolean(host), work: Boolean(testUser), ...(testUser ? {} : { noRuns: NO_RUNS }), load: load(), tests, skillFiles: true, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
+      const noRuns = noRunsNow();
+      next({ type: 'hello', version: VERSION, loggedIn, ...setup.field(), running: [...running.keys(), ...typed, ...unconfirmed.keys()], ...(models ? { models } : {}), terminals: Boolean(host), work: Boolean(testUser), ...(noRuns ? { noRuns } : {}), browserError, load: load(), tests, skillFiles: true, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
       for (const m of outbox.splice(0)) emit(m);
       for (const m of unconfirmed.values()) next(m);
       for (const m of unconfirmedTests.values()) next(m);
@@ -420,11 +432,12 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
 
   /* A part of a test run: no agent program takes part, and its user reaches none of the node's keys. */
   async function testOne(m: TestRun, signal: AbortSignal) {
-    if (!testUser) {
-      const refused: TestsDone = { type: 'tests.done', partId: m.partId, ok: false, exitCode: null, error: 'failed', commit: null, log: NO_RUNS };
-      keepTest(m.partId, refused);
+    const refusal = noRunsNow();
+    if (refusal || !testUser) {
+      const refusedPart: TestsDone = { type: 'tests.done', partId: m.partId, ok: false, exitCode: null, error: 'failed', commit: null, log: refusal || NO_RUNS };
+      keepTest(m.partId, refusedPart);
       testing.delete(m.partId);
-      return emit(refused);
+      return emit(refusedPart);
     }
     emit({ type: 'tests.started', partId: m.partId });
     const done = await runPart(m, { dir, user: testUser, hidden: [...known], signal, files });
@@ -509,6 +522,18 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   asking.unref();
   const renewing = setInterval(() => void renewedCodex().catch(() => {}), leaseCheckMs);
   renewing.unref();
+  const recheckBrowser = async () => {
+    if (stopped || browserError === null) return;
+    const next = await checkBrowser().catch(err => message(err));
+    if (next === browserError) return;
+    browserError = next;
+    writeBrowserError(dir, browserError);
+    if (browserError) log(`Playwright Chromium could not start: ${browserError}`);
+    else log('Playwright Chromium is ready.');
+    await status();
+  };
+  const checkingBrowser = setInterval(() => void recheckBrowser(), browserCheckMs);
+  checkingBrowser.unref();
   /* An old figure says nothing, so one that cannot go out now is not kept for later. */
   const reporting = setInterval(() => void send?.({ type: 'load', ...load() }), loadMs);
   reporting.unref();
@@ -521,6 +546,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     clearInterval(asking);
     clearInterval(reporting);
     clearInterval(renewing);
+    clearInterval(checkingBrowser);
     void host?.stop();
     void login?.shutdown();
     /* Let the last message leave before the socket closes. */
@@ -531,7 +557,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
 
 export type Io = { stdin: NodeJS.ReadableStream; stdout: NodeJS.WritableStream; stderr: NodeJS.WritableStream };
 
-const USAGE = 'Usage: hornhoof-node run [--builtin] | login | status | set-key';
+const USAGE = 'Usage: hornhoof-node run [--builtin] | login | status | set-key | prepare-browser [repo]';
 const SET_KEY_LINE = 'set-key expects one line: <server> <id> <provider or machine> <key>';
 /* A machine joined without a plan has a node of its own: it runs no agent program and has nothing to sign in to. */
 const MACHINE = 'machine';
@@ -635,8 +661,22 @@ async function setKey(dir: string, io: Io): Promise<number> {
 async function status(dir: string, io: Io): Promise<number> {
   const state = readState(dir);
   /* spare: another machine of the plan runs Codex now, and this one takes over when that one is away. */
-  const word = isRemoved(dir) ? 'removed' : !state ? 'no_key' : isSpare(dir) ? 'spare' : state.provider ? await planWord(dir, state.provider) : 'ready';
+  let word = isRemoved(dir) ? 'removed' : !state ? 'no_key' : isSpare(dir) ? 'spare' : state.provider ? await planWord(dir, state.provider) : 'ready';
+  const browserProblem = word === 'ready' ? readBrowserError(dir) : null;
+  if (browserProblem) word = `browser_failed: ${browserProblem}`;
   io.stdout.write(word + '\n');
+  return 0;
+}
+
+async function prepareBrowserCommand(dir: string, repoArg: string | undefined, io: Io): Promise<number> {
+  const owner = agentUser();
+  const res = await prepareAndVerifyBrowser({ dir, ...(repoArg ? { repoDir: resolve(repoArg) } : {}), owner, verifyUser: owner });
+  if (!res.ok) {
+    io.stderr.write(`Playwright Chromium could not start: ${res.error}\n`);
+    return 1;
+  }
+  if (res.status === 'not_needed') io.stdout.write('not_needed\n');
+  else io.stdout.write(`ready: playwright@${res.version} chromium ${res.browserVersion} (downloaded: ${res.downloaded})\n`);
   return 0;
 }
 
@@ -752,13 +792,14 @@ async function run(dir: string, builtinMode: boolean, io: Io): Promise<number | 
     if (user) secureNode(dir, user);
     /* Test runs get a user of their own, apart from the agents' sign-in and folders. */
     const testUser = user ? userFor(dir, 'tests', true) : null;
-    if (state && !state.provider) return runNode({ dir, adapter: machineOnly, log, testUser, build });
+    const checkBrowser = () => startupBrowserCheck(dir, user, user);
+    if (state && !state.provider) return runNode({ dir, adapter: machineOnly, log, testUser, build, checkBrowser });
     const provider = state?.provider ?? 'claude';
     const fs = user ? agentFs(user) : ownFs;
     const adapter = personal(dir, provider, user, fs);
     const programs = managedUpdates(tools, [{ provider, adapter }]);
     const install = () => ensureInstalled(tools, provider, adapter);
-    return runNode({ dir, adapter: withInstall(adapter, tools, provider), install, programs, log, testUser, build, ...terminalFor(dir, provider, user, fs) });
+    return runNode({ dir, adapter: withInstall(adapter, tools, provider), install, programs, log, testUser, build, checkBrowser, ...terminalFor(dir, provider, user, fs) });
   }
 
   const server = process.env.HORNHOOF_SERVER;
@@ -771,7 +812,10 @@ async function run(dir: string, builtinMode: boolean, io: Io): Promise<number | 
   const builtinPick = builtinAdapters(dir, tools);
   const pick = (job: JobRun) => withInstall(builtinPick(job), tools, job.provider);
   const managed = (['anthropic_api', 'openai_api'] as const).map(provider => ({ provider, adapter: adapterFor(provider, { home: dir, tools }) }));
-  return runNode({ dir, adapter: pick, programs: managedUpdates(tools, managed), builtin: { server, key }, log, testUser: userFor(dir, 'tests'), build });
+  const testUser = userFor(dir, 'tests');
+  const browserOwner = agentUser();
+  const checkBrowser = () => startupBrowserCheck(dir, browserOwner, testUser || browserOwner);
+  return runNode({ dir, adapter: pick, programs: managedUpdates(tools, managed), builtin: { server, key }, log, testUser, build, checkBrowser });
 }
 
 /* One command line. A running node answers its handle and keeps the process up; the others answer an exit code. */
@@ -786,6 +830,8 @@ export async function command(args: string[], io: Io): Promise<number | { stop()
       return status(dir, io);
     case 'set-key':
       return setKey(dir, io);
+    case 'prepare-browser':
+      return prepareBrowserCommand(dir, args[1], io);
     default:
       io.stderr.write(USAGE + '\n');
       return 1;

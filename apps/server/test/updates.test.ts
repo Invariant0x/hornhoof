@@ -6,9 +6,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
-import { agents, companies, departments, jobs, subscriptions } from '../src/db/schema.js';
+import { agents, companies, departments, jobs, nodeCodes, subscriptions } from '../src/db/schema.js';
 import { publishWorking } from '../src/modules/events/store.js';
-import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
+import { as, connectNode, invitePerson, listen, sessionFrom, SETUP, setUpCompany, testApp, until } from './helpers.js';
 import { turnsHeld } from '../src/modules/updates/drain.js';
 
 /* Lets a test hold the next count of working agents the update routes read, so something can happen meanwhile. */
@@ -145,6 +145,93 @@ const asked = (registry: { digests: Record<string, string> }, id: string) => ({
   digest: registry.digests.latest,
   nodeDigest: registry.digests[`hornhoof-node:${SHA}`],
   updaterDigest: registry.digests[`hornhoof-updater:${SHA}`],
+});
+
+describe('the node image install.sh names', () => {
+  const MACHINE = { machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' };
+  const LAPTOP = { ...MACHINE, machineId: 'laptop-0002-abcd', hostname: 'ivan-laptop' };
+  const BY_TAG = `ghcr.io/acme/hornhoof-node:${SHA}`;
+  const THIS_SERVER = 'curl -fsSL http://localhost:8080/install.sh | bash';
+  /* What a machine gets that runs the command: the image in the script at the command's address, which anyone may read. */
+  const imageOf = async (app: FastifyInstance, command = THIS_SERVER) => {
+    const { pathname } = new URL(command.match(/^curl -fsSL (\S+) \| bash/)![1]!);
+    return (await app.inject({ url: pathname })).body.match(/^BUILD_IMAGE="(.*)"$/m)?.[1];
+  };
+  const ownDigest = (registry: { digests: Record<string, string> }) => `ghcr.io/acme/hornhoof-node@${registry.digests[`hornhoof-node:${SHA}`]}`;
+
+  it("is the digest of the image CI built from this server's commit, not latest or another build's", async () => {
+    const registry = await fakeRegistry({ '0.4.0': { commit: SHA, version: '0.4.0' }, '0.6.1': { commit: 'f'.repeat(40), version: '0.6.1' }, latest: { commit: 'f'.repeat(40), version: '0.6.1' } });
+    const { app } = await company(registry, SHA);
+    expect(await imageOf(app)).toBe(ownDigest(registry));
+    expect(registry.digests[`hornhoof-node:${SHA}`]).toMatch(/^sha256:[0-9a-f]{64}$/);
+
+    /* Anyone may read install.sh, so the digest once known takes no more calls to the registry. */
+    const calls = registry.calls.length;
+    expect(await imageOf(app)).toBe(ownDigest(registry));
+    expect(registry.calls).toHaveLength(calls);
+  });
+
+  it('is the same in every command that installs or updates a node', async () => {
+    const registry = await fakeRegistry({ '0.4.0': { commit: SHA, version: '0.4.0' } });
+    const { app, db } = await testApp({ HORNHOOF_IMAGE: 'ghcr.io/acme/hornhoof', REGISTRY_URL: registry.base, HORNHOOF_VERSION: '0.4.0', HORNHOOF_COMMIT: SHA });
+    const setup = await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, orchestrator: { mode: 'personal', provider: 'claude' } } });
+    const ceo = sessionFrom(setup);
+    const post = async (url: string, payload: object = {}) => app.inject({ method: 'POST', url, payload, ...as(ceo) });
+    const joinWith = async (command: string, machine: object) => (await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code: command.split('--join ')[1]!, ...machine } })).json();
+
+    const machineCommand = (await post('/api/machines/command')).json();
+    await joinWith(machineCommand.command, MACHINE);
+    const connected = (await post('/api/subscriptions/connect', { providers: ['codex'] })).json();
+    const plan = connected.subscriptions[0].id as string;
+    /* A plan's command that ran out leaves the plan waiting, and its owner makes a new one. */
+    await db.update(nodeCodes).set({ expiresAt: new Date(Date.now() - 1000) });
+    const planCommand = (await post(`/api/subscriptions/${plan}/command`)).json();
+    const joined = await joinWith(planCommand.command, MACHINE);
+    const laptop = await joinWith((await post('/api/machines/command')).json().command, LAPTOP);
+    const addPlan = (await post(`/api/machines/${laptop.machine.id}/plans`, { subscription: plan })).json();
+
+    /* A node from before machine keys cannot sign in here: the answer names the command that updates it. */
+    const node = joined.nodes[0] as { nodeId: string; key: string };
+    (await connectNode(await listen(app), node.key)).send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], terminals: true });
+    await until(() => app.ctx.hub.isReady({ kind: 'node', nodeId: node.nodeId }));
+    const update = (await post(`/api/subscriptions/${plan}/signin`, { fresh: false })).json().error.details.command as string;
+
+    const commands = { setup: setup.json().command, machine: machineCommand.command, connect: connected.command, plan: planCommand.command, addPlan: addPlan.command, update };
+    const seen = Object.fromEntries(await Promise.all(Object.entries(commands).map(async ([name, command]) => [name, await imageOf(app, command as string)])));
+    const image = ownDigest(registry);
+    expect(seen).toEqual({ setup: image, machine: image, connect: image, plan: image, addPlan: image, update: image });
+  });
+
+  it("is the commit's tag, never latest, while the registry lacks the image", async () => {
+    const registry = await fakeRegistry({ latest: { commit: 'f'.repeat(40), version: '0.6.1' } });
+    const { app } = await company(registry, SHA);
+    expect(await imageOf(app)).toBe(BY_TAG);
+  });
+
+  it("is the commit's tag, never latest, when the registry fails, and the script is still served", async () => {
+    const registry = await fakeRegistry({ '0.4.0': { commit: SHA, version: '0.4.0' } });
+    registry.fail(503);
+    const { app } = await company(registry, SHA);
+    expect(await imageOf(app)).toBe(BY_TAG);
+    expect((await app.inject({ url: '/install.sh' })).statusCode).toBe(200);
+  });
+
+  it('says "local" for a server CI did not build, and asks no registry', async () => {
+    const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.0' } });
+    const { app } = await testApp({ HORNHOOF_IMAGE: 'ghcr.io/acme/hornhoof', REGISTRY_URL: registry.base });
+    expect(await imageOf(app)).toBe('local');
+    expect(registry.calls).toEqual([]);
+  });
+
+  it('tells the log when the registry fails', async () => {
+    const registry = await fakeRegistry({ '0.4.0': { commit: SHA, version: '0.4.0' } });
+    registry.fail(503);
+    const lines: string[] = [];
+    const { app } = await testApp({ HORNHOOF_IMAGE: 'ghcr.io/acme/hornhoof', REGISTRY_URL: registry.base, HORNHOOF_COMMIT: SHA }, { level: 'warn', stream: { write: (line: string) => void lines.push(line) } });
+    await imageOf(app);
+    const said = lines.map(line => JSON.parse(line) as { msg: string; error?: { message?: string } }).find(line => line.msg.includes('node image'));
+    expect(said?.error?.message).toContain('503');
+  });
 });
 
 describe('updates', () => {

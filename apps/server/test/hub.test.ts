@@ -137,6 +137,9 @@ describe('live program metadata in the hub', () => {
     expect(hub.programsOf(BUILTIN)).toEqual(programs);
     expect(hub.updatePrograms(BUILTIN)).toBe(false);
     hub.greet(BUILTIN);
+    expect(hub.hasTerminals(BUILTIN)).toBe(false);
+    expect(hub.takesSkillFiles(BUILTIN)).toBe(false);
+    expect(hub.runsWork(BUILTIN)).toBe(false);
     const snapshot = hub.programsOf(BUILTIN)!;
     snapshot[0]!.version = 'changed outside';
     expect(hub.programsOf(BUILTIN)).toEqual(programs);
@@ -175,5 +178,50 @@ describe('live program metadata in the hub', () => {
       hub.stop();
       vi.useRealTimers();
     }
+  });
+
+  it('tracks browser failure, noRuns and load across greeting, live status updates and closed sockets', () => {
+    const hub = new NodeHub({ pingMs: 60_000, onClose: async () => {}, onMessage: async () => {} });
+    onTestFinished(() => hub.stop());
+    const unknown = { kind: 'node' as const, nodeId: 'missing' };
+    expect(hub.browserErrorOf(unknown)).toBeNull();
+    expect(hub.noRunsOf(unknown)).toBeNull();
+    expect(hub.loadOf(unknown)).toBeNull();
+    expect(hub.noteStatus(unknown, null, null)).toBe(false);
+
+    const node = { kind: 'node' as const, nodeId: 'n1' };
+    const socket = Object.assign(new EventEmitter(), { readyState: 1, close() {}, ping() {} });
+    hub.attach(node, socket as unknown as WebSocket);
+    expect(hub.browserErrorOf(node)).toBeNull();
+    expect(hub.noRunsOf(node)).toBeNull();
+    expect(hub.loadOf(node)).toBeNull();
+
+    hub.greet(node, true, true, true, null, 'build-1', 'libnss3.so: cannot open shared object file');
+    expect(hub.browserErrorOf(node)).toBe('libnss3.so: cannot open shared object file');
+    expect(hub.noRunsOf(node)).toBe('browser_failed: libnss3.so: cannot open shared object file');
+
+    /* Leaving fields undefined in status preserves the current readiness state and reports no recovery. */
+    expect(hub.noteStatus(node)).toBe(false);
+    expect(hub.browserErrorOf(node)).toBe('libnss3.so: cannot open shared object file');
+
+    /* Explicit noRuns overrides the fallback reason; clearing only browserError while noRuns stays set still recovers browser turns. */
+    expect(hub.noteStatus(node, 'git missing')).toBe(false);
+    expect(hub.noRunsOf(node)).toBe('git missing');
+    expect(hub.noteStatus(node, 'git missing', null)).toBe(true);
+    expect(hub.browserErrorOf(node)).toBeNull();
+    expect(hub.noRunsOf(node)).toBe('git missing');
+
+    /* Clearing noRuns while browser is already healthy signals run recovery; repeating when already clear returns false. */
+    expect(hub.noteStatus(node, null, null)).toBe(true);
+    expect(hub.noRunsOf(node)).toBeNull();
+    expect(hub.noteStatus(node, null, null)).toBe(false);
+
+    hub.report(node, { cpus: 4, load: 1.5, memFree: 900, memTotal: 1000, tests: 0, jobs: 0 });
+    expect(hub.loadOf(node)).toMatchObject({ cpus: 4, load: 1.5 });
+
+    /* Once the socket is no longer open, browserErrorOf and loadOf return null. */
+    socket.readyState = 3;
+    expect(hub.browserErrorOf(node)).toBeNull();
+    expect(hub.loadOf(node)).toBeNull();
   });
 });
