@@ -181,14 +181,13 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard, o
   const title = orchestrator ? t.window.title : card ? [card.name, role !== card.name && role].filter(Boolean).join(', ') : '';
   const placeholder = orchestrator ? t.window.placeholder : t.window.writeTo(card?.name ?? '');
 
-  /* An employee's name, role and subscription come from its card; the orchestrator's from the company. */
+  /* Every agent's current task comes from its card; the company supplies the orchestrator's other details. */
   const loadCard = useCallback(() => {
-    if (orchestrator) return;
     api.get<AgentCardView>(path).then(
       c => mounted.current && setCard(c),
       err => mounted.current && setFailure(err),
     );
-  }, [orchestrator, path]);
+  }, [path]);
 
   /* A line comes once, whether the stream or a catch-up brought it first. */
   const merge = useCallback((more: EventView[]) => {
@@ -251,9 +250,10 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard, o
 
   useEffect(() => {
     mounted.current = true;
-    loadCard();
     void (async () => {
-      await catchUp();
+      const history = catchUp();
+      loadCard();
+      await history;
       await greet();
     })();
     const poll = setInterval(() => void catchUp(), POLL_MS);
@@ -282,7 +282,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard, o
       soon();
     }
     if (m.type === 'working') soon();
-    if (m.type === 'org') loadCard();
+    if (['org', 'task', 'working'].includes(m.type)) loadCard();
     if (m.type === 'reconnected') {
       loadCard();
       void catchUp();
@@ -528,7 +528,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard, o
   }
 
   return (
-    <AgentWindowLayout known={known} box={box} terminal={terminal} title={title} org={org} agentId={agentId} onClose={onClose} openRequest={openRequest} onMinimizedChange={onMinimizedChange} requests={requests} onRequestsChanged={onRequestsChanged} toolbar={<>
+    <AgentWindowLayout currentTask={card?.currentTask} box={box} terminal={terminal} title={title} onClose={onClose} openRequest={openRequest} onMinimizedChange={onMinimizedChange} requests={requests} onRequestsChanged={onRequestsChanged} toolbar={<>
         {terminal && state?.busy && (
           <button className="btn small ghost" type="button" onClick={stop}>
             {t.window.stop}

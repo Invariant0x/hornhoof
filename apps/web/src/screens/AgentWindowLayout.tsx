@@ -1,17 +1,14 @@
 import { useEffect, useId, useRef, useState, type ReactNode, type Ref, type RefObject } from 'react';
-import { errorText, useT, type Messages } from '../i18n';
-import { useTasks } from '../tasks';
-import type { Org, TaskLine, WaitingRequest } from '../types';
+import { useT } from '../i18n';
+import type { AgentCardView, WaitingRequest } from '../types';
 import { TaskPanel } from '../ui/TaskPanel';
 import { useOpenAgent } from './AgentWindowContext';
 
 type Waiting = { requests: WaitingRequest[]; onRequestsChanged(): void };
 type Props = Waiting & {
-  agentId: string;
-  org: Org;
+  currentTask: AgentCardView['currentTask'] | undefined;
   title: string;
   terminal: boolean;
-  known: boolean;
   box: RefObject<HTMLElement | null>;
   toolbar: ReactNode;
   children: ReactNode;
@@ -21,32 +18,6 @@ type Props = Waiting & {
 };
 
 type CurrentTask = { id: string | null; why: string };
-
-function employeeTask(org: Org, agentId: string): string | null {
-  return org.departments.flatMap(d => d.employees).find(a => a.id === agentId)?.task?.id ?? null;
-}
-
-function orchestratorTask(org: Org, tasks: TaskLine[] | undefined): string | null {
-  const id = org.orchestrator?.id;
-  if (!id) return null;
-  return tasks?.find(task => task.assignee?.id === id)?.id ?? null;
-}
-
-function taskListWhy(t: Messages, tasks: TaskLine[] | undefined, failure: unknown): string {
-  if (failure !== null) return errorText(t, failure);
-  return tasks ? t.window.noTaskWhy : t.common.loading;
-}
-
-/* Employees already carry their current task on the map. The orchestrator's tasks come from the task list. */
-function useCurrentTask(org: Org, agentId: string, known: boolean): CurrentTask {
-  const t = useT();
-  const orchestrator = agentId === 'orchestrator';
-  const { tasks, failure } = useTasks({ status: 'open', department: null }, orchestrator && known);
-  return {
-    id: orchestrator ? orchestratorTask(org, tasks) : employeeTask(org, agentId),
-    why: orchestrator ? taskListWhy(t, tasks, failure) : t.window.noTaskWhy,
-  };
-}
 
 function TaskToggle({ current, taskId, onTask, panelId, button }: { current: CurrentTask; taskId: string | null; onTask(id: string | null): void; panelId: string; button: Ref<HTMLButtonElement> }) {
   const t = useT();
@@ -86,9 +57,9 @@ function useWindowFocus(minimized: boolean, box: RefObject<HTMLElement | null>, 
 }
 
 /* Hiding keeps the live terminal, drafts, task and previous size until the window is restored. */
-export function AgentWindowLayout({ agentId, org, title, terminal, known, box, toolbar, children, openRequest, onMinimizedChange, onClose, ...waiting }: Props) {
+export function AgentWindowLayout({ currentTask, title, terminal, box, toolbar, children, openRequest, onMinimizedChange, onClose, ...waiting }: Props) {
   const t = useT();
-  const current = useCurrentTask(org, agentId, known);
+  const current: CurrentTask = { id: currentTask?.id ?? null, why: currentTask === undefined ? t.common.loading : t.window.noTaskWhy };
   const [taskId, setTaskId] = useState<string | null>(null);
   const [minimized, setMinimized] = useState(false);
   const [full, setFull] = useState(false);
@@ -107,7 +78,7 @@ export function AgentWindowLayout({ agentId, org, title, terminal, known, box, t
         <span className="agent-window-title">{title}</span>
         {toolbar}
         <TaskToggle current={current} taskId={taskId} onTask={setTaskId} panelId={taskPanelId} button={taskButton} />
-        {taskId && <button className="btn small ghost agent-task-back" type="button" onClick={closeTask}>{t.window.backToTerminal}</button>}
+        {taskId && <button className="btn small ghost agent-task-back" type="button" onClick={closeTask}>{terminal ? t.window.backToTerminal : t.window.backToConversation}</button>}
         <WindowControls full={full} onFull={() => setFull(v => !v)} onMinimize={() => setMinimized(true)} onClose={onClose} />
       </div>
       <div className="agent-workspace">

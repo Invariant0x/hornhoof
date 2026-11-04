@@ -60,8 +60,8 @@ export const ORG_WITH_TEAMS: Org = {
 };
 
 export const RUNNING_AGENTS: RunningAgent[] = [
-  { id: 'b1', name: 'Bruno', busy: true, title: { en: 'Backend engineer', ru: 'Бэкенд-разработчик' }, department: { id: 'd2', name: 'Development' }, provider: 'claude', since: new Date(Date.now() - 12 * 60_000).toISOString(), task: { number: 12, title: 'Checkout API' }, withCeo: false },
-  { id: 'b2', name: 'Vera', busy: false, title: { en: 'Reviewer', ru: 'Рецензент' }, department: { id: 'd2', name: 'Development' }, provider: 'claude', since: null, task: null, withCeo: false },
+  { id: 'b1', canOpen: true, name: 'Bruno', busy: true, title: { en: 'Backend engineer', ru: 'Бэкенд-разработчик' }, department: { id: 'd2', name: 'Development' }, provider: 'claude', since: new Date(Date.now() - 12 * 60_000).toISOString(), task: { number: 12, title: 'Checkout API' }, withCeo: false },
+  { id: 'b2', canOpen: true, name: 'Vera', busy: false, title: { en: 'Reviewer', ru: 'Рецензент' }, department: { id: 'd2', name: 'Development' }, provider: 'claude', since: null, task: null, withCeo: false },
 ];
 
 const SUB_BASE = { kind: 'personal' as const, last4: null, owner: { id: 'p1', name: 'Ivan' }, place: { kind: 'company' as const, id: null, name: 'Whole company' }, limits: null, budget: null, isOrchestrator: false, accounts: [], tier: null, accountsDiffer: false, signedInOnce: false, leaseMachine: null };
@@ -168,6 +168,7 @@ const about = (en: string) => ({ en, ru: en });
 
 export const CARD: AgentCardView = {
   id: 'b1',
+  currentTask: null,
   kind: 'worker',
   name: 'Bruno',
   role: { id: 'DEV-BE', title: BE_TITLE, description: about('Builds the API.'), effort: 'xhigh' },

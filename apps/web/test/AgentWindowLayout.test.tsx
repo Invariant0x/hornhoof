@@ -10,10 +10,11 @@ import { fakeStream } from './fake-stream';
 const task = { id: 't12', number: 12, title: 'Checkout API', stage: 0, gateCount: 0, bounces: 0 };
 function company(hasTask = true, busy = false, events: EventView[] = []) {
   const org = { ...DEV_ORG, departments: DEV_ORG.departments.map(d => ({ ...d, employees: d.employees.map(a => a.id === 'b1' ? { ...a, task: hasTask ? task : null } : a) })) };
+  const card = { ...CARD, currentTask: hasTask ? { id: task.id, number: task.number, title: task.title } : null };
   const calls = mockApi({
     'GET /api/org': [200, org],
     'GET /api/requests': [200, decisions([])],
-    'GET /api/agents/b1': [200, CARD],
+    'GET /api/agents/b1': [200, card],
     'GET /api/agents/b1/events?after=0': [200, { events, state: { ready: true, reason: null, busy, runningJobId: busy ? 'j1' : null, queued: 0 } }],
     'GET /api/tasks/t12': [200, { task: TASK_DETAIL }],
     'GET /api/tasks?status=open': [200, { tasks: [] }],
@@ -21,7 +22,7 @@ function company(hasTask = true, busy = false, events: EventView[] = []) {
     'GET /api/link': [200, { link: null, domain: 'hornhoof.org' }],
     'POST /api/agents/b1/stop': [200, {}],
   });
-  return { calls, org };
+  return { calls, org, card };
 }
 
 async function openEmployee(user: ReturnType<typeof userEvent.setup>) {
@@ -81,7 +82,8 @@ describe('agent window task and controls', () => {
     const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
     expect(within(panel).getByText('POST /checkout takes a', { exact: false })).toBeInTheDocument();
     expect(within(panel).getByRole('list', { name: 'Log' })).toHaveTextContent('Endpoint done.');
-    await user.click(within(window).getByRole('button', { name: 'Back to terminal' }));
+    expect(within(window).queryByRole('button', { name: 'Back to terminal' })).not.toBeInTheDocument();
+    await user.click(within(window).getByRole('button', { name: 'Back to conversation' }));
     expect(screen.queryByRole('complementary', { name: '#12 Checkout API' })).not.toBeInTheDocument();
     expect(input).toHaveValue('Keep this draft');
   });
@@ -144,13 +146,14 @@ describe('agent window task and controls', () => {
   });
 
   it('closes a task that no longer belongs to the employee when the live company changes', async () => {
-    const { org } = company();
+    const { org, card } = company();
     const stream = fakeStream();
     const user = userEvent.setup();
     const window = await openEmployee(user);
     await user.click(within(window).getByRole('button', { name: 'Task' }));
     expect(await screen.findByRole('complementary', { name: '#12 Checkout API' })).toBeInTheDocument();
     for (const d of org.departments) for (const a of d.employees) a.task = null;
+    card.currentTask = null;
     stream.send({ type: 'org' });
     expect(await within(window).findByRole('button', { name: 'No task' })).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByRole('complementary', { name: '#12 Checkout API' })).not.toBeInTheDocument());
@@ -186,6 +189,7 @@ describe('agent window task and controls', () => {
     const own = { ...TASK_DETAIL, assignee: { ...TASK_DETAIL.assignee!, id: ORG.orchestrator!.id } };
     mockApi({
       'GET /api/org': [200, ORG],
+      'GET /api/agents/orchestrator': [200, { ...CARD, id: 'a1', kind: 'orchestrator', currentTask: { id: 't12', number: 12, title: 'Checkout API' } }],
       'GET /api/tasks?status=open': [200, { tasks: [{ ...TASK_DETAIL, assignee: null }, own] }],
       'GET /api/tasks/t12': [200, { task: own }],
       'GET /api/requests': [200, decisions([])],

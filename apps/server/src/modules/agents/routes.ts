@@ -20,6 +20,7 @@ import type { Lang } from '../templates/load.js';
 import { agentFor, type AgentRow } from './find.js';
 import { instructionsOf, renderInstructions, placeOf, type Part } from './instructions.js';
 import { TIMER_MAX, TIMER_MIN, TIMER_ORDER_MAX, timerOf } from './timers.js';
+import { currentAgentTask } from './work.js';
 
 export type AgentCard = FailureState & {
   id: string;
@@ -37,6 +38,7 @@ export type AgentCard = FailureState & {
   /* The machine its program is on; none on the built-in node and before it first ran. */
   machine: { id: string; hostname: string } | null;
   state: 'working' | 'sleeping' | 'needs_subscription';
+  currentTask: { id: string; number: number; title: string } | null;
   program: TurnProgram | null;
   alarm: TurnAlarm | null;
   skills: { id: string; title: Lang; description: Lang; on: boolean; locked: boolean; overridden: boolean; templateChanged: boolean }[];
@@ -208,6 +210,7 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
       subscription: agent.subscriptionId ? (views.get(agent.subscriptionId) ?? null) : null,
       machine: await machineOf(db, (await programNode(ctx, agent.id))?.node ?? null),
       state: running ? 'working' : agent.subscriptionId ? 'sleeping' : 'needs_subscription',
+      currentTask: await currentAgentTask(db, agent, me),
       ...agentProgramState(ctx, running),
       ...await agentFailureState(ctx, agent.id),
       skills: offered.flatMap(s => {

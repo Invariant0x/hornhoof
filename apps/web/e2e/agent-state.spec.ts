@@ -10,6 +10,7 @@ const BRUNO: Employee = {
   context: null, program: null, alarm: null, retry: null, failure: null,
 };
 const CARD: AgentCardView = {
+  currentTask: null,
   id: BRUNO.id, name: BRUNO.name, kind: 'worker', role: null, department: { id: 'd2', name: 'Development' },
   product: null, model: '', effort: null, subscription: null, machine: null, state: 'working', retry: null, failure: null, skills: [], parts: [],
   raw: '', instructions: { length: 0, max: 200_000 }, runsOn: [], changes: [], interrupted: [], canEdit: false, timer: null,

@@ -25,6 +25,36 @@ async function openList(user: ReturnType<typeof userEvent.setup>, name: string) 
 }
 
 describe('one agent window', () => {
+  it.each(['Subscriptions', 'Machines'])('shows an error when opening from %s while the company cannot load', async name => {
+    const agents = [{ ...RUNNING_AGENTS[0]!, canOpen: true }];
+    mockApi({
+      'GET /api/org': [503, { error: { code: 'internal', message: 'Company temporarily unavailable' } }],
+      'GET /api/requests': [200, decisions([])],
+      'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, agents }] }],
+      'GET /api/machines': [200, { machines: [{ ...MACHINES[0]!, running: { agents, parts: [] } }] }],
+    });
+    const user = userEvent.setup();
+    render(<Shell me={ME} onSignOut={() => {}} />);
+    await openList(user, name);
+    await user.click(screen.getByRole('button', { name: 'Open Bruno' }));
+    expect(await screen.findByText('Company temporarily unavailable')).toHaveAttribute('role', 'alert');
+    expect(screen.getByText('Company temporarily unavailable')).toHaveFocus();
+  });
+
+  it.each(['Subscriptions', 'Machines'])('leaves inaccessible agents as text in %s', async name => {
+    const agents = [{ ...RUNNING_AGENTS[0]!, canOpen: false }, { ...RUNNING_AGENTS[1]!, canOpen: true }];
+    mockApi({
+      'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, agents }] }],
+      'GET /api/machines': [200, { machines: [{ ...MACHINES[0]!, running: { agents, parts: [] } }] }],
+    });
+    const user = userEvent.setup();
+    render(<Shell me={ME} onSignOut={() => {}} />);
+    await openList(user, name);
+    expect(screen.getByText('Bruno')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open Bruno' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open Vera' })).toBeInTheDocument();
+  });
+
   it.each(['Subscriptions', 'Machines'])('opens a working or sleeping employee from %s and sends a personal message', async name => {
     const calls = company(false);
     const user = userEvent.setup();

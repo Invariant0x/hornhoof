@@ -1,11 +1,12 @@
 import { defaultEffortOf, effortFor, effortsOf, modelsFor, ORCHESTRATOR_EFFORT, type ModelOption, type ProviderId } from '@hornhoof/protocol';
-import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, notInArray } from 'drizzle-orm';
+import { and, asc, eq, isNull, ne } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach, type Access, type Spot } from '../../auth/access.js';
 import { personColumns, requirePerson } from '../../auth/session.js';
-import { agents, companies, departments, jobs, people, personAccess, requests, subscriptions, tasks, teams, turns } from '../../db/schema.js';
+import { agents, companies, departments, people, personAccess, subscriptions, teams, turns } from '../../db/schema.js';
 import { employeeOrder } from '../agents/order.js';
+import { agentWork } from '../agents/work.js';
 import { limitUntil, programNode } from '../conversation/queue.js';
 import { repoView } from '../departments/repository.js';
 import { deptName } from '../departments/templates.js';
@@ -70,11 +71,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
     /* What each department works on now: its newest open task without an executor (the head's), else its newest open one.
        Only for people who reach the department; the rest see that it exists, not what it does. */
     const reach = await accessOf(db, me);
-    const openTasks = await db
-      .select()
-      .from(tasks)
-      .where(and(eq(tasks.companyId, me.companyId), notInArray(tasks.status, ['done', 'cancelled', 'planned'])))
-      .orderBy(desc(tasks.number));
+    const { openTasks, running, busy, doing } = await agentWork(db, me.companyId);
     const currentOf = (id: string) => {
       if (!canReach(reach, { departmentId: id })) return null;
       const mine = openTasks.filter(t => t.departmentId === id);
@@ -106,43 +103,6 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
     const decisions = await visibleDecisions(ctx, me);
     const views = new Map((await personViews(db, active)).map(v => [v.id, { ...v, pendingDecisions: pendingFor(decisions, me, v.id) }]));
     const inDepartment = (deptId: string) => active.filter(p => p.scopeKind !== 'company' && homes.get(p.id)!.length === 1 && homes.get(p.id)![0] === deptId).map(p => views.get(p.id)!);
-    const running = await db
-      .select({ id: jobs.id, agentId: jobs.agentId, taskId: jobs.taskId, startedAt: jobs.startedAt, createdAt: jobs.createdAt })
-      .from(jobs)
-      .where(and(eq(jobs.companyId, me.companyId), eq(jobs.status, 'running'), isNotNull(jobs.agentId)));
-    const busy = new Set(running.map(j => j.agentId));
-    const asked = await db
-      .select({ agentId: requests.agentId, taskId: requests.taskId })
-      .from(requests)
-      .where(and(eq(requests.companyId, me.companyId), eq(requests.status, 'open')));
-    const byId = new Map(openTasks.map(t => [t.id, t]));
-    /* A task that waits for the tasks it comes after is nobody's to act on yet. */
-    const afterIds = [...new Set(openTasks.flatMap(t => t.after))];
-    const notDone = new Set(afterIds.length ? (await db.select({ id: tasks.id }).from(tasks).where(and(inArray(tasks.id, afterIds), ne(tasks.status, 'done')))).map(t => t.id) : []);
-    const waitsAfter = (t: (typeof openTasks)[number]) => t.after.some(id => notDone.has(id));
-    const parents = new Set(openTasks.map(t => t.parentId));
-    /* The task an agent acts on next: at a gate it still checks (or holds, when nobody on can), also while another reviewer
-       there waits for a person, or with it as executor (or holder, for a head's task) before any gate. */
-    const atGate = (t: (typeof openTasks)[number]) => t.status === 'review' || t.status === 'waiting';
-    const holds = (t: (typeof openTasks)[number], id: string) =>
-      t.stage > 0 ? atGate(t) && (t.panel.length ? t.panel.includes(id) : t.assigneeAgentId === id) : (t.executorAgentId ?? t.assigneeAgentId) === id;
-    /* What an employee does now. Working: a turn runs. Waiting: it asked people, or it is blocked. Queued: it holds a task
-       and its turn has not started. Handed: what it holds is with gates or with the tasks it gave out. */
-    const doing = (a: (typeof allAgents)[number]) => {
-      const run = running.find(j => j.agentId === a.id);
-      const held = openTasks.filter(t => holds(t, a.id) && !waitsAfter(t));
-      /* At a gate only the reviewer who asked waits; the others there can still give their verdict. */
-      const waits = [...asked.filter(r => r.agentId === a.id).map(r => byId.get(r.taskId)), ...held.filter(t => t.status === 'blocked' || (t.status === 'waiting' && t.stage === 0))].filter(t => t !== undefined);
-      const next = held.filter(t => !parents.has(t.id) && !waits.includes(t));
-      const gave = [...openTasks.filter(t => t.stage > 0 && t.executorAgentId === a.id), ...held.filter(t => parents.has(t.id))];
-      const pick = (status: 'off' | 'working' | 'waiting' | 'queued' | 'handed' | 'idle', t: (typeof openTasks)[number] | null | undefined) => ({ status, task: t ?? null });
-      if (!a.subscriptionId) return pick('off', null);
-      if (busy.has(a.id)) return pick('working', (run?.taskId && byId.get(run.taskId)) || next[0] || held[0]);
-      if (waits.length) return pick('waiting', waits[0]);
-      if (next.length) return pick('queued', next[0]);
-      if (gave.length) return pick('handed', gave[0]);
-      return pick('idle', null);
-    };
     /* What each agent's card shows, once: the map's lines go by the same tasks. */
     const cards = new Map(allAgents.map(a => [a.id, doing(a)]));
     /* A department's agents include those in its products. */
