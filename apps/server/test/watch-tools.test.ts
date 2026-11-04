@@ -2,10 +2,11 @@ import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { and, eq, inArray } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agentEvents, agents, companies, departments, jobs, requests, subscriptions } from '../src/db/schema.js';
+import { agentEvents, agents, companies, departments, jobs, requests, subscriptions, tasks } from '../src/db/schema.js';
 import { blocked, createTask } from '../src/modules/tasks/engine.js';
 import { as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until } from './helpers.js';
 import { agentState, enqueueTurn, GONE_ALONG } from '../src/modules/conversation/queue.js';
+import { discardStaleTurn } from '../src/modules/tasks/wake-state.js';
 
 const TOKEN = 'tool-token-watch-0123456789abcdef0123';
 const NODE_KEY = 'k'.repeat(40);
@@ -155,7 +156,12 @@ describe('tools a skill grants', () => {
       /* Stopped by a person: no failure of the system. */
       { companyId: acme.id, subscriptionId: sub.id, agentId: bruno.id, kind: 'conversation', prompt: 'x', timeoutMs: 1, status: 'failed', error: 'cancelled', tail: 'stopped', finishedAt: ago(20) },
     ]);
+    const other = (await createTask(app.ctx, { personId: sub.ownerPersonId! }, { title: 'Obsolete wake', brief: '', body: '', departmentId: task.departmentId, assigneeAgentId: bruno.id, executor: true })).task;
+    const [obsolete] = await db.insert(jobs).values({ companyId: acme.id, subscriptionId: sub.id, agentId: bruno.id, taskId: other.id, kind: 'conversation', prompt: 'x', timeoutMs: 1, status: 'queued' }).returning();
+    await db.insert(agentEvents).values({ companyId: acme.id, agentId: bruno.id, jobId: obsolete!.id, kind: 'message', data: { text: 'Merge wake', taskWake: { why: 'merge', status: 'working', stage: 0, merging: false } } });
     await blocked(app.ctx, bruno.id, task.id, 'Waits for #40: the staging database does not answer.');
+    await db.update(tasks).set({ status: 'done', closedAt: new Date() }).where(eq(tasks.id, other.id));
+    expect(await discardStaleTurn(db, obsolete!)).toBe(true);
     const client = await mcp(app, TOKEN);
     const recent = JSON.parse((await call(client, 'failures', { hours: 6 })).content[0]!.text) as { failed: { agent: string; error: string; tail: string }[]; blocked: unknown[] };
     expect(recent.failed).toEqual([expect.objectContaining({ agent: 'Bruno', error: 'timeout', tail: 'npm test hung' })]);

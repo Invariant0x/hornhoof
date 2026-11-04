@@ -47,8 +47,9 @@ describe('Russian vocabulary', () => {
 
   it('writes е without dots and uses no em dashes in either language', () => {
     expect(textsOf(ru).filter(t => /[\u0451\u0401]/.test(t))).toEqual([]);
-    expect(textsOf(en).filter(t => t.includes('\u2014'))).toEqual([]);
-    expect(textsOf(ru).filter(t => t.includes('\u2014'))).toEqual([]);
+    /* The one exception is the author's line in About, as the CEO asked. */
+    expect(textsOf(en).filter(t => t.includes('\u2014'))).toEqual([en.about.author]);
+    expect(textsOf(ru).filter(t => t.includes('\u2014'))).toEqual([ru.about.author]);
   });
 });
 

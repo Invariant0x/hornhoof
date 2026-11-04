@@ -1,3 +1,4 @@
+import { notificationMessage } from '../events/notifications.js';
 import { DEPARTMENT_TEMPLATES, type TemplateKey } from '@hornhoof/protocol';
 import { and, asc, eq, inArray, isNotNull, isNull, max, or } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
@@ -272,7 +273,8 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     for (const id of result.fresh) ctx.bus.publish(me.companyId, { type: 'pulse', from: { kind: 'orchestrator' }, to: { kind: 'department', id } });
     /* The orchestrator that built it reads the outcome in its tool's answer. */
     if (agentId && !me.via && (await orchestratorState(ctx, me.companyId)).ready) {
-      await enqueueTurn(ctx, { companyId: me.companyId, agentId, prompt: builtNote(result.created, result.removed), createdBy: null });
+      const message = await notificationMessage(ctx, me.companyId, 'structure', builtNote(result.created, result.removed), { actor: { personId: me.id } });
+      await enqueueTurn(ctx, { companyId: me.companyId, agentId, prompt: message.text, createdBy: null, message });
     }
     reply.code(201);
     return { created: result.fresh, removed: result.removed.map(r => r.id) };
@@ -402,7 +404,8 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     ctx.bus.publish(me.companyId, { type: 'requests', spot: { departmentId: null } });
     ctx.bus.publish(me.companyId, { type: 'pulse', from: { kind: 'orchestrator' }, to: { kind: 'department', id: dept.id } });
     if (agentId && !me.via && (await orchestratorState(ctx, me.companyId)).ready) {
-      await enqueueTurn(ctx, { companyId: me.companyId, agentId, prompt: staffedNote(deptName(dept), result.hired, result.present), createdBy: null });
+      const message = await notificationMessage(ctx, me.companyId, 'staffing', staffedNote(deptName(dept), result.hired, result.present), { actor: { personId: me.id } });
+      await enqueueTurn(ctx, { companyId: me.companyId, agentId, prompt: message.text, createdBy: null, message });
     }
     reply.code(201);
     return { hired: result.hired.map(h => h.id), present: result.present };

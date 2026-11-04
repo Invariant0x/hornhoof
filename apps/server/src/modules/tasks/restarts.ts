@@ -92,7 +92,7 @@ async function callOperations(ctx: Ctx, ended: Ended): Promise<void> {
   const to = await operationsOnCall(ctx, job.companyId);
   if (to) {
     const text = callText(ctx, ended, before, to);
-    await enqueueTurn(ctx, { companyId: job.companyId, agentId: to.id, prompt: text, createdBy: null, message: { personId: null, text } });
+    await enqueueTurn(ctx, { companyId: job.companyId, agentId: to.id, prompt: text, createdBy: null, message: { personId: null, text, notification: { source: 'machine', tasks: [{ id: task.id, number: task.number }], detail: { en: `turn ${job.id}`, ru: `ход ${job.id}` } } } });
   }
   const called = to ? `Hornhoof does not run it a third time and called ${to.name} of Operations to look at the node.` : 'Hornhoof does not run it a third time, and nobody in Operations is on to look at the node.';
   await logCut(ctx, task, agent, cut, `${agent.name}'s turn ${job.id} on #${task.number}, the retry of turn ${before.job}, ${cutOff(cut)}. ${called}`, {

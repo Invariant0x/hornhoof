@@ -47,6 +47,16 @@ const quiet = async (node: FakeNode) => {
 };
 
 describe('the orchestrator\'s conversation', () => {
+  it('sends a personal message before a report whose combining window is still open', async () => {
+    const { app, db, ceo, builtin } = await live();
+    const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    await enqueueTurn(app.ctx, { companyId: orchestrator!.companyId, agentId: orchestrator!.id, createdBy: null, prompt: 'Report.', message: { personId: null, text: 'Report.', report: 'Report.', notification: { source: 'reported', tasks: [] } } });
+    await say(app, ceo, 'Read this immediately.');
+    const run = await nextRun(builtin);
+    expect(run.prompt).toContain('Read this immediately.');
+    expect(run.prompt).not.toContain('Report.');
+  });
+
   it('starts a typed person message with its sender, role and recipient', async () => {
     const { app, ceo, builtin } = await live();
     await say(app, ceo, 'Keep the service instructions.');
@@ -74,7 +84,7 @@ describe('the orchestrator\'s conversation', () => {
     const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     await enqueueTurn(app.ctx, { companyId: orchestrator!.companyId, agentId: orchestrator!.id, createdBy: null, prompt: 'Read the task and its log before continuing.' });
     const run = await nextRun(builtin);
-    expect(run.prompt.split('\n')[0]).toBe('From Hornhoof to Orchestrator:');
+    expect(run.prompt.split('\n')[0]).toBe('From Hornhoof, recorded service message to Orchestrator:');
     expect(run.prompt).toContain('Read the task and its log before continuing.');
     const [message] = await events(app, ceo);
     expect(message.message).toMatchObject({ direction: 'in', from: { kind: 'hornhoof' }, to: { id: orchestrator!.id } });
@@ -85,7 +95,7 @@ describe('the orchestrator\'s conversation', () => {
     const { app, ceo, builtin } = await live();
     expect((await start(app, ceo)).json()).toEqual({ started: true });
     const run = await nextRun(builtin);
-    expect(run).toMatchObject({ prompt: `From Hornhoof to Orchestrator:\n\n${FIRST_TURN}`, effort: 'xhigh', sessionId: null, timeoutMs: 2 * 3_600_000 });
+    expect(run).toMatchObject({ prompt: `From Hornhoof, first window opened to Orchestrator:\n\n${FIRST_TURN}`, effort: 'xhigh', sessionId: null, timeoutMs: 2 * 3_600_000 });
     expect(run.instructions?.startsWith(ORCHESTRATOR_INSTRUCTIONS)).toBe(true);
     expect(run.toolToken).toMatch(/^[A-Za-z0-9_-]{40,}$/);
     expect((await start(app, ceo)).json()).toEqual({ started: false });
@@ -105,7 +115,7 @@ describe('the orchestrator\'s conversation', () => {
     await db.update(companies).set({ template: 'studio' }).where(eq(companies.id, acme!.id));
     await db.insert(departments).values({ companyId: acme!.id, name: null, templateKey: 'development', roleCode: 'DEV' });
     expect((await start(app, ceo)).json()).toEqual({ started: true });
-    expect((await nextRun(builtin)).prompt).toBe(`From Hornhoof to Orchestrator:\n\n${FIRST_TURN_TEMPLATE}`);
+    expect((await nextRun(builtin)).prompt).toBe(`From Hornhoof, first window opened to Orchestrator:\n\n${FIRST_TURN_TEMPLATE}`);
     expect((await start(app, ceo)).json()).toEqual({ started: false });
   });
 

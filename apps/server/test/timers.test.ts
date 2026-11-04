@@ -6,6 +6,7 @@ import { minuteRound, timerTick } from '../src/modules/agents/timers.js';
 import { agentState, insertTurn, onAgent } from '../src/modules/conversation/queue.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
+import { discardStaleTurn } from '../src/modules/tasks/wake-state.js';
 import { as, connectNode, listen, sessionFrom, SETUP, testApp, until } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
@@ -111,6 +112,10 @@ describe('timers', () => {
     /* A stop by a person is no failure; a timeout is. */
     const failed = (minute: number, error: string) => ({ companyId: orchestrator.companyId, subscriptionId: orchestrator.subscriptionId!, agentId: orchestrator.id, kind: 'conversation' as const, prompt: 'x', timeoutMs: 1, status: 'failed' as const, error, finishedAt: at(minute) });
     await db.insert(jobs).values(failed(25, 'cancelled'));
+    const [obsolete] = await db.insert(jobs).values({ companyId: orchestrator.companyId, subscriptionId: orchestrator.subscriptionId!, agentId: orchestrator.id, taskId: task!.id, kind: 'conversation', prompt: 'x', timeoutMs: 1, status: 'queued' }).returning();
+    await db.insert(agentEvents).values({ companyId: orchestrator.companyId, agentId: orchestrator.id, jobId: obsolete!.id, kind: 'message', data: { text: 'Merge wake', taskWake: { why: 'merge', status: 'working', stage: 0, merging: false } } });
+    expect(await discardStaleTurn(db, obsolete!)).toBe(true);
+    await db.update(jobs).set({ finishedAt: at(26) }).where(eq(jobs.id, obsolete!.id));
     expect(await timerTick(app.ctx, at(30))).toBe(0);
     await db.insert(jobs).values(failed(35, 'timeout'));
     expect(await timerTick(app.ctx, at(40))).toBe(1);

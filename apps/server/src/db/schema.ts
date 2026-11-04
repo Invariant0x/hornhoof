@@ -1,3 +1,4 @@
+import type { ExternalWait } from '@hornhoof/protocol/waits';
 import { COMPANY_TEMPLATE_KEYS, CRED_KINDS, MACHINE_KINDS, RUN_KINDS, TEMPLATE_KEYS, type Account, type Boot, type Failure, type Limits, type ModelOption, type NodeExit } from '@hornhoof/protocol';
 import { sql } from 'drizzle-orm';
 import { bigint, bigserial, boolean, check, customType, index, integer, jsonb, pgTable, primaryKey, real, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
@@ -320,7 +321,7 @@ export const personAccess = pgTable(
   t => [unique('person_access_place').on(t.personId, t.departmentId, t.teamId).nullsNotDistinct(), index('person_access_person_id').on(t.personId)],
 );
 
-export const JOB_STATUSES = ['queued', 'running', 'done', 'failed'] as const;
+export const JOB_STATUSES = ['queued', 'running', 'done', 'failed', 'obsolete'] as const;
 export const JOB_KINDS = ['test', 'conversation'] as const;
 /* Why a node started again, as far as Hornhoof can tell: its built-in server started again, Hornhoof updated it, the machine
    started again, its container was made anew, its program started again in the same container, or the connection broke
@@ -407,6 +408,7 @@ export const agentEvents = pgTable(
     index('agent_events_program_history').on(t.jobId, t.createdAt).where(sql`${t.kind} in ('program', 'failed')`),
     index('agent_events_silent_job').on(sql`(${t.data}->>'silentJob')`).where(sql`${t.kind} = 'message' and ${t.data} ? 'silentJob'`),
     index('agent_events_failure_case').on(sql`(data->>'failureCase')`).where(sql`data->>'failureCase' is not null`),
+    index('agent_events_report_window').on(t.agentId, t.createdAt).where(sql`data->>'report' is not null or data->>'from' = 'agent'`),
     index('agent_events_operations_pending').on(sql`(data->>'operationsPending')`).where(sql`data->>'operationsPending' is not null`),
   ],
 );
@@ -459,7 +461,7 @@ export const turns = pgTable(
 
 export const TASK_STATUSES = ['planned', 'open', 'working', 'review', 'waiting', 'blocked', 'done', 'cancelled'] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
-export type ExternalWait = { reason: string; since: string; until: string };
+export type { ExternalWait } from '@hornhoof/protocol/waits';
 
 /* A piece of work: the title and brief for people, the body every agent reads as the current truth, and its gates. */
 export const tasks = pgTable(
@@ -519,7 +521,7 @@ export const tasks = pgTable(
   ],
 );
 
-export const TASK_EVENT_KINDS = ['created', 'assigned', 'updated', 'comment', 'submitted', 'verdict', 'report', 'blocked', 'asked', 'answered', 'reminded', 'continued', 'stuck', 'cancelled', 'done', 'started', 'interrupted', 'wake_skipped'] as const;
+export const TASK_EVENT_KINDS = ['created', 'assigned', 'updated', 'comment', 'submitted', 'verdict', 'report', 'blocked', 'asked', 'answered', 'reminded', 'continued', 'stuck', 'cancelled', 'done', 'started', 'interrupted', 'wake_skipped', 'wake_obsolete'] as const;
 export type TaskEventKind = (typeof TASK_EVENT_KINDS)[number];
 
 /* Everything that happened to a task, with the person or agent who did it. */
@@ -582,6 +584,7 @@ export const pendingWakes = pgTable(
     /* A timed wake is obsolete once another task move replaced the action it names. */
     taskVersion: integer('task_version'),
     why: text('why').notNull(),
+    cause: jsonb('cause').$type<import('../modules/tasks/notification-cause.js').WakeCause>(),
     text: text('text'),
     note: text('note'),
     createdAt: createdAt(),
@@ -806,3 +809,21 @@ export const publicLinks = pgTable('public_links', {
   tunnelEnc: text('tunnel_enc').notNull(),
   createdAt: createdAt(),
 });
+
+/* Wait requests and observations survive a restart until accepted into the recipient's work queue. */
+export const waitNotices = pgTable('wait_notices', {
+  id: id(),
+  companyId: companyId(),
+  agentId: uuid('agent_id').notNull().references(() => agents.id),
+  dedupKey: text('dedup_key').notNull(),
+  message: jsonb('message').$type<import('../modules/tasks/wait-notice-types.js').WaitNoticeMessage>().notNull(),
+  guard: jsonb('guard').$type<import('../modules/tasks/wait-notice-types.js').WaitNoticeGuard>().notNull(),
+  createdAt: createdAt(),
+  leaseId: uuid('lease_id'),
+  leaseUntil: timestamp('lease_until', { withTimezone: true }),
+  deliveredAt: timestamp('delivered_at', { withTimezone: true }),
+  cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+}, t => [
+  unique('wait_notices_dedup').on(t.companyId, t.dedupKey),
+  index('wait_notices_pending').on(t.createdAt).where(sql`${t.deliveredAt} IS NULL AND ${t.cancelledAt} IS NULL`),
+]);

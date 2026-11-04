@@ -183,13 +183,13 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
   server.registerTool(
     'wait_for',
     {
-      description: 'Waits on a task you hold for an external event, with a one-line reason and an ISO deadline at most two hours away. End your turn after this: no reminder or stuck request is sent while it waits. A comment, a message naming this task, or the deadline wakes you once.',
+      description: 'Waits on a task you hold for an employee or an external event. Name what you need in one line and give an ISO deadline at most two hours away. End your turn after this: no reminder or stuck request is sent while it waits. A comment, a message naming this task, or the deadline wakes you once.',
       inputSchema: { task: Ref, ...WaitInput.shape },
     },
-    async ({ task: ref, reason, until }) => run(async () => {
+    async ({ task: ref, ...input }) => run(async () => {
       const { task } = await find(ref);
-      plain(task, reason);
-      const moved = await waitFor(ctx, job.agentId, task.id, { reason, until });
+      plain(task, input.reason);
+      const moved = await waitFor(ctx, job.agentId, task.id, input);
       return { text: `#${task.number} waits for "${moved.task.externalWait!.reason}" until ${moved.task.externalWait!.until}. End this turn; you will be woken.`, moved };
     }),
   );

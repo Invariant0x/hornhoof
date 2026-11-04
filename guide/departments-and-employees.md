@@ -15,7 +15,7 @@ Click a department to fly into it. Its schema shows:
 
 Every employee shows the task it is about and what it does now: working, queued, handed on, needs a decision, or free.
 
-"Tree" shows the work of the current turn. Drag it with a mouse or finger, use the wheel to zoom, or use the same zoom and "Show everything" buttons as on the map. The tree is for viewing only. Click an employee's name or any of its task rows to open its window, including when it is sleeping.
+"Tree" shows the work of the current turn. It opens at 100% from its start, and each employee's name, role, task and state show in full however many employees there are: a long task title wraps, and the tree may be wider and taller than the screen. Drag it with a mouse or finger, use the wheel to zoom, or use the same zoom and "Show everything" buttons as on the map. The tree is for viewing only. Click an employee's name or any of its task rows to open its window, including when it is sleeping.
 
 On the map, a department's card has one square per employee, in the same colors.
 
@@ -64,7 +64,9 @@ The plan's owner can type into it as into any terminal:
 - Escape stops it, as it stops the program.
 - Only a line a person sent from this window opens such a turn. The agent's program cannot open one for itself.
 
-Opening the window of an employee whose program does not run starts it, so the owner can type to it at once. Everyone else who reaches the employee watches.
+Opening the window of an employee whose program does not run starts it, so the owner can type to it at once.
+
+Everyone else who reaches the employee watches the terminal and writes in the line under it, whoever's plan it runs on. The message goes in their name and with their rights. The CEO and the CEO delegate write this way to the orchestrator too, and a person with a department to its employees. Someone without access to an agent sees neither the window nor the line, and the server turns them away.
 
 "Log" shows the conversation as Hornhoof keeps it, and "Stop" ends the running turn. Employees on company API keys show the log.
 

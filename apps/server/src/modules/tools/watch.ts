@@ -138,6 +138,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
             program: state.program,
             alarm: state.alarm,
             failure: state.failure,
+            obsolete: state.obsolete,
             retry: state.retry,
             restart: await programRestartStatus(ctx, job.companyId, a.id),
             // eslint-disable-next-line @typescript-eslint/no-unused-vars -- strip internal grouping field

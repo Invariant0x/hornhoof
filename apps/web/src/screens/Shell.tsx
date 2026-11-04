@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { deptLabel, errorText, LANGUAGES, useLanguage, useT } from '../i18n';
-import { liveOf, useOrg } from '../org';
+import { useOrg } from '../org';
 import { currentTheme, setTheme, type Theme } from '../theme';
 import type { Me, Org } from '../types';
-import { AgentCard } from '../ui/AgentCard';
 import { LogoMark } from '../ui/icons';
 import { UpdateBanner } from '../ui/UpdateBanner';
 import { useVersion, versionText } from '../ui/VersionMark';
@@ -28,7 +27,7 @@ import { takeEscape } from '../ui/escape';
 
 type Tab = 'map' | 'tasks' | 'people' | 'subscriptions' | 'machines' | 'improvements';
 /* The agent window is on the right, settings and tasks on the left. agentId is 'orchestrator' or an employee's id. */
-type Panel = { kind: 'window' | 'card'; agentId: string; request?: number } | { kind: 'task'; taskId: string } | null;
+type Panel = { kind: 'window'; agentId: string; request?: number } | { kind: 'task'; taskId: string } | null;
 const TABS: Tab[] = ['map', 'tasks', 'people', 'subscriptions', 'machines'];
 const THEMES: Theme[] = ['light', 'dark'];
 
@@ -360,7 +359,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
         {tab === 'machines' && <Machines me={me} />}
         {tab === 'improvements' && company && <Improvements improvements={improvements} failure={improvementsFailure} onChanged={loadImprovements} onTask={taskId => setPanel({ kind: 'task', taskId })} />}
       </main>
-      {agentPanel?.kind === 'window' && org && (
+      {agentPanel && org && (
         <AgentWindow
           key={agentPanel.agentId}
           me={me}
@@ -372,7 +371,6 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
           onRequestsChanged={decisions.load}
           staff={agentPanel.agentId === 'orchestrator' ? staff : null}
           onClose={() => setPanel(null)}
-          onCard={() => setPanel({ kind: 'card', agentId: agentPanel.agentId })}
         />
       )}
       {panel?.kind === 'task' && (
@@ -385,9 +383,6 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
           onRequestsChanged={decisions.load}
           onOpenAgent={openAgent}
         />
-      )}
-      {agentPanel?.kind === 'card' && (
-        <AgentCard key={agentPanel.agentId} me={me} agentId={agentPanel.agentId} {...liveOf(org, agentPanel.agentId)} onClose={() => setPanel(null)} onTerminal={() => openAgent(agentPanel.agentId)} />
       )}
       <AccountDialog active={accountDialog} me={currentMe} updates={updates} onRenamed={setSelfName} onClose={() => { setAccountDialog(null); accountButton.current?.focus(); }} />
     </div>

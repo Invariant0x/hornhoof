@@ -1,3 +1,4 @@
+import { NOTIFICATION_NAMES } from '@hornhoof/protocol';
 import type { EventView } from '../events/store.js';
 import type { MessageEnvelope, MessageParty } from '../events/parties.js';
 
@@ -57,8 +58,19 @@ function partyLine(party: MessageParty): string {
   return oneLine(`${nameOf(party)}${details.length ? ` (${details.join(', ')})` : ''}`);
 }
 
+function noticeLine(message: MessageEnvelope): string {
+  const notice = message.notification;
+  const source = notice ? NOTIFICATION_NAMES[notice.source] : NOTIFICATION_NAMES.service;
+  const refs = notice?.tasks.length ? ` on ${notice.tasks.map(t => `#${t.number}`).join(' and ')}` : '';
+  const detail = notice?.detail ? ` (${oneLine(notice.detail.en)})` : '';
+  return `${source}${refs}${detail}`;
+}
+
 export function messageHeading(message: MessageEnvelope): string {
-  return `From ${partyLine(message.from)} to ${partyLine(message.to)}:`;
+  const senders = message.senders?.length ? message.senders.map(partyLine).join(', ') : partyLine(message.from);
+  if (message.from.kind === 'hornhoof') return `From Hornhoof, ${noticeLine(message)} to ${partyLine(message.to)}:`;
+  const sender = message.notification ? `${senders} via Hornhoof, ${noticeLine(message)}` : senders;
+  return `From ${sender} to ${partyLine(message.to)}:`;
 }
 
 /* An attribute's value: Claude Code reads these entities back, and a bare quote or bracket would end the value or the tag. */

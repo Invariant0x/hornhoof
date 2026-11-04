@@ -10,7 +10,7 @@ import { wakeAll } from '../tasks/wake.js';
 import { listEvents } from '../events/store.js';
 import { isOperations } from '../operations/required.js';
 import { FIRST_TURN, FIRST_TURN_TEMPLATE, turnPrompt } from './prompt.js';
-import { agentState, insertTurn, onAgent, pump } from './queue.js';
+import { agentState, insertTurn, onAgent, pump, typesInTerminal } from './queue.js';
 import { cancelJob } from '../tasks/wake.js';
 import { queueTaskMessage, TaskReference } from '../tasks/external-wait.js';
 
@@ -31,9 +31,9 @@ export function conversationRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
 
   app.get('/api/agents/:id/events', async req => {
-    const { agent } = await agentFor(ctx, req);
+    const { me, agent } = await agentFor(ctx, req);
     const { after } = EventsQuery.parse(req.query);
-    return { events: await listEvents(db, agent.id, after), state: await agentState(ctx, agent.id) };
+    return { events: await listEvents(db, agent.id, after), state: { ...(await agentState(ctx, agent.id)), canType: await typesInTerminal(ctx, agent.id, me.id) } };
   });
 
   app.post('/api/agents/:id/messages', async (req, reply) => {
@@ -73,7 +73,7 @@ export function conversationRoutes(app: FastifyInstance, ctx: Ctx): void {
       /* A company built by hand gets no greeting (its build already enqueued a turn); one from a template is greeted so he
          offers to staff it. The Operations every company starts with is no building. */
       if (depts.some(d => !isOperations(d)) && !company?.template) return false;
-      await insertTurn(ctx, { companyId: me.companyId, agentId: agent.id, prompt: company?.template ? FIRST_TURN_TEMPLATE : FIRST_TURN, createdBy: me.id });
+      await insertTurn(ctx, { companyId: me.companyId, agentId: agent.id, prompt: company?.template ? FIRST_TURN_TEMPLATE : FIRST_TURN, createdBy: me.id, message: { personId: null, text: company?.template ? FIRST_TURN_TEMPLATE : FIRST_TURN, notification: { source: 'first_turn', tasks: [] } } });
       return true;
     });
     /* Outside the agent's line, which the pump waits on. */

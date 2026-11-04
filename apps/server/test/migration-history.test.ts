@@ -88,8 +88,9 @@ describe('migration histories merged in turn 5', () => {
     }
     const recorded = (await db.execute(sql`select id, hash, created_at from drizzle.__drizzle_migrations order by id`)).rows;
     expect(recorded).toEqual(expect.arrayContaining(recordedBefore));
-    expect(recorded).toHaveLength(53);
-    expect(new Set(recorded.map(row => Number(row.created_at))).size).toBe(53);
+    const journal = JSON.parse(await readFile(join(MIGRATIONS, 'meta', '_journal.json'), 'utf8')) as { entries: Entry[] };
+    expect(recorded).toHaveLength(journal.entries.length);
+    expect(new Set(recorded.map(row => Number(row.created_at))).size).toBe(journal.entries.length);
     expect(recorded.map(row => Number(row.created_at))).toEqual(expect.arrayContaining([
       1793700000000, 1793714531704, 1793714572653, 1793716912449, 1793727699000, 1793727700000, 1793739121203,
     ]));

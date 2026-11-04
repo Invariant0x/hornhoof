@@ -241,8 +241,10 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   if (browserError) log(`Playwright Chromium could not start: ${browserError}`);
   const noRunsNow = (): string | null =>
     !testUser ? NO_RUNS : browserError ? `Playwright Chromium could not start: ${browserError}` : null;
-  const tellStatus = () =>
+  const tellStatus = () => {
+    browserError = readBrowserError(dir);
     emit({ type: 'status', loggedIn, ...setup.field(), limits, ...(models ? { models } : {}), account, browserError, noRuns: noRunsNow() });
+  };
   const status = async () => {
     /* A program that cannot list its models now keeps those it listed before. */
     models = await readModels().catch(() => models);

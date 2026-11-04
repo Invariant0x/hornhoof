@@ -2,7 +2,7 @@ import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agentEvents, agents, companies, jobs, people, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
 import { cancel, lastMove, type Task, type WakeWhy } from '../src/modules/tasks/engine.js';
-import { discardStaleTurn, discardStaleTurns, repeatedTurn, repeatWake, taskForWake, taskWakeOf, waitingTaskTurn } from '../src/modules/tasks/wake-state.js';
+import { discardStaleTurn, discardStaleTurns, recordStale, repeatedTurn, repeatWake, taskForWake, taskWakeOf, waitingTaskTurn } from '../src/modules/tasks/wake-state.js';
 import { agentFailureStates } from '../src/modules/tasks/failures.js';
 import { wakeAll, wakePrompt } from '../src/modules/tasks/wake.js';
 import { createTestDb, statements, testApp } from './helpers.js';
@@ -88,7 +88,7 @@ describe('task wake policy in the database', () => {
       if (test.next) await c.db.update(tasks).set(test.next).where(eq(tasks.id, task.id));
       expect(await discardStaleTurn(c.db, job), `${test.why} ${task.number}`).toBe(test.stale);
       const [ended] = await c.db.select().from(jobs).where(eq(jobs.id, job.id));
-      expect(ended!.status).toBe(test.stale ? 'failed' : 'queued');
+      expect(ended!.status).toBe(test.stale ? 'obsolete' : 'queued');
       expect(ended!.startedAt).toBeNull();
       if (test.stale) expect(ended!.result).toContain(`#${task.number}`);
     }
@@ -111,11 +111,11 @@ describe('task wake policy in the database', () => {
     await c.db.update(tasks).set({ status: 'done', closedAt: new Date() }).where(eq(tasks.id, task.id));
     expect(await discardStaleTurn(c.db, job)).toBe(true);
     const skipped = await c.db.select().from(taskEvents).where(eq(taskEvents.taskId, task.id));
-    expect(skipped).toEqual([expect.objectContaining({ kind: 'wake_skipped', agentId: c.worker.id, data: { wake: 'assigned', job: job.id } })]);
+    expect(skipped).toEqual([expect.objectContaining({ kind: 'wake_obsolete', agentId: c.worker.id, data: { wake: 'assigned', job: job.id } })]);
     expect(await lastMove(c.db, task.id)).toBeUndefined();
     const stopped = (await c.db.select().from(agentEvents).where(eq(agentEvents.jobId, job.id))).filter(e => e.kind === 'stopped');
     expect(stopped).toHaveLength(1);
-    expect(stopped[0]!.data).toMatchObject({ reason: 'stale', task: { id: task.id, number: task.number } });
+    expect(stopped[0]!.data).toMatchObject({ reason: 'obsolete', task: { id: task.id, number: task.number } });
     expect(await discardStaleTurn(c.db, job)).toBe(true);
     expect((await c.db.select().from(agentEvents).where(eq(agentEvents.jobId, job.id))).filter(e => e.kind === 'stopped')).toHaveLength(1);
     expect(await c.db.select().from(taskEvents).where(eq(taskEvents.taskId, task.id))).toHaveLength(1);
@@ -126,7 +126,7 @@ describe('task wake policy in the database', () => {
     expect(await discardStaleTurns(c.db, [])).toBe(false);
   });
 
-  it('records why a queued wake became stale, its unstarted program and explicit empty output', async () => {
+  it('marks an unstarted wake obsolete without an agent failure', async () => {
     const { app, db } = await testApp();
     const c = await fixture(db);
     const task = await c.task();
@@ -137,21 +137,32 @@ describe('task wake policy in the database', () => {
     expect(await discardStaleTurn(c.db, job)).toBe(true);
 
     const ended = (await c.db.select().from(jobs).where(eq(jobs.id, job.id)))[0]!;
-    expect(ended).toMatchObject({ status: 'failed', error: 'stale', tail: 'No output.', failure: { kind: 'unknown', retryable: false } });
-    expect(ended.failure!.text).toContain('task status=done');
-    expect(ended.failure!.text).toContain('action=merge');
-    expect(ended.failure!.text).toContain('Program state: not started');
-    expect(ended.failure!.text).toContain('Last sign of life: no data');
-    const shown = (await agentFailureStates(app.ctx, c.worker.companyId, [c.worker.id])).get(c.worker.id)!.failure;
-    expect(shown).toMatchObject({ kind: 'unknown', text: ended.failure!.text, tail: 'No output.' });
+    expect(ended).toMatchObject({ status: 'obsolete', error: 'stale', tail: 'No output.', failure: null });
+    expect(ended.result).toContain('task status=done');
+    expect(ended.result).toContain('action=merge');
+    expect(ended.result).toContain('Program state: not started');
+    expect(ended.result).toContain('Last sign of life: no data');
+    expect(await recordStale(c.db, job.id, c.worker.id, task, 'merge', 'queued')).toBe(false);
+    const shown = (await agentFailureStates(app.ctx, c.worker.companyId, [c.worker.id])).get(c.worker.id)!;
+    expect(shown.failure).toBeNull();
+    expect(shown.obsolete).toEqual({ at: +ended.finishedAt! });
+    const stopped = (await c.db.select().from(agentEvents).where(eq(agentEvents.jobId, job.id))).filter(e => e.kind === 'stopped');
+    expect(stopped[0]!.data).toMatchObject({ reason: 'obsolete', tail: 'No output.', program: null });
+    expect(stopped[0]!.data).not.toHaveProperty('failure');
 
     const finished = await c.job(null, c.reviewer.id);
-    await c.db.update(jobs).set({ status: 'done', failure: ended.failure, finishedAt: new Date() }).where(eq(jobs.id, finished.id));
+    await c.db.update(jobs).set({ status: 'done', failure: { kind: 'overloaded', text: 'Other failure', retryable: true }, finishedAt: new Date() }).where(eq(jobs.id, finished.id));
+    const undated = await c.job(null, c.head.id);
+    await c.db.update(jobs).set({ continueOf: finished.id, notBefore: null }).where(eq(jobs.id, undated.id));
+    const [otherCompany] = await c.db.insert(companies).values({ name: 'Other', singleton: false }).returning();
+    await c.db.update(jobs).set({ companyId: otherCompany!.id, notBefore: new Date(Date.now() + 60_000) }).where(eq(jobs.id, finished.id));
     await c.db.update(jobs).set({ finishedAt: null }).where(eq(jobs.id, ended.id));
     const states = await agentFailureStates(app.ctx, c.worker.companyId, [c.worker.id, c.reviewer.id, c.head.id]);
-    expect(states.get(c.worker.id)!.failure).toMatchObject({ at: +ended.createdAt });
+    expect(states.get(c.worker.id)!.obsolete).toEqual({ at: +ended.createdAt });
     expect(states.get(c.reviewer.id)!.failure).toBeNull();
+    expect(states.get(c.reviewer.id)!.retry).toBeNull();
     expect(states.get(c.head.id)!.failure).toBeNull();
+    expect(states.get(c.head.id)!.retry).toBeNull();
   });
 
   it('repeats current work, keeping its purpose and stage while rejecting another holder, stage, merge phase or external wait', async () => {

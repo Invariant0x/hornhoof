@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentEvent, ServerMessage } from '@hornhoof/protocol';
@@ -245,7 +245,7 @@ describe('runJob', () => {
     expect(done).toMatchObject({ ok: false, error: 'cancelled', result: 'Stopped.' });
   });
 
-  it('prepares the repository lockfile browser before the first turn and fails clearly when Chromium cannot start', async () => {
+  it('prepares the repository lockfile browser before the turn and records browser-error without failing the agent turn when Chromium cannot start', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-node-'));
     const prepared: string[] = [];
     const adapter = fakeAdapter(async () => {
@@ -269,12 +269,9 @@ describe('runJob', () => {
         throw new Error('Playwright Chromium could not start: libnss3.so missing');
       },
     });
-    expect(broken).toMatchObject({
-      ok: false,
-      error: 'agent_failed',
-      tail: expect.stringContaining('Playwright Chromium could not start: libnss3.so missing'),
-    });
-    expect(prepared).toHaveLength(2);
+    expect(broken).toMatchObject({ ok: true, result: 'ready', error: null });
+    expect(prepared).toEqual([join(dir, 'work', 'agents', 'dev-1', 'shop'), 'agent-ran', 'agent-ran']);
+    expect(readFileSync(join(dir, 'browser-error'), 'utf8').trim()).toBe('libnss3.so missing');
   });
 });
 

@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { expect, it } from 'vitest';
-import { agents, departments, jobs, tasks } from '../src/db/schema.js';
+import { agents, departments, jobs, people, tasks } from '../src/db/schema.js';
 import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
 
 it('lists canOpen with the same product and orchestrator access as the agent API', async () => {
@@ -42,4 +42,27 @@ it('lists canOpen with the same product and orchestrator access as the agent API
   for (const id of [own!.id, outside!.id, orchestrator!.id]) await db.update(agents).set({ nodeId }).where(eq(agents.id, id));
   const machine = (await app.inject({ url: '/api/machines', ...as(viewer) })).json().machines.find((m: { hostname: string }) => m.hostname === 'maria-machine');
   expect(machine.running.agents.map((a: { id: string; canOpen: boolean }) => [a.id, a.canOpen])).toEqual([[orchestrator!.id, false], [outside!.id, false], [own!.id, true]]);
+});
+
+it("says an agent is with the CEO only for a turn that answers the CEO, not the CEO's delegate", async () => {
+  const { app, db } = await testApp();
+  const ceo = await setUpCompany(app);
+  const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+  const companyId = orchestrator!.companyId;
+  await invitePerson(app, ceo, { name: 'Lisa', email: 'lisa@acme.com', access: { whole: true } });
+  const [lisa] = await db.select().from(people).where(eq(people.name, 'Lisa'));
+  await app.inject({ method: 'PUT', url: `/api/people/${lisa!.id}/ceo-delegate`, payload: { isCeoDelegate: true }, ...as(ceo) });
+  const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
+  const connected = (await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['codex'] }, ...as(ceo) })).json();
+  const subscriptionId = connected.subscriptions[0].id as string;
+  const [withLisa, withIvan, afterIvan, working] = await db.insert(agents).values(['With Lisa', 'With Ivan', 'After Ivan', 'Working'].map(name => ({ companyId, kind: 'worker' as const, name, model: '', subscriptionId }))).returning();
+  const running = { companyId, subscriptionId, prompt: 'work', status: 'running' as const, timeoutMs: 1000 };
+  await db.insert(jobs).values([
+    { ...running, agentId: withLisa!.id, createdBy: lisa!.id, answersCeo: true },
+    { ...running, agentId: withIvan!.id, createdBy: owner!.id, answersCeo: true },
+    { ...running, agentId: afterIvan!.id, createdBy: null, answersCeo: true },
+    { ...running, agentId: working!.id, createdBy: null, answersCeo: false },
+  ]);
+  const shown = (await app.inject({ url: '/api/subscriptions', ...as(ceo) })).json().subscriptions.find((s: { id: string }) => s.id === subscriptionId).agents as { name: string; withCeo: boolean }[];
+  expect(Object.fromEntries(shown.map(a => [a.name, a.withCeo]))).toMatchObject({ 'With Lisa': false, 'With Ivan': true, 'After Ivan': true, Working: false });
 });

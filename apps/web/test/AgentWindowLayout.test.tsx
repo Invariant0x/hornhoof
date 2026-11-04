@@ -21,6 +21,7 @@ function company(hasTask = true, busy = false, events: EventView[] = []) {
     'GET /api/updates': [200, { current: { version: '0.5.1', commit: 'abc1234', migrations: 1 }, available: false, latest: null, versions: [], updater: { present: false, status: null, waiting: null } }],
     'GET /api/link': [200, { link: null, domain: 'hornhoof.org' }],
     'POST /api/agents/b1/stop': [200, {}],
+    'DELETE /api/agents/b1': [200, {}],
   });
   return { calls, org, card };
 }
@@ -72,12 +73,13 @@ describe('agent window task and controls', () => {
     const event: EventView = { seq: 1, kind: 'message', data: { text: 'Release verified.' }, jobId: 'j1', person: null, at: '2026-11-04T14:00:00Z', message };
     company(true, false, [event]);
     const window = await openEmployee(userEvent.setup());
-    await within(window).findByRole('button', { name: 'Message from Hana via Hornhoof to Bruno' });
-    stream.send({ type: 'agent_event', agentId: 'b1', event: { ...event, message: { ...message, revision: 1, senders: [message.from, { ...message.from, id: 'h2', name: 'Rita' }] } } });
+    fireEvent.click(await within(window).findByRole('button', { name: 'Message from Hana via Hornhoof to Bruno' }));
+    stream.send({ type: 'agent_event', agentId: 'b1', event: { ...event, seq: 2, message: { ...message, originSeq: 1, revision: 1, senders: [message.from, { ...message.from, id: 'h2', name: 'Rita' }] } } });
     expect(await within(window).findByRole('button', { name: 'Message from Hana, Rita via Hornhoof to Bruno' })).toBeInTheDocument();
     stream.send({ type: 'agent_event', agentId: 'b1', event });
     expect(await within(window).findByRole('button', { name: 'Message from Hana, Rita via Hornhoof to Bruno' })).toBeInTheDocument();
     expect(within(window).queryByRole('button', { name: 'Message from Hana via Hornhoof to Bruno' })).not.toBeInTheDocument();
+    expect(within(window).getByText('Release verified.')).toBeVisible();
   });
 
   it.each(['Department tasks', 'About the department', 'Speed', 'Account', 'About', 'Settings', 'Versions'])('keeps Escape with %s instead of stopping the busy agent', async name => {
@@ -131,6 +133,18 @@ describe('agent window task and controls', () => {
     await user.click(within(window).getByRole('button', { name: 'Back to conversation' }));
     expect(screen.queryByRole('complementary', { name: '#12 Checkout API' })).not.toBeInTheDocument();
     expect(input).toHaveValue('Keep this draft');
+  });
+
+  it('closes the window with the card when the employee is removed from the company', async () => {
+    const { calls } = company();
+    const user = userEvent.setup();
+    const window = await openEmployee(user);
+    await user.click(within(window).getByRole('button', { name: 'Card' }));
+    const card = await within(window).findByRole('complementary', { name: 'Card: Bruno' });
+    await user.click(await within(card).findByRole('button', { name: 'Remove from the company' }));
+    await user.click(within(card).getByRole('button', { name: 'Yes, remove' }));
+    await waitFor(() => expect(window).not.toBeInTheDocument());
+    expect(calls).toContainEqual({ method: 'DELETE', path: '/api/agents/b1', body: undefined });
   });
 
   it('shows an employee without a task only its switched off button, in Russian', async () => {

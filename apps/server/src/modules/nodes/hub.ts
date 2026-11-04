@@ -167,6 +167,15 @@ export class NodeHub {
     return this.openEntry(id)?.browserError || null;
   }
 
+  /* Why Playwright's browser alone holds this ready node back from runs, or null when it takes runs or has another blocker. */
+  browserHoldOf(id: NodeIdentity): string | null {
+    if (!this.isReady(id) || !this.loadOf(id)) return null;
+    const error = this.browserErrorOf(id);
+    if (!error) return null;
+    const noRuns = this.sockets.get(keyOf(id))!.noRuns;
+    return !noRuns || noRuns.startsWith('browser_failed:') || noRuns.startsWith('Playwright Chromium') ? error : null;
+  }
+
   /* Why a connected node takes no part of any run, as it said; none when it takes them. */
   noRunsOf(id: NodeIdentity): string | null {
     const entry = this.sockets.get(keyOf(id));

@@ -83,7 +83,8 @@ async function delegateTarget(db: Db, me: Person, id: string, isCeoDelegate: boo
 export async function reinvite(db: Db, personId: string, by: Pick<Person, 'id' | 'companyId'>): Promise<{ token: string; person: Person }> {
   const token = newToken();
   const person = await db.transaction(async tx => {
-    const [row] = await tx.update(people).set({ status: 'invited', passwordHash: null, isCeoDelegate: false }).where(eq(people.id, personId)).returning(personColumns);
+    const [row] = await tx.update(people).set({ status: 'invited', passwordHash: null, isCeoDelegate: false }).where(and(eq(people.id, personId), eq(people.companyId, by.companyId))).returning(personColumns);
+    if (!row) throw new ApiError(404, 'not_found', 'This person does not exist.', 'person_unknown');
     await tx.update(invites).set({ usedAt: new Date() }).where(and(eq(invites.personId, personId), isNull(invites.usedAt)));
     await tx.delete(sessions).where(eq(sessions.personId, personId));
     await tx.insert(invites).values(inviteFor(token, by, personId));
@@ -136,8 +137,8 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
   }
 
   app.get('/api/people', async req => {
-    await requirePerson(req, db);
-    const rows = await db.select(personColumns).from(people).orderBy(asc(people.createdAt));
+    const me = await requirePerson(req, db);
+    const rows = await db.select(personColumns).from(people).where(eq(people.companyId, me.companyId)).orderBy(asc(people.createdAt));
     return { people: await personViews(db, rows) };
   });
 
@@ -172,7 +173,7 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     requireCompanyScope(me);
     const { id } = IdParams.parse(req.params);
-    const [target] = await db.select(personColumns).from(people).where(eq(people.id, id));
+    const [target] = await db.select(personColumns).from(people).where(and(eq(people.id, id), eq(people.companyId, me.companyId)));
     if (!target) throw new ApiError(404, 'not_found', 'This person does not exist.', 'person_unknown');
     if (target.isOwner) throw new ApiError(403, 'forbidden', 'The owner cannot be sent a new invite.', 'owner_locked');
     if (target.id === me.id) throw new ApiError(403, 'forbidden', 'You cannot send a new invite to yourself.', 'self_locked');
@@ -229,8 +230,10 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
     /* Anyone may rename their own title; everything else needs the whole company. */
     if (id !== me.id || body.access !== undefined || body.status !== undefined) requireCompanyScope(me);
 
-    const [target] = await db.select({ ...personColumns, passwordHash: people.passwordHash }).from(people).where(eq(people.id, id));
+    const [target] = await db.select({ ...personColumns, passwordHash: people.passwordHash }).from(people).where(and(eq(people.id, id), eq(people.companyId, me.companyId)));
     if (!target) throw new ApiError(404, 'not_found', 'This person does not exist.', 'person_unknown');
+    const canRenameOther = me.isOwner || (me.isCeoDelegate && me.scopeKind === 'company');
+    if (id !== me.id && body.name !== undefined && !canRenameOther) throw new ApiError(403, 'forbidden', 'Only the CEO or the CEO delegate changes another person\'s name.', 'owner_locked');
     if (body.status === 'disabled' && (target.isOwner || target.id === me.id)) {
       throw new ApiError(403, 'forbidden', target.isOwner ? 'The owner cannot be disabled.' : 'You cannot disable yourself.', target.isOwner ? 'owner_locked' : 'self_locked');
     }
@@ -247,7 +250,7 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
 
     const person = await db.transaction(async tx => {
       if (Object.keys(changes).length) await tx.update(people).set(changes).where(eq(people.id, id));
-      if (id === me.id && body.name !== undefined && body.name !== target.name) {
+      if (body.name !== undefined && body.name !== target.name) {
         await tx.insert(personChanges).values({ companyId: me.companyId, personId: id, actorId: me.id, field: 'name', before: target.name, after: body.name });
       }
       if (body.access) await saveAccess(tx, target, body.access);

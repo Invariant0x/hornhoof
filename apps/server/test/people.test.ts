@@ -130,6 +130,21 @@ describe('GET /api/people', () => {
     expect(res.body).not.toContain('scrypt');
     expect((await app.inject({ url: '/api/people' })).statusCode).toBe(401);
   });
+
+  it('lists only people from the session company', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    await invite(app, ceo, { name: 'Kate', email: 'kate@acme.com', title: 'Head of marketing', access: { whole: true } });
+    const [otherCompany] = await db.insert(companies).values({ name: 'Other', singleton: false }).returning();
+    await db.insert(people).values({ companyId: otherCompany!.id, name: 'Other person', email: 'other@example.test', title: 'Other title', status: 'active', scopeKind: 'company' });
+
+    const res = await app.inject({ url: '/api/people', ...as(ceo) });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().people.map((p: { name: string }) => p.name)).toEqual(['Ivan', 'Kate']);
+    expect(res.body).not.toContain('other@example.test');
+    expect(res.body).not.toContain('Other title');
+  });
 });
 
 describe('PATCH /api/people/:id', () => {
@@ -210,6 +225,45 @@ describe('PATCH /api/people/:id', () => {
     const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     const to = await agentParty(app.ctx, owner!.companyId, orchestrator!.id);
     expect(messageHeading({ direction: 'in', from, to })).toBe('From Lisa (Head of marketing) to Orchestrator:');
+  });
+
+  it('scopes person changes and invites to the session company', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const [otherCompany] = await db.insert(companies).values({ name: 'Other', singleton: false }).returning();
+    const [other] = await db.insert(people).values({ companyId: otherCompany!.id, name: 'Other', email: 'other@example.test', title: '', status: 'active', scopeKind: 'company', isOwner: true }).returning();
+
+    const changed = await app.inject({ method: 'PATCH', url: `/api/people/${other!.id}`, payload: { name: 'Compromised', title: 'Taken', status: 'disabled', access: { whole: true } }, ...as(ceo) });
+    const invited = await app.inject({ method: 'POST', url: `/api/people/${other!.id}/invite`, ...as(ceo) });
+
+    expect([changed.statusCode, invited.statusCode]).toEqual([404, 404]);
+    expect(changed.json().error.reason).toBe('person_unknown');
+    expect(invited.json().error.reason).toBe('person_unknown');
+    expect((await db.select().from(people).where(eq(people.id, other!.id)))[0]).toMatchObject({ name: 'Other', title: '', status: 'active', scopeKind: 'company' });
+    expect(await db.select().from(invites).where(eq(invites.personId, other!.id))).toEqual([]);
+  });
+
+  it('lets only the CEO or an active delegate rename another person and records the actor', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const maria = await inviteAndAccept(app, ceo, { name: 'Maria', email: 'maria@acme.com', title: '', access: { whole: true } });
+    const olga = await inviteAndAccept(app, ceo, { name: 'Olga', email: 'olga@acme.com', title: '', access: { whole: true } });
+    const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
+
+    expect((await app.inject({ method: 'PATCH', url: `/api/people/${olga.id}`, payload: { name: 'Changed by Maria' }, ...as(maria.token) })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'PATCH', url: `/api/people/${owner!.id}`, payload: { name: 'Changed by Maria' }, ...as(maria.token) })).statusCode).toBe(403);
+    await db.update(people).set({ isCeoDelegate: true }).where(eq(people.id, olga.id));
+    const byDelegate = await app.inject({ method: 'PATCH', url: `/api/people/${owner!.id}`, payload: { name: 'Ivan Delegate' }, ...as(olga.token) });
+    expect(byDelegate.statusCode).toBe(200);
+    await db.update(people).set({ scopeKind: 'listed' }).where(eq(people.id, olga.id));
+    expect((await app.inject({ method: 'PATCH', url: `/api/people/${owner!.id}`, payload: { name: 'Listed Delegate' }, ...as(olga.token) })).statusCode).toBe(403);
+    const byOwner = await app.inject({ method: 'PATCH', url: `/api/people/${maria.id}`, payload: { name: 'Maria Owner' }, ...as(ceo) });
+    expect(byOwner.statusCode).toBe(200);
+    const audit = await db.execute(sql`select person_id, actor_id, before, after from person_changes order by created_at`) as { rows: { person_id: string; actor_id: string; before: string; after: string }[] };
+    expect(audit.rows).toEqual([
+      { person_id: owner!.id, actor_id: olga.id, before: 'Ivan', after: 'Ivan Delegate' },
+      { person_id: maria.id, actor_id: owner!.id, before: 'Maria', after: 'Maria Owner' },
+    ]);
   });
 
   it('stops a disabled invitee from accepting', async () => {
