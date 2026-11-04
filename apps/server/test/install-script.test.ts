@@ -300,6 +300,15 @@ describe('install.sh', () => {
     expect(r.out).toMatch(/Claude: needs sign-in, sign in once in Hornhoof under Subscriptions/);
   });
 
+  it("takes the owner to agy's terms again on an update, and names that step when the owner leaves it", () => {
+    const name = `hornhoof-antigravity-${SUB_A.slice(0, 8)}`;
+    const r = install({ args: [], env: { STUB_CONTAINERS: `${name}=${SERVER}`, STUB_STATUS: 'needs_setup', STUB_LOGIN_EXIT: '1' } });
+    expect(r.code).toBe(0);
+    expect(r.calls.filter(c => c.startsWith(`docker exec -it ${name}`) && c.endsWith('login'))).toHaveLength(1);
+    expect(r.out).toContain(`The sign-in or first setup on ${name} did not finish. To try again, run the install command without --join.`);
+    expect(r.out).toContain(`Antigravity: needs its first setup, run the install command again without --join (${name})`);
+  });
+
   it('sets up a node for a Google AI plan and signs in to Antigravity on it', () => {
     const r = install({ env: { STUB_JOIN_BODY: `${SUB_A} antigravity node-key-aaaaaaaaaaaaaaaa\\n` } });
     expect(r.code).toBe(0);
