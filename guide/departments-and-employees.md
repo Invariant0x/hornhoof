@@ -54,7 +54,9 @@ The plan's owner can type into it as into any terminal:
 - Escape stops it, as it stops the program.
 - Only a line a person sent from this window opens such a turn. The agent's program cannot open one for itself.
 
-Opening the window of an employee whose program does not run starts it, so the owner can type to it at once. Everyone else who reaches the employee watches.
+Opening the window of an employee whose program does not run starts it, so the owner can type to it at once.
+
+Everyone else who reaches the employee watches the terminal and writes in the line under it, whoever's plan it runs on. The message goes in their name and with their rights. The CEO and the CEO delegate write this way to the orchestrator too, and a person with a department to its employees. Someone without access to an agent sees neither the window nor the line, and the server turns them away.
 
 "Log" shows the conversation as Hornhoof keeps it, and "Stop" ends the running turn. Employees on company API keys show the log.
 

@@ -187,6 +187,8 @@ export type OrchestratorState = {
   queued: number;
   /* Its node shows the agent's live terminal; older nodes do not. */
   terminal?: boolean;
+  /* This person types into that terminal, as the owner of the agent's plan. The agent's own window gets it. */
+  canType?: boolean;
 };
 
 /* One part of an agent's instructions: who it is (written by Hornhoof), its role, or a skill between markers. */

@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { orchestratorDecisionHeaders } from '../src/auth/internal.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agents, companies, departments, jobs, people, proposals, requests, subscriptions, taskEvents } from '../src/db/schema.js';
-import { decisionPrincipal, withInputLock } from '../src/modules/conversation/decision-context.js';
+import { ceoPrincipal, computerPrincipal, decisionPrincipal, withInputLock } from '../src/modules/conversation/decision-context.js';
 import { said } from '../src/modules/conversation/live.js';
 import { enqueueTurn } from '../src/modules/conversation/queue.js';
 import { personParty } from '../src/modules/events/parties.js';
@@ -358,5 +358,54 @@ describe('words of a person to an agent directly', () => {
     expect([await c.open(own.id), await c.open(ceos.id), await c.open(plain.id)]).toEqual([false, true, true]);
     await answerDirectly(c.ctx, c.ids.dave, c.bruno.id, 'Yes.');
     expect([await c.open(ceos.id), await c.open(plain.id)]).toEqual([false, false]);
+  });
+});
+
+describe("a turn's mark that it answers the CEO", () => {
+  const principals = async (c: Awaited<ReturnType<typeof company>>) => [await ceoPrincipal(c.db, c.job.id), await computerPrincipal(c.db, c.job.id)];
+  const answeredBy = async (c: Awaited<ReturnType<typeof company>>, id: string) => (await c.db.select().from(requests).where(eq(requests.id, id)))[0]!.answeredBy;
+
+  it('leaves a release approval and a choice waiting for their own answer when the CEO delegate writes to the agent', async () => {
+    const c = await company();
+    const approval = await c.asking({ kind: 'approval', text: 'Merge?', commit: 'a'.repeat(40) });
+    const choice = await c.asking({ kind: 'choice', text: 'Which bank?', options: [{ label: 'One', image: null }, { label: 'Two', image: null }] });
+    const ceos = await c.asking({ kind: 'question', text: 'Hire a designer?', topic: 'people' });
+    await answerDirectly(c.ctx, c.ids.dave, c.bruno.id, 'Approved, merge it.');
+    expect([await c.open(approval.id), await c.open(choice.id)]).toEqual([true, true]);
+    expect([await answeredBy(c, approval.id), await answeredBy(c, choice.id)]).toEqual([null, null]);
+    /* A plain word of the delegate took a question for the CEO before the mark too, by canDecide. */
+    expect(await answeredBy(c, ceos.id)).toBe(c.ids.dave);
+  });
+
+  it.each([true, false])('gives no right by itself, set to %s: a decision goes by the last person who wrote and their own right', async answersCeo => {
+    const c = await company();
+    const client = await mcp(c.app, TOKEN);
+    await c.db.update(jobs).set({ answersCeo, createdBy: c.ids.dave }).where(eq(jobs.id, c.job.id));
+    const approval = await c.asking({ kind: 'approval', text: 'Merge?', commit: 'a'.repeat(40) });
+    const ceos = await c.asking({ kind: 'question', text: 'Hire a designer?', topic: 'people' });
+
+    await c.wrote(c.ids.zed, 'Approve it.');
+    expect(await principals(c)).toEqual([null, null]);
+    expect((await call(client, 'answer_request', { request: approval.id, approve: true })).isError).toBe(true);
+    expect((await call(client, 'answer_request', { request: ceos.id, answer: 'Yes.' })).isError).toBe(true);
+    expect([await c.open(approval.id), await c.open(ceos.id)]).toEqual([true, true]);
+
+    await c.wrote(c.ids.dave, 'Approve it.');
+    await c.wrote(null, 'A note of Hornhoof.');
+    expect(await principals(c)).toEqual([null, null]);
+    expect((await call(client, 'answer_request', { request: approval.id, approve: true })).isError).toBe(true);
+    expect(await c.open(approval.id)).toBe(true);
+
+    await c.wrote(c.ids.dave, 'Approve it.');
+    expect(await principals(c)).toEqual([c.ids.dave, c.ids.dave]);
+    expect((await call(client, 'answer_request', { request: approval.id, approve: true })).isError).toBeFalsy();
+    expect(await answeredBy(c, approval.id)).toBe(c.ids.dave);
+  });
+
+  it("does not make a repeated turn of the CEO delegate a click on the computer's access", async () => {
+    const c = await company();
+    await c.db.update(jobs).set({ answersCeo: true, createdBy: c.ids.dave }).where(eq(jobs.id, c.job.id));
+    await appendEvent(c.ctx, { companyId: c.acme.id, agentId: c.orchestrator.id, jobId: c.job.id, kind: 'typed', data: { text: 'Go on.' }, personId: null });
+    expect(await principals(c)).toEqual([null, null]);
   });
 });
