@@ -21,5 +21,8 @@ Progress after the interrupted turn:
 - Ruling: preserve the existing checkout and task branch, as the task requires. No new worktree or external approval is needed.
 - Ruling: department instructions override CONTRIBUTING's sign-off trailer, full-suite and Docker guidance. Commits use Ivan Korol without trailers; checks cover changed components on Linux.
 - Ruling: only service reports/submissions wait up to 10 seconds. People and employee messages bypass this delay; an employee's identical copy flushes the grouped report immediately, including into a live turn.
-- Migration 0053 adds nullable pending_wakes.cause and an agent/time index for report matching. Old rows survive a twice-applied migration unchanged; the previous release can ignore the new column and index.
+- Migration 0054 adds nullable pending_wakes.cause and an agent/time index for report matching. Old rows survive a twice-applied migration unchanged; the previous release can ignore the new column and index.
 - Formatter configuration is absent; reported to the head and did not install one. npm ci reported 16 moderate dependency advisories; dependency changes are outside this task.
+
+- Resumed after run 51: 507/508 server tests; repaired synthetic wake acknowledgement and proved 114/114 notification/wake tests plus typecheck:tests. Delivered duplicates now update metadata only when their exact report and task references were already delivered; different text and unknown task references are delivered. Tests also preserve newer personal instruction authority.
+- Integrated turn-7 d2d0990: retained stale-turn diagnostics and person changes. Reused the agreed notification migration 0054 and snapshot from task-241, removing the colliding 0053 notification migration. Upgrade tests assert old wake fields remain unchanged and both new nullable fields are null.

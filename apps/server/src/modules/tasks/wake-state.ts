@@ -1,3 +1,5 @@
+import { lastBytes, type Failure } from '@hornhoof/protocol';
+import type { TurnProgram } from '@hornhoof/protocol/map';
 import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Db } from '../../db/client.js';
@@ -134,12 +136,28 @@ export async function discardStaleTurn(db: Store, job: TaskTurn): Promise<boolea
 
 const runOf = (job: typeof jobs.$inferSelect, state: TaskWake | null): string => job.retryOf ? 'restart' : job.continueOf ? 'continue' : state ? state.why : 'task';
 
-export async function recordStale(db: Store, jobId: string, agentId: string, task: Task, run: string, status: 'queued' | 'running'): Promise<boolean> {
-  const text = `Stale turn: #${task.number} no longer waits for this action from the agent.`;
-  const [ended] = await db.update(jobs).set({ status: 'failed', error: 'stale', result: text, finishedAt: new Date() })
+export type StaleProgram = Pick<TurnProgram, 'state' | 'since' | 'tool' | 'signAt'>;
+
+export function staleOutput(text: string): string {
+  const tail = lastBytes(text).trimEnd();
+  return tail ? tail.split('\n').slice(-200).join('\n') : 'No output.';
+}
+
+function staleFailure(task: Task, run: string, status: 'queued' | 'running', program: StaleProgram | null): Failure {
+  const state = status === 'queued' ? 'not started' : program ? `${program.state}${program.tool ? ` (${program.tool})` : ''}, since ${new Date(program.since).toISOString()}` : 'no data';
+  const signAt = status === 'running' && program?.signAt != null ? new Date(program.signAt).toISOString() : 'no data';
+  const text = `Stale turn: #${task.number} no longer waits for this action from the agent. Technical reason: task status=${task.status}, stage=${task.stage}, merging=${task.merging}, action=${run}, turn status=${status}. Program state: ${state}. Last sign of life: ${signAt}.`;
+  return { kind: 'unknown', text, retryable: false };
+}
+
+export async function recordStale(db: Store, jobId: string, agentId: string, task: Task, run: string, status: 'queued' | 'running', program: StaleProgram | null = null): Promise<boolean> {
+  const failure = staleFailure(task, run, status, program);
+  const text = failure.text;
+  const tail = staleOutput('');
+  const [ended] = await db.update(jobs).set({ status: 'failed', error: 'stale', result: text, failure, tail, finishedAt: new Date() })
     .where(and(eq(jobs.id, jobId), eq(jobs.status, status))).returning({ id: jobs.id });
   if (!ended) return false;
-  await db.insert(agentEvents).values({ companyId: task.companyId, agentId, jobId, kind: 'stopped', data: { reason: 'stale', text, task: { id: task.id, number: task.number } } });
+  await db.insert(agentEvents).values({ companyId: task.companyId, agentId, jobId, kind: 'stopped', data: { reason: 'stale', text, failure, tail, program, task: { id: task.id, number: task.number } } });
   /* A running turn was already logged by repeatWake; queued work reaches this path directly. */
   if (status === 'queued') await logSkipped(db, task, agentId, run, jobId);
   return true;

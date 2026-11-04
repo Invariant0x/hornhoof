@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { agentEvents, agents, companies, jobs, people, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
 import { cancel, lastMove, type Task, type WakeWhy } from '../src/modules/tasks/engine.js';
 import { discardStaleTurn, discardStaleTurns, repeatedTurn, repeatWake, taskForWake, taskWakeOf, waitingTaskTurn } from '../src/modules/tasks/wake-state.js';
+import { agentFailureStates } from '../src/modules/tasks/failures.js';
 import { wakeAll, wakePrompt } from '../src/modules/tasks/wake.js';
 import { createTestDb, statements, testApp } from './helpers.js';
 
@@ -123,6 +124,34 @@ describe('task wake policy in the database', () => {
     expect(await discardStaleTurn(c.db, plain)).toBe(false);
     expect(await discardStaleTurn(c.db, await c.job(task, null))).toBe(false);
     expect(await discardStaleTurns(c.db, [])).toBe(false);
+  });
+
+  it('records why a queued wake became stale, its unstarted program and explicit empty output', async () => {
+    const { app, db } = await testApp();
+    const c = await fixture(db);
+    const task = await c.task();
+    const job = await c.job(task);
+    await c.message(job.id, task, 'merge');
+    await c.db.update(tasks).set({ status: 'done', closedAt: new Date(), merging: false }).where(eq(tasks.id, task.id));
+
+    expect(await discardStaleTurn(c.db, job)).toBe(true);
+
+    const ended = (await c.db.select().from(jobs).where(eq(jobs.id, job.id)))[0]!;
+    expect(ended).toMatchObject({ status: 'failed', error: 'stale', tail: 'No output.', failure: { kind: 'unknown', retryable: false } });
+    expect(ended.failure!.text).toContain('task status=done');
+    expect(ended.failure!.text).toContain('action=merge');
+    expect(ended.failure!.text).toContain('Program state: not started');
+    expect(ended.failure!.text).toContain('Last sign of life: no data');
+    const shown = (await agentFailureStates(app.ctx, c.worker.companyId, [c.worker.id])).get(c.worker.id)!.failure;
+    expect(shown).toMatchObject({ kind: 'unknown', text: ended.failure!.text, tail: 'No output.' });
+
+    const finished = await c.job(null, c.reviewer.id);
+    await c.db.update(jobs).set({ status: 'done', failure: ended.failure, finishedAt: new Date() }).where(eq(jobs.id, finished.id));
+    await c.db.update(jobs).set({ finishedAt: null }).where(eq(jobs.id, ended.id));
+    const states = await agentFailureStates(app.ctx, c.worker.companyId, [c.worker.id, c.reviewer.id, c.head.id]);
+    expect(states.get(c.worker.id)!.failure).toMatchObject({ at: +ended.createdAt });
+    expect(states.get(c.reviewer.id)!.failure).toBeNull();
+    expect(states.get(c.head.id)!.failure).toBeNull();
   });
 
   it('repeats current work, keeping its purpose and stage while rejecting another holder, stage, merge phase or external wait', async () => {

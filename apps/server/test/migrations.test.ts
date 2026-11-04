@@ -67,8 +67,8 @@ describe('migration 0050', () => {
     await migrate(db, { migrationsFolder: MIGRATIONS });
     await migrate(db, { migrationsFolder: MIGRATIONS });
     expect((await db.execute(sql`select to_jsonb(t) - 'external_wait' as data from tasks t order by number`)).rows).toEqual(before);
-    expect((await db.execute(sql`select to_jsonb(w) - 'task_version' as data from pending_wakes w order by id`)).rows).toEqual(beforeWakes);
-    expect((await db.execute(sql`select task_version from pending_wakes`)).rows).toEqual([{ task_version: null }]);
+    expect((await db.execute(sql`select to_jsonb(w) - 'task_version' - 'cause' as data from pending_wakes w order by id`)).rows).toEqual(beforeWakes);
+    expect((await db.execute(sql`select task_version, cause from pending_wakes`)).rows).toEqual([{ task_version: null, cause: null }]);
     const rows = (await db.execute(sql`select * from tasks order by number`)).rows;
     expect(rows).toHaveLength(150);
     for (const row of rows) expect(row).toHaveProperty('external_wait', null);
@@ -862,6 +862,44 @@ describe('migration 0052', () => {
     await migrate(db, { migrationsFolder: MIGRATIONS });
     expect((await db.execute(sql`select to_jsonb(c) - 'dismissed_subscription_ids' as data from node_codes c order by code_hash`)).rows).toEqual(before);
     expect((await db.execute(sql`select dismissed_subscription_ids from node_codes`)).rows).toEqual(Array.from({ length: 3 }, () => ({ dismissed_subscription_ids: [] })));
+  });
+});
+
+describe('migration 0053', () => {
+  it('creates the person rename journal and its indexes on a fresh install', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    const columns = await db.execute<{ column_name: string }>(sql`select column_name from information_schema.columns where table_name = 'person_changes' order by column_name`);
+    expect(columns.rows.map(row => row.column_name)).toEqual(['actor_id', 'after', 'before', 'company_id', 'created_at', 'field', 'id', 'person_id']);
+    const indexes = await db.execute<{ indexname: string }>(sql`select indexname from pg_indexes where tablename = 'person_changes' order by indexname`);
+    expect(indexes.rows).toEqual([{ indexname: 'person_changes_company_id' }, { indexname: 'person_changes_person_id' }, { indexname: 'person_changes_pkey' }]);
+  });
+
+  it('upgrades existing people intact, keeps the actor when a different person is deleted and cascades with the company', async () => {
+    const source = new PGlite();
+    onTestFinished(() => source.close());
+    let db = drizzle(source);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0052_dismissed_command_blocks') });
+    const company = (await db.execute<{ id: string }>(sql`insert into companies (name) values ('Demo') returning id`)).rows[0]!.id;
+    const person = (await db.execute<{ id: string }>(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Lisa', 'lisa@example.test', 'active', 'listed') returning id`)).rows[0]!.id;
+    const actor = (await db.execute<{ id: string }>(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Author', 'author@example.test', 'active', 'listed') returning id`)).rows[0]!.id;
+    const before = (await db.execute(sql`select to_jsonb(p) as data from people p order by id`)).rows;
+    const copy = new PGlite({ loadDataDir: await source.dumpDataDir('none') });
+    onTestFinished(() => copy.close());
+    db = drizzle(copy);
+
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+
+    expect((await db.execute(sql`select to_jsonb(p) as data from people p order by id`)).rows).toEqual(before);
+    await db.execute(sql`insert into person_changes (company_id, person_id, actor_id, field, before, after) values (${company}, ${person}, ${actor}, 'name', 'Lisa', 'Lisa Ray')`);
+    await db.execute(sql`delete from people where id = ${actor}`);
+    expect((await db.execute(sql`select actor_id, before, after from person_changes`)).rows).toEqual([{ actor_id: null, before: 'Lisa', after: 'Lisa Ray' }]);
+    await db.execute(sql`delete from people where id = ${person}`);
+    await db.execute(sql`delete from companies where id = ${company}`);
+    expect((await db.execute(sql`select count(*)::int as n from person_changes`)).rows).toEqual([{ n: 0 }]);
   });
 });
 

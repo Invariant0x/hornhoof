@@ -19,6 +19,7 @@ import { Improvements } from './Improvements';
 import { Machines } from './Machines';
 import { MapScreen } from './Map';
 import { People } from './People';
+import { Profile } from './Profile';
 import { Settings } from './Settings';
 import { Subscriptions } from './Subscriptions';
 import { Tasks } from './Tasks';
@@ -39,13 +40,14 @@ function mapPanels(panel: Panel) {
   return { windowOpen: panel?.kind === 'window', leftPanelOpen: panel !== null && panel.kind !== 'window' };
 }
 
-type AccountDialogName = 'about' | 'versions' | 'settings';
+type AccountDialogName = 'about' | 'versions' | 'profile' | 'settings';
 
-function AccountDialog({ active, me, updates, onClose }: { active: AccountDialogName | null; me: Me; updates: Updates; onClose: () => void }) {
+function AccountDialog({ active, me, updates, onRenamed, onClose }: { active: AccountDialogName | null; me: Me; updates: Updates; onRenamed: (name: string) => void; onClose: () => void }) {
   if (!active) return null;
   return {
     about: <About onClose={onClose} />,
     versions: <Versions updates={updates} onClose={onClose} />,
+    profile: <Profile me={me} onRenamed={onRenamed} onClose={onClose} />,
     settings: <Settings me={me} onClose={onClose} />,
   }[active];
 }
@@ -57,6 +59,7 @@ function AccountMenu({
   onSignOut,
   onImprovements,
   onVersions,
+  onProfile,
   onSettings,
   onAbout,
   toDecide,
@@ -66,6 +69,7 @@ function AccountMenu({
   onSignOut: () => void;
   onImprovements?: () => void;
   onVersions?: () => void;
+  onProfile: () => void;
   onSettings?: () => void;
   onAbout: () => void;
   toDecide: number;
@@ -133,6 +137,9 @@ function AccountMenu({
           {t.updates.menu}
         </button>
       )}
+      <button className="btn small ghost" type="button" onClick={() => { onClose(); onProfile(); }}>
+        {t.profile.title}
+      </button>
       {onSettings && (
         <button
           className="btn small ghost"
@@ -209,6 +216,8 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   const t = useT();
   const [tab, setTab] = useState<Tab>('map');
   const [menu, setMenu] = useState(false);
+  const [selfName, setSelfName] = useState(me.person.name);
+  const currentMe = { ...me, person: { ...me.person, name: selfName } };
   const company = me.person.scopeKind === 'company';
   /* The orchestrator's window opens over the map, for people who see the whole company. */
   const [panel, setPanel] = useState<Panel>(welcome && company ? { kind: 'window', agentId: 'orchestrator' } : null);
@@ -296,9 +305,9 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
         <div className="tb-right">
           <div className="account" ref={account}>
             <button ref={accountButton} className="avatar glass" type="button" aria-label={t.shell.account} aria-expanded={menu} onClick={() => setMenu(!menu)}>
-              {me.person.name.trim().charAt(0).toUpperCase()}
+              {currentMe.person.name.trim().charAt(0).toUpperCase()}
             </button>
-            {menu && <AccountMenu me={me} onClose={() => setMenu(false)} onSignOut={() => void signOut()} onImprovements={company ? () => setTab('improvements') : undefined} onVersions={company ? () => setAccountDialog('versions') : undefined} onSettings={company ? () => setAccountDialog('settings') : undefined} onAbout={() => setAccountDialog('about')} toDecide={toDecide} />}
+            {menu && <AccountMenu me={currentMe} onClose={() => setMenu(false)} onSignOut={() => void signOut()} onImprovements={company ? () => setTab('improvements') : undefined} onVersions={company ? () => setAccountDialog('versions') : undefined} onProfile={() => setAccountDialog('profile')} onSettings={company ? () => setAccountDialog('settings') : undefined} onAbout={() => setAccountDialog('about')} toDecide={toDecide} />}
           </div>
         </div>
       </header>
@@ -346,7 +355,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
             onOpenOrchestrator={company ? () => openAgent('orchestrator') : undefined}
           />
         )}
-        {tab === 'people' && <People me={me} />}
+        {tab === 'people' && <People me={currentMe} />}
         {tab === 'subscriptions' && <Subscriptions me={me} />}
         {tab === 'machines' && <Machines me={me} />}
         {tab === 'improvements' && company && <Improvements improvements={improvements} failure={improvementsFailure} onChanged={loadImprovements} onTask={taskId => setPanel({ kind: 'task', taskId })} />}
@@ -380,7 +389,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
       {agentPanel?.kind === 'card' && (
         <AgentCard key={agentPanel.agentId} me={me} agentId={agentPanel.agentId} {...liveOf(org, agentPanel.agentId)} onClose={() => setPanel(null)} onTerminal={() => openAgent(agentPanel.agentId)} />
       )}
-      <AccountDialog active={accountDialog} me={me} updates={updates} onClose={() => { setAccountDialog(null); accountButton.current?.focus(); }} />
+      <AccountDialog active={accountDialog} me={currentMe} updates={updates} onRenamed={setSelfName} onClose={() => { setAccountDialog(null); accountButton.current?.focus(); }} />
     </div>
     </AgentWindowContext>
   );

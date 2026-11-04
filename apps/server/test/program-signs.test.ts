@@ -24,6 +24,49 @@ describe('silence measured by signs of life', () => {
     expect((await c.log(task!.id)).filter(e => e.kind === 'wake_skipped')).toHaveLength(1);
   });
 
+  it('keeps the last program evidence and redacted 200-line tail when running work becomes stale', async () => {
+    const c = await failureCompany();
+    const [task] = await c.db.insert(tasks).values({ companyId: c.companyId, number: 1, title: 'Checkout', status: 'working', assigneeAgentId: c.agent.id }).returning();
+    const id = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.agent.id, taskId: task!.id, prompt: 'Work', createdBy: null });
+    const now = Date.now();
+    const signAt = now - 121 * MIN;
+    await handleNodeMessage(c.ctx, BUILTIN, { type: 'job.program', jobId: id, state: 'tool', tool: 'Bash', since: signAt - MIN, screenAt: now, signAt }, new Date(now));
+    await c.db.update(tasks).set({ status: 'done', closedAt: new Date(), assigneeAgentId: null }).where(eq(tasks.id, task!.id));
+    await checkSilentTurns(c.ctx, new Date(now));
+
+    const stale = await c.jobOf(id);
+    expect(stale).toMatchObject({ status: 'failed', error: 'stale', tail: 'No output.', failure: { kind: 'unknown', retryable: false } });
+    expect(stale.failure!.text).toContain('Program state: tool (Bash)');
+    expect(stale.failure!.text).toContain(`Last sign of life: ${new Date(signAt).toISOString()}`);
+
+    const lines = Array.from({ length: 205 }, (_, i) => `line ${i + 1}`);
+    lines[204] = 'last [hidden] line';
+    await handleNodeMessage(c.ctx, BUILTIN, { type: 'job.done', jobId: id, ok: false, sessionId: 'session', result: 'Stopped.', tail: lines.join('\n'), error: 'cancelled' });
+
+    const ended = await c.jobOf(id);
+    expect(ended).toMatchObject({ status: 'failed', error: 'stale', failure: stale.failure });
+    expect(ended.tail).toBe(lines.slice(-200).join('\n'));
+    expect(ended.tail).not.toContain('line 1\n');
+    const card = (await c.app.inject({ url: `/api/agents/${c.agent.id}`, ...c.as(c.ceo) })).json();
+    expect(card.failure).toMatchObject({ text: stale.failure!.text, tail: ended.tail });
+  });
+
+  it('says when a running stale turn never reported its program state or a sign of life', async () => {
+    const c = await failureCompany();
+    const [task] = await c.db.insert(tasks).values({ companyId: c.companyId, number: 1, title: 'Checkout', status: 'working', assigneeAgentId: c.agent.id }).returning();
+    const id = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.agent.id, taskId: task!.id, prompt: 'Work', createdBy: null });
+    const now = Date.now();
+    await c.db.update(jobs).set({ startedAt: new Date(now - 31 * MIN) }).where(eq(jobs.id, id));
+    await c.db.update(tasks).set({ status: 'done', closedAt: new Date(), assigneeAgentId: null }).where(eq(tasks.id, task!.id));
+
+    await checkSilentTurns(c.ctx, new Date(now));
+
+    const stale = await c.jobOf(id);
+    expect(stale).toMatchObject({ status: 'failed', error: 'stale', tail: 'No output.' });
+    expect(stale.failure!.text).toContain('Program state: no data');
+    expect(stale.failure!.text).toContain('Last sign of life: no data');
+  });
+
   it.each<[ProgramState, number]>([['thinking', 30], ['retrying', 30], ['idle', 30], ['tool', 120]])('%s alarms at %i minutes since the sign, even while the screen changes', async (state, minutes) => {
     const c = await failureCompany();
     const id = await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.agent.id, prompt: 'Work', createdBy: null });
