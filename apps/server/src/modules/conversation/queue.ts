@@ -251,7 +251,10 @@ async function isCeo(ctx: Ctx, personId: string | null | undefined): Promise<boo
 /* Stores the turn and, when it carries a person's message, the message under the same job. */
 export async function insertTurn(ctx: Ctx, t: Turn): Promise<string> {
   const combined = t.message?.report ? await combineReport(ctx, t) : null;
-  if (combined) return combined;
+  return combined ?? insertFreshTurn(ctx, t);
+}
+
+async function insertFreshTurn(ctx: Ctx, t: Turn): Promise<string> {
   const sub = await liveSubscription(ctx, t.agentId);
   if (!sub) throw new NoSubscription();
   const [job] = await ctx.db

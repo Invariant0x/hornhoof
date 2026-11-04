@@ -31,7 +31,7 @@ export const ru: Messages = {
     wait_ended: 'таймер ожидания',
     timer: 'таймер сотрудника',
     first_turn: 'первое открытие окна',
-    computer_access: 'доступ к компьютеру изменен',
+    computer_access: 'доступ к машине изменен',
     structure: 'состав компании изменен',
     staffing: 'сотрудники наняты',
     improvement: 'улучшение выбрано',
