@@ -149,8 +149,33 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
       const { words, errors, window } = await prepare(page, info, settings, { awake: false, hasTask: false });
       await openFromMap(page, lang);
       await expect(window.getByRole('button', { name: words.noTask })).toBeDisabled();
-      await expect(window.getByRole('status')).toHaveText(words.why);
+      await expect(window.locator('.xterm-screen, .t-log').first()).toBeVisible();
+      await expect(window.getByText(words.why)).toHaveCount(0);
       await expect(page.getByRole('complementary', { name: '#1 Checkout step 1' })).toHaveCount(0);
+      await checkSurface(page, errors);
+    });
+
+    test('the header stands the same with a task and without', async ({ page }, info) => {
+      const { words, errors, live, window, capture } = await prepare(page, info, settings);
+      const bar = window.locator(':scope > .t-bar');
+      const close = bar.getByRole('button', { name: words.close, exact: true });
+      const task = bar.getByRole('button', { name: words.task, exact: true });
+      const noTask = bar.getByRole('button', { name: words.noTask, exact: true });
+      await openFromMap(page, lang);
+      await expect(task).toBeEnabled();
+      await page.waitForTimeout(250);
+      const [withTask, closeWithTask, buttonWithTask] = [await box(bar), await box(close), await box(task)];
+      expect(withTask.height, 'the header is one row').toBeLessThanOrEqual(40);
+      await capture('header-with-task');
+      live.hasTask = false;
+      await openFromMap(page, lang);
+      await expect(noTask).toBeDisabled();
+      await page.waitForTimeout(250);
+      expect(await box(bar)).toEqual(withTask);
+      expect(await box(close)).toEqual(closeWithTask);
+      expect(await box(noTask), 'nothing in the bar moves').toEqual(buttonWithTask);
+      await checkLeftControls(window, [words.close, words.minimize, words.full]);
+      await capture('header-without-task');
       await checkSurface(page, errors);
     });
   });
