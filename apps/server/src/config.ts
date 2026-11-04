@@ -36,6 +36,8 @@ export type Config = {
   relayUrl: string;
   /* The tunnel container's host name: only requests from it may say they came in over https. */
   tunnelHost?: string;
+  /* Set by compose when a keeper sits in front: the app then takes its mode from the keeper's word. */
+  keeper: boolean;
   /* How much all the files on the company's tasks may take together. */
   taskFilesBytes: number;
   /* The computer the server runs on, as a hash of the key a join from it sends; null for a server installed before. */
@@ -71,6 +73,7 @@ const Env = z.object({
   REGISTRY_URL: webAddress('REGISTRY_URL must be an http:// or https:// address.'),
   RELAY_URL: webAddress('RELAY_URL must be an http:// or https:// address, like https://hornhoof.org.'),
   TUNNEL_HOST: z.preprocess(unset, z.string().regex(/^[A-Za-z0-9.-]{1,253}$/, 'TUNNEL_HOST must be the host name of the tunnel container, like tunnel.').optional()),
+  HORNHOOF_KEEPER: z.preprocess(unset, z.literal('on', { error: 'HORNHOOF_KEEPER must be on, or not set.' }).optional()),
   TASK_FILES_MB: wholeNumber(1, 1_000_000, 'TASK_FILES_MB must be a whole number of megabytes, like 2048.'),
   HORNHOOF_HOST_ID: z.preprocess(
     unset,
@@ -118,6 +121,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     templatesDir: env.TEMPLATES_DIR || DEFAULT_TEMPLATES,
     relayUrl: (set.RELAY_URL ?? 'https://hornhoof.org').replace(/\/+$/, ''),
     tunnelHost: set.TUNNEL_HOST,
+    keeper: set.HORNHOOF_KEEPER === 'on',
     taskFilesBytes: (set.TASK_FILES_MB ?? 2048) * 1024 * 1024,
     hostId: set.HORNHOOF_HOST_ID ?? null,
   };
