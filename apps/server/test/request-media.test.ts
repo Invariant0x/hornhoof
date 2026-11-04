@@ -5,7 +5,7 @@ import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, companies, departments, jobs, people, subscriptions, taskEvents } from '../src/db/schema.js';
+import { agents, attachments, companies, departments, jobs, people, subscriptions, taskEvents } from '../src/db/schema.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import { as, invitePerson, listen, setUpCompany, testApp } from './helpers.js';
 
@@ -71,6 +71,17 @@ describe('pictures, links and choices in requests', () => {
     expect((await upload(token, Buffer.concat([PNG, Buffer.alloc(3 * 1024 * 1024)]))).statusCode).toBe(413);
     expect((await upload(null, PNG)).statusCode).toBe(401);
     expect((await upload('tool-token-not-a-turn-0123456789abcdef', PNG)).statusCode).toBe(401);
+  });
+
+  it('refuses a picture a person sent the agent: it stays in that conversation', async () => {
+    const { app, db, ceoSession, turn, fran, task } = await company();
+    const { tools } = await turn(fran);
+    const sent = await app.inject({ method: 'POST', url: `/api/agents/${fran.id}/pictures?name=screen.png`, payload: PNG, headers: { 'content-type': 'application/octet-stream' }, ...as(ceoSession) });
+    expect(sent.statusCode).toBe(201);
+    const shown = await call(tools, 'ask_person', { task: task.number, question: 'Look?', images: [sent.json().id] });
+    expect(shown.isError).toBe(true);
+    expect(shown.content[0]!.text).toContain('hh-attach');
+    expect((await db.select().from(attachments).where(eq(attachments.id, sent.json().id)))[0]!.requestId).toBeNull();
   });
 
   it('shows the pictures of a question to the people who reach its task, and to nobody else', async () => {

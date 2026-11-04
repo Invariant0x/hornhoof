@@ -6,8 +6,9 @@ import type { Ctx } from '../../app.js';
 import { accessOf, canReach } from '../../auth/access.js';
 import { requirePerson } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
-import { attachments, departments, requests, tasks, turns, type RequestOption } from '../../db/schema.js';
+import { agents, attachments, departments, requests, tasks, turns, type RequestOption } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
+import { canOpenAgent } from '../agents/running.js';
 import { jobOf, type ToolJob } from '../tools/job.js';
 import { refuse, taskSpot, type Task } from './engine.js';
 import { taskByRef } from './views.js';
@@ -102,14 +103,29 @@ export async function picturesOf(db: Db, rows: { id: string; options: RequestOpt
   return new Map(rows.map(r => [r.id, found.filter(a => a.requestId === r.id && !r.options.some(o => o.image === a.id)).map(a => a.id)]));
 }
 
-/* Removes the files on the tasks of turns closed 30 days or more before now, and says how many went. */
+/* Removes the files on the tasks of turns closed 30 days or more before now, and people's pictures sent as long ago or
+   never sent, and says how many went. */
 export async function dropOldFiles(db: Db, now: Date): Promise<number> {
+  const pictures = await db.delete(attachments).where(and(isNotNull(attachments.personId), lt(attachments.createdAt, new Date(now.getTime() - KEEP_FILES_MS)))).returning({ id: attachments.id });
   const old = db
     .select({ id: tasks.id })
     .from(tasks)
     .innerJoin(turns, eq(turns.id, tasks.turnId))
     .where(and(eq(turns.status, 'closed'), lt(turns.closedAt, new Date(now.getTime() - KEEP_FILES_MS))));
-  return (await db.delete(attachments).where(inArray(attachments.taskId, old)).returning({ id: attachments.id })).length;
+  return pictures.length + (await db.delete(attachments).where(inArray(attachments.taskId, old)).returning({ id: attachments.id })).length;
+}
+
+/* What counts towards what the company keeps: files on tasks and people's pictures. */
+const kept = (companyId: string) => and(eq(attachments.companyId, companyId), or(isNotNull(attachments.taskId), isNotNull(attachments.personId)));
+
+const companyFull = (inCompany: number, limit: number) =>
+  new ApiError(413, 'validation', `The company's task files take ${sizeText(inCompany)} of the ${sizeText(limit)} Hornhoof keeps for them. The files of a turn go 30 days after it closes. ${ELSEWHERE}`, 'attachment_invalid');
+
+/* Refuses a person's picture of this size when the company has no room left for it. */
+export async function checkPictureRoom(ctx: Pick<Ctx, 'db' | 'config'>, companyId: string, size: number): Promise<void> {
+  const [used] = await ctx.db.select({ company: sql<string>`coalesce(sum(${attachments.size}), 0)` }).from(attachments).where(kept(companyId));
+  const inCompany = Number(used?.company ?? 0);
+  if (inCompany + size > ctx.config.taskFilesBytes) throw companyFull(inCompany, ctx.config.taskFilesBytes);
 }
 
 /* Refuses a new file of this size on the task when the task or the company has no room left for it. */
@@ -120,19 +136,12 @@ export async function checkRoom(ctx: Pick<Ctx, 'db' | 'config'>, companyId: stri
       company: sql<string>`coalesce(sum(${attachments.size}), 0)`,
     })
     .from(attachments)
-    .where(and(eq(attachments.companyId, companyId), isNotNull(attachments.taskId)));
+    .where(kept(companyId));
   const [onTask, inCompany] = [Number(used?.task ?? 0), Number(used?.company ?? 0)];
   if (onTask + size > TASK_FILES_BYTES) {
     throw new ApiError(413, 'validation', `Task ${task.number} holds ${sizeText(onTask)} of files, and one task holds at most ${sizeText(TASK_FILES_BYTES)}. ${ELSEWHERE}`, 'attachment_invalid');
   }
-  if (inCompany + size > ctx.config.taskFilesBytes) {
-    throw new ApiError(
-      413,
-      'validation',
-      `The company's task files take ${sizeText(inCompany)} of the ${sizeText(ctx.config.taskFilesBytes)} Hornhoof keeps for them. The files of a turn go 30 days after it closes. ${ELSEWHERE}`,
-      'attachment_invalid',
-    );
-  }
+  if (inCompany + size > ctx.config.taskFilesBytes) throw companyFull(inCompany, ctx.config.taskFilesBytes);
 }
 
 /* Sends a task file in pieces, so the server never holds a whole one. */
@@ -158,6 +167,19 @@ export function sendFile(db: Db, reply: FastifyReply, found: { id: string; name:
 const IdParams = z.object({ id: z.uuid() });
 const SendQuery = z.object({ task: z.string().optional(), name: z.string().optional() });
 const FetchQuery = z.object({ task: z.string().min(1), file: z.string().min(1) });
+/* What hh-fetch names instead of a task for a picture that came with a message. */
+const MESSAGE_FILES = 'message';
+
+/* A picture a person sent this agent, for this agent alone. Two pictures pasted from the clipboard have one name, so the
+   file's name starts with its id. */
+async function messagePicture(db: Db, job: ToolJob, id: string) {
+  if (!z.uuid().safeParse(id).success) return undefined;
+  const [found] = await db
+    .select({ id: attachments.id, name: attachments.name, length: sql<number>`octet_length(${attachments.bytes})`.mapWith(Number) })
+    .from(attachments)
+    .where(and(eq(attachments.id, id), eq(attachments.agentId, job.agentId), isNotNull(attachments.personId)));
+  return found && { ...found, name: `${found.id.slice(0, 8)}-${found.name ?? 'picture'}` };
+}
 
 export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
@@ -190,10 +212,15 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /* Any agent of the company downloads a task's file, by its name or id, with its tool token, through hh-fetch. A name
-     put on twice gives the newest. */
+     put on twice gives the newest. "message" in place of the task gets a picture that came with a message to this agent. */
   app.get('/api/attachments/file', async (req, reply) => {
     const job = await jobOf(ctx, req);
     const { task: ref, file } = FetchQuery.parse(req.query);
+    if (ref === MESSAGE_FILES) {
+      const picture = await messagePicture(db, job, file);
+      if (!picture) throw new ApiError(404, 'not_found', `You have no picture ${file}. A picture goes only to the agent it was sent to.`, 'attachment_unknown');
+      return sendFile(db, reply, picture);
+    }
     const task = await taskByRef(ctx, job.companyId, ref);
     const byId = z.uuid().safeParse(file).success;
     const [found] = task
@@ -208,17 +235,21 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     return sendFile(db, reply, found);
   });
 
-  /* People see a picture once a request shows it, and only where they reach the request's task. */
+  /* People see a picture once a request shows it, and only where they reach the request's task; one a person sends an
+     agent, where they reach that agent's window. */
   app.get('/api/attachments/:id', async (req, reply) => {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
     const [found] = await db
-      .select({ mediaType: attachments.mediaType, bytes: attachments.bytes, task: tasks })
+      .select({ mediaType: attachments.mediaType, bytes: attachments.bytes, personId: attachments.personId, agent: agents, task: tasks })
       .from(attachments)
-      .innerJoin(requests, eq(requests.id, attachments.requestId))
-      .innerJoin(tasks, eq(tasks.id, requests.taskId))
+      .innerJoin(agents, eq(agents.id, attachments.agentId))
+      .leftJoin(requests, eq(requests.id, attachments.requestId))
+      .leftJoin(tasks, eq(tasks.id, requests.taskId))
       .where(and(eq(attachments.id, id), eq(attachments.companyId, me.companyId)));
-    if (!found || !canReach(await accessOf(db, me), taskSpot(found.task))) throw new ApiError(404, 'not_found', 'There is no such picture.', 'attachment_unknown');
+    const reach = await accessOf(db, me);
+    const shows = found && (found.personId ? await canOpenAgent(ctx, reach, found.agent) : found.task && canReach(reach, taskSpot(found.task)));
+    if (!shows) throw new ApiError(404, 'not_found', 'There is no such picture.', 'attachment_unknown');
     return reply
       .header('x-content-type-options', 'nosniff')
       .header('content-security-policy', "default-src 'none'")

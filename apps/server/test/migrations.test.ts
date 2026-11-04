@@ -885,6 +885,47 @@ describe('migration 0053', () => {
   });
 });
 
+describe('migration 0054', () => {
+  const columnsOf = (db: PgliteDatabase) =>
+    db.execute<{ column_name: string; is_nullable: string }>(sql`select column_name, is_nullable from information_schema.columns where table_name = 'attachments' and column_name in ('job_id', 'person_id') order by column_name`);
+
+  it('lets a picture have a person instead of a turn on a fresh install', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    expect((await columnsOf(db)).rows).toEqual([{ column_name: 'job_id', is_nullable: 'YES' }, { column_name: 'person_id', is_nullable: 'YES' }]);
+    const indexes = await db.execute(sql`select indexname from pg_indexes where indexname = 'attachments_person_id'`);
+    expect(indexes.rows).toHaveLength(1);
+  });
+
+  it("keeps the previous release's files as they were and takes a person's picture after them", async () => {
+    const source = new PGlite();
+    onTestFinished(() => source.close());
+    let db = drizzle(source);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0053_person_changes') });
+    const one = async (statement: Parameters<typeof db.execute>[0]) => (await db.execute<{ id: string }>(statement)).rows[0]!.id;
+    const company = await one(sql`insert into companies (name) values ('Demo') returning id`);
+    const person = await one(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Lisa', 'lisa@example.test', 'active', 'listed') returning id`);
+    const sub = await one(sql`insert into subscriptions (company_id, provider, kind, label, owner_person_id, status) values (${company}, 'anthropic_api', 'api_key', 'Key', ${person}, 'ready') returning id`);
+    const agent = await one(sql`insert into agents (company_id, kind, name, model, subscription_id) values (${company}, 'worker', 'Bruno', '', ${sub}) returning id`);
+    const job = await one(sql`insert into jobs (company_id, subscription_id, agent_id, kind, prompt, timeout_ms, status) values (${company}, ${sub}, ${agent}, 'conversation', 'go', 900000, 'done') returning id`);
+    await db.execute(sql`insert into attachments (company_id, job_id, agent_id, name, media_type, bytes, size) values (${company}, ${job}, ${agent}, 'shot.png', 'image/png', '\\x89504e47', 4)`);
+    const before = (await db.execute(sql`select to_jsonb(a) as data from attachments a`)).rows;
+    const copy = new PGlite({ loadDataDir: await source.dumpDataDir('none') });
+    onTestFinished(() => copy.close());
+    db = drizzle(copy);
+
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+
+    expect((await db.execute(sql`select to_jsonb(a) - 'person_id' as data from attachments a`)).rows).toEqual(before);
+    expect((await db.execute(sql`select person_id from attachments`)).rows).toEqual([{ person_id: null }]);
+    await db.execute(sql`insert into attachments (company_id, agent_id, person_id, name, media_type, bytes, size) values (${company}, ${agent}, ${person}, 'screen.png', 'image/png', '\\x89504e47', 4)`);
+    expect((await db.execute(sql`select name from attachments where job_id is null and person_id = ${person}`)).rows).toEqual([{ name: 'screen.png' }]);
+  });
+});
+
 describe('migration 0046', () => {
   it('recovers a missing migration below the newest recorded timestamp exactly once', async () => {
     const logged = vi.spyOn(console, 'info').mockImplementation(() => {});
