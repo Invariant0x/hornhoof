@@ -20,9 +20,8 @@ import { disconnectMachines } from './disconnect.js';
 import { BUILTIN, nodeIdentity, type NodeHub } from './hub.js';
 import { nodeImageOfBuild } from './image.js';
 import { builtinMachine, liveNode, otherBuild, settlePlans } from './nodes.js';
-import { machineProgramState, machineProgramRoutes, programsFor } from './programs.js';
+import { machineProgramNodes, machineProgramState, machineProgramRoutes, programsFor } from './programs.js';
 import { machineDrain, nodeDrain } from '../updates/drain.js';
-import { machineProgramNodes } from './programs.js';
 
 const JoinBody = z.object({
   code: z.string().min(1).max(200),
