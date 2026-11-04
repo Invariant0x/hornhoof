@@ -201,12 +201,12 @@ export type CompanyTemplate = { key: CompanyTemplateKey; departments: readonly C
 export const COMPANY_TEMPLATES: readonly CompanyTemplate[] = [
   {
     key: 'project',
-    departments: [{ template: 'operations', staff: [{ role: 'OPS-HEAD', count: 1 }] }, { template: 'development', staff: [{ role: 'DEV-HEAD', count: 1 }, { role: 'DEV-ENG', count: 2 }, { role: 'DEV-REV', count: 1 }] }],
+    departments: [{ template: 'operations', staff: [{ role: 'OPS-HEAD', count: 1 }, { role: 'OPS-WATCH', count: 1 }, { role: 'OPS-BUGS', count: 1 }, { role: 'OPS-PROGRAM', count: 1 }] }, { template: 'development', staff: [{ role: 'DEV-HEAD', count: 1 }, { role: 'DEV-ENG', count: 2 }, { role: 'DEV-REV', count: 1 }] }],
   },
   {
     key: 'startup',
     departments: [
-      { template: 'operations', staff: [{ role: 'OPS-HEAD', count: 1 }, { role: 'OPS-WATCH', count: 1 }, { role: 'OPS-BUGS', count: 1 }] },
+      { template: 'operations', staff: [{ role: 'OPS-HEAD', count: 1 }, { role: 'OPS-WATCH', count: 1 }, { role: 'OPS-BUGS', count: 1 }, { role: 'OPS-PROGRAM', count: 1 }] },
       { template: 'development', staff: [{ role: 'DEV-HEAD', count: 1 }, { role: 'DEV-ENG', count: 2 }, { role: 'DEV-REV', count: 1 }, { role: 'DEV-SEC', count: 1 }] },
       { template: 'design', staff: [{ role: 'DSN-HEAD', count: 1 }, { role: 'DSN-UI', count: 1 }] },
       { template: 'marketing', staff: [{ role: 'MKT-HEAD', count: 1 }, { role: 'MKT-WRITE', count: 1 }] },
@@ -216,7 +216,7 @@ export const COMPANY_TEMPLATES: readonly CompanyTemplate[] = [
   {
     key: 'studio',
     departments: [
-      { template: 'operations', staff: [{ role: 'OPS-HEAD', count: 1 }, { role: 'OPS-INTEG', count: 1 }] },
+      { template: 'operations', staff: [{ role: 'OPS-HEAD', count: 1 }, { role: 'OPS-WATCH', count: 1 }, { role: 'OPS-BUGS', count: 1 }, { role: 'OPS-PROGRAM', count: 1 }, { role: 'OPS-INTEG', count: 1 }] },
       {
         template: 'development',
         products: ['Product 1', 'Product 2', 'Product 3'],
@@ -227,7 +227,7 @@ export const COMPANY_TEMPLATES: readonly CompanyTemplate[] = [
   {
     key: 'corporation',
     departments: [
-      { template: 'operations', staff: [{ role: 'OPS-HEAD', count: 1 }, { role: 'OPS-INTEG', count: 1 }, { role: 'OPS-FIX', count: 1 }] },
+      { template: 'operations', staff: [{ role: 'OPS-HEAD', count: 1 }, { role: 'OPS-WATCH', count: 1 }, { role: 'OPS-BUGS', count: 1 }, { role: 'OPS-PROGRAM', count: 1 }, { role: 'OPS-INTEG', count: 1 }, { role: 'OPS-FIX', count: 1 }] },
       {
         template: 'development',
         products: ['Product 1', 'Product 2'],
@@ -244,7 +244,7 @@ export const COMPANY_TEMPLATES: readonly CompanyTemplate[] = [
   {
     key: 'security',
     departments: [
-      { template: 'operations', staff: [{ role: 'OPS-HEAD', count: 1 }, { role: 'OPS-INTEG', count: 1 }] },
+      { template: 'operations', staff: [{ role: 'OPS-HEAD', count: 1 }, { role: 'OPS-WATCH', count: 1 }, { role: 'OPS-BUGS', count: 1 }, { role: 'OPS-PROGRAM', count: 1 }, { role: 'OPS-INTEG', count: 1 }] },
       { template: 'development', staff: [{ role: 'DEV-HEAD', count: 1 }, { role: 'DEV-ENG', count: 2 }, { role: 'DEV-SEC', count: 1 }, { role: 'DEV-RED', count: 1 }] },
       { template: 'sales', staff: [{ role: 'SAL-HEAD', count: 1 }, { role: 'SAL-AE', count: 1 }] },
       { template: 'support', staff: [{ role: 'SUP-HEAD', count: 1 }, { role: 'SUP-T1', count: 1 }] },
@@ -253,7 +253,7 @@ export const COMPANY_TEMPLATES: readonly CompanyTemplate[] = [
   {
     key: 'opensource',
     departments: [
-      { template: 'operations', staff: [{ role: 'OPS-HEAD', count: 1 }, { role: 'OPS-WATCH', count: 1 }] },
+      { template: 'operations', staff: [{ role: 'OPS-HEAD', count: 1 }, { role: 'OPS-WATCH', count: 1 }, { role: 'OPS-BUGS', count: 1 }, { role: 'OPS-PROGRAM', count: 1 }] },
       { template: 'development', staff: [{ role: 'DEV-HEAD', count: 1 }, { role: 'DEV-ENG', count: 2 }, { role: 'DEV-REV', count: 1 }, { role: 'DEV-DOCS', count: 1 }] },
       { template: 'support', staff: [{ role: 'SUP-HEAD', count: 1 }, { role: 'SUP-KB', count: 1 }] },
     ],
@@ -262,14 +262,14 @@ export const COMPANY_TEMPLATES: readonly CompanyTemplate[] = [
     key: 'agency',
     departments: [
       { template: 'sales', staff: [{ role: 'SAL-HEAD', count: 1 }, { role: 'SAL-AE', count: 1 }, { role: 'SAL-SDR', count: 1 }] },
-      { template: 'operations', staff: [{ role: 'OPS-HEAD', count: 1 }, { role: 'OPS-INTEG', count: 1 }, { role: 'OPS-FIX', count: 1 }] },
+      { template: 'operations', staff: [{ role: 'OPS-HEAD', count: 1 }, { role: 'OPS-WATCH', count: 1 }, { role: 'OPS-BUGS', count: 1 }, { role: 'OPS-PROGRAM', count: 1 }, { role: 'OPS-INTEG', count: 1 }, { role: 'OPS-FIX', count: 1 }] },
       { template: 'support', staff: [{ role: 'SUP-HEAD', count: 1 }, { role: 'SUP-T1', count: 1 }, { role: 'SUP-T2', count: 1 }] },
     ],
   },
   {
     key: 'lab',
     departments: [
-      { template: 'operations', staff: [{ role: 'OPS-HEAD', count: 1 }, { role: 'OPS-WATCH', count: 1 }] },
+      { template: 'operations', staff: [{ role: 'OPS-HEAD', count: 1 }, { role: 'OPS-WATCH', count: 1 }, { role: 'OPS-BUGS', count: 1 }, { role: 'OPS-PROGRAM', count: 1 }] },
       { template: 'development', staff: [{ role: 'DEV-HEAD', count: 1 }, { role: 'DEV-ARCH', count: 1 }, { role: 'DEV-ENG', count: 2 }, { role: 'DEV-DOCS', count: 1 }] },
       { template: 'business_development', staff: [{ role: 'BIZ-HEAD', count: 1 }, { role: 'BIZ-ANALYST', count: 1 }] },
     ],
@@ -277,7 +277,7 @@ export const COMPANY_TEMPLATES: readonly CompanyTemplate[] = [
   {
     key: 'home',
     departments: [
-      { template: 'operations', staff: [{ role: 'OPS-HEAD', count: 1 }, { role: 'OPS-WATCH', count: 1 }, { role: 'OPS-BUGS', count: 1 }] },
+      { template: 'operations', staff: [{ role: 'OPS-HEAD', count: 1 }, { role: 'OPS-WATCH', count: 1 }, { role: 'OPS-BUGS', count: 1 }, { role: 'OPS-PROGRAM', count: 1 }] },
       { template: 'home_devices', staff: [{ role: 'HOM-HEAD', count: 1 }, { role: 'HOM-NET', count: 1 }, { role: 'HOM-SMART', count: 1 }] },
       { template: 'household', staff: [{ role: 'HHD-HEAD', count: 1 }, { role: 'HHD-SUPPLY', count: 1 }, { role: 'HHD-BILLS', count: 1 }, { role: 'HHD-CAL', count: 1 }] },
     ],
@@ -348,6 +348,35 @@ export const ProgramExit = z.object({ code: z.number().int().nullable(), signal:
 export type ProgramExit = z.infer<typeof ProgramExit>;
 const BrowserError = z.string().min(1).max(300);
 
+export const NODE_DISCONNECT_CAUSES = [
+  'watchdog_timeout',
+  'server_close',
+  'socket_error',
+  'dns_error',
+  'handshake_timeout',
+  'http_rejected',
+  'abnormal_close',
+] as const;
+export type NodeDisconnectCause = (typeof NODE_DISCONNECT_CAUSES)[number];
+
+/* What a node observed across a connection drop, sent right after hello once it reconnects. */
+export const NodeReconnect = z.object({
+  disconnectedAt: z.iso.datetime(),
+  reconnectedAt: z.iso.datetime(),
+  offlineMs: z.number().int().nonnegative(),
+  attempts: z.number().int().min(1),
+  cause: z.enum(NODE_DISCONNECT_CAUSES),
+  closeCode: z.number().int().min(0).max(65_535).nullable(),
+  closeReason: z.string().max(200).regex(/^[^\p{Cc}]*$/u).nullable(),
+  errorCode: z.string().min(1).max(64).regex(/^[A-Za-z0-9_.:-]+$/).nullable(),
+  error: z.string().max(300).regex(/^[^\p{Cc}]*$/u).nullable(),
+  dnsFailed: z.boolean(),
+  watchdogTimedOut: z.boolean(),
+  clockJumpMs: z.number().int().positive().nullable(),
+  networkChanged: z.boolean(),
+});
+export type NodeReconnect = z.infer<typeof NodeReconnect>;
+
 const NodeMessage = z.discriminatedUnion('type', [
   /* terminals: the node runs agents in sessions people can watch and type into. */
   /* tests: the parts of test runs it runs, or ran and Hornhoof has not confirmed. */
@@ -383,6 +412,7 @@ const NodeMessage = z.discriminatedUnion('type', [
     nodeLog: NodeLog.optional(),
   }),
   z.object({ type: z.literal('node.stopping'), startedAt: z.iso.datetime(), exit: NodeExit }),
+  z.object({ type: z.literal('node.reconnect'), ...NodeReconnect.shape }),
   z.object({ type: z.literal('load'), ...Load.shape }),
   z.object({ type: z.literal('tests.started'), partId: z.string() }),
   /* exitCode: the command's, none when it never ran or was killed. commit: what the clone tested. */

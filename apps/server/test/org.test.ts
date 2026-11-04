@@ -1,3 +1,4 @@
+import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agents, companies, departments, jobs, people, subscriptions, teams } from '../src/db/schema.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
@@ -40,6 +41,35 @@ describe('GET /api/org', () => {
     expect(employees.find((a: { id: string }) => a.id === c.head.id)).toMatchObject({ failure: { kind: 'refused', text: refused!.failure!.text, at: +at }, retry: null });
     expect(employees.find((a: { id: string }) => a.id === c.watcher.id)).toMatchObject({ failure: { kind: 'network', text: network!.failure!.text, at: +at }, retry: { attempt: 2, max: 4, at: +at + 120000, kind: 'network' } });
     expect(org.orchestrator).toMatchObject({ failure: null, retry: null });
+  });
+
+  it('shows only the session company, including its own orchestrator', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const [ownOrchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    const [otherCompany] = await db.insert(companies).values({ name: 'Other company', singleton: false }).returning();
+    const [otherPerson] = await db.insert(people).values({ companyId: otherCompany!.id, name: 'Other person', email: 'other@example.test', title: 'Other title', status: 'active', scopeKind: 'company' }).returning();
+    const [otherSub] = await db.insert(subscriptions).values({ companyId: otherCompany!.id, ownerPersonId: otherPerson!.id, provider: 'claude', kind: 'personal', label: 'Other plan', status: 'ready' }).returning();
+    const [otherDept] = await db.insert(departments).values({ companyId: otherCompany!.id, name: 'Other department', roleCode: 'OTHER' }).returning();
+    await db.insert(teams).values({ companyId: otherCompany!.id, departmentId: otherDept!.id, name: 'Other team' });
+    await db.delete(agents).where(eq(agents.id, ownOrchestrator!.id));
+    await db.insert(agents).values([
+      { companyId: otherCompany!.id, name: 'Other orchestrator', kind: 'orchestrator', model: '', subscriptionId: otherSub!.id },
+      { companyId: otherCompany!.id, name: 'Other employee', kind: 'worker', departmentId: otherDept!.id, model: '', subscriptionId: otherSub!.id },
+      ownOrchestrator!,
+    ]);
+
+    const res = await app.inject({ url: '/api/org', ...as(ceo) });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().company.name).toBe('Acme');
+    expect(res.json().orchestrator).toMatchObject({ name: 'Orchestrator', subscription: { label: 'Orchestrator', owner: { name: 'Ivan' } } });
+    expect(res.json().agents).toEqual({ total: 1, working: 0 });
+    expect(res.json().people.map((p: { name: string }) => p.name)).toEqual(['Ivan']);
+    expect(res.json().departments).toEqual([]);
+    for (const secret of ['Other person', 'Other title', 'other@example.test', 'Other plan', 'Other orchestrator', 'Other employee', 'Other department', 'Other team']) {
+      expect(res.body).not.toContain(secret);
+    }
   });
 
   it('shows the orchestrator with its active API key subscription', async () => {

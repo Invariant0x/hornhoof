@@ -90,7 +90,7 @@ export const en = {
     menu: 'About', title: 'About Hornhoof', close: 'Close',
     description: 'A company where people and agents work together.',
     version: 'Version', license: 'License', code: 'Source code', contact: 'Contact', website: 'Website',
-    issues: 'Report a bug or suggest an idea', author: 'Author — Ivan Korol, © 2026',
+    issues: 'Report a bug or suggest an idea', author: 'Author: Ivan Korol, © 2026',
     versionFailed: 'The server version could not be loaded. Close this window and open it again to retry.',
   },
   profile: {
@@ -788,6 +788,9 @@ export const en = {
     hired: 'Hired',
     modelOf: (name: string) => `Model for ${name}`,
     runsOnOf: (name: string) => `Where ${name} runs`,
+    required: 'Required',
+    present: (name: string) => `Already here: ${name}`,
+    closeCard: 'Nothing to hire, close',
     noServing: 'No subscription serves this department yet. Add one in Subscriptions; people hired now wait for it.',
   },
   templates: {
@@ -1074,6 +1077,7 @@ export const en = {
     instructions_too_long: 'The instructions got too long. Shorten the prompt and save again.',
     agent_working: 'This employee is working now. Stop it or wait until it finishes.',
     agent_has_tasks: 'This employee works on open tasks. Wait until they are done or cancel them, then remove the employee.',
+    required_role: 'Operations must always have someone in this role. Switch this employee off instead, or hire a replacement first.',
     no_subscription: 'Whoever gets this has no subscription to run on. Pick one on their card first.',
     no_role: 'This employee has no template to go back to.',
     task_changed: 'Someone changed this task meanwhile. Look at it again and retry.',
