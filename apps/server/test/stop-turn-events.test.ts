@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { expect, it, vi } from 'vitest';
 import type { ServerMessage } from '@hornhoof/protocol';
-import { jobs } from '../src/db/schema.js';
+import { agentEvents, jobs } from '../src/db/schema.js';
 import { failOpenJobs, handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { as, connectNode, listen, setUpCompany, statements, testApp, until } from './helpers.js';
@@ -104,14 +104,24 @@ it('queues new words without sending them to a turn already stopping', async () 
   expect(sent.mock.calls.map(([, message]) => message.type)).not.toContain('agent.say');
 });
 
-it('keeps acknowledged live words in their original turn if it completed normally before the acknowledgment', async () => {
+it('keeps acknowledged live words in their original turn when completion arrives before the acknowledgment', async () => {
   const c = await atWork(true);
   const sending = c.app.inject({ method: 'POST', url: '/api/agents/orchestrator/messages', payload: { text: 'An accepted live letter.' }, ...as(c.ceo) });
   const words = await c.node.next();
   expect(words.type).toBe('agent.say');
   if (words.type !== 'agent.say') throw new Error('Expected live delivery');
-  await c.receive({ type: 'job.done', jobId: c.run.jobId, ok: true, sessionId: 'session-1', result: 'The answer to the live letter.', tail: '', error: null });
-  await c.receive({ type: 'agent.said', ref: words.ref, ok: true });
-  expect((await sending).json().jobId).toBe(c.run.jobId);
-  expect(await c.db.select({ id: jobs.id }).from(jobs)).toEqual([{ id: c.run.jobId }]);
+  /* The receipt bypasses a completion waiting on live input in the socket's message queue. */
+  c.node.send({ type: 'job.done', jobId: c.run.jobId, ok: true, sessionId: 'session-1', result: 'The answer to the live letter.', tail: '', error: null });
+  c.node.send({ type: 'agent.said', ref: words.ref, ok: true });
+  const response = await sending;
+  expect(response.statusCode).toBe(202);
+  expect(response.json().jobId).toBe(c.run.jobId);
+  await until(() => c.node.acks.includes(c.run.jobId));
+  expect(await c.db.select({ id: jobs.id, status: jobs.status, result: jobs.result }).from(jobs)).toEqual([
+    { id: c.run.jobId, status: 'done', result: 'The answer to the live letter.' },
+  ]);
+  const messages = await c.db.select().from(agentEvents).where(eq(agentEvents.jobId, c.run.jobId));
+  expect(messages.filter(e => e.kind === 'message' && (e.data as { text?: string }).text === 'An accepted live letter.')).toEqual([
+    expect.objectContaining({ data: expect.objectContaining({ text: 'An accepted live letter.' }) }),
+  ]);
 });

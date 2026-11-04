@@ -1,6 +1,6 @@
 import { MAX_INSTRUCTIONS } from '@hornhoof/protocol';
 import { eq } from 'drizzle-orm';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../src/errors.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, jobs, tasks, teams } from '../src/db/schema.js';
@@ -126,17 +126,35 @@ describe('task messages reach their recipient', () => {
     expect(await c.jobOf(id)).toMatchObject({ status: 'queued', prompt: 'A task needs attention.' });
   });
 
-  it('keeps the input lock before the agent line when a message meets a pending decision', async () => {
-    const c = await messaging();
-    const task = await c.task();
-    const worker = await c.run(c.agent.id, task.id);
-    let incoming: Promise<string> | undefined;
-    await withInputLock(c.ctx, c.agent.id, async () => {
-      incoming = queueTaskMessage(c.ctx, { companyId: c.companyId, agentId: c.agent.id, task: task.number, actor: { agentId: c.head.id }, text: 'Check the registry.' }, { companyId: c.companyId, agentId: c.agent.id, prompt: 'Check the registry.', createdBy: null, message: { personId: null, text: 'Check the registry.' } });
-      await onAgent(c.ctx, c.agent.id, async () => {});
+  describe('a message meeting a pending decision', () => {
+    let c: Awaited<ReturnType<typeof failureCompany>>;
+    let task: Awaited<ReturnType<typeof createTask>>['task'];
+    let job: typeof jobs.$inferSelect;
+
+    beforeEach(async () => {
+      c = await failureCompany();
+      c.sent.mockImplementation((_node, message) => {
+        if (message.type === 'agent.say') queueMicrotask(() => said(c.ctx, BUILTIN, message.ref, true));
+        return true;
+      });
+      task = (await createTask(c.ctx, { agentId: c.head.id }, { title: 'Publish images', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.agent.id, executor: true, gates: [] })).task;
+      const [running] = await c.db.insert(jobs).values({ companyId: c.companyId, agentId: c.agent.id, subscriptionId: c.sub.id, kind: 'conversation', prompt: 'Work.', status: 'running', taskId: task.id, startedAt: new Date(), timeoutMs: 1000 }).returning();
+      job = running!;
     });
-    expect(await incoming).toBe(worker.job.id);
-  }, 3000);
+
+    it('keeps the input lock before the agent line when a message meets a pending decision', async () => {
+      let incoming: Promise<string> | undefined;
+      await withInputLock(c.ctx, c.agent.id, async () => {
+        incoming = queueTaskMessage(c.ctx, { companyId: c.companyId, agentId: c.agent.id, task: task.number, actor: { agentId: c.head.id }, text: 'Check the registry.' }, { companyId: c.companyId, agentId: c.agent.id, prompt: 'Check the registry.', createdBy: null, message: { personId: null, text: 'Check the registry.' } });
+        await onAgent(c.ctx, c.agent.id, async () => {});
+        expect((await listEvents(c.db, c.agent.id, 0)).filter(e => e.kind === 'message')).toEqual([]);
+      });
+      expect(await incoming).toBe(job.id);
+      expect((await listEvents(c.db, c.agent.id, 0)).filter(e => e.kind === 'message')).toEqual([
+        expect.objectContaining({ jobId: job.id, data: expect.objectContaining({ text: 'Check the registry.' }) }),
+      ]);
+    }, 3000);
+  });
 
   it('keeps the external wait when the message cannot be dispatched', async () => {
     const c = await messaging();
