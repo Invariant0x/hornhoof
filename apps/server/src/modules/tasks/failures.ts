@@ -197,7 +197,7 @@ async function retryPassingFailure(ctx: Ctx, job: Job, taskTurn?: TaskTurn): Pro
 
 async function holdFailedTurn(ctx: Ctx, job: Job, taskTurn?: TaskTurn): Promise<void> {
   const [plan] = await ctx.db.select().from(subscriptions).where(eq(subscriptions.id, job.subscriptionId));
-  const reset = limitUntil(plan?.limits ?? null);
+  const reset = limitUntil(plan?.limits ?? null, plan?.limitsUpdatedAt ?? null);
   const next = OWNER_STEP[job.failure!.kind] ?? `The plan holds its turns until its usage limit resets${reset ? ` at ${reset}` : ''}, then this turn goes on.`;
   await retryTurn(ctx, job, null, next, taskTurn);
 }

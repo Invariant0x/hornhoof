@@ -8,6 +8,8 @@ import type { AgentCardView, Me, Part, SubView } from '../types';
 import { TimerSettings } from './TimerSettings';
 import { Ask } from './Ask';
 import { PanelFrame } from './SidePanels';
+import { LimitMeters } from './PlanLimits';
+import { useNow } from './reset';
 import { AgentState, clockAt, type AgentLive } from './AgentState';
 import { byProvider, servingLabel } from './StaffCard';
 
@@ -139,6 +141,7 @@ export function AgentCard({ me, agentId, live, serverNow, onClose, onRemoved = o
   const t = useT();
   const { language } = useLanguage();
   const id = useId();
+  const now = useNow();
   const [card, setCard] = useState<AgentCardView | null>(null);
   const [failure, setFailure] = useState<unknown>(null);
   const [saved, setSaved] = useState(false);
@@ -325,6 +328,7 @@ export function AgentCard({ me, agentId, live, serverNow, onClose, onRemoved = o
           </div>
           <SubUnitField card={card} inputId={`${id}-team`} editable={editable} onChange={team => void change({ team })} />
         </div>
+        {card.subscription && <LimitMeters sub={card.subscription} now={now} />}
         {saved && (
           <p className="ac-note" role="status">
             {t.agent.applies}

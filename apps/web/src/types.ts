@@ -65,6 +65,8 @@ export type SubView = {
   /* The machines the plan runs on, oldest first, with its state on each. */
   machines: { id: string; hostname: string; status: PlanStatus; online: boolean }[];
   limits: Limits | null;
+  /* When the last snapshot arrived. Undefined on an older server, null when an old row never recorded it. */
+  limitsUpdatedAt?: string | null;
   /* The share of each limit window, in percent, that task turns may use; null: the whole limit. */
   budget: number | null;
   isOrchestrator: boolean;

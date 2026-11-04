@@ -233,7 +233,7 @@ export const en = {
     resetUnknown: 'Reset time unknown',
     limitReached: (duration: string | null) => (duration ? `Limit reached, resets in ${duration}` : 'Limit reached'),
     notOnPlan: 'Not on this plan',
-    noDataYet: 'No data yet',
+    unknown: (at: string | null) => at ? `Unknown, last data from ${at}` : 'Unknown, no limit data received yet',
     noPlanLimits: 'Pay as you go, no plan limits',
     share: 'Tasks may use',
     shareLabel: (name: string) => `Share of ${name} for tasks`,

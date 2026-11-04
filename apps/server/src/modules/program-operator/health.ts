@@ -60,7 +60,7 @@ function availableTurn(job: typeof jobs.$inferSelect, agentId: string): boolean 
 }
 
 function availablePlan(plan: typeof subscriptions.$inferSelect, companyId: string): boolean {
-  return plan.companyId === companyId && !plan.removedAt && plan.status === 'ready' && !limitUntil(plan.limits);
+  return plan.companyId === companyId && !plan.removedAt && plan.status === 'ready' && !limitUntil(plan.limits, plan.limitsUpdatedAt);
 }
 
 export async function restoreOperatorNode(ctx: Ctx, node: NodeIdentity): Promise<void> {

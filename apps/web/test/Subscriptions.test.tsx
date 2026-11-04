@@ -257,7 +257,7 @@ describe('Subscriptions', () => {
     const rows = async (name: string) => meterRows(rowOf(name));
     const [claudeFive, claudeSeven, ...claudeMore] = await rows('Claude');
     expect(claudeFive).toHaveTextContent(/^5 hours30%usedReset time unknown$/);
-    expect(claudeSeven).toHaveTextContent(/^7 daysNo data yet$/);
+    expect(claudeSeven).toHaveTextContent(/^7 daysUnknown, no limit data received yet$/);
     expect(claudeSeven!.querySelector('.bar')).not.toBeInTheDocument();
     expect(claudeMore.map(r => r.textContent)).toEqual(['7 days, Opus100%usedReset time unknown']);
     const [codexFive, codexSeven] = await rows('Codex');
@@ -277,6 +277,42 @@ describe('Subscriptions', () => {
     expect(within(rowOf('Claude')).getByText('Limit reached')).toBeInTheDocument();
   });
 
+  it.each([['claude', 'Claude'], ['codex', 'Codex'], ['kimi', 'Kimi'], ['antigravity', 'Antigravity']])('shows an expired rejection as unknown with its last data time for %s', async (provider, label) => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date('2026-11-04T22:00:00.000Z'));
+    onTestFinished(() => { vi.useRealTimers(); });
+    const limits = { status: 'rejected' as const, windows: [{ name: 'five_hour', utilization: 1, resetsAt: '2026-11-03T00:53:03.947Z' }], complete: true };
+    lists({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, provider, label, limits, limitsUpdatedAt: '2026-11-04T21:55:00.000Z' }] }] });
+    render(<Subscriptions me={ME} />);
+    await openAll();
+
+    const row = rowOf(label);
+    expect(within(row).queryByText('Limit reached')).not.toBeInTheDocument();
+    expect(meterRows(row)[0]).toHaveTextContent('5 hoursUnknown, last data from 09:55 PM');
+  });
+
+  it('shows a stale rejection as unknown instead of exhausted, in Russian', async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date('2026-11-04T22:00:00.000Z'));
+    onTestFinished(() => { vi.useRealTimers(); });
+    const limits = { status: 'rejected' as const, windows: [{ name: 'five_hour', utilization: 1, resetsAt: '2026-11-05T02:19:23.000Z' }] };
+    lists({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, provider: 'antigravity', label: 'Antigravity', limits, limitsUpdatedAt: '2026-11-04T21:44:00.000Z' }] }] });
+    render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
+    await openAll();
+
+    const row = rowOf('Antigravity');
+    expect(within(row).queryByText('Лимит исчерпан')).not.toBeInTheDocument();
+    expect(meterRows(row)[0]).toHaveTextContent('5 часовНеизвестно, последние данные от 21:44');
+  });
+
+  it('says a working plan has no limit data without calling its limits unset', async () => {
+    lists({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, limits: null, limitsUpdatedAt: null }] }] });
+    render(<Subscriptions me={ME} />);
+    await openAll();
+    expect(meterRows(rowOf('Claude'))[0]).toHaveTextContent('5 hoursUnknown, no limit data received yet');
+  });
+
   it('shows a window that started over since the plan last spoke as not known yet, and no reached limit for it', async () => {
     const limits = {
       status: 'rejected' as const,
@@ -288,7 +324,7 @@ describe('Subscriptions', () => {
     await openAll();
     const row = rowOf('Claude');
     const [five, seven] = meterRows(row);
-    expect(five).toHaveTextContent(/^5 hoursNo data yetReset time unknown$/);
+    expect(five).toHaveTextContent(/^5 hoursUnknown, no limit data received yet$/);
     expect(seven).toHaveTextContent(/^7 days40%usedresets in /);
     expect(within(row).queryByText(/^Limit reached/)).not.toBeInTheDocument();
   });
@@ -472,7 +508,7 @@ describe('Subscriptions', () => {
     expect(five).toHaveTextContent(/^5 часов42%использованодо сброса /);
     expect(seven).toHaveTextContent(/^7 дней10%использованоВремя сброса неизвестно$/);
     const [glmFive] = meterRows(rowOf('GLM'));
-    expect(glmFive).toHaveTextContent(/^5 часовПока нет данных$/);
+    expect(glmFive).toHaveTextContent(/^5 часовНеизвестно, данных о лимитах еще не было$/);
     expect(within(rowOf('Ключ Anthropic, заканчивается на 9f3a')).getByText('Оплата по факту, без лимитов тарифа')).toBeInTheDocument();
   });
 });

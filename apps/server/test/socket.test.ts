@@ -58,6 +58,21 @@ describe('node socket', () => {
     await until(async () => (await subOf(app, ceo, subId)).online === false);
   });
 
+  it('timestamps every limits snapshot and replaces an old rejection with fresh data', async () => {
+    const { app, db, ceo, subId, nodeId } = await liveCompany();
+    const identity = { kind: 'node' as const, nodeId };
+    const old = { status: 'rejected' as const, windows: [{ name: 'five_hour', utilization: 1, resetsAt: '2026-11-03T00:53:03.947Z' }] };
+    const freshAt = new Date().toISOString();
+    const fresh = { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.3, resetsAt: new Date(Date.now() + 4 * 3600_000).toISOString() }], complete: true };
+
+    await handleNodeMessage(app.ctx, identity, { type: 'status', loggedIn: true, limits: old }, new Date('2026-11-03T00:40:00.000Z'));
+    expect((await db.select().from(subscriptions).where(eq(subscriptions.id, subId)))[0]).toMatchObject({ limits: old, limitsUpdatedAt: new Date('2026-11-03T00:40:00.000Z') });
+    expect(await subOf(app, ceo, subId)).toMatchObject({ limits: { status: 'allowed', windows: [], complete: false }, limitsUpdatedAt: '2026-11-03T00:40:00.000Z' });
+
+    await handleNodeMessage(app.ctx, identity, { type: 'status', loggedIn: true, limits: fresh }, new Date(freshAt));
+    expect(await subOf(app, ceo, subId)).toMatchObject({ limits: fresh, limitsUpdatedAt: freshAt });
+  });
+
   it('keeps the models a node reports, and keeps them when a message has none', async () => {
     const { db, url, subId, key } = await liveCompany();
     const node = await connectNode(url, key);

@@ -1,7 +1,7 @@
 import { combineReport, reportDelay } from './report-notices.js';
 import type { Notification } from '@hornhoof/protocol';
 import type { MessageParty } from '../events/parties.js';
-import { effortFor, effortsOf, MAX_INSTRUCTIONS, modelsFor, OLD_NODE_INSTRUCTIONS, ORCHESTRATOR_EFFORT, UNHEARD_MS, type Limits } from '@hornhoof/protocol';
+import { currentLimits, effortFor, effortsOf, MAX_INSTRUCTIONS, modelsFor, OLD_NODE_INSTRUCTIONS, ORCHESTRATOR_EFFORT, UNHEARD_MS, type Limits } from '@hornhoof/protocol';
 import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lte, ne, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -65,16 +65,17 @@ const LONGEST_TIMER_MS = 2 ** 31 - 1;
 
 /* When the plan's limit starts over, while the plan is at it: the latest reset of a full window still to come. A plan at
    its limit that says no reset holds nothing, so its turns go out and fail as before rather than wait forever. */
-export function limitUntil(limits: Limits | null, now = Date.now()): string | null {
-  if (limits?.status !== 'rejected') return null;
-  const resets = limits.windows.filter(w => (w.utilization === null || w.utilization >= 1) && w.resetsAt && Date.parse(w.resetsAt) > now).map(w => w.resetsAt!);
+export function limitUntil(limits: Limits | null, updatedAt: string | Date | null, now = Date.now()): string | null {
+  const current = currentLimits(limits, updatedAt, now);
+  if (current?.status !== 'rejected') return null;
+  const resets = current.windows.filter(w => (w.utilization === null || w.utilization >= 1) && w.resetsAt).map(w => w.resetsAt!);
   return resets.length ? resets.reduce((a, b) => (Date.parse(a) >= Date.parse(b) ? a : b)) : null;
 }
 
 /* When a window of the plan that used the share set for task turns starts over: the latest such reset still to come. */
-export function budgetUntil(limits: Limits | null, budget: number | null, now = Date.now()): string | null {
+export function budgetUntil(limits: Limits | null, budget: number | null, updatedAt: string | Date | null, now = Date.now()): string | null {
   if (budget === null || budget >= 100) return null;
-  const resets = (limits?.windows ?? []).filter(w => w.utilization !== null && w.utilization * 100 >= budget && w.resetsAt && Date.parse(w.resetsAt) > now).map(w => w.resetsAt!);
+  const resets = (currentLimits(limits, updatedAt, now)?.windows ?? []).filter(w => w.utilization !== null && w.utilization * 100 >= budget && w.resetsAt).map(w => w.resetsAt!);
   return resets.length ? resets.reduce((a, b) => (Date.parse(a) >= Date.parse(b) ? a : b)) : null;
 }
 
@@ -404,7 +405,7 @@ export async function startProgram(ctx: Ctx, node: NodeIdentity, agentId: string
     if (!agent || !sub || !at || !sameNode(at, node)) return false;
     if (node.kind === 'node' && await resumeOperatorProcess(ctx, agentId, node.nodeId)) return true;
     /* Task turns of an agent that is switched off wait for it to be on and start nothing. */
-    const waiting = and(eq(jobs.status, 'queued'), limitUntil(sub.limits) ? programStart : agent.switchedOffAt ? isNull(jobs.taskId) : undefined);
+    const waiting = and(eq(jobs.status, 'queued'), limitUntil(sub.limits, sub.limitsUpdatedAt) ? programStart : agent.switchedOffAt ? isNull(jobs.taskId) : undefined);
     const [open] = await db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), or(eq(jobs.status, 'running'), waiting))).limit(1);
     if (open) return false;
     await insertTurn(ctx, { companyId: agent.companyId, agentId, prompt: '', createdBy: null });
@@ -664,8 +665,8 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   if (await waitsForRetry(ctx, agentId)) return;
   /* Real turns wait for the limit; an empty start can still open the saved program. Past the share set for tasks only
      task turns wait. */
-  const until = limitUntil(sub.limits);
-  const spent = budgetUntil(sub.limits, sub.budget);
+  const until = limitUntil(sub.limits, sub.limitsUpdatedAt);
+  const spent = budgetUntil(sub.limits, sub.budget, sub.limitsUpdatedAt);
   if (until ?? spent) pumpAt(ctx, agentId, (until ?? spent)!);
   /* Switched off, it still answers people who write to it; its task turns wait until it is on. */
   const [job] = await db
@@ -815,8 +816,8 @@ export async function agentState(ctx: Ctx, agentId: string): Promise<AgentState>
   const browserError = shown ? ctx.hub.browserErrorOf(shown) : null;
   return {
     ready: reason === null,
-    limitUntil: sub ? limitUntil(sub.limits) : null,
-    budgetUntil: sub ? budgetUntil(sub.limits, sub.budget) : null,
+    limitUntil: sub ? limitUntil(sub.limits, sub.limitsUpdatedAt) : null,
+    budgetUntil: sub ? budgetUntil(sub.limits, sub.budget, sub.limitsUpdatedAt) : null,
     reason,
     browserError,
     busy: Boolean(running),

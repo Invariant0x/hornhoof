@@ -1,0 +1,1 @@
+ALTER TABLE "subscriptions" ADD COLUMN "limits_updated_at" timestamp with time zone;

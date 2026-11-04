@@ -1,4 +1,4 @@
-import type { Account, Limits } from '@hornhoof/protocol';
+import { currentLimits, type Account, type Limits } from '@hornhoof/protocol';
 import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { agents, departments, nodes, people, personAccess, subscriptions, teams, type NodeStatus, type Provider, type SUBSCRIPTION_STATUSES } from '../../db/schema.js';
@@ -23,6 +23,7 @@ export type SubView = {
   /* The machines the plan runs on, oldest first, with its state on each. */
   machines: { id: string; hostname: string; status: NodeStatus; online: boolean }[];
   limits: Limits | null;
+  limitsUpdatedAt: string | null;
   budget: number | null;
   isOrchestrator: boolean;
   /* The account each machine's program is signed in to: the address only for the plan's owner and people who see the
@@ -59,6 +60,7 @@ const columns = {
   status: subscriptions.status,
   last4: subscriptions.last4,
   limits: subscriptions.limits,
+  limitsUpdatedAt: subscriptions.limitsUpdatedAt,
   budget: subscriptions.budget,
   credVersion: subscriptions.credVersion,
   leaseNodeId: subscriptions.leaseNodeId,
@@ -140,7 +142,8 @@ export async function subViews(db: Db, isOnline: IsOnline, id?: string, viewer: 
     owner: { id: r.ownerId, name: r.ownerName },
     place: r.kind === 'api_key' ? placeOf(r.targetKind, r.targetId, depts, teamDept) : r.ownerScopeKind === 'company' ? COMPANY : ownerPlace(ownerDepts(r.ownerId), depts),
     machines: mine.map(n => ({ id: n.machineId, hostname: n.hostname, status: n.status, online: isOnline(nodeIdentity(n.id)) })),
-    limits: r.limits ?? null,
+    limits: currentLimits(r.limits ?? null, r.limitsUpdatedAt),
+    limitsUpdatedAt: r.limitsUpdatedAt?.toISOString() ?? null,
     budget: r.budget,
     isOrchestrator: orchestrator?.subscriptionId === r.id,
     accounts: signed.map(({ node, account }) => ({ nodeId: node.id, hostname: node.hostname, tier: account.tier, ...(sees ? { email: account.email } : {}) })),
