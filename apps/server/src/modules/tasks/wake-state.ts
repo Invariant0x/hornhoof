@@ -150,16 +150,23 @@ function staleFailure(task: Task, run: string, status: 'queued' | 'running', pro
   return { kind: 'unknown', text, retryable: false };
 }
 
+async function logObsolete(db: Store, task: Task, agentId: string, wake: string, jobId: string): Promise<void> {
+  const [agent] = await db.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId));
+  const text = `Wake-up became obsolete: the task moved on. ${agent!.name}: ${wake}.`;
+  await db.insert(taskEvents).values({ companyId: task.companyId, taskId: task.id, agentId, kind: 'wake_obsolete', text, data: { wake, job: jobId } });
+}
+
 export async function recordStale(db: Store, jobId: string, agentId: string, task: Task, run: string, status: 'queued' | 'running', program: StaleProgram | null = null): Promise<boolean> {
   const failure = staleFailure(task, run, status, program);
-  const text = failure.text;
+  const text = status === 'queued' ? `Wake-up became obsolete: task #${task.number} moved on. ${failure.text}` : failure.text;
   const tail = staleOutput('');
-  const [ended] = await db.update(jobs).set({ status: 'failed', error: 'stale', result: text, failure, tail, finishedAt: new Date() })
+  const [ended] = await db.update(jobs).set({ status: status === 'queued' ? 'obsolete' : 'failed', error: 'stale', result: text, failure: status === 'queued' ? null : failure, tail, finishedAt: new Date() })
     .where(and(eq(jobs.id, jobId), eq(jobs.status, status))).returning({ id: jobs.id });
   if (!ended) return false;
-  await db.insert(agentEvents).values({ companyId: task.companyId, agentId, jobId, kind: 'stopped', data: { reason: 'stale', text, failure, tail, program, task: { id: task.id, number: task.number } } });
+  const reason = status === 'queued' ? 'obsolete' : 'stale';
+  await db.insert(agentEvents).values({ companyId: task.companyId, agentId, jobId, kind: 'stopped', data: { reason, text, ...(status === 'running' ? { failure } : {}), tail, program, task: { id: task.id, number: task.number } } });
   /* A running turn was already logged by repeatWake; queued work reaches this path directly. */
-  if (status === 'queued') await logSkipped(db, task, agentId, run, jobId);
+  if (status === 'queued') await logObsolete(db, task, agentId, run, jobId);
   return true;
 }
 

@@ -61,7 +61,7 @@ describe('named turn failures', () => {
     await c.db.update(tasks).set({ status: 'review', stage: 1, panel: [c.agent.id] }).where(eq(tasks.id, c.task.id));
     await c.db.update(jobs).set({ notBefore: new Date(Date.now() - 1) }).where(eq(jobs.id, retry.id));
     await pump(c.ctx, c.agent.id);
-    expect(await c.jobOf(retry.id)).toMatchObject({ status: 'failed', error: 'stale' });
+    expect(await c.jobOf(retry.id)).toMatchObject({ status: 'obsolete', error: 'stale' });
     expect(await c.turnsOf(c.watcher.id)).toEqual([]);
   });
 

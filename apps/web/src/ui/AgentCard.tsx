@@ -127,6 +127,11 @@ function LastFailure({ failure, when }: { failure: AgentCardView['failure'] | un
   );
 }
 
+function LastObsolete({ obsolete }: { obsolete: AgentCardView['obsolete'] }) {
+  const t = useT();
+  return obsolete ? <p className="ac-obsolete">{t.agent.obsolete}</p> : null;
+}
+
 /* An agent's card in the side panel: where it runs, its skills and the text it runs with, with every change kept. */
 export function AgentCard({ me, agentId, live, serverNow, onClose, onTerminal }: Props) {
   const t = useT();
@@ -290,6 +295,7 @@ export function AgentCard({ me, agentId, live, serverNow, onClose, onTerminal }:
             <AgentState agent={stateAgent} serverNow={serverNow} />
           </p>
           <LastFailure failure={card.failure} when={when} />
+          <LastObsolete obsolete={card.obsolete} />
           <button className="btn small" type="button" onClick={onTerminal}>
             {t.agent.openTerminal}
           </button>

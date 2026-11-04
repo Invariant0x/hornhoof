@@ -748,6 +748,7 @@ export const ru: Messages = {
     openTerminal: 'Открыть терминал',
     lastFailed: (at: string, kind: string) => `Последний ход не удался в ${at}: ${kind}`,
     lastFailedOn: (when: string, kind: string) => `Последний ход не удался ${when}: ${kind}`,
+    obsolete: 'Побудка устарела: задача ушла дальше',
     noOutput: 'Вывода не было.',
     runsOn: 'Где работает',
     onMachine: (host: string) => `Работает на машине ${host}`,
@@ -904,6 +905,7 @@ export const ru: Messages = {
     questions: 'Вопросы',
     log: 'Журнал',
     skippedRun: (by, run) => `Запуск пропущен: задача уже закрыта. ${by}: ${run}.`,
+    obsoleteRun: (by, run) => `Побудка устарела: задача ушла дальше. ${by}: ${run}.`,
     skippedJob: job => `Ход ${job}.`,
     skippedRuns: {
       task: 'работа по задаче', restart: 'возобновление после перезапуска', continue: 'продолжение после выхода программы', merge: 'слияние',

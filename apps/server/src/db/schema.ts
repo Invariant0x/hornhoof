@@ -320,7 +320,7 @@ export const personAccess = pgTable(
   t => [unique('person_access_place').on(t.personId, t.departmentId, t.teamId).nullsNotDistinct(), index('person_access_person_id').on(t.personId)],
 );
 
-export const JOB_STATUSES = ['queued', 'running', 'done', 'failed'] as const;
+export const JOB_STATUSES = ['queued', 'running', 'done', 'failed', 'obsolete'] as const;
 export const JOB_KINDS = ['test', 'conversation'] as const;
 /* Why a node started again, as far as Hornhoof can tell: its built-in server started again, Hornhoof updated it, the machine
    started again, its container was made anew, its program started again in the same container, or the connection broke
@@ -519,7 +519,7 @@ export const tasks = pgTable(
   ],
 );
 
-export const TASK_EVENT_KINDS = ['created', 'assigned', 'updated', 'comment', 'submitted', 'verdict', 'report', 'blocked', 'asked', 'answered', 'reminded', 'continued', 'stuck', 'cancelled', 'done', 'started', 'interrupted', 'wake_skipped'] as const;
+export const TASK_EVENT_KINDS = ['created', 'assigned', 'updated', 'comment', 'submitted', 'verdict', 'report', 'blocked', 'asked', 'answered', 'reminded', 'continued', 'stuck', 'cancelled', 'done', 'started', 'interrupted', 'wake_skipped', 'wake_obsolete'] as const;
 export type TaskEventKind = (typeof TASK_EVENT_KINDS)[number];
 
 /* Everything that happened to a task, with the person or agent who did it. */
