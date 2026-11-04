@@ -462,6 +462,7 @@ export const en = {
     showLog: 'Log',
     showTerminal: 'Terminal',
     writeTo: (name: string) => `Write to ${name}`,
+    openAgent: (name: string) => `Open ${name}`,
     hiredLine: (name: string) => `Hired: ${name}`,
     /* A machine command he asked Hornhoof for: the CEO sees it here, he does not. */
     commandMachine: 'Command to connect a machine',

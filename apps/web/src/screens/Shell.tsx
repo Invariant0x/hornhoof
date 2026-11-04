@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { deptLabel, LANGUAGES, useLanguage, useT } from '../i18n';
 import { liveOf, useOrg } from '../org';
@@ -13,6 +13,7 @@ import { TaskPanel } from '../ui/TaskPanel';
 import { useUpdates, type Updates } from '../updates';
 import { About } from './About';
 import { AgentWindow, type StaffAsk } from './AgentWindow';
+import { AgentWindowContext } from './AgentWindowContext';
 import { DepartmentView } from './Department';
 import { Improvements } from './Improvements';
 import { Machines } from './Machines';
@@ -180,6 +181,9 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   const [deptId, setDeptId] = useState<string | null>(null);
   const [staff, setStaff] = useState<StaffAsk | null>(null);
   const { org } = useOrg(panel !== null || deptId !== null);
+  const openAgent = useCallback((agentId: string) => {
+    setPanel({ kind: 'window', agentId: agentId === org?.orchestrator?.id ? 'orchestrator' : agentId });
+  }, [org?.orchestrator?.id]);
   const dept = deptId ? org?.departments.find(d => d.id === deptId) : undefined;
   /* A department removed while its view was open closes the view. */
   useEffect(() => {
@@ -227,6 +231,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   }
 
   return (
+    <AgentWindowContext value={openAgent}>
     <div className="shell">
       <header className="topbar">
         <div className="tb-brand glass">
@@ -269,7 +274,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
           <MapScreen
             me={me}
             windowOpen={panel !== null}
-            onOpenOrchestrator={() => setPanel({ kind: 'window', agentId: 'orchestrator' })}
+            onOpenOrchestrator={() => openAgent('orchestrator')}
             inside={!!dept}
             onOpenDepartment={setDeptId}
             onOpenDecisions={openDecisions}
@@ -285,12 +290,12 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
             panel={panel?.kind ?? null}
             serverNow={org?.serverNow}
             onBack={() => setDeptId(null)}
-            onOpen={agentId => setPanel({ kind: 'window', agentId })}
+            onOpen={openAgent}
             onOpenTask={taskId => setPanel({ kind: 'task', taskId })}
             onOpenDecisions={openDecisions}
             onHire={() => {
               setStaff({ id: dept.id, name: deptLabel(t, dept), at: Date.now() });
-              setPanel({ kind: 'window', agentId: 'orchestrator' });
+              openAgent('orchestrator');
             }}
           />
         )}
@@ -302,8 +307,8 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
             onClearPerson={() => decisions.showPerson(null)}
             selected={panel?.kind === 'task' ? panel.taskId : null}
             onOpenTask={taskId => setPanel({ kind: 'task', taskId })}
-            onOpenAgent={agentId => setPanel({ kind: 'window', agentId })}
-            onOpenOrchestrator={company ? () => setPanel({ kind: 'window', agentId: 'orchestrator' }) : undefined}
+            onOpenAgent={openAgent}
+            onOpenOrchestrator={company ? () => openAgent('orchestrator') : undefined}
           />
         )}
         {tab === 'people' && <People me={me} />}
@@ -330,13 +335,14 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
           onOpen={taskId => setPanel({ kind: 'task', taskId })}
           requests={decisions.requestsOf(panel.taskId)}
           onRequestsChanged={decisions.load}
-          onOpenAgent={agentId => setPanel({ kind: 'window', agentId })}
+          onOpenAgent={openAgent}
         />
       )}
       {panel?.kind === 'card' && (
-        <AgentCard key={panel.agentId} me={me} agentId={panel.agentId} {...liveOf(org, panel.agentId)} onClose={() => setPanel(null)} onTerminal={() => setPanel({ kind: 'window', agentId: panel.agentId })} />
+        <AgentCard key={panel.agentId} me={me} agentId={panel.agentId} {...liveOf(org, panel.agentId)} onClose={() => setPanel(null)} onTerminal={() => openAgent(panel.agentId)} />
       )}
       <AccountDialog active={accountDialog} me={me} updates={updates} onClose={() => { setAccountDialog(null); accountButton.current?.focus(); }} />
     </div>
+    </AgentWindowContext>
   );
 }

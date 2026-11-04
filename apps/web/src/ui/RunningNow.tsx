@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useLanguage, useT } from '../i18n';
+import { useOpenAgent } from '../screens/AgentWindowContext';
 import type { Me, Running, RunningAgent } from '../types';
 import { EmptyBox } from './Cards';
 import { Edge } from './Edge';
@@ -32,13 +33,15 @@ function AgentActivity({ agent: a, me, now }: { agent: RunningAgent; me: Me; now
 }
 
 function AgentChip({ agent: a, me, now }: { agent: RunningAgent; me: Me; now: number }) {
+  const openAgent = useOpenAgent();
+  const t = useT();
   const { language } = useLanguage();
   const role = a.title?.[language];
-  return <Edge className={`run-chip${a.busy ? ' on' : ''}`} cut={8}>
+  return <button type="button" className="run-open" aria-label={t.window.openAgent(a.name)} onClick={() => openAgent(a.id)}><Edge className={`run-chip${a.busy ? ' on' : ''}`} cut={8}>
     <span className="l1"><span className={`ag${a.busy ? ' on' : ''}`}><AgentIcon /></span><b>{a.name}</b><ProviderMark provider={a.provider} /></span>
     {role && role !== a.name && <span className="l2">{role}</span>}
     <span className="l3"><AgentActivity agent={a} me={me} now={now} /></span>
-  </Edge>;
+  </Edge></button>;
 }
 
 function AgentGroup({ name, agents, foldable, me, now }: { name: string; agents: RunningAgent[]; foldable: boolean; me: Me; now: number }) {

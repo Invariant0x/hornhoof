@@ -445,6 +445,7 @@ export const ru: Messages = {
     showLog: 'Журнал',
     showTerminal: 'Терминал',
     writeTo: (name: string) => `Сообщение для ${name}`,
+    openAgent: name => `Открыть: ${name}`,
     hiredLine: (name: string) => `Нанят: ${name}`,
     commandMachine: 'Команда для подключения машины',
     commandPlans: names => `Команда для подключения: ${names}`,
