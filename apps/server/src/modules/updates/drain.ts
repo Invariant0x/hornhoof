@@ -1,4 +1,5 @@
 import type { Ctx } from '../../app.js';
+export { nodeDrain, nodeHeld, machineDrain } from './node-drain.js';
 
 /* Companies whose update waits for their agents to finish: no new turn starts there meanwhile, so the turns that run
    end and the update can go in. The orchestrator still answers people. */

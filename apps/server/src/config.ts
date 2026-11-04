@@ -28,6 +28,8 @@ export type Config = {
   image: string;
   registryUrl?: string;
   updateCheckMs: number;
+  nodeDrainMs: number;
+  nodeUpdateRetryMs: number;
   /* The folder the app shares with the updater service. */
   controlDir: string;
   /* Role and skill templates, loaded once at start. */
@@ -68,6 +70,8 @@ const Env = z.object({
   STREAM_PING_MS: milliseconds('STREAM_PING_MS', 1, '25000'),
   MAX_RUNS_PER_HOST: wholeNumber(1, 1000, 'MAX_RUNS_PER_HOST must be a whole number between 1 and 1000.').default(1),
   UPDATE_CHECK_MS: milliseconds('UPDATE_CHECK_MS', 0, '1800000'),
+  NODE_DRAIN_MS: milliseconds('NODE_DRAIN_MS', 1, '3600000'),
+  NODE_UPDATE_RETRY_MS: milliseconds('NODE_UPDATE_RETRY_MS', 1, '900000'),
   REGISTRY_URL: webAddress('REGISTRY_URL must be an http:// or https:// address.'),
   RELAY_URL: webAddress('RELAY_URL must be an http:// or https:// address, like https://hornhoof.org.'),
   TUNNEL_HOST: z.preprocess(unset, z.string().regex(/^[A-Za-z0-9.-]{1,253}$/, 'TUNNEL_HOST must be the host name of the tunnel container, like tunnel.').optional()),
@@ -114,6 +118,8 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     image: env.HORNHOOF_IMAGE || 'ghcr.io/invariant0x/hornhoof',
     registryUrl: set.REGISTRY_URL,
     updateCheckMs: set.UPDATE_CHECK_MS ?? 1800000,
+    nodeDrainMs: set.NODE_DRAIN_MS ?? 3_600_000,
+    nodeUpdateRetryMs: set.NODE_UPDATE_RETRY_MS ?? 900_000,
     controlDir: env.HORNHOOF_CONTROL_DIR || '/control',
     templatesDir: env.TEMPLATES_DIR || DEFAULT_TEMPLATES,
     relayUrl: (set.RELAY_URL ?? 'https://hornhoof.org').replace(/\/+$/, ''),

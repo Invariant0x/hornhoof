@@ -20,6 +20,8 @@ import { BUILTIN, nodeIdentity, type NodeHub } from './hub.js';
 import { nodeImageOfBuild } from './image.js';
 import { builtinMachine, liveNode, otherBuild, settlePlans } from './nodes.js';
 import { machineProgramState, machineProgramRoutes, programsFor } from './programs.js';
+import { machineDrain, nodeDrain } from '../updates/drain.js';
+import { machineProgramNodes } from './programs.js';
 
 const JoinBody = z.object({
   code: z.string().min(1).max(200),
@@ -207,6 +209,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
               load: together([hub.loadOf(BUILTIN)]),
               running: running(a => Boolean(a.builtin), p => p.builtin),
               machine: serverMachine,
+              drain: nodeDrain(ctx, BUILTIN),
               programs: programsFor(hub, [BUILTIN]),
               browserError: hub.browserErrorOf(BUILTIN),
             }
@@ -224,6 +227,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
         lastSeenAt: latest(on(m.id).map(n => n.lastSeenAt)),
         plans: on(m.id).flatMap(n => (n.subscriptionId && n.provider ? [{ id: n.subscriptionId, provider: n.provider, status: n.status, online: hub.isOnline(nodeIdentity(n.id)) }] : [])),
         lendsTests: m.lendsTests,
+        drain: machineDrain(ctx, machineProgramNodes(on(m.id).map(n => n.id), m.id, programHost)),
         running: running(a => (a.builtin && serverMachine?.id === m.id) || on(m.id).some(n => n.id === a.nodeId), p => p.machineId === m.id || (p.builtin && serverMachine?.id === m.id)),
       })),
     };

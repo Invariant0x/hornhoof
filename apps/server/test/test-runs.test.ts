@@ -1,4 +1,7 @@
 import type { ServerMessage } from '@hornhoof/protocol';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { and, asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { encryptSecret } from '../src/crypto/secrets.js';
@@ -128,6 +131,21 @@ const reportHost = (c: Awaited<ReturnType<typeof company>>, nodeId: string | nul
 };
 
 describe('parts on physical computers', () => {
+  it.each(['run_tests', 'run_work'])('sends %s parts to a free machine while another waits for an update', async tool => {
+    const c = await company({ HORNHOOF_CONTROL_DIR: mkdtempSync(join(tmpdir(), 'hh-run-drain-')) });
+    const first = await c.machine(c.ann, 'updating');
+    const second = await c.machine(c.ceo, 'available');
+    const { call } = await c.turn(c.bruno);
+    const prepared = await c.app.inject({ method: 'POST', url: '/api/nodes/update', headers: { authorization: `Bearer ${first.key}` }, payload: {} });
+    expect(prepared.json().ready).toBe(true);
+    const started = await call(tool, { command: 'printf checked', ...(tool === 'run_work' ? { branch: 'task-1' } : {}) });
+    expect(started.error).toBe(false);
+    const parts = await c.db.select().from(testParts);
+    expect(parts).toHaveLength(1);
+    expect(parts[0]).toMatchObject({ nodeId: second.nodeId, status: 'running' });
+    expect(await gets(first.node, 'tests.run')).toBe(false);
+  });
+
   it.each([
     { selectedGb: 2, siblingGb: 12, status: 'queued' },
     { selectedGb: 12, siblingGb: 2, status: 'running' },

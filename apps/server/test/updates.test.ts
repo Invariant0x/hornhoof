@@ -390,7 +390,31 @@ describe('updates', () => {
     await db.insert(jobs).values({ companyId: acme!.id, subscriptionId: sub!.id, agentId: orchestrator!.id, prompt: 'build 2', status: 'running', timeoutMs: 1000 });
     const now = await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: false }, ...as(ceo) });
     expect(now.statusCode).toBe(202);
-    expect(request(control)).toEqual(asked(registry, now.json().id));
+    expect(request(control)).toEqual({ ...asked(registry, now.json().id), immediate: true });
+  });
+
+  it('counts interrupted turns before an immediate update and rechecks the confirmation', async () => {
+    const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
+    const { app, db, ceo, control } = await company(registry);
+    updaterAlive(control);
+    const [acme] = await db.select().from(companies);
+    const [sub] = await db.select().from(subscriptions);
+    const [agent] = await db.select().from(agents);
+    const running = { companyId: acme!.id, subscriptionId: sub!.id, agentId: agent!.id, kind: 'conversation' as const, prompt: 'keep working', status: 'running' as const, timeoutMs: 900_000 };
+    await db.insert(jobs).values(running);
+    const update = (confirmTurns?: number) => app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: false, ...(confirmTurns === undefined ? {} : { confirmTurns }) }, ...as(ceo) });
+    const first = await update();
+    expect(first.statusCode).toBe(409);
+    expect(first.json().error).toMatchObject({ code: 'conflict', reason: 'turns_would_stop', details: { turns: 1 } });
+    expect(request(control)).toBeNull();
+    await db.insert(jobs).values(running);
+    const changed = await update(1);
+    expect(changed.statusCode).toBe(409);
+    expect(changed.json().error.details).toEqual({ turns: 2 });
+    expect(request(control)).toBeNull();
+    expect((await update(2)).statusCode).toBe(202);
+    expect(request(control)).toMatchObject({ immediate: true });
+    expect((await db.select().from(jobs).where(eq(jobs.status, 'running')))).toHaveLength(2);
   });
 
   it('holds new turns of the company while its update waits for the agents, and lets them go when it is called off', async () => {
