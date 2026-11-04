@@ -216,6 +216,47 @@ describe('templates', () => {
       expect(harmless).toMatch(/program_screen again after every key/);
     });
 
+    describe('on a question about permission', () => {
+      const section = body.slice(body.indexOf('### Permission questions'));
+      const point = (start: string) => section.split('\n').find(line => line.startsWith(`- ${start}`)) ?? '';
+
+      it('has a section of its own after the steps', () => {
+        expect(body).toContain('### Permission questions');
+        expect(body.indexOf('### Permission questions')).toBeGreaterThan(body.indexOf('\n6. '));
+      });
+
+      it('allows what is harmless, its own temporary folder too', () => {
+        const allow = point('Allow');
+        for (const kind of ['reading', 'working folder', 'temporary folder', 'deleting its own temporary folder']) expect(allow, kind).toContain(kind);
+      });
+
+      it('denies what reaches outside the working folder, and tells the head of that agent\'s department with the picture', () => {
+        const deny = point('Deny');
+        for (const kind of ['outside the working folder', 'system paths', 'secrets', 'unfamiliar addresses', 'not sure']) expect(deny, kind).toContain(kind);
+        for (const told of ['outcome denied', "head of that agent's department", 'picture of the screen']) expect(deny, told).toContain(told);
+      });
+
+      it('never answers consents, sign-in, passwords, payment or plans, and only signals the orchestrator', () => {
+        const never = point('Consents');
+        for (const kind of ['sign-in', 'passwords', 'payment', 'plans', 'never']) expect(never, kind).toContain(kind);
+        expect(never).toContain('orchestrator');
+        expect(never).not.toContain('program_keys');
+      });
+
+      it('takes a fresh picture before every key and leaves its decision in the agent\'s journal', () => {
+        const key = point('Take a fresh');
+        expect(key).toContain('program_screen');
+        expect(key).toContain('before every key');
+        for (const part of ['what was asked', 'what you chose', 'why', "agent's journal"]) expect(key, part).toContain(part);
+      });
+
+      it('leaves a question about the work itself to a person', () => {
+        const work = point('A question about the work');
+        expect(work).toContain('ask_person');
+        expect(work).toMatch(/Leave it alone/);
+      });
+    });
+
     it('presses nothing on terms, consents, sign-in, passwords, codes, payment or a plan, and only signals', () => {
       const never = step('Press nothing on');
       for (const kind of ['terms', 'any consent', 'sharing data', 'sign-in', 'passwords', 'codes', 'payment', 'plan']) expect(never, kind).toContain(kind);

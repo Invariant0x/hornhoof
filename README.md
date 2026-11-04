@@ -82,7 +82,7 @@ Instead of a dozen chats you have one company. You write to the orchestrator onc
 
 ### A company that keeps itself moving
 
-Operations, a department every company always has, keeps the work going so you do not have to. Its task watchdog wakes every 10 minutes while there is work, nudges any agent that is stuck on a task, and tells the head when a nudge did not help. Every three hours another agent reads what failed and where agents stumbled, and proposes fixes. They wait for you under Improvements. When an agent's program stops on a screen nobody planned for, the program operator looks at it: it passes what is harmless, and brings you terms, sign-ins and payment with a picture of the screen. Hornhoof keeps these people and the department's head in place by itself, in new companies and in ones that already run.
+Operations, a department every company always has, keeps the work going so you do not have to. Its task watchdog wakes every 10 minutes while there is work, nudges any agent that is stuck on a task, and tells the head when a nudge did not help. Every three hours another agent reads what failed and where agents stumbled, and proposes fixes. They wait for you under Improvements. When an agent's program stops on a screen nobody planned for, the program operator looks at it: it passes what is harmless, refuses what a program may not do, and brings you terms, sign-ins and payment with a picture of the screen. Hornhoof keeps these people and the department's head in place by itself, in new companies and in ones that already run.
 
 ### All your computers in one pool
 
