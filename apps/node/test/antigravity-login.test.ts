@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -135,6 +135,20 @@ describe.skipIf(!hasTmux)("Antigravity CLI's first-run setup", () => {
     expect(await goneFrom(dir)).toEqual([]);
   });
 
+  /* The node may run as root, and the agent owns its home: a link it left where the node looks at agy hands over nothing. */
+  it('looks at agy in no link left in its home, and starts nothing there', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'agy-look-'));
+    const home = join(dir, 'home');
+    const elsewhere = join(dir, 'elsewhere');
+    mkdirSync(home, { recursive: true });
+    mkdirSync(elsewhere);
+    symlinkSync(elsewhere, join(home, '.hh-setup-check'));
+    process.env.FAKE_LOG = join(dir, 'agy.log');
+    const user = { uid: process.getuid!(), gid: process.getgid!() };
+    const look = antigravityAdapter({ home, tools: join(dir, 'tools'), bin: FAKE, user }).setupNeeded!();
+    await expect(look).rejects.toThrow(`${join(home, '.hh-setup-check')} is not a folder.`);
+    expect([existsSync(join(dir, 'agy.log')), readdirSync(elsewhere)]).toEqual([false, []]);
+  });
 });
 
 it("shows agy's terms only on the terminal of the person who runs the install command", () => {
