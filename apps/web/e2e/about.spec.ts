@@ -52,7 +52,7 @@ for (const language of ['en', 'ru']) for (const theme of ['light', 'dark']) for 
     expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
     await page.screenshot({ path: info.outputPath(`about-${language}-${theme}-${width}.png`), fullPage: true });
     await expect(dialog).not.toContainText(language === 'en' ? 'Developer' : 'Разработчик');
-    await expect(dialog.locator('.about-author')).toHaveText(language === 'en' ? 'Author — Ivan Korol, © 2026' : 'Автор — Ivan Korol, © 2026');
+    await expect(dialog.locator('.about-author')).toHaveText(language === 'en' ? 'Author: Ivan Korol, © 2026' : 'Автор: Ivan Korol, © 2026');
     expect(box!.height, 'the window is clearly lower than it was').toBeLessThan(TALLEST[width]!);
     expect(box!.width, 'the window is no wider than a small window').toBeLessThanOrEqual(420);
     expect(await dialog.evaluate(element => element.scrollHeight <= element.clientHeight), 'the window fits without scrolling').toBe(true);
