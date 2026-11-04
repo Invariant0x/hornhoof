@@ -8,11 +8,14 @@ import { CEO_DECIDES, DecidedByNote } from './DecidedBy';
    it for a day, then until when it is open with a click to close it. People of the whole company read it without them. */
 export const isOpen = (view: ComputerView) => view.until !== null && Date.parse(view.until) > Date.now();
 
+export type ComputerAnswer = 'open' | 'close' | 'decline';
+export const answerComputer = (action: ComputerAnswer) => api.post<ComputerView>(`/api/computer/${action}`);
+
 export function ComputerCard({ view, onChange, onFailure }: { view: ComputerView; onChange(next: ComputerView): void; onFailure(err: unknown): void }) {
   const t = useT();
   const { language } = useLanguage();
   const machine = view.machine ?? t.window.computerServer;
-  const act = (action: 'open' | 'close' | 'decline') => api.post<ComputerView>(`/api/computer/${action}`).then(onChange, onFailure);
+  const act = (action: ComputerAnswer) => answerComputer(action).then(onChange, onFailure);
   /* An older server shows it to the CEO alone. */
   const decides = view.canAnswer ?? true;
 
