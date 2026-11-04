@@ -702,6 +702,7 @@ export const en = {
     usage_limit: 'plan limit reached',
     auth: 'sign-in needed',
     setup: 'first setup needed',
+    tools: "Hornhoof's tools missing",
     network: 'network error',
     cut: 'answer cut off',
     refused: 'refused by the provider',

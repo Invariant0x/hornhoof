@@ -13,9 +13,9 @@ export type JobError = (typeof JOB_ERRORS)[number];
 
 /* Why a turn's program failed, in one list for every program: the model is busy, too many requests now, the plan's
    window is used up, the sign-in no longer works, the program waits for a first setup only the plan's owner may pass,
-   such as accepting its terms, the service could not be reached, the answer broke off, the provider will not do this
-   work, the context or output is too big, the program itself is gone, or anything else. */
-export const FAILURE_KINDS = ['overloaded', 'rate_limited', 'usage_limit', 'auth', 'setup', 'network', 'cut', 'refused', 'too_big', 'crash', 'unknown'] as const;
+   such as accepting its terms, it did not get Hornhoof's tools, the service could not be reached, the answer broke off,
+   the provider will not do this work, the context or output is too big, the program itself is gone, or anything else. */
+export const FAILURE_KINDS = ['overloaded', 'rate_limited', 'usage_limit', 'auth', 'setup', 'tools', 'network', 'cut', 'refused', 'too_big', 'crash', 'unknown'] as const;
 export type FailureKind = (typeof FAILURE_KINDS)[number];
 /* A failed turn's kind, the program's own words for it, cut to size, and whether the program called it worth trying again. */
 export const Failure = z.object({ kind: z.enum(FAILURE_KINDS), text: z.string().max(2000), retryable: z.boolean() });

@@ -12,7 +12,8 @@ describe.skipIf(!hasTmux)('turns ended by a delayed hook', () => {
   for (const kind of ['claude', 'antigravity'] as const) it(`closes ${kind}'s turn by its hook after a slow owner check, with the program alive`, async () => {
     const key = `slow-hook-${kind}`;
     const fixture = procFixture(key);
-    await setUp({ proc: fixture.proc });
+    /* agy lists its tools through the same slow check before it gets the prompt. */
+    await setUp({ proc: fixture.proc, toolsMs: 10_000 });
     fixture.listen(host['bridge'], tmux);
     const run = tmux.run.bind(tmux);
     vi.spyOn(tmux, 'run').mockImplementation(async (args, input) => {

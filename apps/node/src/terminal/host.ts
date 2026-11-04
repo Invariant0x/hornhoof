@@ -287,6 +287,11 @@ async function keptContext(fs: AgentFs, workDir: string, sessionId: string): Pro
 
 /* The turn's own address and token for pictures change every turn; the bridge serves them instead. */
 const lasting = (env: Record<string, string> = {}) => Object.fromEntries(Object.entries(env).filter(([k]) => !k.startsWith('HH_ATTACH_')));
+/* A Hornhoof turn into Antigravity waits for agy to list Hornhoof's tools, which it does on its own time after it starts. */
+const needsTools = ({ program, input }: TermJob): boolean => program.kind === 'antigravity' && Boolean(input.tools && input.prompt);
+/* Resolves false once the turn is stopped, and never for a turn nobody can stop. */
+const stopped = (signal?: AbortSignal): Promise<false> =>
+  new Promise(resolve => (signal?.aborted ? resolve(false) : signal?.addEventListener('abort', () => resolve(false), { once: true })));
 
 /* Runs agents in their tmux sessions on this node and shows those sessions to the people watching. */
 export class TerminalHost {
@@ -401,12 +406,12 @@ export class TerminalHost {
     const spec = program.launch({ bin: job.bin, home: job.home, workDir: input.workDir, sessionId: input.sessionId, model: input.model, effort: input.effort, compactWindow: input.compactWindow, instructionsFile, urls, plugins: this.plugins });
     const hash = await this.versionedHash(a, job, spec);
     if (input.signal?.aborted) return this.failedTurn(a, job, 'cancelled');
-    const goesOn = await this.goesOn(a, input.sessionId, hash);
+    const goesOn = await this.goesOn(a, job, hash);
     a.launch = { job, spec };
     /* A program started with nothing to type gets its tools before its turn ends, while Hornhoof still answers for them.
-       Kimi Code connects to its tools only once it has a session, which a new one gets with the first message, and
-       Antigravity only while it answers a message. */
-    const lazy = (program.kind === 'kimi' && !input.sessionId) || program.kind === 'antigravity';
+       Kimi Code connects to its tools only once it has a session, which a new one gets with the first message; agy loads
+       them in the background as its terminal starts. */
+    const lazy = program.kind === 'kimi' && !input.sessionId;
     const tools = !goesOn && !input.prompt && input.tools && !lazy ? this.bridge.listed(job.key, this.toolsMs) : null;
 
     /* What is left in the log from before belongs to no turn. */
@@ -451,7 +456,21 @@ export class TerminalHost {
   private async runRequested(a: Agent, job: TermJob, turn: Turn, tools: Promise<unknown> | null, goesOn: boolean, ended: Deferred<string>): Promise<RunResult> {
     /* Nothing to type: the turn only starts the program for the person who opened its window. */
     if (!job.input.prompt) return this.started(a, turn, tools, goesOn ? null : job.input.sessionId === null);
-    return (await this.typePrompt(a, job, job.input.prompt)) ?? this.turnEnd(a, job, ended, turn);
+    return (await this.toolsMissing(a, job)) ?? (await this.typePrompt(a, job, job.input.prompt)) ?? this.turnEnd(a, job, ended, turn);
+  }
+
+  /* agy 1.4.12 loads the MCP servers of its folder in the background once it starts, and a turn gets only the tools listed
+     before it began, so a prompt typed at once works without Hornhoof's. Hornhoof's prompt goes into agy once agy has
+     listed them through the bridge since it started. One that does not ends the turn saying so; the next turn starts agy
+     anew unless it has listed them by then. */
+  private async toolsMissing(a: Agent, job: TermJob): Promise<RunResult | null> {
+    if (!needsTools(job)) return null;
+    const { signal } = job.input;
+    const listed = await Promise.race([this.bridge.listed(job.key, this.toolsMs, a.startedAt), stopped(signal)]);
+    if (signal?.aborted) return await this.failedTurn(a, job, 'cancelled');
+    if (listed) return null;
+    a.failure = failure('tools', `Antigravity CLI did not get Hornhoof's tools within ${Math.round(this.toolsMs / 1000)} s of showing its prompt.`);
+    return await this.failedTurn(a, job, 'agent_failed');
   }
 
   private async waitForTurn(a: Agent, job: TermJob): Promise<void> {
@@ -487,10 +506,12 @@ export class TerminalHost {
   }
 
   /* The program runs as this turn would start it, in the session it asks for. A new session asked for goes on in a program
-     started for a person that nothing was said in yet. */
-  private async goesOn(a: Agent, sessionId: string | null, hash: string): Promise<boolean> {
+     started for a person that nothing was said in yet. An agy that never listed Hornhoof's tools would work without them. */
+  private async goesOn(a: Agent, job: TermJob, hash: string): Promise<boolean> {
+    const { sessionId } = job.input;
     const sameSession = sessionId === null ? a.fresh : sessionId === a.sessionId || a.cleared.has(sessionId);
-    return sameSession && a.hash === hash && (await this.opts.tmux.alive(a.name));
+    const tools = !needsTools(job) || this.bridge.listedSince(job.key, a.startedAt);
+    return sameSession && a.hash === hash && tools && (await this.opts.tmux.alive(a.name));
   }
 
   /* Starts the program for the turn. One that never shows it is ready ends the turn with its screen, which says why. */

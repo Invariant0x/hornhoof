@@ -79,6 +79,53 @@ describe("the node's bridge to Hornhoof's tools", () => {
     expect(listed).toBe(true);
   });
 
+  it('counts a listing of the tools from when it was asked, so a slow answer to the program before counts for none since', async () => {
+    let answer = () => {};
+    const answered = new Promise<void>(r => (answer = r));
+    const slow = createServer((req, res) => {
+      req.resume().on('end', () => void answered.then(() => res.writeHead(200, { 'content-type': 'application/json' }).end('{"jsonrpc":"2.0","id":1,"result":{"tools":[]}}')));
+    });
+    await new Promise<void>(r => slow.listen(0, '127.0.0.1', r));
+    const bridge = new Bridge(`http://127.0.0.1:${(slow.address() as AddressInfo).port}`, () => {});
+    await bridge.start();
+    closers.push(() => bridge.stop(), () => slow.close());
+    const a = bridge.agent('agent-1');
+    bridge.setToken('agent-1', 'tok-turn-1');
+    const asked = fetch(a.mcpUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' });
+    await new Promise(r => setTimeout(r, 100));
+    const since = Date.now();
+    const listed = bridge.listed('agent-1', 300, since);
+    answer();
+    await asked;
+    expect(await listed).toBe(false);
+    expect([bridge.listedSince('agent-1', since), bridge.listedSince('agent-1', since - 1000)]).toEqual([false, true]);
+  });
+
+  it('keeps the later of two listings when the answer to the earlier one comes last', async () => {
+    let answer = () => {};
+    const answered = new Promise<void>(r => (answer = r));
+    let calls = 0;
+    const server = createServer((req, res) => {
+      const first = calls++ === 0;
+      req.resume().on('end', () => void (first ? answered : Promise.resolve()).then(() => res.writeHead(200, { 'content-type': 'application/json' }).end('{"jsonrpc":"2.0","id":1,"result":{"tools":[]}}')));
+    });
+    await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+    const bridge = new Bridge(`http://127.0.0.1:${(server.address() as AddressInfo).port}`, () => {});
+    await bridge.start();
+    closers.push(() => bridge.stop(), () => server.close());
+    const a = bridge.agent('agent-1');
+    bridge.setToken('agent-1', 'tok-turn-1');
+    const list = () => fetch(a.mcpUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' });
+    const early = list();
+    await new Promise(r => setTimeout(r, 100));
+    const since = Date.now();
+    await list();
+    expect(bridge.listedSince('agent-1', since)).toBe(true);
+    answer();
+    await early;
+    expect(bridge.listedSince('agent-1', since)).toBe(true);
+  });
+
   it('answers a tool call between turns with an error the agent can read, without asking Hornhoof', async () => {
     const up = await upstream();
     const bridge = new Bridge(up.url, () => {});
