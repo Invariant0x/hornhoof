@@ -4,7 +4,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Ctx } from '../../app.js';
 import { hashToken } from '../../crypto/tokens.js';
 import { nodes } from '../../db/schema.js';
-import { BUILTIN, nodeIdentity, type NodeIdentity } from './hub.js';
+import { BUILTIN, type NodeIdentity } from './hub.js';
 
 /* Results can be long; anything bigger than this closes the socket. */
 const MAX_FRAME = 4 * 1024 * 1024;
@@ -22,8 +22,9 @@ export async function identify(ctx: Ctx, req: FastifyRequest): Promise<NodeIdent
   const key = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
   if (!key) return null;
   if (ctx.config.nodeKey && sameKey(key, ctx.config.nodeKey)) return BUILTIN;
-  const [node] = await ctx.db.select({ id: nodes.id }).from(nodes).where(eq(nodes.keyHash, hashToken(key)));
-  return node ? nodeIdentity(node.id) : null;
+  const keyHash = hashToken(key);
+  const [node] = await ctx.db.select({ id: nodes.id }).from(nodes).where(eq(nodes.keyHash, keyHash));
+  return node ? { kind: 'node', nodeId: node.id, keyHash } : null;
 }
 
 export function nodeSocket(app: FastifyInstance, ctx: Ctx): void {

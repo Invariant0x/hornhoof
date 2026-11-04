@@ -74,18 +74,19 @@ type ExistingPlan = {
 
 const isProtectedPlan = (s: ExistingPlan, busy: ReadonlySet<string | null>) => s.removedAt === null && (s.status === 'ready' || busy.has(s.id));
 
-async function clearPlanNodes(tx: Db, resetIds: string[]): Promise<void> {
-  if (!resetIds.length) return;
+async function clearPlanNodes(tx: Db, resetIds: string[]): Promise<string[]> {
+  if (!resetIds.length) return [];
   const goneNodes = tx.select({ id: nodes.id }).from(nodes).where(inArray(nodes.subscriptionId, resetIds));
   await tx.update(subscriptions).set({ removedAt: null, status: 'waiting_machine', leaseNodeId: null }).where(inArray(subscriptions.id, resetIds));
   await tx.update(agents).set({ nodeId: null }).where(inArray(agents.nodeId, goneNodes));
   await tx.update(jobs).set({ nodeId: null }).where(inArray(jobs.nodeId, goneNodes));
   await tx.update(testParts).set({ nodeId: null }).where(inArray(testParts.nodeId, goneNodes));
   await tx.delete(planCredentials).where(inArray(planCredentials.subscriptionId, resetIds));
-  await tx.delete(nodes).where(inArray(nodes.subscriptionId, resetIds));
+  const removed = await tx.delete(nodes).where(inArray(nodes.subscriptionId, resetIds)).returning({ id: nodes.id });
+  return removed.map(n => n.id);
 }
 
-async function prepareConnectPlans(tx: Db, me: Person, providers: Plan[]): Promise<string[]> {
+async function prepareConnectPlans(tx: Db, me: Person, providers: Plan[]): Promise<{ ids: string[]; removedNodes: string[] }> {
   const had = (await tx
     .select({
       id: subscriptions.id,
@@ -108,7 +109,7 @@ async function prepareConnectPlans(tx: Db, me: Person, providers: Plan[]): Promi
     const row = had.find(s => s.provider === p);
     return row ? [row] : [];
   });
-  await clearPlanNodes(tx, kept.map(s => s.id));
+  const removedNodes = await clearPlanNodes(tx, kept.map(s => s.id));
   const fresh = providers.filter(p => !kept.some(s => s.provider === p));
   const rows = fresh.length
     ? await tx
@@ -116,7 +117,7 @@ async function prepareConnectPlans(tx: Db, me: Person, providers: Plan[]): Promi
         .values(fresh.map(p => ({ companyId: me.companyId, provider: p, kind: 'personal' as const, label: PLANS[p], ownerPersonId: me.id, status: 'waiting_machine' as const })))
         .returning({ id: subscriptions.id })
     : [];
-  return [...kept.map(s => s.id), ...rows.map(r => r.id)];
+  return { ids: [...kept.map(s => s.id), ...rows.map(r => r.id)], removedNodes };
 }
 
 export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
@@ -193,11 +194,12 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/subscriptions/connect', async (req, reply) => {
     const me = await requirePerson(req, db);
     const { providers } = ConnectBody.parse(req.body);
-    const { ids, command } = await db.transaction(async tx => {
+    const { ids, removedNodes, command } = await db.transaction(async tx => {
       await lockCommandOwner(tx, me.id);
-      const ids = await prepareConnectPlans(tx, me, providers);
-      return { ids, command: await createInstallCommand(tx, config, me, { companyId: me.companyId, personId: me.id, subscriptionIds: ids }) };
+      const { ids, removedNodes } = await prepareConnectPlans(tx, me, providers);
+      return { ids, removedNodes, command: await createInstallCommand(tx, config, me, { companyId: me.companyId, personId: me.id, subscriptionIds: ids }) };
     });
+    for (const id of removedNodes) hub.close(id, 4001);
     const views = (await subViews(db, online, undefined, me)).filter(s => ids.includes(s.id));
     reply.code(201);
     return { subscriptions: views, ...command };
