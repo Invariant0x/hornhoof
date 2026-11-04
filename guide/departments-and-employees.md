@@ -15,7 +15,7 @@ Click a department to fly into it. Its schema shows:
 
 Every employee shows the task it is about and what it does now: working, queued, handed on, needs a decision, or free.
 
-"Tree" shows the work of the current turn. It opens at 100% from its start, and everything on its plates can be read at any number of employees: a long task title wraps, and the tree may be wider and taller than the screen. Drag it with a mouse or finger, use the wheel to zoom, or use the same zoom and "Show everything" buttons as on the map. The tree is for viewing only. Click an employee's name or any of its task rows to open its window, including when it is sleeping.
+"Tree" shows the work of the current turn. It opens at 100% from its start, and each employee's name, role, task and state show in full however many employees there are: a long task title wraps, and the tree may be wider and taller than the screen. Drag it with a mouse or finger, use the wheel to zoom, or use the same zoom and "Show everything" buttons as on the map. The tree is for viewing only. Click an employee's name or any of its task rows to open its window, including when it is sleeping.
 
 On the map, a department's card has one square per employee, in the same colors.
 

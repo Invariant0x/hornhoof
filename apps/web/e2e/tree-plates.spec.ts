@@ -40,7 +40,7 @@ function aloneIn({ tree, org }: Tree, name: string): Tree {
   const mine = (agent: { name: string }) => agent.name === name, department = org.departments[0]!;
   const reviews = tree.reviews!.map(r => ({ ...r, reviewers: r.reviewers.filter(p => mine(p.agent)) })).filter(r => r.reviewers.length);
   return {
-    org: { ...org, departments: [{ ...department, employees: department.employees.filter(mine) }] },
+    org: { ...org, departments: [{ ...department, employees: department.employees.filter(mine), repository: { ...department.repository!, branch: 'main' } }] },
     tree: { ...tree, reviews, review: reviews.at(-1) ?? null, lines: tree.lines.filter(l => mine(l.agent)), activity: tree.activity!.filter(a => mine(a.agent)),
       idle: tree.idle.filter(i => mine(i.agent)), waiting: tree.waiting!.filter(w => mine(w.agent)), time: tree.time.filter(t => mine(t.agent)) },
   };
@@ -75,9 +75,9 @@ const readPlates = (page: Page) => page.locator('.tv-labs .lchip').evaluateAll((
 const inFrame = (frame: Frame, item: Frame) => item.x >= frame.x && item.y >= frame.y
   && item.x + item.width <= frame.x + frame.width && item.y + item.height <= frame.y + frame.height;
 
-async function expectNoPlatesTouch(labs: Locator) {
+async function expectNoPlatesTouch(labs: Locator, count = 14) {
   const rects = await labs.locator('.lchip').evaluateAll(list => list.map(el => el.getBoundingClientRect()).map(r => ({ top: r.top, bottom: r.bottom })));
-  expect.soft(rects.length).toBeGreaterThanOrEqual(14);
+  expect.soft(rects.length).toBeGreaterThanOrEqual(count);
   const overlaps = rects.filter((r, i) => rects.some((other, j) => i !== j && r.top < other.bottom && other.top < r.bottom));
   expect.soft(overlaps).toEqual([]);
 }
@@ -158,6 +158,7 @@ for (const lang of ['en', 'ru'] as const) {
         await expect.soft(of('Ostap')).toContainText(LONG_WAIT);
         await expect.soft(labs.locator('.lchip.tk.main')).toContainText(LONG_BRANCH);
         const size = (name: string) => plates.find(p => p.name === name)!.size;
+        expect.soft(all.find(p => p.name === 'turn-4')!.size, 'the turn plate is its natural size').toEqual([PLATE.width, 40]);
         for (const name of ['Nora', 'Lena']) expect.soft(size(name), `${name}'s plate with short texts is exactly the natural size`).toEqual([PLATE.width, PLATE.height]);
         expect.soft(size('Mark')[1], 'a very long title wraps instead of being cut').toBeGreaterThan(PLATE.height);
         expect.soft(size(LONG_NAME)[1], 'a very long name wraps instead of being cut').toBeGreaterThan(PLATE.height);
@@ -183,7 +184,8 @@ for (const lang of ['en', 'ru'] as const) {
         for (const name of ['Bruno', 'Mark']) {
           shown = aloneIn(full, name);
           await open(page, lang);
-          const alone = (await readPlates(page)).find(p => !p.trunk);
+          const seen = await readPlates(page), alone = seen.find(p => !p.trunk);
+          expect.soft(seen.find(p => p.name === 'main')!.size, 'the main plate with a short name is its natural size').toEqual([PLATE.width, 32]);
           expect.soft(alone!.name).toBe(name);
           expect.soft(alone!.size, `${name}'s plate is the size it is in the full department`).toEqual(plates.find(p => p.name === name)!.size);
           if (name === 'Bruno') await page.screenshot({ path: info.outputPath(`tree-${lang}-${theme}-${width}-alone.png`) });
@@ -193,3 +195,19 @@ for (const lang of ['en', 'ru'] as const) {
     }
   }
 }
+
+test('a department without a repository opens at 100% from its first plate', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.addInitScript(() => localStorage.setItem('hh-lang', 'en'));
+  const full = fullDepartment();
+  await serveTree(page, { during: true });
+  await page.route('**/api/org', route => route.fulfill({ json: full.org }));
+  await page.route('**/api/departments/d2/tree', route => route.fulfill({ json: { tree: { ...full.tree, repository: false } } }));
+  await open(page, 'en');
+  await expect(page.locator('.dview .zv')).toHaveText('100%');
+  await expect(page.locator('.tv-labs .lchip.tk')).toHaveCount(0);
+  const frame = await box(page.locator('.tv-scroll')), first = page.locator('.tv-labs .lchip').first();
+  expect(inFrame(frame, await box(first)), 'the first plate is on the screen').toBe(true);
+  expect((await readPlates(page)).find(p => p.name === 'Nora')!.size).toEqual([PLATE.width, PLATE.height]);
+  await expectNoPlatesTouch(page.locator('.tv-labs'), 12);
+});
