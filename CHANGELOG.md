@@ -7,8 +7,8 @@ The middle number is the turn; the last counts releases between turns.
 
 ## [0.5.2] - 2026-11-04
 
-An urgent fix: Antigravity on a new machine no longer fails every turn at its
-first-run setup.
+Urgent fixes for Antigravity: a new machine no longer fails every turn at its
+first-run setup, and its agents have Hornhoof's tools from their first turn.
 
 ### Fixed
 
@@ -18,6 +18,14 @@ first-run setup.
   setup", its agents wait without spending retries, and its owner accepts the
   terms by running the install command on that machine again. The choice stays
   on the node's volume across updates.
+- Antigravity agents have Hornhoof's tools from their first turn again, so they
+  hand in work and give verdicts without detours through subagents. The node
+  gives Antigravity its work only once it has loaded Hornhoof's tools. If it
+  has not within 15 seconds, the turn fails as "Hornhoof's tools missing" and
+  is tried again.
+- A turn that is tried again says in one short line why the last try failed,
+  without the program's screen, and repeats the work its first try was given,
+  not the text of the previous retry.
 
 ## [0.5.1] - 2026-11-04
 
