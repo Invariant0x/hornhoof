@@ -12,7 +12,7 @@ export const TAKEN_TYPES = TAKEN.join(',');
 const SCALES = [1, 0.75, 0.5, 0.35];
 const JPEG_QUALITY = 0.85;
 /* Panels stand in the window's box though they show beside it, with fields of their own. */
-const PANELS = '.side-panels, .agent-task-slot';
+const PANELS = '.side-panels';
 const FIELDS = 'input, textarea, select, [contenteditable="true"]';
 const OWN_FIELDS = '.t-in textarea, .xterm-helper-textarea';
 
@@ -173,20 +173,17 @@ function dragOut(e: DragEvent, d: Drags) {
 }
 
 function dragOver(e: DragEvent, d: Drags) {
-  if (!hasFiles(e)) return;
-  e.preventDefault();
-  if (e.dataTransfer) e.dataTransfer.dropEffect = takes(e, d) ? 'copy' : 'none';
+  if (hasFiles(e) && e.dataTransfer) e.dataTransfer.dropEffect = takes(e, d) ? 'copy' : 'none';
 }
 
 function dropped(e: DragEvent, d: Drags) {
   if (!hasFiles(e)) return;
-  e.preventDefault();
   d.depth.current = 0;
   d.setDragging(false);
   if (takes(e, d)) d.add(Array.from(e.dataTransfer?.files ?? []));
 }
 
-/* A browser opens a file dropped on a page in place of the page. */
+/* Here and past the box: a browser opens a file dropped on a page in place of the page. This also lets a file drop at all. */
 function keepPage(e: DragEvent) {
   if (hasFiles(e)) e.preventDefault();
 }

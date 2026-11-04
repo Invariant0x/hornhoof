@@ -238,7 +238,7 @@ describe('a picture pasted into the window', () => {
   it('is not taken from a field of a panel or of a card, or dropped on a panel', async () => {
     open();
     await line();
-    const panel = document.querySelector('.agent-task-slot')!;
+    const panel = document.querySelector('.side-panels')!;
     const comment = panel.appendChild(document.createElement('textarea'));
     expect(fireEvent.paste(comment, copied([png()]))).toBe(true);
     const card = document.querySelector('.agent-conversation')!.appendChild(document.createElement('input'));

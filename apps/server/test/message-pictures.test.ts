@@ -72,6 +72,14 @@ describe('a picture a person sends an agent', () => {
     expect(row).toMatchObject({ agentId: bruno.id, personId: idOf('Maria'), jobId: null, taskId: null, requestId: null, name: 'screen.png', mediaType: 'image/png', size: PNG.length });
   });
 
+  it('takes its name from what it is when it comes without one', async () => {
+    const { app, ceo, bruno } = await company();
+    const send = (bytes: Buffer, name: string) => app.inject({ method: 'POST', url: `/api/agents/${bruno.id}/pictures${name}`, payload: bytes, headers: { 'content-type': 'application/octet-stream' }, ...as(ceo) });
+    expect((await send(PNG, '')).json().name).toBe('picture.png');
+    expect((await send(JPEG, '')).json().name).toBe('picture.jpg');
+    expect((await send(JPEG, '?name=..')).json().name).toBe('picture.jpg');
+  });
+
   it('is judged by what it holds, not by its name or the type it says', async () => {
     const { app, db, ceo, bruno } = await company();
     const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
@@ -98,6 +106,7 @@ describe('a picture a person sends an agent', () => {
     for (const size of [PICTURE_BYTES + 1, PICTURE_BYTES * 4]) {
       const res = await upload(app, ceo, bruno.id, big(size));
       expect([res.statusCode, res.json().error.reason]).toEqual([413, 'picture_too_big']);
+      expect(res.json().error.message).toContain('3 MB');
     }
   });
 
@@ -131,6 +140,7 @@ describe('a message with pictures', () => {
     expect(run.prompt).toContain('What is wrong here?');
     expect(run.prompt).toContain(`screen.png: hh-fetch message ${shot.id}`);
     expect(run.prompt).toContain(`photo.jpg: hh-fetch message ${photo.id}`);
+    expect(run.prompt).toContain('Pictures came with this message');
     expect(run.prompt).not.toContain('iVBOR');
     const folder = mkdtempSync(join(tmpdir(), 'hh-pictures-'));
     const got = await hhFetch(['message', shot.id], url, run.toolToken!, folder);
