@@ -1,3 +1,6 @@
+import { combineReport, reportDelay } from './report-notices.js';
+import type { Notification } from '@hornhoof/protocol';
+import type { MessageParty } from '../events/parties.js';
 import { effortFor, effortsOf, MAX_INSTRUCTIONS, modelsFor, OLD_NODE_INSTRUCTIONS, ORCHESTRATOR_EFFORT, UNHEARD_MS, type Limits } from '@hornhoof/protocol';
 import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lte, ne, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
@@ -158,7 +161,7 @@ export const STOPPED_ON_PURPOSE = ['cancelled', 'removed', 'switched_off'];
 /* withMessage: what is kept together with the message, or not at all. */
 /* retryOf: the turn a node restart cut off, which this one runs once more. continueOf: the turn that ended without
    recording its work, whose session this one goes on with. */
-type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string | null; text: string; from?: 'orchestrator' | 'agent'; name?: string; by?: string; task?: { id: string; number: number }; taskWake?: TaskWake; request?: string; timer?: true; failureCase?: string; silentJob?: string; silentReason?: TurnAlarmReason }; repeated?: TurnWords; taskId?: string; answersCeo?: boolean; withMessage?: WithEvent; retryOf?: string; continueOf?: string; notBefore?: Date | null };
+type Turn = { companyId: string; agentId: string; prompt: string; createdBy: string | null; message?: { personId: string | null; text: string; from?: 'orchestrator' | 'agent'; name?: string; by?: string; task?: { id: string; number: number }; taskWake?: TaskWake; request?: string; timer?: true; failureCase?: string; silentJob?: string; silentReason?: TurnAlarmReason; notification?: Notification; actor?: MessageParty; action?: string; report?: string; reportContext?: string; senders?: MessageParty[] }; repeated?: TurnWords; taskId?: string; answersCeo?: boolean; withMessage?: WithEvent; retryOf?: string; continueOf?: string; notBefore?: Date | null };
 
 export type TurnMessage = NonNullable<Turn['message']>;
 
@@ -247,6 +250,11 @@ async function isCeo(ctx: Ctx, personId: string | null | undefined): Promise<boo
 
 /* Stores the turn and, when it carries a person's message, the message under the same job. */
 export async function insertTurn(ctx: Ctx, t: Turn): Promise<string> {
+  const combined = t.message?.report ? await combineReport(ctx, t) : null;
+  return combined ?? insertFreshTurn(ctx, t);
+}
+
+async function insertFreshTurn(ctx: Ctx, t: Turn): Promise<string> {
   const sub = await liveSubscription(ctx, t.agentId);
   if (!sub) throw new NoSubscription();
   const [job] = await ctx.db
@@ -262,7 +270,7 @@ export async function insertTurn(ctx: Ctx, t: Turn): Promise<string> {
       taskId: t.taskId ?? null,
       retryOf: t.retryOf ?? null,
       continueOf: t.continueOf ?? null,
-      notBefore: t.notBefore ?? null,
+      notBefore: t.notBefore ?? reportDelay(t.message),
       answersCeo: t.answersCeo === true || (await isCeo(ctx, t.message?.personId)),
       /* Until its message is kept, a turn sent at once answers nobody. */
       decisionInputPending: !!t.repeated || shownOf(t) !== null,
@@ -301,6 +309,8 @@ export async function enqueueTurn(ctx: Ctx, t: Turn): Promise<string> {
 
 /* Direct messages need the node's receipt, including when their topic is a task. The caller owns the input lock. */
 export async function insertOrDeliverTurn(ctx: Ctx, t: Turn, required = false): Promise<string> {
+  const combined = await combineReport(ctx, t, { send: deliverLockedInput, required });
+  if (combined) return combined;
   const message = t.repeated ? undefined : t.message;
   const into = message
     ? await deliverLockedInput(ctx, t.agentId, t.prompt, { source: { personId: message.personId, data: message }, required }, async (jobId, kept) => {
@@ -624,7 +634,7 @@ async function wentOut(ctx: Ctx, job: Queued, along: readonly Along[], lines: { 
 /* A delayed retry holds the whole line, including personal messages while task turns are held back. */
 async function waitsForRetry(ctx: Ctx, agentId: string): Promise<boolean> {
   const [retry] = await ctx.db.select({ at: jobs.notBefore }).from(jobs)
-    .where(and(conversationOf(agentId), eq(jobs.status, 'queued'), isNotNull(jobs.notBefore))).orderBy(asc(jobs.createdAt)).limit(1);
+    .where(and(conversationOf(agentId), eq(jobs.status, 'queued'), isNotNull(jobs.notBefore), sql`not exists (select 1 from agent_events e where e.job_id = ${jobs.id} and e.data->>'report' is not null)`)).orderBy(asc(jobs.createdAt)).limit(1);
   if (!retry?.at || +retry.at <= Date.now()) return false;
   pumpAt(ctx, agentId, retry.at.toISOString(), 0);
   return true;
@@ -650,10 +660,14 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const [job] = await db
     .select()
     .from(jobs)
-    .where(and(conversationOf(agentId), eq(jobs.status, 'queued'), until ? programStart : undefined, agent.switchedOffAt || spent ? isNull(jobs.taskId) : undefined))
+    .where(and(conversationOf(agentId), eq(jobs.status, 'queued'), or(isNull(jobs.notBefore), lte(jobs.notBefore, new Date(Date.now()))), until ? programStart : undefined, agent.switchedOffAt || spent ? isNull(jobs.taskId) : undefined))
     .orderBy(desc(sql`${jobs.notBefore} is not null`), asc(jobs.createdAt))
     .limit(1);
-  if (!job) return;
+  if (!job) {
+    const [later] = await db.select({ at: jobs.notBefore }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'queued'), isNotNull(jobs.notBefore))).orderBy(asc(jobs.notBefore)).limit(1);
+    if (later?.at) pumpAt(ctx, agentId, later.at.toISOString(), 0);
+    return;
+  }
   if (job.notBefore && +job.notBefore > Date.now()) return pumpAt(ctx, agentId, job.notBefore.toISOString(), 0);
   if (await heldBack(ctx, job)) return sendNext(ctx, agentId);
   const repo = await repoFor(ctx, agent);
@@ -685,7 +699,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   /* A turn that types nothing only starts the program, for a person to talk to it: what was said before and where the
      repository is go with its instructions instead. */
   const composed = catchUp ? `${catchUp}\n\n${said}` : said;
-  const prompt = job.prompt ? addressed(composed, await messageForJob(ctx, { id: job.id, companyId: job.companyId, agentId })) : '';
+  const prompt = job.prompt ? addressed(composed, await messageForJob(ctx, { id: job.id, companyId: job.companyId, agentId, retryOf: job.retryOf, continueOf: job.continueOf })) : '';
   const token = newToken();
   /* Running from the moment it is sent: the token works for its tools at once, and the next turn waits. */
   const taken = await take(ctx, job, along, { subscriptionId: sub.id, nodeId: place.nodeId, prompt, sessionId, toolTokenHash: hashToken(token), instructionsHash: runHash });

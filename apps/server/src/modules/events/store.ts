@@ -4,7 +4,7 @@ import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { agentSpot } from '../../auth/access.js';
 import { agentEvents, agents, jobs, people, type AgentEventKind } from '../../db/schema.js';
-import { agentParty, incomingEnvelope, messageData, readMessage, type MessageEnvelope, type MessageParty } from './parties.js';
+import { HORNHOOF, agentParty, incomingEnvelope, messageData, readMessage, type MessageEnvelope, type MessageParty } from './parties.js';
 
 export type EventView = { seq: number; kind: AgentEventKind; data: unknown; message?: MessageEnvelope; jobId: string | null; person: { id: string; name: string } | null; at: string };
 
@@ -69,7 +69,7 @@ export async function appendTurnEvent(ctx: Pick<Ctx, 'db' | 'bus'>, jobId: strin
 
 /* Only the receiving copy carries by, which the per-turn send quota counts after a restart. */
 async function outgoingLetter(db: Db, e: NewEvent, message?: MessageEnvelope): Promise<EventValues | null> {
-  if (!message || message.direction !== 'in' || message.from.kind !== 'agent' || !message.from.id || message.from.id === e.agentId) return null;
+  if (!message || message.direction !== 'in' || message.notification || message.from.kind !== 'agent' || !message.from.id || message.from.id === e.agentId) return null;
   const senderId = message.from.id;
   const [senderJob] = await db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, senderId), eq(jobs.kind, 'conversation'), eq(jobs.status, 'running'))).limit(1);
   return {
@@ -90,7 +90,7 @@ async function storeEvents(db: Db, values: EventValues, outgoing: EventValues | 
     : db.insert(agentEvents).values(values).returning(returning);
 }
 
-async function publishEvent(ctx: Pick<Ctx, 'db' | 'bus'>, companyId: string, agentId: string, id: string): Promise<EventView> {
+export async function publishEvent(ctx: Pick<Ctx, 'db' | 'bus'>, companyId: string, agentId: string, id: string): Promise<EventView> {
   const [stored] = await ctx.db.select(columns).from(agentEvents).leftJoin(people, eq(people.id, agentEvents.personId)).where(eq(agentEvents.id, id));
   const event = view(stored!);
   const [agent] = await ctx.db.select({ departmentId: agents.departmentId, productId: agents.productId, teamId: agents.teamId }).from(agents).where(eq(agents.id, agentId));
@@ -116,11 +116,12 @@ export async function listEvents(db: Db, agentId: string, after: number, limit =
 }
 
 /* A queued turn's sender snapshot, with trusted legacy ids for turns queued before message envelopes existed. */
-export async function messageForJob(ctx: Pick<Ctx, 'db' | 'templates'>, job: { id: string; companyId: string; agentId: string }): Promise<MessageEnvelope> {
+export async function messageForJob(ctx: Pick<Ctx, 'db' | 'templates'>, job: { id: string; companyId: string; agentId: string; retryOf?: string | null; continueOf?: string | null }): Promise<MessageEnvelope> {
   const [row] = await ctx.db.select({ data: agentEvents.data, personId: agentEvents.personId }).from(agentEvents)
     .where(and(eq(agentEvents.jobId, job.id), or(eq(agentEvents.kind, 'message'), and(eq(agentEvents.kind, 'typed'), sql`${agentEvents.data}->'_message' is not null`)))).orderBy(asc(agentEvents.seq)).limit(1);
   const saved = row && readMessage(row.data).message;
-  return saved ?? incomingEnvelope(ctx, job.companyId, job.agentId, row?.personId, row?.data);
+  const message = saved ?? await incomingEnvelope(ctx, job.companyId, job.agentId, row?.personId, row?.data);
+  return automaticMessage(message, job);
 }
 
 /* Agents with a job running right now. */
@@ -149,4 +150,10 @@ export async function earlierTalk(db: Db, agentId: string, limit = 20): Promise<
 /* How many agents work right now, for the map's counter. */
 export async function publishWorking(ctx: Pick<Ctx, 'db' | 'bus'>, companyId: string): Promise<void> {
   ctx.bus.publish(companyId, { type: 'working', working: await workingCount(ctx.db, companyId) });
+}
+
+function automaticMessage(message: MessageEnvelope, job: { retryOf?: string | null; continueOf?: string | null }): MessageEnvelope {
+  const original = job.retryOf ?? job.continueOf;
+  if (!original) return message;
+  return { direction: 'in', from: HORNHOOF, to: message.to, notification: { source: job.retryOf ? 'machine' : 'go_on', tasks: message.notification?.tasks ?? [], detail: { en: `after turn ${original}`, ru: `после хода ${original}` } } };
 }

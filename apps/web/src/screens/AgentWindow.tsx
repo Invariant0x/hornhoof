@@ -5,7 +5,7 @@ import { deptLabel, errorText, useLanguage, useT, type Messages } from '../i18n'
 import { useStream } from '../live';
 import { PROGRAM_NAMES, PROVIDER_NAMES } from '../providers';
 import type { AgentCardView, ComputerView, DecidedBy, Decisions, EventView, Me, OrchestratorState, Org, ShownCommand, StaffLine, StructureItem, SubView, TemplateKey, WaitingRequest } from '../types';
-import { EventMessage, isMessage, useFolding } from '../ui/AgentMessage';
+import { EventMessage, isMessage, messageKey, useFolding } from '../ui/AgentMessage';
 import { AgentTerminal } from '../ui/AgentTerminal';
 import { CommandCard } from '../ui/CommandCard';
 import { CEO_DECIDES } from '../ui/DecidedBy';
@@ -201,10 +201,11 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard, o
   const merge = useCallback((more: EventView[]) => {
     if (!more.length) return;
     setEvents(list => {
-      const bySeq = new Map(list.map(e => [e.seq, e]));
+      const bySeq = new Map(list.map(e => [messageKey(e), e]));
       for (const event of more) {
-        const before = bySeq.get(event.seq);
-        if ((event.message?.revision ?? 0) >= (before?.message?.revision ?? 0)) bySeq.set(event.seq, event);
+        const key = messageKey(event);
+        const before = bySeq.get(key);
+        if ((event.message?.revision ?? 0) >= (before?.message?.revision ?? 0)) bySeq.set(key, event);
       }
       return [...bySeq.values()].sort((a, b) => a.seq - b.seq);
     });
@@ -373,7 +374,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard, o
   const shown = visible(events);
   const messages = shown.filter(isMessage);
   /* Only the log folds messages; the live terminal has the whole window, and its program has Ctrl+O. */
-  const folding = useFolding(messages.map(e => e.seq), box, !terminal);
+  const folding = useFolding(messages.map(messageKey), box, !terminal);
   const newest = events.findLast(e => e.kind === 'proposal');
   const applied = new Set(events.filter(e => e.kind === 'applied').map(e => (e.data as Applied).proposalId));
   const open = newest && !applied.has(field(newest.data, 'proposalId')) ? newest.data : null;
@@ -594,7 +595,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard, o
             <div className="w2">{where}</div>
           </div>
           {shown.map((e, i) => (
-            <div key={e.seq} className="t-line">
+            <div key={messageKey(e)} className="t-line">
               {line(e, i)}
             </div>
           ))}

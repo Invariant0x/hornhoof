@@ -1,3 +1,4 @@
+import { notificationMessage } from '../events/notifications.js';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Ctx } from '../../app.js';
 import { actsAsCeo } from '../../auth/decisions.js';
@@ -51,7 +52,8 @@ export function computerRoutes(app: FastifyInstance, ctx: Ctx): void {
     const orchestrator = await line(me.companyId, { state: 'opened', until, ...onMachine(machine) }, me.id);
     /* The note waits in his line while his machine is offline, and goes out when it is back. */
     if (orchestrator && asked) {
-      await enqueueTurn(ctx, { companyId: me.companyId, agentId: orchestrator.id, prompt: openedNote(me, until, asked.reason, machine), createdBy: me.id, answersCeo: true }).catch(err => {
+      const message = await notificationMessage(ctx, me.companyId, 'computer_access', openedNote(me, until, asked.reason, machine), { actor: { personId: me.id } });
+      await enqueueTurn(ctx, { companyId: me.companyId, agentId: orchestrator.id, prompt: message.text, createdBy: me.id, answersCeo: true, message }).catch(err => {
         if (!(err instanceof NoSubscription)) throw err;
       });
     }
