@@ -622,6 +622,23 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .t-in textarea { flex: 1; min-width: 0; height: 22px; max-height: 140px; padding: 0; border: 0; background: none; resize: none; outline: none; color: var(--ink); font-family: var(--f-mono); font-size: 13px; line-height: 22px; }
 .t-in textarea:disabled { cursor: not-allowed; }
 .t-in:focus-within { border-color: var(--cyan); }
+.t-in { flex-wrap: wrap; }
+/* Pictures on their way with the message, above its words. */
+.t-tray { flex: 0 0 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.t-tray-pic { position: relative; width: 56px; height: 56px; }
+.t-tray-pic img { display: block; width: 100%; height: 100%; object-fit: cover; border: 1px solid var(--line2); border-radius: 4px; box-sizing: border-box; }
+.t-tray-pic button { position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; padding: 0; border: 1px solid var(--line2); border-radius: 50%; background: var(--surface); color: var(--ink); font-size: 13px; line-height: 16px; cursor: pointer; }
+.t-tray-pic button:disabled { cursor: default; opacity: .6; }
+.t-tray[aria-busy="true"] img { opacity: .6; }
+.t-add { flex: none; display: inline-flex; width: 22px; height: 22px; color: var(--muted); cursor: pointer; }
+.t-add:hover, .t-add:focus-within { color: var(--ink); }
+.t-add svg { width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.t-refused { flex: none; margin: 4px 12px 0; }
+/* Where to let go of a dragged picture; the drag goes on through it to the window. */
+.t-drop { position: absolute; z-index: 6; inset: 8px; display: flex; align-items: center; justify-content: center; padding: 16px; border: 2px dashed var(--cyan); border-radius: 6px; background: var(--surface); color: var(--ink); font-family: var(--f-body); font-size: 15px; text-align: center; pointer-events: none; }
+.t-pics { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 2px 16px; }
+.t-pics img { display: block; max-width: 180px; max-height: 120px; border: 1px solid var(--line2); border-radius: 4px; }
+.t-pic-gone { color: var(--muted); font-size: 12.5px; }
 /* The live terminal takes the window, wider, in its own colors; cards wait below it. */
 .orch.term { width: min(980px, calc(100vw - 32px)); }
 /* The padding sits on the terminal itself, which is what its fit leaves out when it counts rows. */
@@ -1522,7 +1539,7 @@ summary.turn-head:focus-visible { outline: 2px solid var(--cyan); outline-offset
 .window-controls .window-minimize { color: var(--amber-ink); }
 .window-controls .window-full { color: var(--ok); }
 .agent-workspace { display: flex; flex: 1; min-height: 0; min-width: 0; }
-.agent-conversation { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.agent-conversation { position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .agent-task-slot:empty { display: none; }
 .agent-task-slot { width: 40%; min-width: 320px; min-height: 0; }
 .agent-task { height: 100%; }
