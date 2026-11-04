@@ -27,10 +27,14 @@ export function limiter({ max = 10, windowMs = 15 * 60 * 1000 }: { max?: number;
   return Object.assign(attempts, { size: () => seen.size, windowMs });
 }
 
+/* Answers 429 with Retry-After: the one refusal every limit gives. */
+export function refuse(reply: FastifyReply, retryAfterS: number, windowMs: number): never {
+  reply.header('retry-after', String(retryAfterS));
+  throw new ApiError(429, 'too_many', `Too many attempts. Wait up to ${Math.round(windowMs / 60_000)} minutes, then try again.`, 'too_many_attempts');
+}
+
 /* Answers 429 with Retry-After once the key is over the limit. */
 export function guard(reply: FastifyReply, attempts: Attempts, key: string): void {
   const { allowed, retryAfterS } = attempts(key);
-  if (allowed) return;
-  reply.header('retry-after', String(retryAfterS));
-  throw new ApiError(429, 'too_many', `Too many attempts. Wait up to ${Math.round(attempts.windowMs / 60_000)} minutes, then try again.`, 'too_many_attempts');
+  if (!allowed) refuse(reply, retryAfterS, attempts.windowMs);
 }
