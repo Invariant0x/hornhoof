@@ -20,6 +20,7 @@ import { hasCurrentKey, liveNode, settlePlans } from './nodes.js';
 import { builtinInterruption, interruptionOf } from './restarts.js';
 import { interruptionValue, type RestartCut } from './restart-evidence.js';
 import { hookRejected } from './hook-rejections.js';
+import { attachNodeReconnect } from './history.js';
 
 const OPEN_JOBS = ['queued', 'running'] as const;
 
@@ -207,6 +208,12 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       /* The plan's sign-in sealed to this node, or a word to a node that holds it to seal it for this one. */
       if (id.kind === 'node') await pushCredentials(ctx, id.nodeId, msg.loggedIn);
       await pumpWaiting(ctx);
+      return;
+    }
+    case 'node.reconnect': {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars -- strip the message type tag from the node's report
+      const { type: _, ...report } = msg;
+      await attachNodeReconnect(db, id, report);
       return;
     }
     case 'status':

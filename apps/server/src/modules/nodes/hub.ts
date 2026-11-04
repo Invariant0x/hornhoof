@@ -24,7 +24,32 @@ const MISSED_PINGS = 3;
    test runs. load: how busy its machine was when it last said. skillFiles: it writes a turn's skills as files. noRuns: why
    it takes no part of any run. browserError: why Playwright's browser failed to start on the node. build: the node build its
    image is, none from a node built by hand or from before. */
-type Entry = { socket: WebSocket; keyHash: string | null; missed: number; greeted: boolean; terminals: boolean; work: boolean; load: SaidLoad | null; skillFiles: boolean; noRuns: string | null; browserError: string | null; programs: ProgramInfo[] | null; build: string | null };
+type CloseEvent = {
+  actor: 'server' | 'node' | 'network';
+  cause: 'missed_pongs' | 'node_closed' | 'socket_error' | 'replaced' | 'server_close' | 'server_stop' | 'abnormal_close';
+  closeCode: number | null;
+  closeReason: string | null;
+  error: string | null;
+};
+
+type Entry = {
+  id: NodeIdentity;
+  socket: WebSocket;
+  keyHash: string | null;
+  missed: number;
+  greeted: boolean;
+  terminals: boolean;
+  work: boolean;
+  load: SaidLoad | null;
+  skillFiles: boolean;
+  noRuns: string | null;
+  browserError: string | null;
+  programs: ProgramInfo[] | null;
+  build: string | null;
+  chain: Promise<void>;
+  end: CloseEvent | null;
+  ended: boolean;
+};
 
 /* A node's load and when it said it. */
 export type SaidLoad = NodeLoad & { at: number };
@@ -39,6 +64,7 @@ type HubOptions = {
   onMessage(id: NodeIdentity, msg: NodeMessage): Promise<void>;
   /* A screen goes straight to the people watching, without waiting behind the node's other messages. */
   onTerminal?(id: NodeIdentity, msg: TerminalMessage): void;
+  onEvent?(id: NodeIdentity, event: import('./history.js').NodeConnectionEvent): Promise<void> | void;
   onClose(id: NodeIdentity): Promise<void>;
   onError?(err: unknown): void;
 };
@@ -48,6 +74,7 @@ export class NodeHub {
   private readonly sockets = new Map<string, Entry>();
   /* When each node that is away lost its socket, while it stays away. */
   private readonly away = new Map<string, number>();
+  private readonly tails = new Map<string, Promise<void>>();
   private readonly timer: NodeJS.Timeout;
 
   constructor(private readonly opts: HubOptions) {
@@ -55,30 +82,57 @@ export class NodeHub {
     this.timer.unref();
   }
 
+  private queue(entry: Entry, event: import('./history.js').NodeConnectionEvent): void {
+    const key = keyOf(entry.id);
+    const before = this.tails.get(key) ?? Promise.resolve();
+    const messages = event.kind === 'disconnected' ? entry.chain : Promise.resolve();
+    const next = Promise.all([before, messages]).then(() => this.opts.onEvent?.(entry.id, event)).catch(err => this.opts.onError?.(err));
+    this.tails.set(key, next);
+  }
+
+  private finish(entry: Entry, end: CloseEvent): void {
+    if (entry.ended) return;
+    entry.ended = true;
+    this.queue(entry, { kind: 'disconnected', at: new Date(), ...end });
+  }
+
   attach(id: NodeIdentity, socket: WebSocket): void {
     const key = keyOf(id);
-    this.sockets.get(key)?.socket.close(4000, 'Replaced by a newer connection.');
+    const previous = this.sockets.get(key);
+    if (previous) {
+      this.finish(previous, { actor: 'server', cause: 'replaced', closeCode: 4000, closeReason: 'Replaced by a newer connection.', error: null });
+      previous.socket.close(4000, 'Replaced by a newer connection.');
+    }
     const keyHash = id.kind === 'node' ? (id.keyHash ?? null) : null;
-    const entry: Entry = { socket, keyHash, missed: 0, greeted: false, terminals: false, work: false, load: null, skillFiles: false, noRuns: null, browserError: null, programs: null, build: null };
+    const entry: Entry = {
+      id, socket, keyHash, missed: 0, greeted: false, terminals: false, work: false, load: null, skillFiles: false, noRuns: null,
+      browserError: null, programs: null, build: null, chain: previous?.chain ?? Promise.resolve(), end: null, ended: false,
+    };
     this.sockets.set(key, entry);
     this.away.delete(key);
+    this.queue(entry, { kind: 'connected', at: new Date() });
     const report = (err: unknown) => this.opts.onError?.(err);
-    /* Messages run one after another, so job.started is stored before job.done. */
-    let chain = Promise.resolve();
     socket.on('pong', () => {
       entry.missed = 0;
     });
+    /* Messages run one after another, so job.started is stored before job.done. */
     socket.on('message', data => {
-      chain = this.onFrame(id, key, entry, String(data), chain);
+      entry.chain = this.onFrame(id, key, entry, String(data), entry.chain);
     });
-    socket.on('close', () => {
+    socket.on('close', (code: number, reason: Buffer) => {
       if (this.sockets.get(key) === entry) {
         this.sockets.delete(key);
         this.away.set(key, Date.now());
       }
-      chain = chain.then(() => this.opts.onClose(id)).catch(report);
+      this.finish(entry, entry.end
+        ? { ...entry.end, closeCode: code, closeReason: String(reason) }
+        : { actor: code === 1000 || code === 1001 || code === 1005 ? 'node' : 'network', cause: code === 1000 || code === 1001 || code === 1005 ? 'node_closed' : 'abnormal_close', closeCode: code, closeReason: String(reason), error: null });
+      entry.chain = entry.chain.then(() => this.opts.onClose(id)).catch(report);
     });
-    socket.on('error', report);
+    socket.on('error', (err: unknown) => {
+      entry.end ??= { actor: 'network', cause: 'socket_error', closeCode: null, closeReason: null, error: err instanceof Error ? err.message : String(err) };
+      report(err);
+    });
   }
 
   private forwardTerminal(id: NodeIdentity, msg: TerminalMessage): void {
@@ -98,7 +152,11 @@ export class NodeHub {
       this.forwardTerminal(id, msg);
       return chain;
     }
-    const deliver = () => (this.sockets.get(key) === entry ? this.opts.onMessage(id, msg) : Promise.resolve());
+    const deliver = () => {
+      if (this.sockets.get(key) !== entry) return Promise.resolve();
+      if (msg.type === 'node.reconnect') return (this.tails.get(key) ?? Promise.resolve()).then(() => this.opts.onMessage(id, msg));
+      return this.opts.onMessage(id, msg);
+    };
     const report = (err: unknown) => this.opts.onError?.(err);
     /* A message before it may wait for this word, as a finished job waits for words typed into another agent's turn. */
     if (msg.type === 'agent.said') {
@@ -251,18 +309,25 @@ export class NodeHub {
     if (!entry || (keyHash && entry.keyHash !== keyHash)) return;
     this.sockets.delete(nodeId);
     this.away.set(nodeId, Date.now());
+    this.finish(entry, { actor: 'server', cause: 'server_close', closeCode: code, closeReason: 'Disconnected in Hornhoof.', error: null });
     entry.socket.close(code, 'Disconnected in Hornhoof.');
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
     clearInterval(this.timer);
-    for (const { socket } of this.sockets.values()) socket.close(1001, 'Server is stopping.');
+    const entries = [...this.sockets.values()];
+    for (const entry of entries) {
+      this.finish(entry, { actor: 'server', cause: 'server_stop', closeCode: 1001, closeReason: 'Server is stopping.', error: null });
+      entry.socket.close(1001, 'Server is stopping.');
+    }
     this.sockets.clear();
+    await Promise.all(entries.map(entry => this.tails.get(keyOf(entry.id)) ?? entry.chain));
   }
 
   private sweep(): void {
     for (const entry of this.sockets.values()) {
       if (entry.missed >= MISSED_PINGS) {
+        this.finish(entry, { actor: 'server', cause: 'missed_pongs', closeCode: 1006, closeReason: '', error: null });
         entry.socket.terminate();
         continue;
       }

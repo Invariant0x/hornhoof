@@ -16,7 +16,6 @@ CREATE TABLE "node_connection_events" (
 --> statement-breakpoint
 ALTER TABLE "node_connection_events" ADD CONSTRAINT "node_connection_events_company_id_companies_id_fk" FOREIGN KEY ("company_id") REFERENCES "public"."companies"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "node_connection_events" ADD CONSTRAINT "node_connection_events_machine_id_machines_id_fk" FOREIGN KEY ("machine_id") REFERENCES "public"."machines"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "node_connection_events" ADD CONSTRAINT "node_connection_events_node_id_nodes_id_fk" FOREIGN KEY ("node_id") REFERENCES "public"."nodes"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "node_connection_events_happened_at" ON "node_connection_events" USING btree ("happened_at");--> statement-breakpoint
 CREATE INDEX "node_connection_events_machine_time" ON "node_connection_events" USING btree ("machine_id","happened_at");--> statement-breakpoint
 CREATE INDEX "node_connection_events_node_time" ON "node_connection_events" USING btree ("node_id","happened_at");

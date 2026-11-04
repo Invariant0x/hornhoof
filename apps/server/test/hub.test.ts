@@ -237,3 +237,92 @@ describe('live program metadata in the hub', () => {
     expect(hub.loadOf(node)).toBeNull();
   });
 });
+
+
+describe('connection history events', () => {
+  const node = { kind: 'node' as const, nodeId: 'n1' };
+
+  function fakeSocket(closed: number[] = []) {
+    const socket = Object.assign(new EventEmitter(), {
+      readyState: 1,
+      close(code: number, reason: string) {
+        closed.push(code);
+        this.readyState = 3;
+        this.emit('close', code, Buffer.from(reason));
+      },
+      ping() {},
+      terminate() {
+        this.readyState = 3;
+        this.emit('close', 1006, Buffer.alloc(0));
+      },
+    });
+    return socket;
+  }
+
+  it('distinguishes a node close from a socket error', async () => {
+    const events: unknown[] = [];
+    const hub = new NodeHub({ pingMs: 60_000, onClose: async () => {}, onMessage: async () => {}, onEvent: async (_id, event) => { events.push(event); } });
+    onTestFinished(() => hub.stop());
+    const first = fakeSocket();
+    hub.attach(node, first as unknown as WebSocket);
+    first.readyState = 3;
+    first.emit('close', 1000, Buffer.from('Bye'));
+    const second = fakeSocket();
+    hub.attach(node, second as unknown as WebSocket);
+    second.emit('error', new Error('read ECONNRESET'));
+    second.readyState = 3;
+    second.emit('close', 1006, Buffer.alloc(0));
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(events).toEqual([
+      { kind: 'connected', at: expect.any(Date) },
+      { kind: 'disconnected', at: expect.any(Date), actor: 'node', cause: 'node_closed', closeCode: 1000, closeReason: 'Bye', error: null },
+      { kind: 'connected', at: expect.any(Date) },
+      { kind: 'disconnected', at: expect.any(Date), actor: 'network', cause: 'socket_error', closeCode: 1006, closeReason: '', error: 'read ECONNRESET' },
+    ]);
+  });
+
+  it('records a replaced socket once before the new connection', async () => {
+    const events: { kind: string; cause?: string }[] = [];
+    const hub = new NodeHub({ pingMs: 60_000, onClose: async () => {}, onMessage: async () => {}, onEvent: async (_id, event) => { events.push(event); } });
+    onTestFinished(() => hub.stop());
+    const first = fakeSocket();
+    hub.attach(node, first as unknown as WebSocket);
+    hub.attach(node, fakeSocket() as unknown as WebSocket);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(events.map(event => [event.kind, event.cause ?? null])).toEqual([
+      ['connected', null], ['disconnected', 'replaced'], ['connected', null],
+    ]);
+    expect(events[1]).toMatchObject({ actor: 'server', closeCode: 4000, closeReason: 'Replaced by a newer connection.' });
+  });
+
+  it('names missed pongs when sweep drops the socket', async () => {
+    vi.useFakeTimers();
+    const events: unknown[] = [];
+    const hub = new NodeHub({ pingMs: 1000, onClose: async () => {}, onMessage: async () => {}, onEvent: async (_id, event) => { events.push(event); } });
+    const socket = fakeSocket();
+    hub.attach(node, socket as unknown as WebSocket);
+    try {
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(events.at(-1)).toMatchObject({ kind: 'disconnected', actor: 'server', cause: 'missed_pongs', closeCode: 1006 });
+    } finally {
+      await hub.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  it('names an administrative close and a server stop', async () => {
+    const events: unknown[] = [];
+    const hub = new NodeHub({ pingMs: 60_000, onClose: async () => {}, onMessage: async () => {}, onEvent: async (_id, event) => { events.push(event); } });
+    hub.attach(node, fakeSocket() as unknown as WebSocket);
+    hub.close(node.nodeId, 4001);
+    hub.attach(node, fakeSocket() as unknown as WebSocket);
+    await hub.stop();
+    expect(events).toEqual([
+      { kind: 'connected', at: expect.any(Date) },
+      { kind: 'disconnected', at: expect.any(Date), actor: 'server', cause: 'server_close', closeCode: 4001, closeReason: 'Disconnected in Hornhoof.', error: null },
+      { kind: 'connected', at: expect.any(Date) },
+      { kind: 'disconnected', at: expect.any(Date), actor: 'server', cause: 'server_stop', closeCode: 1001, closeReason: 'Server is stopping.', error: null },
+    ]);
+  });
+});

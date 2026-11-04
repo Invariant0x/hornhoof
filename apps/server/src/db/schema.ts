@@ -220,7 +220,7 @@ export const nodeConnectionEvents = pgTable(
     id: id(),
     companyId: companyId(),
     machineId: uuid('machine_id').notNull().references(() => machines.id),
-    nodeId: uuid('node_id').notNull().references(() => nodes.id),
+    nodeId: uuid('node_id').notNull(),
     kind: text('kind', { enum: ['connected', 'disconnected'] }).notNull(),
     happenedAt: timestamp('happened_at', { withTimezone: true }).notNull().defaultNow(),
     actor: text('actor', { enum: NODE_CONNECTION_ACTORS }),

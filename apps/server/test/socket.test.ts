@@ -1,7 +1,7 @@
-import { eq } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
-import { describe, expect, it, onTestFinished } from 'vitest';
-import { agentEvents, agents, departments, jobs, nodes, subscriptions } from '../src/db/schema.js';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import { agentEvents, agents, departments, jobs, nodeConnectionEvents, nodes, subscriptions } from '../src/db/schema.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { NODE_STALE_MS, expireStaleNodes } from '../src/modules/nodes/nodes.js';
 import { reconcile } from '../src/modules/tasks/reconcile.js';
@@ -96,12 +96,15 @@ describe('node socket', () => {
   });
 
   it('drops a node that stops answering pings', async () => {
-    const { app, url, ceo, subId, key } = await liveCompany();
+    const { app, db, url, ceo, subId, nodeId, key } = await liveCompany();
     const node = await connectNode(url, key, { autoPong: false });
     const started = Date.now();
     await node.closed;
     expect(Date.now() - started).toBeLessThan(300);
     expect((await subOf(app, ceo, subId)).online).toBe(false);
+    await until(async () => (await db.select().from(nodeConnectionEvents).where(eq(nodeConnectionEvents.nodeId, nodeId))).length === 2);
+    const events = await db.select().from(nodeConnectionEvents).where(eq(nodeConnectionEvents.nodeId, nodeId));
+    expect(events.map(event => [event.kind, event.cause])).toEqual([['connected', null], ['disconnected', 'missed_pongs']]);
   });
 
   it('closes the older socket when the same node connects again', async () => {
@@ -110,6 +113,36 @@ describe('node socket', () => {
     const second = await connectNode(url, key);
     await first.closed;
     expect((await subOf(app, ceo, subId)).online).toBe(true);
+    second.close();
+  });
+
+  it('joins the returning node report to the disconnect and logs no key', async () => {
+    const { app, db, url, nodeId, key } = await liveCompany();
+    const logged = vi.spyOn(app.ctx.log, 'info');
+    const first = await connectNode(url, key);
+    first.close();
+    await first.closed;
+    await until(async () => (await db.select().from(nodeConnectionEvents).where(eq(nodeConnectionEvents.nodeId, nodeId))).length === 2);
+
+    const second = await connectNode(url, key);
+    second.send(hello());
+    const report = {
+      disconnectedAt: new Date(Date.now() - 5000).toISOString(), reconnectedAt: new Date().toISOString(), offlineMs: 5000,
+      attempts: 2, cause: 'dns_error' as const, closeCode: 1006, closeReason: '', errorCode: 'ENOTFOUND', error: 'DNS failed',
+      dnsFailed: true, watchdogTimedOut: false, clockJumpMs: null, networkChanged: true,
+    };
+    second.send({ type: 'node.reconnect', ...report });
+    await until(async () => {
+      const events = await db.select().from(nodeConnectionEvents).where(eq(nodeConnectionEvents.nodeId, nodeId));
+      return events.some(event => event.kind === 'disconnected' && event.nodeReport !== null);
+    });
+    const events = await db.select().from(nodeConnectionEvents).where(eq(nodeConnectionEvents.nodeId, nodeId)).orderBy(desc(nodeConnectionEvents.happenedAt));
+    const disconnected = events.find(event => event.kind === 'disconnected')!;
+    expect(disconnected).toMatchObject({ actor: 'node', cause: 'node_closed', closeCode: 1005, nodeReport: report });
+    expect(disconnected.offlineMs).toBeGreaterThanOrEqual(0);
+    expect(events.find(event => event.kind === 'connected')!.offlineMs).toBe(disconnected.offlineMs);
+    expect(logged.mock.calls.some(([fields, message]) => fields.machine === 'ivan-mac' && fields.cause === 'node_closed' && fields.closeCode === 1005 && message === 'A node disconnected.')).toBe(true);
+    expect(JSON.stringify(logged.mock.calls)).not.toContain(key);
     second.close();
   });
 

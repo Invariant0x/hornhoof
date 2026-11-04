@@ -2327,19 +2327,6 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
-        },
-        "node_connection_events_node_id_nodes_id_fk": {
-          "name": "node_connection_events_node_id_nodes_id_fk",
-          "tableFrom": "node_connection_events",
-          "tableTo": "nodes",
-          "columnsFrom": [
-            "node_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
