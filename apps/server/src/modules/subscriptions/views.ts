@@ -84,6 +84,10 @@ function ownerPlace(deptIds: string[], depts: Map<string, string>): Place {
   return { kind: 'listed', id: null, name: deptIds.map(d => depts.get(d) ?? '').join(', ') };
 }
 
+/* Of a plan's machines online, the one whose state the plan shows: one signed in and set up, else one signed in that waits
+   for its program's first setup, else the first. */
+const shownNode = <T extends { status: string }>(up: T[]): T | undefined => up.find(n => n.status === 'ready') ?? up.find(n => n.status === 'needs_setup') ?? up[0];
+
 export async function subViews(db: Db, isOnline: IsOnline, id?: string, viewer: Viewer | null = null): Promise<SubView[]> {
   await expireStaleNodes(db);
   const live = isNull(subscriptions.removedAt);
@@ -112,10 +116,10 @@ export async function subViews(db: Db, isOnline: IsOnline, id?: string, viewer: 
   const accountOf = new Map(told.map(n => [n.id, n.account]));
   return rows.map(r => {
     const mine = allNodes.filter(n => n.subscriptionId === r.id);
-    /* A plan's state is of one machine: one online and signed in, else one online, else what the plan was last. So it
-       never shows signed in on one machine and online on another, which can take no turn. */
+    /* A plan's state is of one machine online, else what the plan was last. So it never shows signed in on one machine and
+       online on another, which can take no turn. */
     const up = mine.filter(n => isOnline(nodeIdentity(n.id)));
-    const shown = up.find(n => n.status === 'ready') ?? up[0];
+    const shown = shownNode(up);
     /* The address an account signed in with goes to the plan's owner and the CEO, never to an agent acting for them. */
     const sees = viewer !== null && !viewer.via && (viewer.id === r.ownerId || viewer.isOwner === true);
     const signed = mine.flatMap(n => {

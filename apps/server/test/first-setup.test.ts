@@ -4,6 +4,8 @@ import { agentEvents, agents, jobs, machines, nodes, subscriptions } from '../sr
 import { agentState, enqueueTurn, pump } from '../src/modules/conversation/queue.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
+import { expireStaleNodes, NODE_STALE_MS, settlePlans } from '../src/modules/nodes/nodes.js';
+import { subViews } from '../src/modules/subscriptions/views.js';
 import { agentFailureState } from '../src/modules/tasks/failures.js';
 import { failureCompany } from './failure-company.js';
 
@@ -56,5 +58,26 @@ describe("a program's first setup that only the plan's owner passes", () => {
     expect([await c.nodeStatus(), await c.planStatus()]).toEqual(['needs_login', 'needs_login']);
     await handleNodeMessage(c.ctx, c.id, { type: 'status', loggedIn: true, setupNeeded: true, limits: null });
     expect([await c.nodeStatus(), await c.planStatus()]).toEqual(['needs_setup', 'needs_setup']);
+  });
+
+  /* A plan shows the state of one machine: one signed in that waits for the setup goes before one that needs a sign-in. */
+  it('shows the machine that waits for the first setup before an older one that needs a sign-in', async () => {
+    const c = await planOnMachine();
+    await c.db.update(nodes).set({ status: 'needs_login', createdAt: new Date(Date.now() - 3_600_000) }).where(eq(nodes.id, c.node.id));
+    const [other] = await c.db.insert(machines).values({ companyId: c.companyId, personId: c.sub.ownerPersonId, machineKey: 'b-host', hostname: 'b-host' }).returning();
+    await c.db.insert(nodes).values({ companyId: c.companyId, machineId: other!.id, subscriptionId: c.sub.id, status: 'needs_setup', version: '0.5.2', keyHash: 'hash-b' });
+    await settlePlans(c.db, [c.sub.id]);
+    const [view] = await subViews(c.db, () => true, c.sub.id);
+    expect([view!.status, await c.planStatus()]).toEqual(['needs_setup', 'needs_setup']);
+    expect(view!.machines.map(m => [m.hostname, m.status])).toEqual([['a-host', 'needs_login'], ['b-host', 'needs_setup']]);
+  });
+
+  /* A machine nobody heard from for a day may have lost its sign-in as well. */
+  it('asks for a sign-in again on a machine that waited for the setup and was not heard from for a day', async () => {
+    const c = await planOnMachine();
+    const now = new Date();
+    await c.db.update(nodes).set({ status: 'needs_setup', lastSeenAt: new Date(now.getTime() - NODE_STALE_MS - 60_000) }).where(eq(nodes.id, c.node.id));
+    await expireStaleNodes(c.db, now);
+    expect([await c.nodeStatus(), await c.planStatus()]).toEqual(['needs_login', 'needs_login']);
   });
 });

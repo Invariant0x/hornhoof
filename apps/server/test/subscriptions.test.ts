@@ -115,6 +115,22 @@ describe('POST /api/subscriptions/connect', () => {
     expect((await db.select().from(agents).where(eq(agents.id, bruno!.id)))[0]!.nodeId).toBeNull();
   });
 
+  it('refuses a plan that waits for its first setup on its machine, as it is signed in there', async () => {
+    const { app, db, ceo } = await companyWithMaria();
+    const agy = (await connect(app, ceo, ['antigravity'])).json();
+    const agyId = agy.subscriptions[0].id as string;
+    const joined = await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code: agy.command.split('--join ')[1], machineId: 'mac-0003-ijkl', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' } });
+    expect(joined.statusCode).toBe(200);
+    await db.update(nodes).set({ status: 'needs_setup' }).where(eq(nodes.subscriptionId, agyId));
+    await db.update(subscriptions).set({ status: 'needs_setup' }).where(eq(subscriptions.id, agyId));
+
+    const refused = await connect(app, ceo, ['antigravity']);
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json().error.reason).toBe('already_connected');
+    expect((await db.select().from(subscriptions).where(eq(subscriptions.id, agyId)))[0]).toMatchObject({ status: 'needs_setup', removedAt: null });
+    expect((await db.select().from(nodes).where(eq(nodes.subscriptionId, agyId)))[0]).toMatchObject({ status: 'needs_setup' });
+  });
+
   it('refuses a ready plan or a plan with agents on a second connection and never touches its row or node', async () => {
     const { app, db, ceo, development } = await companyWithMaria();
     const joinNode = (command: string, machineId: string) =>
