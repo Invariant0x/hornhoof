@@ -158,7 +158,7 @@ describe('a plan at its limit', () => {
     const task = await c.memberTask();
     await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: task.id, why: 'assigned' }]);
     const resetsAt = new Date(Date.now() + 3_600_000).toISOString();
-    await c.db.update(subscriptions).set({ limits: { status: 'rejected', windows: [{ name: 'five_hour', utilization: 1, resetsAt }] } }).where(eq(subscriptions.id, c.sub.id));
+    await c.db.update(subscriptions).set({ limitsUpdatedAt: new Date(), limits: { status: 'rejected', windows: [{ name: 'five_hour', utilization: 1, resetsAt }] } }).where(eq(subscriptions.id, c.sub.id));
     for (let i = 0; i < SILENT_TURNS + 1; i++) await c.finish(c.bruno.id, async () => {}, 'failed');
     expect(await c.db.select({ status: tasks.status, silent: tasks.silent }).from(tasks).where(eq(tasks.id, task.id))).toEqual([{ status: 'open', silent: 0 }]);
     expect(await c.db.select().from(requests)).toEqual([]);
@@ -177,7 +177,7 @@ describe('a plan at its limit, with others of the role on other plans', () => {
     const rejected = { status: 'rejected' as const, windows: [{ name: 'five_hour', utilization: 1, resetsAt }] };
     const [codex] = await c.db
       .insert(subscriptions)
-      .values({ companyId: c.dev.companyId, provider: 'codex', kind: 'personal', label: 'Codex', ownerPersonId: c.ceo.id, status: rex.status ?? 'ready', limits: rex.limited ? rejected : null })
+      .values({ companyId: c.dev.companyId, provider: 'codex', kind: 'personal', label: 'Codex', ownerPersonId: c.ceo.id, status: rex.status ?? 'ready', limits: rex.limited ? rejected : null, limitsUpdatedAt: rex.limited ? new Date() : null })
       .returning();
     const [box] = await c.db.insert(machines).values({ companyId: c.dev.companyId, personId: c.ceo.id, machineKey: 'rex-0001-abcd', hostname: 'rex-box' }).returning();
     await c.db.insert(nodes).values({ id: codex!.id, companyId: c.dev.companyId, machineId: box!.id, subscriptionId: codex!.id, keyHash: 'rex-key-hash', status: rex.status ?? 'ready', version: rex.nodeVersion ?? '0.5.0' });
@@ -189,7 +189,7 @@ describe('a plan at its limit, with others of the role on other plans', () => {
     const task = await c.memberTask();
     await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: task.id, why: 'assigned' }]);
     if (before === 'a turn') await c.finish(c.bruno.id, () => comment(c.ctx, { agentId: c.bruno.id }, task.id, 'The handler is half done.'));
-    await c.db.update(subscriptions).set({ limits: rejected }).where(eq(subscriptions.id, c.sub.id));
+    await c.db.update(subscriptions).set({ limitsUpdatedAt: new Date(), limits: rejected }).where(eq(subscriptions.id, c.sub.id));
     const running = and(eq(jobs.agentId, c.bruno.id), eq(jobs.status, 'running'));
     const refused = async () => {
       await c.db.update(jobs).set({ tail: "You've hit your usage limit. Try again in 1 hour." }).where(running);
@@ -642,7 +642,7 @@ describe("a plan's share for tasks", () => {
     const r = await withRepositories();
     const bruno = await r.hire('Bruno', null);
     const resetsAt = new Date(Date.now() + 3_600_000).toISOString();
-    await r.db.update(subscriptions).set({ budget: 80, limits: used(utilization, resetsAt) });
+    await r.db.update(subscriptions).set({ budget: 80, limits: used(utilization, resetsAt), limitsUpdatedAt: new Date() });
     return { ...r, bruno, resetsAt };
   }
 

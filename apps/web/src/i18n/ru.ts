@@ -263,7 +263,7 @@ export const ru: Messages = {
     resetUnknown: 'Время сброса неизвестно',
     limitReached: duration => (duration ? `Лимит исчерпан, до сброса ${duration}` : 'Лимит исчерпан'),
     notOnPlan: 'Нет у этого тарифа',
-    noDataYet: 'Пока нет данных',
+    unknown: at => at ? `Неизвестно, последние данные от ${at}` : 'Неизвестно, данных о лимитах еще не было',
     noPlanLimits: 'Оплата по факту, без лимитов тарифа',
     share: 'Задачам можно',
     shareLabel: name => `Доля ${name} для задач`,

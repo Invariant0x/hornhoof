@@ -19,6 +19,26 @@ async function migrate(db: PgliteDatabase, config: MigrationConfig): Promise<voi
   await applyMissingMigrations(db, config);
 }
 
+describe('limits freshness migration', () => {
+  it('keeps an old limits snapshot and leaves its unknown timestamp null on upgrade', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0058_program_operator') });
+    const company = (await db.execute<{ id: string }>(sql`insert into companies (name) values ('Acme') returning id`)).rows[0]!.id;
+    const owner = (await db.execute<{ id: string }>(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Ivan', 'ivan@acme.example', 'active', 'company') returning id`)).rows[0]!.id;
+    await db.execute(sql`insert into subscriptions (company_id, provider, kind, label, owner_person_id, status, limits)
+      values (${company}, 'antigravity', 'personal', 'Antigravity', ${owner}, 'ready', '{"status":"rejected","windows":[{"name":"five_hour","utilization":1,"resetsAt":"2026-11-03T00:53:03.947Z"}]}')`);
+    const before = (await db.execute(sql`select to_jsonb(s) as data from subscriptions s`)).rows;
+
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+
+    expect((await db.execute(sql`select to_jsonb(s) - 'limits_updated_at' as data from subscriptions s`)).rows).toEqual(before);
+    expect((await db.execute(sql`select limits_updated_at from subscriptions`)).rows).toEqual([{ limits_updated_at: null }]);
+  });
+});
+
 describe('notification provenance migration', () => {
   it('preserves old pending wakes and adds nullable structured provenance', async () => {
     const client = new PGlite();

@@ -529,8 +529,8 @@ async function checkHeld(ctx: Ctx, job: typeof jobs.$inferSelect & { agentId: st
   }
   /* A turn that ended at the plan's limit did not stand still: another of its role on another plan takes the work over,
      or the agent goes on once the limit starts over. */
-  const [sub] = job.subscriptionId ? await db.select({ limits: subscriptions.limits }).from(subscriptions).where(eq(subscriptions.id, job.subscriptionId)) : [];
-  const until = limitUntil(sub?.limits ?? null);
+  const [sub] = job.subscriptionId ? await db.select({ limits: subscriptions.limits, limitsUpdatedAt: subscriptions.limitsUpdatedAt }).from(subscriptions).where(eq(subscriptions.id, job.subscriptionId)) : [];
+  const until = limitUntil(sub?.limits ?? null, sub?.limitsUpdatedAt ?? null);
   if (until) {
     const other = await standIn(ctx, agentId, task);
     const [me] = other ? await db.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId)) : [];

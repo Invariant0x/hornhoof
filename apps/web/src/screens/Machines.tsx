@@ -109,7 +109,7 @@ function PlansOnMachine({ row, subs }: { row: MachineRow; subs: SubView[] }) {
   if (!row.plans.length) return <p className="part-note">{t.cards.noPlans}</p>;
   return <ul className="plist" aria-label={t.cards.plansOn}>{row.plans.map(plan => {
     const sub = subs.find(s => s.id === plan.id);
-    const state = planStateOnMachine(t, language, { ...plan, online: row.online && plan.online }, sub?.limits ?? null, now);
+    const state = planStateOnMachine(t, language, { ...plan, online: row.online && plan.online }, sub?.limits ?? null, now, sub?.limitsUpdatedAt);
     return <li key={plan.id}><ProviderMark provider={plan.provider} /><span className="nm"><b>{sub ? subName(t, sub) : PROVIDER_NAMES[plan.provider]}{sub?.tier && <> <small>{sub.tier}</small></>}</b><small>{[sub?.owner.name, state].filter(Boolean).join(', ')}</small></span></li>;
   })}</ul>;
 }

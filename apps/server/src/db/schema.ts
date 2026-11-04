@@ -168,6 +168,8 @@ export const subscriptions = pgTable(
     targetId: uuid('target_id'),
     /* The same on every machine the plan runs on. */
     limits: jsonb('limits').$type<Limits>(),
+    /* When the last limits snapshot arrived. Null on rows written before snapshots were timestamped. */
+    limitsUpdatedAt: timestamp('limits_updated_at', { withTimezone: true }),
     /* The share of each limit window, in percent, that task turns may use; past it they wait for the window to start
        over while people's own messages still go. Null: the whole limit. */
     budget: integer('budget'),

@@ -401,6 +401,19 @@ describe('GET /api/subscriptions', () => {
     expect((await list(app, maria)).map((s: { owner: { name: string } }) => s.owner.name)).toEqual(['Maria']);
   });
 
+  it.each(['claude', 'codex', 'kimi', 'antigravity'])('does not return an expired rejection as current for %s', async provider => {
+    const { app, db, ceo } = await companyWithMaria();
+    const id = (await connect(app, ceo, [provider])).json().subscriptions[0].id;
+    await db.update(subscriptions).set({
+      limits: { status: 'rejected', windows: [{ name: 'five_hour', utilization: 1, resetsAt: '2026-11-03T00:53:03.947Z' }], complete: true },
+    }).where(eq(subscriptions.id, id));
+
+    const shown = (await list(app, ceo)).find((s: { id: string }) => s.id === id);
+
+    expect(shown.limits).toEqual({ status: 'allowed', windows: [], complete: false });
+    expect(shown).toHaveProperty('limitsUpdatedAt');
+  });
+
   it('never returns the key or its ciphertext', async () => {
     const { app } = await testApp();
     const ceo = await setUpCompany(app);
