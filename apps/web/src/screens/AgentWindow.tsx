@@ -416,9 +416,9 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, openReque
   const staffDept = staffing && org.departments.find(d => d.id === staffing.department);
   const ready = state?.ready ?? false;
   const existing = org.departments.flatMap(d => (d.templateKey ? [d.templateKey] : []));
-  /* The by-hand card builds the structure of a company that has none; a company that already has departments (made
-     from a template, or built earlier) is past that, so it does not offer more departments. */
-  const empty = !org.departments.length;
+  /* The by-hand card builds the structure of a company that has none but the Operations every company starts with; a
+     company that has other departments (made from a template, or built earlier) is past that, so it does not offer more. */
+  const empty = org.departments.every(d => d.templateKey === 'operations');
   const byHand = orchestrator && !open && !staffByHand && empty && (manual ?? (state !== null && !ready));
   const offerByHand = orchestrator && !open && !byHand && !staffByHand && !state?.busy && !state?.queued && empty;
   /* A company that has departments but no orchestrator yet waits for a subscription, so he can staff them. */

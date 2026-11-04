@@ -62,6 +62,7 @@ export type ErrorReason =
   | 'instructions_too_long'
   | 'agent_working'
   | 'agent_has_tasks'
+  | 'required_role'
   | 'no_subscription'
   | 'no_role'
   | 'nothing_running'

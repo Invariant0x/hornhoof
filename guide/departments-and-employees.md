@@ -31,6 +31,16 @@ On the map, a department's card has one square per employee, in the same colors.
 
 When he cannot answer, the card comes from the department's default roster. Roles and their skills come from the templates in `templates/`.
 
+## Who is always in Operations?
+
+Every company has Operations, with its head, a task watchdog, a weak point collector and a program operator. Hornhoof hires whoever of the four is missing by itself, when the company is set up and after an update. It leaves everyone else in the department as they are.
+
+On a staff card for Operations these four stay ticked. Someone who already holds the role is shown by name and is not hired again.
+
+The last employee in each of the four cannot be removed. Switch it off for a while instead, or hire a replacement first. A department has one head, so its head has no replacement: change its model or its instructions, or switch it off.
+
+The program operator starts on the oldest subscription that may serve Operations. When there is none yet it waits, and the first that may serve Operations goes to it without a question, even one still waiting for its machine. A subscription you pick for it yourself stays as long as it may serve Operations. When it no longer may, the operator moves to the next one after its current turn ends.
+
 ## What is in an employee's window?
 
 Click an employee to open its window, with its terminal or its log. A small mark next to its name says whether it works in Claude, Codex, Kimi, GLM or Antigravity.

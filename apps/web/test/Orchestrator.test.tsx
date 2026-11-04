@@ -554,6 +554,15 @@ describe('AgentWindow', () => {
     expect(screen.getByText('Company structure')).toBeInTheDocument();
   });
 
+  it('still offers the card by hand when the company has only the Operations it starts with, and leaves Operations off it', async () => {
+    const onlyOps = { ...ORG, departments: [{ id: 'd1', name: null, templateKey: 'operations' as const, roleCode: 'OPS', about: '', agents: { total: 4, working: 0 }, products: [], teams: [], people: [], employees: [], roles: [] }] };
+    open(undefined, onlyOps);
+    fireEvent.click(await screen.findByRole('button', { name: 'Pick departments by hand' }));
+    expect(screen.getByText('Company structure')).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /Development/ })).toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: /Operations/ })).not.toBeInTheDocument();
+  });
+
   it('offers no structure card on a company that already has departments, only a line to connect a subscription', async () => {
     const withDepts = { ...ORG, departments: [{ id: 'd1', name: null, templateKey: 'home_devices' as const, roleCode: 'HOM', about: '', agents: { total: 0, working: 0 }, products: [], teams: [], people: [], employees: [], roles: [] }] };
     open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, ready: false, reason: 'needs_login' } }] }, withDepts);

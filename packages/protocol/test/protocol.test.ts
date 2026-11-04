@@ -322,6 +322,17 @@ describe('company templates', () => {
       expect(operations!.staff.some(line => line.role === 'OPS-HEAD'), `${template.key} operations head`).toBe(true);
     }
   });
+
+  it('staff Operations in full in all nine, one of each required role, and keep their other roles', () => {
+    const required = ['OPS-BUGS', 'OPS-HEAD', 'OPS-PROGRAM', 'OPS-WATCH'];
+    const others: Record<string, string[]> = { project: [], startup: [], studio: ['OPS-INTEG'], corporation: ['OPS-FIX', 'OPS-INTEG'], security: ['OPS-INTEG'], opensource: [], agency: ['OPS-FIX', 'OPS-INTEG'], lab: [], home: [] };
+    expect(Object.keys(others).sort()).toEqual([...COMPANY_TEMPLATE_KEYS].sort());
+    for (const template of COMPANY_TEMPLATES) {
+      const { staff } = template.departments.find(d => d.template === 'operations')!;
+      expect(staff.map(line => line.role).sort(), template.key).toEqual([...required, ...others[template.key]!].sort());
+      expect(staff.every(line => line.count === 1), template.key).toBe(true);
+    }
+  });
 });
 
 describe('lastBytes', () => {
@@ -642,5 +653,85 @@ describe('plans on any machine', () => {
     const status = parseNodeMessage(JSON.stringify({ type: 'status', loggedIn: true, limits: null, browserError: 'Executable missing', noRuns: 'Executable missing' }));
     expect(status).toMatchObject({ type: 'status', browserError: 'Executable missing', noRuns: 'Executable missing' });
     expect(parseNodeMessage(JSON.stringify({ type: 'status', loggedIn: true, limits: null, browserError: null, noRuns: null }))).toMatchObject({ type: 'status', browserError: null, noRuns: null });
+  });
+
+  it('carries what a node observed across a connection drop and bounds every field', () => {
+    expect(protocol.NODE_DISCONNECT_CAUSES).toEqual([
+      'watchdog_timeout',
+      'server_close',
+      'socket_error',
+      'dns_error',
+      'handshake_timeout',
+      'http_rejected',
+      'abnormal_close',
+    ]);
+    const base = {
+      type: 'node.reconnect' as const,
+      disconnectedAt: '2026-11-04T19:00:00.000Z',
+      reconnectedAt: '2026-11-04T19:00:12.500Z',
+      offlineMs: 12_500,
+      attempts: 3,
+      cause: 'watchdog_timeout' as const,
+      closeCode: 1006,
+      closeReason: 'Replaced by a newer connection.',
+      errorCode: 'ECONNRESET',
+      error: 'read ECONNRESET',
+      dnsFailed: true,
+      watchdogTimedOut: true,
+      clockJumpMs: 45_000,
+      networkChanged: true,
+    };
+    expect(parseNodeMessage(JSON.stringify(base))).toEqual(base);
+
+    const minimal = {
+      ...base,
+      offlineMs: 0,
+      attempts: 1,
+      closeCode: null,
+      closeReason: null,
+      errorCode: null,
+      error: null,
+      dnsFailed: false,
+      watchdogTimedOut: false,
+      clockJumpMs: null,
+      networkChanged: false,
+    };
+    expect(parseNodeMessage(JSON.stringify(minimal))).toEqual(minimal);
+
+    for (const cause of protocol.NODE_DISCONNECT_CAUSES) {
+      expect(parseNodeMessage(JSON.stringify({ ...minimal, cause }))).toMatchObject({ cause });
+    }
+    expect(parseNodeMessage(JSON.stringify({ ...minimal, closeCode: 0 }))).toMatchObject({ closeCode: 0 });
+    expect(parseNodeMessage(JSON.stringify({ ...minimal, closeCode: 65_535 }))).toMatchObject({ closeCode: 65_535 });
+    expect(parseNodeMessage(JSON.stringify({ ...minimal, closeReason: 'x'.repeat(200) }))).not.toBeNull();
+    expect(parseNodeMessage(JSON.stringify({ ...minimal, errorCode: 'A'.repeat(64) }))).not.toBeNull();
+    expect(parseNodeMessage(JSON.stringify({ ...minimal, error: 'x'.repeat(300) }))).not.toBeNull();
+    expect(parseNodeMessage(JSON.stringify({ ...minimal, clockJumpMs: 1 }))).toMatchObject({ clockJumpMs: 1 });
+
+    for (const bad of [
+      { disconnectedAt: 'nope' },
+      { reconnectedAt: 'nope' },
+      { offlineMs: -1 },
+      { offlineMs: 1.5 },
+      { attempts: 0 },
+      { attempts: 1.5 },
+      { cause: 'mystery' },
+      { closeCode: -1 },
+      { closeCode: 65_536 },
+      { closeCode: 1000.5 },
+      { closeReason: 'x'.repeat(201) },
+      { closeReason: 'line1\nline2' },
+      { errorCode: '' },
+      { errorCode: 'A'.repeat(65) },
+      { errorCode: 'bad code' },
+      { errorCode: 'bad\ncode' },
+      { error: 'x'.repeat(301) },
+      { error: 'line1\nline2' },
+      { clockJumpMs: 0 },
+      { clockJumpMs: -5 },
+      { clockJumpMs: 1.5 },
+    ]) {
+      expect(parseNodeMessage(JSON.stringify({ ...minimal, ...bad })), JSON.stringify(bad)).toBeNull();
+    }
   });
 });

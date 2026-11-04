@@ -90,7 +90,7 @@ describe('POST /api/departments/build', () => {
     const { app, db } = await testApp();
     const res = await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, orchestrator: { mode: 'later' } } });
     const ceo = res.cookies[0]!.value;
-    const built = await build(app, ceo, { items: [{ template: 'operations' }, { template: 'sales', note: '' }] });
+    const built = await build(app, ceo, { items: [{ template: 'sales', note: '' }] });
     expect(built.statusCode).toBe(201);
     expect(await db.select().from(departments)).toHaveLength(2);
     expect(await db.select().from(jobs)).toHaveLength(0);

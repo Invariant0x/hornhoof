@@ -20,6 +20,7 @@ import { handleNodeClose } from './modules/nodes/messages.js';
 import { receiveNodeMessage } from './modules/nodes/lifecycle.js';
 import { nodeRoutes } from './modules/nodes/routes.js';
 import { nodeSocket, SOCKET_OPTIONS } from './modules/nodes/socket.js';
+import { startOperationsCheck } from './modules/operations/ensure.js';
 import { orgRoutes } from './modules/org/routes.js';
 import { peopleRoutes } from './modules/people/routes.js';
 import { setupRoutes } from './modules/setup/routes.js';
@@ -122,6 +123,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   notebookRoutes(app, ctx);
   improvementRoutes(app, ctx);
   startTimers(app, ctx);
+  startOperationsCheck(app, ctx);
   terminalRoutes(app, ctx);
   agentRoutes(app, ctx);
   departmentRoutes(app, ctx);

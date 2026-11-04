@@ -432,7 +432,7 @@ describe('POST /api/subscriptions', () => {
     const ceo = setup.cookies[0]!.value;
     const res = await addKey(app, ceo, { provider: 'anthropic_api', kind: 'api_key', label: 'Orchestrator key', apiKey: 'sk-ant-api03-late-key-1234', target: { kind: 'orchestrator' } });
     expect(res.statusCode).toBe(201);
-    const [orchestrator] = await db.select().from(agents);
+    const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
     expect(orchestrator!.subscriptionId).toBe(res.json().subscription.id);
     const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
     expect(org.orchestrator.subscription).toMatchObject({ label: 'Orchestrator key', last4: '1234', isOrchestrator: true });
