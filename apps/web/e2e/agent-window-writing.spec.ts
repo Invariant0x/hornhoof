@@ -1,7 +1,7 @@
 import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
-import type { AgentCardView, Me, Org } from '../src/types';
+import type { AgentCardView, ComputerView, Me, Org } from '../src/types';
 import { box, ME } from './api';
 import { serveAgentWindow, SUB, type AgentFixture } from './agent-window-api';
 
@@ -18,6 +18,7 @@ type Viewer = keyof typeof VIEWERS;
 
 const ORCHESTRATOR: Org['orchestrator'] = { id: 'a1', name: 'Orchestrator', model: 'gpt-6', effort: null, subscription: SUB, context: null, program: null, alarm: null, retry: null, failure: null };
 const ORCHESTRATOR_CARD: Partial<AgentCardView> = { id: 'a1', kind: 'orchestrator', name: 'Orchestrator', role: null, department: null, product: null, model: 'gpt-6', effort: null, subscription: SUB, machine: null, state: 'sleeping', currentTask: null, skills: [], parts: [], raw: '', instructions: { length: 0, max: 200_000 }, runsOn: [], changes: [], interrupted: [], canEdit: false, timer: null };
+const ASKED: ComputerView = { available: true, until: null, asked: { reason: 'Restart the nodes outside AppArmor.', at: '2026-11-04T14:30:00.000Z' }, machine: 'a-host', canAnswer: true };
 const REFUSED = { error: { code: 'forbidden', message: 'This employee works in a department you do not have.', reason: 'not_your_department' } };
 
 /* What reached the server from this person, and the keys that reached the terminal. */
@@ -148,6 +149,23 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
         await checkPage(page, errors);
       });
     }
+
+    test('the line stands under the strip of a machine the orchestrator asks for', async ({ page }, info) => {
+      const errors = watchErrors(page);
+      const sent = await serve(page, 'delegate', settings);
+      await page.route('**/api/computer', route => route.fulfill({ json: ASKED }));
+      const window = await open(page, 'orchestrator', lang);
+      const line = window.getByRole('textbox', { name: t.window.placeholder, exact: true });
+      const strip = window.getByRole('region', { name: t.window.computerAsks(ASKED.machine!) });
+      await expect(strip).toBeVisible();
+      const below = await box(strip);
+      const form = await box(line.locator('xpath=ancestor::form'));
+      expect(below.y + below.height).toBeLessThanOrEqual(form.y);
+      await checkLineUnderTerminal(window, line);
+      await checkWrites(page, window, 'orchestrator', settings, sent);
+      await shot(page, info, 'delegate-orchestrator-strip', settings);
+      await checkPage(page, errors);
+    });
 
     test('a person with the department writes to its employee on another plan', async ({ page }, info) => {
       const errors = watchErrors(page);
