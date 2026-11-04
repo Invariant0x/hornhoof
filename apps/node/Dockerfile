@@ -25,16 +25,19 @@ COPY apps/web/package.json apps/web/
 RUN npm ci --omit=dev --workspace apps/node --workspace packages/protocol && npm cache clean --force \
   && rm -rf node_modules/.package-lock.json node_modules/@hornhoof/server node_modules/@hornhoof/web
 
-# A browser for agents: Playwright with Chromium's headless shell for the target, and the Debian packages it needs.
+# A browser for agents: Playwright with Chromium for the target at the repository lockfile's version, and the Debian packages it needs.
 # Playwright picks the download by the machine it runs on; the override names the target instead.
 FROM --platform=$BUILDPLATFORM node:22.23.4-bookworm-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da AS browser
 ARG TARGETARCH
-ARG PLAYWRIGHT_VERSION=1.64.1
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
-RUN npm install -g playwright@$PLAYWRIGHT_VERSION && npm cache clean --force
+COPY package-lock.json /tmp/package-lock.json
+RUN version="$(node -p "JSON.parse(require('node:fs').readFileSync('/tmp/package-lock.json', 'utf8')).packages['node_modules/@playwright/test'].version")" \
+  && npm install -g "playwright@$version" \
+  && rm -f /tmp/package-lock.json \
+  && npm cache clean --force
 COPY apps/node/browser-packages.cjs /opt/browser-packages.cjs
 RUN target="debian12-$(case "$TARGETARCH" in amd64) echo x64 ;; *) echo "$TARGETARCH" ;; esac)" \
-  && PLAYWRIGHT_HOST_PLATFORM_OVERRIDE="$target" playwright install --only-shell chromium \
+  && PLAYWRIGHT_HOST_PLATFORM_OVERRIDE="$target" playwright install chromium \
   && node /opt/browser-packages.cjs /usr/local/lib/node_modules/playwright/node_modules/playwright-core/lib/coreBundle.js "$target" > /opt/browser-packages \
   && chmod -R a+rX /opt/ms-playwright
 
@@ -107,10 +110,11 @@ COPY --from=quality /opt/hornhoof/superpowers /opt/hornhoof/superpowers
 COPY --from=quality /opt/hornhoof/grammars /opt/hornhoof/grammars
 ENV TREE_SITTER_LANGUAGE_PACK_CACHE_DIR=/opt/hornhoof/grammars
 COPY --from=quality /opt/hornhoof/bin/ /usr/local/bin/
-# Outside /data and readable by every job user, so require('playwright') works anywhere.
-ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright NODE_PATH=/usr/local/lib/node_modules
+# Seed outside /data and readable by every job user; runtime browsers live on /data/browsers across container updates.
+ENV NODE_PATH=/usr/local/lib/node_modules
 COPY --from=browser /opt/ms-playwright /opt/ms-playwright
 COPY --from=browser /usr/local/lib/node_modules/playwright /usr/local/lib/node_modules/playwright
+RUN chmod 755 /usr/local/lib/node_modules/playwright/cli.js && ln -s ../lib/node_modules/playwright/cli.js /usr/local/bin/playwright
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=deps /app/node_modules node_modules
@@ -132,11 +136,15 @@ COPY apps/node/hh-capture.cjs /app/apps/node/hh-capture.cjs
 COPY apps/node/hh-fs.cjs /app/apps/node/hh-fs.cjs
 RUN mkdir -p /data && chown node:node /data
 # Agent programs run their commands in login shells, where Debian's /etc/profile sets PATH again: the tools folder goes
-# back in front, so an agent finds codex, claude, kimi and agy by name.
-RUN printf '%s\n' 'case ":$PATH:" in *:/data/tools/bin:*) ;; *) PATH=/data/tools/bin:$PATH ;; esac' 'export PATH' > /etc/profile.d/hornhoof-tools.sh
-# Agent programs are installed into /data/tools at first use and keep their sign-in in /data/home.
+# back in front, so an agent finds codex, claude, kimi and agy by name, and Playwright finds /data/browsers.
+RUN printf '%s\n' \
+  'case ":$PATH:" in *:/data/tools/bin:*) ;; *) PATH=/data/tools/bin:$PATH ;; esac' \
+  ': "${PLAYWRIGHT_BROWSERS_PATH:=/data/browsers}"' \
+  ': "${PLAYWRIGHT_SKIP_BROWSER_GC:=1}"' \
+  'export PATH PLAYWRIGHT_BROWSERS_PATH PLAYWRIGHT_SKIP_BROWSER_GC' > /etc/profile.d/hornhoof-tools.sh
+# Agent programs are installed into /data/tools at first use, keep their sign-in in /data/home, and share browsers in /data/browsers.
 # Set last, so nothing the build writes lands in /data.
-ENV PATH=/data/tools/bin:$PATH HOME=/data/home
+ENV PATH=/data/tools/bin:$PATH HOME=/data/home PLAYWRIGHT_BROWSERS_PATH=/data/browsers PLAYWRIGHT_SKIP_BROWSER_GC=1
 # Personal nodes run as node. The built-in node overrides the user to root in compose.yaml, to run each company key as its own user.
 USER node
 VOLUME /data

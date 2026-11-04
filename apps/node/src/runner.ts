@@ -1,7 +1,8 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { cut, lastBytes, type Account, type AgentEvent, type Failure, type JobError, type Limits, type ModelOption, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
+import { cut, lastBytes, repoFolder, type Account, type AgentEvent, type Failure, type JobError, type Limits, type ModelOption, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
 import { agentFs, ownFs, type AgentFs } from './agent-fs.js';
+import { ensureRepoBrowser } from './browser.js';
 import type { JobUser } from './isolation.js';
 import { redact } from './redact.js';
 import { plainOutput, programEnded, signalName, type ProgramOutput } from './program-exit.js';
@@ -126,6 +127,8 @@ type RunOptions = {
   untimed?: boolean;
   /* The superpowers copy whose skills a program without its plugin gets; the image's by default. */
   superpowers?: string | null;
+  /* Ensures the repository lockfile's Playwright Chromium is ready and launchable before the turn starts. */
+  prepareRepoBrowser?: (repoDir: string) => Promise<void>;
 };
 
 /* An event as people may see it: no secrets, and within the sizes the protocol allows. */
@@ -144,7 +147,7 @@ export function tidy(event: AgentEvent, secrets: string[]): AgentEvent {
 }
 
 /* Always ends with a job.done, whatever breaks on the way. */
-export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string, { hidden = [], signal, toolsUrl, onEvent, git, beforeRun = async () => {}, untimed = false, superpowers = superpowersIn() }: RunOptions = {}): Promise<JobDone> {
+export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string, { hidden = [], signal, toolsUrl, onEvent, git, beforeRun = async () => {}, untimed = false, superpowers = superpowersIn(), prepareRepoBrowser }: RunOptions = {}): Promise<JobDone> {
   /* Programs refresh their tokens during a run, so the values from before, during and after are all hidden. */
   const before = await adapter.secrets().catch(() => []);
   const repo = msg.workspace?.repo ?? null;
@@ -176,6 +179,11 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
       }
     }
     const repoEnv = repo ? await prepareRepo(workDir, repo, { user: adapter.owner?.user ?? null, home: adapter.owner?.home ?? null }, git) : undefined;
+    if (repo) {
+      const repoDir = join(workDir, repoFolder(repo.url));
+      const owner = adapter.owner ? adapter.owner.user : null;
+      await (prepareRepoBrowser ? prepareRepoBrowser(repoDir) : ensureRepoBrowser(dir, repoDir, owner, owner));
+    }
     /* hh-attach sends the turn's pictures with its token. The name has no KEY, SECRET or TOKEN in it, so Codex passes it on. */
     const attachEnv = tools ? { HH_ATTACH_URL: tools.url.replace(/\/mcp$/, '/api/attachments'), HH_ATTACH_PASS: tools.token } : undefined;
     const env = repoEnv || attachEnv ? { ...repoEnv, ...attachEnv } : undefined;

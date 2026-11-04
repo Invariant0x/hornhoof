@@ -17,14 +17,22 @@
 # Several companies can share a computer: each node carries the address of the server it works for, and an
 # update or an uninstall touches only that server's nodes.
 #
-# The server fills in its own address when it serves this file. The script arrives through a pipe, so every
-# question is read from the terminal. It runs on the bash that ships with macOS (3.2).
+# The server fills in its own address when it serves this file, and the node image of its own build: by digest, by its
+# commit's tag while the registry cannot say which digest, or "local" for a build CI did not make, which has no image
+# published. A script downloaded on its own and a local build take the latest image; HORNHOOF_NODE_IMAGE comes before
+# them all. The script arrives through a pipe, so every question is read from the terminal. It runs on the bash that
+# ships with macOS (3.2).
 set -euo pipefail
 
 SERVER="${HORNHOOF_SERVER:-__HORNHOOF_SERVER__}"
 TTY="${HORNHOOF_TTY:-/dev/tty}"
 STATE_DIR="${HORNHOOF_HOME:-$HOME/.hornhoof}"
-IMAGE="${HORNHOOF_NODE_IMAGE:-ghcr.io/invariant0x/hornhoof-node:latest}"
+BUILD_IMAGE="__HORNHOOF_NODE_IMAGE__"
+case "$BUILD_IMAGE" in
+  __HORNHOOF_* | local) DEFAULT_IMAGE=ghcr.io/invariant0x/hornhoof-node:latest ;;
+  *) DEFAULT_IMAGE=$BUILD_IMAGE ;;
+esac
+IMAGE="${HORNHOOF_NODE_IMAGE:-$DEFAULT_IMAGE}"
 COMPOSE_URL="${HORNHOOF_COMPOSE_URL:-}"
 APP_IMAGE="${HORNHOOF_APP_IMAGE:-ghcr.io/invariant0x/hornhoof}"
 BASE_DIR="${HORNHOOF_DIR:-$HOME/hornhoof}"
@@ -259,10 +267,15 @@ check_server() {
 }
 
 pull_image() {
+  if [ "$BUILD_IMAGE" = local ] && [ -z "${HORNHOOF_NODE_IMAGE:-}" ]; then
+    say "This Hornhoof is a local build with no node image published for it, so this machine gets the latest node image, which may not match it."
+  fi
   say "Getting the node image $IMAGE."
   if ! "${DOCKER[@]}" pull "$IMAGE" > /dev/null; then
     if "${DOCKER[@]}" image inspect "$IMAGE" > /dev/null 2>&1; then
       say "Using the local image."
+    elif [ "$IMAGE" = "$BUILD_IMAGE" ]; then
+      fail "Could not download $IMAGE, the node image of this Hornhoof's build. Check the internet connection. If this Hornhoof was updated in the last few minutes, the image may not be published yet. Then run this command again. To start another node image instead, set HORNHOOF_NODE_IMAGE to it."
     else
       fail "Could not download $IMAGE. Check the internet connection, then run this command again."
     fi
@@ -463,8 +476,8 @@ watch_link() {
 # Antigravity signs in on each machine.
 signs_in_hornhoof() { case "$1" in claude | codex | kimi | glm) return 0 ;; esac; return 1; }
 
-# A node that needs no sign-in here: ready, or a spare machine of a Codex plan that another machine runs now.
-signed_in() { case "$(node_status "$1")" in ready | spare) return 0 ;; esac; return 1; }
+# A node that needs no sign-in here: ready, a spare machine of a Codex plan, or signed in with a browser error to report.
+signed_in() { case "$(node_status "$1")" in ready | spare | browser_failed:*) return 0 ;; esac; return 1; }
 
 # The joined nodes, of those named, that are not ready after SIGNIN_WAIT seconds. A plan its owner signed in once in
 # Hornhoof reaches a new node of the plan within seconds, and that node needs no sign-in here.
@@ -606,6 +619,7 @@ node_mode() {
         fi
         ;;
       needs_setup) status="needs its first setup, run the install command again without --join" ;;
+      browser_failed:*) status="browser did not start (${status#browser_failed: }), see docker logs $name" ;;
       *) status="not answering yet, see docker logs $name" ;;
     esac
     say "  $(program_name "$provider"): $status ($name)"
