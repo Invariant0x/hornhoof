@@ -40,6 +40,14 @@ describe("a program's first setup that only the plan's owner passes", () => {
     expect(await c.db.select().from(jobs).where(and(eq(jobs.agentId, c.agent.id), eq(jobs.status, 'running')))).toHaveLength(1);
   });
 
+  it('leaves the plan ready while another of its machines is ready', async () => {
+    const c = await planOnMachine();
+    const [other] = await c.db.insert(machines).values({ companyId: c.companyId, personId: c.sub.ownerPersonId, machineKey: 'b-host', hostname: 'b-host' }).returning();
+    await c.db.insert(nodes).values({ companyId: c.companyId, machineId: other!.id, subscriptionId: c.sub.id, status: 'ready', version: '0.5.2', keyHash: 'hash-b' });
+    await handleNodeMessage(c.ctx, c.id, { type: 'hello', version: '0.5.2', loggedIn: true, setupNeeded: true, running: [] });
+    expect([await c.nodeStatus(), await c.planStatus()]).toEqual(['needs_setup', 'ready']);
+  });
+
   it('is what a node says of itself once signed in, and the sign-in comes first', async () => {
     const c = await planOnMachine();
     await handleNodeMessage(c.ctx, c.id, { type: 'hello', version: '0.5.2', loggedIn: true, setupNeeded: true, running: [] });
