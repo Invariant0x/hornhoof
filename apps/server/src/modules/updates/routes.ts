@@ -11,7 +11,8 @@ import type { UpdateRequest, UpdaterView } from './control.js';
 import { FULL_SHA, type Build } from './registry.js';
 import { drainWork, serverNodes } from './drain-work.js';
 
-export const UpdateBody = z.object({ version: z.string().min(1).max(128), whenIdle: z.boolean().default(true), confirmTurns: z.number().int().nonnegative().optional() });
+/* urgent: a security update, which goes in at once and waits for no turn, and asks nobody about them. */
+export const UpdateBody = z.object({ version: z.string().min(1).max(128), whenIdle: z.boolean().default(true), confirmTurns: z.number().int().nonnegative().optional(), urgent: z.boolean().optional() });
 /* While an update waits for the agents, the working count is checked when it changes and this often besides. */
 const IDLE_CHECK_MS = 30_000;
 /* An update handed over restarts Hornhoof within minutes; one that did not keeps no turns waiting longer. */
@@ -114,7 +115,7 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/updates', async (req, reply) => {
     const me = await companyPerson(req);
     const body = UpdateBody.parse(req.body);
-    if (!body.whenIdle) {
+    if (!body.whenIdle && !body.urgent) {
       const work = await Promise.all((await serverNodes(ctx)).map(node => drainWork(ctx, node)));
       const turns = work.reduce((n, w) => n + w.turnsLeft, 0);
       if (turns > (body.confirmTurns ?? 0)) throw new ApiError(409, 'conflict', 'Confirm how many running turns this update will stop.', 'turns_would_stop', { turns });
@@ -128,9 +129,10 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
     const build = body.version === 'latest' ? latest : versions.find(v => v.tag === body.version);
     if (!build) throw new ApiError(400, 'validation', `There is no published build ${body.version}.`, 'version_unknown');
     const request = await requestFor(build, randomUUID());
-    if (!body.whenIdle) request.immediate = true;
+    if (body.urgent) request.urgent = true;
+    else if (!body.whenIdle) request.immediate = true;
     callOff();
-    if (body.whenIdle) await sendWhenIdle(me.companyId, request);
+    if (body.whenIdle && !body.urgent) await sendWhenIdle(me.companyId, request);
     else send(request);
     return reply.code(202).send({ id: request.id });
   });

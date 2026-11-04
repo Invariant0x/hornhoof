@@ -5,7 +5,7 @@ import type { Ctx } from '../../app.js';
 import { decryptSecret } from '../../crypto/secrets.js';
 import { subscriptions } from '../../db/schema.js';
 import { identityOf } from '../nodes/hub.js';
-import { nodeHeld } from '../updates/drain.js';
+import { nodeHeldFrom } from '../updates/drain.js';
 
 export const TEST_PROMPT = 'Reply with one word: ready';
 export const TEST_TIMEOUT_MS = 120_000;
@@ -16,6 +16,8 @@ type JobToSend = {
   subscriptionId: string;
   /* The node of a plan's machine it goes to; an API key's go to the built-in node. */
   nodeId: string | null;
+  /* The role of the agent it is for: the one role that may go to a node waiting for an update. */
+  role?: string | null;
   prompt: string;
   sessionId: string | null;
   model?: string | null;
@@ -40,7 +42,7 @@ type JobToSend = {
 export async function dispatchJob(ctx: Ctx, job: JobToSend): Promise<boolean> {
   const [sub] = await ctx.db.select().from(subscriptions).where(eq(subscriptions.id, job.subscriptionId));
   const node = sub && identityOf(sub, job.nodeId);
-  if (!sub || sub.removedAt || !node || nodeHeld(ctx, node)) return false;
+  if (!sub || sub.removedAt || !node || nodeHeldFrom(ctx, node, job.role)) return false;
   const secret = sub.kind === 'api_key' && sub.secretEnc ? decryptSecret(sub.secretEnc, ctx.config.secret) : null;
   return ctx.hub.send(node, {
     type: 'job.run',

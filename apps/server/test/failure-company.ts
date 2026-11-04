@@ -6,8 +6,8 @@ import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import type { Failure } from '@hornhoof/protocol';
 import { as, setUpCompany, testApp } from './helpers.js';
 
-export async function failureCompany() {
-  const { app, db } = await testApp();
+export async function failureCompany(env: NodeJS.ProcessEnv = {}) {
+  const { app, db } = await testApp(env);
   const ceo = await setUpCompany(app);
   const ctx = app.ctx;
   const [sub] = await db.select().from(subscriptions);
