@@ -1,25 +1,32 @@
 import { useT } from '../i18n';
+import type { Messages } from '../i18n/en';
 import type { UpdateStep } from '../types';
 
 /* The four steps of an update, in the order the updater takes them. */
 const STEPS: UpdateStep[] = ['pull', 'backup', 'install', 'health'];
 
-type Props = { version: string; step: UpdateStep | null; starting?: boolean; offline?: boolean };
+type Props = { version: string; step: UpdateStep | null; starting?: boolean; offline?: boolean; maintenance?: boolean };
+
+/* What the bar says: a failed poll first, then the step. */
+function barLabel(t: Messages, p: { step: UpdateStep | null; starting: boolean; offline: boolean; maintenance: boolean }, at: number): string {
+  if (p.maintenance) return t.updates.maintenance;
+  if (p.offline) return t.updates.restarting;
+  return stepLabel(t, p.step, p.starting, at);
+}
+
+/* What the bar says about the step: the first words while the update has not begun, then the step in order. */
+function stepLabel(t: Messages, step: UpdateStep | null, starting: boolean, at: number): string {
+  if (starting || !step) return t.updates.starting;
+  if (step === 'finished' || step === 'rollback') return t.updates.steps[step];
+  return t.updates.stepOf(at + 1, STEPS.length, t.updates.steps[step]);
+}
 
 /* A turning ring and a bar of the four steps: the ones behind are filled, the one under way moves. */
-export function UpdateProgress({ version, step, starting = false, offline = false }: Props) {
+export function UpdateProgress({ version, step, starting = false, offline = false, maintenance = false }: Props) {
   const t = useT();
   const back = step === 'rollback';
   const at = starting || !step ? 0 : step === 'finished' ? STEPS.length : back ? STEPS.length - 1 : STEPS.indexOf(step);
-  const label = offline
-    ? t.updates.restarting
-    : starting || !step
-      ? t.updates.starting
-      : step === 'finished'
-        ? t.updates.steps.finished
-        : back
-          ? t.updates.steps.rollback
-          : t.updates.stepOf(at + 1, STEPS.length, t.updates.steps[step]);
+  const label = barLabel(t, { step, starting, offline, maintenance }, at);
   return (
     <div className={`uprog${back ? ' back' : ''}`}>
       <span className="spinner" aria-hidden="true" />

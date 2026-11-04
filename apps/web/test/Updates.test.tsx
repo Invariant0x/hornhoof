@@ -135,6 +135,27 @@ describe('updates', () => {
     await waitFor(() => expect(screen.getByRole('progressbar', { name: 'Update progress' })).toHaveAttribute('aria-valuetext', 'Hornhoof is restarting. The page reloads by itself.'), { timeout: 4000 });
   });
 
+  it('shows maintenance while the server answers with it', async () => {
+    let view = updates({}, { status: { ...status('running', 'install'), id: 'u2' } });
+    let maintenance = false;
+    mockApi({
+      'GET /api/org': [200, ORG],
+      'GET /api/updates': () =>
+        maintenance ? [503, { error: { code: 'unavailable', message: '', reason: 'maintenance' } }] : [200, view],
+    });
+    render(<Shell me={ME} onSignOut={() => {}} />);
+    const bar = () => screen.getByRole('progressbar', { name: 'Update progress' });
+    await waitFor(() => expect(bar()).toHaveAttribute('aria-valuetext', 'Step 3 of 4: installing'), { timeout: 4000 });
+    maintenance = true;
+    await waitFor(
+      () => expect(bar()).toHaveAttribute('aria-valuetext', 'Maintenance: Hornhoof is installing the update and takes no changes until it ends.'),
+      { timeout: 4000 },
+    );
+    maintenance = false;
+    view = updates({}, { status: { ...status('running', 'health'), id: 'u2' } });
+    await waitFor(() => expect(bar()).toHaveAttribute('aria-valuetext', 'Step 4 of 4: waiting for the new server'), { timeout: 4000 });
+  });
+
   it('lists versions and marks the running one', async () => {
     mockApi({ 'GET /api/org': [200, ORG], 'GET /api/updates': [200, updates()] });
     const user = userEvent.setup();
@@ -235,7 +256,7 @@ describe('updates', () => {
   it('gives the time of the last check as the chosen language writes it', () => {
     localStorage.setItem('hh-lang', 'ru');
     const view = updates();
-    const idle: Updates = { view, busy: false, starting: false, target: null, offline: false, asking: false, check: async () => {}, update: async () => {}, callOff: async () => {} };
+    const idle: Updates = { view, busy: false, starting: false, target: null, offline: false, maintenance: false, asking: false, check: async () => {}, update: async () => {}, callOff: async () => {} };
     render(
       <LanguageProvider>
         <Versions updates={idle} onClose={() => {}} />

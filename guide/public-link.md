@@ -20,7 +20,7 @@ Anyone who learns the link reaches the sign-in page. A name like the company's o
 
 ## What does hornhoof.org see?
 
-hornhoof.org only passes the traffic on and has no accounts of its own. A small tunnel container next to the server keeps the connection to it, so nothing has to be opened on your router. The tunnel waits while the company has no link.
+hornhoof.org only passes the traffic on and has no accounts of its own. The keeper, a small container next to the server, keeps the connection to it, so nothing has to be opened on your router. It carries nothing while the company has no link.
 
 ## How do I change or remove the link?
 

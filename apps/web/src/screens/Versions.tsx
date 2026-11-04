@@ -69,11 +69,11 @@ export function Versions({ updates, onClose }: { updates: Updates; onClose: () =
           <span className="muted">{view.error ? t.updates.checkFailed : view.checkedAt && t.updates.checkedAt(new Intl.DateTimeFormat(language, { hour: '2-digit', minute: '2-digit' }).format(new Date(view.checkedAt)))}</span>
         </div>
         {!updater.present && <p className="update-note">{t.updates.missing}</p>}
-        {updates.starting && !status && <UpdateProgress version={updateTargetText(updates)} step={null} starting offline={updates.offline} />}
+        {updates.starting && !status && <UpdateProgress version={updateTargetText(updates)} step={null} starting offline={updates.offline} maintenance={updates.maintenance} />}
         {status && (
           <div className="update-progress">
             {updates.starting || status.state === 'running' ? (
-              <UpdateProgress version={updateTargetText(updates)} step={updates.starting ? null : status.step} starting={updates.starting} offline={updates.offline} />
+              <UpdateProgress version={updateTargetText(updates)} step={updates.starting ? null : status.step} starting={updates.starting} offline={updates.offline} maintenance={updates.maintenance} />
             ) : (
               <p>{t.updates.result(versionedStatus(status), versionText(current))}</p>
             )}
