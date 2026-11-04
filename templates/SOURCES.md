@@ -62,6 +62,7 @@ The list at the end names every template, what it learned from and its licence. 
 | `roles/operations/OPS-FIX.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `roles/operations/OPS-HEAD.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `roles/operations/OPS-INTEG.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/operations/OPS-PROGRAM.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `roles/operations/OPS-WATCH.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `roles/sales/SAL-AE.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `roles/sales/SAL-HEAD.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
@@ -179,6 +180,7 @@ The list at the end names every template, what it learned from and its licence. 
 | `skills/ops-mcp-config-review.md` | Written for Hornhoof | affaan-m/ECC skills/mcp-dependency-review/SKILL.md | Hornhoof |
 | `skills/ops-node-health.md` | Written for Hornhoof | affaan-m/ECC skills/docker-patterns/SKILL.md | Hornhoof |
 | `skills/ops-postmortem.md` | Written for Hornhoof | wshobson/agents plugins/incident-response/skills/postmortem-writing/SKILL.md | Hornhoof |
+| `skills/ops-program-operator.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/ops-runbook.md` | Written for Hornhoof | anthropics/knowledge-work-plugins operations/skills/runbook/SKILL.md | Hornhoof |
 | `skills/ops-task-watch.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/ops-tool-install.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
