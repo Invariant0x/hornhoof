@@ -5,6 +5,7 @@ import { Shell } from '../src/screens/Shell';
 import { AgentWindow } from '../src/screens/AgentWindow';
 import { CARD, DEV_ORG, ME, ORG, RUNNING_AGENTS, SUBS, TASK_DETAIL, decisions, mockApi } from './api-mock';
 import { fakeStream } from './fake-stream';
+import { until } from './until';
 import type { LiveMessage } from '../src/live';
 
 const currentTask = { id: 't12', number: 12, title: 'Checkout API' };
@@ -25,8 +26,9 @@ it('opens the running orchestrator task instead of a newer assigned task', async
   });
   const user = userEvent.setup();
   render(<Shell me={ME} welcome onSignOut={() => {}} />);
-  await user.click(await screen.findByRole('button', { name: 'Task' }));
-  await screen.findByRole('heading', { name: /Checkout API|Later work/ });
+  await until(() => screen.queryByTitle('Task'));
+  await user.click(screen.getByRole('button', { name: 'Task' }));
+  await until(() => screen.queryByRole('heading', { name: /Checkout API|Later work/ }));
   expect(calls.filter(c => c.path.startsWith('/api/tasks/')).map(c => c.path)).toEqual(['/api/tasks/t12']);
 });
 
