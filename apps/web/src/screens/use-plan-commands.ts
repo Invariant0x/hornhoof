@@ -5,6 +5,7 @@ import { toActiveCommand, type ActiveCommand } from '../ui/CommandBox';
 
 type Setter<T> = Dispatch<SetStateAction<T>>;
 type Controls = {
+  failure: unknown;
   subs: SubView[] | null; setSubs: Setter<SubView[] | null>; commands: ShownCommand[] | null;
   load: () => Promise<void>; connected: (shown: ActiveCommand, added: SubView[]) => void;
   newCommand: (sub: SubView) => Promise<void>; dismissCommand: (command: ShownCommand, id: string) => Promise<void>;
@@ -31,6 +32,7 @@ const dismiss = (all: ShownCommand[] | null, commandId: string, subId: string) =
 
 /* The list and its commands share a revision: a reply started before a local action cannot overwrite its result. */
 export function usePlanCommands(live: { current: boolean }, setFailure: Setter<unknown>): Controls {
+  const [failure, setReadFailure] = useState<unknown>(null);
   const [subs, setSubs] = useState<SubView[] | null>(null);
   const [commands, setCommands] = useState<ShownCommand[] | null>(null);
   const revision = useRef(0);
@@ -40,9 +42,11 @@ export function usePlanCommands(live: { current: boolean }, setFailure: Setter<u
       const next = await readPlans();
       if (!live.current || started !== revision.current) return;
       setSubs(next.subscriptions);
+      setReadFailure(null);
       if (next.commands) setCommands(next.commands);
       if (next.error) setFailure(next.error);
     } catch (err) {
+      setReadFailure(err);
       setFailure(err);
     }
   }, [live, setFailure]);
@@ -66,5 +70,5 @@ export function usePlanCommands(live: { current: boolean }, setFailure: Setter<u
     revision.current++;
     setCommands(list => dismiss(list, command.id, id));
   };
-  return { subs, setSubs, commands, load, connected, newCommand, dismissCommand };
+  return { subs, setSubs, commands, load, connected, newCommand, dismissCommand, failure };
 }

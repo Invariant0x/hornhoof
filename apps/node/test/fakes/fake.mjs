@@ -92,6 +92,21 @@ export function run(name) {
     }
     return void process.stdout.write(readFileSync(new URL('../fixtures/agy-models.txt', import.meta.url)));
   }
+  /* agy 1.4.12 prints the plan's quota buckets for `/usage` in JSON when signed in. */
+  if (name === 'agy' && words === '--print=/usage --output-format json') {
+    const limitsMode = process.env.FAKE_LIMITS_MODE ?? mode;
+    if (!signedIn || limitsMode === 'fail') {
+      process.stderr.write(signedIn ? 'error: failed to fetch usage\n' : 'Error: Please sign in to view usage.\n');
+      process.exit(1);
+    }
+    if (limitsMode === 'bad_json') {
+      process.stdout.write('{broken\n');
+      process.exit(0);
+    }
+    if (limitsMode === 'stderr_noise') process.stderr.write('Checking for updates...\n');
+    const custom = join(home, 'fake-agy-usage.json');
+    return void process.stdout.write(existsSync(custom) ? readFileSync(custom) : readFileSync(new URL('../fixtures/agy-usage.json', import.meta.url)));
+  }
   if (name === 'codex' && words === 'app-server') return void appServer(signedIn);
   if (words === 'auth login' || words === 'login --device-auth' || words === 'login') {
     if (mode === 'login_fail') {

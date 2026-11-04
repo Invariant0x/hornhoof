@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { Limits } from '@hornhoof/protocol';
 import { ownFs, type AgentFs } from '../agent-fs.js';
 import { CRED_FILES } from '../credentials.js';
+import type { JobUser } from '../isolation.js';
+import { agyPlanLimits } from '../providers/antigravity.js';
 import { readPrivate } from '../providers/process.js';
 import { WHOLE_AGENTS_MD } from '../providers/codex.js';
 import { CLAUDE_NO_AUTO_UPDATE, CODEX_NO_AUTO_UPDATE, KIMI_NO_AUTO_UPDATE } from '../providers/session-updates.js';
@@ -30,11 +32,13 @@ export type LaunchInput = {
 /* sessionId: known before the program starts, or null when the program names it later in its log. */
 export type LaunchSpec = { command: string[]; env: Record<string, string>; sessionId: string | null };
 
+export type LimitsRun = { bin?: string; user?: JobUser | null; signal?: AbortSignal };
+
 export type TermProgram = {
   kind: 'claude' | 'codex' | 'kimi' | 'antigravity';
   launch(input: LaunchInput): LaunchSpec;
   /* The plan's limits, for a program that does not write them where the host reads. */
-  limits?(home: string): Promise<Limits | null>;
+  limits?(home: string, run?: LimitsRun): Promise<Limits | null>;
 };
 
 const bridgeEnv = (urls: AgentUrls) => ({
@@ -138,6 +142,10 @@ export const agyProgram: TermProgram = {
     const command = [bin, ...(sessionId ? ['--conversation', sessionId] : []), ...(model ? ['--model', model] : []), ...(effort ? ['--effort', effort] : []), '--dangerously-skip-permissions', '--settings', JSON.stringify({ trustedWorkspaces: [workDir] })];
     /* agy keeps everything in HOME, and leaves the program in the node's tools folder as the node installed it. */
     return { command, env: { HOME: home, AGY_CLI_DISABLE_AUTO_UPDATE: 'true', ...bridgeEnv(urls) }, sessionId };
+  },
+  limits(home, run) {
+    const tools = run?.bin ? dirname(dirname(run.bin)) : join(dirname(home), 'tools');
+    return agyPlanLimits({ bin: run?.bin, home, tools, user: run?.user ?? null, signal: run?.signal });
   },
 };
 

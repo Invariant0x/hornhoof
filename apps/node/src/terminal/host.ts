@@ -54,7 +54,7 @@ function deferred<T>(): Deferred<T> {
   return d;
 }
 
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+const sleep = (ms: number): Promise<void> => new Promise(r => setTimeout(r, ms));
 const pasteWait = (text: string) => Math.min(3000, 300 + text.length / 20);
 
 function exitError(output: string | null, signedOut: RegExp | null, fallback: JobError): JobError {
@@ -244,7 +244,7 @@ const EARLY_MAX = 1000;
 /* A stop hook can precede the program's last log lines; the turn waits this long for them. */
 const SETTLE_MS = 3000;
 /* How long the plan's limits may take to come after a turn of a program that does not log them. */
-const LIMITS_WAIT_MS = 3000;
+const LIMITS_WAIT_MS = 10_000;
 /* How long a Claude Code that said it started may take to show its input box. */
 const INPUT_WAIT_MS = 10_000;
 /* How often the host looks at what the program of a running turn does, besides each time it begins or ends a tool. */
@@ -346,6 +346,7 @@ export class TerminalHost {
   /* The size each view's window asks for, from the moment Hornhoof opens it: a resize that comes while it still opens
      counts too, since Hornhoof says the view is ready as it asks for it. */
   private readonly wanted = new Map<string, { key: string; size: Size }>();
+  private readonly limitsStops = new Set<AbortController>();
   private readonly cols: number;
   private readonly rows: number;
 
@@ -403,6 +404,8 @@ export class TerminalHost {
 
   async stop(): Promise<void> {
     if (this.operatorTimer) clearInterval(this.operatorTimer);
+    for (const stop of this.limitsStops) stop.abort();
+    this.limitsStops.clear();
     this.closeViews();
     for (const a of this.agents.values()) {
       this.operator?.intentional(a.key, 'update');
@@ -1005,8 +1008,18 @@ export class TerminalHost {
   /* Programs that do not log their plan's limits are asked after a turn, for a while. */
   private async planLimits(a: Agent): Promise<void> {
     if (!a.program?.limits) return;
-    const limits = await Promise.race([a.program.limits(a.home).catch(() => null), sleep(LIMITS_WAIT_MS).then(() => null)]);
-    if (limits) a.limits = limits;
+    const stop = new AbortController();
+    this.limitsStops.add(stop);
+    try {
+      const limits = await Promise.race([
+        a.program.limits(a.home, { bin: a.launch?.job.bin, user: this.opts.user, signal: stop.signal }).catch(() => null),
+        sleep(LIMITS_WAIT_MS),
+      ]);
+      if (limits) a.limits = limits;
+    } finally {
+      stop.abort();
+      this.limitsStops.delete(stop);
+    }
   }
 
   /* A stop in the log counts for the running turn once its prompt went in: one logged before is the last turn's. */

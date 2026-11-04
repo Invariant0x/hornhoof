@@ -479,7 +479,8 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
         ...chosen,
         run: async input => {
           const res = await runUnlessStopped(input, () => runIn(input));
-          if (res.limits) limits = merged(limits, res.limits);
+          const fresh = res.limits ?? (!(host && terminal && input.agentKey) && single?.limits ? await single.limits().catch(() => null) : null);
+          if (fresh) limits = merged(limits, fresh);
           return res;
         },
       };

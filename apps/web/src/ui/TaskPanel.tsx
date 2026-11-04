@@ -10,6 +10,7 @@ import { Field } from './Field';
 import { Markdown } from './Markdown';
 import { Requests, wordsAnswer } from './Requests';
 import { PanelFrame } from './SidePanels';
+import { RouteUnavailable, unavailableFailure } from '../screens/RouteUnavailable';
 
 const field = (data: unknown, key: string): unknown => (data && typeof data === 'object' && key in data ? (data as Record<string, unknown>)[key] : undefined);
 
@@ -305,15 +306,15 @@ function useEscapeCloses(onClose: () => void, active: boolean): void {
   }, [onClose, active]);
 }
 
-export function TaskPanel({ taskId, onClose, onOpen, active = true, ...waiting }: { taskId: string; active?: boolean; onClose: () => void; onOpen: (id: string) => void } & Waiting) {
+export function TaskPanel({ taskId, onClose, onOpen, onHome, active = true, ...waiting }: { taskId: string; active?: boolean; onHome?: () => void; onClose: () => void; onOpen: (id: string) => void } & Waiting) {
   const t = useT();
   const { task, failure, load } = useTask(taskId);
   const title = task ? `#${task.number} ${task.title}` : t.tasks.heading;
   useEscapeCloses(onClose, active);
   return (
     <PanelFrame label={title} heading={task ? `#${task.number}` : ''} busy={!task && failure === null} onClose={onClose}>
-      {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
-      {task && <TaskBody task={task} onOpen={onOpen} onChanged={load} waiting={waiting} />}
+      {failure !== null && (unavailableFailure(failure) ? <RouteUnavailable onHome={onHome} /> : <p className="alert" role="alert">{errorText(t, failure)}</p>)}
+      {task && !unavailableFailure(failure) && <TaskBody task={task} onOpen={onOpen} onChanged={load} waiting={waiting} />}
     </PanelFrame>
   );
 }

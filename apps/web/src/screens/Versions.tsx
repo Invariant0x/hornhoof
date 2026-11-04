@@ -1,3 +1,4 @@
+import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 import { useEffect, useRef, useState } from 'react';
 import { errorText, useLanguage, useT } from '../i18n';
 import type { Build } from '../types';
@@ -8,7 +9,7 @@ import { updateTargetText, versionedStatus } from '../ui/UpdateVersion';
 import { takeEscape } from '../ui/escape';
 
 /* The builds Hornhoof can run, the one it runs, and the update under way or the last one's end. */
-export function Versions({ updates, onClose }: { updates: Updates; onClose: () => void }) {
+export function Versions({ updates, onClose, onHome }: { updates: Updates; onClose: () => void; onHome?: () => void }) {
   const t = useT();
   const { language } = useLanguage();
   const { view, busy } = updates;
@@ -41,6 +42,7 @@ export function Versions({ updates, onClose }: { updates: Updates; onClose: () =
     await act(() => updates.update(build === view?.latest ? 'latest' : build.tag, false));
   }
 
+  if (unavailableFailure(updates.failure)) return <RouteUnavailable dialog onHome={onHome} />;
   if (!view) return null;
   const { current, latest, versions, updater } = view;
   const status = updater.status;

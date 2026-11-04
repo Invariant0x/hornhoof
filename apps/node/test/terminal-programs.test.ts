@@ -3,6 +3,7 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { ownFs, type AgentFs } from '../src/agent-fs.js';
 import { credentialSecrets } from '../src/credentials.js';
@@ -215,6 +216,24 @@ describe('Antigravity CLI in a terminal', () => {
       PreInvocation: [{ type: 'command', command: 'hh-hook invocation' }], Stop: [{ type: 'command', command: 'hh-hook stop' }],
     } });
     expect(existsSync(join(work, '.hh-agy.jsonl'))).toBe(false);
+  });
+
+  it("reads the plan's limits through agy, and gives nothing when agy is absent or fails", async () => {
+    const root = mkdtempSync(join(tmpdir(), 'agy-limits-'));
+    const home = join(root, 'home');
+    mkdirSync(home, { recursive: true });
+    expect(await agyProgram.limits!(home)).toBeNull();
+    const bin = fileURLToPath(new URL('./fakes/fake-agy-term.mjs', import.meta.url));
+    expect(await agyProgram.limits!(home, { bin })).toMatchObject({
+      status: 'allowed',
+      complete: true,
+      windows: [
+        { name: 'five_hour', resetsAt: '2026-11-04T21:41:44.000Z' },
+        { name: 'seven_day', resetsAt: '2026-11-10T00:41:44.000Z' },
+      ],
+    });
+    writeFileSync(join(home, '.fake-limits-mode'), 'fail');
+    expect(await agyProgram.limits!(home, { bin })).toBeNull();
   });
 });
 

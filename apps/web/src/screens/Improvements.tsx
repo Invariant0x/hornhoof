@@ -1,3 +1,4 @@
+import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 import { useId, useState } from 'react';
 import { api } from '../api';
 import { errorText, useT } from '../i18n';
@@ -120,7 +121,7 @@ function Item({ item, org, onChanged, onTask }: { item: Improvement; org: Org | 
 
 /* What employees found to improve in how the company works, for people who see the whole company: what waits for a
    decision first, then what the orchestrator does now, what was done, and what was set aside, folded away. */
-export function Improvements({ improvements, failure, onChanged, onTask }: { improvements: Improvement[] | undefined; failure: unknown; onChanged: () => void; onTask: (taskId: string) => void }) {
+export function Improvements({ improvements, failure, onChanged, onTask, onHome }: { improvements: Improvement[] | undefined; failure: unknown; onChanged: () => void; onTask: (taskId: string) => void; onHome?: () => void }) {
   const t = useT();
   const { org } = useOrg();
   const of = (status: Improvement['status']) => improvements?.filter(i => i.status === status) ?? [];
@@ -134,6 +135,7 @@ export function Improvements({ improvements, failure, onChanged, onTask }: { imp
   const open = of('open');
   const later = (['taken', 'done'] as const).filter(s => of(s).length);
   const dismissed = of('dismissed');
+  if (unavailableFailure(failure)) return <RouteUnavailable onHome={onHome} />;
 
   return (
     <section className="tasks">

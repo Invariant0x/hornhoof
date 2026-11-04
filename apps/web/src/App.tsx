@@ -8,6 +8,7 @@ import { Shell } from './screens/Shell';
 import type { Me } from './types';
 import { Card } from './ui/Card';
 import { VersionMark } from './ui/VersionMark';
+import { parseRoute } from './routes';
 
 type Screen =
   | { kind: 'loading' }
@@ -16,8 +17,6 @@ type Screen =
   | { kind: 'login' }
   | { kind: 'shell'; me: Me; welcome?: boolean }
   | { kind: 'error'; failure: unknown };
-
-const INVITE_PATH = /^\/invite\/([^/]+)\/?$/;
 
 export function App() {
   return (
@@ -33,8 +32,8 @@ function Screens() {
   const [screen, setScreen] = useState<Screen>({ kind: 'loading' });
 
   const decide = useCallback(async (welcome = false) => {
-    const invite = window.location.pathname.match(INVITE_PATH);
-    if (invite) return setScreen({ kind: 'invite', token: decodeURIComponent(invite[1]!) });
+    const route = parseRoute(window.location.pathname);
+    if (route.kind === 'invite') return setScreen({ kind: 'invite', token: route.token });
     try {
       const { needed, linkDomain } = await api.get<{ needed: boolean; linkDomain?: string }>('/api/setup');
       if (needed) return setScreen({ kind: 'setup', linkDomain });
@@ -65,9 +64,9 @@ function Screens() {
     case 'setup':
       return <Setup linkDomain={screen.linkDomain} onDone={({ welcome }) => home(welcome)} />;
     case 'login':
-      return <Login onDone={() => home()} />;
+      return <Login onDone={() => void decide()} />;
     case 'shell':
-      return <Shell me={screen.me} welcome={screen.welcome} onSignOut={() => home()} />;
+      return <Shell me={screen.me} welcome={screen.welcome} onSignOut={() => void decide()} />;
     case 'error':
       return (
         <Card>
