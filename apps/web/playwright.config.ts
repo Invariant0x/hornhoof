@@ -2,8 +2,8 @@
 import { defineConfig, devices } from '@playwright/test';
 
 /* Tests in a real browser, for what jsdom cannot lay out. The app runs on Vite's dev server and every /api call is answered
-   in the page by the test itself, so no Hornhoof server is needed. The browser comes from `npx playwright install
-   --only-shell chromium`, or from PLAYWRIGHT_BROWSERS_PATH on a Hornhoof node, which carries the same version. */
+   in the page by the test itself, so no Hornhoof server is needed. The browser comes from `npx playwright install chromium`
+   on a developer's machine, or from PLAYWRIGHT_BROWSERS_PATH (/data/browsers) prepared on a Hornhoof node at the lockfile version. */
 const PORT = process.env.HORNHOOF_BROWSER_PORT ?? '4179';
 
 export default defineConfig({

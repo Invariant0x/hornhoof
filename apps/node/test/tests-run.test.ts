@@ -43,6 +43,38 @@ describe('a part of a test run on a node', () => {
     expect(readdirSync(join(dir, 'tests'))).toEqual([]);
   });
 
+  it('exposes PLAYWRIGHT_BROWSERS_PATH on /data/browsers and prepares the repository browser before running the check', async () => {
+    const { url } = origin();
+    const dir = nodeDir();
+    const seen: string[] = [];
+    const done = await runTests(
+      run(url, { command: 'printf "%s|%s\n" "$PLAYWRIGHT_BROWSERS_PATH" "$PLAYWRIGHT_SKIP_BROWSER_GC"' }),
+      {
+        dir,
+        user: null,
+        hidden: [],
+        prepareRepoBrowser: async repoDir => {
+          seen.push(repoDir);
+        },
+      },
+    );
+    expect(done).toMatchObject({ ok: true, exitCode: 0 });
+    expect(seen).toHaveLength(1);
+    expect(done.log).toContain(`${join(dir, 'browsers')}|1`);
+
+    const failed = await runTests(run(url, { partId: 'part-2', command: 'echo should-not-run' }), {
+      dir,
+      user: null,
+      hidden: [],
+      prepareRepoBrowser: async () => {
+        throw new Error('Playwright Chromium could not start: libgbm.so.1 missing');
+      },
+    });
+    expect(failed).toMatchObject({ ok: false, error: 'failed', exitCode: null });
+    expect(failed.log).toContain('Playwright Chromium could not start: libgbm.so.1 missing');
+    expect(failed.log).not.toContain('should-not-run');
+  });
+
   it("finds the task's own branch by its number when none is named, and says which when it cannot", async () => {
     const { url, commits } = origin(['task-12-checkout', 'task-120-other', 'task-7-a', 'task-7-b']);
     const dir = nodeDir();

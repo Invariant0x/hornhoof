@@ -243,6 +243,19 @@ describe('AgentWindow', () => {
     expect(await screen.findByText("Hornhoof on Ivan's machine is out of date. Run the install command there again.")).toBeInTheDocument();
   });
 
+  it('explains when the browser for checks failed on a personal or built-in machine', async () => {
+    const mac = { ...SUBS[1]!, kind: 'personal' as const, owner: { id: 'p1', name: 'Ivan' } };
+    const view = open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, ready: false, reason: 'browser_failed' } }] }, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: mac } });
+    expect(await screen.findByText("The browser for checks did not start on Ivan's machine. Open Machines to see why.")).toBeInTheDocument();
+    view.unmount();
+    const key = { ...SUBS[0]!, kind: 'api_key' as const };
+    const builtin = open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, ready: false, reason: 'browser_failed' } }] }, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: key } });
+    expect(await screen.findByText('The browser for checks did not start on the built-in machine. Open Machines to see why.')).toBeInTheDocument();
+    builtin.unmount();
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, ready: false, reason: 'browser_failed' } }] }, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: null } });
+    expect(await screen.findByText('The browser for checks did not start on the built-in machine. Open Machines to see why.')).toBeInTheDocument();
+  });
+
   it('names the machine he runs on', async () => {
     const plan = { ...SUBS[0]!, owner: { id: 'p1', name: 'Ivan' } };
     open({}, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: plan, machine: { id: 'm3', hostname: 'ivan-laptop' } } });

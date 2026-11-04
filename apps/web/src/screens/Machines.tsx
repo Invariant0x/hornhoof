@@ -127,22 +127,23 @@ function machineRows(machines: MachineView[], builtin: BuiltinView | null, subs:
   const rows = machines.map(m => {
     const here = m.id === host ? builtin : null;
     return { ...m, source: m, server: Boolean(here), online: m.online || Boolean(here?.online), load: m.load ?? here?.load ?? null,
+      browserError: m.browserError || here?.browserError || null,
       plans: [...m.plans, ...(here ? keys : [])],
       running: here ? combinedRunning(m.running, here.running) : m.running };
   });
   if (!builtin || machines.some(m => m.id === host)) return rows;
-  return [...rows, { id: 'builtin', hostname: builtinName, source: null, server: true, owner: null, lendsTests: null, os: 'linux', arch: '', online: builtin.online, lastSeenAt: null, plans: keys, load: builtin.load, running: builtin.running, programs: builtin.programs }];
+  return [...rows, { id: 'builtin', hostname: builtinName, source: null, server: true, owner: null, lendsTests: null, os: 'linux', arch: '', online: builtin.online, lastSeenAt: null, plans: keys, load: builtin.load, running: builtin.running, programs: builtin.programs, browserError: builtin.browserError || null }];
 }
 
 function machineColumns(t: Messages, language: Language): TableColumn<MachineRow>[] {
   const load = (m: MachineRow) => m.online && m.load ? busyShare(m.load.load, m.load.cpus) : null;
   return [
-    { key: 'name', label: t.tables.machine, direction: 1, value: m => m.hostname, cell: m => <><span className="nm"><b>{m.hostname}</b></span>{m.server && <Leader />}<OtherBuild row={m} /></> },
+    { key: 'name', label: t.tables.machine, direction: 1, value: m => m.hostname, cell: m => <><span className="nm"><b>{m.hostname}</b></span>{m.server && <Leader />}<OtherBuild row={m} /><BrowserIssue row={m} /></> },
     { key: 'owner', label: t.machines.owner, direction: 1, value: m => m.owner?.name ?? null, cell: m => m.owner?.name },
     { key: 'status', label: t.tables.status, direction: 1, value: m => m.online ? 0 : 1, className: 'k-status', cell: m => m.online ? <span className="status ready">{t.machines.online}</span> : <span className="muted">{lastSeen(t, language, m.lastSeenAt)}</span> },
     { key: 'load', label: t.machines.load, direction: -1, value: load, cell: m => load(m) === null ? t.machines.unknown : <span className="cell-load"><Bar used={load(m)! / 100} /><b>{load(m)}%</b></span> },
     { key: 'memory', label: t.tables.freeMemory, direction: -1, value: m => m.online ? m.load?.memFree ?? null : null, cell: m => m.online && m.load ? t.machines.gbOf(gigabytes(language, m.load.memFree), gigabytes(language, m.load.memTotal)) : t.machines.unknown },
-    { key: 'plans', label: t.tables.plans, direction: -1, value: m => m.plans.length, cell: m => <span className="marks">{m.plans.length ? m.plans.map(p => <span key={p.id} className={!m.online || !p.online || p.status !== 'ready' ? 'dim' : undefined}><ProviderMark provider={p.provider} /></span>) : 0}</span> },
+    { key: 'plans', label: t.tables.plans, direction: -1, value: m => m.plans.length, cell: m => <span className="marks">{m.plans.length ? m.plans.map(p => <span key={p.id} className={!m.online || !p.online || p.status !== 'ready' || Boolean(m.browserError) ? 'dim' : undefined}><ProviderMark provider={p.provider} /></span>) : 0}</span> },
     { key: 'agents', label: t.tables.agents, direction: -1, value: m => agentAmounts(m.running.agents), cell: m => <AgentsCell agents={m.running.agents} /> },
     { key: 'tests', label: t.tables.tests, direction: -1, value: m => m.lendsTests === null ? null : Number(m.lendsTests), cell: m => m.lendsTests === null ? null : m.lendsTests ? t.tables.lent : t.tables.notLent },
   ];
@@ -183,6 +184,16 @@ function OtherBuild({ row }: { row: MachineRow }) {
 function BuildNote({ row }: { row: MachineRow }) {
   const t = useT();
   return row.otherBuild ? <p className="machine-note">{buildNote(t, row.otherBuild)}</p> : null;
+}
+
+function BrowserIssue({ row }: { row: MachineRow }) {
+  const t = useT();
+  return row.browserError ? <span className="badge old" title={t.machines.browserFailedNote(row.browserError)}>{t.machines.browserFailed}</span> : null;
+}
+
+function BrowserNote({ row }: { row: MachineRow }) {
+  const t = useT();
+  return row.browserError ? <p className="machine-note">{t.machines.browserFailedNote(row.browserError)}</p> : null;
 }
 
 type MachineControls = {
@@ -252,7 +263,7 @@ function MachineDetails({ row, subs, me, now, controls }: { row: MachineRow; sub
   const picking = controls.picking === row.id;
   return (
     <CardFrame label={row.hostname} accent={row.server}
-      head={<CardHead mark={<MachineMark />} name={row.hostname} badges={<>{row.server && <Leader />}<OtherBuild row={row} /></>} state={<span className={`status ${row.online ? 'ready' : 'offline'}`}>{row.online ? t.machines.online : t.cards.offline}</span>} line={!row.online && lastSeen(t, language, row.lastSeenAt)} />}
+      head={<CardHead mark={<MachineMark />} name={row.hostname} badges={<>{row.server && <Leader />}<OtherBuild row={row} /><BrowserIssue row={row} /></>} state={<span className={`status ${row.online ? 'ready' : 'offline'}`}>{row.online ? t.machines.online : t.cards.offline}</span>} line={!row.online && lastSeen(t, language, row.lastSeenAt)} />}
       extra={m && <PlanPicker machine={m} addable={addable} shown={shown} picking={picking} controls={controls} />}>
       <section className="blk blk-facts">
         <h4>{t.cards.aboutMachine}</h4>
@@ -260,6 +271,7 @@ function MachineDetails({ row, subs, me, now, controls }: { row: MachineRow; sub
           <Resources row={row} />
           {row.server && <p className="machine-note">{m ? t.machines.builtinHere : t.machines.builtinAbout}</p>}
           <BuildNote row={row} />
+          <BrowserNote row={row} />
         </Part>
         {m && <Part title={t.cards.ownerSystem}><Facts items={[[t.machines.owner, m.owner.name], [t.machines.system, `${SYSTEMS[m.os] ?? m.os}, ${m.arch}`]]} /></Part>}
         {m && row.server && <Part title={t.cards.priority}><p className="server-priority"><b>1</b><span>{t.cards.serverHere}</span></p></Part>}

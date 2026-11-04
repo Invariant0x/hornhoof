@@ -137,6 +137,34 @@ const builtinCut = (ctx: Ctx, id: NodeIdentity, msg: Hello, now: Date) =>
 const nodeCut = (ctx: Ctx, nodeId: string, row: { node: typeof nodes.$inferSelect; host: string | null }, msg: Hello, now: Date) =>
   interruptionOf(ctx, { id: nodeId, name: row.host || 'a machine with no name', machine: { id: row.node.machineId, name: row.host }, said: { version: row.node.version, boot: row.node.boot } }, msg, now);
 
+async function savePlanMetadata(ctx: Ctx, planId: string, msg: Extract<NodeMessage, { type: 'status' }>): Promise<void> {
+  if (!msg.limits && !msg.models) return;
+  await ctx.db
+    .update(subscriptions)
+    .set({ ...(msg.limits ? { limits: msg.limits } : {}), ...(msg.models ? { models: msg.models } : {}) })
+    .where(and(eq(subscriptions.id, planId), isNull(subscriptions.removedAt)));
+}
+
+async function updatePlanStatus(ctx: Ctx, nodeId: string, msg: Extract<NodeMessage, { type: 'status' }>, now: Date): Promise<boolean> {
+  const status = statusOf(msg);
+  const [node] = await ctx.db
+    .update(nodes)
+    .set({ status, lastSeenAt: now, ...(msg.account !== undefined ? { account: msg.account } : {}) })
+    .where(and(eq(nodes.id, nodeId), liveNode))
+    .returning({ plan: nodes.subscriptionId });
+  if (!node?.plan) return false;
+  await savePlanMetadata(ctx, node.plan, msg);
+  await settlePlans(ctx.db, [node.plan]);
+  return status === 'ready';
+}
+
+async function handleNodeStatus(ctx: Ctx, id: NodeIdentity, msg: Extract<NodeMessage, { type: 'status' }>, now: Date): Promise<void> {
+  const unblocked = ctx.hub.noteStatus(id, msg.noRuns, msg.browserError);
+  const ready = id.kind === 'node' ? await updatePlanStatus(ctx, id.nodeId, msg, now) : false;
+  if (ready || unblocked) await pumpWaiting(ctx);
+  if (unblocked) await pumpTests(ctx);
+}
+
 export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage, now = new Date()): Promise<void> {
   if (!(await hasCurrentKey(ctx, id))) return;
   const { db } = ctx;
@@ -167,7 +195,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
         await settlePlans(db, [plan]);
       }
       await failOpenJobs(ctx, jobsOf(id, ctx), 'machine_restarted', msg.running, cut);
-      ctx.hub.greet(id, msg.terminals === true, msg.skillFiles === true, msg.work === true, msg.noRuns ?? null, msg.build);
+      ctx.hub.greet(id, msg.terminals === true, msg.skillFiles === true, msg.work === true, msg.noRuns || null, msg.build, msg.browserError || null);
       if (msg.load) ctx.hub.report(id, msg.load);
       await testsHello(ctx, id, msg.tests);
       /* Hornhoof ended these while the node was away, with a stop or a removed subscription; the node stops them now. */
@@ -181,28 +209,9 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       await pumpWaiting(ctx);
       return;
     }
-    case 'status': {
-      if (id.kind !== 'node') return;
-      const status = statusOf(msg);
-      const [node] = await db
-        .update(nodes)
-        .set({ status, lastSeenAt: now, ...(msg.account !== undefined ? { account: msg.account } : {}) })
-        .where(and(eq(nodes.id, id.nodeId), liveNode))
-        .returning({ plan: nodes.subscriptionId });
-      if (!node?.plan) return;
-      /* A node that started again knows no limits until its program says them; the last ones stay until then. The plan's
-         limits are the same on each of its machines, so the last word counts. */
-      if (msg.limits || msg.models) {
-        await db
-          .update(subscriptions)
-          .set({ ...(msg.limits ? { limits: msg.limits } : {}), ...(msg.models ? { models: msg.models } : {}) })
-          .where(and(eq(subscriptions.id, node.plan), isNull(subscriptions.removedAt)));
-      }
-      await settlePlans(db, [node.plan]);
-      /* A ready subscription may have turns waiting for it. */
-      if (status === 'ready') await pumpWaiting(ctx);
+    case 'status':
+      await handleNodeStatus(ctx, id, msg, now);
       return;
-    }
     /* A node of a plan sealed the sign-in it holds for the plan's other nodes. */
     case 'cred.sealed': {
       if (id.kind !== 'node') return;

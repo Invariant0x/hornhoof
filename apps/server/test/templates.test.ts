@@ -462,4 +462,12 @@ describe('templates', () => {
     const credits = readFileSync(`${DIR}/SOURCES.md`, 'utf8');
     for (const s of skills) for (const src of s.sources) expect(credits, `${s.id} ${src}`).toContain(src.split(' ')[0]);
   });
+
+  it('tells browser checks to verify the preinstalled browser opens instead of installing it by hand, without naming Hornhoof', () => {
+    const check = templates.skills.get('dev-browser-check')!.body;
+    expect(check).toMatch(/verify the browser opens/i);
+    expect(check).toMatch(/instead of running `playwright install` by hand/);
+    expect(check).not.toMatch(/hornhoof/i);
+    for (const item of [...roles, ...skills]) expect(item.body, item.id).not.toMatch(/npx playwright install/);
+  });
 });

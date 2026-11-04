@@ -476,8 +476,8 @@ watch_link() {
 # Antigravity signs in on each machine.
 signs_in_hornhoof() { case "$1" in claude | codex | kimi | glm) return 0 ;; esac; return 1; }
 
-# A node that needs no sign-in here: ready, or a spare machine of a Codex plan that another machine runs now.
-signed_in() { case "$(node_status "$1")" in ready | spare) return 0 ;; esac; return 1; }
+# A node that needs no sign-in here: ready, a spare machine of a Codex plan, or signed in with a browser error to report.
+signed_in() { case "$(node_status "$1")" in ready | spare | browser_failed:*) return 0 ;; esac; return 1; }
 
 # The joined nodes, of those named, that are not ready after SIGNIN_WAIT seconds. A plan its owner signed in once in
 # Hornhoof reaches a new node of the plan within seconds, and that node needs no sign-in here.
@@ -619,6 +619,7 @@ node_mode() {
         fi
         ;;
       needs_setup) status="needs its first setup, run the install command again without --join" ;;
+      browser_failed:*) status="browser did not start (${status#browser_failed: }), see docker logs $name" ;;
       *) status="not answering yet, see docker logs $name" ;;
     esac
     say "  $(program_name "$provider"): $status ($name)"

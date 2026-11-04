@@ -36,7 +36,11 @@ export function programsFor(hub: NodeHub, ids: NodeIdentity[]): ProgramInfo[] | 
 
 export function machineProgramState(hub: NodeHub, ids: string[], machineId: string, builtin: { id: string } | null) {
   const nodes = machineProgramNodes(ids, machineId, builtin);
-  return { online: nodes.some(id => hub.isOnline(id)), programs: programsFor(hub, nodes) };
+  return {
+    online: nodes.some(id => hub.isOnline(id)),
+    programs: programsFor(hub, nodes),
+    browserError: nodes.map(id => hub.browserErrorOf(id)).find((err): err is string => err !== null) || null,
+  };
 }
 
 async function targets(ctx: Ctx, person: Person, id: string, ownMachine: OwnMachine): Promise<NodeIdentity[]> {

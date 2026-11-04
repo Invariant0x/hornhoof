@@ -68,6 +68,7 @@ const PLAN_WAITS: Partial<Record<NonNullable<OrchestratorState['reason']>, (t: M
 function reasonText(t: Messages, reason: OrchestratorState['reason'], sub: SubView | null): string {
   const waits = reason && sub ? PLAN_WAITS[reason]?.(t, sub) : undefined;
   if (waits) return waits;
+  if (reason === 'browser_failed') return sub?.kind === 'personal' ? t.window.browserFailed(sub.owner.name) : t.window.builtinBrowserFailed;
   if (reason === 'machine_offline') return sub?.kind === 'personal' ? t.map.machineOffline(sub.owner.name) : t.window.builtinOffline;
   return t.map.needsSubscription;
 }

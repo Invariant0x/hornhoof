@@ -631,4 +631,16 @@ describe('plans on any machine', () => {
   it('name the four kinds of sign-in a plan can carry', () => {
     expect(CRED_KINDS).toEqual(['claude_token', 'codex_auth', 'kimi_key', 'glm_key']);
   });
+
+  it('carries a bounded browserError in hello and status when Chromium cannot start', () => {
+    const hello = parseNodeMessage(JSON.stringify({ type: 'hello', version: '0.6.1', loggedIn: true, running: [], browserError: 'libnss3.so: cannot open shared object file' }));
+    expect(hello).toMatchObject({ type: 'hello', browserError: 'libnss3.so: cannot open shared object file' });
+    expect(parseNodeMessage(JSON.stringify({ type: 'hello', version: '0.6.1', loggedIn: true, running: [], browserError: null }))).toMatchObject({ type: 'hello', browserError: null });
+    expect(parseNodeMessage(JSON.stringify({ type: 'hello', version: '0.6.1', loggedIn: true, running: [], browserError: '' }))).toBeNull();
+    expect(parseNodeMessage(JSON.stringify({ type: 'hello', version: '0.6.1', loggedIn: true, running: [], browserError: 'x'.repeat(301) }))).toBeNull();
+
+    const status = parseNodeMessage(JSON.stringify({ type: 'status', loggedIn: true, limits: null, browserError: 'Executable missing', noRuns: 'Executable missing' }));
+    expect(status).toMatchObject({ type: 'status', browserError: 'Executable missing', noRuns: 'Executable missing' });
+    expect(parseNodeMessage(JSON.stringify({ type: 'status', loggedIn: true, limits: null, browserError: null, noRuns: null }))).toMatchObject({ type: 'status', browserError: null, noRuns: null });
+  });
 });

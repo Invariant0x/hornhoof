@@ -423,6 +423,8 @@ export const en = {
     otherBuild: 'Other build',
     otherBuildNote: (here: string, server: string) => `Its nodes are not the server's build (${here} here, ${server} on the server). To update them, run the install command on it again without --join.`,
     olderBuild: 'an older one',
+    browserFailed: 'Browser failed',
+    browserFailedNote: (reason: string) => `The browser for checks did not start (${reason}). Run the install command on this machine again without --join, or check the node logs.`,
   },
   notebook: {
     title: 'Notebook',
@@ -514,6 +516,8 @@ export const en = {
       agent_failed: 'The employee stopped with an error.',
     } as Record<string, string>,
     builtinOffline: 'The built-in machine is offline',
+    builtinBrowserFailed: 'The browser for checks did not start on the built-in machine. Open Machines to see why.',
+    browserFailed: (owner: string) => `The browser for checks did not start on ${owner}'s machine. Open Machines to see why.`,
     nodeOutdated: (owner: string) => `Hornhoof on ${owner}'s machine is out of date. Run the install command there again.`,
     limitUntil: (at: string) => `The plan is at its limit. Turns wait until ${at} and go on by themselves then.`,
     budgetUntil: (at: string) => `The plan used the share set for tasks. Task turns wait until ${at}; messages from people still go.`,
