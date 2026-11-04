@@ -12,7 +12,8 @@ import { drainPostponed, drainWork } from './drain-work.js';
 
 const Saved = z.object({ key: z.string(), boot: z.string().nullable(), view: MachineDrain, touched: z.number() });
 type Saved = z.infer<typeof Saved>;
-const states = new WeakMap<Ctx, NodeDrains>();
+/* By the config, which a transaction's copy of the context shares with the context itself. */
+const states = new WeakMap<Ctx['config'], NodeDrains>();
 const keyOf = (node: NodeIdentity) => node.kind === 'builtin' ? 'builtin' : node.nodeId;
 const nodeOf = (key: string): NodeIdentity => key === 'builtin' ? { kind: 'builtin' } : { kind: 'node', nodeId: key };
 /* An installer that disappeared must not hold a node forever. Restarting gets longer for image/container startup. */
@@ -127,20 +128,20 @@ class NodeDrains {
 
 export function startNodeDrains(app: FastifyInstance, ctx: Ctx): void {
   const drains = new NodeDrains(ctx);
-  states.set(ctx, drains);
+  states.set(ctx.config, drains);
   const timer = setInterval(() => drains.tick(), Math.min(1000, ctx.config.nodeDrainMs, ctx.config.nodeUpdateRetryMs));
   timer.unref();
   app.addHook('onClose', async () => clearInterval(timer));
 }
 
-export const nodeDrain = (ctx: Ctx, node: NodeIdentity): MachineDrain | null => states.get(ctx)?.view(node) ?? null;
+export const nodeDrain = (ctx: Ctx, node: NodeIdentity): MachineDrain | null => states.get(ctx.config)?.view(node) ?? null;
 export const nodeHeld = (ctx: Ctx, node: NodeIdentity): boolean => {
   const state = nodeDrain(ctx, node)?.state;
   return state === 'waiting' || state === 'restarting';
 };
-export const requestNodeDrain = (ctx: Ctx, node: NodeIdentity): Promise<MachineDrain> => states.get(ctx)!.request(node);
-export const cancelNodeDrain = (ctx: Ctx, node: NodeIdentity): void => states.get(ctx)?.cancel(node);
-export const nodeDrainHello = (ctx: Ctx, node: NodeIdentity, boot: string | undefined): void => states.get(ctx)?.hello(node, boot);
+export const requestNodeDrain = (ctx: Ctx, node: NodeIdentity): Promise<MachineDrain> => states.get(ctx.config)!.request(node);
+export const cancelNodeDrain = (ctx: Ctx, node: NodeIdentity): void => states.get(ctx.config)?.cancel(node);
+export const nodeDrainHello = (ctx: Ctx, node: NodeIdentity, boot: string | undefined): void => states.get(ctx.config)?.hello(node, boot);
 
 export function machineDrain(ctx: Ctx, nodes: NodeIdentity[]): MachineDrain | null {
   const views = nodes.map(n => nodeDrain(ctx, n)).filter((v): v is MachineDrain => v !== null);
