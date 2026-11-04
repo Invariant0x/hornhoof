@@ -147,7 +147,7 @@ describe('the task engine', () => {
   });
 
   it('tells whoever gave a department task when its head reports, and asks a person when a head is blocked on theirs, whose question the orchestrator puts into plain words', async () => {
-    const { ctx, db, CEO, orchestrator, dev, head, deptTask } = await company();
+    const { ctx, db, orchestrator, dev, head, deptTask } = await company();
     const given = await createTask(ctx, { agentId: orchestrator.id }, { title: 'Pricing page', brief: '', body: '', departmentId: dev.id, assigneeAgentId: head.id });
     const done = await report(ctx, head.id, given.task.id, { done: true, summary: 'Shipped behind a flag.' });
     expect(done.task.status).toBe('done');

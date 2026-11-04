@@ -7,7 +7,7 @@ import { nodeLifecycle, prepareNodeStop, stopNode } from '../src/lifecycle.js';
 const FIRST = '2026-11-03T17:00:00.000Z';
 const NEXT = '2026-11-03T17:47:00.000Z';
 const dir = () => mkdtempSync(join(tmpdir(), 'hh-node-life-'));
-const open = (path: string, startedAt: string, readOom = () => null as number | null, write = (_line: string) => {}) =>
+const open = (path: string, startedAt: string, readOom = () => null as number | null, write: (line: string) => void = () => {}) =>
   nodeLifecycle({ dir: path, startedAt, secrets: () => ['node-token-123456789'], write, readOom });
 
 describe('a persisted node lifecycle', () => {
