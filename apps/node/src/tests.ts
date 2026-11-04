@@ -3,6 +3,7 @@ import { chmodSync, chownSync, closeSync, constants, fstatSync, lstatSync, mkdir
 import { availableParallelism } from 'node:os';
 import { join } from 'node:path';
 import { MAX_RUN_FILES, RUN_FILE_BYTES, TEST_LOG_BYTES, type NodeMessage, type ServerMessage, type TestError } from '@hornhoof/protocol';
+import { browserEnv, ensureRepoBrowser } from './browser.js';
 import { ensurePasswd, FIRST_UID, prepareFolder, type JobUser } from './isolation.js';
 import { stripEscapes } from './providers/process.js';
 import { redact } from './redact.js';
@@ -34,6 +35,8 @@ type Options = {
   env?: NodeJS.ProcessEnv;
   /* The task's files of a part of work, in and out. */
   files?: PartFiles;
+  /* Ensures the repository lockfile's Playwright Chromium is ready and launchable before the check runs. */
+  prepareRepoBrowser?: (repoDir: string) => Promise<void>;
 };
 
 /* What a command prints, at most TEST_LOG_BYTES of it: its first quarter and its end, where a runner sums up. */
@@ -301,7 +304,7 @@ function commandEnv(base: NodeJS.ProcessEnv, msg: TestRun, inbox: string, outbox
    a part of work gets the task's files it names, the command runs within the time with a home and a temporary folder
    of its own, what a part of work leaves in its output folder goes on the task, and the folder goes, whatever
    happened. */
-export async function runTests(msg: TestRun, { dir, user, hidden, signal, proc = '/proc', cpus, env: hostEnv, files }: Options): Promise<TestsDone> {
+export async function runTests(msg: TestRun, { dir, user, hidden, signal, proc = '/proc', cpus, env: hostEnv, files, prepareRepoBrowser }: Options): Promise<TestsDone> {
   const deadline = Date.now() + msg.timeoutMs;
   const work = msg.kind === 'work';
   const root = join(dir, 'tests', msg.partId);
@@ -329,7 +332,7 @@ export async function runTests(msg: TestRun, { dir, user, hidden, signal, proc =
     chmodSync(folders.own, 0o755);
     for (const folder of folders.user) prepareFolder(folder, user);
     if (user) ensurePasswd(user, join(dir, 'tests'));
-    const base = { PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin', HOME: join(root, 'home'), TMPDIR: join(root, 'tmp'), LANG: 'C.UTF-8' };
+    const base = { PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin', HOME: join(root, 'home'), TMPDIR: join(root, 'tmp'), LANG: 'C.UTF-8', ...browserEnv(dir) };
     const source = msg.repo;
     /* Git reads no settings but its own here, and gets the token only through the helper, for the repository's host. */
     const git = (args: string[], cwd: string, into = out) =>
@@ -371,6 +374,7 @@ export async function runTests(msg: TestRun, { dir, user, hidden, signal, proc =
       await git(['rev-parse', 'HEAD'], repo, head);
       commit = /^[0-9a-f]{40,64}$/.exec(head.text().trim())?.[0] ?? null;
       if (commit) out.line(`At ${commit}.`);
+      await (prepareRepoBrowser ? prepareRepoBrowser(repo) : ensureRepoBrowser(dir, repo, user, user));
     }
     if (!error && work && msg.files?.length) {
       for (const name of msg.files) {

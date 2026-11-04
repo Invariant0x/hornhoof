@@ -79,6 +79,13 @@ describe('secureNode', () => {
       'chown /data/work 1000:1000',
       'chmod /data/work 700',
     ]);
+
+    const { ops: ops2, calls: calls2 } = fakeOps(
+      { '/data': 0, '/data/browser-error': 1000, '/data/home': 1000, '/data/work': 1000 },
+      ['/data/node.json', '/data/sessions.json', '/data/users.json', '/data/login-url', '/data/removed', '/data/tools', '/data/.hh-recordings'],
+    );
+    secureNode('/data', user, ops2);
+    expect(calls2).toContain('chown1 /data/browser-error 0:0');
   });
 });
 

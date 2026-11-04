@@ -9,7 +9,7 @@ import { EventMessage, isMessage, useFolding } from '../ui/AgentMessage';
 import { AgentTerminal } from '../ui/AgentTerminal';
 import { CommandCard } from '../ui/CommandCard';
 import { CEO_DECIDES } from '../ui/DecidedBy';
-import { ComputerCard, isOpen } from '../ui/ComputerCard';
+import { ComputerStrip } from '../ui/ComputerStrip';
 import { Markdown } from '../ui/Markdown';
 import { Notebook } from '../ui/Notebook';
 import { StaffCard } from '../ui/StaffCard';
@@ -68,6 +68,7 @@ const PLAN_WAITS: Partial<Record<NonNullable<OrchestratorState['reason']>, (t: M
 function reasonText(t: Messages, reason: OrchestratorState['reason'], sub: SubView | null): string {
   const waits = reason && sub ? PLAN_WAITS[reason]?.(t, sub) : undefined;
   if (waits) return waits;
+  if (reason === 'browser_failed') return sub?.kind === 'personal' ? t.window.browserFailed(sub.owner.name) : t.window.builtinBrowserFailed;
   if (reason === 'machine_offline') return sub?.kind === 'personal' ? t.map.machineOffline(sub.owner.name) : t.window.builtinOffline;
   return t.map.needsSubscription;
 }
@@ -402,7 +403,6 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard, o
       {commands.map(c => (
         <CommandCard key={c.id} shown={c} onDone={() => void hideCommand(c.id)} />
       ))}
-      {computer && <ComputerCard view={computer} onChange={next => mounted.current && setComputer(next)} onFailure={err => mounted.current && setFailure(err)} />}
     </>
   );
   const after = (
@@ -420,7 +420,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard, o
       )}
     </>
   );
-  const hasCards = Boolean(pending || staffing || (!open && staffByHand) || byHand || offerByHand || needsOrchestrator || failure !== null || commands.length || (computer && (isOpen(computer) || computer.asked)));
+  const hasCards = Boolean(pending || staffing || (!open && staffByHand) || byHand || offerByHand || needsOrchestrator || failure !== null || commands.length);
 
   /* Who wrote a message no person typed: the orchestrator, an employee by its name, or Hornhoof itself. */
   const author = (from: string, name: string) => (from === 'orchestrator' ? t.window.orchestrator : from === 'agent' && name ? name : t.window.hornhoof);
@@ -614,6 +614,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard, o
           {after}
         </div>
       )}
+      {!notebook && known && <ComputerStrip machines={computer ? [computer] : []} onChange={next => mounted.current && setComputer(next)} onFailure={err => mounted.current && setFailure(err)} />}
       {known && !ready && <p className="t-why">{reasonText(t, state.reason, sub)}</p>}
       {known && state?.limitUntil && <p className="t-why">{t.window.limitUntil(clock(language, state.limitUntil)!)}</p>}
       {known && !state?.limitUntil && state?.budgetUntil && <p className="t-why">{t.window.budgetUntil(clock(language, state.budgetUntil)!)}</p>}

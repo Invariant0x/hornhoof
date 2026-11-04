@@ -74,7 +74,7 @@ describe('a decision for someone who may not take it', () => {
     );
     expect(await screen.findAllByText('Decided by the CEO or the CEO delegate.')).toHaveLength(3);
     for (const box of screen.getAllByRole('checkbox')) expect(box).toBeDisabled();
-    for (const name of [/Create departments/, /Hire/, 'Correct in words', 'Open access for a day', 'Not now']) expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
+    for (const name of [/Create departments/, /Hire/, 'Correct in words', 'Open for a day', 'Not now']) expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
     expect(screen.getByText('Clean Docker images.')).toBeInTheDocument();
   });
 });

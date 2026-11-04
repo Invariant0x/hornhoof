@@ -636,6 +636,34 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .t-load .spinner { width: 44px; height: 44px; border-width: 3px; border-color: #2b323b; border-top-color: #dcdcdc; }
 @media (prefers-reduced-motion: reduce) { .t-load .spinner { animation-duration: 3s; } }
 .t-cards { flex: none; max-height: 45%; overflow: auto; padding: 10px 16px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 12px; }
+/* Access to machines: a line each, no taller than one row of the window's header, however narrow the screen. */
+.t-access { flex: none; max-height: 35%; overflow: auto; border-top: 1px solid var(--line); font-family: var(--f-body); font-size: 12.5px; line-height: 1.4; }
+.t-access-line { border-left: 2px solid var(--cyan); }
+.t-access-line.asks { border-left-color: var(--amber); }
+.t-access-line + .t-access-line { box-shadow: inset 0 1px 0 var(--line); }
+.t-access-row { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 6px 0 10px; }
+.t-access-row strong, .t-access-text, .t-access-row .decided-by { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.t-access-row strong { flex: 0 1 auto; max-width: 40%; font-weight: 600; }
+.t-access-text { flex: 1 1 0; color: var(--muted); }
+.t-access-row .decided-by { flex: 0 2 auto; margin: 0; font-size: 12.5px; }
+.t-access-row .btn { flex: none; --cut: 5px; min-height: 26px; padding: 0 10px; font-size: 12.5px; }
+.t-access-row .btn:focus-visible { clip-path: none; }
+.t-access-more, .t-access-count { flex: none; height: 26px; padding: 0; border: 0; background: none; color: var(--muted); cursor: pointer; font: inherit; }
+.t-access-more { display: grid; place-items: center; width: 26px; }
+.t-access-more svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+.t-access-count { padding: 0 6px; white-space: nowrap; color: var(--cyan-ink); font-weight: 600; }
+.t-access-count::after { content: ' \25BE'; }
+.t-access-count[aria-expanded="true"]::after { content: ' \25B4'; }
+.t-access-more:hover, .t-access-more[aria-expanded="true"] { color: var(--ink); }
+.t-access-count:hover { color: var(--ink); }
+.t-access-why { padding: 0 10px 8px; color: var(--muted); }
+.t-access-why p { margin: 0 0 4px; }
+@media (max-width: 420px) {
+  .t-access-row { gap: 4px; padding: 0 4px 0 8px; }
+  .t-access-row .btn { padding: 0 6px; font-size: 11.5px; }
+  .t-access-more { width: 24px; }
+  .t-access-count { padding: 0 2px; }
+}
 .notebook { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; font-family: var(--f-body); }
 .notebook ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .notebook li { display: grid; grid-template-columns: auto 1fr auto auto auto; gap: 4px 10px; align-items: baseline; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
@@ -1485,12 +1513,14 @@ summary.turn-head:focus-visible { outline: 2px solid var(--cyan); outline-offset
 .orch[hidden] { display: none; }
 .orch > .t-bar { height: auto; min-height: 38px; flex-wrap: wrap; gap: 4px; padding: 2px 6px; }
 .orch .agent-window-title { min-width: 60px; text-align: left; padding-left: 6px; }
+/* As wide as its longer label, so nothing in the bar moves when a task comes or goes. */
+.t-bar button.agent-task-toggle { flex-direction: column; gap: 0; }
+.agent-task-toggle::after { content: attr(data-other); height: 0; overflow: hidden; visibility: hidden; }
 .window-controls { display: flex; flex: none; gap: 4px; }
 .window-controls button { width: 26px; height: 26px; border-radius: 50%; background: var(--surface2); }
 .window-controls .window-close { color: var(--pink); }
 .window-controls .window-minimize { color: var(--amber-ink); }
 .window-controls .window-full { color: var(--ok); }
-.agent-task-explanation { flex-basis: 100%; order: 1; padding-bottom: 6px; }
 .agent-workspace { display: flex; flex: 1; min-height: 0; min-width: 0; }
 .agent-conversation { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .agent-task-slot:empty { display: none; }
@@ -1507,6 +1537,7 @@ summary.turn-head:focus-visible { outline: 2px solid var(--cyan); outline-offset
 }
 @media (max-width: 760px) {
   .orch, .orch.with-agent-task { max-width: 100vw; width: auto; }
+  .orch > .t-bar button.btn { padding: 0 6px; }
   .orch .t-st { white-space: normal; flex-wrap: wrap; }
   .agent-strip { top: 56px; bottom: 0; }
 }

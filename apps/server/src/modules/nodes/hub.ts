@@ -22,8 +22,9 @@ const MISSED_PINGS = 3;
 /* greeted: Hornhoof has handled the node's hello, so a job sent now cannot be mistaken for one lost in a restart.
    terminals: the node said it runs agents in sessions people can watch. work: it runs parts of any work, not only of
    test runs. load: how busy its machine was when it last said. skillFiles: it writes a turn's skills as files. noRuns: why
-   it takes no part of any run. build: the node build its image is, none from a node built by hand or from before. */
-type Entry = { socket: WebSocket; keyHash: string | null; missed: number; greeted: boolean; terminals: boolean; work: boolean; load: SaidLoad | null; skillFiles: boolean; noRuns: string | null; programs: ProgramInfo[] | null; build: string | null };
+   it takes no part of any run. browserError: why Playwright's browser failed to start on the node. build: the node build its
+   image is, none from a node built by hand or from before. */
+type Entry = { socket: WebSocket; keyHash: string | null; missed: number; greeted: boolean; terminals: boolean; work: boolean; load: SaidLoad | null; skillFiles: boolean; noRuns: string | null; browserError: string | null; programs: ProgramInfo[] | null; build: string | null };
 
 /* A node's load and when it said it. */
 export type SaidLoad = NodeLoad & { at: number };
@@ -58,7 +59,7 @@ export class NodeHub {
     const key = keyOf(id);
     this.sockets.get(key)?.socket.close(4000, 'Replaced by a newer connection.');
     const keyHash = id.kind === 'node' ? (id.keyHash ?? null) : null;
-    const entry: Entry = { socket, keyHash, missed: 0, greeted: false, terminals: false, work: false, load: null, skillFiles: false, noRuns: null, programs: null, build: null };
+    const entry: Entry = { socket, keyHash, missed: 0, greeted: false, terminals: false, work: false, load: null, skillFiles: false, noRuns: null, browserError: null, programs: null, build: null };
     this.sockets.set(key, entry);
     this.away.delete(key);
     const report = (err: unknown) => this.opts.onError?.(err);
@@ -120,7 +121,15 @@ export class NodeHub {
     return this.away.get(key)!;
   }
 
-  greet(id: NodeIdentity, terminals = false, skillFiles = false, work = false, noRuns: string | null = null, build: string | null = null): void {
+  greet(
+    id: NodeIdentity,
+    terminals = false,
+    skillFiles = false,
+    work = false,
+    noRuns: string | null = null,
+    build: string | null = null,
+    browserError: string | null = null,
+  ): void {
     const entry = this.sockets.get(keyOf(id));
     if (!entry) return;
     entry.greeted = true;
@@ -128,7 +137,19 @@ export class NodeHub {
     entry.skillFiles = skillFiles;
     entry.work = work;
     entry.noRuns = noRuns;
+    entry.browserError = browserError;
     entry.build = build;
+  }
+
+  /* Updates live readiness flags reported in a status message; returns true when a held reason cleared. */
+  noteStatus(id: NodeIdentity, noRuns?: string | null, browserError?: string | null): boolean {
+    const entry = this.sockets.get(keyOf(id));
+    if (!entry) return false;
+    const beforeBrowser = entry.browserError;
+    const beforeRuns = this.noRunsOf(id);
+    if (noRuns !== undefined) entry.noRuns = noRuns;
+    if (browserError !== undefined) entry.browserError = browserError;
+    return Boolean((beforeBrowser && !entry.browserError) || (beforeRuns && !this.noRunsOf(id)));
   }
 
   /* The node build a node that is ready said it is; none when it said none, as a node from before builds does. */
@@ -136,9 +157,22 @@ export class NodeHub {
     return this.sockets.get(keyOf(id))?.build ?? null;
   }
 
+  private openEntry(id: NodeIdentity): Entry | null {
+    const entry = this.sockets.get(keyOf(id));
+    return entry?.socket.readyState === 1 ? entry : null;
+  }
+
+  /* Why Playwright's browser did not launch on a connected node, or null when it is ready. */
+  browserErrorOf(id: NodeIdentity): string | null {
+    return this.openEntry(id)?.browserError || null;
+  }
+
   /* Why a connected node takes no part of any run, as it said; none when it takes them. */
   noRunsOf(id: NodeIdentity): string | null {
-    return this.sockets.get(keyOf(id))?.noRuns ?? null;
+    const entry = this.sockets.get(keyOf(id));
+    if (!entry) return null;
+    if (entry.noRuns !== null) return entry.noRuns;
+    return entry.browserError ? `browser_failed: ${entry.browserError}` : null;
   }
 
   /* Ready, and runs parts of any work. */
@@ -153,8 +187,7 @@ export class NodeHub {
   }
 
   loadOf(id: NodeIdentity): SaidLoad | null {
-    const entry = this.sockets.get(keyOf(id));
-    return entry?.socket.readyState === 1 ? entry.load : null;
+    return this.openEntry(id)?.load || null;
   }
 
   /* Program metadata belongs to this socket, including before an asynchronous hello handler finishes. */

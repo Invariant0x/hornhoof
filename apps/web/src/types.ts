@@ -181,7 +181,7 @@ export type OrchestratorState = {
   limitUntil?: string | null;
   /* The plan used the share set for tasks until then; task turns wait, people's messages still go. */
   budgetUntil?: string | null;
-  reason: 'no_subscription' | 'waiting_machine' | 'needs_login' | 'needs_setup' | 'node_outdated' | 'machine_offline' | null;
+  reason: 'no_subscription' | 'waiting_machine' | 'needs_login' | 'needs_setup' | 'node_outdated' | 'machine_offline' | 'browser_failed' | null;
   busy: boolean;
   runningJobId: string | null;
   queued: number;
@@ -467,6 +467,8 @@ export type MachineView = {
   /* The node builds of its nodes online that are not the server's own node build, null for one that says none; null
      while all are, or while the server tells none apart. */
   otherBuild?: { server: string; nodes: (string | null)[] } | null;
+  /* Why Playwright's browser failed to start on the machine, or null when it is ready. */
+  browserError?: string | null;
 };
 
 /* What runs on a machine now: the employees whose program is there, busy while a turn of theirs runs, and the parts of
@@ -499,7 +501,7 @@ export type ShownCommand = { id: string; kind: 'machine' | 'plans' | 'add'; plan
 
 /* The node that comes with the server, for those who see the whole company. */
 /* machine: the company's machine it runs on, when the server is on one; the pool counts that computer once. */
-export type BuiltinView = { online: boolean; load: NodeLoad | null; running: Running; machine?: Machine | null; programs?: ProgramInfo[] | null };
+export type BuiltinView = { online: boolean; load: NodeLoad | null; running: Running; machine?: Machine | null; programs?: ProgramInfo[] | null; browserError?: string | null };
 
 export type JobView = {
   id: string;

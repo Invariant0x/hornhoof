@@ -243,6 +243,19 @@ describe('AgentWindow', () => {
     expect(await screen.findByText("Hornhoof on Ivan's machine is out of date. Run the install command there again.")).toBeInTheDocument();
   });
 
+  it('explains when the browser for checks failed on a personal or built-in machine', async () => {
+    const mac = { ...SUBS[1]!, kind: 'personal' as const, owner: { id: 'p1', name: 'Ivan' } };
+    const view = open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, ready: false, reason: 'browser_failed' } }] }, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: mac } });
+    expect(await screen.findByText("The browser for checks did not start on Ivan's machine. Open Machines to see why.")).toBeInTheDocument();
+    view.unmount();
+    const key = { ...SUBS[0]!, kind: 'api_key' as const };
+    const builtin = open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, ready: false, reason: 'browser_failed' } }] }, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: key } });
+    expect(await screen.findByText('The browser for checks did not start on the built-in machine. Open Machines to see why.')).toBeInTheDocument();
+    builtin.unmount();
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, ready: false, reason: 'browser_failed' } }] }, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: null } });
+    expect(await screen.findByText('The browser for checks did not start on the built-in machine. Open Machines to see why.')).toBeInTheDocument();
+  });
+
   it('names the machine he runs on', async () => {
     const plan = { ...SUBS[0]!, owner: { id: 'p1', name: 'Ivan' } };
     open({}, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: plan, machine: { id: 'm3', hostname: 'ivan-laptop' } } });
@@ -289,7 +302,7 @@ describe('AgentWindow', () => {
     const card = await screen.findByRole('region', { name: "The orchestrator asks for access to the server's computer" });
     expect(within(card).getByText('Restart the nodes outside AppArmor.')).toBeInTheDocument();
     expect(within(card).getByText('Decided by the CEO or the CEO delegate.')).toBeInTheDocument();
-    expect(within(card).queryByRole('button', { name: 'Open access for a day' })).not.toBeInTheDocument();
+    expect(within(card).queryByRole('button', { name: 'Open for a day' })).not.toBeInTheDocument();
     expect(calls.some(c => c.path === '/api/nodes/commands')).toBe(false);
   });
 
@@ -315,10 +328,13 @@ describe('AgentWindow', () => {
       });
       const card = await screen.findByRole('region', { name: "The orchestrator asks for access to the server's computer" });
       expect(within(card).getByText('Restart the nodes outside AppArmor.')).toBeInTheDocument();
+      expect(within(card).queryByText(/as root on the server's computer/)).not.toBeInTheDocument();
+      await user.click(within(card).getByRole('button', { name: "More about access to the server's computer" }));
       expect(within(card).getByText(/as root on the server's computer/)).toBeInTheDocument();
-      await user.click(within(card).getByRole('button', { name: 'Open access for a day' }));
+      await user.click(within(card).getByRole('button', { name: 'Open for a day' }));
       expect(calls).toContainEqual({ method: 'POST', path: '/api/computer/open', body: undefined });
       const opened = await screen.findByRole('region', { name: "Access to the server's computer" });
+      await user.click(within(opened).getByRole('button', { name: "More about access to the server's computer" }));
       expect(within(opened).getByText(/^The orchestrator can run commands on the server's computer until .+\. The company server runs there, so this shows wherever you open Hornhoof\.$/)).toBeInTheDocument();
       expect(screen.queryByRole('region', { name: "The orchestrator asks for access to the server's computer" })).not.toBeInTheDocument();
     });
@@ -358,6 +374,12 @@ describe('AgentWindow', () => {
       expect(await screen.findByRole('region', { name: "The orchestrator asks for access to the server's computer" })).toBeInTheDocument();
     });
 
+    it('keeps the line below the conversation, not in it, when the window shows the log', async () => {
+      open({ [`GET ${EVENTS}?after=0`]: [200, { events: [ev(1, 'text', { kind: 'text', text: 'First' })], state: READY }], 'GET /api/computer': [200, ASKED] });
+      const line = await screen.findByRole('region', { name: "The orchestrator asks for access to the server's computer" });
+      expect(screen.getByRole('log')).not.toContainElement(line);
+    });
+
     it('writes each step in the log', async () => {
       open({
         [`GET ${EVENTS}?after=0`]: [
@@ -379,8 +401,8 @@ describe('AgentWindow', () => {
       expect(screen.getByText("Ivan did not open access to the server's computer")).toBeInTheDocument();
     });
 
-    /* Access is to the machine the server runs on, whichever screen the CEO opens Hornhoof from, so the card names it. */
-    it('names the machine the access is to, on the card and in the log', async () => {
+    /* Access is to the machine the server runs on, whichever screen the CEO opens Hornhoof from, so its line names it. */
+    it('names the machine the access is to, in its line and in the log', async () => {
       const user = userEvent.setup();
       open({
         [`GET ${EVENTS}?after=0`]: [200, { events: [ev(1, 'computer', { state: 'opened', until: OPEN.until, machine: 'debian-box' }, { person: IVAN })], state: READY }],
@@ -388,10 +410,12 @@ describe('AgentWindow', () => {
         'POST /api/computer/open': [200, { ...OPEN, machine: 'debian-box' }],
       });
       const card = await screen.findByRole('region', { name: 'The orchestrator asks for access to debian-box' });
+      await user.click(within(card).getByRole('button', { name: 'More about access to debian-box' }));
       expect(within(card).getByText(/as root on debian-box/)).toBeInTheDocument();
       expect(screen.getByText(/^Ivan opened access to debian-box until .+$/)).toBeInTheDocument();
-      await user.click(within(card).getByRole('button', { name: 'Open access for a day' }));
+      await user.click(within(card).getByRole('button', { name: 'Open for a day' }));
       const opened = await screen.findByRole('region', { name: 'Access to debian-box' });
+      await user.click(within(opened).getByRole('button', { name: 'More about access to debian-box' }));
       expect(within(opened).getByText(/^The orchestrator can run commands on debian-box until .+\. The company server runs there, so this shows wherever you open Hornhoof\.$/)).toBeInTheDocument();
     });
 
@@ -403,7 +427,7 @@ describe('AgentWindow', () => {
           'GET /api/computer': [200, ASKED],
         });
         const card = await screen.findByRole('region', { name: 'Оркестратор просит доступ к машине сервера' });
-        expect(within(card).getByRole('button', { name: 'Открыть доступ на сутки' })).toBeInTheDocument();
+        expect(within(card).getByRole('button', { name: 'Открыть на сутки' })).toBeInTheDocument();
         expect(within(card).getByRole('button', { name: 'Не сейчас' })).toBeInTheDocument();
         expect(screen.getByText(/^Ivan: доступ к машине сервера открыт до .+$/)).toBeInTheDocument();
       } finally {

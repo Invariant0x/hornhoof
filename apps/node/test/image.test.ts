@@ -68,4 +68,22 @@ describe('the node image', () => {
     expect(credit).toContain('| MIT |');
     expect(credit).toContain(`word for word at commit ${commit}`);
   });
+
+  it('installs full Playwright Chromium at the lockfile version in the browser stage and points runtime browsers to /data/browsers', () => {
+    const browserStage = dockerfile.slice(dockerfile.indexOf('AS browser\n'), dockerfile.indexOf('AS quality\n'));
+    expect(browserStage).not.toContain('ARG PLAYWRIGHT_VERSION=');
+    expect(browserStage).toContain('COPY package-lock.json /tmp/package-lock.json');
+    expect(browserStage).toContain("packages['node_modules/@playwright/test'].version");
+    expect(browserStage).not.toContain('--only-shell');
+    expect(browserStage).toContain('PLAYWRIGHT_HOST_PLATFORM_OVERRIDE="$target" playwright install chromium');
+    expect(browserStage).toContain('chmod -R a+rX /opt/ms-playwright');
+
+    expect(runtime).toContain('$(cat /opt/browser-packages)');
+    expect(runtime).toContain('COPY --from=browser /opt/ms-playwright /opt/ms-playwright');
+    expect(runtime).toContain('COPY --from=browser /usr/local/lib/node_modules/playwright /usr/local/lib/node_modules/playwright');
+    expect(runtime).toContain('ln -s ../lib/node_modules/playwright/cli.js /usr/local/bin/playwright');
+    expect(runtime).toContain('PLAYWRIGHT_BROWSERS_PATH=/data/browsers');
+    expect(runtime).toContain('PLAYWRIGHT_SKIP_BROWSER_GC=1');
+    expect(runtime.indexOf('PLAYWRIGHT_BROWSERS_PATH=/data/browsers')).toBeLessThan(runtime.indexOf('USER node'));
+  });
 });

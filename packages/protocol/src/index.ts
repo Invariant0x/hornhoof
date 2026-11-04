@@ -346,6 +346,7 @@ export const NodeBuild = z.string().regex(/^[0-9a-f]{40}([0-9a-f]{24})?$/);
 /* How an agent's program ended: its exit code, or the signal that ended it, by name, such as SIGTERM. */
 export const ProgramExit = z.object({ code: z.number().int().nullable(), signal: z.string().max(40).nullable() });
 export type ProgramExit = z.infer<typeof ProgramExit>;
+const BrowserError = z.string().min(1).max(300);
 
 const NodeMessage = z.discriminatedUnion('type', [
   /* terminals: the node runs agents in sessions people can watch and type into. */
@@ -365,6 +366,8 @@ const NodeMessage = z.discriminatedUnion('type', [
     work: z.boolean().optional(),
     /* Why the node takes no part of any run: a part runs only as a user of the node's own, which this one lacks. */
     noRuns: z.string().max(300).optional(),
+    /* Why Playwright Chromium could not launch on this node before handing out tasks or runs; null when ready. */
+    browserError: BrowserError.nullable().optional(),
     load: Load.optional(),
     tests: z.array(z.string()).max(100).optional(),
     skillFiles: z.boolean().optional(),
@@ -392,7 +395,17 @@ const NodeMessage = z.discriminatedUnion('type', [
     commit: z.string().regex(/^[0-9a-f]{40,64}$/).nullable(),
     log: z.string().max(TEST_LOG_BYTES + 1024),
   }),
-  z.object({ type: z.literal('status'), loggedIn: z.boolean(), setupNeeded: z.boolean().optional(), limits: Limits.nullable(), models: Models.optional(), account: Account.nullable().optional(), programs: Programs.optional() }),
+  z.object({
+    type: z.literal('status'),
+    loggedIn: z.boolean(),
+    setupNeeded: z.boolean().optional(),
+    limits: Limits.nullable(),
+    models: Models.optional(),
+    account: Account.nullable().optional(),
+    programs: Programs.optional(),
+    browserError: BrowserError.nullable().optional(),
+    noRuns: z.string().max(300).nullable().optional(),
+  }),
   /* The sign-in this node holds, sealed for each of the plan's other nodes; version counts sign-ins of the plan. */
   z.object({
     type: z.literal('cred.sealed'),
