@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import type { AgentCardView, Employee, Org, SubView } from '../src/types';
 import { box, ME, serveApi, TASKS } from './api';
 
 test.use({ locale: 'en-US' });
@@ -13,71 +14,143 @@ const LONG_PRODUCT = {
   name: 'Enterprise autonomous multi-region cloud orchestration platform',
 };
 
-const SUB = {
+const SUB: SubView = {
   id: 's-claude',
-  provider: 'claude' as const,
-  kind: 'personal' as const,
+  provider: 'claude',
+  kind: 'personal',
   label: 'Claude personal subscription with a very long display label',
   last4: null,
-  status: 'ready' as const,
+  status: 'ready',
   online: true,
   owner: { id: 'p1', name: 'Ivan' },
-  place: { kind: 'company' as const, id: null, name: 'Whole company' },
+  place: { kind: 'company', id: null, name: 'Whole company' },
   limits: {
-    status: 'allowed' as const,
-    windows: [{ name: 'five_hour' as const, utilization: 0.42, resetsAt: '2099-10-29T18:00:00.000Z' }],
+    status: 'allowed',
+    windows: [{ name: 'five_hour', utilization: 0.42, resetsAt: '2099-10-29T18:00:00.000Z' }],
   },
   budget: 80,
   isOrchestrator: false,
   accounts: [],
-  tier: 'max' as const,
+  tier: 'max',
   accountsDiffer: false,
   signedInOnce: true,
   leaseMachine: null,
-  machines: [{ id: 'm1', hostname: 'ivan-mbp', status: 'ready' as const, online: true }],
+  machines: [{ id: 'm1', hostname: 'ivan-mbp', status: 'ready', online: true }],
   agents: [],
 };
 
 const HEAD_TITLE = { en: 'Head of development', ru: 'Руководитель разработки' };
 const BE_TITLE = { en: 'Backend engineer', ru: 'Бэкенд-разработчик' };
 
-const HEAD = {
+const HEAD: Employee = {
   id: 'b0',
   name: 'Dana',
   roleId: 'DEV-HEAD',
   title: HEAD_TITLE,
-  kind: 'head' as const,
+  kind: 'head',
   model: '',
   modelName: null,
-  provider: 'claude' as const,
+  provider: 'claude',
   effort: null,
-  state: 'sleeping' as const,
-  status: 'idle' as const,
+  state: 'sleeping',
+  status: 'idle',
   on: true,
   timer: null,
   task: null,
   context: null,
+  program: null,
+  alarm: null,
+  retry: null,
+  failure: null,
 };
 
-const EMPLOYEE = {
+const EMPLOYEE: Employee = {
   id: 'b1',
   name: 'Bruno',
   roleId: 'DEV-BE',
   title: BE_TITLE,
-  kind: 'worker' as const,
+  kind: 'worker',
   model: 'claude-sonnet-5-5',
   modelName: 'Claude Sonnet 5.5',
-  provider: 'claude' as const,
+  provider: 'claude',
   effort: 'high',
-  state: 'sleeping' as const,
-  status: 'idle' as const,
+  state: 'sleeping',
+  status: 'idle',
   on: true,
-  timer: { everyHours: 2, order: 'Check PRs', forWork: false, lastAt: null },
+  timer: 120,
   task: null,
   context: null,
+  program: null,
+  alarm: null,
+  retry: null,
+  failure: null,
 };
 
 const SONNET = { id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5 (long model display name for mobile check)', efforts: ['low', 'high', 'max'] };
+
+const ORG_VIEW: Org = {
+  company: ME.company,
+  orchestrator: { id: 'a1', name: 'Orchestrator', model: 'claude-opus-5-5', effort: null, subscription: SUB, context: null, program: null, alarm: null, retry: null, failure: null },
+  agents: { total: 1, working: 0 },
+  people: [],
+  departments: [
+    {
+      id: LONG_DEPT.id,
+      name: LONG_DEPT.name,
+      templateKey: 'development',
+      roleCode: 'CTO',
+      about: '',
+      agents: { total: 1, working: 0 },
+      products: [LONG_PRODUCT],
+      teams: [],
+      people: [],
+      employees: [HEAD, EMPLOYEE],
+      roles: [
+        {
+          id: 'DEV-HEAD',
+          title: HEAD_TITLE,
+          description: { en: 'Leads development.', ru: 'Ведет разработку.' },
+          kind: 'head',
+          gate: null,
+        },
+        {
+          id: 'DEV-BE',
+          title: BE_TITLE,
+          description: { en: 'Builds the server side.', ru: 'Делает серверную часть.' },
+          kind: 'member',
+          gate: null,
+        },
+      ],
+    },
+  ],
+};
+
+const BRUNO_CARD: AgentCardView = {
+  id: 'b1',
+  kind: 'worker',
+  name: 'Bruno',
+  role: { id: 'DEV-BE', title: BE_TITLE, description: { en: 'Builds the API.', ru: 'Строит API.' }, effort: 'xhigh' },
+  department: LONG_DEPT,
+  product: null,
+  model: 'claude-sonnet-5-5',
+  effort: 'high',
+  subscription: SUB,
+  machine: null,
+  state: 'sleeping',
+  program: null,
+  alarm: null,
+  retry: null,
+  failure: null,
+  skills: [],
+  parts: [],
+  raw: '',
+  instructions: { length: 100, max: 200_000 },
+  runsOn: [{ subscription: SUB, models: [SONNET] }],
+  changes: [],
+  interrupted: [],
+  timer: { minutes: 120, order: 'Check PRs', forWork: false, lastAt: null },
+  canEdit: true,
+};
 
 async function serveSelectScreens(page: Page) {
   await serveApi(page);
@@ -85,42 +158,7 @@ async function serveSelectScreens(page: Page) {
     route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({
-        company: ME.company,
-        orchestrator: { id: 'a1', name: 'Orchestrator', model: 'claude-opus-5-5', effort: null, subscription: SUB, context: null },
-        agents: { total: 1, working: 0 },
-        people: [],
-        departments: [
-          {
-            id: LONG_DEPT.id,
-            name: LONG_DEPT.name,
-            templateKey: 'development',
-            roleCode: 'CTO',
-            about: '',
-            agents: { total: 1, working: 0 },
-            products: [LONG_PRODUCT],
-            teams: [],
-            people: [],
-            employees: [HEAD, EMPLOYEE],
-            roles: [
-              {
-                id: 'DEV-HEAD',
-                title: HEAD_TITLE,
-                description: { en: 'Leads development.', ru: 'Ведет разработку.' },
-                kind: 'head',
-                gate: null,
-              },
-              {
-                id: 'DEV-BE',
-                title: BE_TITLE,
-                description: { en: 'Builds the server side.', ru: 'Делает серверную часть.' },
-                kind: 'member',
-                gate: null,
-              },
-            ],
-          },
-        ],
-      }),
+      body: JSON.stringify(ORG_VIEW),
     }),
   );
   await page.route('**/api/tasks?*', route =>
@@ -174,28 +212,7 @@ async function serveSelectScreens(page: Page) {
     route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({
-        id: 'b1',
-        kind: 'worker',
-        name: 'Bruno',
-        role: { id: 'DEV-BE', title: BE_TITLE, description: { en: 'Builds the API.', ru: 'Строит API.' }, effort: 'xhigh' },
-        department: LONG_DEPT,
-        product: null,
-        model: 'claude-sonnet-5-5',
-        effort: 'high',
-        subscription: SUB,
-        machine: null,
-        state: 'sleeping',
-        skills: [],
-        parts: [],
-        raw: '',
-        instructions: { length: 100, max: 200_000 },
-        runsOn: [{ subscription: SUB, models: [SONNET] }],
-        changes: [],
-        interrupted: [],
-        timer: EMPLOYEE.timer,
-        canEdit: true,
-      }),
+      body: JSON.stringify(BRUNO_CARD),
     }),
   );
 }
