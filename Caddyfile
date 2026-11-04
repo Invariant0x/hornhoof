@@ -1,17 +1,36 @@
-# Hornhoof edge and relay. hornhoof.org and www show the stub; hornhoof.org/api/ is the relay's link API and
-# hornhoof.org/~!frp takes the tunnels (frpc over wss) of Hornhoof servers. Each company is one subdomain, a name it
-# picked (acme) or by default a long random one, served by frps through its server's own tunnel. Reserved and blocked
-# names get the 404 and 410 pages of /var/www/hornhoof-pages; a name with no tunnel gets the same 404 page from frps.
+# Hornhoof edge and relay. frps holds port 443 and routes each connection by its TLS server name. A name in https mode
+# goes straight to its company, unread. Everything else comes here through frps's edge proxy, to 127.0.0.1:8443.
+# hornhoof.org and www show the stub; hornhoof.org/api/ is the relay's link API and hornhoof.org/~!frp takes the tunnels
+# (frpc over wss) of Hornhoof servers. Each company is one subdomain, a name it picked (acme) or by default a long
+# random one, served by frps through its server's own tunnel. Reserved and blocked names get the 404 and 410 pages of
+# /var/www/hornhoof-pages; a name with no tunnel gets the same 404 page from frps.
+# Names in http mode stay out of CT logs under the wildcard certificate; names in https mode hold their own
+# certificates.
 # Older companies on the Mac's SSH tunnel live in /etc/caddy/companies/*.caddy and come first.
 # After an edit: caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy
 {
-	servers {
+	https_port 8443
+	servers 127.0.0.1:8443 {
+		# The visitor's address comes in a PROXY v2 header from the edge proxy's frpc. Nothing else may name a visitor.
+		listener_wrappers {
+			proxy_protocol {
+				allow 127.0.0.1/32
+			}
+			tls
+		}
 		# No HTTP/3: the firewall opens TCP only.
 		protocols h1 h2
 	}
 }
 
+# Port 80 on every address: a redirect to https. Caddy itself answers an HTTP-01 challenge here, ahead of any handler.
+# Each https site below binds to loopback, so without this site its automatic redirect would be on loopback too.
+http:// {
+	redir https://{host}{uri} 308
+}
+
 hornhoof.org {
+	bind 127.0.0.1
 	# The relay's API (hornhoof-relay on 7600).
 	handle /api/* {
 		reverse_proxy 127.0.0.1:7600
@@ -35,6 +54,7 @@ hornhoof.org {
 }
 
 www.hornhoof.org {
+	bind 127.0.0.1
 	redir https://hornhoof.org{uri} permanent
 }
 
@@ -49,9 +69,12 @@ www.hornhoof.org {
 }
 
 *.hornhoof.org {
-	# Wildcard certificate, renewed on the Mac by DNS-01 and pushed here. Company names never reach CT logs.
+	bind 127.0.0.1
+	# Wildcard certificate, renewed on the Mac by DNS-01 and pushed here. A name in http mode never reaches CT logs.
 	tls /etc/caddy/certs/wildcard.crt /etc/caddy/certs/wildcard.key
 	header -Server
+	# A company's link is its own business, not a search engine's.
+	header X-Robots-Tag "noindex, nofollow"
 
 	# Names that never go to a company, whatever the company files say. company.sh on the Mac reads this line.
 	@reserved host www.hornhoof.org api.hornhoof.org admin.hornhoof.org administrator.hornhoof.org root.hornhoof.org mail.hornhoof.org email.hornhoof.org smtp.hornhoof.org imap.hornhoof.org pop.hornhoof.org pop3.hornhoof.org mx.hornhoof.org webmail.hornhoof.org autodiscover.hornhoof.org autoconfig.hornhoof.org ns.hornhoof.org ns1.hornhoof.org ns2.hornhoof.org ns3.hornhoof.org ns4.hornhoof.org dns.hornhoof.org status.hornhoof.org health.hornhoof.org app.hornhoof.org apps.hornhoof.org dashboard.hornhoof.org console.hornhoof.org panel.hornhoof.org portal.hornhoof.org login.hornhoof.org signin.hornhoof.org signup.hornhoof.org auth.hornhoof.org sso.hornhoof.org oauth.hornhoof.org id.hornhoof.org account.hornhoof.org accounts.hornhoof.org billing.hornhoof.org pay.hornhoof.org payments.hornhoof.org support.hornhoof.org help.hornhoof.org docs.hornhoof.org doc.hornhoof.org blog.hornhoof.org news.hornhoof.org cdn.hornhoof.org static.hornhoof.org assets.hornhoof.org media.hornhoof.org files.hornhoof.org img.hornhoof.org images.hornhoof.org download.hornhoof.org downloads.hornhoof.org upload.hornhoof.org uploads.hornhoof.org dev.hornhoof.org staging.hornhoof.org stage.hornhoof.org test.hornhoof.org testing.hornhoof.org demo.hornhoof.org beta.hornhoof.org preview.hornhoof.org sandbox.hornhoof.org git.hornhoof.org ssh.hornhoof.org vpn.hornhoof.org ftp.hornhoof.org sftp.hornhoof.org proxy.hornhoof.org edge.hornhoof.org gateway.hornhoof.org internal.hornhoof.org intranet.hornhoof.org hostmaster.hornhoof.org postmaster.hornhoof.org webmaster.hornhoof.org abuse.hornhoof.org security.hornhoof.org noc.hornhoof.org localhost.hornhoof.org wildcard.hornhoof.org hornhoof.hornhoof.org

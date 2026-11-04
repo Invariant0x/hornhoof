@@ -9,7 +9,7 @@ Public API (Caddy sends https://hornhoof.org/api/* here):
   POST   /api/v1/links/{name}/sync  Authorization: Bearer <key> {client, generation, state, copy, epoch} -> 200 {sync}
   POST   /api/v1/links/{name}/key   Authorization: Bearer <key> -> 200 {key} (R6.1)
   POST   /api/v1/links/{name}/visitor-key Authorization: Bearer <key> -> 200 {visitorKey} (R6.2)
-  GET    /api/v1/health            -> 200 {ok, frps, relayStarted} while frps takes logins, else 503
+  GET    /api/v1/health            -> 200 {ok, frps, relayStarted, passthrough} while frps takes logins, else 503
 frps plugin (local only): POST /frp/handler?op=Login|NewProxy|Ping
 Admin (as the service user): relay.py admin list|add|ban|unban|release|banned-caddy ...
 
@@ -56,6 +56,14 @@ FRPS_PASSWORD = os.environ.get('RELAY_FRPS_PASSWORD', '')
 # rewrites the started file every time frps starts.
 RELAY_FRPS_BIND = os.environ.get('RELAY_FRPS_BIND', '127.0.0.1:7000')
 RELAY_FRPS_STARTED = os.environ.get('RELAY_FRPS_STARTED', '/run/frps/started')
+# frps's https port; health says whether it accepts connections (R4.1). Unset, nothing is passed through.
+RELAY_FRPS_HTTPS = os.environ.get('RELAY_FRPS_HTTPS', '')
+# The one client that may carry hornhoof.org and everything no company claims on to Caddy (R7.5). Its token is the only
+# proof: every tunnel reaches frps from Caddy on loopback, so an address proves nothing. Unset, no login is the edge.
+EDGE_TOKEN = os.environ.get('RELAY_EDGE_TOKEN', '')
+EDGE_CLIENT = 'edge'
+EDGE_DOMAINS = [DOMAIN, '*']
+EDGE_REFUSED = 'edge login refused'
 # A registration frps has not shown yet reads as held for this long (R1.1, R2.1).
 PENDING_S = 10
 # R3.1 measured with frp 0.71.1: network 20.16/20.46 s, today 20.26 s (2026-11-03).
@@ -206,19 +214,26 @@ STARTED = now()
 
 # frps watcher state: frps_ok_at is the epoch of the last good probe, frps_back_at the epoch
 # of the first good probe after a failure or after start (0 until then).
-_frps = {'ok_at': 0.0, 'back_at': 0}
+_frps = {'ok_at': 0.0, 'back_at': 0, 'passthrough': False}
 WATCH_INTERVAL_S = 0.5
 # Health answers 200 only while the watcher's last good probe is younger than this.
 HEALTH_MAX_AGE_S = 2.0
 
 
-def frps_answers() -> bool:
-    """True when frps's bind port accepts a connection and its dashboard answers /healthz."""
-    host, _, port_text = RELAY_FRPS_BIND.rpartition(':')
+def port_accepts(address: str) -> bool:
+    """True when host:port takes a connection within 1 s; an unset or malformed address does not."""
+    host, _, port_text = address.rpartition(':')
     try:
         connection = socket.create_connection((host, int(port_text)), timeout=1)
         connection.close()
-    except OSError:
+    except (OSError, ValueError, OverflowError):
+        return False
+    return True
+
+
+def frps_answers() -> bool:
+    """True when frps's bind port accepts a connection and its dashboard answers /healthz."""
+    if not port_accepts(RELAY_FRPS_BIND):
         return False
     try:
         status, _ = _dash_get('/healthz', cap=1.0)
@@ -231,7 +246,11 @@ def watch_frps() -> None:
     """Probe frps forever; keep the last good answer and the recovery after a failure."""
     was_ok = False
     while True:
-        if frps_answers():
+        answers = frps_answers()
+        # Read before a good answer is published, and after frps answered, so that the first healthy answer already
+        # says whether the https port, which frps opens before its dashboard, takes connections.
+        _frps['passthrough'] = port_accepts(RELAY_FRPS_HTTPS)
+        if answers:
             t = time.time()
             if not was_ok:
                 _frps['back_at'] = t
@@ -861,7 +880,7 @@ def proxy_check(name: str, content: dict) -> str | None:
     """Today's NewProxy checks, then whether this registration may hold the name; None lets it through."""
     if (content.get('user') or {}).get('user'):
         return 'set no user in the tunnel config'
-    if content.get('proxy_type') != 'http':
+    if content.get('proxy_type') not in ('http', 'https'):
         return 'only http proxies are allowed'
     if content.get('proxy_name') != name:
         return f'the proxy must be named {name}'
@@ -1321,6 +1340,32 @@ def authenticate_call(op: str, metas: dict) -> tuple[str | None, str | None, str
     return name, kind, reason
 
 
+def edge_token_matches(token: object) -> bool:
+    """R7.5: the edge's token, compared in constant time; with no token set, nothing matches."""
+    return bool(EDGE_TOKEN) and isinstance(token, str) and hmac.compare_digest(token.encode(), EDGE_TOKEN.encode())
+
+
+def edge_proxy_reason(content: dict) -> str | None:
+    """R7.5: the edge offers one proxy, the catch-all behind hornhoof.org, shared with no one. It gets no routes row."""
+    if (content.get('proxy_name') != EDGE_CLIENT or content.get('proxy_type') != 'https'
+            or content.get('custom_domains') != EDGE_DOMAINS or content.get('subdomain')):
+        return 'the edge offers only its own proxy'
+    return shared_route_fields(content)
+
+
+def edge_reason(op: str, content: dict, metas: dict) -> str | None:
+    """R7.5: a session that names itself the edge passes on its token alone, never on a binding's checks."""
+    if not edge_token_matches(metas['edge']):
+        return EDGE_REFUSED
+    if op == 'Login' and content.get('client_id') != EDGE_CLIENT:
+        return EDGE_REFUSED
+    return edge_proxy_reason(content) if op == 'NewProxy' else None
+
+
+def plugin_answer(reason: str | None) -> dict:
+    return {'reject': False, 'unchange': True} if reason is None else {'reject': True, 'reject_reason': reason}
+
+
 def plugin_decide(op: str, content: dict) -> dict:
     """Authenticate the session, then the op's own rule; a refusal rejects, else the call passes and is marked seen.
 
@@ -1328,17 +1373,17 @@ def plugin_decide(op: str, content: dict) -> dict:
     still refuse a registration already on disk.
     """
     metas = call_metas(op, content)
+    if 'edge' in metas:
+        return plugin_answer(edge_reason(op, content, metas))
     name, kind, reason = authenticate_call(op, metas)
     if reason is None and op == 'Login':
         reason = login_reason(name, kind, content, metas)
     elif reason is None and op == 'NewProxy':
         touch(name)
         reason = offer_reason(name, kind, content, metas)
-    if reason is not None:
-        return {'reject': True, 'reject_reason': reason}
-    if op != 'NewProxy':
+    if reason is None and op != 'NewProxy':
         touch(name)
-    return {'reject': False, 'unchange': True}
+    return plugin_answer(reason)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -1507,7 +1552,8 @@ class Handler(BaseHTTPRequestHandler):
     def health_answer(self):
         """GET /api/v1/health (R4.1): 200 only while frps takes logins, else 503; never a guess."""
         if frps_ok():
-            return self.send_json(200, {'ok': True, 'frps': True, 'relayStarted': relay_started()})
+            return self.send_json(200, {'ok': True, 'frps': True, 'relayStarted': relay_started(),
+                                        'passthrough': _frps['passthrough']})
         return self.send_json(503, {'ok': False, 'frps': False})
 
     def handle_plugin(self):

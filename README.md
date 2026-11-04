@@ -4,17 +4,19 @@ The relay behind the public links of [Hornhoof](https://github.com/Invariant0x/h
 
 ## What it does
 
-It gives each company a link like `https://acme.hornhoof.org`. The company's own machine opens a tunnel to the relay, so nothing needs to open on the company's router. A visitor opens the link, and the relay passes the request through that company's tunnel to its Hornhoof app.
+It gives each company a link like `https://acme.hornhoof.org`. The company's own machine opens a tunnel to the relay, so nothing needs to open on the company's router. A visitor opens the link, and the relay passes the connection through that company's tunnel to its Hornhoof app.
 
-The relay hands out names, checks each tunnel's key, and sends each request to the company named in its address.
+The relay hands out names, checks each tunnel's key, and sends each connection to the company named in its TLS server name.
 
 A company on several machines gives each one its own client id, so two companies can run side by side on one machine and no two machines log in as one. A company's machines also reach each other's services through the relay: a `-peer` machine offers two stcp services, `-data` and `-app`, and another machine of the same link visits them with the link's visitor key and the service's own secret. The relay lets those machines reach each other through it and passes their bytes on as they come; [Hornhoof's security page](https://github.com/Invariant0x/hornhoof/blob/main/SECURITY.md#the-hornhooforg-link) says how the machines encrypt them.
 
 ## What it sees
 
-At present, the browser's https connection ends at hornhoof.org. The relay reads each request to find its company, then passes it through that company's tunnel. This includes the contents of requests and answers. It keeps no copy of what passes.
+For a company whose link uses https, hornhoof.org sees only encrypted bytes, the name being reached and the visitor's address, which it does not keep. The browser's https connection ends at the company's own machine, with the company's own certificate. The relay holds no key for it and cannot read what passes.
 
-This is the same behavior described in [Hornhoof's security page](https://github.com/Invariant0x/hornhoof/blob/main/SECURITY.md#the-hornhooforg-link).
+A company on an older Hornhoof is served the old way until it updates: its https ends at hornhoof.org, under the relay's wildcard certificate. The relay reads each request to find its company, then passes it through that company's tunnel. This includes the contents of requests and answers. It keeps no copy of what passes. This is the behavior [Hornhoof's security page](https://github.com/Invariant0x/hornhoof/blob/main/SECURITY.md#the-hornhooforg-link) describes today.
+
+hornhoof.org itself, its API and the tunnels' way in also end at hornhoof.org, in Caddy.
 
 ## What it never does
 
@@ -41,7 +43,7 @@ Releasing a name deletes its key hashes and its sync record. Its route record st
 
 For each address, it also keeps the times of new links made in the last hour, to limit how many it can make. The relay's database is SQLite.
 
-The relay logs each link made or freed with the address it came from. frps logs each tunnel's login. On the server, both logs go to the system journal.
+The relay logs each link made or freed with the address it came from. On the server, this log goes to the system journal. frps logs only its errors, because its other lines name each visitor's address. Caddy logs no requests, but its error log names the visitor's address of a request that fails on its way to frps or the relay; a connection to a company whose link uses https never reaches Caddy.
 
 ## Run the tests
 
@@ -61,8 +63,9 @@ The tests start their own relay, frps, frpc, Caddy and small web server on local
 
 - `relay/relay.py`: the name API, tunnel checks and operator commands, in one Python file.
 - `relay/frps.toml`: frps settings; the server password is a placeholder.
+- `relay/edge-frpc.toml`: the server's own frpc, which carries everything that frps does not route to a company on to Caddy. Its token comes from the environment.
 - `relay/setup-relay.sh`, `relay/hornhoof-relay` and the service files: server setup and operator commands.
-- `Caddyfile`: the web server settings, the API and tunnel entry points, and company traffic.
+- `Caddyfile`: the web server settings behind frps, the API and tunnel entry points, and the traffic of companies in http mode.
 - `pages/`: the page template, build script and fonts. `pages/build.py` builds `www/index.html` and the relay's 404 and 410 pages.
 - `relay/test/`: tests and their local server harness. Downloaded binaries stay in the ignored `.bin/` folder.
 - `deploy.env.example`: example deployment settings. Real settings, access keys and other private files stay outside this repository.

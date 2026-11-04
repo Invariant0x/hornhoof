@@ -280,6 +280,8 @@ localPort = {recorder.server_port}
 
     def test_refused_connections_read_as_failures(self) -> None:
         self.stack.caddy.stop()
+        # frps holds the public https port since Task 9, so without it the port stays open and only the handshake fails.
+        self.stack.stop_frps()
         for name, answer in (('https', self.stack.https('hornhoof.org')), ('http', self.stack.http('hornhoof.org'))):
             with self.subTest(name):
                 self.assertIsNone(answer.status)
