@@ -1,3 +1,4 @@
+import type { ExternalWait } from '@hornhoof/protocol/waits';
 import type { Notification } from '@hornhoof/protocol';
 import type { FailureKind, Limits, ModelOption, NodeLoad, ProgramInfo, ProviderId, TemplateKey } from '@hornhoof/protocol';
 import type { RoleEffort } from '@hornhoof/protocol/efforts';
@@ -530,7 +531,7 @@ export type UpdatesView = {
 export type NoteView = { number: number; text: string; by: { kind: 'orchestrator' } | { kind: 'person' | 'agent'; id: string; name: string } | null; updatedAt: string };
 
 export type SegmentKind = 'work' | 'after' | 'person' | 'stall' | 'lost' | 'alarm' | 'queued' | 'unknown';
-export type ExternalWait = { reason: string; since: string; until: string };
+export type { ExternalWait } from '@hornhoof/protocol/waits';
 export type TreeSegment = { kind: SegmentKind; from: string; to: string | null; program?: Pick<TurnProgram, 'state' | 'since' | 'tool'>; alarm?: TurnAlarm; waitsForAgent?: TreeAgent; externalWait?: ExternalWait };
 export type TreeMove = { kind: string; at: string; text: string };
 export type TreeAgent = { id: string; name: string };
