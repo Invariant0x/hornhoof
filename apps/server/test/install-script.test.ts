@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -77,6 +77,34 @@ function fromUpdater(env: Record<string, string> = {}, dotEnv = 'HORNHOOF_SECRET
 const linesOf = (dotEnv: string, key: string) => dotEnv.split('\n').filter(line => line.startsWith(`${key}=`));
 const COMPOSE_STEP = /^docker compose (stop|up|pull)/;
 const UPDATER_REF = `ghcr.io/invariant0x/hornhoof-updater@sha256:${'f'.repeat(64)}`;
+
+/* Installs on one computer: one home, one list of ports, as several companies share them. */
+function computer() {
+  const base = mkdtempSync(join(tmpdir(), 'hh-computer-'));
+  const home = join(base, 'home');
+  const portsDir = join(base, 'ports');
+  mkdirSync(home);
+  mkdirSync(portsDir);
+  const folder = (name = 'hornhoof') => join(home, name);
+  return {
+    folder,
+    run: (args: string[] = [], env: Record<string, string> = {}) => install({ args: ['server', ...args], tty: '\n', env: { HOME: home, HORNHOOF_DIR: folder(), STUB_PORTS_DIR: portsDir, ...env } }),
+    company: (dotEnv: string, name = 'hornhoof') => {
+      mkdirSync(folder(name));
+      writeFileSync(join(folder(name), '.env'), dotEnv);
+    },
+    dotEnv: (name = 'hornhoof') => readFileSync(join(folder(name), '.env'), 'utf8'),
+    list: () => readFileSync(join(portsDir, 'registry'), 'utf8').trim().split('\n'),
+    setList: (lines: string[]) => writeFileSync(join(portsDir, 'registry'), `${lines.join('\n')}\n`),
+    holdLock: (id: string) => writeFileSync(join(portsDir, 'lock'), `${id}\n`),
+    freeLock: () => rmSync(join(portsDir, 'lock')),
+  };
+}
+/* The web and peer port lines of a .env. */
+const portsIn = (dotEnv: string) => [...linesOf(dotEnv, 'HORNHOOF_PORT'), ...linesOf(dotEnv, 'HORNHOOF_PEER_PORT')];
+const LOCK_BUSY = 'Another Hornhoof install on this computer is choosing its ports. Wait a minute, then run this command again.';
+const REGISTRY_WRITE = 'cat > /ports/registry.new';
+const portRange = (first: number, count: number) => Array.from({ length: count }, (_, i) => first + i).join(' ');
 
 describe('install.sh', () => {
   it('records an update intent and stops an old node gracefully before replacing it', () => {
@@ -690,7 +718,7 @@ describe('install.sh', () => {
     expect(env).toMatch(new RegExp(`^HORNHOOF_NODE_REF=ghcr\\.io/invariant0x/hornhoof-node@sha256:${'d'.repeat(64)}$`, 'm'));
     expect(env).toMatch(new RegExp(`^HORNHOOF_UPDATER_REF=ghcr\\.io/invariant0x/hornhoof-updater@sha256:${'f'.repeat(64)}$`, 'm'));
     expect(r.calls.some(c => c.startsWith('curl'))).toBe(false);
-    expect(r.calls.some(c => c.startsWith('docker create') || c.startsWith('docker info'))).toBe(false);
+    expect(r.calls.some(c => (c.startsWith('docker create') && !c.includes('hornhoof-port-lock')) || c.startsWith('docker info'))).toBe(false);
     /* The updater downloaded every image before it saved the database, so this only starts them. */
     expect(r.calls.some(c => c.startsWith('docker pull') || c.startsWith('docker compose pull'))).toBe(false);
     expect(r.calls).toContain('docker compose up -d --no-build app node');
@@ -798,7 +826,7 @@ describe('install.sh', () => {
     expect(r.code).toBe(0);
     expect(r.calls).toContain('docker compose up -d --no-build app');
     expect(r.calls).not.toContain('docker compose up -d --no-build app node');
-    expect(r.calls.some(c => c.startsWith('docker rm') || c.startsWith('docker run -d'))).toBe(false);
+    expect(r.calls.some(c => c.startsWith('docker rm -f hornhoof-') || c.startsWith('docker run -d'))).toBe(false);
     expect(r.calls.some(c => c.includes('tunnel.json'))).toBe(false);
   });
 
@@ -898,6 +926,216 @@ describe('install.sh', () => {
     expect(r.code).toBe(0);
     expect(r.calls.some(c => c.includes('--take-over'))).toBe(false);
     expect(r.calls).toContain('docker compose up -d --no-build app node');
+  });
+
+  it('keeps a host-wide list of ports, so four companies on one computer never share one', () => {
+    const c = computer();
+    const companies: [string, string[]][] = [['hornhoof', []], ['hornhoof-b', ['--name', 'b']], ['hornhoof-c', ['--name', 'c']], ['hornhoof-d', ['--name', 'd']]];
+    companies.forEach(([name, args], i) => {
+      expect(c.run(args).code).toBe(0);
+      expect(portsIn(c.dotEnv(name))).toEqual([`HORNHOOF_PORT=${8080 + i}`, `HORNHOOF_PEER_PORT=${8180 + i}`]);
+    });
+    expect(c.list()).toEqual(companies.map(([name], i) => `${c.folder(name)} ${8080 + i} ${8180 + i}`));
+  });
+
+  it('leaves the ports of a stopped and pruned company to it', () => {
+    const c = computer();
+    c.setList([`${c.folder('hornhoof-old')} 8080 8180`]);
+    expect(c.run().code).toBe(0);
+    expect(portsIn(c.dotEnv())).toEqual(['HORNHOOF_PORT=8081', 'HORNHOOF_PEER_PORT=8181']);
+    expect(c.list()).toEqual([`${c.folder('hornhoof-old')} 8080 8180`, `${c.folder()} 8081 8181`]);
+  });
+
+  it('skips ports any container publishes, running or stopped', () => {
+    const c = computer();
+    expect(c.run([], { STUB_BOUND_PORTS: '8080 8180' }).code).toBe(0);
+    expect(portsIn(c.dotEnv())).toEqual(['HORNHOOF_PORT=8081', 'HORNHOOF_PEER_PORT=8181']);
+  });
+
+  it('gives an existing company a peer port and keeps its web port', () => {
+    const kept = computer();
+    kept.company('HORNHOOF_SECRET=s\nNODE_KEY=k\nHORNHOOF_PORT=8085\n');
+    expect(kept.run().code).toBe(0);
+    expect(portsIn(kept.dotEnv())).toEqual(['HORNHOOF_PORT=8085', 'HORNHOOF_PEER_PORT=8180']);
+    expect(kept.list()).toEqual([`${kept.folder()} 8085 8180`]);
+
+    const older = computer();
+    older.company('HORNHOOF_SECRET=s\nNODE_KEY=k\n');
+    expect(older.run([], { STUB_BOUND_PORTS: '8080' }).code).toBe(0);
+    expect(portsIn(older.dotEnv())).toEqual(['HORNHOOF_PORT=8080', 'HORNHOOF_PEER_PORT=8180']);
+  });
+
+  it("chooses a new company's ports by the free search though its .env is there by then", () => {
+    const c = computer();
+    expect(c.run([], { STUB_BOUND_PORTS: '8080' }).code).toBe(0);
+    expect(linesOf(c.dotEnv(), 'HORNHOOF_PORT')).toEqual(['HORNHOOF_PORT=8081']);
+    expect(linesOf(c.dotEnv(), 'PUBLIC_URL')).toEqual(['PUBLIC_URL=http://localhost:8081']);
+    /* Its own front binds 8081 now. */
+    expect(c.run([], { STUB_BOUND_PORTS: '8080 8081' }).code).toBe(0);
+    expect(linesOf(c.dotEnv(), 'HORNHOOF_PORT')).toEqual(['HORNHOOF_PORT=8081']);
+  });
+
+  it('takes the lock and gives it back', () => {
+    const c = computer();
+    const r = c.run();
+    expect(r.code).toBe(0);
+    const taken = r.calls.findIndex(call => /^docker create --name hornhoof-port-lock --label io\.hornhoof\.since=\d+ \S+ true$/.test(call));
+    const written = r.calls.findIndex(call => call.includes(REGISTRY_WRITE));
+    expect(taken).toBeGreaterThanOrEqual(0);
+    expect(written).toBeGreaterThan(taken);
+    expect(r.calls.indexOf('docker rm lock-1')).toBeGreaterThan(written);
+    expect(r.calls).toContain('docker volume create hornhoof-ports');
+
+    const failing = computer();
+    const failed = failing.run([], { STUB_REGISTRY: 'fail' });
+    expect(failed.code).toBe(1);
+    expect(linesOf(failing.dotEnv(), 'HORNHOOF_PEER_PORT')).toEqual([]);
+    expect(failed.calls).toContain('docker rm lock-1');
+    expect(failed.calls.some(call => call.startsWith('docker compose up'))).toBe(false);
+  });
+
+  it('writes nothing when another install took its lock over', () => {
+    const c = computer();
+    const r = c.run([], { STUB_LOCK_TAKEN: '1' });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain(LOCK_BUSY);
+    expect(r.calls.some(call => call.includes(REGISTRY_WRITE))).toBe(false);
+    expect(linesOf(c.dotEnv(), 'HORNHOOF_PEER_PORT')).toEqual([]);
+    expect(r.calls).not.toContain('docker rm lock-other');
+  });
+
+  it('takes over a lock older than two minutes by its id, and waits for a younger one', () => {
+    const now = Math.floor(Date.now() / 1000);
+    const old = computer();
+    old.holdLock('lock-old');
+    const taken = old.run([], { STUB_LOCK_SINCE: String(now - 200) });
+    expect(taken.code).toBe(0);
+    expect(taken.calls).toContain('docker rm lock-old');
+    expect(portsIn(old.dotEnv())).toEqual(['HORNHOOF_PORT=8080', 'HORNHOOF_PEER_PORT=8180']);
+
+    const young = computer();
+    young.holdLock('lock-young');
+    const waited = young.run([], { STUB_LOCK_SINCE: String(now - 30), HORNHOOF_PORT_LOCK_WAIT: '2' });
+    expect(waited.code).toBe(1);
+    expect(waited.out).toContain(LOCK_BUSY);
+    expect(waited.calls).not.toContain('docker rm lock-young');
+  });
+
+  it('moves a new port that something outside Docker holds, and its address with it', () => {
+    const up = 'docker compose up -d --no-build keeper front';
+    const peer = computer();
+    const moved = peer.run([], { STUB_BIND_FAIL: '8180' });
+    expect(moved.code).toBe(0);
+    expect(portsIn(peer.dotEnv())).toEqual(['HORNHOOF_PORT=8080', 'HORNHOOF_PEER_PORT=8181']);
+    expect(peer.list()).toEqual([`${peer.folder()} 8080 8181`]);
+    expect(moved.calls.filter(call => call === up)).toHaveLength(2);
+    expect(moved.out).toContain('Port 8180 is taken, so Hornhoof takes another one.');
+
+    /* Docker words it otherwise when its proxy finds the port taken. */
+    const web = computer();
+    const moves = web.run([], { STUB_BIND_FAIL: '8080', STUB_BIND_WORDS: 'address' });
+    expect(moves.code).toBe(0);
+    expect(linesOf(web.dotEnv(), 'HORNHOOF_PORT')).toEqual(['HORNHOOF_PORT=8081']);
+    expect(linesOf(web.dotEnv(), 'PUBLIC_URL')).toEqual(['PUBLIC_URL=http://localhost:8081']);
+    expect(web.list()).toEqual([`${web.folder()} 8081 8180`]);
+    expect(moves.calls.some(call => call.startsWith('curl') && call.includes('http://localhost:8081/api/health'))).toBe(true);
+    expect(moves.out).toContain('Hornhoof is running at http://localhost:8081.');
+
+    const six = computer().run([], { STUB_BIND_FAIL: portRange(8180, 6) });
+    expect(six.code).toBe(1);
+    expect(six.out).toContain('Port 8185 is taken by a program outside Docker. Stop what uses it, then run this command again.');
+    expect(six.calls.filter(call => call === up)).toHaveLength(6);
+
+    const before = computer();
+    before.company('HORNHOOF_SECRET=s\nNODE_KEY=k\nHORNHOOF_PORT=8085\n');
+    const taken = before.run([], { STUB_BIND_FAIL: '8085' });
+    expect(taken.code).toBe(1);
+    expect(taken.out).toContain('Port 8085 is taken by a program outside Docker.');
+    expect(linesOf(before.dotEnv(), 'HORNHOOF_PORT')).toEqual(['HORNHOOF_PORT=8085']);
+  });
+
+  it('takes the last port of a range, and says so when a range has none free', () => {
+    const last = computer();
+    expect(last.run([], { STUB_BOUND_PORTS: portRange(8080, 99) }).code).toBe(0);
+    expect(linesOf(last.dotEnv(), 'HORNHOOF_PORT')).toEqual(['HORNHOOF_PORT=8179']);
+
+    const noWeb = computer();
+    const web = noWeb.run([], { STUB_BOUND_PORTS: portRange(8080, 100) });
+    expect(web.code).toBe(1);
+    expect(web.out).toContain('No free port from 8080 to 8179 for Hornhoof. Stop what uses them, then run this command again.');
+    expect(web.calls).toContain('docker rm lock-1');
+
+    const peer = computer().run([], { STUB_BOUND_PORTS: portRange(8180, 100) });
+    expect(peer.code).toBe(1);
+    expect(peer.out).toContain('No free port from 8180 to 8279 for Hornhoof. Stop what uses them, then run this command again.');
+  });
+
+  it('hands out no port when it cannot read the list', () => {
+    const c = computer();
+    const r = c.run([], { STUB_REGISTRY: 'unreadable' });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain("Could not read the list of Hornhoof's ports on this computer. Run this command again.");
+    expect(r.calls.some(call => call.includes(REGISTRY_WRITE))).toBe(false);
+    expect(r.calls).toContain('docker rm lock-1');
+    expect(linesOf(c.dotEnv(), 'HORNHOOF_PEER_PORT')).toEqual([]);
+  });
+
+  it('asks no port on localhost from the updater, whose localhost is its own container', () => {
+    const r = fromUpdater({ HORNHOOF_UPDATER_REV: '2', STUB_PORTS_TAKEN: '8180' });
+    expect(r.code).toBe(0);
+    expect(linesOf(r.dotEnv(), 'HORNHOOF_PEER_PORT')).toEqual(['HORNHOOF_PEER_PORT=8180']);
+    expect(r.calls.some(c => c.startsWith('curl'))).toBe(false);
+  });
+
+  it('counts a company whose first run stopped before it chose its ports as new', () => {
+    const c = computer();
+    expect(c.run().code).toBe(0);
+    c.holdLock('lock-of-another-install');
+    expect(c.run(['--name', 'b'], { HORNHOOF_PORT_LOCK_WAIT: '0' }).code).toBe(1);
+    c.freeLock();
+    expect(c.run(['--name', 'b']).code).toBe(0);
+    expect(portsIn(c.dotEnv('hornhoof-b'))).toEqual(['HORNHOOF_PORT=8081', 'HORNHOOF_PEER_PORT=8181']);
+    expect(linesOf(c.dotEnv('hornhoof-b'), 'PUBLIC_URL')).toEqual(['PUBLIC_URL=http://localhost:8081']);
+  });
+
+  it('gives a company whose folder is gone its ports and its address back', () => {
+    const c = computer();
+    c.setList([`${c.folder('hornhoof-b')} 8083 8183`]);
+    expect(c.run(['--name', 'b']).code).toBe(0);
+    expect(portsIn(c.dotEnv('hornhoof-b'))).toEqual(['HORNHOOF_PORT=8083', 'HORNHOOF_PEER_PORT=8183']);
+    expect(linesOf(c.dotEnv('hornhoof-b'), 'PUBLIC_URL')).toEqual(['PUBLIC_URL=http://localhost:8083']);
+  });
+
+  it('reads a folder with a space in its name from the list', () => {
+    const c = computer();
+    const spaced = join(c.folder(), 'my company');
+    mkdirSync(c.folder());
+    c.setList([`${spaced} 8084 8184`, `${c.folder('hornhoof-old')} 8080 8180`]);
+    expect(c.run([], { HORNHOOF_SERVER_DIR: spaced, HORNHOOF_DIR: c.folder() }).code).toBe(0);
+    expect(linesOf(readFileSync(join(spaced, '.env'), 'utf8'), 'HORNHOOF_PORT')).toEqual(['HORNHOOF_PORT=8084']);
+    expect(c.list()).toEqual([`${c.folder('hornhoof-old')} 8080 8180`, `${spaced} 8084 8184`]);
+  });
+
+  it("keeps to the ports in other companies' .env files when the list is gone", () => {
+    const c = computer();
+    c.company('HORNHOOF_SECRET=s\nNODE_KEY=k\nHORNHOOF_PORT=8080\nHORNHOOF_PEER_PORT=8180\n', 'hornhoof-a');
+    expect(c.run().code).toBe(0);
+    expect(portsIn(c.dotEnv())).toEqual(['HORNHOOF_PORT=8081', 'HORNHOOF_PEER_PORT=8181']);
+  });
+
+  it('says what did not start when a step fails for another reason', () => {
+    const database = computer().run([], { STUB_UP_FAIL: 'db' });
+    expect(database.code).toBe(1);
+    expect(database.out).toContain('The database did not start. Run docker compose logs db in ');
+    const front = computer().run([], { STUB_UP_FAIL: 'front' });
+    expect(front.code).toBe(1);
+    expect(front.out).toContain('Hornhoof did not start. Run docker compose logs in ');
+    expect(front.calls.filter(call => call.endsWith(' keeper front'))).toHaveLength(1);
+    const app = fromUpdater({ HORNHOOF_UPDATER_REV: '2', STUB_UP_FAIL: 'app' });
+    expect(app.code).toBe(1);
+    expect(app.out).toContain('Hornhoof did not start.');
+    expect(app.out).not.toContain('could not bring its database');
+    expect(app.out).not.toContain('docker compose logs');
   });
 
   it('refuses a server name it cannot use as a folder', () => {
