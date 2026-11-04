@@ -30,8 +30,10 @@ describe('About from the account menu', () => {
     const box = await screen.findByRole('dialog', { name: 'About Hornhoof' });
     expect(await within(box).findByText('0.5.0 (abc1234)')).toBeInTheDocument();
     expect(within(box).getByText('A company where people and agents work together.')).toBeInTheDocument();
-    expect(within(box).getByText('Ivan Korol', { exact: true })).toBeInTheDocument();
-    expect(within(box).getByText('Copyright (c) 2026 Ivan Korol')).toBeInTheDocument();
+    expect(within(box).queryByText('Developer')).not.toBeInTheDocument();
+    expect(within(box).queryByText('Ivan Korol', { exact: true })).not.toBeInTheDocument();
+    expect(within(box).queryByText(/Copyright/)).not.toBeInTheDocument();
+    expect(within(box).getByText('Author — Ivan Korol, © 2026')).toBeInTheDocument();
     for (const [name, href] of [
       ['MIT', 'https://github.com/Invariant0x/hornhoof/blob/main/LICENSE'],
       ['Source code', 'https://github.com/Invariant0x/hornhoof'],
@@ -68,7 +70,10 @@ describe('About from the account menu', () => {
     expect(await within(box).findByText('0.5.0 (abc1234)')).toBeInTheDocument();
     expect(within(box).getByText('Компания, где люди и агенты работают вместе.')).toBeInTheDocument();
     expect(within(box).getByRole('link', { name: 'Сообщить об ошибке или предложить идею' })).toBeInTheDocument();
-    expect(box.textContent).not.toMatch(/[\u0451\u2014]/);
+    expect(within(box).queryByText('Разработчик')).not.toBeInTheDocument();
+    expect(within(box).getByText('Автор — Ivan Korol, © 2026')).toBeInTheDocument();
+    /* The author's line has the one long dash the CEO asked for. */
+    expect(box.textContent!.replace('Автор — Ivan Korol, © 2026', '')).not.toMatch(/[\u0451\u2014]/);
     await user.click(within(box).getByRole('button', { name: 'Закрыть' }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
