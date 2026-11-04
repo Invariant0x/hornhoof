@@ -25,7 +25,7 @@ export async function dropEarlierWakes(tx: Tx, taskId: string): Promise<void> {
 /* The turn for this wake is queued, or another one for the same agent and task covers it. */
 export async function wakeQueued(db: Db, w: Wake): Promise<void> {
   const same = and(eq(pendingWakes.agentId, w.agentId), eq(pendingWakes.taskId, w.taskId), eq(pendingWakes.why, w.why));
-  const action = w.cause?.eventId === undefined ? sql`${pendingWakes.cause}->>'eventId' is null` : sql`${pendingWakes.cause}->>'eventId' = ${String(w.cause.eventId)}`;
+  const action = w.cause?.eventId === undefined ? sql`${pendingWakes.cause}->>'report' is null` : sql`${pendingWakes.cause}->>'eventId' = ${String(w.cause.eventId)}`;
   await db.delete(pendingWakes).where(and(same, action, w.why === 'explain' ? eq(pendingWakes.text, w.text ?? '') : undefined));
 }
 

@@ -1,8 +1,9 @@
-import { and, asc, eq, gte, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentEvents, jobs } from '../../db/schema.js';
 import { incomingEnvelope, messageData, readMessage, type MessageEnvelope, type MessageParty } from '../events/parties.js';
 import { publishEvent, type WithEvent } from '../events/store.js';
+import type { Tx } from '../tasks/engine.js';
 import type { TurnMessage } from './queue.js';
 import { quote } from './prompt.js';
 import type { deliverLockedInput } from './decision-context.js';
@@ -67,11 +68,66 @@ function mergeGroup(row: Stored, input: TurnMessage, incoming: MessageEnvelope, 
   return { text, prompt: words.prompt, message, data: { ...before.data as object, text, notification, report, reportContexts, reportPromptPreserved: words.reportPromptPreserved, actor: message.from, senders } };
 }
 
+function matchingReport(input: TurnMessage, report: string) {
+  const direct = input.report ? sql`${agentEvents.data}->>'from' = 'agent' and ${agentEvents.data}->>'text' = ${report}` : sql`false`;
+  return or(sql`${agentEvents.data}->>'report' = ${report}`, direct);
+}
+
+function taskNumbers(text: string, message?: MessageEnvelope): number[] {
+  const numbers = [...text.matchAll(/#([1-9]\d*)\b/g)].map(match => Number(match[1]));
+  return [...new Set([...numbers, ...(message?.notification?.tasks.map(task => task.number) ?? [])])];
+}
+
+function deliveredTasks(row: Stored): number[] {
+  const data = readMessage(row.event.data);
+  const saved = (data.data as Record<string, unknown>).deliveredTasks;
+  if (Array.isArray(saved)) return saved.filter((n): n is number => typeof n === 'number' && Number.isInteger(n));
+  return taskNumbers(String((data.data as Record<string, unknown>).text ?? ''), data.message);
+}
+
+function coversTasks(row: Stored, input: TurnMessage, incoming: MessageEnvelope): boolean {
+  const known = new Set(deliveredTasks(row));
+  const refs = [...(incoming.notification?.tasks ?? []), ...(input.task ? [input.task] : [])];
+  return refs.every(task => known.has(task.number));
+}
+
+async function freezeInput(tx: Tx, row: Stored): Promise<void> {
+  if ((row.event.data as Record<string, unknown>).inputShadow === true) return;
+  await tx.insert(agentEvents).values({ companyId: row.event.companyId, agentId: row.event.agentId, jobId: row.event.jobId,
+    kind: 'typed', seq: row.event.seq, personId: row.event.personId, createdAt: row.event.createdAt,
+    data: { ...row.event.data as object, inputShadow: false } });
+}
+
+async function updateDelivered(ctx: Ctx, row: Stored, input: TurnMessage, incoming: MessageEnvelope, report: string): Promise<boolean> {
+  const changed = await ctx.db.transaction(async tx => {
+    const [current] = await tx.select({ event: agentEvents, job: jobs }).from(agentEvents).innerJoin(jobs, eq(jobs.id, agentEvents.jobId))
+      .where(and(eq(agentEvents.id, row.event.id), inArray(jobs.status, ['running', 'done']))).for('update');
+    if (!current || !coversTasks(current, input, incoming)) return false;
+    const group = mergeGroup(current, input, incoming, report);
+    if (!group) return false;
+    const data = { ...group.data, inputShadow: true, deliveredTasks: deliveredTasks(current) };
+    await tx.update(agentEvents).set({ seq: sql`nextval(pg_get_serial_sequence('agent_events', 'seq'))`, data: messageData(data, group.message) }).where(eq(agentEvents.id, current.event.id));
+    await freezeInput(tx, current);
+    return true;
+  });
+  if (changed) await publishEvent(ctx, row.event.companyId, row.event.agentId, row.event.id);
+  return changed;
+}
+
+async function deliveredCandidate(ctx: Ctx, turn: ReportTurn, input: TurnMessage, incoming: MessageEnvelope, report: string): Promise<string | null> {
+  const rows = await ctx.db.select({ event: agentEvents, job: jobs }).from(agentEvents).innerJoin(jobs, eq(jobs.id, agentEvents.jobId))
+    .where(and(eq(agentEvents.agentId, turn.agentId), eq(agentEvents.kind, 'message'), inArray(jobs.status, ['running', 'done']),
+      gte(sql`greatest(${agentEvents.createdAt}, ${jobs.startedAt})`, new Date(Date.now() - REPORT_WINDOW_MS)), matchingReport(input, report))).orderBy(desc(agentEvents.seq));
+  for (const row of rows) {
+    if (coversTasks(row, input, incoming) && await updateDelivered(ctx, row, input, incoming, report)) return row.job.id;
+  }
+  return null;
+}
+
 async function candidate(ctx: Ctx, turn: ReportTurn, report: string): Promise<Stored | undefined> {
-  const direct = turn.message?.report ? sql`${agentEvents.data}->>'from' = 'agent' and ${agentEvents.data}->>'text' = ${report}` : sql`false`;
   const rows = await ctx.db.select({ event: agentEvents, job: jobs }).from(agentEvents).innerJoin(jobs, eq(jobs.id, agentEvents.jobId))
     .where(and(eq(agentEvents.agentId, turn.agentId), eq(agentEvents.kind, 'message'), eq(jobs.status, 'queued'),
-      gte(agentEvents.createdAt, new Date(Date.now() - REPORT_WINDOW_MS)), or(sql`${agentEvents.data}->>'report' = ${report}`, direct))).orderBy(asc(agentEvents.seq)).limit(1);
+      gte(agentEvents.createdAt, new Date(Date.now() - REPORT_WINDOW_MS)), matchingReport(turn.message!, report))).orderBy(asc(agentEvents.seq)).limit(1);
   return rows[0];
 }
 
@@ -108,9 +164,9 @@ export async function combineReport(ctx: Ctx, turn: ReportTurn, delivery?: Deliv
   const input = turn.message;
   const report = reportText(input);
   if (!input || !report) return null;
-  const row = await candidate(ctx, turn, report);
-  if (!row) return null;
   const incoming = await incomingEnvelope(ctx, turn.companyId, turn.agentId, input.personId, input);
+  const row = await candidate(ctx, turn, report);
+  if (!row) return deliveredCandidate(ctx, turn, input, incoming, report);
   if (delivery) {
     const into = await deliverCopy(ctx, turn, row, input, incoming, report, delivery);
     if (into) return into;

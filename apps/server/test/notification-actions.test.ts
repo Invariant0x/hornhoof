@@ -285,3 +285,50 @@ it('keeps other queued words when a direct report is combined and delivered live
   expect(await wordsForTurn(c.app.ctx, orchestrator.id, run!.id, spoken[0])).toHaveLength(1);
   vi.restoreAllMocks();
 });
+
+async function deliveredReport() {
+  const c = await fixture();
+  const orchestrator = (await c.db.select().from(agents)).find(a => a.kind === 'orchestrator')!;
+  const make = async () => (await createTask(c.app.ctx, { agentId: orchestrator.id }, { title: 'Goal', brief: '', body: '', departmentId: c.head.departmentId!, assigneeAgentId: c.head.id, gates: [] })).task;
+  const first = await make();
+  const second = await make();
+  const [run] = await c.db.insert(jobs).values({ companyId: orchestrator.companyId, subscriptionId: orchestrator.subscriptionId!, agentId: orchestrator.id, kind: 'conversation', prompt: 'Working.', status: 'running', timeoutMs: 1000, startedAt: new Date() }).returning();
+  const spoken: string[] = [];
+  vi.spyOn(c.app.ctx.hub, 'hasTerminals').mockReturnValue(true);
+  vi.spyOn(c.app.ctx.hub, 'send').mockImplementation((_node, message) => {
+    if (message.type === 'agent.say') { spoken.push(message.text); queueMicrotask(() => said(c.app.ctx, BUILTIN, message.ref, true)); }
+    return true;
+  });
+  const text = `Release verified on #${first.number}.`;
+  await enqueueTurn(c.app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, createdBy: null, prompt: text, message: { personId: null, from: 'agent', by: c.worker.id, text } });
+  return { ...c, orchestrator, first, second, run: run!, text, spoken };
+}
+
+it('updates a delivered copy for known tasks without another input or changing the person it answers', async () => {
+  const c = await deliveredReport();
+  const original = (await c.notices(c.orchestrator.id))[0]!;
+  await appendEvent(c.app.ctx, { companyId: c.orchestrator.companyId, agentId: c.orchestrator.id, jobId: c.run.id, kind: 'message', personId: c.ceo.id, data: { text: 'A newer personal instruction.' } });
+  await wakeAll(c.app.ctx, (await report(c.app.ctx, c.head.id, c.first.id, { done: true, summary: c.text })).wakes);
+  const notices = (await c.notices(c.orchestrator.id)).filter(e => e.message!.from.kind !== 'person');
+  expect(notices).toHaveLength(1);
+  expect(notices[0]!.message!.notification!.tasks).toEqual([{ id: c.first.id, number: c.first.number }]);
+  expect(notices[0]!.message!.senders!.map(p => p.name)).toEqual(['Bruno', 'Hana']);
+  expect(notices[0]!.message!.originSeq).toBe(original.seq);
+  expect(notices[0]!.seq).toBeGreaterThan(original.seq);
+  expect(c.spoken).toHaveLength(1);
+  expect((await decisionPrincipal(c.db, c.run.id))!.personId).toBe(c.ceo.id);
+  expect(await wordsForTurn(c.app.ctx, c.orchestrator.id, c.run.id, c.spoken[0])).toHaveLength(1);
+  vi.restoreAllMocks();
+});
+
+it.each(['different text', 'new task'] as const)('delivers %s even after a similar report was delivered', async difference => {
+  const c = await deliveredReport();
+  const task = difference === 'new task' ? c.second : c.first;
+  const text = difference === 'different text' ? 'A different report.' : c.text;
+  await wakeAll(c.app.ctx, (await report(c.app.ctx, c.head.id, task.id, { done: true, summary: text })).wakes);
+  const notices = await c.notices(c.orchestrator.id);
+  expect(notices).toHaveLength(2);
+  expect((notices[1]!.data as { text: string }).text).toContain(text);
+  expect(notices[1]!.message!.notification!.tasks).toContainEqual({ id: task.id, number: task.number });
+  vi.restoreAllMocks();
+});
