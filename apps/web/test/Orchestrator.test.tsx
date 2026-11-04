@@ -699,7 +699,7 @@ describe('messages between agents and people', () => {
   it("shows the orchestrator's messages each as one line naming who wrote to whom, the text folded and opened by a click", async () => {
     open({ [`GET ${EVENTS}?after=0`]: [200, { events: ORCHESTRATOR_LOG, state: READY }] });
     const david = await screen.findByRole('button', { name: 'Message from David AI (CEO assistant) to the orchestrator' });
-    expect(screen.getByRole('button', { name: 'Hornhoof notice to the orchestrator' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Hornhoof, recorded service message to the orchestrator' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Message from Dana (Head of development) to the orchestrator' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Message to Dana (Head of development) from the orchestrator' })).toBeInTheDocument();
     /* Folded: the text is not on the screen, and the agent's own words to the person are. */
@@ -717,7 +717,7 @@ describe('messages between agents and people', () => {
 
   it('opens every folded message with Ctrl+O and folds them again with it', async () => {
     open({ [`GET ${EVENTS}?after=0`]: [200, { events: ORCHESTRATOR_LOG, state: READY }] });
-    await screen.findByRole('button', { name: 'Hornhoof notice to the orchestrator' });
+    await screen.findByRole('button', { name: 'Hornhoof, recorded service message to the orchestrator' });
     ctrlO();
     for (const text of [/Take #78 into work/, /David AI took an improvement into work/, /#49 is blocked/, /Give #78 to a developer/]) expect(screen.getByText(text)).toBeInTheDocument();
     ctrlO(screen.getByRole('textbox', { name: 'Write to the orchestrator' }));
@@ -727,7 +727,7 @@ describe('messages between agents and people', () => {
 
   it('takes Ctrl+O while the focus is still on the map that opened the window, but not while one types elsewhere', async () => {
     open({ [`GET ${EVENTS}?after=0`]: [200, { events: ORCHESTRATOR_LOG, state: READY }] });
-    await screen.findByRole('button', { name: 'Hornhoof notice to the orchestrator' });
+    await screen.findByRole('button', { name: 'Hornhoof, recorded service message to the orchestrator' });
     const chip = document.body.appendChild(document.createElement('button'));
     const field = document.body.appendChild(document.createElement('input'));
     onTestFinished(() => { chip.remove(); field.remove(); });
@@ -754,7 +754,7 @@ describe('messages between agents and people', () => {
     ]);
     const first = await screen.findByRole('button', { name: 'Сообщение от Dana (Руководитель разработки) для Bruno (Бэкенд-разработчик)' });
     expect(screen.getByRole('button', { name: 'Сообщение для людей от Bruno (Бэкенд-разработчик)' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Уведомление Hornhoof для Bruno (Бэкенд-разработчик)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Hornhoof, сохраненное служебное сообщение для Bruno (Бэкенд-разработчик)' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Сообщение для оркестратора от Bruno (Бэкенд-разработчик)' })).toBeInTheDocument();
     expect(screen.queryByText('Возьми #83.')).not.toBeInTheDocument();
     fireEvent.click(first);

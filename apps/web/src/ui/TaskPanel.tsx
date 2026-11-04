@@ -1,3 +1,4 @@
+import { taskWaitText } from './task-wait';
 import { useEffect, useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { errorText, useLanguage, useT, type Messages } from '../i18n';
@@ -74,7 +75,7 @@ function ExternalTaskWait({ wait }: { wait: TaskDetail['externalWait'] }) {
   const { language } = useLanguage();
   if (!wait) return null;
   const until = new Date(wait.until).toLocaleTimeString(language === 'ru' ? 'ru-RU' : 'en-GB', { hour: '2-digit', minute: '2-digit' });
-  return <p className="muted">{t.dept.tree.externalWaiting(wait.reason, until)}</p>;
+  return <p className="muted">{taskWaitText(t, wait, until)}</p>;
 }
 
 function TaskBody({ task, onOpen, onChanged, waiting }: { task: TaskDetail; onOpen: (id: string) => void; onChanged: () => void; waiting: Waiting }) {
