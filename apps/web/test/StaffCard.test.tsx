@@ -2,7 +2,7 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
-import type { StaffLine } from '../src/types';
+import type { Roster, StaffLine } from '../src/types';
 import { StaffCard } from '../src/ui/StaffCard';
 import { mockApi, ROSTER } from './api-mock';
 
@@ -13,6 +13,37 @@ function card(proposal?: { id: string; brief: string; people: StaffLine[] }, ros
   render(
     <LanguageProvider>
       <StaffCard department={DEPT} proposal={proposal} onCorrect={() => {}} />
+    </LanguageProvider>,
+  );
+  return calls;
+}
+
+const OPS = { id: 'd1', name: 'Operations' };
+const member = (id: string, en: string, ru: string, required: boolean, holder: string | null) => ({ id, title: { en, ru }, kind: 'member' as const, tier: 'standard' as const, perProduct: false, skills: ['hh-report-to-head'], subscription: 's-key', required, holder });
+/* Operations with its head and watchdog there, and its operator missing, as the server sends it. */
+const OPS_ROSTER: Roster = {
+  ...ROSTER,
+  people: [
+    { role: 'OPS-HEAD', name: 'Head of operations', product: null, model: '', subscription: 's-key', skills: [] },
+    { role: 'OPS-WATCH', name: 'Task watchdog', product: null, model: '', subscription: 's-key', skills: [] },
+    { role: 'OPS-PROGRAM', name: 'Program operator', product: null, model: '', subscription: 's-key', skills: [] },
+    { role: 'OPS-FIX', name: 'Reliability engineer', product: null, model: '', subscription: 's-key', skills: [] },
+  ],
+  roles: [
+    { ...member('OPS-HEAD', 'Head of operations', 'Руководитель операционного отдела', true, 'Hanna'), kind: 'head' },
+    member('OPS-WATCH', 'Task watchdog', 'Сторож задач', true, 'Argus'),
+    member('OPS-PROGRAM', 'Program operator', 'Оператор программ', true, null),
+    member('OPS-FIX', 'Reliability engineer', 'Инженер надежности', false, null),
+  ],
+  products: [],
+};
+const WHOLE_STAFF: Roster = { ...OPS_ROSTER, roles: OPS_ROSTER.roles.map(r => (r.id === 'OPS-PROGRAM' ? { ...r, holder: 'Otto' } : r)) };
+
+function opsCard(proposal?: { id: string; brief: string; people: StaffLine[] }, roster = OPS_ROSTER) {
+  const calls = mockApi({ 'GET /api/departments/d1/roster': [200, roster], 'POST /api/departments/d1/staff': [201, { hired: [], present: [] }] });
+  render(
+    <LanguageProvider>
+      <StaffCard department={OPS} proposal={proposal} onCorrect={() => {}} />
     </LanguageProvider>,
   );
   return calls;
@@ -77,5 +108,103 @@ describe('StaffCard', () => {
     } finally {
       localStorage.removeItem('hh-lang');
     }
+  });
+
+  describe('in Operations', () => {
+    it('keeps a required role ticked, even when the proposal unticked it, and hires it', async () => {
+      const user = userEvent.setup();
+      const calls = opsCard({ id: 'pr1', brief: 'Staff it.', people: [{ role: 'OPS-PROGRAM', checked: false }, { role: 'OPS-FIX', checked: true }] });
+      const box = await screen.findByRole('checkbox', { name: /Program operator/ });
+      expect(box).toBeChecked();
+      expect(box).toBeDisabled();
+      await user.click(box);
+      expect(box).toBeChecked();
+      expect(within(box.closest('label')!).getByText('Required')).toBeInTheDocument();
+      expect(screen.getByRole('combobox', { name: 'Where Program operator runs' })).toBeEnabled();
+      await user.click(screen.getByRole('button', { name: 'Hire (2)' }));
+      await vi.waitFor(() => expect((calls.find(c => c.method === 'POST')?.body as { people: { role: string }[] }).people.map(p => p.role)).toContain('OPS-PROGRAM'));
+    });
+
+    it('lets another role be unticked, and does not call it required', async () => {
+      const user = userEvent.setup();
+      opsCard({ id: 'pr1', brief: 'Staff it.', people: [{ role: 'OPS-PROGRAM', checked: true }, { role: 'OPS-FIX', checked: true }] });
+      const box = await screen.findByRole('checkbox', { name: /Reliability engineer/ });
+      expect(box).toBeEnabled();
+      expect(within(box.closest('label')!).queryByText('Required')).not.toBeInTheDocument();
+      await user.click(box);
+      expect(box).not.toBeChecked();
+      expect(screen.getByRole('combobox', { name: 'Where Reliability engineer runs' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Hire (1)' })).toBeEnabled();
+    });
+
+    it('adds the required roles an older proposal left out', async () => {
+      opsCard({ id: 'pr1', brief: 'Staff it.', people: [{ role: 'OPS-FIX', checked: true }] });
+      for (const name of [/Head of operations/, /Task watchdog/, /Program operator/]) {
+        const box = await screen.findByRole('checkbox', { name });
+        expect(box).toBeChecked();
+        expect(box).toBeDisabled();
+      }
+    });
+
+    it('shows who holds a role, with nothing to pick for them', async () => {
+      opsCard();
+      const box = await screen.findByRole('checkbox', { name: /Task watchdog/ });
+      expect(box).toBeChecked();
+      expect(box).toBeDisabled();
+      expect(within(box.closest('label')!).getByText('Already here: Argus')).toBeInTheDocument();
+      expect(screen.queryByRole('combobox', { name: 'Where Task watchdog runs' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('combobox', { name: 'Model for Task watchdog' })).not.toBeInTheDocument();
+      expect(screen.getByRole('combobox', { name: 'Where Program operator runs' })).toBeInTheDocument();
+    });
+
+    it('by hand hires only who is not there', async () => {
+      const user = userEvent.setup();
+      const calls = opsCard();
+      await user.click(await screen.findByRole('button', { name: 'Hire (2)' }));
+      await vi.waitFor(() => expect((calls.find(c => c.method === 'POST')?.body as { people: { role: string }[] }).people.map(p => p.role)).toEqual(['OPS-PROGRAM', 'OPS-FIX']));
+    });
+
+    it('by hand offers no hire when everyone is there and the rest is unticked', async () => {
+      const user = userEvent.setup();
+      opsCard(undefined, WHOLE_STAFF);
+      await user.click(await screen.findByRole('checkbox', { name: /Reliability engineer/ }));
+      expect(screen.getByRole('button', { name: 'Hire (0)' })).toBeDisabled();
+    });
+
+    it('counts only who a proposal really hires, and leaves the server to skip the rest', async () => {
+      const user = userEvent.setup();
+      const calls = opsCard({ id: 'pr1', brief: 'Staff it.', people: [{ role: 'OPS-WATCH', checked: true }, { role: 'OPS-FIX', checked: true }] });
+      await user.click(await screen.findByRole('button', { name: 'Hire (2)' }));
+      await vi.waitFor(() => expect((calls.find(c => c.method === 'POST')?.body as { proposalId: string; people: { role: string }[] }).people.map(p => p.role).sort()).toEqual(['OPS-FIX', 'OPS-HEAD', 'OPS-PROGRAM', 'OPS-WATCH']));
+      expect(await screen.findByText('Hired')).toBeInTheDocument();
+    });
+
+    it('closes a proposal with nobody left to hire, and does not say anyone was hired', async () => {
+      const user = userEvent.setup();
+      const calls = opsCard({ id: 'pr1', brief: 'Old.', people: [{ role: 'OPS-WATCH', checked: true }, { role: 'OPS-FIX', checked: false }] }, WHOLE_STAFF);
+      await user.click(await screen.findByRole('button', { name: 'Nothing to hire, close' }));
+      await vi.waitFor(() => expect((calls.find(c => c.method === 'POST')?.body as { proposalId: string }).proposalId).toBe('pr1'));
+      expect(await screen.findByText('Applied')).toBeInTheDocument();
+      expect(screen.queryByText('Hired')).not.toBeInTheDocument();
+    });
+
+    it('marks nothing in another department', async () => {
+      card();
+      const box = await screen.findByRole('checkbox', { name: /Backend engineer/ });
+      expect(box).toBeEnabled();
+      expect(screen.queryByText('Required')).not.toBeInTheDocument();
+    });
+
+    it('says it in Russian too', async () => {
+      localStorage.setItem('hh-lang', 'ru');
+      try {
+        opsCard();
+        const box = await screen.findByRole('checkbox', { name: /Сторож задач/ });
+        expect(within(box.closest('label')!).getByText('Обязательная роль')).toBeInTheDocument();
+        expect(within(box.closest('label')!).getByText('Уже в отделе: Argus')).toBeInTheDocument();
+      } finally {
+        localStorage.removeItem('hh-lang');
+      }
+    });
   });
 });

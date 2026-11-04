@@ -7,11 +7,12 @@ import { startSession } from '../../auth/session.js';
 import { encryptSecret } from '../../crypto/secrets.js';
 import { isUniqueViolation } from '../../db/errors.js';
 import { agents, companies, departments, people, subscriptions } from '../../db/schema.js';
-import { ApiError } from '../../errors.js';
+import { ApiError, loggable } from '../../errors.js';
 import { saveLink } from '../link/link.js';
 import { LinkBody } from '../link/routes.js';
 import { createNodeCode } from '../nodes/codes.js';
 import { installCommand } from '../nodes/command.js';
+import { ensureOperations } from '../operations/ensure.js';
 import { isSetupCode, setupNeeded } from './code.js';
 
 const roleCodeOf = (template: string) => DEPARTMENT_TEMPLATES.find(t => t.key === template)!.roleCode;
@@ -156,6 +157,8 @@ export function setupRoutes(app: FastifyInstance, ctx: Ctx): void {
 
     const { company, person, code } = result;
     if (bound) await ctx.links.sync();
+    /* The check repeats it, so a failure here does not lose the company that is already set up. */
+    await ensureOperations(ctx, company.id).catch((err: unknown) => ctx.log.error({ error: loggable(err) }, 'Staffing Operations of the new company failed.'));
     await startSession(reply, db, config, person.id, passwordHash);
     reply.code(201);
     return {
