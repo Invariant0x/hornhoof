@@ -7,7 +7,7 @@ import { hashToken, newToken } from '../../crypto/tokens.js';
 import { agents, jobs, nodes, people, subscriptions, tasks, turns } from '../../db/schema.js';
 import { dispatchJob } from '../jobs/dispatch.js';
 import { turnsHeld } from '../updates/drain.js';
-import { alsoKept, deliverLockedInput, inputKept, turnStarted, withInputLock } from './decision-context.js';
+import { actingCeo, alsoKept, deliverLockedInput, inputKept, turnStarted, withInputLock } from './decision-context.js';
 import { BUILTIN, identityOf, nodeIdentity, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { liveNode, planNodes, type NodeRow } from '../nodes/nodes.js';
 import { appendEvent, earlierTalk, messageForJob, publishWorking, type WithEvent } from '../events/store.js';
@@ -237,13 +237,8 @@ export class NoSubscription extends Error {
   }
 }
 
-/* Whether the person is the company's owner, the CEO, whose words alone open the tools for people, access, money and
-   the company's reach. */
-async function isCeo(ctx: Ctx, personId: string | null | undefined): Promise<boolean> {
-  if (!personId) return false;
-  const [owner] = await ctx.db.select({ id: people.id }).from(people).where(and(eq(people.id, personId), eq(people.isOwner, true)));
-  return Boolean(owner);
-}
+/* Whether the person is the CEO or the CEO delegate now, whose words count as the CEO's. */
+const actsForCeo = async (ctx: Ctx, personId: string | null | undefined): Promise<boolean> => Boolean(personId && (await actingCeo(ctx.db, personId)));
 
 /* Stores the turn and, when it carries a person's message, the message under the same job. */
 export async function insertTurn(ctx: Ctx, t: Turn): Promise<string> {
@@ -263,7 +258,7 @@ export async function insertTurn(ctx: Ctx, t: Turn): Promise<string> {
       retryOf: t.retryOf ?? null,
       continueOf: t.continueOf ?? null,
       notBefore: t.notBefore ?? null,
-      answersCeo: t.answersCeo === true || (await isCeo(ctx, t.message?.personId)),
+      answersCeo: t.answersCeo === true || (await actsForCeo(ctx, t.message?.personId)),
       /* Until its message is kept, a turn sent at once answers nobody. */
       decisionInputPending: !!t.repeated || shownOf(t) !== null,
     })
@@ -292,7 +287,7 @@ async function showMessage(ctx: Ctx, t: Turn, jobId: string, kept: WithEvent): P
 }
 
 /* Stores the turn, then sends it if he is free. A message for an agent at work goes into the turn it runs instead, and a
-   turn that took the CEO's message answers the CEO from then on. */
+   turn that took a message of the CEO or the CEO delegate answers the CEO from then on. */
 export async function enqueueTurn(ctx: Ctx, t: Turn): Promise<string> {
   const jobId = await withInputLock(ctx, t.agentId, () => insertOrDeliverTurn(ctx, t));
   await pump(ctx, t.agentId);
@@ -304,7 +299,7 @@ export async function insertOrDeliverTurn(ctx: Ctx, t: Turn, required = false): 
   const message = t.repeated ? undefined : t.message;
   const into = message
     ? await deliverLockedInput(ctx, t.agentId, t.prompt, { source: { personId: message.personId, data: message }, required }, async (jobId, kept) => {
-        if (await isCeo(ctx, message.personId)) await ctx.db.update(jobs).set({ answersCeo: true }).where(eq(jobs.id, jobId));
+        if (await actsForCeo(ctx, message.personId)) await ctx.db.update(jobs).set({ answersCeo: true }).where(eq(jobs.id, jobId));
         await showMessage(ctx, t, jobId, kept);
       })
     : null;
@@ -354,7 +349,7 @@ export async function openTypedTurn(ctx: Ctx, node: NodeIdentity, agentId: strin
         prompt: text,
         timeoutMs: TURN_TIMEOUT_MS,
         createdBy: repeated ? repeated.createdBy : personId,
-        answersCeo: repeated ? repeated.answersCeo : await isCeo(ctx, personId),
+        answersCeo: repeated ? repeated.answersCeo : await actsForCeo(ctx, personId),
         toolTokenHash: hashToken(token),
         instructionsHash: last?.hash ?? null,
       })

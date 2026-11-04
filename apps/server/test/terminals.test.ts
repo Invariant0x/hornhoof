@@ -55,6 +55,120 @@ async function lent() {
   return { ...at, zed, zedId: z!.id };
 }
 
+/* Marks the person the CEO delegate, as the CEO does on the People screen. */
+const delegate = (app: FastifyInstance, ceo: string, personId: string) => app.inject({ method: 'PUT', url: `/api/people/${personId}/ceo-delegate`, payload: { isCeoDelegate: true }, ...as(ceo) });
+const say = (app: FastifyInstance, token: string, agent: string, text: string) => app.inject({ method: 'POST', url: `/api/agents/${agent}/messages`, payload: { text }, ...as(token) });
+const jobOf = async (app: FastifyInstance, id: string) => (await app.ctx.db.select({ createdBy: jobs.createdBy, answersCeo: jobs.answersCeo }).from(jobs).where(eq(jobs.id, id)))[0];
+
+/* The orchestrator runs on Zed's plan, and Lisa is the CEO delegate: she watches its terminal and writes through Hornhoof. */
+async function withDelegate() {
+  const at = await lent();
+  const lisa = await invitePerson(at.app, at.ceo, { name: 'Lisa', email: 'lisa@example.com', access: { whole: true } });
+  const [l] = await at.db.select().from(people).where(eq(people.name, 'Lisa'));
+  expect((await delegate(at.app, at.ceo, l!.id)).statusCode).toBe(200);
+  return { ...at, lisa, lisaId: l!.id };
+}
+
+/* Bruno works in Development on the plan the orchestrator runs on, which is not Maria's, and Sam in Sales. */
+async function withEmployees() {
+  const at = await lent();
+  const [orchestrator] = await at.db.select().from(agents);
+  const place = (name: string, roleCode: string) => at.db.insert(departments).values({ companyId: orchestrator!.companyId, name, roleCode }).returning();
+  const [dev] = await place('Development', 'DEV');
+  const [sales] = await place('Sales', 'SAL');
+  const hire = (name: string, departmentId: string) => at.db.insert(agents).values({ companyId: orchestrator!.companyId, kind: 'worker', name, model: 'sonnet', departmentId, subscriptionId: orchestrator!.subscriptionId }).returning();
+  const [bruno] = await hire('Bruno', dev!.id);
+  const [sam] = await hire('Sam', sales!.id);
+  const maria = await invitePerson(at.app, at.ceo, { name: 'Maria', email: 'maria@example.com', access: { departments: [dev!.id] } });
+  const [m] = await at.db.select().from(people).where(eq(people.name, 'Maria'));
+  return { ...at, bruno: bruno!, sam: sam!, maria, mariaId: m!.id };
+}
+
+describe("writing to an agent whose terminal the person only watches", () => {
+  it('opens the turn in the name of the CEO delegate, as answering the CEO, though the delegate cannot type', async () => {
+    const { app, url, builtin, lisa, lisaId } = await withDelegate();
+    const screen = await watch(url, lisa);
+    const open = await next(builtin, 'term.open');
+    expect(open.write).toBe(false);
+    await until(() => screen.frames.length > 0);
+    expect(screen.frames[0]).toEqual({ type: 'ready', write: false });
+    expect(await state(app, lisa)).toMatchObject({ terminal: true, ready: true });
+
+    const said = await say(app, lisa, 'orchestrator', 'Please check the release');
+    expect(said.statusCode).toBe(202);
+    const run = await next(builtin, 'job.run');
+    expect(run.prompt).toContain('From Lisa');
+    expect(run.prompt).toContain('Please check the release');
+    expect(await jobOf(app, said.json().jobId)).toEqual({ createdBy: lisaId, answersCeo: true });
+    const message = (await events(app, lisa)).find((e: { kind: string; jobId: string | null }) => e.kind === 'message' && e.jobId === said.json().jobId);
+    expect(message).toMatchObject({ data: { text: 'Please check the release' }, person: { name: 'Lisa' } });
+  });
+
+  it('marks a running turn as answering the CEO once the delegate writes into it', async () => {
+    const { app, builtin, zed, lisa } = await withDelegate();
+    const first = await say(app, zed, 'orchestrator', 'Start the work');
+    const jobId = first.json().jobId as string;
+    await next(builtin, 'job.run');
+    expect(await jobOf(app, jobId)).toMatchObject({ answersCeo: false });
+    const delivered = say(app, lisa, 'orchestrator', 'And check the release');
+    const words = await next(builtin, 'agent.say');
+    builtin.send({ type: 'agent.said', ref: words.ref, ok: true });
+    expect((await delivered).json().jobId).toBe(jobId);
+    expect(await jobOf(app, jobId)).toMatchObject({ answersCeo: true });
+  });
+
+  it('opens the turn the CEO delegate types into the terminal of their own plan as answering the CEO', async () => {
+    const { app, url, builtin, ceo, orchestratorId, zed, zedId } = await lent();
+    await delegate(app, ceo, zedId);
+    const screen = await watch(url, zed);
+    await next(builtin, 'term.open');
+    screen.ws.send(JSON.stringify({ type: 'input', data: 'what do we sell\r' }));
+    expect(await next(builtin, 'term.input')).toMatchObject({ data: 'what do we sell\r' });
+    builtin.send({ type: 'turn.open', agentKey: orchestratorId, text: 'what do we sell', ref: 'r-1' });
+    const opened = await next(builtin, 'turn.opened');
+    expect(await jobOf(app, opened.jobId!)).toEqual({ createdBy: zedId, answersCeo: true });
+  });
+
+  it('opens the turn in the name of a person with the employee\'s department, without answering the CEO', async () => {
+    const { app, url, builtin, bruno, maria, mariaId } = await withEmployees();
+    const screen = await watch(url, maria, bruno.id);
+    expect((await next(builtin, 'term.open')).write).toBe(false);
+    await until(() => screen.frames.length > 0);
+    expect(screen.frames[0]).toEqual({ type: 'ready', write: false });
+    const said = await say(app, maria, bruno.id, 'Please check the cart');
+    expect(said.statusCode).toBe(202);
+    const run = await next(builtin, 'job.run');
+    expect(run.prompt).toContain('From Maria to Bruno');
+    expect(await jobOf(app, said.json().jobId)).toEqual({ createdBy: mariaId, answersCeo: false });
+  });
+
+  it('turns away someone without the right to write, on every door of the window, and opens no turn', async () => {
+    const { app, url, db, sam, maria } = await withEmployees();
+    const turnsBefore = (await db.select().from(jobs)).length;
+    for (const [agent, reason] of [[sam.id, 'not_your_department'], ['orchestrator', 'company_scope_only']] as const) {
+      for (const res of [await say(app, maria, agent, 'Hi'), await app.inject({ url: `/api/agents/${agent}/events`, ...as(maria) }), await app.inject({ url: `/api/agents/${agent}`, ...as(maria) })]) {
+        expect(res.statusCode).toBe(403);
+        expect(res.json().error.reason).toBe(reason);
+      }
+      await expect(watch(url, maria, agent)).rejects.toThrow('HTTP 403');
+    }
+    expect(await db.select().from(jobs)).toHaveLength(turnsBefore);
+  });
+
+  it("still takes keys from the subscription's owner alone", async () => {
+    const { url, builtin, zed, lisa } = await withDelegate();
+    const watching = await watch(url, lisa);
+    const watcher = await next(builtin, 'term.open');
+    expect(watcher.write).toBe(false);
+    const typing = await watch(url, zed);
+    const owner = await next(builtin, 'term.open');
+    expect(owner.write).toBe(true);
+    watching.ws.send(JSON.stringify({ type: 'input', data: 'from the delegate\r' }));
+    typing.ws.send(JSON.stringify({ type: 'input', data: 'from the owner\r' }));
+    expect(await next(builtin, 'term.input')).toEqual({ type: 'term.input', termId: owner.termId, data: 'from the owner\r' });
+  });
+});
+
 describe("an agent's live terminal", () => {
   it('shows the screen from the node and passes on what the person types and the size of their window', async () => {
     const { url, ceo, builtin, orchestratorId } = await live();
