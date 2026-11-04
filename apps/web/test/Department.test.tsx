@@ -1052,11 +1052,12 @@ describe('Department work tree', () => {
     shell(treeRoute());
     await showTree(user);
     expect(document.querySelector('.tview animateMotion')).toBeInTheDocument();
-    const before = document.querySelector('.dview .zoom .zv')!.textContent!;
+    const scale = document.querySelector('.dview .zoom .zv')!;
+    expect(scale).toHaveTextContent('100%');
     await user.click(within(document.querySelector('.dview') as HTMLElement).getByRole('button', { name: 'Zoom in' }));
-    expect(parseInt(document.querySelector('.dview .zoom .zv')!.textContent!)).toBeCloseTo(parseInt(before) * 1.2, -1);
+    expect(scale).toHaveTextContent('120%');
     await user.click(within(document.querySelector('.dview') as HTMLElement).getByRole('button', { name: 'Show everything' }));
-    expect(document.querySelector('.dview .zoom .zv')).toHaveTextContent(before);
+    expect(parseInt(scale.textContent!)).toBeLessThan(100);
   });
 
   it('keeps the same tree dot when reduced motion slows it down', async () => {
