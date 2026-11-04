@@ -1,5 +1,18 @@
 #!/usr/bin/env bash
 . "$STUB_SRC/_log.sh"
+# The helper of updater.sh --take-over. Without the socket, the server's folder at its own path and the control folder of
+# the project .env names, it finds no update and exits 0, as the real one does. STUB_HELPER=replaces: with them, compose
+# replaces the updater a moment later, which kills the installer running under it.
+take_over_helper() {
+  [ "${STUB_HELPER:-}" = replaces ] || return 0
+  for word in "$@"; do case "$word" in HORNHOOF_SERVER_DIR=*) dir=${word#*=} ;; esac; done
+  project=$(grep '^COMPOSE_PROJECT_NAME=' "${dir:-}/.env" 2> /dev/null | cut -d= -f2-)
+  case " $* " in *' -v /var/run/docker.sock:/var/run/docker.sock '*) ;; *) return 0 ;; esac
+  case " $* " in *" -v ${dir:-}:${dir:-} "*) ;; *) return 0 ;; esac
+  case " $* " in *" -v ${project}_control:/control "*) ;; *) return 0 ;; esac
+  printf 'helper replaced the updater\n' >> "$STUB_LOG"
+  (sleep 1; kill -9 "$PPID") > /dev/null 2>&1 &
+}
 # The list of ports and its lock live here, so several installs of one test can share them.
 PORTS=${STUB_PORTS_DIR:-$STUB_STATE}
 works() {
@@ -111,7 +124,8 @@ case "$1" in
         exit 0 ;;
     esac
     WORD=set-key; if has "$@"; then IFS= read -r line; printf 'stdin %s\n' "$line" >> "$STUB_LOG"; fi
-    WORD=-d; if has "$@"; then [ "${STUB_RUN:-ok}" = fail ] && { echo "docker: Error response from daemon: failed to create task" >&2; exit 1; }; echo "0123456789ab"; fi ;;
+    WORD=-d; if has "$@"; then [ "${STUB_RUN:-ok}" = fail ] && { echo "docker: Error response from daemon: failed to create task" >&2; exit 1; }; echo "0123456789ab"; fi
+    WORD=--take-over; if has "$@"; then take_over_helper "$@"; fi ;;
   exec)
     WORD=prepare-stop; if has "$@"; then [ "${STUB_STOP_INTENT:-}" = unsupported ] && exit 1; exit 0; fi
     # STUB_NODE_SERVERS words are "name=server", the server a node's own settings name.

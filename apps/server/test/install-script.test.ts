@@ -921,6 +921,45 @@ describe('install.sh', () => {
     expect(r.calls.some(c => COMPOSE_STEP.test(c))).toBe(false);
   });
 
+  /* updater.sh --take-over without the control folder and the server folder finds no update and exits 0, which the
+     installer cannot see but as the update not being taken over. An older updater takes a 0 from this script for a
+     finished install, and removes what the new compose file does not name while the old app runs. */
+  it('fails loudly when the helper exits at once and takes nothing over', () => {
+    const started = Date.now();
+    const r = fromUpdater({ HORNHOOF_UPDATER_REF: UPDATER_REF, HORNHOOF_HANDOVER_WAIT: '2' });
+    /* It waits it out: going back sooner would race the helper for the updater's place. */
+    expect(Date.now() - started).toBeGreaterThanOrEqual(2000);
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('The updater of this build did not take over, so nothing changed.');
+    expect(r.calls.some(c => COMPOSE_STEP.test(c))).toBe(false);
+  });
+
+  it('gives the helper its two folders, and waits until it replaces the updater this runs under', () => {
+    const dotEnv = 'HORNHOOF_SECRET=s\nNODE_KEY=k\nCOMPOSE_PROJECT_NAME=hornhoof-acme\n';
+    const r = fromUpdater({ HORNHOOF_UPDATER_REF: UPDATER_REF, HORNHOOF_HANDOVER_WAIT: '3', STUB_HELPER: 'replaces' }, dotEnv);
+    expect(r.calls).toContain('helper replaced the updater');
+    /* Compose killed it where it waited: it neither went on nor said the helper failed. */
+    expect(r.code).toBeNull();
+    expect(r.out).not.toContain('did not take over');
+    expect(r.calls.some(c => COMPOSE_STEP.test(c))).toBe(false);
+  });
+
+  it('takes an updater that does not say a revision of 2 or more for an older one', () => {
+    for (const rev of ['1', '', 'x']) {
+      const r = fromUpdater({ HORNHOOF_UPDATER_REV: rev, HORNHOOF_UPDATER_REF: UPDATER_REF, HORNHOOF_HANDOVER_WAIT: '0' });
+      expect(r.code).toBe(1);
+      expect(r.calls.some(c => c.endsWith(`${UPDATER_REF} --take-over`))).toBe(true);
+      expect(r.calls.some(c => COMPOSE_STEP.test(c))).toBe(false);
+    }
+  });
+
+  it('starts no helper for an updater that names no server folder', () => {
+    const r = fromUpdater({ HORNHOOF_SERVER_DIR: '', HORNHOOF_UPDATER_REF: UPDATER_REF });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('to update.');
+    expect(r.calls.some(c => c.includes('--take-over'))).toBe(false);
+  });
+
   it('goes on without a handover under an updater of revision 2', () => {
     const r = fromUpdater({ HORNHOOF_UPDATER_REV: '2', HORNHOOF_UPDATER_REF: UPDATER_REF, HORNHOOF_PULLED: '1' });
     expect(r.code).toBe(0);

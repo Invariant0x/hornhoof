@@ -999,9 +999,14 @@ start_server_services() {
   fi
 }
 
+# Only a revision it can read as 2 or more goes on, so a value it cannot read ends in the handover, which is safe.
+older_updater_runs_this() { [ -n "$FROM_UPDATER" ] && ! [ "${HORNHOOF_UPDATER_REV:-1}" -ge 2 ] 2> /dev/null; }
+
 # An older updater cannot run this build's move, so this build's updater takes the update over: the helper starts it,
 # which replaces the updater this script runs under, and with it this script. Until then only .env and compose.yaml
-# have changed, and the old installer writes both back on the way back.
+# have changed, and the old installer writes both back on the way back. This never returns: an older updater takes a 0
+# for a finished install, and removes what the new compose file does not name while the old app runs. A helper that
+# lacks its two folders finds no update and exits 0, which shows only as this wait running out, and then it goes back.
 hand_over_update() {
   say "This build's updater takes over the update first."
   "${DOCKER[@]}" run -d --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$SERVER_DIR:$SERVER_DIR" -v "${1}_control:/control" -e "HORNHOOF_SERVER_DIR=$SERVER_DIR" "$UPDATER_REF" --take-over > /dev/null ||
@@ -1089,7 +1094,7 @@ server_mode() {
     compose_from_image
   fi
 
-  if [ -n "$FROM_UPDATER" ] && [ "${HORNHOOF_UPDATER_REV:-1}" -lt 2 ]; then hand_over_update "$project"; fi
+  if older_updater_runs_this; then hand_over_update "$project"; fi
 
   # The updater downloads them before it saves the database; an updater from before leaves it to this.
   if [ -z "$PULLED" ]; then
