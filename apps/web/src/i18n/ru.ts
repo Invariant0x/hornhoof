@@ -122,8 +122,8 @@ export const ru: Messages = {
   about: {
     menu: 'О программе', title: 'О программе Hornhoof', close: 'Закрыть',
     description: 'Компания, где люди и агенты работают вместе.',
-    version: 'Версия', developer: 'Разработчик', license: 'Лицензия', code: 'Исходный код', contact: 'Связь', website: 'Сайт',
-    issues: 'Сообщить об ошибке или предложить идею', copyright: 'Copyright (c) 2026 Ivan Korol',
+    version: 'Версия', license: 'Лицензия', code: 'Исходный код', contact: 'Связь', website: 'Сайт',
+    issues: 'Сообщить об ошибке или предложить идею', author: 'Автор — Ivan Korol, © 2026',
     versionFailed: 'Не удалось загрузить версию сервера. Закройте окно и откройте снова, чтобы повторить.',
   },
   profile: {
