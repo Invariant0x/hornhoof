@@ -11,7 +11,7 @@ export const TAKEN_TYPES = TAKEN.join(',');
 /* How far a big picture is scaled down, in turn, before it is turned away. */
 const SCALES = [1, 0.75, 0.5, 0.35];
 const JPEG_QUALITY = 0.85;
-/* Panels keep their own fields; they stand in the window's box though they show beside it. */
+/* Panels stand in the window's box though they show beside it, with fields of their own. */
 const PANELS = '.side-panels, .agent-task-slot';
 const FIELDS = 'input, textarea, select, [contenteditable="true"]';
 const OWN_FIELDS = '.t-in textarea, .xterm-helper-textarea';
@@ -23,13 +23,9 @@ const refusal = (reason: Refusal) => new ApiFailure(400, 'validation', '', reaso
 const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
 const inPanel = (target: EventTarget | null) => target instanceof Element && Boolean(target.closest(PANELS));
 
-/* A paste with nothing focused has the page as its target. */
-function pasteIsForLine(target: EventTarget | null, box: HTMLElement): boolean {
-  if (isHidden(box)) return false;
-  if (target === document.body) return true;
-  if (!(target instanceof Element) || !box.contains(target) || inPanel(target)) return false;
-  return !target.closest(FIELDS) || target.matches(OWN_FIELDS);
-}
+/* Nothing else on the page takes a picture, so one pasted with the window showing is for it, wherever the focus is, unless
+   it goes into a field of its own. */
+const pasteIsForLine = (target: EventTarget | null, box: HTMLElement) => !isHidden(box) && target instanceof Element && (!target.closest(FIELDS) || target.matches(OWN_FIELDS));
 
 /* The file as JPEG at the first scale that fits, or nothing when none does or it is no picture a browser can read. */
 async function shrunk(file: File): Promise<Blob | null> {
@@ -103,10 +99,7 @@ export function useDraftPictures(path: string) {
 
   const drop = useCallback(
     (gone: Draft[]) => {
-      for (const d of gone) {
-        URL.revokeObjectURL(d.preview);
-        ids.current.delete(d.key);
-      }
+      for (const d of gone) URL.revokeObjectURL(d.preview);
       change(current.current.filter(d => !gone.includes(d)));
     },
     [change],
@@ -295,13 +288,9 @@ function SentPicture({ id, name }: { id: string; name: string }) {
   );
 }
 
-type Sent = { id: string; name: string };
-const isSent = (p: unknown): p is Sent => typeof (p as Sent | null)?.id === 'string' && typeof (p as Sent).name === 'string';
-
 /* The pictures of a person's message, whether its text is folded or not; each opens large. */
 export function SentPictures({ data }: { data: unknown }) {
-  const said = (data as { pictures?: unknown } | null)?.pictures;
-  const pictures = Array.isArray(said) ? said.filter(isSent) : [];
+  const pictures = (data as { pictures?: { id: string; name: string }[] } | null)?.pictures ?? [];
   if (!pictures.length) return null;
   return (
     <div className="t-pics">

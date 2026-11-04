@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
@@ -46,6 +46,8 @@ function open(routes: Record<string, unknown> = {}, state: object = READY, event
 }
 
 const windowBox = () => screen.getByRole('complementary');
+/* A file takes a moment to be looked at before it shows, so that nothing shows yet proves little. */
+const settled = () => act(() => new Promise(done => setTimeout(done)));
 const line = () => screen.findByRole('textbox', { name: LINE });
 const preview = (name = 'screen.png') => screen.findByRole('img', { name });
 const remove = (name = 'screen.png') => screen.findByRole('button', { name: `Remove ${name}` });
@@ -70,6 +72,18 @@ describe('a picture dragged into the window', () => {
     expect(screen.queryByText(en.window.dropPictures)).not.toBeInTheDocument();
   });
 
+  it('counts its way in and out afresh after a drop', async () => {
+    open();
+    await line();
+    fireEvent.dragEnter(windowBox(), dragged());
+    fireEvent.drop(windowBox(), dragged(png()));
+    await preview();
+    fireEvent.dragEnter(windowBox(), dragged());
+    expect(screen.getByText(en.window.dropPictures)).toBeInTheDocument();
+    fireEvent.dragLeave(windowBox(), dragged());
+    expect(screen.queryByText(en.window.dropPictures)).not.toBeInTheDocument();
+  });
+
   it('says nothing for a selection of text being dragged, and leaves it to the page', async () => {
     open();
     await line();
@@ -85,6 +99,7 @@ describe('a picture dragged into the window', () => {
     const over = dragged();
     expect(fireEvent.dragOver(windowBox(), over)).toBe(false);
     expect(over.dataTransfer.dropEffect).toBe('copy');
+    fireEvent.dragEnter(windowBox(), dragged());
     fireEvent.drop(windowBox(), dragged(png()));
     expect(await preview()).toHaveAttribute('src', 'blob:preview-1');
     expect(screen.queryByText(en.window.dropPictures)).not.toBeInTheDocument();
@@ -103,6 +118,7 @@ describe('a picture dragged into the window', () => {
     const user = userEvent.setup();
     const { messages } = open({ [`POST ${AGENT}/pictures?name=screen.png`]: uploaded('pic1') });
     await line();
+    expect(screen.queryByRole('button', { name: en.window.sendPictures })).not.toBeInTheDocument();
     fireEvent.drop(windowBox(), dragged(png()));
     await preview();
     await user.click(screen.getByRole('button', { name: en.window.sendPictures }));
@@ -236,16 +252,22 @@ describe('a picture pasted into the window', () => {
     fireEvent.dragLeave(comment, dragged());
     expect(screen.getByText(en.window.dropPictures)).toBeInTheDocument();
     fireEvent.drop(comment, dragged(png()));
+    await settled();
     expect(screen.queryByRole('img', { name: 'screen.png' })).not.toBeInTheDocument();
   });
 
-  it('is not taken from a field outside the window', async () => {
+  it('is not taken from a field outside the window, but is from a button there', async () => {
     open();
     await line();
     const search = document.body.appendChild(document.createElement('input'));
     expect(fireEvent.paste(search, copied([png()]))).toBe(true);
     search.remove();
+    await settled();
     expect(screen.queryByRole('img', { name: 'screen.png' })).not.toBeInTheDocument();
+    const button = document.body.appendChild(document.createElement('button'));
+    expect(fireEvent.paste(button, copied([png()]))).toBe(false);
+    button.remove();
+    expect(await preview()).toBeInTheDocument();
   });
 
   it('is not taken by a window that is minimized', async () => {
@@ -283,6 +305,31 @@ describe('what the window turns away', () => {
     fireEvent.drop(windowBox(), dragged(new File(['words'], 'notes.txt', { type: 'text/plain' })));
     await refusedAlert(en.errors.picture_invalid);
     expect(URL.createObjectURL).not.toHaveBeenCalled();
+  });
+
+  it('says why to the owner of the terminal too, who has no line', async () => {
+    open({}, TERMINAL);
+    await screen.findByTestId('live-terminal');
+    fireEvent.drop(windowBox(), dragged(new File(['<svg/>'], 'logo.svg', { type: 'image/svg+xml' })));
+    await refusedAlert(en.errors.picture_invalid);
+    expect(screen.queryByRole('textbox', { name: LINE })).not.toBeInTheDocument();
+  });
+
+  it('stops saying why once the picture is taken back or another comes', async () => {
+    const user = userEvent.setup();
+    open();
+    await line();
+    fireEvent.drop(windowBox(), dragged(png()));
+    await preview();
+    fireEvent.drop(windowBox(), dragged(new File(['<svg/>'], 'logo.svg', { type: 'image/svg+xml' })));
+    await refusedAlert(en.errors.picture_invalid);
+    await user.click(await remove());
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    fireEvent.drop(windowBox(), dragged(new File(['<svg/>'], 'logo.svg', { type: 'image/svg+xml' })));
+    await refusedAlert(en.errors.picture_invalid);
+    fireEvent.drop(windowBox(), dragged(png()));
+    await preview();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('refuses a renamed file as soon as it turns out to be no picture', async () => {
@@ -347,12 +394,22 @@ describe('what the window turns away', () => {
     fireEvent.drop(windowBox(), dragged(png()));
     await user.type(await line(), 'Look{Enter}');
     await refusedAlert(en.errors.not_your_department);
+    /* Right above the line, however long the log above it is. */
+    expect((await line()).closest('form')!.previousElementSibling).toBe(screen.getByRole('alert'));
     expect(await preview()).toBeInTheDocument();
     refuse = false;
     await user.type(await line(), '{Enter}');
     await waitFor(() => expect(messages()).toHaveLength(2));
     expect(messages()[1]).toEqual({ text: 'Look', pictures: ['pic1'] });
     expect(uploads()).toHaveLength(1);
+  });
+
+  it('leaves the failure of a message without pictures where it was, under the log', async () => {
+    const user = userEvent.setup();
+    open({ [`POST ${AGENT}/messages`]: [403, { error: { code: 'forbidden', message: 'No.', reason: 'not_your_department' } }] });
+    await user.type(await line(), 'Words{Enter}');
+    await refusedAlert(en.errors.not_your_department);
+    expect(screen.getByRole('alert').closest('.t-log')).not.toBeNull();
   });
 
   it('does not send the same picture twice while it is on its way', async () => {
@@ -382,7 +439,9 @@ describe('what the window turns away', () => {
     expect(over.dataTransfer.dropEffect).toBe('none');
     expect(fireEvent.drop(windowBox(), dragged(png()))).toBe(false);
     expect(fireEvent.paste(await line(), copied([png()]))).toBe(true);
+    await settled();
     expect(screen.queryByRole('img', { name: 'screen.png' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText(en.window.addPicture)).toBeDisabled();
   });
 
   it('keeps a picture that misses the window from replacing the page', async () => {
@@ -439,6 +498,7 @@ describe('a picture in the conversation', () => {
     open({}, READY, [{ ...said, data: { text: 'Look at this' } }]);
     await screen.findByRole('button', { name: /Message from/ });
     expect(screen.queryByRole('link')).not.toBeInTheDocument();
+    expect(document.querySelector('.t-pics')).toBeNull();
   });
 });
 
