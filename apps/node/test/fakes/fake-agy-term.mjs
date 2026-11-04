@@ -137,6 +137,6 @@ class AgyTerminal {
 if (!process.argv.includes('--dangerously-skip-permissions')) await import('./fake-agy-login.mjs');
 else {
   /* agy asks for its first-run setup before anything else on a machine where nobody passed it. */
-  if (process.env.FAKE_AGY_SETUP) await firstRun();
+  await firstRun();
   new AgyTerminal();
 }

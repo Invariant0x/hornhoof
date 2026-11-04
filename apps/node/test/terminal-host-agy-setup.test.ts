@@ -2,15 +2,16 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { SIGNED_OUT } from '../src/providers/antigravity.js';
+import { SETUP_PASSED, SIGNED_OUT } from '../src/providers/antigravity.js';
 import { agyProgram } from '../src/terminal/programs.js';
 import { hasTmux, home, host, job, setUp, tmux, until } from './terminal-host-helpers.js';
 
 const FAKE = fileURLToPath(new URL('./fakes/fake-agy-term.mjs', import.meta.url));
 const log = join(home, 'agy-setup.log');
-/* agy as on a machine where nobody passed its first-run setup. */
+/* agy as on a machine where nobody passed its first-run setup, which it shows until its settings hold what the node reads
+   as passed. */
 const agyJob = (key: string) => ({
-  ...job(key, 'hello', { env: { FAKE_LOG: log, FAKE_AGY_SETUP: '1' } }), program: agyProgram, bin: FAKE, home: join(home, 'agy', key), signedOut: SIGNED_OUT,
+  ...job(key, 'hello', { env: { FAKE_LOG: log, FAKE_AGY_SETUP: JSON.stringify(SETUP_PASSED) } }), program: agyProgram, bin: FAKE, home: join(home, 'agy', key), signedOut: SIGNED_OUT,
 });
 const keys = () => readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line)).filter(r => r.setup);
 
@@ -35,7 +36,7 @@ describe.skipIf(!hasTmux)("Antigravity's first-run setup", () => {
     for (const key of ['Down', 'Down', 'Enter']) await tmux.keys('a-s1', key);
     const settings = join(first.home, '.gemini', 'antigravity-cli', 'settings.json');
     await until(() => existsSync(settings));
-    expect(JSON.parse(readFileSync(settings, 'utf8'))).toEqual({ consumerOnboardingComplete: true });
+    expect(JSON.parse(readFileSync(settings, 'utf8'))).toEqual(SETUP_PASSED);
 
     // The next turn starts agy anew, which goes straight to its prompt.
     expect(await host.run(agyJob('s1'))).toMatchObject({ ok: true, result: 'FINISHED', error: null });

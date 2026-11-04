@@ -2,7 +2,8 @@
 // Plays Antigravity CLI 1.4.12 for a person who is not signed in, for the sign-in tests: the screens recorded from agy in
 // a container. Enter picks Google OAuth and shows Google's link; the code "good-code" signs in, any other gets Google's
 // answer to a wrong code; what agy shows once signed in was not recorded, so the screen is left empty. `agy models` answers
-// as agy does, signed in or not. Started signed in, it shows its first-run setup where nobody passed it, then its prompt.
+// as agy does, signed in or not. Started signed in, it shows its first-run setup where the test turned it on and nobody
+// passed it, then its prompt.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { firstRun } from './fake-agy-setup.mjs';

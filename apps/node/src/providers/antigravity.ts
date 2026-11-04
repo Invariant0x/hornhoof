@@ -235,13 +235,17 @@ async function signInOnScreen(io: LoginIo, { bin, home, env, user, recordingsDir
 /* agy keeps its settings, its first-run setup among them, in this file of its home, which is on the node's volume. */
 export const agySettings = (home: string): string => join(home, '.gemini', 'antigravity-cli', 'settings.json');
 
-/* Whether a person passed agy's first-run setup here. agy 1.4.12 shows it until its settings say
-   consumerOnboardingComplete, which it writes once a person accepts its terms. The key skips the terms, so the node only
-   reads it, and not through a link an agent could have put there. */
+/* What agy's settings hold once a person passed its first-run setup there. agy 1.4.12 shows the setup until they hold it,
+   and skips all of it, its terms too, when they do, so the node only reads it. This is the one place that says so: the
+   node, the tests and their fake agy all take it from here. */
+export const SETUP_PASSED: Readonly<Record<string, string | number | boolean>> = { consumerOnboardingComplete: true };
+
+/* Whether a person passed agy's first-run setup here: its settings hold that mark, part for part. They are not read
+   through a link an agent could have put there. */
 function setupPassed(home: string): boolean {
   try {
     const settings: unknown = JSON.parse(readPrivate(agySettings(home)) ?? '');
-    return isRecord(settings) && settings.consumerOnboardingComplete === true;
+    return isRecord(settings) && Object.entries(SETUP_PASSED).every(([key, value]) => settings[key] === value);
   } catch {
     return false;
   }

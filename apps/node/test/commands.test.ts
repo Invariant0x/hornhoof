@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { command } from '../src/main.js';
+import { SETUP_PASSED } from '../src/providers/antigravity.js';
 import { markRemoved, readState } from '../src/state.js';
 
 const FAKES = fileURLToPath(new URL('./fakes/', import.meta.url));
@@ -221,7 +222,7 @@ describe("a plan whose program asks for a first setup on its machine", () => {
   it('says needs_setup until agy saved its terms as accepted', async () => {
     expect((await run(['status'])).out).toBe('needs_setup\n');
     mkdirSync(dirname(settings()), { recursive: true });
-    writeFileSync(settings(), '{"consumerOnboardingComplete":true}');
+    writeFileSync(settings(), JSON.stringify(SETUP_PASSED));
     expect((await run(['status'])).out).toBe('ready\n');
   });
 
@@ -235,7 +236,7 @@ describe("a plan whose program asks for a first setup on its machine", () => {
 
   it('is left out of the sign-in once passed', async () => {
     mkdirSync(dirname(settings()), { recursive: true });
-    writeFileSync(settings(), '{"consumerOnboardingComplete":true}');
+    writeFileSync(settings(), JSON.stringify(SETUP_PASSED));
     expect(await run(['login'])).toMatchObject({ code: 0, out: 'Logged in.\n' });
   });
 });
