@@ -130,6 +130,21 @@ describe('GET /api/people', () => {
     expect(res.body).not.toContain('scrypt');
     expect((await app.inject({ url: '/api/people' })).statusCode).toBe(401);
   });
+
+  it('lists only people from the session company', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    await invite(app, ceo, { name: 'Kate', email: 'kate@acme.com', title: 'Head of marketing', access: { whole: true } });
+    const [otherCompany] = await db.insert(companies).values({ name: 'Other', singleton: false }).returning();
+    await db.insert(people).values({ companyId: otherCompany!.id, name: 'Other person', email: 'other@example.test', title: 'Other title', status: 'active', scopeKind: 'company' });
+
+    const res = await app.inject({ url: '/api/people', ...as(ceo) });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().people.map((p: { name: string }) => p.name)).toEqual(['Ivan', 'Kate']);
+    expect(res.body).not.toContain('other@example.test');
+    expect(res.body).not.toContain('Other title');
+  });
 });
 
 describe('PATCH /api/people/:id', () => {
