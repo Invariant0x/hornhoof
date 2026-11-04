@@ -36,6 +36,8 @@ for (const lang of ['en', 'ru'] as const) {
           await route.fulfill({ json: { person } });
         });
         await page.goto('/');
+        await page.getByRole('button', { name: lang === 'en' ? 'People' : 'Люди' }).click();
+        await expect(page.getByText('Lisa', { exact: true })).toBeVisible();
         await page.getByRole('button', { name: lang === 'en' ? 'Account' : 'Аккаунт' }).click();
         await page.getByRole('button', { name: lang === 'en' ? 'Settings' : 'Настройки' }).click();
         const dialog = page.getByRole('dialog', { name: lang === 'en' ? 'Settings' : 'Настройки' });
@@ -45,7 +47,6 @@ for (const lang of ['en', 'ru'] as const) {
         await field.fill(lang === 'en' ? '  Lisa Ray  ' : '  Лиза Рей  ');
         await dialog.getByRole('button', { name: lang === 'en' ? 'Save' : 'Сохранить' }).click();
         await dialog.getByRole('button', { name: lang === 'en' ? 'Done' : 'Готово' }).click();
-        await page.getByRole('button', { name: lang === 'en' ? 'People' : 'Люди' }).click();
         await expect(page.getByText(lang === 'en' ? 'Lisa Ray' : 'Лиза Рей', { exact: true })).toBeVisible();
         await page.getByRole('button', { name: lang === 'en' ? 'Account' : 'Аккаунт' }).click();
         await expect(page.locator('.account-menu').getByText(lang === 'en' ? 'Lisa Ray' : 'Лиза Рей', { exact: true })).toBeVisible();
