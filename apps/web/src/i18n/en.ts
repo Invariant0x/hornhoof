@@ -93,6 +93,10 @@ export const en = {
     issues: 'Report a bug or suggest an idea', copyright: 'Copyright (c) 2026 Ivan Korol',
     versionFailed: 'The server version could not be loaded. Close this window and open it again to retry.',
   },
+  profile: {
+    title: 'Settings',
+    nameRequired: 'Enter your name.',
+  },
   settings: {
     menu: 'Share access',
     title: 'Share access',
@@ -718,6 +722,7 @@ export const en = {
     openTerminal: 'Open terminal',
     lastFailed: (at: string, kind: string) => `Last turn failed at ${at}: ${kind}`,
     lastFailedOn: (when: string, kind: string) => `Last turn failed on ${when}: ${kind}`,
+    noOutput: 'No output.',
     runsOn: 'Runs on',
     onMachine: (host: string) => `Works on the machine ${host}`,
     model: 'Model',
