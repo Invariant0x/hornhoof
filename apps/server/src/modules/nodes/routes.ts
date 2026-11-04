@@ -15,6 +15,7 @@ import { machineNodes, machineState, together } from '../testruns/load.js';
 import { pumpTests } from '../testruns/runs.js';
 import { createInstallCommand } from './command.js';
 import { nodeCommandRoutes } from './command-routes.js';
+import { connectionRoutes } from './connection-routes.js';
 import { disconnectMachines } from './disconnect.js';
 import { BUILTIN, nodeIdentity, type NodeHub } from './hub.js';
 import { nodeImageOfBuild } from './image.js';
@@ -168,6 +169,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   nodeCommandRoutes(app, ctx);
+  connectionRoutes(app, ctx);
 
   app.get('/api/machines', async req => {
     const me = await requirePerson(req, db);

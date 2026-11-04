@@ -2,8 +2,6 @@ import { expect, test, type Locator } from '@playwright/test';
 import { box } from './api';
 import { serveAgentWindow, type AgentFixture } from './agent-window-api';
 
-test.use({ reducedMotion: 'reduce' });
-
 async function activate(button: Locator) {
   await button.focus();
   await button.press('Enter');
@@ -87,7 +85,7 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
     }
     await window.focus();
     await page.keyboard.press('Escape');
-    expect(stops).toEqual(['POST']);
+    await expect.poll(() => stops).toEqual(['POST']);
     await fit.focus();
     await fit.press('Enter');
     const withWindow = await box(world);

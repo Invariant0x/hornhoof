@@ -89,6 +89,23 @@ const Limits = z.object({
 });
 export type Limits = z.infer<typeof Limits>;
 
+/* Nodes read plan limits every five minutes. Three missed readings make a snapshot stale. */
+const LIMITS_STALE_MS = 15 * 60_000;
+const blockingWindow = (w: Limits['windows'][number]) => w.utilization === null || w.utilization >= 1;
+const staleSnapshot = (updatedAt: string | Date | null, now: number) => {
+  const measuredAt = updatedAt instanceof Date ? updatedAt.getTime() : updatedAt ? Date.parse(updatedAt) : NaN;
+  return !Number.isFinite(measuredAt) || now - measuredAt > LIMITS_STALE_MS;
+};
+const rejectionOver = (limits: Limits, windows: Limits['windows']) => limits.status === 'rejected' && limits.windows.some(blockingWindow) && !windows.some(blockingWindow);
+
+/* The last snapshot as it applies now: expired windows are over, and a stale one says nothing current. */
+export function currentLimits(limits: Limits | null, updatedAt: string | Date | null, now = Date.now()): Limits | null {
+  if (!limits) return null;
+  if (staleSnapshot(updatedAt, now)) return { status: 'allowed', windows: [], complete: false };
+  const windows = limits.windows.filter(w => w.resetsAt === null || Date.parse(w.resetsAt) > now);
+  return { ...limits, status: rejectionOver(limits, windows) ? 'allowed' : limits.status, windows, ...(windows.length !== limits.windows.length ? { complete: false } : {}) };
+}
+
 /* How hard a model thinks, as its program names the level: low, high, max and the like. */
 const Effort = z.string().regex(/^[a-z]{1,16}$/);
 
@@ -348,6 +365,12 @@ export const NodeBuild = z.string().regex(/^[0-9a-f]{40}([0-9a-f]{24})?$/);
 export const ProgramExit = z.object({ code: z.number().int().nullable(), signal: z.string().max(40).nullable() });
 export type ProgramExit = z.infer<typeof ProgramExit>;
 const BrowserError = z.string().min(1).max(300);
+
+/* How the server saw a node's connection end: the node stopped answering its pings, the node closed it, it was cut with no
+   word from either side, the socket failed, a newer connection of the same node took its place, the server stopped, or the
+   node was taken off its machine in Hornhoof. */
+export const CONNECTION_ENDS = ['missed_pongs', 'node_closed', 'network', 'socket_error', 'replaced', 'server_stopped', 'disconnected'] as const;
+export type ConnectionEnd = (typeof CONNECTION_ENDS)[number];
 
 export const NODE_DISCONNECT_CAUSES = [
   'watchdog_timeout',

@@ -1,6 +1,6 @@
 import type { ExternalWait } from '@hornhoof/protocol/waits';
 import type { Notification } from '@hornhoof/protocol';
-import type { FailureKind, Limits, ModelOption, NodeLoad, ProgramInfo, ProviderId, TemplateKey } from '@hornhoof/protocol';
+import type { ConnectionEnd, FailureKind, Limits, ModelOption, NodeDisconnectCause, NodeLoad, NodeReconnect, ProgramInfo, ProviderId, TemplateKey } from '@hornhoof/protocol';
 import type { RoleEffort } from '@hornhoof/protocol/efforts';
 import type { ProgramRetry, TurnAlarm, TurnProgram, TurnRetry, WorkLine } from '@hornhoof/protocol/map';
 
@@ -65,6 +65,8 @@ export type SubView = {
   /* The machines the plan runs on, oldest first, with its state on each. */
   machines: { id: string; hostname: string; status: PlanStatus; online: boolean }[];
   limits: Limits | null;
+  /* When the last snapshot arrived. Undefined on an older server, null when an old row never recorded it. */
+  limitsUpdatedAt?: string | null;
   /* The share of each limit window, in percent, that task turns may use; null: the whole limit. */
   budget: number | null;
   isOrchestrator: boolean;
@@ -453,6 +455,29 @@ export type TurnView = {
 };
 
 export type Machine = { id: string; hostname: string };
+
+/* Why a machine dropped: as the server saw it, or as the machine did when the server saw only its new connection. */
+export type DropCause = ConnectionEnd | NodeDisconnectCause;
+
+/* One connection of a machine that broke; report: what the machine said of it when back, none from a node from before. */
+export type NodeDropView = {
+  nodeId: string;
+  subscriptionId: string | null;
+  at: string;
+  back: string | null;
+  offlineMs: number | null;
+  cause: ConnectionEnd;
+  closeCode: number | null;
+  closeReason: string | null;
+  error: string | null;
+  report: NodeReconnect | null;
+};
+
+/* The connections of a machine that broke together; back and offlineMs are none while one of them is away. */
+export type MachineDrop = { at: string; back: string | null; offlineMs: number | null; cause: DropCause; drops: NodeDropView[] };
+
+/* What GET /api/machines/:id/connections answers: the last day in short, and the latest drops, newest first. */
+export type ConnectionHistory = { summary: { drops: number; averageMs: number | null; cause: DropCause | null }; events: MachineDrop[] };
 
 export type MachineView = {
   id: string;

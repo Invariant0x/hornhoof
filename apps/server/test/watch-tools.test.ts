@@ -118,7 +118,7 @@ describe('tools a skill grants', () => {
   it('show until when a plan is at its limit, so the watchdog leaves its agents to wait', async () => {
     const { app, db, sub } = await company(['ops-task-watch']);
     const resetsAt = new Date(Date.now() + 3_600_000).toISOString();
-    await db.update(subscriptions).set({ limits: { status: 'rejected', windows: [{ name: 'five_hour', utilization: 1, resetsAt }] } }).where(eq(subscriptions.id, sub.id));
+    await db.update(subscriptions).set({ limits: { status: 'rejected', windows: [{ name: 'five_hour', utilization: 1, resetsAt }] }, limitsUpdatedAt: new Date() }).where(eq(subscriptions.id, sub.id));
     const all = JSON.parse((await call(await mcp(app, TOKEN), 'agents')).content[0]!.text) as { name: string; limitUntil: string | null }[];
     expect(all.find(a => a.name === 'Bruno')).toMatchObject({ limitUntil: resetsAt });
   });

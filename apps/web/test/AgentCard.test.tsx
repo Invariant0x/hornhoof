@@ -391,6 +391,29 @@ describe('AgentCard', () => {
     await vi.waitFor(() => expect(calls.find(c => c.method === 'PATCH')?.body).toEqual({ effort: null }));
   });
 
+  it.each([
+    ['en', 'Limits', 'Unknown, last data from 09:44 PM'],
+    ['ru', 'Лимиты', 'Неизвестно, последние данные от 21:44'],
+  ])('shows stale Antigravity limits as unknown in the agent card in %s', async (language, heading, words) => {
+    localStorage.setItem('hh-lang', language);
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date('2026-11-04T22:00:00.000Z'));
+    onTestFinished(() => { vi.useRealTimers(); localStorage.removeItem('hh-lang'); });
+    const antigravity = {
+      ...TEAM_KEY,
+      kind: 'personal' as const,
+      provider: 'antigravity' as const,
+      label: 'Antigravity',
+      status: 'ready' as const,
+      limits: { status: 'rejected' as const, windows: [{ name: 'five_hour', utilization: 1, resetsAt: '2026-11-05T02:19:23.000Z' }] },
+      limitsUpdatedAt: '2026-11-04T21:44:00.000Z',
+    };
+    open({ 'GET /api/agents/b1': [200, { ...CARD, subscription: antigravity, runsOn: [{ subscription: antigravity, models: [] }] }] });
+
+    expect(await screen.findByRole('group', { name: heading })).toHaveTextContent(words);
+    expect(screen.queryByText(language === 'en' ? 'Limit reached' : 'Лимит исчерпан')).not.toBeInTheDocument();
+  });
+
   it('moves the employee to another subscription', async () => {
     const user = userEvent.setup();
     const { calls } = open({ 'PATCH /api/agents/b1': [200, { ...CARD, model: '', subscription: CARD.runsOn[1]!.subscription }] });

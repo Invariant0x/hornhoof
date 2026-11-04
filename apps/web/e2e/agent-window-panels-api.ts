@@ -11,8 +11,8 @@ export type Who = 'orchestrator' | 'employee';
 type Rect = { x: number; y: number; width: number; height: number };
 
 const WORDS = {
-  en: { card: 'Card', notebook: 'Notebook', task: 'Task', close: 'Close', log: 'Log', terminal: 'Terminal', full: 'Full screen', size: 'Restore size', minimize: 'Minimize', restore: 'Restore', members: 'Members', notes: 'Notebook' },
-  ru: { card: 'Карточка', notebook: 'Блокнот', task: 'Задача', close: 'Закрыть', log: 'Журнал', terminal: 'Терминал', full: 'На весь экран', size: 'Обычный размер', minimize: 'Свернуть', restore: 'Развернуть', members: 'Сотрудники', notes: 'Блокнот' },
+  en: { card: 'Card', notebook: 'Notebook', task: 'Task', close: 'Close', log: 'Log', terminal: 'Terminal', full: 'Full screen', size: 'Restore size', minimize: 'Minimize', restore: 'Restore', members: 'Members', notes: 'Notebook', back: 'Back to terminal' },
+  ru: { card: 'Карточка', notebook: 'Блокнот', task: 'Задача', close: 'Закрыть', log: 'Журнал', terminal: 'Терминал', full: 'На весь экран', size: 'Обычный размер', minimize: 'Свернуть', restore: 'Развернуть', members: 'Сотрудники', notes: 'Блокнот', back: 'К терминалу' },
 };
 
 const NOTES: NoteView[] = [{ number: 1, text: 'Turns stay small.', by: { kind: 'orchestrator' }, updatedAt: '2026-11-04T00:00:00.000Z' }];
@@ -70,8 +70,12 @@ export async function openAgent(page: Page, settings: Settings, who: Who) {
     await expect(panel(name)).toBeVisible();
     return panel(name);
   };
-  return { window, errors, connections, stops, sent, words, names, toggle, panel, openPanel, terminal: window.locator('.t-term') };
+  const bar = window.locator(':scope > .t-bar');
+  return { window, errors, connections, stops, sent, words, names, bar, back: bar.getByRole('button', { name: words.back, exact: true }), toggle, panel, openPanel, terminal: window.locator('.t-term') };
 }
+
+/* Where each button of a window's bar stands. */
+export const barButtons = (bar: Locator) => bar.getByRole('button').evaluateAll(buttons => buttons.map(b => { const r = b.getBoundingClientRect(); return { name: b.getAttribute('aria-label') ?? b.textContent, x: r.x, y: r.y, width: r.width, height: r.height }; }));
 
 /* Each panel stands on the screen and clear of the others. */
 export async function expectApart(page: Page, panels: Locator[]) {

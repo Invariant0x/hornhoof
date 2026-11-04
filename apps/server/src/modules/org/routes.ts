@@ -64,7 +64,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const [company] = await db.select({ id: companies.id, name: companies.name }).from(companies).where(eq(companies.id, me.companyId));
     const allAgents = await db.select().from(agents).where(and(eq(agents.companyId, me.companyId), isNull(agents.removedAt)));
-    const subs = new Map((await db.select({ id: subscriptions.id, provider: subscriptions.provider, models: subscriptions.models, limits: subscriptions.limits }).from(subscriptions).where(eq(subscriptions.companyId, me.companyId))).map(s => [s.id, s]));
+    const subs = new Map((await db.select({ id: subscriptions.id, provider: subscriptions.provider, models: subscriptions.models, limits: subscriptions.limits, limitsUpdatedAt: subscriptions.limitsUpdatedAt }).from(subscriptions).where(eq(subscriptions.companyId, me.companyId))).map(s => [s.id, s]));
     const orchestrator = allAgents.find(a => a.kind === 'orchestrator');
     const active = await db.select(personColumns).from(people).where(and(eq(people.companyId, me.companyId), ne(people.status, 'disabled'))).orderBy(asc(people.createdAt));
     const depts = await db.select().from(departments).where(eq(departments.companyId, me.companyId)).orderBy(asc(departments.position), asc(departments.createdAt));
@@ -194,7 +194,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
         ...agentProgramState(ctx, running.find(j => j.agentId === orchestrator.id), reach.whole),
         ...(reach.whole ? failures.get(orchestrator.id)! : { retry: null, failure: null, obsolete: null }),
         /* His plan is at its limit until then: he waits for the reset on it, and the CEO decides whether he moves. */
-        limitUntil: limitUntil((orchestrator.subscriptionId && subs.get(orchestrator.subscriptionId)?.limits) || null),
+        limitUntil: limitUntil((orchestrator.subscriptionId && subs.get(orchestrator.subscriptionId)?.limits) || null, (orchestrator.subscriptionId && subs.get(orchestrator.subscriptionId)?.limitsUpdatedAt) || null),
         subscription: orchestrator.subscriptionId ? await subView(db, node => hub.isOnline(node), orchestrator.subscriptionId, me) : null,
         machine: await machineOf(db, (await programNode(ctx, orchestrator.id))?.node ?? null),
       },

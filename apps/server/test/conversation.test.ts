@@ -443,6 +443,19 @@ describe('the orchestrator\'s conversation', () => {
     expect((await state(app, ceo)).limitUntil).toBeNull();
   });
 
+  it.each(['claude', 'codex', 'kimi', 'antigravity'])('does not hold %s turns on a stale rejection, even with a future reset', async provider => {
+    const { app, ceo, mac, node } = await onMac('0.3.0', provider);
+    await until(async () => (await state(app, ceo)).ready);
+    const resetsAt = new Date(Date.now() + 3600_000).toISOString();
+    mac.send({ type: 'status', loggedIn: true, limits: { status: 'rejected', windows: [{ name: 'five_hour', utilization: 1, resetsAt }] } });
+    await until(async () => (await state(app, ceo)).limitUntil === resetsAt);
+    await app.ctx.db.update(subscriptions).set({ limitsUpdatedAt: new Date(Date.now() - 16 * 60_000) }).where(eq(subscriptions.id, node.subscriptionId));
+
+    expect((await state(app, ceo)).limitUntil).toBeNull();
+    expect((await say(app, ceo, 'Go on')).statusCode).toBe(202);
+    expect((await nextRun(mac)).prompt).toBe(`${IVAN_TO_ORCHESTRATOR}Ivan (CEO): Go on`);
+  });
+
   it('waits quietly for a limit that starts over in more than 24 days, too long for one timer', async () => {
     const { app, ceo, mac } = await onMac('0.3.0');
     await until(async () => (await state(app, ceo)).ready);

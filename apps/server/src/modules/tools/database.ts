@@ -27,6 +27,7 @@ const RULES: Record<string, string> = {
   subscriptions: PLANS,
   machines: PLANS,
   nodes: PLANS,
+  node_connections: 'Hornhoof writes the history of node connections itself: the tool only reads it.',
   test_runs: TESTS,
   test_parts: TESTS,
   departments: "A department's repository changes only with set_repository, which only the CEO may ask for.",

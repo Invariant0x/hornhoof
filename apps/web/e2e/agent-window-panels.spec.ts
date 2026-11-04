@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { box } from './api';
-import { addTestPanel, expectApart, openAgent, overlaps, type Who } from './agent-window-panels-api';
+import { addTestPanel, barButtons, expectApart, openAgent, overlaps, type Who } from './agent-window-panels-api';
 import { SETTINGS } from './computer-strip-api';
 
 const PEOPLE: Who[] = ['orchestrator', 'employee'];
@@ -32,6 +32,41 @@ for (const who of PEOPLE) {
       expect(errors).toEqual([]);
     });
 
+    test(`the way back to the terminal is there only while a panel covers it: ${named}`, async ({ page }) => {
+      const { bar, back, errors, words, openPanel, panel } = await openAgent(page, s, who);
+      const resting = await barButtons(bar);
+      await openPanel('card');
+      await expect(back).toHaveCount(0);
+      expect(await barButtons(bar)).toEqual(resting);
+
+      await openPanel('notebook');
+      await expect(back).toBeVisible();
+      /* It takes its room from the title: nothing to the right of it moves. */
+      expect(await barButtons(bar).then(all => all.filter(b => b.name !== words.back))).toEqual(resting);
+      await back.click();
+      await expect(panel('notebook')).toHaveCount(0);
+      await expect(back).toHaveCount(0);
+
+      await page.setViewportSize({ width: 1100, height: 900 });
+      await expect(back).toBeVisible();
+      /* A department's panel takes the window's width alone, which leaves room for the row beside it. */
+      if (who === 'employee') {
+        const about = page.getByRole('button', { name: s.lang === 'en' ? 'About the department' : 'Об отделе', exact: true });
+        await about.click();
+        await expect(back).toHaveCount(0);
+        await about.click();
+        await expect(back).toBeVisible();
+      }
+      await page.setViewportSize({ width: s.width, height: 900 });
+      await expect(back).toHaveCount(0);
+
+      await bar.getByRole('button', { name: words.full, exact: true }).click();
+      await expect(back).toBeVisible();
+      await bar.getByRole('button', { name: words.size, exact: true }).click();
+      await expect(back).toHaveCount(0);
+      expect(errors).toEqual([]);
+    });
+
     test(`panels stand side by side and the second lies over the terminal only when it must: ${named}`, async ({ page }) => {
       const { terminal, errors, openPanel, panel } = await openAgent(page, s, who);
       const before = await box(terminal);
@@ -59,6 +94,35 @@ for (const who of PEOPLE) {
 
   for (const s of NARROW) {
     const named = `${who}, ${s.lang}, ${s.theme}`;
+
+    test(`the window's bar stays one row on a phone, with every button in reach: ${named}`, async ({ page }) => {
+      const { bar, back, errors, openPanel, panel, words } = await openAgent(page, s, who);
+      const inOneRow = async (count: number) => {
+        const buttons = await barButtons(bar);
+        expect(buttons.map(b => b.name)).toHaveLength(count);
+        expect((await box(bar)).height).toBeLessThanOrEqual(40);
+        for (const b of buttons) {
+          expect(b.x, String(b.name)).toBeGreaterThanOrEqual(0);
+          expect(b.x + b.width, String(b.name)).toBeLessThanOrEqual(s.width);
+          expect(b.width, String(b.name)).toBeGreaterThanOrEqual(26);
+          expect(b.height, String(b.name)).toBeGreaterThanOrEqual(26);
+        }
+        for (const [i, b] of buttons.entries()) for (const other of buttons.slice(i + 1)) expect(overlaps(b, other), `${b.name}, ${other.name}`).toBe(false);
+      };
+      const resting = (await barButtons(bar)).length;
+      await inOneRow(resting);
+      await openPanel('card');
+      await expect(back).toBeVisible();
+      await inOneRow(resting + 1);
+      await page.screenshot({ path: test.info().outputPath(`bar-with-panel-${who}-${s.lang}-${s.theme}.png`) });
+      await back.click();
+      await expect(panel('card')).toHaveCount(0);
+      await expect(back).toHaveCount(0);
+      await inOneRow(resting);
+      await bar.getByRole('button', { name: words.full, exact: true }).click();
+      await inOneRow(resting);
+      expect(errors).toEqual([]);
+    });
 
     test(`on a phone a panel lies over the terminal and closes with its button and Escape: ${named}`, async ({ page }) => {
       const { terminal, errors, toggle, openPanel, panel, words, connections } = await openAgent(page, s, who);

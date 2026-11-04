@@ -15,6 +15,7 @@ import { providerFilter, type FilterGroup } from '../ui/TableTools';
 import { SortTable, type TableColumn } from '../ui/SortTable';
 import { planStateOnMachine, subName } from '../ui/subscription';
 import { useNow } from '../ui/reset';
+import { MachineConnections } from '../ui/MachineConnections';
 import { ProgramVersions } from '../ui/ProgramVersions';
 import { RouteUnavailable, unavailableFailure, type CardRoute } from './RouteUnavailable';
 
@@ -110,7 +111,7 @@ function PlansOnMachine({ row, subs }: { row: MachineRow; subs: SubView[] }) {
   if (!row.plans.length) return <p className="part-note">{t.cards.noPlans}</p>;
   return <ul className="plist" aria-label={t.cards.plansOn}>{row.plans.map(plan => {
     const sub = subs.find(s => s.id === plan.id);
-    const state = planStateOnMachine(t, language, { ...plan, online: row.online && plan.online }, sub?.limits ?? null, now);
+    const state = planStateOnMachine(t, language, { ...plan, online: row.online && plan.online }, sub?.limits ?? null, now, sub?.limitsUpdatedAt);
     return <li key={plan.id}><ProviderMark provider={plan.provider} /><span className="nm"><b>{sub ? subName(t, sub) : PROVIDER_NAMES[plan.provider]}{sub?.tier && <> <small>{sub.tier}</small></>}</b><small>{[sub?.owner.name, state].filter(Boolean).join(', ')}</small></span></li>;
   })}</ul>;
 }
@@ -284,6 +285,7 @@ function MachineDetails({ row, subs, me, now, controls }: { row: MachineRow; sub
         <PlansOnMachine row={row} subs={subs} />
         {m && <MachineSettings machine={m} editable={editable} addable={addable} busy={Boolean(shown || picking)} controls={controls} />}
       </section>
+      {m && <MachineConnections key={m.id} id={m.id} hostname={m.hostname} online={row.online} />}
     </CardFrame>
   );
 }

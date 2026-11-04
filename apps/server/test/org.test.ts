@@ -95,7 +95,7 @@ describe('GET /api/org', () => {
     const ceo = await setUpCompany(app);
     expect((await app.inject({ url: '/api/org', ...as(ceo) })).json().orchestrator.limitUntil).toBeNull();
     const resetsAt = new Date(Date.now() + 3_600_000).toISOString();
-    await db.update(subscriptions).set({ limits: { status: 'rejected', windows: [{ name: 'five_hour', utilization: 1, resetsAt }] } });
+    await db.update(subscriptions).set({ limits: { status: 'rejected', windows: [{ name: 'five_hour', utilization: 1, resetsAt }] }, limitsUpdatedAt: new Date() });
     expect((await app.inject({ url: '/api/org', ...as(ceo) })).json().orchestrator.limitUntil).toBe(resetsAt);
   });
 

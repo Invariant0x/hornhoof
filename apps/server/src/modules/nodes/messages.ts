@@ -138,11 +138,11 @@ const builtinCut = (ctx: Ctx, id: NodeIdentity, msg: Hello, now: Date) =>
 const nodeCut = (ctx: Ctx, nodeId: string, row: { node: typeof nodes.$inferSelect; host: string | null }, msg: Hello, now: Date) =>
   interruptionOf(ctx, { id: nodeId, name: row.host || 'a machine with no name', machine: { id: row.node.machineId, name: row.host }, said: { version: row.node.version, boot: row.node.boot } }, msg, now);
 
-async function savePlanMetadata(ctx: Ctx, planId: string, msg: Extract<NodeMessage, { type: 'status' }>): Promise<void> {
+async function savePlanMetadata(ctx: Ctx, planId: string, msg: Extract<NodeMessage, { type: 'status' }>, now: Date): Promise<void> {
   if (!msg.limits && !msg.models) return;
   await ctx.db
     .update(subscriptions)
-    .set({ ...(msg.limits ? { limits: msg.limits } : {}), ...(msg.models ? { models: msg.models } : {}) })
+    .set({ ...(msg.limits ? { limits: msg.limits, limitsUpdatedAt: now } : {}), ...(msg.models ? { models: msg.models } : {}) })
     .where(and(eq(subscriptions.id, planId), isNull(subscriptions.removedAt)));
 }
 
@@ -154,7 +154,7 @@ async function updatePlanStatus(ctx: Ctx, nodeId: string, msg: Extract<NodeMessa
     .where(and(eq(nodes.id, nodeId), liveNode))
     .returning({ plan: nodes.subscriptionId });
   if (!node?.plan) return false;
-  await savePlanMetadata(ctx, node.plan, msg);
+  await savePlanMetadata(ctx, node.plan, msg, now);
   await settlePlans(ctx.db, [node.plan]);
   return status === 'ready';
 }
@@ -265,7 +265,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
         const [sub] = await db.select({ id: subscriptions.id, limits: subscriptions.limits }).from(jobs).innerJoin(subscriptions, eq(subscriptions.id, jobs.subscriptionId)).where(eq(jobs.id, msg.jobId));
         const held = sub && refusedLimits(`${msg.result}\n${msg.tail}`, sub.limits ?? null, now.getTime(), msg.failure?.kind === 'usage_limit');
         if (held) {
-          await db.update(subscriptions).set({ limits: held }).where(eq(subscriptions.id, sub.id));
+          await db.update(subscriptions).set({ limits: held, limitsUpdatedAt: now }).where(eq(subscriptions.id, sub.id));
           for (const { companyId } of finished) ctx.bus.publish(companyId, { type: 'org' });
         }
       }
