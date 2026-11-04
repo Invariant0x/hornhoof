@@ -1,3 +1,4 @@
+import { sameProgram } from './program-history.js';
 import type { jobs } from '../../db/schema.js';
 import type { ProgramChange } from './silent.js';
 import type { ExternalWait, SegmentKind, TreeAgent, TreeSegment } from './tree.js';
@@ -23,7 +24,7 @@ function programKind(program: ReportedProgram): SegmentKind {
 function changedPrograms(points: ProgramPoint[]): ReportedProgram[] {
   const out: ReportedProgram[] = [];
   for (const point of points) {
-    if (point.program && point.program.state !== out.at(-1)?.state) out.push(point.program);
+    if (point.program && !sameProgram(out.at(-1), point.program)) out.push(point.program);
   }
   return out;
 }

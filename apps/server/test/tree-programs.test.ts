@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { countedSegments, withExternalWait, withPrograms, type FactTurn, type ProgramPoint } from '../src/modules/tasks/tree-programs.js';
+import { countedSegments, turnSegments, withExternalWait, withPrograms, type FactTurn, type ProgramPoint } from '../src/modules/tasks/tree-programs.js';
 
 const date = (ms: number) => new Date(Date.parse('2026-11-03T00:00:00.000Z') + ms);
 const iso = (ms: number) => date(ms).toISOString();
@@ -102,4 +102,35 @@ it('keeps the reason when an external wait starts during ordinary dependency wai
   const list = withExternalWait([{ kind: 'after', from: iso(0), to: null }], externalWait, date(2000));
   expect(list).toEqual([{ kind: 'after', from: iso(0), to: iso(1000) }, { kind: 'after', from: iso(1000), to: null, externalWait }]);
   expect(withExternalWait(base, externalWait, date(3000)).at(-1)!.to).toBe(iso(3000));
+});
+it('keeps the Bash and Read boundaries and removes only an identical repeated Read point', () => {
+  const bash = point('tool', 0);
+  const read = { ...point('tool', 1000), program: { state: 'tool' as const, tool: 'Read', since: date(1000).getTime() } };
+  const repeated = { ...read, at: date(2000), program: { ...read.program } };
+  expect(withPrograms(base, [turn([bash, read, repeated])], agent, date(3000))).toEqual([
+    { kind: 'work', from: iso(0), to: iso(1000), program: { state: 'tool', tool: 'Bash', since: date(0).getTime() } },
+    { kind: 'work', from: iso(1000), to: null, program: { state: 'tool', tool: 'Read', since: date(1000).getTime() } },
+  ]);
+});
+
+it('deduplicates against the latest point after more than two changes', () => {
+  const history = [point('thinking', 0), point('tool', 1000), point('idle', 2000)];
+  const idle = { ...point('idle', 2000), at: date(3000) };
+  expect(turnSegments(turn([...history, idle]), agent).filter(s => s.program).map(s => s.program))
+    .toEqual(history.map(p => p.program));
+});
+
+it.each([
+  { state: 'thinking', tool: 'Bash', since: 0 },
+  { state: 'tool', tool: 'Read', since: 0 },
+  { state: 'tool', tool: 'Bash', since: 1000 },
+] as const)('retains a point when only a program identity field changes to %j', next => {
+  const bash = point('tool', 0);
+  const changed = { at: date(1000), program: { ...next, since: date(next.since).getTime() }, alarm: null };
+  const repeated = { ...changed, at: date(2000), program: { ...changed.program } };
+  const programs = turnSegments(turn([bash, changed, repeated]), agent).filter(s => s.program).map(s => s.program);
+  expect(programs).toEqual([
+    { state: 'tool', tool: 'Bash', since: date(0).getTime() },
+    { state: next.state, tool: next.tool, since: date(next.since).getTime() },
+  ]);
 });
