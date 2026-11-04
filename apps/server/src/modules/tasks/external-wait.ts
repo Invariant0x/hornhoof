@@ -1,11 +1,13 @@
 import { z } from 'zod';
 import { and, eq, isNotNull, lte, notInArray, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { agentEvents, jobs, tasks, type ExternalWait } from '../../db/schema.js';
+import { agentEvents, jobs, pendingWakes, tasks, type ExternalWait } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { loadTask, move, refuse, type Moved, type Task, type Wake } from './engine.js';
 import { wakeAll } from './wake.js';
-import { enqueueTurn, insertTurn, onAgent, pump, type TurnMessage } from '../conversation/queue.js';
+import { enqueueTurn, insertOrDeliverTurn, onAgent, pump, type TurnMessage } from '../conversation/queue.js';
+import { withInputLock } from '../conversation/decision-context.js';
+import { messageNotDelivered } from '../conversation/live.js';
 import { taskByRef } from './views.js';
 import type { Actor } from './engine.js';
 import { taskWakeOf, waitingTaskTurn } from './wake-state.js';
@@ -38,9 +40,12 @@ async function placeWait(ctx: Ctx, agentId: string, taskId: string, input: z.inf
   await waitingTaskTurn(ctx.db, agentId, taskId);
   const [message] = await ctx.db.select({ id: jobs.id }).from(jobs).innerJoin(agentEvents, eq(agentEvents.jobId, jobs.id)).where(and(
     eq(jobs.agentId, agentId), eq(jobs.taskId, taskId), eq(jobs.status, 'queued'), eq(agentEvents.kind, 'message'),
-    sql`${agentEvents.data}->'taskWake'->>'why' = 'message'`,
+    sql`${agentEvents.data}->'taskWake'->>'why' in ('message', 'comment')`,
   )).limit(1);
-  if (message) throw refuse(409, 'task_invalid', `A message on #${task.number} waits for you. End this turn and read it before waiting.`);
+  const [comment] = await ctx.db.select({ id: pendingWakes.id }).from(pendingWakes).where(and(
+    eq(pendingWakes.agentId, agentId), eq(pendingWakes.taskId, taskId), eq(pendingWakes.why, 'comment'),
+  )).limit(1);
+  if (message || comment) throw refuse(409, 'task_invalid', `A message on #${task.number} waits for you. End this turn and read it before waiting.`);
   const externalWait = waitOf(input, now);
   const row = await move(ctx, task, { externalWait, silent: 0 }, { kind: 'updated', actor: { agentId }, text: `Waiting for "${externalWait.reason}" until ${externalWait.until}.`, data: { externalWait } });
   return { task: row, wakes: [] };
@@ -54,22 +59,56 @@ function requireHolder(task: Task, agentId: string): void {
 type TaskMessage = { companyId: string; agentId: string; task?: number | string; actor: Actor; text: string };
 type MessageTurn = Parameters<typeof enqueueTurn>[1] & { message: TurnMessage };
 
-/* Queueing and waiting use the same agent line, so an unread message cannot slip behind a new wait. */
-export async function queueTaskMessage(ctx: Ctx, input: TaskMessage, turn: MessageTurn): Promise<string> {
-  if (input.task === undefined) return enqueueTurn(ctx, turn);
-  const bound = { ...input, task: input.task };
-  const id = await onAgent(ctx, input.agentId, () => queueBoundMessage(ctx, bound, turn));
-  await pump(ctx, input.agentId);
-  return id;
+type ResumedWait = { task: Task; before: ExternalWait };
+type QueuedMessage = { id: string; resumed?: ResumedWait };
+
+/* Input precedes the agent line, as it does for a decision that changes its own agent. */
+export function queueTaskMessage(ctx: Ctx, input: TaskMessage, turn: MessageTurn): Promise<string> {
+  return withInputLock(ctx, input.agentId, () => queueMessage(ctx, input, turn));
 }
 
-async function queueBoundMessage(ctx: Ctx, input: TaskMessage & { task: number | string }, turn: MessageTurn): Promise<string> {
+async function queueMessage(ctx: Ctx, input: TaskMessage, turn: MessageTurn): Promise<string> {
+  const required = !!input.actor.agentId;
+  const queued: QueuedMessage = await onAgent(ctx, input.agentId, async () => input.task === undefined
+    ? { id: await insertOrDeliverTurn(ctx, turn, required) }
+    : queueBoundMessage(ctx, { ...input, task: input.task }, turn, required));
+  try {
+    await pump(ctx, input.agentId);
+    if (required) await onAgent(ctx, input.agentId, () => confirmMessage(ctx, queued.id));
+  } catch (error) {
+    const resumed = queued.resumed;
+    if (resumed) await onAgent(ctx, input.agentId, () => restoreWait(ctx, resumed, input.actor));
+    throw error;
+  }
+  return queued.id;
+}
+
+async function confirmMessage(ctx: Ctx, id: string): Promise<void> {
+  await ctx.db.update(jobs).set({ status: 'failed', error: 'message_not_delivered', finishedAt: new Date() }).where(and(eq(jobs.id, id), eq(jobs.status, 'queued')));
+  const [job] = await ctx.db.select({ status: jobs.status }).from(jobs).where(eq(jobs.id, id));
+  if (!job || job.status === 'failed') throw messageNotDelivered();
+}
+
+/* A failed send preserves the previous wait unless another task action has already replaced it. */
+async function restoreWait(ctx: Ctx, resumed: ResumedWait, actor: Actor): Promise<void> {
+  try {
+    await move(ctx, resumed.task, { externalWait: resumed.before }, { kind: 'updated', actor, text: 'The message did not go out. The previous wait continues.', data: { externalWait: resumed.before } });
+  } catch (error) {
+    if (!(error instanceof ApiError && error.reason === 'task_changed')) throw error;
+  }
+}
+
+async function queueBoundMessage(ctx: Ctx, input: TaskMessage & { task: number | string }, turn: MessageTurn, required: boolean): Promise<QueuedMessage> {
   const task = await taskByRef(ctx, input.companyId, input.task);
   if (!task) throw refuse(404, 'task_unknown', `There is no task ${input.task} you can message.`);
-  requireHolder(task, input.agentId);
-  const id = await insertTurn(ctx, { ...turn, ...taskTurn(task, turn.message) });
-  if (task.externalWait) await move(ctx, task, { externalWait: null, silent: 0 }, { kind: 'comment', actor: input.actor, text: input.text, data: { externalWait: null } });
-  return id;
+  const recipient = input.agentId;
+  const holder = task.assigneeAgentId === recipient || task.panel.includes(recipient);
+  if (![task.assigneeAgentId, task.createdByAgentId, task.executorAgentId, ...task.panel, ...task.gates].includes(recipient)) throw refuse(403, 'task_not_yours', `#${task.number} does not involve this employee.`);
+  const topic = taskTurn(task, turn.message);
+  const id = await insertOrDeliverTurn(ctx, { ...turn, ...topic, taskId: holder ? task.id : undefined }, required);
+  if (!task.externalWait || task.assigneeAgentId !== recipient) return { id };
+  const resumed = await move(ctx, task, { externalWait: null, silent: 0 }, { kind: 'comment', actor: input.actor, text: input.text, data: { externalWait: null } });
+  return { id, resumed: { task: resumed, before: task.externalWait } };
 }
 
 function taskTurn(task: Task, message: TurnMessage): { message: TurnMessage; taskId: string } {

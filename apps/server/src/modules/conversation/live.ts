@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { jobs, subscriptions } from '../../db/schema.js';
+import { ApiError } from '../../errors.js';
 import { identityOf, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { incomingEnvelope } from '../events/parties.js';
 import { addressed } from './prompt.js';
@@ -17,6 +18,8 @@ const waiting = new WeakMap<Ctx, Map<string, Waiting>>();
 
 const nothingBefore = async (): Promise<void> => {};
 
+export const messageNotDelivered = (): ApiError => new ApiError(409, 'conflict', 'The message did not reach the employee. Check its window and try again.', 'agent_not_ready');
+
 function liveEnvelope(ctx: Ctx, companyId: string, agentId: string, source?: MessageSource) {
   return incomingEnvelope(ctx, companyId, agentId, source?.personId, source?.data);
 }
@@ -31,6 +34,7 @@ export async function sayLive(
   taskId?: string,
   source?: MessageSource,
   before: (jobId: string) => Promise<void> = nothingBefore,
+  required = false,
 ): Promise<string | null> {
   const [running] = await ctx.db
     .select({ id: jobs.id, companyId: jobs.companyId, taskId: jobs.taskId, nodeId: jobs.nodeId, sub: subscriptions })
@@ -40,10 +44,16 @@ export async function sayLive(
     .limit(1);
   const node = running && identityOf(running.sub, running.nodeId);
   if (!running || !node || (taskId && running.taskId !== taskId)) return null;
-  if (!ctx.hub.hasTerminals(node)) return null;
+  if (!ctx.hub.hasTerminals(node)) return missedLive(required);
   const message = await liveEnvelope(ctx, running.companyId, agentId, source);
   await before(running.id);
-  return (await waitForWords(ctx, node, agentId, addressed(text, message))) ? running.id : null;
+  if (await waitForWords(ctx, node, agentId, addressed(text, message))) return running.id;
+  return missedLive(required);
+}
+
+function missedLive(required: boolean): null {
+  if (required) throw messageNotDelivered();
+  return null;
 }
 
 function waitForWords(ctx: Ctx, node: NodeIdentity, agentId: string, text: string): Promise<boolean> {
