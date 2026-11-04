@@ -102,6 +102,10 @@ for (const lang of ['en', 'ru'] as const) {
         await across(agy);
         await agy.scrollIntoViewIfNeeded();
         await agy.screenshot({ path: info.outputPath(`224-setup-${lang}-${theme}-${width}.png`) });
+        /* Its state warns as one waiting for its sign-in does. */
+        const color = (state: string) => page.locator(`.status.${state}`).first().evaluate(e => getComputedStyle(e).color);
+        expect(await color('needs_setup')).toBe(await color('needs_login'));
+        expect(await color('needs_setup')).not.toBe(await color('ready'));
 
         /* Waiting for its machine: one block from the start, with the install command, Copy and how long it works. */
         await expect(kimi.getByText(INSTALL)).toBeVisible();

@@ -81,6 +81,19 @@ describe('Subscriptions', () => {
     expect(rowOf('Antigravity').querySelector('.blk-fix')?.textContent).toContain('It needs its first setup on a-host, and the machine is offline.');
   });
 
+  it('names the machine online that waits for the first setup before one offline', async () => {
+    const machines = [{ ...MACHINE, hostname: 'a-host', status: 'needs_setup' as const, online: false }, { ...MACHINE, id: 'm2', hostname: 'b-host', status: 'needs_setup' as const }];
+    lists({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[1]!, id: 's-agy', provider: 'antigravity', label: 'Antigravity', status: 'needs_setup', machines }] }] });
+    render(<Subscriptions me={ME} />);
+    await openAll();
+    expect(rowOf('Antigravity').querySelector('.blk-fix')?.textContent).toContain('On b-host, Antigravity asks its owner to accept its terms.');
+  });
+
+  it('marks a plan that waits for its first setup in the warning color of one that waits for its login', () => {
+    expect(decl('.status.needs_setup', 'color')).toBe(decl('.status.needs_login', 'color'));
+    expect(decl('.status.needs_setup', 'border-color')).toBe('currentColor');
+  });
+
   it('omits the sign-in line while waiting for the login', async () => {
     lists({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[1]!, signedInOnce: true, machines: [MACHINE, { ...SUBS[1]!.machines[0]!, id: 'login', hostname: 'laptop' }] }] }] });
     render(<Subscriptions me={ME} />);
