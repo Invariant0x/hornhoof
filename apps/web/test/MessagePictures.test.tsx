@@ -89,7 +89,9 @@ describe('a picture dragged into the window', () => {
     await line();
     fireEvent.dragEnter(windowBox(), { dataTransfer: { types: ['text/plain'], files: [] } });
     expect(screen.queryByText(en.window.dropPictures)).not.toBeInTheDocument();
-    expect(fireEvent.dragOver(windowBox(), { dataTransfer: { types: ['text/plain'], files: [] } })).toBe(true);
+    const over = { dataTransfer: { types: ['text/plain'], files: [], dropEffect: 'move' } };
+    expect(fireEvent.dragOver(windowBox(), over)).toBe(true);
+    expect(over.dataTransfer.dropEffect).toBe('move');
   });
 
   it('goes with the words of the message, once, as raw bytes', async () => {
