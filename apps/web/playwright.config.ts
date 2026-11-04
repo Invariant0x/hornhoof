@@ -4,7 +4,7 @@ import { defineConfig, devices } from '@playwright/test';
 /* Tests in a real browser, for what jsdom cannot lay out. The app runs on Vite's dev server and every /api call is answered
    in the page by the test itself, so no Hornhoof server is needed. The browser comes from `npx playwright install
    --only-shell chromium`, or from PLAYWRIGHT_BROWSERS_PATH on a Hornhoof node, which carries the same version. */
-const PORT = 4179;
+const PORT = process.env.HORNHOOF_BROWSER_PORT ?? '4179';
 
 export default defineConfig({
   testDir: 'e2e',
@@ -15,5 +15,6 @@ export default defineConfig({
   /* Match UTC clock fixtures regardless of the host timezone. */
   use: { baseURL: `http://localhost:${PORT}`, trace: 'retain-on-failure', timezoneId: 'UTC' },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'], channel: process.env.PLAYWRIGHT_CHANNEL } }],
-  webServer: { command: `vite --port ${PORT} --strictPort`, url: `http://localhost:${PORT}`, reuseExistingServer: !process.env.CI },
+  /* A browser check owns its server; another checkout can have different code or live edits. */
+  webServer: { command: `vite --mode browser-test --port ${PORT} --strictPort`, url: `http://localhost:${PORT}`, reuseExistingServer: false },
 });
