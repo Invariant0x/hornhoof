@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { chmodSync, chownSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, lchownSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { AgentEvent, ModelOption } from '@hornhoof/protocol';
 import { asAgent, type JobUser } from '../isolation.js';
@@ -312,10 +312,13 @@ async function setUpOnScreen(io: LoginIo, { recordingsDir, person, ...look }: Se
   if (await setupShown(look)) throw new Error('Antigravity CLI was closed before its terms were accepted.');
 }
 
-/* A folder in the agent's own folder that its program's user may use. */
+/* A folder in the agent's own folder that its program's user may use. The node may run as root there, where the agent
+   could leave a link: it hands over a real folder only, and never what a link points to (lstat and lchown). */
 function agentDir(path: string, user: JobUser | null): string {
   mkdirSync(path, { recursive: true });
-  if (user) chownSync(path, user.uid, user.gid);
+  if (!user) return path;
+  if (!lstatSync(path).isDirectory()) throw new Error(`${path} is not a folder.`);
+  lchownSync(path, user.uid, user.gid);
   return path;
 }
 
