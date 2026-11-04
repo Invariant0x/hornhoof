@@ -873,7 +873,7 @@ describe('obsolete task turns', () => {
       expect(stale).toMatchObject({ status: 'failed', error: 'stale', startedAt: null });
       expect(stale!.result).toContain(`#${task.number}`);
       expect((await c.db.select().from(agentEvents).where(and(eq(agentEvents.jobId, stale!.id), eq(agentEvents.kind, 'stopped')))).map(e => e.data)).toEqual([
-        { reason: 'stale', text: stale!.result, task: { id: task.id, number: task.number } },
+        { reason: 'stale', text: stale!.result, failure: stale!.failure, tail: 'No output.', program: null, task: { id: task.id, number: task.number } },
       ]);
     }
   });

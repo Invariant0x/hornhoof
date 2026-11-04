@@ -15,7 +15,7 @@ import { originalPromptOf } from '../conversation/requested-prompt.js';
 const RETRY_MINUTES = [1, 2, 5, 10];
 type Job = typeof jobs.$inferSelect;
 type TaskTurn = Parameters<typeof turnAgain>[1];
-export type LastFailure = { kind: Failure['kind']; text: string; at: number };
+export type LastFailure = { kind: Failure['kind']; text: string; at: number; tail: string };
 export type FailureState = { retry: TurnRetry | null; failure: LastFailure | null };
 
 /* Failures that hold the turn until the plan can take it again: its limit resets, or its owner signs in or passes the
@@ -64,7 +64,7 @@ export async function agentFailureStates(ctx: Ctx, companyId: string, agentIds: 
     const before = next?.continueOf ? history.get(next.continueOf) : undefined;
     const retry = next?.notBefore && before?.failure && passing(before.failure)
       ? { attempt: await passingAttempts(ctx, before, history), max: RETRY_MINUTES.length, at: +next.notBefore, kind: before.failure.kind } : null;
-    const failure = ended?.status === 'failed' && ended.failure ? { kind: ended.failure.kind, text: ended.failure.text, at: +(ended.finishedAt ?? ended.createdAt) } : null;
+    const failure = ended?.status === 'failed' && ended.failure ? { kind: ended.failure.kind, text: ended.failure.text, at: +(ended.finishedAt === null ? ended.createdAt : ended.finishedAt), tail: ended.tail } : null;
     return [id, { retry, failure }] as const;
   })));
 }

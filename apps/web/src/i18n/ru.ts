@@ -744,6 +744,7 @@ export const ru: Messages = {
     openTerminal: 'Открыть терминал',
     lastFailed: (at: string, kind: string) => `Последний ход не удался в ${at}: ${kind}`,
     lastFailedOn: (when: string, kind: string) => `Последний ход не удался ${when}: ${kind}`,
+    noOutput: 'Вывода не было.',
     runsOn: 'Где работает',
     onMachine: (host: string) => `Работает на машине ${host}`,
     model: 'Модель',
