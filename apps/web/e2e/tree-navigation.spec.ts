@@ -94,9 +94,9 @@ for (const lang of ['en', 'ru'] as const) {
         await expect(page.locator('.tv-card')).toHaveCount(0);
         await page.screenshot({ path: info.outputPath(`tree-agent-${lang}-${theme}-${width}.png`) });
         await agent.getByRole('button', { name: lang === 'en' ? 'Card' : 'Карточка', exact: true }).click();
-        const card = page.getByRole('complementary', { name: 'Bruno', exact: true });
+        const card = agent.getByRole('complementary', { name: lang === 'en' ? 'Card: Bruno' : 'Карточка: Bruno', exact: true });
         await expect(card).toHaveClass('acard');
-        expect(await box(card)).toEqual(leftFrame);
+        expect(await box(card)).toMatchObject({ width: width === 375 ? width : leftFrame.width });
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
         expect(errors).toEqual([]);
       });

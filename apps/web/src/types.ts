@@ -98,6 +98,7 @@ export type ProgramView = TurnProgram;
 
 /* The latest failed turn of an agent, as /api/org and /api/agents/:id give it; at is Unix epoch milliseconds. */
 export type TurnFailure = { kind: FailureKind; text: string; at: number; tail?: string };
+export type TurnObsolete = { at: number };
 
 /* An employee as the map lists it: the head first, then members in the order they were hired. */
 export type Employee = {
@@ -129,6 +130,7 @@ export type Employee = {
   retry: TurnRetry | null;
   /* Its latest failed turn, or null. */
   failure: TurnFailure | null;
+  obsolete?: TurnObsolete | null;
 };
 
 /* A role a department's employees hold, in its template's order; gate: where it stands among the default gates. */
@@ -222,6 +224,7 @@ export type AgentCardView = {
   alarm?: TurnAlarm | null;
   retry: TurnRetry | null;
   failure: TurnFailure | null;
+  obsolete?: TurnObsolete | null;
   skills: CardSkill[];
   parts: Part[];
   raw: string;
@@ -507,7 +510,7 @@ export type BuiltinView = { online: boolean; load: NodeLoad | null; running: Run
 
 export type JobView = {
   id: string;
-  status: 'queued' | 'running' | 'done' | 'failed';
+  status: 'queued' | 'running' | 'done' | 'failed' | 'obsolete';
   result: string | null;
   tail: string;
   error: string | null;

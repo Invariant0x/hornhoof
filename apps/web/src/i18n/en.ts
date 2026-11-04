@@ -479,6 +479,7 @@ export const en = {
     pickByHand: 'Pick departments by hand',
     connectForStaff: 'Connect a subscription, and the orchestrator offers employees for these departments.',
     card: 'Card',
+    cardOf: (name: string) => `Card: ${name}`,
     notebook: 'Notebook',
     showLog: 'Log',
     showTerminal: 'Terminal',
@@ -731,9 +732,9 @@ export const en = {
     unknown: 'unknown error',
   } satisfies Record<FailureKind, string>,
   agent: {
-    openTerminal: 'Open terminal',
     lastFailed: (at: string, kind: string) => `Last turn failed at ${at}: ${kind}`,
     lastFailedOn: (when: string, kind: string) => `Last turn failed on ${when}: ${kind}`,
+    obsolete: 'Wake-up became obsolete: the task moved on',
     noOutput: 'No output.',
     runsOn: 'Runs on',
     onMachine: (host: string) => `Works on the machine ${host}`,
@@ -886,6 +887,7 @@ export const en = {
     questions: 'Questions',
     log: 'Log',
     skippedRun: (by: string, run: string) => `Run skipped: task is already closed. ${by}: ${run}.`,
+    obsoleteRun: (by: string, run: string) => `Wake-up became obsolete: the task moved on. ${by}: ${run}.`,
     skippedJob: (job: string) => `Turn ${job}.`,
     skippedRuns: {
       task: 'task work', restart: 'resume after a restart', continue: 'continue after the program ended', merge: 'merge',

@@ -50,7 +50,7 @@ async function flyIn(user: ReturnType<typeof userEvent.setup>) {
 const drawer = (user: ReturnType<typeof userEvent.setup>, name: 'Department tasks' | 'About the department') => user.click(screen.getByRole('button', { name }));
 
 describe('Department view', () => {
-  it.each(['card', 'task', 'window'] as const)('fits the schema clear of the %s panel on its own side', panel => {
+  it.each(['task', 'window'] as const)('fits the schema clear of the %s panel on its own side', panel => {
     mockApi({});
     render(<LanguageProvider><DepartmentView me={ME} department={DEV_ORG.departments[0]!} deputies={[]} selected={null} selectedTask={null}
       panel={panel} onBack={() => {}} onHire={() => {}} onOpen={() => {}} onOpenTask={() => {}} /></LanguageProvider>);
@@ -343,12 +343,12 @@ describe('Department view', () => {
     expect(ru.dept.status.waiting).toBe('ждет решения');
   });
 
-  it('keeps the department actions in the free strip after the zoom while a window, card or task is open', () => {
-    /* Windows, cards and tasks end above the strip at the bottom where the zoom and the actions sit, so the actions
+  it('keeps the department actions in the free strip after the zoom while a window or task is open', () => {
+    /* Windows and tasks end above the strip at the bottom where the zoom and the actions sit, so the actions
        stay there, right after the zoom, at every width a window leaves beside them; on a phone the window covers all. */
     const strip = px(decl('.dv-acts', 'bottom')) + px(decl('.hbtn', 'height'));
     for (const panel of ['.orch', '.acard']) expect(px(decl(panel, 'bottom'))).toBeGreaterThan(strip);
-    for (const kind of ['window', 'card', 'task'])
+    for (const kind of ['window', 'task'])
       expect(rulesFor(`.body.with-${kind} .dv-acts`).map(r => [r.media, r.decls.left, r.decls.right, r.decls.bottom])).toEqual([
         ['(min-width: 761px)', decl('.dview .ticker', 'left'), 'auto', undefined],
       ]);
@@ -420,18 +420,23 @@ describe('Department view', () => {
     await user.click(screen.getByRole('button', { name: /Bruno/ }));
     expect(await screen.findByRole('complementary', { name: 'Bruno, Backend engineer' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Card' }));
-    expect(await screen.findByRole('button', { name: 'Open terminal' })).toBeInTheDocument();
+    expect(await screen.findByRole('complementary', { name: 'Card: Bruno' })).toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: 'Bruno, Backend engineer' })).toBeInTheDocument();
   });
 
-  it("goes from an employee's card back to its window with Open terminal", async () => {
+  it("closes an employee's card back to its window, which stood there all along", async () => {
     const user = userEvent.setup();
     shell({ 'GET /api/agents/b1': [200, CARD], 'GET /api/agents/b1/events?after=0': [200, { events: [], state: READY }] });
     await flyIn(user);
     await user.click(screen.getByRole('button', { name: /Bruno/ }));
-    await user.click(await screen.findByRole('button', { name: 'Card' }));
-    await user.click(await screen.findByRole('button', { name: 'Open terminal' }));
-    expect(await screen.findByRole('complementary', { name: 'Bruno, Backend engineer' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Open terminal' })).not.toBeInTheDocument();
+    const window = await screen.findByRole('complementary', { name: 'Bruno, Backend engineer' });
+    const toggle = within(window).getByRole('button', { name: 'Card' });
+    await user.click(toggle);
+    const card = await screen.findByRole('complementary', { name: 'Card: Bruno' });
+    await user.click(within(card).getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('complementary', { name: 'Card: Bruno' })).not.toBeInTheDocument();
+    expect(window).toBeInTheDocument();
+    expect(toggle).toHaveFocus();
   });
 
   it("opens a head's department notebook from its window", async () => {
