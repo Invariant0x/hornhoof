@@ -15,6 +15,9 @@ const NODE: NodeMessage[] = [
   { type: 'status', loggedIn: true, limits: null },
   { type: 'hello', version: '0.4.0', loggedIn: true, running: [], models: [{ id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol' }] },
   { type: 'status', loggedIn: true, limits: null, models: [] },
+  /* Signed in, but its program waits for a first setup only the plan's owner may pass. */
+  { type: 'status', loggedIn: true, setupNeeded: true, limits: null },
+  { type: 'hello', version: '0.5.2', loggedIn: true, setupNeeded: true, running: [] },
   { type: 'job.started', jobId: 'job-1' },
   { type: 'job.done', jobId: 'job-1', ok: true, sessionId: 'abc', result: 'ready', tail: '', error: null },
   { type: 'job.done', jobId: 'job-2', ok: false, sessionId: null, result: '', tail: 'boom', error: 'timeout' },
@@ -76,7 +79,7 @@ describe('node messages', () => {
 describe('turn failures', () => {
   const done: NodeMessage = { type: 'job.done', jobId: 'job-1', ok: false, sessionId: 'abc', result: '', tail: '', error: 'agent_failed' };
 
-  it.each(['overloaded', 'rate_limited', 'usage_limit', 'auth', 'network', 'cut', 'refused', 'too_big', 'crash', 'unknown'])('carry a failed turn whose program reports %s', kind => {
+  it.each(['overloaded', 'rate_limited', 'usage_limit', 'auth', 'setup', 'network', 'cut', 'refused', 'too_big', 'crash', 'unknown'])('carry a failed turn whose program reports %s', kind => {
     const m = { ...done, failure: { kind, text: 'The program said why it failed.', retryable: true } };
     expect(parseNodeMessage(JSON.stringify(m))).toEqual(m);
   });

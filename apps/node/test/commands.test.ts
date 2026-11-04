@@ -1,7 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
@@ -204,6 +204,39 @@ describe('login', () => {
     const res = await run(['login']);
     expect(res.code).toBe(1);
     expect(res.err).toContain('install command');
+  });
+});
+
+/* agy asks a person who signed it in on a machine to accept its terms once there, which only the plan's owner may do. */
+describe("a plan whose program asks for a first setup on its machine", () => {
+  const settings = () => join(data, 'home', '.gemini', 'antigravity-cli', 'settings.json');
+  beforeEach(async () => {
+    await run(['set-key'], `${SERVER} sub-1 antigravity ${KEY}\n`);
+    mkdirSync(bin, { recursive: true });
+    symlinkSync(join(FAKES, 'fake-agy-term.mjs'), join(bin, 'agy'));
+    mkdirSync(join(data, 'home'), { recursive: true });
+    writeFileSync(join(data, 'home', 'fake-signed-in'), '');
+  });
+
+  it('says needs_setup until agy saved its terms as accepted', async () => {
+    expect((await run(['status'])).out).toBe('needs_setup\n');
+    mkdirSync(dirname(settings()), { recursive: true });
+    writeFileSync(settings(), '{"consumerOnboardingComplete":true}');
+    expect((await run(['status'])).out).toBe('ready\n');
+  });
+
+  it('goes with the sign-in, which says why it cannot finish without the terminal of the person who runs it', async () => {
+    const res = await run(['login']);
+    expect(res.code).toBe(1);
+    expect(res.err).toBe('The first setup of Antigravity CLI did not finish: Its terms need the terminal of the person who runs the install command.\n');
+    expect(existsSync(settings())).toBe(false);
+    expect((await run(['status'])).out).toBe('needs_setup\n');
+  });
+
+  it('is left out of the sign-in once passed', async () => {
+    mkdirSync(dirname(settings()), { recursive: true });
+    writeFileSync(settings(), '{"consumerOnboardingComplete":true}');
+    expect(await run(['login'])).toMatchObject({ code: 0, out: 'Logged in.\n' });
   });
 });
 

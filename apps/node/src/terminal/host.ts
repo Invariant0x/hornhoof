@@ -4,7 +4,7 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { TERM_CHUNK, UNHEARD_MS, type AgentEvent, type Failure, type Limits, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
-import { agyRules } from '../providers/antigravity.js';
+import { agyRules, pastColors, SETUP_NEEDED } from '../providers/antigravity.js';
 import { claudeEvents, claudeInterrupted } from '../providers/claude.js';
 import type { ProgramRetry } from '@hornhoof/protocol/map';
 import { contentText, isRecord } from '../providers/events.js';
@@ -852,10 +852,10 @@ export class TerminalHost {
     return false;
   }
 
-  /* Claude Code says it started through its hook; the others are ready once their prompt shows. Kimi shows its prompt
-     also when it is not signed in, with a word to sign in. */
+  /* Claude Code says it started through its hook; the others are ready once their prompt shows. */
   private async ready(a: Agent, job: TermJob): Promise<boolean> {
     const end = Date.now() + this.readyMs;
+    const colors = { at: -Infinity };
     while (Date.now() < end) {
       if (!(await this.opts.tmux.alive(a.name))) return false;
       const kind = job.program.kind;
@@ -865,17 +865,37 @@ export class TerminalHost {
           return true;
         }
       } else {
-        const screen = await this.screen(a.key);
-        if (kind === 'kimi' && job.signedOut.test(screen)) return false;
-        if (READY[kind](screen)) {
-          await sleep(500);
-          return true;
-        }
-        await sleep(this.pollMs);
+        const shown = await this.promptShows(a, job, kind, colors);
+        if (shown !== null) return shown;
       }
       if (job.signedOut.test(await this.screen(a.key))) return false;
     }
     return false;
+  }
+
+  /* Whether the prompt shows, or null while the program is still on its way to it. Kimi shows its prompt also when it is
+     not signed in, with a word to sign in; agy may first ask for its first-run setup. */
+  private async promptShows(a: Agent, job: TermJob, kind: keyof typeof READY, colors: { at: number }): Promise<boolean | null> {
+    const screen = await this.screen(a.key);
+    if (kind === 'kimi' && job.signedOut.test(screen)) return false;
+    if (READY[kind](screen)) {
+      await sleep(500);
+      return true;
+    }
+    if (kind === 'antigravity' && (await this.agyFirstRun(a, colors))) return false;
+    await sleep(this.pollMs);
+    return null;
+  }
+
+  /* agy's first-run setup: the node takes the colors agy offers first and goes on. Its terms are the plan owner's alone to
+     accept, so the node presses nothing on them: the turn ends saying why, and the next start runs agy anew rather than
+     typing into them. True when the turn ends. */
+  private async agyFirstRun(a: Agent, colors: { at: number }): Promise<boolean> {
+    const step = await pastColors(await this.opts.tmux.screen(a.name, 0), () => this.opts.tmux.keys(a.name, 'Enter'), colors);
+    if (step !== 'terms') return false;
+    a.failure = failure('setup', SETUP_NEEDED, false);
+    a.hash = null;
+    return true;
   }
 
   /* Claude Code can say it started before its input box is up, and loses what is typed into it until then. Hornhoof's

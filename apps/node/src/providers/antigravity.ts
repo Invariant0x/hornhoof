@@ -7,12 +7,43 @@ import type { LoginIo, ProviderAdapter, RunInput, RunResult } from '../runner.js
 import { withProgramExit } from '../program-exit.js';
 import { Tmux } from '../terminal/tmux.js';
 import { contentText, inputText, isRecord, objectLine, toolName } from './events.js';
-import { childEnv, ensureDir, exitsCleanly, firstLine, lastUrl, runProgram, tokensIn, writePrivate } from './process.js';
+import { childEnv, ensureDir, exitsCleanly, firstLine, lastUrl, readPrivate, runProgram, tokensIn, writePrivate } from './process.js';
 
-type Options = { home: string; tools: string; bin?: string; user?: JobUser | null };
+type Options = { home: string; tools: string; bin?: string; user?: JobUser | null; person?: Person };
 
 /* What agy 1.4.12 says in print mode and in `agy models` when it is not signed in. */
 export const SIGNED_OUT = /authentication failed or timed out|authentication required|not logged into Antigravity|Please sign in/i;
+
+/* agy 1.4.12's first-run setup, which its own screen shows once signed in on a machine where nobody passed it: the
+   colors, then its terms of service with whether Google may use the interactions data. Read from the visible screen
+   before agy's prompt shows, never from a conversation above it. */
+const SETUP_COLORS = /Choose your color scheme:[\s\S]*\[Next\]/;
+const SETUP_TERMS = /\[Previous\][ \t]+\[Done\]/;
+export type AgySetupStep = 'colors' | 'terms';
+
+export function agySetupStep(screen: string): AgySetupStep | null {
+  if (SETUP_TERMS.test(screen)) return 'terms';
+  return SETUP_COLORS.test(screen) ? 'colors' : null;
+}
+
+/* After an Enter on the colors, how long agy has to show its terms before the node presses again: an Enter must never
+   land on the terms, where it ticks or unticks the box. */
+export const COLORS_WAIT_MS = 5000;
+
+/* The node answers the colors itself: Enter takes the scheme agy offers first. The terms it leaves alone. Returns the step
+   the screen shows. */
+export async function pastColors(screen: string, enter: () => Promise<void>, last: { at: number }, now = Date.now()): Promise<AgySetupStep | null> {
+  const step = agySetupStep(screen);
+  if (step === 'colors' && now - last.at >= COLORS_WAIT_MS) {
+    last.at = now;
+    await enter();
+  }
+  return step;
+}
+
+/* Why a turn ends at agy's terms. */
+export const SETUP_NEEDED =
+  "Antigravity CLI asks for its first setup on this machine: to accept its terms of service and choose whether Google may use the interactions data. Only the plan's owner can do it, by running the install command on the machine again, as for a sign-in. Hornhoof never accepts them for a person; the plan's turns wait for it.";
 
 /* agy cuts each rules file, AGENTS.md among them, at 24,000 bytes on a line boundary, and has no setting for it. Longer
    instructions keep their start there, in whole lines well under that, and say where they are whole. */
@@ -201,6 +232,57 @@ async function signInOnScreen(io: LoginIo, { bin, home, env, user, recordingsDir
   }
 }
 
+/* agy keeps its settings, its first-run setup among them, in this file of its home, which is on the node's volume. */
+export const agySettings = (home: string): string => join(home, '.gemini', 'antigravity-cli', 'settings.json');
+
+/* Whether a person passed agy's first-run setup here. agy 1.4.12 shows it until its settings say
+   consumerOnboardingComplete, which it writes once a person accepts its terms. The key skips the terms, so the node only
+   reads it, and not through a link an agent could have put there. */
+function setupPassed(home: string): boolean {
+  try {
+    const settings: unknown = JSON.parse(readPrivate(agySettings(home)) ?? '');
+    return isRecord(settings) && settings.consumerOnboardingComplete === true;
+  } catch {
+    return false;
+  }
+}
+
+/* The person who runs the install command, on agy's session: they see its screen and answer it, until the session ends.
+   None without a terminal of their own. */
+export type Person = (io: LoginIo) => ((tmux: Tmux, session: string) => Promise<void>) | null;
+const onOwnTerminal: Person = io =>
+  io.input === process.stdin && process.stdin.isTTY
+    ? (tmux, session) => new Promise(resolve => tmux.attachHere(session).once('exit', () => resolve()).once('error', () => resolve()))
+    : null;
+
+const SETUP_HANDED =
+  'Antigravity CLI asks you to accept its terms of service and to choose whether Google may use your interactions data. Hornhoof picked its colors and leaves this to you. Its own screen comes next: read it, then choose Done to accept, or press Ctrl+C twice to leave it for now.\n';
+
+type SetUp = { bin: string; home: string; env: NodeJS.ProcessEnv; user: JobUser | null; recordingsDir: string; person: Person };
+
+/* agy's first-run setup, which its owner passes once on the machine after the sign-in. The node answers the colors in a
+   hidden tmux session; the terms go to the person's own terminal, on agy's own screen, and the node presses nothing on
+   them. It ends once agy saved them as accepted, or when agy is closed first. */
+async function setUpOnScreen(io: LoginIo, { bin, home, env, user, recordingsDir, person }: SetUp): Promise<void> {
+  const answer = person(io);
+  if (!answer) throw new Error('Its terms need the terminal of the person who runs the install command.');
+  const tmux = new Tmux({ socket: 'hh-login', env, recordingsDir });
+  const name = 'agy-setup';
+  try {
+    await tmux.launch(name, { cwd: home, command: user ? asAgent([bin], user) : [bin], cols: 120, rows: 40 });
+    const colors = { at: -Infinity };
+    await until(async () => setupPassed(home) || (await pastColors(await tmux.screen(name, 0), () => tmux.keys(name, 'Enter'), colors)) === 'terms', 60_000, 'Antigravity CLI did not show its terms.');
+    if (setupPassed(home)) return;
+    io.output.write(SETUP_HANDED);
+    let watching = true;
+    void answer(tmux, name).finally(() => (watching = false));
+    while (watching && !setupPassed(home) && (await tmux.alive(name))) await pause(250);
+    if (!setupPassed(home)) throw new Error('Antigravity CLI was closed before its terms were accepted.');
+  } finally {
+    await tmux.stopAll();
+  }
+}
+
 /* A folder in the agent's own folder that its program's user may use. */
 function agentDir(path: string, user: JobUser | null): string {
   mkdirSync(path, { recursive: true });
@@ -208,7 +290,7 @@ function agentDir(path: string, user: JobUser | null): string {
   return path;
 }
 
-export function antigravityAdapter({ home, tools, bin = join(tools, 'bin', 'agy'), user = null }: Options): ProviderAdapter {
+export function antigravityAdapter({ home, tools, bin = join(tools, 'bin', 'agy'), user = null, person = onOwnTerminal }: Options): ProviderAdapter {
   /* agy has no setting for its folder: it keeps everything in HOME. It does not replace itself: the program in the node's
      tools folder stays as the node installed it, which agents on a root node could not write anyway. */
   const env = () => childEnv(tools, { HOME: ensureDir(home), AGY_CLI_DISABLE_AUTO_UPDATE: 'true' });
@@ -233,6 +315,14 @@ export function antigravityAdapter({ home, tools, bin = join(tools, 'bin', 'agy'
     async login(io) {
       const signedIn = () => exitsCleanly(bin, ['models'], env(), user);
       await signInOnScreen(io, { bin, home, env: env(), user, recordingsDir: join(dirname(tools), '.hh-recordings'), signedIn });
+    },
+
+    async setupNeeded() {
+      return !setupPassed(home);
+    },
+
+    async setup(io) {
+      await setUpOnScreen(io, { bin, home, env: env(), user, recordingsDir: join(dirname(tools), '.hh-recordings'), person });
     },
 
     async run(input: RunInput): Promise<RunResult> {

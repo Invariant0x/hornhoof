@@ -670,6 +670,7 @@ export const ru: Messages = {
     rate_limited: 'слишком много запросов',
     usage_limit: 'лимит тарифа',
     auth: 'нужен вход',
+    setup: 'нужна первая настройка',
     network: 'ошибка сети',
     cut: 'ответ оборвался',
     refused: 'отказ провайдера',
