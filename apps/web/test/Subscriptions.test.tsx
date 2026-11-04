@@ -58,6 +58,21 @@ describe('Subscriptions', () => {
     expect(plan).toHaveAccessibleName('Claude, Ivan');
   });
 
+  it.each([
+    ['en', 'Waiting for the first setup', 'a-host, waiting for the first setup', 'On a-host, Antigravity asks its owner to accept its terms. Only Ivan can do it, by running the install command on that machine again.'],
+    ['ru', 'Ждет первой настройки', 'a-host, ждет первой настройки', 'На a-host Antigravity просит владельца принять его условия. Это может сделать только Ivan: снова запустить на этой машине команду установки.'],
+  ])("says in %s that a plan waits for its owner to accept its program's terms on the machine", async (language, state, there, fix) => {
+    localStorage.setItem('hh-lang', language);
+    const machines = [{ ...MACHINE, hostname: 'a-host', status: 'needs_setup' as const }, { ...MACHINE, id: 'm2', hostname: 'b-host', status: 'ready' as const, online: false }];
+    lists({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[1]!, id: 's-agy', provider: 'antigravity', label: 'Antigravity', status: 'needs_setup', machines }] }] });
+    render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
+    const row = await screen.findByRole('row', { name: /^Antigravity\b/ });
+    expect(within(row).getByText(state)).toBeInTheDocument();
+    expect(row.textContent).toContain(there);
+    await openAll();
+    expect(rowOf('Antigravity').querySelector('.blk-fix')?.textContent).toContain(fix);
+  });
+
   it('omits the sign-in line while waiting for the login', async () => {
     lists({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[1]!, signedInOnce: true, machines: [MACHINE, { ...SUBS[1]!.machines[0]!, id: 'login', hostname: 'laptop' }] }] }] });
     render(<Subscriptions me={ME} />);

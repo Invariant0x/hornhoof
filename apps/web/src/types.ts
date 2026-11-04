@@ -47,18 +47,21 @@ export type AccessView = { whole: boolean; departments: { id: string; name: stri
 /* What the People screen sends for a person's access. */
 export type AccessInput = { whole: true } | { departments: string[]; teams: string[] };
 
+/* A plan's state on one machine: waiting for the login there, for the first setup of its program, or ready. */
+export type PlanStatus = 'needs_login' | 'needs_setup' | 'ready';
+
 export type SubView = {
   id: string;
   provider: ProviderId;
   kind: 'personal' | 'api_key';
   label: string;
-  status: 'waiting_machine' | 'needs_login' | 'ready';
+  status: 'waiting_machine' | 'needs_login' | 'needs_setup' | 'ready';
   online: boolean;
   last4: string | null;
   owner: { id: string; name: string };
   place: { kind: 'company' | 'department' | 'listed'; id: string | null; name: string };
   /* The machines the plan runs on, oldest first, with its state on each. */
-  machines: { id: string; hostname: string; status: 'needs_login' | 'ready'; online: boolean }[];
+  machines: { id: string; hostname: string; status: PlanStatus; online: boolean }[];
   limits: Limits | null;
   /* The share of each limit window, in percent, that task turns may use; null: the whole limit. */
   budget: number | null;
@@ -177,7 +180,7 @@ export type OrchestratorState = {
   limitUntil?: string | null;
   /* The plan used the share set for tasks until then; task turns wait, people's messages still go. */
   budgetUntil?: string | null;
-  reason: 'no_subscription' | 'waiting_machine' | 'needs_login' | 'node_outdated' | 'machine_offline' | null;
+  reason: 'no_subscription' | 'waiting_machine' | 'needs_login' | 'needs_setup' | 'node_outdated' | 'machine_offline' | null;
   busy: boolean;
   runningJobId: string | null;
   queued: number;
@@ -451,7 +454,7 @@ export type MachineView = {
   online: boolean;
   lastSeenAt: string | null;
   /* The plans that run on it, with their state there; none: it only lends itself to test runs. */
-  plans: { id: string; provider: ProviderId; status: 'needs_login' | 'ready'; online: boolean }[];
+  plans: { id: string; provider: ProviderId; status: PlanStatus; online: boolean }[];
   /* What its nodes said last about how busy it is; none while no node of it is connected. */
   load: NodeLoad | null;
   /* Takes the company's test runs when it is the freest machine. */

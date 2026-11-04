@@ -27,6 +27,7 @@ const STATES: [string, SubView | null, string, string][] = [
   ['API key', SUBS[3]!, 'Ready, on the Anthropic key ending 9f3a', 'На связи, ключ Anthropic, последние символы 9f3a'],
   ['waiting for the machine', { ...claude, status: 'waiting_machine', online: false, machines: [] }, "Waiting for Ivan's machine", 'Ждет машину, владелец Ivan'],
   ['needs login', { ...claude, status: 'needs_login' }, 'Waiting for the Claude login', 'Ждет входа в Claude'],
+  ['needs the first setup', { ...claude, provider: 'antigravity', status: 'needs_setup' }, 'Waiting for the first setup of Antigravity', 'Ждет первой настройки Antigravity'],
   ['ready and offline', { ...claude, online: false }, "Ivan's machine is offline", 'Машина не в сети, владелец Ivan'],
   ['ready and online', claude, "Ready, on Ivan's Claude subscription", 'На связи, подписка Claude, владелец Ivan'],
 ];
