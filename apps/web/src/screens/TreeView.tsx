@@ -1,21 +1,20 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type RefObject } from 'react';
 import { useT } from '../i18n';
 import type { Department, DepartmentTree, TreeAgent } from '../types';
 import { Pulse, motionSpeed, toD, useReducedMotion } from '../ui/wires';
 import {
-  idleClass, treeClock, treeLayout, latestLines, trunkBranch, reviewsOf, rowTaskNumber, statePriority,
+  idleClass, treeClock, treeLayout, trunkBranch, reviewsOf, rowTaskNumber, statePriority,
   type TreeLayout, type TreeBadge, type TreeMark, type TreePick, type TreeRow, type TreeTarget,
 } from './tree';
 import { TreeCardBody, TreeWho } from './TreeCard';
 import { segmentText } from './tree-state';
 import { AgentState } from '../ui/AgentState';
+import { useOpenAgent } from './AgentWindowContext';
+import { CANVAS_ZOOM_LIMITS, usePanZoom, ZoomBar } from '../ui/canvas';
 
 type Props = {
   tree: DepartmentTree;
   department: Department;
-  zoom: number;
-  fit: number;
-  openAgent: { id: string; key: number; top: number } | null;
   onOpenTask(id: string): void;
 };
 type Selection = { pick: TreePick; x: number; y: number };
@@ -358,29 +357,9 @@ function useTreeBox(root: RefObject<HTMLDivElement | null>) {
   return box;
 }
 
-function agentPick(tree: DepartmentTree, layout: TreeLayout, agentId: string): TreePick | undefined {
-  const row = layout.rows.find(r => r.agent?.id === agentId);
-  if (row?.pick) return row.pick;
-  const line = latestLines(tree.lines).find(l => l.agent.id === agentId);
-  return line ? { kind: 'line', taskId: line.taskId, agentId } : undefined;
-}
-
-function useTreeSelection(root: RefObject<HTMLDivElement | null>, props: Props, layout: TreeLayout, width: number) {
+function useTreeSelection(root: RefObject<HTMLDivElement | null>) {
   const [selection, setSelection] = useState<Selection | null>(null);
-  const opened = useRef<number | null>(null), card = useRef<HTMLDivElement>(null);
-  const { tree, openAgent } = props;
-  useEffect(() => {
-    if (!openAgent || opened.current === openAgent.key) return;
-    opened.current = openAgent.key;
-    const pick = agentPick(tree, layout, openAgent.id);
-    if (pick) {
-      setSelection({
-        pick,
-        x: Math.max(0, width - 348),
-        y: openAgent.top - (root.current?.getBoundingClientRect().top ?? 0) - 20,
-      });
-    }
-  }, [openAgent, tree, layout, width, root]);
+  const card = useRef<HTMLDivElement>(null), openAgent = useOpenAgent();
   useEffect(() => {
     if (!selection) return;
     const key = (e: KeyboardEvent) => {
@@ -400,6 +379,11 @@ function useTreeSelection(root: RefObject<HTMLDivElement | null>, props: Props, 
     };
   }, [selection]);
   function select(pick: TreePick, e: MouseEvent) {
+    if (pick.agentId) {
+      setSelection(null);
+      openAgent(pick.agentId);
+      return;
+    }
     const rect = root.current!.getBoundingClientRect(), anchor = e.currentTarget.getBoundingClientRect();
     const x = e.currentTarget.classList.contains('lchip')
       ? anchor.right - rect.left + 8
@@ -450,29 +434,60 @@ function fitBadges(layout: TreeLayout, t: ReturnType<typeof useT>, phone: boolea
 }
 
 export function TreeView(props: Props) {
-  const { tree, department, zoom, fit } = props, t = useT();
+  const { tree, department } = props, t = useT();
   const root = useRef<HTMLDivElement>(null), scroll = useRef<HTMLDivElement>(null);
   const box = useTreeBox(root);
-  const layout = useMemo(() => fitBadges(treeLayout(tree, { ...box, agentOrder: department.employees.map(e => e.id) }, zoom), t, box.phone), [tree, department, box, zoom, t]);
-  const { selection, card, select, close } = useTreeSelection(root, props, layout, box.width);
-  useLayoutEffect(() => {
-    if (scroll.current) scroll.current.scrollLeft = scroll.current.scrollWidth;
-  }, [fit, box, zoom]);
+  const layout = useMemo(() => fitBadges(treeLayout(tree, { ...box, agentOrder: department.employees.map(e => e.id) }, 1), t, box.phone), [tree, department, box, t]);
+  const { view, zoomAt, handlers, dragged, fit } = useTreeNavigation(scroll, layout, box, !!tree.turn);
+  const { selection, card, select, close } = useTreeSelection(root);
   const canvas = { layout, tree, department, phone: box.phone, selected: selection?.pick ?? null, select };
   return (
-    <div className="tview" ref={root}>
-      {!tree.turn ? <p className="tv-empty glass">{t.dept.treeNoTurn}</p> : (
-        <>
-          <div className="tv-scroll" ref={scroll}>
-            <div className="tv-in">
-              <Labels {...canvas} />
-              <Graph {...canvas} />
+    <>
+      <div className="tview" ref={root}>
+        {!tree.turn ? <p className="tv-empty glass">{t.dept.treeNoTurn}</p> : (
+          <>
+            <div className="tv-scroll" ref={scroll} role="region" aria-label={t.dept.treeCanvas} {...handlers}
+              onClickCapture={e => ignoreDraggedClick(e, dragged)}>
+              <div className="tv-in" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})` }}>
+                <Labels {...canvas} />
+                <Graph {...canvas} />
+              </div>
             </div>
-          </div>
-          <Legend tree={tree} />
-          {selection && <FloatingCard {...props} selection={selection} card={card} box={box} onClose={close} />}
-        </>
-      )}
-    </div>
+            <Legend tree={tree} />
+            {selection && <FloatingCard {...props} selection={selection} card={card} box={box} onClose={close} />}
+          </>
+        )}
+      </div>
+      <ZoomBar k={view.k} onZoom={zoomAt} onFit={fit} />
+    </>
   );
+}
+
+function useTreeNavigation(viewport: RefObject<HTMLDivElement | null>, layout: TreeLayout, box: { width: number; height: number }, ready: boolean) {
+  const [minZoom, setMinZoom] = useState(CANVAS_ZOOM_LIMITS.min);
+  const pan = usePanZoom(viewport, ready, { min: minZoom, max: CANVAS_ZOOM_LIMITS.max });
+  const { setView } = pan;
+  const placed = useRef(''), frame = `${box.width}:${box.height}:${ready}`;
+  const width = layout.labelWidth + layout.width, height = layout.height;
+  const fit = useCallback(() => {
+    if (viewport.current) {
+      viewport.current.scrollLeft = 0;
+      viewport.current.scrollTop = 0;
+    }
+    const k = Math.min(1, (box.width - 24) / width, (box.height - 24) / height);
+    setMinZoom(Math.min(CANVAS_ZOOM_LIMITS.min, k));
+    setView({ k, x: Math.max(12, (box.width - width * k) / 2), y: 12, smooth: false });
+  }, [viewport, width, height, box.width, box.height, setView]);
+  useLayoutEffect(() => {
+    if (placed.current === frame) return;
+    placed.current = frame;
+    fit();
+  }, [fit, frame]);
+  return { ...pan, fit };
+}
+
+function ignoreDraggedClick(event: MouseEvent, dragged: () => boolean): void {
+  if (!event.detail || !dragged()) return;
+  event.preventDefault();
+  event.stopPropagation();
 }

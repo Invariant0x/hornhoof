@@ -803,7 +803,8 @@ button.shead:focus-visible, button.schip:focus-visible { outline: none; }
 body:has(.dview) .version-mark { display: none; }
 /* The line of what changed sits between the zoom and the actions. */
 .dview .ticker { left: 212px; right: var(--ticker-right, 16px); transform: none; max-width: none; }
-.dv-drawer { position: absolute; z-index: 4; top: 68px; left: 16px; bottom: 76px; width: 400px; max-width: calc(100% - 32px); box-sizing: border-box; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-top: 2px solid var(--cyan); box-shadow: 0 24px 60px var(--shadow); }
+.dv-drawer { position: absolute; z-index: 4; }
+.dv-drawer, .acard { top: 68px; left: 16px; bottom: 76px; width: 400px; max-width: calc(100% - 32px); box-sizing: border-box; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-top: 2px solid var(--cyan); box-shadow: 0 24px 60px var(--shadow); }
 .dv-drawer-h { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 6px 6px 18px; border-bottom: 1px solid var(--line); }
 .dv-drawer-h b { font-family: var(--f-display); font-size: 16px; font-weight: 600; }
 .dv-drawer-b { flex: 1 1 auto; min-height: 0; overflow: auto; display: grid; gap: 24px; align-content: start; padding: 16px 18px 20px; }
@@ -841,8 +842,8 @@ body:has(.dview) .version-mark { display: none; }
 .repo-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 4px; font-size: 13px; }
 .dv-side li .repo { margin-top: 6px; }
 
-/* An agent's card in the right panel. */
-.acard { position: fixed; z-index: 9; top: 68px; right: 16px; bottom: 76px; width: 460px; box-sizing: border-box; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-top: 2px solid var(--cyan); box-shadow: 0 24px 60px var(--shadow); }
+/* Agent settings and task details share the left panel's frame. */
+.acard { position: fixed; z-index: 9; }
 /* A page has no strip at the bottom: there a card, task or window lies over it down to the bottom of the window, and the page
    keeps its width and place under it. */
 .body.page ~ .acard, .body.page ~ .orch { bottom: 0; }
@@ -895,8 +896,7 @@ textarea.ac-text:focus { outline: none; border-color: var(--cyan); box-shadow: 0
   .crumbs { top: 64px; left: 16px; max-width: calc(100% - 32px); }
   .dview .ticker { left: 16px; right: 16px; }
   .dv-acts { left: 16px; right: 16px; bottom: 124px; flex-wrap: wrap; }
-  .dv-drawer { top: 116px; bottom: 16px; width: auto; right: 16px; }
-  .acard { left: 0; right: 0; top: 56px; bottom: 0; width: auto; border-left: 0; border-right: 0; }
+  .dv-drawer, .acard { top: 116px; bottom: 16px; width: auto; right: 16px; }
   .ac-pick, .staff-pick { grid-template-columns: minmax(0, 1fr); }
   .staff-pick { margin-left: 0; }
 }
@@ -1066,13 +1066,12 @@ summary.turn-head:focus-visible { outline: 2px solid var(--cyan); outline-offset
 .hbtn.ib .gl { stroke: var(--cyan); }
 .hbtn.ib:hover { color: var(--cyan-ink); }
 
-.dv-drawer.right { left: auto; right: 16px; }
 .tview { position: absolute; top: 68px; left: 16px; right: 16px; bottom: 76px; background-image: radial-gradient(var(--dot) 1px, transparent 1px); background-size: 22px 22px; }
-.dview.spd-open .tview { right: 432px; }
 .tview .tv-empty { margin: 32px; padding: 12px 16px; width: fit-content; color: var(--muted); }
-.tview .tv-scroll { position: absolute; inset: 0; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; }
-.tview .tv-in { display: flex; width: max-content; min-width: 100%; }
-.tview .tv-labs { position: sticky; left: 0; z-index: 3; flex: none; background: linear-gradient(to right, var(--bg) calc(100% - 12px), transparent); }
+.tview .tv-scroll { position: absolute; inset: 0; overflow: hidden; cursor: grab; touch-action: none; user-select: none; }
+.tview .tv-scroll:active { cursor: grabbing; }
+.tview .tv-in { display: flex; width: max-content; transform-origin: 0 0; }
+.tview .tv-labs { position: relative; z-index: 3; flex: none; background: linear-gradient(to right, var(--bg) calc(100% - 12px), transparent); }
 .tview .tv-in > svg { display: block; flex: none; }
 .tview .lchip { --cut: 8px; position: absolute; left: 0; right: 10px; display: block; padding: 1px; border: 0; background: var(--line2); cursor: pointer; text-align: left; clip-path: polygon(0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, var(--cut) 100%, 0 calc(100% - var(--cut))); }
 .tview .lchip > .in { display: flex; flex-direction: column; justify-content: center; gap: 1px; height: 100%; padding: 0 10px; background: var(--hud); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); clip-path: inherit; }
@@ -1251,8 +1250,7 @@ summary.turn-head:focus-visible { outline: 2px solid var(--cyan); outline-offset
 .dv-drawer.spd .dv-drawer-b { gap: 16px; }
 @keyframes breathe { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
 @media (max-width: 760px) {
-  .dv-drawer.spd { left: 0; right: 0; top: auto; bottom: 0; width: auto; max-width: none; height: 76%; border-left: 0; border-right: 0; box-shadow: 0 -18px 50px var(--shadow); }
-  .tview, .dview.spd-open .tview { top: 116px; right: 16px; bottom: var(--tree-bottom, 228px); }
+  .tview { top: 116px; right: 16px; bottom: var(--tree-bottom, 228px); }
   .tview .tv-card { position: fixed; left: 0 !important; right: 0; top: auto !important; bottom: 0; width: auto; }
   .tview .tv-card-in { max-height: min(440px, 76vh); }
   .tview .lgd-b span, .tview .tv-title { display: none; }

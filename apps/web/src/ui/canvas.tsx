@@ -3,6 +3,13 @@ import { useT } from '../i18n';
 
 /* A press that moves further than this drags the canvas instead of clicking. */
 export const DRAG_PX = 4;
+export const CANVAS_ZOOM_LIMITS = { min: .3, max: 2.5 };
+export const CANVAS_NARROW = 760;
+export const LEFT_PANEL_COVER = 432;
+
+export function canvasSpace(width: number, left: number, right: number): { left: number; width: number } {
+  return width <= CANVAS_NARROW ? { left: 0, width } : { left, width: width - left - right };
+}
 
 /* smooth: the change came from Fit and glides, or flies into a department; drag and zoom follow the hand at once. */
 export type View = { x: number; y: number; k: number; smooth: boolean | 'fly' };
