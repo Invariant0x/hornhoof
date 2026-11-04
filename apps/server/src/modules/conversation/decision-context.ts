@@ -85,7 +85,7 @@ export async function requireDecider(db: Reader, companyId: string, personId: st
 }
 
 /* The person, if they are the CEO or the CEO delegate now. */
-async function actingCeo(db: Reader, personId: string): Promise<string | null> {
+export async function actingCeo(db: Reader, personId: string): Promise<string | null> {
   const [p] = await db
     .select({ status: people.status, scopeKind: people.scopeKind, isOwner: people.isOwner, isCeoDelegate: people.isCeoDelegate, companyId: people.companyId })
     .from(people)

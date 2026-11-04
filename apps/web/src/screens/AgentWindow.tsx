@@ -1,17 +1,20 @@
 import { commandBlockOpen } from '../ui/CommandBox';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { api } from '../api';
+import { api, ApiFailure } from '../api';
 import { deptLabel, errorText, useLanguage, useT, type Messages } from '../i18n';
 import { useStream } from '../live';
+import { liveOf } from '../org';
 import { PROGRAM_NAMES, PROVIDER_NAMES } from '../providers';
 import type { AgentCardView, ComputerView, DecidedBy, Decisions, EventView, Me, OrchestratorState, Org, ShownCommand, StaffLine, StructureItem, SubView, TemplateKey, WaitingRequest } from '../types';
 import { EventMessage, isMessage, messageKey, useFolding } from '../ui/AgentMessage';
+import { AgentCard } from '../ui/AgentCard';
 import { AgentTerminal } from '../ui/AgentTerminal';
 import { CommandCard } from '../ui/CommandCard';
 import { CEO_DECIDES } from '../ui/DecidedBy';
 import { ComputerStrip } from '../ui/ComputerStrip';
 import { Markdown } from '../ui/Markdown';
 import { Notebook } from '../ui/Notebook';
+import { framedPanel, type WindowPanel } from '../ui/SidePanels';
 import { StaffCard } from '../ui/StaffCard';
 import { StructureCard } from '../ui/StructureCard';
 import { orchestratorStatus } from './Map';
@@ -24,6 +27,8 @@ const PAGE = 500;
 const POLL_MS = 15_000;
 /* Many lines can arrive in a second while he works; one catch-up covers them. */
 const CATCH_UP_MS = 300;
+const NOTEBOOK_ICON = 'M6 4h11v16H6zM9 4v16M12 9h3M12 13h3';
+const CARD_ICON = 'M4 7h10M18 7h2M4 17h4M12 17h8M14 4v6M8 14v6';
 
 type Applied = {
   proposalId: string | null;
@@ -68,9 +73,12 @@ const PLAN_WAITS: Partial<Record<NonNullable<OrchestratorState['reason']>, (t: M
 function reasonText(t: Messages, reason: OrchestratorState['reason'], sub: SubView | null): string {
   const waits = reason && sub ? PLAN_WAITS[reason]?.(t, sub) : undefined;
   if (waits) return waits;
-  if (reason === 'browser_failed') return sub?.kind === 'personal' ? t.window.browserFailed(sub.owner.name) : t.window.builtinBrowserFailed;
   if (reason === 'machine_offline') return sub?.kind === 'personal' ? t.map.machineOffline(sub.owner.name) : t.window.builtinOffline;
   return t.map.needsSubscription;
+}
+
+function browserWarning(t: Messages, reason: string, sub: SubView | null): string {
+  return sub?.kind === 'personal' ? t.window.browserFailed(sub.owner.name, reason) : t.window.builtinBrowserFailed(reason);
 }
 
 function failedText(t: Messages, data: unknown, employee: boolean): string {
@@ -82,7 +90,7 @@ function failedText(t: Messages, data: unknown, employee: boolean): string {
 export type StaffAsk = { id: string; name: string; at: number };
 
 /* agentId: 'orchestrator' or an employee's id. staff: the CEO's "+ Hire", for the orchestrator's window only. */
-type Props = { me: Me; org: Org; agentId: string; staff?: StaffAsk | null; onClose(): void; onCard?(): void; openRequest?: number; onMinimizedChange?(minimized: boolean): void; requests?: WaitingRequest[]; onRequestsChanged?(): void };
+type Props = { me: Me; org: Org; agentId: string; staff?: StaffAsk | null; onClose(): void; openRequest?: number; onMinimizedChange?(minimized: boolean): void; requests?: WaitingRequest[]; onRequestsChanged?(): void };
 
 type CardRight = { id: string; canAnswer: boolean };
 
@@ -142,9 +150,10 @@ function stopOnEscape(e: globalThis.KeyboardEvent, box: HTMLElement | null, stop
   if (e.key === 'Escape' && !e.defaultPrevented && !box?.hidden) stop();
 }
 
-/* An agent's window: its live terminal when its node shows one, or its conversation as a log with a line to write to it;
-   and the orchestrator's cards. */
-export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard, openRequest, onMinimizedChange, requests = [], onRequestsChanged = () => {} }: Props) {
+/* An agent's window: its live terminal when its node shows one, or its conversation as a log; a line to write to it for
+   anyone who cannot type into that terminal; and the orchestrator's cards. Whoever reaches this window may write: the
+   server opens the agent's conversation and takes a message by the same rule. */
+export function AgentWindow({ me, org, agentId, staff = null, onClose, openRequest, onMinimizedChange, requests = [], onRequestsChanged = () => {} }: Props) {
   const t = useT();
   const { language } = useLanguage();
   const orchestrator = agentId === 'orchestrator';
@@ -160,9 +169,6 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard, o
   const [staffByHand, setStaffByHand] = useState<{ id: string; name: string } | null>(null);
   /* The terminal shows unless the person asked for the log or the node could not show one. */
   const [asLog, setAsLog] = useState(false);
-  /* The orchestrator's window shows the company notebook in place of his conversation while this is on, a head's its
-     department's. */
-  const [notebook, setNotebook] = useState(false);
   const [noTerminal, setNoTerminal] = useState(false);
   /* The machine commands he asked Hornhoof for. They are the CEO's alone: only the CEO's screen gets them, and shows them
      here, apart from his conversation. */
@@ -240,7 +246,11 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard, o
         if (res.events.length < PAGE) break;
       }
     } catch (err) {
-      if (mounted.current) setFailure(err);
+      if (mounted.current) {
+        setFailure(err);
+        /* The server no longer lets this person reach the agent: nothing of it stays open, its line to write included. */
+        if (err instanceof ApiFailure && err.status === 403) setState(null);
+      }
     }
     await loadCommands();
   }, [loadCommands, merge, path]);
@@ -370,6 +380,13 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard, o
 
   const hasTerminal = Boolean(state?.terminal) && !noTerminal;
   const terminal = hasTerminal && !asLog;
+  /* Only the owner of the agent's plan types into its live terminal, which has its own line. */
+  const hasLine = !terminal || !state?.canType;
+  /* Someone the terminal takes no keys from starts in the line under it. */
+  const lineUnderTerminal = known && terminal && hasLine;
+  useEffect(() => {
+    if (lineUnderTerminal) input.current?.focus();
+  }, [lineUnderTerminal]);
   /* One card at a time: his newest proposal until it is applied, below his latest line. */
   const shown = visible(events);
   const messages = shown.filter(isMessage);
@@ -538,8 +555,14 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard, o
     }
   }
 
+  /* The orchestrator's notebook is the company's, a head's its department's. */
+  const sidePanels: WindowPanel[] = [
+    ...(orchestrator || headOf ? [framedPanel('notebook', t.window.notebook, NOTEBOOK_ICON, <Notebook departmentId={orchestrator ? null : headOf} />)] : []),
+    { id: 'card', label: t.window.card, icon: CARD_ICON, render: close => <AgentCard me={me} agentId={agentId} {...liveOf(org, agentId)} onClose={close} onRemoved={onClose} /> },
+  ];
+
   return (
-    <AgentWindowLayout currentTask={card?.currentTask} box={box} terminal={terminal} title={title} onClose={onClose} openRequest={openRequest} onMinimizedChange={onMinimizedChange} requests={requests} onRequestsChanged={onRequestsChanged} toolbar={<>
+    <AgentWindowLayout currentTask={card?.currentTask} box={box} terminal={terminal} title={title} onClose={onClose} openRequest={openRequest} onMinimizedChange={onMinimizedChange} requests={requests} onRequestsChanged={onRequestsChanged} panels={sidePanels} toolbar={<>
         {terminal && state?.busy && (
           <button className="btn small ghost" type="button" onClick={stop}>
             {t.window.stop}
@@ -552,23 +575,8 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard, o
             </svg>
           </button>
         )}
-        {(orchestrator || headOf) && (
-          <button type="button" aria-label={t.window.notebook} title={t.window.notebook} aria-pressed={notebook} onClick={() => setNotebook(v => !v)}>
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M6 4h11v16H6zM9 4v16M12 9h3M12 13h3" />
-            </svg>
-          </button>
-        )}
-        {onCard && (
-          <button type="button" aria-label={t.window.card} onClick={onCard}>
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M4 7h10M18 7h2M4 17h4M12 17h8M14 4v6M8 14v6" />
-            </svg>
-          </button>
-        )}
     </>}>
-      {notebook && <Notebook departmentId={orchestrator ? null : headOf} />}
-      {!notebook && !known && (
+      {!known && (
         <div className="t-log" aria-busy="true">
           {failure !== null && (
             <p className="alert" role="alert">
@@ -577,16 +585,16 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard, o
           )}
         </div>
       )}
-      {!notebook && known && terminal && (
-        <AgentTerminal path={`/api/agents/${agentId}/terminal`} program={sub ? PROGRAM_NAMES[sub.provider] : 'Claude'} onGone={() => setNoTerminal(true)} />
+      {known && terminal && (
+        <AgentTerminal path={`/api/agents/${agentId}/terminal`} program={sub ? PROGRAM_NAMES[sub.provider] : 'Claude'} onGone={() => setNoTerminal(true)} watching={hasLine} />
       )}
-      {!notebook && known && terminal && hasCards && (
+      {known && terminal && hasCards && (
         <div className="t-cards">
           {cards}
           {after}
         </div>
       )}
-      {!notebook && known && !terminal && (
+      {known && !terminal && (
         <div className="t-log" ref={log} role="log">
           <div className="t-wel">
             <div className="w1">
@@ -615,12 +623,12 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard, o
           {after}
         </div>
       )}
-      {!notebook && known && <ComputerStrip machines={computer ? [computer] : []} onChange={next => mounted.current && setComputer(next)} onFailure={err => mounted.current && setFailure(err)} />}
+      {known && <ComputerStrip machines={computer ? [computer] : []} onChange={next => mounted.current && setComputer(next)} onFailure={err => mounted.current && setFailure(err)} />}
       {known && !ready && <p className="t-why">{reasonText(t, state.reason, sub)}</p>}
+      {known && state.browserError && <p className="t-why">{browserWarning(t, state.browserError, sub)}</p>}
       {known && state?.limitUntil && <p className="t-why">{t.window.limitUntil(clock(language, state.limitUntil)!)}</p>}
       {known && !state?.limitUntil && state?.budgetUntil && <p className="t-why">{t.window.budgetUntil(clock(language, state.budgetUntil)!)}</p>}
-      {/* A live terminal has its own line to type in; the log needs this one. */}
-      {known && !terminal && (
+      {known && hasLine && (
         <form
           className="t-in"
           onSubmit={e => {
@@ -637,7 +645,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard, o
       )}
       <div className="t-st">
         {known && <span>{where}</span>}
-        {known && !terminal && <span>{t.window.hint}</span>}
+        {known && hasLine && <span>{t.window.hint}</span>}
       </div>
     </AgentWindowLayout>
   );

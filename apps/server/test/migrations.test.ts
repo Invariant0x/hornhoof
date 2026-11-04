@@ -903,6 +903,36 @@ describe('migration 0053', () => {
   });
 });
 
+describe('migration 0056', () => {
+  it('makes only unstarted stale wakes obsolete', async () => {
+    const source = new PGlite();
+    onTestFinished(() => source.close());
+    let db = drizzle(source);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0053_person_changes') });
+    const company = (await db.execute<{ id: string }>(sql`insert into companies (name) values ('Demo') returning id`)).rows[0]!.id;
+    const person = (await db.execute<{ id: string }>(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Owner', 'owner@example.test', 'active', 'company') returning id`)).rows[0]!.id;
+    const sub = (await db.execute<{ id: string }>(sql`insert into subscriptions (company_id, provider, kind, label, owner_person_id, status) values (${company}, 'anthropic_api', 'api_key', 'Key', ${person}, 'ready') returning id`)).rows[0]!.id;
+    const machine = (await db.execute<{ id: string }>(sql`insert into machines (company_id, person_id, machine_key, hostname) values (${company}, ${person}, 'build-key', 'build-box') returning id`)).rows[0]!.id;
+    const node = (await db.execute<{ id: string }>(sql`insert into nodes (company_id, machine_id, status) values (${company}, ${machine}, 'ready') returning id`)).rows[0]!.id;
+    await db.execute(sql`insert into jobs (company_id, subscription_id, prompt, timeout_ms, status, error, failure, started_at, node_id) values
+      (${company}, ${sub}, 'Unstarted stale', 1000, 'failed', 'stale', '{"kind":"unknown","text":"Old failure","retryable":false}', null, null),
+      (${company}, ${sub}, 'Started stale', 1000, 'failed', 'stale', '{"kind":"unknown","text":"Running failure","retryable":false}', now(), null),
+      (${company}, ${sub}, 'Node stale', 1000, 'failed', 'stale', '{"kind":"unknown","text":"Node failure","retryable":false}', null, ${node}),
+      (${company}, ${sub}, 'Timeout', 1000, 'failed', 'timeout', null, null, null)`);
+
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+
+    const rows = await db.execute<{ prompt: string; status: string; error: string }>(sql`select prompt, status, error from jobs order by prompt`);
+    expect(rows.rows).toEqual([
+      { prompt: 'Node stale', status: 'failed', error: 'stale' },
+      { prompt: 'Started stale', status: 'failed', error: 'stale' },
+      { prompt: 'Timeout', status: 'failed', error: 'timeout' },
+      { prompt: 'Unstarted stale', status: 'obsolete', error: 'stale' },
+    ]);
+  });
+});
+
 describe('migration 0046', () => {
   it('recovers a missing migration below the newest recorded timestamp exactly once', async () => {
     const logged = vi.spyOn(console, 'info').mockImplementation(() => {});

@@ -1,3 +1,4 @@
+import { taskWaitText } from './task-wait';
 import { useEffect, useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { errorText, useLanguage, useT, type Messages } from '../i18n';
@@ -8,6 +9,7 @@ import type { AgentRef, TaskDetail, TaskLogLine, WaitingRequest } from '../types
 import { Field } from './Field';
 import { Markdown } from './Markdown';
 import { Requests, wordsAnswer } from './Requests';
+import { PanelFrame } from './SidePanels';
 
 const field = (data: unknown, key: string): unknown => (data && typeof data === 'object' && key in data ? (data as Record<string, unknown>)[key] : undefined);
 
@@ -58,9 +60,17 @@ function skippedText(t: Messages, e: TaskLogLine): string {
   return typeof job === 'string' ? `${text} ${t.tasks.skippedJob(job)}` : text;
 }
 
+function obsoleteText(t: Messages, e: TaskLogLine): string {
+  const wake = field(e.data, 'wake');
+  if (typeof wake !== 'string') return e.text;
+  const run = t.tasks.skippedRuns[wake] ?? t.tasks.skippedRuns.task!;
+  return t.tasks.obsoleteRun(authorOf(t, e), run);
+}
+
 /* System log lines use the person's language; employees' own words stay as they wrote them. */
 const systemText: Record<string, (t: Messages, e: TaskLogLine, when: (at: string) => string) => string | null> = {
   wake_skipped: skippedText,
+  wake_obsolete: obsoleteText,
   interrupted: (t, e, when) => cutText(t, e.data, when),
 };
 const lineText = (t: Messages, e: TaskLogLine, when: (at: string) => string): string => systemText[e.kind]?.(t, e, when) || e.text;
@@ -73,7 +83,7 @@ function ExternalTaskWait({ wait }: { wait: TaskDetail['externalWait'] }) {
   const { language } = useLanguage();
   if (!wait) return null;
   const until = new Date(wait.until).toLocaleTimeString(language === 'ru' ? 'ru-RU' : 'en-GB', { hour: '2-digit', minute: '2-digit' });
-  return <p className="muted">{t.dept.tree.externalWaiting(wait.reason, until)}</p>;
+  return <p className="muted">{taskWaitText(t, wait, until)}</p>;
 }
 
 function TaskBody({ task, onOpen, onChanged, waiting }: { task: TaskDetail; onOpen: (id: string) => void; onChanged: () => void; waiting: Waiting }) {
@@ -301,24 +311,9 @@ export function TaskPanel({ taskId, onClose, onOpen, active = true, ...waiting }
   const title = task ? `#${task.number} ${task.title}` : t.tasks.heading;
   useEscapeCloses(onClose, active);
   return (
-    <aside className="acard tpanel" aria-label={title} aria-busy={!task && failure === null}>
-      <div className="t-bar">
-        <span className="lights" aria-hidden="true">
-          <i />
-          <i />
-          <i />
-        </span>
-        <span>{task ? `#${task.number}` : ''}</span>
-        <button type="button" aria-label={t.window.close} onClick={onClose}>
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M6 6l12 12M18 6L6 18" />
-          </svg>
-        </button>
-      </div>
-      <div className="ac-body">
-        {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
-        {task && <TaskBody task={task} onOpen={onOpen} onChanged={load} waiting={waiting} />}
-      </div>
-    </aside>
+    <PanelFrame label={title} heading={task ? `#${task.number}` : ''} busy={!task && failure === null} onClose={onClose}>
+      {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
+      {task && <TaskBody task={task} onOpen={onOpen} onChanged={load} waiting={waiting} />}
+    </PanelFrame>
   );
 }

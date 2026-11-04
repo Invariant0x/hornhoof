@@ -36,6 +36,7 @@ type FakeTerminal = {
   clearSelection(): void;
   resized(cols: number, rows: number): void;
   disposed: boolean;
+  focused: number;
 };
 
 vi.mock('@xterm/xterm', () => ({
@@ -46,6 +47,7 @@ vi.mock('@xterm/xterm', () => ({
     rows = 30;
     selection = '';
     disposed = false;
+    focused = 0;
     /* The history above the screen, and the line the view starts at: at the bottom when they are equal. */
     /* Rows that go on the line above them, as xterm wraps a line longer than the terminal is wide. */
     wrapped = new Set<number>();
@@ -94,7 +96,9 @@ vi.mock('@xterm/xterm', () => ({
       parent?.appendChild(this.element);
       setTimeout(() => this.synced('open'));
     }
-    focus() {}
+    focus() {
+      this.focused++;
+    }
     hasSelection() {
       return this.selection.length > 0;
     }
@@ -322,6 +326,20 @@ describe("an agent's live terminal in its window", () => {
     expect(terms[0]!.options.disableStdin).toBe(true);
     terms[0]!.type('ls\r');
     expect(ws.sent).toEqual([]);
+  });
+
+  it('takes the focus for the person who types into it', async () => {
+    open(true, { canType: true });
+    await socket();
+    expect(terms.at(-1)!.focused).toBe(1);
+  });
+
+  it('leaves the focus to the line under it for someone who only watches', async () => {
+    open(true, { canType: false });
+    const line = await screen.findByRole('textbox', { name: 'Write to the orchestrator' });
+    await socket();
+    expect(terms.at(-1)!.focused).toBe(0);
+    expect(line).toHaveFocus();
   });
 
   it('offers Stop above the terminal while the agent works', async () => {

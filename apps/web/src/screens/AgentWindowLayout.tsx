@@ -1,6 +1,7 @@
-import { useEffect, useId, useRef, useState, type ReactNode, type Ref, type RefObject } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { useT } from '../i18n';
 import type { AgentCardView, WaitingRequest } from '../types';
+import { SidePanelRow, useSidePanels, type SidePanel, type WindowPanel } from '../ui/SidePanels';
 import { TaskPanel } from '../ui/TaskPanel';
 import { useOpenAgent } from './AgentWindowContext';
 
@@ -11,24 +12,27 @@ type Props = Waiting & {
   terminal: boolean;
   box: RefObject<HTMLElement | null>;
   toolbar: ReactNode;
+  /* What else slides out of this window besides its task, each opened by its icon in the bar. */
+  panels?: WindowPanel[];
   children: ReactNode;
   openRequest?: number;
   onMinimizedChange?(minimized: boolean): void;
   onClose(): void;
 };
 
-type CurrentTask = { id: string | null; why: string };
+const TASK_PANEL = 'task';
 
-function TaskToggle({ current, taskId, onTask, panelId, button }: { current: CurrentTask; taskId: string | null; onTask(id: string | null): void; panelId: string; button: Ref<HTMLButtonElement> }) {
+function TaskToggle({ currentId, open, onToggle, panelsId }: { currentId: string | null; open: boolean; onToggle(opener: HTMLElement): void; panelsId: string }) {
   const t = useT();
-  const explanationId = useId();
-  return <>
-    <button ref={button} className="btn small ghost" type="button" disabled={!current.id} aria-disabled={!current.id} aria-expanded={taskId !== null} aria-controls={panelId} aria-describedby={current.id ? undefined : explanationId} title={current.id ? t.window.task : current.why} onClick={() => onTask(taskId ? null : current.id)}>{current.id ? t.window.task : t.window.noTask}</button>
-    {!current.id && <p className="t-why agent-task-explanation" id={explanationId} role="status">{current.why}</p>}
-  </>;
+  const [label, other] = currentId ? [t.window.task, t.window.noTask] : [t.window.noTask, t.window.task];
+  return <button className="btn small ghost agent-task-toggle" data-other={other} type="button" disabled={!currentId} aria-disabled={!currentId} aria-expanded={open} aria-controls={panelsId} title={label} onClick={e => onToggle(e.currentTarget)}>{label}</button>;
 }
 
-const windowClasses = (terminal: boolean, hasTask: boolean, full: boolean): string => ['orch', terminal && 'term', hasTask && 'with-agent-task', full && 'fullscreen'].filter(Boolean).join(' ');
+function PanelToggle({ panel, open, onToggle, panelsId }: { panel: WindowPanel; open: boolean; onToggle(opener: HTMLElement): void; panelsId: string }) {
+  return <button type="button" aria-label={panel.label} title={panel.label} aria-expanded={open} aria-controls={panelsId} onClick={e => onToggle(e.currentTarget)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d={panel.icon} /></svg></button>;
+}
+
+const windowClasses = (terminal: boolean, withPanels: boolean, full: boolean): string => ['orch', terminal && 'term', withPanels && 'with-panels', full && 'fullscreen'].filter(Boolean).join(' ');
 
 function WindowControls({ full, onFull, onMinimize, onClose }: { full: boolean; onFull(): void; onMinimize(): void; onClose(): void }) {
   const t = useT();
@@ -40,11 +44,15 @@ function WindowControls({ full, onFull, onMinimize, onClose }: { full: boolean; 
   </div>;
 }
 
-function AgentTask({ taskId, active, onClose, onOpen, requests, onRequestsChanged }: Waiting & { taskId: string; active: boolean; onClose(): void; onOpen(id: string): void }) {
+/* The agent's task as a panel of its window. Links in it open others in its place. Escape is the panels' own here. */
+function useTaskPanel(currentId: string | null, { requests, onRequestsChanged }: Waiting) {
   const openAgent = useOpenAgent();
-  return <div className="agent-task">
-    <TaskPanel taskId={taskId} active={active} onClose={onClose} onOpen={onOpen} requests={requests.filter(r => r.task.id === taskId)} onRequestsChanged={onRequestsChanged} onOpenAgent={openAgent} />
-  </div>;
+  const [taskId, setTaskId] = useState<string | null>(null);
+  useEffect(() => { setTaskId(null); }, [currentId]);
+  const panels: SidePanel[] = taskId
+    ? [{ id: TASK_PANEL, render: close => <TaskPanel key={taskId} taskId={taskId} active={false} onClose={close} onOpen={setTaskId} requests={requests.filter(r => r.task.id === taskId)} onRequestsChanged={onRequestsChanged} onOpenAgent={openAgent} /> }]
+    : [];
+  return { panels, showCurrent: () => setTaskId(currentId) };
 }
 
 function useWindowFocus(minimized: boolean, box: RefObject<HTMLElement | null>, restore: RefObject<HTMLButtonElement | null>): void {
@@ -63,33 +71,31 @@ function useMinimized(openRequest: number | undefined, onChange?: (minimized: bo
   return { minimized, setMinimized };
 }
 
-/* Hiding keeps the live terminal, drafts, task and previous size until the window is restored. */
-export function AgentWindowLayout({ currentTask, title, terminal, box, toolbar, children, openRequest, onMinimizedChange, onClose, ...waiting }: Props) {
+/* Hiding keeps the live terminal, drafts, panels and previous size until the window is restored. */
+export function AgentWindowLayout({ currentTask, title, terminal, box, toolbar, panels = [], children, openRequest, onMinimizedChange, onClose, ...waiting }: Props) {
   const t = useT();
-  const current: CurrentTask = { id: currentTask?.id ?? null, why: currentTask === undefined ? t.common.loading : t.window.noTaskWhy };
-  const [taskId, setTaskId] = useState<string | null>(null);
+  const currentId = currentTask?.id ?? null;
+  const task = useTaskPanel(currentId, waiting);
   const { minimized, setMinimized } = useMinimized(openRequest, onMinimizedChange);
   const [full, setFull] = useState(false);
-  const taskButton = useRef<HTMLButtonElement>(null);
   const restoreButton = useRef<HTMLButtonElement>(null);
-  const taskPanelId = useId();
-  useEffect(() => { setTaskId(null); }, [current.id]);
+  const panelsId = useId();
+  const stack = useSidePanels([...panels, ...task.panels], box, !minimized);
+  const newest = stack.shown.at(-1);
   useWindowFocus(minimized, box, restoreButton);
-  const closeTask = () => { setTaskId(null); taskButton.current?.focus(); };
-  const classes = windowClasses(terminal, taskId !== null, full);
+  const classes = windowClasses(terminal, newest !== undefined, full);
   return <>
     <aside ref={box} className={classes} aria-label={title} tabIndex={-1} hidden={minimized}>
       <div className="t-bar">
         <WindowControls full={full} onFull={() => setFull(v => !v)} onMinimize={() => setMinimized(true)} onClose={onClose} />
         <span className="agent-window-title">{title}</span>
         {toolbar}
-        <TaskToggle current={current} taskId={taskId} onTask={setTaskId} panelId={taskPanelId} button={taskButton} />
-        {taskId && <button className="btn small ghost agent-task-back" type="button" onClick={closeTask}>{terminal ? t.window.backToTerminal : t.window.backToConversation}</button>}
+        {panels.map(panel => <PanelToggle key={panel.id} panel={panel} open={stack.isOpen(panel.id)} onToggle={opener => stack.toggle(panel.id, opener)} panelsId={panelsId} />)}
+        <TaskToggle currentId={currentId} open={stack.isOpen(TASK_PANEL)} onToggle={opener => { task.showCurrent(); stack.toggle(TASK_PANEL, opener); }} panelsId={panelsId} />
+        {newest && <button className="btn small ghost agent-task-back" type="button" onClick={() => stack.close(newest.id)}>{terminal ? t.window.backToTerminal : t.window.backToConversation}</button>}
       </div>
       <div className="agent-workspace">
-        <div id={taskPanelId} className="agent-task-slot">
-          {taskId && <AgentTask key={taskId} taskId={taskId} active={!minimized} onClose={closeTask} onOpen={setTaskId} {...waiting} />}
-        </div>
+        <SidePanelRow stack={stack} id={panelsId} />
         <div className="agent-conversation">{children}</div>
       </div>
     </aside>

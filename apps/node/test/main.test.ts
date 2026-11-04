@@ -810,6 +810,10 @@ describe('runNode', () => {
     expect(lines.some(line => line.includes('Playwright Chromium could not start: libnss3.so'))).toBe(true);
     expect(readFileSync(join(dir, 'browser-error'), 'utf8').trim()).toBe('libnss3.so: cannot open shared object file');
 
+    server.send({ type: 'job.run', jobId: 'j-agent', subscriptionId: 's1', provider: 'claude', prompt: 'hello', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
+    await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'j-agent'));
+    expect(server.received.find(m => m.type === 'job.done' && m.jobId === 'j-agent')).toMatchObject({ ok: true, error: null });
+
     server.send({ type: 'tests.run', partId: 'p-broken', repo: { url: 'https://github.com/acme/shop.git', token: '' }, branch: null, task: 3, command: 'npm test', part: 1, parts: 1, timeoutMs: 60000 });
     await server.wait(() => server.received.some(m => m.type === 'tests.done' && m.partId === 'p-broken'));
     expect(server.received.find(m => m.type === 'tests.done' && m.partId === 'p-broken')).toMatchObject({
