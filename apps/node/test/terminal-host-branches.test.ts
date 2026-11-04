@@ -212,7 +212,9 @@ describe('stop hook branches before extraction', () => {
 
   it.each([[null, ''], [undefined, ''], [0, '0'], [false, 'false'], [23, '23']])('normalizes a successful hook answer %j without a program', async (answer, expected) => {
     const c = fixture(null);
-    await c.host['hook']('branches', 'stop', { last_assistant_message: answer });
+    const stopping = c.host['hook']('branches', 'stop', { last_assistant_message: answer });
+    expect(c.agent.turn!.ending).toEqual({ status: 'done', message: expected });
+    await stopping;
     expect(await c.finished).toBe(expected);
   });
 
