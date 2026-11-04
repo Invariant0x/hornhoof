@@ -54,8 +54,6 @@ it("paints what an agent does from the theme's tokens, and an alarm and the fram
     expect(decl(selector, '--on-red', media), selector).toMatch(/^#[0-9A-F]{6}$/);
   }
   expect(decl(':root', '--red')).not.toBe(decl(':root[data-theme="dark"]', '--red'));
-  /* On a phone the tree's narrow label gives the task's line to what the agent does, which may wrap. */
-  expect(decl('.tview .lchip .in:has(.ast) .r2', 'display', '(max-width: 760px)')).toBe('none');
-  expect(decl('.tview .lchip .ast', 'white-space', '(max-width: 760px)')).toBe('normal');
-  expect(decl('.tview .lchip .ast', '-webkit-line-clamp', '(max-width: 760px)')).toBe('2');
+  /* What the agent does on a plate of the tree wraps instead of being cut. */
+  expect(decl('.tview .lchip .ast', 'white-space')).toBe('normal');
 });

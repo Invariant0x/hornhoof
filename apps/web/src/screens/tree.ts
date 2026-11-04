@@ -2,6 +2,7 @@ import type {
   Department, DepartmentTree, SegmentKind, TreeActivity, TreeAgent, TreeLine, TreeMove, TreeReview, TreeReviewer, TreeSegment, TreeVerdict,
 } from '../types';
 import type { Point } from '../ui/wires';
+import { CH, CW } from './schema';
 
 export const SEGMENT_CLASS: Record<SegmentKind, string> = { work: 'w', after: 'af', person: 'ps', stall: 'st', lost: 'ls', alarm: 'al', queued: 'q', unknown: 'u' };
 export const reviewsOf = (tree: DepartmentTree): TreeReview[] => tree.reviews ?? (tree.review ? [tree.review] : []);
@@ -93,6 +94,15 @@ export type TreeLayout = {
 };
 type Drawing = { tree: DepartmentTree; layout: TreeLayout; turnY: number };
 const R = 8;
+
+/* A plate is the size of an employee's chip on the map, on every screen and beside any number of others: the tree moves and
+   zooms instead of squeezing it. Text that needs more makes the plate taller, and the page measures it for its row. */
+export type PlateHeights = Record<string, number>;
+const PLATE_HEIGHT = { axis: 0, main: 32, turn: 40, lane: CH };
+const PLATE_WIDTH = CW;
+export const plateKey = (row: Pick<TreeRow, 'type' | 'agent'>): string => row.agent?.id ?? row.type;
+export const plateHeight = (row: Pick<TreeRow, 'type'>): number => PLATE_HEIGHT[row.type];
+export const plateRoom = (row: Pick<TreeRow, 'agent'>): number => row.agent ? 6 : 4;
 const center = (r: TreeRow) => r.y + r.h / 2;
 
 const STATE_PRIORITY: Record<SegmentKind, number> = { unknown: 0, queued: 1, stall: 2, after: 3, person: 4, work: 5, lost: 6, alarm: 7 };
@@ -180,19 +190,11 @@ function orderedLanes(tree: DepartmentTree, agentOrder: string[]): Lane[] {
   return lanesOf(tree).sort((a, b) => rank(a.agent!.id) - rank(b.agent!.id));
 }
 
-function rowsOf(tree: DepartmentTree, phone: boolean, height: number, agentOrder: string[] = []): TreeRow[] {
-  const lanes = orderedLanes(tree, agentOrder);
-  const trunk = phone ? 34 : 40;
-  const fixed = 32 + (tree.repository ? trunk * 2 + 8 : 0) + 12;
-  const laneHeight = Math.min(phone ? 58 : 84, Math.max(phone ? 50 : 60, Math.floor((height - fixed) / Math.max(1, lanes.length))));
+function rowsOf(tree: DepartmentTree, plates: PlateHeights, agentOrder: string[] = []): TreeRow[] {
+  const sized = (row: Lane): TreeRow => ({ ...row, y: 0, h: (plates[plateKey(row)] || plateHeight(row)) + plateRoom(row) * 2 });
   const rows: TreeRow[] = [{ type: 'axis', y: 0, h: 32 }];
-  if (tree.repository) {
-    rows.push(
-      { type: 'main', y: 0, h: trunk, pick: { kind: 'main' } },
-      { type: 'turn', y: 0, h: trunk + 8, pick: { kind: 'turn' } },
-    );
-  }
-  rows.push(...lanes.map(r => ({ ...r, y: 0, h: laneHeight })));
+  if (tree.repository) rows.push(sized({ type: 'main', pick: { kind: 'main' } }), sized({ type: 'turn', pick: { kind: 'turn' } }));
+  rows.push(...orderedLanes(tree, agentOrder).map(sized));
   let y = 0;
   for (const row of rows) {
     row.y = y;
@@ -406,7 +408,7 @@ function rowTargets(layout: TreeLayout) {
   for (const row of layout.rows.filter(r => r.pick)) {
     layout.targets.unshift({
       pick: row.pick!,
-      row: row.agent?.id ?? row.type,
+      row: plateKey(row),
       x: 0,
       y: row.y,
       width: layout.width,
@@ -416,10 +418,9 @@ function rowTargets(layout: TreeLayout) {
   }
 }
 
-export function treeLayout(tree: DepartmentTree, box: { width: number; height: number; phone: boolean; agentOrder?: string[] }, zoom: number): TreeLayout {
-  const from = windowStart(tree), rows = rowsOf(tree, box.phone, box.height, box.agentOrder);
-  /* A phone's labels leave room for what the agent does in two short lines. */
-  const labelWidth = box.phone ? 132 : 184, tail = box.phone ? 108 : 168;
+export function treeLayout(tree: DepartmentTree, box: { width: number; phone: boolean; agentOrder?: string[]; plates?: PlateHeights }, zoom: number): TreeLayout {
+  const from = windowStart(tree), rows = rowsOf(tree, box.plates ?? {}, box.agentOrder);
+  const labelWidth = PLATE_WIDTH + 10, tail = box.phone ? 108 : 168;
   const available = Math.max(140, box.width - labelWidth - tail - 12);
   const scale = Math.min(18, Math.max(box.phone ? .9 : 1.2, available / Math.max(1, secondsBetween(from, tree.now) / 60))) * zoom;
   const x = (at: string) => Math.round((12 + (Date.parse(at) - Date.parse(from)) / 60_000 * scale) * 10) / 10;

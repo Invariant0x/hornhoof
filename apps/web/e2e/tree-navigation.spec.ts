@@ -19,6 +19,7 @@ async function openTree(page: Page, lang: 'en' | 'ru', theme: 'light' | 'dark', 
   await page.getByRole('button', { name: lang === 'en' ? /Development/ : /Разработка/ }).click();
   await page.getByRole('button', { name: lang === 'en' ? 'Tree' : 'Дерево', exact: true }).click();
   await expect(page.locator('.tv-in')).toBeVisible();
+  await page.evaluate(() => document.fonts.ready);
   return { errors, writes };
 }
 

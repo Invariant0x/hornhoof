@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { currentTaskNumber, treeLayout } from '../src/screens/tree';
 import { DEV_TREE, REVIEW_TREE, SALES_TREE } from './api-mock';
 
-const box = { width: 1100, height: 640, phone: false };
+const box = { width: 1100, phone: false };
 const minutes = (a: string, b: string) => (Date.parse(a) - Date.parse(b)) / 60_000;
 
 describe('work tree layout', () => {
@@ -11,7 +11,7 @@ describe('work tree layout', () => {
       mergedAt: null, doneAt: null, live: true, moves: [], segments: [{ kind: 'work' as const, from: '2026-10-30T11:30:00.000Z', to: null }] };
     const tree = { ...DEV_TREE, now: '2026-10-30T12:00:00.000Z', turn: { ...DEV_TREE.turn!, startedAt: '2026-10-30T00:00:00.000Z' },
       lines: [line], reviews: [], review: null, waiting: [], activity: [], idle: [] };
-    const layout = treeLayout(tree, { width: 375, height: 1000, phone: true }, 1);
+    const layout = treeLayout(tree, { width: 375, phone: true }, 1);
     expect(layout.pulses).toHaveLength(1);
     expect(layout.pulses[0]![1]![0] - layout.pulses[0]![0]![0]).toBeCloseTo(19);
   });
@@ -127,9 +127,45 @@ describe('work tree layout', () => {
     expect(treeLayout(DEV_TREE, box, 1.25).scale).toBeCloseTo(l.scale * 1.25);
   });
 
-  it("leaves a phone's lane labels room for what the agent does in two short lines", () => {
-    expect(treeLayout(DEV_TREE, { ...box, width: 375, phone: true }, 1).labelWidth).toBe(132);
-    expect(treeLayout(DEV_TREE, box, 1).labelWidth).toBe(184);
+  it('gives plates the same room on a phone and on a desktop', () => {
+    expect(treeLayout(DEV_TREE, { ...box, width: 375, phone: true }, 1).labelWidth).toBe(250);
+    expect(treeLayout(DEV_TREE, box, 1).labelWidth).toBe(250);
+  });
+
+  it('keeps every row its natural height on any screen and beside any number of lanes', () => {
+    const heights = (tree: typeof DEV_TREE, phone: boolean) => treeLayout(tree, { width: phone ? 375 : 1100, phone }, 1).rows.map(r => [r.type, r.h]);
+    const one = { ...DEV_TREE, lines: DEV_TREE.lines.slice(0, 1), idle: [], waiting: [], activity: [], reviews: [], review: null };
+    const natural = [['axis', 32], ['main', 40], ['turn', 48], ['lane', 96]];
+    expect(heights(one, false)).toEqual(natural);
+    expect(heights(one, true)).toEqual(natural);
+    const lanes = treeLayout(DEV_TREE, box, 1).rows.filter(r => r.type === 'lane');
+    expect(lanes.length).toBeGreaterThan(1);
+    for (const phone of [false, true]) {
+      expect(heights(DEV_TREE, phone)).toEqual([...natural.slice(0, 3), ...lanes.map(() => ['lane', 96])]);
+    }
+  });
+
+  it('makes a row as tall as its plate measures, and moves the rows below with their lines', () => {
+    const plain = treeLayout(DEV_TREE, box, 1), first = DEV_TREE.lines[0]!.agent.id, next = DEV_TREE.lines[1]!.agent.id;
+    const grown = treeLayout(DEV_TREE, { ...box, plates: { main: 50, [first]: 130 } }, 1);
+    const row = (layout: typeof plain, id: string) => layout.rows.find(r => r.agent?.id === id)!;
+    expect(grown.rows.find(r => r.type === 'main')!.h).toBe(58);
+    expect(row(grown, first).h).toBe(142);
+    expect(grown.height).toBe(plain.height + 18 + 46);
+    expect(row(grown, next).y).toBe(row(plain, next).y + 18 + 46);
+    const middle = row(grown, next).y + row(grown, next).h / 2;
+    const drawn = grown.paths.filter(p => p.kind === 'segment' && p.row === next);
+    expect(drawn.length).toBeGreaterThan(0);
+    expect(drawn.flatMap(p => p.points.map(point => point[1]))).toEqual(drawn.flatMap(p => p.points.map(() => middle)));
+    expect(grown.targets.find(hit => hit.row === next && hit.x === 0)).toMatchObject({ y: row(grown, next).y, height: row(grown, next).h });
+    const turn = grown.rows.find(r => r.type === 'turn')!, fork = grown.paths.find(p => p.kind === 'fork' && p.row === next)!;
+    expect(fork.points[0]![1]).toBe(turn.y + turn.h / 2);
+    expect(fork.points.at(-1)![1]).toBe(middle);
+  });
+
+  it('keeps the natural height of a plate the page could not measure', () => {
+    const agent = DEV_TREE.lines[0]!.agent.id;
+    expect(treeLayout(DEV_TREE, { ...box, plates: { [agent]: 0 } }, 1).rows.find(r => r.agent?.id === agent)!.h).toBe(96);
   });
 
   it('draws plain lines without trunks or forks, starting at creation and ending in a square', () => {
