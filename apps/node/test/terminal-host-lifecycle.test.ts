@@ -143,7 +143,6 @@ describe.skipIf(!hasTmux)('turn identity on a typed Codex prompt', () => {
   it('keeps the task_started turn id when UserMessage opens the typed job', async () => {
     await setUp(); await host.run(codexJob('typed-id', 'hello'));
     await typeTurn('typed-id', 'view', 'HANG', 'job-id');
-    const a = host['agents'].get('typed-id')!;
     await host['hook']('typed-id', 'stop', { turn_id: 'wrong', last_assistant_message: 'Wrong' });
     await new Promise(r => setTimeout(r, 100));
     expect(done('job-id')).toBeUndefined();

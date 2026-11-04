@@ -14,15 +14,16 @@ export default [
   },
   {
     files: [
-      'packages/*/src/**/*.ts',
-      'apps/*/src/**/*.{ts,tsx}',
-      'apps/web/{test,e2e}/**/*.{ts,tsx}',
-      'apps/web/*.config.ts',
+      'packages/*/{src,test}/**/*.ts',
+      'packages/*/*.config.ts',
+      'apps/*/{src,test}/**/*.{ts,tsx}',
+      'apps/web/e2e/**/*.{ts,tsx}',
+      'apps/*/*.config.ts',
     ],
     languageOptions: {
       parser: tseslint.parser,
       parserOptions: {
-        project: ['./packages/*/tsconfig.json', './apps/*/tsconfig.json'],
+        project: ['./packages/*/tsconfig.eslint.json', './apps/*/tsconfig.eslint.json', './apps/web/tsconfig.json'],
         tsconfigRootDir: import.meta.dirname,
       },
     },

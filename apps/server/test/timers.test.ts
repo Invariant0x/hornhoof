@@ -1,12 +1,11 @@
 import { and, asc, eq, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
-import { agentChanges, agentEvents, agents, departments, jobs, taskEvents, tasks } from '../src/db/schema.js';
+import { agentChanges, agentEvents, agents, departments, jobs, tasks } from '../src/db/schema.js';
 import { minuteRound, timerTick } from '../src/modules/agents/timers.js';
-import { agentState, enqueueTurn, insertTurn, onAgent } from '../src/modules/conversation/queue.js';
+import { agentState, insertTurn, onAgent } from '../src/modules/conversation/queue.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
-import { submit } from '../src/modules/tasks/engine.js';
 import { as, connectNode, listen, setUpCompany, testApp, until } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
