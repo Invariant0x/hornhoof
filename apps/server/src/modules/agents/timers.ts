@@ -124,15 +124,23 @@ export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) =>
   ]);
 }
 
-/* Does the minute round while the server runs; left-behind turns and old files are looked at as it starts too. */
+/* Does the minute round while the app leads; left-behind turns and old files are looked at as it starts leading, and the
+   timer stops with it, after waiting for a round that runs. */
 export function startTimers(app: FastifyInstance, ctx: Ctx): void {
   const failed = (what: string) => (err: unknown) => app.log.error({ error: loggable(err) }, what);
-  app.addHook('onReady', async () => {
+  let timer: NodeJS.Timeout | null = null;
+  let round: Promise<void> = Promise.resolve();
+  const enter = () => {
     void checkExternalWaits(ctx).catch(failed('ending external task waits failed'));
     void wakeLeftBehind(ctx).catch(failed('queueing left-behind turns failed'));
     void dropOldFiles(ctx.db, new Date()).catch(failed('removing the files of old turns failed'));
-  });
-  const timer = setInterval(() => void minuteRound(ctx, new Date(), failed), TICK_MS);
-  timer.unref();
-  app.addHook('onClose', async () => clearInterval(timer));
+    timer = setInterval(() => (round = minuteRound(ctx, new Date(), failed)), TICK_MS);
+    timer.unref();
+  };
+  const leave = async () => {
+    if (timer) clearInterval(timer);
+    timer = null;
+    await round;
+  };
+  ctx.mode.whenLead(enter, leave);
 }

@@ -3,6 +3,7 @@ import websocket from '@fastify/websocket';
 import Fastify, { LogController, type FastifyBaseLogger, type FastifyInstance, type FastifyServerOptions } from 'fastify';
 import type { Config } from './config.js';
 import { loggable, registerErrorHandling } from './errors.js';
+import { AppMode, modeGate, whileLeading } from './modules/keeper/app-mode.js';
 import { authRoutes } from './modules/auth/routes.js';
 import { agentRoutes } from './modules/agents/routes.js';
 import { conversationRoutes } from './modules/conversation/routes.js';
@@ -72,6 +73,7 @@ export type Ctx = Deps & {
   templates: Templates;
   links: PublicLinks;
   challenges: Challenges;
+  mode: AppMode;
 };
 
 declare module 'fastify' {
@@ -86,15 +88,25 @@ declare module 'fastify' {
 }
 
 /* The few routes that answer without a session. Over the link they say nothing a stranger could use to tell which
-   company or which build is behind the name. */
-function publicRoutes(app: FastifyInstance, { config, db }: Deps): void {
+   company or which build is behind the name. The health answer is 503 while the app is off, so a check can tell it has
+   not started. */
+function publicRoutes(app: FastifyInstance, { config, db, mode }: Ctx): void {
   const { version, commit, migrations } = config;
-  app.get('/api/health', async req => (req.overLink ? { ok: true } : { ok: true, version, commit }));
+  app.get('/api/health', async (req, reply) => {
+    const ok = mode.current() !== 'off';
+    if (!ok) reply.code(503);
+    return req.overLink ? { ok } : { ok, version, commit, mode: mode.current() };
+  });
   app.get('/api/version', async req => {
     if (req.overLink) await requirePerson(req, db);
     return { version, commit, migrations };
   });
   app.get('/robots.txt', async (_req, reply) => reply.type('text/plain; charset=utf-8').send('User-agent: *\nDisallow: /\n'));
+}
+
+/* A node or a terminal connected while leading sends nothing more once the app stops leading; 1012 tells it to come back. */
+function closeOpenSockets(app: FastifyInstance): void {
+  for (const client of app.websocketServer.clients) client.close(1012, 'Hornhoof takes no changes now.');
 }
 
 export async function buildApp(deps: Deps): Promise<FastifyInstance> {
@@ -109,11 +121,12 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   registerErrorHandling(app, web ? webAppRoutes : undefined);
   const ctx = { ...deps, log: app.log, bus: new EventBus(), terminals: new TerminalRelay() } as Ctx;
   app.decorate('ctx', ctx);
+  ctx.mode = new AppMode({ dir: deps.config.controlDir, fromKeeper: deps.config.keeper, log: line => app.log.info(line) });
   ctx.hub = new NodeHub({
     pingMs: deps.config.nodePingMs,
-    onMessage: (id, msg) => receiveNodeMessage(ctx, id, msg),
+    onMessage: whileLeading(ctx.mode, (id, msg) => receiveNodeMessage(ctx, id, msg)),
     onTerminal: (id, msg) => ctx.terminals.fromNode(id, msg),
-    onClose: id => handleNodeClose(ctx, id),
+    onClose: whileLeading(ctx.mode, id => handleNodeClose(ctx, id)),
     onError: err => app.log.error({ error: loggable(err) }, 'A node message failed.'),
   });
   app.addHook('onClose', async () => ctx.hub.stop());
@@ -129,17 +142,25 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   ctx.templates = loadTemplates(config.templatesDir);
   ctx.links = new PublicLinks(ctx);
   ctx.challenges = new Challenges();
-  app.addHook('onReady', async () => ctx.updates.start());
-  app.addHook('onClose', async () => ctx.updates.stop());
-  app.addHook('onReady', async () => ctx.links.sync());
+  ctx.mode.whenLead(() => ctx.updates.start(), () => ctx.updates.stop());
+  ctx.mode.whenLead(() => ctx.links.sync(), () => undefined);
+  ctx.mode.whenLead(() => undefined, () => closeOpenSockets(app));
+  app.addHook('onReady', async () => {
+    ctx.mode.start();
+    await ctx.mode.settled();
+  });
+  app.addHook('onClose', async () => ctx.mode.stop());
   await app.register(cookie);
   await app.register(websocket, SOCKET_OPTIONS);
   /* Needs the cookies, so after the cookie plugin; a socket upgrade is skipped by the hand-over itself. */
-  app.addHook('onRequest', async (req, reply) => handOverSession(req, reply, deps.db, deps.config));
+  app.addHook('onRequest', async (req, reply) => {
+    if (ctx.mode.current() === 'lead') await handOverSession(req, reply, deps.db, deps.config);
+  });
   /* After the socket plugin, so a refused socket is closed by it. */
+  app.addHook('onRequest', modeGate(ctx.mode));
   app.addHook('onRequest', fromOwnPages(deps.config, deps.db));
   if (web) await serveWebApp(app, deps.config.webDist);
-  publicRoutes(app, deps);
+  publicRoutes(app, ctx);
   setupRoutes(app, ctx);
   authRoutes(app, deps);
   peopleRoutes(app, ctx);
