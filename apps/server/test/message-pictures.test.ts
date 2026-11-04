@@ -122,7 +122,7 @@ describe('a picture a person sends an agent', () => {
 
   it('leaves room for what the company keeps', async () => {
     const { app, ceo, bruno } = await company();
-    app.ctx.config.taskFilesBytes = PNG.length + 10;
+    app.ctx.config.taskFilesBytes = PNG.length;
     await uploaded(app, ceo, bruno.id);
     const res = await upload(app, ceo, bruno.id, PNG);
     expect([res.statusCode, res.json().error.reason]).toEqual([413, 'attachment_invalid']);
@@ -159,6 +159,7 @@ describe('a message with pictures', () => {
     builtin.send({ type: 'agent.said', ref: words.ref, ok: true });
     expect((await delivered).statusCode).toBe(202);
     expect(words.text).toContain(`screen.png: hh-fetch message ${shot.id}`);
+    expect(words.text).toContain('A picture came with this message');
   });
 
   it('shows in the conversation as words and pictures, with file names when nothing was written', async () => {

@@ -124,7 +124,7 @@ const companyFull = (inCompany: number, limit: number) =>
 /* Refuses a person's picture of this size when the company has no room left for it. */
 export async function checkPictureRoom(ctx: Pick<Ctx, 'db' | 'config'>, companyId: string, size: number): Promise<void> {
   const [used] = await ctx.db.select({ company: sql<string>`coalesce(sum(${attachments.size}), 0)` }).from(attachments).where(kept(companyId));
-  const inCompany = Number(used?.company ?? 0);
+  const inCompany = Number(used!.company);
   if (inCompany + size > ctx.config.taskFilesBytes) throw companyFull(inCompany, ctx.config.taskFilesBytes);
 }
 
