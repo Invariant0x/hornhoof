@@ -1,4 +1,5 @@
-import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode, type Ref, type RefObject } from 'react';
+import { createPortal } from 'react-dom';
 import { useT } from '../i18n';
 import type { AgentCardView, WaitingRequest } from '../types';
 import { SidePanelRow, useSidePanels, type SidePanel, type WindowPanel } from '../ui/SidePanels';
@@ -14,11 +15,16 @@ type Props = Waiting & {
   toolbar: ReactNode;
   /* What else slides out of this window besides its task, each opened by its icon in the bar. */
   panels?: WindowPanel[];
+  /* What its strip says about it, once its card has come. */
+  agentState?: AgentCardView['state'];
+  place?: WindowPlace;
   children: ReactNode;
-  openRequest?: number;
-  onMinimizedChange?(minimized: boolean): void;
   onClose(): void;
 };
+
+/* Where the window stands among the others: dock is where its strip goes while it is hidden. */
+export type WindowPlace = { minimized: boolean; dock: HTMLElement | null; onMinimize(): void; onRestore(): void };
+const ALONE: WindowPlace = { minimized: false, dock: null, onMinimize() {}, onRestore() {} };
 
 const TASK_PANEL = 'task';
 
@@ -55,39 +61,51 @@ function useTaskPanel(currentId: string | null, { requests, onRequestsChanged }:
   return { panels, showCurrent: () => setTaskId(currentId) };
 }
 
-function useWindowFocus(minimized: boolean, box: RefObject<HTMLElement | null>, restore: RefObject<HTMLButtonElement | null>): void {
-  const wasMinimized = useRef(false);
+/* The focus goes to the strip when the person minimized this window; a window another one pushed aside leaves it to that one.
+   Says so through what it returns. */
+function useWindowFocus(minimized: boolean, box: RefObject<HTMLElement | null>, restore: RefObject<HTMLButtonElement | null>) {
+  const wasMinimized = useRef(minimized);
+  const toStrip = useRef(false);
   useEffect(() => {
-    if (minimized) restore.current?.focus();
-    else if (wasMinimized.current) box.current?.focus();
+    if (minimized && toStrip.current) restore.current?.focus();
+    else if (!minimized && wasMinimized.current) box.current?.focus();
+    toStrip.current = false;
     wasMinimized.current = minimized;
   }, [minimized, box, restore]);
+  return toStrip;
 }
 
-function useMinimized(openRequest: number | undefined, onChange?: (minimized: boolean) => void) {
-  const [minimized, setMinimized] = useState(false);
-  useEffect(() => { setMinimized(false); }, [openRequest]);
-  useEffect(() => { onChange?.(minimized); }, [minimized, onChange]);
-  return { minimized, setMinimized };
+/* A hidden window at the edge of the screen: its name and state, and the cross that closes it. */
+function AgentStrip({ title, state, button, onRestore, onClose }: { title: string; state?: AgentCardView['state']; button: Ref<HTMLButtonElement>; onRestore(): void; onClose(): void }) {
+  const t = useT();
+  const word = state && t.dept.states[state];
+  return <div className="agent-strip">
+    <button ref={button} className="agent-strip-open" type="button" aria-label={t.window.restoreAgent(title)} title={word ? `${title}: ${word}` : title} onClick={onRestore}>
+      {state && <i className={`dot ${state}`} aria-hidden="true" />}
+      <span className="agent-strip-name">{title}</span>
+      {word && <span className="agent-strip-state">{word}</span>}
+    </button>
+    <button className="agent-strip-close" type="button" aria-label={t.window.closeAgent(title)} title={t.window.closeAgent(title)} onClick={onClose}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17" /></svg></button>
+  </div>;
 }
 
 /* Hiding keeps the live terminal, drafts, panels and previous size until the window is restored. */
-export function AgentWindowLayout({ currentTask, title, terminal, box, toolbar, panels = [], children, openRequest, onMinimizedChange, onClose, ...waiting }: Props) {
+export function AgentWindowLayout({ currentTask, title, terminal, box, toolbar, panels = [], agentState, place = ALONE, children, onClose, ...waiting }: Props) {
   const t = useT();
   const currentId = currentTask?.id ?? null;
   const task = useTaskPanel(currentId, waiting);
-  const { minimized, setMinimized } = useMinimized(openRequest, onMinimizedChange);
+  const { minimized, dock } = place;
   const [full, setFull] = useState(false);
   const restoreButton = useRef<HTMLButtonElement>(null);
   const panelsId = useId();
   const stack = useSidePanels([...panels, ...task.panels], box, !minimized);
   const newest = stack.shown.at(-1);
-  useWindowFocus(minimized, box, restoreButton);
+  const toStrip = useWindowFocus(minimized, box, restoreButton);
   const classes = windowClasses(terminal, newest !== undefined, full);
   return <>
     <aside ref={box} className={classes} aria-label={title} tabIndex={-1} hidden={minimized}>
       <div className="t-bar">
-        <WindowControls full={full} onFull={() => setFull(v => !v)} onMinimize={() => setMinimized(true)} onClose={onClose} />
+        <WindowControls full={full} onFull={() => setFull(v => !v)} onMinimize={() => { toStrip.current = true; place.onMinimize(); }} onClose={onClose} />
         <span className="agent-window-title">{title}</span>
         {toolbar}
         {panels.map(panel => <PanelToggle key={panel.id} panel={panel} open={stack.isOpen(panel.id)} onToggle={opener => stack.toggle(panel.id, opener)} panelsId={panelsId} />)}
@@ -99,6 +117,6 @@ export function AgentWindowLayout({ currentTask, title, terminal, box, toolbar, 
         <div className="agent-conversation">{children}</div>
       </div>
     </aside>
-    {minimized && <button ref={restoreButton} className="agent-strip" type="button" aria-label={t.window.restoreAgent(title)} title={t.window.restoreAgent(title)} onClick={() => setMinimized(false)}><span aria-hidden="true">{title}</span></button>}
+    {minimized && dock && createPortal(<AgentStrip title={title} state={agentState} button={restoreButton} onRestore={place.onRestore} onClose={onClose} />, dock)}
   </>;
 }

@@ -11,8 +11,9 @@ import { useDecisions, useImprovements } from '../tasks';
 import { TaskPanel } from '../ui/TaskPanel';
 import { useUpdates, type Updates } from '../updates';
 import { About } from './About';
-import { AgentWindow, type StaffAsk } from './AgentWindow';
+import type { StaffAsk } from './AgentWindow';
 import { AgentWindowContext } from './AgentWindowContext';
+import { AgentWindows, useAgentWindows } from './AgentWindows';
 import { DepartmentView } from './Department';
 import { Improvements } from './Improvements';
 import { Machines } from './Machines';
@@ -26,18 +27,8 @@ import { Versions } from './Versions';
 import { takeEscape } from '../ui/escape';
 
 type Tab = 'map' | 'tasks' | 'people' | 'subscriptions' | 'machines' | 'improvements';
-/* The agent window is on the right, settings and tasks on the left. agentId is 'orchestrator' or an employee's id. */
-type Panel = { kind: 'window'; agentId: string; request?: number } | { kind: 'task'; taskId: string } | null;
 const TABS: Tab[] = ['map', 'tasks', 'people', 'subscriptions', 'machines'];
 const THEMES: Theme[] = ['light', 'dark'];
-
-function visiblePanel(panel: Panel, minimized: boolean): Panel {
-  return panel?.kind === 'window' && minimized ? null : panel;
-}
-
-function mapPanels(panel: Panel) {
-  return { windowOpen: panel?.kind === 'window', leftPanelOpen: panel !== null && panel.kind !== 'window' };
-}
 
 type AccountDialogName = 'about' | 'versions' | 'profile' | 'settings';
 
@@ -187,26 +178,11 @@ function useDecisionsView() {
   };
 }
 
-/* An explicit opening also brings a minimized window back, including when its agent did not change. */
-function useAgentOpener(setPanel: (panel: Panel) => void) {
-  const requests = useRef(0);
-  return useCallback((agentId: string) => {
-    setPanel({ kind: 'window', agentId, request: ++requests.current });
-  }, [setPanel]);
-}
-
-/* Resolve the orchestrator after the company loads too, since lists may open before that response arrives. */
-function agentPanelFor(panel: Panel, org: Org | null) {
-  if (!panel || panel.kind === 'task') return null;
-  const agentId = panel.agentId === org?.orchestrator?.id ? 'orchestrator' : panel.agentId;
-  return { ...panel, agentId };
-}
-
-function AgentWindowError({ panel, org, failure }: { panel: Panel; org: Org | null; failure: unknown }) {
+function AgentWindowError({ shown, org, failure }: { shown: string | null; org: Org | null; failure: unknown }) {
   const t = useT();
   const message = useRef<HTMLParagraphElement>(null);
-  useEffect(() => { message.current?.focus(); }, [panel, org, failure]);
-  if (panel?.kind !== 'window' || org || failure === null) return null;
+  useEffect(() => { message.current?.focus(); }, [shown, org, failure]);
+  if (!shown || org || failure === null) return null;
   return <p ref={message} tabIndex={-1} className="alert agent-window-error" role="alert">{errorText(t, failure)}</p>;
 }
 
@@ -219,13 +195,24 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   const currentMe = { ...me, person: { ...me.person, name: selfName } };
   const company = me.person.scopeKind === 'company';
   /* The orchestrator's window opens over the map, for people who see the whole company. */
-  const [panel, setPanel] = useState<Panel>(welcome && company ? { kind: 'window', agentId: 'orchestrator' } : null);
-  const [minimized, setMinimized] = useState(false);
-  const shownPanel = visiblePanel(panel, minimized);
+  const windows = useAgentWindows(welcome && company ? 'orchestrator' : null);
+  /* A task's panel stands on the left, on its own: it and a window on the screen take each other's place. */
+  const [taskId, setTaskId] = useState<string | null>(null);
   const [deptId, setDeptId] = useState<string | null>(null);
   const [staff, setStaff] = useState<StaffAsk | null>(null);
-  const { org, failure: orgFailure } = useOrg(panel !== null || deptId !== null);
-  const openAgent = useAgentOpener(setPanel);
+  const { org, failure: orgFailure } = useOrg(windows.ids.length > 0 || taskId !== null || deptId !== null);
+  const orchestratorId = org?.orchestrator?.id;
+  if (orchestratorId && windows.ids.includes(orchestratorId)) windows.nameOrchestrator(orchestratorId);
+  const { open: openWindow, hide: hideWindow } = windows;
+  const openAgent = useCallback((agentId: string) => {
+    setTaskId(null);
+    openWindow(agentId);
+  }, [openWindow]);
+  const openTask = useCallback((id: string) => {
+    hideWindow();
+    setTaskId(id);
+  }, [hideWindow]);
+  const shownPanel = windows.shown ? 'window' : taskId ? 'task' : null;
   const dept = deptId ? org?.departments.find(d => d.id === deptId) : undefined;
   /* A department removed while its view was open closes the view. */
   useEffect(() => {
@@ -241,7 +228,6 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   };
   const { improvements, failure: improvementsFailure, load: loadImprovements } = useImprovements(company);
   const toDecide = improvements?.filter(i => i.status === 'open').length ?? 0;
-  const agentPanel = agentPanelFor(panel, org);
   const [accountDialog, setAccountDialog] = useState<AccountDialogName | null>(null);
   const account = useRef<HTMLDivElement>(null);
   const accountButton = useRef<HTMLButtonElement>(null);
@@ -311,12 +297,13 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
         </div>
       </header>
       {company && <UpdateBanner updates={updates} onDetails={() => setAccountDialog('versions')} />}
-      <main className={`body${tab === 'map' ? '' : ' page'}${shownPanel ? ` with-${shownPanel.kind}` : ''}`}>
-        <AgentWindowError panel={panel} org={org} failure={orgFailure} />
+      <main className={`body${tab === 'map' ? '' : ' page'}${shownPanel ? ` with-${shownPanel}` : ''}`}>
+        <AgentWindowError shown={windows.shown} org={org} failure={orgFailure} />
         {tab === 'map' && (
           <MapScreen
             me={me}
-            {...mapPanels(shownPanel)}
+            windowOpen={shownPanel === 'window'}
+            leftPanelOpen={shownPanel === 'task'}
             onOpenOrchestrator={() => openAgent('orchestrator')}
             inside={!!dept}
             onOpenDepartment={setDeptId}
@@ -328,13 +315,13 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
             me={me}
             department={dept}
             deputies={org?.people ?? []}
-            selected={agentPanel?.agentId ?? null}
-            selectedTask={panel?.kind === 'task' ? panel.taskId : null}
-            panel={shownPanel?.kind ?? null}
+            selected={windows.shown}
+            selectedTask={taskId}
+            panel={shownPanel}
             serverNow={org?.serverNow}
             onBack={() => setDeptId(null)}
             onOpen={openAgent}
-            onOpenTask={taskId => setPanel({ kind: 'task', taskId })}
+            onOpenTask={openTask}
             onOpenDecisions={openDecisions}
             onHire={() => {
               setStaff({ id: dept.id, name: deptLabel(t, dept), at: Date.now() });
@@ -348,8 +335,8 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
             onDecisionsChanged={decisions.load}
             personId={decisions.personId}
             onClearPerson={() => decisions.showPerson(null)}
-            selected={panel?.kind === 'task' ? panel.taskId : null}
-            onOpenTask={taskId => setPanel({ kind: 'task', taskId })}
+            selected={taskId}
+            onOpenTask={openTask}
             onOpenAgent={openAgent}
             onOpenOrchestrator={company ? () => openAgent('orchestrator') : undefined}
           />
@@ -357,29 +344,16 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
         {tab === 'people' && <People me={currentMe} />}
         {tab === 'subscriptions' && <Subscriptions me={me} />}
         {tab === 'machines' && <Machines me={me} />}
-        {tab === 'improvements' && company && <Improvements improvements={improvements} failure={improvementsFailure} onChanged={loadImprovements} onTask={taskId => setPanel({ kind: 'task', taskId })} />}
+        {tab === 'improvements' && company && <Improvements improvements={improvements} failure={improvementsFailure} onChanged={loadImprovements} onTask={openTask} />}
       </main>
-      {agentPanel && org && (
-        <AgentWindow
-          key={agentPanel.agentId}
-          me={me}
-          org={org}
-          agentId={agentPanel.agentId}
-          openRequest={agentPanel.request}
-          onMinimizedChange={setMinimized}
-          requests={decisions.requests}
-          onRequestsChanged={decisions.load}
-          staff={agentPanel.agentId === 'orchestrator' ? staff : null}
-          onClose={() => setPanel(null)}
-        />
-      )}
-      {panel?.kind === 'task' && (
+      <AgentWindows windows={windows} onOpen={openAgent} me={me} org={org} staff={staff} requests={decisions.requests} onRequestsChanged={decisions.load} />
+      {taskId && (
         <TaskPanel
-          key={panel.taskId}
-          taskId={panel.taskId}
-          onClose={() => setPanel(null)}
-          onOpen={taskId => setPanel({ kind: 'task', taskId })}
-          requests={decisions.requestsOf(panel.taskId)}
+          key={taskId}
+          taskId={taskId}
+          onClose={() => setTaskId(null)}
+          onOpen={setTaskId}
+          requests={decisions.requestsOf(taskId)}
           onRequestsChanged={decisions.load}
           onOpenAgent={openAgent}
         />

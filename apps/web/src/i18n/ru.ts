@@ -480,6 +480,7 @@ export const ru: Messages = {
     fullScreen: 'На весь экран',
     restoreSize: 'Обычный размер',
     restoreAgent: name => `Развернуть: ${name}`,
+    closeAgent: name => `Закрыть: ${name}`,
     title: 'Оркестратор',
     close: 'Закрыть',
     hornhoof: 'Hornhoof',
