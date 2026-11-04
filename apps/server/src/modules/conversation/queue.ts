@@ -28,6 +28,11 @@ import { originalPromptOf } from './requested-prompt.js';
 import { ABOUT_AS_FREE, freedom } from '../testruns/pick.js';
 import { queuedInput } from './queued-input.js';
 import { repeatedTurn, UNHEARD_NOTE, type TurnWords } from './turn-words.js';
+import { cancelUnsentDelivery, reserveDelivery } from '../program-operator/deliveries.js';
+import { liveInputOf, sourceDeliveryForJob, sourceDeliveryMetadataForJob } from '../program-operator/input.js';
+import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
+import { operatorRecoveryHolds, resumeOperatorProcess } from '../program-operator/recovery.js';
+import { queuedOperatorAssignment } from '../program-operator/recovered-input.js';
 
 /* Workers compact their conversation at half a million tokens, which keeps their turns quick; heads and the orchestrator
    keep the whole window, since they hold the department's and the company's picture. */
@@ -302,7 +307,8 @@ async function showMessage(ctx: Ctx, t: Turn, jobId: string, kept: WithEvent): P
   const message = shownOf(t);
   if (!message) return;
   const { personId, ...data } = message;
-  await appendEvent(ctx, { companyId: t.companyId, agentId: t.agentId, jobId, kind: 'message', data, personId }, alsoKept(t.withMessage, kept));
+  const delivery = liveInputOf(message, t.agentId)?.delivery;
+  await appendEvent(ctx, { companyId: t.companyId, agentId: t.agentId, jobId, kind: 'message', data: { ...data, ...(delivery ? { operatorDelivery: delivery } : {}) }, personId }, alsoKept(t.withMessage, kept));
 }
 
 /* Stores the turn, then sends it if he is free. A message for an agent at work goes into the turn it runs instead, and a
@@ -339,7 +345,7 @@ export async function openTypedTurn(ctx: Ctx, node: NodeIdentity, agentId: strin
     const sub = agent ? await liveSubscription(ctx, agent.id) : null;
     const at = sub ? await nodeOfAgent(ctx, agentId) : null;
     if (!agent || !sub || !at || !sameNode(at, node)) return null;
-    const queued = queuedFrom ? await queuedInput(ctx, agentId, queuedFrom, text) : null;
+    const queued = queuedFrom ? await queuedInput(ctx, agentId, queuedFrom, text) ?? await queuedOperatorAssignment(ctx, agentId, queuedFrom, text) : null;
     if (queuedFrom && !queued) return null;
     const repeated = queued ? await repeatedTurn(ctx, queued.job, queued.source) : null;
     /* A turn that only started the program is over once the person types: their turn takes its place. */
@@ -397,6 +403,7 @@ export async function startProgram(ctx: Ctx, node: NodeIdentity, agentId: string
     const sub = agent ? await liveSubscription(ctx, agent.id) : null;
     const at = sub ? await nodeOfAgent(ctx, agentId) : null;
     if (!agent || !sub || !at || !sameNode(at, node)) return false;
+    if (node.kind === 'node' && await resumeOperatorProcess(ctx, agentId, node.nodeId)) return true;
     /* Task turns of an agent that is switched off wait for it to be on and start nothing. */
     const waiting = and(eq(jobs.status, 'queued'), limitUntil(sub.limits) ? programStart : agent.switchedOffAt ? isNull(jobs.taskId) : undefined);
     const [open] = await db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), or(eq(jobs.status, 'running'), waiting))).limit(1);
@@ -646,6 +653,7 @@ async function waitsForRetry(ctx: Ctx, agentId: string): Promise<boolean> {
 
 async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const { db } = ctx;
+  if (await operatorRecoveryHolds(ctx, agentId)) return;
   const [running] = await db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
   if (running || waitsForWords(ctx, agentId)) return;
   const sub = await liveSubscription(ctx, agentId);
@@ -712,7 +720,9 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   /* The agent stays on this machine from now on. */
   if (place.moves) await db.update(agents).set({ nodeId: place.nodeId }).where(eq(agents.id, agentId));
   let sent = false;
+  let operatorDelivery: OperatorDelivery | undefined;
   try {
+    if (prompt && place.node.kind === 'node' && ctx.hub.hasProgramOperator(place.node)) operatorDelivery = await reserveDelivery(db, { companyId: job.companyId, agentId, jobId: job.id, nodeId: place.node.nodeId, kind: 'assignment', words: prompt, reference: `job:${job.id}`, sourceDeliveryId: await sourceDeliveryForJob(db, agentId, job.id) });
     await publishWorking(ctx, job.companyId);
     sent = await dispatchJob(ctx, {
       id: job.id,
@@ -726,6 +736,8 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
       timeoutMs: job.timeoutMs,
       instructions: instructions.text,
       toolToken: token,
+      ...(operatorDelivery ? { operatorDelivery } : {}),
+      operatorSourceDelivery: await sourceDeliveryMetadataForJob(db, agentId, job.id),
       context: job.prompt ? null : catchUp,
       guidance: job.prompt || !repo ? null : repoLine(repo),
       /* Each agent keeps one folder on the node, with its repository's clone inside. */
@@ -737,6 +749,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
     ctx.log.error({ error: loggable(err) }, 'A turn could not go out and waits for the next try.');
   }
   if (sent) return wentOut(ctx, job, along, taken.lines);
+  if (operatorDelivery) await cancelUnsentDelivery(db, operatorDelivery);
   await db.update(jobs).set({ status: 'queued', startedAt: null, nodeId: null, prompt: job.prompt, sessionId: job.sessionId, toolTokenHash: null, instructionsHash: null }).where(and(eq(jobs.id, job.id), eq(jobs.status, 'running')));
   await publishWorking(ctx, job.companyId);
 }

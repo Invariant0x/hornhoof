@@ -460,6 +460,7 @@ export const en = {
     fullScreen: 'Full screen',
     restoreSize: 'Restore size',
     restoreAgent: (name: string) => `Restore ${name}`,
+    closeAgent: (name: string) => `Close ${name}`,
     title: 'Orchestrator',
     close: 'Close',
     hornhoof: 'Hornhoof',

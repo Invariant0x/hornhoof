@@ -263,10 +263,14 @@ describe('a node that runs agents in terminals', () => {
     const words = { type: 'agent.say', agentKey: 'agent-1', text: 'Use the new schema.' };
     server.send({ ...words, ref: 'budget', within: 15_000 });
     await server.wait(() => server.received.some(m => m.type === 'agent.said' && m.ref === 'budget'));
-    expect(say).toHaveBeenLastCalledWith('agent-1', words.text, 15_000);
+    expect(say).toHaveBeenLastCalledWith('agent-1', words.text, 15_000, undefined);
     server.send({ ...words, ref: 'older' });
     await server.wait(() => server.received.some(m => m.type === 'agent.said' && m.ref === 'older'));
-    expect(say).toHaveBeenLastCalledWith('agent-1', words.text, undefined);
+    expect(say).toHaveBeenLastCalledWith('agent-1', words.text, undefined, undefined);
+    const operatorDelivery = { id: '10000000-0000-4000-8000-000000000001', ordinal: 3 };
+    server.send({ ...words, ref: 'operator', operatorDelivery });
+    await server.wait(() => server.received.some(m => m.type === 'agent.said' && m.ref === 'operator'));
+    expect(say).toHaveBeenLastCalledWith('agent-1', words.text, undefined, operatorDelivery);
   });
 
   it.skipIf(!hasTmux)("says so, runs an agent's turn in its session, shows the session and keeps test jobs as they were", async () => {

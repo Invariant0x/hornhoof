@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNotNull, isNull, ne, or, type SQL } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, isNull, ne, or, sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { accessOf } from '../../auth/access.js';
 import type { DecisionSubject } from '../../auth/decision-owner.js';
@@ -10,6 +10,8 @@ import { appendEvent, type WithEvent } from '../events/store.js';
 import type { NodeIdentity } from '../nodes/hub.js';
 import { sayLive } from './live.js';
 import { incomingWords } from './turn-words.js';
+import { liveInputOf } from '../program-operator/input.js';
+import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
 
 /* The orchestrator takes a decision for a person only in a turn that answers that person: the last message that came into
    the turn, or the last Enter a person pressed in its terminal, says who it is. A message of an agent or of Hornhoof itself answers nobody, so after it the turn takes no
@@ -160,7 +162,15 @@ export async function deliverLockedInput(
   keep: (jobId: string, kept: WithEvent) => Promise<void>,
 ): Promise<string | null> {
   const into = await sayLive(ctx, agentId, text, on.taskId, on.source, jobId => inputPending(ctx.db, jobId), on.required);
-  return into ? keepLiveInput(into, keep) : null;
+  const delivery = liveInputOf(on.source?.data, agentId)?.delivery;
+  return into ? keepLiveInput(into, (jobId, kept) => keep(jobId, keepOperatorDelivery(kept, delivery))) : null;
+}
+
+function keepOperatorDelivery(kept: WithEvent, delivery: OperatorDelivery | undefined): WithEvent {
+  return async (tx, stored) => {
+    await kept(tx, stored);
+    if (delivery) await tx.update(agentEvents).set({ data: sql`${agentEvents.data} || jsonb_build_object('operatorDelivery', ${JSON.stringify(delivery)}::jsonb)` }).where(eq(agentEvents.seq, stored.seq));
+  };
 }
 
 class TurnStopped extends Error {}

@@ -20,6 +20,7 @@ import { hasCurrentKey, liveNode, settlePlans } from './nodes.js';
 import { builtinInterruption, interruptionOf } from './restarts.js';
 import { interruptionValue, type RestartCut } from './restart-evidence.js';
 import { hookRejected } from './hook-rejections.js';
+import { adoptOperatorOwnerTurn } from '../program-operator/recovery.js';
 
 const OPEN_JOBS = ['queued', 'running'] as const;
 
@@ -275,6 +276,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
     }
     case 'turn.open': {
       const opened = await typedTurn(ctx, id, msg.agentKey, msg.text, ctx.terminals.takeTyped(id, msg.agentKey), msg.queuedFrom);
+      if (opened && id.kind === 'node') await adoptOperatorOwnerTurn(ctx, msg.agentKey, opened.jobId, id.nodeId);
       ctx.hub.send(id, { type: 'turn.opened', agentKey: msg.agentKey, jobId: opened?.jobId ?? null, toolToken: opened?.token ?? null, ...(msg.ref ? { ref: msg.ref } : {}) });
       return;
     }

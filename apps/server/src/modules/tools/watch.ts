@@ -14,9 +14,11 @@ import { programRestartStatus, restartProgram } from '../tasks/program-restarts.
 import { CLOSED } from '../tasks/engine.js';
 import { queueTaskMessage, MESSAGE_TASK_HINT, TaskReference } from '../tasks/external-wait.js';
 import type { Grant } from '../templates/load.js';
+import { PROGRAM_OPERATOR_ROLE } from '@hornhoof/protocol/program-operator';
+import { registerOperatorTools } from '../program-operator/tools.js';
 import { INSTALL_HINT, installsIn, MISSING_HINT, missingIn, type Missing } from './stumbles.js';
 
-type ToolJob = { id: string; companyId: string; agentId: string; agentKind: string };
+type ToolJob = { id: string; companyId: string; agentId: string; agentKind: string; roleKey?: string | null };
 
 /* What one turn may send to others, so a round that goes wrong cannot flood the company. */
 export const TURN_NUDGES = 10;
@@ -73,6 +75,7 @@ function givingBack(ctx: Ctx, companyId: string, me: string, to: string) {
 /* The tools a skill grants an employee, for watching the company on a timer round: every agent's state, what failed, and
    writing to another employee as itself; and a head's way to tell the orchestrator. */
 export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, grants: ReadonlySet<Grant>): void {
+  if (job.roleKey === PROGRAM_OPERATOR_ROLE) registerOperatorTools(server, ctx, job);
   const { db } = ctx;
   const deptNames = async () => new Map((await db.select().from(departments).where(eq(departments.companyId, job.companyId))).map(d => [d.id, deptName(d)]));
   const roleTitle = (roleKey: string | null) => (roleKey && ctx.templates.roles.get(roleKey)?.title.en) || null;

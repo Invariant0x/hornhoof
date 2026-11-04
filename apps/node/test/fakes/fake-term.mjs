@@ -82,13 +82,24 @@ const show = () => {
 };
 let queue = Promise.resolve();
 let hanging = false;
+let permission = null;
 readKeys(key => {
   if (Date.now() < inputAt) return;
+  if (permission) {
+    if (key === 'enter') { const selected = permission; permission = null; selected.answer(selected.denied); }
+    return;
+  }
   // Escape stops an answer; it is not part of the next line.
   if (key === 'escape') return;
   if (key !== 'enter') return typed(key);
   const line = entered();
   if (line) queue = queue.then(() => take(line));
+});
+process.stdin.on('data', data => {
+  if (!permission) return;
+  if (data.includes('\x1b[B')) permission.denied = true;
+  if (data.includes('\x1b[A')) permission.denied = false;
+  showPermission();
 });
 
 function typed(key) {
@@ -128,6 +139,7 @@ async function take(line) {
   if (line === 'EXIT') process.exit(3);
   if (line === 'CLEAR') return clear();
   const context = await hook('prompt', { prompt: line });
+  if (line === 'PERMISSION_MENU') return permissionMenu();
   if (line.includes('APIFAIL')) return apiFailure(line);
   if (line.startsWith('CRASH')) crash(line.includes('LONG') ? 'long' : '');
   if (line.includes('HANG_EXIT')) process.stdout.write('exit-test running\n');
@@ -206,6 +218,22 @@ async function workFirst(line) {
   if (line.includes('SPINNER')) await currentSpinner();
   if (line.includes('TICK')) await tick();
   if (line.includes('WORK')) await work();
+}
+
+function showPermission() {
+  process.stdout.write(`\r\x1b[JAllow Bash to remove ./tmp/mine?\r\n${permission.denied ? '  Yes\r\n> No' : '> Yes\r\n  No'}\r\n`);
+}
+
+async function permissionMenu() {
+  const call = { tool_use_id: 'permission-menu', tool_name: 'Bash', tool_input: { command: 'rm -r ./tmp/mine' } };
+  said('assistant', { type: 'tool_use', id: call.tool_use_id, name: 'Bash', input: call.tool_input });
+  const decision = new Promise(resolve => { permission = { denied: false, answer: resolve }; });
+  showPermission();
+  await hook('ask', call);
+  const denied = await decision;
+  await hook(denied ? 'toolfail' : 'tooldone', call);
+  said('user', { type: 'tool_result', tool_use_id: call.tool_use_id, content: denied ? 'Denied' : 'Allowed' });
+  await answer(`Permission ${denied ? 'denied' : 'allowed'}.`, '');
 }
 
 // TICK works for 3 s with its prompt empty under a line that counts the time, as Claude Code's spinner does.
