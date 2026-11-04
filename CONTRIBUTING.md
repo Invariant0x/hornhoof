@@ -52,10 +52,13 @@ The repository has four parts:
 
 ```sh
 npm test
+npm run lint
 npx tsc -p apps/server/tsconfig.json --noEmit
 npx tsc -p apps/web/tsconfig.json --noEmit
 npx tsc -p apps/node/tsconfig.json --noEmit
 ```
+
+`npm run lint` gives each part its own eslint process. To lint one part, run `npm run build -w @hornhoof/protocol` and `npm run lint:part -w apps/server`. Avoid `npx eslint` over the whole repository: eslint keeps the types of every part in memory until it exits, and together they need more than the 2 GB node allows by default on a machine with less than 15 GB of memory.
 
 Run `tsc` for each part you changed. After a change in `packages/protocol`, rebuild it with `npx tsc -p packages/protocol/tsconfig.json` before you test the server or the node. After a change in `scripts/`, run `shellcheck` over the script.
 

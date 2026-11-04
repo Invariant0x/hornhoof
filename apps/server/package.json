@@ -7,7 +7,8 @@
     "build": "tsc -p tsconfig.json && node -e \"require('node:fs').cpSync('src/modules/program-operator/fonts', 'dist/modules/program-operator/fonts', { recursive: true })\"",
     "start": "node dist/main.js",
     "pretest": "npm run build -w @hornhoof/protocol",
-    "test": "vitest run"
+    "test": "vitest run",
+    "lint:part": "eslint"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.5",

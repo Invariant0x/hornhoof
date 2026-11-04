@@ -35,7 +35,8 @@
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "lint:part": "eslint"
   },
   "dependencies": {
     "zod": "^4.6.7"
