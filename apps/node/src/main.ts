@@ -18,6 +18,7 @@ import { applyCredential, dropCredential, giveUpLease, heldCredential, holdsLeas
 import { nodeIdentity, seal, unseal } from './keys.js';
 import { LOGIN_KEY, LoginTerminal, type LoginSetup } from './login.js';
 import { dataDir, isRemoved, markRemoved, readState, rememberSession, writeState, type NodeState } from './state.js';
+import { SETUP_CHECK_MS, SetupWait } from './setup-wait.js';
 import { partFiles, runTests } from './tests.js';
 import { SIGNED_OUT as AGY_SIGNED_OUT } from './providers/antigravity.js';
 import { SIGNED_OUT as CLAUDE_SIGNED_OUT } from './providers/claude.js';
@@ -78,6 +79,8 @@ type RunOptions = {
   builtin?: { server: string; key: string };
   log?: (line: string) => void;
   loginCheckMs?: number;
+  /* How often the node looks again at a first setup the plan waits for. */
+  setupCheckMs?: number;
   learnMs?: number;
   limitsMs?: number;
   /* How often the node says how busy its machine is. */
@@ -107,7 +110,7 @@ function merged(known: Limits | null, news: Limits): Limits {
 }
 
 /* The node's life: stay connected, run jobs, report the sign-in state and the limits, clean up when removed. */
-export async function runNode({ dir, adapter, builtin, terminal, login: loginSetup, log: writeLog = console.log, loginCheckMs = LOGIN_CHECK_MS, learnMs = LEARN_MS, limitsMs = LIMITS_MS, loadMs = LOAD_MS, leaseCheckMs = LEASE_CHECK_MS, install, programs = new ProgramUpdates([]), testUser = null, runPart = runTests, build }: RunOptions): Promise<{ stop(reason?: NodeStopReason): void }> {
+export async function runNode({ dir, adapter, builtin, terminal, login: loginSetup, log: writeLog = console.log, loginCheckMs = LOGIN_CHECK_MS, setupCheckMs = SETUP_CHECK_MS, learnMs = LEARN_MS, limitsMs = LIMITS_MS, loadMs = LOAD_MS, leaseCheckMs = LEASE_CHECK_MS, install, programs = new ProgramUpdates([]), testUser = null, runPart = runTests, build }: RunOptions): Promise<{ stop(reason?: NodeStopReason): void }> {
   if (!builtin && isRemoved(dir)) {
     writeLog('This node was removed in Hornhoof.');
     return { stop() {} };
@@ -160,6 +163,8 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     return single.loggedIn();
   };
   let loggedIn = await signedInHere();
+  const setup = new SetupWait(single, setupCheckMs);
+  await setup.check(loggedIn);
   let limits: Limits | null = null;
   let stopped = false;
 
@@ -226,7 +231,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   /* Which account and plan the program is signed in to, read at the start, after a sign-in and with the limits. */
   const readAccount = async () => (single?.account ? await single.account().catch(() => null) : null);
   let account = await readAccount();
-  const tellStatus = () => emit({ type: 'status', loggedIn, limits, ...(models ? { models } : {}), account });
+  const tellStatus = () => emit({ type: 'status', loggedIn, ...setup.field(), limits, ...(models ? { models } : {}), account });
   const status = async () => {
     /* A program that cannot list its models now keeps those it listed before. */
     models = await readModels().catch(() => models);
@@ -247,7 +252,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       /* Finished jobs Hornhoof has not confirmed still count as running, so the server does not give up on them. */
       const typed = host?.typedJobs() ?? [];
       const tests = [...testing.keys(), ...unconfirmedTests.keys()];
-      next({ type: 'hello', version: VERSION, loggedIn, running: [...running.keys(), ...typed, ...unconfirmed.keys()], ...(models ? { models } : {}), terminals: Boolean(host), work: Boolean(testUser), ...(testUser ? {} : { noRuns: NO_RUNS }), load: load(), tests, skillFiles: true, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
+      next({ type: 'hello', version: VERSION, loggedIn, ...setup.field(), running: [...running.keys(), ...typed, ...unconfirmed.keys()], ...(models ? { models } : {}), terminals: Boolean(host), work: Boolean(testUser), ...(testUser ? {} : { noRuns: NO_RUNS }), load: load(), tests, skillFiles: true, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
       for (const m of outbox.splice(0)) emit(m);
       for (const m of unconfirmed.values()) next(m);
       for (const m of unconfirmedTests.values()) next(m);
@@ -408,6 +413,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   async function signedInNow() {
     await learn();
     loggedIn = await signedInHere();
+    await setup.check(loggedIn);
     account = await readAccount();
     await status();
   }
@@ -462,7 +468,9 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     /* The end counts as running from here, so a hello while the limits are read does not give the job up. */
     keep(m.jobId, done);
     running.delete(m.jobId);
-    /* The limits the turn brought go first, so Hornhoof knows of a plan at its limit when it hears the job ended. */
+    /* A first setup the turn met, which only the plan's owner may pass, and the limits the turn brought go first, so
+       Hornhoof knows of a plan that waits for its owner or is at its limit when it hears the job ended. */
+    setup.met(done.failure);
     await status();
     emit(done);
     await renewedCodex().catch(() => {});
@@ -474,13 +482,13 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     }
   }
 
-  /* While signed out, look again now and then, so the person sees Ready soon after signing in. */
+  /* While signed out or waiting for the first setup, look again now and then, so the person sees Ready soon after. Only a
+     sign-in found by looking changes it: a turn may have found it gone meanwhile. */
   const checkLogin = async () => {
-    if (loggedIn || stopped || !single) return;
-    if (await signedInHere()) {
-      loggedIn = true;
-      void status();
-    }
+    if (stopped || !single) return;
+    const now = await setup.recheck(loggedIn, signedInHere);
+    loggedIn ||= now.signedIn;
+    if (now.changed) void status();
   };
   const timer = setInterval(() => void checkLogin(), loginCheckMs);
   timer.unref();
@@ -627,9 +635,31 @@ async function setKey(dir: string, io: Io): Promise<number> {
 async function status(dir: string, io: Io): Promise<number> {
   const state = readState(dir);
   /* spare: another machine of the plan runs Codex now, and this one takes over when that one is away. */
-  const word = isRemoved(dir) ? 'removed' : !state ? 'no_key' : isSpare(dir) ? 'spare' : !state.provider || (await personal(dir, state.provider, agentUser()).loggedIn()) ? 'ready' : 'needs_login';
+  const word = isRemoved(dir) ? 'removed' : !state ? 'no_key' : isSpare(dir) ? 'spare' : state.provider ? await planWord(dir, state.provider) : 'ready';
   io.stdout.write(word + '\n');
   return 0;
+}
+
+/* A plan's program is ready once signed in and past a first setup only its owner passes on the machine. A setup the node
+   cannot look at does not hold the plan, as in the node's own hello. */
+async function planWord(dir: string, provider: ProviderId): Promise<string> {
+  const adapter = personal(dir, provider, agentUser());
+  if (!(await adapter.loggedIn())) return 'needs_login';
+  return (await adapter.setupNeeded?.().catch(() => false)) ? 'needs_setup' : 'ready';
+}
+
+/* The first setup its owner passes on the machine after the sign-in, such as accepting agy's terms; an exit code when it
+   did not finish. */
+async function firstSetup(adapter: ProviderAdapter, name: string, io: Io, urlFile: string): Promise<number | null> {
+  if (!adapter.setup) return null;
+  try {
+    if (!(await adapter.setupNeeded?.())) return null;
+    await adapter.setup({ input: io.stdin, output: io.stdout, urlFile });
+    return null;
+  } catch (err) {
+    io.stderr.write(`The first setup of ${name} did not finish: ${message(err)}\n`);
+    return 1;
+  }
 }
 
 async function login(dir: string, io: Io): Promise<number> {
@@ -666,6 +696,8 @@ async function login(dir: string, io: Io): Promise<number> {
       return 1;
     }
   }
+  const unfinished = await firstSetup(adapter, name, io, join(dir, 'login-url'));
+  if (unfinished !== null) return unfinished;
   io.stdout.write('Logged in.\n');
   return 0;
 }

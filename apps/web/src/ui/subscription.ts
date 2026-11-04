@@ -1,6 +1,6 @@
 import type { Language, Messages } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
-import type { Limits, SubView } from '../types';
+import type { Limits, PlanStatus, SubView } from '../types';
 
 export const subName = (t: Messages, s: SubView) => s.kind === 'api_key' ? t.subs.keyEnding(PROVIDER_NAMES[s.provider], s.last4 ?? '') : PROVIDER_NAMES[s.provider];
 export const MAIN_WINDOWS = ['five_hour', 'seven_day'];
@@ -20,7 +20,7 @@ export function limitState(limits: Limits | null, now: number) {
 export function stateOf(s: SubView, now: number) {
   if (s.status === 'waiting_machine') return 'waiting_machine';
   if (!s.online) return s.kind === 'api_key' ? 'builtin_offline' : 'offline';
-  if (s.status === 'needs_login') return 'needs_login';
+  if (s.status !== 'ready') return s.status;
   return s.kind === 'personal' && limitState(s.limits, now).reached ? 'limit' : 'ready';
 }
 
@@ -39,12 +39,12 @@ export function clock(language: Language, iso: string | null): string | null {
 }
 
 /* What keeps a plan from working on one of its machines, if anything. */
-export function waitsThere(t: Messages, on: { online: boolean; status: 'ready' | 'needs_login' }): string | null {
+export function waitsThere(t: Messages, on: { online: boolean; status: PlanStatus }): string | null {
   if (!on.online) return t.subs.waitsThere.offline;
-  return on.status === 'needs_login' ? t.subs.waitsThere.needs_login : null;
+  return on.status === 'ready' ? null : t.subs.waitsThere[on.status];
 }
 
-export function planStateOnMachine(t: Messages, language: Language, on: { online: boolean; status: 'ready' | 'needs_login' }, limits: Limits | null, now: number): string {
+export function planStateOnMachine(t: Messages, language: Language, on: { online: boolean; status: PlanStatus }, limits: Limits | null, now: number): string {
   const waiting = waitsThere(t, on);
   if (waiting) return waiting;
   const limit = limitState(limits, now);

@@ -80,7 +80,7 @@ describe('POST /api/subscriptions/:id/test', () => {
     builtin.close();
   });
 
-  it('says when the machine is offline or still waits for a login', async () => {
+  it('says when the machine is offline, still waits for a login or for the first setup of its program', async () => {
     const { app, url, ceo } = await liveCompany();
     const { subscriptionId, key } = await joinedClaude(app, ceo);
     const offline = await app.inject({ method: 'POST', url: `/api/subscriptions/${subscriptionId}/test`, ...as(ceo) });
@@ -93,6 +93,12 @@ describe('POST /api/subscriptions/:id/test', () => {
     const notSignedIn = await app.inject({ method: 'POST', url: `/api/subscriptions/${subscriptionId}/test`, ...as(ceo) });
     expect(notSignedIn.statusCode).toBe(409);
     expect(notSignedIn.json().error.reason).toBe('needs_login');
+
+    node.send({ type: 'status', loggedIn: true, setupNeeded: true, limits: null });
+    await until(async () => (await statusOf(app, ceo, subscriptionId)) === 'needs_setup');
+    const notSetUp = await app.inject({ method: 'POST', url: `/api/subscriptions/${subscriptionId}/test`, ...as(ceo) });
+    expect(notSetUp.statusCode).toBe(409);
+    expect(notSetUp.json().error.reason).toBe('needs_setup');
     node.close();
   });
 });

@@ -2,9 +2,10 @@
 // Plays agy's own terminal from the recorded screens, hooks and transcript. Login keeps its own recorded flow.
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { firstRun } from './fake-agy-setup.mjs';
 import { rawKeys, readKeys } from './keys.mjs';
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -37,11 +38,51 @@ class AgyTerminal {
     this.id = args.includes('--conversation') ? args[args.indexOf('--conversation') + 1] : randomUUID();
     this.log = join(process.env.HOME, '.gemini', 'antigravity-cli', 'brain', this.id, '.system_generated', 'logs', 'transcript_full.jsonl');
     mkdirSync(dirname(this.log), { recursive: true });
-    this.hooks = JSON.parse(readFileSync(join(process.cwd(), '.agents', 'hooks.json'), 'utf8')).hornhoof;
-    trace({ argv: args, home: process.env.HOME, agentsMd: readFileSync('AGENTS.md', 'utf8'), hooks: this.hooks });
+    /* agy starts in any folder; only an agent's folder has Hornhoof's hooks and rules. */
+    const own = file => (existsSync(file) ? readFileSync(file, 'utf8') : null);
+    this.hooks = JSON.parse(own(join(process.cwd(), '.agents', 'hooks.json')) ?? '{}').hornhoof;
+    trace({ argv: args, home: process.env.HOME, agentsMd: own('AGENTS.md'), hooks: this.hooks });
+    this.mcpUrl = JSON.parse(own(join(process.cwd(), '.agents', 'mcp_config.json')) ?? '{}').mcpServers?.hornhoof?.serverUrl;
     rawKeys();
     this.display();
     readKeys(key => this.key(key));
+  }
+
+  /* agy 1.4.12 connects to the MCP servers of its folder only once it takes its first input or opens its /mcp panel, never
+     on its own, and the turn whose input made it connect works without their tools (seen on a-host, #226).
+     FAKE_MCP_LIST_MS: how long listing them takes; FAKE_AGY_NO_TOOLS: it never gets them. */
+  tools = false;
+
+  connect() {
+    if (this.connecting || !this.mcpUrl || process.env.FAKE_AGY_NO_TOOLS) return;
+    this.connecting = true;
+    setTimeout(async () => {
+      const listed = await fetch(this.mcpUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) })
+        .then(res => res.json(), () => null);
+      this.tools = Array.isArray(listed?.result?.tools);
+      trace({ toolsListed: this.tools });
+      if (this.panel) this.display();
+    }, Number(process.env.FAKE_MCP_LIST_MS ?? 50));
+  }
+
+  /* agy's /mcp panel connects to the folder's MCP servers and calls no model; Escape closes it. Its look here stands in for
+     agy's, which was not recorded: it shows no prompt, and the prompt from before stays in the lines above the screen. FAKE_MCP_PANEL_STAYS: Escape does not close it;
+     FAKE_MCP_PANEL_KEEPS_INPUT: closed, it leaves "/mcp" in agy's input. */
+  openPanel() {
+    /* agy empties its input as it takes the command, and the panel then scrolls that empty prompt up. */
+    this.display();
+    this.panel = true;
+    trace({ mcpPanel: 'open' });
+    this.connect();
+    this.display();
+  }
+
+  closePanel() {
+    if (process.env.FAKE_MCP_PANEL_STAYS) return trace({ mcpPanel: 'kept' });
+    this.panel = false;
+    if (process.env.FAKE_MCP_PANEL_KEEPS_INPUT) this.input = '/mcp';
+    trace({ mcpPanel: 'closed' });
+    this.display();
   }
 
   write(line) {
@@ -60,7 +101,13 @@ class AgyTerminal {
   }
 
   display() {
-    this.show(this.queued.length ? 'queued.txt' : this.active ? 'busy.ansi' : 'idle.ansi', this.input);
+    /* The panel scrolls agy's prompt up into the lines above the screen rather than clear it. */
+    if (this.panel) return process.stdout.write(`\x1b[0m${'\n'.repeat(process.stdout.rows ?? 48)} Manage MCP servers\n\n  hornhoof  ${this.tools ? 'connected' : 'connecting'}\n\n Esc to close`);
+    /* FAKE_AGY_SHOWN_AFTER_MCP: what agy shows after /mcp typed, as a suggestion of its list; FAKE_AGY_PLACEHOLDER: a dim
+       placeholder in its empty input. */
+    const empty = process.env.FAKE_AGY_PLACEHOLDER ? '\x1b[2mAsk anything\x1b[22m' : '';
+    const shown = this.input === '/mcp' ? this.input + (process.env.FAKE_AGY_SHOWN_AFTER_MCP ?? '') : this.input || empty;
+    this.show(this.queued.length ? 'queued.txt' : this.active ? 'busy.ansi' : 'idle.ansi', shown);
   }
 
   async hook(name, sample, line, extra = {}) {
@@ -73,6 +120,8 @@ class AgyTerminal {
 
   async take(line) {
     const turn = { line };
+    trace({ turn: line, tools: this.tools });
+    this.connect();
     this.active = turn;
     this.display();
     await this.hook('PreInvocation', 'hook-pre.json', line);
@@ -120,6 +169,11 @@ class AgyTerminal {
   }
 
   key(key) {
+    /* FAKE_AGY_DEAF: agy takes no keys at all; FAKE_AGY_EXITS_ON_KEY: it exits on the first one. */
+    if (process.env.FAKE_AGY_DEAF) return trace({ deafKey: key });
+    if (process.env.FAKE_AGY_EXITS_ON_KEY) process.exit(3);
+    /* The node types nothing into the panel but the Escape that closes it. */
+    if (this.panel) return key === 'escape' ? this.closePanel() : trace({ panelKey: key });
     if (key === 'escape') return this.interrupt();
     if (key === 'kill') this.input = this.input.slice(0, this.input.lastIndexOf('\n') + 1);
     else if (key === 'erase') this.input = this.input.slice(0, -1);
@@ -128,10 +182,15 @@ class AgyTerminal {
     const line = this.input;
     this.input = '';
     if (!line) return;
+    if (line === '/mcp') return this.openPanel();
     if (this.active) { this.queued.push(line); this.display(); }
     else void this.take(line);
   }
 }
 
 if (!process.argv.includes('--dangerously-skip-permissions')) await import('./fake-agy-login.mjs');
-else new AgyTerminal();
+else {
+  /* agy asks for its first-run setup before anything else on a machine where nobody passed it. */
+  await firstRun();
+  new AgyTerminal();
+}

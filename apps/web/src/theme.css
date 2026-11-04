@@ -473,7 +473,7 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .sub-name { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 7px; color: var(--pink-ink); border: 1px solid currentColor; vertical-align: 1px; }
 .status.ready { color: var(--ok); border-color: currentColor; }
-.status.needs_login, .status.waiting_machine { color: var(--amber-ink); border-color: currentColor; }
+.status.needs_login, .status.needs_setup, .status.waiting_machine { color: var(--amber-ink); border-color: currentColor; }
 .subs .status { display: inline-block; white-space: nowrap; }
 .status.offline, .status.builtin_offline { color: var(--muted); }
 .limits { display: block; margin-top: 4px; font-size: 12px; color: var(--muted); }

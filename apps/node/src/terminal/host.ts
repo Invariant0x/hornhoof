@@ -4,7 +4,7 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { TERM_CHUNK, UNHEARD_MS, type AgentEvent, type Failure, type Limits, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
-import { agyRules } from '../providers/antigravity.js';
+import { agyRules, COLORS_NOT_TAKEN, colorsNotTaken, pastColors, SETUP_NEEDED } from '../providers/antigravity.js';
 import { claudeEvents, claudeInterrupted } from '../providers/claude.js';
 import type { ProgramRetry } from '@hornhoof/protocol/map';
 import { contentText, isRecord } from '../providers/events.js';
@@ -16,7 +16,7 @@ import { claudePlugins } from '../skills.js';
 import { plainOutput, signalName, type ProgramOutput } from '../program-exit.js';
 import { redact } from '../redact.js';
 import { Bridge, type AgentUrls } from './bridge.js';
-import { inputOf } from './input.js';
+import { atEmptyPrompt, inputOf, withoutDim } from './input.js';
 import { procOwner, type OwnerFactory, type Ownership, type Panes } from './peer.js';
 import { StreamMask } from './mask.js';
 import { ProgramWatch, READY, REPORT_MS, programState, type Pending } from './program-state.js';
@@ -237,6 +237,10 @@ const LIMITS_WAIT_MS = 3000;
 const INPUT_WAIT_MS = 10_000;
 /* How often the host looks at what the program of a running turn does, besides each time it begins or ends a tool. */
 const LOOK_MS = 5000;
+/* How long agy's list of slash commands takes to catch up with a command's name before the Enter that runs it. */
+const SLASH_MS = 500;
+/* How long a program that just showed its prompt takes before it reads what is typed. */
+const PROMPT_SETTLE_MS = 500;
 /* What the options leave out: how long the host waits for what, and the terminal's size. */
 const DEFAULTS = { readyMs: 120_000, pollMs: 500, openMs: 8000, toolsMs: 15_000, enterWaitMs: 4000, reportMs: REPORT_MS, cols: 160, rows: 48 };
 /* The options given, without those set to nothing. */
@@ -287,6 +291,24 @@ async function keptContext(fs: AgentFs, workDir: string, sessionId: string): Pro
 
 /* The turn's own address and token for pictures change every turn; the bridge serves them instead. */
 const lasting = (env: Record<string, string> = {}) => Object.fromEntries(Object.entries(env).filter(([k]) => !k.startsWith('HH_ATTACH_')));
+/* A Hornhoof turn into Antigravity needs agy to have listed Hornhoof's tools before its prompt goes in. */
+const needsTools = ({ program, input }: TermJob): boolean => program.kind === 'antigravity' && Boolean(input.tools && input.prompt);
+/* agy waits at its prompt with nothing typed, on the screen as it is now rather than in the lines above it. */
+const agyWaits = (screen: string): boolean => READY.antigravity(screen) && atEmptyPrompt('antigravity', screen);
+/* agy shows /mcp typed on its input line, and nothing after it but dim suggestions, wherever it lists its commands. */
+const mcpTyped = (screen: string): boolean => /^[ \t]*>[ \t]?\/mcp[ \t]*$/m.test(withoutDim(screen));
+/* What the node waits for agy to do with its MCP panel, in order: wait at its empty prompt, show the command typed, list
+   Hornhoof's tools in the panel, wait at its empty prompt again once the panel closes. A turn says where agy stopped. */
+type PanelStep = 'waits' | 'typed' | 'listed' | 'back';
+const PANEL_STOPPED: Record<PanelStep, (seconds: number) => Failure> = {
+  waits: () => failure('unknown', 'Antigravity CLI did not wait at its empty prompt, so the node did not open its MCP panel.', true),
+  typed: seconds => failure('unknown', `Antigravity CLI did not show /mcp in its input within ${seconds} s, so the node did not open its MCP panel.`, true),
+  listed: seconds => failure('tools', `Antigravity CLI did not list Hornhoof's tools within ${seconds} s of opening its MCP panel.`),
+  back: seconds => failure('unknown', `Antigravity CLI did not show its empty prompt again within ${seconds} s of closing its MCP panel.`, true),
+};
+/* Resolves false once the turn is stopped, and never for a turn nobody can stop. */
+const stopped = (signal?: AbortSignal): Promise<false> =>
+  new Promise(resolve => (signal?.aborted ? resolve(false) : signal?.addEventListener('abort', () => resolve(false), { once: true })));
 
 /* Runs agents in their tmux sessions on this node and shows those sessions to the people watching. */
 export class TerminalHost {
@@ -405,7 +427,7 @@ export class TerminalHost {
     a.launch = { job, spec };
     /* A program started with nothing to type gets its tools before its turn ends, while Hornhoof still answers for them.
        Kimi Code connects to its tools only once it has a session, which a new one gets with the first message, and
-       Antigravity only while it answers a message. */
+       Antigravity only once it takes a message or opens its MCP panel. */
     const lazy = (program.kind === 'kimi' && !input.sessionId) || program.kind === 'antigravity';
     const tools = !goesOn && !input.prompt && input.tools && !lazy ? this.bridge.listed(job.key, this.toolsMs) : null;
 
@@ -451,7 +473,68 @@ export class TerminalHost {
   private async runRequested(a: Agent, job: TermJob, turn: Turn, tools: Promise<unknown> | null, goesOn: boolean, ended: Deferred<string>): Promise<RunResult> {
     /* Nothing to type: the turn only starts the program for the person who opened its window. */
     if (!job.input.prompt) return this.started(a, turn, tools, goesOn ? null : job.input.sessionId === null);
-    return (await this.typePrompt(a, job, job.input.prompt)) ?? this.turnEnd(a, job, ended, turn);
+    return (await this.toolsMissing(a, job)) ?? (await this.typePrompt(a, job, job.input.prompt)) ?? this.turnEnd(a, job, ended, turn);
+  }
+
+  /* agy 1.4.12 connects to the MCP servers of its folder only once it takes its first input or opens its /mcp panel, and
+     the turn whose input made it connect works without their tools (seen on a-host, #226). So an agy that has not listed
+     Hornhoof's tools through the bridge since it started opens that panel before Hornhoof's prompt goes in, whether this
+     turn started it or a person's window did. A turn whose agy lists none there, or does not come back to its prompt,
+     ends saying so. */
+  private async toolsMissing(a: Agent, job: TermJob): Promise<RunResult | null> {
+    if (!needsTools(job) || this.bridge.listedSince(job.key, a.startedAt)) return null;
+    const failed = await this.agyTools(a, job.key, job.input.signal);
+    if (job.input.signal?.aborted) return await this.failedTurn(a, job, 'cancelled');
+    if (!failed) return null;
+    a.failure = failed;
+    return await this.failedTurn(a, job, 'agent_failed');
+  }
+
+  /* Gets agy Hornhoof's tools through its MCP panel: what went wrong, or null. One that did not end with the tools listed
+     and agy at its empty prompt starts anew for the next turn, as a panel still up or a person's words in its input
+     would take the next prompt. A turn stopped meanwhile goes no further. */
+  private async agyTools(a: Agent, key: string, signal?: AbortSignal): Promise<Failure | null> {
+    if (signal?.aborted) return null;
+    const missed = await this.mcpPanel(a, key, signal);
+    if (missed) a.hash = null;
+    if (!(await this.opts.tmux.alive(a.name))) return failure('crash', "The program exited before it took Hornhoof's prompt.");
+    return missed ? PANEL_STOPPED[missed](Math.round(this.toolsMs / 1000)) : null;
+  }
+
+  /* Opens agy's MCP panel, which calls no model, from its empty prompt, waits for agy to list Hornhoof's tools there,
+     closes the panel with Escape and waits for agy's empty prompt. The step agy did not get to, or null. Nothing goes into
+     words a person left in its input. */
+  private async mcpPanel(a: Agent, key: string, signal?: AbortSignal): Promise<PanelStep | null> {
+    if (!agyWaits(await this.opts.tmux.screen(a.name, 0, true))) return 'waits';
+    /* A program gone meanwhile takes no keys; the turn says it is gone. */
+    const press = (...keys: string[]) => this.opts.tmux.keys(a.name, ...keys).catch(() => {});
+    await press('-l', '/mcp');
+    const missed = await this.panelListed(a, key, press, signal);
+    await press('Escape');
+    if (missed) return missed;
+    return (await this.agyShows(a, agyWaits, signal, PROMPT_SETTLE_MS)) ? null : 'back';
+  }
+
+  /* Runs the /mcp typed once agy shows it, as an Enter before then could run another command of its list or send the words
+     to the model, and waits for agy to list Hornhoof's tools: the step agy did not get to, or null. A turn stopped
+     meanwhile presses no Enter. */
+  private async panelListed(a: Agent, key: string, press: (...keys: string[]) => Promise<void>, signal?: AbortSignal): Promise<'typed' | 'listed' | null> {
+    if (!(await this.agyShows(a, mcpTyped, signal))) return 'typed';
+    await sleep(SLASH_MS);
+    if (signal?.aborted) return 'typed';
+    await press('Enter');
+    return (await Promise.race([this.bridge.listed(key, this.toolsMs, a.startedAt), stopped(signal)])) ? null : 'listed';
+  }
+
+  /* Whether agy's screen as it is now, with its styles, shows what is asked within toolsMs, then waits settleMs; false once
+     the turn is stopped or the program is gone. Dim words there are a suggestion, not input. */
+  private async agyShows(a: Agent, shows: (screen: string) => boolean, signal?: AbortSignal, settleMs = 0): Promise<boolean> {
+    for (const end = Date.now() + this.toolsMs; Date.now() < end && !signal?.aborted && (await this.opts.tmux.alive(a.name)); await sleep(this.pollMs)) {
+      if (!shows(await this.opts.tmux.screen(a.name, 0, true))) continue;
+      await sleep(settleMs);
+      return true;
+    }
+    return false;
   }
 
   private async waitForTurn(a: Agent, job: TermJob): Promise<void> {
@@ -504,6 +587,8 @@ export class TerminalHost {
     const env = { ...lasting(input.env), ...spec.env };
     const scratch = this.opts.tmux.scratch();
     await this.opts.tmux.launch(a.name, { cwd: input.workDir, command: this.asAgent(spec.command), cols: this.cols, rows: this.rows, envFile: envFile(scratch, env), outputDir: scratch });
+    /* The program starts as its launch ends, once the one before it is gone: what it does counts from then. */
+    a.startedAt = Date.now();
     this.watch(a);
     if (await this.ready(a, job)) {
       this.programIs(a, true);
@@ -512,7 +597,15 @@ export class TerminalHost {
     const screen = await this.screen(job.key);
     /* Its screen says why, which the loader would hide. */
     this.showViews(a);
+    await this.whyNotReady(a, job, screen);
     return await this.failedTurn(a, job, job.signedOut.test(screen) ? 'not_logged_in' : 'agent_failed', screen);
+  }
+
+  /* A program still there that never showed its prompt fails its turn saying so in short, for the retry to say; its screen
+     goes with the turn's output. One that met a failure, ended or is signed out says that instead. */
+  private async whyNotReady(a: Agent, job: TermJob, screen: string): Promise<void> {
+    if (a.failure || job.signedOut.test(screen) || !(await this.opts.tmux.alive(a.name))) return;
+    a.failure = failure('unknown', `The program did not show its prompt within ${Math.round(this.readyMs / 1000)} s.`, true);
   }
 
   /* What each program needs in its folders before it starts. A person's first message into a new Kimi session, or into
@@ -556,7 +649,9 @@ export class TerminalHost {
       a.busy = false;
       /* Its input still holds the prompt, so the next turn starts the program anew, resuming the session. */
       a.hash = null;
-      return await this.failedTurn(a, job, 'agent_failed', `The program did not take Hornhoof's prompt within ${Math.round(this.readyMs / 1000)} s.\n\n${await this.screen(job.key)}`);
+      const why = `The program did not take Hornhoof's prompt within ${Math.round(this.readyMs / 1000)} s.`;
+      a.failure = failure('unknown', why, true);
+      return await this.failedTurn(a, job, 'agent_failed', `${why}\n\n${await this.screen(job.key)}`);
     }
     return null;
   }
@@ -852,10 +947,10 @@ export class TerminalHost {
     return false;
   }
 
-  /* Claude Code says it started through its hook; the others are ready once their prompt shows. Kimi shows its prompt
-     also when it is not signed in, with a word to sign in. */
+  /* Claude Code says it started through its hook; the others are ready once their prompt shows. */
   private async ready(a: Agent, job: TermJob): Promise<boolean> {
     const end = Date.now() + this.readyMs;
+    const colors = { at: -Infinity };
     while (Date.now() < end) {
       if (!(await this.opts.tmux.alive(a.name))) return false;
       const kind = job.program.kind;
@@ -865,17 +960,39 @@ export class TerminalHost {
           return true;
         }
       } else {
-        const screen = await this.screen(a.key);
-        if (kind === 'kimi' && job.signedOut.test(screen)) return false;
-        if (READY[kind](screen)) {
-          await sleep(500);
-          return true;
-        }
-        await sleep(this.pollMs);
+        const shown = await this.promptShows(a, job, kind, colors);
+        if (shown !== null) return shown;
       }
       if (job.signedOut.test(await this.screen(a.key))) return false;
     }
     return false;
+  }
+
+  /* Whether the prompt shows, or null while the program is still on its way to it. Kimi shows its prompt also when it is
+     not signed in, with a word to sign in; agy may first ask for its first-run setup. */
+  private async promptShows(a: Agent, job: TermJob, kind: keyof typeof READY, colors: { at: number }): Promise<boolean | null> {
+    const screen = await this.screen(a.key);
+    if (kind === 'kimi' && job.signedOut.test(screen)) return false;
+    if (READY[kind](screen)) {
+      await sleep(PROMPT_SETTLE_MS);
+      return true;
+    }
+    if (kind === 'antigravity' && (await this.agyFirstRun(a, colors))) return false;
+    await sleep(this.pollMs);
+    return null;
+  }
+
+  /* agy's first-run setup: the node takes the colors agy offers first, once, and goes on. Its terms are the plan owner's
+     alone to accept, so the node presses nothing on them: the turn ends saying why, and the next start runs agy anew rather
+     than typing into them. An agy that did not take the colors ends the turn too, to be started anew. True when the turn
+     ends. */
+  private async agyFirstRun(a: Agent, colors: { at: number }): Promise<boolean> {
+    const step = await pastColors(await this.opts.tmux.screen(a.name, 0), () => this.opts.tmux.keys(a.name, 'Enter'), colors);
+    const stuck = colorsNotTaken(step, colors);
+    if (step !== 'terms' && !stuck) return false;
+    a.failure = stuck ? failure('unknown', COLORS_NOT_TAKEN, true) : failure('setup', SETUP_NEEDED, false);
+    a.hash = null;
+    return true;
   }
 
   /* Claude Code can say it started before its input box is up, and loses what is typed into it until then. Hornhoof's

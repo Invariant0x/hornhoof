@@ -1,4 +1,4 @@
-import type { Failure } from '@hornhoof/protocol';
+import type { Failure, FailureKind } from '@hornhoof/protocol';
 import type { TurnRetry } from '@hornhoof/protocol/map';
 import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
@@ -10,7 +10,7 @@ import { continuationNote } from './endings.js';
 import { operationsWatchers, pickOpsRecipient } from './silent.js';
 import { logTurnFact } from './turn-log.js';
 import { repeatWake } from './wake-state.js';
-import { requestedPromptOf } from '../conversation/requested-prompt.js';
+import { originalPromptOf } from '../conversation/requested-prompt.js';
 
 const RETRY_MINUTES = [1, 2, 5, 10];
 type Job = typeof jobs.$inferSelect;
@@ -18,7 +18,15 @@ type TaskTurn = Parameters<typeof turnAgain>[1];
 export type LastFailure = { kind: Failure['kind']; text: string; at: number };
 export type FailureState = { retry: TurnRetry | null; failure: LastFailure | null };
 
-const passing = (f: Failure | null) => !!f && (['overloaded', 'network', 'cut', 'rate_limited'].includes(f.kind) || (f.kind === 'unknown' && f.retryable));
+/* Failures that hold the turn until the plan can take it again: its limit resets, or its owner signs in or passes the
+   program's first setup on its machine. */
+const HELD = new Set<FailureKind>(['usage_limit', 'auth', 'setup']);
+const OWNER_STEP: Partial<Record<FailureKind, string>> = {
+  auth: 'The turn waits for the plan owner to sign in on its machine.',
+  setup: "The turn waits for the plan owner to pass its program's first setup on its machine, as for a sign-in.",
+};
+
+const passing = (f: Failure | null) => !!f && (['overloaded', 'network', 'cut', 'rate_limited', 'tools'].includes(f.kind) || (f.kind === 'unknown' && f.retryable));
 
 /* Count only this continuation's unbroken chain, never an unrelated turn of the same agent. */
 async function passingAttempts(ctx: Ctx, job: Job, history?: ReadonlyMap<string, Job>): Promise<number> {
@@ -113,14 +121,22 @@ async function sendFailureMessage(ctx: Ctx, job: Job, agentId: string, text: str
   await enqueueTurn(ctx, { companyId: job.companyId, agentId, prompt: text, createdBy: null, message: { personId: null, text, failureCase: caseId } });
 }
 
+/* What a retry says of a failure: its first line. A program's screen, which older nodes gave as the reason, says none: a
+   line drawn with boxes or blocks, or one that starts with no word, number, bracket or quote. */
+export function shortReason(text: string): string {
+  const line = text.trim().split('\n', 1)[0]!.replace(/\s+/g, ' ').trim();
+  if (!/^[\p{L}\p{N}[{("'`]/u.test(line) || /[\u2500-\u259f]/u.test(line)) return 'the program gave no reason';
+  return line.length > 300 ? `${line.slice(0, 299)}…` : line;
+}
+
 async function retryTurn(ctx: Ctx, job: Job, at: Date | null, next: string, taskTurn?: TaskTurn): Promise<void> {
   if (!job.agentId) return;
   const [agent] = taskTurn ? [taskTurn.agent] : await ctx.db.select().from(agents).where(eq(agents.id, job.agentId));
   const task = taskTurn?.task;
   if (!agent) return;
-  const why = `The last try failed (${job.failure!.kind}): ${job.failure!.text.replace(/\s+/g, ' ').trim()}`;
+  const why = `The last try failed (${job.failure!.kind}): ${shortReason(job.failure!.text)}`;
   const note = task ? `${continuationNote(job, task)}\n${why}` : why;
-  const prompt = task ? note : `${note}\n\n${requestedPromptOf(job)}`;
+  const prompt = task ? note : `${note}\n\n${await originalPromptOf(ctx, job)}`;
   const id = await onAgent(ctx, agent.id, async () => {
     const [existing] = await ctx.db.select({ id: jobs.id }).from(jobs).where(eq(jobs.continueOf, job.id)).limit(1);
     if (existing) return existing.id;
@@ -143,7 +159,7 @@ export async function afterFailure(ctx: Ctx, jobId: string): Promise<boolean> {
 
 async function applyFailure(ctx: Ctx, job: Job, failure: Failure, taskTurn?: TaskTurn): Promise<boolean> {
   if (passing(failure)) await retryPassingFailure(ctx, job, taskTurn);
-  else if (failure.kind === 'usage_limit' || failure.kind === 'auth') await holdFailedTurn(ctx, job, taskTurn);
+  else if (HELD.has(failure.kind)) await holdFailedTurn(ctx, job, taskTurn);
   else if (failure.kind === 'crash') {
     await logTurnFact(ctx, job, `The program crashed: ${failure.text}. Hornhoof checks whether it can go on once.`);
     if (job.taskId) return false;
@@ -175,7 +191,7 @@ async function retryPassingFailure(ctx: Ctx, job: Job, taskTurn?: TaskTurn): Pro
 async function holdFailedTurn(ctx: Ctx, job: Job, taskTurn?: TaskTurn): Promise<void> {
   const [plan] = await ctx.db.select().from(subscriptions).where(eq(subscriptions.id, job.subscriptionId));
   const reset = limitUntil(plan?.limits ?? null);
-  const next = job.failure!.kind === 'auth' ? 'The turn waits for the plan owner to sign in on its machine.' : `The plan holds its turns until its usage limit resets${reset ? ` at ${reset}` : ''}, then this turn goes on.`;
+  const next = OWNER_STEP[job.failure!.kind] ?? `The plan holds its turns until its usage limit resets${reset ? ` at ${reset}` : ''}, then this turn goes on.`;
   await retryTurn(ctx, job, null, next, taskTurn);
 }
 

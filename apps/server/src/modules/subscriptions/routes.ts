@@ -6,7 +6,7 @@ import type { Ctx } from '../../app.js';
 import { requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
 import { encryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
-import { agents, departments, jobs, machines, nodes, people, planCredentials, subscriptions, teams, testParts } from '../../db/schema.js';
+import { agents, departments, jobs, machines, nodes, people, planCredentials, subscriptions, teams, testParts, type SUBSCRIPTION_STATUSES } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { runningAgents } from '../agents/running.js';
 import { servesWholeCompany } from '../tools/staff.js';
@@ -68,11 +68,13 @@ const connectedAlready = () =>
 type ExistingPlan = {
   id: string;
   provider: Plan;
-  status: 'waiting_machine' | 'needs_login' | 'ready';
+  status: (typeof SUBSCRIPTION_STATUSES)[number];
   removedAt: Date | null;
 };
 
-const isProtectedPlan = (s: ExistingPlan, busy: ReadonlySet<string | null>) => s.removedAt === null && (s.status === 'ready' || busy.has(s.id));
+/* A plan signed in on its machine: ready there, or waiting for its owner to pass its program's first setup there. */
+const SIGNED_IN = new Set<ExistingPlan['status']>(['ready', 'needs_setup']);
+const isProtectedPlan = (s: ExistingPlan, busy: ReadonlySet<string | null>) => s.removedAt === null && (SIGNED_IN.has(s.status) || busy.has(s.id));
 
 async function clearPlanNodes(tx: Db, resetIds: string[]): Promise<string[]> {
   if (!resetIds.length) return [];

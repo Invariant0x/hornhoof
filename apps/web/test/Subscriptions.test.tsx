@@ -58,6 +58,42 @@ describe('Subscriptions', () => {
     expect(plan).toHaveAccessibleName('Claude, Ivan');
   });
 
+  it.each([
+    ['en', 'Waiting for the first setup', 'a-host, waiting for the first setup', 'On a-host, Antigravity asks its owner to accept its terms. Only Ivan can do it, by running the install command on that machine again.'],
+    ['ru', 'Ждет первой настройки', 'a-host, ждет первой настройки', 'На a-host Antigravity просит владельца принять его условия. Это может сделать только Ivan: снова запустить на этой машине команду установки.'],
+  ])("says in %s that a plan waits for its owner to accept its program's terms on the machine", async (language, state, there, fix) => {
+    localStorage.setItem('hh-lang', language);
+    const machines = [{ ...MACHINE, hostname: 'a-host', status: 'needs_setup' as const }, { ...MACHINE, id: 'm2', hostname: 'b-host', status: 'ready' as const, online: false }];
+    lists({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[1]!, id: 's-agy', provider: 'antigravity', label: 'Antigravity', status: 'needs_setup', machines }] }] });
+    render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
+    const row = await screen.findByRole('row', { name: /^Antigravity\b/ });
+    expect(within(row).getByText(state)).toBeInTheDocument();
+    expect(row.textContent).toContain(there);
+    await openAll();
+    expect(rowOf('Antigravity').querySelector('.blk-fix')?.textContent).toContain(fix);
+  });
+
+  it('names the machine that waits for the first setup when that machine is offline', async () => {
+    const machines = [{ ...MACHINE, id: 'm2', hostname: 'b-host', status: 'needs_login' as const }, { ...MACHINE, hostname: 'a-host', status: 'needs_setup' as const, online: false }];
+    lists({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[1]!, id: 's-agy', provider: 'antigravity', label: 'Antigravity', status: 'needs_setup', machines }] }] });
+    render(<Subscriptions me={ME} />);
+    await openAll();
+    expect(rowOf('Antigravity').querySelector('.blk-fix')?.textContent).toContain('It needs its first setup on a-host, and the machine is offline.');
+  });
+
+  it('names the machine online that waits for the first setup before one offline', async () => {
+    const machines = [{ ...MACHINE, hostname: 'a-host', status: 'needs_setup' as const, online: false }, { ...MACHINE, id: 'm2', hostname: 'b-host', status: 'needs_setup' as const }];
+    lists({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[1]!, id: 's-agy', provider: 'antigravity', label: 'Antigravity', status: 'needs_setup', machines }] }] });
+    render(<Subscriptions me={ME} />);
+    await openAll();
+    expect(rowOf('Antigravity').querySelector('.blk-fix')?.textContent).toContain('On b-host, Antigravity asks its owner to accept its terms.');
+  });
+
+  it('marks a plan that waits for its first setup in the warning color of one that waits for its login', () => {
+    expect(decl('.status.needs_setup', 'color')).toBe(decl('.status.needs_login', 'color'));
+    expect(decl('.status.needs_setup', 'border-color')).toBe('currentColor');
+  });
+
   it('omits the sign-in line while waiting for the login', async () => {
     lists({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[1]!, signedInOnce: true, machines: [MACHINE, { ...SUBS[1]!.machines[0]!, id: 'login', hostname: 'laptop' }] }] }] });
     render(<Subscriptions me={ME} />);
@@ -136,16 +172,17 @@ describe('Subscriptions', () => {
     lists({ 'GET /api/subscriptions': [200, { subscriptions: [
       { ...SUBS[0]!, limits }, SUBS[1]!, SUBS[2]!, { ...SUBS[3]!, online: false },
       { ...SUBS[0]!, id: 'off', provider: 'glm', online: false },
+      { ...SUBS[1]!, id: 's-agy', provider: 'antigravity', label: 'Antigravity', status: 'needs_setup', machines: [{ ...MACHINE, status: 'needs_setup' }] },
     ] }] });
     render(<Subscriptions me={ME} />);
     await screen.findByRole('table');
     const order = () => screen.getAllByRole('row').filter(r => r.classList.contains('rm')).map(r => r.getAttribute('aria-label'));
-    expect(order()).toEqual(['Anthropic key ending 9f3a', 'GLM', 'Codex', 'Claude', 'Kimi']);
+    expect(order()).toEqual(['Anthropic key ending 9f3a', 'GLM', 'Codex', 'Antigravity', 'Claude', 'Kimi']);
     expect(within(screen.getByRole('row', { name: 'Claude' })).getByText(/^until /)).toBeInTheDocument();
     const header = within(screen.getByRole('columnheader', { name: 'Status' })).getByRole('button');
     expect(header.closest('th')).toHaveAttribute('aria-sort', 'ascending');
     await userEvent.click(header);
-    expect(order()).toEqual(['Kimi', 'Claude', 'Codex', 'GLM', 'Anthropic key ending 9f3a']);
+    expect(order()).toEqual(['Kimi', 'Claude', 'Antigravity', 'Codex', 'GLM', 'Anthropic key ending 9f3a']);
     await openAll();
     expect(within(rowOf('Claude')).getByText(/^Until .+Its agents wait until then\.$/)).toBeInTheDocument();
     expect(rowOf('Claude').querySelector('.card-h .until')).not.toBeInTheDocument();

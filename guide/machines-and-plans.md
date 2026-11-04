@@ -21,7 +21,7 @@ The command installs Docker if needed and starts one small locked-down container
 - Codex opens the ChatGPT device login for your ChatGPT plan.
 - Kimi opens the Kimi Code login.
 - GLM asks you to paste your GLM Coding Plan key from z.ai.
-- Antigravity, Google's agent program for a Google AI Pro or Ultra plan, opens the Google sign-in. Google then shows a code: paste it into the terminal where the command runs.
+- Antigravity, Google's agent program for a Google AI Pro or Ultra plan, opens the Google sign-in. Google then shows a code: paste it into the terminal where the command runs. On a machine where it runs for the first time, Antigravity then asks you to accept its terms of service and to choose whether Google may use your interactions data: read its screen and choose Done. Hornhoof picks its colors but never accepts the terms for you. Until you do, the plan shows "Waiting for the first setup" and its agents wait; to do it later, run the install command again without --join.
 
 ![Connecting AI plans](../.github/assets/subscriptions.png)
 

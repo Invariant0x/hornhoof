@@ -1,7 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
@@ -29,7 +29,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  for (const k of ['HORNHOOF_DATA', 'FAKE_LOG', 'FAKE_MODE', 'HORNHOOF_SERVER', 'NODE_KEY']) delete process.env[k];
+  for (const k of ['HORNHOOF_DATA', 'FAKE_LOG', 'FAKE_MODE', 'FAKE_AGY_SETUP', 'HORNHOOF_SERVER', 'NODE_KEY']) delete process.env[k];
 });
 
 function io(input = '') {
@@ -204,6 +204,53 @@ describe('login', () => {
     const res = await run(['login']);
     expect(res.code).toBe(1);
     expect(res.err).toContain('install command');
+  });
+});
+
+/* agy asks a person who signed it in on a machine to accept its terms once there, which only the plan's owner may do. */
+describe("a plan whose program asks for a first setup on its machine", () => {
+  const settings = () => join(data, 'home', '.gemini', 'antigravity-cli', 'settings.json');
+  /* What a person's Done leaves: agy 1.4.12 kept its settings as {}, and the fake agy keeps the rest in its own file. */
+  const passed = () => {
+    mkdirSync(dirname(settings()), { recursive: true });
+    writeFileSync(settings(), '{}\n');
+    writeFileSync(join(data, 'agy-setup-passed'), '');
+  };
+  beforeEach(async () => {
+    process.env.FAKE_AGY_SETUP = join(data, 'agy-setup-passed');
+    await run(['set-key'], `${SERVER} sub-1 antigravity ${KEY}\n`);
+    mkdirSync(bin, { recursive: true });
+    symlinkSync(join(FAKES, 'fake-agy-term.mjs'), join(bin, 'agy'));
+    mkdirSync(join(data, 'home'), { recursive: true });
+    writeFileSync(join(data, 'home', 'fake-signed-in'), '');
+  });
+
+  it('says needs_setup while agy shows its first-run setup, and ready once it shows its prompt with settings of {}', async () => {
+    expect((await run(['status'])).out).toBe('needs_setup\n');
+    passed();
+    expect((await run(['status'])).out).toBe('ready\n');
+  });
+
+  it('goes with the sign-in, which says why it cannot finish without the terminal of the person who runs it', async () => {
+    const res = await run(['login']);
+    expect(res.code).toBe(1);
+    expect(res.err).toBe('The first setup of Antigravity CLI did not finish: Its terms need the terminal of the person who runs the install command.\n');
+    expect(existsSync(settings())).toBe(false);
+    expect((await run(['status'])).out).toBe('needs_setup\n');
+  });
+
+  it('is left out of the sign-in once passed', async () => {
+    passed();
+    expect(await run(['login'])).toMatchObject({ code: 0, out: 'Logged in.\n' });
+  });
+
+  /* As the node does not hold a plan for a setup it cannot see, while the sign-in says why it cannot finish it. */
+  it('says ready when the node cannot look at agy, and the sign-in says why its first setup did not finish', async () => {
+    writeFileSync(join(data, 'home', '.hh-setup-check'), '');
+    expect(await run(['status'])).toMatchObject({ code: 0, out: 'ready\n' });
+    const res = await run(['login']);
+    expect(res.code).toBe(1);
+    expect(res.err).toMatch(/^The first setup of Antigravity CLI did not finish: EEXIST: file already exists, mkdir '.+\.hh-setup-check'\n$/);
   });
 });
 

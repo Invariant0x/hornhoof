@@ -12,9 +12,10 @@ export const JOB_ERRORS = ['timeout', 'agent_failed', 'not_logged_in', 'cancelle
 export type JobError = (typeof JOB_ERRORS)[number];
 
 /* Why a turn's program failed, in one list for every program: the model is busy, too many requests now, the plan's
-   window is used up, the sign-in no longer works, the service could not be reached, the answer broke off, the
-   provider will not do this work, the context or output is too big, the program itself is gone, or anything else. */
-export const FAILURE_KINDS = ['overloaded', 'rate_limited', 'usage_limit', 'auth', 'network', 'cut', 'refused', 'too_big', 'crash', 'unknown'] as const;
+   window is used up, the sign-in no longer works, the program waits for a first setup only the plan's owner may pass,
+   such as accepting its terms, it did not get Hornhoof's tools, the service could not be reached, the answer broke off,
+   the provider will not do this work, the context or output is too big, the program itself is gone, or anything else. */
+export const FAILURE_KINDS = ['overloaded', 'rate_limited', 'usage_limit', 'auth', 'setup', 'tools', 'network', 'cut', 'refused', 'too_big', 'crash', 'unknown'] as const;
 export type FailureKind = (typeof FAILURE_KINDS)[number];
 /* A failed turn's kind, the program's own words for it, cut to size, and whether the program called it worth trying again. */
 export const Failure = z.object({ kind: z.enum(FAILURE_KINDS), text: z.string().max(2000), retryable: z.boolean() });
@@ -354,6 +355,8 @@ const NodeMessage = z.discriminatedUnion('type', [
     type: z.literal('hello'),
     version: z.string().max(40),
     loggedIn: z.boolean(),
+    /* Signed in, but the program waits for a first setup only the plan's owner may pass, such as accepting its terms. */
+    setupNeeded: z.boolean().optional(),
     running: z.array(z.string()).max(100),
     models: Models.optional(),
     terminals: z.boolean().optional(),
@@ -388,7 +391,7 @@ const NodeMessage = z.discriminatedUnion('type', [
     commit: z.string().regex(/^[0-9a-f]{40,64}$/).nullable(),
     log: z.string().max(TEST_LOG_BYTES + 1024),
   }),
-  z.object({ type: z.literal('status'), loggedIn: z.boolean(), limits: Limits.nullable(), models: Models.optional(), account: Account.nullable().optional(), programs: Programs.optional() }),
+  z.object({ type: z.literal('status'), loggedIn: z.boolean(), setupNeeded: z.boolean().optional(), limits: Limits.nullable(), models: Models.optional(), account: Account.nullable().optional(), programs: Programs.optional() }),
   /* The sign-in this node holds, sealed for each of the plan's other nodes; version counts sign-ins of the plan. */
   z.object({
     type: z.literal('cred.sealed'),

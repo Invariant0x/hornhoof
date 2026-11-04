@@ -5,6 +5,37 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.6.1] - 2026-11-04
+
+Urgent fixes for Antigravity: a new machine no longer fails every turn at its
+first-run setup, and its agents have Hornhoof's tools from their first turn.
+
+### Fixed
+
+- Antigravity no longer fails every turn on a machine where it never ran. The
+  node picks its colors itself and never accepts its terms or the consent to
+  use interactions data for a person: the plan shows "Waiting for the first
+  setup", its agents wait without spending retries, and its owner accepts the
+  terms by running the install command on that machine again. The choice stays
+  on the node's volume across updates.
+- Antigravity agents have Hornhoof's tools from their first turn again, so they
+  hand in work and give verdicts without detours through subagents. Antigravity
+  connects to them only once it takes its first message or opens its MCP panel,
+  and that first message works without them. The node now opens the MCP panel
+  first, waits until Antigravity has listed Hornhoof's tools, closes the panel
+  and only then types the work. If they are not listed within 15 seconds, the
+  turn fails as "Hornhoof's tools missing" and is tried again in a new
+  Antigravity.
+- A turn that is tried again says in one short line why the last try failed,
+  without the program's screen, and repeats the work its first try was given,
+  not the text of the previous retry.
+
+### Before you update
+
+- Update the server first, then the nodes: a server older than 0.6.1 cannot
+  read how a 0.6.1 node ends an Antigravity turn that stopped at the first-run
+  setup or without Hornhoof's tools, and that turn can hang.
+
 ## [0.6.0] - 2026-11-04
 
 Turn 6: one agent window you can open from anywhere, with the agent's current

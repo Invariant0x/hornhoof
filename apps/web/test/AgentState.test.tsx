@@ -181,6 +181,7 @@ describe('AgentState', () => {
       ['rate_limited', 'too many requests', 'слишком много запросов'],
       ['usage_limit', 'plan limit reached', 'лимит тарифа'],
       ['auth', 'sign-in needed', 'нужен вход'],
+      ['tools', "Hornhoof's tools missing", 'нет инструментов Hornhoof'],
       ['network', 'network error', 'ошибка сети'],
       ['cut', 'answer cut off', 'ответ оборвался'],
       ['refused', 'refused by the provider', 'отказ провайдера'],

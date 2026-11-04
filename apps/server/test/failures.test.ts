@@ -8,7 +8,11 @@ import { enqueueTurn, GONE_ALONG, insertTurn, pump } from '../src/modules/conver
 import { createTask } from '../src/modules/tasks/engine.js';
 import { cancelJob, wakeAll } from '../src/modules/tasks/wake.js';
 import { failureCompany } from './failure-company.js';
+import { BUILTIN } from '../src/modules/nodes/hub.js';
+import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { taskWakeOf } from '../src/modules/tasks/wake-state.js';
+import { shortReason } from '../src/modules/tasks/failures.js';
+import { originalPromptOf } from '../src/modules/conversation/requested-prompt.js';
 
 const failure = (kind: Failure['kind'], retryable = true): Failure => ({ kind, retryable, text: 'The provider said no this time.' });
 const MIN = 60_000;
@@ -149,7 +153,7 @@ describe('named turn failures', () => {
     if (kind) expect((await c.log(c.task.id)).some(e => e.kind === 'continued')).toBe(false);
   });
 
-  it.each(['overloaded', 'network', 'cut', 'rate_limited', 'unknown'] as const)('keeps %s, records why and waits a minute before continuing', async kind => {
+  it.each(['overloaded', 'network', 'cut', 'rate_limited', 'tools', 'unknown'] as const)('keeps %s, records why and waits a minute before continuing', async kind => {
     const c = await atWork();
     const at = new Date();
     await c.fail(c.first.id, failure(kind), at);
@@ -370,4 +374,104 @@ it('holds the whole line until the retry even when task turns were switched off 
   await insertTurn(c.ctx, { companyId: c.companyId, agentId: c.agent.id, prompt: 'Answer the person later', createdBy: null });
   await pump(c.ctx, c.agent.id);
   expect((await c.turnsOf()).some(j => j.status === 'running')).toBe(false);
+});
+
+/* What the CEO saw on a-host: a retry gave agy's raw first-run screen as the reason, and "The turn that ended was asked"
+   held the retry before it instead of the turn's work. */
+describe('a retry of a retry', () => {
+  const SCREEN = "    ▄▀▀▄\n   ▀▀▀▀▀▀\n  ▀▀▀▀▀▀▀▀\nWelcome to Antigravity CLI!\nChoose your color scheme:\n  > terminal\n    light\n  [Next]";
+  /* A program that never took its prompt, so there is no session to go on in. An older node gave its screen as the reason. */
+  const neverTook = (c: Awaited<ReturnType<typeof failureCompany>>, jobId: string, text: string, at: Date) =>
+    handleNodeMessage(c.ctx, BUILTIN, { type: 'job.done', jobId, ok: false, sessionId: null, error: 'agent_failed', tail: SCREEN, result: '', failure: { kind: 'unknown', retryable: true, text } }, at);
+
+  it.each([
+    ['the screen alone', SCREEN, null],
+    ['a reason and then the screen', `The program did not show its prompt within 120 s.\n\n${SCREEN}`, 'The program did not show its prompt within 120 s.'],
+  ])('says what the first try was asked, once, and a short reason without %s', async (_, text, reason) => {
+    const c = await atWork();
+    const clock = vi.spyOn(Date, 'now');
+    onTestFinished(() => clock.mockRestore());
+    const asked = (await c.jobOf(c.first.id)).requestedPrompt!;
+    expect(asked).toContain('is yours to do');
+    let current = c.first;
+    for (const i of [1, 2, 3]) {
+      await neverTook(c, current.id, text, new Date(Date.now()));
+      const next = (await c.turnsOf())[i]!;
+      clock.mockReturnValue(+next.notBefore!);
+      await pump(c.ctx, c.agent.id);
+      current = await c.jobOf(next.id);
+      expect(current.status).toBe('running');
+    }
+    const prompt = current.prompt;
+    /* What the turn was asked is the first try's work, whole, with no retry inside it. */
+    const what = prompt.split('The turn that ended was asked:')[1]!.trim();
+    expect(what.startsWith(asked)).toBe(true);
+    expect(what).not.toContain('The last try failed');
+    expect(prompt.split('The last try failed')).toHaveLength(2);
+    expect(prompt).not.toContain('Welcome to Antigravity CLI');
+    expect(prompt).not.toContain('▀▀');
+    expect(prompt).toContain(`The last try failed (unknown): ${reason ?? 'the program gave no reason'}`);
+  });
+
+  it('goes back past a turn a node restart ran once more, to the work of the first try', async () => {
+    const c = await atWork();
+    const first = await c.jobOf(c.first.id);
+    const turn = async (prompt: string, link: { continueOf: string } | { retryOf: string }) =>
+      (await c.db.insert(jobs).values({ companyId: first.companyId, agentId: first.agentId, subscriptionId: first.subscriptionId, taskId: first.taskId, timeoutMs: first.timeoutMs, prompt, requestedPrompt: prompt, status: 'failed', ...link }).returning())[0]!;
+    const retried = await turn('The last try failed (network): fetch failed', { continueOf: first.id });
+    const restarted = await turn('Your last turn was cut off. Hornhoof runs it once more.\n\nThe last try failed (network): fetch failed', { retryOf: retried.id });
+    expect(await originalPromptOf(c.ctx, restarted)).toBe(first.requestedPrompt);
+    const after = await turn('The last try failed (unknown): The program did not show its prompt within 120 s.', { continueOf: restarted.id });
+    expect(await originalPromptOf(c.ctx, after)).toBe(first.requestedPrompt);
+  });
+
+  it('says what the first try was asked once a turn a node restart ran once more fails too', async () => {
+    const c = await atWork();
+    const asked = (await c.jobOf(c.first.id)).requestedPrompt!;
+    /* The node comes back without the turn, so Hornhoof runs it once more with a note before what it was asked. */
+    await handleNodeMessage(c.ctx, BUILTIN, { type: 'hello', version: '0.5.2', loggedIn: true, running: [] });
+    await pump(c.ctx, c.agent.id);
+    const restarted = (await c.turnsOf())[1]!;
+    expect(restarted).toMatchObject({ retryOf: c.first.id, status: 'running' });
+    expect(restarted.requestedPrompt).toContain('was cut off');
+    /* That try never takes its prompt, so the next one cannot go on in its session and says what the turn was asked. */
+    const clock = vi.spyOn(Date, 'now');
+    onTestFinished(() => clock.mockRestore());
+    await neverTook(c, restarted.id, 'The program did not show its prompt within 120 s.', new Date(Date.now()));
+    const next = (await c.turnsOf())[2]!;
+    clock.mockReturnValue(+next.notBefore!);
+    await pump(c.ctx, c.agent.id);
+    const what = (await c.jobOf(next.id)).prompt.split('The turn that ended was asked:')[1]!.trim();
+    expect(what.startsWith(asked)).toBe(true);
+    expect(what).not.toContain('was cut off');
+  });
+
+  it('says what a conversation outside any task was asked once, after a retry that did not go on either', async () => {
+    const c = await failureCompany();
+    const clock = vi.spyOn(Date, 'now');
+    onTestFinished(() => clock.mockRestore());
+    const asked = 'Answer the person once.';
+    let current = await c.jobOf(await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.agent.id, prompt: asked, createdBy: null, answersCeo: true }));
+    for (const i of [1, 2]) {
+      await neverTook(c, current.id, 'The program did not show its prompt within 120 s.', new Date(Date.now()));
+      const next = (await c.turnsOf())[i]!;
+      clock.mockReturnValue(+next.notBefore!);
+      await pump(c.ctx, c.agent.id);
+      current = await c.jobOf(next.id);
+      expect(current.status).toBe('running');
+    }
+    /* The catch-up of its new session shows the conversation before; the turn itself is the retry's reason and the work. */
+    expect(current.prompt.trimEnd().endsWith(`The last try failed (unknown): The program did not show its prompt within 120 s.\n\n${asked}`)).toBe(true);
+    expect(current.prompt.split('The last try failed')).toHaveLength(2);
+    expect(current.prompt).not.toContain('The turn that ended was asked');
+  });
+});
+
+it('gives the first line of a failure as its reason, short, and none for a screen', () => {
+  expect(shortReason('  The provider said   no.\nMore lines.')).toBe('The provider said no.');
+  expect(shortReason(`${'a'.repeat(300)}`)).toBe('a'.repeat(300));
+  expect(shortReason(`${'a'.repeat(301)}`)).toBe(`${'a'.repeat(299)}…`);
+  for (const screen of ['    ▄▀▀▄\n Welcome', '╭────╮\n│ > │', '', '> terminal', '✻ Welcome to Claude Code!', 'Welcome to Antigravity CLI! ▄▀▀▄', 'Choose your color scheme: ╭────╮']) expect(shortReason(screen)).toBe('the program gave no reason');
+  /* A provider's own words may start with a code, a bracket or a quote. */
+  for (const reason of ['429 Resource has been exhausted', '[ERROR] stream closed', '{"error":{"code":503}}', '"model" is not available', "(no output)", "'gemini-4' is not a model", '`agy` exited with 1']) expect(shortReason(reason)).toBe(reason);
 });

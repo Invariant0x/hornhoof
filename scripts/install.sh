@@ -495,7 +495,7 @@ login_node() {
     if signs_in_hornhoof "$provider"; then
       say "The sign-in on $name did not finish. Sign in once in Hornhoof under Subscriptions, or run the install command again without --join."
     else
-      say "The sign-in on $name did not finish. To try again, run the install command without --join."
+      say "The sign-in or first setup on $name did not finish. To try again, run the install command without --join."
     fi
   fi
   kill "$watcher" 2> /dev/null || true
@@ -605,6 +605,7 @@ node_mode() {
           status="needs sign-in, run the install command again without --join"
         fi
         ;;
+      needs_setup) status="needs its first setup, run the install command again without --join" ;;
       *) status="not answering yet, see docker logs $name" ;;
     esac
     say "  $(program_name "$provider"): $status ($name)"

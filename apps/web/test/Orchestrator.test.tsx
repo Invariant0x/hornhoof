@@ -226,6 +226,17 @@ describe('AgentWindow', () => {
     expect(await screen.findByText(/^The plan used the share set for tasks\. Task turns wait until .+; messages from people still go\.$/)).toBeInTheDocument();
   });
 
+  it('says he waits for the first setup of the program on his plan', async () => {
+    const plan = { ...SUBS[0]!, provider: 'antigravity' as const, owner: { id: 'p1', name: 'Ivan' } };
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, ready: false, reason: 'needs_setup' } }] }, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: plan } });
+    expect(await screen.findByText('Waiting for the first setup of Antigravity')).toBeInTheDocument();
+  });
+
+  it('says he needs a plan when his plan is gone while his state still names its wait', async () => {
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, ready: false, reason: 'needs_setup' } }] }, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: null } });
+    expect(await screen.findByText('Needs a subscription to start')).toBeInTheDocument();
+  });
+
   it('tells to update Hornhoof on a machine too old to run his turns', async () => {
     const mac = { ...SUBS[1]!, kind: 'personal' as const, owner: { id: 'p1', name: 'Ivan' } };
     open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, ready: false, reason: 'node_outdated' } }] }, { ...ORG, orchestrator: { ...ORG.orchestrator!, subscription: mac } });

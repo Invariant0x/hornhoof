@@ -27,7 +27,9 @@ export class Bridge {
   private readonly bySecret = new Map<string, string>();
   private readonly secrets = new Map<string, string>();
   private readonly tokens = new Map<string, string>();
-  private readonly listing = new Map<string, Set<() => void>>();
+  private readonly listing = new Map<string, Set<(asked: number) => void>>();
+  /* When each agent's program last asked for the list of its tools that the bridge then handed it. */
+  private readonly listedAt = new Map<string, number>();
   /* How long an agent's tool calls between turns wait for a turn to open, and the calls waiting now. */
   private readonly patience = new Map<string, number>();
   private readonly waiting = new Map<string, Set<() => void>>();
@@ -108,9 +110,16 @@ export class Bridge {
     });
   }
 
-  /* Resolves true once the agent's program has listed its tools through the bridge, or false after ms. A program
-     connects to its tools on its own time after it starts, and Hornhoof answers only while a turn runs. */
-  listed(key: string, ms: number): Promise<boolean> {
+  /* Whether the agent's program has listed its tools through the bridge, asking for them since then. */
+  listedSince(key: string, since: number): boolean {
+    return (this.listedAt.get(key) ?? -Infinity) >= since;
+  }
+
+  /* Resolves true once the agent's program has listed its tools through the bridge, asking for them since the time given
+     (from now on by default), at once if it did, or false after ms. A program connects to its tools on its own time
+     after it starts, and Hornhoof answers only while a turn runs. */
+  listed(key: string, ms: number, since = Date.now()): Promise<boolean> {
+    if (this.listedSince(key, since)) return Promise.resolve(true);
     return new Promise(resolve => {
       const waiting = this.listing.get(key) ?? new Set();
       this.listing.set(key, waiting);
@@ -120,7 +129,7 @@ export class Bridge {
         if (!waiting.size && this.listing.get(key) === waiting) this.listing.delete(key);
         resolve(ok);
       };
-      const heard = () => done(true);
+      const heard = (asked: number) => asked >= since && done(true);
       const timer = setTimeout(() => done(false), ms);
       waiting.add(heard);
     });
@@ -172,6 +181,7 @@ export class Bridge {
   }
 
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const asked = Date.now();
     const [path, query] = (req.url ?? '').split(/\?(.*)/s);
     const [, kind, secret, event] = path!.split('/');
     const key = secret ? this.bySecret.get(secret) : undefined;
@@ -213,7 +223,13 @@ export class Bridge {
     }
     res.writeHead(up.status, out);
     res.end(Buffer.from(await up.arrayBuffer()));
-    if (kind === 'mcp' && up.ok && asks(body, 'tools/list')) for (const heard of [...(this.listing.get(key) ?? [])]) heard();
+    if (kind === 'mcp' && up.ok && asks(body, 'tools/list')) this.heardList(key, asked);
+  }
+
+  /* A slow answer to a request from before counts from when it was asked. */
+  private heardList(key: string, asked: number): void {
+    if (!this.listedSince(key, asked)) this.listedAt.set(key, asked);
+    for (const heard of [...(this.listing.get(key) ?? [])]) heard(asked);
   }
 }
 

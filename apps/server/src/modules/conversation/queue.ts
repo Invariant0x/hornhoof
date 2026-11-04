@@ -21,7 +21,7 @@ import { workStarts } from '../org/map-state.js';
 import { agentFailureState, type FailureState } from '../tasks/failures.js';
 import { logTurnFact } from '../tasks/turn-log.js';
 import { addressed, preface } from './prompt.js';
-import { requestedPromptOf } from './requested-prompt.js';
+import { originalPromptOf } from './requested-prompt.js';
 import { ABOUT_AS_FREE, freedom } from '../testruns/pick.js';
 import { queuedInput } from './queued-input.js';
 import { repeatedTurn, UNHEARD_NOTE, type TurnWords } from './turn-words.js';
@@ -40,7 +40,7 @@ export type AgentState = FailureState & {
   limitUntil: string | null;
   /* Its plan used the share set for tasks until then: task turns wait, people's own messages still go. */
   budgetUntil: string | null;
-  reason: 'no_subscription' | 'waiting_machine' | 'needs_login' | 'node_outdated' | 'machine_offline' | null;
+  reason: 'no_subscription' | 'waiting_machine' | 'needs_login' | 'needs_setup' | 'node_outdated' | 'machine_offline' | null;
   busy: boolean;
   runningJobId: string | null;
   queued: number;
@@ -400,10 +400,10 @@ type Continuation = { sessionId: string | null; originalPrompt: string | null };
 /* The turn this one goes on from: its session, when it can go on there, on the same plan and node with the same
    instructions; otherwise what that turn was asked. */
 async function continuedFrom(ctx: Ctx, jobId: string, on: On, instructionsHash: string): Promise<Continuation> {
-  const [from] = await ctx.db.select({ subscriptionId: jobs.subscriptionId, nodeId: jobs.nodeId, sessionId: jobs.sessionId, instructionsHash: jobs.instructionsHash, prompt: jobs.prompt, requestedPrompt: jobs.requestedPrompt }).from(jobs).where(eq(jobs.id, jobId));
+  const [from] = await ctx.db.select({ subscriptionId: jobs.subscriptionId, nodeId: jobs.nodeId, sessionId: jobs.sessionId, instructionsHash: jobs.instructionsHash, prompt: jobs.prompt, requestedPrompt: jobs.requestedPrompt, continueOf: jobs.continueOf, retryOf: jobs.retryOf }).from(jobs).where(eq(jobs.id, jobId));
   if (!from) return { sessionId: null, originalPrompt: null };
   const goesOn = from.subscriptionId === on.subscriptionId && from.nodeId === on.nodeId && from.instructionsHash === instructionsHash;
-  return { sessionId: goesOn ? from.sessionId : null, originalPrompt: requestedPromptOf(from) };
+  return { sessionId: goesOn ? from.sessionId : null, originalPrompt: await originalPromptOf(ctx, from) };
 }
 
 /* continueOf: a turn that goes on from one that ended without its work recorded goes on in that turn's session, or, when
@@ -415,7 +415,7 @@ async function sessionFor(ctx: Ctx, agent: Agent, on: On, instructionsHash: stri
 }
 
 /* What a turn asks: a continuation that lost its session says again what the turn that ended was asked. */
-const withOriginal = (asked: string, original: string | null) => (original ? `${asked}\n\nThe turn that ended was asked:\n\n${original}` : asked);
+const withOriginal = (asked: string, original: string | null) => (original && !asked.includes(original) ? `${asked}\n\nThe turn that ended was asked:\n\n${original}` : asked);
 
 /* A new session catches up from the conversation. The last finished turn's session goes on only on the same subscription
    and node with the same instructions: another machine does not have it, and changed instructions would not reach a
@@ -758,7 +758,7 @@ async function waitsFor(ctx: Ctx, agent: { id: string; productId: string | null;
   if (!all.length) return 'waiting_machine';
   const need = all.some(n => outdated(n.version, REPOSITORY_NODE)) && (await repoFor(ctx, agent)) ? REPOSITORY_NODE : CONVERSATION_NODE;
   const why = (n: NodeRow): AgentState['reason'] =>
-    n.status === 'needs_login' ? 'needs_login' : outdated(n.version, need) ? 'node_outdated' : !ctx.hub.isReady(nodeIdentity(n.id)) ? 'machine_offline' : null;
+    n.status !== 'ready' ? n.status : outdated(n.version, need) ? 'node_outdated' : !ctx.hub.isReady(nodeIdentity(n.id)) ? 'machine_offline' : null;
   const own = all.find(n => n.id === agent.nodeId);
   if (own && why(own) !== null && (await holdsWork(ctx, agent.id))) return why(own);
   if (all.some(n => why(n) === null)) return null;

@@ -46,6 +46,10 @@ export interface ProviderAdapter {
   install(): Promise<void>;
   loggedIn(): Promise<boolean>;
   login(io: LoginIo): Promise<void>;
+  /* Whether the signed-in program waits for a first setup only the plan's owner may pass, such as accepting its terms,
+     and that setup on the owner's own terminal, as the sign-in. */
+  setupNeeded?(): Promise<boolean>;
+  setup?(io: LoginIo): Promise<void>;
   run(input: RunInput): Promise<RunResult>;
   /* Values that must never leave the node, such as the tokens in the program's credentials file. */
   secrets(): Promise<string[]>;
