@@ -4,9 +4,10 @@
 Public API (Caddy sends https://hornhoof.org/api/* here):
   GET    /api/v1/names/{name}      -> 200 {name, free, reason?: taken|reserved|invalid}
   POST   /api/v1/bindings          {name?} -> 201 {name, url, key, tunnel}
-  DELETE /api/v1/bindings/{name}   Authorization: Bearer <key> -> 204
+  DELETE /api/v1/bindings/{name}   Authorization: Bearer <key> -> 204 (404 once the name belongs to a new owner)
   GET    /api/v1/links/{name}/route Authorization: Bearer <key> -> 200 {state, client, since, generation, ...}
   POST   /api/v1/links/{name}/sync  Authorization: Bearer <key> {client, generation, state, copy, epoch} -> 200 {sync}
+  POST   /api/v1/links/{name}/visitor-key Authorization: Bearer <key> -> 200 {visitorKey} (R6.2)
   GET    /api/v1/health            -> 200 {ok, frps, relayStarted} while frps takes logins, else 503
 frps plugin (local only): POST /frp/handler?op=Login|NewProxy|Ping
 Admin (as the service user): relay.py admin list|show|ban|unban|release|banned-caddy ...
@@ -14,6 +15,7 @@ Admin (as the service user): relay.py admin list|show|ban|unban|release|banned-c
 Standard library only. State: SQLite in /var/lib/hornhoof-relay/relay.db. Keys are stored as SHA-256 hashes.
 """
 import base64
+import contextlib
 import hashlib
 import hmac
 import http.client
@@ -27,7 +29,7 @@ import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 DOMAIN = 'hornhoof.org'
 DB_PATH = os.environ.get('RELAY_DB', '/var/lib/hornhoof-relay/relay.db')
@@ -61,6 +63,10 @@ PLUGIN_CALL_S = 1.0
 
 LABEL = re.compile(r'^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$')
 RANDOM_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789'
+# A network client's id: <link>-<machine8>-<kind> (R1.3, R1.4, R5.1).
+CLIENT = re.compile(r'^(?P<link>[a-z0-9-]{1,63})-(?P<m8>[0-9a-f]{8})-(?P<kind>link|peer|visit)$')
+# The two stcp services a -peer client may offer, named <link>-<m8>-<service> (R5.1).
+PEER_SERVICES = ('data', 'app')
 
 
 def now() -> int:
@@ -121,6 +127,11 @@ def init_db() -> None:
             epoch INTEGER NOT NULL,
             generation INTEGER NOT NULL,
             at INTEGER NOT NULL
+        )''', ())
+    write('''CREATE TABLE IF NOT EXISTS visitor_keys (
+            name TEXT PRIMARY KEY,
+            key_hash TEXT NOT NULL,
+            created_at INTEGER NOT NULL
         )''', ())
 
 
@@ -265,6 +276,86 @@ def dash_answer(name: str, proxy_type: str) -> tuple[str, str] | None:
     if route_status not in ('online', 'offline') or not isinstance(client_id, str) or not client_id:
         raise FrpsUnknown(f'dashboard body for {proxy_type} {name} is not a route record')
     return route_status, client_id
+
+
+def dash_client_records(body: bytes) -> list[dict]:
+    """The parsed clients answer: a list of records with a clientID string and a boolean
+    online. Anything else is FrpsUnknown, never an empty guess."""
+    try:
+        answer = json.loads(body)
+    except ValueError:
+        raise FrpsUnknown('dashboard clients answer is not JSON') from None
+    if not isinstance(answer, list):
+        raise FrpsUnknown('dashboard clients answer is not a list')
+    for entry in answer:
+        if (not isinstance(entry, dict) or not isinstance(entry.get('clientID'), str)
+                or not entry['clientID']
+                or type(entry.get('online')) is not bool):
+            raise FrpsUnknown('dashboard clients answer has no client record')
+    return answer
+
+
+def dash_clients(run_id: str) -> list[dict]:
+    """The /api/clients?runId= answer on the plugin call's budget; a dashboard error is
+    FrpsUnknown, never an empty guess."""
+    status, body = _dash_get(f'/api/clients?runId={quote(run_id, safe="")}')
+    if status != 200:
+        raise FrpsUnknown(f'dashboard answered {status} for clients runId {run_id}')
+    return dash_client_records(body)
+
+
+def run_id_conflict(run_id: str, client_id: str, name: str) -> str | None:
+    """R1.3, C1: a live session with this run id is taken over only by its own.
+
+    A session with a client id names itself by that id. A legacy login names a
+    session by its run id, because frps 0.71.1 shows a legacy client's runID as
+    its clientID (pinned against the local binary); a live session reached that
+    way additionally needs legacy ownership proof, or any foreign binding could
+    displace an unrecorded live session (C1). An absent or offline session
+    reconnects as before. A dashboard error refuses the login: the relay cannot
+    tell whose the run id is.
+    """
+    try:
+        clients = dash_clients(run_id)
+    except FrpsUnknown:
+        return 'relay error: frps does not answer'
+    own = client_id or run_id
+    online = False
+    for entry in clients:
+        if not entry['online']:
+            continue
+        online = True
+        if entry['clientID'] != own:
+            return 'this run id belongs to another client'
+    if online and not client_id and not legacy_run_id_proven(name, run_id):
+        return 'this run id belongs to another client'
+    return None
+
+
+def legacy_run_id_proven(name: str, run_id: str) -> bool:
+    """C1: proof that a legacy run id with a live session belongs to this binding.
+
+    The run id must not itself look like a network client id, and the binding's
+    own routes ledger must record it as a legacy route: no ledger row, no
+    ownership. A recorded same-binding legacy run id keeps its reconnect.
+    """
+    if CLIENT.fullmatch(run_id):
+        return False
+    row = db().execute("SELECT 1 FROM routes WHERE name = ? AND client = 'legacy' AND run_id = ? LIMIT 1",
+                       (name, run_id)).fetchone()
+    return row is not None
+
+
+def run_id_recorded_elsewhere(run_id: str, name: str) -> bool:
+    """True when the route ledger records this run id for another binding (C1).
+
+    A legacy login reusing such a run id would replace that binding's session in frps:
+    the dashboard shows the session's clientID as the run id itself, so the dashboard
+    check alone cannot refuse it.
+    """
+    row = db().execute('SELECT 1 FROM routes WHERE run_id = ? AND name != ? LIMIT 1',
+                       (run_id, name)).fetchone()
+    return row is not None
 
 
 def frps_route(name: str) -> tuple[str, str | None, str | None]:
@@ -541,14 +632,120 @@ def proxy_check(name: str, content: dict) -> str | None:
     return register_route(name, content)
 
 
+def client_id_reason(name: str, kind: str, client_id: str, meta_client) -> str | None:
+    """R1.3, R5.1: a client id names this link and matches its session's key kind.
+
+    An empty client id is a today's tunnel: only a link-key session without metas.client.
+    """
+    if not client_id:
+        if kind == 'link' and not meta_client:
+            return None
+        return f'this client id is not for {name}'
+    match = CLIENT.fullmatch(client_id)
+    if (match is None or match.group('link') != name or meta_client != client_id
+            or (match.group('kind') == 'visit') != (kind == 'visitor')):
+        return f'this client id is not for {name}'
+    return None
+
+
+def malformed_id_reason(name: str, content: dict, metas: dict) -> str | None:
+    """I6: a present-but-non-string id refuses; an absent one stays the legacy empty
+    string, as actual legacy frpc sends it."""
+    if 'client_id' in content and not isinstance(content['client_id'], str):
+        return f'this client id is not for {name}'
+    if 'client' in metas and not isinstance(metas['client'], str):
+        return f'this client id is not for {name}'
+    if 'run_id' in content and not isinstance(content['run_id'], str):
+        return 'this run id belongs to another client'
+    return None
+
+
+def login_reason(name: str, kind: str, content: dict, metas: dict) -> str | None:
+    """R1.3: the client id fits the session; a live run id is this client's own.
+
+    Every non-empty run id is checked, a legacy login too (C1): frps would let it replace
+    the live session with that run id. Legacy run ids cannot use the network client-id
+    namespace, even while its client is offline (C3).
+    """
+    reason = malformed_id_reason(name, content, metas)
+    if reason is not None:
+        return reason
+    client_id = content.get('client_id') or ''
+    reason = client_id_reason(name, kind, client_id, metas.get('client'))
+    if reason is not None:
+        return reason
+    run_id = content.get('run_id')
+    if not isinstance(run_id, str) or not run_id:
+        return None
+    if (not client_id and CLIENT.fullmatch(run_id)) or run_id_recorded_elsewhere(run_id, name):
+        return 'this run id belongs to another client'
+    return run_id_conflict(run_id, client_id, name)
+
+
+def malformed_user_reason(content: dict) -> str | None:
+    """I6: a present-but-malformed user object refuses before any route lookup,
+    straightening or upsert: no row, no generation may move on a bad shape."""
+    if 'user' not in content:
+        return None
+    user = content['user']
+    if not isinstance(user, dict):
+        return 'relay error: invalid user'
+    if 'run_id' in user and not isinstance(user['run_id'], str):
+        return 'this run id belongs to another client'
+    return None
+
+
+def offer_reason(name: str, kind: str, content: dict, metas: dict) -> str | None:
+    """R5.1: a visitor offers nothing; a peer offers only its two stcp services; the rest
+    is the http proxy of today (Task 2). stcp services get no route row and no generation."""
+    reason = malformed_user_reason(content)
+    if reason is not None:
+        return reason
+    if kind == 'visitor':
+        return 'visitors may not offer services'
+    if 'client' in metas and not isinstance(metas['client'], str):
+        return f'this client id is not for {name}'
+    client_id = metas.get('client') or ''
+    reason = client_id_reason(name, kind, client_id, client_id)
+    if reason is not None:
+        return reason
+    return service_offer_reason(name, client_id, content)
+
+
+def service_offer_reason(name: str, client_id: str, content: dict) -> str | None:
+    """A peer client offers only its two stcp services; every other session offers
+    the http proxy of today (Task 2)."""
+    match = CLIENT.fullmatch(client_id) if client_id else None
+    if match is not None and match.group('kind') == 'peer':
+        return peer_proxy_reason(name, match.group('m8'), content)
+    return proxy_check(name, content)
+
+
+def peer_proxy_reason(name: str, m8: str, content: dict) -> str | None:
+    """R5.1: a peer offers only <name>-<m8>-data and <name>-<m8>-app, stcp with a real
+    secret and open to every visitor of the service."""
+    proxy_name = content.get('proxy_name')
+    label = proxy_name if isinstance(proxy_name, str) else ''
+    allowed = {f'{name}-{m8}-{service}' for service in PEER_SERVICES}
+    sk = content.get('sk')
+    allow_users = content.get('allow_users')
+    if (content.get('proxy_type') != 'stcp' or label not in allowed
+            or not isinstance(sk, str) or len(sk) < 32
+            or allow_users not in (None, [], ['*'])):
+        return f'this client may not offer {label}'
+    return None
+
+
 def trace_run_id(op: str, content: dict) -> str:
-    user = content.get('user') or {}
+    user = content.get('user')
+    user = user if isinstance(user, dict) else {}
     run_id = content.get('run_id') if op == 'Login' else user.get('run_id')
     return run_id if isinstance(run_id, str) else ''
 
 
 def trace_client(op: str, content: dict) -> str:
-    user = content.get('user') or {}
+    user = content.get('user')
+    user = user if isinstance(user, dict) else {}
     metas = content.get('metas') if op == 'Login' else user.get('metas')
     client = metas.get('client') if isinstance(metas, dict) else None
     return client if isinstance(client, str) and client else 'legacy'
@@ -642,16 +839,121 @@ def tunnel_info(name: str, key: str) -> dict:
     }
 
 
-def binding_ok(name: str, key: str):
-    """None if the name exists, is not banned and the key matches, else a reason."""
-    if not isinstance(name, str) or not isinstance(key, str) or not name or not key:
-        return 'this tunnel has no Hornhoof relay binding (metadatas.name and metadatas.key)'
+@contextlib.contextmanager
+def transaction():
+    """One BEGIN IMMEDIATE..COMMIT block; every statement, including BEGIN and
+    COMMIT, runs through write(), so lock acquisition draws from the one write
+    budget and raises the same WriteBusy as a single write (G1). Any failure
+    rolls back; a spent budget refuses instead of waiting.
+    """
+    conn = db()
+    write('BEGIN IMMEDIATE', ())
+    try:
+        yield
+        write('COMMIT', ())
+    except BaseException:
+        if conn.in_transaction:
+            try:
+                conn.execute('ROLLBACK')
+            except sqlite3.Error:
+                pass
+        raise
+
+
+def release_binding(name: str, expected_hash: str | None = None) -> bool:
+    """Drop a binding and its visitor credentials in one transaction (C2).
+
+    Separate deletes would let a concurrent visitor-key issuer plant a credential for the
+    name between them. The HTTP DELETE passes the hash of the key that authorized it: the
+    deletes recheck that hash and a currently unblocked binding inside the transaction,
+    so a request authorized for an older lifetime cannot drop a new owner's binding
+    (stale DELETE) and one in flight when the operator bans the name cannot erase the
+    ban (concurrent ban); False then reads as 404. Admin release passes no hash and
+    stays operator-authorized.
+    """
+    with transaction():
+        if expected_hash is None:
+            write('DELETE FROM visitor_keys WHERE name = ?', (name,))
+            write('DELETE FROM bindings WHERE name = ?', (name,))
+        else:
+            # The guarded release requires the authorizing hash and a currently
+            # unblocked binding: a DELETE in flight when the operator bans the
+            # name must not erase the ban (C2 concurrent ban).
+            write('DELETE FROM visitor_keys WHERE name = ? AND EXISTS '
+                  '(SELECT 1 FROM bindings WHERE name = ? AND key_hash = ? AND banned_at IS NULL)',
+                  (name, name, expected_hash))
+            write('DELETE FROM bindings WHERE name = ? AND key_hash = ? AND banned_at IS NULL',
+                  (name, expected_hash))
+        return db().execute('SELECT changes()').fetchone()[0] == 1
+
+
+def unban_binding(name: str) -> None:
+    """Lift a ban in one transaction; a placeholder ban row goes with its visitor key."""
+    with transaction():
+        write('UPDATE bindings SET banned_at = NULL, ban_reason = NULL WHERE name = ?', (name,))
+        write('DELETE FROM visitor_keys WHERE name = ? AND EXISTS '
+              '(SELECT 1 FROM bindings WHERE name = ? AND key_hash = \'-\')', (name, name))
+        write("DELETE FROM bindings WHERE name = ? AND key_hash = '-'", (name,))
+
+
+def store_visitor_key(name: str, visitor_hash: str, link_hash: str) -> bool:
+    """R6.2: store the hash only while the binding with the authorizing key still exists.
+
+    A request authorized before a release or rebind cannot plant a credential for the
+    name's next owner (C2): the write re-checks the binding's key hash in the same
+    statement, and a failed check changes nothing.
+    """
+    write('INSERT INTO visitor_keys (name, key_hash, created_at) '
+          'SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM bindings WHERE name = ? AND key_hash = ?) '
+          'ON CONFLICT(name) DO UPDATE SET key_hash = excluded.key_hash, '
+          'created_at = excluded.created_at',
+          (name, visitor_hash, now(), name, link_hash))
+    return db().execute('SELECT changes()').fetchone()[0] == 1
+
+
+def visitor_hash_matches(name: str, visitor: str) -> bool:
+    """R6.2: the visitor key matches only while it is the one stored, compared in constant time."""
+    row = db().execute('SELECT key_hash FROM visitor_keys WHERE name = ?', (name,)).fetchone()
+    return row is not None and hmac.compare_digest(row[0], key_hash(visitor))
+
+
+def binding_state(name: str):
+    """The bindings row for name, or the refusal: no binding, or blocked."""
     row = db().execute('SELECT key_hash, banned_at FROM bindings WHERE name = ?', (name,)).fetchone()
-    if row is None or not hmac.compare_digest(row[0], key_hash(key)):
+    if row is None:
         return f'no binding {name} with this key'
     if row[1]:
         return f'{name}.{DOMAIN} is blocked'
+    return row
+
+
+def key_kind(name: str, metas: dict, row: tuple) -> str | None:
+    """'link' when the link key matches, 'visitor' when only the visitor key does."""
+    key = metas.get('key')
+    if isinstance(key, str) and key and hmac.compare_digest(row[0], key_hash(key)):
+        return 'link'
+    visitor = metas.get('visitor')
+    if key is None and isinstance(visitor, str) and visitor and visitor_hash_matches(name, visitor):
+        return 'visitor'
     return None
+
+
+def authenticate(metas: dict) -> tuple[str | None, str | None, str | None]:
+    """(name, kind, refusal): kind is 'link' with the link key, 'visitor' with the visitor key.
+
+    The binding check is as before; a login with no metas.key may match the stored
+    visitor key instead (R6.2).
+    """
+    name = metas.get('name')
+    if not isinstance(name, str) or not name:
+        return None, None, 'this tunnel has no Hornhoof relay binding (metadatas.name and metadatas.key)'
+    state = binding_state(name)
+    if isinstance(state, str):
+        return name, None, state
+    kind = key_kind(name, metas, state)
+    if kind is None:
+        return name, None, f'no binding {name} with this key'
+    return name, kind, None
 
 
 _seen = {}
@@ -676,15 +978,28 @@ def plugin(op: str, content: dict) -> dict:
         call_state.end = None
 
 
-def plugin_decide(op: str, content: dict) -> dict:
+def call_metas(op: str, content: dict) -> dict:
+    """The login metas of a plugin call: top level for Login, under user otherwise.
+
+    A malformed user object yields no metas (I6): the call refuses as
+    unauthenticated instead of crashing on the bad shape.
+    """
     if op == 'Login':
-        metas = content.get('metas') or {}
+        metas = content.get('metas')
     else:
-        metas = (content.get('user') or {}).get('metas') or {}
-    name, key = metas.get('name'), metas.get('key')
-    reason = binding_ok(name, key)
-    if reason is None and op == 'NewProxy':
-        reason = proxy_check(name, content)
+        user = content.get('user')
+        metas = user.get('metas') if isinstance(user, dict) else None
+    return metas if isinstance(metas, dict) else {}
+
+
+def plugin_decide(op: str, content: dict) -> dict:
+    """Authenticate the session, then the op's own rule; a refusal rejects, else the call passes."""
+    metas = call_metas(op, content)
+    name, kind, reason = authenticate(metas)
+    if reason is None and op == 'Login':
+        reason = login_reason(name, kind, content, metas)
+    elif reason is None and op == 'NewProxy':
+        reason = offer_reason(name, kind, content, metas)
     if reason is not None:
         return {'reject': True, 'reject_reason': reason}
     touch(name)
@@ -807,6 +1122,18 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(409, {'error': conflict})
         return self.send_json(200, {'sync': record})
 
+    def visitor_key_answer(self, name: str) -> None:
+        """R6.2: hand out a new visitor key, replacing the one before; the relay stores its
+        hash only and never logs or answers with the key again. The store lands only while
+        the binding with the authorizing key still exists (C2)."""
+        if not self.authorize_link(name):
+            return
+        visitor_key = secrets.token_urlsafe(32)
+        if not store_visitor_key(name, key_hash(visitor_key), key_hash(self.bearer_key())):
+            return self.error(404, 'not_found', f'There is no binding {name}.')
+        log_line(f'new visitor key for {name}')
+        self.send_json(200, {'visitorKey': visitor_key})
+
     def health_answer(self):
         """GET /api/v1/health (R4.1): 200 only while frps takes logins, else 503; never a guess."""
         if frps_ok():
@@ -849,6 +1176,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.create_binding()
         if parts[:3] == ['api', 'v1', 'links'] and len(parts) == 5 and parts[4] == 'sync':
             return self.sync_answer(parts[3].lower())
+        if parts[:3] == ['api', 'v1', 'links'] and len(parts) == 5 and parts[4] == 'visitor-key':
+            return self.visitor_key_answer(parts[3].lower())
         self.error(404, 'not_found', 'Not found.')
 
     def create_binding(self):
@@ -908,7 +1237,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.wrong_key(self.client_ip())
         if row[1]:
             return self.error(403, 'blocked', f'{name}.{DOMAIN} is blocked and cannot be released.')
-        write('DELETE FROM bindings WHERE name = ?', (name,))
+        if not release_binding(name, row[0]):
+            return self.error(404, 'not_found', f'There is no binding {name}.')
         log_line(f'released {name} for {self.client_ip()}')
         self.send_json(204)
 
@@ -953,10 +1283,9 @@ def admin(args) -> int:
                 write('INSERT INTO bindings (name, key_hash, created_at, created_ip, banned_at, ban_reason) '
                       'VALUES (?, ?, ?, ?, ?, ?)', (name, '-', now(), 'operator', now(), reason))
         elif cmd == 'unban':
-            write('UPDATE bindings SET banned_at = NULL, ban_reason = NULL WHERE name = ?', (name,))
-            write("DELETE FROM bindings WHERE name = ? AND key_hash = '-'", (name,))
+            unban_binding(name)
         else:
-            write('DELETE FROM bindings WHERE name = ?', (name,))
+            release_binding(name)
         print(f'{cmd} {name}: done')
         return 0
     print('usage: relay.py admin list | add <name> | ban <name> [reason] | unban <name> | release <name> | banned-caddy',

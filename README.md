@@ -8,6 +8,8 @@ It gives each company a link like `https://acme.hornhoof.org`. The company's own
 
 The relay hands out names, checks each tunnel's key, and sends each request to the company named in its address.
 
+A company on several machines gives each one its own client id, so two companies can run side by side on one machine and no two machines log in as one. A company's machines also reach each other's services through the relay: a `-peer` machine offers two stcp services, `-data` and `-app`, and another machine of the same link visits them with the link's visitor key and the service's own secret. The relay lets those machines reach each other through it and passes their bytes on as they come; [Hornhoof's security page](https://github.com/Invariant0x/hornhoof/blob/main/SECURITY.md#the-hornhooforg-link) says how the machines encrypt them.
+
 ## What it sees
 
 At present, the browser's https connection ends at hornhoof.org. The relay reads each request to find its company, then passes it through that company's tunnel. This includes the contents of requests and answers. It keeps no copy of what passes.
@@ -19,7 +21,7 @@ This is the same behavior described in [Hornhoof's security page](https://github
 - Run a company's code.
 - Hold a company's data, files or passwords in storage.
 - Keep accounts.
-- Reach through a tunnel to anything but the Hornhoof app.
+- Reach through a tunnel anywhere but where the company's own frpc pointed it. Today that is the Hornhoof app; a `-peer` machine may also offer two stcp services, `<link>-<machine8>-data` and `<link>-<machine8>-app`, to the link's other machines, each opened with the service's own secret. The relay fixes which service names a peer may offer; which ports they connect to on the machine is the company's own frpc setting.
 - Keep a copy of the requests and answers it passes.
 
 ## What it stores
@@ -31,7 +33,8 @@ For each link, the relay keeps:
 - when its tunnel was last seen;
 - whether it is blocked, when it was blocked, and why;
 - which client holds its route, with that client's run id, since when, and in which registration (a counter that grows by one at every registration); the route's state (pending, held, empty) and type (http, https). The relay reads whether a route is live from frps itself, so it never answers "empty" for a name it is not sure of;
-- its sync record: on or off, the copy's machine, its epoch, the registration it came in and when. Only the live route's holder can set a newer epoch. The relay commits it to SQLite with full synchronization before answering, and keeps it across restarts.
+- its sync record: on or off, the copy's machine, its epoch, the registration it came in and when. Only the live route's holder can set a newer epoch. The relay commits it to SQLite with full synchronization before answering, and keeps it across restarts;
+- a hash of its visitor key, the key a visitor-only client logs in with. The key itself is handed out once and never stored or logged.
 
 For each address, it also keeps the times of new links made in the last hour, to limit how many it can make. The relay's database is SQLite.
 
