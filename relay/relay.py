@@ -16,6 +16,7 @@ Admin (as the service user): relay.py admin list|add|ban|unban|release|banned-ca
 Standard library only. State: SQLite in /var/lib/hornhoof-relay/relay.db. Keys are stored as SHA-256 hashes.
 """
 import base64
+import collections
 import contextlib
 import hashlib
 import hmac
@@ -420,30 +421,193 @@ def check_route_holder(name: str, row, status: str, client_id: str | None, proxy
 
 
 class WriteBusy(Exception):
-    """A SQLite write could not take the lock within its budget: refuse the op, never guess."""
+    """A SQLite write could not get its turn within its budget: refuse the op, never guess."""
 
 
-def write(sql: str, args: tuple) -> None:
-    """The one SQLite write of the plugin and the API.
+# The most one write waits outside a plugin call; inside one, the call's time left may be less.
+WRITE_BUDGET_S = 0.8
 
-    SQLite itself retries database is locked for the write's budget (0.8 s, or the plugin
-    call's time left, whichever is less); past the budget the write raises WriteBusy and a
-    plugin call refuses with 'relay error: busy' (Review Focus 3).
+
+class WriteTicket:
+    """A place in the writer's queue: a statement and, after its commit, its outcome. No statement: a transaction's."""
+
+    def __init__(self, sql: str | None = None, args: tuple = ()):
+        self.sql, self.args = sql, args
+        self.claimed = False
+        self.done = False
+        self.changes = 0
+        self.error: Exception | None = None
+
+    def run(self, conn: sqlite3.Connection) -> None:
+        """A failure SQLite backed out alone is this statement's own, and the batch goes on. One that ended the
+        transaction ends the batch."""
+        try:
+            self.changes = conn.execute(self.sql, self.args).rowcount
+        except sqlite3.Error as failure:
+            if not conn.in_transaction:
+                raise
+            self.error = failure
+
+    def outcome(self) -> int:
+        """The rows the statement changed, or what stopped it."""
+        if self.error is not None:
+            raise self.error
+        return self.changes
+
+
+class WriterQueue:
+    """The one writer of this process, and the writes waiting for it in the order they came (Review Focus 3).
+
+    All writers are threads of one process, so they do not compete for SQLite's lock: SQLite's backoff sleeps up to
+    100 ms between tries, and a burst of commits, each with its own fsync, costs more than a plugin call's budget on a
+    real disk. Here the first in the queue takes the writer and commits every statement queued by then in one
+    transaction, so a burst costs a few fsyncs however large it is, and each statement's owner still answers only after
+    its commit.
     """
-    conn = db()
+
+    def __init__(self) -> None:
+        self.changed = threading.Condition()
+        self.queue: collections.deque[WriteTicket] = collections.deque()
+        self.taken = False
+
+    def wait_for_turn(self, ticket: WriteTicket, deadline: float) -> bool:
+        """Queue the ticket. True: this thread now holds the writer. False: another thread's commit carried it."""
+        with self.changed:
+            self.queue.append(ticket)
+            while not ticket.done:
+                left = self.time_left(ticket, deadline)
+                if left == 0:
+                    self.give_up(ticket)
+                    raise WriteBusy('no outcome from the writer within the budget')
+                if not self.taken and self.queue[0] is ticket:
+                    self.taken = True
+                    return True
+                self.changed.wait(left)
+            return False
+
+    @staticmethod
+    def time_left(ticket: WriteTicket, deadline: float) -> float | None:
+        """The seconds its owner may still wait; None: until the outcome.
+
+        Queued, that is the write's budget. In a commit under way, a plugin call has until its own end, and the API's
+        answer has to be true, so it waits for the outcome.
+        """
+        return call_deadline() if ticket.claimed else max(0.0, deadline - time.monotonic())
+
+    def give_up(self, ticket: WriteTicket) -> None:
+        """A queued ticket leaves and can never land. A claimed one may still land, which a plugin call's writes can
+        bear: last_seen, a route's state, and a pending row that frps never shows, which empties within PENDING_S."""
+        if not ticket.claimed:
+            self.leave(ticket)
+
+    def leave(self, ticket: WriteTicket) -> None:
+        with self.changed:
+            self.queue.remove(ticket)
+            self.changed.notify_all()
+
+    def claim_statements(self) -> list[WriteTicket]:
+        """The holder's batch: the queue's head up to a transaction's place, so that a transaction keeps its turn."""
+        with self.changed:
+            batch = []
+            while self.queue and self.queue[0].sql is not None:
+                ticket = self.queue.popleft()
+                ticket.claimed = True
+                batch.append(ticket)
+            return batch
+
+    def hand_back(self, batch: list[WriteTicket]) -> None:
+        """The holder is finished: its batch has its outcomes, and the next in the queue may take the writer."""
+        with self.changed:
+            for ticket in batch:
+                ticket.done = True
+            self.taken = False
+            self.changed.notify_all()
+
+
+writer = WriterQueue()
+
+
+def write_deadline() -> float:
+    """When this write's budget ends; a plugin call whose budget is spent refuses before any SQL runs."""
     left = call_deadline()
     if left is not None and left <= 0:
         raise WriteBusy('plugin call budget spent')
-    budget = 0.8 if left is None else min(0.8, left)
-    conn.execute(f'PRAGMA busy_timeout = {max(0, int(budget * 1000))}')
+    return time.monotonic() + (WRITE_BUDGET_S if left is None else min(WRITE_BUDGET_S, left))
+
+
+@contextlib.contextmanager
+def locked_is_busy():
+    """SQLite's database is locked reads as the relay's one busy refusal."""
     try:
-        conn.execute(sql, args)
+        yield
     except sqlite3.OperationalError as e:
         if 'locked' in str(e):
-            raise WriteBusy(f'database is locked for {budget:.2f} s') from None
+            raise WriteBusy('database is locked') from None
         raise
+
+
+def begin_writing(conn: sqlite3.Connection, deadline: float) -> None:
+    """Open the holder's transaction. Only another process can hold SQLite's lock now: `relay.py admin`, briefly."""
+    left = deadline - time.monotonic()
+    conn.execute(f'PRAGMA busy_timeout = {max(0, int(left * 1000))}')
+    try:
+        with locked_is_busy():
+            conn.execute('BEGIN IMMEDIATE')
     finally:
         conn.execute('PRAGMA busy_timeout = 10000')
+
+
+def roll_back(conn: sqlite3.Connection) -> None:
+    """End a transaction a failure left open; SQLite may have ended it already."""
+    if conn.in_transaction:
+        try:
+            conn.execute('ROLLBACK')
+        except sqlite3.Error:
+            pass
+
+
+def commit_batch(conn: sqlite3.Connection, batch: list[WriteTicket]) -> None:
+    """One transaction, so one fsync, for the whole batch. A failure lands none of it, so it reaches every owner."""
+    try:
+        for ticket in batch:
+            ticket.run(conn)
+        conn.execute('COMMIT')
+    except Exception as failure:
+        roll_back(conn)
+        for ticket in batch:
+            ticket.error = failure
+
+
+def write_the_queue(conn: sqlite3.Connection, ticket: WriteTicket, deadline: float) -> None:
+    """This thread holds the writer. Refused by another process's lock, only its own budget is spent: the rest stay."""
+    batch = []
+    try:
+        begin_writing(conn, deadline)
+        batch = writer.claim_statements()
+        commit_batch(conn, batch)
+    finally:
+        if not ticket.claimed:
+            writer.leave(ticket)
+        writer.hand_back(batch)
+
+
+def write(sql: str, args: tuple) -> int:
+    """The one SQLite write of the plugin and the API: the rows it changed, on disk before it returns.
+
+    It waits for its turn for the write's budget (WRITE_BUDGET_S, or the plugin call's time left, whichever is less);
+    past the budget it raises WriteBusy and a plugin call refuses with 'relay error: busy' (Review Focus 3). Inside this
+    thread's transaction it runs at once. A statement runs on the connection of whichever thread holds the writer, so
+    its owner reads the changed rows from here and not from SELECT changes().
+    """
+    conn = db()
+    deadline = write_deadline()
+    with locked_is_busy():
+        if conn.in_transaction:
+            return conn.execute(sql, args).rowcount
+        ticket = WriteTicket(sql, args)
+        if writer.wait_for_turn(ticket, deadline):
+            write_the_queue(conn, ticket, deadline)
+        return ticket.outcome()
 
 
 def straighten_route(name: str, row, status: str, t: int) -> None:
@@ -524,16 +688,15 @@ def store_sync(name: str, body: dict, link_hash: str) -> bool:
     """Commit only while the checked registration still holds and the authorizing binding still
     exists, so that a post in flight across a release cannot reach the name's next owner; never
     overwrite a newer epoch."""
-    write('INSERT INTO sync (name, state, copy, epoch, generation, at) '
-          'SELECT name, ?, ?, ?, generation, ? FROM routes '
-          "WHERE name = ? AND generation = ? AND client = ? AND state = 'held' "
-          'AND EXISTS (SELECT 1 FROM bindings WHERE name = ? AND key_hash = ?) '
-          'ON CONFLICT(name) DO UPDATE SET state = excluded.state, copy = excluded.copy, '
-          'epoch = excluded.epoch, generation = excluded.generation, at = excluded.at '
-          'WHERE excluded.epoch > sync.epoch',
-          (body['state'], body['copy'], body['epoch'], now(), name, body['generation'], body['client'],
-           name, link_hash))
-    return db().execute('SELECT changes()').fetchone()[0] == 1
+    return write('INSERT INTO sync (name, state, copy, epoch, generation, at) '
+                 'SELECT name, ?, ?, ?, generation, ? FROM routes '
+                 "WHERE name = ? AND generation = ? AND client = ? AND state = 'held' "
+                 'AND EXISTS (SELECT 1 FROM bindings WHERE name = ? AND key_hash = ?) '
+                 'ON CONFLICT(name) DO UPDATE SET state = excluded.state, copy = excluded.copy, '
+                 'epoch = excluded.epoch, generation = excluded.generation, at = excluded.at '
+                 'WHERE excluded.epoch > sync.epoch',
+                 (body['state'], body['copy'], body['epoch'], now(), name, body['generation'], body['client'],
+                  name, link_hash)) == 1
 
 
 def set_sync(name: str, body: dict, link_hash: str) -> tuple[str | None, dict | None]:
@@ -904,23 +1067,25 @@ def store_new_binding(name: str, ip: str, t: int) -> str:
 
 @contextlib.contextmanager
 def transaction():
-    """One BEGIN IMMEDIATE..COMMIT block; every statement, including BEGIN and
-    COMMIT, runs through write(), so lock acquisition draws from the one write
-    budget and raises the same WriteBusy as a single write (G1). Any failure
-    rolls back; a spent budget refuses instead of waiting.
+    """One BEGIN IMMEDIATE..COMMIT block on this thread's connection, holding the one writer throughout.
+
+    It queues for the writer like any write, so its wait draws from the one write budget and raises the same WriteBusy
+    (G1). Its statements run through write(). Any failure rolls back; a spent budget refuses instead of waiting.
     """
     conn = db()
-    write('BEGIN IMMEDIATE', ())
+    deadline = write_deadline()
+    ticket = WriteTicket()
+    writer.wait_for_turn(ticket, deadline)
+    writer.leave(ticket)
     try:
+        begin_writing(conn, deadline)
         yield
         write('COMMIT', ())
     except BaseException:
-        if conn.in_transaction:
-            try:
-                conn.execute('ROLLBACK')
-            except sqlite3.Error:
-                pass
+        roll_back(conn)
         raise
+    finally:
+        writer.hand_back([])
 
 
 # What belongs to one binding's lifetime and goes with it. The routes row stays: the generation only grows across
@@ -973,12 +1138,11 @@ def store_visitor_key(name: str, visitor_hash: str, link_hash: str) -> bool:
     name's next owner (C2): the write re-checks the binding's key hash in the same
     statement, and a failed check changes nothing.
     """
-    write('INSERT INTO visitor_keys (name, key_hash, created_at) '
-          'SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM bindings WHERE name = ? AND key_hash = ?) '
-          'ON CONFLICT(name) DO UPDATE SET key_hash = excluded.key_hash, '
-          'created_at = excluded.created_at',
-          (name, visitor_hash, now(), name, link_hash))
-    return db().execute('SELECT changes()').fetchone()[0] == 1
+    return write('INSERT INTO visitor_keys (name, key_hash, created_at) '
+                 'SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM bindings WHERE name = ? AND key_hash = ?) '
+                 'ON CONFLICT(name) DO UPDATE SET key_hash = excluded.key_hash, '
+                 'created_at = excluded.created_at',
+                 (name, visitor_hash, now(), name, link_hash)) == 1
 
 
 def store_link_key(name: str, new_hash: str, link_hash: str) -> bool:
