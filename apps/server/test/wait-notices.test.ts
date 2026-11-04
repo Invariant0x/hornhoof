@@ -5,6 +5,11 @@ import { deliverWaitNotices, recordWaitNotice, requestedWaitNotice } from '../sr
 import { waitCompany } from './wait-company.js';
 
 describe('wait recipient notices', () => {
+  it('does not create a recipient notice for a task with no wait', async () => {
+    const c = await waitCompany();
+    expect(await requestedWaitNotice(c.ctx, await c.task(), c.agent.id)).toBeNull();
+  });
+
   it('wakes the employee with the recorded waiter, reason, task and deadline', async () => {
     const c = await waitCompany();
     const task = await c.task();
