@@ -48,6 +48,9 @@ describe("a program's first setup that only the plan's owner passes", () => {
     await c.db.insert(nodes).values({ companyId: c.companyId, machineId: other!.id, subscriptionId: c.sub.id, status: 'ready', version: '0.5.2', keyHash: 'hash-b' });
     await handleNodeMessage(c.ctx, c.id, { type: 'hello', version: '0.5.2', loggedIn: true, setupNeeded: true, running: [] });
     expect([await c.nodeStatus(), await c.planStatus()]).toEqual(['needs_setup', 'ready']);
+    /* With both online, the plan shows the machine that can take its turns. */
+    const [view] = await subViews(c.db, () => true, c.sub.id);
+    expect(view!.status).toBe('ready');
   });
 
   it('is what a node says of itself once signed in, and the sign-in comes first', async () => {
