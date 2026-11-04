@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
-import { createServer } from 'node:http';
+import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -41,10 +41,23 @@ export let tmux: Tmux;
 export let sent: NodeMessage[];
 export const home = mkdtempSync(join(tmpdir(), 'hh-home-'));
 
+/* A Hornhoof that answers every tool call, and the tokens they came with. */
+async function answering(auths: string[] = []): Promise<Server> {
+  const hornhoof = createServer((req, res) => {
+    auths.push(req.headers.authorization ?? '');
+    req.resume().on('end', () => res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { tools: [] } })));
+  });
+  await new Promise<void>(r => hornhoof.listen(0, '127.0.0.1', r));
+  return hornhoof;
+}
+const urlOf = (hornhoof: Server) => `http://127.0.0.1:${(hornhoof.address() as AddressInfo).port}`;
+/* Antigravity gets Hornhoof's prompt only once it has listed Hornhoof's tools. */
+const HORNHOOF = urlOf((await answering()).unref());
+
 export function setUp(more: Partial<ConstructorParameters<typeof TerminalHost>[0]> = {}, path = process.env.PATH ?? '') {
   sent = [];
   tmux = new Tmux({ socket: `hh-host-${process.pid}-${Math.random().toString(36).slice(2, 8)}`, env: { PATH: path, HOME: home } });
-  host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: m => sent.push(m), secrets: () => [SECRET], readyMs: 10_000, pollMs: 100, toolsMs: 300, ...more });
+  host = new TerminalHost({ tmux, hornhoof: HORNHOOF, send: m => sent.push(m), secrets: () => [SECRET], readyMs: 10_000, pollMs: 100, toolsMs: 300, ...more });
   return host.start();
 }
 
@@ -105,16 +118,12 @@ export function endsLost(): void {
   vi.spyOn(host as unknown as { hook: typeof hook }, 'hook').mockImplementation((key, event, data) => event === 'stop' ? Promise.resolve() : hook(key, event, data));
 }
 
-/* A Hornhoof that answers every tool call, and the tokens they came with. */
+/* The test sees the tokens of the tool calls. */
 export async function withTools(test: (auths: string[]) => Promise<void>) {
   const auths: string[] = [];
-  const hornhoof = createServer((req, res) => {
-    auths.push(req.headers.authorization ?? '');
-    req.resume().on('end', () => res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { tools: [] } })));
-  });
-  await new Promise<void>(r => hornhoof.listen(0, '127.0.0.1', r));
+  const hornhoof = await answering(auths);
   try {
-    await setUp({ hornhoof: `http://127.0.0.1:${(hornhoof.address() as AddressInfo).port}`, toolsMs: 5000 });
+    await setUp({ hornhoof: urlOf(hornhoof), toolsMs: 5000 });
     await test(auths);
   } finally {
     hornhoof.close();

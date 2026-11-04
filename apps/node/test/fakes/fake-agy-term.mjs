@@ -42,9 +42,23 @@ class AgyTerminal {
     const own = file => (existsSync(file) ? readFileSync(file, 'utf8') : null);
     this.hooks = JSON.parse(own(join(process.cwd(), '.agents', 'hooks.json')) ?? '{}').hornhoof;
     trace({ argv: args, home: process.env.HOME, agentsMd: own('AGENTS.md'), hooks: this.hooks });
+    this.loadTools(JSON.parse(own(join(process.cwd(), '.agents', 'mcp_config.json')) ?? '{}').mcpServers?.hornhoof?.serverUrl);
     rawKeys();
     this.display();
     readKeys(key => this.key(key));
+  }
+
+  /* agy 1.4.12 loads the MCP servers of its folder in the background once its terminal starts, and a turn gets only the
+     tools listed before it began. FAKE_MCP_LIST_MS: how long that takes; FAKE_AGY_NO_TOOLS: it never gets them. */
+  loadTools(url) {
+    this.tools = false;
+    if (!url || process.env.FAKE_AGY_NO_TOOLS) return;
+    setTimeout(async () => {
+      const listed = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) })
+        .then(res => res.json(), () => null);
+      this.tools = Array.isArray(listed?.result?.tools);
+      trace({ toolsListed: this.tools });
+    }, Number(process.env.FAKE_MCP_LIST_MS ?? 50));
   }
 
   write(line) {
@@ -76,6 +90,7 @@ class AgyTerminal {
 
   async take(line) {
     const turn = { line };
+    trace({ turn: line, tools: this.tools });
     this.active = turn;
     this.display();
     await this.hook('PreInvocation', 'hook-pre.json', line);

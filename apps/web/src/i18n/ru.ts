@@ -674,6 +674,7 @@ export const ru: Messages = {
     usage_limit: 'лимит тарифа',
     auth: 'нужен вход',
     setup: 'нужна первая настройка',
+    tools: 'нет инструментов Hornhoof',
     network: 'ошибка сети',
     cut: 'ответ оборвался',
     refused: 'отказ провайдера',

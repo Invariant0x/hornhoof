@@ -3,7 +3,7 @@ import { SIGNED_OUT as AGY_SIGNED_OUT } from '../providers/antigravity.js';
 import { isRecord } from '../providers/events.js';
 
 const text = (v: unknown): string => typeof v === 'string' ? v : '';
-const passing = new Set<FailureKind>(['overloaded', 'rate_limited', 'network', 'cut', 'crash']);
+const passing = new Set<FailureKind>(['overloaded', 'rate_limited', 'network', 'cut', 'crash', 'tools']);
 
 export function failure(kind: FailureKind, reason: string, retryable?: unknown): Failure {
   return { kind, text: reason.slice(0, 2000), retryable: typeof retryable === 'boolean' ? retryable : passing.has(kind) };
