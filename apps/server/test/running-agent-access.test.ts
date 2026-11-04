@@ -14,8 +14,8 @@ it('lists canOpen with the same product and orchestrator access as the agent API
   const connected = (await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['codex'] }, ...as(viewer) })).json();
   const subscriptionId = connected.subscriptions[0].id as string;
   const [own, outside] = await db.insert(agents).values([
-    { companyId, kind: 'worker', name: 'Product agent', departmentId: department!.id, productId: product!.id, model: '', subscriptionId },
-    { companyId, kind: 'worker', name: 'Department agent', departmentId: department!.id, model: '', subscriptionId },
+    { companyId, kind: 'worker', name: 'Product agent', roleKey: 'DEV-BE', departmentId: department!.id, productId: product!.id, model: '', subscriptionId },
+    { companyId, kind: 'worker', name: 'Department agent', roleKey: 'retired-role', departmentId: department!.id, model: '', subscriptionId },
   ]).returning();
   await db.update(agents).set({ subscriptionId }).where(eq(agents.id, orchestrator!.id));
   const [current] = await db.insert(tasks).values({ companyId, departmentId: department!.id, productId: product!.id, number: 12, title: 'Product work' }).returning();
@@ -24,10 +24,12 @@ it('lists canOpen with the same product and orchestrator access as the agent API
     { companyId, subscriptionId, agentId: own!.id, taskId: current!.id, prompt: 'work', status: 'running', timeoutMs: 1000, startedAt: new Date('2026-11-04T04:00:00Z'), answersCeo: true },
     { companyId, subscriptionId, agentId: outside!.id, taskId: privateTask!.id, prompt: 'work', status: 'running', timeoutMs: 1000 },
   ]);
-  const shown = (await app.inject({ url: '/api/subscriptions', ...as(viewer) })).json().subscriptions[0].agents;
+  const response = await app.inject({ url: '/api/subscriptions', ...as(viewer) });
+  expect(response.statusCode).toBe(200);
+  const shown = response.json().subscriptions[0].agents;
   const byName = Object.fromEntries(shown.map((a: { name: string }) => [a.name, a]));
-  expect(byName['Product agent']).toMatchObject({ canOpen: true, busy: true, since: '2026-11-04T04:00:00.000Z', withCeo: true, task: { number: 12, title: 'Product work' } });
-  expect(byName['Department agent']).toMatchObject({ canOpen: false, task: null });
+  expect(byName['Product agent']).toMatchObject({ canOpen: true, busy: true, since: '2026-11-04T04:00:00.000Z', withCeo: true, title: { en: 'Backend engineer', ru: 'Бэкенд-разработчик' }, task: { number: 12, title: 'Product work' } });
+  expect(byName['Department agent']).toMatchObject({ canOpen: false, title: null, task: null });
   expect(byName.Orchestrator).toMatchObject({ canOpen: false, busy: false, since: null, withCeo: false, task: null });
   for (const [id, status] of [[own!.id, 200], [outside!.id, 403], [orchestrator!.id, 403]] as const) {
     expect((await app.inject({ url: `/api/agents/${id}`, ...as(viewer) })).statusCode).toBe(status);

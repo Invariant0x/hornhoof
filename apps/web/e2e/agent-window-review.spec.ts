@@ -41,6 +41,10 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
     await page.getByRole('button', { name: words.open, exact: true }).click();
     await expect(page.getByRole('alert')).toHaveText(lang === 'en' ? 'Company temporarily unavailable' : 'Что-то пошло не так.');
     await expect(page.getByRole('alert')).toBeInViewport();
+    await expect.poll(() => page.getByRole('alert').evaluate(element => {
+      const rect = element.getBoundingClientRect();
+      return element.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2));
+    })).toBe(true);
     await page.screenshot({ path: info.outputPath(`company-failure-${lang}-${theme}-${width}.png`) });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     expect(errors).toEqual([]);

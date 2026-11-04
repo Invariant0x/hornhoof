@@ -1,4 +1,4 @@
-import { act, render, screen, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { expect, it } from 'vitest';
 import { Shell } from '../src/screens/Shell';
@@ -66,5 +66,5 @@ it.each<LiveMessage>([{ type: 'task', id: 't12', spot: { departmentId: 'd2' } },
   if (message.type === 'reconnected') act(() => stream.sources().forEach(source => { source.fire('error'); source.fire('open'); }));
   else stream.send(message);
   expect(await screen.findByRole('button', { name: 'No task' })).toBeDisabled();
-  expect(screen.queryByRole('complementary', { name: '#12 Checkout API' })).not.toBeInTheDocument();
+  await waitFor(() => expect(screen.queryByRole('complementary', { name: '#12 Checkout API' })).not.toBeInTheDocument());
 });

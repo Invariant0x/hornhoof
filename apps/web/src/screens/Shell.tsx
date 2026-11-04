@@ -196,7 +196,7 @@ function AgentWindowError({ panel, org, failure }: { panel: Panel; org: Org | nu
   const message = useRef<HTMLParagraphElement>(null);
   useEffect(() => { message.current?.focus(); }, [panel, org, failure]);
   if (panel?.kind !== 'window' || org || failure === null) return null;
-  return <p ref={message} tabIndex={-1} className="alert" role="alert">{errorText(t, failure)}</p>;
+  return <p ref={message} tabIndex={-1} className="alert agent-window-error" role="alert">{errorText(t, failure)}</p>;
 }
 
 /* welcome: setup just finished, so the orchestrator's window opens at once. */

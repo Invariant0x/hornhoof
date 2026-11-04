@@ -52,8 +52,26 @@ describe('the task in an agent window', () => {
     const [current] = await db.insert(tasks).values({ companyId, departmentId: department.id, productId: product.id, number: 12, title: 'Waiting work', status: 'blocked', assigneeAgentId: employee.id }).returning();
     await db.insert(tasks).values({ companyId, number: 99, title: 'Later work', assigneeAgentId: employee.id, after: [current!.id] });
     expect((await app.inject({ url: `/api/agents/${employee.id}`, ...as(ceo) })).json().currentTask).toEqual({ id: current!.id, number: 12, title: 'Waiting work' });
+    const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
+    expect(org.departments.find((d: { id: string }) => d.id === department.id).employees.find((a: { id: string }) => a.id === employee.id).status).toBe('waiting');
     await db.update(tasks).set({ status: 'done', closedAt: new Date() }).where(eq(tasks.id, current!.id));
     await db.update(tasks).set({ status: 'cancelled', closedAt: new Date() }).where(eq(tasks.number, 99));
     expect((await app.inject({ url: `/api/agents/${employee.id}`, ...as(ceo) })).json().currentTask).toBeNull();
+  });
+
+  it('uses the holder of an empty review panel only while that gate is active', async () => {
+    const { app, db, ceo, companyId, employee, orchestrator } = await company();
+    const [current] = await db.insert(tasks).values({ companyId, number: 12, title: 'Review work', status: 'blocked', stage: 1, gates: [employee.id], assigneeAgentId: employee.id, executorAgentId: orchestrator.id }).returning();
+    expect((await app.inject({ url: `/api/agents/${employee.id}`, ...as(ceo) })).json().currentTask).toBeNull();
+    await db.update(tasks).set({ status: 'review' }).where(eq(tasks.id, current!.id));
+    expect((await app.inject({ url: `/api/agents/${employee.id}`, ...as(ceo) })).json().currentTask).toEqual({ id: current!.id, number: 12, title: 'Review work' });
+  });
+
+  it.each(['open', 'blocked'] as const)('keeps the leading held task during a conversation without a task reference (%s)', async status => {
+    const { app, db, ceo, companyId, employee } = await company();
+    await db.insert(tasks).values({ companyId, number: 12, title: 'Older work', status, assigneeAgentId: employee.id });
+    const [current] = await db.insert(tasks).values({ companyId, number: 99, title: 'Leading work', status, assigneeAgentId: employee.id }).returning();
+    await db.insert(jobs).values({ companyId, subscriptionId: employee.subscriptionId!, agentId: employee.id, prompt: 'conversation', status: 'running', timeoutMs: 1000 });
+    expect((await app.inject({ url: `/api/agents/${employee.id}`, ...as(ceo) })).json().currentTask).toEqual({ id: current!.id, number: 99, title: 'Leading work' });
   });
 });
