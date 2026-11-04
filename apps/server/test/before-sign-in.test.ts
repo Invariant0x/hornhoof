@@ -10,10 +10,10 @@ import type { Db } from '../src/db/client.js';
 import * as schema from '../src/db/schema.js';
 import { createTestDb, invitePerson, SETUP, sessionFrom, TEST_SECRET, TUNNEL, viaLink } from './helpers.js';
 
-type Route = { method: string; url: string };
+type Route = { method: string; url: string; websocket: boolean };
 type Origin = 'local' | 'link';
 
-const NAMES_THE_COMPANY = ['Acme', 'Ivan', 'ivan@acme.com', 'Maria', 'maria@acme.com', 'Zebra Payments'];
+const NAMES_THE_COMPANY = ['Acme', 'Ivan', 'ivan@acme.com', 'Maria', 'maria@acme.com', 'Zebra Payments', 'Zebra Settlements'];
 
 /* Every route that answers 2xx without a session today, with the origin it does so from. A new public route fails the
    test until it is listed here, and the lead reads this list in review. */
@@ -42,26 +42,26 @@ function fakeDist(): string {
   return dir;
 }
 
-/* The id of the first row of every table that has an id column and a row. */
+/* Every id of every table that has an id column: the company is small, and a leak may hide behind any row. */
 async function idsOfEveryTable(db: Db): Promise<string[]> {
   const rowsOf = async <T>(query: ReturnType<typeof sql>) => ((await db.execute(query)) as unknown as { rows: T[] }).rows;
   const tables = await rowsOf<{ table_name: string }>(sql`select table_name from information_schema.columns where table_schema = 'public' and column_name = 'id'`);
   const ids: string[] = [];
   for (const { table_name } of tables) {
-    const [row] = await rowsOf<{ id: string | number }>(sql.raw(`select id from "${table_name}" limit 1`));
-    if (row) ids.push(String(row.id));
+    for (const row of await rowsOf<{ id: string | number }>(sql.raw(`select id from "${table_name}"`))) ids.push(String(row.id));
   }
   return [...new Set(ids)];
 }
 
 const FIXED_PARAMS: Record<string, string> = { name: 'acme', token: 'x', number: '1', '*': 'x' };
 
-/* The urls a route is asked at: its parameters are filled by name, `:id` once with each real id. */
-function urlsOf(url: string, ids: string[]): string[] {
-  return (/:(id|teamId)\b/.test(url) ? ids : ['']).map(id =>
+/* The urls a route is asked at: its parameters are filled by name, `:id` once with each real id, `:teamId` with the one
+   real team, so that a department and its sub-unit are asked for as a real pair. */
+function urlsOf(url: string, ids: string[], teamId: string): string[] {
+  return (/:id\b/.test(url) ? ids : ['']).map(id =>
     url.replace(/:(\w+)|\*/g, (found, param?: string) => {
       const key = param ?? '*';
-      const value = key === 'id' || key === 'teamId' ? id : FIXED_PARAMS[key];
+      const value = key === 'id' ? id : key === 'teamId' ? teamId : FIXED_PARAMS[key];
       if (value === undefined) throw new Error(`Add the parameter "${key}" of ${url} to FIXED_PARAMS.`);
       return value;
     }),
@@ -70,12 +70,16 @@ function urlsOf(url: string, ids: string[]): string[] {
 
 describe('urlsOf', () => {
   it('asks a route with an id once for each id and fills the other parameters by name', () => {
-    expect(urlsOf('/api/links/:name/keys/:id', ['a', 'b'])).toEqual(['/api/links/acme/keys/a', '/api/links/acme/keys/b']);
-    expect(urlsOf('/*', ['a'])).toEqual(['/x']);
+    expect(urlsOf('/api/links/:name/keys/:id', ['a', 'b'], 't')).toEqual(['/api/links/acme/keys/a', '/api/links/acme/keys/b']);
+    expect(urlsOf('/*', ['a'], 't')).toEqual(['/x']);
+  });
+
+  it('asks a department and its sub-unit as the real pair for every department id', () => {
+    expect(urlsOf('/api/departments/:id/teams/:teamId', ['a', 'b'], 't')).toEqual(['/api/departments/a/teams/t', '/api/departments/b/teams/t']);
   });
 
   it('refuses a parameter it does not know', () => {
-    expect(() => urlsOf('/api/things/:mystery', [])).toThrow(/mystery/);
+    expect(() => urlsOf('/api/things/:mystery', [], 't')).toThrow(/mystery/);
   });
 });
 
@@ -83,13 +87,18 @@ async function companyWithPeople() {
   const routes: Route[] = [];
   const db = (await createTestDb()) as unknown as Db;
   const config = loadConfig({ HORNHOOF_SECRET: TEST_SECRET, UPDATE_CHECK_MS: '0', TUNNEL_HOST: TUNNEL, WEB_DIST: fakeDist() });
-  const app = await buildApp({ db, config, onRoute: r => routes.push(...[r.method].flat().map(method => ({ method, url: r.url }))) });
+  const app = await buildApp({ db, config, onRoute: (r: { method: string | string[]; url: string; websocket?: boolean }) =>
+      routes.push(...[r.method].flat().map(method => ({ method, url: r.url, websocket: !!r.websocket }))),
+  });
   onTestFinished(() => app.close());
   const ceoToken = sessionFrom(await app.inject({ method: 'POST', url: '/api/setup', payload: { ...SETUP, template: 'startup' } }));
   const [made] = await db.select().from(schema.departments).limit(1);
-  await db.insert(schema.departments).values({ ...made!, id: crypto.randomUUID(), name: 'Zebra Payments' });
+  const zebra = crypto.randomUUID();
+  const teamId = crypto.randomUUID();
+  await db.insert(schema.departments).values({ ...made!, id: zebra, name: 'Zebra Payments' });
+  await db.insert(schema.teams).values({ id: teamId, companyId: made!.companyId, departmentId: zebra, name: 'Zebra Settlements' });
   await invitePerson(app, ceoToken, { name: 'Maria', email: 'maria@acme.com', access: { whole: true } });
-  return { app, db, routes, ceoToken };
+  return { app, db, routes, ceoToken, teamId };
 }
 
 const askFrom = (app: FastifyInstance, route: Route, url: string, origin: Origin) =>
@@ -102,14 +111,15 @@ const askFrom = (app: FastifyInstance, route: Route, url: string, origin: Origin
 
 describe('before sign-in', () => {
   it('answers nothing that names the company before sign-in, locally and over the link', async () => {
-    const { app, db, routes } = await companyWithPeople();
+    const { app, db, routes, teamId } = await companyWithPeople();
     await app.ready();
     const ids = await idsOfEveryTable(db);
+    expect(ids).toContain(teamId);
     expect(routes.length).toBeGreaterThanOrEqual(30);
     const unlisted: string[] = [];
     for (const route of routes) {
       for (const origin of ['local', 'link'] as const) {
-        for (const url of urlsOf(route.url, ids)) {
+        for (const url of urlsOf(route.url, ids, teamId)) {
           const res = await askFrom(app, route, url, origin);
           const seen = res.body + Object.values(res.headers).join('\n');
           for (const word of NAMES_THE_COMPANY) expect(seen, `${route.method} ${url} ${origin}`).not.toContain(word);
@@ -119,6 +129,35 @@ describe('before sign-in', () => {
       }
     }
     expect([...new Set(unlisted)]).toEqual([]);
+  });
+});
+
+/* What the upgrade request of a socket carries as the address it came from, the way a real connection does. */
+const upgradeFrom = (origin: Origin) =>
+  origin === 'link' ? { socket: { remoteAddress: TUNNEL }, headers: viaLink().headers } : { socket: { remoteAddress: '127.0.0.1' }, headers: {} };
+
+describe('sockets before sign-in', () => {
+  it('refuses every socket route without a session before anything is sent, locally and over the link', async () => {
+    const { app, db, routes, teamId } = await companyWithPeople();
+    await app.ready();
+    const ids = await idsOfEveryTable(db);
+    const sockets = routes.filter(r => r.websocket && r.method === 'GET');
+    expect(sockets.length).toBeGreaterThanOrEqual(3);
+    const opened: string[] = [];
+    for (const route of sockets) {
+      for (const origin of ['local', 'link'] as const) {
+        for (const url of urlsOf(route.url, ids, teamId)) {
+          const ws = await app.injectWS(url, upgradeFrom(origin)).catch((err: Error) => err);
+          if (ws instanceof Error) {
+            expect(ws.message, `${url} ${origin}`).toMatch(/^Unexpected server response: 4\d\d$/);
+          } else {
+            ws.terminate();
+            opened.push(`${url} ${origin}`);
+          }
+        }
+      }
+    }
+    expect(opened).toEqual([]);
   });
 });
 
