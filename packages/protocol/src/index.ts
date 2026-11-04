@@ -348,6 +348,35 @@ export const ProgramExit = z.object({ code: z.number().int().nullable(), signal:
 export type ProgramExit = z.infer<typeof ProgramExit>;
 const BrowserError = z.string().min(1).max(300);
 
+export const NODE_DISCONNECT_CAUSES = [
+  'watchdog_timeout',
+  'server_close',
+  'socket_error',
+  'dns_error',
+  'handshake_timeout',
+  'http_rejected',
+  'abnormal_close',
+] as const;
+export type NodeDisconnectCause = (typeof NODE_DISCONNECT_CAUSES)[number];
+
+/* What a node observed across a connection drop, sent right after hello once it reconnects. */
+export const NodeReconnect = z.object({
+  disconnectedAt: z.iso.datetime(),
+  reconnectedAt: z.iso.datetime(),
+  offlineMs: z.number().int().nonnegative(),
+  attempts: z.number().int().min(1),
+  cause: z.enum(NODE_DISCONNECT_CAUSES),
+  closeCode: z.number().int().min(0).max(65_535).nullable(),
+  closeReason: z.string().max(200).regex(/^[^\p{Cc}]*$/u).nullable(),
+  errorCode: z.string().min(1).max(64).regex(/^[A-Za-z0-9_.:-]+$/).nullable(),
+  error: z.string().max(300).regex(/^[^\p{Cc}]*$/u).nullable(),
+  dnsFailed: z.boolean(),
+  watchdogTimedOut: z.boolean(),
+  clockJumpMs: z.number().int().positive().nullable(),
+  networkChanged: z.boolean(),
+});
+export type NodeReconnect = z.infer<typeof NodeReconnect>;
+
 const NodeMessage = z.discriminatedUnion('type', [
   /* terminals: the node runs agents in sessions people can watch and type into. */
   /* tests: the parts of test runs it runs, or ran and Hornhoof has not confirmed. */
@@ -383,6 +412,7 @@ const NodeMessage = z.discriminatedUnion('type', [
     nodeLog: NodeLog.optional(),
   }),
   z.object({ type: z.literal('node.stopping'), startedAt: z.iso.datetime(), exit: NodeExit }),
+  z.object({ type: z.literal('node.reconnect'), ...NodeReconnect.shape }),
   z.object({ type: z.literal('load'), ...Load.shape }),
   z.object({ type: z.literal('tests.started'), partId: z.string() }),
   /* exitCode: the command's, none when it never ran or was killed. commit: what the clone tested. */
