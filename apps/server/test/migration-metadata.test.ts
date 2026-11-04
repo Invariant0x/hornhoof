@@ -21,6 +21,9 @@ async function snapshot(tag: string): Promise<Snapshot> {
 describe('merged migration metadata', () => {
   it('carries both histories into the latest snapshot used to generate the next migration', async () => {
     const latest = await snapshot((await journal()).entries.at(-1)!.tag);
+    expect(Object.keys(latest.tables['public.person_changes']!.columns)).toEqual(expect.arrayContaining([
+      'company_id', 'person_id', 'actor_id', 'field', 'before', 'after', 'created_at',
+    ]));
     expect(Object.keys(latest.tables['public.jobs']!.columns)).toEqual(expect.arrayContaining([
       'failure', 'not_before', 'restarted_at', 'requested_prompt',
     ]));

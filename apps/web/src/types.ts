@@ -97,7 +97,7 @@ export type EmployeeTask = { id: string; number: number; title: string; stage: n
 export type ProgramView = TurnProgram;
 
 /* The latest failed turn of an agent, as /api/org and /api/agents/:id give it; at is Unix epoch milliseconds. */
-export type TurnFailure = { kind: FailureKind; text: string; at: number };
+export type TurnFailure = { kind: FailureKind; text: string; at: number; tail?: string };
 
 /* An employee as the map lists it: the head first, then members in the order they were hired. */
 export type Employee = {

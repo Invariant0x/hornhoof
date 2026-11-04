@@ -11,6 +11,7 @@ import { startWork } from '../tasks/engine.js';
 import { programRestarted } from '../tasks/program-restarts.js';
 import { recordJobProgram } from '../tasks/silent.js';
 import { afterJob, typedTurn } from '../tasks/wake.js';
+import { staleOutput } from '../tasks/wake-state.js';
 import { appendTurnEvent, publishWorking } from '../events/store.js';
 import { partDone, partStarted, pumpTests, testsHello } from '../testruns/runs.js';
 import { sameNode, type NodeIdentity } from './hub.js';
@@ -37,6 +38,12 @@ const ON_NODE = or(eq(jobs.status, 'running'), and(eq(jobs.status, 'queued'), eq
 async function jobEnded(ctx: Ctx, id: NodeIdentity, msg: Extract<NodeMessage, { type: 'job.done' }>, now: Date) {
   const [job] = await ctx.db.select({ agentId: jobs.agentId }).from(jobs).where(and(eq(jobs.id, msg.jobId), jobsOf(id, ctx)));
   const finish = async () => {
+    if (msg.error === 'cancelled') {
+      const stale = await ctx.db.update(jobs).set({ tail: staleOutput(msg.tail) })
+        .where(and(eq(jobs.id, msg.jobId), eq(jobs.status, 'failed'), eq(jobs.error, 'stale'), jobsOf(id, ctx))).returning({ companyId: jobs.companyId });
+      for (const { companyId } of stale) await publishWorking(ctx, companyId);
+      if (stale.length) return [];
+    }
     const finished = await ctx.db
       .update(jobs)
       .set({

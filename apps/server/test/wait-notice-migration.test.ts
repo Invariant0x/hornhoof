@@ -14,7 +14,7 @@ async function previousMigrations() {
   await cp(MIGRATIONS, folder, { recursive: true });
   const file = join(folder, 'meta/_journal.json');
   const journal = JSON.parse(await readFile(file, 'utf8')) as { entries: { idx: number }[] };
-  journal.entries = journal.entries.filter(entry => entry.idx <= 53);
+  journal.entries = journal.entries.filter(entry => entry.idx <= 54);
   await writeFile(file, JSON.stringify(journal));
   return folder;
 }

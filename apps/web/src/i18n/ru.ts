@@ -125,6 +125,10 @@ export const ru: Messages = {
     issues: 'Сообщить об ошибке или предложить идею', copyright: 'Copyright (c) 2026 Ivan Korol',
     versionFailed: 'Не удалось загрузить версию сервера. Закройте окно и откройте снова, чтобы повторить.',
   },
+  profile: {
+    title: 'Настройки',
+    nameRequired: 'Введите свое имя.',
+  },
   settings: {
     menu: 'Общий доступ',
     title: 'Общий доступ',
@@ -748,6 +752,7 @@ export const ru: Messages = {
     openTerminal: 'Открыть терминал',
     lastFailed: (at: string, kind: string) => `Последний ход не удался в ${at}: ${kind}`,
     lastFailedOn: (when: string, kind: string) => `Последний ход не удался ${when}: ${kind}`,
+    noOutput: 'Вывода не было.',
     runsOn: 'Где работает',
     onMachine: (host: string) => `Работает на машине ${host}`,
     model: 'Модель',

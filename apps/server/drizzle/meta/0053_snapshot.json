@@ -1,5 +1,5 @@
 {
-  "id": "787c1368-f9bf-4c73-9fe8-480e0551e5d6",
+  "id": "21cc4b8b-b9e4-418f-bc8e-67bef84993f1",
   "prevId": "9ad580bf-6914-4d9b-b1fd-dff4077ae906",
   "version": "7",
   "dialect": "postgresql",
@@ -278,28 +278,6 @@
           ],
           "isUnique": false,
           "where": "data->>'failureCase' is not null",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "agent_events_report_window": {
-          "name": "agent_events_report_window",
-          "columns": [
-            {
-              "expression": "agent_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "data->>'report' is not null or data->>'from' = 'agent'",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -2470,12 +2448,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "cause": {
-          "name": "cause",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
         "text": {
           "name": "text",
           "type": "text",
@@ -2801,6 +2773,140 @@
           ]
         }
       },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.person_changes": {
+      "name": "person_changes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "company_id": {
+          "name": "company_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "person_id": {
+          "name": "person_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor_id": {
+          "name": "actor_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "field": {
+          "name": "field",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "before": {
+          "name": "before",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "after": {
+          "name": "after",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "person_changes_person_id": {
+          "name": "person_changes_person_id",
+          "columns": [
+            {
+              "expression": "person_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "person_changes_company_id": {
+          "name": "person_changes_company_id",
+          "columns": [
+            {
+              "expression": "company_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "person_changes_company_id_companies_id_fk": {
+          "name": "person_changes_company_id_companies_id_fk",
+          "tableFrom": "person_changes",
+          "tableTo": "companies",
+          "columnsFrom": [
+            "company_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "person_changes_person_id_people_id_fk": {
+          "name": "person_changes_person_id_people_id_fk",
+          "tableFrom": "person_changes",
+          "tableTo": "people",
+          "columnsFrom": [
+            "person_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "person_changes_actor_id_people_id_fk": {
+          "name": "person_changes_actor_id_people_id_fk",
+          "tableFrom": "person_changes",
+          "tableTo": "people",
+          "columnsFrom": [
+            "actor_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
