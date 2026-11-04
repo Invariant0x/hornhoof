@@ -24,19 +24,51 @@ permissions:
   contents: read
 
 jobs:
+  # While the repository is private, the tests run on Ivan's home server, in three parts at once: GitHub gives a
+  # private repository a machine with two processors, where the suite took half an hour. Before the repository goes
+  # public, pull requests go back to GitHub's machines: code from a fork must never run on Ivan's computers.
   test:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, home-api]
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2, 3]
+    env:
+      PART: ${{ matrix.part }}/3
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npm run lint
-      - run: npm test
-      - run: bash -n scripts/install.sh
-      - run: shellcheck scripts/install.sh scripts/node-build.sh
+      - id: install
+        run: |
+          npm ci --prefer-offline --no-audit --no-fund
+          npm run build -w @hornhoof/protocol
+      # What npm test runs besides the three apps' suites, with the lint and the scripts' checks: once, in the first part.
+      # Every check runs even when one before it failed, so one run shows all that is wrong.
+      - name: Lint, release checks, protocol and scripts
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && matrix.part == 1 }}
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: |
+          npm run lint
+          node scripts/check-release.mjs --local
+          npm run test:release
+          npm test -w @hornhoof/protocol
+          bash -n scripts/install.sh
+          shellcheck scripts/install.sh scripts/node-build.sh
+      - name: Server
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        working-directory: apps/server
+        run: npx vitest run --shard="$PART" --maxWorkers=3
+      - name: Node
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        working-directory: apps/node
+        run: npx vitest run --shard="$PART" --maxWorkers=3
+      - name: Web
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        working-directory: apps/web
+        run: npx vitest run --shard="$PART" --maxWorkers=3
 
   images:
     needs: test
