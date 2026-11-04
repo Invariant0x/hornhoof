@@ -137,8 +137,8 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
   }
 
   app.get('/api/people', async req => {
-    await requirePerson(req, db);
-    const rows = await db.select(personColumns).from(people).orderBy(asc(people.createdAt));
+    const me = await requirePerson(req, db);
+    const rows = await db.select(personColumns).from(people).where(eq(people.companyId, me.companyId)).orderBy(asc(people.createdAt));
     return { people: await personViews(db, rows) };
   });
 
