@@ -8,6 +8,7 @@ import functools
 import glob
 import http.client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -42,11 +43,30 @@ keyUsage = critical, keyCertSign, cRLSign
 basicConstraints = critical, CA:FALSE
 subjectAltName = DNS:hornhoof.org, DNS:www.hornhoof.org, DNS:*.hornhoof.org
 """
+SELF_SIGNED_CONFIG = """
+[req]
+distinguished_name = subject
+[subject]
+[leaf]
+subjectAltName = DNS:{host}
+"""
+PROXY_V2_SIGNATURE = b'\r\n\r\n\x00\r\nQUIT\n'
+# The signature, version and command, family and transport, and the length of what follows.
+PROXY_V2_FIXED_PART = len(PROXY_V2_SIGNATURE) + 4
+PROXY_V2_TCP_OVER_IPV4 = 0x11
 
 
 @functools.lru_cache(maxsize=None)
 def _ensure_binaries(script: str) -> None:
     subprocess.run(['sh', str(BIN.parent / script)], cwd=ROOT, check=True, timeout=180)
+
+
+def load_relay_module():
+    """relay.py in this process, for its pure rules: nothing starts, and no state is shared with a Stack."""
+    spec = importlib.util.spec_from_file_location('relay_under_test', ROOT / 'relay/relay.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _request(port, method, path, body=None, headers=None):
@@ -71,7 +91,8 @@ def _wait(predicate, within):
 
 
 def render_caddyfile(text: str, replacements: list[tuple[str, str]]) -> str:
-    """Raises on a replacement that finds nothing, so that a Caddyfile change cannot slip past the tests unseen."""
+    """Raises on a replacement that finds nothing, so that a change to the file cannot slip past the tests unseen.
+    The edge's frpc file goes through here too."""
     for old, new in replacements:
         if old not in text:
             raise ValueError(f'The Caddyfile no longer holds: {old!r}')
@@ -103,6 +124,16 @@ def _make_test_certificates(folder: Path) -> CertificateFiles:
     _openssl('x509', '-req', '-in', request, '-CA', ca, '-CAkey', ca_key, '-CAcreateserial', '-days', 2,
              '-extfile', config, '-extensions', 'leaf', '-out', cert)
     return CertificateFiles(ca, cert, key)
+
+
+def _make_self_signed_certificate(folder: Path, host: str) -> tuple[Path, Path]:
+    """A company's own certificate: no test CA signs it, so that a client seeing it has reached the company."""
+    config, cert, key = folder / f'{host}.cnf', folder / f'{host}.crt', folder / f'{host}.key'
+    config.write_text(SELF_SIGNED_CONFIG.format(host=host))
+    _openssl('ecparam', '-genkey', '-name', 'prime256v1', '-noout', '-out', key)
+    _openssl('req', '-x509', '-new', '-key', key, '-config', config, '-extensions', 'leaf',
+             '-subj', f'/CN={host}', '-days', 2, '-out', cert)
+    return cert, key
 
 
 # A burst of connections shows one certificate over and over, and one process is enough to read it.
@@ -167,10 +198,13 @@ class KeptConnection:
 
 
 class _Echo(BaseHTTPRequestHandler):
+    def echoed(self) -> tuple[int, dict]:
+        return 200, {'host': self.headers.get('Host'), 'path': self.path, 'xff': self.headers.get('X-Forwarded-For')}
+
     def do_GET(self):
-        data = json.dumps({'host': self.headers.get('Host'), 'path': self.path,
-                           'xff': self.headers.get('X-Forwarded-For')}).encode()
-        self.send_response(200)
+        status, answer = self.echoed()
+        data = json.dumps(answer).encode()
+        self.send_response(status)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(data)))
         self.end_headers()
@@ -185,6 +219,65 @@ class _Echo(BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):
         pass
+
+
+class _PassthroughEchoRequest(_Echo):
+    """Its client_address is the visitor's, from the PROXY v2 header; None when none came first."""
+
+    # A kept connection must be able to ask again, as one to Caddy can.
+    protocol_version = 'HTTP/1.1'
+
+    def echoed(self) -> tuple[int, dict]:
+        if self.client_address is None:
+            return 400, {'error': 'no PROXY v2 header came first'}
+        address, port = self.client_address
+        return 200, {'host': self.headers.get('Host'), 'path': self.path, 'from': f'{address}:{port}'}
+
+
+def _peek(sock: socket.socket, size: int) -> bytes:
+    """Up to size bytes that stay on the socket, once that many came or the stream ended."""
+    seen = b''
+
+    def enough() -> bool:
+        nonlocal seen
+        seen = sock.recv(size, socket.MSG_PEEK)
+        return len(seen) == size or not seen
+
+    _wait(enough, PUBLIC_TIMEOUT)
+    return seen
+
+
+def read_proxy_v2(sock: socket.socket) -> tuple[str, int] | None:
+    """The visitor's address from a PROXY v2 header, which leaves the stream. With no header nothing leaves it, so
+    that TLS still finds its hello. Every test is on IPv4 loopback, so another family is a fault of the test's."""
+    start = _peek(sock, PROXY_V2_FIXED_PART)
+    if not start.startswith(PROXY_V2_SIGNATURE):
+        return None
+    if start[13] != PROXY_V2_TCP_OVER_IPV4:
+        raise ValueError('These tests expect a PROXY v2 header for TCP over IPv4')
+    whole = PROXY_V2_FIXED_PART + int.from_bytes(start[14:16], 'big')
+    header = _peek(sock, whole)
+    sock.recv(whole)
+    return socket.inet_ntoa(header[16:20]), int.from_bytes(header[24:26], 'big')
+
+
+class _PassthroughEcho(ThreadingHTTPServer):
+    """A company's machine in https mode: its own TLS, behind a PROXY v2 header from its frpc."""
+
+    daemon_threads = True
+
+    def __init__(self, cert: Path, key: Path):
+        super().__init__(('127.0.0.1', 0), _PassthroughEchoRequest)
+        self.tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        self.tls.load_cert_chain(cert, key)
+
+    def finish_request(self, request: socket.socket, client_address: tuple) -> None:
+        request.settimeout(PUBLIC_TIMEOUT)
+        visitor = read_proxy_v2(request)
+        with self.tls.wrap_socket(request, server_side=True) as connection:
+            # A kept connection stays as long as its client wants, as one to Caddy does.
+            connection.settimeout(None)
+            self.RequestHandlerClass(connection, visitor, self)
 
 
 class _Process:
@@ -277,22 +370,26 @@ class Client(_Process):
 
 
 class Stack:
-    def __init__(self, tmp: str, dashboard: bool = True, caddy: bool = False):
+    def __init__(self, tmp: str, dashboard: bool = True, caddy: bool = False, droplet_logging: bool = False):
         self.tmp = Path(tmp)
+        self.droplet_logging = droplet_logging
         self.tmp.mkdir(parents=True, exist_ok=True)
         self.dashboard = dashboard
         self.with_caddy = caddy
         self.clients = []
         self.kept_connections = []
+        self.passthrough_echoes = []
         self.relay = None
         self.frps = None
         self.caddy = None
+        self.edge = None
         self.caddy_folder = self.tmp / 'caddy'
         self.certificates = None
         self.echo = None
         self.echo_thread = None
         self.password = secrets.token_hex(24)
-        self.private = [self.password]
+        self.edge_token = secrets.token_hex(32)
+        self.private = [self.password, self.edge_token]
         self._ports = set()
         self.relay_port = self._free_port()
         self.bind_port = self._free_port()
@@ -302,6 +399,7 @@ class Stack:
         self.http_port = self._free_port()
         self.https_port = self._free_port()
         self.echo_port = self._free_port()
+        self.caddy_https_port = self._free_port()
         self.env = dict(os.environ, **{
             'RELAY_DB': str(self.tmp / 'relay.db'),
             'RELAY_PORT': str(self.relay_port),
@@ -313,6 +411,9 @@ class Stack:
             'RELAY_FRPS_BIND': f'127.0.0.1:{self.bind_port}',
             'RELAY_FRPS_STARTED': str(self.tmp / 'frps-started'),
         })
+        if caddy:
+            self.env['RELAY_FRPS_HTTPS'] = f'127.0.0.1:{self.https_port}'
+            self.env['RELAY_EDGE_TOKEN'] = self.edge_token
 
     def _free_port(self):
         while True:
@@ -348,21 +449,24 @@ class Stack:
     def close(self):
         # ExitStack runs every cleanup even if one process fails to stop.
         with ExitStack() as cleanup:
-            if self.echo is not None:
-                cleanup.callback(self.echo.server_close)
-                if self.echo_thread is not None and self.echo_thread.ident is not None:
-                    cleanup.callback(self.echo_thread.join, timeout=5)
-                    cleanup.callback(self.echo.shutdown)
-            if self.relay is not None:
-                cleanup.callback(self.relay.stop)
-            if self.frps is not None:
-                cleanup.callback(self.frps.stop)
-            if self.caddy is not None:
-                cleanup.callback(self.caddy.stop)
+            self._stop_echo_on(cleanup)
+            for echo in self.passthrough_echoes:
+                cleanup.callback(echo.server_close)
+                cleanup.callback(echo.shutdown)
+            for process in (self.relay, self.frps, self.caddy, self.edge):
+                if process is not None:
+                    cleanup.callback(process.stop)
             for client in self.clients:
                 cleanup.callback(client.stop)
             for kept in self.kept_connections:
                 cleanup.callback(kept.close)
+
+    def _stop_echo_on(self, cleanup: ExitStack) -> None:
+        if self.echo is not None:
+            cleanup.callback(self.echo.server_close)
+            if self.echo_thread is not None and self.echo_thread.ident is not None:
+                cleanup.callback(self.echo_thread.join, timeout=5)
+                cleanup.callback(self.echo.shutdown)
 
     def _ready(self, process, port, path):
         def answers():
@@ -402,6 +506,10 @@ class Stack:
         replacements = {
             'bindPort': str(self.bind_port),
             'vhostHTTPPort': str(self.vhost_port),
+            'vhostHTTPSPort': str(self.https_port),
+            'proxyBindAddr': '"127.0.0.1"',
+            # Tests read frps's info lines to see a client go. The droplet logs less; droplet_logging keeps its level.
+            **({} if self.droplet_logging else {'log.level': '"info"'}),
             'webServer.port': str(self.dash_port),
             'addr': json.dumps(f'127.0.0.1:{self.relay_port}'),
         }
@@ -442,10 +550,12 @@ class Stack:
         return [
             # default_bind keeps a test server off this machine's network. auto_https disable_certs makes
             # a site this list missed fail its handshake, where it would otherwise ask for a real certificate.
-            ('{\n\tservers {',
-             f'{{\n\tadmin off\n\thttp_port {self.http_port}\n\thttps_port {self.https_port}\n'
-             '\tdefault_bind 127.0.0.1\n\tauto_https disable_certs\n\tservers {'),
-            ('hornhoof.org {\n\t# The relay', f'hornhoof.org {{\n\t{test_tls}\n\t# The relay'),
+            ('{\n\thttps_port 8443\n',
+             f'{{\n\tadmin off\n\thttp_port {self.http_port}\n\thttps_port {self.caddy_https_port}\n'
+             '\tdefault_bind 127.0.0.1\n\tauto_https disable_certs\n'),
+            ('servers 127.0.0.1:8443 {', f'servers 127.0.0.1:{self.caddy_https_port} {{'),
+            ('hornhoof.org {\n\tbind 127.0.0.1\n\t# The relay',
+             f'hornhoof.org {{\n\tbind 127.0.0.1\n\t{test_tls}\n\t# The relay'),
             ('www.hornhoof.org {\n', f'www.hornhoof.org {{\n\t{test_tls}\n'),
             ('\ttls /etc/caddy/certs/wildcard.crt /etc/caddy/certs/wildcard.key\n', f'\t{test_tls}\n'),
             ('root * /var/www/hornhoof\n', f'root * {folder}/www\n'),
@@ -484,7 +594,21 @@ class Stack:
         # Caddy's state stays in this test's folder, never in the home of whoever runs the tests.
         env = dict(os.environ, HOME=folder, XDG_DATA_HOME=f'{folder}/data', XDG_CONFIG_HOME=f'{folder}/config')
         self.caddy = _Process(command, self.tmp / 'caddy.log', env=env, private=self.private)
+        self._start_edge()
         self._wait_ready(self.caddy, lambda: self.https('hornhoof.org').status == 200)
+
+    def _start_edge(self) -> None:
+        rendered = render_caddyfile((ROOT / 'relay/edge-frpc.toml').read_text(), [
+            ('serverPort = 7000', f'serverPort = {self.bind_port}'),
+            ('localPort = 8443', f'localPort = {self.caddy_https_port}'),
+        ])
+        config_path = self.tmp / 'edge-frpc.toml'
+        self._write_config(config_path, rendered)
+        # The token comes as on the droplet, in the environment, so that the file's own template is what is tested.
+        self.edge = Client([str(BIN / 'frpc'), '-c', str(config_path)], self.tmp / 'edge-frpc.log',
+                           env=dict(os.environ, EDGE_TOKEN=self.edge_token), private=self.private)
+        if not self.edge.started('edge'):
+            raise RuntimeError('The edge did not start its proxy:\n' + self.edge.log())
 
     def reload_caddy(self, within: float = PUBLIC_TIMEOUT) -> None:
         self._write_blocked()
@@ -531,7 +655,7 @@ class Stack:
 
     def client(self, name: str, key: str | None, *, settings: str = 'today',
                client: str | None = None, proxies: str | None = None,
-               visitor_key: str | None = None, via: str = 'frps') -> Client:
+               visitor_key: str | None = None, via: str = 'frps', proxy_type: str = 'http') -> Client:
         if settings not in {'today', 'network'}:
             raise ValueError('Unknown client settings')
         config = [
@@ -552,17 +676,7 @@ class Stack:
         if visitor_key is not None:
             config.append(f'metadatas.visitor = {json.dumps(visitor_key)}')
             self.private.append(visitor_key)
-        if proxies is None:
-            proxies = f'''
-[[proxies]]
-name = {json.dumps(name)}
-type = "http"
-subdomain = {json.dumps(name)}
-localIP = "127.0.0.1"
-localPort = {self.echo_port}
-requestHeaders.set.x-forwarded-proto = "https"
-'''
-        config.append(proxies)
+        config.append(self._proxies_of_type(name, proxy_type) if proxies is None else proxies)
         number = len(self.clients)
         config_path = self.tmp / f'frpc-{number}.toml'
         self._write_config(config_path, '\n'.join(config) + '\n')
@@ -572,6 +686,35 @@ requestHeaders.set.x-forwarded-proto = "https"
         )
         self.clients.append(process)
         return process
+
+    def _proxies_of_type(self, name: str, proxy_type: str) -> str:
+        if proxy_type == 'http':
+            return f'''
+[[proxies]]
+name = {json.dumps(name)}
+type = "http"
+subdomain = {json.dumps(name)}
+localIP = "127.0.0.1"
+localPort = {self.echo_port}
+requestHeaders.set.x-forwarded-proto = "https"
+'''
+        if proxy_type == 'https':
+            return f'''
+[[proxies]]
+name = {json.dumps(name)}
+type = "https"
+subdomain = {json.dumps(name)}
+localIP = "127.0.0.1"
+localPort = {self._start_passthrough_echo(name)}
+transport.proxyProtocolVersion = "v2"
+'''
+        raise ValueError('Unknown proxy type')
+
+    def _start_passthrough_echo(self, name: str) -> int:
+        echo = _PassthroughEcho(*_make_self_signed_certificate(self.tmp, f'{name}.hornhoof.org'))
+        threading.Thread(target=echo.serve_forever, daemon=True).start()
+        self.passthrough_echoes.append(echo)
+        return echo.server_port
 
     def _way_in(self, via: str) -> list[str]:
         if via == 'frps':
