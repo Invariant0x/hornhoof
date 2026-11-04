@@ -70,6 +70,11 @@ class SyncTests(unittest.TestCase):
                                         'generation': 1, 'at': body['sync']['at']})
         self.assertEqual(self.route()['sync'], body['sync'])
 
+    def test_r2_4_a_lone_surrogate_answers_invalid(self) -> None:
+        self.holder()
+        status, body = self.post(copy='\ud800')
+        self.assertEqual((status, body['error']), (400, 'invalid'), body)
+
     def test_r2_4_others_refused(self) -> None:
         client = self.holder()
         status, body = self.post()

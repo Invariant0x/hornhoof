@@ -60,12 +60,15 @@ RELAY_FRPS_STARTED = os.environ.get('RELAY_FRPS_STARTED', '/run/frps/started')
 PENDING_S = 10
 # R3.1 measured with frp 0.71.1: network 20.16/20.46 s, today 20.26 s (2026-11-03).
 EVICTION_BOUND_S = 30
-# One budget per plugin call: a spent budget refuses the op, fail closed (Review Focus 3).
+# One budget per plugin call: a spent budget refuses the op, fail closed (Review Focus 3). The one thing that outlasts it
+# is a write already in a commit, which waits for the outcome: see WriteTicket.time_left.
 PLUGIN_CALL_S = 1.0
 
 LABEL = re.compile(r'^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$')
 CONTENT_LENGTH = re.compile(r'[0-9]{1,18}')
 RANDOM_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789'
+# JSON's "\ud800" decodes to a string with no UTF-8 form, which SQLite cannot store.
+LONE_SURROGATE = re.compile('[\ud800-\udfff]')
 # A network client's id: <link>-<machine8>-<kind> (R1.3, R1.4, R5.1).
 CLIENT = re.compile(r'^(?P<link>[a-z0-9-]{1,63})-(?P<m8>[0-9a-f]{8})-(?P<kind>link|peer|visit)$')
 # The two stcp services a -peer client may offer, named <link>-<m8>-<service> (R5.1).
@@ -102,8 +105,9 @@ def db() -> sqlite3.Connection:
     return conn
 
 
-def init_db() -> None:
-    write('''CREATE TABLE IF NOT EXISTS bindings (
+# Every object of the schema, by the name sqlite_master knows it by.
+SCHEMA = {
+    'bindings': '''CREATE TABLE IF NOT EXISTS bindings (
             name TEXT PRIMARY KEY,
             key_hash TEXT NOT NULL,
             created_at INTEGER NOT NULL,
@@ -111,10 +115,10 @@ def init_db() -> None:
             last_seen INTEGER,
             banned_at INTEGER,
             ban_reason TEXT
-        )''', ())
-    write('CREATE TABLE IF NOT EXISTS creations (ip TEXT NOT NULL, at INTEGER NOT NULL)', ())
-    write('CREATE INDEX IF NOT EXISTS creations_at ON creations(at)', ())
-    write('''CREATE TABLE IF NOT EXISTS routes (
+        )''',
+    'creations': 'CREATE TABLE IF NOT EXISTS creations (ip TEXT NOT NULL, at INTEGER NOT NULL)',
+    'creations_at': 'CREATE INDEX IF NOT EXISTS creations_at ON creations(at)',
+    'routes': '''CREATE TABLE IF NOT EXISTS routes (
             name TEXT PRIMARY KEY,
             generation INTEGER NOT NULL,
             client TEXT NOT NULL,
@@ -122,26 +126,36 @@ def init_db() -> None:
             type TEXT NOT NULL CHECK (type IN ('http', 'https')),
             state TEXT NOT NULL CHECK (state IN ('pending', 'held', 'empty')),
             since INTEGER NOT NULL
-        )''', ())
-    write('''CREATE TABLE IF NOT EXISTS sync (
+        )''',
+    'sync': '''CREATE TABLE IF NOT EXISTS sync (
             name TEXT PRIMARY KEY,
             state TEXT NOT NULL CHECK (state IN ('on', 'off')),
             copy TEXT,
             epoch INTEGER NOT NULL,
             generation INTEGER NOT NULL,
             at INTEGER NOT NULL
-        )''', ())
-    write('''CREATE TABLE IF NOT EXISTS visitor_keys (
+        )''',
+    'visitor_keys': '''CREATE TABLE IF NOT EXISTS visitor_keys (
             name TEXT PRIMARY KEY,
             key_hash TEXT NOT NULL,
             created_at INTEGER NOT NULL
-        )''', ())
-    write('''CREATE TABLE IF NOT EXISTS ping_keys (
+        )''',
+    'ping_keys': '''CREATE TABLE IF NOT EXISTS ping_keys (
             name TEXT NOT NULL,
             key_hash TEXT NOT NULL,
             link_hash TEXT NOT NULL,
             PRIMARY KEY (name, key_hash)
-        )''', ())
+        )''',
+}
+
+
+def init_db() -> None:
+    """Make what is missing. A made database takes no write lock: an admin command that only reads must not wait for,
+    or fail behind, a long commit of the service."""
+    made = {row[0] for row in db().execute('SELECT name FROM sqlite_master')}
+    for name, statement in SCHEMA.items():
+        if name not in made:
+            write(statement, ())
 
 
 _reserved = {'mtime': None, 'names': frozenset()}
@@ -424,26 +438,43 @@ class WriteBusy(Exception):
     """A SQLite write could not get its turn within its budget: refuse the op, never guess."""
 
 
-# The most one write waits outside a plugin call; inside one, the call's time left may be less.
+# The most one write waits in the queue outside a plugin call; inside one, the call's time left may be less.
 WRITE_BUDGET_S = 0.8
 
 
 class WriteTicket:
     """A place in the writer's queue: a statement and, after its commit, its outcome. No statement: a transaction's."""
 
-    def __init__(self, sql: str | None = None, args: tuple = ()):
-        self.sql, self.args = sql, args
+    def __init__(self, deadline: float, sql: str | None = None, args: tuple = ()):
+        self.deadline, self.sql, self.args = deadline, sql, args
         self.claimed = False
         self.done = False
         self.changes = 0
         self.error: Exception | None = None
 
+    def time_left(self) -> float | None:
+        """The seconds its owner may still wait; None: until the outcome.
+
+        Queued, that is the write's budget, and the ticket can still leave without a trace. Claimed, its SQL may land, so
+        a refusal could be false, and every owner waits for the commit's outcome, a plugin call's too. What a stalled
+        disk costs a plugin call is therefore the stall, past its 1 s, and once: its next write refuses at
+        write_deadline before any SQL, and the calls queued behind the stalled commit still refuse at their own budgets.
+        Python cannot interrupt an fsync, so the thread running that commit could not leave it anyway.
+        """
+        return None if self.claimed else max(0.0, self.deadline - time.monotonic())
+
+    def refuse(self) -> None:
+        """Off the queue with its SQL never run, which is what makes the refusal true."""
+        self.claimed, self.done = True, True
+        self.error = WriteBusy('past its budget before its commit')
+
     def run(self, conn: sqlite3.Connection) -> None:
-        """A failure SQLite backed out alone is this statement's own, and the batch goes on. One that ended the
-        transaction ends the batch."""
+        """A failure that left the transaction open is this statement's own, and the batch goes on: SQLite backed it out
+        alone, or one client's value could not even be bound, as a lone surrogate or an int too large cannot. One that
+        ended the transaction ends the batch."""
         try:
             self.changes = conn.execute(self.sql, self.args).rowcount
-        except sqlite3.Error as failure:
+        except Exception as failure:
             if not conn.in_transaction:
                 raise
             self.error = failure
@@ -470,14 +501,14 @@ class WriterQueue:
         self.queue: collections.deque[WriteTicket] = collections.deque()
         self.taken = False
 
-    def wait_for_turn(self, ticket: WriteTicket, deadline: float) -> bool:
-        """Queue the ticket. True: this thread now holds the writer. False: another thread's commit carried it."""
+    def wait_for_turn(self, ticket: WriteTicket) -> bool:
+        """Queue the ticket. True: this thread now holds the writer. False: another thread's holder dealt with it."""
         with self.changed:
             self.queue.append(ticket)
             while not ticket.done:
-                left = self.time_left(ticket, deadline)
+                left = ticket.time_left()
                 if left == 0:
-                    self.give_up(ticket)
+                    self.leave(ticket)
                     raise WriteBusy('no outcome from the writer within the budget')
                 if not self.taken and self.queue[0] is ticket:
                     self.taken = True
@@ -485,34 +516,26 @@ class WriterQueue:
                 self.changed.wait(left)
             return False
 
-    @staticmethod
-    def time_left(ticket: WriteTicket, deadline: float) -> float | None:
-        """The seconds its owner may still wait; None: until the outcome.
-
-        Queued, that is the write's budget. In a commit under way, a plugin call has until its own end, and the API's
-        answer has to be true, so it waits for the outcome.
-        """
-        return call_deadline() if ticket.claimed else max(0.0, deadline - time.monotonic())
-
-    def give_up(self, ticket: WriteTicket) -> None:
-        """A queued ticket leaves and can never land. A claimed one may still land, which a plugin call's writes can
-        bear: last_seen, a route's state, and a pending row that frps never shows, which empties within PENDING_S."""
-        if not ticket.claimed:
-            self.leave(ticket)
-
     def leave(self, ticket: WriteTicket) -> None:
         with self.changed:
             self.queue.remove(ticket)
             self.changed.notify_all()
 
     def claim_statements(self) -> list[WriteTicket]:
-        """The holder's batch: the queue's head up to a transaction's place, so that a transaction keeps its turn."""
+        """The holder's batch: the queue's head up to a transaction's place, so that a transaction keeps its turn.
+
+        A ticket past its deadline is refused here, as its owner may not have woken yet, and a write its owner hears
+        refused must never land.
+        """
         with self.changed:
             batch = []
             while self.queue and self.queue[0].sql is not None:
                 ticket = self.queue.popleft()
-                ticket.claimed = True
-                batch.append(ticket)
+                if ticket.time_left() == 0:
+                    ticket.refuse()
+                else:
+                    ticket.claimed = True
+                    batch.append(ticket)
             return batch
 
     def hand_back(self, batch: list[WriteTicket]) -> None:
@@ -558,31 +581,45 @@ def begin_writing(conn: sqlite3.Connection, deadline: float) -> None:
 
 
 def roll_back(conn: sqlite3.Connection) -> None:
-    """End a transaction a failure left open; SQLite may have ended it already."""
+    """End a transaction a failure left open; SQLite may have ended it already. A connection that cannot end it is
+    closed, which does: kept, it would hold SQLite's write lock against every other thread until a restart."""
+    if not conn.in_transaction:
+        return
+    with contextlib.suppress(sqlite3.Error):
+        conn.execute('ROLLBACK')
     if conn.in_transaction:
-        try:
-            conn.execute('ROLLBACK')
-        except sqlite3.Error:
-            pass
+        with contextlib.suppress(sqlite3.Error):
+            conn.close()
+        _local.conn = None
+
+
+def fail_batch(conn: sqlite3.Connection, batch: list[WriteTicket], failure: Exception) -> None:
+    """None of the batch landed, so that is what every owner hears."""
+    roll_back(conn)
+    for ticket in batch:
+        ticket.error = failure
 
 
 def commit_batch(conn: sqlite3.Connection, batch: list[WriteTicket]) -> None:
-    """One transaction, so one fsync, for the whole batch. A failure lands none of it, so it reaches every owner."""
+    """One transaction, so one fsync, for the whole batch. A failure lands none of it, so it reaches every owner, and no
+    ticket goes back uncommitted with no error."""
     try:
         for ticket in batch:
             ticket.run(conn)
         conn.execute('COMMIT')
     except Exception as failure:
-        roll_back(conn)
-        for ticket in batch:
-            ticket.error = failure
+        fail_batch(conn, batch, failure)
+    except BaseException:
+        # What tears this thread down is its own. The other owners only need to know that nothing landed.
+        fail_batch(conn, batch, WriteBusy('the commit was interrupted'))
+        raise
 
 
-def write_the_queue(conn: sqlite3.Connection, ticket: WriteTicket, deadline: float) -> None:
+def write_the_queue(conn: sqlite3.Connection, ticket: WriteTicket) -> None:
     """This thread holds the writer. Refused by another process's lock, only its own budget is spent: the rest stay."""
     batch = []
     try:
-        begin_writing(conn, deadline)
+        begin_writing(conn, ticket.deadline)
         batch = writer.claim_statements()
         commit_batch(conn, batch)
     finally:
@@ -591,22 +628,30 @@ def write_the_queue(conn: sqlite3.Connection, ticket: WriteTicket, deadline: flo
         writer.hand_back(batch)
 
 
+def inside_transaction() -> bool:
+    """Whether this thread is in `with transaction()`. Not conn.in_transaction: a transaction opened any other way is one
+    nobody will commit, and a write inside it would answer with nothing on disk."""
+    return getattr(_local, 'inside_transaction', False)
+
+
 def write(sql: str, args: tuple) -> int:
-    """The one SQLite write of the plugin and the API: the rows it changed, on disk before it returns.
+    """The one SQLite write of the plugin and the API: the rows it changed, on disk before it returns. DDL and COMMIT
+    change none and return -1.
 
     It waits for its turn for the write's budget (WRITE_BUDGET_S, or the plugin call's time left, whichever is less);
-    past the budget it raises WriteBusy and a plugin call refuses with 'relay error: busy' (Review Focus 3). Inside this
-    thread's transaction it runs at once. A statement runs on the connection of whichever thread holds the writer, so
-    its owner reads the changed rows from here and not from SELECT changes().
+    past the budget it raises WriteBusy, a plugin call refuses with 'relay error: busy' (Review Focus 3), and the
+    statement can never land. Once in a commit it waits for the outcome. Inside this thread's `with transaction()` it
+    runs at once. A statement runs on the connection of whichever thread holds the writer, so its owner reads the
+    changed rows from here and not from SELECT changes().
     """
     conn = db()
     deadline = write_deadline()
     with locked_is_busy():
-        if conn.in_transaction:
+        if inside_transaction():
             return conn.execute(sql, args).rowcount
-        ticket = WriteTicket(sql, args)
-        if writer.wait_for_turn(ticket, deadline):
-            write_the_queue(conn, ticket, deadline)
+        ticket = WriteTicket(deadline, sql, args)
+        if writer.wait_for_turn(ticket):
+            write_the_queue(conn, ticket)
         return ticket.outcome()
 
 
@@ -655,7 +700,7 @@ def sync_of(name: str) -> dict:
 
 
 def sync_text(value: object) -> bool:
-    return isinstance(value, str) and 1 <= len(value) <= 100
+    return isinstance(value, str) and 1 <= len(value) <= 100 and not LONE_SURROGATE.search(value)
 
 
 def sync_integer(value: object) -> bool:
@@ -1073,18 +1118,19 @@ def transaction():
     (G1). Its statements run through write(). Any failure rolls back; a spent budget refuses instead of waiting.
     """
     conn = db()
-    deadline = write_deadline()
-    ticket = WriteTicket()
-    writer.wait_for_turn(ticket, deadline)
-    writer.leave(ticket)
+    ticket = WriteTicket(write_deadline())
+    writer.wait_for_turn(ticket)
     try:
-        begin_writing(conn, deadline)
+        writer.leave(ticket)
+        begin_writing(conn, ticket.deadline)
+        _local.inside_transaction = True
         yield
         write('COMMIT', ())
     except BaseException:
         roll_back(conn)
         raise
     finally:
+        _local.inside_transaction = False
         writer.hand_back([])
 
 
@@ -1276,16 +1322,22 @@ def authenticate_call(op: str, metas: dict) -> tuple[str | None, str | None, str
 
 
 def plugin_decide(op: str, content: dict) -> dict:
-    """Authenticate the session, then the op's own rule; a refusal rejects, else the call passes."""
+    """Authenticate the session, then the op's own rule; a refusal rejects, else the call passes and is marked seen.
+
+    A NewProxy is marked seen before its rule, so that its registration is the call's last write: a later one could
+    still refuse a registration already on disk.
+    """
     metas = call_metas(op, content)
     name, kind, reason = authenticate_call(op, metas)
     if reason is None and op == 'Login':
         reason = login_reason(name, kind, content, metas)
     elif reason is None and op == 'NewProxy':
+        touch(name)
         reason = offer_reason(name, kind, content, metas)
     if reason is not None:
         return {'reject': True, 'reject_reason': reason}
-    touch(name)
+    if op != 'NewProxy':
+        touch(name)
     return {'reject': False, 'unchange': True}
 
 
@@ -1622,9 +1674,19 @@ def admin(args) -> int:
     return 2
 
 
+def run_admin(args) -> int:
+    """`relay.py admin`: a store busy past a write's budget is one plain line and a failure, which stops hornhoof-relay
+    before its next step."""
+    try:
+        return admin(args)
+    except WriteBusy:
+        print('the relay store is busy, nothing changed, try again', file=sys.stderr)
+        return 1
+
+
 def main() -> int:
     if sys.argv[1:2] == ['admin']:
-        return admin(sys.argv[2:])
+        return run_admin(sys.argv[2:])
     init_db()
     threading.Thread(target=watch_frps, name='frps-watcher', daemon=True).start()
     server = ThreadingHTTPServer(LISTEN, Handler)
