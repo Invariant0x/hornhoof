@@ -918,3 +918,17 @@ describe('migration 0046', () => {
     expect((await db.execute(sql`select failure->>'kind' as kind, not_before > restarted_at as waits from jobs`)).rows).toEqual([{ kind: 'network', waits: true }]);
   });
 });
+
+describe('migration session_handover', () => {
+  it('marks the sessions of an older install as made before the __Host- cookie', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0052_dismissed_command_blocks') });
+    const company = (await db.execute<{ id: string }>(sql`insert into companies (name) values ('Acme') returning id`)).rows[0]!.id;
+    const person = (await db.execute<{ id: string }>(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Ivan', 'ivan@acme.example', 'active', 'company') returning id`)).rows[0]!.id;
+    await db.execute(sql`insert into sessions (token_hash, person_id, expires_at) values ('older', ${person}, now() + interval '1 day')`);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    expect((await db.execute(sql`select before_host_cookie from sessions`)).rows).toEqual([{ before_host_cookie: true }]);
+  });
+});

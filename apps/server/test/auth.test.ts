@@ -1,9 +1,11 @@
 import { eq } from 'drizzle-orm';
+import type { InjectOptions } from 'fastify';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { requireCompanyScope, type Person } from '../src/auth/session.js';
+import { hashToken } from '../src/crypto/tokens.js';
 import { runCli } from '../src/cli.js';
 import { people, sessions } from '../src/db/schema.js';
-import { invitePerson, SETUP, sessionFrom, setUpCompany, testApp } from './helpers.js';
+import { as, invitePerson, listen, openStream, statements, SETUP, sessionFrom, setUpCompany, testApp, TUNNEL, viaLink } from './helpers.js';
 
 /* Lets a test hold one sign-in after its password check, where a reset can slip in before the session starts. */
 const pause = vi.hoisted(() => ({ next: undefined as undefined | { checked: () => void; resume: Promise<void> } }));
@@ -167,16 +169,19 @@ describe('sessions', () => {
     const signIn = async (remoteAddress: string, headers: Record<string, string> = {}) => {
       const res = await app.inject({ ...login('ivan@acme.com', SETUP.password), remoteAddress, headers });
       expect(res.statusCode).toBe(200);
-      return Boolean(res.cookies.find(c => c.name === 'hh_session')!.secure);
+      const [cookie] = res.cookies;
+      return { name: cookie!.name, secure: Boolean(cookie!.secure) };
     };
-    expect(await signIn('192.0.2.10', { 'x-forwarded-proto': 'https' })).toBe(true);
-    expect(await signIn('::ffff:192.0.2.10', { 'x-forwarded-proto': 'https' })).toBe(true);
-    expect(await signIn('192.0.2.10', { 'x-forwarded-proto': 'http' })).toBe(false);
-    expect(await signIn('192.0.2.10')).toBe(false);
+    const link = { name: '__Host-hh_session', secure: true };
+    const local = { name: 'hh_session', secure: false };
+    expect(await signIn('192.0.2.10', { 'x-forwarded-proto': 'https' })).toEqual(link);
+    expect(await signIn('::ffff:192.0.2.10', { 'x-forwarded-proto': 'https' })).toEqual(link);
+    expect(await signIn('192.0.2.10', { 'x-forwarded-proto': 'http' })).toEqual(local);
+    expect(await signIn('192.0.2.10')).toEqual(local);
     /* Anyone else can write the header, so it is not believed from them, and plain http to localhost keeps working. */
-    expect(await signIn('192.0.2.11', { 'x-forwarded-proto': 'https' })).toBe(false);
-    expect(await signIn('127.0.0.1', { 'x-forwarded-proto': 'https' })).toBe(false);
-    expect(await signIn('127.0.0.1')).toBe(false);
+    expect(await signIn('192.0.2.11', { 'x-forwarded-proto': 'https' })).toEqual(local);
+    expect(await signIn('127.0.0.1', { 'x-forwarded-proto': 'https' })).toEqual(local);
+    expect(await signIn('127.0.0.1')).toEqual(local);
   });
 
   it('believe nobody about https while there is no tunnel', async () => {
@@ -221,7 +226,12 @@ describe('POST /api/auth/logout', () => {
     const token = await setUpCompany(app);
     const res = await app.inject({ method: 'POST', url: '/api/auth/logout', cookies: { hh_session: token } });
     expect(res.statusCode).toBe(204);
-    expect(res.cookies.find(c => c.name === 'hh_session')?.value).toBe('');
+    const cleared = res.cookies.find(c => c.name === 'hh_session')!;
+    expect(cleared.value).toBe('');
+    /* A plain-http address must still be able to sign out, so the clearing carries no Secure. */
+    expect(cleared).toMatchObject({ path: '/' });
+    expect(cleared.secure).toBeFalsy();
+    expect(cleared.expires!.getTime()).toBeLessThan(Date.now());
     expect(await db.select().from(sessions)).toEqual([]);
     expect((await app.inject(me(token))).statusCode).toBe(401);
   });
@@ -235,5 +245,263 @@ describe('requireCompanyScope', () => {
     const person = row as unknown as Person;
     expect(() => requireCompanyScope(person)).not.toThrow();
     expect(() => requireCompanyScope({ ...person, scopeKind: 'listed' })).toThrow(expect.objectContaining({ status: 403, code: 'forbidden' }));
+  });
+});
+
+describe('the session cookie over the link', () => {
+  const signInViaLink = async (app: Awaited<ReturnType<typeof testApp>>['app']) =>
+    sessionFrom(await app.inject({ ...login('ivan@acme.com', SETUP.password), ...viaLink() }));
+
+  it('names the session cookie __Host-hh_session over the link, https only, path / and no domain', async () => {
+    const { app } = await testApp({ TUNNEL_HOST: TUNNEL });
+    await setUpCompany(app);
+    const res = await app.inject({ ...login('ivan@acme.com', SETUP.password), ...viaLink() });
+    expect(res.statusCode).toBe(200);
+    expect(res.cookies).toHaveLength(1);
+    expect(res.cookies[0]).toMatchObject({ name: '__Host-hh_session', secure: true, path: '/', httpOnly: true, sameSite: 'Lax' });
+    expect(res.cookies[0]).not.toHaveProperty('domain');
+  });
+
+  it('reads only __Host-hh_session over the link and only hh_session elsewhere', async () => {
+    const { app } = await testApp({ TUNNEL_HOST: TUNNEL });
+    await setUpCompany(app);
+    const token = await signInViaLink(app);
+    const status = async (extra: InjectOptions) => (await app.inject({ url: '/api/me', ...extra })).statusCode;
+    expect(await status(viaLink(token))).toBe(200);
+    expect(await status({ ...viaLink(), cookies: { hh_session: token } })).toBe(401);
+    expect(await status({ remoteAddress: '127.0.0.1', ...as(token) })).toBe(200);
+    expect(await status({ remoteAddress: '127.0.0.1', cookies: { '__Host-hh_session': token } })).toBe(401);
+  });
+
+  it('signs out over the link', async () => {
+    const { app } = await testApp({ TUNNEL_HOST: TUNNEL });
+    await setUpCompany(app);
+    const token = await signInViaLink(app);
+    const res = await app.inject({ method: 'POST', url: '/api/auth/logout', ...viaLink(token) });
+    const header = [res.headers['set-cookie']].flat().find(h => String(h).startsWith('__Host-hh_session='));
+    expect(header).toMatch(/Secure/i);
+    expect(header).toMatch(/Path=\//);
+    expect(header).not.toMatch(/Domain/i);
+    expect(res.cookies.find(c => c.name === '__Host-hh_session')!.expires!.getTime()).toBeLessThan(Date.now());
+    expect((await app.inject({ url: '/api/me', ...viaLink(token) })).statusCode).toBe(401);
+  });
+
+  it("sets the link's cookie when an invite is accepted over the link", async () => {
+    const { app } = await testApp({ TUNNEL_HOST: TUNNEL });
+    const ceo = await setUpCompany(app);
+    const invited = await app.inject({ method: 'POST', url: '/api/people/invite', payload: { name: 'Maria', email: 'maria@acme.com', title: '', access: { whole: true } }, ...as(ceo) });
+    const token = new URL(invited.json().inviteUrl).pathname.split('/').pop();
+    const accepted = await app.inject({ method: 'POST', url: `/api/invites/${token}/accept`, payload: { password: SETUP.password }, ...viaLink() });
+    expect(accepted.statusCode).toBe(200);
+    expect(accepted.cookies[0]).toMatchObject({ name: '__Host-hh_session', secure: true });
+  });
+});
+
+describe('moving a session from before the switch to __Host-hh_session', () => {
+  /* A session of an older install: signed in on localhost, then marked as the migration marks older rows. */
+  async function olderSession(tunnelHost = TUNNEL, addRoutes: (app: Awaited<ReturnType<typeof testApp>>['app']) => void = () => {}) {
+    const made = await testApp({ TUNNEL_HOST: tunnelHost });
+    addRoutes(made.app);
+    const token = await setUpCompany(made.app);
+    await made.db.update(sessions).set({ beforeHostCookie: true }).where(eq(sessions.tokenHash, hashToken(token)));
+    return { ...made, token };
+  }
+  const withOldCookie = (token: string) => ({ ...viaLink(), cookies: { hh_session: token } });
+  const rowOf = async (db: Awaited<ReturnType<typeof testApp>>['db'], token: string) =>
+    (await db.select().from(sessions).where(eq(sessions.tokenHash, hashToken(token))))[0];
+
+  /* hh_session must be dropped the way a browser takes for a plain cookie it set itself: expired, path / and secure. */
+  const expectOldCookieCleared = (res: { cookies: { name: string; value: string; secure?: boolean; path?: string; domain?: string; expires?: Date }[] }) => {
+    const cleared = res.cookies.find(c => c.name === 'hh_session')!;
+    expect(cleared).toMatchObject({ value: '', secure: true, path: '/' });
+    expect(cleared).not.toHaveProperty('domain');
+    expect(cleared.expires!.getTime()).toBeLessThan(Date.now());
+  };
+  const DAY = 24 * 60 * 60 * 1000;
+
+  it('moves it once', async () => {
+    const { app, db, token } = await olderSession();
+    const res = await app.inject({ url: '/api/me', ...withOldCookie(token) });
+    expect(res.statusCode).toBe(200);
+    const fresh = res.cookies.find(c => c.name === '__Host-hh_session')!;
+    expect(fresh.value).not.toBe(token);
+    expect(fresh).toMatchObject({ secure: true, path: '/' });
+    expect(fresh).not.toHaveProperty('domain');
+    expectOldCookieCleared(res);
+    expect((await app.inject({ url: '/api/me', ...viaLink(fresh.value) })).statusCode).toBe(200);
+    const old = await rowOf(db, token);
+    expect(old!.expiresAt.getTime() - Date.now()).toBeLessThanOrEqual(60_000);
+    expect((await rowOf(db, fresh.value))!.beforeHostCookie).toBe(false);
+    await db.update(sessions).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(sessions.tokenHash, hashToken(token)));
+    expect((await app.inject({ url: '/api/me', ...withOldCookie(token) })).statusCode).toBe(401);
+  });
+
+  it('lets a burst with the old cookie through', async () => {
+    const { app, token } = await olderSession();
+    const burst = await Promise.all([1, 2, 3].map(() => app.inject({ url: '/api/me', ...withOldCookie(token) })));
+    expect(burst.map(r => r.statusCode)).toEqual([200, 200, 200]);
+  });
+
+  it('moves no session made after the switch, expired or of a disabled person', async () => {
+    const { app, db, token } = await olderSession();
+    const fresh = sessionFrom(await app.inject({ ...login('ivan@acme.com', SETUP.password), remoteAddress: '127.0.0.1' }));
+    const refused = async (t: string) => {
+      const res = await app.inject({ url: '/api/me', ...withOldCookie(t) });
+      expect(res.statusCode).toBe(401);
+      expect(res.cookies.find(c => c.name === '__Host-hh_session')).toBeUndefined();
+      expectOldCookieCleared(res);
+    };
+    await refused(fresh);
+    await db.update(sessions).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(sessions.tokenHash, hashToken(token)));
+    await refused(token);
+    await db.update(sessions).set({ expiresAt: new Date(Date.now() + 60_000) }).where(eq(sessions.tokenHash, hashToken(token)));
+    await db.update(people).set({ status: 'disabled' });
+    await refused(token);
+  });
+
+  it('leaves hh_session alone on localhost', async () => {
+    const { app, token } = await olderSession();
+    const res = await app.inject({ url: '/api/me', remoteAddress: '127.0.0.1', ...as(token) });
+    expect(res.statusCode).toBe(200);
+    expect(res.cookies).toHaveLength(0);
+  });
+
+  it('gives the new cookie the link attributes and the usual 30 days, and takes the old row to a minute at most', async () => {
+    const { app, db, token } = await olderSession();
+    const res = await app.inject({ url: '/api/me', ...withOldCookie(token) });
+    const fresh = res.cookies.find(c => c.name === '__Host-hh_session')!;
+    expect(fresh).toMatchObject({ httpOnly: true, sameSite: 'Lax' });
+    expect(Math.abs(fresh.expires!.getTime() - (Date.now() + 30 * DAY))).toBeLessThan(60_000);
+    expect(Math.abs((await rowOf(db, fresh.value))!.expiresAt.getTime() - (Date.now() + 30 * DAY))).toBeLessThan(60_000);
+    const left = (await rowOf(db, token))!.expiresAt.getTime() - Date.now();
+    expect(left).toBeGreaterThan(50_000);
+    expect(left).toBeLessThanOrEqual(60_000);
+  });
+
+  it('does not lengthen an old session that ends sooner than a minute', async () => {
+    const { app, db, token } = await olderSession();
+    await db.update(sessions).set({ expiresAt: new Date(Date.now() + 10_000) }).where(eq(sessions.tokenHash, hashToken(token)));
+    await app.inject({ url: '/api/me', ...withOldCookie(token) });
+    const left = (await rowOf(db, token))!.expiresAt.getTime() - Date.now();
+    expect(left).toBeGreaterThan(0);
+    expect(left).toBeLessThanOrEqual(10_000);
+  });
+
+  it("leaves another person's session alone", async () => {
+    const { app, db, token } = await olderSession();
+    const maria = await invitePerson(app, token, { name: 'Maria', email: 'maria@acme.com', access: { whole: true } });
+    await db.update(sessions).set({ beforeHostCookie: true }).where(eq(sessions.tokenHash, hashToken(maria)));
+    const before = await rowOf(db, maria);
+    await app.inject({ url: '/api/me', ...withOldCookie(token) });
+    expect(await rowOf(db, maria)).toEqual(before);
+  });
+
+  it('does nothing when the request already carries __Host-hh_session', async () => {
+    const { app, db, token } = await olderSession();
+    const current = sessionFrom(await app.inject({ ...login('ivan@acme.com', SETUP.password), ...viaLink() }));
+    const res = await app.inject({ url: '/api/me', ...viaLink(current), cookies: { hh_session: token, '__Host-hh_session': current } });
+    expect(res.statusCode).toBe(200);
+    expect(res.cookies).toHaveLength(0);
+    expect((await rowOf(db, token))!.expiresAt.getTime() - Date.now()).toBeGreaterThan(29 * DAY);
+  });
+
+  it('does nothing for a socket upgrade', async () => {
+    const { app, db, token } = await olderSession();
+    const res = await app.inject({ url: '/api/me', ...withOldCookie(token), headers: { ...viaLink().headers, upgrade: 'websocket' } });
+    expect(res.statusCode).toBe(401);
+    expect(res.cookies).toHaveLength(0);
+    expect((await rowOf(db, token))!.expiresAt.getTime() - Date.now()).toBeGreaterThan(29 * DAY);
+  });
+
+  it('delivers the new cookie on the event stream, which sends its own headers', async () => {
+    const { app, db, token } = await olderSession('127.0.0.1');
+    await listen(app);
+    const stream = await openStream(app, undefined, { cookie: `hh_session=${token}`, 'x-forwarded-proto': 'https' });
+    expect(stream.res.status).toBe(200);
+    const header = stream.res.headers.getSetCookie().find(h => h.startsWith('__Host-hh_session='));
+    expect(header).toMatch(/Secure/i);
+    expect(header).toMatch(/Path=\//);
+    const fresh = decodeURIComponent(header!.split(';')[0]!.split('=')[1]!);
+    expect((await rowOf(db, fresh))!.beforeHostCookie).toBe(false);
+    expect(stream.res.headers.getSetCookie().some(h => h.startsWith('hh_session=;'))).toBe(true);
+  });
+
+  it("holds the person's row, then the session's, before it makes the new session, in one transaction", async () => {
+    const { app, db, token } = await olderSession();
+    const client = (db as unknown as { $client: { transaction: (...a: unknown[]) => unknown } }).$client;
+    const transactions = vi.spyOn(client, 'transaction');
+    onTestFinished(() => transactions.mockRestore());
+    const seen = statements();
+    const res = await app.inject({ url: '/api/me', ...withOldCookie(token) });
+    expect(res.statusCode).toBe(200);
+    expect(transactions).toHaveBeenCalledTimes(1);
+    const at = (test: (s: { sql: string; params: unknown[] }) => boolean) => seen.findIndex(test);
+    const people = at(q => /^select .* from "people" where .* for share$/.test(q.sql));
+    const session = at(q => /^select .* from "sessions" where .* for update$/.test(q.sql));
+    const insert = at(q => q.sql.startsWith('insert into "sessions"'));
+    expect(people).toBeGreaterThanOrEqual(0);
+    expect(people).toBeLessThan(session);
+    expect(session).toBeLessThan(insert);
+  });
+
+  it('only clears hh_session when the token is unknown, and makes no session', async () => {
+    const { app, db } = await olderSession();
+    const before = await db.select().from(sessions);
+    const res = await app.inject({ url: '/api/me', ...withOldCookie('no-such-token') });
+    expect(res.statusCode).toBe(401);
+    expect(res.cookies.map(c => c.name)).toEqual(['hh_session']);
+    expect(await db.select().from(sessions)).toEqual(before);
+  });
+
+  it('delivers the cookies of a route that hijacks the reply and sends only a status', async () => {
+    const { app, token } = await olderSession(TUNNEL, app =>
+      app.get('/hijacked', (_req, reply) => {
+        reply.hijack();
+        reply.raw.writeHead(200);
+        reply.raw.end('x');
+      }),
+    );
+    const res = await app.inject({ url: '/hijacked', ...withOldCookie(token) });
+    expect(res.statusCode).toBe(200);
+    expect(res.cookies.map(c => c.name).sort()).toEqual(['__Host-hh_session', 'hh_session']);
+  });
+
+  describe('a request that decides the session cookie itself', () => {
+    const linkCookies = (res: { cookies: { name: string; value: string }[] }) => res.cookies.filter(c => c.name === '__Host-hh_session');
+    const rowsOf = (db: Awaited<ReturnType<typeof testApp>>['db'], personId: string) => db.select().from(sessions).where(eq(sessions.personId, personId));
+
+    it('signs in with one __Host-hh_session and no session made for the older cookie', async () => {
+      const { app, db, token } = await olderSession();
+      const res = await app.inject({ ...login('ivan@acme.com', SETUP.password), ...withOldCookie(token) });
+      expect(res.statusCode).toBe(200);
+      expect(linkCookies(res)).toHaveLength(1);
+      const mine = (await rowOf(db, linkCookies(res)[0]!.value))!;
+      expect(await rowsOf(db, mine.personId)).toHaveLength(2);
+      expect((await rowOf(db, token))!.expiresAt.getTime() - Date.now()).toBeLessThanOrEqual(60_000);
+    });
+
+    it("accepts an invite with one __Host-hh_session, Maria's, and none made for the person of the older cookie", async () => {
+      const { app, db, token } = await olderSession();
+      const invited = await app.inject({ method: 'POST', url: '/api/people/invite', payload: { name: 'Maria', email: 'maria@acme.com', title: '', access: { whole: true } }, ...as(token) });
+      const invite = new URL(invited.json().inviteUrl).pathname.split('/').pop();
+      const res = await app.inject({ method: 'POST', url: `/api/invites/${invite}/accept`, payload: { password: SETUP.password }, ...withOldCookie(token) });
+      expect(res.statusCode).toBe(200);
+      expect(linkCookies(res)).toHaveLength(1);
+      const maria = (await rowOf(db, linkCookies(res)[0]!.value))!;
+      expect(maria.personId).toBe(res.json().person.id);
+      const ivan = (await db.select().from(sessions)).filter(r => r.personId !== maria.personId);
+      expect(ivan).toHaveLength(1);
+      expect(ivan[0]!.tokenHash).toBe(hashToken(token));
+    });
+
+    it('signs out with one expired __Host-hh_session and leaves no session of the person', async () => {
+      const { app, db, token } = await olderSession();
+      const res = await app.inject({ method: 'POST', url: '/api/auth/logout', ...withOldCookie(token) });
+      expect(res.statusCode).toBe(204);
+      expect(linkCookies(res)).toHaveLength(1);
+      expect(linkCookies(res)[0]).toMatchObject({ value: '' });
+      expect(await db.select().from(sessions)).toEqual([]);
+      expect((await app.inject({ url: '/api/me', ...withOldCookie(token) })).statusCode).toBe(401);
+    });
   });
 });

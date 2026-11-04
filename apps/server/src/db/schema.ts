@@ -49,6 +49,8 @@ export const sessions = pgTable(
     personId: uuid('person_id').notNull().references(() => people.id),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     createdAt: createdAt(),
+    /* True only on rows made before the __Host- cookie existed: the migration's default marks them, startSession never does. */
+    beforeHostCookie: boolean('before_host_cookie').notNull().default(true),
   },
   t => [index('sessions_person_id').on(t.personId)],
 );

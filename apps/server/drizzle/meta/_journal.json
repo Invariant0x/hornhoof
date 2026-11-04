@@ -365,6 +365,13 @@
       "when": 1793739121203,
       "tag": "0052_dismissed_command_blocks",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1793807004545,
+      "tag": "0053_session_handover",
+      "breakpoints": true
     }
   ]
 }
