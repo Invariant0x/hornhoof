@@ -350,8 +350,8 @@ describe('GET /api/subscriptions', () => {
     await db.insert(jobs).values({ companyId: development.companyId, subscriptionId: sub.id, agentId: vera.id, taskId: task!.id, prompt: 'review', status: 'done', timeoutMs: 1000, startedAt: since, finishedAt: new Date('2026-11-01T10:05:00Z'), answersCeo: true });
     const shown = (await list(app, ceo)).find((s: { id: string }) => s.id === sub.id);
     expect(shown.agents).toEqual([
-      { id: bruno.id, name: 'Bruno', busy: true, title: { en: 'Backend engineer', ru: 'Бэкенд-разработчик' }, department: { id: development.id, name: 'Development' }, provider: 'claude', since: since.toISOString(), task: { number: 12, title: 'Checkout API' }, withCeo: true },
-      { id: vera.id, name: 'Vera', busy: false, title: { en: 'Backend engineer', ru: 'Бэкенд-разработчик' }, department: { id: marketing.id, name: 'Marketing' }, provider: 'claude', since: null, task: null, withCeo: false },
+      { id: bruno.id, canOpen: true, name: 'Bruno', busy: true, title: { en: 'Backend engineer', ru: 'Бэкенд-разработчик' }, department: { id: development.id, name: 'Development' }, provider: 'claude', since: since.toISOString(), task: { number: 12, title: 'Checkout API' }, withCeo: true },
+      { id: vera.id, canOpen: true, name: 'Vera', busy: false, title: { en: 'Backend engineer', ru: 'Бэкенд-разработчик' }, department: { id: marketing.id, name: 'Marketing' }, provider: 'claude', since: null, task: null, withCeo: false },
     ]);
     expect((await list(app, maria))[0].agents[0].task).toBeNull();
     const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
