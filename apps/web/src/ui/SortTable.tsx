@@ -14,6 +14,8 @@ type Props<T> = {
   search?: TableSearch<T>;
   filters?: FilterGroup<T>[];
   openIds?: readonly string[];
+  selectedId?: string | null;
+  onSelect?: (id: string | null) => void;
 };
 type SortControls<T> = { columns: TableColumn<T>[]; sort: Sort; choose: (column: TableColumn<T>) => void };
 
@@ -64,7 +66,7 @@ function useAutoOpen<T extends { id: string }>(openIds: readonly string[] | unde
   }, [openIds, rows, setOpen]);
 }
 
-export function SortTable<T extends { id: string }>({ rows, columns, name, initialSort, card, search, filters = [], openIds }: Props<T>) {
+export function SortTable<T extends { id: string }>({ rows, columns, name, initialSort, card, search, filters = [], openIds, selectedId, onSelect }: Props<T>) {
   const t = useT();
   const { language } = useLanguage();
   const [query, setQuery] = useState('');
@@ -72,6 +74,18 @@ export function SortTable<T extends { id: string }>({ rows, columns, name, initi
   const [sort, setSort] = useState(initialSort);
   const [open, setOpen] = useState<Set<string>>(() => new Set());
   const [order, setOrder] = useState<string[]>([]);
+  const routed = useRef<string | null>(null);
+  useEffect(() => {
+    if (selectedId === undefined) return;
+    const previous = routed.current;
+    routed.current = selectedId;
+    setOpen(open => {
+      const next = new Set(open);
+      if (previous) next.delete(previous);
+      if (selectedId) next.add(selectedId);
+      return next;
+    });
+  }, [selectedId]);
   const column = columns.find(c => c.key === sort.key) ?? columns[0]!;
   const sorted = sortRows(rows, column, sort.direction, name, language);
   const held = rows.some(r => open.has(r.id));
@@ -95,6 +109,7 @@ export function SortTable<T extends { id: string }>({ rows, columns, name, initi
   }
 
   function toggle(id: string) {
+    onSelect?.(open.has(id) ? null : id);
     setOrder(ordered.map(r => r.id));
     setOpen(previous => {
       const next = new Set(previous);

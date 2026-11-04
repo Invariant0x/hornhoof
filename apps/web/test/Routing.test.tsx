@@ -1,0 +1,153 @@
+import { act, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { describe, expect, it } from 'vitest';
+import { App } from '../src/App';
+import { Shell } from '../src/screens/Shell';
+import { CARD, DEV_ORG, MACHINES, ME, mockApi, PEOPLE, signedOut, SUBS, TASK_DETAIL, TASKS } from './api-mock';
+
+function fixture(extra: Parameters<typeof mockApi>[0] = {}) {
+  return mockApi({
+    'GET /api/setup': [200, { needed: false }], 'GET /api/me': [200, ME],
+    'GET /api/org': [200, DEV_ORG], 'GET /api/people': [200, { people: PEOPLE }],
+    'GET /api/subscriptions': [200, { subscriptions: SUBS }], 'GET /api/machines': [200, { machines: MACHINES }],
+    'GET /api/tasks?status=all': [200, { tasks: TASKS }], 'GET /api/turns': [200, { turns: [] }],
+    'GET /api/requests': [200, { requests: [], proposals: [], computerAccess: null, counts: { byPerson: {}, byAgent: {}, total: 0 } }],
+    'GET /api/tasks/t12': [200, { task: TASK_DETAIL }],
+    'GET /api/link': [200, { link: null, domain: 'example.test' }],
+    'GET /api/nodes/commands': [200, { commands: [] }],
+    'GET /api/improvements': [200, { improvements: [] }],
+    'GET /api/updates': [200, { current: { version: '0.6.1', commit: 'routes', migrations: 57 }, latest: null, available: false, versions: [], error: null, checkedAt: null, updater: { present: false, status: null, waiting: null } }],
+    ...extra,
+  });
+}
+const tab = (name: string) => within(screen.getByRole('navigation')).getByRole('button', { name });
+
+describe('shareable workspace', () => {
+  it('changes the address for every main tab', async () => {
+    fixture();
+    render(<Shell me={ME} onSignOut={() => {}} />);
+    const user = userEvent.setup();
+    for (const [name, path] of [['Tasks', '/tasks'], ['People', '/people'], ['Subscriptions', '/subscriptions'], ['Machines', '/machines'], ['Map', '/']]) {
+      await user.click(tab(name!));
+      expect(location.pathname).toBe(path);
+    }
+  });
+
+  it.each([
+    ['/tasks/t12', 'complementary', '#12 Checkout API'],
+    ['/people/p2', 'heading', 'Edit Maria'],
+    ['/machines/m1', 'article', 'ivan-mbp'],
+    ['/departments/d2', 'heading', 'Development'],
+    ['/profile', 'dialog', 'Settings'],
+    ['/about', 'dialog', 'About Hornhoof'],
+    ['/settings', 'dialog', 'Share access'],
+  ])('opens %s directly', async (path, role, name) => {
+    fixture();
+    history.replaceState(null, '', path!);
+    render(<App />);
+    expect(await screen.findByRole(role!, { name })).toBeInTheDocument();
+    expect(location.pathname).toBe(path);
+  });
+
+  it('follows popstate without remounting the shell', async () => {
+    fixture();
+    render(<Shell me={ME} onSignOut={() => {}} />);
+    await act(async () => {
+      history.replaceState(null, '', '/people');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    expect(await screen.findByRole('heading', { name: 'People' })).toBeInTheDocument();
+    expect(tab('People')).toHaveAttribute('aria-current', 'page');
+  });
+
+  it('retains the local deep link after login and ignores an external return parameter', async () => {
+    let signedIn = false;
+    fixture({ 'GET /api/me': () => signedIn ? [200, ME] : [401, signedOut], 'POST /api/auth/login': () => { signedIn = true; return [200, { person: ME.person }]; } });
+    history.replaceState(null, '', '/tasks/t12?next=https://outside.example');
+    render(<App />);
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText('Email'), 'ivan@acme.com');
+    await user.type(screen.getByLabelText('Password'), 'correct horse battery');
+    await user.click(screen.getByRole('button', { name: 'Log in' }));
+    expect(await screen.findByRole('complementary', { name: '#12 Checkout API' })).toBeInTheDocument();
+    expect(location.pathname).toBe('/tasks/t12');
+    expect(location.host).toBe('localhost:3000');
+  });
+
+  it.each(['/missing', '/departments/foreign', '/people/foreign', '/machines/foreign', '/tasks/foreign'])('shows an unavailable page for %s', async path => {
+    fixture({ 'GET /api/tasks/foreign': [403, { error: { code: 'forbidden' } }] });
+    history.replaceState(null, '', path);
+    render(<App />);
+    expect(await screen.findByRole('heading', { name: 'Not found or no access' })).toBeInTheDocument();
+    expect(screen.queryByText('Foreign secret')).not.toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Go to the map' }));
+    await waitFor(() => expect(location.pathname).toBe('/'));
+  });
+
+  it('opens a person card without giving a restricted viewer editing controls', async () => {
+    const me = { ...ME, person: { ...ME.person, isOwner: false, scopeKind: 'listed' as const } };
+    fixture({ 'GET /api/me': [200, me] });
+    history.replaceState(null, '', '/people/p2');
+    render(<App />);
+    await screen.findByRole('heading', { name: 'People' });
+    await waitFor(() => expect(screen.queryByRole('textbox')).not.toBeInTheDocument());
+    expect(await screen.findByRole('heading', { name: 'Maria' })).toBeInTheDocument();
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
+  });
+
+  it('shares the selected person and machine and clears their addresses when closed', async () => {
+    fixture();
+    const user = userEvent.setup();
+    render(<Shell me={ME} onSignOut={() => {}} />);
+    await user.click(tab('People'));
+    await user.click(await screen.findByRole('button', { name: 'Edit Maria' }));
+    expect(location.pathname).toBe('/people/p2');
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(location.pathname).toBe('/people');
+    await user.click(tab('Machines'));
+    await user.click(await screen.findByRole('button', { name: 'Open the card of ivan-mbp' }));
+    expect(location.pathname).toBe('/machines/m1');
+    await user.click(screen.getByRole('button', { name: 'Open the card of ivan-mbp' }));
+    expect(location.pathname).toBe('/machines');
+  });
+
+  it('minimizes the current agent when history opens a task, keeping its window mounted', async () => {
+    fixture({
+      'GET /api/agents/orchestrator': [200, { ...CARD, id: 'a1', kind: 'orchestrator', name: 'Orchestrator', role: null, department: null }],
+      'GET /api/agents/orchestrator/events?after=0': [200, { events: [], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 } }],
+      'POST /api/agents/orchestrator/start': [200, { started: false }],
+    });
+    render(<Shell me={ME} welcome onSignOut={() => {}} />);
+    const window = await screen.findByRole('complementary', { name: 'Orchestrator' });
+    await act(async () => {
+      history.replaceState(null, '', '/tasks/t12');
+      globalThis.window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    await screen.findByRole('complementary', { name: '#12 Checkout API' });
+    expect(window).toBeInTheDocument();
+    expect(window).not.toBeVisible();
+    expect(screen.getByRole('button', { name: 'Restore Orchestrator' })).toBeVisible();
+  });
+
+  it.each(['settings', 'versions', 'improvements'])('blocks a restricted viewer from %s without showing the map behind it', async kind => {
+    fixture();
+    history.replaceState(null, '', `/${kind}`);
+    render(<Shell me={{ ...ME, person: { ...ME.person, scopeKind: 'listed', isOwner: false } }} onSignOut={() => {}} />);
+    expect(await screen.findByRole('heading', { name: 'Not found or no access' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Open the orchestrator/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['/', '/api/org'], ['/tasks', '/api/tasks?status=all'], ['/subscriptions', '/api/subscriptions'],
+    ['/people', '/api/people'], ['/machines', '/api/machines'], ['/improvements', '/api/improvements'],
+    ['/versions', '/api/updates'], ['/settings', '/api/link'],
+  ])('offers the map when %s is denied by its API', async (path, api) => {
+    fixture({ [`GET ${api}`]: [403, { error: { code: 'forbidden' } }] });
+    history.replaceState(null, '', path!);
+    render(<App />);
+    expect(await screen.findByRole('heading', { name: 'Not found or no access' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Go to the map' })).toBeInTheDocument();
+  });
+});

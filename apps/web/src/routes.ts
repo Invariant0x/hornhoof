@@ -15,20 +15,18 @@ const PATHS = {
 const validId = (id: string): boolean => /^[A-Za-z0-9_-]+$/.test(id);
 const unavailable = (): Route => ({ kind: 'unavailable' });
 
+function cardRoute(kind: 'tasks' | 'people' | 'machines', id: string | undefined, query: string): Route {
+  if (id) return { kind, id };
+  if (kind !== 'tasks') return { kind };
+  const personId = new URLSearchParams(query).get('person');
+  return personId && validId(personId) ? { kind, personId } : { kind };
+}
+
 function fromParts(kind: Route['kind'], id: string | undefined, query: string): Route {
-  if (id !== undefined && !validId(id)) return unavailable();
-  switch (kind) {
-    case 'invite': return id ? { kind, token: id } : unavailable();
-    case 'department': return id ? { kind, id } : unavailable();
-    case 'people':
-    case 'machines': return id ? { kind, id } : { kind };
-    case 'tasks': {
-      if (id) return { kind, id };
-      const personId = new URLSearchParams(query).get('person');
-      return personId && validId(personId) ? { kind, personId } : { kind };
-    }
-    default: return id === undefined ? { kind } : unavailable();
-  }
+  if (kind === 'invite') return id ? { kind, token: id } : unavailable();
+  if (kind === 'department') return id ? { kind, id } : unavailable();
+  if (kind === 'people' || kind === 'machines' || kind === 'tasks') return cardRoute(kind, id, query);
+  return id === undefined ? { kind } : unavailable();
 }
 
 export function parseRoute(path: string): Route {
@@ -37,6 +35,7 @@ export function parseRoute(path: string): Route {
     const [pathname = '', query = ''] = path.split(/[?#]/);
     const parts = pathname.replace(/\/$/, '').slice(1).split('/').map(decodeURIComponent);
     if (parts.length > 2) return unavailable();
+    if (parts[1] !== undefined && !validId(parts[1])) return unavailable();
     const kind = (Object.keys(PATHS) as Route['kind'][]).find(key => PATHS[key] === parts[0]);
     return kind ? fromParts(kind, parts[1], query) : unavailable();
   } catch {

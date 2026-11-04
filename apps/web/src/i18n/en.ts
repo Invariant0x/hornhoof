@@ -14,6 +14,11 @@ export function summary(counts: StatusCounts, words: Record<EmployeeStatus, stri
 /* English is the source. Every other language has to match this shape. */
 
 export const en = {
+  routes: {
+    unavailable: 'Not found or no access',
+    explanation: 'This page may have moved, or you may not have access to it.',
+    home: 'Go to the map',
+  },
   notificationSources: { ...NOTIFICATION_NAMES } as Record<keyof typeof NOTIFICATION_NAMES, string>,
   common: {
     loading: 'Loading…',

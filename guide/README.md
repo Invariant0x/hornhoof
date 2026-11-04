@@ -2,6 +2,8 @@
 
 How Hornhoof works, in detail, one topic per page. The [README](../README.md) has the short install. Come here when you want to know more.
 
+Each workspace screen has its own address. Copy the address to share a department, task, person or machine card. The link opens the same place after login, if the other person has access. Back and Forward move between screens, and reloading keeps the current place. Agent windows stay open or minimized while you navigate; reloading starts them anew.
+
 - [Install and run the server](install.md): what the install line does, several companies on one computer, running from source, your own domain, and a forgotten password.
 - [The link on the internet](public-link.md): how people open your company from anywhere, and who can reach it.
 - [Machines and plans](machines-and-plans.md): how to connect your AI plans and computers, how agents are kept apart, and what happens when a plan hits its limit.
