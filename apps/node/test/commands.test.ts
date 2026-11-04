@@ -243,6 +243,15 @@ describe("a plan whose program asks for a first setup on its machine", () => {
     passed();
     expect(await run(['login'])).toMatchObject({ code: 0, out: 'Logged in.\n' });
   });
+
+  /* As the node does not hold a plan for a setup it cannot see, while the sign-in says why it cannot finish it. */
+  it('says ready when the node cannot look at agy, and the sign-in says why its first setup did not finish', async () => {
+    writeFileSync(join(data, 'home', '.hh-setup-check'), '');
+    expect(await run(['status'])).toMatchObject({ code: 0, out: 'ready\n' });
+    const res = await run(['login']);
+    expect(res.code).toBe(1);
+    expect(res.err).toMatch(/^The first setup of Antigravity CLI did not finish: EEXIST: file already exists, mkdir '.+\.hh-setup-check'\n$/);
+  });
 });
 
 describe('run --builtin', () => {

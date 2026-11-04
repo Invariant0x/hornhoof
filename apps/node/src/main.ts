@@ -640,18 +640,20 @@ async function status(dir: string, io: Io): Promise<number> {
   return 0;
 }
 
-/* A plan's program is ready once signed in and past a first setup only its owner passes on the machine. */
+/* A plan's program is ready once signed in and past a first setup only its owner passes on the machine. A setup the node
+   cannot look at does not hold the plan, as in the node's own hello. */
 async function planWord(dir: string, provider: ProviderId): Promise<string> {
   const adapter = personal(dir, provider, agentUser());
   if (!(await adapter.loggedIn())) return 'needs_login';
-  return (await adapter.setupNeeded?.()) ? 'needs_setup' : 'ready';
+  return (await adapter.setupNeeded?.().catch(() => false)) ? 'needs_setup' : 'ready';
 }
 
 /* The first setup its owner passes on the machine after the sign-in, such as accepting agy's terms; an exit code when it
    did not finish. */
 async function firstSetup(adapter: ProviderAdapter, name: string, io: Io, urlFile: string): Promise<number | null> {
-  if (!adapter.setup || !(await adapter.setupNeeded?.())) return null;
+  if (!adapter.setup) return null;
   try {
+    if (!(await adapter.setupNeeded?.())) return null;
     await adapter.setup({ input: io.stdin, output: io.stdout, urlFile });
     return null;
   } catch (err) {
