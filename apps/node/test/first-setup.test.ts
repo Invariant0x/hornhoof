@@ -30,7 +30,7 @@ async function node(adapter: ProviderAdapter) {
   });
   const dir = mkdtempSync(join(tmpdir(), 'hh-setup-'));
   writeState(dir, { server: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, subscriptionId: 's1', provider: 'antigravity', key: 'node-key-1234567890' });
-  const running = await runNode({ dir, adapter, log: () => {}, loginCheckMs: 30 });
+  const running = await runNode({ dir, adapter, log: () => {}, loginCheckMs: 30, setupCheckMs: 30 });
   onTestFinished(() => running.stop());
   const wait = async (check: () => boolean, ms = 3000) => {
     for (const end = Date.now() + ms; !check() && Date.now() < end; ) await new Promise(r => setTimeout(r, 10));

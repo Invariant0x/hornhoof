@@ -2,16 +2,16 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { COLORS_NOT_TAKEN, COLORS_WAIT_MS, colorsNotTaken, pastColors, SETUP_PASSED, SIGNED_OUT } from '../src/providers/antigravity.js';
+import { COLORS_NOT_TAKEN, COLORS_WAIT_MS, colorsNotTaken, pastColors, SIGNED_OUT } from '../src/providers/antigravity.js';
 import { agyProgram } from '../src/terminal/programs.js';
 import { hasTmux, home, host, job, setUp, tmux, until } from './terminal-host-helpers.js';
 
 const FAKE = fileURLToPath(new URL('./fakes/fake-agy-term.mjs', import.meta.url));
 const logOf = (key: string) => join(home, `agy-setup-${key}.log`);
-/* agy as on a machine where nobody passed its first-run setup, which it shows until its settings hold what the node reads
-   as passed. */
+const passedOf = (key: string) => join(home, `agy-setup-${key}.passed`);
+/* agy as on a machine where nobody passed its first-run setup, which it shows until a person passed it. */
 const agyJob = (key: string, env: Record<string, string> = {}) => ({
-  ...job(key, 'hello', { env: { FAKE_LOG: logOf(key), FAKE_AGY_SETUP: JSON.stringify(SETUP_PASSED), ...env } }), program: agyProgram, bin: FAKE, home: join(home, 'agy', key), signedOut: SIGNED_OUT,
+  ...job(key, 'hello', { env: { FAKE_LOG: logOf(key), FAKE_AGY_SETUP: passedOf(key), ...env } }), program: agyProgram, bin: FAKE, home: join(home, 'agy', key), signedOut: SIGNED_OUT,
 });
 const keys = (key: string) => readFileSync(logOf(key), 'utf8').trim().split('\n').map(line => JSON.parse(line)).filter(r => r.setup);
 
@@ -49,12 +49,11 @@ describe.skipIf(!hasTmux)("Antigravity's first-run setup", () => {
     await new Promise(resolve => setTimeout(resolve, 1500));
     expect(keys('s1')).toEqual([{ setup: 'colors', key: 'enter' }]);
 
-    // The owner accepts the terms on agy's own screen, and agy keeps that in the home the node gives it.
+    // The owner accepts the terms on agy's own screen. As agy 1.4.12 did, its settings then hold {} and say nothing of it.
     const pid = await tmux.programPid('a-s1');
     for (const key of ['Down', 'Down', 'Enter']) await tmux.keys('a-s1', key);
-    const settings = join(first.home, '.gemini', 'antigravity-cli', 'settings.json');
-    await until(() => existsSync(settings));
-    expect(JSON.parse(readFileSync(settings, 'utf8'))).toEqual(SETUP_PASSED);
+    await until(() => existsSync(passedOf('s1')));
+    expect(readFileSync(join(first.home, '.gemini', 'antigravity-cli', 'settings.json'), 'utf8')).toBe('{}\n');
 
     // The next turn starts agy anew, which goes straight to its prompt.
     expect(await host.run(agyJob('s1'))).toMatchObject({ ok: true, result: 'FINISHED', error: null });

@@ -8,7 +8,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { firstRun } from './fake-agy-setup.mjs';
 
-const URL =
+const LINK =
   'https://accounts.google.com/o/oauth2/auth?access_type=offline&client_id=1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com' +
   '&code_challenge=FAKE-challenge&code_challenge_method=S256&prompt=consent&redirect_uri=https%3A%2F%2Fantigravity.google%2Foauth-callback' +
   '&response_type=code&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcloud-platform+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email' +
@@ -44,7 +44,7 @@ function signIn() {
     for (const key of chunk.toString()) {
       if (screen === 'methods' && key === '\r') {
         screen = 'code';
-        show(` Your browser should open automatically. If not:\n ${URL}\n\n If you aren't automatically redirected, paste the authorization code below:\n authorization code...\n\n  shift+up/down Navigate\n`);
+        show(` Your browser should open automatically. If not:\n ${LINK}\n\n If you aren't automatically redirected, paste the authorization code below:\n authorization code...\n\n  shift+up/down Navigate\n`);
       } else if (screen === 'code' && key === '\r') {
         screen = 'done';
         if (code === 'good-code') {
