@@ -1,7 +1,7 @@
 import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
 import { openAgentSql } from './db/agent-sql.js';
-import { createDb } from './db/client.js';
+import { APP_NAME, openDb } from './db/client.js';
 import { publicUrl } from './modules/link/link.js';
 import { setupLink } from './modules/setup/code.js';
 
@@ -12,7 +12,7 @@ function requireDbUrl(url: string | undefined): string {
 
 const config = loadConfig(process.env);
 const url = requireDbUrl(config.databaseUrl);
-const db = await createDb(url);
+const db = openDb(url, APP_NAME);
 const app = await buildApp({
   db,
   agentSql: await openAgentSql(url),
