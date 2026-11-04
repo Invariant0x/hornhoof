@@ -117,6 +117,8 @@ describe('install.sh a server serves', () => {
     expect(r.code).toBe(1);
     expect(r.out).toContain(`Could not download ${BY_TAG}`);
     expect(r.out).toContain(NOT_PUBLISHED);
+    /* An image that never comes, or a machine that cannot reach the registry, still has a way out. */
+    expect(r.out).toContain('set HORNHOOF_NODE_IMAGE');
     /* The command's code stays good, so the same command works once the image is out. */
     expect(r.calls.some(c => c.includes('/api/nodes/join'))).toBe(false);
     expect(r.calls.some(c => /^docker (run|rm|stop)/.test(c))).toBe(false);

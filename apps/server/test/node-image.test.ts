@@ -88,10 +88,26 @@ describe('the node image of a build', () => {
     expect(settled).toEqual([BY_TAG, BY_TAG]);
     expect(asked).toHaveBeenCalledTimes(1);
 
+    /* One who comes after the wait does not wait again, however long the registry takes. */
+    expect(await image()).toBe(BY_TAG);
+    expect(asked).toHaveBeenCalledTimes(1);
+
     /* Its late answer still counts: the next machine gets the digest without asking again. */
     answer(DIGEST);
     expect(await image()).toBe(BY_DIGEST);
     expect(asked).toHaveBeenCalledTimes(1);
+  });
+
+  it('makes one who comes during the wait wait only for what is left of it', async () => {
+    const { image } = lookup(() => new Promise(() => {}));
+    const settled: string[] = [];
+    void image().then(got => settled.push(`first ${got}`));
+    await vi.advanceTimersByTimeAsync(3_000);
+    void image().then(got => settled.push(`second ${got}`));
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(settled).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(settled).toEqual([`first ${BY_TAG}`, `second ${BY_TAG}`]);
   });
 
   it('does not wait at all once it knows the digest or must not ask yet', async () => {

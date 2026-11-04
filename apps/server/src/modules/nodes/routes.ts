@@ -266,9 +266,10 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/install.sh', async (_req, reply) => {
     const script = await readFile(config.installScript, 'utf8');
     const server = await publicUrl(db, config);
+    const image = await nodeImage();
     return reply
       .type('text/plain; charset=utf-8')
       .header('cache-control', 'no-cache')
-      .send(script.replaceAll('__HORNHOOF_SERVER__', server).replaceAll('__HORNHOOF_NODE_IMAGE__', await nodeImage()));
+      .send(script.replaceAll('__HORNHOOF_SERVER__', server).replaceAll('__HORNHOOF_NODE_IMAGE__', image));
   });
 }

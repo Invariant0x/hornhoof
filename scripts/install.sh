@@ -29,9 +29,10 @@ TTY="${HORNHOOF_TTY:-/dev/tty}"
 STATE_DIR="${HORNHOOF_HOME:-$HOME/.hornhoof}"
 BUILD_IMAGE="__HORNHOOF_NODE_IMAGE__"
 case "$BUILD_IMAGE" in
-  __HORNHOOF_* | local) IMAGE="${HORNHOOF_NODE_IMAGE:-ghcr.io/invariant0x/hornhoof-node:latest}" ;;
-  *) IMAGE="${HORNHOOF_NODE_IMAGE:-$BUILD_IMAGE}" ;;
+  __HORNHOOF_* | local) DEFAULT_IMAGE=ghcr.io/invariant0x/hornhoof-node:latest ;;
+  *) DEFAULT_IMAGE=$BUILD_IMAGE ;;
 esac
+IMAGE="${HORNHOOF_NODE_IMAGE:-$DEFAULT_IMAGE}"
 COMPOSE_URL="${HORNHOOF_COMPOSE_URL:-}"
 APP_IMAGE="${HORNHOOF_APP_IMAGE:-ghcr.io/invariant0x/hornhoof}"
 BASE_DIR="${HORNHOOF_DIR:-$HOME/hornhoof}"
@@ -274,7 +275,7 @@ pull_image() {
     if "${DOCKER[@]}" image inspect "$IMAGE" > /dev/null 2>&1; then
       say "Using the local image."
     elif [ "$IMAGE" = "$BUILD_IMAGE" ]; then
-      fail "Could not download $IMAGE, the node image of this Hornhoof's build. Check the internet connection. If this Hornhoof was updated in the last few minutes, the image may not be published yet. Then run this command again."
+      fail "Could not download $IMAGE, the node image of this Hornhoof's build. Check the internet connection. If this Hornhoof was updated in the last few minutes, the image may not be published yet. Then run this command again. To start another node image instead, set HORNHOOF_NODE_IMAGE to it."
     else
       fail "Could not download $IMAGE. Check the internet connection, then run this command again."
     fi
