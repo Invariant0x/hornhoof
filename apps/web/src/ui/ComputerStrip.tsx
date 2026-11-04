@@ -1,13 +1,15 @@
 import { useState, type ReactNode } from 'react';
 import { useLanguage, useT, type Language, type Messages } from '../i18n';
 import type { ComputerView } from '../types';
-import { answerComputer, isOpen, type ComputerAnswer } from './ComputerCard';
+import { answerComputer, type ComputerAnswer } from './ComputerCard';
 import { CEO_DECIDES, DecidedByNote } from './DecidedBy';
 import { clock } from './subscription';
 
 /* Access to the machines at the foot of the orchestrator's window, a thin line each so the terminal keeps its place. One
    line stays with a counter of the others, and the machine that waits for an answer comes first. The buttons name their
    machine; the server keeps access to the one it runs on, so answerComputer does not send it yet. */
+const isOpen = (view: ComputerView) => view.until !== null && Date.parse(view.until) > Date.now();
+
 type Answer = (action: ComputerAnswer, machine: string | null | undefined) => Promise<ComputerView>;
 type Props = { machines: ComputerView[]; onChange(next: ComputerView): void; onFailure(err: unknown): void; answer?: Answer };
 
