@@ -12,7 +12,8 @@
 # starts: by the build's tag, or as HORNHOOF_APP_REF, HORNHOOF_NODE_REF and HORNHOOF_UPDATER_REF give them. The updater
 # service runs the installer of the build it moves to with HORNHOOF_FROM_UPDATER=1: no questions and no Docker setup,
 # the compose file it brings, the images it checked by digest, and this server's nodes on this machine move to the
-# same build. HORNHOOF_PULLED=1 says the images are on this computer already, so it downloads none of them.
+# same build. HORNHOOF_PULLED=1 says the images are on this computer already, so it downloads none of them. An updater
+# that does not say HORNHOOF_UPDATER_REV=2 or later hands the update to the updater of this build first.
 #
 # Several companies can share a computer: each node carries the address of the server it works for, and an
 # update or an uninstall touches only that server's nodes.
@@ -269,10 +270,12 @@ pull_image() {
   fi
 }
 
+random_hex() { od -An -N"$1" -tx1 /dev/urandom | tr -d ' \n'; }
+
 machine_id() {
   mkdir -p "$STATE_DIR"
   if ! grep -Eq '^[0-9a-f]{32}$' "$STATE_DIR/machine" 2> /dev/null; then
-    od -An -N16 -tx1 /dev/urandom | tr -d ' \n' > "$STATE_DIR/machine"
+    random_hex 16 > "$STATE_DIR/machine"
   fi
   cat "$STATE_DIR/machine"
 }
@@ -653,7 +656,7 @@ uninstall_mode() {
 new_secret() { head -c 32 /dev/urandom | base64 | tr -d '\n'; }
 
 # The database password goes into the database address, so it is hex.
-new_password() { od -An -N24 -tx1 /dev/urandom | tr -d ' \n'; }
+new_password() { random_hex 24; }
 
 # The port a server's .env keeps; one from before servers kept a port has the first one.
 port_of() {
@@ -773,25 +776,67 @@ prepare_builtin_stop() {
   prepare_node_stop "$cid" hornhoof_update
 }
 
+# What the last compose step said, for what a failure tells the person.
+STEP_OUTPUT=''
+# compose_step <compose command...>: runs in the server folder, showing what compose says as it comes.
+compose_step() {
+  local said rc=0
+  said=$(mktemp)
+  (cd "$SERVER_DIR" && "$@") 2>&1 | tee "$said" || rc=$?
+  STEP_OUTPUT=$(cat "$said")
+  rm -f "$said"
+  return "$rc"
+}
+
+start_failed() {
+  if [ -n "$FROM_UPDATER" ]; then fail "Hornhoof did not start."; fi
+  fail "Hornhoof did not start. Run docker compose logs in $SERVER_DIR to see why."
+}
+
+# The app waits for migrate, so compose runs it first and a failed start may be the database not reaching this build.
+# Older versions of Compose 2 say "didn't completed", so the check stops before that word.
+start_app() {
+  compose_step "$@" && return 0
+  case "$STEP_OUTPUT" in
+    *'"migrate" didn'*) fail "Hornhoof could not bring its database up to this build. Run docker compose logs migrate in $SERVER_DIR to see why." ;;
+  esac
+  start_failed
+}
+
+# The old build never runs on a schema it does not know, so the app stops first. The keeper and front start before it
+# comes back, so the maintenance answer is up while migrate runs.
 start_server_services() {
+  say "Starting Hornhoof${FROM_UPDATER:+ ${PIN:-latest}}."
+  (cd "$SERVER_DIR" && "$@" stop app) > /dev/null 2>&1 || true
+  compose_step "$@" up -d --no-build --remove-orphans --wait db || fail "The database did not start. Run docker compose logs db in $SERVER_DIR to see why."
+  compose_step "$@" up -d --no-build keeper front || start_failed
   if [ -n "$FROM_UPDATER" ]; then
-    say "Starting Hornhoof ${PIN:-latest}."
     if node_unchanged "$@"; then
-      (cd "$SERVER_DIR" && "$@" up -d --no-build db app tunnel) || fail "Hornhoof did not start."
+      start_app "$@" up -d --no-build app
     else
       prepare_builtin_stop "$@"
-      (cd "$SERVER_DIR" && "$@" up -d --no-build db app node tunnel) || fail "Hornhoof did not start."
+      start_app "$@" up -d --no-build app node
       sweep_nodes "$@"
     fi
     return 0
   fi
-  say "Starting Hornhoof."
   if node_unchanged "$@"; then
-    (cd "$SERVER_DIR" && "$@" up -d --no-build db app tunnel updater) || fail "Hornhoof did not start. Run docker compose logs in $SERVER_DIR to see why."
+    start_app "$@" up -d --no-build app updater
   else
     prepare_builtin_stop "$@"
-    (cd "$SERVER_DIR" && "$@" up -d --no-build) || fail "Hornhoof did not start. Run docker compose logs in $SERVER_DIR to see why."
+    start_app "$@" up -d --no-build
   fi
+}
+
+# An older updater cannot run this build's move, so this build's updater takes the update over: the helper starts it,
+# which replaces the updater this script runs under, and with it this script. Until then only .env and compose.yaml
+# have changed, and the old installer writes both back on the way back.
+hand_over_update() {
+  say "This build's updater takes over the update first."
+  "${DOCKER[@]}" run -d --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$SERVER_DIR:$SERVER_DIR" -v "${1}_control:/control" -e "HORNHOOF_SERVER_DIR=$SERVER_DIR" "$UPDATER_REF" --take-over > /dev/null ||
+    fail "Could not start the updater of this build, so nothing changed."
+  sleep "${HORNHOOF_HANDOVER_WAIT:-300}"
+  fail "The updater of this build did not take over, so nothing changed. Run install.sh server in $SERVER_DIR."
 }
 
 server_mode() {
@@ -860,6 +905,9 @@ server_mode() {
     id=$(host_id)
     if [ -n "$id" ]; then set_env HORNHOOF_HOST_ID "$id"; fi
   fi
+  # What the network knows this machine by, written once: the hash above, so the machine's own key never leaves it, or
+  # random hex from the updater, whose container cannot read that key.
+  if [ -z "$(env_value HORNHOOF_MACHINE_ID)" ]; then set_env HORNHOOF_MACHINE_ID "${id:-$(random_hex 16)}"; fi
   local_url="http://localhost:$(port_of "$env_file")"
   public=$(env_value PUBLIC_URL)
   [ -n "$public" ] || public=$local_url
@@ -872,6 +920,8 @@ server_mode() {
   else
     compose_from_image
   fi
+
+  if [ -n "$FROM_UPDATER" ] && [ "${HORNHOOF_UPDATER_REV:-1}" -lt 2 ]; then hand_over_update "$project"; fi
 
   # The updater downloads them before it saves the database; an updater from before leaves it to this.
   if [ -z "$PULLED" ]; then
