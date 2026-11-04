@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { agentEvents, agents, companies, departments, jobs, people, subscriptions, tasks } from '../src/db/schema.js';
 import { answer, ask, comment, createTask, report, submit, verdict } from '../src/modules/tasks/engine.js';
+import { wordsForTurn } from '../src/modules/conversation/turn-words.js';
 import { said } from '../src/modules/conversation/live.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { eq } from 'drizzle-orm';
@@ -9,7 +10,8 @@ import { enqueueTurn } from '../src/modules/conversation/queue.js';
 import { wakeQueued, wakesLeft } from '../src/modules/tasks/outbox.js';
 import { wakeAll, wakeLeftBehind } from '../src/modules/tasks/wake.js';
 import { messageHeading } from '../src/modules/conversation/prompt.js';
-import { listEvents } from '../src/modules/events/store.js';
+import { decisionPrincipal } from '../src/modules/conversation/decision-context.js';
+import { appendEvent, listEvents } from '../src/modules/events/store.js';
 import { setUpCompany, testApp } from './helpers.js';
 
 async function fixture() {
@@ -185,6 +187,8 @@ it('delivers an employee copy into the live turn immediately, combining the queu
   const [run] = await c.db.insert(jobs).values({ companyId: orchestrator.companyId, subscriptionId: orchestrator.subscriptionId!, agentId: orchestrator.id, kind: 'conversation', prompt: 'Working.', status: 'running', timeoutMs: 1000 }).returning();
   const task = (await createTask(c.app.ctx, { agentId: orchestrator.id }, { title: 'Goal', brief: '', body: '', departmentId: c.head.departmentId!, assigneeAgentId: c.head.id, gates: [] })).task;
   await wakeAll(c.app.ctx, (await report(c.app.ctx, c.head.id, task.id, { done: true, summary: 'Release verified.' })).wakes);
+  await appendEvent(c.app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, jobId: run!.id, kind: 'message', personId: c.ceo.id, data: { text: 'A newer personal instruction.' } });
+  expect((await decisionPrincipal(c.db, run!.id))!.personId).toBe(c.ceo.id);
   const saidTexts: string[] = [];
   vi.spyOn(c.app.ctx.hub, 'hasTerminals').mockReturnValue(true);
   vi.spyOn(c.app.ctx.hub, 'send').mockImplementation((_node, message) => {
@@ -197,7 +201,8 @@ it('delivers an employee copy into the live turn immediately, combining the queu
   expect(saidTexts[0]).toContain('Hana');
   expect(saidTexts[0]).toContain('Bruno');
   expect(saidTexts[0]).toContain('via Hornhoof');
-  expect(await c.notices(orchestrator.id)).toHaveLength(1);
+  expect((await c.notices(orchestrator.id)).filter(e => e.message!.from.kind !== 'person')).toHaveLength(1);
+  expect(await decisionPrincipal(c.db, run!.id)).toBeNull();
   vi.restoreAllMocks();
 });
 
@@ -256,4 +261,27 @@ it('preserves different pending reports across recovery and acknowledges only th
   const notices = await c.notices(orchestrator.id);
   expect(notices).toHaveLength(1);
   expect((notices[0]!.data as { text: string }).text).toContain('Waiting for a machine.');
+});
+
+it('keeps other queued words when a direct report is combined and delivered live', async () => {
+  const c = await fixture();
+  const orchestrator = (await c.db.select().from(agents)).find(a => a.kind === 'orchestrator')!;
+  const id = await enqueueTurn(c.app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, createdBy: null, prompt: 'Hana wrote:\n\n> Release verified.', message: { personId: null, from: 'agent', by: c.head.id, text: 'Release verified.' } });
+  await appendEvent(c.app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, jobId: id, kind: 'message', personId: c.ceo.id, data: { text: 'Keep the separate instruction.' } });
+  await c.db.update(jobs).set({ prompt: 'Hana wrote:\n\n> Release verified.\n\nIvan commented: Keep the separate instruction.' }).where(eq(jobs.id, id));
+  const task = (await createTask(c.app.ctx, { agentId: orchestrator.id }, { title: 'Goal', brief: '', body: '', departmentId: c.head.departmentId!, assigneeAgentId: c.head.id, gates: [] })).task;
+  await wakeAll(c.app.ctx, (await report(c.app.ctx, c.head.id, task.id, { done: true, summary: 'Release verified.' })).wakes);
+  expect((await c.db.select().from(jobs).where(eq(jobs.id, id)))[0]!.prompt).toContain('Keep the separate instruction.');
+  const [run] = await c.db.insert(jobs).values({ companyId: orchestrator.companyId, subscriptionId: orchestrator.subscriptionId!, agentId: orchestrator.id, kind: 'conversation', prompt: 'Working.', status: 'running', timeoutMs: 1000 }).returning();
+  const spoken: string[] = [];
+  vi.spyOn(c.app.ctx.hub, 'hasTerminals').mockReturnValue(true);
+  vi.spyOn(c.app.ctx.hub, 'send').mockImplementation((_node, message) => {
+    if (message.type === 'agent.say') { spoken.push(message.text); queueMicrotask(() => said(c.app.ctx, BUILTIN, message.ref, true)); }
+    return true;
+  });
+  await enqueueTurn(c.app.ctx, { companyId: orchestrator.companyId, agentId: orchestrator.id, createdBy: null, prompt: 'Release verified.', message: { personId: null, from: 'agent', by: c.worker.id, text: 'Release verified.' } });
+  expect(spoken[0]).toContain('Keep the separate instruction.');
+  expect(spoken[0]!.match(/Release verified\./g)).toHaveLength(1);
+  expect(await wordsForTurn(c.app.ctx, orchestrator.id, run!.id, spoken[0])).toHaveLength(1);
+  vi.restoreAllMocks();
 });

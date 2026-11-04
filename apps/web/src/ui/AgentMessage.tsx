@@ -6,6 +6,7 @@ import { isHidden } from './visibility';
 export type AgentMessageView = NonNullable<EventView['message']>;
 /* A message event that names who wrote to whom; older ones without it show as they did. */
 export type MessageEvent = EventView & { kind: 'message'; message: AgentMessageView };
+export const messageKey = (event: EventView): number => event.message?.originSeq ?? event.seq;
 export const isMessage = (e: EventView): e is MessageEvent => e.kind === 'message' && Boolean(e.message);
 type Folding = { opened: ReadonlySet<number>; toggle(seq: number): void };
 
@@ -98,5 +99,6 @@ const textOf = (data: unknown) => {
 };
 
 export function EventMessage({ event, folding }: { event: MessageEvent; folding: Folding }) {
-  return <AgentMessage message={event.message} text={textOf(event.data)} open={folding.opened.has(event.seq)} onToggle={() => folding.toggle(event.seq)} />;
+  const key = messageKey(event);
+  return <AgentMessage message={event.message} text={textOf(event.data)} open={folding.opened.has(key)} onToggle={() => folding.toggle(key)} />;
 }

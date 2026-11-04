@@ -276,7 +276,7 @@ export type EventView = {
   jobId: string | null;
   person: { id: string; name: string } | null;
   at: string;
-  message?: { direction: 'in' | 'out'; from: MessageParty; to: MessageParty; notification?: Notification; senders?: MessageParty[]; revision?: number };
+  message?: { direction: 'in' | 'out'; from: MessageParty; to: MessageParty; notification?: Notification; senders?: MessageParty[]; revision?: number; originSeq?: number };
 };
 
 /* What the browser hears live from /api/stream. */

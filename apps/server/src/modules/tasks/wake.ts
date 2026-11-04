@@ -2,7 +2,7 @@ import { and, asc, count, desc, eq, gt, gte, inArray, isNotNull, isNull, ne, not
 import type { Ctx } from '../../app.js';
 import { loggable } from '../../errors.js';
 import { agentChanges, agentEvents, agents, jobs, requests, subscriptions, taskEvents, tasks, testRuns } from '../../db/schema.js';
-import { agentState, conversationOf, insertTurn, limitUntil, liveSubscription, onAgent, openTypedTurn, orchestratorOf, pump, refusedLimits, UNSENT } from '../conversation/queue.js';
+import { agentState, conversationOf, insertTurn, limitUntil, liveSubscription, onAgent, openTypedTurn, orchestratorOf, pump, refusedLimits, UNSENT, type TurnMessage } from '../conversation/queue.js';
 import { deliverLive } from '../conversation/decision-context.js';
 import { quote } from '../conversation/prompt.js';
 import { appendEvent, publishWorking } from '../events/store.js';
@@ -359,19 +359,23 @@ async function queueWake(ctx: Ctx, w: Wake): Promise<boolean> {
   }
   /* One at a time per agent, so two moves at once still queue one turn. */
   return onAgent(ctx, agent.id, async () => {
-    const waiting = notice.report ? null : await waitingTaskTurn(db, agent.id, task.id);
-    if (waiting) {
-      /* New words are kept with the turn that already waits. */
-      if (LIVE_WAKES.includes(w.why) || w.cause?.actor) {
-        const text = prompt;
-        await db.update(jobs).set({ prompt: sql`${jobs.prompt} || ${`\n\n${text}`}` }).where(eq(jobs.id, waiting.id));
-        await appendEvent(ctx, { companyId: agent.companyId, agentId: agent.id, jobId: waiting.id, kind: 'message', data });
-      }
-      return false;
-    }
-    await insertTurn(ctx, { companyId: agent.companyId, agentId: agent.id, prompt, createdBy: null, taskId: task.id, message: { personId: null, ...data } });
-    return true;
+    return keepTaskWake(ctx, agent, task, w, data);
   });
+}
+
+async function keepTaskWake(ctx: Ctx, agent: typeof agents.$inferSelect, task: Task, w: Wake, data: Omit<TurnMessage, 'personId'>): Promise<boolean> {
+  const { db } = ctx;
+  const waiting = data.report ? null : await waitingTaskTurn(db, agent.id, task.id);
+  if (waiting) {
+    /* Keep new words and their provenance with the turn that already waits. */
+    if (LIVE_WAKES.includes(w.why) || w.cause?.actor) {
+      await db.update(jobs).set({ prompt: sql`${jobs.prompt} || ${`\n\n${data.text}`}` }).where(eq(jobs.id, waiting.id));
+      await appendEvent(ctx, { companyId: agent.companyId, agentId: agent.id, jobId: waiting.id, kind: 'message', data });
+    }
+    return true;
+  }
+  await insertTurn(ctx, { companyId: agent.companyId, agentId: agent.id, prompt: data.text, createdBy: null, taskId: task.id, message: { personId: null, ...data } });
+  return true;
 }
 
 /* The open task the agent holds after a turn about this one: the task itself, or the task it gave this one out from. */

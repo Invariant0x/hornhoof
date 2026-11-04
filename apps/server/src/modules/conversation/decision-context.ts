@@ -145,13 +145,22 @@ export function deliverLive(
   ctx: Ctx,
   agentId: string,
   text: string,
-  on: { taskId?: string; source?: { personId?: string | null; data?: unknown } },
+  on: { taskId?: string; source?: { personId?: string | null; data?: unknown }; required?: boolean },
   keep: (jobId: string, kept: WithEvent) => Promise<void>,
 ): Promise<string | null> {
-  return withInputLock(ctx, agentId, async () => {
-    const into = await sayLive(ctx, agentId, text, on.taskId, on.source, jobId => inputPending(ctx.db, jobId));
-    return into ? keepLiveInput(into, keep) : null;
-  });
+  return withInputLock(ctx, agentId, () => deliverLockedInput(ctx, agentId, text, on, keep));
+}
+
+/* The caller already owns the input lock; callers that also need the agent line take input first. */
+export async function deliverLockedInput(
+  ctx: Ctx,
+  agentId: string,
+  text: string,
+  on: { taskId?: string; source?: { personId?: string | null; data?: unknown }; required?: boolean },
+  keep: (jobId: string, kept: WithEvent) => Promise<void>,
+): Promise<string | null> {
+  const into = await sayLive(ctx, agentId, text, on.taskId, on.source, jobId => inputPending(ctx.db, jobId), on.required);
+  return into ? keepLiveInput(into, keep) : null;
 }
 
 class TurnStopped extends Error {}

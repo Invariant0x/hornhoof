@@ -5,13 +5,14 @@ import { incomingEnvelope, messageData, readMessage, type MessageEnvelope, type 
 import { publishEvent, type WithEvent } from '../events/store.js';
 import type { TurnMessage } from './queue.js';
 import { quote } from './prompt.js';
-import { deliverLive } from './decision-context.js';
+import type { deliverLockedInput } from './decision-context.js';
 
 /* Persisted queued turns form the window, including across a server restart. */
 export const REPORT_WINDOW_MS = 10_000;
+type Delivery = { send: typeof deliverLockedInput; required?: boolean };
 type ReportTurn = { companyId: string; agentId: string; message?: TurnMessage; withMessage?: WithEvent };
 type Stored = { event: typeof agentEvents.$inferSelect; job: typeof jobs.$inferSelect };
-type Group = { data: Record<string, unknown>; message: MessageEnvelope; text: string };
+type Group = { data: Record<string, unknown>; message: MessageEnvelope; text: string; prompt: string };
 
 export function reportDelay(message?: TurnMessage): Date | null {
   return message?.report?.trim() ? new Date(Date.now() + REPORT_WINDOW_MS) : null;
@@ -43,6 +44,14 @@ function reportText(input?: TurnMessage): string | null {
   return (input.report ?? input.text).trim() || null;
 }
 
+function queuedWords(row: Stored, data: Record<string, unknown>, reportContexts: string[], text: string) {
+  const preserve = data.reportPromptPreserved === true || typeof data.report !== 'string';
+  if (!preserve) return { prompt: text, reportPromptPreserved: false };
+  const previous = contexts(data);
+  const added = reportContexts.filter(context => !previous.includes(context));
+  return { prompt: [row.job.prompt, ...added].join('\n\n'), reportPromptPreserved: true };
+}
+
 function mergeGroup(row: Stored, input: TurnMessage, incoming: MessageEnvelope, report: string): Group | null {
   const before = readMessage(row.event.data);
   const envelope = before.message;
@@ -53,8 +62,9 @@ function mergeGroup(row: Stored, input: TurnMessage, incoming: MessageEnvelope, 
   const notification = { ...origin, tasks };
   const reportContexts = [...new Set([...contexts(before.data as Record<string, unknown>), ...contexts(input)])];
   const text = [...reportContexts, quote(report)].join('\n\n');
-  const message = { ...envelope, notification, senders, revision: (envelope.revision ?? 0) + 1 };
-  return { text, message, data: { ...before.data as object, text, notification, report, reportContexts, actor: message.from, senders } };
+  const message = { ...envelope, notification, senders, revision: (envelope.revision ?? 0) + 1, originSeq: envelope.originSeq ?? row.event.seq };
+  const words = queuedWords(row, before.data as Record<string, unknown>, reportContexts, text);
+  return { text, prompt: words.prompt, message, data: { ...before.data as object, text, notification, report, reportContexts, reportPromptPreserved: words.reportPromptPreserved, actor: message.from, senders } };
 }
 
 async function candidate(ctx: Ctx, turn: ReportTurn, report: string): Promise<Stored | undefined> {
@@ -72,36 +82,37 @@ async function saveGroup(ctx: Ctx, turn: ReportTurn, row: Stored, input: TurnMes
     if (!current) return false;
     const group = mergeGroup(current, input, incoming, report);
     if (!group) return false;
-    const set = jobFields(group.text, input, into);
+    const set = jobFields(group.prompt, input, into);
     await tx.update(jobs).set(set).where(eq(jobs.id, current.job.id));
-    await tx.update(agentEvents).set({ data: messageData(group.data, group.message), ...(into ? { jobId: into } : {}) }).where(eq(agentEvents.id, row.event.id));
-    const record = { seq: row.event.seq, createdAt: row.event.createdAt };
-    await kept?.(tx, record);
-    await turn.withMessage?.(tx, record);
+    /* A fresh stream sequence also makes live input newer than any earlier personal instruction. */
+    const [record] = await tx.update(agentEvents).set({ seq: sql`nextval(pg_get_serial_sequence('agent_events', 'seq'))`, data: messageData({ ...group.data, ...(into ? { inputShadow: true } : {}) }, group.message), ...(into ? { jobId: into } : {}) }).where(eq(agentEvents.id, row.event.id)).returning({ seq: agentEvents.seq, createdAt: agentEvents.createdAt });
+    const receipt = into ? (await tx.insert(agentEvents).values({ companyId: turn.companyId, agentId: turn.agentId, jobId: into, kind: 'typed', personId: null, data: messageData({ ...group.data, inputShadow: false, text: group.prompt }, group.message) }).returning({ seq: agentEvents.seq, createdAt: agentEvents.createdAt }))[0]! : record!;
+    await kept?.(tx, receipt);
+    await turn.withMessage?.(tx, receipt);
     return true;
   });
   if (stored) await publishEvent(ctx, turn.companyId, turn.agentId, row.event.id);
   return stored;
 }
 
-async function deliverCopy(ctx: Ctx, turn: ReportTurn, row: Stored, input: TurnMessage, incoming: MessageEnvelope, report: string): Promise<string | null> {
+async function deliverCopy(ctx: Ctx, turn: ReportTurn, row: Stored, input: TurnMessage, incoming: MessageEnvelope, report: string, delivery: Delivery): Promise<string | null> {
   const group = mergeGroup(row, input, incoming, report);
   if (!group) return null;
-  return deliverLive(ctx, turn.agentId, group.text, { source: { data: group.data } }, async (id, kept) => {
+  return delivery.send(ctx, turn.agentId, group.prompt, { source: { data: group.data }, required: delivery.required }, async (id, kept) => {
     if (!await saveGroup(ctx, turn, row, input, incoming, report, id, kept)) throw new Error('The report left its queue while its copy was delivered.');
   });
 }
 
 /* Exact report text only; similar but different reports must never disappear. */
-export async function combineReport(ctx: Ctx, turn: ReportTurn): Promise<string | null> {
+export async function combineReport(ctx: Ctx, turn: ReportTurn, delivery?: Delivery): Promise<string | null> {
   const input = turn.message;
   const report = reportText(input);
   if (!input || !report) return null;
   const row = await candidate(ctx, turn, report);
   if (!row) return null;
   const incoming = await incomingEnvelope(ctx, turn.companyId, turn.agentId, input.personId, input);
-  if (!input.report) {
-    const into = await deliverCopy(ctx, turn, row, input, incoming, report);
+  if (delivery) {
+    const into = await deliverCopy(ctx, turn, row, input, incoming, report, delivery);
     if (into) return into;
   }
   return await saveGroup(ctx, turn, row, input, incoming, report) ? row.job.id : null;
