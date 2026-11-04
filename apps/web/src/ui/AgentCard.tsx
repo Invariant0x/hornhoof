@@ -110,6 +110,22 @@ function SubUnitField({ card, inputId, editable, onChange }: { card: AgentCardVi
   );
 }
 
+function LastFailure({ failure, when }: { failure: AgentCardView['failure'] | undefined; when(at: string | number): string }) {
+  const t = useT();
+  if (!failure) return null;
+  const today = new Date(failure.at).toDateString() === new Date().toDateString();
+  const line = today ? t.agent.lastFailed(clockAt(failure.at), t.failures[failure.kind]) : t.agent.lastFailedOn(when(failure.at), t.failures[failure.kind]);
+  const text = clip(failure.text, FAILURE_TEXT_MAX);
+  return text ? (
+    <details className="ac-failure">
+      <summary title={text}>{line}</summary>
+      <pre>{text}</pre>
+    </details>
+  ) : (
+    <p className="ac-failure">{line}</p>
+  );
+}
+
 /* An agent's card in the side panel: where it runs, its skills and the text it runs with, with every change kept. */
 export function AgentCard({ me, agentId, live, serverNow, onClose, onTerminal }: Props) {
   const t = useT();
@@ -242,13 +258,6 @@ export function AgentCard({ me, agentId, live, serverNow, onClose, onTerminal }:
   const stateAgent: AgentLive = live
     ? { ...live, retry: live.retry === undefined ? card.retry : live.retry }
     : { id: card.id, program: card.program ?? null, alarm: card.alarm ?? null, retry: card.retry };
-  const failureToday = card.failure !== null && new Date(card.failure.at).toDateString() === new Date().toDateString();
-  const failureLine =
-    card.failure &&
-    (failureToday
-      ? t.agent.lastFailed(clockAt(card.failure.at), t.failures[card.failure.kind])
-      : t.agent.lastFailedOn(when(card.failure.at), t.failures[card.failure.kind]));
-  const failureText = card.failure ? clip(card.failure.text, FAILURE_TEXT_MAX) : '';
 
   /* An edit carries over to the other view; a raw text with broken markers stays in the raw view until it is fixed. */
   function showRaw(next: boolean) {
@@ -279,15 +288,7 @@ export function AgentCard({ me, agentId, live, serverNow, onClose, onTerminal }:
             {t.dept.states[card.state]}
             <AgentState agent={stateAgent} serverNow={serverNow} />
           </p>
-          {failureLine &&
-            (failureText ? (
-              <details className="ac-failure">
-                <summary title={failureText}>{failureLine}</summary>
-                <pre>{failureText}</pre>
-              </details>
-            ) : (
-              <p className="ac-failure">{failureLine}</p>
-            ))}
+          <LastFailure failure={card.failure} when={when} />
           <button className="btn small" type="button" onClick={onTerminal}>
             {t.agent.openTerminal}
           </button>

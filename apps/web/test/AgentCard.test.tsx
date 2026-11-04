@@ -81,6 +81,12 @@ describe('AgentCard', () => {
     const shortLine = await screen.findByText('Last turn failed at 14:02: too many requests');
     expect(shortLine).toHaveAttribute('title', '429 Too Many Requests');
     expect(shortLine.closest('details')?.querySelector('pre')?.textContent).toBe('429 Too Many Requests');
+    cleanup();
+
+    open({ 'GET /api/agents/b1': [200, { ...CARD, failure: { kind: 'rate_limited', text: '', at } }] });
+    const bareLine = await screen.findByText('Last turn failed at 14:02: too many requests');
+    expect(bareLine.tagName).toBe('P');
+    expect(bareLine).toHaveClass('ac-failure');
   });
 
   it('shows only the clock time when the last turn failed today, and the date with the time when it failed earlier, in English and Russian', async () => {
@@ -109,12 +115,14 @@ describe('AgentCard', () => {
     }
   });
 
-  it('shows nothing under the state when failure is null, and shows a waiting retry on the state line', async () => {
-    open();
-    await screen.findByRole('heading', { name: 'Bruno' });
-    expect(screen.queryByText(/Last turn failed/)).not.toBeInTheDocument();
-    expect(document.querySelector('.ac-failure')).toBeNull();
-    cleanup();
+  it('shows nothing under the state when failure is null or omitted, and shows a waiting retry on the state line', async () => {
+    for (const failure of [null, undefined]) {
+      open({ 'GET /api/agents/b1': [200, { ...CARD, failure }] });
+      await screen.findByRole('heading', { name: 'Bruno' });
+      expect(screen.queryByText(/Last turn failed/)).not.toBeInTheDocument();
+      expect(document.querySelector('.ac-failure')).toBeNull();
+      cleanup();
+    }
 
     const retryAt = new Date(2026, 10, 3, 14, 5).getTime();
     for (const [lang, expected] of [
