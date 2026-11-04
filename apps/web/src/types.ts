@@ -1,6 +1,6 @@
 import type { ExternalWait } from '@hornhoof/protocol/waits';
 import type { Notification } from '@hornhoof/protocol';
-import type { FailureKind, Limits, ModelOption, NodeLoad, ProgramInfo, ProviderId, TemplateKey } from '@hornhoof/protocol';
+import type { FailureKind, Limits, MachineDrain, ModelOption, NodeLoad, ProgramInfo, ProviderId, TemplateKey } from '@hornhoof/protocol';
 import type { RoleEffort } from '@hornhoof/protocol/efforts';
 import type { ProgramRetry, TurnAlarm, TurnProgram, TurnRetry, WorkLine } from '@hornhoof/protocol/map';
 
@@ -456,12 +456,7 @@ export type TurnView = {
 
 export type Machine = { id: string; hostname: string };
 
-/* A machine that waits for its work to end before an update restarts it, was put off because it did not end in time, or
-   restarts for the update now. */
-export type MachineDrain =
-  | { state: 'waiting'; turnsLeft: number; partsLeft: number; until: string }
-  | { state: 'postponed'; turnsLeft: number; partsLeft: number; retryAt: string }
-  | { state: 'restarting'; since: string };
+export type { MachineDrain };
 
 export type MachineView = {
   id: string;
