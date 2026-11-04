@@ -2,8 +2,9 @@ import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
 import { openAgentSql } from './db/agent-sql.js';
 import { APP_NAME, openDb } from './db/client.js';
-import { publicUrl } from './modules/link/link.js';
+import { linkOf, publicUrl } from './modules/link/link.js';
 import { setupLink } from './modules/setup/code.js';
+import { LINK_TLS_PORT, LinkListener } from './modules/tls/listener.js';
 
 function requireDbUrl(url: string | undefined): string {
   if (!url) throw new Error('DATABASE_URL is not set.');
@@ -20,13 +21,24 @@ const app = await buildApp({
   logger: { level: process.env.LOG_LEVEL || 'info' },
 });
 await app.listen({ port: config.port, host: '0.0.0.0' });
+const listener = new LinkListener({ app, config, log: app.log });
+await listener.listen(LINK_TLS_PORT);
+const publicLink = await linkOf(db);
+await listener.use(publicLink && new URL(publicLink.url).hostname, null);
 console.log(`Hornhoof is running at ${await publicUrl(db, config)}`);
 /* Until a company exists, only the link with the setup code sets it up. */
 const link = await setupLink(db, config);
 if (link) console.log(`Open this link to set Hornhoof up: ${link}`);
 
+/* The listener stops taking connections first; the app's close then ends the event streams and WebSockets on those it
+   already has, which lets the listener finish. */
+async function stop(): Promise<void> {
+  const closing = listener.close();
+  await app.close();
+  await closing;
+  process.exit(0);
+}
+
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-  process.once(signal, () => {
-    void app.close().then(() => process.exit(0));
-  });
+  process.once(signal, () => void stop());
 }
