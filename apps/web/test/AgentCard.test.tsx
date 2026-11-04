@@ -104,6 +104,22 @@ describe('AgentCard', () => {
     }
   });
 
+  it('shows an obsolete wake calmly in English and Russian without a failure', async () => {
+    const at = new Date().setHours(14, 2, 0, 0);
+    for (const [lang, expected] of [
+      ['en', 'Wake-up became obsolete: the task moved on'],
+      ['ru', 'Побудка устарела: задача ушла дальше'],
+    ] as const) {
+      localStorage.setItem('hh-lang', lang);
+      open({ 'GET /api/agents/b1': [200, { ...CARD, obsolete: { at } }] });
+      const line = await screen.findByText(expected);
+      expect(line).toHaveClass('ac-obsolete');
+      expect(screen.queryByText(/Last turn failed|Последний ход не удался/)).not.toBeInTheDocument();
+      cleanup();
+      localStorage.removeItem('hh-lang');
+    }
+  });
+
   it('shows only the clock time when the last turn failed today, and the date with the time when it failed earlier, in English and Russian', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date(2026, 10, 3, 16, 0));

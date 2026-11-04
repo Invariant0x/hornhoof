@@ -59,9 +59,17 @@ function skippedText(t: Messages, e: TaskLogLine): string {
   return typeof job === 'string' ? `${text} ${t.tasks.skippedJob(job)}` : text;
 }
 
+function obsoleteText(t: Messages, e: TaskLogLine): string {
+  const wake = field(e.data, 'wake');
+  if (typeof wake !== 'string') return e.text;
+  const run = t.tasks.skippedRuns[wake] ?? t.tasks.skippedRuns.task!;
+  return t.tasks.obsoleteRun(authorOf(t, e), run);
+}
+
 /* System log lines use the person's language; employees' own words stay as they wrote them. */
 const systemText: Record<string, (t: Messages, e: TaskLogLine, when: (at: string) => string) => string | null> = {
   wake_skipped: skippedText,
+  wake_obsolete: obsoleteText,
   interrupted: (t, e, when) => cutText(t, e.data, when),
 };
 const lineText = (t: Messages, e: TaskLogLine, when: (at: string) => string): string => systemText[e.kind]?.(t, e, when) || e.text;
