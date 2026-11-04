@@ -14,16 +14,15 @@ for (const lang of ['en', 'ru'] as const) {
         }, { lang, theme });
         const errors: string[] = [];
         const failures: string[] = [];
-        let navigations = 0;
         page.on('pageerror', e => errors.push(e.message));
         page.on('console', e => { if (e.type() === 'error') errors.push(e.text()); });
         page.on('requestfailed', r => failures.push(r.url()));
-        page.on('framenavigated', frame => { if (frame === page.mainFrame()) navigations++; });
         const live = await serveHubTurn(page);
         const label = (done: number, total: number) => lang === 'en' ? `${done} of ${total} tasks done` : `Готово ${done} из ${total} задач`;
         const tasksTab = lang === 'en' ? 'Tasks' : 'Задачи';
         const mapTab = lang === 'en' ? 'Map' : 'Карта';
         await page.goto('/');
+        const initialDocument = await page.evaluateHandle(() => document);
         const hub = page.locator('.hub-turn');
         await expect(hub.locator('b')).toHaveText(lang === 'en' ? 'Turn 3' : 'Ход 3');
         await expect(hub).toContainText(label(3, 17));
@@ -71,7 +70,7 @@ for (const lang of ['en', 'ru'] as const) {
         expect(large.scrollWidth).toBeLessThanOrEqual(large.width);
         await live.closeTurn();
         await expect(hub).toHaveCount(0);
-        expect(navigations).toBe(1);
+        expect(await page.evaluate(initial => document === initial, initialDocument)).toBe(true);
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
         expect(errors).toEqual([]);
         expect(failures).toEqual([]);

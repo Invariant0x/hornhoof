@@ -6,14 +6,18 @@ import { box, serveApi } from './api';
 
 test.use({ locale: 'en-US' });
 
-test('opens a task on the left and reserves the right for the agent window', async ({ page }) => {
+test('a tab closes the task, history restores it, and the agent window stays on the right', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await openTasks(page);
   await row(page, 1).click();
   expect((await box(panelOf(page, 1))).x).toBe(16);
   await page.getByRole('navigation').getByRole('button', { name: 'Map', exact: true }).click();
-  const department = page.locator('.map .dept');
-  await expect.poll(async () => (await box(department)).x).toBeGreaterThanOrEqual(432);
+  await expect(page).toHaveURL(/\/$/);
+  await expect(panelOf(page, 1)).toHaveCount(0);
+  await expect(page.locator('.map .dept')).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL(/\/tasks\/t1$/);
+  await expect(panelOf(page, 1)).toBeVisible();
   await panelOf(page, 1).getByRole('button', { name: 'Close' }).click();
   await page.getByRole('navigation').getByRole('button', { name: 'Tasks', exact: true }).click();
   await page.getByRole('button', { name: 'Write to the orchestrator' }).click();

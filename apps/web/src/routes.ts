@@ -51,13 +51,27 @@ export function routePath(route: Route): string {
   return person && validId(person) ? `${base}?person=${person}` : base;
 }
 
-function backgroundOf(state: unknown): Route {
-  if (!state || typeof state !== 'object' || !('hhBackground' in state) || typeof state.hhBackground !== 'string') return { kind: 'map' };
-  const route = parseRoute(state.hhBackground);
-  return route.kind === 'unavailable' ? { kind: 'map' } : route;
+function backgroundsOf(state: unknown): Route[] {
+  if (!state || typeof state !== 'object' || !('hhBackground' in state) || typeof state.hhBackground !== 'string') return [];
+  const rest = 'hhUnderlays' in state && Array.isArray(state.hhUnderlays) ? state.hhUnderlays.filter((path): path is string => typeof path === 'string') : [];
+  return [state.hhBackground, ...rest].map(path => {
+    const route = parseRoute(path);
+    return route.kind === 'unavailable' ? { kind: 'map' } as const : route;
+  });
 }
 
-const currentEntry = () => ({ route: parseRoute(location.pathname + location.search), background: backgroundOf(history.state) });
+function currentEntry() {
+  const route = parseRoute(location.pathname + location.search);
+  const stored = backgroundsOf(history.state);
+  const backgrounds: Route[] = stored.length ? stored : [{ kind: route.kind === 'tasks' ? 'tasks' : 'map' }];
+  return { route, backgrounds };
+}
+
+function pushRoute(next: Route, backgrounds: Route[]) {
+  const path = routePath(next);
+  const paths = backgrounds.map(routePath);
+  if (path !== location.pathname + location.search) history.pushState(paths.length ? { hhBackground: paths[0], hhUnderlays: paths.slice(1) } : null, '', path);
+}
 
 export function useRoute() {
   const [entry, setEntry] = useState(currentEntry);
@@ -67,9 +81,14 @@ export function useRoute() {
     return () => window.removeEventListener('popstate', pop);
   }, []);
   const navigate = useCallback((next: Route, background?: Route) => {
-    const path = routePath(next);
-    if (path !== location.pathname + location.search) history.pushState(background ? { hhBackground: routePath(background) } : null, '', path);
+    const rest = background && routePath(background) === routePath(parseRoute(location.pathname + location.search)) ? backgroundsOf(history.state) : [];
+    pushRoute(next, background ? [background, ...rest] : []);
     setEntry(currentEntry());
   }, []);
-  return { ...entry, navigate };
+  const closeOverlay = useCallback(() => {
+    const { backgrounds } = currentEntry();
+    pushRoute(backgrounds[0]!, backgrounds.slice(1));
+    setEntry(currentEntry());
+  }, []);
+  return { ...entry, navigate, closeOverlay };
 }

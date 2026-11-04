@@ -185,10 +185,14 @@ describe('improvements', () => {
     await user.click(firstLink);
     expect(await screen.findByRole('complementary', { name: '#12 Checkout API' })).toBeInTheDocument();
     expect(location.pathname).toBe('/tasks/t12');
-    await openImprovements(user);
+    expect(taken).toBeVisible();
+    await user.click(within(screen.getByRole('complementary', { name: '#12 Checkout API' })).getByRole('button', { name: 'Close' }));
+    expect(location.pathname).toBe('/improvements');
+    expect(taken).toBeVisible();
     await user.click(screen.getByRole('button', { name: '#13 Refunds' }));
     expect(await screen.findByRole('complementary', { name: '#13 Refunds' })).toBeInTheDocument();
     expect(location.pathname).toBe('/tasks/t13');
+    expect(taken).toBeVisible();
   });
 
   it('keeps taken out of the open count and shows Take only for open improvements', async () => {
