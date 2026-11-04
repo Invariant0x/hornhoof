@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { basename, join, resolve } from 'node:path';
+import { basename, dirname, join, normalize, relative, resolve } from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { ESLint } from 'eslint';
@@ -69,14 +69,13 @@ export function label(kind: 'a' | 'b') { switch (kind) { case 'a': return kind; 
 
 test('a file builds only the TypeScript program of its own workspace, because eslint keeps every program it builds', async () => {
   const linter = new ESLint({ cwd: root });
-  assert.ok(workspaces.length > 0);
-  for (const workspace of workspaces) {
-    for (const file of ['src/any.ts', 'test/any.test.ts', 'any.config.ts']) {
-      const config = await linter.calculateConfigForFile(join(root, workspace, file));
-      const { project } = config.languageOptions.parserOptions;
-      assert.equal(project?.length, 1, `${workspace}/${file}: ${project}`);
-      assert.ok(project[0].startsWith(`./${workspace}/`), `${workspace}/${file}: ${project}`);
-    }
+  const files = (await lintedFiles(root)).filter(file => /\.tsx?$/.test(file));
+  assert.ok(files.length > 0);
+  for (const file of files) {
+    const path = relative(root, file);
+    const { project } = (await linter.calculateConfigForFile(file)).languageOptions.parserOptions;
+    assert.equal(project?.length, 1, `${path}: ${project}`);
+    assert.equal(dirname(normalize(project[0])), path.split('/').slice(0, 2).join('/'), path);
   }
 });
 
