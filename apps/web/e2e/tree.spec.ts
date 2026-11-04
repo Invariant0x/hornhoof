@@ -1,22 +1,8 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import { serveApi } from './api';
 import { wholeTurn } from './whole-turn';
+import { serveTree } from './tree-api';
 
-async function serveTree(page: Page, live: { during: boolean }) {
-  await serveApi(page);
-  await page.route('**/api/**', route => {
-    const url = new URL(route.request().url()), path = url.pathname + url.search;
-    const { tree, org } = wholeTurn(live.during);
-    const routes: Record<string, unknown> = {
-      '/api/org': org,
-      '/api/departments/d2/tree': { tree },
-      '/api/tasks?status=open&department=d2': { tasks: [] },
-      '/api/version': { version: '0.5.0', commit: 'task-148' },
-      '/api/updates': { current: { version: '0.5.0', commit: 'task-148' }, available: false, latest: null, updater: { status: null, waiting: null } },
-    };
-    return path in routes ? route.fulfill({ json: routes[path] }) : route.fallback();
-  });
-}
 
 for (const lang of ['en', 'ru'] as const) {
   for (const theme of ['light', 'dark'] as const) {
@@ -53,26 +39,30 @@ for (const lang of ['en', 'ru'] as const) {
           const oldAlarm = graph.getByRole('button', { name: lang === 'en' ? /Hana: program frozen since 06:11/ : /Hana: программа замерла с 06:11/ }).first();
           await oldAlarm.scrollIntoViewIfNeeded();
           await oldAlarm.focus();
+          await expect(oldAlarm).toBeFocused();
           await page.keyboard.press('Enter');
-          const stateCard = page.getByRole('dialog', { name: 'Hana', exact: true });
-          await expect(stateCard).toContainText(lang === 'en' ? 'No task' : 'Нет задачи');
-          await expect(stateCard.getByRole('button', { name: lang === 'en' ? 'Open the task' : 'Открыть задачу' })).toHaveCount(0);
-          await page.keyboard.press('Escape');
+          const headWindow = page.getByRole('complementary', { name: 'Hana', exact: true });
+          await expect(headWindow).toBeVisible();
+          await expect(page.locator('.tv-card')).toHaveCount(0);
+          await headWindow.getByRole('button', { name: lang === 'en' ? 'Close' : 'Закрыть', exact: true }).click();
           const oldTask = graph.getByRole('button', { name: /#62 Night checkout work/ }).first();
           await oldTask.scrollIntoViewIfNeeded();
           await oldTask.focus();
           await page.keyboard.press('Enter');
-          await expect(page.getByRole('dialog', { name: /#62 Night checkout work/ })).toBeVisible();
-          await page.keyboard.press('Escape');
+          const agentWindow = page.getByRole('complementary', { name: 'Bruno', exact: true });
+          await expect(agentWindow).toBeVisible();
+          await page.screenshot({ path: info.outputPath(`tree-agent-${width}-${lang}-${theme}.png`) });
+          await agentWindow.getByRole('button', { name: lang === 'en' ? 'Close' : 'Закрыть', exact: true }).click();
           const oldReview = graph.getByRole('button', { name: /Vera, #90/ }).first();
           await oldReview.scrollIntoViewIfNeeded();
-          await oldReview.click();
-          const card = page.getByRole('dialog', { name: /#90/ });
-          await expect(card).toContainText(lang === 'en' ? '2 findings' : '2 находки');
-          await page.keyboard.press('Escape');
-          await page.locator('.tv-scroll').evaluate(el => { el.scrollLeft = 0; });
+          await oldReview.focus();
+          await page.keyboard.press('Enter');
+          const reviewer = page.getByRole('complementary', { name: 'Vera', exact: true });
+          await expect(reviewer).toBeVisible();
+          await reviewer.getByRole('button', { name: lang === 'en' ? 'Close' : 'Закрыть', exact: true }).click();
+          await page.locator('.dview').getByRole('button', { name: lang === 'en' ? 'Show everything' : 'Показать все', exact: true }).click();
           await page.screenshot({ path: info.outputPath(`tree-${width}-${lang}-${theme}-${during ? 'review' : 'after'}-start.png`) });
-          await page.locator('.tv-scroll').evaluate(el => { el.scrollLeft = el.scrollWidth; });
+
           expect(await graph.locator('.g-now').evaluate(el => el.getBoundingClientRect().x)).toBeGreaterThan(await labs.evaluate(el => el.getBoundingClientRect().right));
           if (during) {
             await expect(labs.getByRole('button', { name: /Bruno/ })).toContainText(lang === 'en' ? 'waits for Hana since' : 'ждет Hana с');

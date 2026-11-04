@@ -25,10 +25,15 @@ import { Tasks } from './Tasks';
 import { Versions } from './Versions';
 
 type Tab = 'map' | 'tasks' | 'people' | 'subscriptions' | 'machines' | 'improvements';
-/* The right panel: an agent's terminal or its card, or a task. agentId is 'orchestrator' or an employee's id. */
+/* The agent window is on the right, settings and tasks on the left. agentId is 'orchestrator' or an employee's id. */
 type Panel = { kind: 'window' | 'card'; agentId: string; request?: number } | { kind: 'task'; taskId: string } | null;
 const TABS: Tab[] = ['map', 'tasks', 'people', 'subscriptions', 'machines'];
 const THEMES: Theme[] = ['light', 'dark'];
+
+function mapPanels(panel: Panel) {
+  return { windowOpen: panel?.kind === 'window', leftPanelOpen: panel !== null && panel.kind !== 'window' };
+}
+
 type AccountDialogName = 'about' | 'versions' | 'settings';
 
 function AccountDialog({ active, me, updates, onClose }: { active: AccountDialogName | null; me: Me; updates: Updates; onClose: () => void }) {
@@ -287,7 +292,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
         {tab === 'map' && (
           <MapScreen
             me={me}
-            windowOpen={panel !== null}
+            {...mapPanels(panel)}
             onOpenOrchestrator={() => openAgent('orchestrator')}
             inside={!!dept}
             onOpenDepartment={setDeptId}

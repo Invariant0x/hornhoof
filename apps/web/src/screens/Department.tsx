@@ -7,7 +7,7 @@ import { useStream } from '../live';
 import { useDepartmentTree, useTasks } from '../tasks';
 import type { Department, Employee, EmployeeStatus, Me, PersonView } from '../types';
 import { Bar, percent } from '../ui/Bar';
-import { usePanZoom, ZoomBar } from '../ui/canvas';
+import { CANVAS_NARROW as NARROW, LEFT_PANEL_COVER, canvasSpace, usePanZoom, ZoomBar } from '../ui/canvas';
 import { Edge } from '../ui/Edge';
 import { AgentIcon, BackIcon, MapIcon, PersonIcon, ProviderMark, SpeedIcon, TreeIcon } from '../ui/icons';
 import { NewTask } from '../ui/NewTask';
@@ -20,6 +20,7 @@ import { useWorkLines } from '../ui/work-lines';
 import { useRework } from '../ui/use-rework';
 import { AgentState, type AgentLive } from '../ui/AgentState';
 import { TreeView } from './TreeView';
+import { useOpenAgent } from './AgentWindowContext';
 import { SpeedPanel } from './SpeedPanel';
 import { arrowD, CH, CW, CY, FT, FW, HH, HW, PH, PW, schemaLayout, stepPaths, type Frame, type Line, type Schema } from './schema';
 
@@ -35,7 +36,7 @@ type Props = {
   deputies: PersonView[];
   selected: string | null;
   selectedTask: string | null;
-  /* What covers the right of the screen, so the schema starts clear of it. */
+  /* The panel the schema leaves room for, on its side of the screen. */
   panel: 'window' | 'card' | 'task' | null;
   /* The server's clock when it read the company, which times the yellow lines. */
   serverNow?: string;
@@ -47,9 +48,8 @@ type Props = {
   onOpenDecisions?(personId: string): void;
 };
 
-/* The orchestrator's window and the right panels, with their margins. */
-const COVER = { window: 688, card: 492, task: 492 } as const;
-const NARROW = 760;
+/* The agent window is on the right, settings and task details on the left. */
+const COVER = { window: 688, card: LEFT_PANEL_COVER, task: LEFT_PANEL_COVER } as const;
 const MIN_K = 0.15, MAX_K = 2;
 /* Below this scale the schema shows colors instead of text, as in the prototype. */
 const FAR_K = 0.55;
@@ -321,9 +321,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
   const [tree, setTree] = useState(false);
   const [drawer, setDrawer] = useState<'tasks' | 'about' | 'speed' | null>(null);
   const { tree: workTree, failure: treeFailure } = useDepartmentTree(d.id, sees && (tree || drawer === 'speed'));
-  const [treeZoom, setTreeZoom] = useState(1);
-  const [treeFit, setTreeFit] = useState(0);
-  const [openAgent, setOpenAgent] = useState<{ id: string; key: number; top: number } | null>(null);
+  const openAgent = useOpenAgent();
   const chrome = useDepartmentSpace(language, panel);
   useEffect(() => {
     if (!drawer) return;
@@ -344,16 +342,16 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
     (whole: boolean) => {
       const el = box.current;
       if (!el || !el.clientWidth) return;
-      const width = el.clientWidth - (el.clientWidth > NARROW ? covered : 0);
+      const { left, width } = canvasSpace(el.clientWidth, panel === 'window' ? 0 : covered, panel === 'window' ? covered : 0);
       const padTop = 76, padBottom = 76, padX = 48;
       const bw = s.right + 80, bh = s.h + 40;
       const fitK = Math.max(MIN_K, Math.min((width - padX * 2) / bw, (el.clientHeight - padTop - padBottom) / bh, 1));
       const k = whole || fitK >= START_K ? fitK : START_K;
       const x = k === fitK ? (width - bw * k) / 2 + 40 * k : padX + 40 * k;
       const y = k === fitK ? padTop + (el.clientHeight - padTop - padBottom - bh * k) / 2 + 20 * k : padTop + 20 * k;
-      setView({ k, x, y, smooth: true });
+      setView({ k, x: left + x, y, smooth: true });
     },
-    [s.right, s.h, covered, setView],
+    [s.right, s.h, covered, panel, setView],
   );
 
   useEffect(() => {
@@ -495,26 +493,10 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
   const treeButton = tree ? t.dept.mapButton : t.dept.treeButton;
   const lines = (...cls: Line['cls'][]) => s.lines.filter(l => cls.includes(l.cls)).map((l, i) => <Wire key={`${l.cls}${i}`} l={l} />);
 
-  function openTreeAgent(id: string, top: number) {
-    setTree(true);
-    setOpenAgent(previous => ({ id, top, key: (previous?.key ?? 0) + 1 }));
-  }
-
-  function changeZoom(factor: number) {
-    if (tree) setTreeZoom(k => Math.max(.5, Math.min(3, k * factor)));
-    else zoomAt(factor);
-  }
-
-  function fitCanvas() {
-    if (!tree) return place(true);
-    setTreeZoom(1);
-    setTreeFit(n => n + 1);
-  }
-
   return (
-    <div className={`dview${drawer === 'speed' && !panel ? ' spd-open' : ''}`} ref={chrome.root} style={chrome.style}>
+    <div className="dview" ref={chrome.root} style={chrome.style}>
       {tree && (workTree ? (
-        <TreeView tree={workTree} department={d} zoom={treeZoom} fit={treeFit} openAgent={openAgent} onOpenTask={onOpenTask} />
+        <TreeView tree={workTree} department={d} onOpenTask={onOpenTask} />
       ) : <div className="tview"><p className="tv-empty glass">{treeFailure ? errorText(t, treeFailure) : t.common.loading}</p></div>)}
       {!tree && (
       <div className={`dcanvas${far ? ' far' : ''}`} ref={box} role="region" aria-label={t.dept.schema} {...handlers}>
@@ -649,9 +631,9 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
       </div>
 
       {drawer && (
-        <aside className={`dv-drawer${drawer === 'speed' ? ` spd${panel ? '' : ' right'}` : ''}`} aria-label={drawerTitle}>
+        <aside className={`dv-drawer${drawer === 'speed' ? ' spd' : ''}`} aria-label={drawerTitle}>
           <DrawerHead title={drawerTitle} onClose={() => setDrawer(null)} />
-          {drawer === 'speed' ? (workTree ? <SpeedPanel tree={workTree} department={d} onAgent={openTreeAgent} /> : <div className="dv-drawer-b">{treeFailure ? errorText(t, treeFailure) : t.common.loading}</div>) : (
+          {drawer === 'speed' ? (workTree ? <SpeedPanel tree={workTree} department={d} onAgent={openAgent} /> : <div className="dv-drawer-b">{treeFailure ? errorText(t, treeFailure) : t.common.loading}</div>) : (
           <div className="dv-drawer-b">
             {drawer === 'tasks' && sees && <DeptTasks department={d} head={head} canGive={canGive} selected={selectedTask} onOpenTask={onOpenTask} />}
             {drawer === 'about' && (
@@ -699,8 +681,8 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
         </aside>
       )}
 
-      <ZoomBar k={tree ? treeZoom : view.k} step={tree ? 1.25 : 1.2} onZoom={changeZoom} onFit={fitCanvas} />
-      {/* A panel at the right takes the room the line needs. */}
+      {!tree && <ZoomBar k={view.k} onZoom={zoomAt} onFit={() => place(true)} />}
+      {/* An open panel takes the room the ticker needs. */}
       {!panel && !chrome.tickerHidden && (
         <div className="ticker glass" aria-live="polite" onPointerDown={e => e.stopPropagation()}>
           <span className="live" />

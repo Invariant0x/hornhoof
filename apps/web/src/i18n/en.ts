@@ -527,6 +527,7 @@ export const en = {
     mapButton: 'Map',
     speed: 'Speed',
     treeNoTurn: 'No turn is open now.',
+    treeCanvas: 'Work tree',
     tree: {
       treeAria: (n: number) => `Tree of turn ${n}`,
       noTask: 'No task',

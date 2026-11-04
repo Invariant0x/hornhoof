@@ -6,6 +6,21 @@ import { box, serveApi } from './api';
 
 test.use({ locale: 'en-US' });
 
+test('opens a task on the left and reserves the right for the agent window', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openTasks(page);
+  await row(page, 1).click();
+  expect((await box(panelOf(page, 1))).x).toBe(16);
+  await page.getByRole('navigation').getByRole('button', { name: 'Map', exact: true }).click();
+  const department = page.locator('.map .dept');
+  await expect.poll(async () => (await box(department)).x).toBeGreaterThanOrEqual(432);
+  await panelOf(page, 1).getByRole('button', { name: 'Close' }).click();
+  await page.getByRole('navigation').getByRole('button', { name: 'Tasks', exact: true }).click();
+  await page.getByRole('button', { name: 'Write to the orchestrator' }).click();
+  const window = await box(page.getByRole('complementary', { name: 'Orchestrator' }));
+  expect(window.x + window.width).toBe(1424);
+});
+
 const SIZES = [
   { width: 2560, height: 1440 },
   { width: 1440, height: 900 },

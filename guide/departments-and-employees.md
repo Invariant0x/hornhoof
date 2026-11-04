@@ -15,13 +15,15 @@ Click a department to fly into it. Its schema shows:
 
 Every employee shows the task it is about and what it does now: working, queued, handed on, needs a decision, or free.
 
+"Tree" shows the work of the current turn. Drag it with a mouse or finger, use the wheel to zoom, or use the same zoom and "Show everything" buttons as on the map. The tree is for viewing only. Click an employee's name or any of its task rows to open its window, including when it is sleeping.
+
 On the map, a department's card has one square per employee, in the same colors.
 
 ![A department at work](../.github/assets/development.gif)
 
 ## Where are a department's tasks and people?
 
-"Department tasks" and "About the department" open its tasks, repository, products and people at the left.
+"Department tasks", "About the department" and "Speed" open at the same place on the left. Task details and employee settings also open on the left. The right side is for the employee's window.
 
 ## Hire employees
 
