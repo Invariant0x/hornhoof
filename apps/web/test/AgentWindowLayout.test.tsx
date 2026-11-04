@@ -35,6 +35,20 @@ async function openEmployee(user: ReturnType<typeof userEvent.setup>) {
 afterEach(() => localStorage.clear());
 
 describe('agent window task and controls', () => {
+  it('updates a coalesced report in place when another sender joins the same event', async () => {
+    const stream = fakeStream();
+    const message: NonNullable<EventView['message']> = { direction: 'in', from: { kind: 'agent', id: 'h1', name: 'Hana', role: null, department: null }, to: { kind: 'agent', id: 'b1', name: 'Bruno', role: null, department: null }, notification: { source: 'reported', tasks: [{ id: 't1', number: 223 }] } };
+    const event: EventView = { seq: 1, kind: 'message', data: { text: 'Release verified.' }, jobId: 'j1', person: null, at: '2026-11-04T14:00:00Z', message };
+    company(true, false, [event]);
+    const window = await openEmployee(userEvent.setup());
+    await within(window).findByRole('button', { name: 'Message from Hana via Hornhoof to Bruno' });
+    stream.send({ type: 'agent_event', agentId: 'b1', event: { ...event, message: { ...message, revision: 1, senders: [message.from, { ...message.from, id: 'h2', name: 'Rita' }] } } });
+    expect(await within(window).findByRole('button', { name: 'Message from Hana, Rita via Hornhoof to Bruno' })).toBeInTheDocument();
+    stream.send({ type: 'agent_event', agentId: 'b1', event });
+    expect(await within(window).findByRole('button', { name: 'Message from Hana, Rita via Hornhoof to Bruno' })).toBeInTheDocument();
+    expect(within(window).queryByRole('button', { name: 'Message from Hana via Hornhoof to Bruno' })).not.toBeInTheDocument();
+  });
+
   it.each(['Department tasks', 'About the department', 'Speed', 'Account', 'About', 'Settings', 'Versions'])('keeps Escape with %s instead of stopping the busy agent', async name => {
     const { calls } = company(true, true);
     const user = userEvent.setup();
@@ -210,7 +224,7 @@ describe('agent window task and controls', () => {
     company(true, false, [notice]);
     const user = userEvent.setup();
     const window = await openEmployee(user);
-    const noticeButton = await screen.findByRole('button', { name: 'Hornhoof notice to Bruno' });
+    const noticeButton = await screen.findByRole('button', { name: 'Hornhoof, recorded service message to Bruno' });
     expect(noticeButton).toHaveAttribute('aria-expanded', 'false');
     await user.click(within(window).getByRole('button', { name: 'Minimize' }));
     const restore = screen.getByRole('button', { name: 'Restore Bruno, Backend engineer' });

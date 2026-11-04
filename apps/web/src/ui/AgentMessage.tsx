@@ -24,7 +24,12 @@ export function messageLine(t: Messages, language: Language, m: AgentMessageView
   const from = partyName(t, language, m.from);
   const to = partyName(t, language, m.to);
   if (m.direction === 'out') return t.window.messageTo(to, from);
-  return m.from.kind === 'hornhoof' ? t.window.notice(to) : t.window.messageFrom(from, to);
+  if (m.from.kind === 'hornhoof') {
+    const n = m.notification;
+    return t.window.noticeSource(t.notificationSources[n?.source ?? 'service'], n?.tasks.map(t => `#${t.number}`).join(', ') ?? '', n?.detail?.[language] ?? '', to);
+  }
+  const senders = m.senders?.length ? m.senders.map(p => partyName(t, language, p)).join(', ') : from;
+  return m.notification ? t.window.messageVia(senders, to) : t.window.messageFrom(from, to);
 }
 
 /* One message as a single line that names who wrote to whom; its whole text, service lines too, opens under it. */

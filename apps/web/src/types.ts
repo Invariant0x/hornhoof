@@ -1,3 +1,4 @@
+import type { Notification } from '@hornhoof/protocol';
 import type { FailureKind, Limits, ModelOption, NodeLoad, ProgramInfo, ProviderId, TemplateKey } from '@hornhoof/protocol';
 import type { RoleEffort } from '@hornhoof/protocol/efforts';
 import type { ProgramRetry, TurnAlarm, TurnProgram, TurnRetry, WorkLine } from '@hornhoof/protocol/map';
@@ -275,7 +276,7 @@ export type EventView = {
   jobId: string | null;
   person: { id: string; name: string } | null;
   at: string;
-  message?: { direction: 'in' | 'out'; from: MessageParty; to: MessageParty };
+  message?: { direction: 'in' | 'out'; from: MessageParty; to: MessageParty; notification?: Notification; senders?: MessageParty[]; revision?: number };
 };
 
 /* What the browser hears live from /api/stream. */

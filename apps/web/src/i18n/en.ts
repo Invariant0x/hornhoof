@@ -1,3 +1,4 @@
+import { NOTIFICATION_NAMES } from '@hornhoof/protocol';
 import type { EmployeeStatus, FailureKind } from '../types';
 import { plural } from './plural';
 
@@ -13,6 +14,7 @@ export function summary(counts: StatusCounts, words: Record<EmployeeStatus, stri
 /* English is the source. Every other language has to match this shape. */
 
 export const en = {
+  notificationSources: { ...NOTIFICATION_NAMES } as Record<keyof typeof NOTIFICATION_NAMES, string>,
   common: {
     loading: 'Loading…',
     somethingWrong: 'Something went wrong.',
@@ -453,6 +455,8 @@ export const en = {
     /* A message between an agent and someone else: one line that names both, its text folded under it. */
     messageFrom: (from: string, to: string) => `Message from ${from} to ${to}`,
     messageTo: (to: string, from: string) => `Message to ${to} from ${from}`,
+    messageVia: (from: string, to: string) => `Message from ${from} via Hornhoof to ${to}`,
+    noticeSource: (source: string, refs: string, detail: string, to: string) => `Hornhoof, ${source}${refs ? ` on ${refs}` : ''}${detail ? ` (${detail})` : ''} to ${to}`,
     notice: (to: string) => `Hornhoof notice to ${to}`,
     theOrchestrator: 'the orchestrator',
     people: 'people',

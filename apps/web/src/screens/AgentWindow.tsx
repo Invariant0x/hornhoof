@@ -200,9 +200,12 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard, o
   const merge = useCallback((more: EventView[]) => {
     if (!more.length) return;
     setEvents(list => {
-      const seen = new Set(list.map(e => e.seq));
-      const fresh = more.filter(e => !seen.has(e.seq));
-      return fresh.length ? [...list, ...fresh].sort((a, b) => a.seq - b.seq) : list;
+      const bySeq = new Map(list.map(e => [e.seq, e]));
+      for (const event of more) {
+        const before = bySeq.get(event.seq);
+        if ((event.message?.revision ?? 0) >= (before?.message?.revision ?? 0)) bySeq.set(event.seq, event);
+      }
+      return [...bySeq.values()].sort((a, b) => a.seq - b.seq);
     });
   }, []);
 
