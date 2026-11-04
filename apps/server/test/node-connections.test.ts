@@ -223,6 +223,19 @@ describe('the history of a node connection', () => {
     expect(await stored(db)).toEqual([]);
   });
 
+  it('loses the query and the sign-in of any address a socket gave, in the history and in the log', async () => {
+    const lines: string[] = [];
+    const { db, url, keys } = await liveCompany({}, { level: 'info', stream: { write: (line: string) => void lines.push(line) } });
+    const node = await connectNode(url, keys[0]!);
+    await storedAre(db, 1);
+    node.ws.close(1000, 'See HTTPS://user:pw@proxy.example/a?sig=abc123 now');
+    await endedAre(db, 1);
+    expect((await stored(db))[0]!.closeReason).toBe('See HTTPS://proxy.example/a now');
+    await until(() => lines.some(l => l.includes('A node lost its connection.')));
+    expect(lines.join('\n')).not.toContain('abc123');
+    expect(lines.join('\n')).not.toContain('user:pw');
+  });
+
   it('cuts a close reason and an error to their limits and keeps control characters out', async () => {
     const { db, ids } = await liveCompany();
     const hub = new NodeHub({
@@ -241,6 +254,27 @@ describe('the history of a node connection', () => {
     const [row] = await stored(db);
     expect(row!.error).toBe(`Bad frame ${'e'.repeat(290)}`);
     expect(row!.closeReason).toBe(`Why  ${'r'.repeat(195)}`);
+  });
+
+  it('loses a sign-in the limit would cut in two, one with an at sign in it and one with a control character', async () => {
+    const { db, ids } = await liveCompany();
+    const hub = new NodeHub({
+      pingMs: 60_000,
+      onClose: async () => {},
+      onMessage: async () => {},
+      onDisconnected: (id, end) => nodeDisconnected({ db, log: { info: vi.fn() } } as never, id, end),
+      onConnected: (id, link, at) => nodeConnected({ db, log: { info: vi.fn() } } as never, id, link, at),
+    });
+    onTestFinished(() => hub.stop());
+    const socket = Object.assign(new EventEmitter(), { readyState: 1, close() {}, ping() {}, terminate() {} });
+    hub.attach({ kind: 'node', nodeId: ids[0]! }, socket as unknown as WebSocket);
+    const before = 'e'.repeat(270);
+    socket.emit('error', new Error(`${before} https://user:secretsecretsecret@proxy.example/x`));
+    socket.emit('close', 1002, Buffer.from('See https://user:p@ss@proxy.example/a and wss://us\u0007er:pw@proxy.example/b'));
+    await endedAre(db, 1);
+    const [row] = await stored(db);
+    expect(row!.error).toBe(`${before} https://proxy.example/x`);
+    expect(row!.closeReason).toBe('See https://proxy.example/a and wss://proxy.example/b');
   });
 });
 
@@ -291,6 +325,15 @@ describe('what a node says of a drop when it is back', () => {
     second.send(REPORT);
     await second.closed;
     expect((await stored(db)).map(r => r.report)).toEqual([null, null]);
+  });
+
+  it('loses the query and the sign-in of any address in its words, as they go to people', async () => {
+    const { db, second } = await backFromADrop();
+    second.send({ ...REPORT, closeReason: 'See wss://proxy.example/a?sig=abc123', error: 'Redirected to https://user:secret@proxy.example/x?sig=abc123#part, then http://other.example/ok.' });
+    await until(async () => (await stored(db))[0]?.report !== null);
+    const said = (await stored(db))[0]!.report!;
+    expect(said.closeReason).toBe('See wss://proxy.example/a');
+    expect(said.error).toBe('Redirected to https://proxy.example/x, then http://other.example/ok.');
   });
 
   it('is not written for the built-in node', async () => {

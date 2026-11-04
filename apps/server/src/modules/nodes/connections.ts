@@ -20,8 +20,14 @@ const BUILTIN_NAMES = { machine: 'built-in', node: 'builtin' };
 
 type Writes = Pick<Ctx, 'db' | 'log'>;
 
-/* What a socket said of itself goes to the log and to people's screens: one line, within its limit. */
-const oneLine = (text: string | null, limit: number) => (text === null ? null : text.replace(/\p{Cc}/gu, ' ').slice(0, limit));
+/* An address in any words: its scheme and path, then a sign-in and a query, which can hold a secret whatever they are called,
+   up to what ends the address in a sentence. */
+const ADDRESS = /([a-z][a-z0-9+.-]*:\/\/)(?:[^\s/?#]*@)?([^\s?#]*)(?:[?#]\S*?)?(?=[.,;:!)\]'"]*(?:\s|$))/gi;
+
+/* What a socket or a node says goes to the log and to people's screens: one line, within its limit, with addresses bare.
+   Addresses go first: a limit could cut a sign-in in two and a control character could hide one. Each socket and node gives
+   a short text, 123 bytes of a close reason and 300 characters from a node, so the search stays cheap. */
+const oneLine = (text: string | null, limit: number) => (text === null ? null : text.replace(ADDRESS, '$1$2').replace(/\p{Cc}/gu, ' ').slice(0, limit));
 
 async function nodeOn(db: Db, nodeId: string) {
   const [node] = await db
@@ -58,7 +64,11 @@ export async function nodeReported(ctx: Ctx, id: NodeIdentity, msg: Extract<Node
   if (id.kind !== 'node' || !(await hasCurrentKey(ctx, id))) return;
   const [, before] = await ctx.db.select({ id: nodeConnections.id }).from(nodeConnections).where(eq(nodeConnections.nodeId, id.nodeId)).orderBy(desc(nodeConnections.connectedAt)).limit(2);
   if (!before) return;
-  await ctx.db.update(nodeConnections).set({ report: NodeReconnect.parse(msg) }).where(eq(nodeConnections.id, before.id));
+  const report = NodeReconnect.parse(msg);
+  await ctx.db
+    .update(nodeConnections)
+    .set({ report: { ...report, closeReason: oneLine(report.closeReason, REASON_CHARS), error: oneLine(report.error, ERROR_CHARS) } })
+    .where(eq(nodeConnections.id, before.id));
 }
 
 /* While the database still answers: the sockets close after this, and a process that stops does not wait for them. */
