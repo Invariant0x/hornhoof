@@ -3,9 +3,9 @@ import { asc, eq, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { MAX_INSTRUCTIONS, OLD_NODE_INSTRUCTIONS, parseServerMessage } from '@hornhoof/protocol';
-import { agentChanges, agents, departments, jobs, people, proposals, subscriptions, tasks, teams } from '../src/db/schema.js';
+import { agentChanges, agents, departments, jobs, people, proposals, subscriptions, requests, tasks, teams } from '../src/db/schema.js';
 import { instructionsOf, renderInstructions } from '../src/modules/agents/instructions.js';
-import { createTask, submit } from '../src/modules/tasks/engine.js';
+import { ask, createTask, submit } from '../src/modules/tasks/engine.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
 import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
 
@@ -359,7 +359,7 @@ describe('the employee card', () => {
     expect(org.departments[0].employees.map((e: { name: string }) => e.name)).toEqual(['Hana', 'Bruno', 'Rob', 'Ann', 'Rita']);
   });
 
-  it('removes a reviewer moved into a sub-unit from the current gate panel, picks a replacement or advances the gate, drops future gates, and cancels its queued wake', async () => {
+  it.each([false, true])('removes a reviewer moved into a sub-unit from the current gate panel, picks a replacement or advances the gate, drops future gates, and cancels its queued wake (question: %s)', async withQuestion => {
     const { app, db, ceo, dev, teamKey, brunoId } = await company();
     const line = (role: string, name: string) => ({
       role,
@@ -387,11 +387,13 @@ describe('the employee card', () => {
     const ritaJobsBefore = await db.select().from(jobs).where(eq(jobs.agentId, ritaId));
     expect(ritaJobsBefore).toMatchObject([{ taskId: atPanel.id, status: 'queued' }]);
 
+    const question = withQuestion ? await ask(app.ctx, ritaId, atPanel.id, { kind: 'question', text: 'Which checkout version?' }) : null;
     const movedRita = await patch(app, ceo, ritaId, { team: urgent!.id });
     expect(movedRita.statusCode).toBe(200);
 
     const [afterRita] = await db.select().from(tasks).where(eq(tasks.id, atPanel.id));
     expect(afterRita).toMatchObject({ status: 'review', stage: 1, panel: [robId], assigneeAgentId: robId });
+    if (question) expect((await db.select().from(requests).where(eq(requests.id, question.request.id)))[0]).toMatchObject({ status: 'withdrawn', answeredAt: expect.any(Date) });
     const [futureGate] = await db.select().from(tasks).where(eq(tasks.id, atWork.id));
     expect(futureGate!.gates).toEqual([]);
     const ritaJobsAfter = await db.select().from(jobs).where(eq(jobs.agentId, ritaId));
@@ -399,11 +401,53 @@ describe('the employee card', () => {
     const robJobsAfter = await db.select().from(jobs).where(eq(jobs.agentId, robId));
     expect(robJobsAfter).toMatchObject([{ taskId: atPanel.id, status: 'queued' }]);
 
+    const lastQuestion = withQuestion ? await ask(app.ctx, robId, atPanel.id, { kind: 'question', text: 'Can I approve checkout?' }) : null;
     const movedRob = await patch(app, ceo, robId, { team: urgent!.id });
     expect(movedRob.statusCode).toBe(200);
     const [afterRob] = await db.select().from(tasks).where(eq(tasks.id, atPanel.id));
     expect(afterRob).toMatchObject({ status: 'done', panel: [] });
+    if (lastQuestion) expect((await db.select().from(requests).where(eq(requests.id, lastQuestion.request.id)))[0]).toMatchObject({ status: 'withdrawn', answeredAt: expect.any(Date) });
     const robJobsDone = await db.select().from(jobs).where(eq(jobs.agentId, robId));
     expect(robJobsDone).toMatchObject([{ taskId: atPanel.id, status: 'failed', error: 'switched_off' }]);
+  });
+
+  it.each([false, true])("withdraws only the departing reviewer's questions and resumes the remaining review (other question: %s)", async otherAsks => {
+    const { app, db, ceo, dev, teamKey, codex, brunoId } = await company();
+    const [head, rita, rob] = await db.insert(agents).values([
+      { companyId: dev.companyId, departmentId: dev.id, kind: 'head', roleKey: 'DEV-HEAD', name: 'Hana', model: '', subscriptionId: teamKey },
+      { companyId: dev.companyId, departmentId: dev.id, kind: 'worker', roleKey: 'DEV-REV', name: 'Rita', model: 'claude-sonnet-5-5', subscriptionId: teamKey },
+      { companyId: dev.companyId, departmentId: dev.id, kind: 'worker', roleKey: 'DEV-REV', name: 'Rob', model: 'gpt-6.1-sol', subscriptionId: codex },
+    ]).returning();
+    const [team] = await db.insert(teams).values({ companyId: dev.companyId, departmentId: dev.id, name: 'Urgent fixes' }).returning();
+    const { task } = await createTask(app.ctx, { agentId: head!.id }, { title: 'Checkout review', brief: '', body: '', departmentId: dev.id, assigneeAgentId: brunoId, executor: true, gates: [rita!.id] });
+    await submit(app.ctx, brunoId, task.id, { summary: 'Done', evidence: 'Targeted tests' });
+    const first = await ask(app.ctx, rita!.id, task.id, { kind: 'question', text: 'Which version?' });
+    const second = otherAsks ? await ask(app.ctx, rob!.id, task.id, { kind: 'question', text: 'Which deployment?' }) : null;
+    const { task: work } = await createTask(app.ctx, { agentId: head!.id }, { title: 'Review tooling', brief: '', body: '', departmentId: dev.id, assigneeAgentId: rita!.id, executor: true, gates: [] });
+    const ownQuestion = await ask(app.ctx, rita!.id, work.id, { kind: 'question', text: 'Which tool version?' });
+    const [history] = await db.insert(requests).values({ companyId: dev.companyId, taskId: task.id, agentId: rita!.id, kind: 'question', text: 'Settled scope', status: 'answered', answer: 'Checkout only', answeredAt: new Date() }).returning();
+
+    expect((await patch(app, ceo, rita!.id, { team: team!.id })).statusCode).toBe(200);
+
+    expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]).toMatchObject({ status: otherAsks ? 'waiting' : 'review', panel: [rob!.id], assigneeAgentId: rob!.id });
+    expect((await db.select().from(requests).where(eq(requests.id, first.request.id)))[0]).toMatchObject({ status: 'withdrawn', answeredAt: expect.any(Date) });
+    if (second) expect((await db.select().from(requests).where(eq(requests.id, second.request.id)))[0]).toMatchObject({ status: 'open', answeredAt: null, agentId: rob!.id });
+    expect(await db.select().from(jobs).where(eq(jobs.agentId, rob!.id))).toMatchObject(otherAsks ? [] : [{ taskId: task.id, status: 'queued' }]);
+    expect((await db.select().from(requests).where(eq(requests.id, ownQuestion.request.id)))[0]).toMatchObject({ status: 'open', answeredAt: null });
+    expect((await db.select().from(tasks).where(eq(tasks.id, work.id)))[0]).toMatchObject({ status: 'waiting', stage: 0, assigneeAgentId: rita!.id });
+    expect((await db.select().from(requests).where(eq(requests.id, history!.id)))[0]).toMatchObject({ status: 'answered', answer: 'Checkout only' });
+  });
+
+  it('keeps an executor question when the executor moves into a sub-unit without leaving a review panel', async () => {
+    const { app, db, ceo, dev, teamKey, brunoId } = await company();
+    const [head] = await db.insert(agents).values({ companyId: dev.companyId, departmentId: dev.id, kind: 'head', roleKey: 'DEV-HEAD', name: 'Hana', model: '', subscriptionId: teamKey }).returning();
+    const [team] = await db.insert(teams).values({ companyId: dev.companyId, departmentId: dev.id, name: 'Urgent fixes' }).returning();
+    const { task } = await createTask(app.ctx, { agentId: head!.id }, { title: 'Checkout API', brief: '', body: '', departmentId: dev.id, assigneeAgentId: brunoId, executor: true, gates: [] });
+    const question = await ask(app.ctx, brunoId, task.id, { kind: 'question', text: 'Which checkout version?' });
+
+    expect((await patch(app, ceo, brunoId, { team: team!.id })).statusCode).toBe(200);
+
+    expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]).toMatchObject({ status: 'waiting', stage: 0, panel: [], assigneeAgentId: brunoId });
+    expect((await db.select().from(requests).where(eq(requests.id, question.request.id)))[0]).toMatchObject({ status: 'open', answeredAt: null });
   });
 });

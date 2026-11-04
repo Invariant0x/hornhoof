@@ -15,7 +15,7 @@ import { appendTurnEvent, publishWorking } from '../events/store.js';
 import { partDone, partStarted, pumpTests, testsHello } from '../testruns/runs.js';
 import { sameNode, type NodeIdentity } from './hub.js';
 import { deliver, pushCredentials, signedIn, storeEnvelopes } from '../subscriptions/credentials.js';
-import { liveNode, settlePlans } from './nodes.js';
+import { hasCurrentKey, liveNode, settlePlans } from './nodes.js';
 import { builtinInterruption, interruptionOf } from './restarts.js';
 import { interruptionValue, type RestartCut } from './restart-evidence.js';
 import { hookRejected } from './hook-rejections.js';
@@ -123,6 +123,7 @@ const nodeCut = (ctx: Ctx, nodeId: string, row: { node: typeof nodes.$inferSelec
   interruptionOf(ctx, { id: nodeId, name: row.host || 'a machine with no name', machine: { id: row.node.machineId, name: row.host }, said: { version: row.node.version, boot: row.node.boot } }, msg, now);
 
 export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage, now = new Date()): Promise<void> {
+  if (!(await hasCurrentKey(ctx, id))) return;
   const { db } = ctx;
   // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- term.* messages are routed by the terminal hub
   switch (msg.type) {

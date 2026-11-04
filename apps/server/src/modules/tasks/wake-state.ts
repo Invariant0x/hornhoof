@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Db } from '../../db/client.js';
 import { agentEvents, agents, jobs, taskEvents, tasks, TASK_STATUSES } from '../../db/schema.js';
@@ -56,9 +56,18 @@ function recipient(task: Task, agentId: string, why = ''): boolean {
   return onTask(task, agentId);
 }
 
-function applies(task: Task, agentId: string, state: TaskWake | null): boolean {
+/* A cancelled prerequisite is news for the dependent task's creator, not its executor or reviewers. */
+async function wakeRecipient(db: Store, task: Task, agentId: string, why = ''): Promise<boolean> {
+  if (why !== 'after_cancelled') return recipient(task, agentId, why);
+  if (task.createdByAgentId) return task.createdByAgentId === agentId;
+  const [orchestrator] = await db.select({ id: agents.id }).from(agents)
+    .where(and(eq(agents.companyId, task.companyId), eq(agents.kind, 'orchestrator'), isNull(agents.removedAt)));
+  return orchestrator?.id === agentId;
+}
+
+async function applies(db: Store, task: Task, agentId: string, state: TaskWake | null): Promise<boolean> {
   if (isNotice(state)) return true;
-  return !task.externalWait && !CLOSED.includes(task.status) && samePhase(task, state) && recipient(task, agentId, state?.why);
+  return !task.externalWait && !CLOSED.includes(task.status) && samePhase(task, state) && (await wakeRecipient(db, task, agentId, state?.why));
 }
 
 /* Validate again when a delayed outbox wake is queued, before it can reach a live terminal. */
@@ -69,7 +78,7 @@ export async function taskForWake(db: Db, wake: Wake): Promise<Task | null> {
 
 /* Every task action, including a repeat, goes through the same policy before it can wake anybody. */
 async function checkedTask(db: Store, task: Task, agentId: string, state: TaskWake | null, run: string, job: string | null = null): Promise<Task | null> {
-  if (applies(task, agentId, state)) return task;
+  if (await applies(db, task, agentId, state)) return task;
   await logSkipped(db, task, agentId, run, job);
   return null;
 }
@@ -118,7 +127,7 @@ export async function discardStaleTurn(db: Store, job: TaskTurn): Promise<boolea
   if (!row) throw new Error('A queued task turn lost its task or agent.');
   const state = await stateOf(db, job.id);
   if (state === null && legacyNotice(row.task, job.agentId, row.kind, row.job.prompt)) return false;
-  if (applies(row.task, job.agentId, state)) return false;
+  if (await applies(db, row.task, job.agentId, state)) return false;
   await recordStale(db, job.id, job.agentId, row.task, runOf(row.job, state), 'queued');
   return true;
 }

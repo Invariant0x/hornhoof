@@ -945,7 +945,7 @@ export async function leaveGates(ctx: Live, actor: Actor, agent: Leaver): Promis
   const closed: Task[] = [];
   for (const found of open) {
     const current = found.gates.slice(found.stage).includes(agent.id) ? await dropGate(ctx, actor, found, agent.id) : found;
-    const left = await onFresh(ctx, current, task => leaveGate(ctx, n, agent, task));
+    const left = await onFresh(ctx, current, task => leaveCurrentGate(ctx, n, agent, task));
     if (!left) continue;
     handed.push(current.id);
     wakes.push(...left.wakes);
@@ -956,15 +956,42 @@ export async function leaveGates(ctx: Live, actor: Actor, agent: Leaver): Promis
 
 const closedTask = (task: Task): Task | null => (CLOSED.includes(task.status) ? task : null);
 
+/* With the last question withdrawn, remaining reviewers need a fresh turn kept with the final panel change. */
+async function leaveCurrentGate(ctx: Live, n: Note, agent: Leaver, task: Task): Promise<{ wakes: Wake[]; closed: Task | null } | null> {
+  const ready = await releaseGateQuestions(ctx, n, agent, task);
+  const wakes: Wake[] = [];
+  if (ready.status !== task.status) {
+    const back = await reviewWake(ctx.db, ready);
+    wakes.push(...ready.panel.filter(id => id !== agent.id).map(agentId => ({ agentId, taskId: task.id, ...back })));
+  }
+  return leaveGate(ctx, n, agent, ready, wakes);
+}
+
+/* A reviewer moved out of the department's gates can no longer act on its questions. Other reviewers still wait for theirs. */
+async function releaseGateQuestions(ctx: Live, n: Note, agent: Leaver, task: Task): Promise<Task> {
+  if (task.status !== 'waiting' || !task.panel.includes(agent.id) || !(await asked(ctx.db, task, agent.id))) return task;
+  const row = await move(ctx, task, { status: 'review' }, n, async (tx, row) => {
+    await tx.update(requests).set({ status: 'withdrawn', answeredAt: new Date() })
+      .where(and(eq(requests.taskId, task.id), eq(requests.agentId, agent.id), eq(requests.status, 'open')));
+    const [open] = await tx.select({ id: requests.id }).from(requests).where(and(eq(requests.taskId, task.id), eq(requests.status, 'open'))).limit(1);
+    if (open) {
+      await tx.update(tasks).set({ status: 'waiting' }).where(eq(tasks.id, task.id));
+      row.status = 'waiting';
+    }
+  });
+  ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
+  return row;
+}
+
 /* The agent leaves the panel of a task's current gate; null when it is not on the panel. */
-async function leaveGate(ctx: Live, n: Note, agent: Leaver, task: Task): Promise<{ wakes: Wake[]; closed: Task | null } | null> {
+async function leaveGate(ctx: Live, n: Note, agent: Leaver, task: Task, wakes: Wake[] = []): Promise<{ wakes: Wake[]; closed: Task | null } | null> {
   if (task.stage < 1 || !task.panel.includes(agent.id)) return null;
   const panel = task.panel.filter(id => id !== agent.id);
   /* Someone else at the gate asked a person, so someone is left to decide it. */
   if (task.status === 'waiting' && (!panel.length || (await asked(ctx.db, task, agent.id)))) return null;
   if (panel.length) {
-    await move(ctx, task, { panel, assigneeAgentId: panel[0]! }, n);
-    return { wakes: [], closed: null };
+    await move(ctx, task, { panel, assigneeAgentId: panel[0]! }, n, undefined, wakes);
+    return { wakes, closed: null };
   }
   const given = await gateVerdicts(ctx.db, task);
   /* The review of a turn closes as its last reviewer leaves, with whatever verdicts it has. */

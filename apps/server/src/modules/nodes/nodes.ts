@@ -7,6 +7,15 @@ import { nodeIdentity, type NodeHub, type NodeIdentity } from './hub.js';
 /* A node that still has its key: its machine is connected and Hornhoof has not taken the node back. */
 export const liveNode = isNotNull(nodes.keyHash);
 
+/* A socket authenticated with a node key may act only while its node row still holds that exact key hash. */
+export async function hasCurrentKey(ctx: { db: Db; hub: NodeHub }, id: NodeIdentity): Promise<boolean> {
+  if (id.kind !== 'node' || !id.keyHash) return true;
+  const [row] = await ctx.db.select({ keyHash: nodes.keyHash }).from(nodes).where(eq(nodes.id, id.nodeId));
+  if (row?.keyHash === id.keyHash) return true;
+  ctx.hub.close(id.nodeId, 4001, id.keyHash);
+  return false;
+}
+
 export const NODE_STALE_MS = 24 * 60 * 60 * 1000;
 
 /* Clears ready on nodes that have not been heard from for more than 24 hours and settles their plans. */

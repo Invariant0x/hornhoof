@@ -1,26 +1,32 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Subscriptions } from '../src/screens/Subscriptions';
 import { ME, mockApi, SUBS } from './api-mock';
 
 const COMMAND = 'curl -fsSL https://hq.acme.test/install.sh | bash -s -- --join DEMO_ONLY';
+const NOW = Date.parse('2026-11-03T10:00:00Z');
 const pending = { ...SUBS[2]!, id: 's-new', provider: 'claude' as const, label: 'Claude' };
-const shown = () => ({ id: 'a'.repeat(64), kind: 'plans' as const, subscriptionIds: [pending.id], dismissedSubscriptionIds: [] as string[], plans: ['Claude'], machine: null, command: COMMAND, expiresAt: new Date(Date.now() + 21 * 3600_000 + 1000).toISOString() });
+const shown = () => ({ id: 'a'.repeat(64), kind: 'plans' as const, subscriptionIds: [pending.id], dismissedSubscriptionIds: [] as string[], plans: ['Claude'], machine: null, command: COMMAND, expiresAt: new Date(Date.now() + 21 * 3600_000).toISOString() });
 const view = () => render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
 const open = async (name = 'Claude') => {
   fireEvent.click(await screen.findByRole('button', { name: `Open the card of ${name}` }));
   return screen.getByRole('article', { name: `${name}, Ivan` });
 };
-afterEach(() => localStorage.clear());
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+  vi.setSystemTime(NOW);
+});
+afterEach(() => { vi.useRealTimers();localStorage.clear(); });
 
 describe('subscription install commands', () => {
-  it('puts the newly returned waiting plan in the table immediately and keeps its command after Done and reload', async () => {
+  it.each([0, 1500])('keeps the returned plan and command after Done and reload with a %i ms fixture delay', async delay => {
     let commands: ReturnType<typeof shown>[] = [];
     const rows = [pending];
     let sent = false;
     const active = shown();
+    await new Promise(resolve => setTimeout(resolve, delay));
     mockApi({
       'GET /api/subscriptions': () => sent ? new Promise(() => {}) : [200, { subscriptions: [] }],
       'GET /api/nodes/commands': () => [200, { commands }],
@@ -76,9 +82,7 @@ describe('subscription install commands', () => {
 
   it.each([['en', 'Valid for 35 more minutes.'], ['ru', 'Действует еще 35 мин.']])('updates remaining lifetime and allows a new command after expiry in %s', async (language, duration) => {
     localStorage.setItem('hh-lang', language);
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    onTestFinished(() => { vi.useRealTimers(); });
-    const active = { ...shown(), expiresAt: new Date(Date.now() + 35 * 60_000 + 1000).toISOString() };
+    const active = { ...shown(), expiresAt: new Date(Date.now() + 35 * 60_000).toISOString() };
     mockApi({ 'GET /api/subscriptions': [200, { subscriptions: [pending] }], 'GET /api/nodes/commands': [200, { commands: [active] }] });
     view();
     fireEvent.click(await screen.findByRole('button', { name: language === 'en' ? 'Open the card of Claude' : 'Открыть карточку Claude' }));
