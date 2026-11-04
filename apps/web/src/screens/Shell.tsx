@@ -3,7 +3,7 @@ import { api } from '../api';
 import { deptLabel, LANGUAGES, useLanguage, useT } from '../i18n';
 import { liveOf, useOrg } from '../org';
 import { currentTheme, setTheme, type Theme } from '../theme';
-import type { Me } from '../types';
+import type { Me, Org } from '../types';
 import { AgentCard } from '../ui/AgentCard';
 import { LogoMark } from '../ui/icons';
 import { UpdateBanner } from '../ui/UpdateBanner';
@@ -26,7 +26,7 @@ import { Versions } from './Versions';
 
 type Tab = 'map' | 'tasks' | 'people' | 'subscriptions' | 'machines' | 'improvements';
 /* The right panel: an agent's terminal or its card, or a task. agentId is 'orchestrator' or an employee's id. */
-type Panel = { kind: 'window' | 'card'; agentId: string } | { kind: 'task'; taskId: string } | null;
+type Panel = { kind: 'window' | 'card'; agentId: string; request?: number } | { kind: 'task'; taskId: string } | null;
 const TABS: Tab[] = ['map', 'tasks', 'people', 'subscriptions', 'machines'];
 const THEMES: Theme[] = ['light', 'dark'];
 type AccountDialogName = 'about' | 'versions' | 'settings';
@@ -160,6 +160,7 @@ function useDecisionsView() {
   const requests = decisions?.requests ?? [];
   return {
     all: decisions,
+    requests,
     load,
     /* What agents ask, the orchestrator's cards and his request for the computer. */
     waiting: decisions?.counts.total ?? 0,
@@ -168,6 +169,21 @@ function useDecisionsView() {
     /* What agents ask on one task, for its panel. */
     requestsOf: (taskId: string) => requests.filter(r => r.task.id === taskId),
   };
+}
+
+/* An explicit opening also brings a minimized window back, including when its agent did not change. */
+function useAgentOpener(setPanel: (panel: Panel) => void) {
+  const requests = useRef(0);
+  return useCallback((agentId: string) => {
+    setPanel({ kind: 'window', agentId, request: ++requests.current });
+  }, [setPanel]);
+}
+
+/* Resolve the orchestrator after the company loads too, since lists may open before that response arrives. */
+function agentPanelFor(panel: Panel, org: Org | null) {
+  if (!panel || panel.kind === 'task') return null;
+  const agentId = panel.agentId === org?.orchestrator?.id ? 'orchestrator' : panel.agentId;
+  return { ...panel, agentId };
 }
 
 /* welcome: setup just finished, so the orchestrator's window opens at once. */
@@ -181,9 +197,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   const [deptId, setDeptId] = useState<string | null>(null);
   const [staff, setStaff] = useState<StaffAsk | null>(null);
   const { org } = useOrg(panel !== null || deptId !== null);
-  const openAgent = useCallback((agentId: string) => {
-    setPanel({ kind: 'window', agentId: agentId === org?.orchestrator?.id ? 'orchestrator' : agentId });
-  }, [org?.orchestrator?.id]);
+  const openAgent = useAgentOpener(setPanel);
   const dept = deptId ? org?.departments.find(d => d.id === deptId) : undefined;
   /* A department removed while its view was open closes the view. */
   useEffect(() => {
@@ -199,7 +213,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   };
   const { improvements, failure: improvementsFailure, load: loadImprovements } = useImprovements(company);
   const toDecide = improvements?.filter(i => i.status === 'open').length ?? 0;
-  const agentPanel = panel && panel.kind !== 'task' ? panel : null;
+  const agentPanel = agentPanelFor(panel, org);
   const [accountDialog, setAccountDialog] = useState<AccountDialogName | null>(null);
   const account = useRef<HTMLDivElement>(null);
   const accountButton = useRef<HTMLButtonElement>(null);
@@ -316,15 +330,18 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
         {tab === 'machines' && <Machines me={me} />}
         {tab === 'improvements' && company && <Improvements improvements={improvements} failure={improvementsFailure} onChanged={loadImprovements} onTask={taskId => setPanel({ kind: 'task', taskId })} />}
       </main>
-      {panel?.kind === 'window' && org && (
+      {agentPanel?.kind === 'window' && org && (
         <AgentWindow
-          key={panel.agentId}
+          key={agentPanel.agentId}
           me={me}
           org={org}
-          agentId={panel.agentId}
-          staff={panel.agentId === 'orchestrator' ? staff : null}
+          agentId={agentPanel.agentId}
+          openRequest={agentPanel.request}
+          requests={decisions.requests}
+          onRequestsChanged={decisions.load}
+          staff={agentPanel.agentId === 'orchestrator' ? staff : null}
           onClose={() => setPanel(null)}
-          onCard={() => setPanel({ kind: 'card', agentId: panel.agentId })}
+          onCard={() => setPanel({ kind: 'card', agentId: agentPanel.agentId })}
         />
       )}
       {panel?.kind === 'task' && (
@@ -338,8 +355,8 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
           onOpenAgent={openAgent}
         />
       )}
-      {panel?.kind === 'card' && (
-        <AgentCard key={panel.agentId} me={me} agentId={panel.agentId} {...liveOf(org, panel.agentId)} onClose={() => setPanel(null)} onTerminal={() => openAgent(panel.agentId)} />
+      {agentPanel?.kind === 'card' && (
+        <AgentCard key={agentPanel.agentId} me={me} agentId={agentPanel.agentId} {...liveOf(org, agentPanel.agentId)} onClose={() => setPanel(null)} onTerminal={() => openAgent(agentPanel.agentId)} />
       )}
       <AccountDialog active={accountDialog} me={me} updates={updates} onClose={() => { setAccountDialog(null); accountButton.current?.focus(); }} />
     </div>

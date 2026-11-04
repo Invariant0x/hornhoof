@@ -4,7 +4,7 @@ import { api } from '../api';
 import { deptLabel, errorText, useLanguage, useT, type Messages } from '../i18n';
 import { useStream } from '../live';
 import { PROGRAM_NAMES, PROVIDER_NAMES } from '../providers';
-import type { AgentCardView, ComputerView, DecidedBy, Decisions, EventView, Me, OrchestratorState, Org, ShownCommand, StaffLine, StructureItem, SubView, TemplateKey } from '../types';
+import type { AgentCardView, ComputerView, DecidedBy, Decisions, EventView, Me, OrchestratorState, Org, ShownCommand, StaffLine, StructureItem, SubView, TemplateKey, WaitingRequest } from '../types';
 import { EventMessage, isMessage, useFolding } from '../ui/AgentMessage';
 import { AgentTerminal } from '../ui/AgentTerminal';
 import { CommandCard } from '../ui/CommandCard';
@@ -16,6 +16,7 @@ import { StaffCard } from '../ui/StaffCard';
 import { StructureCard } from '../ui/StructureCard';
 import { orchestratorStatus } from './Map';
 import { clock } from './Subscriptions';
+import { AgentWindowLayout } from './AgentWindowLayout';
 
 /* The most events the server sends at a time. */
 const PAGE = 500;
@@ -73,7 +74,7 @@ function failedText(t: Messages, data: unknown, employee: boolean): string {
 export type StaffAsk = { id: string; name: string; at: number };
 
 /* agentId: 'orchestrator' or an employee's id. staff: the CEO's "+ Hire", for the orchestrator's window only. */
-type Props = { me: Me; org: Org; agentId: string; staff?: StaffAsk | null; onClose(): void; onCard?(): void };
+type Props = { me: Me; org: Org; agentId: string; staff?: StaffAsk | null; onClose(): void; onCard?(): void; openRequest?: number; requests?: WaitingRequest[]; onRequestsChanged?(): void };
 
 type CardRight = { id: string; canAnswer: boolean };
 
@@ -128,9 +129,14 @@ function useComputerChanges(load: () => Promise<void>): void {
   });
 }
 
+/* A task takes Escape before the terminal; a minimized agent leaves the rest of the screen alone. */
+function stopOnEscape(e: globalThis.KeyboardEvent, box: HTMLElement | null, stop: () => void): void {
+  if (e.key === 'Escape' && !e.defaultPrevented && !box?.hidden) stop();
+}
+
 /* An agent's window: its live terminal when its node shows one, or its conversation as a log with a line to write to it;
    and the orchestrator's cards. */
-export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard }: Props) {
+export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard, openRequest, requests = [], onRequestsChanged = () => {} }: Props) {
   const t = useT();
   const { language } = useLanguage();
   const orchestrator = agentId === 'orchestrator';
@@ -304,7 +310,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard }:
 
   useEffect(() => {
     if (!state?.busy) return;
-    const onKey = (e: globalThis.KeyboardEvent) => e.key === 'Escape' && stop();
+    const onKey = (e: globalThis.KeyboardEvent) => stopOnEscape(e, box.current, stop);
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [state?.busy, stop]);
@@ -522,14 +528,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard }:
   }
 
   return (
-    <aside ref={box} className={`orch${terminal ? ' term' : ''}`} aria-label={title}>
-      <div className="t-bar">
-        <span className="lights" aria-hidden="true">
-          <i />
-          <i />
-          <i />
-        </span>
-        <span>{title}</span>
+    <AgentWindowLayout known={known} box={box} terminal={terminal} title={title} org={org} agentId={agentId} onClose={onClose} openRequest={openRequest} requests={requests} onRequestsChanged={onRequestsChanged} toolbar={<>
         {terminal && state?.busy && (
           <button className="btn small ghost" type="button" onClick={stop}>
             {t.window.stop}
@@ -556,12 +555,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard }:
             </svg>
           </button>
         )}
-        <button type="button" aria-label={t.window.close} onClick={onClose}>
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M6 6l12 12M18 6L6 18" />
-          </svg>
-        </button>
-      </div>
+    </>}>
       {notebook && <Notebook departmentId={orchestrator ? null : headOf} />}
       {!notebook && !known && (
         <div className="t-log" aria-busy="true">
@@ -633,6 +627,6 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, onCard }:
         {known && <span>{where}</span>}
         {known && !terminal && <span>{t.window.hint}</span>}
       </div>
-    </aside>
+    </AgentWindowLayout>
   );
 }

@@ -50,9 +50,11 @@ export type TaskFilter = { status: 'open' | 'closed' | 'all'; department: string
 
 export const tasksPath = (f: TaskFilter) => `/api/tasks?status=${f.status}${f.department ? `&department=${f.department}` : ''}`;
 
+const taskSource = (filter: TaskFilter, enabled: boolean): string | null => enabled ? tasksPath(filter) : null;
+
 /* Tasks the person reaches, as the tracker lists them. */
-export function useTasks(filter: TaskFilter) {
-  const { data, failure, load } = useLive(tasksPath(filter), (b: { tasks: TaskLine[] }) => b.tasks, m => m.type === 'task');
+export function useTasks(filter: TaskFilter, enabled = true) {
+  const { data, failure, load } = useLive(taskSource(filter, enabled), (b: { tasks: TaskLine[] }) => b.tasks, m => m.type === 'task');
   return { tasks: data, failure, load };
 }
 

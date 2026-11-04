@@ -3,6 +3,7 @@ import { Terminal, type ITerminalOptions, type ITheme } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { useT } from '../i18n';
+import { isHidden } from './visibility';
 
 /* Ivan's iTerm2 profile in dark mode, which the terminal repeats on any page: Claude Code and Codex run their dark theme,
    which a light background would wash out. */
@@ -219,8 +220,10 @@ function openMenu(e: ReactMouseEvent<HTMLDivElement>, term: Terminal | null, set
   setMenu(menuPlace(e, selectedText(term)));
 }
 
+const menuTakesEscape = (e: KeyboardEvent, term: Terminal | null): boolean => e.key === 'Escape' && !isHidden(term?.element);
+
 function closeMenuOnKey(e: KeyboardEvent, term: Terminal | null, close: () => void) {
-  if (e.key !== 'Escape') return;
+  if (!menuTakesEscape(e, term)) return;
   e.preventDefault();
   e.stopImmediatePropagation();
   close();

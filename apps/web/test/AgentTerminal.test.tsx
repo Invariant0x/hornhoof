@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
@@ -283,14 +283,15 @@ describe("an agent's live terminal in its window", () => {
   });
 
   it('shows one big loader naming the program until it is up, over whatever the session shows meanwhile', async () => {
-    open();
+    const { container } = open();
     const ws = await socket();
-    expect(screen.getByRole('status')).toHaveTextContent('Opening the Claude terminal…');
+    const terminal = within(container.querySelector<HTMLElement>('.t-term')!);
+    expect(terminal.getByRole('status')).toHaveTextContent('Opening the Claude terminal…');
     ws.opened();
     ws.program(false);
-    expect(screen.getByRole('status')).toHaveTextContent('Opening the Claude terminal…');
+    expect(terminal.getByRole('status')).toHaveTextContent('Opening the Claude terminal…');
     ws.program(true);
-    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+    await waitFor(() => expect(terminal.queryByRole('status')).not.toBeInTheDocument());
   });
 
   it("looks like Ivan's iTerm2 in dark mode, on a light page too, since the programs inside run their dark theme", async () => {

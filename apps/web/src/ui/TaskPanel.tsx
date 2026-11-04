@@ -281,23 +281,25 @@ function Actions({ task, onChanged }: { task: TaskDetail; onChanged: () => void 
 
 /* One task in the right panel, kept fresh from the live stream. */
 /* Escape closes the panel before what lies under it, such as a department's tasks, which leave an Escape it took alone. */
-function useEscapeCloses(onClose: () => void): void {
+const closesTask = (e: KeyboardEvent, active: boolean): boolean => active && e.key === 'Escape' && !e.defaultPrevented;
+
+function useEscapeCloses(onClose: () => void, active: boolean): void {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      if (!closesTask(e, active)) return;
       e.preventDefault();
       onClose();
     };
     document.addEventListener('keydown', onKey, true);
     return () => document.removeEventListener('keydown', onKey, true);
-  }, [onClose]);
+  }, [onClose, active]);
 }
 
-export function TaskPanel({ taskId, onClose, onOpen, ...waiting }: { taskId: string; onClose: () => void; onOpen: (id: string) => void } & Waiting) {
+export function TaskPanel({ taskId, onClose, onOpen, active = true, ...waiting }: { taskId: string; active?: boolean; onClose: () => void; onOpen: (id: string) => void } & Waiting) {
   const t = useT();
   const { task, failure, load } = useTask(taskId);
   const title = task ? `#${task.number} ${task.title}` : t.tasks.heading;
-  useEscapeCloses(onClose);
+  useEscapeCloses(onClose, active);
   return (
     <aside className="acard tpanel" aria-label={title} aria-busy={!task && failure === null}>
       <div className="t-bar">

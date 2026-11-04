@@ -2,7 +2,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { Shell } from '../src/screens/Shell';
-import { CARD, DEV_ORG, MACHINES, ME, RUNNING_AGENTS, SUBS, decisions, mockApi } from './api-mock';
+import { CARD, DEV_ORG, MACHINES, ME, ORG, RUNNING_AGENTS, SUBS, decisions, mockApi } from './api-mock';
 
 function company(busy: boolean) {
   const agents = [{ ...RUNNING_AGENTS[0]!, busy }];
@@ -58,4 +58,25 @@ describe('one agent window', () => {
     expect(screen.getAllByRole('complementary', { name: 'Bruno, Backend engineer' })).toEqual([window]);
     expect(within(window).getByRole('textbox')).toHaveValue('Draft');
   });
+  it('opens the orchestrator from his real id even if the company answer arrives after the click', async () => {
+    let answer: (reply: [number, unknown]) => void = () => {};
+    const pending = new Promise<[number, unknown]>(resolve => { answer = resolve; });
+    const calls = mockApi({
+      'GET /api/org': () => pending,
+      'GET /api/requests': [200, decisions([])],
+      'GET /api/machines': [200, { machines: MACHINES }],
+      'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, agents: [{ ...RUNNING_AGENTS[0]!, id: 'a1', name: 'Orchestrator' }] }] }],
+      'GET /api/agents/orchestrator/events?after=0': [200, { events: [], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 } }],
+      'POST /api/agents/orchestrator/start': [200, { started: false }],
+      'GET /api/tasks?status=open': [200, { tasks: [] }],
+    });
+    const user = userEvent.setup();
+    render(<Shell me={ME} onSignOut={() => {}} />);
+    await openList(user, 'Subscriptions');
+    await user.click(screen.getByRole('button', { name: 'Open Orchestrator' }));
+    answer([200, ORG]);
+    expect(await screen.findByRole('complementary', { name: 'Orchestrator' })).toBeInTheDocument();
+    expect(calls.some(c => c.path === '/api/agents/a1')).toBe(false);
+  });
+
 });

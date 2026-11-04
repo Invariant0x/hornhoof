@@ -1480,3 +1480,38 @@ summary.turn-head:focus-visible { outline: 2px solid var(--cyan); outline-offset
 .dv-drawer.spd .spl-r .who { grid-column: 1 / -1; }
 .dv-drawer.spd .spl-r .n { text-align: left; }
 .dv-drawer.spd .spl-r .n::before { content: attr(data-label); display: block; color: var(--muted); font-size: 11px; font-weight: 400; }
+
+/* One agent window keeps its conversation mounted beside the existing task panel. */
+.orch { max-width: calc(100vw - 32px); }
+.orch[hidden] { display: none; }
+.orch > .t-bar { height: auto; min-height: 38px; flex-wrap: wrap; gap: 4px; padding: 2px 6px; }
+.orch .agent-window-title { min-width: 60px; text-align: left; padding-left: 6px; }
+.window-controls { display: flex; gap: 4px; margin-left: auto; }
+.window-controls button { width: 26px; height: 26px; border-radius: 50%; background: var(--surface2); }
+.window-controls .window-close { color: var(--pink); }
+.window-controls .window-minimize { color: var(--amber-ink); }
+.window-controls .window-full { color: var(--ok); }
+.agent-task-explanation { flex-basis: 100%; order: 1; padding-bottom: 6px; }
+.agent-workspace { display: flex; flex: 1; min-height: 0; min-width: 0; }
+.agent-conversation { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.agent-task-slot:empty { display: none; }
+.agent-task-slot { width: 40%; min-width: 320px; min-height: 0; }
+.agent-task { height: 100%; }
+.agent-task > .tpanel { position: static; width: 100%; height: 100%; max-width: none; margin: 0; box-shadow: none; box-sizing: border-box; border-width: 0 1px 0 0; }
+.orch.with-agent-task { width: min(1220px, calc(100vw - 32px)); }
+.agent-strip { position: fixed; z-index: 9; top: 68px; right: 0; bottom: 76px; width: 32px; padding: 12px 4px; border: 1px solid var(--cyan); background: var(--surface); color: var(--ink); font: inherit; cursor: pointer; writing-mode: vertical-rl; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-strip:hover { background: var(--glow); }
+.orch.fullscreen { inset: 0; width: 100%; max-width: none; z-index: 20; }
+@media (max-width: 1199px) {
+  .orch.with-agent-task .agent-conversation { display: none; }
+  .orch.with-agent-task .agent-task-slot { width: 100%; min-width: 0; }
+}
+@media (max-width: 760px) {
+  .orch, .orch.with-agent-task { max-width: 100vw; width: auto; }
+  .orch .t-st { white-space: normal; flex-wrap: wrap; }
+  .agent-strip { top: 56px; bottom: 0; }
+}
+
+@media (min-width: 761px) {
+  .shell:has(.dv-drawer) .orch:not(.fullscreen) { max-width: calc(100vw - 448px); }
+}

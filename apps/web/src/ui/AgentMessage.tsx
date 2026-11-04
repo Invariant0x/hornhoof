@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type RefObject } from 'react';
 import { useLanguage, useT, type Language, type Messages } from '../i18n';
 import type { EventView, MessageParty } from '../types';
+import { isHidden } from './visibility';
 
 export type AgentMessageView = NonNullable<EventView['message']>;
 /* A message event that names who wrote to whom; older ones without it show as they did. */
@@ -43,11 +44,20 @@ export function AgentMessage({ message, text, open, onToggle }: { message: Agent
 
 const isCtrlO = (e: KeyboardEvent) => e.ctrlKey && !e.altKey && !e.metaKey && e.key.toLowerCase() === 'o';
 
-/* Ctrl+O stays with the live terminal's program, and with a field outside the window. */
+function conversationHidden(box: HTMLElement | null): boolean {
+  return isHidden(box?.querySelector<HTMLElement>('.agent-conversation') ?? box);
+}
+
+function typingOutside(el: Element | null, box: HTMLElement | null): boolean {
+  return Boolean(el?.closest('input, textarea, select, [contenteditable="true"]') && !box?.contains(el));
+}
+
+/* Ctrl+O stays with the live terminal's program, a field elsewhere, or the page while the window is minimized. */
 function keyIsElsewhere(target: EventTarget | null, box: HTMLElement | null): boolean {
+  if (conversationHidden(box)) return true;
   const el = target instanceof Element ? target : null;
   if (el?.closest('.t-term, .xterm-helper-textarea')) return true;
-  return Boolean(el?.closest('input, textarea, select, [contenteditable="true"]') && !box?.contains(el));
+  return typingOutside(el, box);
 }
 
 /* The messages whose text the person opened; the rest stay one line each. While they are on screen (on), Ctrl+O opens
