@@ -38,7 +38,7 @@ type Props = {
   selected: string | null;
   selectedTask: string | null;
   /* The panel the schema leaves room for, on its side of the screen. */
-  panel: 'window' | 'card' | 'task' | null;
+  panel: 'window' | 'task' | null;
   /* The server's clock when it read the company, which times the yellow lines. */
   serverNow?: string;
   onBack(): void;
@@ -50,7 +50,7 @@ type Props = {
 };
 
 /* The agent window is on the right, settings and task details on the left. */
-const COVER = { window: 688, card: LEFT_PANEL_COVER, task: LEFT_PANEL_COVER } as const;
+const COVER = { window: 688, task: LEFT_PANEL_COVER } as const;
 const MIN_K = 0.15, MAX_K = 2;
 /* Below this scale the schema shows colors instead of text, as in the prototype. */
 const FAR_K = 0.55;

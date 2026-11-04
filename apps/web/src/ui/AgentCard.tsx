@@ -7,11 +7,13 @@ import { defaultEffort, PROVIDER_NAMES } from '../providers';
 import type { AgentCardView, Me, Part, SubView } from '../types';
 import { TimerSettings } from './TimerSettings';
 import { Ask } from './Ask';
+import { PanelFrame } from './SidePanels';
 import { AgentState, clockAt, type AgentLive } from './AgentState';
 import { byProvider, servingLabel } from './StaffCard';
 
 /* live and serverNow: what its program does and the server's alarm, as the map read them, and the server's clock then. */
-type Props = { me: Me; agentId: string; live?: AgentLive; serverNow?: string; onClose(): void; onTerminal(): void };
+/* onRemoved: the agent is gone, and so is what stood for it. */
+type Props = { me: Me; agentId: string; live?: AgentLive; serverNow?: string; onClose(): void; onRemoved?(): void };
 
 const FAILURE_TEXT_MAX = 300;
 const clip = (text: string, max: number) => (text.length <= max ? text : `${text.slice(0, max - 1)}…`);
@@ -128,7 +130,7 @@ function LastFailure({ failure, when }: { failure: AgentCardView['failure'] | un
 }
 
 /* An agent's card in the side panel: where it runs, its skills and the text it runs with, with every change kept. */
-export function AgentCard({ me, agentId, live, serverNow, onClose, onTerminal }: Props) {
+export function AgentCard({ me, agentId, live, serverNow, onClose, onRemoved = onClose }: Props) {
   const t = useT();
   const { language } = useLanguage();
   const id = useId();
@@ -207,38 +209,21 @@ export function AgentCard({ me, agentId, live, serverNow, onClose, onTerminal }:
     setAsking(null);
     try {
       await api.del(base);
-      onClose();
+      onRemoved();
     } catch (err) {
       setFailure(err);
     }
   }
 
-  const bar = (title: string) => (
-    <div className="t-bar">
-      <span className="lights" aria-hidden="true">
-        <i />
-        <i />
-        <i />
-      </span>
-      <span>{title}</span>
-      <button type="button" aria-label={t.window.close} onClick={onClose}>
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M6 6l12 12M18 6L6 18" />
-        </svg>
-      </button>
-    </div>
-  );
-
   if (!card) {
     return (
-      <aside className="acard" aria-busy={failure === null}>
-        {bar('')}
+      <PanelFrame label={t.window.card} heading="" busy={failure === null} onClose={onClose}>
         {failure !== null && (
           <p className="alert" role="alert">
             {errorText(t, failure)}
           </p>
         )}
-      </aside>
+      </PanelFrame>
     );
   }
 
@@ -277,9 +262,7 @@ export function AgentCard({ me, agentId, live, serverNow, onClose, onTerminal }:
   }
 
   return (
-    <aside className="acard" aria-label={title}>
-      {bar(title)}
-      <div className="ac-body">
+    <PanelFrame label={t.window.cardOf(title)} heading={title} onClose={onClose}>
         <header className="ac-head">
           <h3>{title}</h3>
           {card.role && card.role.title[language] !== card.name && <p>{card.role.title[language]}</p>}
@@ -290,9 +273,6 @@ export function AgentCard({ me, agentId, live, serverNow, onClose, onTerminal }:
             <AgentState agent={stateAgent} serverNow={serverNow} />
           </p>
           <LastFailure failure={card.failure} when={when} />
-          <button className="btn small" type="button" onClick={onTerminal}>
-            {t.agent.openTerminal}
-          </button>
         </header>
         {!editable && <p className="muted">{t.agent.viewOnly}</p>}
 
@@ -476,7 +456,6 @@ export function AgentCard({ me, agentId, live, serverNow, onClose, onTerminal }:
             </ul>
           </section>
         )}
-      </div>
-    </aside>
+    </PanelFrame>
   );
 }
