@@ -19,6 +19,24 @@ async function migrate(db: PgliteDatabase, config: MigrationConfig): Promise<voi
   await applyMissingMigrations(db, config);
 }
 
+describe('notification provenance migration', () => {
+  it('preserves old pending wakes and adds nullable structured provenance', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0050_external_wait') });
+    const company = (await db.execute<{ id: string }>(sql`insert into companies (name) values ('Acme') returning id`)).rows[0]!.id;
+    const agent = (await db.execute<{ id: string }>(sql`insert into agents (company_id, kind, name, model) values (${company}, 'worker', 'Bruno', '') returning id`)).rows[0]!.id;
+    const task = (await db.execute<{ id: string }>(sql`insert into tasks (company_id, number, title) values (${company}, 1, 'Checkout') returning id`)).rows[0]!.id;
+    await db.execute(sql`insert into pending_wakes (company_id, agent_id, task_id, why, text) values (${company}, ${agent}, ${task}, 'reported', 'Verified.')`);
+    const before = (await db.execute(sql`select to_jsonb(w) as data from pending_wakes w`)).rows;
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    expect((await db.execute(sql`select to_jsonb(w) - 'cause' as data from pending_wakes w`)).rows).toEqual(before);
+    expect((await db.execute(sql`select cause from pending_wakes`)).rows).toEqual([{ cause: null }]);
+  });
+});
+
 describe('migration 0050', () => {
   it('adds a nullable external wait and its deadline index on a fresh database', async () => {
     const client = new PGlite();

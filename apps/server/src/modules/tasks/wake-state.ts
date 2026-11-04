@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Db } from '../../db/client.js';
 import { agentEvents, agents, jobs, taskEvents, tasks, TASK_STATUSES } from '../../db/schema.js';
@@ -157,9 +157,9 @@ export async function discardStaleTurns(db: Store, waiting: readonly TaskTurn[])
 /* An old step must not swallow a new wake merely because both name the same agent and task. */
 export async function waitingTaskTurn(db: Db, agentId: string, taskId: string): Promise<{ id: string } | undefined> {
   const waiting = await db.select({ id: jobs.id, agentId: jobs.agentId, taskId: jobs.taskId }).from(jobs)
-    .where(and(eq(jobs.agentId, agentId), eq(jobs.taskId, taskId), eq(jobs.status, 'queued'))).orderBy(asc(jobs.createdAt));
+    .where(and(eq(jobs.agentId, agentId), eq(jobs.taskId, taskId), eq(jobs.status, 'queued'), sql`not exists (select 1 from agent_events e where e.job_id = ${jobs.id} and e.data->>'report' is not null)`)).orderBy(asc(jobs.createdAt));
   await discardStaleTurns(db, waiting);
   const [current] = await db.select({ id: jobs.id }).from(jobs)
-    .where(and(eq(jobs.agentId, agentId), eq(jobs.taskId, taskId), eq(jobs.status, 'queued'))).limit(1);
+    .where(and(eq(jobs.agentId, agentId), eq(jobs.taskId, taskId), eq(jobs.status, 'queued'), sql`not exists (select 1 from agent_events e where e.job_id = ${jobs.id} and e.data->>'report' is not null)`)).limit(1);
   return current;
 }

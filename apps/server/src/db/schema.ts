@@ -391,6 +391,7 @@ export const agentEvents = pgTable(
     index('agent_events_program_history').on(t.jobId, t.createdAt).where(sql`${t.kind} in ('program', 'failed')`),
     index('agent_events_silent_job').on(sql`(${t.data}->>'silentJob')`).where(sql`${t.kind} = 'message' and ${t.data} ? 'silentJob'`),
     index('agent_events_failure_case').on(sql`(data->>'failureCase')`).where(sql`data->>'failureCase' is not null`),
+    index('agent_events_report_window').on(t.agentId, t.createdAt).where(sql`data->>'report' is not null or data->>'from' = 'agent'`),
     index('agent_events_operations_pending').on(sql`(data->>'operationsPending')`).where(sql`data->>'operationsPending' is not null`),
   ],
 );
@@ -566,6 +567,7 @@ export const pendingWakes = pgTable(
     /* A timed wake is obsolete once another task move replaced the action it names. */
     taskVersion: integer('task_version'),
     why: text('why').notNull(),
+    cause: jsonb('cause').$type<import('../modules/tasks/notification-cause.js').WakeCause>(),
     text: text('text'),
     note: text('note'),
     createdAt: createdAt(),

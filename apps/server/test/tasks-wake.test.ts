@@ -333,7 +333,7 @@ describe("Hornhoof's note that a task stands still", () => {
     const { wakes } = await updateTask(c.ctx, c.head.id, c.task.id, { executor: c.kai.id });
     expect(await requestsOf(c)).toEqual([{ kind: 'stuck', status: 'withdrawn' }]);
     expect(await taskOf(c, c.task.id)).toEqual({ status: 'open', silent: 0 });
-    expect(wakes).toEqual([{ agentId: c.kai.id, taskId: c.task.id, why: 'assigned' }]);
+    expect(wakes).toEqual([{ agentId: c.kai.id, taskId: c.task.id, why: 'assigned', cause: { actor: { agentId: c.head.id }, action: 'rewrote work', eventId: expect.any(Number), task: { id: c.task.id, number: c.task.number } } }]);
   });
 
   it('goes away when the executor hands its work in after all', async () => {
