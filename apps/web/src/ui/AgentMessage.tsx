@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type RefObject } from 'react';
+import { useCallback, useLayoutEffect, useState, type RefObject } from 'react';
 import { useLanguage, useT, type Language, type Messages } from '../i18n';
 import type { EventView, MessageParty } from '../types';
 
@@ -56,7 +56,8 @@ function keyIsElsewhere(target: EventTarget | null, box: HTMLElement | null): bo
 export function useFolding(seqs: number[], box: RefObject<HTMLElement | null>, on: boolean): Folding {
   const [opened, setOpened] = useState<ReadonlySet<number>>(() => new Set());
   const key = on ? seqs.join(',') : '';
-  useEffect(() => {
+  /* The visible log and its shortcut must use the new messages in the same commit. */
+  useLayoutEffect(() => {
     const all = key ? key.split(',').map(Number) : [];
     const onKey = (e: KeyboardEvent) => {
       if (!isCtrlO(e) || !all.length || keyIsElsewhere(e.target, box.current)) return;
