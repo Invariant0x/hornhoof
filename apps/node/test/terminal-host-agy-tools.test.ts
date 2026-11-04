@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SIGNED_OUT } from '../src/providers/antigravity.js';
 import type { TermJob } from '../src/terminal/host.js';
 import { agyProgram } from '../src/terminal/programs.js';
@@ -17,7 +17,10 @@ const turns = (key: string) => records(key).filter(r => 'turn' in r);
 /* agy 1.4.12 loads the MCP servers of its folder in the background once its terminal starts, and a turn gets only the
    tools listed before it began. */
 describe.skipIf(!hasTmux)("Antigravity and Hornhoof's tools", () => {
-  afterEach(async () => { await host?.stop(); });
+  afterEach(async () => {
+    await host?.stop();
+    vi.restoreAllMocks();
+  });
 
   it("types Hornhoof's prompt only once agy has listed Hornhoof's tools, so its first turn has them", async () => {
     await setUp({ readyMs: 2000, cols: 120, rows: 40, toolsMs: 5000 });
@@ -75,6 +78,21 @@ describe.skipIf(!hasTmux)("Antigravity and Hornhoof's tools", () => {
     /* Another launch starts agy anew, and this agy never lists them. */
     expect(await host.run(agyJob('anew', 'hello', { FAKE_AGY_NO_TOOLS: '1' }))).toMatchObject({ ok: false, failure: { kind: 'tools' } });
     expect(turns('anew')).toEqual([{ turn: 'hello', tools: true }]);
+  });
+
+  it("counts no tools the agy before lists as Hornhoof's turn starts the next one in its place", async () => {
+    await setUp({ readyMs: 2000, cols: 120, rows: 40, toolsMs: 1000 });
+    expect(await host.run(agyJob('replaced', 'hello'))).toMatchObject({ ok: true, result: 'FINISHED' });
+    /* The agy before lists its tools once more just as the next one starts in its place, and that one never lists them. */
+    const next = agyJob('replaced', 'hello', { FAKE_AGY_NO_TOOLS: '1' });
+    const url = JSON.parse(readFileSync(join(next.input.workDir, '.agents', 'mcp_config.json'), 'utf8')).mcpServers.hornhoof.serverUrl;
+    const launch = tmux.launch.bind(tmux);
+    vi.spyOn(tmux, 'launch').mockImplementation(async (name, how) => {
+      await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) });
+      return launch(name, how);
+    });
+    expect(await host.run(next)).toMatchObject({ ok: false, failure: { kind: 'tools' } });
+    expect(turns('replaced')).toEqual([{ turn: 'hello', tools: true }]);
   });
 
   it("keeps the agy a person's window started, whether or not it listed Hornhoof's tools", async () => {
