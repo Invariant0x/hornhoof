@@ -156,54 +156,78 @@ export function useDraftPictures(path: string) {
   return { drafts, sending, refused, setRefused, add, remove, notPicture, deliver };
 }
 
+type Drags = { accepting: boolean; depth: { current: number }; setDragging(on: boolean): void; add(files: File[]): void };
+
+const takes = (e: DragEvent, d: Drags) => d.accepting && hasFiles(e) && !inPanel(e.target);
+
+function dragIn(e: DragEvent, d: Drags) {
+  if (!takes(e, d)) return;
+  d.depth.current += 1;
+  d.setDragging(true);
+}
+
+function dragOut(e: DragEvent, d: Drags) {
+  if (!takes(e, d)) return;
+  d.depth.current = Math.max(0, d.depth.current - 1);
+  if (!d.depth.current) d.setDragging(false);
+}
+
+function dragOver(e: DragEvent, d: Drags) {
+  if (!hasFiles(e)) return;
+  e.preventDefault();
+  if (e.dataTransfer) e.dataTransfer.dropEffect = takes(e, d) ? 'copy' : 'none';
+}
+
+function dropped(e: DragEvent, d: Drags) {
+  if (!hasFiles(e)) return;
+  e.preventDefault();
+  d.depth.current = 0;
+  d.setDragging(false);
+  if (takes(e, d)) d.add(Array.from(e.dataTransfer?.files ?? []));
+}
+
+/* A browser opens a file dropped on a page in place of the page. */
+function keepPage(e: DragEvent) {
+  if (hasFiles(e)) e.preventDefault();
+}
+
+function pasted(e: ClipboardEvent, box: HTMLElement, add: (files: File[]) => void) {
+  const said = e.clipboardData;
+  if (!said || said.getData('text/plain')) return;
+  const files = Array.from(said.files);
+  if (!files.some(f => f.type.startsWith('image/')) || !pasteIsForLine(e.target, box)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  add(files);
+}
+
 /* Dragging files over the window and pasting a picture while it shows. A file that misses the window stays from replacing
-   the page, for as long as it is open. Native listeners: the program in the terminal must not see an image pasted, and the
-   box holds panels with their own fields. */
+   the page, for as long as it is open. Native listeners, from the commit the window shows in: the program in the terminal
+   must not see an image pasted, the box holds panels with their own fields, and a file dropped a moment too early would
+   replace the page. */
 export function usePictureDrop(box: RefObject<HTMLElement | null>, on: boolean, accepting: boolean, add: (files: File[]) => void): boolean {
   const [dragging, setDragging] = useState(false);
   const depth = useRef(0);
 
-  /* From the commit the window shows in: a file dropped a moment too early would replace the page. */
   useLayoutEffect(() => {
-    if (!on) return;
-    const onEnter = (e: DragEvent) => {
-      if (!accepting || !hasFiles(e) || inPanel(e.target)) return;
-      depth.current += 1;
-      setDragging(true);
-    };
-    const onLeave = (e: DragEvent) => {
-      if (!accepting || !hasFiles(e) || inPanel(e.target)) return;
-      depth.current = Math.max(0, depth.current - 1);
-      if (!depth.current) setDragging(false);
-    };
-    const onOver = (e: DragEvent) => {
-      if (!hasFiles(e)) return;
-      e.preventDefault();
-      if (e.dataTransfer) e.dataTransfer.dropEffect = accepting && !inPanel(e.target) ? 'copy' : 'none';
-    };
-    const onDrop = (e: DragEvent) => {
-      if (!hasFiles(e)) return;
-      e.preventDefault();
-      depth.current = 0;
-      setDragging(false);
-      if (accepting && !inPanel(e.target)) add(Array.from(e.dataTransfer?.files ?? []));
-    };
-    /* Past the box too: a browser opens a file dropped on a page in place of the page. */
-    const keepPage = (e: DragEvent) => {
-      if (hasFiles(e)) e.preventDefault();
-    };
     const el = box.current;
-    el?.addEventListener('dragenter', onEnter);
-    el?.addEventListener('dragleave', onLeave);
-    el?.addEventListener('dragover', onOver);
-    el?.addEventListener('drop', onDrop);
+    if (!on || !el) return;
+    const d: Drags = { accepting, depth, setDragging, add };
+    const onEnter = (e: DragEvent) => dragIn(e, d);
+    const onLeave = (e: DragEvent) => dragOut(e, d);
+    const onOver = (e: DragEvent) => dragOver(e, d);
+    const onDrop = (e: DragEvent) => dropped(e, d);
+    el.addEventListener('dragenter', onEnter);
+    el.addEventListener('dragleave', onLeave);
+    el.addEventListener('dragover', onOver);
+    el.addEventListener('drop', onDrop);
     document.addEventListener('dragover', keepPage);
     document.addEventListener('drop', keepPage);
     return () => {
-      el?.removeEventListener('dragenter', onEnter);
-      el?.removeEventListener('dragleave', onLeave);
-      el?.removeEventListener('dragover', onOver);
-      el?.removeEventListener('drop', onDrop);
+      el.removeEventListener('dragenter', onEnter);
+      el.removeEventListener('dragleave', onLeave);
+      el.removeEventListener('dragover', onOver);
+      el.removeEventListener('drop', onDrop);
       document.removeEventListener('dragover', keepPage);
       document.removeEventListener('drop', keepPage);
       depth.current = 0;
@@ -212,17 +236,9 @@ export function usePictureDrop(box: RefObject<HTMLElement | null>, on: boolean, 
   }, [accepting, add, box, on]);
 
   useLayoutEffect(() => {
-    if (!on || !accepting) return;
-    const onPaste = (e: ClipboardEvent) => {
-      const el = box.current;
-      const said = e.clipboardData;
-      if (!el || !said || said.getData('text/plain')) return;
-      const files = Array.from(said.files);
-      if (!files.some(f => f.type.startsWith('image/')) || !pasteIsForLine(e.target, el)) return;
-      e.preventDefault();
-      e.stopPropagation();
-      add(files);
-    };
+    const el = box.current;
+    if (!on || !accepting || !el) return;
+    const onPaste = (e: ClipboardEvent) => pasted(e, el, add);
     document.addEventListener('paste', onPaste, true);
     return () => document.removeEventListener('paste', onPaste, true);
   }, [accepting, add, box, on]);
