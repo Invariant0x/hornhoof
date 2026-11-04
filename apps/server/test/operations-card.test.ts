@@ -302,7 +302,7 @@ describe('removing an employee of Operations', () => {
   it('says it before saying anything about its tasks, but not before saying it works', async () => {
     const c = await company();
     const last = await holder(c, 'OPS-BUGS');
-    await c.db.insert(tasks).values({ companyId: c.companyId, number: 901, title: 'T', brief: '', body: '', departmentId: c.ops.id, assigneeAgentId: last.id, status: 'open', createdBy: { kind: 'hornhoof' } as never });
+    await c.db.insert(tasks).values({ companyId: c.companyId, number: 901, title: 'T', brief: '', body: '', departmentId: c.ops.id, assigneeAgentId: last.id, status: 'open' });
     expect((await fire(c, last.id)).json().error.reason).toBe('agent_has_tasks');
     const [sub] = await c.db.select().from(subscriptions);
     await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: sub!.id, agentId: last.id, kind: 'conversation', prompt: 'x', timeoutMs: 1000, status: 'running' });

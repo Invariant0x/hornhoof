@@ -192,7 +192,7 @@ describe("the program operator's plan", () => {
   it('starts the work that waited for a plan as soon as it has one', async () => {
     const c = await company();
     const me = await operator(c.db);
-    await c.db.insert(tasks).values({ companyId: c.companyId, number: 900, title: 'Look at a screen', brief: '', body: '', departmentId: c.ops.id, assigneeAgentId: me.id, status: 'open', createdBy: { kind: 'hornhoof' } as never });
+    await c.db.insert(tasks).values({ companyId: c.companyId, number: 900, title: 'Look at a screen', brief: '', body: '', departmentId: c.ops.id, assigneeAgentId: me.id, status: 'open' });
     expect(await c.db.select().from(jobs).where(eq(jobs.agentId, me.id))).toEqual([]);
     const key = await addKey(c);
     const turns = await c.db.select().from(jobs).where(eq(jobs.agentId, me.id));
