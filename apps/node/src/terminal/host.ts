@@ -80,6 +80,9 @@ type Turn = {
   restarted?: boolean;
   words?: TurnWords;
   ending?: TurnEnd;
+  sourceDelivery?: OperatorDelivery;
+  operatorInstance?: string;
+  ownActivity?: boolean;
 };
 type JobError = RunResult['error'];
 type LiveWords = { turn: Turn; text: string; deadline: number; operatorDelivery?: OperatorDelivery };
@@ -122,7 +125,7 @@ type Agent = {
   saying: Promise<unknown>;
   waitingWords: TurnWords[];
   retainedAssignments?: { jobId: string; text: string; words: TurnWords }[];
-  originalTaken?: { jobId: string; text: string };
+  originalTaken?: { jobId: string; text: string; operatorDelivery?: OperatorDelivery };
   /* Claude's queue, in the order its log enqueued the words. */
   enqueuedWords: string[];
   /* Reports waiting words even when no later log line or Enter comes. */
@@ -473,13 +476,13 @@ export class TerminalHost {
     a.lastText = null;
     a.stepSaid = false;
     this.beginTurn(a);
-    this.operator?.begin(a.key, input.jobId ?? null, job.operatorDelivery, input.prompt, goesOn);
+    this.operator?.begin(a.key, input.jobId ?? null, job.operatorDelivery, input.prompt, goesOn, job.operatorSourceDelivery);
     input.signal?.addEventListener('abort', () => this.operator?.intentional(a.key, 'cancelled'), { once: true });
     this.bridge.setToken(job.key, input.tools?.token ?? null);
     const starting = input.prompt ? null : (tools ?? Promise.resolve());
     const words = new TurnWords(input.prompt ? [input.prompt] : [], { preserveOriginal: Boolean(job.operatorDelivery), original: phase => {
       this.operator?.receipt(a.key, job.operatorDelivery, phase);
-      if (phase === 'taken' && input.jobId && (!a.turn || a.turn.starting || this.overIn(a))) a.originalTaken = { jobId: input.jobId, text: input.prompt };
+      if (phase === 'taken' && input.jobId && (!a.turn || a.turn.starting || this.overIn(a))) a.originalTaken = { jobId: input.jobId, text: input.prompt, operatorDelivery: job.operatorDelivery };
     }, word: (word, phase) => this.operator?.receipt(a.key, word.operatorDelivery, phase) });
     const turn: Turn = { jobId: input.jobId ?? null, toolToken: input.tools?.token, words, onEvent: input.onEvent ?? (() => {}), typed: false, seq: 0, signal: input.signal, ...(starting ? { starting: true } : {}) };
     if (starting) a.starting = starting;
@@ -915,11 +918,17 @@ export class TerminalHost {
     if (turn && !turn.typed) return;
     const alive = await this.opts.tmux.alive(a.name);
     if (a.turn !== turn) return;
-    if (alive && !turn && a.program && this.operator?.recovering(a.key)) this.operator.recoveryReady(a.key, atEmptyPrompt(a.program.kind, await this.opts.tmux.screen(a.name, 0, true)));
+    if (alive && !turn && a.program && this.operator?.recovering(a.key)) await this.ownerRecoveryReady(a);
     if (alive) return this.lookTyped(a, turn);
     /* What the program logged before it ended, as words a person typed into Codex, comes first. */
     this.drain(a);
     await this.endedTyped(a);
+  }
+
+  private async ownerRecoveryReady(a: Agent): Promise<void> {
+    const ready = atEmptyPrompt(a.program!.kind, await this.opts.tmux.screen(a.name, 0, true));
+    if (ready) a.fresh = true;
+    this.operator!.recoveryReady(a.key, ready);
   }
 
   private async lookTyped(a: Agent, turn: Turn | null): Promise<void> {
@@ -1342,6 +1351,7 @@ export class TerminalHost {
   }
 
   private ownActivity(a: Agent): void {
+    if (a.turn) a.turn.ownActivity = true;
     this.clearQuestion(a);
     this.operator?.activity(a.key);
   }
@@ -1591,16 +1601,18 @@ export class TerminalHost {
      being read now. */
   private async openTyped(a: Agent, text: string, fromLog = false): Promise<void> {
     let queuedFrom: string | null = null;
+    let sourceDelivery: OperatorDelivery | undefined;
     if (a.originalTaken && a.originalTaken.text.replace(/\s+/g, ' ').trim() === text.replace(/\s+/g, ' ').trim()) {
       queuedFrom = a.originalTaken.jobId;
       text = a.originalTaken.text;
+      sourceDelivery = a.originalTaken.operatorDelivery;
       a.originalTaken = undefined;
     }
     for (const words of a.waitingWords) {
       if (queuedFrom) break;
       const taken = words.takeQueued(text);
       /* Hornhoof finds its words by what it typed, not by how the program recorded them. */
-      if (taken) { queuedFrom = taken.jobId; text = taken.text; break; }
+      if (taken) { queuedFrom = taken.jobId; text = taken.text; sourceDelivery = taken.operatorDelivery; break; }
     }
     const start = a.starting;
     a.fresh = false;
@@ -1611,7 +1623,7 @@ export class TerminalHost {
     this.beginTurn(a);
     a.ends.started(id);
     a.programTurnId = id;
-    const turn: Turn = { jobId: null, onEvent: () => {}, typed: true, seq: 0, words: new TurnWords(), ref: randomUUID(), early: [], over: null, opened: deferred() };
+    const turn: Turn = { jobId: null, onEvent: () => {}, typed: true, seq: 0, words: new TurnWords(), ref: randomUUID(), early: [], over: null, opened: deferred(), sourceDelivery, operatorInstance: this.operator?.identity(a.key)?.instance };
     turn.observed = this.observeProgram(null);
     a.turn = turn;
     a.busy = a.took = true;
@@ -1654,13 +1666,22 @@ export class TerminalHost {
   private bindTyped(a: Agent, turn: Turn, m: Msg<'turn.opened'>, early: AgentEvent[]): void {
     if (m.jobId && m.toolToken) {
       turn.jobId = m.jobId;
-      if (a.turn === turn) this.operator?.begin(a.key, m.jobId, undefined, '', true);
+      this.bindOperatorTurn(a, turn, m.jobId);
       turn.words?.bind(m.jobId);
       turn.toolToken = m.toolToken;
       turn.observed!.watch.bind(m.jobId, Date.now());
       if (a.turn === turn) this.bridge.setToken(a.key, m.toolToken);
       for (const e of early) this.typedEvent(turn, e);
     }
+  }
+
+  private bindOperatorTurn(a: Agent, turn: Turn, jobId: string): void {
+    if (a.turn === turn) {
+      this.operator?.begin(a.key, jobId, undefined, '', true, turn.sourceDelivery);
+      return;
+    }
+    if (!a.turn) this.operator?.suspend(a.key);
+    if (turn.ownActivity && turn.sourceDelivery && turn.operatorInstance) this.operator?.sourceActivity(a.key, turn.operatorInstance, turn.sourceDelivery);
   }
 
   private finishTyped(a: Agent, message: string, error: JobError = null, output = '', programOutput?: ProgramOutput, turn = a.turn): void {

@@ -40,11 +40,11 @@ it.skipIf(!hasTmux)('does not paste a continuation whose original words have alr
   expect(paste).not.toHaveBeenCalled();
 });
 
-it.skipIf(!hasTmux)('retains the assignment pane through escalation, observes owner recovery once, and pastes its continuation only once', async () => {
+it.skipIf(!hasTmux).each(['continuation', 'typed', 'late typed'] as const)('retains the assignment pane and credits source activity after owner recovery: %s', async mode => {
   const key = randomUUID(), jobId = randomUUID(), source = { id: randomUUID(), ordinal: 1 };
   dir = join(home, `operator-owner-${key}`);
   const setup = join(dir, 'setup-passed'); const frames: OperatorNodeMessage[] = []; let now = 0;
-  await setUp({ pollMs: 25, readyMs: 2000, lookMs: 50, cols: 120, rows: 40, plugins: [], operator: { dir, now: () => now, connected: () => true, send: frame => { frames.push(frame); return true; } } });
+  await setUp({ pollMs: 25, readyMs: 2000, lookMs: 50, cols: 120, rows: 40, plugins: [], ...(mode === 'late typed' ? { openMs: 25 } : {}), operator: { dir, now: () => now, connected: () => true, send: frame => { frames.push(frame); return true; } } });
   const original = 'Owner recovery original words.';
   const base = job(key, original, { agentKey: key, jobId });
   const requested = { ...base, program: agyProgram, bin: fileURLToPath(new URL('./fakes/fake-agy-term.mjs', import.meta.url)), home: join(home, 'agy', key), signedOut: SIGNED_OUT, input: { ...base.input, env: { ...base.input.env, FAKE_AGY_SETUP: setup, FAKE_LOG: join(dir, 'setup-keys.jsonl') } } };
@@ -83,12 +83,34 @@ it.skipIf(!hasTmux)('retains the assignment pane through escalation, observes ow
     const agent = host['agents'].get(key)!;
     await host['look'](agent); await host['look'](agent);
     expect(frames.filter(frame => frame.type === 'program.recovery_ready')).toEqual([expect.objectContaining({ case: incident.case, jobId })]);
+    const pid = await tmux.programPid(`a-${key}`);
     const continuation = { ...requested, operatorDelivery: { id: randomUUID(), ordinal: 2 }, operatorSourceDelivery: source, input: { ...requested.input, jobId: randomUUID(), sessionId: stopped.sessionId } };
-    const result = await host.run(continuation);
-    expect(result, `${result.error}: ${result.failure?.text ?? 'No program failure detail.'}`).toMatchObject({ ok: true });
-    expect(paste.mock.calls.filter(([, text]) => text === original)).toHaveLength(1);
+    let sessionId = stopped.sessionId;
+    if (mode === 'continuation') {
+      const result = await host.run(continuation);
+      expect(result, `${result.error}: ${result.failure?.text ?? 'No program failure detail.'}`).toMatchObject({ ok: true });
+      sessionId = result.sessionId;
+    } else {
+      host.input({ type: 'term.input', termId, data: `${original}\r` });
+      await until(() => terminalFrames.some(frame => frame.type === 'turn.open' && frame.agentKey === key));
+      const opened = terminalFrames.find(frame => frame.type === 'turn.open' && frame.agentKey === key);
+      if (opened?.type !== 'turn.open') throw new Error('No owner turn.');
+      expect(opened.queuedFrom).toBe(jobId);
+      if (mode === 'late typed') await until(() => Boolean(host['agents'].get(key)?.unopened.find(turn => turn.ref === opened.ref)?.over));
+      const ownerJob = randomUUID();
+      host.opened({ type: 'turn.opened', agentKey: key, jobId: ownerJob, toolToken: 'owner-test-token', ref: opened.ref });
+      await until(() => terminalFrames.some(frame => frame.type === 'job.done' && frame.jobId === ownerJob));
+      const result = terminalFrames.find(frame => frame.type === 'job.done' && frame.jobId === ownerJob);
+      expect(result).toMatchObject({ ok: true });
+      if (result?.type === 'job.done') sessionId = result.sessionId;
+    }
+    expect(await tmux.programPid(`a-${key}`)).toBe(pid);
+    expect(paste.mock.calls.filter(([, text]) => text === original)).toHaveLength(mode === 'continuation' ? 1 : 0);
     expect(frames.filter(frame => frame.type === 'program.delivery' && frame.deliveryId === source.id && frame.phase === 'taken')).toHaveLength(1);
-    expect(await host.run({ ...continuation, operatorDelivery: { id: randomUUID(), ordinal: 3 }, input: { ...continuation.input, jobId: randomUUID(), sessionId: result.sessionId } })).toMatchObject({ ok: false, error: 'cancelled' });
-    expect(paste.mock.calls.filter(([, text]) => text === original)).toHaveLength(1);
+    now += 300000; host.operatorTick();
+    const activityEvidence = frames.filter(frame => frame.type === 'program.delivery' || frame.type === 'program.launch').map(frame => ({ type: frame.type, jobId: frame.jobId, instance: frame.instance, phase: frame.phase, deliveryId: 'deliveryId' in frame ? frame.deliveryId : null }));
+    expect(frames.filter(frame => frame.type === 'program.operator_needed' && frame.reason === 'recorded_no_activity'), JSON.stringify(activityEvidence)).toEqual([]);
+    expect(await host.run({ ...continuation, operatorDelivery: { id: randomUUID(), ordinal: 3 }, input: { ...continuation.input, jobId: randomUUID(), sessionId } })).toMatchObject({ ok: false, error: 'cancelled' });
+    expect(paste.mock.calls.filter(([, text]) => text === original)).toHaveLength(mode === 'continuation' ? 1 : 0);
   } finally { host.close({ type: 'term.close', termId }); }
 });

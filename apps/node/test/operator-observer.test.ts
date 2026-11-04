@@ -29,6 +29,35 @@ function fixture() {
 }
 
 describe('program delivery evidence', () => {
+  it('credits a completed source without clearing a newer native question', () => {
+    const c = fixture(); c.attempt();
+    c.observer.receipt(deliveryId, 'taken');
+    const question: OperatorQuestion = { id: '10000000-0000-4000-8000-000000000005', kind: 'permission', tool: 'Bash', text: 'Read local files?', callId: 'new' };
+    c.observer.question({ ...identity, jobId: '10000000-0000-4000-8000-000000000006' }, question);
+    c.observer.sourceActivity(identity, { id: deliveryId, ordinal: 1 });
+    c.observer.sourceActivity(identity, { id: deliveryId, ordinal: 1 });
+    c.at(300000); c.observer.tick();
+    expect(c.alarms()).toEqual([expect.objectContaining({ reason: 'question_waiting', questionId: question.id })]);
+    expect(c.sent.filter(f => f.type === 'program.delivery' && f.phase === 'activity')).toHaveLength(1);
+  });
+  it.each(['agent', 'instance', 'id', 'ordinal'] as const)('rejects completed-source activity with the wrong %s', field => {
+    const c = fixture(); c.attempt(); c.observer.receipt(deliveryId, 'taken');
+    const actor = { ...identity }, source = { id: deliveryId, ordinal: 1 };
+    if (field === 'agent') actor.agentKey = '10000000-0000-4000-8000-000000000007';
+    if (field === 'instance') actor.instance = '10000000-0000-4000-8000-000000000007';
+    if (field === 'id') source.id = '10000000-0000-4000-8000-000000000007';
+    if (field === 'ordinal') source.ordinal = 2;
+    c.observer.sourceActivity(actor, source);
+    c.at(300000); c.observer.tick();
+    expect(c.alarms()).toEqual([expect.objectContaining({ reason: 'recorded_no_activity', deliveryId })]);
+    expect(c.sent.filter(f => f.type === 'program.delivery' && f.phase === 'activity')).toEqual([]);
+  });
+  it('does not reactivate a replaced physical program through delayed source activity', () => {
+    const c = fixture(); c.attempt(); c.observer.receipt(deliveryId, 'taken');
+    c.observer.exit(identity, { code: null, signal: null }, 'restart');
+    c.observer.sourceActivity(identity, { id: deliveryId, ordinal: 1 });
+    expect(c.sent.filter(f => f.type === 'program.delivery' && f.phase === 'activity')).toEqual([]);
+  });
   it('calls once at thirty seconds of the same authenticated question and does not restart its clock on a repeated observation', () => {
     const c = fixture();
     const question: OperatorQuestion = { id: deliveryId, kind: 'permission', tool: 'Bash', text: 'Remove the agent temporary folder?', callId: 'call-1' };
@@ -350,4 +379,62 @@ it('requires an assignment receipt or live taken receipt before inheriting a rec
   c.observer.attempt(identity, secondDelivery, 'live', 'live source');
   c.observer.receipt(secondDelivery.id, 'queued'); expect(c.observer.recordedSource(secondDelivery.id)).toBe(false);
   c.observer.receipt(secondDelivery.id, 'taken'); expect(c.observer.recordedSource(secondDelivery.id)).toBe(true);
+});
+
+
+describe('continuation source activity ownership', () => {
+  it.each(['before', 'after'] as const)('credits only the linked source on an actual continuation event with receipt %s activity', receipt => {
+    const c = fixture(); c.attempt();
+    c.observer.attempt(identity, secondDelivery, 'assignment', 'Unrelated old words.');
+    c.observer.receipt(secondDelivery.id, 'queued');
+    const current = { ...identity, jobId: nextQuestion.id };
+    const next = { id: '10000000-0000-4000-8000-000000000010', ordinal: 3 };
+    c.observer.attempt(current, next, 'assignment', 'exact words'); c.observer.receipt(next.id, 'queued');
+    if (receipt === 'before') c.observer.receipt(deliveryId, 'taken');
+    c.observer.activity(current, { id: deliveryId, ordinal: 1 });
+    if (receipt === 'after') {
+      c.at(60000); c.observer.tick();
+      expect(c.alarms()).toContainEqual(expect.objectContaining({ reason: 'assignment_unrecorded', deliveryId }));
+      c.observer.receipt(deliveryId, 'taken');
+    }
+    c.at(360000); c.observer.tick();
+    expect(c.alarms().filter(fact => fact.reason === 'recorded_no_activity')).toEqual([expect.objectContaining({ deliveryId: secondDelivery.id })]);
+    expect(c.sent.filter(fact => fact.type === 'program.delivery' && fact.phase === 'activity')).toEqual([
+      expect.objectContaining({ deliveryId, jobId: identity.jobId }),
+      expect.objectContaining({ deliveryId: next.id, jobId: current.jobId }),
+    ]);
+    expect(disk(c).deliveries[deliveryId]).toMatchObject({ active: true });
+    expect(disk(c).deliveries[secondDelivery.id]).toMatchObject({ active: false });
+  });
+
+  it.each(['id', 'ordinal', 'agent', 'physical instance'] as const)('does not credit a source with a mismatched %s', mismatch => {
+    const c = fixture();
+    const sourceIdentity = { ...identity };
+    if (mismatch === 'agent') sourceIdentity.agentKey = nextQuestion.id;
+    if (mismatch === 'physical instance') sourceIdentity.instance = nextQuestion.id;
+    c.observer.attempt(sourceIdentity, { id: deliveryId, ordinal: 1 }, 'assignment', 'exact words');
+    c.observer.receipt(deliveryId, 'taken');
+    const current = { ...identity, jobId: '10000000-0000-4000-8000-000000000011' };
+    c.observer.attempt(current, secondDelivery, 'assignment', 'exact words'); c.observer.receipt(secondDelivery.id, 'taken');
+    const source = { id: mismatch === 'id' ? nextQuestion.id : deliveryId, ordinal: mismatch === 'ordinal' ? 99 : 1 };
+    c.observer.activity(current, source);
+    expect(disk(c).deliveries[deliveryId]).toMatchObject({ active: false });
+    expect(disk(c).deliveries[secondDelivery.id]).toMatchObject({ active: true });
+    c.at(300000); c.observer.tick();
+    expect(c.alarms()).toEqual([expect.objectContaining({ reason: 'recorded_no_activity', deliveryId })]);
+  });
+
+  it('reserves both source and current activity facts atomically under outbox backpressure', () => {
+    const c = fixture(); c.attempt();
+    const current = { ...identity, jobId: nextQuestion.id };
+    c.observer.attempt(current, secondDelivery, 'assignment', 'exact words');
+    const observer = fullOutbox(c, 1), before = disk(c);
+    expect(() => observer.activity(current, { id: deliveryId, ordinal: 1 })).toThrow(/outbox is full/);
+    expect(disk(c)).toEqual(before);
+    freeOutbox(observer, c);
+    const start = c.sent.length; observer.activity(current, { id: deliveryId, ordinal: 1 });
+    expect(c.sent.slice(start).filter(fact => fact.type === 'program.delivery' && fact.phase === 'activity')).toHaveLength(2);
+    expect(disk(c).deliveries[deliveryId]).toMatchObject({ active: true });
+    expect(disk(c).deliveries[secondDelivery.id]).toMatchObject({ active: true });
+  });
 });

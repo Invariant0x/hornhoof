@@ -72,11 +72,11 @@ export class OperatorObserver {
     });
   }
 
-  activity(identity: OperatorIdentity): void {
+  activity(identity: OperatorIdentity, source?: OperatorDelivery): void {
     this.transition(() => {
       const instance = this.state.instances[identity.instance];
       if (!instance || instance.exited) return;
-      const deliveries = Object.values(this.state.deliveries).filter(delivery => delivery.instance === identity.instance && delivery.jobId === identity.jobId && !delivery.active);
+      const deliveries = this.activityDeliveries(identity, source);
       if (instance.active && !instance.question && !deliveries.length) return;
       this.room(Number(Boolean(instance.question)) + deliveries.length);
       this.clearQuestion(instance);
@@ -87,6 +87,37 @@ export class OperatorObserver {
       }
       this.save();
     });
+  }
+
+  private activityDeliveries(identity: OperatorIdentity, source: OperatorDelivery | undefined): Delivery[] {
+    return Object.values(this.state.deliveries).filter(delivery => !delivery.active && this.activityOwner(delivery, identity, source));
+  }
+
+  sourceActivity(identity: OperatorIdentity, source: OperatorDelivery): void {
+    this.transition(() => {
+      const instance = this.state.instances[identity.instance];
+      const delivery = this.sourceForActivity(identity, source);
+      if (!instance || instance.exited || !delivery || delivery.active) return;
+      this.room(1);
+      instance.active = true;
+      delivery.active = true;
+      this.deliveryFact(delivery, 'activity');
+    });
+  }
+
+  private sourceForActivity(identity: OperatorIdentity, source: OperatorDelivery): Delivery | undefined {
+    const delivery = this.state.deliveries[source.id];
+    return delivery && this.matchesSource(delivery, source) && this.activityOwner(delivery, identity, source) ? delivery : undefined;
+  }
+
+  private activityOwner(delivery: Delivery, identity: OperatorIdentity, source: OperatorDelivery | undefined): boolean {
+    if (delivery.agentKey !== identity.agentKey || delivery.instance !== identity.instance) return false;
+    if (delivery.jobId === identity.jobId) return true;
+    return this.matchesSource(delivery, source);
+  }
+
+  private matchesSource(delivery: Delivery, source: OperatorDelivery | undefined): boolean {
+    return Boolean(source && delivery.id === source.id && delivery.ordinal === source.ordinal);
   }
 
   finalize(id: string, outcome: 'not_taken' | 'cancelled'): void {

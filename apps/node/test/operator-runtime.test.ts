@@ -13,10 +13,11 @@ function fixture() {
   const sent: OperatorNodeMessage[] = [];
   const runtime = new OperatorRuntime({ dir, now: () => now, connected: () => true, send: frame => { sent.push(frame); return true; } }, { current: () => ({ agentProgram: true, alive: true, pasted: false, turnStarted: false, active: false, runningTool: false, retrying: false, wait: null }), capture: async () => ({ cols: 80, rows: 24, cells: 'Press Enter for a theme.' }), press: async () => {}, secrets: () => [] });
   const agentKey = randomUUID(), jobId = randomUUID();
-  runtime.begin(agentKey, jobId, { id: randomUUID(), ordinal: 1 }, 'Words.', false);
+  const assignment = { id: randomUUID(), ordinal: 1 };
+  runtime.begin(agentKey, jobId, assignment, 'Words.', false);
   runtime.launch(agentKey, 'attempt'); runtime.launch(agentKey, 'started');
   const identity = runtime.identity(agentKey)!;
-  return { runtime, sent, identity, at: (value: number) => { now = value; } };
+  return { runtime, sent, identity, assignment, at: (value: number) => { now = value; } };
 }
 
 it('ignores an older revoke and does not move a case deadline on replay', async () => {
@@ -129,4 +130,49 @@ it('uses native completion to give the next assignment its own pre-work state', 
   const request = randomUUID();
   await c.runtime.message({ type: 'program.screen_get', ...incident, request });
   expect(c.sent.find(f => f.type === 'program.screen' && f.request === request)).toMatchObject({ state: 'pre_work', keysAllowed: true });
+});
+
+it.each([['bound', false, false], ['pending', true, false], ['late receipt', false, true], ['pending and late receipt', true, true]] as const)('credits exact source activity after continuation binding: %s', (_name, pending, lateReceipt) => {
+  const c = fixture(), key = c.identity.agentKey;
+  const unrelated = { id: randomUUID(), ordinal: 2 }, current = { id: randomUUID(), ordinal: 3 };
+  c.runtime.begin(key, randomUUID(), unrelated, 'Unrelated old words.', true);
+  c.runtime.receipt(key, unrelated, 'queued');
+  if (!lateReceipt) c.runtime.receipt(key, c.assignment, 'taken');
+  if (pending) { c.runtime.suspend(key); c.runtime.activity(key); }
+  const source = { ...c.assignment }, jobId = randomUUID();
+  c.runtime.begin(key, jobId, current, 'Words.', true, source);
+  source.ordinal = 999;
+  if (!pending) {
+    expect(c.sent.filter(fact => fact.type === 'program.delivery' && fact.phase === 'activity')).toEqual([]);
+    c.runtime.activity(key);
+  }
+  if (lateReceipt) c.runtime.receipt(key, c.assignment, 'taken');
+  c.runtime.receipt(key, current, 'taken');
+  c.runtime.intentional(key, 'completed'); c.at(300000); c.runtime.tick();
+  expect(c.sent.filter(fact => fact.type === 'program.operator_needed' && fact.reason === 'recorded_no_activity')).toEqual([expect.objectContaining({ deliveryId: unrelated.id })]);
+  expect(c.sent.filter(fact => fact.type === 'program.delivery' && fact.phase === 'activity')).toEqual([
+    expect.objectContaining({ deliveryId: c.assignment.id, jobId: c.identity.jobId }),
+    expect.objectContaining({ deliveryId: current.id, jobId }),
+  ]);
+});
+
+it('does not credit source activity merely from binding, receipt or source inheritance', () => {
+  const c = fixture(), key = c.identity.agentKey;
+  c.runtime.receipt(key, c.assignment, 'queued');
+  c.runtime.begin(key, randomUUID(), { id: randomUUID(), ordinal: 2 }, 'Words.', true, c.assignment);
+  expect(c.runtime.inheritSource(key, c.assignment)).toBe(true);
+  c.at(300000); c.runtime.tick();
+  expect(c.sent.filter(fact => fact.type === 'program.delivery' && fact.phase === 'activity')).toEqual([]);
+  expect(c.sent.filter(fact => fact.type === 'program.operator_needed' && fact.reason === 'recorded_no_activity')).toEqual([expect.objectContaining({ deliveryId: c.assignment.id })]);
+});
+
+it('retires replaced physical programs without a startup incident or a stale first-activity alarm', () => {
+  const c = fixture(), key = c.identity.agentKey;
+  c.runtime.receipt(key, c.assignment, 'queued');
+  c.runtime.begin(key, randomUUID(), undefined, '', false);
+  c.runtime.launch(key, 'attempt'); c.runtime.launch(key, 'started');
+  expect(c.runtime.identity(key)?.instance).not.toBe(c.identity.instance);
+  c.at(300000); c.runtime.tick();
+  expect(c.sent.filter(f => f.type === 'program.delivery' && f.deliveryId === c.assignment.id && f.phase === 'cancelled')).toHaveLength(1);
+  expect(c.sent.filter(f => f.type === 'program.operator_needed')).toEqual([]);
 });

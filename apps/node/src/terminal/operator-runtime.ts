@@ -14,7 +14,7 @@ type Source = {
   press(key: string, value: 'Enter' | 'Up' | 'Down' | 'Left' | 'Right' | 'Tab'): Promise<void>;
   secrets(): string[];
 };
-type Target = { identity: OperatorIdentity; control: OperatorControl; generation: number; physical: boolean; pasted: boolean; started: boolean; active: boolean; recorded: boolean; taken: boolean; assignment: OperatorDelivery | null; caseId: string | null; caseReason: OperatorReason | null; ownerTouched: boolean; bound: boolean; idle: boolean; pendingActivity: boolean; pendingQuestion: { data: OperatorQuestion; at: number } | null; deadline: number | null; failed: string | null; intentional?: 'cancelled' | 'update' | 'restart' | 'offline' | 'completed' };
+type Target = { identity: OperatorIdentity; control: OperatorControl; generation: number; physical: boolean; pasted: boolean; started: boolean; active: boolean; recorded: boolean; taken: boolean; assignment: OperatorDelivery | null; sourceDelivery: OperatorDelivery | undefined; caseId: string | null; caseReason: OperatorReason | null; ownerTouched: boolean; bound: boolean; idle: boolean; pendingActivity: boolean; pendingQuestion: { data: OperatorQuestion; at: number } | null; deadline: number | null; failed: string | null; intentional?: 'cancelled' | 'update' | 'restart' | 'offline' | 'completed' };
 
 /* Runtime glue stays outside the terminal host's provider logic; evidence and the key guard share one input lane. */
 export class OperatorRuntime {
@@ -29,23 +29,30 @@ export class OperatorRuntime {
     this.observer.retire();
   }
 
-  begin(key: string, jobId: string | null, metadata: OperatorDelivery | undefined, words: string, reuse: boolean): void {
+  begin(key: string, jobId: string | null, metadata: OperatorDelivery | undefined, words: string, reuse: boolean, source?: OperatorDelivery): void {
     if (!z.uuid().safeParse(key).success || !z.uuid().safeParse(jobId).success) return;
     let target = this.targets.get(key);
     if (!target || !reuse) {
-      target = this.createTarget(key, jobId, reuse);
-      this.targets.set(key, target);
+      target = this.replaceTarget(key, jobId, reuse, target);
     }
     this.bindTarget(target, jobId, metadata);
+    target.sourceDelivery = structuredClone(source);
     if (words && metadata) this.observer.attempt(target.identity, metadata, 'assignment', words);
     this.restorePending(target);
     if (reuse && !target.physical) target.physical = true;
   }
 
+  private replaceTarget(key: string, jobId: string | null, reuse: boolean, previous: Target | undefined): Target {
+    if (previous) this.observer.exit(previous.identity, { code: null, signal: null }, 'restart');
+    const target = this.createTarget(key, jobId, reuse);
+    this.targets.set(key, target);
+    return target;
+  }
+
   private createTarget(key: string, jobId: string | null, reuse: boolean): Target {
     const identity = { agentKey: key, jobId, instance: randomUUID() };
     const control = new OperatorControl({ file: join(this.options.dir, `actions-${key}.json`), now: this.now, current: () => this.current(key), capture: () => this.source.capture(key), press: value => this.source.press(key, value), lane: run => this.serial(key, run), secrets: this.source.secrets });
-    return { identity, control, generation: 0, physical: reuse, pasted: reuse, started: reuse, active: reuse, recorded: false, taken: false, assignment: null, caseId: null, caseReason: null, ownerTouched: false, bound: true, idle: false, pendingActivity: false, pendingQuestion: null, deadline: null, failed: null };
+    return { identity, control, generation: 0, physical: reuse, pasted: reuse, started: reuse, active: reuse, recorded: false, taken: false, assignment: null, sourceDelivery: undefined, caseId: null, caseReason: null, ownerTouched: false, bound: true, idle: false, pendingActivity: false, pendingQuestion: null, deadline: null, failed: null };
   }
 
   private bindTarget(target: Target, jobId: string | null, metadata: OperatorDelivery | undefined): void {
@@ -60,7 +67,7 @@ export class OperatorRuntime {
   private restorePending(target: Target): void {
     const pendingQuestion = target.pendingQuestion, pendingActivity = target.pendingActivity;
     target.pendingQuestion = null; target.pendingActivity = false;
-    if (pendingActivity) this.observer.activity(target.identity);
+    if (pendingActivity) this.observer.activity(target.identity, target.sourceDelivery);
     if (pendingQuestion) this.observer.question(target.identity, pendingQuestion.data, Math.max(0, this.now() - pendingQuestion.at));
   }
 
@@ -88,8 +95,12 @@ export class OperatorRuntime {
   activity(key: string): void {
     const target = this.targets.get(key); if (!target) return;
     target.active = true; target.generation++;
-    if (target.bound) this.observer.activity(target.identity);
+    if (target.bound) this.observer.activity(target.identity, target.sourceDelivery);
     else target.pendingActivity = true;
+  }
+
+  sourceActivity(key: string, instance: string, source: OperatorDelivery): void {
+    this.observer.sourceActivity({ agentKey: key, jobId: null, instance }, source);
   }
 
   question(key: string, question: OperatorQuestion | null): void {
