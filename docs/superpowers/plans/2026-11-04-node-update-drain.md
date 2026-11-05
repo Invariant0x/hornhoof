@@ -47,7 +47,7 @@ Files: updates/routes.ts and control.ts, node update command, scripts/install.sh
 
 - [x] Record duration measurements, default wait/retry rationale, and the update paths found in the source. Distinguish source evidence from the historical incident.
 - [x] Push task-299; run changed-area tests and checks on a free Linux machine with npm ci.
-- [ ] Read full logs, run crapper and dryer on the changed files, review the complete diff.
+- [x] Read full logs, run crapper and dryer on the changed files, review the complete diff.
 - [ ] Submit with exact branch/commit/evidence, then merge into fresh turn-7 as #299 directs.
 
 ## Ledger
