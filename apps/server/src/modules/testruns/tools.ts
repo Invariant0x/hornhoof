@@ -4,7 +4,8 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { ApiError } from '../../errors.js';
 import type { ToolJob } from '../tools/job.js';
-import { runState, startRun, stopRun, TEST_MINUTES, TEST_MINUTES_MAX, WORK_MEMORY_GB } from './runs.js';
+import { queuedRunState } from '../nodes/check-slot-view.js';
+import { startRun, stopRun, TEST_MINUTES, TEST_MINUTES_MAX, WORK_MEMORY_GB } from './runs.js';
 
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
 const answer = (fn: () => Promise<string>) =>
@@ -53,7 +54,7 @@ export function registerTestTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
   server.registerTool(
     'test_run',
     { description: "How a test run goes: its state, the commit it pinned (commitSha), and each part's state, machine, the commit it checked, exit code, log file and, for a failed one, the end of its log.", inputSchema: { run: Run } },
-    async ({ run }) => answer(async () => JSON.stringify(await runState(ctx, job, run))),
+    async ({ run }) => answer(async () => JSON.stringify(await queuedRunState(ctx, job, run))),
   );
   server.registerTool(
     'stop_tests',
@@ -94,7 +95,7 @@ export function registerTestTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
   server.registerTool(
     'work_run',
     { description: "How a work run goes: its state, and each part's state, machine, exit code, log file, the files it made and, for a failed one, the end of its log.", inputSchema: { run: WorkRun } },
-    async ({ run }) => answer(async () => JSON.stringify(await runState(ctx, job, run, 'work'))),
+    async ({ run }) => answer(async () => JSON.stringify(await queuedRunState(ctx, job, run, 'work'))),
   );
   server.registerTool(
     'stop_work',

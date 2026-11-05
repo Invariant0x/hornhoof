@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo, Socket } from 'node:net';
 import { socketOf, type Capture, type Owns, type Peer } from './peer.js';
+import { serveCheckCommand } from '../check-command-runner.js';
 import { HookCalls } from './hook-calls.js';
 import { HookFailures, type HookRejected } from './hook-failures.js';
 
@@ -38,6 +39,7 @@ export class Bridge {
 
   private readonly accepted = new WeakMap<Socket, ReturnType<Capture>>();
   private readonly calls = new HookCalls();
+  private readonly checkStops = new Map<string, Set<AbortController>>();
   private readonly failures: HookFailures;
 
   constructor(
@@ -62,6 +64,7 @@ export class Bridge {
   }
 
   stop(): void {
+    this.abortChecks();
     this.server?.close();
     this.server = null;
   }
@@ -79,6 +82,7 @@ export class Bridge {
 
   /* The token of the agent's running turn, or null between turns. */
   setToken(key: string, token: string | null): void {
+    this.changeCheckToken(key, token);
     if (token) this.tokens.set(key, token);
     else this.tokens.delete(key);
     if (token) for (const go of [...(this.waiting.get(key) ?? [])]) go();
@@ -196,16 +200,7 @@ export class Bridge {
     void reading.catch(() => {});
     if (!(await owned)) return this.refused(req, res, 403, 'owner check failed');
     const body = await reading;
-    if (kind === 'hook') {
-      if (!event) return this.refused(req, res, 404, 'unknown hook event');
-      let data: unknown = null;
-      try {
-        data = JSON.parse(body.toString('utf8') || 'null');
-      } catch {
-        /* A hook that sent no JSON still counts. */
-      }
-      return this.hookCall(req, res, key, event, data);
-    }
+    if (agentCall(kind)) return this.agentCall(req, res, key, kind, event, body);
     if (kind !== 'mcp' && kind !== 'attach') return reply(res, 404, '');
     const token = kind === 'mcp' ? await this.tokenFor(key, req.method === 'GET' || only(body, CONNECTING)) : this.tokens.get(key);
     if (!token) return kind === 'mcp' ? noTurn(res, body) : reply(res, 409, JSON.stringify({ error: { message: 'No Hornhoof turn is running for this agent.' } }));
@@ -224,6 +219,32 @@ export class Bridge {
     res.writeHead(up.status, out);
     res.end(Buffer.from(await up.arrayBuffer()));
     if (kind === 'mcp' && up.ok && asks(body, 'tools/list')) this.heardList(key, asked);
+  }
+
+  private changeCheckToken(key: string, token: string | null): void {
+    if (this.tokens.get(key) !== token) this.abortChecks(key);
+  }
+
+  private abortChecks(key?: string): void {
+    const groups = key === undefined ? this.checkStops.values() : [this.checkStops.get(key) ?? new Set<AbortController>()];
+    for (const stops of groups) for (const stop of stops) stop.abort();
+  }
+
+  private async agentCall(req: IncomingMessage, res: ServerResponse, key: string, kind: 'hook' | 'check', event: string | undefined, body: Buffer): Promise<void> {
+    if (kind === 'check') return this.checkCommand(key, body, res);
+    if (!event) return this.refused(req, res, 404, 'unknown hook event');
+    let data: unknown = null;
+    try { data = JSON.parse(body.toString('utf8') || 'null'); } catch { /* An empty hook still counts. */ }
+    return this.hookCall(req, res, key, event, data);
+  }
+
+  private async checkCommand(key: string, body: Buffer, res: ServerResponse): Promise<void> {
+    if (!this.tokens.has(key)) return reply(res, 409, 'No Hornhoof turn is running for this agent.');
+    const stop = new AbortController(), stops = this.checkStops.get(key) ?? new Set<AbortController>();
+    this.checkStops.set(key, stops); stops.add(stop);
+    const closed = () => stop.abort(); res.once('close', closed);
+    try { await serveCheckCommand(key, body, stop.signal, res); }
+    finally { res.removeListener('close', closed); stops.delete(stop); }
   }
 
   /* A slow answer to a request from before counts from when it was asked. */
@@ -302,3 +323,5 @@ function hookFailure(status: number): string {
   if (status === 429) return 'too many recent hook calls';
   return 'hook handler failed';
 }
+
+const agentCall = (kind: string): kind is 'hook' | 'check' => kind === 'hook' || kind === 'check';
