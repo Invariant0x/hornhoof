@@ -113,7 +113,7 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
     await expectPlaceBesideStrip(mapWorld, mapWithoutWindow, width);
     await restore.click();
     await expect(main).toHaveClass(/with-window/);
-    if (width > 760) expect(await box(mapWorld)).not.toEqual(mapWithoutWindow);
+    if (width > 760) await expect.poll(() => box(mapWorld)).not.toEqual(mapWithoutWindow);
     expect(live.connections).toBe(connections);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     expect(errors).toEqual([]);
