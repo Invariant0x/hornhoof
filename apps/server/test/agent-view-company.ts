@@ -7,9 +7,9 @@ import { as, invitePerson, listen, setUpCompany, testApp } from './helpers.js';
 /* A company for who sees which agent (#398): Development and Sales, Ann and Bob listed for Development with a plan each,
    Olga who owns Development, Wes with the whole company and Lisa the CEO's delegate. Ann has one agent where she works and
    one in Sales, so own plan and reachable department each go alone. */
-export async function aclCompany() {
-  const { app, db } = await testApp();
-  await listen(app);
+export async function aclCompany(env: NodeJS.ProcessEnv = {}) {
+  const { app, db } = await testApp(env);
+  const url = await listen(app);
   const ceo = await setUpCompany(app);
   const [acme] = await db.select().from(companies);
   const companyId = acme!.id;
@@ -58,7 +58,7 @@ export async function aclCompany() {
   const work = async (title: string, agent: { id: string }, departmentId = dev!.id) =>
     (await createTask(app.ctx, { agentId: crew.head.id }, { title, brief: `${title} brief`, body: `${title} body`, departmentId, assigneeAgentId: agent.id, executor: true, gates: [] })).task;
   const get = (url: string, token: string) => app.inject({ url, ...as(token) });
-  return { app, db, companyId, tokens, ids, plans, crew, orchestrator: orchestrator!, dev: dev!, sales: sales!, work, get };
+  return { app, db, url, companyId, tokens, ids, plans, crew, orchestrator: orchestrator!, dev: dev!, sales: sales!, work, get };
 }
 
 export type AclCompany = Awaited<ReturnType<typeof aclCompany>>;
