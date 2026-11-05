@@ -8,6 +8,8 @@ const PORT = process.env.HORNHOOF_BROWSER_PORT ?? '4179';
 
 export default defineConfig({
   testDir: 'e2e',
+  /* The real-server geometry harness has its own config and requires pinned source/resource inputs. */
+  testIgnore: 'geometry.spec.ts',
   outputDir: 'e2e/results',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
@@ -22,7 +24,11 @@ export default defineConfig({
     /* Match UTC clock fixtures regardless of the host timezone. */
     timezoneId: 'UTC',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'], channel: process.env.PLAYWRIGHT_CHANNEL } }],
+  projects: [
+    { name: 'chromium', use: { ...devices['Desktop Chrome'], browserName: 'chromium', channel: process.env.PLAYWRIGHT_CHANNEL } },
+    { name: 'firefox', use: { ...devices['Desktop Firefox'], browserName: 'firefox' } },
+    { name: 'webkit', use: { ...devices['Desktop Safari'], browserName: 'webkit' } },
+  ],
   /* A browser check owns its server; another checkout can have different code or live edits. */
   webServer: { command: `vite --mode browser-test --port ${PORT} --strictPort`, url: `http://localhost:${PORT}`, reuseExistingServer: false },
 });

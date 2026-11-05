@@ -1,0 +1,3050 @@
+{
+  "task": 535,
+  "acceptance": false,
+  "sourceInventorySha": "5c67fb005820a6085018f0240b2532e50819f52a",
+  "sourceArchiveSha256": "5477f3dd64688d1bac477a09d8aa66b8218ec0b3f8a0e361df1b229e13ad7f50",
+  "catalogCount": 89,
+  "sourceMainSha": "f289196b97c9d6fea391248d76e422214f2638ad",
+  "candidateSha": null,
+  "matrix": {
+    "engines": [
+      "chromium",
+      "firefox",
+      "webkit"
+    ],
+    "themes": [
+      "light",
+      "dark"
+    ],
+    "viewports": [
+      {
+        "width": 375,
+        "height": 812
+      },
+      {
+        "width": 1440,
+        "height": 900
+      }
+    ],
+    "dpr": 1,
+    "locales": "Dynamically select longest/shortest actual strings per view plus one shipped RTL; ranking NOT_RUN",
+    "panelWidths": "Measure native panel width. Impossible opposite-width profiles require explicit geometric reason; no injected CSS.",
+    "status": "NOT_RUN"
+  },
+  "intentionalScrollCandidates": [
+    {
+      "selector": ".side-panels",
+      "purpose": "Navigate between whole side panels on narrow viewports; each panel prose must still fit."
+    },
+    {
+      "selector": ".orch > .t-bar",
+      "purpose": "Reach header actions on phone; measure individual controls after native scroll."
+    },
+    {
+      "selector": ".map, .tview",
+      "purpose": "Pan/zoom graph canvas; do not extend this exception to prose cards."
+    },
+    {
+      "selector": ".xterm-viewport",
+      "purpose": "Terminal output viewport; real terminal fit proof remains separate."
+    }
+  ],
+  "panels": [
+    {
+      "id": "agent.window",
+      "route": "/ tasks -> Write to orchestrator; department -> employee",
+      "sourceComponent": "apps/web/src/screens/AgentWindowLayout.tsx",
+      "sourceSelector": ".orch",
+      "sourceStates": [
+        "terminal",
+        "log",
+        "conversation",
+        "minimized",
+        "fullscreen"
+      ],
+      "sourceLiteralKeys": 11,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "terminal",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "log",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "conversation",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "minimized",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "fullscreen",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "agent.notebook.company",
+      "route": "agent orchestrator -> Notebook",
+      "sourceComponent": "apps/web/src/ui/Notebook.tsx",
+      "sourceSelector": ".side-panel .acard:has(.notebook)",
+      "sourceStates": [
+        "loading",
+        "empty",
+        "full",
+        "edit",
+        "read-error",
+        "write-error"
+      ],
+      "sourceLiteralKeys": 14,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "loading",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "empty",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "edit",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "read-error",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "write-error",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "agent.notebook.department",
+      "route": "department head -> Notebook",
+      "sourceComponent": "apps/web/src/ui/Notebook.tsx",
+      "sourceSelector": ".side-panel .acard:has(.notebook)",
+      "sourceStates": [
+        "loading",
+        "empty",
+        "full",
+        "edit",
+        "read-error",
+        "write-error"
+      ],
+      "sourceLiteralKeys": 14,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "loading",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "empty",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "edit",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "read-error",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "write-error",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "agent.card",
+      "route": "agent window -> Card",
+      "sourceComponent": "apps/web/src/ui/AgentCard.tsx",
+      "sourceSelector": ".side-panel .acard:has(.ac-head)",
+      "sourceStates": [
+        "loading",
+        "error",
+        "read",
+        "edit",
+        "raw",
+        "dirty",
+        "reset-confirm",
+        "remove-confirm"
+      ],
+      "sourceLiteralKeys": 66,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "loading",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "read",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "edit",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "raw",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "dirty",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "reset-confirm",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "remove-confirm",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "agent.timer",
+      "route": "agent Card -> timer",
+      "sourceComponent": "apps/web/src/ui/TimerSettings.tsx",
+      "sourceSelector": ".ac-timer",
+      "sourceStates": [
+        "off",
+        "on",
+        "read-only",
+        "edit"
+      ],
+      "sourceLiteralKeys": 9,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "off",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "on",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "read-only",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "edit",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "agent.task",
+      "route": "agent window -> Task",
+      "sourceComponent": "apps/web/src/ui/TaskPanel.tsx",
+      "sourceSelector": ".side-panel .acard:has(.tp-body)",
+      "sourceStates": [
+        "loading",
+        "error",
+        "unavailable",
+        "full",
+        "rework",
+        "cancel-confirm"
+      ],
+      "sourceLiteralKeys": 80,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "loading",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "unavailable",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "rework",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "cancel-confirm",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "agent.log",
+      "route": "agent window -> Log",
+      "sourceComponent": "apps/web/src/screens/AgentWindow.tsx",
+      "sourceSelector": ".orch",
+      "sourceStates": [
+        "empty",
+        "full",
+        "error"
+      ],
+      "sourceLiteralKeys": 57,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "empty",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "agent.input",
+      "route": "agent window terminal",
+      "sourceComponent": "apps/web/src/ui/AgentTerminal.tsx",
+      "sourceSelector": ".t-term",
+      "sourceStates": [
+        "ready",
+        "read-only",
+        "gone",
+        "input-error"
+      ],
+      "sourceLiteralKeys": 2,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "ready",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "read-only",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "gone",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "input-error",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "agent.computer.strip",
+      "route": "orchestrator -> computer access strip",
+      "sourceComponent": "apps/web/src/ui/ComputerStrip.tsx",
+      "sourceSelector": ".t-access",
+      "sourceStates": [
+        "closed",
+        "asked",
+        "open",
+        "multiple",
+        "details"
+      ],
+      "sourceLiteralKeys": 5,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "closed",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "asked",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "open",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "multiple",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "details",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "agent.computer.card",
+      "route": "orchestrator computer details",
+      "sourceComponent": "apps/web/src/ui/ComputerCard.tsx",
+      "sourceSelector": ".t-card",
+      "sourceStates": [
+        "asked",
+        "open",
+        "closed",
+        "error"
+      ],
+      "sourceLiteralKeys": 3,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "asked",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "open",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "closed",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "agent.structure",
+      "route": "orchestrator proposal cards",
+      "sourceComponent": "apps/web/src/ui/StructureCard.tsx",
+      "sourceSelector": ".t-card:has(.t-card-tag)",
+      "sourceStates": [
+        "draft",
+        "locked",
+        "applied",
+        "error"
+      ],
+      "sourceLiteralKeys": 26,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "draft",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "locked",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "applied",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "agent.staff",
+      "route": "orchestrator staffing cards",
+      "sourceComponent": "apps/web/src/ui/StaffCard.tsx",
+      "sourceSelector": ".t-card.staff",
+      "sourceStates": [
+        "loading",
+        "no-serving",
+        "draft",
+        "applied",
+        "error"
+      ],
+      "sourceLiteralKeys": 10,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "loading",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "no-serving",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "draft",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "applied",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "agent.command",
+      "route": "orchestrator command card",
+      "sourceComponent": "apps/web/src/ui/CommandCard.tsx",
+      "sourceSelector": "section.t-card",
+      "sourceStates": [
+        "full",
+        "expired"
+      ],
+      "sourceLiteralKeys": 6,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "expired",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "agent.message",
+      "route": "agent log event message",
+      "sourceComponent": "apps/web/src/ui/AgentMessage.tsx",
+      "sourceSelector": ".t-m",
+      "sourceStates": [
+        "folded",
+        "expanded"
+      ],
+      "sourceLiteralKeys": 47,
+      "sourceObservationStatus": "NOT_CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "folded",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "expanded",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "agent.start-card",
+      "route": "agent -> company structure",
+      "sourceComponent": "apps/web/src/ui/CompanyTemplates.tsx",
+      "sourceSelector": ".templates-pick",
+      "sourceStates": [
+        "select",
+        "loading",
+        "error"
+      ],
+      "sourceLiteralKeys": 42,
+      "sourceObservationStatus": "NOT_CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "select",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "loading",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "agent.notifications",
+      "route": "agent window skipped/review/access cards",
+      "sourceComponent": "apps/web/src/screens/AgentWindow.tsx",
+      "sourceSelector": ".t-cards",
+      "sourceStates": [
+        "requests",
+        "refusal",
+        "blocked"
+      ],
+      "sourceLiteralKeys": 57,
+      "sourceObservationStatus": "NOT_CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "requests",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "refusal",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "blocked",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "agent.running",
+      "route": "running agents in cards/tables",
+      "sourceComponent": "apps/web/src/ui/RunningNow.tsx",
+      "sourceSelector": ".blk-run",
+      "sourceStates": [
+        "empty",
+        "working",
+        "private"
+      ],
+      "sourceLiteralKeys": 10,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "empty",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "working",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "private",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "tasks.list",
+      "route": "/tasks",
+      "sourceComponent": "apps/web/src/screens/Tasks.tsx",
+      "sourceSelector": "section.tasks",
+      "sourceStates": [
+        "loading",
+        "error",
+        "empty",
+        "full",
+        "filtered"
+      ],
+      "sourceLiteralKeys": 22,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "loading",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "empty",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "filtered",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "tasks.detail",
+      "route": "/tasks/t1",
+      "sourceComponent": "apps/web/src/ui/TaskPanel.tsx",
+      "sourceSelector": ".acard",
+      "sourceStates": [
+        "loading",
+        "error",
+        "unavailable",
+        "full",
+        "rework",
+        "cancel-confirm"
+      ],
+      "sourceLiteralKeys": 80,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "loading",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "unavailable",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "rework",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "cancel-confirm",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "tasks.requests.question",
+      "route": "/tasks waiting or task panel",
+      "sourceComponent": "apps/web/src/ui/Requests.tsx",
+      "sourceSelector": "article.req-question",
+      "sourceStates": [
+        "full",
+        "busy",
+        "send-error",
+        "read-only"
+      ],
+      "sourceLiteralKeys": 12,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "busy",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "send-error",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "read-only",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "tasks.requests.choice",
+      "route": "/tasks waiting or task panel",
+      "sourceComponent": "apps/web/src/ui/Requests.tsx",
+      "sourceSelector": "article.req-choice",
+      "sourceStates": [
+        "full",
+        "pictures",
+        "busy",
+        "send-error",
+        "read-only"
+      ],
+      "sourceLiteralKeys": 12,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "pictures",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "busy",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "send-error",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "read-only",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "tasks.requests.approval",
+      "route": "/tasks waiting or task panel",
+      "sourceComponent": "apps/web/src/ui/Requests.tsx",
+      "sourceSelector": "article.req-approval",
+      "sourceStates": [
+        "full",
+        "busy",
+        "send-error",
+        "read-only"
+      ],
+      "sourceLiteralKeys": 12,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "busy",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "send-error",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "read-only",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "tasks.requests.stuck",
+      "route": "/tasks waiting or task panel",
+      "sourceComponent": "apps/web/src/ui/Requests.tsx",
+      "sourceSelector": "article.req-stuck",
+      "sourceStates": [
+        "full",
+        "busy",
+        "send-error",
+        "read-only"
+      ],
+      "sourceLiteralKeys": 12,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "busy",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "send-error",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "read-only",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "tasks.new",
+      "route": "department -> Department tasks -> New task",
+      "sourceComponent": "apps/web/src/ui/NewTask.tsx",
+      "sourceSelector": "form.new-task",
+      "sourceStates": [
+        "draft",
+        "busy",
+        "error"
+      ],
+      "sourceLiteralKeys": 8,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "draft",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "busy",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "department.tasks",
+      "route": "/departments/d2 -> Department tasks",
+      "sourceComponent": "apps/web/src/screens/Department.tsx",
+      "sourceSelector": "aside.dv-drawer",
+      "sourceStates": [
+        "loading",
+        "error",
+        "empty",
+        "full",
+        "new-task"
+      ],
+      "sourceLiteralKeys": 37,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "loading",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "empty",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "new-task",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "department.about",
+      "route": "/departments/d2 -> About the department",
+      "sourceComponent": "apps/web/src/screens/Department.tsx",
+      "sourceSelector": "aside.dv-drawer",
+      "sourceStates": [
+        "full",
+        "edit"
+      ],
+      "sourceLiteralKeys": 37,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "edit",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "department.speed.turn",
+      "route": "/departments/d2 -> Speed tab0",
+      "sourceComponent": "apps/web/src/screens/SpeedPanel.tsx",
+      "sourceSelector": "aside.dv-drawer.spd",
+      "sourceStates": [
+        "loading",
+        "error",
+        "empty",
+        "full"
+      ],
+      "sourceLiteralKeys": 159,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "loading",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "empty",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "department.speed.idle",
+      "route": "/departments/d2 -> Speed tab1",
+      "sourceComponent": "apps/web/src/screens/SpeedPanel.tsx",
+      "sourceSelector": "aside.dv-drawer.spd",
+      "sourceStates": [
+        "loading",
+        "error",
+        "empty",
+        "full"
+      ],
+      "sourceLiteralKeys": 159,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "loading",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "empty",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "department.speed.report",
+      "route": "/departments/d2 -> Speed tab2",
+      "sourceComponent": "apps/web/src/screens/SpeedPanel.tsx",
+      "sourceSelector": "aside.dv-drawer.spd",
+      "sourceStates": [
+        "loading",
+        "error",
+        "empty",
+        "full"
+      ],
+      "sourceLiteralKeys": 159,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "loading",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "empty",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "department.repository",
+      "route": "About drawer -> Repository",
+      "sourceComponent": "apps/web/src/ui/RepoSettings.tsx",
+      "sourceSelector": ".repo, form.repo-form",
+      "sourceStates": [
+        "none",
+        "full",
+        "edit",
+        "remove-confirm",
+        "error"
+      ],
+      "sourceLiteralKeys": 24,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "none",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "edit",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "remove-confirm",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "department.subunits",
+      "route": "About drawer -> Sub-units",
+      "sourceComponent": "apps/web/src/ui/SubUnits.tsx",
+      "sourceSelector": ".dv-drawer-b section",
+      "sourceStates": [
+        "empty",
+        "full",
+        "create",
+        "rename",
+        "error"
+      ],
+      "sourceLiteralKeys": 11,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "empty",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "create",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "rename",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "department.members",
+      "route": "About drawer -> Members",
+      "sourceComponent": "apps/web/src/ui/SubUnits.tsx",
+      "sourceSelector": ".dv-drawer-b section",
+      "sourceStates": [
+        "empty",
+        "full",
+        "error"
+      ],
+      "sourceLiteralKeys": 11,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "empty",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "tree.detail",
+      "route": "department Tree -> employee/review",
+      "sourceComponent": "apps/web/src/screens/TreeCard.tsx",
+      "sourceSelector": "[role=dialog].tv-card",
+      "sourceStates": [
+        "main",
+        "turn",
+        "agent",
+        "reviewer",
+        "review"
+      ],
+      "sourceLiteralKeys": 1124,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "main",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "turn",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "agent",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "reviewer",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "review",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "people.list",
+      "route": "/people",
+      "sourceComponent": "apps/web/src/screens/People.tsx",
+      "sourceSelector": "section.people",
+      "sourceStates": [
+        "loading",
+        "error",
+        "empty",
+        "full"
+      ],
+      "sourceLiteralKeys": 29,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "loading",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "empty",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "people.invite",
+      "route": "/people -> Invite",
+      "sourceComponent": "apps/web/src/screens/People.tsx",
+      "sourceSelector": ".panel:has(form.panel-form)",
+      "sourceStates": [
+        "draft",
+        "busy",
+        "error"
+      ],
+      "sourceLiteralKeys": 29,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "draft",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "busy",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "people.invite-link",
+      "route": "/people -> invite result/new link",
+      "sourceComponent": "apps/web/src/screens/People.tsx",
+      "sourceSelector": ".panel:has(.command)",
+      "sourceStates": [
+        "full"
+      ],
+      "sourceLiteralKeys": 29,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "people.edit",
+      "route": "/people/p2",
+      "sourceComponent": "apps/web/src/screens/People.tsx",
+      "sourceSelector": ".panel:has(form.panel-form)",
+      "sourceStates": [
+        "full",
+        "busy",
+        "error"
+      ],
+      "sourceLiteralKeys": 29,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "busy",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "people.details",
+      "route": "/people/p2 without rename rights",
+      "sourceComponent": "apps/web/src/screens/People.tsx",
+      "sourceSelector": ".panel",
+      "sourceStates": [
+        "full",
+        "unavailable"
+      ],
+      "sourceLiteralKeys": 29,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "unavailable",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "machines.list",
+      "route": "/machines",
+      "sourceComponent": "apps/web/src/screens/Machines.tsx",
+      "sourceSelector": "section.machines",
+      "sourceStates": [
+        "loading",
+        "error",
+        "empty",
+        "full",
+        "filtered"
+      ],
+      "sourceLiteralKeys": 64,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "loading",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "empty",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "filtered",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "machines.pool",
+      "route": "/machines -> pool",
+      "sourceComponent": "apps/web/src/screens/Machines.tsx",
+      "sourceSelector": ".pool",
+      "sourceStates": [
+        "full",
+        "empty"
+      ],
+      "sourceLiteralKeys": 64,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "empty",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "machines.card",
+      "route": "/machines/m1 expanded",
+      "sourceComponent": "apps/web/src/screens/Machines.tsx",
+      "sourceSelector": "article.wcard",
+      "sourceStates": [
+        "full",
+        "offline",
+        "error"
+      ],
+      "sourceLiteralKeys": 64,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "offline",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "machines.connections",
+      "route": "machine card -> connection history",
+      "sourceComponent": "apps/web/src/ui/MachineConnections.tsx",
+      "sourceSelector": ".blk-link",
+      "sourceStates": [
+        "loading",
+        "error",
+        "empty",
+        "full",
+        "expanded"
+      ],
+      "sourceLiteralKeys": 22,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "loading",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "empty",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "expanded",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "machines.programs",
+      "route": "machine card -> Programs",
+      "sourceComponent": "apps/web/src/ui/ProgramVersions.tsx",
+      "sourceSelector": ".blk-facts .part:has(.machine-actions)",
+      "sourceStates": [
+        "missing",
+        "full",
+        "update-running",
+        "error"
+      ],
+      "sourceLiteralKeys": 10,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "missing",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "update-running",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "machines.drain",
+      "route": "machine card draining status",
+      "sourceComponent": "apps/web/src/ui/MachineDrain.tsx",
+      "sourceSelector": ".wcard .stline [role=status]",
+      "sourceStates": [
+        "draining",
+        "waiting"
+      ],
+      "sourceLiteralKeys": 8,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "draining",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "waiting",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "machines.connect",
+      "route": "/machines -> Connect machine",
+      "sourceComponent": "apps/web/src/ui/CommandBox.tsx",
+      "sourceSelector": ".panel:has(.command-box)",
+      "sourceStates": [
+        "full",
+        "expired",
+        "error"
+      ],
+      "sourceLiteralKeys": 4,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "expired",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "machines.disconnect",
+      "route": "machine card -> Disconnect",
+      "sourceComponent": "apps/web/src/ui/Ask.tsx",
+      "sourceSelector": ".ask",
+      "sourceStates": [
+        "confirm"
+      ],
+      "sourceLiteralKeys": 1,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "confirm",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "subscriptions.list",
+      "route": "/subscriptions",
+      "sourceComponent": "apps/web/src/screens/Subscriptions.tsx",
+      "sourceSelector": "section.subs",
+      "sourceStates": [
+        "loading",
+        "error",
+        "empty",
+        "full",
+        "filtered"
+      ],
+      "sourceLiteralKeys": 58,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "loading",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "empty",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "filtered",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "subscriptions.card",
+      "route": "subscription expanded card",
+      "sourceComponent": "apps/web/src/screens/Subscriptions.tsx",
+      "sourceSelector": "article.wcard",
+      "sourceStates": [
+        "ready",
+        "needs_login",
+        "needs_setup",
+        "waiting_machine",
+        "offline"
+      ],
+      "sourceLiteralKeys": 58,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "ready",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "needs_login",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "needs_setup",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "waiting_machine",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "offline",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "subscriptions.connect",
+      "route": "/subscriptions -> Connect",
+      "sourceComponent": "apps/web/src/ui/ConnectPanel.tsx",
+      "sourceSelector": ".panel:has(.connect-form)",
+      "sourceStates": [
+        "draft",
+        "busy",
+        "error"
+      ],
+      "sourceLiteralKeys": 12,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "draft",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "busy",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "subscriptions.command",
+      "route": "subscription command panel",
+      "sourceComponent": "apps/web/src/screens/SubscriptionCommands.tsx",
+      "sourceSelector": "section:has(.command-box) > .panel",
+      "sourceStates": [
+        "full",
+        "expired"
+      ],
+      "sourceLiteralKeys": 4,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "expired",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "subscriptions.install",
+      "route": "expanded plan install command",
+      "sourceComponent": "apps/web/src/screens/SubscriptionCommands.tsx",
+      "sourceSelector": ".plan-command",
+      "sourceStates": [
+        "loading",
+        "full",
+        "expired"
+      ],
+      "sourceLiteralKeys": 4,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "loading",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "expired",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "subscriptions.key",
+      "route": "plan -> Add/change key",
+      "sourceComponent": "apps/web/src/ui/KeyForm.tsx",
+      "sourceSelector": "form.key-form",
+      "sourceStates": [
+        "draft",
+        "busy",
+        "no-machine",
+        "error"
+      ],
+      "sourceLiteralKeys": 4,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "draft",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "busy",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "no-machine",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "subscriptions.signin",
+      "route": "plan -> Sign in",
+      "sourceComponent": "apps/web/src/ui/SignInPanel.tsx",
+      "sourceSelector": ".signin",
+      "sourceStates": [
+        "terminal",
+        "success",
+        "error",
+        "stopped"
+      ],
+      "sourceLiteralKeys": 9,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "terminal",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "success",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "stopped",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "subscriptions.test",
+      "route": "plan test result",
+      "sourceComponent": "apps/web/src/screens/Subscriptions.tsx",
+      "sourceSelector": ".test",
+      "sourceStates": [
+        "running",
+        "done",
+        "error"
+      ],
+      "sourceLiteralKeys": 58,
+      "sourceObservationStatus": "NOT_CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "running",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "done",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "subscriptions.remove",
+      "route": "plan -> Remove",
+      "sourceComponent": "apps/web/src/ui/Ask.tsx",
+      "sourceSelector": ".ask",
+      "sourceStates": [
+        "confirm"
+      ],
+      "sourceLiteralKeys": 1,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "confirm",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "settings.company",
+      "route": "/settings",
+      "sourceComponent": "apps/web/src/screens/Settings.tsx",
+      "sourceSelector": "[role=dialog].dialog",
+      "sourceStates": [
+        "loading",
+        "error",
+        "closed",
+        "view",
+        "edit",
+        "remove-confirm"
+      ],
+      "sourceLiteralKeys": 13,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "loading",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "closed",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "view",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "edit",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "remove-confirm",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "settings.profile",
+      "route": "/profile",
+      "sourceComponent": "apps/web/src/screens/Profile.tsx",
+      "sourceSelector": "[role=dialog].dialog",
+      "sourceStates": [
+        "full",
+        "busy",
+        "validation-error",
+        "save-error"
+      ],
+      "sourceLiteralKeys": 5,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "busy",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "validation-error",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "save-error",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "settings.about",
+      "route": "/about",
+      "sourceComponent": "apps/web/src/screens/About.tsx",
+      "sourceSelector": "[role=dialog].about",
+      "sourceStates": [
+        "loading",
+        "full",
+        "version-error"
+      ],
+      "sourceLiteralKeys": 12,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "loading",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "version-error",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "settings.versions",
+      "route": "/versions",
+      "sourceComponent": "apps/web/src/screens/Versions.tsx",
+      "sourceSelector": "[role=dialog].dialog",
+      "sourceStates": [
+        "loading",
+        "error",
+        "empty",
+        "full",
+        "waiting",
+        "running",
+        "rolled-back",
+        "confirm"
+      ],
+      "sourceLiteralKeys": 10,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "loading",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "empty",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "waiting",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "running",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "rolled-back",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "confirm",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "updates.banner",
+      "route": "global shell update banner",
+      "sourceComponent": "apps/web/src/ui/UpdateBanner.tsx",
+      "sourceSelector": ".update-banner",
+      "sourceStates": [
+        "available",
+        "waiting",
+        "running",
+        "done",
+        "failed",
+        "error"
+      ],
+      "sourceLiteralKeys": 7,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "available",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "waiting",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "running",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "done",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "failed",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "updates.cut",
+      "route": "Versions -> force update",
+      "sourceComponent": "apps/web/src/ui/UpdateCut.tsx",
+      "sourceSelector": "[role=alertdialog].update-cut",
+      "sourceStates": [
+        "confirm",
+        "busy",
+        "error"
+      ],
+      "sourceLiteralKeys": 3,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "confirm",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "busy",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "updates.progress",
+      "route": "global update progress",
+      "sourceComponent": "apps/web/src/ui/UpdateProgress.tsx",
+      "sourceSelector": ".uprog",
+      "sourceStates": [
+        "starting",
+        "running",
+        "offline"
+      ],
+      "sourceLiteralKeys": 9,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "starting",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "running",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "offline",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "improvements.list",
+      "route": "/improvements",
+      "sourceComponent": "apps/web/src/screens/Improvements.tsx",
+      "sourceSelector": "section.tasks",
+      "sourceStates": [
+        "loading",
+        "error",
+        "empty",
+        "full"
+      ],
+      "sourceLiteralKeys": 18,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "loading",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "empty",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "improvements.item",
+      "route": "improvement item",
+      "sourceComponent": "apps/web/src/screens/Improvements.tsx",
+      "sourceSelector": "article.req",
+      "sourceStates": [
+        "open",
+        "taken",
+        "dismissed",
+        "edit",
+        "error"
+      ],
+      "sourceLiteralKeys": 18,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "open",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "taken",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "dismissed",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "edit",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "auth.login",
+      "route": "/ when signed out",
+      "sourceComponent": "apps/web/src/screens/Login.tsx",
+      "sourceSelector": "main.stage .card",
+      "sourceStates": [
+        "draft",
+        "busy",
+        "error"
+      ],
+      "sourceLiteralKeys": 5,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "draft",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "busy",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "auth.setup",
+      "route": "/ when setup required",
+      "sourceComponent": "apps/web/src/screens/Setup.tsx",
+      "sourceSelector": "main.stage .card",
+      "sourceStates": [
+        "company",
+        "template",
+        "plans",
+        "command",
+        "error"
+      ],
+      "sourceLiteralKeys": 35,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "company",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "template",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "plans",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "command",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "auth.invite",
+      "route": "/invite/demo-only",
+      "sourceComponent": "apps/web/src/screens/AcceptInvite.tsx",
+      "sourceSelector": "main.stage .card",
+      "sourceStates": [
+        "loading",
+        "unknown",
+        "accept",
+        "connect",
+        "error"
+      ],
+      "sourceLiteralKeys": 9,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "loading",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "unknown",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "accept",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "connect",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "routes.unavailable",
+      "route": "/not-found or forbidden resource",
+      "sourceComponent": "apps/web/src/screens/RouteUnavailable.tsx",
+      "sourceSelector": ".dialog, section.people",
+      "sourceStates": [
+        "page",
+        "dialog"
+      ],
+      "sourceLiteralKeys": 3,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "page",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "dialog",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "shared.table",
+      "route": "Machines/Subscriptions tables",
+      "sourceComponent": "apps/web/src/ui/SortTable.tsx",
+      "sourceSelector": ".tbl-frame .dt",
+      "sourceStates": [
+        "empty",
+        "full",
+        "filtered",
+        "expanded"
+      ],
+      "sourceLiteralKeys": 5,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "empty",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "filtered",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "expanded",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "shared.filters",
+      "route": "Machines/Subscriptions filters",
+      "sourceComponent": "apps/web/src/ui/TableTools.tsx",
+      "sourceSelector": ".tools",
+      "sourceStates": [
+        "closed",
+        "open",
+        "selected"
+      ],
+      "sourceLiteralKeys": 1,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "closed",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "open",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "selected",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "shared.confirm",
+      "route": "inline confirmations in several cards",
+      "sourceComponent": "apps/web/src/ui/Ask.tsx",
+      "sourceSelector": ".ask",
+      "sourceStates": [
+        "confirm"
+      ],
+      "sourceLiteralKeys": 1,
+      "sourceObservationStatus": "NOT_CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "confirm",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "shared.command",
+      "route": "Commands in multiple panels",
+      "sourceComponent": "apps/web/src/ui/CommandBox.tsx",
+      "sourceSelector": ".command-box",
+      "sourceStates": [
+        "full"
+      ],
+      "sourceLiteralKeys": 4,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "map.context",
+      "route": "/ company map",
+      "sourceComponent": "apps/web/src/screens/Map.tsx",
+      "sourceSelector": ".map",
+      "sourceStates": [
+        "empty",
+        "full",
+        "turn-error"
+      ],
+      "sourceLiteralKeys": 21,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "empty",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "turn-error",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "shell.menu",
+      "route": "global account menu",
+      "sourceComponent": "apps/web/src/screens/Shell.tsx",
+      "sourceSelector": ".account",
+      "sourceStates": [
+        "closed",
+        "open"
+      ],
+      "sourceLiteralKeys": 17,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "closed",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "open",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "pipeline.report",
+      "route": "department Speed report",
+      "sourceComponent": "apps/web/src/screens/PipelineReport.tsx",
+      "sourceSelector": "[role=tabpanel]",
+      "sourceStates": [
+        "loading",
+        "error",
+        "empty",
+        "full"
+      ],
+      "sourceLiteralKeys": 86,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "loading",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "empty",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "shared.treeframe",
+      "route": "department Tree detail card",
+      "sourceComponent": "apps/web/src/screens/TreeView.tsx",
+      "sourceSelector": ".tv-card",
+      "sourceStates": [
+        "main",
+        "turn",
+        "agent",
+        "reviewer"
+      ],
+      "sourceLiteralKeys": 160,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "main",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "turn",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "agent",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "reviewer",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "shared.authframe",
+      "route": "auth setup/login/invite",
+      "sourceComponent": "apps/web/src/ui/Card.tsx",
+      "sourceSelector": "main.stage .card",
+      "sourceStates": [
+        "standard",
+        "wide"
+      ],
+      "sourceLiteralKeys": 1124,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "standard",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "wide",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "shared.expanded-card",
+      "route": "Machines/Subscriptions expanded card",
+      "sourceComponent": "apps/web/src/ui/Cards.tsx",
+      "sourceSelector": "article.wcard",
+      "sourceStates": [
+        "full"
+      ],
+      "sourceLiteralKeys": 1124,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "shared.taskrow",
+      "route": "Tasks and department lists",
+      "sourceComponent": "apps/web/src/ui/TaskRow.tsx",
+      "sourceSelector": "button.trow",
+      "sourceStates": [
+        "open",
+        "working",
+        "review",
+        "done",
+        "blocked"
+      ],
+      "sourceLiteralKeys": 8,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "open",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "working",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "review",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "done",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "blocked",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "department.approval",
+      "route": "About drawer -> Approvals",
+      "sourceComponent": "apps/web/src/ui/ApprovalPolicy.tsx",
+      "sourceSelector": ".appr",
+      "sourceStates": [
+        "loading",
+        "error",
+        "full",
+        "read-only",
+        "edit-owner"
+      ],
+      "sourceLiteralKeys": 1124,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "loading",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "read-only",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "edit-owner",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "agent.dock",
+      "route": "global minimized agent windows",
+      "sourceComponent": "apps/web/src/screens/AgentWindows.tsx",
+      "sourceSelector": ".agent-strips",
+      "sourceStates": [
+        "empty",
+        "minimized",
+        "multiple"
+      ],
+      "sourceLiteralKeys": 1124,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "empty",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "minimized",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "multiple",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "shared.access",
+      "route": "People forms -> Access",
+      "sourceComponent": "apps/web/src/ui/AccessPicker.tsx",
+      "sourceSelector": "fieldset.access",
+      "sourceStates": [
+        "whole",
+        "department",
+        "teams",
+        "disabled"
+      ],
+      "sourceLiteralKeys": 5,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "whole",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "department",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "teams",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "disabled",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "shared.linkname",
+      "route": "Settings/Setup link name",
+      "sourceComponent": "apps/web/src/ui/LinkName.tsx",
+      "sourceSelector": ".link-name",
+      "sourceStates": [
+        "empty",
+        "checking",
+        "valid",
+        "taken",
+        "error"
+      ],
+      "sourceLiteralKeys": 11,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "empty",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "checking",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "valid",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "taken",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "shared.planlimits",
+      "route": "Subscription meters",
+      "sourceComponent": "apps/web/src/ui/PlanLimits.tsx",
+      "sourceSelector": ".gauges",
+      "sourceStates": [
+        "known",
+        "unknown",
+        "exhausted"
+      ],
+      "sourceLiteralKeys": 4,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "known",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "unknown",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "exhausted",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "shared.markdown",
+      "route": "Task/Request/Agent message text",
+      "sourceComponent": "apps/web/src/ui/Markdown.tsx",
+      "sourceSelector": ".md",
+      "sourceStates": [
+        "paragraphs",
+        "lists",
+        "inline-code"
+      ],
+      "sourceLiteralKeys": 1124,
+      "sourceObservationStatus": "NOT_CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "paragraphs",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "lists",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "inline-code",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "shared.pictures",
+      "route": "Agent draft pictures",
+      "sourceComponent": "apps/web/src/ui/MessagePictures.tsx",
+      "sourceSelector": ".t-tray",
+      "sourceStates": [
+        "empty",
+        "full",
+        "upload-error"
+      ],
+      "sourceLiteralKeys": 2,
+      "sourceObservationStatus": "NOT_CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "empty",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "upload-error",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "shared.field",
+      "route": "Forms -> labeled field + error",
+      "sourceComponent": "apps/web/src/ui/Field.tsx",
+      "sourceSelector": ".field",
+      "sourceStates": [
+        "normal",
+        "hint",
+        "error"
+      ],
+      "sourceLiteralKeys": 1124,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "normal",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "hint",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "error",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "updates.nodes",
+      "route": "Versions -> Node replacement waits",
+      "sourceComponent": "apps/web/src/ui/MachineDrain.tsx",
+      "sourceSelector": "section.update-nodes",
+      "sourceStates": [
+        "waiting",
+        "restarting",
+        "postponed"
+      ],
+      "sourceLiteralKeys": 8,
+      "sourceObservationStatus": "NOT_CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "waiting",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "restarting",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "postponed",
+          "status": "NOT_RUN"
+        }
+      ]
+    },
+    {
+      "id": "shared.frame",
+      "route": "all agent/task panels",
+      "sourceComponent": "apps/web/src/ui/SidePanels.tsx",
+      "sourceSelector": "aside.acard",
+      "sourceStates": [
+        "busy",
+        "full"
+      ],
+      "sourceLiteralKeys": 1,
+      "sourceObservationStatus": "CAPTURED",
+      "sourceObservationIsAcceptance": false,
+      "status": "NOT_RUN",
+      "reason": "No verified Docker/resource/export handoff from543 and no remote task commit while536 is open. Real-server fixtures beyond window/company notebook remain to be implemented.",
+      "states": [
+        {
+          "name": "busy",
+          "status": "NOT_RUN"
+        },
+        {
+          "name": "full",
+          "status": "NOT_RUN"
+        }
+      ]
+    }
+  ],
+  "approvedDesign": {
+    "archive": "etalon-465-package.zip",
+    "archiveSha256": "68ef28f7f426b5758bfec350cbbac560418680479d76c24913ddba70c4ea02ec",
+    "readFirstSha256": "c3c46c05f74059404b5b9641e39807070f53e5ab0f24fc24adf7c64fc06fddb6",
+    "provenance": "Permitted head handoff on465; read READ-FIRST and head-corrections. Prototype is not product or cross-engine PASS.",
+    "recordActions": "Logical end, grouped below text/metadata, minimum44px; whole words may wrap; no new UX confirmation.",
+    "subscriptionChoiceList": "Full-width choices with Cancel in separate group below. Not CEO507 choices.",
+    "closeFocusOffsetPx": -2,
+    "stableScrollbarGutter": "Accepted; record actual gutter width rather than requiring symmetric border distance.",
+    "designFirefoxWebKit": "NOT_AVAILABLE in the Design prototype; no cross-engine acceptance inherited."
+  }
+}
