@@ -162,6 +162,16 @@ describe('each node on the server computer is replaced on its own', () => {
     expect(nodeDrain(f.app.ctx, { kind: 'node', nodeId: remote.nodeId })).toBeNull();
   });
 
+  it('knows only the built-in node without the id of its computer: it holds no other, and calls no other free', async () => {
+    const f = await computer({ HORNHOOF_HOST_ID: '' });
+    const claude = await f.plan('claude');
+
+    const answer = (await f.server('POST', ['builtin', claude.plan])).json();
+
+    expect(answer).toMatchObject({ ready: true, free: ['builtin'] });
+    expect(nodeDrain(f.app.ctx, { kind: 'node', nodeId: claude.nodeId })).toBeNull();
+  });
+
   it('takes names only from the built-in key on the whole server: a node key answers for itself', async () => {
     const f = await computer();
     const claude = await f.plan('claude');
