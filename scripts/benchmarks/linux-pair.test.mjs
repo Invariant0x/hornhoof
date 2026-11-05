@@ -38,6 +38,7 @@ if(tool==='npm'&&args[0]==='ci') {row.cacheWasEmpty=fs.readdirSync(row.cache).le
 fs.appendFileSync(process.env.HH_PAIR_TRACE,JSON.stringify(row)+'\\n');
 if(process.env.HH_PAIR_FIXTURE_SETUP_FAIL&&row.variant==='control'&&row.part==='1'&&tool==='npm'&&args[0]==='ci') {console.error('SETUP failed');process.exit(1);}
 if(process.env.HH_PAIR_FIXTURE_PAUSE&&row.variant==='control'&&row.part==='1'&&tool==='npm'&&args[0]==='ci') Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,5500);
+if(process.env.HH_PAIR_FIXTURE_DRIFT&&row.variant==='control'&&row.part==='1'&&tool==='npm'&&args[0]==='ci') {console.log('completed command before quota drift');fs.writeFileSync(process.env.HH_PAIR_QUOTA_MARKER,'drift');}
 if(tool==='npm'&&args[0]==='run'&&args[1]==='build'&&args.includes('@hornhoof/protocol')) {fs.mkdirSync(path.join(cwd,'packages/protocol/dist'),{recursive:true});fs.writeFileSync(path.join(cwd,'packages/protocol/dist/ready'),'built');}
 if(tool==='npm'&&args[0]==='run'&&args[1]==='build'&&args.includes('@hornhoof/node')) {
  if(process.env.HH_PAIR_FIXTURE_NODE_BUILD_FAIL&&row.variant==='control'&&row.part==='1') {console.error('NODE BUILD failed');process.exit(1);}
@@ -49,6 +50,7 @@ if(tool==='npx'||(tool==='npm'&&args[0]==='test')) {
  const cli=cp.spawnSync(process.execPath,[path.join(root,'apps/node/dist/check-command.js')],{encoding:'utf8'});
  if(cli.status!==0||cli.stdout!==row.variant) {console.error(cli.stderr||'wrong source CLI artifact');process.exit(1);}
  const pkg=cwd.endsWith('protocol')||args.includes('@hornhoof/protocol')?'packages/protocol':cwd.slice(cwd.lastIndexOf('apps/'));
+ if(process.env.HH_PAIR_FIXTURE_MALFORMED&&row.variant==='control'&&row.part==='1'&&pkg==='apps/server') console.log('::hh-test-timing::{broken}');
  if(process.env.HH_PAIR_FIXTURE_BINARY&&row.variant==='control'&&row.part==='2'&&pkg==='apps/server') process.stdout.write(Buffer.from([0,255,195,40,10]));
  console.log('::hh-test-timing::'+JSON.stringify({kind:'file',package:pkg,file:'test/example.test.ts',totalMs:10,setupMs:2,testsMs:8,teardownMs:0,slowest:[]}));
  const summary='::hh-test-timing::'+JSON.stringify({kind:'package',package:pkg,tests:3,medianTestMs:1,slowerThanMedian:1});
@@ -106,6 +108,23 @@ test('a failed node build prevents suite commands in that fresh source',t=>{
  assert.ok(!trace.some(x=>x.variant==='control'&&x.part==='1'&&(x.tool==='npx'||x.args[0]==='test')));
  const result=r.records.find(x=>x.kind==='HH_PAIR_RESULT');assert.equal(result.complete,false);assert.equal(result.valid,false);
  assert.ok(result.failures.some(x=>x.stage==='node-build'&&x.phase==='preparation'));
+});
+test('retains completed-stage evidence when timing parsing fails',t=>{
+ const f=fixture(t),r=run(f,{HH_PAIR_FIXTURE_MALFORMED:'1'});assert.equal(r.status,1);
+ const rows=decodeEvidence(r.stdout,f.out);
+ const output=rows.find(x=>x.kind==='HH_PAIR_OUTPUT'&&x.value.variant==='control'&&x.value.part===1&&x.value.stage==='apps/server');
+ assert.ok(output,'completed raw output must survive a parser failure');assert.match(output.value.output,/\{broken\}/);
+ const stage=rows.find(x=>x.kind==='HH_PAIR_STAGE'&&x.value.variant==='control'&&x.value.part===1&&x.value.stage==='apps/server').value;
+ assert.equal(stage.exitCode,0);assert.ok(stage.ms>0);assert.equal(stage.timingValid,false);assert.match(stage.validationError,/timing/i);
+});
+test('retains completed-stage evidence when observed quota identity drifts',t=>{
+ const f=fixture(t),preload=join(f.root,'quota.mjs'),marker=join(f.root,'quota-marker');
+ writeFileSync(preload,"import os from 'node:os';import fs from 'node:fs';import {syncBuiltinESMExports} from 'node:module';const cpu=os.availableParallelism();os.availableParallelism=()=>cpu+(fs.existsSync(process.env.HH_PAIR_QUOTA_MARKER)?1:0);syncBuiltinESMExports();\n");
+ const r=run(f,{HH_PAIR_FIXTURE_DRIFT:'1',HH_PAIR_QUOTA_MARKER:marker,NODE_OPTIONS:'--import='+preload});assert.equal(r.status,1);
+ const rows=decodeEvidence(r.stdout,f.out);
+ const output=rows.find(x=>x.kind==='HH_PAIR_OUTPUT');assert.ok(output,'raw output must survive quota drift');assert.match(output.value.output,/completed command/);
+ const stage=rows.find(x=>x.kind==='HH_PAIR_STAGE').value;assert.equal(stage.exitCode,0);assert.ok(stage.ms>0);assert.equal(stage.timingValid,false);assert.match(stage.validationError,/identity|quota|limits/i);
+ assert.equal(r.records.filter(x=>x.kind==='HH_PAIR_STAGE').length,1);
 });
 test('runs both pinned commits as eight isolated logical shards with all original stages', t=>{
  const f=fixture(t),r=run(f);assert.equal(r.status,0,r.stderr+'\n'+r.stdout);
