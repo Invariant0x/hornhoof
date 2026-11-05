@@ -486,6 +486,7 @@ export const en = {
     placeholder: 'One fact, like "Every release waits for a yes from the CEO"',
     add: 'Add',
     save: 'Save',
+    saving: 'Saving',
     cancel: 'Cancel',
     change: 'Change',
     remove: 'Remove',
