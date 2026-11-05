@@ -9,11 +9,12 @@ import { loggable } from '../../errors.js';
 import { pumpWaiting } from '../conversation/queue.js';
 import type { NodeIdentity } from '../nodes/hub.js';
 import { pumpTests } from '../testruns/runs.js';
-import { drainPostponed, drainWork, namedWork, nodePlaces } from './drain-work.js';
+import { drainPostponed, drainWork, namedWork, nodePlaces, type Place } from './drain-work.js';
 
 /* heldAt: when this hold of the node began. A wait saved before this began when the server read it. */
 const Saved = z.object({ key: z.string(), boot: z.string().nullable(), view: MachineDrain, touched: z.number(), heldAt: z.number().default(() => Date.now()) });
 type Saved = z.infer<typeof Saved>;
+type Drain = { node: NodeIdentity; view: MachineDrain };
 /* By the config, which a transaction's copy of the context shares with the context itself. */
 const states = new WeakMap<Ctx['config'], NodeDrains>();
 const keyOf = (node: NodeIdentity) => node.kind === 'builtin' ? 'builtin' : node.nodeId;
@@ -47,7 +48,7 @@ class NodeDrains {
     return this.records.get(keyOf(node))?.view ?? null;
   }
 
-  all(): { node: NodeIdentity; view: MachineDrain }[] {
+  all(): Drain[] {
     return [...this.records.values()].map(r => ({ node: nodeOf(r.key), view: r.view }));
   }
 
@@ -177,9 +178,10 @@ export const nodeHeldLong = (ctx: Ctx, node: NodeIdentity): boolean => states.ge
    the node goes on either way. A node that restarts takes nothing. */
 export const nodeHeldFrom = (ctx: Ctx, node: NodeIdentity, role: string | null | undefined, leader = false): boolean => {
   const state = nodeDrain(ctx, node)?.state;
-  if (state !== 'waiting') return state === 'restarting';
-  return role !== PROGRAM_OPERATOR_ROLE && !(leader && nodeHeldLong(ctx, node));
+  return state === 'waiting' ? !entersWaitingNode(ctx, node, role, leader) : state === 'restarting';
 };
+const entersWaitingNode = (ctx: Ctx, node: NodeIdentity, role: string | null | undefined, leader: boolean): boolean =>
+  role === PROGRAM_OPERATOR_ROLE || (leader && nodeHeldLong(ctx, node));
 export const requestNodeDrain = (ctx: Ctx, node: NodeIdentity): Promise<MachineDrain> => states.get(ctx.config)!.request(node);
 export const cancelNodeDrain = (ctx: Ctx, node: NodeIdentity): void => states.get(ctx.config)?.cancel(node);
 export const nodeDrainHello = (ctx: Ctx, node: NodeIdentity, boot: string | undefined): void => states.get(ctx.config)?.hello(node, boot);
@@ -198,12 +200,13 @@ export async function nodeWaits(ctx: Ctx, companyId: string): Promise<NodeWait[]
   const ids = drains.flatMap(d => (d.node.kind === 'node' ? [d.node.nodeId] : []));
   const places = await nodePlaces(ctx, companyId, ids);
   const seen = drains.filter(d => d.node.kind === 'builtin' || places.has(d.node.nodeId));
-  const waits = await Promise.all(seen.map(async ({ node, view }) => {
-    const place = node.kind === 'node' ? places.get(node.nodeId) : undefined;
-    const work = view.state === 'restarting' ? [] : namedWork(await drainWork(ctx, node), companyId);
-    return { node: keyOf(node), provider: place?.provider ?? null, hostname: place?.hostname ?? null, drain: view, work };
-  }));
+  const waits = await Promise.all(seen.map(d => nodeWait(ctx, companyId, d, d.node.kind === 'node' ? places.get(d.node.nodeId) : undefined)));
   return waits.sort((a, b) => placeOrder(a).localeCompare(placeOrder(b)));
+}
+
+async function nodeWait(ctx: Ctx, companyId: string, { node, view }: Drain, place: Place | undefined): Promise<NodeWait> {
+  const work = view.state === 'restarting' ? [] : namedWork(await drainWork(ctx, node), companyId);
+  return { node: keyOf(node), provider: place?.provider ?? null, hostname: place?.hostname ?? null, drain: view, work };
 }
 
 const placeOrder = (wait: NodeWait): string => (wait.hostname === null ? '' : `${wait.hostname} ${wait.provider ?? ''} ${wait.node}`);

@@ -65,9 +65,11 @@ export const serverNodes = async (ctx: Ctx): Promise<NodeIdentity[]> => (await n
 export const namedWork = (work: Work, companyId: string) =>
   work.turns.flatMap(t => (t.companyId === companyId && t.kind === 'conversation' && t.agent ? [{ agent: t.agent, task: t.task }] : []));
 
+export type Place = { provider: string | null; hostname: string };
+
 /* The plan and the machine of those of these nodes that are this company's. */
-export async function nodePlaces(ctx: Ctx, companyId: string, ids: string[]) {
-  if (!ids.length) return new Map<string, { provider: string | null; hostname: string }>();
+export async function nodePlaces(ctx: Ctx, companyId: string, ids: string[]): Promise<Map<string, Place>> {
+  if (!ids.length) return new Map();
   const rows = await ctx.db.select({ id: nodes.id, provider: subscriptions.provider, hostname: machines.hostname })
     .from(nodes).innerJoin(machines, eq(machines.id, nodes.machineId)).leftJoin(subscriptions, eq(subscriptions.id, nodes.subscriptionId))
     .where(and(eq(nodes.companyId, companyId), inArray(nodes.id, ids)));

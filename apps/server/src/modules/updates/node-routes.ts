@@ -1,3 +1,4 @@
+import type { MachineDrain } from '@hornhoof/protocol';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -24,14 +25,19 @@ async function targets(ctx: Ctx, req: FastifyRequest): Promise<ServerNode[]> {
   return nodes ? all.filter(n => nodes.includes(n.name)) : all;
 }
 
+/* The one that says most of why they wait: one still waiting, or else put off, or else the first. */
+const longestWait = (views: MachineDrain[]): MachineDrain | null =>
+  views.find(v => v.state === 'waiting') ?? views.find(v => v.state === 'postponed') ?? views[0] ?? null;
+
+const allFree = (views: MachineDrain[], free: string[]): boolean => views.length > 0 && free.length === views.length;
+
 export function nodeUpdateRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/nodes/update', async req => {
     const asked = await targets(ctx, req);
     const views = await Promise.all(asked.map(n => requestNodeDrain(ctx, n.node)));
     const free = asked.filter((_, i) => views[i]!.state === 'restarting').map(n => n.name);
-    const drain = views.find(v => v.state === 'waiting') ?? views.find(v => v.state === 'postponed') ?? views[0] ?? null;
     /* ready, for an updater from before free: all of them together. */
-    return { ready: views.length > 0 && free.length === views.length, free, drain, pollAfterMs: POLL_MS };
+    return { ready: allFree(views, free), free, drain: longestWait(views), pollAfterMs: POLL_MS };
   });
   app.delete('/api/nodes/update', async (req, reply) => {
     for (const { node } of await targets(ctx, req)) cancelNodeDrain(ctx, node);
