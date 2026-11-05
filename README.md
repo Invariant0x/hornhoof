@@ -36,8 +36,6 @@ It is your own virtual cloud. It runs on the computers you connect, one or many,
 
 ## How it starts
 
-The pictures show Moonfern, a made-up startup of three friends with seven AI plans and ten computers. Its people and work are invented for the demo.
-
 1. Install Hornhoof with one line in the terminal. On a Mac, press `Cmd` and `Space`, type `Terminal` and press `Enter`. On Linux, press `Ctrl`, `Alt` and `T`. On Windows, open the Ubuntu terminal of WSL. Docker installs itself if it is missing.
 
    ```sh
