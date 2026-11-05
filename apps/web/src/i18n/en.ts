@@ -1240,7 +1240,7 @@ export const en = {
     agent_hidden: 'You can open only employees on your own plan in your departments.',
     task_hidden: 'This task is the work of an employee you cannot open.',
     ceo_view_only: 'Only the CEO and the CEO delegate see this.',
-    attachment_hidden: 'This picture belongs to work you cannot open.',
+    attachment_hidden: 'This file belongs to work you cannot open.',
     picture_invalid: 'This file is not a picture that can be sent. Send a PNG, JPEG or WebP.',
     picture_too_big: 'This picture is too big, even made smaller. A picture is at most 3 MB.',
     pictures_too_many: 'One message takes at most 10 pictures.',
