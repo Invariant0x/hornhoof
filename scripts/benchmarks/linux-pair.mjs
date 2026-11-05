@@ -102,6 +102,14 @@ function stable(expected) {
   const actual=identity();
   if(JSON.stringify(actual)!==JSON.stringify(expected)) throw new Error('Worker identity or resource quotas changed: '+JSON.stringify({expected,actual}));
 }
+function validateStage(output, context, counts, expected, drift) {
+  try {
+    stable(expected);
+    if(drift)throw new Error('Worker limits changed during stage: '+JSON.stringify(drift));
+  } catch(error) {return {timingValid:false,validationError:error.message,abort:true};}
+  try {return {timingValid:timings(output,context,counts)};}
+  catch(error) {return {timingValid:false,validationError:'Invalid timing evidence: '+error.message};}
+}
 async function stage(item, spec, expected, scratch, counts) {
   const [name,command,relative,extra]=spec;
   const context={variant:item.variant,sha:item.sha,part:item.part,parts:4,stage:name,phase:phaseOf(name)};
@@ -111,14 +119,15 @@ async function stage(item, spec, expected, scratch, counts) {
   let result;
   try {result=await child(command,relative?join(item.dir,relative):item.dir,{...process.env,VITEST_MAX_WORKERS:'2',HH_TEST_PART:String(item.part),HH_TEST_PARTS:'4',HH_PAIR_VARIANT:item.variant,npm_config_cache:item.cache,NPM_CONFIG_CACHE:item.cache,...extra},join(scratch,item.variant+'-'+item.part+'-'+name.replaceAll('/','_')+'.log'));}
   finally {clearInterval(timer);}
-  samples.push(resource(context,'after'));stable(expected);
-  if(drift)throw new Error('Worker limits changed during stage: '+JSON.stringify(drift));
-  const timingValid=timings(result.output,context,counts);
   emit('HH_PAIR_OUTPUT',{...context,output:result.output,rawBase64:result.raw.toString('base64'),rawSha256:createHash('sha256').update(result.raw).digest('hex')});
   if(result.code!==0) emit('HH_PAIR_FAILED_OUTPUT',{...context,output:result.output});
   if(result.error)emit('HH_PAIR_CHILD_ERROR',{...context,message:result.error});
+  samples.push(resource(context,'after'));
+  const validation=validateStage(result.output,context,counts,expected,drift);
   const ranges={samples:samples.length,loadMin:[0,1,2].map(i=>Math.min(...samples.map(s=>s.load[i]))),loadMax:[0,1,2].map(i=>Math.max(...samples.map(s=>s.load[i]))),freeMin:Math.min(...samples.map(s=>s.free)),freeMax:Math.max(...samples.map(s=>s.free))};
-  const row={...context,resources:ranges,ms:Math.round(result.ms),collectionMs:Math.round(performance.now()-start-result.ms),timingValid,exitCode:result.code,signal:result.signal};emit('HH_PAIR_STAGE',row);return row;
+  const row={...context,resources:ranges,ms:Math.round(result.ms),collectionMs:Math.round(performance.now()-start-result.ms),...validation,exitCode:result.code,signal:result.signal};emit('HH_PAIR_STAGE',row);
+  if(validation.abort)throw new Error(validation.validationError);
+  return row;
 }
 async function compare(control, optimized) {
   const env=pinned(control,optimized),scratch=join(root,'.metrics','paired-tests');mkdirSync(scratch,{recursive:true});
