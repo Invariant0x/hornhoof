@@ -52,6 +52,31 @@ describe.skipIf(!hasTmux)('what a view of a session shows when it opens', () => 
     }
   });
 
+  /* tmux's client keeps a browser's terminal on its normal screen, where lines that scroll off stay as its history. */
+  it.each([true, false])('a view opened before the program writes gets every line, and no alternate screen, write: %s', async write => {
+    const key = `h4-${write}`;
+    const name = await session(key);
+    await host.open({ type: 'term.open', termId: key, agentKey: key, cols: 80, rows: 24, write });
+    await until(() => frames(key).length > 0);
+    await tmux.run(['respawn-pane', '-k', '-t', name, 'sh', '-c', 'i=1; while [ $i -le 244 ]; do echo "line-$i-end"; i=$((i+1)); sleep 0.005; done; sleep 30']);
+    await until(() => shown(key).includes('line-244-end'), 15_000);
+    expect(shown(key)).not.toContain('\x1b[?1049h');
+    const seen = [...new Set([...shown(key).matchAll(/line-(\d+)-end/g)].map(line => Number(line[1])))];
+    expect(seen).toEqual(Array.from({ length: 244 }, (_, at) => at + 1));
+  });
+
+  it('keeps the other settings of terminals on the server when a view asks for its screen', async () => {
+    await session('h5');
+    await tmux.run(['set-option', '-sa', 'terminal-overrides', 'other-term:Tc']);
+    await host.open({ type: 'term.open', termId: 't5', agentKey: 'h5', cols: 80, rows: 24, write: false });
+    await until(() => frames('t5').length > 0);
+    await host.open({ type: 'term.open', termId: 't6', agentKey: 'h5', cols: 80, rows: 24, write: false });
+    await until(() => frames('t6').length > 0);
+    const overrides = await tmux.run(['show-options', '-s', 'terminal-overrides']);
+    expect(overrides).toContain('other-term:Tc');
+    expect(overrides.match(/smcup@/g)).toHaveLength(1);
+  });
+
   it('says nothing more once the view closed while its history was read', async () => {
     await session('h3');
     const read = tmux.screen.bind(tmux);
