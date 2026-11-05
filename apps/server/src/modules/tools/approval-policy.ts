@@ -13,7 +13,7 @@ import { personParty } from '../events/parties.js';
 import { appendOutgoing } from '../events/store.js';
 import { carriesFile, encodedHint } from '../tasks/attachments.js';
 import { decisionPerson } from '../tasks/decisions.js';
-import { ask, comment, mayAsk, refuse, taskSpot, type Task } from '../tasks/engine.js';
+import { ask, comment, mayAsk, refuse, taskSpot, type Ask, type Task } from '../tasks/engine.js';
 import { TURN_QUESTIONS } from '../tasks/tools.js';
 import { taskByRef } from '../tasks/views.js';
 import { wakeAll } from '../tasks/wake.js';
@@ -44,47 +44,72 @@ async function ruleFor(ctx: Pick<Ctx, 'db'>, task: Task, channel: ApprovalChanne
 
 const limitWords = (rule: { limit: number; unit?: string | undefined }) => `${rule.limit}${rule.unit ? ` ${rule.unit}` : ''}`;
 
-/* The tools every agent has for approvals: it reads how a department's go, and asks under them. Work the policy lets go
-   leaves a line in the task's log, so people can see what went without them. */
+/* The task, when this agent is the one who asks on it. */
+async function heldTask(ctx: Pick<Ctx, 'db'>, job: ToolJob, ref: number | string): Promise<Task> {
+  const task = await taskByRef(ctx, job.companyId, ref);
+  if (!task) throw refuse(404, 'task_unknown', `There is no task ${ref}. Call tasks for yours.`);
+  mayAsk(task, job.agentId);
+  return task;
+}
+
+/* How many times this turn asked people already. */
+async function askedInTurn(db: Ctx['db'], job: ToolJob): Promise<number> {
+  const [started] = await db.select({ at: jobs.startedAt }).from(jobs).where(eq(jobs.id, job.id));
+  const [asked] = await db
+    .select({ n: count() })
+    .from(requests)
+    .where(and(eq(requests.agentId, job.agentId), inArray(requests.kind, ['question', 'approval', 'choice']), gte(requests.createdAt, started?.at ?? new Date(0))));
+  return Number(asked?.n ?? 0);
+}
+
+/* A question to people, kept with the person it goes to, within what one turn may ask. */
+async function askPerson(ctx: Ctx, job: ToolJob, task: Task, q: Ask & { kind: 'question' | 'approval' }): Promise<void> {
+  if (carriesFile(q.text)) throw refuse(400, 'task_invalid', encodedHint(task.number));
+  if ((await askedInTurn(ctx.db, job)) >= TURN_QUESTIONS) throw refuse(409, 'task_invalid', `One turn asks people at most ${TURN_QUESTIONS} times.`);
+  const moved = await ask(ctx, job.agentId, task.id, q);
+  const personId = await decisionPerson(ctx, job.companyId, { source: 'request', kind: q.kind, topic: moved.request.decisionTopic, spot: taskSpot(task) });
+  await appendOutgoing(ctx, { companyId: job.companyId, agentId: job.agentId, jobId: job.id, text: q.text, to: await personParty(ctx, job.companyId, personId) });
+  await wakeAll(ctx, moved.wakes);
+}
+
+/* Why the policy lets this work go without a person, when it does. */
+async function letGoBecause(ctx: Pick<Ctx, 'db'>, job: ToolJob, task: Task, asked: Asked): Promise<string | null> {
+  const rule = await ruleFor(ctx, task, asked.channel);
+  const known = task.departmentId !== null && rule.mode === 'new_kinds' && (await kindKnown(ctx.db, job.companyId, task.departmentId, asked.channel, asked.kind));
+  if (approvalNeeded(rule, { amount: asked.amount ?? null, known })) return null;
+  return rule.mode === 'within_limits' ? `${asked.amount} is within the limit of ${limitWords(rule)}` : 'this kind was approved before';
+}
+
+/* Asks under the policy. Work the policy lets go leaves a line in the task's log, so people can see what went without them. */
+async function requestApproval(ctx: Ctx, job: ToolJob, ref: number | string, asked: Asked) {
+  const task = await heldTask(ctx, job, ref);
+  const why = await letGoBecause(ctx, job, task, asked);
+  const kind = kindKey(asked.kind);
+  if (why) {
+    await wakeAll(ctx, (await comment(ctx, { agentId: job.agentId }, task.id, `Went without approval (${asked.channel}, ${kind}): ${why}. ${asked.text}`)).wakes);
+    return say(`No approval needed: ${why}. Go on with the work.`);
+  }
+  await askPerson(ctx, job, task, { kind: 'approval', text: asked.text, approval: { channel: asked.channel, kind, amount: asked.amount ?? null }, link: asked.link ?? null, topic: 'task' });
+  return say(`Asked. #${task.number} waits for a person's answer; you will be woken with it.`);
+}
+
+/* A department's owner and rules as an agent reads them. */
+async function readPolicy(ctx: Pick<Ctx, 'db'>, job: ToolJob, department: string) {
+  const [dept] = await ctx.db.select().from(departments).where(and(eq(departments.id, department), eq(departments.companyId, job.companyId)));
+  if (!dept) return say(`There is no department with id ${department}. Call company to see the current ids.`, true);
+  const top = dept.parentId ?? dept.id;
+  return say(JSON.stringify({ department: top, owner: await departmentOwner(ctx, job.companyId, top), rules: await departmentRules(ctx.db, top) }));
+}
+
+/* The tools every agent has for approvals: it reads how a department's go, and asks under them. */
 export function registerApprovalTools(server: McpServer, ctx: Ctx, job: ToolJob): void {
-  const { db } = ctx;
-
-  const held = async (ref: number | string): Promise<Task> => {
-    const task = await taskByRef(ctx, job.companyId, ref);
-    if (!task) throw refuse(404, 'task_unknown', `There is no task ${ref}. Call tasks for yours.`);
-    mayAsk(task, job.agentId);
-    return task;
-  };
-
-  /* A question to people, kept with the person it goes to, within what one turn may ask. */
-  const askPerson = async (task: Task, q: { kind: 'question' | 'approval'; text: string; approval?: { channel: ApprovalChannel; kind: string; amount: number | null }; link?: string | null }) => {
-    if (carriesFile(q.text)) throw refuse(400, 'task_invalid', encodedHint(task.number));
-    const [{ at } = { at: null }] = await db.select({ at: jobs.startedAt }).from(jobs).where(eq(jobs.id, job.id));
-    const [asked] = await db
-      .select({ n: count() })
-      .from(requests)
-      .where(and(eq(requests.agentId, job.agentId), inArray(requests.kind, ['question', 'approval', 'choice']), gte(requests.createdAt, at ?? new Date(0))));
-    if (Number(asked?.n ?? 0) >= TURN_QUESTIONS) throw refuse(409, 'task_invalid', `One turn asks people at most ${TURN_QUESTIONS} times.`);
-    const moved = await ask(ctx, job.agentId, task.id, q);
-    const personId = await decisionPerson(ctx, job.companyId, { source: 'request', kind: q.kind, topic: moved.request.decisionTopic, spot: taskSpot(task) });
-    await appendOutgoing(ctx, { companyId: job.companyId, agentId: job.agentId, jobId: job.id, text: q.text, to: await personParty(ctx, job.companyId, personId) });
-    await wakeAll(ctx, moved.wakes);
-    return moved;
-  };
-
   server.registerTool(
     'approval_policy',
     {
       description: "A department's approvals: who owns them (none means the CEO) and the rule of each channel: every, new_kinds, or within_limits with its limit. Each channel with no rule of its own asks every time.",
       inputSchema: { department: Department },
     },
-    ({ department }) =>
-      readable(async () => {
-        const [dept] = await db.select().from(departments).where(and(eq(departments.id, department), eq(departments.companyId, job.companyId)));
-        if (!dept) return say(`There is no department with id ${department}. Call company to see the current ids.`, true);
-        const top = dept.parentId ?? dept.id;
-        return say(JSON.stringify({ department: top, owner: await departmentOwner(ctx, job.companyId, top), rules: await departmentRules(db, top) }));
-      }),
+    ({ department }) => readable(() => readPolicy(ctx, job, department)),
   );
 
   server.registerTool(
@@ -105,19 +130,7 @@ export function registerApprovalTools(server: McpServer, ctx: Ctx, job: ToolJob)
         link: z.url({ protocol: /^https$/ }).max(500).optional(),
       },
     },
-    ({ task: ref, ...asked }: Asked & { task: number | string }) =>
-      readable(async () => {
-        const task = await held(ref);
-        const rule = await ruleFor(ctx, task, asked.channel);
-        const known = task.departmentId !== null && rule.mode === 'new_kinds' && (await kindKnown(db, job.companyId, task.departmentId, asked.channel, asked.kind));
-        if (!approvalNeeded(rule, { amount: asked.amount ?? null, known })) {
-          const why = rule.mode === 'within_limits' ? `${asked.amount} is within the limit of ${limitWords(rule)}` : 'this kind was approved before';
-          await wakeAll(ctx, (await comment(ctx, { agentId: job.agentId }, task.id, `Went without approval (${asked.channel}, ${kindKey(asked.kind)}): ${why}. ${asked.text}`)).wakes);
-          return say(`No approval needed: ${why}. Go on with the work.`);
-        }
-        await askPerson(task, { kind: 'approval', text: asked.text, approval: { channel: asked.channel, kind: kindKey(asked.kind), amount: asked.amount ?? null }, link: asked.link ?? null });
-        return say(`Asked. #${task.number} waits for a person's answer; you will be woken with it.`);
-      }),
+    ({ task, ...asked }: Asked & { task: number | string }) => readable(() => requestApproval(ctx, job, task, asked)),
   );
 
   if (job.agentKind === 'worker') return;
@@ -129,8 +142,8 @@ export function registerApprovalTools(server: McpServer, ctx: Ctx, job: ToolJob)
     },
     ({ task: ref, goal, why }) =>
       readable(async () => {
-        const task = await held(ref);
-        await askPerson(task, { kind: 'question', text: `Missed goal: ${goal}. ${why}` });
+        const task = await heldTask(ctx, job, ref);
+        await askPerson(ctx, job, task, { kind: 'question', text: `Missed goal: ${goal}. ${why}` });
         return say(`Told the CEO. #${task.number} waits for the answer; you will be woken with it.`);
       }),
   );

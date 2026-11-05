@@ -60,6 +60,12 @@ export async function decisionPerson(ctx: Pick<Ctx, 'db'>, companyId: string, su
   return decisionOwner(subject, await candidates(ctx, companyId));
 }
 
+/* Whether a decision is held by a department's named owner other than this viewer. */
+function heldElsewhere(subject: DecisionSubject, everyone: readonly Candidate[], viewer: string): boolean {
+  const named = namedOwner(subject, everyone);
+  return named !== null && named !== viewer;
+}
+
 const byTimeAndId = <T extends { createdAt: Date; id: string }>(a: T, b: T) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id);
 
 function counted(owners: { ownerPersonId: string; agentId: string; elsewhere?: boolean }[]): Counts {
@@ -87,10 +93,6 @@ export async function visibleDecisions(ctx: Pick<Ctx, 'db' | 'computer'>, me: Pe
   const whole = me.scopeKind === 'company';
   /* As the routes that take them let them. */
   const judged = (subject: DecisionSubject) => ({ ownerPersonId: decisionOwner(subject, everyone), canAnswer: canDecide(subject, me, access, me.companyId), decidedBy: decidedBy(subject, everyone) });
-  const elsewhere = (subject: DecisionSubject) => {
-    const named = namedOwner(subject, everyone);
-    return named !== null && named !== me.id;
-  };
   const seen = rows.filter(r => canReach(access, taskSpot(r.task))).map(r => ({ ...r, ...judged(requestSubject(r.request, r.task)) }));
   const cards = whole ? (await db.select().from(proposals).where(and(eq(proposals.companyId, me.companyId), eq(proposals.status, 'pending')))).sort(byTimeAndId) : [];
   const shownCards = cards.map(proposal => ({ proposal, ...judged({ source: 'proposal' }) }));
@@ -99,7 +101,7 @@ export async function visibleDecisions(ctx: Pick<Ctx, 'db' | 'computer'>, me: Pe
   const [orchestrator] = asked ? await db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, me.companyId), eq(agents.kind, 'orchestrator'))) : [];
   const computer = asked && orchestrator ? { asked, agentId: orchestrator.id, ...judged({ source: 'computer_access' }) } : null;
   const counts = counted([
-    ...seen.map(r => ({ ownerPersonId: r.ownerPersonId, agentId: r.request.agentId, elsewhere: elsewhere(requestSubject(r.request, r.task)) })),
+    ...seen.map(r => ({ ownerPersonId: r.ownerPersonId, agentId: r.request.agentId, elsewhere: heldElsewhere(requestSubject(r.request, r.task), everyone, me.id) })),
     ...shownCards.map(c => ({ ownerPersonId: c.ownerPersonId, agentId: c.proposal.agentId })),
     ...(computer ? [{ ownerPersonId: computer.ownerPersonId, agentId: computer.agentId }] : []),
   ]);

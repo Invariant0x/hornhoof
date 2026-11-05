@@ -13,13 +13,20 @@ export type Decider = { companyId: string; status: 'active' | 'invited' | 'disab
 /* The CEO, or the CEO's delegate while they are active with the whole company: they take the CEO's decisions. */
 export const actsAsCeo = (p: Decider): boolean => p.status === 'active' && (p.isOwner || (p.isCeoDelegate && p.scopeKind === 'company'));
 
+const takesAsOwner = (subject: DecisionSubject, access: Access): boolean => {
+  const department = ownerDepartment(subject);
+  return department !== null && access.owns?.has(department) === true;
+};
+
+const takesWithDepartment = (subject: DecisionSubject, access: Access): boolean => {
+  const place = decisionPlace(subject);
+  return place !== null && listsPlace(access, place);
+};
+
 export function canDecide(subject: DecisionSubject, person: Decider, access: Access, companyId: string): boolean {
   if (person.companyId !== companyId || person.status !== 'active') return false;
   if (actsAsCeo(person)) return true;
-  const department = ownerDepartment(subject);
-  if (department && access.owns?.has(department)) return true;
-  const place = decisionPlace(subject);
-  return place !== null && listsPlace(access, place);
+  return takesAsOwner(subject, access) || takesWithDepartment(subject, access);
 }
 
 export function requireDecision(subject: DecisionSubject, person: Decider, access: Access, companyId: string): void {
@@ -33,9 +40,12 @@ export const notAllowed = () =>
    CEO and the delegate. A product's decision is its department's. */
 export type DecidedBy = { kind: 'ceo_and_delegate' | 'department_and_ceo' | 'owner_and_ceo'; departmentId: string | null };
 
+/* What no department's people take: its named owner's with the CEO, or the CEO's. */
+const decidedAbove = (subject: DecisionSubject, people: readonly Candidate[]): DecidedBy =>
+  namedOwner(subject, people) ? { kind: 'owner_and_ceo', departmentId: ownerDepartment(subject) } : { kind: 'ceo_and_delegate', departmentId: null };
+
 export function decidedBy(subject: DecisionSubject, people: readonly Candidate[] = []): DecidedBy {
   const place = decisionPlace(subject);
-  if (place) return { kind: 'department_and_ceo', departmentId: place.parentId ?? place.departmentId };
-  if (namedOwner(subject, people)) return { kind: 'owner_and_ceo', departmentId: ownerDepartment(subject) };
-  return { kind: 'ceo_and_delegate', departmentId: null };
+  if (!place) return decidedAbove(subject, people);
+  return { kind: 'department_and_ceo', departmentId: place.parentId ?? place.departmentId };
 }

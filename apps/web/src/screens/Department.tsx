@@ -190,6 +190,19 @@ function HeadCard({ d, head, stats, on, flash, serverNow, onOpen, onSwitch }: { 
   );
 }
 
+/* Who owns the department and how its approvals go, for people with access to the department itself. */
+function DeptApprovals({ department, shown }: { department: Department; shown: boolean }) {
+  const t = useT();
+  const id = useId();
+  if (!shown) return null;
+  return (
+    <section aria-labelledby={`${id}-approvals`}>
+      <h3 id={`${id}-approvals`}>{t.dept.approvals.title}</h3>
+      <ApprovalPolicy departmentId={department.id} ownerPersonId={department.ownerPersonId} />
+    </section>
+  );
+}
+
 function Wire({ l }: { l: Line }) {
   const d = toD(l.pts);
   const knock = l.cls === 'pl' || l.cls === 'rl';
@@ -642,12 +655,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
               <>
                 <DeptEmployeeList department={d} company={company} />
                 <DeptSubUnits department={d} company={company} />
-                {canGive && (
-                  <section aria-labelledby={`${id}-approvals`}>
-                    <h3 id={`${id}-approvals`}>{t.dept.approvals.title}</h3>
-                    <ApprovalPolicy departmentId={d.id} ownerPersonId={d.ownerPersonId} />
-                  </section>
-                )}
+                <DeptApprovals department={d} shown={canGive} />
                 {company && (
                   <section aria-labelledby={`${id}-repo`}>
                     <h3 id={`${id}-repo`}>{t.dept.repository}</h3>

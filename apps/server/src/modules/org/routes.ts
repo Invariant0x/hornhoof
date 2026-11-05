@@ -56,6 +56,9 @@ function reachedLines(lines: readonly MapLine[], reach: Access, allAgents: reado
     shown.filter(l => l.kind === kind && (!departmentId || l.departmentId === departmentId)).map(({ kind: _, departmentId: __, ...line }) => line);
 }
 
+/* The person who takes a department's approvals; null means the CEO. */
+const ownerOf = (owners: ReadonlyMap<string, string>, departmentId: string) => owners.get(departmentId) ?? null;
+
 const teamField = (teamId: string | null) => (teamId ? { teamId } : {});
 
 /* Until when a plan is at its limit, from what it last read. */
@@ -216,8 +219,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
           templateKey: d.templateKey,
           roleCode: d.roleCode,
           about: d.about,
-          /* The person who takes its approvals; null means the CEO. */
-          ownerPersonId: owners.get(d.id) ?? null,
+          ownerPersonId: ownerOf(owners, d.id),
           agents: agentsOf(d.id),
           people: inDepartment(d.id),
           employees: employeesOf(d),

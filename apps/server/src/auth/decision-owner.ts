@@ -48,15 +48,18 @@ export function namedOwner(d: DecisionSubject, people: readonly Candidate[]): st
   return people.find(p => p.status === 'active' && p.access.owns?.has(department))?.id ?? null;
 }
 
-/* A decision goes to its department's named owner. Without one, an approval goes to the CEO: an owner is never worked out
-   from who has access. A department's own decision goes, as it did before owners, to the one active person other than the
-   CEO whose access lists that department or the product it is about; with nobody or with several such people, to the CEO.
+/* A department's own decision with no named owner goes, as it did before owners, to the one active person other than the CEO
+   whose access lists that department or the product it is about; with nobody or with several such people, to the CEO.
    People who see the whole company are no department's own. Every other decision goes to the CEO. */
-export function decisionOwner(d: DecisionSubject, people: readonly Candidate[]): string {
-  const named = namedOwner(d, people);
-  if (named) return named;
+function unownedDecision(d: DecisionSubject, people: readonly Candidate[]): string {
   const place = decisionPlace(d);
   if (!place) return ceoOf(people);
   const own = people.filter(p => p.status === 'active' && !p.isOwner && listsPlace(p.access, place));
   return own.length === 1 ? own[0]!.id : ceoOf(people);
+}
+
+/* A decision goes to its department's named owner. Without one, an approval goes to the CEO: an owner is never worked out
+   from who has access. */
+export function decisionOwner(d: DecisionSubject, people: readonly Candidate[]): string {
+  return namedOwner(d, people) ?? unownedDecision(d, people);
 }

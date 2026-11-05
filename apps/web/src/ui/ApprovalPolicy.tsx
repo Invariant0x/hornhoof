@@ -81,8 +81,10 @@ function RuleForm({ path, rule, modes, onSaved }: { path: string; rule: Approval
   );
 }
 
-/* Who owns the department: the CEO picks among those who may, everyone else reads it. */
-function OwnerLine({ view, path, onChanged }: { view: ApprovalPolicyView; path: string; onChanged(): Promise<void> }) {
+const candidateLabel = (c: ApprovalPolicyView['candidates'][number]) => (c.title ? `${c.name}, ${c.title}` : c.name);
+
+/* The CEO picks the owner among those who may be. */
+function OwnerPick({ view, path, onChanged }: { view: ApprovalPolicyView; path: string; onChanged(): Promise<void> }) {
   const tt = useT();
   const t = tt.dept.approvals;
   const [busy, setBusy] = useState(false);
@@ -101,7 +103,6 @@ function OwnerLine({ view, path, onChanged }: { view: ApprovalPolicyView; path: 
     }
   }
 
-  if (!view.canSetOwner) return <p className="appr-owner">{view.owner ? t.ownerIs(view.owner.name) : t.ownerNone}</p>;
   return (
     <div className="appr-owner">
       <Field label={t.owner} hint={t.ownerHint}>
@@ -109,7 +110,7 @@ function OwnerLine({ view, path, onChanged }: { view: ApprovalPolicyView; path: 
           <select {...p} value={view.owner?.id ?? ''} disabled={busy} onChange={e => void name(e.target.value || null)}>
             <option value="">{t.ownerCeo}</option>
             {view.candidates.map(c => (
-              <option key={c.id} value={c.id}>{c.title ? `${c.name}, ${c.title}` : c.name}</option>
+              <option key={c.id} value={c.id}>{candidateLabel(c)}</option>
             ))}
           </select>
         )}
@@ -118,6 +119,12 @@ function OwnerLine({ view, path, onChanged }: { view: ApprovalPolicyView; path: 
       {failure !== null && <p className="alert" role="alert">{errorText(tt, failure)}</p>}
     </div>
   );
+}
+
+/* Who owns the department, in words for anyone but the one who picks it. */
+function OwnerWords({ owner }: { owner: ApprovalPolicyView['owner'] }) {
+  const t = useT().dept.approvals;
+  return <p className="appr-owner">{owner ? t.ownerIs(owner.name) : t.ownerNone}</p>;
 }
 
 /* Who owns a department and how its approvals go on each channel. The rules stay when the owner changes. */
@@ -148,7 +155,7 @@ export function ApprovalPolicy({ departmentId, ownerPersonId }: Props) {
   const modes = view.owner && view.canSetOwner ? { ...t.modes, every: t.everyToOwner } : t.modes;
   return (
     <div className="appr">
-      <OwnerLine view={view} path={departmentPath} onChanged={load} />
+      {view.canSetOwner ? <OwnerPick view={view} path={departmentPath} onChanged={load} /> : <OwnerWords owner={view.owner} />}
       <p className="muted">{t.rulesHint}</p>
       <div className="appr-rules">
         {view.rules.map(rule => (
