@@ -92,6 +92,12 @@ describe('registered workspace retirement consumer, unit provenance', () => {
     expect(await retireRegisteredWorkspace(context, input)).toEqual({ code: 'workspace_ambiguous', retryable: false });
   });
 
+  it('compares namespace snapshots when the resolver reuses a mutable object', async () => {
+    const { context, input, workspace, resolve, retire } = fixture(); resolve.mockResolvedValue(workspace);
+    retire.mockImplementation(async () => { workspace.realPath = '/fixture/replaced/app'; return { status: 'retired', instanceGone: true }; });
+    expect(await retireRegisteredWorkspace(context, input)).toEqual({ code: 'workspace_ambiguous', retryable: false });
+  });
+
   it('allows retained unpublished HEAD changes without claiming clean or quiescent evidence', async () => {
     const { context, input, workspace, resolve } = fixture(), latest = { ...workspace, sourceHeadSha: 'c'.repeat(40) };
     resolve.mockResolvedValueOnce(workspace).mockResolvedValueOnce(latest);
