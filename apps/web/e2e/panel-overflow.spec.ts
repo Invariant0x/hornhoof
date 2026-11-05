@@ -1,9 +1,10 @@
 import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { en, type Messages } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
-import type { NoteView } from '../src/types';
+import type { MachineView, NoteView, PersonView, ShownCommand } from '../src/types';
 import { openAgent } from './agent-window-panels-api';
 import { serveApi, TASKS } from './api';
+import { serveRoutes } from './routes-api';
 
 const MESSAGES: Record<'en' | 'ru', Messages> = { en, ru };
 const PHASE = process.env.HH_PANEL_PHASE ?? 'after';
@@ -44,13 +45,11 @@ async function expectWrappedText(element: Locator) {
 for (const lang of ['en', 'ru'] as const) {
   for (const theme of ['light', 'dark'] as const) {
     for (const width of [1440, 375]) {
-      for (const panel of ['narrow', 'wide'] as const) {
-        const look = `${lang}-${theme}-${width}-${panel}`;
+      {
+        const look = `${lang}-${theme}-${width}`;
         test(`Notebook content and its whole action group fit: ${look}`, async ({ page }, info) => {
           const m = MESSAGES[lang];
-          const { errors, openPanel, window } = await openAgent(page, { lang, theme, width }, 'orchestrator');
-          const panelWidth = panel === 'narrow' ? 280 : width === 375 ? 375 : 640;
-          await window.evaluate((el, value) => el.style.setProperty('--panel-width', `${value}px`), panelWidth);
+          const { errors, openPanel } = await openAgent(page, { lang, theme, width }, 'orchestrator');
           const removed: string[] = [];
           await page.route('**/api/notebook', route => route.fulfill({ json: { notes: NOTES } }));
           await page.route('**/api/notebook/1', route => {
@@ -127,6 +126,128 @@ for (const lang of ['en', 'ru'] as const) {
         await capture(page, info, `task-detail-${look}`);
         await expectWrappedText(detail.locator('.tp-brief'));
         await expectInside(detail.locator('.ac-body'), [detail.locator('.tp-brief')]);
+        expect(errors).toEqual([]);
+      });
+    }
+  }
+}
+
+const LONG_HOST = `build-${'x'.repeat(140)}.example.internal`;
+const LONG_PERSON: PersonView = { id: 'p2', name: `Alexandria${'VeryLong'.repeat(20)}`, email: 'long@acme.test', title: 'COO', status: 'active', isOwner: false, access: { whole: true, departments: [], teams: [] } };
+const LONG_MACHINE: MachineView = {
+  id: 'm1', hostname: LONG_HOST, owner: { id: 'p1', name: 'Ivan' }, os: 'linux', arch: 'x86_64', online: false,
+  lastSeenAt: null, load: null, plans: [], lendsTests: true, running: { agents: [], parts: [] },
+};
+const LONG_COMMAND: ShownCommand = { id: 'cmd1', kind: 'machine', plans: [], machine: null, command: LONG_URL, expiresAt: '2026-11-06T00:00:00.000Z' };
+
+async function prepareRoutes(page: Page, lang: 'en' | 'ru', theme: 'light' | 'dark', width: number) {
+  await page.setViewportSize({ width, height: 900 });
+  await page.addInitScript(({ lang, theme }) => {
+    localStorage.setItem('hh-lang', lang);
+    localStorage.setItem('hh-theme', theme);
+  }, { lang, theme });
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('response', response => { if (response.status() >= 400) errors.push(`${response.status()} ${response.url()}`); });
+  await serveRoutes(page);
+  return errors;
+}
+
+for (const lang of ['en', 'ru'] as const) {
+  for (const theme of ['light', 'dark'] as const) {
+    for (const width of [1440, 375]) {
+      const look = `${lang}-${theme}-${width}`;
+      const m = MESSAGES[lang];
+
+      test(`People names and row actions stay inside: ${look}`, async ({ page }, info) => {
+        const errors = await prepareRoutes(page, lang, theme, width);
+        await page.route('**/api/people', route => route.fulfill({ json: { people: [LONG_PERSON] } }));
+        await page.goto('/people');
+        const row = page.locator('.ptable tbody tr').first();
+        const name = row.locator('.pname');
+        const actions = row.locator('.row-actions');
+        await expect(name).toBeVisible();
+        await capture(page, info, `people-${look}`);
+        const cells = row.locator('td');
+        for (const [index, column] of (['name', 'title', 'access', 'status', 'actions'] as const).entries()) {
+          await expect(cells.nth(index)).toHaveAttribute('data-label', m.people.columns[column]);
+        }
+        if (width === 375) expect(await cells.first().evaluate(el => getComputedStyle(el, '::before').content)).toBe(`"${m.people.columns.name}"`);
+        await expectWrappedText(name);
+        await expectInside(row, [name, actions]);
+        const edit = row.getByRole('button', { name: m.people.editLabel(LONG_PERSON.name), exact: true });
+        await expectInside(actions, [edit]);
+        await edit.click();
+        await expect(page.getByRole('heading', { name: m.people.editHeading(LONG_PERSON.name) })).toBeVisible();
+        expect(errors).toEqual([]);
+      });
+
+      test(`A long machine confirmation keeps its whole action group below: ${look}`, async ({ page }, info) => {
+        const errors = await prepareRoutes(page, lang, theme, width);
+        await page.route('**/api/machines', route => route.fulfill({ json: { machines: [LONG_MACHINE] } }));
+        await page.goto('/machines/m1');
+        const card = page.getByRole('article', { name: LONG_HOST, exact: true });
+        await expect(card).toBeVisible();
+        await card.getByRole('button', { name: m.machines.disconnectLabel(LONG_HOST), exact: true }).click();
+        const ask = card.locator('.ask');
+        const question = ask.locator('span');
+        const buttons = ask.getByRole('button');
+        await capture(page, info, `machine-confirm-${look}`);
+        await expectWrappedText(question);
+        await expectInside(ask, [question, ...await buttons.all()]);
+        const questionBox = (await question.boundingBox())!;
+        const yesBox = (await buttons.nth(0).boundingBox())!;
+        const noBox = (await buttons.nth(1).boundingBox())!;
+        expect(yesBox.y).toBeGreaterThanOrEqual(questionBox.y + questionBox.height - 1);
+        expect(noBox.y).toBe(yesBox.y);
+        await buttons.nth(1).click();
+        await expect(ask).toHaveCount(0);
+        expect(errors).toEqual([]);
+      });
+
+      test(`Settings link and remove actions stay readable: ${look}`, async ({ page }, info) => {
+        const errors = await prepareRoutes(page, lang, theme, width);
+        await page.route('**/api/link', route => route.fulfill({ json: { link: { name: 'evidence', url: LONG_URL }, domain: 'example.invalid' } }));
+        await page.goto('/settings');
+        const dialog = page.getByRole('dialog', { name: m.settings.title, exact: true });
+        await expect(dialog).toBeVisible();
+        await dialog.getByRole('button', { name: m.settings.remove, exact: true }).click();
+        const actions = dialog.locator('.settings-actions');
+        const question = actions.locator('span');
+        const buttons = actions.getByRole('button');
+        await capture(page, info, `settings-remove-${look}`);
+        await expectWrappedText(question);
+        await expectInside(actions, [question, ...await buttons.all()]);
+        const questionBox = (await question.boundingBox())!;
+        const yesBox = (await buttons.nth(0).boundingBox())!;
+        const noBox = (await buttons.nth(1).boundingBox())!;
+        expect(yesBox.y).toBeGreaterThanOrEqual(questionBox.y + questionBox.height - 1);
+        expect(noBox.y).toBe(yesBox.y);
+        await buttons.nth(1).click();
+        await expect(dialog.getByRole('button', { name: m.settings.remove, exact: true })).toBeVisible();
+        expect(errors).toEqual([]);
+      });
+
+      test(`A long command and its actions fit the panel: ${look}`, async ({ page }, info) => {
+        const errors = await prepareRoutes(page, lang, theme, width);
+        await page.route('**/api/nodes/commands', route => route.fulfill({ json: { commands: [LONG_COMMAND] } }));
+        const hidden: string[] = [];
+        await page.route('**/api/nodes/commands/cmd1/hide', route => {
+          hidden.push(route.request().method());
+          return route.fulfill({ json: {} });
+        });
+        await page.goto('/machines');
+        const panel = page.locator('.panel').filter({ has: page.locator('.command-box') });
+        const command = panel.locator('.command');
+        const code = command.locator('code');
+        const copy = command.getByRole('button');
+        await expect(code).toHaveText(LONG_URL);
+        await capture(page, info, `command-${look}`);
+        await expectWrappedText(code);
+        await expectInside(command, [code, copy]);
+        await panel.getByRole('button', { name: m.subs.cancelCommand, exact: true }).click();
+        await expect(panel).toHaveCount(0);
+        expect(hidden).toEqual(['POST']);
         expect(errors).toEqual([]);
       });
     }

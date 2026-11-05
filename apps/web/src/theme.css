@@ -222,8 +222,8 @@ select:disabled { opacity: .55; }
 .link-input input { flex: 1; min-width: 0; width: 100%; }
 .link-input .link-domain { display: flex; align-items: center; padding: 0 10px; border: 1px solid var(--line2); border-left: 0; background: var(--surface); color: var(--muted); font-size: 14px; white-space: nowrap; }
 .segments label:has(input:focus-visible) { outline: 2px solid var(--cyan); outline-offset: 2px; }
-.command { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: start; min-width: 0; padding: 12px; background: var(--surface2); border: 1px solid var(--line); }
-.command code { min-width: 0; font-family: var(--f-mono); font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; }
+.command { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: start; padding: 12px; background: var(--surface2); border: 1px solid var(--line); }
+.command code { font-family: var(--f-mono); font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; }
 
 /* Shell: the header floats over the canvas in three glass blocks, as in the prototype; there is no bar under it. */
 .shell { position: relative; height: 100%; }
@@ -448,7 +448,7 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .ptable td { padding: 12px 14px; border-bottom: 1px solid var(--line); vertical-align: middle; }
 .ptable tr:last-child td { border-bottom: 0; }
 .ptable tr.disabled td { color: var(--muted); }
-.pname { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; }
+.pname { display: inline-flex; align-items: center; gap: 8px; min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
 .pname .ic { color: var(--pink-ink); }
 /* The deputy CEO's mark by the name: a hat before a short word, which as one flex line never wraps. */
 .badge.deputy { display: inline-flex; align-items: center; gap: 3px; }
@@ -466,6 +466,7 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
   .ptable, .ptable tbody, .ptable tr, .ptable td { display: block; width: 100%; }
   .ptable tr { padding: 10px 0; border-bottom: 1px solid var(--line); }
   .ptable td { padding: 2px 14px; border: 0; }
+  .ptable td::before { content: attr(data-label); display: block; margin-bottom: 2px; color: var(--muted); font-size: 11px; font-weight: 600; }
   .row-actions { text-align: left; }
   /* The actions wrap on a narrow screen instead of pushing it sideways. */
   .ptable td.row-actions { display: flex; flex-wrap: wrap; gap: 8px; width: auto; white-space: normal; }
