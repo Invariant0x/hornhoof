@@ -324,13 +324,31 @@ it.each(['offline', 'already-stuck', 'self'])('does not assign recovery to an op
     const instance = randomUUID();
     await c.db.insert(programInstances).values({ id: instance, companyId: c.companyId, agentId: c.operator!.id, nodeId: c.identity.nodeId });
     const [operatorJob] = await c.db.insert(jobs).values({ companyId: c.companyId, agentId: c.operator!.id, subscriptionId: c.sub.id, nodeId: c.identity.nodeId, kind: 'conversation', prompt: 'Stuck operator.', status: 'failed', timeoutMs: 1000 }).returning();
-    await c.db.insert(programOperatorCases).values({ companyId: c.companyId, agentId: c.operator!.id, jobId: operatorJob!.id, nodeId: c.identity.nodeId, instance, reason: 'startup_exit', evidenceKey: instance, capability: randomUUID(), status: 'escalated', deadlineAt: c.now });
+    await c.db.insert(programOperatorCases).values({ companyId: c.companyId, agentId: c.operator!.id, jobId: operatorJob!.id, nodeId: c.identity.nodeId, instance, reason: 'startup_exit', evidenceKey: instance, capability: randomUUID(), status: 'escalated', recoveryHold: true, deadlineAt: c.now });
   }
   await c.alarm('assignment_unrecorded', 60000);
   expect((await c.cases()).find(row => row.agentId === c.agent.id)).toMatchObject({ status: 'escalated', operatorAgentId: null });
   expect(await c.turnsOf(c.operator!.id)).toHaveLength(state === 'already-stuck' ? 1 : 0);
 });
 
+
+it.each([
+  { status: 'open', recoveryHold: false, selected: false },
+  { status: 'escalated', recoveryHold: false, selected: true },
+  { status: 'escalated', recoveryHold: true, selected: false },
+] as const)('selects an operator with own $status case and hold=$recoveryHold only when available=$selected', async ({ status, recoveryHold, selected }) => {
+  const c = await fixture();
+  const instance = randomUUID();
+  await c.db.insert(programInstances).values({ id: instance, companyId: c.companyId, agentId: c.operator!.id, nodeId: c.identity.nodeId });
+  const [operatorJob] = await c.db.insert(jobs).values({ companyId: c.companyId, agentId: c.operator!.id, subscriptionId: c.sub.id, nodeId: c.identity.nodeId, kind: 'conversation', prompt: 'Previous operator turn.', status: 'failed', timeoutMs: 1000 }).returning();
+  await c.db.insert(programOperatorCases).values({ companyId: c.companyId, agentId: c.operator!.id, jobId: operatorJob!.id, nodeId: c.identity.nodeId, instance, reason: 'startup_exit', evidenceKey: instance, capability: randomUUID(), status, recoveryHold, deadlineAt: new Date(+c.now + 600000) });
+  await c.attempt(); await c.alarm('assignment_unrecorded', 60000);
+  const target = (await c.cases()).find(row => row.agentId === c.agent.id)!;
+  expect(target).toMatchObject({ status: selected ? 'open' : 'escalated', operatorAgentId: selected ? c.operator!.id : null });
+  expect((await c.turnsOf(c.operator!.id)).filter(job => job.id !== operatorJob!.id)).toHaveLength(selected ? 1 : 0);
+  await checkOperatorHealth(c.ctx, c.now);
+  expect((await c.cases()).find(row => row.id === target.id)).toMatchObject({ status: target.status, operatorAgentId: target.operatorAgentId });
+});
 
 it('binds a new turn question to a fresh case when the same physical program retains an old live-failure case', async () => {
   const c = await fixture();

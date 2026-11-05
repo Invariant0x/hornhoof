@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Notification } from '@hornhoof/protocol';
 import { OPERATOR_CASE_MS, OperatorNodeMessage, PROGRAM_OPERATOR_ROLE, type OperatorEvidence, type OperatorQuestion, type OperatorReason } from '@hornhoof/protocol/program-operator';
-import { and, asc, desc, eq, isNull, lte, ne, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, isNull, lte, ne, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentEvents, agents, departments, jobs, programDeliveries, programInstances, programOperatorCases, programOperatorSignals, subscriptions } from '../../db/schema.js';
 import { identityOf, nodeIdentity } from '../nodes/hub.js';
@@ -115,7 +115,7 @@ async function pickOperator(ctx: Ctx, companyId: string, target: string) {
     const node = identityOf(sub, agent.nodeId);
     /* A machine that restarts for an update comes back: the operator's turn waits for it. */
     if (!node || !(ctx.hub.isReady(node) || nodeHeld(ctx, node)) || limitUntil(sub.limits, sub.limitsUpdatedAt)) continue;
-    const [stuck] = await ctx.db.select({ id: programOperatorCases.id }).from(programOperatorCases).where(and(eq(programOperatorCases.agentId, agent.id), ne(programOperatorCases.status, 'resolved'))).limit(1);
+    const [stuck] = await ctx.db.select({ id: programOperatorCases.id }).from(programOperatorCases).where(and(eq(programOperatorCases.agentId, agent.id), or(eq(programOperatorCases.status, 'open'), eq(programOperatorCases.recoveryHold, true)))).limit(1);
     if (!stuck) return agent;
   }
   return null;

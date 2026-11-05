@@ -108,10 +108,7 @@ export class TurnWords {
 
   taken(text: string): boolean {
     if (this.replayed !== null && same(this.replayed, text)) {
-      for (const word of this.words) if (this.waiting(word)) { word.state = 'taken'; this.receipts.word?.(word, 'taken'); }
-      if (this.original.length) this.receipts.original?.('taken');
-      this.replayed = null;
-      this.original = [];
+      this.takeReplay();
       return true;
     }
     if (this.takeOriginal(text)) return true;
@@ -120,6 +117,13 @@ export class TurnWords {
     word.state = 'taken';
     this.receipts.word?.(word, 'taken');
     return true;
+  }
+
+  private takeReplay(): void {
+    for (const word of this.words) if (this.waiting(word)) { word.state = 'taken'; this.receipts.word?.(word, 'taken'); }
+    if (this.original.length) this.receipts.original?.('taken');
+    this.replayed = null;
+    this.original = [];
   }
 
   takeOriginal(text: string): boolean {
