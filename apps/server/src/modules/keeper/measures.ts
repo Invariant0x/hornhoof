@@ -38,17 +38,18 @@ async function timedSyncedWrite(path: string): Promise<number> {
 
 export class Measures {
   private samples: number[] = [];
-  private timer: NodeJS.Timeout | null = null;
+  private timer: NodeJS.Timeout | undefined;
+  private busy = false;
 
   constructor(private readonly opts: { dir: string; sampleMs?: number }) {}
 
   start(): void {
-    this.waitForNext();
+    this.timer = setInterval(() => void this.sampleUnlessBusy(), this.opts.sampleMs ?? SAMPLE_MS);
+    this.timer.unref();
   }
 
   stop(): void {
-    if (this.timer) clearTimeout(this.timer);
-    this.timer = null;
+    clearInterval(this.timer);
   }
 
   async sample(): Promise<void> {
@@ -61,15 +62,12 @@ export class Measures {
     return { uptimeS: Math.floor(uptime()), fsyncP99Ms: fsyncP99(this.samples), diskFree: bavail * bsize };
   }
 
-  /* The wait starts when a sample ends, so a disk that hangs never collects a pile of open writes. */
-  private waitForNext(): void {
-    this.timer = setTimeout(() => void this.sampleThenWait(), this.opts.sampleMs ?? SAMPLE_MS);
-    this.timer.unref();
-  }
-
-  /* A sample the disk refuses costs only that sample: a measure changes nothing the company runs, and is tried again. */
-  private async sampleThenWait(): Promise<void> {
+  /* A disk that hangs never collects a pile of open writes. A sample it refuses costs only that sample: a measure changes
+     nothing the company runs, and is tried again. */
+  private async sampleUnlessBusy(): Promise<void> {
+    if (this.busy) return;
+    this.busy = true;
     await this.sample().catch(() => undefined);
-    if (this.timer) this.waitForNext();
+    this.busy = false;
   }
 }
