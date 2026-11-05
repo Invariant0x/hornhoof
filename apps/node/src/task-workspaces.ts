@@ -3,30 +3,12 @@ import { createHash, randomUUID } from 'node:crypto';
 import { closeSync, constants, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readSync, realpathSync, renameSync, writeFileSync, type Stats } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
-import { repoFolder } from '@hornhoof/protocol';
+import { repoFolder, NodeRef as Node, TaskWorkspaceBinding as Binding,
+  type NodeRef, type TaskWorkspaceBinding, type VerifiedWorkspace, type WorkspaceProblem } from '@hornhoof/protocol';
 import type { JobUser } from './isolation.js';
 import { inspectWorkspaceGit, repositoryIdentity, WorkspaceFault } from './task-workspace-git.js';
 
-export type NodeRef = { kind: 'builtin' } | { kind: 'node'; nodeId: string };
-export interface TaskWorkspaceBinding {
-  workspaceId: string;
-  taskId: string;
-  agentId: string;
-  nodeId: NodeRef;
-  assignmentEpoch: number;
-  bindingVersion: number;
-  repositoryId: string;
-  taskBranch: string;
-  baseSha: string;
-}
-export interface VerifiedWorkspace {
-  binding: TaskWorkspaceBinding;
-  realPath: string;
-  ownerUid: number;
-  gitCommonDir: string;
-  sourceHeadSha: string;
-}
-export interface WorkspaceProblem { code: 'workspace_missing' | 'workspace_ambiguous' | 'wrong_repository' | 'wrong_owner' | 'wrong_branch' | 'base_unavailable' | 'binding_stale' | 'workspace_switch_unavailable'; retryable: boolean }
+export type { NodeRef, TaskWorkspaceBinding, VerifiedWorkspace, WorkspaceProblem } from '@hornhoof/protocol';
 export interface TaskWorkspaceRegistryOptions { nodeDataDir: string; nodeId: NodeRef; nodeOwner: JobUser }
 export interface TaskWorkspaceRegistration { binding: TaskWorkspaceBinding; repositoryUrl: string; owner: JobUser }
 export interface TaskWorkspaceRegistry {
@@ -34,12 +16,6 @@ export interface TaskWorkspaceRegistry {
   resolveTaskWorkspace(binding: TaskWorkspaceBinding): Promise<VerifiedWorkspace | WorkspaceProblem>;
 }
 
-const Node = z.discriminatedUnion('kind', [z.object({ kind: z.literal('builtin') }).strict(), z.object({ kind: z.literal('node'), nodeId: z.uuid() }).strict()]);
-const Binding = z.object({
-  workspaceId: z.uuid(), taskId: z.uuid(), agentId: z.uuid(), nodeId: Node,
-  assignmentEpoch: z.number().int().min(0), bindingVersion: z.number().int().min(1), repositoryId: z.uuid(),
-  taskBranch: z.string().min(1).max(240).regex(/^[A-Za-z0-9][A-Za-z0-9/._-]*$/), baseSha: z.string().regex(/^[0-9a-f]{40}$/),
-}).strict();
 const Owner = z.object({ uid: z.number().int().min(1), gid: z.number().int().min(0) }).strict();
 const Registration = z.object({ binding: Binding, repositoryUrl: z.string(), owner: Owner });
 const Identity = z.object({ dev: z.number(), ino: z.number(), uid: z.number(), gitFileHash: z.string().optional() }).strict();

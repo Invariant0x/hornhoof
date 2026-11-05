@@ -144,6 +144,13 @@ describe('frozen task workspace registry producer', () => {
     expect(existsSync(join(root, 'task-workspace-registry', 'entries', `${item.binding.workspaceId}.json`))).toBe(false);
   });
 
+  it.each(['task//other', 'task/../other', 'task/other.lock'])('rejects the canonical nonliteral ref %s before registry lookup', async taskBranch => {
+    const item = fixture();
+    expect(await registry().resolveTaskWorkspace({ ...item.binding, taskBranch })).toEqual({ code: 'binding_stale', retryable: false });
+    expect(existsSync(join(root, 'task-workspace-registry', 'entries', `${item.binding.workspaceId}.json`))).toBe(false);
+    expect(git(item.tree, 'branch', '--show-current')).toBe(item.binding.taskBranch);
+  });
+
   it('verifies actual owner, source remote and current branch instead of trusting registration', async () => {
     const item = fixture(), producer = registry();
     expect(await producer.registerTaskWorkspace({ ...item, owner: { uid: owner.uid + 1, gid: owner.gid } })).toMatchObject({ code: 'wrong_owner' });
