@@ -32,13 +32,19 @@ const evidence = { ...identity, evidenceId: z.uuid(), ordinal: count };
 export const OperatorQuestion = z.object({ id: z.uuid(), kind: z.enum(['permission', 'menu', 'protected', 'work', 'unknown']), tool: z.string().max(100).nullable(), text: z.string().max(4096), callId: z.string().max(128).nullable() }).strict();
 export type OperatorQuestion = z.infer<typeof OperatorQuestion>;
 export const OperatorExit = z.object({ code: z.number().int().nullable(), signal: z.string().max(40).nullable() }).strict();
+const screenCells = { cols: z.number().int().min(1).max(512), rows: z.number().int().min(1).max(256), cells: z.string().max(OPERATOR_CELLS_BYTES).refine(value => new TextEncoder().encode(value).length <= OPERATOR_CELLS_BYTES) };
+export const OperatorInputLine = z.enum(['empty', 'text', 'unknown']);
+export type OperatorInputLine = z.infer<typeof OperatorInputLine>;
+/* What the node saw as it stopped waiting: whether the program's input line held text, and its screen, if it could look. */
+export const OperatorCheck = z.object({ input: OperatorInputLine, screen: z.object({ protected: z.boolean(), ...screenCells }).strict().nullable() }).strict();
+export type OperatorCheck = z.infer<typeof OperatorCheck>;
 
 export const OperatorNodeMessages = [
   z.object({ type: z.literal('program.delivery'), ...evidence, deliveryId: z.uuid(), deliveryOrdinal: z.number().int().positive(), kind: z.enum(['assignment', 'live']), phase: OperatorDeliveryPhase, elapsedMs: count, wordsDigest: z.string().regex(/^[a-f0-9]{64}$/) }).strict(),
   z.object({ type: z.literal('program.launch'), ...evidence, phase: z.enum(['attempt', 'started', 'failed']), elapsedMs: count }).strict(),
-  z.object({ type: z.literal('program.operator_needed'), ...evidence, reason: OperatorReason, deliveryId: z.uuid().nullable(), questionId: z.uuid().nullable().optional(), evidenceKey: z.string().min(1).max(128), elapsedMs: count, sinceLaunchMs: count.nullable(), exit: OperatorExit.nullable() }).strict().refine(frame => frame.reason !== 'question_waiting' || Boolean(frame.questionId && frame.evidenceKey === frame.questionId)),
+  z.object({ type: z.literal('program.operator_needed'), ...evidence, reason: OperatorReason, deliveryId: z.uuid().nullable(), questionId: z.uuid().nullable().optional(), evidenceKey: z.string().min(1).max(128), elapsedMs: count, sinceLaunchMs: count.nullable(), exit: OperatorExit.nullable(), check: OperatorCheck.optional() }).strict().refine(frame => frame.reason !== 'question_waiting' || Boolean(frame.questionId && frame.evidenceKey === frame.questionId)),
   z.object({ type: z.literal('program.question'), ...evidence, question: OperatorQuestion, questionOrdinal: z.number().int().positive(), phase: z.enum(['asked', 'cleared']), elapsedMs: count }).strict(),
-  z.object({ type: z.literal('program.screen'), ...identity, request: z.uuid(), result: z.enum(['ok', 'refused']), reason: OperatorError.nullable(), snapshot: opaque.nullable(), generation: count, state: z.enum(['pre_work', 'working', 'awaiting_input', 'gone', 'unknown']), keysAllowed: z.boolean(), protected: z.boolean(), cols: z.number().int().min(1).max(512), rows: z.number().int().min(1).max(256), cells: z.string().max(OPERATOR_CELLS_BYTES).refine(value => new TextEncoder().encode(value).length <= OPERATOR_CELLS_BYTES) }).strict(),
+  z.object({ type: z.literal('program.screen'), ...identity, request: z.uuid(), result: z.enum(['ok', 'refused']), reason: OperatorError.nullable(), snapshot: opaque.nullable(), generation: count, state: z.enum(['pre_work', 'working', 'awaiting_input', 'gone', 'unknown']), keysAllowed: z.boolean(), protected: z.boolean(), ...screenCells }).strict(),
   z.object({ type: z.literal('program.key_result'), ...identity, action: z.uuid(), result: z.enum(['applied', 'refused', 'unknown']), reason: OperatorError.nullable() }).strict(),
   z.object({ type: z.literal('program.key_prepared'), ...identity, action: z.uuid(), result: z.enum(['ok', 'refused']), reason: OperatorError.nullable(), lease: z.uuid().nullable() }).strict(),
   z.object({ type: z.literal('program.recovery_ready'), ...evidence, case: z.uuid() }).strict(),

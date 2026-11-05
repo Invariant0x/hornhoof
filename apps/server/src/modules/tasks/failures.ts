@@ -9,7 +9,7 @@ import { repeatedTurn } from '../conversation/turn-words.js';
 import { continuationNote } from './endings.js';
 import { operationsWatchers, pickOpsRecipient } from './silent.js';
 import { logTurnFact } from './turn-log.js';
-import { operatorHandledFailure } from '../program-operator/recovery.js';
+import { keepUnheardWords, operatorHandledFailure, sayAgain, tellAgainWentAlong, unheardWords } from '../program-operator/recovery.js';
 import { repeatWake } from './wake-state.js';
 import { originalPromptOf } from '../conversation/requested-prompt.js';
 
@@ -31,10 +31,10 @@ const OWNER_STEP: Partial<Record<FailureKind, string>> = {
 const passing = (f: Failure | null) => !!f && (['overloaded', 'network', 'cut', 'rate_limited', 'tools'].includes(f.kind) || (f.kind === 'unknown' && f.retryable));
 
 /* Count only this continuation's unbroken chain, never an unrelated turn of the same agent. */
-async function passingAttempts(ctx: Ctx, job: Job, history?: ReadonlyMap<string, Job>): Promise<number> {
+async function passingAttempts(ctx: Ctx, job: Job, history?: ReadonlyMap<string, Job>, counted: (f: Failure | null) => boolean = passing): Promise<number> {
   let n = 0;
   let current: Job | undefined = job;
-  while (current?.status === 'failed' && passing(current.failure)) {
+  while (current?.status === 'failed' && counted(current.failure)) {
     n++;
     if (!current.continueOf) break;
     if (history) current = history.get(current.continueOf);
@@ -140,12 +140,14 @@ export function shortReason(text: string): string {
   return line.length > 300 ? `${line.slice(0, 299)}…` : line;
 }
 
+const failedWhy = (job: Job) => `The last try failed (${job.failure!.kind}): ${shortReason(job.failure!.text)}`;
+
 async function retryTurn(ctx: Ctx, job: Job, at: Date | null, next: string, taskTurn?: TaskTurn): Promise<void> {
   if (!job.agentId) return;
   const [agent] = taskTurn ? [taskTurn.agent] : await ctx.db.select().from(agents).where(eq(agents.id, job.agentId));
   const task = taskTurn?.task;
   if (!agent) return;
-  const why = `The last try failed (${job.failure!.kind}): ${shortReason(job.failure!.text)}`;
+  const why = failedWhy(job);
   const note = task ? `${continuationNote(job, task)}\n${why}` : why;
   const prompt = task ? note : `${note}\n\n${await originalPromptOf(ctx, job)}`;
   const id = await onAgent(ctx, agent.id, async () => {
@@ -159,6 +161,30 @@ async function retryTurn(ctx: Ctx, job: Job, at: Date | null, next: string, task
   await logTurnFact(ctx, job, `${why}. ${id ? next : 'The agent has no plan to continue.'}`, { continuation: id, at: at?.toISOString() ?? null });
 }
 
+const unheardNote = (why: string, words: string) => `${why}. Your program did not record these words, so here they are again:\n\n${words}`;
+
+/* The program never recorded these words, so nothing was lost but time: they go on, whatever the node said of retrying, and
+   a turn on a task says them again, for its program knows nothing of them. The wait grows, and a program that stays stuck
+   costs a try now and then. A turn of a task that no longer waits for it was stopped before this. */
+async function retryUnheardWords(ctx: Ctx, job: Job, failure: Failure): Promise<boolean> {
+  if (passing(failure) || HELD.has(failure.kind)) return false;
+  const unheard = await unheardWords(ctx, job);
+  if (!unheard) return false;
+  const attempt = await passingAttempts(ctx, job, undefined, f => !passing(f));
+  const minutes = RETRY_MINUTES[Math.min(attempt, RETRY_MINUTES.length) - 1]!;
+  const at = new Date(+(job.finishedAt ?? new Date()) + minutes * 60_000);
+  const why = failedWhy(job);
+  const kept = { operatorDelivery: { id: unheard.delivery.id, ordinal: unheard.delivery.ordinal }, operatorRecovery: unheard.incident.id };
+  const said = await originalPromptOf(ctx, job);
+  const id = await onAgent(ctx, job.agentId!, async () => {
+    await tellAgainWentAlong(ctx, job, at, words => unheardNote(why, words));
+    return sayAgain(ctx, job, at, unheardNote(why, said), kept);
+  });
+  await keepUnheardWords(ctx, unheard.incident, id);
+  await logTurnFact(ctx, job, id ? `${why}. The program did not record these words. They go with its next turn, not before ${at.toISOString()}.` : `${why}. The program did not record these words, and the agent has no plan to say them again.`, { continuation: id, at: at.toISOString() });
+  return true;
+}
+
 /* True means this named failure decided the follow-up. Old nodes and crashes on tasks keep the existing path. */
 export async function afterFailure(ctx: Ctx, jobId: string): Promise<boolean> {
   const [job] = await ctx.db.select().from(jobs).where(eq(jobs.id, jobId));
@@ -166,8 +192,11 @@ export async function afterFailure(ctx: Ctx, jobId: string): Promise<boolean> {
   if (await operatorHandledFailure(ctx, jobId)) return true;
   const taskTurn = await failureTaskTurn(ctx, job);
   if (taskTurn === null) return true;
-  return applyFailure(ctx, job, job.failure, taskTurn);
+  return decideFailure(ctx, job, job.failure, taskTurn);
 }
+
+const decideFailure = async (ctx: Ctx, job: Job, failure: Failure, taskTurn?: TaskTurn): Promise<boolean> =>
+  (await retryUnheardWords(ctx, job, failure)) || applyFailure(ctx, job, failure, taskTurn);
 
 async function applyFailure(ctx: Ctx, job: Job, failure: Failure, taskTurn?: TaskTurn): Promise<boolean> {
   if (passing(failure)) await retryPassingFailure(ctx, job, taskTurn);
