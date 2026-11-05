@@ -5,6 +5,24 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.7.1] - 2026-11-05
+
+Agents on Codex and Kimi Code get their assignments again, also after a node restart, and a release now reaches machines only
+after a live check of its exact build on all four programs.
+
+### Fixed
+
+- Agents on Codex and Kimi Code receive their assignments again: a node reads the real empty prompt of these programs, also
+  after a long session has moved everything else off the screen, and keeps out of a draft a person left there.
+- Words a program lost are typed again in the same turn, and words on hold go on by themselves once as soon as the program
+  stands ready with an empty input.
+- A turn cut off by a node restart runs once more in its own session and for whoever asked for it, also outside a task, and
+  never twice.
+- Your Enter at an agent's terminal sends its saved words on, also for a session that goes on.
+- Operations hears of words on hold within five minutes and can release them with a checked tool that logs who did it and why.
+- An update is offered and installed only when its exact build passed a live check on Claude, Codex, Kimi Code and
+  Antigravity. Without one, a machine stays on the version it runs, and asking for that version says why.
+
 ## [0.7.0] - 2026-11-05
 
 Turn 7: planned node updates wait for running turns to finish; nodes reconnect on their own and keep Chromium ready in a
