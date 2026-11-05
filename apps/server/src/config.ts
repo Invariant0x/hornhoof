@@ -39,10 +39,10 @@ export type Config = {
   tunnelHost?: string;
   /* Set by compose when a keeper sits in front: the app then takes its mode from the keeper's word. */
   keeper: boolean;
-  /* The ACME directory the link's certificate comes from; null with certificates off. */
-  acmeDirectory: string | null;
   /* How much all the files on the company's tasks may take together. */
   taskFilesBytes: number;
+  /* The ACME directory the link's certificate comes from; null with certificates off. */
+  acmeDirectory: string | null;
   /* The computer the server runs on, as a hash of the key a join from it sends; null for a server installed before. */
   hostId: string | null;
 };
@@ -78,11 +78,11 @@ const Env = z.object({
   RELAY_URL: webAddress('RELAY_URL must be an http:// or https:// address, like https://hornhoof.org.'),
   TUNNEL_HOST: z.preprocess(unset, z.string().regex(/^[A-Za-z0-9.-]{1,253}$/, 'TUNNEL_HOST must be the host name of the tunnel container, like tunnel.').optional()),
   HORNHOOF_KEEPER: z.preprocess(unset, z.literal('on', { error: 'HORNHOOF_KEEPER must be on, or not set.' }).optional()),
+  TASK_FILES_MB: wholeNumber(1, 1_000_000, 'TASK_FILES_MB must be a whole number of megabytes, like 2048.'),
   ACME_DIRECTORY: z.preprocess(
     unset,
     z.union([z.literal(CERTIFICATES_OFF), z.url({ protocol: /^https$/, error: 'ACME_DIRECTORY must be off or an https:// ACME directory address.' })]).optional(),
   ),
-  TASK_FILES_MB: wholeNumber(1, 1_000_000, 'TASK_FILES_MB must be a whole number of megabytes, like 2048.'),
   HORNHOOF_HOST_ID: z.preprocess(
     unset,
     z.string().regex(/^[0-9a-f]{64}$/, 'HORNHOOF_HOST_ID must be the 64 characters install.sh writes. Remove the line from .env, or run the install command again.').optional(),
