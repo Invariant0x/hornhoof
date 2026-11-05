@@ -62,13 +62,12 @@ for (const profile of PROFILES) {
 }
 
 for (const write of [false, true]) {
-  test(`new output restores the live alternate screen with write=${write}`, async ({ page }) => {
+  test(`new output grows history without moving the reader with write=${write}`, async ({ page }) => {
     const { rows, wheel, sent, errors, sendOutput } = await openTerminal(page, 'agy', write);
     await wheel(-8000);
     await expect(rows).toContainText('HISTORY-0');
     sendOutput('\r\nagy-LIVE-UPDATE');
-    await expect(rows).toContainText('agy-LIVE-UPDATE');
-    await expect(rows).not.toContainText('HISTORY-0');
+    await expect(rows).toContainText('HISTORY-0');
     for (let i = 0; i < 2; i++) await wheel(2000);
     await expect(rows).toContainText('agy-LIVE-UPDATE');
     expect(sent).toEqual([]);

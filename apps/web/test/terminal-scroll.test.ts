@@ -1,6 +1,6 @@
 import { Terminal } from '@xterm/xterm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { attachTerminalScroll, restoreLiveTerminal, scrollTerminal } from '../src/ui/terminal-scroll';
+import { attachTerminalScroll, restoreLiveTerminal, scrollTerminal, writeTerminalData } from '../src/ui/terminal-scroll';
 
 const terms: Terminal[] = [];
 type TestCore = { buffers: { active: { hasScrollback: boolean } }; viewport: { getLinesScrolled(event: WheelEvent): number }; _customWheelEventHandler(event: WheelEvent): boolean };
@@ -49,6 +49,22 @@ describe('local terminal scrollback', () => {
     expect(term.buffer.active.type).toBe('alternate');
     await write(term, '\rALT-NEW');
     expect(Array.from({ length: term.buffer.active.length }, (_, i) => term.buffer.active.getLine(i)?.translateToString()).join('\n')).toContain('ALT-NEW');
+  });
+
+  it('grows history without moving the reader while alternate output updates both buffers', async () => {
+    const term = await fixture(true);
+    const normal = term.buffer.normal;
+    const alternate = term.buffer.alternate;
+    scrollTerminal(term, -10);
+    const reading = normal.viewportY;
+    writeTerminalData(term, '\r\nALT-NEW');
+    await write(term, '');
+    const normalText = Array.from({ length: normal.length }, (_, i) => normal.getLine(i)?.translateToString()).join('\n');
+    const alternateText = Array.from({ length: alternate.length }, (_, i) => alternate.getLine(i)?.translateToString()).join('\n');
+    expect(normal.viewportY).toBe(reading);
+    expect(normalText).toContain('ALT-NEW');
+    expect(alternateText).toContain('ALT-NEW');
+    expect(core(term).buffers.active.hasScrollback).toBe(true);
   });
 
   it('returns to the live alternate screen when the wheel reaches the bottom', async () => {
