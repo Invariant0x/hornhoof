@@ -39,6 +39,7 @@ export async function serveAgentWindow(page: Page, live: AgentFixture): Promise<
       '/api/nodes/commands': { commands: [] },
       '/api/agents/b1': { ...CARD, kind: live.head ? 'head' : 'worker', product: live.productOnly ? { id: 'p2', name: 'Checkout' } : null, currentTask: live.hasTask ? { id: 't1', number: 1, title: 'Checkout step 1' } : null },
       '/api/departments/d2/notebook': { notes: [{ number: 1, text: 'Review every merge.', by: { kind: 'agent', id: 'b1', name: 'Bruno' }, updatedAt: '2026-11-04T00:00:00.000Z' }] },
+      '/api/departments/d2/approval-policy': { departmentId: 'd2', owner: null, canSetOwner: true, canChangePolicy: true, candidates: [], rules: [{ channel: 'message', mode: 'every' }, { channel: 'price', mode: 'every' }, { channel: 'publication', mode: 'every' }, { channel: 'commit', mode: 'every' }, { channel: 'spend', mode: 'every' }, { channel: 'other', mode: 'every' }] },
       '/api/tasks/t1': { task: DETAIL },
       '/api/tasks?status=open&department=d2': { tasks: [] },
     };
