@@ -1,5 +1,7 @@
-# Hornhoof edge and relay. frps holds port 443 and routes each connection by its TLS server name. A name in https mode
-# goes straight to its company, unread. Everything else comes here through frps's edge proxy, to 127.0.0.1:8443.
+# Hornhoof edge and relay. frps holds port 443 and routes each connection by its TLS server name. A name with a live
+# https tunnel goes straight to its company, unread. Everything else comes here through frps's edge proxy, to
+# 127.0.0.1:8443. That includes a name in https mode while its tunnel is down: Caddy answers under the wildcard
+# certificate, so it reads that request, cookies included, to give the 404 or 410 below, and keeps nothing of it.
 # hornhoof.org and www show the stub; hornhoof.org/api/ is the relay's link API and hornhoof.org/~!frp takes the tunnels
 # (frpc over wss) of Hornhoof servers. Each company is one subdomain, a name it picked (acme) or by default a long
 # random one, served by frps through its server's own tunnel. Reserved and blocked names get the 404 and 410 pages of
@@ -18,8 +20,12 @@
 			}
 			tls
 		}
-		# No HTTP/3: the firewall opens TCP only.
-		protocols h1 h2
+		# No HTTP/3: the firewall opens TCP only. No HTTP/2: all names share one address and this server holds a certificate
+		# for every one of them, so a browser would reuse one connection for any name, a company's whose tunnel is up too,
+		# and that company's requests would be read here and answered 404.
+		protocols h1
+		# A request for a name other than its connection's gets 421, so that it goes no further than this.
+		strict_sni_host
 	}
 }
 
@@ -75,6 +81,14 @@ www.hornhoof.org {
 	header -Server
 	# A company's link is its own business, not a search engine's.
 	header X-Robots-Tag "noindex, nofollow"
+	# A 404 or 410 ends its connection. A tab polling a name across a leader switch then asks again on a new one, which
+	# frps can route to the tunnel once it is back; on a kept connection it would stay here, on the 404.
+	header {
+		Connection close
+		match {
+			status 404 410
+		}
+	}
 
 	# Names that never go to a company, whatever the company files say. company.sh on the Mac reads this line.
 	@reserved host www.hornhoof.org api.hornhoof.org admin.hornhoof.org administrator.hornhoof.org root.hornhoof.org mail.hornhoof.org email.hornhoof.org smtp.hornhoof.org imap.hornhoof.org pop.hornhoof.org pop3.hornhoof.org mx.hornhoof.org webmail.hornhoof.org autodiscover.hornhoof.org autoconfig.hornhoof.org ns.hornhoof.org ns1.hornhoof.org ns2.hornhoof.org ns3.hornhoof.org ns4.hornhoof.org dns.hornhoof.org status.hornhoof.org health.hornhoof.org app.hornhoof.org apps.hornhoof.org dashboard.hornhoof.org console.hornhoof.org panel.hornhoof.org portal.hornhoof.org login.hornhoof.org signin.hornhoof.org signup.hornhoof.org auth.hornhoof.org sso.hornhoof.org oauth.hornhoof.org id.hornhoof.org account.hornhoof.org accounts.hornhoof.org billing.hornhoof.org pay.hornhoof.org payments.hornhoof.org support.hornhoof.org help.hornhoof.org docs.hornhoof.org doc.hornhoof.org blog.hornhoof.org news.hornhoof.org cdn.hornhoof.org static.hornhoof.org assets.hornhoof.org media.hornhoof.org files.hornhoof.org img.hornhoof.org images.hornhoof.org download.hornhoof.org downloads.hornhoof.org upload.hornhoof.org uploads.hornhoof.org dev.hornhoof.org staging.hornhoof.org stage.hornhoof.org test.hornhoof.org testing.hornhoof.org demo.hornhoof.org beta.hornhoof.org preview.hornhoof.org sandbox.hornhoof.org git.hornhoof.org ssh.hornhoof.org vpn.hornhoof.org ftp.hornhoof.org sftp.hornhoof.org proxy.hornhoof.org edge.hornhoof.org gateway.hornhoof.org internal.hornhoof.org intranet.hornhoof.org hostmaster.hornhoof.org postmaster.hornhoof.org webmaster.hornhoof.org abuse.hornhoof.org security.hornhoof.org noc.hornhoof.org localhost.hornhoof.org wildcard.hornhoof.org hornhoof.hornhoof.org

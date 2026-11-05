@@ -1,8 +1,9 @@
-# frps for the Hornhoof relay. frps takes 443 and routes each connection by its TLS server name: a company's https
+# frps for the Hornhoof relay. frps takes 443 and routes each connection by its TLS server name: a company's live https
 # proxy gets the encrypted stream as it came, and everything else goes through the droplet's own frpc (client edge) to
-# Caddy on loopback. Caddy brings tunnels in over wss (https://hornhoof.org/~!frp -> 7000) and the traffic of companies
-# in http mode (*.hornhoof.org -> 8080). 8080 now listens on every address, because proxyBindAddr opens 443; both
-# firewalls keep it closed.
+# Caddy on loopback. That includes a name in https mode while its tunnel is down: Caddy reads that request to answer it
+# with a 404 or 410, and keeps nothing of it. Caddy brings tunnels in over wss (https://hornhoof.org/~!frp -> 7000) and
+# the traffic of companies in http mode (*.hornhoof.org -> 8080). 8080 now listens on every address, because
+# proxyBindAddr opens 443; both firewalls keep it closed.
 # Every login, proxy and heartbeat is checked by hornhoof-relay (127.0.0.1:7600); if it does not answer, frps refuses.
 bindAddr = "127.0.0.1"
 bindPort = 7000

@@ -16,9 +16,11 @@ import unittest
 if __package__:
     from .harness import (BIN, Client, KeptConnection, PROXY_V2_SIGNATURE, ROOT, Stack, _tls_socket, _wait,
                           load_relay_module, read_proxy_v2)
+    from .test_peers import FrpsWireSession
 else:
     from harness import (BIN, Client, KeptConnection, PROXY_V2_SIGNATURE, ROOT, Stack, _tls_socket, _wait,
                          load_relay_module, read_proxy_v2)
+    from test_peers import FrpsWireSession
 
 
 # In two parts because this repo's own test allows only known hosts, and this one must stay unknown.
@@ -224,6 +226,27 @@ localPort = {self.stack.echo_port}
         self.assertEqual((status, answer), (200, EDGE_REFUSED))
 
 
+class EdgeNameTests(PassthroughCase):
+    """The name edge is the edge's alone. frps registers a legacy login under its run id, so a binding's key could take
+    that name, and the real edge could not log in again: hornhoof.org, the tunnels and every http-mode company gone."""
+
+    def squatter(self) -> FrpsWireSession:
+        key = self.stack.bind('acme')['key']
+        session = FrpsWireSession(self.stack, {'name': 'acme', 'key': key}, run_id='edge')
+        self.addCleanup(session.close)
+        return session
+
+    def test_a_binding_key_cannot_take_the_name_edge(self) -> None:
+        squatter = self.squatter()
+        self.assertFalse(squatter.accepted, squatter.resp)
+        self.assertIn('this run id belongs to another client', squatter.resp['error'])
+
+    def test_the_edge_comes_back_after_a_restart_with_a_squatter_on_the_wire(self) -> None:
+        self.squatter()
+        self.stack.restart_edge()
+        self.assertEqual(self.stack.https('hornhoof.org').status, 200)
+
+
 class EdgeHealthAndPagesTests(PassthroughCase):
     def test_r4_1_passthrough_in_health(self) -> None:
         self.assertIs(wait_for_health(self.stack, 200)['passthrough'], True)
@@ -251,6 +274,80 @@ class EdgeHealthAndPagesTests(PassthroughCase):
         stub = self.stack.https('hornhoof.org')
         self.assertEqual(stub.status, 200)
         self.assertNotIn('X-Robots-Tag', stub.headers)
+
+
+def read_until_closed(stack: Stack, host: str) -> tuple[bytes, bool]:
+    """What one request to host gets, and whether the other side then ended the connection. A plain socket, because
+    http.client gives up on a connection the moment it reads Connection: close, whether or not it was closed."""
+    received = b''
+    with _tls_socket(stack.https_port, host) as sock:
+        sock.sendall(f'GET / HTTP/1.1\r\nHost: {host}\r\n\r\n'.encode())
+        try:
+            while chunk := sock.recv(65536):
+                received += chunk
+        except TimeoutError:
+            return received, False
+    return received, True
+
+
+class OneConnectionOneNameTests(PassthroughCase):
+    """All names share one address and Caddy holds a certificate for every one of them, so a connection to Caddy must
+    never carry a request for a company whose tunnel is up: Caddy would read it and answer 404."""
+
+    def test_no_browser_is_offered_http2(self) -> None:
+        # A browser reuses an HTTP/2 connection for any name its certificate covers (RFC 9113, 9.1.1).
+        for host in ('nobody.hornhoof.org', 'hornhoof.org'):
+            with self.subTest(host):
+                sock = _tls_socket(self.stack.https_port, host, alpn=('h2', 'http/1.1'))
+                self.addCleanup(sock.close)
+                self.assertEqual(sock.selected_alpn_protocol(), 'http/1.1')
+
+    def test_a_request_for_another_name_is_misdirected(self) -> None:
+        self.holder()
+        misdirected = self.stack.https('acme.hornhoof.org', sni='nobody.hornhoof.org')
+        self.assertEqual(misdirected.status, 421, misdirected.error)
+        self.assertEqual(self.stack.https('acme.hornhoof.org').cert_names, ['acme.hornhoof.org'])
+
+    def test_a_404_or_410_ends_its_connection(self) -> None:
+        self.stack.admin('ban', 'blocked')
+        self.stack.reload_caddy()
+        for host, status in (('nobody.hornhoof.org', 404), ('admin.hornhoof.org', 404), ('blocked.hornhoof.org', 410)):
+            with self.subTest(host):
+                received, closed = read_until_closed(self.stack, host)
+                self.assertTrue(received.startswith(f'HTTP/1.1 {status} '.encode()), received[:40])
+                self.assertTrue(closed, 'the connection stayed open after the answer')
+
+    def test_a_companys_own_answer_keeps_its_connection(self) -> None:
+        client = self.stack.client('initech', self.stack.bind('initech')['key'], via='caddy')
+        self.assertTrue(client.started('initech'), client.log())
+        first, kept = self.stack.https('initech.hornhoof.org', keep=True)
+        self.assertEqual(first.status, 200, first.error)
+        self.assertEqual(kept.again('/').status, 200)
+
+    def test_a_tab_polling_across_a_leader_switch_reaches_the_tunnel_again(self) -> None:
+        client, key = self.holder()
+        self.assertEqual(self.route('acme', key)['state'], 'held')
+        client.stop()
+        self.assertTrue(_wait(lambda: self.route('acme', key)['state'] == 'empty', 5))
+        polling, kept = self.stack.https('acme.hornhoof.org', keep=True)
+        self.assertEqual(polling.status, 404, polling.error)
+        self.assertIn('*.hornhoof.org', polling.cert_names, 'with no tunnel the name falls back to Caddy')
+        back = self.network_client('acme', key)
+        self.assertTrue(back.started('acme'), back.log())
+        self.assertIsNone(kept.again('/').status, 'the tab is stuck on its kept 404')
+        again = self.stack.https('acme.hornhoof.org')
+        self.assertEqual((again.status, again.cert_names), (200, ['acme.hornhoof.org']), again.error)
+
+    def test_a_misdirected_request_logs_no_visitor_address(self) -> None:
+        tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sni-421-'))
+        stack = self.enterContext(Stack(tmp, caddy=True, droplet_logging=True))
+        answer = stack.https('acme.hornhoof.org', sni='nobody.hornhoof.org')
+        self.assertEqual(answer.status, 421, answer.error)
+        # Caddy's JSON names the address and the port apart.
+        for name, process in (('frps', stack.frps), ('edge', stack.edge), ('caddy', stack.caddy)):
+            with self.subTest(name):
+                self.assertNotIn(f'127.0.0.1:{answer.local_port}', process.log())
+                self.assertNotIn(f'"remote_port":"{answer.local_port}"', process.log())
 
 
 class VisitorAddressTests(unittest.TestCase):
@@ -396,6 +493,24 @@ class ProxyHeaderTests(unittest.TestCase):
             read_proxy_v2(self.reader)
 
 
+class PassthroughEchoServerTests(unittest.TestCase):
+    """The same lost-port failure as the plain echo's in batch 3: bind(0) may draw a port the stack has yet to start."""
+
+    def setUp(self) -> None:
+        self.tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sni-echo-'))
+        self.stack = self.enterContext(Stack(self.tmp))
+        self.stack._start_passthrough_echo('acme')
+
+    def test_its_port_is_one_the_stack_picked(self) -> None:
+        self.assertIn(self.stack.passthrough_echoes[-1].server_port, self.stack._ports)
+
+    def test_close_ends_its_thread(self) -> None:
+        thread = self.stack.passthrough_echoes[-1].thread
+        self.assertTrue(thread.is_alive())
+        self.stack.close()
+        self.assertFalse(thread.is_alive())
+
+
 class EdgeRuleTests(unittest.TestCase):
     """R7.5's rule on relay.py itself, for what a real frpc would never send."""
 
@@ -415,6 +530,17 @@ class EdgeRuleTests(unittest.TestCase):
             with self.subTest(client_id=client_id, token_is_a=type(token).__name__):
                 answer = self.relay.plugin_decide('Login', {'metas': {'edge': token}, 'client_id': client_id})
                 self.assertEqual(answer, EDGE_REFUSED)
+
+    def test_a_token_with_no_utf8_form_is_refused(self) -> None:
+        answer = self.relay.plugin_decide('Login', {'metas': {'edge': '\ud800'}, 'client_id': 'edge'})
+        self.assertEqual(answer, EDGE_REFUSED)
+
+    def test_the_trace_names_the_edge_on_every_op(self) -> None:
+        metas = {'edge': TOKEN}
+        for op, content in (('Login', {'metas': metas}), ('NewProxy', {'user': {'metas': metas}}),
+                            ('Ping', {'user': {'metas': metas}})):
+            with self.subTest(op):
+                self.assertEqual(self.relay.trace_client(op, content), 'edge')
 
     def test_no_token_set_refuses_every_login(self) -> None:
         self.relay.EDGE_TOKEN = ''
@@ -452,11 +578,132 @@ class EdgeRuleTests(unittest.TestCase):
                     content = {'proxy_type': proxy_type, 'proxy_name': 'acme', 'subdomain': 'acme', **changed}
                     self.assertEqual(self.relay.proxy_check('acme', content), reason)
 
+    def test_the_run_ids_no_login_but_the_edge_may_use(self) -> None:
+        for run_id, client_id in (('edge', ''), ('edge', 'acme-aaaaaaaa-link'), ('acme-aaaaaaaa-link', '')):
+            with self.subTest(run_id=run_id, client_id=client_id):
+                self.assertTrue(self.relay.reserved_run_id(run_id, client_id))
+        for run_id, client_id in (('0123456789abcdef', ''), ('acme-aaaaaaaa-link', 'acme-aaaaaaaa-link'),
+                                  ('edge2', ''), ('Edge', '')):
+            with self.subTest(run_id=run_id, client_id=client_id):
+                self.assertFalse(self.relay.reserved_run_id(run_id, client_id))
+
+    def test_a_binding_key_cannot_name_itself_the_edge_by_client_id(self) -> None:
+        self.assertEqual(self.relay.client_id_reason('acme', 'link', 'edge', 'edge'), 'this client id is not for acme')
+
     def test_other_proxy_types_stay_refused(self) -> None:
         for proxy_type in ('tcp', 'udp', 'stcp', 'HTTPS', None):
             with self.subTest(proxy_type=proxy_type):
                 content = {'proxy_type': proxy_type, 'proxy_name': 'acme', 'subdomain': 'acme'}
                 self.assertEqual(self.relay.proxy_check('acme', content), 'only http proxies are allowed')
+
+
+class EdgeServiceTests(unittest.TestCase):
+    def test_starting_the_edge_alone_starts_frps(self) -> None:
+        unit = (ROOT / 'relay/edge-frpc.service').read_text().partition('[Service]')[0]
+        self.assertIn('\nWants=frps.service\n', unit)
+
+
+class WatcherStops(Exception):
+    """Ends a watcher's endless loop in a test."""
+
+
+class VirtualTime:
+    """Stands for the module time in relay.py: a slow probe costs no real second, and no run can be late. Each moment that
+    passes reads frps_ok, as /api/v1/health does."""
+
+    def __init__(self, relay: object, cycles: int) -> None:
+        self.relay = relay
+        self.cycles = cycles
+        self.now = 1000.0
+        self.health = []
+
+    def time(self) -> float:
+        return self.now
+
+    def pass_seconds(self, seconds: float) -> None:
+        self.now += seconds
+        self.health.append(self.relay.frps_ok())
+
+    def sleep(self, seconds: float) -> None:
+        self.pass_seconds(seconds)
+        self.cycles -= 1
+        if self.cycles == 0:
+            raise WatcherStops
+
+
+class WatcherTests(unittest.TestCase):
+    """The watcher's loops in virtual time, frps and its https port played by the test."""
+
+    def setUp(self) -> None:
+        self.relay = load_relay_module()
+        self.clock = VirtualTime(self.relay, cycles=4)
+        self.relay.time = self.clock
+        self.probes = []
+        self.relay.port_accepts = self.probe
+
+    def probe(self, _address: str, took: float = 0.0, answer: bool = True) -> bool:
+        self.probes.append(self.relay.frps_ok())
+        self.clock.pass_seconds(took)
+        return answer
+
+    def frps_answering(self, took: float, answer: bool = True) -> None:
+        def frps_answers() -> bool:
+            self.clock.pass_seconds(took)
+            return answer
+        self.relay.frps_answers = frps_answers
+
+    def run_watcher(self, watcher: object) -> None:
+        with self.assertRaises(WatcherStops):
+            watcher()
+
+    def test_a_slow_https_probe_cannot_flip_a_healthy_relay_to_503(self) -> None:
+        # frps a little slow and the https port at its 1 s timeout: with the probe between two stamps, that is past 2 s.
+        self.frps_answering(took=0.6)
+        self.relay.port_accepts = lambda address: self.probe(address, took=1.0)
+        self.run_watcher(self.relay.watch_frps)
+        first_good = self.clock.health.index(True)
+        self.assertNotIn(False, self.clock.health[first_good:], self.clock.health)
+
+    def test_no_probe_of_the_https_port_while_frps_does_not_answer(self) -> None:
+        self.frps_answering(took=0.1, answer=False)
+        self.run_watcher(self.relay.watch_frps)
+        self.assertEqual(self.probes, [])
+        self.assertNotIn(True, self.clock.health)
+
+    def test_the_first_good_answer_already_says_whether_the_port_takes_connections(self) -> None:
+        self.frps_answering(took=0.1)
+        self.clock.cycles = 1
+        self.run_watcher(self.relay.watch_frps)
+        self.assertEqual(self.probes, [False], 'the probe must come before the first good answer is published')
+        self.assertIs(self.relay._frps['passthrough'], True)
+        self.assertIs(self.relay.frps_ok(), True)
+
+    def test_the_port_is_followed_while_frps_answers_and_left_alone_when_it_does_not(self) -> None:
+        self.relay.port_accepts = lambda address: self.probe(address, answer=False)
+        self.relay._frps['passthrough'] = True
+        self.clock.cycles = 1
+        self.run_watcher(self.relay.watch_passthrough)
+        self.assertEqual(self.probes, [], 'frps does not answer, so nothing may be probed')
+        self.relay._frps['ok_at'] = self.clock.now
+        self.clock.cycles = 1
+        self.run_watcher(self.relay.watch_passthrough)
+        self.assertEqual(self.probes, [True])
+        self.assertIs(self.relay._frps['passthrough'], False)
+
+
+class HealthFollowsThePortTests(unittest.TestCase):
+    def test_health_says_when_the_port_stops_taking_connections(self) -> None:
+        # The relay starts this loop itself, and only a running relay can show that. frps stays up all along.
+        tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sni-port-'))
+        stack = Stack(tmp)
+        with socket.socket() as listener:
+            listener.bind(('127.0.0.1', 0))
+            listener.listen()
+            stack.env['RELAY_FRPS_HTTPS'] = f'127.0.0.1:{listener.getsockname()[1]}'
+            with stack:
+                self.assertIs(wait_for_health(stack, 200)['passthrough'], True)
+                listener.close()
+                self.assertTrue(_wait(lambda: stack.api('GET', '/api/v1/health')[1].get('passthrough') is False, 10))
 
 
 class PortProbeTests(unittest.TestCase):

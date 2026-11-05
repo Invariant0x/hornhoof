@@ -1,6 +1,7 @@
 [Unit]
 Description=The droplet's own frpc: carries what frps does not route by name on to Caddy
 After=frps.service
+Wants=frps.service
 
 [Service]
 User=frps

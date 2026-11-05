@@ -12,7 +12,11 @@ A company on several machines gives each one its own client id, so two companies
 
 ## What it sees
 
-For a company whose link uses https, hornhoof.org sees only encrypted bytes, the name being reached and the visitor's address, which it does not keep. The browser's https connection ends at the company's own machine, with the company's own certificate. The relay holds no key for it and cannot read what passes.
+For a company whose link uses https and whose tunnel is up, hornhoof.org sees only encrypted bytes, the name being reached and the visitor's address, which it does not keep. The browser's https connection ends at the company's own machine, with the company's own certificate, and never reaches Caddy. The relay holds no key for that connection and cannot read what passes.
+
+While that company's tunnel is down, during an update, a restart or a network failure, or before it first connects, nothing claims its name, so a visitor's connection falls back to Caddy. Caddy answers under the relay's wildcard certificate, which a browser trusts for that name, with a 404 page, or a 410 page if the name is blocked. To answer, it reads that request, including any cookies the company's app set, and keeps nothing of it.
+
+Caddy speaks only HTTP/1.1, because a browser reuses an HTTP/2 connection for any name its certificate covers, which would bring the requests of a company whose tunnel is up to Caddy as well. A company in http mode does without HTTP/2 until it moves to https.
 
 A company on an older Hornhoof is served the old way until it updates: its https ends at hornhoof.org, under the relay's wildcard certificate. The relay reads each request to find its company, then passes it through that company's tunnel. This includes the contents of requests and answers. It keeps no copy of what passes. This is the behavior [Hornhoof's security page](https://github.com/Invariant0x/hornhoof/blob/main/SECURITY.md#the-hornhooforg-link) describes today.
 
@@ -43,7 +47,7 @@ Releasing a name deletes its key hashes and its sync record. Its route record st
 
 For each address, it also keeps the times of new links made in the last hour, to limit how many it can make. The relay's database is SQLite.
 
-The relay logs each link made or freed with the address it came from. On the server, this log goes to the system journal. frps logs only its errors, because its other lines name each visitor's address. Caddy logs no requests, but its error log names the visitor's address of a request that fails on its way to frps or the relay; a connection to a company whose link uses https never reaches Caddy.
+The relay logs each link made or freed with the address it came from. On the server, this log goes to the system journal. frps logs only its errors, because its other lines name each visitor's address. Caddy logs no requests, but its error log names the visitor's address of a request that fails on its way to frps or the relay; a connection to a company whose https tunnel is up never reaches Caddy.
 
 ## Run the tests
 

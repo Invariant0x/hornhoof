@@ -242,22 +242,38 @@ def frps_answers() -> bool:
     return status == 200
 
 
+def frps_came_back() -> None:
+    """Probes before the good answer is published, and after frps answered, so that the first healthy answer already
+    says whether the https port, which frps opens before its dashboard, takes connections. No good answer is out yet,
+    so this wait cannot make one look old."""
+    _frps['passthrough'] = port_accepts(RELAY_FRPS_HTTPS)
+    _frps['back_at'] = time.time()
+
+
+def watch_once(was_ok: bool) -> bool:
+    """One probe of frps: a good answer is stamped at once. Says whether frps answered."""
+    if not frps_answers():
+        return False
+    if not was_ok:
+        frps_came_back()
+    _frps['ok_at'] = time.time()
+    return True
+
+
 def watch_frps() -> None:
     """Probe frps forever; keep the last good answer and the recovery after a failure."""
     was_ok = False
     while True:
-        answers = frps_answers()
-        # Read before a good answer is published, and after frps answered, so that the first healthy answer already
-        # says whether the https port, which frps opens before its dashboard, takes connections.
-        _frps['passthrough'] = port_accepts(RELAY_FRPS_HTTPS)
-        if answers:
-            t = time.time()
-            if not was_ok:
-                _frps['back_at'] = t
-            _frps['ok_at'] = t
-            was_ok = True
-        else:
-            was_ok = False
+        was_ok = watch_once(was_ok)
+        time.sleep(WATCH_INTERVAL_S)
+
+
+def watch_passthrough() -> None:
+    """Follow frps's https port while frps answers, on a loop of its own. Between two stamps of frps's answers a probe
+    that waits out its timeout would count against HEALTH_MAX_AGE_S, and health would read as the relay being down."""
+    while True:
+        if frps_ok():
+            _frps['passthrough'] = port_accepts(RELAY_FRPS_HTTPS)
         time.sleep(WATCH_INTERVAL_S)
 
 
@@ -922,6 +938,12 @@ def malformed_id_reason(name: str, content: dict, metas: dict) -> str | None:
     return None
 
 
+def reserved_run_id(run_id: str, client_id: str) -> bool:
+    """A run id no binding's login may use. frps registers a legacy login under its run id, so the edge's name would cut
+    off the real edge (R7.5), and a network client's would take that client's id even while it is offline (C3)."""
+    return run_id == EDGE_CLIENT or (not client_id and CLIENT.fullmatch(run_id) is not None)
+
+
 def login_reason(name: str, kind: str, content: dict, metas: dict) -> str | None:
     """R1.3: the client id fits the session; a live run id is this client's own.
 
@@ -939,7 +961,7 @@ def login_reason(name: str, kind: str, content: dict, metas: dict) -> str | None
     run_id = content.get('run_id')
     if not isinstance(run_id, str) or not run_id:
         return None
-    if (not client_id and CLIENT.fullmatch(run_id)) or run_id_recorded_elsewhere(run_id, name):
+    if reserved_run_id(run_id, client_id) or run_id_recorded_elsewhere(run_id, name):
         return 'this run id belongs to another client'
     return run_id_conflict(run_id, client_id, name)
 
@@ -1009,7 +1031,10 @@ def trace_client(op: str, content: dict) -> str:
     user = content.get('user')
     user = user if isinstance(user, dict) else {}
     metas = content.get('metas') if op == 'Login' else user.get('metas')
-    client = metas.get('client') if isinstance(metas, dict) else None
+    metas = metas if isinstance(metas, dict) else {}
+    if 'edge' in metas:
+        return EDGE_CLIENT
+    client = metas.get('client')
     return client if isinstance(client, str) and client else 'legacy'
 
 
@@ -1342,7 +1367,9 @@ def authenticate_call(op: str, metas: dict) -> tuple[str | None, str | None, str
 
 def edge_token_matches(token: object) -> bool:
     """R7.5: the edge's token, compared in constant time; with no token set, nothing matches."""
-    return bool(EDGE_TOKEN) and isinstance(token, str) and hmac.compare_digest(token.encode(), EDGE_TOKEN.encode())
+    if not EDGE_TOKEN or not isinstance(token, str) or LONE_SURROGATE.search(token):
+        return False
+    return hmac.compare_digest(token.encode(), EDGE_TOKEN.encode())
 
 
 def edge_proxy_reason(content: dict) -> str | None:
@@ -1735,6 +1762,7 @@ def main() -> int:
         return run_admin(sys.argv[2:])
     init_db()
     threading.Thread(target=watch_frps, name='frps-watcher', daemon=True).start()
+    threading.Thread(target=watch_passthrough, name='https-port-watcher', daemon=True).start()
     server = ThreadingHTTPServer(LISTEN, Handler)
     server.daemon_threads = True
     print(f'hornhoof-relay listening on {LISTEN[0]}:{LISTEN[1]}', flush=True)
