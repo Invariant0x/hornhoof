@@ -11,7 +11,7 @@ import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import { inject, onTestFinished, vi } from 'vitest';
 import { buildApp, type Deps } from '../src/app.js';
 import { loadConfig, type Config } from '../src/config.js';
-import { agentRole, grantsFor, readerGrantsFor, readerRole, type AgentSql } from '../src/db/agent-sql.js';
+import { agentRole, grantsFor, PRE_COMMIT, PUBLIC_REVOKES, readerGrantsFor, readerRole, type AgentSql } from '../src/db/agent-sql.js';
 import type { Db } from '../src/db/client.js';
 import { FENCED, type LeaseKind, type LeaseSync } from '../src/db/net.js';
 import { LINK_SESSION_COOKIE } from '../src/auth/session.js';
@@ -81,12 +81,14 @@ function agentSqlOn(client: PGlite): AgentSql {
   let granted: Promise<unknown> | null = null;
   return {
     run: async (text, mode) => {
-      granted ??= client.exec(`${grantsFor(roles.write)};\n${readerGrantsFor(roles.read)}`);
+      granted ??= client.exec(`${PUBLIC_REVOKES};\n${grantsFor(roles.write)};\n${readerGrantsFor(roles.read)}`);
       await granted;
       return client.transaction(async tx => {
         if (mode === 'read') await tx.query('SET TRANSACTION READ ONLY');
         await tx.query(`SET LOCAL ROLE "${roles[mode]}"`);
-        return (await tx.exec(text)).map(r => ({ rows: r.rows as Record<string, unknown>[], changed: r.affectedRows ?? 0 }));
+        const answers = (await tx.exec(text)).map(r => ({ rows: r.rows as Record<string, unknown>[], changed: r.affectedRows ?? 0 }));
+        if (mode === 'write') await tx.exec(PRE_COMMIT);
+        return answers;
       });
     },
     close: async () => {},

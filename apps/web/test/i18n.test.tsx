@@ -62,6 +62,9 @@ describe('The agent in the center', () => {
 describe('errorText', () => {
   it('shows a known reason in the chosen language', () => {
     expect(errorText(ru, new ApiFailure(401, 'unauthorized', 'Wrong email or password.', 'wrong_password'))).toBe(ru.errors.wrong_password);
+    const notConfirmed = new ApiFailure(503, 'unavailable', 'x', 'not_confirmed');
+    expect(errorText(en, notConfirmed)).toBe('Hornhoof could not confirm this change. It may be saved; look before you try again.');
+    expect(errorText(ru, notConfirmed)).toBe('Hornhoof не смог подтвердить это изменение. Возможно, оно сохранено: проверьте, прежде чем повторять.');
   });
 
   it('words the reasons of maintenance, read-only and starting in both languages', () => {

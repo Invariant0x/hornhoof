@@ -3,7 +3,7 @@ import { sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { isLeaseRefused, type LeaseKind, type LeaseSync } from '../src/db/net.js';
 import { agents, attachments, companies, departments, jobs, people, subscriptions } from '../src/db/schema.js';
-import { createTestDb, setLease, testApp } from './helpers.js';
+import { as, createTestDb, setLease, setUpCompany, testApp } from './helpers.js';
 
 type TestDb = Awaited<ReturnType<typeof createTestDb>>;
 type JournalRow = {
@@ -46,9 +46,11 @@ describe('the journal', () => {
 
     const rows = await journalOf(db, 'departments');
 
-    expect(rows.map(row => row.key)).toEqual([...together, alone!].map(({ id }) => ({ id })));
-    expect(rows[0]!.xact).toBe(rows[1]!.xact);
-    expect(rows[2]!.xact).not.toBe(rows[0]!.xact);
+    /* Two rows of one statement can share a tick of the clock, and then a random id orders them, so they are found by their keys. */
+    const xactOf = ({ id }: { id: string }): string => rows.find(row => row.key.id === id)!.xact;
+    expect(rows).toHaveLength(3);
+    expect(xactOf(together[0]!)).toBe(xactOf(together[1]!));
+    expect(xactOf(alone!)).not.toBe(xactOf(together[0]!));
     for (const row of rows) expect(row).toMatchObject({ term_number: 1, term_machine: 'test', term_split: false, machine: 'test', tbl: 'departments', op: 'insert' });
   });
 
@@ -169,5 +171,21 @@ describe('fence 1', () => {
 
     await db.$client.exec('SET hornhoof.fenced = on');
     expect(await refusal(db.insert(departments).values(aDepartment('Sales', companyId)))).toBe(true);
+  });
+});
+
+describe('a write when the lease has ended', () => {
+  it('answers read_only to a write when the lease has ended', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const [acme] = await db.select().from(companies);
+    const [bruno] = await db.insert(agents).values({ companyId: acme!.id, kind: 'worker', name: 'Bruno', model: '' }).returning();
+    await setLease(db, { until: '-infinity' });
+
+    expect((await app.inject({ method: 'GET', url: '/api/me', ...as(ceo) })).statusCode).toBe(200);
+
+    const rename = await app.inject({ method: 'PATCH', url: `/api/agents/${bruno!.id}`, payload: { name: 'Bruno the Second' }, ...as(ceo) });
+    expect(rename.statusCode).toBe(503);
+    expect(rename.json()).toMatchObject({ error: { code: 'unavailable', reason: 'read_only' } });
   });
 });
