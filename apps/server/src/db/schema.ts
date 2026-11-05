@@ -1,5 +1,5 @@
 import type { ExternalWait } from '@hornhoof/protocol/waits';
-import { APPROVAL_CHANNELS, APPROVAL_MODES, COMPANY_TEMPLATE_KEYS, CONNECTION_ENDS, CRED_KINDS, MACHINE_KINDS, RISK_CLASSES, RUN_KINDS, TEMPLATE_KEYS, WORK_KINDS, type Account, type Boot, type Failure, type Limits, type ModelOption, type NodeExit, type NodeReconnect, type TestFileTiming, type TestPackageTiming, type TurnFacts } from '@hornhoof/protocol';
+import { APPROVAL_CHANNELS, APPROVAL_MODES, COMPANY_TEMPLATE_KEYS, CONNECTION_ENDS, CRED_KINDS, MACHINE_KINDS, RISK_CLASSES, RUN_KINDS, TEMPLATE_KEYS, WORK_KINDS, type EnvironmentSnapshot, type EnvironmentProblem, type RepositoryScope, type TestExecution, type TestEnvironmentReceipt, type Account, type Boot, type Failure, type Limits, type ModelOption, type NodeExit, type NodeReconnect, type TestFileTiming, type TestPackageTiming, type TurnFacts } from '@hornhoof/protocol';
 import type { OperatorError, OperatorInputLine, OperatorQuestion, OperatorReason } from '@hornhoof/protocol/program-operator';
 import type { MessageParty } from '../modules/events/parties.js';
 import { sql } from 'drizzle-orm';
@@ -846,6 +846,13 @@ export const TEST_RUN_STATUSES = ['running', 'passed', 'failed', 'stopped'] as c
 /* A command an agent runs for a task on whichever machines of the company are free, in parts when it splits: the full
    test suite of a task's branch, or any other work, on a branch or in an empty folder with the task's files. The agent
    hears the result on its task, and each part's log, and what a part of work made, go on the task as files. */
+export type TestEnvironmentRequest = {
+  version: 1; repositoryScope: RepositoryScope; suite?: string; profile?: string;
+  requestId: string | null; nodeId: string | null; builtin: boolean;
+  sentAt: string | null; attempts: number; problem: EnvironmentProblem | null;
+};
+export type TestEnvironmentSelection = { selection: TestExecution['selection']; after: number[] };
+
 export const testRuns = pgTable(
   'test_runs',
   {
@@ -866,6 +873,11 @@ export const testRuns = pgTable(
        work, or on a run from before commits were pinned. */
     commitSha: text('commit_sha'),
     command: text('command').notNull(),
+    /* Original manifest evidence and the chosen profile; old manual runs retain null evidence. */
+    environmentSnapshot: jsonb('environment_snapshot').$type<EnvironmentSnapshot>(),
+    environmentHash: text('environment_hash'),
+    /* The assigned authenticated metadata request, persisted without a repository credential. */
+    environmentRequest: jsonb('environment_request').$type<TestEnvironmentRequest>(),
     /* The task's files a part of work takes in, by name. */
     files: jsonb('files').$type<string[]>().notNull().default([]),
     /* The free memory a part of work needs; tests need what their repository says. */
@@ -881,7 +893,7 @@ export const testRuns = pgTable(
     createdAt: createdAt(),
     finishedAt: timestamp('finished_at', { withTimezone: true }),
   },
-  t => [unique('test_runs_company_number').on(t.companyId, t.number), index('test_runs_task_id').on(t.taskId)],
+  t => [unique('test_runs_company_number').on(t.companyId, t.number), index('test_runs_task_id').on(t.taskId), index('test_runs_environment_request').on(sql`(${t.environmentRequest}->>'requestId')`).where(sql`${t.environmentRequest} is not null and ${t.environmentSnapshot} is null and ${t.status} = 'running'`)],
 );
 
 export const TEST_PART_STATUSES = ['queued', 'running', 'passed', 'failed', 'stopped'] as const;
@@ -896,6 +908,8 @@ export const testParts = pgTable(
     companyId: companyId(),
     runId: uuid('run_id').notNull().references(() => testRuns.id),
     part: integer('part').notNull(),
+    environmentSelection: jsonb('environment_selection').$type<TestEnvironmentSelection>(),
+    environmentReceipt: jsonb('environment_receipt').$type<TestEnvironmentReceipt>(),
     status: text('status', { enum: TEST_PART_STATUSES }).notNull().default('queued'),
     nodeId: uuid('node_id').references(() => nodes.id),
     builtin: boolean('builtin').notNull().default(false),
