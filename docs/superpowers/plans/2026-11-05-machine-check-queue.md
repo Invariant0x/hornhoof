@@ -29,7 +29,7 @@
 - [x] Write failing watchdog and operator tests for queue waiting, completed waits and lost heartbeats.
 - [x] Connect typed authenticated queue observations and verify these tests.
 - [ ] Run migrations.test.ts and the three prior timeout cases ten times under at least the prior concurrent load; retain loadavg and cleanup evidence.
-- [ ] Run targeted dependency tests, affected tsc, typecheck:tests, scoped eslint, crapper and dryer.
+- [x] Run targeted dependency tests, affected tsc, typecheck:tests, scoped eslint, crapper and dryer.
 - [ ] Review the final diff independently, commit, push task-356, submit evidence to the head.
 
 ## Review focus
@@ -86,3 +86,7 @@
 - A nested-context check exposed that ambient preparation cancellation still saw the parent signal. RED expected the aborted nested signal but observed an un-aborted parent signal. Nested lease reuse now installs its combined signal in AsyncLocalStorage; all60 related node checks pass.
 - Final pre-load regression evidence: server7files137/137; node12files227/227 plus macOS ownership16/16 and last-change related5files60/60. Static checks and final loaded proof are recorded separately.
 - Ruling on review exclusions: Docker/PID1 and live macOS cannot be exercised on this Linux/no-Docker machine; retain targeted ownership/process tests and report that limit. Cooperative admission requires hh-check or the slot API; no universal shell interception was requested. Browser cancellation is now checked with a real local installer fixture, not a download. Capacity under final live load remains the outstanding acceptance check.
+
+- Correcting the temporary baseline namespace exposed a real test-helper CC regression: fakeServer3->5. The check-reply branch was extracted into grantCheck; the original helper must return to3 before completion. Commit952bd0a3 is an intermediate fix commit, not a completed gate.
+
+- Final static verification completed after the helper extraction: affected builds, typecheck:tests, scoped eslint all exit0; corrected crapper comparison has increases=[] and newOverLimit=[] (fakeServer3->3, unchanged opened16->16); dryer no duplicate candidates; git diff --check empty. main.test.ts57/57 on the final helper. All source changes are frozen for the loaded proof.

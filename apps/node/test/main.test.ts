@@ -32,6 +32,10 @@ const adapter: ProviderAdapter = {
   run: async () => ({ ok: true, sessionId: 'sess-9', result: 'ready', output: '', error: null, limits: { status: 'allowed', windows: [] } }),
 };
 
+function grantCheck(socket: WebSocket, frame: { type: string; id?: string }, allowed: boolean): void {
+  if (allowed && frame.type === 'check.acquire') socket.send(JSON.stringify({ type: 'check.state', id: frame.id, state: 'running', position: 0 }));
+}
+
 async function fakeServer(grantChecks = true) {
   const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });
   onTestFinished(() => server.close());
@@ -43,7 +47,7 @@ async function fakeServer(grantChecks = true) {
     s.on('message', data => {
       const frame = JSON.parse(String(data)) as { type: string; id?: string };
       received.push(frame);
-      if (grantChecks && frame.type === 'check.acquire') s.send(JSON.stringify({ type: 'check.state', id: frame.id, state: 'running', position: 0 }));
+      grantCheck(s, frame, grantChecks);
     });
   });
   const wait = async (check: () => boolean, ms = 3000) => {
