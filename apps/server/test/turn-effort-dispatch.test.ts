@@ -1,11 +1,11 @@
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agentEvents, agents, jobs, people, subscriptions, tasks } from '../src/db/schema.js';
-import { insertTurn, pump } from '../src/modules/conversation/queue.js';
+import { agentEvents, agents, departments, jobs, people, subscriptions, tasks } from '../src/db/schema.js';
+import { insertTurn, openTypedTurn, pump } from '../src/modules/conversation/queue.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { turnAgain } from '../src/modules/tasks/again.js';
-import { comment, createTask, submit, verdict, type Task, type Wake } from '../src/modules/tasks/engine.js';
+import { blocked, comment, createTask, submit, verdict, type Task, type Wake } from '../src/modules/tasks/engine.js';
 import { repeatedTurn } from '../src/modules/tasks/wake-state.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
 import { failureCompany } from './failure-company.js';
@@ -109,6 +109,93 @@ describe('how hard each turn thinks', () => {
     await c.sentBackOnce(task);
     await c.handIn(task);
     expect(await c.levels(c.reviewer.id)).toEqual([null, null]);
+  });
+
+  it('takes what the running model has: the levels all its models share on the Default, the nearest above medium', async () => {
+    const c = await gateCompany();
+    await c.db.update(subscriptions).set({ models: [{ id: 'narrow', name: 'Narrow', efforts: ['low', 'high', 'xhigh'] }, { id: 'wide', name: 'Wide', efforts: LEVELS }] }).where(eq(subscriptions.id, c.sub.id));
+    const relook = async (model: string, title: string) => {
+      await c.db.update(agents).set({ model }).where(eq(agents.id, c.reviewer.id));
+      const task = await c.task(title);
+      await c.sentBackOnce(task);
+      await c.handIn(task);
+      await c.wake((await verdict(c.ctx, c.reviewer.id, task.id, { pass: true, comment: 'Fine.' })).wakes);
+      await c.endTurn(c.reviewer.id);
+    };
+    await relook('', 'On the Default');
+    await relook('wide', 'On the wide model');
+    await relook('gone', 'On a model the plan does not run');
+    expect(await c.levels(c.reviewer.id)).toEqual(['xhigh', 'high', 'xhigh', 'medium', 'xhigh', 'high']);
+  });
+
+  describe('for a merge', () => {
+    const withRepository = async () => {
+      const c = await gateCompany();
+      await c.db.update(departments).set({ repoUrl: 'https://example.invalid/repo.git' }).where(eq(departments.id, c.dev.id));
+      await c.card(c.bruno.id, 'xhigh');
+      const task = await c.task('Checkout API');
+      await c.handIn(task);
+      await c.wake((await verdict(c.ctx, c.reviewer.id, task.id, { pass: true, comment: 'Fine.' })).wakes);
+      return { ...c, merging: task };
+    };
+
+    it('takes medium from the gate that really passed it', async () => {
+      const c = await withRepository();
+      expect((await c.db.select({ merging: tasks.merging }).from(tasks).where(eq(tasks.id, c.merging.id)))[0]!.merging).toBe(true);
+      expect(await c.levels(c.bruno.id)).toEqual(['medium']);
+    });
+
+    it('goes back to the full level once a merge that failed was reported: mending it is no mechanical work', async () => {
+      const c = await withRepository();
+      await c.wake((await blocked(c.ctx, c.bruno.id, c.merging.id, 'A conflict in the routes.')).wakes);
+      await c.endTurn(c.bruno.id);
+      expect(await c.levels(c.head.id)).toEqual([HEAD]);
+      await c.endTurn(c.head.id);
+      await c.wake((await comment(c.ctx, { agentId: c.head.id }, c.merging.id, 'Mend it and hand it in.')).wakes);
+      expect(await c.levels(c.bruno.id)).toEqual(['medium', 'xhigh']);
+    });
+  });
+
+  describe('for words typed into the terminal', () => {
+    const typed = async (c: Awaited<ReturnType<typeof gateCompany>>, agentId: string) => {
+      const [person] = await c.db.select().from(people);
+      return (await openTypedTurn(c.ctx, BUILTIN, agentId, 'Typed words.', person!.id))!;
+    };
+
+    it('starts no program and picks no level: the turn runs on what the program has, and the next wake takes its own', async () => {
+      const c = await gateCompany();
+      const lookedAt = await c.task('Checkout API');
+      await c.sentBackOnce(lookedAt);
+      expect(await c.levels(c.reviewer.id)).toEqual([REVIEWER]);
+      const before = c.sent.mock.calls.length;
+
+      const opened = await typed(c, c.reviewer.id);
+
+      expect(c.sent.mock.calls.length).toBe(before);
+      expect((await c.running(c.reviewer.id))!.id).toBe(opened.jobId);
+      await c.handIn(lookedAt);
+      expect(await c.levels(c.reviewer.id)).toEqual([REVIEWER]);
+      expect((await c.running(c.reviewer.id))!.id).toBe(opened.jobId);
+
+      await c.endTurn(c.reviewer.id);
+      expect(await c.levels(c.reviewer.id)).toEqual([REVIEWER, 'medium']);
+    });
+
+    it('takes the level of the next wake, not of the turn typed before it', async () => {
+      const c = await gateCompany();
+      const lookedAt = await c.task('Checkout API');
+      await c.sentBackOnce(lookedAt);
+      await c.handIn(lookedAt);
+      await c.wake((await verdict(c.ctx, c.reviewer.id, lookedAt.id, { pass: true, comment: 'Fine.' })).wakes);
+      await c.endTurn(c.reviewer.id);
+      expect(await c.levels(c.reviewer.id)).toEqual([REVIEWER, 'medium']);
+
+      await typed(c, c.reviewer.id);
+      await c.endTurn(c.reviewer.id);
+      await c.handIn(await c.task('Refunds'));
+
+      expect(await c.levels(c.reviewer.id)).toEqual([REVIEWER, 'medium', REVIEWER]);
+    });
   });
 
   it('never changes a running turn: what comes while it runs starts no program, and the next turn takes its own level', async () => {
