@@ -59,8 +59,9 @@ export function Notebook({ departmentId = null }: { departmentId?: string | null
   const who = (n: NoteView) => (n.by?.kind === 'orchestrator' ? t.window.orchestrator : n.by ? n.by.name : '');
 
   return (
-    <section className="notebook" aria-label={t.notebook.title}>
+    <section className="notebook" aria-label={t.notebook.title} aria-busy={busy || (notes === null && unread === null)}>
       <p className="muted">{departmentId ? t.notebook.departmentIntro : t.notebook.intro}</p>
+      {notes === null && unread === null && <p className="muted">{t.common.loading}</p>}
       {unread !== null && (
         <div className="notebook-unread">
           <p className="error" role="alert">
@@ -111,6 +112,7 @@ export function Notebook({ departmentId = null }: { departmentId?: string | null
           {t.notebook.add}
         </button>
       </form>
+      {busy && <p className="muted" role="status">{t.notebook.saving}</p>}
       {failure !== null && (
         <p className="error" role="alert">
           {errorText(t, failure)}
