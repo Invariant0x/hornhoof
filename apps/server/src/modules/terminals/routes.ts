@@ -63,8 +63,8 @@ export function terminalRoutes(app: FastifyInstance, ctx: Ctx): void {
            counts is kept before the keys reach the program. */
         const keys = readKeys(unread, data.data);
         unread = keys.rest;
-        if (keys.enter) await enterPressed(ctx, agentId, personId, node);
-        ctx.hub.send(node, { type: 'term.input', termId, data: data.data });
+        const pressedIn = keys.enter ? await enterPressed(ctx, agentId, personId, node) : null;
+        ctx.hub.send(node, { type: 'term.input', termId, data: data.data, ...(pressedIn ? { pressedIn } : {}) });
       };
       socket.on('message', raw => {
         let parsed: unknown;

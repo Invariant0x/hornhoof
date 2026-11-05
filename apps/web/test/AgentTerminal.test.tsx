@@ -398,6 +398,52 @@ describe("an agent's live terminal in its window", () => {
     expect(terms[0]!.written).toEqual(['new screen']);
   });
 
+  it.each([
+    ['busy', /went into the turn that was running/],
+    ['unknown_words', /Hornhoof could not tell who wrote/],
+  ] as const)('says at once in the window why a turn could not open: %s', async (turnRefused, says) => {
+    open(true, { turnRefused });
+    const why = await screen.findByText(says);
+    expect(why).toHaveClass('t-why');
+    expect(why).toBeVisible();
+  });
+
+  it.each([
+    [{ ready: false, reason: 'machine_offline' as const }, /offline|не в сети/i],
+    [{ browserError: 'no chrome' }, /no chrome/],
+    [{ limitUntil: '2026-11-05T15:00:00Z' }, /The plan is at its limit/],
+    [{ budgetUntil: '2026-11-05T15:00:00Z' }, /The plan used the share set for tasks/],
+    [{ limitUntil: '2026-11-05T15:00:00Z', budgetUntil: '2026-11-05T15:00:00Z' }, /The plan is at its limit/],
+    [{ machineDrain: { state: 'waiting', until: '2026-11-05T15:00:00Z', turnsLeft: 1, partsLeft: 0 } as const }, /finishing its work before an update/],
+  ])('says what keeps the agent from answering: %j', async (state, says) => {
+    open(true, state);
+    expect(await screen.findByText(says)).toHaveClass('t-why');
+  });
+
+  it('leaves the share of the plan out while the plan is at its limit, and a drain that was put off', async () => {
+    open(true, { limitUntil: '2026-11-05T15:00:00Z', budgetUntil: '2026-11-05T15:00:00Z', machineDrain: { state: 'postponed' } as unknown as OrchestratorState['machineDrain'] });
+    await screen.findByText(/The plan is at its limit/);
+    expect(screen.queryByText(/The plan used the share set for tasks/)).toBeNull();
+    expect(screen.queryByText(/finishing its work before an update/)).toBeNull();
+  });
+
+  it('says nothing of a refused turn while none was refused', async () => {
+    open(true, { turnRefused: null });
+    await socket();
+    await waitFor(() => expect(screen.queryByText(/went into the turn that was running|Hornhoof could not tell who wrote/)).toBeNull());
+  });
+
+  it('keeps the refused turn in the log of what happened', async () => {
+    const refused: EventView = { seq: 2, kind: 'turn_refused', data: { reason: 'unknown_words' }, jobId: null, person: null, at: '2026-10-30T10:00:01Z' };
+    mockApi({
+      [`GET ${EVENTS}?after=0`]: [200, { events: [...LOG, refused], state: { ...READY, terminal: false } }],
+      [`GET ${EVENTS}?after=2`]: [200, { events: [], state: { ...READY, terminal: false } }],
+      'POST /api/agents/orchestrator/start': [200, { started: false }],
+    });
+    view();
+    expect(await screen.findByText(/Hornhoof could not tell who wrote/)).toBeInTheDocument();
+  });
+
   it('shows the bottom of the screen, where the line to type in is, after a card below the terminal comes or goes', async () => {
     /* A taller terminal takes rows back from its history and stays scrolled up: the program's input line fell below the window. */
     open();
