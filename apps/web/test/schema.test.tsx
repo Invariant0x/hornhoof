@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { BUS, CY, FHEAD, FT, FW, G, GS, HH, HW, PY, REP, RY, schemaLayout, stepPaths } from '../src/screens/schema';
 import type { Department, DeptRole, Employee } from '../src/types';
 
-const role = (id: string, gate: number | null = null): DeptRole => ({ id, title: { en: id, ru: id }, description: { en: '', ru: '' }, kind: id.endsWith('HEAD') ? 'head' : 'member', gate });
+const role = (id: string, gate: number | null = null, schema?: 'before_work' | 'final_check' | 'observer'): DeptRole => ({ id, title: { en: id, ru: id }, description: { en: '', ru: '' }, kind: id.endsWith('HEAD') ? 'head' : 'member', gate, ...(schema ? { schema } : {}) });
 const emp = (id: string, roleId: string | null, kind: Employee['kind'] = 'worker'): Employee => ({
   id,
   name: id,
@@ -39,6 +39,32 @@ const ROLES = [role('DEV-HEAD'), role('DEV-BE'), role('DEV-FE'), role('DEV-REV',
 const TEAM = [emp('hana', 'DEV-HEAD', 'head'), emp('bruno', 'DEV-BE'), emp('felix', 'DEV-FE'), emp('fiona', 'DEV-FE'), emp('rita', 'DEV-REV'), emp('quinn', 'DEV-QA')];
 
 describe('the department schema', () => {
+  it('lays out design, work, ordered gates and the final check, with an observer outside the pipeline', () => {
+    const roles = [
+      role('DEV-ARCH', null, 'before_work'),
+      role('DEV-ENG'),
+      role('DEV-REV', 1),
+      role('DEV-SEC', 2),
+      role('DEV-TEST', null, 'final_check'),
+      role('DEV-PERF', null, 'observer'),
+    ];
+    const employees = roles.map(r => emp(r.id.toLowerCase(), r.id));
+    const s = schemaLayout(dept(employees, roles), 0);
+    expect(s.stages.map(stage => stage.map(f => [f.key, f.stage]))).toEqual([
+      [['DEV-ARCH', 0]],
+      [['DEV-ENG', 1]],
+      [['DEV-REV', 2]],
+      [['DEV-SEC', 3]],
+      [['DEV-TEST', 4]],
+    ]);
+    expect(s.gates.map(g => g.n)).toEqual([1, 2]);
+    const observer = s.frames.find(f => f.key === 'DEV-PERF')!;
+    expect(observer.stage).toBe(-1);
+    expect(observer.x).toBeLessThan(s.stages[0]![0]!.x);
+    expect(s.stages.flat().some(f => f.key === 'DEV-PERF')).toBe(false);
+    expect(s.frames.filter(f => f.stage >= 0).at(-1)!.key).toBe('DEV-TEST');
+  });
+
   it('puts a frame per role into stages: the roles without a gate first, then each gate in its order', () => {
     const s = schemaLayout(dept(TEAM, ROLES), 0);
     expect(s.frames.map(f => [f.key, f.x, f.stage])).toEqual([
