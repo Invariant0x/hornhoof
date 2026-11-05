@@ -1173,6 +1173,7 @@ async function resumeByComment(ctx: Live, actor: Actor, task: Task, text: string
 
 function commentWakes(task: Task, actor: Actor, text: string): Wake[] {
   if (CLOSED.includes(task.status)) return [];
+  if (task.status === 'blocked' && !actor.personId) return [];
   const recipients = new Set(task.status === 'review' ? [task.assigneeAgentId, ...task.panel] : [task.assigneeAgentId]);
   recipients.delete(actor.agentId ?? null);
   return [...recipients].filter((id): id is string => id !== null).map(agentId => ({ agentId, taskId: task.id, why: 'comment', text }));

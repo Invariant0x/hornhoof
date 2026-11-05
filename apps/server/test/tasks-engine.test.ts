@@ -55,7 +55,12 @@ describe('the task engine', () => {
     expect([aside.wakes, (await read(task.id)).status]).toEqual([[], 'blocked']);
     const answered = await comment(ctx, { agentId: head.id }, task.id, 'Euros only.');
     expect(answered.task).toMatchObject({ status: 'open', assigneeAgentId: bruno.id, silent: 0 });
-    expect(answered.wakes).toEqual([{ agentId: bruno.id, taskId: task.id, why: 'unblocked', text: 'Euros only.' }]);
+    const log = await db.select().from(taskEvents).where(eq(taskEvents.taskId, task.id)).orderBy(taskEvents.id);
+    expect(log.at(-1)).toMatchObject({ kind: 'comment', agentId: head.id, text: 'Euros only.' });
+    expect(answered.wakes).toEqual([{
+      agentId: bruno.id, taskId: task.id, why: 'unblocked', text: 'Euros only.',
+      cause: { actor: { agentId: head.id }, action: 'commented', eventId: log.at(-1)!.id, task: { id: task.id, number: task.number } },
+    }]);
     const [me] = await db.select().from(agents).where(eq(agents.id, bruno.id));
     const prompt = wakePrompt(me!, answered.task, answered.wakes[0]!);
     expect(prompt).toContain('answered what blocked it');
@@ -64,8 +69,26 @@ describe('the task engine', () => {
     const [hana] = await db.select().from(agents).where(eq(agents.id, head.id));
     const stopped = await blocked(ctx, bruno.id, task.id, 'And the rounding?');
     expect(wakePrompt(hana!, stopped.task, stopped.wakes[0]!)).toContain('Answer it with comment, which opens it again for its executor');
-    expect((await comment(ctx, { agentId: orchestrator.id }, task.id, 'Round half up.')).task.status).toBe('open');
-    expect(woken(await comment(ctx, { agentId: head.id }, task.id, 'Thanks.'))).toEqual([]);
+    const resumed = await comment(ctx, { agentId: orchestrator.id }, task.id, 'Round half up.');
+    expect(resumed.task).toMatchObject({ status: 'open', assigneeAgentId: bruno.id });
+    expect(woken(resumed)).toEqual([[bruno.id, 'unblocked']]);
+    expect(woken(await comment(ctx, { agentId: head.id }, task.id, 'Thanks.'))).toEqual([[bruno.id, 'comment']]);
+    expect(woken(await comment(ctx, { agentId: bruno.id }, task.id, 'Understood.'))).toEqual([]);
+  });
+
+  it('delivers a person comment to the blocked executor without opening the task', async () => {
+    const { ctx, db, CEO, bruno, memberTask, read } = await company();
+    const task = await memberTask();
+    await blocked(ctx, bruno.id, task.id, 'Which currency?');
+    const result = await comment(ctx, CEO, task.id, 'Check the accounting notes.');
+    expect(result.task).toMatchObject({ status: 'blocked', assigneeAgentId: bruno.id });
+    expect(await read(task.id)).toMatchObject({ status: 'blocked', assigneeAgentId: bruno.id });
+    const log = await db.select().from(taskEvents).where(eq(taskEvents.taskId, task.id)).orderBy(taskEvents.id);
+    expect(log.at(-1)).toMatchObject({ kind: 'comment', personId: CEO.personId, text: 'Check the accounting notes.' });
+    expect(result.wakes).toEqual([{
+      agentId: bruno.id, taskId: task.id, why: 'comment', text: 'Check the accounting notes.',
+      cause: { actor: CEO, action: 'commented', eventId: log.at(-1)!.id, task: { id: task.id, number: task.number } },
+    }]);
   });
 
   it("gives a person's task to the department head and wakes the head", async () => {
@@ -219,13 +242,18 @@ describe('the task engine', () => {
   });
 
   it('takes no work in while work under it is open, and tells its executor once that work is done', async () => {
-    const { ctx, dev, head, bruno, tess, memberTask, read } = await company();
+    const { ctx, db, dev, head, bruno, tess, memberTask, read } = await company();
     const task = await memberTask([]);
     const { task: under } = await createTask(ctx, { agentId: head.id }, { title: 'Refunds', brief: '', body: 'POST /refunds.', departmentId: dev.id, parentId: task.id, assigneeAgentId: tess.id, executor: true, gates: [] });
     expect(await reason(submit(ctx, bruno.id, task.id, { summary: 'Done.', evidence: 'npm test: 12 passed' }))).toBe('task_invalid');
     expect((await read(task.id)).status).toBe('open');
     const finished = await submit(ctx, tess.id, under.id, { summary: 'Done.', evidence: 'npm test: 3 passed' });
-    expect(finished.wakes).toContainEqual({ agentId: bruno.id, taskId: task.id, why: 'subtasks' });
+    const log = await db.select().from(taskEvents).where(eq(taskEvents.taskId, under.id)).orderBy(taskEvents.id);
+    expect(log.at(-1)).toMatchObject({ kind: 'submitted', agentId: tess.id, text: 'Done.' });
+    expect(finished.wakes).toContainEqual({
+      agentId: bruno.id, taskId: task.id, why: 'subtasks',
+      cause: { actor: { agentId: tess.id }, action: 'handed in work', eventId: log.at(-1)!.id, task: { id: under.id, number: under.number }, report: 'Done.' },
+    });
     expect((await submit(ctx, bruno.id, task.id, { summary: 'Done.', evidence: 'npm test: 12 passed' })).task.status).toBe('done');
   });
 
@@ -243,7 +271,12 @@ describe('the task engine', () => {
     const task = await memberTask([rita.id]);
     const sent = await submit(ctx, bruno.id, task.id, { summary: 'Done.', evidence: 'npm test: 12 passed' });
     expect(sent.task).toMatchObject({ status: 'review', stage: 1, panel: [rita.id], assigneeAgentId: rita.id });
-    expect(sent.wakes).toEqual([{ agentId: rita.id, taskId: task.id, why: 'review' }]);
+    const log = await db.select().from(taskEvents).where(eq(taskEvents.taskId, task.id)).orderBy(taskEvents.id);
+    expect(log.at(-1)).toMatchObject({ kind: 'submitted', agentId: bruno.id, text: 'Done.' });
+    expect(sent.wakes).toEqual([{
+      agentId: rita.id, taskId: task.id, why: 'review',
+      cause: { actor: { agentId: bruno.id }, action: 'handed in work', eventId: log.at(-1)!.id, task: { id: task.id, number: task.number }, report: 'Done.' },
+    }]);
   });
 
   it('declines a commit: the request closes, the task goes on and the agent hears why', async () => {
@@ -255,17 +288,23 @@ describe('the task engine', () => {
     const declined = await answer(ctx, CEO, approval.request.id, { approve: false, answer: 'Refunds first.' });
     expect(declined.request).toMatchObject({ status: 'declined', answer: 'Refunds first.', answeredBy: CEO.personId });
     expect((await read(task.id)).status).toBe('working');
-    expect(declined.wakes).toEqual([{ agentId: bruno.id, taskId: task.id, why: 'answered', text: `Declined ${commit}. Refunds first.` }]);
-    const log = await db.select().from(taskEvents).where(eq(taskEvents.taskId, task.id));
+    const log = await db.select().from(taskEvents).where(eq(taskEvents.taskId, task.id)).orderBy(taskEvents.id);
+    expect(declined.wakes).toEqual([{
+      agentId: bruno.id, taskId: task.id, why: 'answered', text: `Declined ${commit}. Refunds first.`,
+      cause: { actor: CEO, action: `declined ${commit}`, eventId: log.at(-1)!.id, task: { id: task.id, number: task.number } },
+    }]);
     expect(log.at(-1)).toMatchObject({ kind: 'answered', personId: CEO.personId, text: `Declined ${commit}. Refunds first.` });
     expect(await reason(answer(ctx, CEO, approval.request.id, { approve: true }))).toBe('request_closed');
   });
 
-  it("wakes the assignee for a person's comment but nobody for an agent's", async () => {
-    const { ctx, CEO, head, bruno, memberTask } = await company();
+  it.each(['open', 'working'] as const)('wakes the %s task holder for another author, and skips its own comments', async status => {
+    const { ctx, db, CEO, head, bruno, rita, memberTask } = await company();
     const task = await memberTask();
+    await db.update(tasks).set({ status }).where(eq(tasks.id, task.id));
     expect(woken(await comment(ctx, CEO, task.id, 'Keep refunds out of this one.'))).toEqual([[bruno.id, 'comment']]);
-    expect(woken(await comment(ctx, { agentId: head.id }, task.id, 'Noted.'))).toEqual([]);
+    expect(woken(await comment(ctx, { agentId: head.id }, task.id, 'Noted.'))).toEqual([[bruno.id, 'comment']]);
+    expect(woken(await comment(ctx, { agentId: rita.id }, task.id, 'I can check refunds separately.'))).toEqual([[bruno.id, 'comment']]);
+    expect(woken(await comment(ctx, { agentId: bruno.id }, task.id, 'I will leave refunds out.'))).toEqual([]);
   });
 
   it('wakes the executor when its head rewrites the task', async () => {
