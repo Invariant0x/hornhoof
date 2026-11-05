@@ -475,6 +475,7 @@ describe('decisions read failure', () => {
   it('keeps the shown requests and retries the failed read', async () => {
     const user = userEvent.setup();
     let broken = false;
+    const stream = fakeStream();
     const calls = shell({
       'GET /api/requests': () => (broken ? [503, { error: { code: 'unavailable', message: 'Hornhoof is busy.' } }] : [200, decisions(REQUESTS)]),
     });
@@ -482,7 +483,7 @@ describe('decisions read failure', () => {
     const waiting = screen.getByRole('region', { name: 'Waiting for you' });
     expect(within(waiting).getByRole('article', { name: /#9/ })).toBeInTheDocument();
     broken = true;
-    fakeStream().send({ type: 'requests' });
+    stream.send({ type: 'requests' });
     await expect.poll(() => calls.filter(c => c.path === '/api/requests').length).toBeGreaterThanOrEqual(2);
     expect(await within(waiting).findByRole('alert')).toHaveTextContent('Hornhoof is busy.');
     expect(within(waiting).getByRole('article', { name: /#9/ })).toBeInTheDocument();
