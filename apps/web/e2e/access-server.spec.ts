@@ -22,7 +22,7 @@ type Boot = {
 type Server = Boot & { child: ChildProcessWithoutNullStreams; control(command: string): Promise<void>; stop(): Promise<void> };
 
 async function startServer(): Promise<Server> {
-  const child = spawn(resolve(HERE, '../../node_modules/.bin/vitest'), ['run', 'test/access-server-support.test.ts', '--pool=forks', '--poolOptions.forks.singleFork=true'], {
+  const child = spawn(resolve(HERE, '../../../node_modules/.bin/vitest'), ['run', 'test/access-server-support.test.ts', '--pool=forks', '--poolOptions.forks.singleFork=true'], {
     cwd: resolve(HERE, '../../server'),
     stdio: ['pipe', 'pipe', 'pipe'],
   });
