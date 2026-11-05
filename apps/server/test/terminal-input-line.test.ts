@@ -119,6 +119,9 @@ describe('the line of a program, as its terminals made it', () => {
     expect(line.take('  ', WRITER)).toBeNull();
     expect(line.take('/x', WRITER)).toBe('control');
     expect(new InputLine().take(' a/b', WRITER)).toBeNull();
+    const typed = new InputLine();
+    expect(typed.take(' /', WRITER)).toBe('control');
+    expect(typed.take('login', WRITER)).toBe('control');
   });
 
   it('knows the 8-bit form of what starts a steering sequence', () => {

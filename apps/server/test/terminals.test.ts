@@ -240,17 +240,15 @@ describe("writing to an agent on the plan of someone else", () => {
     expect((await state(app, ceo)).canType).toBe(true);
   });
 
-  it("still takes keys from the subscription's owner alone", async () => {
+  it("still takes the keys that steer from the subscription's owner alone", async () => {
     const { url, builtin, zed, lisa } = await withDelegate();
-    const watching = await watch(url, lisa);
-    const watcher = await next(builtin, 'term.open');
-    expect(watcher.write).toBe(false);
-    const typing = await watch(url, zed);
+    const writing = await watch(url, lisa);
+    await next(builtin, 'term.open');
+    const steering = await watch(url, zed);
     const owner = await next(builtin, 'term.open');
-    expect(owner.write).toBe(true);
-    watching.ws.send(JSON.stringify({ type: 'input', data: 'from the delegate\r' }));
-    typing.ws.send(JSON.stringify({ type: 'input', data: 'from the owner\r' }));
-    expect(await next(builtin, 'term.input')).toEqual({ type: 'term.input', termId: owner.termId, data: 'from the owner\r' });
+    writing.ws.send(JSON.stringify({ type: 'input', data: '\x03' }));
+    steering.ws.send(JSON.stringify({ type: 'input', data: '\x03' }));
+    expect(await next(builtin, 'term.input')).toEqual({ type: 'term.input', termId: owner.termId, data: '\x03' });
   });
 });
 

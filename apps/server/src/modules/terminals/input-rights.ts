@@ -6,8 +6,8 @@ export type InputRefusal = 'control' | 'message';
 
 const PASTE = /^\x1b\[200~([\s\S]*)\x1b\[201~$/;
 /* Enter and the keys that erase write nothing into the program. In a paste, Enter is all that may stand among the words. */
-const STEERS = /[\x00-\x07\x09\x0b\x0c\x0e-\x1f]/;
-const STEERS_IN_PASTE = /[\x00-\x09\x0b\x0c\x0e-\x1f\x7f]/;
+const STEERS = /[\x00-\x07\x09\x0b\x0c\x0e-\x1f\x80-\x9f]/;
+const STEERS_IN_PASTE = /[\x00-\x09\x0b\x0c\x0e-\x1f\x7f-\x9f]/;
 /* Focus, the answers to a program's queries and the mouse are no keys a person typed. */
 const REPORT = /^\x1b\[(?:[IO]|[>?][0-9;]*c|[0-9;]*R|<[0-9]+;[0-9]+;[0-9]+[Mm])$/;
 /* How long a line counts as holding words with no key from anyone: a program may have taken them by then. */
@@ -61,7 +61,7 @@ export class InputLine {
     const length = lengthAfter(this.length, text);
     if (length === null) {
       /* The rest of a command typed key by key is that command too, up to its Enter. */
-      this.blocked = this.length === 0 && /^[/!]/.test(text) && !/[\r\n]/.test(text);
+      this.blocked = this.length === 0 && /^\s*[/!]/.test(text) && !/[\r\n]/.test(text);
       return 'control';
     }
     this.length = length;
@@ -75,14 +75,15 @@ export class InputLine {
   }
 }
 
-/* How long the line gets with these keys, or null when one of them starts a line with what runs a command. */
+/* How long the line gets with these keys, or null when one of them starts a line with what runs a command. Spaces do not
+   start a line: a program may trim them before it looks for a command. */
 function lengthAfter(from: number, text: string): number | null {
   let length = from;
   for (const key of text) {
     if (newLine(key)) length = 0;
     else if (erases(key)) length = Math.max(0, length - 1);
     else if (length === 0 && (key === '/' || key === '!')) return null;
-    else length++;
+    else if (length > 0 || key.trim()) length++;
   }
   return length;
 }

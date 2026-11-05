@@ -31,6 +31,8 @@ async function outcome(c: Company, { screen, termId }: View): Promise<{ keys: st
     if (m.type === 'term.input' && m.termId === termId) keys.push(m.data);
     if (m.type === 'term.resize' && m.cols === cols) break;
   }
+  /* The browser hears on its own socket: what the server said before that size has reached it once a ping came back. */
+  await new Promise(done => { screen.ws.once('pong', done); screen.ws.ping(); });
   const refused = screen.frames.filter(f => f.type === 'refused').map(f => f.reason);
   screen.frames.splice(0, screen.frames.length, ...screen.frames.filter(f => f.type !== 'refused'));
   return { keys, refused };
