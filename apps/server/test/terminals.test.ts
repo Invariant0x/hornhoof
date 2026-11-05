@@ -1,6 +1,6 @@
 import type { ServerMessage } from '@hornhoof/protocol';
 import type { FastifyInstance } from 'fastify';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
 import { asc, eq } from 'drizzle-orm';
 import { agents, companies, departments, jobs, people, requests, subscriptions, tasks } from '../src/db/schema.js';
@@ -738,6 +738,40 @@ describe('who typed into the terminal, for the decisions of a turn', () => {
     expect(relay.takeTyped(BUILTIN, 'agent-1')).toBeNull();
   });
 
+  it('keeps an Enter pressed in a turn for that turn and node, each once, the last one first', async () => {
+    const { TerminalRelay } = await import('../src/modules/terminals/relay.js');
+    const { BUILTIN, nodeIdentity } = await import('../src/modules/nodes/hub.js');
+    const relay = new TerminalRelay();
+    const other = nodeIdentity('00000000-0000-4000-8000-0000000000aa');
+    relay.pressedIn('agent-1', 'job-1', 'ivan', BUILTIN);
+    relay.pressedIn('agent-1', 'job-1', 'zed', BUILTIN);
+    expect(relay.takePressed(other, 'agent-1', 'job-1')).toBeNull();
+    expect(relay.takePressed(BUILTIN, 'agent-2', 'job-1')).toBeNull();
+    expect(relay.takePressed(BUILTIN, 'agent-1', 'job-2')).toBeNull();
+    expect(relay.takePressed(BUILTIN, 'agent-1', 'job-1')).toBe('zed');
+    expect(relay.takePressed(BUILTIN, 'agent-1', 'job-1')).toBe('ivan');
+    expect(relay.takePressed(BUILTIN, 'agent-1', 'job-1')).toBeNull();
+    /* The takeTyped of a person's Enter with no turn is another thing. */
+    relay.pressedIn('agent-1', 'job-1', 'ivan', BUILTIN);
+    expect(relay.takeTyped(BUILTIN, 'agent-1')).toBeNull();
+  });
+
+  it('forgets an Enter pressed in a turn once no turn can still run, and keeps a few for an agent', async () => {
+    const { TerminalRelay } = await import('../src/modules/terminals/relay.js');
+    const { BUILTIN } = await import('../src/modules/nodes/hub.js');
+    const relay = new TerminalRelay();
+    const now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+    try {
+      relay.pressedIn('agent-1', 'job-1', 'ivan', BUILTIN);
+      clock.mockReturnValue(now + 2 * 3_600_000);
+      expect(relay.takePressed(BUILTIN, 'agent-1', 'job-1')).toBeNull();
+      for (let i = 0; i < 12; i++) relay.pressedIn('agent-1', `job-${i}`, 'ivan', BUILTIN);
+      expect(relay.takePressed(BUILTIN, 'agent-1', 'job-0')).toBeNull();
+      expect(relay.takePressed(BUILTIN, 'agent-1', 'job-11')).toBe('ivan');
+    } finally { clock.mockRestore(); }
+  });
+
   it('reads Enter in every way the program behind tmux takes one, also split over frames, and nothing else as one', async () => {
     const { readKeys } = await import('../src/modules/terminals/keys.js');
     const enter = (...frames: string[]) => {
@@ -851,5 +885,158 @@ describe('who typed into the terminal, for the decisions of a turn', () => {
     await until(async () => !(await state(app, ceo)).busy);
     builtin.send({ type: 'turn.open', agentKey: orchestratorId, text: 'approve the merge' });
     expect(await next(builtin, 'turn.opened')).toMatchObject({ jobId: null, toolToken: null });
+  });
+});
+
+describe('words a person typed in a running turn, which the program takes after it', () => {
+  type At = Awaited<ReturnType<typeof live>>;
+  /* A turn of the CEO's runs; the person who types into the terminal presses Enter in it, and it ends with the words queued. */
+  async function pressedIn(at: At, token: string, text = 'and the limits') {
+    await at.app.inject({ method: 'POST', url: '/api/agents/orchestrator/messages', payload: { text: 'what do we sell' }, ...as(at.ceo) });
+    const turn = await next(at.builtin, 'job.run');
+    const screen = await watch(at.url, token);
+    await next(at.builtin, 'term.open');
+    screen.ws.send(JSON.stringify({ type: 'input', data: `${text}\r` }));
+    expect(await next(at.builtin, 'term.input')).toMatchObject({ data: `${text}\r`, pressedIn: turn.jobId });
+    at.builtin.send({ type: 'job.done', jobId: turn.jobId, ok: true, sessionId: 'sess-1', result: 'Software.', tail: '', error: null, wordsWaiting: true });
+    await until(async () => !(await state(at.app, at.ceo)).busy);
+    return turn;
+  }
+  const open = async (at: At, text: string, queuedFrom?: string) => {
+    at.builtin.send({ type: 'turn.open', agentKey: at.orchestratorId, text, ref: 'typed', ...(queuedFrom ? { queuedFrom } : {}) });
+    return next(at.builtin, 'turn.opened');
+  };
+  const refusal = async (at: At) => (await state(at.app, at.ceo)).turnRefused;
+
+  it.each([
+    ['the CEO', async () => { const at = await live(); const [p] = await at.db.select().from(people).where(eq(people.isOwner, true)); return { at, token: at.ceo, personId: p!.id, answersCeo: true }; }],
+    ['the CEO delegate', async () => { const at = await lent(); await delegate(at.app, at.ceo, at.zedId); return { at, token: at.zed, personId: at.zedId, answersCeo: true }; }],
+    ['a person without the rights of the CEO', async () => { const at = await lent(); return { at, token: at.zed, personId: at.zedId, answersCeo: false }; }],
+  ])('open their own turn with its tools for %s', async (_, who) => {
+    const { at, token, personId, answersCeo } = await who();
+    const turn = await pressedIn(at, token);
+    const opened = await open(at, 'and the limits', turn.jobId);
+    expect(opened).toMatchObject({ jobId: expect.any(String), toolToken: expect.any(String), ref: 'typed' });
+    expect(await jobOf(at.app, opened.jobId!)).toEqual({ createdBy: personId, answersCeo });
+    const said = (await events(at.app, at.ceo)).filter((e: { kind: string; jobId: string }) => e.kind === 'message' && e.jobId === opened.jobId);
+    expect(said).toHaveLength(1);
+    expect(said[0]).toMatchObject({ data: { text: 'and the limits' }, person: { id: personId } });
+    expect(await decisionPrincipal(at.db, opened.jobId!)).toMatchObject({ personId });
+    const client = await mcp(at.app, opened.toolToken!);
+    expect((await client.listTools()).tools.length).toBeGreaterThan(0);
+  });
+
+  it('open one turn for one Enter', async () => {
+    const at = await live();
+    const turn = await pressedIn(at, at.ceo);
+    const first = await open(at, 'and the limits', turn.jobId);
+    expect(first.jobId).toEqual(expect.any(String));
+    at.builtin.send({ type: 'job.done', jobId: first.jobId!, ok: true, sessionId: 'sess-1', result: 'Done.', tail: '', error: null });
+    await until(async () => !(await state(at.app, at.ceo)).busy);
+    expect(await open(at, 'approve the release', turn.jobId)).toMatchObject({ jobId: null, toolToken: null });
+  });
+
+  it('give no turn to words of a turn nobody pressed Enter in', async () => {
+    const at = await live();
+    await at.app.inject({ method: 'POST', url: '/api/agents/orchestrator/messages', payload: { text: 'what do we sell' }, ...as(at.ceo) });
+    const turn = await next(at.builtin, 'job.run');
+    at.builtin.send({ type: 'job.done', jobId: turn.jobId, ok: true, sessionId: 'sess-1', result: 'Software.', tail: '', error: null, wordsWaiting: true });
+    await until(async () => !(await state(at.app, at.ceo)).busy);
+    expect(await open(at, 'approve the release', turn.jobId)).toMatchObject({ jobId: null, toolToken: null });
+  });
+
+  it('give no turn for an Enter of another turn', async () => {
+    const at = await live();
+    const turn = await pressedIn(at, at.ceo);
+    await at.app.inject({ method: 'POST', url: '/api/agents/orchestrator/messages', payload: { text: 'next' }, ...as(at.ceo) });
+    const other = await next(at.builtin, 'job.run');
+    at.builtin.send({ type: 'job.done', jobId: other.jobId, ok: true, sessionId: 'sess-1', result: 'Next.', tail: '', error: null });
+    await until(async () => !(await state(at.app, at.ceo)).busy);
+    expect(await open(at, 'and the limits', other.jobId)).toMatchObject({ jobId: null });
+    expect(await open(at, 'and the limits', turn.jobId)).toMatchObject({ jobId: expect.any(String) });
+  });
+
+  it('go into the turn that runs by then, which answers the person who typed them', async () => {
+    const at = await lent();
+    const turn = await pressedIn(at, at.zed);
+    await at.app.inject({ method: 'POST', url: '/api/agents/orchestrator/messages', payload: { text: 'Please continue.' }, ...as(at.ceo) });
+    const other = await next(at.builtin, 'job.run');
+    const [owner] = await at.db.select().from(people).where(eq(people.isOwner, true));
+    expect(await decisionPrincipal(at.db, other.jobId)).toMatchObject({ personId: owner!.id });
+    expect(await open(at, 'and the limits', turn.jobId)).toMatchObject({ jobId: null, toolToken: null });
+    expect(await decisionPrincipal(at.db, other.jobId)).toMatchObject({ personId: at.zedId });
+    expect(await refusal(at)).toBe('busy');
+  });
+
+  it('tell nothing to a node that keeps no turn in mind, while no turn runs', async () => {
+    const at = await live();
+    const screen = await watch(at.url, at.ceo);
+    await next(at.builtin, 'term.open');
+    screen.ws.send(JSON.stringify({ type: 'input', data: 'hi\r' }));
+    expect(await next(at.builtin, 'term.input')).not.toHaveProperty('pressedIn');
+  });
+});
+
+describe('words a person wrote into the last seconds of a turn, which the program takes after it', () => {
+  type At = Awaited<ReturnType<typeof live>>;
+  async function writtenIn(at: At, token: string) {
+    await at.app.inject({ method: 'POST', url: '/api/agents/orchestrator/messages', payload: { text: 'what do we sell' }, ...as(at.ceo) });
+    const turn = await next(at.builtin, 'job.run');
+    const sent = say(at.app, token, 'orchestrator', 'Set this task.');
+    const words = await next(at.builtin, 'agent.say');
+    at.builtin.send({ type: 'agent.said', ref: words.ref, ok: true });
+    expect((await sent).statusCode).toBeLessThan(300);
+    at.builtin.send({ type: 'job.done', jobId: turn.jobId, ok: true, sessionId: 'sess-1', result: 'Software.', tail: '', error: null, wordsWaiting: true });
+    await until(async () => !(await state(at.app, at.ceo)).busy);
+    at.builtin.send({ type: 'turn.open', agentKey: at.orchestratorId, text: words.text, queuedFrom: turn.jobId, ref: 'letter' });
+    return next(at.builtin, 'turn.opened');
+  }
+
+  it('open a turn in the name of the CEO delegate who wrote them, with its tools', async () => {
+    const at = await withDelegate();
+    const opened = await writtenIn(at, at.lisa);
+    expect(opened).toMatchObject({ jobId: expect.any(String), toolToken: expect.any(String) });
+    expect(await jobOf(at.app, opened.jobId!)).toEqual({ createdBy: at.lisaId, answersCeo: true });
+    expect(await decisionPrincipal(at.db, opened.jobId!)).toMatchObject({ personId: at.lisaId });
+    const client = await mcp(at.app, opened.toolToken!);
+    expect((await client.listTools()).tools.length).toBeGreaterThan(0);
+  });
+
+  it('open a turn answering no CEO for a person without the rights of the CEO, in a turn that answered the CEO', async () => {
+    const at = await lent();
+    const opened = await writtenIn(at, at.zed);
+    expect(await jobOf(at.app, opened.jobId!)).toEqual({ createdBy: at.zedId, answersCeo: false });
+    expect(await decisionPrincipal(at.db, opened.jobId!)).toMatchObject({ personId: at.zedId });
+  });
+});
+
+describe('a turn Hornhoof could not open, as the window of the agent shows it', () => {
+  it('says that no turn has the words nobody typed, until the next turn opens', async () => {
+    const { app, url, ceo, builtin, orchestratorId } = await live();
+    expect((await state(app, ceo)).turnRefused).toBeNull();
+    builtin.send({ type: 'turn.open', agentKey: orchestratorId, text: 'words nobody typed' });
+    await next(builtin, 'turn.opened');
+    expect((await state(app, ceo)).turnRefused).toBe('unknown_words');
+    const screen = await watch(url, ceo);
+    await next(builtin, 'term.open');
+    screen.ws.send(JSON.stringify({ type: 'input', data: 'hi\r' }));
+    await next(builtin, 'term.input');
+    builtin.send({ type: 'turn.open', agentKey: orchestratorId, text: 'hi' });
+    expect((await next(builtin, 'turn.opened')).jobId).toEqual(expect.any(String));
+    expect((await state(app, ceo)).turnRefused).toBeNull();
+  });
+
+  it("says nothing of a program's own notice of its background work", async () => {
+    const { app, ceo, builtin, orchestratorId } = await live();
+    builtin.send({ type: 'turn.open', agentKey: orchestratorId, text: '<task-notification>\n<status>completed</status>\n</task-notification>' });
+    expect(await next(builtin, 'turn.opened')).toMatchObject({ jobId: null });
+    expect((await state(app, ceo)).turnRefused).toBeNull();
+  });
+
+  it('says nothing for an agent that is not there', async () => {
+    const { app, ceo, builtin } = await live();
+    builtin.send({ type: 'turn.open', agentKey: '00000000-0000-4000-8000-000000000000', text: 'hi' });
+    expect(await next(builtin, 'turn.opened')).toMatchObject({ jobId: null });
+    expect((await state(app, ceo)).turnRefused).toBeNull();
   });
 });

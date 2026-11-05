@@ -1,0 +1,514 @@
+{
+  "version": 1,
+  "defaultProfile": "fast",
+  "runtimes": [
+    {
+      "id": "node",
+      "version": "22"
+    },
+    {
+      "id": "postgres",
+      "version": "17"
+    }
+  ],
+  "profiles": [
+    {
+      "id": "fast",
+      "requiredSuiteIds": [
+        "protocol",
+        "node",
+        "server",
+        "web",
+        "release-scripts"
+      ]
+    },
+    {
+      "id": "final",
+      "requiredSuiteIds": [
+        "protocol",
+        "node",
+        "server",
+        "web",
+        "release-scripts",
+        "server-postgres"
+      ]
+    }
+  ],
+  "dependencies": {
+    "adapter": "npm",
+    "inputs": [
+      "package.json",
+      "package-lock.json",
+      "apps/*/package.json",
+      "packages/*/package.json"
+    ],
+    "install": [
+      {
+        "program": "npm",
+        "args": [
+          "ci"
+        ],
+        "cwd": "."
+      }
+    ],
+    "paths": [
+      "node_modules",
+      "apps/node/node_modules",
+      "apps/server/node_modules",
+      "apps/web/node_modules",
+      "packages/protocol/node_modules"
+    ],
+    "cache": "copy"
+  },
+  "services": [
+    {
+      "id": "pg",
+      "driver": "postgres",
+      "runtime": "postgres",
+      "profiles": [
+        "final"
+      ],
+      "options": {
+        "database": "hornhoof_test",
+        "locale": "C.UTF-8",
+        "extensions": []
+      }
+    }
+  ],
+  "prepare": [
+    {
+      "id": "runtime-build",
+      "profiles": [
+        "fast",
+        "final"
+      ],
+      "serviceIds": [],
+      "inputs": [
+        "apps/node/src/**",
+        "apps/node/tsconfig.json",
+        "packages/protocol/src/**",
+        "packages/protocol/tsconfig.json",
+        "tsconfig.base.json"
+      ],
+      "commands": [
+        {
+          "program": "npm",
+          "args": [
+            "run",
+            "build",
+            "-w",
+            "@hornhoof/protocol"
+          ],
+          "cwd": "."
+        },
+        {
+          "program": "npm",
+          "args": [
+            "run",
+            "build",
+            "-w",
+            "@hornhoof/node"
+          ],
+          "cwd": "."
+        }
+      ],
+      "artifacts": [
+        {
+          "path": "packages/protocol/dist",
+          "format": "directory"
+        },
+        {
+          "path": "apps/node/dist",
+          "format": "directory"
+        }
+      ]
+    },
+    {
+      "id": "pglite",
+      "profiles": [
+        "fast",
+        "final"
+      ],
+      "serviceIds": [],
+      "inputs": [
+        "apps/server/drizzle/**/*.sql",
+        "apps/server/drizzle/meta/_journal.json",
+        "apps/server/src/db/schema.ts",
+        "apps/server/src/db/client.ts",
+        "apps/server/test/prepare-environment.ts",
+        "apps/server/test/global-setup.ts"
+      ],
+      "commands": [
+        {
+          "program": "node",
+          "args": [
+            "--import",
+            "tsx",
+            "test/prepare-environment.ts",
+            "--output",
+            "../../.hornhoof/prepared/pglite"
+          ],
+          "cwd": "apps/server"
+        }
+      ],
+      "artifacts": [
+        {
+          "path": ".hornhoof/prepared/pglite",
+          "format": "hornhoof-pglite-v1",
+          "env": "HH_PGLITE_TEMPLATE"
+        }
+      ]
+    },
+    {
+      "id": "postgres",
+      "profiles": [
+        "final"
+      ],
+      "serviceIds": [
+        "pg"
+      ],
+      "inputs": [
+        "apps/server/drizzle/**/*.sql",
+        "apps/server/drizzle/meta/_journal.json",
+        "apps/server/src/db/schema.ts",
+        "apps/server/src/db/client.ts",
+        "apps/server/test/prepare-environment.ts"
+      ],
+      "commands": [
+        {
+          "program": "node",
+          "args": [
+            "--import",
+            "tsx",
+            "test/prepare-environment.ts",
+            "--postgres"
+          ],
+          "cwd": "apps/server"
+        }
+      ],
+      "artifacts": [
+        {
+          "service": "pg",
+          "path": "."
+        }
+      ]
+    }
+  ],
+  "reset": [
+    {
+      "suiteIds": [
+        "server"
+      ],
+      "scope": "file",
+      "command": null,
+      "inputs": [
+        "apps/server/test/helpers.ts",
+        "apps/server/test/global-setup.ts"
+      ]
+    },
+    {
+      "suiteIds": [
+        "server-postgres"
+      ],
+      "scope": "file",
+      "command": null,
+      "inputs": [
+        "apps/server/test/postgres/helpers.ts"
+      ]
+    }
+  ],
+  "suites": [
+    {
+      "id": "protocol",
+      "root": "packages/protocol",
+      "files": [
+        "packages/protocol/test/**/*.test.ts"
+      ],
+      "run": {
+        "program": "npx",
+        "args": [
+          "--no-install",
+          "vitest",
+          "run"
+        ],
+        "cwd": "packages/protocol"
+      },
+      "split": {
+        "kind": "argv-files"
+      },
+      "profiles": [
+        "fast",
+        "final"
+      ],
+      "finalChecks": [
+        {
+          "program": "npx",
+          "args": [
+            "--no-install",
+            "tsc",
+            "-p",
+            "packages/protocol/tsconfig.json",
+            "--noEmit"
+          ],
+          "cwd": "."
+        },
+        {
+          "program": "npm",
+          "args": [
+            "run",
+            "typecheck:tests"
+          ],
+          "cwd": "."
+        }
+      ]
+    },
+    {
+      "id": "node",
+      "root": "apps/node",
+      "files": [
+        "apps/node/test/**/*.test.ts"
+      ],
+      "run": {
+        "program": "npx",
+        "args": [
+          "--no-install",
+          "vitest",
+          "run"
+        ],
+        "cwd": "apps/node"
+      },
+      "split": {
+        "kind": "argv-files"
+      },
+      "profiles": [
+        "fast",
+        "final"
+      ],
+      "finalChecks": [
+        {
+          "program": "npx",
+          "args": [
+            "--no-install",
+            "tsc",
+            "-p",
+            "apps/node/tsconfig.json",
+            "--noEmit"
+          ],
+          "cwd": "."
+        }
+      ]
+    },
+    {
+      "id": "server",
+      "root": "apps/server",
+      "files": [
+        "apps/server/test/**/*.test.ts"
+      ],
+      "run": {
+        "program": "npx",
+        "args": [
+          "--no-install",
+          "vitest",
+          "run"
+        ],
+        "cwd": "apps/server"
+      },
+      "split": {
+        "kind": "argv-files"
+      },
+      "profiles": [
+        "fast",
+        "final"
+      ],
+      "finalChecks": [
+        {
+          "program": "npx",
+          "args": [
+            "--no-install",
+            "tsc",
+            "-p",
+            "apps/server/tsconfig.json",
+            "--noEmit"
+          ],
+          "cwd": "."
+        }
+      ]
+    },
+    {
+      "id": "web",
+      "root": "apps/web",
+      "files": [
+        "apps/web/test/**/*.test.ts",
+        "apps/web/test/**/*.test.tsx"
+      ],
+      "run": {
+        "program": "npx",
+        "args": [
+          "--no-install",
+          "vitest",
+          "run"
+        ],
+        "cwd": "apps/web"
+      },
+      "split": {
+        "kind": "argv-files"
+      },
+      "profiles": [
+        "fast",
+        "final"
+      ],
+      "finalChecks": [
+        {
+          "program": "npx",
+          "args": [
+            "--no-install",
+            "tsc",
+            "-p",
+            "apps/web/tsconfig.json",
+            "--noEmit"
+          ],
+          "cwd": "."
+        }
+      ]
+    },
+    {
+      "id": "release-scripts",
+      "root": "scripts",
+      "files": [
+        "scripts/test/*.test.mjs"
+      ],
+      "run": {
+        "program": "node",
+        "args": [
+          "--test"
+        ],
+        "cwd": "."
+      },
+      "split": {
+        "kind": "argv-files"
+      },
+      "profiles": [
+        "fast",
+        "final"
+      ],
+      "finalChecks": []
+    },
+    {
+      "id": "server-postgres",
+      "root": "apps/server",
+      "files": [
+        "apps/server/test/postgres/**/*.pg.spec.ts"
+      ],
+      "run": {
+        "program": "npx",
+        "args": [
+          "--no-install",
+          "vitest",
+          "run",
+          "-c",
+          "vitest.postgres.config.ts"
+        ],
+        "cwd": "apps/server"
+      },
+      "split": {
+        "kind": "argv-files"
+      },
+      "profiles": [
+        "final"
+      ],
+      "finalChecks": []
+    }
+  ],
+  "impact": {
+    "adapter": "typescript",
+    "fullPackageGlobs": [
+      {
+        "globs": [
+          "package.json",
+          "package-lock.json",
+          "tsconfig.base.json",
+          "eslint.config.js",
+          ".hornhoof/test-environment.json",
+          ".github/workflows/**"
+        ],
+        "suiteIds": [
+          "protocol",
+          "node",
+          "server",
+          "web",
+          "release-scripts",
+          "server-postgres"
+        ]
+      },
+      {
+        "globs": [
+          "apps/server/drizzle/**",
+          "apps/server/src/db/schema.ts",
+          "apps/server/test/global-setup.ts",
+          "apps/server/test/prepare-environment.ts",
+          "apps/server/vitest*.config.ts"
+        ],
+        "suiteIds": [
+          "server",
+          "server-postgres"
+        ]
+      },
+      {
+        "globs": [
+          "apps/node/Dockerfile",
+          "apps/node/service-runtime-smoke.mjs"
+        ],
+        "suiteIds": [
+          "node",
+          "server-postgres"
+        ]
+      }
+    ],
+    "migrationCheck": {
+      "status": "unsupported",
+      "reason": "No down migration command is defined; tracked in #309."
+    }
+  },
+  "mutation": {
+    "status": "supported",
+    "tool": "mutator",
+    "language": "typescript",
+    "sourcePaths": [
+      "apps/node/src/redact.ts"
+    ],
+    "fastTestPaths": [
+      "apps/node/test/redact.test.ts"
+    ],
+    "coverageCommands": [
+      {
+        "program": "npx",
+        "args": [
+          "--no-install",
+          "vitest",
+          "run",
+          "test/redact.test.ts",
+          "--coverage",
+          "--coverage.include=src/redact.ts",
+          "--coverage.reporter=lcov"
+        ],
+        "cwd": "apps/node"
+      }
+    ],
+    "coverageFiles": [
+      "apps/node/coverage/lcov.info"
+    ],
+    "command": {
+      "program": "mutator",
+      "args": [
+        "--root",
+        ".",
+        "--source-root",
+        "apps/node/src/redact.ts",
+        "--use-existing-coverage",
+        "--test-command",
+        "npx --no-install vitest run --root apps/node test/redact.test.ts"
+      ],
+      "cwd": "."
+    }
+  }
+}

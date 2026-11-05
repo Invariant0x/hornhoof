@@ -30,6 +30,7 @@ export type Config = {
   updateCheckMs: number;
   nodeDrainMs: number;
   nodeUpdateRetryMs: number;
+  nodeLeaderHoldMs: number;
   /* The folder the app shares with the updater service. */
   controlDir: string;
   /* Role and skill templates, loaded once at start. */
@@ -75,6 +76,9 @@ const Env = z.object({
   NODE_DRAIN_MS: milliseconds('NODE_DRAIN_MS', 1, '5400000').default(5_400_000),
   /* Long enough for 90% of the turns that waited for the node to run and end before it holds them again. */
   NODE_UPDATE_RETRY_MS: milliseconds('NODE_UPDATE_RETRY_MS', 1, '900000').default(900_000),
+  /* How long a node that waits for an update keeps new turns of the orchestrator and the heads off it. Replacing a free
+     node takes under a minute, so past this the node has work that runs on. */
+  NODE_LEADER_HOLD_MS: milliseconds('NODE_LEADER_HOLD_MS', 1, '180000').default(180_000),
   REGISTRY_URL: webAddress('REGISTRY_URL must be an http:// or https:// address.'),
   RELAY_URL: webAddress('RELAY_URL must be an http:// or https:// address, like https://hornhoof.org.'),
   TUNNEL_HOST: z.preprocess(unset, z.string().regex(/^[A-Za-z0-9.-]{1,253}$/, 'TUNNEL_HOST must be the host name of the tunnel container, like tunnel.').optional()),
@@ -123,6 +127,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     updateCheckMs: set.UPDATE_CHECK_MS ?? 1800000,
     nodeDrainMs: set.NODE_DRAIN_MS,
     nodeUpdateRetryMs: set.NODE_UPDATE_RETRY_MS,
+    nodeLeaderHoldMs: set.NODE_LEADER_HOLD_MS,
     controlDir: env.HORNHOOF_CONTROL_DIR || '/control',
     templatesDir: env.TEMPLATES_DIR || DEFAULT_TEMPLATES,
     relayUrl: (set.RELAY_URL ?? 'https://hornhoof.org').replace(/\/+$/, ''),

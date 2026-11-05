@@ -27,10 +27,13 @@ type FakeTerminal = {
   wrapped: Set<number>;
   markers: Marker[];
   _core: {
+    buffers: { active: { hasScrollback: boolean; ybase: number; ydisp: number }; normal: { hasScrollback: boolean; ybase: number; ydisp: number } };
+    viewport: { getLinesScrolled(event: WheelEvent): number };
     _selectionService: { enabled: boolean; shouldForceSelection(e: MouseEvent): boolean; enable(): void; disable(): void };
     coreMouseService: { _protocols: Record<string, { events: number }>; fireProtocol(events: number): void };
   };
   type(data: string): void;
+  wheel(deltaY: number): boolean;
   pressKey(init: KeyboardEventInit): KeyboardEvent;
   selectText(text: string): void;
   clearSelection(): void;
@@ -59,8 +62,11 @@ vi.mock('@xterm/xterm', () => ({
     private onSize: ((s: { cols: number; rows: number }) => void)[] = [];
     private onSelect: (() => void)[] = [];
     private keyHandler: ((e: KeyboardEvent) => boolean) | null = null;
+    private wheelHandler: ((e: WheelEvent) => boolean) | null = null;
     private onProto: ((events: number) => void)[] = [];
     _core = {
+      buffers: { active: { hasScrollback: true, ybase: 200, ydisp: 200 }, normal: { hasScrollback: true, ybase: 200, ydisp: 200 } },
+      viewport: { getLinesScrolled: (event: WheelEvent) => event.deltaY },
       _selectionService: {
         enabled: true,
         shouldForceSelection: (e: MouseEvent) => e.shiftKey,
@@ -120,6 +126,16 @@ vi.mock('@xterm/xterm', () => ({
     attachCustomKeyEventHandler(fn: (e: KeyboardEvent) => boolean) {
       this.keyHandler = fn;
     }
+    attachCustomWheelEventHandler(fn: (e: WheelEvent) => boolean) {
+      this.wheelHandler = fn;
+    }
+    wheel(deltaY: number) {
+      return this.wheelHandler?.(new WheelEvent('wheel', { deltaY })) ?? true;
+    }
+    scrollLines(amount: number) {
+      this.buffer.active.viewportY = Math.max(0, Math.min(this.buffer.active.baseY, this.buffer.active.viewportY + amount));
+    }
+    refresh() {}
     pressKey(init: KeyboardEventInit) {
       const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
       if (this.keyHandler && !this.keyHandler(event)) return event;
@@ -334,6 +350,16 @@ describe("an agent's live terminal in its window", () => {
     expect(ws.sent).toEqual([]);
   });
 
+  it.each([false, true])('scrolls history locally without sending wheel input when write=%s', async write => {
+    open();
+    const ws = await socket();
+    ws.opened(write);
+    const term = terms[0]!;
+    expect(term.wheel(-3)).toBe(false);
+    expect(term.buffer.active.viewportY).toBe(197);
+    expect(ws.sent).toEqual([]);
+  });
+
   it('takes the focus for the person who types into it', async () => {
     open(true, { canType: true });
     await socket();
@@ -396,6 +422,52 @@ describe("an agent's live terminal in its window", () => {
     FakeSocket.all[1]!.opened();
     FakeSocket.all[1]!.screen('new screen');
     expect(terms[0]!.written).toEqual(['new screen']);
+  });
+
+  it.each([
+    ['busy', /went into the turn that was running/],
+    ['unknown_words', /Hornhoof could not tell who wrote/],
+  ] as const)('says at once in the window why a turn could not open: %s', async (turnRefused, says) => {
+    open(true, { turnRefused });
+    const why = await screen.findByText(says);
+    expect(why).toHaveClass('t-why');
+    expect(why).toBeVisible();
+  });
+
+  it.each([
+    [{ ready: false, reason: 'machine_offline' as const }, /offline|не в сети/i],
+    [{ browserError: 'no chrome' }, /no chrome/],
+    [{ limitUntil: '2026-11-05T15:00:00Z' }, /The plan is at its limit/],
+    [{ budgetUntil: '2026-11-05T15:00:00Z' }, /The plan used the share set for tasks/],
+    [{ limitUntil: '2026-11-05T15:00:00Z', budgetUntil: '2026-11-05T15:00:00Z' }, /The plan is at its limit/],
+    [{ machineDrain: { state: 'waiting', until: '2026-11-05T15:00:00Z', turnsLeft: 1, partsLeft: 0 } as const }, /finishing its work before an update/],
+  ])('says what keeps the agent from answering: %j', async (state, says) => {
+    open(true, state);
+    expect(await screen.findByText(says)).toHaveClass('t-why');
+  });
+
+  it('leaves the share of the plan out while the plan is at its limit, and a drain that was put off', async () => {
+    open(true, { limitUntil: '2026-11-05T15:00:00Z', budgetUntil: '2026-11-05T15:00:00Z', machineDrain: { state: 'postponed' } as unknown as OrchestratorState['machineDrain'] });
+    await screen.findByText(/The plan is at its limit/);
+    expect(screen.queryByText(/The plan used the share set for tasks/)).toBeNull();
+    expect(screen.queryByText(/finishing its work before an update/)).toBeNull();
+  });
+
+  it('says nothing of a refused turn while none was refused', async () => {
+    open(true, { turnRefused: null });
+    await socket();
+    await waitFor(() => expect(screen.queryByText(/went into the turn that was running|Hornhoof could not tell who wrote/)).toBeNull());
+  });
+
+  it('keeps the refused turn in the log of what happened', async () => {
+    const refused: EventView = { seq: 2, kind: 'turn_refused', data: { reason: 'unknown_words' }, jobId: null, person: null, at: '2026-10-30T10:00:01Z' };
+    mockApi({
+      [`GET ${EVENTS}?after=0`]: [200, { events: [...LOG, refused], state: { ...READY, terminal: false } }],
+      [`GET ${EVENTS}?after=2`]: [200, { events: [], state: { ...READY, terminal: false } }],
+      'POST /api/agents/orchestrator/start': [200, { started: false }],
+    });
+    view();
+    expect(await screen.findByText(/Hornhoof could not tell who wrote/)).toBeInTheDocument();
   });
 
   it('shows the bottom of the screen, where the line to type in is, after a card below the terminal comes or goes', async () => {
@@ -578,16 +650,16 @@ describe("an agent's live terminal in its window", () => {
     ws.opened();
     const term = terms[0]!;
 
-    /* Even when tmux or the program turns mouse tracking on, plain mouse drags select text while wheel events still go through. */
+    /* Even when tmux or the program turns mouse tracking on, plain mouse drags select text while wheel stays local. */
     term._core.coreMouseService.fireProtocol(23);
     expect(term._core._selectionService.enabled).toBe(true);
     expect(term._core._selectionService.shouldForceSelection(new MouseEvent('mousedown'))).toBe(true);
-    expect(term._core.coreMouseService._protocols.DRAG!.events).toBe(16);
+    expect(term._core.coreMouseService._protocols.DRAG!.events).toBe(0);
     term.type('\x1b[<0;10;5M');
     term.type('\x1b[<32;12;5M');
     term.type('\x1b[<0;12;5m');
     term.type('\x1b[<64;10;5M');
-    expect(ws.sent).toEqual([{ type: 'input', data: '\x1b[<64;10;5M' }]);
+    expect(ws.sent).toEqual([]);
     ws.sent.length = 0;
 
     /* Right-click opens Copy, clicking it copies the selection and closes the menu, and Escape on an open menu neither stops the agent nor sends Escape. */

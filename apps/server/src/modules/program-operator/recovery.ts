@@ -1,13 +1,15 @@
-import { and, eq, inArray, isNotNull, type SQL } from 'drizzle-orm';
+import { and, eq, exists, gte, inArray, isNotNull, isNull, lte, or, sql, type SQL } from 'drizzle-orm';
 import type { OperatorEvidence } from '@hornhoof/protocol/program-operator';
 import type { Ctx } from '../../app.js';
-import { agents, jobs, programDeliveries, programOperatorCases } from '../../db/schema.js';
-import { insertTurn } from '../conversation/queue.js';
+import { agents, jobs, programDeliveries, programOperatorCases, tasks } from '../../db/schema.js';
+import { conversationOf, GONE_ALONG, insertTurn, NoSubscription } from '../conversation/queue.js';
 import { repeatedTurn } from '../conversation/turn-words.js';
 import { logTurnFact } from '../tasks/turn-log.js';
+import { repeatWake, type TaskWake } from '../tasks/wake-state.js';
 import { operatorTransaction } from './transactions.js';
 
 type Case = typeof programOperatorCases.$inferSelect;
+type Job = typeof jobs.$inferSelect;
 
 export async function operatorRecoveryHolds(ctx: Ctx, agentId: string): Promise<boolean> {
   return recoveryHolds(ctx, eq(programOperatorCases.agentId, agentId));
@@ -20,6 +22,57 @@ export async function operatorHandledFailure(ctx: Ctx, jobId: string): Promise<b
 async function recoveryHolds(ctx: Ctx, scope: SQL): Promise<boolean> {
   const [held] = await ctx.db.select({ id: programOperatorCases.id }).from(programOperatorCases).where(and(scope, eq(programOperatorCases.recoveryHold, true))).limit(1);
   return Boolean(held);
+}
+
+/* The case of a failed turn whose words the program never recorded, with what they went out by. A stopped turn says nothing
+   of words, and one recorded after all has nothing left to deliver. */
+export async function unheardWords(ctx: Ctx, job: Pick<Job, 'id' | 'error'>): Promise<{ incident: Case; delivery: typeof programDeliveries.$inferSelect } | null> {
+  if (job.error === 'cancelled' || job.error === 'stale') return null;
+  const rows = await ctx.db.select({ incident: programOperatorCases, delivery: programDeliveries }).from(programOperatorCases)
+    .innerJoin(programDeliveries, eq(programDeliveries.jobId, programOperatorCases.jobId))
+    .where(and(eq(programOperatorCases.jobId, job.id), eq(programDeliveries.kind, 'assignment'), isNull(programDeliveries.receiptAt)));
+  return rows.find(({ incident }) => incident.reason === 'assignment_unrecorded' || incident.evidence.some(fact => fact.reason === 'assignment_unrecorded')) ?? null;
+}
+
+/* The turn that says the unheard words again, for a late receipt to find. */
+export async function keepUnheardWords(ctx: Ctx, incident: Case, continuationJobId: string | null): Promise<void> {
+  await ctx.db.update(programOperatorCases).set({ continuationJobId }).where(eq(programOperatorCases.id, incident.id));
+}
+
+/* A task's wake as it stands now, for going out set the task to work and the wake it went with is out of date. Null when the
+   task no longer waits for it. */
+async function wakeNow(ctx: Ctx, job: Job): Promise<{ taskWake?: TaskWake } | null> {
+  if (!job.taskId) return {};
+  const [found] = await ctx.db.select({ task: tasks, agent: agents }).from(tasks).innerJoin(agents, eq(agents.id, job.agentId!)).where(eq(tasks.id, job.taskId));
+  const taskWake = found ? await repeatWake(ctx.db, { job, ...found }, 'continue') : null;
+  return taskWake ? { taskWake } : null;
+}
+
+/* The one turn that says a turn's words again, in a turn of their own and not in one that waits on the task: that one may be
+   out of date by its time, and has words of its own to go on with when a late receipt ends this one. None when the task no
+   longer waits for them or the agent has no plan. The caller holds the agent. */
+export async function sayAgain(ctx: Ctx, job: Job, at: Date, prompt: string, data: object = {}): Promise<string | null> {
+  const [existing] = await ctx.db.select({ id: jobs.id }).from(jobs).where(eq(jobs.continueOf, job.id)).limit(1);
+  if (existing) return existing.id;
+  const wake = await wakeNow(ctx, job);
+  if (!wake) return null;
+  const repeated = await repeatedTurn(ctx, job);
+  repeated.repeated.data = { ...(repeated.repeated.data as object), ...data, ...wake };
+  try {
+    return await insertTurn(ctx, { companyId: job.companyId, agentId: job.agentId!, prompt, taskId: job.taskId ?? undefined, ...repeated, continueOf: job.id, notBefore: at });
+  } catch (err) {
+    if (err instanceof NoSubscription) return null;
+    throw err;
+  }
+}
+
+const wentAlong = (ctx: Ctx, job: Job) => job.agentId && job.startedAt && job.finishedAt
+  ? ctx.db.select().from(jobs).where(and(conversationOf(job.agentId), eq(jobs.status, 'done'), eq(jobs.result, GONE_ALONG), gte(jobs.startedAt, job.startedAt), lte(jobs.startedAt, job.finishedAt)))
+  : Promise.resolve([]);
+
+/* The tasks that went out inside an unheard turn were not heard with it. Each is told again on its own. */
+export async function tellAgainWentAlong(ctx: Ctx, job: Job, at: Date, say: (words: string) => string): Promise<void> {
+  for (const gone of await wentAlong(ctx, job)) await sayAgain(ctx, gone, at, say(gone.prompt));
 }
 
 /* The caller holds the agent row. The old job stays failed; one new owner continuation takes its pending words. */
@@ -52,18 +105,14 @@ async function continueRecovery(ctx: Ctx, row: Case): Promise<void> {
   await finishRecovery(ctx, row, continuationJobId, 'The owner passed the screen; the original words continue once.');
 }
 
-function recoverableJob(job: typeof jobs.$inferSelect): boolean {
+function recoverableJob(job: Job): boolean {
   return job.status === 'failed' && job.error !== 'cancelled';
 }
 
-async function recoveryContinuation(ctx: Ctx, row: Case, original: typeof jobs.$inferSelect, delivery: typeof programDeliveries.$inferSelect): Promise<string> {
-  const [previous] = await ctx.db.select({ id: jobs.id }).from(jobs).where(eq(jobs.continueOf, original.id)).limit(1);
-  let continuationJobId = previous?.id ?? null;
-  if (!continuationJobId) {
-    const repeated = await repeatedTurn(ctx, original);
-    repeated.repeated.data = { ...(repeated.repeated.data as object), operatorDelivery: { id: delivery.id, ordinal: delivery.ordinal }, operatorRecovery: row.id };
-    continuationJobId = await insertTurn(ctx, { companyId: row.companyId, agentId: row.agentId, prompt: original.requestedPrompt ?? original.prompt, taskId: original.taskId ?? undefined, continueOf: original.id, notBefore: new Date(), ...repeated });
-  }
+async function recoveryContinuation(ctx: Ctx, row: Case, original: Job, delivery: typeof programDeliveries.$inferSelect): Promise<string | null> {
+  const at = new Date();
+  const continuationJobId = await sayAgain(ctx, original, at, original.requestedPrompt ?? original.prompt, { operatorDelivery: { id: delivery.id, ordinal: delivery.ordinal }, operatorRecovery: row.id });
+  await tellAgainWentAlong(ctx, original, at, words => words);
   return continuationJobId;
 }
 
@@ -73,14 +122,36 @@ async function finishRecovery(ctx: Ctx, row: Case, continuationJobId: string | n
   await logTurnFact(ctx, job!, text, { notification: { source: 'program_operator', tasks: [] }, operatorRecovery: row.id, continuation: continuationJobId });
 }
 
+/* The words a case is about were recorded: those of its own delivery, or, for a case first opened for something else, those
+   of its turn. */
+const wordsRecorded = (ctx: Ctx) => exists(ctx.db.select({ id: programDeliveries.id }).from(programDeliveries).where(and(isNotNull(programDeliveries.receiptAt),
+  or(eq(programDeliveries.id, programOperatorCases.deliveryId), and(eq(programDeliveries.jobId, programOperatorCases.jobId), eq(programDeliveries.kind, 'assignment'))))));
+
 /* A late receipt always wins over an unsent child, including after readiness already resolved its case. */
 export async function reconcileRecoveryReceipts(ctx: Ctx, agentId: string): Promise<void> {
-  const rows = await ctx.db.select({ incident: programOperatorCases, delivery: programDeliveries }).from(programOperatorCases).innerJoin(programDeliveries, eq(programDeliveries.id, programOperatorCases.deliveryId)).where(eq(programOperatorCases.agentId, agentId));
-  for (const { incident, delivery } of rows) {
-    if (!delivery.receiptAt) continue;
-    if (incident.continuationJobId) await ctx.db.update(jobs).set({ status: 'failed', error: 'cancelled', result: 'The program already recorded these words.', finishedAt: new Date() }).where(and(eq(jobs.id, incident.continuationJobId), eq(jobs.status, 'queued')));
+  const recorded = await ctx.db.select().from(programOperatorCases).where(and(eq(programOperatorCases.agentId, agentId), wordsRecorded(ctx)));
+  const [waiting] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'queued'), isNotNull(jobs.continueOf))).limit(1);
+  for (const incident of recorded) {
+    if (waiting) await cancelRepeats(ctx, incident);
     if (incident.recoveryHold) await finishRecovery(ctx, incident, incident.continuationJobId, 'The program recorded the original words; no duplicate was sent.');
   }
+}
+
+/* What the program recorded late includes the tasks that went out inside that turn, whatever became of the turn's own repeat.
+   Only an unheard turn repeats a task that went along, so a turn that merely goes on from recorded words stays. */
+async function cancelRepeats(ctx: Ctx, incident: Case): Promise<void> {
+  const [carrier] = await ctx.db.select().from(jobs).where(eq(jobs.id, incident.jobId));
+  const along = carrier ? await wentAlong(ctx, carrier) : [];
+  const repeats = along.length ? await ctx.db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, incident.agentId), inArray(jobs.continueOf, along.map(gone => gone.id)))) : [];
+  const first = [...(incident.continuationJobId ? [incident.continuationJobId] : []), ...repeats.map(repeat => repeat.id)];
+  if (first.length) await cancelContinuations(ctx, incident.agentId, first);
+}
+
+/* The words may be on a later retry by the time the first try's receipt comes, and retries do not stop: whatever still waits
+   to repeat them ends, all in one walk. It meets each turn once, so a chain that loops ends too. */
+async function cancelContinuations(ctx: Ctx, agentId: string, first: string[]): Promise<void> {
+  const chain = sql`with recursive repeats(id) as (select id from jobs where ${inArray(jobs.id, first)} union select j.id from jobs j join repeats r on j.continue_of = r.id where j.agent_id = ${agentId}) select id from repeats`;
+  await ctx.db.update(jobs).set({ status: 'failed', error: 'cancelled', result: 'The program already recorded these words.', finishedAt: new Date() }).where(and(eq(jobs.status, 'queued'), sql`${jobs.id} in (${chain})`));
 }
 
 export async function adoptOperatorOwnerTurn(ctx: Ctx, agentId: string, jobId: string, nodeId: string): Promise<void> {

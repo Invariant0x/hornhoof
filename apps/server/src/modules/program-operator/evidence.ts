@@ -3,9 +3,11 @@ import { and, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { agentEvents, agents, jobs, nodes, programDeliveries, programInstances, subscriptions } from '../../db/schema.js';
+import { loggable } from '../../errors.js';
 import { hasCurrentKey } from '../nodes/nodes.js';
 import type { NodeIdentity } from '../nodes/hub.js';
 import { syncOperatorCases, updateOperatorCases } from './cases.js';
+import { pictureSecrets, renderPicture } from './pictures.js';
 import { operatorTransaction } from './transactions.js';
 import { acceptOperatorRecovery, reconcileRecoveryReceipts } from './recovery.js';
 import { recordOperatorFallback } from './requeue.js';
@@ -21,15 +23,31 @@ export async function acceptOperatorEvidence(ctx: Ctx, node: NodeIdentity, input
   if (!parsed.success || !('evidenceId' in parsed.data) || node.kind !== 'node' || !await authenticatedSource(ctx, node)) return false;
   const frame = parsed.data;
   if (!frame.jobId) return false;
-  const { accepted, settled } = await commitEvidence(ctx, node.nodeId, frame, now);
-  if (accepted) await acknowledgeEvidence(ctx, node, frame, settled, now);
+  const { fact, png } = await drawnCheck(ctx, node.nodeId, frame);
+  const { accepted, settled } = await commitEvidence(ctx, node.nodeId, fact, png, now);
+  if (accepted) await acknowledgeEvidence(ctx, node, fact, settled, now);
   return accepted;
 }
 
-async function commitEvidence(ctx: Ctx, nodeId: string, frame: OperatorEvidence, now: Date) {
+/* A screen in a signal becomes the picture any program_screen gives, drawn outside the transaction. Its cells stop here, as
+   they hold what the picture masks. A screen that cannot be drawn costs the picture, never the signal. */
+async function drawnCheck(ctx: Ctx, nodeId: string, frame: OperatorEvidence): Promise<{ fact: OperatorEvidence; png: Buffer | null }> {
+  if (frame.type !== 'program.operator_needed' || !frame.check?.screen) return { fact: frame, png: null };
+  const fact = { ...frame, check: { ...frame.check, screen: null } };
+  const [job] = await ctx.db.select({ companyId: jobs.companyId }).from(jobs).where(and(eq(jobs.id, frame.jobId!), eq(jobs.agentId, frame.agentKey), eq(jobs.nodeId, nodeId)));
+  if (!job) return { fact, png: null };
+  try {
+    return { fact, png: renderPicture(frame.check.screen, await pictureSecrets(ctx, job.companyId)).rendered.png };
+  } catch (error) {
+    ctx.log.error({ error: loggable(error) }, 'Drawing the screen a node saw failed.');
+    return { fact, png: null };
+  }
+}
+
+async function commitEvidence(ctx: Ctx, nodeId: string, frame: OperatorEvidence, png: Buffer | null, now: Date) {
   const settled: SettledWords[] = [];
   const accepted = await operatorTransaction(ctx, async (tx, inside) => {
-    const recorded = await recordEvidence(tx, inside, nodeId, frame, now);
+    const recorded = await recordEvidence(tx, inside, nodeId, frame, png, now);
     if (!recorded) return false;
     const fallback = await recordOperatorFallback(tx, inside, frame, now);
     if (fallback) settled.push(fallback);
@@ -49,7 +67,7 @@ async function authenticatedSource(ctx: Ctx, node: Extract<NodeIdentity, { kind:
   return ctx.hub.hasProgramOperator(node) && await hasCurrentKey(ctx, node);
 }
 
-async function recordEvidence(tx: Tx, inside: Ctx, nodeId: string, frame: OperatorEvidence, now: Date): Promise<boolean> {
+async function recordEvidence(tx: Tx, inside: Ctx, nodeId: string, frame: OperatorEvidence, png: Buffer | null, now: Date): Promise<boolean> {
   if (!frame.jobId) return false;
   const [job] = await tx.select({ companyId: jobs.companyId, agentId: agents.id }).from(jobs)
     .innerJoin(agents, eq(agents.id, jobs.agentId)).innerJoin(subscriptions, eq(subscriptions.id, jobs.subscriptionId)).innerJoin(nodes, eq(nodes.id, jobs.nodeId))
@@ -65,7 +83,7 @@ async function recordEvidence(tx: Tx, inside: Ctx, nodeId: string, frame: Operat
   if (frame.type === 'program.delivery') await applyDeliveryFact(tx, frame, now);
   await acceptOperatorRecovery(inside, frame);
   await reconcileRecoveryReceipts(inside, frame.agentKey);
-  await updateOperatorCases(inside, frame, now);
+  await updateOperatorCases(inside, frame, now, png);
   return true;
 }
 

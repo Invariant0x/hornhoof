@@ -8,6 +8,9 @@ import { migrate } from 'drizzle-orm/pglite/migrator';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { MIGRATIONS } from '../src/db/client.js';
 
+/* Columns added to tasks after the schema this test upgrades from, empty on every task kept from before them. */
+const ADDED_TO_TASKS = { work_kind: null, risk_class: null };
+
 async function previousMigrations() {
   const folder = await mkdtemp(join(tmpdir(), 'wait-notice-migration-'));
   onTestFinished(() => rm(folder, { recursive: true, force: true }));
@@ -44,11 +47,11 @@ describe('durable wait notices migration', () => {
     await db.execute(sql`insert into agents(company_id,kind,name,model) select id,'worker','Bruno','' from companies`);
     await db.execute(sql`insert into tasks(company_id,number,title,external_wait) select id,1,'Acceptance','{"reason":"Machine","since":"2026-11-04T16:00:00Z","until":"2026-11-04T17:00:00Z"}'::jsonb from companies`);
     await db.execute(sql`insert into pending_wakes(company_id,agent_id,task_id,why) select a.company_id,a.id,t.id,'comment' from agents a join tasks t on t.company_id=a.company_id`);
-    const beforeTasks = (await db.execute(sql`select to_jsonb(t) as data from tasks t`)).rows;
+    const beforeTasks = (await db.execute<{ data: Record<string, unknown> }>(sql`select to_jsonb(t) as data from tasks t`)).rows;
     const beforeWakes = (await db.execute(sql`select to_jsonb(w) as data from pending_wakes w`)).rows;
     await migrate(db, { migrationsFolder: MIGRATIONS });
     await migrate(db, { migrationsFolder: MIGRATIONS });
-    expect((await db.execute(sql`select to_jsonb(t) as data from tasks t`)).rows).toEqual(beforeTasks);
+    expect((await db.execute(sql`select to_jsonb(t) as data from tasks t`)).rows).toEqual(beforeTasks.map(({ data }) => ({ data: { ...data, ...ADDED_TO_TASKS } })));
     expect((await db.execute(sql`select to_jsonb(w) as data from pending_wakes w`)).rows).toEqual(beforeWakes);
     expect((await db.execute(sql`select table_name from information_schema.tables where table_name = 'wait_notices'`)).rows).toHaveLength(1);
   });
