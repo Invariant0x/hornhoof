@@ -1,4 +1,5 @@
-import { parse, type A_Indirection, type ColumnRef, type FuncCall, type Node } from 'libpg-query';
+import type { A_Indirection, ColumnRef, FuncCall, Node } from 'libpg-query';
+import { PARSER_DEADLINE_MS, startParserWorker, ThrowawayParser } from './sql-parser.js';
 
 export const ONLY_STATEMENTS = 'This tool runs only SELECT, INSERT, UPDATE, DELETE and WITH statements; Hornhoof begins and commits the transaction itself.';
 
@@ -48,9 +49,9 @@ function refusedCall({ funcname }: FuncCall): string | undefined {
   return inFence ? parts.join('.') : ifRefused(parts.at(-1));
 }
 
-/* Postgres resolves `a.f` as the call f(a) when a has no such column, so the last name counts as a call. A lone name
-   never does: it can only be a column. */
-const refusedColumn = ({ fields = [] }: ColumnRef): string | undefined => (fields.length >= 2 ? ifRefused(namesIn(fields).at(-1)) : undefined);
+/* Postgres resolves `a.f` as the call f(a) when a has no such column, so a name in the last field counts as a call. A star
+   there means every column of a, which calls nothing, and a lone name can only be a column. */
+const refusedColumn = ({ fields = [] }: ColumnRef): string | undefined => (fields.length >= 2 ? ifRefused(namesIn(fields.slice(-1)).at(0)) : undefined);
 
 /* `(x).f` is the call f(x) when x has no such field, wherever f stands in the chain. */
 const refusedIndirection = ({ indirection }: A_Indirection): string | undefined => namesIn(indirection).find(isRefusedName);
@@ -74,17 +75,17 @@ function refusedNameIn(key: string, node: unknown): string | undefined {
 const STATEMENT_KIND = /^[A-Z]\w*Stmt$/;
 const isRefusedStatement = (key: string): boolean => key === 'intoClause' || (STATEMENT_KIND.test(key) && !ROW_STATEMENTS.has(key));
 
+const entriesInside = (value: unknown): [string, unknown][] => (typeof value === 'object' && value !== null ? Object.entries(value) : []);
+
 /* Every key of the tree with its value, whatever kind of node holds it, so that a kind nobody listed cannot hide a call. A
-   list of what waits, not recursion, as the parser can hand back a tree thousands of levels deep. */
+   list of what waits, not recursion, as the parser can hand back a tree thousands of levels deep. What waits goes in last
+   to first, so that it comes out in the order of the tree, and the first statement's fault is the one the text hears of. */
 function* entriesOf(tree: unknown): Generator<[string, unknown]> {
-  const waiting = [tree];
+  const waiting = entriesInside(tree).reverse();
   while (waiting.length > 0) {
-    const value = waiting.pop();
-    if (typeof value !== 'object' || value === null) continue;
-    for (const entry of Object.entries(value)) {
-      yield entry;
-      waiting.push(entry[1]);
-    }
+    const entry = waiting.pop()!;
+    yield entry;
+    for (const inner of entriesInside(entry[1]).reverse()) waiting.push(inner);
   }
 }
 
@@ -96,13 +97,17 @@ function refuseWhatTheTreeHolds(tree: unknown): void {
   }
 }
 
-/* Whatever stops the parser stops the text: it reports a deep tree as a plain stack error, not as a parse error of its own. */
+const parser = new ThrowawayParser(startParserWorker, PARSER_DEADLINE_MS);
+const NOTHING_TO_CHECK = 'The text is empty.';
+const PARSER_GAVE_OUT = 'The parser gave up on this text, so it cannot be checked. Write it shorter or less deeply nested.';
+
+/* Whatever stops the parser stops the text. The library takes an empty text for a failure of its own, and a parser is not
+   worth replacing over that. */
 async function parsed(text: string): Promise<unknown> {
-  try {
-    return await parse(text);
-  } catch (err) {
-    throw new SqlRefused('syntax', err instanceof Error ? err.message : String(err));
-  }
+  if (text.trim() === '') throw new SqlRefused('syntax', NOTHING_TO_CHECK);
+  const answer = await parser.parse(text);
+  if ('tree' in answer) return JSON.parse(answer.tree);
+  throw new SqlRefused('syntax', 'refused' in answer ? answer.refused : PARSER_GAVE_OUT);
 }
 
 /* The parser reads its own copy of the text. A NUL ends that copy, and half a surrogate pair is counted short when it is
