@@ -493,6 +493,27 @@ describe('a test run', () => {
     expect(await c.wokeWith(c.bruno.id)).toMatch(/Test run 1 failed[\s\S]*did not end within 5 min/);
   });
 
+  it('keeps a machine-queued part out of execution timeout until tests.started', async () => {
+    const c = await company();
+    const ivan = await c.machine(c.ceo, 'queued-machine');
+    const { call } = await c.turn(c.bruno);
+    await call('run_tests', { command: 'make test', minutes: 1 });
+    const run = await nextOf(ivan.node, 'tests.run');
+    ivan.node.send({ type: 'tests.waiting', partId: run.partId, position: 2 });
+    await until(async () => (await c.db.select().from(testParts).where(eq(testParts.id, run.partId)))[0]?.startedAt === null);
+    await checkTestTimes(c.app.ctx, new Date(Date.now() + 15 * 60_000));
+    const [waiting] = await c.db.select().from(testParts).where(eq(testParts.id, run.partId));
+    expect(waiting).toMatchObject({ status: 'running', startedAt: null });
+    expect(waiting!.tail).toContain('2');
+    const visible = JSON.parse((await call('test_run', { run: 1 })).text) as { parts: { queuePosition?: number }[] };
+    expect(visible.parts[0]!.queuePosition).toBe(2);
+    ivan.node.send({ type: 'tests.started', partId: run.partId });
+    await until(async () => (await c.db.select().from(testParts).where(eq(testParts.id, run.partId)))[0]?.startedAt !== null);
+    expect((await c.db.select().from(testParts).where(eq(testParts.id, run.partId)))[0]!.tail).toBe('');
+    await checkTestTimes(c.app.ctx, new Date(Date.now() + 15 * 60_000));
+    expect(await nextOf(ivan.node, 'tests.cancel')).toEqual({ type: 'tests.cancel', partId: run.partId });
+  });
+
   it('stops on stop_tests: its parts end, their nodes stop them, and nobody is woken', async () => {
     const c = await company();
     const ivan = await c.machine(c.ceo, 'ivan-mac');

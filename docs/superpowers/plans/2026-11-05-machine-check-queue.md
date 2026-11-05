@@ -12,22 +12,22 @@
 
 - [x] Write acceptance tests: capacity overflow waits in FIFO order with visible positions; failure releases and cancellation removes the waiter.
 - [x] Observe assertion failures against direct execution, then implement admission.
-- [ ] Measure the CPU budget and load before choosing capacity; pin the decision in pure function tests.
-- [ ] Check dynamic capacity, pre-aborted input, callback failures and nested commands.
-- [ ] Commit the queue API and its tests.
+- [x] Measure the CPU budget and load before choosing capacity; pin the decision in pure function tests.
+- [x] Check dynamic capacity, pre-aborted input, callback failures and nested commands.
+- [x] Commit the queue API and its tests.
 
 ## Task 2: Machine coordination and command entry
 
-- [ ] Confirm required cross-node wiring with the head; isolated volumes cannot share an in-memory queue.
-- [ ] Write and observe failing tests for common admission across nodes and command output/exit/cancellation.
-- [ ] Integrate the shared coordinator, withCheckSlot and a generic hh-check command without editing neighbour-owned files.
-- [ ] Check reconnect, stale requests, nested commands and ownership boundaries.
+- [x] Confirm required cross-node wiring with the head; isolated volumes cannot share an in-memory queue.
+- [x] Write and observe failing tests for common admission across nodes and command output/exit/cancellation.
+- [x] Integrate the shared coordinator, withCheckSlot and a generic hh-check command without editing neighbour-owned files.
+- [x] Check reconnect, stale requests, nested commands and ownership boundaries.
 - [ ] Commit and send the contract to the tests.ts owner.
 
 ## Task 3: Waiting evidence and proof
 
-- [ ] Write failing watchdog and operator tests for queue waiting, completed waits and lost heartbeats.
-- [ ] Connect typed authenticated queue observations and verify these tests.
+- [x] Write failing watchdog and operator tests for queue waiting, completed waits and lost heartbeats.
+- [x] Connect typed authenticated queue observations and verify these tests.
 - [ ] Run migrations.test.ts and the three prior timeout cases ten times under at least the prior concurrent load; retain loadavg and cleanup evidence.
 - [ ] Run targeted dependency tests, affected tsc, typecheck:tests, scoped eslint, crapper and dryer.
 - [ ] Review the final diff independently, commit, push task-356, submit evidence to the head.
@@ -56,3 +56,16 @@
 - #354 does not own slot integration. Head was asked to name its owner and settle the conflicting boundaries: architect #280 requests checkout/cache/services inside the slot, #354 proposes command-only. Proposed accounting: acquire before tests.started, then start the execution deadline.
 - The contended CPU0 probe reached its 300 s outer bound, then cleaned all 32 synthetic processes (before-cleanup.json). The surviving Vitest child finished after cleanup: one original wait-target timeout, two migration cases passed. This is not a successful three-timeout reproduction. Four-way probe on CPUs1-9 separately reproduced original migration timeout failures. No test thresholds changed.
 - Started a bounded after experiment using the tested FIFO class, CPU0 background 32 processes, target checks on the same CPUs1-9 as the concurrency probe. Ten full repetitions plus queued competing commands requested, 1400 s overall budget and 1500 s synthetic worker lifetimes. Its result proves the queue core only, not unimplemented cross-node production integration. Logs /tmp/task-356-evidence/after-*; script apps/node/.check-queue-probe/after.mjs is temporary and will be removed.
+
+## Implementation decisions and current evidence
+
+- Head approved the server/node/bridge wiring in the task log at 11:14 UTC. Adapter is in nodes/check-slots.ts; tests.ts and testruns/runs.ts remain untouched.
+- Approved execution accounting supersedes the initial absolute-deadline proposal: main.testOne acquires before tests.started and runPart. tests.waiting clears startedAt only for the reporting node's running part; tests.started restores it. The existing LATE_MS logic stays unchanged.
+- The owner of testruns/tools.ts confirmed that decorating test_run/work_run handlers does not overlap the neighbour's description changes. queuedRunState preserves the original authorization and adds queuePosition.
+- FIFO logic now lives once in protocol.CheckSlotQueue. The node-local prototype class was removed; the product API uses the authenticated server client. Node API callbacks receive a combined cancellation/lease-loss signal. Queue metadata is not owned by a job UID.
+- First complete integration checks: node modules 108/108; watchdog/coordinator targeted checks 4/4; CLI output and nonzero exit round trip; authenticated process/current-turn guards; real TERM-ignoring process held its slot until the five-second KILL grace ended.
+- Operator and watchdog post-wait tests exposed immediate false alarms after long waits. Their quiet clocks now exclude queue time without changing native program evidence or disabling missing-node alarms.
+- Static complexity was compared against f289196b using crapper: no existing function increased; no new function reached CC 10. This is rerun at final validation.
+- Five loaded full migration/wait repetitions passed in the first after probe. Repetition six hit that probe's separate 180-second process bound before it produced a test result. It is not counted as a passing repetition. All 32 synthetic workers were terminated and the active child list was empty. A final ten-run experiment on the completed API is still required, with a sufficiently bounded outer run budget and the unchanged 20-second tests.
+
+- Current complete targeted checks: protocol 162/162 (9 files), node 180/180 (8 files), server 136/136 (7 files). Full output in protocol-final.log, node-final.log and server-final.log. Final loaded ten-run proof and independent review remain pending.

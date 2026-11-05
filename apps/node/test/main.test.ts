@@ -32,7 +32,7 @@ const adapter: ProviderAdapter = {
   run: async () => ({ ok: true, sessionId: 'sess-9', result: 'ready', output: '', error: null, limits: { status: 'allowed', windows: [] } }),
 };
 
-async function fakeServer() {
+async function fakeServer(grantChecks = true) {
   const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });
   onTestFinished(() => server.close());
   await new Promise(r => server.once('listening', r));
@@ -40,7 +40,11 @@ async function fakeServer() {
   let socket: WebSocket | null = null;
   server.on('connection', s => {
     socket = s;
-    s.on('message', data => received.push(JSON.parse(String(data))));
+    s.on('message', data => {
+      const frame = JSON.parse(String(data)) as { type: string; id?: string };
+      received.push(frame);
+      if (grantChecks && frame.type === 'check.acquire') s.send(JSON.stringify({ type: 'check.state', id: frame.id, state: 'running', position: 0 }));
+    });
   });
   const wait = async (check: () => boolean, ms = 3000) => {
     const end = Date.now() + ms;
@@ -1150,6 +1154,40 @@ describe('runNode', () => {
     server.send({ type: 'tests.cancel', partId: 'p2' });
     await server.wait(() => server.received.some(m => m.type === 'tests.done' && m.partId === 'p2'));
     expect(server.received.find(m => m.type === 'tests.done' && m.partId === 'p2')).toMatchObject({ ok: false, error: 'cancelled' });
+  });
+
+  it('takes a machine check slot before preparing a part or reporting that it started', async () => {
+    const server = await fakeServer(false), ran: string[] = [];
+    const runPart: typeof runTests = async m => { ran.push(m.partId); return { type: 'tests.done', partId: m.partId, ok: true, exitCode: 0, error: null, commit: null, log: 'checked' }; };
+    const node = await runNode({ dir: nodeDir(server.url), adapter, log: () => {}, runPart, testUser: { uid: 20001, gid: 20001 } });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    server.send({ type: 'tests.run', partId: 'queued-part', repo: null, branch: null, task: 3, command: 'check', part: 1, parts: 1, timeoutMs: 60000 });
+    await server.wait(() => server.received.some(m => m.type === 'check.acquire'));
+    const id = server.received.find(m => m.type === 'check.acquire')!.id;
+    server.send({ type: 'check.state', id, state: 'queued', position: 2 });
+    await server.wait(() => server.received.some(m => m.type === 'tests.waiting'));
+    expect(ran).toEqual([]);
+    expect(server.received.filter(m => m.type === 'tests.started')).toEqual([]);
+    server.send({ type: 'check.state', id, state: 'running', position: 0 });
+    await server.wait(() => server.received.some(m => m.type === 'tests.done'));
+    expect(ran).toEqual(['queued-part']);
+    expect(server.received.findIndex(m => m.type === 'check.release')).toBeGreaterThan(server.received.findIndex(m => m.type === 'tests.started'));
+  });
+
+  it('cancels a queued part without starting preparation or claiming execution began', async () => {
+    const server = await fakeServer(false), ran: string[] = [];
+    const runPart: typeof runTests = async m => { ran.push(m.partId); return { type: 'tests.done', partId: m.partId, ok: true, exitCode: 0, error: null, commit: null, log: '' }; };
+    const node = await runNode({ dir: nodeDir(server.url), adapter, log: () => {}, runPart, testUser: { uid: 20001, gid: 20001 } });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    server.send({ type: 'tests.run', partId: 'cancelled-part', repo: null, branch: null, task: 3, command: 'check', part: 1, parts: 1, timeoutMs: 60000 });
+    await server.wait(() => server.received.some(m => m.type === 'check.acquire'));
+    server.send({ type: 'tests.cancel', partId: 'cancelled-part' });
+    await server.wait(() => server.received.some(m => m.type === 'tests.done'));
+    expect(server.received.find(m => m.type === 'tests.done')).toMatchObject({ partId: 'cancelled-part', error: 'cancelled' });
+    expect(server.received.filter(m => m.type === 'tests.started')).toEqual([]);
+    expect(ran).toEqual([]);
   });
 
   it('stays idle once removed', async () => {

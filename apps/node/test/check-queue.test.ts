@@ -1,5 +1,8 @@
-import { describe, expect, it } from 'vitest';
-import { CheckQueue } from '../src/check-queue.js';
+import { afterEach, describe, expect, it } from 'vitest';
+import { CheckSlotQueue as CheckQueue } from '@hornhoof/protocol';
+import { CheckClient } from '../src/check-client.js';
+import { setCheckClient, withCheckSlot } from '../src/check-queue.js';
+afterEach(() => setCheckClient(null));
 
 function gate() {
   let open!: () => void;
@@ -73,8 +76,12 @@ describe('the machine check queue', () => {
   });
 
   it('reuses the current slot for a nested check instead of waiting on itself', async () => {
-    const queue = new CheckQueue(() => 1);
-    const result = queue.withSlot(async () => queue.withSlot(async () => 'nested'));
+    const client = new CheckClient(frame => {
+      if (frame.type === 'check.acquire') queueMicrotask(() => client.receive({ type: 'check.state', id: frame.id, state: 'running', position: 0 }));
+      return true;
+    });
+    client.online(true); setCheckClient(client);
+    const result = withCheckSlot(async () => withCheckSlot(async () => 'nested'));
     expect(await result).toBe('nested');
   });
 
@@ -113,5 +120,32 @@ describe('the machine check queue', () => {
     await expect(run).rejects.toBe(reason);
     expect(ran).toBe(false);
     expect(await queue.withSlot(async () => 'next')).toBe('next');
+  });
+
+  it('keeps other waiters when a position callback cancels itself and then throws', async () => {
+    let capacity = 0, firstRan = false;
+    const queue = new CheckQueue(() => capacity), cancel = new AbortController();
+    const first = queue.withSlot(async () => { firstRan = true; });
+    const reason = new Error('stopped');
+    const second = queue.withSlot(async () => {}, { signal: cancel.signal, onPosition: () => { cancel.abort(reason); throw new Error('output closed'); } });
+    await expect(second).rejects.toBe(reason);
+    capacity = 1; queue.refresh(); await Promise.resolve();
+    expect(firstRan).toBe(true);
+    await first;
+  });
+
+  it('passes a nested deadline to the command while retaining its parent lease', async () => {
+    const client = new CheckClient(frame => {
+      if (frame.type === 'check.acquire') queueMicrotask(() => client.receive({ type: 'check.state', id: frame.id, state: 'running', position: 0 }));
+      return true;
+    });
+    client.online(true); setCheckClient(client);
+    const started = gate(), finished = gate(), cancel = new AbortController();
+    let childSignal: AbortSignal | undefined;
+    const pending = withCheckSlot(async () => withCheckSlot(async signal => { childSignal = signal; started.open(); await finished.waiting; }, { signal: cancel.signal }));
+    await started.waiting;
+    cancel.abort();
+    try { expect(childSignal?.aborted).toBe(true); }
+    finally { finished.open(); await pending; }
   });
 });

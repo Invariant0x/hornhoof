@@ -1,59 +1,41 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { CheckClient, type CheckLease, type SlotOptions } from './check-client.js';
 
-export type CheckOptions = { signal?: AbortSignal; onPosition?(position: number): void };
-type Waiting = { start(): void; cancel(reason?: unknown): void; options: CheckOptions; position: number };
+export type { CheckOptions } from '@hornhoof/protocol';
 
-export class CheckQueue {
-  private running = 0;
-  private readonly waiting: Waiting[] = [];
-  private readonly context = new AsyncLocalStorage<{ active: boolean }>();
-  constructor(readonly capacity: () => number) {}
+let client: CheckClient | null = null;
+const leased = new AsyncLocalStorage<{ lease: CheckLease; active: boolean }>();
+const leases = new Map<string, { lease: CheckLease; agentId: string | undefined; active: boolean; children: Set<Promise<unknown>> }>();
 
-  async withSlot<T>(run: () => Promise<T>, options: CheckOptions = {}): Promise<T> {
-    options.signal?.throwIfAborted();
-    if (this.context.getStore()?.active) return run();
-    await this.acquire(options);
-    const context = { active: true };
-    return this.context.run(context, async () => {
-      try { options.signal?.throwIfAborted(); return await run(); }
-      finally { context.active = false; this.running--; this.pump(); }
-    });
-  }
+export function setCheckClient(next: CheckClient | null): void { client = next; }
+export function checkSlotWaiting(agentId: string, jobId?: string | null): boolean { return client?.waiting(agentId, jobId) ?? false; }
+export function currentCheckLease(): string | undefined { return leased.getStore()?.lease.id; }
 
-  private acquire(options: CheckOptions): Promise<void> {
-    options.signal?.throwIfAborted();
-    return new Promise((resolve, reject) => {
-      const abort = () => entry.cancel(options.signal?.reason);
-      const remove = () => options.signal?.removeEventListener('abort', abort);
-      const entry: Waiting = {
-        options, position: 0,
-        start: () => { remove(); resolve(); },
-        cancel: reason => {
-          remove();
-          this.waiting.splice(this.waiting.indexOf(entry), 1);
-          reject(reason);
-          this.pump();
-        },
-      };
-      this.waiting.push(entry);
-      options.signal?.addEventListener('abort', abort, { once: true });
-      this.pump();
-    });
-  }
+export async function reuseCheckLease<T>(id: string, agentId: string | undefined, signal: AbortSignal, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const entry = leases.get(id);
+  if (!entry?.active || entry.agentId !== agentId) throw new Error('The parent check slot is no longer active.');
+  const pending = Promise.resolve().then(() => run(AbortSignal.any([entry.lease.signal, signal])));
+  entry.children.add(pending);
+  try { return await pending; }
+  finally { entry.children.delete(pending); }
+}
 
-  refresh(): void { this.pump(); }
-
-  private pump(): void {
-    while (this.waiting.length && this.running < this.capacity()) {
-      const entry = this.waiting.shift()!;
-      this.running++;
-      entry.start();
+/* The callback covers checkout, dependency preparation, services, execution and cleanup.
+   Use its signal for child processes: it includes both the caller's deadline and loss of the lease. */
+export async function withCheckSlot<T>(run: (signal: AbortSignal) => Promise<T>, options: SlotOptions = {}): Promise<T> {
+  options.signal?.throwIfAborted();
+  const parent = leased.getStore();
+  if (parent?.active) return reuseCheckLease(parent.lease.id, options.agentId ?? leases.get(parent.lease.id)?.agentId, options.signal ?? parent.lease.signal, run);
+  if (!client) throw new Error('Machine check queue is not connected.');
+  const lease = await client.acquire(options), context = { lease, active: true };
+  const entry = { lease, agentId: options.agentId, active: true, children: new Set<Promise<unknown>>() };
+  leases.set(lease.id, entry);
+  return leased.run(context, async () => {
+    try { lease.signal.throwIfAborted(); return await run(lease.signal); }
+    finally {
+      context.active = false; entry.active = false;
+      await Promise.allSettled(entry.children);
+      leases.delete(lease.id); lease.release();
     }
-    this.waiting.forEach((entry, index) => {
-      if (entry.position === index + 1) return;
-      entry.position = index + 1;
-      try { entry.options.onPosition?.(entry.position); }
-      catch (error) { entry.cancel(error); }
-    });
-  }
+  });
 }

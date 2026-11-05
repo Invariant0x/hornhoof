@@ -1,3 +1,4 @@
+import { closeCheckQueue } from './modules/nodes/check-slots.js';
 import cookie from '@fastify/cookie';
 import websocket from '@fastify/websocket';
 import Fastify, { LogController, type FastifyBaseLogger, type FastifyInstance, type FastifyServerOptions } from 'fastify';
@@ -92,7 +93,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   });
   /* Before the socket plugin's, which closes the sockets, and while the database still answers. */
   app.addHook('preClose', async () => serverStopping(ctx).catch(err => app.log.error({ error: loggable(err) }, 'Writing that the server stopped into the history of node connections failed.')));
-  app.addHook('onClose', async () => ctx.hub.stop());
+  app.addHook('onClose', async () => { closeCheckQueue(ctx); ctx.hub.stop(); });
   app.addHook('onClose', async () => ctx.agentSql?.close());
   const { config } = deps;
   ctx.updates = new UpdateCheck({

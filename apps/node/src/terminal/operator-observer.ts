@@ -2,13 +2,14 @@ import { createHash, randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { ASSIGNMENT_RECEIPT_MS, FIRST_ACTIVITY_MS, OperatorNodeMessage, OperatorQuestion, QUESTION_WAIT_MS, STARTUP_EXIT_MS, type OperatorDelivery, type OperatorEvidence, type OperatorReason } from '@hornhoof/protocol/program-operator';
 import { z } from 'zod';
+import { checkSlotWaiting } from '../check-queue.js';
 import { readOperatorStore, writeOperatorStore } from './operator-storage.js';
 
 const Identity = z.object({ agentKey: z.uuid(), jobId: z.uuid().nullable(), instance: z.uuid() });
 export type OperatorIdentity = z.infer<typeof Identity>;
 const Question = z.object({ data: OperatorQuestion, jobId: z.uuid().nullable(), at: z.number(), ordinal: z.number().int().positive(), alarmed: z.boolean() });
 const Instance = Identity.extend({ at: z.number(), startedAt: z.number().nullable(), active: z.boolean(), exited: z.boolean(), ordinal: z.number().int().nonnegative(), phases: z.array(z.enum(['attempt', 'started', 'failed'])), alarmed: z.boolean(), question: Question.nullable().default(null), questionOrdinal: z.number().int().nonnegative().default(0), recovered: z.array(z.uuid()).default([]) });
-const Delivery = Identity.extend({ id: z.uuid(), ordinal: z.number().int().positive(), kind: z.enum(['assignment', 'live']), digest: z.string(), at: z.number(), receiptAt: z.number().nullable(), active: z.boolean(), outcome: z.enum(['pending', 'taken', 'not_taken', 'cancelled']), phases: z.array(z.enum(['attempt', 'queued', 'taken', 'activity', 'not_taken', 'cancelled'])), alarms: z.array(z.string()) });
+const Delivery = Identity.extend({ id: z.uuid(), ordinal: z.number().int().positive(), kind: z.enum(['assignment', 'live']), digest: z.string(), at: z.number(), receiptAt: z.number().nullable(), checkAfter: z.number().nullable().default(null), active: z.boolean(), outcome: z.enum(['pending', 'taken', 'not_taken', 'cancelled']), phases: z.array(z.enum(['attempt', 'queued', 'taken', 'activity', 'not_taken', 'cancelled'])), alarms: z.array(z.string()) });
 const StoredEvidence = OperatorNodeMessage.refine((frame): frame is OperatorEvidence => 'evidenceId' in frame);
 const Store = z.object({ instances: z.record(z.string(), Instance), deliveries: z.record(z.string(), Delivery), outbox: z.array(StoredEvidence) });
 type Store = z.infer<typeof Store>;
@@ -54,7 +55,7 @@ export class OperatorObserver {
       this.room(1);
       if (Object.keys(this.state.deliveries).length >= MAX_PENDING) throw new Error('Program delivery history must be acknowledged before more input.');
       this.instance(identity);
-      const delivery: Delivery = { ...identity, ...metadata, kind, digest, at: this.now(), receiptAt: null, active: false, outcome: 'pending', phases: [], alarms: [] };
+      const delivery: Delivery = { ...identity, ...metadata, kind, digest, at: this.now(), receiptAt: null, checkAfter: null, active: false, outcome: 'pending', phases: [], alarms: [] };
       this.state.deliveries[metadata.id] = delivery;
       this.deliveryFact(delivery, 'attempt');
     });
@@ -137,12 +138,24 @@ export class OperatorObserver {
   }
 
   private checkDelivery(delivery: Delivery): void {
-    if (delivery.kind !== 'assignment' || delivery.outcome === 'cancelled' || this.state.instances[delivery.instance]?.exited) return;
+    if (this.deliveryInactive(delivery) || this.deferForCheck(delivery)) return;
     if (delivery.receiptAt === null) {
       if (this.elapsed(delivery.at) >= ASSIGNMENT_RECEIPT_MS) this.alarm(delivery, 'assignment_unrecorded');
       return;
     }
     if (!delivery.active && this.elapsed(delivery.receiptAt) >= FIRST_ACTIVITY_MS) this.alarm(delivery, 'recorded_no_activity');
+  }
+
+  private deferForCheck(delivery: Delivery): boolean {
+    if (checkSlotWaiting(delivery.agentKey, delivery.jobId)) {
+      delivery.checkAfter = this.now() + (delivery.receiptAt === null ? ASSIGNMENT_RECEIPT_MS : FIRST_ACTIVITY_MS);
+      this.save(); return true;
+    }
+    return delivery.checkAfter !== null && this.now() < delivery.checkAfter;
+  }
+
+  private deliveryInactive(delivery: Delivery): boolean {
+    return delivery.kind !== 'assignment' || delivery.outcome === 'cancelled' || this.state.instances[delivery.instance]?.exited === true;
   }
 
   exit(identity: OperatorIdentity, exit: Exit, cause?: ExitCause): void {
