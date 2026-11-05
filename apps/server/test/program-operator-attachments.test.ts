@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
-import { expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, attachments, companies, jobs, nodes, people, personAccess, programInstances, programOperatorCases, requests, sessions, subscriptions, tasks, testParts, testRuns } from '../src/db/schema.js';
+import { agents, attachments, companies, departments, jobs, nodes, people, personAccess, programInstances, programOperatorCases, requests, sessions, subscriptions, tasks, testParts, testRuns } from '../src/db/schema.js';
 import { filesOf, picturesOf } from '../src/modules/tasks/attachments.js';
 import { ask, createTask } from '../src/modules/tasks/engine.js';
 import { as } from './helpers.js';
@@ -27,14 +27,22 @@ async function fixture() {
   const [picture] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.agent.id, jobId: c.job.id, operatorCaseId: incident!.id, mediaType: 'image/png', bytes: PNG, size: PNG.length }).returning();
   await c.db.update(programOperatorCases).set({ pictureId: picture!.id }).where(eq(programOperatorCases.id, incident!.id));
   const fetchPicture = (token: string, file = picture!.id, ref = `operator-case:${incident!.id}`) => c.app.inject({ method: 'GET', url: `/api/attachments/file?task=${encodeURIComponent(ref)}&file=${encodeURIComponent(file)}`, headers: { authorization: `Bearer ${token}` } });
-  const person = async (departmentId: string | null, companyId = c.companyId) => {
-    const [p] = await c.db.insert(people).values({ companyId, name: 'Reader', email: `${randomUUID()}@example.test`, status: 'active', scopeKind: departmentId ? 'listed' : 'company' }).returning();
+  const enrol = async (departmentId: string | null, companyId = c.companyId, more: Partial<typeof people.$inferInsert> = {}) => {
+    const [p] = await c.db.insert(people).values({ companyId, name: 'Reader', email: `${randomUUID()}@example.test`, status: 'active', scopeKind: departmentId ? 'listed' : 'company', ...more }).returning();
     if (departmentId) await c.db.insert(personAccess).values({ companyId, personId: p!.id, departmentId });
     const token = randomUUID();
     await c.db.insert(sessions).values({ tokenHash: hashToken(token), personId: p!.id, expiresAt: new Date(Date.now() + 60000) });
-    return token;
+    return { id: p!.id, token };
   };
-  return { ...c, turn, operatorTurn: operator, headTurn: head, orchestrator: orchestrator!, orchestratorTurn, incident: incident!, picture: picture!, fetchPicture, person };
+  const person = async (departmentId: string | null, companyId = c.companyId) => (await enrol(departmentId, companyId)).token;
+  /* Someone on whose plan the target employee runs, in the department given. */
+  const planOwner = async (departmentId: string | null) => {
+    const reader = await enrol(departmentId);
+    await c.db.update(subscriptions).set({ ownerPersonId: reader.id }).where(eq(subscriptions.id, c.sub.id));
+    return reader;
+  };
+  const download = (token: string, id = picture!.id) => c.app.inject({ method: 'GET', url: `/api/attachments/${id}`, ...as(token) });
+  return { ...c, turn, operatorTurn: operator, headTurn: head, orchestrator: orchestrator!, orchestratorTurn, incident: incident!, picture: picture!, fetchPicture, person, enrol, planOwner, download };
 }
 
 it('downloads the case PNG for its assigned operator, actual report recipient and current orchestrator after resolution', async () => {
@@ -122,19 +130,65 @@ it('refuses pictures associated with API and login/test targets', async () => {
   expect((await c.fetchPicture(c.operatorTurn.token)).statusCode).toBe(404);
 });
 
-it('shows the picture to the CEO and people reaching the target, and hides it from unrelated and foreign people', async () => {
+it('shows the picture to the CEO, a delegate and whoever has both the plan and the department of its target', async () => {
   const c = await fixture();
-  const [foreign] = await c.db.insert(companies).values({ name: 'Foreign', singleton: false }).returning();
-  for (const token of [c.ceo, await c.person(c.dev.id)]) {
-    const res = await c.app.inject({ method: 'GET', url: `/api/attachments/${c.picture.id}`, ...as(token) });
+  const delegate = await c.enrol(null, c.companyId, { isCeoDelegate: true });
+  const owner = await c.planOwner(c.dev.id);
+  for (const token of [c.ceo, delegate.token, owner.token]) {
+    const res = await c.download(token);
     expect(res.statusCode).toBe(200);
     expect(res.rawPayload.equals(PNG)).toBe(true);
   }
-  for (const token of [await c.person(c.watcher.departmentId!), await c.person(null, foreign!.id)]) expect((await c.app.inject({ method: 'GET', url: `/api/attachments/${c.picture.id}`, ...as(token) })).statusCode).toBe(404);
-  await c.db.update(programOperatorCases).set({ agentId: c.orchestrator.id, jobId: c.orchestratorTurn.job.id }).where(eq(programOperatorCases.id, c.incident.id));
-  await c.db.update(attachments).set({ agentId: c.orchestrator.id, jobId: c.orchestratorTurn.job.id }).where(eq(attachments.id, c.picture.id));
-  expect((await c.app.inject({ method: 'GET', url: `/api/attachments/${c.picture.id}`, ...as(await c.person(c.dev.id)) })).statusCode).toBe(404);
-  expect((await c.app.inject({ method: 'GET', url: `/api/attachments/${c.picture.id}`, ...as(c.ceo) })).statusCode).toBe(200);
+});
+
+describe('to everyone else the picture does not exist', () => {
+  const asMissing = async (c: Awaited<ReturnType<typeof fixture>>, token: string) => {
+    const missing = await c.download(c.ceo, randomUUID());
+    const res = await c.download(token);
+    expect(res.statusCode).toBe(404);
+    expect(res.json()).toEqual(missing.json());
+  };
+
+  it('for the department without the plan, the plan without the department, and neither', async () => {
+    const c = await fixture();
+    for (const token of [await c.person(c.dev.id), await c.person(c.watcher.departmentId!)]) await asMissing(c, token);
+    await asMissing(c, (await c.planOwner(c.watcher.departmentId!)).token);
+  });
+
+  it('for the whole company or the department owner on another plan', async () => {
+    const c = await fixture();
+    await asMissing(c, await c.person(null));
+    const owner = await c.enrol(null, c.companyId, { scopeKind: 'listed' });
+    await c.db.update(departments).set({ ownerPersonId: owner.id }).where(eq(departments.id, c.dev.id));
+    await asMissing(c, owner.token);
+  });
+
+  it('for another company, whose own whole view reaches nothing here', async () => {
+    const c = await fixture();
+    const [foreign] = await c.db.insert(companies).values({ name: 'Foreign', singleton: false }).returning();
+    await asMissing(c, await c.person(null, foreign!.id));
+  });
+
+  it('once the plan or the department is gone from a person who had both', async () => {
+    const c = await fixture();
+    const owner = await c.planOwner(c.dev.id);
+    expect((await c.download(owner.token)).statusCode).toBe(200);
+    await c.db.update(subscriptions).set({ removedAt: new Date() }).where(eq(subscriptions.id, c.sub.id));
+    await asMissing(c, owner.token);
+    await c.db.update(subscriptions).set({ removedAt: null }).where(eq(subscriptions.id, c.sub.id));
+    expect((await c.download(owner.token)).statusCode).toBe(200);
+    await c.db.delete(personAccess).where(eq(personAccess.personId, owner.id));
+    await asMissing(c, owner.token);
+  });
+
+  it('for a listed person on the plan of a target with no department, and the CEO still sees it', async () => {
+    const c = await fixture();
+    await c.db.update(agents).set({ subscriptionId: c.sub.id }).where(eq(agents.id, c.orchestrator.id));
+    await c.db.update(programOperatorCases).set({ agentId: c.orchestrator.id, jobId: c.orchestratorTurn.job.id }).where(eq(programOperatorCases.id, c.incident.id));
+    await c.db.update(attachments).set({ agentId: c.orchestrator.id, jobId: c.orchestratorTurn.job.id }).where(eq(attachments.id, c.picture.id));
+    await asMissing(c, (await c.planOwner(c.dev.id)).token);
+    expect((await c.download(c.ceo)).statusCode).toBe(200);
+  });
 });
 
 it('cannot rebind a target worker case picture as an ordinary request picture or choice', async () => {
