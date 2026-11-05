@@ -3,7 +3,8 @@
 # STUB_MIGRATIONS words are "tag=count": the migrations each build applies when it starts. STUB_STATE/migrations holds
 # how many the database has now. STUB_DIGESTS words are "tag=digest": the build each tag points at in the registry,
 # which also keeps every build by its digest. STUB_RUNNING_IMAGES words are "service=image": the image each service
-# runs now, as Docker keeps it by digest.
+# runs now, as Docker keeps it by digest. STUB_PLAN_NODES words are "name=plan=image": the other nodes on this computer,
+# with the plan on their label and the image they run.
 printf 'docker %s\n' "$*" >> "$STUB_LOG"
 commit_of() { for w in ${STUB_COMMITS:-}; do [ "${w%%=*}" = "$1" ] && { printf '%s' "${w#*=}"; return; }; done; }
 digest_of() { for w in ${STUB_DIGESTS:-}; do [ "${w%%=*}" = "$1" ] && { printf '%s' "${w#*=}"; return; }; done; }
@@ -14,6 +15,8 @@ ref_id() { case "$1" in *@*) printf 'id-%s' "${1#*@}" ;; *) printf 'id-%s' "$(di
 running_image() { for w in ${STUB_RUNNING_IMAGES:-}; do [ "${w%%=*}" = "$1" ] && { printf '%s' "${w#*=}"; return; }; done; }
 image_by_id() { for w in ${STUB_RUNNING_IMAGES:-}; do [ "$(ref_id "${w#*=}")" = "$1" ] && { printf '%s' "${w#*=}"; return; }; done; }
 case "$1 $2" in
+  'ps -a')
+    for w in ${STUB_PLAN_NODES:-}; do rest=${w#*=}; printf '%s %s\n' "${w%%=*}" "${rest%%=*}"; done ;;
   'compose ps')
     case " $* " in *' db '*) echo dbcid ;; *' app '*) echo appcid ;; *' node '*) [ -n "${STUB_NO_NODE:-}" ] || echo nodecid ;; *' updater '*) echo updatercid ;; esac ;;
   'exec dbcid')
@@ -36,7 +39,11 @@ case "$1 $2" in
     esac ;;
   'inspect --format')
     case "$3" in
-      '{{.Image}}') case "${!#}" in *cid) image=$(running_image "${4%cid}"); if [ -n "$image" ]; then ref_id "$image"; else printf 'img-%s\n' "${4%cid}"; fi ;; esac ;;
+      '{{.Image}}')
+        case "${!#}" in
+          *cid) image=$(running_image "${4%cid}"); if [ -n "$image" ]; then ref_id "$image"; else printf 'img-%s\n' "${4%cid}"; fi ;;
+          *) for w in ${STUB_PLAN_NODES:-}; do [ "${w%%=*}" = "${!#}" ] && ref_id "${w##*=}"; done ;;
+        esac ;;
       *) [ "${!#}" = appcid ] && printf '%s\n' "${STUB_RUNNING_COMMIT:-}" ;;
     esac ;;
   *)
@@ -80,6 +87,7 @@ case "$1 $2" in
 [ -z "${STUB_INSTALLER_FAILS:-}" ] || { echo 'the installer failed' >&2; exit 1; }
 case " ${STUB_STOP_IN:-} " in *" $tag "*) [ -f "$STUB_STATE/stopped" ] || { touch "$STUB_STATE/stopped"; kill -9 "\$PPID"; exit 0; } ;; esac
 [ -z "\${HORNHOOF_NODES_FREE:-}" ] || printf 'installer told the nodes are free\n' >> "$STUB_LOG"
+[ -z "\${HORNHOOF_NODES_ONLY:-}" ] || printf 'installer told only %s\n' "\$HORNHOOF_NODES_ONLY" >> "$STUB_LOG"
 printf 'installer %s HORNHOOF_VERSION=%s HORNHOOF_FROM_UPDATER=%s HORNHOOF_SERVER_DIR=%s HORNHOOF_COMPOSE_FILE=%s HORNHOOF_PULLED=%s HORNHOOF_APP_REF=%s HORNHOOF_NODE_REF=%s HORNHOOF_UPDATER_REF=%s\n' "\$*" "\$HORNHOOF_VERSION" "\$HORNHOOF_FROM_UPDATER" "\$HORNHOOF_SERVER_DIR" "\$(basename "\$HORNHOOF_COMPOSE_FILE")" "\${HORNHOOF_PULLED:-}" "\${HORNHOOF_APP_REF:-}" "\${HORNHOOF_NODE_REF:-}" "\${HORNHOOF_UPDATER_REF:-}" >> "$STUB_LOG"
 grep -v '^HORNHOOF_VERSION=' "\$HORNHOOF_SERVER_DIR/.env" > "\$HORNHOOF_SERVER_DIR/.env.new"; printf 'HORNHOOF_VERSION=%s\n' "\$HORNHOOF_VERSION" >> "\$HORNHOOF_SERVER_DIR/.env.new"; mv "\$HORNHOOF_SERVER_DIR/.env.new" "\$HORNHOOF_SERVER_DIR/.env"
 # The build migrates the database when it starts, also when it fails afterwards.

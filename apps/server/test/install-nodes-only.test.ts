@@ -1,0 +1,115 @@
+import { spawnSync } from 'node:child_process';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { describe, expect, it } from 'vitest';
+
+const SCRIPT = fileURLToPath(new URL('../../../scripts/install.sh', import.meta.url));
+const STUBS = fileURLToPath(new URL('./install-stubs/', import.meta.url));
+/* System tools the script and the stubs may use. Real docker, brew, curl and sudo are never reachable. */
+const TOOLS = ['bash', 'sh', 'env', 'cat', 'od', 'tr', 'head', 'base64', 'sleep', 'mkdir', 'rm', 'chmod', 'grep', 'sed', 'cut', 'cp', 'mv', 'touch', 'basename', 'dirname', 'wc', 'mktemp', 'date', 'sort', 'kill', 'printf', 'tail', 'awk', 'sha256sum', 'shasum'];
+const OLD_NODE = 'ghcr.io/invariant0x/hornhoof-node:0.6.1';
+const NEW_NODE = `ghcr.io/invariant0x/hornhoof-node@sha256:${'c'.repeat(64)}`;
+const CLAUDE = 'hornhoof-claude-1c07dac4';
+const GOOGLE = 'hornhoof-antigravity-22222222';
+
+/* install.sh server as the updater runs it for nodes behind, on a computer with the built-in node and two plan nodes. */
+function fromUpdater(env: Record<string, string>) {
+  const dir = mkdtempSync(join(tmpdir(), 'hh-nodes-only-'));
+  const bin = join(dir, 'stubs');
+  const sys = join(dir, 'sys');
+  mkdirSync(bin);
+  mkdirSync(sys);
+  for (const f of readdirSync(STUBS)) if (!f.startsWith('_')) copyFileSync(join(STUBS, f), join(bin, f));
+  for (const tool of TOOLS) {
+    const real = ['/usr/bin', '/bin'].map(d => join(d, tool)).find(p => existsSync(p));
+    if (real) symlinkSync(real, join(sys, tool));
+  }
+  const log = join(dir, 'stub.log');
+  writeFileSync(log, '');
+  writeFileSync(join(dir, '.env'), 'HORNHOOF_SECRET=s\nNODE_KEY=k\nPUBLIC_URL=http://localhost:8081\nHORNHOOF_PORT=8081\nHORNHOOF_VERSION=0.6.1\n');
+  const compose = join(dir, 'brought.yaml');
+  writeFileSync(compose, 'services: {app: {}}\n');
+  const res = spawnSync(join(sys, 'bash'), [SCRIPT, 'server'], {
+    encoding: 'utf8',
+    timeout: 60_000,
+    env: {
+      PATH: `${bin}:${sys}`,
+      HOME: join(dir, 'home'),
+      STUB_LOG: log,
+      STUB_SRC: STUBS,
+      STUB_BIN: bin,
+      STUB_STATE: dir,
+      HORNHOOF_HOME: join(dir, 'home', '.hornhoof'),
+      HORNHOOF_DIR: join(dir, 'home', 'hornhoof'),
+      HORNHOOF_FROM_UPDATER: '1',
+      HORNHOOF_PULLED: '1',
+      HORNHOOF_SERVER_DIR: dir,
+      HORNHOOF_VERSION: '0.7.0',
+      HORNHOOF_COMPOSE_FILE: compose,
+      HORNHOOF_APP_REF: `ghcr.io/invariant0x/hornhoof@sha256:${'b'.repeat(64)}`,
+      HORNHOOF_NODE_REF: NEW_NODE,
+      HORNHOOF_UPDATER_REF: `ghcr.io/invariant0x/hornhoof-updater@sha256:${'f'.repeat(64)}`,
+      STUB_NODE_RUNNING: OLD_NODE,
+      STUB_CONTAINERS: `${CLAUDE}=http://localhost:8081 ${GOOGLE}=http://localhost:8081`,
+      HORNHOOF_NODES_FREE: '1',
+      ...env,
+    },
+  });
+  return { code: res.status, out: res.stdout + res.stderr, calls: readFileSync(log, 'utf8').trim().split('\n').filter(Boolean) };
+}
+
+const touched = (calls: string[], name: string) => calls.filter(c => c.includes(name) && !c.startsWith('docker ps'));
+const STOPS_BUILTIN = 'docker exec nodecid node /app/apps/node/dist/main.js prepare-stop hornhoof_update';
+const WITH_NODE = 'docker compose up -d --no-build db app node tunnel';
+const WITHOUT_NODE = 'docker compose up -d --no-build db app tunnel';
+
+describe('install.sh when the updater names the nodes that are free', () => {
+  it('replaces only a plan node it names: the built-in node and the other plan node go on with what they run', () => {
+    const r = fromUpdater({ HORNHOOF_NODES_ONLY: `id-of-${CLAUDE}` });
+    expect(r.code).toBe(0);
+    expect(r.calls).toContain(WITHOUT_NODE);
+    expect(r.calls).not.toContain(WITH_NODE);
+    expect(r.calls).not.toContain(STOPS_BUILTIN);
+    expect(r.calls).toContain(`docker exec ${CLAUDE} node /app/apps/node/dist/main.js prepare-stop hornhoof_update`);
+    expect(r.calls).toContain(`docker rm -f ${CLAUDE}`);
+    expect(touched(r.calls, GOOGLE)).toEqual([]);
+  });
+
+  it('replaces only the built-in node when it names that one', () => {
+    const r = fromUpdater({ HORNHOOF_NODES_ONLY: 'builtin' });
+    expect(r.code).toBe(0);
+    expect(r.calls).toContain(WITH_NODE);
+    expect(r.calls).toContain(STOPS_BUILTIN);
+    expect(touched(r.calls, CLAUDE)).toEqual([]);
+    expect(touched(r.calls, GOOGLE)).toEqual([]);
+  });
+
+  it('replaces all it names at once', () => {
+    const r = fromUpdater({ HORNHOOF_NODES_ONLY: `builtin id-of-${CLAUDE} id-of-${GOOGLE}` });
+    expect(r.calls).toContain(WITH_NODE);
+    expect(r.calls).toContain(`docker rm -f ${CLAUDE}`);
+    expect(r.calls).toContain(`docker rm -f ${GOOGLE}`);
+  });
+
+  it('takes a plan node it names on when the built-in node runs that image already', () => {
+    const r = fromUpdater({ HORNHOOF_NODES_ONLY: `id-of-${GOOGLE}`, STUB_NODE_RUNNING: NEW_NODE });
+    expect(r.code).toBe(0);
+    expect(r.calls).toContain(`docker rm -f ${GOOGLE}`);
+    expect(touched(r.calls, CLAUDE)).toEqual([]);
+  });
+
+  it('replaces them all, as before, when it names none', () => {
+    const r = fromUpdater({});
+    expect(r.calls).toContain(WITH_NODE);
+    expect(r.calls).toContain(`docker rm -f ${CLAUDE}`);
+    expect(r.calls).toContain(`docker rm -f ${GOOGLE}`);
+  });
+
+  it('matches a whole plan, never part of a longer one', () => {
+    const r = fromUpdater({ HORNHOOF_NODES_ONLY: `id-of-${CLAUDE}-longer` });
+    expect(r.code).toBe(0);
+    expect(touched(r.calls, CLAUDE)).toEqual([]);
+  });
+});

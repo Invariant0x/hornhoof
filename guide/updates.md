@@ -17,6 +17,12 @@ A planned update does not cut off agents at work. The machine takes no new work,
 
 If the work does not finish in time, nothing stops. The update is put off, the card says when it tries again, and the head of Operations is told.
 
+Each node on the computer goes by itself: one that has no work left restarts at once, whatever the others still wait for. Versions in the account menu says of each node what it waits for and until when.
+
+A plan's node goes this way only when the server knows it runs on the server's own computer, by the `HORNHOOF_HOST_ID` line in `.env`. The install line writes that line; an update through the updater does not. A node the server does not know is not replaced by itself: it goes on working on its build, and Machines says it is of another build. Run the install line once on that computer: what runs goes on, and the updater replaces such a node when its work ends.
+
+The orchestrator and the heads wait for such a node for three minutes at most. After that their next turn goes to another machine of their plan or, when the plan has no other, to the node that waits, whose work runs on. Other agents' turns wait for the update.
+
 ## Go back to an earlier build
 
 Versions in the account menu lists the published builds, with the one running now. It goes back to an earlier one the same way.
