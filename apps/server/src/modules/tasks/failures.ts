@@ -70,9 +70,14 @@ export async function agentFailureStates(ctx: Ctx, companyId: string, agentIds: 
     const before = next?.continueOf ? history.get(next.continueOf) : undefined;
     const retry = before?.failure && passing(before.failure)
       ? { attempt: await passingAttempts(ctx, before, history), max: RETRY_MINUTES.length, at: Number(next?.notBefore), kind: before.failure.kind } : null;
-    const failure = ended?.status === 'failed' && ended.failure ? { kind: ended.failure.kind, text: ended.failure.text, at: +(ended.finishedAt === null ? ended.createdAt : ended.finishedAt), tail: ended.tail } : null;
+    const failure = lastFailureOf(ended);
     return [id, { retry, failure, obsolete: obsolete ? { at: +(obsolete.finishedAt === null ? obsolete.createdAt : obsolete.finishedAt) } : null }] as const;
   })));
+}
+
+function lastFailureOf(ended: Job | undefined): LastFailure | null {
+  if (ended?.status !== 'failed' || !ended.failure) return null;
+  return { kind: ended.failure.kind, text: ended.failure.text, at: +(ended.finishedAt === null ? ended.createdAt : ended.finishedAt), tail: ended.tail };
 }
 
 async function retryHistory(ctx: Ctx, companyId: string, waiting: Job[]): Promise<Map<string, Job>> {
