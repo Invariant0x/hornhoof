@@ -1251,9 +1251,8 @@ export class TerminalHost {
     const call = this.pendingCall(a);
     if (call === look.call && a.retry === look.retry && now - look.at < this.lookMs && !watch.due(now)) return;
     Object.assign(look, { at: now, call, retry: a.retry });
-    /* A session gone since the last look shows no screen; whoever waits on this turn hears it is gone. */
-    const screen = await this.opts.tmux.screen(a.name, 0, true).catch(() => null);
-    if (screen === null || a.turn !== turn) return;
+    const screen = await this.opts.tmux.screen(a.name, 0, true);
+    if (a.turn !== turn) return;
     watch.look(now, screen, call, this.programRunning(a), a.signAt, a.retry);
     if (this.atInterruption(a, screen)) this.interrupted(a);
     this.agyFailed(a);
