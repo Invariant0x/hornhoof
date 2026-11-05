@@ -19,11 +19,11 @@ describe.skipIf(!hasTmux)('what a view of a session shows when it opens', () => 
 
   it('gives the history first, styled and masked, and what the program wrote while it was read after it', async () => {
     const name = await session('h1');
-    const read = tmux.screen.bind(tmux);
-    vi.spyOn(tmux, 'screen').mockImplementation(async (target, history, styled) => {
-      if (history !== 5000) return read(target, history, styled);
-      await tmux.run(['send-keys', '-t', name, '-l', 'WRITTEN-WHILE-READ']);
-      await until(async () => (await read(name)).includes('WRITTEN-WHILE-READ'));
+    const run = tmux.run.bind(tmux);
+    vi.spyOn(tmux, 'run').mockImplementation(async (args, input) => {
+      if (!args.includes('-5000')) return run(args, input);
+      await run(['send-keys', '-t', name, '-l', 'WRITTEN-WHILE-READ']);
+      await until(async () => (await tmux.screen(name)).includes('WRITTEN-WHILE-READ'));
       return `OLD-LINE-0\n\x1b[2mDIM\x1b[0m ${SECRET}\n`;
     });
     await host.open({ type: 'term.open', termId: 't1', agentKey: 'h1', cols: 80, rows: 24, write: false });
@@ -65,6 +65,31 @@ describe.skipIf(!hasTmux)('what a view of a session shows when it opens', () => 
     expect(seen).toEqual(Array.from({ length: 244 }, (_, at) => at + 1));
   });
 
+  it('shows what a program left on its normal screen between the history and its alternate screen, whose rows the client draws over', async () => {
+    const name = await session('h6');
+    await tmux.run(['respawn-pane', '-k', '-t', name, 'sh', '-c', `i=1; while [ $i -le 40 ]; do echo "OLD-$i-end"; i=$((i+1)); done; printf '\\033[?1049h\\033[HALT-SCREEN'; sleep 30`]);
+    await until(async () => (await tmux.screen(name)).includes('ALT-SCREEN'));
+    await host.open({ type: 'term.open', termId: 't6', agentKey: 'h6', cols: 80, rows: 24, write: false });
+    await until(() => frames('t6').length > 0);
+    const history = frames('t6')[0]!.replace(/\x1b\[[0-9;]*m/g, '');
+    const lines = history.split('\r\n');
+    expect(lines.filter(line => /^OLD-/.test(line))).toEqual(Array.from({ length: 40 }, (_, at) => `OLD-${at + 1}-end`));
+    expect(lines.indexOf('OLD-40-end')).toBeLessThan(lines.indexOf('ALT-SCREEN'));
+    expect(lines.slice(lines.indexOf('ALT-SCREEN')).join('').trim()).toBe('ALT-SCREEN');
+    expect(history).not.toMatch(/[^\r]\n/);
+  });
+
+  it('ends the lines of the history as a terminal moves on them, on the normal screen too', async () => {
+    const name = await session('h7');
+    await tmux.run(['respawn-pane', '-k', '-t', name, 'sh', '-c', 'i=1; while [ $i -le 40 ]; do echo "OLD-$i-end"; i=$((i+1)); done; sleep 30']);
+    await until(async () => (await tmux.screen(name)).includes('OLD-40-end'));
+    await host.open({ type: 'term.open', termId: 't7', agentKey: 'h7', cols: 80, rows: 24, write: false });
+    await until(() => frames('t7').length > 0);
+    const history = frames('t7')[0]!.replace(/\x1b\[[0-9;]*m/g, '');
+    expect(history.split('\r\n').filter(line => /^OLD-/.test(line))).toHaveLength(40);
+    expect(history).not.toMatch(/[^\r]\n/);
+  });
+
   it('keeps the other settings of terminals on the server when a view asks for its screen', async () => {
     await session('h5');
     await tmux.run(['set-option', '-sa', 'terminal-overrides', 'other-term:Tc']);
@@ -79,12 +104,12 @@ describe.skipIf(!hasTmux)('what a view of a session shows when it opens', () => 
 
   it('says nothing more once the view closed while its history was read', async () => {
     await session('h3');
-    const read = tmux.screen.bind(tmux);
+    const run = tmux.run.bind(tmux);
     let release = () => {};
     const held = new Promise<void>(done => { release = done; });
-    vi.spyOn(tmux, 'screen').mockImplementation(async (target, history, styled) => {
-      if (history === 5000) { await held; return 'LATE-HISTORY\n'; }
-      return read(target, history, styled);
+    vi.spyOn(tmux, 'run').mockImplementation(async (args, input) => {
+      if (args.includes('-5000')) { await held; return 'LATE-HISTORY\n'; }
+      return run(args, input);
     });
     const opening = host.open({ type: 'term.open', termId: 't3', agentKey: 'h3', cols: 80, rows: 24, write: false });
     await until(() => host['views'].has('t3'));

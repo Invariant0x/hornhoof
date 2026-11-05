@@ -972,6 +972,8 @@ export class TerminalHost {
   private async submitOperatorAssignment(a: Agent, job: TermJob, prompt: string): Promise<boolean> {
     this.operator?.pasted(a.key);
     a.pastedAt = Date.now();
+    /* On a busy machine the program can tell of the prompt before the key is back. */
+    a.promptWaits = false;
     await this.opts.tmux.paste(a.name, prompt);
     await sleep(pasteWait(prompt));
     if (!job.input.signal?.aborted) await this.opts.tmux.keys(a.name, 'Enter');
