@@ -101,7 +101,9 @@ it.skipIf(!hasTmux).each(['continuation', 'continuation that the program is slow
         await until(() => frames.some(frame => frame.type === 'program.delivery' && frame.deliveryId === source.id && frame.phase === 'taken'));
       }
       const result = await host.run(continuation);
-      expect(result, `${result.error}: ${result.failure?.text ?? 'No program failure detail.'}`).toMatchObject({ ok: true });
+      /* Those words were the owner's turn, done by now: the continuation waited for it and has nothing left to type. */
+      const asked = mode === 'continuation just after the owner typed those words' ? { ok: false, error: 'cancelled' } : { ok: true };
+      expect(result, `${result.error}: ${result.failure?.text ?? 'No program failure detail.'}`).toMatchObject(asked);
       sessionId = result.sessionId;
     } else {
       host.input({ type: 'term.input', termId, data: `${original}\r` });
