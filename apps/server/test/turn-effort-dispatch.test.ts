@@ -273,7 +273,8 @@ describe('how hard each turn thinks', () => {
     it.each<[string, string[] | undefined, string | null, string | null]>([
       ['the nearest level above medium for a model without it', ['low', 'high', 'xhigh'], FULL, 'high'],
       ['the card when it stands below medium, as a lighter turn never raises it', LEVELS, 'low', 'low'],
-      ['no level for a model that names none', undefined, FULL, null],
+      ['the card for a model that names no levels, as nothing says it takes a lighter one', undefined, FULL, FULL],
+      ['no level for a model that names none and a card that names none', undefined, null, null],
     ])('takes %s', async (_name, efforts, card, level) => {
       const c = await gateCompany();
       const [own] = await c.db.select({ plan: agents.subscriptionId }).from(agents).where(eq(agents.id, c.bruno.id));

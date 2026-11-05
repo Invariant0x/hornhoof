@@ -156,7 +156,7 @@ Hornhoof's own lists give these tables, so they say what it does today. A progra
 | --- | --- | --- | --- |
 | Business development | - | Business analyst | Head of business development, Partnerships manager |
 | Design | - | Design system designer, Product UI designer | Design QA, Head of design |
-| Development | Architect, Backend engineer, Code reviewer, Developer, Frontend engineer, Performance engineer, Red team, Security engineer | DevOps engineer, Head of development, QA lead, Test engineer | Technical writer |
+| Development | Architect, Backend engineer, Code reviewer, Developer, Frontend, Performance engineer, Red team, Security engineer | DevOps engineer, Head of development, QA lead, Test engineer | Technical writer |
 | Finance | - | Finance auditor, Financial planning analyst | Bookkeeper, Controller |
 | Home devices | - | Home network helper | Head of home devices, Smart home helper |
 | Household | - | - | Bills helper, Calendar helper, Head of household, Supplies helper |
