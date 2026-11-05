@@ -316,13 +316,12 @@ describe('the keeper', () => {
     const inFlight = new Promise<void>(resolve => {
       arrived = resolve;
     });
-    const app = await listening(
-      http.createServer(async (_req, res) => {
-        arrived();
-        await sleep(200);
-        res.end('whole');
-      }),
-    );
+    const answerLate = async (res: http.ServerResponse) => {
+      arrived();
+      await sleep(200);
+      res.end('whole');
+    };
+    const app = await listening(http.createServer((_req, res) => void answerLate(res)));
     const { keeper, dir, front, ports } = await keeperOn(app, { everyMs: 20 });
     const answer = send(front);
     await inFlight;
