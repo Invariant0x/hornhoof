@@ -105,6 +105,24 @@ describe('a part of a test run on a node', () => {
     expect(missing).toMatchObject({ ok: false, error: 'clone_failed' });
   });
 
+  it("says why it found no branch when the repository's branches cannot be listed", async () => {
+    const dir = nodeDir();
+    const gone = join(dir, 'no-such-repository');
+    const done = await runTests(run(gone, { branch: null, command: 'echo ran-the-command' }), { dir, user: null, hidden: [] });
+    expect(done).toMatchObject({ ok: false, exitCode: null, error: 'clone_failed', commit: null });
+    expect(done.log).toContain('no-such-repository');
+    expect(done.log).not.toContain('ran-the-command');
+  });
+
+  it('says it was stopped when stopped while looking for its branch', async () => {
+    const { url } = origin();
+    const stop = new AbortController();
+    stop.abort();
+    const done = await runTests(run(url, { branch: null, command: 'echo ran-the-command' }), { dir: nodeDir(), user: null, hidden: [], signal: stop.signal });
+    expect(done).toMatchObject({ ok: false, exitCode: null, error: 'cancelled', commit: null });
+    expect(done.log).not.toContain('ran-the-command');
+  });
+
   it("fails with the command's exit code, keeping the start and the end of a long log", async () => {
     const { url } = origin();
     const command = `echo FIRST; head -c ${2 * TEST_LOG_BYTES} /dev/zero | tr '\\0' x; echo; echo LAST; exit 3`;
@@ -292,6 +310,14 @@ describe('the folder older nodes ran their parts in', () => {
 describe('a part of other work on a node', () => {
   const work = (over: Partial<TestRun> = {}): TestRun => ({
     type: 'tests.run', kind: 'work', partId: 'part-1', repo: null, branch: null, task: 12, command: 'true', part: 1, parts: 1, timeoutMs: 60_000, ...over,
+  });
+
+  it('asks for a branch when it has a repository and none is named, and does not guess the task\'s', async () => {
+    const { url } = origin(['task-12']);
+    const done = await runTests(work({ repo: { url, token: '' }, command: 'echo ran-the-command' }), { dir: nodeDir(), user: null, hidden: [] });
+    expect(done).toMatchObject({ ok: false, exitCode: null, error: 'clone_failed', commit: null });
+    expect(done.log).toContain('Name the branch to clone.');
+    expect(done.log).not.toContain('ran-the-command');
   });
 
   it('runs in runs/<part> of the data folder, beside a clone too, with its folders there', async () => {

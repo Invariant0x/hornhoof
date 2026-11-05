@@ -173,6 +173,14 @@ describe('reading a commit from a repository', () => {
     expect(await readCommit({ url, token: '' }, { branch: 'main' })).toEqual({ problem: expect.stringContaining('no branch main') });
   });
 
+  it('finds no branch in an answer with no body', async () => {
+    const url = await serve((_req, res) => {
+      res.writeHead(204, { 'content-type': ADVERTISEMENT });
+      res.end();
+    });
+    expect(await readCommit({ url, token: '' }, { branch: 'main' })).toEqual({ problem: expect.stringContaining('no branch main') });
+  });
+
   it('stops reading an answer that will not end, at its limit', async () => {
     let sent = 0;
     const url = await serve((_req, res) => {
