@@ -1,15 +1,15 @@
 import { and, eq } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, jobs, people, subscriptions, taskEvents, tasks, teams, turns } from '../src/db/schema.js';
 import { answer, ask, createTask, leaveWork, submit, verdict, type Moved } from '../src/modules/tasks/engine.js';
 import { taskDetail } from '../src/modules/tasks/views.js';
 import { resumeAgent, wakePrompt } from '../src/modules/tasks/wake.js';
-import { listen, mcp, setUpCompany, testApp } from './helpers.js';
+import { listen, mcp, setUpCompany, statements, testApp } from './helpers.js';
 
 /* Development works in a repository in turn 4: Bruno and Kai build, Rita (Claude) and Rex (Codex) review code, Sid
    reviews security. */
-async function company({ repository = true, reviewers = true, productRepository = false, sidPlan = true } = {}) {
+async function company({ repository = true, reviewers = true, productRepository = false, sidPlan = true, riskClass = 'access' as 'access' | null } = {}) {
   const { app, db } = await testApp();
   await listen(app);
   await setUpCompany(app);
@@ -31,7 +31,7 @@ async function company({ repository = true, reviewers = true, productRepository 
   const sid = reviewers ? await hire('Sid', 'worker', 'DEV-SEC', sidPlan ? claude!.id : null) : null;
   await db.insert(turns).values({ companyId, number: 4, title: 'Payments', goal: 'Card payments.', status: 'open', openedAt: new Date() });
   const ctx = app.ctx;
-  const parent = (await createTask(ctx, { personId: ceo!.id }, { title: 'Payments', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: head.id })).task;
+  const parent = (await createTask(ctx, { personId: ceo!.id }, { title: 'Payments', riskClass, brief: '', body: '', departmentId: dev!.id, assigneeAgentId: head.id })).task;
   /* Code given out without gates for the review of the turn, as create_task gives it; research with gates: []. */
   const member = async (executor: string, title: string, { under = parent.id, code = true } = {}) =>
     (await createTask(ctx, { agentId: head.id }, { title, brief: '', body: '', departmentId: dev!.id, productId: product?.id ?? null, parentId: under, assigneeAgentId: executor, executor: true, gates: [], inTurnReview: code })).task;
@@ -339,4 +339,93 @@ describe('the review of a turn', () => {
     expect(review!.panel).not.toContain(sid!.id);
     expect(woken(last).map(w => w[0]).sort()).toEqual([rita!.id, rex!.id].sort());
   });
+});
+
+
+describe('conditional gates on the actual turn review', () => {
+  it.each([
+    { label: 'ordinary UI', paths: ['ui/Button.tsx'], diff: '+const text = "Save";', expected: false },
+    { label: 'sensitive path', paths: ['src/db/agent-sql.ts'], diff: '', expected: true },
+    { label: 'added route', paths: ['src/product.ts'], diff: '+app.get("/new", handler);', expected: true },
+    { label: 'raw SQL', paths: ['src/product.ts'], diff: '+sql`select 1`;', expected: true },
+    { label: 'subprocess', paths: ['src/product.ts'], diff: '+spawn("tool");', expected: true },
+    { label: 'child risk', paths: [], diff: '', risk: 'access', expected: true },
+    { label: 'child header', paths: [], diff: '', body: 'Класс риска: доступ.', expected: true },
+    { label: 'pre-release', paths: [], diff: '', beforeRelease: true, expected: true },
+    { label: 'unavailable diff', paths: [], diff: '', unavailable: true, expected: true },
+    { label: 'concurrent close', paths: [], diff: '', concurrent: true, expected: true },
+    { label: 'throwing reader', paths: [], diff: '', throws: true, expected: true },
+  ])('uses $label and fetches before taking company locks', async scenario => {
+    const c = await company({ riskClass: null });
+    const [red] = await c.db.insert(agents).values({ companyId: c.companyId, departmentId: c.dev.id, kind: 'worker', name: 'Rae', roleKey: 'DEV-RED', model: '', subscriptionId: c.sid!.subscriptionId }).returning();
+    const api = await c.member(c.bruno.id, 'UI wording');
+    const peer = 'concurrent' in scenario ? await c.member(c.kai.id, 'Concurrent UI wording') : null;
+    if (peer) await c.merged(c.kai.id, peer.id);
+    if ('risk' in scenario) await c.db.update(tasks).set({ riskClass: 'access' }).where(eq(tasks.id, api.id));
+    if ('body' in scenario) await c.db.update(tasks).set({ body: scenario.body }).where(eq(tasks.id, api.id));
+    if ('beforeRelease' in scenario) await c.db.update(tasks).set({ body: 'Review mode: pre-release' }).where(eq(tasks.id, c.parent.id));
+    await submit(c.ctx, c.bruno.id, api.id, { summary: 'Done.', evidence: 'targeted tests' });
+    const trace = statements();
+    const compare = vi.fn(async () => {
+      expect(trace.some(q => /for update/i.test(q.sql))).toBe(false);
+      if (peer) await c.db.insert(taskEvents).values({ companyId: c.companyId, taskId: peer.id, kind: 'submitted', text: 'Concurrent close', data: { merged: true }, createdAt: new Date(Date.now() + 1) });
+      if ('throws' in scenario) throw new Error('credential-like-private-reader-message');
+      return 'unavailable' in scenario ? { complete: false as const, reason: 'compare-unavailable' } : { complete: true as const, baseSha: 'b'.repeat(40), headSha: 'a'.repeat(40), paths: scenario.paths, diff: scenario.diff };
+    });
+    c.ctx.readCompare = compare;
+    await submit(c.ctx, c.bruno.id, api.id, { summary: 'Merged.', evidence: 'git log: 1a2b3c4' });
+    expect(compare).toHaveBeenCalledWith(expect.objectContaining({ url: 'https://github.com/acme/shop.git' }), { base: 'main', head: 'turn-4' });
+    expect(trace.some(q => /for update/i.test(q.sql))).toBe(true);
+    const [review] = await c.reviews();
+    expect(review!.panel).toContain(c.rita!.id);
+    expect(review!.panel.includes(c.sid!.id)).toBe(scenario.expected);
+    expect(review!.panel.includes(red!.id)).toBe(scenario.expected);
+    const [event] = await c.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, review!.id), eq(taskEvents.kind, 'created')));
+    expect(event!.data.gateTriggers).toBeDefined();
+    expect(JSON.stringify(event)).not.toContain('credential-like-private-reader-message');
+    expect(event!.data.comparison).not.toHaveProperty('diff');
+  });
+});
+
+describe('nonblocking improvement lanes', () => {
+  it.each(['role', 'agent'] as const)('rejects observer and lane-only gates by %s but preserves the mixed red-team gate', async by => {
+    const c = await company({ repository: false });
+    const perfRole = c.ctx.templates.roles.get('DEV-PERF')!;
+    c.ctx.templates.roles.set('DEV-LANE', { ...perfRole, id: 'DEV-LANE', schema: null });
+    const hire = async (name: string, roleKey: string) => (await c.db.insert(agents).values({ companyId: c.companyId, departmentId: c.dev.id, kind: 'worker', name, roleKey, model: '', subscriptionId: c.sid!.subscriptionId }).returning())[0]!;
+    const perf = await hire('Pat', 'DEV-PERF');
+    const lane = await hire('Lee', 'DEV-LANE');
+    const red = await hire('Rae', 'DEV-RED');
+    const tools = await c.tools(c.head);
+    for (const gate of [perf, lane]) {
+      const result = await tools.callTool({ name: 'create_task', arguments: { title: 'Work', brief: '', body: '', executor: c.bruno.id, parent: c.parent.number, gates: [by === 'role' ? gate.roleKey : gate.id] } });
+      expect(result.isError, `${by} ${gate.roleKey}`).toBe(true);
+    }
+    await expect(createTask(c.ctx, { agentId: c.head.id }, { title: 'Direct', brief: '', body: '', departmentId: c.dev.id, parentId: c.parent.id, assigneeAgentId: c.bruno.id, executor: true, gates: [perf.id] })).rejects.toThrow(/nonblocking/);
+    const allowed = await tools.callTool({ name: 'create_task', arguments: { title: 'Explicit risk review', brief: '', body: 'Risk class: access', executor: c.bruno.id, parent: c.parent.number, gates: [by === 'role' ? red.roleKey : red.id] } });
+    expect(allowed.isError).toBeFalsy();
+    const [task] = await c.db.select().from(tasks).where(eq(tasks.title, 'Explicit risk review'));
+    expect(task!.gates).toEqual([red.id]);
+    for (const gate of [perf, lane]) {
+      const changed = await tools.callTool({ name: 'update_task', arguments: { task: task!.number, gates: [by === 'role' ? gate.roleKey : gate.id] } });
+      expect(changed.isError, `${by} ${gate.roleKey}`).toBe(true);
+    }
+  });
+});
+
+
+it.each([
+  { url: 'https://github.com/acme/billing.git', unknown: true },
+  { url: 'https://github.com/acme/shop.git', unknown: false },
+])('does not trust a last-task comparison for uncovered repository $url', async ({ url, unknown }) => {
+  const c = await company({ riskClass: null });
+  const [product] = await c.db.insert(departments).values({ companyId: c.companyId, parentId: c.dev.id, roleCode: 'DEV', name: 'Billing', repoUrl: url }).returning();
+  const first = await c.member(c.bruno.id, 'Earlier product code');
+  const last = await c.member(c.kai.id, 'Last ordinary UI');
+  await c.db.update(tasks).set({ productId: product!.id }).where(eq(tasks.id, first.id));
+  c.ctx.readCompare = async repo => ({ complete: true, baseSha: 'b'.repeat(40), headSha: 'a'.repeat(40), paths: repo.url.includes('billing') ? ['src/auth/session.ts'] : ['ui/Button.tsx'], diff: '' });
+  await c.merged(c.bruno.id, first.id);
+  await c.merged(c.kai.id, last.id);
+  const [review] = await c.reviews();
+  expect(review!.panel.includes(c.sid!.id)).toBe(unknown);
 });

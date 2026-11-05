@@ -20,6 +20,14 @@ export const TIMER_MIN = 5;
 export const TIMER_MAX = 1440;
 export const TIMER_ORDER_MAX = 2000;
 export type RoleTimer = { minutes: number; order: string; forWork: boolean };
+export const GateTriggers = z.object({
+  riskClasses: z.array(z.enum(['money', 'access', 'security', 'data'])),
+  paths: z.array(z.string().min(1)),
+  diffPatterns: z.array(z.enum(['route', 'sql', 'subprocess'])),
+  beforeRelease: z.boolean(),
+}).strict();
+export type GateTriggers = z.infer<typeof GateTriggers>;
+const ImprovementLane = z.object({ id: z.string().regex(/^[a-z][a-z0-9-]*$/), blocking: z.literal(false) }).strict();
 export type Role = {
   id: string;
   department: TemplateKey;
@@ -32,6 +40,8 @@ export type Role = {
   inDefault: boolean;
   /* Where the role stands among its department's default gates; none for a role that is not a gate. */
   gate: number | null;
+  gateTriggers?: GateTriggers;
+  improvementLanes?: z.infer<typeof ImprovementLane>[];
   /* A special place on the department schema, or null for ordinary work. */
   schema: 'before_work' | 'final_check' | 'observer' | null;
   /* A hire of this role wakes on this timer from the start. */
@@ -73,6 +83,8 @@ const RoleHead = z.object({
   /* Where the role stands in its roster, after the head. */
   order: z.number().int().default(50),
   gate: z.number().int().positive().optional(),
+  gateTriggers: GateTriggers.optional(),
+  improvementLanes: z.array(ImprovementLane).default([]),
   schema: z.enum(['before_work', 'final_check', 'observer']).nullable().default(null),
   timer: z
     .object({ minutes: z.number().int().min(TIMER_MIN).max(TIMER_MAX), order: z.string().trim().min(1).max(TIMER_ORDER_MAX), forWork: z.boolean().default(false) })
@@ -138,6 +150,8 @@ export function loadTemplates(dir: string): Templates {
         perProduct: r.perProduct,
         inDefault: r.default,
         gate: r.gate ?? null,
+        gateTriggers: r.gateTriggers,
+        improvementLanes: r.improvementLanes,
         schema: r.schema,
         timer: r.timer ?? null,
         skills: [...locked, ...listed.filter(s => !locked.some(l => l.id === s.id))],
