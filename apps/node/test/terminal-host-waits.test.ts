@@ -1,11 +1,10 @@
-import { setTimeout as pause } from 'node:timers/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { NodeMessage } from '@hornhoof/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SIGNED_OUT as AGY_SIGNED_OUT } from '../src/providers/antigravity.js';
 import type { RunResult } from '../src/runner.js';
 import type { TermJob } from '../src/terminal/host.js';
+import { acceptedReports, cancelTurn } from './terminal-test-clock.js';
 import { agyProgram } from '../src/terminal/programs.js';
 import { hasTmux, home, host, sent, setUp, job, codexJob, kimiJob, tmux, until, endsLost, pastLostEndWindows } from './terminal-host-helpers.js';
 
@@ -17,38 +16,8 @@ const within = (run: Promise<RunResult>, ms: number) => Promise.race([run, new P
 const agyJob = (key: string, prompt: string, more: Partial<TermJob['input']> = {}) => ({ ...job(key, prompt, more), program: agyProgram, bin: FAKE_AGY, home: join(home, 'agy', key), signedOut: AGY_SIGNED_OUT });
 const jobs = { claude: job, codex: codexJob, kimi: kimiJob, antigravity: agyJob };
 const pidOf = (key: string) => tmux.programPid(`a-${key}`);
-/* Initial idle is legitimate until the program accepts the prompt. Every report after acceptance counts. */
-function reports(jobId: string) {
-  const all = sent.filter((m): m is Extract<NodeMessage, { type: 'job.program' }> => m.type === 'job.program' && m.jobId === jobId);
-  const accepted = all.findIndex(m => m.state === 'thinking' || m.state === 'tool');
-  return accepted < 0 ? [] : all.slice(accepted);
-}
+const reports = (jobId: string) => acceptedReports(sent, jobId);
 const states = (jobId: string) => reports(jobId).map(m => m.state);
-
-/* Advance the grace period only after tmux actually delivered Escape. Its I/O keeps using real time. */
-async function cancelTurn(stop: AbortController, run: Promise<RunResult>): Promise<RunResult> {
-  const command = tmux.run.bind(tmux);
-  let escaped = false;
-  const pressed = vi.spyOn(tmux, 'run').mockImplementation(async (args, input) => {
-    const out = await command(args, input);
-    if (args[0] === 'send-keys' && args.includes('Escape')) escaped = true;
-    return out;
-  });
-  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-  try {
-    stop.abort();
-    for (let n = 0; !escaped && n < 200; n++) {
-      await vi.advanceTimersByTimeAsync(100);
-      await pause(10);
-    }
-    expect(escaped).toBe(true);
-    await vi.advanceTimersByTimeAsync(5000);
-    return await run;
-  } finally {
-    vi.useRealTimers();
-    pressed.mockRestore();
-  }
-}
 
 /* The keys the host presses from now on, and whether it ends the program. */
 function touches() {
@@ -91,7 +60,7 @@ describe.skipIf(!hasTmux)('turns end only on an explicit signal', () => {
     expect(await pidOf(key)).toBe(pid);
     expect(host['agents'].get(key)!.sessionId).toBe(sessionId);
     clock.mockRestore();
-    expect(await cancelTurn(stop, run)).toMatchObject({ ok: false, error: 'cancelled', sessionId });
+    expect(await cancelTurn(tmux, stop, run)).toMatchObject({ ok: false, error: 'cancelled', sessionId });
     expect(await pidOf(key)).toBe(pid);
   });
 
@@ -109,7 +78,7 @@ describe.skipIf(!hasTmux)('turns end only on an explicit signal', () => {
     expect(touched()).toEqual({ keys: [], killed: 0 });
     expect(await pidOf(key)).toBe(pid);
     clock.mockRestore();
-    expect(await cancelTurn(stop, run)).toMatchObject({ ok: false, error: 'cancelled' });
+    expect(await cancelTurn(tmux, stop, run)).toMatchObject({ ok: false, error: 'cancelled' });
   });
 
   it('keeps Claude Code thinking with its current spinner beyond three former lost-end windows and ends on its Stop hook', async () => {
@@ -141,7 +110,7 @@ describe.skipIf(!hasTmux)('turns end only on an explicit signal', () => {
     expect(await within(run, 400)).toBe(STILL_WAITING);
     clock.mockRestore();
     expect(new Set(states('job-wait-kimi'))).toEqual(new Set(['thinking']));
-    expect(await cancelTurn(stop, run)).toMatchObject({ ok: false, error: 'cancelled' });
+    expect(await cancelTurn(tmux, stop, run)).toMatchObject({ ok: false, error: 'cancelled' });
   });
 
   /* agy's stream can break off mid-turn, as with a 503 from its backend, while agy works on and never says the turn
@@ -163,7 +132,7 @@ describe.skipIf(!hasTmux)('turns end only on an explicit signal', () => {
     const tool = told.filter(m => m.state === 'tool');
     expect(tool.length).toBeGreaterThanOrEqual(3);
     expect(new Set(tool.map(m => m.screenAt)).size).toBe(1);
-    expect(await cancelTurn(stop, run)).toMatchObject({ ok: false, error: 'cancelled' });
+    expect(await cancelTurn(tmux, stop, run)).toMatchObject({ ok: false, error: 'cancelled' });
   });
 
   it.each([
