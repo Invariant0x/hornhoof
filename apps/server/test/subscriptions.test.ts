@@ -1,8 +1,9 @@
+import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import type { Db } from '../src/db/client.js';
-import { agents, companies, departments, jobs, nodeCodes, nodes, people, personAccess, subscriptions, tasks, teams, testParts, testRuns } from '../src/db/schema.js';
+import { agents, attachments, companies, departments, jobs, nodeCodes, nodes, people, personAccess, programDeliveries, programInstances, programOperatorActions, programOperatorCases, programOperatorSignals, subscriptions, tasks, teams, testParts, testRuns } from '../src/db/schema.js';
 import { as, invitePerson, SETUP, setUpCompany, TEST_API_KEY, testApp } from './helpers.js';
 
 const COMMAND = /^curl -fsSL http:\/\/localhost:8080\/install\.sh \| bash -s -- --join ([A-Za-z0-9_-]{43})$/;
@@ -28,6 +29,21 @@ async function companyWithMaria() {
   const where = await places(db);
   const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [where.marketing.id] } });
   return { app, db, ceo, maria, ...where };
+}
+
+async function programHistory(db: Db, node: typeof nodes.$inferSelect) {
+  const companyId = node.companyId;
+  const [agent] = await db.insert(agents).values({ companyId, name: 'Developer', kind: 'worker', model: '', subscriptionId: node.subscriptionId, nodeId: node.id }).returning();
+  const [job] = await db.insert(jobs).values({ companyId, agentId: agent!.id, subscriptionId: node.subscriptionId!, nodeId: node.id, prompt: 'Past work', timeoutMs: 1000, status: 'done', kind: 'conversation' }).returning();
+  const [instance] = await db.insert(programInstances).values({ id: randomUUID(), companyId, agentId: agent!.id, nodeId: node.id, exited: true }).returning();
+  const [delivery] = await db.insert(programDeliveries).values({ companyId, agentId: agent!.id, jobId: job!.id, nodeId: node.id, instance: instance!.id, ordinal: 1, reference: 'past-work', kind: 'assignment', digest: 'past-work', outcome: 'taken' }).returning();
+  const [incident] = await db.insert(programOperatorCases).values({ companyId, agentId: agent!.id, jobId: job!.id, nodeId: node.id, instance: instance!.id, deliveryId: delivery!.id, reason: 'assignment_unrecorded', evidenceKey: delivery!.id, capability: randomUUID(), status: 'resolved', deadlineAt: new Date() }).returning();
+  const [signal] = await db.insert(programOperatorSignals).values({ companyId, agentId: agent!.id, instance: instance!.id, reason: 'assignment_unrecorded', evidenceKey: delivery!.id, caseId: incident!.id }).returning();
+  const [action] = await db.insert(programOperatorActions).values({ id: randomUUID(), companyId, caseId: incident!.id, operatorAgentId: agent!.id, operatorJobId: job!.id, actorName: agent!.name, agentId: agent!.id, jobId: job!.id, instance: instance!.id, snapshot: 'past-screen', generation: 1, key: 'Enter', reason: 'Continue setup', digest: 'past-action', result: 'applied' }).returning();
+  const screenshot = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7ioAAAAASUVORK5CYII=', 'base64');
+  const [picture] = await db.insert(attachments).values({ companyId, agentId: agent!.id, jobId: job!.id, operatorCaseId: incident!.id, mediaType: 'image/png', bytes: screenshot, size: screenshot.length }).returning();
+  const [shownCase] = await db.update(programOperatorCases).set({ pictureId: picture!.id }).where(eq(programOperatorCases.id, incident!.id)).returning();
+  return { agent: agent!, job: job!, instance: instance!, delivery: delivery!, incident: shownCase!, signal: signal!, action: action!, picture: picture! };
 }
 
 describe('POST /api/subscriptions/connect', () => {
@@ -113,6 +129,36 @@ describe('POST /api/subscriptions/connect', () => {
     expect(await db.select().from(nodes)).toHaveLength(1);
     expect((await db.select().from(jobs).where(eq(jobs.id, pastJob!.id)))[0]).toMatchObject({ id: pastJob!.id, subscriptionId: subId, nodeId: null, status: 'done' });
     expect((await db.select().from(agents).where(eq(agents.id, bruno!.id)))[0]!.nodeId).toBeNull();
+  });
+
+  it('reconnects a removed plan with program history and preserves another node and its history', async () => {
+    const { app, db, ceo } = await companyWithMaria();
+    const first = (await connect(app, ceo, ['codex', 'claude'])).json();
+    const subId = first.subscriptions[0].id as string;
+    const otherSubId = first.subscriptions[1].id as string;
+    const joined = await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code: first.command.split('--join ')[1], machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' } });
+    expect(joined.statusCode).toBe(200);
+    const [oldNode] = await db.select().from(nodes).where(eq(nodes.subscriptionId, subId));
+    const [otherNode] = await db.select().from(nodes).where(eq(nodes.subscriptionId, otherSubId));
+    const old = await programHistory(db, oldNode!);
+    const other = await programHistory(db, otherNode!);
+    await db.insert(programDeliveries).values({ companyId: old.job.companyId, agentId: old.agent.id, jobId: old.job.id, nodeId: oldNode!.id, instance: old.instance.id, ordinal: 2, reference: 'continued-work', kind: 'assignment', digest: 'continued-work', sourceDeliveryId: old.delivery.id });
+    await db.update(programDeliveries).set({ sourceDeliveryId: old.delivery.id }).where(eq(programDeliveries.id, other.delivery.id));
+
+    expect((await app.inject({ method: 'DELETE', url: `/api/subscriptions/${subId}`, ...as(ceo) })).statusCode).toBe(204);
+    const reconnected = await connect(app, ceo, ['codex']);
+
+    expect(reconnected.statusCode).toBe(201);
+    expect(reconnected.json().subscriptions[0]).toMatchObject({ id: subId, status: 'waiting_machine', machines: [] });
+    expect(await db.select().from(nodes)).toEqual([otherNode]);
+    expect(await db.select().from(programInstances)).toEqual([other.instance]);
+    expect(await db.select().from(programDeliveries)).toEqual([other.delivery]);
+    expect(await db.select().from(programOperatorCases)).toEqual([other.incident]);
+    expect(await db.select().from(programOperatorSignals)).toEqual([other.signal]);
+    expect(await db.select().from(programOperatorActions)).toEqual([other.action]);
+    expect((await db.select().from(attachments).where(eq(attachments.id, old.picture.id)))[0]).toEqual({ ...old.picture, operatorCaseId: null });
+    expect((await db.select().from(attachments).where(eq(attachments.id, other.picture.id)))[0]).toEqual(other.picture);
+    expect((await db.select().from(jobs).where(eq(jobs.id, old.job.id)))[0]).toEqual({ ...old.job, nodeId: null });
   });
 
   it('refuses a plan that waits for its first setup on its machine, as it is signed in there', async () => {

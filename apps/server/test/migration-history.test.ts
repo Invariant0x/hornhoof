@@ -9,6 +9,7 @@ import { describe, expect, it, onTestFinished } from 'vitest';
 import { applyMissingMigrations, MIGRATIONS } from '../src/db/client.js';
 
 type Entry = { idx: number; version: string; when: number; tag: string; breakpoints: boolean };
+type SnapshotRow = { row: Record<string, unknown> };
 const mainHistory = [{ idx: 46, when: 1793700000000, tag: '0046_turn_failures' }];
 const turnHistory = [
   { idx: 45, when: 1793714531704, tag: '0045_task_lookup_indexes' },
@@ -72,7 +73,7 @@ describe('migration histories merged in turn 5', () => {
       ? { jobs: ['requested_prompt'], tasks: ['external_wait'], node_codes: ['dismissed_subscription_ids'] }
       : { jobs: ['failure', 'not_before', 'restarted_at'], tasks: [], node_codes: [] };
     const tables = ['companies', 'people', 'subscriptions', 'agents', 'tasks', 'jobs', 'agent_events', 'node_codes'] as const;
-    const before = await Promise.all(tables.map(table => source.query(`select to_jsonb(r) as row from ${table} r`)));
+    const before = await Promise.all(tables.map(table => source.query<SnapshotRow>(`select to_jsonb(r) as row from ${table} r`)));
     const recordedBefore = (await oldDb.execute(sql`select id, hash, created_at from drizzle.__drizzle_migrations order by id`)).rows;
 
     const copy = new PGlite({ loadDataDir: await source.dumpDataDir('none') });
@@ -83,8 +84,11 @@ describe('migration histories merged in turn 5', () => {
 
     for (const [index, table] of tables.entries()) {
       const omitted = table in newColumns ? newColumns[table as keyof typeof newColumns] : [];
-      const after = await copy.query(`select to_jsonb(r) - $1::text[] as row from ${table} r`, [omitted]);
-      expect(after.rows, table).toEqual(before[index]!.rows);
+      const after = await copy.query<SnapshotRow>(`select to_jsonb(r) - $1::text[] as row from ${table} r`, [omitted]);
+      const expected = table === 'subscriptions'
+        ? before[index]!.rows.map(row => ({ row: { ...row.row, limits_updated_at: null } }))
+        : before[index]!.rows;
+      expect(after.rows, table).toEqual(expected);
     }
     const recorded = (await db.execute(sql`select id, hash, created_at from drizzle.__drizzle_migrations order by id`)).rows;
     expect(recorded).toEqual(expect.arrayContaining(recordedBefore));

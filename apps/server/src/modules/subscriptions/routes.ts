@@ -6,7 +6,7 @@ import type { Ctx } from '../../app.js';
 import { requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
 import { encryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
-import { agents, departments, jobs, machines, nodes, people, planCredentials, subscriptions, teams, testParts, type SUBSCRIPTION_STATUSES } from '../../db/schema.js';
+import { agents, attachments, departments, jobs, machines, nodes, people, planCredentials, programDeliveries, programInstances, programOperatorActions, programOperatorCases, programOperatorSignals, subscriptions, teams, testParts, type SUBSCRIPTION_STATUSES } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { runningAgents } from '../agents/running.js';
 import { servesWholeCompany } from '../tools/staff.js';
@@ -85,6 +85,16 @@ async function clearPlanNodes(tx: Db, resetIds: string[]): Promise<string[]> {
   await tx.update(jobs).set({ nodeId: null }).where(inArray(jobs.nodeId, goneNodes));
   await tx.update(testParts).set({ nodeId: null }).where(inArray(testParts.nodeId, goneNodes));
   await tx.delete(planCredentials).where(inArray(planCredentials.subscriptionId, resetIds));
+  const goneCases = tx.select({ id: programOperatorCases.id }).from(programOperatorCases).where(inArray(programOperatorCases.nodeId, goneNodes));
+  const goneDeliveries = tx.select({ id: programDeliveries.id }).from(programDeliveries).where(inArray(programDeliveries.nodeId, goneNodes));
+  await tx.delete(programOperatorActions).where(inArray(programOperatorActions.caseId, goneCases));
+  await tx.delete(programOperatorSignals).where(inArray(programOperatorSignals.caseId, goneCases));
+  /* Keep conversation pictures after their physical program's investigation is gone. */
+  await tx.update(attachments).set({ operatorCaseId: null }).where(inArray(attachments.operatorCaseId, goneCases));
+  await tx.delete(programOperatorCases).where(inArray(programOperatorCases.nodeId, goneNodes));
+  await tx.update(programDeliveries).set({ sourceDeliveryId: null }).where(inArray(programDeliveries.sourceDeliveryId, goneDeliveries));
+  await tx.delete(programDeliveries).where(inArray(programDeliveries.nodeId, goneNodes));
+  await tx.delete(programInstances).where(inArray(programInstances.nodeId, goneNodes));
   const removed = await tx.delete(nodes).where(inArray(nodes.subscriptionId, resetIds)).returning({ id: nodes.id });
   return removed.map(n => n.id);
 }
