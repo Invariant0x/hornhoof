@@ -9,7 +9,7 @@ import { wordsForTurn } from '../conversation/turn-words.js';
 import { CLOSED, type Task, type Tx, type Wake } from './engine.js';
 
 /* Kept in the wake's existing message JSON, so its purpose and phase survive a server restart. */
-const State = z.object({ why: z.string(), again: z.boolean().optional(), status: z.enum(TASK_STATUSES), stage: z.number().int().nonnegative(), merging: z.boolean(), version: z.number().int().nonnegative().optional(), to: z.string().optional() });
+const State = z.object({ why: z.string(), again: z.boolean().optional(), mechanical: z.boolean().optional(), status: z.enum(TASK_STATUSES), stage: z.number().int().nonnegative(), merging: z.boolean(), version: z.number().int().nonnegative().optional(), to: z.string().optional() });
 export type TaskWake = z.infer<typeof State>;
 type TaskTurn = { id: string; agentId: string | null; taskId: string | null };
 type Store = Db | Tx;
@@ -20,7 +20,7 @@ const REVIEW = new Set(['review', 'turn_review']);
 const RUN_ENDS = new Set(['tests', 'work']);
 
 /* A review wake carries words only for the reviewer who sent the work back: its own findings, to check the fixes for. */
-export const taskWakeOf = (task: Task, wake: Pick<Wake, 'why' | 'version' | 'text'>): TaskWake => ({ why: wake.why, ...(wake.why === 'review' && wake.text ? { again: true } : {}), status: task.status, stage: task.stage, merging: task.merging, version: wake.version });
+export const taskWakeOf = (task: Task, wake: Pick<Wake, 'why' | 'version' | 'text' | 'again' | 'mechanical'>): TaskWake => ({ why: wake.why, ...(wake.why === 'review' && wake.again === true ? { again: true } : {}), ...(wake.why === 'changes' && wake.mechanical === true ? { mechanical: true } : {}), status: task.status, stage: task.stage, merging: task.merging, version: wake.version });
 
 /* Legacy turns have no snapshot. Only their known server-written notice prefixes identify a notice to the giver. */
 const isNotice = (state: TaskWake | null): boolean => state !== null && NOTICES.has(state.why);

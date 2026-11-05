@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Work on task-460 from turn-8; Ivan Korol, no trailers; main is untouched.
-- Targeted tests only; no full suite, run_tests, mutation run or release workflow.
+- Targeted checks only; no full suite or release workflow. The head's later CEO decision requires every new T2 command through run_tests on a compatible platform-selected machine. Earlier local evidence keeps its actual origin; collect an already started background run, with no local fallback.
 - Exact lowercase 40-character reviewed/fix SHA; repository outages are explicit degraded results.
 - A turn review has one round. Only the original reviewer checks fixes for its own blocking security/data/spec finding. Medium comes from the existing effort policy.
 - Threshold 800 changed lines is an initial configuration, not a measured optimum. No speed improvement is claimed without a measurement.
@@ -40,7 +40,7 @@
 
 ### Task 2: Vertical review assignments
 
-**Files:** new review-plan.ts; modify compare.ts and engine.ts; test review-plan.test.ts and tasks-turn-review.test.ts.
+**Files:** new review-plan.ts; reuse existing CompareReader and modify engine.ts; test review-plan.test.ts and tasks-turn-review.test.ts.
 
 **Interfaces:** optional submit `review: { baseCommit }` records the source range resolved by the server. `planReview(slices, candidates, changedLines, contracts)` returns per-task assignments, an integration reviewer and explicit degraded reasons. Each assignment retains its own range even when paths overlap.
 
@@ -60,3 +60,10 @@
 - [ ] Implement input parsing, scoped findings, confirmation CAS/history and vendor counters. Noneligible task gate fixes advance through author proof without a fresh review; turn reviews never reopen.
 - [ ] Run all affected tests plus server types, test types, ESLint, crapper and dryer. Expect zero failures; document legacy metrics and missing formatter separately.
 - [ ] Commit, request one independent branch review, fix blocking findings once with RED/GREEN, push and merge into fresh turn-8 without force. Submit exact commits and evidence.
+
+## Head addenda implemented during Task 3
+
+- Explicit confirmations use immutable finding/revision/area provenance; author/head rights come from current server records. Confirmation is separate from fixed/PASS and retains revocation history.
+- Mechanical changes use server `Wake.mechanical` only for entirely structural mechanical failed verdicts. State retains that flag; task 459 owns its effort consumer. `Wake.again` is explicit and only a qualifying original reviewer fix produces it.
+- Run receipts, quality numbers and review lifecycle counters are separate. Producer 325 owns executing checks. The strict backend writer/reader port and unavailable behavior are documented in `docs/author-check-port.md`; real producer integration and three actual submissions belong to 325/331.
+- Tests cover source task scope, foreign quality provenance, missing stages/coverage, CRAP threshold and a changed newer receipt refusing fallback to an older PASS.

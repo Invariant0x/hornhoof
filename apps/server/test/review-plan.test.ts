@@ -1,7 +1,7 @@
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agents, companies, departments, people, subscriptions, taskEvents, tasks, turns } from '../src/db/schema.js';
-import { createTask, submit } from '../src/modules/tasks/engine.js';
+import { createTask, submit, verdict } from '../src/modules/tasks/engine.js';
 import { setUpCompany, testApp } from './helpers.js';
 
 const BASE = 'c'.repeat(40);
@@ -9,7 +9,7 @@ const HEAD = 'd'.repeat(40);
 const LEFT = 'a'.repeat(40);
 const RIGHT = 'b'.repeat(40);
 
-async function fixture({ lines = 801, independent = true, sources = true, integrator = false } = {}) {
+async function fixture({ lines = 801, independent = true, sources = true, integrator = false, increments = false } = {}) {
   const { app, db } = await testApp();
   await setUpCompany(app);
   const ctx = app.ctx;
@@ -17,7 +17,7 @@ async function fixture({ lines = 801, independent = true, sources = true, integr
   const companyId = company!.id;
   const [ceo] = await db.select().from(people);
   const [claude] = await db.select().from(subscriptions);
-  const [codex] = await db.insert(subscriptions).values({ companyId, provider: 'openai_api', kind: 'api', label: 'Other vendor', ownerPersonId: ceo!.id, status: 'ready' }).returning();
+  const [codex] = await db.insert(subscriptions).values({ companyId, provider: 'openai_api', kind: 'api_key', label: 'Other vendor', ownerPersonId: ceo!.id, status: 'ready' }).returning();
   const [dev] = await db.insert(departments).values({ companyId, templateKey: 'development', roleCode: 'DEV', repoUrl: 'https://github.com/acme/shop.git' }).returning();
   const hire = async (name: string, kind: 'worker' | 'head', roleKey: string, sub = claude!.id) =>
     (await db.insert(agents).values({ companyId, name, kind, roleKey, departmentId: dev!.id, subscriptionId: sub, model: '' }).returning())[0]!;
@@ -34,7 +34,7 @@ async function fixture({ lines = 801, independent = true, sources = true, integr
   const first = await member(left.id, 'Checkout API');
   const second = await member(right.id, 'Checkout page');
   ctx.readCommit = async (_repo, want) => ({ branch: 'task' in want ? `task-${want.task}` : want.branch, commitSha: 'task' in want ? want.task === first.number ? LEFT : RIGHT : HEAD });
-  const diff = (n: number) => Array.from({ length: n }, (_, i) => `+value${i}`).join('\n');
+  const diff = (n: number) => Array.from({ length: n }, (_, i) => increments ? `+++counter${i};` : `+value${i}`).join('\n');
   ctx.readCompare = async (_repo, refs) => ({ complete: true, baseSha: BASE, headSha: refs.head === LEFT ? LEFT : refs.head === RIGHT ? RIGHT : HEAD, paths: ['apps/shop/cart.ts', 'packages/protocol/src/index.ts'], diff: diff(refs.head.startsWith('turn-') ? lines : 401) });
   const merge = async (author: string, id: string) => {
     await submit(ctx, author, id, { summary: 'Done', evidence: 'Checks', ...(sources ? { review: { baseCommit: BASE } } : {}) });
@@ -68,6 +68,11 @@ describe('reviewing vertical task slices', () => {
     expect(made.data.reviewPlan).toMatchObject({ threshold: 800, large: false });
   });
 
+  it('counts increment statements in hunk patches as changed lines', async () => {
+    const { made } = await fixture({ increments: true });
+    expect(made.data.reviewPlan).toMatchObject({ large: true });
+  });
+
   it('assigns the common-contract connections to an independent integration reviewer', async () => {
     const { made, review, integrationReviewer } = await fixture({ integrator: true });
     expect(made.data.reviewPlan).toMatchObject({ integrationReviewerId: integrationReviewer!.id });
@@ -89,5 +94,22 @@ describe('reviewing vertical task slices', () => {
     expect(plan.degraded).toContain('source-inventory-unavailable');
     expect(new Set(plan.assignments.map(a => a.taskId))).toEqual(new Set([first.id, second.id]));
     expect(plan.assignments.every(a => a.paths.length === 0)).toBe(true);
+  });
+
+  it('binds a finding to its actual author area and rejects another reviewer area', async () => {
+    const f = await fixture();
+    const issue = { category: 'data' as const, blocking: true, path: 'apps/shop/cart.ts', line: 1, harm: 'The buyer loses the cart total.' };
+    await expect(verdict(f.ctx, f.reviewCodex!.id, f.review.id, { pass: false, comment: 'Wrong area', reviewedCommit: HEAD, issues: [{ ...issue, taskId: f.second.id }] })).rejects.toMatchObject({ reason: 'task_invalid' });
+    await expect(verdict(f.ctx, f.reviewCodex!.id, f.review.id, { pass: false, comment: 'Wrong path', reviewedCommit: HEAD, issues: [{ ...issue, taskId: f.first.id, path: 'other/logic.ts' }] })).rejects.toMatchObject({ reason: 'task_invalid' });
+    await verdict(f.ctx, f.reviewCodex!.id, f.review.id, { pass: false, comment: 'Lost total', reviewedCommit: HEAD, issues: [{ ...issue, taskId: f.first.id }] });
+    const [event] = await f.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, f.review.id), eq(taskEvents.kind, 'verdict')));
+    expect(event!.data.issues).toEqual([expect.objectContaining({ taskId: f.first.id, authorId: f.left.id, reviewerId: f.reviewCodex!.id, reviewedCommit: HEAD })]);
+  });
+
+  it('lets the named integration reviewer inspect shared contracts across slices', async () => {
+    const f = await fixture({ integrator: true });
+    const result = await verdict(f.ctx, f.integrationReviewer!.id, f.review.id, { pass: false, comment: 'The contract disagrees', reviewedCommit: HEAD, issues: [{ taskId: f.second.id, category: 'spec', blocking: true, path: 'packages/protocol/src/index.ts', line: 2, harm: 'The page cannot read the API result.' }] });
+    expect(result.task.panel).not.toContain(f.integrationReviewer!.id);
+    expect(result.task.panel).toHaveLength(2);
   });
 });

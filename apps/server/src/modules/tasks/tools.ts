@@ -20,8 +20,9 @@ import { WaitInput, waitFor } from './external-wait.js';
 import { pipelineReport } from './pipeline-report.js';
 import { commitProof, proofLine } from '../testruns/commit-proof.js';
 import { keptEvidence, noProofNote, taskEvidence } from '../testruns/evidence.js';
-import { ReviewSha, ReviewSubmission, reviewContext } from './review-context.js';
-import { taskReviewPlan } from './review-plan.js';
+import { ReviewSha, ReviewSubmission } from './review-context.js';
+import { pipelineFindings, reviewDetails } from './review-details.js';
+import { ConfirmationInput, confirmFinding, IssueInput } from './review-findings.js';
 
 export type ToolJob = { id: string; companyId: string; agentId: string; agentKind: 'orchestrator' | 'head' | 'worker' };
 type Agent = typeof agents.$inferSelect;
@@ -184,12 +185,12 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     {
       description:
         'One task in full: its body (the current truth), gates and where it stands, subtasks, open questions and its log. A long log comes with its newest lines, and logLeftOut counts the older ones left out. ' +
-        "testEvidence: its newest test runs, and in a review of a turn or a department's task of a turn those on the turn's branch, each with the exact commit it pinned and whether its branch still stands there. Only a run with proves true counts as evidence.",
+        "testEvidence: its newest test runs, and in a review of a turn or a department's task of a turn those on the turn's branch, each with the exact commit it pinned and whether its branch still stands there. Only a run with proves true counts as evidence. review pins an immutable candidate and author receipts; review.quality is structured producer evidence or unavailable; gateCounts is labeled review-lifecycle. reviewPlan assigns task areas/common contracts and an integration reviewer. fixReview limits a repeat to its own original finding IDs and exact range. reviewFindings contains explicit confirmations and vendor provenance.",
       inputSchema: { task: Ref },
     },
     async ({ task: ref }) =>
       find(ref).then(
-        async ({ agent, task }) => say(fitted({ ...await taskDetail(ctx, task, t => sees(agent, t)), review: await reviewContext(db, task.id), reviewPlan: await taskReviewPlan(db, task.id) })),
+        async ({ agent, task }) => say(fitted({ ...await taskDetail(ctx, task, t => sees(agent, t)), ...await reviewDetails(db, task.id, agent.id) })),
         (err: unknown) => (err instanceof ApiError ? say(err.message, true) : Promise.reject(err)),
       ),
   );
@@ -296,7 +297,11 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
           'Each number comes with the previous turn and the baseline turn and its change in percent. By default the running turn, else the last that ran. A department with described false has no description to take its own numbers from.',
         inputSchema: { turn: Turn.optional() },
       },
-      async ({ turn }) => run(async () => ({ text: JSON.stringify(await pipelineReport(db, job.companyId, turn), english) })),
+      async ({ turn }) => run(async () => {
+        const report = await pipelineReport(db, job.companyId, turn);
+        const reviewFindings = await pipelineFindings(db, job.companyId, report);
+        return { text: JSON.stringify({ ...report, reviewFindings }, english) };
+      }),
     );
     server.registerTool(
       'plan_turn',
@@ -443,7 +448,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     server.registerTool(
       'submit',
       {
-        description: 'Hands your finished work on a task to its first gate (or closes it when it has none). summary: what you did; evidence: the command you ran and what it printed, the link, the check.',
+        description: 'Hands your finished work on a task to its first gate (or closes it when it has none). summary: what you did; evidence: the command you ran and what it printed, the link, the check. Optional review.baseCommit pins the source range for your vertical task area; the server reads its head commit.',
         inputSchema: { task: Ref, summary: Text.trim().min(1), evidence: Text.trim().min(1), review: ReviewSubmission.optional() },
       },
       async ({ task: ref, summary, evidence, review }) =>
@@ -468,17 +473,26 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
       'verdict',
       {
         description:
-          'Your verdict as the gate a task stands at: pass sends it to the next gate (or finishes it), changes sends it back to its executor. comment: your reasons, always. findings: how many separate problems your comment names, 0 when there are none. Its log keeps the test runs it stood on, with the commits they pinned.',
-        inputSchema: { task: Ref, pass: z.boolean(), comment: Text.trim().min(1), findings: z.number().int().min(0).max(99).optional(), reviewedCommit: ReviewSha.optional() },
+          'Your verdict as the gate a task stands at: pass sends it to the next gate (or finishes it), changes sends it back to its executor. comment: your reasons, always. findings: how many separate problems your comment names, 0 when there are none. reviewedCommit names the pinned candidate. issues records category/blocking/path/line/harm and taskId for a vertical area. Only original blocking security/data/spec findings get a same-reviewer fix look; repeats add no new issues. Legacy findings is not a confirmed count. Its log retains run/commit provenance.',
+        inputSchema: { task: Ref, pass: z.boolean(), comment: Text.trim().min(1), findings: z.number().int().min(0).max(99).optional(), reviewedCommit: ReviewSha.optional(), issues: z.array(IssueInput).max(99).optional() },
       },
-      async ({ task: ref, pass, comment: why, findings, reviewedCommit }) =>
+      async ({ task: ref, pass, comment: why, findings, reviewedCommit, issues }) =>
         run(async () => {
           const { task } = await find(ref);
           plain(task, why);
           const evidence = await taskEvidence(ctx, task);
-          const moved = await verdict(ctx, job.agentId, task.id, { pass, comment: why, findings, reviewedCommit, evidence: keptEvidence(evidence) });
+          const moved = await verdict(ctx, job.agentId, task.id, { pass, comment: why, findings, reviewedCommit, issues, evidence: keptEvidence(evidence) });
           return { text: `Recorded. ${await where(moved.task)}${noProofNote(evidence, pass)}`, moved };
         }),
+    );
+    server.registerTool(
+      'confirm_finding',
+      { description: 'The actual area author or its head explicitly confirms or rejects a structured finding. Read its findingId and revision from task.reviewFindings. An author must name its current exact fixCommit; a head may confirm existence before a fix. This records existence only; it never passes a gate or removes a blocking finding. History and vendor counts retain provenance.', inputSchema: { task: Ref, ...ConfirmationInput.shape } },
+      async ({ task: ref, ...input }) => run(async () => {
+        const { task } = await find(ref);
+        await confirmFinding(ctx, job.agentId, task, input);
+        return { text: 'The finding confirmation is recorded; its gate and fix status are unchanged.' };
+      }),
     );
   }
 

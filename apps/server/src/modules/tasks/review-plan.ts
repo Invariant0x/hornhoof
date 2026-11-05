@@ -5,6 +5,7 @@ import { taskEvents } from '../../db/schema.js';
 import type { CompareResult } from '../testruns/compare.js';
 import type { Task, Tx } from './engine.js';
 import { changedLines, reviewContext, ReviewSha, type Review } from './review-context.js';
+import { QualityEvidence, unavailableQuality } from './review-quality.js';
 
 /* Initial policy from task 310; this is not an empirically selected optimum. */
 const THRESHOLD = 800;
@@ -12,7 +13,8 @@ const Assignment = z.object({
   reviewerId: z.string(), taskId: z.string(), revision: z.string(), authorId: z.string(), authorVendor: z.string().nullable(),
   baseCommit: ReviewSha.nullable(), commit: ReviewSha.nullable(), paths: z.array(z.string()), commonContracts: z.array(z.string()),
   runs: z.array(z.object({ id: z.string(), commit: z.string().nullable(), verified: z.boolean() }).passthrough()),
-  gateCounts: z.object({ passed: z.number(), returned: z.number() }),
+  gateCounts: z.object({ source: z.literal('review-lifecycle').default('review-lifecycle'), passed: z.number(), returned: z.number() }),
+  quality: QualityEvidence.default(unavailableQuality),
 });
 export const ReviewPlan = z.object({ threshold: z.number(), large: z.boolean(), assignments: z.array(Assignment), integrationReviewerId: z.string().nullable(), degraded: z.array(z.string()) });
 export type Plan = z.infer<typeof ReviewPlan>;
@@ -27,43 +29,69 @@ function eligible(slice: Slice, candidates: Candidate[]): Candidate[] {
 }
 
 function assigned(slice: Slice, candidate: Candidate, commonContracts: string[]): Plan['assignments'][number] {
-  const review = slice.review;
-  return {
-    reviewerId: candidate.reviewerId, taskId: slice.taskId, revision: review?.revision ?? randomUUID(), authorId: slice.authorId, authorVendor: review?.authorVendor ?? null,
-    baseCommit: review?.source?.baseCommit ?? null, commit: review?.commit ?? null, paths: review?.source?.paths ?? [], commonContracts,
-    runs: review?.runs ?? [], gateCounts: review?.gateCounts ?? { passed: 0, returned: 0 },
-  };
+  const review = slice.review ?? { revision: randomUUID(), authorVendor: null, commit: null, source: null, runs: [], gateCounts: { source: 'review-lifecycle' as const, passed: 0, returned: 0 }, quality: unavailableQuality() };
+  const source = review.source ?? { baseCommit: null, paths: [] };
+  return { reviewerId: candidate.reviewerId, taskId: slice.taskId, revision: review.revision, authorId: slice.authorId, authorVendor: review.authorVendor, baseCommit: source.baseCommit, commit: review.commit, paths: source.paths, commonContracts, runs: review.runs, gateCounts: review.gateCounts, quality: review.quality };
+}
+
+function candidateGroups(pool: Candidate[], large: boolean): Candidate[][] {
+  const groups = new Map<string, Candidate[]>();
+  for (const candidate of pool) {
+    const key = large ? candidate.role : `${candidate.role}:${candidate.vendor}`;
+    groups.set(key, [...(groups.get(key) ?? []), candidate]);
+  }
+  return [...groups.values()];
+}
+
+function leastLoaded(pool: Candidate[], loads: Map<string, number>): Candidate {
+  return pool.toSorted((a, b) => (loads.get(a.reviewerId) ?? 0) - (loads.get(b.reviewerId) ?? 0))[0]!;
+}
+
+function assignmentsFor(slices: Slice[], candidates: Candidate[], large: boolean, common: string[]): Plan['assignments'] {
+  const assignments: Plan['assignments'] = [];
+  const loads = new Map<string, number>();
+  for (const slice of slices) {
+    for (const group of candidateGroups(eligible(slice, candidates), large)) {
+      const best = leastLoaded(group, loads);
+      assignments.push(assigned(slice, best, common));
+      loads.set(best.reviewerId, (loads.get(best.reviewerId) ?? 0) + 1);
+    }
+  }
+  return assignments;
+}
+
+function missingReviewers(slices: Slice[], candidates: Candidate[]): string[] {
+  const missing = new Set<string>();
+  const roles = new Set(candidates.map(c => c.role));
+  for (const slice of slices) {
+    const pool = eligible(slice, candidates);
+    if (!pool.length) missing.add('independent-reviewer-unavailable');
+    for (const role of roles) if (!pool.some(c => c.role === role)) missing.add(`independent-reviewer-unavailable:${slice.taskId}:${role}`);
+  }
+  return [...missing];
+}
+
+function integrationReviewer(slices: Slice[], candidates: Candidate[]): string | null {
+  const authors = new Set(slices.map(s => s.review?.authorVendor));
+  return candidates.find(candidate => candidate.vendor && !authors.has(candidate.vendor))?.reviewerId ?? null;
+}
+
+function planConcerns(slices: Slice[], candidates: Candidate[], comparison: CompareResult, large: boolean, assignments: Plan['assignments'], integrator: string | null): string[] {
+  const concerns = missingReviewers(slices, candidates);
+  if (!comparison.complete) concerns.push('comparison-unavailable');
+  if (slices.some(slice => !slice.review?.source)) concerns.push('source-inventory-unavailable');
+  if (large && slices.length < 2) concerns.push('vertical-task-slices-required');
+  if (large && new Set(assignments.map(a => a.reviewerId)).size < 2) concerns.push('two-independent-reviewers-unavailable');
+  if (!integrator) concerns.push('integration-reviewer-unavailable');
+  return concerns;
 }
 
 export function planReview(slices: Slice[], candidates: Candidate[], comparison: CompareResult): Plan {
   const large = comparison.complete && changedLines(comparison.diff) > THRESHOLD;
   const common = [...CONTRACTS, ...(comparison.complete ? comparison.paths.filter(contractPath) : [])];
-  const degraded = new Set<string>();
-  if (!comparison.complete) degraded.add('comparison-unavailable');
-  if (slices.some(s => !s.review?.source)) degraded.add('source-inventory-unavailable');
-  if (large && slices.length < 2) degraded.add('vertical-task-slices-required');
-  const assignments: Plan['assignments'] = [];
-  const loads = new Map<string, number>();
-  for (const slice of slices) {
-    const pool = eligible(slice, candidates);
-    for (const role of new Set(candidates.map(c => c.role))) if (!pool.some(c => c.role === role)) degraded.add(`independent-reviewer-unavailable:${slice.taskId}:${role}`);
-    const groups = new Map<string, Candidate[]>();
-    for (const c of pool) {
-      const key = large ? c.role : `${c.role}:${c.vendor}`;
-      groups.set(key, [...(groups.get(key) ?? []), c]);
-    }
-    if (!pool.length) degraded.add('independent-reviewer-unavailable');
-    for (const group of groups.values()) {
-      const best = group.toSorted((a, b) => (loads.get(a.reviewerId) ?? 0) - (loads.get(b.reviewerId) ?? 0))[0]!;
-      assignments.push(assigned(slice, best, common));
-      loads.set(best.reviewerId, (loads.get(best.reviewerId) ?? 0) + 1);
-    }
-  }
-  if (large && loads.size < 2) degraded.add('two-independent-reviewers-unavailable');
-  const contractAuthors = new Set(slices.filter(s => s.review?.source?.paths.some(contractPath)).flatMap(s => s.review?.authorVendor ? [s.review.authorVendor] : []));
-  const integrator = candidates.find(c => c.vendor && !contractAuthors.has(c.vendor) && slices.every(s => s.review?.authorVendor !== c.vendor));
-  if (!integrator) degraded.add('integration-reviewer-unavailable');
-  return { threshold: THRESHOLD, large, assignments, integrationReviewerId: integrator?.reviewerId ?? null, degraded: [...degraded] };
+  const assignments = assignmentsFor(slices, candidates, large, common);
+  const integrationReviewerId = integrationReviewer(slices, candidates);
+  return { threshold: THRESHOLD, large, assignments, integrationReviewerId, degraded: planConcerns(slices, candidates, comparison, large, assignments, integrationReviewerId) };
 }
 
 /* Each code task remains its own slice, including when two source ranges touch the same file. */
@@ -80,4 +108,9 @@ export async function taskReviewPlan(db: Tx | import('../../db/client.js').Db, t
   const rows = await db.select({ data: taskEvents.data }).from(taskEvents).where(eq(taskEvents.taskId, taskId)).orderBy(asc(taskEvents.id));
   const found = rows.map(row => ReviewPlan.safeParse(row.data.reviewPlan)).findLast(parsed => parsed.success);
   return found?.success ? found.data : null;
+}
+
+export async function degradedReviewNotes(db: import('../../db/client.js').Db, taskId: string): Promise<string[]> {
+  const plan = await taskReviewPlan(db, taskId);
+  return plan ? plan.degraded.map(reason => `Degraded review: ${reason}. The head must settle this before acceptance.`) : [];
 }

@@ -1,6 +1,6 @@
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agentEvents, agents, jobs, people, subscriptions, tasks } from '../src/db/schema.js';
+import { agentEvents, agents, departments, jobs, people, subscriptions, tasks } from '../src/db/schema.js';
 import { insertTurn, pump } from '../src/modules/conversation/queue.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
@@ -20,6 +20,12 @@ async function gateCompany() {
   const { ctx, db } = c;
   await db.update(subscriptions).set({ models: [{ id: 'm', name: 'M', efforts: LEVELS }] }).where(eq(subscriptions.id, c.sub.id));
   const [person] = await db.select().from(people);
+  const [authorPlan] = await db.insert(subscriptions).values({ companyId: c.companyId, provider: 'openai_api', kind: 'api_key', label: 'Author vendor', ownerPersonId: person!.id, secretEnc: c.sub.secretEnc, status: 'ready', models: [{ id: 'm', name: 'M', efforts: LEVELS }] }).returning();
+  await db.update(agents).set({ subscriptionId: authorPlan!.id }).where(eq(agents.id, c.agent.id));
+  await db.update(departments).set({ repoUrl: 'https://github.com/acme/shop.git' }).where(eq(departments.id, c.dev.id));
+  const commits = new Map<number, string>();
+  ctx.readCommit = async (_repo, want) => ({ branch: 'task' in want ? `task-${want.task}` : want.branch, commitSha: 'task' in want ? commits.get(want.task)! : 'a'.repeat(40) });
+  ctx.readCompare = async (_repo, refs) => ({ complete: true, baseSha: refs.base, headSha: refs.head, paths: ['src/checkout.ts'], diff: '@@ -1 +1 @@\n-old\n+fixed' });
   const [rita] = await db.insert(agents).values({ companyId: c.companyId, name: 'Rita', kind: 'worker', roleKey: 'DEV-REV', departmentId: c.dev.id, subscriptionId: c.sub.id, model: '' }).returning();
   const reviewer = rita!;
   const bruno = c.agent;
@@ -34,8 +40,11 @@ async function gateCompany() {
   };
   /* Word for word the same hand-in is taken for a repeat of the last. */
   let handedIn = 0;
-  const handIn = async (t: Task) => wake((await submit(ctx, bruno.id, t.id, { summary: `Done, take ${++handedIn}.`, evidence: 'npm test' })).wakes);
-  const sendBack = async (t: Task, by = reviewer.id) => wake((await verdict(ctx, by, t.id, { pass: false, comment: 'A test is missing.' })).wakes);
+  const handIn = async (t: Task) => {
+    commits.set(t.number, (++handedIn).toString(16).padStart(40, '0'));
+    return wake((await submit(ctx, bruno.id, t.id, { summary: `Done, take ${handedIn}.`, evidence: 'Unit checks' })).wakes);
+  };
+  const sendBack = async (t: Task, by = reviewer.id) => wake((await verdict(ctx, by, t.id, { pass: false, comment: 'A test is missing.', reviewedCommit: commits.get(t.number)!, issues: [{ category: 'spec', blocking: true, path: 'src/checkout.ts', line: 1, harm: 'A buyer can be charged twice.' }] })).wakes);
   const running = async (agentId: string) => (await db.select().from(jobs).where(and(eq(jobs.agentId, agentId), eq(jobs.status, 'running'))))[0];
   const endTurn = async (agentId: string) =>
     handleNodeMessage(ctx, BUILTIN, { type: 'job.done', jobId: (await running(agentId))!.id, ok: true, sessionId: 'session', result: 'Done.', tail: '', error: null });
