@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { link, mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { link, mkdtemp, mkdir, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, onTestFinished } from 'vitest';
@@ -188,4 +188,17 @@ it('does not restore through a symlink used as the checkout root', async () => {
   await mkdir(outside); await symlink(outside, destination);
   await expect(cache.restoreCache(entry, destination, ctx)).rejects.toThrow(/checkout|symlink/i);
   expect(await readdir(outside)).toEqual([]);
+});
+
+
+it('breaks internal payload hardlinks into independent cache and consumer files', async () => {
+  const ctx = await context(), source = join(ctx.cacheRoot, 'source'); await mkdir(join(source, 'deps'), { recursive: true });
+  await writeFile(join(source, 'deps/a'), 'original'); await link(join(source, 'deps/a'), join(source, 'deps/b'));
+  const entry = await cache.prepareCache(join(ctx.cacheRoot, 'dependencies'), 'a'.repeat(64), 'd'.repeat(64), ctx, async () => ({ root: source, paths: ['deps'] }));
+  const a = await stat(join(entry.path, 'payload/deps/a')), b = await stat(join(entry.path, 'payload/deps/b'));
+  expect(a.nlink).toBe(1); expect(b.nlink).toBe(1); expect(a.ino).not.toBe(b.ino);
+  const destination = join(ctx.cacheRoot, 'part'); await cache.restoreCache(entry, destination, ctx);
+  await writeFile(join(destination, 'deps/a'), 'changed');
+  expect(await readFile(join(destination, 'deps/b'), 'utf8')).toBe('original');
+  expect(await readFile(join(entry.path, 'payload/deps/a'), 'utf8')).toBe('original');
 });

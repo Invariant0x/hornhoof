@@ -96,21 +96,39 @@ export async function fileDigest(path: string, context: CacheContext): Promise<s
   for await (const chunk of createReadStream(path)) { checkCacheContext(context); hash.update(chunk); }
   return hash.digest('hex');
 }
-async function scanItem(root: string, path: string, context: CacheContext): Promise<PayloadItem[]> {
+async function scanItem(root: string, path: string, context: CacheContext, links?: ReadonlySet<string>): Promise<PayloadItem[]> {
   checkCacheContext(context);
-  const full = await noLinkedParents(root, path), stat = await lstat(full);
+  const full = await noLinkedParents(root, path), stat = await lstat(full, { bigint: true });
   if (stat.isSymbolicLink()) {
     const target = await readlink(full); safeLink(root, path, target);
     return [{ path, kind: 'symlink', target }];
   }
-  if (stat.isDirectory()) return [{ path, kind: 'directory' }, ...await scanChildren(root, path, context)];
-  if (!stat.isFile() || stat.nlink !== 1) throw new Error('Cache payloads require regular files without hardlinks.');
-  return [{ path, kind: 'file', mode: stat.mode & 0o777, digest: await fileDigest(full, context) }];
+  if (stat.isDirectory()) return [{ path, kind: 'directory' }, ...await scanChildren(root, path, context, links)];
+  if (!stat.isFile() || (stat.nlink !== 1n && !links?.has(inodeKey(stat)))) throw new Error('Cache payloads cannot contain external hardlinks.');
+  return [{ path, kind: 'file', mode: Number(stat.mode & 0o777n), digest: await fileDigest(full, context) }];
 }
-async function scanChildren(root: string, path: string, context: CacheContext): Promise<PayloadItem[]> {
+async function scanChildren(root: string, path: string, context: CacheContext, links?: ReadonlySet<string>): Promise<PayloadItem[]> {
   const items: PayloadItem[] = [];
-  for (const name of (await readdir(within(root, path))).sort()) items.push(...await scanItem(root, path === '.' ? name : `${path}/${name}`, context));
+  for (const name of (await readdir(within(root, path))).sort()) items.push(...await scanItem(root, path === '.' ? name : `${path}/${name}`, context, links));
   return items;
+}
+const inodeKey = (stat: { dev: bigint; ino: bigint }): string => `${stat.dev}:${stat.ino}`;
+type SourceLinks = Map<string, { count: bigint; total: bigint }>;
+async function collectSourceLinks(root: string, path: string, context: CacheContext, found: SourceLinks): Promise<void> {
+  checkCacheContext(context);
+  const full = await noLinkedParents(root, path), stat = await lstat(full, { bigint: true });
+  if (stat.isDirectory()) {
+    for (const name of await readdir(full)) await collectSourceLinks(root, `${path}/${name}`, context, found);
+  } else if (stat.isFile()) {
+    const key = inodeKey(stat), before = found.get(key);
+    found.set(key, { count: (before?.count ?? 0n) + 1n, total: stat.nlink });
+  }
+}
+async function sourceLinks(root: string, paths: string[], context: CacheContext): Promise<ReadonlySet<string>> {
+  const found: SourceLinks = new Map();
+  for (const path of paths) await collectSourceLinks(root, path, context, found);
+  for (const value of found.values()) if (value.count !== value.total) throw new Error('Cache payloads cannot contain external hardlinks.');
+  return new Set(found.keys());
 }
 async function payloadDirectory(path: string): Promise<void> {
   try { await mkdir(path, { mode: 0o700 }); }
@@ -171,8 +189,8 @@ async function publish(entry: CacheEntry, context: CacheContext, build: CacheBui
   const staging = await mkdtemp(join(dirname(entry.path), '.staging-'));
   try {
     const source = await build(), roots = await rootsFor(source.root, source.paths), payload = join(staging, 'payload');
-    const entries: PayloadItem[] = [];
-    for (const path of roots) entries.push(...await scanItem(source.root, path, context));
+    const links = await sourceLinks(source.root, roots, context), entries: PayloadItem[] = [];
+    for (const path of roots) entries.push(...await scanItem(source.root, path, context, links));
     await mkdir(payload, { mode: 0o700 }); await copyItems(source.root, payload, entries, context);
     const copied = await scanChildren(payload, '.', context);
     if (!importMatches(entries, copied)) throw new Error('A preparation payload changed during import.');
