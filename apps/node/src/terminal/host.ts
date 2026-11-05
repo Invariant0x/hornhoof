@@ -1,6 +1,6 @@
 import { execFile, type ChildProcess } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { readFileSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { TERM_CHUNK, UNHEARD_MS, type AgentEvent, type Failure, type Limits, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
@@ -346,6 +346,7 @@ export class TerminalHost {
   private readonly wordsQuietMs: number;
   private readonly lookMs: number;
   private readonly reportMs: number;
+  private readonly remembered = new Set<string>();
   /* Views being opened, and those Hornhoof closed meanwhile. */
   private readonly viewsOpening = new Set<string>();
   private readonly viewsClosed = new Set<string>();
@@ -899,7 +900,27 @@ export class TerminalHost {
 
   /* Both entry paths report the same program state. */
   private observeProgram(a: Agent, jobId: string | null | undefined): ObservedProgram {
-    return { watch: new ProgramWatch(jobId, m => this.opts.send(withSession(m, a.sessionId)), this.reportMs, () => this.opts.secrets()), look: { at: Date.now(), call: null } };
+    return { watch: new ProgramWatch(jobId, m => this.opts.send(withSession(m, this.sessionToTell(a))), this.reportMs, () => this.opts.secrets()), look: { at: Date.now(), call: null } };
+  }
+
+  /* After a restart Hornhoof asks the node to go on in the session it heard of, and a node goes on only in one it remembers:
+     a turn its restart cut never told it by ending. A session with no log yet has nothing to go on from, so the turn starts
+     a new one. */
+  private sessionToTell(a: Agent): string | null {
+    if (a.sessionId && !this.remembered.has(a.sessionId) && this.hasLog(a)) {
+      this.remembered.add(a.sessionId);
+      this.opts.remember?.(a.sessionId, a.workDir);
+    }
+    return a.sessionId;
+  }
+
+  private hasLog(a: Agent): boolean {
+    try {
+      const file = this.transcriptFile(a);
+      return file !== null && existsSync(file);
+    } catch {
+      return false;
+    }
   }
 
   /* The program said the turn ended: stopped by a person, failed, or with its answer, which the turn waits to read. */

@@ -21,7 +21,7 @@ const until = async (check: () => boolean) => {
   throw new Error('The context was not written.');
 };
 
-function fixture(kind: Kind | null = 'claude') {
+function fixture(kind: Kind | null = 'claude', more: Partial<ConstructorParameters<typeof TerminalHost>[0]> = {}) {
   const home = realpathSync(mkdtempSync(join(tmpdir(), 'hh-host-branches-')));
   folders.push(home);
   const workDir = join(home, 'work');
@@ -29,7 +29,7 @@ function fixture(kind: Kind | null = 'claude') {
   const sent: NodeMessage[] = [];
   const events: AgentEvent[] = [];
   const tmux = new Tmux({ env: { HOME: home }, recordingsDir: join(home, 'recordings') });
-  const host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: message => sent.push(message), secrets: () => [], log: () => {} });
+  const host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: message => sent.push(message), secrets: () => [], log: () => {}, ...more });
   const agent = host['agent']('branches');
   Object.assign(agent, { home, workDir, sessionId: 'old', program: kind === null ? null : programs[kind] });
   agent.turn = { jobId: 'job', typed: false, seq: 0, words: new TurnWords(), onEvent: event => events.push(event) };
@@ -299,6 +299,51 @@ describe('stop hook branches before extraction', () => {
     appendFileSync(c.file(), '{"type":"PLANNER_RESPONSE","content":"Native answer"}\n');
     await c.agent.settling;
     expect(await c.finished).toBe('Native answer');
+  });
+});
+
+describe('the session a node can go on in after a restart', () => {
+  const report = async (c: ReturnType<typeof fixture>) => {
+    const { watch, look } = c.host['observeProgram'](c.agent, 'job');
+    look.at = -Infinity;
+    await c.host['reportProgram'](c.agent, watch, look);
+  };
+  const noting = (said: string[]) => ({
+    remember: (session: string, dir: string) => { said.push(`remembered ${session} in ${dir}`); },
+    send: (message: NodeMessage) => { if (message.type === 'job.program' && message.session) said.push(`told ${message.session}`); },
+  });
+
+  it.each(['claude', 'codex', 'kimi', 'antigravity'] as const)('remembers a %s session once it has a log, before the server hears of it, and only once', async kind => {
+    const said: string[] = [];
+    const c = fixture(kind, noting(said));
+    vi.spyOn(c.tmux, 'screen').mockResolvedValue('diagnostic screen');
+    await report(c);
+    expect(said).toEqual(['told old']);
+    write(c.file(), `${JSON.stringify({ type: 'session_meta', payload: { id: 'old', cwd: c.workDir } })}\n`);
+    await report(c);
+    await report(c);
+    expect(said).toEqual(['told old', `remembered old in ${c.workDir}`, 'told old', 'told old']);
+  });
+
+  it('remembers the session a program goes on to', async () => {
+    const said: string[] = [];
+    const c = fixture('kimi', noting(said));
+    vi.spyOn(c.tmux, 'screen').mockResolvedValue('diagnostic screen');
+    write(c.file(), '{}\n');
+    await report(c);
+    write(c.file('next'), '{}\n');
+    c.agent.sessionId = 'next';
+    await report(c);
+    expect(said.filter(line => line.startsWith('remembered'))).toEqual([`remembered old in ${c.workDir}`, `remembered next in ${c.workDir}`]);
+  });
+
+  it('remembers nothing while the folder of the program is not there, and still says the session', async () => {
+    const said: string[] = [];
+    const c = fixture('claude', noting(said));
+    vi.spyOn(c.tmux, 'screen').mockResolvedValue('diagnostic screen');
+    rmSync(c.workDir, { recursive: true });
+    await report(c);
+    expect(said).toEqual(['told old']);
   });
 });
 

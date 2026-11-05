@@ -276,7 +276,7 @@ describe('atomic durable observer transitions', () => {
       if (operation === 'activity') c.observer.activity(identity);
       if (operation === 'exit') c.observer.exit(identity, { code: 1, signal: null });
       if (operation === 'question') c.observer.question(identity, nextQuestion);
-      if (operation === 'recovery') c.observer.recoveryReady(identity, nextQuestion.id);
+      if (operation === 'recovery') c.observer.recoveryReady(identity, nextQuestion.id, false);
       if (operation === 'ack') c.observer.ack(before.outbox[0]!.evidenceId);
     };
     vi.spyOn(storage, 'writeOperatorStore').mockImplementationOnce(() => { throw new Error('injected durable write failure'); });
@@ -320,13 +320,13 @@ it('preserves the native question clock when its confirmed job binds after an ea
 
 it('does not write or flush duplicate activity, observations, or acknowledgements', () => {
   const c = fixture(); c.attempt(); c.observer.receipt(deliveryId, 'taken');
-  c.observer.activity(identity); c.observer.recoveryReady(identity, nextQuestion.id);
+  c.observer.activity(identity); c.observer.recoveryReady(identity, nextQuestion.id, false);
   const acknowledged = c.sent[0]!.evidenceId; c.observer.ack(acknowledged);
   const write = vi.spyOn(storage, 'writeOperatorStore');
   c.observer.activity(identity); c.observer.activity(identity);
   c.observer.launch(identity, 'started'); c.attempt(); c.observer.receipt(deliveryId, 'taken');
   c.observer.finalize(deliveryId, 'not_taken'); c.observer.question(identity, null);
-  c.observer.recoveryReady(identity, nextQuestion.id); c.observer.ack(acknowledged); c.observer.tick();
+  c.observer.recoveryReady(identity, nextQuestion.id, false); c.observer.ack(acknowledged); c.observer.tick();
   expect(write).not.toHaveBeenCalled();
 });
 

@@ -26,7 +26,7 @@ type Program = {
 };
 
 /* A host with a program it started, whose screen and keys the test plays. */
-async function started(program: Program, { plain = false } = {}) {
+async function started(program: Program, { plain = false, remember }: { plain?: boolean; remember?: (sessionId: string, workDir: string) => void } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'hh-lost-words-'));
   const agentKey = randomUUID(), jobId = randomUUID(), deliveryId = randomUUID(), sessionId = randomUUID();
   const workDir = join(home, 'work');
@@ -54,14 +54,14 @@ async function started(program: Program, { plain = false } = {}) {
   const paste = vi.spyOn(tmux, 'paste').mockImplementation(async (_target, text) => program.onPaste(text));
   const keys = vi.spyOn(tmux, 'keys').mockImplementation(async (_target, ...pressed) => { if (pressed.includes('Enter')) program.onEnter(); });
   const host = new TerminalHost({
-    tmux, hornhoof: 'http://127.0.0.1:9', send: frame => { reports.push(frame); }, secrets: () => [], plugins: [], readyMs: plain ? 3000 : 20, pollMs: 5, lookMs: 10, reportMs: 10, enterWaitMs: 10, wordsQuietMs: 40,
+    tmux, hornhoof: 'http://127.0.0.1:9', send: frame => { reports.push(frame); }, remember, secrets: () => [], plugins: [], readyMs: plain ? 3000 : 20, pollMs: 5, lookMs: 10, reportMs: 10, enterWaitMs: 10, wordsQuietMs: 40,
     operator: { dir: join(home, 'operator'), send: frame => { sent.push(frame); return true; }, connected: () => true },
   });
   const abort = new AbortController();
   const running = host.run({ key: agentKey, program: codexProgram, bin: 'codex', home, signedOut: /signed out/i, ...(plain ? {} : { operatorDelivery: { id: deliveryId, ordinal: 1 } }), input: { agentKey, jobId, prompt: WORDS, sessionId: null, model: null, workDir, signal: abort.signal, timeoutMs: 60000, onEvent: () => {} } } as never);
   stops.push(async () => { abort.abort(); await host.stop(); await running.catch(() => {}); rmSync(home, { recursive: true, force: true }); });
   const enters = () => keys.mock.calls.filter(([, key]) => key === 'Enter').length;
-  return { host, running, paste, keys, enters, finish, sent, reports, record, agentKey, deliveryId, sessionId };
+  return { host, running, paste, keys, enters, finish, sent, reports, record, agentKey, deliveryId, sessionId, workDir };
 }
 
 const empty = (over: Partial<Program> = {}): Program => ({ input: '', status: 'idle', onPaste() {}, onEnter() {}, ...over });
@@ -82,6 +82,16 @@ it('tells the server the session of a turn while it runs, as a node that restart
   await until(() => c.reports.some(frame => frame.type === 'job.program' && frame.session === c.sessionId));
   c.finish();
   expect(await c.running).toMatchObject({ ok: true });
+});
+
+/* A node goes on only in a session it remembers, and a restart keeps it from hearing the end of the turn it cut. */
+it('remembers the session it tells the server of while the turn runs', async () => {
+  const remembered: [string, string][] = [];
+  const c = await started(empty({ onEnter: () => { c.record(userMessage(WORDS)); c.record({ type: 'event_msg', payload: { type: 'task_started', turn_id: 'work' } }); } }), { remember: (session, dir) => remembered.push([session, dir]) });
+  await until(() => c.reports.some(frame => frame.type === 'job.program' && frame.session === c.sessionId));
+  expect(remembered).toEqual([[c.sessionId, c.workDir]]);
+  c.finish();
+  await c.running;
 });
 
 it('presses Enter again while the words stay in the input', async () => {
