@@ -32,16 +32,16 @@ describe.skipIf(!hasTmux)('what a hook of a program means', () => {
 
   it.each(['nonsense', 'constructor', '__proto__', 'hasOwnProperty'])('nothing as %s, which is a sign of life all the same', async event => {
     const { key, a } = await quiet();
-    a.signAt = undefined;
+    a.signAt = 0;
     await expect(fire(key, event)).resolves.toBeUndefined();
-    expect(a.signAt).toEqual(expect.any(Number));
+    expect(a.signAt).toBeGreaterThan(0);
   });
 
   it('limits and how full the context is as a status, which is no sign of life', async () => {
     const { key, a } = await quiet();
-    a.signAt = undefined;
+    a.signAt = 0;
     await fire(key, 'status', { rate_limits: { five_hour: { used_percentage: 12, resets_at: 1_790_000_000 } }, context_window: { used_percentage: 40 } });
-    expect(a.signAt).toBeUndefined();
+    expect(a.signAt).toBe(0);
     expect(a.limits).toMatchObject({ status: 'allowed', windows: [{ name: 'five_hour', utilization: 0.12 }] });
     expect(sent).toContainEqual({ type: 'agent.context', agentKey: key, used: 0.4 });
   });
