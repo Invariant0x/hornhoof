@@ -26,6 +26,63 @@ export interface OpenedServices { env: Record<string, string>; close: () => Prom
 const FORMAT = 'hornhoof-services-v1';
 const PG_BIN = '/usr/lib/postgresql/17/bin';
 const GRACE_MS = 2000;
+const preparationLeases = new WeakMap<ServiceContext, number>();
+// This literal runs as the node owner, outside the checkout. Job programs receive only descriptors 0, 1 and 2.
+const LEASE_GUARDIAN = String.raw`
+const {spawn}=require('node:child_process');
+const {readdirSync,readFileSync}=require('node:fs');
+let job, completed=false, disconnected=!process.connected, failed=false, code=1, hard, polling;
+process.stdout.on('error',()=>{});process.stderr.on('error',()=>{});
+function signal(value) {
+  if(!job?.pid)return;
+  try{process.kill(-job.pid,value)}catch(error){if(error.code!=='ESRCH')throw error}
+}
+function alive() {
+  try{process.kill(-job.pid,0)}catch(error){if(error.code==='ESRCH')return false;throw error}
+  return readdirSync('/proc').filter(name=>/^\d+$/.test(name)).some(name=>{
+    try{const stat=readFileSync('/proc/'+name+'/stat','utf8');const fields=stat.slice(stat.lastIndexOf(')')+2).split(' ');return fields[0]!=='Z'&&Number(fields[2])===job.pid}
+    catch(error){if(error.code==='ENOENT')return false;throw error}
+  });
+}
+function finish() {
+  completed=true;clearTimeout(hard);clearInterval(polling);
+  process.stdin.destroy();process.exitCode=failed?1:code;
+  if(process.connected)process.send({supervisionFailed:failed},()=>{if(process.connected)process.disconnect()});
+}
+function reap() {
+  try{if(alive())return}catch{failed=true;signal('SIGKILL');return}
+  finish();
+}
+function escalation(graceMs=2000) {
+  hard??=setTimeout(()=>{failed=true;signal('SIGKILL')},graceMs);
+}
+function disconnect() {
+  if(completed)return;
+  disconnected=true;failed=true;
+  if(!job){process.exitCode=1;process.stdin.destroy();if(process.connected)process.disconnect();return}
+  signal('SIGTERM');escalation();
+}
+function control(message) {
+  if(message.graceMs!==undefined){clearTimeout(hard);hard=undefined;escalation(message.graceMs)}
+  if(job)signal(message.signal);else disconnect();
+}
+function observeJob() {
+  job.stdin.on('error',()=>{});process.stdin.pipe(job.stdin);
+  job.stdout.pipe(process.stdout,{end:false});job.stderr.pipe(process.stderr,{end:false});
+  job.once('error',error=>{failed=true;process.stderr.write(error.message);});
+  job.once('close',()=>{if(!job.pid){failed=true;finish()}});
+  job.once('exit',value=>{code=value??1;escalation();polling=setInterval(reap,5);reap()});
+}
+function start(message) {
+  if(job||disconnected||!process.connected)return disconnect();
+  job=spawn(message.program,message.args,{cwd:message.cwd,env:message.env,uid:message.uid,gid:message.gid,detached:true,stdio:['pipe','pipe','pipe']});
+  observeJob();
+  if(disconnected||!process.connected)disconnect();
+}
+process.on('disconnect',disconnect);
+process.on('SIGTERM',disconnect);process.on('SIGINT',disconnect);
+process.on('message',message=>{if(message.signal)control(message);else start(message)});
+`;
 type Postgres = Extract<ServiceDefinition, { driver: 'postgres' }>;
 interface Receipt { format: typeof FORMAT; inputDigest: string; definitions: string; runtime: string; checksums: Record<string, string> }
 interface ChildResult { code: number | null; output: string }
@@ -109,10 +166,32 @@ async function waitGroup(pid: number | undefined, deadline: number): Promise<voi
     await pause(5);
   }
 }
+function isSupervisionFailure(message: unknown): boolean {
+  return typeof message === 'object' && message !== null && 'supervisionFailed' in message && message.supervisionFailed === true;
+}
+function assertGracefulStop(forced: boolean, supervisionFailed: boolean): void {
+  if (forced || supervisionFailed) throw new Error('Service required forced stop; state cannot be published');
+}
+function serviceProcess(program: string, args: string[], cwd: string, env: Record<string, string>, context: ServiceContext) {
+  const fd = preparationLeases.get(context);
+  const child = fd === undefined
+    ? spawn(program, args, { cwd, env: environment(context, env), uid: context.jobUser.uid, gid: context.jobUser.gid, detached: true, stdio: ['pipe', 'pipe', 'pipe'] })
+    : spawn(process.execPath, ['-e', LEASE_GUARDIAN], { cwd: '/tmp', env: { PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' }, detached: true, stdio: ['pipe', 'pipe', 'pipe', fd, 'ipc'] });
+  const send = (message: object) => { if (child.connected) child.send(message, () => { /* A completed guardian may already have closed IPC. */ }); };
+  const stopChild = (signal: NodeJS.Signals, graceMs?: number) => { if (fd === undefined) kill(child.pid, signal); else send({ signal, graceMs }); };
+  let supervisionFailed = false;
+  child.on('message', message => {
+    if (isSupervisionFailure(message)) supervisionFailed = true;
+  });
+  if (fd !== undefined) send({ program, args, cwd, env: environment(context, env), uid: context.jobUser.uid, gid: context.jobUser.gid });
+  const { stdin, stdout, stderr } = child;
+  if (!stdin || !stdout || !stderr) throw new Error('Service subprocess pipes are unavailable');
+  return { child, stdin, stdout, stderr, stopChild, supervisionFailed: () => supervisionFailed };
+}
 /* A service stays attached to its process group until close, including cancellation cleanup. SQL travels on stdin. */
 function launch(program: string, args: string[], cwd: string, env: Record<string, string>, context: ServiceContext, hidden: string[], input = ''): Running {
   check(context);
-  const child = spawn(program, args, { cwd, env: environment(context, env), uid: context.jobUser.uid, gid: context.jobUser.gid, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
+  const { child, stdin, stdout, stderr, stopChild, supervisionFailed } = serviceProcess(program, args, cwd, env, context);
   let output = '';
   let failure: Error | undefined;
   let ended = false;
@@ -120,13 +199,13 @@ function launch(program: string, args: string[], cwd: string, env: Record<string
   let hard: NodeJS.Timeout | undefined;
   let drain: NodeJS.Timeout | undefined;
   const take = (chunk: Buffer) => { output = (output + chunk.toString()).slice(-64 * 1024); };
-  child.stdout.on('data', take); child.stderr.on('data', take);
-  child.stdin.on('error', () => { /* A failed executable may close stdin before SQL is written. */ });
-  child.stdin.end(input);
+  stdout.on('data', take); stderr.on('data', take);
+  stdin.on('error', () => { /* A failed executable may close stdin before SQL is written. */ });
+  stdin.end(input);
   const interrupt = () => {
     interrupted = true;
-    kill(child.pid, 'SIGTERM');
-    hard ??= setTimeout(() => kill(child.pid, 'SIGKILL'), GRACE_MS);
+    stopChild('SIGTERM', GRACE_MS);
+    hard ??= setTimeout(() => stopChild('SIGKILL'), GRACE_MS);
   };
   const timer = setTimeout(interrupt, Math.max(1, context.deadline - Date.now()));
   context.signal.addEventListener('abort', interrupt, { once: true });
@@ -136,7 +215,7 @@ function launch(program: string, args: string[], cwd: string, env: Record<string
     child.once('exit', () => {
       drain = setTimeout(() => {
         failure = new Error('Service descendants kept output open after leader exit');
-        kill(child.pid, 'SIGKILL'); child.stdout.destroy(); child.stderr.destroy();
+        stopChild('SIGKILL'); stdout.destroy(); stderr.destroy();
       }, GRACE_MS);
     });
     child.once('close', code => {
@@ -154,14 +233,14 @@ function launch(program: string, args: string[], cwd: string, env: Record<string
   const stop = (signal: NodeJS.Signals = 'SIGTERM', graceMs = GRACE_MS) => closing ??= (async () => {
     let forced = false;
     const deadline = Date.now() + graceMs;
-    kill(child.pid, signal);
+    stopChild(signal, graceMs);
     if (!ended) {
-      const hardStop = setTimeout(() => { forced = true; kill(child.pid, 'SIGKILL'); }, graceMs);
+      const hardStop = setTimeout(() => { forced = true; stopChild('SIGKILL'); }, graceMs);
       try { await result; } catch { /* The original operation reports cancellation. */ }
       finally { clearTimeout(hardStop); }
     }
     await waitGroup(child.pid, deadline);
-    if (forced) throw new Error('Service required forced stop; state cannot be published');
+    assertGracefulStop(forced, supervisionFailed());
   })();
   return { result, stop, assertRunning: () => { if (ended) throw new Error(`Service exited before readiness: ${redact(output, hidden)}`); } };
 }
@@ -174,7 +253,10 @@ async function command(program: string, args: string[], cwd: string, env: Record
   } finally { await child.stop(); }
 }
 function cleanupContext(context: ServiceContext): ServiceContext {
-  return { ...context, signal: new AbortController().signal, deadline: Date.now() + 7000 };
+  const cleanup = { ...context, signal: new AbortController().signal, deadline: Date.now() + 7000 };
+  const fd = preparationLeases.get(context);
+  if (fd !== undefined) preparationLeases.set(cleanup, fd);
+  return cleanup;
 }
 async function binaries(context: ServiceContext): Promise<string> {
   const versions: string[] = [];
@@ -339,13 +421,40 @@ function artifactPaths(root: string, definitions: ServiceDefinitions): Record<st
 async function runtime(definitions: ServiceDefinitions, context: ServiceContext): Promise<string> {
   return definitions.services.some(service => service.driver === 'postgres') ? binaries(context) : 'process-v1';
 }
-async function acquire(path: string, context: ServiceContext): Promise<() => void> {
-  for (;;) {
-    check(context);
-    try { mkdirSync(path, { mode: 0o700 }); return () => rmSync(path, { recursive: true, force: true }); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
-    await pause(25, context.signal);
+function lockDescriptor(fd: number, context: ServiceContext): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn('/usr/bin/flock', ['--exclusive', '3'], {
+      cwd: '/tmp', env: { PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' }, stdio: ['ignore', 'ignore', 'pipe', fd],
+    });
+    let failure: Error | undefined;
+    let output = '';
+    child.stderr!.on('data', (chunk: Buffer) => { output = (output + chunk.toString()).slice(-4096); });
+    const interrupt = () => {
+      failure = new Error('Service lock cancelled or deadline exceeded');
+      child.kill('SIGKILL');
+    };
+    const timer = setTimeout(interrupt, Math.max(1, context.deadline - Date.now()));
+    context.signal.addEventListener('abort', interrupt, { once: true });
+    if (context.signal.aborted) interrupt();
+    child.once('error', error => { failure = error; });
+    child.once('close', code => {
+      clearTimeout(timer); context.signal.removeEventListener('abort', interrupt);
+      if (failure) reject(failure);
+      else if (code !== 0) reject(new Error(`Service lock acquisition failed: ${output}`));
+      else resolve();
+    });
+  });
+}
+async function acquire(path: string, context: ServiceContext): Promise<{ fd: number; release: () => void }> {
+  check(context);
+  if (existsSync(path) && lstatSync(path).isDirectory()) {
+    throw new Error('Legacy directory service lock has no owner information. Remove it only after confirming that the node and all its writers have stopped.');
   }
+  // flock and this process share one open file description. Keep the inode when releasing it.
+  const fd = openSync(path, 'a', 0o600);
+  try { await lockDescriptor(fd, context); check(context); }
+  catch (error) { closeSync(fd); throw error; }
+  return { fd, release: () => closeSync(fd) };
 }
 async function prepareCommands(definitions: ServiceDefinitions, checkout: string, env: Record<string, string>, context: ServiceContext, hidden: string[]): Promise<void> {
   for (const unit of definitions.prepare ?? []) {
@@ -398,12 +507,13 @@ export async function prepareServiceArtifacts(definitions: ServiceDefinitions, c
   const fingerprint = await runtime(definitions, context);
   mkdirSync(context.cacheRoot, { recursive: true, mode: 0o700 }); chmodSync(context.cacheRoot, 0o700);
   const root = join(context.cacheRoot, context.envKey);
-  const release = await acquire(`${root}.lock`, context);
+  const lease = await acquire(`${root}.lock`, context);
+  preparationLeases.set(context, lease.fd);
   try {
     if (!existsSync(join(root, 'READY.json'))) await buildArtifacts(definitions, checkout, root, context, fingerprint);
     validateArtifacts(root, definitions, context.inputDigest, fingerprint);
     return { paths: artifactPaths(root, definitions), format: FORMAT, inputDigest: context.inputDigest };
-  } finally { release(); }
+  } finally { preparationLeases.delete(context); lease.release(); }
 }
 async function validateForOpen(definitions: ServiceDefinitions, artifacts: ServiceArtifacts, context: ServiceContext): Promise<void> {
     if (artifacts.format !== FORMAT || Object.keys(artifacts.paths).length !== definitions.services.length) throw new Error('Service artifact integrity metadata mismatch');

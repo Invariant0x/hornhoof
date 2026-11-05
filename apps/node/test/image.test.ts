@@ -54,7 +54,7 @@ describe('the node image', () => {
   });
 
   it('carries the everyday programs agents reach for in a shell', () => {
-    for (const program of ['git', 'curl', 'ripgrep', 'tmux', 'procps', 'jq', 'file', 'python3', 'python-is-python3', 'python3-pil']) expect(installed).toContain(program);
+    for (const program of ['git', 'curl', 'ripgrep', 'tmux', 'procps', 'util-linux', 'jq', 'file', 'python3', 'python-is-python3', 'python3-pil']) expect(installed).toContain(program);
   });
 
   it('installs unzip in the runtime and fails the build if unzip -v fails', () => {

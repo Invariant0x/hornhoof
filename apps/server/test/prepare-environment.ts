@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle as pgliteDb } from 'drizzle-orm/pglite';
@@ -21,9 +21,16 @@ function pgliteVersion(): string {
   const manifest = join(dirname(require.resolve('@electric-sql/pglite')), '../package.json');
   return (JSON.parse(readFileSync(manifest, 'utf8')) as { version: string }).version;
 }
+function protocolInputPaths(): string[] {
+  const directory = 'packages/protocol/dist';
+  const entries = existsSync(join(ROOT, directory)) ? readdirSync(join(ROOT, directory), { recursive: true, withFileTypes: true }) : [];
+  const paths = entries.filter(entry => entry.isFile()).map(entry => relative(ROOT, join(entry.parentPath, entry.name)).split(sep).join('/'));
+  if (!paths.length) throw new Error(`Missing required generated protocol artifact: ${directory}. Run runtime-build first.`);
+  return paths;
+}
 function inputPaths(): string[] {
   const migrations = readdirSync(MIGRATIONS).filter(name => name.endsWith('.sql')).map(name => `apps/server/drizzle/${name}`);
-  return [...migrations, 'apps/server/drizzle/meta/_journal.json', 'apps/server/src/db/schema.ts', 'apps/server/src/db/client.ts',
+  return [...migrations, ...protocolInputPaths(), 'apps/server/drizzle/meta/_journal.json', 'apps/server/src/db/schema.ts', 'apps/server/src/db/client.ts',
     'apps/server/test/prepare-environment.ts', 'apps/server/test/global-setup.ts', 'apps/server/package.json', 'package-lock.json'].sort();
 }
 function inputs(): Record<string, string> {
