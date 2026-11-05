@@ -33,6 +33,17 @@ describe.skipIf(!hasTmux)("Antigravity's own terminal", () => {
     } finally { await host.stop(); await running; }
   });
 
+  it('takes a program gone between two looks at it for gone, and does not fail on its screen', async () => {
+    await setUp({ plugins: [], readyMs: 2000, cols: 120, rows: 40, lookMs: 20 });
+    const running = host.run(agyJob('gone-look', 'HANG', { jobId: 'agy-gone-look' }));
+    await until(() => sent.some(m => m.type === 'job.program' && m.jobId === 'agy-gone-look' && m.state === 'thinking'));
+    const looks = vi.spyOn(tmux, 'screen').mockRejectedValue(new Error('no server running'));
+    await until(() => looks.mock.calls.length > 1);
+    looks.mockRestore();
+    await host.stop();
+    expect(await running).toMatchObject({ ok: false });
+  });
+
   it('takes a Hornhoof turn through invocation 0, follows its session, and reads the feed and answer from its transcript', async () => {
     await start();
     const log = join(home, 'agy-hooks.log');

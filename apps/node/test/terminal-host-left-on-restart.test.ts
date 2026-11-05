@@ -129,6 +129,10 @@ describe.skipIf(!hasTmux)('words left in the input of a program that starts anew
     expect(busyAtLaunch).toEqual([false]);
     expect(lefts()).toEqual([]);
     expect(c.paste.mock.calls.map(call => call[1])).toEqual(['Second assignment.']);
+    /* The turn ended on what the assignment did, and no turn of a person came of it. */
+    await sleep(300);
+    expect(sent.filter(m => m.type === 'turn.open')).toEqual([]);
+    expect(a.busy).toBe(false);
   });
 
   it('waits while a person still writes, and keeps what they wrote by then', async () => {
