@@ -11,7 +11,7 @@ export type RepoAddress = { url: string; token: string };
 /* A branch or tag by name, or the branch of a task. */
 export type CommitWanted = { branch: string } | { task: number };
 export type CommitAt = { branch: string; commitSha: string } | { problem: string };
-export type CommitReader = (repo: RepoAddress, want: CommitWanted) => Promise<CommitAt>;
+export type CommitReader = (repo: RepoAddress, want: CommitWanted, timeoutMs?: number) => Promise<CommitAt>;
 
 /* The refs in git's smart HTTP answer: lines that start with their length in bytes, in four hex digits, each an object
    name and a ref, the first with what the server can do after a NUL. A flush has a length and no line. */

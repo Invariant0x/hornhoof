@@ -16,6 +16,8 @@ import { personParty } from '../events/parties.js';
 import { decisionPerson } from './decisions.js';
 import { WaitInput, waitFor } from './external-wait.js';
 import { pipelineReport } from './pipeline-report.js';
+import { commitProof, proofLine } from '../testruns/commit-proof.js';
+import { keptEvidence, noProofNote, taskEvidence } from '../testruns/evidence.js';
 
 export type ToolJob = { id: string; companyId: string; agentId: string; agentKind: 'orchestrator' | 'head' | 'worker' };
 type Agent = typeof agents.$inferSelect;
@@ -56,6 +58,14 @@ const RiskClass = z.enum(RISK_CLASSES).describe('What a mistake in it would cost
 const Improvement = z.uuid().describe("The improvement these tasks take into work after a person's instruction, from improvements.");
 
 type Question = { kind: 'question' | 'approval' | 'choice'; text: string; topic?: DecisionTopic };
+
+/* What people read of a question, and what its asker hears besides: an approval says what test runs say of its commit as it
+   is asked, which the answer says again as it comes. */
+async function questionWords(db: Ctx['db'], task: Task, question: string, commit?: string): Promise<{ text: string; told: string }> {
+  if (!commit) return { text: question, told: '' };
+  const said = proofLine(await commitProof(db, task, commit));
+  return { text: `${question}\n\nHornhoof checked as this was asked. ${said}`, told: ` ${said}` };
+}
 
 /* Keep the outgoing question with the person responsible for its decision card. */
 async function recordQuestion(ctx: Ctx, job: ToolJob, task: Task, { kind, text, topic }: Question): Promise<void> {
@@ -174,7 +184,8 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     'task',
     {
       description:
-        'One task in full: its body (the current truth), gates and where it stands, subtasks, open questions and its log. A long log comes with its newest lines, and logLeftOut counts the older ones left out.',
+        'One task in full: its body (the current truth), gates and where it stands, subtasks, open questions and its log. A long log comes with its newest lines, and logLeftOut counts the older ones left out. ' +
+        "testEvidence: its newest test runs, and in a review of a turn or a department's task of a turn those on the turn's branch, each with the exact commit it pinned and whether its branch still stands there. Only a run with proves true counts as evidence.",
       inputSchema: { task: Ref },
     },
     async ({ task: ref }) =>
@@ -222,6 +233,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         'Asks the people responsible for the task a question, (with commit) for approval of that exact commit before a release, or (with options) to pick one of 2 to 4 ways. The task waits; you are woken with the answer. ' +
         'Show what people judge instead of describing it: take screenshots, send each with the shell command `hh-attach FILE` and pass the ids it prints as images, or as an option\'s image. ' +
         'link: an https page where the work can be seen, like a branch comparison; an approval links its commit by itself. ' +
+        'An approval tells you and the person which passed test run checked that very commit, or that none did. ' +
         `At most ${TURN_QUESTIONS} per turn; ask only what you cannot decide or find out yourself.`,
       inputSchema: {
         task: Ref,
@@ -249,9 +261,10 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         if (Number(asked?.n ?? 0) >= TURN_QUESTIONS) throw refuse(409, 'task_invalid', `One turn asks people at most ${TURN_QUESTIONS} times.`);
         const kind = commit ? 'approval' : options?.length ? 'choice' : 'question';
         const ways = options?.map(o => ({ label: o.label, image: o.image ?? null }));
-        const moved = await ask(ctx, job.agentId, task.id, { kind, text: question, ...(commit ? { commit } : {}), images, options: ways, link: link ?? null, topic });
-        await recordQuestion(ctx, job, task, { kind, text: question, topic });
-        return { text: `Asked. #${task.number} waits for a person's answer; you will be woken with it.`, moved };
+        const { text, told } = await questionWords(db, task, question, commit);
+        const moved = await ask(ctx, job.agentId, task.id, { kind, text, ...(commit ? { commit } : {}), images, options: ways, link: link ?? null, topic });
+        await recordQuestion(ctx, job, task, { kind, text, topic });
+        return { text: `Asked. #${task.number} waits for a person's answer; you will be woken with it.${told}`, moved };
       }),
   );
 
@@ -456,15 +469,16 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
       'verdict',
       {
         description:
-          'Your verdict as the gate a task stands at: pass sends it to the next gate (or finishes it), changes sends it back to its executor. comment: your reasons, always. findings: how many separate problems your comment names, 0 when there are none.',
+          'Your verdict as the gate a task stands at: pass sends it to the next gate (or finishes it), changes sends it back to its executor. comment: your reasons, always. findings: how many separate problems your comment names, 0 when there are none. Its log keeps the test runs it stood on, with the commits they pinned.',
         inputSchema: { task: Ref, pass: z.boolean(), comment: z.string().trim().min(1).max(4000), findings: z.number().int().min(0).max(99).optional() },
       },
       async ({ task: ref, pass, comment: why, findings }) =>
         run(async () => {
           const { task } = await find(ref);
           plain(task, why);
-          const moved = await verdict(ctx, job.agentId, task.id, { pass, comment: why, findings });
-          return { text: `Recorded. ${await where(moved.task)}`, moved };
+          const evidence = await taskEvidence(ctx, task);
+          const moved = await verdict(ctx, job.agentId, task.id, { pass, comment: why, findings, evidence: keptEvidence(evidence) });
+          return { text: `Recorded. ${await where(moved.task)}${noProofNote(evidence, pass)}`, moved };
         }),
     );
   }
