@@ -1466,6 +1466,13 @@ async function answerWords(db: Db, task: Task, found: Request, a: Answer, text: 
   return option ? `Picked ${a.pick! + 1}: ${option.label}.${more}` : text || 'Try again.';
 }
 
+/* Words are a neutral answer; an explicit pick must still name a valid option. */
+function checkChoiceAnswer(found: Pick<Request, 'options'>, a: Answer, text: string, option: RequestOption | undefined): void {
+  if (a.approve !== undefined) throw refuse(400, 'task_invalid', 'Only a commit is approved; answer in words.');
+  if (a.pick !== undefined && !option) throw refuse(400, 'task_invalid', `Pick one of the ${found.options.length} ways.`);
+  if (!option && !text) throw refuse(400, 'task_invalid', 'Write an answer.');
+}
+
 export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answer, on?: Delegation): Promise<{ request: Request; task: Task; wakes: Wake[] }> {
   const [found] = await ctx.db.select().from(requests).where(eq(requests.id, requestId));
   if (!found) throw refuse(404, 'request_unknown', 'There is no such request.');
@@ -1478,7 +1485,7 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
     if (a.approve === undefined) throw refuse(400, 'task_invalid', approveOrDecline(found));
     status = a.approve ? 'approved' : 'declined';
   } else if (found.kind === 'choice') {
-    if (!option) throw refuse(400, 'task_invalid', `Pick one of the ${found.options.length} ways.`);
+    checkChoiceAnswer(found, a, text, option);
     status = 'answered';
   } else {
     if (a.approve !== undefined) throw refuse(400, 'task_invalid', 'Only a commit is approved; answer in words.');
