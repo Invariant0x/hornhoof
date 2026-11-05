@@ -66,6 +66,9 @@ export const en = {
     runThis: (plan: string) => `Run this in a terminal on your computer. It installs Docker if needed, sets up a node for ${plan} and opens the sign-in link. The orchestrator starts working as soon as you sign in.`,
     joinOnce: 'The command works once, for 24 hours. The node keeps running in the background after the terminal is closed.',
     goToMap: 'Go to the map',
+    linkWait: 'Getting the certificate for your link. This takes under a minute.',
+    linkReady: 'People open your company from anywhere at this link:',
+    linkLater: 'The link works now. Its own certificate comes on its own; until then the connection is encrypted to hornhoof.org.',
   },
   link: {
     open: 'Open Hornhoof on the internet',
@@ -80,8 +83,9 @@ export const en = {
     taken: 'This name is taken. Pick another one.',
     reserved: 'This name is kept for Hornhoof itself. Pick another one.',
     unknown: 'Could not check the name now. It is checked again when you go on.',
-    guessable: 'A name like this is easy to guess, so anyone may find the sign-in page. Only the company\'s sign-in protects what is inside.',
-    hardToGuess: 'A random name is hard to guess. The company\'s sign-in still protects what is inside.',
+    guessable: 'A name you pick shows in public certificate logs and may tell whose company this is. Only the company\'s sign-in protects what is inside.',
+    hardToGuess: 'A random name does not say whose company it is. The company\'s sign-in still protects what is inside.',
+    letsEncrypt: { before: 'The link\'s certificate comes from Let\'s Encrypt. Getting it accepts the ', agreement: 'Let\'s Encrypt Subscriber Agreement', after: ' for your company.' },
     skipHint: 'To go on without it, go back, turn off "Open Hornhoof on the internet", and open the link later under Share access.',
   },
   about: {
@@ -104,6 +108,8 @@ export const en = {
     yesRemove: 'Remove',
     keep: 'Keep',
     moveNote: 'Machines connected through the old link lose the connection. Connect them again under Subscriptions or Machines.',
+    encryptedHere: 'Encrypted to this machine',
+    encryptedRelay: 'Encrypted to hornhoof.org for now. Hornhoof moves the encryption to this machine on its own.',
   },
   invite: {
     heading: 'Invite link',
@@ -339,6 +345,7 @@ export const en = {
     moreIn: (n: number, department: string) => `Show ${n} more in ${department}`, showLess: 'Show less',
   },
   machines: {
+    certEnds: (date: string) => `The link's certificate ends on ${date} and has not renewed yet. Hornhoof tries again every hour. If it ends, the link keeps working, encrypted to hornhoof.org.`,
     programs: 'Agent programs',
     updatePrograms: 'Update programs',
     programsUpdating: 'Updating programs...',
