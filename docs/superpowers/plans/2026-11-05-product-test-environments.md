@@ -39,8 +39,8 @@
 
 - [x] Write strict command/path primitive tests first; observe rejection failures before implementation. No-service manifest acceptance follows after reset is reconciled.
 - [ ] Implement stable command/scope/runtime primitives and verify their direct tests (command/scope complete; runtime remains).
-- [ ] Reconcile reset with the head before executing its parser steps. Proposed baseline: null or nonempty {suiteIds,scope,command,inputs} records, including command:null for fixture reset. This contradicts the abbreviated Command[] in #399; question is recorded in its log.
-- [ ] Test frozen B manifest, both Python fixture variants, strict tagged unions, duplicate IDs, profile/service references, forbidden paths, limits and unsupported versions; observe RED, implement and verify GREEN.
+- [x] Reconcile reset: the head corrected #399 at2026-11-05T15:10:33.690Z. Null or nonempty {suiteIds,scope,command,inputs} records are required; command:null requires fixture input paths.
+- [x] Test frozen B manifest, both Python fixture variants, strict tagged unions, duplicate IDs, profile/service references, forbidden paths, limits and unsupported versions; observe RED, implement and verify GREEN.
 - [ ] Test inventory from tracked paths and cwd-relative argv/JSON selection, including a leading-dash filename and honest whole-package execution.
 - [ ] Add bounded describe/run/result protocol frames and receipt validation; run protocol tests/build/types and commit the complete contract. Send B the parser SHA and fixture result.
 
@@ -95,10 +95,14 @@
 - Read #399 twice, #280 completely including frozen14:28 contract, #308, #389 and #391; read all three architecture documents and current callers/runner boundaries. Repository rules match the just-read05d27e28 tree; no CLAUDE.md or formatter configuration exists.
 - npm ci completed from the lockfile:407packages,15 existing moderate audit findings; no dependency changes.
 - Ruling: version:1 supersedes schemaVersion; split/profiles/artifact/fullPackageGlobs use the frozen baseline, not historical Kimi illustration shapes.
-- Pending head reconciliation: reset Command[] versus suite-scoped fixture records. No reset-dependent implementation is approved by inference.
+- Resolved by the head at2026-11-05T15:10:33.690Z: reset uses suite-scoped records; fixture command:null requires nonempty inputs. The rewritten task was reread before implementation.
 - B API and manifest downloaded from task389; service path '.' is relative to artifacts.paths.pg, file paths are repo-relative. This interpretation was sent to B.
 - b30ac28f reserves0065; journal/snapshot are in origin/task-391@6a0eb1c3.0066 must not enter turn-8 before0065.
 - Inline execution chosen for shared protocol/caller dependencies. One fresh whole-branch review remains required at completion.
 
 - Protocol primitive increment:8/8 new tests failed on undefined exports, then passed against strict Command and RepositoryScope. Whole protocol226/226; build, test typecheck, scoped ESLint, package-scoped crapper existing coverage and dryer all exit0. No canonical manifest acceptance is claimed yet.
 - Ruling: while the reset decision is pending, start independent mirror/cache work using the stable Command/RepositoryScope primitives; the descriptor-specific part of Task1 remains pending. No extra queue or B-file edits.
+
+- Head resolved reset and rewrote#399. Reread the new body; suite-scoped reset is now explicit current truth. Resume Task1 manifest steps before independent mirror/cache.
+
+- Canonical schema RED17 acceptance failures ->GREEN25 total; bounded source/hash RED3 ->GREEN28 total. Frozen B JSON and both C Python descriptions pass; invalid reset/profile/reference/union/path cases fail. This validates description structure, not actual fixture isolation.
