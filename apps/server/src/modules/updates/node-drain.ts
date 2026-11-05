@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { MachineDrain } from '@hornhoof/protocol';
+import { MachineDrain, type NodeWait } from '@hornhoof/protocol';
 import { PROGRAM_OPERATOR_ROLE } from '@hornhoof/protocol/program-operator';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -9,9 +9,10 @@ import { loggable } from '../../errors.js';
 import { pumpWaiting } from '../conversation/queue.js';
 import type { NodeIdentity } from '../nodes/hub.js';
 import { pumpTests } from '../testruns/runs.js';
-import { drainPostponed, drainWork } from './drain-work.js';
+import { drainPostponed, drainWork, namedWork, nodePlaces } from './drain-work.js';
 
-const Saved = z.object({ key: z.string(), boot: z.string().nullable(), view: MachineDrain, touched: z.number() });
+/* heldAt: when this hold of the node began. A wait saved before this began when the server read it. */
+const Saved = z.object({ key: z.string(), boot: z.string().nullable(), view: MachineDrain, touched: z.number(), heldAt: z.number().default(() => Date.now()) });
 type Saved = z.infer<typeof Saved>;
 /* By the config, which a transaction's copy of the context shares with the context itself. */
 const states = new WeakMap<Ctx['config'], NodeDrains>();
@@ -25,6 +26,8 @@ class NodeDrains {
   private readonly records = new Map<string, Saved>();
   private readonly boots = new Map<string, string>();
   private readonly pending = new Map<string, Promise<void>>();
+  /* The nodes whose hold ran past what the orchestrator and the heads wait, for which they were woken. */
+  private readonly woken = new Set<string>();
   private readonly path: string;
 
   constructor(private readonly ctx: Ctx) {
@@ -44,12 +47,25 @@ class NodeDrains {
     return this.records.get(keyOf(node))?.view ?? null;
   }
 
+  all(): { node: NodeIdentity; view: MachineDrain }[] {
+    return [...this.records.values()].map(r => ({ node: nodeOf(r.key), view: r.view }));
+  }
+
+  heldLong(node: NodeIdentity): boolean {
+    const record = this.records.get(keyOf(node));
+    return record ? this.overHold(record) : false;
+  }
+
+  private overHold(record: Saved): boolean {
+    return record.view.state !== 'postponed' && Date.now() - record.heldAt >= this.ctx.config.nodeLeaderHoldMs;
+  }
+
   async request(node: NodeIdentity): Promise<MachineDrain> {
     const key = keyOf(node);
     const at = Date.now();
     let record = this.records.get(key);
     if (!record) {
-      record = { key, boot: this.boots.get(key) ?? null, view: { state: 'waiting', turnsLeft: 0, partsLeft: 0, until: new Date(at + this.ctx.config.nodeDrainMs).toISOString() }, touched: at };
+      record = { key, boot: this.boots.get(key) ?? null, view: { state: 'waiting', turnsLeft: 0, partsLeft: 0, until: new Date(at + this.ctx.config.nodeDrainMs).toISOString() }, touched: at, heldAt: at };
       this.records.set(key, record);
       try { this.save(); }
       catch (err) { this.records.delete(key); throw err; }
@@ -68,6 +84,7 @@ class NodeDrains {
 
   cancel(node: NodeIdentity): void {
     if (!this.records.delete(keyOf(node))) return;
+    this.woken.delete(keyOf(node));
     this.save();
     this.wake();
   }
@@ -76,8 +93,16 @@ class NodeDrains {
     for (const record of this.records.values()) {
       const lease = record.view.state === 'restarting' ? RESTART_LEASE_MS : REQUEST_LEASE_MS;
       if (Date.now() - record.touched > lease) { this.cancel(nodeOf(record.key)); continue; }
+      this.wakeLeaders(record);
       void this.check(record).catch(err => this.ctx.log.error({ error: loggable(err) }, 'Could not check a node waiting for an update.'));
     }
+  }
+
+  /* Once, at the limit: nothing else starts the turns of the orchestrator and the heads that the node kept waiting. */
+  private wakeLeaders(record: Saved): void {
+    if (this.woken.has(record.key) || !this.overHold(record)) return;
+    this.woken.add(record.key);
+    this.wake();
   }
 
   private check(record: Saved): Promise<void> {
@@ -94,6 +119,8 @@ class NodeDrains {
     if (record.view.state === 'postponed') {
       if (Date.parse(record.view.retryAt) > now) return;
       record.view = { state: 'waiting', turnsLeft: 0, partsLeft: 0, until: new Date(now + this.ctx.config.nodeDrainMs).toISOString() };
+      record.heldAt = now;
+      this.woken.delete(record.key);
       this.save();
     }
     const node = nodeOf(record.key);
@@ -142,10 +169,17 @@ export const nodeHeld = (ctx: Ctx, node: NodeIdentity): boolean => {
   const state = nodeDrain(ctx, node)?.state;
   return state === 'waiting' || state === 'restarting';
 };
+/* Whether the node has held new turns for longer than the orchestrator and the heads wait. */
+export const nodeHeldLong = (ctx: Ctx, node: NodeIdentity): boolean => states.get(ctx.config)?.heldLong(node) ?? false;
 /* Whether a new turn of this role stays off the node. A program operator's goes in while the node waits, since a program
-   there may wait for its answer; its case ends within OPERATOR_CASE_MS, so it does not hold the wait longer. */
-export const nodeHeldFrom = (ctx: Ctx, node: NodeIdentity, role: string | null | undefined): boolean =>
-  role === PROGRAM_OPERATOR_ROLE ? nodeDrain(ctx, node)?.state === 'restarting' : nodeHeld(ctx, node);
+   there may wait for its answer; its case ends within OPERATOR_CASE_MS, so it does not hold the wait longer. So does the
+   orchestrator's or a head's past the limit: nothing else can take it, the company waits for it, and the work that runs on
+   the node goes on either way. A node that restarts takes nothing. */
+export const nodeHeldFrom = (ctx: Ctx, node: NodeIdentity, role: string | null | undefined, leader = false): boolean => {
+  const state = nodeDrain(ctx, node)?.state;
+  if (state !== 'waiting') return state === 'restarting';
+  return role !== PROGRAM_OPERATOR_ROLE && !(leader && nodeHeldLong(ctx, node));
+};
 export const requestNodeDrain = (ctx: Ctx, node: NodeIdentity): Promise<MachineDrain> => states.get(ctx.config)!.request(node);
 export const cancelNodeDrain = (ctx: Ctx, node: NodeIdentity): void => states.get(ctx.config)?.cancel(node);
 export const nodeDrainHello = (ctx: Ctx, node: NodeIdentity, boot: string | undefined): void => states.get(ctx.config)?.hello(node, boot);
@@ -156,3 +190,20 @@ export function machineDrain(ctx: Ctx, nodes: NodeIdentity[]): MachineDrain | nu
   if (waiting.length) return { state: 'waiting', turnsLeft: waiting.reduce((n, v) => n + v.turnsLeft, 0), partsLeft: waiting.reduce((n, v) => n + v.partsLeft, 0), until: waiting.map(v => v.until).sort()[0]! };
   return views.find(v => v.state === 'restarting') ?? views[0] ?? null;
 }
+
+/* Of each node this company sees, what it waits for and until when: the built-in node and the company's own, the built-in
+   one first. Other companies' work on the built-in node counts in its numbers and has no names. */
+export async function nodeWaits(ctx: Ctx, companyId: string): Promise<NodeWait[]> {
+  const drains = states.get(ctx.config)?.all() ?? [];
+  const ids = drains.flatMap(d => (d.node.kind === 'node' ? [d.node.nodeId] : []));
+  const places = await nodePlaces(ctx, companyId, ids);
+  const seen = drains.filter(d => d.node.kind === 'builtin' || places.has(d.node.nodeId));
+  const waits = await Promise.all(seen.map(async ({ node, view }) => {
+    const place = node.kind === 'node' ? places.get(node.nodeId) : undefined;
+    const work = view.state === 'restarting' ? [] : namedWork(await drainWork(ctx, node), companyId);
+    return { node: keyOf(node), provider: place?.provider ?? null, hostname: place?.hostname ?? null, drain: view, work };
+  }));
+  return waits.sort((a, b) => placeOrder(a).localeCompare(placeOrder(b)));
+}
+
+const placeOrder = (wait: NodeWait): string => (wait.hostname === null ? '' : `${wait.hostname} ${wait.provider ?? ''} ${wait.node}`);
