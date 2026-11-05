@@ -17,6 +17,7 @@ import { queueTaskMessage, MESSAGE_TASK_HINT, TaskReference } from '../tasks/ext
 import type { Grant } from '../templates/load.js';
 import { PROGRAM_OPERATOR_ROLE } from '@hornhoof/protocol/program-operator';
 import { registerOperatorTools } from '../program-operator/tools.js';
+import { RELEASE_ROLES, registerReleaseTool } from '../program-operator/release.js';
 import { INSTALL_HINT, installsIn, MISSING_HINT, missingIn, type Missing } from './stumbles.js';
 
 type ToolJob = { id: string; companyId: string; agentId: string; agentKind: string; roleKey?: string | null };
@@ -76,6 +77,7 @@ function givingBack(ctx: Ctx, companyId: string, me: string, to: string) {
 /* A program operator gets its own tools along with what its skills grant. */
 function registerRoleTools(server: McpServer, ctx: Ctx, job: ToolJob): void {
   if (job.roleKey === PROGRAM_OPERATOR_ROLE) registerOperatorTools(server, ctx, job);
+  if (job.roleKey && RELEASE_ROLES.includes(job.roleKey)) registerReleaseTool(server, ctx, job);
 }
 
 /* What the sender of a message hears: it went in or started a turn, or it waits for a turn to come. */

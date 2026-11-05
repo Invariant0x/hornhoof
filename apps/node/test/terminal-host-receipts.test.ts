@@ -14,7 +14,7 @@ import { claudeTranscript } from '../src/terminal/programs.js';
 import { restartRefusal, TurnWords } from '../src/terminal/program-restart.js';
 import { Tmux } from '../src/terminal/tmux.js';
 import { claudePasted, claudeQueue, kimiSteer, userMessage } from './fakes/word-receipts.mjs';
-import { codexJob, job, kimiJob, until } from './terminal-host-helpers.js';
+import { codexJob, job, kimiJob, kimiScreen, until } from './terminal-host-helpers.js';
 
 const SESSION = 'c3b66b04-872b-4fbe-a3a4-058a026ef20a';
 const HOOK = fileURLToPath(new URL('../hh-hook.cjs', import.meta.url));
@@ -36,7 +36,7 @@ async function atWork(kind: Kind, mode: Mode) {
   let input = '';
   let initial = true;
   const screen = () => kind === 'claude' ? `❯ ${input}\n` : kind === 'codex' ? `OpenAI Codex\n› ${input}\n`
-    : `Welcome to Kimi Code!\n── input ────────────────────────────────────────────────────────────\n ${input}\n─────────────────────────────────────────────────────────────────────\ncontext: 0% (0/256k)\n`;
+    : kimiScreen(input);
   vi.spyOn(tmux, 'scratch').mockReturnValue(home);
   vi.spyOn(tmux, 'launch').mockImplementation(async () => {
     mkdirSync(dirname(file), { recursive: true });
@@ -142,7 +142,7 @@ describe('program receipts for live words', () => {
     const now = signAt + RESTART_AFTER_MS.claude! + 1000;
     vi.spyOn(Date, 'now').mockReturnValue(now);
     await c.host['hook']('receipt', 'status', { context_window: { used_percentage: 25 } });
-    const observed = c.host['observeProgram']('job-receipt');
+    const observed = c.host['observeProgram'](a, 'job-receipt');
     await c.host['reportProgram'](a, observed.watch, observed.look);
     expect(c.sent.filter(m => m.type === 'job.program').at(-1)).toMatchObject({ signAt, state: 'thinking' });
     expect(a.contextUsed).toBe(0.25);

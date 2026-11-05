@@ -591,6 +591,10 @@ catch_up_nodes() {
       printf 'This server is from before nodes wait for their work, so they stay on their image and what they run goes on.\n'
       NODES_AT=$((now + NODES_RETRY))
       ;;
+    409)
+      printf 'This build has no live check yet, so the nodes stay on their image and what they run goes on.\n'
+      NODES_AT=$((now + NODES_RETRY))
+      ;;
   esac
   rm -f "$answer"
 }

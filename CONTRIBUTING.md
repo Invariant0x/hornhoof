@@ -75,6 +75,17 @@ The first line downloads the browser once on your own machine. A Hornhoof worker
 
 A change to the database schema gets a new migration from `npx drizzle-kit generate` in `apps/server`. Never edit a migration that is already on `main`.
 
+## Releasing a version
+
+A test on a screen a fake program draws proves little about a real one, and 0.7.0 went out that way. So every release passes a live check, and a push to `main` moves the tags machines read only for a commit that passed it.
+
+1. Build the candidate: run the Images workflow by hand on its branch. That pushes the app, node and updater images under the tag of the commit, and moves nothing else.
+2. On a free machine that runs no real work, start a separate server and a node of those exact images for each of Claude, Codex, Kimi and Antigravity. Each plan signs in through its own link on that server; no credential is copied from anywhere.
+3. Give each agent a turn. For each program write down what its own journal shows: that it recorded the words, that it answered, and that its turn ended the usual way. Fixtures, wrappers around a program and another commit's build do not count.
+4. Write the proof: `schema`, `commit`, `version`, the digests of the three `images`, `checkedAt`, the digest of the cleaned evidence you keep with the release (`evidence`), and for each of the four programs its `outcome` with its `version`, `machine`, `node`, `session`, `job`, `instance`, `generations` and when it was `asked`, `recorded`, `answered` and `finished`. `packages/protocol/src/live-check.ts` is what it is judged by.
+5. After the owner approved that exact commit, run the Live check workflow from `main` with the proof. It refuses a proof that does not speak of exactly those images.
+6. Move `main` to that commit by fast-forward: a merge commit is another commit, with no check. If the publish job ran before the proof was out, run that job again.
+
 ## Rules for the code and the words
 
 These are the same rules everyone follows, people and agents alike. [AGENTS.md](AGENTS.md) has them in short.

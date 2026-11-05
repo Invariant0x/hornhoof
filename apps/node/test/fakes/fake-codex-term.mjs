@@ -36,7 +36,9 @@ const event = payload => {
   appendFileSync(log, JSON.stringify({ type: 'event_msg', payload }) + '\n');
 };
 const item = (type, text) => event({ type: 'item_completed', turn_id: turnId, item: { type, id: randomUUID(), content: [{ type: 'text', text }] } });
-const prompt = () => process.stdout.write('\x1b[1m›\x1b[0m \x1b[2mAsk Codex to do anything\x1b[0m\r\x1b[2C');
+// An empty row and its footer under its input, not dim, as Codex shows them (fixtures/real-screens).
+const FOOTER = '\r\n\r\n  \x1b[1m?\x1b[0m for shortcuts\x1b[2A\r';
+const prompt = () => process.stdout.write(`\x1b[1m›\x1b[0m \x1b[2mAsk Codex to do anything\x1b[0m${FOOTER}\x1b[2C`);
 
 rawKeys();
 process.stdout.write('OpenAI Codex\n');
@@ -48,7 +50,7 @@ const show = () => {
   process.stdout.write(`${shown ? `\x1b[${shown}A` : ''}\r\x1b[J`);
   const lines = input.split('\n');
   shown = input ? lines.length - 1 : 0;
-  if (input) process.stdout.write(`\x1b[1m›\x1b[0m ${lines.join('\r\n')}`);
+  if (input) process.stdout.write(`\x1b[1m›\x1b[0m ${lines.join('\r\n')}${FOOTER}\x1b[${lines.at(-1).length + (shown ? 1 : 3)}G`);
   else prompt();
 };
 let queue = Promise.resolve();
@@ -64,7 +66,7 @@ readKeys(key => {
   if (!line) return;
   input = '';
   shown = 0;
-  process.stdout.write('\r\n');
+  process.stdout.write('\r\n\x1b[J');
   if (hanging && process.env.FAKE_HOLD_WORDS) { prompt(); return; }
   queue = queue.then(() => take(line));
 });
