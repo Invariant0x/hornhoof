@@ -34,7 +34,7 @@ export const SECRET: Record<string, string[]> = {
 const READ_ONLY = [
   'people', 'person_access', 'subscriptions', 'machines', 'nodes', 'node_connections', 'test_runs', 'test_parts',
   'requests', 'proposals', 'agent_events', 'task_events', 'program_instances', 'program_deliveries',
-  'program_operator_cases', 'program_operator_actions', 'wait_notices', 'person_changes', 'attachments',
+  'program_operator_cases', 'program_operator_actions', 'program_operator_signals', 'wait_notices', 'person_changes', 'attachments',
 ];
 /* An employee's fields that give it tools, a place or the machine its turns and their tokens go to: they change only by
    hiring and on its card, which make the CEO's checks. A head's department is held by a trigger, as a column right

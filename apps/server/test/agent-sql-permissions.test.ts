@@ -17,14 +17,16 @@ it.each([
   'program_deliveries',
   'program_operator_cases',
   'program_operator_actions',
+  'program_operator_signals',
   'wait_notices',
   'person_changes',
   'attachments',
 ])('keeps %s writes behind the service API for both SQL roles', async table => {
   const run = await roles();
+  const column = table === 'program_operator_signals' ? 'agent_id' : 'id';
   const writes = [
-    `INSERT INTO ${table} (id) SELECT id FROM ${table} WHERE false`,
-    `UPDATE ${table} SET id = id WHERE false`,
+    `INSERT INTO ${table} (${column}) SELECT ${column} FROM ${table} WHERE false`,
+    `UPDATE ${table} SET ${column} = ${column} WHERE false`,
     `DELETE FROM ${table} WHERE false`,
   ];
   for (const mode of ['write', 'read'] as const) {
