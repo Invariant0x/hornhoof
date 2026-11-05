@@ -2,7 +2,7 @@
 
 ## Method
 
-BEFORE: run_tests 101, source c3c6c815321f6c3c222cb35a4cb6d560326bcdff. Four parts with two workers each; every package tested on every shard except protocol (once). The identical command is retained on task 378 as `command.sh` (attachment e17e3f43-cf5c-46df-a071-01a92cafc77d). HH_BENCH_STAGE measures elapsed package wall time; reporter file values include collection/setup and test/teardown. Lazy PGlite initialization can occur during the first SQL statement, so subtracting setupMs does not remove all database startup. File timings overlap and must not be summed as suite wall time.
+BEFORE: run_tests 101, source c3c6c815321f6c3c222cb35a4cb6d560326bcdff. Four application shards with two workers each; protocol ran once with the runner's inherited worker setting. The identical command is retained on task 378 as `command.sh` (attachment e17e3f43-cf5c-46df-a071-01a92cafc77d). HH_BENCH_STAGE measures elapsed package wall time; reporter file values include collection/setup and test/teardown. Lazy PGlite initialization can occur during the first SQL statement, so subtracting setupMs does not remove all database startup. File timings overlap and must not be summed as suite wall time.
 
 The pool is heterogeneous. Reported Linux runtimes include x64 (8 and 16 CPUs) and Linuxkit arm64 (8 CPUs before, 10 CPUs after). A changed host assignment, cache or load can affect the comparison; percentages from this run alone do not establish the parent task target against turn 7.
 
@@ -131,7 +131,7 @@ The only execution-plan deviation was verifying all three independent server str
 
 ### Change provenance
 
-| Commit/task | Included in this measurement branch | Role |
+| Commit/task | Included in the historical measurement source | Role |
 | --- | --- | --- |
 | c3c6c815 | Both BEFORE and AFTER base | Turn-8 snapshot including tasks 308, 328 and 358 |
 | ce2de9ef | AFTER | Accepted-turn observation and controlled cancellation |
@@ -141,13 +141,13 @@ The only execution-plan deviation was verifying all three independent server str
 | 581fc95a | AFTER | Decisions split |
 | 6aea787e53c5433ab5ebf1d87d9893f1f6e1e2c7 | AFTER | Pipe drainage and measurable test utilities |
 | 01c96e10650ea13466e26a656cb888147dd15048 | AFTER run 103 | Documentation and evidence commit, no additional code changes |
-| 408, 409, 374 | Not merged into this branch | Assigned remedies for the six baseline server failures; record their exact SHAs separately if later merged |
+| 408, 409, 374 | Not in either historical source | Assigned remedies for the six baseline server failures; the controlled continuation records their later inclusion separately |
 
 The final Linux comparison follows below.
 
 ## After
 
-AFTER: run_tests 103, all four parts at 01c96e10650ea13466e26a656cb888147dd15048. The command bytes, four-part layout, two workers per Vitest command, Node v22.23.4 and 45-minute part limit match run 101. All four command environments report Linux. No neighboring fixes were merged into this source. Raw logs are task attachments `tests-103-1.log` through `tests-103-4.log`. Structured extraction is attached separately for recomputation.
+AFTER: run_tests 103, all four parts at 01c96e10650ea13466e26a656cb888147dd15048. The command bytes, four-part layout, two workers per application Vitest command, Node v22.23.4 and 45-minute part limit match run 101. Protocol inherited the runner's worker setting in both historical runs; the new controlled pair explicitly pins protocol to two as well. All four command environments report Linux. No neighboring fixes were merged into this source. Raw logs are task attachments `tests-103-1.log` through `tests-103-4.log`. Structured extraction is attached separately for recomputation.
 
 **Validation remains incomplete.** Package counts are preserved and node/protocol/web passed, but server has 30 failed cases: six baseline assertion failures and 24 new 20000 ms timeouts on part 3. One timeout is in the moved test-runs-commit file. Three timed-out migration cases also report ENOTEMPTY during cleanup. No overall speedup or whole-suite green is established. Positive percentage deltas below mean slower, negative mean faster.
 
@@ -296,3 +296,50 @@ These diagnostics do not replace the failed remote measurement or establish the 
 The complete before/after observation is recorded, but the acceptance goal of a reliable, balanced improvement is not demonstrated by run 103. A comparable controlled Linux slot or an explicit head decision about accepting these limitations is needed before closing task 378. The current run_tests API chooses a free machine and offers no worker pinning; changing company pool membership is outside this task. Do not raise timeouts, remove cases, mask the new failures or silently replace this run with a lucky rerun. No extra full-suite run has been launched.
 
 The original task-tool transport problem has cleared on this resume: tasks/task/test_run returned and task 378 is working with externalWait null. The previous wait_for acknowledgment was unavailable; its state was not claimed as saved. This is no longer the technical blocker. The remaining blocker is validating the full AFTER result under comparable conditions.
+
+## Controlled continuation, preparation
+
+The head's 16:07 UTC decision authorizes one additional `run_tests` job with `parts=1`. The job will execute both pinned sources sequentially on its single worker, replaying four logical shards each. This measures sequential logical-part/package/file times. It is neither the earlier distributed four-machine elapsed time nor a historical turn-7 baseline. Run 103 remains failed and is not replaced.
+
+### Shared source and exact provenance
+
+| Component | Exact source | In both variants |
+| --- | --- | --- |
+| Integration base | `0b4b238ce6a84007974cea919a8e032aa5639081` | yes |
+| Task 408 merge | `5e3bc796029e1f95da626b62e66038c5ce4fb8a2` | inherited through the integration base |
+| Task 374 merge | `0b4b238ce6a84007974cea919a8e032aa5639081` | inherited through the integration base |
+| Task 409 original test-only fix | `b05a79fbce4e8c89b85f8696c037827117621c27` | cherry-picked as `0c4644d5c3858653149452e67d000a0534cbaec6`; exactly the full `held: null` expectation |
+| Accepted-report observation boundary | `2eb0d12f9f67fc6e94f75fcf118d3ed788a134f3` | yes; the control retains real waits and all assertions |
+| Shared driver and its tests | `05c63819d59c0cbba044132c89c503f30cb49856` | yes |
+| Pinned CONTROL | `05c63819d59c0cbba044132c89c503f30cb49856` | branch `task-378-control` |
+| Pinned OPTIMIZED | `54340764df895693cabdad4027fdad2ffcf48e38` | branch `task-378`, before documentation-only preparation |
+
+CONTROL is an ancestor of OPTIMIZED. Their differences are the 25 task-378 test/helper paths plus its three documentation files. Production source, protected test families, installer stubs, workspace manifests/lock, test configs, server helpers/global setup and the driver are identical. The machine-readable manifest records all changed paths and 14 identical SHA-256 file hashes. Task 409 was taken as its exact one-file test-only commit; later feature commits from its integration merge are not included.
+
+Runtime collection with `vitest list ... --staticParse=false --maxWorkers=2 --json` gives identical full-name multisets: server affected families 252/252, node affected files 17/17. The server families are installer 94, test-runs 100 and decisions 58. The one new queued-run case comes from the common integration base and is retained exactly once in both variants. Assertion token multisets are 817/817, equal. These updated counts are distinct from the historical 251-case/812-assertion measurement.
+
+The common boundary correction first reproduced both original Antigravity failures, then passed 10/10 with real waits. A temporary old-window idle fault failed three original no-idle assertions, then the restored control passed 10/10. No idle report after accepted work is filtered.
+
+### Diagnosis at the original limits
+
+The full run-103 failure records account for 24 unique timeouts and three additional ENOTEMPTY cleanup errors in already counted cases. `migrationsUpTo` registers recursive removal before awaiting the copy and journal rewrite. A timed-out async body could overlap cleanup; this is a plausible race, not an established cause. No protected migration/helper file was edited.
+
+The targeted diagnostic command was `npx --no-install vitest run test/departments.test.ts test/migration-metadata.test.ts test/migrations.test.ts test/program-operator-evidence.test.ts test/program-operator-migration.test.ts test/program-operator-recovery.test.ts test/program-updates.test.ts test/test-runs-commit.test.ts test/watch-machine-drain.test.ts test/work-tree-route.test.ts test/install-script test/test-runs test/decisions --maxWorkers=2` from `apps/server`, wrapped only with resource sampling. On the merged working tree with the shared 0b4b238c base, it reported **1 failed / 366 passed (367), 22 files, 535.86 s**. All 252 affected-family cases passed, including the entire moved commit file. The remaining failure was `migration 0049 > adds history indexes on an upgraded Acme copy without changing old events`, still at **20000 ms**. ENOTEMPTY was not reproduced. Neither observation clears the original failures.
+
+The 109 samples identify Linuxkit 6.12.54 arm64, Node v22.23.4, 10 visible CPUs, `cpu.max=max 100000`, cpuset 0-9 and `memory.max=max`. One-minute load ranged 9.61..29.65; minimum MemAvailable was 1.391 GiB. The OOM counter did not increase. These visible limits and load observations do not establish a quiet comparable window or a sole resource cause. Raw before/during/after samples remain in `targeted-server.log`.
+
+After the integration, the five affected node files passed **17/17** at their original limits in 32.53 s. The isolated shared task-409 expectation passed **27/27** in 53.73 s. No timeout increase, retry, exclusion or assertion weakening was introduced.
+
+### Driver review and evidence transport
+
+`scripts/benchmarks/linux-pair.mjs` and its test fixture are committed identically in both sources. Each logical shard gets its own fresh worktree and empty npm cache. Node identity, architecture, visible quotas and config hashes are checked; every Vitest invocation has an explicit two-worker ceiling. The 54-command matrix retains the original ancillary checks, with protocol explicitly pinned to two workers in both new variants. Host page cache and background activity remain uncontrolled and are disclosed.
+
+The fresh read-only review identified three important issues. Each has a failing-first regression followed by a green check: protocol inherited a larger worker setting; missing or duplicate shard summaries could validate incomplete counts; middle failures and periodic resource records could be lost when the runner retained only the log head/tail. The driver now requires exactly one expected-package summary for each of the 13 test stages per variant and archives **all 54 full command outputs**, every file/package timing, and every before/during/after resource sample. Child wall time ends at pipe close; collection overhead is reported separately.
+
+The final gzip/base64 evidence frame has a SHA-256 checksum and an enforced 700 KiB encoded budget inside the runner's approximately 768 KiB tail. Oversized evidence fails validation explicitly. A regression feeds over 4 MiB of intermediate output through the actual `Output` class extracted from `apps/node/src/tests.ts`, then checks recovery of the middle failure, all 54 stages, 3146 file records and all resource samples. A separate high-entropy fixture proves that overflow is rejected. Source logs in disposable worker directories are not relied on for durability.
+
+`node --test --experimental-test-coverage --test-coverage-include='**/scripts/benchmarks/*.mjs' --test-reporter=lcov --test-reporter=tap ... scripts/benchmarks/linux-pair.test.mjs` reports **10 passed, 0 failed**. Node syntax checks and scoped ESLint exit 0. Built-in Node LCOV gives crapper a maximum 7.4 with `--use-existing-coverage --threshold 10`. The installed dryer does not support `.mjs` and reports no source for those two paths; the existing TypeScript/CJS change set remains covered by its scoped check. No provider or linter was installed to work around this limitation.
+
+The paired run is pending at this preparation snapshot. No speedup, full-suite green or historical turn-7 percentage is claimed.
+
+On the final common-base candidate, `npx --no-install tsc -p apps/node/tsconfig.json --noEmit`, the equivalent server command, `npm run typecheck:tests`, scoped ESLint and `dryer --threshold 0.8` all exit 0. Crapper with the existing package LCOV also exits0: new node utility maximum 9.7; the unchanged `toldOf` coverage limitation remains 12.0 as disclosed above. Driver coverage was regenerated after its last edit. Repacking the eight complete historical 101/103 logs gives 1,516,230 raw JSON bytes and 463,136 base64 bytes, below the 716,800-byte evidence budget before the new resource metadata. This is a sizing check, not a guarantee about future output; overflow explicitly invalidates the paired result.

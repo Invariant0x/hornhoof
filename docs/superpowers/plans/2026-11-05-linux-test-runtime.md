@@ -16,7 +16,7 @@
 - Do not skip cases, add retries or increase test timeouts.
 - Keep installer stubs in their existing directory, unchanged.
 - All exclusions in the spec apply; no mutation tools.
-- Full run_tests is allowed only for the two benchmark runs.
+- Full run_tests was initially allowed for two benchmark runs; the head subsequently authorized one controlled paired job, as specified below.
 - English repository text, no em dashes, Ivan Korol commits without trailers.
 
 ## Review Focus
@@ -88,22 +88,22 @@ Execution note after run 103: same command and all package counts verified, full
 
 **Interfaces:** Consumes origin/turn-8 initially 0b4b238ce6a84007974cea919a8e032aa5639081 (includes408/374), plus409 when supplied. Produces pinned control and optimized SHAs, with control an ancestor of optimized and source differences limited to378 optimizations.
 
-- [ ] Pin and record the integration commit and the408/374 provenance. Await409's supplied commit; do not implement its fix.
-- [ ] On task-378-control characterize the two existing idle-boundary failures. Apply only accepted-report prefix selection, retaining all no-idle, PID/session, tool/screen assertions and real wait durations. Run the full10-case file green; prove an old-window idle fault still fails.
-- [ ] Merge this common control into task-378. Preserve the upstream new queued-run test when integrating the split file. Compare expanded registration names and assertion multisets against the updated control.
-- [ ] Read the full24 timeout/cleanup failure records and lifecycle code; no unproven fixes to excluded files. Run departments, migration-metadata, migrations, program-operator-evidence/migration/recovery, program-updates, test-runs-commit, watch-machine-drain, work-tree-route with maxWorkers2 and original limits. Record load/limits alongside diagnostics.
-- [ ] Commit/push both branches and record exact control/optimized/fix SHAs, candidate-only paths, config/lock equality and test counts.
+- [x] Pin and record the integration commit and the408/374 provenance. Await409's supplied commit; do not implement its fix.
+- [x] On task-378-control characterize the two existing idle-boundary failures. Apply only accepted-report prefix selection, retaining all no-idle, PID/session, tool/screen assertions and real wait durations. Run the full10-case file green; prove an old-window idle fault still fails.
+- [x] Merge this common control into task-378. Preserve the upstream new queued-run test when integrating the split file. Compare expanded registration names and assertion multisets against the updated control.
+- [x] Read the full24 timeout/cleanup failure records and lifecycle code; no unproven fixes to excluded files. Run departments, migration-metadata, migrations, program-operator-evidence/migration/recovery, program-updates, test-runs-commit, watch-machine-drain, work-tree-route with maxWorkers2 and original limits. Record load/limits alongside diagnostics.
+- [x] Commit/push both branches and record exact control/optimized/fix SHAs, candidate-only paths, config/lock equality and test counts.
 
 ### Task 6: One-worker paired driver
 
-**Files:** Task artifact `.metrics/task-378/controlled/paired-driver.mjs` and its Node test fixture; attach the tested files. No production runner changes.
+**Files:** Shared `scripts/benchmarks/linux-pair.mjs` and its Node fixture, committed identically in both sources; attach the tested files. No production runner changes.
 
 **Interfaces:** Consumes full40-character control/optimized SHAs as explicit arguments and an ancestor check. Produces labeled HH_PAIR environment/resource/stage/timing/result records for control/optimized x logical shards1..4.
 
-- [ ] Write a small fixture-repository acceptance test first: eight fresh worktrees, exact commits, stages, maxWorkers2, logical HH_TEST_PART/PARTS, separate empty npm caches, failures retained, and differing configs rejected. Initially missing driver must fail.
-- [ ] Implement async child execution and5-second resource snapshots so sampling continues during tests. Run each logical shard with the same commands as command.sh, including ancillary stages only on logical part1. Keep all checks; report every failed stage and continue the paired comparison unless setup/identity makes it invalid.
-- [ ] Filter routine console output into labeled structured timing summaries; retain complete output of failed stages. Never print credentials or full environment. Validate constant identity/limits/config hashes across the pair; preserve all package counts.
-- [ ] Run fixture tests green, bash/Node syntax checks where applicable, and get one fresh read-only review of this new measurement driver before a full run. Record limits on page-cache/background-load control.
+- [x] Write a small fixture-repository acceptance test first: eight fresh worktrees, exact commits, stages, maxWorkers2, logical HH_TEST_PART/PARTS, separate empty npm caches, failures retained, and differing configs rejected. Initially missing driver must fail.
+- [x] Implement async child execution and5-second resource snapshots so sampling continues during tests. Run each logical shard with the same commands as command.sh, including ancillary stages only on logical part1. Keep all checks; report every failed stage and continue the paired comparison unless setup/identity makes it invalid.
+- [x] Filter routine console output into labeled structured timing summaries; retain complete output of every stage in a checksummed gzip evidence frame that fits the runner tail budget. Never print credentials or full environment. Validate constant identity/limits/config hashes across the pair; preserve all package counts.
+- [x] Run fixture tests green, bash/Node syntax checks where applicable, and get one fresh read-only review of this new measurement driver before a full run. Record limits on page-cache/background-load control.
 
 ### Task 7: Authorized paired run and report
 
