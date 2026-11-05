@@ -4,6 +4,7 @@ import { plural } from './plural';
 export const ru: Messages = {
   routes: {
     unavailable: 'Не найдено или нет доступа',
+    accessDenied: 'Недостаточно прав',
     explanation: 'Возможно, страница перемещена или у вас нет к ней доступа.',
     home: 'На карту',
   },
@@ -1038,6 +1039,9 @@ export const ru: Messages = {
     decidedByOwner: department => `Принимает хозяин отдела ${department}, CEO или его заместитель.`,
     actedFor: (agent, person) => `${agent} за ${person}`,
     note: 'Комментарий, если нужен',
+    choiceNote: 'Комментарий или замечания',
+    choiceHint: 'Выберите вариант выше или отправьте замечания без выбора.',
+    sendFeedback: 'Отправить',
     cancelTask: 'Отменить задачу',
     department: 'Отдел',
     allDepartments: 'Все отделы',

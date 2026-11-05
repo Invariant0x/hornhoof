@@ -383,15 +383,36 @@ describe.skipIf(!hasTmux)('words left unsent, on a node with no operator', () =>
     expect(paste.mock.calls.map(call => call[1])).toEqual(['Next assignment.']);
   });
 
-  it('goes on at once when a person sends what they wrote while the turn waits', async () => {
-    const { key, sessionId } = await started('codex', { typingQuietMs: 60_000 });
+  it.each(KINDS)('%s: what a person sends while the assignment waits is theirs, and the assignment goes in after it, in the same turn', async kind => {
+    const { key, sessionId } = await started(kind, { typingQuietMs: 60_000, readyMs: 8000, enterWaitMs: 1000 });
+    const pasteWords = tmux.paste.bind(tmux);
     const paste = vi.spyOn(tmux, 'paste');
-    const next = host.run(PROGRAMS.codex(key, 'Next assignment.', { jobId: randomUUID(), sessionId }));
-    await new Promise(done => setTimeout(done, 200));
-    host.input({ type: 'term.input', termId: `view-${key}`, data: '\r' });
-    expect(await next).toMatchObject({ ok: true });
-    expect(lefts()).toEqual([]);
+    const jobId = randomUUID();
+    /* A tool call as the program makes it, through the node's bridge, with what the turn has at that moment. */
+    const tool = () => fetch(host['bridge'].agent(key).mcpUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'company', arguments: {} } }) }).then(r => r.text());
+    let toolAtPaste = '';
+    paste.mockImplementation(async (target, text) => {
+      toolAtPaste = await tool();
+      return pasteWords(target, text);
+    });
+    let pastedAtEnd = -1;
+    const next = host.run(PROGRAMS[kind](key, 'Next assignment.', { jobId, sessionId })).finally(() => { pastedAtEnd = paste.mock.calls.length; });
+    await until(() => host['agents'].get(key)?.turn?.jobId === jobId);
+    await new Promise(done => setTimeout(done, 300));
+    host.input({ type: 'term.input', termId: `view-${key}`, data: '\r', pressedIn: jobId });
+    const result = await next;
+    expect(result).toMatchObject({ ok: true });
+    /* The turn ends with the assignment's answer, not with that of what the person sent. Antigravity's fake answers alike. */
+    if (kind !== 'antigravity') expect(result.result).toContain('Next assignment.');
+    expect(pastedAtEnd).toBe(1);
     expect(paste.mock.calls.map(call => call[1])).toEqual(['Next assignment.']);
+    /* The assignment went in with its turn's tools. Without a turn the same call is refused. */
+    expect(toolAtPaste).toContain('"result"');
+    expect(toolAtPaste).not.toContain('No Hornhoof turn');
+    expect(await tool()).toContain('No Hornhoof turn');
+    expect(lefts()).toEqual([]);
+    expect(sent.filter(m => m.type === 'turn.open')).toEqual([]);
+    expect(await host.screen(key)).not.toContain('cut short');
   });
 
   it('says a stopped turn was stopped when it stops while waiting for a person to finish', async () => {
@@ -416,11 +437,37 @@ describe.skipIf(!hasTmux)('words left unsent, on a node with no operator', () =>
     expect(paste.mock.calls.map(call => call[1])).toEqual(['Next assignment.']);
   });
 
-  it('ends the turn saying so, and leaves the words, when Hornhoof does not answer', async () => {
-    const { key, sessionId } = await started('codex');
+  it.each(['claude', 'codex'] as const)('%s: ends the turn saying so, and leaves the words, when Hornhoof does not answer', async kind => {
+    const { key, sessionId } = await started(kind);
     const paste = vi.spyOn(tmux, 'paste');
-    expect(await host.run(PROGRAMS.codex(key, 'Next assignment.', { jobId: randomUUID(), sessionId }))).toMatchObject({ ok: false, error: 'agent_failed', failure: { kind: 'unknown', text: expect.stringContaining('could not keep') } });
+    expect(await host.run(PROGRAMS[kind](key, 'Next assignment.', { jobId: randomUUID(), sessionId }))).toMatchObject({ ok: false, error: 'agent_failed', failure: { kind: 'unknown', text: expect.stringContaining('could not keep') } });
     expect(paste).not.toHaveBeenCalled();
     expect(await host.screen(key)).toContain(WORDS);
+    /* The wait is over: what the person now sends opens a turn of its own, as it would have. */
+    host.input({ type: 'term.input', termId: `view-${key}`, data: '\r' });
+    await until(() => sent.some(m => m.type === 'turn.open' && m.text === WORDS));
+  });
+
+  it('hears an Enter that was pressed in the turn before its prompt goes in, however late the program tells of it', async () => {
+    const { key, sessionId } = await started('claude', { typingQuietMs: 60_000, readyMs: 8000, enterWaitMs: 2000 });
+    const hook = host['hook'].bind(host);
+    vi.spyOn(host as unknown as { hook: typeof hook }, 'hook').mockImplementation(async (at, event, data) => {
+      if (event === 'prompt' && JSON.stringify(data).includes(WORDS)) await new Promise(done => setTimeout(done, 800));
+      return hook(at, event, data);
+    });
+    /* The program clears its input before it tells of what it took. */
+    let emptied = false;
+    const readInput = host['readInput'].bind(host);
+    vi.spyOn(host as unknown as { readInput: typeof readInput }, 'readInput').mockImplementation(async at => (emptied ? '' : readInput(at)));
+    const jobId = randomUUID();
+    const next = host.run(PROGRAMS.claude(key, 'Next assignment.', { jobId, sessionId }));
+    await until(() => host['agents'].get(key)?.turn?.jobId === jobId);
+    await new Promise(done => setTimeout(done, 300));
+    emptied = true;
+    host.input({ type: 'term.input', termId: `view-${key}`, data: '\r', pressedIn: jobId });
+    const result = await next;
+    expect(result).toMatchObject({ ok: true });
+    expect(result.result).toContain('Next assignment.');
+    expect(await host.screen(key)).not.toContain('cut short');
   });
 });

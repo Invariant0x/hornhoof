@@ -44,6 +44,19 @@ describe('templates', () => {
     for (const role of roles) expect(role.effort, role.id).toBe(xhigh.includes(role.id) ? 'xhigh' : high.includes(role.id) ? 'high' : 'medium');
   });
 
+  it('tells every member and head that a turn keeps its level, which comes from why the turn starts', () => {
+    expect(MEMBER_SKILLS).toContain('hh-task-flow');
+    expect(HEAD_SKILLS).toContain('hh-brief-members');
+    for (const id of ['hh-task-flow', 'hh-brief-members']) {
+      const body = templates.skills.get(id)!.body;
+      expect(body, id).toMatch(/second look[^.]*medium/);
+      expect(body, id).toMatch(/level[^.]*card/);
+      expect(body, id).toMatch(/inside (this|a running) (one|turn)/);
+    }
+    expect(templates.skills.get('dev-review-verdict')!.body).toMatch(/second round[\s\S]*medium/i);
+    for (const id of ['DEV-REV', 'DEV-SEC', 'DEV-RED', 'DEV-QA']) expect(templates.roles.get(id)!.body, id).toMatch(/second look[^.]*medium/);
+  });
+
   it('rejects an unknown role effort and allows a role to omit it', () => {
     const dir = mkdtempSync(join(tmpdir(), 'hornhoof-effort-'));
     onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
