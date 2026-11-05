@@ -50,22 +50,47 @@ type AgyStep = Calls & { events: AgentEvent[]; answered?: boolean };
 /* agy logs each planner response whole. The generic steps after a call are its results, in order. */
 export function agySteps(): (line: unknown) => AgyStep {
   const pending: string[] = [];
+  const seen = new Set<string>();
+  const inputs = new Set<string>();
   return line => {
     const news: AgyStep = { events: [], began: [], ended: [] };
-    if (!isRecord(line)) return news;
-    if (line.type === 'USER_INPUT') news.ended = pending.splice(0);
-    if (line.type === 'PLANNER_RESPONSE') {
-      news.events = agyResponse(line);
-      news.began = news.events.filter(e => e.kind === 'tool').map((e, i) => ({ id: `${line.step_index}:${i}`, name: e.name }));
+    const step = agyStep(line, seen, inputs);
+    if (!step) return news;
+    if (step.type === 'USER_INPUT') news.ended = pending.splice(0);
+    if (step.type === 'PLANNER_RESPONSE') {
+      news.events = agyResponse(step);
+      news.began = news.events.filter(e => e.kind === 'tool').map((e, i) => ({ id: `${step.step_index}:${i}`, name: e.name }));
       pending.push(...news.began.map(c => c.id));
       news.answered = news.began.length === 0;
     }
-    if (line.type === 'GENERIC' && pending.length) {
+    if (step.type === 'GENERIC' && pending.length) {
       news.ended.push(pending.shift()!);
-      news.events.push({ kind: 'tool_result', ok: line.status === 'DONE', summary: typeof line.content === 'string' ? line.content : '' });
+      news.events.push({ kind: 'tool_result', ok: step.status === 'DONE', summary: typeof step.content === 'string' ? step.content : '' });
     }
     return news;
   };
+}
+
+function agyStep(line: unknown, seen: Set<string>, inputs: Set<string>): Record<string, unknown> | null {
+  if (!isRecord(line) || !agyStepComplete(line)) return null;
+  if (line.type === 'USER_INPUT') return agyUserStep(line, seen, inputs);
+  const key = typeof line.step_index === 'number' ? `${line.type}:${line.step_index}` : null;
+  if (key && seen.has(key)) return null;
+  if (key) seen.add(key);
+  return line;
+}
+
+function agyUserStep(line: Record<string, unknown>, seen: Set<string>, inputs: Set<string>): Record<string, unknown> | null {
+  const key = JSON.stringify([line.step_index, line.created_at, line.source, line.content]);
+  if (inputs.has(key)) return null;
+  inputs.add(key);
+  seen.clear();
+  return line;
+}
+
+/* Preserve records without status; an explicit running snapshot cannot finish a tool or publish an answer. */
+function agyStepComplete(line: Record<string, unknown>): boolean {
+  return line.status === undefined || line.status === 'DONE' || line.status === 'ERROR';
 }
 
 function agyResponse(line: Record<string, unknown>): AgentEvent[] {
