@@ -418,6 +418,22 @@ describe("an agent's live terminal in its window", () => {
     expect(again.sent.at(-1)).toEqual({ type: 'input', data: 'next' });
   });
 
+  it('sends what it kept once, and nothing that had gone already, however often the view connects again', async () => {
+    open();
+    const first = await socket();
+    first.opened();
+    terms[0]!.type('went\r');
+    first.ended(4410, 'node_offline');
+    terms[0]!.type('kept\r');
+    await waitFor(() => expect(FakeSocket.all).toHaveLength(2), { timeout: 3000 });
+    FakeSocket.all[1]!.opened();
+    expect(FakeSocket.all[1]!.sent).toEqual([{ type: 'input', data: 'kept\r' }]);
+    FakeSocket.all[1]!.ended(4410, 'node_offline');
+    await waitFor(() => expect(FakeSocket.all).toHaveLength(3), { timeout: 3000 });
+    FakeSocket.all[2]!.opened();
+    expect(FakeSocket.all[2]!.sent).toEqual([]);
+  });
+
   it('keeps what the person types before the first connection is up', async () => {
     open();
     const ws = await socket();
