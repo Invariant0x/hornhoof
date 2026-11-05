@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
-import { closeSync, constants, fchownSync, fstatSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, fchownSync, fstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { JobUser } from '../isolation.js';
+import { isRootUser, type JobUser } from '../isolation.js';
 import type { LoginIo } from '../runner.js';
 import type { ProgramExit } from '../program-exit.js';
 import { agentEnv } from '../agent-env.js';
@@ -237,10 +237,37 @@ export function tokensIn(path: string): string[] {
   return found;
 }
 
+/* A fresh 0700 folder in the system's sticky temporary directory belongs only to the installer (root on a root node).
+   Never use the inherited HOME, TMPDIR, PATH or npm settings for a privileged installation. */
+export async function withTrustedInstall<T>(work: (env: NodeJS.ProcessEnv, cwd: string) => Promise<T>): Promise<T> {
+  const home = mkdtempSync('/tmp/hh-install-');
+  try {
+    writeFileSync(join(home, '.npmrc'), '');
+    writeFileSync(join(home, 'global.npmrc'), '');
+    writeFileSync(join(home, 'package.json'), '{}');
+    const path = '/usr/local/bin:/usr/bin:/bin';
+    const env: NodeJS.ProcessEnv = {
+      PATH: isRootUser() ? path : process.env.PATH || path,
+      HOME: home, TMPDIR: home, LANG: 'C.UTF-8',
+      NPM_CONFIG_USERCONFIG: join(home, '.npmrc'),
+      NPM_CONFIG_GLOBALCONFIG: join(home, 'global.npmrc'),
+      NPM_CONFIG_CACHE: join(home, 'cache'),
+      NPM_CONFIG_REGISTRY: 'https://registry.npmjs.org/',
+      NPM_CONFIG_WORKSPACES: 'false',
+    };
+    return await work(env, home);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+}
+
+export function runInstaller(options: Pick<SpawnOptions, 'bin' | 'args' | 'timeoutMs'>): Promise<Finished> {
+  return withTrustedInstall((env, cwd) => runProgram({ ...options, env, cwd }));
+}
+
 /* Installs an agent program into tools with npm; a failure carries the last lines npm printed. */
 export async function installPackage(tools: string, pkg: string): Promise<void> {
-  /* npm keeps its cache with the programs: in the agents' home it would leave files they cannot change. */
-  const done = await runProgram({ bin: 'npm', args: ['install', '-g', '--prefix', tools, `${pkg}@latest`], env: childEnv(tools, { npm_config_cache: join(tools, '.npm-cache') }), timeoutMs: 10 * 60_000 });
+  const done = await runInstaller({ bin: 'npm', args: ['install', '-g', '--prefix', tools, `${pkg}@latest`], timeoutMs: 10 * 60_000 });
   if (done.code === 0) return;
   const last = stripEscapes(done.output).trim().split('\n').slice(-5).join('\n');
   throw new Error(done.timedOut ? 'npm did not finish within 10 minutes.' : last || `npm ended with code ${done.code}.`);

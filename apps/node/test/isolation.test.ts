@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { agentUser, builtinAdapters, ensurePasswd, FIRST_UID, prepareFolder, secureNode, userFor, type FolderOps } from '../src/isolation.js';
 import { claudeAdapter } from '../src/providers/claude.js';
 import { codexAdapter } from '../src/providers/codex.js';
@@ -10,6 +10,15 @@ import { exitsCleanly, installPackage, interactiveLogin, runProgram } from '../s
 import { PassThrough } from 'node:stream';
 
 const tmp = () => mkdtempSync(join(tmpdir(), 'hh-iso-'));
+
+vi.mock('node:child_process', async importOriginal => {
+  const original = await importOriginal<typeof import('node:child_process')>();
+  return {
+    ...original,
+    spawn: (file: string, args: string[], options: import('node:child_process').SpawnOptions) =>
+      original.spawn(file === 'npm' ? join(args[args.indexOf('--prefix') + 1]!, 'bin', 'npm') : file, args, options),
+  };
+});
 
 function fakeOps(owners: Record<string, number> = {}, missing: string[] = []) {
   const calls: string[] = [];
@@ -203,12 +212,14 @@ describe.skipIf(process.getuid?.() === 0)("a root node's own runs of the agents'
     await expect(codexAdapter({ home, tools: home, bin: '/usr/bin/true', mode: 'plan', user: other }).login(io())).rejects.toThrow();
   });
 
-  it("keeps npm's cache with the programs instead of in the agents' home", async () => {
+  it("keeps npm's cache in the private installer home instead of in the agents' home", async () => {
     const tools = tmp();
     mkdirSync(join(tools, 'bin'));
-    writeFileSync(join(tools, 'bin', 'npm'), `#!/bin/sh\necho "$npm_config_cache" > ${join(tools, 'cache')}\n`, { mode: 0o755 });
+    writeFileSync(join(tools, 'bin', 'npm'), `#!/bin/sh\nprintf '%s\\n' "$HOME" "$NPM_CONFIG_CACHE" > ${join(tools, 'cache')}\n`, { mode: 0o755 });
     await installPackage(tools, 'some-program');
-    expect(readFileSync(join(tools, 'cache'), 'utf8').trim()).toBe(join(tools, '.npm-cache'));
+    const [home, cache] = readFileSync(join(tools, 'cache'), 'utf8').trim().split('\n');
+    expect(home).not.toBe(process.env.HOME);
+    expect(cache).toBe(join(home!, 'cache'));
   });
 });
 
