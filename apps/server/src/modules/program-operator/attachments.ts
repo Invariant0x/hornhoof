@@ -12,7 +12,6 @@ import type { ToolJob } from '../tools/job.js';
 const MAX_PICTURE_BYTES = 3 * 1024 * 1024;
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 export const casePictureUnknown = (): ApiError => new ApiError(404, 'not_found', 'There is no such picture.', 'attachment_unknown');
-const casePictureHidden = (): ApiError => new ApiError(403, 'forbidden', 'This picture belongs to work you do not see.', 'attachment_hidden');
 
 /* Bound the bytes in the query too: an invalid row never becomes an unbounded download. */
 async function casePicture(db: Db, companyId: string, id: string, caseId?: string) {
@@ -66,11 +65,11 @@ export async function agentCasePicture(db: Db, job: ToolJob, ref: string, file: 
   return found.bytes;
 }
 
-/* People follow the target employee's current company, department, product and team visibility. */
+/* A person sees the picture when they see the target employee, on the one rule of who sees whom. To anyone else it does
+   not exist, as for an agent above: its refusal does not tell a real picture from a made up id. */
 export async function personCasePicture(db: Db, person: Person, id: string): Promise<Buffer> {
   const found = await casePicture(db, person.companyId, id);
-  if (!found) throw casePictureUnknown();
-  if (!(await canViewAgent(db, person, found.target))) throw casePictureHidden();
+  if (!found || !(await canViewAgent(db, person, found.target))) throw casePictureUnknown();
   return found.bytes;
 }
 
