@@ -28,7 +28,7 @@
 
 - [x] Write failing watchdog and operator tests for queue waiting, completed waits and lost heartbeats.
 - [x] Connect typed authenticated queue observations and verify these tests.
-- [ ] Run migrations.test.ts and the three prior timeout cases ten times under at least the prior concurrent load; retain loadavg and cleanup evidence.
+- [x] Run migrations.test.ts and the three prior timeout cases ten times under at least the prior concurrent load; retain loadavg and cleanup evidence.
 - [x] Run targeted dependency tests, affected tsc, typecheck:tests, scoped eslint, crapper and dryer.
 - [ ] Review the final diff independently, commit, push task-356, submit evidence to the head.
 
@@ -90,3 +90,10 @@
 - Correcting the temporary baseline namespace exposed a real test-helper CC regression: fakeServer3->5. The check-reply branch was extracted into grantCheck; the original helper must return to3 before completion. Commit952bd0a3 is an intermediate fix commit, not a completed gate.
 
 - Final static verification completed after the helper extraction: affected builds, typecheck:tests, scoped eslint all exit0; corrected crapper comparison has increases=[] and newOverLimit=[] (fakeServer3->3, unchanged opened16->16); dryer no duplicate candidates; git diff --check empty. main.test.ts57/57 on the final helper. All source changes are frozen for the loaded proof.
+
+## Final acceptance evidence
+
+- Fixed source6b8e1100: final-probe.mjs completed PASS10 repetitions; maxActive1. Each repeat log has3files57/57, no failed/skipped target tests. Thirty competing selected three-case runs also exit0. loadavg34.17-44.20, positions3->2->1, same32 boundedCPU0 background workers and check CPUs1-9 as calibration. No test timeout changed.
+- final-load/cleanup.json:32workers terminated, active=[],allExited=true. Process-table readback found none of these32PIDs. final-readback.json records the checks. The driver completed13:26:50UTC, including cleanup by13:26:55UTC.
+- All changed-function CC values are no higher than the task base or origin/main; all new functions are below10. Raw main comparison reports dispatchAlarm5->6, inherited unchanged from task base(CC6). Its function text is byte-identical to f289196b, proven in complexity-main.json. It is outside this task's diff and has not been refactored to hide the existing difference.
+- Source is frozen at6b8e1100; the final commit adds only documentation of these results. Final branch publication and task submission are the remaining handoff actions.

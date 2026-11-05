@@ -40,3 +40,9 @@ Load reports older than 90 seconds are not refreshed by a slot request. Nodes lo
 Queue waiting defers stalled-program alarms in the task watchdog and first-activity alarms in the program operator. Their normal quiet interval starts again after waiting ends. Missing-node alarms remain active. The operator cannot send keys to an agent while it waits for a check slot.
 
 The capacity calibration is conservative and based on the supplied workload. It does not impose a per-process CPU affinity or replace each command's cancellation and execution limit. Commands started outside the wrapper or the node API do not participate in admission.
+
+## Validation
+
+At source commit `6b8e11007a4484399617890619a8c85cb47afdb5`, the completed coordinator/client API passed ten consecutive full migration/wait runs (57 tests each), with three additional selected checks offered each round through another node identity. Thirty competitors also passed. With 32 bounded CPU0 background workers and checks on CPUs1-9, measured loadavg was 34.17-44.20 and at most one check ran at a time. Waiting positions progressed from three to one. All workers exited, confirmed by a process-table readback. The existing 20000 ms test limit was unchanged.
+
+This proof uses the production coordinator/client and wire parsers in a local two-node harness. Authenticated ownership, CLI output, nested commands, cancellation and watchdog behavior have separate targeted integration tests. A live multi-container deployment and live macOS were not available in this Linux environment.
