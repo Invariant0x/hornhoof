@@ -947,7 +947,8 @@ export class TerminalHost {
     const observed = a.turn!.observed!;
     if (!(await this.opts.tmux.alive(a.name))) return this.programGone(a, job, observed.watch);
     await this.reportProgram(a, observed.watch, observed.look);
-    if (this.operator?.inheritSource(a.key, job.operatorSourceDelivery) && !a.busy) return this.failedTurn(a, job, 'cancelled');
+    /* Words of the source got taken by no turn of this one's. Once this turn's are, the program is about to say it is busy. */
+    if (this.operator?.inheritSource(a.key, job.operatorSourceDelivery) && !a.busy && !a.took) return this.failedTurn(a, job, 'cancelled');
     return this.operatorReceiptFailure(a, job);
   }
 
