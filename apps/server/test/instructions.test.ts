@@ -25,6 +25,7 @@ const ROLE: Role = {
   perProduct: false,
   inDefault: true,
   gate: null,
+  schema: null,
   timer: null,
   skills: [
     { id: 'hh-report-to-head', on: true, locked: true },

@@ -367,7 +367,7 @@ describe('Department view', () => {
     await flyIn(user);
     const schema = screen.getByRole('region', { name: 'Department schema' });
     expect(within(schema).getByText('Code reviewer')).toBeInTheDocument();
-    expect(within(schema).getByText('last gate')).toBeInTheDocument();
+    expect(within(schema).getByText('gate 1')).toBeInTheDocument();
     expect(within(schema).queryByText('Sent back for rework')).not.toBeInTheDocument();
     expect(schema.querySelectorAll('.wires .rl, .wires .rah')).toHaveLength(0);
     expect(within(schema).getByText('Report to the head')).toBeInTheDocument();

@@ -145,7 +145,17 @@ describe('templates', () => {
     expect(gates('development')).toEqual(['DEV-REV', 'DEV-SEC', 'DEV-RED']);
     expect(gates('design')).toEqual(['DSN-QA']);
     expect(gates('finance')).toEqual(['FIN-AUDIT']);
+    expect(templates.roles.get('DEV-REV')!.gate).toBe(1);
+    expect(templates.roles.get('DEV-SEC')!.gate).toBe(2);
+    expect(templates.roles.get('DEV-TEST')!.gate).toBeNull();
     for (const r of roles) if (r.kind === 'head') expect(r.gate, r.id).toBeNull();
+  });
+
+  it('reads role positions on the department schema, with ordinary work as the default', () => {
+    expect(templates.roles.get('DEV-ARCH')!.schema).toBe('before_work');
+    expect(templates.roles.get('DEV-TEST')!.schema).toBe('final_check');
+    expect(templates.roles.get('DEV-PERF')!.schema).toBe('observer');
+    expect(templates.roles.get('DEV-ENG')!.schema).toBeNull();
   });
 
   it('teaches the task tools by their names', () => {
