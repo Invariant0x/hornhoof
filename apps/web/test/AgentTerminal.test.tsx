@@ -171,16 +171,22 @@ vi.mock('@xterm/xterm', () => ({
       this.rows = rows;
       for (const fn of this.onSize) fn({ cols, rows });
     }
-  },
-}));
-vi.mock('@xterm/addon-fit', () => ({
-  FitAddon: class {
-    fit() {
-      moves.push('fit');
-      fitting.then?.();
+    resize(cols: number, rows: number) {
+      this.resized(cols, rows);
     }
   },
 }));
+vi.mock('../src/ui/terminal-fit', async importOriginal => {
+  const actual = await importOriginal<typeof import('../src/ui/terminal-fit')>();
+  return {
+    ...actual,
+    fitTerminal(term: Parameters<typeof actual.fitTerminal>[0], box: HTMLElement) {
+      moves.push('fit');
+      fitting.then?.();
+      return actual.fitTerminal(term, box);
+    },
+  };
+});
 
 /* The browser tells of a new size of the terminal's box; jsdom has no layout, so a test says when. */
 class FakeResizeObserver {
@@ -621,5 +627,36 @@ describe("an agent's live terminal in its window", () => {
     await user.click(screen.getByRole('button', { name: 'Копировать' }));
     expect(copied).toEqual(['русский текст']);
     localStorage.removeItem('hh-lang');
+  });
+
+  it('gives the terminal dark scrollbar scheme, right cushion and sends the exact visible column count in resize', async () => {
+    expect(decl('.t-term', 'color-scheme')).toBe('dark');
+    expect(decl('.t-term', 'min-width')).toBe('0');
+    expect(decl('.t-xterm', 'width')).toBe('100%');
+    expect(decl('.t-term .xterm', 'padding')).toBe('6px 8px 4px 10px');
+
+    const { container } = open();
+    const ws = await socket();
+    ws.opened();
+    const term = terms[0]!;
+    const box = container.querySelector<HTMLElement>('.t-xterm')!;
+    const viewport = term.element.querySelector<HTMLElement>('.xterm-viewport')!;
+    const scrollArea = document.createElement('div');
+    scrollArea.className = 'xterm-scroll-area';
+    viewport.appendChild(scrollArea);
+    term.element.style.padding = '6px 8px 4px 10px';
+    Object.assign(term._core, {
+      _charSizeService: { width: 7.201171875, height: 14 },
+      _renderService: { dimensions: { css: { cell: { width: 7.2, height: 14 } } }, clear() {} },
+    });
+
+    /* Narrow 375px box with 15px scrollbar: 375 - (10 + 8) - 15 = 342px -> floor(342 / 7.201171875) = 47 visible cols. */
+    box.getBoundingClientRect = () => ({ x: 0, y: 0, left: 0, top: 0, right: 375, bottom: 500, width: 375, height: 500, toJSON: () => ({}) });
+    viewport.getBoundingClientRect = () => ({ x: 0, y: 0, left: 0, top: 0, right: 375, bottom: 500, width: 375, height: 500, toJSON: () => ({}) });
+    scrollArea.getBoundingClientRect = () => ({ x: 0, y: 0, left: 0, top: 0, right: 360, bottom: 1200, width: 360, height: 1200, toJSON: () => ({}) });
+
+    for (const ro of FakeResizeObserver.all) ro.resized();
+    expect(term.cols).toBe(47);
+    expect(ws.sent).toEqual([{ type: 'resize', cols: 47, rows: 35 }]);
   });
 });
