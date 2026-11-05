@@ -43,17 +43,41 @@ export function mayRunHttps(row: Pick<TlsRow, 'mode' | 'name' | 'certPem' | 'cer
   return isKeyOf(row.certPem, decryptSecret(row.certKeyEnc, secret));
 }
 
+/* Certificate data that cannot be read counts as a no, which is no failure of the database. */
+function passes(row: TlsRow, link: LinkView, secret: Buffer): boolean {
+  try {
+    return mayRunHttps(row, link, secret, new Date());
+  } catch {
+    return false;
+  }
+}
+
 /* The mode the tunnel runs in. Anything unknown or missing about the certificate means http, which works through the
    relay's own TLS, while https on a bad certificate would take the link down. So ACME_DIRECTORY=off and a restart of the
-   app are the way back whatever the row says. */
-export async function linkMode(db: Db, config: Config): Promise<'http' | 'https'> {
+   app are the way back whatever the row says. A failed read of the database throws, so a reader that keeps what it runs
+   does not take it for a change. */
+export async function readLinkMode(db: Db, config: Config): Promise<'http' | 'https'> {
   if (config.acmeDirectory === null) return 'http';
-  try {
-    const [link] = await db.select().from(publicLinks).limit(1);
-    if (!link) return 'http';
-    const row = await tlsOf(db, link.companyId);
-    return row && mayRunHttps(row, link, config.secret, new Date()) ? 'https' : 'http';
-  } catch {
-    return 'http';
-  }
+  const [link] = await db.select().from(publicLinks).limit(1);
+  if (!link) return 'http';
+  const row = await tlsOf(db, link.companyId);
+  return row && passes(row, link, config.secret) ? 'https' : 'http';
+}
+
+export function linkMode(db: Db, config: Config): Promise<'http' | 'https'> {
+  return readLinkMode(db, config).catch(() => 'http' as const);
+}
+
+function certificateIn(row: TlsRow | null, name: string, secret: Buffer): { certPem: string; keyPem: string } | null {
+  if (row?.name !== name || !row.certPem || !row.certKeyEnc) return null;
+  return { certPem: row.certPem, keyPem: decryptSecret(row.certKeyEnc, secret) };
+}
+
+/* What the link's TLS listener is to serve: null without a link, and the link's host with the certificate of its own
+   name once there is one. With certificates off there is none, as the manager also tells the listener. */
+export async function servedCertificate(db: Db, config: Config): Promise<{ host: string; cert: { certPem: string; keyPem: string } | null } | null> {
+  const [link] = await db.select().from(publicLinks).limit(1);
+  if (!link) return null;
+  const row = config.acmeDirectory === null ? null : await tlsOf(db, link.companyId);
+  return { host: new URL(link.url).hostname, cert: certificateIn(row, link.name, config.secret) };
 }
