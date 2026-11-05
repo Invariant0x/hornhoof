@@ -50,11 +50,14 @@ const quoted = (names: string[]) => `ARRAY[${names.map(n => `'${n}'`).join(', ')
 const columns = (table: string, but: string[] = []) =>
   `(SELECT string_agg(quote_ident(column_name), ', ') FROM information_schema.columns WHERE table_schema = 'public' AND table_name = '${table}' AND column_name <> ALL (${quoted(but)}))`;
 const visible = (table: string) => columns(table, SECRET[table] ?? []);
+/* A right to read these tables, column by column, without the secret columns. */
+const readVisible = (tables: string[], name: string) =>
+  tables.map(table => `  EXECUTE format('GRANT SELECT (%s) ON ${table} TO "${name}"', ${visible(table)});`).join('\n');
 
 /* Makes the role or brings its rights up to date, for tables later updates added too, starting from none. It owns
    nothing, so it cannot change the tables themselves, and as no superuser it reads no server files and runs no programs.
    A call may take 15 seconds and may not sit in an open transaction. */
-const role = (name: string, rights: string) => `DO $grants$
+const role = (rights: (name: string) => string) => (name: string) => `DO $grants$
 DECLARE t text;
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${name}') THEN CREATE ROLE "${name}" NOLOGIN; END IF;
@@ -63,7 +66,7 @@ BEGIN
   REVOKE ALL ON ALL TABLES IN SCHEMA public FROM "${name}";
   REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM "${name}";
   GRANT USAGE ON SCHEMA public TO "${name}";
-${rights}
+${rights(name)}
 END $grants$`;
 
 /* Every table but the hidden ones and those named, one by one. */
@@ -76,11 +79,10 @@ const eachTable = (but: string[], grant: string) => `  FOR t IN SELECT tablename
    may ask for, which make the CEO's checks. An employee is added by hiring, keeps its kind, role, skills and
    subscription but by its card, and a head stays in its department. Of a turn only its status changes, so no token is
    forged or swapped. */
-export const grantsFor = (name: string) =>
-  role(
-    name,
+export const grantsFor = role(
+  name =>
     `${eachTable([...READ_ONLY, 'agents', 'jobs', 'departments', ...Object.keys(SECRET)], `GRANT SELECT, INSERT, UPDATE, DELETE ON %I TO "${name}"`)}
-${READ_ONLY.map(table => `  EXECUTE format('GRANT SELECT (%s) ON ${table} TO "${name}"', ${visible(table)});`).join('\n')}
+${readVisible(READ_ONLY, name)}
   EXECUTE format('GRANT SELECT (%1$s), INSERT (%2$s), UPDATE (%2$s), DELETE ON departments TO "${name}"', ${visible('departments')}, ${columns('departments', [...SECRET.departments!, ...REPOSITORY])});
   EXECUTE format('GRANT SELECT (%s), UPDATE (%s) ON agents TO "${name}"', ${visible('agents')}, ${columns('agents', AGENT_FIXED)});
   EXECUTE format('GRANT SELECT (%s), UPDATE (${JOB_STATUS.join(', ')}) ON jobs TO "${name}"', ${visible('jobs')});
@@ -97,19 +99,16 @@ ${READ_ONLY.map(table => `  EXECUTE format('GRANT SELECT (%s) ON ${table} TO "${
       WHEN (OLD.kind = 'head' AND OLD.department_id IS DISTINCT FROM NEW.department_id AND current_user = '${name}')
       EXECUTE FUNCTION hornhoof_head_stays()
   $trigger$;`,
-  );
+);
 
 /* The head of Operations' role reads the rows of every table but the hidden ones and the secrets, and changes nothing:
    it has no right to, and each of its transactions is read-only too, so a write is told apart from a closed table. */
-export const readerGrantsFor = (name: string) =>
-  role(
-    name,
+export const readerGrantsFor = role(
+  name =>
     `  ALTER ROLE "${name}" SET default_transaction_read_only = on;
 ${eachTable(Object.keys(SECRET), `GRANT SELECT ON %I TO "${name}"`)}
-${Object.keys(SECRET)
-  .map(table => `  EXECUTE format('GRANT SELECT (%s) ON ${table} TO "${name}"', ${visible(table)});`)
-  .join('\n')}`,
-  );
+${readVisible(Object.keys(SECRET), name)}`,
+);
 
 /* Each role signs in with a password made fresh at every start and kept only here, over its own small pool. Null, with a
    warning, when the database does not let Hornhoof make roles. */

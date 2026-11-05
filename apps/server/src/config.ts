@@ -37,10 +37,10 @@ export type Config = {
   relayUrl: string;
   /* The tunnel container's host name: only requests from it may say they came in over https. */
   tunnelHost?: string;
-  /* The ACME directory the link's certificate comes from; null with certificates off. */
-  acmeDirectory: string | null;
   /* How much all the files on the company's tasks may take together. */
   taskFilesBytes: number;
+  /* The ACME directory the link's certificate comes from; null with certificates off. */
+  acmeDirectory: string | null;
   /* The computer the server runs on, as a hash of the key a join from it sends; null for a server installed before. */
   hostId: string | null;
 };
@@ -75,11 +75,11 @@ const Env = z.object({
   REGISTRY_URL: webAddress('REGISTRY_URL must be an http:// or https:// address.'),
   RELAY_URL: webAddress('RELAY_URL must be an http:// or https:// address, like https://hornhoof.org.'),
   TUNNEL_HOST: z.preprocess(unset, z.string().regex(/^[A-Za-z0-9.-]{1,253}$/, 'TUNNEL_HOST must be the host name of the tunnel container, like tunnel.').optional()),
+  TASK_FILES_MB: wholeNumber(1, 1_000_000, 'TASK_FILES_MB must be a whole number of megabytes, like 2048.'),
   ACME_DIRECTORY: z.preprocess(
     unset,
     z.union([z.literal(CERTIFICATES_OFF), z.url({ protocol: /^https$/, error: 'ACME_DIRECTORY must be off or an https:// ACME directory address.' })]).optional(),
   ),
-  TASK_FILES_MB: wholeNumber(1, 1_000_000, 'TASK_FILES_MB must be a whole number of megabytes, like 2048.'),
   HORNHOOF_HOST_ID: z.preprocess(
     unset,
     z.string().regex(/^[0-9a-f]{64}$/, 'HORNHOOF_HOST_ID must be the 64 characters install.sh writes. Remove the line from .env, or run the install command again.').optional(),
@@ -92,30 +92,29 @@ const acmeDirectoryOf = (set: string | undefined): string | null => (set === CER
 const productVersion = (): string => (JSON.parse(readFileSync(ROOT_PACKAGE, 'utf8')) as { version: string }).version;
 const migrationCount = (): number => readdirSync(MIGRATIONS).filter(f => f.endsWith('.sql')).length;
 
-export function loadConfig(env: NodeJS.ProcessEnv): Config {
+function secretOf(env: NodeJS.ProcessEnv): Buffer {
   const raw = env.HORNHOOF_SECRET;
   if (!raw) throw new Error('HORNHOOF_SECRET is not set. Generate one with: openssl rand -base64 32');
   const secret = Buffer.from(raw, 'base64');
   if (secret.length !== 32) throw new Error('HORNHOOF_SECRET must be 32 bytes encoded as base64.');
+  return secret;
+}
 
-  const checked = Env.safeParse(env);
-  if (!checked.success) throw new Error(checked.error.issues.map(issue => issue.message).join('\n'));
-  const set = checked.data;
-  const publicUrl = (set.PUBLIC_URL ?? 'http://localhost:8080').replace(/\/+$/, '');
+function nodeKeyOf(env: NodeJS.ProcessEnv): string | undefined {
   const nodeKey = env.NODE_KEY || undefined;
   if (nodeKey && nodeKey.length < 32) throw new Error('NODE_KEY must be at least 32 characters. Generate one with: openssl rand -base64 32');
+  return nodeKey;
+}
+
+function checkedEnv(env: NodeJS.ProcessEnv): z.infer<typeof Env> {
+  const checked = Env.safeParse(env);
+  if (!checked.success) throw new Error(checked.error.issues.map(issue => issue.message).join('\n'));
+  return checked.data;
+}
+
+/* The running build and where its published images come from. */
+function buildOf(env: NodeJS.ProcessEnv, set: z.infer<typeof Env>): Pick<Config, 'version' | 'commit' | 'migrations' | 'nodeBuild' | 'image' | 'registryUrl' | 'updateCheckMs'> {
   return {
-    databaseUrl: env.DATABASE_URL || undefined,
-    secret,
-    publicUrl,
-    port: set.PORT ?? 8080,
-    secureCookies: publicUrl.startsWith('https://'),
-    webDist: env.WEB_DIST || DEFAULT_WEB_DIST,
-    installScript: env.INSTALL_SCRIPT || DEFAULT_INSTALL_SCRIPT,
-    nodeKey,
-    nodePingMs: set.NODE_PING_MS ?? 20000,
-    streamPingMs: set.STREAM_PING_MS ?? 25000,
-    runsPerHost: set.MAX_RUNS_PER_HOST,
     version: env.HORNHOOF_VERSION || productVersion(),
     commit: env.HORNHOOF_COMMIT || 'local',
     migrations: migrationCount(),
@@ -123,12 +122,46 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     image: env.HORNHOOF_IMAGE || 'ghcr.io/invariant0x/hornhoof',
     registryUrl: set.REGISTRY_URL,
     updateCheckMs: set.UPDATE_CHECK_MS ?? 1800000,
+  };
+}
+
+/* Folders and scripts, each with the place the image keeps it. */
+function placesOf(env: NodeJS.ProcessEnv): Pick<Config, 'webDist' | 'installScript' | 'controlDir' | 'templatesDir'> {
+  return {
+    webDist: env.WEB_DIST || DEFAULT_WEB_DIST,
+    installScript: env.INSTALL_SCRIPT || DEFAULT_INSTALL_SCRIPT,
     controlDir: env.HORNHOOF_CONTROL_DIR || '/control',
     templatesDir: env.TEMPLATES_DIR || DEFAULT_TEMPLATES,
+  };
+}
+
+/* Intervals and limits, with their defaults. */
+function limitsOf(set: z.infer<typeof Env>): Pick<Config, 'port' | 'nodePingMs' | 'streamPingMs' | 'runsPerHost' | 'taskFilesBytes'> {
+  return {
+    port: set.PORT ?? 8080,
+    nodePingMs: set.NODE_PING_MS ?? 20000,
+    streamPingMs: set.STREAM_PING_MS ?? 25000,
+    runsPerHost: set.MAX_RUNS_PER_HOST,
+    taskFilesBytes: (set.TASK_FILES_MB ?? 2048) * 1024 * 1024,
+  };
+}
+
+export function loadConfig(env: NodeJS.ProcessEnv): Config {
+  const secret = secretOf(env);
+  const set = checkedEnv(env);
+  const publicUrl = (set.PUBLIC_URL ?? 'http://localhost:8080').replace(/\/+$/, '');
+  return {
+    ...buildOf(env, set),
+    ...placesOf(env),
+    ...limitsOf(set),
+    databaseUrl: env.DATABASE_URL || undefined,
+    secret,
+    publicUrl,
+    secureCookies: publicUrl.startsWith('https://'),
+    nodeKey: nodeKeyOf(env),
     relayUrl: (set.RELAY_URL ?? 'https://hornhoof.org').replace(/\/+$/, ''),
     tunnelHost: set.TUNNEL_HOST,
     acmeDirectory: acmeDirectoryOf(set.ACME_DIRECTORY),
-    taskFilesBytes: (set.TASK_FILES_MB ?? 2048) * 1024 * 1024,
     hostId: set.HORNHOOF_HOST_ID ?? null,
   };
 }
