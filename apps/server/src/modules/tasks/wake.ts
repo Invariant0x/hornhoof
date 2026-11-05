@@ -42,6 +42,8 @@ export function wakePrompt(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): str
 }
 
 const READ_TASK = 'Read it with the task tool first: its body is the current truth and its log has the rest.';
+/* What a reviewer may take from the test runs on a task. */
+const READ_PROOF = 'Its testEvidence names the exact commit each test run pinned and whether its branch still stands there: only a run with proves true counts, and a run on another commit proves nothing about what you review.';
 
 function assignedPrompt(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
   const ref = `#${task.number} "${task.title}"`;
@@ -69,10 +71,10 @@ function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
       return waitEndedPrompt(task, w.text);
     case 'review': {
       /* Its text is what this reviewer sent the work back for in the last round. */
-      if (w.text) return `${ref} came back to your gate. You sent it back for${said}Check only the fixes for your own findings, then give your verdict: pass it, or send it back if one of them is still not fixed.`;
+      if (w.text) return `${ref} came back to your gate. You sent it back for${said}${READ_PROOF} Check only the fixes for your own findings, then give your verdict: pass it, or send it back if one of them is still not fixed.`;
       const together = task.panel.length > 1 ? ' Reviewers of other models check the same work at once; give your own verdict.' : '';
       return (
-        `${ref} is at your gate. ${read} Check the work yourself, then give your verdict: pass it, with notes for what does not block, or send it back only for blocking findings ` +
+        `${ref} is at your gate. ${read} ${READ_PROOF} Check the work yourself, then give your verdict: pass it, with notes for what does not block, or send it back only for blocking findings ` +
         `(a failing test, an unmet requirement, a security hole, data loss), all of them at once with file and line.${together}`
       );
     }
@@ -80,7 +82,7 @@ function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
       /* Its text names the turn's branch. */
       const branch = w.text ?? "the turn's branch";
       return (
-        `${ref} is the review of everything ${branch.replace('-', ' ')} changed in your department, once for the whole turn. ${read} Check it on the turn's branch: git diff <main line>...${branch}. ` +
+        `${ref} is the review of everything ${branch.replace('-', ' ')} changed in your department, once for the whole turn. ${read} ${READ_PROOF} Check it on the turn's branch: git diff <main line>...${branch}. ` +
         'Other reviewers check the same branch at once, each for what their role looks at. Give your verdict: pass it, with notes for what does not block, or send it back for blocking findings ' +
         '(a failing test, an unmet requirement, a security hole, data loss), all of them at once with file and line. Your findings go only in your verdict: write to nobody while you review.'
       );

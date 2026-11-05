@@ -8,6 +8,7 @@ import { ApiError, type ErrorReason } from '../../errors.js';
 import { canDecide } from '../../auth/decisions.js';
 import type { DecisionSubject } from '../../auth/decision-owner.js';
 import { checkDelegation, contextMissing, requireDecider, type Delegation } from '../conversation/decision-context.js';
+import { commitProof, proofLine } from '../testruns/commit-proof.js';
 import { dropEarlierWakes, keepWakes } from './outbox.js';
 import { returnAlongLine } from '../org/map-state.js';
 import { handOff } from './pulses.js';
@@ -84,7 +85,7 @@ async function workUnderDone(tx: Tx, templates: Live['templates'], closed: Task,
 const reviewMark = sql`${taskEvents.data}->>'turnReview' = 'true'`;
 
 /* A review of a department's whole turn: its created note says so. */
-async function isTurnReview(db: Db | Tx, taskId: string): Promise<boolean> {
+export async function isTurnReview(db: Db | Tx, taskId: string): Promise<boolean> {
   const [made] = await db.select({ id: taskEvents.id }).from(taskEvents).where(and(eq(taskEvents.taskId, taskId), eq(taskEvents.kind, 'created'), reviewMark)).limit(1);
   return Boolean(made);
 }
@@ -741,16 +742,20 @@ async function asked(db: Db, task: Task, agentId: string): Promise<boolean> {
   return !!mine;
 }
 
+type Verdict = { pass: boolean; comment: string; findings?: number; evidence?: object[] };
+
+/* What the log keeps of a verdict: evidence names the test runs it stood on, with the commits they pinned. */
+const verdictData = (task: Task, v: Verdict) => ({ pass: v.pass, stage: task.stage, round: task.bounces, ...(v.findings !== undefined ? { findings: v.findings } : {}), ...(v.evidence?.length ? { evidence: v.evidence } : {}) });
+
 /* A reviewer at the task's gate gives its verdict. The gate decides once its whole panel has. */
-export async function verdict(ctx: Live, agentId: string, taskId: string, v: { pass: boolean; comment: string; findings?: number }): Promise<Moved> {
+export async function verdict(ctx: Live, agentId: string, taskId: string, v: Verdict): Promise<Moved> {
   const task = await loadTask(ctx.db, taskId);
   stillOpen(task);
   if (!['review', 'waiting'].includes(task.status) || task.stage < 1 || !task.panel.includes(agentId) || task.executorAgentId === agentId) throw notYours(task, 'is not at your gate');
   if (!v.comment.trim()) throw refuse(400, 'task_invalid', 'A verdict needs its reasons.');
   /* The others at the gate go on while one of them waits for a person; that one decides once the answer is in. */
   if (task.status === 'waiting' && (await asked(ctx.db, task, agentId))) throw refuse(409, 'task_invalid', `#${task.number} waits for the answer to your question first.`);
-  const data = { pass: v.pass, stage: task.stage, round: task.bounces, ...(v.findings !== undefined ? { findings: v.findings } : {}) };
-  const n: Note = { kind: 'verdict', actor: { agentId }, text: v.comment.trim(), data, returned: true };
+  const n: Note = { kind: 'verdict', actor: { agentId }, text: v.comment.trim(), data: verdictData(task, v), returned: true };
   const panel = task.panel.filter(id => id !== agentId);
   if (panel.length) return { task: await move(ctx, task, { panel, assigneeAgentId: panel[0]!, silent: 0 }, n), wakes: [] };
   const [me] = await ctx.db.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId));
@@ -1404,6 +1409,14 @@ const PASSED_OVER = new Set<ErrorReason | undefined>(['request_closed', 'decisio
 /* The person whose answer it is, also when the orchestrator passed it on. */
 const answerer = (personId: string | null, actor: Actor): Actor => (personId ? { personId } : actor);
 
+/* An answer in words, for the one who asked and the log. An approval names the test run that proves its commit, as the
+   release rests on that commit; a pick names its way. */
+async function answerWords(db: Db, task: Task, found: Request, a: Answer, text: string, option: RequestOption | undefined): Promise<string> {
+  const more = text ? ` ${text}` : '';
+  if (found.kind === 'approval') return a.approve ? `Approved ${found.commit}. ${proofLine(await commitProof(db, task, found.commit!))}${more}` : `Declined ${found.commit}.${more}`;
+  return option ? `Picked ${a.pick! + 1}: ${option.label}.${more}` : text || 'Try again.';
+}
+
 export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answer, on?: Delegation): Promise<{ request: Request; task: Task; wakes: Wake[] }> {
   const [found] = await ctx.db.select().from(requests).where(eq(requests.id, requestId));
   if (!found) throw refuse(404, 'request_unknown', 'There is no such request.');
@@ -1423,13 +1436,8 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
     if (!text && !(found.kind === 'stuck' && a.retry)) throw refuse(400, 'task_invalid', 'Write an answer.');
     status = 'answered';
   }
-  const said =
-    found.kind === 'approval'
-      ? `${a.approve ? 'Approved' : 'Declined'} ${found.commit}.${text ? ` ${text}` : ''}`
-      : option
-        ? `Picked ${a.pick! + 1}: ${option.label}.${text ? ` ${text}` : ''}`
-        : text || 'Try again.';
   const task = await loadTask(ctx.db, found.taskId);
+  const said = await answerWords(ctx.db, task, found, a, text, option);
   let wakes: Wake[] = [];
   const row = await ctx.db.transaction(async tx => {
     /* The task first and then its request, in the order a cancel takes them, so the two never wait on each other. As the task

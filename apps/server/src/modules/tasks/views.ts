@@ -3,6 +3,8 @@ import type { Ctx } from '../../app.js';
 import { agents, departments, people, requests, taskEvents, tasks, turns, type RequestOption } from '../../db/schema.js';
 import { commitUrl, filesOf, picturesOf } from './attachments.js';
 import { deptName } from '../departments/templates.js';
+import { commitProof, type CommitProof } from '../testruns/commit-proof.js';
+import { taskEvidence, type RunEvidence } from '../testruns/evidence.js';
 import type { Lang } from '../templates/load.js';
 import { CLOSED, type Task } from './engine.js';
 
@@ -37,13 +39,15 @@ export type TaskLine = {
 export type GateView = AgentRef & { state: 'passed' | 'current' | 'next' | 'returned' | 'skipped' };
 /* for: the person the orchestrator acted for, as in a request it answered for them. */
 export type LogLine = { kind: string; text: string; data: unknown; by: { kind: 'person' | 'agent'; id: string; name: string; for?: { id: string; name: string } } | null; at: string };
-/* images: the pictures the agent showed, commitUrl: where its commit can be seen, picked: the way a person took in a choice. */
+/* images: the pictures the agent showed, commitUrl: where its commit can be seen, proof: what test runs say of that very
+   commit, picked: the way a person took in a choice. */
 export type RequestView = {
   id: string;
   kind: (typeof requests.$inferSelect)['kind'];
   text: string;
   commit: string | null;
   commitUrl: string | null;
+  proof: CommitProof | null;
   images: string[];
   options: RequestOption[];
   link: string | null;
@@ -70,6 +74,8 @@ export type TaskDetail = TaskLine & {
   log: LogLine[];
   requests: RequestView[];
   files: FileView[];
+  /* The newest test runs, each with the commit it pinned and whether it still proves its branch. */
+  testEvidence: RunEvidence[];
 };
 
 type Names = { agent(id: string | null): AgentRef | null; place(id: string | null): Place; turn(id: string | null): number | null; after(t: Pick<Task, 'after'>): Task[] };
@@ -146,9 +152,13 @@ function byOf(n: Names, actedFor: Map<string, { id: string; name: string }>) {
   };
 }
 
+/* What test runs say of the commit each request names, for those that name one. */
+const proofsOf = (db: Ctx['db'], task: Task, asks: Pick<typeof requests.$inferSelect, 'commit'>[]) =>
+  Promise.all(asks.map(async r => (r.commit ? commitProof(db, task, r.commit) : null)));
+
 /* One task as people and agents read it: the body, its gates with where it stands, what it was split into, and its log.
    The task it serves and the tasks under it show only when the reader may see them too. */
-export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates'>, task: Task, sees: (t: Task) => boolean): Promise<TaskDetail> {
+export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates' | 'config' | 'readCommit'>, task: Task, sees: (t: Task) => boolean): Promise<TaskDetail> {
   const { db } = ctx;
   const subs = (await db.select().from(tasks).where(eq(tasks.parentId, task.id)).orderBy(asc(tasks.number))).filter(sees);
   const [above] = task.parentId ? await db.select().from(tasks).where(eq(tasks.id, task.parentId)) : [];
@@ -163,6 +173,7 @@ export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates'>, task: Task,
   const asks = await db.select().from(requests).where(eq(requests.taskId, task.id)).orderBy(asc(requests.createdAt));
   const pictures = await picturesOf(db, asks);
   const commits = await Promise.all(asks.map(r => commitUrl(db, task, r.commit)));
+  const proofs = await proofsOf(db, task, asks);
   const files = await filesOf(db, task.id);
   /* The review of a turn names everyone who checks it as it opens, and each one's verdict says where they stand. */
   const [made] = await db.select({ data: taskEvents.data }).from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'created'))).limit(1);
@@ -202,6 +213,7 @@ export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates'>, task: Task,
       text: r.text,
       commit: r.commit,
       commitUrl: commits[i]!,
+      proof: proofs[i]!,
       images: pictures.get(r.id) ?? [],
       options: r.options,
       link: r.link,
@@ -215,6 +227,7 @@ export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates'>, task: Task,
       const a = n.agent(f.agentId);
       return { id: f.id, name: f.name, size: f.size, by: a && { id: a.id, name: a.name }, at: f.at.toISOString() };
     }),
+    testEvidence: await taskEvidence(ctx, task),
   };
 }
 
