@@ -16,6 +16,7 @@ import { loadConfig } from '../src/config.js';
 import { Keeper, KEEPER_PORTS, type KeeperOptions } from '../src/modules/keeper/keeper.js';
 import { freshState, readKeeperState } from '../src/modules/keeper/state.js';
 import { updaterBusy } from '../src/modules/keeper/updater-status.js';
+import { LINK_TLS_PORT } from '../src/modules/tls/listener.js';
 import type { Target } from '../src/net/proxy.js';
 import { SETUP, setUpCompany, TEST_SECRET, testApp, until } from './helpers.js';
 
@@ -341,8 +342,9 @@ describe('the keeper container', () => {
      it runs the entry point as it is, says what it asked for, and goes to the test's own target instead. */
   const PRELOAD = `
     import http from 'node:http';
-    const { listen } = http.Server.prototype;
-    http.Server.prototype.listen = function (port, host, done) {
+    import net from 'node:net';
+    const { listen } = net.Server.prototype;
+    net.Server.prototype.listen = function (port, host, done) {
       return listen.call(this, 0, '127.0.0.1', () => {
         console.log(JSON.stringify({ asked: { port, host }, port: this.address().port }));
         done();
@@ -361,7 +363,7 @@ describe('the keeper container', () => {
       ...process.env,
       HORNHOOF_SECRET: TEST_SECRET,
       HORNHOOF_CONTROL_DIR: dir,
-      /* Nothing answers here, and nothing asks yet: the pool connects at its first query. */
+      /* Nothing answers here, so the keeper reads no link and runs no frpc. */
       DATABASE_URL: 'postgres://hornhoof:hornhoof@127.0.0.1:1/hornhoof',
       KEEPER_TEST_APP: String(app.port),
     };
@@ -373,22 +375,24 @@ describe('the keeper container', () => {
     onTestFinished(() => void child.kill('SIGKILL'));
     const exit = once(child, 'exit');
     const said: Record<string, unknown>[] = [];
-    const bothDoors = new Promise<void>(resolve => {
+    const everyDoor = new Promise<void>(resolve => {
       createInterface({ input: child.stdout as NodeJS.ReadableStream }).on('line', line => {
-        said.push(JSON.parse(line) as Record<string, unknown>);
-        if (said.filter(word => word.asked).length === 2) resolve();
+        /* The keeper's own log lines go here too. */
+        if (line.startsWith('{')) said.push(JSON.parse(line) as Record<string, unknown>);
+        if (said.filter(word => word.asked).length === 3) resolve();
       });
     });
-    await bothDoors;
+    await everyDoor;
     const doors = said.filter(word => word.asked);
     return { child, dir, said, doors, exit, front: { host: '127.0.0.1', port: doors[0]!.port as number } };
   }
 
-  it.each(['SIGINT', 'SIGTERM'] as const)('opens the front port to all and the link door to itself, and exits 0 on %s', async signal => {
+  it.each(['SIGINT', 'SIGTERM'] as const)('opens the front port to all and the link doors to itself, and exits 0 on %s', async signal => {
     const { child, dir, said, doors, exit, front } = await container(await echoHeaders());
     expect(doors.map(door => door.asked)).toEqual([
       { port: KEEPER_PORTS.front, host: '0.0.0.0' },
       { port: KEEPER_PORTS.linkHttp, host: '127.0.0.1' },
+      { port: LINK_TLS_PORT, host: '127.0.0.1' },
     ]);
     expect(await forwardedWith(front, '198.51.100.7')).toBe('127.0.0.1');
     expect(said.find(word => word.target)?.target).toEqual({ host: 'app', port: 8080 });

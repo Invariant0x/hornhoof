@@ -3,27 +3,31 @@ import http from 'node:http';
 import net from 'node:net';
 import { Duplex } from 'node:stream';
 import tls, { type TLSSocket } from 'node:tls';
-import type { FastifyInstance } from 'fastify';
-import { describe, expect, it, onTestFinished } from 'vitest';
-import { LinkListener } from '../src/modules/tls/listener.js';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import { LinkListener, linkVisitor } from '../src/modules/tls/listener.js';
 import { selfSigned } from '../src/modules/tls/x509.js';
-import { as, listen, SETUP, setUpCompany, testApp } from './helpers.js';
-import { visitorHeader } from './proxy-v2.js';
+import { proxyV2, visitorHeader } from './proxy-v2.js';
 
-const HOST = 'acme.hornhoof.org';
-const VISITOR = '203.0.113.7';
-const OTHER_VISITOR = '203.0.113.8';
-const IS_TUNNEL = { TUNNEL_HOST: '127.0.0.1' };
-const NOT_TUNNEL = { TUNNEL_HOST: '192.0.2.10' };
+const HOST = 'acme.hornhoof.test';
+const VISITOR = '203.0.113.9';
 const TLS_CLIENT = { servername: HOST, rejectUnauthorized: false };
+const V2_LOCAL = 0x20;
 
-async function listening(env: NodeJS.ProcessEnv = IS_TUNNEL) {
-  const { app, config } = await testApp(env);
-  const ceo = await setUpCompany(app);
-  const listener = new LinkListener({ app, config, log: app.log });
-  const port = await listener.listen(0, '127.0.0.1');
+/* What the keeper's third door is here: a server with no port of its own, which says who the listener says it serves. */
+function sayingWho(options: http.ServerOptions = {}): http.Server {
+  return http.createServer(options, (req, res) => {
+    req.resume();
+    res.end(JSON.stringify({ visitor: linkVisitor(req.socket) ?? null }));
+  });
+}
+
+const quietLog = { warn: () => {} };
+
+async function listening(server = sayingWho()) {
+  const listener = new LinkListener({ server, log: quietLog });
+  const port = await listener.listen(0);
   onTestFinished(() => listener.close(0));
-  return { app, config, ceo, listener, port };
+  return { listener, port, server };
 }
 
 async function rawConnection(port: number): Promise<net.Socket> {
@@ -40,10 +44,10 @@ async function secured(socket: TLSSocket): Promise<TLSSocket> {
   return socket;
 }
 
-/* A connection as the tunnel container opens it for a visitor: the PROXY header, then TLS. */
-async function overTls(port: number, visitor = VISITOR): Promise<TLSSocket> {
+/* A connection as the keeper's frpc opens it for a visitor: the PROXY header, then TLS. */
+async function overTls(port: number, header = visitorHeader(VISITOR)): Promise<TLSSocket> {
   const raw = await rawConnection(port);
-  raw.write(visitorHeader(visitor));
+  raw.write(header);
   return secured(tls.connect({ socket: raw, ...TLS_CLIENT }));
 }
 
@@ -71,71 +75,27 @@ async function overTlsWithHeaderInTwoWrites(port: number): Promise<TLSSocket> {
   return secured(tls.connect({ socket: raw, ...TLS_CLIENT }));
 }
 
-type Asked = { method?: string; path: string; body?: object; headers?: Record<string, string> };
-type Answer = { status: number; cookies: string[]; body: string };
+type Answer = { status: number; body: string };
 
 /* A request over a connection that is already open, as one http client would send it. */
-function ask(socket: TLSSocket, { method = 'GET', path, body, headers = {} }: Asked): Promise<Answer> {
+function ask(socket: TLSSocket, { path }: { path: string }): Promise<Answer> {
   return new Promise((resolve, reject) => {
-    const typed = body ? { 'content-type': 'application/json' } : {};
-    const request = http.request({ createConnection: () => socket, method, path, headers: { host: HOST, ...typed, ...headers } }, response => {
+    const request = http.request({ createConnection: () => socket, path, headers: { host: HOST } }, response => {
       const chunks: Buffer[] = [];
       response.on('data', chunk => chunks.push(chunk));
-      response.on('end', () => resolve({ status: response.statusCode!, cookies: response.headers['set-cookie'] ?? [], body: Buffer.concat(chunks).toString() }));
+      response.on('end', () => resolve({ status: response.statusCode!, body: Buffer.concat(chunks).toString() }));
     });
     request.on('error', reject);
-    request.end(body ? JSON.stringify(body) : undefined);
+    request.end();
   });
 }
 
 const health = { path: '/api/health' };
 
-async function wrongSignIn(port: number, visitor: string, headers: Record<string, string> = {}, email = 'x@acme.com'): Promise<number> {
-  const body = { email, password: 'not the password' };
-  return (await ask(await overTls(port, visitor), { method: 'POST', path: '/api/auth/login', body, headers })).status;
-}
-
-/* The per email and address limit stops the eleventh. */
-const LIMITED_AFTER = 10;
-
-/* Wrong sign-ins from one visitor, each with another email, so that only the limit per address fills. */
-const ADDRESS_LIMIT = 30;
-async function fillAddressLimit(port: number, visitor: string): Promise<void> {
-  for (let i = 0; i < ADDRESS_LIMIT; i++) expect(await wrongSignIn(port, visitor, {}, `x${i}@acme.com`)).toBe(401);
-}
-const wrongWithNewEmail = (port: number, visitor: string) => wrongSignIn(port, visitor, {}, `new-${visitor}@acme.com`);
-
 async function closedAfterMs(socket: net.Socket): Promise<number> {
   const started = performance.now();
   await once(socket, 'close');
   return performance.now() - started;
-}
-
-const upgrade = (headers: string[] = []) =>
-  [
-    'GET /api/nodes/socket HTTP/1.1',
-    `Host: ${HOST}`,
-    'Upgrade: websocket',
-    'Connection: Upgrade',
-    'Sec-WebSocket-Version: 13',
-    'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==',
-    ...headers,
-    '',
-    '',
-  ].join('\r\n');
-
-async function statusLineOf(socket: net.Socket, request: string): Promise<string> {
-  socket.write(request);
-  const [answer] = (await once(socket, 'data')) as [Buffer];
-  return answer.toString().split('\r\n')[0]!;
-}
-
-async function nodeKey(app: FastifyInstance, ceo: string): Promise<string> {
-  const connected = await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(ceo) });
-  const code = (connected.json().command as string).split('--join ')[1]!;
-  const payload = { code, machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' };
-  const joined = await app.inject({ method: 'POST', url: '/api/nodes/join', payload });
-  return joined.json().nodes[0].key as string;
 }
 
 describe('the certificate of the TLS listener', () => {
@@ -174,63 +134,35 @@ describe('the certificate of the TLS listener', () => {
   });
 });
 
-describe('a request through the TLS listener', () => {
-  it('answers as over the link', async () => {
+describe('a connection through the TLS listener', () => {
+  it('reaches the server it was given, with the visitor of the PROXY header', async () => {
     const { port } = await listening();
-    const answer = await ask(await overTls(port), health);
-    expect(JSON.parse(answer.body)).toEqual({ ok: true });
-
-    const body = { email: 'ivan@acme.com', password: SETUP.password };
-    const signedIn = await ask(await overTls(port), { method: 'POST', path: '/api/auth/login', body });
-    expect(signedIn.status).toBe(200);
-    expect(signedIn.cookies.some(cookie => cookie.startsWith('__Host-hh_session='))).toBe(true);
+    expect(JSON.parse((await ask(await overTls(port), health)).body)).toEqual({ visitor: VISITOR });
   });
 
-  it('takes the visitor from the PROXY header of the tunnel container only', async () => {
-    const trusted = await listening(IS_TUNNEL);
-    for (let i = 0; i < LIMITED_AFTER; i++) expect(await wrongSignIn(trusted.port, VISITOR)).toBe(401);
-    expect(await wrongSignIn(trusted.port, VISITOR)).toBe(429);
-    expect(await wrongSignIn(trusted.port, OTHER_VISITOR)).toBe(401);
-
-    /* From any other address the header is not believed, so both visitors are 127.0.0.1 here. */
-    const other = await listening(NOT_TUNNEL);
-    for (let i = 0; i < LIMITED_AFTER; i++) expect(await wrongSignIn(other.port, VISITOR)).toBe(401);
-    expect(await wrongSignIn(other.port, OTHER_VISITOR)).toBe(429);
-  });
-
-  it('counts the limit of 30 an hour per address by the visitor of the PROXY header', async () => {
-    const trusted = await listening(IS_TUNNEL);
-    await fillAddressLimit(trusted.port, VISITOR);
-    expect(await wrongWithNewEmail(trusted.port, VISITOR)).toBe(429);
-    expect(await wrongWithNewEmail(trusted.port, OTHER_VISITOR)).toBe(401);
-
-    /* From any other address the header is not believed, so both visitors are 127.0.0.1 here. */
-    const other = await listening(NOT_TUNNEL);
-    await fillAddressLimit(other.port, VISITOR);
-    expect(await wrongWithNewEmail(other.port, OTHER_VISITOR)).toBe(429);
-  });
-
-  it('does not believe an X-Forwarded-For the visitor wrote', async () => {
+  it('has no visitor when the PROXY header names none', async () => {
     const { port } = await listening();
-    for (let i = 0; i < LIMITED_AFTER; i++) {
-      expect(await wrongSignIn(port, VISITOR, { 'x-forwarded-for': `198.51.100.${i}` })).toBe(401);
-    }
-    expect(await wrongSignIn(port, VISITOR, { 'x-forwarded-for': '198.51.100.99' })).toBe(429);
+    const answer = await ask(await overTls(port, proxyV2({ versionAndCommand: V2_LOCAL })), health);
+    expect(JSON.parse(answer.body)).toEqual({ visitor: null });
   });
 
-  it('carries a WebSocket upgrade', async () => {
-    const { app, port } = await listening();
-    const plain = new URL((await listen(app)).replace('ws:', 'http:'));
-    const overHttp = await statusLineOf(await rawConnection(Number(plain.port)), upgrade());
-    expect(overHttp).toMatch(/^HTTP\/1\.1 \d{3} /);
-    expect(await statusLineOf(await overTls(port), upgrade())).toBe(overHttp);
+  it('carries an upgrade', async () => {
+    const server = sayingWho();
+    server.on('upgrade', (_req, socket) => socket.write('HTTP/1.1 101 Switching Protocols\r\n\r\n'));
+    const { port } = await listening(server);
+    const client = await overTls(port);
+    client.write(`GET /socket HTTP/1.1\r\nHost: ${HOST}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n`);
+    const [answer] = (await once(client, 'data')) as [Buffer];
+    expect(answer.toString().split('\r\n')[0]).toBe('HTTP/1.1 101 Switching Protocols');
   });
 
-  it('opens a WebSocket for a node with its key', async () => {
-    const { app, ceo, port } = await listening();
-    const key = await nodeKey(app, ceo);
-    const line = await statusLineOf(await overTls(port), upgrade([`Authorization: Bearer ${key}`]));
-    expect(line).toBe('HTTP/1.1 101 Switching Protocols');
+  /* The server has no port of its own, and Node times a connection's headers only on a server that listens. */
+  it('holds a connection to the time the server gives for its headers', async () => {
+    const { port } = await listening(sayingWho({ requestTimeout: 0, headersTimeout: 100, connectionsCheckingInterval: 20 }));
+    const client = await overTls(port);
+    client.write(`GET / HTTP/1.1\r\nHost: ${HOST}\r\n`);
+    const [answer] = (await once(client, 'data')) as [Buffer];
+    expect(answer.toString().split('\r\n')[0]).toBe('HTTP/1.1 408 Request Timeout');
   });
 });
 
@@ -335,10 +267,18 @@ describe('how a connection opens', () => {
 
 describe('opening the TLS listener', () => {
   it('fails when the port is taken', async () => {
-    const { app, config, port } = await listening();
-    const second = new LinkListener({ app, config, log: app.log });
+    const { port } = await listening();
+    const second = new LinkListener({ server: sayingWho(), log: quietLog });
     await expect(second.listen(port, '127.0.0.1')).rejects.toMatchObject({ code: 'EADDRINUSE' });
     await second.close(0);
+  });
+
+  /* Every PROXY header is believed, which is safe only while nobody but the keeper's frpc can reach the port. */
+  it('listens on 127.0.0.1 unless told otherwise', async () => {
+    const asked = vi.spyOn(net.Server.prototype, 'listen');
+    onTestFinished(() => void asked.mockRestore());
+    await listening();
+    expect(asked.mock.calls[0]!.slice(0, 2)).toEqual([0, '127.0.0.1']);
   });
 });
 
