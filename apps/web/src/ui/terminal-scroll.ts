@@ -2,9 +2,11 @@ import type { Terminal } from '@xterm/xterm';
 
 type ScrollBuffer = { hasScrollback: boolean; ybase: number; ydisp: number };
 type Activation = { activeBuffer: ScrollBuffer; inactiveBuffer: ScrollBuffer };
-type Buffers = { active: ScrollBuffer; normal: ScrollBuffer; alt: ScrollBuffer; _onBufferActivate?: { fire(event: Activation): void } };
+type Buffers = { active: ScrollBuffer; normal: ScrollBuffer; alt: ScrollBuffer; _activeBuffer?: ScrollBuffer; _onBufferActivate?: { fire(event: Activation): void } };
 type XtermCore = { buffers: Buffers; viewport?: WheelViewport };
 type WheelViewport = { getLinesScrolled(event: WheelEvent): number };
+
+const borrowed = new WeakMap<Buffers, ScrollBuffer>();
 
 function buffersOf(term: Terminal): Buffers {
   return (term as unknown as { _core: XtermCore })._core.buffers;
@@ -15,6 +17,7 @@ function report(buffers: Buffers, activeBuffer: ScrollBuffer, inactiveBuffer: Sc
 }
 
 function borrowNormal(buffers: Buffers): void {
+  borrowed.set(buffers, buffers.active);
   Object.defineProperty(buffers, 'active', { configurable: true, get: () => buffers.normal });
   report(buffers, buffers.normal, buffers.alt);
 }
@@ -37,16 +40,19 @@ export function scrollTerminal(term: Terminal, amount: number): void {
 /* New output always goes to the real active buffer, never to the history someone was reading. */
 export function restoreLiveTerminal(term: Terminal): void {
   const buffers = buffersOf(term);
-  if (!Object.getOwnPropertyDescriptor(buffers, 'active')?.get) return;
+  const live = borrowed.get(buffers);
+  if (!live) return;
   Reflect.deleteProperty(buffers, 'active');
-  report(buffers, buffers.alt, buffers.normal);
+  buffers._activeBuffer = live;
+  borrowed.delete(buffers);
+  report(buffers, live, buffers.normal);
   term.refresh(0, term.rows - 1);
 }
 
 /* While someone reads alternate history, output grows it and the live screen in order, without moving the reader. */
 export function writeTerminalData(term: Terminal, data: string): void {
   const buffers = buffersOf(term);
-  if (!Object.getOwnPropertyDescriptor(buffers, 'active')?.get) {
+  if (!borrowed.has(buffers)) {
     term.write(data);
     return;
   }
