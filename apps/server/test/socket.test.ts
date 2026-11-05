@@ -73,6 +73,16 @@ describe('node socket', () => {
     expect(await subOf(app, ceo, subId)).toMatchObject({ limits: fresh, limitsUpdatedAt: freshAt });
   });
 
+  it('keeps the limits and when they were read through a status with no reading in it, so they go stale when readings stop', async () => {
+    const { app, db, subId, nodeId } = await liveCompany();
+    const identity = { kind: 'node' as const, nodeId };
+    const reading = { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.3, resetsAt: null }], complete: true };
+    const readAt = new Date('2026-11-03T00:40:00.000Z');
+    await handleNodeMessage(app.ctx, identity, { type: 'status', loggedIn: true, limits: reading }, readAt);
+    await handleNodeMessage(app.ctx, identity, { type: 'status', loggedIn: true, limits: null, models: [{ id: 'opus', name: 'Opus' }] }, new Date('2026-11-03T01:40:00.000Z'));
+    expect((await db.select().from(subscriptions).where(eq(subscriptions.id, subId)))[0]).toMatchObject({ limits: reading, limitsUpdatedAt: readAt, models: [{ id: 'opus', name: 'Opus' }] });
+  });
+
   it('keeps the models a node reports, and keeps them when a message has none', async () => {
     const { db, url, subId, key } = await liveCompany();
     const node = await connectNode(url, key);

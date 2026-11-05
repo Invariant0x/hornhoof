@@ -116,6 +116,26 @@ function merged(known: Limits | null, news: Limits): Limits {
   return { status: full ? 'rejected' : news.status, windows: windows.slice(0, 8), ...(known.complete ? { complete: true } : {}) };
 }
 
+/* What the node knows of the plan's limits, and whether Hornhoof has heard its last reading. Hornhoof counts them fresh from
+   the moment it hears them, so each reading goes out once, also one that moved nothing, and a status with no reading behind
+   it says none: null, as the protocol asks for the field, which leaves what Hornhoof knows as it is. */
+class PlanLimits {
+  private known: Limits | null = null;
+  private unsaid = false;
+
+  read(news: Limits | null): void {
+    if (!news) return;
+    this.known = merged(this.known, news);
+    this.unsaid = true;
+  }
+
+  forStatus(): Limits | null {
+    const reading = this.unsaid ? this.known : null;
+    this.unsaid = false;
+    return reading;
+  }
+}
+
 /* The node's life: stay connected, run jobs, report the sign-in state and the limits, clean up when removed. */
 export async function runNode({ dir, adapter, builtin, terminal, login: loginSetup, log: writeLog = console.log, loginCheckMs = LOGIN_CHECK_MS, setupCheckMs = SETUP_CHECK_MS, learnMs = LEARN_MS, limitsMs = LIMITS_MS, loadMs = LOAD_MS, leaseCheckMs = LEASE_CHECK_MS, install, programs = new ProgramUpdates([]), testUser = null, runPart = runTests, build, checkBrowser = async () => null, browserCheckMs = BROWSER_CHECK_MS }: RunOptions): Promise<{ stop(reason?: NodeStopReason): void }> {
   if (!builtin && isRemoved(dir)) {
@@ -174,7 +194,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   let loggedIn = await signedInHere();
   const setup = new SetupWait(single, setupCheckMs);
   await setup.check(loggedIn);
-  let limits: Limits | null = null;
+  const planLimits = new PlanLimits();
   let stopped = false;
 
   const emit = (m: NodeMessage) => {
@@ -248,7 +268,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     !testUser ? NO_RUNS : browserError ? `Playwright Chromium could not start: ${browserError}` : null;
   const tellStatus = () => {
     browserError = readBrowserError(dir);
-    emit({ type: 'status', loggedIn, ...setup.field(), limits, ...(models ? { models } : {}), account, browserError, noRuns: noRunsNow() });
+    emit({ type: 'status', loggedIn, ...setup.field(), limits: planLimits.forStatus(), ...(models ? { models } : {}), account, browserError, noRuns: noRunsNow() });
   };
   const status = async () => {
     /* A program that cannot list its models now keeps those it listed before. */
@@ -479,8 +499,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
         ...chosen,
         run: async input => {
           const res = await runUnlessStopped(input, () => runIn(input));
-          const fresh = res.limits ?? (!(host && terminal && input.agentKey) && single?.limits ? await single.limits().catch(() => null) : null);
-          if (fresh) limits = merged(limits, fresh);
+          planLimits.read(res.limits ?? (!(host && terminal && input.agentKey) && single?.limits ? await single.limits().catch(() => null) : null));
           return res;
         },
       };
@@ -525,9 +544,8 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     const was = JSON.stringify(account);
     account = await readAccount();
     const now = single?.limits ? await single.limits().catch(() => null) : null;
-    const moved = now !== null && JSON.stringify(merged(limits, now)) !== JSON.stringify(limits);
-    if (moved) limits = merged(limits, now);
-    if (moved || JSON.stringify(account) !== was) void status();
+    planLimits.read(now);
+    if (now !== null || JSON.stringify(account) !== was) void status();
   };
   void askLimits();
   const asking = setInterval(() => void askLimits(), limitsMs);

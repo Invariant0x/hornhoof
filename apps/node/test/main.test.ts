@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { WebSocketServer, type WebSocket } from 'ws';
+import { parseNodeMessage } from '@hornhoof/protocol';
 import { buildOf, runNode } from '../src/main.js';
 import { prepareNodeStop } from '../src/lifecycle.js';
 import { ProgramUpdates } from '../src/program-updates.js';
@@ -450,17 +451,69 @@ describe('runNode', () => {
     expect(server.received.find(m => m.type === 'status')).toMatchObject({ models: [{ id: 'opus', name: 'Opus' }] });
   });
 
-  it("asks its program for the plan's limits on its own, now and then, and says when they change", async () => {
+  it("asks its program for the plan's limits on its own, now and then, and says each reading, also one that moved nothing, so they do not go stale in Hornhoof", async () => {
     const server = await fakeServer();
     const seen = [0.1, 0.1, 0.25];
     let asked = 0;
     const limits = async () => ({ status: 'allowed' as const, windows: [{ name: 'seven_day', utilization: seen[Math.min(asked++, seen.length - 1)]!, resetsAt: null }] });
     const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, limits }, log: () => {}, limitsMs: 40 });
     onTestFinished(() => node.stop());
+    const readings = () => server.received.filter(m => m.type === 'status' && m.limits !== null).map(m => (m.limits as { windows: { utilization: number }[] }).windows[0]!.utilization);
+    await server.wait(() => readings().length >= 3);
+    expect(readings().slice(0, 3)).toEqual([0.1, 0.1, 0.25]);
+  });
+
+  it('says no limits in a status with no reading behind it, so Hornhoof does not take old ones for fresh, in a frame Hornhoof still reads', async () => {
+    const server = await fakeServer();
+    const reading = { status: 'allowed' as const, windows: [{ name: 'seven_day', utilization: 0.4, resetsAt: null }], complete: true };
+    const answers: (() => Promise<typeof reading | null>)[] = [async () => reading];
+    const limits = () => (answers.shift() ?? (async () => { throw new Error('the source is down'); }))();
+    const run = async (input: RunInput) => ({ ok: input.prompt !== 'signed out', sessionId: 'sess-9', result: 'ready', output: '', error: input.prompt === 'signed out' ? 'not_logged_in' as const : null, limits: null });
+    const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, run, limits }, log: () => {}, limitsMs: 60_000 });
+    onTestFinished(() => node.stop());
+    const statuses = () => server.received.filter(m => m.type === 'status');
+    const job = (jobId: string, prompt: string) => ({ type: 'job.run', jobId, subscriptionId: 's1', provider: 'claude', prompt, sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
+    await server.wait(() => statuses().some(m => m.limits !== null));
+
+    /* The reading after the job fails: the status that says the job is over knows nothing new of the limits. */
+    const told = statuses().length;
+    server.send(job('j1', 'hi'));
+    await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'j1'));
+    expect(statuses().length).toBeGreaterThan(told);
+
+    /* It reads nothing and fails nothing: the program cannot tell now. */
+    answers.push(async () => null);
+    server.send(job('j2', 'hi'));
+    await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'j2'));
+
+    /* The status of a sign-in lost, sent apart from the job's end. */
+    const before = statuses().length;
+    server.send(job('j3', 'signed out'));
+    await server.wait(() => statuses().length >= before + 2);
+
+    const after = statuses().slice(told);
+    expect(after.length).toBeGreaterThanOrEqual(4);
+    for (const status of after) expect(status).toMatchObject({ limits: null });
+    for (const status of after) expect(parseNodeMessage(JSON.stringify(status))).not.toBeNull();
+  });
+
+  it('says a reading once, in the next status that goes out, whichever that is', async () => {
+    const server = await fakeServer();
+    const dir = nodeDir(server.url);
+    let browser: string | null = 'libnss3.so missing';
+    const turn = { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.2, resetsAt: null }] };
+    const run = async () => ({ ok: true, sessionId: 'sess-9', result: 'ready', output: '', error: null, limits: turn });
+    const node = await runNode({ dir, adapter: { ...adapter, run }, log: () => {}, checkBrowser: async () => browser, browserCheckMs: 30 });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
+    await server.wait(() => server.received.some(m => m.type === 'job.done'));
+    expect(server.received.filter(m => m.type === 'status').map(m => m.limits)).toEqual([turn]);
+
+    /* A browser that recovers has nothing to say of the limits. */
+    browser = null;
     await server.wait(() => server.received.filter(m => m.type === 'status').length >= 2);
-    const statuses = server.received.filter(m => m.type === 'status').map(m => (m.limits as { windows: { utilization: number }[] }).windows[0]!.utilization);
-    expect(statuses.slice(0, 2)).toEqual([0.1, 0.25]);
-    expect(asked).toBeGreaterThanOrEqual(3);
+    expect(server.received.filter(m => m.type === 'status')[1]).toMatchObject({ limits: null, browserError: null });
   });
 
   it('reports Antigravity limits on schedule and after a job, and invents no reached limit when the source fails', async () => {
