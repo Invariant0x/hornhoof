@@ -19,7 +19,7 @@ import { redact } from '../redact.js';
 import { Bridge, type AgentUrls } from './bridge.js';
 import { atEmptyPrompt, inputOf, withoutDim } from './input.js';
 import { eraseKeys, holdsFoldedPaste, isOwnLeft, leftRef, LeftInputs, type OwnLeft } from './left-input.js';
-import { readViewHistory, sendTerminalOutput } from './view-stream.js';
+import { sendTerminalOutput, ViewHistory } from './view-stream.js';
 import { procOwner, type OwnerFactory, type Ownership, type Panes } from './peer.js';
 import { StreamMask } from './mask.js';
 import { ProgramWatch, READY, REPORT_MS, programState, type Pending } from './program-state.js';
@@ -205,6 +205,7 @@ type View = {
   shown: Size;
   applied: Size;
   tty: string | null;
+  history: ViewHistory | null;
   out(text: string): void;
 };
 
@@ -2536,13 +2537,14 @@ export class TerminalHost {
     if (this.viewsClosed.delete(m.termId)) return this.forget(m.termId, m.agentKey);
     const shown = this.fitted(m.agentKey);
     const child = this.opts.tmux.attach(a.name, shown.cols, shown.rows, m.write);
-    const view: View = { child, key: m.agentKey, write: m.write, mask: new StreamMask(this.opts.secrets), decoder: new StringDecoder('utf8'), quiet: null, shown, applied: shown, tty: null, out: () => {} };
+    const view: View = { child, key: m.agentKey, write: m.write, mask: new StreamMask(this.opts.secrets), decoder: new StringDecoder('utf8'), quiet: null, shown, applied: shown, tty: null, history: null, out: () => {} };
     this.views.set(m.termId, view);
     a.viewers++;
     /* A watcher of an agent that sleeps sees the waiting screen; anyone else, a loader until the program is up. */
     if (starts || a.turn || a.up) this.opts.send({ type: 'term.program', termId: m.termId, running: a.up && !starts });
     view.out = text => sendTerminalOutput(data => this.opts.send({ type: 'term.data', termId: m.termId, data }), text);
     child.on('exit', () => {
+      view.history?.stop();
       if (view.quiet) clearTimeout(view.quiet);
       view.out(view.mask.flush());
       this.views.delete(m.termId);
@@ -2564,10 +2566,24 @@ export class TerminalHost {
       if (view.quiet) clearTimeout(view.quiet);
       view.quiet = setTimeout(() => view.out(view.mask.flush()), 60);
     };
-    const history = await readViewHistory(this.opts.tmux, name);
-    if (this.views.get(termId) !== view || view.child.killed) return;
-    show(history);
-    view.child.stdout?.on('data', (chunk: Buffer) => show(view.decoder.write(chunk)));
+    const open = () => this.views.get(termId) === view && !view.child.killed;
+    /* A session gets the size of its views when one attaches, and what that leaves off its screen is history too. */
+    const tty = await this.ttyOf(termId, view);
+    if (tty) await this.clientSized(tty, view.shown);
+    const history = new ViewHistory(this.opts.tmux, name, text => { if (open()) show(text); }, () => this.repaint(termId, view));
+    view.history = history;
+    await history.open();
+    if (!open()) return;
+    view.child.stdout?.on('data', (chunk: Buffer) => {
+      const text = view.decoder.write(chunk);
+      history.saw(text);
+      show(text);
+    });
+  }
+
+  private async repaint(termId: string, view: View): Promise<void> {
+    const tty = await this.ttyOf(termId, view);
+    if (tty) await this.opts.tmux.repaint(tty);
   }
 
   input(m: Msg<'term.input'>): void {
