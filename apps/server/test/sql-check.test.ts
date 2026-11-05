@@ -1,9 +1,17 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import { checkAgentSql, ONLY_STATEMENTS, REFUSED_FUNCTIONS, SqlRefused } from '../src/db/sql-check.js';
 
 const refusedFor = (name: string) => expect.objectContaining({ kind: 'function', message: `This tool does not call ${name}.` });
 
 describe("the check on the orchestrator's SQL", () => {
+  let warn: MockInstance;
+  beforeEach(() => {
+    warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  });
+  afterEach(() => {
+    warn.mockRestore();
+  });
+
   it.each([
     'SELECT 1',
     'WITH x AS (SELECT 1) SELECT * FROM x',
@@ -179,6 +187,48 @@ describe("the check on the orchestrator's SQL", () => {
     /* A tree this deep runs the parser out of call stack, which it reports as no parse error of its own. */
     await expect(checkAgentSql(`SELECT 1${'+1'.repeat(100_000)}`)).rejects.toMatchObject({ kind: 'syntax' });
     await expect(checkAgentSql('SELECT 1; COMMIT')).rejects.toMatchObject({ kind: 'statement' });
+  });
+
+  /* A star names no field, so nothing here can be a call, whatever the alias is called. */
+  it.each([
+    'SELECT lo_rows.* FROM (SELECT 1) lo_rows',
+    'SELECT set_config.* FROM agents set_config',
+    'SELECT public.set_config.* FROM public.set_config',
+  ])('leaves alone a star after an alias named like a refused function: %s', async text => {
+    await expect(checkAgentSql(text)).resolves.toBeUndefined();
+  });
+
+  /* The tool words its refusal by kind, so a text with two faults must hear about the one it reaches first. */
+  it.each([
+    ['COMMIT; SELECT pg_cancel_backend(1)', { kind: 'statement', message: ONLY_STATEMENTS }],
+    ['SELECT pg_cancel_backend(1); COMMIT', { kind: 'function', message: 'This tool does not call pg_cancel_backend.' }],
+    ['SELECT pg_reload_conf(), pg_cancel_backend(1)', { kind: 'function', message: 'This tool does not call pg_reload_conf.' }],
+  ])('names the first fault in the order of the text: %s', async (text, refusal) => {
+    await expect(checkAgentSql(text)).rejects.toMatchObject(refusal);
+  });
+
+  /* Looping output has this very shape, and it fits within the tool's limit of 20,000 characters. Each one overflows the
+     parser's stack, and forty of them used to kill the parser until the app restarted. */
+  it('keeps answering after a flood of texts too deep for the parser', async () => {
+    const tooDeep = `SELECT 1${'+1'.repeat(9990)}`;
+    for (let call = 0; call < 60; call++) await expect(checkAgentSql(tooDeep)).rejects.toMatchObject({ kind: 'syntax' });
+    await expect(checkAgentSql('SELECT 1; COMMIT')).rejects.toMatchObject({ kind: 'statement' });
+    await expect(checkAgentSql('SELECT 1')).resolves.toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(60);
+  }, 60_000);
+
+  /* The log goes where the company's people and agents read it, and the text is what the orchestrator wrote. */
+  it('logs that it replaced a parser, without the text', async () => {
+    const tooDeep = `SELECT 'the text itself'${'+1'.repeat(9990)}`;
+    await expect(checkAgentSql(tooDeep)).rejects.toMatchObject({ kind: 'syntax', message: expect.not.stringContaining('the text itself') });
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0])).not.toContain('the text itself');
+  });
+
+  it('replaces no parser over a typo or an empty text', async () => {
+    await expect(checkAgentSql('SELEC 1')).rejects.toMatchObject({ kind: 'syntax' });
+    await expect(checkAgentSql(' ')).rejects.toMatchObject({ kind: 'syntax' });
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it('finds a refused call at the bottom of a deep expression', async () => {
