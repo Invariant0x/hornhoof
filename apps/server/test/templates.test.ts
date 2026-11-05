@@ -308,25 +308,90 @@ describe('templates', () => {
     for (const id of ['DEV-HEAD', 'DEV-ARCH', 'DEV-SEC']) expect(templates.roles.get(id)!.tier, id).toBe('deep');
   });
 
-  it('takes ub-mode whole, with the tools it runs', () => {
+  it('keeps ub-mode and puts its tools under the testing policy', () => {
     const rules = templates.skills.get('dev-engineering-rules')!.body;
-    for (const words of ['Every time you are asked to make a change follow:', '* Use the crapper tool', '* Use the dryer tool to eliminate duplication that rank 0.8 or above.', '* Kill the survivors.', '* Push to the main line at the end.']) {
+    for (const words of ['Every time you are asked to make a change follow:', '* Use the crapper tool', '* Use the dryer tool to eliminate duplication that rank 0.8 or above.', '* Use the mutator tool', '* Kill the survivors.']) {
       expect(rules).toContain(words);
     }
-    expect(rules).toContain('crapper, dryer and mutator are installed on your machine');
+    expect(rules).not.toContain('Push to the main line at the end.');
+    expect(rules).toContain('crapper and dryer are installed on your machine');
     expect(rules).toContain('Push your branch, not the main line');
     /* A submitted branch is committed, and --changed sees only what is not: the gates check what the branch changed. */
     const changed = 'git diff --name-only --diff-filter=d';
-    for (const id of ['dev-engineering-rules', 'dev-review-diff', 'dev-test-gaps']) expect(templates.skills.get(id)!.body, id).toContain(changed);
+    for (const id of ['dev-engineering-rules', 'dev-review-diff']) expect(templates.skills.get(id)!.body, id).toContain(changed);
     expect(templates.skills.get('dev-review-diff')!.body).toMatch(/crapper[\s\S]*dryer/);
     /* They are as objective as a failing test, so they block; the developer runs them before submitting. */
     expect(templates.skills.get('dev-review-diff')!.body).toMatch(/0\.8 or more is blocking, like a failing test/);
     expect(templates.skills.get('dev-review-diff')!.body).toMatch(/runs them before submitting/);
     expect(templates.skills.get('dev-review-verdict')!.body).toMatch(/CRAP 10 or more[\s\S]*counts as a failing test/);
-    expect(templates.skills.get('dev-test-gaps')!.body).toContain('mutator');
+    expect(templates.skills.get('dev-test-gaps')!.body).toContain('break the code on purpose');
     for (const s of skills.filter(x => x.id.startsWith('dev-'))) expect(s.body, s.id).not.toMatch(/(crapper|dryer|mutator) --changed/);
     for (const id of ['DEV-ENG', 'DEV-BE', 'DEV-FE', 'DEV-REV', 'DEV-TEST', 'DEV-SEC', 'DEV-PERF']) expect(templates.roles.get(id)!.skills.find(s => s.id === 'dev-language-rules')?.on, id).toBe(true);
     for (const id of ['DEV-ENG', 'DEV-BE', 'DEV-FE', 'DEV-ARCH', 'DEV-REV', 'DEV-TEST', 'DEV-PERF']) expect(templates.roles.get(id)!.skills.find(s => s.id === 'dev-engineering-rules')?.on, id).toBe(true);
+  });
+
+  it('gives a newly hired developer T1-T11 and the coding cycle with four task kinds', () => {
+    const role = templates.roles.get('DEV-ENG')!;
+    const agent = { id: 'a', companyId: 'c', kind: 'worker', name: 'Bruno', roleKey: role.id, skills: role.skills.filter(s => s.on).map(s => s.id), overrides: {}, templateHashes: {} };
+    const rendered = renderInstructions(templates, agent as Parameters<typeof renderInstructions>[1], { company: 'Acme', department: 'Development', product: null });
+    const card = [rendered.text, ...rendered.skills.map(s => s.body)].join('\n');
+    for (let n = 1; n <= 11; n++) expect(card, `T${n}`).toContain(`T${n}.`);
+    for (const words of ['Bug', 'Known behaviour', 'Unknown path', 'Legacy code', 'acceptance', 'risk class', 'requirement -> test', 'one task in progress and one awaiting review', 'A red turn branch comes before any new task', 'no 80% coverage threshold']) {
+      expect(card, words).toContain(words);
+    }
+  });
+
+  it('keeps test selection, release mutation testing and evidence rules consistent', () => {
+    const body = (id: string) => templates.skills.get(id)!.body;
+    const policy = body('dev-engineering-rules');
+    for (const words of ['pure functions', 'direct fast tests', 'integration tests', 'real database', 'vitest related', 'jest --findRelatedTests', 'pytest --testmon', 'cargo test -p', 'new test file always runs', 'selection miss', 'once per release or phase', 'fast tests', 'CRAP and change size', 'money, access and security', '--root .', 'killed, survived, uncovered, compile_error and timeout', 'zero tests fails the run', 'Do not mass-rewrite old slow tests', 'low coverage alone is not a finding', 'median of its package', 'financial recomputation', 'false accepts and false rejects', 'versioned set of examples', 'F.I.R.S.T.', 'shuffled order', 'same commit', 'any result a success', 'already completed run', 'second coverage run']) {
+      expect(policy, words).toContain(words);
+    }
+    const table = (text: string) => text.split('\n').filter(line => line.startsWith('|')).join('\n');
+    expect(table(body('dev-gates'))).toBe(table(policy));
+    for (const words of ['In work', 'After a batch merges', 'Final turn candidate', 'pinned commit', 'typecheck of tests', 'real database']) expect(table(policy), words).toContain(words);
+    expect(policy).toMatch(/never on a task, a fix round or a batch/);
+    expect(body('dev-review-verdict')).toMatch(/requirement -> test/);
+    expect(body('dev-review-verdict')).toMatch(/low coverage alone is not a finding/);
+  });
+
+  it('removes per-branch mutation runs, fixed test times and model-based financial recomputation', () => {
+    const body = (id: string) => templates.skills.get(id)!.body;
+    expect(body('dev-test-gaps')).not.toMatch(/Run `mutator` from the repository root on the files the branch changed/);
+    expect(body('dev-review-diff')).not.toContain("Mutation testing is the developer's");
+    for (const id of ['dev-engineering-rules', 'dev-gates', 'dev-tdd', 'dev-test-gaps']) expect(body(id), id).not.toMatch(/\b\d+\s+minutes?\b/);
+    const modelChecks = body('dev-engineering-rules').split('Model checks')[1]?.split('\n- T9.')[0];
+    expect(modelChecks).toBeDefined();
+    expect(modelChecks).not.toMatch(/financial recomputation/);
+  });
+
+  it('gives general, backend and frontend developers TDD and worktree skills', () => {
+    for (const id of ['DEV-ENG', 'DEV-BE', 'DEV-FE']) {
+      const role = templates.roles.get(id)!;
+      for (const skill of ['dev-tdd', 'dev-worktrees']) expect(role.skills.find(s => s.id === skill)?.on, `${id} ${skill}`).toBe(true);
+    }
+  });
+
+  it('pins legacy characterization, requirement evidence and the assigned release reviewer', () => {
+    const body = (id: string) => templates.skills.get(id)!.body;
+    expect(body('dev-tdd')).toContain('A characterization test of legacy code passes immediately, and that is correct');
+    for (const id of ['dev-implement', 'dev-tdd']) expect(body(id), id).toContain('four task kinds');
+    for (const id of ['dev-implement', 'dev-review-verdict']) expect(body(id), id).toMatch(/verification before (saying )?done/);
+    expect(templates.roles.get('DEV-HEAD')!.body).toMatch(/four task kinds/);
+    expect(templates.roles.get('DEV-REV')!.body).toMatch(/one reviewer named by the head/);
+    expect(body('dev-review-diff')).toMatch(/T4/);
+    expect(body('dev-review-diff')).toMatch(/repository root/);
+    expect(body('dev-review-diff')).toMatch(/selection and its reason/);
+  });
+
+  it('records the coding cycle and testing policy in project rules and sources', () => {
+    const agents = readFileSync(join(DIR, '../AGENTS.md'), 'utf8');
+    expect(agents).toMatch(/Write the failing test first/);
+    expect(agents).toMatch(/four task kinds/);
+    expect(agents).toContain('templates/skills/dev-implement.md');
+    const sources = readFileSync(join(DIR, 'SOURCES.md'), 'utf8');
+    expect(sources).toContain('T1-T11');
+    expect(sources).toContain('four task kinds');
   });
 
   it("runs the reviewer's program's own review on what the branch changed, besides the tools and the checklists", () => {

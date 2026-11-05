@@ -14,8 +14,16 @@ sources: [obra/superpowers skills/subagent-driven-development/SKILL.md, affaan-m
 
 The turn ends with one review, one final check, then the release with the CEO's approval of the exact commit.
 
-- **Checks in two sizes.** On a task and in the review, the executor and every reviewer run only what the change touches: the tests of the changed parts and the new tests, the formatter, the linter and the type checker on the changed files. Nobody needs anyone's permission to run them. The whole test suite runs once per turn, in the final check, through run_tests: it goes to a free machine of the company, in parts when its runner can split.
-- **The final check.** When the fixes of the review are in, or every reviewer passed the turn, the head gives one task to the test engineer, or to the DevOps engineer when there is none, or runs run_tests itself when there is neither, never to a developer: run the whole test suite with the tests the turn added, the build and the end-to-end checks once on the turn's branch. The QA lead, when there is one, accepts the turn there. Each failure goes back as a task to the member whose change broke it. After the fixes only what failed and the tests around it run again; the whole suite runs again only before the release.
+- **Checks by stage (T3).** On a task and in the review, the executor and every reviewer run only what the change touches under T2. Nobody needs anyone's permission to run them. Use this same table everywhere:
+
+| Stage | Checks |
+|---|---|
+| In work | Tests selected by impact, types, lint, crapper and dryer (T2). |
+| After a batch merges | The batch's affected tests on one pinned commit. |
+| Final turn candidate | The whole suite with typecheck of tests and every affected application, build, QA browser checks and real database tests (T1). |
+
+  The whole suite runs only for the final turn candidate, never on a task, a fix round or a batch. Every check names its commit; its evidence counts while that is the commit being reviewed. A large run may be split across machines only when the split pays for itself and its parts take roughly equal time.
+- **The final check.** When the fixes of the review are in, or every reviewer passed the turn, the head gives one task to the test engineer, or to the DevOps engineer when there is none, or runs run_tests itself when there is neither, never to a developer: run the whole test suite with typecheck of tests and every affected application, the build, QA browser checks and real database tests once on the turn's pinned commit. It goes through run_tests to a free machine, in parts when its runner can split. The QA lead, when there is one, accepts the turn there. Each failure goes back as a task to the member whose change broke it. After the fixes only what failed and the tests around it run again; the whole suite runs again only before the release.
 
 - **Never the author.** Whoever made a piece of work does not pass its gate.
 - **Other providers check.** Reviewers run on other providers than the developer when you have them. With only one provider, use a fresh session on another tier and say "cross-check degraded" in your status.

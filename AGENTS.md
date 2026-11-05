@@ -11,6 +11,7 @@ These rules are for anyone who changes this repository, people and agents alike.
 ## Code
 
 * Write the failing test first, watch it fail, then make it pass.
+* Follow the coding cycle for four task kinds in [`dev-implement`](templates/skills/dev-implement.md): Bug, Known behaviour, Unknown path or Legacy code. Each task names acceptance, risk class and its requirement -> test evidence.
 * Match the code around you: its naming, comment density and idioms.
 * Run the tests of what you changed before you push your branch. The whole suite, `npm test` from the repository root (including `npm run typecheck:tests` for server, node and protocol tests) and `npx tsc -p <app>/tsconfig.json --noEmit` for each app the turn touched, runs once per turn, on the merged turn branch, before it goes into main.
 * Do not reformat files you did not change, and do not run a formatter over the whole repository.
