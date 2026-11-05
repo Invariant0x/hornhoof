@@ -1,5 +1,6 @@
+import { typesWords } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
-import { eraseKeys, holdsFoldedPaste, isOwnLeft, leftRef, LeftInputs, typesWords } from '../src/terminal/left-input.js';
+import { eraseKeys, holdsFoldedPaste, isOwnLeft, leftRef, LeftInputs } from '../src/terminal/left-input.js';
 
 describe('what a program\'s input holds', () => {
   const own = { text: 'A prompt that is long enough to tell apart from the words of a person.', jobId: 'job', at: 100 };

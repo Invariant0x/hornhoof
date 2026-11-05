@@ -318,6 +318,8 @@ const Cols = z.number().int().min(10).max(500);
 const Rows = z.number().int().min(4).max(200);
 /* What one frame carries of a terminal's screen or of a person's keys and pastes. */
 export const TERM_CHUNK = 64 * 1024;
+/* Keys that may leave words in a program's input. Scrolling, clicks, arrows and a lone Enter leave none. */
+export const typesWords = (data: string): boolean => /[^\x00-\x20\x7f]/.test(data.replace(/\x1b(?:\[[0-9;<?]*[ -/]*[@-~]|O.)/g, ''));
 
 /* How busy a node's machine is: its processors, the load average over the last minute, its free and total memory in
    bytes, and how many test runs and agent jobs the node runs now. A node sends it with its hello and every LOAD_MS.

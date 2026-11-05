@@ -28,9 +28,6 @@ export function isOwnLeft(own: OwnLeft | null | undefined, typedAt: number | nul
   return left === prompt || ONLY_FOLDED.test(left) || (left.length >= OWN_PIECE && prompt.includes(left));
 }
 
-/* Keys that may leave words in the input. Scrolling, clicks, arrows and a lone Enter leave none. */
-export const typesWords = (data: string): boolean => /[^\x00-\x20\x7f]/.test(data.replace(/\x1b(?:\[[0-9;<?]*[ -/]*[@-~]|O.)/g, ''));
-
 /* Words Hornhoof was asked to keep, and which it said it keeps. */
 export class LeftInputs {
   private readonly told = new Set<string>();

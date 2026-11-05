@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
-import { cut, isProgramOwnPrompt, UNHEARD_MS, type AgentEvent, type Failure, type Limits, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
+import { cut, isProgramOwnPrompt, typesWords, UNHEARD_MS, type AgentEvent, type Failure, type Limits, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
 import type { OperatorDelivery, OperatorInputLine, OperatorQuestion, OperatorServerMessage } from '@hornhoof/protocol/program-operator';
 import { agyRules, COLORS_NOT_TAKEN, colorsNotTaken, pastColors, SETUP_NEEDED } from '../providers/antigravity.js';
 import { claudeEvents, claudeInterrupted } from '../providers/claude.js';
@@ -18,7 +18,7 @@ import { plainOutput, signalName, type ProgramOutput } from '../program-exit.js'
 import { redact } from '../redact.js';
 import { Bridge, type AgentUrls } from './bridge.js';
 import { atEmptyPrompt, inputOf, withoutDim } from './input.js';
-import { eraseKeys, holdsFoldedPaste, isOwnLeft, leftRef, LeftInputs, typesWords, type OwnLeft } from './left-input.js';
+import { eraseKeys, holdsFoldedPaste, isOwnLeft, leftRef, LeftInputs, type OwnLeft } from './left-input.js';
 import { readViewHistory, sendTerminalOutput } from './view-stream.js';
 import { procOwner, type OwnerFactory, type Ownership, type Panes } from './peer.js';
 import { StreamMask } from './mask.js';
