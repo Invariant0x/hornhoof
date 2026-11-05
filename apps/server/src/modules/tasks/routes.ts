@@ -1,6 +1,7 @@
 import { and, asc, count, desc, eq, inArray, isNull, notInArray, sql, type SQL } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { Text } from './long-text.js';
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach, type Access } from '../../auth/access.js';
 import { actorOf, requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
@@ -38,10 +39,10 @@ const ListQuery = z.object({ department: z.uuid().optional(), status: z.enum(['o
 const DecisionsQuery = z.object({ person: z.uuid().optional() }).strict();
 const PipelineQuery = z.object({ turn: z.coerce.number().int().positive().optional() });
 const AnswerBody = z.union([
-  z.object({ answer: z.string().trim().min(1).max(4000) }).strict(),
-  z.object({ approve: z.boolean(), answer: z.string().max(4000).optional() }).strict(),
+  z.object({ answer: Text.trim().min(1) }).strict(),
+  z.object({ approve: z.boolean(), answer: Text.optional() }).strict(),
   z.object({ retry: z.literal(true) }).strict(),
-  z.object({ pick: z.number().int().min(0).max(9), answer: z.string().trim().max(4000).optional() }).strict(),
+  z.object({ pick: z.number().int().min(0).max(9), answer: Text.trim().optional() }).strict(),
 ]);
 
 const reaches = (access: Access, t: Pick<Task, 'departmentId' | 'productId'>) => canReach(access, taskSpot(t));
@@ -181,7 +182,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/tasks/:id/comments', async (req, reply) => {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
-    const { text } = z.object({ text: z.string().trim().min(1).max(4000) }).parse(req.body);
+    const { text } = z.object({ text: Text.trim().min(1) }).parse(req.body);
     const moved = await comment(ctx, actorOf(me), (await reachable(me, id)).id, text);
     await wakeAll(ctx, moved.wakes);
     return reply.code(201).send({ task: await detail(me, moved.task) });

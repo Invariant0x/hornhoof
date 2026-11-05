@@ -1537,9 +1537,6 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
   return { request: row, task: now, wakes };
 }
 
-/* As long as an answer given in the task may be. */
-const ANSWER_MAX = 4000;
-
 /* Whether a person's words take this open request: they reach its task and may take its decision. */
 function takes(person: Parameters<typeof canDecide>[1], access: Access, r: Parameters<typeof requestSubject>[0] & Parameters<typeof requestSubject>[1] & { companyId: string }): boolean {
   return canReach(access, taskSpot(r)) && canDecide(requestSubject(r, r), person, access, r.companyId);
@@ -1549,7 +1546,7 @@ function takes(person: Parameters<typeof canDecide>[1], access: Access, r: Param
    and tells it how to go on where it was stuck, on the tasks that person reaches. A commit to approve and a choice wait for
    their own answer. The task's own turn still follows, which watches that the task moves. */
 export async function answerDirectly(ctx: Live, personId: string, agentId: string, text: string): Promise<Wake[]> {
-  const said = text.trim().slice(0, ANSWER_MAX);
+  const said = text.trim();
   if (!said) return [];
   const [person] = await ctx.db
     .select({ id: people.id, companyId: people.companyId, status: people.status, scopeKind: people.scopeKind, isOwner: people.isOwner, isCeoDelegate: people.isCeoDelegate })
