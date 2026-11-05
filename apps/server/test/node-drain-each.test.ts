@@ -6,7 +6,7 @@ import { describe, expect, it, onTestFinished } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, jobs, machines, nodes, people, subscriptions, tasks } from '../src/db/schema.js';
-import { enqueueTurn, orchestratorOf } from '../src/modules/conversation/queue.js';
+import { agentState, enqueueTurn, orchestratorOf } from '../src/modules/conversation/queue.js';
 import { nodeDrain, nodeHeldLong } from '../src/modules/updates/node-drain.js';
 import { as, connectNode, listen, setUpCompany, TEST_SECRET, testApp, until, type FakeNode } from './helpers.js';
 
@@ -198,6 +198,9 @@ describe('the orchestrator and the heads while their node waits', () => {
     expect(await nextTurn(node, 300)).toBeNull();
     expect((await f.statusOf(waiting)).status).toBe('queued');
     expect(nodeDrain(f.app.ctx, { kind: 'node', nodeId: google.nodeId })?.state).toBe('waiting');
+    /* The watchdog goes on seeing that the worker waits for the update, and that the head does not. */
+    expect((await agentState(f.app.ctx, worker.id)).machineDrain).toMatchObject({ state: 'waiting' });
+    expect((await agentState(f.app.ctx, head.id)).machineDrain).toBeNull();
   });
 
   it('lets the orchestrator in the same way', async () => {
