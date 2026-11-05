@@ -1,12 +1,66 @@
 services:
+  # Serves the company's web port and passes every request and socket on to the keeper. It holds nothing yet.
+  front:
+    build: .
+    image: ${HORNHOOF_APP_REF:-ghcr.io/invariant0x/hornhoof:latest}
+    command: ["node", "apps/server/dist/front.js"]
+    restart: unless-stopped
+    # install.sh picks a free port for each company's server on one computer and keeps it in .env. An empty value in
+    # .env reads as unset because of the `:-`.
+    ports:
+      - "${HORNHOOF_PORT:-8080}:8080"
+    depends_on:
+      - keeper
+    networks:
+      - default
+
+  # Sets the app's mode, runs the public link's frpc as its child, ends the link's TLS and passes what comes in to the
+  # app. It reads the link from the database, and has the control folder and no Docker socket.
+  keeper:
+    build: .
+    image: ${HORNHOOF_APP_REF:-ghcr.io/invariant0x/hornhoof:latest}
+    command: ["node", "apps/server/dist/keeper.js"]
+    restart: unless-stopped
+    # The peer link's port, held from now on; nothing listens on it until the peer link's plan.
+    ports:
+      - "${HORNHOOF_PEER_PORT:-8180}:7070"
+    environment:
+      # The same database, secret, certificate directory and relay as the app, since the keeper reads the link with the
+      # app's own code.
+      DATABASE_URL: postgres://hornhoof:${POSTGRES_PASSWORD:-hornhoof}@db:5432/hornhoof
+      HORNHOOF_SECRET: ${HORNHOOF_SECRET:?Set HORNHOOF_SECRET in .env}
+      ACME_DIRECTORY: ${ACME_DIRECTORY:-}
+      RELAY_URL: ${RELAY_URL:-}
+      # The id frpc logs in with, written once by install.sh.
+      HORNHOOF_MACHINE_ID: ${HORNHOOF_MACHINE_ID:-}
+    volumes:
+      - control:/control
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - default
+      - internal
+
+  # Runs the database's migrations once, as the owner, before the app starts.
+  migrate:
+    build: .
+    image: ${HORNHOOF_APP_REF:-ghcr.io/invariant0x/hornhoof:latest}
+    command: ["node", "apps/server/dist/migrate.js"]
+    restart: "no"
+    environment:
+      DATABASE_URL: postgres://hornhoof:${POSTGRES_PASSWORD:-hornhoof}@db:5432/hornhoof
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - internal
+
   app:
     build: .
     # install.sh names the exact image in .env: by the digest the updater checked, or by the build's tag.
     image: ${HORNHOOF_APP_REF:-ghcr.io/invariant0x/hornhoof:latest}
     restart: unless-stopped
-    # install.sh picks a free port for each company's server on one computer and keeps it in .env.
-    ports:
-      - "${HORNHOOF_PORT:-8080}:8080"
     environment:
       # install.sh puts a random database password into .env; a server set up before that keeps the one its database
       # was made with.
@@ -14,10 +68,12 @@ services:
       HORNHOOF_SECRET: ${HORNHOOF_SECRET:?Set HORNHOOF_SECRET in .env}
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8080}
       NODE_KEY: ${NODE_KEY:?Set NODE_KEY in .env}
-      # Where the company's public link comes from, and the one container whose word that a request came over https
-      # the app believes.
+      # Where the company's public link comes from.
       RELAY_URL: ${RELAY_URL:-}
-      TUNNEL_HOST: tunnel
+      # The one container whose word on https and on the visitor's address the app believes.
+      TUNNEL_HOST: keeper
+      # The keeper sets the app's mode through the control folder.
+      HORNHOOF_KEEPER: "on"
       # Where the link's certificate comes from: Let's Encrypt when empty, off for none.
       ACME_DIRECTORY: ${ACME_DIRECTORY:-}
       # How many megabytes all the files on the company's tasks may take together; 2048 when empty.
@@ -38,6 +94,10 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      keeper:
+        condition: service_started
     networks:
       - default
       - internal
@@ -45,6 +105,8 @@ services:
   db:
     # Pinned by digest, so every install runs the database image this build was tested with.
     image: postgres:17.11@sha256:3b0cda93be7c8dba2ed484d19393d93845dc3dafb88973e248ba8e6d99d784e1
+    # Logical copies of the database need these settings.
+    command: ["postgres", "-c", "wal_level=logical", "-c", "max_replication_slots=10", "-c", "max_wal_senders=10", "-c", "max_prepared_transactions=0"]
     restart: unless-stopped
     environment:
       POSTGRES_USER: hornhoof
@@ -97,20 +159,6 @@ services:
     security_opt:
       - no-new-privileges:true
       - apparmor:unconfined
-    depends_on:
-      - app
-    networks:
-      - default
-
-  # Carries the company's public link at hornhoof.org to the app. The app writes the link's settings into the control
-  # folder; until it does, this waits. It reads nothing else, holds no Docker socket, and runs the app's own image.
-  tunnel:
-    build: .
-    image: ${HORNHOOF_APP_REF:-ghcr.io/invariant0x/hornhoof:latest}
-    command: ["node", "apps/server/dist/tunnel.js"]
-    restart: unless-stopped
-    volumes:
-      - control:/control:ro
     depends_on:
       - app
     networks:
