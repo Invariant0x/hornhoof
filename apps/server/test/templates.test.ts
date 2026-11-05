@@ -1,4 +1,4 @@
-import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -714,6 +714,7 @@ describe('templates', () => {
       const contributingDoc = readFileSync(join(DIR, '../CONTRIBUTING.md'), 'utf8');
       for (const doc of [agentsDoc, contributingDoc]) {
         expect(doc).toContain('templates/skills/dev-frontend-ui.md');
+        expect(doc).toContain('(docs/style-book.md)');
         expect(doc).toContain('apps/web/src/i18n/index.tsx');
         expect(doc).toMatch(/longest[\s\S]*shortest|shortest[\s\S]*longest/i);
         expect(doc).toMatch(/whole group|one group/i);
@@ -724,6 +725,46 @@ describe('templates', () => {
       }
       expect(agentsDoc).toContain('CONTRIBUTING.md#interface-panels-and-language-checks');
       expect(contributingDoc).toContain('### Interface panels and language checks');
+    });
+
+    it('ships the approved repository style book with matching theme tokens, existing source paths and dated exceptions', () => {
+      const root = join(DIR, '..');
+      const styleBook = readFileSync(join(root, 'docs/style-book.md'), 'utf8');
+      const themeCss = readFileSync(join(root, 'apps/web/src/theme.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+      expect(styleBook).toContain('Version 1.0, approved by the head of Design');
+      expect(styleBook).not.toMatch(/[\u2014\u0451\u0401]/);
+      for (const heading of [
+        '## 1. Colours',
+        '## 2. Type',
+        '## 3. Spacing and sizes',
+        '## 4. Components',
+        '## 5. Languages',
+        '## 6. Text wrap and action groups',
+        '## 7. Site and marketing',
+        '## 8. Using and changing this book',
+        '## 9. Browsers',
+      ]) {
+        expect(styleBook).toContain(heading);
+      }
+      expect(styleBook).toMatch(/ui\/Notebook\.tsx[\s\S]*Reviewed by 2027-02-05/);
+      expect(styleBook).toMatch(/\.chip[\s\S]*Reviewed by 2027-02-05/);
+      expect(styleBook).toMatch(/Close button of a panel[\s\S]*Reviewed by 2027-02-05/);
+      const light = themeDeclarations(themeCss, ':root {');
+      const dark = themeDeclarations(themeCss, ':root[data-theme="dark"]');
+      const colourSection = styleBook.slice(styleBook.indexOf('## 1. Colours'), styleBook.indexOf('### Contrast of text'));
+      const bookColours = Object.fromEntries(
+        [...colourSection.matchAll(/^\| `(--[\w-]+)` \| `([^`]+)` \| `([^`]+)` \|/gm)].map(m => [m[1]!, [m[2]!, m[3]!]]),
+      );
+      expect(Object.keys(bookColours).length).toBeGreaterThanOrEqual(27);
+      const actualColours = Object.fromEntries(Object.keys(bookColours).map(k => [k, [light[k], dark[k]]]));
+      expect(actualColours).toEqual(bookColours);
+      const typeSection = styleBook.slice(styleBook.indexOf('## 2. Type'), styleBook.indexOf('Fonts are imported'));
+      const bookFonts = Object.fromEntries([...typeSection.matchAll(/^\| `(--[\w-]+)` \| `([^`]+)` \|/gm)].map(m => [m[1]!, m[2]!]));
+      expect(Object.keys(bookFonts)).toEqual(['--f-display', '--f-body', '--f-mono']);
+      expect(Object.fromEntries(Object.keys(bookFonts).map(k => [k, light[k]]))).toEqual(bookFonts);
+      const sources = [...new Set(styleBookSources(styleBook))];
+      expect(sources.length).toBeGreaterThanOrEqual(46);
+      expect(sources.filter(rel => !existsSync(join(root, rel)))).toEqual([]);
     });
 
     it('rejects UI skill text that allows clipping, hiding button groups, blocking non-visual work or fixed/pseudo locales', () => {
@@ -955,3 +996,15 @@ const forEvery = <Item>(items: Item[], predicate: (item: Item) => boolean): bool
 
 const failedRuleIds = <Input>(rules: { id: string; holds: (input: Input) => boolean }[], input: Input): string[] =>
   rules.filter(rule => !rule.holds(input)).map(rule => rule.id);
+
+const themeDeclarations = (css: string, selector: string): Record<string, string> => {
+  const start = css.indexOf('{', css.indexOf(selector)) + 1;
+  const block = css.slice(start, css.indexOf('}', start));
+  return Object.fromEntries([...block.matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)].map(m => [m[1]!, m[2]!.trim().replace(/\s+/g, ' ')]));
+};
+
+const styleBookSources = (book: string): string[] => [
+  ...[...book.matchAll(/`((?:ui|screens)\/[\w./-]+\.tsx?)`/g)].map(m => `apps/web/src/${m[1]!}`),
+  ...[...book.matchAll(/`((?:apps|templates|guide|\.github)\/[\w./-]+\.\w+)`/g)].map(m => m[1]!),
+  ...[...book.matchAll(/`([A-Z_]+\.md)`/g)].map(m => m[1]!),
+];
