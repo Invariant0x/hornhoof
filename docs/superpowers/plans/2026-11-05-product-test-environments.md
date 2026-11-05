@@ -35,14 +35,14 @@
 
 **Files:** packages/protocol/src/test-environment.ts, src/index.ts, test/test-environment.test.ts and owned test fixtures.
 
-**Interfaces:** Export Command/TestService/TestPrepare/TestEnvironmentV1 schemas and inferred types, RepositoryScope, RuntimeCapability, environment snapshot/receipt schemas, parseTestEnvironment, listTestUnits and buildTestInvocation. Commands are {program,args,cwd}; repository scope is {companyId,repositoryOwnerId,repoUrlHash}. Describe uses UUID requestId, exact commitSha, scope and repository; response includes original manifest bytes/hash, validated manifest, input digests/inventory, runtime capabilities and a typed problem.
+**Interfaces:** Export Command/TestService/TestPrepare/TestEnvironmentV1 schemas and inferred types, RepositoryScope, RuntimeCapability, environment snapshot/receipt schemas, parseTestEnvironment. listTestUnits/buildTestInvocation live in the node module because they validate filesystem paths and write private selection files. Commands are {program,args,cwd}; repository scope is {companyId,repositoryOwnerId,repoUrlHash}. Describe uses UUID requestId, exact commitSha, scope and repository; response includes original manifest bytes/hash, validated manifest, input digests/inventory, runtime capabilities and a typed problem.
 
 - [x] Write strict command/path primitive tests first; observe rejection failures before implementation. No-service manifest acceptance follows after reset is reconciled.
-- [ ] Implement stable command/scope/runtime primitives and verify their direct tests (command/scope complete; runtime remains).
+- [x] Implement stable command/scope/runtime primitives and verify their direct tests (command/scope/runtime complete).
 - [x] Reconcile reset: the head corrected #399 at2026-11-05T15:10:33.690Z. Null or nonempty {suiteIds,scope,command,inputs} records are required; command:null requires fixture input paths.
 - [x] Test frozen B manifest, both Python fixture variants, strict tagged unions, duplicate IDs, profile/service references, forbidden paths, limits and unsupported versions; observe RED, implement and verify GREEN.
-- [ ] Test inventory from tracked paths and cwd-relative argv/JSON selection, including a leading-dash filename and honest whole-package execution.
-- [ ] Add bounded describe/run/result protocol frames and receipt validation; run protocol tests/build/types and commit the complete contract. Send B the parser SHA and fixture result.
+- [x] Test inventory from tracked paths and cwd-relative argv/JSON selection, including a leading-dash filename and honest whole-package execution.
+- [x] Add bounded describe/run/result protocol frames and receipt validation; run protocol tests/build/types and commit the complete contract. Send B the parser SHA and fixture result.
 
 ## Task 2: Exact Git mirror and immutable cache primitives
 
@@ -106,3 +106,7 @@
 - Head resolved reset and rewrote#399. Reread the new body; suite-scoped reset is now explicit current truth. Resume Task1 manifest steps before independent mirror/cache.
 
 - Canonical schema RED17 acceptance failures ->GREEN25 total; bounded source/hash RED3 ->GREEN28 total. Frozen B JSON and both C Python descriptions pass; invalid reset/profile/reference/union/path cases fail. This validates description structure, not actual fixture isolation.
+
+- Protocol description/wire increment: RED4 ->GREEN4, malformed JSON/false environment-hit regressions RED2 ->GREEN6; frames/runtime-fields RED2 ->GREEN8. Whole protocol254/254, final targeted36/36 after CC extraction; build/types/lint passed. New maximum CC7, dryer clean.
+- Node metadata increment: discovery RED4 ->GREEN4, invocation RED2 ->GREEN6, selective keys RED1 ->GREEN7. Main discovery/cancel wiring RED2, corrected test transport to preserve HTTPS wire validation while reading local Git through the reader adapter. Refused-request tracking and timeout-code regressions each RED1 ->GREEN; affected node88/88. Node test types and scoped lint passed; existing runNode CC166->161, new maxCC7, dryer clean. Product execution/preparation and server snapshots are still outstanding.
+- Ruling: test_mode_conflict is the stable ApiError.reason with existing generic validation code, and prefixes the MCP error text. One additive ErrorReason line in src/errors.ts is necessary plumbing outside the exclusive file list; no other error behavior changes. Cost if wrong: align the transport reason name before exposing product mode.

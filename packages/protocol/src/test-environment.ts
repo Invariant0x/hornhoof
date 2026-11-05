@@ -155,3 +155,91 @@ export async function hashTestEnvironment(source: string | Uint8Array): Promise<
   const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
   return [...digest].map(byte => byte.toString(16).padStart(2, '0')).join('');
 }
+
+export const RuntimeCapability = z.strictObject({ id: Id, version: Text.max(200), fingerprint: EnvironmentDigest });
+export type RuntimeCapability = z.infer<typeof RuntimeCapability>;
+export const ProductCommitSha = z.string().regex(/^[a-f0-9]{40}$/);
+export const TestUnit = z.strictObject({ suiteId: Id, file: RepositoryPath, selectionUnit: RepositoryPath });
+export type TestUnit = z.infer<typeof TestUnit>;
+export const InputDigest = z.strictObject({ path: RepositoryPath, digest: EnvironmentDigest.nullable() });
+export type InputDigest = z.infer<typeof InputDigest>;
+export const TEST_DESCRIPTION_BYTES = 3 * 1024 * 1024;
+const DescriptionShape = z.strictObject({
+  version: z.literal(1), repositoryScope: RepositoryScope, commitSha: ProductCommitSha,
+  manifestSource: z.string().min(1).refine(source => byteLength(source) <= TEST_ENVIRONMENT_BYTES),
+  manifestHash: EnvironmentDigest, manifest: TestEnvironmentV1,
+  inputDigests: z.array(InputDigest).max(10_000), inventory: z.array(TestUnit).max(10_000),
+  runtimeCapabilities: z.array(RuntimeCapability).max(64),
+});
+type DescriptionShape = z.infer<typeof DescriptionShape>;
+function distinct(values: string[], path: string, ctx: z.RefinementCtx): void {
+  if (new Set(values).size !== values.length) ctx.addIssue({ code: 'custom', path: [path], message: 'Evidence entries must be distinct.' });
+}
+function descriptionSource(value: DescriptionShape, ctx: z.RefinementCtx): void {
+  try {
+    const parsed = TestEnvironmentV1.safeParse(JSON.parse(value.manifestSource));
+    if (parsed.success && JSON.stringify(parsed.data) === JSON.stringify(value.manifest)) return;
+  } catch { /* The original bytes must be valid JSON as well as valid manifest data. */ }
+  ctx.addIssue({ code: 'custom', path: ['manifest'], message: 'The snapshot differs from its original manifest bytes.' });
+}
+function descriptionEvidence(value: DescriptionShape, ctx: z.RefinementCtx): void {
+  distinct(value.inputDigests.map(input => input.path), 'inputDigests', ctx);
+  distinct(value.inventory.map(unit => `${unit.suiteId}:${unit.file}`), 'inventory', ctx);
+  distinct(value.runtimeCapabilities.map(runtime => runtime.id), 'runtimeCapabilities', ctx);
+  const suites = new Set(value.manifest.suites.map(suite => suite.id));
+  value.inventory.forEach((unit, index) => reference(unit.suiteId, suites, ['inventory', index, 'suiteId'], ctx));
+}
+function descriptionSize(value: unknown, ctx: z.RefinementCtx): void {
+  if (byteLength(JSON.stringify(value)) >= TEST_DESCRIPTION_BYTES) ctx.addIssue({ code: 'custom', message: 'The environment evidence exceeds its 3MiB limit.' });
+}
+export const EnvironmentDescription = DescriptionShape.superRefine(descriptionSource).superRefine(descriptionEvidence).superRefine(descriptionSize);
+export type EnvironmentDescription = z.infer<typeof EnvironmentDescription>;
+export async function validateEnvironmentDescription(value: unknown): Promise<EnvironmentDescription> {
+  const description = EnvironmentDescription.parse(value);
+  if (await hashTestEnvironment(description.manifestSource) !== description.manifestHash) throw new Error('The original manifest hash differs from its description.');
+  return description;
+}
+export const EnvironmentSnapshot = z.strictObject({ description: EnvironmentDescription, profile: Id })
+  .refine(value => value.description.manifest.profiles.some(profile => profile.id === value.profile), 'Unknown product profile.');
+export type EnvironmentSnapshot = z.infer<typeof EnvironmentSnapshot>;
+const Selection = z.strictObject({ kind: z.enum(['suite', 'final']), suiteId: Id, files: Inputs });
+function finalSelection(selection: z.infer<typeof Selection>, suite: TestSuite, ctx: z.RefinementCtx): void {
+  if (selection.files.length || !suite.finalChecks?.length) ctx.addIssue({ code: 'custom', message: 'Final checks are a separate unsplit leaf without file selection.' });
+}
+function executionSelection(value: { snapshot: EnvironmentSnapshot; selection: z.infer<typeof Selection> }, ctx: z.RefinementCtx): void {
+  const { snapshot, selection } = value;
+  const suite = snapshot.description.manifest.suites.find(item => item.id === selection.suiteId);
+  if (!suite || !suite.profiles.includes(snapshot.profile)) { ctx.addIssue({ code: 'custom', message: 'The suite is not eligible for this profile.' }); return; }
+  if (selection.kind === 'final') return finalSelection(selection, suite, ctx);
+  const files = snapshot.description.inventory.filter(unit => unit.suiteId === suite.id).map(unit => unit.file);
+  references(selection.files, new Set(files), ['selection', 'files'], ctx);
+  distinct(selection.files, 'selection', ctx);
+  if (!selection.files.length || (suite.split.kind === 'whole-package' && selection.files.length !== files.length)) ctx.addIssue({ code: 'custom', message: 'An execution needs a nonempty valid selection; whole-package suites cannot be split.' });
+}
+export const TestExecution = z.strictObject({ snapshot: EnvironmentSnapshot, selection: Selection }).superRefine(executionSelection);
+export type TestExecution = z.infer<typeof TestExecution>;
+const CacheReceipt = z.strictObject({ key: EnvironmentDigest.nullable(), hit: z.boolean() })
+  .refine(receipt => !receipt.hit || receipt.key !== null, 'An uncached preparation cannot be a cache hit.');
+const Duration = z.number().finite().nonnegative();
+export const TestEnvironmentReceipt = z.strictObject({
+  version: z.literal(1), commitSha: ProductCommitSha, manifestHash: EnvironmentDigest,
+  suiteId: Id, kind: z.enum(['suite', 'final']), files: Inputs,
+  runtimes: z.array(RuntimeCapability).max(64), dependencies: CacheReceipt,
+  environments: z.array(CacheReceipt.safeExtend({ unitId: Id })).max(1000),
+  phases: z.strictObject({ checkoutMs: Duration, dependenciesMs: Duration, environmentMs: Duration, servicesMs: Duration, commandMs: Duration, cleanupMs: Duration }),
+}).superRefine(descriptionSize);
+export type TestEnvironmentReceipt = z.infer<typeof TestEnvironmentReceipt>;
+
+export const EnvironmentProblem = z.strictObject({
+  code: z.enum(['environment_missing', 'environment_invalid', 'environment_unsupported', 'environment_too_large', 'runtime_missing', 'isolation_missing', 'commit_unavailable', 'description_mismatch', 'cancelled', 'timeout']),
+  detail: Text.max(2000),
+});
+export type EnvironmentProblem = z.infer<typeof EnvironmentProblem>;
+export const TestsDescribed = z.strictObject({
+  type: z.literal('tests.described'), requestId: z.uuid(), commitSha: ProductCommitSha,
+  result: z.discriminatedUnion('status', [
+    z.strictObject({ status: z.literal('ready'), description: EnvironmentDescription }),
+    z.strictObject({ status: z.literal('error'), problem: EnvironmentProblem }),
+  ]),
+}).refine(value => value.result.status !== 'ready' || value.result.description.commitSha === value.commitSha, 'The described commit differs from the requested commit.').superRefine(descriptionSize);
+export type TestsDescribed = z.infer<typeof TestsDescribed>;
