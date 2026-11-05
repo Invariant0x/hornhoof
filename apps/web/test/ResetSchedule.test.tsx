@@ -119,7 +119,7 @@ describe('relative subscription reset times', () => {
       await vi.advanceTimersByTimeAsync(31_000);
     });
     expect(list).toHaveTextContent('5 hours10%usedresets in 23 h 59 min');
-    expect(list).toHaveTextContent('7 daysNo data yetReset time unknown');
+    expect(list).toHaveTextContent('7 daysUnknown, no limit data received yet');
     expect(list).not.toHaveTextContent(/resets in -/);
     expect(list).not.toHaveTextContent(/restored/i);
   });

@@ -22,6 +22,11 @@ describe('currentLimits', () => {
     expect(currentLimits(rejected([FULL, unknownReset]), FRESH, NOW)).toEqual({ ...rejected([unknownReset]), complete: false });
   });
 
+  it('keeps a window whose reset time cannot be parsed', () => {
+    const unknownReset = { name: 'month', utilization: 0.06, resetsAt: 'not-a-time' };
+    expect(currentLimits(rejected([unknownReset]), FRESH, NOW)).toEqual(rejected([unknownReset]));
+  });
+
   it('keeps a rejection with no blocking window because it gives no reset that could clear it', () => {
     expect(currentLimits(rejected([OPEN]), FRESH, NOW)).toEqual(rejected([OPEN]));
   });
