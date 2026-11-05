@@ -78,7 +78,7 @@ describe('the Task watchdog and a machine waiting for an update', () => {
   it('still tells the sender a message did not go out when the plan is at its limit, which is no wait for an update', async () => {
     const f = await company();
     const resetsAt = new Date(Date.now() + 3_600_000).toISOString();
-    await f.db.update(subscriptions).set({ limits: { status: 'rejected', windows: [{ name: 'five_hour', utilization: 1, resetsAt }] } }).where(eq(subscriptions.id, f.sub.id));
+    await f.db.update(subscriptions).set({ limits: { status: 'rejected', windows: [{ name: 'five_hour', utilization: 1, resetsAt }] }, limitsUpdatedAt: new Date() }).where(eq(subscriptions.id, f.sub.id));
     const said = (await (await mcp(f.app, TOKEN)).callTool({ name: 'message_employee', arguments: { employee: f.bruno.id, text: 'Report on the checkout, please.' } })) as Result;
     expect(said.isError).toBe(true);
     expect(said.content[0]!.text).toContain('did not reach');
