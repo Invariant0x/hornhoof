@@ -2,15 +2,11 @@
 
 # Hornhoof
 
-**Stop juggling AI windows. Give a goal, get it built.**
+**Your AI agents, working as one team.**
 
-Sound familiar?
+When you work with several AI programs at once, it is easy to lose track of which one does what. When you build something with friends, everyone's AI plans work apart. And when you have several computers, usually only one of them does the work.
 
-- Claude Code in one tab, Codex in another, then five more, and your head spins trying to remember which one is doing what.
-- You and a friend decided to build something together. Each of you has AI plans, and there is no way to put them on one job.
-- You have a laptop, a desktop and an old server, and you want all of them speeding up the work, not just one.
-
-Hornhoof makes one company out of all of it. You say what you want in plain words. Hornhoof splits the work between departments of AI agents, runs them on everyone's plans and computers at the same time, has agents of different makers check each other, and brings you the finished result.
+Hornhoof brings all of it together into one team. You describe the task in plain words. Hornhoof splits it between departments of AI agents, runs them on everyone's plans and computers, has agents of different makers check each other's work, and gives you the finished result.
 
 Open source, on your own machines, no sign-up.
 
@@ -76,6 +72,18 @@ Works with **Claude Code**, **Codex** (ChatGPT plans), **Kimi Code**, the **GLM 
 
 ![An employee's terminal](.github/assets/terminal.gif)
 
+## See the work live
+
+*Who works, who waits and who stands idle, right now.*
+
+- **A work tree for every department.** Each agent is a line with its task, and each state has its own color: working, waiting for another task, waiting for a person, standing idle. Work that is handed in merges into the turn's branch before your eyes.
+- **The speed of every turn.** How long each agent worked, waited and stood idle, and every wait with since when, so you see where the time goes.
+- **One click to the agent.** Any line opens the agent's card or its live terminal.
+
+![The work tree of a department](.github/assets/tree.gif)
+
+![Where the time of a turn goes](.github/assets/speed.gif)
+
 ## It gets better by itself
 
 Hornhoof does not stay the way you installed it. Every company has an Operations department whose job is to make the company work better in your own setup:
@@ -92,6 +100,7 @@ Hornhoof does not stay the way you installed it. Every company has an Operations
 | --- | --- |
 | Each of you pays for AI plans and uses them alone. | Everyone's plans work on the same goal. |
 | Twenty terminal tabs, and nobody knows who does what. | One map: every agent, what it is doing now, and its live terminal. |
+| You cannot tell which agent works and which one is stuck. | The work tree shows who works, who waits and who stands idle, live. |
 | A plan hits its limit and the work stops. | The task moves to the same role on another plan, or waits and goes on by itself. |
 | You read every change yourself. | Agents of other makers review it, then security, then the tests. You take the result. |
 | Spare computers sit idle. | They run the tests and the heavy jobs. |
