@@ -64,13 +64,18 @@ RUN set -e; ub=/opt/hornhoof/ub; mkdir -p $ub /opt/hornhoof/bin /opt/hornhoof/ru
   fetch unclebob/dryer $ub/dryer $DRYER_COMMIT; \
   fetch unclebob/mutator $ub/mutator $MUTATOR_COMMIT; \
   patch --directory=$ub/mutator --strip=1 < /tmp/hornhoof-quality/mutator-worker-modules.patch; \
+  patch --directory=$ub/mutator --strip=1 < /tmp/hornhoof-quality/mutator-outcomes.patch; \
+  patch --directory=$ub/crapper --strip=1 < /tmp/hornhoof-quality/crapper-coverage-report.patch; \
   for tool in crapper dryer mutator; do \
     python3 -m venv $ub/$tool/.venv; \
     $ub/$tool/.venv/bin/pip install --no-cache-dir $TREE_SITTER $([ $tool = mutator ] && echo $ub/crapper) $ub/$tool; \
     printf '#!/bin/sh\nexec %s "$@"\n' $ub/$tool/$tool > /opt/hornhoof/bin/$tool; chmod 755 /opt/hornhoof/bin/$tool; \
     /opt/hornhoof/bin/$tool --help > /dev/null; \
   done; \
+  $ub/crapper/.venv/bin/python /tmp/hornhoof-quality/test_crapper_coverage.py; \
+  $ub/mutator/.venv/bin/python /tmp/hornhoof-quality/test_crapper_coverage.py; \
   $ub/mutator/.venv/bin/python /tmp/hornhoof-quality/test_mutator_workers.py; \
+  $ub/mutator/.venv/bin/python /tmp/hornhoof-quality/test_mutator_outcomes.py; \
   $ub/crapper/.venv/bin/python /tmp/hornhoof-quality/test_part_paths.py CrapperPaths; \
   $ub/dryer/.venv/bin/python /tmp/hornhoof-quality/test_part_paths.py DryerPaths; \
   $ub/mutator/.venv/bin/python /tmp/hornhoof-quality/test_part_paths.py MutatorPaths; \

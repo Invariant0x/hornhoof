@@ -838,9 +838,12 @@ export const testRuns = pgTable(
     /* The department or product whose repository it clones; a removed one takes its repository along. */
     departmentId: uuid('department_id').references(() => departments.id, { onDelete: 'set null' }),
     kind: text('kind', { enum: RUN_KINDS }).notNull().default('tests'),
-    /* None: for tests the task's own branch, task-<number> or the one that starts with task-<number>-; for work no
-       repository, an empty folder. */
+    /* A test run's branch, its own or the one named. None: on a test run from before commits were pinned the task's own,
+       task-<number> or the one that starts with task-<number>-; for work no repository, an empty folder. */
     branch: text('branch'),
+    /* The one commit every part of a test run checks, read from its branch before any part goes out. None on a run of
+       work, or on a run from before commits were pinned. */
+    commitSha: text('commit_sha'),
     command: text('command').notNull(),
     /* The task's files a part of work takes in, by name. */
     files: jsonb('files').$type<string[]>().notNull().default([]),
@@ -880,7 +883,7 @@ export const testParts = pgTable(
     machineName: text('machine_name'),
     /* Its assigned physical computer, kept through disconnects and server restarts. Null on older parts. */
     computer: text('computer'),
-    /* The commit it tested, the command's exit code, and why it ended when that was not the tests themselves. */
+    /* The commit its node says it tested, the command's exit code, and why it ended when that was not the tests themselves. */
     commit: text('commit'),
     exitCode: integer('exit_code'),
     error: text('error'),

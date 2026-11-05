@@ -1,5 +1,5 @@
 {
-  "id": "7b03cf87-ac73-40d1-b698-18b4709cd8b9",
+  "id": "42d6bbf7-54a2-4391-a9f7-9556d30e6783",
   "prevId": "33ea30e7-867a-4100-aaee-b5ded26b0e5d",
   "version": "7",
   "dialect": "postgresql",
@@ -741,129 +741,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.approval_policies": {
-      "name": "approval_policies",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "company_id": {
-          "name": "company_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "department_id": {
-          "name": "department_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "channel": {
-          "name": "channel",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "mode": {
-          "name": "mode",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "limit_amount": {
-          "name": "limit_amount",
-          "type": "double precision",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "limit_unit": {
-          "name": "limit_unit",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "updated_by": {
-          "name": "updated_by",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "approval_policies_company_id_companies_id_fk": {
-          "name": "approval_policies_company_id_companies_id_fk",
-          "tableFrom": "approval_policies",
-          "tableTo": "companies",
-          "columnsFrom": [
-            "company_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "approval_policies_department_id_departments_id_fk": {
-          "name": "approval_policies_department_id_departments_id_fk",
-          "tableFrom": "approval_policies",
-          "tableTo": "departments",
-          "columnsFrom": [
-            "department_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "approval_policies_updated_by_people_id_fk": {
-          "name": "approval_policies_updated_by_people_id_fk",
-          "tableFrom": "approval_policies",
-          "tableTo": "people",
-          "columnsFrom": [
-            "updated_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "approval_policies_channel": {
-          "name": "approval_policies_channel",
-          "nullsNotDistinct": false,
-          "columns": [
-            "department_id",
-            "channel"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "approval_policies_limit": {
-          "name": "approval_policies_limit",
-          "value": "(\"approval_policies\".\"mode\" = 'within_limits') = (\"approval_policies\".\"limit_amount\" IS NOT NULL)"
-        }
-      },
-      "isRLSEnabled": false
-    },
     "public.attachments": {
       "name": "attachments",
       "schema": "",
@@ -1283,12 +1160,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "owner_person_id": {
-          "name": "owner_person_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -1297,23 +1168,7 @@
           "default": "now()"
         }
       },
-      "indexes": {
-        "departments_owner_person_id": {
-          "name": "departments_owner_person_id",
-          "columns": [
-            {
-              "expression": "owner_person_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
+      "indexes": {},
       "foreignKeys": {
         "departments_company_id_companies_id_fk": {
           "name": "departments_company_id_companies_id_fk",
@@ -1334,19 +1189,6 @@
           "tableTo": "departments",
           "columnsFrom": [
             "parent_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "departments_owner_person_id_people_id_fk": {
-          "name": "departments_owner_person_id_people_id_fk",
-          "tableFrom": "departments",
-          "tableTo": "people",
-          "columnsFrom": [
-            "owner_person_id"
           ],
           "columnsTo": [
             "id"
@@ -4942,24 +4784,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "approval_channel": {
-          "name": "approval_channel",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "approval_kind": {
-          "name": "approval_kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "approval_amount": {
-          "name": "approval_amount",
-          "type": "double precision",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -4986,34 +4810,6 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "requests_approved_kinds": {
-          "name": "requests_approved_kinds",
-          "columns": [
-            {
-              "expression": "company_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "approval_channel",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "approval_kind",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"requests\".\"status\" = 'approved' AND \"requests\".\"approval_channel\" IS NOT NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -5105,7 +4901,7 @@
       "checkConstraints": {
         "requests_approval_commit": {
           "name": "requests_approval_commit",
-          "value": "\"requests\".\"kind\" <> 'approval' OR \"requests\".\"commit\" IS NOT NULL OR \"requests\".\"approval_channel\" IS NOT NULL"
+          "value": "\"requests\".\"kind\" <> 'approval' OR \"requests\".\"commit\" IS NOT NULL"
         }
       },
       "isRLSEnabled": false
@@ -6293,6 +6089,12 @@
         },
         "branch": {
           "name": "branch",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "commit_sha": {
+          "name": "commit_sha",
           "type": "text",
           "primaryKey": false,
           "notNull": false

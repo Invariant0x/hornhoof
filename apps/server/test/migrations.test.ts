@@ -20,7 +20,7 @@ async function migrate(db: PgliteDatabase, config: MigrationConfig): Promise<voi
 }
 
 describe('department owner and approval policy migration', () => {
-  const FORWARD = '0060_limits_freshness';
+  const FORWARD = '0061_test_run_commit';
 
   it('leaves every department without an owner and every company without rules, with nobody given anything', async () => {
     const client = new PGlite();

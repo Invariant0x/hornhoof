@@ -18,7 +18,7 @@ A product's repository goes to the agents of that product, instead of the depart
 
 Each agent's turn carries it to the machine that runs the agent. So it lands on the machines of whoever's subscriptions serve the department. Give it a fine-grained token for this one repository.
 
-Test runs take it along too. [Tests and heavy work on free machines](free-machines.md#where-does-the-repository-token-go-during-a-test-run) says where.
+Test runs take it along too. [Tests and heavy work on free machines](free-machines.md#where-does-the-repository-token-go-during-a-test-run) says where. The server uses it as well, to read from the repository which commit a branch is at.
 
 ## Whose name goes on the commits?
 
