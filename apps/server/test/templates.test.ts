@@ -707,6 +707,9 @@ describe('templates', () => {
         expect(templates.roles.get(roleId)!.skills.find(s => s.id === 'dev-frontend-ui')?.on, roleId).toBe(true);
       }
       expect(failedRuleIds(FRONTEND_UI_RULES, uiBody())).toEqual([]);
+      const browserCheck = templates.skills.get('dev-browser-check')!.body;
+      expect(browserCheck).toMatch(/longest[\s\S]*shortest[\s\S]*shipped/i);
+      expect(browserCheck).toMatch(/Chromium[\s\S]*Firefox[\s\S]*WebKit/);
       const agentsDoc = readFileSync(join(DIR, '../AGENTS.md'), 'utf8');
       const contributingDoc = readFileSync(join(DIR, '../CONTRIBUTING.md'), 'utf8');
       for (const doc of [agentsDoc, contributingDoc]) {
@@ -714,6 +717,9 @@ describe('templates', () => {
         expect(doc).toContain('apps/web/src/i18n/index.tsx');
         expect(doc).toMatch(/longest[\s\S]*shortest|shortest[\s\S]*longest/i);
         expect(doc).toMatch(/whole group|one group/i);
+        expect(doc).toMatch(/explicit[\s\S]*browser default/i);
+        expect(doc).toMatch(/scrollbar space/i);
+        expect(doc).toMatch(/Chromium[\s\S]*Firefox[\s\S]*WebKit/);
         expect(doc).not.toMatch(/Add screenshots in English and Russian/);
       }
       expect(agentsDoc).toContain('CONTRIBUTING.md#interface-panels-and-language-checks');
@@ -746,6 +752,15 @@ describe('templates', () => {
       );
       expect(failedRuleIds(FRONTEND_UI_RULES, `${base}\nFollow Hornhoof's .notebook and theme.css rules in every company.`)).toContain(
         'project-reference-without-company-lockin',
+      );
+      expect(failedRuleIds(FRONTEND_UI_RULES, `${base}\nRely on browser default geometry and padding for icon buttons.`)).toContain(
+        'explicit-component-geometry-and-scrollbar-space',
+      );
+      expect(failedRuleIds(FRONTEND_UI_RULES, `${base}\nAssume overlay scrollbars instead of reserving scrollbar space in scrollable panels.`)).toContain(
+        'explicit-component-geometry-and-scrollbar-space',
+      );
+      expect(failedRuleIds(FRONTEND_UI_RULES, `${base}\nCount a single browser engine run as cross-engine verification.`)).toContain(
+        'three-browser-engines-check',
       );
     });
   });
@@ -917,6 +932,22 @@ const FRONTEND_UI_RULES: { id: string; holds: (text: string) => boolean }[] = [
     holds: text =>
       /\brepository\b[\s\S]*\b(?:style book|design reference|UI reference)\b/i.test(text) &&
       !/hornhoof|\.notebook|\.side-panel|theme\.css|\b(?:Russian|English)\b/i.test(text),
+  },
+  {
+    id: 'explicit-component-geometry-and-scrollbar-space',
+    holds: text =>
+      /\breset\b[\s\S]*\bexplicit\b[\s\S]*\bbrowser default\b/i.test(text) &&
+      /\bscrollbar space\b[\s\S]*\bscrollable panels?\b[\s\S]*\boverlay\b/i.test(text) &&
+      /\b(?:never|do not|instead of)\b[^.!?]*\bbrowser default\b/i.test(text) &&
+      forbids(text, /\brely\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\bbrowser default\b/i) &&
+      forbids(text, /\bassum\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\boverlay scrollbars?\b/i),
+  },
+  {
+    id: 'three-browser-engines-check',
+    holds: text =>
+      /\bChromium\b[\s\S]*\bFirefox\b[\s\S]*\bWebKit\b/.test(text) &&
+      /\b(?:never|do not|instead of)\b[^.!?]*\b(?:single|one) browser engine\b/i.test(text) &&
+      forbids(text, /\b(?:claim|count)\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\b(?:single|one) browser engine\b[^.!?;,]*\bas\b[^.!?;,]*\bcross-engine\b/i),
   },
 ];
 
