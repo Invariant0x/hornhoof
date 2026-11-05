@@ -11,7 +11,8 @@ import { repoAt, TEST_MEMORY_GB } from '../departments/repository.js';
 import { BUILTIN, nodeIdentity, type NodeIdentity } from '../nodes/hub.js';
 import { liveNode } from '../nodes/nodes.js';
 import { onTask } from '../tasks/attachments.js';
-import { CLOSED, refuse, type Task, type Wake } from '../tasks/engine.js';
+import { CLOSED, published, refuse, type Task, type Tx, type Wake } from '../tasks/engine.js';
+import { endWaitForRun } from '../tasks/external-wait.js';
 import { keepWakes } from '../tasks/outbox.js';
 import { taskByRef } from '../tasks/views.js';
 import { wakeAll } from '../tasks/wake.js';
@@ -58,6 +59,9 @@ const ofNode = (id: NodeIdentity): SQL => (id.kind === 'builtin' ? eq(testParts.
 const named = (run: Pick<Run, 'kind' | 'number'>) => `${run.kind === 'work' ? 'Work run' : 'Test run'} ${run.number}`;
 const stateOf = (run: Pick<Run, 'kind'>, status: string) => (run.kind === 'work' && status === 'passed' ? 'done' : status);
 const toolsOf = (kind: RunKind) => (kind === 'work' ? { state: 'work_run', stop: 'stop_work' } : { state: 'test_run', stop: 'stop_tests' });
+
+/* Where an agent reads a run again, part by part. */
+const readAgain = (run: Pick<Run, 'kind' | 'number'>) => `${toolsOf(run.kind).state} ${run.number} shows it part by part.`;
 
 /* The files of a run on its task: each part's log, and what a part of work made. */
 export const logName = (run: Pick<Run, 'kind' | 'number'>, part: number) => `${run.kind}-${run.number}-${part}.log`;
@@ -146,6 +150,7 @@ function account(run: Run, task: Pick<Task, 'number'>, parts: Part[], files: Set
   const made = [...files].filter(n => !logs.includes(n)).sort();
   if (made.length) lines.push('', `What it made is on #${task.number}: ${made.join(', ')}. Get a file with hh-fetch ${task.number} <name>.`);
   if (logs.length) lines.push('', `Each part's full log is on #${task.number}: hh-fetch ${task.number} ${logs[0]}${logs.length > 1 ? `, and so on up to ${logs.at(-1)}` : ''}.`);
+  lines.push('', readAgain(run));
   return lines.join('\n');
 }
 
@@ -339,13 +344,33 @@ export function pumpTests(ctx: Ctx): Promise<void> {
   return next;
 }
 
-/* A run whose parts all ended ends with them, and its agent hears how it went on its task, unless the task is closed. */
+type RunEnd = { wakes: Wake[]; moved: Task | null };
+
+/* What the end of a run means for its task, in the one place every way a run ends goes through and in the write that ends
+   it: the wait of the one who started it is over, and that one hears of it once. always: tell it even with no wait to end.
+   Nobody hears of a run on a closed task. */
+async function tellEnd(tx: Tx, run: Run, task: Task, text: string, always: boolean): Promise<RunEnd> {
+  if (CLOSED.includes(task.status)) return { wakes: [], moved: null };
+  const waited = await endWaitForRun(tx, task.id, run.agentId, named(run));
+  if (!always && !waited) return { wakes: [], moved: null };
+  const wakes: Wake[] = [{ agentId: run.agentId, taskId: run.taskId, why: run.kind, text }];
+  await keepWakes(tx, run.companyId, wakes);
+  return { wakes, moved: waited ? task : null };
+}
+
+/* What the write that ended a run kept, once it is kept. */
+async function told(ctx: Ctx, end: RunEnd): Promise<void> {
+  if (end.moved) published(ctx, end.moved);
+  await wakeAll(ctx, end.wakes);
+}
+
+/* A run whose parts all ended ends with them, and its agent hears how it went on its task. */
 async function settleRun(ctx: Ctx, runId: string): Promise<void> {
   const { db } = ctx;
   const parts = await db.select().from(testParts).where(eq(testParts.runId, runId)).orderBy(asc(testParts.part));
   if (!parts.length || parts.some(p => p.status === 'queued' || p.status === 'running')) return;
   const status = parts.every(p => p.status === 'passed') ? 'passed' : 'failed';
-  const wake = await db.transaction(async tx => {
+  const end = await db.transaction(async tx => {
     const [run] = await tx
       .update(testRuns)
       .set({ status, finishedAt: new Date() })
@@ -353,13 +378,11 @@ async function settleRun(ctx: Ctx, runId: string): Promise<void> {
       .returning();
     if (!run) return null;
     const [task] = await tx.select().from(tasks).where(eq(tasks.id, run.taskId));
-    if (!task || CLOSED.includes(task.status)) return null;
+    if (!task) return null;
     const files = await tx.select({ name: attachments.name }).from(attachments).where(and(eq(attachments.taskId, run.taskId), filesOf(run)));
-    const w: Wake = { agentId: run.agentId, taskId: run.taskId, why: run.kind, text: account(run, task, parts, new Set(files.map(l => l.name!))) };
-    await keepWakes(tx, run.companyId, [w]);
-    return w;
+    return tellEnd(tx, run, task, account(run, task, parts, new Set(files.map(l => l.name!))), true);
   });
-  if (wake) await wakeAll(ctx, [wake]);
+  if (end) await told(ctx, end);
 }
 
 /* Parts that end without a word from their node, and the runs they finish. */
@@ -645,12 +668,13 @@ export async function runState(ctx: Ctx, job: ToolJob, number: number, kind: Run
 }
 
 /* Stops a run: its waiting parts end here, its running ones on their nodes too. Its agent hears of it when another one
-   stopped it. */
+   stopped it, or when it waits on the run. */
 export async function stopRun(ctx: Ctx, job: ToolJob, number: number, kind: RunKind = 'tests'): Promise<string> {
   const { run, task } = await runOf(ctx, job, number, kind);
   if (run.status !== 'running') throw refuse(409, 'task_invalid', `${named(run)} ${run.status === 'stopped' ? 'is stopped' : stateOf(run, run.status) === 'done' ? 'is done' : run.status} already.`);
   const other = run.agentId !== job.agentId;
   const [me] = other ? await ctx.db.select({ name: agents.name }).from(agents).where(eq(agents.id, job.agentId)) : [];
+  const stopper = other ? (me?.name ?? 'another agent') : 'you';
   const now = new Date();
   const stopped = await ctx.db.transaction(async tx => {
     const [row] = await tx
@@ -664,16 +688,14 @@ export async function stopRun(ctx: Ctx, job: ToolJob, number: number, kind: RunK
       .set({ status: 'stopped', finishedAt: now })
       .where(and(eq(testParts.runId, run.id), inArray(testParts.status, ['queued', 'running'])))
       .returning();
-    const wakes: Wake[] = other && !CLOSED.includes(task.status) ? [{ agentId: run.agentId, taskId: run.taskId, why: run.kind, text: `${named(run)} was stopped by ${me?.name ?? 'another agent'}.` }] : [];
-    await keepWakes(tx, run.companyId, wakes);
-    return { parts, wakes };
+    return { parts, end: await tellEnd(tx, row, task, `${named(run)} was stopped by ${stopper}. ${readAgain(run)}`, other) };
   });
   if (!stopped) throw refuse(409, 'task_invalid', `${named(run)} ended meanwhile.`);
   for (const p of stopped.parts) {
     const node = nodeOf(p);
     if (node) ctx.hub.send(node, { type: 'tests.cancel', partId: p.id });
   }
-  await wakeAll(ctx, stopped.wakes);
+  await told(ctx, stopped.end);
   await pumpTests(ctx);
   return `${named(run)} is stopped.`;
 }

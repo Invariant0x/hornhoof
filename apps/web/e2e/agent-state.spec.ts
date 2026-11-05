@@ -16,10 +16,12 @@ const CARD: AgentCardView = {
   raw: '', instructions: { length: 0, max: 200_000 }, runsOn: [], changes: [], interrupted: [], canEdit: false, timer: null,
 };
 const program = (state: ProgramView['state'], since: number): ProgramView => ({ state, since, tool: null, screenAt: NOW, signAt: null, retry: null, reportedAt: NOW });
-const STATES: { name: string; program: ProgramView; alarm: TurnAlarm | null; en: string; ru: string; red: boolean }[] = [
+const STATES: { name: string; program: ProgramView | null; alarm: TurnAlarm | null; held?: Employee['held']; en: string; ru: string; red: boolean; calm?: boolean }[] = [
   { name: 'thinking', program: program('thinking', NOW - 12 * 60_000), alarm: null, en: 'thinking 12 min', ru: 'думает 12 мин', red: false },
   { name: 'quiet-sign', program: { ...program('thinking', NOW - 32 * 60_000), signAt: NOW - 31 * 60_000 }, alarm: null, en: 'thinking 32 min, no sign 31 min', ru: 'думает 32 мин, без признаков 31 мин', red: false },
   { name: 'alarm', program: program('thinking', NOW - 50 * 60_000), alarm: { reason: 'program_stalled', since: NOW - 34 * 60_000 }, en: 'program frozen 34 min', ru: 'программа замерла 34 мин', red: true },
+  { name: 'budget-hold', program: null, alarm: null, held: { reason: 'budget', since: new Date(NOW - 11 * 60_000).toISOString(), until: new Date(NOW + 65 * 60_000).toISOString() }, en: 'waiting: task share until 13:05', ru: 'ждет: доля тарифа на задачи до 13:05', red: false, calm: true },
+  { name: 'limit-hold', program: null, alarm: null, held: { reason: 'limit', since: new Date(NOW - 11 * 60_000).toISOString(), until: new Date(NOW + 65 * 60_000).toISOString() }, en: 'waiting: plan limit until 13:05', ru: 'ждет: лимит тарифа до 13:05', red: false, calm: true },
 ];
 
 function org(state: (typeof STATES)[number]): Org {
@@ -27,7 +29,7 @@ function org(state: (typeof STATES)[number]): Org {
     company: ME.company, orchestrator: null, agents: { total: 1, working: 1 }, people: [], serverNow: new Date(NOW).toISOString(),
     departments: [{
       id: 'd2', name: null, templateKey: 'development', roleCode: 'DEV', about: '', agents: { total: 1, working: 1 },
-      products: [], teams: [], people: [], employees: [{ ...BRUNO, program: state.program, alarm: state.alarm }],
+      products: [], teams: [], people: [], employees: [{ ...BRUNO, program: state.program, alarm: state.alarm, held: state.held ?? null }],
       roles: [{ id: 'DEV-ENG', title: ROLE, description: ROLE, kind: 'member', gate: null }],
     }],
   };
@@ -78,7 +80,7 @@ for (const lang of ['en', 'ru'] as const) {
           await expect(chip).toContainText(state[lang]);
           const line = card.getByText(state[lang], { exact: true });
           await expect(line).toBeVisible();
-          await expect(line).toHaveClass(state.red ? /alarm/ : /work/);
+          await expect(line).toHaveClass(state.red ? /alarm/ : state.calm ? /calm/ : /work/);
           if (state.red) await expect(line).toHaveCSS('background-color', theme === 'light' ? 'rgb(211, 47, 47)' : 'rgb(255, 107, 107)');
           expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
           await page.screenshot({ path: info.outputPath(`agent-${width}-${lang}-${theme}-${state.name}.png`) });

@@ -21,9 +21,11 @@ it.each([
   'wait_notices',
   'person_changes',
   'attachments',
+  'turn_snapshots',
+  'test_part_timings',
 ])('keeps %s writes behind the service API for both SQL roles', async table => {
   const run = await roles();
-  const column = table === 'program_operator_signals' ? 'agent_id' : 'id';
+  const column = { program_operator_signals: 'agent_id', turn_snapshots: 'turn_id', test_part_timings: 'part_id' }[table] ?? 'id';
   const writes = [
     `INSERT INTO ${table} (${column}) SELECT ${column} FROM ${table} WHERE false`,
     `UPDATE ${table} SET ${column} = ${column} WHERE false`,

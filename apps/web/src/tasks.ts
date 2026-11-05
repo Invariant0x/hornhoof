@@ -1,3 +1,4 @@
+import type { DepartmentPipeline } from '@hornhoof/protocol/pipeline-report';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import { useStream, type LiveMessage } from './live';
@@ -98,6 +99,19 @@ export function roleAfter(a: Pick<AgentRef, 'name' | 'role'>, language: keyof La
 }
 
 /* Only an open tree or Speed drawer keeps the department clock fresh. */
+/* A department's report of a turn, by default the open one or else the last that ran. A closed turn's numbers stay, so only a running one is asked again. */
+export function useDepartmentPipeline(departmentId: string, turn: number | null) {
+  const path = `/api/departments/${departmentId}/pipeline${turn === null ? '' : `?turn=${turn}`}`;
+  const result = useLive(path, (b: { report: DepartmentPipeline }) => b.report, () => false);
+  const running = result.data?.turn.source === 'live';
+  useEffect(() => {
+    if (!running) return;
+    const timer = setInterval(result.load, 60_000);
+    return () => clearInterval(timer);
+  }, [running, result.load]);
+  return { report: result.data, failure: result.failure, load: result.load };
+}
+
 export function useDepartmentTree(departmentId: string, on: boolean) {
   const result = useLive(on ? `/api/departments/${departmentId}/tree` : null, (b: { tree: DepartmentTree }) => b.tree,
     m => m.type === 'task' && (m.spot?.departmentId === departmentId || m.spot?.parentId === departmentId));

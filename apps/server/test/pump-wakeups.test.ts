@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { agentEvents, agents, jobs, subscriptions } from '../src/db/schema.js';
-import { pump } from '../src/modules/conversation/queue.js';
+import { agentState, pump } from '../src/modules/conversation/queue.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import { failureCompany } from './failure-company.js';
 import { statements } from './helpers.js';
@@ -30,7 +30,7 @@ async function line(plan: 'limit' | 'spent' | 'free' = 'limit') {
   const timer = vi.spyOn(globalThis, 'setTimeout');
   const delays = () => timer.mock.calls.map(([, ms]) => ms ?? 0);
   const planned = () => delays().filter(ms => ms > MIN);
-  return { ...c, waiting, delays, planned };
+  return { ...c, waiting, delays, planned, resetsAt };
 }
 
 const inAnHour = (ms: number | undefined) => {
@@ -99,5 +99,29 @@ describe('the line of an agent whose waiting turn may not go out now', () => {
     const retry = await c.waiting(new Date(Date.now() - 1000), { task: true });
     await pump(c.ctx, c.agent.id);
     expect(await c.jobOf(retry.id)).toMatchObject({ status: 'running' });
+  });
+
+  it.each([
+    { plan: 'spent' as const, reason: 'budget', text: 'share set for tasks' },
+    { plan: 'limit' as const, reason: 'limit', text: 'usage limit' },
+  ])('shows a $plan hold over ten minutes and tells Operations only once', async ({ plan, reason, text }) => {
+    const c = await line(plan);
+    const old = new Date(Date.now() - 11 * MIN);
+    const first = await c.waiting(new Date(Date.now() - 1000), { task: true });
+    await c.db.update(jobs).set({ createdAt: old }).where(eq(jobs.id, first.id));
+    await pump(c.ctx, c.agent.id);
+    expect(await agentState(c.ctx, c.agent.id)).toMatchObject({ held: { reason, since: old.toISOString(), until: c.resetsAt } });
+    expect(await c.turnsOf(c.watcher.id)).toHaveLength(1);
+    expect((await c.turnsOf(c.watcher.id))[0]!.prompt).toContain(text);
+    await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.agentId, c.watcher.id));
+
+    const second = await c.waiting(new Date(Date.now() - 1000), { task: true });
+    await c.db.update(jobs).set({ createdAt: old }).where(eq(jobs.id, second.id));
+    await c.db.update(jobs).set({ status: 'failed', error: 'cancelled', finishedAt: new Date() }).where(eq(jobs.id, first.id));
+    await pump(c.ctx, c.agent.id);
+    await pump(c.ctx, c.agent.id);
+    expect(await c.turnsOf(c.watcher.id)).toHaveLength(1);
+    expect(await c.jobOf(first.id)).toMatchObject({ status: 'failed', error: 'cancelled' });
+    expect(await c.jobOf(second.id)).toMatchObject({ status: 'queued' });
   });
 });

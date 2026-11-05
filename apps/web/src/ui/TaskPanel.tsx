@@ -79,6 +79,13 @@ const lineText = (t: Messages, e: TaskLogLine, when: (at: string) => string): st
 /* What waits for the person in this task. */
 type Waiting = { requests: WaitingRequest[]; onRequestsChanged: () => void; onOpenAgent: (id: string) => void };
 
+/* Its kind and risk class, as far as someone said them. */
+function WorkLabels({ task }: { task: TaskDetail }) {
+  const t = useT();
+  const labels = [task.workKind && t.tasks.workKinds[task.workKind], task.riskClass && t.tasks.riskLine(t.tasks.riskClasses[task.riskClass])].filter(Boolean);
+  return labels.length > 0 && <p className="muted tp-kind">{labels.join(', ')}</p>;
+}
+
 function ExternalTaskWait({ wait }: { wait: TaskDetail['externalWait'] }) {
   const t = useT();
   const { language } = useLanguage();
@@ -109,6 +116,7 @@ function TaskBody({ task, onOpen, onChanged, waiting }: { task: TaskDetail; onOp
       <header className="ac-head">
         <h3>{task.title}</h3>
         <p className="muted">{[placeName(t, org, task.department), task.product?.name, task.turn !== null ? t.tasks.turn(task.turn) : null].filter(Boolean).join(' / ')}</p>
+        <WorkLabels task={task} />
         <p className={`tstate ${task.status}`}>{t.tasks.states[task.status]}</p>
         <ExternalTaskWait wait={task.externalWait} />
         {task.createdBy && <p className="muted">{t.tasks.givenBy(task.createdBy.name)}</p>}

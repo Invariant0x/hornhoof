@@ -27,6 +27,8 @@ export type TaskLine = {
   /* The numbers of the tasks it comes after that are not done yet: until they are, it waits. */
   waitsFor: number[];
   externalWait?: Task['externalWait'];
+  workKind: Task['workKind'];
+  riskClass: Task['riskClass'];
   createdAt: string;
   updatedAt: string;
 };
@@ -114,6 +116,8 @@ const line = (t: Task, n: Names, sees: (t: Task) => boolean): TaskLine => ({
   parentId: t.parentId,
   waitsFor: n.after(t).filter(a => a.status !== 'done' && sees(a)).map(a => a.number),
   externalWait: t.externalWait,
+  workKind: t.workKind,
+  riskClass: t.riskClass,
   createdAt: t.createdAt.toISOString(),
   updatedAt: t.updatedAt.toISOString(),
 });

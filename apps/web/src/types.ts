@@ -3,6 +3,7 @@ import type { ExternalWait } from '@hornhoof/protocol/waits';
 import type { Notification } from '@hornhoof/protocol';
 import type { ConnectionEnd, FailureKind, Limits, MachineDrain, ModelOption, NodeDisconnectCause, NodeLoad, NodeReconnect, ProgramInfo, ProviderId, TemplateKey } from '@hornhoof/protocol';
 import type { RoleEffort } from '@hornhoof/protocol/efforts';
+import type { RiskClass, WorkKind } from '@hornhoof/protocol/pipeline-report';
 import type { ProgramRetry, TurnAlarm, TurnProgram, TurnRetry, WorkLine } from '@hornhoof/protocol/map';
 
 export type { FailureKind, Limits, ModelOption, ProgramRetry, ProviderId, TemplateKey, TurnAlarm, TurnRetry, WorkLine };
@@ -129,6 +130,8 @@ export type Employee = {
   program: ProgramView | null;
   /* The server's alarm about its running turn, or null. */
   alarm: TurnAlarm | null;
+  /* The oldest turn its plan holds, and why. */
+  held?: { reason: 'limit' | 'budget'; since: string; until: string } | null;
   /* Hornhoof's waiting retry after a failed turn, or null. */
   retry: TurnRetry | null;
   /* Its latest failed turn, or null. */
@@ -184,7 +187,7 @@ export type Repository = { url: string; branch: string; tokenLast4: string | nul
 export type Org = {
   company: Company;
   /* limitUntil: his plan is at its limit until then, and he waits for the reset. */
-  orchestrator: { id: string; name: string; model: string; effort: string | null; subscription: SubView | null; machine?: Machine | null; context: number | null; limitUntil?: string | null; program: ProgramView | null; alarm: TurnAlarm | null; retry: TurnRetry | null; failure: TurnFailure | null } | null;
+  orchestrator: { id: string; name: string; model: string; effort: string | null; subscription: SubView | null; machine?: Machine | null; context: number | null; limitUntil?: string | null; held?: { reason: 'limit' | 'budget'; since: string; until: string } | null; program: ProgramView | null; alarm: TurnAlarm | null; retry: TurnRetry | null; failure: TurnFailure | null } | null;
   agents: { total: number; working: number };
   /* People who see the whole company, and deputies whose reach spans more than one top-level department. */
   people: (PersonView & { deputy?: boolean; departments?: string[] })[];
@@ -201,8 +204,10 @@ export type OrchestratorState = {
   ready: boolean;
   /* The plan is at its limit until then; its turns wait, and people may still write. */
   limitUntil?: string | null;
-  /* The plan used the share set for tasks until then; task turns wait, people's messages still go. */
+  /* The plan used the share set for tasks until then; workers' task turns wait, people's messages still go. */
   budgetUntil?: string | null;
+  /* The oldest turn its plan holds, and why. */
+  held?: { reason: 'limit' | 'budget'; since: string; until: string } | null;
   /* Its machine gets ready for an update; new turns wait for it, and people may still write. */
   machineDrain?: MachineDrain | null;
   reason: 'no_subscription' | 'waiting_machine' | 'needs_login' | 'needs_setup' | 'node_outdated' | 'machine_offline' | null;
@@ -244,6 +249,7 @@ export type AgentCardView = {
   state: AgentState;
   program?: ProgramView | null;
   alarm?: TurnAlarm | null;
+  held?: { reason: 'limit' | 'budget'; since: string; until: string } | null;
   retry: TurnRetry | null;
   failure: TurnFailure | null;
   obsolete?: TurnObsolete | null;
@@ -336,6 +342,9 @@ export type TaskLine = {
   brief: string;
   status: TaskStatus;
   externalWait?: ExternalWait | null;
+  /* What kind of work it is and what a mistake in it would cost, when someone said so. An older server sends neither. */
+  workKind?: WorkKind | null;
+  riskClass?: RiskClass | null;
   department: TaskPlace;
   product: TaskPlace;
   assignee: AgentRef | null;

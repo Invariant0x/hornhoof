@@ -4,7 +4,7 @@ import { and, eq, inArray, isNotNull, lte, ne, notInArray, sql } from 'drizzle-o
 import type { Ctx } from '../../app.js';
 import { agentEvents, agents, jobs, pendingWakes, tasks, type ExternalWait } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { loadTask, move, refuse, type Moved, type Task, type Wake } from './engine.js';
+import { loadTask, move, note, refuse, type Moved, type Task, type Tx, type Wake } from './engine.js';
 import { wakeAll } from './wake.js';
 import { agentState, conversationOf, enqueueTurn, insertOrDeliverTurn, onAgent, pump, type TurnMessage } from '../conversation/queue.js';
 import { withInputLock } from '../conversation/decision-context.js';
@@ -45,14 +45,14 @@ export async function waitFor(ctx: Ctx, agentId: string, taskId: string, input: 
   return moved;
 }
 
-/* Whether words on the task wait for its holder: in a turn, or still in the outbox. */
+/* Whether words on the task wait for its holder, the end of a run among them: in a turn, or still in the outbox. */
 async function unreadMessage(ctx: Ctx, agentId: string, taskId: string): Promise<boolean> {
   const [message] = await ctx.db.select({ id: jobs.id }).from(jobs).innerJoin(agentEvents, eq(agentEvents.jobId, jobs.id)).where(and(
     eq(jobs.agentId, agentId), eq(jobs.taskId, taskId), eq(jobs.status, 'queued'), eq(agentEvents.kind, 'message'),
-    sql`${agentEvents.data}->'taskWake'->>'why' in ('message', 'comment', 'unblocked')`,
+    sql`${agentEvents.data}->'taskWake'->>'why' in ('message', 'comment', 'unblocked', 'tests', 'work')`,
   )).limit(1);
   const [comment] = await ctx.db.select({ id: pendingWakes.id }).from(pendingWakes).where(and(
-    eq(pendingWakes.agentId, agentId), eq(pendingWakes.taskId, taskId), inArray(pendingWakes.why, ['comment', 'unblocked']),
+    eq(pendingWakes.agentId, agentId), eq(pendingWakes.taskId, taskId), inArray(pendingWakes.why, ['comment', 'unblocked', 'tests', 'work']),
   )).limit(1);
   return Boolean(message || comment);
 }
@@ -183,6 +183,18 @@ export async function expireWait(ctx: Ctx, task: Task, unavailable?: string): Pr
     throw error;
   }
   await wakeAll(ctx, wakes);
+  return true;
+}
+
+/* A run ended, and the one who started it waits on its task: the wait goes in the write that ends the run and keeps its
+   wake, so a crash cannot leave one without the other. It keeps the wakes other moves kept, which are other news. Someone
+   else's wait stays: they wait for something else. */
+export async function endWaitForRun(tx: Tx, taskId: string, agentId: string, run: string): Promise<boolean> {
+  const [task] = await tx.select().from(tasks).where(eq(tasks.id, taskId)).for('update');
+  if (!task?.externalWait || task.assigneeAgentId !== agentId) return false;
+  await tx.update(tasks).set({ externalWait: null, silent: 0, version: task.version + 1, updatedAt: new Date() }).where(eq(tasks.id, taskId));
+  const { reason } = task.externalWait;
+  await note(tx, task, { kind: 'updated', actor: { agentId }, text: `${run} ended, and with it the wait for "${reason}".`, data: { externalWait: null, reason } });
   return true;
 }
 

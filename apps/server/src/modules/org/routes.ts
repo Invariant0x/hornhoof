@@ -7,7 +7,7 @@ import { personColumns, requirePerson } from '../../auth/session.js';
 import { agents, companies, departments, people, personAccess, subscriptions, teams, turns } from '../../db/schema.js';
 import { employeeOrder } from '../agents/order.js';
 import { agentWork } from '../agents/work.js';
-import { limitUntil, programNode } from '../conversation/queue.js';
+import { limitUntil, planHeld, planHoldView, programNode } from '../conversation/queue.js';
 import { repoView } from '../departments/repository.js';
 import { deptName } from '../departments/templates.js';
 import { CHANNEL_MS, type Endpoint } from '../events/bus.js';
@@ -70,7 +70,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const [company] = await db.select({ id: companies.id, name: companies.name }).from(companies).where(eq(companies.id, me.companyId));
     const allAgents = await db.select().from(agents).where(and(eq(agents.companyId, me.companyId), isNull(agents.removedAt)));
-    const subs = new Map((await db.select({ id: subscriptions.id, provider: subscriptions.provider, models: subscriptions.models, limits: subscriptions.limits, limitsUpdatedAt: subscriptions.limitsUpdatedAt }).from(subscriptions).where(eq(subscriptions.companyId, me.companyId))).map(s => [s.id, s]));
+    const subs = new Map((await db.select({ id: subscriptions.id, provider: subscriptions.provider, models: subscriptions.models, limits: subscriptions.limits, limitsUpdatedAt: subscriptions.limitsUpdatedAt, budget: subscriptions.budget }).from(subscriptions).where(eq(subscriptions.companyId, me.companyId))).map(s => [s.id, s]));
     const orchestrator = allAgents.find(a => a.kind === 'orchestrator');
     const active = await db.select(personColumns).from(people).where(and(eq(people.companyId, me.companyId), ne(people.status, 'disabled'))).orderBy(asc(people.createdAt));
     const depts = await db.select().from(departments).where(eq(departments.companyId, me.companyId)).orderBy(asc(departments.position), asc(departments.createdAt));
@@ -122,6 +122,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
       return { total: mine.length, working: mine.filter(id => busy.has(id)).length };
     };
     const failures = await agentFailureStates(ctx, me.companyId, allAgents.map(a => a.id));
+    const holds = new Map(await Promise.all(allAgents.map(async a => [a.id, planHoldView(await planHeld(ctx, a, subs.get(a.subscriptionId!)))] as const)));
     const employeesOf = (dept: (typeof depts)[number]) =>
       allAgents
         .filter(a => a.departmentId === dept.id && a.kind !== 'orchestrator')
@@ -145,6 +146,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
             state: busy.has(a.id) ? 'working' : a.subscriptionId ? 'sleeping' : 'needs_subscription',
             ...agentProgramState(ctx, run, canReach(reach, spotAmong(a, depts))),
             ...(canReach(reach, spotAmong(a, depts)) ? failures.get(a.id)! : { retry: null, failure: null, obsolete: null }),
+            held: holds.get(a.id)!,
             context: a.contextUsed,
             status: now.status,
             on: !a.switchedOffAt,
@@ -202,6 +204,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
         ...(reach.whole ? failures.get(orchestrator.id)! : { retry: null, failure: null, obsolete: null }),
         /* His plan is at its limit until then: he waits for the reset on it, and the CEO decides whether he moves. */
         limitUntil: limitOfPlan(orchestrator.subscriptionId ? subs.get(orchestrator.subscriptionId) : undefined),
+        held: holds.get(orchestrator.id)!,
         subscription: orchestrator.subscriptionId ? await subView(db, node => hub.isOnline(node), orchestrator.subscriptionId, me) : null,
         machine: await machineOf(db, (await programNode(ctx, orchestrator.id))?.node ?? null),
       },

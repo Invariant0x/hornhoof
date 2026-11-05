@@ -8,7 +8,7 @@ import { eq } from 'drizzle-orm';
 import { drizzle, PglitePreparedQuery, type PgliteDatabase } from 'drizzle-orm/pglite';
 import WebSocket from 'ws';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
-import { inject, onTestFinished, vi } from 'vitest';
+import { inject, onTestFinished, TestRunner, vi } from 'vitest';
 import { buildApp, type Deps } from '../src/app.js';
 import type { CommitReader } from '../src/modules/testruns/refs.js';
 import { loadConfig, type Config } from '../src/config.js';
@@ -55,10 +55,21 @@ export function statements(): { sql: string; params: unknown[] }[] {
   return seen;
 }
 
+/* What a test spends on its database and app is no test: the report of test times shows it apart. */
+async function timed<T>(phase: 'setupMs' | 'teardownMs', work: () => Promise<T>): Promise<T> {
+  const from = performance.now();
+  try {
+    return await work();
+  } finally {
+    const meta = TestRunner.getCurrentTest()?.meta as { setupMs?: number; teardownMs?: number } | undefined;
+    if (meta) meta[phase] = (meta[phase] ?? 0) + performance.now() - from;
+  }
+}
+
 /* Each PGlite is a whole Postgres in WASM memory, so it closes when its test ends. Call these inside a test. */
 export async function createTestDb(): Promise<TestDb> {
-  const { client, db } = await openTestDb();
-  onTestFinished(() => client.close());
+  const { client, db } = await timed('setupMs', openTestDb);
+  onTestFinished(() => timed('teardownMs', () => client.close()));
   return db;
 }
 
@@ -82,8 +93,8 @@ function agentSqlOn(client: PGlite): AgentSql {
 }
 
 export async function testApp(env: NodeJS.ProcessEnv = {}, logger?: Deps['logger']): Promise<{ app: FastifyInstance; db: Db; config: Config }> {
-  const { client } = await openTestDb();
-  onTestFinished(() => client.close());
+  const { client } = await timed('setupMs', openTestDb);
+  onTestFinished(() => timed('teardownMs', () => client.close()));
   return appOn(client, env, logger);
 }
 
@@ -97,8 +108,8 @@ export async function appOn(client: PGlite, env: NodeJS.ProcessEnv = {}, logger?
   const db = drizzle(client, { schema }) as unknown as Db;
   /* Tests never reach the real registry unless they ask. */
   const config = loadConfig({ HORNHOOF_SECRET: TEST_SECRET, UPDATE_CHECK_MS: '0', ...env });
-  const app = await buildApp({ db, config, logger, agentSql: agentSqlOn(client), readCommit: atTestCommit });
-  onTestFinished(() => app.close());
+  const app = await timed('setupMs', () => buildApp({ db, config, logger, agentSql: agentSqlOn(client), readCommit: atTestCommit }));
+  onTestFinished(() => timed('teardownMs', () => app.close()));
   return { app, db, config };
 }
 

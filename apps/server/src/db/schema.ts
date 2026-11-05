@@ -1,5 +1,5 @@
 import type { ExternalWait } from '@hornhoof/protocol/waits';
-import { APPROVAL_CHANNELS, APPROVAL_MODES, COMPANY_TEMPLATE_KEYS, CONNECTION_ENDS, CRED_KINDS, MACHINE_KINDS, RUN_KINDS, TEMPLATE_KEYS, type Account, type Boot, type Failure, type Limits, type ModelOption, type NodeExit, type NodeReconnect } from '@hornhoof/protocol';
+import { APPROVAL_CHANNELS, APPROVAL_MODES, COMPANY_TEMPLATE_KEYS, CONNECTION_ENDS, CRED_KINDS, MACHINE_KINDS, RISK_CLASSES, RUN_KINDS, TEMPLATE_KEYS, WORK_KINDS, type Account, type Boot, type Failure, type Limits, type ModelOption, type NodeExit, type NodeReconnect, type TestFileTiming, type TestPackageTiming, type TurnFacts } from '@hornhoof/protocol';
 import type { OperatorError, OperatorQuestion, OperatorReason } from '@hornhoof/protocol/program-operator';
 import type { MessageParty } from '../modules/events/parties.js';
 import { sql } from 'drizzle-orm';
@@ -513,6 +513,20 @@ export const turns = pgTable(
   t => [unique('turns_company_number').on(t.companyId, t.number), uniqueIndex('turns_one_open').on(t.companyId).where(sql`status = 'open'`)],
 );
 
+/* A turn's pipeline facts: kept as it closed, or rebuilt from its events for a turn that closed before this was kept. */
+export const TURN_SNAPSHOT_SOURCES = ['closed', 'rebuilt'] as const;
+export const turnSnapshots = pgTable(
+  'turn_snapshots',
+  {
+    turnId: uuid('turn_id').primaryKey().references(() => turns.id),
+    companyId: companyId(),
+    source: text('source', { enum: TURN_SNAPSHOT_SOURCES }).notNull(),
+    facts: jsonb('facts').$type<TurnFacts>().notNull(),
+    createdAt: createdAt(),
+  },
+  t => [index('turn_snapshots_company_id').on(t.companyId)],
+);
+
 export const TASK_STATUSES = ['planned', 'open', 'working', 'review', 'waiting', 'blocked', 'done', 'cancelled'] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 export type { ExternalWait } from '@hornhoof/protocol/waits';
@@ -549,6 +563,9 @@ export const tasks = pgTable(
     silent: integer('silent').notNull().default(0),
     /* Waiting for an external event, without changing who holds the task or its workflow stage. */
     externalWait: jsonb('external_wait').$type<ExternalWait>(),
+    /* What kind of work it is and what a mistake in it would cost, as whoever gave it out named them. */
+    workKind: text('work_kind', { enum: WORK_KINDS }),
+    riskClass: text('risk_class', { enum: RISK_CLASSES }),
     /* Grows with every move, so two moves that read the same task cannot both land. */
     version: integer('version').notNull().default(0),
     createdByPersonId: uuid('created_by_person_id').references(() => people.id),
@@ -572,6 +589,8 @@ export const tasks = pgTable(
     check('tasks_closed_at', sql`${t.status} NOT IN ('done', 'cancelled') OR ${t.closedAt} IS NOT NULL`),
     check('tasks_not_own_parent', sql`${t.parentId} IS NULL OR ${t.parentId} <> ${t.id}`),
     check('tasks_gates_lists', sql`jsonb_typeof(${t.gates}) = 'array' AND jsonb_typeof(${t.panel}) = 'array'`),
+    check('tasks_work_kind', sql`${t.workKind} IS NULL OR ${t.workKind} IN ('bug', 'known_behavior', 'unknown_path', 'legacy_code')`),
+    check('tasks_risk_class', sql`${t.riskClass} IS NULL OR ${t.riskClass} IN ('money', 'access', 'security', 'data', 'none')`),
   ],
 );
 
@@ -898,6 +917,20 @@ export const testParts = pgTable(
     finishedAt: timestamp('finished_at', { withTimezone: true }),
   },
   t => [unique('test_parts_run_part').on(t.runId, t.part), index('test_parts_status').on(t.status)],
+);
+
+/* What a part's log said of its test files, read once from the log on the task: empty when it said nothing. */
+export const testPartTimings = pgTable(
+  'test_part_timings',
+  {
+    partId: uuid('part_id').primaryKey().references(() => testParts.id, { onDelete: 'cascade' }),
+    companyId: companyId(),
+    runId: uuid('run_id').notNull().references(() => testRuns.id, { onDelete: 'cascade' }),
+    files: jsonb('files').$type<TestFileTiming[]>().notNull().default([]),
+    packages: jsonb('packages').$type<TestPackageTiming[]>().notNull().default([]),
+    createdAt: createdAt(),
+  },
+  t => [index('test_part_timings_run_id').on(t.runId)],
 );
 
 /* The company's notebook: short notes the orchestrator keeps across conversations, such as the CEO's decisions, rules
