@@ -1,6 +1,6 @@
 import type { ExternalWait } from '@hornhoof/protocol/waits';
 import { APPROVAL_CHANNELS, APPROVAL_MODES, COMPANY_TEMPLATE_KEYS, CONNECTION_ENDS, CRED_KINDS, MACHINE_KINDS, RISK_CLASSES, RUN_KINDS, TEMPLATE_KEYS, WORK_KINDS, type Account, type Boot, type Failure, type Limits, type ModelOption, type NodeExit, type NodeReconnect, type TestFileTiming, type TestPackageTiming, type TurnFacts } from '@hornhoof/protocol';
-import type { OperatorError, OperatorQuestion, OperatorReason } from '@hornhoof/protocol/program-operator';
+import type { OperatorError, OperatorInputLine, OperatorQuestion, OperatorReason } from '@hornhoof/protocol/program-operator';
 import type { MessageParty } from '../modules/events/parties.js';
 import { sql } from 'drizzle-orm';
 import { bigint, bigserial, boolean, check, customType, doublePrecision, index, integer, jsonb, pgTable, primaryKey, real, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
@@ -777,7 +777,7 @@ export const programDeliveries = pgTable('program_deliveries', {
   createdAt: createdAt(),
 }, t => [unique('program_deliveries_ordinal').on(t.agentId, t.ordinal), unique('program_deliveries_reference').on(t.agentId, t.reference), index('program_deliveries_job_id').on(t.jobId)]);
 
-export type OperatorCaseEvidence = { reason: OperatorReason; evidenceKey: string; deliveryId: string | null };
+export type OperatorCaseEvidence = { reason: OperatorReason; evidenceKey: string; deliveryId: string | null; input?: OperatorInputLine };
 export type OperatorCaseSnapshot = { token: string; generation: number; at: string; keysAllowed: boolean; state: string; cols: number; rows: number };
 
 /* One investigation per physical program; its original deadline never moves after a read or key. */

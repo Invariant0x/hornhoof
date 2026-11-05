@@ -20,7 +20,7 @@ import type { Tx } from '../tasks/engine.js';
 import { backOn } from '../tasks/wake.js';
 import { checkStaff, departmentOf, HireLine, requiredState, runsTier, servingSubscriptions, spotIn } from '../tools/staff.js';
 import { BuildItem, checkItems, inPlaces, isNew, type TeamChange } from '../tools/structure.js';
-import { linesToHire, type Present } from '../operations/ensure.js';
+import { linesToHire, tryPlaceOperator, type Present } from '../operations/ensure.js';
 import { approvalPolicyRoutes } from './approval-policy.js';
 import { hireEmployee, type Hired } from './hire.js';
 import { repoView } from './repository.js';
@@ -399,6 +399,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
       for (const line of lines) hired.push(await hireEmployee(ctx, tx, { companyId: me.companyId, departmentId: dept.id }, line, changedBy(me)));
       return { hired, present, agentId };
     }));
+    await tryPlaceOperator(ctx, me.companyId);
 
     const orchestrator = await orchestratorOf(ctx, me.companyId);
     const agentId = result.agentId ?? orchestrator?.id;

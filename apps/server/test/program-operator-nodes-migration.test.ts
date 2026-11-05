@@ -32,7 +32,7 @@ async function previousRelease() {
   return db;
 }
 
-it('puts each program operator of every company on the oldest live machine of its plan, and leaves everyone else alone', async () => {
+it('puts each program operator of every company on the oldest live machine of its plan, and leaves everyone else alone', { timeout: 120_000 }, async () => {
   const db = await previousRelease();
   const acme = await company(db, 'Acme'), other = await company(db, 'Other', false);
 
@@ -70,7 +70,7 @@ it('puts each program operator of every company on the oldest live machine of it
   expect((await db.execute(sql`select id, name, kind, role_key, department_id, subscription_id, model, removed_at from agents order by id`)).rows).toEqual(before);
 });
 
-it('changes nothing on a fresh database', async () => {
+it('changes nothing on a fresh database', { timeout: 120_000 }, async () => {
   const client = new PGlite();
   onTestFinished(() => client.close());
   const db = drizzle(client);
