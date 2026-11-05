@@ -6,6 +6,7 @@ import importlib.util
 import json
 from pathlib import Path
 import re
+import secrets
 import socket
 import sqlite3
 import subprocess
@@ -22,15 +23,17 @@ from typing import NamedTuple
 from unittest.mock import patch
 
 if __package__:
-    from .harness import ROOT, Client, Stack, _request, _wait
+    from .harness import ROOT, Client, Stack, _request, _wait, load_relay_module
 else:
-    from harness import ROOT, Client, Stack, _request, _wait
+    from harness import ROOT, Client, Stack, _request, _wait, load_relay_module
 
 
 KEY_PATH = '/api/v1/links/acme/key'
 VISITOR_KEY_PATH = '/api/v1/links/acme/visitor-key'
 ROUTE_PATH = '/api/v1/links/acme/route'
 SYNC_PATH = '/api/v1/links/acme/sync'
+# Fixed, so that nothing in the in-process tests rests on randomness. No relay outside these tests knows it.
+CHOSEN_KEY = 'a' * 43
 
 
 class KeyTests(unittest.TestCase):
@@ -134,6 +137,53 @@ class KeyTests(unittest.TestCase):
         self.assertEqual((after['state'], after['generation'], after['since']),
                          ('held', original['generation'], original['since']))
 
+    def chosen_key(self) -> str:
+        """32 random bytes in base64url, which no log this test prints may show."""
+        chosen = secrets.token_urlsafe(32)
+        self.stack.private.append(chosen)
+        return chosen
+
+    def test_r6_1_chosen_key(self) -> None:
+        self.holder()
+        chosen = self.chosen_key()
+        status, body = self.stack.api('POST', KEY_PATH, {'key': chosen}, key=self.key)
+        self.assertEqual(status, 200, 'a well-formed chosen key must be taken')
+        self.assertTrue(body == {'key': chosen}, 'the answer must be the chosen key and nothing else')
+        self.assertEqual(self.route(chosen)['state'], 'held', 'the live tunnel must keep its route')
+        self.assertEqual(self.stack.get('acme.hornhoof.org'), 200)
+        self.assertEqual(self.stack.api('GET', ROUTE_PATH, key=self.key)[0], 401)
+        refused = self.stack.client('acme', self.key, settings='network', client='acme-bbbbbbbb-link')
+        self.assertTrue(_wait(lambda: 'no binding acme with this key' in refused.log(), 5), refused.log())
+        self.assertFalse(refused.started('acme', within=0.1), refused.log())
+        self.assertTrue(chosen not in self.stack.relay.log_path.read_text(), 'a chosen key must not reach the log')
+
+    def test_r6_1_chosen_key_refused(self) -> None:
+        chosen = self.chosen_key()
+        for label, body, code in (('42 characters', {'key': chosen[:42]}, 'invalid'),
+                                  ('43 with a plus', {'key': chosen[:42] + '+'}, 'invalid'),
+                                  ('another field', {'key': chosen, 'extra': 1}, 'invalid'),
+                                  ('the current key', {'key': self.key}, 'same_key')):
+            with self.subTest(label):
+                status, answer = self.stack.api('POST', KEY_PATH, body, key=self.key)
+                self.assertEqual(status, 400, 'this body must be refused')
+                self.assertTrue(answer.get('error') == code, f'the refusal must say {code}')
+                self.assertTrue(body['key'] not in json.dumps(answer), 'a refusal must not repeat the key it was sent')
+                self.route(self.key)
+        status, _ = self.stack.api('POST', KEY_PATH, {'key': chosen}, key='wrong')
+        self.assertEqual(status, 401, 'a chosen key goes nowhere without the current key')
+        self.route(self.key)
+        self.assertEqual(self.stack.api('GET', ROUTE_PATH, key=chosen)[0], 401, 'no refusal may change the key')
+
+    def test_r6_1_random_key_stays(self) -> None:
+        new = self.rotate(self.key)
+        self.assertEqual(self.stack.api('GET', ROUTE_PATH, key=self.key)[0], 401)
+        self.route(new)
+        status, body = self.stack.api('POST', KEY_PATH, {}, key=new)
+        self.assertEqual(status, 200, 'an empty object asks for a new random key too')
+        self.stack.private.append(body['key'])
+        self.assertTrue(body['key'] != new, 'the key must change')
+        self.route(body['key'])
+
     def test_ban_without_a_restart(self) -> None:
         client = self.holder()
         started = Path(self.stack.env['RELAY_FRPS_STARTED']).read_bytes()
@@ -213,6 +263,43 @@ class KeyTests(unittest.TestCase):
             self.assertEqual(status, 201, 'a random binding must bypass the dashboard')
             self.assertTrue(re.fullmatch(r'[a-z0-9]{24}', body['name']) is not None,
                             'a random binding must have a fresh random name')
+
+
+class ChosenKeyRuleTests(unittest.TestCase):
+    """R6.1: what the body of a key change asks for, by the rule alone, with nothing running."""
+
+    CURRENT = 'c' * 43
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.relay = load_relay_module()
+
+    def refusal_of(self, body: object) -> str:
+        with self.assertRaises(self.relay.KeyRefused) as refused:
+            self.relay.new_link_key(body, self.CURRENT)
+        return refused.exception.code
+
+    def test_a_body_that_chooses_nothing_gets_a_new_random_key(self) -> None:
+        first, second = (self.relay.new_link_key({}, self.CURRENT) for _ in range(2))
+        self.assertTrue(re.fullmatch(r'[A-Za-z0-9_-]{43}', first) is not None, 'a new key has the one form')
+        self.assertTrue(first != second, 'and is new each time')
+
+    def test_a_key_of_the_right_form_is_the_key_asked_for(self) -> None:
+        for chosen in (CHOSEN_KEY, 'aZ09_-' + 'x' * 37):
+            with self.subTest(chosen=chosen):
+                self.assertEqual(self.relay.new_link_key({'key': chosen}, self.CURRENT), chosen)
+
+    def test_any_other_body_is_invalid(self) -> None:
+        for body in (None, [], [CHOSEN_KEY], CHOSEN_KEY, 5, True,
+                     {'key': None}, {'key': 5}, {'key': [CHOSEN_KEY]}, {'key': ''},
+                     {'key': 'a' * 42}, {'key': 'a' * 44}, {'key': 'a' * 42 + '+'}, {'key': 'a' * 42 + '='},
+                     {'key': CHOSEN_KEY + '\n'}, {'key': '\u0663' * 43}, {'key': 'a' * 42 + '\ud800'},
+                     {'key': CHOSEN_KEY, 'extra': 1}, {'extra': 1}, {'Key': CHOSEN_KEY}):
+            with self.subTest(body=ascii(body)):
+                self.assertEqual(self.refusal_of(body), 'invalid')
+
+    def test_the_current_key_cannot_be_chosen(self) -> None:
+        self.assertEqual(self.refusal_of({'key': self.CURRENT}), 'same_key')
 
 
 class RelayInProcess(unittest.TestCase):
@@ -386,6 +473,43 @@ class KeyAuthorizationTests(RelayInProcess):
         self.assertTrue(self.ping('old')['reject'], 'a rebind must refuse the previous lifetime heartbeat')
         self.rotated_key('next-owner')
         self.assertTrue(self.ping('old')['reject'], 'a new lifetime rotation must not revive prior hashes')
+
+    def choose(self, current: str, chosen: str) -> None:
+        status, _ = self.api('POST', KEY_PATH, current, body={'key': chosen})
+        self.assertEqual(status, 200, 'a well-formed chosen key must be taken')
+
+    def test_r6_1_a_chosen_key_retires_the_old_one_as_a_random_key_does(self) -> None:
+        self.choose('old', CHOSEN_KEY)
+        self.assertTrue(self.current_hash_matches(CHOSEN_KEY), 'the chosen key must be the key')
+        self.assertEqual(self.api('GET', ROUTE_PATH, 'old')[0], 401)
+        self.assertFalse(self.ping('old')['reject'], 'a tunnel of the old key keeps its heartbeat')
+        self.assertIsNone(self.relay.link_refusal('acme', 'old'), 'and takes new connections')
+        login = self.relay.plugin('Login', {'metas': {'name': 'acme', 'key': 'old'}})
+        self.assertTrue(login['reject'], 'the old key must not log in again')
+        self.relay.release_binding('acme')
+        self.assertEqual(self.lifetime_rows()['ping_keys'], 0, 'a release takes the retired key with it')
+
+    def test_r6_1_a_retired_key_chosen_again_leaves_every_tunnel_its_heartbeat(self) -> None:
+        # A random key never returns, so only a chosen key can make a retired hash the current one.
+        again = 'b' * 43
+        self.choose('old', CHOSEN_KEY)
+        self.choose(CHOSEN_KEY, again)
+        self.choose(again, CHOSEN_KEY)
+        self.assertTrue(self.current_hash_matches(CHOSEN_KEY), 'the key chosen again must be the key')
+        self.assertEqual(self.api('GET', ROUTE_PATH, again)[0], 401)
+        self.rotated_key(CHOSEN_KEY)
+        self.assertEqual(self.api('GET', ROUTE_PATH, CHOSEN_KEY)[0], 401)
+        for retired in ('old', CHOSEN_KEY, again):
+            with self.subTest(retired=retired):
+                self.assertFalse(self.ping(retired)['reject'], 'each earlier tunnel keeps its heartbeat')
+
+    def test_r6_2_a_visitor_key_is_never_chosen(self) -> None:
+        for body in ({'key': CHOSEN_KEY}, {'key': 'short', 'extra': 1}):
+            with self.subTest(body=body):
+                status, answer = self.api('POST', VISITOR_KEY_PATH, 'old', body=body)
+                self.assertEqual(status, 200, 'a visitor key post ignores its body')
+                self.assertTrue(answer['visitorKey'] != CHOSEN_KEY, 'a visitor key is the relay\'s own')
+                self.assertTrue(self.current_hash_matches('old'), 'the link key must stay')
 
     def test_r6_1_rotation_rolls_back_if_heartbeat_retention_fails(self) -> None:
         original = self.relay.write
@@ -767,7 +891,7 @@ class ConnectionTests(RelayInProcess):
 
     def key_from_a_kept_connection(self, path: str, field: str) -> str:
         """A key request with the largest allowed body and a good request behind it: both run on one connection."""
-        largest_body = b'{"pad":"' + b'x' * 4086 + b'"}'
+        largest_body = b'{' + b' ' * 4094 + b'}'
         good = raw_request('GET', '/api/v1/names/acme', headers=(FROM_OUTSIDE,), framed=False)
         exchange = self.exchange(raw_request('POST', path, largest_body, (FROM_OUTSIDE, GOOD_KEY)) + good, within=0.5)
         self.assertEqual(exchange.statuses, [200, 200], 'the body must be read, so that the next request is whole')
