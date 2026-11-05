@@ -9,7 +9,7 @@ import { improvementsChanged, takeForPlanning } from '../improvements/store.js';
 type Live = Pick<Ctx, 'db' | 'bus'>;
 export type Turn = typeof turns.$inferSelect;
 /* One task of a turn as the orchestrator lays it out. */
-export type PlanItem = { department: string; product?: string; title: string; brief: string; body: string };
+export type PlanItem = { department: string; product?: string; title: string; brief: string; body: string; workKind?: Task['workKind']; riskClass?: Task['riskClass'] };
 type Head = { id: string; name: string };
 type Placed = PlanItem & { head: Head };
 /* The orchestrator and the run he lays the turn out in. */
@@ -114,6 +114,8 @@ async function insertPlanned(tx: Tx, companyId: string, agentId: string, turnId:
         title: item.title.trim(),
         brief: item.brief.trim(),
         body: item.body,
+        workKind: item.workKind ?? null,
+        riskClass: item.riskClass ?? null,
         status: 'planned',
         createdByAgentId: agentId,
         updatedAt: new Date(),

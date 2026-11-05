@@ -1,3 +1,4 @@
+import { RISK_CLASSES, WORK_KINDS } from '@hornhoof/protocol';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { and, asc, count, desc, eq, gte, inArray, isNull, notInArray } from 'drizzle-orm';
 import { z } from 'zod';
@@ -49,6 +50,8 @@ const After = z
   .array(Ref)
   .max(10)
   .describe('Tasks of this turn that must be done first, by number. The task waits, and its executor is woken by itself once the last of them is done.');
+const WorkKind = z.enum(WORK_KINDS).describe('What kind of work it is: a bug, known behavior to build, an unknown path, or old code. The pipeline report counts by it.');
+const RiskClass = z.enum(RISK_CLASSES).describe('What a mistake in it would cost: money, access, security, data, or none.');
 const Improvement = z.uuid().describe("The improvement these tasks take into work after a person's instruction, from improvements.");
 
 type Question = { kind: 'question' | 'approval' | 'choice'; text: string; topic?: DecisionTopic };
@@ -252,7 +255,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
   );
 
   if (job.agentKind === 'orchestrator') {
-    const Item = z.object({ department: z.uuid(), product: z.uuid().optional(), title: Title, brief: Brief, body: Body });
+    const Item = z.object({ department: z.uuid(), product: z.uuid().optional(), title: Title, brief: Brief, body: Body, workKind: WorkKind.optional(), riskClass: RiskClass.optional() });
     const Turn = z.number().int().positive().describe('The turn number, like 2.');
     const Words = z
       .number()
@@ -335,7 +338,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         description:
           'Gives work to a member of your department: executor is an employee id from company. Name yourself only when no member can do it. gates are the reviewers it passes in order, as role ids (DEV-REV) or employee ids: ' +
           "leave them out for code in a repository under your department's task of the turn, which the review of the turn checks all at once; [] for research, reports, plans and docs; name one only where a change must not reach the turn's branch unchecked. Name a role once: one reviewer of each model of it checks the work at once there. Left out anywhere else, the department's first review stage. The executor never reviews its own work. parent: the department task it serves.",
-        inputSchema: { title: Title, brief: Brief, body: Body, executor: z.uuid(), gates: z.array(z.string().max(40)).max(8).optional(), parent: Ref.optional(), product: z.uuid().optional(), after: After.optional() },
+        inputSchema: { title: Title, brief: Brief, body: Body, executor: z.uuid(), gates: z.array(z.string().max(40)).max(8).optional(), parent: Ref.optional(), product: z.uuid().optional(), after: After.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional() },
       },
       async input =>
         run(async () => {
@@ -352,7 +355,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
           const inTurnReview = await turnReviewed(db, agent, executor, parent, input);
           const gates = inTurnReview || (executor.teamId && input.gates === undefined) ? [] : await gatesFor(agent, executor.id, input.gates);
           const after = await afterIds(input.after);
-          const moved = await createTask(ctx, { agentId: agent.id }, { title: input.title, brief: input.brief, body: input.body, departmentId: agent.departmentId, productId: input.product ?? null, parentId: parent?.id ?? null, assigneeAgentId: executor.id, executor: true, gates, after, inTurnReview });
+          const moved = await createTask(ctx, { agentId: agent.id }, { title: input.title, brief: input.brief, body: input.body, departmentId: agent.departmentId, productId: input.product ?? null, parentId: parent?.id ?? null, assigneeAgentId: executor.id, executor: true, gates, after, inTurnReview, workKind: input.workKind, riskClass: input.riskClass });
           return { text: `Created #${moved.task.number} for ${executor.name}${gates.length ? ` with ${gates.length} gate${gates.length > 1 ? 's' : ''}` : ''}.${await waiting(moved.task)}`, moved };
         }),
     );
@@ -367,7 +370,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
             'Whoever holds it is woken with the change. A blocked task opens again. after: the tasks of its turn it waits for from now on, [] to start it now.'
           : "Rewrites one of your department's member tasks so it reads as the current truth, or hands it to another executor or gates (only while it is with its executor). " +
             'A task waiting at a gate with nobody on to check it takes new gates from that gate on. A blocked task opens again. after: the tasks of its turn it waits for from now on, [] to start it now.',
-        inputSchema: { task: Ref, title: Title.optional(), brief: Brief.optional(), body: Body.optional(), executor: z.uuid().optional(), gates: z.array(z.string().max(40)).max(8).optional(), after: After.optional() },
+        inputSchema: { task: Ref, title: Title.optional(), brief: Brief.optional(), body: Body.optional(), executor: z.uuid().optional(), gates: z.array(z.string().max(40)).max(8).optional(), after: After.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional() },
       },
       async ({ task: ref, executor, gates, after, ...text }) =>
         run(async () => {

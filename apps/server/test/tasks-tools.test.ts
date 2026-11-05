@@ -3,16 +3,16 @@ import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, jobs, people, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
-import { createTask, type Task } from '../src/modules/tasks/engine.js';
+import { createTask, updateTask, type Task } from '../src/modules/tasks/engine.js';
 import { TASK_ANSWER } from '../src/modules/tasks/tools.js';
 import { listEvents } from '../src/modules/events/store.js';
 import { wakePrompt } from '../src/modules/tasks/wake.js';
-import { listen, mcp, setUpCompany, testApp } from './helpers.js';
+import { as, listen, mcp, setUpCompany, testApp } from './helpers.js';
 
 async function company() {
   const { app, db } = await testApp();
   await listen(app);
-  await setUpCompany(app);
+  const ceoToken = await setUpCompany(app);
   const [acme] = await db.select().from(companies);
   const companyId = acme!.id;
   const [ceo] = await db.select().from(people);
@@ -39,7 +39,7 @@ async function company() {
     await db.insert(jobs).values({ companyId, subscriptionId: sub!.id, agentId: agent.id, kind: 'conversation', prompt: 'hi', timeoutMs: 900000, status: 'running', startedAt: new Date(), toolTokenHash: hashToken(token) });
     return mcp(app, token);
   };
-  return { app, db, ctx: app.ctx, companyId, ceo: ceo!, orchestrator: orchestrator!, dev: dev!, sales: sales!, head, bruno, rita, tess, sam, tools };
+  return { app, db, ctx: app.ctx, companyId, ceoToken, ceo: ceo!, orchestrator: orchestrator!, dev: dev!, sales: sales!, head, bruno, rita, tess, sam, tools };
 }
 
 type Res = { content: { text: string }[]; isError?: boolean };
@@ -161,5 +161,89 @@ describe('asking a person', () => {
       { text: 'Which cards do we take?', topic: 'task' },
       { text: 'Which banks?', topic: null },
     ]);
+  });
+});
+
+describe("a task's kind and risk class", () => {
+  const work = (department: string, title: string, labels: Record<string, string> = {}) => ({ department, title, brief: 'Why.', body: 'What.', ...labels });
+
+  it('are kept when a head gives the task out, and read back by tasks, task and the API', async () => {
+    const { app, db, ceoToken, head, bruno, tools } = await company();
+    const client = await tools(head);
+    const made = await call(client, 'create_task', { title: 'Fix login', brief: '', body: 'Fix it.', executor: bruno.id, gates: [], workKind: 'bug', riskClass: 'access' });
+    expect(made.isError).toBeFalsy();
+    const [row] = await db.select().from(tasks);
+    expect(row).toMatchObject({ workKind: 'bug', riskClass: 'access' });
+    expect(JSON.parse(text(await call(client, 'tasks', {})))[0]).toMatchObject({ number: row!.number, workKind: 'bug', riskClass: 'access' });
+    expect(JSON.parse(text(await call(client, 'task', { task: row!.number })))).toMatchObject({ workKind: 'bug', riskClass: 'access' });
+    const read = await app.inject({ method: 'GET', url: `/api/tasks/${row!.id}`, ...as(ceoToken) });
+    expect(read.json().task).toMatchObject({ workKind: 'bug', riskClass: 'access' });
+  });
+
+  it('are empty until someone names them', async () => {
+    const { db, head, bruno, tools } = await company();
+    const client = await tools(head);
+    await call(client, 'create_task', { title: 'Plain', brief: '', body: '', executor: bruno.id, gates: [] });
+    const [row] = await db.select().from(tasks);
+    expect(row).toMatchObject({ workKind: null, riskClass: null });
+    expect(JSON.parse(text(await call(client, 'task', { task: row!.number })))).toMatchObject({ workKind: null, riskClass: null });
+  });
+
+  it('change with update_task without waking whoever holds the task, and a log line says so', async () => {
+    const { db, ctx, head, bruno, tools } = await company();
+    const client = await tools(head);
+    await call(client, 'create_task', { title: 'Plain', brief: '', body: '', executor: bruno.id, gates: [] });
+    const [row] = await db.select().from(tasks);
+    const moved = await updateTask(ctx, head.id, row!.id, { workKind: 'legacy_code', riskClass: 'data' });
+    expect(moved.wakes).toEqual([]);
+    expect(moved.task).toMatchObject({ workKind: 'legacy_code', riskClass: 'data' });
+    const updated = await db.select().from(taskEvents).where(eq(taskEvents.kind, 'updated'));
+    expect(updated.at(-1)!.data).toEqual({ fields: ['workKind', 'riskClass'] });
+    const again = await call(client, 'update_task', { task: row!.number, workKind: 'unknown_path', riskClass: 'none' });
+    expect(again.isError).toBeFalsy();
+    expect((await db.select().from(tasks))[0]).toMatchObject({ workKind: 'unknown_path', riskClass: 'none' });
+  });
+
+  it('leave its wait, its place in line and its version as they are', async () => {
+    const { db, ctx, head, bruno, tools } = await company();
+    await call(await tools(head), 'create_task', { title: 'Plain', brief: '', body: '', executor: bruno.id, gates: [] });
+    const until = new Date(Date.now() + 3_600_000).toISOString();
+    const [row] = await db.update(tasks).set({ externalWait: { reason: 'A build', since: new Date().toISOString(), until } }).returning();
+    const moved = await updateTask(ctx, head.id, row!.id, { riskClass: 'data' });
+    expect(moved.task.externalWait).toMatchObject({ reason: 'A build', until });
+    expect(moved.task.version).toBe(row!.version);
+    expect((await updateTask(ctx, head.id, row!.id, { riskClass: 'data' })).task.updatedAt).toEqual(moved.task.updatedAt);
+  });
+
+  it('still wake the holder when the body changes with them', async () => {
+    const { db, ctx, head, bruno, tools } = await company();
+    await call(await tools(head), 'create_task', { title: 'Plain', brief: '', body: '', executor: bruno.id, gates: [] });
+    const [row] = await db.select().from(tasks);
+    const moved = await updateTask(ctx, head.id, row!.id, { body: 'New truth.', workKind: 'bug' });
+    expect(moved.wakes.map(w => w.agentId)).toEqual([bruno.id]);
+  });
+
+  it('come from the orchestrator in plan_turn and add_tasks, on each task', async () => {
+    const { db, dev, orchestrator, tools } = await company();
+    const client = await tools(orchestrator);
+    const planned = await call(client, 'plan_turn', { title: 'Next', goal: 'Do it.', tasks: [work(dev.id, 'One', { workKind: 'known_behavior', riskClass: 'none' }), work(dev.id, 'Two')] });
+    expect(planned.isError).toBeFalsy();
+    const added = await call(client, 'add_tasks', { turn: 1, tasks: [work(dev.id, 'Three', { workKind: 'bug', riskClass: 'money' })] });
+    expect(added.isError).toBeFalsy();
+    const rows = await db.select({ title: tasks.title, workKind: tasks.workKind, riskClass: tasks.riskClass }).from(tasks).orderBy(tasks.number);
+    expect(rows).toEqual([
+      { title: 'One', workKind: 'known_behavior', riskClass: 'none' },
+      { title: 'Two', workKind: null, riskClass: null },
+      { title: 'Three', workKind: 'bug', riskClass: 'money' },
+    ]);
+  });
+
+  it('refuses a kind or a risk class it does not know', async () => {
+    const { db, head, bruno, tools } = await company();
+    const client = await tools(head);
+    const asked = (labels: Record<string, string>) => call(client, 'create_task', { title: 'Plain', brief: '', body: '', executor: bruno.id, gates: [], ...labels });
+    expect((await asked({ workKind: 'feature' })).isError).toBe(true);
+    expect((await asked({ riskClass: 'fun' })).isError).toBe(true);
+    expect(await db.select().from(tasks)).toEqual([]);
   });
 });
