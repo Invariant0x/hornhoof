@@ -24,9 +24,31 @@ permissions:
   contents: read
 
 jobs:
+  # A full test run in Hornhoof leaves the status hornhoof/tests on the commit it checked. With a success there, or on the
+  # second parent of a merge with the same tree, GitHub need not run the tests again; whatever it cannot tell, they run.
+  mark:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      statuses: read
+    outputs:
+      proved: ${{ steps.mark.outputs.proved }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The commit and its parents: a merge may take the mark of its second parent.
+          fetch-depth: 2
+      - id: mark
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/tests-mark.mjs
+
   # The tests run on GitHub's machines in four parts at once, two workers in each: on one machine with two processors,
   # which GitHub gives a private repository, the suite took half an hour.
   test:
+    needs: mark
+    # A first job that failed leaves no answer, so the tests run.
+    if: ${{ !cancelled() && needs.mark.outputs.proved != 'true' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -73,8 +95,9 @@ jobs:
         run: npx vitest run --shard="$PART" --maxWorkers=2
 
   images:
-    needs: test
-    if: github.event_name != 'pull_request'
+    needs: [mark, test]
+    # Skipped tests would skip this job too, unless it says what they may be: passed, or left out because the mark proved the commit.
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && (needs.test.result == 'success' || (needs.test.result == 'skipped' && needs.mark.outputs.proved == 'true')) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -142,7 +165,8 @@ jobs:
 
   release:
     needs: images
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Tests skipped further back would skip this job too, so it asks only that the images were built.
+    if: ${{ !cancelled() && needs.images.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write

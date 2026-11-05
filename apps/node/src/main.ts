@@ -11,8 +11,9 @@ import { agentFs, ownFs, type AgentFs } from './agent-fs.js';
 import { bootFacts } from './boot.js';
 import { prepareAndVerifyBrowser, readBrowserError, startupBrowserCheck, writeBrowserError } from './browser.js';
 import { connect } from './connection.js';
-import type { OperatorServerMessage, ProgramNodeMessage, ProgramServerMessage } from '@hornhoof/protocol/program-operator';
+import type { ProgramNodeMessage, ProgramServerMessage } from '@hornhoof/protocol/program-operator';
 import { agentUser, builtinAdapters, secureNode, userFor, type JobUser } from './isolation.js';
+import { startCheckClient, stopChecks, isProgramControl, applyProgramControl, runQueuedPart, checkGuidance } from './check-runtime.js';
 import { machineLoad } from './load.js';
 import { adapterFor, programFor } from './providers/index.js';
 import { runJob, type ProviderAdapter, type RunInput, type RunResult } from './runner.js';
@@ -223,6 +224,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   const unconfirmedTests = new Map<string, NodeMessage>();
   let send: ((m: ProgramNodeMessage) => boolean) | null = null;
   let online = false;
+  const checks = startCheckClient(dir, terminal, () => send);
   /* The kind of sign-in Hornhoof hands this plan, and what that sign-in was when the plan's program refused it: until
      it changes, the node stays signed out, so turns do not go round on a sign-in that no longer works. */
   const planProvider = builtin ? null : (state as NodeState).provider;
@@ -330,6 +332,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     onOpen(next) {
       send = next;
       online = true;
+      checks.online(true);
       host?.closeViews();
       login?.closeViews();
       /* Finished jobs Hornhoof has not confirmed still count as running, so the server does not give up on them. */
@@ -346,13 +349,15 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     },
     /* One message that fails is logged; it never ends the node with all its runs. */
     onMessage: m => void handle(m).catch(err => log(`A message from Hornhoof failed: ${message(err)}`)),
-    onClose: () => { online = false; },
+    onClose: () => {
+      online = false; stopChecks(checks, testing);
+    },
     onRefused: () => log('Hornhoof does not know this machine any more. Run the install command from Hornhoof again to reconnect.'),
   });
   void programs.update(tellStatus).catch(err => log(`Could not update the programs: ${message(err)}`));
 
   async function handle(m: ProgramServerMessage) {
-    if (isOperatorCommand(m)) return host?.operatorMessage(m);
+    if (isProgramControl(m)) return applyProgramControl(m, checks, host);
     if (m.type === 'remove') {
       /* Only personal subscriptions are removed this way; the built-in node stays. */
       if (builtin || stopped) return;
@@ -507,8 +512,9 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       testing.delete(m.partId);
       return emit(refusedPart);
     }
-    emit({ type: 'tests.started', partId: m.partId });
-    const done = await runPart(m, { dir, user: testUser, hidden: [...known], signal, files });
+    const done = await runQueuedPart(m, runPart, { dir, user: testUser, hidden: [...known], signal, files },
+      position => emit({ type: 'tests.waiting', partId: m.partId, position }),
+      () => emit({ type: 'tests.started', partId: m.partId }));
     keepTest(m.partId, done);
     testing.delete(m.partId);
     emit(done);
@@ -530,7 +536,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
           return { ok: false, sessionId: null, result: '', output: `Could not install the program: ${message(err)}`, error: 'agent_failed', limits: null };
         }
         const version = async () => { await programs.ready(input.signal); return programs.version(terminal.program.kind); };
-        return host.run({ key: input.agentKey, program: terminal.program, bin: terminal.bin, home: terminal.home, signedOut: terminal.signedOut, input, version, operatorDelivery: m.operatorDelivery, operatorSourceDelivery: m.operatorSourceDelivery });
+        return host.run({ key: input.agentKey, program: terminal.program, bin: terminal.bin, home: terminal.home, signedOut: terminal.signedOut, input: checkGuidance(input), version, operatorDelivery: m.operatorDelivery, operatorSourceDelivery: m.operatorSourceDelivery });
       };
       const tracked: ProviderAdapter = {
         ...chosen,
@@ -611,6 +617,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   function stop(reason: NodeStopReason = 'stopped') {
     stopNode(life, send, boot.startedAt, reason);
     stopped = true;
+    stopChecks(checks, testing);
     clearInterval(timer);
     if (learning) clearInterval(learning);
     clearInterval(asking);
@@ -946,5 +953,3 @@ if (isEntry()) {
     process.exit(1);
   });
 }
-
-const isOperatorCommand = (frame: ProgramServerMessage): frame is OperatorServerMessage => frame.type.startsWith('program.');

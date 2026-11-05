@@ -4,7 +4,8 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { ApiError } from '../../errors.js';
 import type { ToolJob } from '../tools/job.js';
-import { runState, startRun, stopRun, TEST_MINUTES, TEST_MINUTES_MAX, WORK_MEMORY_GB } from './runs.js';
+import { queuedRunState } from '../nodes/check-slot-view.js';
+import { startRun, stopRun, TEST_MINUTES, TEST_MINUTES_MAX, WORK_MEMORY_GB } from './runs.js';
 
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
 const answer = (fn: () => Promise<string>) =>
@@ -38,7 +39,8 @@ export function registerTestTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         "a part that checked another one fails the run. The command runs there as in CI, so it installs what it needs first. When every part has ended, however it ended, any wait_for of yours on the task ends and you are woken on it " +
         `with the result: passed or failed, the pinned commit, each part's machine and time, and the last lines of what failed; each part's full log goes on the task as tests-<run>-<part>.log. ` +
         `parts splits the run into up to ${MAX_TEST_PARTS} parts on several machines at once, for a runner that can split: the command says which part with {part} and how many with {parts}, ` +
-        'as in --shard={part}/{parts}, and HH_TEST_PART and HH_TEST_PARTS hold them too.',
+        'as in --shard={part}/{parts}, and HH_TEST_PART and HH_TEST_PARTS hold them too. ' +
+        "A run of exactly the command its repository declared as its full test command sets the GitHub status hornhoof/tests on the pinned commit as it ends, so GitHub need not run the tests again; the answer says whether this run will.",
       inputSchema: {
         command: z.string().trim().min(1).max(4000).describe('What runs the suite in the fresh clone, for example installing and then testing.'),
         task: TaskRef('whose branch it tests'),
@@ -52,7 +54,7 @@ export function registerTestTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
   server.registerTool(
     'test_run',
     { description: "How a test run goes: its state, the commit it pinned (commitSha), and each part's state, machine, the commit it checked, exit code, log file and, for a failed one, the end of its log.", inputSchema: { run: Run } },
-    async ({ run }) => answer(async () => JSON.stringify(await runState(ctx, job, run))),
+    async ({ run }) => answer(async () => JSON.stringify(await queuedRunState(ctx, job, run))),
   );
   server.registerTool(
     'stop_tests',
@@ -93,7 +95,7 @@ export function registerTestTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
   server.registerTool(
     'work_run',
     { description: "How a work run goes: its state, and each part's state, machine, exit code, log file, the files it made and, for a failed one, the end of its log.", inputSchema: { run: WorkRun } },
-    async ({ run }) => answer(async () => JSON.stringify(await runState(ctx, job, run, 'work'))),
+    async ({ run }) => answer(async () => JSON.stringify(await queuedRunState(ctx, job, run, 'work'))),
   );
   server.registerTool(
     'stop_work',

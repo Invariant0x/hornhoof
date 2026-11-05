@@ -2,6 +2,7 @@ import { Agent, request } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Bridge } from '../src/terminal/bridge.js';
 import { macOwner, type Command } from '../src/terminal/mac-peer.js';
+import { trackCheckProcess } from '../src/check-processes.js';
 import { terminalOwner } from '../src/main.js';
 
 const cleanups: (() => void)[] = [];
@@ -64,6 +65,16 @@ describe('macOS hook ownership without proc', () => {
     expect(await post(c.url, c.agent, 77)).toBe(403);
     expect(await post(c.url, c.agent, 55)).toBe(403);
     expect(c.heard).toEqual([]);
+  });
+
+  it('recognizes only the live check roots of the authenticated agent', async () => {
+    const owner = macOwner(async () => '0')(async () => []);
+    const forget = trackCheckProcess('agent-1', 77); cleanups.push(forget);
+    const peer = { port: 1, bridgePort: 2, pid: 77, acceptedPid: 77 };
+    expect(await owner.owns!('agent-1', peer)).toBe(true);
+    expect(await owner.owns!('agent-2', peer)).toBe(false);
+    forget();
+    expect(await owner.owns!('agent-1', peer)).toBe(false);
   });
 
   it('accepts a verified process at pid 1', async () => {

@@ -1,0 +1,1 @@
+ALTER TABLE "departments" ADD COLUMN "repo_full_test_command" text;

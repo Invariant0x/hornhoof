@@ -128,7 +128,8 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
   tool(
     'set_repository',
     'Connects the git repository a department\'s agents work in: an https address, the branch (main by default), a token that may push, author { name, email } for their commits, ' +
-      'and testMemoryGb, the free memory a machine needs to take a test run of it (4 by default).',
+      'testMemoryGb, the free memory a machine needs to take a test run of it (4 by default), ' +
+      'and fullTestCommand, the command that runs its whole test suite (null takes it away): a run of exactly that sets the GitHub status hornhoof/tests on the commit it checked, for which the token needs the right to write commit statuses, and GitHub then builds images without running the tests again.',
     { department: Id('department'), ...RepoBody.shape },
     ({ department, ...body }) => ({ method: 'PUT', url: `/api/departments/${department}/repository`, payload: body }),
   );

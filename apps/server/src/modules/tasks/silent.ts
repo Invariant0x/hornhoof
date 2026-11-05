@@ -8,6 +8,7 @@ import { headOf } from './failures.js';
 import { sameProgram } from './program-history.js';
 import { programRestartStatus } from './program-restarts.js';
 import { logTurnFact } from './turn-log.js';
+import { jobCheckQueued, jobCheckLastEnd } from '../nodes/check-slots.js';
 import { stopStaleProgram } from './stale-program.js';
 
 export const SILENT_TURN_MS = QUIET_ALARM_MS;
@@ -135,6 +136,20 @@ function alarmForTask(job: Job, program: TurnProgram | null, task: { externalWai
   return task?.externalWait ? null : alarmForTurn(job, program, nowMs);
 }
 
+function alarmWithCheckQueue(ctx: Ctx, job: Job, program: TurnProgram | null, task: { externalWait: typeof tasks.$inferSelect.externalWait } | null, nowMs: number): TurnAlarm | null {
+  const detected = alarmForTask(job, program, task, nowMs);
+  if (missingProgramReport(detected)) return detected;
+  if (jobCheckQueued(ctx, job.id, nowMs)) return null;
+  return afterQueuedCheck(program, detected, jobCheckLastEnd(ctx, job.id, nowMs), nowMs);
+}
+
+const missingProgramReport = (alarm: TurnAlarm | null): boolean => alarm?.reason === 'node_silent';
+
+function afterQueuedCheck(program: TurnProgram | null, alarm: TurnAlarm | null, checkEnd: number | null, now: number): TurnAlarm | null {
+  const threshold = program?.state === 'tool' ? TOOL_QUIET_ALARM_MS : SILENT_TURN_MS;
+  return checkEnd !== null && now - checkEnd < threshold ? null : alarm;
+}
+
 const sameAlarm = (a: TurnAlarm | null, b: TurnAlarm | null) => a?.reason === b?.reason && a?.since === b?.since;
 
 async function updateTurnAlarm(ctx: Ctx, job: Job, alarm: TurnAlarm | null, now: Date): Promise<void> {
@@ -172,7 +187,7 @@ async function findSilentTurns(ctx: Ctx, now: Date): Promise<SilentTurn[]> {
   const silent: SilentTurn[] = [];
   for (const { job, agent, task } of rows) {
     const program = programs.get(job.id)?.program ?? null;
-    const alarm = alarmForTask(job, program, task, nowMs);
+    const alarm = alarmWithCheckQueue(ctx, job, program, task, nowMs);
     await updateTurnAlarm(ctx, job, alarm, now);
     if (alarm) silent.push({ job, agent, task: task?.id ? task : null, program, alarm });
   }

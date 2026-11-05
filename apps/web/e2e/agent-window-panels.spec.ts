@@ -14,11 +14,15 @@ for (const who of PEOPLE) {
     test(`each panel stands left of the terminal and leaves it alone: ${named}`, async ({ page }) => {
       const { terminal, errors, connections, toggle, openPanel, panel, window, words } = await openAgent(page, s, who);
       const before = await box(terminal);
+      const outer = await box(window);
       const connected = connections();
       for (const name of ['card', 'notebook', 'task'] as const) {
         const shown = await openPanel(name);
         await expect.poll(() => box(terminal)).toEqual(before);
         const rect = await box(shown);
+        if (name === 'card') await page.screenshot({ path: test.info().outputPath(`desktop-one-${s.lang}-${s.theme}.png`) });
+        expect(Math.abs(rect.y - outer.y), `${name} and window tops`).toBeLessThanOrEqual(1);
+        expect(Math.abs(rect.y + rect.height - outer.y - outer.height), `${name} and window bottoms`).toBeLessThanOrEqual(1);
         expect(overlaps(rect, before)).toBe(false);
         expect(rect.x + rect.width).toBeLessThanOrEqual(before.x);
         expect(rect.x).toBeGreaterThanOrEqual(0);
@@ -68,26 +72,40 @@ for (const who of PEOPLE) {
     });
 
     test(`panels stand side by side and the second lies over the terminal only when it must: ${named}`, async ({ page }) => {
-      const { terminal, errors, openPanel, panel } = await openAgent(page, s, who);
+      const { terminal, errors, openPanel, panel, window } = await openAgent(page, s, who);
       const before = await box(terminal);
+      const outer = await box(window);
       await openPanel('card');
       await openPanel('notebook');
+      await page.screenshot({ path: test.info().outputPath(`desktop-two-${s.lang}-${s.theme}.png`) });
       const [first, second] = await expectApart(page, [panel('card'), panel('notebook')]);
+      for (const rect of [first!, second!]) {
+        expect(Math.abs(rect.y - outer.y)).toBeLessThanOrEqual(1);
+        expect(Math.abs(rect.y + rect.height - outer.y - outer.height)).toBeLessThanOrEqual(1);
+      }
       expect(first!.x + first!.width).toBeLessThanOrEqual(before.x);
       expect(overlaps(second!, before)).toBe(true);
       await openPanel('task');
-      await expectApart(page, [panel('card'), panel('notebook'), panel('task')]);
+      for (const rect of await expectApart(page, [panel('card'), panel('notebook'), panel('task')])) {
+        expect(Math.abs(rect.y - outer.y)).toBeLessThanOrEqual(1);
+        expect(Math.abs(rect.y + rect.height - outer.y - outer.height)).toBeLessThanOrEqual(1);
+      }
       expect(await box(terminal)).toEqual(before);
       expect(errors).toEqual([]);
     });
   }
 
   test(`on a wide screen all panels that fit stand beside the terminal: ${who}`, async ({ page }) => {
-    const { terminal, errors, openPanel, panel } = await openAgent(page, { lang: 'en', theme: 'dark', width: 1920 }, who);
+    const { terminal, errors, openPanel, panel, window } = await openAgent(page, { lang: 'en', theme: 'dark', width: 1920 }, who);
     const before = await box(terminal);
+    const outer = await box(window);
     await openPanel('card');
     await openPanel('notebook');
-    for (const rect of await expectApart(page, [panel('card'), panel('notebook')])) expect(overlaps(rect, before)).toBe(false);
+    for (const rect of await expectApart(page, [panel('card'), panel('notebook')])) {
+      expect(Math.abs(rect.y - outer.y)).toBeLessThanOrEqual(1);
+      expect(Math.abs(rect.y + rect.height - outer.y - outer.height)).toBeLessThanOrEqual(1);
+      expect(overlaps(rect, before)).toBe(false);
+    }
     expect(await box(terminal)).toEqual(before);
     expect(errors).toEqual([]);
   });
@@ -130,6 +148,8 @@ for (const who of PEOPLE) {
       const connected = connections();
       for (const name of ['card', 'notebook', 'task'] as const) {
         const rect = await box(await openPanel(name));
+        if (name === 'card') await page.screenshot({ path: test.info().outputPath(`phone-one-${s.lang}-${s.theme}.png`) });
+        expect(Math.abs(rect.y - before.y), `${name} and terminal tops`).toBeLessThanOrEqual(1);
         expect(rect).toMatchObject({ x: 0, width: s.width });
         await expect(terminal).toBeHidden();
         await panel(name).getByRole('button', { name: words.close, exact: true }).click();
@@ -148,13 +168,16 @@ for (const who of PEOPLE) {
     });
 
     test(`on a phone several panels scroll in a row, the newest in sight: ${named}`, async ({ page }) => {
-      const { errors, openPanel, panel, toggle } = await openAgent(page, s, who);
+      const { terminal, errors, openPanel, panel, toggle } = await openAgent(page, s, who);
+      const before = await box(terminal);
       await openPanel('card');
       await openPanel('notebook');
+      await page.screenshot({ path: test.info().outputPath(`phone-two-${s.lang}-${s.theme}.png`) });
       await expect(panel('notebook')).toBeInViewport({ ratio: 1 });
       await toggle('task').click();
       await expect(panel('task')).toBeInViewport({ ratio: 1 });
       const rects = await Promise.all((['card', 'notebook', 'task'] as const).map(name => box(panel(name))));
+      for (const rect of rects) expect(Math.abs(rect.y - before.y)).toBeLessThanOrEqual(1);
       for (const [i, rect] of rects.entries()) for (const other of rects.slice(i + 1)) expect(overlaps(rect, other)).toBe(false);
       await expect(toggle('card')).toBeVisible();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);

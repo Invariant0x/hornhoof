@@ -29,7 +29,7 @@ export const TEST_MEMORY_GB = 4;
 
 /* A repository as people who set it read it: never its token, only the token's last characters. */
 export const repoView = (d: typeof departments.$inferSelect) =>
-  d.repoUrl ? { url: d.repoUrl, branch: d.repoBranch ?? 'main', tokenLast4: d.repoTokenLast4, author: authorOf(d), testMemoryGb: d.repoTestMemoryGb ?? TEST_MEMORY_GB } : null;
+  d.repoUrl ? { url: d.repoUrl, branch: d.repoBranch ?? 'main', tokenLast4: d.repoTokenLast4, author: authorOf(d), testMemoryGb: d.repoTestMemoryGb ?? TEST_MEMORY_GB, fullTestCommand: d.repoFullTestCommand } : null;
 
 /* Where the agent finds the repository, added to every turn that carries one. */
 export const repoLine = (repo: Repo) =>
