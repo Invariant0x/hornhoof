@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { OPERATOR_KEY_MS, type OperatorKey, type OperatorKeyPrepared, type OperatorKeyResult, type OperatorScreen, type OperatorServerMessage } from '@hornhoof/protocol/program-operator';
+import { OPERATOR_KEY_MS, type OperatorKey, type OperatorKeyPrepared, type OperatorKeyResult, type OperatorRecoveryState, type OperatorScreen, type OperatorServerMessage } from '@hornhoof/protocol/program-operator';
 import type { Ctx } from '../../app.js';
 import { nodeIdentity, sameNode, type NodeIdentity } from '../nodes/hub.js';
 
 type Channels = Pick<Ctx, 'hub'>;
 type Target = { id: string; agentId: string; jobId: string; instance: string; nodeId: string; capability: string };
-type Reply = OperatorScreen | OperatorKeyResult | OperatorKeyPrepared;
+type Reply = OperatorScreen | OperatorKeyResult | OperatorKeyPrepared | OperatorRecoveryState;
 type Waiting = { node: NodeIdentity; target: Target; done(reply: Reply | null): void };
 const pending = new WeakMap<object, Map<string, Waiting>>();
 const WAIT_MS = 3000;
@@ -24,6 +24,13 @@ export async function requestOperatorKey(ctx: Channels, target: Target, input: {
   return reply?.type === 'program.key_result' ? reply : null;
 }
 
+/* What the node sees of the agent's program right now, for a decision that must not rest on what the database last heard. */
+export async function requestRecoveryState(ctx: Channels, target: Target): Promise<OperatorRecoveryState | null> {
+  const request = randomUUID();
+  const reply = await requestReply(ctx, target, `recovery:${request}`, { type: 'program.recovery_state_get', ...identity(target), request, case: target.id });
+  return reply?.type === 'program.recovery_state' ? reply : null;
+}
+
 function requestReply(ctx: Channels, target: Target, ref: string, command: OperatorServerMessage): Promise<Reply | null> {
   const node = nodeIdentity(target.nodeId);
   if (!ctx.hub.hasProgramOperator(node)) return Promise.resolve(null);
@@ -38,9 +45,15 @@ function requestReply(ctx: Channels, target: Target, ref: string, command: Opera
   });
 }
 
+function replyRef(reply: Reply): string {
+  if (reply.type === 'program.screen') return `screen:${reply.request}`;
+  if (reply.type === 'program.recovery_state') return `recovery:${reply.request}`;
+  return reply.type === 'program.key_prepared' ? `prepare:${reply.action}` : `key:${reply.action}`;
+}
+
 /* Replies bypass the evidence queue, but only the original socket identity and exact target can finish a request. */
 export function receiveOperatorReply(ctx: Channels, node: NodeIdentity, reply: Reply): boolean {
-  const ref = reply.type === 'program.screen' ? `screen:${reply.request}` : reply.type === 'program.key_prepared' ? `prepare:${reply.action}` : `key:${reply.action}`;
+  const ref = replyRef(reply);
   const waiting = pending.get(ctx.hub)?.get(ref);
   if (!waiting || !sameNode(node, waiting.node)) return false;
   const target = waiting.target;

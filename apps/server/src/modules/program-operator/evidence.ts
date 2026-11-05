@@ -7,7 +7,7 @@ import { hasCurrentKey } from '../nodes/nodes.js';
 import type { NodeIdentity } from '../nodes/hub.js';
 import { syncOperatorCases, updateOperatorCases } from './cases.js';
 import { operatorTransaction } from './transactions.js';
-import { acceptOperatorRecovery, reconcileRecoveryReceipts } from './recovery.js';
+import { acceptOperatorRecovery, reconcileRecoveryReceipts, settleDeliveryHolds } from './recovery.js';
 import { recordOperatorFallback } from './requeue.js';
 import { pump, settleWords } from '../conversation/queue.js';
 
@@ -65,6 +65,7 @@ async function recordEvidence(tx: Tx, inside: Ctx, nodeId: string, frame: Operat
   if (frame.type === 'program.delivery') await applyDeliveryFact(tx, frame, now);
   await acceptOperatorRecovery(inside, frame);
   await reconcileRecoveryReceipts(inside, frame.agentKey);
+  if (frame.type === 'program.delivery' && frame.kind === 'assignment' && (frame.phase === 'cancelled' || frame.phase === 'not_taken')) await settleDeliveryHolds(inside, frame.deliveryId);
   await updateOperatorCases(inside, frame, now);
   return true;
 }

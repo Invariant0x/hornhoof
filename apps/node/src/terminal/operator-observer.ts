@@ -7,7 +7,7 @@ import { readOperatorStore, writeOperatorStore } from './operator-storage.js';
 const Identity = z.object({ agentKey: z.uuid(), jobId: z.uuid().nullable(), instance: z.uuid() });
 export type OperatorIdentity = z.infer<typeof Identity>;
 const Question = z.object({ data: OperatorQuestion, jobId: z.uuid().nullable(), at: z.number(), ordinal: z.number().int().positive(), alarmed: z.boolean() });
-const Instance = Identity.extend({ at: z.number(), startedAt: z.number().nullable(), active: z.boolean(), exited: z.boolean(), ordinal: z.number().int().nonnegative(), phases: z.array(z.enum(['attempt', 'started', 'failed'])), alarmed: z.boolean(), question: Question.nullable().default(null), questionOrdinal: z.number().int().nonnegative().default(0), recovered: z.array(z.uuid()).default([]) });
+const Instance = Identity.extend({ at: z.number(), startedAt: z.number().nullable(), active: z.boolean(), exited: z.boolean(), ordinal: z.number().int().nonnegative(), phases: z.array(z.enum(['attempt', 'started', 'failed'])), alarmed: z.boolean(), question: Question.nullable().default(null), questionOrdinal: z.number().int().nonnegative().default(0), recovered: z.array(z.uuid()).default([]), recoveredByOwner: z.array(z.uuid()).default([]) });
 const Delivery = Identity.extend({ id: z.uuid(), ordinal: z.number().int().positive(), kind: z.enum(['assignment', 'live']), digest: z.string(), at: z.number(), receiptAt: z.number().nullable(), active: z.boolean(), outcome: z.enum(['pending', 'taken', 'not_taken', 'cancelled']), phases: z.array(z.enum(['attempt', 'queued', 'taken', 'activity', 'not_taken', 'cancelled'])), alarms: z.array(z.string()) });
 const StoredEvidence = OperatorNodeMessage.refine((frame): frame is OperatorEvidence => 'evidenceId' in frame);
 const Store = z.object({ instances: z.record(z.string(), Instance), deliveries: z.record(z.string(), Delivery), outbox: z.array(StoredEvidence) });
@@ -179,13 +179,15 @@ export class OperatorObserver {
     return Boolean(delivery && (delivery.kind === 'live' ? delivery.outcome === 'taken' : delivery.receiptAt !== null));
   }
 
-  recoveryReady(identity: OperatorIdentity, caseId: string): void {
+  /* Once by itself and once by its owner: the server may let only the owner go on. */
+  recoveryReady(identity: OperatorIdentity, caseId: string, owner: boolean): void {
     this.transition(() => {
       const instance = this.instance(identity);
-      if (instance.recovered.includes(caseId) || instance.exited) return;
+      const said = owner ? instance.recoveredByOwner : instance.recovered;
+      if (said.includes(caseId) || instance.exited) return;
       this.room(1);
-      instance.recovered.push(caseId);
-      this.emit(instance, { type: 'program.recovery_ready', ...identity, case: caseId });
+      said.push(caseId);
+      this.emit(instance, { type: 'program.recovery_ready', ...identity, case: caseId, owner });
     });
   }
 
@@ -292,7 +294,7 @@ export class OperatorObserver {
 
   private identity(value: OperatorIdentity): OperatorIdentity { return { agentKey: value.agentKey, jobId: value.jobId, instance: value.instance }; }
   private instance(identity: OperatorIdentity): Instance {
-    return this.state.instances[identity.instance] ??= { ...identity, at: this.now(), startedAt: null, active: false, exited: false, ordinal: 0, phases: [], alarmed: false, question: null, questionOrdinal: 0, recovered: [] };
+    return this.state.instances[identity.instance] ??= { ...identity, at: this.now(), startedAt: null, active: false, exited: false, ordinal: 0, phases: [], alarmed: false, question: null, questionOrdinal: 0, recovered: [], recoveredByOwner: [] };
   }
   private elapsed(at: number): number { return Math.max(0, Math.floor(this.now() - at)); }
 

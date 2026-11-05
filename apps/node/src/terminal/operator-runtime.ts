@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { z } from 'zod';
-import type { OperatorDelivery, OperatorNodeMessage, OperatorQuestion, OperatorReason, OperatorServerMessage } from '@hornhoof/protocol/program-operator';
+import type { OperatorDelivery, OperatorNodeMessage, OperatorQuestion, OperatorReason, OperatorRecoveryState, OperatorServerMessage } from '@hornhoof/protocol/program-operator';
 import { OperatorControl, type OperatorProgram } from './operator-control.js';
 import { OperatorObserver, type OperatorIdentity } from './operator-observer.js';
 
@@ -13,8 +13,10 @@ type Source = {
   capture(key: string): Promise<Pane>;
   press(key: string, value: 'Enter' | 'Up' | 'Down' | 'Left' | 'Right' | 'Tab'): Promise<void>;
   secrets(): string[];
+  /* What the program shows now: its input, null when that cannot be read, and whether it works on a turn. */
+  recovery(key: string): Promise<{ alive: boolean; input: string | null; busy: boolean }>;
 };
-type Target = { identity: OperatorIdentity; control: OperatorControl; generation: number; physical: boolean; pasted: boolean; started: boolean; active: boolean; recorded: boolean; taken: boolean; assignment: OperatorDelivery | null; sourceDelivery: OperatorDelivery | undefined; caseId: string | null; caseReason: OperatorReason | null; ownerTouched: boolean; bound: boolean; idle: boolean; pendingActivity: boolean; pendingQuestion: { data: OperatorQuestion; at: number } | null; deadline: number | null; failed: string | null; intentional?: 'cancelled' | 'update' | 'restart' | 'offline' | 'completed' };
+type Target = { identity: OperatorIdentity; control: OperatorControl; generation: number; physical: boolean; pasted: boolean; started: boolean; active: boolean; recorded: boolean; taken: boolean; sinceWords: boolean; assignment: OperatorDelivery | null; sourceDelivery: OperatorDelivery | undefined; caseId: string | null; caseReason: OperatorReason | null; ownerTouched: boolean; bound: boolean; idle: boolean; pendingActivity: boolean; pendingQuestion: { data: OperatorQuestion; at: number } | null; deadline: number | null; failed: string | null; intentional?: 'cancelled' | 'update' | 'restart' | 'offline' | 'completed' };
 
 /* Runtime glue stays outside the terminal host's provider logic; evidence and the key guard share one input lane. */
 export class OperatorRuntime {
@@ -52,12 +54,14 @@ export class OperatorRuntime {
   private createTarget(key: string, jobId: string | null, reuse: boolean): Target {
     const identity = { agentKey: key, jobId, instance: randomUUID() };
     const control = new OperatorControl({ file: join(this.options.dir, `actions-${key}.json`), now: this.now, current: () => this.current(key), capture: () => this.source.capture(key), press: value => this.source.press(key, value), lane: run => this.serial(key, run), secrets: this.source.secrets });
-    return { identity, control, generation: 0, physical: reuse, pasted: reuse, started: reuse, active: reuse, recorded: false, taken: false, assignment: null, sourceDelivery: undefined, caseId: null, caseReason: null, ownerTouched: false, bound: true, idle: false, pendingActivity: false, pendingQuestion: null, deadline: null, failed: null };
+    return { identity, control, generation: 0, physical: reuse, pasted: reuse, started: reuse, active: reuse, sinceWords: reuse, recorded: false, taken: false, assignment: null, sourceDelivery: undefined, caseId: null, caseReason: null, ownerTouched: false, bound: true, idle: false, pendingActivity: false, pendingQuestion: null, deadline: null, failed: null };
   }
 
   private bindTarget(target: Target, jobId: string | null, metadata: OperatorDelivery | undefined): void {
     if (target.identity.jobId !== jobId || target.assignment?.id !== metadata?.id) { target.caseId = null; target.caseReason = null; target.ownerTouched = false; target.deadline = null; target.failed = null; }
     if (target.idle) { target.pasted = false; target.started = false; target.active = false; }
+    /* What the program did before these words says nothing of them: a program that goes on its session has done plenty. */
+    if (target.idle || metadata) target.sinceWords = false;
     target.bound = true; target.idle = false;
     target.identity = { ...target.identity, jobId };
     target.assignment = metadata ?? null; target.recorded = false; target.taken = false;
@@ -78,7 +82,7 @@ export class OperatorRuntime {
     const target = this.targets.get(key); if (!target) return;
     this.observer.question(target.identity, null);
     target.bound = false; target.idle = false; target.pendingActivity = false; target.pendingQuestion = null;
-    target.pasted = false; target.started = false; target.active = false; target.generation++;
+    target.pasted = false; target.started = false; target.active = false; target.sinceWords = false; target.generation++;
   }
 
   launch(key: string, phase: 'attempt' | 'started' | 'failed'): void {
@@ -90,11 +94,11 @@ export class OperatorRuntime {
 
   changed(key: string): void { const target = this.targets.get(key); if (target) target.generation++; }
   pasted(key: string): void { const target = this.targets.get(key); if (target) { target.pasted = true; target.generation++; } }
-  started(key: string): void { const target = this.targets.get(key); if (target) { target.started = true; target.generation++; } }
+  started(key: string): void { const target = this.targets.get(key); if (target) { target.started = true; target.sinceWords = true; target.generation++; } }
 
   activity(key: string): void {
     const target = this.targets.get(key); if (!target) return;
-    target.active = true; target.generation++;
+    target.active = true; target.sinceWords = true; target.generation++;
     if (target.bound) this.observer.activity(target.identity, target.sourceDelivery);
     else target.pendingActivity = true;
   }
@@ -143,7 +147,7 @@ export class OperatorRuntime {
 
   recovering(key: string): boolean {
     const target = this.targets.get(key);
-    return Boolean(target?.failed && target.caseId && target.caseReason === 'assignment_unrecorded' && !target.recorded && !target.started && !target.active && target.physical);
+    return Boolean(target?.failed && target.caseId && target.caseReason === 'assignment_unrecorded' && !target.recorded && !target.sinceWords && target.physical);
   }
 
   ownerInput(key: string): void {
@@ -154,8 +158,14 @@ export class OperatorRuntime {
 
   recoveryReady(key: string, ready: boolean): void {
     const target = this.targets.get(key);
-    if (!target || !ready || !target.ownerTouched || !this.recovering(key) || this.awaitingNativeInput(key)) return;
-    this.observer.recoveryReady(target.identity, target.caseId!);
+    if (!target || !ready || !this.recovering(key) || this.awaitingNativeInput(key)) return;
+    this.observer.recoveryReady(target.identity, target.caseId!, target.ownerTouched);
+  }
+
+  /* The program may still take these words again: it neither recorded them nor did anything since, and asks nothing. */
+  wordsWaiting(key: string): boolean {
+    const target = this.targets.get(key);
+    return Boolean(target && !target.recorded && !target.sinceWords && !this.awaitingNativeInput(key));
   }
 
   private awaitingNativeInput(key: string): boolean {
@@ -165,7 +175,7 @@ export class OperatorRuntime {
 
   failure(key: string): string | null {
     const target = this.targets.get(key);
-    if (!target || target.recorded || target.active || target.started) return null;
+    if (!target || target.recorded || target.sinceWords) return null;
     return target.failed;
   }
 
@@ -192,6 +202,7 @@ export class OperatorRuntime {
 
   async message(frame: OperatorServerMessage): Promise<void> {
     if (frame.type === 'program.evidence_ack') { this.observer.ack(frame.evidenceId); return; }
+    if (frame.type === 'program.recovery_state_get') { this.options.send(await this.recoveryState(frame)); return; }
     const target = this.targets.get(frame.agentKey);
     if (!target) {
       this.missingProgram(frame);
@@ -206,7 +217,18 @@ export class OperatorRuntime {
     else this.options.send(await target.control.key(frame));
   }
 
-  private missingProgram(frame: Exclude<OperatorServerMessage, { type: 'program.evidence_ack' }>): void {
+  /* What the node sees of an agent's program right now, whichever program that is by now. */
+  private async recoveryState({ agentKey, jobId, instance, request }: Extract<OperatorServerMessage, { type: 'program.recovery_state_get' }>): Promise<OperatorRecoveryState> {
+    const reply = { type: 'program.recovery_state' as const, agentKey, jobId, instance, request };
+    const target = this.targets.get(agentKey);
+    const shown = target?.physical ? await this.source.recovery(agentKey) : null;
+    if (!target || !shown?.alive) return { ...reply, program: 'gone', current: null, generation: 0, input: 'unknown', wait: null, runningTool: false, retrying: false, busy: false };
+    const source = this.source.current(agentKey);
+    const wait = source?.wait ? (source.wait.kind === 'harmless' ? 'unknown' : source.wait.kind) : null;
+    return { ...reply, program: 'here', current: target.identity.instance, generation: target.generation, input: shown.input === null ? 'unknown' : shown.input ? 'words' : 'empty', wait, runningTool: Boolean(source?.runningTool), retrying: Boolean(source?.retrying), busy: shown.busy || target.sinceWords };
+  }
+
+  private missingProgram(frame: Exclude<OperatorServerMessage, { type: 'program.evidence_ack' | 'program.recovery_state_get' }>): void {
     const identity = { agentKey: frame.agentKey, jobId: frame.jobId, instance: frame.instance };
     if (frame.type === 'program.screen_get') this.options.send({ type: 'program.screen', ...identity, request: frame.request, result: 'refused', reason: 'no_program', snapshot: null, generation: 0, state: 'unknown', keysAllowed: false, protected: false, cols: 1, rows: 1, cells: '' });
     if (frame.type === 'program.key_send') this.options.send({ type: 'program.key_result', ...identity, action: frame.action, result: 'refused', reason: 'no_program' });

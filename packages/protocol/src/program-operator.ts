@@ -41,7 +41,8 @@ export const OperatorNodeMessages = [
   z.object({ type: z.literal('program.screen'), ...identity, request: z.uuid(), result: z.enum(['ok', 'refused']), reason: OperatorError.nullable(), snapshot: opaque.nullable(), generation: count, state: z.enum(['pre_work', 'working', 'awaiting_input', 'gone', 'unknown']), keysAllowed: z.boolean(), protected: z.boolean(), cols: z.number().int().min(1).max(512), rows: z.number().int().min(1).max(256), cells: z.string().max(OPERATOR_CELLS_BYTES).refine(value => new TextEncoder().encode(value).length <= OPERATOR_CELLS_BYTES) }).strict(),
   z.object({ type: z.literal('program.key_result'), ...identity, action: z.uuid(), result: z.enum(['applied', 'refused', 'unknown']), reason: OperatorError.nullable() }).strict(),
   z.object({ type: z.literal('program.key_prepared'), ...identity, action: z.uuid(), result: z.enum(['ok', 'refused']), reason: OperatorError.nullable(), lease: z.uuid().nullable() }).strict(),
-  z.object({ type: z.literal('program.recovery_ready'), ...evidence, case: z.uuid() }).strict(),
+  z.object({ type: z.literal('program.recovery_ready'), ...evidence, case: z.uuid(), owner: z.boolean().optional() }).strict(),
+  z.object({ type: z.literal('program.recovery_state'), ...identity, request: z.uuid(), program: z.enum(['here', 'gone']), current: z.uuid().nullable(), generation: count, input: z.enum(['empty', 'words', 'unknown']), wait: OperatorQuestion.shape.kind.nullable(), runningTool: z.boolean(), retrying: z.boolean(), busy: z.boolean() }).strict(),
 ] as const;
 
 export const OperatorNodeMessage = z.discriminatedUnion('type', OperatorNodeMessages);
@@ -50,11 +51,13 @@ export type OperatorEvidence = Extract<OperatorNodeMessage, { evidenceId: string
 export type OperatorScreen = Extract<OperatorNodeMessage, { type: 'program.screen' }>;
 export type OperatorKeyResult = Extract<OperatorNodeMessage, { type: 'program.key_result' }>;
 export type OperatorKeyPrepared = Extract<OperatorNodeMessage, { type: 'program.key_prepared' }>;
+export type OperatorRecoveryState = Extract<OperatorNodeMessage, { type: 'program.recovery_state' }>;
 
 const keyInput = { ...identity, case: z.uuid(), capability: opaque, snapshot: opaque, generation: count, action: z.uuid(), key: OperatorKey };
 
 export const OperatorServerMessages = [
   z.object({ type: z.literal('program.screen_get'), ...identity, request: z.uuid(), case: z.uuid(), capability: opaque }).strict(),
+  z.object({ type: z.literal('program.recovery_state_get'), ...identity, request: z.uuid(), case: z.uuid() }).strict(),
   z.object({ type: z.literal('program.key_prepare'), ...keyInput }).strict(),
   z.object({ type: z.literal('program.key_send'), ...keyInput, lease: z.uuid(), withinMs: z.number().int().min(1).max(OPERATOR_KEY_MS).optional() }).strict(),
   z.object({ type: z.literal('program.operator_case'), ...identity, case: z.uuid(), capability: opaque, disposition: z.enum(['open', 'revoke']), remainingMs: count.max(OPERATOR_CASE_MS), revision: count, readOnly: z.boolean().optional(), reason: OperatorReason.optional(), questionId: z.uuid().nullable().optional(), closedBecause: z.string().min(1).max(100).optional() }).strict(),

@@ -93,16 +93,16 @@ it('stops question timers on cancellation and on process restoration', () => {
   expect(c.sent.some(f => f.type === 'program.operator_needed' && f.reason === 'question_waiting')).toBe(false);
 });
 
-it('retains the pre-work case after escalation and reports readiness once only after owner input', async () => {
+it('retains the pre-work case after escalation and reports readiness once by itself and once after owner input', async () => {
   const c = fixture();
   const command = { type: 'program.operator_case' as const, ...c.identity, case: randomUUID(), capability: randomUUID(), remainingMs: 600000, disposition: 'open' as const, revision: 1, reason: 'assignment_unrecorded' as const };
   await c.runtime.message(command);
   await c.runtime.message({ ...command, revision: 2, disposition: 'revoke', closedBecause: 'operator_unavailable' });
-  c.runtime.recoveryReady(c.identity.agentKey, true);
-  expect(c.sent.some(f => f.type === 'program.recovery_ready')).toBe(false);
+  c.runtime.recoveryReady(c.identity.agentKey, true); c.runtime.recoveryReady(c.identity.agentKey, true);
+  expect(c.sent.filter(f => f.type === 'program.recovery_ready')).toEqual([expect.objectContaining({ case: command.case, ...c.identity, owner: false })]);
   c.runtime.ownerInput(c.identity.agentKey);
   c.runtime.recoveryReady(c.identity.agentKey, true); c.runtime.recoveryReady(c.identity.agentKey, true);
-  expect(c.sent.filter(f => f.type === 'program.recovery_ready')).toEqual([expect.objectContaining({ case: command.case, ...c.identity })]);
+  expect(c.sent.filter(f => f.type === 'program.recovery_ready').map(f => f.type === 'program.recovery_ready' && f.owner)).toEqual([false, true]);
   expect(c.runtime.failureDetail(c.identity.agentKey)).toContain(command.case);
   expect(c.runtime.failureDetail(c.identity.agentKey)).toContain('operator_unavailable');
 });

@@ -161,14 +161,14 @@ function canEscalate(row: Case, outcome: string): boolean {
 
 async function needsRecoveryHold(ctx: Ctx, row: Case): Promise<boolean> {
   const [delivery] = row.deliveryId ? await ctx.db.select().from(programDeliveries).where(eq(programDeliveries.id, row.deliveryId)) : [];
-  const [instance] = await ctx.db.select().from(programInstances).where(eq(programInstances.id, row.instance));
   const [target] = await ctx.db.select().from(jobs).where(eq(jobs.id, row.jobId));
   const current = await latestInstance(ctx, row.agentId);
-  return row.reason === 'assignment_unrecorded' && (!current || current === row.instance) && waitingForWords(delivery, instance, target, row.id);
+  return row.reason === 'assignment_unrecorded' && (!current || current === row.instance) && waitingForWords(delivery, target, row.id);
 }
 
-function waitingForWords(delivery: typeof programDeliveries.$inferSelect | undefined, instance: typeof programInstances.$inferSelect | undefined, target: typeof jobs.$inferSelect | undefined, caseId: string): boolean {
-  return !delivery?.receiptAt && !instance?.active && (target?.status === 'running' || matchingOperatorTimeout(target, caseId));
+/* The facts of these words, not of the program: one that goes on its session did plenty before them. */
+function waitingForWords(delivery: typeof programDeliveries.$inferSelect | undefined, target: typeof jobs.$inferSelect | undefined, caseId: string): boolean {
+  return !delivery?.receiptAt && !delivery?.firstActivityAt && (target?.status === 'running' || matchingOperatorTimeout(target, caseId));
 }
 
 function matchingOperatorTimeout(job: typeof jobs.$inferSelect | undefined, caseId: string): boolean {
@@ -231,7 +231,7 @@ export async function syncOperatorCases(ctx: Ctx, agentId: string, now = new Dat
 }
 
 async function pumpCaseNotices(ctx: Ctx, row: Case): Promise<void> {
-  for (const id of [row.operatorJobId, row.escalationJobId, row.continuationJobId]) {
+  for (const id of [row.operatorJobId, row.escalationJobId, row.continuationJobId, row.resolution?.holdCall?.job]) {
     if (!id) continue;
     const [job] = await ctx.db.select({ agentId: jobs.agentId }).from(jobs).where(eq(jobs.id, id));
     if (job?.agentId) await pump(ctx, job.agentId);

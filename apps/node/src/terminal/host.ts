@@ -29,6 +29,7 @@ import { CALLS } from './tool-calls.js';
 import { agyError, agySteps, claudeStatusContext, claudeStatusLimits, codexRollout, kimiWire, LineTail, type WireNews } from './transcripts.js';
 import type { RecordingCursor } from './recordings.js';
 import { envFile, type Tmux } from './tmux.js';
+import { LostWords } from './lost-words.js';
 import { OperatorRuntime, type OperatorOptions } from './operator-runtime.js';
 import { ownThought } from './operator-activity.js';
 import type { OperatorProgram } from './operator-control.js';
@@ -111,6 +112,8 @@ type Agent = {
   busy: boolean;
   /* The program took the prompt Hornhoof typed: its prompt hook ran or its log says the turn started. */
   took?: boolean;
+  /* A person typed into the program since Hornhoof's words went in: its input is theirs from then on. */
+  ownerTyped?: boolean;
   /* The prompt Hornhoof typed, until the program's prompt hook says what it got. */
   typing?: string | null;
   limits: Limits | null;
@@ -220,6 +223,8 @@ type Options = {
   toolsMs?: number;
   /* How long the host waits for the program to take a prompt before it presses Enter again. */
   enterWaitMs?: number;
+  /* How long a program shows an empty input and no change at all before words it did not record count as lost. */
+  wordsQuietMs?: number;
   /* How often the host observes the program and reports its state again when nothing changed. */
   lookMs?: number;
   reportMs?: number;
@@ -254,7 +259,7 @@ const SLASH_MS = 500;
 /* How long a program that just showed its prompt takes before it reads what is typed. */
 const PROMPT_SETTLE_MS = 500;
 /* What the options leave out: how long the host waits for what, and the terminal's size. */
-const DEFAULTS = { readyMs: 120_000, pollMs: 500, openMs: 8000, toolsMs: 15_000, enterWaitMs: 4000, reportMs: REPORT_MS, cols: 160, rows: 48 };
+const DEFAULTS = { readyMs: 120_000, pollMs: 500, openMs: 8000, toolsMs: 15_000, enterWaitMs: 4000, wordsQuietMs: 15_000, reportMs: REPORT_MS, cols: 160, rows: 48 };
 /* The options given, without those set to nothing. */
 const defined = (opts: Options): Partial<Options> => Object.fromEntries(Object.entries(opts).filter(([, value]) => value !== undefined));
 /* When the host last looked at the program, and the tool it ran then. */
@@ -337,6 +342,7 @@ export class TerminalHost {
   private readonly openMs: number;
   private readonly toolsMs: number;
   private readonly enterWaitMs: number;
+  private readonly wordsQuietMs: number;
   private readonly lookMs: number;
   private readonly reportMs: number;
   /* Views being opened, and those Hornhoof closed meanwhile. */
@@ -364,6 +370,7 @@ export class TerminalHost {
     this.openMs = set.openMs;
     this.toolsMs = set.toolsMs;
     this.enterWaitMs = set.enterWaitMs;
+    this.wordsQuietMs = set.wordsQuietMs;
     this.lookMs = opts.lookMs ?? LOOK_MS;
     this.reportMs = set.reportMs;
     this.cols = set.cols;
@@ -373,7 +380,7 @@ export class TerminalHost {
   }
 
   private operatorFor(opts: Options): OperatorRuntime | null {
-    return opts.operator ? new OperatorRuntime(opts.operator, { current: key => this.operatorState(key), capture: key => this.operatorPane(key), press: (key, value) => this.opts.tmux.keys(this.agents.get(key)!.name, value), secrets: opts.secrets }) : null;
+    return opts.operator ? new OperatorRuntime(opts.operator, { current: key => this.operatorState(key), capture: key => this.operatorPane(key), press: (key, value) => this.opts.tmux.keys(this.agents.get(key)!.name, value), recovery: key => this.operatorRecovery(key), secrets: opts.secrets }) : null;
   }
 
   private operatorTicks(): NodeJS.Timeout | null {
@@ -392,6 +399,12 @@ export class TerminalHost {
     this.drain(a);
     const wait = a.operatorQuestion ? { id: a.operatorQuestion.id, kind: a.operatorQuestion.kind } : null;
     return { agentProgram: Boolean(a.program && a.hash), alive: true, pasted: false, turnStarted: a.took === true, active: false, runningTool: [...a.calls.values()].some(call => call.name !== 'AskUserQuestion'), retrying: Boolean(a.retry || a.restarting), wait };
+  }
+
+  private async operatorRecovery(key: string): Promise<{ alive: boolean; input: string | null; busy: boolean }> {
+    const a = this.agents.get(key);
+    if (!a?.program || !(await this.opts.tmux.alive(a.name))) return { alive: false, input: null, busy: false };
+    return { alive: true, input: inputOf(a.program.kind, await this.opts.tmux.screen(a.name, 0, true)), busy: a.busy };
   }
 
   private async operatorPane(key: string): Promise<{ cols: number; rows: number; cells: string }> {
@@ -781,9 +794,9 @@ export class TerminalHost {
   private async typeOperatorPrompt(a: Agent, job: TermJob, prompt: string): Promise<RunResult | null> {
     if (this.operator?.inheritSource(a.key, job.operatorSourceDelivery)) return a.busy ? null : this.failedTurn(a, job, 'cancelled');
     if (this.operator?.recorded(a.key)) return null;
-    a.fresh = false; a.took = false; a.typing = prompt;
+    a.fresh = false; a.took = false; a.typing = prompt; a.ownerTyped = false;
     const failed = await this.pasteOperatorPrompt(a, job, prompt);
-    return failed ?? this.waitOperatorReceipt(a, job);
+    return failed ?? this.waitOperatorReceipt(a, job, prompt);
   }
 
   private operatorPending(a: Agent): boolean {
@@ -826,15 +839,26 @@ export class TerminalHost {
     return !job.input.signal?.aborted && !a.took && !this.operator?.recorded(a.key) && inputOf(job.program.kind, screen) === '';
   }
 
-  private async waitOperatorReceipt(a: Agent, job: TermJob): Promise<RunResult | null> {
+  private async waitOperatorReceipt(a: Agent, job: TermJob, prompt: string): Promise<RunResult | null> {
+    const lost = new LostWords(prompt, { enterMs: this.enterWaitMs, quietMs: this.wordsQuietMs }, Date.now());
     while (this.operatorPending(a)) {
       this.drain(a); this.operatorTick();
       if (job.input.signal?.aborted) return this.failedTurn(a, job, 'cancelled');
       const failed = await this.operatorReceiptFailure(a, job);
       if (failed) return failed;
+      await this.inputLane(a, () => this.repeatLostWords(a, job, prompt, lost));
       await sleep(this.pollMs);
     }
     return null;
+  }
+
+  /* A program can miss the Enter or lose the words, more so as it starts or resumes a long session: the same turn tries again,
+     as long as nothing shows the program took them and nobody else is at its input. */
+  private async repeatLostWords(a: Agent, job: TermJob, prompt: string, lost: LostWords): Promise<void> {
+    if (a.ownerTyped || a.took || job.input.signal?.aborted || !this.operator?.wordsWaiting(a.key)) return;
+    const step = lost.step(job.program.kind, await this.opts.tmux.screen(a.name, 0, true), Date.now());
+    if (step === 'enter') await this.opts.tmux.keys(a.name, 'Enter');
+    if (step === 'type') await this.submitOperatorAssignment(a, job, prompt);
   }
 
   private async operatorReceiptFailure(a: Agent, job: TermJob): Promise<RunResult | null> {
@@ -2213,6 +2237,7 @@ export class TerminalHost {
   private ownerTyped(view: View, data: string): void {
     this.operator?.ownerInput(view.key);
     const a = this.agents.get(view.key);
+    if (a) a.ownerTyped = true;
     if (a) void this.inputLane(a, async () => { view.child.stdin?.write(data); });
   }
 
