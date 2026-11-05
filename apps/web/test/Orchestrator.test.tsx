@@ -215,6 +215,21 @@ describe('AgentWindow', () => {
     expect(screen.getAllByRole('checkbox')).toHaveLength(10);
   });
 
+  it.each([
+    [{ state: 'waiting', turnsLeft: 2, partsLeft: 0, until: '2026-11-04T21:30:00.000Z' }],
+    [{ state: 'restarting', since: '2026-11-04T21:00:00.000Z' }],
+  ])('says that turns wait while the machine gets ready for an update, and he can still be written to (%j)', async machineDrain => {
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, machineDrain } }] });
+    expect(await screen.findByText('The machine is finishing its work before an update. New turns wait and go on by themselves after it.')).toBeInTheDocument();
+    expect(screen.getByRole('textbox')).toBeEnabled();
+  });
+
+  it('says nothing of the machine when its update was put off, since turns go out then', async () => {
+    open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, machineDrain: { state: 'postponed', turnsLeft: 1, partsLeft: 0, retryAt: '2026-11-04T22:05:00.000Z' } } }] });
+    await screen.findByRole('textbox');
+    expect(screen.queryByText(/before an update/)).not.toBeInTheDocument();
+  });
+
   it('says that his plan is at its limit and that his turns wait until it starts over', async () => {
     open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, limitUntil: '2026-10-31T19:20:00Z' } }] });
     expect(await screen.findByText(/^The plan is at its limit\. Turns wait until .+ and go on by themselves then\.$/)).toBeInTheDocument();

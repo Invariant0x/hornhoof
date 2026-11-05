@@ -6,6 +6,7 @@ import { currentTheme, setTheme, type Theme } from '../theme';
 import type { Me, Org } from '../types';
 import { LogoMark } from '../ui/icons';
 import { UpdateBanner } from '../ui/UpdateBanner';
+import { UpdateCut } from '../ui/UpdateCut';
 import { useVersion, versionText } from '../ui/VersionMark';
 import { useDecisions, useImprovements } from '../tasks';
 import { TaskPanel } from '../ui/TaskPanel';
@@ -371,6 +372,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
         />
       )}
       <AccountDialog active={!company && (accountDialog === 'settings' || accountDialog === 'versions') ? null : accountDialog} me={currentMe} updates={updates} onHome={goHome} onRenamed={setSelfName} onClose={() => { closeOverlay(); accountButton.current?.focus(); }} />
+      {company && updates.cut && <UpdateCut cut={updates.cut} updates={updates} />}
     </div>
     </AgentWindowContext>
   );

@@ -17,6 +17,7 @@ import { planStateOnMachine, subName } from '../ui/subscription';
 import { useNow } from '../ui/reset';
 import { MachineConnections } from '../ui/MachineConnections';
 import { ProgramVersions } from '../ui/ProgramVersions';
+import { DrainLine, DrainMark } from '../ui/MachineDrain';
 import { RouteUnavailable, unavailableFailure, type CardRoute } from './RouteUnavailable';
 
 const REFRESH_MS = 5000;
@@ -130,17 +131,18 @@ function machineRows(machines: MachineView[], builtin: BuiltinView | null, subs:
     const here = m.id === host ? builtin : null;
     return { ...m, source: m, server: Boolean(here), online: m.online || Boolean(here?.online), load: m.load ?? here?.load ?? null,
       browserError: m.browserError || here?.browserError || null,
+      drain: m.drain ?? here?.drain ?? null,
       plans: [...m.plans, ...(here ? keys : [])],
       running: here ? combinedRunning(m.running, here.running) : m.running };
   });
   if (!builtin || machines.some(m => m.id === host)) return rows;
-  return [...rows, { id: 'builtin', hostname: builtinName, source: null, server: true, owner: null, lendsTests: null, os: 'linux', arch: '', online: builtin.online, lastSeenAt: null, plans: keys, load: builtin.load, running: builtin.running, programs: builtin.programs, browserError: builtin.browserError || null }];
+  return [...rows, { id: 'builtin', hostname: builtinName, source: null, server: true, owner: null, lendsTests: null, os: 'linux', arch: '', online: builtin.online, lastSeenAt: null, plans: keys, load: builtin.load, running: builtin.running, programs: builtin.programs, browserError: builtin.browserError || null, drain: builtin.drain ?? null }];
 }
 
 function machineColumns(t: Messages, language: Language): TableColumn<MachineRow>[] {
   const load = (m: MachineRow) => m.online && m.load ? busyShare(m.load.load, m.load.cpus) : null;
   return [
-    { key: 'name', label: t.tables.machine, direction: 1, value: m => m.hostname, cell: m => <><span className="nm"><b>{m.hostname}</b></span>{m.server && <Leader />}<OtherBuild row={m} /><BrowserIssue row={m} /></> },
+    { key: 'name', label: t.tables.machine, direction: 1, value: m => m.hostname, cell: m => <><span className="nm"><b>{m.hostname}</b></span>{m.server && <Leader />}<DrainMark drain={m.drain} /><OtherBuild row={m} /><BrowserIssue row={m} /></> },
     { key: 'owner', label: t.machines.owner, direction: 1, value: m => m.owner?.name ?? null, cell: m => m.owner?.name },
     { key: 'status', label: t.tables.status, direction: 1, value: m => m.online ? 0 : 1, className: 'k-status', cell: m => m.online ? <span className="status ready">{t.machines.online}</span> : <span className="muted">{lastSeen(t, language, m.lastSeenAt)}</span> },
     { key: 'load', label: t.machines.load, direction: -1, value: load, cell: m => load(m) === null ? t.machines.unknown : <span className="cell-load"><Bar used={load(m)! / 100} /><b>{load(m)}%</b></span> },
@@ -265,7 +267,7 @@ function MachineDetails({ row, subs, me, now, controls }: { row: MachineRow; sub
   const picking = controls.picking === row.id;
   return (
     <CardFrame label={row.hostname} accent={row.server}
-      head={<CardHead mark={<MachineMark />} name={row.hostname} badges={<>{row.server && <Leader />}<OtherBuild row={row} /><BrowserIssue row={row} /></>} state={<span className={`status ${row.online ? 'ready' : 'offline'}`}>{row.online ? t.machines.online : t.cards.offline}</span>} line={!row.online && lastSeen(t, language, row.lastSeenAt)} />}
+      head={<CardHead mark={<MachineMark />} name={row.hostname} badges={<>{row.server && <Leader />}<DrainMark drain={row.drain} /><OtherBuild row={row} /><BrowserIssue row={row} /></>} state={<span className={`status ${row.online ? 'ready' : 'offline'}`}>{row.online ? t.machines.online : t.cards.offline}</span>} line={row.drain ? <DrainLine drain={row.drain} /> : !row.online && lastSeen(t, language, row.lastSeenAt)} />}
       extra={m && <PlanPicker machine={m} addable={addable} shown={shown} picking={picking} controls={controls} />}>
       <section className="blk blk-facts">
         <h4>{t.cards.aboutMachine}</h4>

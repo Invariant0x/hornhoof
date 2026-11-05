@@ -6,6 +6,7 @@ import type { Ctx } from '../../app.js';
 import { agentEvents, agents, departments, jobs, programDeliveries, programInstances, programOperatorCases, programOperatorSignals, subscriptions } from '../../db/schema.js';
 import { identityOf, nodeIdentity } from '../nodes/hub.js';
 import { insertTurn, limitUntil, pump } from '../conversation/queue.js';
+import { nodeHeld } from '../updates/drain.js';
 import { currentOperatorQuestion, liveFailureSignals, qualifyingReasons } from './policy.js';
 import { operatorTransaction } from './transactions.js';
 import { operatorNotification } from './notifications.js';
@@ -112,7 +113,8 @@ async function pickOperator(ctx: Ctx, companyId: string, target: string) {
     .where(and(eq(agents.companyId, companyId), eq(subscriptions.companyId, companyId), eq(departments.companyId, companyId), eq(departments.templateKey, 'operations'), eq(agents.roleKey, PROGRAM_OPERATOR_ROLE), eq(agents.kind, 'worker'), ne(agents.id, target), isNull(agents.removedAt), isNull(agents.switchedOffAt), isNull(subscriptions.removedAt), eq(subscriptions.status, 'ready'))).orderBy(asc(agents.createdAt));
   for (const { agent, sub } of candidates) {
     const node = identityOf(sub, agent.nodeId);
-    if (!node || !ctx.hub.isReady(node) || limitUntil(sub.limits, sub.limitsUpdatedAt)) continue;
+    /* A machine that restarts for an update comes back: the operator's turn waits for it. */
+    if (!node || !(ctx.hub.isReady(node) || nodeHeld(ctx, node)) || limitUntil(sub.limits, sub.limitsUpdatedAt)) continue;
     const [stuck] = await ctx.db.select({ id: programOperatorCases.id }).from(programOperatorCases).where(and(eq(programOperatorCases.agentId, agent.id), ne(programOperatorCases.status, 'resolved'))).limit(1);
     if (!stuck) return agent;
   }

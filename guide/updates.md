@@ -6,10 +6,16 @@
 
 Hornhoof checks for a newer build every 30 minutes. People who see the whole company get a banner when one is out:
 
-- "Update" moves to it now;
+- "Update" moves to it now. If agents are in the middle of their turns, Hornhoof first says how many would stop, and nothing stops until you say yes;
 - "Update when agents finish" waits until no agent is working.
 
 Running the install line again updates too.
+
+## Why does a machine say it is waiting to update?
+
+A planned update does not cut off agents at work. The machine takes no new work, what runs on it finishes, and then it restarts and takes work again by itself. Its card says how many turns are left and until when. You can still write to its agents: their next turn starts after the update, or on another free machine of the same plan.
+
+If the work does not finish in time, nothing stops. The update is put off, the card says when it tries again, and the head of Operations is told.
 
 ## Go back to an earlier build
 

@@ -6,7 +6,7 @@ import { agentEvents, jobs, pendingWakes, tasks, type ExternalWait } from '../..
 import { ApiError } from '../../errors.js';
 import { loadTask, move, refuse, type Moved, type Task, type Wake } from './engine.js';
 import { wakeAll } from './wake.js';
-import { enqueueTurn, insertOrDeliverTurn, onAgent, pump, type TurnMessage } from '../conversation/queue.js';
+import { agentState, enqueueTurn, insertOrDeliverTurn, onAgent, pump, type TurnMessage } from '../conversation/queue.js';
 import { withInputLock } from '../conversation/decision-context.js';
 import { messageNotDelivered } from '../conversation/live.js';
 import { recordWaitNotice, requestedWaitNotice } from './wait-notices.js';
@@ -85,7 +85,7 @@ async function queueMessage(ctx: Ctx, input: TaskMessage, turn: MessageTurn): Pr
     : queueBoundMessage(ctx, { ...input, task: input.task }, turn, required));
   try {
     await pump(ctx, input.agentId);
-    if (required) await onAgent(ctx, input.agentId, () => confirmMessage(ctx, queued.id));
+    if (required) await onAgent(ctx, input.agentId, () => confirmMessage(ctx, input.agentId, queued.id));
   } catch (error) {
     const resumed = queued.resumed;
     if (resumed) await onAgent(ctx, input.agentId, () => restoreWait(ctx, resumed, input.actor));
@@ -94,7 +94,10 @@ async function queueMessage(ctx: Ctx, input: TaskMessage, turn: MessageTurn): Pr
   return queued.id;
 }
 
-async function confirmMessage(ctx: Ctx, id: string): Promise<void> {
+async function confirmMessage(ctx: Ctx, agentId: string, id: string): Promise<void> {
+  /* Its machine gets ready for an update: the turn waits in line and goes out after it, so nothing is lost. */
+  const drain = (await agentState(ctx, agentId)).machineDrain;
+  if (drain && drain.state !== 'postponed') return;
   await ctx.db.update(jobs).set({ status: 'failed', error: 'message_not_delivered', finishedAt: new Date() }).where(and(eq(jobs.id, id), eq(jobs.status, 'queued')));
   const [job] = await ctx.db.select({ status: jobs.status }).from(jobs).where(eq(jobs.id, id));
   if (!job || job.status === 'failed') throw messageNotDelivered();

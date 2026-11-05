@@ -95,7 +95,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
       'agents',
       {
         description:
-          'Every agent of the company as it is now: department, role, whether it is on and ready (and why not), until when its plan is at its limit, whether a turn runs and since when, ' +
+          'Every agent of the company as it is now: department, role, whether it is on and ready (and why not), until when its plan is at its limit, whether its machine is getting ready for an update (machineDrain: its turns wait, it has not hung), whether a turn runs and since when, ' +
           'turns waiting, the open tasks it holds with when each last moved, its last activity, how its last turn ended, program state and signs of life, failures, waiting retries, and whether a safe program restart is allowed with the reason when it is not.',
       },
       async () => {
@@ -135,6 +135,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
             ready: state.ready,
             reason: state.reason,
             limitUntil: state.limitUntil,
+            machineDrain: state.machineDrain,
             busy: state.busy,
             runningSince: running?.at ?? null,
             queued: state.queued,
@@ -325,7 +326,8 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
       if (!anywhere && (await topOf(target.departmentId)) !== (await topOf(me.departmentId)))
         return say(`${target.name} works in another department. Ask your head, who has the orchestrator pass it on.`, true);
       if (target.switchedOffAt) return say(`${target.name} is switched off and takes no work until a person switches it on.`, true);
-      if (!(await agentState(ctx, target.id)).ready) return say(`${target.name} cannot run now. Tell your head, who tells the CEO.`, true);
+      const state = await agentState(ctx, target.id);
+      if (!state.ready) return say(`${target.name} cannot run now. Tell your head, who tells the CEO.`, true);
       if (!(await counted(me.id))) return say(`One turn sends at most ${TURN_NUDGES} messages. Go on in your next round.`, true);
       const back = givingBack(ctx, job.companyId, me.id, target.id);
       return queueTaskMessage(ctx, { companyId: job.companyId, agentId: target.id, task: ref, actor: { agentId: me.id }, text }, {
@@ -346,7 +348,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
             to: same ? { kind: 'agent', id: target.id, departmentId: target.departmentId } : { kind: 'department', id: target.departmentId },
           });
         }
-        return say(`Sent to ${target.name}.`);
+        return say(`Sent to ${target.name}.${state.machineDrain ? ' Its machine waits for an update, so the turn starts after it.' : ''}`);
       }, taskMessageFailure);
     },
   );

@@ -1,6 +1,6 @@
 import type { ExternalWait } from '@hornhoof/protocol/waits';
 import type { Notification } from '@hornhoof/protocol';
-import type { ConnectionEnd, FailureKind, Limits, ModelOption, NodeDisconnectCause, NodeLoad, NodeReconnect, ProgramInfo, ProviderId, TemplateKey } from '@hornhoof/protocol';
+import type { ConnectionEnd, FailureKind, Limits, MachineDrain, ModelOption, NodeDisconnectCause, NodeLoad, NodeReconnect, ProgramInfo, ProviderId, TemplateKey } from '@hornhoof/protocol';
 import type { RoleEffort } from '@hornhoof/protocol/efforts';
 import type { ProgramRetry, TurnAlarm, TurnProgram, TurnRetry, WorkLine } from '@hornhoof/protocol/map';
 
@@ -186,6 +186,8 @@ export type OrchestratorState = {
   limitUntil?: string | null;
   /* The plan used the share set for tasks until then; task turns wait, people's messages still go. */
   budgetUntil?: string | null;
+  /* Its machine gets ready for an update; new turns wait for it, and people may still write. */
+  machineDrain?: MachineDrain | null;
   reason: 'no_subscription' | 'waiting_machine' | 'needs_login' | 'needs_setup' | 'node_outdated' | 'machine_offline' | null;
   browserError?: string | null;
   busy: boolean;
@@ -456,6 +458,7 @@ export type TurnView = {
 
 export type Machine = { id: string; hostname: string };
 
+export type { MachineDrain };
 /* Why a machine dropped: as the server saw it, or as the machine did when the server saw only its new connection. */
 export type DropCause = ConnectionEnd | NodeDisconnectCause;
 
@@ -501,6 +504,8 @@ export type MachineView = {
   otherBuild?: { server: string; nodes: (string | null)[] } | null;
   /* Why Playwright's browser failed to start on the machine, or null when it is ready. */
   browserError?: string | null;
+  /* Older servers omit it; null while no update waits on the machine. */
+  drain?: MachineDrain | null;
 };
 
 /* What runs on a machine now: the employees whose program is there, busy while a turn of theirs runs, and the parts of
@@ -533,7 +538,7 @@ export type ShownCommand = { id: string; kind: 'machine' | 'plans' | 'add'; plan
 
 /* The node that comes with the server, for those who see the whole company. */
 /* machine: the company's machine it runs on, when the server is on one; the pool counts that computer once. */
-export type BuiltinView = { online: boolean; load: NodeLoad | null; running: Running; machine?: Machine | null; programs?: ProgramInfo[] | null; browserError?: string | null };
+export type BuiltinView = { online: boolean; load: NodeLoad | null; running: Running; machine?: Machine | null; programs?: ProgramInfo[] | null; browserError?: string | null; drain?: MachineDrain | null };
 
 export type JobView = {
   id: string;

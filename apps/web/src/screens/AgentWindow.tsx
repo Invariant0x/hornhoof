@@ -652,6 +652,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
       {known && state.browserError && <p className="t-why">{browserWarning(t, state.browserError, sub)}</p>}
       {known && state?.limitUntil && <p className="t-why">{t.window.limitUntil(clock(language, state.limitUntil)!)}</p>}
       {known && !state?.limitUntil && state?.budgetUntil && <p className="t-why">{t.window.budgetUntil(clock(language, state.budgetUntil)!)}</p>}
+      {known && state?.machineDrain && state.machineDrain.state !== 'postponed' && <p className="t-why">{t.window.machineDrain}</p>}
       {dragging && (
         <div className="t-drop" role="status">
           {t.window.dropPictures}

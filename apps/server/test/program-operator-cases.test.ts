@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import type { OperatorEvidence, OperatorReason } from '@hornhoof/protocol/program-operator';
 import { eq } from 'drizzle-orm';
 import { expect, it, vi } from 'vitest';
-import { agentEvents, agents, jobs, nodes, programInstances, programOperatorCases, programOperatorSignals, subscriptions } from '../src/db/schema.js';
+import { agentEvents, agents, jobs, machines, nodes, programInstances, programOperatorCases, programOperatorSignals, subscriptions } from '../src/db/schema.js';
 import { acceptOperatorEvidence } from '../src/modules/program-operator/evidence.js';
 import { expireOperatorCases, operatorCaseMode } from '../src/modules/program-operator/cases.js';
 import { resumeOperatorProcess } from '../src/modules/program-operator/recovery.js';
@@ -248,6 +248,33 @@ it('does not assign a case to a worker outside Operations', async () => {
   await c.db.update(agents).set({ departmentId: c.dev.id }).where(eq(agents.id, c.operator!.id));
   await c.attempt(); await c.alarm('assignment_unrecorded', 60000);
   expect((await c.cases())[0]).toMatchObject({ status: 'escalated', operatorAgentId: null });
+});
+
+/* The operator on a plan and a machine of its own; only that machine goes down. */
+async function operatorOnItsOwnMachine(c: Awaited<ReturnType<typeof fixture>>) {
+  const [plan] = await c.db.insert(subscriptions).values({ companyId: c.companyId, provider: 'codex', kind: 'personal', label: 'Operator plan', ownerPersonId: c.sub.ownerPersonId, status: 'ready' }).returning();
+  const [machine] = await c.db.insert(machines).values({ companyId: c.companyId, personId: c.sub.ownerPersonId, machineKey: randomUUID(), hostname: 'Operator machine' }).returning();
+  const [node] = await c.db.insert(nodes).values({ companyId: c.companyId, machineId: machine!.id, subscriptionId: plan!.id, keyHash: randomUUID(), status: 'ready', version: '0.6.1' }).returning();
+  await c.db.update(agents).set({ subscriptionId: plan!.id, nodeId: node!.id }).where(eq(agents.id, c.operator!.id));
+  vi.mocked(c.ctx.hub.isReady).mockImplementation(id => id.kind !== 'node' || id.nodeId !== node!.id);
+  return { kind: 'node' as const, nodeId: node!.id };
+}
+
+it('keeps a case with an operator whose machine restarts for an update: its turn waits for the machine', async () => {
+  const c = await fixture(true, { HORNHOOF_CONTROL_DIR: mkdtempSync(join(tmpdir(), 'hh-operator-drain-')) });
+  expect(await requestNodeDrain(c.ctx, await operatorOnItsOwnMachine(c))).toMatchObject({ state: 'restarting' });
+  await c.attempt(); await c.alarm('assignment_unrecorded', 60000);
+  expect((await c.cases())[0]).toMatchObject({ status: 'open', operatorAgentId: c.operator!.id });
+  expect(await c.turnsOf(c.operator!.id)).toMatchObject([{ status: 'queued' }]);
+  await checkOperatorHealth(c.ctx, c.now);
+  expect((await c.cases())[0]).toMatchObject({ status: 'open', operatorAgentId: c.operator!.id });
+});
+
+it('calls an operator unavailable whose machine went away for no update', async () => {
+  const c = await fixture(true, { HORNHOOF_CONTROL_DIR: mkdtempSync(join(tmpdir(), 'hh-operator-drain-')) });
+  await operatorOnItsOwnMachine(c);
+  await c.attempt(); await c.alarm('assignment_unrecorded', 60000);
+  expect((await c.cases())[0]).toMatchObject({ status: 'escalated', operatorAgentId: null, resolution: { outcome: 'operator_unavailable' } });
 });
 
 it('lets the operator answer a program on a machine that waits for an update, and the machine then goes on to it', async () => {
