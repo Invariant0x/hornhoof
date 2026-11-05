@@ -8,7 +8,7 @@ import { loadConfig } from '../../src/config.js';
 import { hashToken } from '../../src/crypto/tokens.js';
 import { APP_NAME, migrateDb, openDb, type Db } from '../../src/db/client.js';
 import { as, invitePerson, setUpCompany, TEST_SECRET, TUNNEL, until, viaLink } from '../helpers.js';
-import { poolOf, realDatabase, type RealDatabase } from './pg.js';
+import { poolOf, realDatabase, sessionsWaitingOnALock, type RealDatabase } from './pg.js';
 
 /* PGlite has one connection, so what these locks are for shows only here. Nothing rests on timing: a transaction on a
    client of its own holds a lock open, and the test goes on when the database itself says the others wait behind it. */
@@ -28,10 +28,14 @@ beforeAll(async () => {
   ceo = await setUpCompany(app);
 });
 
+/* A beforeAll that failed leaves some of these unset, and its failure is the one to see. The database goes in any case. */
 afterAll(async () => {
-  await app.close();
-  await poolOf(db).end();
-  await real.drop();
+  try {
+    await app?.close();
+    if (db) await poolOf(db).end();
+  } finally {
+    await real?.drop();
+  }
 });
 
 /* Ending the client when the test ends rolls back what a failed test left open, so the waiting requests get to finish. */
@@ -44,15 +48,7 @@ async function holding(text: string, values: unknown[]): Promise<pg.Client> {
   return client;
 }
 
-const appSessionsWaitingOnALock = async (): Promise<number> => {
-  const { rows } = await real.admin.query<{ n: number }>(
-    "SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND application_name = $1 AND wait_event_type = 'Lock'",
-    [APP_NAME],
-  );
-  return rows[0]!.n;
-};
-
-const untilWaiting = (count: number): Promise<void> => until(async () => (await appSessionsWaitingOnALock()) >= count, LOCK_WAIT_LIMIT_MS);
+const untilWaiting = (count: number): Promise<void> => until(async () => (await sessionsWaitingOnALock(real, APP_NAME)) >= count, LOCK_WAIT_LIMIT_MS);
 
 describe('moving a session from before the switch', () => {
   /* A new person's session, marked as the migration marks the rows of an older install. */
@@ -112,7 +108,8 @@ describe('the sign-in limit', () => {
   it('counts 100 tries at once from one address to the limit and no further', async () => {
     const holder = await holding('SELECT pg_advisory_xact_lock($1::bigint)', [SIGN_IN_LOCK]);
     const tries = Array.from({ length: 100 }, (_, i) => signInTry(db, `x${i}@hornhoof.test`, '203.0.113.7'));
-    await untilWaiting(2);
+    /* Every connection of the pool in line, so the tries overlap as far as they can on a machine of any speed. */
+    await untilWaiting(poolOf(db).options.max);
     await holder.query('COMMIT');
     const answers = await Promise.all(tries);
     expect(answers.filter(a => a.allowed)).toHaveLength(SIGN_IN_LIMITS.address.max);

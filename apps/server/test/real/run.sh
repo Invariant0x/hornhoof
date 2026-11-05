@@ -27,7 +27,8 @@ trap 'exit 143' TERM
 # pg_isready over TCP, since the image's first start runs a server on its socket alone and then restarts it.
 start_postgres() {
   password=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
-  docker run --detach --name "$PG_NAME" -e POSTGRES_PASSWORD="$password" -p 127.0.0.1::5432 "$POSTGRES" \
+  # By name, so that the value is on no command line for ps to show.
+  POSTGRES_PASSWORD=$password docker run --detach --name "$PG_NAME" -e POSTGRES_PASSWORD -p 127.0.0.1::5432 "$POSTGRES" \
     -c wal_level=logical -c max_replication_slots=10 -c max_wal_senders=10 -c max_prepared_transactions=0 > /dev/null
   waited=0
   until docker exec "$PG_NAME" pg_isready -h 127.0.0.1 -U postgres > /dev/null 2>&1; do
