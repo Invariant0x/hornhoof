@@ -18,7 +18,8 @@ export async function hasCurrentKey(ctx: { db: Db; hub: NodeHub }, id: NodeIdent
 
 export const NODE_STALE_MS = 24 * 60 * 60 * 1000;
 
-/* Clears ready on nodes that have not been heard from for more than 24 hours and settles their plans. */
+/* Clears ready on nodes that have not been heard from for more than 24 hours and settles their plans. A write, so only
+   the leader's minute round calls it: the screens show what it last found, a minute late at worst. */
 export async function expireStaleNodes(db: Db, now = new Date()): Promise<void> {
   const cutoff = new Date(now.getTime() - NODE_STALE_MS);
   const stale = await db
