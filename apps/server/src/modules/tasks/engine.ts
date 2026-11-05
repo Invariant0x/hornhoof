@@ -788,11 +788,15 @@ function readyGate(task: Task, stage: number, panel: string[], findings: Map<str
 
 async function waitingGate(db: Db | Tx, task: Task, stage: number, idle: { id: string; name: string }[], strictAgain: boolean): Promise<GateMove> {
   const [lead] = await db.select({ name: agents.name, roleKey: agents.roleKey }).from(agents).where(eq(agents.id, task.gates[stage - 1]!));
-  const who = lead?.roleKey ?? lead?.name ?? 'its reviewer';
-  const text = strictAgain ? `The original finding reviewer at gate ${stage} (${who}) is unavailable. The fix check stays blocked; another reviewer cannot silently replace it. Restore the original reviewer or ask the head to settle replacement under the review policy.` : idle.length
+  const who = lead ? lead.roleKey ?? lead.name : 'its reviewer';
+  const text = strictAgain ? `The original finding reviewer at gate ${stage} (${who}) is unavailable. The fix check stays blocked; another reviewer cannot silently replace it. Restore the original reviewer or ask the head to settle replacement under the review policy.` : ordinaryGateWaitText(stage, who, idle);
+  return { set: { status: 'review', stage, panel: [], silent: 0, assigneeAgentId: task.createdByAgentId }, wakes: giver(task, 'switched', undefined, text) };
+}
+
+function ordinaryGateWaitText(stage: number, who: string, idle: { id: string; name: string }[]): string {
+  return idle.length
     ? `${idle.map(a => a.name).join(', ')} ${idle.length === 1 ? 'has' : 'have'} no subscription to run on, so gate ${stage} (${who}) cannot check it. Give them one on their card and then give the task its gates again with update_task, switch them off, or give it other gates.`
     : `Nobody who can check it at gate ${stage} (${who}) is on. Give it other gates with update_task, or tell the CEO it waits for one of them.`;
-  return { set: { status: 'review', stage, panel: [], silent: 0, assigneeAgentId: task.createdByAgentId }, wakes: giver(task, 'switched', undefined, text) };
 }
 
 type Given = { agentId: string; name: string; pass: boolean; comment: string; mechanical?: boolean };

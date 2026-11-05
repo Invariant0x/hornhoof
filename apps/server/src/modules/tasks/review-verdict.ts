@@ -36,6 +36,10 @@ function assertFix(fix: Fix | undefined, verdict: ReviewVerdict): void {
   if (verdict.pass && fix.status !== 'ready') throw refuse(400, 'task_invalid', 'The fix range is unavailable; PASS would claim a check that could not be made.');
 }
 
+function fixResolution(fix: Fix | undefined, pass: boolean): Record<string, unknown> {
+  return fix ? { [pass ? 'resolvedFindingIds' : 'unresolvedFindingIds']: fix.findingIds, fixReviews: [fix] } : {};
+}
+
 export async function verdictReview(db: Db, task: Task, agentId: string, verdict: ReviewVerdict): Promise<Record<string, unknown>> {
   const review = await reviewContext(db, task.id);
   assertCommit(review, verdict);
@@ -45,6 +49,5 @@ export async function verdictReview(db: Db, task: Task, agentId: string, verdict
   const fix = (await fixReviews(db, task.id)).find(item => item.reviewerId === agentId);
   assertFix(fix, verdict);
   const issues = await issuesForVerdict(db, task, agentId, review, plan, verdict.issues ?? [], verdict.pass);
-  const resolution = fix ? { [verdict.pass ? 'resolvedFindingIds' : 'unresolvedFindingIds']: fix.findingIds, fixReviews: [fix] } : {};
-  return { ...(review ? { review: await visibleReview(db, task.id, review) } : {}), ...(verdict.evidence?.length ? { evidence: bindReviewEvidence(verdict.evidence, review?.commit ?? null) } : {}), ...(verdict.issues !== undefined ? { issues } : {}), ...resolution };
+  return { ...(review ? { review: await visibleReview(db, task.id, review) } : {}), ...(verdict.evidence?.length ? { evidence: bindReviewEvidence(verdict.evidence, review?.commit ?? null) } : {}), ...(verdict.issues !== undefined ? { issues } : {}), ...fixResolution(fix, verdict.pass) };
 }

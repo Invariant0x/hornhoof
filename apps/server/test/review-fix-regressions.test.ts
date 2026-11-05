@@ -1,6 +1,6 @@
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agents, subscriptions, taskEvents, tasks, testRuns } from '../src/db/schema.js';
+import { agents, departments, subscriptions, taskEvents, tasks, testRuns } from '../src/db/schema.js';
 import { leaveWork, regateWaiting, submit, verdict } from '../src/modules/tasks/engine.js';
 import { reviewDetails } from '../src/modules/tasks/review-details.js';
 import { FIRST, SECOND, fixture, rejectedFinding } from './review-fixture.js';
@@ -23,6 +23,16 @@ async function twoReviewers(degraded = false) {
 }
 
 describe('the consolidated review fix pass', () => {
+  it.each([null, 'DEV-REV'])('keeps a subscription-less gate waiting with a readable name when its role is %s', async roleKey => {
+    const f = await fixture();
+    await f.db.update(departments).set({ repoUrl: null }).where(eq(departments.id, f.author.departmentId!));
+    await f.db.update(agents).set({ subscriptionId: null, roleKey }).where(eq(agents.id, f.reviewer.id));
+    const sent = await submit(f.ctx, f.author.id, f.task.id, { summary: 'Done', evidence: 'Checks' });
+    expect(sent.task).toMatchObject({ status: 'review', panel: [], assigneeAgentId: f.head.id });
+    expect(sent.wakes).toEqual([expect.objectContaining({ agentId: f.head.id, why: 'switched', text: expect.stringContaining('Reviewer has no subscription') })]);
+    expect(sent.wakes[0]!.text).toContain(roleKey ?? f.reviewer.name);
+  });
+
   it('retains another reviewer restriction after the first repeat verdict', async () => {
     const f = await twoReviewers(true);
     await verdict(f.ctx, f.reviewer.id, f.task.id, { pass: false, comment: 'Still unfixed', reviewedCommit: SECOND });
