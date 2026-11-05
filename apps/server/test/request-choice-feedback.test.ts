@@ -75,7 +75,7 @@ it.each([undefined, 'A bit smaller.'])('retains explicit pick zero and its comme
   expect((await c.answered())[0]!.text).toBe(`Picked 1: Round.${text ? ` ${text}` : ''}`);
 });
 
-it.each([{}, { answer: '' }, { answer: '  \n\t' }, { answer: 'x'.repeat(4001) }, { pick: null, answer: FEEDBACK }, { pick: -1, answer: FEEDBACK }, { pick: 2, answer: FEEDBACK }, { pick: 0.5, answer: FEEDBACK }, { pick: '0', answer: FEEDBACK }])('rejects an invalid answer without changing the request: %j', async payload => {
+it.each([{}, { answer: '' }, { answer: '  \n\t' }, { answer: 4001 }, { pick: null, answer: FEEDBACK }, { pick: -1, answer: FEEDBACK }, { pick: 2, answer: FEEDBACK }, { pick: 0.5, answer: FEEDBACK }, { pick: '0', answer: FEEDBACK }])('rejects an invalid answer without changing the request: %j', async payload => {
   const c = await company();
   const response = await c.app.inject({ method: 'POST', url: `/api/requests/${c.request.id}`, payload, ...as(c.session) });
   expect(response.statusCode).toBe(400);
@@ -83,7 +83,7 @@ it.each([{}, { answer: '' }, { answer: '  \n\t' }, { answer: 'x'.repeat(4001) },
   expect(await c.answered()).toEqual([]);
 });
 
-it('accepts the exact maximum feedback length after trimming', async () => {
+it('keeps a 4000-character feedback after trimming', async () => {
   const c = await company();
   const text = 'x'.repeat(4000);
   const result = await c.app.inject({ method: 'POST', url: `/api/requests/${c.request.id}`, payload: { answer: ` ${text} ` }, ...as(c.session) });

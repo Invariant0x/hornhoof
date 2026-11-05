@@ -583,6 +583,12 @@ export const en = {
     limitUntil: (at: string) => `The plan is at its limit. Turns wait until ${at} and go on by themselves then.`,
     budgetUntil: (at: string) => `The plan used the share set for tasks. Task turns wait until ${at}; messages from people still go.`,
     machineDrain: 'The machine is finishing its work before an update. New turns wait and go on by themselves after it.',
+    inputLeft: {
+      kept: 'These words were left unsent in the program\'s input. Hornhoof took them out so the next assignment could go in, kept them here and did not run them. To send them, type them again.',
+      by: (name: string) => `${name} typed in this terminal last.`,
+      nobody: 'Hornhoof cannot tell who wrote them.',
+    },
+    inputDropped: 'Not sent: too much text was typed while the terminal was disconnected. Wait for it to connect, then type again.',
     turnRefused: {
       busy: 'What was just typed got no turn of its own: it went into the turn that was running. Check the answer there, and type it again if it is missing.',
       unknown_words: 'The agent is answering words, but Hornhoof could not tell who wrote them, so no turn opened and its tools are closed for this answer. Please type your message again.',

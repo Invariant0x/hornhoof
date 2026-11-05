@@ -31,6 +31,9 @@ const OPTIONS: ITerminalOptions = {
 
 /* What one frame of keys or a paste carries; the server takes up to 64 KB. */
 const PIECE = 16_384;
+/* Keys typed while the view has no connection wait for it, a bounded amount: after a minute they do not go to the program. */
+const KEPT_KEYS = 256;
+const KEPT_MS = 60_000;
 const RETRY_MS = 500;
 const RETRY_MAX_MS = 10_000;
 /* How a view ends: the node cannot show one, or the person may no longer reach the agent. */
@@ -44,7 +47,7 @@ type Size = { cols: number; rows: number };
 type Frame = { type: string; data?: string; write?: boolean; running?: boolean };
 type Send = (m: unknown) => void;
 /* What one view of the session learned so far. */
-type View = { term: Terminal; send: Send; setUp(up: boolean): void; asked: Size; told: boolean; unconfirmed: Size | null; ready(): void };
+type View = { term: Terminal; send: Send; setUp(up: boolean): void; asked: Size; told: boolean; unconfirmed: Size | null; ready(write: boolean): void };
 
 /* A card that came or went while the view connected changed the terminal's size, and that resize was lost: sent before
    the socket opened, or after the server said ready but before the node held the view. The session's first screen comes
@@ -58,7 +61,7 @@ function confirmSize(term: Terminal, opened: Size | null, send: Send) {
    or a node from before, shows its screen as it comes. */
 function received(view: View, m: Frame) {
   if (m.type === 'ready') {
-    view.ready();
+    view.ready(Boolean(m.write));
     view.told = false;
     restoreLiveTerminal(view.term);
     view.term.reset();
@@ -89,15 +92,38 @@ function viewUrl(path: string, size: Size) {
 /* The node cannot show a view, or the person may no longer reach the agent: trying again changes nothing. */
 const final = (code: number) => code === NO_TERMINAL || code === NO_ACCESS;
 
+class KeptKeys {
+  private kept: { keys: unknown; at: number }[] = [];
+
+  constructor(private refused: () => void) {}
+
+  keep(m: unknown) {
+    if ((m as { type?: string }).type !== 'input') return;
+    if (this.kept.length === KEPT_KEYS) return this.refused();
+    this.kept.push({ keys: m, at: Date.now() });
+  }
+
+  go(write: boolean, send: Send) {
+    const { kept } = this;
+    this.kept = [];
+    for (const { keys, at } of kept) if (write && Date.now() - at < KEPT_MS) send(keys);
+  }
+}
+
 /* The view of the session over a socket, opened again after a machine went away for a moment, until it ends. */
-function connectView(term: Terminal, path: string, setUp: (up: boolean) => void, gone: () => void) {
+function connectView(term: Terminal, path: string, setUp: (up: boolean) => void, gone: () => void, refused: () => void) {
   let socket: WebSocket | null = null;
   let ended = false;
   let retry: ReturnType<typeof setTimeout> | null = null;
   let tries = 0;
-  const send: Send = m => socket?.readyState === 1 && socket.send(JSON.stringify(m));
+  const kept = new KeptKeys(refused);
+  const send: Send = m => (socket?.readyState === 1 ? socket.send(JSON.stringify(m)) : kept.keep(m));
   const connect = () => {
-    const view: View = { term, send, setUp, asked: { cols: term.cols, rows: term.rows }, told: false, unconfirmed: null, ready: () => (tries = 0) };
+    const ready = (write: boolean) => {
+      tries = 0;
+      kept.go(write, send);
+    };
+    const view: View = { term, send, setUp, asked: { cols: term.cols, rows: term.rows }, told: false, unconfirmed: null, ready };
     const ws = new WebSocket(viewUrl(path, view.asked));
     socket = ws;
     ws.onmessage = e => received(view, JSON.parse(String(e.data)) as Frame);
@@ -353,12 +379,14 @@ export function AgentTerminal({ path, program, onGone, watching = false }: Props
   /* Until the view is open and the program is up, a loader hides what the session shows meanwhile. */
   const [up, setUp] = useState(false);
   const [menu, setMenu] = useState<MenuState | null>(null);
+  const [dropped, setDropped] = useState(false);
   const gone = useRef(onGone);
   gone.current = onGone;
   const leavesFocus = useRef(watching);
   leavesFocus.current = watching;
 
   useEffect(() => {
+    setDropped(false);
     const term = new Terminal(OPTIONS);
     termRef.current = term;
     const container = box.current!;
@@ -367,7 +395,7 @@ export function AgentTerminal({ path, program, onGone, watching = false }: Props
     attachTerminalScroll(term);
     bindCopy(term);
     fitTerminal(term, container);
-    const view = connectView(term, path, setUp, () => gone.current());
+    const view = connectView(term, path, setUp, () => gone.current(), () => setDropped(true));
     forward(term, view.send);
     const unfit = keepFitted(term, container);
     if (!leavesFocus.current) term.focus();
@@ -383,6 +411,7 @@ export function AgentTerminal({ path, program, onGone, watching = false }: Props
     <div className="t-term" onContextMenu={e => openMenu(e, termRef.current, setMenu)}>
       <div className="t-xterm" ref={box} />
       <CopyMenu menu={menu} termRef={termRef} onClose={() => setMenu(null)} label={t.common.copy} />
+      {dropped && <div className="t-why" role="alert">{t.window.inputDropped}</div>}
       {!up && (
         <div className="t-load" role="status">
           <span className="spinner" aria-hidden="true" />

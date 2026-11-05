@@ -622,6 +622,7 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .t-t > div { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .t-r > div { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
 .t-l > .md { white-space: normal; display: grid; gap: 8px; }
+.t-left { margin-top: 4px; padding-left: 8px; border-left: 2px solid var(--muted); color: var(--muted); max-height: 16em; overflow-y: auto; }
 .md p, .md ul, .md ol { margin: 0; }
 .md ul, .md ol { padding-left: 20px; }
 .md strong { font-weight: 700; color: var(--ink); }

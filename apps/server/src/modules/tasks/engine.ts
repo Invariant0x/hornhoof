@@ -15,6 +15,7 @@ import { dropEarlierWakes, keepWakes } from './outbox.js';
 import { returnAlongLine } from '../org/map-state.js';
 import { handOff } from './pulses.js';
 import { recordCause, type WakeCause } from './notification-cause.js';
+import { preserveNote } from './long-text.js';
 
 export type Task = typeof tasks.$inferSelect;
 export type Request = typeof requests.$inferSelect;
@@ -321,12 +322,13 @@ export const taskSpot = (t: Pick<Task, 'departmentId' | 'productId'>): Spot =>
 const actorColumns = (a: Actor) => ({ personId: a.personId ?? null, agentId: a.agentId ?? null });
 
 /* returned: the agent gives its work back to the one above it with this move, which the map shows on their line. */
-type Note = { kind: TaskEventKind; actor: Actor; text?: string; data?: Record<string, unknown>; returned?: true; automatic?: NotificationSource };
+type Note = { kind: TaskEventKind; actor: Actor; text?: string; data?: Record<string, unknown>; inlineText?: true; returned?: true; automatic?: NotificationSource };
 
-export async function note(tx: Tx | Db, task: Pick<Task, 'id' | 'companyId'>, n: Note): Promise<{ id: number; createdAt: Date }> {
+export async function note(tx: Tx | Db, task: Pick<Task, 'id' | 'companyId'>, n: Note, config?: Pick<Ctx['config'], 'taskFilesBytes'>): Promise<{ id: number; createdAt: Date }> {
+  const kept = await preserveNote(tx, task, n, config);
   const [row] = await tx
     .insert(taskEvents)
-    .values({ companyId: task.companyId, taskId: task.id, kind: n.kind, ...actorColumns(n.actor), text: n.text ?? '', data: n.data ?? {} })
+    .values({ companyId: task.companyId, taskId: task.id, kind: n.kind, ...actorColumns(n.actor), text: kept.text, data: kept.data })
     .returning({ id: taskEvents.id, createdAt: taskEvents.createdAt });
   return row!;
 }
@@ -374,7 +376,7 @@ export async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, a
     /* Done means all of it: work under it still open would go on under a finished task, and the turn with it. */
     if (set.status === 'done') await refuseOpenUnder(tx, task);
     await dropEarlierWakes(tx, task.id);
-    const event = await note(tx, row, n);
+    const event = await note(tx, row, n, ctx.config);
     lit = await givesBack(tx, row, n, event);
     await also?.(tx, row);
     if (CLOSED.includes(row.status) && row.parentId) wakes.push(...(await workUnderDone(tx, ctx.templates, row, n.actor.agentId, opened, comparison)));
@@ -1217,7 +1219,7 @@ function commentWakes(task: Task, actor: Actor, text: string): Wake[] {
 async function logComment(ctx: Live, actor: Actor, task: Task, text: string): Promise<Moved> {
   const wakes = commentWakes(task, actor, text);
   await ctx.db.transaction(async tx => {
-    const event = await note(tx, task, { kind: 'comment', actor, text });
+    const event = await note(tx, task, { kind: 'comment', actor, text }, ctx.config);
     recordCause(wakes, { kind: 'comment', actor, text }, event.id, task);
     await keepWakes(tx, task.companyId, wakes);
   });
@@ -1473,7 +1475,7 @@ function checkChoiceAnswer(found: Pick<Request, 'options'>, a: Answer, text: str
   if (!option && !text) throw refuse(400, 'task_invalid', 'Write an answer.');
 }
 
-export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answer, on?: Delegation): Promise<{ request: Request; task: Task; wakes: Wake[] }> {
+export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answer, on?: Delegation, inlineText?: true): Promise<{ request: Request; task: Task; wakes: Wake[] }> {
   const [found] = await ctx.db.select().from(requests).where(eq(requests.id, requestId));
   if (!found) throw refuse(404, 'request_unknown', 'There is no such request.');
   if (found.status !== 'open') throw refuse(409, 'request_closed', 'This request is answered already.');
@@ -1509,7 +1511,7 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
     if (!request) throw refuse(409, 'request_closed', 'This request is answered already.');
     await tx.update(tasks).set({ externalWait: null, silent: 0, version: sql`${tasks.version} + 1`, updatedAt: new Date() })
       .where(and(eq(tasks.id, task.id), isNotNull(tasks.externalWait)));
-    const event = await note(tx, task, { kind: 'answered', actor, text: said, data: { requestId, kind: found.kind, status, ...forWhom } });
+    const event = await note(tx, task, { kind: 'answered', actor, text: said, data: { requestId, kind: found.kind, status, ...forWhom }, inlineText }, ctx.config);
     const [left] = await tx.select({ n: count() }).from(requests).where(and(eq(requests.taskId, task.id), eq(requests.status, 'open')));
     if (current?.status === 'waiting' && !Number(left?.n ?? 0)) {
       await tx
@@ -1537,9 +1539,6 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
   return { request: row, task: now, wakes };
 }
 
-/* As long as an answer given in the task may be. */
-const ANSWER_MAX = 4000;
-
 /* Whether a person's words take this open request: they reach its task and may take its decision. */
 function takes(person: Parameters<typeof canDecide>[1], access: Access, r: Parameters<typeof requestSubject>[0] & Parameters<typeof requestSubject>[1] & { companyId: string }): boolean {
   return canReach(access, taskSpot(r)) && canDecide(requestSubject(r, r), person, access, r.companyId);
@@ -1549,7 +1548,7 @@ function takes(person: Parameters<typeof canDecide>[1], access: Access, r: Param
    and tells it how to go on where it was stuck, on the tasks that person reaches. A commit to approve and a choice wait for
    their own answer. The task's own turn still follows, which watches that the task moves. */
 export async function answerDirectly(ctx: Live, personId: string, agentId: string, text: string): Promise<Wake[]> {
-  const said = text.trim().slice(0, ANSWER_MAX);
+  const said = text.trim();
   if (!said) return [];
   const [person] = await ctx.db
     .select({ id: people.id, companyId: people.companyId, status: people.status, scopeKind: people.scopeKind, isOwner: people.isOwner, isCeoDelegate: people.isCeoDelegate })
@@ -1568,7 +1567,8 @@ export async function answerDirectly(ctx: Live, personId: string, agentId: strin
     /* Only what this person may take: the words still reach the agent, and someone else's question stays open. */
     if (!takes(person, access, r)) continue;
     try {
-      wakes.push(...(await answer(ctx, { personId }, r.id, { answer: said })).wakes);
+      /* The window already delivered these words; its complete mirror must not introduce a later file-quota failure. */
+      wakes.push(...(await answer(ctx, { personId }, r.id, { answer: said }, undefined, true)).wakes);
     } catch (err) {
       /* Someone answered it in the task meanwhile, or the person's right went meanwhile. */
       if (!(err instanceof ApiError && PASSED_OVER.has(err.reason))) throw err;

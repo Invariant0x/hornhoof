@@ -52,6 +52,7 @@ it.skipIf(!hasTmux).each(['continuation', 'typed', 'late typed'] as const)('reta
   const running = host.run({ ...requested, operatorDelivery: source });
   await until(async () => (await tmux.screen(`a-${key}`)).includes('Choose your color scheme'));
   now = 60000; host.operatorTick();
+  await until(() => frames.some(frame => frame.type === 'program.operator_needed' && frame.reason === 'assignment_unrecorded'));
   const needed = frames.find(frame => frame.type === 'program.operator_needed' && frame.reason === 'assignment_unrecorded');
   expect(needed).toBeDefined();
   if (!needed) throw new Error('No assignment operator case evidence.');

@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { performance } from 'node:perf_hooks';
 import { join } from 'node:path';
-import type { OperatorServerMessage } from '@hornhoof/protocol/program-operator';
+import { OPERATOR_CELLS_BYTES, OPERATOR_PROTECTED_SCREEN, type OperatorServerMessage } from '@hornhoof/protocol/program-operator';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { OperatorControl, operatorCells, type OperatorProgram } from '../src/terminal/operator-control.js';
 import { Tmux } from '../src/terminal/tmux.js';
@@ -410,3 +410,43 @@ describe('operator secrets spanning terminal rows', () => {
     expect(screen.cells).not.toContain('token-123');
   });
 });
+
+describe('the look at a screen before telling of a turn', () => {
+  const line = () => 'text' as const;
+
+  it('gives the input line and the styled screen, without a snapshot for keys', async () => {
+    const c = fixture();
+    const control = new OperatorControl({ ...c.options, capture: async () => ({ cols: 90, rows: 30, cells: '\x1b[1mWords\x1b[0m in the input.' }) });
+    expect(await control.check(line)).toEqual({ input: 'text', screen: { protected: false, cols: 90, rows: 30, cells: '\x1b[1mWords\x1b[0m in the input.' } });
+    expect(control['snapshot']).toBeNull();
+  });
+
+  it('reads the line from the raw cells, and masks what it shows', async () => {
+    const c = fixture();
+    const secret = 'a-secret-of-this-node';
+    const seen: string[] = [];
+    const control = new OperatorControl({ ...c.options, secrets: () => [secret], capture: async () => ({ cols: 80, rows: 24, cells: `Screen ${secret} end` }) });
+    const check = await control.check(cells => { seen.push(cells); return 'text'; });
+    expect(seen).toEqual([`Screen ${secret} end`]);
+    expect(check).toEqual({ input: 'text', screen: { protected: true, cols: 80, rows: 24, cells: OPERATOR_PROTECTED_SCREEN } });
+  });
+
+  it('shows a protected screen only as protected', async () => {
+    const c = fixture();
+    const control = new OperatorControl({ ...c.options, capture: async () => ({ cols: 80, rows: 24, cells: 'Enter your password here.' }) });
+    expect(await control.check(line)).toEqual({ input: 'text', screen: { protected: true, cols: 80, rows: 24, cells: OPERATOR_PROTECTED_SCREEN } });
+  });
+
+  it('has an unknown line and no screen when it cannot capture', async () => {
+    const c = fixture();
+    const control = new OperatorControl({ ...c.options, capture: async () => { throw new Error('tmux is gone'); } });
+    expect(await control.check(line)).toEqual({ input: 'unknown', screen: null });
+  });
+
+  it('has an unknown line and no screen when the pane is out of bounds', async () => {
+    const c = fixture();
+    const control = new OperatorControl({ ...c.options, capture: async () => ({ cols: 80, rows: 24, cells: 'x'.repeat(OPERATOR_CELLS_BYTES + 1) }) });
+    expect(await control.check(line)).toEqual({ input: 'unknown', screen: null });
+  });
+});
+

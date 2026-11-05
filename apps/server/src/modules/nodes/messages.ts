@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, machines, nodes, planCredentials, subscriptions, tasks, type NodeStatus } from '../../db/schema.js';
 import { said } from '../conversation/live.js';
+import { keepLeftInput } from '../conversation/left-input.js';
 import { unheard } from '../conversation/unheard.js';
 import { clearNodeWords, holdForWords, limitUntil, nodeOfAgent, onAgent, pumpWaiting, refusedLimits, startProgram, wordsSettled } from '../conversation/queue.js';
 import { workStarts } from '../org/map-state.js';
@@ -196,6 +197,7 @@ async function wordMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage, now: Da
   if (msg.type === 'agent.said') said(ctx, id, msg.ref, msg.ok);
   if (msg.type === 'agent.unheard') await unheard(ctx, id, msg, now);
   if (msg.type === 'agent.words_settled') await wordsSettled(ctx, id, msg.agentKey, msg.jobId);
+  if (msg.type === 'agent.input_left') await keepLeftInput(ctx, id, msg);
 }
 
 export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage, now = new Date()): Promise<void> {
