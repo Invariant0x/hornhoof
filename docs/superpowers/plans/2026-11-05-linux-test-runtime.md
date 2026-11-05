@@ -115,3 +115,5 @@ Execution note after run 103: same command and all package counts verified, full
 - [ ] Launch one parts1 run_tests job, replaying four logical shards sequentially per SHA. Use wait_for for30minutes and end the turn.
 - [ ] Parse variant/part/package/file records and counts, compare load/limits, preserve failures, and label sequential timing correctly. If load is still incomparable, report the exact observed limitation for Operations.
 - [ ] Recheck required scoped gates after any source changes, commit/push report and submit with all concerns; do not claim an unmeasured historical turn7 percentage.
+
+Controlled attempt105 ran only bootstrap: GitHub authentication unavailable after initial clone, exit128, no measurement stages. Prepared an attached shallow source archive and checked offline/output bootstrap at unchanged pinned SHAs. Further full execution awaits head authorization of a replacement one-part run_work, not a blind rerun.
