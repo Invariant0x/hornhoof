@@ -119,3 +119,16 @@ Execution note after run 103: same command and all package counts verified, full
 Controlled attempt105 ran only bootstrap: GitHub authentication unavailable after initial clone, exit128, no measurement stages. Prepared an attached shallow source archive and checked offline/output bootstrap at unchanged pinned SHAs. Further full execution awaits head authorization of a replacement one-part run_work, not a blind rerun.
 
 Replay106 disposition: one authorized run_work was launched instead of failed-bootstrap105, then completed once. Both full outputs and all54 raw logs are retained. Independent analysis verified equal6325-case totals, own252server+17node cases passing,54commands,26package summaries,734file timings,1128stable-identity resource records. Six common cases failed per variant; console archive overflow remains INVALID. One selected3-case diagnostic after building node passed without source changes. Documentation/evidence are complete; acceptance and any future validation plan remain a head decision. No new paired run and no foreign-source/assertion fix.
+
+### Task 8: Candidate prerequisites and durable evidence
+
+**Files:** Modify `scripts/benchmarks/linux-pair.mjs`, its Node fixture, and the offline wrapper; create `scripts/benchmarks/linux-pair-evidence.mjs`. Candidate notes/manifests live in docs/superpowers/reports; preserve the old task branch and source archive.
+
+**Interfaces:** Evidence module exports `createEvidence(folder)` returning `record(kind,value)` and `finish(result)`; finish returns a compact frame referencing checksummed plain/gzip journals. The driver records preparation/check/suite phases and separate elapsed totals. Each fresh source consumes `npm run build -w @hornhoof/protocol` followed by the equivalent node build before any suite command.
+
+- [x] Add a fixture whose real child CLI exists only after protocol/node preparation; show missing-node-build RED, then implement preparation phases and verify both source variants and all8 fresh directories.
+- [x] Show file-transport RED with payload larger than the console budget; implement complete journals and the unchanged700KiB frame guard. Verify every output/resource/timing record and nonzero child status survives.
+- [x] Reject unavailable output storage and failed build prerequisites before suite commands; preserve count/config/identity/worker guards. Exercise real runner head/tail truncation on the compact final frame.
+- [x] Re-archive run106's preserved2067 records as data and deep-compare them after decompression. Keep acceptedPerformanceResult:false; no benchmark rerun.
+- [ ] Run miniature fixture checks, scoped lint/syntax, built-in Node coverage, crapper and dryer. Obtain one fresh read-only candidate review and address Important findings with RED/GREEN.
+- [ ] Commit/push candidate, attach hashes/commands/change boundaries for head. Do not close378/222 or start another full run; await the remaining fixes and explicit acceptance decision.

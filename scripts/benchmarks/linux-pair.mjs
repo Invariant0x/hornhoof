@@ -9,20 +9,14 @@ import { availableParallelism, arch, cpus, freemem, hostname, loadavg, platform,
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
-import { gzipSync } from 'node:zlib';
+import { createEvidence } from './linux-pair-evidence.mjs';
 
 const root = process.cwd();
-const archive = [];
+let evidence;
 const emit = (kind, value) => {
-  console.log(kind + ' ' + JSON.stringify(value));
-  archive.push({ kind, value });
+  evidence?.record(kind, value);
+  if (['HH_PAIR_STAGE','HH_PAIR_RESULT','HH_PAIR_INVALID'].includes(kind)) console.log(kind + ' ' + JSON.stringify(value));
 };
-function replay() {
-  const bytes=gzipSync(JSON.stringify(archive));
-  const line='HH_PAIR_EVIDENCE '+JSON.stringify({sha256:createHash('sha256').update(bytes).digest('hex'),gzip:bytes.toString('base64')});
-  if(Buffer.byteLength(line+'\n')>700*1024) throw new Error('Complete evidence exceeds the 700 KiB runner tail budget');
-  console.log(line);
-}
 const read = path => { try { return readFileSync(path, 'utf8').trim(); } catch { return null; } };
 const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 const limit = (v2, v1) => read('/sys/fs/cgroup/' + v2) ?? read('/sys/fs/cgroup/' + v1);
@@ -36,7 +30,7 @@ function resource(context, point) {
     limits: identity(), cpuStat: read('/sys/fs/cgroup/cpu.stat'), cpuPressure: read('/sys/fs/cgroup/cpu.pressure'), memoryCurrent: read('/sys/fs/cgroup/memory.current'), memoryEvents: read('/sys/fs/cgroup/memory.events'), memoryPressure: read('/sys/fs/cgroup/memory.pressure') };
   emit('HH_PAIR_RESOURCE', value);return value;
 }
-const configPaths = ['package.json','package-lock.json','apps/server/vitest.config.ts','apps/node/vitest.config.ts','apps/web/vite.config.ts','packages/protocol/vitest.config.ts','apps/server/test/global-setup.ts','apps/server/test/helpers.ts'];
+const configPaths = ['package.json','package-lock.json','tsconfig.base.json','apps/server/package.json','apps/node/package.json','apps/web/package.json','packages/protocol/package.json','apps/node/tsconfig.json','packages/protocol/tsconfig.json','apps/server/vitest.config.ts','apps/node/vitest.config.ts','apps/web/vite.config.ts','packages/protocol/vitest.config.ts','apps/server/test/global-setup.ts','apps/server/test/helpers.ts'];
 function configHash(dir) {
   return Object.fromEntries(configPaths.map(path => [path, existsSync(join(dir,path)) ? createHash('sha256').update(readFileSync(join(dir,path))).digest('hex') : null]));
 }
@@ -63,7 +57,7 @@ function worktrees(control, optimized, scratch) {
   return all;
 }
 function steps(part) {
-  const all = [ ['install',['npm','ci','--prefer-offline','--no-audit','--no-fund']], ['protocol-build',['npm','run','build','-w','@hornhoof/protocol']] ];
+  const all = [ ['install',['npm','ci','--prefer-offline','--no-audit','--no-fund']], ['protocol-build',['npm','run','build','-w','@hornhoof/protocol']], ['node-build',['npm','run','build','-w','@hornhoof/node']] ];
   if(part===1) all.push(
     ['lint',['npm','run','lint'],null,{NODE_OPTIONS:'--max-old-space-size=2048'}],
     ['typecheck-tests',['npm','run','typecheck:tests'],null,{NODE_OPTIONS:'--max-old-space-size=2048'}],
@@ -72,13 +66,18 @@ function steps(part) {
   for(const pkg of ['apps/server','apps/node','apps/web']) all.push([pkg,['npx','--no-install','vitest','run','--shard='+part+'/4','--maxWorkers=2'],pkg]);
   return all;
 }
+function phaseOf(stage) {
+  if(['install','protocol-build','node-build'].includes(stage)) return 'preparation';
+  if(['packages/protocol','apps/server','apps/node','apps/web'].includes(stage)) return 'suite';
+  return 'checks';
+}
 function child(command, cwd, env, file) {
   return new Promise(resolve => {
     const chunks=[];let error=null;const start=performance.now();
     const proc=spawn(command[0],command.slice(1),{cwd,env,stdio:['ignore','pipe','pipe']});
     for(const stream of [proc.stdout,proc.stderr]) stream.on('data',chunk=>chunks.push(chunk));
     proc.once('error',err=>error=err.message);
-    proc.once('close',(code,signal)=>{const ms=performance.now()-start;const output=Buffer.concat(chunks).toString();writeFileSync(file,output);resolve({code:code??1,signal,error,output,ms});});
+    proc.once('close',(code,signal)=>{const ms=performance.now()-start,raw=Buffer.concat(chunks),output=raw.toString();writeFileSync(file,raw);resolve({code:code??1,signal,error,output,raw,ms});});
   });
 }
 function timings(output, context, counts) {
@@ -105,7 +104,7 @@ function stable(expected) {
 }
 async function stage(item, spec, expected, scratch, counts) {
   const [name,command,relative,extra]=spec;
-  const context={variant:item.variant,sha:item.sha,part:item.part,parts:4,stage:name};
+  const context={variant:item.variant,sha:item.sha,part:item.part,parts:4,stage:name,phase:phaseOf(name)};
   stable(expected);emit('HH_PAIR_COMMAND',{...context,command,cwd:relative??'.',cache:item.cache});
   const samples=[resource(context,'before')];let drift=null;
   const timer=setInterval(()=>{const sample=resource(context,'during');samples.push(sample);if(JSON.stringify(sample.limits)!==JSON.stringify(expected))drift=sample.limits;},5000),start=performance.now();
@@ -115,7 +114,7 @@ async function stage(item, spec, expected, scratch, counts) {
   samples.push(resource(context,'after'));stable(expected);
   if(drift)throw new Error('Worker limits changed during stage: '+JSON.stringify(drift));
   const timingValid=timings(result.output,context,counts);
-  archive.push({kind:'HH_PAIR_OUTPUT',value:{...context,output:result.output}});
+  emit('HH_PAIR_OUTPUT',{...context,output:result.output,rawBase64:result.raw.toString('base64'),rawSha256:createHash('sha256').update(result.raw).digest('hex')});
   if(result.code!==0) emit('HH_PAIR_FAILED_OUTPUT',{...context,output:result.output});
   if(result.error)emit('HH_PAIR_CHILD_ERROR',{...context,message:result.error});
   const ranges={samples:samples.length,loadMin:[0,1,2].map(i=>Math.min(...samples.map(s=>s.load[i]))),loadMax:[0,1,2].map(i=>Math.max(...samples.map(s=>s.load[i]))),freeMin:Math.min(...samples.map(s=>s.free)),freeMax:Math.max(...samples.map(s=>s.free))};
@@ -124,26 +123,28 @@ async function stage(item, spec, expected, scratch, counts) {
 async function compare(control, optimized) {
   const env=pinned(control,optimized),scratch=join(root,'.metrics','paired-tests');mkdirSync(scratch,{recursive:true});
   emit('HH_PAIR_ENV',{...env,control,optimized,mode:'sequential-four-logical-shards-per-variant',cachePolicy:'fresh-worktree-and-empty-npm-cache-per-logical-shard; host page caches not controlled',backgroundLoad:'observed, not controlled'});
-  const all=worktrees(control,optimized,scratch),counts={control:{},optimized:{}},failures=[];let executed=0,allTimings=true;
+  const all=worktrees(control,optimized,scratch),counts={control:{},optimized:{}},failures=[],times={control:{preparationMs:0,checksMs:0,suiteMs:0},optimized:{preparationMs:0,checksMs:0,suiteMs:0}};let executed=0,allTimings=true;
   for(const item of all) {
     emit('HH_PAIR_PART',{variant:item.variant,part:item.part,sha:item.sha});
     for(const spec of steps(item.part)) {
       const row=await stage(item,spec,env,scratch,counts[item.variant]);executed++;allTimings&&=row.timingValid;
+      times[item.variant][row.phase+'Ms']+=row.ms;
       if(row.exitCode!==0) failures.push(row);
-      if(row.exitCode!==0 && ['install','protocol-build'].includes(spec[0])) break;
+      if(row.exitCode!==0 && row.phase==='preparation') break;
     }
   }
-  const result=resultOf(counts,failures,executed===54&&allTimings);
+  const result=resultOf(counts,failures,executed===62&&allTimings,times);
   emit('HH_PAIR_RESULT',result);return result;
 }
-function resultOf(counts, failures, complete) {
+function resultOf(counts, failures, complete, times) {
   const equal=JSON.stringify(Object.entries(counts.control).sort())===JSON.stringify(Object.entries(counts.optimized).sort());
-  const result={valid:equal&&complete,complete,failed:failures.length>0,failures,counts,identityAndConfig:'verified',backgroundLoad:'review resource records before performance claims'};
+  const result={valid:equal&&complete,complete,failed:failures.length>0,failures,counts,times,identityAndConfig:'verified',backgroundLoad:'review resource records before performance claims'};
   return result;
 }
 export { identity, resource };
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  try {const result=await compare(process.argv[2],process.argv[3]);process.exitCode=result.failed||!result.valid?1:0;}
-  catch(error){emit('HH_PAIR_INVALID',{message:error.message});process.exitCode=1;}
-  try {replay();} catch(error) {console.log('HH_PAIR_INVALID '+JSON.stringify({message:error.message}));process.exitCode=1;}
+  let result;
+  try {evidence=createEvidence(process.env.HH_OUT);result=await compare(process.argv[2],process.argv[3]);process.exitCode=result.failed||!result.valid?1:0;}
+  catch(error){emit('HH_PAIR_INVALID',{message:error.message});result={valid:false,complete:false,failed:true,error:error.message};process.exitCode=1;}
+  try {if(evidence)console.log(evidence.finish(result));} catch(error) {console.log('HH_PAIR_INVALID '+JSON.stringify({message:error.message}));process.exitCode=1;}
 }

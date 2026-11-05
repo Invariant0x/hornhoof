@@ -20,3 +20,13 @@ Diagnose all 24 remote timeout cases and their cleanup errors first, then run th
 Use the same Node binary, architecture, CPU quotas, package locks, Vitest configs and cache policy for both variants. Use eight fresh worktrees in the one worker job, each with a separate initially empty npm cache and a fresh npm ci; do not drop or claim to control host page caches. Record load, free/available memory, cgroup memory/CPU limits, cpuset and pressure before/after each stage and periodically during commands. Reject identity/config/limit changes rather than silently comparing unlike conditions. Background load remains an observed limitation.
 
 Label the result as sequential logical-shard measurements on one worker, not the historical four-machine wall time and not turn7. A failed controlled stage remains failed. Preserve original run101/run103 data and failures. While awaiting409 or the worker use task wait_for with a concrete reason.
+
+## Candidate preparation, head decision at 2026-11-05 21:08 UTC
+
+Prepare and check a candidate only. No new full suite, run_tests, run_work or paired replay is authorized. Preserve task-378@47fab392, the reviewed driver and source archive, and all previous FAIL/INVALID outcomes. Timers belongs to489 and CSS to441; do not edit those sources or assertions.
+
+Every fresh logical source must run protocol and node builds before CLI tests. Label install/build stages as preparation and report their elapsed time separately from suite and ancillary checks. Continue requiring exactly one expected package summary for each suite stage and maxWorkers2, with original test limits.
+
+Keep complete raw logs, full timing records and before/during/after resource samples in output files. A checksummed gzip journal holds all records, including full child output. The final console frame names the plain/gzip artifacts, their lengths and SHA-256 values, plus the compact result. Its existing700KiB budget remains unchanged. Reject missing output storage, missing/duplicate summaries, failed preparation or frame overflow; never discard evidence or raise a limit to make the candidate pass.
+
+Check the candidate on miniature fresh Git sources and on the preserved run106 records as data, without executing those suites. A later real acceptance needs the common timer/CSS fixes, verified prerequisites/transport, an agreed resource/common slot and a separate head decision on exact source/tooling SHAs.
