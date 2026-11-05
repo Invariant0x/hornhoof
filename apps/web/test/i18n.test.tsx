@@ -107,4 +107,9 @@ describe('work tree words', () => {
     expect([1, 2, 5, 11, 21].map(ru.dept.tree.found)).toEqual(['1 находка', '2 находки', '5 находок', '11 находок', '21 находка']);
     expect(en.dept.tree.inTurn(1, 1)).toBe('1 of 1 task');
   });
+
+  it('names the restricted route screen in English and Russian', () => {
+    expect(en.routes.accessDenied).toBe('Insufficient permissions');
+    expect(ru.routes.accessDenied).toBe('Недостаточно прав');
+  });
 });
