@@ -26,6 +26,14 @@ describe('the node image', () => {
     for (const program of ['git', 'curl', 'ripgrep', 'tmux', 'procps', 'jq', 'file', 'python3', 'python-is-python3', 'python3-pil']) expect(installed).toContain(program);
   });
 
+  it('installs unzip in the runtime and fails the build if unzip -v fails', () => {
+    expect(installed).toContain('unzip');
+    const layer = runtime.slice(runtime.indexOf('RUN apt-get update'), runtime.indexOf('\nCOPY --from=quality'));
+    expect(layer).toContain('apt-get install -y --no-install-recommends');
+    expect(layer).toContain('rm -rf /var/lib/apt/lists/*');
+    expect(layer).toMatch(/&& unzip -v(?:\s|$)/);
+  });
+
   it('installs the GitHub CLI in the runtime stage at a pinned version with verified per-arch SHA-256 and checks gh --version', () => {
     const version = runtime.match(/ARG GH_VERSION=(\d+\.\d+\.\d+)\n/)?.[1];
     const amd64Sha = runtime.match(/ARG GH_AMD64_SHA256=([0-9a-f]{64})\n/)?.[1];
