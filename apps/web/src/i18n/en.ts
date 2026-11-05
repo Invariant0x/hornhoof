@@ -516,6 +516,7 @@ export const en = {
     notice: (to: string) => `Hornhoof notice to ${to}`,
     theOrchestrator: 'the orchestrator',
     people: 'people',
+    hiddenEmployee: 'Employee',
     folded: (n: number) => `+${n} ${plural('en', n, { one: 'line', other: 'lines' })} (Ctrl+O to open)`,
     hint: 'Enter to send, Shift+Enter for a new line',
     dropPictures: 'Let go of the pictures here to add them to your message',
