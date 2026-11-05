@@ -40,8 +40,9 @@ it.skipIf(!hasTmux)('does not paste a continuation whose original words have alr
   expect(paste).not.toHaveBeenCalled();
 });
 
-it.skipIf(!hasTmux).each(['continuation', 'continuation that the program is slow to call busy', 'typed', 'late typed'] as const)('retains the assignment pane and credits source activity after owner recovery: %s', async mode => {
+it.skipIf(!hasTmux).each(['continuation', 'continuation that the program is slow to call busy', 'continuation just after the owner typed those words', 'typed', 'late typed'] as const)('retains the assignment pane and credits source activity after owner recovery: %s', async mode => {
   const continues = mode.startsWith('continuation');
+  const pastes = mode === 'continuation' || mode === 'continuation that the program is slow to call busy' ? 1 : 0;
   const key = randomUUID(), jobId = randomUUID(), source = { id: randomUUID(), ordinal: 1 };
   dir = join(home, `operator-owner-${key}`);
   const setup = join(dir, 'setup-passed'); const frames: OperatorNodeMessage[] = []; let now = 0;
@@ -95,6 +96,10 @@ it.skipIf(!hasTmux).each(['continuation', 'continuation that the program is slow
         vi.spyOn(tmux, 'alive').mockImplementation(async name => { await new Promise(done => setTimeout(done, 100)); return alive(name); });
         vi.spyOn(tmux, 'programCursor').mockImplementation(async name => { await new Promise(done => setTimeout(done, 800)); return cursor(name); });
       }
+      if (mode === 'continuation just after the owner typed those words') {
+        host.input({ type: 'term.input', termId, data: `${original}\r` });
+        await until(() => frames.some(frame => frame.type === 'program.delivery' && frame.deliveryId === source.id && frame.phase === 'taken'));
+      }
       const result = await host.run(continuation);
       expect(result, `${result.error}: ${result.failure?.text ?? 'No program failure detail.'}`).toMatchObject({ ok: true });
       sessionId = result.sessionId;
@@ -113,12 +118,12 @@ it.skipIf(!hasTmux).each(['continuation', 'continuation that the program is slow
       if (result?.type === 'job.done') sessionId = result.sessionId;
     }
     expect(await tmux.programPid(`a-${key}`)).toBe(pid);
-    expect(paste.mock.calls.filter(([, text]) => text === original)).toHaveLength(continues ? 1 : 0);
+    expect(paste.mock.calls.filter(([, text]) => text === original)).toHaveLength(pastes);
     expect(frames.filter(frame => frame.type === 'program.delivery' && frame.deliveryId === source.id && frame.phase === 'taken')).toHaveLength(1);
     now += 300000; host.operatorTick();
     const activityEvidence = frames.filter(frame => frame.type === 'program.delivery' || frame.type === 'program.launch').map(frame => ({ type: frame.type, jobId: frame.jobId, instance: frame.instance, phase: frame.phase, deliveryId: 'deliveryId' in frame ? frame.deliveryId : null }));
     expect(frames.filter(frame => frame.type === 'program.operator_needed' && frame.reason === 'recorded_no_activity'), JSON.stringify(activityEvidence)).toEqual([]);
     expect(await host.run({ ...continuation, operatorDelivery: { id: randomUUID(), ordinal: 3 }, input: { ...continuation.input, jobId: randomUUID(), sessionId } })).toMatchObject({ ok: false, error: 'cancelled' });
-    expect(paste.mock.calls.filter(([, text]) => text === original)).toHaveLength(continues ? 1 : 0);
+    expect(paste.mock.calls.filter(([, text]) => text === original)).toHaveLength(pastes);
   } finally { host.close({ type: 'term.close', termId }); }
 });
