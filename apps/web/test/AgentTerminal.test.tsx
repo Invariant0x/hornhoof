@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { AgentWindow } from '../src/screens/AgentWindow';
+import * as testTerminal from '../src/ui/AgentTerminal';
 import type { EventView, OrchestratorState } from '../src/types';
 import { ME, mockApi, ORG } from './api-mock';
 import { decl } from './css';
@@ -944,5 +945,37 @@ describe('pictures directly in the live terminal', () => {
     fireEvent.drop(container.querySelector<HTMLElement>('.t-xterm')!, dragged(png()));
     expect(await screen.findByText('No access.')).toHaveAttribute('role', 'alert');
     expect(ws.sent).toEqual([]);
+  });
+});
+
+
+describe('a test terminal browser key', () => {
+  const lease = {
+    leaseId: '7b1b70f3-f209-40f0-90b0-c06a52ca02a2',
+    expectedLeaseRevision: 3,
+    registrationId: 'eb21e51a-f597-47ae-bf74-317e529be02e',
+    expectedIdentityDigest: 'a'.repeat(64),
+  };
+
+  it('publishes only the frozen public binding and signs the exact bytes the server supplied', async () => {
+    const key = await testTerminal.createTestTerminalBrowserKey(lease);
+    expect(key.request).toEqual({
+      ...lease,
+      operationId: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/),
+      browserPublicKey: {
+        algorithm: 'P-256/SHA-256',
+        kty: 'EC',
+        crv: 'P-256',
+        x: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/),
+        y: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/),
+      },
+    });
+
+    const challenge = new TextEncoder().encode('exact server challenge bytes');
+    const signature = await key.sign(challenge);
+    const { kty, crv, x, y } = key.request.browserPublicKey;
+    const publicKey = await crypto.subtle.importKey('jwk', { kty, crv, x, y }, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
+    expect(await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, publicKey, signature, challenge)).toBe(true);
+    expect(signature.byteLength).toBe(64);
   });
 });
