@@ -1,16 +1,17 @@
 import { taskWaitText } from './task-wait';
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { errorText, useLanguage, useT, type Messages } from '../i18n';
 import { useOrg } from '../org';
 import { cutLine } from '../restarts';
 import { placeName, roleAfter, useTask } from '../tasks';
-import type { AgentRef, TaskDetail, TaskLogLine, WaitingRequest } from '../types';
+import type { AgentRef, Org, TaskDetail, TaskLogLine, TaskStatus, WaitingRequest } from '../types';
 import { Field } from './Field';
 import { Markdown } from './Markdown';
 import { Requests, wordsAnswer } from './Requests';
 import { PanelFrame } from './SidePanels';
 import { RouteUnavailable, unavailableFailure } from '../screens/RouteUnavailable';
+import { fullTextOf, LogParagraph, proseErrorText, TaskFiles } from './TaskAttachments';
 
 const field = (data: unknown, key: string): unknown => (data && typeof data === 'object' && key in data ? (data as Record<string, unknown>)[key] : undefined);
 
@@ -20,18 +21,17 @@ function authorOf(t: Messages, e: TaskLogLine): string {
   return e.by?.name ?? t.window.hornhoof;
 }
 
+function eventKey(e: TaskLogLine): string {
+  if (e.kind === 'verdict') return field(e.data, 'pass') ? 'passed' : 'sentBack';
+  if (e.kind === 'report') return field(e.data, 'done') ? 'reported' : 'notDone';
+  return e.kind;
+}
+
 /* A log line in words: who did what, with its text and, for work handed in, the evidence. */
 function eventTitle(t: Messages, e: TaskLogLine): string {
   const by = authorOf(t, e);
-  const ev = t.tasks.events;
-  switch (e.kind) {
-    case 'verdict':
-      return field(e.data, 'pass') ? ev.passed(by) : ev.sentBack(by);
-    case 'report':
-      return field(e.data, 'done') ? ev.reported(by) : ev.notDone(by);
-    default:
-      return e.kind in ev ? ev[e.kind as keyof typeof ev](by) : by;
-  }
+  const ev = t.tasks.events as Record<string, ((who: string) => string) | undefined>;
+  return ev[eventKey(e)]?.(by) ?? by;
 }
 
 /* Hornhoof's line about a turn a node restart cut off, in the person's language, from what it kept: where, when and why,
@@ -94,49 +94,153 @@ function ExternalTaskWait({ wait }: { wait: TaskDetail['externalWait'] }) {
   return <p className="muted">{taskWaitText(t, wait, until)}</p>;
 }
 
+function TaskHeader({ task, org }: { task: TaskDetail; org: Org | null }) {
+  const t = useT();
+  const turnText = task.turn !== null ? t.tasks.turn(task.turn) : null;
+  const meta = [placeName(t, org, task.department), task.product?.name, turnText].filter(Boolean).join(' / ');
+  return (
+    <header className="ac-head">
+      <h3>{task.title}</h3>
+      <p className="muted">{meta}</p>
+      <WorkLabels task={task} />
+      <p className={`tstate ${task.status}`}>{t.tasks.states[task.status]}</p>
+      <ExternalTaskWait wait={task.externalWait} />
+      {task.createdBy && <p className="muted">{t.tasks.givenBy(task.createdBy.name)}</p>}
+    </header>
+  );
+}
+
+function TaskWaitingSection({ waiting, org, onOpen, onChanged }: { waiting: Waiting; org: Org | null; onOpen: (id: string) => void; onChanged: () => void }) {
+  const t = useT();
+  if (waiting.requests.length === 0) return null;
+  return (
+    <section className="tp-wait" aria-label={t.tasks.waitingHere}>
+      <h4>{t.tasks.waitingHere}</h4>
+      <Requests
+        requests={waiting.requests}
+        onChanged={() => {
+          waiting.onRequestsChanged();
+          onChanged();
+        }}
+        onOpenTask={onOpen}
+        onOpenAgent={waiting.onOpenAgent}
+        placeName={p => placeName(t, org, p)}
+      />
+      {wordsAnswer(waiting.requests) && <p className="muted">{t.tasks.answerElsewhere}</p>}
+    </section>
+  );
+}
+
+function executorStateOf(t: Messages, task: TaskDetail): string {
+  if (task.stage > 0 || task.status === 'done') return t.tasks.gateStates.did;
+  if (task.merging) return t.tasks.gateStates.merging;
+  if (task.waitsFor.length > 0) return t.tasks.waitsFor(task.waitsFor.map(n => `#${n}`).join(', '));
+  return t.tasks.gateStates.working;
+}
+
+function executorClassOf(task: TaskDetail): string {
+  if (task.stage > 0 || task.status === 'done') return 'passed';
+  return task.waitsFor.length > 0 ? 'next' : 'current';
+}
+
+function TaskGatesSection({ task }: { task: TaskDetail }) {
+  const t = useT();
+  const { language } = useLanguage();
+  if (!task.executor) {
+    return task.assignee ? <p className="muted">{`${task.assignee.name}${roleAfter(task.assignee, language)}`}</p> : null;
+  }
+  return (
+    <ol className="tgates" aria-label={t.tasks.gates}>
+      {!task.turnReview && (
+        <li className={executorClassOf(task)}>
+          <b>{task.executor.name}</b>
+          {roleAfter(task.executor, language)}, <span>{executorStateOf(t, task)}</span>
+        </li>
+      )}
+      {task.gates.map((g: AgentRef & { state: keyof Messages['tasks']['gateStates'] }) => (
+        <li key={g.id} className={g.state}>
+          <b>{g.name}</b>
+          {roleAfter(g, language)}, <span>{t.tasks.gateStates[g.state]}</span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+type RelatedItem = { id: string; number: number; title: string; status: TaskStatus };
+
+function TaskRelatedSection({ heading, ariaLabel, items, onOpen }: { heading: string; ariaLabel?: string; items: RelatedItem[]; onOpen: (id: string) => void }) {
+  const t = useT();
+  if (items.length === 0) return null;
+  return (
+    <section aria-label={ariaLabel}>
+      <h4>{heading}</h4>
+      <ul className="tp-subs">
+        {items.map(item => (
+          <li key={item.id}>
+            <button className="linkish" type="button" onClick={() => onOpen(item.id)}>
+              #{item.number} {item.title}
+            </button>
+            <small>{t.tasks.states[item.status]}</small>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function TaskQuestionsSection({ requests }: { requests: TaskDetail['requests'] }) {
+  const t = useT();
+  if (requests.length === 0) return null;
+  return (
+    <section>
+      <h4>{t.tasks.questions}</h4>
+      <ul className="tp-log">
+        {requests.map(r => (
+          <li key={r.id}>
+            <span className="tp-ev">
+              {r.agent?.name ?? t.window.hornhoof}: {r.text} <small>{t.tasks.requestStates[r.status] ?? r.status}</small>
+            </span>
+            {r.answer && <p>{r.answer}</p>}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+const evidenceOf = (data: unknown): string | null => {
+  const raw = field(data, 'evidence');
+  return typeof raw === 'string' && raw ? raw : null;
+};
+
+function LogEntry({ entry, when }: { entry: TaskLogLine; when: (at: string) => string }) {
+  const t = useT();
+  const said = entry.kind === 'created' ? null : lineText(t, entry, when) || null;
+  const evidence = evidenceOf(entry.data);
+
+  return (
+    <li className={entry.kind}>
+      <span className="tp-ev">
+        {eventTitle(t, entry)} <time dateTime={entry.at}>{when(entry.at)}</time>
+      </span>
+      <LogParagraph text={said} fullRef={fullTextOf(entry.data, 'text')} />
+      <LogParagraph text={evidence} fullRef={fullTextOf(entry.data, 'evidence')} prefix={`${t.tasks.evidence}: `} className="tp-evidence" />
+    </li>
+  );
+}
+
 function TaskBody({ task, onOpen, onChanged, waiting }: { task: TaskDetail; onOpen: (id: string) => void; onChanged: () => void; waiting: Waiting }) {
   const t = useT();
   const { language } = useLanguage();
   const { org } = useOrg();
   const when = (at: string) => new Date(at).toLocaleString(language === 'ru' ? 'ru-RU' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' });
-  const who = (a: AgentRef) => `${a.name}${roleAfter(a, language)}`;
   const closed = task.status === 'done' || task.status === 'cancelled';
-  const waits = task.waitsFor.length > 0;
-  const executorState =
-    task.stage > 0 || task.status === 'done'
-      ? t.tasks.gateStates.did
-      : task.merging
-        ? t.tasks.gateStates.merging
-        : waits
-          ? t.tasks.waitsFor(task.waitsFor.map(n => `#${n}`).join(', '))
-          : t.tasks.gateStates.working;
 
   return (
     <>
-      <header className="ac-head">
-        <h3>{task.title}</h3>
-        <p className="muted">{[placeName(t, org, task.department), task.product?.name, task.turn !== null ? t.tasks.turn(task.turn) : null].filter(Boolean).join(' / ')}</p>
-        <WorkLabels task={task} />
-        <p className={`tstate ${task.status}`}>{t.tasks.states[task.status]}</p>
-        <ExternalTaskWait wait={task.externalWait} />
-        {task.createdBy && <p className="muted">{t.tasks.givenBy(task.createdBy.name)}</p>}
-      </header>
-      {waiting.requests.length > 0 && (
-        <section className="tp-wait" aria-label={t.tasks.waitingHere}>
-          <h4>{t.tasks.waitingHere}</h4>
-          <Requests
-            requests={waiting.requests}
-            onChanged={() => {
-              waiting.onRequestsChanged();
-              onChanged();
-            }}
-            onOpenTask={onOpen}
-            onOpenAgent={waiting.onOpenAgent}
-            placeName={p => placeName(t, org, p)}
-          />
-          {wordsAnswer(waiting.requests) && <p className="muted">{t.tasks.answerElsewhere}</p>}
-        </section>
-      )}
+      <TaskHeader task={task} org={org} />
+      <TaskWaitingSection waiting={waiting} org={org} onOpen={onOpen} onChanged={onChanged} />
       {task.parent && (
         <p className="tp-parent">
           {t.tasks.partOf}{' '}
@@ -145,39 +249,8 @@ function TaskBody({ task, onOpen, onChanged, waiting }: { task: TaskDetail; onOp
           </button>
         </p>
       )}
-      {task.executor ? (
-        <ol className="tgates" aria-label={t.tasks.gates}>
-          {!task.turnReview && (
-            <li className={task.stage > 0 || task.status === 'done' ? 'passed' : waits ? 'next' : 'current'}>
-              <b>{task.executor.name}</b>
-              {roleAfter(task.executor, language)}, <span>{executorState}</span>
-            </li>
-          )}
-          {task.gates.map(g => (
-            <li key={g.id} className={g.state}>
-              <b>{g.name}</b>
-              {roleAfter(g, language)}, <span>{t.tasks.gateStates[g.state]}</span>
-            </li>
-          ))}
-        </ol>
-      ) : (
-        task.assignee && <p className="muted">{who(task.assignee)}</p>
-      )}
-      {task.after.length > 0 && (
-        <section aria-label={t.tasks.after}>
-          <h4>{t.tasks.after}</h4>
-          <ul className="tp-subs">
-            {task.after.map(a => (
-              <li key={a.id}>
-                <button className="linkish" type="button" onClick={() => onOpen(a.id)}>
-                  #{a.number} {a.title}
-                </button>
-                <small>{t.tasks.states[a.status]}</small>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      <TaskGatesSection task={task} />
+      <TaskRelatedSection heading={t.tasks.after} ariaLabel={t.tasks.after} items={task.after} onOpen={onOpen} />
       {task.brief && <p className="tp-brief">{task.brief}</p>}
       {task.body && (
         <section className="tp-body">
@@ -185,56 +258,15 @@ function TaskBody({ task, onOpen, onChanged, waiting }: { task: TaskDetail; onOp
           <Markdown text={task.body} />
         </section>
       )}
-      {task.subtasks.length > 0 && (
-        <section>
-          <h4>{t.tasks.subtasks}</h4>
-          <ul className="tp-subs">
-            {task.subtasks.map(s => (
-              <li key={s.id}>
-                <button className="linkish" type="button" onClick={() => onOpen(s.id)}>
-                  #{s.number} {s.title}
-                </button>
-                <small>{t.tasks.states[s.status]}</small>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-      {task.requests.length > 0 && (
-        <section>
-          <h4>{t.tasks.questions}</h4>
-          <ul className="tp-log">
-            {task.requests.map(r => (
-              <li key={r.id}>
-                <span className="tp-ev">
-                  {r.agent?.name ?? t.window.hornhoof}: {r.text} <small>{t.tasks.requestStates[r.status] ?? r.status}</small>
-                </span>
-                {r.answer && <p>{r.answer}</p>}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      <TaskRelatedSection heading={t.tasks.subtasks} items={task.subtasks} onOpen={onOpen} />
+      <TaskFiles files={task.files} />
+      <TaskQuestionsSection requests={task.requests} />
       <section>
         <h4>{t.tasks.log}</h4>
         <ol className="tp-log" aria-label={t.tasks.log}>
-          {task.log.map((e, i) => {
-            const evidence = field(e.data, 'evidence');
-            const said = lineText(t, e, when);
-            return (
-              <li key={i} className={e.kind}>
-                <span className="tp-ev">
-                  {eventTitle(t, e)} <time dateTime={e.at}>{when(e.at)}</time>
-                </span>
-                {said && e.kind !== 'created' && <p>{said}</p>}
-                {typeof evidence === 'string' && evidence && (
-                  <p className="tp-evidence">
-                    {t.tasks.evidence}: {evidence}
-                  </p>
-                )}
-              </li>
-            );
-          })}
+          {task.log.map((e, i) => (
+            <LogEntry key={i} entry={e} when={when} />
+          ))}
         </ol>
       </section>
       {closed ? null : <Actions task={task} onChanged={onChanged} />}
@@ -249,8 +281,11 @@ function Actions({ task, onChanged }: { task: TaskDetail; onChanged: () => void 
   const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<unknown>(null);
+  const sending = useRef(false);
 
   async function run(action: () => Promise<unknown>) {
+    if (sending.current) return;
+    sending.current = true;
     setBusy(true);
     setFailure(null);
     try {
@@ -261,6 +296,7 @@ function Actions({ task, onChanged }: { task: TaskDetail; onChanged: () => void 
     } catch (err) {
       setFailure(err);
     } finally {
+      sending.current = false;
       setBusy(false);
     }
   }
@@ -273,8 +309,10 @@ function Actions({ task, onChanged }: { task: TaskDetail; onChanged: () => void 
   return (
     <>
       <form className="tp-comment" onSubmit={comment}>
-        <Field label={t.tasks.comment}>{p => <textarea {...p} rows={3} value={text} maxLength={4000} onChange={e => setText(e.target.value)} />}</Field>
-        <button className="btn small" type="submit" disabled={busy || !text.trim()}>{t.tasks.addComment}</button>
+        <Field label={t.tasks.comment}>{p => <textarea {...p} rows={3} value={text} onChange={e => setText(e.target.value)} />}</Field>
+        <button className="btn small" type="submit" disabled={busy || !text.trim()}>
+          {t.tasks.addComment}
+        </button>
       </form>
       <div className="ac-actions">
         {asking ? (
@@ -293,7 +331,11 @@ function Actions({ task, onChanged }: { task: TaskDetail; onChanged: () => void 
           </button>
         )}
       </div>
-      {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
+      {failure !== null && (
+        <p className="alert" role="alert">
+          {proseErrorText(t, failure)}
+        </p>
+      )}
     </>
   );
 }

@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agents, departments, jobs, tasks } from '../src/db/schema.js';
-import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
+import { as, invitePerson, ownPlan, setUpCompany, testApp } from './helpers.js';
 
 async function company() {
   const { app, db } = await testApp();
@@ -28,6 +28,7 @@ describe('the task in an agent window', () => {
   it('shows a product employee task to someone with access only to the product', async () => {
     const { app, db, ceo, companyId, department, product, employee } = await company();
     const viewer = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [product.id] } });
+    await ownPlan(db, 'maria@acme.com', employee.id);
     const [current] = await db.insert(tasks).values({ companyId, departmentId: department.id, productId: product.id, number: 12, title: 'Product work', status: 'working', assigneeAgentId: employee.id }).returning();
     await db.insert(jobs).values({ companyId, subscriptionId: employee.subscriptionId!, agentId: employee.id, taskId: current!.id, prompt: 'work', status: 'running', timeoutMs: 1000 });
     const response = await app.inject({ url: `/api/agents/${employee.id}`, ...as(viewer) });
@@ -39,12 +40,13 @@ describe('the task in an agent window', () => {
   it('omits a task outside the viewer access even when the employee is accessible', async () => {
     const { app, db, ceo, companyId, department, product, employee } = await company();
     const viewer = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [product.id] } });
+    await ownPlan(db, 'maria@acme.com', employee.id);
     const [current] = await db.insert(tasks).values({ companyId, departmentId: department.id, number: 12, title: 'Department private work', status: 'working', assigneeAgentId: employee.id }).returning();
     await db.insert(jobs).values({ companyId, subscriptionId: employee.subscriptionId!, agentId: employee.id, taskId: current!.id, prompt: 'work', status: 'running', timeoutMs: 1000 });
     const response = await app.inject({ url: `/api/agents/${employee.id}`, ...as(viewer) });
     expect(response.statusCode).toBe(200);
     expect(response.json().currentTask).toBeNull();
-    expect((await app.inject({ url: `/api/tasks/${current!.id}`, ...as(viewer) })).statusCode).toBe(404);
+    expect((await app.inject({ url: `/api/tasks/${current!.id}`, ...as(viewer) })).statusCode).toBe(403);
   });
 
   it('retains a held task while waiting without a running program and excludes unfinished prerequisites', async () => {

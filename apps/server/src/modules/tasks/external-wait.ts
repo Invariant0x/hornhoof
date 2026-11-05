@@ -158,7 +158,7 @@ async function queueBoundMessage(ctx: Ctx, input: TaskMessage & { task: number |
   requireMessageTask(task, input.agentId, sender);
   const id = await insertOrDeliverTurn(ctx, { ...turn, ...taskTurn(task, input.agentId, turn.message) }, required);
   if (!task.externalWait || task.assigneeAgentId !== input.agentId) return { id };
-  const resumed = await move(ctx, task, { externalWait: null, silent: 0 }, { kind: 'comment', actor: input.actor, text: input.text, data: { externalWait: null } });
+  const resumed = await move(ctx, task, { externalWait: null, silent: 0 }, { kind: 'comment', actor: input.actor, text: input.text, data: { externalWait: null }, inlineText: true });
   return { id, resumed: { task: resumed, before: task.externalWait } };
 }
 

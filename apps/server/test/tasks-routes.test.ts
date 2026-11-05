@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { agents, companies, departments, jobs, requests, subscriptions, tasks } from '../src/db/schema.js';
 import { ask, createTask, submit } from '../src/modules/tasks/engine.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
-import { as, invitePerson, listen, openStream, setUpCompany, testApp, until } from './helpers.js';
+import { as, invitePerson, listen, openStream, setUpCompany, testApp, until, ownPlan } from './helpers.js';
 
 async function company() {
   const { app, db } = await testApp();
@@ -32,13 +32,14 @@ async function company() {
 }
 
 describe('tasks for people', () => {
-  it("shows a person only their departments' tasks and what waits for them", async () => {
-    const { ctx, head, bruno, dev, ceo, oleg, maria, get } = await company();
+  it("shows a person only the tasks of agents they see and what waits for them", async () => {
+    const { ctx, db, head, bruno, dev, ceo, oleg, maria, get } = await company();
+    await ownPlan(db, 'oleg@acme.com', bruno.id);
     const { task } = await createTask(ctx, { agentId: head.id }, { title: 'Checkout API', brief: 'The API.', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true });
     await ask(ctx, bruno.id, task.id, { kind: 'question', text: 'Which currency?' });
     expect((await get(oleg, '/api/tasks')).json().tasks.map((t: { number: number }) => t.number)).toEqual([1]);
     expect((await get(maria, '/api/tasks')).json().tasks).toEqual([]);
-    expect((await get(maria, `/api/tasks/${task.id}`)).statusCode).toBe(404);
+    expect((await get(maria, `/api/tasks/${task.id}`)).statusCode).toBe(403);
     expect((await get(oleg, `/api/tasks/${task.id}`)).json().task).toMatchObject({ number: 1, title: 'Checkout API', executor: { name: 'Bruno' } });
     expect((await get(oleg, '/api/requests')).json().requests).toMatchObject([{ kind: 'question', text: 'Which currency?', task: { number: 1, title: 'Checkout API' } }]);
     expect((await get(maria, '/api/requests')).json().requests).toEqual([]);
@@ -57,6 +58,7 @@ describe('tasks for people', () => {
 
   it("gives a person's task to the department's head, or the orchestrator's to the whole company only", async () => {
     const { db, dev, sales, head, orchestrator, ceo, oleg, post } = await company();
+    await ownPlan(db, 'oleg@acme.com', head.id);
     const made = await post(oleg, '/api/tasks', { title: 'Payments', brief: 'Take card payments.', body: 'Stripe.', department: dev.id });
     expect(made.statusCode).toBe(201);
     expect(made.json().task).toMatchObject({ number: 1, assignee: { name: 'Hana' } });
@@ -67,27 +69,30 @@ describe('tasks for people', () => {
     expect((await db.select({ a: tasks.assigneeAgentId }).from(tasks)).map(r => r.a)).toEqual([head.id, orchestrator.id]);
   });
 
-  it('comments, cancels and answers for the people of the department', async () => {
+  it('comments, cancels and answers for someone who sees the task', async () => {
     const { ctx, db, head, bruno, dev, oleg, maria, ceo, post, get } = await company();
+    await ownPlan(db, 'oleg@acme.com', bruno.id);
     const { task } = await createTask(ctx, { agentId: head.id }, { title: 'Checkout API', brief: '', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true });
     expect((await post(oleg, `/api/tasks/${task.id}/comments`, { text: 'EUR only.' })).statusCode).toBe(201);
-    expect((await post(maria, `/api/tasks/${task.id}/comments`, { text: 'Hi.' })).statusCode).toBe(404);
+    expect((await post(maria, `/api/tasks/${task.id}/comments`, { text: 'Hi.' })).statusCode).toBe(403);
     /* A question without its topic is the CEO's: the department's people take the ones about its tasks and employees. */
     const { request: plain } = await ask(ctx, bruno.id, task.id, { kind: 'question', text: 'Which bank?' });
     expect((await post(oleg, `/api/requests/${plain.id}`, { answer: 'Any.' })).json().error.reason).toBe('decision_not_allowed');
     expect((await post(ceo, `/api/requests/${plain.id}`, { answer: 'Any.' })).statusCode).toBe(200);
     const { request } = await ask(ctx, bruno.id, task.id, { kind: 'question', text: 'Which currency?', topic: 'task' });
     expect((await post(oleg, `/api/requests/${request.id}`, { approve: true })).json().error.reason).toBe('task_invalid');
-    expect((await post(maria, `/api/requests/${request.id}`, { answer: 'EUR' })).statusCode).toBe(404);
+    expect((await post(maria, `/api/requests/${request.id}`, { answer: 'EUR' })).statusCode).toBe(403);
     expect((await post(oleg, `/api/requests/${request.id}`, { answer: 'EUR' })).statusCode).toBe(200);
     expect((await get(oleg, `/api/tasks/${task.id}`)).json().task).toMatchObject({ status: 'working', log: expect.arrayContaining([expect.objectContaining({ kind: 'answered', text: 'EUR' })]) });
     expect((await post(oleg, `/api/tasks/${task.id}/cancel`, { why: 'Not now.' })).json().task.status).toBe('cancelled');
     expect((await db.select().from(requests))[0]!.status).toBe('answered');
   });
 
-  it('shows inside a task only the tasks around it that the person reaches', async () => {
-    const { ctx, dev, sales, head, orchestrator, hire, ceo, oleg, maria, get } = await company();
+  it('shows inside a task only the tasks around it that the person sees', async () => {
+    const { ctx, db, dev, sales, head, orchestrator, hire, ceo, oleg, maria, get } = await company();
     const sam = await hire('Sam', 'head', 'SAL-HEAD', sales.id);
+    await ownPlan(db, 'oleg@acme.com', head.id);
+    await ownPlan(db, 'maria@acme.com', sam.id);
     const { task: payments } = await createTask(ctx, { agentId: orchestrator.id }, { title: 'Payments', brief: '', body: '', departmentId: dev.id, assigneeAgentId: head.id });
     const { task: pricing } = await createTask(ctx, { agentId: orchestrator.id }, { title: 'Pricing page', brief: '', body: '', departmentId: sales.id, parentId: payments.id, assigneeAgentId: sam.id });
     expect((await get(oleg, `/api/tasks/${payments.id}`)).json().task.subtasks).toEqual([]);
@@ -99,7 +104,8 @@ describe('tasks for people', () => {
   it('gives a person\'s task to the head who works in the department now', async () => {
     const { db, dev, head, hire, oleg, post } = await company();
     await db.update(agents).set({ removedAt: new Date() }).where(eq(agents.id, head.id));
-    await hire('Ivo', 'head', 'DEV-HEAD');
+    const ivo = await hire('Ivo', 'head', 'DEV-HEAD');
+    await ownPlan(db, 'oleg@acme.com', ivo.id);
     const made = await post(oleg, '/api/tasks', { title: 'Payments', brief: '', body: '', department: dev.id });
     expect(made.statusCode).toBe(201);
     expect(made.json().task.assignee.name).toBe('Ivo');
@@ -107,6 +113,7 @@ describe('tasks for people', () => {
 
   it('tells whoever gave a task that a person cancelled it', async () => {
     const { ctx, db, head, bruno, dev, oleg, post } = await company();
+    await ownPlan(db, 'oleg@acme.com', bruno.id);
     const { task } = await createTask(ctx, { agentId: head.id }, { title: 'Checkout API', brief: '', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true });
     await post(oleg, `/api/tasks/${task.id}/cancel`, { why: 'Not now.' });
     const turns = await db.select().from(jobs).where(eq(jobs.agentId, head.id));
@@ -152,6 +159,7 @@ describe('tasks for people', () => {
     ]);
     const [running] = await db.select().from(jobs).where(eq(jobs.taskId, parent.id));
     await db.update(jobs).set({ status: 'running', startedAt: new Date() }).where(eq(jobs.id, running!.id));
+    await ownPlan(db, 'oleg@acme.com', bruno.id);
     await post(oleg, `/api/tasks/${parent.id}/cancel`, { why: 'Not now.' });
     const ended = await db.select({ taskId: jobs.taskId, status: jobs.status, error: jobs.error }).from(jobs).where(inArray(jobs.taskId, [parent.id, child.id]));
     expect(ended).toEqual(expect.arrayContaining([
@@ -161,7 +169,8 @@ describe('tasks for people', () => {
   });
 
   it('shows a commit to approve to the people of the department, and lets only the CEO and the delegate approve it', async () => {
-    const { ctx, head, bruno, dev, oleg, ceo, post, get } = await company();
+    const { ctx, db, head, bruno, dev, oleg, ceo, post, get } = await company();
+    await ownPlan(db, 'oleg@acme.com', bruno.id);
     const { task } = await createTask(ctx, { agentId: head.id }, { title: 'Release', brief: '', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true });
     const { request } = await ask(ctx, bruno.id, task.id, { kind: 'approval', text: 'Release 0.5.0 to main.', commit: 'a'.repeat(40) });
     expect((await get(oleg, '/api/requests')).json().requests.map((r: { id: string }) => r.id)).toEqual([request.id]);
@@ -235,8 +244,9 @@ describe('tasks for people', () => {
     for (const bad of [0, 1.5, 1000]) expect((await put({ url: 'https://github.com/acme/app.git', branch: 'dev', testMemoryGb: bad })).statusCode).toBe(400);
   });
 
-  it("streams a task's changes only to people who reach its department", async () => {
-    const { app, ctx, head, bruno, dev, oleg, maria } = await company();
+  it("streams a task's changes only to people who see it", async () => {
+    const { app, ctx, db, head, bruno, dev, oleg, maria } = await company();
+    await ownPlan(db, 'oleg@acme.com', bruno.id);
     const olegs = await openStream(app, oleg);
     const marias = await openStream(app, maria);
     const { task } = await createTask(ctx, { agentId: head.id }, { title: 'Checkout API', brief: '', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true });

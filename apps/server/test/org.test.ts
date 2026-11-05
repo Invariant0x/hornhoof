@@ -6,7 +6,7 @@ import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { ask, createTask, submit } from '../src/modules/tasks/engine.js';
 import { checkSilentTurns, SILENT_TURN_MS } from '../src/modules/tasks/silent.js';
 import { failureCompany } from './failure-company.js';
-import { as, invitePerson, SETUP, setUpCompany, statements, testApp } from './helpers.js';
+import { as, invitePerson, SETUP, setUpCompany, statements, testApp, ownPlan } from './helpers.js';
 
 describe('GET /api/org', () => {
   it('reads failure state with the same number of queries as the company grows', async () => {
@@ -132,7 +132,7 @@ describe('GET /api/org', () => {
     expect(org.departments[1]).toMatchObject({ name: 'Sales Europe', templateKey: 'sales', products: [] });
   });
 
-  it('tells what each employee does now, and its task only to people who reach the department', async () => {
+  it('tells what each employee does now, and only to people who see that employee', async () => {
     const { app, db } = await testApp();
     const ceo = await setUpCompany(app);
     const [company] = await db.select().from(companies);
@@ -186,15 +186,7 @@ describe('GET /api/org', () => {
 
     const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [sales!.id] } });
     const hers = (await app.inject({ url: '/api/org', ...as(maria) })).json();
-    expect(doing(hers)).toEqual({
-      Hana: ['handed', null],
-      Bruno: ['working', null],
-      Felix: ['handed', null],
-      Rita: ['queued', null],
-      Quinn: ['waiting', null],
-      Ida: ['idle', null],
-      Otto: ['off', null],
-    });
+    expect(doing(hers)).toEqual({});
   });
 
   it('shows a reviewer at work on a gate while another reviewer there waits for a person', async () => {
@@ -378,6 +370,7 @@ describe('GET /api/org', () => {
     await checkSilentTurns(app.ctx, alarmAt);
 
     const devPerson = await invitePerson(app, ceo, { name: 'Dev', email: 'dev@acme.com', access: { departments: [dev!.id] } });
+    await ownPlan(db, 'dev@acme.com', bruno!.id, sally!.id);
 
     const ceoOrg = (await app.inject({ url: '/api/org', ...as(ceo) })).json();
     expect(ceoOrg.orchestrator.program).toMatchObject({ state: 'tool', tool: 'company.Reorg' });
@@ -389,7 +382,6 @@ describe('GET /api/org', () => {
 
     const devOrg = (await app.inject({ url: '/api/org', ...as(devPerson) })).json();
     const devEmployee = devOrg.departments.find((d: { id: string }) => d.id === dev!.id).employees[0];
-    const salesEmployee = devOrg.departments.find((d: { id: string }) => d.id === sales!.id).employees[0];
     expect(devEmployee.program).toEqual({
       state: 'tool',
       since: reportedAt.getTime(),
@@ -400,10 +392,8 @@ describe('GET /api/org', () => {
       reportedAt: reportedAt.getTime(),
     });
     expect(devEmployee.alarm).toEqual({ reason: 'node_silent', since: reportedAt.getTime() });
-    expect(salesEmployee.program).toBeNull();
-    expect(salesEmployee.alarm).toBeNull();
-    expect(devOrg.orchestrator.program).toBeNull();
-    expect(devOrg.orchestrator.alarm).toBeNull();
+    expect(devOrg.departments.find((d: { id: string }) => d.id === sales!.id).employees).toEqual([]);
+    expect(devOrg.orchestrator).toBeUndefined();
 
     const ownCard = await app.inject({ url: `/api/agents/${bruno!.id}`, ...as(devPerson) });
     expect(ownCard.statusCode).toBe(200);

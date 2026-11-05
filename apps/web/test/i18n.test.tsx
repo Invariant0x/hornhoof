@@ -112,4 +112,15 @@ describe('work tree words', () => {
     expect(en.routes.accessDenied).toBe('Insufficient permissions');
     expect(ru.routes.accessDenied).toBe('Недостаточно прав');
   });
+
+  it('names terminal permission and picture upload notices in English and Russian', () => {
+    expect(en.window.controlDenied).toBe("Only the owner of this agent's subscription can control its program. Ask the owner, or write an ordinary message.");
+    expect(ru.window.controlDenied).toBe('Управлять программой агента может только владелец его подписки. Попросите владельца или напишите обычное сообщение.');
+    expect(en.window.messageDenied).toBe('You cannot write to this agent. Ask someone who has access to its department.');
+    expect(ru.window.messageDenied).toBe('Вы не можете писать этому агенту. Попросите того, у кого есть доступ к его отделу.');
+    expect(en.window.pictureUploading).toBe('Uploading the picture...');
+    expect(ru.window.pictureUploading).toBe('Картинка загружается...');
+    expect(en.window.pictureUploaded).toBe('The picture path is in the terminal. Press Enter to send it.');
+    expect(ru.window.pictureUploaded).toBe('Путь к картинке вставлен в терминал. Нажмите Enter для отправки.');
+  });
 });

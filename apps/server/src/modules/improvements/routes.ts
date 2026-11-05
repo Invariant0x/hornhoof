@@ -1,10 +1,14 @@
 import { notificationMessage } from '../events/notifications.js';
+import { and, eq, inArray } from 'drizzle-orm';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { requireCompanyScope, requirePerson } from '../../auth/session.js';
+import { agentHidden, seesAgentId, viewerOf } from '../../auth/agent-view.js';
+import { requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
+import { improvements, tasks } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { enqueueTurn, liveSubscription, NoSubscription, orchestratorOf } from '../conversation/queue.js';
+import { seesTask } from '../tasks/sight.js';
 import { listImprovements, moveImprovement } from './store.js';
 
 const Params = z.object({ id: z.uuid() });
@@ -27,11 +31,30 @@ export function improvementRoutes(app: FastifyInstance, ctx: Ctx): void {
     return me;
   };
 
-  app.get('/api/improvements', async req => ({ improvements: await listImprovements(ctx, (await person(req)).companyId) }));
+  /* Those of the agents this person sees, each with the tasks they see that came of it. */
+  async function seenImprovements(me: Person) {
+    const all = await listImprovements(ctx, me.companyId);
+    const viewer = await viewerOf(db, me);
+    if (viewer.full) return all;
+    const mine = all.filter(i => seesAgentId(viewer, i.agent.id));
+    const taskIds = [...new Set(mine.flatMap(i => i.tasks.map(t => t.id)))];
+    const rows = taskIds.length ? await db.select().from(tasks).where(inArray(tasks.id, taskIds)) : [];
+    const seen = new Set(rows.filter(t => seesTask(viewer, t)).map(t => t.id));
+    return mine.map(i => ({ ...i, tasks: i.tasks.filter(t => seen.has(t.id)) }));
+  }
+
+  /* An improvement stays the business of whoever sees the agent who found it. */
+  async function requireSeen(me: Person, id: string): Promise<void> {
+    const [found] = await db.select({ agentId: improvements.agentId }).from(improvements).where(and(eq(improvements.id, id), eq(improvements.companyId, me.companyId)));
+    if (found && !seesAgentId(await viewerOf(db, me), found.agentId)) throw agentHidden();
+  }
+
+  app.get('/api/improvements', async req => ({ improvements: await seenImprovements(await person(req)) }));
 
   app.post('/api/improvements/:id/take', async req => {
     const me = await person(req);
     const { id } = Params.parse(req.params);
+    await requireSeen(me, id);
     /* Taken means the orchestrator has it, so it stays waiting while the orchestrator has nothing to run on. */
     const orchestrator = await orchestratorOf(ctx, me.companyId);
     const unable = () => new ApiError(409, 'conflict', 'The orchestrator has no subscription to run on. Pick one on its card first.', 'no_subscription');
@@ -53,6 +76,7 @@ export function improvementRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/improvements/:id/dismiss', async req => {
     const me = await person(req);
     const { id } = Params.parse(req.params);
+    await requireSeen(me, id);
     const set = await moveImprovement(ctx, me.companyId, id, 'open', { status: 'dismissed', decidedBy: me.id });
     return { improvement: { id, status: set.status } };
   });

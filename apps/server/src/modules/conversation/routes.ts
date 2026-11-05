@@ -1,7 +1,9 @@
 import { and, eq, inArray } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { Text } from '../tasks/long-text.js';
 import type { Ctx } from '../../app.js';
+import { maskEvent, viewerOf } from '../../auth/agent-view.js';
 import { companies, departments, jobs } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { agentFor } from '../agents/find.js';
@@ -17,7 +19,7 @@ import { queueTaskMessage, TaskReference } from '../tasks/external-wait.js';
 
 const EventsQuery = z.object({ after: z.coerce.number().int().min(0).default(0) });
 const MessageBody = z
-  .object({ text: z.string().trim().max(4000).default(''), task: TaskReference.optional(), pictures: z.array(z.uuid()).max(PICTURES_PER_MESSAGE).default([]) })
+  .object({ text: Text.trim().default(''), task: TaskReference.optional(), pictures: z.array(z.uuid()).max(PICTURES_PER_MESSAGE).default([]) })
   .refine(m => m.text || m.pictures.length, 'Write something or add a picture.');
 
 function writtenBy(me: Awaited<ReturnType<typeof agentFor>>['me'], text: string, pictures: MessagePicture[]) {
@@ -38,7 +40,8 @@ export function conversationRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/agents/:id/events', async req => {
     const { me, agent } = await agentFor(ctx, req);
     const { after } = EventsQuery.parse(req.query);
-    return { events: await listEvents(db, agent.id, after), state: { ...(await agentState(ctx, agent.id)), canType: await typesInTerminal(ctx, agent.id, me.id) } };
+    const viewer = await viewerOf(db, me);
+    return { events: (await listEvents(db, agent.id, after)).map(e => maskEvent(viewer, e)), state: { ...(await agentState(ctx, agent.id)), canType: await typesInTerminal(ctx, agent.id, me.id) } };
   });
 
   app.post('/api/agents/:id/messages', async (req, reply) => {

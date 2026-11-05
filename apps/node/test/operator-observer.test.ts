@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { OperatorEvidence, OperatorQuestion } from '@hornhoof/protocol/program-operator';
+import type { OperatorCheck, OperatorEvidence, OperatorQuestion } from '@hornhoof/protocol/program-operator';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as storage from '../src/terminal/operator-storage.js';
 import { OperatorObserver } from '../src/terminal/operator-observer.js';
@@ -467,5 +467,87 @@ describe('continuation source activity ownership', () => {
     expect(c.sent.slice(start).filter(fact => fact.type === 'program.delivery' && fact.phase === 'activity')).toHaveLength(2);
     expect(disk(c).deliveries[deliveryId]).toMatchObject({ active: true });
     expect(disk(c).deliveries[secondDelivery.id]).toMatchObject({ active: true });
+  });
+});
+
+describe('a look at the program before telling of a turn', () => {
+  const needed = (c: ReturnType<typeof fixture>) => c.alarms();
+  const looking = (check: Promise<OperatorCheck> | OperatorCheck = { input: 'text', screen: { protected: false, cols: 80, rows: 24, cells: 'The whole screen.' } }) => {
+    const c = fixture();
+    const look = vi.fn(() => Promise.resolve(check));
+    const observer = new OperatorObserver({ ...c.options, look });
+    observer.attempt(identity, { id: deliveryId, ordinal: 1 }, 'assignment', 'exact words');
+    return { ...c, observer, look };
+  };
+  const settled = () => new Promise(done => setTimeout(done, 0));
+
+  it('looks once, and tells afterwards, with what it saw', async () => {
+    const c = looking();
+    c.at(59_999); c.observer.tick();
+    expect(c.look).not.toHaveBeenCalled();
+    c.at(60_000); c.observer.tick(); c.observer.tick();
+    expect(c.look).toHaveBeenCalledTimes(1);
+    expect(c.look).toHaveBeenCalledWith(identity);
+    expect(needed(c)).toEqual([]);
+    await settled();
+    expect(needed(c)).toEqual([expect.objectContaining({ reason: 'assignment_unrecorded', deliveryId, check: { input: 'text', screen: { protected: false, cols: 80, rows: 24, cells: 'The whole screen.' } } })]);
+    c.observer.tick();
+    await settled();
+    expect(c.look).toHaveBeenCalledTimes(1);
+    expect(needed(c)).toHaveLength(1);
+  });
+
+  it('keeps the state of the line on disk and the screen off it, also when told again', async () => {
+    const c = looking();
+    c.at(60_000); c.observer.tick();
+    await settled();
+    const stored = readFileSync(c.options.file, 'utf8');
+    expect(stored).not.toContain('The whole screen.');
+    expect(JSON.parse(stored).outbox.find((fact: OperatorEvidence) => fact.type === 'program.operator_needed').check).toEqual({ input: 'text', screen: null });
+    const first = needed(c)[0]!;
+    c.observer.replay();
+    expect(needed(c)[1]).toMatchObject({ evidenceId: first.evidenceId, check: { input: 'text', screen: null } });
+  });
+
+  it('tells of it with the line unknown when the look fails', async () => {
+    const c = looking(Promise.reject(new Error('no screen')));
+    c.at(60_000); c.observer.tick();
+    await settled();
+    await settled();
+    expect(needed(c)[0]).toMatchObject({ check: { input: 'unknown', screen: null } });
+  });
+
+  it.each([
+    ['the words got recorded', (c: ReturnType<typeof looking>) => c.observer.receipt(deliveryId, 'queued')],
+    ['the delivery was called off', (c: ReturnType<typeof looking>) => c.observer.finalize(deliveryId, 'cancelled')],
+    ['the program ended', (c: ReturnType<typeof looking>) => c.observer.exit(identity, { code: 0, signal: null }, 'completed')],
+  ])('tells of nothing when %s while it looked', async (_what, meanwhile) => {
+    const c = looking();
+    c.at(60_000); c.observer.tick();
+    meanwhile(c);
+    await settled();
+    expect(needed(c).filter(frame => frame.reason === 'assignment_unrecorded')).toEqual([]);
+  });
+
+  it('looks again when it could not write what it saw', async () => {
+    const c = looking();
+    c.at(60_000);
+    const write = vi.spyOn(storage, 'writeOperatorStore').mockImplementationOnce(() => { throw new Error('disk full'); });
+    c.observer.tick();
+    await settled();
+    expect(needed(c)).toEqual([]);
+    write.mockRestore();
+    c.observer.tick();
+    await settled();
+    expect(c.look).toHaveBeenCalledTimes(2);
+    expect(needed(c)).toHaveLength(1);
+  });
+
+  it('tells of a program it has no way to look at at once', () => {
+    const c = fixture();
+    c.attempt();
+    c.at(60_000); c.observer.tick();
+    expect(c.alarms()).toEqual([expect.objectContaining({ reason: 'assignment_unrecorded' })]);
+    expect(c.alarms()[0]).not.toHaveProperty('check');
   });
 });

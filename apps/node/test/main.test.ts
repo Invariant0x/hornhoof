@@ -1327,3 +1327,31 @@ it('keeps a stopped part cleanup exclusive when another machine slot is granted 
   release(); await server.wait(() => server.received.some(frame => frame.type === 'tests.done' && frame.partId === 'second'));
   expect(runPart).toHaveBeenCalledTimes(2);
 });
+
+it.skipIf(!hasTmux)('delivers input_kept through the node socket before starting the next terminal assignment', async () => {
+  const server = await fakeServer(), dir = nodeDir(server.url), key = 'kept-agent';
+  const tmux = new Tmux({ socket: `hh-main-kept-${process.pid}`, env: { PATH: process.env.PATH ?? '', HOME: dir } });
+  const node = await runNode({ dir, adapter, log: () => {}, terminal: { tmux, program: claudeProgram, bin: new URL('./fakes/fake-term.mjs', import.meta.url).pathname, home: join(dir, 'home'), signedOut: /not logged in/i } });
+  onTestFinished(() => node.stop());
+  await server.wait(() => server.received.some(message => message.type === 'hello'));
+  const run = { type: 'job.run', subscriptionId: 's1', provider: 'claude', model: null, timeoutMs: 20000, secret: null, instructions: null, toolToken: 'fixture-token', workspace: { key, repo: null } };
+  server.send({ ...run, jobId: 'kept-first', prompt: 'First assignment.', sessionId: null });
+  await server.wait(() => server.received.some(message => message.type === 'job.done' && message.jobId === 'kept-first'), 15000);
+  const first = server.received.find(message => message.type === 'job.done' && message.jobId === 'kept-first')!;
+  expect(first).toMatchObject({ ok: true });
+  server.send({ type: 'term.open', termId: 'kept-window', agentKey: key, cols: 100, rows: 30, write: true });
+  await server.wait(() => server.received.some(message => message.type === 'term.data' && message.termId === 'kept-window'));
+  server.send({ type: 'term.input', termId: 'kept-window', data: 'Unsent draft' });
+  await server.wait(() => server.received.some(message => message.type === 'term.data' && String(message.data).includes('Unsent draft')));
+  // Advance only the idle clock past the host's typing grace; do not change its timeout policy.
+  const now = Date.now.bind(Date), clock = vi.spyOn(Date, 'now').mockImplementation(() => now() + 16_000);
+  onTestFinished(() => clock.mockRestore());
+  server.send({ ...run, jobId: 'kept-second', prompt: 'Second assignment.', sessionId: first.sessionId });
+  await server.wait(() => server.received.some(message => message.type === 'agent.input_left' && message.jobId === 'kept-second'), 8000);
+  const left = server.received.find(message => message.type === 'agent.input_left' && message.jobId === 'kept-second')!;
+  expect(left).toMatchObject({ text: 'Unsent draft', typed: true });
+  expect(server.received.some(message => message.type === 'job.done' && message.jobId === 'kept-second')).toBe(false);
+  server.send({ type: 'agent.input_kept', agentKey: key, ref: left.ref });
+  await server.wait(() => server.received.some(message => message.type === 'job.done' && message.jobId === 'kept-second'), 8000);
+  expect(server.received.find(message => message.type === 'job.done' && message.jobId === 'kept-second')).toMatchObject({ ok: true, result: 'echo: Second assignment.' });
+});

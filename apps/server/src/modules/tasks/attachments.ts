@@ -3,16 +3,17 @@ import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lt, or, sql } fr
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { accessOf, canReach } from '../../auth/access.js';
+import { canViewAgent, seesAgentId, viewerOf } from '../../auth/agent-view.js';
 import { requirePerson } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { agents, attachments, departments, requests, tasks, turns, type RequestOption } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { canOpenAgent } from '../agents/running.js';
 import { jobOf, type ToolJob } from '../tools/job.js';
 import { agentCasePicture, personCasePicture, sendCasePicture } from '../program-operator/attachments.js';
-import { refuse, taskSpot, type Task } from './engine.js';
-import { taskByRef } from './views.js';
+import { mayOpenRequest } from './decisions.js';
+import { refuse, type Task } from './engine.js';
+import { seesTask } from './sight.js';
+import { agentSeesTask, taskByRef } from './views.js';
 
 /* A screenshot fits comfortably; a turn sends a few dozen at most. */
 export const PICTURE_BYTES = 3 * 1024 * 1024;
@@ -63,9 +64,9 @@ export const onTask = (job: ToolJob, t: Task) =>
   job.agentKind === 'orchestrator' || (job.departmentId !== null && t.departmentId === job.departmentId) || [t.assigneeAgentId, t.executorAgentId, t.createdByAgentId, ...t.gates, ...t.panel].includes(job.agentId);
 
 /* The files on a task, the newest under each name, without their bytes. */
-export async function filesOf(db: Db, taskId: string): Promise<{ id: string; name: string; size: number; agentId: string; at: Date }[]> {
+export async function filesOf(db: Db, taskId: string): Promise<{ id: string; name: string; size: number; agentId: string; personId: string | null; at: Date }[]> {
   const rows = await db
-    .select({ id: attachments.id, name: attachments.name, size: attachments.size, agentId: attachments.agentId, at: attachments.createdAt })
+    .select({ id: attachments.id, name: attachments.name, size: attachments.size, agentId: attachments.agentId, personId: attachments.personId, at: attachments.createdAt })
     .from(attachments)
     .where(and(eq(attachments.taskId, taskId), isNull(attachments.operatorCaseId)))
     .orderBy(desc(attachments.createdAt));
@@ -107,7 +108,7 @@ export async function picturesOf(db: Db, rows: { id: string; options: RequestOpt
 /* Removes the files on the tasks of turns closed 30 days or more before now, and people's pictures sent as long ago or
    never sent, and says how many went. */
 export async function dropOldFiles(db: Db, now: Date): Promise<number> {
-  const pictures = await db.delete(attachments).where(and(isNotNull(attachments.personId), lt(attachments.createdAt, new Date(now.getTime() - KEEP_FILES_MS)))).returning({ id: attachments.id });
+  const pictures = await db.delete(attachments).where(and(isNotNull(attachments.personId), isNull(attachments.taskId), lt(attachments.createdAt, new Date(now.getTime() - KEEP_FILES_MS)))).returning({ id: attachments.id });
   const old = db
     .select({ id: tasks.id })
     .from(tasks)
@@ -130,7 +131,7 @@ export async function checkPictureRoom(ctx: Pick<Ctx, 'db' | 'config'>, companyI
 }
 
 /* Refuses a new file of this size on the task when the task or the company has no room left for it. */
-export async function checkRoom(ctx: Pick<Ctx, 'db' | 'config'>, companyId: string, task: Pick<Task, 'id' | 'number'>, size: number): Promise<void> {
+export async function checkRoom(ctx: { db: Pick<Ctx['db'], 'select'>; config: Pick<Ctx['config'], 'taskFilesBytes'> }, companyId: string, task: Pick<Task, 'id' | 'number'>, size: number): Promise<void> {
   const [used] = await ctx.db
     .select({
       task: sql<string>`coalesce(sum(${attachments.size}) filter (where ${attachments.taskId} = ${task.id}), 0)`,
@@ -146,7 +147,7 @@ export async function checkRoom(ctx: Pick<Ctx, 'db' | 'config'>, companyId: stri
 }
 
 /* Sends a task file in pieces, so the server never holds a whole one. */
-export async function sendFile(db: Db, reply: FastifyReply, found: { id: string; name: string | null; length: number }) {
+export async function sendFile(db: Db, reply: FastifyReply, found: { id: string; name: string | null; length: number; mediaType?: string }) {
   const [ordinary] = await db.select({ id: attachments.id }).from(attachments).where(and(eq(attachments.id, found.id), isNull(attachments.operatorCaseId)));
   if (!ordinary) throw new ApiError(404, 'not_found', 'There is no such file.', 'attachment_unknown');
   async function* pieces(id: string, length: number) {
@@ -162,8 +163,9 @@ export async function sendFile(db: Db, reply: FastifyReply, found: { id: string;
   return reply
     .header('x-content-type-options', 'nosniff')
     .header('x-file-name', encodeURIComponent(found.name ?? ''))
+    .header('content-security-policy', "default-src 'none'")
     .header('content-length', String(found.length))
-    .type('application/octet-stream')
+    .type(found.mediaType === 'text/plain' ? 'text/plain; charset=utf-8' : 'application/octet-stream')
     .send(Readable.from(pieces(found.id, found.length)));
 }
 
@@ -180,8 +182,25 @@ async function messagePicture(db: Db, job: ToolJob, id: string) {
   const [found] = await db
     .select({ id: attachments.id, name: attachments.name, length: sql<number>`octet_length(${attachments.bytes})`.mapWith(Number) })
     .from(attachments)
-    .where(and(eq(attachments.id, id), eq(attachments.companyId, job.companyId), eq(attachments.agentId, job.agentId), isNotNull(attachments.personId), isNull(attachments.operatorCaseId)));
+    .where(and(eq(attachments.id, id), eq(attachments.companyId, job.companyId), eq(attachments.agentId, job.agentId), isNotNull(attachments.personId), isNull(attachments.taskId), isNull(attachments.operatorCaseId)));
   return found && { ...found, name: `${found.id.slice(0, 8)}-${found.name ?? 'picture'}` };
+}
+
+/* A file of a task goes with its task and with who wrote it: a person, or an agent this person sees. A picture shown with a
+   request answers to the request instead, as below. */
+async function taskFileForPerson(db: Db, me: Awaited<ReturnType<typeof requirePerson>>, id: string) {
+  const [found] = await db.select({ id: attachments.id, name: attachments.name, mediaType: attachments.mediaType, length: attachments.size, personId: attachments.personId, agentId: attachments.agentId, task: tasks }).from(attachments)
+    .innerJoin(tasks, eq(tasks.id, attachments.taskId))
+    .where(and(eq(attachments.id, id), eq(attachments.companyId, me.companyId), eq(tasks.companyId, me.companyId), isNull(attachments.requestId), isNull(attachments.operatorCaseId)));
+  if (!found) return null;
+  const viewer = await viewerOf(db, me);
+  if (!seesTask(viewer, found.task) || !(found.personId || seesAgentId(viewer, found.agentId))) throw new ApiError(403, 'forbidden', 'This file belongs to work you do not see.', 'attachment_hidden');
+  return found;
+}
+
+/* Ordinary uploaded files keep their sharing rule; automatic plain-text logs keep the task's read boundary. */
+function readsTaskFile(job: ToolJob, task: Task | null, file: { mediaType: string }): boolean {
+  return file.mediaType !== 'text/plain' || (task !== null && agentSeesTask({ id: job.agentId, kind: job.agentKind, departmentId: job.departmentId }, task));
 }
 
 export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
@@ -214,7 +233,7 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     });
   });
 
-  /* Any agent of the company downloads a task's file, by its name or id, with its tool token, through hh-fetch. A name
+  /* Any agent of the company downloads an ordinary task file; automatic log files require access to their task, by its name or id, with its tool token, through hh-fetch. A name
      put on twice gives the newest. "message" in place of the task gets a picture that came with a message to this agent. */
   app.get('/api/attachments/file', async (req, reply) => {
     const job = await jobOf(ctx, req);
@@ -229,33 +248,36 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const byId = z.uuid().safeParse(file).success;
     const [found] = task
       ? await db
-          .select({ id: attachments.id, name: attachments.name, length: sql<number>`octet_length(${attachments.bytes})`.mapWith(Number) })
+          .select({ id: attachments.id, name: attachments.name, mediaType: attachments.mediaType, length: sql<number>`octet_length(${attachments.bytes})`.mapWith(Number) })
           .from(attachments)
           .where(and(eq(attachments.taskId, task.id), isNull(attachments.operatorCaseId), byId ? or(eq(attachments.id, file), eq(attachments.name, file)) : eq(attachments.name, file)))
           .orderBy(desc(attachments.createdAt))
           .limit(1)
       : [];
-    if (!found) throw new ApiError(404, 'not_found', `Task ${ref} has no file ${file}. Its card lists its files.`, 'attachment_unknown');
+    if (!found || !readsTaskFile(job, task, found)) throw new ApiError(404, 'not_found', `Task ${ref} has no file ${file}. Its card lists its files.`, 'attachment_unknown');
     return sendFile(db, reply, found);
   });
 
-  /* People see a picture once a request shows it, and only where they reach the request's task; one a person sends an
-     agent, where they reach that agent's window. */
+  /* People see a picture of a request they read with its work, or of an open one that is theirs to answer; one a person
+     sends an agent, when they see that agent. */
   app.get('/api/attachments/:id', async (req, reply) => {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
+    const file = await taskFileForPerson(db, me, id);
+    if (file) return sendFile(db, reply, file);
     const [picture] = await db.select({ operatorCaseId: attachments.operatorCaseId }).from(attachments).where(and(eq(attachments.id, id), eq(attachments.companyId, me.companyId)));
     if (picture?.operatorCaseId) return sendCasePicture(reply, await personCasePicture(db, me, id));
     const [found] = await db
-      .select({ mediaType: attachments.mediaType, bytes: attachments.bytes, personId: attachments.personId, agent: agents, task: tasks })
+      .select({ mediaType: attachments.mediaType, bytes: attachments.bytes, personId: attachments.personId, agent: agents, task: tasks, request: requests })
       .from(attachments)
       .innerJoin(agents, eq(agents.id, attachments.agentId))
       .leftJoin(requests, eq(requests.id, attachments.requestId))
       .leftJoin(tasks, eq(tasks.id, requests.taskId))
       .where(and(eq(attachments.id, id), eq(attachments.companyId, me.companyId), isNull(attachments.operatorCaseId)));
-    const reach = await accessOf(db, me);
-    const shows = found && (found.personId ? await canOpenAgent(ctx, reach, found.agent) : found.task && canReach(reach, taskSpot(found.task)));
-    if (!shows) throw new ApiError(404, 'not_found', 'There is no such picture.', 'attachment_unknown');
+    if (!found || (!found.personId && !found.task)) throw new ApiError(404, 'not_found', 'There is no such picture.', 'attachment_unknown');
+    if (!(found.personId ? await canViewAgent(db, me, found.agent) : await mayOpenRequest(db, me, found.request!, found.task!))) {
+      throw new ApiError(403, 'forbidden', 'This picture belongs to work you do not see.', 'attachment_hidden');
+    }
     return reply
       .header('x-content-type-options', 'nosniff')
       .header('content-security-policy', "default-src 'none'")

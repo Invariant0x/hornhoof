@@ -6,7 +6,7 @@ import { agents, companies, departments, jobs, pendingWakes, people, subscriptio
 import { pump } from '../src/modules/conversation/queue.js';
 import { cancel, comment, createTask, startWork, submit, updateTask, verdict } from '../src/modules/tasks/engine.js';
 import { wakeAll, wakePrompt } from '../src/modules/tasks/wake.js';
-import { as, invitePerson, listen, mcp, setUpCompany, statements, testApp } from './helpers.js';
+import { as, invitePerson, listen, mcp, setUpCompany, statements, testApp, ownPlan } from './helpers.js';
 
 async function company() {
   const { app, db } = await testApp();
@@ -325,6 +325,7 @@ describe('what a task comes after, as each one sees it', () => {
     const refused = await app.inject({ method: 'POST', url: '/api/tasks', payload: { title: 'Launch', department: dev.id, after: [deal.number] }, ...as(dana) });
     expect(refused.statusCode).toBe(400);
     expect(refused.json().error.message).toBe(`There is no task #${deal.number} to come after.`);
+    await ownPlan(ctx.db, 'dana@acme.com', head.id);
     const launch = (await createTask(ctx, { personId: ceo.id }, { title: 'Launch', brief: '', body: '', departmentId: dev.id, assigneeAgentId: head.id, after: [deal.id] })).task;
     const read = (session: typeof owner) => app.inject({ url: `/api/tasks/${launch.id}`, ...as(session) }).then(r => r.json().task);
     expect(await read(dana)).toMatchObject({ after: [], waitsFor: [] });

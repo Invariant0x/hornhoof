@@ -6,7 +6,7 @@ import { agentEvents, agents, companies, departments, jobs, people, subscription
 import { createTask, submit, verdict } from '../src/modules/tasks/engine.js';
 import type { DepartmentTree } from '../src/modules/tasks/tree.js';
 import { treeFacts } from '../src/modules/tasks/tree-facts.js';
-import { as, invitePerson, listen, mcp, setUpCompany, statements, testApp } from './helpers.js';
+import { as, invitePerson, listen, mcp, setUpCompany, statements, testApp, ownPlan } from './helpers.js';
 
 async function company({ openTurn = true, openedMinutesAgo = 120 } = {}) {
   const { app, db } = await testApp();
@@ -200,7 +200,7 @@ describe('GET /api/departments/:id/tree', () => {
     ]);
   });
 
-  it('returns 404 when a person only reaches another department, or for a product or unknown id, and filters lines by product access', async () => {
+  it('returns 403 when a person only reaches another department, 404 for a product or unknown id, and filters lines by product access', async () => {
     const { app, db, companyId, ceoToken, dev, sales, bruno, kai, member } = await company();
     const [shop] = await db.insert(departments).values({ companyId, parentId: dev.id, name: 'Shop', roleCode: 'DEV' }).returning();
     const [other] = await db.insert(departments).values({ companyId, parentId: dev.id, name: 'Backoffice', roleCode: 'DEV' }).returning();
@@ -211,8 +211,9 @@ describe('GET /api/departments/:id/tree', () => {
     const expected404 = { error: { code: 'not_found', message: 'This department does not exist.', reason: 'department_unknown' } };
     const salesPerson = await invitePerson(app, ceoToken, { name: 'Sasha', email: 'sasha@acme.com', access: { departments: [sales.id] } });
     const denied = await app.inject({ method: 'GET', url: `/api/departments/${dev.id}/tree`, ...as(salesPerson) });
-    expect(denied.statusCode).toBe(404);
-    expect(denied.json()).toEqual(expected404);
+    expect(denied.statusCode).toBe(403);
+    expect(denied.json().error.reason).toBe('not_your_department');
+    expect(denied.body).not.toContain('Shop checkout');
 
     const onProduct = await app.inject({ method: 'GET', url: `/api/departments/${shop!.id}/tree`, ...as(ceoToken) });
     expect(onProduct.statusCode).toBe(404);
@@ -223,6 +224,8 @@ describe('GET /api/departments/:id/tree', () => {
     expect(onUnknown.json()).toEqual(expected404);
 
     const shopPerson = await invitePerson(app, ceoToken, { name: 'Polina', email: 'polina@acme.com', access: { departments: [shop!.id] } });
+    await ownPlan(db, 'polina@acme.com', bruno.id);
+    await db.update(agents).set({ productId: shop!.id }).where(eq(agents.id, bruno.id));
     const scoped = await app.inject({ method: 'GET', url: `/api/departments/${dev.id}/tree`, ...as(shopPerson) });
     expect(scoped.statusCode).toBe(200);
     expect(scoped.json<{ tree: DepartmentTree }>().tree.lines.map(l => l.title)).toEqual(['Shop checkout']);

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterEach, expect, it, vi } from 'vitest';
-const sharedState = vi.hoisted(() => ({ builderFiles: new Set<string>() }));
+const sharedState = vi.hoisted(() => ({ builderFiles: new Set<string>(), jobUid: 2_000_000_000 + (process.getuid?.() ?? 0) % 1_000_000, builderUid: 2_001_000_000 + (process.getuid?.() ?? 0) % 1_000_000 }));
 import type { TestEnvironmentV1, TestService, ServerMessage } from '@hornhoof/protocol';
 // Only the unavailable OS identity operations are doubled. Git, files, cache, commands and cleanup are real.
 vi.mock('node:child_process', async original => {
@@ -19,10 +19,20 @@ vi.mock('node:child_process', async original => {
     return child;
   } };
 });
-vi.mock('node:fs', async original => { const module = await original<typeof import('node:fs')>(); return { ...module, chownSync: () => {}, lstatSync: (path: import('node:fs').PathLike) => { const stat = module.lstatSync(path); return sharedState.builderFiles.has(String(path)) ? Object.assign(stat, { uid: 20001 }) : stat; } }; });
+vi.mock('node:fs', async original => {
+  const module = await original<typeof import('node:fs')>();
+  return { ...module, chownSync: () => {},
+    readdirSync: (path: import('node:fs').PathLike) => {
+      const folder = String(path);
+      if (['/tmp', '/var/tmp', '/dev/shm'].includes(folder)) return [...sharedState.builderFiles].filter(file => file.startsWith(folder + '/') && !file.slice(folder.length + 1).includes('/')).map(file => file.slice(folder.length + 1));
+      return module.readdirSync(path);
+    },
+    lstatSync: (path: import('node:fs').PathLike) => { const stat = module.lstatSync(path); return sharedState.builderFiles.has(String(path)) ? Object.assign(stat, { uid: sharedState.builderUid }) : stat; },
+  };
+});
 vi.mock('../src/isolation.js', async original => {
   const module = await original<typeof import('../src/isolation.js')>();
-  return { ...module, userFor: () => ({ uid: 20001, gid: 20001 }), ensurePasswd: () => {}, prepareFolder: (path: string) => module.prepareFolder(path, null) };
+  return { ...module, userFor: () => ({ uid: sharedState.builderUid, gid: sharedState.builderUid }), ensurePasswd: () => {}, prepareFolder: (path: string) => module.prepareFolder(path, null) };
 });
 import { readTestEnvironment } from '../src/test-environment.js';
 import { runTests } from '../src/tests.js';
@@ -48,7 +58,7 @@ async function fixture(configure?: (manifest: TestEnvironmentV1) => void) {
   return { root, source, dir, msg };
 }
 it('executes cold then warm pinned product commands and returns validated cache/phase evidence', async () => {
-  const f = await fixture(), options = { dir: f.dir, proc: join(f.root, 'proc'), user: { uid: 20000, gid: 20000 }, hidden: [], prepareRepoBrowser: async () => {} };
+  const f = await fixture(), options = { dir: f.dir, proc: join(f.root, 'proc'), user: { uid: sharedState.jobUid, gid: sharedState.jobUid }, hidden: [], prepareRepoBrowser: async () => {} };
   const cold = await runTests(f.msg, options);
   expect(cold).toMatchObject({ ok: true, commit: f.msg.commitSha, environmentReceipt: { dependencies: { hit: false }, environments: [{ unitId: 'schema', hit: false }] } }); expect(cold.log).toContain('product ready ["./test.js"]');
   const warm = await runTests({ ...f.msg, partId: 'part-two' }, options);
@@ -60,13 +70,13 @@ it('refuses product execution without a distinct isolated job user and rejects f
   const f = await fixture();
   const refused = await runTests(f.msg, { dir: f.dir, proc: join(f.root, 'proc'), user: null, hidden: [] }); expect(refused.ok).toBe(false); expect(refused.log).toContain('isolation_missing');
   f.msg.environment!.snapshot.description.manifestHash = 'f'.repeat(64);
-  const forged = await runTests(f.msg, { dir: f.dir, proc: join(f.root, 'proc'), user: { uid: 20000, gid: 20000 }, hidden: [], prepareRepoBrowser: async () => {} });
+  const forged = await runTests(f.msg, { dir: f.dir, proc: join(f.root, 'proc'), user: { uid: sharedState.jobUid, gid: sharedState.jobUid }, hidden: [], prepareRepoBrowser: async () => {} });
   expect(forged.ok).toBe(false); expect(forged.log).toContain('description_mismatch');
 });
 
 it('rejects stale tracked input evidence at the same SHA before running a product command', async () => {
   const f = await fixture(); f.msg.environment!.snapshot.description.inputDigests[0].digest = 'f'.repeat(64);
-  const result = await runTests(f.msg, { dir: f.dir, proc: join(f.root, 'proc'), user: { uid: 20000, gid: 20000 }, hidden: [], prepareRepoBrowser: async () => {} });
+  const result = await runTests(f.msg, { dir: f.dir, proc: join(f.root, 'proc'), user: { uid: sharedState.jobUid, gid: sharedState.jobUid }, hidden: [], prepareRepoBrowser: async () => {} });
   expect(result).toMatchObject({ ok: false, commit: null }); expect(result.log).toContain('description_mismatch'); expect(result.log).not.toContain('product ready');
 });
 
@@ -77,7 +87,7 @@ it('integrates the real process service provider with cached stopped state and p
     manifest.prepare = [{ id: 'state', profiles: ['fast'], serviceIds: ['fixture'], inputs: [], commands: [command("require('fs').writeFileSync(process.env.HH_SERVICE_STATE+'/data/db','prepared')")], artifacts: [{ service: 'fixture', path: '.' }] }];
     manifest.suites[0].run = command("const f=require('fs'),p=require('path'),s=process.env.HH_SERVICE_STATE;if((f.statSync(p.resolve(s,'../../..')).mode&511)!==493)throw Error('service parent must be traversable');if(f.readFileSync(s+'/data/db','utf8')!=='prepared')process.exit(7);f.writeFileSync(s+'/data/db','consumer mutation');console.log('provider ready')");
   });
-  const options = { dir: f.dir, proc: join(f.root, 'proc'), user: { uid: 20000, gid: 20000 }, hidden: [], prepareRepoBrowser: async () => {} };
+  const options = { dir: f.dir, proc: join(f.root, 'proc'), user: { uid: sharedState.jobUid, gid: sharedState.jobUid }, hidden: [], prepareRepoBrowser: async () => {} };
   const first = await runTests(f.msg, options);
   expect(first, first.log + JSON.stringify(first.environmentReceipt?.phases)).toMatchObject({ ok: true, environmentReceipt: { environments: [{ unitId: 'state', hit: false }] } }); expect(first.log).toContain('provider ready');
   const warm = await runTests({ ...f.msg, partId: 'part-two' }, options);
@@ -96,7 +106,7 @@ it('opens a described service with fresh state when no preparation unit declares
     manifest.services = [fixtureService()]; manifest.prepare = [];
     manifest.suites[0].run = command("const f=require('fs');if(f.readFileSync(process.env.HH_SERVICE_STATE+'/data/db','utf8')!=='fresh')process.exit(7);console.log('fresh service')");
   });
-  const result = await runTests(f.msg, { dir: f.dir, proc: join(f.root, 'proc'), user: { uid: 20000, gid: 20000 }, hidden: [], prepareRepoBrowser: async () => {} });
+  const result = await runTests(f.msg, { dir: f.dir, proc: join(f.root, 'proc'), user: { uid: sharedState.jobUid, gid: sharedState.jobUid }, hidden: [], prepareRepoBrowser: async () => {} });
   expect(result, result.log).toMatchObject({ ok: true, environmentReceipt: { environments: [] } }); expect(result.log).toContain('fresh service');
 });
 
@@ -106,13 +116,13 @@ it('runs a part reset and passes a JSON file selection literally', async () => {
     manifest.suites[0].split = { kind: 'json-file' };
     manifest.suites[0].run = command("const f=require('fs');if(f.readFileSync('reset-ready','utf8')!=='yes')process.exit(7);console.log('json selection',f.readFileSync(process.env.HH_TEST_FILES,'utf8'))");
   });
-  const result = await runTests(f.msg, { dir: f.dir, proc: join(f.root, 'proc'), user: { uid: 20000, gid: 20000 }, hidden: [], prepareRepoBrowser: async () => {} });
+  const result = await runTests(f.msg, { dir: f.dir, proc: join(f.root, 'proc'), user: { uid: sharedState.jobUid, gid: sharedState.jobUid }, hidden: [], prepareRepoBrowser: async () => {} });
   expect(result, result.log).toMatchObject({ ok: true }); expect(result.log).toContain('json selection ["./test.js"]');
 });
 it('executes its final leaf commands once without suite file arguments', async () => {
   const f = await fixture(manifest => { manifest.suites[0].finalChecks = [command("console.log('final leaf',JSON.stringify(process.argv.slice(1)))")]; });
   f.msg.environment!.selection = { kind: 'final', suiteId: 'unit', files: [] };
-  const result = await runTests(f.msg, { dir: f.dir, proc: join(f.root, 'proc'), user: { uid: 20000, gid: 20000 }, hidden: [], prepareRepoBrowser: async () => {} });
+  const result = await runTests(f.msg, { dir: f.dir, proc: join(f.root, 'proc'), user: { uid: sharedState.jobUid, gid: sharedState.jobUid }, hidden: [], prepareRepoBrowser: async () => {} });
   expect(result, result.log).toMatchObject({ ok: true, environmentReceipt: { kind: 'final', files: [] } });
   expect(result.log.match(/final leaf \[\]/g)).toHaveLength(1);
 });
@@ -121,12 +131,12 @@ async function commandOnlyFixture(code: string) {
 }
 it('reports a failing literal product command and still removes its attempt', async () => {
   const f = await commandOnlyFixture('process.exit(7)');
-  const result = await runTests(f.msg, { dir: f.dir, proc: join(f.root, 'proc'), user: { uid: 20000, gid: 20000 }, hidden: [], prepareRepoBrowser: async () => {} });
+  const result = await runTests(f.msg, { dir: f.dir, proc: join(f.root, 'proc'), user: { uid: sharedState.jobUid, gid: sharedState.jobUid }, hidden: [], prepareRepoBrowser: async () => {} });
   expect(result).toMatchObject({ ok: false, error: 'failed', exitCode: 7 }); expect(result.log).toContain('exit 7');
 });
 it('retains cleanup through caller cancellation of a running product command', async () => {
   const f = await commandOnlyFixture("require('fs').writeFileSync('started','yes');setInterval(()=>{},100)"), stop = new AbortController();
-  const result = runTests(f.msg, { dir: f.dir, proc: join(f.root, 'proc'), user: { uid: 20000, gid: 20000 }, hidden: [], signal: stop.signal, prepareRepoBrowser: async () => {} });
+  const result = runTests(f.msg, { dir: f.dir, proc: join(f.root, 'proc'), user: { uid: sharedState.jobUid, gid: sharedState.jobUid }, hidden: [], signal: stop.signal, prepareRepoBrowser: async () => {} });
   const started = join(f.dir, 'runs', f.msg.partId, 'repo', 'started'), end = Date.now() + 5000;
   while (await readFile(started).catch(() => null) === null) { if (Date.now() >= end) throw new Error('The command never started.'); await new Promise(resolve => setTimeout(resolve, 10)); }
   stop.abort(new Error('Caller cancelled'));
@@ -134,16 +144,16 @@ it('retains cleanup through caller cancellation of a running product command', a
 });
 it('reports an execution timeout after reaching a product command and finishing cleanup', async () => {
   const f = await commandOnlyFixture("console.log('command reached');setInterval(()=>{},100)"); f.msg.timeoutMs = 5000;
-  const result = await runTests(f.msg, { dir: f.dir, proc: join(f.root, 'proc'), user: { uid: 20000, gid: 20000 }, hidden: [], prepareRepoBrowser: async () => {} });
+  const result = await runTests(f.msg, { dir: f.dir, proc: join(f.root, 'proc'), user: { uid: sharedState.jobUid, gid: sharedState.jobUid }, hidden: [], prepareRepoBrowser: async () => {} });
   expect(result).toMatchObject({ ok: false, error: 'timeout' }); expect(result.log).toContain('command reached');
 });
 
 
 it.each([false, true])('sweeps builder shared state after preparation failure=%s', async fail => {
-  const shared = join(tmpdir(), `hh399-builder-${randomUUID()}`); sharedState.builderFiles.add(shared);
+  const shared = join('/tmp', `hh399-builder-${randomUUID()}`); sharedState.builderFiles.add(shared);
   try {
     const f = await fixture(manifest => { manifest.dependencies.install = [command(`require('fs').writeFileSync(${JSON.stringify(shared)}, 'undeclared builder state');${fail ? 'process.exit(9)' : "require('fs').mkdirSync('node_modules');require('fs').writeFileSync('node_modules/ready','dep')"}`)]; });
-    const result = await runTests(f.msg, { dir: f.dir, proc: join(f.root, 'proc'), user: { uid: 20000, gid: 20000 }, hidden: [], prepareRepoBrowser: async () => {} });
+    const result = await runTests(f.msg, { dir: f.dir, proc: join(f.root, 'proc'), user: { uid: sharedState.jobUid, gid: sharedState.jobUid }, hidden: [], prepareRepoBrowser: async () => {} });
     expect(result.ok).toBe(!fail);
     await expect(readFile(shared)).rejects.toThrow();
   } finally { sharedState.builderFiles.delete(shared); await rm(shared, { force: true }); }
@@ -151,10 +161,10 @@ it.each([false, true])('sweeps builder shared state after preparation failure=%s
 
 it('does not return a manual part until its disposable UID has quiesced', async () => {
   const f = await fixture(), processDir = join(f.root, 'proc', '2147483647'); await mkdir(processDir);
-  await writeFile(join(processDir, 'status'), 'State: S (sleeping)\nUid: 20000 20000 20000 20000\n');
+  await writeFile(join(processDir, 'status'), `State: S (sleeping)\nUid: ${sharedState.jobUid} ${sharedState.jobUid} ${sharedState.jobUid} ${sharedState.jobUid}\n`);
   let killed!: () => void, finished = false; const stopping = new Promise<void>(resolve => { killed = resolve; });
   const kill = process.kill.bind(process), spy = vi.spyOn(process, 'kill').mockImplementation((pid, signal) => { if (pid === 2147483647) { killed(); return true; } return kill(pid, signal); });
-  const running = runTests({ ...f.msg, environment: undefined, repo: null, kind: 'work', command: 'true' }, { dir: f.dir, proc: join(f.root, 'proc'), user: { uid: 20000, gid: 20000 }, hidden: [] }).then(result => { finished = true; return result; });
+  const running = runTests({ ...f.msg, environment: undefined, repo: null, kind: 'work', command: 'true' }, { dir: f.dir, proc: join(f.root, 'proc'), user: { uid: sharedState.jobUid, gid: sharedState.jobUid }, hidden: [] }).then(result => { finished = true; return result; });
   try {
     await stopping; await new Promise<void>(resolve => setImmediate(resolve));
     expect(finished).toBe(false);
