@@ -11,6 +11,12 @@ const runtime = dockerfile.slice(dockerfile.lastIndexOf('\nFROM '));
 const installed = new Set([...runtime.matchAll(/apt-get install -y --no-install-recommends ([^\\\n]+)/g)].flatMap(m => m[1]!.split(/\s+/)));
 
 describe('the node image', () => {
+  it('installs the audited runtime tools and verifies their versions in the final stage', () => {
+    for (const name of ['binutils', 'patch', 'iproute2', 'time']) expect(installed).toContain(name);
+    for (const command of ['/usr/bin/time --version', 'strings --version', 'patch --version', 'ss --version', 'objdump --version']) {
+      expect(runtime).toContain(`&& ${command}`);
+    }
+  });
   it('installs PostgreSQL 17 from the fingerprint-checked signed bookworm repository without a default cluster', () => {
     expect(installed).toContain('postgresql-17');
     expect(installed).toContain('postgresql-client-17');
