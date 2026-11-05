@@ -213,7 +213,7 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
 test.describe('a picture for an agent', () => {
   const settings = { lang: 'en', theme: 'dark', width: 1440 } as const;
 
-  test('opens the line under the terminal of the one who types into it, then gives the keys back', async ({ page }, info) => {
+  test('pastes a picture directly into the terminal without opening a separate line', async ({ page }, info) => {
     const errors = watchErrors(page);
     const server = await serve(page, 'owner', settings);
     const window = await open(page, 'b1', 'en');
@@ -224,17 +224,15 @@ test.describe('a picture for an agent', () => {
     await expect(helper).toBeFocused();
 
     await paste(helper, await picture(page, 'screen.png'));
-    await expect(window.getByRole('img', { name: 'screen.png', exact: true })).toBeVisible();
-    await expect(line).toBeFocused();
-    await shot(page, info, 'owner-preview', settings);
-    await line.fill('Here');
-    await line.press('Enter');
-    await expect.poll(() => server.messages).toEqual([{ agent: 'b1', text: 'Here', pictures: ['pic1'] }]);
+    await expect(window.getByRole('status').filter({ hasText: en.window.pictureUploaded })).toBeVisible();
     await expect(line).toHaveCount(0);
     await expect(helper).toBeFocused();
-    expect(server.keys).toEqual([]);
+    expect(server.uploads.map(u => u.name)).toEqual(['screen.png']);
+    expect(server.messages).toEqual([]);
+    expect(server.keys).toEqual(['screen.png: hh-fetch message pic1']);
+    await shot(page, info, 'owner-direct-picture', settings);
     await page.keyboard.type('hi');
-    await expect.poll(() => server.keys.join('')).toBe('hi');
+    await expect.poll(() => server.keys.join('')).toBe('screen.png: hh-fetch message pic1hi');
     await checkPage(page, errors);
   });
 

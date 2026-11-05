@@ -43,7 +43,7 @@ function ReviewCard({ tree, department, pick, onOpenTask }: Props) {
     [L.cWhat, L.reviewWhat(tree.turn!.branch)],
     [L.cOpened, L.reviewOpened(treeClock(review.openedAt))],
     [L.cWho, review.reviewers.map(r => (
-      <Fragment key={r.agent.id}><button type="button" className="linkish" onClick={() => openAgent(r.agent.id)}><TreeWho agent={r.agent} department={department} /></button>{' '}</Fragment>
+      <Fragment key={r.agent.id}><button type="button" className="linkish name-link" onClick={() => openAgent(r.agent.id)}><TreeWho agent={r.agent} department={department} /></button>{' '}</Fragment>
     ))],
     [L.cSaid, L.said(said.length, review.reviewers.length)],
     [L.cFound, said.reduce((n, r) => n + (r.verdict!.findings ?? 0), 0)],
@@ -114,7 +114,7 @@ function LaneCard({ tree, department, pick, onOpenTask, onClose }: Props) {
   ];
   return (
     <>
-      <h4><button type="button" className="linkish" onClick={() => { openAgent(row.agent!.id); onClose?.(); }}><TreeWho agent={row.agent!} department={department} /></button></h4>
+      <h4><button type="button" className="linkish name-link" onClick={() => { openAgent(row.agent!.id); onClose?.(); }}><TreeWho agent={row.agent!} department={department} /></button></h4>
       <LaneRole employee={employee} language={language} />
       <Details pairs={pairs} />
     </>
