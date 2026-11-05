@@ -5,10 +5,8 @@ import type { Db } from '../../db/client.js';
 import { agentEvents, agents, jobs, programDeliveries } from '../../db/schema.js';
 import { withInputLock } from '../conversation/decision-context.js';
 import { insertTurn, onAgent, pump, settleWords } from '../conversation/queue.js';
-import { repeatedTurn, UNHEARD_NOTE, wordsForTurn } from '../conversation/turn-words.js';
+import { deliveredWords, repeatedTurn, UNHEARD_NOTE, wordsForTurn } from '../conversation/turn-words.js';
 import { nodeIdentity, type NodeIdentity } from '../nodes/hub.js';
-import { readMessage } from '../events/parties.js';
-import { addressed } from '../conversation/prompt.js';
 import { logTurnFact } from '../tasks/turn-log.js';
 import { wordsDigest } from './deliveries.js';
 import { operatorTransaction } from './transactions.js';
@@ -57,11 +55,8 @@ export async function reconcileOperatorFallbacks(ctx: Ctx, now = new Date()): Pr
 async function fallbackMessage(ctx: Ctx, delivery: StoredDelivery): Promise<Unheard | null> {
   const events = await ctx.db.select({ data: agentEvents.data }).from(agentEvents).where(and(eq(agentEvents.companyId, delivery.companyId), eq(agentEvents.agentId, delivery.agentId), eq(agentEvents.jobId, delivery.jobId), sql`${agentEvents.data}->'operatorDelivery'->>'id' = ${delivery.id}`));
   for (const event of events) {
-    const { data, message } = readMessage(event.data);
-    const body = data as { text?: unknown };
-    if (typeof body?.text !== 'string') continue;
-    const text = message ? addressed(body.text, message) : body.text;
-    if (wordsDigest(text) === delivery.digest) return { type: 'agent.unheard', agentKey: delivery.agentId, jobId: delivery.jobId, text, operatorDelivery: { id: delivery.id, ordinal: delivery.ordinal } };
+    const text = deliveredWords(event.data);
+    if (text !== null && wordsDigest(text) === delivery.digest) return { type: 'agent.unheard', agentKey: delivery.agentId, jobId: delivery.jobId, text, operatorDelivery: { id: delivery.id, ordinal: delivery.ordinal } };
   }
   return null;
 }

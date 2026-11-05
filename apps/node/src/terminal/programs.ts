@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { Limits } from '@hornhoof/protocol';
+import { inLane, type Limits } from '@hornhoof/protocol';
 import { ownFs, type AgentFs } from '../agent-fs.js';
 import { CRED_FILES } from '../credentials.js';
 import type { JobUser } from '../isolation.js';
@@ -248,20 +248,10 @@ const parsed = (text: string | null): Record<string, unknown> => {
    so none writes back what it read before another added its folder. */
 const answering = new Map<string, Promise<unknown>>();
 
-function onHome<T>(home: string, fn: () => Promise<T>): Promise<T> {
-  const run = (answering.get(home) ?? Promise.resolve()).then(fn);
-  const settled = run.catch(() => undefined);
-  answering.set(home, settled);
-  void settled.then(() => {
-    if (answering.get(home) === settled) answering.delete(home);
-  });
-  return run;
-}
-
 /* A first run asks for a theme, shows notes, asks to trust the folder and to accept running without approvals. An agent
    cannot answer, so the answers are written first: the theme a first run picks, unless the person chose one. */
 export function acceptClaudeDialogs(home: string, workDir: string, fs: AgentFs = ownFs): Promise<void> {
-  return onHome(home, () => answerDialogs(home, workDir, fs));
+  return inLane(answering, home, () => answerDialogs(home, workDir, fs));
 }
 
 async function answerDialogs(home: string, workDir: string, fs: AgentFs): Promise<void> {

@@ -8,7 +8,7 @@ import { builtinMachine } from '../nodes/nodes.js';
 import { availableMemory } from './capacity.js';
 import { machineNodes, machineState, together } from './load.js';
 import { loaded } from './pick.js';
-import { browserHoldReason, commandFor, lostLine, mayTake, needOf, placesOf, reaches, targetOf, type Place } from './runs.js';
+import { browserHeldRun, commandFor, lostLine, needOf, placesOf, reaches, targetOf, type Place } from './runs.js';
 
 type Run = typeof testRuns.$inferSelect;
 type Row = { part: typeof testParts.$inferSelect; run: Run; task: number; agent: string };
@@ -35,15 +35,20 @@ const view = ({ part, run, task, agent }: Row) => ({
 });
 const running = (row: Row) => ({ ...view(row), startedAt: row.part.startedAt?.toISOString() ?? null });
 
-/* Why no machine took a waiting part in the last round, from the machines online now. */
-async function whyWaits(ctx: Ctx, places: Place[], run: Run, targets: Map<string, Awaited<ReturnType<typeof targetOf>>>): Promise<string> {
+type Targets = Map<string, Awaited<ReturnType<typeof targetOf>>>;
+
+/* What a run needs is read once a round, however many of its parts wait. */
+async function targetIn(ctx: Ctx, targets: Targets, run: Run) {
   if (!targets.has(run.id)) targets.set(run.id, await targetOf(ctx, run));
-  const target = targets.get(run.id)!;
+  return targets.get(run.id)!;
+}
+
+/* Why no machine took a waiting part in the last round, from the machines online now. */
+async function whyWaits(ctx: Ctx, places: Place[], run: Run, targets: Targets): Promise<string> {
+  const target = await targetIn(ctx, targets, run);
   if (!target) return 'Its repository is gone: it ends with the next round.';
-  if (!places.some(p => mayTake(p, run, target.department))) {
-    const heldReason = await browserHoldReason(ctx, run.companyId, run, target.department);
-    if (heldReason) return heldReason;
-  }
+  const heldReason = await browserHeldRun(ctx, run.companyId, places, run, target.department);
+  if (heldReason) return heldReason;
   const lent = places.filter(p => p.lent);
   if (!lent.length) return 'No computer lent to runs is online.';
   const reach = lent.filter(p => reaches(p, target.department));

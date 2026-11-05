@@ -69,6 +69,17 @@ describe('the Task watchdog and a machine waiting for an update', () => {
     expect(turn!.status).toBe('queued');
   });
 
+  it('tells the sender of no wait when the words went into the turn that still runs there', async () => {
+    const f = await company();
+    await f.db.insert(jobs).values({ companyId: f.acme.id, subscriptionId: f.sub.id, agentId: f.bruno.id, kind: 'conversation', prompt: 'Go on', timeoutMs: 900000, status: 'running', startedAt: new Date() });
+    await f.waitForUpdate();
+    const sending = (await mcp(f.app, TOKEN)).callTool({ name: 'message_employee', arguments: { employee: f.bruno.id, text: 'Report on the checkout, please.' } }) as Promise<Result>;
+    const typed = await f.builtin.next();
+    if (typed.type !== 'agent.say') throw new Error(`Expected agent.say, got ${typed.type}`);
+    f.builtin.send({ type: 'agent.said', ref: typed.ref as string, ok: true });
+    expect((await sending).content[0]!.text).toBe('Sent to Bruno.');
+  });
+
   it('tells the sender as before when the machine does not wait', async () => {
     const f = await company();
     const said = (await (await mcp(f.app, TOKEN)).callTool({ name: 'message_employee', arguments: { employee: f.bruno.id, text: 'Report on the checkout, please.' } })) as Result;

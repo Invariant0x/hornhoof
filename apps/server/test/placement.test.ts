@@ -67,6 +67,20 @@ describe('agents of one plan on several machines', () => {
     expect((await db.select().from(agents).where(eq(agents.id, bruno.id)))[0]!.nodeId).toBe(nodes.laptop.nodeId);
   });
 
+  it.each(['working', 'blocked'] as const)('keeps an employee with a task %s waiting for its own machine through the update, and sends the turn there when it is back', async status => {
+    const { app, db, ceo, nodes, mac, lap, bruno } = await planOnTwoMachines({ HORNHOOF_CONTROL_DIR: mkdtempSync(join(tmpdir(), 'hh-placement-drain-')) });
+    await db.update(agents).set({ nodeId: nodes.mac.nodeId }).where(eq(agents.id, bruno.id));
+    await db.insert(tasks).values({ companyId: bruno.companyId, number: 1, title: 'Checkout API', executorAgentId: bruno.id, assigneeAgentId: bruno.id, status });
+    await app.inject({ method: 'POST', url: '/api/nodes/update', headers: { authorization: `Bearer ${nodes.mac.key}` }, payload: {} });
+    await write(app, ceo, bruno.id, 'Wait for your own machine');
+    expect(await state(app, ceo, bruno.id)).toMatchObject({ ready: true, reason: null, queued: 1, machineDrain: { state: 'restarting' } });
+    expect(mac.queued() + lap.queued()).toBe(0);
+    expect((await db.select().from(agents).where(eq(agents.id, bruno.id)))[0]!.nodeId).toBe(nodes.mac.nodeId);
+    mac.send({ ...hello, version: '0.9.1', boot: { startedAt: '2026-11-04T11:00:00.000Z', machineUpAt: '2026-11-04T09:00:00.000Z', container: 'second' } });
+    expect((await nextRun(mac)).prompt).toContain('Wait for your own machine');
+    expect(lap.queued()).toBe(0);
+  });
+
   it('queues messages with machineDrain while every node of a plan waits for an update', async () => {
     const { app, ceo, nodes, mac, lap, bruno } = await planOnTwoMachines({ HORNHOOF_CONTROL_DIR: mkdtempSync(join(tmpdir(), 'hh-placement-drain-')) });
     for (const node of [nodes.mac, nodes.laptop]) await app.inject({ method: 'POST', url: '/api/nodes/update', headers: { authorization: `Bearer ${node.key}` }, payload: {} });

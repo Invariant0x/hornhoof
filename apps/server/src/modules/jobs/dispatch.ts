@@ -38,6 +38,17 @@ type JobToSend = {
   operatorSourceDelivery?: OperatorDelivery;
 };
 
+/* What goes along only when the job has it. */
+const jobExtras = (job: JobToSend) => ({
+  ...(job.compactWindow ? { compactWindow: job.compactWindow } : {}),
+  ...(job.operatorDelivery ? { operatorDelivery: job.operatorDelivery } : {}),
+  ...(job.operatorSourceDelivery ? { operatorSourceDelivery: job.operatorSourceDelivery } : {}),
+  ...(job.workspace ? { workspace: job.workspace } : {}),
+  ...(job.context ? { context: job.context } : {}),
+  ...(job.guidance ? { guidance: job.guidance } : {}),
+  ...(job.skills ? { skills: job.skills } : {}),
+});
+
 /* Sends a job to its node. A personal plan's node signs in itself; an API key travels with the job to the built-in node. */
 export async function dispatchJob(ctx: Ctx, job: JobToSend): Promise<boolean> {
   const [sub] = await ctx.db.select().from(subscriptions).where(eq(subscriptions.id, job.subscriptionId));
@@ -53,16 +64,10 @@ export async function dispatchJob(ctx: Ctx, job: JobToSend): Promise<boolean> {
     sessionId: job.sessionId,
     model: job.model ?? null,
     effort: job.effort ?? null,
-    ...(job.compactWindow ? { compactWindow: job.compactWindow } : {}),
     timeoutMs: job.timeoutMs,
     secret,
     instructions: job.instructions,
     toolToken: job.toolToken,
-    ...(job.operatorDelivery ? { operatorDelivery: job.operatorDelivery } : {}),
-    ...(job.operatorSourceDelivery ? { operatorSourceDelivery: job.operatorSourceDelivery } : {}),
-    ...(job.workspace ? { workspace: job.workspace } : {}),
-    ...(job.context ? { context: job.context } : {}),
-    ...(job.guidance ? { guidance: job.guidance } : {}),
-    ...(job.skills ? { skills: job.skills } : {}),
+    ...jobExtras(job),
   });
 }

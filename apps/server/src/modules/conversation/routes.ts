@@ -81,7 +81,8 @@ export function conversationRoutes(app: FastifyInstance, ctx: Ctx): void {
       /* A company built by hand gets no greeting (its build already enqueued a turn); one from a template is greeted so he
          offers to staff it. The Operations every company starts with is no building. */
       if (depts.some(d => !isOperations(d)) && !company?.template) return false;
-      await insertTurn(ctx, { companyId: me.companyId, agentId: agent.id, prompt: company?.template ? FIRST_TURN_TEMPLATE : FIRST_TURN, createdBy: me.id, message: { personId: null, text: company?.template ? FIRST_TURN_TEMPLATE : FIRST_TURN, notification: { source: 'first_turn', tasks: [] } } });
+      const greeting = company?.template ? FIRST_TURN_TEMPLATE : FIRST_TURN;
+      await insertTurn(ctx, { companyId: me.companyId, agentId: agent.id, prompt: greeting, createdBy: me.id, message: { personId: null, text: greeting, notification: { source: 'first_turn', tasks: [] } } });
       return true;
     });
     /* Outside the agent's line, which the pump waits on. */

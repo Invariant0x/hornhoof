@@ -1,0 +1,103 @@
+import { eq } from 'drizzle-orm';
+import { describe, expect, it, vi } from 'vitest';
+import { agentEvents, agents, jobs, subscriptions } from '../src/db/schema.js';
+import { pump } from '../src/modules/conversation/queue.js';
+import { createTask } from '../src/modules/tasks/engine.js';
+import { failureCompany } from './failure-company.js';
+import { statements } from './helpers.js';
+
+const MIN = 60_000;
+const HOUR = 60 * MIN;
+const LIMIT_GRACE_MS = 5_000;
+/* Long enough for a line that spins to run its queries many times over. */
+const SETTLE_MS = 150;
+const settle = () => new Promise(resolve => setTimeout(resolve, SETTLE_MS));
+
+/* Bruno's plan, at its limit or past the share set for tasks until in an hour, and a turn waiting for him. */
+async function line(plan: 'limit' | 'spent' | 'free' = 'limit') {
+  const c = await failureCompany();
+  const resetsAt = new Date(Date.now() + HOUR).toISOString();
+  if (plan === 'limit') await c.db.update(subscriptions).set({ limits: { status: 'rejected', windows: [{ name: 'five_hour', utilization: 1, resetsAt }] }, limitsUpdatedAt: new Date() }).where(eq(subscriptions.id, c.sub.id));
+  if (plan === 'spent') await c.db.update(subscriptions).set({ budget: 50, limits: { status: 'allowed', windows: [{ name: 'five_hour', utilization: 0.8, resetsAt }] }, limitsUpdatedAt: new Date() }).where(eq(subscriptions.id, c.sub.id));
+  const { task } = await createTask(c.ctx, { agentId: c.head.id }, { title: 'Checkout', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.agent.id, executor: true, gates: [] });
+  const waiting = async (at: Date, options: { task?: boolean; prompt?: string; report?: boolean } = {}) => {
+    const [job] = await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: c.sub.id, agentId: c.agent.id, kind: 'conversation', prompt: options.prompt ?? 'Go on.', taskId: options.task ? task.id : null, timeoutMs: 1000, status: 'queued', notBefore: at }).returning();
+    /* A report waits out its short window without holding the agent's line, unlike a delayed retry. */
+    if (options.report) await c.db.insert(agentEvents).values({ companyId: c.companyId, agentId: c.agent.id, jobId: job!.id, kind: 'message', data: { text: 'Done.', report: 'Done.' } });
+    return job!;
+  };
+  /* Each timer the pump sets from now on, with how long it waits. */
+  const timer = vi.spyOn(globalThis, 'setTimeout');
+  const delays = () => timer.mock.calls.map(([, ms]) => ms ?? 0);
+  const planned = () => delays().filter(ms => ms > MIN);
+  return { ...c, waiting, delays, planned };
+}
+
+const inAnHour = (ms: number | undefined) => {
+  expect(ms).toBeGreaterThan(HOUR - MIN);
+  expect(ms).toBeLessThanOrEqual(HOUR + LIMIT_GRACE_MS);
+};
+
+describe('the line of an agent whose waiting turn may not go out now', () => {
+  it.each([
+    { name: 'at the limit of its plan', plan: 'limit' as const, off: false, wakes: true },
+    { name: 'past the share set for tasks', plan: 'spent' as const, off: false, wakes: true },
+    { name: 'switched off', plan: 'free' as const, off: true, wakes: false },
+  ])('does not spin on a retry that is due but may not go, $name', async ({ plan, off, wakes }) => {
+    const c = await line(plan);
+    if (off) await c.db.update(agents).set({ switchedOffAt: new Date() }).where(eq(agents.id, c.agent.id));
+    const retry = await c.waiting(new Date(Date.now() - 1000), { task: true });
+    await pump(c.ctx, c.agent.id);
+    const seen = statements();
+    await settle();
+    expect(seen).toEqual([]);
+    expect(c.delays().filter(ms => ms <= 0)).toEqual([]);
+    expect(await c.jobOf(retry.id)).toMatchObject({ status: 'queued' });
+    if (wakes) inAnHour(c.planned().at(-1));
+    else expect(c.planned()).toEqual([]);
+  });
+
+  it('keeps the wake at the reset when a turn that may go waits longer than the limit', async () => {
+    const c = await line('spent');
+    await c.waiting(new Date(Date.now() + 2 * HOUR), { report: true });
+    await pump(c.ctx, c.agent.id);
+    expect(c.planned()).toHaveLength(1);
+    inAnHour(c.planned()[0]);
+  });
+
+  it('wakes for a turn that may go before the reset, and sets the wake at the reset again after it', async () => {
+    const c = await line('spent');
+    const soon = await c.waiting(new Date(Date.now() + 10 * MIN), { report: true });
+    await pump(c.ctx, c.agent.id);
+    inAnHour(c.planned().at(0));
+    const wake = c.planned().at(-1)!;
+    expect(wake).toBeGreaterThan(9 * MIN);
+    expect(wake).toBeLessThanOrEqual(10 * MIN);
+    await c.db.update(jobs).set({ status: 'failed', error: 'cancelled' }).where(eq(jobs.id, soon.id));
+    await pump(c.ctx, c.agent.id);
+    inAnHour(c.planned().at(-1));
+  });
+
+  it('does not wake for a later task turn that may not go before the reset', async () => {
+    const c = await line('spent');
+    await c.waiting(new Date(Date.now() + 10 * MIN), { task: true, report: true });
+    await pump(c.ctx, c.agent.id);
+    expect(c.planned()).toHaveLength(1);
+    inAnHour(c.planned()[0]);
+  });
+
+  it('wakes for a report that waits while nothing else holds the plan', async () => {
+    const c = await line('free');
+    await c.waiting(new Date(Date.now() + 10 * MIN), { report: true });
+    await pump(c.ctx, c.agent.id);
+    expect(c.planned()).toHaveLength(1);
+    expect(c.planned()[0]).toBeLessThanOrEqual(10 * MIN);
+  });
+
+  it('sends a due turn once what held it is over', async () => {
+    const c = await line('free');
+    const retry = await c.waiting(new Date(Date.now() - 1000), { task: true });
+    await pump(c.ctx, c.agent.id);
+    expect(await c.jobOf(retry.id)).toMatchObject({ status: 'running' });
+  });
+});

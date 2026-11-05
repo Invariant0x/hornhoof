@@ -29,6 +29,17 @@ export const DATABASE_ROLES = ['OPS-HEAD'];
 /* Hornhoof's tools as one agent's job sees them: every agent reads the company, an employee runs tests on free machines
    and gets the tools its skills grant, a head keeps its department notebook, tells the orchestrator and puts what to improve under Improvements, and the
    orchestrator also proposes cards and does whatever the CEO can do in the screens. */
+type StaffLines = ReturnType<typeof withRequiredRoles>;
+
+const withSkills = (lines: StaffLines) => lines.map(p => ({ ...p, skills: p.skills ?? { on: [], off: [] } }));
+
+/* A card for Operations hires nobody when everyone ticked on it is already there. */
+async function nothingToHire(ctx: Ctx, dept: Parameters<typeof withRequiredRoles>[0], lines: StaffLines): Promise<boolean> {
+  if (!isOperations(dept)) return false;
+  const state = await requiredState(ctx.db, dept);
+  return lines.every(line => !line.checked || state(line.role).holder);
+}
+
 function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob): McpServer {
   const server = new McpServer({ name: 'hornhoof', version: '0.5.0' });
   server.registerTool(
@@ -96,10 +107,9 @@ function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob): McpServer {
       const dept = await departmentOf(ctx.db, job.companyId, department);
       if (!dept) return say(`There is no department with id ${department}. Call company to see the current ids.`, true);
       const lines = withRequiredRoles(dept, people);
-      const problem = await checkStaff(ctx, job.companyId, dept, lines.map(p => ({ ...p, skills: p.skills ?? { on: [], off: [] } })));
+      const problem = await checkStaff(ctx, job.companyId, dept, withSkills(lines));
       if (problem) return say(problem, true);
-      const state = await requiredState(ctx.db, dept);
-      if (isOperations(dept) && lines.every(line => !line.checked || state(line.role).holder)) return say(`Nothing to hire in ${deptName(dept)}: everyone ticked on this card is already there. Tick a role it does not have, or show no card.`, true);
+      if (await nothingToHire(ctx, dept, lines)) return say(`Nothing to hire in ${deptName(dept)}: everyone ticked on this card is already there. Tick a role it does not have, or show no card.`, true);
       const proposal = await ctx.db.transaction(async tx => {
         await tx
           .update(proposals)

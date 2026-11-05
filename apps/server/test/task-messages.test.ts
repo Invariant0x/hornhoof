@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../src/errors.js';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, jobs, tasks, teams } from '../src/db/schema.js';
+import { agents, jobs, subscriptions, tasks, teams } from '../src/db/schema.js';
 import { listEvents } from '../src/modules/events/store.js';
 import { said } from '../src/modules/conversation/live.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
@@ -71,15 +71,11 @@ describe('task messages reach their recipient', () => {
     expect((await c.db.select().from(tasks).where(eq(tasks.id, child.id)))[0]!.externalWait).toMatchObject({ reason: 'Registry' });
   });
 
-  it.each([
-    { bound: true, missingTerminal: false }, { bound: false, missingTerminal: false },
-    { bound: true, missingTerminal: true }, { bound: false, missingTerminal: true },
-  ])('returns an error when a live message cannot reach the terminal: %j', async ({ bound, missingTerminal }) => {
+  it.each([{ bound: true }, { bound: false }])('returns an error when a live message cannot reach the terminal: %j', async ({ bound }) => {
     const c = await messaging();
     const task = await c.task();
     const head = await c.run(c.head.id);
     await c.run(c.agent.id, task.id);
-    if (missingTerminal) c.ctx.hub.hasTerminals = () => false;
     c.sent.mockImplementation((_node, message) => {
       if (message.type === 'agent.say') queueMicrotask(() => said(c.ctx, BUILTIN, message.ref, false));
       return true;
@@ -88,6 +84,102 @@ describe('task messages reach their recipient', () => {
     expect(result.isError).toBe(true);
     expect(await c.messages(c.agent.id)).toEqual([]);
     expect((await c.turnsOf()).filter(j => j.status === 'queued')).toEqual([]);
+  });
+
+  describe('a message that waits in line for the next turn', () => {
+    const IN_LINE = 'Sent to Bruno. It gets this with its next turn, not at once.';
+    const send = (client: Awaited<ReturnType<typeof mcp>>, employee: string, text: string, task?: number) =>
+      client.callTool({ name: 'message_employee', arguments: { employee, text, ...(task ? { task } : {}) } }) as Promise<{ isError?: boolean; content: { text: string }[] }>;
+    const atLimit = (c: Awaited<ReturnType<typeof messaging>>) => c.db.update(subscriptions).set({ limits: { status: 'rejected', windows: [{ name: 'five_hour', utilization: 1, resetsAt: new Date(Date.now() + 3_600_000).toISOString() }] }, limitsUpdatedAt: new Date() }).where(eq(subscriptions.id, c.sub.id));
+    const pastShare = (c: Awaited<ReturnType<typeof messaging>>) => c.db.update(subscriptions).set({ budget: 50, limits: { status: 'allowed', windows: [{ name: 'five_hour', utilization: 0.8, resetsAt: new Date(Date.now() + 3_600_000).toISOString() }] }, limitsUpdatedAt: new Date() }).where(eq(subscriptions.id, c.sub.id));
+
+    it.each([{ bound: true }, { bound: false }])('keeps a message for a busy employee on a node without live terminals: %j', async ({ bound }) => {
+      const c = await messaging();
+      const task = await c.task();
+      const head = await c.run(c.head.id);
+      const worker = await c.run(c.agent.id, task.id);
+      c.ctx.hub.hasTerminals = () => false;
+      const result = await send(head.client, c.agent.id, 'Do not lose these words.', bound ? task.number : undefined);
+      expect(result.isError).toBeFalsy();
+      expect(result.content[0]!.text).toBe(IN_LINE);
+      const queued = (await c.turnsOf()).filter(j => j.status === 'queued');
+      expect(queued).toHaveLength(1);
+      expect(queued[0]!.prompt).toContain('Do not lose these words.');
+      expect((await c.jobOf(worker.job.id)).status).toBe('running');
+      expect((await c.messages(c.agent.id)).find(e => e.message?.direction === 'in')).toMatchObject({ jobId: queued[0]!.id });
+    });
+
+    it('keeps a message behind a turn that waits ahead of it', async () => {
+      const c = await messaging();
+      const head = await c.run(c.head.id);
+      const [ahead] = await c.db.insert(jobs).values({ companyId: c.companyId, agentId: c.agent.id, subscriptionId: c.sub.id, kind: 'conversation', prompt: 'Try again.', status: 'queued', timeoutMs: 1000, notBefore: new Date(Date.now() + 60_000) }).returning();
+      const result = await send(head.client, c.agent.id, 'After your retry.');
+      expect(result.isError).toBeFalsy();
+      expect(result.content[0]!.text).toBe(IN_LINE);
+      const queued = (await c.turnsOf()).filter(j => j.status === 'queued');
+      expect(queued.map(j => j.id)).toContain(ahead!.id);
+      expect(queued).toHaveLength(2);
+    });
+
+    it('still says a message did not go out when only later turns wait behind it', async () => {
+      const c = await messaging();
+      const head = await c.run(c.head.id);
+      c.sent.mockReturnValue(false);
+      await c.db.insert(jobs).values({ companyId: c.companyId, agentId: c.agent.id, subscriptionId: c.sub.id, kind: 'conversation', prompt: 'Later.', status: 'queued', timeoutMs: 1000, createdAt: new Date(Date.now() + 60_000) });
+      const result = await send(head.client, c.agent.id, 'Goes first and cannot go.');
+      expect(result.isError).toBe(true);
+      expect((await c.turnsOf()).map(j => j.status).sort()).toEqual(['failed', 'queued']);
+    });
+
+    it('says nothing of a line when the message went into the running turn', async () => {
+      const c = await messaging();
+      const head = await c.run(c.head.id);
+      await c.run(c.agent.id);
+      const result = await send(head.client, c.agent.id, 'Right now.');
+      expect(result.content[0]!.text).toBe('Sent to Bruno.');
+    });
+
+    it('says nothing of a line when the message started a turn', async () => {
+      const c = await messaging();
+      const head = await c.run(c.head.id);
+      const result = await send(head.client, c.agent.id, 'Start now.');
+      expect(result.content[0]!.text).toBe('Sent to Bruno.');
+      expect((await c.turnsOf())[0]!.status).toBe('running');
+    });
+
+    it('still says a message did not go out when the plan of a busy employee is at its limit', async () => {
+      const c = await messaging();
+      const head = await c.run(c.head.id);
+      await c.run(c.agent.id);
+      c.ctx.hub.hasTerminals = () => false;
+      await atLimit(c);
+      const result = await send(head.client, c.agent.id, 'At the limit.');
+      expect(result.isError).toBe(true);
+      expect((await c.turnsOf()).filter(j => j.status === 'queued')).toEqual([]);
+    });
+
+    it('still says a task message did not go out when the plan of a busy employee used the share set for tasks', async () => {
+      const c = await messaging();
+      const task = await c.task();
+      const head = await c.run(c.head.id);
+      await c.run(c.agent.id);
+      c.ctx.hub.hasTerminals = () => false;
+      await pastShare(c);
+      const result = await send(head.client, c.agent.id, 'Past the share.', task.number);
+      expect(result.isError).toBe(true);
+      expect((await c.turnsOf()).filter(j => j.status === 'queued')).toEqual([]);
+    });
+
+    it('keeps a message that is no task turn when the plan of a busy employee used the share set for tasks', async () => {
+      const c = await messaging();
+      const head = await c.run(c.head.id);
+      await c.run(c.agent.id);
+      c.ctx.hub.hasTerminals = () => false;
+      await pastShare(c);
+      const result = await send(head.client, c.agent.id, 'People and employees still get through.');
+      expect(result.isError).toBeFalsy();
+      expect((await c.turnsOf()).filter(j => j.status === 'queued')).toHaveLength(1);
+    });
   });
 
 

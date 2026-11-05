@@ -233,6 +233,10 @@ export async function browserHoldReason(ctx: Ctx, companyId: string, run: Pick<R
   return `Playwright Chromium failed to start on ${held.map(p => `${p.name} (${p.browserError})`).join('; ')}.`;
 }
 
+/* A failed browser's word on why a run has nowhere to go: only when no place may take it. */
+export const browserHeldRun = async (ctx: Ctx, companyId: string, places: Place[], run: Pick<Run, 'kind'>, department: Department | null): Promise<string | null> =>
+  (places.some(p => mayTake(p, run, department)) ? null : browserHoldReason(ctx, companyId, run, department));
+
 /* The machine's owner reaches the department a run is for; a run for no department only someone who sees the whole
    company. */
 export const reaches = (place: Pick<Place, 'access'>, d: Department | null) =>
@@ -495,6 +499,10 @@ async function taskFor(ctx: Ctx, job: ToolJob, ref: number | string | undefined,
 
 /* Starts a run for a task: a test run of its branch, or any other work, on a branch or in an empty folder with the task's
    files. Its parts go out to free machines now or wait for them. Says how it went out. */
+/* The department whose people's machines may take a run without a repository of its own. */
+const taskDepartment = async (ctx: Ctx, task: Pick<Task, 'productId' | 'departmentId'>, kind: RunKind) =>
+  (await targetOf(ctx, { kind, branch: null, departmentId: task.productId ?? task.departmentId }))?.department ?? null;
+
 export async function startRun(ctx: Ctx, job: ToolJob, input: RunInput, kind: RunKind = 'tests'): Promise<string> {
   const { db } = ctx;
   const task = await taskFor(ctx, job, input.task, kind);
@@ -522,11 +530,9 @@ export async function startRun(ctx: Ctx, job: ToolJob, input: RunInput, kind: Ru
   }
   const [open] = await db.select({ n: count() }).from(testRuns).where(and(eq(testRuns.agentId, job.agentId), eq(testRuns.status, 'running')));
   if (Number(open?.n ?? 0) >= OPEN_RUNS) throw refuse(409, 'task_invalid', `You have ${OPEN_RUNS} runs going on already. Wait for one to end, or stop one with stop_tests or stop_work.`);
-  const department = found?.department ?? (await targetOf(ctx, { kind, branch: null, departmentId: task.productId ?? task.departmentId }))?.department ?? null;
-  if (!(await placesOf(ctx, job.companyId)).some(p => mayTake(p, { kind }, department))) {
-    const heldReason = await browserHoldReason(ctx, job.companyId, { kind }, department);
-    if (heldReason) throw refuse(409, 'browser_failed', heldReason);
-  }
+  const department = found?.department ?? await taskDepartment(ctx, task, kind);
+  const heldReason = await browserHeldRun(ctx, job.companyId, await placesOf(ctx, job.companyId), { kind }, department);
+  if (heldReason) throw refuse(409, 'browser_failed', heldReason);
   const run = await db.transaction(async tx => {
     /* Numbers go up one by one per company, so starting a run waits on the company row. */
     await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, job.companyId)).for('update');

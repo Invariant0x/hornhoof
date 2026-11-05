@@ -1,12 +1,12 @@
 import { WaitOnInput } from '@hornhoof/protocol/waits';
 import { z } from 'zod';
-import { and, eq, inArray, isNotNull, lte, notInArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, lte, ne, notInArray, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agentEvents, jobs, pendingWakes, tasks, type ExternalWait } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { loadTask, move, refuse, type Moved, type Task, type Wake } from './engine.js';
 import { wakeAll } from './wake.js';
-import { agentState, enqueueTurn, insertOrDeliverTurn, onAgent, pump, type TurnMessage } from '../conversation/queue.js';
+import { agentState, conversationOf, enqueueTurn, insertOrDeliverTurn, onAgent, pump, type TurnMessage } from '../conversation/queue.js';
 import { withInputLock } from '../conversation/decision-context.js';
 import { messageNotDelivered } from '../conversation/live.js';
 import { recordWaitNotice, requestedWaitNotice } from './wait-notices.js';
@@ -94,10 +94,22 @@ async function queueMessage(ctx: Ctx, input: TaskMessage, turn: MessageTurn): Pr
   return queued.id;
 }
 
+/* Whether a turn that did not go out waits for something that ends by itself: the update its machine gets ready for, the
+   turn that runs or a turn ahead of it. One its plan cannot run for now, at its limit or past the share set for tasks,
+   does not: the sender hears at once and can tell someone else. */
+async function waitsItsLine(ctx: Ctx, agentId: string, id: string): Promise<boolean> {
+  const [turn] = await ctx.db.select({ taskId: jobs.taskId, createdAt: jobs.createdAt }).from(jobs).where(and(eq(jobs.id, id), eq(jobs.status, 'queued')));
+  if (!turn) return false;
+  const state = await agentState(ctx, agentId);
+  if (state.machineDrain && state.machineDrain.state !== 'postponed') return true;
+  if (state.limitUntil || (state.budgetUntil && turn.taskId)) return false;
+  if (state.busy) return true;
+  const [ahead] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'queued'), ne(jobs.id, id), lte(jobs.createdAt, turn.createdAt))).limit(1);
+  return Boolean(ahead);
+}
+
 async function confirmMessage(ctx: Ctx, agentId: string, id: string): Promise<void> {
-  /* Its machine gets ready for an update: the turn waits in line and goes out after it, so nothing is lost. */
-  const drain = (await agentState(ctx, agentId)).machineDrain;
-  if (drain && drain.state !== 'postponed') return;
+  if (await waitsItsLine(ctx, agentId, id)) return;
   await ctx.db.update(jobs).set({ status: 'failed', error: 'message_not_delivered', finishedAt: new Date() }).where(and(eq(jobs.id, id), eq(jobs.status, 'queued')));
   const [job] = await ctx.db.select({ status: jobs.status }).from(jobs).where(eq(jobs.id, id));
   if (!job || job.status === 'failed') throw messageNotDelivered();

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { jobs, subscriptions } from '../../db/schema.js';
@@ -46,7 +47,8 @@ export async function sayLive(
     .limit(1);
   const node = running && identityOf(running.sub, running.nodeId);
   if (!running || !node || (taskId && running.taskId !== taskId)) return null;
-  if (!ctx.hub.hasTerminals(node)) return missedLive(required);
+  /* A node without live terminals never takes words into a turn: they wait for the next one. */
+  if (!ctx.hub.hasTerminals(node)) return null;
   const message = await liveEnvelope(ctx, running.companyId, agentId, source);
   await before(running.id);
   if (await waitForWords(ctx, node, agentId, addressed(text, message), running, source)) return running.id;
@@ -58,35 +60,49 @@ function missedLive(required: boolean): null {
   return null;
 }
 
-async function waitForWords(ctx: Ctx, node: NodeIdentity, agentId: string, text: string, running: { id: string; companyId: string }, source?: MessageSource): Promise<boolean> {
-  const ref = randomUUID();
+type Words = { agentKey: string; text: string; ref: string };
+
+/* The delivery of these words on a node that tracks them: the one they have in this turn already, when they are tried again. */
+async function liveDelivery(ctx: Ctx, node: NodeIdentity, words: Words, running: { id: string; companyId: string }, source?: MessageSource): Promise<OperatorDelivery | undefined> {
+  if (node.kind !== 'node' || !ctx.hub.hasProgramOperator(node)) return undefined;
+  const { agentKey: agentId, text, ref } = words;
   const digest = wordsDigest(text);
   const previous = liveInputOf(source?.data, agentId);
-  const operatorDelivery = node.kind === 'node' && ctx.hub.hasProgramOperator(node)
-    ? previous?.jobId === running.id && previous.digest === digest ? previous.delivery : await reserveDelivery(ctx.db, { companyId: running.companyId, agentId, jobId: running.id, nodeId: node.nodeId, kind: 'live', words: text, reference: `live:${ref}` }) : undefined;
-  if (operatorDelivery) rememberLiveInput(source?.data, agentId, { delivery: operatorDelivery, jobId: running.id, digest });
+  const delivery = previous?.jobId === running.id && previous.digest === digest ? previous.delivery : await reserveDelivery(ctx.db, { companyId: running.companyId, agentId, jobId: running.id, nodeId: node.nodeId, kind: 'live', words: text, reference: `live:${ref}` });
+  rememberLiveInput(source?.data, agentId, { delivery, jobId: running.id, digest });
+  return delivery;
+}
+
+/* Sends the words and waits for the node's word on them. sent: they left for the node. refused: the node said no. */
+async function typeWords(ctx: Ctx, node: NodeIdentity, words: Words, operatorDelivery?: OperatorDelivery) {
   const deadline = Date.now() + SAY_WAIT_MS;
   const map = waiting.get(ctx) ?? new Map<string, Waiting>();
   waiting.set(ctx, map);
-  let sent = false;
-  let refused = false;
-  const went = await new Promise<boolean>(done => {
+  const typed = { went: false, sent: false, refused: false };
+  typed.went = await new Promise<boolean>(done => {
     const timer = setTimeout(() => done(false), SAY_WAIT_MS);
     const end = (went: boolean) => {
       clearTimeout(timer);
       done(went && Date.now() < deadline);
     };
-    map.set(ref, { node, done: went => { refused = !went; end(went); } });
+    map.set(words.ref, { node, done: went => { typed.refused = !went; end(went); } });
     try {
-      sent = ctx.hub.send(node, { type: 'agent.say', agentKey: agentId, text, ref, within: SAY_WAIT_MS - SAY_MARGIN_MS, ...(operatorDelivery ? { operatorDelivery } : {}) });
-      if (!sent) end(false);
+      typed.sent = ctx.hub.send(node, { type: 'agent.say', ...words, within: SAY_WAIT_MS - SAY_MARGIN_MS, ...(operatorDelivery ? { operatorDelivery } : {}) });
+      if (!typed.sent) end(false);
     } catch {
       end(false);
     }
-  }).finally(() => map.delete(ref));
-  if (!sent && operatorDelivery) await cancelUnsentDelivery(ctx.db, operatorDelivery);
-  else if (refused && operatorDelivery) await cancelUnattemptedLive(ctx.db, operatorDelivery);
-  return went;
+  }).finally(() => map.delete(words.ref));
+  return typed;
+}
+
+async function waitForWords(ctx: Ctx, node: NodeIdentity, agentId: string, text: string, running: { id: string; companyId: string }, source?: MessageSource): Promise<boolean> {
+  const words = { agentKey: agentId, text, ref: randomUUID() };
+  const delivery = await liveDelivery(ctx, node, words, running, source);
+  const typed = await typeWords(ctx, node, words, delivery);
+  if (delivery && !typed.sent) await cancelUnsentDelivery(ctx.db, delivery);
+  else if (delivery && typed.refused) await cancelUnattemptedLive(ctx.db, delivery);
+  return typed.went;
 }
 
 /* The node's word on words Hornhoof sent it to type. */

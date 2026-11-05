@@ -755,6 +755,9 @@ export async function verdict(ctx: Live, agentId: string, taskId: string, v: { p
 
 /* Everyone at the gate has given a verdict: it passes the task on (or finishes it) when all of them passed, else the work
    goes back to its executor with every reason in one list. n is the move that closes the gate. */
+/* Who sent the work back, as each wake that says so tells. */
+const returnedBy = (task: Task, failed: Given[]): WakeCause => ({ actor: { agentId: failed[0]!.agentId }, actors: failed.map(g => ({ agentId: g.agentId })), action: 'returned work', task: { id: task.id, number: task.number } });
+
 async function closeGate(ctx: Live, task: Task, n: Note, given: Given[]): Promise<Moved> {
   if (await isTurnReview(ctx.db, task.id)) return closeTurnReview(ctx, task, n, given);
   const actorId = n.actor.agentId;
@@ -772,10 +775,10 @@ async function closeGate(ctx: Live, task: Task, n: Note, given: Given[]): Promis
   const [executor] = await ctx.db.select({ name: agents.name, off: agents.switchedOffAt }).from(agents).where(eq(agents.id, task.executorAgentId!));
   const away = executor?.off && task.createdByAgentId && task.createdByAgentId !== task.executorAgentId ? task.createdByAgentId : null;
   const name = executor?.name ?? 'Its executor';
+  const cause = returnedBy(task, failed);
   const wakes: Wake[] = away
-    ? [{ agentId: away, taskId: task.id, why: 'switched', text: `${name} does it and is switched off, and gate ${task.stage} sent it back with changes to make: ${reasons}\n\nGive it to someone who is on with update_task, or tell the CEO it waits for ${name}.` }]
-    : [{ agentId: task.executorAgentId!, taskId: task.id, why: 'changes', text: reasons }];
-  for (const wake of wakes) wake.cause = { actor: { agentId: failed[0]!.agentId }, actors: failed.map(g => ({ agentId: g.agentId })), action: 'returned work', task: { id: task.id, number: task.number } };
+    ? [{ agentId: away, taskId: task.id, why: 'switched', text: `${name} does it and is switched off, and gate ${task.stage} sent it back with changes to make: ${reasons}\n\nGive it to someone who is on with update_task, or tell the CEO it waits for ${name}.`, cause }]
+    : [{ agentId: task.executorAgentId!, taskId: task.id, why: 'changes', text: reasons, cause }];
   const rework: Note = { ...n, data: { ...n.data, rework: true } };
   const row = await move(ctx, task, { status: 'open', stage: 0, panel: [], assigneeAgentId: away ?? task.executorAgentId, bounces: task.bounces + 1, silent: 0 }, rework, async tx => {
     wakes.push(...(await stuckAtGate(tx, task, task.stage, actorId)));
@@ -1326,6 +1329,9 @@ export async function wentOn(ctx: Live, agentId: string, task: Task): Promise<Mo
 /* pick: the way a person took, from 0, in a choice. */
 export type Answer = { answer?: string; approve?: boolean; retry?: boolean; pick?: number };
 
+const sentByAgent = (picture: { companyId: string; agentId: string | null; personId: string | null }, companyId: string, agentId: string): boolean =>
+  picture.companyId === companyId && picture.agentId === agentId && !picture.personId;
+
 /* Pictures are the agent's own, from hh-attach, each shown once. A file put on a task is no picture, whatever it holds, and
    one a person sent the agent stays in that conversation. */
 async function checkPictures(db: Db, companyId: string, agentId: string, ids: string[]): Promise<void> {
@@ -1337,7 +1343,7 @@ async function checkPictures(db: Db, companyId: string, agentId: string, ids: st
     .where(and(inArray(attachments.id, ids), isNull(attachments.operatorCaseId)));
   for (const id of ids) {
     const found = rows.find(r => r.id === id);
-    if (!found || found.companyId !== companyId || found.agentId !== agentId || found.personId) throw refuse(400, 'task_invalid', `${id} is not a picture you sent. Send it with hh-attach and use the id it prints.`);
+    if (!found || !sentByAgent(found, companyId, agentId)) throw refuse(400, 'task_invalid', `${id} is not a picture you sent. Send it with hh-attach and use the id it prints.`);
     if (found.taskId) throw refuse(400, 'task_invalid', `${id} is a file on a task, not a picture. Send the picture with hh-attach FILE, without --task.`);
     if (found.requestId) throw refuse(400, 'task_invalid', `${id} is shown in another request already. Send it again with hh-attach.`);
   }
@@ -1375,6 +1381,9 @@ const PASSED_OVER = new Set<ErrorReason | undefined>(['request_closed', 'decisio
 
 /* A person answers: the request closes, the task goes on where it stood, and the agent that asked wakes with the answer.
    on: the orchestrator answers for the person its turn answers, under that agent's input lock. */
+/* The person whose answer it is, also when the orchestrator passed it on. */
+const answerer = (personId: string | null, actor: Actor): Actor => (personId ? { personId } : actor);
+
 export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answer, on?: Delegation): Promise<{ request: Request; task: Task; wakes: Wake[] }> {
   const [found] = await ctx.db.select().from(requests).where(eq(requests.id, requestId));
   if (!found) throw refuse(404, 'request_unknown', 'There is no such request.');
@@ -1433,7 +1442,7 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
       const back = await reviewWake(tx, after!);
       wakes.push(...after!.panel.filter(id => id !== found.agentId).map(agentId => ({ agentId, taskId: task.id, ...back })));
     }
-    recordCause(wakes, { kind: 'answered', actor: answeredBy ? { personId: answeredBy } : actor, text: said, data: { status, commit: found.commit } }, event.id, task);
+    recordCause(wakes, { kind: 'answered', actor: answerer(answeredBy, actor), text: said, data: { status, commit: found.commit } }, event.id, task);
     await keepWakes(tx, task.companyId, wakes);
     return request;
   });
