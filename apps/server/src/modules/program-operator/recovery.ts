@@ -1,4 +1,4 @@
-import { and, eq, gte, inArray, isNotNull, isNull, lte, type SQL } from 'drizzle-orm';
+import { and, eq, exists, gte, inArray, isNotNull, isNull, lte, or, sql, type SQL } from 'drizzle-orm';
 import type { OperatorEvidence } from '@hornhoof/protocol/program-operator';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, programDeliveries, programOperatorCases, tasks } from '../../db/schema.js';
@@ -10,8 +10,6 @@ import { operatorTransaction } from './transactions.js';
 
 type Case = typeof programOperatorCases.$inferSelect;
 type Job = typeof jobs.$inferSelect;
-/* How far a chain of retries is followed; the retries of one set of words stay far below it. */
-const CONTINUATIONS_MAX = 200;
 
 export async function operatorRecoveryHolds(ctx: Ctx, agentId: string): Promise<boolean> {
   return recoveryHolds(ctx, eq(programOperatorCases.agentId, agentId));
@@ -124,33 +122,36 @@ async function finishRecovery(ctx: Ctx, row: Case, continuationJobId: string | n
   await logTurnFact(ctx, job!, text, { notification: { source: 'program_operator', tasks: [] }, operatorRecovery: row.id, continuation: continuationJobId });
 }
 
+/* The words a case is about were recorded: those of its own delivery, or, for a case first opened for something else, those
+   of its turn. */
+const wordsRecorded = (ctx: Ctx) => exists(ctx.db.select({ id: programDeliveries.id }).from(programDeliveries).where(and(isNotNull(programDeliveries.receiptAt),
+  or(eq(programDeliveries.id, programOperatorCases.deliveryId), and(eq(programDeliveries.jobId, programOperatorCases.jobId), eq(programDeliveries.kind, 'assignment'))))));
+
 /* A late receipt always wins over an unsent child, including after readiness already resolved its case. */
 export async function reconcileRecoveryReceipts(ctx: Ctx, agentId: string): Promise<void> {
-  const rows = await ctx.db.select({ incident: programOperatorCases, delivery: programDeliveries }).from(programOperatorCases).innerJoin(programDeliveries, eq(programDeliveries.id, programOperatorCases.deliveryId)).where(eq(programOperatorCases.agentId, agentId));
-  for (const { incident, delivery } of rows) {
-    if (!delivery.receiptAt) continue;
-    if (incident.continuationJobId) await cancelRepeats(ctx, incident, incident.continuationJobId);
+  const recorded = await ctx.db.select().from(programOperatorCases).where(and(eq(programOperatorCases.agentId, agentId), wordsRecorded(ctx)));
+  const [waiting] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'queued'), isNotNull(jobs.continueOf))).limit(1);
+  for (const incident of recorded) {
+    if (waiting) await cancelRepeats(ctx, incident);
     if (incident.recoveryHold) await finishRecovery(ctx, incident, incident.continuationJobId, 'The program recorded the original words; no duplicate was sent.');
   }
 }
 
-/* What the program recorded late includes the tasks that went out inside that turn. */
-async function cancelRepeats(ctx: Ctx, incident: Case, continuationJobId: string): Promise<void> {
-  await cancelContinuations(ctx, continuationJobId);
+/* What the program recorded late includes the tasks that went out inside that turn, whatever became of the turn's own repeat.
+   Only an unheard turn repeats a task that went along, so a turn that merely goes on from recorded words stays. */
+async function cancelRepeats(ctx: Ctx, incident: Case): Promise<void> {
   const [carrier] = await ctx.db.select().from(jobs).where(eq(jobs.id, incident.jobId));
-  for (const gone of carrier ? await wentAlong(ctx, carrier) : []) {
-    const [repeat] = await ctx.db.select({ id: jobs.id }).from(jobs).where(eq(jobs.continueOf, gone.id)).limit(1);
-    if (repeat) await cancelContinuations(ctx, repeat.id);
-  }
+  const along = carrier ? await wentAlong(ctx, carrier) : [];
+  const repeats = along.length ? await ctx.db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, incident.agentId), inArray(jobs.continueOf, along.map(gone => gone.id)))) : [];
+  const first = [...(incident.continuationJobId ? [incident.continuationJobId] : []), ...repeats.map(repeat => repeat.id)];
+  if (first.length) await cancelContinuations(ctx, incident.agentId, first);
 }
 
-/* The words may be on their second retry by the time the first try's receipt comes: whatever still waits to repeat them ends. */
-async function cancelContinuations(ctx: Ctx, first: string): Promise<void> {
-  for (let id: string | undefined = first, hops = 0; id && hops < CONTINUATIONS_MAX; hops++) {
-    await ctx.db.update(jobs).set({ status: 'failed', error: 'cancelled', result: 'The program already recorded these words.', finishedAt: new Date() }).where(and(eq(jobs.id, id), eq(jobs.status, 'queued')));
-    const [next]: { id: string }[] = await ctx.db.select({ id: jobs.id }).from(jobs).where(eq(jobs.continueOf, id)).limit(1);
-    id = next?.id;
-  }
+/* The words may be on a later retry by the time the first try's receipt comes, and retries do not stop: whatever still waits
+   to repeat them ends, all in one walk. It meets each turn once, so a chain that loops ends too. */
+async function cancelContinuations(ctx: Ctx, agentId: string, first: string[]): Promise<void> {
+  const chain = sql`with recursive repeats(id) as (select id from jobs where ${inArray(jobs.id, first)} union select j.id from jobs j join repeats r on j.continue_of = r.id where j.agent_id = ${agentId}) select id from repeats`;
+  await ctx.db.update(jobs).set({ status: 'failed', error: 'cancelled', result: 'The program already recorded these words.', finishedAt: new Date() }).where(and(eq(jobs.status, 'queued'), sql`${jobs.id} in (${chain})`));
 }
 
 export async function adoptOperatorOwnerTurn(ctx: Ctx, agentId: string, jobId: string, nodeId: string): Promise<void> {

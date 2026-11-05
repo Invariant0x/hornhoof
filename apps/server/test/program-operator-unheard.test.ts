@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { and, eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agentEvents, jobs, programInstances, tasks } from '../src/db/schema.js';
@@ -133,7 +134,7 @@ async function headTakesTaskAlong(c: Company) {
   const along = await wake(c, c.head.id, two, words);
   await handleNodeMessage(c.ctx, c.identity, { type: 'job.done', jobId: busy!.id, ok: true, sessionId: 'session', tail: 'Done.', result: 'Done.', error: null });
   expect(await c.jobOf(along)).toMatchObject({ status: 'done', result: GONE_ALONG });
-  return { two, words, along, carrier: (await c.runningOf(c.head.id))! };
+  return { one, two, words, along, carrier: (await c.runningOf(c.head.id))! };
 }
 
 it('a task that went out inside the unheard turn is told again by the next one, though going out set it to work', async () => {
@@ -266,4 +267,105 @@ it('a stopped turn is not repeated', async () => {
   await c.unrecorded(c.agent.id, first!.id);
   await handleNodeMessage(c.ctx, c.identity, { type: 'job.done', jobId: first!.id, ok: false, sessionId: 'session', error: 'cancelled', tail: 'Stopped.', result: '' });
   expect(await c.db.select().from(jobs).where(and(eq(jobs.continueOf, first!.id)))).toEqual([]);
+});
+
+describe('a receipt that comes late', () => {
+  it('ends the repeat of a case that first opened for a question', async () => {
+    const c = await stuckPrograms(true);
+    await say(c, c.agent.id);
+    const first = (await c.runningOf(c.agent.id))!;
+    const instance = await c.instanceOf(c.agent.id);
+    const question = { id: randomUUID(), kind: 'permission' as const, text: 'Continue?', tool: 'Bash', callId: null };
+    await c.record({ type: 'program.question', agentKey: c.agent.id, jobId: first.id, instance, evidenceId: randomUUID(), ordinal: 0, phase: 'asked', question, questionOrdinal: 1, elapsedMs: 0 });
+    await c.record({ type: 'program.operator_needed', agentKey: c.agent.id, jobId: first.id, instance, evidenceId: randomUUID(), ordinal: 0, reason: 'question_waiting', deliveryId: null, questionId: question.id, evidenceKey: question.id, elapsedMs: 30000, sinceLaunchMs: 30000, exit: null });
+    const { fact } = await c.unrecorded(c.agent.id, first.id);
+    const incident = await c.caseOf(first.id);
+    expect(incident).toMatchObject({ reason: 'question_waiting', deliveryId: null });
+    await expireOperatorCases(c.ctx, new Date(+incident.deadlineAt + 1));
+    await c.failedTurn(first.id);
+    const [next] = await c.continuationsOf(first.id);
+    expect(next).toMatchObject({ status: 'queued' });
+    await c.record({ ...fact, phase: 'taken', elapsedMs: 70000 } as typeof fact);
+    expect(await c.jobOf(next!.id)).toMatchObject({ status: 'failed', error: 'cancelled' });
+  });
+
+  it('ends the repeat of a task that went along, though the task of the turn itself closed and has no repeat', async () => {
+    const c = await stuckPrograms();
+    const { one, along, carrier } = await headTakesTaskAlong(c);
+    await c.db.update(programInstances).set({ active: false }).where(eq(programInstances.id, await c.instanceOf(c.head.id)));
+    const { fact } = await c.unrecorded(c.head.id, carrier.id);
+    await c.failedTurn(carrier.id);
+    expect(await c.caseOf(carrier.id)).toMatchObject({ recoveryHold: true });
+    await c.db.update(tasks).set({ status: 'cancelled', closedAt: new Date() }).where(eq(tasks.id, one.id));
+    await resumeOperatorProcess(c.ctx, c.head.id, c.identity.nodeId);
+    expect(await c.caseOf(carrier.id)).toMatchObject({ continuationJobId: null });
+    const [repeat] = await c.continuationsOf(along);
+    expect(repeat).toMatchObject({ status: 'queued' });
+    await c.record({ ...fact, phase: 'taken', elapsedMs: 70000 } as typeof fact);
+    expect(await c.jobOf(repeat!.id)).toMatchObject({ status: 'failed', error: 'cancelled' });
+  });
+
+  /* Retries of words a stuck program never takes do not stop, so neither does what the receipt ends. */
+  async function retried(c: Company, length: number) {
+    await say(c, c.orchestrator.id);
+    const first = (await c.runningOf(c.orchestrator.id))!;
+    const { fact } = await c.unrecorded(c.orchestrator.id, first.id);
+    await c.failedTurn(first.id);
+    const [next] = await c.continuationsOf(first.id);
+    await c.db.update(jobs).set({ status: 'failed', error: 'agent_failed', finishedAt: new Date() }).where(eq(jobs.id, next!.id));
+    let parent = next!.id;
+    const chain = Array.from({ length }, (_, i) => {
+      const id = randomUUID();
+      const row = { id, companyId: c.companyId, agentId: c.orchestrator.id, subscriptionId: c.sub.id, kind: 'conversation' as const, prompt: letter, timeoutMs: 1000, continueOf: parent, status: i === length - 1 ? 'queued' as const : 'failed' as const, error: i === length - 1 ? null : 'agent_failed', notBefore: new Date(Date.now() + 60_000) };
+      parent = id;
+      return row;
+    });
+    await c.db.insert(jobs).values(chain);
+    return { fact, last: parent, next: next!.id };
+  }
+
+  it('ends a repeat however many retries came before it', async () => {
+    const c = await stuckPrograms();
+    const { fact, last } = await retried(c, 250);
+    await c.record({ ...fact, phase: 'taken', elapsedMs: 70000 } as typeof fact);
+    expect(await c.jobOf(last)).toMatchObject({ status: 'failed', error: 'cancelled' });
+  });
+
+  it('stops at a chain that loops', async () => {
+    const c = await stuckPrograms();
+    const { fact, last, next } = await retried(c, 3);
+    await c.db.update(jobs).set({ continueOf: last }).where(eq(jobs.id, next));
+    await c.record({ ...fact, phase: 'taken', elapsedMs: 70000 } as typeof fact);
+    expect(await c.jobOf(last)).toMatchObject({ status: 'failed', error: 'cancelled' });
+  });
+
+  it('leaves alone the turn that goes on from a turn whose words were recorded', async () => {
+    const c = await stuckPrograms();
+    await say(c, c.agent.id);
+    const first = (await c.runningOf(c.agent.id))!;
+    const { fact } = await c.deliveryFact(c.agent.id, first.id);
+    await c.record(fact);
+    await c.record({ ...fact, phase: 'taken', elapsedMs: 100 } as typeof fact);
+    await handleNodeMessage(c.ctx, c.identity, { type: 'job.done', jobId: first.id, ok: false, sessionId: 'session', error: 'agent_failed', tail: 'Failed.', result: '', failure: { kind: 'network', retryable: true, text: 'The connection was lost.' } });
+    const [next] = await c.continuationsOf(first.id);
+    expect(next).toMatchObject({ status: 'queued' });
+    await c.record({ ...fact, phase: 'activity', elapsedMs: 200 } as typeof fact);
+    expect(await c.jobOf(next!.id)).toMatchObject({ status: 'queued' });
+  });
+
+  it('leaves alone the turn that goes on from a case whose words were recorded, with a case on it', async () => {
+    const c = await stuckPrograms();
+    await say(c, c.agent.id);
+    const first = (await c.runningOf(c.agent.id))!;
+    const { fact, delivery, instance } = await c.deliveryFact(c.agent.id, first.id);
+    await c.record(fact);
+    await c.record({ ...fact, phase: 'taken', elapsedMs: 100 } as typeof fact);
+    await c.record({ type: 'program.operator_needed', agentKey: c.agent.id, jobId: first.id, instance, evidenceId: randomUUID(), ordinal: 0, reason: 'recorded_no_activity', deliveryId: delivery.id, evidenceKey: delivery.id, elapsedMs: 300_200, sinceLaunchMs: 300_200, exit: null });
+    expect(await c.caseOf(first.id)).toMatchObject({ reason: 'recorded_no_activity', continuationJobId: null });
+    await handleNodeMessage(c.ctx, c.identity, { type: 'job.done', jobId: first.id, ok: false, sessionId: 'session', error: 'agent_failed', tail: 'Failed.', result: '', failure: { kind: 'network', retryable: true, text: 'The connection was lost.' } });
+    const [next] = await c.continuationsOf(first.id);
+    expect(next).toMatchObject({ status: 'queued' });
+    await c.record({ ...fact, phase: 'activity', elapsedMs: 300_300 } as typeof fact);
+    expect(await c.jobOf(next!.id)).toMatchObject({ status: 'queued' });
+  });
 });
