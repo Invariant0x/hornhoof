@@ -11,7 +11,7 @@ export type TlsRow = typeof linkTls.$inferSelect;
 type TlsFields = Partial<Omit<TlsRow, 'companyId'>>;
 
 /* A certificate this close to its end goes back to http while visitors can still reach the link, before it ends on them. */
-export const LEAST_LEFT_MS = 24 * 60 * 60 * 1000;
+const LEAST_LEFT_MS = 24 * 60 * 60 * 1000;
 
 export async function tlsOf(db: Db, companyId: string): Promise<TlsRow | null> {
   const [row] = await db.select().from(linkTls).where(eq(linkTls.companyId, companyId));
