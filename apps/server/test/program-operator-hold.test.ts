@@ -11,6 +11,8 @@ import { checkOperatorHealth } from '../src/modules/program-operator/health.js';
 import { releaseRecoveryHold } from '../src/modules/program-operator/release.js';
 import { receiveOperatorReply } from '../src/modules/program-operator/rpc.js';
 import { readProgramScreen, sendProgramKey } from '../src/modules/program-operator/tools.js';
+import { hashToken } from '../src/crypto/tokens.js';
+import { listen, mcp } from './helpers.js';
 import { operatorCompany } from './program-operator-company.js';
 
 const MINUTE = 60_000;
@@ -210,6 +212,21 @@ it('lets Operations release a hold and deliver its saved words once, and records
   expect(await c.audits()).toEqual([expect.objectContaining({ actor: { id: c.rob.id, name: 'Rob', role: 'OPS-FIX' }, reason: 'The program stands ready and the words wait.', at: expect.any(String), result: 'released', action: 'release_and_deliver', job: c.job.id, instance: c.program.instance, generation: 7, input: 'empty', continuation: children[0]!.id })]);
   expect(await c.call()).toMatchObject({ result: 'no_hold', continuation: children[0]!.id });
   expect(await c.children()).toHaveLength(1);
+});
+
+it.each<[string, string, 'worker' | 'head', boolean]>([
+  ['the reliability engineer', 'OPS-FIX', 'worker', true],
+  ['the head of Operations', 'OPS-HEAD', 'head', true],
+  ['a program operator', 'OPS-PROGRAM', 'worker', false],
+  ['a developer', 'DEV-BE', 'worker', false],
+])('offers the tool to %s: %s', async (_name, roleKey, kind, offered) => {
+  const c = await held();
+  const someone = await hire(c, 'Rob', kind, roleKey);
+  const token = randomUUID();
+  await c.db.insert(jobs).values({ companyId: c.companyId, agentId: someone.id, subscriptionId: c.sub.id, kind: 'conversation', prompt: 'Look.', timeoutMs: 1000, status: 'running', toolTokenHash: hashToken(token) });
+  await listen(c.app);
+  const { tools } = await (await mcp(c.app, token)).listTools();
+  expect(tools.some(tool => tool.name === 'program_recovery_release')).toBe(offered);
 });
 
 it('lets the head of Operations do the same', async () => {
