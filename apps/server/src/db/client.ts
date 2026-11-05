@@ -6,7 +6,8 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
 import pg from 'pg';
-import { AFTER_MIGRATIONS, BEFORE_MIGRATIONS } from './net.js';
+import { confirmCommits, keepErrors, logTimeouts } from './confirm.js';
+import { AFTER_MIGRATIONS, BEFORE_MIGRATIONS, FENCED } from './net.js';
 import * as schema from './schema.js';
 
 export type Db = PgDatabase<PgQueryResultHKT, typeof schema>;
@@ -17,23 +18,48 @@ export const APP_NAME = 'hornhoof-app';
 export const MIGRATE_NAME = 'hornhoof-migrate';
 export const KEEPER_NAME = 'hornhoof-keeper';
 
+/* The app's transactions end when they run 5 s before their commit, and a commit hears only of warnings. A superuser session
+   is fenced only when it says so, and the app says so when it runs with a keeper. */
+const APP_SETTINGS = '-c transaction_timeout=5s -c client_min_messages=warning';
+const appSettings = (fenced: boolean | undefined): string => (fenced ? `${APP_SETTINGS} -c ${FENCED}=on` : APP_SETTINGS);
+
+export type PoolOptions = { statementTimeoutMs?: number; fenced?: boolean };
+
+/* pg lets an address's options and application_name replace the ones given beside it, and a fence must not depend on what
+   an address says. */
+export function stripSettings(url: string): string {
+  const address = new URL(url);
+  address.searchParams.delete('options');
+  address.searchParams.delete('application_name');
+  return address.toString();
+}
+
+function watchClient(client: pg.ClientBase, name: string): void {
+  keepErrors(client);
+  if (name !== APP_NAME) return;
+  confirmCommits(client);
+  logTimeouts(client, line => console.warn(line));
+}
+
 /* pg reports an idle connection the database dropped, as when Postgres restarts, as an error on the pool. Without a
    listener Node ends the whole server; with one the pool opens a fresh connection for the next query. The name shows
    in pg_stat_activity, so each process can be told apart there. */
-export function openPool(url: string, onDropped: (err: Error) => void, name: string, opts: { statementTimeoutMs?: number } = {}): pg.Pool {
+export function openPool(url: string, onDropped: (err: Error) => void, name: string, opts: PoolOptions = {}): pg.Pool {
   const pool = new pg.Pool({
-    connectionString: url,
+    connectionString: stripSettings(url),
     application_name: name,
     ...(opts.statementTimeoutMs === undefined ? {} : { statement_timeout: opts.statementTimeoutMs }),
+    ...(name === APP_NAME ? { options: appSettings(opts.fenced) } : {}),
   });
   pool.on('error', onDropped);
+  pool.on('connect', client => watchClient(client, name));
   return pool;
 }
 
 const warnDropped = (err: Error) => console.warn(`Lost a database connection, will open another: ${err.message}`);
 
 /* The app and the CLI only read the schema; the migrate entry point is the one place that changes it. */
-export function openDb(url: string, name: string, opts: { statementTimeoutMs?: number } = {}): Db {
+export function openDb(url: string, name: string, opts: PoolOptions = {}): Db {
   return drizzle(openPool(url, warnDropped, name, opts), { schema });
 }
 

@@ -90,7 +90,7 @@ const entry = process.argv[1] ? realpathSync(process.argv[1]) : '';
 if (entry === fileURLToPath(import.meta.url)) {
   const config = loadConfig(process.env);
   if (!config.databaseUrl) throw new Error('DATABASE_URL is not set.');
-  const db = openDb(config.databaseUrl, APP_NAME);
+  const db = openDb(config.databaseUrl, APP_NAME, { fenced: config.keeper });
   const read = async () => {
     let text = '';
     for await (const chunk of process.stdin) text += String(chunk);

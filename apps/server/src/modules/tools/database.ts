@@ -2,6 +2,8 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { HIDDEN, SECRET, type SqlMode } from '../../db/agent-sql.js';
+import { notConfirmed } from '../../db/confirm.js';
+import { checkAgentSql, SqlRefused } from '../../db/sql-check.js';
 import { answersCeoOrDelegate, withInputLock } from '../conversation/decision-context.js';
 
 type ToolJob = { id: string; companyId: string; agentId: string };
@@ -60,16 +62,28 @@ function refusal(err: Error & { code?: string }, mode: SqlMode, readOnly = READ_
   return `The database answered: ${err.message}${why ? `. ${why}` : ''}`;
 }
 
+/* A text the check refused never reached the database, so it hears that and not the database's words. What is no row change
+   in a call that only reads is a change it may not make, so it hears why too. */
+function refusedText(err: SqlRefused, mode: SqlMode, readOnly: string): string {
+  return `Hornhoof did not run this SQL: ${err.message}${mode === 'read' && err.kind === 'statement' ? ` ${readOnly}` : ''}`;
+}
+
+function failureText(err: Error, mode: SqlMode, readOnly: string): string {
+  if (err instanceof SqlRefused) return refusedText(err, mode, readOnly);
+  if (notConfirmed(err)) return `The database answered: ${err.message} The call may have run; check before repeating it.`;
+  return refusal(err, mode, readOnly);
+}
+
 const DESCRIPTIONS: Record<SqlMode, string> = {
   write:
     "Runs SQL on Hornhoof's own Postgres database, for what no other tool does: fixing a stuck row, changing a field, removing what the screens cannot. " +
-    'Several statements run in one transaction and are undone together when one fails; a call may take 15 seconds. It reads and changes the rows of every table ' +
+    'Only SELECT, INSERT, UPDATE, DELETE and WITH statements run, several in one transaction that Hornhoof begins and commits, undone together when one fails; a call may take 5 seconds. It reads and changes the rows of every table ' +
     `but sign-ins, ${CLOSED_AFTER_SIGN_INS}, and never the columns with secrets (${SECRETS}), so name columns instead of * on those tables. ` +
     "People and their access, subscriptions, machines, repositories, an employee's kind, role, skills and subscription, a head's department and a turn but its status change only through the other tools. " +
     'It cannot change the tables themselves. A change skips the checks and notices the other tools make, so prefer them, read before you write and change only ' +
     'the rows you mean. Each statement comes back as { rows, changed }.',
   read:
-    "Reads Hornhoof's own Postgres database, to find what went wrong: stuck rows, failed turns, who changed what and when. Several statements run in one " +
+    "Reads Hornhoof's own Postgres database, to find what went wrong: stuck rows, failed turns, who changed what and when. Only SELECT and WITH statements run, several in one " +
     `transaction; a call may take 15 seconds. It reads the rows of every table but sign-ins, ${CLOSED_AFTER_SIGN_INS}, and never the columns ` +
     `with secrets (${SECRETS}), so name columns instead of * on those tables. ${READ_ONLY} Each statement comes back as { rows, changed }.`,
 };
@@ -90,12 +104,13 @@ async function modeNow(ctx: Ctx, job: ToolJob, mode: SqlMode): Promise<SqlMode> 
 async function runSql(ctx: Ctx, agentSql: NonNullable<Ctx['agentSql']>, job: ToolJob, sql: string, mode: SqlMode) {
   const now = await modeNow(ctx, job, mode);
   try {
+    await checkAgentSql(sql);
     const answers = await agentSql.run(sql, now);
     if (answers.some(a => a.changed > 0)) ctx.bus.publish(job.companyId, { type: 'org' });
     const body = JSON.stringify(answers);
     return say(body.length > MAX_ANSWER ? `${body.slice(0, MAX_ANSWER)}\n[cut at ${MAX_ANSWER} characters]` : body);
   } catch (err) {
-    return say(refusal(err as Error, now, WHY_READ_ONLY[mode]), true);
+    return say(failureText(err as Error, now, WHY_READ_ONLY[mode]), true);
   }
 }
 
