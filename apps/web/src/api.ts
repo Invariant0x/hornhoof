@@ -23,17 +23,26 @@ function failure(status: number, data: unknown): ApiFailure {
   return failed;
 }
 
-async function respond<T>(path: string, init: RequestInit): Promise<T> {
-  let res: Response;
+async function fetchOrigin(path: string, init: RequestInit = {}): Promise<Response> {
   try {
-    res = await fetch(path, { credentials: 'same-origin', ...init });
+    return await fetch(path, { credentials: 'same-origin', ...init });
   } catch {
     throw new ApiFailure(0, 'network', '');
   }
+}
+
+async function respond<T>(path: string, init: RequestInit): Promise<T> {
+  const res = await fetchOrigin(path, init);
   if (res.status === 204) return undefined as T;
   const data = await res.json().catch(() => null);
   if (!res.ok) throw failure(res.status, data);
   return data as T;
+}
+
+async function respondText(path: string): Promise<string> {
+  const res = await fetchOrigin(path);
+  if (!res.ok) throw failure(res.status, await res.json().catch(() => null));
+  return res.text();
 }
 
 const request = <T>(method: string, path: string, body?: unknown) =>
@@ -41,6 +50,7 @@ const request = <T>(method: string, path: string, body?: unknown) =>
 
 export const api = {
   upload: <T>(path: string, file: Blob) => respond<T>(path, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: file }),
+  text: (path: string) => respondText(path),
   get: <T>(path: string) => request<T>('GET', path),
   post: <T>(path: string, body?: unknown) => request<T>('POST', path, body),
   put: <T>(path: string, body: unknown) => request<T>('PUT', path, body),

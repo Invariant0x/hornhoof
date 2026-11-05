@@ -131,7 +131,7 @@ function ChoiceForm({ options, text, busy, onText, onPick, onSubmit }: ChoicePro
         ))}
       </div>
       <Field label={t.tasks.choiceNote} hint={t.tasks.choiceHint}>
-        {p => <textarea {...p} rows={3} value={text} maxLength={4000} onChange={e => onText(e.target.value)} />}
+        {p => <textarea {...p} rows={3} value={text} onChange={e => onText(e.target.value)} />}
       </Field>
       <div className="req-actions">
         <button className="btn small" type="submit" disabled={busy || !text.trim()}>
@@ -156,7 +156,7 @@ function QuestionForm({ stuck, text, busy, onText, onSubmit, onCancel }: Questio
   return (
     <form className="req-form" onSubmit={onSubmit}>
       <Field label={t.tasks.yourAnswer}>
-        {p => <textarea {...p} rows={3} value={text} maxLength={4000} onChange={e => onText(e.target.value)} />}
+        {p => <textarea {...p} rows={3} value={text} onChange={e => onText(e.target.value)} />}
       </Field>
       <div className="req-actions">
         <button className="btn small" type="submit" disabled={busy || !text.trim()}>
@@ -185,7 +185,7 @@ function ApprovalForm({ request, text, busy, onText, onDecide }: ApprovalProps) 
   return (
     <div className="req-form">
       <ApprovedCommit request={request} />
-      <Field label={t.tasks.note}>{p => <input {...p} value={text} maxLength={4000} onChange={e => onText(e.target.value)} />}</Field>
+      <Field label={t.tasks.note}>{p => <textarea {...p} rows={3} value={text} onChange={e => onText(e.target.value)} />}</Field>
       <div className="req-actions">
         <button className="btn small" type="button" disabled={busy} onClick={() => onDecide(true)}>
           {t.tasks.approve}
