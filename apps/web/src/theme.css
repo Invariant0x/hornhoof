@@ -1591,7 +1591,7 @@ summary.turn-head:focus-visible { outline: 2px solid var(--cyan); outline-offset
    window, so the terminal keeps its place and size. --edge: how far the window stands from the screen's left side, --inset:
    from its right, where strips may stand too. --frame: the
    window's border. A percentage here is the width of the window, inside its border. */
-.orch { --edge: 16px; --strip-room: 0px; --inset: calc(var(--edge) + var(--strip-room)); --frame: 1px; --panel-width: min(400px, calc(100vw - var(--edge) - var(--inset))); right: var(--inset); max-width: calc(100vw - var(--edge) - var(--inset)); }
+.orch { --edge: 16px; --strip-room: 0px; --inset: calc(var(--edge) + var(--strip-room)); --frame: 1px; --top-frame: 2px; --panel-width: min(400px, calc(100vw - var(--edge) - var(--inset))); right: var(--inset); max-width: calc(100vw - var(--edge) - var(--inset)); }
 .orch.fullscreen { --edge: 0px; }
 .side-panels {
   --gap: 8px;
@@ -1641,6 +1641,9 @@ summary.turn-head:focus-visible { outline: 2px solid var(--cyan); outline-offset
 }
 
 @media (min-width: 761px) {
+  /* A floating panel shares the window's outer frame. Fullscreen keeps its panels below the bar, as on a phone. */
+  .orch:not(.fullscreen) > .agent-workspace { position: static; }
+  .orch:not(.fullscreen) .side-panels { top: calc(-1 * var(--top-frame)); bottom: calc(-1 * var(--frame)); }
   .shell:has(.dv-drawer) .orch:not(.fullscreen) { max-width: calc(100vw - 432px - var(--inset)); }
   /* Strips take the room from the window's right side; its left side stays, and so does the room for panels. */
   .shell:has(.agent-strip) .orch { --strip-room: 24px; }
