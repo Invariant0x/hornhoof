@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { command } from '../src/main.js';
+import { Outbox } from '../src/outbox.js';
 import { markRemoved, readState } from '../src/state.js';
 
 const FAKES = fileURLToPath(new URL('./fakes/', import.meta.url));
@@ -125,6 +126,50 @@ describe('set-key', () => {
     markRemoved(data);
     await run(['set-key'], `${SERVER} sub-2 claude ${KEY}\n`);
     expect((await run(['status'])).out.trim()).not.toBe('removed');
+  });
+
+  describe('and what waits in the outbox', () => {
+    const NEW_KEY = 'node-key-new-0123456789abcdef';
+    const kept = () => new Outbox(data).pending().map(entry => entry.msg.type);
+    /* A node set up on this server and plan, with a removed it could not get confirmed. */
+    const owingRemoved = async () => {
+      await run(['set-key'], `${SERVER} sub-1 claude ${KEY}\n`);
+      new Outbox(data).add({ type: 'removed' });
+    };
+
+    it('forgets it when a removed node comes back, so an old removed cannot revoke the new key', async () => {
+      await owingRemoved();
+      markRemoved(data);
+      await run(['set-key'], `${SERVER} sub-1 claude ${NEW_KEY}\n`);
+      expect(kept()).toEqual([]);
+    });
+
+    it.each([
+      ['another server', `https://other.example.test sub-1 claude ${NEW_KEY}\n`],
+      ['another subscription', `${SERVER} sub-2 claude ${NEW_KEY}\n`],
+    ])('forgets it when the node moves to %s', async (_, line) => {
+      await owingRemoved();
+      await run(['set-key'], line);
+      expect(kept()).toEqual([]);
+    });
+
+    it('forgets it when nothing says whose it was', async () => {
+      new Outbox(data).add({ type: 'removed' });
+      await run(['set-key'], `${SERVER} sub-1 claude ${KEY}\n`);
+      expect(kept()).toEqual([]);
+    });
+
+    it('keeps it when only the key changes', async () => {
+      await owingRemoved();
+      await run(['set-key'], `${SERVER} sub-1 claude ${NEW_KEY}\n`);
+      expect(kept()).toEqual(['removed']);
+    });
+
+    it('keeps it when the line is refused', async () => {
+      await owingRemoved();
+      expect((await run(['set-key'], `${SERVER} sub-2 claude ${NEW_KEY} extra\n`)).code).toBe(1);
+      expect(kept()).toEqual(['removed']);
+    });
   });
 });
 

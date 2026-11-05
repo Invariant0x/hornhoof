@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, truncateSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, truncateSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { parseNodeMessage, type NodeMessage } from '@hornhoof/protocol';
+import { HELLO_IDS_BEFORE_ACKS, HELLO_IDS_MAX, parseNodeMessage, type NodeMessage } from '@hornhoof/protocol';
 import { z } from 'zod';
 
 export const OUTBOX_FILE = 'outbox.jsonl';
@@ -104,6 +104,11 @@ export class Outbox {
 
   pending(): Entry[] {
     return [...this.entries];
+  }
+
+  /* Whether a numbered message of this type still waits to be confirmed. */
+  owes(type: NodeMessage['type']): boolean {
+    return this.entries.some(e => e.msg.type === type);
   }
 
   ack(upto: number): void {
@@ -213,7 +218,7 @@ export class Outbox {
     try {
       appendFileSync(this.path, `${JSON.stringify(line)}\n`, { mode: 0o600 });
     } catch (err) {
-      this.onError(err);
+      this.failed(err);
     }
   }
 
@@ -230,7 +235,37 @@ export class Outbox {
       renameSync(temp, this.path);
       this.stale = 0;
     } catch (err) {
-      this.onError(err);
+      this.failed(err);
     }
   }
+
+  /* Memory still has it all, and a write that failed may have left a line cut short or no stream line: the next rewrite
+     puts the file right, whole. */
+  private failed(err: unknown): void {
+    this.onError(err);
+    this.dirty();
+  }
+}
+
+/* Everything numbered that Hornhoof has not confirmed, in order, ends that were still held included, for as long as the
+   socket takes them. A server that confirms nothing gets each once, so what really went is dropped and no more. */
+export function sendPending(outbox: Outbox, next: (m: NodeMessage) => boolean, confirmed: boolean): void {
+  for (const id of outbox.held()) outbox.number(id);
+  let last = 0;
+  for (const entry of outbox.pending()) {
+    if (!next(entry.msg)) break;
+    last = entry.n;
+  }
+  if (!confirmed && last) outbox.dropSent(last);
+}
+
+/* The ids of a hello: the runs still going, then those whose ends wait. A server drops a hello past its bound, and the
+   node would get no more work, so the list stops there, with the runs still going kept. */
+export function helloIds(active: string[], ended: string[], confirming: boolean): string[] {
+  return [...new Set([...active, ...ended])].slice(0, confirming ? HELLO_IDS_MAX : HELLO_IDS_BEFORE_ACKS);
+}
+
+/* What waited was for the node as it was. Sent by the node it is now, an old removed would revoke its new key. */
+export function clearOutbox(dir: string): void {
+  for (const file of [OUTBOX_FILE, `${OUTBOX_FILE}.tmp`]) rmSync(join(dir, file), { force: true });
 }

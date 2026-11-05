@@ -12,7 +12,8 @@ import { bootFacts } from './boot.js';
 import { connect } from './connection.js';
 import { agentUser, builtinAdapters, secureNode, userFor, type JobUser } from './isolation.js';
 import { machineLoad } from './load.js';
-import { endId, isEnd, Outbox, type Entry } from './outbox.js';
+import { removalWatch } from './removal.js';
+import { clearOutbox, endId, helloIds, isEnd, Outbox, sendPending, type Entry } from './outbox.js';
 import { adapterFor, programFor } from './providers/index.js';
 import { runJob, type ProviderAdapter, type RunInput, type RunResult } from './runner.js';
 import { applyCredential, dropCredential, giveUpLease, heldCredential, holdsLease, isSpare, takeLease } from './credentials.js';
@@ -171,8 +172,13 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   };
   /* An end is numbered when its turn comes, after the messages of its job; the rest are numbered as they are made. */
   const sendNumbered = (m: NodeMessage) => {
-    if (isEnd(m)) outbox.hold(m);
-    const entry = isEnd(m) ? outbox.number(endId(m)) : outbox.add(m);
+    if (!isEnd(m)) return deliver(outbox.add(m));
+    outbox.hold(m);
+    sendHeld(endId(m));
+  };
+  /* The turn of an end that was held has come. None is held when a new connection numbered and sent it meanwhile. */
+  const sendHeld = (id: string) => {
+    const entry = outbox.number(id);
     if (entry) deliver(entry);
   };
   /* A message that cannot go out now stays numbered in the outbox and goes after the next hello. */
@@ -237,6 +243,8 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
 
   /* How busy the machine is, which Hornhoof weighs when it picks a machine for a test run. */
   const load = (): NodeLoad => ({ ...machineLoad({ dir }), tests: testing.size, jobs: running.size });
+  /* The node stops once Hornhoof has heard of its removal, not before. */
+  const removal = removalWatch(() => outbox.owes('removed'), () => stop());
 
   const conn = connect({
     url: state.server.replace(/^http/, 'ws') + '/api/nodes/socket',
@@ -249,25 +257,20 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       login?.closeViews();
       /* Finished jobs Hornhoof has not confirmed still count as running, so the server does not give up on them. */
       const typed = host?.typedJobs() ?? [];
-      const tests = [...testing.keys(), ...outbox.doneParts()];
-      next({ type: 'hello', version: VERSION, stream: outbox.stream, loggedIn, running: [...running.keys(), ...typed, ...outbox.doneJobs()], ...(models ? { models } : {}), terminals: Boolean(host), work: Boolean(testUser), ...(testUser ? {} : { noRuns: NO_RUNS }), load: load(), tests, skillFiles: true, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
+      const tests = helloIds([...testing.keys()], outbox.doneParts(), acks);
+      next({ type: 'hello', version: VERSION, stream: outbox.stream, loggedIn, running: helloIds([...running.keys(), ...typed], outbox.doneJobs(), acks), ...(models ? { models } : {}), terminals: Boolean(host), work: Boolean(testUser), ...(testUser ? {} : { noRuns: NO_RUNS }), load: load(), tests, skillFiles: true, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
       for (const m of waiting.splice(0)) emit(m);
-      sendPending(next);
+      sendPending(outbox, next, acks);
+      removal.settle();
     },
     /* One message that fails is logged; it never ends the node with all its runs. */
     onMessage: m => void handle(m).catch(err => log(`A message from Hornhoof failed: ${message(err)}`)),
-    onRefused: () => log('Hornhoof does not know this machine any more. Run the install command from Hornhoof again to reconnect.'),
+    onRefused: () => {
+      log('Hornhoof does not know this machine any more. Run the install command from Hornhoof again to reconnect.');
+      removal.refused();
+    },
   });
   void programs.update(tellStatus).catch(err => log(`Could not update the programs: ${message(err)}`));
-
-  /* Everything numbered that Hornhoof has not confirmed, in order, ends that were still held included. A server that
-     confirms nothing gets it once. */
-  function sendPending(next: (m: NodeMessage) => boolean) {
-    for (const id of outbox.held()) outbox.number(id);
-    const pending = outbox.pending();
-    for (const entry of pending) next(entry.msg);
-    if (!confirmed && pending.length) outbox.dropSent(pending[pending.length - 1]!.n);
-  }
 
   async function handle(m: ServerMessage) {
     if (m.type === 'remove') {
@@ -284,10 +287,10 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       markRemoved(dir);
       emit({ type: 'removed' });
       log('This node was removed in Hornhoof.');
-      stop();
+      removal.start();
       return;
     }
-    if (acknowledged(m, outbox)) return;
+    if (acknowledged(m, outbox)) return removal.settle();
     if (m.type === 'programs.update') return programs.update(tellStatus);
     if (m.type === 'tests.cancel') return void testing.get(m.partId)?.stop.abort();
     if (m.type === 'tests.run') {
@@ -429,13 +432,13 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       const refused: TestsDone = { type: 'tests.done', partId: m.partId, ok: false, exitCode: null, error: 'failed', commit: null, log: NO_RUNS };
       outbox.hold(refused);
       testing.delete(m.partId);
-      return emit(refused);
+      return sendHeld(m.partId);
     }
     emit({ type: 'tests.started', partId: m.partId });
     const done = await runPart(m, { dir, user: testUser, hidden: [...known], signal, files });
     outbox.hold(done);
     testing.delete(m.partId);
-    emit(done);
+    sendHeld(m.partId);
   }
 
   async function runOne(m: JobRun, signal: AbortSignal) {
@@ -475,7 +478,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     running.delete(m.jobId);
     /* The limits the turn brought go first, so Hornhoof knows of a plan at its limit when it hears the job ended. */
     await status();
-    emit(done);
+    sendHeld(m.jobId);
     await renewedCodex().catch(() => {});
     if (done.error === 'not_logged_in') {
       loggedIn = false;
@@ -618,8 +621,12 @@ function withInstall(adapter: ProviderAdapter, tools: string, provider: Provider
   };
 }
 
+/* The node these words set up is still the one that was here, so what waits in its outbox is still its own to say. */
+const sameNode = (was: NodeState | null, server: string | undefined, subscriptionId: string | undefined): boolean => was?.server === server && was?.subscriptionId === subscriptionId;
+
 async function setKey(dir: string, io: Io): Promise<number> {
   const [server, subscriptionId, provider, key, ...rest] = (await firstLine(io.stdin)).split(/\s+/);
+  const was = readState(dir);
   try {
     if (rest.length) throw new Error('extra words');
     mkdirSync(dir, { recursive: true });
@@ -628,6 +635,9 @@ async function setKey(dir: string, io: Io): Promise<number> {
     io.stderr.write(`${SET_KEY_LINE}.\n`);
     return 1;
   }
+  /* An old removed waiting in the outbox would revoke the new key. The file named removed goes last, so a crash before
+     it leaves a node that is cleared the next time. */
+  if (isRemoved(dir) || !sameNode(was, server, subscriptionId)) clearOutbox(dir);
   /* A new key means Hornhoof took this machine back after a removal. */
   rmSync(join(dir, 'removed'), { force: true });
   return 0;
