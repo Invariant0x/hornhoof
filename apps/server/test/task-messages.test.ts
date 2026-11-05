@@ -121,6 +121,16 @@ describe('task messages reach their recipient', () => {
       expect(queued).toHaveLength(2);
     });
 
+    it('still says a message did not go out when only later turns wait behind it', async () => {
+      const c = await messaging();
+      const head = await c.run(c.head.id);
+      c.sent.mockReturnValue(false);
+      await c.db.insert(jobs).values({ companyId: c.companyId, agentId: c.agent.id, subscriptionId: c.sub.id, kind: 'conversation', prompt: 'Later.', status: 'queued', timeoutMs: 1000, createdAt: new Date(Date.now() + 60_000) });
+      const result = await send(head.client, c.agent.id, 'Goes first and cannot go.');
+      expect(result.isError).toBe(true);
+      expect((await c.turnsOf()).map(j => j.status).sort()).toEqual(['failed', 'queued']);
+    });
+
     it('says nothing of a line when the message went into the running turn', async () => {
       const c = await messaging();
       const head = await c.run(c.head.id);

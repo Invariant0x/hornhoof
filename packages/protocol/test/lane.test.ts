@@ -41,12 +41,14 @@ describe('one thing at a time per key', () => {
 
   it('forgets a key once nothing is left in its lane, and not before', async () => {
     const lanes = new Map<string, Promise<unknown>>();
-    const first = later();
+    const [first, second] = [later(), later()];
     const a = inLane(lanes, 'k', () => first.held);
-    const b = inLane(lanes, 'k', async () => {});
+    const b = inLane(lanes, 'k', () => second.held);
     first.done();
     await a;
+    await new Promise(resolve => setImmediate(resolve));
     expect(lanes.has('k')).toBe(true);
+    second.done();
     await b;
     await new Promise(resolve => setImmediate(resolve));
     expect(lanes.size).toBe(0);
