@@ -42,8 +42,8 @@ const READ_ONLY = [
    hiring and on its card, which make the CEO's checks. A head's department is held by a trigger, as a column right
    cannot tell a head from a worker. */
 const AGENT_FIXED = ['kind', 'role_key', 'skills', 'subscription_id', 'node_id'];
-/* Where a department's agents push their work, set only with set_repository. */
-const REPOSITORY = ['repo_url', 'repo_branch', 'repo_token_last4', 'repo_author_name', 'repo_author_email'];
+/* Where a department's agents push their work, and what lets a commit past GitHub's tests: set only with set_repository. */
+const REPOSITORY = ['repo_url', 'repo_branch', 'repo_token_last4', 'repo_author_name', 'repo_author_email', 'repo_full_test_command'];
 /* What of a turn the orchestrator may change, to close one that hangs. */
 const JOB_STATUS = ['status', 'error', 'finished_at'];
 const WRITES = new Set(['INSERT', 'UPDATE', 'DELETE', 'MERGE']);

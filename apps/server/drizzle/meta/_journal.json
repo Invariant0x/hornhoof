@@ -442,6 +442,13 @@
       "when": 1793880663417,
       "tag": "0063_department_owner_approval_policy",
       "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1793883829330,
+      "tag": "0064_repo_full_test_command",
+      "breakpoints": true
     }
   ]
 }
