@@ -1,0 +1,415 @@
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import http from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createInterface } from 'node:readline';
+import { setTimeout as sleep } from 'node:timers/promises';
+import { fileURLToPath } from 'node:url';
+import type { FastifyInstance } from 'fastify';
+import { describe, expect, it, onTestFinished } from 'vitest';
+import WebSocket, { WebSocketServer } from 'ws';
+import { clientAddress } from '../src/auth/tunnel.js';
+import { loadConfig } from '../src/config.js';
+import { Keeper, KEEPER_PORTS, type KeeperOptions } from '../src/modules/keeper/keeper.js';
+import { freshState, readKeeperState } from '../src/modules/keeper/state.js';
+import { updaterBusy } from '../src/modules/keeper/updater-status.js';
+import type { Target } from '../src/net/proxy.js';
+import { SETUP, setUpCompany, TEST_SECRET, testApp, until } from './helpers.js';
+
+const FAST = { everyMs: 50 };
+const MAINTENANCE_MESSAGE = 'Hornhoof is installing an update and takes no changes until it ends.';
+
+function folder(): string {
+  const dir = mkdtempSync(join(tmpdir(), 'hh-keeper-'));
+  onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+  return dir;
+}
+
+function statusSays(dir: string, state: string, step: string): void {
+  writeFileSync(join(dir, 'status.json'), JSON.stringify({ id: 'u1', version: '1.2.3', state, step, log: '', at: '2026-01-01T00:00:00.000Z' }));
+}
+
+const wordIn = (dir: string) => readKeeperState(dir)?.mode;
+
+async function listening(server: http.Server): Promise<Target> {
+  onTestFinished(() => {
+    server.closeAllConnections();
+    server.close();
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  return { host: '127.0.0.1', port: (server.address() as AddressInfo).port };
+}
+
+const echoHeaders = () =>
+  listening(
+    http.createServer((req, res) => {
+      req.resume();
+      res.end(JSON.stringify(req.headers));
+    }),
+  );
+
+/* A port with nobody on it, as the app's is while it is stopped. */
+async function appIsDown(): Promise<Target> {
+  const server = http.createServer();
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address() as AddressInfo;
+  await new Promise(resolve => server.close(resolve));
+  return { host: '127.0.0.1', port };
+}
+
+async function appListening(app: FastifyInstance): Promise<Target> {
+  await app.listen({ host: '127.0.0.1', port: 0 });
+  return { host: '127.0.0.1', port: (app.server.address() as AddressInfo).port };
+}
+
+async function keeperOn(app: Target, extra: Partial<KeeperOptions> = {}, dir: string = folder()) {
+  const lines: string[] = [];
+  const keeper = new Keeper({
+    config: loadConfig({ HORNHOOF_SECRET: TEST_SECRET, HORNHOOF_CONTROL_DIR: dir }),
+    db: null,
+    app,
+    frontHost: null,
+    log: line => lines.push(line),
+    host: '127.0.0.1',
+    ports: { front: 0, linkHttp: 0, linkTls: 0 },
+    ...extra,
+  });
+  const ports = await keeper.start();
+  onTestFinished(() => keeper.stop());
+  const door = (port: number): Target => ({ host: '127.0.0.1', port });
+  return { keeper, dir, lines, ports, front: door(ports.front), link: door(ports.linkHttp) };
+}
+
+type Answer = { status: number; headers: http.IncomingHttpHeaders; body: string };
+
+function send(to: Target, options: http.RequestOptions = {}, body?: string): Promise<Answer> {
+  return new Promise((resolve, reject) => {
+    const out = http.request({ ...to, agent: false, ...options }, res => {
+      const chunks: Buffer[] = [];
+      res.on('data', chunk => chunks.push(chunk));
+      res.on('error', reject);
+      res.on('end', () => resolve({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks).toString() }));
+    });
+    out.on('error', reject);
+    out.end(body);
+  });
+}
+
+const seenWith = async (door: Target, headers: http.OutgoingHttpHeaders = {}) => JSON.parse((await send(door, { headers })).body);
+const forwardedWith = async (door: Target, sent: string) => (await seenWith(door, { 'x-forwarded-for': sent }))['x-forwarded-for'];
+
+const health = async (door: Target) => JSON.parse((await send(door, { path: '/api/health' })).body);
+
+/* Only the names: a session's value is never compared or shown. */
+async function signIn(door: Target): Promise<{ status: number; body: string; cookies: string[] }> {
+  const payload = JSON.stringify({ email: 'ivan@acme.com', password: SETUP.password });
+  const answer = await send(door, { method: 'POST', path: '/api/auth/login', headers: { 'content-type': 'application/json' } }, payload);
+  return { status: answer.status, body: answer.body, cookies: (answer.headers['set-cookie'] ?? []).map(cookie => cookie.split('=')[0]!) };
+}
+
+describe('updaterBusy', () => {
+  it.each(['backup', 'install', 'health', 'rollback'])('is true while a running update is at step %s', step => {
+    const dir = folder();
+    statusSays(dir, 'running', step);
+    expect(updaterBusy(dir)).toBe(true);
+  });
+
+  it.each([
+    ['running', 'pull'],
+    ['done', 'finished'],
+    ['failed', 'install'],
+    ['rolled_back', 'rollback'],
+  ])('is false for state %s at step %s', (state, step) => {
+    const dir = folder();
+    statusSays(dir, state, step);
+    expect(updaterBusy(dir)).toBe(false);
+  });
+
+  it('is false for a running update that names no step, and without a file', () => {
+    const dir = folder();
+    expect(updaterBusy(dir)).toBe(false);
+    writeFileSync(join(dir, 'status.json'), '{"state":"running"}');
+    expect(updaterBusy(dir)).toBe(false);
+  });
+
+  it.each(['{', '[]', 'null', '{"state":1}', '{"step":"install"}'])('is null for %s, which it cannot tell anything from', text => {
+    const dir = folder();
+    writeFileSync(join(dir, 'status.json'), text);
+    expect(updaterBusy(dir)).toBeNull();
+  });
+
+  it('is null for a file it cannot read', () => {
+    const dir = folder();
+    mkdirSync(join(dir, 'status.json'));
+    expect(updaterBusy(dir)).toBeNull();
+  });
+});
+
+describe('the keeper', () => {
+  it('writes its mode every second, maintenance while the updater installs', async () => {
+    const { keeper, dir } = await keeperOn(await echoHeaders());
+    /* What the app's own reader takes, so the two sides of the file cannot drift apart. */
+    expect(freshState(dir, Date.now(), 2000)).toMatchObject({ mode: 'lead', link: null });
+    const first = readKeeperState(dir)?.at;
+    await until(() => readKeeperState(dir)?.at !== first);
+    statusSays(dir, 'running', 'install');
+    await until(() => wordIn(dir) === 'maintenance');
+    expect(keeper.mode()).toBe('maintenance');
+    expect(freshState(dir, Date.now(), 2000)?.mode).toBe('maintenance');
+    statusSays(dir, 'done', 'finished');
+    await until(() => wordIn(dir) === 'lead');
+    expect(keeper.mode()).toBe('lead');
+  });
+
+  it('keeps maintenance through a status file it cannot read', async () => {
+    const { keeper, dir } = await keeperOn(await echoHeaders(), FAST);
+    statusSays(dir, 'running', 'install');
+    await until(() => wordIn(dir) === 'maintenance');
+    writeFileSync(join(dir, 'status.json'), '{');
+    const end = Date.now() + 3000;
+    while (Date.now() < end) {
+      expect(wordIn(dir)).toBe('maintenance');
+      expect(keeper.mode()).toBe('maintenance');
+      await sleep(100);
+    }
+    statusSays(dir, 'failed', 'install');
+    await until(() => wordIn(dir) === 'lead');
+  });
+
+  it('takes its first word from the status file, and leads when it cannot read it', async () => {
+    const duringUpdate = folder();
+    statusSays(duringUpdate, 'running', 'health');
+    const restarted = await keeperOn(await echoHeaders(), {}, duringUpdate);
+    expect(restarted.keeper.mode()).toBe('maintenance');
+    expect(wordIn(duringUpdate)).toBe('maintenance');
+
+    const broken = folder();
+    writeFileSync(join(broken, 'status.json'), '{');
+    const fresh = await keeperOn(await echoHeaders(), {}, broken);
+    expect(fresh.keeper.mode()).toBe('lead');
+    expect(wordIn(broken)).toBe('lead');
+  });
+
+  it('keeps its doors open when it cannot write its word, and says so once until it can again', async () => {
+    const dir = join(folder(), 'not-there-yet');
+    const { front, lines } = await keeperOn(await echoHeaders(), { everyMs: 20 }, dir);
+    expect(await forwardedWith(front, '198.51.100.7')).toBe('127.0.0.1');
+    await sleep(150);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(/could not write/);
+    mkdirSync(dir);
+    await until(() => wordIn(dir) === 'lead');
+  });
+
+  it('takes the visitor from front and from nobody else', async () => {
+    const app = await echoHeaders();
+    const fromFront = await keeperOn(app, { frontHost: 'localhost' });
+    expect(await forwardedWith(fromFront.front, '203.0.113.5')).toBe('203.0.113.5');
+    expect(await forwardedWith(fromFront.front, '203.0.113.5, 198.51.100.7')).toBe('203.0.113.5');
+    expect(await forwardedWith(fromFront.front, ', 203.0.113.5')).toBe('127.0.0.1');
+    const notFront = await keeperOn(app, { frontHost: 'front.invalid' });
+    expect(await forwardedWith(notFront.front, '203.0.113.5')).toBe('127.0.0.1');
+    const noFront = await keeperOn(app, { frontHost: null });
+    expect(await forwardedWith(noFront.front, '203.0.113.5')).toBe('127.0.0.1');
+  });
+
+  it("marks the link's http traffic as https, and only that", async () => {
+    const { front, link } = await keeperOn(await echoHeaders());
+    const overLink = await seenWith(link, { 'x-forwarded-for': '203.0.113.5, 198.51.100.7', 'x-forwarded-proto': 'http', 'x-hornhoof-via': 'x' });
+    expect(overLink['x-forwarded-for']).toBe('203.0.113.5');
+    expect(overLink['x-forwarded-proto']).toBe('https');
+    expect(overLink['x-hornhoof-via']).toBeUndefined();
+    expect((await seenWith(link))['x-forwarded-for']).toBe('127.0.0.1');
+    const overFront = await seenWith(front, { 'x-forwarded-proto': 'https', 'x-hornhoof-via': 'x', 'x-forwarded-host': 'corp.hornhoof.test' });
+    expect(overFront['x-forwarded-proto']).toBeUndefined();
+    expect(overFront['x-hornhoof-via']).toBeUndefined();
+    expect(overFront['x-forwarded-host']).toBe('corp.hornhoof.test');
+  });
+
+  it('answers maintenance while the app is down during an update, and starting otherwise', async () => {
+    const { keeper, dir, front, link } = await keeperOn(await appIsDown(), FAST);
+    const starting = await send(front, { path: '/api/me' });
+    expect(starting.status).toBe(502);
+    expect(starting.headers['retry-after']).toBe('5');
+    expect(JSON.parse(starting.body).error.reason).toBe('starting');
+
+    statusSays(dir, 'running', 'install');
+    await until(() => keeper.mode() === 'maintenance');
+    for (const door of [front, link]) {
+      for (const path of ['/api/me', '/mcp']) {
+        const answer = await send(door, { path, method: 'POST' });
+        expect(answer.status).toBe(503);
+        expect(answer.headers['retry-after']).toBe('10');
+        expect(answer.headers['content-type']).toBe('application/json');
+        expect(JSON.parse(answer.body)).toEqual({ error: { code: 'unavailable', message: MAINTENANCE_MESSAGE, reason: 'maintenance' } });
+      }
+    }
+    const page = await send(front, { path: '/tasks' });
+    expect(page.status).toBe(503);
+    expect(page.headers['retry-after']).toBe('10');
+    expect(page.headers['content-type']).toBe('text/plain; charset=utf-8');
+    expect(page.body).toContain('Hornhoof is installing an update. Try again in a few minutes.');
+    expect(page.body).toContain('Hornhoof ставит обновление. Попробуйте через несколько минут.');
+
+    statusSays(dir, 'done', 'finished');
+    await until(() => keeper.mode() === 'lead');
+    expect((await send(front, { path: '/tasks' })).status).toBe(502);
+  });
+
+  it("takes link traffic through the keeper as over the link, and front's as local", async () => {
+    const { app } = await testApp({ TUNNEL_HOST: 'localhost' });
+    await setUpCompany(app);
+    const { front, link } = await keeperOn(await appListening(app), { frontHost: 'localhost' });
+
+    expect(await health(link)).toEqual({ ok: true });
+    expect((await signIn(link)).cookies).toContain('__Host-hh_session');
+
+    expect(await health(front)).toMatchObject({ ok: true, version: expect.any(String), commit: expect.any(String) });
+    const overFront = await signIn(front);
+    expect(overFront.cookies).toContain('hh_session');
+    expect(overFront.cookies).not.toContain('__Host-hh_session');
+  });
+
+  it('believes no forged header that did not come through its door', async () => {
+    const { app, config } = await testApp({ TUNNEL_HOST: 'localhost' });
+    app.get('/who', async req => ({ address: await clientAddress(req, config), overLink: req.overLink }));
+    const target = await appListening(app);
+    const who = async (door: Target, headers: http.OutgoingHttpHeaders) => JSON.parse((await send(door, { path: '/who', headers })).body);
+    const forged = { 'x-forwarded-for': '198.51.100.7', 'x-forwarded-proto': 'https' };
+
+    /* The built-in node shares the network with the keeper's front port, and its socket is not front's. */
+    const fromNode = await keeperOn(target, { frontHost: 'front.invalid' });
+    expect(await who(fromNode.front, forged)).toEqual({ address: '127.0.0.1', overLink: false });
+
+    const fromFront = await keeperOn(target, { frontHost: 'localhost' });
+    expect(await who(fromFront.front, forged)).toEqual({ address: '198.51.100.7', overLink: false });
+
+    expect(await who(fromNode.link, { 'x-forwarded-for': '203.0.113.5, 198.51.100.7' })).toEqual({ address: '203.0.113.5', overLink: true });
+  });
+
+  it("lets the updater read the new build's health through front during maintenance, while changes wait", async () => {
+    const dir = folder();
+    const { app } = await testApp({ TUNNEL_HOST: 'localhost', HORNHOOF_KEEPER: 'on', HORNHOOF_CONTROL_DIR: dir });
+    const { front, link } = await keeperOn(await appListening(app), { ...FAST, frontHost: 'localhost' }, dir);
+    statusSays(dir, 'running', 'health');
+    await until(async () => {
+      await app.ctx.mode.check();
+      return app.ctx.mode.current() === 'maintenance';
+    });
+
+    const seen = await send(front, { path: '/api/health' });
+    expect(seen.status).toBe(200);
+    expect(JSON.parse(seen.body)).toMatchObject({ ok: true, commit: 'local', mode: 'maintenance' });
+    expect(await health(link)).toEqual({ ok: true });
+
+    /* The app's refusal, word for word what the keeper answers while the app is down, so the Update panel reads one state. */
+    const change = await signIn(front);
+    expect(change.status).toBe(503);
+    expect(JSON.parse(change.body)).toEqual({ error: { code: 'unavailable', message: MAINTENANCE_MESSAGE, reason: 'maintenance' } });
+  });
+
+  it('finishes a request in flight when it stops, then takes no other and writes no more', async () => {
+    let arrived = (): void => {};
+    const inFlight = new Promise<void>(resolve => {
+      arrived = resolve;
+    });
+    const app = await listening(
+      http.createServer(async (_req, res) => {
+        arrived();
+        await sleep(200);
+        res.end('whole');
+      }),
+    );
+    const { keeper, dir, front, ports } = await keeperOn(app, { everyMs: 20 });
+    const answer = send(front);
+    await inFlight;
+    await keeper.stop();
+    expect(await answer).toMatchObject({ status: 200, body: 'whole' });
+    await expect(send({ host: '127.0.0.1', port: ports.front })).rejects.toThrow('ECONNREFUSED');
+    const last = readKeeperState(dir)?.at;
+    await sleep(100);
+    expect(readKeeperState(dir)?.at).toBe(last);
+  });
+});
+
+describe('the keeper container', () => {
+  const SERVER_DIR = fileURLToPath(new URL('..', import.meta.url));
+
+  /* The entry point has its ports and its app written in. This keeps them from reaching anything real on this machine:
+     it runs the entry point as it is, says what it asked for, and goes to the test's own target instead. */
+  const PRELOAD = `
+    import http from 'node:http';
+    const { listen } = http.Server.prototype;
+    http.Server.prototype.listen = function (port, host, done) {
+      return listen.call(this, 0, '127.0.0.1', () => {
+        console.log(JSON.stringify({ asked: { port, host }, port: this.address().port }));
+        done();
+      });
+    };
+    const { request } = http;
+    http.request = options => {
+      console.log(JSON.stringify({ target: { host: options.host, port: options.port } }));
+      return request({ ...options, host: '127.0.0.1', port: Number(process.env.KEEPER_TEST_APP) });
+    };
+  `;
+
+  async function container(app: Target) {
+    const dir = folder();
+    const env = {
+      ...process.env,
+      HORNHOOF_SECRET: TEST_SECRET,
+      HORNHOOF_CONTROL_DIR: dir,
+      /* Nothing answers here, and nothing asks yet: the pool connects at its first query. */
+      DATABASE_URL: 'postgres://hornhoof:hornhoof@127.0.0.1:1/hornhoof',
+      KEEPER_TEST_APP: String(app.port),
+    };
+    const child = spawn(process.execPath, ['--import', 'tsx', '--import', `data:text/javascript,${encodeURIComponent(PRELOAD)}`, 'src/keeper.ts'], {
+      cwd: SERVER_DIR,
+      env,
+      stdio: ['ignore', 'pipe', 'inherit'],
+    });
+    onTestFinished(() => void child.kill('SIGKILL'));
+    const exit = once(child, 'exit');
+    const said: Record<string, unknown>[] = [];
+    const bothDoors = new Promise<void>(resolve => {
+      createInterface({ input: child.stdout as NodeJS.ReadableStream }).on('line', line => {
+        said.push(JSON.parse(line) as Record<string, unknown>);
+        if (said.filter(word => word.asked).length === 2) resolve();
+      });
+    });
+    await bothDoors;
+    const doors = said.filter(word => word.asked);
+    return { child, dir, said, doors, exit, front: { host: '127.0.0.1', port: doors[0]!.port as number } };
+  }
+
+  it.each(['SIGINT', 'SIGTERM'] as const)('opens the front port to all and the link door to itself, and exits 0 on %s', async signal => {
+    const { child, dir, said, doors, exit, front } = await container(await echoHeaders());
+    expect(doors.map(door => door.asked)).toEqual([
+      { port: KEEPER_PORTS.front, host: '0.0.0.0' },
+      { port: KEEPER_PORTS.linkHttp, host: '127.0.0.1' },
+    ]);
+    expect(await forwardedWith(front, '198.51.100.7')).toBe('127.0.0.1');
+    expect(said.find(word => word.target)?.target).toEqual({ host: 'app', port: 8080 });
+    expect(wordIn(dir)).toBe('lead');
+    child.kill(signal);
+    expect(await exit).toEqual([0, null]);
+  });
+
+  it('exits 0 in about 5 seconds with a socket that stays open', async () => {
+    const app = http.createServer();
+    new WebSocketServer({ server: app });
+    const { child, exit, front } = await container(await listening(app));
+    const client = new WebSocket(`ws://127.0.0.1:${front.port}/socket`);
+    client.on('error', () => {});
+    onTestFinished(() => client.terminate());
+    await once(client, 'open');
+    const started = Date.now();
+    child.kill('SIGTERM');
+    expect(await exit).toEqual([0, null]);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(4500);
+    expect(Date.now() - started).toBeLessThan(7000);
+  });
+});
