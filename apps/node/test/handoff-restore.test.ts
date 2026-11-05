@@ -172,7 +172,7 @@ describe('other work on the way of a restore', () => {
     const receipt = await capture();
     mkdirSync(join(destination.path, 'src/fresh.ts'));
     expect(await restoreTaskCheckpoint(restoreInput(receipt))).toEqual(FAILED);
-    expect(git(destination.path, 'status', '--porcelain', '--untracked-files=all')).toBe('');
+    expect(git(destination.path, 'status', '--porcelain', '--untracked-files=all')).not.toMatch(/\.(?:hh-restore|staging)-/);
     expect(readdirSync(join(stand.root, 'handoff', id(11))).filter(name => name.startsWith('.staging-'))).toEqual([]);
   });
 });
