@@ -397,7 +397,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
             onOpenOrchestrator={company ? () => openAgent('orchestrator') : undefined}
           />
         )}
-        {pageRoute.kind === 'people' && <People me={currentMe} selected={pageRoute.id ?? null} onSelect={id => navigate(id ? { kind: 'people', id } : { kind: 'people' })} onHome={goHome} />}
+        {pageRoute.kind === 'people' && <People me={currentMe} selected={pageRoute.id ?? null} onSelect={id => navigate(id ? { kind: 'people', id } : { kind: 'people' })} onHome={goHome} onRenamed={setSelfName} />}
         {tab === 'subscriptions' && <Subscriptions me={me} onHome={goHome} />}
         {pageRoute.kind === 'machines' && <Machines me={me} selected={pageRoute.id ?? null} onSelect={id => navigate(id ? { kind: 'machines', id } : { kind: 'machines' })} onHome={goHome} />}
         {tab === 'improvements' && company && <Improvements improvements={improvements} failure={improvementsFailure} onChanged={loadImprovements} onTask={openTask} onHome={goHome} />}
