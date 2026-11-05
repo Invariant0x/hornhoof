@@ -3,8 +3,10 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Bridge } from '../src/terminal/bridge.js';
 import { fromAgent } from '../src/terminal/peer.js';
+import { hookClock } from './hook-test-clock.js';
 import { procFixture } from './terminal-proc-fixture.js';
 
+const CLOCK = fileURLToPath(new URL('./fakes/hook-clock.cjs', import.meta.url));
 const HOOK = fileURLToPath(new URL('../hh-hook.cjs', import.meta.url));
 /* Longer than a hook used to wait: how long a busy machine may take to tell whose a call is. */
 const BUSY_MS = 3500;
@@ -15,17 +17,21 @@ const BUSY_MS = 3500;
 async function busyBridge(caller: () => number) {
   const heard: { event: string; body: unknown }[] = [];
   const checked: boolean[] = [];
+  let release!: () => void;
+  const busy = new Promise<void>(resolve => release = resolve);
+  let checking = false;
   const fixture = procFixture('agent-1');
   const own = fromAgent(async () => [process.pid], fixture.proc);
   const bridge = new Bridge('http://127.0.0.1:9', (_key, event, body) => void heard.push({ event, body }), async (key, peer) => {
-    await new Promise(r => setTimeout(r, BUSY_MS));
+    checking = true;
+    await busy;
     const ok = await own(key, peer);
     checked.push(ok);
     return ok;
   }, { proc: fixture.proc });
   await bridge.start();
   fixture.listen(bridge, () => process.pid, caller);
-  return { bridge, heard, checked, url: bridge.agent('agent-1').hookUrl };
+  return { bridge, heard, checked, release, checking: () => checking, url: bridge.agent('agent-1').hookUrl };
 }
 
 describe('word that a turn ended, on a busy machine', () => {
@@ -36,10 +42,18 @@ describe('word that a turn ended, on a busy machine', () => {
     let caller = process.pid;
     const b = await busyBridge(() => caller);
     closers.push(() => b.bridge.stop());
-    const hook = spawn('node', [HOOK, 'stop', '{"last_assistant_message":"Done."}'], { env: { PATH: process.env.PATH, HH_BRIDGE: b.url }, stdio: 'ignore' });
+    const hook = spawn('node', ['-r', CLOCK, HOOK, 'stop', '{"last_assistant_message":"Done."}'], { env: { PATH: process.env.PATH, HH_BRIDGE: b.url }, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
     caller = hook.pid!;
-    await new Promise(r => hook.on('exit', r));
+    closers.push(() => { b.release(); hook.kill('SIGKILL'); });
+    const clock = hookClock(hook);
+    const exited = new Promise<void>(resolve => hook.once('exit', () => resolve()));
+    await vi.waitFor(() => expect(b.checking()).toBe(true));
+    await clock.advance(BUSY_MS);
+    b.release();
+    await exited;
+    expect(hook.exitCode).toBe(0);
     await vi.waitFor(() => expect(b.checked).toHaveLength(1), { timeout: BUSY_MS + 2000 });
+    expect(b.checked).toEqual([true]);
     expect(b.heard).toEqual([{ event: 'stop', body: { last_assistant_message: 'Done.' } }]);
   }, 20_000);
 });
