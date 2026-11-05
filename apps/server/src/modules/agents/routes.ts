@@ -7,7 +7,7 @@ import { accessOf, agentSpot, canReach } from '../../auth/access.js';
 import { actorOf, changedBy, requireCompanyScope, type Person } from '../../auth/session.js';
 import { agentChanges, agents, departments, jobs, people, subscriptions, tasks, teams, type AGENT_CHANGE_FIELDS, type Interruption, type RestartCause } from '../../db/schema.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
-import { onAgent, programNode, pump, pumpWaiting } from '../conversation/queue.js';
+import { liveSubscription, onAgent, planHeld, planHoldView, programNode, pump, pumpWaiting } from '../conversation/queue.js';
 import { deptName } from '../departments/templates.js';
 import { machineOf } from '../nodes/nodes.js';
 import { checkRemoval } from '../operations/ensure.js';
@@ -42,6 +42,7 @@ export type AgentCard = FailureState & {
   currentTask: { id: string; number: number; title: string } | null;
   program: TurnProgram | null;
   alarm: TurnAlarm | null;
+  held: ReturnType<typeof planHoldView>;
   skills: { id: string; title: Lang; description: Lang; on: boolean; locked: boolean; overridden: boolean; templateChanged: boolean }[];
   parts: Part[];
   raw: string;
@@ -214,6 +215,7 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
       currentTask: await currentAgentTask(db, agent, me),
       ...agentProgramState(ctx, running),
       ...await agentFailureState(ctx, agent.id),
+      held: planHoldView(await planHeld(ctx, agent, await liveSubscription(ctx, agent.id))),
       skills: offered.flatMap(s => {
         const skill = ctx.templates.skills.get(s.id);
         if (!skill) return [];

@@ -305,6 +305,61 @@ describe('the turns a task move needs', () => {
 });
 
 describe('a task handed to another executor', () => {
+  it('moves unstarted work queued to a busy worker to a free worker of the same role', async () => {
+    const c = await company();
+    const started = await c.memberTask();
+    await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: started.id, why: 'assigned' }]);
+    await c.db.update(jobs).set({ status: 'running', startedAt: new Date() }).where(eq(jobs.taskId, started.id));
+    await c.db.update(tasks).set({ status: 'working' }).where(eq(tasks.id, started.id));
+    await c.db.update(subscriptions).set({ status: 'ready' }).where(eq(subscriptions.id, c.sub.id));
+    vi.spyOn(c.ctx.hub, 'isReady').mockReturnValue(true);
+    vi.spyOn(c.ctx.hub, 'isOnline').mockReturnValue(true);
+    vi.spyOn(c.ctx.hub, 'hasTerminals').mockReturnValue(true);
+    const [kai] = await c.db.insert(agents).values({ companyId: c.dev.companyId, kind: 'worker', name: 'Kai', roleKey: 'DEV-BE', departmentId: c.dev.id, model: '', subscriptionId: c.sub.id }).returning();
+    expect(await agentState(c.ctx, kai!.id)).toMatchObject({ ready: true, busy: false, queued: 0, limitUntil: null, budgetUntil: null, machineDrain: null });
+
+    const unstarted = await c.memberTask();
+    await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: unstarted.id, why: 'assigned' }]);
+
+    expect((await c.db.select().from(tasks).where(eq(tasks.id, unstarted.id)))[0]).toMatchObject({ assigneeAgentId: kai!.id, executorAgentId: kai!.id, status: 'open' });
+    expect((await c.turnsOf(kai!.id)).map(j => j.taskId)).toEqual([unstarted.id]);
+    expect((await c.db.select().from(tasks).where(eq(tasks.id, started.id)))[0]).toMatchObject({ assigneeAgentId: c.bruno.id, executorAgentId: c.bruno.id, status: 'working' });
+  });
+
+  it('keeps unstarted work queued when the worker of the same role is busy too', async () => {
+    const c = await company();
+    const started = await c.memberTask();
+    await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: started.id, why: 'assigned' }]);
+    await c.db.update(jobs).set({ status: 'running', startedAt: new Date() }).where(eq(jobs.taskId, started.id));
+    await c.db.update(subscriptions).set({ status: 'ready' }).where(eq(subscriptions.id, c.sub.id));
+    vi.spyOn(c.ctx.hub, 'isReady').mockReturnValue(true);
+    vi.spyOn(c.ctx.hub, 'isOnline').mockReturnValue(true);
+    vi.spyOn(c.ctx.hub, 'hasTerminals').mockReturnValue(true);
+    const [kai] = await c.db.insert(agents).values({ companyId: c.dev.companyId, kind: 'worker', name: 'Kai', roleKey: 'DEV-BE', departmentId: c.dev.id, model: '', subscriptionId: c.sub.id }).returning();
+    await c.db.insert(jobs).values({ companyId: c.dev.companyId, subscriptionId: c.sub.id, agentId: kai!.id, kind: 'conversation', prompt: 'Other work', timeoutMs: 1000, status: 'running', startedAt: new Date() });
+
+    const unstarted = await c.memberTask();
+    await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: unstarted.id, why: 'assigned' }]);
+
+    expect((await c.db.select().from(tasks).where(eq(tasks.id, unstarted.id)))[0]).toMatchObject({ assigneeAgentId: c.bruno.id, executorAgentId: c.bruno.id, status: 'open' });
+  });
+
+  it('keeps started work with its worker when another free worker is available', async () => {
+    const c = await company();
+    const started = await c.memberTask();
+    await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: started.id, why: 'assigned' }]);
+    await c.db.update(jobs).set({ status: 'running', startedAt: new Date() }).where(eq(jobs.taskId, started.id));
+    await c.db.update(tasks).set({ status: 'working' }).where(eq(tasks.id, started.id));
+    await c.db.insert(agents).values({ companyId: c.dev.companyId, kind: 'worker', name: 'Kai', roleKey: 'DEV-BE', departmentId: c.dev.id, model: '', subscriptionId: c.sub.id });
+
+    await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: started.id, why: 'assigned' }]);
+
+    expect((await c.db.select().from(tasks).where(eq(tasks.id, started.id)))[0]).toMatchObject({ assigneeAgentId: c.bruno.id, executorAgentId: c.bruno.id, status: 'working' });
+    await c.db.update(tasks).set({ status: 'open' }).where(eq(tasks.id, started.id));
+    await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: started.id, why: 'assigned' }]);
+    expect((await c.db.select().from(tasks).where(eq(tasks.id, started.id)))[0]).toMatchObject({ assigneeAgentId: c.bruno.id, executorAgentId: c.bruno.id, status: 'open' });
+  });
+
   it('takes away the turns that waited for the one who held it before', async () => {
     const c = await company();
     const task = await c.memberTask();
@@ -667,6 +722,19 @@ describe("a plan's share for tasks", () => {
     await wakeAll(ctx, [{ agentId: bruno.id, taskId: (await task(bruno.id)).id, why: 'assigned' }]);
     expect((await nextRun(builtin)).prompt).toContain('Checkout API');
     expect(await agentState(ctx, bruno.id)).toMatchObject({ budgetUntil: null });
+  });
+
+  it.each(['head', 'orchestrator'] as const)('sends a %s turn with a task above the share', async kind => {
+    const r = await plan(0.85);
+    const agent = kind === 'head'
+      ? (await r.db.insert(agents).values({ companyId: r.companyId, kind: 'head', name: 'Hana', roleKey: 'DEV-HEAD', departmentId: r.dev.id, model: '', subscriptionId: r.bruno.subscriptionId }).returning())[0]!
+      : (await r.db.select().from(agents).where(eq(agents.kind, 'orchestrator')))[0]!;
+    const mine = kind === 'head'
+      ? await r.task(agent.id)
+      : (await createTask(r.ctx, { personId: (await r.db.select({ id: people.id }).from(people))[0]!.id }, { title: 'Checkout API', brief: '', body: '', departmentId: null, assigneeAgentId: agent.id })).task;
+    await wakeAll(r.ctx, [{ agentId: agent.id, taskId: mine.id, why: 'assigned' }]);
+    expect((await nextRun(r.builtin)).prompt).toContain('Checkout API');
+    expect(await r.db.select({ status: jobs.status }).from(jobs).where(eq(jobs.agentId, agent.id))).toEqual([{ status: 'running' }]);
   });
 });
 

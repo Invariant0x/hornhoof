@@ -22,7 +22,7 @@ import { openAfter, startWork, type Tx } from '../tasks/engine.js';
 import { discardStaleTurn, discardStaleTurns, type TaskWake } from '../tasks/wake-state.js';
 import { agentProgramState, type TurnAlarm, type TurnAlarmReason, type TurnProgram } from '../tasks/silent.js';
 import { workStarts } from '../org/map-state.js';
-import { agentFailureState, type FailureState } from '../tasks/failures.js';
+import { agentFailureState, notifyFailure, type FailureState } from '../tasks/failures.js';
 import { logTurnFact } from '../tasks/turn-log.js';
 import { addressed, preface } from './prompt.js';
 import { originalPromptOf } from './requested-prompt.js';
@@ -43,13 +43,17 @@ export const WORKER_COMPACT_WINDOW = 500_000;
    nobody gives, so the agent's next turns are not stuck behind it; the agent goes on in the same session. */
 export const TURN_TIMEOUT_MS = 2 * 3_600_000;
 
+export type PlanHold = { reason: 'limit' | 'budget'; since: string; until: string };
+
 export type AgentState = FailureState & {
   ready: boolean;
   machineDrain: MachineDrain | null;
   /* Its plan is at its limit until then: its turns wait in line, and people may still write to it. */
   limitUntil: string | null;
-  /* Its plan used the share set for tasks until then: task turns wait, people's own messages still go. */
+  /* Its plan used the share set for tasks until then: workers' task turns wait, people's own messages still go. */
   budgetUntil: string | null;
+  /* The oldest turn its plan holds, and why. */
+  held: PlanHold | null;
   reason: 'no_subscription' | 'waiting_machine' | 'needs_login' | 'needs_setup' | 'node_outdated' | 'machine_offline' | null;
   browserError: string | null;
   busy: boolean;
@@ -773,21 +777,55 @@ async function waitsForRetry(ctx: Ctx, agentId: string): Promise<boolean> {
   return true;
 }
 
+type PlanAgent = { id: string; kind: string };
+type Plan = { limits: Limits | null; limitsUpdatedAt: Date | null; budget: number | null };
+export type HeldPlanTurn = PlanHold & { job: typeof jobs.$inferSelect };
+
+const workerBudgetUntil = (agent: { kind: string }, sub: Plan): string | null => agent.kind === 'worker' ? budgetUntil(sub.limits, sub.budget, sub.limitsUpdatedAt) : null;
+
+/* The oldest turn the plan really holds. Heads and the orchestrator keep coordinating work above the task share. */
+export async function planHeld(ctx: Ctx, agent: PlanAgent, sub: Plan | null | undefined): Promise<HeldPlanTurn | null> {
+  if (!sub) return null;
+  const until = limitUntil(sub.limits, sub.limitsUpdatedAt);
+  const spent = workerBudgetUntil(agent, sub);
+  const reason = until ? 'limit' : spent ? 'budget' : null;
+  if (!reason) return null;
+  const held = reason === 'limit' ? or(isNotNull(jobs.taskId), isNotNull(jobs.createdBy), ne(jobs.prompt, '')) : isNotNull(jobs.taskId);
+  const [job] = await ctx.db.select().from(jobs).where(and(conversationOf(agent.id), eq(jobs.status, 'queued'), held)).orderBy(asc(jobs.createdAt)).limit(1);
+  return job ? { reason, since: job.createdAt.toISOString(), until: until ?? spent!, job } : null;
+}
+
+export const planHoldView = (held: HeldPlanTurn | null): PlanHold | null => held && { reason: held.reason, since: held.since, until: held.until };
+
+const HELD_NOTICE_MS = 10 * 60_000;
+
+function heldNotice(agent: { name: string }, held: HeldPlanTurn): string {
+  const why = held.reason === 'limit' ? "its plan's usage limit" : 'the share set for tasks';
+  return `Hornhoof: ${agent.name}'s turn ${held.job.id} has waited for ${why} since ${held.since}. It waits until ${held.until}. Check the plan and give the work to another employee if one can take it.`;
+}
+
+async function tellOperationsOfHold(ctx: Ctx, agent: PlanAgent & { name: string }, sub: Plan): Promise<void> {
+  const held = await planHeld(ctx, agent, sub);
+  if (!held || Date.now() - Date.parse(held.since) <= HELD_NOTICE_MS) return;
+  await notifyFailure(ctx, held.job, heldNotice(agent, held), `plan-hold:${agent.id}:${held.until}`);
+}
+
 /* Switched off, it still answers people who write to it; its task turns wait until it is on. */
-function turnsThatMayGo(agent: { id: string; switchedOffAt: Date | null }, until: string | null, spent: string | null) {
+function turnsThatMayGo(agent: PlanAgent & { switchedOffAt: Date | null }, until: string | null, spent: string | null) {
   return and(conversationOf(agent.id), eq(jobs.status, 'queued'), until ? programStart : undefined, agent.switchedOffAt || spent ? isNull(jobs.taskId) : undefined);
 }
 
 /* The turn that may go out now, if any, with the line woken for what comes next: the plan's limit or share starting over,
    or a turn that may go by then and waits for its time. A turn that is due and may not go sets no wake, which would only
    send the line round again at once. */
-async function dueTurn(ctx: Ctx, agent: { id: string; switchedOffAt: Date | null }, sub: { limits: Limits | null; limitsUpdatedAt: Date | null; budget: number | null }) {
+async function dueTurn(ctx: Ctx, agent: PlanAgent & { name: string; switchedOffAt: Date | null }, sub: Plan) {
   /* Real turns wait for the limit; an empty start can still open the saved program. Past the share set for tasks only
-     task turns wait. */
+     workers' task turns wait. */
   const until = limitUntil(sub.limits, sub.limitsUpdatedAt);
-  const spent = budgetUntil(sub.limits, sub.budget, sub.limitsUpdatedAt);
+  const spent = workerBudgetUntil(agent, sub);
   const reset = until ?? spent;
   if (reset) pumpAt(ctx, agent.id, reset);
+  await tellOperationsOfHold(ctx, agent, sub);
   const mayGo = turnsThatMayGo(agent, until, spent);
   const now = new Date(Date.now());
   const [job] = await ctx.db.select().from(jobs).where(and(mayGo, or(isNull(jobs.notBefore), lte(jobs.notBefore, now)))).orderBy(desc(sql`${jobs.notBefore} is not null`), asc(jobs.createdAt)).limit(1);
@@ -914,7 +952,7 @@ export async function orchestratorOf(ctx: Ctx, companyId: string) {
 
 export async function orchestratorState(ctx: Ctx, companyId: string): Promise<AgentState> {
   const agent = await orchestratorOf(ctx, companyId);
-  if (!agent) return { ready: false, machineDrain: null, limitUntil: null, budgetUntil: null, reason: 'no_subscription', browserError: null, busy: false, runningJobId: null, queued: 0, terminal: false, program: null, alarm: null, retry: null, failure: null, obsolete: null };
+  if (!agent) return { ready: false, machineDrain: null, limitUntil: null, budgetUntil: null, held: null, reason: 'no_subscription', browserError: null, busy: false, runningJobId: null, queued: 0, terminal: false, program: null, alarm: null, retry: null, failure: null, obsolete: null };
   return agentState(ctx, agent.id);
 }
 
@@ -946,10 +984,17 @@ async function drainInTheWay(ctx: Ctx, agent: { nodeId: string | null } | undefi
 }
 
 /* What its plan holds back now. */
-const planHolds = (sub: Awaited<ReturnType<typeof liveSubscription>>) => ({
+const planHolds = (sub: Awaited<ReturnType<typeof liveSubscription>>, kind: string) => ({
   limitUntil: sub ? limitUntil(sub.limits, sub.limitsUpdatedAt) : null,
-  budgetUntil: sub ? budgetUntil(sub.limits, sub.budget, sub.limitsUpdatedAt) : null,
+  budgetUntil: sub ? workerBudgetUntil({ kind }, sub) : null,
 });
+
+async function planState(ctx: Ctx, agent: PlanAgent | undefined, sub: Awaited<ReturnType<typeof liveSubscription>>): Promise<Pick<AgentState, 'limitUntil' | 'budgetUntil' | 'held'>> {
+  return {
+    ...planHolds(sub, agent?.kind ?? 'worker'),
+    held: agent ? planHoldView(await planHeld(ctx, agent, sub)) : null,
+  };
+}
 
 /* The terminal the window opens is of the machine the program is on, or for one not on a machine yet, of the machine its
    next turn would go to, where the window starts it. */
@@ -960,7 +1005,7 @@ export async function agentState(ctx: Ctx, agentId: string): Promise<AgentState>
   const [running] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
   const [waiting] = await ctx.db.select({ n: count() }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'queued')));
   const sub = await liveSubscription(ctx, agentId);
-  const [agent] = sub ? await ctx.db.select({ id: agents.id, productId: agents.productId, departmentId: agents.departmentId, nodeId: agents.nodeId, roleKey: agents.roleKey }).from(agents).where(eq(agents.id, agentId)) : [];
+  const [agent] = sub ? await ctx.db.select({ id: agents.id, kind: agents.kind, productId: agents.productId, departmentId: agents.departmentId, nodeId: agents.nodeId, roleKey: agents.roleKey }).from(agents).where(eq(agents.id, agentId)) : [];
   const reason: AgentState['reason'] = !sub || !agent ? 'no_subscription' : await waitsFor(ctx, agent, sub);
   const place = sub && agent ? await placement(ctx, agent, sub) : null;
   const shown = await shownNode(ctx, agentId, place);
@@ -969,7 +1014,7 @@ export async function agentState(ctx: Ctx, agentId: string): Promise<AgentState>
   return {
     ready: reason === null,
     machineDrain: place || reason !== null ? null : await drainInTheWay(ctx, agent, sub, shown),
-    ...planHolds(sub),
+    ...await planState(ctx, agent, sub),
     reason,
     browserError,
     busy: Boolean(running),
