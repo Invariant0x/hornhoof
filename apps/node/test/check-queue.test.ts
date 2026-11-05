@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { CheckSlotQueue as CheckQueue } from '@hornhoof/protocol';
 import { CheckClient } from '../src/check-client.js';
-import { setCheckClient, withCheckSlot } from '../src/check-queue.js';
+import { setCheckClient, withCheckSlot, currentCheckSignal } from '../src/check-queue.js';
 afterEach(() => setCheckClient(null));
 
 function gate() {
@@ -141,11 +141,11 @@ describe('the machine check queue', () => {
     });
     client.online(true); setCheckClient(client);
     const started = gate(), finished = gate(), cancel = new AbortController();
-    let childSignal: AbortSignal | undefined;
-    const pending = withCheckSlot(async () => withCheckSlot(async signal => { childSignal = signal; started.open(); await finished.waiting; }, { signal: cancel.signal }));
+    let childSignal: AbortSignal | undefined, ambientSignal: AbortSignal | undefined;
+    const pending = withCheckSlot(async () => withCheckSlot(async signal => { childSignal = signal; ambientSignal = currentCheckSignal(); started.open(); await finished.waiting; }, { signal: cancel.signal }));
     await started.waiting;
     cancel.abort();
-    try { expect(childSignal?.aborted).toBe(true); }
+    try { expect(ambientSignal).toBe(childSignal); expect(childSignal?.aborted).toBe(true); }
     finally { finished.open(); await pending; }
   });
 });

@@ -138,12 +138,12 @@ function alarmForTask(job: Job, program: TurnProgram | null, task: { externalWai
 
 function alarmWithCheckQueue(ctx: Ctx, job: Job, program: TurnProgram | null, task: { externalWait: typeof tasks.$inferSelect.externalWait } | null, nowMs: number): TurnAlarm | null {
   const detected = alarmForTask(job, program, task, nowMs);
-  if (missingProgramReport(program, detected)) return detected;
+  if (missingProgramReport(detected)) return detected;
   if (jobCheckQueued(ctx, job.id, nowMs)) return null;
   return afterQueuedCheck(program, detected, jobCheckLastEnd(ctx, job.id, nowMs), nowMs);
 }
 
-const missingProgramReport = (program: TurnProgram | null, alarm: TurnAlarm | null): boolean => Boolean(program && alarm?.reason === 'node_silent');
+const missingProgramReport = (alarm: TurnAlarm | null): boolean => alarm?.reason === 'node_silent';
 
 function afterQueuedCheck(program: TurnProgram | null, alarm: TurnAlarm | null, checkEnd: number | null, now: number): TurnAlarm | null {
   const threshold = program?.state === 'tool' ? TOOL_QUIET_ALARM_MS : SILENT_TURN_MS;

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { basename, join, sep } from 'node:path';
 import { agentUser, ensurePasswd, FIRST_UID, isRootUser, type JobUser, type SystemFiles } from './isolation.js';
 import { runProgram, stripEscapes } from './providers/process.js';
+import { currentCheckSignal } from './check-queue.js';
 
 export const SEED_BROWSERS_PATH = '/opt/ms-playwright';
 export const GLOBAL_PLAYWRIGHT_DIR = '/usr/local/lib/node_modules/playwright';
@@ -280,7 +281,18 @@ function seedFromImage(targetDir: string, seedDir: string, folders: string[], is
 }
 
 const defaultRunner = (timeoutMs: number): CommandRunner => (bin, args, env, user) =>
-  runProgram({ bin, args, env, timeoutMs, user });
+  runBrowserCommand({ bin, args, env, timeoutMs, user });
+
+async function runBrowserCommand(options: Parameters<typeof runProgram>[0]): ReturnType<typeof runProgram> {
+  const signal = currentCheckSignal();
+  signal?.throwIfAborted();
+  let cleanup = Promise.resolve();
+  /* runProgram kills the group after TERM. Keep admission through that cleanup, even if pipes close early. */
+  const aborted = () => { cleanup = new Promise(resolve => setTimeout(resolve, 5000)); };
+  signal?.addEventListener('abort', aborted, { once: true });
+  try { return await runProgram({ ...options, signal }); }
+  finally { signal?.removeEventListener('abort', aborted); await cleanup; }
+}
 
 function cleanErrorLine(line: string): string {
   return line

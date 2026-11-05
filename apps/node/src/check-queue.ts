@@ -10,14 +10,16 @@ const leases = new Map<string, { lease: CheckLease; agentId: string | undefined;
 export function setCheckClient(next: CheckClient | null): void { client = next; }
 export function checkSlotWaiting(agentId: string, jobId?: string | null): boolean { return client?.waiting(agentId, jobId) ?? false; }
 export function currentCheckLease(): string | undefined { return leased.getStore()?.lease.id; }
+export function currentCheckSignal(): AbortSignal | undefined { return leased.getStore()?.lease.signal; }
 
 export async function reuseCheckLease<T>(id: string, agentId: string | undefined, signal: AbortSignal, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
   const entry = leases.get(id);
   if (!entry?.active || entry.agentId !== agentId) throw new Error('The parent check slot is no longer active.');
-  const pending = Promise.resolve().then(() => run(AbortSignal.any([entry.lease.signal, signal])));
+  const context = { lease: { ...entry.lease, signal: AbortSignal.any([entry.lease.signal, signal]) }, active: true };
+  const pending = Promise.resolve().then(() => leased.run(context, () => run(context.lease.signal)));
   entry.children.add(pending);
   try { return await pending; }
-  finally { entry.children.delete(pending); }
+  finally { context.active = false; entry.children.delete(pending); }
 }
 
 /* The callback covers checkout, dependency preparation, services, execution and cleanup.

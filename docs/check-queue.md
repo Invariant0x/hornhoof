@@ -16,7 +16,7 @@ hh-check -- make build
 
 The wrapper preserves stdout, stderr and the command's exit status. While waiting it prints `Waiting for a machine check slot. Position 2.` Positions start at one for the next waiting command. A nested wrapper reuses its parent's live slot only for the same agent.
 
-The bridge authenticates the calling process and requires a current agent turn. It starts commands as the agent user, never as root, with the caller's environment. Working-directory changes happen after dropping privileges. Cancellation stops the process group, waits up to five seconds before KILL, and holds the slot until process cleanup finishes.
+The bridge authenticates the calling process and requires a current agent turn. Commands it starts become live process roots for that agent, so nested wrappers and bridge calls retain the same ownership checks. It starts commands as the agent user, never as root, with the caller's environment. Working-directory changes happen after dropping privileges. Cancellation stops the process group, waits up to five seconds before KILL, and holds the slot until process cleanup finishes.
 
 ## Node API
 
@@ -29,7 +29,7 @@ await withCheckSlot(async signal => {
 
 `withCheckSlot` is exported by `apps/node/src/check-queue.ts`. Options also accept `agentId` and `jobId` for conversation ownership. A waiting cancellation rejects with the exact `signal.reason` and never invokes the callback. A running callback retains its slot until its promise settles. The callback signal includes the caller's cancellation and lease loss. Nested calls reuse the current slot and combine cancellation signals.
 
-`main.ts` uses this API around the complete `runPart` call, including preparation and cleanup. It acquires before `tests.started`, so the execution deadline inside `runPart` starts after admission. An authenticated `tests.waiting` report clears the assigned part's execution start while it waits. `tests.started` begins that clock and removes the queue hint. A queued part does not hit the execution timeout or its late-result margin. No test timeout is increased. `test_run` and `work_run` expose `queuePosition` on waiting parts.
+`main.ts` uses this API around the complete `runPart` call, including preparation and cleanup. It acquires before `tests.started`, so the execution deadline inside `runPart` starts after admission. An authenticated `tests.waiting` report clears the assigned part's execution start while it waits. `tests.started` begins that clock and removes the queue hint. A queued part does not hit the execution timeout or its late-result margin. Browser installation and verification also receive the current slot cancellation and retain admission through their process cleanup. No test timeout is increased. `test_run` and `work_run` expose `queuePosition` on waiting parts.
 
 ## Capacity and liveness
 

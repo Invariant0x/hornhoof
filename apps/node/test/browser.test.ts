@@ -1,7 +1,7 @@
 import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished } from 'vitest';
 import {
   browserEnv,
   browsersDir,
@@ -17,6 +17,8 @@ import {
   verifyBrowser,
   writeBrowserError,
 } from '../src/browser.js';
+import { CheckClient } from '../src/check-client.js';
+import { setCheckClient, withCheckSlot } from '../src/check-queue.js';
 import { FIRST_UID } from '../src/isolation.js';
 
 const tempDirs: string[] = [];
@@ -122,6 +124,34 @@ describe('playwrightVersionIn', () => {
 });
 
 describe('prepareBrowser', () => {
+  it('cancels a real browser preparation process when its check lease is lost', async () => {
+    const dir = makeTemp(), repo = makeTemp(), seedDir = makeTemp();
+    const globalPlaywrightDir = fakePlaywrightPackage(makeTemp(), '1.64.1', '1248');
+    writeFileSync(join(repo, 'package-lock.json'), JSON.stringify({ packages: { 'node_modules/playwright': { version: '1.64.1' } } }));
+    const started = join(dir, 'started'), stopped = join(dir, 'stopped');
+    writeFileSync(join(globalPlaywrightDir, 'cli.js'), `const fs = require('node:fs'); fs.writeFileSync(${JSON.stringify(started)}, String(process.pid)); process.on('SIGTERM', () => fs.writeFileSync(${JSON.stringify(stopped)}, 'stopped')); setInterval(() => {}, 1000);`);
+    const client = new CheckClient(frame => {
+      if (frame.type === 'check.acquire') queueMicrotask(() => client.receive({ type: 'check.state', id: frame.id, state: 'running', position: 0 }));
+      return true;
+    });
+    client.online(true); setCheckClient(client);
+    let settled = false, fixturePid = 0;
+    const pending = withCheckSlot(() => prepareBrowser({ dir, repoDir: repo, seedDir, globalPlaywrightDir, isRoot: false })).finally(() => { settled = true; });
+    void pending.catch(() => {});
+    onTestFinished(async () => {
+      if (fixturePid) { try { process.kill(-fixturePid, 'SIGKILL'); } catch { /* Already gone. */ } }
+      await pending.catch(() => {}); client.online(false); setCheckClient(null);
+    });
+    await expect.poll(() => existsSync(started)).toBe(true);
+    fixturePid = Number(readFileSync(started, 'utf8'));
+    const at = performance.now();
+    client.online(false);
+    await expect.poll(() => existsSync(stopped), { timeout: 1500 }).toBe(true);
+    expect(settled).toBe(false);
+    await pending.catch(() => {});
+    expect(performance.now() - at).toBeGreaterThanOrEqual(4500);
+  });
+
   it('seeds matching revisions from the image seed without downloading and makes binaries readable for job users', async () => {
     const dir = makeTemp();
     const seedDir = makeTemp('hh-seed-');

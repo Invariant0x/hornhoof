@@ -22,7 +22,7 @@
 - [x] Write and observe failing tests for common admission across nodes and command output/exit/cancellation.
 - [x] Integrate the shared coordinator, withCheckSlot and a generic hh-check command without editing neighbour-owned files.
 - [x] Check reconnect, stale requests, nested commands and ownership boundaries.
-- [ ] Commit and send the contract to the tests.ts owner.
+- [x] Commit and send the contract to the tests.ts owner.
 
 ## Task 3: Waiting evidence and proof
 
@@ -69,3 +69,20 @@
 - Five loaded full migration/wait repetitions passed in the first after probe. Repetition six hit that probe's separate 180-second process bound before it produced a test result. It is not counted as a passing repetition. All 32 synthetic workers were terminated and the active child list was empty. A final ten-run experiment on the completed API is still required, with a sufficiently bounded outer run budget and the unchanged 20-second tests.
 
 - Current complete targeted checks: protocol 162/162 (9 files), node 180/180 (8 files), server 136/136 (7 files). Full output in protocol-final.log, node-final.log and server-final.log. Final loaded ten-run proof and independent review remain pending.
+
+## Whole-branch review and fix pass
+
+- The single fresh reviewer inspected f289196b..823e4583, including actual production ownership and process lifecycle dependencies. Four Important findings, no Critical or Minor findings. Docker/PID1 could not be exercised; capacity proof remained pending; unwrapped commands are outside cooperative admission.
+- Nested CLI regression with real procOwner failed with exit1, own hook403 and nested wrapper403. Commands started by the bridge are now live process roots scoped to their authenticated agent. Kernel socket ownership is still required; a different agent remains403. Nested wrappers reuse one slot.
+- Leader-exit regression failed because an inherited output pipe held the slot. Process-group cleanup now starts on exit, before waiting for close. The test returns the original exit0 and releases the slot with a background child terminated.
+- Missing-report regression failed with undefined instead of node_silent. All missing-report alarms now survive waiting and post-wait grace, including when no program state ever arrived.
+- A real local fake browser installer ignored lease loss in the RED test. Browser defaultRunner now uses the slot's AsyncLocalStorage signal and retains a five-second cancellation cleanup interval. The test observes TERM promptly, then retains admission through cleanup; no download is needed.
+- Ruling: browser.ts cancellation is required to honor the head-approved complete-preparation boundary; change its default runner, leaving protected tests.ts and providers untouched. Cost if wrong: browser preparation needs a separately approved explicit signal parameter instead of ambient context.
+- Focused fix checks: CLI/browser27/27; watchdog/program-signs14/14. Full affected checks are rerun after the fix pass.
+
+- The same agent-scoped command roots are recognized by both Linux procOwner and macOS macOwner. macOwner regression failed first; then 16/16 ownership tests passed (command lookup simulated, no live macOS available).
+- origin/task-356 readback confirmed 823e458304482abcce41bdc081f4af718b053c2b, and both neighbouring owners received the API contract. This intermediate push is not task completion or integration into turn-8.
+
+- A nested-context check exposed that ambient preparation cancellation still saw the parent signal. RED expected the aborted nested signal but observed an un-aborted parent signal. Nested lease reuse now installs its combined signal in AsyncLocalStorage; all60 related node checks pass.
+- Final pre-load regression evidence: server7files137/137; node12files227/227 plus macOS ownership16/16 and last-change related5files60/60. Static checks and final loaded proof are recorded separately.
+- Ruling on review exclusions: Docker/PID1 and live macOS cannot be exercised on this Linux/no-Docker machine; retain targeted ownership/process tests and report that limit. Cooperative admission requires hh-check or the slot API; no universal shell interception was requested. Browser cancellation is now checked with a real local installer fixture, not a download. Capacity under final live load remains the outstanding acceptance check.
