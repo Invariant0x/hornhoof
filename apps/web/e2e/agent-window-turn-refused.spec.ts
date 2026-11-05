@@ -40,13 +40,15 @@ for (const lang of ['en', 'ru'] as const) {
 }
 
 test('the note goes once a new turn began', async ({ page }) => {
+  test.setTimeout(60_000);
   const live = fixture('busy');
   await atSize(page, { lang: 'en', theme: 'light', width: 1440 });
   await serveAgentWindow(page, live);
   const window = await open(page, 'b1', 'en');
   await expect(window.getByText(en.window.turnRefused.busy)).toBeVisible();
   live.turnRefused = null;
-  await expect(window.getByText(en.window.turnRefused.busy)).toHaveCount(0, { timeout: 15_000 });
+  /* The window looks again every 15 s when no news comes. */
+  await expect(window.getByText(en.window.turnRefused.busy)).toHaveCount(0, { timeout: 25_000 });
 });
 
 test('keys typed while the view of the session connects again reach the program in order', async ({ page }) => {
