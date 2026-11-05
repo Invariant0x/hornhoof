@@ -863,6 +863,8 @@ describe('Department work tree', () => {
       ? within(document.querySelector('.tv-labs') as HTMLElement).getByRole('button', { name: /Bruno/ })
       : within(graph).getAllByRole('button', { name: /Bruno, #42 Payment gateway on the server/ })[0]!;
     await user.click(target);
+    const card = await screen.findByRole('dialog');
+    await user.click(within(card).getByRole('button', { name: /Bruno/ }));
     const window = await screen.findByRole('complementary', { name: 'Bruno, Backend engineer' });
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     await user.type(within(window).getByRole('textbox', { name: 'Write to Bruno' }), 'Please check the cart{Enter}');
@@ -876,9 +878,12 @@ describe('Department work tree', () => {
     activity.push({ jobId: 'head-queue', agent: { id: 'b0', name: 'Dana' }, task: { id: 'r90', number: 90, title: 'Review' }, segments: [{ kind: 'queued', from: DEV_TREE.turn!.startedAt, to: end, waitsForAgent: { id: 'b0', name: 'Dana' } }] });
     shell(treeRoute({ ...DEV_TREE, activity }), TREE_ORG);
     const graph = await showTree(user);
-    expect(within(document.querySelector('.tv-labs') as HTMLElement).getByRole('button', { name: /Dana/ })).toHaveTextContent('No task');
+    expect(within(document.querySelector('.tv-labs') as HTMLElement).getByRole('button', { name: /Dana/ })).toHaveTextContent('Default, default effort, Claude');
     expect([...graph.querySelectorAll('path.seg')].at(-1)).toHaveClass('ls');
     await user.click(within(graph).getByRole('button', { name: /Dana: turn end lost since/ }));
+    const card = await screen.findByRole('dialog');
+    expect(card).toHaveTextContent('No task');
+    await user.click(within(card).getByRole('button', { name: /Dana/ }));
     expect(await screen.findByRole('complementary', { name: 'Dana, Head of development' })).toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
@@ -893,8 +898,10 @@ describe('Department work tree', () => {
     shell(treeRoute({ ...DEV_TREE, lines: [paused, running] }), TREE_ORG);
     await showTree(user);
     const label = within(document.querySelector('.tv-labs') as HTMLElement).getByRole('button', { name: /Bruno/ });
-    expect(label).toHaveTextContent('#99');
-    expect(label).not.toHaveTextContent('Image build');
+    await user.click(label);
+    const card = await screen.findByRole('dialog');
+    expect(card).toHaveTextContent('#99');
+    expect(card).not.toHaveTextContent('Image build');
   });
 
   it.each([375, 1440])('shows an external event reason and deadline as a calm wait at %ipx', async width => {
@@ -907,8 +914,10 @@ describe('Department work tree', () => {
     shell(treeRoute({ ...DEV_TREE, lines: [line] }), TREE_ORG);
     const graph = await showTree(user);
     const label = within(document.querySelector('.tv-labs') as HTMLElement).getByRole('button', { name: /Bruno/ });
-    expect(label).toHaveTextContent('waits: Image build, until 14:50');
-    expect(label.querySelector('.ast')).not.toHaveClass('alarm');
+    await user.click(label);
+    const card = await screen.findByRole('dialog');
+    expect(card).toHaveTextContent('waits: Image build, until 14:50');
+    expect(card.querySelector('.ast')).not.toHaveClass('alarm');
     expect(within(graph).getAllByRole('button', { name: /waits: Image build, until 14:50/ }).length).toBeGreaterThan(0);
   });
 
@@ -1045,9 +1054,12 @@ describe('Department work tree', () => {
     shell(treeRoute(), TREE_ORG);
     const graph = await showTree(user);
     await user.click(graph.querySelector('[data-row="b1"]')!);
+    const card = await screen.findByRole('dialog');
+    await user.click(within(card).getByRole('button', { name: /Bruno/ }));
     const window = await screen.findByRole('complementary', { name: 'Bruno, Backend engineer' });
     await user.type(within(window).getByRole('textbox'), 'Draft');
     await user.click(within(document.querySelector('.tv-labs') as HTMLElement).getByRole('button', { name: /Bruno/ }));
+    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: /Bruno/ }));
     expect(screen.getByRole('complementary', { name: 'Bruno, Backend engineer' })).toBe(window);
     expect(within(window).getByRole('textbox')).toHaveValue('Draft');
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -1163,6 +1175,7 @@ it('keeps failed unnumbered verdicts amber and opens the reviewer window', async
   expect(amber).toBeInTheDocument();
   expect(amber!.parentElement!.querySelector('.ic-ok')).not.toBeInTheDocument();
   await user.click(graph.querySelector('[data-row="b6"]')!);
+  await user.click(within(within(await screen.findByRole('dialog')).getAllByRole('heading', { level: 4 })[0]!).getByRole('button'));
   expect(await screen.findByRole('complementary', { name: 'Vera, Backend engineer' })).toBeInTheDocument();
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });
@@ -1262,7 +1275,7 @@ describe("what an agent's program does, and the server's alarms about its turn",
     return userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
   }
   const bruno = () => within(screen.getByRole('region', { name: /^(Members|Сотрудники)$/ })).getByRole('button', { name: /Bruno/ });
-  const lane = () => [...document.querySelectorAll<HTMLElement>('.tv-labs .lchip')].find(b => b.textContent!.includes('Bruno'))!;
+  const lane = () => [...document.querySelectorAll<HTMLElement>('.tv-labs .dept-chip .schip')].find(b => b.textContent!.includes('Bruno'))!;
 
   describe.each([
     ['en', /Development/, 'Tree'],
@@ -1287,10 +1300,12 @@ describe("what an agent's program does, and the server's alarms about its turn",
       }
       await user.click(screen.getByRole('button', { name: tree }));
       await screen.findByRole('group');
-      expect(stateOf(lane())).toHaveTextContent(text);
-      expect(stateOf(lane())!.classList.contains('alarm')).toBe(alarm);
+      await user.click(lane());
+      const card = await screen.findByRole('dialog');
+      expect(stateOf(card)).toHaveTextContent(text);
+      expect(stateOf(card)!.classList.contains('alarm')).toBe(alarm);
       /* Where a phone's label cuts it short, the whole of it is a touch away. */
-      expect(stateOf(lane())).toHaveAttribute('title', text);
+      expect(stateOf(card)).toHaveAttribute('title', text);
     });
 
     it('says in the tree that an agent without a running turn waits for a task, and nothing of it on the schema, which says so already', async () => {
@@ -1303,7 +1318,8 @@ describe("what an agent's program does, and the server's alarms about its turn",
       expect(stateOf(bruno())).toBeNull();
       await user.click(screen.getByRole('button', { name: tree }));
       await screen.findByRole('group');
-      expect(stateOf(lane())).toHaveTextContent(lang === 'en' ? 'waiting for a task' : 'ждет задачу');
+      await user.click(lane());
+      expect(stateOf(await screen.findByRole('dialog'))).toHaveTextContent(lang === 'en' ? 'waiting for a task' : 'ждет задачу');
     });
   });
 
