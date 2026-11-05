@@ -23,12 +23,13 @@ function dimAfter(codes: string, dim: boolean): boolean {
   return dim;
 }
 
+/* Kimi Code's input is a box of its own, with `>` on its first row and the rest of a draft on the rows under it. Its welcome
+   is a box too, without the `>`. */
 function boxedInput(screen: string): string | null {
-  const rule = [...screen.matchAll(/^[ \t]*[─━═]{2,}[ \t]+input\b[^\n]*$/gm)].at(-1);
-  if (!rule) return null;
-  const below = screen.slice(rule.index + rule[0].length);
-  const end = below.search(/^[ \t]*[─━═]{2,}[ \t]*$/m);
-  return end < 0 ? null : below.slice(0, end).trim();
+  const box = [...screen.matchAll(/^[ \t]*╭─[^\n]*\n[ \t]*│[ \t]*>[ \t]?([^\n]*(?:\n[ \t]*│[^\n]*)*)\n[ \t]*╰─[^\n]*$/gm)].at(-1);
+  if (!box) return null;
+  const rows = box[1]!.split('\n').map((row, i) => (i ? row.replace(/^[ \t]*│/, '') : row).replace(/│?[ \t]*$/, '').trim());
+  return rows.join('\n').trim();
 }
 
 /* The closing rule belongs to the next box too when history puts two boxes together. */
@@ -49,8 +50,9 @@ function promptedInput(kind: 'claude' | 'codex', screen: string): string | null 
   /* An unfinished box may hide the rest of a person's draft. Wait for its closing rule before typing. */
   const above = screen.slice(0, prompt.index).trimEnd();
   if (kind === 'claude' && /(?:^|\n)[ \t]*[─━═]{2,}[ \t]*$/.test(above)) return framedInput(prompt[1]!, rest);
-  const below = rest.split(/\n[ \t]*[─━═╰└]/, 1)[0]!;
-  return `${prompt[1]}${below}`.trim();
+  /* Codex leaves an empty row between its input and the footer under it, whose words are not input. */
+  const below = rest.split(kind === 'codex' ? /\n[ \t]*(?:[─━═╰└]|\n|$)/ : /\n[ \t]*[─━═╰└]/, 1)[0]!;
+  return `${prompt[1]}${below}`.replace(/[ \t]+$/gm, '').trim();
 }
 
 function framedInput(first: string, rest: string): string | null {

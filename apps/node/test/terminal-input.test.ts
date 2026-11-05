@@ -26,22 +26,22 @@ describe('the input shown by a terminal program', () => {
     expect(inputOf('codex', 'OpenAI Codex\n\x1b[1;2m›\x1b[0m Earlier user message\nWorking.')).toBeNull();
   });
 
-  it('reads blank lines between the Kimi input rule and its closing rule as empty', () => {
+  it('reads an empty Kimi box as empty, with its footer under it', () => {
     expect(inputOf('kimi', screen('kimi-empty'))).toBe('');
   });
 
   it('reads typed text only from inside the Kimi box', () => {
     expect(inputOf('kimi', screen('kimi-typed'))).toBe('abc');
-    expect(inputOf('kimi', screen('kimi-typed').replace(' abc\n ', ' abc\n\n second line'))).toBe('abc\n\n second line');
+    expect(inputOf('kimi', screen('kimi-typed').replace(/^( *│) > abc.*$/m, '$1 > abc\n$1\n$1   second line'))).toBe('abc\n\nsecond line');
   });
 
   it('finds the Kimi box even when its rules are dim', () => {
-    expect(inputOf('kimi', screen('kimi-empty').replace(/^(─.*)$/gm, '\x1b[2m$1\x1b[0m'))).toBe('');
+    expect(inputOf('kimi', screen('kimi-empty').replace(/^( *[╭╰].*)$/gm, '\x1b[2m$1\x1b[0m'))).toBe('');
   });
 
   it('reads the latest Kimi box and requires a closing rule', () => {
     expect(inputOf('kimi', screen('kimi-typed') + screen('kimi-empty'))).toBe('');
-    expect(inputOf('kimi', '── input ─────\n abc\n')).toBeNull();
+    expect(inputOf('kimi', '╭─────╮\n│ > abc\n')).toBeNull();
   });
 
   it('keeps the rest of a multiline prompt when its first line is empty', () => {
@@ -76,6 +76,36 @@ describe('the input shown by a terminal program', () => {
   it('strips escapes without confusing color values with dim text', () => {
     expect(inputOf('codex', '\x1b[1m›\x1b[0m \x1b[38;2;0;2;0mabc\x1b[0m\n')).toBe('abc');
     expect(inputOf('codex', '› \x1b[2;38;2;0;2;0mSuggestion\x1b[22mabc\x1b[0m\n')).toBe('abc');
+  });
+});
+
+describe('the input on the real screens of the programs', () => {
+  const real = (name: string) => readFileSync(new URL(`./fixtures/real-screens/${name}.ansi`, import.meta.url), 'utf8');
+
+  it.each(['codex-0.166.0-first', 'codex-0.166.0-idle', 'codex-0.166.0-busy', 'codex-0.166.0-retrying'])('reads %s as empty, whatever footer is under its input', name => {
+    expect(inputOf('codex', real(name))).toBe('');
+    expect(atEmptyPrompt('codex', real(name))).toBe(true);
+  });
+
+  it('reads what a person typed into real Codex and not its footer', () => {
+    expect(inputOf('codex', real('codex-0.166.0-draft'))).toBe('abc draft');
+    expect(inputOf('codex', real('codex-0.166.0-multi-line'))).toBe('first line\n  second line');
+  });
+
+  it.each(['kimi-2.2.0-first', 'kimi-2.3.3-first', 'kimi-2.4.1-first', 'kimi-2.5.1-first', 'kimi-2.5.1-after'])('reads %s as empty, in the box Kimi Code draws', name => {
+    expect(inputOf('kimi', real(name))).toBe('');
+    expect(atEmptyPrompt('kimi', real(name))).toBe(true);
+  });
+
+  it('reads what a person typed into real Kimi Code and nothing around it', () => {
+    expect(inputOf('kimi', real('kimi-2.5.1-draft'))).toBe('abc draft');
+    expect(inputOf('kimi', real('kimi-2.5.1-multi-line'))).toBe('first line\nsecond line');
+  });
+
+  it('does not take the welcome box of real Kimi Code for its input', () => {
+    const welcome = real('kimi-2.5.1-first').split(/\n(?=.*╭)/).slice(0, 2).join('\n');
+    expect(welcome).toContain('Welcome to Kimi Code');
+    expect(inputOf('kimi', welcome)).toBeNull();
   });
 });
 
