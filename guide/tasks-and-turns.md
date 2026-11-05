@@ -78,6 +78,18 @@ When one of those tasks is cancelled, whoever made the waiting task is told.
 
 Once every task of the turn is closed, the turn ends. The next planned one starts by itself.
 
+## How do I see how a turn went?
+
+Open a department, then "Speed", then "Report", and pick any turn that ran. You see that department's time from issue to acceptance, its critical path apart from the sum of agent hours, time by stage, waits by reason, returns, failures, interrupted turns, numbers by kind of task, quality after release and test time by package and file. Each number comes with its change in percent to the previous turn and to the starting turn: turn 7, or the first turn of a company that never ran one.
+
+Hornhoof saves a turn's numbers as it closes, before the next one opens. A turn closed before this existed is worked out from its events the first time someone reads it, and the report says so. Bugs found later keep counting after that, since they turn up later.
+
+Only people who reach the whole department see its report. The orchestrator reads the same report with `pipeline_report`.
+
+## What are a task's kind and risk class?
+
+The head or the orchestrator can say what kind of work a task is (bug, known behavior, unknown path, legacy code) and what a mistake in it would touch (money, access, security, data or none). They show on the task and in its tools, and the report counts by kind. Changing them wakes nobody and leaves the task where it stands.
+
 ## When does Hornhoof wake an agent?
 
 When there is something for it:

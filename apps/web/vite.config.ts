@@ -10,6 +10,7 @@ export default defineConfig(({ mode }) => ({
     watch: mode === 'browser-test' ? null : undefined,
   },
   test: {
+    reporters: ['../../packages/protocol/src/test-timings-reporter.ts', 'default'],
     environment: 'jsdom',
     /* UTC fixtures keep exact clock assertions independent of the host timezone. */
     env: { TZ: 'UTC' },

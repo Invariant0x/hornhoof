@@ -461,6 +461,8 @@ export type NewTask = {
   after?: string[];
   /* Code given out without gates of its own: the review of its department's turn checks it. */
   inTurnReview?: boolean;
+  workKind?: Task['workKind'];
+  riskClass?: Task['riskClass'];
 };
 
 /* A live employee or orchestrator of the company. */
@@ -535,6 +537,8 @@ export async function createTask(ctx: Live, actor: Actor, input: NewTask): Promi
         executorAgentId: input.executor ? assignee.id : null,
         gates,
         after: input.after ?? [],
+        workKind: input.workKind,
+        riskClass: input.riskClass,
         createdByPersonId: actor.personId ?? null,
         createdByAgentId: actor.agentId ?? null,
         updatedAt: new Date(),
@@ -909,7 +913,7 @@ export async function dropGate(ctx: Live, actor: Actor, task: Task, agentId: str
   return move(ctx, task, { gates }, { kind: 'updated', actor, data: { fields: ['gates'] } });
 }
 
-export type TaskChange = { title?: string; brief?: string; body?: string; executor?: string; gates?: string[]; after?: string[] };
+export type TaskChange = { title?: string; brief?: string; body?: string; executor?: string; gates?: string[]; after?: string[]; workKind?: NonNullable<Task['workKind']>; riskClass?: NonNullable<Task['riskClass']> };
 
 /* Runs fn on the task, and again on a fresh read of it when someone moved it meanwhile; null when it kept moving. */
 async function onFresh<T>(ctx: Live, task: Task, fn: (task: Task) => Promise<T>): Promise<T | null> {
@@ -1070,17 +1074,32 @@ async function regate(ctx: Live, agentId: string, task: Task, c: TaskChange): Pr
   return { task: await move(ctx, task, { ...text.set, gates, ...gate.set }, n, undefined, gate.wakes), wakes: gate.wakes };
 }
 
-/* The title, brief and body a change rewrites. */
+/* The title, brief, body and labels a change rewrites. */
 function rewrite(task: Task, c: TaskChange): { set: Partial<Task>; fields: string[] } {
   const set: Partial<Task> = {};
   const fields: string[] = [];
-  for (const key of ['title', 'brief', 'body'] as const) {
+  for (const key of ['title', 'brief', 'body', 'workKind', 'riskClass'] as const) {
     if (c[key] !== undefined && c[key] !== task[key]) {
-      set[key] = c[key];
+      Object.assign(set, { [key]: c[key] });
       fields.push(key);
     }
   }
   return { set, fields };
+}
+
+const LABELS: ReadonlySet<string> = new Set(['workKind', 'riskClass']);
+
+/* What kind of work it is changes nothing of the work: whoever holds it is not woken, its wait stays and wakes on their way
+   still come. Nothing else changes with them, so no move that read the task loses its place. */
+async function relabel(ctx: Live, agentId: string, task: Task, set: Partial<Task>, fields: string[]): Promise<Moved> {
+  if (!fields.length) return { task, wakes: [] };
+  const row = await ctx.db.transaction(async tx => {
+    const [changed] = await tx.update(tasks).set({ ...set, updatedAt: new Date() }).where(eq(tasks.id, task.id)).returning();
+    await note(tx, changed!, { kind: 'updated', actor: { agentId }, data: { fields } });
+    return changed!;
+  });
+  published(ctx, row);
+  return { task: row, wakes: [] };
 }
 
 /* The owner rewrites the task so it reads as the current truth, or hands it to another executor or other gates. */
@@ -1116,7 +1135,7 @@ export async function updateTask(ctx: Live, agentId: string, taskId: string, c: 
     set.after = c.after;
     fields.push('after');
   }
-  if (!fields.length) return { task, wakes: [] };
+  if (fields.every(f => LABELS.has(f))) return relabel(ctx, agentId, task, set, fields);
   /* A rewrite answers a blocked executor. A task nobody holds stays blocked until someone can take it. */
   if (task.status === 'blocked' && (set.assigneeAgentId ?? task.assigneeAgentId)) set.status = 'open';
   /* Another one takes it up, so Hornhoof's note that it stood still is over; a person's word asked for still waits. */

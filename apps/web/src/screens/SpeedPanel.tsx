@@ -1,6 +1,7 @@
 import { useId, useState } from 'react';
 import { useT } from '../i18n';
 import type { AgentTime, Department, DepartmentTree, IdleStretch, TreeAgent } from '../types';
+import { PipelineReport } from './PipelineReport';
 import { segmentText } from './tree-state';
 import { TreeWho } from './TreeCard';
 import { agentSegments, idleClass, currentTaskNumber, SEGMENT_CLASS, secondsBetween, treeClock } from './tree';
@@ -155,6 +156,28 @@ function IdleRows(props: Props) {
   );
 }
 
+function nextTab(key: string, tab: number, count: number): number | null {
+  if (key === 'ArrowRight') return (tab + 1) % count;
+  if (key === 'ArrowLeft') return (tab + count - 1) % count;
+  return null;
+}
+
+/* The running turn's two tabs. The report has its own turns: it is there with none running too. */
+function RunningTurn({ idle, ...props }: Props & { idle: boolean }) {
+  const t = useT(), L = t.dept.tree;
+  if (!props.tree.turn) return <p>{t.dept.treeNoTurn}</p>;
+  return (
+    <>
+      <p className="spd-sub">
+        {L.spdSub(props.tree.turn.number, treeClock(props.tree.turn.startedAt), treeClock(props.tree.now))}
+      </p>
+      {idle ? <IdleRows {...props} /> : <SpeedRows {...props} />}
+    </>
+  );
+}
+
+const REPORT_TAB = 2;
+
 export function SpeedPanel(props: Props) {
   const t = useT(), L = t.dept.tree, [tab, setTab] = useState(0), id = useId();
   return (
@@ -171,9 +194,10 @@ export function SpeedPanel(props: Props) {
             key={name}
             onClick={() => setTab(i)}
             onKeyDown={e => {
-              if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
-              setTab(1 - tab);
-              document.getElementById(`${id}-tab-${1 - tab}`)?.focus();
+              const next = nextTab(e.key, tab, L.spdTabs.length);
+              if (next === null) return;
+              setTab(next);
+              document.getElementById(`${id}-tab-${next}`)?.focus();
             }}
           >
             {name}
@@ -181,14 +205,7 @@ export function SpeedPanel(props: Props) {
         ))}
       </div>
       <div className="dv-drawer-b" role="tabpanel" id={`${id}-body`} aria-labelledby={`${id}-tab-${tab}`}>
-        {props.tree.turn ? (
-          <>
-            <p className="spd-sub">
-              {L.spdSub(props.tree.turn.number, treeClock(props.tree.turn.startedAt), treeClock(props.tree.now))}
-            </p>
-            {tab === 0 ? <SpeedRows {...props} /> : <IdleRows {...props} />}
-          </>
-        ) : <p>{t.dept.treeNoTurn}</p>}
+        {tab === REPORT_TAB ? <PipelineReport department={props.department} /> : <RunningTurn {...props} idle={tab === 1} />}
       </div>
     </>
   );

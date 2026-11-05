@@ -2,15 +2,17 @@ import { and, asc, eq, gte, inArray, isNotNull, notInArray, or, sql } from 'driz
 import { unionAll } from 'drizzle-orm/pg-core';
 import type { Db } from '../../db/client.js';
 import { agentEvents, agents, departments, jobs, requests, taskEvents, tasks, turns } from '../../db/schema.js';
-import type { Task } from './engine.js';
+import type { Task, Tx } from './engine.js';
 import { NUDGES, type FactJobState, type FactRequest, type FactSign, type FactTask, type FactTaskEvent, type TreeFacts } from './tree.js';
 
-import { readTurnHistory } from './tree-history.js';
+import { readTurnHistory, upTo } from './tree-history.js';
+
+type Reader = Db | Tx;
 
 const toDate = (v: Date | string): Date => (v instanceof Date ? v : new Date(v));
 
 /* Signs of life grouped by distinct minute per task and agent, keeping the minute's bounds for exact stall starts. */
-async function readSigns(db: Db, taskIds: string[], turnStarted: Date): Promise<FactSign[]> {
+async function readSigns(db: Reader, taskIds: string[], turnStarted: Date, until?: Date): Promise<FactSign[]> {
   const fromTasks = db
     .select({
       taskId: sql<string>`${taskEvents.taskId}`.as('task_id'),
@@ -18,7 +20,7 @@ async function readSigns(db: Db, taskIds: string[], turnStarted: Date): Promise<
       createdAt: sql<Date>`${taskEvents.createdAt}`.as('created_at'),
     })
     .from(taskEvents)
-    .where(and(inArray(taskEvents.taskId, taskIds), notInArray(taskEvents.kind, [...NUDGES]), gte(taskEvents.createdAt, turnStarted)));
+    .where(and(inArray(taskEvents.taskId, taskIds), notInArray(taskEvents.kind, [...NUDGES]), gte(taskEvents.createdAt, turnStarted), upTo(taskEvents.createdAt, until)));
 
   const fromAgents = db
     .select({
@@ -28,7 +30,7 @@ async function readSigns(db: Db, taskIds: string[], turnStarted: Date): Promise<
     })
     .from(agentEvents)
     .innerJoin(jobs, eq(jobs.id, agentEvents.jobId))
-    .where(and(inArray(jobs.taskId, taskIds), gte(agentEvents.createdAt, turnStarted)));
+    .where(and(inArray(jobs.taskId, taskIds), gte(agentEvents.createdAt, turnStarted), upTo(agentEvents.createdAt, until)));
 
   const raw = unionAll(fromTasks, fromAgents).as('raw');
   const buckets = await db
@@ -53,7 +55,7 @@ async function readSigns(db: Db, taskIds: string[], turnStarted: Date): Promise<
   });
 }
 
-async function readJobStates(db: Db, taskIds: string[]): Promise<FactJobState[]> {
+async function readJobStates(db: Reader, taskIds: string[]): Promise<FactJobState[]> {
   const rows = await db
     .select({
       taskId: sql<string>`${jobs.taskId}`,
@@ -126,18 +128,14 @@ const emptyFacts = (repository: boolean, turn: TreeFacts['turn']): TreeFacts => 
   jobs: [],
 });
 
-export async function treeFacts(db: Db, companyId: string, departmentId: string, sees: (t: Task) => boolean): Promise<TreeFacts> {
+/* The department's facts in a turn. until: a turn that is over, whose agents went on to other work after it. */
+export async function treeFactsOf(db: Reader, companyId: string, departmentId: string, sees: (t: Task) => boolean, turn: TreeFacts['turn'], until?: Date): Promise<TreeFacts> {
   const places = await db
     .select({ id: departments.id, repoUrl: departments.repoUrl })
     .from(departments)
     .where(and(eq(departments.companyId, companyId), or(eq(departments.id, departmentId), eq(departments.parentId, departmentId))));
   const repoIds = new Set(places.filter(p => p.repoUrl).map(p => p.id));
   const repository = repoIds.size > 0;
-
-  const [turn] = await db
-    .select({ id: turns.id, number: turns.number, createdAt: turns.createdAt, openedAt: turns.openedAt })
-    .from(turns)
-    .where(and(eq(turns.companyId, companyId), eq(turns.status, 'open')));
   if (!turn) return emptyFacts(repository, null);
 
   const turnTasks = await db
@@ -178,10 +176,10 @@ export async function treeFacts(db: Db, companyId: string, departmentId: string,
     .orderBy(asc(requests.createdAt));
 
   const from = turn.openedAt ?? turn.createdAt;
-  const signs = await readSigns(db, taskIds, from);
+  const signs = await readSigns(db, taskIds, from, until);
   const jobStates = await readJobStates(db, taskIds);
   const agentIds = collectAgentIds(turnTasks, events, asks);
-  const history = await readTurnHistory(db, companyId, agentIds, from);
+  const history = await readTurnHistory(db, companyId, agentIds, from, until);
   const agentRows = agentIds.length
     ? await db.select({ id: agents.id, name: agents.name, createdAt: agents.createdAt }).from(agents).where(inArray(agents.id, agentIds)).orderBy(asc(agents.createdAt))
     : [];
@@ -198,4 +196,12 @@ export async function treeFacts(db: Db, companyId: string, departmentId: string,
     jobs: jobStates,
     turns: history,
   };
+}
+
+export async function treeFacts(db: Db, companyId: string, departmentId: string, sees: (t: Task) => boolean): Promise<TreeFacts> {
+  const [turn] = await db
+    .select({ id: turns.id, number: turns.number, createdAt: turns.createdAt, openedAt: turns.openedAt })
+    .from(turns)
+    .where(and(eq(turns.companyId, companyId), eq(turns.status, 'open')));
+  return treeFactsOf(db, companyId, departmentId, sees, turn ?? null);
 }

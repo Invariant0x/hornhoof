@@ -18,6 +18,7 @@ import { commitUrl, picturesOf } from './attachments.js';
 import { departmentOf } from '../tools/staff.js';
 import { workTree } from './tree.js';
 import { treeFacts } from './tree-facts.js';
+import { departmentPipeline } from './pipeline-report.js';
 import { taskDetail, taskLines } from './views.js';
 import { settle, tell, turnRows, type Turn } from './turns.js';
 import { leaveIfOff, stopTurns, wakeAll } from './wake.js';
@@ -35,6 +36,7 @@ const NewTaskBody = z.object({
 const ListQuery = z.object({ department: z.uuid().optional(), status: z.enum(['open', 'closed', 'all']).default('open') });
 /* person: only the decisions this person owns, among those the viewer sees anyway. */
 const DecisionsQuery = z.object({ person: z.uuid().optional() }).strict();
+const PipelineQuery = z.object({ turn: z.coerce.number().int().positive().optional() });
 const AnswerBody = z.union([
   z.object({ answer: z.string().trim().min(1).max(4000) }).strict(),
   z.object({ approve: z.boolean(), answer: z.string().max(4000).optional() }).strict(),
@@ -326,5 +328,15 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     }
     const facts = await treeFacts(db, me.companyId, dept.id, sees);
     return { tree: workTree(facts, new Date()) };
+  });
+
+  /* The numbers add up all of a department, so they reach only those who reach all of it. */
+  app.get('/api/departments/:id/pipeline', async req => {
+    const me = await requirePerson(req, db);
+    const { id } = IdParams.parse(req.params);
+    const { turn } = PipelineQuery.parse(req.query);
+    const dept = await departmentOf(db, me.companyId, id);
+    if (!dept || dept.parentId || !canReach(await accessOf(db, me), { departmentId: dept.id, parentId: null })) throw refuse(404, 'department_unknown', 'This department does not exist.');
+    return { report: await departmentPipeline(db, me.companyId, dept.id, turn) };
   });
 }
