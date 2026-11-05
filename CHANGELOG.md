@@ -5,6 +5,58 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.7.0] - 2026-11-05
+
+Turn 7: planned node updates wait for running turns to finish; nodes reconnect on their own and keep Chromium ready in a
+read-only cache; direct browser links open every screen; the agent window takes pasted and dropped pictures, and the
+program operator handles stuck agent programs from masked screen snapshots.
+
+### Added
+
+- Open any screen, panel or agent window directly from its browser address, share the link and step back with the
+  browser's Back button.
+- Drag or paste screenshots and images into the agent window so the agent sees them in its turn.
+- Change your own display name from your account menu, with a history of name changes.
+- Inspect a machine's connection history with disconnect reasons, and see on its card when it waits for running turns to
+  finish before a planned update or warns how many turns an immediate update would stop.
+- Recover stuck CLI programs through Operations' program operator, which receives masked PNG snapshots of the program
+  screen and sends keys when delivery receipts stall, with Operations staffed in full across companies.
+
+### Changed
+
+- Planned node updates now stop assigning new turns to the machine, wait up to a bounded deadline for active turns to
+  finish before restarting, and postpone the update with a signal to Operations if a turn is still running at the
+  deadline; task watchdogs and the program operator treat update waiting as normal waiting, not a hang.
+- Nodes detect silent connection drops on their own and reconnect immediately, and `install.sh` installs the node image
+  matching the server's build.
+- Worker nodes prepare and verify Playwright Chromium ahead of time in a root-owned read-only cache so checks use it
+  without downloading a browser, while regular agent turns keep running even if a node's browser check fails.
+- On the home screen, the circle now shows the turn number and a task progress bar instead of the turn goal text, and
+  cards in the work tree keep their natural size without squishing.
+- In the agent window, the close, minimize and maximize buttons sit on the left of the header, every small panel slides
+  out beside the terminal through one shared mechanism, minimized windows stay as edge strips across all screens, the
+  yellow "no task" banner is gone, the message box stays visible alongside the terminal for everyone allowed to write,
+  and machine access in the orchestrator window is a compact strip supporting multiple machines.
+- Notifications always show who sent them, to whom and why, without bare "From Hornhoof" headers, and collapse duplicate
+  notices of the same event into one message.
+- Every wait now rests on a specific holder, waiting cycles are surfaced to the orchestrator, quiet departments alert
+  Operations, and task comments reach the active executor or review panel with delivery receipts.
+
+### Fixed
+
+- Task messages sent with `message_employee` deliver reliably to the holder or queue for its next turn when no live
+  terminal is open, and a task's executor can reply about its own task.
+- Stale turns now keep their reason, program state and last output lines instead of losing diagnostics, and a cancelled
+  wake that never started is recorded as obsolete rather than an agent failure.
+- Antigravity and other subscription limits refresh reliably when readings succeed without change and stop showing a
+  cached timestamp as fresh when a reading fails.
+
+### Before you update
+
+- Update the server first, then the nodes: the server applies database migrations 0052 through 0060 on startup and adds
+  the protocol messages for node update draining, connection history, browser readiness, limit freshness and program
+  operator receipts that 0.7.0 nodes send.
+
 ## [0.6.2] - 2026-11-04
 
 Words typed into a running turn are no longer lost or delivered twice, and a turn keeps answering the CEO when Hornhoof
