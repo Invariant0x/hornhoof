@@ -1,6 +1,6 @@
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agents, jobs, people, subscriptions, tasks } from '../src/db/schema.js';
+import { agentEvents, agents, jobs, people, subscriptions, tasks } from '../src/db/schema.js';
 import { insertTurn, pump } from '../src/modules/conversation/queue.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
@@ -195,6 +195,16 @@ describe('how hard each turn thinks', () => {
       await c.handIn(c.two);
       await c.endTurn(c.head.id);
       expect((await c.levels(c.head.id)).at(-1)).toBe('medium');
+    });
+
+    it('keeps the base when one of them has no words to say why', async () => {
+      const c = await headAtTwoGates();
+      await c.handIn(c.one);
+      await c.handIn(c.two);
+      const [waiting] = await c.db.select().from(jobs).where(and(eq(jobs.agentId, c.head.id), eq(jobs.taskId, c.two.id), eq(jobs.status, 'queued')));
+      await c.db.delete(agentEvents).where(eq(agentEvents.jobId, waiting!.id));
+      await c.endTurn(c.head.id);
+      expect((await c.levels(c.head.id)).at(-1)).toBe(HEAD);
     });
 
     it('keeps the base when one of them is a first look', async () => {
