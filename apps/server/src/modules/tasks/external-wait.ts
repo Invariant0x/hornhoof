@@ -2,7 +2,7 @@ import { WaitOnInput } from '@hornhoof/protocol/waits';
 import { z } from 'zod';
 import { and, eq, inArray, isNotNull, lte, ne, notInArray, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { agentEvents, jobs, pendingWakes, tasks, type ExternalWait } from '../../db/schema.js';
+import { agentEvents, agents, jobs, pendingWakes, tasks, type ExternalWait } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { loadTask, move, refuse, type Moved, type Task, type Wake } from './engine.js';
 import { wakeAll } from './wake.js';
@@ -14,7 +14,7 @@ import { checkWaitHealth } from './wait-monitor.js';
 import { checkedWaitTarget } from './wait-target.js';
 import { taskByRef } from './views.js';
 import type { Actor } from './engine.js';
-import { taskWakeOf, waitingTaskTurn } from './wake-state.js';
+import { onTask, taskWakeOf, waitingTaskTurn } from './wake-state.js';
 
 export const EXTERNAL_WAIT_MS = 2 * 3_600_000;
 export const TaskReference = z.union([z.number().int().positive(), z.string().max(40)]).describe('The task number, like 12 or "#12", or its id.');
@@ -62,9 +62,22 @@ async function placeWait(ctx: Ctx, agentId: string, taskId: string, input: z.inf
   return { task: row, wakes: [] };
 }
 
+const OPEN = new Set(['open', 'working', 'review', 'waiting', 'blocked']);
+type Sender = Pick<typeof agents.$inferSelect, 'id' | 'kind' | 'departmentId'>;
+const actsOnTask = (task: Task, agentId: string): boolean => onTask(task, agentId) || task.executorAgentId === agentId;
+const overseesTask = (task: Task, sender: Sender): boolean =>
+  sender.kind === 'orchestrator' || (sender.kind === 'head' && task.departmentId !== null && sender.departmentId === task.departmentId);
+const senderMayWrite = (task: Task, sender: Sender | undefined): boolean => Boolean(sender && (actsOnTask(task, sender.id) || overseesTask(task, sender)));
+
 function requireHolder(task: Task, agentId: string): void {
-  if (!['open', 'working', 'review', 'waiting', 'blocked'].includes(task.status)) throw refuse(409, 'task_invalid', `#${task.number} cannot wait while ${task.status}.`);
+  if (!OPEN.has(task.status)) throw refuse(409, 'task_invalid', `#${task.number} cannot wait while ${task.status}.`);
   if (task.assigneeAgentId !== agentId) throw refuse(403, 'task_not_yours', `#${task.number} is not with you.`);
+}
+
+/* The recipient holds the task, or the sender acts on it or oversees it as orchestrator or head of its department. */
+function requireMessageTask(task: Task, recipientId: string, sender: Sender | undefined): void {
+  if (!OPEN.has(task.status)) throw refuse(409, 'task_invalid', `#${task.number} is ${task.status}.`);
+  if (task.assigneeAgentId !== recipientId && !senderMayWrite(task, sender)) throw refuse(403, 'task_not_yours', `#${task.number} is not with you.`);
 }
 
 type TaskMessage = { companyId: string; agentId: string; task?: number | string; actor: Actor; text: string };
@@ -127,18 +140,19 @@ async function restoreWait(ctx: Ctx, resumed: ResumedWait, actor: Actor): Promis
 async function queueBoundMessage(ctx: Ctx, input: TaskMessage & { task: number | string }, turn: MessageTurn, required: boolean): Promise<QueuedMessage> {
   const task = await taskByRef(ctx, input.companyId, input.task);
   if (!task) throw refuse(404, 'task_unknown', `There is no task ${input.task} you can message.`);
-  const recipient = input.agentId;
-  const holder = task.assigneeAgentId === recipient || task.panel.includes(recipient);
-  if (![task.assigneeAgentId, task.createdByAgentId, task.executorAgentId, ...task.panel, ...task.gates].includes(recipient)) throw refuse(403, 'task_not_yours', `#${task.number} does not involve this employee.`);
-  const topic = taskTurn(task, turn.message);
-  const id = await insertOrDeliverTurn(ctx, { ...turn, ...topic, taskId: holder ? task.id : undefined }, required);
-  if (!task.externalWait || task.assigneeAgentId !== recipient) return { id };
+  const [sender] = input.actor.agentId
+    ? await ctx.db.select({ id: agents.id, kind: agents.kind, departmentId: agents.departmentId }).from(agents).where(eq(agents.id, input.actor.agentId))
+    : [];
+  requireMessageTask(task, input.agentId, sender);
+  const id = await insertOrDeliverTurn(ctx, { ...turn, ...taskTurn(task, input.agentId, turn.message) }, required);
+  if (!task.externalWait || task.assigneeAgentId !== input.agentId) return { id };
   const resumed = await move(ctx, task, { externalWait: null, silent: 0 }, { kind: 'comment', actor: input.actor, text: input.text, data: { externalWait: null } });
   return { id, resumed: { task: resumed, before: task.externalWait } };
 }
 
-function taskTurn(task: Task, message: TurnMessage): { message: TurnMessage; taskId: string } {
-  return { taskId: task.id, message: { ...message, task: { id: task.id, number: task.number }, taskWake: { ...taskWakeOf(task, { why: 'comment' }), why: 'message' } } };
+function taskTurn(task: Task, agentId: string, message: TurnMessage): { message: TurnMessage; taskId: string } {
+  const to = task.assigneeAgentId === agentId ? {} : { to: agentId };
+  return { taskId: task.id, message: { ...message, task: { id: task.id, number: task.number }, taskWake: { ...taskWakeOf(task, { why: 'comment' }), why: 'message', ...to } } };
 }
 
 export async function expireWait(ctx: Ctx, task: Task, unavailable?: string): Promise<boolean> {

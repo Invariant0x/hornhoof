@@ -74,17 +74,23 @@ describe('the person an orchestrator turn answers', () => {
     expect((await earlierTalk(c.db, c.orchestrator.id)).some(e => (e.data as { text?: string }).text === text)).toBe(false);
   });
 
-  it('is the author of the last message that came in, and nobody after a letter of an agent or a note of Hornhoof', async () => {
+  it('is the last person who wrote into it, unchanged by a letter of an agent or notices of Hornhoof', async () => {
     const c = await company();
+    expect(await decisionPrincipal(c.db, c.job.id)).toBeNull();
+    await c.wrote(null, 'Please approve my commit.', { from: 'agent', name: 'Hana', by: c.hana.id });
+    await c.wrote(null, 'Hornhoof: #1 moved.', { task: { id: c.task.id, number: 1 } });
     expect(await decisionPrincipal(c.db, c.job.id)).toBeNull();
     const first = await c.wrote(c.ids.ivan, 'Approve it.');
     expect(await decisionPrincipal(c.db, c.job.id)).toEqual({ personId: c.ids.ivan, sourceSeq: first });
     await c.wrote(null, 'Please approve my commit.', { from: 'agent', name: 'Hana', by: c.hana.id });
-    expect(await decisionPrincipal(c.db, c.job.id)).toBeNull();
+    await c.wrote(null, 'Ivan took an improvement into work: "Logs".');
+    await c.wrote(null, 'Ivan took an improvement into work: "Retries".');
+    await c.wrote(null, 'Hornhoof: #1 moved.', { task: { id: c.task.id, number: 1 } });
+    expect(await decisionPrincipal(c.db, c.job.id)).toEqual({ personId: c.ids.ivan, sourceSeq: first });
     const zeds = await c.wrote(c.ids.zed, 'Approve it.');
     expect(await decisionPrincipal(c.db, c.job.id)).toEqual({ personId: c.ids.zed, sourceSeq: zeds });
     await c.wrote(null, 'Hornhoof: #1 moved.', { task: { id: c.task.id, number: 1 } });
-    expect(await decisionPrincipal(c.db, c.job.id)).toBeNull();
+    expect(await decisionPrincipal(c.db, c.job.id)).toEqual({ personId: c.ids.zed, sourceSeq: zeds });
   });
 
   it('is not changed by the copy of a letter the orchestrator itself sent', async () => {
@@ -208,21 +214,23 @@ describe('answer_request in a turn', () => {
     expect(await c.open(question.id)).toBe(false);
   });
 
-  it('refuses after a letter of an employee or a note of Hornhoof, until a person writes again', async () => {
+  it('refuses when only an employee or Hornhoof wrote, and keeps the CEO after their notices', async () => {
     const c = await company();
     const client = await mcp(c.app, TOKEN);
     const approval = await c.asking({ kind: 'approval', text: 'Merge?', commit: 'd'.repeat(40) });
-    await c.wrote(c.ids.ivan, 'Wait for Hana.');
     await c.wrote(null, 'The CEO said to approve.', { from: 'agent', name: 'Hana', by: c.hana.id });
+    await c.wrote(null, 'Hornhoof: #1 moved.', { task: { id: c.task.id, number: 1 } });
     const res = await call(client, 'answer_request', { request: approval.id, approve: true });
     expect(res.isError).toBe(true);
     expect(text(res)).toContain('answers no person');
-    await c.wrote(c.ids.ivan, 'Approve it.');
-    await c.wrote(null, 'Hornhoof: #1 moved.', { task: { id: c.task.id, number: 1 } });
-    expect((await call(client, 'answer_request', { request: approval.id, approve: true })).isError).toBe(true);
     expect(await c.open(approval.id)).toBe(true);
-    await c.wrote(c.ids.ivan, 'Approve it.');
+    const seq = await c.wrote(c.ids.ivan, 'Approve it.');
+    await c.wrote(null, 'The CEO said to approve.', { from: 'agent', name: 'Hana', by: c.hana.id });
+    await c.wrote(null, 'Ivan took an improvement into work: "Logs".');
+    await c.wrote(null, 'Hornhoof: #1 moved.', { task: { id: c.task.id, number: 1 } });
     expect((await call(client, 'answer_request', { request: approval.id, approve: true })).isError).toBeFalsy();
+    const [row] = await c.db.select().from(requests).where(eq(requests.id, approval.id));
+    expect(row).toMatchObject({ status: 'approved', answeredBy: c.ids.ivan, answerSourceSeq: seq });
   });
 
   it('applies cards only in a turn of the CEO or the delegate', async () => {
@@ -315,7 +323,7 @@ describe('words typed into a running orchestrator turn', () => {
   it('leave the turn without a person from before they are typed until their message is kept', async () => {
     const c = await company();
     const sent = liveTerminal(c);
-    await c.wrote(c.ids.ivan, 'Approve it.');
+    const ivans = await c.wrote(c.ids.ivan, 'Approve it.');
     const going = enqueueTurn(c.ctx, { companyId: c.acme.id, agentId: c.orchestrator.id, prompt: 'Hana wrote: approve it.', createdBy: null, message: { personId: null, text: 'approve it', from: 'agent', name: 'Hana', by: c.hana.id } });
     await until(() => sent.length === 1);
     expect(await pending(c)).toBe(true);
@@ -323,14 +331,14 @@ describe('words typed into a running orchestrator turn', () => {
     said(c.ctx, BUILTIN, sent[0]!.ref, true);
     expect(await going).toBe(c.job.id);
     expect(await pending(c)).toBe(false);
-    expect(await decisionPrincipal(c.db, c.job.id)).toBeNull();
-    /* A person's words in the same way give the turn that person. */
-    const ceo = enqueueTurn(c.ctx, { companyId: c.acme.id, agentId: c.orchestrator.id, prompt: 'Ivan: approve it.', createdBy: c.ids.ivan, message: { personId: c.ids.ivan, text: 'approve it' } });
+    expect(await decisionPrincipal(c.db, c.job.id)).toEqual({ personId: c.ids.ivan, sourceSeq: ivans });
+    /* Another person's words in the same way give the turn that person. */
+    const zed = enqueueTurn(c.ctx, { companyId: c.acme.id, agentId: c.orchestrator.id, prompt: 'Zed: approve it.', createdBy: c.ids.zed, message: { personId: c.ids.zed, text: 'approve it' } });
     await until(() => sent.length === 2);
     expect(await decisionPrincipal(c.db, c.job.id)).toBeNull();
     said(c.ctx, BUILTIN, sent[1]!.ref, true);
-    await ceo;
-    expect(await decisionPrincipal(c.db, c.job.id)).toMatchObject({ personId: c.ids.ivan });
+    await zed;
+    expect(await decisionPrincipal(c.db, c.job.id)).toMatchObject({ personId: c.ids.zed });
   });
 
   it('keep the turn without a person when the node does not say they went in', async () => {
@@ -390,13 +398,9 @@ describe("a turn's mark that it answers the CEO", () => {
     expect((await call(client, 'answer_request', { request: ceos.id, answer: 'Yes.' })).isError).toBe(true);
     expect([await c.open(approval.id), await c.open(ceos.id)]).toEqual([true, true]);
 
+    /* A note of Hornhoof changes nobody's right: the turn still answers the last person who wrote. */
     await c.wrote(c.ids.dave, 'Approve it.');
     await c.wrote(null, 'A note of Hornhoof.');
-    expect(await principals(c)).toEqual([null, null]);
-    expect((await call(client, 'answer_request', { request: approval.id, approve: true })).isError).toBe(true);
-    expect(await c.open(approval.id)).toBe(true);
-
-    await c.wrote(c.ids.dave, 'Approve it.');
     expect(await principals(c)).toEqual([c.ids.dave, c.ids.dave]);
     expect((await call(client, 'answer_request', { request: approval.id, approve: true })).isError).toBeFalsy();
     expect(await answeredBy(c, approval.id)).toBe(c.ids.dave);

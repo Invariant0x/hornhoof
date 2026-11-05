@@ -20,6 +20,19 @@ const start = () => setUp({ readyMs: 2000, cols: 120, rows: 40, lookMs: 100 });
 describe.skipIf(!hasTmux)("Antigravity's own terminal", () => {
   afterEach(async () => { vi.restoreAllMocks(); await host?.stop(); });
 
+  it('refuses live words while Antigravity runs without typing them', async () => {
+    const log = vi.fn();
+    await setUp({ log, plugins: [], readyMs: 2000, cols: 120, rows: 40, lookMs: 100 });
+    const running = host.run(agyJob('live-refusal', 'HANG', { jobId: 'agy-live' }));
+    await until(() => sent.some(m => m.type === 'job.program' && m.jobId === 'agy-live' && m.state === 'thinking'));
+    const paste = vi.spyOn(tmux, 'paste');
+    try {
+      expect(await host.say('live-refusal', 'Private live words.')).toBe(false);
+      expect(paste).not.toHaveBeenCalled();
+      expect(log.mock.calls).toEqual([['Agent live-refusal (antigravity): live words were not delivered: this program takes live words as a separate turn.']]);
+    } finally { await host.stop(); await running; }
+  });
+
   it('takes a Hornhoof turn through invocation 0, follows its session, and reads the feed and answer from its transcript', async () => {
     await start();
     const log = join(home, 'agy-hooks.log');

@@ -8,7 +8,7 @@ import { requestedPromptOf } from '../conversation/requested-prompt.js';
 import { CLOSED, type Task, type Tx, type Wake } from './engine.js';
 
 /* Kept in the wake's existing message JSON, so its purpose and phase survive a server restart. */
-const State = z.object({ why: z.string(), status: z.enum(TASK_STATUSES), stage: z.number().int().nonnegative(), merging: z.boolean(), version: z.number().int().nonnegative().optional() });
+const State = z.object({ why: z.string(), status: z.enum(TASK_STATUSES), stage: z.number().int().nonnegative(), merging: z.boolean(), version: z.number().int().nonnegative().optional(), to: z.string().optional() });
 export type TaskWake = z.infer<typeof State>;
 type TaskTurn = { id: string; agentId: string | null; taskId: string | null };
 type Store = Db | Tx;
@@ -21,6 +21,10 @@ export const taskWakeOf = (task: Task, wake: Pick<Wake, 'why' | 'version'>): Tas
 
 /* Legacy turns have no snapshot. Only their known server-written notice prefixes identify a notice to the giver. */
 const isNotice = (state: TaskWake | null): boolean => state !== null && NOTICES.has(state.why);
+
+/* A message addressed to someone other than the task's assignee stays deliverable unless the task was cancelled. */
+const directMessage = (task: Task, agentId: string, state: TaskWake | null): boolean =>
+  state?.why === 'message' && state.to === agentId && task.status !== 'cancelled';
 
 const legacyNotice = (task: Task, agentId: string, kind: string, prompt: string): boolean =>
   kind !== 'worker' && task.createdByAgentId === agentId && legacyReport(task, prompt);
@@ -46,7 +50,7 @@ const sameStatus = (task: Task, state: TaskWake): boolean => state.why === 'mess
 
 const sameVersion = (task: Task, state: TaskWake): boolean => state.version === undefined || state.version === task.version;
 
-const onTask = (task: Task, agentId: string): boolean => task.assigneeAgentId === agentId || task.panel.includes(agentId);
+export const onTask = (task: Task, agentId: string): boolean => task.assigneeAgentId === agentId || (task.stage > 0 && task.panel.includes(agentId));
 const assignment = (task: Task, agentId: string): boolean => ['open', 'working'].includes(task.status) && !task.merging && task.assigneeAgentId === agentId;
 const review = (task: Task, agentId: string): boolean => task.status === 'review' && task.panel.includes(agentId);
 
@@ -68,7 +72,7 @@ async function wakeRecipient(db: Store, task: Task, agentId: string, why = ''): 
 }
 
 async function applies(db: Store, task: Task, agentId: string, state: TaskWake | null): Promise<boolean> {
-  if (isNotice(state)) return true;
+  if (isNotice(state) || directMessage(task, agentId, state)) return true;
   return !task.externalWait && !CLOSED.includes(task.status) && samePhase(task, state) && (await wakeRecipient(db, task, agentId, state?.why));
 }
 

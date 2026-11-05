@@ -64,6 +64,17 @@ const CRED_KINDS: Record<string, CredKind> = { claude: 'claude_token', codex: 'c
 type TestRun = Extract<ServerMessage, { type: 'tests.run' }>;
 type TestsDone = Extract<NodeMessage, { type: 'tests.done' }>;
 
+async function sayToAgent(host: TerminalHost | null, m: Extract<ProgramServerMessage, { type: 'agent.say' }>, log: (line: string) => void): Promise<boolean> {
+  const refused = (reason: string) => { log(`Agent ${m.agentKey}: live words were not delivered: ${reason}.`); return false; };
+  if (!host) return refused('the terminal host is not running');
+  return host.say(m.agentKey, m.text, m.within, m.operatorDelivery).catch(() => refused('terminal input failed'));
+}
+
+async function answerLiveWords(host: TerminalHost | null, m: Extract<ProgramServerMessage, { type: 'agent.say' }>, log: (line: string) => void, emit: (m: NodeMessage) => void): Promise<void> {
+  const ok = await sayToAgent(host, m, log);
+  emit({ type: 'agent.said', ref: m.ref, ok });
+}
+
 /* What a node says to a sign-in it cannot run: a company key's, a Kimi or GLM key's, or one with no tmux. */
 
 /* A part of a run never runs as the node itself: without a user of its own for runs, the node takes none. */
@@ -389,10 +400,8 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
         return shownBy(login, host, m.termId)?.close(m);
       case 'turn.opened':
         return host?.opened(m);
-      case 'agent.say': {
-        const ok = host ? await host.say(m.agentKey, m.text, m.within, m.operatorDelivery).catch(() => false) : false;
-        return void send?.({ type: 'agent.said', ref: m.ref, ok });
-      }
+      case 'agent.say':
+        return answerLiveWords(host, m, log, emit);
       case 'agent.restart': {
         const result = host ? await host.restart(m.agentKey, m.jobId, m.note) : { ok: false, reason: 'The terminal host is not running.' };
         return void send?.({ type: 'agent.restarted', agentKey: m.agentKey, jobId: m.jobId, ...result });

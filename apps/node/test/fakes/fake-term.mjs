@@ -27,6 +27,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { crash } from './crash.mjs';
 import { bracketed, rawKeys, readKeys } from './keys.mjs';
+import { claudePasted, claudeQueue } from './word-receipts.mjs';
 
 if (process.env.FAKE_CRASH_START) crash(process.env.FAKE_CRASH_START);
 
@@ -76,8 +77,13 @@ if (inputMs)
 // The input box: what is typed or pasted stays in it, over as many lines as it takes, until Enter.
 let input = '';
 let shown = 0;
+let longTool = null;
 const show = () => {
   const lines = input.split('\n');
+  if (longTool) {
+    process.stdout.write(`\x1b[2J\x1b[HRunning a long Bash command.\n────────────────────\n❯ ${lines.join('\r\n')}\n────────────────────\n  ctrl+b to run in background\n`);
+    return;
+  }
   process.stdout.write(`${shown ? `\x1b[${shown}A` : ''}\r\x1b[J❯ ${lines.join('\r\n')}`);
   shown = lines.length - 1;
 };
@@ -128,6 +134,14 @@ function entered() {
 }
 
 async function take(line) {
+  if (longTool) {
+    const text = claudePasted(line);
+    longTool.push(text);
+    appendFileSync(log, JSON.stringify(claudeQueue('enqueue', text)) + '\n');
+    show();
+    return;
+  }
+  if (line === 'LONG_TOOL') return runLongTool(line);
   if (hanging) {
     await hook('prompt', { prompt: line });
     appendFileSync(log, JSON.stringify({ type: 'queue-operation', operation: 'enqueue', content: line }) + '\n');
@@ -148,6 +162,29 @@ async function take(line) {
   if (ending) return ending[1]();
   await workFirst(line);
   await answer(line, context);
+}
+
+/* The tool keeps running while background results and pasted messages use the same queue. */
+async function runLongTool(line) {
+  await hook('prompt', { prompt: line });
+  longTool = [];
+  said('assistant', { type: 'tool_use', id: 'long-bash', name: 'Bash', input: { command: 'long-command' } });
+  show();
+  let notification = 0;
+  const timer = setInterval(() => {
+    const content = `<task-notification>Background task ${++notification} finished.</task-notification>`;
+    appendFileSync(log, JSON.stringify(claudeQueue('enqueue', content)) + '\n');
+    appendFileSync(log, JSON.stringify(claudeQueue('remove', content, { reason: 'dismissed' })) + '\n');
+  }, 1000);
+  setTimeout(() => appendFileSync(log, JSON.stringify({ type: 'system', subtype: 'compact_boundary' }) + '\n'), 7000);
+  setTimeout(async () => {
+    clearInterval(timer);
+    const words = longTool;
+    longTool = null;
+    for (const text of words) appendFileSync(log, JSON.stringify(claudeQueue('remove', text, { reason: 'absorbed_mid_turn' })) + '\n');
+    said('user', { type: 'tool_result', tool_use_id: 'long-bash', content: 'Done.' });
+    await answer(line, '');
+  }, Number(process.env.FAKE_LONG_TOOL_MS ?? 32_000));
 }
 
 /* Claude Code 2.1.317 sends StopFailure with the error's kind and puts the API error's own text in

@@ -48,20 +48,25 @@ const PASTED = /^\s*<pasted_content id="([^"]*)">\n?([\s\S]*?)\n?<\/pasted_conte
 const recorded = (text: string) => PASTED.exec(text)?.[2] ?? text;
 /* Whether the program's record is these words: as they are, or inside Claude's paste wrapper. */
 const same = (words: string, got: string) => flat(words) === flat(got) || flat(words) === flat(recorded(got));
-type WordState = 'waiting' | 'queued' | 'held' | 'taken' | 'discarded';
-export type WordReceipt = { text: string; jobId: string | null; state: WordState; accepted: boolean; sources: Set<string>; operatorDelivery?: OperatorDelivery };
+type WordState = 'waiting' | 'queued' | 'held' | 'taken' | 'removed' | 'discarded';
+export type WordReceipt = { text: string; jobId: string | null; state: WordState; accepted: boolean; sources: Set<string>; shown?: string | null; operatorDelivery?: OperatorDelivery };
 type ReceiptHooks = { preserveOriginal?: boolean; original?(phase: 'queued' | 'taken'): void; word?(word: WordReceipt, phase: 'queued' | 'taken' | 'not_taken'): void };
 
+function removeQueued(text: string, enqueued: string[]): string {
+  const at = text ? enqueued.findIndex(queued => same(queued, text) || same(text, queued)) : 0;
+  return at < 0 ? text : enqueued.splice(at, 1).join('');
+}
+
 /* Claude can omit the words from a removal; its queue belongs to the program, across turns. */
-export function claudeWordReceipt(line: Record<string, unknown>, enqueued: string[]): { state: 'queued' | 'taken'; text: string } | null {
+export function claudeWordReceipt(line: Record<string, unknown>, enqueued: string[]): { state: 'queued' | 'taken' | 'removed'; text: string } | null {
   if (line.type !== 'queue-operation') return null;
   const text = contentText(line.content);
   if (line.operation === 'enqueue') {
     enqueued.push(text);
     return { state: 'queued', text };
   }
-  if (line.operation === 'remove' && line.reason === 'absorbed_mid_turn') return { state: 'taken', text: enqueued.shift() ?? text };
-  if (line.operation === 'dequeue') enqueued.shift();
+  if (line.operation === 'remove') return { state: line.reason === 'absorbed_mid_turn' ? 'taken' : 'removed', text: removeQueued(text, enqueued) };
+  if (line.operation === 'dequeue') removeQueued(text, enqueued);
   return null;
 }
 
@@ -88,12 +93,27 @@ export class TurnWords {
 
   pending(): string[] { return [...this.original, ...this.words.filter(word => this.waiting(word)).map(word => word.text)]; }
   originalPending(): boolean { return this.original.length > 0; }
+  held(): WordReceipt[] { return this.words.filter(word => word.state === 'held'); }
   replay(text: string): void { this.replayed = text; this.endedAt = null; }
   end(now: number): void { this.endedAt ??= now; }
 
   waitingForTurn(now: number): boolean {
-    return this.endedAt !== null && now - this.endedAt < UNHEARD_MS
-      && this.words.some(word => word.state === 'queued' || word.state === 'held');
+    const endedAt = this.endedAt;
+    if (endedAt === null) return false;
+    return now - endedAt < UNHEARD_MS && this.words.some(word => word.state === 'queued' || word.state === 'held');
+  }
+
+  settledJobs(): string[] {
+    return [...new Set(this.words.filter(word => word.accepted).map(word => word.jobId).filter((id): id is string => id !== null))];
+  }
+
+  settled(): boolean { return this.endedAt !== null && this.pending().length === 0; }
+
+  removed(text: string): boolean {
+    const word = this.words.find(word => this.waiting(word) && same(word.text, text));
+    if (!word) return false;
+    word.state = 'removed';
+    return true;
   }
 
   queued(text: string, source: string): boolean {
@@ -147,13 +167,18 @@ export class TurnWords {
     for (const word of this.words) word.jobId ??= jobId;
   }
 
-  unheard(now: number, gone = false): { text: string; jobId: string | null; operatorDelivery?: OperatorDelivery }[] {
-    if (!gone && (this.endedAt === null || now - this.endedAt < UNHEARD_MS)) return [];
-    return this.words.filter(word => word.accepted && this.waiting(word)).map(word => {
+  unheard(now: number, gone = false, idle = true): { text: string; jobId: string | null; reason?: string; operatorDelivery?: OperatorDelivery }[] {
+    const expired = gone || (this.endedAt !== null && now - this.endedAt >= UNHEARD_MS);
+    return this.words.filter(word => this.returnWords(word, expired, gone || idle)).map(word => {
+      const reason = word.state === 'removed' ? 'the program removed the queued words' : null;
       word.state = 'discarded';
       this.receipts.word?.(word, 'not_taken');
-      return { text: word.text, jobId: word.jobId, ...(word.operatorDelivery ? { operatorDelivery: word.operatorDelivery } : {}) };
+      return { text: word.text, jobId: word.jobId, ...(reason ? { reason } : {}), ...(word.operatorDelivery ? { operatorDelivery: word.operatorDelivery } : {}) };
     });
+  }
+
+  private returnWords(word: WordReceipt, expired: boolean, idle: boolean): boolean {
+    return word.accepted && this.waiting(word) && (word.state === 'removed' || (expired && (idle || word.state !== 'queued')));
   }
 
   observe(kind: TermProgram['kind'], line: Record<string, unknown>, turnId?: string): void {

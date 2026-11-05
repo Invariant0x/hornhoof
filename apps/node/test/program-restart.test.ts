@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { restartRefusal, TurnWords, type RestartEvidence } from '../src/terminal/program-restart.js';
+import { claudeWordReceipt, restartRefusal, TurnWords, type RestartEvidence } from '../src/terminal/program-restart.js';
 
 const now = 2_000_000;
 const ready: RestartEvidence = { jobId: 'job', kind: 'codex', state: 'thinking', calls: 0, question: false, signAt: 1, sessionId: 'session', restarted: false };
@@ -47,6 +47,143 @@ it.each(['codex', 'kimi', 'claude'] as const)('keeps the second pending message 
 });
 
 describe('live word receipts', () => {
+  it('lists only held receipts', () => {
+    const words = new TurnWords();
+    const held = words.add('Held words.', 'job');
+    held.state = 'held';
+    words.add('Waiting words.', 'job');
+    words.add('Queued words.', 'job');
+    words.queued('Queued words.', 'hook');
+    words.add('Taken words.', 'job');
+    words.taken('Taken words.');
+    expect(words.held()).toEqual([held]);
+  });
+
+  it('waits for queued words only during the grace period after the turn ends', () => {
+    const words = new TurnWords();
+    words.add('Queued words.', 'job');
+    words.queued('Queued words.', 'hook');
+    expect(words.waitingForTurn(100)).toBe(false);
+    words.end(100);
+    expect(words.waitingForTurn(100)).toBe(true);
+    expect(words.waitingForTurn(15_099)).toBe(true);
+    expect(words.waitingForTurn(15_100)).toBe(false);
+    expect(words.waitingForTurn(15_101)).toBe(false);
+  });
+
+  it('waits for held words during the grace period', () => {
+    const words = new TurnWords();
+    words.add('Held words.', 'job').state = 'held';
+    words.end(100);
+    expect(words.waitingForTurn(101)).toBe(true);
+    expect(words.waitingForTurn(15_100)).toBe(false);
+  });
+
+  it('does not wait after a turn with no queued or held words', () => {
+    const words = new TurnWords();
+    words.end(100);
+    expect(words.waitingForTurn(101)).toBe(false);
+    words.add('Waiting words.', 'job');
+    expect(words.waitingForTurn(101)).toBe(false);
+  });
+
+  it('lists each accepted job once and omits unbound or unaccepted words', () => {
+    const words = new TurnWords();
+    words.add('First words.', 'first').accepted = true;
+    words.add('Unbound words.').accepted = true;
+    words.add('More words.', 'first').accepted = true;
+    words.add('Unaccepted words.', 'ignored');
+    words.add('Last words.', 'last').accepted = true;
+    expect(words.settledJobs()).toEqual(['first', 'last']);
+  });
+
+  it('settles only after the turn ends and every pending word is taken', () => {
+    const words = new TurnWords(['Original prompt.']);
+    words.add('Live words.', 'job');
+    expect(words.settled()).toBe(false);
+    words.end(100);
+    expect(words.settled()).toBe(false);
+    words.taken('Original prompt.');
+    expect(words.settled()).toBe(false);
+    words.taken('Live words.');
+    expect(words.settled()).toBe(true);
+  });
+
+  it('refuses to remove missing or already taken words', () => {
+    const words = new TurnWords();
+    const taken = words.add('Taken words.', 'job');
+    words.taken('Taken words.');
+    const waiting = words.add('Waiting words.', 'job');
+    expect(words.removed('Missing words.')).toBe(false);
+    expect(words.removed('Taken words.')).toBe(false);
+    expect(taken.state).toBe('taken');
+    expect(waiting.state).toBe('waiting');
+    expect(words.pending()).toEqual(['Waiting words.']);
+  });
+
+  it('marks only the oldest matching pending receipt as removed', () => {
+    const words = new TurnWords();
+    const taken = words.add('Same words.', 'job');
+    words.taken('Same words.');
+    const other = words.add('Other words.', 'job');
+    const first = words.add('Same\n words.', 'job');
+    const second = words.add('Same words.', 'job');
+    expect(words.removed('Same words.')).toBe(true);
+    expect(taken.state).toBe('taken');
+    expect(other.state).toBe('waiting');
+    expect(first.state).toBe('removed');
+    expect(second.state).toBe('waiting');
+  });
+
+  it('returns removed words immediately with their reason', () => {
+    const words = new TurnWords();
+    words.add('Removed words.', 'job').accepted = true;
+    words.add('Waiting words.', 'job').accepted = true;
+    words.removed('Removed words.');
+    expect(words.unheard(0, false, false)).toEqual([
+      { text: 'Removed words.', jobId: 'job', reason: 'the program removed the queued words' },
+    ]);
+    expect(words.pending()).toEqual(['Waiting words.']);
+    expect(words.unheard(0, false, false)).toEqual([]);
+  });
+
+  it('returns expired queued words when the caller omits idle', () => {
+    const words = new TurnWords();
+    words.add('Queued words.', 'job').accepted = true;
+    words.queued('Queued words.', 'hook');
+    words.end(100);
+    expect(words.unheard(15_099)).toEqual([]);
+    expect(words.unheard(15_100)).toEqual([{ text: 'Queued words.', jobId: 'job' }]);
+    expect(words.unheard(15_101)).toEqual([]);
+  });
+
+  it('keeps expired queued words while the program is busy', () => {
+    const words = new TurnWords();
+    words.add('Queued words.', 'job').accepted = true;
+    words.queued('Queued words.', 'hook');
+    words.end(100);
+    expect(words.unheard(15_100, false, false)).toEqual([]);
+    expect(words.pending()).toEqual(['Queued words.']);
+  });
+
+  it('returns queued words when the program is gone even if it was busy', () => {
+    const words = new TurnWords();
+    words.add('Queued words.', 'job').accepted = true;
+    words.queued('Queued words.', 'hook');
+    expect(words.unheard(0, true, false)).toEqual([{ text: 'Queued words.', jobId: 'job' }]);
+    expect(words.pending()).toEqual([]);
+  });
+
+  it('returns expired held words while the program is busy', () => {
+    const words = new TurnWords();
+    const held = words.add('Held words.', 'job');
+    held.accepted = true;
+    held.state = 'held';
+    words.end(100);
+    expect(words.unheard(15_099, false, false)).toEqual([]);
+    expect(words.unheard(15_100, false, false)).toEqual([{ text: 'Held words.', jobId: 'job' }]);
+  });
+
   it('matches flattened text oldest first, once per record, and ignores a different Codex turn', () => {
     const words = new TurnWords();
     const first = words.add('Use\n this.', 'job');
@@ -102,5 +239,27 @@ describe('live word receipts', () => {
     words.clear();
     expect(words.pending()).toEqual(['Exact words.']);
     expect(words.unheard(0, true)).toEqual([{ text: 'Exact words.', jobId: 'job' }]);
+  });
+});
+
+describe('Claude queue receipts', () => {
+  const text = 'First line.\nSecond line.';
+  const pasted = `<pasted_content id="1">\n${text}\n</pasted_content id="1">`;
+
+  it.each([
+    { where: 'enqueue', queued: pasted, removed: text },
+    { where: 'removal', queued: text, removed: pasted },
+  ])('matches a paste wrapper on $where while returning the queued text', ({ queued, removed }) => {
+    const enqueued = ['Other words.', queued, 'Later words.'];
+    expect(claudeWordReceipt({ type: 'queue-operation', operation: 'remove', content: removed }, enqueued)).toEqual({ state: 'removed', text: queued });
+    expect(enqueued).toEqual(['Other words.', 'Later words.']);
+  });
+
+  it('dequeues the matching entry without removing the others', () => {
+    const enqueued = ['First words.', 'Second words.', 'Third words.'];
+    expect(claudeWordReceipt({ type: 'queue-operation', operation: 'dequeue', content: 'Second words.' }, enqueued)).toBeNull();
+    expect(enqueued).toEqual(['First words.', 'Third words.']);
+    expect(claudeWordReceipt({ type: 'queue-operation', operation: 'remove' }, enqueued)).toEqual({ state: 'removed', text: 'First words.' });
+    expect(enqueued).toEqual(['Third words.']);
   });
 });

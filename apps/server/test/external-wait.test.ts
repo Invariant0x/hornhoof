@@ -1,9 +1,9 @@
 import type { ServerMessage } from '@hornhoof/protocol';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agentEvents, agents, companies, departments, jobs, requests, subscriptions, tasks } from '../src/db/schema.js';
+import { agentEvents, agents, companies, departments, jobs, requests, subscriptions, tasks, teams } from '../src/db/schema.js';
 import { cancel, createTask, silentTurn, updateTask } from '../src/modules/tasks/engine.js';
 import { checkLiveness, wakeAll } from '../src/modules/tasks/wake.js';
 import { agentProgramState, checkSilentTurns } from '../src/modules/tasks/silent.js';
@@ -391,13 +391,18 @@ describe('external task wait', () => {
   it.each(['head', 'orchestrator'] as const)('refuses invalid task bindings on a %s message without clearing another wait', async sender => {
     const c = await messaging();
     const task = await c.task();
+    const closed = await c.task();
+    await c.db.update(tasks).set({ status: 'done', closedAt: new Date() }).where(eq(tasks.id, closed.id));
     await c.wait(task.number, 'Images', new Date(Date.now() + 3_600_000).toISOString());
     const client = await c.tools(c[sender].id);
-    for (const input of [{ employee: c.peer.id, task: task.number }, { employee: c.worker.id, task: 9999 }]) {
+    for (const input of [{ employee: c.worker.id, task: closed.number }, { employee: c.worker.id, task: 9999 }]) {
       const result = await client.callTool({ name: 'message_employee', arguments: { ...input, text: 'Images are ready.' } });
       expect(result.isError).toBe(true);
       expect((await c.read(task.id)).externalWait).toMatchObject({ reason: 'Images' });
     }
+    const unrelated = await (await c.tools(c.peer.id)).callTool({ name: 'message_employee', arguments: { employee: c.head.id, task: task.number, text: 'Images are ready.' } });
+    expect(unrelated.isError).toBe(true);
+    expect((await c.read(task.id)).externalWait).toMatchObject({ reason: 'Images' });
     expect(await c.db.select().from(jobs).where(eq(jobs.taskId, task.id))).toEqual([]);
   });
 
@@ -414,5 +419,231 @@ describe('external task wait', () => {
     expect((await c.read(task.id)).externalWait).toBeNull();
     const messages = await c.db.select().from(agentEvents).where(eq(agentEvents.agentId, c.worker.id));
     expect(messages.filter(e => e.kind === 'message').map(e => e.data)).toContainEqual(expect.objectContaining({ text: 'Images are ready.', task: { id: task.id, number: task.number } }));
+  });
+
+  it('lets a team worker doing a gate-free subtask and its head both message each other with task', async () => {
+    const c = await messaging();
+    const [team] = await c.db.insert(teams).values({ companyId: c.company.id, departmentId: c.department.id, name: 'Urgent fixes' }).returning();
+    const [simon] = await c.db
+      .insert(agents)
+      .values({ companyId: c.company.id, departmentId: c.department.id, teamId: team!.id, kind: 'worker', roleKey: 'DEV-BE', name: 'Simon', model: '', subscriptionId: c.sub.id })
+      .returning();
+    const parent = (await createTask(c.ctx, { agentId: c.orchestrator.id }, { title: 'Urgent server fixes', brief: '', body: '', departmentId: c.department.id, assigneeAgentId: c.head.id })).task;
+
+    const headTools = await c.tools(c.head.id);
+    const created = (await headTools.callTool({
+      name: 'create_task',
+      arguments: { title: 'Fix task messages', brief: 'Subtask without gates.', body: '', executor: simon!.id, parent: parent.number },
+    })) as { isError?: boolean; content: { text: string }[] };
+    expect(created.isError).toBeFalsy();
+
+    const simonTools = await c.tools(simon!.id);
+    const listed = JSON.parse(((await simonTools.callTool({ name: 'tasks', arguments: {} })) as { content: { text: string }[] }).content[0]!.text) as { id: string; number: number; gateCount: number; assignee: { id: string } | null }[];
+    const subtask = listed[0]!;
+    expect(subtask).toMatchObject({ gateCount: 0, assignee: { id: simon!.id } });
+
+    const toSimon = (await headTools.callTool({
+      name: 'message_employee',
+      arguments: { employee: simon!.id, task: subtask.number, text: 'Please check the edge cases too.' },
+    })) as { isError?: boolean; content: { text: string }[] };
+    expect(toSimon.isError).toBeFalsy();
+
+    /* The head's turn is over, so its next message starts a turn of its own instead of going into that one. */
+    await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(and(eq(jobs.agentId, c.head.id), eq(jobs.status, 'running')));
+
+    const toHead = (await simonTools.callTool({
+      name: 'message_employee',
+      arguments: { employee: c.head.id, task: subtask.number, text: 'Checked and ready to submit.' },
+    })) as { isError?: boolean; content: { text: string }[] };
+    expect(toHead.isError, toHead.content[0]?.text).toBeFalsy();
+
+    const headJobs = await c.db.select().from(jobs).where(eq(jobs.agentId, c.head.id));
+    const headTurn = headJobs.find(j => j.taskId === subtask.id)!;
+    expect(headTurn.prompt).toContain('Checked and ready to submit.');
+    expect(await discardStaleTurn(c.db, headTurn)).toBe(false);
+
+    const submitted = (await simonTools.callTool({
+      name: 'submit',
+      arguments: { task: subtask.number, summary: 'Fixed.', evidence: 'Tests pass.' },
+    })) as { isError?: boolean };
+    expect(submitted.isError).toBeFalsy();
+    expect(await discardStaleTurn(c.db, headTurn)).toBe(false);
+  });
+
+  it('allows only the assignee, executor and current gate reviewers to act on a task message', async () => {
+    const c = await messaging();
+    const [rob, outsider] = await c.db
+      .insert(agents)
+      .values([
+        { companyId: c.company.id, departmentId: c.department.id, kind: 'worker', roleKey: 'DEV-REV', name: 'Rob', model: '', subscriptionId: c.sub.id },
+        { companyId: c.company.id, departmentId: c.department.id, kind: 'worker', roleKey: 'DEV-BE', name: 'Oleg', model: '', subscriptionId: c.sub.id },
+      ])
+      .returning();
+
+    const task = await c.task(c.worker.id);
+    /* A future gate reviewer before stage 1 is not on the gate yet. */
+    await c.db.update(tasks).set({ gates: [rob!.id] }).where(eq(tasks.id, task.id));
+    const beforeGate = (await (await c.tools(rob!.id)).callTool({
+      name: 'message_employee',
+      arguments: { employee: c.head.id, task: task.number, text: 'Not at my gate yet.' },
+    })) as { isError?: boolean; content: { text: string }[] };
+    expect(beforeGate.isError).toBe(true);
+    expect(beforeGate.content[0]!.text).toBe(`#${task.number} is not with you.`);
+
+    /* While the holder waits, its own message to the head keeps its external wait intact. */
+    await c.wait(task.number, 'Images', new Date(Date.now() + 3_600_000).toISOString());
+    const fromWaitingHolder = (await (await c.tools(c.worker.id)).callTool({
+      name: 'message_employee',
+      arguments: { employee: c.head.id, task: task.number, text: 'Registry still building.' },
+    })) as { isError?: boolean; content: { text: string }[] };
+    expect(fromWaitingHolder.isError, fromWaitingHolder.content[0]?.text).toBeFalsy();
+    expect((await c.read(task.id)).externalWait).toMatchObject({ reason: 'Images' });
+    const [waitingHeadTurn] = (await c.db.select().from(jobs).where(eq(jobs.agentId, c.head.id))).filter(j => j.taskId === task.id);
+    expect(await discardStaleTurn(c.db, waitingHeadTurn!)).toBe(false);
+
+    /* At stage 1: assignee is peer, panel has peer and rob, executor is worker; head oversees its department. */
+    await c.db
+      .update(tasks)
+      .set({ status: 'review', stage: 1, gates: [c.peer.id], panel: [c.peer.id, rob!.id], assigneeAgentId: c.peer.id, externalWait: null })
+      .where(eq(tasks.id, task.id));
+
+    for (const [from, to] of [
+      [outsider!.id, c.peer.id],
+      [c.worker.id, c.head.id],
+      [rob!.id, c.head.id],
+      [c.peer.id, outsider!.id],
+      [c.head.id, outsider!.id],
+    ] as const) {
+      const res = (await (await c.tools(from)).callTool({
+        name: 'message_employee',
+        arguments: { employee: to, task: task.number, text: 'About the review.' },
+      })) as { isError?: boolean; content: { text: string }[] };
+      expect(res.isError, `${from} -> ${to}: ${res.content[0]?.text}`).toBeFalsy();
+    }
+
+    for (const to of [c.worker.id, rob!.id, c.head.id] as const) {
+      const res = (await (await c.tools(outsider!.id)).callTool({
+        name: 'message_employee',
+        arguments: { employee: to, task: task.number, text: 'Unrelated.' },
+      })) as { isError?: boolean; content: { text: string }[] };
+      expect(res.isError, `outsider -> ${to}`).toBe(true);
+      expect(res.content[0]!.text).toBe(`#${task.number} is not with you.`);
+    }
+  });
+
+  it('lets the orchestrator oversee any task and a department head oversee its department tasks without granting creators or others', async () => {
+    const c = await messaging();
+    const [ops] = await c.db.insert(departments).values({ companyId: c.company.id, templateKey: 'operations', roleCode: 'OPS' }).returning();
+    const [simon, creator, opsHead] = await c.db
+      .insert(agents)
+      .values([
+        { companyId: c.company.id, departmentId: c.department.id, kind: 'worker', roleKey: 'DEV-BE', name: 'Simon', model: '', subscriptionId: c.sub.id },
+        { companyId: c.company.id, departmentId: c.department.id, kind: 'worker', roleKey: 'DEV-BE', name: 'Clara', model: '', subscriptionId: c.sub.id },
+        { companyId: c.company.id, departmentId: ops!.id, kind: 'head', roleKey: 'OPS-HEAD', name: 'Wanda', model: '', skills: ['ops-task-watch'], subscriptionId: c.sub.id },
+      ])
+      .returning();
+
+    /* Real company case: the orchestrator laid out the task for Development and Simon does it. */
+    const laidOut = (
+      await createTask(c.ctx, { agentId: c.orchestrator.id }, {
+        title: 'Access team fixes',
+        brief: '',
+        body: '',
+        departmentId: c.department.id,
+        assigneeAgentId: simon!.id,
+        executor: true,
+        gates: [],
+      })
+    ).task;
+    await c.wait(laidOut.number, 'Build check', new Date(Date.now() + 3_600_000).toISOString(), simon!.id);
+
+    const orchTools = await c.tools(c.orchestrator.id);
+    const toHead = (await orchTools.callTool({
+      name: 'message_employee',
+      arguments: { employee: c.head.id, task: laidOut.number, text: 'Check Simon on this task.' },
+    })) as { isError?: boolean; content: { text: string }[] };
+    expect(toHead.isError, toHead.content[0]?.text).toBeFalsy();
+    /* Messaging the head does not clear Simon's external wait on the task. */
+    expect((await c.read(laidOut.id)).externalWait).toMatchObject({ reason: 'Build check' });
+    const headTurn = (await c.db.select().from(jobs).where(eq(jobs.agentId, c.head.id))).find(j => j.taskId === laidOut.id)!;
+    expect(headTurn.prompt).toContain('Check Simon on this task.');
+    expect(await discardStaleTurn(c.db, headTurn)).toBe(false);
+
+    /* Orchestrator and the department's own head may write about the task to anyone they may write to at all. */
+    const orchToOps = (await orchTools.callTool({
+      name: 'message_employee',
+      arguments: { employee: opsHead!.id, task: laidOut.number, text: 'Watch this build.' },
+    })) as { isError?: boolean; content: { text: string }[] };
+    expect(orchToOps.isError, orchToOps.content[0]?.text).toBeFalsy();
+
+    const headTools = await c.tools(c.head.id);
+    const headToPeer = (await headTools.callTool({
+      name: 'message_employee',
+      arguments: { employee: c.peer.id, task: laidOut.number, text: 'Pair with Simon if needed.' },
+    })) as { isError?: boolean; content: { text: string }[] };
+    expect(headToPeer.isError, headToPeer.content[0]?.text).toBeFalsy();
+
+    /* Ordinary creators stay out; another department's head and unrelated workers gain nothing. */
+    await c.db.update(tasks).set({ createdByAgentId: creator!.id }).where(eq(tasks.id, laidOut.id));
+    for (const [from, to] of [
+      [creator!.id, c.head.id],
+      [creator!.id, c.peer.id],
+      [opsHead!.id, c.head.id],
+      [opsHead!.id, c.peer.id],
+      [c.peer.id, c.head.id],
+    ] as const) {
+      const res = (await (await c.tools(from)).callTool({
+        name: 'message_employee',
+        arguments: { employee: to, task: laidOut.number, text: 'Not mine to oversee.' },
+      })) as { isError?: boolean; content: { text: string }[] };
+      expect(res.isError, `${from} -> ${to}`).toBe(true);
+      expect(res.content[0]!.text).toBe(`#${laidOut.number} is not with you.`);
+    }
+
+    /* A person writing through the HTTP endpoint also gains nothing on non-holders, while reaching the holder. */
+    const personRefused = await c.app.inject({
+      method: 'POST',
+      url: `/api/agents/${c.head.id}/messages`,
+      payload: { text: 'Any update?', task: laidOut.number },
+      ...as(c.owner),
+    });
+    expect(personRefused.statusCode).toBe(403);
+    expect(personRefused.json().error.message).toBe(`#${laidOut.number} is not with you.`);
+
+    const personToHolder = await c.app.inject({
+      method: 'POST',
+      url: `/api/agents/${simon!.id}/messages`,
+      payload: { text: 'Build check finished.', task: laidOut.number },
+      ...as(c.owner),
+    });
+    expect(personToHolder.statusCode).toBe(202);
+    expect((await c.read(laidOut.id)).externalWait).toBeNull();
+  });
+
+  it('delivers a queued task message to another panel reviewer while the assignee waits externally', async () => {
+    const c = await messaging();
+    const [rob] = await c.db
+      .insert(agents)
+      .values({ companyId: c.company.id, departmentId: c.department.id, kind: 'worker', roleKey: 'DEV-REV', name: 'Rob', model: '', subscriptionId: c.sub.id })
+      .returning();
+    const task = await c.task(c.worker.id);
+    await c.db
+      .update(tasks)
+      .set({ status: 'review', stage: 1, gates: [c.peer.id], panel: [c.peer.id, rob!.id], assigneeAgentId: c.peer.id })
+      .where(eq(tasks.id, task.id));
+    await c.wait(task.number, 'Staging deploy', new Date(Date.now() + 3_600_000).toISOString(), c.peer.id);
+
+    const sent = (await (await c.tools(c.worker.id)).callTool({
+      name: 'message_employee',
+      arguments: { employee: rob!.id, task: task.number, text: 'The migration script is ready to check.' },
+    })) as { isError?: boolean; content: { text: string }[] };
+    expect(sent.isError, sent.content[0]?.text).toBeFalsy();
+    expect((await c.read(task.id)).externalWait).toMatchObject({ reason: 'Staging deploy' });
+
+    const [p2Turn] = await c.db.select().from(jobs).where(eq(jobs.agentId, rob!.id));
+    expect(p2Turn).toMatchObject({ taskId: task.id, status: 'running', error: null });
+    let delivered = await c.node.next();
+    while (delivered.type !== 'job.run' || delivered.jobId !== p2Turn!.id) delivered = await c.node.next();
+    expect(delivered.prompt).toContain('The migration script is ready to check.');
   });
 });
