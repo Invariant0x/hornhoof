@@ -110,15 +110,14 @@ describe('words typed into a running turn', () => {
     expect(await c.host.screen('say')).toContain(text);
   });
 
-  it('pastes and presses Enter on an unknown screen, and logs the fallback once for the agent', async () => {
+  it('refuses each delivery on an unknown screen without typing', async () => {
     const c = await atWork();
     c.screen.mockResolvedValue('Program is loading.');
-    expect(await c.host.say('say', 'Use the new schema.')).toBe(true);
-    expect(await c.host.say('say', 'Then check the result.')).toBe(true);
-    expect(c.paste.mock.calls.map(([, text]) => text)).toEqual(['Use the new schema.', 'Then check the result.']);
-    expect(c.keys.mock.calls.filter(([, key]) => key === 'Enter')).toHaveLength(2);
-    expect(c.logMessage).toHaveBeenCalledOnce();
-    expect(c.logMessage.mock.calls[0]![0]).toMatch(/say.*codex.*input/i);
+    expect(await c.host.say('say', 'Use the new schema.')).toBe(false);
+    expect(await c.host.say('say', 'Then check the result.')).toBe(false);
+    expect(c.paste).not.toHaveBeenCalled();
+    expect(c.keys).not.toHaveBeenCalled();
+    expect(c.logMessage.mock.calls).toEqual(Array(2).fill(['Agent say (codex): live words were not delivered: the input could not be read.']));
   });
 
   it("leaves a person's unfinished input alone", async () => {
@@ -128,12 +127,28 @@ describe('words typed into a running turn', () => {
     expect(await c.host.say('say', 'Use the new schema.')).toBe(false);
     expect(c.paste).not.toHaveBeenCalled();
     expect(await c.host.screen('say')).toContain('An unfinished draft.');
+    expect(c.logMessage.mock.calls).toEqual([['Agent say (codex): live words were not delivered: the input contains unsent words.']]);
   });
 
-  it('falls back on the visible screen without reading an old empty prompt from history', async () => {
+  it.each([
+    ['no turn is running', async (c: Awaited<ReturnType<typeof atWork>>) => { c.finish(); await c.running; }, Infinity],
+    ['the delivery deadline passed', async () => {}, 0],
+    ['there is not enough time to paste the words', async () => {}, 100],
+    ['the program is no longer running', async (c: Awaited<ReturnType<typeof atWork>>) => { c.alive.mockResolvedValue(false); }, Infinity],
+    ['could not read the input', async (c: Awaited<ReturnType<typeof atWork>>) => { c.screen.mockRejectedValueOnce(new Error('Private words.')); }, Infinity],
+    ['could not paste the words', async (c: Awaited<ReturnType<typeof atWork>>) => { c.paste.mockRejectedValueOnce(new Error('Private words.')); }, Infinity],
+    ['could not send the submit key', async (c: Awaited<ReturnType<typeof atWork>>) => { c.keys.mockRejectedValueOnce(new Error('Private words.')); }, Infinity],
+  ] as const)('logs one refusal without message text when %s', async (reason, prepare, within) => {
+    const c = await atWork();
+    await prepare(c);
+    expect(await c.host.say('say', 'Private words.', within)).toBe(false);
+    expect(c.logMessage.mock.calls).toEqual([[`Agent say (codex): live words were not delivered: ${reason}.`]]);
+  });
+
+  it('refuses hidden input without reading an old empty prompt from history', async () => {
     const c = await atWork();
     c.screen.mockImplementation(async (_name, history = 200) => history === 0 ? 'Input is hidden.' : '› \n');
-    expect(await c.host.say('say', 'Use the new schema.')).toBe(true);
+    expect(await c.host.say('say', 'Use the new schema.')).toBe(false);
     expect(c.screen.mock.calls.every(([, history]) => history === 0)).toBe(true);
   });
 
@@ -159,14 +174,15 @@ describe('words typed into a running turn', () => {
     expect(c.logMessage).not.toHaveBeenCalled();
   });
 
-  it('keeps the fallback answer when the turn ends as Enter goes in', async () => {
+  it('does not send Enter into input that cannot be read', async () => {
     const c = await atWork();
     c.screen.mockResolvedValue('Input is hidden.');
     c.keys.mockImplementationOnce(async () => {
       c.finish();
       await c.running;
     });
-    expect(await c.host.say('say', 'Use the new schema.')).toBe(true);
+    expect(await c.host.say('say', 'Use the new schema.')).toBe(false);
+    expect(c.keys).not.toHaveBeenCalled();
   });
 
   it('checks the turn after reading the input before typing', async () => {
@@ -180,7 +196,7 @@ describe('words typed into a running turn', () => {
     expect(c.paste).not.toHaveBeenCalled();
   });
 
-  it('clears words left by a paste that failed halfway through', async () => {
+  it('leaves unconfirmed input untouched when a paste fails', async () => {
     const c = await atWork();
     c.paste.mockImplementationOnce(async (name, text) => {
       await c.tmux.paste(name, text);
@@ -188,7 +204,8 @@ describe('words typed into a running turn', () => {
     });
     expect(await c.host.say('say', 'Use the new schema.')).toBe(false);
     expect(c.keys.mock.calls.flat()).not.toContain('Enter');
-    expect(await c.host.screen('say')).not.toContain('Use the new schema.');
+    expect(c.keys.mock.calls.flat()).not.toContain('C-u');
+    expect(await c.host.screen('say')).toContain('Use the new schema.');
   });
 
   it('says yes when the input clears and the same turn still runs, even with the words in its history', async () => {
@@ -202,6 +219,28 @@ describe('words typed into a running turn', () => {
     c.screen.mockResolvedValueOnce('OpenAI Codex\n› \n').mockResolvedValueOnce('OpenAI Codex\n› Use the new schema.\n');
     expect(await c.host.say('say', 'Use the new schema.')).toBe(true);
     expect(c.keys.mock.calls.filter(([, key]) => key === 'Enter')).toHaveLength(1);
+  });
+
+  it('keeps a transcript receipt when the last liveness check fails', async () => {
+    const c = await atWork();
+    const keys = c.keys.getMockImplementation()!;
+    c.keys.mockImplementationOnce(async (name, ...pressed) => {
+      await keys(name, ...pressed);
+      c.alive.mockRejectedValueOnce(new Error('Connection lost.'));
+    });
+    expect(await c.host.say('say', 'Use the new schema.')).toBe(true);
+    expect(c.logMessage).not.toHaveBeenCalled();
+  });
+
+  it('keeps a transcript receipt when sending Enter reports an error after it went in', async () => {
+    const c = await atWork();
+    const keys = c.keys.getMockImplementation()!;
+    c.keys.mockImplementationOnce(async (name, ...pressed) => {
+      await keys(name, ...pressed);
+      throw new Error('Connection lost.');
+    });
+    expect(await c.host.say('say', 'Use the new schema.')).toBe(true);
+    expect(c.logMessage).not.toHaveBeenCalled();
   });
 
   it.each([-15_000, 15_000])('starts its budget on a node whose clock differs by %i ms', async offset => {

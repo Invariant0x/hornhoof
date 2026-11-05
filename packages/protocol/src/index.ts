@@ -530,6 +530,7 @@ const NodeMessage = z.discriminatedUnion('type', [
   /* Said ok means the program recorded the words, or Codex holds them. Unheard follows if they never entered a turn. */
   z.object({ type: z.literal('agent.said'), ref: z.string().max(64), ok: z.boolean() }),
   z.object({ type: z.literal('agent.unheard'), agentKey: Id, jobId: Id.nullable(), text: z.string().max(100_000) }),
+  z.object({ type: z.literal('agent.words_settled'), agentKey: Id, jobId: Id }),
   /* How a restart Hornhoof asked for went: done, or why the node did not do it. */
   z.object({ type: z.literal('agent.restarted'), agentKey: Id, jobId: Id, ok: z.boolean(), reason: z.string().max(300).nullable() }),
 ]);

@@ -64,6 +64,17 @@ const CRED_KINDS: Record<string, CredKind> = { claude: 'claude_token', codex: 'c
 type TestRun = Extract<ServerMessage, { type: 'tests.run' }>;
 type TestsDone = Extract<NodeMessage, { type: 'tests.done' }>;
 
+async function sayToAgent(host: TerminalHost | null, m: Extract<ProgramServerMessage, { type: 'agent.say' }>, log: (line: string) => void): Promise<boolean> {
+  const refused = (reason: string) => { log(`Agent ${m.agentKey}: live words were not delivered: ${reason}.`); return false; };
+  if (!host) return refused('the terminal host is not running');
+  return host.say(m.agentKey, m.text, m.within, m.operatorDelivery).catch(() => refused('terminal input failed'));
+}
+
+async function answerLiveWords(host: TerminalHost | null, m: Extract<ProgramServerMessage, { type: 'agent.say' }>, log: (line: string) => void, emit: (m: NodeMessage) => void): Promise<void> {
+  const ok = await sayToAgent(host, m, log);
+  emit({ type: 'agent.said', ref: m.ref, ok });
+}
+
 /* What a node says to a sign-in it cannot run: a company key's, a Kimi or GLM key's, or one with no tmux. */
 
 /* A part of a run never runs as the node itself: without a user of its own for runs, the node takes none. */
@@ -389,10 +400,8 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
         return shownBy(login, host, m.termId)?.close(m);
       case 'turn.opened':
         return host?.opened(m);
-      case 'agent.say': {
-        const ok = host ? await host.say(m.agentKey, m.text, m.within, m.operatorDelivery).catch(() => false) : false;
-        return void send?.({ type: 'agent.said', ref: m.ref, ok });
-      }
+      case 'agent.say':
+        return answerLiveWords(host, m, log, emit);
       case 'agent.restart': {
         const result = host ? await host.restart(m.agentKey, m.jobId, m.note) : { ok: false, reason: 'The terminal host is not running.' };
         return void send?.({ type: 'agent.restarted', agentKey: m.agentKey, jobId: m.jobId, ...result });
@@ -719,13 +728,17 @@ async function setKey(dir: string, io: Io): Promise<number> {
   return 0;
 }
 
+/* A machine ready for turns that could not prepare its browser says why. */
+function withBrowserProblem(dir: string, word: string): string {
+  const problem = word === 'ready' ? readBrowserError(dir) : null;
+  return problem ? `browser_failed: ${problem}` : word;
+}
+
 async function status(dir: string, io: Io): Promise<number> {
   const state = readState(dir);
   /* spare: another machine of the plan runs Codex now, and this one takes over when that one is away. */
-  let word = isRemoved(dir) ? 'removed' : !state ? 'no_key' : isSpare(dir) ? 'spare' : state.provider ? await planWord(dir, state.provider) : 'ready';
-  const browserProblem = word === 'ready' ? readBrowserError(dir) : null;
-  if (browserProblem) word = `browser_failed: ${browserProblem}`;
-  io.stdout.write(word + '\n');
+  const word = isRemoved(dir) ? 'removed' : !state ? 'no_key' : isSpare(dir) ? 'spare' : state.provider ? await planWord(dir, state.provider) : 'ready';
+  io.stdout.write(withBrowserProblem(dir, word) + '\n');
   return 0;
 }
 
@@ -885,6 +898,14 @@ async function run(dir: string, builtinMode: boolean, io: Io): Promise<number | 
 }
 
 /* One command line. A running node answers its handle and keeps the process up; the others answer an exit code. */
+/* What the node's updater and its machine's setup call, or the usage for anything else. */
+async function upkeepCommand(dir: string, args: string[], io: Io): Promise<number> {
+  if (args[0] === 'wait-update') return waitUpdate(dir, io);
+  if (args[0] === 'prepare-browser') return prepareBrowserCommand(dir, args[1], io);
+  io.stderr.write(USAGE + '\n');
+  return 1;
+}
+
 export async function command(args: string[], io: Io): Promise<number | { stop(): void }> {
   const dir = dataDir();
   switch (args[0]) {
@@ -896,13 +917,8 @@ export async function command(args: string[], io: Io): Promise<number | { stop()
       return status(dir, io);
     case 'set-key':
       return setKey(dir, io);
-    case 'wait-update':
-      return waitUpdate(dir, io);
-    case 'prepare-browser':
-      return prepareBrowserCommand(dir, args[1], io);
     default:
-      io.stderr.write(USAGE + '\n');
-      return 1;
+      return upkeepCommand(dir, args, io);
   }
 }
 

@@ -21,7 +21,7 @@ export async function requeueOperatorWords(ctx: Ctx, node: NodeIdentity, message
   const metadata = parsed.data;
   const settled = await withInputLock(ctx, message.agentKey, () => onAgent(ctx, message.agentKey, () => operatorTransaction(ctx,
     (tx, inside) => recordFallback(tx, inside, node.nodeId, message, metadata, now))));
-  if (settled) settleWords(ctx, message.agentKey, settled.jobId, settled.beforeEnd);
+  if (settled) settleWords(ctx, message.agentKey, settled.jobId);
   await pump(ctx, message.agentKey);
   return true;
 }
@@ -72,7 +72,7 @@ async function recordFallback(tx: Tx, inside: Ctx, nodeId: string, message: Unhe
   }
   const [original] = await tx.select().from(jobs).where(and(eq(jobs.id, delivery.jobId), eq(jobs.agentId, agent.id))).for('update');
   if (!original) return;
-  if (previous) return { jobId: original.id, beforeEnd: original.status === 'running' };
+  if (previous) return { jobId: original.id };
   return enqueueFallback(inside, agent, original, message.text, metadata, now);
 }
 
@@ -88,5 +88,5 @@ async function enqueueFallback(inside: Ctx, agent: StoredAgent, original: typeof
   repeated.repeated.data = { ...(data && typeof data === 'object' ? data : {}), operatorDelivery: metadata, operatorFallback: metadata.id };
   await insertTurn(inside, { companyId: agent.companyId, agentId: agent.id, prompt: text, ...repeated });
   await logTurnFact(inside, original, UNHEARD_NOTE, { unheardAt: now.toISOString(), operatorDelivery: metadata });
-  return { jobId: original.id, beforeEnd: original.status === 'running' };
+  return { jobId: original.id };
 }

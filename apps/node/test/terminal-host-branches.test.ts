@@ -32,7 +32,7 @@ function fixture(kind: Kind | null = 'claude') {
   const host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: message => sent.push(message), secrets: () => [], log: () => {} });
   const agent = host['agent']('branches');
   Object.assign(agent, { home, workDir, sessionId: 'old', program: kind === null ? null : programs[kind] });
-  agent.turn = { jobId: 'job', typed: false, seq: 0, onEvent: event => events.push(event) };
+  agent.turn = { jobId: 'job', typed: false, seq: 0, words: new TurnWords(), onEvent: event => events.push(event) };
   agent.busy = agent.took = true;
   agent.ends.started('current');
   let resolve!: (message: string) => void;

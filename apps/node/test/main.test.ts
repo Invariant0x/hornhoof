@@ -19,6 +19,11 @@ import type { ProviderAdapter, RunInput } from '../src/runner.js';
 import { isRemoved, writeState } from '../src/state.js';
 import type { runTests } from '../src/tests.js';
 
+vi.mock('node:os', async importOriginal => {
+  const os = await importOriginal<typeof import('node:os')>();
+  return { ...os, uptime: vi.fn(os.uptime) };
+});
+
 const adapter: ProviderAdapter = {
   install: async () => {},
   loggedIn: async () => true,
@@ -254,13 +259,15 @@ describe('a node that runs agents in terminals', () => {
   });
 
   it.skipIf(!hasTmux)('passes the live word budget to the host and accepts older servers without it', async () => {
+    vi.mocked(uptime).mockReturnValueOnce(3600);
     const server = await fakeServer();
     const dir = nodeDir(server.url);
     const tmux = new Tmux({ socket: `hh-within-${process.pid}`, env: { PATH: process.env.PATH ?? '', HOME: dir } });
     const say = vi.spyOn(TerminalHost.prototype, 'say').mockResolvedValue(true);
     onTestFinished(() => say.mockRestore());
     const fake = new URL('./fakes/fake-term.mjs', import.meta.url).pathname;
-    const node = await runNode({ dir, adapter, log: () => {}, terminal: { tmux, program: claudeProgram, bin: fake, home: join(dir, 'home'), signedOut: /not logged in/i } });
+    const log = vi.fn();
+    const node = await runNode({ dir, adapter, log, terminal: { tmux, program: claudeProgram, bin: fake, home: join(dir, 'home'), signedOut: /not logged in/i } });
     onTestFinished(() => node.stop());
     await server.wait(() => server.received.some(m => m.type === 'hello'));
     const words = { type: 'agent.say', agentKey: 'agent-1', text: 'Use the new schema.' };
@@ -274,9 +281,39 @@ describe('a node that runs agents in terminals', () => {
     server.send({ ...words, ref: 'operator', operatorDelivery });
     await server.wait(() => server.received.some(m => m.type === 'agent.said' && m.ref === 'operator'));
     expect(say).toHaveBeenLastCalledWith('agent-1', words.text, undefined, operatorDelivery);
+    say.mockRejectedValueOnce(new Error(words.text));
+    server.send({ ...words, ref: 'failed' });
+    await server.wait(() => server.received.some(m => m.type === 'agent.said' && m.ref === 'failed'));
+    expect(server.received.find(m => m.type === 'agent.said' && m.ref === 'failed')).toMatchObject({ ok: false });
+    expect(log.mock.calls.filter(([line]) => line.includes('live words'))).toEqual([['Agent agent-1: live words were not delivered: terminal input failed.']]);
+  });
+
+  it('keeps a live receipt across a short reconnect', async () => {
+    vi.mocked(uptime).mockReturnValueOnce(3600);
+    const server = await fakeServer();
+    const dir = nodeDir(server.url);
+    let receipt!: (ok: boolean) => void;
+    let entered = false;
+    const pending = new Promise<boolean>(resolve => { receipt = resolve; });
+    const say = vi.spyOn(TerminalHost.prototype, 'say').mockImplementation(() => { entered = true; return pending; });
+    onTestFinished(() => say.mockRestore());
+    const log: string[] = [];
+    const tmux = new Tmux({ env: { HOME: dir } });
+    const node = await runNode({ dir, adapter, log: line => log.push(line), terminal: { tmux, program: claudeProgram, bin: 'claude', home: dir, signedOut: /not logged in/i } });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    server.send({ type: 'agent.say', agentKey: 'agent-1', text: 'Keep these words.', ref: 'offline' });
+    await server.wait(() => entered);
+    server.drop();
+    await server.wait(() => log.some(line => line.includes('Connection closed')));
+    receipt(true);
+    await server.wait(() => server.received.filter(m => m.type === 'hello').length === 2, 5000);
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(server.received.filter(m => m.type === 'agent.said')).toEqual([{ type: 'agent.said', ref: 'offline', ok: true }]);
   });
 
   it.skipIf(!hasTmux)("says so, runs an agent's turn in its session, shows the session and keeps test jobs as they were", async () => {
+    vi.mocked(uptime).mockReturnValueOnce(3600);
     const server = await fakeServer();
     const dir = nodeDir(server.url);
     const tmux = new Tmux({ socket: `hh-main-${process.pid}`, env: { PATH: process.env.PATH ?? '', HOME: dir } });
@@ -415,13 +452,16 @@ describe('a node that runs agents in terminals', () => {
   });
 
   it('says words for a running turn did not go in when it runs no terminals', async () => {
+    vi.mocked(uptime).mockReturnValueOnce(3600);
     const server = await fakeServer();
-    const node = await runNode({ dir: nodeDir(server.url), adapter, log: () => {} });
+    const log = vi.fn();
+    const node = await runNode({ dir: nodeDir(server.url), adapter, log });
     onTestFinished(() => node.stop());
     await server.wait(() => server.received.some(m => m.type === 'hello'));
     server.send({ type: 'agent.say', agentKey: 'agent-1', text: 'Use the new schema.', ref: 'r-1' });
     await server.wait(() => server.received.some(m => m.type === 'agent.said'));
     expect(server.received.find(m => m.type === 'agent.said')).toEqual({ type: 'agent.said', ref: 'r-1', ok: false });
+    expect(log.mock.calls.filter(([line]) => line.includes('live words'))).toEqual([['Agent agent-1: live words were not delivered: the terminal host is not running.']]);
   });
 });
 

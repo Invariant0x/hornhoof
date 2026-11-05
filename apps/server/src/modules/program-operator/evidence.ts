@@ -13,7 +13,7 @@ import { pump, settleWords } from '../conversation/queue.js';
 
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 type DeliveryFact = Extract<OperatorEvidence, { type: 'program.delivery' }>;
-type SettledWords = { jobId: string; beforeEnd: boolean };
+type SettledWords = { jobId: string };
 
 /* The receipt ACK follows the transaction, including immutable evidence and its resulting delivery state. */
 export async function acceptOperatorEvidence(ctx: Ctx, node: NodeIdentity, input: OperatorEvidence, now = new Date()): Promise<boolean> {
@@ -39,7 +39,7 @@ async function commitEvidence(ctx: Ctx, nodeId: string, frame: OperatorEvidence,
 }
 
 async function acknowledgeEvidence(ctx: Ctx, node: NodeIdentity, frame: OperatorEvidence, settled: readonly SettledWords[], now: Date): Promise<void> {
-  for (const fallback of settled) settleWords(ctx, frame.agentKey, fallback.jobId, fallback.beforeEnd);
+  for (const fallback of settled) settleWords(ctx, frame.agentKey, fallback.jobId);
   ctx.hub.send(node, { type: 'program.evidence_ack', evidenceId: frame.evidenceId });
   await syncOperatorCases(ctx, frame.agentKey, now);
   if (settled.length) void pump(ctx, frame.agentKey).catch(error => ctx.log.error({ error }, 'Restoring finalized live words failed.'));
