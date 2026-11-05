@@ -136,7 +136,7 @@ export type Employee = {
 };
 
 /* A role a department's employees hold, in its template's order; gate: where it stands among the default gates. */
-export type DeptRole = { id: string; title: Lang; description: Lang; kind: 'head' | 'member'; gate: number | null };
+export type DeptRole = { id: string; title: Lang; description: Lang; kind: 'head' | 'member'; gate: number | null; schema?: 'before_work' | 'final_check' | 'observer' | null };
 
 /* A template department without a typed name shows its template's name in the person's language. people: those who reach
    only this department. */

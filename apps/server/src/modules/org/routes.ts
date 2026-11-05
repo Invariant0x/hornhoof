@@ -159,7 +159,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
         .sort((a, b) => at(a) - at(b))
         .flatMap(id => {
           const role = templates.roles.get(id);
-          return role ? [{ id, title: role.title, description: role.description, kind: role.kind, gate: role.gate }] : [];
+          return role ? [{ id, title: role.title, description: role.description, kind: role.kind, gate: role.gate, schema: role.schema }] : [];
         });
     };
 
