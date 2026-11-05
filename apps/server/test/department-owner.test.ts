@@ -200,6 +200,21 @@ describe('setting a department owner', () => {
     await c.app.inject({ method: 'PATCH', url: `/api/people/${c.ids.dana}`, payload: { access: { departments: [c.sales.id] } }, ...as(c.ceoToken) });
     expect((await reach(c.ids.dana)).owns ?? new Set()).toEqual(new Set());
   });
+
+  it('shows the company the owner who counts now: none once that person is switched off or loses access', async () => {
+    const c = await company();
+    const shown = async () => (await c.app.inject({ method: 'GET', url: '/api/org', ...as(c.ceoToken) })).json().departments.find((d: { id: string }) => d.id === c.dev.id).ownerPersonId;
+    expect(await shown()).toBeNull();
+    await c.setOwner(c.ceoToken, c.dev.id, c.ids.dana);
+    expect(await shown()).toBe(c.ids.dana);
+    await c.db.update(people).set({ status: 'disabled' }).where(eq(people.id, c.ids.dana));
+    expect(await shown()).toBeNull();
+    expect((await c.policy(c.ceoToken, c.dev.id)).json().owner).toBeNull();
+    await c.db.update(people).set({ status: 'active' }).where(eq(people.id, c.ids.dana));
+    expect(await shown()).toBe(c.ids.dana);
+    await c.app.inject({ method: 'PATCH', url: `/api/people/${c.ids.dana}`, payload: { access: { departments: [c.sales.id] } }, ...as(c.ceoToken) });
+    expect(await shown()).toBeNull();
+  });
 });
 
 type Waiting = { requests: { id: string; ownerPersonId: string; canAnswer: boolean; decidedBy: { kind: string; department: { id: string } | null } }[]; counts: { byPerson: Record<string, number>; total: number } };

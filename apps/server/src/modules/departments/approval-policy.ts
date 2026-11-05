@@ -46,12 +46,12 @@ export async function departmentOwner(ctx: Pick<Ctx, 'db'>, companyId: string, d
 
 /* Whether a person approved this kind of work on this channel of the department before. A kind nobody approved stays new:
    neither a wait nor a refusal makes it known. */
-export async function kindKnown(db: Pick<Db, 'select'>, departmentId: string, channel: ApprovalChannel, kind: string): Promise<boolean> {
+export async function kindKnown(db: Pick<Db, 'select'>, companyId: string, departmentId: string, channel: ApprovalChannel, kind: string): Promise<boolean> {
   const [found] = await db
     .select({ id: requests.id })
     .from(requests)
     .innerJoin(tasks, eq(tasks.id, requests.taskId))
-    .where(and(eq(tasks.departmentId, departmentId), eq(requests.approvalChannel, channel), eq(requests.approvalKind, kindKey(kind)), eq(requests.status, 'approved')))
+    .where(and(eq(requests.companyId, companyId), eq(requests.approvalChannel, channel), eq(requests.approvalKind, kindKey(kind)), eq(requests.status, 'approved'), eq(tasks.departmentId, departmentId)))
     .limit(1);
   return found !== undefined;
 }

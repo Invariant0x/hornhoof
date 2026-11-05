@@ -25,9 +25,9 @@ function ceoOf(people: readonly Candidate[]): string {
 export const listsPlace = (access: Access, spot: Spot) =>
   !access.whole && Boolean((spot.departmentId && access.departments.has(spot.departmentId)) || (spot.parentId && access.departments.has(spot.parentId)));
 
-/* The department or product a decision belongs to: a question, a choice or a stuck task, on a task or an employee of a
-   department. Approvals, the CEO's topics, unknown topics, the orchestrator's own tasks, its cards and its request for the
-   computer belong to none, so they are the CEO's. */
+/* The department or product whose people a decision belongs to: a question, a choice or a stuck task, on a task or an
+   employee of a department. Approvals, which only a named owner takes besides the CEO, the CEO's topics, unknown topics, the
+   orchestrator's own tasks, its cards and its request for the computer belong to no department's people. */
 export function decisionPlace(d: DecisionSubject): Spot | null {
   if (d.source !== 'request' || d.kind === 'approval' || !d.topic || !DEPARTMENTAL.includes(d.topic) || !d.spot.departmentId) return null;
   return d.spot;

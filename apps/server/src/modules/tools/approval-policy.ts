@@ -109,7 +109,7 @@ export function registerApprovalTools(server: McpServer, ctx: Ctx, job: ToolJob)
       readable(async () => {
         const task = await held(ref);
         const rule = await ruleFor(ctx, task, asked.channel);
-        const known = task.departmentId !== null && rule.mode === 'new_kinds' && (await kindKnown(db, task.departmentId, asked.channel, asked.kind));
+        const known = task.departmentId !== null && rule.mode === 'new_kinds' && (await kindKnown(db, job.companyId, task.departmentId, asked.channel, asked.kind));
         if (!approvalNeeded(rule, { amount: asked.amount ?? null, known })) {
           const why = rule.mode === 'within_limits' ? `${asked.amount} is within the limit of ${limitWords(rule)}` : 'this kind was approved before';
           await wakeAll(ctx, (await comment(ctx, { agentId: job.agentId }, task.id, `Went without approval (${asked.channel}, ${kindKey(asked.kind)}): ${why}. ${asked.text}`)).wakes);
