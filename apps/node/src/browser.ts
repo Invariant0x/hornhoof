@@ -10,6 +10,10 @@ export const GLOBAL_PLAYWRIGHT_DIR = '/usr/local/lib/node_modules/playwright';
 
 const INSTALL_TIMEOUT_MS = 10 * 60_000;
 const VERIFY_TIMEOUT_MS = 30_000;
+const STARTUP_TOOLS: { bin: string; args: string[] }[] = [
+  { bin: 'unzip', args: ['-v'] },
+  ...['gh', 'shellcheck', '/usr/bin/time', 'strings', 'patch', 'ss', 'objdump'].map(bin => ({ bin, args: ['--version'] })),
+];
 const MAX_REASON_LENGTH = 240;
 const SAFE_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 const PLAYWRIGHT_PACKAGES = ['@playwright/test', 'playwright', 'playwright-core'] as const;
@@ -494,15 +498,24 @@ export async function ensureRepoBrowser(
   if (!res.ok) throw new Error(`Playwright Chromium could not start: ${res.error}`);
 }
 
-async function startupReadinessError(dir: string, verifyUser: JobUser | null): Promise<string | null> {
+async function startupToolError(bin: string, args: string[], verifyUser: JobUser | null): Promise<string | null> {
+  const command = [bin, ...args].join(' ');
   const checked = await runProgram({
-    bin: 'unzip', args: ['-v'], user: verifyUser, timeoutMs: VERIFY_TIMEOUT_MS,
+    bin, args, user: verifyUser, timeoutMs: VERIFY_TIMEOUT_MS,
     env: { PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin', LANG: 'C.UTF-8' },
   });
-  if (checked.timedOut) return 'unzip -v timed out.';
+  if (checked.timedOut) return `${command} timed out.`;
   if (checked.code !== 0) {
     const reason = stripEscapes(checked.output).trim().slice(0, MAX_REASON_LENGTH) || `exited with code ${checked.code ?? 'unknown'}`;
-    return `unzip -v failed: ${reason}`;
+    return `${command} failed: ${reason}`;
+  }
+  return null;
+}
+
+async function startupReadinessError(dir: string, verifyUser: JobUser | null): Promise<string | null> {
+  for (const { bin, args } of STARTUP_TOOLS) {
+    const error = await startupToolError(bin, args, verifyUser);
+    if (error) return error;
   }
   const res = await prepareAndVerifyBrowser({ dir, verifyUser });
   return res.ok ? null : res.error;
