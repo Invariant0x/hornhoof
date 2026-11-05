@@ -24,7 +24,7 @@ import { ProgramWatch, READY, REPORT_MS, programState, type Pending } from './pr
 import { acceptClaudeDialogs, agyTranscript, claudeTranscript, findKimiWire, findRollout, prepareAgy, prepareKimi, rolloutFiles, type LaunchSpec, type TermProgram } from './programs.js';
 import { FAILURE, failure } from './failures.js';
 import { TurnEnds, hookCalls, claudeEnd, type TurnEnd } from './turn-signals.js';
-import { claudeWordReceipt, restartRefusal, resumeCommand, TurnWords, type WordReceipt } from './program-restart.js';
+import { claudeWordReceipt, restartRefusal, resumeCommand, TurnWords, type RestartEvidence, type WordReceipt } from './program-restart.js';
 import { CALLS } from './tool-calls.js';
 import { agyError, agySteps, claudeStatusContext, claudeStatusLimits, codexRollout, kimiWire, LineTail, type WireNews } from './transcripts.js';
 import type { RecordingCursor } from './recordings.js';
@@ -86,6 +86,7 @@ type Turn = {
 };
 type JobError = RunResult['error'];
 type LiveWords = { turn: Turn; text: string; deadline: number; operatorDelivery?: OperatorDelivery };
+type TakenWords = { jobId: string | null; text: string; operatorDelivery?: OperatorDelivery };
 
 type Agent = {
   key: string;
@@ -471,8 +472,7 @@ export class TerminalHost {
     /* A program started with nothing to type gets its tools before its turn ends, while Hornhoof still answers for them.
        Kimi Code connects to its tools only once it has a session, which a new one gets with the first message, and
        Antigravity only once it takes a message or opens its MCP panel. */
-    const lazy = (program.kind === 'kimi' && !input.sessionId) || program.kind === 'antigravity';
-    const tools = !goesOn && !input.prompt && input.tools && !lazy ? this.bridge.listed(job.key, this.toolsMs) : null;
+    const tools = initialToolsNeeded(job, goesOn) ? this.bridge.listed(job.key, this.toolsMs) : null;
 
     /* What is left in the log from before belongs to no turn. */
     this.drain(a);
@@ -483,10 +483,7 @@ export class TerminalHost {
     input.signal?.addEventListener('abort', () => this.operator?.intentional(a.key, 'cancelled'), { once: true });
     this.bridge.setToken(job.key, input.tools?.token ?? null);
     const starting = input.prompt ? null : (tools ?? Promise.resolve());
-    const words = new TurnWords(input.prompt ? [input.prompt] : [], { preserveOriginal: Boolean(job.operatorDelivery), original: phase => {
-      this.operator?.receipt(a.key, job.operatorDelivery, phase);
-      if (phase === 'taken' && input.jobId && (!a.turn || a.turn.starting || this.overIn(a))) a.originalTaken = { jobId: input.jobId, text: input.prompt, operatorDelivery: job.operatorDelivery };
-    }, word: (word, phase) => this.operator?.receipt(a.key, word.operatorDelivery, phase) });
+    const words = this.requestedWords(a, job);
     const turn: Turn = { jobId: input.jobId ?? null, toolToken: input.tools?.token, words, onEvent: input.onEvent ?? (() => {}), typed: false, seq: 0, signal: input.signal, ...(starting ? { starting: true } : {}) };
     if (starting) a.starting = starting;
     a.turn = turn;
@@ -499,7 +496,7 @@ export class TerminalHost {
       return await this.runRequested(a, job, turn, tools, goesOn, a.ended);
     } finally {
       this.endWords(a, turn);
-      if (job.operatorDelivery && input.jobId && words.originalPending() && !input.signal?.aborted) (a.retainedAssignments ??= []).push({ jobId: input.jobId, text: input.prompt, words });
+      this.retainAssignment(a, job, words);
       a.typing = null;
       if (starting && a.starting === starting) a.starting = null;
       if (a.turn === turn) {
@@ -508,6 +505,23 @@ export class TerminalHost {
         a.ended = null;
       }
     }
+  }
+
+  private requestedWords(a: Agent, job: TermJob): TurnWords {
+    return new TurnWords(job.input.prompt ? [job.input.prompt] : [], {
+      preserveOriginal: Boolean(job.operatorDelivery),
+      original: phase => this.originalReceipt(a, job, phase),
+      word: (word, phase) => this.operator?.receipt(a.key, word.operatorDelivery, phase),
+    });
+  }
+
+  private originalReceipt(a: Agent, { input, operatorDelivery }: TermJob, phase: 'queued' | 'taken'): void {
+    this.operator?.receipt(a.key, operatorDelivery, phase);
+    if (phase === 'taken' && input.jobId && assignmentOutlastsTurn(a)) a.originalTaken = { jobId: input.jobId, text: input.prompt, operatorDelivery };
+  }
+
+  private retainAssignment(a: Agent, { input, operatorDelivery }: TermJob, words: TurnWords): void {
+    if (operatorDelivery && input.jobId && words.originalPending() && !input.signal?.aborted) (a.retainedAssignments ??= []).push({ jobId: input.jobId, text: input.prompt, words });
   }
 
   private async versionedHash(a: Agent, job: TermJob, spec: LaunchSpec): Promise<string> {
@@ -628,23 +642,9 @@ export class TerminalHost {
 
   /* Starts the program for the turn. One that never shows it is ready ends the turn with its screen, which says why. */
   private async startProgram(a: Agent, job: TermJob, spec: LaunchSpec, hash: string, urls: AgentUrls): Promise<RunResult | null> {
-    const { input } = job;
     this.programIs(a, false);
-    await this.prepare(job, urls);
-    Object.assign(a, { ...startedState(job, spec), hash });
-    if (job.program.kind === 'claude' && !input.sessionId) await this.keepNew(input, spec.sessionId);
-    a.tail = this.tailFor(a);
-    const env = { ...lasting(input.env), ...spec.env };
-    const scratch = this.opts.tmux.scratch();
-    this.operator?.launch(a.key, 'attempt');
-    try {
-      await this.inputLane(a, () => this.opts.tmux.launch(a.name, { cwd: input.workDir, command: this.asAgent(spec.command), cols: this.cols, rows: this.rows, envFile: envFile(scratch, env), outputDir: scratch }));
-      this.operator?.launch(a.key, 'started');
-    } catch (error) {
-      this.operator?.launch(a.key, 'failed');
-      this.operator?.exited(a.key, { code: null, signal: null });
-      throw error;
-    }
+    await this.prepareLaunch(a, job, spec, hash, urls);
+    await this.launchAttempt(a, job, spec);
     /* The program starts as its launch ends, once the one before it is gone: what it does counts from then. */
     a.startedAt = Date.now();
     this.watch(a);
@@ -652,7 +652,32 @@ export class TerminalHost {
       this.programIs(a, true);
       return null;
     }
-    if (input.signal?.aborted) return this.failedTurn(a, job, 'cancelled');
+    return this.failedStart(a, job);
+  }
+
+  private async prepareLaunch(a: Agent, job: TermJob, spec: LaunchSpec, hash: string, urls: AgentUrls): Promise<void> {
+    await this.prepare(job, urls);
+    Object.assign(a, { ...startedState(job, spec), hash });
+    if (job.program.kind === 'claude' && !job.input.sessionId) await this.keepNew(job.input, spec.sessionId);
+    a.tail = this.tailFor(a);
+  }
+
+  private async launchAttempt(a: Agent, job: TermJob, spec: LaunchSpec): Promise<void> {
+    const env = { ...lasting(job.input.env), ...spec.env };
+    const scratch = this.opts.tmux.scratch();
+    this.operator?.launch(a.key, 'attempt');
+    try {
+      await this.inputLane(a, () => this.opts.tmux.launch(a.name, { cwd: job.input.workDir, command: this.asAgent(spec.command), cols: this.cols, rows: this.rows, envFile: envFile(scratch, env), outputDir: scratch }));
+      this.operator?.launch(a.key, 'started');
+    } catch (error) {
+      this.operator?.launch(a.key, 'failed');
+      this.operator?.exited(a.key, { code: null, signal: null });
+      throw error;
+    }
+  }
+
+  private async failedStart(a: Agent, job: TermJob): Promise<RunResult> {
+    if (job.input.signal?.aborted) return this.failedTurn(a, job, 'cancelled');
     const screen = await this.screen(job.key);
     /* Its screen says why, which the loader would hide. */
     this.showViews(a);
@@ -890,10 +915,10 @@ export class TerminalHost {
 
   private async failedTurn(a: Agent, job: TermJob, error: RunResult['error'], output?: string, detail = a.failure): Promise<RunResult> {
     const ended = error === 'agent_failed' || error === 'not_logged_in' ? await this.opts.tmux.exitSnapshot(a.name) : null;
-    if (ended && this.operator?.enabled(a.key)) this.operator.exited(a.key, { code: ended.programOutput?.code ?? null, signal: signalName(ended.programOutput?.signal ?? null) });
+    if (ended && this.operator?.enabled(a.key)) this.operator.exited(a.key, programExitStatus(ended.programOutput));
     const details = ended?.output ?? output ?? await this.screen(job.key);
-    const operatorFailure = this.operator?.failure(a.key);
-    return { ok: false, sessionId: a.sessionId, result: '', output: details, programOutput: ended?.programOutput, error: operatorFailure && error !== 'cancelled' ? 'agent_failed' : detail?.kind === 'auth' && error !== 'cancelled' ? 'not_logged_in' : exitError(ended?.output ?? null, job.signedOut, error), ...(error && error !== 'cancelled' ? { failure: detail ?? failure(ended ? 'crash' : 'unknown', details, true) } : {}), limits: a.limits };
+    const classified = failedError(error, detail, Boolean(this.operator?.failure(a.key)), ended?.output ?? null, job.signedOut);
+    return { ok: false, sessionId: a.sessionId, result: '', output: details, programOutput: ended?.programOutput, error: classified, ...failedDetail(error, detail, Boolean(ended), details), limits: a.limits };
   }
 
   /* While its program runs the host reads the agent's log and reports typed turns, ending them if the program is gone.
@@ -918,14 +943,18 @@ export class TerminalHost {
     if (a.restarting) return;
     this.drain(a);
     const turn = a.turn;
-    if (turn && !turn.typed) return;
+    if (managedTurn(turn)) return;
     const alive = await this.opts.tmux.alive(a.name);
     if (a.turn !== turn) return;
-    if (alive && !turn && a.program && this.operator?.recovering(a.key)) await this.ownerRecoveryReady(a);
-    if (alive) return this.lookTyped(a, turn);
+    if (alive) return this.lookAlive(a, turn);
     /* What the program logged before it ended, as words a person typed into Codex, comes first. */
     this.drain(a);
     await this.endedTyped(a);
+  }
+
+  private async lookAlive(a: Agent, turn: Turn | null): Promise<void> {
+    if (!turn && a.program && this.operator?.recovering(a.key)) await this.ownerRecoveryReady(a);
+    await this.lookTyped(a, turn);
   }
 
   private async ownerRecoveryReady(a: Agent): Promise<void> {
@@ -1069,7 +1098,7 @@ export class TerminalHost {
     const turn = a.turn;
     if (turn) turn.ending = end;
     if (!turn?.typed) return a.ended?.resolve(end.message);
-    const error = a.stopped ? 'cancelled' : end.failure ? (end.failure.kind === 'auth' || a.signedOut?.test(end.failure.text) ? 'not_logged_in' : 'agent_failed') : null;
+    const error = endedError(a.stopped, end.failure, a.signedOut);
     const settling = this.settle(a, end.message);
     a.settling = settling;
     void settling.finally(() => { if (a.settling === settling) a.settling = null; });
@@ -1103,27 +1132,37 @@ export class TerminalHost {
   private async ready(a: Agent, job: TermJob): Promise<boolean> {
     const end = Date.now() + this.readyMs;
     const colors = { at: -Infinity };
-    while (job.operatorDelivery && this.operator?.enabled(a.key) ? !this.operator.failure(a.key) : Date.now() < end) {
+    while (this.waitingReady(a, job, end)) {
       this.operatorTick();
-      if (job.input.signal?.aborted) return false;
-      if (!(await this.opts.tmux.alive(a.name))) return false;
-      const kind = job.program.kind;
-      if (kind === 'claude') {
-        if (await Promise.race([a.started!.promise.then(() => true), sleep(this.pollMs).then(() => false)])) {
-          if (job.operatorDelivery && this.operator?.enabled(a.key)) {
-            if (await this.inputBox(a)) return true;
-            continue;
-          }
-          await this.inputShows(a);
-          return true;
-        }
-      } else {
-        const shown = await this.promptShows(a, job, kind, colors);
-        if (shown !== null) return shown;
-      }
-      if (!job.operatorDelivery && job.signedOut.test(await this.screen(a.key))) return false;
+      if (await this.readyStopped(a, job)) return false;
+      const shown = await this.readyPrompt(a, job, colors);
+      if (shown !== null) return shown;
+      if (await this.signedOutBeforeReady(a, job)) return false;
     }
     return false;
+  }
+
+  private waitingReady(a: Agent, job: TermJob, end: number): boolean {
+    return job.operatorDelivery && this.operator?.enabled(a.key) ? !this.operator.failure(a.key) : Date.now() < end;
+  }
+
+  private async readyStopped(a: Agent, job: TermJob): Promise<boolean> {
+    return Boolean(job.input.signal?.aborted) || !(await this.opts.tmux.alive(a.name));
+  }
+
+  private async readyPrompt(a: Agent, job: TermJob, colors: { at: number }): Promise<boolean | null> {
+    return job.program.kind === 'claude' ? this.claudeReady(a, job) : this.promptShows(a, job, job.program.kind, colors);
+  }
+
+  private async claudeReady(a: Agent, job: TermJob): Promise<boolean | null> {
+    if (!(await Promise.race([a.started!.promise.then(() => true), sleep(this.pollMs).then(() => false)]))) return null;
+    if (job.operatorDelivery && this.operator?.enabled(a.key)) return (await this.inputBox(a)) || null;
+    await this.inputShows(a);
+    return true;
+  }
+
+  private async signedOutBeforeReady(a: Agent, job: TermJob): Promise<boolean> {
+    return !job.operatorDelivery && job.signedOut.test(await this.screen(a.key));
   }
 
   /* Whether the prompt shows, or null while the program is still on its way to it. Kimi shows its prompt also when it is
@@ -1217,18 +1256,8 @@ export class TerminalHost {
   }
 
   private readLog(a: Agent): void {
-    if (!a.tail && a.program?.kind === 'codex') {
-      const found = findRollout(a.home, a.workDir, a.startedAt - 2000, null, a.oldLogs ?? undefined);
-      if (found) {
-        a.sessionId = found.sessionId;
-        a.tail = new LineTail(found.file);
-      }
-    }
-    /* Kimi named a session it started now; its log comes once it writes it. */
-    if (!a.tail && a.program?.kind === 'kimi' && a.sessionId) {
-      const wire = findKimiWire(a.home, a.sessionId);
-      if (wire) a.tail = new LineTail(wire);
-    }
+    this.findCodexTail(a);
+    this.findKimiTail(a);
     for (const line of a.tail?.read() ?? []) {
       a.signAt = Date.now();
       let data: unknown;
@@ -1239,7 +1268,7 @@ export class TerminalHost {
       }
       const raw = isRecord(data) ? data : {};
       this.receivedWords(a, raw);
-      if (a.program && activeTurn(a) && ownThought(a.program.kind, raw, a.programTurnId)) this.ownActivity(a);
+      if (hasOwnThought(a, raw)) this.ownActivity(a);
       if (a.program?.kind === 'antigravity') {
         this.agyNews(a, data);
         continue;
@@ -1281,17 +1310,40 @@ export class TerminalHost {
     }
   }
 
+  private findCodexTail(a: Agent): void {
+    if (a.tail || a.program?.kind !== 'codex') return;
+    const found = findRollout(a.home, a.workDir, a.startedAt - 2000, null, a.oldLogs ?? undefined);
+    if (!found) return;
+    a.sessionId = found.sessionId;
+    a.tail = new LineTail(found.file);
+  }
+
+  /* Kimi named a session it started now; its log comes once it writes it. */
+  private findKimiTail(a: Agent): void {
+    if (a.tail || a.program?.kind !== 'kimi' || !a.sessionId) return;
+    const wire = findKimiWire(a.home, a.sessionId);
+    if (wire) a.tail = new LineTail(wire);
+  }
+
   private receivedWords(a: Agent, line: Record<string, unknown>): void {
     this.observeRetainedAssignments(a, line);
     if (a.program?.kind === 'claude') {
-      if (this.operator?.enabled(a.key) && line.type === 'user' && isRecord(line.message)) a.turn?.words?.takeOriginal(contentText(line.message.content));
-      const receipt = claudeWordReceipt(line, a.enqueuedWords);
-      if (!receipt) return;
-      for (const words of new Set([...a.waitingWords, ...(a.turn?.words ? [a.turn.words] : [])])) {
-        if (receipt.state === 'queued' ? words.queued(receipt.text, 'transcript') : words.taken(receipt.text)) break;
-      }
+      this.takeOperatorOriginal(a, line);
+      this.claudeReceivedWords(a, line);
     } else if (a.program && !this.overIn(a)) {
       a.turn?.words?.observe(a.program.kind, line, a.programTurnId);
+    }
+  }
+
+  private takeOperatorOriginal(a: Agent, line: Record<string, unknown>): void {
+    if (this.operator?.enabled(a.key) && line.type === 'user' && isRecord(line.message)) a.turn?.words?.takeOriginal(contentText(line.message.content));
+  }
+
+  private claudeReceivedWords(a: Agent, line: Record<string, unknown>): void {
+    const receipt = claudeWordReceipt(line, a.enqueuedWords);
+    if (!receipt) return;
+    for (const words of waitingWords(a)) {
+      if (receipt.state === 'queued' ? words.queued(receipt.text, 'transcript') : words.taken(receipt.text)) break;
     }
   }
 
@@ -1577,10 +1629,14 @@ export class TerminalHost {
       return;
     }
     const prompt = String(data.lastUserInput ?? '');
+    this.takeInvocationWords(a, prompt);
+    await this.prompted(a, prompt);
+  }
+
+  private takeInvocationWords(a: Agent, prompt: string): void {
     const retained = this.takeRetainedAssignment(a, prompt);
     if (a.typing !== null && !retained) a.turn?.words?.taken(prompt);
     a.typing = null;
-    await this.prompted(a, prompt);
   }
 
   private async prompted(a: Agent, prompt: string): Promise<void> {
@@ -1613,20 +1669,10 @@ export class TerminalHost {
      for a while; Codex goes on, and what it does waits in the turn. fromLog: the typing was read from the log, which is
      being read now. */
   private async openTyped(a: Agent, text: string, fromLog = false): Promise<void> {
-    let queuedFrom: string | null = null;
-    let sourceDelivery: OperatorDelivery | undefined;
-    if (a.originalTaken && a.originalTaken.text.replace(/\s+/g, ' ').trim() === text.replace(/\s+/g, ' ').trim()) {
-      queuedFrom = a.originalTaken.jobId;
-      text = a.originalTaken.text;
-      sourceDelivery = a.originalTaken.operatorDelivery;
-      a.originalTaken = undefined;
-    }
-    for (const words of a.waitingWords) {
-      if (queuedFrom) break;
-      const taken = words.takeQueued(text);
-      /* Hornhoof finds its words by what it typed, not by how the program recorded them. */
-      if (taken) { queuedFrom = taken.jobId; text = taken.text; sourceDelivery = taken.operatorDelivery; break; }
-    }
+    const taken = this.takeTypedWords(a, text);
+    const queuedFrom = taken.jobId;
+    const sourceDelivery = taken.operatorDelivery;
+    text = taken.text;
     const start = a.starting;
     a.fresh = false;
     if (!fromLog) this.drain(a);
@@ -1655,8 +1701,21 @@ export class TerminalHost {
       });
       await start;
     }
-    this.opts.send({ type: 'turn.open', agentKey: a.key, text: text.slice(0, 100_000), ref: turn.ref, ...(queuedFrom ? { queuedFrom } : {}) });
+    this.opts.send(typedOpen(a.key, text, turn.ref, queuedFrom));
     await answered();
+  }
+
+  private takeTypedWords(a: Agent, text: string): TakenWords {
+    const original = recordedOriginal(a, text);
+    if (original) a.originalTaken = undefined;
+    let taken: TakenWords = original ?? { jobId: null, text };
+    for (const words of a.waitingWords) {
+      if (taken.jobId) break;
+      const queued = words.takeQueued(taken.text);
+      /* Hornhoof finds its words by what it typed, not by how the program recorded them. */
+      if (queued) { taken = queued; break; }
+    }
+    return taken;
   }
 
   /* Hornhoof's answer to turn.open, found by its ref; a Hornhoof from before refs answers in order. A typed turn gets its
@@ -1742,9 +1801,7 @@ export class TerminalHost {
     const wait = pasteWait(words.text);
     if (Date.now() + wait >= words.deadline) return false;
     let went = false;
-    const pending = words.turn.words ??= new TurnWords([], { word: (word, phase) => this.operator?.receipt(a.key, word.operatorDelivery, phase) });
-    const receipt = pending.add(words.text, words.turn.jobId, words.operatorDelivery);
-    if (!a.waitingWords.includes(pending)) a.waitingWords.push(pending);
+    const receipt = this.liveReceipt(a, words);
     try {
       this.operator?.live(a.key, words.operatorDelivery, words.text);
       await this.opts.tmux.paste(a.name, words.text);
@@ -1756,8 +1813,9 @@ export class TerminalHost {
         if (await this.waitForReceipt(a, words, receipt)) { went = true; break; }
         if (!(await this.canSay(a, words))) break;
       }
-      if (!went && a.program?.kind === 'codex') { receipt.state = 'held'; went = true; }
-      receipt.accepted = went;
+      const accepted = acceptedReceipt(a.program?.kind, receipt.state, went);
+      Object.assign(receipt, accepted);
+      went = accepted.accepted;
       this.reportUnheard(a, !(await this.opts.tmux.alive(a.name)));
       return went;
     } catch {
@@ -1765,6 +1823,13 @@ export class TerminalHost {
     } finally {
       if (!went) { receipt.state = 'discarded'; this.operator?.receipt(a.key, words.operatorDelivery, 'not_taken'); await this.discardWords(a, words); }
     }
+  }
+
+  private liveReceipt(a: Agent, words: LiveWords): WordReceipt {
+    const pending = words.turn.words ??= new TurnWords([], { word: (word, phase) => this.operator?.receipt(a.key, word.operatorDelivery, phase) });
+    const receipt = pending.add(words.text, words.turn.jobId, words.operatorDelivery);
+    if (!a.waitingWords.includes(pending)) a.waitingWords.push(pending);
+    return receipt;
   }
 
   private async waitToSay(a: Agent, words: LiveWords): Promise<void> {
@@ -1819,18 +1884,13 @@ export class TerminalHost {
     const a = this.agents.get(key);
     if (a && !a.restarting) this.drain(a);
     const turn = a?.turn;
-    const evidence = () => a?.program && a.turn ? {
-      jobId: a.turn.jobId, kind: a.program.kind,
-      state: programState('', a.question ?? a.calls.values().next().value ?? null, Boolean(a.busy && a.took), a.retry),
-      calls: a.calls.size, question: Boolean(a.question), signAt: a.signAt, sessionId: a.sessionId, restarted: Boolean(a.turn.restarted),
-    } : null;
-    const reason = restartRefusal(evidence(), jobId, Date.now());
+    const reason = restartRefusal(restartEvidence(a), jobId, Date.now());
     if (reason) return { ok: false, reason };
     if (!a?.launch || !turn || a.restarting) return { ok: false, reason: 'The program launch is not available.' };
     try {
       await a.saying;
       this.drain(a);
-      const changed = restartRefusal(evidence(), jobId, Date.now());
+      const changed = restartRefusal(restartEvidence(a), jobId, Date.now());
       if (changed) return { ok: false, reason: changed };
       turn.restarted = true;
       a.restarting = true;
@@ -1854,7 +1914,7 @@ export class TerminalHost {
       a.enqueuedWords = [];
       a.ends.begin();
       a.retry = null;
-      const text = [note, ...(turn.words?.pending() ?? [])].filter(Boolean).join('\n\n');
+      const text = restartPrompt(note, turn.words);
       turn.words?.replay(text);
       a.took = false;
       a.typing = text;
@@ -2103,6 +2163,75 @@ function ownership(options: Options, panes: Panes): Ownership {
 /* A cancelled turn can still wait for Escape and its final session, but takes no more input or events. */
 function activeTurn(a: Agent): Turn | null {
   return a.turn?.signal?.aborted ? null : a.turn;
+}
+
+function initialToolsNeeded({ program, input }: TermJob, goesOn: boolean): boolean {
+  const lazy = (program.kind === 'kimi' && !input.sessionId) || program.kind === 'antigravity';
+  return !goesOn && !input.prompt && Boolean(input.tools) && !lazy;
+}
+
+function assignmentOutlastsTurn(a: Agent): boolean {
+  return !a.turn || Boolean(a.turn.starting || a.turn.ending);
+}
+
+function failedError(error: JobError, detail: Failure | null, operatorFailure: boolean, output: string | null, signedOut: RegExp): JobError {
+  if (error === 'cancelled') return exitError(output, signedOut, error);
+  if (operatorFailure) return 'agent_failed';
+  if (detail?.kind === 'auth') return 'not_logged_in';
+  return exitError(output, signedOut, error);
+}
+
+function failedDetail(error: JobError, detail: Failure | null, exited: boolean, output: string): { failure?: Failure } {
+  return error && error !== 'cancelled' ? { failure: detail ?? failure(exited ? 'crash' : 'unknown', output, true) } : {};
+}
+
+function managedTurn(turn: Turn | null): boolean {
+  return Boolean(turn && !turn.typed);
+}
+
+function endedError(stopped: boolean, detail: Failure | undefined, signedOut: RegExp | null): JobError {
+  if (stopped) return 'cancelled';
+  if (!detail) return null;
+  return detail.kind === 'auth' || signedOut?.test(detail.text) ? 'not_logged_in' : 'agent_failed';
+}
+
+function hasOwnThought(a: Agent, line: Record<string, unknown>): boolean {
+  return Boolean(a.program && activeTurn(a) && ownThought(a.program.kind, line, a.programTurnId));
+}
+
+function waitingWords(a: Agent): Set<TurnWords> {
+  return new Set([...a.waitingWords, ...(a.turn?.words ? [a.turn.words] : [])]);
+}
+
+function recordedOriginal(a: Agent, text: string): Agent['originalTaken'] | null {
+  const original = a.originalTaken;
+  return original && flat(original.text) === flat(text) ? original : null;
+}
+
+function acceptedReceipt(kind: TermProgram['kind'] | undefined, state: WordReceipt['state'], went: boolean): Pick<WordReceipt, 'state' | 'accepted'> {
+  const held = !went && kind === 'codex';
+  return { state: held ? 'held' : state, accepted: went || held };
+}
+
+function restartEvidence(a: Agent | undefined): RestartEvidence | null {
+  if (!a?.program || !a.turn) return null;
+  return {
+    jobId: a.turn.jobId, kind: a.program.kind,
+    state: programState('', a.question ?? a.calls.values().next().value ?? null, Boolean(a.busy && a.took), a.retry),
+    calls: a.calls.size, question: Boolean(a.question), signAt: a.signAt, sessionId: a.sessionId, restarted: Boolean(a.turn.restarted),
+  };
+}
+
+function programExitStatus(output: ProgramOutput | undefined): { code: number | null; signal: string | null } {
+  return { code: output?.code ?? null, signal: signalName(output?.signal ?? null) };
+}
+
+function typedOpen(agentKey: string, text: string, ref: Turn['ref'], queuedFrom: string | null): Extract<NodeMessage, { type: 'turn.open' }> {
+  return { type: 'turn.open', agentKey, text: text.slice(0, 100_000), ref, ...(queuedFrom ? { queuedFrom } : {}) };
+}
+
+function restartPrompt(note: string, words: TurnWords | undefined): string {
+  return [note, ...(words?.pending() ?? [])].filter(Boolean).join('\n\n');
 }
 
 /* How many tokens the model Kimi starts with takes in its context, from its settings. */

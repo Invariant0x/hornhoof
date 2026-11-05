@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull, ne } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, type SQL } from 'drizzle-orm';
 import type { OperatorEvidence } from '@hornhoof/protocol/program-operator';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, programDeliveries, programOperatorCases } from '../../db/schema.js';
@@ -10,13 +10,16 @@ import { operatorTransaction } from './transactions.js';
 type Case = typeof programOperatorCases.$inferSelect;
 
 export async function operatorRecoveryHolds(ctx: Ctx, agentId: string): Promise<boolean> {
-  const [held] = await ctx.db.select({ id: programOperatorCases.id }).from(programOperatorCases).where(and(eq(programOperatorCases.agentId, agentId), eq(programOperatorCases.recoveryHold, true))).limit(1);
-  return Boolean(held);
+  return recoveryHolds(ctx, eq(programOperatorCases.agentId, agentId));
 }
 
 export async function operatorHandledFailure(ctx: Ctx, jobId: string): Promise<boolean> {
-  const [incident] = await ctx.db.select({ id: programOperatorCases.id }).from(programOperatorCases).where(and(eq(programOperatorCases.jobId, jobId), ne(programOperatorCases.status, 'resolved'))).limit(1);
-  return Boolean(incident);
+  return recoveryHolds(ctx, eq(programOperatorCases.jobId, jobId));
+}
+
+async function recoveryHolds(ctx: Ctx, scope: SQL): Promise<boolean> {
+  const [held] = await ctx.db.select({ id: programOperatorCases.id }).from(programOperatorCases).where(and(scope, eq(programOperatorCases.recoveryHold, true))).limit(1);
+  return Boolean(held);
 }
 
 /* The caller holds the agent row. The old job stays failed; one new owner continuation takes its pending words. */
