@@ -1,8 +1,11 @@
-import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, it, onTestFinished } from 'vitest';
+import { parseTestEnvironment, type EnvironmentDescription } from '@hornhoof/protocol';
+import { readPreparationInputs } from '../src/test-environment.js';
 import { inspectReplayFixture, replayCommand } from './preparation-replay.js';
 
 const fixture = fileURLToPath(new URL('./fixtures/preparation-replay/', import.meta.url));
@@ -52,4 +55,37 @@ it('refuses measurement even when a caller supplies its own claimed admission', 
 
 it('rejects unknown modes instead of interpreting them as commands', async () => {
   await expect(replayCommand(['npm', 'ci'], fixture)).rejects.toThrow('Use plan');
+});
+
+it('rejects a symlink supplied as the fixture root', async () => {
+  const root = await privateFixture(), link = `${root}-link`;
+  onTestFinished(() => rm(link, { force: true }));
+  await symlink(root, link, 'dir');
+  await expect(inspectReplayFixture(link)).rejects.toThrow('fixture root');
+});
+
+it('rejects a preexisting empty generated output directory', async () => {
+  const root = await privateFixture();
+  await mkdir(join(root, 'template'));
+  await expect(inspectReplayFixture(root)).rejects.toThrow('Fixture inventory differs');
+});
+
+it('makes source bytes available to the actual minimal template-input consumer', async () => {
+  const root = await privateFixture(), audit = await inspectReplayFixture(root);
+  const manifestSource = await readFile(join(root, '.hornhoof/test-environment.json'), 'utf8');
+  const description: EnvironmentDescription = {
+    version: 1, repositoryScope: { companyId: '11111111-1111-4111-8111-111111111111', repositoryOwnerId: '22222222-2222-4222-8222-222222222222', repoUrlHash: 'f'.repeat(64) },
+    commitSha: 'bb6882c520a0180f28610fbf8690a2ae52a56050', manifestSource, manifestHash: createHash('sha256').update(manifestSource).digest('hex'),
+    manifest: parseTestEnvironment(manifestSource), inputDigests: audit.files.map(file => ({ path: file.path, digest: file.sha256 })), inventory: [], runtimeCapabilities: [],
+  };
+  await mkdir(join(root, 'protocol/dist'), { recursive: true });
+  await writeFile(join(root, 'protocol/dist/index.json'), '{"source":"4240cf02cf97d67c31513ec17ac8df5704e40ad153fbba2e9f5789e399432623"}');
+  const context = { checkout: root, cacheRoot: root, profile: 'preparation', completed: ['runtime-build'], signal: new AbortController().signal, deadline: Date.now() + 10_000, log: () => {} };
+  const inputs = await readPreparationInputs(description, 'template', context), builder = join(root, 'minimal-builder');
+  for (const input of inputs) {
+    const destination = join(builder, input.path);
+    await mkdir(dirname(destination), { recursive: true });
+    await cp(join(root, input.path), destination);
+  }
+  expect(await readFile(join(builder, 'protocol-source.txt'), 'utf8')).toBe('protocol-v1\n');
 });
