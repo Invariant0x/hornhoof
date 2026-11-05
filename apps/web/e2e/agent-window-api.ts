@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import type { AgentCardView, Employee, EventView, MachineView, Org, RunningAgent, SubView, TaskDetail } from '../src/types';
+import type { AgentCardView, Employee, EventView, MachineView, Org, RunningAgent, SubView, TaskDetail, TurnRefusal } from '../src/types';
 import { ME, TASKS, serveApi } from './api';
 
 const ROLE = { en: 'Developer', ru: 'Разработчик' };
@@ -19,7 +19,7 @@ export const CARD: AgentCardView = { id: 'b1', currentTask: null, kind: 'worker'
 const DETAIL: TaskDetail = { ...TASKS[0]!, body: 'The task details stay beside the terminal on a wide screen.', parent: null, after: [], executor: TASKS[0]!.assignee, gates: [], createdBy: null, subtasks: [], requests: [], log: [{ kind: 'comment', text: 'The checkout form is being checked.', data: {}, by: { kind: 'agent', id: 'b1', name: 'Bruno' }, at: '2026-11-04T00:00:00Z' }] };
 
 /* canType: whether this person types into the terminal, as the owner of its plan; so by default. orchestrator: the company's, for its window. */
-export type AgentFixture = { awake: boolean; hasTask: boolean; messages: unknown[]; connections: number; events?: EventView[]; productOnly?: boolean; privateAgent?: boolean; orgFailure?: boolean; head?: boolean; sent?: string[]; canType?: boolean; orchestrator?: Org['orchestrator'] };
+export type AgentFixture = { turnRefused?: TurnRefusal | null; awake: boolean; hasTask: boolean; messages: unknown[]; connections: number; events?: EventView[]; productOnly?: boolean; privateAgent?: boolean; orgFailure?: boolean; head?: boolean; sent?: string[]; canType?: boolean; orchestrator?: Org['orchestrator'] };
 
 export async function serveAgentWindow(page: Page, live: AgentFixture): Promise<void> {
   await serveApi(page);
@@ -39,6 +39,7 @@ export async function serveAgentWindow(page: Page, live: AgentFixture): Promise<
       '/api/nodes/commands': { commands: [] },
       '/api/agents/b1': { ...CARD, kind: live.head ? 'head' : 'worker', product: live.productOnly ? { id: 'p2', name: 'Checkout' } : null, currentTask: live.hasTask ? { id: 't1', number: 1, title: 'Checkout step 1' } : null },
       '/api/departments/d2/notebook': { notes: [{ number: 1, text: 'Review every merge.', by: { kind: 'agent', id: 'b1', name: 'Bruno' }, updatedAt: '2026-11-04T00:00:00.000Z' }] },
+      '/api/departments/d2/approval-policy': { departmentId: 'd2', owner: null, canSetOwner: true, canChangePolicy: true, candidates: [], rules: [{ channel: 'message', mode: 'every' }, { channel: 'price', mode: 'every' }, { channel: 'publication', mode: 'every' }, { channel: 'commit', mode: 'every' }, { channel: 'spend', mode: 'every' }, { channel: 'other', mode: 'every' }] },
       '/api/tasks/t1': { task: DETAIL },
       '/api/tasks?status=open&department=d2': { tasks: [] },
     };
@@ -49,7 +50,7 @@ export async function serveAgentWindow(page: Page, live: AgentFixture): Promise<
     if (path === '/api/org' && live.orgFailure) return route.fulfill({ status: 503, json: { error: { code: 'internal', message: 'Company temporarily unavailable' } } });
     if (url.pathname === '/api/agents/b1/events') {
       const after = Number(url.searchParams.get('after') ?? 0);
-      return route.fulfill({ json: { events: (live.events ?? []).filter(e => e.seq > after), state: { ready: true, reason: null, busy: live.awake, runningJobId: live.awake ? 'j1' : null, queued: 0, terminal: live.awake, canType: live.canType ?? true } } });
+      return route.fulfill({ json: { events: (live.events ?? []).filter(e => e.seq > after), state: { ready: true, reason: null, busy: live.awake, runningJobId: live.awake ? 'j1' : null, queued: 0, terminal: live.awake, canType: live.canType ?? true, turnRefused: live.turnRefused ?? null } } });
     }
     if (path === '/api/agents/b1/messages') { live.messages.push(route.request().postDataJSON()); return route.fulfill({ json: { queued: true } }); }
     if (path in routes) return route.fulfill({ json: routes[path] });

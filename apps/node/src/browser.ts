@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { basename, join, sep } from 'node:path';
 import { agentUser, ensurePasswd, FIRST_UID, isRootUser, type JobUser, type SystemFiles } from './isolation.js';
 import { runProgram, stripEscapes, withTrustedInstall } from './providers/process.js';
+import { currentCheckSignal } from './check-queue.js';
 
 export const SEED_BROWSERS_PATH = '/opt/ms-playwright';
 export const GLOBAL_PLAYWRIGHT_DIR = '/usr/local/lib/node_modules/playwright';
@@ -280,7 +281,18 @@ function seedFromImage(targetDir: string, seedDir: string, folders: string[], is
 }
 
 const defaultRunner = (timeoutMs: number): CommandRunner => (bin, args, env, user, cwd) =>
-  runProgram({ bin, args, env, timeoutMs, user, cwd });
+  runBrowserCommand({ bin, args, env, timeoutMs, user, cwd });
+
+async function runBrowserCommand(options: Parameters<typeof runProgram>[0]): ReturnType<typeof runProgram> {
+  const signal = currentCheckSignal();
+  signal?.throwIfAborted();
+  let cleanup = Promise.resolve();
+  /* runProgram kills the group after TERM. Keep admission through that cleanup, even if pipes close early. */
+  const aborted = () => { cleanup = new Promise(resolve => setTimeout(resolve, 5000)); };
+  signal?.addEventListener('abort', aborted, { once: true });
+  try { return await runProgram({ ...options, signal }); }
+  finally { signal?.removeEventListener('abort', aborted); await cleanup; }
+}
 
 function cleanErrorLine(line: string): string {
   return line
@@ -482,12 +494,25 @@ export async function ensureRepoBrowser(
   if (!res.ok) throw new Error(`Playwright Chromium could not start: ${res.error}`);
 }
 
+async function startupReadinessError(dir: string, verifyUser: JobUser | null): Promise<string | null> {
+  const checked = await runProgram({
+    bin: 'unzip', args: ['-v'], user: verifyUser, timeoutMs: VERIFY_TIMEOUT_MS,
+    env: { PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin', LANG: 'C.UTF-8' },
+  });
+  if (checked.timedOut) return 'unzip -v timed out.';
+  if (checked.code !== 0) {
+    const reason = stripEscapes(checked.output).trim().slice(0, MAX_REASON_LENGTH) || `exited with code ${checked.code ?? 'unknown'}`;
+    return `unzip -v failed: ${reason}`;
+  }
+  const res = await prepareAndVerifyBrowser({ dir, verifyUser });
+  return res.ok ? null : res.error;
+}
+
 export async function startupBrowserCheck(
   dir: string,
   verifyUser: JobUser | null = agentUser(),
   files?: SystemFiles,
 ): Promise<string | null> {
   if (verifyUser && verifyUser.uid >= FIRST_UID) ensurePasswd(verifyUser, join(dir, 'home'), files);
-  const res = await prepareAndVerifyBrowser({ dir, verifyUser });
-  return res.ok ? null : res.error;
+  return startupReadinessError(dir, verifyUser);
 }

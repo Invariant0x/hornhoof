@@ -578,6 +578,10 @@ export const en = {
     limitUntil: (at: string) => `The plan is at its limit. Turns wait until ${at} and go on by themselves then.`,
     budgetUntil: (at: string) => `The plan used the share set for tasks. Task turns wait until ${at}; messages from people still go.`,
     machineDrain: 'The machine is finishing its work before an update. New turns wait and go on by themselves after it.',
+    turnRefused: {
+      busy: 'What was just typed got no turn of its own: it went into the turn that was running. Check the answer there, and type it again if it is missing.',
+      unknown_words: 'The agent is answering words, but Hornhoof could not tell who wrote them, so no turn opened and its tools are closed for this answer. Please type your message again.',
+    },
     failed: {
       timeout: 'The orchestrator did not finish within 15 minutes.',
       not_logged_in: 'The orchestrator\'s subscription is signed out on its machine. Sign in again, then write once more.',
@@ -778,6 +782,10 @@ export const en = {
     testMemory: 'Free memory for a test run, GB',
     testMemoryHint: 'The full test suite runs on whichever machine of the company is freest. It goes only to a machine with this much free memory.',
     testMemoryIs: (gb: number) => `A test run needs a machine with ${gb} GB of free memory`,
+    fullCommand: 'Full test command',
+    fullCommandHint: 'The command that runs every test of this repository. When a test run of exactly this command ends, Hornhoof marks the commit on GitHub, and a passed one is not tested again before images are built. The token needs the right to write commit statuses.',
+    fullCommandIs: (command: string) => `Full test command: ${command}`,
+    noFullCommand: 'No full test command, so GitHub tests every commit itself',
     remove: 'Remove',
     removeAsk: 'Remove the repository? Agents keep their clones and the token is deleted.',
     yesRemove: 'Yes, remove',
@@ -1134,6 +1142,12 @@ export const en = {
     cutTitle: 'Update now?',
     cutText: (n: number) => (n === 1 ? '1 agent turn is running. If you update now, it stops midway, and Hornhoof starts it again after the update.' : `${n} agent turns are running. If you update now, they stop midway, and Hornhoof starts them again after the update.`),
     cutYes: 'Update now',
+    /* Each node on the update screen: what it waits for before it is replaced. */
+    nodesTitle: 'Updating the nodes',
+    nodesNote: 'Each node restarts as soon as its own work ends. Nothing that runs is stopped.',
+    nodeOn: (plan: string, machine: string) => `${plan} on ${machine}`,
+    nodeFree: 'Free: being replaced now, then takes work again by itself',
+    nodeWaitsFor: (work: string) => `Waits for: ${work}`,
   },
   errors: {
     command_active: 'There is an active command for this place. Use it or wait until it expires.',
@@ -1229,6 +1243,7 @@ export const en = {
     no_head: 'This department has no head yet. Hire one first.',
     switched_off: 'This employee is switched off right now. Switch it on on the department schema first.',
     repo_invalid: 'Use an https address with no name or token in it, a plain branch name, and an author name on one line with a full email.',
+    repo_command_invalid: 'A full test command that names its part with {part} must also say how many parts there are with {parts}.',
     relay_unreachable: 'hornhoof.org does not answer now. Try again in a few minutes.',
     link_taken: 'This link is taken already. Pick another name.',
     link_reserved: 'This name is kept for Hornhoof itself. Pick another one.',

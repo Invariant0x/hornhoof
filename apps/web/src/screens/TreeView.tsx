@@ -1,16 +1,14 @@
-import { taskWaitText } from '../ui/task-wait';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type RefObject, type UIEvent } from 'react';
-import { useLanguage, useT } from '../i18n';
-import type { Department, DepartmentTree, TreeAgent } from '../types';
+import { useT } from '../i18n';
+import type { Department, DepartmentTree } from '../types';
 import { Pulse, motionSpeed, toD, useReducedMotion } from '../ui/wires';
 import {
-  idleClass, plateHeight, plateKey, plateRoom, treeClock, treeLayout, trunkBranch, reviewsOf, rowTaskNumber, statePriority,
-  type PlateHeights, type TreeLayout, type TreeBadge, type TreeMark, type TreePick, type TreeRow, type TreeTarget,
+  idleClass, plateHeight, plateKey, plateRoom, treeClock, treeLayout, trunkBranch, reviewsOf, statePriority,
+  type TreeLayout, type TreeBadge, type TreeMark, type TreePick, type TreeRow, type TreeTarget,
 } from './tree';
-import { TreeCardBody, TreeWho } from './TreeCard';
+import { TreeCardBody } from './TreeCard';
 import { segmentText } from './tree-state';
-import { AgentState } from '../ui/AgentState';
-import { useOpenAgent } from './AgentWindowContext';
+import { Chip } from '../ui/Chip';
 import { CANVAS_ZOOM_LIMITS, usePanZoom, ZoomBar } from '../ui/canvas';
 
 type Props = {
@@ -173,51 +171,8 @@ function pickLabel(pick: TreePick, tree: DepartmentTree, department: Department,
   return tree.turn!.branch;
 }
 
-/* What a lane's agent does now: its program, the server's alarm in red, or what its turn waits for. */
-function LaneState({ agent, department, now }: { agent: TreeAgent; department: Department; now: string }) {
-  return <AgentState agent={department.employees.find(e => e.id === agent.id)} serverNow={now} />;
-}
-
-function ExternalWaitState({ wait }: { wait: NonNullable<DepartmentTree['lines'][number]['externalWait']> }) {
-  const text = taskWaitText(useT(), wait, treeClock(wait.until));
-  return <span className="ast calm" title={text}>{text}</span>;
-}
-
-function LaneDescription({ agent, tree, department, line }: { agent: TreeAgent; tree: DepartmentTree; department: Department; line?: DepartmentTree['lines'][number] }) {
-  const L = useT().dept.tree;
-  const external = line?.externalWait;
-  if (external && external.until > tree.now) return <ExternalWaitState wait={external} />;
-  const wait = tree.waiting?.find(w => w.agent.id === agent.id);
-  if (!wait) return <LaneState agent={agent} department={department} now={tree.now} />;
-  const text = L.waitingFor(wait.waitsForAgent.name, treeClock(wait.from));
-  return <span className="ast calm" title={text}>{text}</span>;
-}
-
-function rowTitle(row: TreeRow, tree: DepartmentTree, L: ReturnType<typeof useT>['dept']['tree']): string {
-  if (row.line) return row.line.title;
-  if (row.review) return L.reviewH(tree.turn!.number);
-  return row.activity?.task?.title ?? L.noTask;
-}
-
-function RowTask({ row, tree }: { row: TreeRow; tree: DepartmentTree }) {
-  const L = useT().dept.tree, number = rowTaskNumber(row);
-  return <>{number !== undefined && `#${number}`}<span className="tv-title"> {rowTitle(row, tree, L)}</span></>;
-}
-
-/* An employee named after its role says it once. */
-function LaneRole({ agent, department }: { agent: TreeAgent; department: Department }) {
-  const { language } = useLanguage(), employee = department.employees.find(e => e.id === agent.id);
-  const role = employee?.title?.[language];
-  return role && role !== employee?.name ? <small className="tv-role">{role}</small> : null;
-}
-
 function Label({ row, tree, department }: { row: TreeRow; tree: DepartmentTree; department: Department }) {
-  if (!row.agent) return <b>{row.type === 'main' ? trunkBranch(department) : tree.turn!.branch}</b>;
-  return <>
-    <span className="r1"><b><TreeWho agent={row.agent} department={department} /></b><LaneRole agent={row.agent} department={department} /></span>
-    <span className="r2"><RowTask row={row} tree={tree} /></span>
-    <LaneDescription agent={row.agent} department={department} tree={tree} line={row.line} />
-  </>;
+  return <b>{row.type === 'main' ? trunkBranch(department) : tree.turn!.branch}</b>;
 }
 
 type CanvasProps = Pick<Props, 'tree' | 'department'> & {
@@ -308,36 +263,32 @@ function labelClass(row: TreeRow, selected: TreePick | null): string {
   return `lchip${trunk}${on ? ' on' : ''}`;
 }
 
-/* A plate's text decides its height and its row follows. Moving and zooming resize no plate; a new text or font does. */
-function useMeasuredPlates(labs: RefObject<HTMLDivElement | null>, keys: string, onPlates: (heights: PlateHeights) => void) {
-  useLayoutEffect(() => {
-    const plates = [...labs.current!.querySelectorAll<HTMLElement>('.lchip')];
-    const measure = () => onPlates(Object.fromEntries(plates.map(plate => [plate.dataset.row!, plate.offsetHeight])));
-    measure();
-    if (typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(measure);
-    plates.forEach(plate => observer.observe(plate));
-    return () => observer.disconnect();
-  }, [labs, keys, onPlates]);
+function LaneChip({ row, tree, department, selected, select }: Omit<CanvasProps, 'layout'> & { row: TreeRow }) {
+  const employee = department.employees.find(e => e.id === row.agent!.id);
+  if (!employee) return null;
+  return <Chip row={plateKey(row)} e={employee} x={0} y={row.y + plateRoom(row)} on={selected?.agentId === row.agent!.id} flash={false} serverNow={tree.now} onOpen={e => select(row.pick!, e)} />;
 }
 
-function Labels({ layout, tree, department, selected, select, onPlates }: CanvasProps & { onPlates(heights: PlateHeights): void }) {
-  const labs = useRef<HTMLDivElement>(null), rows = layout.rows.filter(r => r.pick);
-  useMeasuredPlates(labs, rows.map(plateKey).join(), onPlates);
+function RowLabel({ row, tree, department, selected, select }: Omit<CanvasProps, 'layout'> & { row: TreeRow }) {
+  if (row.agent) return <LaneChip row={row} tree={tree} department={department} selected={selected} select={select} />;
   return (
-    <div className="tv-labs" ref={labs} style={{ width: layout.labelWidth, height: layout.height }}>
-      {rows.map(r => (
-        <button
-          type="button"
-          key={plateKey(r)}
-          data-row={plateKey(r)}
-          className={labelClass(r, selected)}
-          style={{ top: r.y + plateRoom(r), minHeight: plateHeight(r) }}
-          onClick={e => select(r.pick!, e)}
-        >
-          <span className="in"><Label row={r} tree={tree} department={department} /></span>
-        </button>
-      ))}
+    <button
+      type="button"
+      data-row={plateKey(row)}
+      className={labelClass(row, selected)}
+      style={{ top: row.y + plateRoom(row), minHeight: plateHeight(row) }}
+      onClick={e => select(row.pick!, e)}
+    >
+      <span className="in"><Label row={row} tree={tree} department={department} /></span>
+    </button>
+  );
+}
+
+function Labels({ layout, tree, department, selected, select }: CanvasProps) {
+  const rows = layout.rows.filter(r => r.pick);
+  return (
+    <div className="tv-labs" style={{ width: layout.labelWidth, height: layout.height }}>
+      {rows.map(r => <RowLabel key={plateKey(r)} row={r} tree={tree} department={department} selected={selected} select={select} />)}
     </div>
   );
 }
@@ -367,7 +318,7 @@ function useTreeBox(root: RefObject<HTMLDivElement | null>) {
 
 function useTreeSelection(root: RefObject<HTMLDivElement | null>) {
   const [selection, setSelection] = useState<Selection | null>(null);
-  const card = useRef<HTMLDivElement>(null), openAgent = useOpenAgent();
+  const card = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!selection) return;
     const key = (e: KeyboardEvent) => {
@@ -387,13 +338,9 @@ function useTreeSelection(root: RefObject<HTMLDivElement | null>) {
     };
   }, [selection]);
   function select(pick: TreePick, e: MouseEvent) {
-    if (pick.agentId) {
-      setSelection(null);
-      openAgent(pick.agentId);
-      return;
-    }
     const rect = root.current!.getBoundingClientRect(), anchor = e.currentTarget.getBoundingClientRect();
-    const x = e.currentTarget.classList.contains('lchip')
+    const chip = e.currentTarget.closest('.lchip,.dept-chip');
+    const x = chip
       ? anchor.right - rect.left + 8
       : (e.clientX || anchor.left + anchor.width / 2) - rect.left - 40;
     setSelection({ pick, x, y: anchor.bottom - rect.top + 8 });
@@ -430,7 +377,7 @@ function FloatingCard({ selection, card, box, tree, department, onOpenTask, onCl
           <button type="button" className="x" aria-label={t.dept.close} onClick={onClose}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
           </button>
-          <TreeCardBody tree={tree} department={department} pick={selection.pick} onOpenTask={onOpenTask} />
+          <TreeCardBody tree={tree} department={department} pick={selection.pick} onOpenTask={onOpenTask} onClose={onClose} />
         </div>
       </div>
     </div>
@@ -447,9 +394,7 @@ export function TreeView(props: Props) {
   const { tree, department } = props, t = useT();
   const root = useRef<HTMLDivElement>(null), scroll = useRef<HTMLDivElement>(null);
   const box = useTreeBox(root);
-  const [plates, setPlates] = useState<PlateHeights>({});
-  const onPlates = useCallback((next: PlateHeights) => setPlates(old => JSON.stringify(old) === JSON.stringify(next) ? old : next), []);
-  const layout = useMemo(() => fitBadges(treeLayout(tree, { ...box, plates, agentOrder: department.employees.map(e => e.id) }, 1), t), [tree, department, box, plates, t]);
+  const layout = useMemo(() => fitBadges(treeLayout(tree, { ...box, agentOrder: department.employees.map(e => e.id) }, 1), t), [tree, department, box, t]);
   const { view, zoomAt, handlers, dragged, fit, onScroll } = useTreeNavigation(scroll, layout, box, !!tree.turn);
   const { selection, card, select, close } = useTreeSelection(root);
   const canvas = { layout, tree, department, selected: selection?.pick ?? null, select };
@@ -461,7 +406,7 @@ export function TreeView(props: Props) {
             <div className="tv-scroll" ref={scroll} role="region" aria-label={t.dept.treeCanvas} {...handlers} onScroll={onScroll}
               onClickCapture={e => ignoreDraggedClick(e, dragged)}>
               <div className="tv-in" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})` }}>
-                <Labels {...canvas} onPlates={onPlates} />
+                <Labels {...canvas} />
                 <Graph {...canvas} />
               </div>
             </div>

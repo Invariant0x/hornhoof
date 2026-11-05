@@ -230,13 +230,27 @@ type Typing = Pick<Ctx, 'db' | 'bus' | 'templates' | 'terminals'>;
 
 /* A person pressed Enter in the agent's terminal, settled under the lock before the keys go on. In the turn that runs,
    what they typed goes into it: the orchestrator's answers them from now on, and no Enter from before opens a turn after
-   it. While none runs, or the program only starts, the Enter may open one turn of theirs. Never both. */
-export async function enterPressed(ctx: Typing, agentId: string, personId: string, node: NodeIdentity): Promise<void> {
+   it. The Enter stays known with that turn, as the program may queue the words for after it, and is the turn to tell the
+   node of. While none runs, or the program only starts, the Enter may open one turn of theirs. Never both. */
+export async function enterPressed(ctx: Typing, agentId: string, personId: string, node: NodeIdentity): Promise<string | null> {
+  return withInputLock(ctx, agentId, async () => {
+    const turn = await turnWithWords(ctx.db, eq(jobs.agentId, agentId));
+    if (!turn) {
+      ctx.terminals.typing(agentId, personId, node);
+      return null;
+    }
+    ctx.terminals.drop(agentId);
+    ctx.terminals.pressedIn(agentId, turn.id, personId, node);
+    await answersFromNow(ctx, turn, personId);
+    return turn.id;
+  });
+}
+
+/* What a person typed came out of the program's queue into a turn that runs by then: it answers that person from now on. */
+export async function typedWentIn(ctx: Typing, agentId: string, personId: string): Promise<void> {
   await withInputLock(ctx, agentId, async () => {
     const turn = await turnWithWords(ctx.db, eq(jobs.agentId, agentId));
-    if (!turn) return ctx.terminals.typing(agentId, personId, node);
-    ctx.terminals.drop(agentId);
-    await answersFromNow(ctx, turn, personId);
+    if (turn) await answersFromNow(ctx, turn, personId);
   });
 }
 

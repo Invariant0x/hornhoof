@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { errorText, useLanguage, useT } from '../i18n';
 import type { Build } from '../types';
 import type { Updates } from '../updates';
+import { NodeWaits } from '../ui/MachineDrain';
 import { UpdateProgress } from '../ui/UpdateProgress';
 import { buildText, versionText } from '../ui/VersionMark';
 import { updateTargetText, versionedStatus } from '../ui/UpdateVersion';
@@ -72,6 +73,7 @@ export function Versions({ updates, onClose, onHome }: { updates: Updates; onClo
             {status.log && <pre>{status.log}</pre>}
           </div>
         )}
+        <NodeWaits waits={view.nodeWaits} />
         {failure !== null && <p className="update-error" role="alert">{errorText(t, failure)}</p>}
         <ul className="versions">
           {rows.map(b => (

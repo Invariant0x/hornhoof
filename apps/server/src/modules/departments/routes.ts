@@ -24,6 +24,7 @@ import { linesToHire, type Present } from '../operations/ensure.js';
 import { approvalPolicyRoutes } from './approval-policy.js';
 import { hireEmployee, type Hired } from './hire.js';
 import { repoView } from './repository.js';
+import { coversEveryPart } from '../testruns/github-status.js';
 import { deptName, TEMPLATE_TEXT } from './templates.js';
 
 const IdParams = z.object({ id: z.uuid() });
@@ -41,8 +42,17 @@ export const RepoBody = z
     author: z.unknown().optional(),
     /* The free memory, in GB, a machine needs to take a test run of it; null takes the default again. */
     testMemoryGb: z.number().int().min(1).max(512).nullable().optional(),
+    /* The command that runs the whole test suite, as run_tests takes it; empty or null takes it away. */
+    fullTestCommand: z.string().trim().max(4000).nullable().optional(),
   })
   .strict();
+
+/* What a repository's save says of its full test command: left out, the saved one stays. */
+function fullCommandPatch(given: string | null | undefined): { repoFullTestCommand?: string | null } {
+  if (given === undefined) return {};
+  if (given && !coversEveryPart(given)) throw new ApiError(400, 'validation', 'A full test command that names its part with {part} says how many there are with {parts}.', 'repo_command_invalid');
+  return { repoFullTestCommand: given || null };
+}
 
 type Created = { id: string; template: TemplateKey | null; name: string | null; products: string[] };
 type Removed = { id: string; template: TemplateKey | null; name: string | null };
@@ -307,7 +317,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const memory = body.testMemoryGb === undefined ? {} : { repoTestMemoryGb: body.testMemoryGb };
     const [row] = await db
       .update(departments)
-      .set({ repoUrl: checked.data.url, repoBranch: checked.data.branch, ...token, ...author, ...memory })
+      .set({ repoUrl: checked.data.url, repoBranch: checked.data.branch, ...token, ...author, ...memory, ...fullCommandPatch(body.fullTestCommand) })
       .where(eq(departments.id, id))
       .returning();
     ctx.bus.publish(me.companyId, { type: 'org' });
@@ -320,7 +330,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { id } = IdParams.parse(req.params);
     await db
       .update(departments)
-      .set({ repoUrl: null, repoBranch: null, repoTokenEnc: null, repoTokenLast4: null, repoAuthorName: null, repoAuthorEmail: null, repoTestMemoryGb: null })
+      .set({ repoUrl: null, repoBranch: null, repoTokenEnc: null, repoTokenLast4: null, repoAuthorName: null, repoAuthorEmail: null, repoTestMemoryGb: null, repoFullTestCommand: null })
       .where(and(eq(departments.id, id), eq(departments.companyId, me.companyId)));
     ctx.bus.publish(me.companyId, { type: 'org' });
     return reply.code(204).send();

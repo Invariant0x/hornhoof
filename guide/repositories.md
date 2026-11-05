@@ -26,6 +26,18 @@ Set a commit author, a name and an email, and every agent commits under that nam
 
 Without one, each agent's program picks its own.
 
+## Does GitHub have to test a commit again?
+
+Not after Hornhoof has. Name the repository's full test command, the one that runs every test, on the repository's settings or with `set_repository`.
+
+When a test run of exactly this command ends, Hornhoof puts a commit status called `hornhoof/tests` on the commit that run pinned: `success` when it passed, `failure` when it did not. It stays on that commit even when the branch has moved on. A run of one file, or of any other command, marks nothing.
+
+A GitHub workflow can read this status and skip its own tests on a commit that has `success`. Hornhoof's own image build does.
+
+The token needs the right to write commit statuses: **Commit statuses: Read and write** on a fine-grained token, `repo:status` on a classic one. Without it, or when GitHub does not answer, the task's log and the run's result say so and what to give the token. The run stays passed, and GitHub tests that commit itself.
+
+A command that splits the tests with `{part}` must also say how many parts there are with `{parts}`. Otherwise one part could pass for all of them, so Hornhoof refuses it.
+
 ## Where does an agent keep its copy of the code?
 
 Each agent gets its own clone, in its own folder on the node, before its first turn. It keeps the clone between turns, and works in a branch per task.

@@ -18,10 +18,12 @@
 # in its image.
 #
 # An update replaces the app alone while a node runs another image, since the turns on it would stop with it. Afterwards
-# this asks the server, with the built-in node's key, to let the work of the nodes on this computer end: the server keeps
-# new work off them, says when they are free, and goes on saying they are not past its deadline, when it told Operations.
-# Only then the installer of the build that runs replaces them. Requests marked immediate or urgent replace them with the
-# app at once. The same goes for an update an updater from before this ran, and for install.sh server by hand.
+# this asks the server, with the built-in node's key, to let the work of the nodes on this computer that run another image
+# end: the server keeps new work off them, says of each when it is free, and goes on saying one is not past its deadline,
+# when it told Operations. The installer of the build that runs replaces each as soon as it is free itself, whatever the
+# others wait for. A server from before this says so only of all of them together. Requests marked immediate or urgent
+# replace them with the app at once. The same goes for an update an updater from before this ran, and for install.sh
+# server by hand.
 #
 # It also runs the orchestrator's commands on this computer, as root, while the CEO keeps access to the computer open:
 # the app writes computer.json {untilSec} and each command as computer/<id>.json {id, command, timeout}; this answers
@@ -67,8 +69,10 @@ BACK_UPDATER=''
 TARGET=''
 BEFORE=''
 BACKUP=''
-# Set for an installer that may stop the nodes now. When to look at the nodes next, in seconds since 1970.
+# Set for an installer that may stop the nodes now, with the ones it may stop when the server named them. When to look at
+# the nodes next, in seconds since 1970.
 NODES_FREE=''
+NODES_ONLY=''
 NODES_AT=0
 
 say() {
@@ -300,7 +304,7 @@ install() {
   local tag=$1 dir="$WORK/$1"
   unpack "$tag" "$2" || return 1
   HORNHOOF_SERVER_DIR="$SERVER_DIR" HORNHOOF_VERSION="$tag" HORNHOOF_FROM_UPDATER=1 HORNHOOF_COMPOSE_FILE="$dir/compose.yaml" HORNHOOF_PULLED=1 \
-    HORNHOOF_APP_REF="$2" HORNHOOF_NODE_REF="$3" HORNHOOF_UPDATER_REF="$4" HORNHOOF_NODES_FREE="$NODES_FREE" bash "$dir/install.sh" server >> "$WORK/install.log" 2>&1 || return 1
+    HORNHOOF_APP_REF="$2" HORNHOOF_NODE_REF="$3" HORNHOOF_UPDATER_REF="$4" HORNHOOF_NODES_FREE="$NODES_FREE" HORNHOOF_NODES_ONLY="$NODES_ONLY" bash "$dir/install.sh" server >> "$WORK/install.log" 2>&1 || return 1
   drop_orphans
 }
 
@@ -493,57 +497,95 @@ interrupted() {
   NODES_FREE=''
 }
 
-# Whether the built-in node runs another image than the one .env names, by the images of this server's own repositories.
+# The nodes on this computer that run another image than the one .env names, by the images of this server's own
+# repositories, as words: builtin for the built-in node, the plan on its label for each other. One of another server on
+# this computer counts too: the server names only its own.
 nodes_behind() {
-  local running target
-  [ -n "$SERVER_DIR" ] && [ -f "$SERVER_DIR/.env" ] || return 1
-  own "$IMAGE" "$(env_value HORNHOOF_APP_REF)" && own "$NODE_IMAGE" "$(env_value HORNHOOF_NODE_REF)" && own "$UPDATER_IMAGE" "$(env_value HORNHOOF_UPDATER_REF)" || return 1
-  plain_tag "$(env_value HORNHOOF_VERSION)" || return 1
-  running=$(docker inspect --format '{{.Image}}' "$(compose ps -q node 2> /dev/null || true)" 2> /dev/null || true)
-  [ -n "$running" ] || return 1
+  local running target name plan
+  [ -n "$SERVER_DIR" ] && [ -f "$SERVER_DIR/.env" ] || return 0
+  own "$IMAGE" "$(env_value HORNHOOF_APP_REF)" && own "$NODE_IMAGE" "$(env_value HORNHOOF_NODE_REF)" && own "$UPDATER_IMAGE" "$(env_value HORNHOOF_UPDATER_REF)" || return 0
+  plain_tag "$(env_value HORNHOOF_VERSION)" || return 0
   target=$(docker image inspect --format '{{.Id}}' "$(env_value HORNHOOF_NODE_REF)" 2> /dev/null || true)
-  [ "$running" != "$target" ]
+  running=$(docker inspect --format '{{.Image}}' "$(compose ps -q node 2> /dev/null || true)" 2> /dev/null || true)
+  if [ -n "$running" ] && [ "$running" != "$target" ]; then printf 'builtin '; fi
+  { docker ps -a --filter label=hornhoof.subscription --format '{{.Names}} {{.Label "hornhoof.subscription"}}' 2> /dev/null || true; } | while read -r name plan; do
+    case "$plan" in '' | *[!A-Za-z0-9-]*) continue ;; esac
+    running=$(docker inspect --format '{{.Image}}' "$name" 2> /dev/null || true)
+    if [ -n "$running" ] && [ "$running" != "$target" ]; then printf '%s ' "$plan"; fi
+  done
 }
 
-# ask_nodes <method> <answer file>: the HTTP code of the server's answer about the nodes on this computer. The key goes
-# to curl on its input, so no command line shows it.
+# ask_nodes <method> <answer file> [names]: the HTTP code of the server's answer about these nodes on this computer, or
+# about all of them. The key goes to curl on its input, so no command line shows it.
 ask_nodes() {
+  local body
+  body=$(jq -cn --arg names "${3:-}" 'if $names == "" then {scope: "server"} else {scope: "server", nodes: ($names | split(" ") | map(select(length > 0)))} end')
   printf 'header = "Authorization: Bearer %s"\n' "$(env_value NODE_KEY)" |
-    curl -sS --max-time 10 --config - -X "$1" -H 'content-type: application/json' -d '{"scope":"server"}' -o "$2" -w '%{http_code}' "$NODES_URL" 2> /dev/null
+    curl -sS --max-time 10 --config - -X "$1" -H 'content-type: application/json' -d "$body" -o "$2" -w '%{http_code}' "$NODES_URL" 2> /dev/null
 }
 
-# The nodes are free: the installer of the build that runs replaces them, and the server lets go of those it did not.
+# replace_nodes [names]: these nodes are free, or all of them with no names: the installer of the build that runs replaces
+# them, and the server lets go of them. The others keep their wait and its deadline.
 replace_nodes() {
   WORK=$(mktemp -d)
   NODES_FREE=1
+  NODES_ONLY=${1:-}
   if ! install "$(env_value HORNHOOF_VERSION)" "$(env_value HORNHOOF_APP_REF)" "$(env_value HORNHOOF_NODE_REF)" "$(env_value HORNHOOF_UPDATER_REF)"; then
     printf 'Could not replace the nodes: %s\n' "$(tail -n 3 "$WORK/install.log" 2> /dev/null | tr '\n' ' ')"
     NODES_AT=$(($(date +%s) + NODES_RETRY))
   fi
   NODES_FREE=''
-  ask_nodes DELETE /dev/null > /dev/null || true
+  NODES_ONLY=''
+  ask_nodes DELETE /dev/null "${1:-}" > /dev/null || true
   rm -rf "$WORK"
   WORK=''
+}
+
+# free_of <answer file> <names>: those of these names the server says are free. The names are the ones this found itself,
+# so the installer gets nothing else the server says.
+free_of() {
+  local name
+  for name in $2; do
+    if jq -e --arg name "$name" 'any(.free[]?; . == $name)' "$1" > /dev/null 2>&1; then printf '%s ' "$name"; fi
+  done
+}
+
+# act_on_nodes <answer file> <names>: what the server said of the nodes behind. One from before free replaces them all or
+# none, and its installer moves them only along with the built-in node: with that one on its image nothing would ever move,
+# so they go back to work until a later look.
+act_on_nodes() {
+  local free now
+  now=$(date +%s)
+  if jq -e '.free != null' "$1" > /dev/null 2>&1; then
+    free=$(free_of "$1" "$2")
+    if [ -n "$free" ]; then replace_nodes "${free% }"; fi
+  else
+    case " $2 " in
+      *' builtin '*) if [ "$(jq -r '.ready // false' "$1")" = true ]; then replace_nodes; fi ;;
+      *)
+        ask_nodes DELETE /dev/null > /dev/null || true
+        NODES_AT=$((now + NODES_RETRY))
+        ;;
+    esac
+  fi
 }
 
 # One look at the nodes, which never waits: a request for an update goes first, and the server lets go of the nodes when
 # this stops asking.
 catch_up_nodes() {
-  local now code answer poll
+  local now code answer poll behind
   now=$(date +%s)
   [ "$now" -ge "$NODES_AT" ] || return 0
   NODES_AT=$((now + NODES_CHECK))
-  nodes_behind || return 0
+  behind=$(nodes_behind || true)
+  [ -n "$behind" ] || return 0
   answer=$(mktemp)
-  code=$(ask_nodes POST "$answer" || true)
+  code=$(ask_nodes POST "$answer" "$behind" || true)
   case "$code" in
     200)
-      if [ "$(jq -r '.ready // false' "$answer")" = true ]; then
-        replace_nodes
-      else
-        poll=$(jq -r '((.pollAfterMs // 5000) / 1000) | ceil' "$answer")
-        NODES_AT=$((now + poll))
-      fi
+      poll=$(jq -r '((.pollAfterMs // 5000) / 1000) | ceil' "$answer")
+      NODES_AT=$((now + poll))
+      act_on_nodes "$answer" "$behind"
       ;;
     404)
       printf 'This server is from before nodes wait for their work, so they stay on their image and what they run goes on.\n'

@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import {
   browserEnv,
   browsersDir,
@@ -18,7 +18,10 @@ import {
   verifyBrowser,
   writeBrowserError,
 } from '../src/browser.js';
+import { CheckClient } from '../src/check-client.js';
+import { setCheckClient, withCheckSlot } from '../src/check-queue.js';
 import { FIRST_UID } from '../src/isolation.js';
+import * as programs from '../src/providers/process.js';
 
 const tempDirs: string[] = [];
 
@@ -26,6 +29,14 @@ function makeTemp(prefix = 'hh-browser-'): string {
   const dir = mkdtempSync(join(tmpdir(), prefix));
   tempDirs.push(dir);
   return dir;
+}
+
+function unzipOnPath(body: string): string {
+  const bin = makeTemp('hh-unzip-');
+  const executable = join(bin, 'unzip');
+  writeFileSync(executable, '#!/bin/sh\nprintf "%s\\n" "$*" > "$0.args"\n' + body + '\n', { mode: 0o755 });
+  vi.stubEnv('PATH', `${bin}:${process.env.PATH ?? '/usr/bin:/bin'}`);
+  return executable + '.args';
 }
 
 function fakePlaywrightPackage(root: string, version: string, rev: string): string {
@@ -59,8 +70,54 @@ function markInstalled(baseDir: string, folders: string[]): void {
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllEnvs();
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+describe('startup tool readiness', () => {
+  it('refuses work when unzip is absent, before preparing any browsers', async () => {
+    const dir = makeTemp();
+    vi.stubEnv('PATH', makeTemp('hh-no-tools-'));
+    const error = await startupBrowserCheck(dir, null);
+    expect(error).toContain('unzip');
+    expect(error).toContain('ENOENT');
+    expect(existsSync(browsersDir(dir))).toBe(false);
+  });
+
+  it('refuses work when unzip cannot run successfully and names the failed command', async () => {
+    const dir = makeTemp();
+    const args = unzipOnPath('echo "unzip binary is broken" >&2\nexit 3');
+    const error = await startupBrowserCheck(dir, null);
+    expect(error).toContain('unzip -v');
+    expect(error).toContain('unzip binary is broken');
+    expect(existsSync(args)).toBe(true);
+    expect(readFileSync(args, 'utf8').trim()).toBe('-v');
+    expect(existsSync(browsersDir(dir))).toBe(false);
+  });
+
+  it('reports the exit code when unzip fails without output', async () => {
+    unzipOnPath('exit 7');
+    const error = await startupBrowserCheck(makeTemp(), null);
+    expect(error).toContain('unzip -v');
+    expect(error).toContain('code 7');
+  });
+
+  it('reports a timed out unzip check as a readiness failure', async () => {
+    vi.spyOn(programs, 'runProgram').mockResolvedValue({
+      code: null, signal: 'SIGTERM', at: new Date().toISOString(), output: '', timedOut: true,
+    });
+    const error = await startupBrowserCheck(makeTemp(), null);
+    expect(error).toContain('unzip -v');
+    expect(error).toContain('timed out');
+  });
+
+  it('continues readiness after unzip -v succeeds', async () => {
+    const args = unzipOnPath('echo "UnZip 6.00"\nexit 0');
+    expect(await startupBrowserCheck(makeTemp(), null)).toBeNull();
+    expect(existsSync(args)).toBe(true);
+    expect(readFileSync(args, 'utf8').trim()).toBe('-v');
+  });
 });
 
 describe('playwrightVersionIn', () => {
@@ -124,6 +181,34 @@ describe('playwrightVersionIn', () => {
 });
 
 describe('prepareBrowser', () => {
+  it('cancels a real browser preparation process when its check lease is lost', async () => {
+    const dir = makeTemp(), repo = makeTemp(), seedDir = makeTemp();
+    const globalPlaywrightDir = fakePlaywrightPackage(makeTemp(), '1.64.1', '1248');
+    writeFileSync(join(repo, 'package-lock.json'), JSON.stringify({ packages: { 'node_modules/playwright': { version: '1.64.1' } } }));
+    const started = join(dir, 'started'), stopped = join(dir, 'stopped');
+    writeFileSync(join(globalPlaywrightDir, 'cli.js'), `const fs = require('node:fs'); fs.writeFileSync(${JSON.stringify(started)}, String(process.pid)); process.on('SIGTERM', () => fs.writeFileSync(${JSON.stringify(stopped)}, 'stopped')); setInterval(() => {}, 1000);`);
+    const client = new CheckClient(frame => {
+      if (frame.type === 'check.acquire') queueMicrotask(() => client.receive({ type: 'check.state', id: frame.id, state: 'running', position: 0 }));
+      return true;
+    });
+    client.online(true); setCheckClient(client);
+    let settled = false, fixturePid = 0;
+    const pending = withCheckSlot(() => prepareBrowser({ dir, repoDir: repo, seedDir, globalPlaywrightDir, isRoot: false })).finally(() => { settled = true; });
+    void pending.catch(() => {});
+    onTestFinished(async () => {
+      if (fixturePid) { try { process.kill(-fixturePid, 'SIGKILL'); } catch { /* Already gone. */ } }
+      await pending.catch(() => {}); client.online(false); setCheckClient(null);
+    });
+    await expect.poll(() => existsSync(started)).toBe(true);
+    fixturePid = Number(readFileSync(started, 'utf8'));
+    const at = performance.now();
+    client.online(false);
+    await expect.poll(() => existsSync(stopped), { timeout: 1500 }).toBe(true);
+    expect(settled).toBe(false);
+    await pending.catch(() => {});
+    expect(performance.now() - at).toBeGreaterThanOrEqual(4500);
+  });
+
   it('seeds matching revisions from the image seed without downloading and makes binaries readable for job users', async () => {
     const dir = makeTemp();
     const seedDir = makeTemp('hh-seed-');
@@ -615,6 +700,7 @@ describe('verifyBrowser and prepareAndVerifyBrowser', () => {
   });
 
   it('persists and clears browser-error files and runs startupBrowserCheck / ensureRepoBrowser with passwd setup', async () => {
+    unzipOnPath('exit 0');
     const dir = makeTemp('hh-err-state-');
     expect(readBrowserError(dir)).toBeNull();
     writeBrowserError(dir, 'libnss3.so missing');

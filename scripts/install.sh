@@ -49,6 +49,9 @@ NODE_REF="${HORNHOOF_NODE_REF:-}"
 UPDATER_REF="${HORNHOOF_UPDATER_REF:-}"
 # An updater says so once the server let the work of the nodes on this computer end, or was told to stop it.
 NODES_FREE="${HORNHOOF_NODES_FREE:-}"
+# The ones of them it may replace, when the server said so of each: builtin, and the plan of each other node. The others go
+# on with what they run. Empty: all of them.
+NODES_ONLY="${HORNHOOF_NODES_ONLY:-}"
 # A security update replaces the nodes now, and what they run stops with them.
 URGENT=''
 # The nodes this run left as they are, since it could not learn when their work ends.
@@ -770,6 +773,9 @@ public_link() {
   esac
 }
 
+# Whether the updater left this node to be replaced now: named_free builtin, or by a node's plan.
+named_free() { [ -z "$NODES_ONLY" ] || case " $NODES_ONLY " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
+
 # This server's nodes on this machine move to the node image of the same build, with their volumes: the ones that
 # joined through PUBLIC_URL, through the public link or through localhost.
 sweep_nodes() {
@@ -782,6 +788,7 @@ sweep_nodes() {
     for entry in $(existing_nodes); do
       name=${entry%%:*}
       id=${entry#*:}
+      named_free "$id" || continue
       case "$seen" in *" $name "*) continue ;; esac
       seen="$seen$name "
       if [ -z "$pulled" ]; then
@@ -827,10 +834,23 @@ nodes_stay() {
   [ -n "$cid" ] && [ "$("${DOCKER[@]}" inspect --format '{{.State.Running}}' "$cid" 2> /dev/null)" = true ]
 }
 
+# Only the nodes the updater named, whatever image the built-in node runs: each is free by itself.
+replace_named_nodes() {
+  if named_free builtin; then
+    prepare_builtin_stop "$@"
+    (cd "$SERVER_DIR" && "$@" up -d --no-build db app node tunnel) || fail "Hornhoof did not start."
+  else
+    (cd "$SERVER_DIR" && "$@" up -d --no-build db app tunnel) || fail "Hornhoof did not start."
+  fi
+  sweep_nodes "$@"
+}
+
 start_server_services() {
   if [ -n "$FROM_UPDATER" ]; then
     say "Starting Hornhoof ${PIN:-latest}."
-    if nodes_stay "$@"; then
+    if [ -n "$NODES_ONLY" ]; then
+      replace_named_nodes "$@"
+    elif nodes_stay "$@"; then
       (cd "$SERVER_DIR" && "$@" up -d --no-build db app tunnel) || fail "Hornhoof did not start."
     else
       prepare_builtin_stop "$@"

@@ -151,14 +151,15 @@ describe('work tree layout', () => {
     }
   });
 
-  it('makes a row as tall as its plate measures, and moves the rows below with their lines', () => {
+  it('keeps lane rows and their lines fixed when task text grows', () => {
     const plain = treeLayout(DEV_TREE, box, 1), first = DEV_TREE.lines[0]!.agent.id, next = DEV_TREE.lines[1]!.agent.id;
-    const grown = treeLayout(DEV_TREE, { ...box, plates: { main: 50, [first]: 130 } }, 1);
+    const long = { ...DEV_TREE, lines: DEV_TREE.lines.map(line => ({ ...line, title: `${line.title} with a very long task title that must not stretch the chip` })) };
+    const grown = treeLayout(long, box, 1);
     const row = (layout: typeof plain, id: string) => layout.rows.find(r => r.agent?.id === id)!;
-    expect(grown.rows.find(r => r.type === 'main')!.h).toBe(58);
-    expect(row(grown, first).h).toBe(142);
-    expect(grown.height).toBe(plain.height + 18 + 46);
-    expect(row(grown, next).y).toBe(row(plain, next).y + 18 + 46);
+    expect(grown.rows.find(r => r.type === 'main')!.h).toBe(40);
+    expect(row(grown, first).h).toBe(96);
+    expect(grown.height).toBe(plain.height);
+    expect(row(grown, next).y).toBe(row(plain, next).y);
     const middle = row(grown, next).y + row(grown, next).h / 2;
     const drawn = grown.paths.filter(p => p.kind === 'segment' && p.row === next);
     expect(drawn.length).toBeGreaterThan(0);
@@ -167,11 +168,6 @@ describe('work tree layout', () => {
     const turn = grown.rows.find(r => r.type === 'turn')!, fork = grown.paths.find(p => p.kind === 'fork' && p.row === next)!;
     expect(fork.points[0]![1]).toBe(turn.y + turn.h / 2);
     expect(fork.points.at(-1)![1]).toBe(middle);
-  });
-
-  it('keeps the natural height of a plate the page could not measure', () => {
-    const agent = DEV_TREE.lines[0]!.agent.id;
-    expect(treeLayout(DEV_TREE, { ...box, plates: { [agent]: 0 } }, 1).rows.find(r => r.agent?.id === agent)!.h).toBe(96);
   });
 
   it('draws plain lines without trunks or forks, starting at creation and ending in a square', () => {

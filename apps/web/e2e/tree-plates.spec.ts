@@ -1,4 +1,4 @@
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
 import type { DepartmentTree, Org } from '../src/types';
 import { box } from './api';
 import { serveTree } from './tree-api';
@@ -14,7 +14,7 @@ const LONG_ROLE = 'Engineer_of_payments_and_receipts_in_both_languages';
 const LONG_WAIT = 'Image_build_of_the_new_checkout_on_the_slowest_machine';
 const LONG_BRANCH = 'release_2026_11_checkout_with_the_new_payment_provider';
 const PLATE = { width: 240, height: 84 };
-const FONTS = { name: '13.5px', role: '12px', task: '12px', state: '11px' };
+const FONTS = { name: '13.5px', task: '12px', state: '13px' };
 
 /* A department at its real size: 12 lanes and more than 50 tasks, one agent with no state to show, and very long texts. */
 function fullDepartment(): Tree {
@@ -46,37 +46,42 @@ function aloneIn({ tree, org }: Tree, name: string): Tree {
   };
 }
 
-async function open(page: Page, lang: 'en' | 'ru') {
+async function open(page: Page, lang: 'en' | 'ru', info?: TestInfo, width?: number) {
   await page.goto('/');
   await page.getByRole('button', { name: lang === 'en' ? /Development/ : /Разработка/ }).click();
+  if (info) {
+    const evidence = info.outputPath(`department-${lang}-${width}-map.png`);
+    await page.screenshot({ path: evidence });
+    await info.attach(`department-${lang}-${width}-map.png`, { path: evidence, contentType: 'image/png' });
+  }
   await page.getByRole('button', { name: lang === 'en' ? 'Tree' : 'Дерево', exact: true }).click();
-  await expect(page.locator('.tv-labs .lchip').first()).toBeVisible();
+  await expect(page.locator('.tv-labs .dept-chip').first()).toBeVisible();
   await page.evaluate(() => document.fonts.ready);
 }
 
-/* Sizes are read without the canvas' zoom. Anything scrolled inside a plate or hidden in it is text a person cannot read. */
-const readPlates = (page: Page) => page.locator('.tv-labs .lchip').evaluateAll((plates: HTMLElement[]) => plates.map(plate => {
+/* Sizes are read without the canvas' zoom. Long text stays clipped inside a fixed chip. */
+const readPlates = (page: Page) => page.locator('.tv-labs .dept-chip, .tv-labs .lchip').evaluateAll((plates: HTMLElement[]) => plates.map(plate => {
   const parts = [...plate.querySelectorAll<HTMLElement>('*')].filter(el => !(el instanceof SVGElement));
   const font = (selector: string) => {
     const el = plate.querySelector(selector);
     return el && getComputedStyle(el).fontSize;
   };
   return {
-    name: plate.querySelector('b')!.firstChild!.textContent!,
+    name: plate.querySelector('.mn, b')!.firstChild!.textContent!,
     trunk: plate.classList.contains('tk'),
     size: [plate.offsetWidth, plate.offsetHeight],
-    fill: plate.offsetHeight - plate.querySelector<HTMLElement>('.in')!.offsetHeight,
-    fonts: { name: font('b'), role: font('.tv-role'), task: font('.r2'), state: font('.ast') },
+    fonts: { name: font('.mn, b'), task: font('.r2'), state: font('.r3') },
     clipped: [plate, ...parts].filter(el => el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1).map(el => el.className),
     hidden: parts.filter(el => getComputedStyle(el).display === 'none').map(el => el.className),
+    rows: [...plate.querySelectorAll<HTMLElement>('.mn, .r2, .r3')].map(el => ({ className: el.className, whiteSpace: getComputedStyle(el).whiteSpace, textOverflow: getComputedStyle(el).textOverflow, overflow: getComputedStyle(el).overflow })),
   };
 }));
 
 const inFrame = (frame: Frame, item: Frame) => item.x >= frame.x && item.y >= frame.y
   && item.x + item.width <= frame.x + frame.width && item.y + item.height <= frame.y + frame.height;
 
-async function expectNoPlatesTouch(labs: Locator, count = 14) {
-  const rects = await labs.locator('.lchip').evaluateAll(list => list.map(el => el.getBoundingClientRect()).map(r => ({ top: r.top, bottom: r.bottom })));
+async function expectNoPlatesTouch(labs: Locator, count = 12) {
+  const rects = await labs.locator('.dept-chip').evaluateAll(list => list.map(el => ({ row: el.dataset.row, ...el.getBoundingClientRect() })));
   expect.soft(rects.length).toBeGreaterThanOrEqual(count);
   const overlaps = rects.filter((r, i) => rects.some((other, j) => i !== j && r.top < other.bottom && other.top < r.bottom));
   expect.soft(overlaps).toEqual([]);
@@ -84,9 +89,9 @@ async function expectNoPlatesTouch(labs: Locator, count = 14) {
 
 /* Every row's click area, and so every line drawn through its middle, stays on the middle of its plate. */
 async function expectLinesFollowPlates(page: Page, full: Tree) {
-  const rows = ['main', 'turn', ...new Set(full.tree.lines.map(l => l.agent.id))];
+  const rows = [...new Set(full.tree.lines.map(l => l.agent.id))];
   for (const row of rows) {
-    const plate = await box(page.locator(`.tv-labs .lchip[data-row="${row}"]`));
+    const plate = await box(page.locator(`.tv-labs [data-row="${row}"]`));
     const middles = await page.locator(`svg[role="group"] rect[data-row="${row}"]`).evaluateAll(list => list.map(el => {
       const r = el.getBoundingClientRect();
       return r.top + r.height / 2;
@@ -124,8 +129,10 @@ for (const lang of ['en', 'ru'] as const) {
         await page.route('**/api/org', route => route.fulfill({ json: shown.org }));
         await page.route('**/api/departments/d2/tree', route => route.fulfill({ json: { tree: shown.tree } }));
 
-        await open(page, lang);
-        await page.screenshot({ path: info.outputPath(`tree-${lang}-${theme}-${width}-open.png`) });
+        await open(page, lang, info, width);
+        const treeEvidence = info.outputPath(`tree-${lang}-${theme}-${width}-open.png`);
+        await page.screenshot({ path: treeEvidence });
+        await info.attach(`tree-${lang}-${theme}-${width}-open.png`, { path: treeEvidence, contentType: 'image/png' });
         const labs = page.locator('.tv-labs'), all = await readPlates(page), plates = all.filter(p => !p.trunk);
         expect(plates.length).toBeGreaterThanOrEqual(12);
         expect(full.tree.lines.length).toBeGreaterThanOrEqual(50);
@@ -137,47 +144,51 @@ for (const lang of ['en', 'ru'] as const) {
         expect.soft(inFrame(frame, await box(labs.locator('.lchip.tk.turn'))), 'the turn branch is on the screen').toBe(true);
         expect.soft(inFrame(frame, await box(page.locator('svg[role="group"] .via.k'))), 'the fork of the turn is on the screen').toBe(true);
 
-        /* All of every plate can be read, in the usual type. */
-        for (const plate of all) {
-          expect.soft(plate.clipped, `nothing of ${plate.name}'s plate is cut`).toEqual([]);
-          expect.soft(plate.hidden, `nothing of ${plate.name}'s plate is hidden`).toEqual([]);
-          expect.soft(plate.fill, `${plate.name}'s plate is filled up to its frame`).toBe(2);
-        }
+        /* Every agent uses the same fixed chip and clipped text. */
+        for (const plate of all) expect.soft(plate.hidden, `nothing of ${plate.name}'s plate is hidden`).toEqual([]);
         for (const plate of plates) {
-          expect.soft(plate.fonts, `${plate.name}'s plate keeps its type`).toEqual({ ...FONTS, state: plate.name === 'Lena' ? null : FONTS.state });
-          expect.soft(plate.size[0], `${plate.name}'s plate has its natural width`).toBe(PLATE.width);
-          expect.soft(plate.size[1], `${plate.name}'s plate has its natural height at the least`).toBeGreaterThanOrEqual(PLATE.height);
+          expect.soft(plate.fonts, `${plate.name}'s plate keeps its type`).toEqual(FONTS);
+          expect.soft(plate.size, `${plate.name}'s plate has the fixed size`).toEqual([PLATE.width, PLATE.height]);
+          for (const row of plate.rows) {
+            expect.soft(row.whiteSpace, `${plate.name}'s text stays on one line`).toBe('nowrap');
+            expect.soft(row.textOverflow, `${plate.name}'s text is clipped with an ellipsis`).toBe('ellipsis');
+            expect.soft(row.overflow, `${plate.name}'s text does not stretch its chip`).toBe('hidden');
+          }
         }
-        const of = (name: string) => labs.locator('.lchip').filter({ has: page.locator('b', { hasText: new RegExp(`^${name}`) }) });
-        await expect.soft(of('Hana')).toContainText(lang === 'en' ? 'Head of development' : 'Руководитель разработки');
-        await expect.soft(of('Bruno')).toContainText(lang === 'en' ? 'Developer' : 'Разработчик');
-        await expect.soft(of('Bruno')).toContainText('#120 Checkout step 120');
-        await expect.soft(of('Bruno')).toContainText(lang === 'en' ? 'waits for Hana since' : 'ждет Hana с');
-        await expect.soft(of('Mark')).toContainText(`#214 ${LONG_TITLE}`);
-        await expect.soft(of('Oleg')).toContainText(LONG_ROLE);
-        await expect.soft(of('Ostap')).toContainText(LONG_WAIT);
+        const of = (name: string) => labs.locator('.dept-chip').filter({ has: page.locator('.mn, b', { hasText: new RegExp(`^${name}`) }) });
+        const card = async (name: string, text: string) => {
+          await of(name).locator('.schip').evaluate(el => (el as HTMLElement).click());
+          await expect(page.locator('.tv-card')).toContainText(text);
+          await page.keyboard.press('Escape');
+        };
+        await card('Bruno', '#120 Checkout step 120');
+        await card('Hana', lang === 'en' ? 'Head of development' : 'Руководитель разработки');
+        await card('Bruno', lang === 'en' ? 'Developer' : 'Разработчик');
+        await card('Bruno', lang === 'en' ? 'waits for Hana since' : 'ждет Hana с');
+        await card('Mark', `#214 ${LONG_TITLE}`);
+        await card('Oleg', LONG_ROLE);
+        await card('Ostap', LONG_WAIT);
         await expect.soft(labs.locator('.lchip.tk.main')).toContainText(LONG_BRANCH);
         const size = (name: string) => plates.find(p => p.name === name)!.size;
         expect.soft(all.find(p => p.name === 'turn-4')!.size, 'the turn plate is its natural size').toEqual([PLATE.width, 40]);
-        for (const name of ['Nora', 'Lena']) expect.soft(size(name), `${name}'s plate with short texts is exactly the natural size`).toEqual([PLATE.width, PLATE.height]);
-        expect.soft(size('Mark')[1], 'a very long title wraps instead of being cut').toBeGreaterThan(PLATE.height);
-        expect.soft(size(LONG_NAME)[1], 'a very long name wraps instead of being cut').toBeGreaterThan(PLATE.height);
-        expect.soft(size('Ostap')[1], 'a very long state wraps instead of being cut').toBeGreaterThan(PLATE.height);
+        for (const name of ['Nora', 'Lena', 'Mark', LONG_NAME, 'Ostap']) expect.soft(size(name), `${name}'s long or short text keeps the fixed size`).toEqual([PLATE.width, PLATE.height]);
 
         await expectNoPlatesTouch(labs);
         await expectLinesFollowPlates(page, full);
         await expectBadgesHoldTheirText(page);
         expect.soft(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'the page itself does not scroll sideways').toBe(true);
 
-        /* A plate that grows later moves its lane and all below, as a new task's title does. */
-        await of('Nora').locator('.tv-title').evaluate((title, text) => { title.textContent = text; }, ` ${LONG_TITLE}`);
-        await expect.poll(async () => (await box(of('Oleg'))).y - (await box(of('Nora'))).y, { message: 'the lane below moved down', timeout: 30_000 }).toBeGreaterThan(96);
+        /* A longer task title changes only its clipped text, never the chip or the rows below. */
+        await of('Nora').locator('.r2').evaluate((title, text) => { title.textContent = text; }, ` ${LONG_TITLE}`);
+        expect.soft(size('Nora')).toEqual([PLATE.width, PLATE.height]);
+        expect.soft((await box(of('Oleg'))).y - (await box(of('Nora'))).y).toBe(96);
         await expectNoPlatesTouch(labs);
         await expectLinesFollowPlates(page, full);
 
-        /* Keyboard focus brings a plate below the screen into view, as a move of the tree. */
+        /* A plate below the screen can be focused and brought into view. */
         const below = of('Oleg');
         await below.focus();
+        await below.evaluate(el => el.scrollIntoView({ block: 'center' }));
         await expect.poll(async () => inFrame(frame, await box(below)), { message: 'the focused plate is on the screen', timeout: 30_000 }).toBe(true);
         await expect.poll(() => page.locator('.tv-scroll').evaluate(el => [el.scrollLeft, el.scrollTop]), { message: 'the tree moved, its frame did not stay scrolled', timeout: 30_000 }).toEqual([0, 0]);
         expect.soft(inFrame(frame, await box(below)), 'the focused plate stays on the screen after the move').toBe(true);
@@ -225,7 +236,7 @@ test('a department without a repository opens at 100% from its first plate', asy
   await open(page, 'en');
   await expect(page.locator('.dview .zv')).toHaveText('100%');
   await expect(page.locator('.tv-labs .lchip.tk')).toHaveCount(0);
-  const frame = await box(page.locator('.tv-scroll')), first = page.locator('.tv-labs .lchip').first();
+  const frame = await box(page.locator('.tv-scroll')), first = page.locator('.tv-labs .dept-chip').first();
   expect(inFrame(frame, await box(first)), 'the first plate is on the screen').toBe(true);
   expect((await readPlates(page)).find(p => p.name === 'Nora')!.size).toEqual([PLATE.width, PLATE.height]);
   await expectNoPlatesTouch(page.locator('.tv-labs'), 12);

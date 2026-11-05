@@ -1,0 +1,12 @@
+services:
+  database:
+    image: postgres:17.11
+    environment:
+      POSTGRES_DB: baskets_test
+      POSTGRES_USER: basket_test
+      POSTGRES_HOST_AUTH_METHOD: trust
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U basket_test -d baskets_test"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
