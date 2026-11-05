@@ -1,7 +1,7 @@
 import { combineReport, reportDelay } from './report-notices.js';
 import type { MachineDrain, Notification } from '@hornhoof/protocol';
 import type { MessageParty } from '../events/parties.js';
-import { effortFor, effortsOf, MAX_INSTRUCTIONS, modelsFor, OLD_NODE_INSTRUCTIONS, ORCHESTRATOR_EFFORT, UNHEARD_MS, type Limits } from '@hornhoof/protocol';
+import { currentLimits, effortFor, effortsOf, MAX_INSTRUCTIONS, modelsFor, OLD_NODE_INSTRUCTIONS, ORCHESTRATOR_EFFORT, UNHEARD_MS, type Limits } from '@hornhoof/protocol';
 import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lte, ne, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -9,7 +9,7 @@ import { loggable } from '../../errors.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
 import { agents, jobs, nodes, subscriptions, tasks, turns } from '../../db/schema.js';
 import { dispatchJob } from '../jobs/dispatch.js';
-import { nodeDrain, nodeHeld, turnsHeld } from '../updates/drain.js';
+import { nodeDrain, nodeHeld, nodeHeldFrom, turnsHeld } from '../updates/drain.js';
 import { actingCeo, alsoKept, deliverLockedInput, inputKept, turnStarted, withInputLock } from './decision-context.js';
 import { BUILTIN, identityOf, nodeIdentity, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { liveNode, planNodes, type NodeRow } from '../nodes/nodes.js';
@@ -66,16 +66,17 @@ const LONGEST_TIMER_MS = 2 ** 31 - 1;
 
 /* When the plan's limit starts over, while the plan is at it: the latest reset of a full window still to come. A plan at
    its limit that says no reset holds nothing, so its turns go out and fail as before rather than wait forever. */
-export function limitUntil(limits: Limits | null, now = Date.now()): string | null {
-  if (limits?.status !== 'rejected') return null;
-  const resets = limits.windows.filter(w => (w.utilization === null || w.utilization >= 1) && w.resetsAt && Date.parse(w.resetsAt) > now).map(w => w.resetsAt!);
+export function limitUntil(limits: Limits | null, updatedAt: string | Date | null, now = Date.now()): string | null {
+  const current = currentLimits(limits, updatedAt, now);
+  if (current?.status !== 'rejected') return null;
+  const resets = current.windows.filter(w => (w.utilization === null || w.utilization >= 1) && w.resetsAt).map(w => w.resetsAt!);
   return resets.length ? resets.reduce((a, b) => (Date.parse(a) >= Date.parse(b) ? a : b)) : null;
 }
 
 /* When a window of the plan that used the share set for task turns starts over: the latest such reset still to come. */
-export function budgetUntil(limits: Limits | null, budget: number | null, now = Date.now()): string | null {
+export function budgetUntil(limits: Limits | null, budget: number | null, updatedAt: string | Date | null, now = Date.now()): string | null {
   if (budget === null || budget >= 100) return null;
-  const resets = (limits?.windows ?? []).filter(w => w.utilization !== null && w.utilization * 100 >= budget && w.resetsAt && Date.parse(w.resetsAt) > now).map(w => w.resetsAt!);
+  const resets = (currentLimits(limits, updatedAt, now)?.windows ?? []).filter(w => w.utilization !== null && w.utilization * 100 >= budget && w.resetsAt).map(w => w.resetsAt!);
   return resets.length ? resets.reduce((a, b) => (Date.parse(a) >= Date.parse(b) ? a : b)) : null;
 }
 
@@ -239,7 +240,7 @@ export async function windowNode(ctx: Ctx, agentId: string): Promise<ProgramNode
     const [running] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
     const sub = running ? null : await liveSubscription(ctx, agentId);
     if (sub?.kind !== 'personal') return null;
-    const [agent] = await ctx.db.select({ id: agents.id, nodeId: agents.nodeId }).from(agents).where(eq(agents.id, agentId));
+    const [agent] = await ctx.db.select({ id: agents.id, nodeId: agents.nodeId, roleKey: agents.roleKey }).from(agents).where(eq(agents.id, agentId));
     const place = agent ? await placement(ctx, agent, sub) : null;
     if (place?.moves) await ctx.db.update(agents).set({ nodeId: place.nodeId }).where(eq(agents.id, agentId));
     if (place) return { node: place.node, ownerPersonId: sub.ownerPersonId };
@@ -405,7 +406,7 @@ export async function startProgram(ctx: Ctx, node: NodeIdentity, agentId: string
     if (!agent || !sub || !at || !sameNode(at, node)) return false;
     if (node.kind === 'node' && await resumeOperatorProcess(ctx, agentId, node.nodeId)) return true;
     /* Task turns of an agent that is switched off wait for it to be on and start nothing. */
-    const waiting = and(eq(jobs.status, 'queued'), limitUntil(sub.limits) ? programStart : agent.switchedOffAt ? isNull(jobs.taskId) : undefined);
+    const waiting = and(eq(jobs.status, 'queued'), limitUntil(sub.limits, sub.limitsUpdatedAt) ? programStart : agent.switchedOffAt ? isNull(jobs.taskId) : undefined);
     const [open] = await db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), or(eq(jobs.status, 'running'), waiting))).limit(1);
     if (open) return false;
     await insertTurn(ctx, { companyId: agent.companyId, agentId, prompt: '', createdBy: null });
@@ -479,6 +480,8 @@ function outdated(version: string | null, need = CONVERSATION_NODE): boolean {
   return false;
 }
 
+const takesTurns = (ctx: Ctx, n: NodeRow, need: number[]): boolean => n.status === 'ready' && !outdated(n.version, need) && ctx.hub.isReady(nodeIdentity(n.id));
+
 /* moves: the agent has not been on this node until now, or leaves the machine it was on for the built-in node. */
 type Placement = { node: NodeIdentity; nodeId: string | null; moves: boolean };
 
@@ -486,11 +489,13 @@ type Placement = { node: NodeIdentity; nodeId: string | null; moves: boolean };
    that one is signed in, connected and new enough, so its folder, session and terminal go on there; otherwise to the
    freest of the plan's nodes that is, unless the agent has work in progress on its own and waits for it. None while no
    node can take it. */
-async function placement(ctx: Ctx, agent: { id: string; nodeId: string | null }, sub: { id: string; kind: 'personal' | 'api_key' }, need = CONVERSATION_NODE): Promise<Placement | null> {
-  if (sub.kind === 'api_key') return ctx.hub.isReady(BUILTIN) && !nodeHeld(ctx, BUILTIN) ? { node: BUILTIN, nodeId: null, moves: agent.nodeId !== null } : null;
+async function placement(ctx: Ctx, agent: { id: string; nodeId: string | null; roleKey: string | null }, sub: { id: string; kind: 'personal' | 'api_key' }, need = CONVERSATION_NODE): Promise<Placement | null> {
+  const held = (node: NodeIdentity) => nodeHeldFrom(ctx, node, agent.roleKey);
+  if (sub.kind === 'api_key') return ctx.hub.isReady(BUILTIN) && !held(BUILTIN) ? { node: BUILTIN, nodeId: null, moves: agent.nodeId !== null } : null;
   const all = await planNodes(ctx.db, [sub.id]);
-  const able = all.filter(n => n.status === 'ready' && !outdated(n.version, need) && ctx.hub.isReady(nodeIdentity(n.id)) && !nodeHeld(ctx, nodeIdentity(n.id)));
-  const stays = all.some(n => n.id === agent.nodeId && !nodeHeld(ctx, nodeIdentity(n.id))) && (await holdsWork(ctx, agent.id));
+  const free = all.filter(n => !held(nodeIdentity(n.id)));
+  const able = free.filter(n => takesTurns(ctx, n, need));
+  const stays = free.some(n => n.id === agent.nodeId) && (await holdsWork(ctx, agent.id));
   const pick = able.find(n => n.id === agent.nodeId) ?? (stays ? null : await freest(ctx, able));
   return pick ? { node: nodeIdentity(pick.id), nodeId: pick.id, moves: pick.id !== agent.nodeId } : null;
 }
@@ -665,8 +670,8 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   if (await waitsForRetry(ctx, agentId)) return;
   /* Real turns wait for the limit; an empty start can still open the saved program. Past the share set for tasks only
      task turns wait. */
-  const until = limitUntil(sub.limits);
-  const spent = budgetUntil(sub.limits, sub.budget);
+  const until = limitUntil(sub.limits, sub.limitsUpdatedAt);
+  const spent = budgetUntil(sub.limits, sub.budget, sub.limitsUpdatedAt);
   if (until ?? spent) pumpAt(ctx, agentId, (until ?? spent)!);
   /* Switched off, it still answers people who write to it; its task turns wait until it is on. */
   const [job] = await db
@@ -728,6 +733,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
       id: job.id,
       subscriptionId: sub.id,
       nodeId: place.nodeId,
+      role: agent.roleKey,
       prompt,
       sessionId,
       model,
@@ -787,19 +793,31 @@ export async function orchestratorState(ctx: Ctx, companyId: string): Promise<Ag
   return agentState(ctx, agent.id);
 }
 
+/* A node that waits or restarts for an update is not away: it comes back by itself, and its turns wait in line for it. */
+const notAway = (ctx: Ctx, node: NodeIdentity): boolean => ctx.hub.isReady(node) || nodeHeld(ctx, node);
+
 /* Why the agent's turns cannot go out now, or null when they can: a plan's go out while one of its machines can take them,
    and otherwise wait for what its own machine waits for, or one of the plan's that is online, or its first. One with work
    in progress waits for its own machine alone. */
 async function waitsFor(ctx: Ctx, agent: { id: string; productId: string | null; departmentId: string | null; nodeId: string | null }, sub: { id: string; kind: 'personal' | 'api_key' }): Promise<AgentState['reason']> {
-  if (sub.kind === 'api_key') return ctx.hub.isReady(BUILTIN) || nodeHeld(ctx, BUILTIN) ? null : 'machine_offline';
+  if (sub.kind === 'api_key') return notAway(ctx, BUILTIN) ? null : 'machine_offline';
   const all = await planNodes(ctx.db, [sub.id]);
   if (!all.length) return 'waiting_machine';
   const need = all.some(n => outdated(n.version, REPOSITORY_NODE)) && (await repoFor(ctx, agent)) ? REPOSITORY_NODE : CONVERSATION_NODE;
-  const why = (n: NodeRow): AgentState['reason'] => (n.status !== 'ready' ? n.status : outdated(n.version, need) ? 'node_outdated' : ctx.hub.isReady(nodeIdentity(n.id)) || nodeHeld(ctx, nodeIdentity(n.id)) ? null : 'machine_offline');
+  const why = (n: NodeRow): AgentState['reason'] => (n.status !== 'ready' ? n.status : outdated(n.version, need) ? 'node_outdated' : notAway(ctx, nodeIdentity(n.id)) ? null : 'machine_offline');
   const own = all.find(n => n.id === agent.nodeId);
   if (own && why(own) !== null && (await holdsWork(ctx, agent.id))) return why(own);
   if (all.some(n => why(n) === null)) return null;
   return why(own ?? all.find(n => ctx.hub.isOnline(nodeIdentity(n.id))) ?? all[0]!);
+}
+
+/* The update its next turn waits for: of its own machine or, with that one away, of the one its plan has left. */
+async function drainInTheWay(ctx: Ctx, agent: { nodeId: string | null } | undefined, sub: { id: string; kind: 'personal' | 'api_key' } | null, shown: NodeIdentity | null): Promise<MachineDrain | null> {
+  if (!agent || !sub) return null;
+  if (sub.kind === 'api_key') return nodeDrain(ctx, BUILTIN);
+  const plan = (await planNodes(ctx.db, [sub.id])).map(n => nodeIdentity(n.id));
+  const own = agent.nodeId ? [nodeIdentity(agent.nodeId)] : [];
+  return [...(shown ? [shown] : []), ...own, ...plan].map(node => nodeDrain(ctx, node)).find(Boolean) ?? null;
 }
 
 /* Whether the agent can answer now and, if not, why; what it is doing and how many turns wait. */
@@ -807,22 +825,19 @@ export async function agentState(ctx: Ctx, agentId: string): Promise<AgentState>
   const [running] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
   const [waiting] = await ctx.db.select({ n: count() }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'queued')));
   const sub = await liveSubscription(ctx, agentId);
-  const [agent] = sub ? await ctx.db.select({ id: agents.id, productId: agents.productId, departmentId: agents.departmentId, nodeId: agents.nodeId }).from(agents).where(eq(agents.id, agentId)) : [];
+  const [agent] = sub ? await ctx.db.select({ id: agents.id, productId: agents.productId, departmentId: agents.departmentId, nodeId: agents.nodeId, roleKey: agents.roleKey }).from(agents).where(eq(agents.id, agentId)) : [];
   const reason: AgentState['reason'] = !sub || !agent ? 'no_subscription' : await waitsFor(ctx, agent, sub);
   /* The terminal the window opens is of the machine the program is on, or for one not on a machine yet, of the machine
      its next turn would go to, where the window starts it. */
-  const shown = (await programNode(ctx, agentId))?.node ?? (sub && agent ? ((await placement(ctx, agent, sub))?.node ?? null) : null);
+  const place = sub && agent ? await placement(ctx, agent, sub) : null;
+  const shown = (await programNode(ctx, agentId))?.node ?? place?.node ?? null;
   const terminal = Boolean(shown && ctx.hub.hasTerminals(shown));
   const browserError = shown ? ctx.hub.browserErrorOf(shown) : null;
-  const available = sub && agent ? await placement(ctx, agent, sub) : null;
-  const first = !available && sub?.kind === 'personal' ? (await planNodes(ctx.db, [sub.id])).find(n => nodeHeld(ctx, nodeIdentity(n.id))) : null;
-  const heldNode = shown ?? (sub?.kind === 'api_key' ? BUILTIN : agent?.nodeId ? nodeIdentity(agent.nodeId) : first ? nodeIdentity(first.id) : null);
-  const drain = !available && heldNode ? nodeDrain(ctx, heldNode) : null;
   return {
     ready: reason === null,
-    machineDrain: drain,
-    limitUntil: sub ? limitUntil(sub.limits) : null,
-    budgetUntil: sub ? budgetUntil(sub.limits, sub.budget) : null,
+    machineDrain: place || reason !== null ? null : await drainInTheWay(ctx, agent, sub, shown),
+    limitUntil: sub ? limitUntil(sub.limits, sub.limitsUpdatedAt) : null,
+    budgetUntil: sub ? budgetUntil(sub.limits, sub.budget, sub.limitsUpdatedAt) : null,
     reason,
     browserError,
     busy: Boolean(running),

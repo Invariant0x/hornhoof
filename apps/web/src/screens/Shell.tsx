@@ -26,6 +26,8 @@ import { Subscriptions } from './Subscriptions';
 import { Tasks } from './Tasks';
 import { Versions } from './Versions';
 import { takeEscape } from '../ui/escape';
+import { useRoute, type Route } from '../routes';
+import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 
 type Tab = 'map' | 'tasks' | 'people' | 'subscriptions' | 'machines' | 'improvements';
 const TABS: Tab[] = ['map', 'tasks', 'people', 'subscriptions', 'machines'];
@@ -33,13 +35,17 @@ const THEMES: Theme[] = ['light', 'dark'];
 
 type AccountDialogName = 'about' | 'versions' | 'profile' | 'settings';
 
-function AccountDialog({ active, me, updates, onRenamed, onClose }: { active: AccountDialogName | null; me: Me; updates: Updates; onRenamed: (name: string) => void; onClose: () => void }) {
+function dialogOf(route: Route): AccountDialogName | null {
+  return route.kind === 'about' || route.kind === 'versions' || route.kind === 'profile' || route.kind === 'settings' ? route.kind : null;
+}
+
+function AccountDialog({ active, me, updates, onRenamed, onClose, onHome }: { active: AccountDialogName | null; me: Me; updates: Updates; onRenamed: (name: string) => void; onClose: () => void; onHome: () => void }) {
   if (!active) return null;
   return {
     about: <About onClose={onClose} />,
-    versions: <Versions updates={updates} onClose={onClose} />,
+    versions: <Versions updates={updates} onClose={onClose} onHome={onHome} />,
     profile: <Profile me={me} onRenamed={onRenamed} onClose={onClose} />,
-    settings: <Settings me={me} onClose={onClose} />,
+    settings: <Settings me={me} onClose={onClose} onHome={onHome} />,
   }[active];
 }
 
@@ -164,7 +170,6 @@ function AccountMenu({
    after a click on a person's card: null shows everyone's. */
 function useDecisionsView() {
   const { decisions, load } = useDecisions();
-  const [personId, showPerson] = useState<string | null>(null);
   const requests = decisions?.requests ?? [];
   return {
     all: decisions,
@@ -172,8 +177,6 @@ function useDecisionsView() {
     load,
     /* What agents ask, the orchestrator's cards and his request for the computer. */
     waiting: decisions?.counts.total ?? 0,
-    personId,
-    showPerson,
     /* What agents ask on one task, for its panel. */
     requestsOf: (taskId: string) => requests.filter(r => r.task.id === taskId),
   };
@@ -190,46 +193,50 @@ function AgentWindowError({ shown, org, failure }: { shown: string | null; org: 
 /* welcome: setup just finished, so the orchestrator's window opens at once. */
 export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: boolean; onSignOut: () => void }) {
   const t = useT();
-  const [tab, setTab] = useState<Tab>('map');
+  const { route, navigate, backgrounds, closeOverlay } = useRoute();
+  const accountDialog = dialogOf(route);
+  const contentRoute = accountDialog ? backgrounds[0]! : route;
+  const taskId = contentRoute.kind === 'tasks' ? contentRoute.id ?? null : null;
+  const pageRoute = taskId ? backgrounds[accountDialog ? 1 : 0] ?? { kind: 'tasks' } as const : contentRoute;
+  const tab = pageRoute.kind === 'department' ? 'map' : pageRoute.kind;
+  const deptId = pageRoute.kind === 'department' ? pageRoute.id : null;
+  const goHome = () => navigate({ kind: 'map' });
+  const openAccount = (kind: AccountDialogName) => navigate({ kind }, route);
   const [menu, setMenu] = useState(false);
   const [selfName, setSelfName] = useState(me.person.name);
   const currentMe = { ...me, person: { ...me.person, name: selfName } };
   const company = me.person.scopeKind === 'company';
+  const denied = !company && ['improvements', 'settings', 'versions'].some(kind => kind === route.kind || kind === pageRoute.kind);
   /* The orchestrator's window opens over the map, for people who see the whole company. */
   const windows = useAgentWindows(welcome && company ? 'orchestrator' : null);
   /* A task's panel stands on the left, on its own: it and a window on the screen take each other's place. */
-  const [taskId, setTaskId] = useState<string | null>(null);
-  const [deptId, setDeptId] = useState<string | null>(null);
   const [staff, setStaff] = useState<StaffAsk | null>(null);
   const { org, failure: orgFailure } = useOrg(windows.ids.length > 0 || taskId !== null || deptId !== null);
   const orchestratorId = org?.orchestrator?.id;
   if (orchestratorId && windows.ids.includes(orchestratorId)) windows.nameOrchestrator(orchestratorId);
   const { open: openWindow, hide: hideWindow } = windows;
+  useEffect(() => {
+    if (taskId) hideWindow();
+  }, [taskId, hideWindow]);
   const openAgent = useCallback((agentId: string) => {
-    setTaskId(null);
+    if (taskId) navigate(pageRoute);
     openWindow(agentId);
-  }, [openWindow]);
+  }, [openWindow, taskId, navigate, pageRoute]);
   const openTask = useCallback((id: string) => {
     hideWindow();
-    setTaskId(id);
-  }, [hideWindow]);
+    navigate({ kind: 'tasks', id }, pageRoute);
+  }, [hideWindow, navigate, pageRoute]);
   const shownPanel = windows.shown ? 'window' : taskId ? 'task' : null;
   const dept = deptId ? org?.departments.find(d => d.id === deptId) : undefined;
-  /* A department removed while its view was open closes the view. */
-  useEffect(() => {
-    if (org && deptId && !dept) setDeptId(null);
-  }, [org, deptId, dept]);
+  const missingDepartment = deptId !== null && (unavailableFailure(orgFailure) || (org !== null && !dept));
   const updates = useUpdates(company);
   const decisions = useDecisionsView();
   /* A person's card, on the map or in a department, opens the decisions screen showing theirs. */
   const openDecisions = (personId: string) => {
-    setDeptId(null);
-    decisions.showPerson(personId);
-    setTab('tasks');
+    navigate({ kind: 'tasks', personId });
   };
   const { improvements, failure: improvementsFailure, load: loadImprovements } = useImprovements(company);
   const toDecide = improvements?.filter(i => i.status === 'open').length ?? 0;
-  const [accountDialog, setAccountDialog] = useState<AccountDialogName | null>(null);
   const account = useRef<HTMLDivElement>(null);
   const accountButton = useRef<HTMLButtonElement>(null);
 
@@ -278,8 +285,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
                 aria-current={tab === id ? 'page' : undefined}
                 aria-label={count ? t.tasks.navWaiting(count) : undefined}
                 onClick={() => {
-                  setTab(id);
-                  decisions.showPerson(null);
+                  navigate({ kind: id });
                 }}
               >
                 {t.shell.tabs[id]}
@@ -293,25 +299,28 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
             <button ref={accountButton} className="avatar glass" type="button" aria-label={t.shell.account} aria-expanded={menu} onClick={() => setMenu(!menu)}>
               {currentMe.person.name.trim().charAt(0).toUpperCase()}
             </button>
-            {menu && <AccountMenu me={currentMe} onClose={() => setMenu(false)} onSignOut={() => void signOut()} onImprovements={company ? () => setTab('improvements') : undefined} onVersions={company ? () => setAccountDialog('versions') : undefined} onProfile={() => setAccountDialog('profile')} onSettings={company ? () => setAccountDialog('settings') : undefined} onAbout={() => setAccountDialog('about')} toDecide={toDecide} />}
+            {menu && <AccountMenu me={currentMe} onClose={() => setMenu(false)} onSignOut={() => void signOut()} onImprovements={company ? () => navigate({ kind: 'improvements' }) : undefined} onVersions={company ? () => openAccount('versions') : undefined} onProfile={() => openAccount('profile')} onSettings={company ? () => openAccount('settings') : undefined} onAbout={() => openAccount('about')} toDecide={toDecide} />}
           </div>
         </div>
       </header>
-      {company && <UpdateBanner updates={updates} onDetails={() => setAccountDialog('versions')} />}
+      {company && <UpdateBanner updates={updates} onDetails={() => openAccount('versions')} />}
       <main className={`body${tab === 'map' ? '' : ' page'}${shownPanel ? ` with-${shownPanel}` : ''}`}>
         <AgentWindowError shown={windows.shown} org={org} failure={orgFailure} />
-        {tab === 'map' && (
+        {(route.kind === 'unavailable' || route.kind === 'invite' || missingDepartment || denied) && <RouteUnavailable onHome={goHome} />}
+        {deptId && orgFailure !== null && !unavailableFailure(orgFailure) && <p className="alert" role="alert">{errorText(t, orgFailure)}</p>}
+        {tab === 'map' && !denied && !missingDepartment && (!deptId || dept) && (
           <MapScreen
             me={me}
+            onHome={goHome}
             windowOpen={shownPanel === 'window'}
             leftPanelOpen={shownPanel === 'task'}
             onOpenOrchestrator={() => openAgent('orchestrator')}
             inside={!!dept}
-            onOpenDepartment={setDeptId}
+            onOpenDepartment={id => navigate(id ? { kind: 'department', id } : { kind: 'map' })}
             onOpenDecisions={openDecisions}
           />
         )}
-        {tab === 'map' && dept && (
+        {tab === 'map' && dept && !missingDepartment && (
           <DepartmentView
             me={me}
             department={dept}
@@ -320,7 +329,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
             selectedTask={taskId}
             panel={shownPanel}
             serverNow={org?.serverNow}
-            onBack={() => setDeptId(null)}
+            onBack={goHome}
             onOpen={openAgent}
             onOpenTask={openTask}
             onOpenDecisions={openDecisions}
@@ -332,34 +341,37 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
         )}
         {tab === 'tasks' && (
           <Tasks
+            onHome={goHome}
             decisions={decisions.all}
             onDecisionsChanged={decisions.load}
-            personId={decisions.personId}
-            onClearPerson={() => decisions.showPerson(null)}
+            personId={pageRoute.kind === 'tasks' ? pageRoute.personId ?? null : null}
+            onClearPerson={() => navigate({ kind: 'tasks' })}
             selected={taskId}
             onOpenTask={openTask}
             onOpenAgent={openAgent}
             onOpenOrchestrator={company ? () => openAgent('orchestrator') : undefined}
           />
         )}
-        {tab === 'people' && <People me={currentMe} />}
-        {tab === 'subscriptions' && <Subscriptions me={me} />}
-        {tab === 'machines' && <Machines me={me} />}
-        {tab === 'improvements' && company && <Improvements improvements={improvements} failure={improvementsFailure} onChanged={loadImprovements} onTask={openTask} />}
+        {pageRoute.kind === 'people' && <People me={currentMe} selected={pageRoute.id ?? null} onSelect={id => navigate(id ? { kind: 'people', id } : { kind: 'people' })} onHome={goHome} />}
+        {tab === 'subscriptions' && <Subscriptions me={me} onHome={goHome} />}
+        {pageRoute.kind === 'machines' && <Machines me={me} selected={pageRoute.id ?? null} onSelect={id => navigate(id ? { kind: 'machines', id } : { kind: 'machines' })} onHome={goHome} />}
+        {tab === 'improvements' && company && <Improvements improvements={improvements} failure={improvementsFailure} onChanged={loadImprovements} onTask={openTask} onHome={goHome} />}
       </main>
       <AgentWindows windows={windows} onOpen={openAgent} me={me} org={org} staff={staff} requests={decisions.requests} onRequestsChanged={decisions.load} />
       {taskId && (
         <TaskPanel
           key={taskId}
           taskId={taskId}
-          onClose={() => setTaskId(null)}
-          onOpen={setTaskId}
+          active={!accountDialog && !menu}
+          onClose={() => navigate(pageRoute)}
+          onOpen={openTask}
+          onHome={goHome}
           requests={decisions.requestsOf(taskId)}
           onRequestsChanged={decisions.load}
           onOpenAgent={openAgent}
         />
       )}
-      <AccountDialog active={accountDialog} me={currentMe} updates={updates} onRenamed={setSelfName} onClose={() => { setAccountDialog(null); accountButton.current?.focus(); }} />
+      <AccountDialog active={!company && (accountDialog === 'settings' || accountDialog === 'versions') ? null : accountDialog} me={currentMe} updates={updates} onHome={goHome} onRenamed={setSelfName} onClose={() => { closeOverlay(); accountButton.current?.focus(); }} />
       {company && updates.cut && <UpdateCut cut={updates.cut} updates={updates} />}
     </div>
     </AgentWindowContext>

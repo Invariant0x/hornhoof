@@ -12,6 +12,8 @@ import { resumeOperatorProcess } from '../src/modules/program-operator/recovery.
 import { afterFailure } from '../src/modules/tasks/failures.js';
 import { requestNodeDrain } from '../src/modules/updates/node-drain.js';
 import { checkOperatorHealth, restoreOperatorNode } from '../src/modules/program-operator/health.js';
+import { enqueueTurn } from '../src/modules/conversation/queue.js';
+import { until } from './helpers.js';
 import { operatorCompany } from './program-operator-company.js';
 import { reserveDelivery, wordsDigest } from '../src/modules/program-operator/deliveries.js';
 
@@ -273,6 +275,44 @@ it('calls an operator unavailable whose machine went away for no update', async 
   await operatorOnItsOwnMachine(c);
   await c.attempt(); await c.alarm('assignment_unrecorded', 60000);
   expect((await c.cases())[0]).toMatchObject({ status: 'escalated', operatorAgentId: null, resolution: { outcome: 'operator_unavailable' } });
+});
+
+it('lets the operator answer a program on a machine that waits for an update, and the machine then goes on to it', async () => {
+  const c = await fixture(true, { HORNHOOF_CONTROL_DIR: mkdtempSync(join(tmpdir(), 'hh-operator-drain-')) });
+  const machine = { kind: 'node' as const, nodeId: c.identity.nodeId };
+  await c.db.update(agents).set({ nodeId: machine.nodeId }).where(eq(agents.id, c.operator!.id));
+  expect(await requestNodeDrain(c.ctx, machine)).toMatchObject({ state: 'waiting', turnsLeft: 1 });
+  await c.launch();
+  const question = { id: randomUUID(), kind: 'permission' as const, tool: 'Bash', text: 'Remove ./tmp/mine?', callId: 'q' };
+  const asked: OperatorEvidence = { type: 'program.question', agentKey: c.agent.id, jobId: c.job.id, instance: c.fact.instance, evidenceId: randomUUID(), ordinal: 0, question, questionOrdinal: 1, phase: 'asked', elapsedMs: 0 };
+  await c.record(asked);
+  await c.record({ type: 'program.operator_needed', agentKey: c.agent.id, jobId: c.job.id, instance: c.fact.instance, evidenceId: randomUUID(), ordinal: 0, reason: 'question_waiting', questionId: question.id, deliveryId: null, evidenceKey: question.id, elapsedMs: 30000, sinceLaunchMs: 30000, exit: null });
+  await until(async () => (await c.turnsOf(c.operator!.id))[0]?.status === 'running');
+  const [turn] = await c.turnsOf(c.operator!.id);
+  expect(turn).toMatchObject({ status: 'running', nodeId: machine.nodeId });
+  expect(await requestNodeDrain(c.ctx, machine)).toMatchObject({ state: 'waiting', turnsLeft: 2 });
+  await c.record({ ...asked, phase: 'cleared', elapsedMs: 30001 });
+  expect((await c.cases())[0]!.status).toBe('resolved');
+  await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, c.job.id));
+  await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, turn!.id));
+  expect(await requestNodeDrain(c.ctx, machine)).toMatchObject({ state: 'restarting' });
+});
+
+it('keeps a program operator off a machine that restarts for an update, and other turns off one that waits', async () => {
+  const c = await fixture(true, { HORNHOOF_CONTROL_DIR: mkdtempSync(join(tmpdir(), 'hh-operator-drain-')) });
+  const machine = { kind: 'node' as const, nodeId: c.identity.nodeId };
+  await c.db.update(agents).set({ nodeId: machine.nodeId }).where(eq(agents.id, c.operator!.id));
+  await c.db.update(agents).set({ nodeId: machine.nodeId }).where(eq(agents.id, c.head.id));
+  expect(await requestNodeDrain(c.ctx, machine)).toMatchObject({ state: 'waiting' });
+  await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.head.id, prompt: 'A head stays out while the machine waits.', createdBy: null });
+  await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.operator!.id, prompt: 'An operator goes in.', createdBy: null });
+  await until(async () => (await c.turnsOf(c.operator!.id))[0]?.status === 'running');
+  expect((await c.turnsOf(c.head.id))[0]).toMatchObject({ status: 'queued' });
+  await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.agentId, c.operator!.id));
+  await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, c.job.id));
+  expect(await requestNodeDrain(c.ctx, machine)).toMatchObject({ state: 'restarting' });
+  await enqueueTurn(c.ctx, { companyId: c.companyId, agentId: c.operator!.id, prompt: 'Not while it restarts.', createdBy: null });
+  expect((await c.turnsOf(c.operator!.id)).at(-1)).toMatchObject({ status: 'queued' });
 });
 
 it.each(['offline', 'already-stuck', 'self'])('does not assign recovery to an operator that is %s', async state => {

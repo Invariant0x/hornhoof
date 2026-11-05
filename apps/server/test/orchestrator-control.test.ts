@@ -430,6 +430,7 @@ describe('the orchestrator reads and changes the database itself', () => {
     }
     expect(text(await call(client, 'database', { sql: 'SELECT * FROM sessions' }))).toContain('Sign-ins, invites, install codes, sealed plan sign-ins and the public link are closed to this tool.');
     expect(JSON.parse(text(await call(client, 'database', { sql: 'SELECT name FROM people' })))[0].rows).toEqual([{ name: 'Ivan' }]);
+    expect(JSON.parse(text(await call(client, 'database', { sql: 'SELECT cause FROM node_connections' })))[0].rows).toEqual([]);
   });
 
   it('reads requests, cards and the logs, and is refused changing them even in a turn of the CEO', async () => {
@@ -528,6 +529,8 @@ describe('the orchestrator reads and changes the database itself', () => {
       ['UPDATE subscriptions SET budget = 10', /only the CEO/],
       ['UPDATE machines SET revoked_at = now()', /only the CEO/],
       ['UPDATE machines SET lends_tests = false', /only the CEO/],
+      ['DELETE FROM node_connections', /Hornhoof writes the history/],
+      [`UPDATE node_connections SET cause = 'network'`, /Hornhoof writes the history/],
       ['DELETE FROM test_parts', /run_tests/],
       [`UPDATE departments SET repo_url = 'https://evil.test/acme.git' WHERE id = '${dev.id}'`, /only the CEO/],
       [`UPDATE agents SET subscription_id = NULL WHERE id = '${orchestrator.id}'`, /change_employee/],
@@ -588,6 +591,7 @@ describe('the orchestrator reads and changes the database itself', () => {
     }
     expect((await db.select().from(agents).where(eq(agents.id, bruno.id)))[0]!.name).toBe('Bruno');
     expect((await db.select().from(tasks).where(eq(tasks.id, task.id))).length).toBe(1);
+    expect(JSON.parse(text(await call(client, 'database', { sql: 'SELECT cause FROM node_connections' })))[0].rows).toEqual([]);
     const read = await call(client, 'database', { sql: `SELECT status, error FROM jobs WHERE agent_id = '${wanda.id}'` });
     expect(JSON.parse(text(read))).toEqual([{ rows: [{ status: 'running', error: null }], changed: 0 }]);
   });

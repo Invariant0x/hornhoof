@@ -15,8 +15,10 @@ import { providerFilter, type FilterGroup } from '../ui/TableTools';
 import { SortTable, type TableColumn } from '../ui/SortTable';
 import { planStateOnMachine, subName } from '../ui/subscription';
 import { useNow } from '../ui/reset';
+import { MachineConnections } from '../ui/MachineConnections';
 import { ProgramVersions } from '../ui/ProgramVersions';
 import { DrainLine, DrainMark } from '../ui/MachineDrain';
+import { RouteUnavailable, unavailableFailure, type CardRoute } from './RouteUnavailable';
 
 const REFRESH_MS = 5000;
 const GIB = 1024 ** 3;
@@ -110,7 +112,7 @@ function PlansOnMachine({ row, subs }: { row: MachineRow; subs: SubView[] }) {
   if (!row.plans.length) return <p className="part-note">{t.cards.noPlans}</p>;
   return <ul className="plist" aria-label={t.cards.plansOn}>{row.plans.map(plan => {
     const sub = subs.find(s => s.id === plan.id);
-    const state = planStateOnMachine(t, language, { ...plan, online: row.online && plan.online }, sub?.limits ?? null, now);
+    const state = planStateOnMachine(t, language, { ...plan, online: row.online && plan.online }, sub?.limits ?? null, now, sub?.limitsUpdatedAt);
     return <li key={plan.id}><ProviderMark provider={plan.provider} /><span className="nm"><b>{sub ? subName(t, sub) : PROVIDER_NAMES[plan.provider]}{sub?.tier && <> <small>{sub.tier}</small></>}</b><small>{[sub?.owner.name, state].filter(Boolean).join(', ')}</small></span></li>;
   })}</ul>;
 }
@@ -285,11 +287,12 @@ function MachineDetails({ row, subs, me, now, controls }: { row: MachineRow; sub
         <PlansOnMachine row={row} subs={subs} />
         {m && <MachineSettings machine={m} editable={editable} addable={addable} busy={Boolean(shown || picking)} controls={controls} />}
       </section>
+      {m && <MachineConnections key={m.id} id={m.id} hostname={m.hostname} online={row.online} />}
     </CardFrame>
   );
 }
 
-export function Machines({ me }: { me: Me }) {
+export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRoute) {
   const t = useT();
   const { language } = useLanguage();
   const now = useNow();
@@ -392,6 +395,8 @@ export function Machines({ me }: { me: Me }) {
   const online = (machines ?? []).filter(m => m.online || (m === host && builtin!.online)).length + (apart?.online ? 1 : 0);
   const activeCommand = liveCommand(command, now);
   const openIds = openCommandIds(addCommands, now);
+  const rows = machineRows(machines ?? [], builtin, subs, t.machines.builtin);
+  if (unavailableFailure(failure) || (selected && machines && !rows.some(row => row.id === selected))) return <RouteUnavailable onHome={onHome} />;
 
   return (
     <section className="people machines">
@@ -422,7 +427,9 @@ export function Machines({ me }: { me: Me }) {
       {machines && machines.length === 0 && !builtin && <p className="muted">{t.machines.noMachines}</p>}
       {machines && (machines.length > 0 || builtin) && (
         <SortTable
-          rows={machineRows(machines, builtin, subs, t.machines.builtin)}
+          rows={rows}
+          selectedId={selected}
+          onSelect={onSelect}
           columns={machineColumns(t, language)}
           name={row => row.hostname}
           openIds={openIds}

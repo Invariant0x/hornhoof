@@ -71,6 +71,33 @@ export function useSidePanels(panels: SidePanel[], box: RefObject<HTMLElement | 
   return { shown, isOpen, toggle, close, row };
 }
 
+/* The row reaches over what stands under it, or that has made way for it altogether. */
+function liesOver(row: HTMLElement, under: HTMLElement): boolean {
+  const { left, width } = under.getBoundingClientRect();
+  return width === 0 || row.getBoundingClientRect().right > left;
+}
+
+/* Whether open panels keep the person from seeing what the window shows: only then is there something to go back to. theme.css
+   reckons the place of the row, so this asks the page, whenever the row, the window or the screen changes size. */
+export function usePanelsCover(row: RefObject<HTMLElement | null>, under: RefObject<HTMLElement | null>, open: boolean): boolean {
+  const [covered, setCovered] = useState(false);
+  useLayoutEffect(() => {
+    const [panels, shown] = [row.current, under.current];
+    if (!open || !panels || !shown) return;
+    const measure = () => setCovered(liesOver(panels, shown));
+    measure();
+    window.addEventListener('resize', measure);
+    const resized = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    resized?.observe(panels);
+    resized?.observe(shown);
+    return () => {
+      window.removeEventListener('resize', measure);
+      resized?.disconnect();
+    };
+  }, [open, row, under]);
+  return open && covered;
+}
+
 export function SidePanelRow({ stack, id }: { stack: ReturnType<typeof useSidePanels>; id: string }) {
   const count = stack.shown.length;
   const { row } = stack;

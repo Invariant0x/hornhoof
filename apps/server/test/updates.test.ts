@@ -417,6 +417,20 @@ describe('updates', () => {
     expect((await db.select().from(jobs).where(eq(jobs.status, 'running')))).toHaveLength(2);
   });
 
+  it('hands an urgent security update over at once: it asks nobody, as updates did before they waited', async () => {
+    const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
+    const { app, db, ceo, control } = await company(registry);
+    updaterAlive(control);
+    const [acme] = await db.select().from(companies);
+    const [sub] = await db.select().from(subscriptions);
+    const [agent] = await db.select().from(agents);
+    await db.insert(jobs).values({ companyId: acme!.id, subscriptionId: sub!.id, agentId: agent!.id, kind: 'conversation', prompt: 'keep working', status: 'running', timeoutMs: 900_000 });
+    const res = await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', urgent: true }, ...as(ceo) });
+    expect(res.statusCode).toBe(202);
+    expect(request(control)).toEqual({ ...asked(registry, res.json().id), urgent: true });
+    expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json().updater.waiting).toBeNull();
+  });
+
   it('holds new turns of the company while its update waits for the agents, and lets them go when it is called off', async () => {
     const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
     const { app, db, ceo, control } = await company(registry);

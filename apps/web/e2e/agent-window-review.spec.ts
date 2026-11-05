@@ -28,9 +28,12 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
       const window = page.getByRole('complementary', { name: /^Bruno,/ });
       await window.getByRole('button', { name: words.task, exact: true }).click();
       await expect(page.getByRole('heading', { name: 'Checkout step 1', exact: true })).toBeVisible();
-      await expect(window.getByRole('button', { name: words.back, exact: true })).toBeVisible();
+      /* Only a phone gives the conversation's place to the panel: on a wide screen it stays in sight and there is no way back to it. */
+      const back = window.getByRole('button', { name: words.back, exact: true });
+      await expect(back).toHaveCount(width === 375 ? 1 : 0);
       await page.screenshot({ path: info.outputPath(`product-task-${source}-${lang}-${theme}-${width}.png`) });
-      await window.getByRole('button', { name: words.back, exact: true }).click();
+      if (width === 375) await back.click();
+      else await window.getByRole('complementary', { name: /Checkout step 1/ }).getByRole('button', { name: words.close, exact: true }).click();
       await expect(window.getByRole('textbox')).toBeVisible();
       await window.getByRole('button', { name: words.close, exact: true }).click();
     }

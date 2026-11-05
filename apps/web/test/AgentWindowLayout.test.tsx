@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Shell } from '../src/screens/Shell';
 import type { EventView } from '../src/types';
-import { CARD, DEV_ORG, ME, ORG, TASK_DETAIL, decisions, mockApi } from './api-mock';
+import { CARD, DEV_ORG, ME, ORG, PEOPLE, TASK_DETAIL, decisions, mockApi } from './api-mock';
 import { fakeStream } from './fake-stream';
 
 const task = { id: 't12', number: 12, title: 'Checkout API', stage: 0, gateCount: 0, bounces: 0 };
@@ -13,6 +13,7 @@ function company(hasTask = true, busy = false, events: EventView[] = []) {
   const card = { ...CARD, currentTask: hasTask ? { id: task.id, number: task.number, title: task.title } : null };
   const calls = mockApi({
     'GET /api/org': [200, org],
+    'GET /api/people': [200, { people: PEOPLE }],
     'GET /api/requests': [200, decisions([])],
     'GET /api/agents/b1': [200, card],
     'GET /api/agents/b1/events?after=0': [200, { events, state: { ready: true, reason: null, busy, runningJobId: busy ? 'j1' : null, queued: 0 } }],

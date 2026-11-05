@@ -12,9 +12,10 @@ tag_of() { for w in ${STUB_DIGESTS:-}; do [ "${w#*=}" = "$1" ] && { printf '%s' 
 ref_tag() { case "$1" in *@*) tag_of "${1#*@}" ;; *) printf '%s' "${1##*:}" ;; esac; }
 ref_id() { case "$1" in *@*) printf 'id-%s' "${1#*@}" ;; *) printf 'id-%s' "$(digest_of "${1##*:}")" ;; esac; }
 running_image() { for w in ${STUB_RUNNING_IMAGES:-}; do [ "${w%%=*}" = "$1" ] && { printf '%s' "${w#*=}"; return; }; done; }
+image_by_id() { for w in ${STUB_RUNNING_IMAGES:-}; do [ "$(ref_id "${w#*=}")" = "$1" ] && { printf '%s' "${w#*=}"; return; }; done; }
 case "$1 $2" in
   'compose ps')
-    case " $* " in *' db '*) echo dbcid ;; *' app '*) echo appcid ;; *' node '*) echo nodecid ;; *' updater '*) echo updatercid ;; esac ;;
+    case " $* " in *' db '*) echo dbcid ;; *' app '*) echo appcid ;; *' node '*) [ -n "${STUB_NO_NODE:-}" ] || echo nodecid ;; *' updater '*) echo updatercid ;; esac ;;
   'exec dbcid')
     case "$*" in
       *pg_dump*) printf -- '-- a dump of the hornhoof database\n-- migrations %s\n' "$(cat "$STUB_STATE/migrations")" ;;
@@ -30,12 +31,12 @@ case "$1 $2" in
     case "${4:-}" in
       '{{.Id}}') ref_id "$last" ;;
       # The image of a running service by its digest, after the digest of a copy of it in another repository.
-      *RepoDigests*) image=$(running_image "${last#img-}"); [ -n "$image" ] && printf 'ghcr.io/acme/copy@sha256:%064d %s\n' 0 "$image" ;;
+      *RepoDigests*) image=$(image_by_id "$last"); [ -n "$image" ] && printf 'ghcr.io/acme/copy@sha256:%064d %s\n' 0 "$image" ;;
       *) commit_of "$(ref_tag "$last")" ;;
     esac ;;
   'inspect --format')
     case "$3" in
-      '{{.Image}}') case "${!#}" in *cid) printf 'img-%s\n' "${4%cid}" ;; esac ;;
+      '{{.Image}}') case "${!#}" in *cid) image=$(running_image "${4%cid}"); if [ -n "$image" ]; then ref_id "$image"; else printf 'img-%s\n' "${4%cid}"; fi ;; esac ;;
       *) [ "${!#}" = appcid ] && printf '%s\n' "${STUB_RUNNING_COMMIT:-}" ;;
     esac ;;
   *)
@@ -76,7 +77,9 @@ case "$1 $2" in
 #!/usr/bin/env bash
 # STUB_STOP_IN names a build whose installer stops the updater that runs it, once, as a restart of its container would;
 # "pull" stops it while it downloads.
+[ -z "${STUB_INSTALLER_FAILS:-}" ] || { echo 'the installer failed' >&2; exit 1; }
 case " ${STUB_STOP_IN:-} " in *" $tag "*) [ -f "$STUB_STATE/stopped" ] || { touch "$STUB_STATE/stopped"; kill -9 "\$PPID"; exit 0; } ;; esac
+[ -z "\${HORNHOOF_NODES_FREE:-}" ] || printf 'installer told the nodes are free\n' >> "$STUB_LOG"
 printf 'installer %s HORNHOOF_VERSION=%s HORNHOOF_FROM_UPDATER=%s HORNHOOF_SERVER_DIR=%s HORNHOOF_COMPOSE_FILE=%s HORNHOOF_PULLED=%s HORNHOOF_APP_REF=%s HORNHOOF_NODE_REF=%s HORNHOOF_UPDATER_REF=%s\n' "\$*" "\$HORNHOOF_VERSION" "\$HORNHOOF_FROM_UPDATER" "\$HORNHOOF_SERVER_DIR" "\$(basename "\$HORNHOOF_COMPOSE_FILE")" "\${HORNHOOF_PULLED:-}" "\${HORNHOOF_APP_REF:-}" "\${HORNHOOF_NODE_REF:-}" "\${HORNHOOF_UPDATER_REF:-}" >> "$STUB_LOG"
 grep -v '^HORNHOOF_VERSION=' "\$HORNHOOF_SERVER_DIR/.env" > "\$HORNHOOF_SERVER_DIR/.env.new"; printf 'HORNHOOF_VERSION=%s\n' "\$HORNHOOF_VERSION" >> "\$HORNHOOF_SERVER_DIR/.env.new"; mv "\$HORNHOOF_SERVER_DIR/.env.new" "\$HORNHOOF_SERVER_DIR/.env"
 # The build migrates the database when it starts, also when it fails afterwards.

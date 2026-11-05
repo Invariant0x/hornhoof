@@ -1,33 +1,36 @@
+import { currentLimits } from '@hornhoof/protocol';
 import type { Language, Messages } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
 import type { Limits, PlanStatus, SubView } from '../types';
 
 export const subName = (t: Messages, s: SubView) => s.kind === 'api_key' ? t.subs.keyEnding(PROVIDER_NAMES[s.provider], s.last4 ?? '') : PROVIDER_NAMES[s.provider];
 export const MAIN_WINDOWS = ['five_hour', 'seven_day'];
-export const startedOver = (w: Limits['windows'][number], now: number) => w.resetsAt !== null && Date.parse(w.resetsAt) <= now;
 const until = (w: Limits['windows'][number]) => w.resetsAt ? Date.parse(w.resetsAt) : Infinity;
+const snapshotAt = (s: Pick<SubView, 'limitsUpdatedAt'>, now: number) => s.limitsUpdatedAt === undefined ? new Date(now) : s.limitsUpdatedAt;
+
+export const currentPlanLimits = (s: Pick<SubView, 'limits' | 'limitsUpdatedAt'>, now: number) => currentLimits(s.limits, snapshotAt(s, now), now);
+
+const fullestWindow = (windows: Limits['windows']) => [...windows].sort((a, b) => (b.utilization ?? -1) - (a.utilization ?? -1))[0];
 
 /* Rejection lasts until every blocking window resets. Unknown shares can block too. */
-export function limitState(limits: Limits | null, now: number) {
-  const windows = limits?.windows ?? [];
-  const causes = windows.filter(w => w.utilization === null || w.utilization >= 1);
-  const open = causes.filter(w => !startedOver(w, now)).sort((a, b) => until(b) - until(a));
-  const reached = limits?.status === 'rejected' && (!causes.length || open.length > 0);
-  const top = open[0] ?? [...windows].sort((a, b) => (b.utilization ?? -1) - (a.utilization ?? -1))[0];
-  return { reached, resetsAt: top?.resetsAt ?? null };
+export function limitState(limits: Limits | null, now: number, updatedAt?: string | Date | null) {
+  const current = updatedAt === undefined ? limits : currentLimits(limits, updatedAt, now);
+  const windows = current?.windows ?? [];
+  const open = windows.filter(w => w.utilization === null || w.utilization >= 1).sort((a, b) => until(b) - until(a));
+  const top = open[0] ?? fullestWindow(windows);
+  return { reached: current?.status === 'rejected', resetsAt: top?.resetsAt ?? null };
 }
 
 export function stateOf(s: SubView, now: number) {
   if (s.status === 'waiting_machine') return 'waiting_machine';
   if (!s.online) return s.kind === 'api_key' ? 'builtin_offline' : 'offline';
   if (s.status !== 'ready') return s.status;
-  return s.kind === 'personal' && limitState(s.limits, now).reached ? 'limit' : 'ready';
+  return s.kind === 'personal' && limitState(s.limits, now, snapshotAt(s, now)).reached ? 'limit' : 'ready';
 }
 
 export function windowUsage(s: SubView, name: string, now: number): number | null {
   if (s.kind === 'api_key') return null;
-  const window = s.limits?.windows.find(w => w.name === name);
-  return window && !startedOver(window, now) ? window.utilization : null;
+  return currentPlanLimits(s, now)?.windows.find(w => w.name === name)?.utilization ?? null;
 }
 
 export function clock(language: Language, iso: string | null): string | null {
@@ -38,16 +41,18 @@ export function clock(language: Language, iso: string | null): string | null {
   return new Intl.DateTimeFormat(language, parts).format(at);
 }
 
+export const unknownLimitData = (t: Messages, language: Language, s: Pick<SubView, 'limitsUpdatedAt'>) => t.subs.unknown(clock(language, s.limitsUpdatedAt ?? null));
+
 /* What keeps a plan from working on one of its machines, if anything. */
 export function waitsThere(t: Messages, on: { online: boolean; status: PlanStatus }): string | null {
   if (!on.online) return t.subs.waitsThere.offline;
   return on.status === 'ready' ? null : t.subs.waitsThere[on.status];
 }
 
-export function planStateOnMachine(t: Messages, language: Language, on: { online: boolean; status: PlanStatus }, limits: Limits | null, now: number): string {
+export function planStateOnMachine(t: Messages, language: Language, on: { online: boolean; status: PlanStatus }, limits: Limits | null, now: number, updatedAt?: string | Date | null): string {
   const waiting = waitsThere(t, on);
   if (waiting) return waiting;
-  const limit = limitState(limits, now);
+  const limit = limitState(limits, now, updatedAt);
   return limit.reached ? t.cards.limitUntil(clock(language, limit.resetsAt)) : t.cards.ready;
 }
 

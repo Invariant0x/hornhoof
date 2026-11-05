@@ -1,3 +1,4 @@
+import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 import { useEffect, useRef, useState } from 'react';
 import { api, ApiFailure } from '../api';
 import { errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
@@ -26,8 +27,6 @@ const POLL_LIMIT_MS = 150_000;
 type Test = { phase: 'running' } | { phase: 'done'; text: string } | { phase: 'failed'; text: string; tail: string | null };
 /* A sign-in the owner runs now, in a terminal on one of the plan's machines. */
 type Signing = { subId: string; nodeId: string; hostname: string };
-
-const sleep = (ms: number) => new Promise(done => setTimeout(done, ms));
 
 /* Plans that sign in once in a terminal on one machine; Hornhoof then passes the sign-in to the owner's others. */
 const TERMINAL_SIGNIN = new Set(['claude', 'codex']);
@@ -109,7 +108,7 @@ function PlanMachines({ sub: s, now }: { sub: SubView; now: number }) {
   const { language } = useLanguage();
   if (s.kind === 'api_key') return <ul className="plist"><li><MachineMark /><span className="nm"><b>{t.subs.builtin}</b><small>{t.cards.builtinSmall}</small></span></li></ul>;
   const line = signinLine(t, language, s);
-  return <>{s.machines.length ? <ul className="plist" aria-label={t.subs.machinesOf(subName(t, s))}>{s.machines.map(m => <li key={m.id}><MachineMark /><span className="nm"><b>{m.hostname}</b><small>{s.owner.name}, {planStateOnMachine(t, language, m, s.limits, now)}</small></span></li>)}</ul> : <p className="part-note">{t.subs.noMachine}</p>}{line && <p className="part-note">{line}</p>}</>;
+  return <>{s.machines.length ? <ul className="plist" aria-label={t.subs.machinesOf(subName(t, s))}>{s.machines.map(m => <li key={m.id}><MachineMark /><span className="nm"><b>{m.hostname}</b><small>{s.owner.name}, {planStateOnMachine(t, language, m, s.limits, now, s.limitsUpdatedAt)}</small></span></li>)}</ul> : <p className="part-note">{t.subs.noMachine}</p>}{line && <p className="part-note">{line}</p>}</>;
 }
 
 /* What the head of the card says under the state: until when a plan at its limit waits. */
@@ -374,7 +373,7 @@ function SubscriptionDetails({ sub: s, me, controls, now }: PlanProps & { now: n
   );
 }
 
-export function Subscriptions({ me }: { me: Me }) {
+export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
   const t = useT();
   const { language } = useLanguage();
   const now = useNow();
@@ -387,14 +386,18 @@ export function Subscriptions({ me }: { me: Me }) {
   const [signNote, setSignNote] = useState<SignNote | null>(null);
   const [keyFor, setKeyFor] = useState<string | null>(null);
   const live = useRef(true);
+  const polls = useRef(new Map<ReturnType<typeof setTimeout>, () => void>());
   useEffect(() => {
     live.current = true;
+    const pending = polls.current;
     return () => {
       live.current = false;
+      for (const cancel of pending.values()) cancel();
+      pending.clear();
     };
   }, []);
 
-  const { subs, setSubs, commands, load, connected, newCommand: requestCommand, dismissCommand } = usePlanCommands(live, setFailure);
+  const { subs, setSubs, commands, load, connected, newCommand: requestCommand, dismissCommand, failure: readFailure } = usePlanCommands(live, setFailure);
   const newCommand = (sub: SubView) => run(() => requestCommand(sub));
   const onConnected = (shown: ActiveCommand, added: SubView[]) => { setConnecting(false); connected(shown, added); };
 
@@ -409,14 +412,28 @@ export function Subscriptions({ me }: { me: Me }) {
 
   const setTest = (id: string, test: Test) => live.current && setTests(all => ({ ...all, [id]: test }));
 
+  function sleep() {
+    return new Promise<void>(resolve => {
+      const timer = setTimeout(() => {
+        polls.current.delete(timer);
+        resolve();
+      }, POLL_MS);
+      polls.current.set(timer, () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+  }
+
   async function runTest(sub: SubView) {
     setTest(sub.id, { phase: 'running' });
     try {
       let { job } = await api.post<{ job: JobView }>(`/api/subscriptions/${sub.id}/test`);
       const started = Date.now();
       while (job.status === 'queued' || job.status === 'running') {
+        if (!live.current) return;
         if (Date.now() - started > POLL_LIMIT_MS) return setTest(sub.id, { phase: 'failed', text: t.subs.testErrors.tooLong, tail: null });
-        await sleep(POLL_MS);
+        await sleep();
         if (!live.current) return;
         job = (await api.get<{ job: JobView }>(`/api/jobs/${job.id}`)).job;
       }
@@ -458,6 +475,8 @@ export function Subscriptions({ me }: { me: Me }) {
       await api.del(`/api/subscriptions/${sub.id}`);
       await load();
     });
+
+  if (unavailableFailure(readFailure)) return <RouteUnavailable onHome={onHome} />;
 
   return (
     <section className="people subs">

@@ -14,6 +14,7 @@ const BUSY_POLL_MS = 2_000;
 export type UpdateCut = { version: string; turns: number };
 
 export type Updates = {
+  failure?: unknown;
   view: UpdatesView | null;
   busy: boolean;
   /* An update was asked for and the updater has not reported on it yet. */
@@ -58,6 +59,7 @@ function requestedBuild(view: UpdatesView | null, tag: string): Version {
 
 /* What Hornhoof knows about newer builds and the updater, for people who see the whole company. */
 export function useUpdates(enabled: boolean): Updates {
+  const [failure, setFailure] = useState<unknown>(null);
   const [view, setView] = useState<UpdatesView | null>(null);
   const [sent, setSent] = useState<(Version & { id: string }) | null>(null);
   const [offline, setOffline] = useState(false);
@@ -76,8 +78,10 @@ export function useUpdates(enabled: boolean): Updates {
   const load = useCallback(async () => {
     try {
       take(await api.get<UpdatesView>('/api/updates'));
+      setFailure(null);
       setOffline(false);
-    } catch {
+    } catch (err) {
+      setFailure(err);
       /* The server restarts during an update; the next poll asks again. */
       if (busyNow.current) setOffline(true);
     }
@@ -122,6 +126,7 @@ export function useUpdates(enabled: boolean): Updates {
   };
 
   return {
+    failure,
     view,
     busy,
     starting,

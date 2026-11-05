@@ -19,6 +19,26 @@ async function migrate(db: PgliteDatabase, config: MigrationConfig): Promise<voi
   await applyMissingMigrations(db, config);
 }
 
+describe('limits freshness migration', () => {
+  it('keeps an old limits snapshot and leaves its unknown timestamp null on upgrade', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0059_node_connections') });
+    const company = (await db.execute<{ id: string }>(sql`insert into companies (name) values ('Acme') returning id`)).rows[0]!.id;
+    const owner = (await db.execute<{ id: string }>(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Ivan', 'ivan@acme.example', 'active', 'company') returning id`)).rows[0]!.id;
+    await db.execute(sql`insert into subscriptions (company_id, provider, kind, label, owner_person_id, status, limits)
+      values (${company}, 'antigravity', 'personal', 'Antigravity', ${owner}, 'ready', '{"status":"rejected","windows":[{"name":"five_hour","utilization":1,"resetsAt":"2026-11-03T00:53:03.947Z"}]}')`);
+    const before = (await db.execute(sql`select to_jsonb(s) as data from subscriptions s`)).rows;
+
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+
+    expect((await db.execute(sql`select to_jsonb(s) - 'limits_updated_at' as data from subscriptions s`)).rows).toEqual(before);
+    expect((await db.execute(sql`select limits_updated_at from subscriptions`)).rows).toEqual([{ limits_updated_at: null }]);
+  });
+});
+
 describe('notification provenance migration', () => {
   it('preserves old pending wakes and adds nullable structured provenance', async () => {
     const client = new PGlite();
@@ -930,6 +950,74 @@ describe('migration 0056', () => {
       { prompt: 'Timeout', status: 'failed', error: 'timeout' },
       { prompt: 'Unstarted stale', status: 'obsolete', error: 'stale' },
     ]);
+  });
+});
+
+describe('migration 0059', () => {
+  const tableOf = (db: PgliteDatabase) =>
+    db.execute<{ column_name: string; is_nullable: string }>(sql`select column_name, is_nullable from information_schema.columns where table_name = 'node_connections' order by column_name`);
+  const COLUMNS = [
+    { column_name: 'cause', is_nullable: 'YES' },
+    { column_name: 'close_code', is_nullable: 'YES' },
+    { column_name: 'close_reason', is_nullable: 'YES' },
+    { column_name: 'company_id', is_nullable: 'NO' },
+    { column_name: 'connected_at', is_nullable: 'NO' },
+    { column_name: 'disconnected_at', is_nullable: 'YES' },
+    { column_name: 'error', is_nullable: 'YES' },
+    { column_name: 'id', is_nullable: 'NO' },
+    { column_name: 'machine_id', is_nullable: 'NO' },
+    { column_name: 'node_id', is_nullable: 'NO' },
+    { column_name: 'report', is_nullable: 'YES' },
+  ];
+
+  it('makes the history of node connections on a fresh install, with its indexes', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    expect((await tableOf(db)).rows).toEqual(COLUMNS);
+    const indexes = await db.execute<{ indexname: string }>(sql`select indexname from pg_indexes where tablename = 'node_connections' and indexname <> 'node_connections_pkey' order by indexname`);
+    expect(indexes.rows.map(r => r.indexname)).toEqual(['node_connections_machine', 'node_connections_node']);
+  });
+
+  it("starts empty on the previous release's database, keeps its nodes, and grants no one anything", async () => {
+    const source = new PGlite();
+    onTestFinished(() => source.close());
+    let db = drizzle(source);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0058_program_operator') });
+    const one = async (statement: Parameters<typeof db.execute>[0]) => (await db.execute<{ id: string }>(statement)).rows[0]!.id;
+    const company = await one(sql`insert into companies (name) values ('Demo') returning id`);
+    const person = await one(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Lisa', 'lisa@example.test', 'active', 'company') returning id`);
+    const machine = await one(sql`insert into machines (company_id, person_id, machine_key, hostname) values (${company}, ${person}, 'mac-0001-abcd', 'lisa-mac') returning id`);
+    const node = await one(sql`insert into nodes (company_id, machine_id, status) values (${company}, ${machine}, 'ready') returning id`);
+    const before = (await db.execute(sql`select to_jsonb(n) as data from nodes n`)).rows;
+    const copy = new PGlite({ loadDataDir: await source.dumpDataDir('none') });
+    onTestFinished(() => copy.close());
+    db = drizzle(copy);
+
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+
+    expect((await db.execute(sql`select to_jsonb(n) as data from nodes n`)).rows).toEqual(before);
+    expect((await db.execute(sql`select * from node_connections`)).rows).toEqual([]);
+    expect((await db.execute(sql`select grantee from information_schema.role_table_grants where table_name = 'node_connections' and grantee <> current_user`)).rows).toEqual([]);
+    await db.execute(sql`insert into node_connections (company_id, machine_id, node_id, connected_at) values (${company}, ${machine}, ${node}, now())`);
+    await db.execute(sql`delete from nodes where id = ${node}`);
+    expect((await db.execute(sql`select * from node_connections`)).rows).toEqual([]);
+  });
+
+  it('refuses a cause on a connection that has not ended, and an end with no cause', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    const one = async (statement: Parameters<typeof db.execute>[0]) => (await db.execute<{ id: string }>(statement)).rows[0]!.id;
+    const company = await one(sql`insert into companies (name) values ('Demo') returning id`);
+    const person = await one(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Lisa', 'lisa@example.test', 'active', 'company') returning id`);
+    const machine = await one(sql`insert into machines (company_id, person_id, machine_key, hostname) values (${company}, ${person}, 'mac-0001-abcd', 'lisa-mac') returning id`);
+    const node = await one(sql`insert into nodes (company_id, machine_id, status) values (${company}, ${machine}, 'ready') returning id`);
+    await expect(db.execute(sql`insert into node_connections (company_id, machine_id, node_id, connected_at, cause) values (${company}, ${machine}, ${node}, now(), 'network')`)).rejects.toThrow();
+    await expect(db.execute(sql`insert into node_connections (company_id, machine_id, node_id, connected_at, disconnected_at) values (${company}, ${machine}, ${node}, now(), now())`)).rejects.toThrow();
   });
 });
 

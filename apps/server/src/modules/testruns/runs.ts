@@ -175,16 +175,18 @@ async function companyComputers(db: Ctx['db'], companyId: string) {
   return { rows, live };
 }
 
+/* Only nodes that say how busy they are know test runs, only those with a user of their own for runs take them, and one
+   that waits for an update takes none. */
+const takesParts = (ctx: Ctx, node: NodeIdentity): boolean =>
+  !nodeHeld(ctx, node) && ctx.hub.isReady(node) && ctx.hub.loadOf(node) !== null && ctx.hub.noRunsOf(node) === null;
+
 export async function placesOf(ctx: Ctx, companyId: string): Promise<Place[]> {
   const { db, hub } = ctx;
   const running = (await db.select({ computer: testParts.computer, machineId: testParts.machineId, builtin: testParts.builtin, nodeId: testParts.nodeId }).from(testParts).where(eq(testParts.status, 'running'))).map(p => partPlace(ctx, p));
   const { rows, live } = await companyComputers(db, companyId);
   const places: Place[] = [];
   for (const { machine, owner } of rows) {
-    /* Only nodes that say how busy they are know test runs, and only those with a user of their own for runs take them. */
-    const ready = live
-      .filter(n => n.machineId === machine.id && !nodeHeld(ctx, nodeIdentity(n.id)) && hub.isReady(nodeIdentity(n.id)) && hub.loadOf(nodeIdentity(n.id)) !== null && hub.noRunsOf(nodeIdentity(n.id)) === null)
-      .map(n => n.id);
+    const ready = live.filter(n => n.machineId === machine.id && takesParts(ctx, nodeIdentity(n.id))).map(n => n.id);
     if (!ready.length) continue;
     /* A node that runs work takes test runs too. */
     const node = ready.find(id => hub.runsWork(nodeIdentity(id))) ?? ready[0]!;
@@ -203,7 +205,7 @@ export async function placesOf(ctx: Ctx, companyId: string): Promise<Place[]> {
       works: hub.runsWork(nodeIdentity(node)),
     });
   }
-  if (!nodeHeld(ctx, BUILTIN) && hub.isReady(BUILTIN) && hub.loadOf(BUILTIN) && hub.noRunsOf(BUILTIN) === null) {
+  if (takesParts(ctx, BUILTIN)) {
     places.push({ key: 'builtin', node: BUILTIN, name: BUILTIN_NAME, machineId: null, nodeId: null, builtin: true, lent: true, busy: false, running: 0, load: together([hub.loadOf(BUILTIN)]), access: null, works: hub.runsWork(BUILTIN) });
   }
   const reports = [...live.map(n => hub.loadOf(nodeIdentity(n.id))), hub.loadOf(BUILTIN)];
@@ -264,6 +266,19 @@ function placeFor(open: Place[], run: Run, part: Part, department: Department | 
   return spot ? open.find(p => p.key === spot.key) ?? null : null;
 }
 
+const partMessage = (run: Run, part: Part, repo: Repo | null, task: number) => ({
+  type: 'tests.run' as const,
+  partId: part.id,
+  ...(run.kind === 'work' ? { kind: 'work' as const, files: run.files } : {}),
+  repo: repo ? { url: repo.url, token: repo.token } : null,
+  branch: run.branch,
+  task,
+  command: commandFor(run, part.part),
+  part: part.part,
+  parts: run.parts,
+  timeoutMs: run.timeoutMs,
+});
+
 /* Gives waiting parts out oldest first, keeping a shared count of reservations on each physical computer. */
 async function giveOut(ctx: Ctx): Promise<void> {
   const { db } = ctx;
@@ -292,19 +307,8 @@ async function giveOut(ctx: Ctx): Promise<void> {
       .where(and(eq(testParts.id, part.id), eq(testParts.status, 'queued')))
       .returning();
     if (!taken) continue;
-    const sent = !nodeHeld(ctx, place.node) && ctx.hub.send(place.node, {
-      type: 'tests.run',
-      partId: part.id,
-      ...(run.kind === 'work' ? { kind: 'work' as const, files: run.files } : {}),
-      repo: found.repo ? { url: found.repo.url, token: found.repo.token } : null,
-      branch: run.branch,
-      task: task.number,
-      command: commandFor(run, part.part),
-      part: part.part,
-      parts: run.parts,
-      timeoutMs: run.timeoutMs,
-    });
-    /* The node went away meanwhile: the part waits for the next machine. */
+    const sent = !nodeHeld(ctx, place.node) && ctx.hub.send(place.node, partMessage(run, part, found.repo, task.number));
+    /* The node went away or began to wait for an update meanwhile: the part waits for the next machine. */
     if (!sent) {
       await db
         .update(testParts)

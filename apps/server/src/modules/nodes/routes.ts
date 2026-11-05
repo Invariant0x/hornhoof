@@ -15,13 +15,13 @@ import { machineNodes, machineState, together } from '../testruns/load.js';
 import { pumpTests } from '../testruns/runs.js';
 import { createInstallCommand } from './command.js';
 import { nodeCommandRoutes } from './command-routes.js';
+import { connectionRoutes } from './connection-routes.js';
 import { disconnectMachines } from './disconnect.js';
 import { BUILTIN, nodeIdentity, type NodeHub } from './hub.js';
 import { nodeImageOfBuild } from './image.js';
 import { builtinMachine, liveNode, otherBuild, settlePlans } from './nodes.js';
-import { machineProgramState, machineProgramRoutes, programsFor } from './programs.js';
+import { machineProgramNodes, machineProgramState, machineProgramRoutes, programsFor } from './programs.js';
 import { machineDrain, nodeDrain } from '../updates/drain.js';
-import { machineProgramNodes } from './programs.js';
 
 const JoinBody = z.object({
   code: z.string().min(1).max(200),
@@ -168,6 +168,7 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   nodeCommandRoutes(app, ctx);
+  connectionRoutes(app, ctx);
 
   app.get('/api/machines', async req => {
     const me = await requirePerson(req, db);

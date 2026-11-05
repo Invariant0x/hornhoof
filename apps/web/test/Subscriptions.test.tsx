@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Subscriptions } from '../src/screens/Subscriptions';
-import type { Me, SubView } from '../src/types';
+import type { JobView, Me, SubView } from '../src/types';
 import { armor, Decrypter, generateX25519Identity, identityToRecipient } from 'age-encryption';
 import { ME, MACHINE, mockApi, SUBS } from './api-mock';
 import { decl } from './css';
@@ -15,13 +15,17 @@ vi.mock('../src/ui/AgentTerminal', () => ({
 
 const COMMAND = 'curl -fsSL https://hq.acme.com/install.sh | bash -s -- --join CODE123';
 const TRUST = 'Agents will run on this machine with your subscription. People with access to this Hornhoof can give them work.';
+const RUNNING_JOB: JobView = { id: 'j1', status: 'running', result: null, tail: '', error: null, machine: 'ivan-mbp', createdAt: '2026-10-29T10:00:00.000Z', startedAt: '2026-10-29T10:00:00.500Z', finishedAt: null };
 
 const lists = (extra: Parameters<typeof mockApi>[0] = {}) => mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  'GET /api/subscriptions': [200, { subscriptions: SUBS }], ...extra });
 
 const rowOf = (name: string) => screen.queryByRole('article', { name: new RegExp(`^${name}, `) }) ?? screen.getByRole('row', { name: new RegExp(`^${name}\\b`) });
+const openCards = () => {
+  for (const button of screen.getAllByRole('button', { name: /^(Open the card of |Открыть карточку )/ })) fireEvent.click(button);
+};
 const openAll = async () => {
   await screen.findByRole('table');
-  for (const button of screen.getAllByRole('button', { name: /^(Open the card of |Открыть карточку )/ })) fireEvent.click(button);
+  openCards();
 };
 const meterRows = (card: HTMLElement) => [...card.querySelectorAll('.gauge')];
 
@@ -257,7 +261,7 @@ describe('Subscriptions', () => {
     const rows = async (name: string) => meterRows(rowOf(name));
     const [claudeFive, claudeSeven, ...claudeMore] = await rows('Claude');
     expect(claudeFive).toHaveTextContent(/^5 hours30%usedReset time unknown$/);
-    expect(claudeSeven).toHaveTextContent(/^7 daysNo data yet$/);
+    expect(claudeSeven).toHaveTextContent(/^7 daysUnknown, no limit data received yet$/);
     expect(claudeSeven!.querySelector('.bar')).not.toBeInTheDocument();
     expect(claudeMore.map(r => r.textContent)).toEqual(['7 days, Opus100%usedReset time unknown']);
     const [codexFive, codexSeven] = await rows('Codex');
@@ -277,6 +281,42 @@ describe('Subscriptions', () => {
     expect(within(rowOf('Claude')).getByText('Limit reached')).toBeInTheDocument();
   });
 
+  it.each([['claude', 'Claude'], ['codex', 'Codex'], ['kimi', 'Kimi'], ['antigravity', 'Antigravity']])('shows an expired rejection as unknown with its last data time for %s', async (provider, label) => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date('2026-11-04T22:00:00.000Z'));
+    onTestFinished(() => { vi.useRealTimers(); });
+    const limits = { status: 'rejected' as const, windows: [{ name: 'five_hour', utilization: 1, resetsAt: '2026-11-03T00:53:03.947Z' }], complete: true };
+    lists({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, provider, label, limits, limitsUpdatedAt: '2026-11-04T21:55:00.000Z' }] }] });
+    render(<Subscriptions me={ME} />);
+    await openAll();
+
+    const row = rowOf(label);
+    expect(within(row).queryByText('Limit reached')).not.toBeInTheDocument();
+    expect(meterRows(row)[0]).toHaveTextContent('5 hoursUnknown, last data from 09:55 PM');
+  });
+
+  it('shows a stale rejection as unknown instead of exhausted, in Russian', async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date('2026-11-04T22:00:00.000Z'));
+    onTestFinished(() => { vi.useRealTimers(); });
+    const limits = { status: 'rejected' as const, windows: [{ name: 'five_hour', utilization: 1, resetsAt: '2026-11-05T02:19:23.000Z' }] };
+    lists({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, provider: 'antigravity', label: 'Antigravity', limits, limitsUpdatedAt: '2026-11-04T21:44:00.000Z' }] }] });
+    render(<LanguageProvider><Subscriptions me={ME} /></LanguageProvider>);
+    await openAll();
+
+    const row = rowOf('Antigravity');
+    expect(within(row).queryByText('Лимит исчерпан')).not.toBeInTheDocument();
+    expect(meterRows(row)[0]).toHaveTextContent('5 часовНеизвестно, последние данные от 21:44');
+  });
+
+  it('says a working plan has no limit data without calling its limits unset', async () => {
+    lists({ 'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, limits: null, limitsUpdatedAt: null }] }] });
+    render(<Subscriptions me={ME} />);
+    await openAll();
+    expect(meterRows(rowOf('Claude'))[0]).toHaveTextContent('5 hoursUnknown, no limit data received yet');
+  });
+
   it('shows a window that started over since the plan last spoke as not known yet, and no reached limit for it', async () => {
     const limits = {
       status: 'rejected' as const,
@@ -288,7 +328,7 @@ describe('Subscriptions', () => {
     await openAll();
     const row = rowOf('Claude');
     const [five, seven] = meterRows(row);
-    expect(five).toHaveTextContent(/^5 hoursNo data yetReset time unknown$/);
+    expect(five).toHaveTextContent(/^5 hoursUnknown, no limit data received yet$/);
     expect(seven).toHaveTextContent(/^7 days40%usedresets in /);
     expect(within(row).queryByText(/^Limit reached/)).not.toBeInTheDocument();
   });
@@ -387,6 +427,49 @@ describe('Subscriptions', () => {
     expect(calls.filter(c => c.path === '/api/jobs/j1')).toHaveLength(2);
   });
 
+  it.each([1, 2])('cancels %i pending test polls when the subscriptions screen closes', async count => {
+    vi.useFakeTimers();
+    onTestFinished(() => { vi.useRealTimers(); });
+    const job = RUNNING_JOB;
+    const calls = lists({
+      'POST /api/subscriptions/s-claude/test': [201, { job }],
+      'POST /api/subscriptions/s-key/test': [201, { job: { ...job, id: 'j2' } }],
+    });
+    const { unmount } = render(<Subscriptions me={ME} />);
+    await act(async () => {});
+    openCards();
+    for (const name of ['Claude', 'Anthropic key ending 9f3a'].slice(0, count)) {
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: `Run a test on ${name}` })); });
+    }
+    expect(screen.getAllByText('Checking. This can take up to two minutes.')).toHaveLength(count);
+    unmount();
+    expect(vi.getTimerCount()).toBe(0);
+    await act(async () => vi.runAllTimersAsync());
+    expect(calls.filter(c => c.path.startsWith('/api/jobs/'))).toHaveLength(0);
+  });
+
+  it.each(['start', 'poll'])('does not schedule a test poll when a late %s response arrives after closing', async phase => {
+    vi.useFakeTimers();
+    onTestFinished(() => { vi.useRealTimers(); });
+    const job = RUNNING_JOB;
+    let finish!: (reply: [number, unknown]) => void;
+    const pending = () => new Promise<[number, unknown]>(resolve => { finish = resolve; });
+    const calls = lists({
+      'POST /api/subscriptions/s-claude/test': phase === 'start' ? pending : [201, { job }],
+      'GET /api/jobs/j1': pending,
+    });
+    const { unmount } = render(<Subscriptions me={ME} />);
+    await act(async () => {});
+    openCards();
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Run a test on Claude' })); });
+    if (phase === 'poll') await act(async () => vi.advanceTimersByTimeAsync(1000));
+    unmount();
+    await act(async () => { finish([200, { job }]); });
+    expect(vi.getTimerCount()).toBe(0);
+    await act(async () => vi.runAllTimersAsync());
+    expect(calls.filter(c => c.path === '/api/jobs/j1')).toHaveLength(phase === 'poll' ? 1 : 0);
+  });
+
   it('explains a failed test and keeps the output folded', async () => {
     const job = { id: 'j2', status: 'failed', result: '', tail: 'Error: something broke', error: 'agent_failed', machine: 'ivan-mbp', createdAt: '2026-10-29T10:00:00.000Z', startedAt: null, finishedAt: '2026-10-29T10:00:01.000Z' };
     lists({ 'POST /api/subscriptions/s-claude/test': [201, { job: { ...job, status: 'queued' } }], 'GET /api/jobs/j2': [200, { job }] });
@@ -472,7 +555,7 @@ describe('Subscriptions', () => {
     expect(five).toHaveTextContent(/^5 часов42%использованодо сброса /);
     expect(seven).toHaveTextContent(/^7 дней10%использованоВремя сброса неизвестно$/);
     const [glmFive] = meterRows(rowOf('GLM'));
-    expect(glmFive).toHaveTextContent(/^5 часовПока нет данных$/);
+    expect(glmFive).toHaveTextContent(/^5 часовНеизвестно, данных о лимитах еще не было$/);
     expect(within(rowOf('Ключ Anthropic, заканчивается на 9f3a')).getByText('Оплата по факту, без лимитов тарифа')).toBeInTheDocument();
   });
 });

@@ -392,6 +392,135 @@ describe('updater', () => {
     expect(r.status.log).toMatch(/stopped/);
   });
 
+  describe('nodes on another image than the build names', () => {
+    const KEY = 'the-built-in-node-key';
+    const builtOn041 = `HORNHOOF_SECRET=s\nNODE_KEY=${KEY}\nHORNHOOF_VERSION=0.4.1\n${refs('0.4.1').replace(/ /g, '\n')}\n`;
+    /* What an update from before this leaves behind: the new app and its .env, and the node on the old image. */
+    const behind = () => stand(builtOn041);
+    const running041 = { STUB_RUNNING_IMAGES: `app=${APP}@${DIGESTS['0.4.1']} node=${APP}-node@${NODE_DIGESTS['0.4.0']}`, STUB_COMMITS: '0.4.0=aaa 0.4.1=bbb' };
+    const installs = (calls: string[]) => calls.filter(c => c.startsWith('installer server'));
+    const asked = (calls: string[], method: string) => calls.filter(c => c.startsWith('curl') && c.includes('/api/nodes/update') && c.includes(`-X ${method}`));
+
+    it('changes nothing while their work runs, and keeps the key off the command line', () => {
+      const s = behind();
+      const r = runOnce(s, null, { ...running041, STUB_NODES: 'waiting' });
+      expect(r.code).toBe(0);
+      expect(asked(r.calls, 'POST')).toHaveLength(1);
+      expect(asked(r.calls, 'POST')[0]).toContain('http://app:8080/api/nodes/update');
+      expect(asked(r.calls, 'POST')[0]).toContain('{"scope":"server"}');
+      expect(installs(r.calls)).toEqual([]);
+      expect(r.calls.join('\n')).not.toContain(KEY);
+      expect(readFileSync(join(s.dir, 'curl-config'), 'utf8')).toBe(`header = "Authorization: Bearer ${KEY}"\n`);
+      expect(asked(r.calls, 'DELETE')).toEqual([]);
+    });
+
+    it('changes nothing either when the wait ran out, and asks on, so the update repeats by itself', () => {
+      const s = behind();
+      expect(installs(runOnce(s, null, { ...running041, STUB_NODES: 'postponed' }).calls)).toEqual([]);
+      expect(installs(runOnce(s, null, { ...running041, STUB_NODES: 'ready' }).calls)).toHaveLength(1);
+    });
+
+    it('finishes the step from 0.6.1: the new updater replaces them through that build\'s installer once they are free, and lets go of them', () => {
+      const s = behind();
+      const r = runOnce(s, null, { ...running041, STUB_NODES: 'ready' });
+      expect(r.code).toBe(0);
+      expect(r.calls).toContain('installer told the nodes are free');
+      expect(at(r.calls, `docker create ${APP}@${DIGESTS['0.4.1']}`)).toBeGreaterThanOrEqual(0);
+      const [install] = installs(r.calls) as [string];
+      expect(install).toContain(`HORNHOOF_VERSION=0.4.1 HORNHOOF_FROM_UPDATER=1`);
+      expect(install).toContain(refs('0.4.1'));
+      expect(at(r.calls, 'curl')).toBeLessThan(r.calls.indexOf('installer told the nodes are free'));
+      expect(r.calls.indexOf(asked(r.calls, 'DELETE')[0]!)).toBeGreaterThan(r.calls.indexOf(install));
+      expect(r.status).toBeNull();
+    });
+
+    it('lets go of them when the installer fails, and stays up', () => {
+      const s = behind();
+      const r = runOnce(s, null, { ...running041, STUB_NODES: 'ready', STUB_INSTALLER_FAILS: '1' });
+      expect(r.code).toBe(0);
+      expect(asked(r.calls, 'DELETE')).toHaveLength(1);
+      expect(r.out).toContain('Could not replace the nodes');
+    });
+
+    it('asks nothing when the built-in node runs the image the build names', () => {
+      const s = behind();
+      const r = runOnce(s, null, { STUB_RUNNING_IMAGES: `node=${APP}-node@${NODE_DIGESTS['0.4.1']}` });
+      expect(asked(r.calls, 'POST')).toEqual([]);
+      expect(installs(r.calls)).toEqual([]);
+    });
+
+    it('asks nothing when no built-in node runs', () => {
+      const r = runOnce(behind(), null, { STUB_NO_NODE: '1' });
+      expect(asked(r.calls, 'POST')).toEqual([]);
+    });
+
+    it('asks nothing for a server that install.sh did not set up, or whose .env names no node image', () => {
+      expect(asked(runOnce(stand(), null, running041).calls, 'POST')).toEqual([]);
+    });
+
+    it('leaves them and their turns on a server from before this wait, and says why', () => {
+      const r = runOnce(behind(), null, { ...running041, STUB_NODES: 'old' });
+      expect(r.code).toBe(0);
+      expect(installs(r.calls)).toEqual([]);
+      expect(r.out).toContain('This server is from before nodes wait for their work');
+    });
+
+    it.each(['down', 'refused'])('leaves them and their turns when the server is %s, and stays up', state => {
+      const r = runOnce(behind(), null, { ...running041, STUB_NODES: state });
+      expect(r.code).toBe(0);
+      expect(installs(r.calls)).toEqual([]);
+    });
+
+    it('never starts an image that is not its own from what .env names', () => {
+      const s = stand(builtOn041.replace(`${APP}@`, 'ghcr.io/acme/other@'));
+      const r = runOnce(s, null, { ...running041, STUB_NODES: 'ready' });
+      expect(r.code).toBe(0);
+      expect(asked(r.calls, 'POST')).toEqual([]);
+      expect(installs(r.calls)).toEqual([]);
+    });
+  });
+
+  describe('the nodes during an update', () => {
+    const told = 'installer told the nodes are free';
+
+    it('leaves them to the wait in a planned update', () => {
+      const r = runOnce(stand(), ask('p1'));
+      expect(r.status).toMatchObject({ state: 'done' });
+      expect(r.calls).not.toContain(told);
+    });
+
+    it.each([['urgent', { urgent: true }], ['confirmed', { immediate: true }]])('replaces them with the app in an %s update', (_name, flag) => {
+      const r = runOnce(stand(), { ...ask('n1'), ...flag });
+      expect(r.status).toMatchObject({ state: 'done' });
+      expect(r.calls.indexOf(told)).toBeGreaterThanOrEqual(0);
+      expect(r.calls.indexOf(told)).toBeLessThan(at(r.calls, 'installer server'));
+    });
+
+    it('still replaces them when it goes on with such an update after being stopped', () => {
+      const s = stand();
+      runOnce(s, { ...ask('n2'), urgent: true }, { STUB_STOP_IN: '0.4.1' });
+      writeFileSync(s.log, '');
+      const r = runOnce(s, null);
+      expect(r.status).toMatchObject({ id: 'n2', state: 'done' });
+      expect(r.calls).toContain(told);
+    });
+
+    it('puts the nodes from before back too when such an update goes back', () => {
+      const r = runOnce(stand(), { ...ask('n3'), urgent: true }, { STUB_BROKEN: '0.4.1' });
+      expect(r.status).toMatchObject({ state: 'rolled_back' });
+      expect(r.calls.filter(c => c === told)).toHaveLength(2);
+    });
+
+    it('does not carry that over to a later planned update', () => {
+      const s = stand();
+      runOnce(s, { ...ask('n4'), urgent: true });
+      writeFileSync(s.log, '');
+      const r = runOnce(s, { ...ask('n5') });
+      expect(r.status).toMatchObject({ id: 'n5', state: 'done' });
+      expect(r.calls).not.toContain(told);
+    });
+  });
+
   it('refuses to update a Hornhoof that install.sh did not set up', () => {
     const s = stand();
     const r = runOnce(s, ask('u8'), { HORNHOOF_SERVER_DIR: '' });

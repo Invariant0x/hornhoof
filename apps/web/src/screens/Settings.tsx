@@ -1,3 +1,4 @@
+import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 import { linkNameOf } from '@hornhoof/protocol/link';
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
@@ -12,7 +13,7 @@ type Loaded = { link: Link | null; domain: string };
 
 /* The company's settings, for people who see the whole company: for now its public link at hornhoof.org, which they
    copy, move to another name or remove. */
-export function Settings({ me, onClose }: { me: Me; onClose: () => void }) {
+export function Settings({ me, onClose, onHome }: { me: Me; onClose: () => void; onHome?: () => void }) {
   const t = useT();
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [mode, setMode] = useState<'view' | 'edit' | 'remove'>('view');
@@ -62,6 +63,7 @@ export function Settings({ me, onClose }: { me: Me; onClose: () => void }) {
   const remove = () => run(async () => (await api.del('/api/link'), null));
   const check = (n: string) => api.get<NameCheck>(`/api/link/names/${encodeURIComponent(n)}`);
   const link = loaded?.link ?? null;
+  if (unavailableFailure(failure)) return <RouteUnavailable dialog onHome={onHome} />;
 
   return (
     <div className="dialog-back" onPointerDown={e => e.target === e.currentTarget && onClose()}>

@@ -20,6 +20,7 @@ import { applyCredential, dropCredential, giveUpLease, heldCredential, holdsLeas
 import { nodeIdentity, seal, unseal } from './keys.js';
 import { LOGIN_KEY, LoginTerminal, type LoginSetup } from './login.js';
 import { dataDir, isRemoved, markRemoved, readState, rememberSession, writeState, type NodeState } from './state.js';
+import { waitUpdate } from './wait-update.js';
 import { SETUP_CHECK_MS, SetupWait } from './setup-wait.js';
 import { partFiles, removeOldParts, runTests } from './tests.js';
 import { SIGNED_OUT as AGY_SIGNED_OUT } from './providers/antigravity.js';
@@ -478,7 +479,8 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
         ...chosen,
         run: async input => {
           const res = await runUnlessStopped(input, () => runIn(input));
-          if (res.limits) limits = merged(limits, res.limits);
+          const fresh = res.limits ?? (!(host && terminal && input.agentKey) && single?.limits ? await single.limits().catch(() => null) : null);
+          if (fresh) limits = merged(limits, fresh);
           return res;
         },
       };
@@ -567,7 +569,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
 
 export type Io = { stdin: NodeJS.ReadableStream; stdout: NodeJS.WritableStream; stderr: NodeJS.WritableStream };
 
-const USAGE = 'Usage: hornhoof-node run [--builtin] | login | status | set-key | prepare-browser [repo]';
+const USAGE = 'Usage: hornhoof-node run [--builtin] | login | status | set-key | wait-update | prepare-browser [repo]';
 const SET_KEY_LINE = 'set-key expects one line: <server> <id> <provider or machine> <key>';
 /* A machine joined without a plan has a node of its own: it runs no agent program and has nothing to sign in to. */
 const MACHINE = 'machine';
@@ -840,6 +842,8 @@ export async function command(args: string[], io: Io): Promise<number | { stop()
       return status(dir, io);
     case 'set-key':
       return setKey(dir, io);
+    case 'wait-update':
+      return waitUpdate(dir, io);
     case 'prepare-browser':
       return prepareBrowserCommand(dir, args[1], io);
     default:

@@ -17,6 +17,12 @@
 # its -node and -updater repositories. It runs on the bash that ships with macOS (3.2) for the tests, and on Alpine's
 # in its image.
 #
+# An update replaces the app alone while a node runs another image, since the turns on it would stop with it. Afterwards
+# this asks the server, with the built-in node's key, to let the work of the nodes on this computer end: the server keeps
+# new work off them, says when they are free, and goes on saying they are not past its deadline, when it told Operations.
+# Only then the installer of the build that runs replaces them. Requests marked immediate or urgent replace them with the
+# app at once. The same goes for an update an updater from before this ran, and for install.sh server by hand.
+#
 # It also runs the orchestrator's commands on this computer, as root, while the CEO keeps access to the computer open:
 # the app writes computer.json {untilSec} and each command as computer/<id>.json {id, command, timeout}; this answers
 # computer/<id>.out.json {id, exit, output}. It checks untilSec itself before each command.
@@ -30,6 +36,11 @@ UPDATER_IMAGE="${IMAGE}-updater"
 HEALTH_URL="${HORNHOOF_HEALTH_URL:-http://app:8080/api/health}"
 HEALTH_WAIT="${HORNHOOF_HEALTH_WAIT:-120}"
 KEEP_BACKUPS=3
+NODES_URL="${HEALTH_URL%/api/health}/api/nodes/update"
+# How often it looks whether a node is behind, and asks again after a server that gave no answer, in seconds.
+NODES_CHECK=30
+# How long it leaves the nodes alone after an installer failed or a server said it cannot wait, in seconds.
+NODES_RETRY=300
 # The image commands on the computer run in: the updater's own, which compose names.
 COMPUTER_IMAGE="${HORNHOOF_COMPUTER_IMAGE:-$UPDATER_IMAGE:latest}"
 # The longest a command on the computer runs, in seconds, and how many characters of its output go back.
@@ -56,6 +67,9 @@ BACK_UPDATER=''
 TARGET=''
 BEFORE=''
 BACKUP=''
+# Set for an installer that may stop the nodes now. When to look at the nodes next, in seconds since 1970.
+NODES_FREE=''
+NODES_AT=0
 
 say() {
   printf '%s\n' "$*"
@@ -121,9 +135,9 @@ note() {
   mkdir -p "$SERVER_DIR/backups"
   (umask 077 && jq -n --arg id "$ID" --arg version "$VERSION" --arg tag "$TAG" --arg digest "$DIGEST" --arg node "$NODE_DIGEST" \
     --arg updater "$UPDATER_DIGEST" --arg previous "$PREVIOUS" --arg back_app "$BACK_APP" --arg back_node "$BACK_NODE" \
-    --arg back_updater "$BACK_UPDATER" --arg target "$TARGET" --arg before "$BEFORE" --arg backup "$BACKUP" \
+    --arg back_updater "$BACK_UPDATER" --arg target "$TARGET" --arg before "$BEFORE" --arg backup "$BACKUP" --arg nodes_free "$NODES_FREE" \
     '{id: $id, version: $version, tag: $tag, digest: $digest, node: $node, updater: $updater, previous: $previous,
-      back: {app: $back_app, node: $back_node, updater: $back_updater}, target: $target, before: $before, backup: $backup}' \
+      back: {app: $back_app, node: $back_node, updater: $back_updater}, target: $target, before: $before, backup: $backup, nodes_free: $nodes_free}' \
     > "$SERVER_DIR/backups/update.json.new")
   mv "$SERVER_DIR/backups/update.json.new" "$SERVER_DIR/backups/update.json"
 }
@@ -144,6 +158,7 @@ recall() {
   TARGET=$(jq -r '.target' "$file")
   BEFORE=$(jq -r '.before' "$file")
   BACKUP=$(jq -r '.backup' "$file")
+  NODES_FREE=$(jq -r '.nodes_free // empty' "$file")
   plain_tag "$TAG" && plain_digest "$DIGEST" && digest_or_none "$NODE_DIGEST" && digest_or_none "$UPDATER_DIGEST" && plain_tag "$PREVIOUS" || return 1
   own "$IMAGE" "$BACK_APP" && own "$NODE_IMAGE" "$BACK_NODE" && own "$UPDATER_IMAGE" "$BACK_UPDATER" || return 1
   case "$BACKUP" in '' | "$SERVER_DIR"/backups/hornhoof-*.sql.gz) ;; *) return 1 ;; esac
@@ -285,7 +300,7 @@ install() {
   local tag=$1 dir="$WORK/$1"
   unpack "$tag" "$2" || return 1
   HORNHOOF_SERVER_DIR="$SERVER_DIR" HORNHOOF_VERSION="$tag" HORNHOOF_FROM_UPDATER=1 HORNHOOF_COMPOSE_FILE="$dir/compose.yaml" HORNHOOF_PULLED=1 \
-    HORNHOOF_APP_REF="$2" HORNHOOF_NODE_REF="$3" HORNHOOF_UPDATER_REF="$4" bash "$dir/install.sh" server >> "$WORK/install.log" 2>&1 || return 1
+    HORNHOOF_APP_REF="$2" HORNHOOF_NODE_REF="$3" HORNHOOF_UPDATER_REF="$4" HORNHOOF_NODES_FREE="$NODES_FREE" bash "$dir/install.sh" server >> "$WORK/install.log" 2>&1 || return 1
   drop_orphans
 }
 
@@ -441,10 +456,12 @@ handle_request() {
   digest=$(jq -r '.digest // empty' "$CONTROL/request.json")
   node=$(jq -r '.nodeDigest // empty' "$CONTROL/request.json")
   updater=$(jq -r '.updaterDigest // empty' "$CONTROL/request.json")
+  NODES_FREE=$(jq -r 'if .immediate == true or .urgent == true then "1" else "" end' "$CONTROL/request.json")
   WORK=$(mktemp -d)
   update "$tag" "$digest" "$node" "$updater"
   rm -rf "$WORK"
   WORK=''
+  NODES_FREE=''
 }
 
 # An update this updater was stopped in goes on from the step it was at, by the updater's own note of it. Before the
@@ -473,6 +490,67 @@ interrupted() {
   esac
   rm -rf "$WORK"
   WORK=''
+  NODES_FREE=''
+}
+
+# Whether the built-in node runs another image than the one .env names, by the images of this server's own repositories.
+nodes_behind() {
+  local running target
+  [ -n "$SERVER_DIR" ] && [ -f "$SERVER_DIR/.env" ] || return 1
+  own "$IMAGE" "$(env_value HORNHOOF_APP_REF)" && own "$NODE_IMAGE" "$(env_value HORNHOOF_NODE_REF)" && own "$UPDATER_IMAGE" "$(env_value HORNHOOF_UPDATER_REF)" || return 1
+  plain_tag "$(env_value HORNHOOF_VERSION)" || return 1
+  running=$(docker inspect --format '{{.Image}}' "$(compose ps -q node 2> /dev/null || true)" 2> /dev/null || true)
+  [ -n "$running" ] || return 1
+  target=$(docker image inspect --format '{{.Id}}' "$(env_value HORNHOOF_NODE_REF)" 2> /dev/null || true)
+  [ "$running" != "$target" ]
+}
+
+# ask_nodes <method> <answer file>: the HTTP code of the server's answer about the nodes on this computer. The key goes
+# to curl on its input, so no command line shows it.
+ask_nodes() {
+  printf 'header = "Authorization: Bearer %s"\n' "$(env_value NODE_KEY)" |
+    curl -sS --max-time 10 --config - -X "$1" -H 'content-type: application/json' -d '{"scope":"server"}' -o "$2" -w '%{http_code}' "$NODES_URL" 2> /dev/null
+}
+
+# The nodes are free: the installer of the build that runs replaces them, and the server lets go of those it did not.
+replace_nodes() {
+  WORK=$(mktemp -d)
+  NODES_FREE=1
+  if ! install "$(env_value HORNHOOF_VERSION)" "$(env_value HORNHOOF_APP_REF)" "$(env_value HORNHOOF_NODE_REF)" "$(env_value HORNHOOF_UPDATER_REF)"; then
+    printf 'Could not replace the nodes: %s\n' "$(tail -n 3 "$WORK/install.log" 2> /dev/null | tr '\n' ' ')"
+    NODES_AT=$(($(date +%s) + NODES_RETRY))
+  fi
+  NODES_FREE=''
+  ask_nodes DELETE /dev/null > /dev/null || true
+  rm -rf "$WORK"
+  WORK=''
+}
+
+# One look at the nodes, which never waits: a request for an update goes first, and the server lets go of the nodes when
+# this stops asking.
+catch_up_nodes() {
+  local now code answer poll
+  now=$(date +%s)
+  [ "$now" -ge "$NODES_AT" ] || return 0
+  NODES_AT=$((now + NODES_CHECK))
+  nodes_behind || return 0
+  answer=$(mktemp)
+  code=$(ask_nodes POST "$answer" || true)
+  case "$code" in
+    200)
+      if [ "$(jq -r '.ready // false' "$answer")" = true ]; then
+        replace_nodes
+      else
+        poll=$(jq -r '((.pollAfterMs // 5000) / 1000) | ceil' "$answer")
+        NODES_AT=$((now + poll))
+      fi
+      ;;
+    404)
+      printf 'This server is from before nodes wait for their work, so they stay on their image and what they run goes on.\n'
+      NODES_AT=$((now + NODES_RETRY))
+      ;;
+  esac
+  rm -f "$answer"
 }
 
 # Whether the CEO keeps access to the computer open now, by the time the app wrote, which ends it by itself.
@@ -582,6 +660,7 @@ touch "$CONTROL/alive"
 interrupted
 if [ "${1:-}" = --once ]; then
   handle_request
+  catch_up_nodes
   computer_runs
   exit 0
 fi
@@ -597,5 +676,6 @@ RUNS=$!
 trap 'kill $ALIVE $RUNS 2> /dev/null || true' EXIT
 while true; do
   handle_request
+  catch_up_nodes || printf 'Could not look at the nodes.\n'
   sleep 2
 done

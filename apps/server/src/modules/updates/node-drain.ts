@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { MachineDrain } from '@hornhoof/protocol';
+import { PROGRAM_OPERATOR_ROLE } from '@hornhoof/protocol/program-operator';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -139,6 +140,10 @@ export const nodeHeld = (ctx: Ctx, node: NodeIdentity): boolean => {
   const state = nodeDrain(ctx, node)?.state;
   return state === 'waiting' || state === 'restarting';
 };
+/* Whether a new turn of this role stays off the node. A program operator's goes in while the node waits, since a program
+   there may wait for its answer; its case ends within OPERATOR_CASE_MS, so it does not hold the wait longer. */
+export const nodeHeldFrom = (ctx: Ctx, node: NodeIdentity, role: string | null | undefined): boolean =>
+  role === PROGRAM_OPERATOR_ROLE ? nodeDrain(ctx, node)?.state === 'restarting' : nodeHeld(ctx, node);
 export const requestNodeDrain = (ctx: Ctx, node: NodeIdentity): Promise<MachineDrain> => states.get(ctx.config)!.request(node);
 export const cancelNodeDrain = (ctx: Ctx, node: NodeIdentity): void => states.get(ctx.config)?.cancel(node);
 export const nodeDrainHello = (ctx: Ctx, node: NodeIdentity, boot: string | undefined): void => states.get(ctx.config)?.hello(node, boot);

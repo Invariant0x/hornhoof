@@ -14,7 +14,7 @@ import { adapterFor } from '../src/providers/index.js';
 import { claudeEvents, claudeInterrupted, limitsFrom } from '../src/providers/claude.js';
 import { codexEvents, codexRateLimits } from '../src/providers/codex.js';
 import { kimiContextSize, kimiEvents, kimiModels } from '../src/providers/kimi.js';
-import { agyModels, agyStream, installAgy } from '../src/providers/antigravity.js';
+import { agyModels, agyPlanLimits, agyStream, agyUsageLimits, installAgy } from '../src/providers/antigravity.js';
 import { childEnv, lastUrl } from '../src/providers/process.js';
 import { runJob, type RunInput } from '../src/runner.js';
 
@@ -742,6 +742,116 @@ describe('Antigravity CLI', () => {
     writeFileSync(join(home, '.gemini', 'antigravity-cli', 'antigravity-oauth-token'), JSON.stringify({ access_token: 'ya29.access0123456789abcdef', refresh_token: '1//refresh0123456789abcdef' }));
     writeFileSync(join(home, '.gemini', 'antigravity-cli', 'installation_id'), 'b1f3c7de-0000-4000-8000-000000000001');
     expect((await a.secrets()).sort()).toEqual(['1//refresh0123456789abcdef', 'gho_plugin0123456789abcdef', 'ya29.access0123456789abcdef']);
+  });
+
+  it("reads the plan's windows, used shares and resets from agy's real /usage output", () => {
+    const raw = readFileSync(new URL('./fixtures/agy-usage.json', import.meta.url), 'utf8');
+    const expected = {
+      status: 'allowed',
+      windows: [
+        { name: 'five_hour', utilization: 1 - 0.6985989809036255, resetsAt: '2026-11-04T21:41:44.000Z' },
+        { name: 'seven_day', utilization: 1 - 0.6328346133232117, resetsAt: '2026-11-10T00:41:44.000Z' },
+      ],
+      complete: true,
+    };
+    expect(agyUsageLimits(raw)).toEqual(expected);
+    expect(agyUsageLimits(JSON.parse(raw))).toEqual(expected);
+
+    /* Across model groups, the fuller bucket speaks for each window, and a full or disabled bucket marks the plan at its limit. */
+    const exhausted = {
+      status: 'SUCCESS',
+      command: {
+        name: 'usage',
+        data: {
+          groups: [
+            { buckets: [{ window: '5h', remaining_fraction: 0.7, reset_time: '2026-11-04T21:41:44Z' }, { window: 'weekly', remaining_fraction: 0, reset_time: '2026-11-10T00:41:44Z' }] },
+            { buckets: [{ window: '5h', remaining_fraction: 0, reset_time: '2026-11-05T02:19:23Z' }, { window: 'weekly', disabled: true, reset_time: '2026-11-11T21:19:23Z' }] },
+          ],
+        },
+      },
+    };
+    expect(agyUsageLimits(exhausted)).toEqual({
+      status: 'rejected',
+      windows: [
+        { name: 'five_hour', utilization: 1, resetsAt: '2026-11-05T02:19:23.000Z' },
+        { name: 'seven_day', utilization: 1, resetsAt: '2026-11-11T21:19:23.000Z' },
+      ],
+      complete: true,
+    });
+
+    /* Other durations, clamped fractions and unreadable reset dates stay safe, and bad output never invents a reached limit. */
+    const varied = {
+      status: 'SUCCESS',
+      command: {
+        name: 'usage',
+        data: {
+          groups: [
+            null,
+            {
+              buckets: [
+                null,
+                { window: 'daily', remaining_fraction: 1.5, reset_time: 'not-a-date' },
+                { window: 'monthly', remaining_fraction: -0.25 },
+                { window: '2h', remaining_fraction: 0.5, reset_time: '2026-11-04T23:00:00Z' },
+                { window: 'rolling-tier', remaining_fraction: 0.75 },
+                { window: '---', remaining_fraction: 0.5 },
+                { window: '0h', remaining_fraction: 0.5 },
+                { window: '', remaining_fraction: 0.5 },
+                { window: '5h' },
+              ],
+            },
+          ],
+        },
+      },
+    };
+    expect(agyUsageLimits(varied)).toEqual({
+      status: 'rejected',
+      windows: [
+        { name: 'one_day', utilization: 0, resetsAt: null },
+        { name: 'month', utilization: 1, resetsAt: null },
+        { name: '120_minutes', utilization: 0.5, resetsAt: '2026-11-04T23:00:00.000Z' },
+        { name: 'rolling_tier', utilization: 0.25, resetsAt: null },
+      ],
+      complete: true,
+    });
+    for (const bad of ['{broken', null, {}, { status: 'ERROR', command: { name: 'usage', data: { groups: [] } } }, { status: 'SUCCESS', command: { name: 'other', data: { groups: [] } } }, { status: 'SUCCESS', command: { name: 'usage', data: { groups: [{ buckets: [] }] } } }]) {
+      expect(agyUsageLimits(bad)).toBeNull();
+    }
+  });
+
+  it("asks agy for the plan's limits with no turn, and gives nothing when signed out or when agy fails", async () => {
+    const a = adapter('antigravity');
+    expect(await a.limits!()).toEqual({
+      status: 'allowed',
+      windows: [
+        { name: 'five_hour', utilization: 1 - 0.6985989809036255, resetsAt: '2026-11-04T21:41:44.000Z' },
+        { name: 'seven_day', utilization: 1 - 0.6328346133232117, resetsAt: '2026-11-10T00:41:44.000Z' },
+      ],
+      complete: true,
+    });
+    expect(lastRun().argv).toEqual(['--print=/usage', '--output-format', 'json']);
+    expect(lastRun().cwd).toBe(join(home, '.hh-limits'));
+    expect(lastRun().env).toMatchObject({ HOME: home, AGY_CLI_DISABLE_AUTO_UPDATE: 'true' });
+
+    process.env.FAKE_LIMITS_MODE = 'stderr_noise';
+    expect((await a.limits!())?.status).toBe('allowed');
+    delete process.env.FAKE_LIMITS_MODE;
+
+    for (const mode of ['signed_out', 'fail', 'bad_json']) {
+      process.env.FAKE_MODE = mode;
+      expect(await a.limits!()).toBeNull();
+    }
+    process.env.FAKE_MODE = 'hang';
+    expect(await agyPlanLimits({ bin: join(FAKES, 'agy'), home, tools, timeoutMs: 200 })).toBeNull();
+    delete process.env.FAKE_MODE;
+
+    /* A symlink where the limits folder goes never makes the node crash or invent a reached limit. */
+    rmSync(join(home, '.hh-limits'), { recursive: true, force: true });
+    const outside = join(dir, 'outside-limits');
+    mkdirSync(outside);
+    symlinkSync(outside, join(home, '.hh-limits'));
+    const user = { uid: process.getuid!(), gid: process.getgid!() };
+    expect(await agyPlanLimits({ bin: join(FAKES, 'agy'), home, tools, user })).toBeNull();
   });
 
   it('stops at the timeout', async () => {
