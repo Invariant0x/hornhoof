@@ -470,3 +470,25 @@ describe('the decisions of one person', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Tasks' })).toBeInTheDocument());
   });
 });
+
+describe('decisions read failure', () => {
+  it('keeps the shown requests and retries the failed read', async () => {
+    const user = userEvent.setup();
+    let broken = false;
+    const calls = shell({
+      'GET /api/requests': () => (broken ? [503, { error: { code: 'unavailable', message: 'Hornhoof is busy.' } }] : [200, decisions(REQUESTS)]),
+    });
+    await openTasks(user);
+    const waiting = screen.getByRole('region', { name: 'Waiting for you' });
+    expect(within(waiting).getByRole('article', { name: /#9/ })).toBeInTheDocument();
+    broken = true;
+    fakeStream().send({ type: 'requests' });
+    expect(await within(waiting).findByRole('alert')).toHaveTextContent('Hornhoof is busy.');
+    expect(within(waiting).getByRole('article', { name: /#9/ })).toBeInTheDocument();
+    broken = false;
+    await user.click(within(waiting).getByRole('button', { name: 'Try again' }));
+    await waitFor(() => expect(within(waiting).queryByRole('alert')).not.toBeInTheDocument());
+    expect(within(waiting).getByRole('article', { name: /#9/ })).toBeInTheDocument();
+    expect(calls.filter(c => c.path === '/api/requests').length).toBeGreaterThanOrEqual(3);
+  });
+});
