@@ -7,7 +7,7 @@ Public API (Caddy sends https://hornhoof.org/api/* here):
   DELETE /api/v1/bindings/{name}   Authorization: Bearer <key> -> 204 (404 once the name belongs to a new owner)
   GET    /api/v1/links/{name}/route Authorization: Bearer <key> -> 200 {state, client, since, generation, ...}
   POST   /api/v1/links/{name}/sync  Authorization: Bearer <key> {client, generation, state, copy, epoch} -> 200 {sync}
-  POST   /api/v1/links/{name}/key   Authorization: Bearer <key> -> 200 {key} (R6.1)
+  POST   /api/v1/links/{name}/key   Authorization: Bearer <key> {key?} -> 200 {key}, 400 invalid|same_key (R6.1)
   POST   /api/v1/links/{name}/visitor-key Authorization: Bearer <key> -> 200 {visitorKey} (R6.2)
   GET    /api/v1/health            -> 200 {ok, frps, relayStarted, passthrough} while frps takes logins, else 503
 frps plugin (local only): POST /frp/handler?op=Login|NewProxy|Ping|NewUserConn
@@ -79,6 +79,9 @@ RANDOM_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789'
 LONE_SURROGATE = re.compile('[\ud800-\udfff]')
 # A network client's id: <link>-<machine8>-<kind> (R1.3, R1.4, R5.1).
 CLIENT = re.compile(r'^(?P<link>[a-z0-9-]{1,63})-(?P<m8>[0-9a-f]{8})-(?P<kind>link|peer|visit)$')
+# A key a link's owner may choose: 32 bytes in base64url without padding (R6.1).
+CHOSEN_KEY = re.compile(r'[A-Za-z0-9_-]{43}')
+BAD_KEY_BODY = 'Send no body, {}, or {"key": <32 bytes in base64url without padding>}.'
 # The two stcp services a -peer client may offer, named <link>-<m8>-<service> (R5.1).
 PEER_SERVICES = ('data', 'app')
 
@@ -1278,6 +1281,33 @@ def store_visitor_key(name: str, visitor_hash: str, link_hash: str) -> bool:
                  (name, visitor_hash, now(), name, link_hash)) == 1
 
 
+class KeyRefused(Exception):
+    """R6.1: a key change's body the relay will not act on; the store is not touched. Its message goes in the answer, so
+    it never holds a key."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def new_link_key(body: object, current_key: str) -> str:
+    """R6.1: the key a change ends on: the one the body chose, or with none chosen a new random one.
+
+    A caller that chose its key holds it before it asks, so an answer lost on the way does not lose the link. Only what the
+    relay's own keys look like is taken, and anything else raises KeyRefused.
+    """
+    if not isinstance(body, dict) or not body.keys() <= {'key'}:
+        raise KeyRefused('invalid', BAD_KEY_BODY)
+    if 'key' not in body:
+        return secrets.token_urlsafe(32)
+    chosen = body['key']
+    if not isinstance(chosen, str) or CHOSEN_KEY.fullmatch(chosen) is None:
+        raise KeyRefused('invalid', BAD_KEY_BODY)
+    if secrets.compare_digest(chosen.encode(), current_key.encode()):
+        raise KeyRefused('same_key', 'The chosen key is the current key.')
+    return chosen
+
+
 def store_link_key(name: str, new_hash: str, link_hash: str) -> bool:
     """R6.1: rotate only the authorizing, unblocked binding, preserving live Ping.
 
@@ -1664,21 +1694,25 @@ class Handler(BaseHTTPRequestHandler):
         self.key_answer(name, visitor=True)
 
     def key_answer(self, name: str, visitor: bool = False) -> None:
-        """R6.1, R6.2: hand out a fresh key once, committing its hash before answering.
+        """R6.1, R6.2: hand out a key once, committing its hash before answering. A link's owner may choose its key
+        (new_link_key); a visitor key is always the relay's own, whatever the body says.
 
-        The body is read before the commit: the answer is the only copy of the key, and closing a
+        The body is read before the commit: the answer can be the only copy of the key, and closing a
         connection over unread bytes can reset it, which would leave the company with no key.
         """
         if not self.authorize_link(name):
             return
+        current_key = self.bearer_key()
         try:
-            self.read_json()
+            body = self.read_json()
+            new_key = secrets.token_urlsafe(32) if visitor else new_link_key(body, current_key)
+        except KeyRefused as refused:
+            return self.error(400, refused.code, str(refused))
         except ValueError:
             return self.error(400, 'invalid', 'The body is not valid JSON.')
         field, store, label = (('visitorKey', store_visitor_key, 'visitor') if visitor
                                else ('key', store_link_key, 'link'))
-        new_key = secrets.token_urlsafe(32)
-        if not store(name, key_hash(new_key), key_hash(self.bearer_key())):
+        if not store(name, key_hash(new_key), key_hash(current_key)):
             return self.error(404, 'not_found', f'There is no binding {name}.')
         log_line(f'new {label} key for {name}')
         self.send_json(200, {field: new_key})
