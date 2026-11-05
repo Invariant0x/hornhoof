@@ -8,6 +8,7 @@
 #                                             already open stay; --cut also drops open ones, with every link, by restarting frps
 #   hornhoof-relay unban <name>
 #   hornhoof-relay release <name>             free a name once its old tunnel is gone
+#   hornhoof-relay traffic                    bytes sent per month, the last 12 months
 set -eu
 # add asks frps whether a freed name's old tunnel lives, so it needs what the service reads to reach frps's dashboard.
 if [ -r /etc/hornhoof-relay.env ]; then
