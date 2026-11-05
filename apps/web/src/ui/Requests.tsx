@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { api } from '../api';
-import { errorText, useT } from '../i18n';
+import { errorText, useT, type Messages } from '../i18n';
 import type { TaskPlace, WaitingRequest } from '../types';
 import { DecidedByNote } from './DecidedBy';
 import { Field } from './Field';
@@ -19,11 +19,14 @@ const formOf = (request: WaitingRequest): WaitingRequest['kind'] | null => (requ
 /* onOpenAgent opens the asking agent's window, to see in its terminal what it did. */
 type Shared = { onOpenTask: (id: string) => void; onOpenAgent: (id: string) => void; placeName: (p: TaskPlace) => string };
 
+/* An approval names a commit, or under a department's policy the work its words say. */
+const asksToApprove = (t: Messages, request: WaitingRequest) => (request.commit ? t.tasks.asksApproval(request.agent.name) : t.tasks.asksApprovalOf(request.agent.name));
+
 /* A request for someone who may not take it: the commit or the ways it offers, and who takes it. */
 function ReadOnly({ request }: { request: WaitingRequest }) {
   return (
     <div className="req-form">
-      {request.kind === 'approval' && <Commit request={request} />}
+      {request.kind === 'approval' && <ApprovedCommit request={request} />}
       {request.kind === 'choice' && (
         <ul className="req-ways">
           {request.options.map((o, i) => (
@@ -65,7 +68,7 @@ function RequestItem({ request, onDone, onOpenTask, onOpenAgent, placeName }: Sh
   }
 
   const who =
-    request.kind === 'approval' ? t.tasks.asksApproval(agent.name) : request.kind === 'stuck' ? t.tasks.stuck(agent.name) : request.kind === 'choice' ? t.tasks.asksChoice(agent.name) : t.tasks.asks(agent.name);
+    request.kind === 'approval' ? asksToApprove(t, request) : request.kind === 'stuck' ? t.tasks.stuck(agent.name) : request.kind === 'choice' ? t.tasks.asksChoice(agent.name) : t.tasks.asks(agent.name);
   /* Hornhoof's own words about a stuck task are said in the person's language. */
   const said = request.kind === 'stuck' ? t.tasks.stuckText(agent.name, task.number) : request.text;
   return (
@@ -141,7 +144,7 @@ function RequestItem({ request, onDone, onOpenTask, onOpenAgent, placeName }: Sh
       {!request.canAnswer && <ReadOnly request={request} />}
       {form === 'approval' && (
         <div className="req-form">
-          <Commit request={request} />
+          <ApprovedCommit request={request} />
           <Field label={t.tasks.note}>{p => <input {...p} value={text} maxLength={4000} onChange={e => setText(e.target.value)} />}</Field>
           <div className="req-actions">
             <button className="btn small" type="button" disabled={busy} onClick={() => void reply(text.trim() ? { approve: true, answer: text.trim() } : { approve: true })}>
@@ -159,6 +162,9 @@ function RequestItem({ request, onDone, onOpenTask, onOpenAgent, placeName }: Sh
 }
 
 /* The exact commit, linked on GitHub when the repository is there. */
+/* An approval under a department's policy is about the work its words name, and shows no commit. */
+const ApprovedCommit = ({ request }: { request: WaitingRequest }) => (request.commit ? <Commit request={request} /> : null);
+
 function Commit({ request }: { request: WaitingRequest }) {
   const code = <code className="req-commit">{request.commit}</code>;
   return request.commitUrl ? (

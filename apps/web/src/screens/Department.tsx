@@ -10,6 +10,7 @@ import { Bar, percent } from '../ui/Bar';
 import { CANVAS_NARROW as NARROW, LEFT_PANEL_COVER, canvasSpace, usePanZoom, ZoomBar } from '../ui/canvas';
 import { Edge } from '../ui/Edge';
 import { AgentIcon, BackIcon, MapIcon, PersonIcon, ProviderMark, SpeedIcon, TreeIcon } from '../ui/icons';
+import { ApprovalPolicy } from '../ui/ApprovalPolicy';
 import { NewTask } from '../ui/NewTask';
 import { PersonButton } from '../ui/PersonButton';
 import { RepoSettings } from '../ui/RepoSettings';
@@ -189,6 +190,19 @@ function HeadCard({ d, head, stats, on, flash, serverNow, onOpen, onSwitch }: { 
       </button>
       <Switch e={head} onSwitch={onSwitch} />
     </div>
+  );
+}
+
+/* Who owns the department and how its approvals go, for people with access to the department itself. */
+function DeptApprovals({ department, shown }: { department: Department; shown: boolean }) {
+  const t = useT();
+  const id = useId();
+  if (!shown) return null;
+  return (
+    <section aria-labelledby={`${id}-approvals`}>
+      <h3 id={`${id}-approvals`}>{t.dept.approvals.title}</h3>
+      <ApprovalPolicy departmentId={department.id} ownerPersonId={department.ownerPersonId} />
+    </section>
   );
 }
 
@@ -657,6 +671,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
               <>
                 <DeptEmployeeList department={d} company={company} />
                 <DeptSubUnits department={d} company={company} />
+                <DeptApprovals department={d} shown={canGive} />
                 {company && (
                   <section aria-labelledby={`${id}-repo`}>
                     <h3 id={`${id}-repo`}>{t.dept.repository}</h3>

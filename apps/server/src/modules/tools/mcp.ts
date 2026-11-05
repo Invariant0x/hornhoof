@@ -10,6 +10,7 @@ import { appendEvent } from '../events/store.js';
 import { isOperations } from '../operations/required.js';
 import { companyView } from './company.js';
 import { jobOf, type ToolJob } from './job.js';
+import { registerApprovalControlTools, registerApprovalTools } from './approval-policy.js';
 import { registerControlTools } from './control.js';
 import { registerComputerTools } from '../computer/tools.js';
 import { registerDatabaseTool } from './database.js';
@@ -48,6 +49,7 @@ function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob): McpServer {
     async () => say(JSON.stringify(await companyView(ctx.db, ctx.templates, job.companyId))),
   );
   registerTaskTools(server, ctx, job);
+  registerApprovalTools(server, ctx, job);
   if (job.agentKind !== 'orchestrator') {
     const grants = new Set(job.skills.flatMap(id => ctx.templates.skills.get(id)?.grants ?? []));
     registerWatchTools(server, ctx, job, grants);
@@ -127,6 +129,7 @@ function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob): McpServer {
     },
   );
   registerControlTools(server, ctx, app, job);
+  registerApprovalControlTools(server, ctx, app, job);
   registerComputerTools(server, ctx, job);
   registerDatabaseTool(server, ctx, job, 'write');
   registerOrchestratorImprovementTools(server, ctx, job);

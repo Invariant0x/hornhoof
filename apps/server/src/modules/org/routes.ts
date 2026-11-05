@@ -13,7 +13,7 @@ import { deptName } from '../departments/templates.js';
 import { CHANNEL_MS, type Endpoint } from '../events/bus.js';
 import { workingCount } from '../events/store.js';
 import { machineOf } from '../nodes/nodes.js';
-import { pendingFor, visibleDecisions } from '../tasks/decisions.js';
+import { departmentOwners, pendingFor, visibleDecisions } from '../tasks/decisions.js';
 import { agentFailureStates } from '../tasks/failures.js';
 import { agentProgramState } from '../tasks/silent.js';
 import { mapLines, type MapLine } from './map-state.js';
@@ -55,6 +55,9 @@ function reachedLines(lines: readonly MapLine[], reach: Access, allAgents: reado
     // eslint-disable-next-line @typescript-eslint/no-unused-vars -- strip routing keys used only for filtering
     shown.filter(l => l.kind === kind && (!departmentId || l.departmentId === departmentId)).map(({ kind: _, departmentId: __, ...line }) => line);
 }
+
+/* The person who takes a department's approvals; null means the CEO. */
+const ownerOf = (owners: ReadonlyMap<string, string>, departmentId: string) => owners.get(departmentId) ?? null;
 
 const teamField = (teamId: string | null) => (teamId ? { teamId } : {});
 
@@ -104,6 +107,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
     const nextToCeo = active.filter(p => p.scopeKind === 'company' || homes.get(p.id)!.length > 1);
     /* Each card counts the decisions waiting for its person that the viewer sees, as the decisions screen lists them. */
     const decisions = await visibleDecisions(ctx, me);
+    const owners = await departmentOwners(ctx, me.companyId);
     const views = new Map((await personViews(db, active)).map(v => [v.id, { ...v, pendingDecisions: pendingFor(decisions, me, v.id) }]));
     const inDepartment = (deptId: string) => active.filter(p => p.scopeKind !== 'company' && homes.get(p.id)!.length === 1 && homes.get(p.id)![0] === deptId).map(p => views.get(p.id)!);
     /* What each agent's card shows, once: the map's lines go by the same tasks. */
@@ -218,6 +222,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
           templateKey: d.templateKey,
           roleCode: d.roleCode,
           about: d.about,
+          ownerPersonId: ownerOf(owners, d.id),
           agents: agentsOf(d.id),
           people: inDepartment(d.id),
           employees: employeesOf(d),
