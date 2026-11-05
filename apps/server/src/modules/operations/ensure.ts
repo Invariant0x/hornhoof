@@ -1,9 +1,9 @@
-import { and, asc, eq, isNull, max } from 'drizzle-orm';
+import { and, asc, eq, isNotNull, isNull, max } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import type { Ctx } from '../../app.js';
 import { agentChanges, agents, companies, departments, jobs } from '../../db/schema.js';
 import { ApiError, loggable } from '../../errors.js';
-import { orchestratorOf, pump } from '../conversation/queue.js';
+import { orchestratorOf, pump, windowNode } from '../conversation/queue.js';
 import { hireEmployee, type Hired, type HiredBy } from '../departments/hire.js';
 import { appendEvent, listEvents } from '../events/store.js';
 import type { Tx } from '../tasks/engine.js';
@@ -132,6 +132,14 @@ export async function placeOperator(ctx: Ctx, companyId: string): Promise<void> 
     await resumeAgent(ctx, id);
     await pump(ctx, id);
   }
+  await settleOperators(ctx, companyId);
+}
+
+/* Each operator stands on a machine of its plan from the start, so it is on the machine the next call for it finds. */
+async function settleOperators(ctx: Ctx, companyId: string): Promise<void> {
+  const operators = await ctx.db.select({ id: agents.id }).from(agents)
+    .where(and(eq(agents.companyId, companyId), eq(agents.roleKey, PROGRAM_OPERATOR_ROLE), isNull(agents.removedAt), isNull(agents.switchedOffAt), isNotNull(agents.subscriptionId)));
+  for (const { id } of operators) await windowNode(ctx, id);
 }
 
 /* After a plan came or went: the check repeats it, so a failure here does not fail what the person did. */

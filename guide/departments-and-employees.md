@@ -41,6 +41,8 @@ The last employee in each of the four cannot be removed. Switch it off for a whi
 
 The program operator starts on the oldest subscription that may serve Operations. When there is none yet it waits, and the first that may serve Operations goes to it without a question, even one still waiting for its machine. A subscription you pick for it yourself stays as long as it may serve Operations. When it no longer may, the operator moves to the next one after its current turn ends.
 
+When a program does not record the words it was given for a minute, the operator gets a turn on any connected machine of its subscription, even if it has never had a turn before. If nobody gets the words through, they are not lost: they go with that employee's next turn, after a wait that grows from one minute to ten, and they are not repeated if the program recorded them after all. However many tries fail in a row, the news comes once. When it is the orchestrator's program, the orchestrator gets no turn about it: you see it in the orchestrator's window, with a picture of its screen, and the head of Operations hears of it.
+
 ## What is in an employee's window?
 
 Click an employee to open its window, with its terminal or its log. A small mark next to its name says whether it works in Claude, Codex, Kimi, GLM or Antigravity.

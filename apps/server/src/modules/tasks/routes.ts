@@ -260,7 +260,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     await wakeAll(ctx, done.wakes);
     /* An agent switched off while it waited for this answer leaves the work now. */
     await leaveIfOff(ctx, done.request.agentId);
-    return { request: { id: done.request.id, status: done.request.status } };
+    return { request: { id: done.request.id, status: done.request.status, picked: done.request.picked, answer: done.request.answer } };
   });
 
   /* The orchestrator puts what an employee asks into plain words for the people who answer it. */

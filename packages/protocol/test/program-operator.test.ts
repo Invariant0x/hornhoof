@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { OperatorDelivery, OperatorKey, OperatorNodeMessage, OperatorServerMessage, PROGRAM_OPERATOR_ROLE } from '../src/program-operator.js';
+import { OPERATOR_CELLS_BYTES, OperatorDelivery, OperatorKey, OperatorNodeMessage, OperatorServerMessage, PROGRAM_OPERATOR_ROLE } from '../src/program-operator.js';
 
 const id = '10000000-0000-4000-8000-000000000001';
 const identity = { agentKey: id, jobId: id, instance: id };
@@ -67,5 +67,26 @@ describe('bounded program operator protocol', () => {
     const capability = { type: 'program.operator_case', ...identity, case: id, capability: id, disposition: 'open', remainingMs: 600000, revision: 1, reason: 'question_waiting', questionId: id };
     expect(OperatorServerMessage.parse(capability)).toEqual(capability);
     expect(OperatorNodeMessage.safeParse({ ...asked, question: { ...question, text: 'a'.repeat(4097) } }).success).toBe(false);
+  });
+  describe('what the node saw as it stopped waiting', () => {
+    const needed = { type: 'program.operator_needed', ...evidence, reason: 'assignment_unrecorded', deliveryId: id, evidenceKey: id, elapsedMs: 60000, sinceLaunchMs: 60000, exit: null };
+    const screen = { protected: false, cols: 80, rows: 24, cells: 'Screen.' };
+
+    it('is optional, and takes the input line with or without a screen', () => {
+      expect(OperatorNodeMessage.safeParse(needed).success).toBe(true);
+      expect(OperatorNodeMessage.safeParse({ ...needed, check: { input: 'text', screen } }).success).toBe(true);
+      expect(OperatorNodeMessage.safeParse({ ...needed, check: { input: 'unknown', screen: null } }).success).toBe(true);
+    });
+
+    it('refuses an unknown input state, the text of the line, a screen over the limit and any other field', () => {
+      for (const check of [
+        { input: 'full', screen: null },
+        { input: 'text', screen: null, text: 'The unsent words.' },
+        { input: 'text', screen: { ...screen, cells: 'x'.repeat(OPERATOR_CELLS_BYTES + 1) } },
+        { input: 'text', screen: { ...screen, cols: 513 } },
+        { input: 'text', screen: { ...screen, snapshot: 'a-snapshot-token-16' } },
+        { input: 'text' },
+      ]) expect(OperatorNodeMessage.safeParse({ ...needed, check }).success).toBe(false);
+    });
   });
 });
