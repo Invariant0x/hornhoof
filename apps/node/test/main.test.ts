@@ -1,4 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
@@ -8,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { parseNodeMessage } from '@hornhoof/protocol';
+import { readTestEnvironment } from '../src/test-environment.js';
 import { buildOf, runNode } from '../src/main.js';
 import { prepareNodeStop } from '../src/lifecycle.js';
 import { ProgramUpdates } from '../src/program-updates.js';
@@ -1251,4 +1253,51 @@ describe('runNode', () => {
     expect(lines).toContain('Playwright Chromium is ready.');
     expect(existsSync(join(dir, 'browser-error'))).toBe(false);
   });
+});
+
+function descriptionRepo(dir: string) {
+  const root = join(dir, 'description-source'); mkdirSync(root);
+  execFileSync('git', ['init', '--quiet'], { cwd: root });
+  execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '--quiet', '--allow-empty', '-m', 'No descriptor'], { cwd: root });
+  const localUrl = new URL(`file://${root}`).href, url = 'https://example.test/description.git';
+  const read: typeof readTestEnvironment = (repo, scope, sha, context) => readTestEnvironment({ ...repo, url: localUrl }, { ...scope, repoUrlHash: createHash('sha256').update(localUrl).digest('hex') }, sha, context);
+  return { read, repo: { url, token: '' }, commitSha: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), repositoryScope: { companyId: '11111111-1111-4111-8111-111111111111', repositoryOwnerId: '22222222-2222-4222-8222-222222222222', repoUrlHash: createHash('sha256').update(url).digest('hex') } };
+}
+
+it('queues description discovery before reading a cold mirror and replies with a typed missing descriptor', async () => {
+  const server = await fakeServer(false), dir = nodeDir(server.url), source = descriptionRepo(dir);
+  const node = await runNode({ dir, adapter, log: () => {}, testUser: { uid: 20000, gid: 20000 }, describeEnvironment: source.read }); onTestFinished(() => node.stop());
+  await server.wait(() => server.received.some(frame => frame.type === 'hello'));
+  expect(server.received.find(frame => frame.type === 'hello')).toMatchObject({ testEnvironmentVersion: 1, testRuntimes: expect.arrayContaining([expect.objectContaining({ id: 'node' })]) });
+  const requestId = '33333333-3333-4333-8333-333333333333'; server.send({ type: 'tests.describe', requestId, ...source });
+  await server.wait(() => server.received.some(frame => frame.type === 'check.acquire'));
+  expect(server.received.filter(frame => frame.type === 'tests.described')).toEqual([]);
+  const acquired = server.received.find(frame => frame.type === 'check.acquire')!;
+  server.send({ type: 'check.state', id: acquired.id, state: 'running', position: 0 });
+  await server.wait(() => server.received.some(frame => frame.type === 'tests.described'));
+  expect(server.received.find(frame => frame.type === 'tests.described')).toMatchObject({ requestId, commitSha: source.commitSha, result: { status: 'error', problem: { code: 'environment_missing' } } });
+  await server.wait(() => server.received.some(frame => frame.type === 'check.release'));
+});
+
+it('cancels a queued description before repository materialization', async () => {
+  const server = await fakeServer(false), dir = nodeDir(server.url), source = descriptionRepo(dir);
+  const node = await runNode({ dir, adapter, log: () => {}, testUser: { uid: 20000, gid: 20000 }, describeEnvironment: source.read }); onTestFinished(() => node.stop());
+  await server.wait(() => server.received.some(frame => frame.type === 'hello'));
+  const requestId = '44444444-4444-4444-8444-444444444444'; server.send({ type: 'tests.describe', requestId, ...source });
+  await server.wait(() => server.received.some(frame => frame.type === 'check.acquire'));
+  server.send({ type: 'tests.describe.cancel', requestId });
+  await server.wait(() => server.received.some(frame => frame.type === 'tests.described'));
+  expect(server.received.find(frame => frame.type === 'tests.described')).toMatchObject({ result: { status: 'error', problem: { code: 'cancelled' } } });
+  expect(existsSync(join(dir, 'cache', source.repositoryScope.companyId))).toBe(false);
+});
+
+it('reports a metadata deadline and replays its settled reply without acquiring another slot', async () => {
+  const server = await fakeServer(), dir = nodeDir(server.url), source = descriptionRepo(dir);
+  const node = await runNode({ dir, adapter, log: () => {}, testUser: { uid: 20000, gid: 20000 }, describeEnvironment: async () => { throw new DOMException('Description deadline expired.', 'TimeoutError'); } }); onTestFinished(() => node.stop());
+  await server.wait(() => server.received.some(frame => frame.type === 'hello'));
+  const request = { type: 'tests.describe', requestId: '66666666-6666-4666-8666-666666666666', ...source };
+  server.send(request); await server.wait(() => server.received.some(frame => frame.type === 'tests.described'));
+  expect(server.received.find(frame => frame.type === 'tests.described')).toMatchObject({ result: { status: 'error', problem: { code: 'timeout' } } });
+  server.send(request); await server.wait(() => server.received.filter(frame => frame.type === 'tests.described').length === 2);
+  expect(server.received.filter(frame => frame.type === 'check.acquire')).toHaveLength(1);
 });

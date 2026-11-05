@@ -6,7 +6,7 @@ import { RepositoryPath, RepositoryScope, type Workspace } from '@hornhoof/proto
 import { cacheLockDescriptors, checkCacheContext, privateCacheRoot, withCacheLock, type CacheContext } from './test-cache.js';
 import { gitEnv } from './workspace.js';
 
-type Source = Pick<NonNullable<Workspace['repo']>, 'url' | 'branch' | 'token'>;
+type Source = Pick<NonNullable<Workspace['repo']>, 'url' | 'token'>;
 export type GitEntry = { path: string; mode: string; oid: string };
 export type CommitTree = { commitSha: string; entries: GitEntry[]; readBlob: (path: string, limit: number) => Promise<Buffer> };
 const GIT_FLAGS = ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-c', 'core.logAllRefUpdates=false', '-c', 'protocol.ext.allow=never'];
@@ -25,7 +25,7 @@ function gitBytes(args: string[], context: CacheContext, limit = 3 * 1024 * 1024
       stopGit(child.pid, 'SIGTERM');
       killTimer ??= setTimeout(() => stopGit(child.pid, 'SIGKILL'), 5000); killTimer.unref();
     };
-    child.stdout.on('data', (chunk: Buffer) => {
+    child.stdout!.on('data', (chunk: Buffer) => {
       size += chunk.length;
       if (size > limit) { failure = new Error('Git output exceeds the configured limit.'); stop(); }
       else chunks.push(chunk);
