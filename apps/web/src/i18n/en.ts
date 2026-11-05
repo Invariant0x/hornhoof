@@ -783,6 +783,8 @@ export const en = {
       gone: 'no program',
       waitsForTask: 'waiting for a task',
       queued: 'in the queue',
+      taskShareUntil: (at: string) => `waiting: task share until ${at}`,
+      planLimitUntil: (at: string) => `waiting: plan limit until ${at}`,
       program_stalled: (n: string) => `program frozen ${n} min`,
       node_silent: (n: string) => `node silent ${n} min`,
     },

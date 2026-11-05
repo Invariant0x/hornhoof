@@ -807,6 +807,8 @@ export const ru: Messages = {
       gone: 'программы нет',
       waitsForTask: 'ждет задачу',
       queued: 'в очереди',
+      taskShareUntil: at => `ждет: доля тарифа на задачи до ${at}`,
+      planLimitUntil: at => `ждет: лимит тарифа до ${at}`,
       program_stalled: n => `программа замерла ${n} мин`,
       node_silent: n => `нода молчит ${n} мин`,
     },

@@ -7,7 +7,7 @@ import { deliverLive } from '../conversation/decision-context.js';
 import { quote } from '../conversation/prompt.js';
 import { appendEvent, publishWorking } from '../events/store.js';
 import { identityOf, type NodeIdentity } from '../nodes/hub.js';
-import { answerDirectly, brokeDown, CLOSED, GATE_ROUNDS, handOver, lastMove, leaveGates, leaveWork, NOT_A_MOVE, openAfter, regateWaiting, reviewWake, silentTurn, taskSpot, wentOn, type Actor, type Task, type Wake, type WakeWhy } from './engine.js';
+import { answerDirectly, brokeDown, CLOSED, GATE_ROUNDS, handOver, lastMove, leaveGates, leaveWork, NOT_A_MOVE, openAfter, regateWaiting, reviewWake, silentTurn, taskSpot, wentOn, type Actor, type Moved, type Task, type Wake, type WakeWhy } from './engine.js';
 import { wakeQueued, wakesLeft } from './outbox.js';
 import { taskForWake, taskWakeOf, waitingTaskTurn } from './wake-state.js';
 import { carriedTasks, continueOnce, doneIfRecorded } from './endings.js';
@@ -346,13 +346,22 @@ async function wakeMessage(ctx: Ctx, agent: typeof agents.$inferSelect, task: Ta
   return { text: prompt, task: { id: task.id, number: task.number }, taskWake: taskWakeOf(task, w), ...notice, reportContext };
 }
 
+async function waitsForBefore(db: Ctx['db'], task: Task, w: Wake): Promise<boolean> {
+  return TO_WORK.includes(w.why) && w.agentId === task.assigneeAgentId && (await openAfter(db, task)).length > 0;
+}
+
 async function queueWake(ctx: Ctx, w: Wake): Promise<boolean> {
   const { db } = ctx;
   const [agent] = await db.select().from(agents).where(and(eq(agents.id, w.agentId), isNull(agents.removedAt)));
   if (!agent || !(await liveSubscription(ctx, agent.id))) return false;
   const task = await taskForWake(db, w);
   if (!task) return false;
-  if (TO_WORK.includes(w.why) && w.agentId === task.assigneeAgentId && (await openAfter(db, task)).length) return false;
+  if (await waitsForBefore(db, task, w)) return false;
+  const handed = await handQueuedToFree(ctx, agent, task, w);
+  if (handed) {
+    await wakeAll(ctx, handed.wakes);
+    return false;
+  }
   const data = await wakeMessage(ctx, agent, task, w);
   /* New words on the task the agent works on right now go into that turn. */
   if (LIVE_WAKES.includes(w.why)) {
@@ -460,21 +469,13 @@ const PROVIDER_NAMES: Record<string, string> = { claude: 'Claude', codex: 'Codex
 /* Its turn would go out now: signed in, on a machine that is on, and with plan left for tasks. */
 const goesOutNow = (state: Awaited<ReturnType<typeof agentState>>): boolean => state.ready && !state.limitUntil && !state.budgetUntil && !state.machineDrain;
 
-async function standIn(ctx: Ctx, agentId: string, task: Task): Promise<{ id: string; name: string; provider: string } | null> {
-  if (task.executorAgentId !== agentId || task.assigneeAgentId !== agentId || task.stage !== 0 || !['open', 'working'].includes(task.status)) return null;
+async function rolePeers(ctx: Ctx, agentId: string, anotherProvider: boolean) {
   const [me] = await ctx.db
     .select({ agent: agents, provider: subscriptions.provider })
     .from(agents)
     .innerJoin(subscriptions, eq(subscriptions.id, agents.subscriptionId))
     .where(and(eq(agents.id, agentId), isNull(agents.teamId)));
   if (!me || me.agent.kind !== 'worker' || !me.agent.roleKey || !me.agent.departmentId) return null;
-  /* What its turns did so far is in its folder on its machine and maybe not pushed, so only work none of them did
-     anything on goes to another. */
-  const ran = await ctx.db
-    .select({ status: jobs.status, error: jobs.error, startedAt: jobs.startedAt, finishedAt: jobs.finishedAt, result: jobs.result, tail: jobs.tail, failure: jobs.failure })
-    .from(jobs)
-    .where(and(eq(jobs.agentId, agentId), eq(jobs.taskId, task.id), isNotNull(jobs.startedAt)));
-  if (ran.some(j => !refusedAtStart(j))) return null;
   const peers = await ctx.db
     .select({ id: agents.id, name: agents.name, productId: agents.productId, provider: subscriptions.provider })
     .from(agents)
@@ -488,17 +489,57 @@ async function standIn(ctx: Ctx, agentId: string, task: Task): Promise<{ id: str
         isNull(agents.switchedOffAt),
         isNull(agents.teamId),
         ne(agents.id, agentId),
-        ne(subscriptions.provider, me.provider),
+        anotherProvider ? ne(subscriptions.provider, me.provider) : undefined,
       ),
     )
     .orderBy(asc(agents.createdAt));
+  return { me, peers };
+}
+
+const mayTake = (task: Task, peer: { id: string; productId: string | null }): boolean => (!peer.productId || peer.productId === task.productId) && !task.gates.includes(peer.id);
+
+async function standIn(ctx: Ctx, agentId: string, task: Task): Promise<{ id: string; name: string; provider: string } | null> {
+  if (task.executorAgentId !== agentId || task.assigneeAgentId !== agentId || task.stage !== 0 || !['open', 'working'].includes(task.status)) return null;
+  /* What its turns did so far is in its folder on its machine and maybe not pushed, so only work none of them did
+     anything on goes to another. */
+  const ran = await ctx.db
+    .select({ status: jobs.status, error: jobs.error, startedAt: jobs.startedAt, finishedAt: jobs.finishedAt, result: jobs.result, tail: jobs.tail, failure: jobs.failure })
+    .from(jobs)
+    .where(and(eq(jobs.agentId, agentId), eq(jobs.taskId, task.id), isNotNull(jobs.startedAt)));
+  if (ran.some(j => !refusedAtStart(j))) return null;
+  const found = await rolePeers(ctx, agentId, true);
+  if (!found) return null;
   /* Only one whose turn would go out now: signed in, on a machine that is on, and with plan left for tasks. Anyone else
      would only wait in the agent's place. */
-  for (const p of peers) {
-    if ((p.productId && p.productId !== task.productId) || task.gates.includes(p.id)) continue;
+  for (const p of found.peers) {
+    if (!mayTake(task, p)) continue;
     if (goesOutNow(await agentState(ctx, p.id))) return { id: p.id, name: p.name, provider: p.provider };
   }
   return null;
+}
+
+const isUnstartedMemberWork = (task: Task, agentId: string): boolean => task.executorAgentId === agentId && task.assigneeAgentId === agentId && task.stage === 0 && task.status === 'open';
+
+async function freeForQueued(ctx: Ctx, agentId: string, task: Task): Promise<{ id: string; name: string } | null> {
+  if (!isUnstartedMemberWork(task, agentId)) return null;
+  const [started] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.taskId, task.id), isNotNull(jobs.startedAt))).limit(1);
+  if (started) return null;
+  const found = await rolePeers(ctx, agentId, false);
+  if (!found) return null;
+  for (const p of found.peers) {
+    if (!mayTake(task, p)) continue;
+    const state = await agentState(ctx, p.id);
+    if (goesOutNow(state) && !state.busy && state.queued === 0) return { id: p.id, name: p.name };
+  }
+  return null;
+}
+
+async function handQueuedToFree(ctx: Ctx, agent: Agent, task: Task, w: Wake): Promise<Moved | null> {
+  if (w.why !== 'assigned') return null;
+  const [running] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agent.id), eq(jobs.status, 'running'))).limit(1);
+  if (!running) return null;
+  const other = await freeForQueued(ctx, agent.id, task);
+  return other ? handOver(ctx, task, other.id, `${agent.name} is busy with another turn, so ${other.name} takes the unstarted work.`) : null;
 }
 
 const mayCheckTask = (task: Task): boolean => ['open', 'working', 'review'].includes(task.status) && !task.externalWait;

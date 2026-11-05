@@ -35,7 +35,7 @@ describe('browser launch readiness before handing out work', () => {
 
     /* Before hello, waitsFor and placement follow node readiness (needs_login, node_outdated, machine_offline), never browser_failed. */
     expect(await orchestratorState(app.ctx, '00000000-0000-0000-0000-000000000000')).toEqual({
-      ready: false, limitUntil: null, budgetUntil: null, reason: 'no_subscription', browserError: null,
+      ready: false, limitUntil: null, budgetUntil: null, held: null, reason: 'no_subscription', browserError: null,
       busy: false, runningJobId: null, queued: 0, terminal: false, program: null, alarm: null, retry: null, failure: null, obsolete: null, machineDrain: null,
     });
     expect(await agentState(app.ctx, bruno!.id)).toMatchObject({ ready: false, reason: 'needs_login', browserError: null });
