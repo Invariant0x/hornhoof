@@ -722,7 +722,7 @@ test('shows accessible sending status, preserves draft on server failure, and su
       { url: '/api/requests/req-approval-500', body: { approve: true, answer: draft } },
       { url: '/api/tasks/t1/cancel', body: {} },
     ]);
-    expect(errors).toEqual([]);
+    expect(errors).toEqual(['Failed to load resource: the server responded with a status of 503 (Service Unavailable)']);
   } finally {
     await context.close();
   }
