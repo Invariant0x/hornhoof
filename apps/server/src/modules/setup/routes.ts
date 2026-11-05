@@ -184,7 +184,10 @@ export function setupRoutes(app: FastifyInstance, ctx: Ctx): void {
     /* The link comes first, so a name taken meanwhile sets nothing up and the person picks another. */
     const bound = body.link ? await ctx.links.relay.bind(body.link.name) : null;
     const made = await madeOrLinkLetGo(ctx, { body, passwordHash, bound });
-    if (bound) await ctx.links.sync();
+    if (bound) {
+      await ctx.links.sync();
+      ctx.tls.kick();
+    }
     await startSession(reply, db, config, made.person.id, passwordHash);
     reply.code(201);
     return setupAnswer(made, bound, config.publicUrl);

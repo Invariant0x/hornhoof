@@ -5,13 +5,13 @@ import { decryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
 import { linkTls, publicLinks } from '../../db/schema.js';
 import type { LinkView } from '../link/link.js';
-import { certInfo } from './x509.js';
+import { certInfo, namesHost } from './x509.js';
 
 export type TlsRow = typeof linkTls.$inferSelect;
 type TlsFields = Partial<Omit<TlsRow, 'companyId'>>;
 
 /* A certificate this close to its end goes back to http while visitors can still reach the link, before it ends on them. */
-const LEAST_LEFT_MS = 24 * 60 * 60 * 1000;
+export const LEAST_LEFT_MS = 24 * 60 * 60 * 1000;
 
 export async function tlsOf(db: Db, companyId: string): Promise<TlsRow | null> {
   const [row] = await db.select().from(linkTls).where(eq(linkTls.companyId, companyId));
@@ -38,7 +38,7 @@ const isKeyOf = (certPem: string, keyPem: string) => new X509Certificate(certPem
 export function mayRunHttps(row: Pick<TlsRow, 'mode' | 'name' | 'certPem' | 'certKeyEnc'>, link: LinkView, secret: Buffer, now: Date): boolean {
   if (row.mode !== 'https' || row.name !== link.name || !row.certPem || !row.certKeyEnc) return false;
   const info = certInfo(row.certPem);
-  if (!info.names.includes(new URL(link.url).hostname)) return false;
+  if (!namesHost(info, new URL(link.url).hostname)) return false;
   if (info.notAfter.getTime() - now.getTime() <= LEAST_LEFT_MS) return false;
   return isKeyOf(row.certPem, decryptSecret(row.certKeyEnc, secret));
 }
