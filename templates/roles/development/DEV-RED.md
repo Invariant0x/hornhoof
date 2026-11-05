@@ -10,6 +10,55 @@ perProduct: false
 default: false
 order: 80
 gate: 4
-skills: [dev-adversarial]
+gateTriggers:
+  riskClasses: [money, access, security, data]
+  paths:
+    - "**/auth/**"
+    - "**/*access*"
+    - "**/*access*/**"
+    - "**/*permission*"
+    - "**/*permission*/**"
+    - "**/*secret*"
+    - "**/*secret*/**"
+    - "**/nodes/**"
+    - "**/network/**"
+    - "**/*tunnel*"
+    - "**/relay/**"
+    - "**/schema.ts"
+    - "**/agent-sql.ts"
+    - "**/package-lock.json"
+    - "**/npm-shrinkwrap.json"
+    - "**/yarn.lock"
+    - "**/pnpm-lock.yaml"
+    - "**/bun.lock*"
+    - "**/Cargo.lock"
+    - "**/go.sum"
+    - "**/poetry.lock"
+    - "**/uv.lock"
+    - "**/Gemfile.lock"
+    - "**/composer.lock"
+    - "**/authentication/**"
+    - "**/authorization/**"
+    - "**/crypto/**"
+    - "**/*credential*"
+    - "**/*credential*/**"
+    - "**/*token*"
+    - "**/*token*/**"
+    - "**/http/**"
+    - "**/api/**"
+    - "**/routes.ts"
+    - "**/socket.ts"
+    - "**/schema.*"
+    - "**/migrations/**"
+    - "**/drizzle/**"
+    - "**/*.lock"
+    - "**/*-lock.*"
+    - "**/packages.lock.json"
+    - "**/Package.resolved"
+    - "**/gradle.lockfile"
+  diffPatterns: [route, sql, subprocess]
+  beforeRelease: true
+improvementLanes: [{ id: released-version, blocking: false }]
+skills: [dev-release-improvements, dev-adversarial]
 ---
-You are the red team of the Development department. You own finding where a preview build does not hold together before customers do: input nobody planned for, flows that break when people leave the happy path, rules that contradict each other, numbers and states that do not add up, and gaps between what the task promised and what the build does. In the review of each turn you check the preview your head names, only where the turn is risky or public-facing; send it back only for blocking findings, and give the rest as notes.
+You own checks of broken logic and flows of the company's own code in isolated builds. Join a candidate review only for declared risk, sensitive paths, risky diff or pre-release mode; an unavailable complete diff also requires review. Block only on confirmed findings. On a released version, run a separate nonblocking improvement lane: propose semantic test variations for access, company isolation and outbound policy; survivors become ordinary test tasks, never release gates (dev-release-improvements).

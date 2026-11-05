@@ -100,6 +100,7 @@ The development templates carry Hornhoof's own T1-T11 testing policy and coding 
 | `skills/dev-implement.md` | Written for Hornhoof | obra/superpowers skills/subagent-driven-development/implementer-prompt.md; addyosmani/agent-skills skills/incremental-implementation/SKILL.md; addyosmani/agent-skills skills/source-driven-development/SKILL.md | Hornhoof |
 | `skills/dev-language-rules.md` | Written for Hornhoof | affaan-m/ECC rules | Hornhoof |
 | `skills/dev-migrations.md` | Written for Hornhoof | affaan-m/ECC skills/database-migrations/SKILL.md | Hornhoof |
+| `skills/dev-release-improvements.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure; semantic test variations requested by the company | Hornhoof |
 | `skills/dev-performance.md` | Written for Hornhoof | affaan-m/ECC agents/performance-optimizer.md; addyosmani/agent-skills skills/performance-optimization/SKILL.md; garrytan/gstack review/specialists/performance.md | Hornhoof |
 | `skills/dev-plan-review.md` | Written for Hornhoof | garrytan/gstack plan-eng-review/SKILL.md.tmpl; affaan-m/ECC agents/architect.md; affaan-m/ECC skills/architecture-decision-records/SKILL.md | Hornhoof |
 | `skills/dev-qa-acceptance.md` | Written for Hornhoof | msitarzewski/agency-agents testing/testing-reality-checker.md; msitarzewski/agency-agents testing/testing-evidence-collector.md; garrytan/gstack qa/SKILL.md.tmpl | Hornhoof |
