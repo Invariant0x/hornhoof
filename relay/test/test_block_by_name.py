@@ -1,6 +1,8 @@
 """Blocking by name, per connection (R7.4): frps asks the plugin about every new connection to an https or stcp proxy."""
 
+import base64
 import http.client
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import os
 from pathlib import Path
 import secrets
@@ -115,11 +117,13 @@ class BlockByNameTests(PassthroughCase):
         self.assertEqual(answer.status, 200, answer.error)
 
     def test_r7_4_a_new_owner_never_opens_the_old_owners_tunnel(self) -> None:
-        # An operator's add does not ask frps, so it is a way for a live tunnel to find its name bound again.
+        # Neither the API nor an operator's add binds a name while frps shows its route, so the second binding goes straight
+        # into the store. A route frps shows only after its window finds its name bound again this way (test_keys).
         _, key = self.holder('acme')
         self.assertEqual(self.stack.https('acme.hornhoof.org').status, 200)
         self.assertEqual(self.stack.api('DELETE', '/api/v1/bindings/acme', key=key)[0], 204)
-        self.stack.admin('add', 'acme')
+        with sqlite3.connect(self.stack.env['RELAY_DB']) as connection:
+            connection.execute("INSERT INTO bindings (name, key_hash, created_at) VALUES ('acme', 'a new owner', 0)")
         self.assert_refused_at_once('acme.hornhoof.org')
 
     def crowd(self, host: str, seconds: float) -> list[Answer]:
@@ -440,6 +444,7 @@ class OperatorCommandTests(AdminCase):
         self.script.write_text(render_caddyfile((ROOT / 'relay/hornhoof-relay').read_text(), [
             ('/usr/bin/python3 /usr/local/lib/hornhoof-relay/relay.py', f'{sys.executable} {ROOT}/relay/relay.py'),
             ('/etc/caddy', str(self.tmp / 'caddy')),
+            ('/etc/hornhoof-relay.env', str(self.tmp / 'relay.env')),
         ], file='relay/hornhoof-relay'))
 
     def operator(self, *args: str) -> subprocess.CompletedProcess:
@@ -448,6 +453,53 @@ class OperatorCommandTests(AdminCase):
 
     def systemctl_calls(self) -> list[str]:
         return self.calls.read_text().splitlines() if self.calls.exists() else []
+
+    def dashboard_showing_acme_to(self, password: str) -> int:
+        """A stand-in for frps's dashboard: acme's http route is online, for the one who has this password."""
+        expected = 'Basic ' + base64.b64encode(f'admin:{password}'.encode()).decode()
+
+        class Dashboard(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                status, body = 401, b''
+                if self.headers.get('Authorization') == expected:
+                    online = self.path == '/api/proxy/http/acme'
+                    status, body = (200, b'{"status":"online","clientID":"a-run-id"}') if online else (404, b'{}')
+                self.send_response(status)
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *_args: object) -> None:
+                pass
+
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Dashboard)
+        server.daemon_threads = True
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(thread.join, 5)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return server.server_port
+
+    def bound_names(self) -> list[str]:
+        with sqlite3.connect(self.env['RELAY_DB']) as connection:
+            return [row[0] for row in connection.execute('SELECT name FROM bindings')]
+
+    def assert_add_refused(self, reason: str) -> None:
+        done = self.operator('add', 'acme')
+        self.assertEqual(done.returncode, 1, 'the name must not go to a new owner')
+        self.assertIn(reason, done.stderr)
+        self.assertTrue(done.stdout == '', 'a refused name must hand out no key')
+        self.assertEqual(self.bound_names(), [])
+
+    def test_add_asks_frps_with_the_relays_own_settings(self) -> None:
+        port = self.dashboard_showing_acme_to('its-password')
+        (self.tmp / 'relay.env').write_text(f'RELAY_FRPS_API=http://127.0.0.1:{port}\nRELAY_FRPS_PASSWORD=its-password\n')
+        self.assert_add_refused('acme: taken')
+
+    def test_add_with_no_settings_it_can_read_refuses_and_says_so(self) -> None:
+        self.env['RELAY_FRPS_API'] = f'http://127.0.0.1:{self.dashboard_showing_acme_to("its-password")}'
+        self.assert_add_refused('acme: the relay cannot tell')
 
     def test_a_ban_with_cut_restarts_frps_after_caddys_list(self) -> None:
         done = self.operator('ban', 'acme', '--cut')
