@@ -483,6 +483,7 @@ describe('decisions read failure', () => {
     expect(within(waiting).getByRole('article', { name: /#9/ })).toBeInTheDocument();
     broken = true;
     fakeStream().send({ type: 'requests' });
+    await expect.poll(() => calls.filter(c => c.path === '/api/requests').length).toBeGreaterThanOrEqual(2);
     expect(await within(waiting).findByRole('alert')).toHaveTextContent('Hornhoof is busy.');
     expect(within(waiting).getByRole('article', { name: /#9/ })).toBeInTheDocument();
     broken = false;
