@@ -417,10 +417,11 @@ describe('templates', () => {
     expect(sources).toContain('four task kinds');
   });
 
-  it("runs the reviewer's program's own review on what the branch changed, besides the tools and the checklists", () => {
+  it("runs the reviewer's program's own review on a first look only, without forcing high effort on repeats", () => {
     const body = (id: string) => templates.skills.get(id)!.body;
-    for (const words of ['code-review skill at high effort', 'codex review --base <main line>', 'review-agent', 'Kimi Code has none']) expect(body('dev-review-diff'), words).toContain(words);
-    for (const words of ['security-review skill', 'codex review --base <main line>', 'review-agent']) expect(body('dev-security-review'), words).toContain(words);
+    for (const words of ['first look', 'code-review skill', 'codex review --base <main line>', 'review-agent', 'Kimi Code has none']) expect(body('dev-review-diff'), words).toContain(words);
+    expect(body('dev-review-diff')).not.toContain('code-review skill at high effort');
+    for (const words of ['first look', 'security-review skill', 'codex review --base <main line>', 'review-agent']) expect(body('dev-security-review'), words).toContain(words);
     expect(body('dev-gates')).toMatch(/program's own review/);
     expect(body('dev-review-verdict')).toMatch(/program's own review[\s\S]*against the code/);
   });
@@ -661,4 +662,169 @@ describe('templates', () => {
     expect(check).not.toMatch(/hornhoof/i);
     for (const item of [...roles, ...skills]) expect(item.body, item.id).not.toMatch(/npx playwright install/);
   });
+
+  describe('differential second looks, vertical slices, author evidence and verified finding provenance', () => {
+    const current = (): ReviewSkills => ({
+      diff: templates.skills.get('dev-review-diff')!.body,
+      verdict: templates.skills.get('dev-review-verdict')!.body,
+      security: templates.skills.get('dev-security-review')!.body,
+    });
+
+    it('satisfies every differential review, T6/T10 evidence, slice and provenance rule in the shipped skills', () => {
+      expect(reviewSkillViolations(current())).toEqual([]);
+      for (const id of ['dev-review-diff', 'dev-review-verdict']) expect(templates.skills.get(id)!.body, id).not.toMatch(/hornhoof/i);
+    });
+
+    it('rejects broken-meaning skills even when required substrings remain present', () => {
+      const base = current();
+      expect(reviewSkillViolations(base)).toEqual([]);
+      expect(reviewSkillViolations({ ...base, diff: `${base.diff}\nOn a second look, read the whole patch again alongside reviewedCommit..fixCommit.` })).toContain('no-repeat-full-read-or-high');
+      expect(reviewSkillViolations({ ...base, diff: `${base.diff}\nOn a second look, rerun your program's own review after reading reviewedCommit..fixCommit.` })).toContain('no-repeat-full-read-or-high');
+      expect(reviewSkillViolations({ ...base, diff: `${base.diff}\nIn Claude Code run its code-review skill at high effort on every round.` })).toEqual(
+        expect.arrayContaining(['native-review-first-look-only', 'no-repeat-full-read-or-high']),
+      );
+      expect(reviewSkillViolations({ ...base, security: `${base.security}\nOn a second round, run codex review --base <main line> again.` })).toEqual(
+        expect.arrayContaining(['native-review-first-look-only', 'no-repeat-full-read-or-high']),
+      );
+      expect(reviewSkillViolations({ ...base, diff: `${base.diff}\nThe general review of a turn has two rounds when fixes touch routes.` })).toContain('turn-review-one-round');
+      expect(reviewSkillViolations({ ...base, verdict: `${base.verdict}\nVerify testEvidence run and commitSha, then rerun the author's test runs to confirm.` })).toContain('t10-verify-evidence-no-rerun');
+      expect(reviewSkillViolations({ ...base, verdict: `${base.verdict}\nEven with harm to a person rules, low coverage alone is a blocking finding.` })).toContain('t6-named-harm-no-coverage-chasing');
+      expect(reviewSkillViolations({ ...base, diff: `${base.diff}\nAbove 800 lines, split across two reviewers by folders after task.reviewPlan.` })).toContain('vertical-slices-above-800');
+      expect(reviewSkillViolations({ ...base, verdict: `${base.verdict}\nA reviewer's own verdict marks its findingId confirmed for provider counts.` })).toContain('structured-findings-and-provenance');
+      expect(reviewSkillViolations({ ...base, verdict: `${base.verdict}\nAuthors of internal role or skill rules may take release approval on main when docs have no gates.` })).toContain(
+        'no-self-or-role-rule-main-release-approval',
+      );
+    });
+  });
 });
+
+type ReviewSkills = { diff: string; verdict: string; security: string };
+
+const NATIVE_TOOL_RE = /code-review skill|security-review skill|codex review --base|review-agent/i;
+
+const sentencesOf = (text: string): string[] =>
+  text.split(/(?<=[.!?])\s+|\n+/).map(line => line.trim()).filter(Boolean);
+
+const clausesOf = (text: string): string[] =>
+  text.split(/[.!?;,\n]+|\b(?:then|but|however|yet)\b/i).map(clause => clause.trim()).filter(Boolean);
+
+const negatesBefore = (clause: string, target: RegExp): boolean => {
+  const hit = target.exec(clause);
+  return !hit || /\b(never|not|don't|cannot|forbid\w*|skip\w*|without|instead of|no|neither|nor)\b/i.test(clause.slice(0, hit.index));
+};
+
+const forbids = (text: string, target: RegExp): boolean =>
+  clausesOf(text).every(clause => negatesBefore(clause, target));
+
+const scopesFirstLook = (sentence: string): boolean =>
+  /\bfirst look\b/i.test(sentence) && !/\b(?:second (?:look|round)|every round)\b/i.test(sentence);
+
+const allowsNativeMention = (sentence: string): boolean =>
+  scopesFirstLook(sentence) || forbids(sentence, NATIVE_TOOL_RE);
+
+const nativeReviewScoped = (text: string): boolean => {
+  const mentions = sentencesOf(text).filter(s => NATIVE_TOOL_RE.test(s));
+  return mentions.some(scopesFirstLook) && mentions.every(allowsNativeMention);
+};
+
+const secondLookSentences = (s: ReviewSkills): string =>
+  sentencesOf(`${s.diff}\n${s.verdict}\n${s.security}`).filter(line => /\b(?:second (?:look|round)|fixReview)\b/i.test(line)).join('\n');
+
+const REVIEW_CONTRACT_RULES: { id: string; holds: (s: ReviewSkills) => boolean }[] = [
+  {
+    id: 'native-review-first-look-only',
+    holds: s => nativeReviewScoped(s.diff) && nativeReviewScoped(s.security),
+  },
+  {
+    id: 'no-repeat-full-read-or-high',
+    holds: s => {
+      const all = `${s.diff}\n${s.verdict}\n${s.security}`;
+      const repeats = secondLookSentences(s);
+      return (
+        /\bfirst look[\s\S]*(?:role's|card)\b/i.test(all) &&
+        forbids(all, /\b(?:at|on|force|forcing|raise\s+effort\s+to)\s+high(?:\s+effort)?\b/i) &&
+        forbids(repeats, /\b(?:read|reread|re-read|inspect|review)\b[^.!?;,]*\b(?:whole|entire|full)\s+(?:patch|change|branch|diff)\b/i) &&
+        forbids(repeats, /\b(?:(?:re-?)?run\w*|use|invoke|repeat\w*)\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\b(?:program's own review|native review|code-review|security-review|codex review|review-agent)\b/i) &&
+        /\b(?:do not|never|skip|without|no second)\b[^.!?]*\b(?:program's own review|native review|whole (?:patch|change|branch))\b/i.test(s.diff)
+      );
+    },
+  },
+  {
+    id: 'immutable-fix-range-and-own-blocking-findings',
+    holds: s =>
+      forEvery([s.diff, s.verdict], text =>
+        /\btask\.fixReview\b/.test(text) &&
+        /\breviewedCommit\.\.fixCommit\b/.test(text) &&
+        /\breviewed_commit\.\.fix_commit\b/.test(text) &&
+        /\bsecurity\b[\s\S]*\bdata\b[\s\S]*\bspec\b/.test(text) &&
+        /\bsame reviewer\b/i.test(text) &&
+        /\bmedium\b/i.test(text) &&
+        /\bfindingIds\b/.test(text) &&
+        /\bunchanged code\b[^.!?]*\bno new\b/i.test(text),
+      ),
+  },
+  {
+    id: 'turn-review-one-round',
+    holds: s =>
+      forEvery([s.diff, s.verdict], text =>
+        /\breview of a turn\b[\s\S]*\bone round\b/i.test(text) &&
+        /\bfailing test\b[\s\S]*\bfinal check\b[\s\S]*\bQA\b/i.test(text),
+      ) && forbids(`${s.diff}\n${s.verdict}`, /\breview of a turn\b[^.!?;,]*\btwo rounds\b/i),
+  },
+  {
+    id: 't6-named-harm-no-coverage-chasing',
+    holds: s =>
+      forEvery([s.diff, s.verdict], text => /\bharm to a person\b/i.test(text) && /\bT6\b/.test(text) && /\bT1\b/.test(text) && /\blow coverage alone is not a finding\b/i.test(text)) &&
+      forbids(`${s.diff}\n${s.verdict}`, /\blow coverage(?:\s+alone)?\s+(?:blocks|counts as a finding|is a (?:blocking )?finding)\b/i),
+  },
+  {
+    id: 't10-verify-evidence-no-rerun',
+    holds: s =>
+      forEvery([s.diff, s.verdict], text =>
+        /\btask\.review\b/.test(text) &&
+        /\btestEvidence\b/.test(text) &&
+        /\bgateCounts\b/.test(text) &&
+        /\bproves\b/.test(text) &&
+        /\bT10\b/.test(text) &&
+        /\b(?:instead of rerunning|do not rerun|never rerun)\b/i.test(text),
+      ) && forbids(`${s.diff}\n${s.verdict}\n${s.security}`, /\b(?:re-?run\w*|re-?execut\w*)\b[^.!?;,]*\b(?:author'?s?\s+|submitted\s+|its\s+)?test(?:\s+runs?|\s+suites?|s)\b/i),
+  },
+  {
+    id: 'vertical-slices-above-800',
+    holds: s =>
+      /\btask\.reviewPlan\b/.test(s.diff) &&
+      /\b800\b/.test(s.diff) &&
+      /\bvertical task slices\b[\s\S]*\bnot by folders\b/i.test(s.diff) &&
+      /\bcommonContracts\b/.test(s.diff) &&
+      /\bpackages\/protocol\b[\s\S]*\bschema\.ts\b[\s\S]*\broute schemas\b/.test(s.diff) &&
+      /\bintegrationReviewerId\b/.test(s.diff) &&
+      /\bcross-slice\b/i.test(s.diff) &&
+      /\bauthorVendor\b/.test(s.diff) &&
+      /\bdegraded\b/.test(s.diff) &&
+      forbids(s.diff, /\bsplit\b[^.!?;,]*\bby (?:top-level )?folders\b/i),
+  },
+  {
+    id: 'structured-findings-and-provenance',
+    holds: s =>
+      /\breviewedCommit\b/.test(s.verdict) &&
+      /\bissues\b/.test(s.verdict) &&
+      /\bfindingId\b/.test(s.verdict) &&
+      /\bconfirm_finding\b/.test(s.verdict) &&
+      /\bfixCommit\b/.test(s.verdict) &&
+      /\breviewerVendor\b/.test(s.verdict) &&
+      /\blegacy\b/i.test(s.verdict) &&
+      /\bdoes not\b[^.!?]*\b(?:fixed|APPROVE)\b/i.test(s.verdict) &&
+      forbids(`${s.diff}\n${s.verdict}`, /\b(?:mark\w*|confirm\w*|count\w*)\b[^.!?;,]*\bfindingId\s+confirmed\b/i),
+  },
+  {
+    id: 'no-self-or-role-rule-main-release-approval',
+    holds: s =>
+      /\binternal role or skill rules\b[^.!?]*\bnever\b[^.!?]*\b(?:main|release) approval\b/i.test(s.verdict) &&
+      forbids(`${s.diff}\n${s.verdict}`, /\b(?:may|can)\s+(?:take|grant|claim)\b[^.!?;,]*\b(?:main|release)\s+approval\b/i),
+  },
+];
+
+const forEvery = <Item>(items: Item[], predicate: (item: Item) => boolean): boolean => items.every(predicate);
+
+const reviewSkillViolations = (skillsInput: ReviewSkills): string[] =>
+  REVIEW_CONTRACT_RULES.filter(rule => !rule.holds(skillsInput)).map(rule => rule.id);
