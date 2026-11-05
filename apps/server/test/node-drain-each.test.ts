@@ -195,6 +195,7 @@ describe('the orchestrator and the heads while their node waits', () => {
     expect(run).toMatchObject({ jobId: led });
     expect(Date.now() - from).toBeGreaterThanOrEqual(HOLD - 50);
     expect(await f.statusOf(long.id)).toMatchObject({ status: 'running', error: null });
+    expect(await nextTurn(node, 300)).toBeNull();
     expect((await f.statusOf(waiting)).status).toBe('queued');
     expect(nodeDrain(f.app.ctx, { kind: 'node', nodeId: google.nodeId })?.state).toBe('waiting');
   });
@@ -311,7 +312,8 @@ describe('the orchestrator and the heads while their node waits', () => {
     const head = await f.hire('Hana', 'head', google.plan, google.nodeId);
     await f.app.inject({ method: 'POST', url: '/api/nodes/update', headers: { authorization: `Bearer ${google.key}` }, payload: {} });
     const job = await f.turnFor(head.id);
-    expect(await nextTurn(node, 300)).toBeNull();
+    /* Longer than the look at the waits that lets the leaders in, at most a second apart. */
+    expect(await nextTurn(node, 1500)).toBeNull();
     expect((await f.statusOf(job)).status).toBe('queued');
   });
 });
