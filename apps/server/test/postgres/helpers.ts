@@ -1,0 +1,180 @@
+import { randomBytes } from 'node:crypto';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { createServer, type ServerResponse } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { tmpdir, userInfo } from 'node:os';
+import { join } from 'node:path';
+import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
+import { migrate } from 'drizzle-orm/node-postgres/migrator';
+import pg from 'pg';
+import { onTestFinished } from 'vitest';
+import { buildApp, type Ctx } from '../../src/app.js';
+import { loadConfig } from '../../src/config.js';
+import { encryptSecret } from '../../src/crypto/secrets.js';
+import { agentRole, readerRole } from '../../src/db/agent-sql.js';
+import { applyMissingMigrations, MIGRATIONS } from '../../src/db/client.js';
+import * as schema from '../../src/db/schema.js';
+import type { ToolJob } from '../../src/modules/tools/job.js';
+
+type Cleanup = () => Promise<unknown>;
+export type PgDb = NodePgDatabase<typeof schema>;
+export type PostgresFixture = {
+  name: string;
+  url: string;
+  db: PgDb;
+  admin: pg.Pool;
+  pool: (label: string) => pg.Pool;
+  cleanup: (close: Cleanup) => void;
+};
+export type Actor = { ctx: Ctx; pool: pg.Pool; task: typeof schema.tasks.$inferSelect; job: ToolJob };
+export const FIXTURE_COMMIT = 'b'.repeat(40);
+
+function sourceUrl(): URL {
+  if (process.env.TEST_DATABASE_URL) return new URL(process.env.TEST_DATABASE_URL);
+  if (!process.env.PGHOST || !process.env.PGDATABASE) {
+    throw new Error('Live PostgreSQL 17 is required: supply TEST_DATABASE_URL or PGHOST and PGDATABASE. No PGlite fallback is allowed.');
+  }
+  const url = new URL('postgresql://localhost');
+  url.searchParams.set('host', process.env.PGHOST);
+  url.username = process.env.PGUSER ?? userInfo().username;
+  url.password = process.env.PGPASSWORD ?? '';
+  url.port = process.env.PGPORT ?? '5432';
+  url.pathname = `/${process.env.PGDATABASE}`;
+  return url;
+}
+
+async function dispose(cleanups: Cleanup[]): Promise<void> {
+  const errors: unknown[] = [];
+  for (const close of cleanups.reverse()) {
+    try { await close(); } catch (error) { errors.push(error); }
+  }
+  if (errors.length) throw new AggregateError(errors, 'PostgreSQL fixture cleanup failed');
+}
+
+function ownedPool(url: string, label: string, cleanups: Cleanup[]): pg.Pool {
+  const pool = new pg.Pool({ connectionString: url, application_name: label, max: 1, connectionTimeoutMillis: 2000, statement_timeout: 15000 });
+  const errors: Error[] = [];
+  pool.on('error', error => errors.push(error));
+  cleanups.push(async () => {
+    await pool.end();
+    if (errors.length) throw new AggregateError(errors, `Unexpected PostgreSQL pool errors: ${label}`);
+  });
+  return pool;
+}
+
+async function requirePostgres17(pool: pg.Pool): Promise<void> {
+  let version: string;
+  try {
+    version = (await pool.query<{ server_version_num: string }>('SHOW server_version_num')).rows[0]!.server_version_num;
+  } catch {
+    throw new Error('Live PostgreSQL 17 is required: the supplied test database is unavailable. No skip or PGlite fallback is allowed.');
+  }
+  if (Math.floor(Number(version) / 10000) !== 17) throw new Error(`Live PostgreSQL 17 is required; server_version_num was ${version}.`);
+}
+
+export async function migrateCandidate(db: PgDb): Promise<void> {
+  await migrate(db, { migrationsFolder: MIGRATIONS });
+  await applyMissingMigrations(db, { migrationsFolder: MIGRATIONS });
+}
+
+/* Every test owns a new database, including grants and migration history. The supplied database is never reset. */
+export async function privatePostgres(options: { migrate?: boolean } = {}): Promise<PostgresFixture> {
+  const source = sourceUrl();
+  const cleanups: Cleanup[] = [];
+  onTestFinished(() => dispose(cleanups));
+  const name = `hh_pg_${randomBytes(12).toString('hex')}`;
+  const control = ownedPool(source.toString(), `${name}_control`, cleanups);
+  await requirePostgres17(control);
+  await control.query(`CREATE DATABASE "${name}"`);
+  cleanups.push(async () => {
+    await control.query(`DROP DATABASE "${name}" WITH (FORCE)`);
+    await control.query(`DROP ROLE IF EXISTS "${agentRole(name)}", "${readerRole(name)}"`);
+  });
+  const url = new URL(source);
+  url.pathname = `/${name}`;
+  const pool = (label: string) => ownedPool(url.toString(), `${name}_${label}`, cleanups);
+  const admin = pool('admin');
+  const db = drizzle(admin, { schema });
+  if (options.migrate !== false) await migrateCandidate(db);
+  return { name, url: url.toString(), db, admin, pool, cleanup: close => { cleanups.push(close); } };
+}
+
+export async function backendPid(pool: pg.Pool): Promise<number> {
+  return (await pool.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0]!.pid;
+}
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>(done => { resolve = done; });
+  return { promise, resolve };
+}
+
+function advertisement(): Buffer {
+  const packet = (text: string) => `${(Buffer.byteLength(text) + 4).toString(16).padStart(4, '0')}${text}`;
+  return Buffer.from(packet('# service=git-upload-pack\n') + '0000' + packet(`${FIXTURE_COMMIT} refs/heads/task-1\0multi_ack\n`) + packet(`${FIXTURE_COMMIT} refs/heads/task-2\n`) + '0000');
+}
+
+/* A real authorized Git refs endpoint is the barrier immediately before startRun enters its numbering transaction. */
+async function localRepository(fixture: PostgresFixture, held: boolean) {
+  const token = randomBytes(24).toString('hex');
+  const authorization = `Basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`;
+  const waiting: ServerResponse[] = [];
+  const arrived = deferred();
+  let released = !held;
+  let requests = 0;
+  const send = (response: ServerResponse) => {
+    response.writeHead(200, { 'content-type': 'application/x-git-upload-pack-advertisement' });
+    response.end(advertisement());
+  };
+  const release = () => { released = true; waiting.splice(0).forEach(send); };
+  const server = createServer((request, response) => {
+    if (request.headers.authorization !== authorization || request.url !== '/fixture.git/info/refs?service=git-upload-pack') {
+      response.writeHead(401).end();
+      return;
+    }
+    requests++;
+    if (requests === 2) arrived.resolve();
+    if (released) send(response);
+    else waiting.push(response);
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  fixture.cleanup(async () => {
+    release();
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  });
+  return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/fixture.git`, token, ready: arrived.promise, release, requests: () => requests };
+}
+
+async function appContext(fixture: PostgresFixture, label: string, secret: string): Promise<{ ctx: Ctx; pool: pg.Pool }> {
+  const folder = await mkdtemp(join(tmpdir(), 'hh-pg-app-'));
+  fixture.cleanup(() => rm(folder, { recursive: true, force: true }));
+  const config = loadConfig({ HORNHOOF_SECRET: secret, UPDATE_CHECK_MS: '0', HORNHOOF_CONTROL_DIR: folder, WEB_DIST: join(folder, 'web') });
+  const pool = fixture.pool(label);
+  const app = await buildApp({ db: drizzle(pool, { schema }), config });
+  fixture.cleanup(() => app.close());
+  await app.ready();
+  return { ctx: app.ctx, pool };
+}
+
+async function seedActor(fixture: PostgresFixture, context: { ctx: Ctx; pool: pg.Pool }, companyId: string, departmentId: string, subscriptionId: string, number: number): Promise<Actor> {
+  const [agent] = await fixture.db.insert(schema.agents).values({ companyId, departmentId, subscriptionId, kind: 'worker', name: `Worker ${number}`, model: '', roleKey: 'DEV-BE' }).returning();
+  const [task] = await fixture.db.insert(schema.tasks).values({ companyId, departmentId, number, title: `PostgreSQL task ${number}`, status: 'working', assigneeAgentId: agent!.id, executorAgentId: agent!.id }).returning();
+  const [job] = await fixture.db.insert(schema.jobs).values({ companyId, subscriptionId, agentId: agent!.id, taskId: task!.id, kind: 'conversation', prompt: 'Check PostgreSQL', timeoutMs: 900000, status: 'running' }).returning();
+  return { ...context, task: task!, job: { id: job!.id, companyId, agentId: agent!.id, agentKind: 'worker', roleKey: 'DEV-BE', departmentId, skills: [] } };
+}
+
+export async function runFixture(fixture: PostgresFixture, options: { barrier?: boolean } = {}): Promise<{ companyId: string; departmentId: string; actors: [Actor, Actor]; repository: Awaited<ReturnType<typeof localRepository>> }> {
+  const repository = await localRepository(fixture, options.barrier === true);
+  /* Ready the real apps before inserting a company, so setup restoration has no queued turns to start. */
+  const secret = randomBytes(32).toString('base64');
+  const first = await appContext(fixture, 'actor_a', secret);
+  const second = await appContext(fixture, 'actor_b', secret);
+  const [company] = await fixture.db.insert(schema.companies).values({ name: 'PostgreSQL fixture' }).returning();
+  const companyId = company!.id;
+  const [person] = await fixture.db.insert(schema.people).values({ companyId, name: 'Fixture owner', email: 'postgres-fixture@example.test', status: 'active', scopeKind: 'company', isOwner: true }).returning();
+  const [subscription] = await fixture.db.insert(schema.subscriptions).values({ companyId, ownerPersonId: person!.id, provider: 'anthropic_api', kind: 'api_key', label: 'Fixture plan', status: 'ready' }).returning();
+  const [department] = await fixture.db.insert(schema.departments).values({ companyId, templateKey: 'development', roleCode: 'DEV', repoUrl: repository.url, repoTokenEnc: encryptSecret(repository.token, first.ctx.config.secret) }).returning();
+  const actors: [Actor, Actor] = [await seedActor(fixture, first, companyId, department!.id, subscription!.id, 1), await seedActor(fixture, second, companyId, department!.id, subscription!.id, 2)];
+  return { companyId, departmentId: department!.id, actors, repository };
+}
