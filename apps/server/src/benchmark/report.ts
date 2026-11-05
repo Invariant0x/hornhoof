@@ -1,11 +1,12 @@
-import { parseTimingLines, TestFileTiming } from '@hornhoof/protocol';
+import { SLOWEST_TESTS, TestFileTiming, type TestFileTiming as FileTiming } from '@hornhoof/protocol';
+import { timingsOfLog } from '../modules/testruns/timings.js';
 import { z } from 'zod';
 
 const NumberAtLeastZero = z.number().finite().nonnegative();
 const Tests = z.object({
-  status: z.enum(['measured', 'missing']),
+  status: z.enum(['measured', 'partial', 'missing']),
   totalMs: NumberAtLeastZero.nullable(),
-  parts: z.array(z.object({ name: z.string(), totalMs: NumberAtLeastZero, files: z.number().int().nonnegative() })),
+  parts: z.array(z.object({ name: z.string(), totalMs: NumberAtLeastZero.nullable(), files: z.number().int().nonnegative() })),
   slowestFiles: z.array(TestFileTiming),
 });
 export const Snapshot = z.object({
@@ -22,31 +23,45 @@ export const Snapshot = z.object({
 });
 export type Snapshot = z.infer<typeof Snapshot>;
 
+const sumPhase = (a: number | null, b: number | null): number | null => a === null || b === null ? null : a + b;
+
+function summedFiles(files: FileTiming[]): FileTiming[] {
+  const totals = new Map<string, FileTiming>();
+  for (const file of files) {
+    const key = `${file.package}/${file.file}`;
+    const previous = totals.get(key);
+    if (!previous) { totals.set(key, file); continue; }
+    totals.set(key, { ...file, totalMs: previous.totalMs + file.totalMs, setupMs: sumPhase(previous.setupMs, file.setupMs), testsMs: sumPhase(previous.testsMs, file.testsMs), teardownMs: sumPhase(previous.teardownMs, file.teardownMs), slowest: [...previous.slowest, ...file.slowest].sort((a, b) => b.ms - a.ms).slice(0, SLOWEST_TESTS) });
+  }
+  return [...totals.values()];
+}
+
 /* Part totals are summed file time, not elapsed wall time: parallel files overlap. */
 export function testTimings(logs: { name: string; log: string }[]): z.infer<typeof Tests> {
-  const parts = logs.map(part => ({ name: part.name, files: parseTimingLines(part.log).files }));
+  const parts = logs.map(part => ({ name: part.name, files: timingsOfLog(part.log).files }));
   const files = parts.flatMap(part => part.files);
+  const complete = parts.every(part => part.files.length > 0);
   return {
-    status: files.length ? 'measured' : 'missing',
-    totalMs: files.length ? files.reduce((sum, file) => sum + file.totalMs, 0) : null,
-    parts: parts.filter(part => part.files.length).map(part => ({ name: part.name, totalMs: part.files.reduce((sum, file) => sum + file.totalMs, 0), files: part.files.length })).sort((a, b) => b.totalMs - a.totalMs),
-    slowestFiles: files.sort((a, b) => b.totalMs - a.totalMs),
+    status: files.length ? complete ? 'measured' : 'partial' : 'missing',
+    totalMs: complete && files.length ? files.reduce((sum, file) => sum + file.totalMs, 0) : null,
+    parts: parts.map(part => ({ name: part.name, totalMs: part.files.length ? part.files.reduce((sum, file) => sum + file.totalMs, 0) : null, files: part.files.length })).sort((a, b) => (b.totalMs ?? -1) - (a.totalMs ?? -1)),
+    slowestFiles: summedFiles(files).sort((a, b) => b.totalMs - a.totalMs),
   };
 }
 
-function metrics(snapshot: Snapshot): Map<string, number> {
+function metrics(snapshot: Snapshot): Map<string, number | null> {
   return new Map([
     ['coldReadyMs', snapshot.coldReadyMs], ['appReadyMs', snapshot.appReadyMs], ['dbSetupMs', snapshot.dbSetupMs],
     ['memory.rss', snapshot.memory.rss], ['memory.heapUsed', snapshot.memory.heapUsed],
     ...snapshot.requests.flatMap(r => [[`request.${r.method}.${r.url}.medianMs`, r.medianMs], [`request.${r.method}.${r.url}.p95Ms`, r.p95Ms]] as [string, number][]),
-    ...snapshot.tests.totalMs === null ? [] : [['tests.totalMs', snapshot.tests.totalMs] as [string, number]],
-    ...snapshot.tests.parts.map(p => [`part.${p.name}.totalMs`, p.totalMs] as [string, number]),
+    ['tests.totalMs', snapshot.tests.totalMs],
+    ...snapshot.tests.parts.map(p => [`part.${p.name}.totalMs`, p.totalMs] as [string, number | null]),
     ...snapshot.tests.slowestFiles.map(f => [`file.${f.package}/${f.file}.totalMs`, f.totalMs] as [string, number]),
   ]);
 }
 
-function metricDelta(metric: string, baseline: number | undefined, current: number | undefined, threshold: number) {
-  if (baseline === undefined || current === undefined) return { missing: { metric, reason: 'measurement-missing' } };
+function metricDelta(metric: string, baseline: number | null | undefined, current: number | null | undefined, threshold: number) {
+  if (baseline == null || current == null) return { missing: { metric, reason: 'measurement-missing' } };
   if (baseline === 0) return { missing: { metric, reason: 'zero-baseline' } };
   const deltaPercent = (current - baseline) / baseline * 100;
   return deltaPercent > threshold ? { regression: { metric, baseline, current, deltaPercent } } : {};
@@ -88,4 +103,11 @@ export function improvementCard(baseline: { turn: number; source: string; wait: 
     measurementBecomesTest: true,
     text: `Next-turn task: measure and reduce ${baseline.wait}; before = ${baseline.beforeSeconds}s across ${baseline.events} waits (100% of turn ${baseline.turn}); target after <= ${100 - reductionPercent}% of baseline. Establish the final issue-to-acceptance baseline and demonstrate >= ${reductionPercent}% reduction using the same task cohort and measurement. Aggregate wait time may overlap; first submission is not acceptance. Add the repeatable before/after measurement as a regression test. This improvement never blocks the release.`,
   };
+}
+
+export function requestStats(samples: readonly number[]): { medianMs: number; p95Ms: number } {
+  const sorted = [...samples].sort((a, b) => a - b);
+  const middle = sorted.length >> 1;
+  const medianMs = sorted.length % 2 ? sorted[middle]! : (sorted[middle - 1]! + sorted[middle]!) / 2;
+  return { medianMs, p95Ms: sorted[Math.ceil(sorted.length * 0.95) - 1]! };
 }

@@ -8,6 +8,8 @@ import { ApiError, type ErrorReason } from '../../errors.js';
 import { canDecide } from '../../auth/decisions.js';
 import type { DecisionSubject } from '../../auth/decision-owner.js';
 import { checkDelegation, contextMissing, requireDecider, type Delegation } from '../conversation/decision-context.js';
+import { compareForTask, comparisonForReview, comparisonProof, type CompareSnapshot } from '../testruns/compare.js';
+import { gateReasons, requireBlockingGate, reviewChanges, tasksUnder, type GateChanges } from './gate-triggers.js';
 import { commitProof, proofLine } from '../testruns/commit-proof.js';
 import { dropEarlierWakes, keepWakes } from './outbox.js';
 import { returnAlongLine } from '../org/map-state.js';
@@ -25,7 +27,7 @@ export type Moved = { task: Task; wakes: Wake[] };
 
 export type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 /* The templates name a department's gate roles, for the review of a turn; without them none opens. */
-type Live = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'templates'>>;
+type Live = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'templates' | 'config' | 'readCompare'>>;
 
 export const CLOSED: readonly Task['status'][] = ['done', 'cancelled'];
 /* The send-back at one gate that also calls the head in. */
@@ -61,7 +63,7 @@ async function refuseOpenUnder(db: Db | Tx, task: Task): Promise<void> {
 /* The last work under a task closed: whoever holds the task hears it can go on, once for all of it, unless it closed that
    work itself. When the code of a department's turn is in, the review of the turn opens instead, with the same move;
    opened takes it. A review of the turn that closes tells the head itself. */
-async function workUnderDone(tx: Tx, templates: Live['templates'], closed: Task, actorId: string | undefined, opened: Task[]): Promise<Wake[]> {
+async function workUnderDone(tx: Tx, templates: Live['templates'], closed: Task, actorId: string | undefined, opened: Task[], comparison?: CompareSnapshot): Promise<Wake[]> {
   const [parent] = await tx.select().from(tasks).where(eq(tasks.id, closed.parentId!));
   const holder = parent?.assigneeAgentId;
   if (!parent || CLOSED.includes(parent.status) || !holder || (await isTurnReview(tx, closed.id))) return [];
@@ -72,7 +74,7 @@ async function workUnderDone(tx: Tx, templates: Live['templates'], closed: Task,
   if (due?.waiting.length) {
     note = `The review of the turn opens by itself once the department's other code of the turn, under ${listed(due.waiting)}, is in, and checks the code under this task with it. Give the final check only after its verdicts.`;
   } else if (due) {
-    const review = await openTurnReview(tx, templates!, parent, holder, due.covered);
+    const review = await openTurnReview(tx, templates!, parent, holder, due.covered, comparison);
     if ('row' in review) {
       opened.push(review.row);
       return review.wakes;
@@ -135,9 +137,12 @@ async function reviewDue(db: Db | Tx, parent: Task): Promise<{ covered: Task[]; 
 }
 
 /* The gate roles of a department in their order, by the first employee of each, one that is on before one that is off. */
-export async function gateLeads(db: Db | Tx, templates: Ctx['templates'], departmentId: string, executor: string): Promise<string[]> {
+export async function gateLeads(db: Db | Tx, templates: Ctx['templates'], departmentId: string, executor: string, changes: GateChanges = { tasks: [], paths: [], diff: '', mode: 'turn' }): Promise<string[]> {
   const staff = await db.select().from(agents).where(and(eq(agents.departmentId, departmentId), isNull(agents.removedAt), isNull(agents.teamId))).orderBy(asc(agents.createdAt));
-  const gate = (a: typeof agents.$inferSelect) => (a.roleKey ? templates.roles.get(a.roleKey)?.gate : null) ?? null;
+  const gate = (a: typeof agents.$inferSelect) => {
+    const role = a.roleKey ? templates.roles.get(a.roleKey) : undefined;
+    return role && gateReasons(role, changes).length ? role.gate : null;
+  };
   const seen = new Set<string>();
   return staff
     .filter(a => a.id !== executor && gate(a) !== null)
@@ -150,8 +155,13 @@ export async function gateLeads(db: Db | Tx, templates: Ctx['templates'], depart
    models, the least busy. The head gives the work and gets the verdicts. With nobody to check it, a note for the head,
    who hears the work under its task is done as without a review. Inside the move that closed the last work, which holds
    the company and the task, as a new task takes them. covered: the department's tasks of the turn it checks. */
-async function openTurnReview(tx: Tx, templates: Ctx['templates'], parent: Task, head: string, covered: Task[]): Promise<{ row: Task; wakes: Wake[] } | { note?: string }> {
-  const leads = await gateLeads(tx, templates, parent.departmentId!, head);
+async function openTurnReview(tx: Tx, templates: Ctx['templates'], parent: Task, head: string, covered: Task[], comparison?: CompareSnapshot): Promise<{ row: Task; wakes: Wake[] } | { note?: string }> {
+  const all = await tx.select().from(tasks).where(and(eq(tasks.companyId, parent.companyId), eq(tasks.turnId, parent.turnId!), eq(tasks.departmentId, parent.departmentId!), ne(tasks.status, 'cancelled')));
+  const scoped = tasksUnder(all, covered.map(task => task.id));
+  const result = await comparisonForReview(tx, scoped.map(task => task.id), comparison);
+  const changes = reviewChanges(scoped, result);
+  const leads = await gateLeads(tx, templates, parent.departmentId!, head, changes);
+  const gateTriggers = Object.fromEntries([...templates.roles.values()].filter(role => role.gate !== null).map(role => [role.id, gateReasons(role, changes)]));
   const draft = { ...parent, executorAgentId: head, gates: leads };
   const roles = await Promise.all(leads.map((_, i) => panelFor(tx, draft, i + 1)));
   const panel = [...new Set(roles.flatMap(p => p.panel))];
@@ -192,7 +202,7 @@ async function openTurnReview(tx: Tx, templates: Ctx['templates'], parent: Task,
     kind: 'created',
     actor: { agentId: head },
     text: row!.brief,
-    data: { assignee: panel[0], gates: leads, after: [], panel, unable: unable.map(a => a.id), covers: covered.map(t => t.id), turnReview: true },
+    data: { assignee: panel[0], gates: leads, after: [], panel, unable: unable.map(a => a.id), covers: covered.map(t => t.id), turnReview: true, gateTriggers, comparison: comparisonProof(result) },
   });
   return { row: row!, wakes: panel.map(agentId => ({ agentId, taskId: row!.id, why: 'turn_review', text: branch })) };
 }
@@ -338,6 +348,7 @@ export async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, a
   let started: Task[] = [];
   const opened: Task[] = [];
   let lit: Task | null = null;
+  const comparison = await compareForTask(ctx, task, set.status);
   const row = await ctx.db.transaction(async tx => {
     /* Two changes at once to what tasks come after would each miss the other's half of a circle: they go one at a time in
        a company, and the circle is looked for once it is this one's turn. What it comes after now is held until the move
@@ -366,7 +377,7 @@ export async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, a
     const event = await note(tx, row, n);
     lit = await givesBack(tx, row, n, event);
     await also?.(tx, row);
-    if (CLOSED.includes(row.status) && row.parentId) wakes.push(...(await workUnderDone(tx, ctx.templates, row, n.actor.agentId, opened)));
+    if (CLOSED.includes(row.status) && row.parentId) wakes.push(...(await workUnderDone(tx, ctx.templates, row, n.actor.agentId, opened, comparison)));
     /* What waited for it starts with the same move, so its turn is kept with it. */
     if (row.status === 'done') {
       const after = await startAfter(tx, row);
@@ -485,17 +496,17 @@ async function workingAgent(db: Db | Tx, companyId: string | null, id: string, g
   return agent;
 }
 
-async function checkGates(db: Db, companyId: string, executor: string, gates: string[]): Promise<void> {
+async function checkGates(db: Db, companyId: string, executor: string, gates: string[], templates?: Live['templates']): Promise<void> {
   if (new Set(gates).size !== gates.length) throw refuse(400, 'task_invalid', 'A gate is listed twice.');
   if (gates.includes(executor)) throw refuse(400, 'task_invalid', 'Whoever does the work never passes its gate. Pick another reviewer.');
-  for (const id of gates) await workingAgent(db, companyId, id, true);
+  for (const id of gates) requireBlockingGate(templates, (await workingAgent(db, companyId, id, true)).roleKey);
 }
 
 export async function createTask(ctx: Live, actor: Actor, input: NewTask): Promise<Moved> {
   const assignee = await workingAgent(ctx.db, null, input.assigneeAgentId);
   const gates = input.executor ? (input.gates ?? []) : [];
   if (!input.executor && input.gates?.length) throw refuse(400, 'task_invalid', 'Only a task with an executor has gates.');
-  if (input.executor) await checkGates(ctx.db, assignee.companyId, assignee.id, gates);
+  if (input.executor) await checkGates(ctx.db, assignee.companyId, assignee.id, gates, ctx.templates);
   if (!input.title.trim()) throw refuse(400, 'task_invalid', 'A task needs a title.');
   const parent = input.parentId ? await loadTask(ctx.db, input.parentId) : null;
   if (parent) stillOpen(parent);
@@ -1066,7 +1077,7 @@ export async function regateWaiting(ctx: Live, actor: Actor, agent: Leaver, text
    starts at once. None left finishes the task. */
 async function regate(ctx: Live, agentId: string, task: Task, c: TaskChange): Promise<Moved> {
   const given = c.gates!;
-  await checkGates(ctx.db, task.companyId, task.executorAgentId!, given);
+  await checkGates(ctx.db, task.companyId, task.executorAgentId!, given, ctx.templates);
   const gates = [...task.gates.slice(0, task.stage - 1), ...given];
   const text = rewrite(task, c);
   const n: Note = { kind: 'updated', actor: { agentId }, data: { fields: [...text.fields, 'gates'] } };
@@ -1120,7 +1131,7 @@ export async function updateTask(ctx: Live, agentId: string, taskId: string, c: 
   const executor = c.executor ?? task.executorAgentId;
   const gates = c.gates ?? task.gates;
   if (executor && c.executor !== undefined) await workingAgent(ctx.db, task.companyId, executor);
-  if (executor && (c.executor !== undefined || c.gates !== undefined)) await checkGates(ctx.db, task.companyId, executor, gates);
+  if (executor && (c.executor !== undefined || c.gates !== undefined)) await checkGates(ctx.db, task.companyId, executor, gates, ctx.templates);
   const { set, fields } = rewrite(task, c);
   /* Handing it to its executor again gives it back after it waited with the head. */
   if (executor !== task.executorAgentId || (c.executor !== undefined && task.assigneeAgentId !== executor)) {

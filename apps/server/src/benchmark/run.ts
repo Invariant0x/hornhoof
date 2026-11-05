@@ -10,7 +10,7 @@ import { loadConfig } from '../config.js';
 import { hashToken } from '../crypto/tokens.js';
 import { applyMissingMigrations, MIGRATIONS, type Db } from '../db/client.js';
 import * as schema from '../db/schema.js';
-import { compareSnapshots, Snapshot, testTimings } from './report.js';
+import { compareSnapshots, requestStats, Snapshot, testTimings } from './report.js';
 
 const { values } = parseArgs({ options: { output: { type: 'string' }, baseline: { type: 'string' }, timings: { type: 'string', multiple: true }, samples: { type: 'string', default: '15' }, threshold: { type: 'string', default: '20' }, commit: { type: 'string', default: '' } } });
 const samples = Number(values.samples);
@@ -48,8 +48,7 @@ try {
       }
       times.push(performance.now() - from);
     }
-    times.sort((a, b) => a - b);
-    requests.push({ method: 'GET', url, statusCode: 200, errors: 0, samples, medianMs: times[Math.floor(times.length / 2)]!, p95Ms: times[Math.ceil(times.length * 0.95) - 1]! });
+    requests.push({ method: 'GET', url, statusCode: 200, errors: 0, samples, ...requestStats(times) });
   }
   const { rss, heapUsed } = process.memoryUsage();
   const snapshot = Snapshot.parse({ version: 1, measuredAt: new Date().toISOString(), commit: values.commit, environment: { node: process.version, platform: process.platform, arch: process.arch, cpus: availableParallelism(), database: 'pglite', samples }, coldReadyMs, appReadyMs, dbSetupMs, memory: { rss, heapUsed }, requests, tests });

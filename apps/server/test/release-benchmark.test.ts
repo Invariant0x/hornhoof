@@ -2,9 +2,9 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { timingLine } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
-import { compareSnapshots, improvementCard, Snapshot, testTimings } from '../src/benchmark/report.js';
+import { compareSnapshots, improvementCard, requestStats, Snapshot, testTimings } from '../src/benchmark/report.js';
 
-const snapshot = (coldReadyMs = 100) => ({ version: 1 as const, measuredAt: '2026-11-05T14:00:00.000Z', commit: 'c'.repeat(40), environment: { node: 'v22', platform: 'linux', arch: 'x64', cpus: 2, database: 'pglite', samples: 3 }, coldReadyMs, appReadyMs: 30, dbSetupMs: 50, memory: { rss: 1000, heapUsed: 500 }, requests: [{ method: 'GET', url: '/api/org', statusCode: 200 as const, errors: 0 as const, samples: 3, medianMs: 2, p95Ms: 3 }], tests: testTimings([]) });
+const snapshot = (coldReadyMs = 100) => ({ version: 1 as const, measuredAt: '2026-11-05T14:00:00.000Z', commit: 'c'.repeat(40), environment: { node: 'v22', platform: 'linux', arch: 'x64', cpus: 2, database: 'pglite', samples: 3 }, coldReadyMs, appReadyMs: 30, dbSetupMs: 50, memory: { rss: 1000, heapUsed: 500 }, requests: [{ method: 'GET', url: '/api/org', statusCode: 200 as const, errors: 0 as const, samples: 3, medianMs: 2, p95Ms: 3 }], tests: testTimings([{ name: 'part-1', log: timingLine({ kind: 'file', package: 'fixture', file: 'a.test.ts', totalMs: 1, setupMs: 0, testsMs: 1, teardownMs: 0, slowest: [] }) }]) });
 
 describe('release benchmark report', () => {
   it('validates finite structured measurements instead of accepting missing or invalid numbers', () => {
@@ -58,3 +58,28 @@ describe('release benchmark report', () => {
   expect(measured.requests.every(r => r.medianMs > 0 && r.p95Ms >= r.medianMs)).toBe(true);
   expect(report.comparison.status).toBe('baseline-missing');
  }, 40_000);
+
+it('uses #308 legacy runner logs when structured lines are absent and sums a file seen in two parts', () => {
+  const a = ' RUN v5.0.5 /data/tests/one/repo/apps/server\n ✓ test/a.test.ts (1 test) 100ms';
+  const b = ' RUN v5.0.5 /data/tests/one/repo/apps/server\n ✓ test/a.test.ts (1 test) 200ms';
+  const timings = testTimings([{ name: 'part-1', log: a }, { name: 'part-2', log: b }]);
+  expect(timings.status).toBe('measured');
+  expect(timings.totalMs).toBe(300);
+  expect(timings.slowestFiles).toHaveLength(1);
+  expect(timings.slowestFiles[0]).toMatchObject({ file: 'test/a.test.ts', totalMs: 300, setupMs: null });
+});
+
+it('keeps missing test measurements unknown even when both snapshots and an input part lack timings', () => {
+  const missing = { ...snapshot(), tests: testTimings([]) };
+  expect(compareSnapshots(missing, missing, 20)).toMatchObject({ status: 'partial', missing: [{ metric: 'tests.totalMs', reason: 'measurement-missing' }] });
+  const partial = testTimings([{ name: 'unreported-part', log: 'runner output without timing data' }]);
+  expect(partial.parts).toEqual([{ name: 'unreported-part', totalMs: null, files: 0 }]);
+  expect(compareSnapshots({ ...snapshot(), tests: partial }, { ...snapshot(), tests: partial }, 20).missing).toContainEqual({ metric: 'part.unreported-part.totalMs', reason: 'measurement-missing' });
+});
+
+it('uses the median of both middle observations for even request samples', () => {
+  const samples = [9, 1, 7, 3];
+  expect(requestStats(samples)).toEqual({ medianMs: 5, p95Ms: 9 });
+  expect(samples).toEqual([9, 1, 7, 3]);
+  expect(requestStats([9, 1, 5])).toEqual({ medianMs: 5, p95Ms: 9 });
+});

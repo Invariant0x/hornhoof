@@ -6,6 +6,7 @@ import type { Ctx } from '../../app.js';
 import { agents, DECISION_TOPICS, departments, jobs, requests, tasks, type DecisionTopic } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { ask, blocked, cancel, CLOSED, comment, createTask, gateLeads, inRepository, listed, openAfter, refuse, report, submit, taskSpot, updateTask, verdict, type Moved, type Task } from './engine.js';
+import { requireBlockingGate } from './gate-triggers.js';
 import { carriesFile, encodedHint } from './attachments.js';
 import { taskByRef, taskDetail, taskLines, type TaskDetail } from './views.js';
 import { addTasks, editTurn, mergeTurn, planTurn, settle, tell, TURN_MESSAGES, turnName, turnRows } from './turns.js';
@@ -498,6 +499,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
       const role = (a: Agent) => a.roleKey === g && a.id !== executor;
       const found = /^[A-Z]{3}-[A-Z0-9]+$/.test(g) ? (staff.find(a => role(a) && !a.switchedOffAt) ?? staff.find(role)) : staff.find(a => a.id === g);
       if (!found) throw refuse(400, 'task_invalid', `No one in your department can be the gate ${g}.`);
+      requireBlockingGate(ctx.templates, found.roleKey);
       return found.id;
     });
   }
