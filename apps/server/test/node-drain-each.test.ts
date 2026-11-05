@@ -112,6 +112,19 @@ describe('each node on the server computer is replaced on its own', () => {
     expect(nodeDrain(f.app.ctx, { kind: 'node', nodeId: google.nodeId })).toMatchObject({ state: 'waiting', until: before });
   });
 
+  it('says that a node still waits rather than that another one was put off', async () => {
+    const f = await computer({ NODE_DRAIN_MS: '300', NODE_UPDATE_RETRY_MS: '60000' });
+    const late = await f.plan('antigravity');
+    const busy = await f.plan('claude');
+    await f.longTurn(await f.hire('Dev', 'worker', late.plan, late.nodeId), late.nodeId);
+    await until(async () => (await f.server('POST', [late.plan])).json().drain.state === 'postponed');
+    await f.longTurn(await f.hire('Bob', 'worker', busy.plan, busy.nodeId), busy.nodeId);
+
+    const answer = (await f.server('POST', [late.plan, busy.plan])).json();
+
+    expect(answer).toMatchObject({ ready: false, free: [], drain: { state: 'waiting' } });
+  });
+
   it('starts the orchestrator on its free node as soon as that one is back, while another node still waits', async () => {
     const f = await computer();
     const builtin = await f.online(NODE_KEY);
