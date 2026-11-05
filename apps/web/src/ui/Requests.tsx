@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { errorText, useT, type Messages } from '../i18n';
 import type { TaskPlace, WaitingRequest } from '../types';
@@ -13,14 +13,21 @@ export const wordsAnswer = (requests: WaitingRequest[]) => requests.some(r => r.
 /* A picture an agent showed, as people who reach its task load it. */
 const picture = (id: string) => `/api/attachments/${id}`;
 
-/* The form a request shows: the one of its kind to a person the server lets answer it, and none to anyone else. */
-const formOf = (request: WaitingRequest): WaitingRequest['kind'] | null => (request.canAnswer ? request.kind : null);
-
 /* onOpenAgent opens the asking agent's window, to see in its terminal what it did. */
 type Shared = { onOpenTask: (id: string) => void; onOpenAgent: (id: string) => void; placeName: (p: TaskPlace) => string };
 
 /* An approval names a commit, or under a department's policy the work its words say. */
 const asksToApprove = (t: Messages, request: WaitingRequest) => (request.commit ? t.tasks.asksApproval(request.agent.name) : t.tasks.asksApprovalOf(request.agent.name));
+
+function whoAsked(t: Messages, request: WaitingRequest): string {
+  if (request.kind === 'approval') return asksToApprove(t, request);
+  if (request.kind === 'stuck') return t.tasks.stuck(request.agent.name);
+  if (request.kind === 'choice') return t.tasks.asksChoice(request.agent.name);
+  return t.tasks.asks(request.agent.name);
+}
+
+const pickBody = (pick: number, text: string) => (text.trim() ? { pick, answer: text.trim() } : { pick });
+const approvalBody = (approve: boolean, text: string) => (text.trim() ? { approve, answer: text.trim() } : { approve });
 
 /* A request for someone who may not take it: the commit or the ways it offers, and who takes it. */
 function ReadOnly({ request }: { request: WaitingRequest }) {
@@ -39,66 +46,50 @@ function ReadOnly({ request }: { request: WaitingRequest }) {
   );
 }
 
-/* One thing an agent waits for: a question to answer, a commit to approve, or a task it is stuck on. Its answers show only
-   to a person the server lets take it; anyone else reads who takes it. */
-function RequestItem({ request, onDone, onOpenTask, onOpenAgent, placeName }: Shared & { request: WaitingRequest; onDone: () => void }) {
+function RequestHeader({ who, request, onOpenTask, onOpenAgent, placeName }: Shared & { who: string; request: WaitingRequest }) {
   const t = useT();
-  const [text, setText] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [failure, setFailure] = useState<unknown>(null);
   const { task, agent } = request;
-  const form = formOf(request);
-
-  async function send(path: string, body: unknown) {
-    setBusy(true);
-    setFailure(null);
-    try {
-      await api.post(path, body);
-      onDone();
-    } catch (err) {
-      setFailure(err);
-      setBusy(false);
-    }
-  }
-  const reply = (body: object) => send(`/api/requests/${request.id}`, body);
-
-  function answer(e: FormEvent) {
-    e.preventDefault();
-    if (text.trim()) void reply({ answer: text.trim() });
-  }
-
-  const who =
-    request.kind === 'approval' ? asksToApprove(t, request) : request.kind === 'stuck' ? t.tasks.stuck(agent.name) : request.kind === 'choice' ? t.tasks.asksChoice(agent.name) : t.tasks.asks(agent.name);
-  /* Hornhoof's own words about a stuck task are said in the person's language. */
-  const said = request.kind === 'stuck' ? t.tasks.stuckText(agent.name, task.number) : request.text;
   return (
-    <article className={`req req-${request.kind}`} aria-label={`#${task.number} ${task.title}`}>
-      <header>
-        <b>{who}</b>
-        <button className="linkish" type="button" onClick={() => onOpenTask(task.id)}>
-          #{task.number} {task.title}
-        </button>
-        {task.department && <small>{placeName(task.department)}</small>}
-        <button className="btn small ghost req-term" type="button" onClick={() => onOpenAgent(agent.id)}>
-          {t.tasks.openTerminal(agent.name)}
-        </button>
-      </header>
-      {request.explained ? (
-        <>
-          <div className="req-explained">
-            <Markdown text={request.explained} />
-          </div>
-          <details className="req-more">
-            <summary>{t.tasks.inDetail}</summary>
-            <p className="req-text">{said}</p>
-          </details>
-        </>
-      ) : (
-        <>
+    <header>
+      <b>{who}</b>
+      <button className="linkish" type="button" onClick={() => onOpenTask(task.id)}>
+        #{task.number} {task.title}
+      </button>
+      {task.department && <small>{placeName(task.department)}</small>}
+      <button className="btn small ghost req-term" type="button" onClick={() => onOpenAgent(agent.id)}>
+        {t.tasks.openTerminal(agent.name)}
+      </button>
+    </header>
+  );
+}
+
+function RequestWords({ request, said }: { request: WaitingRequest; said: string }) {
+  const t = useT();
+  if (request.explained) {
+    return (
+      <>
+        <div className="req-explained">
+          <Markdown text={request.explained} />
+        </div>
+        <details className="req-more">
+          <summary>{t.tasks.inDetail}</summary>
           <p className="req-text">{said}</p>
-          {request.explaining && <p className="muted">{t.tasks.explaining}</p>}
-        </>
-      )}
+        </details>
+      </>
+    );
+  }
+  return (
+    <>
+      <p className="req-text">{said}</p>
+      {request.explaining && <p className="muted">{t.tasks.explaining}</p>}
+    </>
+  );
+}
+
+function RequestMedia({ request }: { request: WaitingRequest }) {
+  const t = useT();
+  return (
+    <>
       {request.images.length > 0 && (
         <div className="req-pics">
           {request.images.map((id, i) => (
@@ -113,49 +104,171 @@ function RequestItem({ request, onDone, onOpenTask, onOpenAgent, placeName }: Sh
           {t.tasks.seeWork}
         </a>
       )}
-      {form === 'choice' && (
-        <div className="req-form">
-          <div className="req-options">
-            {request.options.map((o, i) => (
-              <button key={i} className="req-option" type="button" disabled={busy} onClick={() => void reply(text.trim() ? { pick: i, answer: text.trim() } : { pick: i })}>
-                {o.image && <img src={picture(o.image)} alt={o.label} />}
-                <span>{o.label}</span>
-              </button>
-            ))}
-          </div>
-          <Field label={t.tasks.note}>{p => <input {...p} value={text} maxLength={4000} onChange={e => setText(e.target.value)} />}</Field>
-        </div>
-      )}
-      {(form === 'question' || form === 'stuck') && (
-        <form className="req-form" onSubmit={answer}>
-          <Field label={t.tasks.yourAnswer}>{p => <textarea {...p} rows={3} value={text} maxLength={4000} onChange={e => setText(e.target.value)} />}</Field>
-          <div className="req-actions">
-            <button className="btn small" type="submit" disabled={busy || !text.trim()}>
-              {t.tasks.sendAnswer}
-            </button>
-            {request.kind === 'stuck' && (
-              <button className="btn small ghost" type="button" disabled={busy} onClick={() => void send(`/api/tasks/${task.id}/cancel`, {})}>
-                {t.tasks.cancelTask}
-              </button>
-            )}
-          </div>
-        </form>
-      )}
-      {!request.canAnswer && <ReadOnly request={request} />}
-      {form === 'approval' && (
-        <div className="req-form">
-          <ApprovedCommit request={request} />
-          <Field label={t.tasks.note}>{p => <input {...p} value={text} maxLength={4000} onChange={e => setText(e.target.value)} />}</Field>
-          <div className="req-actions">
-            <button className="btn small" type="button" disabled={busy} onClick={() => void reply(text.trim() ? { approve: true, answer: text.trim() } : { approve: true })}>
-              {t.tasks.approve}
-            </button>
-            <button className="btn small ghost" type="button" disabled={busy} onClick={() => void reply(text.trim() ? { approve: false, answer: text.trim() } : { approve: false })}>
-              {t.tasks.decline}
-            </button>
-          </div>
-        </div>
-      )}
+    </>
+  );
+}
+
+type ChoiceProps = {
+  options: WaitingRequest['options'];
+  text: string;
+  busy: boolean;
+  onText: (value: string) => void;
+  onPick: (index: number) => void;
+  onSubmit: (e: FormEvent) => void;
+};
+
+/* A choice lets the person pick a way with an optional note, or send free-form feedback without picking any way. */
+function ChoiceForm({ options, text, busy, onText, onPick, onSubmit }: ChoiceProps) {
+  const t = useT();
+  return (
+    <form className="req-form" onSubmit={onSubmit}>
+      <div className="req-options">
+        {options.map((o, i) => (
+          <button key={i} className="req-option" type="button" disabled={busy} onClick={() => onPick(i)}>
+            {o.image && <img src={picture(o.image)} alt={o.label} />}
+            <span>{o.label}</span>
+          </button>
+        ))}
+      </div>
+      <Field label={t.tasks.choiceNote} hint={t.tasks.choiceHint}>
+        {p => <textarea {...p} rows={3} value={text} maxLength={4000} onChange={e => onText(e.target.value)} />}
+      </Field>
+      <div className="req-actions">
+        <button className="btn small" type="submit" disabled={busy || !text.trim()}>
+          {t.tasks.sendFeedback}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+type QuestionProps = {
+  stuck: boolean;
+  text: string;
+  busy: boolean;
+  onText: (value: string) => void;
+  onSubmit: (e: FormEvent) => void;
+  onCancel: () => void;
+};
+
+function QuestionForm({ stuck, text, busy, onText, onSubmit, onCancel }: QuestionProps) {
+  const t = useT();
+  return (
+    <form className="req-form" onSubmit={onSubmit}>
+      <Field label={t.tasks.yourAnswer}>
+        {p => <textarea {...p} rows={3} value={text} maxLength={4000} onChange={e => onText(e.target.value)} />}
+      </Field>
+      <div className="req-actions">
+        <button className="btn small" type="submit" disabled={busy || !text.trim()}>
+          {t.tasks.sendAnswer}
+        </button>
+        {stuck && (
+          <button className="btn small ghost" type="button" disabled={busy} onClick={onCancel}>
+            {t.tasks.cancelTask}
+          </button>
+        )}
+      </div>
+    </form>
+  );
+}
+
+type ApprovalProps = {
+  request: WaitingRequest;
+  text: string;
+  busy: boolean;
+  onText: (value: string) => void;
+  onDecide: (approve: boolean) => void;
+};
+
+function ApprovalForm({ request, text, busy, onText, onDecide }: ApprovalProps) {
+  const t = useT();
+  return (
+    <div className="req-form">
+      <ApprovedCommit request={request} />
+      <Field label={t.tasks.note}>{p => <input {...p} value={text} maxLength={4000} onChange={e => onText(e.target.value)} />}</Field>
+      <div className="req-actions">
+        <button className="btn small" type="button" disabled={busy} onClick={() => onDecide(true)}>
+          {t.tasks.approve}
+        </button>
+        <button className="btn small ghost" type="button" disabled={busy} onClick={() => onDecide(false)}>
+          {t.tasks.decline}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+type FormActions = {
+  text: string;
+  busy: boolean;
+  onText: (value: string) => void;
+  onAnswer: (e: FormEvent) => void;
+  onPick: (index: number) => void;
+  onDecide: (approve: boolean) => void;
+  onCancel: () => void;
+};
+
+function RequestForm({ request, text, busy, onText, onAnswer, onPick, onDecide, onCancel }: FormActions & { request: WaitingRequest }) {
+  if (!request.canAnswer) return <ReadOnly request={request} />;
+  if (request.kind === 'choice') return <ChoiceForm options={request.options} text={text} busy={busy} onText={onText} onPick={onPick} onSubmit={onAnswer} />;
+  if (request.kind === 'approval') return <ApprovalForm request={request} text={text} busy={busy} onText={onText} onDecide={onDecide} />;
+  return <QuestionForm stuck={request.kind === 'stuck'} text={text} busy={busy} onText={onText} onSubmit={onAnswer} onCancel={onCancel} />;
+}
+
+function useRequestSend(onDone: () => void) {
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<unknown>(null);
+  const sending = useRef(false);
+
+  async function send(path: string, body: unknown) {
+    if (sending.current) return;
+    sending.current = true;
+    setBusy(true);
+    setFailure(null);
+    try {
+      await api.post(path, body);
+      onDone();
+    } catch (err) {
+      sending.current = false;
+      setFailure(err);
+      setBusy(false);
+    }
+  }
+
+  return { busy, failure, send };
+}
+
+/* One thing an agent waits for: a question to answer, a choice to answer or pick, a commit to approve, or a stuck task.
+   Its answers show only to a person the server lets take it; anyone else reads who takes it. */
+function RequestItem({ request, onDone, ...shared }: Shared & { request: WaitingRequest; onDone: () => void }) {
+  const t = useT();
+  const [text, setText] = useState('');
+  const { busy, failure, send } = useRequestSend(onDone);
+  const { task, agent } = request;
+  const reply = (body: object) => void send(`/api/requests/${request.id}`, body);
+
+  function answer(e: FormEvent) {
+    e.preventDefault();
+    if (text.trim()) reply({ answer: text.trim() });
+  }
+
+  /* Hornhoof's own words about a stuck task are said in the person's language. */
+  const said = request.kind === 'stuck' ? t.tasks.stuckText(agent.name, task.number) : request.text;
+  return (
+    <article className={`req req-${request.kind}`} aria-label={`#${task.number} ${task.title}`}>
+      <RequestHeader who={whoAsked(t, request)} request={request} {...shared} />
+      <RequestWords request={request} said={said} />
+      <RequestMedia request={request} />
+      <RequestForm
+        request={request}
+        text={text}
+        busy={busy}
+        onText={setText}
+        onAnswer={answer}
+        onPick={i => reply(pickBody(i, text))}
+        onDecide={approve => reply(approvalBody(approve, text))}
+        onCancel={() => void send(`/api/tasks/${task.id}/cancel`, {})}
+      />
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
     </article>
   );
