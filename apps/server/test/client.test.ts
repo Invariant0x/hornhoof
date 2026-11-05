@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { clientFor } from '../src/modules/link/client.js';
-import type { TunnelSettings } from '../src/modules/link/tunnel.js';
+import { Settings, type TunnelSettings } from '../src/modules/link/tunnel.js';
 
 const KEY = 'Zm9vYmFyLWtleS1vZi10aGUtYmluZGluZy0wMTIzNDU2';
 
@@ -13,6 +13,7 @@ const settings = (tunnel: Record<string, unknown> = {}, more: Partial<TunnelSett
   name: 'acme',
   key: KEY,
   tunnel: { serverAddr: 'hornhoof.org', serverPort: 443, protocol: 'wss', config: 'localIP = "db"\nlocalPort = 5432\n', ...tunnel },
+  mode: 'http',
   ...more,
 });
 
@@ -38,6 +39,17 @@ localPort = 8080
 requestHeaders.set.x-forwarded-proto = "https"
 `;
 
+const ABOVE_THE_PROXY = CONFIG.slice(0, CONFIG.indexOf('[[proxies]]'));
+
+const HTTPS_PROXY = `[[proxies]]
+name = "acme"
+type = "https"
+subdomain = "acme"
+localIP = "app"
+localPort = 8443
+transport.proxyProtocolVersion = "v2"
+`;
+
 describe('the tunnel client', () => {
   it('runs frpc with a config that carries the link to the app and nothing else', () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-frpc-'));
@@ -47,6 +59,20 @@ describe('the tunnel client', () => {
     expect(readFileSync(path, 'utf8')).toBe(CONFIG);
     /* It holds the key of the link. */
     expect(statSync(path).mode & 0o077).toBe(0);
+  });
+
+  it("runs an https proxy to the app's TLS port in https mode, with the visitor's address in a PROXY v2 header", () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-frpc-'));
+    clientFor(settings({}, { mode: 'https' }), dir);
+    expect(readFileSync(join(dir, 'frpc.toml'), 'utf8')).toBe(`${ABOVE_THE_PROXY}${HTTPS_PROXY}`);
+  });
+
+  it('reads settings with no mode as http', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-frpc-'));
+    /* What an app from before this mode wrote: the file stays as it is until the app writes it again. */
+    const today = { url: 'https://acme.hornhoof.org', name: 'acme', key: KEY, tunnel: { serverAddr: 'hornhoof.org', serverPort: 443, protocol: 'wss' } };
+    clientFor(Settings.parse(JSON.parse(JSON.stringify(today))), dir);
+    expect(readFileSync(join(dir, 'frpc.toml'), 'utf8')).toBe(CONFIG);
   });
 
   it('writes the key so that no character of it can break out of its line', () => {

@@ -2,9 +2,15 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 
-/* What the app writes into the control folder for the public link: its address, name and key, and what the relay gave
-   the tunnel. */
-const Settings = z.object({ url: z.string(), name: z.string(), key: z.string(), tunnel: z.record(z.string(), z.unknown()) });
+/* What the app writes into the control folder for the public link: its address, name and key, what the relay gave the
+   tunnel, and where the link's TLS ends. A file from before there was a mode still means the relay ends it. */
+export const Settings = z.object({
+  url: z.string(),
+  name: z.string(),
+  key: z.string(),
+  tunnel: z.record(z.string(), z.unknown()),
+  mode: z.enum(['http', 'https']).default('http'),
+});
 export type TunnelSettings = z.infer<typeof Settings>;
 
 /* The program that carries the link's traffic, as it is started. */

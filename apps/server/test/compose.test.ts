@@ -20,6 +20,12 @@ describe('the tunnel service', () => {
   });
 });
 
+describe("the link's certificate", () => {
+  it('comes from the directory .env names, and from nothing else when that is empty', () => {
+    expect(compose.services.app!.environment!.ACME_DIRECTORY).toBe('${ACME_DIRECTORY:-}');
+  });
+});
+
 describe('the computer the server runs on', () => {
   it('is known to the app by the hash install.sh writes, not by the key a machine joins with', () => {
     expect(compose.services.app!.environment!.HORNHOOF_HOST_ID).toBe('${HORNHOOF_HOST_ID:-}');

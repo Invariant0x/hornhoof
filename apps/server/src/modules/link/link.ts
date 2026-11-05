@@ -7,6 +7,7 @@ import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
 import { publicLinks } from '../../db/schema.js';
 import { loggable } from '../../errors.js';
+import { linkMode } from '../tls/store.js';
 import { Relay, type Bound, type NameCheck } from './relay.js';
 
 export type LinkView = { name: string; url: string };
@@ -38,7 +39,7 @@ export async function writeTunnelSettings(db: Db, config: Config): Promise<void>
   const file = join(config.controlDir, TUNNEL_FILE);
   const [row] = await db.select().from(publicLinks).limit(1);
   if (!row) return rmSync(file, { force: true });
-  const settings = { url: row.url, name: row.name, key: decryptSecret(row.keyEnc, config.secret), tunnel: JSON.parse(decryptSecret(row.tunnelEnc, config.secret)) as unknown };
+  const settings = { url: row.url, name: row.name, key: decryptSecret(row.keyEnc, config.secret), tunnel: JSON.parse(decryptSecret(row.tunnelEnc, config.secret)) as unknown, mode: await linkMode(db, config) };
   rmSync(`${file}.new`, { force: true });
   writeFileSync(`${file}.new`, JSON.stringify(settings), { mode: 0o600 });
   renameSync(`${file}.new`, file);
