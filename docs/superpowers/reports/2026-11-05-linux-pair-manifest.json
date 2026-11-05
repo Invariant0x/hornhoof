@@ -1,0 +1,79 @@
+{
+  "control": "05c63819d59c0cbba044132c89c503f30cb49856",
+  "optimized": "54340764df895693cabdad4027fdad2ffcf48e38",
+  "integrationBase": "0b4b238ce6a84007974cea919a8e032aa5639081",
+  "sharedFixes": {
+    "task408": "5e3bc796029e1f95da626b62e66038c5ce4fb8a2",
+    "task374": "0b4b238ce6a84007974cea919a8e032aa5639081",
+    "task409Original": "b05a79fbce4e8c89b85f8696c037827117621c27",
+    "task409CherryPick": "0c4644d5c3858653149452e67d000a0534cbaec6",
+    "acceptedBoundary": "2eb0d12f9f67fc6e94f75fcf118d3ed788a134f3",
+    "driver": "05c63819d59c0cbba044132c89c503f30cb49856"
+  },
+  "changedPaths": [
+    "apps/node/test/fakes/hook-clock.cjs",
+    "apps/node/test/hook-client.test.ts",
+    "apps/node/test/hook-delivery.test.ts",
+    "apps/node/test/hook-retry-delivery.test.ts",
+    "apps/node/test/hook-test-client.ts",
+    "apps/node/test/hook-test-clock.ts",
+    "apps/node/test/terminal-host-hook-delivery.test.ts",
+    "apps/node/test/terminal-host-waits.test.ts",
+    "apps/node/test/terminal-test-clock.ts",
+    "apps/server/test/decisions-answers-ceo.test.ts",
+    "apps/server/test/decisions-answers-department.test.ts",
+    "apps/server/test/decisions-answers-fallback.test.ts",
+    "apps/server/test/decisions-company.ts",
+    "apps/server/test/decisions.test.ts",
+    "apps/server/test/install-script-browser.test.ts",
+    "apps/server/test/install-script-helpers.ts",
+    "apps/server/test/install-script-join.test.ts",
+    "apps/server/test/install-script-served.test.ts",
+    "apps/server/test/install-script.test.ts",
+    "apps/server/test/test-runs-commit.test.ts",
+    "apps/server/test/test-runs-company.ts",
+    "apps/server/test/test-runs-hosts.test.ts",
+    "apps/server/test/test-runs-wait.test.ts",
+    "apps/server/test/test-runs-work.test.ts",
+    "apps/server/test/test-runs.test.ts",
+    "docs/superpowers/plans/2026-11-05-linux-test-runtime.md",
+    "docs/superpowers/reports/2026-11-05-linux-test-runtime.md",
+    "docs/superpowers/specs/2026-11-05-linux-test-runtime.md"
+  ],
+  "identicalHashes": {
+    "package.json": "42dd75b4384fdc07dc844ec513fd55b185d11a9aa8d1ee4245a9213fb1269f26",
+    "package-lock.json": "0737176b95ecbdb2a68f6003b60c7055a7f893107269c11c163c8cc953b3daa2",
+    "apps/node/package.json": "3622bc37e28cdc9ccb864fa0c00ac0fd2d20d94b5e0a1e32c5d0b1d6a9cd4131",
+    "apps/server/package.json": "beedc556e2a013486c5f96cde19d9e47ab7364810f3ad99e4938de93d7fe478b",
+    "apps/web/package.json": "efb3fa63fff1d1acb20b1e97be5770a18fa53c140a296238281734d5e71dd525",
+    "packages/protocol/package.json": "0f8eda3b8b0e72e532eae0f88e0180ae4c78ce4dfbf5a011f9c54c4733e441e6",
+    "apps/node/vitest.config.ts": "b8504edbf12a24ae808482d0f7e6af2b4f8e60332e4f92e25ed0d01c33e99454",
+    "apps/server/vitest.config.ts": "8e9c172f2630e3140b84312f6c180299cb66c577c3b0cc7e460f01ce83c6f7bf",
+    "apps/web/vite.config.ts": "4f5dc31a5c9811f44bd51e7e78ca0f07b6223124fe686802691a87eb2c8c7ab9",
+    "packages/protocol/vitest.config.ts": "343b338e8d0c8252491d23c2a0145c656892e2cf268aa09d2797e3b0b42ad4df",
+    "apps/server/test/helpers.ts": "00d47800386e709f4d14cf10115d92cc194b156b609ad69d2d642adfa4c8c9c4",
+    "apps/server/test/global-setup.ts": "4fa305d103f0e701d50c4eb7612b9766849d81785b51c03fd09799c225997aa8",
+    "scripts/benchmarks/linux-pair.mjs": "3f18d46d4d629302c7bdbeb3396b742395cc0b418640fcdda2ada0f6cb2a72ac",
+    "scripts/benchmarks/linux-pair.test.mjs": "c51df1376a705d25474e9be0e73444483371e3b037b88f6691b6e721bce5e136"
+  },
+  "counts": {
+    "serverAffected": [
+      252,
+      252
+    ],
+    "serverAssertions": [
+      817,
+      817
+    ]
+  },
+  "method": {
+    "parts": 1,
+    "logicalShards": 4,
+    "variants": 2,
+    "maxWorkers": 2,
+    "cache": "fresh worktree and empty npm cache per logical shard; host page cache uncontrolled",
+    "resourceSamplingSeconds": 5,
+    "archive": "all raw stage logs and resource/timing records, gzip + SHA256, 700KiB maximum in 1MiB runner log tail",
+    "historicalTurn7": false
+  }
+}
