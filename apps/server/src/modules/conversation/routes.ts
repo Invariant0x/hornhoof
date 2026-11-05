@@ -2,6 +2,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
+import { maskEvent, viewerOf } from '../../auth/agent-view.js';
 import { companies, departments, jobs } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { agentFor } from '../agents/find.js';
@@ -38,7 +39,8 @@ export function conversationRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/agents/:id/events', async req => {
     const { me, agent } = await agentFor(ctx, req);
     const { after } = EventsQuery.parse(req.query);
-    return { events: await listEvents(db, agent.id, after), state: { ...(await agentState(ctx, agent.id)), canType: await typesInTerminal(ctx, agent.id, me.id) } };
+    const viewer = await viewerOf(db, me);
+    return { events: (await listEvents(db, agent.id, after)).map(e => maskEvent(viewer, e)), state: { ...(await agentState(ctx, agent.id)), canType: await typesInTerminal(ctx, agent.id, me.id) } };
   });
 
   app.post('/api/agents/:id/messages', async (req, reply) => {
