@@ -218,18 +218,31 @@ function Wire({ l }: { l: Line }) {
   );
 }
 
-/* The way from the head's card to each employee's runs while the employee works on the head's task, down to the employee,
-   and for five minutes after it gave a result back, up to the head. */
-function MemberLines({ s, toMember, stateOf, still }: { s: Schema; toMember(id: string): Point[] | null; stateOf(up: string, down: string): LineState; still: boolean }) {
+const ordinaryWork = (f: Frame) => f.stage >= 0 && !f.role?.schema && f.role?.gate == null;
+
+/* Amber signals use the same gate-to-work segments as the return lines, and exist only where those lines are. */
+function reworkPaths(s: Schema, f: Frame, m: Frame['members'][number], back: (from: string, to: string) => Point[] | null): Point[][] {
+  if (!ordinaryWork(f) || !s.lines.some(l => l.cls === 'rl')) return [];
+  return s.frames.filter(g => g.role?.gate != null).flatMap(g => {
+    const from = g.members[0];
+    const pts = from ? back(from.e.id, m.e.id) : null;
+    return pts ? [pts] : [];
+  });
+}
+
+/* Cyan runs from the head to an employee at work; amber returns from each gate over the drawn return line. */
+function MemberLines({ s, toMember, back, stateOf, still }: { s: Schema; toMember(id: string): Point[] | null; back(from: string, to: string): Point[] | null; stateOf(up: string, down: string): LineState; still: boolean }) {
   const head = s.head;
   if (!head) return null;
   return s.frames.flatMap(f =>
     f.members.map(m => {
       const state = stateOf(head.id, m.e.id);
+      if (state === 'yellow') {
+        return reworkPaths(s, f, m, back).map((pts, i) => <LiveWay key={`${m.e.id}:${i}`} pts={pts} speed={PULSE_SPEED} tone="a" still={still} data={{ 'data-work': m.e.id }} />);
+      }
       const down = state === 'quiet' ? null : toMember(m.e.id);
       if (!down) return null;
-      const back = state === 'yellow';
-      return <LiveWay key={m.e.id} pts={back ? [...down].reverse() : down} speed={PULSE_SPEED} tone={back ? 'a' : 'c'} still={still} data={{ 'data-work': m.e.id }} />;
+      return <LiveWay key={m.e.id} pts={down} speed={PULSE_SPEED} tone="c" still={still} data={{ 'data-work': m.e.id }} />;
     }),
   );
 }
@@ -551,9 +564,9 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
             {s.gates.map(g => (
               <path key={g.x} className="gd" d={`M ${g.x} ${CY - 7} L ${g.x + 7} ${CY} L ${g.x} ${CY + 7} L ${g.x - 7} ${CY} Z`} />
             ))}
-            {rework && lines('rl')}
+            {lines('rl')}
             {s.report && <Wire l={{ cls: 'pl', pts: s.report.pts, arrow: true }} />}
-            <MemberLines s={s} toMember={paths.toMember} stateOf={stateOf} still={still} />
+            <MemberLines s={s} toMember={paths.toMember} back={paths.back} stateOf={stateOf} still={still} />
             {shots.map(x => (
               <Pulse key={x.key} pts={x.pts} speed={x.speed} once tone={x.tone} />
             ))}

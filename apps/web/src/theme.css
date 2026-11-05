@@ -650,9 +650,9 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 /* The live terminal takes the window, wider, in its own colors; cards wait below it. */
 .orch.term { width: min(980px, calc(100vw - 32px)); }
 /* The padding sits on the terminal itself, which is what its fit leaves out when it counts rows. */
-.t-term { position: relative; flex: 1 1 auto; min-height: 0; background: #15191F; overflow: hidden; }
-.t-xterm { height: 100%; }
-.t-term .xterm { height: 100%; padding: 6px 4px 4px 10px; }
+.t-term { position: relative; flex: 1 1 auto; min-height: 0; min-width: 0; color-scheme: dark; background: #15191F; overflow: hidden; }
+.t-xterm { width: 100%; height: 100%; }
+.t-term .xterm { height: 100%; padding: 6px 8px 4px 10px; }
 .t-menu { position: absolute; z-index: 20; padding: 4px; background: var(--surface); border: 1px solid var(--line2); box-shadow: 0 8px 24px var(--shadow); }
 .t-copy { display: block; width: 100%; padding: 6px 12px; border: 0; background: none; color: var(--ink); font-family: var(--f-display); font-size: 13px; font-weight: 600; text-align: left; white-space: nowrap; cursor: pointer; }
 .t-copy:hover:not(:disabled) { color: var(--cyan-ink); background: var(--glow); }
