@@ -583,6 +583,7 @@ export const en = {
       by: (name: string) => `${name} typed in this terminal last.`,
       nobody: 'Hornhoof cannot tell who wrote them.',
     },
+    inputDropped: 'Not sent: too much text was typed while the terminal was disconnected. Wait for it to connect, then type again.',
     turnRefused: {
       busy: 'What was just typed got no turn of its own: it went into the turn that was running. Check the answer there, and type it again if it is missing.',
       unknown_words: 'The agent is answering words, but Hornhoof could not tell who wrote them, so no turn opened and its tools are closed for this answer. Please type your message again.',

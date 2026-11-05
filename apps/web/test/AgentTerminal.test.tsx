@@ -93,7 +93,7 @@ vi.mock('@xterm/xterm', () => ({
       },
     };
     constructor(options: Record<string, unknown>) {
-      this.options = options;
+      this.options = { ...options };
       terms.push(this as unknown as FakeTerminal);
     }
     loadAddon() {}
@@ -484,6 +484,77 @@ describe("an agent's live terminal in its window", () => {
     expect(await screen.findByText(/were left unsent in the program's input/)).toBeInTheDocument();
     expect(screen.getByText(says)).toBeInTheDocument();
     expect(screen.getByText(/a <b>draft<\/b>\s+of two lines/)).toBeInTheDocument();
+  });
+
+  it('keeps what the person types while the view connects again, and sends it in order once it is back', async () => {
+    open();
+    const first = await socket();
+    first.opened();
+    first.ended(4410, 'node_offline');
+    terms[0]!.type('first question');
+    terms[0]!.type('\r');
+    terms[0]!.resized(90, 30);
+    await waitFor(() => expect(FakeSocket.all).toHaveLength(2), { timeout: 3000 });
+    const again = FakeSocket.all[1]!;
+    again.opened();
+    expect(again.sent.filter(m => (m as { type: string }).type === 'input')).toEqual([
+      { type: 'input', data: 'first question' },
+      { type: 'input', data: '\r' },
+    ]);
+    expect(again.sent).not.toContainEqual({ type: 'resize', cols: 90, rows: 30 });
+    terms[0]!.type('next');
+    expect(again.sent.at(-1)).toEqual({ type: 'input', data: 'next' });
+  });
+
+  it('sends what it kept once, and nothing that had gone already, however often the view connects again', async () => {
+    open();
+    const first = await socket();
+    first.opened();
+    terms[0]!.type('went\r');
+    first.ended(4410, 'node_offline');
+    terms[0]!.type('kept\r');
+    await waitFor(() => expect(FakeSocket.all).toHaveLength(2), { timeout: 3000 });
+    FakeSocket.all[1]!.opened();
+    expect(FakeSocket.all[1]!.sent).toEqual([{ type: 'input', data: 'kept\r' }]);
+    FakeSocket.all[1]!.ended(4410, 'node_offline');
+    await waitFor(() => expect(FakeSocket.all).toHaveLength(3), { timeout: 3000 });
+    FakeSocket.all[2]!.opened();
+    expect(FakeSocket.all[2]!.sent).toEqual([]);
+  });
+
+  it('keeps what the person types before the first connection is up', async () => {
+    open();
+    const ws = await socket();
+    terms[0]!.type('hi\r');
+    expect(ws.sent).toEqual([]);
+    ws.opened();
+    expect(ws.sent).toEqual([{ type: 'input', data: 'hi\r' }]);
+  });
+
+  it('sends none of it when the view comes back for someone who may only watch now', async () => {
+    open();
+    const first = await socket();
+    first.opened();
+    first.ended(4410, 'node_offline');
+    terms[0]!.type('hi\r');
+    await waitFor(() => expect(FakeSocket.all).toHaveLength(2), { timeout: 3000 });
+    FakeSocket.all[1]!.opened(false);
+    expect(FakeSocket.all[1]!.sent).toEqual([]);
+  });
+
+  it('sends none of it after a minute, when the person may have gone on, and keeps a bounded amount', async () => {
+    open();
+    const ws = await socket();
+    const now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+    terms[0]!.type('old\r');
+    clock.mockReturnValue(now + 60_000);
+    for (let i = 0; i < 300; i++) terms[0]!.type('k');
+    expect(await screen.findByText('Not sent: too much text was typed while the terminal was disconnected. Wait for it to connect, then type again.')).toHaveAttribute('role', 'alert');
+    ws.opened();
+    clock.mockRestore();
+    expect(ws.sent).toHaveLength(255);
+    expect(ws.sent).not.toContainEqual({ type: 'input', data: 'old\r' });
   });
 
   it('shows the bottom of the screen, where the line to type in is, after a card below the terminal comes or goes', async () => {
