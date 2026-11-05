@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
-import { hasTmux, until, host, sent, home, setUp, job, codexJob, kimiJob, done, ack, typeTurn } from './terminal-host-helpers.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { hasTmux, until, host, tmux, sent, home, setUp, job, codexJob, kimiJob, done, ack, typeTurn } from './terminal-host-helpers.js';
 
 describe.skipIf(!hasTmux)('agents in live terminals', () => {
   afterEach(async () => host?.stop());
@@ -109,5 +109,34 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
       { type: 'agent.context', agentKey: 'x3', used: 0.25 },
       { type: 'agent.context', agentKey: 'x3', used: 0.5 },
     ]);
+  });
+
+  /* The host answers a turn as soon as it reads the end in the program's log, and Hornhoof's next turn can begin before
+     the program's stop hook of that same end arrives. These two deliver that hook at a chosen point of the next turn. */
+  it("gives the next turn its own answer when the last turn's stop arrives while the next program starts", async () => {
+    await setUp();
+    const first = await host.run(kimiJob('late1', 'hello'));
+    const launch = tmux.launch.bind(tmux);
+    vi.spyOn(tmux, 'launch').mockImplementation((...args) => {
+      void host['hook']('late1', 'stop', { session_id: first.sessionId });
+      return launch(...args);
+    });
+    const next = await host.run(kimiJob('late1', 'next'));
+    expect(next).toMatchObject({ ok: true, result: 'echo: next' });
+    expect(next.sessionId).not.toBe(first.sessionId);
+  });
+
+  it("stays in the next turn's session when the last turn's stop arrives after the next prompt went in", async () => {
+    await setUp();
+    const first = await host.run(kimiJob('late2', 'hello'));
+    const stopping = new AbortController();
+    const running = host.run(kimiJob('late2', 'HANG', { signal: stopping.signal }));
+    await until(async () => (await host.screen('late2')).includes('waiting: HANG'));
+    await host['hook']('late2', 'stop', { session_id: first.sessionId });
+    const agent = host['agents'].get('late2')!;
+    expect(agent.sessionId).not.toBe(first.sessionId);
+    expect(agent.turn?.ending).toBeUndefined();
+    stopping.abort();
+    expect(await running).toMatchObject({ ok: false, error: 'cancelled' });
   });
 });
