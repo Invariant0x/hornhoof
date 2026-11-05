@@ -267,6 +267,8 @@ class _PassthroughEcho(ThreadingHTTPServer):
     """A company's machine in https mode: its own TLS, behind a PROXY v2 header from its frpc."""
 
     daemon_threads = True
+    # A crowd comes at once. Python's default queue of 5 would cost it the kernel's retries, on this fake and not the relay.
+    request_queue_size = 512
 
     def __init__(self, port: int, cert: Path, key: Path):
         super().__init__(('127.0.0.1', port), _PassthroughEchoRequest)
@@ -499,9 +501,15 @@ class Stack:
         # Readiness must work before frps starts, including when health later returns 503.
         self._ready(self.relay, self.relay_port, '/api/v1/names/www')
 
-    def restart_relay(self):
+    def stop_relay(self) -> None:
         self.relay.stop()
+
+    def start_relay(self) -> None:
         self._start_relay()
+
+    def restart_relay(self):
+        self.stop_relay()
+        self.start_relay()
 
     def start_frps(self):
         if self.frps is not None and self.frps.process.poll() is None:

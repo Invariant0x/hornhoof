@@ -362,11 +362,26 @@ class VisitorAddressTests(unittest.TestCase):
         for host in ('acme.hornhoof.org', 'initech.hornhoof.org', 'hornhoof.org', 'nobody.hornhoof.org'):
             answer = stack.https(host)
             self.assertIsNotNone(answer.status, answer.error)
-            visitor = f'127.0.0.1:{answer.local_port}'
+            # Caddy's JSON names the address and the port apart.
             for name, process in (('frps', stack.frps), ('edge', stack.edge), ('caddy', stack.caddy),
                                   ('relay', stack.relay)):
                 with self.subTest(host=host, process=name):
-                    self.assertNotIn(visitor, process.log())
+                    self.assertNotIn(f'127.0.0.1:{answer.local_port}', process.log())
+                    self.assertNotIn(f'"remote_port":"{answer.local_port}"', process.log())
+
+    def test_caddy_names_a_visitor_in_the_form_those_checks_look_for(self) -> None:
+        # As the README says, a request that fails on its way to the relay is the one that leaves an address in Caddy's log.
+        # With relay.py down nothing comes through frps, so this one goes to Caddy itself. If Caddy changes its form, the
+        # checks above go on passing and see nothing, so this one fails first.
+        tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-sni-502-'))
+        stack = self.enterContext(Stack(tmp, caddy=True, droplet_logging=True))
+        stack.stop_relay()
+        sock = _tls_socket(stack.caddy_https_port, 'hornhoof.org')
+        direct = KeptConnection(sock, 'hornhoof.org', [])
+        self.addCleanup(direct.close)
+        answer = direct.ask('/api/v1/health')
+        self.assertEqual(answer.status, 502, answer.error)
+        self.assertTrue(_wait(lambda: f'"remote_port":"{answer.local_port}"' in stack.caddy.log(), 5), stack.caddy.log())
 
 
 class CaddyBehindFrpsTests(PassthroughCase):

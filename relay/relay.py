@@ -10,7 +10,7 @@ Public API (Caddy sends https://hornhoof.org/api/* here):
   POST   /api/v1/links/{name}/key   Authorization: Bearer <key> -> 200 {key} (R6.1)
   POST   /api/v1/links/{name}/visitor-key Authorization: Bearer <key> -> 200 {visitorKey} (R6.2)
   GET    /api/v1/health            -> 200 {ok, frps, relayStarted, passthrough} while frps takes logins, else 503
-frps plugin (local only): POST /frp/handler?op=Login|NewProxy|Ping
+frps plugin (local only): POST /frp/handler?op=Login|NewProxy|Ping|NewUserConn
 Admin (as the service user): relay.py admin list|add|ban|unban|release|banned-caddy ...
 
 Standard library only. State: SQLite in /var/lib/hornhoof-relay/relay.db. Keys are stored as SHA-256 hashes.
@@ -1389,6 +1389,41 @@ def edge_reason(op: str, content: dict, metas: dict) -> str | None:
     return edge_proxy_reason(content) if op == 'NewProxy' else None
 
 
+def peer_service_link(proxy_name: str) -> str | None:
+    """The link of a peer's service <link>-<m8>-<service>, by CLIENT's rule for the machine that offers it."""
+    machine, _, service = proxy_name.rpartition('-')
+    match = CLIENT.fullmatch(f'{machine}-peer') if service in PEER_SERVICES else None
+    return match.group('link') if match else None
+
+
+def connection_link(proxy_name: object, proxy_type: object) -> str | None:
+    """The link a new connection is for; None for anything that is neither a company's https proxy nor a service."""
+    if not isinstance(proxy_name, str):
+        return None
+    if proxy_type == 'https':
+        return proxy_name
+    return peer_service_link(proxy_name) if proxy_type == 'stcp' else None
+
+
+def link_refusal(link: str) -> str | None:
+    """R7.4: why this link takes no new connection. frps holds each new connection on this answer, so that a crowd can
+    wait on it (Review Focus 5): one read by the primary key, which under WAL waits for no commit, and never a write."""
+    row = db().execute('SELECT banned_at FROM bindings WHERE name = ?', (link,)).fetchone()
+    if row is None:
+        return 'freed'
+    return 'blocked' if row[0] else None
+
+
+def new_user_conn_reason(content: dict, metas: dict) -> str | None:
+    """R7.4: a new connection goes on only to the edge, on its token, or to a link still bound and not blocked. The name
+    decides and the owner's key does not, since a live tunnel keeps logging its old key after a key change (R6.1)."""
+    proxy_name = content.get('proxy_name')
+    if proxy_name == EDGE_CLIENT:
+        return None if edge_token_matches(metas.get('edge')) else EDGE_REFUSED
+    link = connection_link(proxy_name, content.get('proxy_type'))
+    return 'not a link' if link is None else link_refusal(link)
+
+
 def plugin_answer(reason: str | None) -> dict:
     return {'reject': False, 'unchange': True} if reason is None else {'reject': True, 'reject_reason': reason}
 
@@ -1400,6 +1435,8 @@ def plugin_decide(op: str, content: dict) -> dict:
     still refuse a registration already on disk.
     """
     metas = call_metas(op, content)
+    if op == 'NewUserConn':
+        return plugin_answer(new_user_conn_reason(content, metas))
     if 'edge' in metas:
         return plugin_answer(edge_reason(op, content, metas))
     name, kind, reason = authenticate_call(op, metas)
@@ -1413,10 +1450,19 @@ def plugin_decide(op: str, content: dict) -> dict:
     return plugin_answer(reason)
 
 
+class RelayServer(ThreadingHTTPServer):
+    # frps keeps two connections to the relay and opens one more for each plugin call beyond those, so that a crowd of
+    # visitors is as many new connections at once. Past this queue the kernel drops one, and the visitor waits for its retry.
+    request_queue_size = 1024
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = 'hornhoof-relay'
     sys_version = ''
     protocol_version = 'HTTP/1.1'
+    # An answer is two writes, its headers and its body. Under Nagle's rule the body would wait for the ACK of the headers,
+    # which the receiver delays by 40 ms, and frps holds a visitor's new connection on this answer.
+    disable_nagle_algorithm = True
 
     def log_message(self, fmt, *args):
         pass
@@ -1697,52 +1743,87 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json(204)
 
 
+# What a ban prints last when frps must restart, which hornhoof-relay acts on. frp 0.71.1 has no call that closes one
+# proxy's open connections, so cutting one name's means every link's.
+RESTART_FRPS = 'restart frps'
+CUT = '--cut'
+
+
+def admin_list() -> int:
+    for r in db().execute('SELECT name, created_at, created_ip, last_seen, banned_at, ban_reason FROM bindings '
+                          'ORDER BY created_at'):
+        seen = time.strftime('%Y-%m-%d %H:%M', time.gmtime(r[3])) if r[3] else 'never'
+        ban = f'  BLOCKED: {r[5]}' if r[4] else ''
+        print(f'{r[0]}  created {time.strftime("%Y-%m-%d %H:%M", time.gmtime(r[1]))} from {r[2]}  seen {seen}{ban}')
+    return 0
+
+
+def admin_banned_caddy() -> int:
+    hosts = [f'{r[0]}.{DOMAIN}' for r in db().execute('SELECT name FROM bindings WHERE banned_at IS NOT NULL')]
+    print('# Generated by hornhoof-relay from blocked bindings. Do not edit.')
+    if hosts:
+        print(f'@blocked host {" ".join(hosts)}\nhandle @blocked {{\n\troot * /var/www/hornhoof-pages\n\trewrite * /410.html\n'
+              f'\tfile_server {{\n\t\tstatus 410\n\t}}\n}}')
+    return 0
+
+
+def admin_add(name: str) -> int:
+    """Operator-made binding, no rate limit. Prints {name, key} as JSON once; keep it secret."""
+    reason = check_name(name)
+    if reason:
+        print(f'{name}: {reason}', file=sys.stderr)
+        return 1
+    key = secrets.token_urlsafe(32)
+    write('INSERT INTO bindings (name, key_hash, created_at, created_ip) VALUES (?, ?, ?, ?)',
+          (name, key_hash(key), now(), 'operator'))
+    print(json.dumps({'name': name, 'key': key}))
+    return 0
+
+
+def store_ban(name: str, reason: str) -> None:
+    if db().execute('SELECT 1 FROM bindings WHERE name = ?', (name,)).fetchone():
+        write('UPDATE bindings SET banned_at = ?, ban_reason = ? WHERE name = ?', (now(), reason, name))
+    else:  # block a name nobody holds, so nobody can take it
+        write('INSERT INTO bindings (name, key_hash, created_at, created_ip, banned_at, ban_reason) '
+              'VALUES (?, ?, ?, ?, ?, ?)', (name, '-', now(), 'operator', now(), reason))
+
+
+def admin_ban(name: str, words: list[str]) -> int:
+    """R7.4: refuses the name's new connections at once. Only the ban's last line can ask for a restart."""
+    reason = [word for word in words if word != CUT]
+    store_ban(name, ' '.join(reason) or 'blocked by the relay operator')
+    print(f'ban {name}: done')
+    if len(reason) != len(words):
+        print(RESTART_FRPS)
+    return 0
+
+
+def admin_unban(name: str, _words: list[str]) -> int:
+    unban_binding(name)
+    print(f'unban {name}: done')
+    return 0
+
+
+def admin_release(name: str, _words: list[str]) -> int:
+    release_binding(name)
+    print(f'release {name}: done')
+    return 0
+
+
+ADMIN_REPORTS = {'list': admin_list, 'banned-caddy': admin_banned_caddy}
+ADMIN_CHANGES = {'ban': admin_ban, 'unban': admin_unban, 'release': admin_release}
+
+
 def admin(args) -> int:
     init_db()
-    conn = db()
     cmd = args[0] if args else 'list'
-    if cmd == 'list':
-        for r in conn.execute('SELECT name, created_at, created_ip, last_seen, banned_at, ban_reason FROM bindings '
-                              'ORDER BY created_at'):
-            seen = time.strftime('%Y-%m-%d %H:%M', time.gmtime(r[3])) if r[3] else 'never'
-            ban = f'  BLOCKED: {r[5]}' if r[4] else ''
-            print(f'{r[0]}  created {time.strftime("%Y-%m-%d %H:%M", time.gmtime(r[1]))} from {r[2]}  seen {seen}{ban}')
-        return 0
-    if cmd == 'banned-caddy':
-        hosts = [f'{r[0]}.{DOMAIN}' for r in conn.execute('SELECT name FROM bindings WHERE banned_at IS NOT NULL')]
-        print('# Generated by hornhoof-relay from blocked bindings. Do not edit.')
-        if hosts:
-            print(f'@blocked host {" ".join(hosts)}\nhandle @blocked {{\n\troot * /var/www/hornhoof-pages\n\trewrite * /410.html\n'
-                  f'\tfile_server {{\n\t\tstatus 410\n\t}}\n}}')
-        return 0
+    if cmd in ADMIN_REPORTS:
+        return ADMIN_REPORTS[cmd]()
     if cmd == 'add' and len(args) == 2:
-        # Operator-made binding, no rate limit. Prints {name, key} as JSON once; keep it secret.
-        name = args[1].lower()
-        reason = check_name(name)
-        if reason:
-            print(f'{name}: {reason}', file=sys.stderr)
-            return 1
-        key = secrets.token_urlsafe(32)
-        write('INSERT INTO bindings (name, key_hash, created_at, created_ip) VALUES (?, ?, ?, ?)',
-              (name, key_hash(key), now(), 'operator'))
-        print(json.dumps({'name': name, 'key': key}))
-        return 0
-    if cmd in ('ban', 'unban', 'release') and len(args) >= 2:
-        name = args[1].lower()
-        if cmd == 'ban':
-            reason = ' '.join(args[2:]) or 'blocked by the relay operator'
-            if conn.execute('SELECT 1 FROM bindings WHERE name = ?', (name,)).fetchone():
-                write('UPDATE bindings SET banned_at = ?, ban_reason = ? WHERE name = ?', (now(), reason, name))
-            else:  # block a name nobody holds, so nobody can take it
-                write('INSERT INTO bindings (name, key_hash, created_at, created_ip, banned_at, ban_reason) '
-                      'VALUES (?, ?, ?, ?, ?, ?)', (name, '-', now(), 'operator', now(), reason))
-        elif cmd == 'unban':
-            unban_binding(name)
-        else:
-            release_binding(name)
-        print(f'{cmd} {name}: done')
-        return 0
-    print('usage: relay.py admin list | add <name> | ban <name> [reason] | unban <name> | release <name> | banned-caddy',
+        return admin_add(args[1].lower())
+    if cmd in ADMIN_CHANGES and len(args) >= 2:
+        return ADMIN_CHANGES[cmd](args[1].lower(), args[2:])
+    print(f'usage: relay.py admin list | add <name> | ban <name> [reason] [{CUT}] | unban <name> | release <name> | banned-caddy',
           file=sys.stderr)
     return 2
 
@@ -1763,7 +1844,7 @@ def main() -> int:
     init_db()
     threading.Thread(target=watch_frps, name='frps-watcher', daemon=True).start()
     threading.Thread(target=watch_passthrough, name='https-port-watcher', daemon=True).start()
-    server = ThreadingHTTPServer(LISTEN, Handler)
+    server = RelayServer(LISTEN, Handler)
     server.daemon_threads = True
     print(f'hornhoof-relay listening on {LISTEN[0]}:{LISTEN[1]}', flush=True)
     server.serve_forever()
