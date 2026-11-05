@@ -1,17 +1,31 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Setup } from '../src/screens/Setup';
 import { mockApi, type Call } from './api-mock';
 import { decl } from './css';
 
+/* The same long random name for every start, so the tests know what the Link field holds before anything is typed. */
+vi.mock('@hornhoof/protocol/link', async importOriginal => ({ ...(await importOriginal<typeof import('@hornhoof/protocol/link')>()), randomLinkName: () => 'r4nd0mr4nd0mr4nd0m' }));
+
+const RANDOM = 'r4nd0mr4nd0mr4nd0m';
 const CREATED = { company: { id: 'c1', name: 'Acme' }, person: { id: 'p1', name: 'Ivan', email: 'ivan@acme.com', title: 'CEO' } };
 const CHECK_ACME = 'GET /api/setup/names/acme?code=LINK-CODE-123';
+const MADE = { name: RANDOM, url: `https://${RANDOM}.hornhoof.org` };
+const linkAnswer = (certificate: boolean) => [200, { link: MADE, domain: 'hornhoof.org', tls: { mode: certificate ? 'https' : 'http', certificate, expiresAt: null, failedAt: null } }] as [number, unknown];
+const AGREEMENT = 'Let\'s Encrypt Subscriber Agreement';
 /* The setup itself, among the name checks the screen makes while the company name is typed. */
 const posted = (calls: Call[]) => calls.filter(c => c.method === 'POST');
 
+/* The Link field starts on a random name, so a test that wants its own name writes it there. */
+async function typeLinkName(user: ReturnType<typeof userEvent.setup>, name: string) {
+  await user.clear(screen.getByLabelText('Link'));
+  await user.type(screen.getByLabelText('Link'), name);
+}
+
 async function fillFirstTwoSteps(user: ReturnType<typeof userEvent.setup>, password = 'correct horse battery') {
   await user.type(screen.getByLabelText('Company name'), 'Acme');
+  await typeLinkName(user, 'acme');
   await user.click(screen.getByRole('button', { name: 'Next' }));
   await user.type(screen.getByLabelText('Your name'), 'Ivan');
   await user.type(screen.getByLabelText('Email'), 'ivan@acme.com');
@@ -209,22 +223,23 @@ describe('the public link on the setup screen', () => {
     mockApi({ [`GET /api/setup/names/${longest}?code=LINK-CODE-123`]: [200, { name: longest, free: true }] });
     const user = userEvent.setup();
     render(<Setup onDone={() => {}} linkDomain="hornhoof.org" />);
-    await user.type(screen.getByLabelText('Link'), longest);
+    await typeLinkName(user, longest);
     const note = await screen.findByText(`${longest}.hornhoof.org is free.`);
     /* The address is one word with no place to wrap, wider than a phone; the note may break inside it. */
     expect(note.matches('.link-name > span')).toBe(true);
     expect(decl('.link-name > span', 'overflow-wrap')).toBe('anywhere');
   });
 
-  it('opens Hornhoof on the internet at a link made from the company name as it is typed', async () => {
+  it('starts the link with a long random name and keeps it while the company name is typed', async () => {
     const user = userEvent.setup();
     render(<Setup onDone={() => {}} linkDomain="hornhoof.org" />);
     expect(screen.getByRole('checkbox', { name: 'Open Hornhoof on the internet' })).toBeChecked();
     expect(screen.getByRole('checkbox', { name: 'Open Hornhoof on the internet' })).toHaveAccessibleDescription(/open it later under Share access\.$/);
+    expect(screen.getByLabelText('Link')).toHaveValue(RANDOM);
     await user.type(screen.getByLabelText('Company name'), 'Рога и копыта');
-    expect(screen.getByLabelText('Link')).toHaveValue('roga-i-kopyta');
+    expect(screen.getByLabelText('Link')).toHaveValue(RANDOM);
     expect(screen.getByText('.hornhoof.org')).toBeInTheDocument();
-    expect(screen.getByText(/A name like this is easy to guess/)).toBeInTheDocument();
+    expect(screen.getByText(/A random name does not say whose company it is/)).toBeInTheDocument();
   });
 
   it('asks Hornhoof, with the setup code, whether the name is free', async () => {
@@ -232,6 +247,7 @@ describe('the public link on the setup screen', () => {
     const user = userEvent.setup();
     render(<Setup onDone={() => {}} linkDomain="hornhoof.org" />);
     await user.type(screen.getByLabelText('Company name'), 'Acme');
+    await typeLinkName(user, 'acme');
     expect(await screen.findByText('acme.hornhoof.org is free.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled();
     await user.clear(screen.getByLabelText('Link'));
@@ -254,13 +270,14 @@ describe('the public link on the setup screen', () => {
     expect(screen.getByLabelText('Link')).toHaveValue('my-firm');
   });
 
-  it('gives a long random name on a click, which is hard to guess', async () => {
+  it('gives a long random name on a click, which says nothing of the company', async () => {
     const user = userEvent.setup();
     render(<Setup onDone={() => {}} />);
-    await user.type(screen.getByLabelText('Company name'), 'Acme');
+    await typeLinkName(user, 'my-firm');
+    expect(screen.getByText(/A name you pick shows in public certificate logs/)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Random name' }));
-    expect((screen.getByLabelText('Link') as HTMLInputElement).value).toMatch(/^[a-z0-9]{24}$/);
-    expect(screen.getByText(/A random name is hard to guess/)).toBeInTheDocument();
+    expect(screen.getByLabelText('Link')).toHaveValue(RANDOM);
+    expect(screen.getByText(/A random name does not say whose company it is/)).toBeInTheDocument();
   });
 
   it('sends no link when it is turned off', async () => {
@@ -301,6 +318,77 @@ describe('the public link on the setup screen', () => {
     await user.click(screen.getByRole('button', { name: 'Finish setup' }));
     expect(await screen.findByText('hornhoof.org does not answer now. Try again in a few minutes.')).toBeInTheDocument();
     expect(screen.getByText(/turn off "Open Hornhoof on the internet", and open the link later under Share access\./)).toBeInTheDocument();
+  });
+});
+
+describe('the new link on the setup screen', () => {
+  beforeEach(() => {
+    window.history.replaceState(null, '', '/setup?code=LINK-CODE-123');
+    /* The clock also runs by itself, so the screen's own waiting (findBy) works beside the timers the test moves. */
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+  });
+  afterEach(() => vi.useRealTimers());
+
+  const setUpWithLink = async (onDone: (done: { welcome: boolean }) => void = () => {}) => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<Setup onDone={onDone} />);
+    await fillFirstTwoSteps(user);
+    await user.click(screen.getByRole('radio', { name: 'Later' }));
+    await user.click(screen.getByRole('button', { name: 'Finish setup' }));
+    return user;
+  };
+
+  it('shows the new link once its certificate is in', async () => {
+    let asked = 0;
+    mockApi({ 'POST /api/setup': [201, { ...CREATED, link: MADE }], 'GET /api/link': () => linkAnswer(++asked > 1) });
+    await setUpWithLink();
+    expect(await screen.findByText('Getting the certificate for your link. This takes under a minute.')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: MADE.url })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: AGREEMENT })).toHaveAttribute('href', 'https://letsencrypt.org/repository/');
+    await act(() => vi.advanceTimersByTimeAsync(2000));
+    expect(screen.getByText('People open your company from anywhere at this link:')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: MADE.url })).toHaveAttribute('href', MADE.url);
+    expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: AGREEMENT })).toBeInTheDocument();
+  });
+
+  it('shows the link after 90 seconds anyway', async () => {
+    mockApi({ 'POST /api/setup': [201, { ...CREATED, link: MADE }], 'GET /api/link': () => linkAnswer(false) });
+    await setUpWithLink();
+    await screen.findByText('Getting the certificate for your link. This takes under a minute.');
+    await act(() => vi.advanceTimersByTimeAsync(89_000));
+    expect(screen.queryByRole('link', { name: MADE.url })).not.toBeInTheDocument();
+    await act(() => vi.advanceTimersByTimeAsync(1_000));
+    expect(screen.getByText('The link works now. Its own certificate comes on its own; until then the connection is encrypted to hornhoof.org.')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: MADE.url })).toBeInTheDocument();
+  });
+
+  it('goes on with Next to the command card, or to the map when there is no command', async () => {
+    const command = 'curl -fsSL https://hq.acme.com/install.sh | bash -s -- --join JOIN-CODE-123';
+    mockApi({ 'POST /api/setup': [201, { ...CREATED, link: MADE, command }], 'GET /api/link': () => linkAnswer(true) });
+    const user = await setUpWithLink();
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    expect(screen.getByRole('heading', { name: 'Connect your machine' })).toBeInTheDocument();
+    expect(screen.getByText(command)).toBeInTheDocument();
+  });
+
+  it('goes to the map with Next when the setup made no command', async () => {
+    mockApi({ 'POST /api/setup': [201, { ...CREATED, link: MADE }], 'GET /api/link': () => linkAnswer(true) });
+    const onDone = vi.fn();
+    const user = await setUpWithLink(onDone);
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(onDone).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    expect(onDone).toHaveBeenCalledWith({ welcome: true });
+  });
+
+  it('goes on as today without a link', async () => {
+    mockApi({ 'POST /api/setup': [201, CREATED] });
+    const onDone = vi.fn();
+    await setUpWithLink(onDone);
+    expect(onDone).toHaveBeenCalledWith({ welcome: true });
+    expect(screen.queryByRole('link', { name: AGREEMENT })).not.toBeInTheDocument();
   });
 });
 
