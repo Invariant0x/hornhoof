@@ -3,6 +3,7 @@ import '@xterm/xterm/css/xterm.css';
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { useT } from '../i18n';
 import { fitTerminal, observeTerminalFit } from './terminal-fit';
+import { attachTerminalScroll, restoreLiveTerminal } from './terminal-scroll';
 import { isHidden } from './visibility';
 
 /* Ivan's iTerm2 profile in dark mode, which the terminal repeats on any page: Claude Code and Codex run their dark theme,
@@ -59,6 +60,7 @@ function received(view: View, m: Frame) {
   if (m.type === 'ready') {
     view.ready();
     view.told = false;
+    restoreLiveTerminal(view.term);
     view.term.reset();
     view.term.options.disableStdin = !m.write;
     view.unconfirmed = view.asked;
@@ -72,6 +74,7 @@ function received(view: View, m: Frame) {
 
 function screenCame(view: View, data: string) {
   if (!view.told) view.setUp(true);
+  restoreLiveTerminal(view.term);
   view.term.write(data);
   /* Forgotten before the resize goes, since the screen it brings may come before send returns. */
   const opened = view.unconfirmed;
@@ -117,12 +120,11 @@ function connectView(term: Terminal, path: string, setUp: (up: boolean) => void,
   };
 }
 
-/* SGR mouse reports carry 64 in the button code for the wheel; clicks, drags and moves never go to the program. */
+/* Mouse reports are for selection and local history, never for the program. */
 const SGR_MOUSE = /^\x1b\[<(\d+);\d+;\d+[Mm]$/;
 
-function isMouseClickOrDrag(data: string) {
-  const match = SGR_MOUSE.exec(data);
-  return match !== null && (Number(match[1]) & 64) === 0;
+function isMouseReport(data: string) {
+  return SGR_MOUSE.test(data);
 }
 
 function copyByCommand(text: string) {
@@ -158,10 +160,10 @@ type XtermCore = {
   };
 };
 
-/* Mouse drag selects text in the browser while the wheel (bit 16) still goes to tmux for history scrolling. */
+/* Mouse drag selects text and the wheel scrolls in the browser, so no mouse protocol events go to the node. */
 function keepSelecting(term: Terminal) {
   const { _selectionService: selection, coreMouseService: mouse } = (term as unknown as { _core: XtermCore })._core;
-  for (const p of Object.values(mouse._protocols)) p.events &= 16;
+  for (const p of Object.values(mouse._protocols)) p.events = 0;
   selection.shouldForceSelection = () => true;
   const enable = () => {
     selection.enable();
@@ -280,7 +282,7 @@ function CopyMenu({ menu, termRef, onClose, label }: CopyMenuProps) {
 }
 
 function shouldIgnoreInput(term: Terminal, data: string) {
-  return Boolean(term.options.disableStdin) || isMouseClickOrDrag(data);
+  return Boolean(term.options.disableStdin) || isMouseReport(data);
 }
 
 /* What the person types goes to the session in pieces the server takes, and so does each new size of the terminal. */
@@ -363,6 +365,7 @@ export function AgentTerminal({ path, program, onGone, watching = false }: Props
     const container = box.current!;
     term.open(container);
     keepSelecting(term);
+    attachTerminalScroll(term);
     bindCopy(term);
     fitTerminal(term, container);
     const view = connectView(term, path, setUp, () => gone.current());

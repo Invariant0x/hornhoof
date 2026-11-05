@@ -1,7 +1,7 @@
 import type { ApprovalChannel, ApprovalMode, ApprovalRule as ChannelRule } from '@hornhoof/protocol/approval-policy';
 import type { ExternalWait } from '@hornhoof/protocol/waits';
 import type { Notification } from '@hornhoof/protocol';
-import type { ConnectionEnd, FailureKind, Limits, MachineDrain, ModelOption, NodeDisconnectCause, NodeLoad, NodeReconnect, ProgramInfo, ProviderId, TemplateKey } from '@hornhoof/protocol';
+import type { ConnectionEnd, FailureKind, Limits, MachineDrain, ModelOption, NodeWait, NodeDisconnectCause, NodeLoad, NodeReconnect, ProgramInfo, ProviderId, TemplateKey } from '@hornhoof/protocol';
 import type { RoleEffort } from '@hornhoof/protocol/efforts';
 import type { RiskClass, WorkKind } from '@hornhoof/protocol/pipeline-report';
 import type { ProgramRetry, TurnAlarm, TurnProgram, TurnRetry, WorkLine } from '@hornhoof/protocol/map';
@@ -219,6 +219,8 @@ export type OrchestratorState = {
   terminal?: boolean;
   /* This person types into that terminal, as the owner of the agent's plan. The agent's own window gets it. */
   canType?: boolean;
+  /* Why the last prompt its program took has no turn, until a new turn begins; older servers do not say. */
+  turnRefused?: TurnRefusal | null;
 };
 
 /* One part of an agent's instructions: who it is (written by Hornhoof), its role, or a skill between markers. */
@@ -290,7 +292,8 @@ export type StructureItem = NewItem | ChangeItem;
 /* Who a pulse on the map runs between. */
 export type Endpoint = { kind: 'person'; id: string } | { kind: 'orchestrator' } | { kind: 'department'; id: string } | { kind: 'agent'; id: string; departmentId: string };
 
-export type AgentEventKind = 'program' | 'message' | 'text' | 'tool' | 'tool_result' | 'todo' | 'proposal' | 'applied' | 'stopped' | 'failed' | 'computer' | 'typed';
+export type AgentEventKind = 'program' | 'message' | 'text' | 'tool' | 'tool_result' | 'todo' | 'proposal' | 'applied' | 'stopped' | 'failed' | 'computer' | 'typed' | 'turn_refused';
+export type TurnRefusal = 'busy' | 'unknown_words';
 
 /* Who wrote or got a message: a person (id null: the company's people at large), an agent, or Hornhoof itself. */
 export type MessageParty = {
@@ -484,7 +487,7 @@ export type TurnView = {
 
 export type Machine = { id: string; hostname: string };
 
-export type { MachineDrain };
+export type { MachineDrain, NodeWait };
 /* Why a machine dropped: as the server saw it, or as the machine did when the server saw only its new connection. */
 export type DropCause = ConnectionEnd | NodeDisconnectCause;
 
@@ -590,6 +593,8 @@ export type UpdatesView = {
   versions: Build[];
   error: string | null;
   updater: { present: boolean; status: UpdaterStatus | null; waiting: { version: string; commit?: string } | null };
+  /* What each node waits for before it is replaced. A server from before this says nothing. */
+  nodeWaits?: NodeWait[];
 };
 
 /* A note of the company notebook or a department's, and who wrote it last: a person, the orchestrator or the head. */

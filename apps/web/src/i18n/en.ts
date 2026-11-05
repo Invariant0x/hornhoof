@@ -578,6 +578,10 @@ export const en = {
     limitUntil: (at: string) => `The plan is at its limit. Turns wait until ${at} and go on by themselves then.`,
     budgetUntil: (at: string) => `The plan used the share set for tasks. Task turns wait until ${at}; messages from people still go.`,
     machineDrain: 'The machine is finishing its work before an update. New turns wait and go on by themselves after it.',
+    turnRefused: {
+      busy: 'What was just typed got no turn of its own: it went into the turn that was running. Check the answer there, and type it again if it is missing.',
+      unknown_words: 'The agent is answering words, but Hornhoof could not tell who wrote them, so no turn opened and its tools are closed for this answer. Please type your message again.',
+    },
     failed: {
       timeout: 'The orchestrator did not finish within 15 minutes.',
       not_logged_in: 'The orchestrator\'s subscription is signed out on its machine. Sign in again, then write once more.',
@@ -1138,6 +1142,12 @@ export const en = {
     cutTitle: 'Update now?',
     cutText: (n: number) => (n === 1 ? '1 agent turn is running. If you update now, it stops midway, and Hornhoof starts it again after the update.' : `${n} agent turns are running. If you update now, they stop midway, and Hornhoof starts them again after the update.`),
     cutYes: 'Update now',
+    /* Each node on the update screen: what it waits for before it is replaced. */
+    nodesTitle: 'Updating the nodes',
+    nodesNote: 'Each node restarts as soon as its own work ends. Nothing that runs is stopped.',
+    nodeOn: (plan: string, machine: string) => `${plan} on ${machine}`,
+    nodeFree: 'Free: being replaced now, then takes work again by itself',
+    nodeWaitsFor: (work: string) => `Waits for: ${work}`,
   },
   errors: {
     command_active: 'There is an active command for this place. Use it or wait until it expires.',

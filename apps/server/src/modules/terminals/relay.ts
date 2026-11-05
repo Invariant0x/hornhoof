@@ -6,6 +6,15 @@ export type View = { socket: WebSocket; node: NodeIdentity; agentId: string; per
 
 /* What a person typed counts for this long: the prompt they sent opens its turn right after. */
 const TYPED_MS = 60_000;
+/* An Enter pressed in a running turn counts for as long as a turn may run: what it sent may wait in the program's queue
+   until that turn ends. An agent keeps only its last few. */
+const PRESSED_MS = 2 * 3_600_000;
+const MAX_PRESSED = 8;
+
+type Pressed = { jobId: string; personId: string; node: NodeIdentity; at: number };
+
+/* Why Hornhoof opened no turn for what a program took: another turn ran, or the words are tied to nobody. */
+export type TurnRefusal = 'busy' | 'unknown_words';
 
 /* How a view ends, as the browser hears it. */
 export const CLOSE = {
@@ -18,10 +27,14 @@ export const CLOSE = {
 
 const end = (socket: WebSocket, [code, reason]: readonly [number, string]) => socket.close(code, reason);
 
+const fresh = (pressed: Pressed) => Date.now() - pressed.at < PRESSED_MS;
+
 /* Browsers watching agents' terminals, each tied to the node that shows the session. */
 export class TerminalRelay {
   private readonly views = new Map<string, View>();
   private readonly typed = new Map<string, { personId: string; node: NodeIdentity; at: number }>();
+  private readonly pressed = new Map<string, Pressed[]>();
+  private readonly refused = new Map<string, TurnRefusal>();
 
   add(termId: string, view: View): void {
     this.views.set(termId, view);
@@ -77,6 +90,36 @@ export class TerminalRelay {
     const last = this.typed.get(agentId);
     this.typed.delete(agentId);
     return last && Date.now() - last.at < TYPED_MS ? last.personId : null;
+  }
+
+  /* A person pressed Enter in the agent's running turn. The program may take it into that turn, or queue it for after. */
+  pressedIn(agentId: string, jobId: string, personId: string, node: NodeIdentity): void {
+    const kept = (this.pressed.get(agentId) ?? []).filter(fresh);
+    kept.push({ jobId, personId, node, at: Date.now() });
+    this.pressed.set(agentId, kept.slice(-MAX_PRESSED));
+  }
+
+  /* The person whose Enter in this turn sent words its node saw queued, the latest first. One Enter opens one turn. */
+  takePressed(node: NodeIdentity, agentId: string, jobId: string): string | null {
+    const kept = this.pressed.get(agentId) ?? [];
+    const at = kept.findLastIndex(p => p.jobId === jobId && sameNode(p.node, node) && fresh(p));
+    if (at < 0) return null;
+    const [taken] = kept.splice(at, 1);
+    if (!kept.length) this.pressed.delete(agentId);
+    return taken!.personId;
+  }
+
+  refuse(agentId: string, reason: TurnRefusal): void {
+    this.refused.set(agentId, reason);
+  }
+
+  /* A new turn of the agent ended what its window says about the last one it could not open. */
+  turnBegan(agentId: string): void {
+    this.refused.delete(agentId);
+  }
+
+  refusal(agentId: string): TurnRefusal | null {
+    return this.refused.get(agentId) ?? null;
   }
 
   stop(): void {

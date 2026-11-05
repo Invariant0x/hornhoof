@@ -1,7 +1,7 @@
 import { combineReport, reportDelay } from './report-notices.js';
 import type { MachineDrain, Notification } from '@hornhoof/protocol';
 import type { MessageParty } from '../events/parties.js';
-import { currentLimits, effortFor, effortsOf, inLane, MAX_INSTRUCTIONS, modelsFor, OLD_NODE_INSTRUCTIONS, ORCHESTRATOR_EFFORT, UNHEARD_MS, type Limits } from '@hornhoof/protocol';
+import { currentLimits, effortFor, effortsOf, inLane, isProgramOwnPrompt, MAX_INSTRUCTIONS, modelsFor, OLD_NODE_INSTRUCTIONS, ORCHESTRATOR_EFFORT, UNHEARD_MS, type Limits } from '@hornhoof/protocol';
 import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, lte, ne, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -9,8 +9,9 @@ import { loggable } from '../../errors.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
 import { agentEvents, agents, jobs, nodes, subscriptions, tasks, turns } from '../../db/schema.js';
 import { dispatchJob } from '../jobs/dispatch.js';
-import { nodeDrain, nodeHeld, nodeHeldFrom, turnsHeld } from '../updates/drain.js';
-import { actingCeo, alsoKept, deliverLockedInput, inputKept, turnStarted, withInputLock } from './decision-context.js';
+import type { TurnRefusal } from '../terminals/relay.js';
+import { nodeDrain, nodeHeld, nodeHeldFrom, nodeHeldLong, turnsHeld } from '../updates/drain.js';
+import { actingCeo, alsoKept, deliverLockedInput, inputKept, turnStarted, typedWentIn, withInputLock } from './decision-context.js';
 import { BUILTIN, identityOf, nodeIdentity, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { liveNode, planNodes, type NodeRow } from '../nodes/nodes.js';
 import { jobsOf } from '../nodes/messages.js';
@@ -61,6 +62,8 @@ export type AgentState = FailureState & {
   queued: number;
   /* Its node shows the agent's live terminal. */
   terminal: boolean;
+  /* Why the last prompt its program took has no turn, until a new turn begins. */
+  turnRefused: TurnRefusal | null;
   program: TurnProgram | null;
   alarm: TurnAlarm | null;
 };
@@ -254,7 +257,7 @@ export async function windowNode(ctx: Ctx, agentId: string): Promise<ProgramNode
     const [running] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
     const sub = running ? null : await liveSubscription(ctx, agentId);
     if (sub?.kind !== 'personal') return null;
-    const [agent] = await ctx.db.select({ id: agents.id, nodeId: agents.nodeId, roleKey: agents.roleKey }).from(agents).where(eq(agents.id, agentId));
+    const [agent] = await ctx.db.select({ id: agents.id, kind: agents.kind, nodeId: agents.nodeId, roleKey: agents.roleKey }).from(agents).where(eq(agents.id, agentId));
     const place = agent ? await placement(ctx, agent, sub) : null;
     if (place?.moves) await ctx.db.update(agents).set({ nodeId: place.nodeId }).where(eq(agents.id, agentId));
     if (place) return { node: place.node, ownerPersonId: sub.ownerPersonId };
@@ -371,6 +374,14 @@ async function agentOnNode(ctx: Ctx, node: NodeIdentity, agentId: string): Promi
   return agent && sub && at && sameNode(at, node) ? { agent, sub } : null;
 }
 
+/* Whose turn it is: of the person who typed, of the person whose words the program took after the turn they answered, or,
+   for the words of anyone else, of the one the turn they came into was. */
+async function turnOwner(ctx: Ctx, personId: string | null, repeated: RepeatedTurn | null): Promise<{ createdBy: string | null; answersCeo: boolean }> {
+  if (repeated && !repeated.repeated.personId) return { createdBy: repeated.createdBy, answersCeo: repeated.answersCeo };
+  const owner = repeated ? repeated.repeated.personId : personId;
+  return { createdBy: owner, answersCeo: await actsForCeo(ctx, owner) };
+}
+
 async function insertRunningTurn(
   ctx: Ctx,
   node: NodeIdentity,
@@ -398,8 +409,7 @@ async function insertRunningTurn(
       startedAt: new Date(),
       prompt: text,
       timeoutMs: TURN_TIMEOUT_MS,
-      createdBy: repeated ? repeated.createdBy : personId,
-      answersCeo: repeated ? repeated.answersCeo : await actsForCeo(ctx, personId),
+      ...(await turnOwner(ctx, personId, repeated)),
       toolTokenHash: hashToken(token),
       instructionsHash: last ? last.hash : null,
     })
@@ -451,15 +461,44 @@ async function storeTypedTurn(
   return opened;
 }
 
-/* A person typed into the agent's terminal while no turn ran, or while the program started. The turn is theirs and runs
-   from now on the node that shows the session, which goes on with the instructions it was started with: their hash stays,
-   so the next turn resumes it. Without a person's keys, only known live words the program queued may open a turn. */
-export async function openTypedTurn(ctx: Ctx, node: NodeIdentity, agentId: string, text: string, personId: string | null, queuedFrom?: string): Promise<{ jobId: string; token: string } | null> {
+/* A person typed into the agent's terminal while no turn ran, or while the program started: their keys came just before.
+   Or they pressed Enter in a turn and its node saw the program queue what they typed for after it. The turn is theirs and
+   runs from now on the node that shows the session, which goes on with the instructions it was started with: their hash
+   stays, so the next turn resumes it. Without a person's keys, only known live words the program queued may open a turn. */
+export async function openTypedTurn(ctx: Ctx, node: NodeIdentity, agentId: string, text: string, personId: string | null, queuedFrom?: string): Promise<{ jobId: string; token: string; typedBy: string | null } | null> {
   if ((!personId && !queuedFrom) || !z.uuid().safeParse(agentId).success) return null;
-  const queued = queuedFrom ? await queuedWords(ctx, agentId, queuedFrom, text) : null;
-  if (queuedFrom && !queued) return null;
-  const run = () => onAgent(ctx, agentId, () => storeTypedTurn(ctx, node, agentId, text, personId, queuedFrom, queued));
-  return queued ? withInputLock(ctx, agentId, run) : run();
+  const queued = await knownQueued(ctx, agentId, text, queuedFrom);
+  const pressed = pressedEnter(ctx, node, agentId, personId, queued, queuedFrom);
+  const typedBy = pressed ?? personId;
+  if (!queued && !typedBy) return null;
+  const run = () => onAgent(ctx, agentId, () => storeTypedTurn(ctx, node, agentId, text, typedBy, queuedFrom, queued));
+  return afterTypedTurn(ctx, agentId, await (queued ? withInputLock(ctx, agentId, run) : run()), pressed, typedBy);
+}
+
+/* The person whose Enter in the turn that the node names sent the words, when no keys came just before them. */
+const pressedEnter = (ctx: Ctx, node: NodeIdentity, agentId: string, personId: string | null, queued: QueuedTurn | null, queuedFrom?: string): string | null =>
+  queuedFrom && !queued && !personId ? ctx.terminals.takePressed(node, agentId, queuedFrom) : null;
+
+const knownQueued = async (ctx: Ctx, agentId: string, text: string, queuedFrom?: string): Promise<QueuedTurn | null> =>
+  queuedFrom ? queuedWords(ctx, agentId, queuedFrom, text) : null;
+
+/* What the window says of the last refusal ends with a turn. With none, what a person's Enter queued is in the turn that runs. */
+async function afterTypedTurn(ctx: Ctx, agentId: string, opened: { jobId: string; token: string } | null, pressed: string | null, typedBy: string | null) {
+  if (opened) ctx.terminals.turnBegan(agentId);
+  else if (pressed) await typedWentIn(ctx, agentId, pressed);
+  return opened && { ...opened, typedBy };
+}
+
+/* Hornhoof opened no turn for what the program took, whose answer has no tools: the window of the agent says why. Nothing
+   of the kind for a node the agent is not on, which may speak for no one of its company, or for the program's own news. */
+export async function turnRefused(ctx: Ctx, node: NodeIdentity, agentId: string, text: string, queuedFrom?: string): Promise<void> {
+  if (isProgramOwnPrompt(text) || !z.uuid().safeParse(agentId).success) return;
+  const target = await agentOnNode(ctx, node, agentId);
+  if (!target) return;
+  const [running] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
+  const reason: TurnRefusal = running && running.id !== queuedFrom ? 'busy' : 'unknown_words';
+  ctx.terminals.refuse(agentId, reason);
+  await appendEvent(ctx, { companyId: target.agent.companyId, agentId, kind: 'turn_refused', data: { reason } });
 }
 
 /* Someone who may type opened the window of an agent whose program does not run: a turn that types nothing starts it on
@@ -607,18 +646,37 @@ export const takesTurns = (ctx: Ctx, n: NodeRow, need: number[] = CONVERSATION_N
 /* moves: the agent has not been on this node until now, or leaves the machine it was on for the built-in node. */
 type Placement = { node: NodeIdentity; nodeId: string | null; moves: boolean };
 
+type PlacedAgent = { id: string; kind: 'orchestrator' | 'head' | 'worker'; nodeId: string | null; roleKey: string | null };
+
+/* The ones the company waits for while a node waits for an update: a limit holds their turns, see nodeHeldFrom. */
+const isLeader = (agent: Pick<PlacedAgent, 'kind'>): boolean => agent.kind !== 'worker';
+
 /* Where the agent's next turn goes. A company key's to the built-in node. A plan's to the node its program is on while
    that one is signed in, connected and new enough, so its folder, session and terminal go on there; otherwise to the
    freest of the plan's nodes that is, unless the agent has work in progress on its own and waits for it. None while no
    node can take it. */
-async function placement(ctx: Ctx, agent: { id: string; nodeId: string | null; roleKey: string | null }, sub: { id: string; kind: 'personal' | 'api_key' }, need = CONVERSATION_NODE): Promise<Placement | null> {
-  const held = (node: NodeIdentity) => nodeHeldFrom(ctx, node, agent.roleKey);
-  if (sub.kind === 'api_key') return ctx.hub.isReady(BUILTIN) && !held(BUILTIN) ? { node: BUILTIN, nodeId: null, moves: agent.nodeId !== null } : null;
+async function placement(ctx: Ctx, agent: PlacedAgent, sub: { id: string; kind: 'personal' | 'api_key' }, need = CONVERSATION_NODE): Promise<Placement | null> {
+  if (sub.kind === 'api_key') return ctx.hub.isReady(BUILTIN) && !nodeHeldFrom(ctx, BUILTIN, agent.roleKey, isLeader(agent)) ? { node: BUILTIN, nodeId: null, moves: agent.nodeId !== null } : null;
   const all = await planNodes(ctx.db, [sub.id]);
-  const able = all.filter(n => !held(nodeIdentity(n.id)) && takesTurns(ctx, n, need));
-  const stays = all.some(n => n.id === agent.nodeId) && (await holdsWork(ctx, agent.id));
-  const pick = able.find(n => n.id === agent.nodeId) ?? (stays ? null : await freest(ctx, able));
+  const able = all.filter(n => !nodeHeldFrom(ctx, nodeIdentity(n.id), agent.roleKey) && takesTurns(ctx, n, need));
+  const pick = able.find(n => n.id === agent.nodeId) ?? (await waitsForOwnNode(ctx, agent, all) ? null : (await freest(ctx, able)) ?? (await heldNodeFor(ctx, agent, all, need)));
   return pick ? { node: nodeIdentity(pick.id), nodeId: pick.id, moves: pick.id !== agent.nodeId } : null;
+}
+
+/* Whether the agent has work in progress on a node of its plan and waits for that one: not the orchestrator or a head whom
+   an update kept off it past their limit, who go to another machine of the plan when one can take them. */
+async function waitsForOwnNode(ctx: Ctx, agent: PlacedAgent, all: NodeRow[]): Promise<boolean> {
+  if (!all.some(n => n.id === agent.nodeId)) return false;
+  if (isLeader(agent) && nodeHeldLong(ctx, nodeIdentity(agent.nodeId!))) return false;
+  return holdsWork(ctx, agent.id);
+}
+
+/* With no other machine, the node an update keeps the orchestrator's or a head's turn off past their limit: its own, if it
+   is one of those. */
+async function heldNodeFor(ctx: Ctx, agent: PlacedAgent, all: NodeRow[], need: number[]): Promise<NodeRow | null> {
+  if (!isLeader(agent)) return null;
+  const open = all.filter(n => !nodeHeldFrom(ctx, nodeIdentity(n.id), agent.roleKey, true) && takesTurns(ctx, n, need));
+  return open.find(n => n.id === agent.nodeId) ?? freest(ctx, open);
 }
 
 /* Whether the agent holds a task it works on, or stopped on to ask: its folder may hold work it has not pushed, so it
@@ -757,6 +815,7 @@ async function takeCurrent(tx: Tx, job: Queued, along: readonly Along[], sending
    as what holds the agent's input lock may wait for its line. */
 function wentOutWithWords(ctx: Ctx, agentId: string, job: Queued & { prompt: string }): void {
   if (!job.prompt && !job.taskId) return;
+  ctx.terminals.turnBegan(agentId);
   void turnStarted(ctx, agentId, job.id).catch(err => ctx.log.error({ error: loggable(err) }, 'An Enter that waited could not be settled.'));
 }
 
@@ -897,6 +956,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
       subscriptionId: sub.id,
       nodeId: place.nodeId,
       role: agent.roleKey,
+      leader: isLeader(agent),
       prompt,
       sessionId,
       model,
@@ -952,7 +1012,7 @@ export async function orchestratorOf(ctx: Ctx, companyId: string) {
 
 export async function orchestratorState(ctx: Ctx, companyId: string): Promise<AgentState> {
   const agent = await orchestratorOf(ctx, companyId);
-  if (!agent) return { ready: false, machineDrain: null, limitUntil: null, budgetUntil: null, held: null, reason: 'no_subscription', browserError: null, busy: false, runningJobId: null, queued: 0, terminal: false, program: null, alarm: null, retry: null, failure: null, obsolete: null };
+  if (!agent) return { ready: false, machineDrain: null, limitUntil: null, budgetUntil: null, held: null, reason: 'no_subscription', browserError: null, busy: false, runningJobId: null, queued: 0, terminal: false, turnRefused: null, program: null, alarm: null, retry: null, failure: null, obsolete: null };
   return agentState(ctx, agent.id);
 }
 
@@ -1021,6 +1081,7 @@ export async function agentState(ctx: Ctx, agentId: string): Promise<AgentState>
     runningJobId: running?.id ?? null,
     queued: Number(waiting?.n ?? 0),
     terminal,
+    turnRefused: ctx.terminals.refusal(agentId),
     ...agentProgramState(ctx, running),
     ...await agentFailureState(ctx, agentId),
   };

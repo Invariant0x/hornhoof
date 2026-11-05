@@ -279,7 +279,8 @@ describe('a program starts a turn with its queued live words', () => {
     const source = await appendEvent(c.ctx, { companyId: c.companyId, agentId: orchestrator!.id, jobId: before!.id, kind: 'message', personId: author === 'person' ? c.sub.ownerPersonId : null, data: { text: 'Keep these words.', ...(author === 'agent' ? { from: 'agent', by: c.head.id } : {}) } });
     await handleNodeMessage(c.ctx, BUILTIN, { type: 'turn.open', agentKey: orchestrator!.id, text: addressed('Keep these words.', source.message!), queuedFrom: before!.id, ref: 'queued' });
     const next = (await c.turnsOf(orchestrator!.id)).find(j => j.id !== before!.id)!;
-    expect(await c.jobOf(next.id)).toMatchObject({ createdBy: null, answersCeo: true });
+    /* Words of the person the turn answered open a turn in their name; an agent's go on as the turn they came into. */
+    expect(await c.jobOf(next.id)).toMatchObject({ createdBy: author === 'person' ? c.sub.ownerPersonId : null, answersCeo: true });
     expect(await decisionPrincipal(c.db, next.id)).toEqual(author === 'person' ? { personId: c.sub.ownerPersonId, sourceSeq: expect.any(Number) } : null);
     expect(await messageForJob(c.ctx, { id: next.id, companyId: c.companyId, agentId: orchestrator!.id })).toEqual(source.message);
     const messages = await c.db.select().from(agentEvents).where(and(eq(agentEvents.agentId, orchestrator!.id), eq(agentEvents.kind, 'message')));

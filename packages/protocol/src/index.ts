@@ -1,6 +1,6 @@
 export { APPROVAL_CHANNELS, APPROVAL_MODES, ApprovalAmount, ApprovalChannel, ApprovalRule, DEFAULT_APPROVAL_RULE, approvalNeeded, kindKey, ruleOf, type ApprovalMode, type ApprovalWork, type StoredApprovalRule } from './approval-policy.js';
 export { NOTIFICATION_NAMES, NotificationSchema, NotificationSourceSchema, type Notification, type NotificationSource } from './notifications.js';
-export { MachineDrain } from './machine-drain.js';
+export { MachineDrain, NodeWait } from './machine-drain.js';
 export { inLane } from './lane.js';
 export * from './pipeline-report.js';
 export { COMMIT_SHA, CommitSha, ownBranch } from './test-commit.js';
@@ -40,6 +40,9 @@ export const PROGRAM_SCREEN_MAX = 4000;
 
 /* How long after a turn ends the program may still start its own turn with words it kept. */
 export const UNHEARD_MS = 15_000;
+
+/* A program's own words to itself, like the news of its background work: no person's, and nothing of anyone's goes lost. */
+export const isProgramOwnPrompt = (text: string): boolean => /^\s*<(?:task-notification|system-reminder)\b/.test(text);
 
 /* Why a part of a run ended other than with its command passing: it failed, ran out of time, was stopped, the branch
    could not be cloned, or the task's files could not be fetched. */
@@ -625,7 +628,9 @@ const ServerMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('cred.lease'), hold: z.boolean() }),
   /* write: the person may type; anyone else watches. agentKey: the agent's folder and session on the node. */
   z.object({ type: z.literal('term.open'), termId: TermId, agentKey: Id, cols: Cols, rows: Rows, write: z.boolean() }),
-  z.object({ type: z.literal('term.input'), termId: TermId, data: z.string().max(TERM_CHUNK) }),
+  /* pressedIn: these keys hold an Enter of a person, pressed in this running turn: what it sends may come out of the
+     program's own queue after that turn. */
+  z.object({ type: z.literal('term.input'), termId: TermId, data: z.string().max(TERM_CHUNK), pressedIn: Id.optional() }),
   z.object({ type: z.literal('term.resize'), termId: TermId, cols: Cols, rows: Rows }),
   z.object({ type: z.literal('term.close'), termId: TermId }),
   /* The turn Hornhoof opened for what a person typed, or none when it could not. */

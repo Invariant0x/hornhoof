@@ -2,7 +2,7 @@ import { and, asc, count, desc, eq, gt, gte, inArray, isNotNull, isNull, ne, not
 import type { Ctx } from '../../app.js';
 import { loggable } from '../../errors.js';
 import { agentChanges, agentEvents, agents, jobs, requests, subscriptions, taskEvents, tasks, testRuns } from '../../db/schema.js';
-import { agentState, conversationOf, insertTurn, limitUntil, liveSubscription, onAgent, openTypedTurn, orchestratorOf, pump, refusedLimits, UNSENT, type TurnMessage } from '../conversation/queue.js';
+import { agentState, conversationOf, insertTurn, limitUntil, liveSubscription, onAgent, openTypedTurn, orchestratorOf, pump, refusedLimits, turnRefused, UNSENT, type TurnMessage } from '../conversation/queue.js';
 import { deliverLive } from '../conversation/decision-context.js';
 import { quote } from '../conversation/prompt.js';
 import { appendEvent, publishWorking } from '../events/store.js';
@@ -698,6 +698,7 @@ async function requestCancellation(ctx: Ctx, jobId: string) {
    the agent's line, which the pump of its task's turn waits on. */
 export async function typedTurn(ctx: Ctx, node: NodeIdentity, agentId: string, text: string, personId: string | null, queuedFrom?: string): Promise<{ jobId: string; token: string } | null> {
   const opened = await openTypedTurn(ctx, node, agentId, text, personId, queuedFrom);
-  if (opened && personId) await wakeAll(ctx, await answerDirectly(ctx, personId, agentId, text));
+  if (!opened) await turnRefused(ctx, node, agentId, text, queuedFrom);
+  else if (opened.typedBy) await wakeAll(ctx, await answerDirectly(ctx, opened.typedBy, agentId, text));
   return opened;
 }
