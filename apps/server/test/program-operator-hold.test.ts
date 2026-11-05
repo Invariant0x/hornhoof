@@ -9,6 +9,7 @@ import { createTask } from '../src/modules/tasks/engine.js';
 import { afterRestart, afterRestartOutsideTask } from '../src/modules/tasks/restarts.js';
 import { recordJobProgram } from '../src/modules/tasks/silent.js';
 import { acceptOperatorEvidence } from '../src/modules/program-operator/evidence.js';
+import { adoptOperatorOwnerTurn } from '../src/modules/program-operator/recovery.js';
 import { checkOperatorHealth } from '../src/modules/program-operator/health.js';
 import { releaseRecoveryHold } from '../src/modules/program-operator/release.js';
 import { receiveOperatorReply } from '../src/modules/program-operator/rpc.js';
@@ -128,9 +129,49 @@ it('leaves the retry of a cut turn to run after a late receipt: being recorded d
   await askedByItsOwner(c);
   await failOpenJobs(c.ctx, eq(jobs.id, c.job.id), 'machine_restarted');
   const [retry] = await retriesOf(c);
-  await c.record({ ...c.fact, phase: 'cancelled', elapsedMs: 70000 });
+  c.ctx.hub.isReady = () => false;
+  await c.ready(true);
+  expect(await c.row()).toMatchObject({ recoveryHold: false, continuationJobId: retry!.id });
   await c.record({ ...c.fact, phase: 'taken', elapsedMs: 90000 });
-  expect((await c.jobOf(retry!.id)).error).not.toBe('cancelled');
+  expect(await c.jobOf(retry!.id)).toMatchObject({ status: 'queued' });
+});
+
+it('leaves the retry of a cut turn to run when its owner starts a turn of their own, linked to the hold or not', async () => {
+  for (const linked of [false, true]) {
+    const c = await held({ failed: false });
+    await askedByItsOwner(c);
+    await failOpenJobs(c.ctx, eq(jobs.id, c.job.id), 'machine_restarted');
+    const [retry] = await retriesOf(c);
+    c.ctx.hub.isReady = () => false;
+    if (linked) await c.record({ ...c.fact, phase: 'cancelled', elapsedMs: 70000 });
+    const [typed] = await c.db.insert(jobs).values({ companyId: c.companyId, agentId: c.agent.id, subscriptionId: c.sub.id, nodeId: c.identity.nodeId, kind: 'conversation', prompt: 'Words of its owner.', timeoutMs: 1000, status: 'running' }).returning();
+    await adoptOperatorOwnerTurn(c.ctx, c.agent.id, typed!.id, c.identity.nodeId);
+    expect(await c.jobOf(retry!.id)).toMatchObject({ status: 'queued' });
+    expect(await c.row()).toMatchObject({ recoveryHold: false, resolution: { outcome: 'owner_turn' } });
+  }
+});
+
+it('ends the hold as stopped when somebody stopped the turn its words went on in, with no second turn', async () => {
+  const c = await held({ failed: false });
+  await askedByItsOwner(c);
+  await failOpenJobs(c.ctx, eq(jobs.id, c.job.id), 'machine_restarted');
+  const [retry] = await retriesOf(c);
+  await c.db.update(jobs).set({ status: 'failed', error: 'cancelled', finishedAt: new Date() }).where(eq(jobs.id, retry!.id));
+  await c.record({ ...c.fact, phase: 'cancelled', elapsedMs: 70000 });
+  expect(await c.children()).toEqual([]);
+  expect(await c.row()).toMatchObject({ recoveryHold: false, continuationJobId: null, resolution: { outcome: 'stopped' } });
+});
+
+it('ends the hold of an agent that was removed, runs nothing for it and calls nobody about it', async () => {
+  const c = await held();
+  const rob = await hire(c, 'Rob', 'worker', 'OPS-FIX');
+  await c.db.update(agents).set({ removedAt: new Date() }).where(eq(agents.id, c.agent.id));
+  await c.ready(true);
+  expect(await c.children()).toEqual([]);
+  await checkOperatorHealth(c.ctx, new Date(Date.now() + 6 * MINUTE));
+  expect(await c.row()).toMatchObject({ recoveryHold: false, continuationJobId: null, resolution: { outcome: 'stopped' } });
+  expect(await turnsWith(c, rob.id, c.incident.id)).toEqual([]);
+  expect(await c.children()).toEqual([]);
 });
 
 it.each(['removed', 'switched_off'])('does not send again the words of a turn that ended as %s', async error => {
@@ -384,6 +425,13 @@ it.each<[string, (c: Awaited<ReturnType<typeof release>>) => Promise<unknown>]>(
   expect(await c.children()).toEqual([]);
 });
 
+it('refuses to release the hold of an agent that was removed, and sends it nothing', async () => {
+  const c = await release();
+  await c.db.update(agents).set({ removedAt: new Date() }).where(eq(agents.id, c.agent.id));
+  await expect(c.call()).rejects.toMatchObject({ status: 403 });
+  expect(await c.children()).toEqual([]);
+});
+
 it('refuses a reliability engineer who is the one on hold', async () => {
   const c = await release();
   const own = { id: c.turn.id, companyId: c.companyId, agentId: c.agent.id };
@@ -488,6 +536,7 @@ it('runs nothing again for a cut turn whose agent has no plan any more, and what
   await failOpenJobs(c.ctx, eq(jobs.id, first), 'machine_restarted');
   expect(await c.db.select().from(jobs).where(eq(jobs.retryOf, first))).toEqual([]);
   expect(await c.jobOf(first)).toMatchObject({ status: 'failed', error: 'machine_restarted' });
+  expect(JSON.stringify(await c.db.select().from(agentEvents).where(eq(agentEvents.jobId, first)))).toContain('no plan');
 });
 
 it('goes on in the session the turn had when the node restarted, known only from what the node said meanwhile', async () => {

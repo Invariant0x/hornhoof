@@ -56,7 +56,8 @@ async function otherTurnRuns(ctx: Ctx, row: Case): Promise<boolean> {
 
 export async function releaseRecoveryHold(ctx: Ctx, caller: OperatorCaller, input: ReleaseInput): Promise<ReleaseResult> {
   const me = await authorizeRelease(ctx, caller);
-  const [found] = await ctx.db.select().from(programOperatorCases).where(and(eq(programOperatorCases.id, input.case), eq(programOperatorCases.companyId, caller.companyId)));
+  const [held] = await ctx.db.select({ row: programOperatorCases }).from(programOperatorCases).innerJoin(agents, eq(agents.id, programOperatorCases.agentId)).where(and(eq(programOperatorCases.id, input.case), eq(programOperatorCases.companyId, caller.companyId), isNull(agents.removedAt)));
+  const found = held?.row;
   if (!found || found.agentId === me.id) throw operatorRefused();
   if (!found.recoveryHold) return { result: 'no_hold', status: found.status, continuation: found.continuationJobId };
   const state = await requestRecoveryState(ctx, found);

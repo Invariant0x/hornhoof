@@ -1,9 +1,10 @@
 import { and, asc, eq, inArray, isNull, or } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, departments, jobs, taskEvents, tasks, type Interruption, type RestartCause } from '../../db/schema.js';
-import { enqueueTurn, insertTurn, liveSubscription, NoSubscription, onAgent } from '../conversation/queue.js';
+import { enqueueTurn, insertTurn, liveSubscription, NoSubscription, onAgent, turnGoingOn } from '../conversation/queue.js';
 import { repeatedTurn as repeatedWords, wordsForTurn } from '../conversation/turn-words.js';
 import { turnAgain } from './again.js';
+import { logTurnFact } from './turn-log.js';
 import { published } from './engine.js';
 import { repeatedTurn, type TaskWake } from './wake-state.js';
 
@@ -52,15 +53,10 @@ export async function afterRestart(ctx: Ctx, jobId: string): Promise<'retried' |
   return 'retried';
 }
 
-/* The turn these words already go on in: the recovery of a hold this restart ended may have been first. */
-async function goingOn(ctx: Ctx, jobId: string): Promise<string | null> {
-  const [next] = await ctx.db.select({ id: jobs.id }).from(jobs).where(or(eq(jobs.retryOf, jobId), eq(jobs.continueOf, jobId))).limit(1);
-  return next?.id ?? null;
-}
-
 async function retry(ctx: Ctx, { job, task, agent, cut, taskWake }: Ended & { taskWake: TaskWake }): Promise<void> {
   const note = `Your last turn on #${task.number} "${task.title}" ${cutOff(cut)}. Hornhoof runs it once more: check what that turn already did, then go on.`;
-  const retried = await onAgent(ctx, agent.id, async () => (await goingOn(ctx, job.id)) ?? turnAgain(ctx, { job, task, agent, taskWake }, note, { retryOf: job.id }));
+  /* The recovery of a hold this restart ended may have been first: its turn is the retry. */
+  const retried = await onAgent(ctx, agent.id, async () => (await turnGoingOn(ctx, job.id))?.id ?? turnAgain(ctx, { job, task, agent, taskWake }, note, { retryOf: job.id }));
   const again = retried ? `Hornhoof runs it again: retry 1 of ${RETRIES}, turn ${retried}.` : `Hornhoof could not run it again: ${agent.name} has no subscription.`;
   await logCut(ctx, task, agent, cut, `${agent.name}'s turn ${job.id} on #${task.number} ${cutOff(cut)}. ${again}`, { retry: retried ? { job: retried, n: 1, of: RETRIES } : null });
 }
@@ -131,9 +127,10 @@ export async function afterRestartOutsideTask(ctx: Ctx, jobId: string): Promise<
   const agentId = job.agentId, repeated = await repeatedWords(ctx, job);
   const words = job.requestedPrompt ?? job.prompt;
   await onAgent(ctx, agentId, async () => {
-    if (await goingOn(ctx, job.id)) return;
-    await insertTurn(ctx, { companyId: job.companyId, agentId, prompt: `${cutOffOutsideTask(job)}\n\n${words}`, retryOf: job.id, ...repeated }).catch((err: unknown) => {
+    if (await turnGoingOn(ctx, job.id)) return;
+    await insertTurn(ctx, { companyId: job.companyId, agentId, prompt: `${cutOffOutsideTask(job)}\n\n${words}`, retryOf: job.id, ...repeated }).catch(async (err: unknown) => {
       if (!(err instanceof NoSubscription)) throw err;
+      await logTurnFact(ctx, job, 'Hornhoof could not run this turn again: the agent has no plan to continue.');
     });
   });
 }

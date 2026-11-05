@@ -260,6 +260,12 @@ export async function windowNode(ctx: Ctx, agentId: string): Promise<ProgramNode
   return placed ?? programNode(ctx, agentId);
 }
 
+/* The turn that goes on from this one's words, whichever way it came: a retry after a restart or a continuation. */
+export async function turnGoingOn(ctx: Ctx, jobId: string): Promise<{ id: string; error: string | null } | null> {
+  const [next] = await ctx.db.select({ id: jobs.id, error: jobs.error }).from(jobs).where(or(eq(jobs.retryOf, jobId), eq(jobs.continueOf, jobId))).limit(1);
+  return next ?? null;
+}
+
 /* Thrown before anything is stored, so the caller may undo what it did for the turn. */
 export class NoSubscription extends Error {
   constructor() {

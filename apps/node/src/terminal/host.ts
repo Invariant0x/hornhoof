@@ -1255,8 +1255,8 @@ export class TerminalHost {
     return null;
   }
 
-  /* A long session takes Codex's banner off the top of its screen: its empty prompt says it waits all the same, and only the
-     styles tell that from a suggestion in it. */
+  /* A long session takes Codex's banner off the top of its screen: its empty prompt still shows, and only the styles tell that
+     from a suggestion in it. A turn it still runs was waited for before this. */
   private async codexWaits(a: Agent, kind: keyof typeof READY): Promise<boolean> {
     return kind === 'codex' && atEmptyPrompt(kind, await this.opts.tmux.screen(a.name, 0, true));
   }
