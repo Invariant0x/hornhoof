@@ -91,12 +91,14 @@ export function Notebook({ departmentId = null }: { departmentId?: string | null
                 <>
                   <span>{n.text}</span>
                   <small>{who(n)}</small>
-                  <button className="t-link" type="button" aria-label={t.notebook.changeNote(n.number)} onClick={() => setEditing({ number: n.number, text: n.text })}>
-                    {t.notebook.change}
-                  </button>
-                  <button className="t-link" type="button" aria-label={t.notebook.removeNote(n.number)} disabled={busy} onClick={() => void run(() => api.del(`${base}/${n.number}`), () => {})}>
-                    {t.notebook.remove}
-                  </button>
+                  <div className="notebook-item-actions">
+                    <button className="t-link" type="button" aria-label={t.notebook.changeNote(n.number)} onClick={() => setEditing({ number: n.number, text: n.text })}>
+                      {t.notebook.change}
+                    </button>
+                    <button className="t-link" type="button" aria-label={t.notebook.removeNote(n.number)} disabled={busy} onClick={() => void run(() => api.del(`${base}/${n.number}`), () => {})}>
+                      {t.notebook.remove}
+                    </button>
+                  </div>
                 </>
               )}
             </li>

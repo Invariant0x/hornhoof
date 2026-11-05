@@ -222,8 +222,8 @@ select:disabled { opacity: .55; }
 .link-input input { flex: 1; min-width: 0; width: 100%; }
 .link-input .link-domain { display: flex; align-items: center; padding: 0 10px; border: 1px solid var(--line2); border-left: 0; background: var(--surface); color: var(--muted); font-size: 14px; white-space: nowrap; }
 .segments label:has(input:focus-visible) { outline: 2px solid var(--cyan); outline-offset: 2px; }
-.command { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: start; padding: 12px; background: var(--surface2); border: 1px solid var(--line); }
-.command code { font-family: var(--f-mono); font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; }
+.command { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: start; min-width: 0; padding: 12px; background: var(--surface2); border: 1px solid var(--line); }
+.command code { min-width: 0; font-family: var(--f-mono); font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; }
 
 /* Shell: the header floats over the canvas in three glass blocks, as in the prototype; there is no bar under it. */
 .shell { position: relative; height: 100%; }
@@ -698,15 +698,17 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
   .t-access-more { width: 24px; }
   .t-access-count { padding: 0 2px; }
 }
-.notebook { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; font-family: var(--f-body); }
-.notebook ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-.notebook li { display: grid; grid-template-columns: auto 1fr auto auto auto; gap: 4px 10px; align-items: baseline; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
-.notebook li form { grid-column: 2 / -1; display: flex; flex-wrap: wrap; gap: 8px; }
-.notebook li small { color: var(--muted); }
+.notebook { flex: 1 1 auto; min-width: 0; min-height: 0; overflow: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; font-family: var(--f-body); }
+.notebook ul { list-style: none; min-width: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.notebook li { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 4px 10px; align-items: baseline; min-width: 0; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.notebook li > span, .notebook li > small { min-width: 0; overflow-wrap: anywhere; }
+.notebook li small { grid-column: 2; color: var(--muted); }
+.notebook-item-actions { grid-column: 2 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.notebook li form { grid-column: 2 / -1; display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
 .notebook textarea { width: 100%; box-sizing: border-box; font: inherit; resize: vertical; }
 .notebook-add { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
 .notebook-unread { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
-.notebook-unread p { margin: 0; }
+.notebook-unread p { min-width: 0; margin: 0; overflow-wrap: anywhere; }
 .t-st { flex: none; display: flex; justify-content: space-between; gap: 12px; padding: 6px 16px 10px; font-size: 11.5px; color: var(--muted); white-space: nowrap; }
 .t-st > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 760px) { .orch, .orch.term { left: 0; right: 0; top: 56px; bottom: 0; width: auto; border-left: 0; border-right: 0; } }
@@ -926,6 +928,8 @@ body:has(.dview) .version-mark { display: none; }
    keeps its width and place under it. */
 .body.page ~ .acard, .body.page ~ .orch { bottom: 0; }
 .ac-body { flex: 1 1 auto; min-height: 0; overflow: auto; display: grid; gap: 18px; align-content: start; padding: 16px 18px 20px; }
+.ac-body > * { min-width: 0; }
+.ac-body :where(p, h3, h4, dd, li, pre, code) { overflow-wrap: anywhere; }
 .ac-head { display: grid; gap: 4px; justify-items: start; min-width: 0; }
 .ac-head h3 { font-size: 22px; }
 .ac-head p { margin: 0; }
@@ -1104,7 +1108,7 @@ summary.turn-head:focus-visible { outline: 2px solid var(--cyan); outline-offset
 .trow:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
 .trow-title { font-weight: 600; overflow-wrap: anywhere; }
 .trow-title b { font-family: var(--f-display); color: var(--cyan-ink); }
-.trow-brief { font-size: 13.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trow-brief { min-width: 0; font-size: 13.5px; color: var(--muted); overflow-wrap: anywhere; white-space: normal; }
 .trow-meta { display: flex; flex-wrap: wrap; gap: 2px 14px; font-size: 12.5px; color: var(--muted); }
 .trow-gate { color: var(--cyan-ink); font-weight: 600; }
 .trow-back { color: var(--amber-ink); }
