@@ -19,6 +19,8 @@ curl -fsSL https://raw.githubusercontent.com/Invariant0x/hornhoof/main/scripts/i
 Works with Claude Code, Codex (ChatGPT plans), Kimi Code, the GLM Coding Plan and Google Antigravity, plus Anthropic and OpenAI API keys.
 
 > **Hornhoof is built by a Hornhoof company.** Its development runs inside Hornhoof itself: 32 agents on Claude, ChatGPT, Kimi and Google plans, in Development and Operations, on two computers, with the CEO approving each release. So far they have run 8 turns and closed more than 330 tasks.
+>
+> It is open source, and we are looking for people to build it with us: see [Build it with us](#build-it-with-us).
 
 ## What you get
 
@@ -27,6 +29,7 @@ Works with Claude Code, Codex (ChatGPT plans), Kimi Code, the GLM Coding Plan an
 - **Every change checked by a different AI.** Code written on one maker's model is reviewed by the models of the other makers at the same time, then by security, then by one test run of the whole turn.
 - **One map instead of twelve tabs.** Every agent, what it is doing right now, and its real terminal live in your browser, whichever machine it runs on.
 - **You decide, they do.** Questions, approvals and stuck tasks wait for you in one list. Each turn of work ends in a numbered release, and nothing reaches your main branch until you approve the exact commit.
+- **It improves itself.** Every company has an Operations department that watches how the work goes in your setup, finds what slows it down or breaks, and fixes it or brings you the fix to accept with one click.
 - **It stays yours.** Agents run in locked boxes on your machines, sign-ins stay sealed to their owners' computers, and the optional public link cannot read your traffic.
 
 ## Hornhoof is for you if
@@ -44,7 +47,6 @@ Works with Claude Code, Codex (ChatGPT plans), Kimi Code, the GLM Coding Plan an
 - **Tests run on your freest computer.** When an agent runs the tests, Hornhoof sends them to the machine with the most room, and splits a big suite over several machines at once. The agent keeps working meanwhile. A machine busy at 90% or more gets no new work.
 - **Limits do not stop the job.** When a plan hits its limit, the task goes to an employee of the same role on another plan, or waits and resumes by itself when the limit resets. You choose how much of each plan the company may use, from 50 to 90%, so some is always left for you.
 - **Checks only where they matter.** Research and docs pass with none. Code gets one review stage, where a reviewer of each maker reads the same change at the same time. Security review joins only when a change touches sign-in, access or secrets. The whole suite runs once per turn, not once per task.
-- **The company keeps itself moving.** A watchdog in Operations wakes every 10 minutes while there is work, nudges a stuck agent, and tells its head when the nudge did not help.
 
 ## Why the result is better
 
@@ -52,7 +54,18 @@ Works with Claude Code, Codex (ChatGPT plans), Kimi Code, the GLM Coding Plan an
 - **Different makers, different blind spots.** Claude, GPT, Kimi and Gemini fail in different ways. Hornhoof puts them in the same review, so a change passes only when all of them agree.
 - **Fixes start with a failing test.** A bug is first reproduced by a test, then fixed. Before a release, the riskiest logic is checked with mutation testing, so tests that would pass on broken code get caught.
 - **Design you pick by eye.** A design team of two or three designers on different models draws variants of the same screen. You get them side by side and pick one with a click.
-- **It learns from its own mistakes.** Every three hours an agent in Operations reads what failed and where agents stumbled, and proposes fixes. They wait for you under Improvements, and one click turns a proposal into a task.
+
+## It gets better by itself
+
+Hornhoof does not stay the way you installed it. Every company, yours too, has an Operations department whose whole job is to make the company work better in your own setup:
+
+- **A task watchdog** wakes every 10 minutes while there is work. It nudges an agent that is stuck and tells its head when the nudge did not help.
+- **A weak point collector** reads every three hours what failed and where agents stumbled: a test that hung, a tool that is missing on a machine, a rule that sends work back too often. Each finding becomes a short case with its facts and a proposed fix.
+- **Improvements** collect those cases. You take one with a click, and the orchestrator turns it into a task, or does it himself: installs the missing tool, changes a rule, moves an agent.
+- **A program operator** looks after the AI programs themselves. When one stops on a screen nobody planned for, it passes what is harmless, refuses what a program may not do, and brings you sign-ins and payments with a picture of the screen.
+- **A reliability engineer** restores broken machines, tools and integrations, finds the root cause, and writes down how to handle it next time.
+
+What our own company finds this way goes into Hornhoof itself, so every release carries fixes from real work.
 
 ## Why you stay in control
 
@@ -219,9 +232,11 @@ Yes, to watch, answer and approve from the phone's browser. Phones that do work 
 - It is not a new AI. It runs the AI programs you already use.
 - It is not a chat. Work is tasks, each with an owner, a review and a result.
 
-## Help build Hornhoof
+## Build it with us
 
-Hornhoof is built by a few people and a lot of agents, and we are looking for more of both. You can:
+We want Hornhoof to be the fastest and most reliable way to build software with AI: many models checking each other, every computer you have at work, safe by default, and yours. It is open source under MIT, and it is built by a Hornhoof company, so what you add goes to work right away.
+
+We are a few people and a lot of agents, and we are looking for more of both. You can:
 
 - try it and tell us what broke or what confused you;
 - bring ideas for what would make your own company of agents work better;
