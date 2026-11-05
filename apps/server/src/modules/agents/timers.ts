@@ -124,25 +124,43 @@ export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) =>
   ]);
 }
 
-/* Does the minute round while the app leads; left-behind turns and old files are looked at as it starts leading, and the
-   timer stops with it, after waiting for a round that runs. */
+/* What is looked at as the app starts leading, without waiting for the first minute round. */
+async function entrySweeps(ctx: Ctx, failed: (what: string) => (err: unknown) => void): Promise<void> {
+  await Promise.all([
+    checkExternalWaits(ctx).catch(failed('ending external task waits failed')),
+    wakeLeftBehind(ctx).catch(failed('queueing left-behind turns failed')),
+    dropOldFiles(ctx.db, new Date()).catch(failed('removing the files of old turns failed')),
+  ]);
+}
+
+/* A leading app's sweeps, one at a time: those of the way in, then a round on each tick. A tick that finds a sweep still
+   running is dropped, since the next one does what it would have. Entering waits for no sweep; leaving stops the ticks
+   and waits for what runs, so nothing of this writes once the app has left lead. */
+export function leadSweeps(entry: () => Promise<void>, round: () => Promise<void>, everyMs = TICK_MS): { enter: () => void; leave: () => Promise<void> } {
+  let timer: NodeJS.Timeout | null = null;
+  let running: Promise<void> | null = null;
+  const alone = (sweep: () => Promise<void>) => {
+    if (running) return;
+    running = sweep().finally(() => {
+      running = null;
+    });
+  };
+  return {
+    enter() {
+      alone(entry);
+      timer = setInterval(() => alone(round), everyMs);
+      timer.unref();
+    },
+    async leave() {
+      if (timer) clearInterval(timer);
+      timer = null;
+      await running;
+    },
+  };
+}
+
 export function startTimers(app: FastifyInstance, ctx: Ctx): void {
   const failed = (what: string) => (err: unknown) => app.log.error({ error: loggable(err) }, what);
-  let timer: NodeJS.Timeout | null = null;
-  let round: Promise<void> = Promise.resolve();
-  const enter = () => {
-    void checkExternalWaits(ctx).catch(failed('ending external task waits failed'));
-    void wakeLeftBehind(ctx).catch(failed('queueing left-behind turns failed'));
-    void dropOldFiles(ctx.db, new Date()).catch(failed('removing the files of old turns failed'));
-    timer = setInterval(() => {
-      round = minuteRound(ctx, new Date(), failed);
-    }, TICK_MS);
-    timer.unref();
-  };
-  const leave = async () => {
-    if (timer) clearInterval(timer);
-    timer = null;
-    await round;
-  };
+  const { enter, leave } = leadSweeps(() => entrySweeps(ctx, failed), () => minuteRound(ctx, new Date(), failed));
   ctx.mode.whenLead(enter, leave);
 }
