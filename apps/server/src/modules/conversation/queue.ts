@@ -641,7 +641,7 @@ function outdated(version: string | null, need = CONVERSATION_NODE): boolean {
   return false;
 }
 
-const takesTurns = (ctx: Ctx, n: NodeRow, need: number[]): boolean => n.status === 'ready' && !outdated(n.version, need) && ctx.hub.isReady(nodeIdentity(n.id));
+export const takesTurns = (ctx: Ctx, n: NodeRow, need: number[] = CONVERSATION_NODE): boolean => n.status === 'ready' && !outdated(n.version, need) && ctx.hub.isReady(nodeIdentity(n.id));
 
 /* moves: the agent has not been on this node until now, or leaves the machine it was on for the built-in node. */
 type Placement = { node: NodeIdentity; nodeId: string | null; moves: boolean };
