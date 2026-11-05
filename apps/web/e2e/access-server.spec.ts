@@ -77,7 +77,7 @@ async function startServer(): Promise<Server> {
   child.stderr.on('data', chunk => { stderr += String(chunk); });
   const boot = await new Promise<Boot>((done, fail) => {
     createInterface({ input: child.stdout }).once('line', line => done(JSON.parse(line) as Boot));
-    child.once('exit', code => fail(new Error(`The server stopped early (${code}):\n${stderr}`));
+    child.once('exit', code => fail(new Error(`The server stopped early (${code}):\n${stderr}`)));
   });
   const pending = new Map<string, () => void>();
   child.stdout.on('data', chunk => {
