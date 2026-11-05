@@ -15,6 +15,7 @@ import { dropEarlierWakes, keepWakes } from './outbox.js';
 import { returnAlongLine } from '../org/map-state.js';
 import { handOff } from './pulses.js';
 import { recordCause, type WakeCause } from './notification-cause.js';
+import { preserveNote } from './long-text.js';
 
 export type Task = typeof tasks.$inferSelect;
 export type Request = typeof requests.$inferSelect;
@@ -323,10 +324,11 @@ const actorColumns = (a: Actor) => ({ personId: a.personId ?? null, agentId: a.a
 /* returned: the agent gives its work back to the one above it with this move, which the map shows on their line. */
 type Note = { kind: TaskEventKind; actor: Actor; text?: string; data?: Record<string, unknown>; returned?: true; automatic?: NotificationSource };
 
-export async function note(tx: Tx | Db, task: Pick<Task, 'id' | 'companyId'>, n: Note): Promise<{ id: number; createdAt: Date }> {
+export async function note(tx: Tx | Db, task: Pick<Task, 'id' | 'companyId'>, n: Note, config?: Pick<Ctx['config'], 'taskFilesBytes'>): Promise<{ id: number; createdAt: Date }> {
+  const kept = await preserveNote(tx, task, n, config);
   const [row] = await tx
     .insert(taskEvents)
-    .values({ companyId: task.companyId, taskId: task.id, kind: n.kind, ...actorColumns(n.actor), text: n.text ?? '', data: n.data ?? {} })
+    .values({ companyId: task.companyId, taskId: task.id, kind: n.kind, ...actorColumns(n.actor), text: kept.text, data: kept.data })
     .returning({ id: taskEvents.id, createdAt: taskEvents.createdAt });
   return row!;
 }
@@ -374,7 +376,7 @@ export async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, a
     /* Done means all of it: work under it still open would go on under a finished task, and the turn with it. */
     if (set.status === 'done') await refuseOpenUnder(tx, task);
     await dropEarlierWakes(tx, task.id);
-    const event = await note(tx, row, n);
+    const event = await note(tx, row, n, ctx.config);
     lit = await givesBack(tx, row, n, event);
     await also?.(tx, row);
     if (CLOSED.includes(row.status) && row.parentId) wakes.push(...(await workUnderDone(tx, ctx.templates, row, n.actor.agentId, opened, comparison)));
@@ -1217,7 +1219,7 @@ function commentWakes(task: Task, actor: Actor, text: string): Wake[] {
 async function logComment(ctx: Live, actor: Actor, task: Task, text: string): Promise<Moved> {
   const wakes = commentWakes(task, actor, text);
   await ctx.db.transaction(async tx => {
-    const event = await note(tx, task, { kind: 'comment', actor, text });
+    const event = await note(tx, task, { kind: 'comment', actor, text }, ctx.config);
     recordCause(wakes, { kind: 'comment', actor, text }, event.id, task);
     await keepWakes(tx, task.companyId, wakes);
   });
@@ -1509,7 +1511,7 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
     if (!request) throw refuse(409, 'request_closed', 'This request is answered already.');
     await tx.update(tasks).set({ externalWait: null, silent: 0, version: sql`${tasks.version} + 1`, updatedAt: new Date() })
       .where(and(eq(tasks.id, task.id), isNotNull(tasks.externalWait)));
-    const event = await note(tx, task, { kind: 'answered', actor, text: said, data: { requestId, kind: found.kind, status, ...forWhom } });
+    const event = await note(tx, task, { kind: 'answered', actor, text: said, data: { requestId, kind: found.kind, status, ...forWhom } }, ctx.config);
     const [left] = await tx.select({ n: count() }).from(requests).where(and(eq(requests.taskId, task.id), eq(requests.status, 'open')));
     if (current?.status === 'waiting' && !Number(left?.n ?? 0)) {
       await tx

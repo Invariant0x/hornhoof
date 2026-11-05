@@ -63,9 +63,9 @@ export const onTask = (job: ToolJob, t: Task) =>
   job.agentKind === 'orchestrator' || (job.departmentId !== null && t.departmentId === job.departmentId) || [t.assigneeAgentId, t.executorAgentId, t.createdByAgentId, ...t.gates, ...t.panel].includes(job.agentId);
 
 /* The files on a task, the newest under each name, without their bytes. */
-export async function filesOf(db: Db, taskId: string): Promise<{ id: string; name: string; size: number; agentId: string; at: Date }[]> {
+export async function filesOf(db: Db, taskId: string): Promise<{ id: string; name: string; size: number; agentId: string; personId: string | null; at: Date }[]> {
   const rows = await db
-    .select({ id: attachments.id, name: attachments.name, size: attachments.size, agentId: attachments.agentId, at: attachments.createdAt })
+    .select({ id: attachments.id, name: attachments.name, size: attachments.size, agentId: attachments.agentId, personId: attachments.personId, at: attachments.createdAt })
     .from(attachments)
     .where(and(eq(attachments.taskId, taskId), isNull(attachments.operatorCaseId)))
     .orderBy(desc(attachments.createdAt));
@@ -107,7 +107,7 @@ export async function picturesOf(db: Db, rows: { id: string; options: RequestOpt
 /* Removes the files on the tasks of turns closed 30 days or more before now, and people's pictures sent as long ago or
    never sent, and says how many went. */
 export async function dropOldFiles(db: Db, now: Date): Promise<number> {
-  const pictures = await db.delete(attachments).where(and(isNotNull(attachments.personId), lt(attachments.createdAt, new Date(now.getTime() - KEEP_FILES_MS)))).returning({ id: attachments.id });
+  const pictures = await db.delete(attachments).where(and(isNotNull(attachments.personId), isNull(attachments.taskId), lt(attachments.createdAt, new Date(now.getTime() - KEEP_FILES_MS)))).returning({ id: attachments.id });
   const old = db
     .select({ id: tasks.id })
     .from(tasks)
@@ -130,7 +130,7 @@ export async function checkPictureRoom(ctx: Pick<Ctx, 'db' | 'config'>, companyI
 }
 
 /* Refuses a new file of this size on the task when the task or the company has no room left for it. */
-export async function checkRoom(ctx: Pick<Ctx, 'db' | 'config'>, companyId: string, task: Pick<Task, 'id' | 'number'>, size: number): Promise<void> {
+export async function checkRoom(ctx: { db: Pick<Ctx['db'], 'select'>; config: Pick<Ctx['config'], 'taskFilesBytes'> }, companyId: string, task: Pick<Task, 'id' | 'number'>, size: number): Promise<void> {
   const [used] = await ctx.db
     .select({
       task: sql<string>`coalesce(sum(${attachments.size}) filter (where ${attachments.taskId} = ${task.id}), 0)`,
@@ -146,7 +146,7 @@ export async function checkRoom(ctx: Pick<Ctx, 'db' | 'config'>, companyId: stri
 }
 
 /* Sends a task file in pieces, so the server never holds a whole one. */
-export async function sendFile(db: Db, reply: FastifyReply, found: { id: string; name: string | null; length: number }) {
+export async function sendFile(db: Db, reply: FastifyReply, found: { id: string; name: string | null; length: number; mediaType?: string }) {
   const [ordinary] = await db.select({ id: attachments.id }).from(attachments).where(and(eq(attachments.id, found.id), isNull(attachments.operatorCaseId)));
   if (!ordinary) throw new ApiError(404, 'not_found', 'There is no such file.', 'attachment_unknown');
   async function* pieces(id: string, length: number) {
@@ -162,8 +162,9 @@ export async function sendFile(db: Db, reply: FastifyReply, found: { id: string;
   return reply
     .header('x-content-type-options', 'nosniff')
     .header('x-file-name', encodeURIComponent(found.name ?? ''))
+    .header('content-security-policy', "default-src 'none'")
     .header('content-length', String(found.length))
-    .type('application/octet-stream')
+    .type(found.mediaType === 'text/plain' ? 'text/plain; charset=utf-8' : 'application/octet-stream')
     .send(Readable.from(pieces(found.id, found.length)));
 }
 
@@ -182,6 +183,16 @@ async function messagePicture(db: Db, job: ToolJob, id: string) {
     .from(attachments)
     .where(and(eq(attachments.id, id), eq(attachments.companyId, job.companyId), eq(attachments.agentId, job.agentId), isNotNull(attachments.personId), isNull(attachments.operatorCaseId)));
   return found && { ...found, name: `${found.id.slice(0, 8)}-${found.name ?? 'picture'}` };
+}
+
+/* A task file is authorized by its task, including one a person wrote, before any picture/window fallback. */
+async function taskFileForPerson(db: Db, me: Awaited<ReturnType<typeof requirePerson>>, id: string) {
+  const [found] = await db.select({ id: attachments.id, name: attachments.name, mediaType: attachments.mediaType, length: attachments.size, task: tasks }).from(attachments)
+    .innerJoin(tasks, eq(tasks.id, attachments.taskId))
+    .where(and(eq(attachments.id, id), eq(attachments.companyId, me.companyId), eq(tasks.companyId, me.companyId), isNull(attachments.operatorCaseId)));
+  if (!found) return null;
+  if (!canReach(await accessOf(db, me), taskSpot(found.task))) throw new ApiError(404, 'not_found', 'There is no such file.', 'attachment_unknown');
+  return found;
 }
 
 export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
@@ -244,6 +255,8 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/attachments/:id', async (req, reply) => {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
+    const file = await taskFileForPerson(db, me, id);
+    if (file) return sendFile(db, reply, file);
     const [picture] = await db.select({ operatorCaseId: attachments.operatorCaseId }).from(attachments).where(and(eq(attachments.id, id), eq(attachments.companyId, me.companyId)));
     if (picture?.operatorCaseId) return sendCasePicture(reply, await personCasePicture(db, me, id));
     const [found] = await db
