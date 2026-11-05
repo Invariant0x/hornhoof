@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createTaskWorkspaceRegistry, type TaskWorkspaceBinding } from '../src/task-workspaces.js';
+import { createTaskWorkspaceRegistry, prepareTaskWorkspace, type TaskWorkspaceBinding } from '../src/task-workspaces.js';
 
 const id = (suffix: number) => `00000000-0000-4000-8000-${String(suffix).padStart(12, '0')}`;
 const nodeId = { kind: 'node' as const, nodeId: id(1) };
@@ -83,6 +83,26 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); played.root = null; played.race = null; rmSync(root, { recursive: true, force: true }); });
 
 describe('frozen task workspace registry producer', () => {
+  it('reuses only the admitted retained Git tree without changing dirty or unknown bytes', async () => {
+    const item = fixture(), producer = registry(); await producer.registerTaskWorkspace(item);
+    writeFileSync(join(item.tree, 'file.txt'), 'retained dirty\n');
+    writeFileSync(join(item.tree, '.gitignore'), 'ignored.data\n');
+    writeFileSync(join(item.tree, 'ignored.data'), 'retained ignored\n');
+    writeFileSync(join(item.tree, 'untracked.data'), 'retained untracked\n');
+    const before = git(item.tree, 'status', '--porcelain=v1', '--untracked-files=all', '--ignored');
+    const result = await prepareTaskWorkspace({ jobId: id(99), binding: item.binding,
+      repo: { url: item.repositoryUrl, branch: 'main', token: '' }, owner: item.owner }, {
+      registry: producer, signal: new AbortController().signal,
+      resolveAdmittedWorkspace: async () => ({ version: 1, binding: item.binding, baseRef: 'turn-8',
+        areas: ['.'], requiredIntegrations: [{ kind: 'turn', ref: 'turn-8' }] }),
+    });
+    expect(result).toMatchObject({ binding: item.binding, realPath: item.tree, sourceHeadSha: item.binding.baseSha });
+    expect(git(item.tree, 'status', '--porcelain=v1', '--untracked-files=all', '--ignored')).toBe(before);
+    expect(readFileSync(join(item.tree, 'file.txt'), 'utf8')).toBe('retained dirty\n');
+    expect(readFileSync(join(item.tree, 'ignored.data'), 'utf8')).toBe('retained ignored\n');
+    expect(readFileSync(join(item.tree, 'untracked.data'), 'utf8')).toBe('retained untracked\n');
+  });
+
   it('refuses a mapping when the agent UID could also write the node registry', async () => {
     const item = fixture();
     played.root = null; vi.spyOn(process, 'getuid').mockReturnValue(owner.uid);

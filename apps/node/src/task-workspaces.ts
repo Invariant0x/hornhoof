@@ -4,7 +4,7 @@ import { closeSync, constants, fstatSync, fsyncSync, lstatSync, mkdirSync, openS
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
 import { repoFolder, NodeRef as Node, TaskWorkspaceBinding as Binding,
-  type NodeRef, type TaskWorkspaceBinding, type VerifiedWorkspace, type WorkspaceProblem } from '@hornhoof/protocol';
+  type NodeRef, type TaskWorkspaceBinding, type TaskWorkspaceSpec, type VerifiedWorkspace, type Workspace, type WorkspaceProblem } from '@hornhoof/protocol';
 import type { JobUser } from './isolation.js';
 import { inspectWorkspaceGit, repositoryIdentity, WorkspaceFault } from './task-workspace-git.js';
 
@@ -14,6 +14,17 @@ export interface TaskWorkspaceRegistration { binding: TaskWorkspaceBinding; repo
 export interface TaskWorkspaceRegistry {
   registerTaskWorkspace(input: unknown): Promise<VerifiedWorkspace | WorkspaceProblem>;
   resolveTaskWorkspace(binding: TaskWorkspaceBinding): Promise<VerifiedWorkspace | WorkspaceProblem>;
+}
+export interface TaskWorkspacePreparationInput {
+  jobId: string;
+  binding: TaskWorkspaceBinding;
+  repo: NonNullable<Workspace['repo']>;
+  owner: JobUser;
+}
+export interface TaskWorkspacePreparationContext {
+  signal: AbortSignal;
+  registry: TaskWorkspaceRegistry;
+  resolveAdmittedWorkspace?: (query: { jobId: string; binding: TaskWorkspaceBinding }) => Promise<TaskWorkspaceSpec | WorkspaceProblem>;
 }
 
 const Owner = z.object({ uid: z.number().int().min(1), gid: z.number().int().min(0) }).strict();
@@ -222,4 +233,10 @@ async function resolveRegistered(context: RegistryContext, input: TaskWorkspaceB
 export function createTaskWorkspaceRegistry(options: TaskWorkspaceRegistryOptions): TaskWorkspaceRegistry {
   const context = registryContext(options);
   return { registerTaskWorkspace: input => register(context, input), resolveTaskWorkspace: binding => resolveRegistered(context, binding) };
+}
+
+/* Admission-first reuse of retained trees. Clone/allocation and runtime admission integration are separate. */
+export async function prepareTaskWorkspace(_input: TaskWorkspacePreparationInput, context: TaskWorkspacePreparationContext): Promise<VerifiedWorkspace | WorkspaceProblem> {
+  context.signal.throwIfAborted();
+  return { code: 'integration_plan_missing', retryable: true };
 }
