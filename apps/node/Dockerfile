@@ -98,7 +98,7 @@ ARG SHELLCHECK_ARM64_SHA256=68a8133197a50beb8803f8d42f9908d1af1c5540d4bb05fdfca8
 COPY --from=browser /opt/browser-packages /opt/browser-packages
 # procps gives agents ps and free, python-is-python3 the python that scripts call, and python3-pil Pillow for image checks.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends git ca-certificates curl gpg ripgrep jq file tmux procps unzip python3 python3-venv python-is-python3 python3-pil $(cat /opt/browser-packages) \
+  && apt-get install -y --no-install-recommends git ca-certificates curl gpg ripgrep jq file tmux procps util-linux unzip python3 python3-venv python-is-python3 python3-pil $(cat /opt/browser-packages) \
   && install -d /usr/share/keyrings \
   && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc -o /usr/share/keyrings/postgresql-pgdg.asc \
   && GNUPGHOME="$(mktemp -d)" && export GNUPGHOME \
@@ -112,6 +112,7 @@ RUN apt-get update \
   && printf '%s\n' 'create_main_cluster = false' 'start_conf = manual' > /etc/postgresql-common/createcluster.conf \
   && apt-get install -y --no-install-recommends postgresql-17 postgresql-client-17 \
   && rm -rf /var/lib/apt/lists/* \
+  && flock --version \
   && unzip -v \
   && arch="${TARGETARCH:-$(dpkg --print-architecture)}" \
   && case "$arch" in amd64) sha="$GH_AMD64_SHA256"; sc_arch=x86_64; sc_sha="$SHELLCHECK_AMD64_SHA256" ;; arm64) sha="$GH_ARM64_SHA256"; sc_arch=aarch64; sc_sha="$SHELLCHECK_ARM64_SHA256" ;; *) exit 1 ;; esac \
