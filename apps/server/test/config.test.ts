@@ -106,6 +106,7 @@ describe('loadConfig', () => {
       RELAY_URL: '',
     });
     expect(config.controlDir).toBe('/control');
+    expect(config.acmeDirectory).toBe(LETS_ENCRYPT);
     expect(config.machineId).toBeNull();
     expect(config.relayUrl).toBe('https://hornhoof.org');
     expect(config.databaseUrl).toBe('postgres://hornhoof:hornhoof@db:5432/hornhoof');

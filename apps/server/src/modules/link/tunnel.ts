@@ -1,15 +1,13 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 
-/* What the app writes into the control folder for the public link: its address, name and key, what the relay gave the
-   tunnel, and where the link's TLS ends. A file from before there was a mode still means the relay ends it. */
+/* The public link as frpc needs it: its address, name and key, what the relay gave the tunnel, and where its TLS ends. */
 export const Settings = z.object({
   url: z.string(),
   name: z.string(),
   key: z.string(),
   tunnel: z.record(z.string(), z.unknown()),
-  mode: z.enum(['http', 'https']).default('http'),
+  mode: z.enum(['http', 'https']),
 });
 export type TunnelSettings = z.infer<typeof Settings>;
 
@@ -17,8 +15,9 @@ export type TunnelSettings = z.infer<typeof Settings>;
 export type Client = { program: string; args: string[]; env?: Record<string, string> };
 
 type Options = {
-  file: string;
-  /* How often the settings file is read. */
+  /* The settings now. Null: no link, and the client stops. Undefined: not known now, and the client it runs stays. */
+  read: () => Promise<TunnelSettings | null | undefined>;
+  /* How often the settings are read. */
   everyMs: number;
   /* The first pause before a client that ended starts again; it doubles up to a minute while it keeps ending. */
   restartMs: number;
@@ -30,23 +29,24 @@ const LONGEST_PAUSE_MS = 60_000;
 /* A client that ran this long counts as having worked, so the next pause starts short again. */
 const WORKED_MS = 60_000;
 
-/* The tunnel container's whole job: it waits while the app has written no settings, runs the client with them once it
-   has, starts it again with new ones, and stops it when they go. It reads only that one file, so the container needs
-   no Docker socket and nothing from the app but the control folder. */
+/* It waits while there is no link, runs the client once there is, starts it again when the settings change, and stops it
+   when they go. Only a change starts it again, since each start may cost the link up to 40 s at the relay. */
 export class TunnelKeeper {
   private timer: NodeJS.Timeout | null = null;
   private text: string | null = null;
   private child: ChildProcess | null = null;
   private again: NodeJS.Timeout | null = null;
   private pause: number;
+  /* A read may outlast the pause between reads, and an older answer must not land after a newer one. */
+  private reading = false;
 
   constructor(private readonly opts: Options) {
     this.pause = opts.restartMs;
   }
 
   start(): void {
-    this.tick();
-    this.timer = setInterval(() => this.tick(), this.opts.everyMs);
+    this.timer = setInterval(() => void this.tick(), this.opts.everyMs);
+    void this.tick();
   }
 
   async stop(): Promise<void> {
@@ -56,36 +56,25 @@ export class TunnelKeeper {
     await this.end();
   }
 
-  private read(): string | null {
-    try {
-      return readFileSync(this.opts.file, 'utf8');
-    } catch {
-      return null;
-    }
+  private async tick(): Promise<void> {
+    if (this.reading) return;
+    this.reading = true;
+    const settings = await this.opts.read();
+    this.reading = false;
+    /* The timer's going means it stopped during the read, and a client started now would outlive the stop. */
+    if (settings !== undefined && this.timer) this.follow(settings);
   }
 
-  private tick(): void {
-    const text = this.read();
+  private follow(settings: TunnelSettings | null): void {
+    const text = settings && JSON.stringify(settings);
     if (text === this.text) return;
     this.text = text;
     this.pause = this.opts.restartMs;
     void this.end().then(() => {
-      if (this.text !== text || text === null) {
-        if (text === null) this.opts.log('No public link: the tunnel waits.');
-        return;
-      }
-      const settings = this.parse(text);
-      if (settings) this.run(text, settings);
+      if (this.text !== text) return;
+      if (text && settings) this.run(text, settings);
+      else this.opts.log('No public link: the tunnel waits.');
     });
-  }
-
-  private parse(text: string): TunnelSettings | null {
-    try {
-      return Settings.parse(JSON.parse(text));
-    } catch {
-      this.opts.log('Hornhoof cannot read the tunnel settings: the tunnel waits for the app to write them again.');
-      return null;
-    }
   }
 
   private run(text: string, settings: TunnelSettings): void {
@@ -93,12 +82,14 @@ export class TunnelKeeper {
     try {
       client = this.opts.clientFor(settings);
     } catch (err) {
-      this.opts.log(`The tunnel cannot use these settings (${(err as Error).message}): it waits for the app to write new ones.`);
+      this.opts.log(`The tunnel cannot use these settings (${(err as Error).message}): it waits for new ones.`);
       return;
     }
     const began = Date.now();
     this.opts.log(`Carrying ${settings.url} to Hornhoof.`);
-    const child = spawn(client.program, client.args, { stdio: ['ignore', 'inherit', 'inherit'], env: { ...process.env, ...client.env } });
+    /* Not the keeper's own environment: frpc fills in {{ .Envs.NAME }} wherever its config says so, the config carries
+       what the relay gave, and that environment holds the company's secret and the database's password. */
+    const child = spawn(client.program, client.args, { stdio: ['ignore', 'inherit', 'inherit'], env: { PATH: process.env.PATH, ...client.env } });
     this.child = child;
     child.on('error', err => this.opts.log(`The tunnel client did not start: ${err.message}`));
     child.on('exit', (code, signal) => {
