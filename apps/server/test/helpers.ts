@@ -91,8 +91,8 @@ export async function testApp(env: NodeJS.ProcessEnv = {}, logger?: Deps['logger
    still write to it. */
 export async function appOn(client: PGlite, env: NodeJS.ProcessEnv = {}, logger?: Deps['logger']): Promise<{ app: FastifyInstance; db: Db; config: Config }> {
   const db = drizzle(client, { schema }) as unknown as Db;
-  /* Tests never reach the real registry unless they ask. */
-  const config = loadConfig({ HORNHOOF_SECRET: TEST_SECRET, UPDATE_CHECK_MS: '0', ...env });
+  /* Tests never reach the real registry or a real CA unless they ask. */
+  const config = loadConfig({ HORNHOOF_SECRET: TEST_SECRET, UPDATE_CHECK_MS: '0', ACME_DIRECTORY: 'off', ...env });
   const app = await buildApp({ db, config, logger, agentSql: agentSqlOn(client) });
   onTestFinished(() => app.close());
   return { app, db, config };
