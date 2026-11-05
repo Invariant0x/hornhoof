@@ -4,6 +4,57 @@ import { errorText, useT } from '../i18n';
 import { useStream } from '../live';
 import type { NoteView } from '../types';
 
+type Editing = { number: number; text: string };
+
+function NotebookFeedback({ loading, unread, saving, failure, onRetry }: { loading: boolean; unread: unknown; saving: boolean; failure: unknown; onRetry(): void }) {
+  const t = useT();
+  return (
+    <>
+      {loading && <p className="muted">{t.common.loading}</p>}
+      {unread !== null && (
+        <div className="notebook-unread">
+          <p className="error" role="alert">{t.notebook.unread} {errorText(t, unread)}</p>
+          <button className="btn small ghost" type="button" onClick={onRetry}>{t.app.tryAgain}</button>
+        </div>
+      )}
+      {saving && <p className="muted" role="status">{t.notebook.saving}</p>}
+      {failure !== null && <p className="error" role="alert">{errorText(t, failure)}</p>}
+    </>
+  );
+}
+
+function NotebookItems({ notes, editing, busy, onEdit, onSave, onCancel, onRemove }: { notes: NoteView[] | null; editing: Editing | null; busy: boolean; onEdit(note: NoteView): void; onSave(event: FormEvent): void; onCancel(): void; onRemove(note: NoteView): void }) {
+  const t = useT();
+  if (!notes) return null;
+  if (!notes.length) return <p className="muted">{t.notebook.empty}</p>;
+  const who = (n: NoteView) => (n.by?.kind === 'orchestrator' ? t.window.orchestrator : n.by ? n.by.name : '');
+  return (
+    <ul aria-label={t.notebook.title}>
+      {notes.map(n => (
+        <li key={n.number}>
+          <b>#{n.number}</b>
+          {editing?.number === n.number ? (
+            <form onSubmit={onSave}>
+              <textarea aria-label={t.notebook.note(n.number)} value={editing.text} maxLength={300} rows={2} onChange={e => onEdit({ ...n, text: e.target.value })} />
+              <button className="btn small" type="submit" disabled={busy}>{t.notebook.save}</button>
+              <button className="btn small ghost" type="button" onClick={onCancel}>{t.notebook.cancel}</button>
+            </form>
+          ) : (
+            <>
+              <span>{n.text}</span>
+              <small>{who(n)}</small>
+              <div className="notebook-item-actions">
+                <button className="t-link" type="button" aria-label={t.notebook.changeNote(n.number)} onClick={() => onEdit(n)}>{t.notebook.change}</button>
+                <button className="t-link" type="button" aria-label={t.notebook.removeNote(n.number)} disabled={busy} onClick={() => onRemove(n)}>{t.notebook.remove}</button>
+              </div>
+            </>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /* A notebook in an agent's window: the company's in the orchestrator's, which people who see the whole company read and
    change too, or a department's in its head's, for people who run that department. It is read again whenever it changes. */
 export function Notebook({ departmentId = null }: { departmentId?: string | null }) {
@@ -56,68 +107,17 @@ export function Notebook({ departmentId = null }: { departmentId?: string | null
     void run(() => api.patch(`${base}/${editing.number}`, { text: editing.text.trim() }), () => setEditing(null));
   }
 
-  const who = (n: NoteView) => (n.by?.kind === 'orchestrator' ? t.window.orchestrator : n.by ? n.by.name : '');
-
   return (
     <section className="notebook" aria-label={t.notebook.title} aria-busy={busy || (notes === null && unread === null)}>
       <p className="muted">{departmentId ? t.notebook.departmentIntro : t.notebook.intro}</p>
-      {notes === null && unread === null && <p className="muted">{t.common.loading}</p>}
-      {unread !== null && (
-        <div className="notebook-unread">
-          <p className="error" role="alert">
-            {t.notebook.unread} {errorText(t, unread)}
-          </p>
-          <button className="btn small ghost" type="button" onClick={() => void load()}>
-            {t.app.tryAgain}
-          </button>
-        </div>
-      )}
-      {notes && !notes.length && <p className="muted">{t.notebook.empty}</p>}
-      {notes && notes.length > 0 && (
-        <ul aria-label={t.notebook.title}>
-          {notes.map(n => (
-            <li key={n.number}>
-              <b>#{n.number}</b>
-              {editing?.number === n.number ? (
-                <form onSubmit={save}>
-                  <textarea aria-label={t.notebook.note(n.number)} value={editing.text} maxLength={300} rows={2} onChange={e => setEditing({ number: n.number, text: e.target.value })} />
-                  <button className="btn small" type="submit" disabled={busy}>
-                    {t.notebook.save}
-                  </button>
-                  <button className="btn small ghost" type="button" onClick={() => setEditing(null)}>
-                    {t.notebook.cancel}
-                  </button>
-                </form>
-              ) : (
-                <>
-                  <span>{n.text}</span>
-                  <small>{who(n)}</small>
-                  <div className="notebook-item-actions">
-                    <button className="t-link" type="button" aria-label={t.notebook.changeNote(n.number)} onClick={() => setEditing({ number: n.number, text: n.text })}>
-                      {t.notebook.change}
-                    </button>
-                    <button className="t-link" type="button" aria-label={t.notebook.removeNote(n.number)} disabled={busy} onClick={() => void run(() => api.del(`${base}/${n.number}`), () => {})}>
-                      {t.notebook.remove}
-                    </button>
-                  </div>
-                </>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
+      <NotebookFeedback loading={notes === null && unread === null} unread={unread} saving={busy} failure={failure} onRetry={() => void load()} />
+      <NotebookItems notes={notes} editing={editing} busy={busy} onEdit={n => setEditing({ number: n.number, text: n.text })} onSave={save} onCancel={() => setEditing(null)} onRemove={n => void run(() => api.del(`${base}/${n.number}`), () => {})} />
       <form className="notebook-add" onSubmit={add}>
         <textarea aria-label={t.notebook.newNote} placeholder={t.notebook.placeholder} value={text} maxLength={300} rows={2} onChange={e => setText(e.target.value)} />
         <button className="btn small" type="submit" disabled={busy || !text.trim()}>
           {t.notebook.add}
         </button>
       </form>
-      {busy && <p className="muted" role="status">{t.notebook.saving}</p>}
-      {failure !== null && (
-        <p className="error" role="alert">
-          {errorText(t, failure)}
-        </p>
-      )}
     </section>
   );
 }
