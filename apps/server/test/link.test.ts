@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { runCli } from '../src/cli.js';
 import { decryptSecret, encryptSecret } from '../src/crypto/secrets.js';
 import { companies, departments, linkTls, publicLinks } from '../src/db/schema.js';
-import { writeTunnelSettings } from '../src/modules/link/link.js';
+import { PublicLinks, writeTunnelSettings } from '../src/modules/link/link.js';
 import { newAccountKey } from '../src/modules/tls/acme.js';
 import { mayRunHttps, saveTls, tlsOf, updateTls } from '../src/modules/tls/store.js';
 import { selfSigned } from '../src/modules/tls/x509.js';
@@ -99,6 +99,8 @@ describe("the tunnel's mode", () => {
       ['a key that does not decrypt', { certKeyEnc: encryptSecret(pair.keyPem, Buffer.alloc(32, 9)) }],
       ['a key that is no key', { certKeyEnc: sealed('no key') }],
       ['text that is no certificate', { certPem: 'not a certificate' }],
+      ['a chain whose second block is broken', { certPem: `${pair.certPem}-----BEGIN CERTIFICATE-----\nYWJj\n-----END CERTIFICATE-----\n` }],
+      ['a chain whose second block is cut off', { certPem: `${pair.certPem}${another.certPem.slice(0, 200)}` }],
       ['a row in http mode', { mode: 'http' }],
     ];
     for (const [what, change] of cases) {
@@ -137,6 +139,22 @@ describe("the tunnel's mode", () => {
     const leaving = (leftMs: number) => new Date(notBefore.getTime() + 3 * DAY_MS - leftMs);
     expect(mayRunHttps(row, link, secret, leaving(DAY_MS + 1000))).toBe(true);
     expect(mayRunHttps(row, link, secret, leaving(DAY_MS))).toBe(false);
+    expect(mayRunHttps(row, link, secret, new Date(Number.NaN)), 'a date that cannot be read').toBe(false);
+  });
+
+  it('says in the log why a certificate that cannot be checked leaves the link on http, with no key in the line', async () => {
+    const { db, config, companyId, good, written } = await companyWithCertificate(CERTIFICATES_ON);
+    const certKeyEnc = encryptSecret('-----BEGIN PRIVATE KEY-----\nYWJj\n-----END PRIVATE KEY-----\n', config.secret);
+    await saveTls(db, companyId, { ...good, certKeyEnc });
+    const warned: unknown[][] = [];
+    const log = { warn: (...line: unknown[]) => warned.push(line) };
+    await new PublicLinks({ db, config, log: log as never }).sync();
+    expect((JSON.parse(written()) as { mode: unknown }).mode).toBe('http');
+    expect(warned.map(line => line[1])).toEqual(['The link stays on http: its certificate could not be checked.']);
+    /* Booleans only: a failure here must not print a key. */
+    const text = JSON.stringify(warned);
+    expect(text.includes('PRIVATE KEY')).toBe(false);
+    expect(text.includes(certKeyEnc)).toBe(false);
   });
 });
 

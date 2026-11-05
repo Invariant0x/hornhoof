@@ -75,6 +75,13 @@ describe('the tunnel client', () => {
     expect(readFileSync(join(dir, 'frpc.toml'), 'utf8')).toBe(CONFIG);
   });
 
+  it('refuses a mode that is only a name every object inherits', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-frpc-'));
+    for (const mode of ['toString', 'constructor', '__proto__']) {
+      expect(() => clientFor(settings({}, { mode: mode as TunnelSettings['mode'] }), dir), mode).toThrow(`${mode} is not a tunnel mode`);
+    }
+  });
+
   it('writes the key so that no character of it can break out of its line', () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-frpc-'));
     clientFor(settings({}, { key: 'abc"\nlocalIP = "db' }), dir);
