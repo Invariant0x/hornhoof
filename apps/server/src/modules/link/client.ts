@@ -3,8 +3,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { isLinkName } from '@hornhoof/protocol/link';
 import { z } from 'zod';
-import { LINK_TLS_PORT } from '../tls/listener.js';
 import type { Client, TunnelSettings } from './tunnel.js';
+
+/* Where frpc hands the link's traffic, by where its TLS ends. */
+export type FrpcLocal = { http: { ip: string; port: number }; https: { ip: string; port: number } };
+type Identity = { clientId: string; local: FrpcLocal };
 
 /* The parts of the relay's tunnel Hornhoof takes: the frps server and how to reach it. */
 const Server = z.object({
@@ -13,51 +16,57 @@ const Server = z.object({
   protocol: z.literal('wss'),
 });
 
-/* What differs by where the link's TLS ends. At the relay, the app hears from the tunnel that a request came over https.
-   At the app, the relay passes TLS on unread, so the tunnel's PROXY header is all that says who the visitor is. */
-const PROXY: Record<TunnelSettings['mode'], { localPort: number; lastLine: string }> = {
-  http: { localPort: 8080, lastLine: 'requestHeaders.set.x-forwarded-proto = "https"' },
-  https: { localPort: LINK_TLS_PORT, lastLine: 'transport.proxyProtocolVersion = "v2"' },
+const CLIENT_ID = /^[a-z0-9-]{1,63}-[0-9a-f]{8}-link$/;
+
+/* What https adds: the relay passes TLS on unread, so the tunnel's PROXY header is all that says who the visitor is. */
+const LAST_LINES: Record<TunnelSettings['mode'], string> = {
+  http: '',
+  https: 'transport.proxyProtocolVersion = "v2"\n',
 };
 
 /* A TOML string: JSON escapes quotes, backslashes and line breaks the way TOML reads them. */
 const quoted = (text: string) => JSON.stringify(text);
 
+/* The same on every start of this machine's frpc, so the relay knows it for the one that held the link before. */
+export const linkClientId = (name: string, machineId: string): string => `${name}-${machineId.slice(0, 8)}-link`;
+
 /* The frpc config for the link. It is written here and not taken as the relay sends it, so the tunnel carries the
-   link's traffic to the app and to nothing else on the company's network, whatever the relay says. */
-function configFor(settings: TunnelSettings): string {
+   link's traffic to the keeper's own door and to nothing else on the company's network, whatever the relay says. */
+export function configFor(settings: TunnelSettings, { clientId, local }: Identity): string {
   const server = Server.parse(settings.tunnel);
   if (!isLinkName(settings.name)) throw new Error(`${settings.name} is not a link name`);
   if (!settings.key) throw new Error('the link has no key');
+  if (!CLIENT_ID.test(clientId) || !clientId.startsWith(`${settings.name}-`)) throw new Error(`${clientId} is not a client id of this link`);
   /* The table's own names only: an object also answers to the names it inherits, such as toString. */
-  if (!Object.hasOwn(PROXY, settings.mode)) throw new Error(`${settings.mode} is not a tunnel mode`);
-  const proxy = PROXY[settings.mode];
+  if (!Object.hasOwn(local, settings.mode)) throw new Error(`${settings.mode} is not a tunnel mode`);
+  const door = local[settings.mode];
   return `serverAddr = ${quoted(server.serverAddr)}
 serverPort = ${server.serverPort}
 loginFailExit = false
 log.to = "console"
 log.level = "info"
 log.disablePrintColor = true
+clientID = ${quoted(clientId)}
 transport.protocol = "wss"
 transport.tls.trustedCaFile = "/etc/ssl/certs/ca-certificates.crt"
-transport.heartbeatInterval = 30
-transport.heartbeatTimeout = 90
+transport.heartbeatInterval = -1
+transport.tcpMuxKeepaliveInterval = 10
 metadatas.name = ${quoted(settings.name)}
 metadatas.key = ${quoted(settings.key)}
+metadatas.client = ${quoted(clientId)}
 
 [[proxies]]
 name = ${quoted(settings.name)}
 type = ${quoted(settings.mode)}
 subdomain = ${quoted(settings.name)}
-localIP = "app"
-localPort = ${proxy.localPort}
-${proxy.lastLine}
-`;
+localIP = ${quoted(door.ip)}
+localPort = ${door.port}
+${LAST_LINES[settings.mode]}`;
 }
 
 /* frpc with the link's config, written where only this container's user reads it. */
-export function clientFor(settings: TunnelSettings, dir = tmpdir()): Client {
+export function clientFor(settings: TunnelSettings, { dir = tmpdir(), ...identity }: Identity & { dir?: string }): Client {
   const path = join(dir, 'frpc.toml');
-  writeFileSync(path, configFor(settings), { mode: 0o600 });
+  writeFileSync(path, configFor(settings, identity), { mode: 0o600 });
   return { program: 'frpc', args: ['-c', path] };
 }
