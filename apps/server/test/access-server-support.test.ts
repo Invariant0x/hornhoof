@@ -1,4 +1,5 @@
 import { it } from 'vitest';
+import { createInterface } from 'node:readline';
 import { eq } from 'drizzle-orm';
 import { agents, jobs, subscriptions } from '../src/db/schema.js';
 import { aclCompany } from './agent-view-company.js';
