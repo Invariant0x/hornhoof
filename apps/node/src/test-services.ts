@@ -80,8 +80,15 @@ function environment(context: ServiceContext, extra: Record<string, string>): No
   return { PATH: '/usr/local/bin:/usr/bin:/bin', LANG: 'C.UTF-8', ...context.env, ...extra };
 }
 
+function groupExists(pid: number): boolean {
+  try { process.kill(-pid, 0); return true; }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
+    throw error;
+  }
+}
 function liveGroup(pid: number | undefined): boolean {
-  if (!pid) return false;
+  if (!pid || !groupExists(pid)) return false;
   for (const entry of readdirSync('/proc').filter(name => /^\d+$/.test(name))) {
     try {
       const stat = readFileSync(join('/proc', entry, 'stat'), 'utf8');

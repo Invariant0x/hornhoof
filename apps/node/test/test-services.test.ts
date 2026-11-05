@@ -5,7 +5,16 @@ import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, st
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { openServices, prepareServiceArtifacts, type ServiceContext, type ServiceDefinitions } from '../src/test-services.js';
+import { openServices, prepareServiceArtifacts, type ServiceCommand, type ServiceContext, type ServiceDefinitions } from '../src/test-services.js';
+
+const procVisibility = vi.hoisted(() => ({ readable: true }));
+vi.mock('node:fs', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return { ...actual, readdirSync: new Proxy(actual.readdirSync, { apply(target, receiver, args) {
+    if (args[0] === '/proc' && !procVisibility.readable) throw Object.assign(new Error('Unrelated process inventory is unavailable'), { code: 'EACCES' });
+    return Reflect.apply(target, receiver, args);
+  } }) };
+});
 
 const roots: string[] = [];
 let root: string;
@@ -33,6 +42,7 @@ function fakePostgres(): void {
 }
 
 beforeEach(() => {
+  procVisibility.readable = true;
   root = mkdtempSync(join(tmpdir(), 'hh-services-test-'));
   roots.push(root);
   bin = join(root, 'bin'); mkdirSync(bin);
@@ -98,7 +108,7 @@ describe('prepared native services', () => {
   it('cancels an observed readiness query and removes both supervised processes and their socket', async () => {
     const controller = new AbortController();
     const marker = join(root, 'readiness');
-    executable('psql', `const fs=require('node:fs'),p=require('node:path');if(process.argv.includes('--version')){console.log('psql (PostgreSQL) 17.4');process.exit(0)}fs.writeFileSync(${JSON.stringify(marker)},JSON.stringify({pid:process.pid,postgresPid:Number(fs.readFileSync(p.join(process.cwd(),'postmaster.pid'),'utf8')),host:process.env.PGHOST}));process.on('SIGTERM',()=>process.exit(0));setInterval(()=>{},100);`);
+    executable('psql', `const fs=require('node:fs'),p=require('node:path');if(process.argv.includes('--version')){console.log('psql (PostgreSQL) 17.4');process.exit(0)}if(!fs.existsSync(p.join(process.cwd(),'postmaster.pid')))process.exit(2);fs.writeFileSync(${JSON.stringify(marker)},JSON.stringify({pid:process.pid,postgresPid:Number(fs.readFileSync(p.join(process.cwd(),'postmaster.pid'),'utf8')),host:process.env.PGHOST}));process.on('SIGTERM',()=>process.exit(0));setInterval(()=>{},100);`);
     const watcher = watch(root);
     const entered = new Promise<{ pid: number; postgresPid: number; host: string }>(resolve => {
       watcher.on('change', () => {
@@ -128,6 +138,11 @@ describe('prepared native services', () => {
     expect(existsSync(readFileSync(trace, 'utf8'))).toBe(false);
     expect(existsSync(join(root, 'cache', 'a'.repeat(64), 'READY.json'))).toBe(false);
   });
+  it('does not inspect unrelated processes after its own process groups have exited', async () => {
+    procVisibility.readable = false;
+    const artifacts = await prep();
+    expect(readFileSync(join(artifacts.paths.pg!, 'PG_VERSION'), 'utf8')).toBe('17');
+  });
   it('deduplicates concurrent preparation and keeps the stopped cache reusable', async () => {
     context.env = { INIT_MARKER: join(root, 'initializations') };
     const [one, two] = await Promise.all([prep(), prep()]);
@@ -149,12 +164,12 @@ describe('prepared native services', () => {
 });
 
 describe('managed process services', () => {
-  function processDefinitions(): ServiceDefinitions {
+  function processDefinitions(graceMs = 100): ServiceDefinitions {
     executable('service', `const fs=require('node:fs'); const p=require('node:path'); const state=process.env.HH_SERVICE_STATE; fs.mkdirSync(p.join(state,'data'),{recursive:true}); fs.writeFileSync(p.join(state,'data','value'),'prepared'); fs.writeFileSync(p.join(state,'undeclared'),'private'); process.on('SIGINT',()=>{fs.writeFileSync(p.join(state,'data','stopped'),'yes');process.exit(0)}); setInterval(()=>{},100);`);
     executable('ready', `const fs=require('node:fs'); const p=require('node:path'); const t=setInterval(()=>{if(fs.existsSync(p.join(process.env.HH_SERVICE_STATE,'data','value'))){clearInterval(t);process.exit(process.env.BAD_READY==='1'?3:0)}},5);`);
     return { services: [{ id: 'worker', driver: 'process', runtime: 'node', profiles: ['fast'], options: {
       start: { program: join(bin, 'service'), args: [], cwd: '.' }, readiness: { program: join(bin, 'ready'), args: [], cwd: '.' },
-      stop: { signal: 'SIGINT', graceMs: 100 }, statePaths: ['data'],
+      stop: { signal: 'SIGINT', graceMs }, statePaths: ['data'],
     } }], prepare: [] };
   }
   it('honors the stop policy before publishing only declared state', async () => {
@@ -168,8 +183,8 @@ describe('managed process services', () => {
     expect(existsSync(opened.env.HH_SERVICE_STATE!)).toBe(false);
   });
   it('waits for descendant writers before snapshotting declared process state', async () => {
-    const defs = processDefinitions();
-    const child = "const fs=require('node:fs'),p=require('node:path');const d=p.join(process.env.HH_SERVICE_STATE,'data');process.on('SIGINT',()=>setTimeout(()=>{fs.writeFileSync(p.join(d,'child-stopped'),'yes');process.exit(0)},50));fs.writeFileSync(p.join(d,'child-ready'),'yes');setInterval(()=>{},100)";
+    const defs = processDefinitions(1000);
+    const child = "const fs=require('node:fs'),p=require('node:path');const d=p.join(process.env.HH_SERVICE_STATE,'data');process.on('SIGINT',()=>setTimeout(()=>{fs.writeFileSync(p.join(d,'child-stopped'),'yes');process.exit(0)},500));fs.writeFileSync(p.join(d,'child-ready'),'yes');setInterval(()=>{},100)";
     executable('service', `const fs=require('node:fs'),p=require('node:path'),cp=require('node:child_process');const d=p.join(process.env.HH_SERVICE_STATE,'data');fs.mkdirSync(d,{recursive:true});cp.spawn(process.execPath,['-e',${JSON.stringify(child)}],{stdio:'ignore'});const t=setInterval(()=>{if(fs.existsSync(p.join(d,'child-ready'))){clearInterval(t);fs.writeFileSync(p.join(d,'value'),'ready')}},5);process.on('SIGINT',()=>process.exit(0));setInterval(()=>{},100);`);
     const artifacts = await prepareServiceArtifacts(defs, root, { ...context, cacheRoot: join(root, 'cache'), envKey: 'c'.repeat(64), inputDigest: 'b'.repeat(64) });
     expect(readFileSync(join(artifacts.paths.worker!, 'data', 'child-stopped'), 'utf8')).toBe('yes');
@@ -191,22 +206,27 @@ async function pgliteProbe(body: string): Promise<Record<string, boolean | numbe
     import {PGlite} from '@electric-sql/pglite';
     import {preparePgliteTemplate,readPgliteTemplate} from './apps/server/test/prepare-environment.ts';
     import setup from './apps/server/test/global-setup.ts';
+    process.stderr.write('probe-start\\n');
     const path=process.argv[1]; const started=Date.now();
     const provided=[]; const project={provide:(_,value)=>provided.push(value)};
     process.env.HH_PGLITE_TEMPLATE=path;
     ${body}
   `;
   const result = await promisify(execFile)(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script, join(root, 'pglite')], {
-    cwd: fileURLToPath(new URL('../../..', import.meta.url)), timeout: 18000,
+    cwd: fileURLToPath(new URL('../../..', import.meta.url)), timeout: 18000, killSignal: 'SIGKILL',
   });
   return JSON.parse(result.stdout) as Record<string, boolean | number>;
 }
 describe('prepared PGlite compatibility', () => {
   it('copies a validated migrated dump and rejects stale metadata or changed bytes', async () => {
     const measured = await pgliteProbe(`
+      process.stderr.write('prepare-start\\n');
       await preparePgliteTemplate(path);
+      process.stderr.write('prepare-done\\n');
       const bytes=readPgliteTemplate(path); assert(Buffer.isBuffer(bytes));
+      process.stderr.write('setup-start\\n');
       const cleanup=await setup(project);
+      process.stderr.write('setup-done\\n');
       try {assert(readFileSync(provided[0]).equals(bytes)); assert(!provided[0].startsWith(path));} finally {cleanup();}
       const file=join(path,'READY.json'); const metadata=JSON.parse(readFileSync(file,'utf8'));
       writeFileSync(file,JSON.stringify({...metadata,pgliteVersion:'0.0.0'})); assert.equal(readPgliteTemplate(path),null);
@@ -220,7 +240,9 @@ describe('prepared PGlite compatibility', () => {
   it('falls back to standalone migrations when the optional artifact is corrupt', async () => {
     const measured = await pgliteProbe(`
       mkdirSync(path); writeFileSync(join(path,'READY.json'),'{}'); writeFileSync(join(path,'migrated.tar'),'corrupt');
+      process.stderr.write('setup-start\\n');
       const cleanup=await setup(project);
+      process.stderr.write('setup-done\\n');
       try {
         const client=new PGlite({loadDataDir:new Blob([readFileSync(provided[0])])});
         try {assert(Number((await client.query('SELECT count(*) AS n FROM drizzle.__drizzle_migrations')).rows[0].n)>0);} finally {await client.close();}
@@ -248,5 +270,29 @@ describe('service ownership boundaries', () => {
     expect(opened.env).toEqual({});
     await opened.close();
     expect(existsSync(join(root, 'runs', 'empty'))).toBe(false);
+  });
+});
+
+describe('manifest argv selection', () => {
+  it.each([
+    { id: 'node', selected: 'test/redact.test.ts', expected: 'apps/node/test/redact.test.ts' },
+    { id: 'server-postgres', selected: 'test/postgres/race.pg.spec.ts', expected: 'apps/server/test/postgres/race.pg.spec.ts' },
+  ])('collects only the selected file for $id before execution', async ({ id, selected, expected }) => {
+    const checkout = fileURLToPath(new URL('../../..', import.meta.url));
+    const manifest = JSON.parse(readFileSync(join(checkout, '.hornhoof/test-environment.json'), 'utf8')) as { suites: { id: string; run: ServiceCommand }[] };
+    const run = manifest.suites.find(suite => suite.id === id)!.run;
+    const inventory = join(root, `${id}-inventory.json`);
+    const list = run.args.flatMap(arg => arg === 'run' ? ['list', '--filesOnly', `--json=${inventory}`] : [arg]);
+    await promisify(execFile)(run.program, [...list, selected], { cwd: join(checkout, run.cwd), timeout: 18000 });
+    const files = JSON.parse(readFileSync(inventory, 'utf8')) as { file: string }[];
+    expect(files.map(file => file.file)).toEqual([join(checkout, expected)]);
+    if (id === 'node') {
+      const reportFile = join(root, 'selected-run.json');
+      const args = run.args.flatMap(arg => arg === 'run' ? ['run', '--reporter=json', `--outputFile=${reportFile}`] : [arg]);
+      await promisify(execFile)(run.program, [...args, selected], { cwd: join(checkout, run.cwd), timeout: 18000 });
+      const report = JSON.parse(readFileSync(reportFile, 'utf8')) as { numTotalTests: number; testResults: { name: string }[] };
+      expect(report.testResults.map(file => file.name)).toEqual([join(checkout, expected)]);
+      expect(report.numTotalTests).toBeGreaterThan(0);
+    }
   });
 });
