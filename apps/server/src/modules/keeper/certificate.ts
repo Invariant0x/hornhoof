@@ -64,7 +64,7 @@ export function readHeldCertificate(dir: string, key: MachineKey): HeldCertifica
 export class CertificateKeeper {
   private held: HeldCertificate | null;
   private readonly listeners: Array<(held: HeldCertificate) => void> = [];
-  private timer: NodeJS.Timeout | null = null;
+  private timer: NodeJS.Timeout | undefined;
   private asking = false;
   private told = false;
   private stopped = false;
@@ -80,7 +80,6 @@ export class CertificateKeeper {
   }
 
   start(): void {
-    this.stopped = false;
     this.look();
   }
 
@@ -95,8 +94,7 @@ export class CertificateKeeper {
 
   stop(): void {
     this.stopped = true;
-    if (this.timer) clearTimeout(this.timer);
-    this.timer = null;
+    clearTimeout(this.timer);
   }
 
   /* One ask at a time. A word that comes during an ask stays in told and is acted on when that ask ends. */
@@ -112,7 +110,7 @@ export class CertificateKeeper {
   }
 
   private lookAgainAfter(ms: number): void {
-    if (this.timer) clearTimeout(this.timer);
+    clearTimeout(this.timer);
     this.timer = setTimeout(() => this.look(), ms);
     this.timer.unref();
   }
