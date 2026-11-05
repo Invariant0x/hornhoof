@@ -22,7 +22,7 @@ import { StreamMask } from './mask.js';
 import { ProgramWatch, READY, REPORT_MS, programState, type Pending } from './program-state.js';
 import { acceptClaudeDialogs, agyTranscript, claudeTranscript, findKimiWire, findRollout, prepareAgy, prepareKimi, rolloutFiles, type LaunchSpec, type TermProgram } from './programs.js';
 import { FAILURE, failure } from './failures.js';
-import { TurnEnds, hookCalls, claudeEnd, type TurnEnd } from './turn-signals.js';
+import { TurnEnds, hookCalls, claudeEnd, stopIsLate, type TurnEnd } from './turn-signals.js';
 import { claudeWordReceipt, restartRefusal, resumeCommand, TurnWords, type WordReceipt } from './program-restart.js';
 import { CALLS } from './tool-calls.js';
 import { agyError, agySteps, claudeStatusContext, claudeStatusLimits, codexRollout, kimiWire, LineTail, type WireNews } from './transcripts.js';
@@ -91,6 +91,8 @@ type Agent = {
   sessionId: string | null;
   /* Sessions a person cleared in the running program: a turn asking for one goes on in the session that replaced it. */
   cleared: Set<string>;
+  /* Sessions the agent was in and left, in any program: what they still say is not about the turn that runs now. */
+  left: Set<string>;
   tail: LineTail | null;
   draining: boolean;
   /* The Codex session logs there were when the program started a new session: its own log is none of them. */
@@ -371,7 +373,7 @@ export class TerminalHost {
   private agent(key: string): Agent {
     let a = this.agents.get(key);
     if (!a) {
-      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), tail: null, draining: false, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, viewers: 0, up: false, watch: null, saying: Promise.resolve(), waitingWords: [], enqueuedWords: [], unheardTimers: new Map(), dequeued: false, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, agyAnswered: false, agyCursor: null, interruptions: 0, calls: new Map(), closedCalls: new Set(), question: null, ends: new TurnEnds(), signAt: 0, retry: null, apiError: null, restarting: false, launch: null, programTurnId: undefined };
+      a = { key, name: `a-${key}`, program: null, signedOut: null, home: '', workDir: '', hash: null, sessionId: null, cleared: new Set(), left: new Set(), tail: null, draining: false, oldLogs: null, startedAt: 0, started: null, ended: null, turn: null, busy: false, limits: null, contextUsed: null, contextSize: null, viewers: 0, up: false, watch: null, saying: Promise.resolve(), waitingWords: [], enqueuedWords: [], unheardTimers: new Map(), dequeued: false, queue: Promise.resolve(), unopened: [], stopped: false, failure: null, lastText: null, stepSaid: false, settling: null, fresh: false, starting: null, keep: null, agyRead: null, agyAnswered: false, agyCursor: null, interruptions: 0, calls: new Map(), closedCalls: new Set(), question: null, ends: new TurnEnds(), signAt: 0, retry: null, apiError: null, restarting: false, launch: null, programTurnId: undefined };
       this.agents.set(key, a);
     }
     return a;
@@ -498,6 +500,7 @@ export class TerminalHost {
     const { input } = job;
     this.programIs(a, false);
     await this.prepare(job, urls);
+    if (a.sessionId) a.left.add(a.sessionId);
     Object.assign(a, { ...startedState(job, spec), hash });
     if (job.program.kind === 'claude' && !input.sessionId) await this.keepNew(input, spec.sessionId);
     a.tail = this.tailFor(a);
@@ -743,6 +746,7 @@ export class TerminalHost {
     this.drain(a);
     this.reportUnheard(a, true);
     a.cleared.add(a.sessionId);
+    a.left.add(a.sessionId);
   }
 
   private followSessionLog(a: Agent, sessionId: string): void {
@@ -811,7 +815,7 @@ export class TerminalHost {
   private endTurn(a: Agent, end: TurnEnd, id?: string, blocked = false): void {
     if (a.restarting) return;
     const decision = a.ends.end(end.status, this.stoppable(a) || Boolean(blocked && a.turn), id);
-    if (decision.conflict) this.log(`Agent ${a.key} (${a.program?.kind}): turn end channels disagree. The first end was kept.`);
+    if (decision.conflict) this.logDisagreement(a);
     if (!decision.accept) return;
     if (a.turn) this.endWords(a, a.turn);
     a.busy = false;
@@ -830,6 +834,10 @@ export class TerminalHost {
     void settling.then(() => {
       this.finishTyped(a, end.message, error, end.failure?.text ?? '', undefined, turn);
     });
+  }
+
+  private logDisagreement(a: Agent): void {
+    this.log(`Agent ${a.key} (${a.program?.kind}): turn end channels disagree. The first end was kept.`);
   }
 
   private tookTurn(a: Agent, id?: string): void {
@@ -1205,12 +1213,20 @@ export class TerminalHost {
 
   private async stoppedHook(a: Agent, data: Record<string, unknown>): Promise<void> {
     this.drain(a);
-    if (typeof data.session_id === 'string') this.follow(a, data.session_id);
     const id = typeof data.turn_id === 'string' ? data.turn_id : undefined;
+    if (stopIsLate({ promptIn: this.stoppable(a), from: data.session_id, session: a.sessionId, left: a.left })) return this.lateStop(a, data, id);
+    if (typeof data.session_id === 'string') this.follow(a, data.session_id);
     if (data.stopped === true) return this.interrupted(a, id);
     const detail = this.stopFailure(a, data);
     if (detail) return this.turnFailed(a, detail.text, detail, id);
     await this.successfulStop(a, data, id);
+  }
+
+  /* The turn this stop tells of is over, so the session and the turn that run now are not its to change. All it can still
+     show is that the two channels disagree on how that turn ended. */
+  private lateStop(a: Agent, data: Record<string, unknown>, id: string | undefined): void {
+    const status = data.stopped === true ? 'stopped' : this.stopFailure(a, data) ? 'failed' : 'done';
+    if (a.ends.end(status, false, id).conflict) this.logDisagreement(a);
   }
 
   private stopFailure(a: Agent, data: Record<string, unknown>): Failure | null {
