@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { asc, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { expect, it } from 'vitest';
 import { OPERATOR_CASE_MS, type OperatorRecoveryState } from '@hornhoof/protocol/program-operator';
 import { agentEvents, agents, departments, jobs, programInstances, programOperatorActions, programOperatorCases } from '../src/db/schema.js';
@@ -19,6 +19,10 @@ import { listen, mcp } from './helpers.js';
 import { operatorCompany } from './program-operator-company.js';
 
 const MINUTE = 60_000;
+
+/* Whom Hornhoof answers for: the person the words of a turn stand for, who has that turn's rights. */
+const principalOf = async (c: { db: Awaited<ReturnType<typeof operatorCompany>>['db'] }, jobId: string) =>
+  (await c.db.select({ personId: agentEvents.personId }).from(agentEvents).where(and(eq(agentEvents.jobId, jobId), inArray(agentEvents.kind, ['message', 'typed'])))).map(word => word.personId);
 
 /* Words the program never recorded: their case escalated at once with nobody to take it, and they wait on a hold. */
 async function held(options: { before?: (c: Awaited<ReturnType<typeof operatorCompany>>) => Promise<void>; failed?: boolean } = {}) {
@@ -532,6 +536,7 @@ it('keeps queue, start and deadline apart for an operator late behind other work
   const children = await c.db.select().from(jobs).where(eq(jobs.continueOf, c.job.id));
   expect(children).toHaveLength(1);
   expect(children[0]).toMatchObject({ createdBy: c.sub.ownerPersonId, prompt: expect.stringContaining('Words.') });
+  expect(await principalOf(c, children[0]!.id)).toEqual([c.sub.ownerPersonId]);
   const running = await c.db.select({ id: jobs.id }).from(jobs).where(sql`${jobs.agentId} = ${c.agent.id} and ${jobs.status} = 'running'`);
   expect(running.length).toBeLessThanOrEqual(1);
 });
@@ -565,6 +570,7 @@ it('runs a turn someone asked for once more after a node restart, outside any ta
   const again = await c.db.select().from(jobs).where(eq(jobs.retryOf, first));
   expect(again).toHaveLength(1);
   expect(again[0]).toMatchObject({ createdBy: c.sub.ownerPersonId, prompt: expect.stringContaining('Please look at the invoice.'), continueOf: null });
+  expect(await principalOf(c, again[0]!.id)).toEqual([c.sub.ownerPersonId]);
   await failOpenJobs(c.ctx, eq(jobs.id, first), 'machine_restarted');
   expect(await c.db.select().from(jobs).where(eq(jobs.retryOf, first))).toHaveLength(1);
 });
