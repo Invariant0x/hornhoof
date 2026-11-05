@@ -20,6 +20,7 @@ import { hasCurrentKey, liveNode, settlePlans } from './nodes.js';
 import { builtinInterruption, interruptionOf } from './restarts.js';
 import { interruptionValue, type RestartCut } from './restart-evidence.js';
 import { hookRejected } from './hook-rejections.js';
+import { checkQueueLoad, nodeCheckQueueLost, routeCheckMessage } from './check-slots.js';
 import { adoptOperatorOwnerTurn } from '../program-operator/recovery.js';
 
 const OPEN_JOBS = ['queued', 'running'] as const;
@@ -199,10 +200,12 @@ async function wordMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage, now: Da
 
 export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage, now = new Date()): Promise<void> {
   if (!(await hasCurrentKey(ctx, id))) return;
+  await routeCheckMessage(ctx, id, msg, jobsOf(id, ctx));
   await wordMessage(ctx, id, msg, now);
   const { db } = ctx;
   // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- Terminal and live word messages have their own handlers.
   switch (msg.type) {
+
     case 'hello': {
       clearNodeWords(ctx, id);
       let cut = await builtinCut(ctx, id, msg, now);
@@ -230,7 +233,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       }
       await failOpenJobs(ctx, jobsOf(id, ctx), 'machine_restarted', msg.running, cut);
       ctx.hub.greet(id, msg.terminals === true, msg.skillFiles === true, msg.work === true, msg.noRuns || null, msg.build, msg.browserError || null);
-      if (msg.load) ctx.hub.report(id, msg.load);
+      if (msg.load) { ctx.hub.report(id, msg.load); await checkQueueLoad(ctx, id); }
       await testsHello(ctx, id, msg.tests);
       /* Hornhoof ended these while the node was away, with a stop or a removed subscription; the node stops them now. */
       if (msg.running.length) {
@@ -262,10 +265,12 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       // eslint-disable-next-line @typescript-eslint/no-unused-vars -- strip the message type tag from the node load
       const { type: _, ...load } = msg;
       ctx.hub.report(id, load);
+      await checkQueueLoad(ctx, id);
       /* A machine that freed up takes a part that waits. */
       await pumpTests(ctx);
       return;
     }
+
     case 'tests.started':
       await partStarted(ctx, id, msg.partId);
       return;
@@ -348,7 +353,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
 /* Jobs keep running on the node while it is away and report after it reconnects, so only the time is kept. */
 export async function handleNodeClose(ctx: Ctx, id: NodeIdentity): Promise<void> {
   /* A newer connection of the same node keeps the views. */
-  if (!ctx.hub.isOnline(id)) ctx.terminals.nodeGone(id);
+  if (!ctx.hub.isOnline(id)) { ctx.terminals.nodeGone(id); nodeCheckQueueLost(ctx, id); }
   if (id.kind !== 'node') return;
   await ctx.db.update(nodes).set({ lastSeenAt: new Date() }).where(eq(nodes.id, id.nodeId));
 }

@@ -1,5 +1,6 @@
 import { readdir, readFile, readlink } from 'node:fs/promises';
 import { join } from 'node:path';
+import { checkProcesses } from '../check-processes.js';
 
 /* A connection to the bridge: the caller's port and the bridge's, both on 127.0.0.1. */
 export type Peer = { port: number; bridgePort: number; pid?: number; acceptedInode?: string | null; acceptedPid?: number | null };
@@ -54,8 +55,9 @@ export function fromAgent(panes: (key: string) => Promise<number[]>, proc = '/pr
     const inode = peer.acceptedInode === undefined ? await socketOf(proc, peer) : peer.acceptedInode;
     if (!inode) return false;
     const link = `socket:[${inode}]`;
-    if (peer.pid !== undefined) return hintedOwner(proc, peer.pid, link, () => panes(key));
-    return underPanes(proc, await panes(key), link);
+    const roots = async () => [...await panes(key), ...checkProcesses(key)];
+    if (peer.pid !== undefined) return hintedOwner(proc, peer.pid, link, roots);
+    return underPanes(proc, await roots(), link);
   };
 }
 

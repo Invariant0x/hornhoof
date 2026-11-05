@@ -5,6 +5,8 @@ import type { OperatorEvidence, OperatorQuestion } from '@hornhoof/protocol/prog
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as storage from '../src/terminal/operator-storage.js';
 import { OperatorObserver } from '../src/terminal/operator-observer.js';
+import { CheckClient } from '../src/check-client.js';
+import { setCheckClient } from '../src/check-queue.js';
 
 const agentKey = '10000000-0000-4000-8000-000000000001';
 const jobId = '10000000-0000-4000-8000-000000000002';
@@ -12,7 +14,7 @@ const instance = '10000000-0000-4000-8000-000000000003';
 const deliveryId = '10000000-0000-4000-8000-000000000004';
 const identity = { agentKey, jobId, instance };
 const folders: string[] = [];
-afterEach(() => { vi.restoreAllMocks(); for (const folder of folders.splice(0)) rmSync(folder, { recursive: true, force: true }); });
+afterEach(() => { setCheckClient(null); vi.restoreAllMocks(); for (const folder of folders.splice(0)) rmSync(folder, { recursive: true, force: true }); });
 
 function fixture() {
   const folder = mkdtempSync(join(tmpdir(), 'hh-operator-'));
@@ -29,6 +31,35 @@ function fixture() {
 }
 
 describe('program delivery evidence', () => {
+  it('does not call authenticated queue waiting missing activity, but detects a lost queue connection', async () => {
+    const client = new CheckClient(() => true); client.online(true); setCheckClient(client);
+    const pending = client.acquire({ agentId: agentKey, jobId });
+    const rejected = pending.catch(() => {});
+    const c = fixture(); c.attempt(); c.observer.receipt(deliveryId, 'taken');
+    c.at(600000); c.observer.tick();
+    expect(c.alarms()).toEqual([]);
+    client.online(false); await rejected;
+    c.observer.tick();
+    expect(c.alarms()).toEqual([]);
+    c.at(900000); c.observer.tick();
+    expect(c.alarms()).toEqual([expect.objectContaining({ reason: 'recorded_no_activity' })]);
+  });
+  it('does not count queue time against the first-activity clock after a grant', async () => {
+    let requestId = '';
+    const client = new CheckClient(frame => { requestId = frame.id; return true; });
+    client.online(true); setCheckClient(client);
+    const pending = client.acquire({ agentId: agentKey, jobId });
+    const c = fixture(); c.attempt(); c.observer.receipt(deliveryId, 'taken');
+    c.at(600000); c.observer.tick();
+    client.receive({ type: 'check.state', id: requestId, state: 'running', position: 0 });
+    const lease = await pending;
+    try {
+      c.at(600001); c.observer.tick(); expect(c.alarms()).toEqual([]);
+      c.at(899999); c.observer.tick(); expect(c.alarms()).toEqual([]);
+      c.at(900000); c.observer.tick();
+      expect(c.alarms()).toEqual([expect.objectContaining({ reason: 'recorded_no_activity' })]);
+    } finally { lease.release(); client.online(false); }
+  });
   it('credits a completed source without clearing a newer native question', () => {
     const c = fixture(); c.attempt();
     c.observer.receipt(deliveryId, 'taken');

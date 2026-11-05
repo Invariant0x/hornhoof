@@ -1,11 +1,13 @@
 import { Fragment, type ReactNode } from 'react';
-import { useT } from '../i18n';
+import { useLanguage, useT } from '../i18n';
 import type { Department, DepartmentTree, TreeAgent } from '../types';
 import { ProviderMark } from '../ui/icons';
-import { treeClock, trunkBranch, reviewsOf, type TreePick } from './tree';
+import { AgentState } from '../ui/AgentState';
+import { taskWaitText } from '../ui/task-wait';
+import { lanesOf, rowTaskNumber, treeClock, trunkBranch, reviewsOf, type TreePick, type TreeRow } from './tree';
 import { useOpenAgent } from './AgentWindowContext';
 
-type Props = { tree: DepartmentTree; department: Department; pick: TreePick; onOpenTask(id: string): void };
+type Props = { tree: DepartmentTree; department: Department; pick: TreePick; onOpenTask(id: string): void; onClose?(): void };
 
 export function TreeWho({ agent, department }: { agent: TreeAgent; department: Department }) {
   const employee = department.employees.find(e => e.id === agent.id);
@@ -71,11 +73,68 @@ function TurnCard({ tree, department }: Pick<Props, 'tree' | 'department'>) {
   );
 }
 
+function LaneDescription({ agent, tree, department, line }: { agent: TreeAgent; tree: DepartmentTree; department: Department; line?: DepartmentTree['lines'][number] }) {
+  const L = useT().dept.tree, external = line?.externalWait;
+  if (external && external.until > tree.now) {
+    const text = taskWaitText(useT(), external, treeClock(external.until));
+    return <span className="ast calm" title={text}>{text}</span>;
+  }
+  const wait = tree.waiting?.find(w => w.agent.id === agent.id);
+  if (!wait) return <AgentState agent={department.employees.find(e => e.id === agent.id)} serverNow={tree.now} />;
+  const text = L.waitingFor(wait.waitsForAgent.name, treeClock(wait.from));
+  return <span className="ast calm" title={text}>{text}</span>;
+}
+
+function rowTitle(row: Pick<TreeRow, 'line' | 'review' | 'activity'>, tree: DepartmentTree, L: ReturnType<typeof useT>['dept']['tree']): string {
+  if (row.line) return row.line.title;
+  if (row.review) return L.reviewH(tree.turn!.number);
+  return row.activity?.task?.title ?? L.noTask;
+}
+
+function LaneTask({ row, tree, onOpenTask }: { row: Pick<TreeRow, 'line' | 'review' | 'activity'>; tree: DepartmentTree; onOpenTask(id: string): void }) {
+  const L = useT().dept.tree, taskId = row.line?.taskId ?? row.review?.taskId ?? row.activity?.jobId;
+  if (!taskId) return <>{L.noTask}</>;
+  const number = rowTaskNumber(row);
+  return <button type="button" className="linkish" onClick={() => onOpenTask(taskId)}>{number !== undefined && `#${number}`} {rowTitle(row, tree, L)}</button>;
+}
+
+function LaneRole({ employee, language }: { employee: Department['employees'][number] | undefined; language: 'en' | 'ru' }) {
+  const role = employee?.title?.[language];
+  return role && role !== employee?.name ? <p className="say">{role}</p> : null;
+}
+
+function LaneCard({ tree, department, pick, onOpenTask, onClose }: Props) {
+  const L = useT().dept.tree, { language } = useLanguage(), openAgent = useOpenAgent();
+  const row = lanesOf(tree).find(r => r.agent?.id === pick.agentId);
+  if (!row?.agent) return null;
+  const employee = department.employees.find(e => e.id === row.agent!.id);
+  const pairs: [string, ReactNode][] = [
+    [L.cTask, <LaneTask row={row} tree={tree} onOpenTask={onOpenTask} />],
+    [L.cNow, <LaneDescription agent={row.agent} tree={tree} department={department} line={row.line} />],
+  ];
+  return (
+    <>
+      <h4><button type="button" className="linkish" onClick={() => { openAgent(row.agent!.id); onClose?.(); }}><TreeWho agent={row.agent!} department={department} /></button></h4>
+      <LaneRole employee={employee} language={language} />
+      <Details pairs={pairs} />
+    </>
+  );
+}
+
 const isReviewPick = (pick: TreePick) => pick.kind === 'review' || pick.kind === 'reviewer';
+
+function AgentCard(props: Props) {
+  if (!isReviewPick(props.pick)) return <LaneCard {...props} />;
+  return (
+    <>
+      <LaneCard {...props} />
+      {reviewsOf(props.tree).length > 0 && <ReviewCard {...props} />}
+    </>
+  );
+}
 
 export function TreeCardBody(props: Props) {
   const { tree, pick, department } = props, L = useT().dept.tree;
-  if (isReviewPick(pick)) return reviewsOf(tree).length > 0 && <ReviewCard {...props} />;
   if (pick.kind === 'main') {
     return (
       <>
@@ -85,5 +144,6 @@ export function TreeCardBody(props: Props) {
     );
   }
   if (pick.kind === 'turn') return <TurnCard tree={tree} department={department} />;
+  if (pick.agentId || isReviewPick(pick)) return <AgentCard {...props} />;
   return null;
 }

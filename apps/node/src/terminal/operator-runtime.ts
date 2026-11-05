@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { z } from 'zod';
+import { checkSlotWaiting } from '../check-queue.js';
 import type { OperatorDelivery, OperatorNodeMessage, OperatorQuestion, OperatorReason, OperatorServerMessage } from '@hornhoof/protocol/program-operator';
 import { OperatorControl, type OperatorProgram } from './operator-control.js';
 import { OperatorObserver, type OperatorIdentity } from './operator-observer.js';
@@ -160,7 +161,7 @@ export class OperatorRuntime {
 
   private awaitingNativeInput(key: string): boolean {
     const source = this.source.current(key);
-    return Boolean(source?.runningTool || source?.retrying || source?.wait);
+    return programWaits(source, checkSlotWaiting(key));
   }
 
   failure(key: string): string | null {
@@ -233,6 +234,12 @@ export class OperatorRuntime {
   private current(key: string): OperatorProgram | null {
     const target = this.targets.get(key), source = this.source.current(key);
     if (!target || !source) return null;
-    return { ...source, ...target.identity, jobId: target.bound ? target.identity.jobId : null, generation: target.generation, alive: source.alive && target.physical, pasted: source.pasted || target.pasted, turnStarted: source.turnStarted || target.started, active: source.active || target.active };
+    return { ...source, ...target.identity, runningTool: queueTool(source.runningTool, checkSlotWaiting(key, target.identity.jobId)), jobId: target.bound ? target.identity.jobId : null, generation: target.generation, alive: source.alive && target.physical, pasted: source.pasted || target.pasted, turnStarted: source.turnStarted || target.started, active: source.active || target.active };
   }
 }
+
+function programWaits(source: ReturnType<Source['current']>, queued: boolean): boolean {
+  return Boolean(source?.runningTool || source?.retrying || source?.wait || queued);
+}
+
+const queueTool = (running: boolean, queued: boolean): boolean => running || queued;
