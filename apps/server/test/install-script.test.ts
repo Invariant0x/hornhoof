@@ -529,10 +529,10 @@ describe('install.sh', () => {
     const env = readFileSync(join(dir, '.env'), 'utf8');
     expect(env).toContain('HORNHOOF_SECRET=keep-me');
     expect(env).toMatch(/^NODE_KEY=.{44}$/m);
-    /* Its database was made with the password compose gives when .env names none. */
+    /* Its database was made with the password compose gives when .env names none; the database, the app, the keeper and migrate each read it. */
     expect(env).not.toContain('POSTGRES_PASSWORD');
     const compose = readFileSync(fileURLToPath(new URL('../../../compose.yaml', import.meta.url)), 'utf8');
-    expect(compose.match(/\$\{POSTGRES_PASSWORD:-hornhoof\}/g)).toHaveLength(2);
+    expect(compose.match(/\$\{POSTGRES_PASSWORD:-hornhoof\}/g)).toHaveLength(4);
   });
 
   it('replaces an existing .env whole and leaves it readable by its owner only', () => {
