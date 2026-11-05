@@ -1,12 +1,12 @@
 import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { errorText, useLanguage, useT } from '../i18n';
 import type { Build } from '../types';
 import type { Updates } from '../updates';
 import { UpdateProgress } from '../ui/UpdateProgress';
 import { buildText, versionText } from '../ui/VersionMark';
 import { updateTargetText, versionedStatus } from '../ui/UpdateVersion';
-import { takeEscape } from '../ui/escape';
+import { useDialogClose } from '../ui/use-dialog-close';
 
 /* The builds Hornhoof can run, the one it runs, and the update under way or the last one's end. */
 export function Versions({ updates, onClose, onHome }: { updates: Updates; onClose: () => void; onHome?: () => void }) {
@@ -16,17 +16,7 @@ export function Versions({ updates, onClose, onHome }: { updates: Updates; onClo
   const [confirm, setConfirm] = useState<Build | null>(null);
   const [failure, setFailure] = useState<unknown>(null);
   const [checking, setChecking] = useState(false);
-  const box = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    box.current?.focus();
-    const onKey = (e: KeyboardEvent) => {
-      if (!takeEscape(e)) return;
-      onClose();
-    };
-    document.addEventListener('keydown', onKey, true);
-    return () => document.removeEventListener('keydown', onKey, true);
-  }, [onClose]);
+  const box = useDialogClose(onClose);
 
   async function act(run: () => Promise<void>) {
     setFailure(null);

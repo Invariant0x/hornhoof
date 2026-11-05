@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { api } from '../api';
 import { deptLabel, errorText, LANGUAGES, useLanguage, useT } from '../i18n';
 import { useOrg } from '../org';
@@ -37,6 +37,16 @@ type AccountDialogName = 'about' | 'versions' | 'profile' | 'settings';
 
 function dialogOf(route: Route): AccountDialogName | null {
   return route.kind === 'about' || route.kind === 'versions' || route.kind === 'profile' || route.kind === 'settings' ? route.kind : null;
+}
+
+function workspaceOf(route: Route, backgrounds: Route[]) {
+  const accountDialog = dialogOf(route);
+  const contentRoute = accountDialog ? backgrounds[0]! : route;
+  const taskId = contentRoute.kind === 'tasks' ? contentRoute.id ?? null : null;
+  const pageRoute = taskId ? backgrounds[accountDialog ? 1 : 0] ?? { kind: 'tasks' } as const : contentRoute;
+  const tab = pageRoute.kind === 'department' ? 'map' : pageRoute.kind;
+  const deptId = pageRoute.kind === 'department' ? pageRoute.id : null;
+  return { accountDialog, pageRoute, taskId, tab, deptId };
 }
 
 function AccountDialog({ active, me, updates, onRenamed, onClose, onHome }: { active: AccountDialogName | null; me: Me; updates: Updates; onRenamed: (name: string) => void; onClose: () => void; onHome: () => void }) {
@@ -166,6 +176,51 @@ function AccountMenu({
   );
 }
 
+function ShellTabs({ tab, waiting, navigate }: { tab: Route['kind']; waiting: number; navigate: ReturnType<typeof useRoute>['navigate'] }) {
+  const t = useT();
+  return (
+    <nav className="tabs glass" aria-label={t.shell.sections}>
+      {TABS.map(id => {
+        const count = id === 'tasks' ? waiting : 0;
+        return (
+          <button
+            key={id}
+            type="button"
+            className={tab === id ? 'on' : ''}
+            aria-current={tab === id ? 'page' : undefined}
+            aria-label={count ? t.tasks.navWaiting(count) : undefined}
+            onClick={() => {
+              navigate({ kind: id });
+            }}
+          >
+            {t.shell.tabs[id]}
+            {count > 0 && <span className="nav-count" aria-hidden="true">{count}</span>}
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+
+function ShellAccount({ me, menu, setMenu, company, navigate, openAccount, onSignOut, toDecide, account, accountButton }: {
+  me: Me; menu: boolean; setMenu: (open: boolean) => void; company: boolean;
+  navigate: ReturnType<typeof useRoute>['navigate']; openAccount: (kind: AccountDialogName) => void;
+  onSignOut: () => void; toDecide: number;
+  account: RefObject<HTMLDivElement | null>; accountButton: RefObject<HTMLButtonElement | null>;
+}) {
+  const t = useT();
+  return (
+    <div className="tb-right">
+      <div className="account" ref={account}>
+        <button ref={accountButton} className="avatar glass" type="button" aria-label={t.shell.account} aria-expanded={menu} onClick={() => setMenu(!menu)}>
+          {me.person.name.trim().charAt(0).toUpperCase()}
+        </button>
+        {menu && <AccountMenu me={me} onClose={() => setMenu(false)} onSignOut={onSignOut} onImprovements={company ? () => navigate({ kind: 'improvements' }) : undefined} onVersions={company ? () => openAccount('versions') : undefined} onProfile={() => openAccount('profile')} onSettings={company ? () => openAccount('settings') : undefined} onAbout={() => openAccount('about')} toDecide={toDecide} />}
+      </div>
+    </div>
+  );
+}
+
 /* What waits for people as the navigation counts it and the screens show it, and whose decisions the Tasks screen shows
    after a click on a person's card: null shows everyone's. */
 function useDecisionsView() {
@@ -190,16 +245,58 @@ function AgentWindowError({ shown, org, failure }: { shown: string | null; org: 
   return <p ref={message} tabIndex={-1} className="alert agent-window-error" role="alert">{errorText(t, failure)}</p>;
 }
 
+type Department = Org['departments'][number];
+type MapRouteProps = {
+  tab: Route['kind']; me: Me; dept: Department | undefined; missingDepartment: boolean;
+  goHome: () => void; openAgent: (id: string) => void; openDecisions: (id: string) => void;
+};
+
+function MapWorkspace({ tab, me, dept, deptId, denied, missingDepartment, panel, goHome, openAgent, navigate, openDecisions }: MapRouteProps & {
+  deptId: string | null; denied: boolean; panel: 'window' | 'task' | null; navigate: ReturnType<typeof useRoute>['navigate'];
+}) {
+  if (tab !== 'map' || denied || missingDepartment || (deptId && !dept)) return null;
+  return (
+    <MapScreen
+      me={me}
+      onHome={goHome}
+      windowOpen={panel === 'window'}
+      leftPanelOpen={panel === 'task'}
+      onOpenOrchestrator={() => openAgent('orchestrator')}
+      inside={!!dept}
+      onOpenDepartment={id => navigate(id ? { kind: 'department', id } : { kind: 'map' })}
+      onOpenDecisions={openDecisions}
+    />
+  );
+}
+
+function DepartmentWorkspace({ tab, me, dept, missingDepartment, org, shown, taskId, panel, goHome, openAgent, openTask, openDecisions, onHire }: MapRouteProps & {
+  org: Org | null; shown: string | null; taskId: string | null; panel: 'window' | 'task' | null;
+  openTask: (id: string) => void; onHire: (dept: Department) => void;
+}) {
+  if (tab !== 'map' || !dept || missingDepartment) return null;
+  return (
+    <DepartmentView
+      me={me}
+      department={dept}
+      deputies={org?.people ?? []}
+      selected={shown}
+      selectedTask={taskId}
+      panel={panel}
+      serverNow={org?.serverNow}
+      onBack={goHome}
+      onOpen={openAgent}
+      onOpenTask={openTask}
+      onOpenDecisions={openDecisions}
+      onHire={() => onHire(dept)}
+    />
+  );
+}
+
 /* welcome: setup just finished, so the orchestrator's window opens at once. */
 export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: boolean; onSignOut: () => void }) {
   const t = useT();
   const { route, navigate, backgrounds, closeOverlay } = useRoute();
-  const accountDialog = dialogOf(route);
-  const contentRoute = accountDialog ? backgrounds[0]! : route;
-  const taskId = contentRoute.kind === 'tasks' ? contentRoute.id ?? null : null;
-  const pageRoute = taskId ? backgrounds[accountDialog ? 1 : 0] ?? { kind: 'tasks' } as const : contentRoute;
-  const tab = pageRoute.kind === 'department' ? 'map' : pageRoute.kind;
-  const deptId = pageRoute.kind === 'department' ? pageRoute.id : null;
+  const { accountDialog, pageRoute, taskId, tab, deptId } = workspaceOf(route, backgrounds);
   const goHome = () => navigate({ kind: 'map' });
   const openAccount = (kind: AccountDialogName) => navigate({ kind }, route);
   const [menu, setMenu] = useState(false);
@@ -274,71 +371,19 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
           <LogoMark />
           <span className="sr">{me.company.name}</span>
         </div>
-        <nav className="tabs glass" aria-label={t.shell.sections}>
-          {TABS.map(id => {
-            const count = id === 'tasks' ? decisions.waiting : 0;
-            return (
-              <button
-                key={id}
-                type="button"
-                className={tab === id ? 'on' : ''}
-                aria-current={tab === id ? 'page' : undefined}
-                aria-label={count ? t.tasks.navWaiting(count) : undefined}
-                onClick={() => {
-                  navigate({ kind: id });
-                }}
-              >
-                {t.shell.tabs[id]}
-                {count > 0 && <span className="nav-count" aria-hidden="true">{count}</span>}
-              </button>
-            );
-          })}
-        </nav>
-        <div className="tb-right">
-          <div className="account" ref={account}>
-            <button ref={accountButton} className="avatar glass" type="button" aria-label={t.shell.account} aria-expanded={menu} onClick={() => setMenu(!menu)}>
-              {currentMe.person.name.trim().charAt(0).toUpperCase()}
-            </button>
-            {menu && <AccountMenu me={currentMe} onClose={() => setMenu(false)} onSignOut={() => void signOut()} onImprovements={company ? () => navigate({ kind: 'improvements' }) : undefined} onVersions={company ? () => openAccount('versions') : undefined} onProfile={() => openAccount('profile')} onSettings={company ? () => openAccount('settings') : undefined} onAbout={() => openAccount('about')} toDecide={toDecide} />}
-          </div>
-        </div>
+        <ShellTabs tab={tab} waiting={decisions.waiting} navigate={navigate} />
+        <ShellAccount me={currentMe} menu={menu} setMenu={setMenu} company={company} navigate={navigate} openAccount={openAccount} onSignOut={() => void signOut()} toDecide={toDecide} account={account} accountButton={accountButton} />
       </header>
       {company && <UpdateBanner updates={updates} onDetails={() => openAccount('versions')} />}
       <main className={`body${tab === 'map' ? '' : ' page'}${shownPanel ? ` with-${shownPanel}` : ''}`}>
         <AgentWindowError shown={windows.shown} org={org} failure={orgFailure} />
         {(route.kind === 'unavailable' || route.kind === 'invite' || missingDepartment || denied) && <RouteUnavailable onHome={goHome} />}
         {deptId && orgFailure !== null && !unavailableFailure(orgFailure) && <p className="alert" role="alert">{errorText(t, orgFailure)}</p>}
-        {tab === 'map' && !denied && !missingDepartment && (!deptId || dept) && (
-          <MapScreen
-            me={me}
-            onHome={goHome}
-            windowOpen={shownPanel === 'window'}
-            leftPanelOpen={shownPanel === 'task'}
-            onOpenOrchestrator={() => openAgent('orchestrator')}
-            inside={!!dept}
-            onOpenDepartment={id => navigate(id ? { kind: 'department', id } : { kind: 'map' })}
-            onOpenDecisions={openDecisions}
-          />
-        )}
-        {tab === 'map' && dept && !missingDepartment && (
-          <DepartmentView
-            me={me}
-            department={dept}
-            deputies={org?.people ?? []}
-            selected={windows.shown}
-            selectedTask={taskId}
-            panel={shownPanel}
-            serverNow={org?.serverNow}
-            onBack={goHome}
-            onOpen={openAgent}
-            onOpenTask={openTask}
-            onOpenDecisions={openDecisions}
-            onHire={() => {
-              setStaff({ id: dept.id, name: deptLabel(t, dept), at: Date.now() });
-              openAgent('orchestrator');
-            }}
-          />
-        )}
+        <MapWorkspace tab={tab} me={me} dept={dept} deptId={deptId} denied={denied} missingDepartment={missingDepartment} panel={shownPanel} goHome={goHome} openAgent={openAgent} navigate={navigate} openDecisions={openDecisions} />
+        <DepartmentWorkspace tab={tab} me={me} dept={dept} missingDepartment={missingDepartment} org={org} shown={windows.shown} taskId={taskId} panel={shownPanel} goHome={goHome} openAgent={openAgent} openTask={openTask} openDecisions={openDecisions} onHire={dept => {
+          setStaff({ id: dept.id, name: deptLabel(t, dept), at: Date.now() });
+          openAgent('orchestrator');
+        }} />
         {tab === 'tasks' && (
           <Tasks
             onHome={goHome}

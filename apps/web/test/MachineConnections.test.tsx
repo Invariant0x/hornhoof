@@ -304,6 +304,42 @@ describe('the drops the card of a machine lists', () => {
     expect(await screen.findByText(/^The machine saw:/)).toHaveTextContent(/the server's address could not be found/);
   });
 
+  it('uses the first report even when a later report adds more facts', async () => {
+    mockApi({ [`GET ${PATH}`]: [200, history({ events: [event({ cause: 'socket_error' }, [
+      nodeDrop(),
+      nodeDrop({ nodeId: 'n2', report: report() }),
+      nodeDrop({ nodeId: 'n3', report: report({ errorCode: 'LATER', attempts: 4, networkChanged: true }) }),
+    ])] })] });
+    show();
+    await row();
+    expect(screen.queryByText(/^The machine saw:/)).toBeNull();
+    expect(screen.getByRole('listitem')).not.toHaveTextContent('LATER');
+  });
+
+  it.each([
+    ['ECONNRESET', 'raw <b>error</b>', 'The machine saw: ECONNRESET.'],
+    [null, 'raw <b>error</b>', 'The machine saw: raw <b>error</b>.'],
+    ['', 'raw error', null],
+  ] as const)('prefers the report code %s to its raw error, including an empty code', async (errorCode, error, text) => {
+    mockApi({ [`GET ${PATH}`]: [200, history({ events: [event({ cause: 'socket_error' }, [nodeDrop({ report: report({ errorCode, error }) })])] })] });
+    show();
+    await row();
+    const saw = screen.queryByText(/^The machine saw:/);
+    if (text === null) expect(saw).toBeNull();
+    else expect(saw).toHaveTextContent(text);
+    expect(saw?.querySelector('b')).toBeFalsy();
+  });
+
+  it.each([
+    [0, 'under a second'],
+    [1000, '1 s'],
+    [60_000, '1 min'],
+  ] as const)('keeps a report clock jump of %i ms, including zero', async (clockJumpMs, length) => {
+    mockApi({ [`GET ${PATH}`]: [200, history({ events: [event({ cause: 'socket_error' }, [nodeDrop({ report: report({ clockJumpMs }) })])] })] });
+    show();
+    expect(await screen.findByText(/^The machine saw:/)).toHaveTextContent(`The machine saw: the machine slept or its clock jumped by ${length}.`);
+  });
+
   it('does not repeat that the name was not found when that is the cause it gives', async () => {
     mockApi({ [`GET ${PATH}`]: [200, history({ events: [event({}, [nodeDrop({ report: report({ cause: 'dns_error', dnsFailed: true }) })])] })] });
     show();

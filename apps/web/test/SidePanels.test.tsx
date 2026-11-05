@@ -263,6 +263,28 @@ describe('side panels', () => {
     expect(screen.queryByRole('complementary', { name: 'Note' })).not.toBeInTheDocument();
   });
 
+  it('leaves a text input draft on Escape without closing its panel', async () => {
+    const user = userEvent.setup();
+    show([framedPanel('name', 'Name', 'M0 0', <input aria-label="Name draft" />)]);
+    await user.click(toggle('name'));
+    const field = screen.getByRole('textbox', { name: 'Name draft' });
+    await user.type(field, 'Still writing');
+    await user.keyboard('{Escape}');
+    expect(field).toHaveValue('Still writing');
+    expect(field).not.toHaveFocus();
+    expect(screen.queryByRole('complementary', { name: 'Name' })).toBeInTheDocument();
+  });
+
+  it.each(['checkbox', 'radio'])('closes on Escape from a %s instead of treating its value as a draft', async type => {
+    const user = userEvent.setup();
+    show([framedPanel('choice', 'Choice', 'M0 0', <input type={type} aria-label="Chosen" defaultChecked />)]);
+    await user.click(toggle('choice'));
+    screen.getByRole(type, { name: 'Chosen' }).focus();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('complementary', { name: 'Choice' })).not.toBeInTheDocument();
+    expect(toggle('choice')).toHaveFocus();
+  });
+
   it('gives the focus to the window when what opened the panel is gone', async () => {
     const user = userEvent.setup();
     const { rerender } = show([NOTE, OTHER]);

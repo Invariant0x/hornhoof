@@ -26,6 +26,19 @@ function focusIn(box: HTMLElement | null): boolean {
   return !at || at === document.body || !!box?.contains(at);
 }
 
+function restorePanelFocus(back: HTMLElement | null | undefined, box: HTMLElement | null): void {
+  (back?.isConnected ? back : box)?.focus();
+}
+
+function takePanelEscape(e: KeyboardEvent, row: HTMLElement | null, close: () => void): void {
+  if (!takeEscape(e)) return;
+  /* Neither the terminal nor the window may hear it: there Escape stops the agent's work. */
+  e.stopPropagation();
+  const draft = draftIn(row, e.target);
+  if (draft) draft.blur();
+  else close();
+}
+
 /* box: the window, for the focus and for Escape. active: false while the window is hidden, and Escape is none of its business. */
 export function useSidePanels(panels: SidePanel[], box: RefObject<HTMLElement | null>, active: boolean) {
   const [opened, setOpened] = useState<Opened[]>([]);
@@ -36,7 +49,7 @@ export function useSidePanels(panels: SidePanel[], box: RefObject<HTMLElement | 
     (id: string) => {
       const back = opened.find(o => o.id === id)?.back;
       setOpened(list => list.filter(o => o.id !== id));
-      (back?.isConnected ? back : box.current)?.focus();
+      restorePanelFocus(back, box.current);
     },
     [opened, box],
   );
@@ -48,14 +61,7 @@ export function useSidePanels(panels: SidePanel[], box: RefObject<HTMLElement | 
 
   useEffect(() => {
     if (!active || !newest) return;
-    const take = (e: KeyboardEvent) => {
-      if (!takeEscape(e)) return;
-      /* Neither the terminal nor the window may hear it: there Escape stops the agent's work. */
-      e.stopPropagation();
-      const draft = draftIn(row.current, e.target);
-      if (draft) draft.blur();
-      else close(newest);
-    };
+    const take = (e: KeyboardEvent) => takePanelEscape(e, row.current, () => close(newest));
     const beforeTerminal = (e: KeyboardEvent) => {
       if (focusIn(box.current)) take(e);
     };

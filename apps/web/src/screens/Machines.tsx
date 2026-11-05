@@ -3,7 +3,7 @@ import type { NodeLoad } from '@hornhoof/protocol';
 import { api } from '../api';
 import { errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
-import type { BuiltinView, MachineView, Me, Running, SubView } from '../types';
+import type { BuiltinView, MachineView, Me, SubView } from '../types';
 import { Ask } from '../ui/Ask';
 import { Bar } from '../ui/Bar';
 import { ActiveCommandPanel, CommandBox, CommandLifetime, hideShownCommand, liveCommand, loadMachineCommands, openCommandIds, toActiveCommand, type ActiveCommand } from '../ui/CommandBox';
@@ -19,6 +19,7 @@ import { MachineConnections } from '../ui/MachineConnections';
 import { ProgramVersions } from '../ui/ProgramVersions';
 import { DrainLine, DrainMark } from '../ui/MachineDrain';
 import { RouteUnavailable, unavailableFailure, type CardRoute } from './RouteUnavailable';
+import { addablePlans, machinePool, machineRows, type MachineRow } from './machine-rows';
 
 const REFRESH_MS = 5000;
 const GIB = 1024 ** 3;
@@ -64,13 +65,6 @@ function Pool({ loads, online, all }: { loads: NodeLoad[]; online: number; all: 
   );
 }
 
-type MachineRow = Omit<MachineView, 'owner' | 'lendsTests'> & {
-  owner: MachineView['owner'] | null;
-  lendsTests: boolean | null;
-  server: boolean;
-  source: MachineView | null;
-};
-
 function MemoryGauge({ load, less }: { load: NodeLoad; less: boolean }) {
   const t = useT();
   const { language } = useLanguage();
@@ -105,38 +99,18 @@ function Resources({ row }: { row: MachineRow }) {
   </>;
 }
 
-function PlansOnMachine({ row, subs }: { row: MachineRow; subs: SubView[] }) {
+function MachinePlan({ plan, sub, online, now }: { plan: MachineView['plans'][number]; sub: SubView | undefined; online: boolean; now: number }) {
   const t = useT();
   const { language } = useLanguage();
+  const state = planStateOnMachine(t, language, { ...plan, online: online && plan.online }, sub?.limits ?? null, now, sub?.limitsUpdatedAt);
+  return <li><ProviderMark provider={plan.provider} /><span className="nm"><b>{sub ? subName(t, sub) : PROVIDER_NAMES[plan.provider]}{sub?.tier && <> <small>{sub.tier}</small></>}</b><small>{[sub?.owner.name, state].filter(Boolean).join(', ')}</small></span></li>;
+}
+
+function PlansOnMachine({ row, subs }: { row: MachineRow; subs: SubView[] }) {
+  const t = useT();
   const now = useNow();
   if (!row.plans.length) return <p className="part-note">{t.cards.noPlans}</p>;
-  return <ul className="plist" aria-label={t.cards.plansOn}>{row.plans.map(plan => {
-    const sub = subs.find(s => s.id === plan.id);
-    const state = planStateOnMachine(t, language, { ...plan, online: row.online && plan.online }, sub?.limits ?? null, now, sub?.limitsUpdatedAt);
-    return <li key={plan.id}><ProviderMark provider={plan.provider} /><span className="nm"><b>{sub ? subName(t, sub) : PROVIDER_NAMES[plan.provider]}{sub?.tier && <> <small>{sub.tier}</small></>}</b><small>{[sub?.owner.name, state].filter(Boolean).join(', ')}</small></span></li>;
-  })}</ul>;
-}
-
-/* The server merges work in map order; older responses still keep built-in work apart. */
-function combinedRunning(machine: Running, builtin: Running): Running {
-  const agents = new Map([...machine.agents, ...builtin.agents].map(a => [a.id, a]));
-  const parts = new Map([...machine.parts, ...builtin.parts].map(p => [`${p.kind}-${p.run}-${p.part}`, p]));
-  return { agents: [...agents.values()], parts: [...parts.values()] };
-}
-
-function machineRows(machines: MachineView[], builtin: BuiltinView | null, subs: SubView[], builtinName: string): MachineRow[] {
-  const host = builtin?.machine?.id;
-  const keys = subs.filter(s => s.kind === 'api_key').map(s => ({ id: s.id, provider: s.provider, status: s.status === 'needs_login' ? 'needs_login' as const : 'ready' as const, online: s.online }));
-  const rows = machines.map(m => {
-    const here = m.id === host ? builtin : null;
-    return { ...m, source: m, server: Boolean(here), online: m.online || Boolean(here?.online), load: m.load ?? here?.load ?? null,
-      browserError: m.browserError || here?.browserError || null,
-      drain: m.drain ?? here?.drain ?? null,
-      plans: [...m.plans, ...(here ? keys : [])],
-      running: here ? combinedRunning(m.running, here.running) : m.running };
-  });
-  if (!builtin || machines.some(m => m.id === host)) return rows;
-  return [...rows, { id: 'builtin', hostname: builtinName, source: null, server: true, owner: null, lendsTests: null, os: 'linux', arch: '', online: builtin.online, lastSeenAt: null, plans: keys, load: builtin.load, running: builtin.running, programs: builtin.programs, browserError: builtin.browserError || null, drain: builtin.drain ?? null }];
+  return <ul className="plist" aria-label={t.cards.plansOn}>{row.plans.map(plan => <MachinePlan key={plan.id} plan={plan} sub={subs.find(s => s.id === plan.id)} online={row.online} now={now} />)}</ul>;
 }
 
 function machineColumns(t: Messages, language: Language): TableColumn<MachineRow>[] {
@@ -262,7 +236,7 @@ function MachineDetails({ row, subs, me, now, controls }: { row: MachineRow; sub
   const m = row.source;
   const mine = m?.owner.id === me.person.id;
   const editable = me.person.scopeKind === 'company' || mine;
-  const addable = m && mine ? subs.filter(s => s.kind === 'personal' && s.owner.id === me.person.id && !m.plans.some(p => p.id === s.id)) : [];
+  const addable = addablePlans(m, subs, me.person.id);
   const shown = liveCommand(controls.addCommands[row.id], now);
   const picking = controls.picking === row.id;
   return (
@@ -387,12 +361,7 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
       await load();
     });
 
-  /* The built-in node on a machine that joined runs on that machine's computer, which the pool counts once and the list
-     shows as one card: online while either is, with what either says it has and what runs on either. */
-  const host = builtin?.machine ? ((machines ?? []).find(m => m.id === builtin.machine!.id) ?? null) : null;
-  const apart = host ? null : builtin;
-  const loads = [...(machines ?? []).map(m => (m === host ? (m.load ?? builtin!.load) : m.load)), apart?.load ?? null].filter((l): l is NodeLoad => l !== null);
-  const online = (machines ?? []).filter(m => m.online || (m === host && builtin!.online)).length + (apart?.online ? 1 : 0);
+  const pool = machinePool(machines ?? [], builtin);
   const activeCommand = liveCommand(command, now);
   const openIds = openCommandIds(addCommands, now);
   const rows = machineRows(machines ?? [], builtin, subs, t.machines.builtin);
@@ -423,7 +392,7 @@ export function Machines({ me, selected, onSelect, onHome }: { me: Me } & CardRo
       )}
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
 
-      {machines && <Pool loads={loads} online={online} all={machines.length + (apart ? 1 : 0)} />}
+      {machines && <Pool {...pool} />}
       {machines && machines.length === 0 && !builtin && <p className="muted">{t.machines.noMachines}</p>}
       {machines && (machines.length > 0 || builtin) && (
         <SortTable

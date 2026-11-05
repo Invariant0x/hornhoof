@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
-import { errorText, useLanguage, useT } from '../i18n';
+import { errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
 import type { DecidedBy, ProviderId, RoleOption, Roster, Serving, StaffLine } from '../types';
 import { Decides, frozenBy } from './DecidedBy';
@@ -52,6 +52,55 @@ function rowsOf(roster: Roster, lines: StaffLine[]): Row[] {
   });
 }
 
+function staffName(r: Row, roster: Roster | null, language: Language): string {
+  if (r.line.name) return r.line.name;
+  const product = roster?.products.find(p => p.id === r.line.product);
+  return product ? `${r.role.title[language]} (${product.name})` : r.role.title[language];
+}
+
+function StaffPerson({ r, name, frozen, language, t, onChecked }: { r: Row; name: string; frozen: boolean; language: Language; t: Messages; onChecked(checked: boolean): void }) {
+  const { required, holder } = r.role;
+  return (
+    <label className={required ? 'lock' : ''}>
+      <input type="checkbox" checked={r.checked} disabled={frozen || required} onChange={e => onChecked(e.target.checked)} />
+      <span>
+        <b>{name}</b>
+        {r.role.kind === 'head' && <em className="t-card-tag">{t.dept.head}</em>}
+        {required && <em className="t-card-tag">{t.staff.required}</em>}
+        {r.line.name && <small>{r.role.title[language]}</small>}
+        {holder && <small>{t.staff.present(holder)}</small>}
+      </span>
+    </label>
+  );
+}
+
+function StaffChoices({ r, name, sub, off, subscriptions, t, update }: { r: Row; name: string; sub?: Serving; off: boolean; subscriptions: Serving[]; t: Messages; update(change: Partial<Row>): void }) {
+  return (
+    <div className="staff-pick">
+      <select aria-label={t.staff.runsOnOf(name)} value={r.subscription ?? ''} disabled={off} onChange={e => update({ subscription: e.target.value || null, model: '' })}>
+        <option value="">{t.agent.noSubscription}</option>
+        {byProvider(subscriptions, s => s.provider).map(([p, subs]) => (
+          <optgroup key={p} label={PROVIDER_NAMES[p]}>
+            {subs.map(s => (
+              <option key={s.id} value={s.id}>
+                {servingLabel(s)}
+              </option>
+            ))}
+          </optgroup>
+        ))}
+      </select>
+      <select aria-label={t.staff.modelOf(name)} value={r.model} disabled={off || !sub} onChange={e => update({ model: e.target.value })}>
+        <option value="">{t.agent.default}</option>
+        {sub?.models.map(m => (
+          <option key={m.id} value={m.id}>
+            {m.name}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 /* Who to hire into a department: ticks, a subscription and a model per person, and one click that hires them. */
 export function StaffCard({ department, proposal, onCorrect, onDone, onHide, locked }: Props) {
   const t = useT();
@@ -81,11 +130,7 @@ export function StaffCard({ department, proposal, onCorrect, onDone, onHide, loc
     };
   }, [department.id]);
 
-  const nameOf = (r: Row) => {
-    if (r.line.name) return r.line.name;
-    const product = roster?.products.find(p => p.id === r.line.product);
-    return product ? `${r.role.title[language]} (${product.name})` : r.role.title[language];
-  };
+  const nameOf = (r: Row) => staffName(r, roster, language);
   const chosen = rows.filter(r => r.checked && !r.role.holder);
   /* A proposal sends all it ticks: the server skips who came since, says so and closes the card. By hand, who is there is no hire. */
   const sending = proposal ? rows.filter(r => r.checked) : chosen;
@@ -115,41 +160,11 @@ export function StaffCard({ department, proposal, onCorrect, onDone, onHide, loc
         const name = nameOf(r);
         const sub = roster?.subscriptions.find(s => s.id === r.subscription);
         const off = frozenBy(sent, locked) || !r.checked;
-        const { required, holder } = r.role;
+        const { holder } = r.role;
         return (
           <div key={i} className="staff-row">
-            <label className={required ? 'lock' : ''}>
-              <input type="checkbox" checked={r.checked} disabled={frozenBy(sent, locked) || required} onChange={e => update(i, { checked: e.target.checked })} />
-              <span>
-                <b>{name}</b>
-                {r.role.kind === 'head' && <em className="t-card-tag">{t.dept.head}</em>}
-                {required && <em className="t-card-tag">{t.staff.required}</em>}
-                {r.line.name && <small>{r.role.title[language]}</small>}
-                {holder && <small>{t.staff.present(holder)}</small>}
-              </span>
-            </label>
-            {!holder && <div className="staff-pick">
-              <select aria-label={t.staff.runsOnOf(name)} value={r.subscription ?? ''} disabled={off} onChange={e => update(i, { subscription: e.target.value || null, model: '' })}>
-                <option value="">{t.agent.noSubscription}</option>
-                {byProvider(roster?.subscriptions ?? [], s => s.provider).map(([p, subs]) => (
-                  <optgroup key={p} label={PROVIDER_NAMES[p]}>
-                    {subs.map(s => (
-                      <option key={s.id} value={s.id}>
-                        {servingLabel(s)}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
-              <select aria-label={t.staff.modelOf(name)} value={r.model} disabled={off || !sub} onChange={e => update(i, { model: e.target.value })}>
-                <option value="">{t.agent.default}</option>
-                {sub?.models.map(m => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}
-                  </option>
-                ))}
-              </select>
-            </div>}
+            <StaffPerson r={r} name={name} frozen={frozenBy(sent, locked)} language={language} t={t} onChecked={checked => update(i, { checked })} />
+            {!holder && <StaffChoices r={r} name={name} sub={sub} off={off} subscriptions={roster?.subscriptions ?? []} t={t} update={change => update(i, change)} />}
           </div>
         );
       })}

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiFailure } from './api';
 import type { UpdatesView } from './types';
 import type { Version } from './ui/VersionMark';
+import { answeredUpdate } from './update-state';
 
 /* A seam for tests: the page reloads once the server runs another build. */
 export const page = { reload: () => window.location.reload() };
@@ -89,7 +90,7 @@ export function useUpdates(enabled: boolean): Updates {
 
   const status = view?.updater.status;
   /* A sent request counts until the updater reports on it. */
-  const answered = sent !== null && status?.id === sent.id && status.state !== 'running';
+  const answered = answeredUpdate(sent, status);
   const busy = (sent !== null && !answered) || status?.state === 'running' || Boolean(view?.updater.waiting);
   const starting = sent !== null && status?.id !== sent.id;
   busyNow.current = busy;

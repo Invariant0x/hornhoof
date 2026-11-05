@@ -117,6 +117,27 @@ describe('shareable workspace', () => {
     expect(location.pathname).toBe('/tasks');
   });
 
+  it('keeps the selected person and title draft mounted beneath an account dialog', async () => {
+    fixture();
+    history.replaceState(null, '', '/people/p2');
+    render(<Shell me={ME} onSignOut={() => {}} />);
+    const user = userEvent.setup();
+    const title = await screen.findByLabelText('Title');
+    await user.clear(title);
+    await user.type(title, 'Unsaved person title');
+    await user.click(screen.getByRole('button', { name: 'Account' }));
+    await user.click(screen.getByRole('button', { name: 'About' }));
+    await screen.findByRole('dialog', { name: 'About Hornhoof' });
+    expect(location.pathname).toBe('/about');
+    expect(tab('People')).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByLabelText('Title')).toBe(title);
+    expect(title).toHaveValue('Unsaved person title');
+    await user.keyboard('{Escape}');
+    expect(location.pathname).toBe('/people/p2');
+    expect(screen.getByLabelText('Title')).toBe(title);
+    expect(title).toHaveValue('Unsaved person title');
+  });
+
   it('retains the local deep link after login and ignores an external return parameter', async () => {
     let signedIn = false;
     fixture({ 'GET /api/me': () => signedIn ? [200, ME] : [401, signedOut], 'POST /api/auth/login': () => { signedIn = true; return [200, { person: ME.person }]; } });

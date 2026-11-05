@@ -189,6 +189,58 @@ function DeputyMark() {
   );
 }
 
+type PersonEdit = { person: PersonView; titleOnly: boolean; deputy: boolean };
+
+function selectionOf(me: Me, selected: CardRoute['selected'], people: PersonView[] | null, panel: Panel) {
+  const person = selected ? people?.find(p => p.id === selected) : null;
+  const edit = person ? { person, ...rightsOn(me, person) } : selected === undefined && panel?.kind === 'edit' ? panel : null;
+  return { person, edit };
+}
+
+function InvitationPanel({ panel, org, onSent, onClose }: { panel: Panel; org: Org | null; onSent: (name: string, url: string) => void; onClose: () => void }) {
+  return <>
+    {panel?.kind === 'invite' && <InviteForm org={org} onSent={onSent} onClose={onClose} />}
+    {panel?.kind === 'link' && <InviteLink name={panel.name} url={panel.url} onClose={onClose} />}
+  </>;
+}
+
+function PersonEditPanel({ edit, me, org, onUpdated, onSaved, onClose }: { edit: PersonEdit | null; me: Me; org: Org | null; onUpdated: (person: PersonView) => void; onSaved: (person: PersonView) => void; onClose: () => void }) {
+  if (!edit) return null;
+  const canEdit = rightsOn(me, edit.person).manageable || edit.titleOnly;
+  if (!canEdit) return <PersonDetails person={edit.person} org={org} onClose={onClose} />;
+  return <EditForm key={edit.person.id} person={edit.person} org={org} titleOnly={edit.titleOnly} deputy={edit.deputy} onUpdated={onUpdated} onSaved={onSaved} onClose={onClose} />;
+}
+
+function PersonRow({ p, me, org, routed, openPerson, newLink, setStatus }: { p: PersonView; me: Me; org: Org | null; routed: boolean; openPerson: (person: PersonView) => void; newLink: (person: PersonView) => Promise<void>; setStatus: (person: PersonView, status: 'active' | 'disabled') => Promise<void> }) {
+  const t = useT();
+  const { manageable, titleOnly } = rightsOn(me, p);
+  return (
+    <tr className={p.status}>
+      <td>
+        {routed ? <button className="linkish pname" type="button" onClick={() => openPerson(p)}><PersonIcon />{p.name}{p.isCeoDelegate && <DeputyMark />}</button> : <span className="pname"><PersonIcon />{p.name}{p.isCeoDelegate && <DeputyMark />}</span>}
+      </td>
+      <td>{p.title}</td>
+      <td>{accessText(t, p.access, org)}</td>
+      <td><span className={`status ${p.status}`}>{t.people.status[p.status]}</span></td>
+      <td className="row-actions">
+        {(manageable || titleOnly) && (
+          <button className="act" type="button" aria-label={t.people.editLabel(p.name)} onClick={() => openPerson(p)}>{t.people.edit}</button>
+        )}
+        {manageable && (
+          <>
+            <button className="act" type="button" aria-label={t.people.newLinkLabel(p.name)} onClick={() => void newLink(p)}>{t.people.newLink}</button>
+            {p.status === 'disabled' ? (
+              <button className="act" type="button" aria-label={t.people.enableLabel(p.name)} onClick={() => void setStatus(p, 'active')}>{t.people.enable}</button>
+            ) : (
+              <button className="act danger" type="button" aria-label={t.people.disableLabel(p.name)} onClick={() => void setStatus(p, 'disabled')}>{t.people.disable}</button>
+            )}
+          </>
+        )}
+      </td>
+    </tr>
+  );
+}
+
 export function People({ me, selected, onSelect, onHome }: { me: Me } & CardRoute) {
   const t = useT();
   const [people, setPeople] = useState<PersonView[] | null>(null);
@@ -219,9 +271,7 @@ export function People({ me, selected, onSelect, onHome }: { me: Me } & CardRout
   }, [me.person.id, me.person.name]);
 
   const replace = (person: PersonView) => setPeople(list => list?.map(p => (p.id === person.id ? person : p)) ?? null);
-  const person = selected ? people?.find(p => p.id === selected) : null;
-  const edit = person ? { person, ...rightsOn(me, person) } : selected === undefined && panel?.kind === 'edit' ? panel : null;
-  const canEdit = edit && (rightsOn(me, edit.person).manageable || edit.titleOnly);
+  const { person, edit } = selectionOf(me, selected, people, panel);
   const closePerson = () => { onSelect?.(null); setPanel(null); };
   const openPerson = (person: PersonView) => {
     if (onSelect) onSelect(person.id);
@@ -261,33 +311,26 @@ export function People({ me, selected, onSelect, onHome }: { me: Me } & CardRout
         )}
       </header>
 
-      {panel?.kind === 'invite' && (
-        <InviteForm
-          org={org}
-          onSent={(name, url) => {
-            setPanel({ kind: 'link', name, url });
-            void load();
-          }}
-          onClose={() => setPanel(null)}
-        />
-      )}
-      {panel?.kind === 'link' && <InviteLink name={panel.name} url={panel.url} onClose={() => setPanel(null)} />}
-      {edit && !canEdit && <PersonDetails person={edit.person} org={org} onClose={closePerson} />}
-      {edit && canEdit && (
-        <EditForm
-          key={edit.person.id}
-          person={edit.person}
-          org={org}
-          titleOnly={edit.titleOnly}
-          deputy={edit.deputy}
-          onUpdated={replace}
-          onSaved={person => {
-            replace(person);
-            closePerson();
-          }}
-          onClose={closePerson}
-        />
-      )}
+      <InvitationPanel
+        panel={panel}
+        org={org}
+        onSent={(name, url) => {
+          setPanel({ kind: 'link', name, url });
+          void load();
+        }}
+        onClose={() => setPanel(null)}
+      />
+      <PersonEditPanel
+        edit={edit}
+        me={me}
+        org={org}
+        onUpdated={replace}
+        onSaved={person => {
+          replace(person);
+          closePerson();
+        }}
+        onClose={closePerson}
+      />
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
 
       {people && (
@@ -302,34 +345,7 @@ export function People({ me, selected, onSelect, onHome }: { me: Me } & CardRout
             </tr>
           </thead>
           <tbody>
-            {people.map(p => {
-              const { manageable, titleOnly } = rightsOn(me, p);
-              return (
-                <tr key={p.id} className={p.status}>
-                  <td>
-                    {onSelect ? <button className="linkish pname" type="button" onClick={() => openPerson(p)}><PersonIcon />{p.name}{p.isCeoDelegate && <DeputyMark />}</button> : <span className="pname"><PersonIcon />{p.name}{p.isCeoDelegate && <DeputyMark />}</span>}
-                  </td>
-                  <td>{p.title}</td>
-                  <td>{accessText(t, p.access, org)}</td>
-                  <td><span className={`status ${p.status}`}>{t.people.status[p.status]}</span></td>
-                  <td className="row-actions">
-                    {(manageable || titleOnly) && (
-                      <button className="act" type="button" aria-label={t.people.editLabel(p.name)} onClick={() => openPerson(p)}>{t.people.edit}</button>
-                    )}
-                    {manageable && (
-                      <>
-                        <button className="act" type="button" aria-label={t.people.newLinkLabel(p.name)} onClick={() => void newLink(p)}>{t.people.newLink}</button>
-                        {p.status === 'disabled' ? (
-                          <button className="act" type="button" aria-label={t.people.enableLabel(p.name)} onClick={() => void setStatus(p, 'active')}>{t.people.enable}</button>
-                        ) : (
-                          <button className="act danger" type="button" aria-label={t.people.disableLabel(p.name)} onClick={() => void setStatus(p, 'disabled')}>{t.people.disable}</button>
-                        )}
-                      </>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
+            {people.map(p => <PersonRow key={p.id} p={p} me={me} org={org} routed={Boolean(onSelect)} openPerson={openPerson} newLink={newLink} setStatus={setStatus} />)}
           </tbody>
         </table>
       )}

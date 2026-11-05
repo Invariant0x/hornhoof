@@ -2,18 +2,12 @@ import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { errorText, useLanguage, useT, type Messages } from '../i18n';
 import type { ConnectionHistory, MachineDrop } from '../types';
-import { resetDuration } from './reset';
+import { dropFacts, lengthOf, sawOf } from './connection-details';
 
 /* A history kept for days changes little: half a minute, and at once when the machine goes or comes. */
 const REFRESH_MS = 30_000;
 const LISTED = 5;
 const SECOND = 1000;
-const MINUTE = 60_000;
-
-function lengthOf(t: Messages, ms: number): string {
-  if (ms < SECOND) return t.machines.connection.moment;
-  return ms < MINUTE ? t.machines.connection.seconds(Math.round(ms / SECOND)) : resetDuration(t, ms);
-}
 
 const sentence = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
@@ -26,23 +20,6 @@ function DaySummary({ summary }: { summary: ConnectionHistory['summary'] }) {
   return <p>{summary.drops === 1 ? text.one(length, cause) : text.many(summary.drops, length, cause)}</p>;
 }
 
-/* What the machine itself has to add to what the server saw, in the first of its connections that said anything. */
-function sawOf(t: Messages, event: MachineDrop): string | null {
-  const report = event.drops.find(d => d.report)?.report;
-  if (!report) return null;
-  const text = t.machines.connection;
-  const parts = [
-    report.cause !== event.cause && text.causes[report.cause],
-    report.errorCode ?? report.error,
-    report.attempts > 1 && text.tries(report.attempts),
-    report.dnsFailed && report.cause !== 'dns_error' && text.causes.dns_error,
-    report.watchdogTimedOut && report.cause !== 'watchdog_timeout' && text.causes.watchdog_timeout,
-    report.clockJumpMs !== null && text.slept(lengthOf(t, report.clockJumpMs)),
-    report.networkChanged && text.networkChanged,
-  ].filter(Boolean);
-  return parts.length ? text.saw(parts.join(', ')) : null;
-}
-
 function backText(t: Messages, offlineMs: number | null): string {
   const text = t.machines.connection;
   if (offlineMs === null) return text.notBack;
@@ -53,15 +30,8 @@ function Drop({ event }: { event: MachineDrop }) {
   const t = useT();
   const { language } = useLanguage();
   const text = t.machines.connection;
-  const [first] = event.drops;
   const when = new Date(event.at).toLocaleString(language === 'ru' ? 'ru-RU' : 'en-GB', { dateStyle: 'medium', timeStyle: 'short' });
-  const facts = [
-    first?.closeCode != null && text.code(first.closeCode),
-    /* A machine's own words; those the server closed with its cause says already, in the language of the screen. */
-    first?.cause === 'node_closed' && first.closeReason,
-    first?.error,
-    event.drops.length > 1 && text.together(event.drops.length),
-  ].filter(Boolean);
+  const facts = dropFacts(t, event);
   const saw = sawOf(t, event);
   return (
     <li className={event.offlineMs === null ? 'away' : undefined}>

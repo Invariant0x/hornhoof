@@ -66,14 +66,7 @@ function useAutoOpen<T extends { id: string }>(openIds: readonly string[] | unde
   }, [openIds, rows, setOpen]);
 }
 
-export function SortTable<T extends { id: string }>({ rows, columns, name, initialSort, card, search, filters = [], openIds, selectedId, onSelect }: Props<T>) {
-  const t = useT();
-  const { language } = useLanguage();
-  const [query, setQuery] = useState('');
-  const [selected, setSelected] = useState<Selections>({});
-  const [sort, setSort] = useState(initialSort);
-  const [open, setOpen] = useState<Set<string>>(() => new Set());
-  const [order, setOrder] = useState<string[]>([]);
+function useRoutedOpen(selectedId: string | null | undefined, setOpen: Dispatch<SetStateAction<Set<string>>>) {
   const routed = useRef<string | null>(null);
   useEffect(() => {
     if (selectedId === undefined) return;
@@ -85,13 +78,28 @@ export function SortTable<T extends { id: string }>({ rows, columns, name, initi
       if (selectedId) next.add(selectedId);
       return next;
     });
-  }, [selectedId]);
+  }, [selectedId, setOpen]);
+}
+
+function visibleRows<T extends { id: string }>(rows: readonly T[], selectedId: string | null | undefined, needle: string, search: TableSearch<T> | undefined, language: string, filters: FilterGroup<T>[], selected: Selections): T[] {
+  return rows.filter(row => row.id === selectedId || ((!needle || search?.text(row).toLocaleLowerCase(language).includes(needle)) && matchesFilters(row, filters, selected)));
+}
+
+export function SortTable<T extends { id: string }>({ rows, columns, name, initialSort, card, search, filters = [], openIds, selectedId, onSelect }: Props<T>) {
+  const t = useT();
+  const { language } = useLanguage();
+  const [query, setQuery] = useState('');
+  const [selected, setSelected] = useState<Selections>({});
+  const [sort, setSort] = useState(initialSort);
+  const [open, setOpen] = useState<Set<string>>(() => new Set());
+  const [order, setOrder] = useState<string[]>([]);
+  useRoutedOpen(selectedId, setOpen);
   const column = columns.find(c => c.key === sort.key) ?? columns[0]!;
   const sorted = sortRows(rows, column, sort.direction, name, language);
   const held = rows.some(r => open.has(r.id));
   const ordered = orderRows(sorted, order, held);
   const needle = query.trim().toLocaleLowerCase(language);
-  const visible = ordered.filter(row => row.id === selectedId || ((!needle || search?.text(row).toLocaleLowerCase(language).includes(needle)) && matchesFilters(row, filters, selected)));
+  const visible = visibleRows(ordered, selectedId, needle, search, language, filters, selected);
   const filtered = Boolean(needle || Object.values(selected).some(values => values.length));
 
   /* Record additions and removals after each refresh, keeping all surviving cards and their places. */

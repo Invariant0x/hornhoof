@@ -19,6 +19,7 @@ import { LimitCell, LimitMeters } from '../ui/PlanLimits';
 import { providerFilter, type FilterGroup } from '../ui/TableTools';
 import { SortTable, type TableColumn } from '../ui/SortTable';
 import { clock, limitState, planStateOnMachine, stateOf, subName, waitsThere, windowName, windowUsage } from '../ui/subscription';
+import { replaceSubscription } from './subscription-list';
 export { clock } from '../ui/subscription';
 
 const POLL_MS = 1000;
@@ -446,13 +447,13 @@ export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
   const makeOrchestrator = (sub: SubView) =>
     run(async () => {
       const { subscription } = await api.post<{ subscription: SubView }>(`/api/subscriptions/${sub.id}/orchestrator`);
-      setSubs(list => list?.map(s => (s.id === subscription.id ? { ...s, ...subscription } : { ...s, isOrchestrator: false })) ?? null);
+      setSubs(list => replaceSubscription(list, subscription, 'orchestrator'));
     });
 
   const setBudget = (sub: SubView, budget: number | null) =>
     run(async () => {
       const { subscription } = await api.patch<{ subscription: SubView }>(`/api/subscriptions/${sub.id}`, { budget });
-      setSubs(list => list?.map(s => (s.id === subscription.id ? { ...s, ...subscription } : s)) ?? null);
+      setSubs(list => replaceSubscription(list, subscription, 'update'));
     });
 
   const signIn = (sub: SubView, fresh: boolean) => startSignIn(t, sub, fresh, setSigning, setSignNote);

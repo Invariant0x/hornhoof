@@ -121,10 +121,14 @@ function Item({ item, org, onChanged, onTask }: { item: Improvement; org: Org | 
 
 /* What employees found to improve in how the company works, for people who see the whole company: what waits for a
    decision first, then what the orchestrator does now, what was done, and what was set aside, folded away. */
+function ofStatus(improvements: Improvement[] | undefined, status: Improvement['status']): Improvement[] {
+  return improvements?.filter(item => item.status === status) ?? [];
+}
+
 export function Improvements({ improvements, failure, onChanged, onTask, onHome }: { improvements: Improvement[] | undefined; failure: unknown; onChanged: () => void; onTask: (taskId: string) => void; onHome?: () => void }) {
   const t = useT();
   const { org } = useOrg();
-  const of = (status: Improvement['status']) => improvements?.filter(i => i.status === status) ?? [];
+  const of = (status: Improvement['status']) => ofStatus(improvements, status);
   const list = (items: Improvement[]) => (
     <div className="imps">
       {items.map(i => (

@@ -1,7 +1,7 @@
 import { commandBlockOpen } from '../ui/CommandBox';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { api, ApiFailure } from '../api';
-import { deptLabel, errorText, useLanguage, useT, type Messages } from '../i18n';
+import { deptLabel, errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
 import { useStream } from '../live';
 import { liveOf } from '../org';
 import { PROGRAM_NAMES, PROVIDER_NAMES } from '../providers';
@@ -96,6 +96,11 @@ function listedName(org: Org, agentId: string): string {
   return org.departments.flatMap(d => d.employees).find(e => e.id === agentId)?.name ?? '';
 }
 
+function windowTitle(t: Messages, language: Language, org: Org, agentId: string, card: AgentCardView | null): string {
+  const role = card?.role?.title[language];
+  return agentId === 'orchestrator' ? t.window.title : card ? [card.name, role !== card.name && role].filter(Boolean).join(', ') : listedName(org, agentId);
+}
+
 /* agentId: 'orchestrator' or an employee's id. staff: the CEO's "+ Hire", for the orchestrator's window only. */
 type Props = { me: Me; org: Org; agentId: string; staff?: StaffAsk | null; onClose(): void; place?: WindowPlace; requests?: WaitingRequest[]; onRequestsChanged?(): void };
 
@@ -157,6 +162,98 @@ function stopOnEscape(e: globalThis.KeyboardEvent, box: HTMLElement | null, stop
   if (e.key === 'Escape' && !e.defaultPrevented && !box?.hidden) stop();
 }
 
+/* Who wrote a message no person typed: the orchestrator, an employee by its name, or Hornhoof itself. */
+const messageAuthor = (t: Messages, from: string, name: string) => (from === 'orchestrator' ? t.window.orchestrator : from === 'agent' && name ? name : t.window.hornhoof);
+
+/* What the orchestrator asked of the computer, and what the CEO did about it. */
+function computerLine(t: Messages, language: Language, e: EventView): string {
+  const who = e.person?.name ?? t.window.hornhoof;
+  const machine = field(e.data, 'machine') || t.window.computerServer;
+  switch (field(e.data, 'state')) {
+    case 'asked':
+      return t.window.computerAsked(field(e.data, 'reason'), machine);
+    case 'opened':
+      return t.window.computerOpened(who, clock(language, field(e.data, 'until')) ?? '', machine);
+    case 'closed':
+      return t.window.computerClosed(who, machine);
+    default:
+      return t.window.computerDeclined(who, machine);
+  }
+}
+
+function TodoLine({ todo }: { todo: Todo }) {
+  return (
+    <div className="t-l t-plan">
+      <i>⏺</i>
+      <div>
+        {todo.items.map((item, j) => (
+          <div key={j}>
+            {item.state === 'done' ? '☒' : '☐'} {item.state === 'doing' ? <b>{item.text}</b> : <span>{item.text}</span>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AppliedLine({ applied, t }: { applied: Applied; t: Messages }) {
+  return (
+    <div className="t-done">
+      {(applied.created ?? []).map((d, j) => (
+        <div key={`c${j}`} className="t-l">
+          <i>⏺</i>
+          <div>{t.window.created(named(t, d), d.products.length)}</div>
+        </div>
+      ))}
+      {(applied.removed ?? []).map((d, j) => (
+        <div key={`r${j}`} className="t-l">
+          <i>⏺</i>
+          <div>{t.window.removed(named(t, d))}</div>
+        </div>
+      ))}
+      {(applied.hired ?? []).map(h => (
+        <div key={h.id} className="t-l">
+          <i>⏺</i>
+          <div>{t.window.hiredLine(h.name)}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function WindowToolbar({ t, terminal, state, hasTerminal, asLog, stop, onToggle }: { t: Messages; terminal: boolean; state: OrchestratorState | null; hasTerminal: boolean; asLog: boolean; stop(): void; onToggle(): void }) {
+  return (
+    <>
+      {terminal && state?.busy && <WordButton label={t.window.stop} icon={STOP_ICON} onClick={stop} />}
+      {hasTerminal && (
+        <button type="button" aria-label={asLog ? t.window.showTerminal : t.window.showLog} title={asLog ? t.window.showTerminal : t.window.showLog} onClick={onToggle}>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d={asLog ? 'M5 7l5 5-5 5M12 17h7' : 'M5 6h14M5 10h14M5 14h9M5 18h11'} />
+          </svg>
+        </button>
+      )}
+    </>
+  );
+}
+
+function WindowAfter({ offerByHand, needsOrchestrator, failure, t, onPickByHand }: { offerByHand: boolean; needsOrchestrator: boolean; failure: unknown; t: Messages; onPickByHand(): void }) {
+  return (
+    <>
+      {offerByHand && (
+        <button className="t-link" type="button" onClick={onPickByHand}>
+          {t.window.pickByHand}
+        </button>
+      )}
+      {needsOrchestrator && <p className="t-why">{t.window.connectForStaff}</p>}
+      {failure !== null && (
+        <p className="alert" role="alert">
+          {errorText(t, failure)}
+        </p>
+      )}
+    </>
+  );
+}
+
 /* An agent's window: its live terminal when its node shows one, or its conversation as a log; a line to write to it for
    anyone who cannot type into that terminal; and the orchestrator's cards. Whoever reaches this window may write: the
    server opens the agent's conversation and takes a message by the same rule. */
@@ -198,8 +295,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   const sub = orchestrator ? (org.orchestrator?.subscription ?? null) : (card?.subscription ?? null);
   const model = orchestrator ? org.orchestrator?.model : card?.model;
   const machine = orchestrator ? org.orchestrator?.machine : card?.machine;
-  const role = card?.role?.title[language];
-  const title = orchestrator ? t.window.title : card ? [card.name, role !== card.name && role].filter(Boolean).join(', ') : listedName(org, agentId);
+  const title = windowTitle(t, language, org, agentId, card);
   const placeholder = orchestrator ? t.window.placeholder : t.window.writeTo(card?.name ?? '');
 
   /* Every agent's current task comes from its card; the company supplies the orchestrator's other details. */
@@ -445,41 +541,8 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
       ))}
     </>
   );
-  const after = (
-    <>
-      {offerByHand && (
-        <button className="t-link" type="button" onClick={() => setManual(true)}>
-          {t.window.pickByHand}
-        </button>
-      )}
-      {needsOrchestrator && <p className="t-why">{t.window.connectForStaff}</p>}
-      {failure !== null && (
-        <p className="alert" role="alert">
-          {errorText(t, failure)}
-        </p>
-      )}
-    </>
-  );
+  const after = <WindowAfter offerByHand={offerByHand} needsOrchestrator={needsOrchestrator} failure={failure} t={t} onPickByHand={() => setManual(true)} />;
   const hasCards = Boolean(pending || staffing || (!open && staffByHand) || byHand || offerByHand || needsOrchestrator || failure !== null || commands.length);
-
-  /* Who wrote a message no person typed: the orchestrator, an employee by its name, or Hornhoof itself. */
-  const author = (from: string, name: string) => (from === 'orchestrator' ? t.window.orchestrator : from === 'agent' && name ? name : t.window.hornhoof);
-
-  /* What the orchestrator asked of the computer, and what the CEO did about it. */
-  function computerLine(e: EventView): string {
-    const who = e.person?.name ?? t.window.hornhoof;
-    const machine = field(e.data, 'machine') || t.window.computerServer;
-    switch (field(e.data, 'state')) {
-      case 'asked':
-        return t.window.computerAsked(field(e.data, 'reason'), machine);
-      case 'opened':
-        return t.window.computerOpened(who, clock(language, field(e.data, 'until')) ?? '', machine);
-      case 'closed':
-        return t.window.computerClosed(who, machine);
-      default:
-        return t.window.computerDeclined(who, machine);
-    }
-  }
 
   function line(e: LogEvent, i: number) {
     // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- proposal and typed events are not rendered as log lines
@@ -491,7 +554,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
               <EventMessage event={e} folding={folding} />
             ) : (
               <div className="t-u">
-                &gt; <em>{e.person?.name ?? author(field(e.data, 'from'), field(e.data, 'name'))}:</em> {field(e.data, 'text')}
+                &gt; <em>{e.person?.name ?? messageAuthor(t, field(e.data, 'from'), field(e.data, 'name'))}:</em> {field(e.data, 'text')}
               </div>
             )}
             <SentPictures data={e.data} />
@@ -522,43 +585,9 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
           </div>
         );
       case 'todo':
-        return (
-          <div className="t-l t-plan">
-            <i>⏺</i>
-            <div>
-              {(e.data as Todo).items.map((item, j) => (
-                <div key={j}>
-                  {item.state === 'done' ? '☒' : '☐'} {item.state === 'doing' ? <b>{item.text}</b> : <span>{item.text}</span>}
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-      case 'applied': {
-        const a = e.data as Applied;
-        return (
-          <div className="t-done">
-            {(a.created ?? []).map((d, j) => (
-              <div key={`c${j}`} className="t-l">
-                <i>⏺</i>
-                <div>{t.window.created(named(t, d), d.products.length)}</div>
-              </div>
-            ))}
-            {(a.removed ?? []).map((d, j) => (
-              <div key={`r${j}`} className="t-l">
-                <i>⏺</i>
-                <div>{t.window.removed(named(t, d))}</div>
-              </div>
-            ))}
-            {(a.hired ?? []).map(h => (
-              <div key={h.id} className="t-l">
-                <i>⏺</i>
-                <div>{t.window.hiredLine(h.name)}</div>
-              </div>
-            ))}
-          </div>
-        );
-      }
+        return <TodoLine todo={e.data as Todo} />;
+      case 'applied':
+        return <AppliedLine applied={e.data as Applied} t={t} />;
       case 'failed':
         return (
           <div className="t-l t-bad">
@@ -577,7 +606,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
         return (
           <div className="t-l">
             <i>⏺</i>
-            <div>{computerLine(e)}</div>
+            <div>{computerLine(t, language, e)}</div>
           </div>
         );
     }
@@ -590,16 +619,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   ];
 
   return (
-    <AgentWindowLayout currentTask={card?.currentTask} box={box} terminal={terminal} title={title} onClose={onClose} agentState={card?.state} place={place} requests={requests} onRequestsChanged={onRequestsChanged} panels={sidePanels} toolbar={<>
-        {terminal && state?.busy && <WordButton label={t.window.stop} icon={STOP_ICON} onClick={stop} />}
-        {hasTerminal && (
-          <button type="button" aria-label={asLog ? t.window.showTerminal : t.window.showLog} title={asLog ? t.window.showTerminal : t.window.showLog} onClick={() => setAsLog(v => !v)}>
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d={asLog ? 'M5 7l5 5-5 5M12 17h7' : 'M5 6h14M5 10h14M5 14h9M5 18h11'} />
-            </svg>
-          </button>
-        )}
-    </>}>
+    <AgentWindowLayout currentTask={card?.currentTask} box={box} terminal={terminal} title={title} onClose={onClose} agentState={card?.state} place={place} requests={requests} onRequestsChanged={onRequestsChanged} panels={sidePanels} toolbar={<WindowToolbar t={t} terminal={terminal} state={state} hasTerminal={hasTerminal} asLog={asLog} stop={stop} onToggle={() => setAsLog(v => !v)} />}>
       {!known && (
         <div className="t-log" aria-busy="true">
           {failure !== null && (

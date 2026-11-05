@@ -119,6 +119,24 @@ describe('People', () => {
 });
 
 describe('People row actions', () => {
+  it('lets routed selection override a local edit and resets the draft only for another person', async () => {
+    mockApi({ 'GET /api/people': [200, { people: PEOPLE }], 'GET /api/org': [200, ORG_WITH_TEAMS] });
+    const view = render(<People me={ME} />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Edit Maria' }));
+    const title = screen.getByLabelText('Title');
+    await user.clear(title);
+    await user.type(title, 'Maria draft');
+    view.rerender(<People me={ME} selected="p2" />);
+    expect(screen.getByLabelText('Title')).toBe(title);
+    expect(title).toHaveValue('Maria draft');
+    view.rerender(<People me={ME} selected={null} />);
+    expect(screen.queryByLabelText('Title')).not.toBeInTheDocument();
+    view.rerender(<People me={ME} selected="p3" />);
+    expect(screen.getByRole('heading', { name: 'Edit Sasha' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Title')).toHaveValue('SMM');
+  });
+
   it('sends a new invite link and shows it once', async () => {
     const link = 'https://hq.acme.com/invite/NEWTOKEN';
     const calls = mockApi({

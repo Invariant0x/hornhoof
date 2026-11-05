@@ -72,3 +72,24 @@ it('keeps unknown loads last both ways and gives mobile sorting the same state a
   expect(load).toHaveAccessibleName('Load, ascending');
   expect(screen.getByRole('columnheader', { name: 'Load' })).toHaveAttribute('aria-sort', 'ascending');
 });
+
+it('keeps the controlled selection visible through search and filters, then closes the previous routed card', async () => {
+  const user = userEvent.setup();
+  const filteredTable = (selectedId: string | null) => <SortTable rows={rows} columns={columns} name={r => r.name} initialSort={{ key: 'name', direction: 1 }} card={r => <article aria-label={r.name} />} selectedId={selectedId}
+    search={{ placeholder: 'Find machine', text: r => r.name, count: n => `${n} machines` }}
+    filters={[{ key: 'state', label: 'State', values: r => [r.load === null ? 'Offline' : 'Online'], text: value => value }]} />;
+  const view = render(filteredTable('a'));
+  expect(screen.getByRole('article', { name: 'Alpha' })).toBeInTheDocument();
+  await user.type(screen.getByRole('searchbox'), '  OFFLINE  ');
+  await user.click(within(screen.getByRole('group', { name: 'State' })).getByRole('button', { name: 'Online2' }));
+  expect(names()).toEqual(['Alpha']);
+  view.rerender(filteredTable('b'));
+  expect(names()).toEqual(['Beta']);
+  expect(screen.queryByRole('article', { name: 'Alpha' })).not.toBeInTheDocument();
+  expect(screen.getByRole('article', { name: 'Beta' })).toBeInTheDocument();
+  view.rerender(filteredTable(null));
+  expect(screen.getByText('Nothing matches. Change the search or clear the filters.')).toBeInTheDocument();
+  expect(screen.queryByRole('article')).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Clear filters' }));
+  expect(names()).toEqual(['Alpha', 'Beta', 'Offline']);
+});

@@ -203,6 +203,21 @@ describe('Machines', () => {
     expect(within(card('build-box')).queryByText('Company server here')).not.toBeInTheDocument();
   });
 
+  it('keeps machine notes ahead of built-in notes and uses built-in resources when its machine has none', async () => {
+    const machine = { ...MACHINES[0]!, online: false, load: null, browserError: 'machine browser reason', drain: { state: 'restarting' as const, since: '2026-11-04T17:00:00.000Z' } };
+    lists({ 'GET /api/machines': [200, { machines: [machine], builtin: { ...BUILTIN, machine: { id: machine.id, hostname: machine.hostname }, browserError: 'builtin browser reason', drain: { state: 'postponed', turnsLeft: 2, partsLeft: 0, retryAt: '2026-11-04T18:00:00.000Z' } } }] });
+    render(<Machines me={ME} />);
+    const mac = await openCard('ivan-mbp');
+    expect(fact(await screen.findByRole('region', { name: 'All machines together' }), 'Machines online')).toBe('1 of 1');
+    expect(meter(mac, 'Processor')).toHaveTextContent('4 cores');
+    expect(within(mac).getByText('Online', { selector: '.status' })).toBeInTheDocument();
+    expect(within(mac).getByText(/machine browser reason/, { selector: 'p' })).toBeInTheDocument();
+    expect(within(mac).queryByText(/builtin browser reason/)).not.toBeInTheDocument();
+    expect(within(mac).getByText('Updating now: the machine restarts and takes work again by itself')).toBeInTheDocument();
+    expect(within(mac).queryByText(/update is postponed/)).not.toBeInTheDocument();
+    expect(screen.getAllByRole('row').filter(r => r.classList.contains('rm'))).toHaveLength(1);
+  });
+
   it('counts server work once when the joined machine already includes it in map order', async () => {
     const merged = { ...MACHINES[0]!, running: { agents: [...BUILTIN.running.agents, ...MACHINES[0]!.running.agents], parts: MACHINES[0]!.running.parts } };
     lists({ 'GET /api/machines': [200, { machines: [merged], builtin: { ...BUILTIN, machine: { id: merged.id, hostname: merged.hostname } } }] });

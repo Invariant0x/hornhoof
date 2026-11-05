@@ -1,12 +1,12 @@
 import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 import { linkNameOf } from '@hornhoof/protocol/link';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { errorText, useT } from '../i18n';
 import type { Me } from '../types';
 import { CopyButton } from '../ui/CopyButton';
 import { blocks, LinkName, type NameCheck, type NameState } from '../ui/LinkName';
-import { takeEscape } from '../ui/escape';
+import { useDialogClose } from '../ui/use-dialog-close';
 
 type Link = { name: string; url: string };
 type Loaded = { link: Link | null; domain: string };
@@ -21,18 +21,8 @@ export function Settings({ me, onClose, onHome }: { me: Me; onClose: () => void;
   const [state, setState] = useState<NameState>('empty');
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<unknown>(null);
-  const box = useRef<HTMLDivElement>(null);
+  const box = useDialogClose(onClose);
   const suggested = linkNameOf(me.company.name);
-
-  useEffect(() => {
-    box.current?.focus();
-    const onKey = (e: KeyboardEvent) => {
-      if (!takeEscape(e)) return;
-      onClose();
-    };
-    document.addEventListener('keydown', onKey, true);
-    return () => document.removeEventListener('keydown', onKey, true);
-  }, [onClose]);
 
   useEffect(() => {
     api
