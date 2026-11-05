@@ -123,4 +123,9 @@ describe('work tree words', () => {
     expect(en.window.pictureUploaded).toBe('The picture path is in the terminal. Press Enter to send it.');
     expect(ru.window.pictureUploaded).toBe('Путь к картинке вставлен в терминал. Нажмите Enter для отправки.');
   });
+
+  it('names a hidden employee in English and Russian', () => {
+    expect(en.window.hiddenEmployee).toBe('Employee');
+    expect(ru.window.hiddenEmployee).toBe('Сотрудник');
+  });
 });
