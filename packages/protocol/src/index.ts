@@ -4,6 +4,7 @@ export { MachineDrain } from './machine-drain.js';
 export { inLane } from './lane.js';
 export * from './pipeline-report.js';
 export { COMMIT_SHA, CommitSha, ownBranch } from './test-commit.js';
+export { Command, EnvironmentDigest, RepositoryPath, RepositoryScope } from './test-environment.js';
 import { z } from 'zod';
 import { NodeExit, NodeLog } from './node-exit.js';
 import { CommitSha } from './test-commit.js';
