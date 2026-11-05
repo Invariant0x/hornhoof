@@ -310,20 +310,16 @@ function MachineDetails({ row, subs, me, now, controls }: { row: MachineRow; sub
   );
 }
 
-export function Machines({ me }: { me: Me }) {
-  const t = useT();
-  const { language } = useLanguage();
-  const now = useNow();
+/* What the screen has loaded, looked at again every few seconds since machines come online, sign in and take work on
+   their own. */
+function useMachineData() {
   const [machines, setMachines] = useState<MachineView[] | null>(null);
   const [builtin, setBuiltin] = useState<BuiltinView | null>(null);
   const [subs, setSubs] = useState<SubView[]>([]);
   const [command, setCommand] = useState<ActiveCommand | null>(null);
   const [addCommands, setAddCommands] = useState<Record<string, ActiveCommand>>({});
-  const [confirm, setConfirm] = useState<string | null>(null);
-  const [picking, setPicking] = useState<string | null>(null);
   const [failure, setFailure] = useState<unknown>(null);
   const live = useRef(true);
-  const certificateEnds = endingSoon(useLinkTls(me), now);
 
   useEffect(() => {
     live.current = true;
@@ -348,12 +344,31 @@ export function Machines({ me }: { me: Me }) {
     }
   }, []);
 
-  /* Machines come online, sign in and take work on their own, so the screen looks again every few seconds. */
   useEffect(() => {
     void load();
     const timer = setInterval(() => void load(), REFRESH_MS);
     return () => clearInterval(timer);
   }, [load]);
+
+  return { machines, setMachines, builtin, subs, command, setCommand, addCommands, setAddCommands, failure, setFailure, load };
+}
+
+type MachineData = ReturnType<typeof useMachineData>;
+
+const withLends = (list: MachineView[] | null, id: string, lendsTests: boolean) => list?.map(x => (x.id === id ? { ...x, lendsTests } : x)) ?? null;
+
+const withoutKey = <T,>(all: Record<string, T>, key: string): Record<string, T> => {
+  const next = { ...all };
+  delete next[key];
+  return next;
+};
+
+/* What the person can do on the screen: connect a machine, add a plan to one, lend it for tests, disconnect it. A failure
+   of any shows above the list. */
+function useMachineActions(data: MachineData) {
+  const { setCommand, setAddCommands, setMachines, setFailure, load } = data;
+  const [confirm, setConfirm] = useState<string | null>(null);
+  const [picking, setPicking] = useState<string | null>(null);
 
   async function run(action: () => Promise<void>) {
     setFailure(null);
@@ -376,87 +391,135 @@ export function Machines({ me }: { me: Me }) {
       setCommand(null);
     });
 
-  const addPlan = (m: MachineView, sub: SubView) =>
-    run(async () => {
-      const res = await api.post<{ id?: string; command: string; expiresAt?: string }>(`/api/machines/${m.id}/plans`, { subscription: sub.id });
-      setPicking(null);
-      setAddCommands(all => ({ ...all, [m.id]: toActiveCommand(res) }));
-    });
+  const controls: MachineControls = {
+    picking,
+    addCommands: data.addCommands,
+    confirm,
+    setPicking,
+    setConfirm,
+    refresh: load,
+    addPlan: (m, sub) =>
+      run(async () => {
+        const res = await api.post<{ id?: string; command: string; expiresAt?: string }>(`/api/machines/${m.id}/plans`, { subscription: sub.id });
+        setPicking(null);
+        setAddCommands(all => ({ ...all, [m.id]: toActiveCommand(res) }));
+      }),
+    cancelAdd: (machineId, id) =>
+      run(async () => {
+        await hideShownCommand(id);
+        setAddCommands(all => withoutKey(all, machineId));
+      }),
+    lend: (m, lendsTests) =>
+      run(async () => {
+        await api.patch(`/api/machines/${m.id}`, { lendsTests });
+        setMachines(list => withLends(list, m.id, lendsTests));
+      }),
+    disconnect: m =>
+      run(async () => {
+        setConfirm(null);
+        await api.post(`/api/machines/${m.id}/disconnect`);
+        await load();
+      }),
+  };
+  return { machineCommand, cancelMachine, controls };
+}
 
-  const cancelAdd = (machineId: string, id: string) =>
-    run(async () => {
-      await hideShownCommand(id);
-      setAddCommands(all => {
-        const next = { ...all };
-        delete next[machineId];
-        return next;
-      });
-    });
+/* The built-in node on a machine that joined runs on that machine's computer, which the pool counts once and the list
+   shows as one card: online while either is, with what either says it has and what runs on either. */
+const hostOf = (machines: MachineView[], builtin: BuiltinView | null): MachineView | null =>
+  builtin?.machine ? (machines.find(m => m.id === builtin.machine!.id) ?? null) : null;
 
-  const lend = (m: MachineView, lendsTests: boolean) =>
-    run(async () => {
-      await api.patch(`/api/machines/${m.id}`, { lendsTests });
-      setMachines(list => list?.map(x => (x.id === m.id ? { ...x, lendsTests } : x)) ?? null);
-    });
+function loadsOf(machines: MachineView[], host: MachineView | null, builtin: BuiltinView | null, apart: BuiltinView | null): NodeLoad[] {
+  const own = machines.map(m => (m === host ? (m.load ?? builtin!.load) : m.load));
+  return [...own, apart?.load ?? null].filter((l): l is NodeLoad => l !== null);
+}
 
-  const disconnect = (m: MachineView) =>
-    run(async () => {
-      setConfirm(null);
-      await api.post(`/api/machines/${m.id}/disconnect`);
-      await load();
-    });
+const onlineCount = (machines: MachineView[], host: MachineView | null, builtin: BuiltinView | null, apart: BuiltinView | null) =>
+  machines.filter(m => m.online || (m === host && builtin!.online)).length + (apart?.online ? 1 : 0);
 
-  /* The built-in node on a machine that joined runs on that machine's computer, which the pool counts once and the list
-     shows as one card: online while either is, with what either says it has and what runs on either. */
-  const host = builtin?.machine ? ((machines ?? []).find(m => m.id === builtin.machine!.id) ?? null) : null;
+/* The machines as one pool: whose loads it sums, how many are online, and the built-in node that has no machine of its own. */
+function poolOf(machines: MachineView[], builtin: BuiltinView | null) {
+  const host = hostOf(machines, builtin);
   const apart = host ? null : builtin;
-  const loads = [...(machines ?? []).map(m => (m === host ? (m.load ?? builtin!.load) : m.load)), apart?.load ?? null].filter((l): l is NodeLoad => l !== null);
-  const online = (machines ?? []).filter(m => m.online || (m === host && builtin!.online)).length + (apart?.online ? 1 : 0);
-  const activeCommand = liveCommand(command, now);
-  const openIds = openCommandIds(addCommands, now);
+  return { host, apart, loads: loadsOf(machines, host, builtin, apart), online: onlineCount(machines, host, builtin, apart) };
+}
 
+function MachinesHead({ shown, onConnect }: { shown: ActiveCommand | null; onConnect: () => void }) {
+  const t = useT();
   return (
-    <section className="people machines">
-      <header className="people-head">
-        <div>
-          <h1>{t.machines.heading}</h1>
-          <p className="muted">{t.machines.intro}</p>
+    <header className="people-head">
+      <div>
+        <h1>{t.machines.heading}</h1>
+        <p className="muted">{t.machines.intro}</p>
+      </div>
+      {!shown && (
+        <div className="head-actions">
+          <button className="btn" type="button" onClick={onConnect}>{t.machines.connect}</button>
         </div>
-        {!activeCommand && (
-          <div className="head-actions">
-            <button className="btn" type="button" onClick={() => void machineCommand()}>{t.machines.connect}</button>
-          </div>
-        )}
-      </header>
-
-      {activeCommand && (
-        <ActiveCommandPanel
-          heading={t.machines.connectHeading}
-          run={t.machines.runThis}
-          trust={t.machines.trust}
-          shown={activeCommand}
-          onCancel={() => void cancelMachine(activeCommand.id)}
-        />
       )}
-      {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
+    </header>
+  );
+}
 
-      {certificateEnds && <CertificateWarning ends={certificateEnds} />}
-      {machines && <Pool loads={loads} online={online} all={machines.length + (apart ? 1 : 0)} />}
-      {machines && machines.length === 0 && !builtin && <p className="muted">{t.machines.noMachines}</p>}
-      {machines && (machines.length > 0 || builtin) && (
+interface MachineListProps {
+  data: MachineData;
+  controls: MachineControls;
+  me: Me;
+  now: number;
+}
+
+/* The pool and the table of machines, or a word that there are none. */
+function MachineList({ data, controls, me, now }: MachineListProps) {
+  const t = useT();
+  const { language } = useLanguage();
+  const { machines, builtin, subs, addCommands } = data;
+  if (!machines) return null;
+  const pool = poolOf(machines, builtin);
+  const none = machines.length === 0 && !builtin;
+  return (
+    <>
+      <Pool loads={pool.loads} online={pool.online} all={machines.length + (pool.apart ? 1 : 0)} />
+      {none ? (
+        <p className="muted">{t.machines.noMachines}</p>
+      ) : (
         <SortTable
           rows={machineRows(machines, builtin, subs, t.machines.builtin)}
           columns={machineColumns(t, language)}
           name={row => row.hostname}
-          openIds={openIds}
+          openIds={openCommandIds(addCommands, now)}
           initialSort={{ key: 'status', direction: 1 }}
           search={{ placeholder: t.tables.searchMachines, text: row => machineSearch(t, language, subs, row), count: t.tables.machineCount }}
           filters={machineFilters(t)}
-          card={row => <MachineDetails row={row} subs={subs} me={me} now={now} controls={{
-            picking, addCommands, confirm, setPicking, setConfirm, addPlan, cancelAdd, lend, disconnect, refresh: load,
-          }} />}
+          card={row => <MachineDetails row={row} subs={subs} me={me} now={now} controls={controls} />}
         />
       )}
+    </>
+  );
+}
+
+export function Machines({ me }: { me: Me }) {
+  const t = useT();
+  const now = useNow();
+  const data = useMachineData();
+  const { machineCommand, cancelMachine, controls } = useMachineActions(data);
+  const certificateEnds = endingSoon(useLinkTls(me), now);
+  const shown = liveCommand(data.command, now);
+
+  return (
+    <section className="people machines">
+      <MachinesHead shown={shown} onConnect={() => void machineCommand()} />
+      {shown && (
+        <ActiveCommandPanel
+          heading={t.machines.connectHeading}
+          run={t.machines.runThis}
+          trust={t.machines.trust}
+          shown={shown}
+          onCancel={() => void cancelMachine(shown.id)}
+        />
+      )}
+      {data.failure !== null && <p className="alert" role="alert">{errorText(t, data.failure)}</p>}
+      {certificateEnds && <CertificateWarning ends={certificateEnds} />}
+      <MachineList data={data} controls={controls} me={me} now={now} />
     </section>
   );
 }
