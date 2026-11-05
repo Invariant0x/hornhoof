@@ -23,7 +23,7 @@ export default defineConfig({
     deviceScaleFactor: 2,
     locale: 'en',
     timezoneId: 'UTC',
-    colorScheme: 'light',
+    colorScheme: 'dark',
     reducedMotion: 'no-preference',
     video: {
       mode: 'on',
