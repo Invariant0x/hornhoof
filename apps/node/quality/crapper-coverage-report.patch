@@ -1,0 +1,80 @@
+--- a/src/crapper/cli.py
++++ b/src/crapper/cli.py
+@@ -8,7 +8,7 @@
+ from pathlib import Path
+
+ from crapper.analyze import analyze_files
+-from crapper.coverage import CoverageBundle, load_bundle
++from crapper.coverage import CoverageBundle, load_bundle, parse_lcov
+ from crapper.discover import (
+     CLOJURE_TEST_SUFFIXES,
+     GO_TEST_SUFFIX,
+@@ -56,6 +56,7 @@
+                                 git status.
+   --no-coverage                 Score complexity only. Coverage and CRAP are N/A.
+   --use-existing-coverage       Read coverage already on disk. Do not rerun tests.
++  --coverage-report <path>     Read this LCOV report only. Do not rerun tests.
+   --coverage-command <cmd>      Run this command instead of the per-language
+                                 coverage tools, then read the reports it wrote.
+   --threshold <number>          Exit 2 when the worst CRAP score is above this.
+@@ -98,6 +99,7 @@
+     no_coverage: bool = False
+     use_existing_coverage: bool = False
+     coverage_command: str | None = None
++    coverage_report: Path | None = None
+     threshold: float | None = None
+     changed: bool = False
+
+@@ -125,6 +127,10 @@
+                 options.project_root = Path(_take(args, index, arg))
+                 index += 2
+                 continue
++            if arg == "--coverage-report":
++                options.coverage_report = Path(_take(args, index, arg))
++                index += 2
++                continue
+             if arg == "--coverage-command":
+                 options.coverage_command = _take(args, index, arg)
+                 index += 2
+@@ -159,6 +165,14 @@
+         return Options(
+             action="help",
+             message=f"--no-coverage cannot be combined with --coverage-command\n\n{HELP}",
++            exit_code=1,
++        )
++    if options.coverage_report is not None and (
++        options.no_coverage or options.coverage_command or options.use_existing_coverage
++    ):
++        return Options(
++            action="help",
++            message="--coverage-report cannot be combined with other coverage options\n",
+             exit_code=1,
+         )
+     return options
+@@ -283,6 +297,12 @@
+ def _coverage_bundle(options: Options, root: Path, files: list[Path]):
+     if options.no_coverage:
+         return None
++    if options.coverage_report is not None:
++        report = root / options.coverage_report
++        records = parse_lcov(report.read_text(encoding="utf-8"))
++        if not records or not any(records.values()):
++            raise ValueError(f"No LCOV records in {report}")
++        return CoverageBundle(lcov=records)
+     if options.use_existing_coverage:
+         return load_bundle(root)
+     status = run_coverage(root, files, options.coverage_command)
+@@ -319,7 +339,12 @@
+         print("No source files to analyze.")
+         return 0
+
+-    entries = analyze_files(files, root, _coverage_bundle(options, root, files))
++    try:
++        bundle = _coverage_bundle(options, root, files)
++    except (OSError, UnicodeError, ValueError) as exc:
++        print(str(exc), file=sys.stderr)
++        return 2
++    entries = analyze_files(files, root, bundle)
+     metrics = write_metrics(entries, root)
+     print(format_report(entries), end="", flush=True)
+     print(f"Wrote {metrics}", file=sys.stderr)

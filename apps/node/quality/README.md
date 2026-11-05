@@ -46,3 +46,43 @@ The image runs `test_part_paths.py` with each tool's own Python before the
 quality stage can finish, and `../test/tests-run.test.ts` holds the path in that
 file to the node's code. A clone of your own under such a folder still has this
 problem.
+
+## Prepared coverage for crapper
+
+`crapper-coverage-report.patch` applies to unclebob/crapper at the pinned
+`CRAPPER_COMMIT`, under the same 0BSD terms as `LICENSE.mutator`. It adds an
+explicit LCOV input, in addition to upstream's `--use-existing-coverage`:
+
+```sh
+crapper --root . apps/node/src/load.ts --coverage-report path/to/saved.lcov
+```
+
+The path is relative to `--root`, or absolute. This reads only that report,
+without invoking a coverage or test command. Missing, unreadable or empty
+reports fail before writing metrics. The flag cannot be combined with other
+coverage options. The caller owns the report's freshness and must supply the
+report from the same source revision. The image checks both installed copies
+of crapper, including the dependency installed with mutator.
+
+## Honest mutator outcomes
+
+`mutator-outcomes.patch` applies after `mutator-worker-modules.patch` to the
+pinned `MUTATOR_COMMIT`, under `LICENSE.mutator`. It preserves the JS/TS
+bootstrap-copy fix and adds unmutated checks in both the original project and
+all worker overlays. A baseline check runs even when no mutations are selected.
+
+Known zero-test summaries and configuration failures abort with exit 2 and a
+reason. Unknown nonzero command failures also abort unless the output contains
+a test-failure marker. A test assertion failure is `killed`; successful tests
+are `survived`; sites outside coverage are `uncovered`; compiler/transform
+failures are `compile_error`; command timeouts are `timeout`. Compilation errors
+and timeouts have their own text columns and persisted counters, are excluded
+from the killed/survived score, and make the CLI exit 2. Only surviving mutants
+produce exit 3. For unrecognized test-runner summaries, fail closed on nonzero
+exits; a silent successful custom command cannot prove how many tests ran.
+
+Always run from the monorepo root with `--root .`, then scope the package's test
+command. Snapshot version 2 discards cached outcomes from older tools, whose
+stored killed outcomes predate these checks. The isolated
+[Stryker pilot](stryker/README.md) records a reproducible comparison and guards
+Stryker's incremental cache against helper/config/dependency/environment changes.
