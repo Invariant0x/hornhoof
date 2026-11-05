@@ -2,7 +2,7 @@ import { chmodSync, cpSync, existsSync, lchownSync, lstatSync, mkdirSync, mkdtem
 import { tmpdir } from 'node:os';
 import { basename, join, sep } from 'node:path';
 import { agentUser, ensurePasswd, FIRST_UID, isRootUser, type JobUser, type SystemFiles } from './isolation.js';
-import { runProgram, stripEscapes } from './providers/process.js';
+import { runProgram, stripEscapes, withTrustedInstall } from './providers/process.js';
 
 export const SEED_BROWSERS_PATH = '/opt/ms-playwright';
 export const GLOBAL_PLAYWRIGHT_DIR = '/usr/local/lib/node_modules/playwright';
@@ -35,7 +35,7 @@ const LAUNCH_CHECK_SCRIPT = [
 ].join('\n');
 
 export type CommandResult = { code: number | null; output: string; timedOut: boolean };
-export type CommandRunner = (bin: string, args: string[], env: NodeJS.ProcessEnv, user?: JobUser | null) => Promise<CommandResult>;
+export type CommandRunner = (bin: string, args: string[], env: NodeJS.ProcessEnv, user?: JobUser | null, cwd?: string) => Promise<CommandResult>;
 
 export type PrepareBrowserOptions = {
   dir: string;
@@ -279,8 +279,8 @@ function seedFromImage(targetDir: string, seedDir: string, folders: string[], is
   }
 }
 
-const defaultRunner = (timeoutMs: number): CommandRunner => (bin, args, env, user) =>
-  runProgram({ bin, args, env, timeoutMs, user });
+const defaultRunner = (timeoutMs: number): CommandRunner => (bin, args, env, user, cwd) =>
+  runProgram({ bin, args, env, timeoutMs, user, cwd });
 
 function cleanErrorLine(line: string): string {
   return line
@@ -328,18 +328,13 @@ async function resolvePlaywrightDir(
     if (candidate && readPackageVersion(candidate) === version) return candidate;
   }
   mkdirSync(prefix, { recursive: true });
-  const env: NodeJS.ProcessEnv = {
-    PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin',
-    HOME: prefix,
-    TMPDIR: tmpdir(),
-    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1',
-    npm_config_cache: join(targetDir, '.npm-cache'),
-  };
-  const done = await opts.runCommand(
+  const done = await withTrustedInstall((env, cwd) => opts.runCommand(
     'npm',
     ['install', '--prefix', prefix, '--no-save', '--no-package-lock', '--no-audit', '--no-fund', '--ignore-scripts', `playwright@${version}`],
-    env,
-  );
+    { ...env, PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1' },
+    null,
+    cwd,
+  ));
   if (done.code !== 0) throw new Error(summarizeBrowserError(done.output, done.code, done.timedOut));
   shareTree(targetDir, opts.isRoot);
   return cached;
@@ -390,15 +385,12 @@ export async function prepareBrowser({
     if (hasRequiredInstall(targetDir, folders, fullChromium)) {
       return { status: 'ready', version, playwrightDir, downloaded: false };
     }
-    return withTempHome('hh-pw-install-', null, async homeDir => {
+    return withTrustedInstall(async (trustedEnv, cwd) => {
       const env: NodeJS.ProcessEnv = {
-        PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin',
-        HOME: homeDir,
-        TMPDIR: homeDir,
-        LANG: 'C.UTF-8',
+        ...trustedEnv,
         ...browserEnv(dir),
       };
-      const done = await runCommand(process.execPath, [join(playwrightDir, 'cli.js'), 'install', 'chromium'], env);
+      const done = await runCommand(process.execPath, [join(playwrightDir, 'cli.js'), 'install', 'chromium'], env, null, cwd);
       if (done.code !== 0) throw new Error(summarizeBrowserError(done.output, done.code, done.timedOut));
       shareTree(targetDir, isRoot);
       return { status: 'ready', version, playwrightDir, downloaded: true };

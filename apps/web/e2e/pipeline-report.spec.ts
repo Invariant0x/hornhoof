@@ -60,7 +60,7 @@ const REPORT: DepartmentPipeline = {
         { package: 'apps/server', file: 'test/modules/tasks/a-very-long-folder-name-that-goes-on-and-on/turns-and-their-reads-of-the-whole-department.test.ts', totalMs: 73_400, setupMs: 42_000, testsMs: 31_000, teardownMs: 400, parts: 2 },
         { package: 'apps/server', file: 'test/migrations.test.ts', totalMs: 41_200, setupMs: null, testsMs: null, teardownMs: null, parts: 1 },
       ],
-      slowestTests: [{ package: 'apps/server', file: 'test/migrations.test.ts', name: 'migration 0061 fills the kind and risk class of open tasks from the first line of the body', ms: 9_800 }],
+      slowestTests: [{ package: 'apps/server', file: 'test/migrations.test.ts', name: 'migration 0062 fills the kind and risk class of open tasks from the first line of the body', ms: 9_800 }],
     },
   },
 };

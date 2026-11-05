@@ -32,6 +32,8 @@ export type Role = {
   inDefault: boolean;
   /* Where the role stands among its department's default gates; none for a role that is not a gate. */
   gate: number | null;
+  /* A special place on the department schema, or null for ordinary work. */
+  schema: 'before_work' | 'final_check' | 'observer' | null;
   /* A hire of this role wakes on this timer from the start. */
   timer: RoleTimer | null;
   skills: RoleSkill[];
@@ -71,6 +73,7 @@ const RoleHead = z.object({
   /* Where the role stands in its roster, after the head. */
   order: z.number().int().default(50),
   gate: z.number().int().positive().optional(),
+  schema: z.enum(['before_work', 'final_check', 'observer']).nullable().default(null),
   timer: z
     .object({ minutes: z.number().int().min(TIMER_MIN).max(TIMER_MAX), order: z.string().trim().min(1).max(TIMER_ORDER_MAX), forWork: z.boolean().default(false) })
     .strict()
@@ -135,6 +138,7 @@ export function loadTemplates(dir: string): Templates {
         perProduct: r.perProduct,
         inDefault: r.default,
         gate: r.gate ?? null,
+        schema: r.schema,
         timer: r.timer ?? null,
         skills: [...locked, ...listed.filter(s => !locked.some(l => l.id === s.id))],
         body,

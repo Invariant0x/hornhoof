@@ -31,6 +31,7 @@ const view = ({ part, run, task, agent }: Row) => ({
   parts: run.parts,
   agent,
   command: cut(commandFor(run, part.part)),
+  commit: run.commitSha,
   ranAgain: part.lost.map(lostLine),
 });
 const running = (row: Row) => ({ ...view(row), startedAt: row.part.startedAt?.toISOString() ?? null });

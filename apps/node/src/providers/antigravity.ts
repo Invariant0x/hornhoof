@@ -8,7 +8,7 @@ import { withProgramExit } from '../program-exit.js';
 import { READY } from '../terminal/program-state.js';
 import { Tmux } from '../terminal/tmux.js';
 import { contentText, inputText, isRecord, objectLine, toolName } from './events.js';
-import { childEnv, ensureDir, exitsCleanly, firstLine, lastUrl, runProgram, tokensIn, writePrivate } from './process.js';
+import { childEnv, ensureDir, exitsCleanly, firstLine, lastUrl, runInstaller, runProgram, tokensIn, writePrivate } from './process.js';
 
 type Options = { home: string; tools: string; bin?: string; user?: JobUser | null; person?: Person };
 
@@ -95,7 +95,7 @@ export async function installAgy(tools: string, base = RELEASES, on = platform()
     const bin = join(staging, 'antigravity');
     if (url.split('?')[0]!.endsWith('.tar.gz')) {
       writeFileSync(join(staging, 'agy.tar.gz'), archive);
-      const done = await runProgram({ bin: 'tar', args: ['-xzf', join(staging, 'agy.tar.gz'), '-C', staging, 'antigravity'], env: process.env, timeoutMs: 60_000 });
+      const done = await runInstaller({ bin: 'tar', args: ['-xzf', join(staging, 'agy.tar.gz'), '-C', staging, 'antigravity'], timeoutMs: 60_000 });
       if (done.code !== 0) throw new Error(`Antigravity CLI could not be taken out of its archive: ${done.output.trim()}`);
     } else writeFileSync(bin, archive);
     chmodSync(bin, 0o755);

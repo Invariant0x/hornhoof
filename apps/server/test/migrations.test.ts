@@ -746,7 +746,7 @@ describe('migration 0045', () => {
         ('20000000-0000-4000-8000-' || lpad((1 + n % 100)::text, 12, '0'))::uuid
       from generate_series(1, 20000) n`);
     await db.execute(sql`insert into tasks (company_id, number, title) values (${C}, 20001, 'No turn or product')`);
-    /* Migrations 0050 and 0061 check their new nullable fields separately; every earlier field must stay identical. */
+    /* Migrations 0050 and 0062 check their new nullable fields separately; every earlier field must stay identical. */
     const fingerprint = sql`select count(*)::int as n, md5(string_agg((to_jsonb(t) - 'external_wait' - 'work_kind' - 'risk_class')::text, '' order by number)) as checksum from tasks t`;
     const before = await db.execute(fingerprint);
     expect(before.rows[0]).toMatchObject({ n: 20001 });
@@ -953,12 +953,12 @@ describe('migration 0056', () => {
   });
 });
 
-describe('migration 0061', () => {
+describe('migration 0062', () => {
   const previous = async () => {
     const source = new PGlite();
     onTestFinished(() => source.close());
     const db = drizzle(source);
-    await migrate(db, { migrationsFolder: await migrationsUpTo('0060_limits_freshness') });
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0061_test_run_commit') });
     const company = (await db.execute<{ id: string }>(sql`insert into companies (name) values ('Demo') returning id`)).rows[0]!.id;
     const task = async (number: number, status: string, body: string) => {
       const closed = status === 'done' || status === 'cancelled' ? sql`now()` : sql`null`;

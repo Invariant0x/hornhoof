@@ -1,0 +1,349 @@
+--- a/src/mutator/cli.py
++++ b/src/mutator/cli.py
+@@ -513,6 +513,8 @@
+     print(format_site_log(result.sites, result.statuses), end="")
+     forms.extend(result.forms)
+     written.extend(result.written)
++    if any(form.compile_error or form.timeout for form in result.forms):
++        return "invalid"
+     if any(form.survived for form in result.forms):
+         return "survived"
+     return "ok"
+@@ -549,7 +551,7 @@
+             max_workers=options.max_workers,
+         )
+         outcome = _record(result, forms, written)
+-        if outcome == "baseline":
++        if outcome in {"baseline", "invalid"}:
+             baseline_failed = True
+         elif outcome == "survived":
+             survived = True
+--- a/src/mutator/engine.py
++++ b/src/mutator/engine.py
+@@ -3,12 +3,14 @@
+ from __future__ import annotations
+
+ import sys
++from collections import Counter
+ from pathlib import Path
+
+ from mutator.crapper_link import ensure_crapper
+ from mutator.functions import form_digests, form_spans, sites_in_file
+ from mutator.metrics import load_history, source_key, write_results
+ from mutator.model import FormResult, RunResult, Site
++from mutator.outcomes import RunError, require_baseline
+ from mutator.report import format_scan
+ from mutator.runner import Command, CommandRunner, display_command, test_plan
+ from mutator.workers import run_mutants
+@@ -117,18 +119,9 @@
+     for key, (start, end, name, private) in sorted(spans.items(), key=lambda item: item[1][0]):
+         namespace, form = key
+         owned = grouped.get(key, [])
+-        killed = survived = uncovered = 0
+-        for site in owned:
+-            if not covered[site.mutation_id]:
+-                uncovered += 1
+-                continue
+-            status = outcomes.get(site.mutation_id)
+-            if status == "killed":
+-                killed += 1
+-            elif status == "survived":
+-                survived += 1
+-            elif lines is None:
+-                survived += 1
++        counts = Counter(_statuses(owned, covered, outcomes).values())
++        if lines is None:
++            counts["survived"] += len(owned) - sum(counts.values())
+         forms.append(
+             FormResult(
+                 id=form,
+@@ -139,10 +132,12 @@
+                 line=start,
+                 end_line=end,
+                 digest=digests[key],
+-                killed=killed,
+-                survived=survived,
+-                uncovered=uncovered,
++                killed=counts["killed"],
++                survived=counts["survived"],
++                uncovered=counts["uncovered"],
+                 sites=len(owned),
++                compile_error=counts["compile_error"],
++                timeout=counts["timeout"],
+             )
+         )
+     return forms
+@@ -192,8 +187,10 @@
+     if cache_key in baselines:
+         return
+     baseline = runner.run(command, cwd, None)
+-    if baseline.code != 0:
+-        tail = "\n".join(baseline.output.splitlines()[-20:])
++    try:
++        require_baseline(baseline)
++    except RunError as exc:
++        tail = str(exc)
+         baselines[cache_key] = (False, baseline.seconds, tail)
+         return
+     baselines[cache_key] = (True, baseline.seconds, "")
+@@ -220,14 +217,14 @@
+     outcomes,
+     max_workers,
+ ) -> RunResult | None:
+-    if not selected:
+-        return None
+     command, cwd = test_plan(root, path, language, test_command)
+     cache_key = (_command_key(command), str(cwd))
+     _remember_baseline(baselines, cache_key, runner, command, cwd)
+     ok, seconds, tail = baselines[cache_key]
+     if not ok:
+         return _baseline_failure(file_key, command, tail)
++    if not selected:
++        return None
+     timeout = max(2.0, seconds * timeout_factor)
+     run_mutants(
+         root,
+@@ -296,31 +293,35 @@
+     selected = _select(found, covered, history, digests, mutate_all, lines)
+     outcomes = _carry_forward(found, covered, history, digests)
+     _warn_many(file_key, selected, mutation_warning)
+-    failure = _apply_selected(
+-        path,
+-        root,
+-        original,
+-        selected,
+-        runner,
+-        language,
+-        test_command,
+-        timeout_factor,
+-        file_key,
+-        baselines,
+-        outcomes,
+-        max_workers,
+-    )
++    try:
++        failure = _apply_selected(
++            path,
++            root,
++            original,
++            selected,
++            runner,
++            language,
++            test_command,
++            timeout_factor,
++            file_key,
++            baselines,
++            outcomes,
++            max_workers,
++        )
++    except RunError as exc:
++        return _baseline_failure(file_key, test_command or "tests", str(exc))
+     if failure is not None:
+         return failure
+     forms = _forms(source, path, root, file_key, found, covered, outcomes, lines)
+-    written = write_results(root, file_key, forms, outcomes)
++    statuses = _statuses(found, covered, outcomes)
++    written = write_results(root, file_key, forms, statuses)
+     _restore_if_dirty(path, original)
+     return RunResult(
+         path=file_key,
+         forms=forms,
+         written=[item.as_posix() for item in written],
+         sites=found,
+-        statuses=_statuses(found, covered, outcomes),
++        statuses=statuses,
+     )
+
+
+--- a/src/mutator/metrics.py
++++ b/src/mutator/metrics.py
+@@ -56,6 +56,8 @@
+
+
+ def _outcomes_of(data: dict) -> dict[str, str]:
++    if data.get("version") != 2:
++        return {}
+     raw = data.get("outcomes")
+     if not isinstance(raw, dict):
+         return {}
+@@ -64,7 +66,7 @@
+         if not isinstance(key, str):
+             continue
+         status = value[1:] if isinstance(value, str) and value.startswith(":") else value
+-        if status in {"killed", "survived"}:
++        if status in {"killed", "survived", "uncovered", "compile_error", "timeout"}:
+             found[key] = status
+     return found
+
+@@ -130,13 +132,15 @@
+         "killed": form.killed,
+         "survived": form.survived,
+         "uncovered": form.uncovered,
++        "compile-error": form.compile_error,
++        "timeout": form.timeout,
+         "sites": form.sites,
+     }
+
+
+ def _render_snapshot(namespace: str, source: str, forms: list[dict], outcomes: dict[str, str]) -> str:
+     payload = {
+-        "version": 1,
++        "version": 2,
+         "tested-at": datetime.now().astimezone().isoformat(timespec="seconds"),
+         "source": source,
+         "namespace": namespace,
+@@ -173,7 +177,7 @@
+     for mutation, status in outcomes.items():
+         if mutation_file(mutation) != file_key:
+             continue
+-        if status not in {"killed", "survived"}:
++        if status not in {"killed", "survived", "uncovered", "compile_error", "timeout"}:
+             continue
+         found[mutation] = status
+     return found
+--- a/src/mutator/model.py
++++ b/src/mutator/model.py
+@@ -46,6 +46,8 @@
+     survived: int = 0
+     uncovered: int = 0
+     sites: int = 0
++    compile_error: int = 0
++    timeout: int = 0
+
+     @property
+     def score(self) -> float | None:
+--- /dev/null
++++ b/src/mutator/outcomes.py
+@@ -0,0 +1,64 @@
++"""Separate test failures from invalid runs and invalid mutants."""
++
++from __future__ import annotations
++
++import re
++
++from mutator.runner import CommandResult
++
++_ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
++_NO_TESTS = re.compile(
++    r"\bno (?:test files|tests)(?: found)?\b|\bTests\s+0\s+(?:passed|total)\b|"
++    r"\bRan\s+0\s+tests\b|\bcollected\s+0\s+items\b|^# tests 0\s*$",
++    re.IGNORECASE | re.MULTILINE,
++)
++_SKIPPED = re.compile(r"^\s*Tests\s+[^\n]*\b(?:skipped|todo)\b", re.I | re.M)
++_EXECUTED = re.compile(r"^\s*Tests\s+[^\n]*\b[1-9]\d* (?:passed|failed)\b", re.I | re.M)
++_CONFIG = re.compile(
++    r"TSCONFIG_ERROR|failed to load config|cannot find (?:module|package)|"
++    r"cannot resolve.*(?:config|setup)|failed to resolve import|"
++    r"command not found|not recognized as an internal|startup error",
++    re.IGNORECASE,
++)
++_COMPILE = re.compile(
++    r"\berror TS\d+\b|\bTSError\b|\bSyntaxError\b|Transform failed|"
++    r"compilation (?:failed|error)|failed to compile|build failed|"
++    r"error: could not compile|\[build failed\]",
++    re.IGNORECASE,
++)
++
++_TEST_FAILURE = re.compile(
++    r"AssertionError|\bFAIL(?:ED)?\b|\b[1-9]\d*\s+(?:failed|failures|errors)\b|"
++    r"Failures:\s*[1-9]|Errors:\s*[1-9]",
++    re.IGNORECASE,
++)
++
++
++class RunError(RuntimeError):
++    """The command did not execute a valid test run."""
++
++
++def no_tests(text: str) -> bool:
++    return bool(_NO_TESTS.search(text) or (_SKIPPED.search(text) and not _EXECUTED.search(text)))
++
++
++def classify(result: CommandResult) -> str:
++    text = _ANSI.sub("", result.output)
++    if result.timed_out:
++        return "timeout"
++    if _CONFIG.search(text) or result.code in {126, 127, 137, 143} or result.code < 0:
++        raise RunError("test configuration or runner error\n" + text[-4000:])
++    if _COMPILE.search(text):
++        return "compile_error"
++    if no_tests(text):
++        raise RunError("no tests\n" + text[-4000:])
++    if result.code == 0:
++        return "survived"
++    if _TEST_FAILURE.search(text):
++        return "killed"
++    raise RunError("test command failed without test failure evidence\n" + text[-4000:])
++
++
++def require_baseline(result: CommandResult) -> None:
++    if classify(result) != "survived":
++        raise RunError("unmutated tests failed\n" + result.output[-4000:])
+--- a/src/mutator/report.py
++++ b/src/mutator/report.py
+@@ -18,29 +18,31 @@
+     namespace_width = max(9, min(72, max(len(form.namespace) for form in forms)))
+     header = (
+         f"{'Function':<{name_width}} {'Namespace':<{namespace_width}} "
+-        f"{'Killed':>7} {'Survived':>9} {'Uncovered':>10} {'Sites':>6} {'Score':>7}"
++        f"{'Killed':>7} {'Survived':>9} {'Uncovered':>10} {'CompileError':>12} {'Timeout':>8} {'Sites':>6} {'Score':>7}"
+     )
+     ordered = sorted(
+         forms,
+         key=lambda form: (form.score is not None, form.score or 0, -form.survived, form.name),
+     )
+     lines = [header, "-" * len(header)]
+-    killed = survived = uncovered = sites = 0
++    killed = survived = uncovered = compile_error = timeout = sites = 0
+     for form in ordered:
+         lines.append(
+             f"{form.name:<{name_width}} {form.namespace:<{namespace_width}} "
+-            f"{form.killed:7d} {form.survived:9d} {form.uncovered:10d} {form.sites:6d} {_score(form)}"
++            f"{form.killed:7d} {form.survived:9d} {form.uncovered:10d} {form.compile_error:12d} {form.timeout:8d} {form.sites:6d} {_score(form)}"
+         )
+         killed += form.killed
+         survived += form.survived
+         uncovered += form.uncovered
++        compile_error += form.compile_error
++        timeout += form.timeout
+         sites += form.sites
+     executed = killed + survived
+     score = "n/a" if executed == 0 else f"{(killed / executed) * 100:.1f}%"
+     lines.append("-" * len(header))
+     lines.append(
+         f"{'Total':<{name_width}} {'':<{namespace_width}} "
+-        f"{killed:7d} {survived:9d} {uncovered:10d} {sites:6d} {score:>7}"
++        f"{killed:7d} {survived:9d} {uncovered:10d} {compile_error:12d} {timeout:8d} {sites:6d} {score:>7}"
+     )
+     lines.append("")
+     return "\n".join(lines)
+--- a/src/mutator/workers.py
++++ b/src/mutator/workers.py
+@@ -18,6 +18,7 @@
+ from threading import Lock
+
+ from mutator.model import Site
++from mutator.outcomes import classify, require_baseline
+ from mutator.runner import Command
+ from mutator.sites import apply_site
+
+@@ -333,9 +334,7 @@
+         result = runner.run(command, mapped_cwd(directory, root, cwd), timeout)
+     finally:
+         destination.write_bytes(original)
+-    if result.timed_out or result.code != 0:
+-        return "killed"
+-    return "survived"
++    return classify(result)
+
+
+ def _drain(
+@@ -443,6 +442,8 @@
+         directories = create_workers(
+             base, root, relative, original, worker_count(len(sites), max_workers)
+         )
++        for directory in directories:
++            require_baseline(runner.run(command, mapped_cwd(directory, root, cwd), timeout))
+         _run_all(
+             directories,
+             sites,

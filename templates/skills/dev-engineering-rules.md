@@ -1,7 +1,7 @@
 ---
 id: dev-engineering-rules
 title: { en: "Engineering rules (ub-mode)", ru: "Инженерные правила (ub-mode)" }
-description: { en: "Uncle Bob's ub-mode word for word: first make it work, then make it right, then follow practice.", ru: "ub-mode Дяди Боба слово в слово: сначала чтобы работало, потом чтобы было правильно, затем практика." }
+description: { en: "Uncle Bob's ub-mode with Hornhoof's testing policy: make it work, make it right, then follow practice.", ru: "ub-mode Дяди Боба с правилами тестирования Hornhoof: сначала чтобы работало, потом чтобы было правильно, затем практика." }
 kind: checklist
 sources: [unclebob/ub-mode SKILL.md, unclebob/crapper README.md, unclebob/dryer README.md, unclebob/mutator README.md]
 ---
@@ -115,6 +115,7 @@ Every time you are asked to make a change follow:
 #### Mutator
 
 * Use the mutator tool
+* Run it only as T4 below schedules it, never as a task or fix-round check.
 * Cover the uncovered.
 * Kill the survivors.
 * Delete dead code.
@@ -146,9 +147,33 @@ Every time you are asked to make a change follow:
 
 * Commit often, in small ordered commits.
 * Each commit says why, what changed, and how you proved it.
-* Push to the main line at the end.
+* Push your branch, not the main line.
 
 ### In Hornhoof
 
-* crapper, dryer and mutator are installed on your machine. Run them from the repository root on the files your branch changed, `git diff --name-only --diff-filter=d <main line>...HEAD`: `--changed` sees only uncommitted files. Their coverage comes from the project's own test tools (vitest: `@vitest/coverage-v8` at the same version as vitest; pytest: `pytest-cov`; Rust: `cargo-llvm-cov`; Go has coverage built in). If the project is missing a coverage provider, linter (`typescript-eslint`, `ruff`, `clippy`, `golangci-lint`) or formatter settings, do not install them locally or work around them; tell the head of Development so one task adds them to the project.
+* crapper and dryer are installed on your machine. Run them from the repository root on the files your branch changed, `git diff --name-only --diff-filter=d <main line>...HEAD`: `--changed` sees only uncommitted files. Their coverage comes from the project's own test tools (vitest: `@vitest/coverage-v8` at the same version as vitest; pytest: `pytest-cov`; Rust: `cargo-llvm-cov`; Go has coverage built in). If the project is missing a coverage provider, linter (`typescript-eslint`, `ruff`, `clippy`, `golangci-lint`) or formatter settings, do not install them locally or work around them; tell the head of Development so one task adds them to the project.
 * Push your branch, not the main line: the main line takes it after the gates and the CEO's approval.
+
+### Testing policy
+
+These rules fit any company, project and language.
+
+- T1. Put logic in pure functions with direct fast tests: milliseconds, no database, network or processes. At each seam, such as a route or an outside-world boundary, use only the integration tests that cover its contract and named failures, usually one or two, and few end-to-end tests. Write no tests just for coverage. Split a function with CRAP above 10 first. Test races, locks, role permissions and migrations of existing data on the product's real database in the final run.
+- T2. A task runs only what its change affects, using the project's selector, such as vitest related, jest --findRelatedTests, pytest --testmon, go test of affected packages or cargo test -p, plus types, lint, crapper and dryer on changed functions. Migrations, schemas, configuration, environment variables, routes, fixtures, string tables, scripts, installation and updates run their whole package at once. Measure selection instead of trusting it: a new test file always runs; when in doubt, run the whole package. When the final run finds what selection missed, record a selection miss.
+- T3. Use this same check table everywhere:
+
+| Stage | Checks |
+|---|---|
+| In work | Tests selected by impact, types, lint, crapper and dryer (T2). |
+| After a batch merges | The batch's affected tests on one pinned commit. |
+| Final turn candidate | The whole suite with typecheck of tests and every affected application, build, QA browser checks and real database tests (T1). |
+
+  The whole suite runs only for the final turn candidate, never on a task, a fix round or a batch. Every check names its commit; its evidence counts while that is the commit being reviewed. A large run may be split across machines only when the split pays for itself and its parts take roughly equal time.
+- T4. Run mutator, Stryker, PIT, Infection or mull once per release or phase, only on the riskiest pure logic and only against its fast tests; never on a task, a fix round or against tests using a database, processes or network. One reviewer named by the head selects changed pure functions without database, network or process imports by CRAP and change size, plus everything on money, access and security paths, within the release check's time budget. Skip dry code such as logs, string tables and configuration literals, with at most one mutant per line. Use covering tests and past results where the tool supports perTest and incremental runs. In monorepos run mutator from the repository root (`--root .`), selecting package tests through the workspace. Report killed, survived, uncovered, compile_error and timeout separately; compile errors and timeouts are not kills. A configuration error or zero tests fails the run. Survivors go to the line's author as direct fast tests; record why an equivalent mutant is equivalent. Only money, access and security logic blocks the release; other survivors become tasks for the next turn.
+- T5. Do not mass-rewrite old slow tests. New code follows T1; rewrite a slow test only when its code is already changing.
+- T6. Review asks for more tests only for a named harm to a person; low coverage alone is not a finding. Every bug fix still starts with a failing test that reproduces it.
+- T7. Measure suite speed every turn. The performance line records time by package and part and tests slower than the median of its package by a chosen factor. Limits are relative, never fixed minutes.
+- T8. Test checks in other departments the same way. Code checks, such as an email gate, a response gate or financial recomputation in SQL or a script, have fast unit tests, including cases they must reject. Model checks, such as ticket classification, brand and promise review or design criticism, use a versioned set of examples with known answers, labelled by someone other than its author and with a part hidden from the author. Run that set when the check, its prompt or the provider model changes, not on every item, and count false accepts and false rejects separately. The department owner sets the acceptance threshold. Every error found in life becomes an example.
+- T9. Keep tests deterministic (F.I.R.S.T.): date, timezone, test order, randomness and ids do not change the result. Shared test helpers set clocks, timezone and seed. Fix a flaky test by its cause, without retries or quarantine. Once per turn, run the final suite in shuffled order.
+- T10. Evidence is a run, not a paraphrase. A submission attaches the actual result and names the same commit that is reviewed; the reviewer checks that evidence instead of rerunning the tests. A result parser that counts any result a success is broken evidence.
+- T11. Crapper and dryer take coverage from an already completed run and never start a second coverage run. Split a changed function with CRAP above 10; the ub-mode gates remain. A dryer flag tells the reviewer to remove the duplicate or leave a written reason; dryer compares changed code with existing code too.

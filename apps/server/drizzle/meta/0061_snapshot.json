@@ -1,5 +1,5 @@
 {
-  "id": "31469faf-e1c9-43b9-802c-9743664184c6",
+  "id": "42d6bbf7-54a2-4391-a9f7-9556d30e6783",
   "prevId": "33ea30e7-867a-4100-aaee-b5ded26b0e5d",
   "version": "7",
   "dialect": "postgresql",
@@ -5440,18 +5440,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "work_kind": {
-          "name": "work_kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "risk_class": {
-          "name": "risk_class",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "version": {
           "name": "version",
           "type": "integer",
@@ -5736,14 +5724,6 @@
         "tasks_gates_lists": {
           "name": "tasks_gates_lists",
           "value": "jsonb_typeof(\"tasks\".\"gates\") = 'array' AND jsonb_typeof(\"tasks\".\"panel\") = 'array'"
-        },
-        "tasks_work_kind": {
-          "name": "tasks_work_kind",
-          "value": "\"tasks\".\"work_kind\" IS NULL OR \"tasks\".\"work_kind\" IN ('bug', 'known_behavior', 'unknown_path', 'legacy_code')"
-        },
-        "tasks_risk_class": {
-          "name": "tasks_risk_class",
-          "value": "\"tasks\".\"risk_class\" IS NULL OR \"tasks\".\"risk_class\" IN ('money', 'access', 'security', 'data', 'none')"
         }
       },
       "isRLSEnabled": false
@@ -5832,114 +5812,6 @@
             "id"
           ],
           "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.test_part_timings": {
-      "name": "test_part_timings",
-      "schema": "",
-      "columns": {
-        "part_id": {
-          "name": "part_id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "company_id": {
-          "name": "company_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "run_id": {
-          "name": "run_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "files": {
-          "name": "files",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'[]'::jsonb"
-        },
-        "packages": {
-          "name": "packages",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'[]'::jsonb"
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "test_part_timings_run_id": {
-          "name": "test_part_timings_run_id",
-          "columns": [
-            {
-              "expression": "run_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "test_part_timings_part_id_test_parts_id_fk": {
-          "name": "test_part_timings_part_id_test_parts_id_fk",
-          "tableFrom": "test_part_timings",
-          "tableTo": "test_parts",
-          "columnsFrom": [
-            "part_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "test_part_timings_company_id_companies_id_fk": {
-          "name": "test_part_timings_company_id_companies_id_fk",
-          "tableFrom": "test_part_timings",
-          "tableTo": "companies",
-          "columnsFrom": [
-            "company_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "test_part_timings_run_id_test_runs_id_fk": {
-          "name": "test_part_timings_run_id_test_runs_id_fk",
-          "tableFrom": "test_part_timings",
-          "tableTo": "test_runs",
-          "columnsFrom": [
-            "run_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -6221,6 +6093,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "commit_sha": {
+          "name": "commit_sha",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "command": {
           "name": "command",
           "type": "text",
@@ -6395,93 +6273,6 @@
           ]
         }
       },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.turn_snapshots": {
-      "name": "turn_snapshots",
-      "schema": "",
-      "columns": {
-        "turn_id": {
-          "name": "turn_id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "company_id": {
-          "name": "company_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "source": {
-          "name": "source",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "facts": {
-          "name": "facts",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "turn_snapshots_company_id": {
-          "name": "turn_snapshots_company_id",
-          "columns": [
-            {
-              "expression": "company_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "turn_snapshots_turn_id_turns_id_fk": {
-          "name": "turn_snapshots_turn_id_turns_id_fk",
-          "tableFrom": "turn_snapshots",
-          "tableTo": "turns",
-          "columnsFrom": [
-            "turn_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "turn_snapshots_company_id_companies_id_fk": {
-          "name": "turn_snapshots_company_id_companies_id_fk",
-          "tableFrom": "turn_snapshots",
-          "tableTo": "companies",
-          "columnsFrom": [
-            "company_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false

@@ -2,8 +2,10 @@ export { NOTIFICATION_NAMES, NotificationSchema, NotificationSourceSchema, type 
 export { MachineDrain } from './machine-drain.js';
 export { inLane } from './lane.js';
 export * from './pipeline-report.js';
+export { COMMIT_SHA, CommitSha, ownBranch } from './test-commit.js';
 import { z } from 'zod';
 import { NodeExit, NodeLog } from './node-exit.js';
+import { CommitSha } from './test-commit.js';
 
 export { NODE_LOG_BYTES, NODE_LOG_LINES, NodeExit, NodeLog, NodeStopReason } from './node-exit.js';
 
@@ -441,14 +443,14 @@ const NodeMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('node.reconnect'), ...NodeReconnect.shape }),
   z.object({ type: z.literal('load'), ...Load.shape }),
   z.object({ type: z.literal('tests.started'), partId: z.string() }),
-  /* exitCode: the command's, none when it never ran or was killed. commit: what the clone tested. */
+  /* exitCode: the command's, none when it never ran or was killed. commit: what its clone was at when the command ran. */
   z.object({
     type: z.literal('tests.done'),
     partId: z.string(),
     ok: z.boolean(),
     exitCode: z.number().int().nullable(),
     error: z.enum(TEST_ERRORS).nullable(),
-    commit: z.string().regex(/^[0-9a-f]{40,64}$/).nullable(),
+    commit: CommitSha.nullable(),
     log: z.string().max(TEST_LOG_BYTES + 1024),
   }),
   z.object({
@@ -626,13 +628,15 @@ const ServerMessage = z.discriminatedUnion('type', [
      none of the node's keys, within the time, and removes the folder. No agent program takes part. branch null: for
      tests the task's own, task-<task> or the only one that starts with task-<task>-. kind work: any command, in an
      empty folder when there is no repository, with the task's files named in files fetched first; what it leaves in its
-     output folder goes on the task. */
+     output folder goes on the task. commitSha: the one commit every part of the run checks, whatever its branch points
+     at by now; none on a part of work, or on one of a run from before commits were pinned. */
   z.object({
     type: z.literal('tests.run'),
     partId: Id,
     kind: z.enum(RUN_KINDS).optional(),
     repo: Repo.pick({ url: true, token: true }).nullable(),
     branch: Branch.nullable(),
+    commitSha: CommitSha.nullable().optional(),
     files: z.array(RunFile).max(MAX_RUN_FILES).optional(),
     task: z.number().int().positive(),
     command: z.string().min(1).max(4000),
