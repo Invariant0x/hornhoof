@@ -7,7 +7,7 @@ import { loadConfig } from '../src/config.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, jobs, machines, nodes, people, subscriptions, tasks } from '../src/db/schema.js';
 import { enqueueTurn, orchestratorOf } from '../src/modules/conversation/queue.js';
-import { nodeDrain } from '../src/modules/updates/node-drain.js';
+import { nodeDrain, nodeHeldLong } from '../src/modules/updates/node-drain.js';
 import { as, connectNode, listen, setUpCompany, TEST_SECRET, testApp, until, type FakeNode } from './helpers.js';
 
 const NODE_KEY = 'builtin-each-key-0123456789abcdef';
@@ -247,6 +247,41 @@ describe('the orchestrator and the heads while their node waits', () => {
     expect(await f.statusOf(job)).toMatchObject({ nodeId: other.nodeId });
     expect(await nextTurn(here, 100)).toBeNull();
     expect((await f.db.select({ nodeId: agents.nodeId }).from(agents).where(eq(agents.id, head.id)))[0]!.nodeId).toBe(other.nodeId);
+  });
+
+  it('stays on its own node past the limit when every machine of its plan waits, and starts on that one', async () => {
+    const f = await computer({ NODE_LEADER_HOLD_MS: String(HOLD) });
+    const [away] = await f.db.insert(machines).values({ companyId: f.company.id, personId: f.person.id, machineKey: 'another-machine', hostname: 'away' }).returning();
+    const google = await f.plan('antigravity');
+    const other = await f.nodeOf(google.plan, away!.id);
+    const first = await f.online(google.key);
+    const own = await f.online(other.key);
+    await until(() => f.app.ctx.hub.isReady({ kind: 'node', nodeId: google.nodeId }) && f.app.ctx.hub.isReady({ kind: 'node', nodeId: other.nodeId }));
+    const dev = await f.hire('Dev', 'worker', google.plan, google.nodeId);
+    await f.longTurn(dev, google.nodeId);
+    await f.longTurn(await f.hire('Bob', 'worker', google.plan, other.nodeId), other.nodeId);
+    const head = await f.hire('Hana', 'head', google.plan, other.nodeId);
+    for (const key of [google.key, other.key]) await f.app.inject({ method: 'POST', url: '/api/nodes/update', headers: { authorization: `Bearer ${key}` }, payload: {} });
+
+    const job = await f.turnFor(head.id);
+
+    expect(await nextTurn(own)).toMatchObject({ jobId: job });
+    expect(await nextTurn(first, 100)).toBeNull();
+  });
+
+  it('starts the limit over when the node waits again after its update was put off', async () => {
+    const f = await computer({ NODE_LEADER_HOLD_MS: '300', NODE_DRAIN_MS: '600', NODE_UPDATE_RETRY_MS: '100' });
+    const google = await f.plan('antigravity');
+    await f.longTurn(await f.hire('Dev', 'worker', google.plan, google.nodeId), google.nodeId);
+    const node = { kind: 'node' as const, nodeId: google.nodeId };
+    const ask = () => f.app.inject({ method: 'POST', url: '/api/nodes/update', headers: { authorization: `Bearer ${google.key}` }, payload: {} });
+    await ask();
+    await until(() => nodeHeldLong(f.app.ctx, node));
+    await until(async () => (await ask()).json().drain.state === 'postponed');
+    expect(nodeHeldLong(f.app.ctx, node)).toBe(false);
+    await until(async () => (await ask()).json().drain.state === 'waiting');
+    expect(nodeHeldLong(f.app.ctx, node)).toBe(false);
+    await until(() => nodeHeldLong(f.app.ctx, node));
   });
 
   it('never sends a head onto a node that restarts, however long it takes: it goes to another machine of its plan', async () => {
