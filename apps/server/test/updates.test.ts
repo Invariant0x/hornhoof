@@ -160,6 +160,7 @@ const updaterAlive = (control: string, ageSeconds = 0) => {
 };
 const request = (control: string) => (existsSync(join(control, 'request.json')) ? JSON.parse(readFileSync(join(control, 'request.json'), 'utf8')) : null);
 const SHA = 'b'.repeat(40);
+const HELD_AFTER_MS = 10 * 60_000;
 /* What the updater is asked for: the build the server read, by digest, and the node and updater images of its commit. */
 const asked = (registry: { digests: Record<string, string> }, id: string) => ({
   id,
@@ -429,24 +430,44 @@ describe('updates', () => {
     expect(request(control)).toBeNull();
   });
 
-  it('lets the turns held after a hand-over go, and ends their timeout, when the app leaves lead', async () => {
+  /* An update just handed over, with the turns still held, and the timeout that ends the hold, which the test may run
+     without waiting its ten minutes. */
+  async function handedOver() {
     const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
-    const { app, db, ceo, control, acme, job, stepDown } = await leadingCompany(registry);
+    const made = await leadingCompany(registry);
+    const { app, db, ceo, control, acme, job } = made;
     const timeouts = vi.spyOn(globalThis, 'setTimeout');
-    const cleared = vi.spyOn(globalThis, 'clearTimeout');
-    onTestFinished(() => {
-      timeouts.mockRestore();
-      cleared.mockRestore();
-    });
+    onTestFinished(() => timeouts.mockRestore());
     await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: true }, ...as(ceo) });
     await db.update(jobs).set({ status: 'done' }).where(eq(jobs.id, job.id));
     await publishWorking(app.ctx, acme.id);
     await expect.poll(() => request(control)).not.toBeNull();
     expect(turnsHeld(app.ctx, acme.id)).toBe(true);
-    const heldFor = timeouts.mock.results[timeouts.mock.calls.findIndex(([, ms]) => ms === 10 * 60_000)]!.value;
+    const at = timeouts.mock.calls.findIndex(([, ms]) => ms === HELD_AFTER_MS);
+    return { ...made, holdEnds: timeouts.mock.calls[at]![0] as () => void, holdTimeout: timeouts.mock.results[at]!.value as NodeJS.Timeout };
+  }
+
+  it('lets the turns held after a hand-over go when its timeout ends', async () => {
+    const { app, acme, holdEnds } = await handedOver();
+    holdEnds();
+    expect(turnsHeld(app.ctx, acme.id)).toBe(false);
+  });
+
+  it('keeps the turns held when the timeout of a hand-over ends and another update waits', async () => {
+    const { app, db, ceo, acme, job, holdEnds } = await handedOver();
+    await db.update(jobs).set({ status: 'running' }).where(eq(jobs.id, job.id));
+    await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest', whenIdle: true }, ...as(ceo) });
+    holdEnds();
+    expect(turnsHeld(app.ctx, acme.id)).toBe(true);
+  });
+
+  it('lets the turns held after a hand-over go, and ends their timeout, when the app leaves lead', async () => {
+    const cleared = vi.spyOn(globalThis, 'clearTimeout');
+    onTestFinished(() => cleared.mockRestore());
+    const { app, acme, stepDown, holdTimeout } = await handedOver();
     await stepDown();
     expect(turnsHeld(app.ctx, acme.id)).toBe(false);
-    expect(cleared).toHaveBeenCalledWith(heldFor);
+    expect(cleared).toHaveBeenCalledWith(holdTimeout);
   });
 
   it('refuses an update whose reading of the registry crossed a step-down', async () => {
