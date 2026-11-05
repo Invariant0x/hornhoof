@@ -2,13 +2,17 @@
 
 # Hornhoof
 
-**All your AI plans, computers and people. One company.**
+**Stop juggling AI windows. Give a goal, get it built.**
 
-You and your friends each pay for Claude, ChatGPT, Kimi or Google. Each of you works alone, in a dozen terminal tabs on your own laptop. One plan runs out while the others sit idle, the spare computers do nothing, and nobody sees what anyone's agents are doing.
+Sound familiar?
 
-Hornhoof puts it all into one company of AI agents: departments with heads and employees, each agent on someone's plan and someone's computer. You give a goal in plain words. The orchestrator splits it into tasks, the departments work at the same time, agents of different makers check each other, and the result comes back to you.
+- Claude Code in one tab, Codex in another, then five more, and your head spins trying to remember which one is doing what.
+- You and a friend decided to build something together. Each of you has AI plans, and there is no way to put them on one job.
+- You have a laptop, a desktop and an old server, and you want all of them speeding up the work, not just one.
 
-Open source. Runs on your own machines. No sign-up, no cloud of ours.
+Hornhoof makes one company out of all of it. You say what you want in plain words. Hornhoof splits the work between departments of AI agents, runs them on everyone's plans and computers at the same time, has agents of different makers check each other, and brings you the finished result.
+
+Open source, on your own machines, no sign-up.
 
 ![The company map](.github/assets/map.gif)
 
@@ -116,19 +120,11 @@ Hornhoof does not stay the way you installed it. Every company has an Operations
 
 Hornhoof is developed inside Hornhoof. Its own company of agents on Claude, ChatGPT, Kimi and Google plans takes the tasks, writes the code, reviews it across makers, tests it and ships every turn as a release, the way large companies run on their own products.
 
-## Why I built it, and why I want you in
+## Let's build it together
 
-I built Hornhoof for myself. I had several AI plans, several computers and far too many terminal tabs, and I wanted them to work as one team. On the way I gathered what actually works: how to split work so agents do not wait on each other, which checks catch real bugs and which only slow things down, how to keep agents moving without babysitting them. All of it is in Hornhoof's templates, 50 roles and over 150 skills that every company starts with.
+I built Hornhoof for myself, to make working with AI convenient: several plans, several computers and far too many terminal tabs, working as one team. On the way I gathered what actually works: how to split work so agents do not wait on each other, which checks catch real bugs and which only slow things down, how to keep agents moving without babysitting them. All of it is in the templates, 50 roles and over 150 skills that every company starts with.
 
-Let's build this environment together. The aim is the fastest and most reliable way to make software with AI: many models checking each other, every computer you have at work, safe by default, and yours. It is open source under MIT, and Hornhoof's own company puts what you add to work right away.
-
-You can:
-
-- try it and tell me what broke or what confused you;
-- bring ideas, and the practices that work for you;
-- write templates for departments, roles and skills;
-- translate the screens, which are in English and Russian now;
-- fix and build things, starting with an issue marked "good first issue".
+Let's join forces and make it the best way to run AI agents: the fastest, the most reliable, safe, and fully yours. The code is open under MIT, and Hornhoof's own company puts what you add to work right away. Try it and tell me what broke, bring the practices that work for you, write templates for departments and roles, translate the screens, or pick an issue marked "good first issue".
 
 Start with [CONTRIBUTING.md](CONTRIBUTING.md). Please read the [code of conduct](CODE_OF_CONDUCT.md), and report security problems privately, as [SECURITY.md](SECURITY.md) says.
 
