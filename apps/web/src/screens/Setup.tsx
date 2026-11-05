@@ -1,4 +1,3 @@
-import { linkNameOf } from '@hornhoof/protocol/link';
 import { useId, useState, type FormEvent } from 'react';
 import { api, ApiFailure } from '../api';
 import { errorText, useT } from '../i18n';
@@ -8,6 +7,7 @@ import { CommandBox } from '../ui/CommandBox';
 import { CompanyTemplates, type Pick } from '../ui/CompanyTemplates';
 import { Field } from '../ui/Field';
 import { blocks, LinkName, type NameCheck, type NameState } from '../ui/LinkName';
+import { LinkReady, type MadeLink } from '../ui/LinkReady';
 
 type Mode = 'api_key' | 'personal' | 'later';
 type KeyProvider = 'anthropic_api' | 'openai_api';
@@ -31,10 +31,9 @@ export function Setup({ onDone, linkDomain = 'hornhoof.org' }: { onDone: (done: 
   const [companyName, setCompanyName] = useState('');
   /* The ready-made company the CEO starts from, or "empty" to let the orchestrator build it. */
   const [template, setTemplate] = useState<Pick>('empty');
-  /* The public link: on unless the person turns it off, named after the company until they write a name themselves. */
+  /* The public link: on unless the person turns it off, starting on a long random name. */
   const [linkOn, setLinkOn] = useState(true);
   const [linkName, setLinkName] = useState('');
-  const [linkOwn, setLinkOwn] = useState(false);
   const [linkState, setLinkState] = useState<NameState>('empty');
   const [name, setName] = useState('');
   const [title, setTitle] = useState('CEO');
@@ -49,6 +48,8 @@ export function Setup({ onDone, linkDomain = 'hornhoof.org' }: { onDone: (done: 
   const [skipLink, setSkipLink] = useState(false);
   const [busy, setBusy] = useState(false);
   const [command, setCommand] = useState<string | null>(null);
+  /* The link setup made, shown with its certificate before the person goes on. */
+  const [made, setMade] = useState<MadeLink | null>(null);
 
   function next(e: FormEvent) {
     e.preventDefault();
@@ -61,11 +62,6 @@ export function Setup({ onDone, linkDomain = 'hornhoof.org' }: { onDone: (done: 
       if (Object.keys(found).length) return;
     }
     setStep(step + 1);
-  }
-
-  function nameCompany(value: string) {
-    setCompanyName(value);
-    if (!linkOwn) setLinkName(linkNameOf(value));
   }
 
   const checkName = (name: string) => api.get<NameCheck>(`/api/setup/names/${encodeURIComponent(name)}?code=${encodeURIComponent(code.trim())}`);
@@ -82,7 +78,7 @@ export function Setup({ onDone, linkDomain = 'hornhoof.org' }: { onDone: (done: 
     setFailure('');
     setSkipLink(false);
     try {
-      const res = await api.post<{ command?: string }>('/api/setup', {
+      const res = await api.post<{ command?: string; link?: MadeLink }>('/api/setup', {
         code: code.trim(),
         companyName: companyName.trim(),
         name: name.trim(),
@@ -93,8 +89,9 @@ export function Setup({ onDone, linkDomain = 'hornhoof.org' }: { onDone: (done: 
         ...(linkOn ? { link: { name: linkName } } : {}),
         ...(template === 'empty' ? {} : { template }),
       });
-      if (res.command) setCommand(res.command);
-      else onDone({ welcome: true });
+      setCommand(res.command ?? null);
+      if (res.link) setMade(res.link);
+      else if (!res.command) onDone({ welcome: true });
     } catch (err) {
       if (err instanceof ApiFailure && err.reason === 'setup_code') {
         setAskCode(true);
@@ -110,6 +107,20 @@ export function Setup({ onDone, linkDomain = 'hornhoof.org' }: { onDone: (done: 
     } finally {
       setBusy(false);
     }
+  }
+
+  function goOn() {
+    setMade(null);
+    if (!command) onDone({ welcome: true });
+  }
+
+  if (made) {
+    return (
+      <Card>
+        <h1>{t.settings.link}</h1>
+        <LinkReady link={made} onNext={goOn} />
+      </Card>
+    );
   }
 
   if (command) {
@@ -144,7 +155,7 @@ export function Setup({ onDone, linkDomain = 'hornhoof.org' }: { onDone: (done: 
         <form onSubmit={next}>
           <div className="setup-lead">
             <Field label={t.setup.companyName}>
-              {p => <input {...p} value={companyName} onChange={e => nameCompany(e.target.value)} maxLength={80} autoFocus autoComplete="organization" />}
+              {p => <input {...p} value={companyName} onChange={e => setCompanyName(e.target.value)} maxLength={80} autoFocus autoComplete="organization" />}
             </Field>
           </div>
           <CompanyTemplates value={template} onPick={setTemplate} />
@@ -161,7 +172,6 @@ export function Setup({ onDone, linkDomain = 'hornhoof.org' }: { onDone: (done: 
                 name={linkName}
                 onName={name => {
                   setLinkName(name);
-                  setLinkOwn(true);
                   // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omit the cleared link problem
                   setProblems(({ link: _, ...rest }) => rest);
                 }}
@@ -169,6 +179,7 @@ export function Setup({ onDone, linkDomain = 'hornhoof.org' }: { onDone: (done: 
                 check={checkName}
                 onState={setLinkState}
                 problem={problems.link}
+                startRandom
               />
             )}
             {askCode && (

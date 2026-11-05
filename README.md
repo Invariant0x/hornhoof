@@ -187,6 +187,9 @@ Hornhoof uses them. They are the employees, and Hornhoof is the company around t
 **Can I use my phone?**
 You can open and run your company from the phone's browser. Phones that do work themselves, like an old Android on a charger, are coming next.
 
+**What if the hornhoof.org link stops opening after an update?**
+Put `ACME_DIRECTORY=off` in the `.env` file in the `~/hornhoof` folder and run `docker compose up -d app` there. The link opens again within a minute, with its https ending at hornhoof.org as before. Then tell us in an issue.
+
 ## What Hornhoof is not
 
 - It is not a cloud service. There is no sign-up and no account with us. It is yours, on your machines.
