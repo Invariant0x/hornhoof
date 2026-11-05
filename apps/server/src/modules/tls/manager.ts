@@ -7,7 +7,7 @@ import type { Health } from '../link/relay.js';
 import { AcmeAccount, AcmeError, newAccountKey } from './acme.js';
 import { certId, renewalInfo, type RenewalWindow } from './ari.js';
 import { probe } from './checks.js';
-import { LEAST_LEFT_MS, linkMode, saveTls, tlsOf, updateTls, type TlsRow } from './store.js';
+import { linkMode, mayRunHttps, saveTls, tlsOf, updateTls, type TlsRow } from './store.js';
 import { certInfo, namesHost } from './x509.js';
 
 const TICK_MS = 60_000;
@@ -31,7 +31,7 @@ type Link = { companyId: string; name: string; url: string };
 type Held = { certPem: string; keyEnc: string; notAfter: Date };
 export type OrderTry = { accountUrl: string | null; replaces: string | null };
 export type RenewalAnswer = RenewalWindow | null | 'error';
-export type ModeFacts = { rowMode: TunnelMode; notAfter: Date; held: boolean; health: Health | null; blockedUntil: Date | null };
+export type ModeFacts = { rowMode: TunnelMode; canServe: boolean; health: Health | null; blockedUntil: Date | null };
 type LinkTlsOptions = {
   acme?: (directory: string, accountKeyPem: string, accountUrl: string | null) => Acme;
   renewalInfo?: typeof renewalInfo;
@@ -69,8 +69,8 @@ export function renewalPlan(answer: RenewalAnswer, cert: { renewAt: Date | null;
 
 /* Fails toward a working link: a certificate that cannot serve means http, and a relay nobody has heard from changes
    nothing, since dropping https on every hiccup of its health would make the link blink. */
-export function wantedMode({ rowMode, notAfter, held, health, blockedUntil }: ModeFacts, now: number): TunnelMode {
-  if (!held || notAfter.getTime() - now <= LEAST_LEFT_MS) return 'http';
+export function wantedMode({ rowMode, canServe, health, blockedUntil }: ModeFacts, now: number): TunnelMode {
+  if (!canServe) return 'http';
   if (!health?.up) return rowMode;
   const blocked = blockedUntil !== null && blockedUntil.getTime() > now;
   return health.passthrough && !blocked ? 'https' : 'http';
@@ -238,8 +238,10 @@ export class LinkTls {
       return await this.order(link, row);
     } catch (err) {
       const failure = err instanceof AcmeError ? err : new AcmeError('invalid');
+      /* Saved first: a row that went meanwhile is the pass's failure, and its one line, not this one's too. */
+      const failed = await this.changed(row, failureFields(failure, this.now()));
       this.ctx.log.warn({ kind: failure.kind, type: failure.type }, "Could not get the link's certificate.");
-      return this.changed(row, failureFields(failure, this.now()));
+      return failed;
     }
   }
 
@@ -323,14 +325,23 @@ export class LinkTls {
   }
 
   private wantsHttps(link: Link, row: TlsRow, held: Held): boolean {
+    const now = this.now();
     const facts = {
       rowMode: row.mode,
-      notAfter: held.notAfter,
-      held: this.given === servedKey(hostOf(link), held.certPem),
+      canServe: this.given === servedKey(hostOf(link), held.certPem) && this.mayServe(link, row, now),
       health: this.health?.answer ?? null,
       blockedUntil: row.httpsBlockedUntil,
     };
-    return wantedMode(facts, this.now()) === 'https';
+    return wantedMode(facts, now) === 'https';
+  }
+
+  /* The rule the tunnel's file is written by, asked as if the row were in https. What cannot be read cannot serve. */
+  private mayServe(link: Link, row: TlsRow, now: number): boolean {
+    try {
+      return mayRunHttps({ ...row, mode: 'https' }, link, this.ctx.config.secret, new Date(now));
+    } catch {
+      return false;
+    }
   }
 
   private async runHttps(link: Link, row: TlsRow, held: Held, first: boolean): Promise<void> {

@@ -3,10 +3,12 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { PGlite } from '@electric-sql/pglite';
+import { eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { decryptSecret, encryptSecret } from '../src/crypto/secrets.js';
-import { companies } from '../src/db/schema.js';
+import { companies, linkTls } from '../src/db/schema.js';
 import { AppMode } from '../src/modules/keeper/app-mode.js';
+import { Settings } from '../src/modules/link/tunnel.js';
 import { writeKeeperState } from '../src/modules/keeper/state.js';
 import { AcmeError } from '../src/modules/tls/acme.js';
 import { certId, type RenewalWindow } from '../src/modules/tls/ari.js';
@@ -50,6 +52,7 @@ function fakes(clock: { now: number }, challenges: () => { get(token: string): s
     probeAnswer: true,
     onProbe: (): void => {},
     useFails: false,
+    onIssue: async (): Promise<unknown> => undefined,
   };
   const acme = (directory: string, accountKeyPem: string, accountUrl: string | null): Acme => {
     seen.made.push({ directory, accountKeyPem, accountUrl });
@@ -57,6 +60,7 @@ function fakes(clock: { now: number }, challenges: () => { get(token: string): s
       account: async () => `https://acme.invalid/account/${++seen.accounts}`,
       issue: async (host, hooks, { replaces } = {}) => {
         seen.issues.push({ host, replaces });
+        await set.onIssue();
         hooks.answer('tok', 'tok.ka');
         seen.answered.push(challenges().get('tok'));
         hooks.forget('tok');
@@ -127,7 +131,8 @@ async function stage(env: NodeJS.ProcessEnv = {}) {
     serving,
     move: (ms: number) => void (clock.now += ms),
     row: async () => (await tlsOf(db, companyId))!,
-    tunnelMode: () => (JSON.parse(readFileSync(tunnelFile, 'utf8')) as { mode: string }).mode,
+    /* Read as the tunnel container reads it. */
+    tunnelMode: () => Settings.parse(JSON.parse(readFileSync(tunnelFile, 'utf8'))).mode,
   };
 }
 
@@ -181,13 +186,11 @@ describe('renewalPlan', () => {
 describe('wantedMode', () => {
   const NOW = Date.parse('2030-01-10T00:00:00.000Z');
   const up = { up: true, relayStarted: 1, passthrough: true };
-  const facts = { rowMode: 'http' as const, notAfter: new Date(NOW + 30 * DAY), held: true, health: up, blockedUntil: null };
+  const facts = { rowMode: 'http' as const, canServe: true, health: up, blockedUntil: null };
 
-  it('is https only with the certificate held, time left, and a relay that passes TLS through', () => {
+  it('is https only with a certificate that can serve, and a relay that passes TLS through', () => {
     expect(wantedMode(facts, NOW)).toBe('https');
-    expect(wantedMode({ ...facts, held: false }, NOW)).toBe('http');
-    expect(wantedMode({ ...facts, notAfter: new Date(NOW + DAY) }, NOW)).toBe('http');
-    expect(wantedMode({ ...facts, notAfter: new Date(NOW + DAY + 1) }, NOW)).toBe('https');
+    expect(wantedMode({ ...facts, canServe: false }, NOW)).toBe('http');
     expect(wantedMode({ ...facts, health: { ...up, passthrough: false }, rowMode: 'https' }, NOW)).toBe('http');
   });
 
@@ -201,7 +204,7 @@ describe('wantedMode', () => {
     for (const rowMode of ['http', 'https'] as const) {
       expect(wantedMode({ ...facts, rowMode, health: null }, NOW)).toBe(rowMode);
       expect(wantedMode({ ...facts, rowMode, health: down }, NOW)).toBe(rowMode);
-      expect(wantedMode({ ...facts, rowMode, health: null, held: false }, NOW)).toBe('http');
+      expect(wantedMode({ ...facts, rowMode, health: null, canServe: false }, NOW)).toBe('http');
     }
   });
 });
@@ -592,6 +595,20 @@ describe("the tunnel's mode", () => {
     expect(w.tunnelMode()).toBe('http');
   });
 
+  it("stays on http when the stored key is not the certificate's own", async () => {
+    const w = await stage();
+    w.relay.passthrough = false;
+    await w.tls.tick();
+    const other = await selfSigned(HOST);
+    await updateTls(w.db, w.companyId, { certKeyEnc: encryptSecret(other.keyPem, w.config.secret) });
+    w.relay.passthrough = true;
+    w.move(11 * MINUTE);
+    await w.tls.tick();
+    expect((await w.row()).mode).toBe('http');
+    expect(w.seen.probes).toEqual([]);
+    expect(w.tunnelMode()).toBe('http');
+  });
+
   it("probes https again after a restart, and keeps the hour's block", async () => {
     const w = await stage();
     await w.tls.tick();
@@ -906,6 +923,23 @@ describe('running on its own', () => {
     await tls.tick();
     expect(await w.row()).toMatchObject({ mode: 'https', httpsBlockedUntil: null });
     expect(w.tunnelMode()).toBe('https');
+  });
+
+  it('takes a row gone under a pass as one line, and the next pass makes it again', async () => {
+    const w = await stage();
+    const warn = vi.spyOn(w.app.ctx.log, 'warn');
+    w.set.onIssue = () => w.db.delete(linkTls).where(eq(linkTls.companyId, w.companyId));
+    await w.tls.tick();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(warn.mock.calls).includes('The link has no certificate row to change.')).toBe(true);
+    expect(await tlsOf(w.db, w.companyId)).toBeNull();
+
+    w.set.onIssue = async () => undefined;
+    await w.tls.tick();
+    const row = await w.row();
+    expect(certInfo(row.certPem!).names).toEqual([HOST]);
+    expect(row.mode).toBe('https');
+    expect(warn).toHaveBeenCalledTimes(1);
   });
 
   it('takes a pass that fails as one line, and the next starts over', async () => {
