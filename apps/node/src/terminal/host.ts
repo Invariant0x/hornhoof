@@ -1242,7 +1242,7 @@ export class TerminalHost {
     if (!decision.accept) return;
     const unanswered = end.status === 'stopped' ? null : a.unanswered;
     a.unanswered = null;
-    this.acceptedEnd(a, end);
+    this.acceptedEnd(a, a.turn!, end);
     if (unanswered) this.openUnanswered(a, unanswered);
   }
 
@@ -1251,14 +1251,14 @@ export class TerminalHost {
     void this.openTyped(a, words.text, true);
   }
 
-  private acceptedEnd(a: Agent, end: TurnEnd): void {
+  /* An end is accepted only of a running turn: `stoppable` asks for one. */
+  private acceptedEnd(a: Agent, turn: Turn, end: TurnEnd): void {
     this.clearQuestion(a);
-    this.operator?.intentional(a.key, end.status === 'stopped' ? 'cancelled' : 'completed');
-    if (a.turn) this.endWords(a, a.turn);
+    this.intentional(a, end.status === 'stopped' ? 'cancelled' : 'completed');
+    this.endWords(a, turn);
     this.notBusyAfter(a, end);
-    const turn = a.turn;
-    if (turn) turn.ending = end;
-    if (!turn?.typed) return a.ended?.resolve(end.message);
+    turn.ending = end;
+    if (!turn.typed) return a.ended?.resolve(end.message);
     this.settleTyped(a, end, turn);
   }
 
