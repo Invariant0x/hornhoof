@@ -2,36 +2,65 @@
 
 # Hornhoof
 
-**Your AI agents, working as one team.**
+**Your own company of AI agents, on your own computers.**
 
-When you work with several AI programs at once, it is easy to lose track of which one does what. When you build something with friends, everyone's AI plans work apart. And when you have several computers, usually only one of them does the work.
+Hornhoof turns the AI plans you and your friends already pay for, like Claude, ChatGPT, Kimi, GLM or Google, into one company that works for you. You describe the task in plain words. The orchestrator, the main agent, splits it between departments, each with a head and employees, and agents of different makers check each other's work. You get the finished result.
 
-Hornhoof brings all of it together into one team. You describe the task in plain words. Hornhoof splits it between departments of AI agents, runs them on everyone's plans and computers, has agents of different makers check each other's work, and gives you the finished result.
+It is your own private cloud. It runs on your computers, joined with the computers of the friends who build the project with you. No cloud provider, no third-party servers, no account to make. Free and open source.
 
-In effect, you get your own private cloud with no cloud provider. It runs on your own devices, joined with the devices of the friends who build the startup or the project with you. Open source, no sign-up.
+## Hornhoof is for you if
 
-![The company map](.github/assets/map.gif)
+- ✅ You have many Claude Code or Codex windows open and no longer remember which one does what.
+- ✅ You and a few friends want to build something together, and each of you has your own AI plans.
+- ✅ You pay for more than one AI plan and want all of them working, not waiting.
+- ✅ You have a spare laptop, a home server or an old Mac that sits idle most of the day.
+- ✅ You want to give a goal and get a checked result, not watch every step.
+- ✅ You want your home looked after too: devices, network, shopping, bills.
+- ✅ You want it all on your own machines, under your own control.
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/Invariant0x/hornhoof/main/scripts/install.sh | bash -s -- server
-```
+## What changes
 
-Works with **Claude Code**, **Codex** (ChatGPT plans), **Kimi Code**, the **GLM Coding Plan** and **Google Antigravity**, and with Anthropic and OpenAI API keys.
+| | AI programs on their own | With Hornhoof |
+| --- | :---: | :---: |
+| Your plans and your friends' plans work on one job at the same time | ❌ | ✅ |
+| Work goes on when a plan hits its limit | ❌ | ✅ |
+| Every change is reviewed by AI of other makers, then security, then tests | ❌ | ✅ |
+| One map shows every agent, what it does now and who stands idle | ❌ | ✅ |
+| Spare computers take the tests and heavy jobs | ❌ | ✅ |
+| The company keeps running when one of your computers stops | ❌ | ✅ |
+| Nothing reaches your main branch without your approval | ❌ | ✅ |
+| Departments beyond code: design, marketing, sales, the home | ❌ | ✅ |
+| Runs on your own machines, with no sign-up | ✅ | ✅ |
 
-| | Step | Example |
-| --- | --- | --- |
-| **1** | Create the company | "Moonfern", from the Startup template: development, design, marketing, business development. |
-| **2** | Bring plans and computers | Three friends bring seven AI plans and ten computers: 112 cores and 296 GB of memory in one pool. |
-| **3** | Give a goal, take the result | "Launch the iOS beta by Friday." The departments do the work, you take the release. |
+"AI programs on their own" means Claude Code, Codex, Kimi Code and the like, each in its own window. Hornhoof runs them for you as one team.
 
-## Hornhoof is right for you if
+## How it starts
 
-- ✅ You and a friend, or a small team, are building something and each of you has your own AI plans.
-- ✅ Your startup needs development, design and marketing moving at the same time, before you hire anyone.
-- ✅ You want your home looked after like a company: devices, network, shopping, bills.
-- ✅ You have twenty Claude Code or Codex tabs open and lose track of who does what.
-- ✅ You have computers that sit idle most of the day.
-- ✅ You want to look in, answer and approve from your phone.
+The pictures show Moonfern, a made-up startup of three friends with seven AI plans and ten computers. Its people and work are invented for the demo.
+
+1. Install Hornhoof with one line in the terminal. On a Mac, press `Cmd` and `Space`, type `Terminal` and press `Enter`. On Linux, press `Ctrl`, `Alt` and `T`. On Windows, open the Ubuntu terminal of WSL. Docker installs itself if it is missing.
+
+   ```sh
+   curl -fsSL https://raw.githubusercontent.com/Invariant0x/hornhoof/main/scripts/install.sh | bash -s -- server
+   ```
+
+2. Open the link it shows, name your company and pick one of nine templates. You are the CEO.
+
+   ![Setting up a company](.github/assets/setup.gif)
+
+3. Connect your AI plans, add your computers with one command each, and invite friends with a link so they bring theirs.
+
+   ![Connecting AI plans](.github/assets/subscriptions.png)
+
+4. Tell the orchestrator what you are building. He proposes departments, and you create them with one click.
+
+   ![Building the departments](.github/assets/build.gif)
+
+5. Give a goal, like "Launch the iOS beta by Friday", and watch the company work on the map.
+
+   ![The company map](.github/assets/map.gif)
+
+Works with **Claude Code**, **Codex** (ChatGPT plans), **Kimi Code**, the **GLM Coding Plan** and **Google Antigravity**, and with Anthropic and OpenAI API keys. When a new version is out, one "Update" button moves every machine to it.
 
 ## For a startup or a team of friends
 
@@ -59,30 +88,27 @@ Works with **Claude Code**, **Codex** (ChatGPT plans), **Kimi Code**, the **GLM 
 
 ![A home run by Hornhoof](.github/assets/home.gif)
 
-## What makes Hornhoof different
-
-| | |
-| --- | --- |
-| **All your plans at once** | Developers on Claude, Codex, Kimi, GLM and Google take parts of the same job at the same time. |
-| **All your computers as one** | One pool runs the work. When the server's computer stops, another takes over within a minute, at the same link. |
-| **Every change checked by another maker** | Reviewers of the other makers read the same change at once, then security, then one test run of the whole turn. |
-| **A live terminal for every agent** | The real Claude Code, Codex, Kimi or Antigravity screen, live in your browser, whichever machine it runs on. |
-| **Work in turns** | A goal becomes a turn of tasks, and each turn ends in a numbered release. Nothing reaches your main branch without approval. |
-| **It improves itself** | An Operations department in every company finds what slows the work down or breaks, and fixes it. |
-
-![An employee's terminal](.github/assets/terminal.gif)
-
 ## See the work live
 
 *Who works, who waits and who stands idle, right now.*
 
 - **A work tree for every department.** Each agent is a line with its task, and each state has its own color: working, waiting for another task, waiting for a person, standing idle. Work that is handed in merges into the turn's branch before your eyes.
 - **The speed of every turn.** How long each agent worked, waited and stood idle, and every wait with since when, so you see where the time goes.
-- **One click to the agent.** Any line opens the agent's card or its live terminal.
+- **A live terminal for every agent.** The real Claude Code, Codex, Kimi or Antigravity screen in your browser, whichever machine it runs on. Any line of the tree opens it.
 
 ![The work tree of a department](.github/assets/tree.gif)
 
 ![Where the time of a turn goes](.github/assets/speed.gif)
+
+![An employee's terminal](.github/assets/terminal.gif)
+
+## You decide, they do
+
+- **One list for everything that needs you.** Questions, design choices and approvals wait in one place, and you answer from any device, your phone too.
+- **Work in turns.** A goal becomes a turn of tasks, and each turn ends in a numbered release.
+- **Nothing ships without you.** Work reaches your main branch only after the review of the turn, the final test run and your approval.
+
+![Tasks and turns](.github/assets/tasks.gif)
 
 ## It gets better by itself
 
@@ -93,21 +119,6 @@ Hornhoof does not stay the way you installed it. Every company has an Operations
 - **Improvements** collect those fixes. You take one with a click, and the orchestrator does it or turns it into a task.
 - **A program operator** looks after the AI programs themselves: it passes harmless screens, refuses what a program may not do, and brings you sign-ins and payments.
 - **A reliability engineer** restores broken machines, tools and integrations, finds the cause, and writes down how to handle it next time.
-
-## Problems Hornhoof solves
-
-| Without Hornhoof | With Hornhoof |
-| --- | --- |
-| Each of you pays for AI plans and uses them alone. | Everyone's plans work on the same goal. |
-| Twenty terminal tabs, and nobody knows who does what. | One map: every agent, what it is doing now, and its live terminal. |
-| You cannot tell which agent works and which one is stuck. | The work tree shows who works, who waits and who stands idle, live. |
-| A plan hits its limit and the work stops. | The task moves to the same role on another plan, or waits and goes on by itself. |
-| You read every change yourself. | Agents of other makers review it, then security, then the tests. You take the result. |
-| Spare computers sit idle. | They run the tests and the heavy jobs. |
-| The laptop with everything on it closes, and the work stops. | Another machine takes over within a minute. |
-| Home devices and chores are nobody's job. | A home department keeps an eye on them all the time. |
-
-![Tasks and turns](.github/assets/tasks.gif)
 
 ## Next to the alternatives
 
@@ -136,19 +147,6 @@ I built Hornhoof for myself, to make working with AI convenient: several plans, 
 Let's join forces and make it the best way to run AI agents: the fastest, the most reliable, safe, and fully yours. The code is open under MIT, and Hornhoof's own company puts what you add to work right away. Try it and tell me what broke, bring the practices that work for you, write templates for departments and roles, translate the screens, or pick an issue marked "good first issue".
 
 Start with [CONTRIBUTING.md](CONTRIBUTING.md). Please read the [code of conduct](CODE_OF_CONDUCT.md), and report security problems privately, as [SECURITY.md](SECURITY.md) says.
-
-## Quickstart
-
-1. Open a terminal. On a Mac, press `Cmd` and `Space`, type `Terminal` and press `Enter`. On Linux, press `Ctrl`, `Alt` and `T`. On Windows, open the Ubuntu terminal of WSL.
-2. Paste the line from the top of this page and press `Enter`. It installs Docker if it is missing.
-3. Open the link it shows at the end, name your company, pick a template and create your account. You are the CEO.
-4. Connect a plan, click the orchestrator in the middle of the map, and tell him about your company.
-
-![Setting up a company](.github/assets/setup.gif)
-
-Later, from the app: **Machines** to add a computer with one command, **Subscriptions** to add AI plans, **People** to invite a friend with a link. When a new version is out, one "Update" button moves every machine to it.
-
-![Connecting AI plans](.github/assets/subscriptions.png)
 
 ## Good to know
 
