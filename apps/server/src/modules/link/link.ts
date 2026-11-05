@@ -51,7 +51,7 @@ export class PublicLinks {
   readonly relay: Relay;
   private queue: Promise<unknown> = Promise.resolve();
 
-  constructor(private readonly ctx: { db: Db; config: Config; log: FastifyBaseLogger }) {
+  constructor(private readonly ctx: { db: Db; config: Config; log: FastifyBaseLogger; tls?: { kick(): void } }) {
     this.relay = new Relay(ctx.config.relayUrl);
   }
 
@@ -83,7 +83,8 @@ export class PublicLinks {
         await this.letGo(bound.name, bound.key);
         throw err;
       }
-      await this.sync();
+      await this.writeSettings();
+      this.ctx.tls?.kick();
       if (old) await this.letGo(old.name, decryptSecret(old.keyEnc, this.ctx.config.secret));
       return { name: bound.name, url: bound.url };
     });
@@ -96,7 +97,8 @@ export class PublicLinks {
       if (!old) return;
       await this.relay.unbind(old.name, decryptSecret(old.keyEnc, this.ctx.config.secret));
       await this.ctx.db.delete(publicLinks).where(eq(publicLinks.companyId, companyId));
-      await this.sync();
+      await this.writeSettings();
+      this.ctx.tls?.kick();
     });
   }
 
@@ -105,13 +107,21 @@ export class PublicLinks {
     await this.relay.unbind(name, key).catch(err => this.ctx.log.warn({ error: loggable(err), name }, 'Could not let the old public link go at the relay.'));
   }
 
-  /* The tunnel's settings for the link the database holds. A control folder that cannot be written, as when Hornhoof
-     runs outside compose, goes to the log: the link works once the tunnel reads the settings. */
-  async sync(): Promise<void> {
+  /* The tunnel's settings for the link the database holds, true once they are written. In turn with the changes of the
+     link, so a write that read the link before a change cannot land after the change's own. */
+  sync(): Promise<boolean> {
+    return this.inTurn(() => this.writeSettings());
+  }
+
+  /* A control folder that cannot be written, as when Hornhoof runs outside compose, goes to the log: the link works once
+     the tunnel reads the settings. */
+  private async writeSettings(): Promise<boolean> {
     try {
       await writeTunnelSettings(this.ctx.db, this.ctx.config);
+      return true;
     } catch (err) {
       this.ctx.log.error({ error: loggable(err) }, 'Could not write the tunnel settings for the public link.');
+      return false;
     }
   }
 }
