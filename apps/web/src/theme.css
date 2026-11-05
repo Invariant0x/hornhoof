@@ -451,7 +451,7 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .pname { display: inline-flex; align-items: center; gap: 8px; min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
 .pname .ic { color: var(--pink-ink); }
 /* The deputy CEO's mark by the name: a hat before a short word, which as one flex line never wraps. */
-.badge.deputy { display: inline-flex; align-items: center; gap: 3px; }
+.badge.deputy { flex: none; display: inline-flex; align-items: center; gap: 3px; }
 .badge.deputy .ic { width: 11px; height: 11px; }
 .status { font-size: 12px; font-weight: 600; padding: 2px 8px; border: 1px solid var(--line2); }
 .status.active { color: var(--ok); border-color: currentColor; }
