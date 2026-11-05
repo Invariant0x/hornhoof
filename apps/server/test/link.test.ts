@@ -3,8 +3,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { runCli } from '../src/cli.js';
-import { decryptSecret } from '../src/crypto/secrets.js';
-import { companies, departments, publicLinks } from '../src/db/schema.js';
+import { decryptSecret, encryptSecret } from '../src/crypto/secrets.js';
+import { companies, departments, linkTls, publicLinks } from '../src/db/schema.js';
+import { writeTunnelSettings } from '../src/modules/link/link.js';
+import { newAccountKey } from '../src/modules/tls/acme.js';
+import { mayRunHttps, saveTls, tlsOf, updateTls } from '../src/modules/tls/store.js';
+import { selfSigned } from '../src/modules/tls/x509.js';
 import { fakeRelay } from './fake-relay.js';
 import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
 
@@ -47,6 +51,126 @@ describe('checking a name for the public link', () => {
   });
 });
 
+const LINK_HOST = 'acme.hornhoof.test';
+const CERTIFICATES_ON = { ACME_DIRECTORY: 'https://acme.invalid/directory' };
+
+/* A company with the link acme, and a certificate row that may run https. The tests change one thing of it at a time. */
+async function companyWithCertificate(env: NodeJS.ProcessEnv) {
+  const made = await company(env);
+  await made.put({ name: 'acme' });
+  const [acme] = await made.db.select().from(companies);
+  const pair = await selfSigned(LINK_HOST);
+  const accountKey = await newAccountKey();
+  const secret = made.config.secret;
+  const good = {
+    directory: CERTIFICATES_ON.ACME_DIRECTORY,
+    accountKeyEnc: encryptSecret(accountKey, secret),
+    name: 'acme',
+    mode: 'https' as const,
+    certPem: pair.certPem,
+    certKeyEnc: encryptSecret(pair.keyPem, secret),
+  };
+  const written = () => readFileSync(made.tunnelFile, 'utf8');
+  const modeWith = async (row: Parameters<typeof saveTls>[2]) => {
+    await saveTls(made.db, acme!.id, row);
+    await writeTunnelSettings(made.db, made.config);
+    return (JSON.parse(written()) as { mode: unknown }).mode;
+  };
+  return { ...made, companyId: acme!.id, pair, accountKey, good, written, modeWith };
+}
+
+describe("the tunnel's mode", () => {
+  it("writes the tunnel's mode: https only for a certificate of the link's own name", async () => {
+    const { config, pair, good, written, modeWith } = await companyWithCertificate(CERTIFICATES_ON);
+    expect((JSON.parse(written()) as { mode: unknown }).mode).toBe('http');
+    expect(await modeWith(good)).toBe('https');
+
+    const sealed = (keyPem: string) => encryptSecret(keyPem, config.secret);
+    const another = await selfSigned(LINK_HOST);
+    const shortLived = await selfSigned(LINK_HOST, { days: 23 / 24 });
+    const otherHost = await selfSigned('other.hornhoof.test');
+    const cases: [string, Partial<Parameters<typeof saveTls>[2]>][] = [
+      ['the row of another name', { name: 'old' }],
+      ['no certificate', { certPem: null }],
+      ['no key', { certKeyEnc: null }],
+      ['a certificate with 23 h left', { certPem: shortLived.certPem, certKeyEnc: sealed(shortLived.keyPem) }],
+      ['a certificate of another host', { certPem: otherHost.certPem, certKeyEnc: sealed(otherHost.keyPem) }],
+      ["another certificate's key", { certKeyEnc: sealed(another.keyPem) }],
+      ['a key that does not decrypt', { certKeyEnc: encryptSecret(pair.keyPem, Buffer.alloc(32, 9)) }],
+      ['a key that is no key', { certKeyEnc: sealed('no key') }],
+      ['text that is no certificate', { certPem: 'not a certificate' }],
+      ['a row in http mode', { mode: 'http' }],
+    ];
+    for (const [what, change] of cases) {
+      expect(await modeWith({ ...good, ...change }), what).toBe('http');
+    }
+  });
+
+  it('keeps every private key out of the tunnel settings', async () => {
+    const { pair, accountKey, good, written, modeWith } = await companyWithCertificate(CERTIFICATES_ON);
+    expect(await modeWith(good)).toBe('https');
+    const text = written();
+    /* Booleans only: a failure here must not print a key. */
+    expect(text.includes('certKeyEnc')).toBe(false);
+    expect(text.includes('PRIVATE KEY')).toBe(false);
+    expect(text.includes(accountKey)).toBe(false);
+    expect(text.includes(pair.keyPem)).toBe(false);
+    expect(text.includes(good.accountKeyEnc)).toBe(false);
+    expect(text.includes(good.certKeyEnc)).toBe(false);
+  });
+
+  it('puts the link on http when certificates are off, which is how tests run unless they ask', async () => {
+    for (const env of [{ ACME_DIRECTORY: 'off' }, {}]) {
+      const { good, modeWith } = await companyWithCertificate(env);
+      expect(await modeWith(good), JSON.stringify(env)).toBe('http');
+    }
+  });
+
+  it('asks for more than a day left on the certificate, read from the first of a chain', async () => {
+    const secret = Buffer.alloc(32, 3);
+    const notBefore = new Date('2026-11-04T12:00:00.000Z');
+    const pair = await selfSigned(LINK_HOST, { days: 3, now: notBefore });
+    const other = await selfSigned('intermediate.hornhoof.test');
+    const row = { mode: 'https' as const, name: 'acme', certPem: `${pair.certPem}${other.certPem}`, certKeyEnc: encryptSecret(pair.keyPem, secret) };
+    const link = { name: 'acme', url: `https://${LINK_HOST}` };
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    const leaving = (leftMs: number) => new Date(notBefore.getTime() + 3 * DAY_MS - leftMs);
+    expect(mayRunHttps(row, link, secret, leaving(DAY_MS + 1000))).toBe(true);
+    expect(mayRunHttps(row, link, secret, leaving(DAY_MS))).toBe(false);
+  });
+});
+
+describe("the certificate's row", () => {
+  it('is made once, keeps what a later save does not name, and may not be changed before it exists', async () => {
+    const { db } = await company();
+    const [acme] = await db.select().from(companies);
+    expect(await tlsOf(db, acme!.id)).toBeNull();
+    await expect(updateTls(db, acme!.id, { mode: 'https' })).rejects.toThrow('The link has no certificate row to change.');
+    expect(await tlsOf(db, acme!.id)).toBeNull();
+
+    await saveTls(db, acme!.id, { directory: 'https://one.invalid/directory', accountKeyEnc: 'sealed one' });
+    expect(await tlsOf(db, acme!.id)).toMatchObject({ directory: 'https://one.invalid/directory', accountKeyEnc: 'sealed one', mode: 'http', certPem: null });
+    await updateTls(db, acme!.id, { failure: 'refused' });
+    await saveTls(db, acme!.id, { directory: 'https://two.invalid/directory', accountKeyEnc: 'sealed two' });
+    expect(await tlsOf(db, acme!.id)).toMatchObject({ directory: 'https://two.invalid/directory', accountKeyEnc: 'sealed two', failure: 'refused' });
+    expect(await db.select().from(linkTls)).toHaveLength(1);
+  });
+
+  it('notes the time of every change', async () => {
+    const { db } = await company();
+    const [acme] = await db.select().from(companies);
+    await saveTls(db, acme!.id, { directory: 'https://one.invalid/directory', accountKeyEnc: 'sealed' });
+    const longAgo = new Date('2020-01-01T00:00:00.000Z');
+    const updatedAt = async () => (await tlsOf(db, acme!.id))!.updatedAt.getTime();
+    await db.update(linkTls).set({ updatedAt: longAgo });
+    await updateTls(db, acme!.id, { failure: 'refused' });
+    expect(await updatedAt()).toBeGreaterThan(longAgo.getTime());
+    await db.update(linkTls).set({ updatedAt: longAgo });
+    await saveTls(db, acme!.id, { directory: 'https://one.invalid/directory', accountKeyEnc: 'sealed' });
+    expect(await updatedAt()).toBeGreaterThan(longAgo.getTime());
+  });
+});
+
 describe('binding the company to a public link', () => {
   it('takes the name at the relay, keeps the key encrypted and writes the tunnel settings', async () => {
     const { app, db, config, relay, ceo, put, tunnelFile } = await company();
@@ -69,6 +193,7 @@ describe('binding the company to a public link', () => {
       name: 'acme',
       key,
       tunnel: expect.objectContaining({ serverAddr: 'hornhoof.test', serverPort: 443, protocol: 'wss' }),
+      mode: 'http',
     });
     /* The link's key is for the tunnel container alone. */
     expect(statSync(tunnelFile).mode & 0o077).toBe(0);
@@ -251,7 +376,7 @@ describe('taking over a link made before', () => {
     const url = `https://${NAME}.${hostname}`;
     expect(lines.join('\n')).toContain(url);
     expect((await app.inject({ url: '/api/link', ...as(ceo) })).json().link).toEqual({ name: NAME, url });
-    expect(JSON.parse(readFileSync(tunnelFile, 'utf8'))).toEqual({ url, name: NAME, key: KEY, tunnel: { serverAddr: hostname, serverPort: Number(port), protocol: 'wss' } });
+    expect(JSON.parse(readFileSync(tunnelFile, 'utf8'))).toEqual({ url, name: NAME, key: KEY, tunnel: { serverAddr: hostname, serverPort: Number(port), protocol: 'wss' }, mode: 'http' });
     expect(statSync(tunnelFile).mode & 0o077).toBe(0);
 
     /* The key it keeps is the one that frees the link. */

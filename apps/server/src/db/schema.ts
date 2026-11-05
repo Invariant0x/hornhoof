@@ -802,3 +802,36 @@ export const publicLinks = pgTable('public_links', {
   tunnelEnc: text('tunnel_enc').notNull(),
   createdAt: createdAt(),
 });
+
+/* The certificate of the company's public link, which ends TLS on this machine, and the ACME account it comes from. The
+   private keys are kept only as encryptSecret gives them, like the link's own key. The mode is kept here so a restart
+   writes the same tunnel settings and the link does not blink. */
+export const linkTls = pgTable('link_tls', {
+  companyId: uuid('company_id')
+    .primaryKey()
+    .references(() => companies.id),
+  /* The CA the account is at. */
+  directory: text('directory').notNull(),
+  accountKeyEnc: text('account_key_enc').notNull(),
+  accountUrl: text('account_url'),
+  /* The link name the certificate is for. */
+  name: text('name'),
+  /* The chain. */
+  certPem: text('cert_pem'),
+  /* The CA the certificate came from. */
+  certDirectory: text('cert_directory'),
+  certKeyEnc: text('cert_key_enc'),
+  notAfter: timestamp('not_after', { withTimezone: true }),
+  renewAt: timestamp('renew_at', { withTimezone: true }),
+  /* When to ask the CA's renewal information again. */
+  askAt: timestamp('ask_at', { withTimezone: true }),
+  /* No order before this, after a failure. */
+  nextTryAt: timestamp('next_try_at', { withTimezone: true }),
+  /* The last failure's AcmeError type, else its kind; null after a success. */
+  failure: text('failure'),
+  failedAt: timestamp('failed_at', { withTimezone: true }),
+  mode: text('mode', { enum: ['http', 'https'] }).notNull().default('http'),
+  /* No switch to https before this. */
+  httpsBlockedUntil: timestamp('https_blocked_until', { withTimezone: true }),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});

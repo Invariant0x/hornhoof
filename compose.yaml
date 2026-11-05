@@ -18,6 +18,8 @@ services:
       # the app believes.
       RELAY_URL: ${RELAY_URL:-}
       TUNNEL_HOST: tunnel
+      # Where the link's certificate comes from: Let's Encrypt when empty, off for none.
+      ACME_DIRECTORY: ${ACME_DIRECTORY:-}
       # How many megabytes all the files on the company's tasks may take together; 2048 when empty.
       TASK_FILES_MB: ${TASK_FILES_MB:-}
       # Parts of runs allowed on one physical computer at once; 1 when empty.
