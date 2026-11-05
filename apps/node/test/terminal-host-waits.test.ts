@@ -17,7 +17,13 @@ const within = (run: Promise<RunResult>, ms: number) => Promise.race([run, new P
 const agyJob = (key: string, prompt: string, more: Partial<TermJob['input']> = {}) => ({ ...job(key, prompt, more), program: agyProgram, bin: FAKE_AGY, home: join(home, 'agy', key), signedOut: AGY_SIGNED_OUT });
 const jobs = { claude: job, codex: codexJob, kimi: kimiJob, antigravity: agyJob };
 const pidOf = (key: string) => tmux.programPid(`a-${key}`);
-const states = (jobId: string) => sent.flatMap(m => (m.type === 'job.program' && m.jobId === jobId ? [m.state] : []));
+/* Initial idle precedes prompt acceptance. Every report after running work starts remains asserted. */
+function reports(jobId: string) {
+  const all = sent.filter((m): m is Extract<NodeMessage, { type: 'job.program' }> => m.type === 'job.program' && m.jobId === jobId);
+  const accepted = all.findIndex(m => m.state === 'thinking' || m.state === 'tool');
+  return accepted < 0 ? [] : all.slice(accepted);
+}
+const states = (jobId: string) => reports(jobId).map(m => m.state);
 
 /* The keys the host presses from now on, and whether it ends the program. */
 function touches() {
@@ -119,7 +125,7 @@ describe.skipIf(!hasTmux)('turns end only on an explicit signal', () => {
     const stop = new AbortController();
     const run = host.run(agyJob('cut-agy', 'CUT here', { jobId: 'job-cut', signal: stop.signal }));
     expect(await within(run, WAIT_MS)).toBe(STILL_WAITING);
-    const told = sent.filter((m): m is Extract<NodeMessage, { type: 'job.program' }> => m.type === 'job.program' && m.jobId === 'job-cut');
+    const told = reports('job-cut');
     expect(told.map(m => m.state)).not.toContain('idle');
     expect(told.at(-1)).toMatchObject({ state: 'tool', tool: 'run_command' });
     const tool = told.filter(m => m.state === 'tool');
