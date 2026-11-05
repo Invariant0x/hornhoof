@@ -35,6 +35,7 @@ export class TerminalRelay {
   private readonly typed = new Map<string, { personId: string; node: NodeIdentity; at: number }>();
   private readonly pressed = new Map<string, Pressed[]>();
   private readonly refused = new Map<string, TurnRefusal>();
+  private readonly writers = new Map<string, { personId: string; node: NodeIdentity }>();
 
   add(termId: string, view: View): void {
     this.views.set(termId, view);
@@ -74,6 +75,17 @@ export class TerminalRelay {
   /* A person pressed Enter in the agent's terminal, which the node shows. */
   typing(agentId: string, personId: string, node: NodeIdentity): void {
     this.typed.set(agentId, { personId, node, at: Date.now() });
+  }
+
+  /* A person typed words in the agent's terminal, which may stay there unsent. */
+  wrote(agentId: string, personId: string, node: NodeIdentity): void {
+    this.writers.set(agentId, { personId, node });
+  }
+
+  /* The person who last typed words in the agent's terminal on this node, for as long as this server has run. */
+  lastWriter(node: NodeIdentity, agentId: string): string | null {
+    const last = this.writers.get(agentId);
+    return last && sameNode(last.node, node) ? last.personId : null;
   }
 
   /* The person who pressed Enter in the agent's terminal on this node just now, if anyone did. One Enter opens one turn:

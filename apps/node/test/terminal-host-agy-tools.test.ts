@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SIGNED_OUT } from '../src/providers/antigravity.js';
 import type { TermJob } from '../src/terminal/host.js';
 import { agyProgram } from '../src/terminal/programs.js';
-import { hasTmux, host, home, setUp, job, tmux, until } from './terminal-host-helpers.js';
+import { hasTmux, host, home, sent as frames, setUp, job, tmux, until } from './terminal-host-helpers.js';
 
 const FAKE = fileURLToPath(new URL('./fakes/fake-agy-term.mjs', import.meta.url));
 const agyJob = (key: string, prompt: string, env: Record<string, string> = {}, more: Partial<TermJob['input']> = {}) => ({
@@ -153,18 +153,22 @@ describe.skipIf(!hasTmux)("Antigravity and Hornhoof's tools", () => {
     expect(steps('person')).toEqual([...OPENED, { turn: 'hello', tools: true }]);
   });
 
-  it("types nothing into words a person left in agy's input, says why, and starts agy anew for the next turn", async () => {
-    await setUp({ readyMs: 2000, cols: 120, rows: 40, toolsMs: 5000 });
+  it("keeps words left in agy's input before it opens its panel, and leaves them in the same agy until Hornhoof keeps them", async () => {
+    await setUp({ readyMs: 2000, cols: 120, rows: 40, toolsMs: 5000, keptWaitMs: 300, typingQuietMs: 0 });
     expect(await host.run(agyJob('draft', ''))).toMatchObject({ ok: true, sessionId: null });
     const pid = await tmux.programPid('a-draft');
     await tmux.keys('a-draft', '-l', 'fix th');
     await until(async () => (await host.screen('draft')).includes('fix th'));
-    const sent = keysSent();
-    expect(await host.run(agyJob('draft', 'hello'))).toMatchObject({ ok: false, error: 'agent_failed', failure: { kind: 'unknown', text: 'Antigravity CLI did not wait at its empty prompt, so the node did not open its MCP panel.', retryable: true } });
-    expect(sent).toEqual([]);
+    const pressed = keysSent();
+    expect(await host.run(agyJob('draft', 'hello'))).toMatchObject({ ok: false, error: 'agent_failed', failure: { kind: 'unknown', text: 'Antigravity CLI did not wait at its empty prompt, so the node did not open its MCP panel.' } });
+    expect(pressed).toEqual([]);
     expect(await host.screen('draft')).toContain('fix th');
-    expect(await host.run(agyJob('draft', 'hello'))).toMatchObject({ ok: true, result: 'FINISHED' });
-    expect(await tmux.programPid('a-draft')).not.toBe(pid);
+    const next = host.run(agyJob('draft', 'hello'));
+    const left = () => frames.filter(m => m.type === 'agent.input_left');
+    await until(() => left().length > 1);
+    host.inputKept({ type: 'agent.input_kept', agentKey: 'draft', ref: (left()[0] as { ref: string }).ref });
+    expect(await next).toMatchObject({ ok: true, result: 'FINISHED' });
+    expect(await tmux.programPid('a-draft')).toBe(pid);
     expect(steps('draft')).toEqual([...OPENED, { turn: 'hello', tools: true }]);
   });
 

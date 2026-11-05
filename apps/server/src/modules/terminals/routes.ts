@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { TERM_CHUNK } from '@hornhoof/protocol';
+import { TERM_CHUNK, typesWords } from '@hornhoof/protocol';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -61,6 +61,7 @@ export function terminalRoutes(app: FastifyInstance, ctx: Ctx): void {
         if (!write) return;
         /* A prompt goes in with Enter, in any of its forms; scrolling and clicks send keys too. Where the person's Enter
            counts is kept before the keys reach the program. */
+        if (typesWords(data.data)) ctx.terminals.wrote(agentId, personId, node);
         const keys = readKeys(unread, data.data);
         unread = keys.rest;
         const pressedIn = keys.enter ? await enterPressed(ctx, agentId, personId, node) : null;

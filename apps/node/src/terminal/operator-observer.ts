@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
-import { ASSIGNMENT_RECEIPT_MS, FIRST_ACTIVITY_MS, OperatorNodeMessage, OperatorQuestion, QUESTION_WAIT_MS, STARTUP_EXIT_MS, type OperatorDelivery, type OperatorEvidence, type OperatorReason } from '@hornhoof/protocol/program-operator';
+import { ASSIGNMENT_RECEIPT_MS, FIRST_ACTIVITY_MS, OperatorNodeMessage, OperatorQuestion, QUESTION_WAIT_MS, STARTUP_EXIT_MS, type OperatorCheck, type OperatorDelivery, type OperatorEvidence, type OperatorReason } from '@hornhoof/protocol/program-operator';
 import { z } from 'zod';
 import { checkSlotWaiting } from '../check-queue.js';
 import { readOperatorStore, writeOperatorStore } from './operator-storage.js';
@@ -15,15 +15,17 @@ const Store = z.object({ instances: z.record(z.string(), Instance), deliveries: 
 type Store = z.infer<typeof Store>;
 type Delivery = z.infer<typeof Delivery>;
 type Instance = z.infer<typeof Instance>;
-type Options = { file: string; send(fact: OperatorEvidence): boolean; connected(): boolean; now?(): number };
+type Options = { file: string; send(fact: OperatorEvidence): boolean; connected(): boolean; now?(): number; look?(identity: OperatorIdentity): Promise<OperatorCheck> };
 type Exit = { code: number | null; signal: string | null };
 type ExitCause = 'cancelled' | 'update' | 'restart' | 'offline' | 'completed';
 type EvidenceInput<T = OperatorEvidence> = T extends OperatorEvidence ? Omit<T, 'evidenceId' | 'ordinal'> : never;
 const MAX_PENDING = 4096;
 
-/* Only identities, hashes and bounded facts reach disk; program words and screens stay out of this outbox. */
+/* Only identities, hashes and bounded facts reach disk; program words and screens stay out of this outbox. A screen goes
+   with the first telling of its fact alone: told again, the fact has the state of the input line without it. */
 export class OperatorObserver {
   private state: Store;
+  private readonly looking = new Set<string>();
   private staged: { facts: OperatorEvidence[]; changed: boolean } | null = null;
   private readonly now: () => number;
 
@@ -140,10 +142,27 @@ export class OperatorObserver {
   private checkDelivery(delivery: Delivery): void {
     if (this.deliveryInactive(delivery) || this.deferForCheck(delivery)) return;
     if (delivery.receiptAt === null) {
-      if (this.elapsed(delivery.at) >= ASSIGNMENT_RECEIPT_MS) this.alarm(delivery, 'assignment_unrecorded');
+      if (this.elapsed(delivery.at) >= ASSIGNMENT_RECEIPT_MS) this.unrecorded(delivery);
       return;
     }
     if (!delivery.active && this.elapsed(delivery.receiptAt) >= FIRST_ACTIVITY_MS) this.alarm(delivery, 'recorded_no_activity');
+  }
+
+  /* What follows the alarm can end the turn, so the screen and the input line come first. */
+  private unrecorded(delivery: Delivery): void {
+    if (!this.options.look) return this.alarm(delivery, 'assignment_unrecorded');
+    if (delivery.alarms.includes('assignment_unrecorded') || this.looking.has(delivery.id)) return;
+    this.looking.add(delivery.id);
+    void this.options.look(this.identity(delivery))
+      .catch((): OperatorCheck => ({ input: 'unknown', screen: null }))
+      .then(check => this.transition(() => this.alarmLooked(delivery.id, check)))
+      .catch(() => {})
+      .finally(() => this.looking.delete(delivery.id));
+  }
+
+  private alarmLooked(id: string, check: OperatorCheck): void {
+    const delivery = this.state.deliveries[id];
+    if (delivery && !this.deliveryInactive(delivery) && delivery.receiptAt === null) this.alarm(delivery, 'assignment_unrecorded', check);
   }
 
   private deferForCheck(delivery: Delivery): boolean {
@@ -238,12 +257,12 @@ export class OperatorObserver {
     return !cause && !instance.active && !instance.alarmed && elapsedMs <= STARTUP_EXIT_MS;
   }
 
-  private alarm(delivery: Delivery, reason: OperatorReason): void {
+  private alarm(delivery: Delivery, reason: OperatorReason, check?: OperatorCheck): void {
     if (delivery.alarms.includes(reason)) return;
     this.room(1);
     delivery.alarms.push(reason);
     const instance = this.state.instances[delivery.instance]!;
-    this.emit(instance, { type: 'program.operator_needed', ...this.identity(delivery), reason, deliveryId: delivery.id, evidenceKey: delivery.id, elapsedMs: this.elapsed(delivery.at), sinceLaunchMs: this.elapsed(instance.startedAt ?? instance.at), exit: null });
+    this.emit(instance, { type: 'program.operator_needed', ...this.identity(delivery), reason, deliveryId: delivery.id, evidenceKey: delivery.id, elapsedMs: this.elapsed(delivery.at), sinceLaunchMs: this.elapsed(instance.startedAt ?? instance.at), exit: null, ...(check ? { check: { input: check.input, screen: null } } : {}) }, check?.screen);
   }
 
   question(identity: OperatorIdentity, input: OperatorQuestion | null, elapsedMs = 0): void {
@@ -295,11 +314,11 @@ export class OperatorObserver {
     this.emit(this.state.instances[delivery.instance]!, { type: 'program.delivery', ...this.identity(delivery), deliveryId: delivery.id, deliveryOrdinal: delivery.ordinal, kind: delivery.kind, phase, elapsedMs: this.elapsed(delivery.at), wordsDigest: delivery.digest });
   }
 
-  private emit(instance: Instance, frame: EvidenceInput): void {
+  private emit(instance: Instance, frame: EvidenceInput, screen?: OperatorCheck['screen']): void {
     if (this.state.outbox.length >= MAX_PENDING) throw new Error('The program evidence outbox is full.');
     const fact = StoredEvidence.parse({ ...frame, evidenceId: randomUUID(), ordinal: instance.ordinal++ });
     this.state.outbox.push(fact);
-    this.staged!.facts.push(fact);
+    this.staged!.facts.push(screen && fact.type === 'program.operator_needed' && fact.check ? { ...fact, check: { ...fact.check, screen } } : fact);
     this.save();
   }
 

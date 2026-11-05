@@ -11,7 +11,7 @@ function fixture() {
   onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
   let now = 0;
   const sent: OperatorNodeMessage[] = [];
-  const runtime = new OperatorRuntime({ dir, now: () => now, connected: () => true, send: frame => { sent.push(frame); return true; } }, { current: () => ({ agentProgram: true, alive: true, pasted: false, turnStarted: false, active: false, runningTool: false, retrying: false, wait: null }), capture: async () => ({ cols: 80, rows: 24, cells: 'Press Enter for a theme.' }), press: async () => {}, secrets: () => [] });
+  const runtime = new OperatorRuntime({ dir, now: () => now, connected: () => true, send: frame => { sent.push(frame); return true; } }, { inputLine: () => 'unknown', current: () => ({ agentProgram: true, alive: true, pasted: false, turnStarted: false, active: false, runningTool: false, retrying: false, wait: null }), capture: async () => ({ cols: 80, rows: 24, cells: 'Press Enter for a theme.' }), press: async () => {}, secrets: () => [] });
   const agentKey = randomUUID(), jobId = randomUUID();
   const assignment = { id: randomUUID(), ordinal: 1 };
   runtime.begin(agentKey, jobId, assignment, 'Words.', false);

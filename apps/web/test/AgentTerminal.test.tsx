@@ -470,6 +470,22 @@ describe("an agent's live terminal in its window", () => {
     expect(await screen.findByText(/Hornhoof could not tell who wrote/)).toBeInTheDocument();
   });
 
+  it.each([
+    ['who typed there last', { id: 'p1', name: 'Zed' }, /Zed typed in this terminal last/],
+    ['that nobody knows who wrote them', null, /Hornhoof cannot tell who wrote them/],
+  ] as const)('keeps words left in the input in the log of what happened, and says %s', async (_, person, says) => {
+    const left: EventView = { seq: 2, kind: 'input_left', data: { text: 'a <b>draft</b>\nof two lines', ref: 'r1' }, jobId: null, person, at: '2026-10-30T10:00:01Z' };
+    mockApi({
+      [`GET ${EVENTS}?after=0`]: [200, { events: [...LOG, left], state: { ...READY, terminal: false } }],
+      [`GET ${EVENTS}?after=2`]: [200, { events: [], state: { ...READY, terminal: false } }],
+      'POST /api/agents/orchestrator/start': [200, { started: false }],
+    });
+    view();
+    expect(await screen.findByText(/were left unsent in the program's input/)).toBeInTheDocument();
+    expect(screen.getByText(says)).toBeInTheDocument();
+    expect(screen.getByText(/a <b>draft<\/b>\s+of two lines/)).toBeInTheDocument();
+  });
+
   it('shows the bottom of the screen, where the line to type in is, after a card below the terminal comes or goes', async () => {
     /* A taller terminal takes rows back from its history and stays scrolled up: the program's input line fell below the window. */
     open();

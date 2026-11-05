@@ -256,9 +256,11 @@ export class Tmux {
     return spawn('tmux', [...this.base(), 'attach', '-t', `=${name}`], { env: { ...this.env, TERM: process.env.TERM ?? 'xterm-256color' }, uid: this.user?.uid, gid: this.user?.gid, stdio: 'inherit' });
   }
 
-  /* A viewer: a terminal of its own size attached to the session, read-only unless the person may type. */
+  /* A viewer: a terminal of its own size attached to the session, read-only unless the person may type. Its client stays on
+     the normal screen of the browser's terminal, where lines that scroll off stay as its history: an alternate screen
+     keeps none. */
   attach(name: string, cols: number, rows: number, write: boolean) {
-    const inner = `stty cols ${cols} rows ${rows}; exec tmux ${this.base().join(' ')} attach${write ? '' : ' -r'} -t '=${name}'`;
+    const inner = `stty cols ${cols} rows ${rows}; exec tmux ${this.base().join(' ')} set-option -s 'terminal-overrides[9]' 'xterm-256color:smcup@:rmcup@' \\; attach${write ? '' : ' -r'} -t '=${name}'`;
     /* script gives tmux a terminal without native modules. macOS has the BSD one, which needs a terminal of its own, so
        there Python's pty does it; nodes run on Linux. */
     const [bin, args] = process.platform === 'darwin' ? ['python3', ['-c', 'import pty,sys; pty.spawn(sys.argv[1:])', 'sh', '-c', inner]] : ['script', ['-qfec', inner, '/dev/null']];
