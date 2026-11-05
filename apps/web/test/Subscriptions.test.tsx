@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Subscriptions } from '../src/screens/Subscriptions';
-import type { Me, SubView } from '../src/types';
+import type { JobView, Me, SubView } from '../src/types';
 import { armor, Decrypter, generateX25519Identity, identityToRecipient } from 'age-encryption';
 import { ME, MACHINE, mockApi, SUBS } from './api-mock';
 import { decl } from './css';
@@ -15,13 +15,17 @@ vi.mock('../src/ui/AgentTerminal', () => ({
 
 const COMMAND = 'curl -fsSL https://hq.acme.com/install.sh | bash -s -- --join CODE123';
 const TRUST = 'Agents will run on this machine with your subscription. People with access to this Hornhoof can give them work.';
+const RUNNING_JOB: JobView = { id: 'j1', status: 'running', result: null, tail: '', error: null, machine: 'ivan-mbp', createdAt: '2026-10-29T10:00:00.000Z', startedAt: '2026-10-29T10:00:00.500Z', finishedAt: null };
 
 const lists = (extra: Parameters<typeof mockApi>[0] = {}) => mockApi({ 'GET /api/nodes/commands': [200, { commands: [] }],  'GET /api/subscriptions': [200, { subscriptions: SUBS }], ...extra });
 
 const rowOf = (name: string) => screen.queryByRole('article', { name: new RegExp(`^${name}, `) }) ?? screen.getByRole('row', { name: new RegExp(`^${name}\\b`) });
+const openCards = () => {
+  for (const button of screen.getAllByRole('button', { name: /^(Open the card of |Открыть карточку )/ })) fireEvent.click(button);
+};
 const openAll = async () => {
   await screen.findByRole('table');
-  for (const button of screen.getAllByRole('button', { name: /^(Open the card of |Открыть карточку )/ })) fireEvent.click(button);
+  openCards();
 };
 const meterRows = (card: HTMLElement) => [...card.querySelectorAll('.gauge')];
 
@@ -421,6 +425,49 @@ describe('Subscriptions', () => {
     await user.click(await screen.findByRole('button', { name: 'Run a test on Claude' }));
     expect(await screen.findByText('Answered "ready" in 3.2 s on ivan-mbp.', {}, { timeout: 4000 })).toBeInTheDocument();
     expect(calls.filter(c => c.path === '/api/jobs/j1')).toHaveLength(2);
+  });
+
+  it.each([1, 2])('cancels %i pending test polls when the subscriptions screen closes', async count => {
+    vi.useFakeTimers();
+    onTestFinished(() => { vi.useRealTimers(); });
+    const job = RUNNING_JOB;
+    const calls = lists({
+      'POST /api/subscriptions/s-claude/test': [201, { job }],
+      'POST /api/subscriptions/s-key/test': [201, { job: { ...job, id: 'j2' } }],
+    });
+    const { unmount } = render(<Subscriptions me={ME} />);
+    await act(async () => {});
+    openCards();
+    for (const name of ['Claude', 'Anthropic key ending 9f3a'].slice(0, count)) {
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: `Run a test on ${name}` })); });
+    }
+    expect(screen.getAllByText('Checking. This can take up to two minutes.')).toHaveLength(count);
+    unmount();
+    expect(vi.getTimerCount()).toBe(0);
+    await act(async () => vi.runAllTimersAsync());
+    expect(calls.filter(c => c.path.startsWith('/api/jobs/'))).toHaveLength(0);
+  });
+
+  it.each(['start', 'poll'])('does not schedule a test poll when a late %s response arrives after closing', async phase => {
+    vi.useFakeTimers();
+    onTestFinished(() => { vi.useRealTimers(); });
+    const job = RUNNING_JOB;
+    let finish!: (reply: [number, unknown]) => void;
+    const pending = () => new Promise<[number, unknown]>(resolve => { finish = resolve; });
+    const calls = lists({
+      'POST /api/subscriptions/s-claude/test': phase === 'start' ? pending : [201, { job }],
+      'GET /api/jobs/j1': pending,
+    });
+    const { unmount } = render(<Subscriptions me={ME} />);
+    await act(async () => {});
+    openCards();
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Run a test on Claude' })); });
+    if (phase === 'poll') await act(async () => vi.advanceTimersByTimeAsync(1000));
+    unmount();
+    await act(async () => { finish([200, { job }]); });
+    expect(vi.getTimerCount()).toBe(0);
+    await act(async () => vi.runAllTimersAsync());
+    expect(calls.filter(c => c.path === '/api/jobs/j1')).toHaveLength(phase === 'poll' ? 1 : 0);
   });
 
   it('explains a failed test and keeps the output folded', async () => {

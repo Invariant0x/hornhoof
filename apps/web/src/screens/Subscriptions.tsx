@@ -28,8 +28,6 @@ type Test = { phase: 'running' } | { phase: 'done'; text: string } | { phase: 'f
 /* A sign-in the owner runs now, in a terminal on one of the plan's machines. */
 type Signing = { subId: string; nodeId: string; hostname: string };
 
-const sleep = (ms: number) => new Promise(done => setTimeout(done, ms));
-
 /* Plans that sign in once in a terminal on one machine; Hornhoof then passes the sign-in to the owner's others. */
 const TERMINAL_SIGNIN = new Set(['claude', 'codex']);
 
@@ -388,10 +386,14 @@ export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
   const [signNote, setSignNote] = useState<SignNote | null>(null);
   const [keyFor, setKeyFor] = useState<string | null>(null);
   const live = useRef(true);
+  const polls = useRef(new Map<ReturnType<typeof setTimeout>, () => void>());
   useEffect(() => {
     live.current = true;
+    const pending = polls.current;
     return () => {
       live.current = false;
+      for (const cancel of pending.values()) cancel();
+      pending.clear();
     };
   }, []);
 
@@ -410,14 +412,28 @@ export function Subscriptions({ me, onHome }: { me: Me; onHome?: () => void }) {
 
   const setTest = (id: string, test: Test) => live.current && setTests(all => ({ ...all, [id]: test }));
 
+  function sleep() {
+    return new Promise<void>(resolve => {
+      const timer = setTimeout(() => {
+        polls.current.delete(timer);
+        resolve();
+      }, POLL_MS);
+      polls.current.set(timer, () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+  }
+
   async function runTest(sub: SubView) {
     setTest(sub.id, { phase: 'running' });
     try {
       let { job } = await api.post<{ job: JobView }>(`/api/subscriptions/${sub.id}/test`);
       const started = Date.now();
       while (job.status === 'queued' || job.status === 'running') {
+        if (!live.current) return;
         if (Date.now() - started > POLL_LIMIT_MS) return setTest(sub.id, { phase: 'failed', text: t.subs.testErrors.tooLong, tail: null });
-        await sleep(POLL_MS);
+        await sleep();
         if (!live.current) return;
         job = (await api.get<{ job: JobView }>(`/api/jobs/${job.id}`)).job;
       }
