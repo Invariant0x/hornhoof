@@ -338,6 +338,14 @@ const LIVE_WAKES: WakeWhy[] = ['comment', 'unblocked', 'answered', 'updated', 't
 /* Wakes that would set the holder to work on its task, held back while the task waits for the tasks it comes after. */
 const TO_WORK: WakeWhy[] = ['assigned', 'updated', 'comment', 'answered', 'unblocked', 'reminder', 'go_on', 'subtasks'];
 
+/* What a wake says, kept as the message of its turn. */
+async function wakeMessage(ctx: Ctx, agent: typeof agents.$inferSelect, task: Task, w: Wake) {
+  const notice = await wakeNotice(ctx, task, w);
+  const prompt = notice.action + wakePrompt(agent, task, w) + (notice.report && w.text?.trim() !== notice.report ? `\n\n${quote(notice.report)}` : '');
+  const reportContext = notice.report ? notice.action + wakePrompt(agent, task, { ...w, ...(w.text?.trim() === notice.report ? { text: undefined } : {}) }) : undefined;
+  return { text: prompt, task: { id: task.id, number: task.number }, taskWake: taskWakeOf(task, w), ...notice, reportContext };
+}
+
 async function queueWake(ctx: Ctx, w: Wake): Promise<boolean> {
   const { db } = ctx;
   const [agent] = await db.select().from(agents).where(and(eq(agents.id, w.agentId), isNull(agents.removedAt)));
@@ -345,14 +353,10 @@ async function queueWake(ctx: Ctx, w: Wake): Promise<boolean> {
   const task = await taskForWake(db, w);
   if (!task) return false;
   if (TO_WORK.includes(w.why) && w.agentId === task.assigneeAgentId && (await openAfter(db, task)).length) return false;
-  const notice = await wakeNotice(ctx, task, w);
-  const prompt = notice.action + wakePrompt(agent, task, w) + (notice.report && w.text?.trim() !== notice.report ? `\n\n${quote(notice.report)}` : '');
-  const reportContext = notice.report ? notice.action + wakePrompt(agent, task, { ...w, ...(w.text?.trim() === notice.report ? { text: undefined } : {}) }) : undefined;
-  const data = { text: prompt, task: { id: task.id, number: task.number }, taskWake: taskWakeOf(task, w), ...notice, reportContext };
+  const data = await wakeMessage(ctx, agent, task, w);
   /* New words on the task the agent works on right now go into that turn. */
   if (LIVE_WAKES.includes(w.why)) {
-    const text = prompt;
-    const into = await deliverLive(ctx, agent.id, text, { taskId: task.id, source: { data } }, (jobId, kept) =>
+    const into = await deliverLive(ctx, agent.id, data.text, { taskId: task.id, source: { data } }, (jobId, kept) =>
       appendEvent(ctx, { companyId: agent.companyId, agentId: agent.id, jobId, kind: 'message', data }, kept).then(() => {}),
     );
     if (into) return false;
@@ -453,6 +457,9 @@ const PROVIDER_NAMES: Record<string, string> = { claude: 'Claude', codex: 'Codex
 /* Who takes member work over while its executor's plan is at its limit: another employee of its role and department who
    is on, for the task's product or for none, on a plan of another provider that is not at its limit, and not one of the
    task's gates. Only an employee's work moves: a head and the orchestrator keep theirs and wait for the reset. */
+/* Its turn would go out now: signed in, on a machine that is on, and with plan left for tasks. */
+const goesOutNow = (state: Awaited<ReturnType<typeof agentState>>): boolean => state.ready && !state.limitUntil && !state.budgetUntil && !state.machineDrain;
+
 async function standIn(ctx: Ctx, agentId: string, task: Task): Promise<{ id: string; name: string; provider: string } | null> {
   if (task.executorAgentId !== agentId || task.assigneeAgentId !== agentId || task.stage !== 0 || !['open', 'working'].includes(task.status)) return null;
   const [me] = await ctx.db
@@ -489,13 +496,18 @@ async function standIn(ctx: Ctx, agentId: string, task: Task): Promise<{ id: str
      would only wait in the agent's place. */
   for (const p of peers) {
     if ((p.productId && p.productId !== task.productId) || task.gates.includes(p.id)) continue;
-    const state = await agentState(ctx, p.id);
-    if (state.ready && !state.limitUntil && !state.budgetUntil && !state.machineDrain) return { id: p.id, name: p.name, provider: p.provider };
+    if (goesOutNow(await agentState(ctx, p.id))) return { id: p.id, name: p.name, provider: p.provider };
   }
   return null;
 }
 
 const mayCheckTask = (task: Task): boolean => ['open', 'working', 'review'].includes(task.status) && !task.externalWait;
+
+async function planLimitUntil(db: Ctx['db'], subscriptionId: string | null): Promise<string | null> {
+  if (!subscriptionId) return null;
+  const [sub] = await db.select({ limits: subscriptions.limits, limitsUpdatedAt: subscriptions.limitsUpdatedAt }).from(subscriptions).where(eq(subscriptions.id, subscriptionId));
+  return sub ? limitUntil(sub.limits, sub.limitsUpdatedAt) : null;
+}
 
 async function checkHeld(ctx: Ctx, job: typeof jobs.$inferSelect & { agentId: string; startedAt: Date }, task: Task): Promise<void> {
   const { db } = ctx;
@@ -529,8 +541,7 @@ async function checkHeld(ctx: Ctx, job: typeof jobs.$inferSelect & { agentId: st
   }
   /* A turn that ended at the plan's limit did not stand still: another of its role on another plan takes the work over,
      or the agent goes on once the limit starts over. */
-  const [sub] = job.subscriptionId ? await db.select({ limits: subscriptions.limits, limitsUpdatedAt: subscriptions.limitsUpdatedAt }).from(subscriptions).where(eq(subscriptions.id, job.subscriptionId)) : [];
-  const until = limitUntil(sub?.limits ?? null, sub?.limitsUpdatedAt ?? null);
+  const until = await planLimitUntil(db, job.subscriptionId);
   if (until) {
     const other = await standIn(ctx, agentId, task);
     const [me] = other ? await db.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId)) : [];

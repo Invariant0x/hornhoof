@@ -33,13 +33,22 @@ export async function wordsForTurn(ctx: Pick<Ctx, 'db'>, agentId: string, jobId:
   });
 }
 
+const lastWords = async (ctx: Pick<Ctx, 'db'>, job: Standing | undefined) => (job?.agentId ? (await wordsForTurn(ctx, job.agentId, job.id))[0] : undefined);
+
+/* Whom the original answers now: nobody while words are on their way into it, the one who said its last words, or whoever
+   started it. */
+const answeredBy = (job: Standing | undefined, last: TurnWords | undefined): string | null => {
+  if (job?.decisionInputPending) return null;
+  return last ? last.personId : job?.createdBy ?? null;
+};
+
+const hiddenRecord = (words: TurnWords | null, personId: string | null): TurnWords => ({ personId: words?.personId === personId ? personId : null, data: words?.data ?? {} });
+const standingOf = (job: Standing | undefined) => ({ createdBy: job?.createdBy ?? null, answersCeo: job?.answersCeo ?? false });
+
 /* The next turn keeps a hidden record of the words, but never restores a person the original no longer answers. */
 export async function repeatedTurn(ctx: Pick<Ctx, 'db'>, job: Standing | undefined, source?: TurnWords | null): Promise<RepeatedTurn> {
-  const last = job?.agentId ? (await wordsForTurn(ctx, job.agentId, job.id))[0] : undefined;
-  const personId = job?.decisionInputPending ? null : last ? last.personId : job?.createdBy ?? null;
+  const last = await lastWords(ctx, job);
+  const personId = answeredBy(job, last);
   const words = source === undefined ? last ?? { personId, data: {} } : source;
-  return {
-    createdBy: job?.createdBy ?? null, answersCeo: job?.answersCeo ?? false,
-    repeated: { personId: words?.personId === personId ? personId : null, data: words?.data ?? {} },
-  };
+  return { ...standingOf(job), repeated: hiddenRecord(words, personId) };
 }

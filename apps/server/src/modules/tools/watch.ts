@@ -72,6 +72,11 @@ function givingBack(ctx: Ctx, companyId: string, me: string, to: string) {
   return { withMessage, told };
 }
 
+/* A program operator gets its own tools along with what its skills grant. */
+function registerRoleTools(server: McpServer, ctx: Ctx, job: ToolJob): void {
+  if (job.roleKey === PROGRAM_OPERATOR_ROLE) registerOperatorTools(server, ctx, job);
+}
+
 /* What the sender of a message hears: it went in or started a turn, or it waits for a turn to come. */
 async function sentLine(ctx: Ctx, name: string, jobId: string, machineWaits: boolean): Promise<string> {
   const [turn] = await ctx.db.select({ status: jobs.status }).from(jobs).where(eq(jobs.id, jobId));
@@ -82,7 +87,7 @@ async function sentLine(ctx: Ctx, name: string, jobId: string, machineWaits: boo
 /* The tools a skill grants an employee, for watching the company on a timer round: every agent's state, what failed, and
    writing to another employee as itself; and a head's way to tell the orchestrator. */
 export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, grants: ReadonlySet<Grant>): void {
-  if (job.roleKey === PROGRAM_OPERATOR_ROLE) registerOperatorTools(server, ctx, job);
+  registerRoleTools(server, ctx, job);
   const { db } = ctx;
   const deptNames = async () => new Map((await db.select().from(departments).where(eq(departments.companyId, job.companyId))).map(d => [d.id, deptName(d)]));
   const roleTitle = (roleKey: string | null) => (roleKey && ctx.templates.roles.get(roleKey)?.title.en) || null;
