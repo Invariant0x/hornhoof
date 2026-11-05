@@ -1416,8 +1416,7 @@ class VisitorKeyLifecycleTests(unittest.TestCase):
         self.admin('unban', 'placeholder-name')
         self.assertIsNone(self.binding_row('placeholder-name'))
         self.assertIsNone(self.stored_hash('placeholder-name'))
-        created = json.loads(self.admin('add', 'placeholder-name'))
-        self.assertEqual(created['name'], 'placeholder-name')
+        self.bind('placeholder-name', 'its-new-key')
         self.assertIsNotNone(self.binding_row('placeholder-name'))
         self.assertFalse(relay.visitor_hash_matches('placeholder-name', 'old-visitor'))
 

@@ -230,6 +230,21 @@ class KeyTests(unittest.TestCase):
         status, _body = self.stack.api('POST', '/api/v1/bindings', {'name': 'acme'})
         self.assertEqual(status, 201, 'an offline freed name must bind again')
 
+    def test_r1_5_an_operators_add_waits_for_the_tunnel_too(self) -> None:
+        # An http-mode tunnel gets no NewUserConn, so that a name bound again while it lives sends its visitors to the old owner.
+        client = self.holder('today')
+        self.assertEqual(self.stack.api('DELETE', '/api/v1/bindings/acme', key=self.key)[0], 204)
+        refused = subprocess.run([sys.executable, str(ROOT / 'relay/relay.py'), 'admin', 'add', 'acme'],
+                                 env=self.stack.env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(refused.returncode, 1, 'a live route must keep the name from a new owner')
+        self.assertIn('acme: taken', refused.stderr)
+        self.assertTrue(refused.stdout == '', 'a refused name must hand out no key')
+        client.stop()
+        self.assertTrue(_wait(lambda: self.stack.dash('/api/proxy/http/acme')[1]['status'] == 'offline', 5))
+        added = json.loads(self.admin('add', 'acme'))
+        self.stack.private.append(added['key'])
+        self.assertEqual(added['name'], 'acme')
+
     def test_r2_4_a_freed_names_sync_record_goes_with_it(self) -> None:
         first = self.holder()
         post = {'client': 'acme-aaaaaaaa-link', 'generation': self.route(self.key)['generation'],
@@ -986,6 +1001,10 @@ def frps_shows_acme_online(path: str, cap: float = 0.5) -> tuple[int, bytes]:
     return 404, b'{}'
 
 
+def frps_cannot_tell(_path: str, cap: float = 0.5) -> tuple[int, bytes]:
+    return 500, b''
+
+
 class FreedNameTests(RelayInProcess):
     """A name's change of owner, at the plugin and the API, with a stand-in for frps's dashboard, so that each step lands
     exactly where a real frps could put it and no test waits for a moment to come. frps asks the plugin before it makes a
@@ -1101,6 +1120,45 @@ class FreedNameTests(RelayInProcess):
         with patch.object(self.relay, '_dash_get', frps_shows_nothing):
             status, route = self.api('GET', ROUTE_PATH, next_owner[0])
         self.assertEqual((status, route['state'], route['generation']), (200, 'empty', 0))
+
+    def operators_add(self) -> tuple[int, str, str]:
+        """(exit code, what it said, what it refused with). What it said holds the key once it adds: never print it."""
+        with redirect_stdout(StringIO()) as said, redirect_stderr(StringIO()) as refusal:
+            code = self.relay.admin(['add', 'acme'])
+        return code, said.getvalue(), refusal.getvalue()
+
+    def assert_operators_add_refused(self, reason: str) -> None:
+        code, said, refusal = self.operators_add()
+        self.assertEqual(code, 1, 'the name must not go to a new owner')
+        self.assertIn(reason, refusal)
+        self.assertTrue(said == '', 'a refused name must hand out no key')
+        self.assertEqual(self.counts(), (0, 0), 'a refused name stores nothing')
+
+    def test_r1_5_an_operators_add_refuses_a_route_frps_shows(self) -> None:
+        self.free_acme()
+        with patch.object(self.relay, '_dash_get', frps_shows_acme_online):
+            self.assert_operators_add_refused('acme: taken')
+
+    def test_r1_5_an_operators_add_refuses_a_route_frps_has_not_shown_yet(self) -> None:
+        with patch.object(self.relay, '_dash_get', frps_shows_nothing):
+            with self.at():
+                self.assert_passed('NewProxy', self.registration())
+                self.free_acme()
+                self.assert_operators_add_refused('acme: taken')
+            with self.at(self.relay.PENDING_S + 1):
+                self.assertEqual(self.operators_add()[0], 0, 'a route frps never showed frees the name after its window')
+
+    def test_r1_5_an_operators_add_refuses_while_frps_cannot_tell(self) -> None:
+        self.free_acme()
+        with patch.object(self.relay, '_dash_get', frps_cannot_tell):
+            self.assert_operators_add_refused('acme: the relay cannot tell')
+
+    def test_r1_5_an_operators_add_of_a_free_name_makes_the_binding(self) -> None:
+        self.free_acme()
+        with patch.object(self.relay, '_dash_get', frps_shows_nothing):
+            code, said, _ = self.operators_add()
+        self.assertEqual(code, 0, 'a free name must bind')
+        self.assertTrue(self.current_hash_matches(json.loads(said)['key']), 'the key it hands out must be the key')
 
     def test_r7_4_an_old_owners_route_is_refused_under_a_new_binding(self) -> None:
         # frps shows the route later than the window allows for, when the name already has its next owner.
