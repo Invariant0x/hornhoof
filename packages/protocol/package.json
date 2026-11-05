@@ -11,6 +11,10 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./approval-policy": {
+      "types": "./dist/approval-policy.d.ts",
+      "default": "./dist/approval-policy.js"
+    },
     "./efforts": {
       "types": "./dist/efforts.d.ts",
       "default": "./dist/efforts.js"

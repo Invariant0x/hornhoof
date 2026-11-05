@@ -1,4 +1,4 @@
-import type { NotificationSource } from '@hornhoof/protocol';
+import type { ApprovalChannel, NotificationSource } from '@hornhoof/protocol';
 import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, max, ne, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach, type Access, type Spot } from '../../auth/access.js';
@@ -1199,18 +1199,33 @@ async function gaveOut(db: Db, task: Task, agentId: string): Promise<boolean> {
 
 /* What an agent asks: words, an approval of an exact commit, or a pick of one of 2 to 4 ways. images: pictures it sent
    with hh-attach, link: where to see the work, topic: what it is about, which says whose decision it is. */
-export type Ask = { kind: 'question' | 'approval' | 'choice'; text: string; commit?: string; images?: string[]; options?: RequestOption[]; link?: string | null; topic?: DecisionTopic };
+export type Ask = {
+  kind: 'question' | 'approval' | 'choice';
+  text: string;
+  commit?: string;
+  /* What an approval a department's policy asks for is about, in place of a commit. */
+  approval?: { channel: ApprovalChannel; kind: string; amount: number | null };
+  images?: string[];
+  options?: RequestOption[];
+  link?: string | null;
+  topic?: DecisionTopic;
+};
 
 /* An approval lets a commit into the release, whatever the agent says it is about. */
-const topicOf = (q: Ask): DecisionTopic | null => (q.kind === 'approval' ? 'release' : (q.topic ?? null));
+const topicOf = (q: Ask): DecisionTopic | null => (q.approval ? 'task' : q.kind === 'approval' ? 'release' : (q.topic ?? null));
+
+/* The agent that holds the task, or any reviewer at its gate, is the one who asks on it. */
+export function mayAsk(task: Task, agentId: string): void {
+  stillOpen(task);
+  if (task.assigneeAgentId !== agentId && !(task.stage > 0 && task.panel.includes(agentId))) throw notYours(task, 'is not with you');
+}
 
 /* The agent that holds the task, or any reviewer at its gate, asks a person and the task waits for the answer. */
 export async function ask(ctx: Live, agentId: string, taskId: string, q: Ask): Promise<Moved & { request: Request }> {
   const task = await loadTask(ctx.db, taskId);
-  stillOpen(task);
-  if (task.assigneeAgentId !== agentId && !(task.stage > 0 && task.panel.includes(agentId))) throw notYours(task, 'is not with you');
+  mayAsk(task, agentId);
   if (!q.text.trim()) throw refuse(400, 'task_invalid', 'Say what you need.');
-  if (q.kind === 'approval' && !COMMIT.test(q.commit ?? '')) throw refuse(400, 'task_invalid', 'An approval names the full 40-character commit.');
+  if (q.kind === 'approval' && !q.approval && !COMMIT.test(q.commit ?? '')) throw refuse(400, 'task_invalid', 'An approval names the full 40-character commit.');
   if (q.kind !== 'approval' && q.commit) throw refuse(400, 'task_invalid', 'Only an approval names a commit; ask for an approval instead.');
   const options = q.kind === 'choice' ? (q.options ?? []) : [];
   if (q.kind === 'choice' && (options.length < 2 || options.length > 4)) throw refuse(400, 'task_invalid', 'A choice offers 2 to 4 ways.');
@@ -1222,7 +1237,20 @@ export async function ask(ctx: Live, agentId: string, taskId: string, q: Ask): P
   const row = await move(ctx, task, { status: 'waiting', silent: 0 }, { kind: 'asked', actor: { agentId }, text: q.text.trim(), data: { kind: q.kind, commit: q.commit ?? null } }, async tx => {
     [request] = await tx
       .insert(requests)
-      .values({ companyId: task.companyId, taskId, agentId, kind: q.kind, text: q.text.trim(), commit: q.commit ?? null, options, link: q.link ?? null, decisionTopic: topicOf(q) })
+      .values({
+        companyId: task.companyId,
+        taskId,
+        agentId,
+        kind: q.kind,
+        text: q.text.trim(),
+        commit: q.commit ?? null,
+        options,
+        link: q.link ?? null,
+        decisionTopic: topicOf(q),
+        approvalChannel: q.approval?.channel ?? null,
+        approvalKind: q.approval?.kind ?? null,
+        approvalAmount: q.approval?.amount ?? null,
+      })
       .returning();
     wakes = await explaining(tx, task, agentId, request!.id);
     await keepWakes(tx, task.companyId, wakes);
@@ -1385,6 +1413,9 @@ const PASSED_OVER = new Set<ErrorReason | undefined>(['request_closed', 'decisio
 /* The person whose answer it is, also when the orchestrator passed it on. */
 const answerer = (personId: string | null, actor: Actor): Actor => (personId ? { personId } : actor);
 
+/* What an approval let through or stopped: its commit, or the channel and kind a department's policy asked it for. */
+const approvedWhat = (r: Pick<Request, 'commit' | 'approvalChannel' | 'approvalKind'>) => r.commit ?? `${r.approvalChannel}, ${r.approvalKind}`;
+
 export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answer, on?: Delegation): Promise<{ request: Request; task: Task; wakes: Wake[] }> {
   const [found] = await ctx.db.select().from(requests).where(eq(requests.id, requestId));
   if (!found) throw refuse(404, 'request_unknown', 'There is no such request.');
@@ -1394,7 +1425,7 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
   const option = found.kind === 'choice' && a.pick !== undefined ? found.options[a.pick] : undefined;
   if (found.kind !== 'choice' && a.pick !== undefined) throw refuse(400, 'task_invalid', 'Only a choice is answered with a pick.');
   if (found.kind === 'approval') {
-    if (a.approve === undefined) throw refuse(400, 'task_invalid', 'Approve or decline this commit.');
+    if (a.approve === undefined) throw refuse(400, 'task_invalid', found.commit ? 'Approve or decline this commit.' : 'Approve or decline this.');
     status = a.approve ? 'approved' : 'declined';
   } else if (found.kind === 'choice') {
     if (!option) throw refuse(400, 'task_invalid', `Pick one of the ${found.options.length} ways.`);
@@ -1406,7 +1437,7 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
   }
   const said =
     found.kind === 'approval'
-      ? `${a.approve ? 'Approved' : 'Declined'} ${found.commit}.${text ? ` ${text}` : ''}`
+      ? `${a.approve ? 'Approved' : 'Declined'} ${approvedWhat(found)}.${text ? ` ${text}` : ''}`
       : option
         ? `Picked ${a.pick! + 1}: ${option.label}.${text ? ` ${text}` : ''}`
         : text || 'Try again.';
@@ -1443,7 +1474,7 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
       const back = await reviewWake(tx, after!);
       wakes.push(...after!.panel.filter(id => id !== found.agentId).map(agentId => ({ agentId, taskId: task.id, ...back })));
     }
-    recordCause(wakes, { kind: 'answered', actor: answerer(answeredBy, actor), text: said, data: { status, commit: found.commit } }, event.id, task);
+    recordCause(wakes, { kind: 'answered', actor: answerer(answeredBy, actor), text: said, data: { status, commit: found.kind === 'approval' ? approvedWhat(found) : found.commit } }, event.id, task);
     await keepWakes(tx, task.companyId, wakes);
     return request;
   });

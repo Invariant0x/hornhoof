@@ -1,11 +1,12 @@
 import type { ScopeKind } from '../db/schema.js';
 import { ApiError } from '../errors.js';
 import type { Access } from './access.js';
-import { decisionPlace, listsPlace, type DecisionSubject } from './decision-owner.js';
+import { decisionPlace, listsPlace, namedOwner, ownerDepartment, type Candidate, type DecisionSubject } from './decision-owner.js';
 
-/* Who may take a decision. The CEO and the CEO's delegate take every one; a department's decision also every active
-   person whose access lists that department or the product it is about. Seeing a decision is a matter of access alone:
-   someone who sees one without this right reads it and cannot take it. */
+/* Who may take a decision. The CEO and the CEO's delegate take every one; a department's owner also its approvals and its
+   own decisions; a department's own decision also every active person whose access lists that department or the product it
+   is about. Seeing a decision is a matter of access alone: someone who sees one without this right reads it and cannot take
+   it. */
 
 export type Decider = { companyId: string; status: 'active' | 'invited' | 'disabled'; scopeKind: ScopeKind; isOwner: boolean; isCeoDelegate: boolean };
 
@@ -15,6 +16,8 @@ export const actsAsCeo = (p: Decider): boolean => p.status === 'active' && (p.is
 export function canDecide(subject: DecisionSubject, person: Decider, access: Access, companyId: string): boolean {
   if (person.companyId !== companyId || person.status !== 'active') return false;
   if (actsAsCeo(person)) return true;
+  const department = ownerDepartment(subject);
+  if (department && access.owns?.has(department)) return true;
   const place = decisionPlace(subject);
   return place !== null && listsPlace(access, place);
 }
@@ -24,14 +27,15 @@ export function requireDecision(subject: DecisionSubject, person: Decider, acces
 }
 
 export const notAllowed = () =>
-  new ApiError(403, 'forbidden', 'This decision is not yours to take. The people of its department, the CEO or the CEO delegate take it.', 'decision_not_allowed');
+  new ApiError(403, 'forbidden', 'This decision is not yours to take. Its department\'s owner or people, the CEO or the CEO delegate take it.', 'decision_not_allowed');
 
-/* Whom people see a decision is for: the department's people with the CEO and the delegate, or the CEO and the delegate.
-   A product's decision is its department's. */
-export type DecidedBy = { kind: 'ceo_and_delegate' | 'department_and_ceo'; departmentId: string | null };
+/* Whom people see a decision is for: the department's people with the CEO and the delegate, its owner with them, or the
+   CEO and the delegate. A product's decision is its department's. */
+export type DecidedBy = { kind: 'ceo_and_delegate' | 'department_and_ceo' | 'owner_and_ceo'; departmentId: string | null };
 
-export function decidedBy(subject: DecisionSubject): DecidedBy {
+export function decidedBy(subject: DecisionSubject, people: readonly Candidate[] = []): DecidedBy {
   const place = decisionPlace(subject);
-  if (!place) return { kind: 'ceo_and_delegate', departmentId: null };
-  return { kind: 'department_and_ceo', departmentId: place.parentId ?? place.departmentId };
+  if (place) return { kind: 'department_and_ceo', departmentId: place.parentId ?? place.departmentId };
+  if (namedOwner(subject, people)) return { kind: 'owner_and_ceo', departmentId: ownerDepartment(subject) };
+  return { kind: 'ceo_and_delegate', departmentId: null };
 }

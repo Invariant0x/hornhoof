@@ -5,8 +5,9 @@ import { departments, people, personAccess, teams } from '../db/schema.js';
 import { ApiError } from '../errors.js';
 import type { Person } from './session.js';
 
-/* What a person reaches: the whole company, or the departments and teams listed for them. */
-export type Access = { whole: boolean; departments: ReadonlySet<string>; teams: ReadonlySet<string> };
+/* What a person reaches: the whole company, or the departments and teams listed for them. owns: the departments the CEO
+   named them owner of and they still have access to; left out when there are none. */
+export type Access = { whole: boolean; departments: ReadonlySet<string>; teams: ReadonlySet<string>; owns?: ReadonlySet<string> };
 
 /* Where something sits: its department, the department that holds it when it is a product, and its team. */
 export type Spot = { departmentId: string | null; teamId?: string | null; parentId?: string | null };
@@ -33,14 +34,27 @@ export async function agentSpot(db: Db, agent: { departmentId: string | null; pr
   return { departmentId: agent.departmentId, parentId: dept?.parentId ?? null, teamId: agent.teamId };
 }
 
+/* Whether a person has access to the department itself, which owning it takes: a team in it or a product of it is not enough. */
+export const listsDepartment = (access: Access, departmentId: string): boolean => access.whole || access.departments.has(departmentId);
+
+/* Access with the departments this person is named owner of. Someone who lost access to a department owns it no more, at once. */
+export function withOwned(access: Access, named: readonly string[]): Access {
+  const owns = named.filter(id => listsDepartment(access, id));
+  return owns.length ? { ...access, owns: new Set(owns) } : access;
+}
+
 export async function accessOf(db: Pick<Db, 'select'>, person: Pick<Person, 'id' | 'scopeKind'>): Promise<Access> {
-  if (person.scopeKind === 'company') return WHOLE;
+  const named = (await db.select({ id: departments.id }).from(departments).where(eq(departments.ownerPersonId, person.id))).map(d => d.id);
+  if (person.scopeKind === 'company') return withOwned(WHOLE, named);
   const rows = await db.select().from(personAccess).where(eq(personAccess.personId, person.id));
-  return {
-    whole: false,
-    departments: new Set(rows.flatMap(r => (r.departmentId ? [r.departmentId] : []))),
-    teams: new Set(rows.flatMap(r => (r.teamId ? [r.teamId] : []))),
-  };
+  return withOwned(
+    {
+      whole: false,
+      departments: new Set(rows.flatMap(r => (r.departmentId ? [r.departmentId] : []))),
+      teams: new Set(rows.flatMap(r => (r.teamId ? [r.teamId] : []))),
+    },
+    named,
+  );
 }
 
 export function canReach(access: Access, spot: Spot): boolean {

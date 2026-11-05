@@ -1,9 +1,9 @@
 import type { ExternalWait } from '@hornhoof/protocol/waits';
-import { COMPANY_TEMPLATE_KEYS, CONNECTION_ENDS, CRED_KINDS, MACHINE_KINDS, RUN_KINDS, TEMPLATE_KEYS, type Account, type Boot, type Failure, type Limits, type ModelOption, type NodeExit, type NodeReconnect } from '@hornhoof/protocol';
+import { APPROVAL_CHANNELS, APPROVAL_MODES, COMPANY_TEMPLATE_KEYS, CONNECTION_ENDS, CRED_KINDS, MACHINE_KINDS, RUN_KINDS, TEMPLATE_KEYS, type Account, type Boot, type Failure, type Limits, type ModelOption, type NodeExit, type NodeReconnect } from '@hornhoof/protocol';
 import type { OperatorError, OperatorQuestion, OperatorReason } from '@hornhoof/protocol/program-operator';
 import type { MessageParty } from '../modules/events/parties.js';
 import { sql } from 'drizzle-orm';
-import { bigint, bigserial, boolean, check, customType, index, integer, jsonb, pgTable, primaryKey, real, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
+import { bigint, bigserial, boolean, check, customType, doublePrecision, index, integer, jsonb, pgTable, primaryKey, real, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
 
 const id = () => uuid('id').primaryKey().defaultRandom();
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
@@ -90,8 +90,30 @@ export const departments = pgTable('departments', {
   repoAuthorEmail: text('repo_author_email'),
   /* The free memory, in GB, a machine needs to take one of the repository's test runs; none takes the default. */
   repoTestMemoryGb: integer('repo_test_memory_gb'),
+  /* The person the CEO named to take the department's approvals and set its policy; none means the CEO. Only the CEO sets it,
+     and it is never worked out from who has access. It counts only while that person is active and still has access. */
+  ownerPersonId: uuid('owner_person_id').references((): AnyPgColumn => people.id),
   createdAt: createdAt(),
-});
+}, t => [index('departments_owner_person_id').on(t.ownerPersonId)]);
+
+/* How a department's approvals go, one rule per channel; a channel with no rule asks every time. The rules belong to the
+   department, not to its owner, so they stay when the owner changes or goes. */
+export const approvalPolicies = pgTable(
+  'approval_policies',
+  {
+    id: id(),
+    companyId: companyId(),
+    departmentId: uuid('department_id').notNull().references(() => departments.id, { onDelete: 'cascade' }),
+    channel: text('channel', { enum: APPROVAL_CHANNELS }).notNull(),
+    mode: text('mode', { enum: APPROVAL_MODES }).notNull(),
+    limitAmount: doublePrecision('limit_amount'),
+    limitUnit: text('limit_unit'),
+    /* The person whose rule it is; when the orchestrator set it, the person its turn answered. */
+    updatedBy: uuid('updated_by').references(() => people.id),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  t => [unique('approval_policies_channel').on(t.departmentId, t.channel), check('approval_policies_limit', sql`(${t.mode} = 'within_limits') = (${t.limitAmount} IS NOT NULL)`)],
+);
 
 export const teams = pgTable('teams', {
   id: id(),
@@ -660,10 +682,19 @@ export const requests = pgTable(
     explained: text('explained'),
     /* What it is about; none on requests from before topics, which go to the CEO. */
     decisionTopic: text('decision_topic', { enum: DECISION_TOPICS }),
+    /* What an approval a department's policy asked for is about: its channel, the kind of work and how much, as the agent said.
+       An approval either names a commit or says this. */
+    approvalChannel: text('approval_channel', { enum: APPROVAL_CHANNELS }),
+    approvalKind: text('approval_kind'),
+    approvalAmount: doublePrecision('approval_amount'),
     createdAt: createdAt(),
     answeredAt: timestamp('answered_at', { withTimezone: true }),
   },
-  t => [index('requests_task_id').on(t.taskId), check('requests_approval_commit', sql`${t.kind} <> 'approval' OR ${t.commit} IS NOT NULL`)],
+  t => [
+    index('requests_task_id').on(t.taskId),
+    index('requests_approved_kinds').on(t.companyId, t.approvalChannel, t.approvalKind).where(sql`${t.status} = 'approved' AND ${t.approvalChannel} IS NOT NULL`),
+    check('requests_approval_commit', sql`${t.kind} <> 'approval' OR ${t.commit} IS NOT NULL OR ${t.approvalChannel} IS NOT NULL`),
+  ],
 );
 
 /* A picture an agent sent from its turn to show its work. People see it once a request of that agent shows it. Or a file

@@ -19,6 +19,66 @@ async function migrate(db: PgliteDatabase, config: MigrationConfig): Promise<voi
   await applyMissingMigrations(db, config);
 }
 
+describe('department owner and approval policy migration', () => {
+  const FORWARD = '0060_limits_freshness';
+
+  it('leaves every department without an owner and every company without rules, with nobody given anything', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo(FORWARD) });
+    const company = (await db.execute<{ id: string }>(sql`insert into companies (name) values ('Acme') returning id`)).rows[0]!.id;
+    await db.execute(sql`insert into people (company_id, name, email, status, scope_kind, is_owner) values (${company}, 'Ivan', 'ivan@acme.example', 'active', 'company', true)`);
+    const person = (await db.execute<{ id: string }>(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Dana', 'dana@acme.example', 'active', 'listed') returning id`)).rows[0]!.id;
+    const dept = (await db.execute<{ id: string }>(sql`insert into departments (company_id, template_key, role_code) values (${company}, 'development', 'DEV') returning id`)).rows[0]!.id;
+    await db.execute(sql`insert into person_access (company_id, person_id, department_id) values (${company}, ${person}, ${dept})`);
+    const rows = async (table: string) => (await db.execute(sql.raw(`select to_jsonb(t) - 'owner_person_id' as data from ${table} t order by id`))).rows;
+    const before = { departments: await rows('departments'), people: await rows('people'), access: await rows('person_access') };
+
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+
+    expect({ departments: await rows('departments'), people: await rows('people'), access: await rows('person_access') }).toEqual(before);
+    expect((await db.execute(sql`select owner_person_id from departments`)).rows).toEqual([{ owner_person_id: null }]);
+    expect((await db.execute(sql`select count(*)::int as n from approval_policies`)).rows).toEqual([{ n: 0 }]);
+  });
+
+  it('keeps the approvals already asked as they are, and still refuses an approval that says nothing of what it approves', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo(FORWARD) });
+    const company = (await db.execute<{ id: string }>(sql`insert into companies (name) values ('Acme') returning id`)).rows[0]!.id;
+    const owner = (await db.execute<{ id: string }>(sql`insert into people (company_id, name, email, status, scope_kind, is_owner) values (${company}, 'Ivan', 'ivan@acme.example', 'active', 'company', true) returning id`)).rows[0]!.id;
+    const sub = (await db.execute<{ id: string }>(sql`insert into subscriptions (company_id, provider, kind, label, owner_person_id, status) values (${company}, 'codex', 'personal', 'Plan', ${owner}, 'ready') returning id`)).rows[0]!.id;
+    const dept = (await db.execute<{ id: string }>(sql`insert into departments (company_id, template_key, role_code) values (${company}, 'development', 'DEV') returning id`)).rows[0]!.id;
+    const agent = (await db.execute<{ id: string }>(sql`insert into agents (company_id, kind, name, department_id, model, subscription_id) values (${company}, 'worker', 'Bruno', ${dept}, '', ${sub}) returning id`)).rows[0]!.id;
+    const task = (await db.execute<{ id: string }>(sql`insert into tasks (company_id, number, title, department_id, status) values (${company}, 1, 'Checkout', ${dept}, 'waiting') returning id`)).rows[0]!.id;
+    const commit = 'a'.repeat(40);
+    await db.execute(sql`insert into requests (company_id, task_id, agent_id, kind, text, commit, decision_topic) values (${company}, ${task}, ${agent}, 'approval', 'Merge?', ${commit}, 'release')`);
+
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+
+    expect((await db.execute(sql`select kind, commit, decision_topic, status, approval_channel, approval_kind, approval_amount from requests`)).rows).toEqual([
+      { kind: 'approval', commit, decision_topic: 'release', status: 'open', approval_channel: null, approval_kind: null, approval_amount: null },
+    ]);
+    await expect(db.execute(sql`insert into requests (company_id, task_id, agent_id, kind, text) values (${company}, ${task}, ${agent}, 'approval', 'Nothing named')`)).rejects.toThrow();
+    await db.execute(sql`insert into requests (company_id, task_id, agent_id, kind, text, approval_channel, approval_kind) values (${company}, ${task}, ${agent}, 'approval', 'Buy ads', 'spend', 'ads')`);
+  });
+
+  it('refuses a stored rule that would let everything through: a mode of limits with no limit', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    const company = (await db.execute<{ id: string }>(sql`insert into companies (name) values ('Acme') returning id`)).rows[0]!.id;
+    const dept = (await db.execute<{ id: string }>(sql`insert into departments (company_id, template_key, role_code) values (${company}, 'development', 'DEV') returning id`)).rows[0]!.id;
+    await expect(db.execute(sql`insert into approval_policies (company_id, department_id, channel, mode) values (${company}, ${dept}, 'spend', 'within_limits')`)).rejects.toThrow();
+    await expect(db.execute(sql`insert into approval_policies (company_id, department_id, channel, mode, limit_amount) values (${company}, ${dept}, 'spend', 'every', 5)`)).rejects.toThrow();
+    await db.execute(sql`insert into approval_policies (company_id, department_id, channel, mode, limit_amount) values (${company}, ${dept}, 'spend', 'within_limits', 5)`);
+  });
+});
+
 describe('limits freshness migration', () => {
   it('keeps an old limits snapshot and leaves its unknown timestamp null on upgrade', async () => {
     const client = new PGlite();
