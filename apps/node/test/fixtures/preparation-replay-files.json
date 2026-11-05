@@ -1,7 +1,11 @@
 [
   {
     "path": ".hornhoof/test-environment.json",
-    "sha256": "5e2054141128ce3168ea2de723646cd57369212ad2f4024ff967da6e3c5dd6e9"
+    "sha256": "60d3db5cb557b75f2562e60ba0aafeefc6406494a8be80fadc9237bd31e4cdb3"
+  },
+  {
+    "path": "build-note.txt",
+    "sha256": "fc36631a471ccfad7b944e9bacaba3a62aaac337e78dea0b280da8b40b1ecd01"
   },
   {
     "path": "check.fixture",

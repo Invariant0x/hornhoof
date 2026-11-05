@@ -51,7 +51,8 @@
       "serviceIds": [],
       "inputs": [
         "protocol-source.txt",
-        "prepare.cjs"
+        "prepare.cjs",
+        "build-note.txt"
       ],
       "commands": [
         {
