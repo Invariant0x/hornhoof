@@ -2,7 +2,7 @@ import { combineReport, reportDelay } from './report-notices.js';
 import type { MachineDrain, Notification } from '@hornhoof/protocol';
 import type { MessageParty } from '../events/parties.js';
 import { currentLimits, effortFor, effortsOf, MAX_INSTRUCTIONS, modelsFor, OLD_NODE_INSTRUCTIONS, ORCHESTRATOR_EFFORT, UNHEARD_MS, type Limits } from '@hornhoof/protocol';
-import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lte, ne, or, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, lte, ne, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { loggable } from '../../errors.js';
@@ -493,9 +493,8 @@ async function placement(ctx: Ctx, agent: { id: string; nodeId: string | null; r
   const held = (node: NodeIdentity) => nodeHeldFrom(ctx, node, agent.roleKey);
   if (sub.kind === 'api_key') return ctx.hub.isReady(BUILTIN) && !held(BUILTIN) ? { node: BUILTIN, nodeId: null, moves: agent.nodeId !== null } : null;
   const all = await planNodes(ctx.db, [sub.id]);
-  const free = all.filter(n => !held(nodeIdentity(n.id)));
-  const able = free.filter(n => takesTurns(ctx, n, need));
-  const stays = free.some(n => n.id === agent.nodeId) && (await holdsWork(ctx, agent.id));
+  const able = all.filter(n => !held(nodeIdentity(n.id)) && takesTurns(ctx, n, need));
+  const stays = all.some(n => n.id === agent.nodeId) && (await holdsWork(ctx, agent.id));
   const pick = able.find(n => n.id === agent.nodeId) ?? (stays ? null : await freest(ctx, able));
   return pick ? { node: nodeIdentity(pick.id), nodeId: pick.id, moves: pick.id !== agent.nodeId } : null;
 }
@@ -656,6 +655,27 @@ async function waitsForRetry(ctx: Ctx, agentId: string): Promise<boolean> {
   return true;
 }
 
+/* The turn that may go out now, if any, with the line woken for what comes next: the plan's limit or share starting over,
+   or a turn that may go by then and waits for its time. A turn that is due and may not go sets no wake, which would only
+   send the line round again at once. */
+async function dueTurn(ctx: Ctx, agent: { id: string; switchedOffAt: Date | null }, sub: { limits: Limits | null; limitsUpdatedAt: Date | null; budget: number | null }) {
+  /* Real turns wait for the limit; an empty start can still open the saved program. Past the share set for tasks only
+     task turns wait. */
+  const until = limitUntil(sub.limits, sub.limitsUpdatedAt);
+  const spent = budgetUntil(sub.limits, sub.budget, sub.limitsUpdatedAt);
+  const reset = until ?? spent;
+  if (reset) pumpAt(ctx, agent.id, reset);
+  /* Switched off, it still answers people who write to it; its task turns wait until it is on. */
+  const mayGo = and(conversationOf(agent.id), eq(jobs.status, 'queued'), until ? programStart : undefined, agent.switchedOffAt || spent ? isNull(jobs.taskId) : undefined);
+  const now = new Date(Date.now());
+  const [job] = await ctx.db.select().from(jobs).where(and(mayGo, or(isNull(jobs.notBefore), lte(jobs.notBefore, now)))).orderBy(desc(sql`${jobs.notBefore} is not null`), asc(jobs.createdAt)).limit(1);
+  if (job) return job;
+  const [later] = await ctx.db.select({ at: jobs.notBefore }).from(jobs).where(and(mayGo, gt(jobs.notBefore, now))).orderBy(asc(jobs.notBefore)).limit(1);
+  /* The earlier wake stands; the one at the reset is set again when the earlier one comes. */
+  if (later?.at && (!reset || +later.at < Date.parse(reset))) pumpAt(ctx, agent.id, later.at.toISOString(), 0);
+  return null;
+}
+
 async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const { db } = ctx;
   if (await operatorRecoveryHolds(ctx, agentId)) return;
@@ -668,24 +688,8 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   /* An update waits for the turns that run: new ones start after it, the orchestrator's go on. */
   if (agent.kind !== 'orchestrator' && turnsHeld(ctx, agent.companyId)) return;
   if (await waitsForRetry(ctx, agentId)) return;
-  /* Real turns wait for the limit; an empty start can still open the saved program. Past the share set for tasks only
-     task turns wait. */
-  const until = limitUntil(sub.limits, sub.limitsUpdatedAt);
-  const spent = budgetUntil(sub.limits, sub.budget, sub.limitsUpdatedAt);
-  if (until ?? spent) pumpAt(ctx, agentId, (until ?? spent)!);
-  /* Switched off, it still answers people who write to it; its task turns wait until it is on. */
-  const [job] = await db
-    .select()
-    .from(jobs)
-    .where(and(conversationOf(agentId), eq(jobs.status, 'queued'), or(isNull(jobs.notBefore), lte(jobs.notBefore, new Date(Date.now()))), until ? programStart : undefined, agent.switchedOffAt || spent ? isNull(jobs.taskId) : undefined))
-    .orderBy(desc(sql`${jobs.notBefore} is not null`), asc(jobs.createdAt))
-    .limit(1);
-  if (!job) {
-    const [later] = await db.select({ at: jobs.notBefore }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'queued'), isNotNull(jobs.notBefore))).orderBy(asc(jobs.notBefore)).limit(1);
-    if (later?.at) pumpAt(ctx, agentId, later.at.toISOString(), 0);
-    return;
-  }
-  if (job.notBefore && +job.notBefore > Date.now()) return pumpAt(ctx, agentId, job.notBefore.toISOString(), 0);
+  const job = await dueTurn(ctx, agent, sub);
+  if (!job) return;
   if (await heldBack(ctx, job)) return sendNext(ctx, agentId);
   const repo = await repoFor(ctx, agent);
   const place = await placement(ctx, agent, sub, repo ? REPOSITORY_NODE : CONVERSATION_NODE);
