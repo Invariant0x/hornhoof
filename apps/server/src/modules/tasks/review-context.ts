@@ -23,6 +23,7 @@ export const ReviewRecord = z.object({
   status: z.enum(['pinned', 'degraded']), reason: z.string().nullable(),
   gateCounts: z.object({ source: z.literal('review-lifecycle').default('review-lifecycle'), passed: z.number().int().nonnegative(), returned: z.number().int().nonnegative() }),
   quality: QualityEvidence.default(unavailableQuality),
+  qualityTaskId: z.string().uuid().optional(),
   runs: z.array(Run), source: Source.nullable().default(null),
 });
 export type Review = z.infer<typeof ReviewRecord>;
@@ -63,7 +64,7 @@ async function authorRuns(db: Store, task: Task, commit: string | null, branch?:
 
 export async function turnReviewContext(db: Tx, task: Task, head: string, branch: string, comparison: CompareResult): Promise<Review> {
   const pin: Pin = comparison.complete ? { commit: comparison.headSha, branch, status: 'pinned', reason: null } : { ...UNAVAILABLE, branch, reason: 'comparison-unavailable' };
-  return { ...pin, revision: randomUUID(), authorId: head, authorVendor: await authorVendor(db, head), gateCounts: { source: 'review-lifecycle', passed: 0, returned: 0 }, quality: await authorQuality(db, task.id, pin.commit), runs: await authorRuns(db, task, pin.commit, branch), source: null };
+  return { ...pin, revision: randomUUID(), authorId: head, authorVendor: await authorVendor(db, head), gateCounts: { source: 'review-lifecycle', passed: 0, returned: 0 }, qualityTaskId: task.id, quality: await authorQuality(db, task.id, pin.commit), runs: await authorRuns(db, task, pin.commit, branch), source: null };
 }
 
 async function readPin(read: Ctx['readCommit'], repo: RepoAddress, task: number): Promise<Pin> {
@@ -94,7 +95,13 @@ export async function captureReview(ctx: Reader, task: Task, input?: z.infer<typ
   const found = await repoAt({ db: ctx.db, config: ctx.config }, [task.productId, task.departmentId]);
   if (!found) return null;
   const pin = await readPin(ctx.readCommit, found.repo, task.number);
-  return { ...pin, revision: randomUUID(), authorId: task.executorAgentId, authorVendor: await authorVendor(ctx.db, task.executorAgentId), gateCounts: await gateCounts(ctx.db, task.id), quality: await authorQuality(ctx.db, task.id, pin.commit), runs: await authorRuns(ctx.db, task, pin.commit), source: await sourceAt(ctx, found.repo, pin.commit, input) };
+  return { ...pin, revision: randomUUID(), authorId: task.executorAgentId, authorVendor: await authorVendor(ctx.db, task.executorAgentId), gateCounts: await gateCounts(ctx.db, task.id), qualityTaskId: task.id, quality: await authorQuality(ctx.db, task.id, pin.commit), runs: await authorRuns(ctx.db, task, pin.commit), source: await sourceAt(ctx, found.repo, pin.commit, input) };
+}
+
+/* Keep immutable submission facts separate from the consumer's current receipt validation. */
+export async function visibleReview(db: Store, taskId: string, review: Review): Promise<Review & { qualityAtSubmission: Review['quality'] }> {
+  const sourceId = review.qualityTaskId ?? review.quality.record?.taskId ?? taskId;
+  return { ...review, qualityAtSubmission: review.quality, quality: await authorQuality(db, sourceId, review.commit) };
 }
 
 /* Event records, rather than a live branch lookup, define what a reviewer was assigned. */

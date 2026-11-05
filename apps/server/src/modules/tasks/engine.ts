@@ -20,7 +20,7 @@ import { authorVendor, captureReview, reviewContext, reviewVendor, turnReviewCon
 import { degradedReviewNotes, turnReviewPlan, type Plan } from './review-plan.js';
 import { mechanicalVerdict } from './review-findings.js';
 import { verdictReview, type ReviewVerdict } from './review-verdict.js';
-import { prepareFixReviews } from './review-fixes.js';
+import { pendingFixReviews, prepareFixReviews } from './review-fixes.js';
 
 export type Task = typeof tasks.$inferSelect;
 export type Request = typeof requests.$inferSelect;
@@ -759,7 +759,14 @@ async function skipGate(db: Db | Tx, task: Task, at: number, from: number, hasFi
    nor one whose role a gate before it has, so the task goes on to the next one, and past the last it is done. While nobody of the role who is on can check it, it
    waits with whoever gave it out. findings: what each reviewer sent the work back from this gate for, in the last round;
    those reviewers check their own fixes. */
-async function atGate(db: Db | Tx, task: Task, from: number, findings = new Map<string, string>(), strictAgain = false): Promise<{ set: Partial<Task>; wakes: Wake[] }> {
+async function atGate(db: Db | Tx, task: Task, from: number, findings = new Map<string, string>(), strictAgain = false): Promise<GateMove> {
+  const fixes = strictAgain ? [] : await pendingFixReviews(db, task, from);
+  const original = fixes.length ? new Map(fixes.map(fix => [fix.reviewerId, 'Check only your original blocking finding IDs in the pinned fix range.'])) : findings;
+  const gate = await gateForFindings(db, task, from, original, strictAgain || fixes.length > 0);
+  return { ...gate, wakes: fixWakes(gate.wakes, fixes) };
+}
+
+async function gateForFindings(db: Db | Tx, task: Task, from: number, findings: Map<string, string>, strictAgain: boolean): Promise<GateMove> {
   let stage = from;
   /* Work sent back from a gate goes back to it, to those who sent it back. */
   while (task.gates[stage - 1] && await skipGate(db, task, stage, from, findings.size > 0, strictAgain)) stage++;
@@ -771,13 +778,18 @@ async function atGate(db: Db | Tx, task: Task, from: number, findings = new Map<
   const picked = await panelFor(db, task, stage, again, false, strictAgain);
   const panel = strictAgain && picked.panel.length !== again.length ? [] : picked.panel;
   const idle = picked.idle;
-  if (panel.length) {
-    const wakes = panel.map(agentId => ({ agentId, taskId: task.id, why: 'review' as const, ...(again.includes(agentId) ? { text: findings.get(agentId)! } : {}) }));
-    return { set: { status: 'review', stage, panel, silent: 0, assigneeAgentId: panel[0]! }, wakes };
-  }
+  return panel.length ? readyGate(task, stage, panel, findings) : waitingGate(db, task, stage, idle, strictAgain);
+}
+
+function readyGate(task: Task, stage: number, panel: string[], findings: Map<string, string>): GateMove {
+  const wakes = panel.map(agentId => ({ agentId, taskId: task.id, why: 'review' as const, ...(findings.has(agentId) ? { text: findings.get(agentId)! } : {}) }));
+  return { set: { status: 'review', stage, panel, silent: 0, assigneeAgentId: panel[0]! }, wakes };
+}
+
+async function waitingGate(db: Db | Tx, task: Task, stage: number, idle: { id: string; name: string }[], strictAgain: boolean): Promise<GateMove> {
   const [lead] = await db.select({ name: agents.name, roleKey: agents.roleKey }).from(agents).where(eq(agents.id, task.gates[stage - 1]!));
   const who = lead?.roleKey ?? lead?.name ?? 'its reviewer';
-  const text = idle.length
+  const text = strictAgain ? `The original finding reviewer at gate ${stage} (${who}) is unavailable. The fix check stays blocked; another reviewer cannot silently replace it. Restore the original reviewer or ask the head to settle replacement under the review policy.` : idle.length
     ? `${idle.map(a => a.name).join(', ')} ${idle.length === 1 ? 'has' : 'have'} no subscription to run on, so gate ${stage} (${who}) cannot check it. Give them one on their card and then give the task its gates again with update_task, switch them off, or give it other gates.`
     : `Nobody who can check it at gate ${stage} (${who}) is on. Give it other gates with update_task, or tell the CEO it waits for one of them.`;
   return { set: { status: 'review', stage, panel: [], silent: 0, assigneeAgentId: task.createdByAgentId }, wakes: giver(task, 'switched', undefined, text) };
@@ -1093,6 +1105,15 @@ async function releaseGateQuestions(ctx: Live, n: Note, agent: Leaver, task: Tas
 /* The agent leaves the panel of a task's current gate; null when it is not on the panel. */
 async function leaveGate(ctx: Live, n: Note, agent: Leaver, task: Task, wakes: Wake[] = []): Promise<{ wakes: Wake[]; closed: Task | null } | null> {
   if (task.stage < 1 || !task.panel.includes(agent.id)) return null;
+  if ((await pendingFixReviews(ctx.db, task, task.stage)).some(fix => fix.reviewerId === agent.id)) {
+    const gate = await atGate(ctx.db, task, task.stage);
+    await move(ctx, task, gate.set, n, undefined, gate.wakes);
+    return { wakes: gate.wakes, closed: null };
+  }
+  return leaveOrdinaryGate(ctx, n, agent, task, wakes);
+}
+
+async function leaveOrdinaryGate(ctx: Live, n: Note, agent: Leaver, task: Task, wakes: Wake[]): Promise<{ wakes: Wake[]; closed: Task | null } | null> {
   const panel = task.panel.filter(id => id !== agent.id);
   /* Someone else at the gate asked a person, so someone is left to decide it. */
   if (task.status === 'waiting' && (!panel.length || (await asked(ctx.db, task, agent.id)))) return null;

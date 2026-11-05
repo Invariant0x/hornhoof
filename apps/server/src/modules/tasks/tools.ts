@@ -20,9 +20,10 @@ import { WaitInput, waitFor } from './external-wait.js';
 import { pipelineReport } from './pipeline-report.js';
 import { commitProof, proofLine } from '../testruns/commit-proof.js';
 import { keptEvidence, noProofNote, taskEvidence } from '../testruns/evidence.js';
-import { ReviewSha, ReviewSubmission } from './review-context.js';
+import { reviewContext, ReviewSha, ReviewSubmission } from './review-context.js';
 import { pipelineFindings, reviewDetails } from './review-details.js';
 import { ConfirmationInput, confirmFinding, IssueInput } from './review-findings.js';
+import { bindReviewEvidence } from './review-verdict.js';
 
 export type ToolJob = { id: string; companyId: string; agentId: string; agentKind: 'orchestrator' | 'head' | 'worker' };
 type Agent = typeof agents.$inferSelect;
@@ -480,7 +481,8 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         run(async () => {
           const { task } = await find(ref);
           plain(task, why);
-          const evidence = await taskEvidence(ctx, task);
+          const review = await reviewContext(ctx.db, task.id);
+          const evidence = bindReviewEvidence(await taskEvidence(ctx, task), review?.commit ?? null);
           const moved = await verdict(ctx, job.agentId, task.id, { pass, comment: why, findings, reviewedCommit, issues, evidence: keptEvidence(evidence) });
           return { text: `Recorded. ${await where(moved.task)}${noProofNote(evidence, pass)}`, moved };
         }),

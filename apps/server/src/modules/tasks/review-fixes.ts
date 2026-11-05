@@ -1,23 +1,28 @@
-import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { taskEvents } from '../../db/schema.js';
 import { repoAt } from '../departments/repository.js';
 import type { Task, Tx } from './engine.js';
 import { exactComparison, ReviewRecord, ReviewSha, type Review } from './review-context.js';
 import { findingsOf, reviewEvents, type Finding } from './review-findings.js';
 
-const FixReview = z.object({ reviewerId: z.string(), revision: z.string(), reviewedCommit: ReviewSha, fixCommit: ReviewSha, findingIds: z.array(z.string()), paths: z.array(z.string()), status: z.enum(['ready', 'degraded']), reason: z.string().nullable() });
+const FixReview = z.object({ reviewerId: z.string(), stage: z.number().int().positive().default(1), revision: z.string(), reviewedCommit: ReviewSha, fixCommit: ReviewSha, findingIds: z.array(z.string()), paths: z.array(z.string()), status: z.enum(['ready', 'degraded']), reason: z.string().nullable() });
 export type Fix = z.infer<typeof FixReview>;
 type Live = Pick<Ctx, 'db'> & Partial<Pick<Ctx, 'config' | 'readCompare'>>;
 
 const eligible = (finding: Finding): boolean => finding.blocking && ['security', 'data', 'spec'].includes(finding.category);
 
 export async function fixReviews(db: Ctx['db'] | Tx, taskId: string): Promise<Fix[]> {
-  const rows = await db.select({ data: taskEvents.data }).from(taskEvents).where(eq(taskEvents.taskId, taskId)).orderBy(taskEvents.id);
-  const latest = rows.filter(row => 'fixReviews' in row.data).at(-1);
+  const latest = (await reviewEvents(db, [taskId])).filter(row => row.kind === 'submitted').at(-1);
   const parsed = z.array(FixReview).safeParse(latest?.data.fixReviews);
   return parsed.success ? parsed.data : [];
+}
+
+/* Automatic gate changes retain the submission's original reviewers, including those currently unavailable. */
+export async function pendingFixReviews(db: Ctx['db'] | Tx, task: Task, stage: number): Promise<Fix[]> {
+  const events = await reviewEvents(db, [task.id]);
+  const submission = events.filter(event => event.kind === 'submitted').at(-1);
+  const spoken = new Set(events.filter(event => event.kind === 'verdict' && event.id > (submission?.id ?? Infinity) && event.data.stage === stage && event.data.round === task.bounces).map(event => event.agentId));
+  return (await fixReviews(db, task.id)).filter(fix => fix.stage === stage && !spoken.has(fix.reviewerId));
 }
 
 async function fixRange(ctx: Live, task: Task, fix: Fix): Promise<Fix> {
@@ -44,7 +49,7 @@ function pendingFix(event: Event, issues: Finding[], commit: string): Fix | null
   if (!event.agentId || !review.success || !review.data.commit) return null;
   const own = ownFindings(event, issues, review.data.revision);
   if (!own.length) return null;
-  return { reviewerId: event.agentId, revision: review.data.revision, reviewedCommit: review.data.commit, fixCommit: commit, findingIds: own.map(issue => issue.findingId), paths: [], status: 'degraded', reason: 'fix-comparison-unavailable' };
+  return { reviewerId: event.agentId, stage: Number(event.data.stage), revision: review.data.revision, reviewedCommit: review.data.commit, fixCommit: commit, findingIds: own.map(issue => issue.findingId), paths: [], status: 'degraded', reason: 'fix-comparison-unavailable' };
 }
 
 /* The latest actual look pins the next range; unresolved findings keep their original identity. */

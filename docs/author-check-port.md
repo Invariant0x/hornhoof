@@ -15,6 +15,8 @@ The port derives the company, task author and originating job from protected dat
 
 `authorQuality(db, taskId, commit)` validates the saved record against the protected run, job, task and receipt snapshot. The task MCP response includes it as `review.quality`; source task assignments carry their own `quality`. The result has `status`, `reason`, `record` and `sourceEventId`.
 
+Task reads and verdicts revalidate receipts and authority. They retain the immutable captured value separately as `review.qualityAtSubmission` (also on source task assignments); historical task events are never rewritten. `review.qualityTaskId` identifies the source task for a turn review's quality record. Changed receipts or ownership produce current `unavailable`, even when the submission snapshot recorded `passed`.
+
 Only all six real passed stages, zero exit codes, complete matching receipts and present numbers can produce `passed`. A failed/stopped run, failed phase or CRAP at least 10 cannot pass. Dryer flags remain informational when its phase exited successfully. Missing stages, scope or numbers remain partial. Unknown coverage remains null. A record whose receipts or ownership changed is not accepted as current evidence.
 
 Three families stay separate:

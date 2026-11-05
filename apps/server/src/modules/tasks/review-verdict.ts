@@ -1,11 +1,20 @@
 import type { Db } from '../../db/client.js';
 import { refuse, type Task } from './engine.js';
-import { reviewContext, type Review } from './review-context.js';
+import { reviewContext, visibleReview, type Review } from './review-context.js';
 import { assertReviewVendor, issuesForVerdict, type NewIssue } from './review-findings.js';
 import { fixReviews, type Fix } from './review-fixes.js';
 import { taskReviewPlan, type Plan } from './review-plan.js';
 
-export type ReviewVerdict = { pass: boolean; reviewedCommit?: string; issues?: NewIssue[] };
+export type ReviewVerdict = { pass: boolean; reviewedCommit?: string; issues?: NewIssue[]; evidence?: object[] };
+
+/* Live branch freshness remains a separate fact; it cannot certify a different pinned candidate. */
+export function bindReviewEvidence<T extends object>(runs: T[], commit: string | null): T[] {
+  return runs.map(run => {
+    if (!('proves' in run)) return run;
+    if (commit !== null && 'commitSha' in run && run.commitSha === commit) return run;
+    return { ...run, proves: false, why: `This run does not match the pinned review commit ${commit ?? '(unavailable)'}.` };
+  });
+}
 
 function assertPinnedPass(review: Review | null, pass: boolean): void {
   if (review && pass && !review.commit) throw refuse(400, 'task_invalid', 'The review commit is unavailable; an unpinned PASS cannot certify it.');
@@ -37,5 +46,5 @@ export async function verdictReview(db: Db, task: Task, agentId: string, verdict
   assertFix(fix, verdict);
   const issues = await issuesForVerdict(db, task, agentId, review, plan, verdict.issues ?? [], verdict.pass);
   const resolution = fix ? { [verdict.pass ? 'resolvedFindingIds' : 'unresolvedFindingIds']: fix.findingIds, fixReviews: [fix] } : {};
-  return { ...(review ? { review } : {}), ...(verdict.issues !== undefined ? { issues } : {}), ...resolution };
+  return { ...(review ? { review: await visibleReview(db, task.id, review) } : {}), ...(verdict.evidence ? { evidence: bindReviewEvidence(verdict.evidence, review?.commit ?? null) } : {}), ...(verdict.issues !== undefined ? { issues } : {}), ...resolution };
 }

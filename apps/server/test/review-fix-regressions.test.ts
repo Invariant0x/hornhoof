@@ -99,10 +99,28 @@ describe('the consolidated review fix pass', () => {
     const f = await qualityFixture();
     await f.seed();
     expect((await f.read()).quality.status).toBe('passed');
+    const [original] = await f.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, f.task.id), eq(taskEvents.kind, 'submitted')));
+    const snapshot = original!.data.review as { quality: object; revision: string; gateCounts: object };
+    await f.db.insert(taskEvents).values({ companyId: f.author.companyId, taskId: f.task.id, kind: 'comment', text: 'Review assignment', data: { reviewPlan: { threshold: 800, large: false, integrationReviewerId: null, degraded: [], assignments: [{ reviewerId: f.author.id, taskId: f.task.id, revision: snapshot.revision, authorId: f.author.id, authorVendor: 'claude', baseCommit: null, commit: FIRST, paths: ['logic/totals.ts'], commonContracts: [], runs: [], gateCounts: snapshot.gateCounts, quality: snapshot.quality }] } } });
     await f.db.update(testRuns).set({ status: 'failed' }).where(eq(testRuns.id, f.run.id));
     const visible = await reviewDetails(f.db, f.task.id, f.author.id);
     expect(visible.review!.quality.status).toBe('unavailable');
-    const [original] = await f.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, f.task.id), eq(taskEvents.kind, 'submitted')));
+    expect(visible.review!.qualityAtSubmission.status).toBe('passed');
+    expect(visible.reviewPlan!.assignments[0]!.quality.status).toBe('unavailable');
     expect((original!.data.review as { quality: { status: string } }).quality.status).toBe('passed');
+  });
+
+  it('binds direct engine verdict evidence to the pinned candidate too', async () => {
+    const f = await fixture();
+    await submit(f.ctx, f.author.id, f.task.id, { summary: 'Done', evidence: 'Checks A' });
+    await verdict(f.ctx, f.reviewer.id, f.task.id, { pass: true, comment: 'A', reviewedCommit: FIRST, evidence: [{ run: 2, commitSha: SECOND, proves: true }] });
+    expect((await f.event('verdict')).data.evidence).toEqual([expect.objectContaining({ commitSha: SECOND, proves: false })]);
+  });
+
+  it('rejects blocking findings attached to PASS', async () => {
+    const f = await fixture();
+    await submit(f.ctx, f.author.id, f.task.id, { summary: 'Done', evidence: 'Checks' });
+    await expect(verdict(f.ctx, f.reviewer.id, f.task.id, { pass: true, comment: 'Good', reviewedCommit: FIRST, issues: [problem] })).rejects.toMatchObject({ reason: 'task_invalid' });
+    expect(await f.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, f.task.id), eq(taskEvents.kind, 'verdict')))).toEqual([]);
   });
 });

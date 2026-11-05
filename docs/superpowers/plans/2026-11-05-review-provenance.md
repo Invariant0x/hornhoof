@@ -67,3 +67,10 @@
 - Mechanical changes use server `Wake.mechanical` only for entirely structural mechanical failed verdicts. State retains that flag; task 459 owns its effort consumer. `Wake.again` is explicit and only a qualifying original reviewer fix produces it.
 - Run receipts, quality numbers and review lifecycle counters are separate. Producer 325 owns executing checks. The strict backend writer/reader port and unavailable behavior are documented in `docs/author-check-port.md`; real producer integration and three actual submissions belong to 325/331.
 - Tests cover source task scope, foreign quality provenance, missing stages/coverage, CRAP threshold and a changed newer receipt refusing fallback to an older PASS.
+
+## Consolidated fix pass after independent review
+
+- Submission events own all fix restrictions. One reviewer's verdict cannot hide another's restriction. Automatic gate changes retain pending original reviewers and explicit repeat wakes; an unavailable original blocks the gate, including after another original passed.
+- Both author and head confirmations validate current area ownership under the task lock. The head explicitly permits historical existence confirmation when the original reviewer is off or removed; its stored vendor stays unchanged. This does not allow a replacement fix review or clear a blocker.
+- Verdict evidence is bound to the immutable candidate, while live branch freshness remains separate. Current quality is revalidated on reads and verdicts; the captured quality remains historical.
+- Remote run 113 on c194 failed test types and CRAP; formatter is unavailable. It is not a passed author check. Remote RED 158 on test-only 599df0f3 reproduced eight failures and retained the head-approved historical reviewer case. Only targeted remote checks are authorized for this fix pass; no second independent review or full suite.

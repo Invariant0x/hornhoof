@@ -52,10 +52,14 @@ function scopedIssue(task: Task, agentId: string, review: Review, plan: Plan | n
   return { ...issue, taskId: issue.taskId ?? task.id, findingId: randomUUID(), revision: review.revision, reviewedCommit: review.commit!, authorId: area ? area.authorId : review.authorId, reviewerId: agentId, reviewerVendor };
 }
 
-export async function issuesForVerdict(db: Reader, task: Task, agentId: string, review: Review | null, plan: Plan | null, input: NewIssue[], pass: boolean): Promise<Finding[]> {
-  if (!input.length) return [];
+function assertFindingReview(review: Review | null, pass: boolean, input: NewIssue[]): asserts review is Review & { commit: string } {
   if (!review?.commit) throw refuse(400, 'task_invalid', 'A structured finding needs a pinned review commit.');
   if (pass && input.some(issue => issue.blocking)) throw refuse(400, 'task_invalid', 'A blocking finding cannot accompany PASS.');
+}
+
+export async function issuesForVerdict(db: Reader, task: Task, agentId: string, review: Review | null, plan: Plan | null, input: NewIssue[], pass: boolean): Promise<Finding[]> {
+  if (!input.length) return [];
+  assertFindingReview(review, pass, input);
   const vendor = await authorVendor(db, agentId);
   if (!vendor) throw refuse(400, 'task_invalid', 'A structured finding needs a known reviewer vendor.');
   return input.map(issue => scopedIssue(task, agentId, review, plan, vendor, issue));
@@ -156,8 +160,9 @@ async function confirmationActor(db: Tx, actorId: string, task: Task, area: Task
 }
 
 function assertCurrentProof(area: Task, current: Review | null, issue: Finding, proof: FixProof | null): void {
+  if (area.executorAgentId !== issue.authorId) throw refuse(409, 'task_changed', 'The area author changed. Read its ownership again.');
   if (!proof) return;
-  if (area.version !== proof.version || area.executorAgentId !== issue.authorId || current?.revision !== proof.revision || current.commit !== proof.head) throw refuse(409, 'task_changed', 'The area or its fix revision changed. Read it again.');
+  if (area.version !== proof.version || current?.revision !== proof.revision || current.commit !== proof.head) throw refuse(409, 'task_changed', 'The area or its fix revision changed. Read it again.');
 }
 
 async function recordConfirmation(tx: Tx, task: Task, actorId: string, issue: Finding, input: ConfirmInput, proof: FixProof | null, authority: 'head' | 'author'): Promise<Task> {
