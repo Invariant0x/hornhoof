@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
-import { OPERATOR_CASE_MS, OPERATOR_CELLS_BYTES, OPERATOR_KEY_MS, OPERATOR_MAX_KEYS, OPERATOR_PROTECTED_SCREEN, OPERATOR_SNAPSHOT_MS, OperatorError, OperatorKey, OperatorReason, type OperatorKeyPrepared, type OperatorKeyResult, type OperatorScreen, type OperatorServerMessage } from '@hornhoof/protocol/program-operator';
+import { OPERATOR_CASE_MS, OPERATOR_CELLS_BYTES, OPERATOR_KEY_MS, OPERATOR_MAX_KEYS, OPERATOR_PROTECTED_SCREEN, OPERATOR_SNAPSHOT_MS, OperatorError, OperatorKey, OperatorReason, type OperatorCheck, type OperatorInputLine, type OperatorKeyPrepared, type OperatorKeyResult, type OperatorScreen, type OperatorServerMessage } from '@hornhoof/protocol/program-operator';
 import { z } from 'zod';
 import { HIDDEN, redact, secretForms } from '../redact.js';
 import type { OperatorIdentity } from './operator-observer.js';
@@ -101,6 +101,22 @@ export class OperatorControl {
       if (!captured.pane) return this.noScreen(command, captured.error);
       return this.screenResult(command, current, captured.pane, row.readOnly);
     });
+  }
+
+  /* The screen and the input line as the node stops waiting for a turn's words. It gives no snapshot, so no key follows it. */
+  check(line: (cells: string) => OperatorInputLine): Promise<OperatorCheck> {
+    return this.options.lane(async () => {
+      const { pane } = await this.capturePane();
+      return pane ? { input: line(pane.cells), screen: this.checkScreen(pane) } : { input: 'unknown', screen: null };
+    });
+  }
+
+  /* Masking can make a full pane too long for its frame. The case then goes without its picture. */
+  private checkScreen(pane: Pane): OperatorCheck['screen'] {
+    const display = operatorCells(pane.cells, this.options.secrets());
+    const isProtected = this.protected(this.options.current(), display);
+    const cells = isProtected ? OPERATOR_PROTECTED_SCREEN : display;
+    return Buffer.byteLength(cells) > OPERATOR_CELLS_BYTES ? null : { protected: isProtected, cols: pane.cols, rows: pane.rows, cells };
   }
 
   prepare(command: PrepareCommand): OperatorKeyPrepared {

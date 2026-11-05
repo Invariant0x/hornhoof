@@ -3,8 +3,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
-import { isProgramOwnPrompt, UNHEARD_MS, type AgentEvent, type Failure, type Limits, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
-import type { OperatorDelivery, OperatorQuestion, OperatorServerMessage } from '@hornhoof/protocol/program-operator';
+import { cut, isProgramOwnPrompt, UNHEARD_MS, type AgentEvent, type Failure, type Limits, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
+import type { OperatorDelivery, OperatorInputLine, OperatorQuestion, OperatorServerMessage } from '@hornhoof/protocol/program-operator';
 import { agyRules, COLORS_NOT_TAKEN, colorsNotTaken, pastColors, SETUP_NEEDED } from '../providers/antigravity.js';
 import { claudeEvents, claudeInterrupted } from '../providers/claude.js';
 import type { ProgramRetry } from '@hornhoof/protocol/map';
@@ -18,6 +18,7 @@ import { plainOutput, signalName, type ProgramOutput } from '../program-exit.js'
 import { redact } from '../redact.js';
 import { Bridge, type AgentUrls } from './bridge.js';
 import { atEmptyPrompt, inputOf, withoutDim } from './input.js';
+import { eraseKeys, holdsFoldedPaste, isOwnLeft, leftRef, LeftInputs, typesWords, type OwnLeft } from './left-input.js';
 import { readViewHistory, sendTerminalOutput } from './view-stream.js';
 import { procOwner, type OwnerFactory, type Ownership, type Panes } from './peer.js';
 import { StreamMask } from './mask.js';
@@ -127,6 +128,11 @@ type Agent = {
   saying: Promise<unknown>;
   waitingWords: TurnWords[];
   retainedAssignments?: { jobId: string; text: string; words: TurnWords }[];
+  /* When a person last typed words at the terminal, and when Hornhoof last typed a prompt there. */
+  typedAt?: number | null;
+  pastedAt?: number;
+  /* The prompt of a turn that ended as its program never took it: Hornhoof repeats those words itself. */
+  ownLeft?: OwnLeft | null;
   originalTaken?: { jobId: string; text: string; operatorDelivery?: OperatorDelivery };
   /* The owner's last Enter in a running turn, as Hornhoof tells of it: a prompt the program queues from it, or takes right
      after that turn, opens a turn of theirs. It counts until shortly after that turn ended. */
@@ -224,6 +230,10 @@ type Options = {
   toolsMs?: number;
   /* How long the host waits for the program to take a prompt before it presses Enter again. */
   enterWaitMs?: number;
+  /* How long after a person's last key their words in the input stay untouched, for they may still be writing. */
+  typingQuietMs?: number;
+  /* How long the host waits for Hornhoof to say it keeps words left in the input, before it tells them again. */
+  keptWaitMs?: number;
   /* How often the host observes the program and reports its state again when nothing changed. */
   lookMs?: number;
   reportMs?: number;
@@ -252,6 +262,8 @@ const SETTLE_MS = 3000;
 const LIMITS_WAIT_MS = 10_000;
 /* How long a Claude Code that said it started may take to show its input box. */
 const INPUT_WAIT_MS = 10_000;
+/* How many times the host tries to empty an input before the turn's watch takes over. */
+const ERASE_ROUNDS = 3;
 /* How often the host looks at what the program of a running turn does, besides each time it begins or ends a tool. */
 const LOOK_MS = 5000;
 /* How long agy's list of slash commands takes to catch up with a command's name before the Enter that runs it. */
@@ -259,7 +271,7 @@ const SLASH_MS = 500;
 /* How long a program that just showed its prompt takes before it reads what is typed. */
 const PROMPT_SETTLE_MS = 500;
 /* What the options leave out: how long the host waits for what, and the terminal's size. */
-const DEFAULTS = { readyMs: 120_000, pollMs: 500, openMs: 8000, toolsMs: 15_000, enterWaitMs: 4000, reportMs: REPORT_MS, cols: 160, rows: 48 };
+const DEFAULTS = { readyMs: 120_000, pollMs: 500, openMs: 8000, toolsMs: 15_000, enterWaitMs: 4000, typingQuietMs: 15_000, keptWaitMs: 10_000, reportMs: REPORT_MS, cols: 160, rows: 48 };
 /* The options given, without those set to nothing. */
 const defined = (opts: Options): Partial<Options> => Object.fromEntries(Object.entries(opts).filter(([, value]) => value !== undefined));
 /* When the host last looked at the program, and the tool it ran then. */
@@ -313,6 +325,8 @@ const lasting = (env: Record<string, string> = {}) => Object.fromEntries(Object.
 const needsTools = ({ program, input }: TermJob): boolean => program.kind === 'antigravity' && Boolean(input.tools && input.prompt);
 /* agy waits at its prompt with nothing typed, on the screen as it is now rather than in the lines above it. */
 const agyWaits = (screen: string): boolean => READY.antigravity(screen) && atEmptyPrompt('antigravity', screen);
+/* agy waits at its prompt, which may still hold words. */
+const agyAtPrompt = (screen: string): boolean => READY.antigravity(screen) && inputOf('antigravity', screen) !== null;
 /* agy shows /mcp typed on its input line, and nothing after it but dim suggestions, wherever it lists its commands. */
 const mcpTyped = (screen: string): boolean => /^[ \t]*>[ \t]?\/mcp[ \t]*$/m.test(withoutDim(screen));
 /* What the node waits for agy to do with its MCP panel, in order: wait at its empty prompt, show the command typed, list
@@ -342,6 +356,8 @@ export class TerminalHost {
   private readonly openMs: number;
   private readonly toolsMs: number;
   private readonly enterWaitMs: number;
+  private readonly typingQuietMs: number;
+  private readonly leftInputs: LeftInputs;
   private readonly lookMs: number;
   private readonly reportMs: number;
   /* Views being opened, and those Hornhoof closed meanwhile. */
@@ -371,6 +387,8 @@ export class TerminalHost {
     this.openMs = set.openMs;
     this.toolsMs = set.toolsMs;
     this.enterWaitMs = set.enterWaitMs;
+    this.typingQuietMs = set.typingQuietMs;
+    this.leftInputs = new LeftInputs(frame => opts.send(frame), set.keptWaitMs);
     this.lookMs = opts.lookMs ?? LOOK_MS;
     this.reportMs = set.reportMs;
     this.cols = set.cols;
@@ -380,7 +398,7 @@ export class TerminalHost {
   }
 
   private operatorFor(opts: Options): OperatorRuntime | null {
-    return opts.operator ? new OperatorRuntime(opts.operator, { current: key => this.operatorState(key), capture: key => this.operatorPane(key), press: (key, value) => this.opts.tmux.keys(this.agents.get(key)!.name, value), secrets: opts.secrets }) : null;
+    return opts.operator ? new OperatorRuntime(opts.operator, { current: key => this.operatorState(key), capture: key => this.operatorPane(key), inputLine: (key, cells) => this.operatorInputLine(key, cells), press: (key, value) => this.opts.tmux.keys(this.agents.get(key)!.name, value), secrets: opts.secrets }) : null;
   }
 
   private operatorTicks(): NodeJS.Timeout | null {
@@ -407,6 +425,13 @@ export class TerminalHost {
     const [cols, rows] = size.trim().split(/\s+/).map(Number);
     if (!cols || !rows) throw new Error('The existing pane size is unknown.');
     return { cols, rows, cells };
+  }
+
+  private operatorInputLine(key: string, cells: string): OperatorInputLine {
+    const kind = this.agents.get(key)?.program?.kind;
+    const input = kind ? inputOf(kind, cells) : null;
+    if (input === null) return 'unknown';
+    return input ? 'text' : 'empty';
   }
 
   private inputLane<T>(a: Agent, run: () => Promise<T>): Promise<T> { return this.operator?.serial(a.key, run) ?? run(); }
@@ -578,6 +603,7 @@ export class TerminalHost {
      ends saying so. */
   private async toolsMissing(a: Agent, job: TermJob): Promise<RunResult | null> {
     if (!needsTools(job) || this.bridge.listedSince(job.key, a.startedAt)) return null;
+    await this.freeInput(a, job);
     const failed = await this.agyTools(a, job.key, job.input.signal);
     if (job.input.signal?.aborted) return await this.failedTurn(a, job, 'cancelled');
     if (!failed) return null;
@@ -591,7 +617,8 @@ export class TerminalHost {
   private async agyTools(a: Agent, key: string, signal?: AbortSignal): Promise<Failure | null> {
     if (signal?.aborted) return null;
     const missed = await this.mcpPanel(a, key, signal);
-    if (missed) a.hash = null;
+    /* Words still in its input stay for the next turn to keep: a program started anew would lose them. */
+    if (missed && !(missed === 'waits' && (await this.readInput(a)))) a.hash = null;
     if (!(await this.opts.tmux.alive(a.name))) return failure('crash', "The program exited before it took Hornhoof's prompt.");
     return missed ? PANEL_STOPPED[missed](Math.round(this.toolsMs / 1000)) : null;
   }
@@ -788,6 +815,8 @@ export class TerminalHost {
     a.fresh = false;
     a.took = false;
     a.typing = prompt;
+    /* What a program that just started shows after its prompt is its own, not words anybody left. */
+    if ((a.typedAt ?? -Infinity) >= a.startedAt && !(await this.freeInput(a, job))) return this.inputNotFree(a, job);
     await this.opts.tmux.paste(a.name, prompt);
     await sleep(pasteWait(prompt));
     await this.opts.tmux.keys(a.name, 'Enter');
@@ -817,7 +846,9 @@ export class TerminalHost {
     while (!pasted) {
       const failed = await this.waitAgyInput(a, job);
       if (failed) return failed;
+      await this.keepLeftInput(a, job);
       pasted = await this.inputLane(a, () => this.pasteAgyAssignment(a, job, prompt));
+      if (!pasted) await sleep(this.pollMs);
     }
     return this.waitAgyReceipt(a, job, prompt);
   }
@@ -826,7 +857,7 @@ export class TerminalHost {
     for (;;) {
       const failed = await this.agyDeliveryStopped(a, job);
       if (failed) return failed;
-      if (this.agyReceiptTaken(a) || agyWaits(await this.opts.tmux.screen(a.name, 0, true))) return null;
+      if (this.agyReceiptTaken(a) || agyAtPrompt(await this.opts.tmux.screen(a.name, 0, true))) return null;
       await sleep(this.pollMs);
     }
   }
@@ -836,8 +867,10 @@ export class TerminalHost {
     this.drain(a);
     if (job.input.signal?.aborted) return false;
     if (this.operator?.inheritSource(a.key, job.operatorSourceDelivery) || this.agyReceiptTaken(a)) return true;
-    if (!agyWaits(screen)) return false;
-    return this.submitOperatorAssignment(a, job, prompt);
+    if (!agyAtPrompt(screen) || !(await this.inputCleared(a, job, inputOf('antigravity', screen)!))) return false;
+    this.drain(a);
+    if (job.input.signal?.aborted) return false;
+    return this.agyReceiptTaken(a) || this.submitOperatorAssignment(a, job, prompt);
   }
 
   private agyReceiptTaken(a: Agent): boolean {
@@ -904,7 +937,9 @@ export class TerminalHost {
         await this.whyNotReady(a, job, await this.screen(a.key));
         return this.failedTurn(a, job, job.input.signal?.aborted ? 'cancelled' : 'agent_failed');
       }
+      await this.keepLeftInput(a, job);
       pasted = await this.inputLane(a, () => this.pasteOperatorAssignment(a, job, prompt));
+      if (!pasted) await sleep(this.pollMs);
     }
     return null;
   }
@@ -913,20 +948,84 @@ export class TerminalHost {
     const screen = await this.opts.tmux.screen(a.name, 0, true);
     this.drain(a);
     if (this.operator?.inheritSource(a.key, job.operatorSourceDelivery)) return false;
-    if (!this.operatorInputProven(a, job, screen)) return false;
-    return this.submitOperatorAssignment(a, job, prompt);
+    const input = inputOf(job.program.kind, screen);
+    if (!this.operatorMayType(a, job) || input === null || !(await this.inputCleared(a, job, input))) return false;
+    this.drain(a);
+    return this.operatorMayType(a, job) && this.submitOperatorAssignment(a, job, prompt);
   }
 
   private async submitOperatorAssignment(a: Agent, job: TermJob, prompt: string): Promise<boolean> {
     this.operator?.pasted(a.key);
+    a.pastedAt = Date.now();
     await this.opts.tmux.paste(a.name, prompt);
     await sleep(pasteWait(prompt));
     if (!job.input.signal?.aborted) await this.opts.tmux.keys(a.name, 'Enter');
     return true;
   }
 
-  private operatorInputProven(a: Agent, job: TermJob, screen: string): boolean {
-    return !job.input.signal?.aborted && !a.took && !this.operator?.recorded(a.key) && inputOf(job.program.kind, screen) === '';
+  private operatorMayType(a: Agent, job: TermJob): boolean {
+    return !job.input.signal?.aborted && !a.took && !this.operator?.recorded(a.key);
+  }
+
+  private stillTyping(a: Agent): boolean {
+    return Date.now() - (a.typedAt ?? -Infinity) < this.typingQuietMs;
+  }
+
+  /* Words someone left go to Hornhoof before they leave the input. Not in the input lane, as the owner's keys go through it.
+     A paste the program folded is not on its screen to keep, so it stays, and the turn's watch tells of it. */
+  private async keepLeftInput(a: Agent, job: TermJob): Promise<void> {
+    const input = await this.readInput(a);
+    if (!input || this.stillTyping(a) || isOwnLeft(a.ownLeft, a.typedAt, input) || holdsFoldedPaste(input)) return;
+    const jobId = job.input.jobId ?? null;
+    const secrets = [...this.opts.secrets(), ...(job.input.tools?.token ? [job.input.tools.token] : [])];
+    const text = cut(redact(await this.wholeInput(a, input), secrets), 100_000);
+    await this.leftInputs.keep({ agentKey: a.key, jobId, text, typed: (a.typedAt ?? -Infinity) > (a.pastedAt ?? -Infinity), ref: leftRef(jobId, input) });
+  }
+
+  /* Words too long for the screen go on above it. */
+  private async wholeInput(a: Agent, input: string): Promise<string> {
+    const whole = inputOf(a.program!.kind, await this.opts.tmux.screen(a.name, 5000, true));
+    return whole && flat(whole).includes(flat(input)) ? whole : input;
+  }
+
+  /* An input that holds nothing, or only what is safe elsewhere, which then goes. It takes no Escape, which stops a program. */
+  private async inputCleared(a: Agent, job: TermJob, input: string): Promise<boolean> {
+    if (!input) return true;
+    const own = isOwnLeft(a.ownLeft, a.typedAt, input);
+    if (this.stillTyping(a) || !(own || this.leftInputs.isKept(leftRef(job.input.jobId ?? null, input)))) return false;
+    if (!(await this.eraseLeft(a))) return false;
+    if (own) this.forgetOwnLeft(a);
+    return true;
+  }
+
+  private async eraseLeft(a: Agent): Promise<boolean> {
+    for (let round = 0; round < ERASE_ROUNDS; round++) {
+      const input = await this.readInput(a);
+      if (!input) return input === '';
+      /* The cursor may stand inside the words: the first keys then leave what follows it. */
+      await this.opts.tmux.keys(a.name, ...(round ? ['C-k'] : []), ...eraseKeys(input));
+      await sleep(this.pollMs);
+    }
+    return (await this.readInput(a)) === '';
+  }
+
+  private forgetOwnLeft(a: Agent): void {
+    const jobId = a.ownLeft?.jobId;
+    a.ownLeft = null;
+    a.retainedAssignments = a.retainedAssignments?.filter(retained => retained.jobId !== jobId);
+  }
+
+  /* For a path with no watch to tell of words it cannot move: they are kept and gone, or the turn ends saying so. */
+  private async freeInput(a: Agent, job: TermJob): Promise<boolean> {
+    await this.keepLeftInput(a, job);
+    const input = await this.readInput(a);
+    return !input || this.inputLane(a, () => this.inputCleared(a, job, input));
+  }
+
+  private inputNotFree(a: Agent, job: TermJob): Promise<RunResult> {
+    a.busy = false;
+    a.failure = failure('unknown', "The program's input holds words Hornhoof could not keep, so it typed nothing into them.", true);
+    return this.failedTurn(a, job, 'agent_failed');
   }
 
   private async waitOperatorReceipt(a: Agent, job: TermJob): Promise<RunResult | null> {
@@ -942,7 +1041,11 @@ export class TerminalHost {
 
   private async operatorReceiptFailure(a: Agent, job: TermJob): Promise<RunResult | null> {
     const why = this.operator?.failureDetail(a.key);
-    if (why) { a.failure = failure('unknown', `Program operator recovery ended: ${why}.`, false); return this.failedTurn(a, job, 'agent_failed'); }
+    if (why) {
+      a.failure = failure('unknown', `Program operator recovery ended: ${why}.`, false);
+      if (this.operator?.unrecordedEnded(a.key)) a.ownLeft = { text: job.input.prompt, jobId: job.input.jobId ?? null, at: a.pastedAt ?? -Infinity };
+      return this.failedTurn(a, job, 'agent_failed');
+    }
     if (!(await this.opts.tmux.alive(a.name))) return this.failedTurn(a, job, 'agent_failed');
     return null;
   }
@@ -1332,7 +1435,7 @@ export class TerminalHost {
 
   private async claudeReady(a: Agent, job: TermJob): Promise<boolean | null> {
     if (!(await Promise.race([a.started!.promise.then(() => true), sleep(this.pollMs).then(() => false)]))) return null;
-    if (job.operatorDelivery && this.operator?.enabled(a.key)) return (await this.inputBox(a)) || null;
+    if (job.operatorDelivery && this.operator?.enabled(a.key)) return (await this.inputBox(a, input => input !== null)) || null;
     await this.inputShows(a);
     return true;
   }
@@ -1377,9 +1480,9 @@ export class TerminalHost {
   }
 
   /* Whether Claude Code's input box shows, empty, within INPUT_WAIT_MS while the program runs. */
-  private async inputBox(a: Agent): Promise<boolean> {
+  private async inputBox(a: Agent, shows: (input: string | null) => boolean = input => input === ''): Promise<boolean> {
     for (const end = Date.now() + INPUT_WAIT_MS; Date.now() < end && (await this.opts.tmux.alive(a.name)); await sleep(this.pollMs)) {
-      if (inputOf('claude', await this.opts.tmux.screen(a.name, 0, true)) === '') return true;
+      if (shows(inputOf('claude', await this.opts.tmux.screen(a.name, 0, true)))) return true;
     }
     return false;
   }
@@ -1990,6 +2093,11 @@ export class TerminalHost {
 
   /* Hornhoof's answer to turn.open, found by its ref; a Hornhoof from before refs answers in order. A typed turn gets its
      job and tool token, and what it did or how it ended so far goes out. An answer no typed turn waits for ends its job. */
+  /* Hornhoof keeps words left in an input: they may leave it now. */
+  inputKept(m: Msg<'agent.input_kept'>): void {
+    this.leftInputs.kept(m.ref);
+  }
+
   opened(m: Msg<'turn.opened'>): void {
     const a = this.agents.get(m.agentKey);
     const at = a ? (m.ref ? a.unopened.findIndex(t => t.ref === m.ref) : a.unopened.length ? 0 : -1) : -1;
@@ -2225,8 +2333,7 @@ export class TerminalHost {
     if (!(await this.opts.tmux.alive(a.name))) return;
     const shown = receipt.shown ?? receipt.text.trim();
     if (!shown || await this.readInput(a) !== shown) return;
-    const erase = receipt.text.split('\n').flatMap((_, i) => i ? ['BSpace', 'C-u'] : ['C-u']);
-    await this.opts.tmux.keys(a.name, ...erase);
+    await this.opts.tmux.keys(a.name, ...eraseKeys(receipt.text));
   }
 
   async restart(key: string, jobId: string, note: string): Promise<{ ok: boolean; reason: string | null }> {
@@ -2438,6 +2545,7 @@ export class TerminalHost {
 
   private ownerKeys(a: Agent, view: View, data: string, pressedIn?: string): void {
     if (pressedIn) a.pressed = { jobId: pressedIn, at: Date.now(), until: a.turn && !this.overIn(a) ? null : Date.now() + UNHEARD_MS };
+    if (typesWords(data)) a.typedAt = Date.now();
     void this.inputLane(a, async () => { view.child.stdin?.write(data); });
   }
 
