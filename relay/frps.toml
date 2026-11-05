@@ -4,7 +4,9 @@
 # with a 404 or 410, and keeps nothing of it. Caddy brings tunnels in over wss (https://hornhoof.org/~!frp -> 7000) and
 # the traffic of companies in http mode (*.hornhoof.org -> 8080). 8080 now listens on every address, because
 # proxyBindAddr opens 443; both firewalls keep it closed.
-# Every login, proxy and heartbeat is checked by hornhoof-relay (127.0.0.1:7600); if it does not answer, frps refuses.
+# Every login, proxy and heartbeat is checked by hornhoof-relay (127.0.0.1:7600), and so is every new connection to an
+# https or stcp proxy, the edge's too; if it does not answer, frps refuses. While relay.py restarts nothing new comes in
+# on 443, and connections already open stay.
 bindAddr = "127.0.0.1"
 bindPort = 7000
 proxyBindAddr = "0.0.0.0"
@@ -40,4 +42,4 @@ webServer.password = "@WEB_PASSWORD@"
 name = "hornhoof-relay"
 addr = "127.0.0.1:7600"
 path = "/frp/handler"
-ops = ["Login", "NewProxy", "Ping"]
+ops = ["Login", "NewProxy", "Ping", "NewUserConn"]

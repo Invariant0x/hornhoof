@@ -47,6 +47,8 @@ Releasing a name deletes its key hashes and its sync record. Its route record st
 
 For each address, it also keeps the times of new links made in the last hour, to limit how many it can make. The relay's database is SQLite.
 
+frps asks the relay about every new connection to a company's https proxy or stcp service, with the visitor's address among what it sends. The relay reads only the name, and neither logs nor keeps the address. A blocked or released name is refused at once, with no restart, and connections already open stay until they close; `hornhoof-relay ban <name> --cut` restarts frps to drop them too, along with every other link's. While the relay itself restarts, frps refuses every new connection on port 443, hornhoof.org and the tunnels' way in included.
+
 The relay logs each link made or freed with the address it came from. On the server, this log goes to the system journal. frps logs only its errors, because its other lines name each visitor's address. Caddy logs no requests, but its error log names the visitor's address of a request that fails on its way to frps or the relay; a connection to a company whose https tunnel is up never reaches Caddy.
 
 ## Run the tests
