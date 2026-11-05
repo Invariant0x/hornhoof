@@ -1,9 +1,11 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
+import { AgentWindowContext } from '../src/screens/AgentWindowContext';
+import { DepartmentView } from '../src/screens/Department';
 import { TreeView } from '../src/screens/TreeView';
-import { DEV_TREE, TREE_ORG } from './api-mock';
+import { DEV_TREE, ME, REVIEW_TREE, TREE_ORG } from './api-mock';
 
 function view(tree = DEV_TREE) {
   return <LanguageProvider><TreeView tree={tree} department={TREE_ORG.departments.find(d => d.id === 'd2')!} onOpenTask={() => {}} /></LanguageProvider>;
@@ -26,84 +28,53 @@ describe('Tree plates', () => {
   const agent = DEV_TREE.lines[0]!.agent.id;
   const rowHeight = (row: string) => Number(document.querySelector(`rect.rowhit[data-row="${row}"][x="0"]`)!.getAttribute('height'));
   afterEach(() => { vi.restoreAllMocks(); });
-  function plateHeights(height: (row: string) => number) {
-    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) { return height(this.dataset.row ?? ''); });
-  }
 
-  it('gives a row the height its plate takes on the page', () => {
-    plateHeights(row => row === agent ? 130 : 0);
-    show();
-    expect(rowHeight(agent)).toBe(142);
-    expect(rowHeight('main')).toBe(40);
-  });
-
-  it('follows a plate that grows later, as a new text or font makes it', () => {
-    const observers: { measure: () => void; seen: Element[]; gone: boolean }[] = [];
-    vi.stubGlobal('ResizeObserver', class {
-      own = { measure: () => {}, seen: [] as Element[], gone: false };
-      constructor(measure: () => void) { this.own.measure = measure; observers.push(this.own); }
-      observe(el: Element) { this.own.seen.push(el); }
-      disconnect() { this.own.gone = true; }
-    });
-    let plate = 90;
-    plateHeights(row => row === agent ? plate : 0);
-    const { unmount } = render(view());
-    expect(rowHeight(agent)).toBe(102);
-    const watching = observers.find(o => o.seen.some(el => el.classList.contains('lchip')))!;
-    expect(watching.seen).toEqual([...document.querySelectorAll('.lchip')]);
-    plate = 150;
-    act(() => watching.measure());
-    expect(rowHeight(agent)).toBe(162);
-    unmount();
-    expect(watching.gone).toBe(true);
-  });
-
-  it('watches a plate that appears with a new lane', () => {
-    const watched: Element[] = [];
-    vi.stubGlobal('ResizeObserver', class {
-      observe(el: Element) { watched.push(el); }
-      disconnect() {}
-    });
-    const { rerender } = render(view({ ...DEV_TREE, lines: DEV_TREE.lines.slice(0, 1) }));
-    const added = DEV_TREE.lines[1]!.agent.id;
-    expect(document.querySelector(`.lchip[data-row="${added}"]`)).toBeNull();
-    rerender(view(DEV_TREE));
-    expect(watched).toContain(document.querySelector(`.lchip[data-row="${added}"]`));
-  });
-
-  it('keeps a plate on its row and gives it its natural height at the least', () => {
-    show();
-    const main = document.querySelector<HTMLElement>('.lchip[data-row="main"]')!, turn = document.querySelector<HTMLElement>('.lchip[data-row="turn"]')!;
-    const lane = document.querySelector<HTMLElement>(`.lchip[data-row="${agent}"]`)!;
-    expect([main.style.top, main.style.minHeight]).toEqual(['36px', '32px']);
-    expect([turn.style.top, turn.style.minHeight]).toEqual(['76px', '40px']);
-    expect(lane.style.minHeight).toBe('84px');
-    expect(parseFloat(lane.style.top)).toBe(32 + 40 + 48 + 6 + 96 * [...document.querySelectorAll('.lchip:not(.tk)')].indexOf(lane));
-  });
-
-  it('names the role beside the name, in the language of the screen, and only when it says something more', () => {
+  it('uses the department Chip with the same text and a fixed size for every lane', () => {
     const department = TREE_ORG.departments.find(d => d.id === 'd2')!;
-    const employee = department.employees.find(e => e.id === agent)!;
-    const named = (name: string) => ({ ...department, employees: department.employees.map(e => e.id === agent ? { ...e, name, title: { en: 'Developer', ru: 'Разработчик' } } : e) });
-    const plate = (dept: typeof department, lang: 'en' | 'ru') => {
-      localStorage.setItem('hh-lang', lang);
-      const { unmount } = render(<LanguageProvider><TreeView tree={DEV_TREE} department={dept} onOpenTask={() => {}} /></LanguageProvider>);
-      const text = document.querySelector(`.lchip[data-row="${agent}"] .tv-role`)?.textContent ?? null;
-      unmount();
-      return text;
-    };
-    expect(plate(named(employee.name), 'en')).toBe('Developer');
-    expect(plate(named(employee.name), 'ru')).toBe('Разработчик');
-    expect(plate(named('Developer'), 'en')).toBeNull();
-    expect(plate({ ...department, employees: department.employees.filter(e => e.id !== agent) }, 'en')).toBeNull();
-    localStorage.removeItem('hh-lang');
+    render(<LanguageProvider><DepartmentView me={ME} department={department} deputies={[]} selected={null} selectedTask={null} panel={null} onBack={() => {}} onHire={() => {}} onOpen={() => {}} onOpenTask={() => {}} /></LanguageProvider>);
+    const expected = document.querySelector('.schip')!.textContent;
+    show();
+    const chips = [...document.querySelectorAll<HTMLElement>('.tv-labs .dept-chip')];
+    expect(chips.length).toBeGreaterThan(0);
+    for (const chip of chips) {
+      expect([chip.style.width, chip.style.height]).toEqual(['240px', '84px']);
+      expect(rowHeight(chip.dataset.row!)).toBe(96);
+    }
+    expect(document.querySelector(`.dept-chip[data-row="${agent}"] .schip`)!.textContent).toBe(expected);
+    expect(document.querySelector(`.dept-chip[data-row="${agent}"] .r2`)).toHaveTextContent('Claude Sonnet 5.5');
   });
 
-  it('shows the task and its title on every screen', () => {
-    vi.stubGlobal('innerWidth', 375);
-    show();
+  it('keeps every lane at CW by CH when long text arrives', () => {
+    const { rerender } = render(view());
+    const before = [...document.querySelectorAll<HTMLElement>('.tv-labs .dept-chip')].map(chip => [chip.style.width, chip.style.height]);
+    expect(before.length).toBeGreaterThan(0);
+    const long = { ...DEV_TREE, lines: DEV_TREE.lines.map(line => ({ ...line, title: `${line.title} with a very long task title that must not stretch the chip` })) };
+    rerender(view(long));
+    const after = [...document.querySelectorAll<HTMLElement>('.tv-labs .dept-chip')].map(chip => [chip.style.width, chip.style.height]);
+    expect(after).toEqual(before);
+  });
+
+  it('puts the lane role, task and current state into TreeCard on click', async () => {
+    const user = userEvent.setup(), openAgent = vi.fn();
+    render(<AgentWindowContext.Provider value={openAgent}><LanguageProvider><TreeView tree={DEV_TREE} department={TREE_ORG.departments.find(d => d.id === 'd2')!} onOpenTask={() => {}} /></LanguageProvider></AgentWindowContext.Provider>);
+    await user.click(document.querySelector(`.dept-chip[data-row="${agent}"] .schip`)!);
+    const card = screen.getByRole('dialog');
     const line = DEV_TREE.lines[0]!;
-    expect(document.querySelector(`.lchip[data-row="${agent}"] .r2`)).toHaveTextContent(`#${line.number} ${line.title}`);
+    expect(card).toHaveTextContent('Backend engineer');
+    expect(card).toHaveTextContent(`#${line.number} ${line.title}`);
+    expect(openAgent).not.toHaveBeenCalled();
+    await user.click(within(card).getByRole('button', { name: /Bruno/ }));
+    expect(openAgent).toHaveBeenCalledWith(agent);
+  });
+
+  it('keeps the review verdict and its details beside the lane in TreeCard', async () => {
+    const user = userEvent.setup(), reviewer = REVIEW_TREE.review!.reviewers[0]!.agent.id;
+    render(view(REVIEW_TREE));
+    await user.click(document.querySelector(`.dept-chip[data-row="${reviewer}"] .schip`)!);
+    const card = screen.getByRole('dialog');
+    expect(card).toHaveTextContent('Review of turn 3');
+    expect(card).toHaveTextContent('Findings');
+    expect(card).toHaveTextContent('Task');
   });
 
   it('lets a row be clicked as far as the drawing goes, past a long badge too', () => {
