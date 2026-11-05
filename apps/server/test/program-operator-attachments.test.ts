@@ -27,22 +27,26 @@ async function fixture() {
   const [picture] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.agent.id, jobId: c.job.id, operatorCaseId: incident!.id, mediaType: 'image/png', bytes: PNG, size: PNG.length }).returning();
   await c.db.update(programOperatorCases).set({ pictureId: picture!.id }).where(eq(programOperatorCases.id, incident!.id));
   const fetchPicture = (token: string, file = picture!.id, ref = `operator-case:${incident!.id}`) => c.app.inject({ method: 'GET', url: `/api/attachments/file?task=${encodeURIComponent(ref)}&file=${encodeURIComponent(file)}`, headers: { authorization: `Bearer ${token}` } });
-  const enrol = async (departmentId: string | null, companyId = c.companyId, more: Partial<typeof people.$inferInsert> = {}) => {
-    const [p] = await c.db.insert(people).values({ companyId, name: 'Reader', email: `${randomUUID()}@example.test`, status: 'active', scopeKind: departmentId ? 'listed' : 'company', ...more }).returning();
-    if (departmentId) await c.db.insert(personAccess).values({ companyId, personId: p!.id, departmentId });
+  /* Someone of the whole company, unless more says otherwise. */
+  const enrol = async (more: Partial<typeof people.$inferInsert> = {}, companyId = c.companyId) => {
+    const [p] = await c.db.insert(people).values({ companyId, name: 'Reader', email: `${randomUUID()}@example.test`, status: 'active', scopeKind: 'company', ...more }).returning();
     const token = randomUUID();
     await c.db.insert(sessions).values({ tokenHash: hashToken(token), personId: p!.id, expiresAt: new Date(Date.now() + 60000) });
     return { id: p!.id, token };
   };
-  const person = async (departmentId: string | null, companyId = c.companyId) => (await enrol(departmentId, companyId)).token;
+  const listedIn = async (departmentId: string) => {
+    const reader = await enrol({ scopeKind: 'listed' });
+    await c.db.insert(personAccess).values({ companyId: c.companyId, personId: reader.id, departmentId });
+    return reader;
+  };
   /* Someone on whose plan the target employee runs, in the department given. */
-  const planOwner = async (departmentId: string | null) => {
-    const reader = await enrol(departmentId);
+  const planOwner = async (departmentId: string) => {
+    const reader = await listedIn(departmentId);
     await c.db.update(subscriptions).set({ ownerPersonId: reader.id }).where(eq(subscriptions.id, c.sub.id));
     return reader;
   };
   const download = (token: string, id = picture!.id) => c.app.inject({ method: 'GET', url: `/api/attachments/${id}`, ...as(token) });
-  return { ...c, turn, operatorTurn: operator, headTurn: head, orchestrator: orchestrator!, orchestratorTurn, incident: incident!, picture: picture!, fetchPicture, person, enrol, planOwner, download };
+  return { ...c, turn, operatorTurn: operator, headTurn: head, orchestrator: orchestrator!, orchestratorTurn, incident: incident!, picture: picture!, fetchPicture, enrol, listedIn, planOwner, download };
 }
 
 it('downloads the case PNG for its assigned operator, actual report recipient and current orchestrator after resolution', async () => {
@@ -132,7 +136,7 @@ it('refuses pictures associated with API and login/test targets', async () => {
 
 it('shows the picture to the CEO, a delegate and whoever has both the plan and the department of its target', async () => {
   const c = await fixture();
-  const delegate = await c.enrol(null, c.companyId, { isCeoDelegate: true });
+  const delegate = await c.enrol({ isCeoDelegate: true });
   const owner = await c.planOwner(c.dev.id);
   for (const token of [c.ceo, delegate.token, owner.token]) {
     const res = await c.download(token);
@@ -151,14 +155,14 @@ describe('to everyone else the picture does not exist', () => {
 
   it('for the department without the plan, the plan without the department, and neither', async () => {
     const c = await fixture();
-    for (const token of [await c.person(c.dev.id), await c.person(c.watcher.departmentId!)]) await asMissing(c, token);
+    for (const reader of [await c.listedIn(c.dev.id), await c.listedIn(c.watcher.departmentId!)]) await asMissing(c, reader.token);
     await asMissing(c, (await c.planOwner(c.watcher.departmentId!)).token);
   });
 
   it('for the whole company or the department owner on another plan', async () => {
     const c = await fixture();
-    await asMissing(c, await c.person(null));
-    const owner = await c.enrol(null, c.companyId, { scopeKind: 'listed' });
+    await asMissing(c, (await c.enrol()).token);
+    const owner = await c.enrol({ scopeKind: 'listed' });
     await c.db.update(departments).set({ ownerPersonId: owner.id }).where(eq(departments.id, c.dev.id));
     await asMissing(c, owner.token);
   });
@@ -166,7 +170,7 @@ describe('to everyone else the picture does not exist', () => {
   it('for another company, whose own whole view reaches nothing here', async () => {
     const c = await fixture();
     const [foreign] = await c.db.insert(companies).values({ name: 'Foreign', singleton: false }).returning();
-    await asMissing(c, await c.person(null, foreign!.id));
+    await asMissing(c, (await c.enrol({}, foreign!.id)).token);
   });
 
   it('once the plan or the department is gone from a person who had both', async () => {
@@ -210,7 +214,7 @@ it('excludes case pictures from ordinary file downloads and request/file listing
   expect(await filesOf(c.db, task.id)).toEqual([]);
   expect((await picturesOf(c.db, [{ id: request!.id, options: [] }])).get(request!.id)).toEqual([]);
   await c.db.update(tasks).set({ departmentId: c.watcher.departmentId }).where(eq(tasks.id, task.id));
-  expect((await c.app.inject({ method: 'GET', url: `/api/attachments/${c.picture.id}`, ...as(await c.person(c.watcher.departmentId!)) })).statusCode).toBe(404);
+  expect((await c.app.inject({ method: 'GET', url: `/api/attachments/${c.picture.id}`, ...as((await c.listedIn(c.watcher.departmentId!)).token) })).statusCode).toBe(404);
 });
 
 it('keeps case pictures out of node work-file downloads even with an accidental task link', async () => {
