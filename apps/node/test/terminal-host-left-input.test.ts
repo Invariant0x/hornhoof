@@ -348,7 +348,7 @@ describe.skipIf(!hasTmux)('a turn whose words did not get recorded within 60 s',
     await new Promise(done => setTimeout(done, 100));
     expect(needed(c)).toEqual([]);
     vi.restoreAllMocks();
-    tmux.keys(host['agents'].get(c.key)!.name, 'Enter');
+    await tmux.keys(host['agents'].get(c.key)!.name, 'Enter');
     expect(await first.running).toMatchObject({ ok: true });
   });
 });
