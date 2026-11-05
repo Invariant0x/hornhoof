@@ -645,6 +645,22 @@ describe('numbered node messages', () => {
     expect(nodeMessage({ ...event, n: 3, extra: 'x' })).not.toHaveProperty('extra');
   });
 
+  it('takes a hello with as many runs and ends as a node can owe, and no more', () => {
+    const hello = (running: string[], tests: string[]) => nodeMessage({ type: 'hello', version: '1', loggedIn: true, running, tests });
+    const ids = (count: number) => Array.from({ length: count }, (_, i) => `id-${i}`);
+    expect(protocol.HELLO_IDS_BEFORE_ACKS).toBe(100);
+    expect(protocol.HELLO_IDS_MAX).toBeGreaterThan(protocol.HELLO_IDS_BEFORE_ACKS);
+    expect(hello(ids(protocol.HELLO_IDS_MAX), ids(protocol.HELLO_IDS_MAX))).not.toBeNull();
+    expect(hello(ids(protocol.HELLO_IDS_MAX + 1), [])).toBeNull();
+    expect(hello([], ids(protocol.HELLO_IDS_MAX + 1))).toBeNull();
+  });
+
+  it('leaves half of the 4 MiB a socket of the server takes for the rest of the longest hello', () => {
+    const uuid = '8b1f6e1c-2d1c-4c9e-9a53-0f1d7f3f5a11';
+    const hello = { type: 'hello', version: '1', loggedIn: true, running: Array(protocol.HELLO_IDS_MAX).fill(uuid), tests: Array(protocol.HELLO_IDS_MAX).fill(uuid) };
+    expect(JSON.stringify(hello).length).toBeLessThan(2 * 1024 * 1024);
+  });
+
   it('refuses an ack that is negative or not whole', () => {
     expect(parseServerMessage('{"type":"ack","upto":-1}')).toBeNull();
     expect(parseServerMessage('{"type":"ack","upto":2.5}')).toBeNull();

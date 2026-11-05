@@ -354,6 +354,11 @@ export const NUMBERED = ['job.started', 'job.event', 'job.done', 'tests.started'
 const MessageNumber = z.number().int().min(1).optional();
 /* The header of the upgrade answer of a server that sends ack. */
 export const ACKS_HEADER = 'hornhoof-acks';
+/* How many runs or parts a hello may list. A node lists the ends it has not had confirmed too, and never drops those, so
+   the bound is the outbox's own; at a uuid's 39 bytes both lists leave half of the socket's 4 MiB for the rest. */
+export const HELLO_IDS_MAX = 20_000;
+/* A server that sends no ack drops a hello that lists more than this. */
+export const HELLO_IDS_BEFORE_ACKS = 100;
 
 const NodeMessage = z.discriminatedUnion('type', [
   /* terminals: the node runs agents in sessions people can watch and type into. */
@@ -364,7 +369,7 @@ const NodeMessage = z.discriminatedUnion('type', [
     type: z.literal('hello'),
     version: z.string().max(40),
     loggedIn: z.boolean(),
-    running: z.array(z.string()).max(100),
+    running: z.array(z.string()).max(HELLO_IDS_MAX),
     models: Models.optional(),
     terminals: z.boolean().optional(),
     /* The node runs parts of other work too, not only of test runs. */
@@ -372,7 +377,7 @@ const NodeMessage = z.discriminatedUnion('type', [
     /* Why the node takes no part of any run: a part runs only as a user of the node's own, which this one lacks. */
     noRuns: z.string().max(300).optional(),
     load: Load.optional(),
-    tests: z.array(z.string()).max(100).optional(),
+    tests: z.array(z.string()).max(HELLO_IDS_MAX).optional(),
     skillFiles: z.boolean().optional(),
     /* The key Hornhoof seals this node's sign-ins to; the private half never leaves the node. */
     publicKey: AgeRecipient.optional(),
