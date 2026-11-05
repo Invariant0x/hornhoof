@@ -1309,12 +1309,12 @@ def new_link_key(body: object, current_key: str) -> str:
 
 
 def store_link_key(name: str, new_hash: str, link_hash: str) -> bool:
-    """R6.1: rotate only the authorizing, unblocked binding, preserving live Ping.
+    """R6.1: rotate only the authorizing, unblocked binding, preserving live tunnels.
 
     The hash comparison prevents an in-flight request from changing a later owner's
-    key or overwriting another rotation. Retired hashes authorize only Ping from
-    frps's already authenticated sessions, tied to this binding's current hash.
-    A release deletes them.
+    key or overwriting another rotation. Retired hashes serve only frps's already
+    authenticated sessions, for their Ping and their NewUserConn, tied to this
+    binding's current hash. A release deletes them.
     """
     with transaction():
         write('UPDATE bindings SET key_hash = ? WHERE name = ? AND key_hash = ? AND banned_at IS NULL',
@@ -1326,7 +1326,7 @@ def store_link_key(name: str, new_hash: str, link_hash: str) -> bool:
 
 
 def retain_ping_keys(name: str, new_hash: str, link_hash: str) -> None:
-    """Keep prior login hashes usable only for heartbeats in this binding lifetime.
+    """Keep prior login hashes for live tunnels' heartbeats and new connections in this binding lifetime.
 
     Both statements run in the key rotation's transaction. No retired credential
     becomes a public API credential or authorizes a Login or registration.
@@ -1339,7 +1339,8 @@ def retain_ping_keys(name: str, new_hash: str, link_hash: str) -> None:
 
 
 def ping_key_matches(name: str | None, key: object) -> bool:
-    """A retired link hash serves only this still-bound, unblocked lifetime's Ping."""
+    """A retired link hash serves only this still-bound, unblocked lifetime's tunnels already logged in: their Ping
+    (authenticate_call) and their NewUserConn (link_refusal)."""
     if not isinstance(key, str) or not key:
         return False
     row = db().execute('SELECT 1 FROM ping_keys AS p JOIN bindings AS b '
@@ -1435,7 +1436,8 @@ def call_metas(op: str, content: dict) -> dict:
 
 
 def authenticate_call(op: str, metas: dict) -> tuple[str | None, str | None, str | None]:
-    """Live sessions retain their heartbeat after rotation; all other ops need the current key."""
+    """Live sessions retain their heartbeat after rotation; Login and NewProxy need the current key. A NewUserConn never
+    comes here: link_refusal answers it."""
     name, kind, reason = authenticate(metas)
     if op == 'Ping' and reason is not None and ping_key_matches(name, metas.get('key')):
         return name, 'link', None
