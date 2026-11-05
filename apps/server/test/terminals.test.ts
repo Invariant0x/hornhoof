@@ -62,7 +62,7 @@ const delegate = (app: FastifyInstance, ceo: string, personId: string) => app.in
 const say = (app: FastifyInstance, token: string, agent: string, text: string) => app.inject({ method: 'POST', url: `/api/agents/${agent}/messages`, payload: { text }, ...as(token) });
 const jobOf = async (app: FastifyInstance, id: string) => (await app.ctx.db.select({ createdBy: jobs.createdBy, answersCeo: jobs.answersCeo }).from(jobs).where(eq(jobs.id, id)))[0];
 
-/* The orchestrator runs on Zed's plan, and Lisa is the CEO delegate: she watches its terminal and writes through Hornhoof. */
+/* The orchestrator runs on Zed's plan, and Lisa is the CEO delegate: she writes to it and steers nothing. */
 async function withDelegate() {
   const at = await lent();
   const lisa = await invitePerson(at.app, at.ceo, { name: 'Lisa', email: 'lisa@example.com', access: { whole: true } });
@@ -86,14 +86,13 @@ async function withEmployees() {
   return { ...at, bruno: bruno!, sam: sam!, maria, mariaId: m!.id };
 }
 
-describe("writing to an agent whose terminal the person only watches", () => {
-  it('opens the turn in the name of the CEO delegate, as answering the CEO, though the delegate cannot type', async () => {
+describe("writing to an agent on the plan of someone else", () => {
+  it('opens the turn in the name of the CEO delegate, as answering the CEO, though the delegate does not own the plan', async () => {
     const { app, url, builtin, lisa, lisaId } = await withDelegate();
     const screen = await watch(url, lisa);
-    const open = await next(builtin, 'term.open');
-    expect(open.write).toBe(false);
+    await next(builtin, 'term.open');
     await until(() => screen.frames.length > 0);
-    expect(screen.frames[0]).toEqual({ type: 'ready', write: false });
+    expect(screen.frames[0]).toEqual({ type: 'ready', write: false, message: true });
     expect(await state(app, lisa)).toMatchObject({ terminal: true, ready: true });
 
     const said = await say(app, lisa, 'orchestrator', 'Please check the release');
@@ -137,7 +136,7 @@ describe("writing to an agent whose terminal the person only watches", () => {
     const screen = await watch(url, maria, bruno.id);
     expect((await next(builtin, 'term.open')).write).toBe(true);
     await until(() => screen.frames.length > 0);
-    expect(screen.frames[0]).toEqual({ type: 'ready', write: true });
+    expect(screen.frames[0]).toEqual({ type: 'ready', write: true, message: true });
     const said = await say(app, maria, bruno.id, 'Please check the cart');
     expect(said.statusCode).toBe(202);
     const run = await next(builtin, 'job.run');
@@ -208,9 +207,9 @@ describe("writing to an agent whose terminal the person only watches", () => {
     for (const [person, owner] of [[zed, true], [lisa, false]] as const) {
       expect((await state(app, person)).canType).toBe(owner);
       const screen = await watch(url, person);
-      expect((await next(builtin, 'term.open')).write).toBe(owner);
+      expect((await next(builtin, 'term.open')).write).toBe(true);
       await until(() => screen.frames.length > 0);
-      expect(screen.frames[0]).toEqual({ type: 'ready', write: owner });
+      expect(screen.frames[0]).toEqual({ type: 'ready', write: owner, message: true });
     }
   });
 
@@ -262,7 +261,7 @@ describe("an agent's live terminal", () => {
     const open = await next(builtin, 'term.open');
     expect(open).toMatchObject({ agentKey: orchestratorId, cols: 100, rows: 30, write: true });
     await until(() => screen.frames.length > 0);
-    expect(screen.frames[0]).toEqual({ type: 'ready', write: true });
+    expect(screen.frames[0]).toEqual({ type: 'ready', write: true, message: true });
 
     builtin.send({ type: 'term.data', termId: open.termId, data: '\u001b[1mhello\u001b[0m' });
     await until(() => screen.frames.length > 1);
@@ -310,15 +309,14 @@ describe("an agent's live terminal", () => {
     expect(await state(plain.app, plain.ceo)).toMatchObject({ terminal: false });
   });
 
-  it("lets only the subscription's owner type: a CEO delegate who sees the agent watches", async () => {
+  it("lets only the subscription's owner steer: a CEO delegate who sees the agent writes", async () => {
     const { app, db, url, ceo, builtin } = await live();
     const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.test', access: { whole: true } });
     await db.update(people).set({ isCeoDelegate: true }).where(eq(people.name, 'Maria'));
     const screen = await watch(url, maria);
     const open = await next(builtin, 'term.open');
-    expect(open.write).toBe(false);
     await until(() => screen.frames.length > 0);
-    expect(screen.frames[0]).toEqual({ type: 'ready', write: false });
+    expect(screen.frames[0]).toEqual({ type: 'ready', write: false, message: true });
     screen.ws.send(JSON.stringify({ type: 'input', data: '! cat /data/node.json\r' }));
     screen.ws.send(JSON.stringify({ type: 'resize', cols: 90, rows: 30 }));
     expect(await builtin.next()).toEqual({ type: 'term.resize', termId: open.termId, cols: 90, rows: 30 });
