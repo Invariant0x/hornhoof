@@ -73,6 +73,8 @@
 **Interfaces:** Consumes baseline run 101 and identical command.sh; produces evidence/report and pushed task-378 commit.
 
 - [x] Run all affected tests with coverage, tsc node/server, typecheck:tests, eslint, crapper --use-existing-coverage and dryer. Require exit 0 for scoped checks.
-- [ ] Obtain one fresh whole-branch review, resolve important findings using failing tests, commit and push task-378.
+- [x] Obtain one fresh whole-branch review, resolve important findings using failing tests, commit and push task-378.
 - [ ] Run the identical four-part benchmark AFTER through run_tests, set wait_for for 30 minutes and end turn.
 - [ ] Read all logs. Report per-part/package/file times and percentage deltas with hardware caveats, exact package counts after >= before, and all unrelated failures without hiding them. Submit evidence and branch SHA.
+
+Execution note after run 103: same command and all package counts verified, full result failed. Twenty-four new timeouts on the changed part-3 worker include one moved case; the full local affected file passed 24/24 diagnostically. The failed remote result remains unmodified. Comparable full-suite validation and submit remain pending a suitable Linux pool/slot or a head decision. The earlier wait_for acknowledgment timed out.
