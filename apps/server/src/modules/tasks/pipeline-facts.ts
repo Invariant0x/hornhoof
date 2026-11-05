@@ -1,4 +1,4 @@
-import type { AgentTimeKind, DoneTask, ExternalWaitKind, FileTime, KindFacts, KindLine, PackageTime, PartTimings, PipelineFacts, PipelineStage, RunWaits, SlowTest, Spread, TestFileTiming, TestsFacts, Waited, WorkKind } from '@hornhoof/protocol';
+import { AGENT_TIMES, EXTERNAL_WAITS, KIND_LINES, PIPELINE_STAGES, type AgentTimeKind, type DoneTask, type ExternalWaitKind, type FileTime, type KindFacts, type KindLine, type PackageTime, type PartTimings, type PipelineFacts, type PipelineRow, type PipelineSection, type PipelineStage, type PipelineUnit, type RunWaits, type SlowTest, type Spread, type TestFileTiming, type TestsFacts, type Waited, type WorkKind } from '@hornhoof/protocol';
 import type { TaskEventKind, TaskStatus } from '../../db/schema.js';
 import type { AgentTime } from './tree.js';
 
@@ -364,4 +364,113 @@ export function laterBugsOf(done: DoneTask[], bugs: LaterBug[]): LaterBugs {
     for (const kind of new Set(hits.map(h => h.kind))) out.byKind[kind] = (out.byKind[kind] ?? 0) + 1;
   }
   return out;
+}
+
+/* The change from one number to another in percent, none when there is nothing to compare with. */
+export function percentChange(value: number | null, base: number | null): number | null {
+  if (value === null || base === null) return null;
+  if (base === 0) return value === 0 ? 0 : null;
+  return Math.round(((value - base) / base) * 100);
+}
+
+/* Numbers of a turn with the bugs found later in it, which grow after its snapshot. */
+export type CountedFacts = { facts: PipelineFacts; later: LaterBugs };
+type Fact = { section: PipelineSection; key: string; unit: PipelineUnit; value: number | null };
+
+const counts = (section: PipelineSection, values: Record<string, number | null>): Fact[] => Object.entries(values).map(([key, value]) => ({ section, key, unit: 'count', value }));
+const times = (section: PipelineSection, values: Record<string, number | null>): Fact[] => Object.entries(values).map(([key, value]) => ({ section, key, unit: 'seconds', value }));
+
+function waitFacts(name: string, w: Waited): Fact[] {
+  return [...counts('waits', { [`waits.${name}.count`]: w.count }), ...times('waits', { [`waits.${name}.seconds`]: w.seconds })];
+}
+
+function runFacts(name: string, w: RunWaits): Fact[] {
+  return [
+    ...waitFacts(name, w),
+    ...times('waits', { [`waits.${name}.worst`]: w.worst, [`waits.${name}.partQueue`]: w.partQueueSeconds, [`waits.${name}.partRun`]: w.partRunSeconds }),
+    ...counts('waits', { [`waits.${name}.parts`]: w.parts }),
+  ];
+}
+
+function timeFacts(f: PipelineFacts): Fact[] {
+  const agentsTotal = sum(AGENT_TIMES.filter(k => k !== 'queued').map(k => f.agents[k]));
+  return times('time', {
+    'toAcceptance.median': f.toAcceptance.median,
+    'toAcceptance.worst': f.toAcceptance.worst,
+    'toFirstSubmit.median': f.toFirstSubmit.median,
+    'toFirstSubmit.worst': f.toFirstSubmit.worst,
+    wholeTurn: f.wholeTurn,
+    criticalPath: f.criticalPath.seconds,
+    'agents.total': agentsTotal,
+  });
+}
+
+function waitsFacts(f: PipelineFacts): Fact[] {
+  return [
+    ...runFacts('testRuns', f.waits.testRuns),
+    ...runFacts('workRuns', f.waits.workRuns),
+    ...EXTERNAL_WAITS.flatMap(k => waitFacts(`external.${k}`, f.waits.external[k])),
+    ...waitFacts('person', f.waits.person),
+    ...waitFacts('tasks', f.waits.tasks),
+    ...waitFacts('queue', f.waits.queue),
+  ];
+}
+
+function kindRows({ facts, later }: CountedFacts): Fact[] {
+  return KIND_LINES.flatMap(kind => {
+    const k = facts.kinds[kind];
+    if (!k) return [];
+    return [
+      ...counts('kinds', { [`kinds.${kind}.tasks`]: k.tasks }),
+      ...times('kinds', { [`kinds.${kind}.toAcceptance`]: k.toAcceptance }),
+      ...counts('kinds', { [`kinds.${kind}.returns`]: k.returns, [`kinds.${kind}.fixRounds`]: k.fixRounds, [`kinds.${kind}.laterBugs`]: later.byKind[kind] ?? 0 }),
+    ];
+  });
+}
+
+const tenths = (ms: number | null): number | null => (ms === null ? null : Math.round(ms / 100) / 10);
+
+function testRows(t: TestsFacts): Fact[] {
+  if (!t.files) return [];
+  return [
+    ...times('tests', { 'tests.total': tenths(t.totalMs), 'tests.setup': tenths(t.setupMs), 'tests.run': tenths(t.testsMs), 'tests.teardown': tenths(t.teardownMs) }),
+    ...counts('tests', { 'tests.files': t.files }),
+    ...t.packages.flatMap(p => times('tests', { [`tests.package.${p.package}`]: tenths(p.totalMs) })),
+  ];
+}
+
+function factsOf(counted: CountedFacts): Fact[] {
+  const f = counted.facts;
+  return [
+    ...counts('tasks', { 'tasks.total': f.tasks.total, 'tasks.done': f.tasks.done, 'tasks.cancelled': f.tasks.cancelled, 'tasks.open': f.tasks.open }),
+    ...timeFacts(f),
+    ...times('stages', Object.fromEntries(PIPELINE_STAGES.map(k => [`stages.${k}`, f.stages[k]]))),
+    ...times('agents', Object.fromEntries(AGENT_TIMES.map(k => [`agents.${k}`, f.agents[k]]))),
+    ...waitsFacts(f),
+    { section: 'problems', key: 'submitsPerTask', unit: 'ratio', value: f.submitsPerTask },
+    ...counts('problems', { failures: f.failures, interrupted: f.interrupted, selectionMisses: f.selectionMisses }),
+    ...counts('quality', { 'quality.laterBugs': counted.later.total, returns: f.returns, fixRounds: f.fixRounds }),
+    ...kindRows(counted),
+    ...testRows(f.tests),
+  ];
+}
+
+/* Sections that grow with what happened: a line of nothing but zeros there says nothing. */
+const OMITTED_WHEN_EMPTY: ReadonlySet<PipelineSection> = new Set(['stages', 'agents', 'waits']);
+const says = (row: PipelineRow): boolean => !OMITTED_WHEN_EMPTY.has(row.section) || !!(row.value || row.previous || row.baseline);
+
+/* Every number of a turn with the same number of the turns it is compared with, also one only they have. */
+export function reportRows(now: CountedFacts, previous: CountedFacts | null, baseline: CountedFacts | null): PipelineRow[] {
+  const valuesOf = (c: CountedFacts | null) => new Map((c ? factsOf(c) : []).map(f => [f.key, f.value]));
+  const current = factsOf(now);
+  const before = valuesOf(previous);
+  const base = valuesOf(baseline);
+  const known = new Set(current.map(f => f.key));
+  const gone = [...(previous ? factsOf(previous) : []), ...(baseline ? factsOf(baseline) : [])].filter(f => !known.has(f.key)).map(f => ({ ...f, value: null }));
+  const unique = [...new Map([...current, ...gone].map(f => [f.key, f])).values()];
+  return unique.map(f => {
+    const was = before.get(f.key) ?? null;
+    const first = base.get(f.key) ?? null;
+    return { ...f, previous: was, baseline: first, vsPrevious: percentChange(f.value, was), vsBaseline: percentChange(f.value, first) };
+  }).filter(says);
 }

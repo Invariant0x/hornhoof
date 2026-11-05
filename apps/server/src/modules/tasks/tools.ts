@@ -15,6 +15,7 @@ import { appendOutgoing } from '../events/store.js';
 import { personParty } from '../events/parties.js';
 import { decisionPerson } from './decisions.js';
 import { WaitInput, waitFor } from './external-wait.js';
+import { pipelineReport } from './pipeline-report.js';
 
 export type ToolJob = { id: string; companyId: string; agentId: string; agentKind: 'orchestrator' | 'head' | 'worker' };
 type Agent = typeof agents.$inferSelect;
@@ -274,6 +275,16 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         const lines = await taskLines(ctx, top, t => sees(agent, t));
         return json(rows.map(t => ({ number: t.number, title: t.title || t.goal, goal: t.goal, status: t.status, tasks: lines.filter((_, i) => top[i]!.turnId === t.id) })));
       },
+    );
+    server.registerTool(
+      'pipeline_report',
+      {
+        description:
+          'How the pipeline went in a turn, for the company and by department: time from giving a task out to accepting it, the critical path apart from agent time, stages, waits by reason, returns, failures, interrupted turns, numbers by kind of task and test times. ' +
+          'Each number comes with the previous turn and the baseline turn and its change in percent. By default the running turn, else the last that ran. A department with described false has no description to take its own numbers from.',
+        inputSchema: { turn: Turn.optional() },
+      },
+      async ({ turn }) => run(async () => ({ text: JSON.stringify(await pipelineReport(db, job.companyId, turn), english) })),
     );
     server.registerTool(
       'plan_turn',

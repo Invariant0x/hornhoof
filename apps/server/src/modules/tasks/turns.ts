@@ -5,8 +5,9 @@ import { CLOSED, note, published, refuse, type Task, type Tx, type Wake } from '
 import { keepWakes } from './outbox.js';
 import { handOff } from './pulses.js';
 import { improvementsChanged, takeForPlanning } from '../improvements/store.js';
+import { keepSnapshot } from './pipeline-report.js';
 
-type Live = Pick<Ctx, 'db' | 'bus'>;
+type Live = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'log'>>;
 export type Turn = typeof turns.$inferSelect;
 /* One task of a turn as the orchestrator lays it out. */
 export type PlanItem = { department: string; product?: string; title: string; brief: string; body: string; workKind?: Task['workKind']; riskClass?: Task['riskClass'] };
@@ -181,15 +182,22 @@ export async function liveIn(tx: Tx, companyId: string, turnId: string): Promise
   return Boolean(open);
 }
 
+/* A turn that ran is over: its snapshot is kept before the next one opens. */
+async function closeRunning(ctx: Live, tx: Tx, turnId: string): Promise<Turn> {
+  const [closed] = await tx.update(turns).set({ status: 'closed', closedAt: new Date() }).where(eq(turns.id, turnId)).returning();
+  await keepSnapshot(tx, closed!, ctx.log);
+  return closed!;
+}
+
 /* Opens the lowest planned turn when none is open, and sends its tasks to their heads. An open turn with nothing left at
    its top closes first, and a planned turn whose tasks were all cancelled closes without starting, so the turns after
    them do not wait for nothing. */
-async function openNext(tx: Tx, companyId: string): Promise<{ turn: Turn; started: Started[] } | null> {
+async function openNext(ctx: Live, tx: Tx, companyId: string): Promise<{ turn: Turn; started: Started[] } | null> {
   for (;;) {
     const [open] = await tx.select({ id: turns.id }).from(turns).where(and(eq(turns.companyId, companyId), eq(turns.status, 'open')));
     if (open) {
       if (await liveIn(tx, companyId, open.id)) return null;
-      await tx.update(turns).set({ status: 'closed', closedAt: new Date() }).where(eq(turns.id, open.id));
+      await closeRunning(ctx, tx, open.id);
       continue;
     }
     const [next] = await tx.select().from(turns).where(and(eq(turns.companyId, companyId), eq(turns.status, 'planned'))).orderBy(asc(turns.number)).limit(1);
@@ -231,7 +239,7 @@ export async function planTurn(ctx: Live, by: By, input: { title: string; goal: 
       .returning();
     const planned = await insertPlanned(tx, companyId, agentId, turn!.id, items, input.improvement);
     if (input.improvement) await takeForPlanning(tx, companyId, input.improvement, await decidingPerson(tx, by));
-    const opened = await openNext(tx, companyId);
+    const opened = await openNext(ctx, tx, companyId);
     return { turn: opened?.turn ?? turn!, planned, opened };
   });
   ctx.bus.publish(companyId, { type: 'org' });
@@ -365,13 +373,17 @@ export async function mergeTurn(ctx: Live, by: Pick<By, 'companyId' | 'agentId'>
   return { turn: done.target, text: `Merged ${turnName(done.source)} into ${turnName(done.target)}.${what} ${turnName(done.source)} is closed.`, wakes: wakesFor(done.started) };
 }
 
-async function storeSettle(tx: Tx, task: Pick<Task, 'turnId' | 'companyId' | 'status'>) {
+async function storeSettle(ctx: Live, tx: Tx, task: Pick<Task, 'turnId' | 'companyId' | 'status'>) {
   const turnId = task.turnId!;
   const [turn] = await tx.select().from(turns).where(and(eq(turns.id, turnId), inArray(turns.status, ['open', 'planned'])));
   if (!turn) return null;
   if (await liveIn(tx, task.companyId, turnId)) return null;
-  const [closed] = await tx.update(turns).set({ status: 'closed', closedAt: new Date() }).where(eq(turns.id, turnId)).returning();
-  return { closed: closed!, planned: turn.status === 'planned', opened: turn.status === 'open' ? await openNext(tx, task.companyId) : null };
+  if (turn.status === 'planned') {
+    const [closed] = await tx.update(turns).set({ status: 'closed', closedAt: new Date() }).where(eq(turns.id, turnId)).returning();
+    return { closed: closed!, planned: true, opened: null };
+  }
+  const closed = await closeRunning(ctx, tx, turnId);
+  return { closed, planned: false, opened: await openNext(ctx, tx, task.companyId) };
 }
 
 /* After a task closed: when it was the last open task at the top of the open turn, the turn is over and the next planned
@@ -380,7 +392,7 @@ export async function settle(ctx: Live, task: Pick<Task, 'turnId' | 'companyId' 
   if (!task.turnId || !CLOSED.includes(task.status)) return null;
   const done = await ctx.db.transaction(async tx => {
     await lockCompany(tx, task.companyId);
-    return storeSettle(tx, task);
+    return storeSettle(ctx, tx, task);
   });
   if (!done) return null;
   ctx.bus.publish(task.companyId, { type: 'org' });
