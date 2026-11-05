@@ -114,6 +114,16 @@ Reviewers of different models find different things. So at each gate, one employ
 - A send-back gives the executor all their reasons in one list.
 - Work handed in again goes straight back to that gate, and only to the reviewers who sent it back. Each of them checks the fixes for its own findings.
 
+## How hard does an employee think?
+
+Hornhoof picks the level when a turn starts, by why it starts, and the level stays until that turn ends.
+
+- Plans, first looks, security checks and work run at the role's level, or at the level set on the employee's card.
+- A second look at the fixes for a reviewer's own finding and a merge of what passed its gates run at medium, or at the nearest level above it that the model has. A lower level stays as it is.
+- A turn that also brings anything else, such as a comment or a person's words, keeps the full level.
+- The card keeps the level you set. A model that names no levels gets none from Hornhoof.
+- A change of level starts the program again between turns, and the conversation goes on in the same session.
+
 ## What if a role has nobody switched on?
 
 - A role with nobody on takes no part. It gets no tasks, and work passes its gate by, on to the next one, or is done after the last.

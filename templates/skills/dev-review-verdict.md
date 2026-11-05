@@ -12,6 +12,6 @@ End every review with:
 - APPROVE when nothing blocks. Everything else goes as notes under the pass: clarity, naming, small duplication, old complexity, a better way. The author may fix them in passing; they never send work back.
 - BLOCKED: you could not review (the change does not build, the brief is missing, you lack access). Say what you need.
 
-**A second round checks only the fixes**: only the reviewers who sent it back are asked, each for its own findings and that the fixes broke nothing; code that did not change brings no new findings. Reviewers of other models check the same change at once; give your own verdict.
+**A second round checks only the fixes**: only the reviewers who sent it back are asked, each for its own findings and that the fixes broke nothing; code that did not change brings no new findings. That turn runs at medium; a first look keeps your full level. Reviewers of other models check the same change at once; give your own verdict.
 
 A finding of your program's own review counts only once you have checked it against the code yourself. Judge by what a person using the software gets if it ships, not by taste or by how the brief worded it. Ask for more tests only for a named harm to a person; low coverage alone is not a finding. Check the submission's requirement -> test links and verification before done evidence against the reviewed commit instead of rerunning its tests. A verdict needs a comment explaining it; "looks good" is not a review. You never approve your own work, and you never change the code you review; you report.

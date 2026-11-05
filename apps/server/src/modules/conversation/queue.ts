@@ -1,7 +1,7 @@
 import { combineReport, reportDelay } from './report-notices.js';
 import type { MachineDrain, Notification } from '@hornhoof/protocol';
 import type { MessageParty } from '../events/parties.js';
-import { currentLimits, effortFor, effortsOf, inLane, isProgramOwnPrompt, MAX_INSTRUCTIONS, modelsFor, OLD_NODE_INSTRUCTIONS, ORCHESTRATOR_EFFORT, UNHEARD_MS, type Limits } from '@hornhoof/protocol';
+import { currentLimits, effortsOf, inLane, isProgramOwnPrompt, MAX_INSTRUCTIONS, modelsFor, OLD_NODE_INSTRUCTIONS, UNHEARD_MS, type Limits } from '@hornhoof/protocol';
 import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, lte, ne, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -27,6 +27,7 @@ import { agentFailureState, notifyFailure, type FailureState } from '../tasks/fa
 import { logTurnFact } from '../tasks/turn-log.js';
 import { addressed, preface } from './prompt.js';
 import { originalPromptOf } from './requested-prompt.js';
+import { effortOfTurn } from './turn-effort.js';
 import { ABOUT_AS_FREE, freedom } from '../testruns/pick.js';
 import { queuedInput, queuedUsed } from './queued-input.js';
 import { repeatedTurn, UNHEARD_NOTE, type RepeatedTurn, type TurnWords } from './turn-words.js';
@@ -926,9 +927,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
   const models = modelsFor(sub.provider, sub.models);
   const model = agent.model && models.some(m => m.id === agent.model) ? agent.model : null;
   /* How hard it thinks goes on in the same session; the program starts again at the new level. */
-  const role = agent.roleKey ? ctx.templates.roles.get(agent.roleKey) : undefined;
-  const roleEffort = agent.kind === 'orchestrator' ? ORCHESTRATOR_EFFORT : role?.effort;
-  const effort = effortFor(agent.effort, effortsOf(models, model), roleEffort);
+  const effort = await effortOfTurn(ctx, agent, effortsOf(models, model), [job, ...along]);
   /* The hash covers the model too, so a new model starts a fresh session like new instructions do. */
   const runHash = model ? textHash(`${instructions.hash}:${model}`) : instructions.hash;
   const on = { subscriptionId: sub.id, nodeId: place.nodeId };
