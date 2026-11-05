@@ -20,6 +20,7 @@ import { WaitInput, waitFor } from './external-wait.js';
 import { pipelineReport } from './pipeline-report.js';
 import { commitProof, proofLine } from '../testruns/commit-proof.js';
 import { keptEvidence, noProofNote, taskEvidence } from '../testruns/evidence.js';
+import { ReviewSha, reviewContext } from './review-context.js';
 
 export type ToolJob = { id: string; companyId: string; agentId: string; agentKind: 'orchestrator' | 'head' | 'worker' };
 type Agent = typeof agents.$inferSelect;
@@ -37,7 +38,7 @@ const json = (value: unknown) => say(JSON.stringify(value, english));
 export const TASK_ANSWER = 40_000;
 
 /* A task as an agent reads it: when it is too long, its oldest log lines are left out and counted. */
-function fitted(detail: TaskDetail): string {
+function fitted<T extends TaskDetail>(detail: T): string {
   const whole = JSON.stringify(detail, english);
   if (whole.length <= TASK_ANSWER) return whole;
   const sizes = detail.log.map(l => JSON.stringify(l, english).length + 1);
@@ -187,7 +188,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     },
     async ({ task: ref }) =>
       find(ref).then(
-        async ({ agent, task }) => say(fitted(await taskDetail(ctx, task, t => sees(agent, t)))),
+        async ({ agent, task }) => say(fitted({ ...await taskDetail(ctx, task, t => sees(agent, t)), review: await reviewContext(db, task.id) })),
         (err: unknown) => (err instanceof ApiError ? say(err.message, true) : Promise.reject(err)),
       ),
   );
@@ -467,14 +468,14 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
       {
         description:
           'Your verdict as the gate a task stands at: pass sends it to the next gate (or finishes it), changes sends it back to its executor. comment: your reasons, always. findings: how many separate problems your comment names, 0 when there are none. Its log keeps the test runs it stood on, with the commits they pinned.',
-        inputSchema: { task: Ref, pass: z.boolean(), comment: Text.trim().min(1), findings: z.number().int().min(0).max(99).optional() },
+        inputSchema: { task: Ref, pass: z.boolean(), comment: Text.trim().min(1), findings: z.number().int().min(0).max(99).optional(), reviewedCommit: ReviewSha.optional() },
       },
-      async ({ task: ref, pass, comment: why, findings }) =>
+      async ({ task: ref, pass, comment: why, findings, reviewedCommit }) =>
         run(async () => {
           const { task } = await find(ref);
           plain(task, why);
           const evidence = await taskEvidence(ctx, task);
-          const moved = await verdict(ctx, job.agentId, task.id, { pass, comment: why, findings, evidence: keptEvidence(evidence) });
+          const moved = await verdict(ctx, job.agentId, task.id, { pass, comment: why, findings, reviewedCommit, evidence: keptEvidence(evidence) });
           return { text: `Recorded. ${await where(moved.task)}${noProofNote(evidence, pass)}`, moved };
         }),
     );

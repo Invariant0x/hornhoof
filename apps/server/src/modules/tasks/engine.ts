@@ -16,6 +16,7 @@ import { returnAlongLine } from '../org/map-state.js';
 import { handOff } from './pulses.js';
 import { recordCause, type WakeCause } from './notification-cause.js';
 import { preserveNote } from './long-text.js';
+import { captureReview, reviewContext } from './review-context.js';
 
 export type Task = typeof tasks.$inferSelect;
 export type Request = typeof requests.$inferSelect;
@@ -28,7 +29,7 @@ export type Moved = { task: Task; wakes: Wake[] };
 
 export type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 /* The templates name a department's gate roles, for the review of a turn; without them none opens. */
-type Live = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'templates' | 'config' | 'readCompare'>>;
+type Live = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'templates' | 'config' | 'readCompare' | 'readCommit'>>;
 
 export const CLOSED: readonly Task['status'][] = ['done', 'cancelled'];
 /* The send-back at one gate that also calls the head in. */
@@ -581,7 +582,8 @@ export async function submit(ctx: Live, agentId: string, taskId: string, r: { su
   if (task.status === 'waiting' && (await waitsForPerson(ctx.db, task.id))) throw refuse(409, 'task_invalid', `#${task.number} waits for a person's answer first.`);
   await refuseWaiting(ctx.db, task);
   await refuseOpenUnder(ctx.db, task);
-  const n: Note = { kind: 'submitted', actor: { agentId }, text: r.summary, data: { evidence: r.evidence, ...(task.merging ? { merged: true } : {}) }, returned: true };
+  const review = await captureReview(ctx, task);
+  const n: Note = { kind: 'submitted', actor: { agentId }, text: r.summary, data: { evidence: r.evidence, ...(review ? { review } : {}), ...(task.merging ? { merged: true } : {}) }, returned: true };
   const unstuck = stuckGoes(ctx, task);
   /* Its gates passed it already: handing the merge in finishes it. Work sent back goes straight to the gate that sent it. */
   if (task.gates.length && !task.merging) {
@@ -755,7 +757,7 @@ async function asked(db: Db, task: Task, agentId: string): Promise<boolean> {
   return !!mine;
 }
 
-type Verdict = { pass: boolean; comment: string; findings?: number; evidence?: object[] };
+type Verdict = { pass: boolean; comment: string; findings?: number; evidence?: object[]; reviewedCommit?: string };
 
 /* What the log keeps of a verdict: evidence names the test runs it stood on, with the commits they pinned. */
 const verdictData = (task: Task, v: Verdict) => ({ pass: v.pass, stage: task.stage, round: task.bounces, ...(v.findings !== undefined ? { findings: v.findings } : {}), ...(v.evidence?.length ? { evidence: v.evidence } : {}) });
@@ -768,7 +770,9 @@ export async function verdict(ctx: Live, agentId: string, taskId: string, v: Ver
   if (!v.comment.trim()) throw refuse(400, 'task_invalid', 'A verdict needs its reasons.');
   /* The others at the gate go on while one of them waits for a person; that one decides once the answer is in. */
   if (task.status === 'waiting' && (await asked(ctx.db, task, agentId))) throw refuse(409, 'task_invalid', `#${task.number} waits for the answer to your question first.`);
-  const n: Note = { kind: 'verdict', actor: { agentId }, text: v.comment.trim(), data: verdictData(task, v), returned: true };
+  const review = await reviewContext(ctx.db, task.id);
+  if (v.reviewedCommit !== undefined && v.reviewedCommit !== review?.commit) throw refuse(400, 'task_invalid', 'The reviewed commit must match the pinned review revision.');
+  const n: Note = { kind: 'verdict', actor: { agentId }, text: v.comment.trim(), data: { ...verdictData(task, v), ...(review ? { review } : {}) }, returned: true };
   const panel = task.panel.filter(id => id !== agentId);
   if (panel.length) return { task: await move(ctx, task, { panel, assigneeAgentId: panel[0]!, silent: 0 }, n), wakes: [] };
   const [me] = await ctx.db.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId));
