@@ -208,6 +208,6 @@ describe('the words', () => {
     expect(Object.keys(r.readModes).sort()).toEqual(['every', 'new_kinds']);
     expect(r.modes).toEqual({ every: 'Каждое мне', new_kinds: 'Только новые виды', within_limits: 'Без одобрения в пределах лимитов' });
     const words = JSON.stringify(r, (_k, v: unknown) => (typeof v === 'function' ? String((v as (a: string, b: string) => string)('a', 'b')) : v));
-    expect(words).not.toMatch(/[ёЁ—]/);
+    expect(words).not.toMatch(/[\u0451\u0401\u2014]/);
   });
 });
