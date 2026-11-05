@@ -35,6 +35,49 @@ const fact = (within_: HTMLElement, label: string) => within(within_).getByText(
 
 afterEach(() => localStorage.clear());
 
+const DAY = 24 * 3600_000;
+const endsIn = (days: number) => new Date(Date.now() + days * DAY).toISOString();
+const linkWithCertificate = (expiresAt: string) => ({ link: { name: 'acme', url: 'https://acme.hornhoof.org' }, domain: 'hornhoof.org', tls: { mode: 'https', certificate: true, expiresAt, failedAt: null } });
+
+describe('the link certificate warning', () => {
+  it('warns 14 days before the link\'s certificate ends', async () => {
+    const soon = endsIn(13);
+    lists({ 'GET /api/link': [200, linkWithCertificate(soon)] });
+    render(<Machines me={ME} />);
+    const warning = (await screen.findByText(/The link's certificate ends/)).closest('p')!;
+    expect(warning).toHaveClass('alert');
+    expect(warning).toHaveAttribute('role', 'status');
+    expect(warning).toHaveTextContent(`The link's certificate ends on ${new Date(soon).toLocaleDateString('en')} and has not renewed yet. Hornhoof tries again every hour.`);
+    expect(warning).toHaveTextContent('If it ends, the link keeps working, encrypted to hornhoof.org.');
+  });
+
+  it('says nothing while the certificate has 15 days left', async () => {
+    const calls = lists({ 'GET /api/link': [200, linkWithCertificate(endsIn(15))] });
+    render(<Machines me={ME} />);
+    await screen.findByRole('table');
+    await vi.waitFor(() => expect(calls.some(c => c.path === '/api/link')).toBe(true));
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+    expect(screen.queryByText(/The link's certificate ends/)).not.toBeInTheDocument();
+  });
+
+  it('warns in Russian with the date in that language', async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    const soon = endsIn(3);
+    lists({ 'GET /api/link': [200, linkWithCertificate(soon)] });
+    render(<LanguageProvider><Machines me={ME} /></LanguageProvider>);
+    expect(await screen.findByText(/Сертификат ссылки заканчивается/)).toHaveTextContent(`Сертификат ссылки заканчивается ${new Date(soon).toLocaleDateString('ru')} и еще не обновился.`);
+  });
+
+  it('asks nothing about the link for people who do not see the whole company', async () => {
+    const calls = lists();
+    render(<Machines me={{ ...ME, person: { ...ME.person, scopeKind: 'listed' } }} />);
+    await screen.findByRole('table');
+    expect(calls.some(c => c.path === '/api/link')).toBe(false);
+  });
+});
+
 describe('Machines', () => {
   it.each([['en', 'Agent programs'], ['ru', 'Программы агентов']])('shows reported program versions on the machine card in %s', async (language, heading) => {
     localStorage.setItem('hh-lang', language);

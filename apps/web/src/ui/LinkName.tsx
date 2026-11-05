@@ -22,6 +22,8 @@ type Props = {
   problem?: string;
   /* The name of the link the company has now, which is not asked about. */
   current?: string;
+  /* Starts on a long random name when the field is empty as it mounts. */
+  startRandom?: boolean;
 };
 
 /* Waits this long after the last key before asking, so typing a name asks once. */
@@ -29,7 +31,7 @@ const PAUSE_MS = 350;
 
 /* The name of a public link like acme.hornhoof.org: the field, a button for a long random name, and whether the name is
    free, asked while it is typed. */
-export function LinkName({ name, onName, domain, check, onState, problem, current }: Props) {
+export function LinkName({ name, onName, domain, check, onState, problem, current, startRandom }: Props) {
   const t = useT();
   const id = useId();
   const [state, setState] = useState<NameState>('empty');
@@ -38,6 +40,19 @@ export function LinkName({ name, onName, domain, check, onState, problem, curren
   asking.current = check;
   const told = useRef(onState);
   told.current = onState;
+  const named = useRef(onName);
+  named.current = onName;
+
+  const takeRandom = () => {
+    const next = randomLinkName();
+    setRandom(next);
+    named.current(next);
+  };
+
+  useEffect(() => {
+    if (startRandom && !name) takeRandom();
+    // Only as the field mounts: later empty names are the person's own.
+  }, []);
 
   useEffect(() => {
     const now: NameState = !name ? 'empty' : name === current ? 'current' : isLinkName(name) ? 'checking' : 'invalid';
@@ -96,11 +111,7 @@ export function LinkName({ name, onName, domain, check, onState, problem, curren
       <button
         className="btn small ghost"
         type="button"
-        onClick={() => {
-          const next = randomLinkName();
-          setRandom(next);
-          onName(next);
-        }}
+        onClick={takeRandom}
       >
         {t.link.random}
       </button>
