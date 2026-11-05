@@ -22,6 +22,8 @@ export const SECRET: Record<string, string[]> = {
   nodes: ['key_hash', 'account'],
   machines: ['machine_key'],
   departments: ['repo_token_enc'],
+  program_operator_cases: ['capability'],
+  attachments: ['bytes'],
 };
 /* Who people are and what they reach, and the subscriptions, machines and nodes the company runs on: the orchestrator's
    role reads them, and they change only through the tools the CEO alone may ask for. The history of the nodes' connections,
@@ -29,7 +31,11 @@ export const SECRET: Record<string, string[]> = {
    carry a repository's token and the task's files to the machines lent to them. And what waits for people's decisions
    with the logs that say who wrote and who decided: a request closes only through answer_request, in a turn of a person
    who may take it, and a forged message would make a turn answer someone else. */
-const READ_ONLY = ['people', 'person_access', 'subscriptions', 'machines', 'nodes', 'node_connections', 'test_runs', 'test_parts', 'requests', 'proposals', 'agent_events', 'task_events'];
+const READ_ONLY = [
+  'people', 'person_access', 'subscriptions', 'machines', 'nodes', 'node_connections', 'test_runs', 'test_parts',
+  'requests', 'proposals', 'agent_events', 'task_events', 'program_instances', 'program_deliveries',
+  'program_operator_cases', 'program_operator_actions', 'wait_notices', 'person_changes', 'attachments',
+];
 /* An employee's fields that give it tools, a place or the machine its turns and their tokens go to: they change only by
    hiring and on its card, which make the CEO's checks. A head's department is held by a trigger, as a column right
    cannot tell a head from a worker. */
