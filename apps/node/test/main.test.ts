@@ -1264,9 +1264,12 @@ function descriptionRepo(dir: string) {
   return { read, repo: { url, token: '' }, commitSha: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), repositoryScope: { companyId: '11111111-1111-4111-8111-111111111111', repositoryOwnerId: '22222222-2222-4222-8222-222222222222', repoUrlHash: createHash('sha256').update(url).digest('hex') } };
 }
 
+const environmentTestUid = 2_000_000_000 + (process.getuid?.() ?? 0) % 1_000_000;
+const environmentTestUser = { uid: environmentTestUid, gid: environmentTestUid };
+
 it('queues description discovery before reading a cold mirror and replies with a typed missing descriptor', async () => {
   const server = await fakeServer(false), dir = nodeDir(server.url), source = descriptionRepo(dir);
-  const node = await runNode({ dir, adapter, log: () => {}, testUser: { uid: 20000, gid: 20000 }, describeEnvironment: source.read }); onTestFinished(() => node.stop());
+  const node = await runNode({ dir, adapter, log: () => {}, testUser: environmentTestUser, describeEnvironment: source.read }); onTestFinished(() => node.stop());
   await server.wait(() => server.received.some(frame => frame.type === 'hello'));
   expect(server.received.find(frame => frame.type === 'hello')).toMatchObject({ testEnvironmentVersion: 1, testRuntimes: expect.arrayContaining([expect.objectContaining({ id: 'node' })]) });
   const requestId = '33333333-3333-4333-8333-333333333333'; server.send({ type: 'tests.describe', requestId, ...source });
@@ -1281,7 +1284,7 @@ it('queues description discovery before reading a cold mirror and replies with a
 
 it('cancels a queued description before repository materialization', async () => {
   const server = await fakeServer(false), dir = nodeDir(server.url), source = descriptionRepo(dir);
-  const node = await runNode({ dir, adapter, log: () => {}, testUser: { uid: 20000, gid: 20000 }, describeEnvironment: source.read }); onTestFinished(() => node.stop());
+  const node = await runNode({ dir, adapter, log: () => {}, testUser: environmentTestUser, describeEnvironment: source.read }); onTestFinished(() => node.stop());
   await server.wait(() => server.received.some(frame => frame.type === 'hello'));
   const requestId = '44444444-4444-4444-8444-444444444444'; server.send({ type: 'tests.describe', requestId, ...source });
   await server.wait(() => server.received.some(frame => frame.type === 'check.acquire'));
@@ -1293,7 +1296,7 @@ it('cancels a queued description before repository materialization', async () =>
 
 it('reports a metadata deadline and replays its settled reply without acquiring another slot', async () => {
   const server = await fakeServer(), dir = nodeDir(server.url), source = descriptionRepo(dir);
-  const node = await runNode({ dir, adapter, log: () => {}, testUser: { uid: 20000, gid: 20000 }, describeEnvironment: async () => { throw new DOMException('Description deadline expired.', 'TimeoutError'); } }); onTestFinished(() => node.stop());
+  const node = await runNode({ dir, adapter, log: () => {}, testUser: environmentTestUser, describeEnvironment: async () => { throw new DOMException('Description deadline expired.', 'TimeoutError'); } }); onTestFinished(() => node.stop());
   await server.wait(() => server.received.some(frame => frame.type === 'hello'));
   const request = { type: 'tests.describe', requestId: '66666666-6666-4666-8666-666666666666', ...source };
   server.send(request); await server.wait(() => server.received.some(frame => frame.type === 'tests.described'));
@@ -1313,7 +1316,7 @@ it('keeps a stopped part cleanup exclusive when another machine slot is granted 
     }
     return { type: 'tests.done', partId: message.partId, ok: message.partId !== 'first', exitCode: message.partId === 'first' ? null : 0, error: message.partId === 'first' ? 'cancelled' : null, commit: null, log: 'cleanup finished' };
   });
-  const node = await runNode({ dir, adapter, testUser: { uid: 20000, gid: 20000 }, runPart, log: () => {} });
+  const node = await runNode({ dir, adapter, testUser: environmentTestUser, runPart, log: () => {} });
   onTestFinished(() => { release(); node.stop(); });
   await server.wait(() => server.received.some(frame => frame.type === 'hello'));
   const part = { type: 'tests.run', repo: { url: 'https://example.test/repo.git', token: '' }, branch: null, task: 1, command: 'check', part: 1, parts: 1, timeoutMs: 1000 };
