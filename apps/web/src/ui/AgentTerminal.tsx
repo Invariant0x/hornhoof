@@ -3,7 +3,7 @@ import '@xterm/xterm/css/xterm.css';
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { useT } from '../i18n';
 import { fitTerminal, observeTerminalFit } from './terminal-fit';
-import { attachTerminalScroll, restoreLiveTerminal } from './terminal-scroll';
+import { attachTerminalScroll, restoreLiveTerminal, writeTerminalData } from './terminal-scroll';
 import { isHidden } from './visibility';
 
 /* Ivan's iTerm2 profile in dark mode, which the terminal repeats on any page: Claude Code and Codex run their dark theme,
@@ -74,8 +74,7 @@ function received(view: View, m: Frame) {
 
 function screenCame(view: View, data: string) {
   if (!view.told) view.setUp(true);
-  restoreLiveTerminal(view.term);
-  view.term.write(data);
+  writeTerminalData(view.term, data);
   /* Forgotten before the resize goes, since the screen it brings may come before send returns. */
   const opened = view.unconfirmed;
   view.unconfirmed = null;
