@@ -2,11 +2,11 @@
 
 # Hornhoof
 
-**Your own company of AI agents, on your own computers.**
+**Your own company of AI agents: any models, your own computers.**
 
-Hornhoof turns the AI plans you and your friends already pay for, like Claude, ChatGPT, Kimi, GLM or Google, into one company that works for you. You describe the task in plain words. The orchestrator, the main agent, splits it between departments, each with a head and employees, and agents of different makers check each other's work. You get the finished result.
+Hornhoof is a system for running AI agents as one company. It works with any models: through subscriptions like Claude, ChatGPT, Kimi, GLM or Google, through API keys, and with new models as they come out. You describe the task in plain words. The orchestrator, the main agent, splits it between departments, each with a head and employees, and agents on different models check each other's work. You see everything on one map and get the finished result.
 
-It is your own private cloud. It runs on your computers, joined with the computers of the friends who build the project with you. No cloud provider, no third-party servers, no account to make. Free and open source.
+It is your own virtual cloud. It runs on the computers you connect, one or many, yours or your team's. No cloud provider, no third-party servers, no account to make. Free and open source.
 
 ## Hornhoof is for you if
 
@@ -60,7 +60,7 @@ The pictures show Moonfern, a made-up startup of three friends with seven AI pla
 
    ![The company map](.github/assets/map.gif)
 
-Works with **Claude Code**, **Codex** (ChatGPT plans), **Kimi Code**, the **GLM Coding Plan** and **Google Antigravity**, and with Anthropic and OpenAI API keys. When a new version is out, one "Update" button moves every machine to it.
+Works with **Claude Code**, **Codex** (ChatGPT plans), **Kimi Code**, the **GLM Coding Plan** and **Google Antigravity**, and with Anthropic and OpenAI API keys. New programs and models are added as they come out. When a new version is out, one "Update" button moves every machine to it.
 
 ## For a startup or a team of friends
 
