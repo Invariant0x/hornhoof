@@ -15,6 +15,8 @@ import { updaterBusy } from './updater-status.js';
 
 export const KEEPER_PORTS = { peer: 7070, front: 7080, linkHttp: 7081 } as const;
 
+const DOOR_PORTS = { front: KEEPER_PORTS.front, linkHttp: KEEPER_PORTS.linkHttp, linkTls: LINK_TLS_PORT };
+
 export type KeeperOptions = {
   config: Config;
   /* Where the link and its certificate are read from. Null: no link, as for a keeper with no DATABASE_URL. */
@@ -162,12 +164,13 @@ export class Keeper {
   }
 
   async start(): Promise<{ front: number; linkHttp: number; linkTls: number }> {
-    const { host, ports, frontHost, everyMs, db } = this.opts;
+    const { host = '0.0.0.0', ports, frontHost, everyMs = EVERY_MS, db } = this.opts;
+    const at = { ...DOOR_PORTS, ...ports };
     this.giveWord();
-    const front = await this.open(visitorFromFront(frontHost), ports?.front ?? KEEPER_PORTS.front, host ?? '0.0.0.0');
-    const linkHttp = await this.open(visitorFromLink, ports?.linkHttp ?? KEEPER_PORTS.linkHttp, LINK_HOST);
-    const linkTls = await this.listener.listen(ports?.linkTls ?? LINK_TLS_PORT);
-    this.timer = setInterval(() => this.giveWord(), everyMs ?? EVERY_MS);
+    const front = await this.open(visitorFromFront(frontHost), at.front, host);
+    const linkHttp = await this.open(visitorFromLink, at.linkHttp, LINK_HOST);
+    const linkTls = await this.listener.listen(at.linkTls);
+    this.timer = setInterval(() => this.giveWord(), everyMs);
     if (db) this.carryLink(db, { http: { ip: LINK_HOST, port: linkHttp }, https: { ip: LINK_HOST, port: linkTls } });
     return { front, linkHttp, linkTls };
   }
