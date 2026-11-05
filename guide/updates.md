@@ -17,6 +17,10 @@ A planned update does not cut off agents at work. The machine takes no new work,
 
 If the work does not finish in time, nothing stops. The update is put off, the card says when it tries again, and the head of Operations is told.
 
+Each node on the computer goes by itself: one that has no work left restarts at once, whatever the others still wait for. Versions in the account menu says of each node what it waits for and until when.
+
+The orchestrator and the heads wait for such a node for three minutes at most. After that their next turn goes to another machine of their plan or, when the plan has no other, to the node that waits, whose work runs on. Other agents' turns wait for the update.
+
 ## Go back to an earlier build
 
 Versions in the account menu lists the published builds, with the one running now. It goes back to an earlier one the same way.

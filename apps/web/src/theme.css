@@ -304,6 +304,14 @@ select:disabled { opacity: .55; }
   margin: 0; max-height: 180px; overflow: auto; padding: 10px 12px;
   background: var(--surface2); border: 1px solid var(--line); font-family: var(--f-mono); font-size: 12px; white-space: pre-wrap;
 }
+/* Each node's wait for an update: its name and mark, what it waits for and until when. */
+.update-nodes { display: grid; gap: 8px; }
+.update-nodes h3 { margin: 0; font-size: 15px; }
+.update-nodes p { margin: 0; color: var(--muted); font-size: 13px; }
+.update-nodes ul { list-style: none; margin: 0; padding: 0; display: grid; }
+.update-nodes li { display: grid; gap: 4px; padding: 8px 0; border-top: 1px solid var(--line); font-size: 13px; overflow-wrap: anywhere; }
+.update-nodes li > div { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.update-nodes li b { font-family: var(--f-display); }
 .versions { list-style: none; margin: 0; padding: 0; display: grid; }
 .versions li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); }
 .versions li > div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; min-width: 0; }
