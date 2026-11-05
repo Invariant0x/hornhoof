@@ -9,6 +9,15 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import { command } from '../src/main.js';
 import { markRemoved, readState } from '../src/state.js';
 
+vi.mock('node:child_process', async importOriginal => {
+  const original = await importOriginal<typeof import('node:child_process')>();
+  return {
+    ...original,
+    spawn: (file: string, args: string[], options: import('node:child_process').SpawnOptions) =>
+      original.spawn(file === 'npm' ? join(bin, 'npm') : file, args, options),
+  };
+});
+
 const FAKES = fileURLToPath(new URL('./fakes/', import.meta.url));
 const SERVER = 'https://hornhoof.example.test';
 const KEY = 'node-key-0123456789abcdef';

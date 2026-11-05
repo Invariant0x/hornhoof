@@ -1,7 +1,8 @@
+import { execFileSync } from 'node:child_process';
 import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   browserEnv,
   browsersDir,
@@ -58,6 +59,7 @@ function markInstalled(baseDir: string, folders: string[]): void {
 }
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -163,6 +165,45 @@ describe('prepareBrowser', () => {
     });
     expect(second).toEqual({ status: 'ready', version: '1.64.1', playwrightDir: globalPw, downloaded: false });
     expect(calls).toBe(0);
+  });
+
+  it('isolates npm and Chromium installers from inherited settings and working directories', async () => {
+    const dir = makeTemp();
+    const repoDir = makeTemp();
+    writeFileSync(join(repoDir, 'package-lock.json'), JSON.stringify({ packages: { 'node_modules/playwright': { version: '1.65.0' } } }));
+    writeFileSync(join(repoDir, '.npmrc'), 'registry=https://project.invalid/\n');
+    vi.stubEnv('HOME', repoDir);
+    vi.stubEnv('npm_config_registry', 'https://lower.invalid/');
+    vi.stubEnv('NPM_CONFIG_REGISTRY', 'https://upper.invalid/');
+    vi.stubEnv('npm_config_userconfig', join(repoDir, '.npmrc'));
+    vi.stubEnv('NODE_OPTIONS', '--no-warnings');
+    vi.stubEnv('PLAYWRIGHT_DOWNLOAD_HOST', 'https://download.invalid');
+    const homes: string[] = [];
+    const result = await prepareBrowser({
+      dir, repoDir, isRoot: false, seedDir: makeTemp(), globalPlaywrightDir: makeTemp(),
+      runCommand: async (bin, args, env, _user, cwd) => {
+        homes.push(env.HOME!);
+        expect(cwd).toBe(env.HOME);
+        expect(env.HOME).not.toBe(repoDir);
+        expect(statSync(env.HOME!).mode & 0o777).toBe(0o700);
+        expect(env.npm_config_registry).toBeUndefined();
+        expect(env.NPM_CONFIG_REGISTRY).toBe('https://registry.npmjs.org/');
+        expect(env.npm_config_userconfig).toBeUndefined();
+        expect(env.NODE_OPTIONS).toBeUndefined();
+        expect(env.PLAYWRIGHT_DOWNLOAD_HOST).toBeUndefined();
+        if (bin === 'npm') {
+          expect(args).toContain('--ignore-scripts');
+          expect(readFileSync(env.NPM_CONFIG_USERCONFIG!, 'utf8')).toBe('');
+          const config = JSON.parse(execFileSync('npm', ['config', 'list', '--json', '--prefix', args[args.indexOf('--prefix') + 1]!], { env, cwd, encoding: 'utf8' }));
+          expect(config.registry).toBe('https://registry.npmjs.org/');
+          fakePlaywrightPackage(args[args.indexOf('--prefix') + 1]!, '1.65.0', '1260');
+        } else markInstalled(env.PLAYWRIGHT_BROWSERS_PATH!, ['chromium-1260', 'chromium_headless_shell-1260']);
+        return { code: 0, output: '', timedOut: false };
+      },
+    });
+    expect(result).toMatchObject({ status: 'ready', downloaded: true });
+    expect(homes).toHaveLength(2);
+    expect(homes.every(home => !existsSync(home))).toBe(true);
   });
 
   it('downloads once when a project updates @playwright/test in its lockfile and skips download on repeat runs', async () => {
