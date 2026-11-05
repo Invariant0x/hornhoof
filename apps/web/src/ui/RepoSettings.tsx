@@ -12,6 +12,19 @@ type Props = {
   compact?: boolean;
 };
 
+const savedCommand = (repository: Repository | null | undefined) => repository?.fullTestCommand ?? '';
+
+/* Sent only when it changed; an empty field says there is no such command. */
+function commandChange(typed: string, saved: string) {
+  const command = typed.trim();
+  return command === saved ? {} : { fullTestCommand: command || null };
+}
+
+function FullCommandLine({ command }: { command: string }) {
+  const t = useT();
+  return <small className="repo-command">{command ? t.dept.fullCommandIs(command) : t.dept.noFullCommand}</small>;
+}
+
 /* The repository a department's or product's agents clone, for people who see the whole company. An empty token keeps the saved one. */
 export function RepoSettings({ placeId, repository, compact = false }: Props) {
   const t = useT();
@@ -50,7 +63,7 @@ export function RepoSettings({ placeId, repository, compact = false }: Props) {
     setAuthorName(repository?.author?.name ?? '');
     setAuthorEmail(repository?.author?.email ?? '');
     setMemory(repository?.testMemoryGb ? String(repository.testMemoryGb) : '');
-    setFullCommand(repository?.fullTestCommand ?? '');
+    setFullCommand(savedCommand(repository));
     setFailure(null);
     setEditing(true);
   }
@@ -62,10 +75,7 @@ export function RepoSettings({ placeId, repository, compact = false }: Props) {
     /* Sent only when it changed; an empty field takes the default again. */
     const gb = memory.trim() ? Number(memory) : null;
     const testMemory = gb !== (repository?.testMemoryGb ?? null) ? { testMemoryGb: gb } : {};
-    /* The same; an empty field says there is no such command. */
-    const command = fullCommand.trim() || null;
-    const testCommand = command !== (repository?.fullTestCommand ?? null) ? { fullTestCommand: command } : {};
-    const body = { url: url.trim(), branch: branch.trim() || 'main', ...(token.trim() ? { token: token.trim() } : {}), ...author, ...testMemory, ...testCommand };
+    const body = { url: url.trim(), branch: branch.trim() || 'main', ...(token.trim() ? { token: token.trim() } : {}), ...author, ...testMemory, ...commandChange(fullCommand, savedCommand(repository)) };
     void run(() => api.put(path, body));
   }
 
@@ -109,7 +119,7 @@ export function RepoSettings({ placeId, repository, compact = false }: Props) {
       <small>{repository.tokenLast4 ? t.dept.tokenEnding(repository.tokenLast4) : t.dept.noToken}</small>
       {repository.author && <small>{t.dept.commitsAs(repository.author.name, repository.author.email)}</small>}
       {repository.testMemoryGb !== undefined && <small>{t.dept.testMemoryIs(repository.testMemoryGb)}</small>}
-      <small className="repo-command">{repository.fullTestCommand ? t.dept.fullCommandIs(repository.fullTestCommand) : t.dept.noFullCommand}</small>
+      <FullCommandLine command={savedCommand(repository)} />
       {asking ? (
         <div className="repo-actions">
           <span>{t.dept.removeAsk}</span>

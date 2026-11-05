@@ -133,6 +133,8 @@ const ranAgain = (lost: LostRun[]) => (lost.length ? ` It ran again after ${lost
 
 /* The commit a run pinned, where agents read of it. */
 const pinLine = (run: Pick<Run, 'branch' | 'commitSha'>) => (run.commitSha ? ` Pinned commit: ${run.commitSha} (${run.branch}).` : '');
+/* Only a test run can leave a mark on its commit. */
+const markLine = (kind: RunKind, found: { department: { repoFullTestCommand: string | null } } | null, command: string) => (kind === 'tests' ? markPromise(found?.department.repoFullTestCommand, command) : '');
 
 /* Hornhoof's account of a run that ended: each part, where it ran and how long, the end of what failed, and the files
    on the task. */
@@ -626,7 +628,7 @@ export async function startRun(ctx: Ctx, job: ToolJob, input: RunInput, kind: Ru
   });
   const none = went.some(p => p.status === 'queued') && !places.length ? ' No machine that may take it is online now, so it waits until one is.' : '';
   return (
-    `${named(run)} of #${task.number} ${one && went[0]!.status === 'running' ? 'runs ' : ''}${one ? where[0] : `has ${parts} parts: ${where.join(', ')}`}.${none}${pinLine(run)}${kind === 'tests' ? markPromise(found?.department.repoFullTestCommand, run.command) : ''} ` +
+    `${named(run)} of #${task.number} ${one && went[0]!.status === 'running' ? 'runs ' : ''}${one ? where[0] : `has ${parts} parts: ${where.join(', ')}`}.${none}${pinLine(run)}${markLine(kind, found, run.command)} ` +
     `When every part has ended you are woken on #${task.number} with the result; ${toolsOf(kind).state} ${run.number} shows how it goes.`
   );
 }
