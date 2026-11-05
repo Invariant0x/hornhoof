@@ -236,7 +236,9 @@ describe('frozen task workspace registry producer', () => {
     let output: string;
     try { output = run(); }
     finally {
-      const phases: unknown = existsSync(phasesFile) ? JSON.parse(readFileSync(phasesFile, 'utf8')) : [];
+      let phases: unknown;
+      try { phases = JSON.parse(readFileSync(phasesFile, 'utf8')); }
+      catch { phases = 'unavailable'; }
       process.stdout.write(JSON.stringify({ diagnostic: 'fifo-child', wallMs: Math.round(performance.now() - started), phases }) + '\n');
     }
     expect(JSON.parse(output)).toEqual({ code: 'workspace_ambiguous', retryable: false });
