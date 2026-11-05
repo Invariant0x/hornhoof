@@ -46,7 +46,8 @@ export async function sayLive(
     .limit(1);
   const node = running && identityOf(running.sub, running.nodeId);
   if (!running || !node || (taskId && running.taskId !== taskId)) return null;
-  if (!ctx.hub.hasTerminals(node)) return missedLive(required);
+  /* A node without live terminals never takes words into a turn: they wait for the next one. */
+  if (!ctx.hub.hasTerminals(node)) return null;
   const message = await liveEnvelope(ctx, running.companyId, agentId, source);
   await before(running.id);
   if (await waitForWords(ctx, node, agentId, addressed(text, message), running, source)) return running.id;

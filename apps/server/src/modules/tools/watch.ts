@@ -72,6 +72,13 @@ function givingBack(ctx: Ctx, companyId: string, me: string, to: string) {
   return { withMessage, told };
 }
 
+/* What the sender of a message hears: it went in or started a turn, or it waits for a turn to come. */
+async function sentLine(ctx: Ctx, name: string, jobId: string, machineWaits: boolean): Promise<string> {
+  const [turn] = await ctx.db.select({ status: jobs.status }).from(jobs).where(eq(jobs.id, jobId));
+  if (turn?.status !== 'queued') return `Sent to ${name}.`;
+  return `Sent to ${name}. ${machineWaits ? 'Its machine waits for an update, so the turn starts after it.' : 'It gets this with its next turn, not at once.'}`;
+}
+
 /* The tools a skill grants an employee, for watching the company on a timer round: every agent's state, what failed, and
    writing to another employee as itself; and a head's way to tell the orchestrator. */
 export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, grants: ReadonlySet<Grant>): void {
@@ -337,7 +344,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
           createdBy: null,
           message: { personId: null, text, from: 'agent', name: me.name, by: me.id },
           withMessage: back.withMessage,
-        }).then(() => {
+        }).then(async id => {
         back.told();
         /* The map runs it between the two departments, or the card between the two agents of one. */
         if (me.departmentId && target.departmentId) {
@@ -348,7 +355,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
             to: same ? { kind: 'agent', id: target.id, departmentId: target.departmentId } : { kind: 'department', id: target.departmentId },
           });
         }
-        return say(`Sent to ${target.name}.${state.machineDrain ? ' Its machine waits for an update, so the turn starts after it.' : ''}`);
+        return say(await sentLine(ctx, target.name, id, state.machineDrain !== null));
       }, taskMessageFailure);
     },
   );
