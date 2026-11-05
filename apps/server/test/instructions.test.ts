@@ -193,4 +193,24 @@ describe('renderInstructions', () => {
     expect(revFiles.get('dev-review-verdict')).toContain('confirm_finding');
     expect(revFiles.get('dev-review-verdict')).toMatch(/internal role or skill rules[^.!?]*never[^.!?]*(?:main|release) approval/i);
   });
+
+  it('delivers the mandatory UI panel-wrapping and dynamic language rule to DEV-ENG and DEV-FE through pointers, on-demand skill files and whole instructions', () => {
+    const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
+    for (const roleKey of ['DEV-ENG', 'DEV-FE'] as const) {
+      const role = shipped.roles.get(roleKey)!;
+      const rendered = renderInstructions(shipped, agent({ roleKey, skills: role.skills.filter(s => s.on).map(s => s.id), templateHashes: {} }), PLACE);
+      expect(Buffer.byteLength(rendered.text), roleKey).toBeLessThan(24_000);
+      expect(rendered.text, roleKey).toContain('.agents/skills/<name>/SKILL.md');
+      expect(rendered.text, roleKey).toContain('.claude/skills/<name>/SKILL.md');
+      expect(rendered.text, roleKey).toContain('\n- dev-frontend-ui: User interface engineering.');
+      const uiSkill = rendered.skills.find(s => s.name === 'dev-frontend-ui');
+      expect(uiSkill, roleKey).toBeDefined();
+      expect(Buffer.byteLength(uiSkill!.body), roleKey).toBeLessThan(22_000);
+      for (const delivered of [uiSkill!.body, rendered.whole]) {
+        expect(delivered, roleKey).toMatch(/whole group|together as one group/i);
+        expect(delivered, roleKey).toMatch(/non-visual[\s\S]*in parallel/i);
+        expect(delivered, roleKey).toMatch(/longest[\s\S]*shortest[\s\S]*(?:shipped|supported)/i);
+      }
+    }
+  });
 });

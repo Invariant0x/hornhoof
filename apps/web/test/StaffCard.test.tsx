@@ -64,7 +64,7 @@ describe('StaffCard', () => {
       ],
     });
     expect(await screen.findByText('Start with the API.')).toBeInTheDocument();
-    expect(screen.getByRole('checkbox', { name: /Frontend engineer \(Mascot\)/ })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /^Frontend \(Mascot\)/ })).not.toBeChecked();
     await user.selectOptions(screen.getByRole('combobox', { name: 'Model for Bruno' }), 'claude-sonnet-5-5');
     await user.click(screen.getByRole('button', { name: 'Hire (2)' }));
     await vi.waitFor(() =>
@@ -102,8 +102,17 @@ describe('StaffCard', () => {
   it("names the people in the person's language", async () => {
     localStorage.setItem('hh-lang', 'ru');
     try {
-      card();
+      card({
+        id: 'pr10',
+        brief: 'API and UI.',
+        people: [
+          { role: 'DEV-HEAD', checked: true },
+          { role: 'DEV-BE', checked: true },
+          { role: 'DEV-FE', product: 'pd1', checked: false },
+        ],
+      });
       expect(await screen.findByRole('checkbox', { name: /Бэкенд-разработчик/ })).toBeChecked();
+      expect(screen.getByRole('checkbox', { name: /^Фронтенд \(Mascot\)/ })).not.toBeChecked();
       expect(screen.getByRole('button', { name: 'Нанять (2)' })).toBeInTheDocument();
     } finally {
       localStorage.removeItem('hh-lang');
