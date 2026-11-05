@@ -436,7 +436,7 @@ export const jobs = pgTable(
    person pressed Enter in the terminal of the running turn, so what they typed is their word in it; the window shows
    what the program shows instead. Repeated words keep their author and envelope as typed, without showing or sending
    another message. */
-export const AGENT_EVENT_KINDS = ['message', 'text', 'tool', 'tool_result', 'todo', 'proposal', 'applied', 'stopped', 'failed', 'computer', 'typed', 'hook_rejected', 'program'] as const;
+export const AGENT_EVENT_KINDS = ['message', 'text', 'tool', 'tool_result', 'todo', 'proposal', 'applied', 'stopped', 'failed', 'computer', 'typed', 'hook_rejected', 'program', 'turn_refused'] as const;
 export type AgentEventKind = (typeof AGENT_EVENT_KINDS)[number];
 
 /* An agent's conversation as people see it: their messages, what the agent did, and what came of it. */

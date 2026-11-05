@@ -1,7 +1,7 @@
 import { combineReport, reportDelay } from './report-notices.js';
 import type { MachineDrain, Notification } from '@hornhoof/protocol';
 import type { MessageParty } from '../events/parties.js';
-import { currentLimits, effortFor, effortsOf, inLane, MAX_INSTRUCTIONS, modelsFor, OLD_NODE_INSTRUCTIONS, ORCHESTRATOR_EFFORT, UNHEARD_MS, type Limits } from '@hornhoof/protocol';
+import { currentLimits, effortFor, effortsOf, inLane, isProgramOwnPrompt, MAX_INSTRUCTIONS, modelsFor, OLD_NODE_INSTRUCTIONS, ORCHESTRATOR_EFFORT, UNHEARD_MS, type Limits } from '@hornhoof/protocol';
 import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, lte, ne, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -9,8 +9,9 @@ import { loggable } from '../../errors.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
 import { agentEvents, agents, jobs, nodes, subscriptions, tasks, turns } from '../../db/schema.js';
 import { dispatchJob } from '../jobs/dispatch.js';
+import type { TurnRefusal } from '../terminals/relay.js';
 import { nodeDrain, nodeHeld, nodeHeldFrom, turnsHeld } from '../updates/drain.js';
-import { actingCeo, alsoKept, deliverLockedInput, inputKept, turnStarted, withInputLock } from './decision-context.js';
+import { actingCeo, alsoKept, deliverLockedInput, inputKept, turnStarted, typedWentIn, withInputLock } from './decision-context.js';
 import { BUILTIN, identityOf, nodeIdentity, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { liveNode, planNodes, type NodeRow } from '../nodes/nodes.js';
 import { jobsOf } from '../nodes/messages.js';
@@ -61,6 +62,8 @@ export type AgentState = FailureState & {
   queued: number;
   /* Its node shows the agent's live terminal. */
   terminal: boolean;
+  /* Why the last prompt its program took has no turn, until a new turn begins. */
+  turnRefused: TurnRefusal | null;
   program: TurnProgram | null;
   alarm: TurnAlarm | null;
 };
@@ -371,6 +374,14 @@ async function agentOnNode(ctx: Ctx, node: NodeIdentity, agentId: string): Promi
   return agent && sub && at && sameNode(at, node) ? { agent, sub } : null;
 }
 
+/* Whose turn it is: of the person who typed, of the person whose words the program took after the turn they answered, or,
+   for the words of anyone else, of the one the turn they came into was. */
+async function turnOwner(ctx: Ctx, personId: string | null, repeated: RepeatedTurn | null): Promise<{ createdBy: string | null; answersCeo: boolean }> {
+  if (repeated && !repeated.repeated.personId) return { createdBy: repeated.createdBy, answersCeo: repeated.answersCeo };
+  const owner = repeated ? repeated.repeated.personId : personId;
+  return { createdBy: owner, answersCeo: await actsForCeo(ctx, owner) };
+}
+
 async function insertRunningTurn(
   ctx: Ctx,
   node: NodeIdentity,
@@ -398,8 +409,7 @@ async function insertRunningTurn(
       startedAt: new Date(),
       prompt: text,
       timeoutMs: TURN_TIMEOUT_MS,
-      createdBy: repeated ? repeated.createdBy : personId,
-      answersCeo: repeated ? repeated.answersCeo : await actsForCeo(ctx, personId),
+      ...(await turnOwner(ctx, personId, repeated)),
       toolTokenHash: hashToken(token),
       instructionsHash: last ? last.hash : null,
     })
@@ -451,15 +461,33 @@ async function storeTypedTurn(
   return opened;
 }
 
-/* A person typed into the agent's terminal while no turn ran, or while the program started. The turn is theirs and runs
-   from now on the node that shows the session, which goes on with the instructions it was started with: their hash stays,
-   so the next turn resumes it. Without a person's keys, only known live words the program queued may open a turn. */
-export async function openTypedTurn(ctx: Ctx, node: NodeIdentity, agentId: string, text: string, personId: string | null, queuedFrom?: string): Promise<{ jobId: string; token: string } | null> {
+/* A person typed into the agent's terminal while no turn ran, or while the program started: their keys came just before.
+   Or they pressed Enter in a turn and its node saw the program queue what they typed for after it. The turn is theirs and
+   runs from now on the node that shows the session, which goes on with the instructions it was started with: their hash
+   stays, so the next turn resumes it. Without a person's keys, only known live words the program queued may open a turn. */
+export async function openTypedTurn(ctx: Ctx, node: NodeIdentity, agentId: string, text: string, personId: string | null, queuedFrom?: string): Promise<{ jobId: string; token: string; typedBy: string | null } | null> {
   if ((!personId && !queuedFrom) || !z.uuid().safeParse(agentId).success) return null;
   const queued = queuedFrom ? await queuedWords(ctx, agentId, queuedFrom, text) : null;
-  if (queuedFrom && !queued) return null;
-  const run = () => onAgent(ctx, agentId, () => storeTypedTurn(ctx, node, agentId, text, personId, queuedFrom, queued));
-  return queued ? withInputLock(ctx, agentId, run) : run();
+  const pressed = queuedFrom && !queued && !personId ? ctx.terminals.takePressed(node, agentId, queuedFrom) : null;
+  const typedBy = personId ?? pressed;
+  if (queuedFrom && !queued && !typedBy) return null;
+  const run = () => onAgent(ctx, agentId, () => storeTypedTurn(ctx, node, agentId, text, typedBy, queuedFrom, queued));
+  const opened = await (queued ? withInputLock(ctx, agentId, run) : run());
+  if (opened) ctx.terminals.turnBegan(agentId);
+  else if (pressed) await typedWentIn(ctx, agentId, pressed);
+  return opened && { ...opened, typedBy };
+}
+
+/* Hornhoof opened no turn for what the program took, whose answer has no tools: the window of the agent says why. Nothing
+   of the kind for a node the agent is not on, which may speak for no one of its company, or for the program's own news. */
+export async function turnRefused(ctx: Ctx, node: NodeIdentity, agentId: string, text: string, queuedFrom?: string): Promise<void> {
+  if (isProgramOwnPrompt(text) || !z.uuid().safeParse(agentId).success) return;
+  const target = await agentOnNode(ctx, node, agentId);
+  if (!target) return;
+  const [running] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
+  const reason: TurnRefusal = running && running.id !== queuedFrom ? 'busy' : 'unknown_words';
+  ctx.terminals.refuse(agentId, reason);
+  await appendEvent(ctx, { companyId: target.agent.companyId, agentId, kind: 'turn_refused', data: { reason } });
 }
 
 /* Someone who may type opened the window of an agent whose program does not run: a turn that types nothing starts it on
@@ -757,6 +785,7 @@ async function takeCurrent(tx: Tx, job: Queued, along: readonly Along[], sending
    as what holds the agent's input lock may wait for its line. */
 function wentOutWithWords(ctx: Ctx, agentId: string, job: Queued & { prompt: string }): void {
   if (!job.prompt && !job.taskId) return;
+  ctx.terminals.turnBegan(agentId);
   void turnStarted(ctx, agentId, job.id).catch(err => ctx.log.error({ error: loggable(err) }, 'An Enter that waited could not be settled.'));
 }
 
@@ -952,7 +981,7 @@ export async function orchestratorOf(ctx: Ctx, companyId: string) {
 
 export async function orchestratorState(ctx: Ctx, companyId: string): Promise<AgentState> {
   const agent = await orchestratorOf(ctx, companyId);
-  if (!agent) return { ready: false, machineDrain: null, limitUntil: null, budgetUntil: null, held: null, reason: 'no_subscription', browserError: null, busy: false, runningJobId: null, queued: 0, terminal: false, program: null, alarm: null, retry: null, failure: null, obsolete: null };
+  if (!agent) return { ready: false, machineDrain: null, limitUntil: null, budgetUntil: null, held: null, reason: 'no_subscription', browserError: null, busy: false, runningJobId: null, queued: 0, terminal: false, turnRefused: null, program: null, alarm: null, retry: null, failure: null, obsolete: null };
   return agentState(ctx, agent.id);
 }
 
@@ -1021,6 +1050,7 @@ export async function agentState(ctx: Ctx, agentId: string): Promise<AgentState>
     runningJobId: running?.id ?? null,
     queued: Number(waiting?.n ?? 0),
     terminal,
+    turnRefused: ctx.terminals.refusal(agentId),
     ...agentProgramState(ctx, running),
     ...await agentFailureState(ctx, agentId),
   };
