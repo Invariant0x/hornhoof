@@ -105,13 +105,40 @@ function DeputySwitch({ on, onChange }: { on: boolean; onChange: (on: boolean) =
   );
 }
 
-/* Your own row and the owner's take a new title only: access is not theirs to change here. deputy: the CEO may make this
-   person the deputy, or take it off, here. onUpdated: what is saved, before the deputy's own call. */
-function EditForm({ person, org, titleOnly, deputy, onUpdated, onSaved, onClose }: { person: PersonView; org: Org | null; titleOnly: boolean; deputy: boolean; onUpdated: (p: PersonView) => void; onSaved: (p: PersonView) => void; onClose: () => void }) {
+/* rename: the server lets this person change the name here. titleOnly: access is not theirs to change here. */
+type EditRights = { rename: boolean; titleOnly: boolean };
+type EditDraft = { name: string; title: string; access: AccessInput };
+
+/* What Save sends: the name only when the window shows it and it changed, so an old window takes back nobody's new name. */
+function changesOf(person: PersonView, { rename, titleOnly }: EditRights, draft: EditDraft) {
+  const name = draft.name.trim();
+  return { ...(rename && name !== person.name ? { name } : {}), title: draft.title.trim(), ...(titleOnly ? {} : { access: draft.access }) };
+}
+
+const fillable = ({ rename, titleOnly }: EditRights, draft: EditDraft): boolean => (!rename || draft.name.trim() !== '') && (titleOnly || !accessEmpty(draft.access));
+
+/* The name, when the form shows it, above the title. The form has two columns, so the title keeps to the first one to stand
+   under the name and not beside it. */
+function NameAndTitle({ rename, name, title, onName, onTitle }: { rename: boolean; name: string; title: string; onName: (name: string) => void; onTitle: (title: string) => void }) {
   const t = useT();
+  return <>
+    {rename && <Field label={t.common.name}>{p => <input {...p} value={name} onChange={e => onName(e.target.value)} maxLength={80} autoFocus required />}</Field>}
+    <div style={{ gridColumn: 1 }}>
+      <Field label={t.common.title}>{p => <input {...p} value={title} onChange={e => onTitle(e.target.value)} maxLength={80} autoFocus={!rename} />}</Field>
+    </div>
+  </>;
+}
+
+/* Your own row and the owner's take no access. deputy: the CEO may make this person the deputy, or take it off, here.
+   onUpdated: what is saved, before the deputy's own call. */
+function EditForm({ person, org, titleOnly, rename, deputy, onUpdated, onSaved, onClose }: { person: PersonView; org: Org | null; titleOnly: boolean; rename: boolean; deputy: boolean; onUpdated: (p: PersonView) => void; onSaved: (p: PersonView) => void; onClose: () => void }) {
+  const t = useT();
+  const [name, setName] = useState(person.name);
   const [title, setTitle] = useState(person.title);
   const [choice, setChoice] = useState<Choice>(() => ({ access: accessInput(person.access), deputy: Boolean(person.isCeoDelegate), before: null }));
   const { access, deputy: isDeputy } = choice;
+  const rights = { rename, titleOnly };
+  const draft = { name, title, access };
   const [failure, setFailure] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -122,7 +149,7 @@ function EditForm({ person, org, titleOnly, deputy, onUpdated, onSaved, onClose 
     try {
       const res = await api.patch<{ person: PersonView }>(
         `/api/people/${person.id}`,
-        titleOnly ? { title: title.trim() } : { title: title.trim(), access },
+        changesOf(person, rights, draft),
       );
       /* The row shows what is saved even if the deputy's own call, which needs that access, fails after it. */
       onUpdated(res.person);
@@ -137,13 +164,13 @@ function EditForm({ person, org, titleOnly, deputy, onUpdated, onSaved, onClose 
     <Edge className="panel" cut={12}>
       <h2>{t.people.editHeading(person.name)}</h2>
       <form onSubmit={e => void submit(e)} className="panel-form">
-        <Field label={t.common.title}>{p => <input {...p} value={title} onChange={e => setTitle(e.target.value)} maxLength={80} autoFocus />}</Field>
+        <NameAndTitle rename={rename} name={name} title={title} onName={setName} onTitle={setTitle} />
         {!titleOnly && <AccessPicker org={org} value={access} onChange={a => setChoice(c => deputyRule.accessed(c, a))} />}
         {deputy && <DeputySwitch on={isDeputy} onChange={on => setChoice(c => deputyRule.switched(c, on))} />}
         {failure && <p className="alert" role="alert">{failure}</p>}
         <div className="actions">
           <button className="btn ghost" type="button" onClick={onClose}>{t.common.cancel}</button>
-          <button className="btn" type="submit" disabled={busy || (!titleOnly && accessEmpty(access))}>{t.common.save}</button>
+          <button className="btn" type="submit" disabled={busy || !fillable(rights, draft)}>{t.common.save}</button>
         </div>
       </form>
     </Edge>
@@ -164,6 +191,10 @@ function PersonDetails({ person, org, onClose }: { person: PersonView; org: Org 
 const delegateLocked = (me: Me, p: PersonView): boolean => Boolean(p.isCeoDelegate) && !me.person.isOwner;
 /* The CEO alone makes someone active the deputy, and takes it off anyone who has it. */
 const deputyOn = (me: Me, p: PersonView): boolean => me.person.isOwner && !p.isOwner && (Boolean(p.isCeoDelegate) || p.status === 'active');
+
+/* Whose name this person may change, as the server's guard has it: their own, and anyone's for the CEO and for the deputy
+   who sees the whole company. Having the whole company alone is not enough. */
+const renames = (me: Me, p: PersonView): boolean => p.id === me.person.id || me.person.isOwner || (Boolean(me.person.isCeoDelegate) && me.person.scopeKind === 'company');
 
 /* What this person may do on another's row. */
 function rightsOn(me: Me, p: PersonView): { manageable: boolean; titleOnly: boolean; deputy: boolean } {
@@ -208,7 +239,7 @@ function PersonEditPanel({ edit, me, org, onUpdated, onSaved, onClose }: { edit:
   if (!edit) return null;
   const canEdit = rightsOn(me, edit.person).manageable || edit.titleOnly;
   if (!canEdit) return <PersonDetails person={edit.person} org={org} onClose={onClose} />;
-  return <EditForm key={edit.person.id} person={edit.person} org={org} titleOnly={edit.titleOnly} deputy={edit.deputy} onUpdated={onUpdated} onSaved={onSaved} onClose={onClose} />;
+  return <EditForm key={edit.person.id} person={edit.person} org={org} titleOnly={edit.titleOnly} rename={renames(me, edit.person)} deputy={edit.deputy} onUpdated={onUpdated} onSaved={onSaved} onClose={onClose} />;
 }
 
 function PersonRow({ p, me, org, routed, openPerson, newLink, setStatus }: { p: PersonView; me: Me; org: Org | null; routed: boolean; openPerson: (person: PersonView) => void; newLink: (person: PersonView) => Promise<void>; setStatus: (person: PersonView, status: 'active' | 'disabled') => Promise<void> }) {
@@ -241,7 +272,12 @@ function PersonRow({ p, me, org, routed, openPerson, newLink, setStatus }: { p: 
   );
 }
 
-export function People({ me, selected, onSelect, onHome }: { me: Me } & CardRoute) {
+/* What the shell shows of you follows the name saved on your own row. */
+const tellOwnName = (me: Me, person: PersonView, onRenamed?: (name: string) => void): void => {
+  if (person.id === me.person.id) onRenamed?.(person.name);
+};
+
+export function People({ me, selected, onSelect, onHome, onRenamed }: { me: Me; onRenamed?: (name: string) => void } & CardRoute) {
   const t = useT();
   const [people, setPeople] = useState<PersonView[] | null>(null);
   const [org, setOrg] = useState<Org | null>(null);
@@ -270,7 +306,10 @@ export function People({ me, selected, onSelect, onHome }: { me: Me } & CardRout
     setPeople(list => list?.map(p => p.id === me.person.id ? { ...p, name: me.person.name } : p) ?? null);
   }, [me.person.id, me.person.name]);
 
-  const replace = (person: PersonView) => setPeople(list => list?.map(p => (p.id === person.id ? person : p)) ?? null);
+  const replace = (person: PersonView) => {
+    setPeople(list => list?.map(p => (p.id === person.id ? person : p)) ?? null);
+    tellOwnName(me, person, onRenamed);
+  };
   const { person, edit } = selectionOf(me, selected, people, panel);
   const closePerson = () => { onSelect?.(null); setPanel(null); };
   const openPerson = (person: PersonView) => {

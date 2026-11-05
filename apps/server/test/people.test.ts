@@ -1,6 +1,6 @@
 import { eq, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { Db } from '../src/db/client.js';
 import { agents, companies, departments, invites, people, sessions, teams } from '../src/db/schema.js';
 import { sessionFrom, setUpCompany, testApp } from './helpers.js';
@@ -241,6 +241,43 @@ describe('PATCH /api/people/:id', () => {
     expect(invited.json().error.reason).toBe('person_unknown');
     expect((await db.select().from(people).where(eq(people.id, other!.id)))[0]).toMatchObject({ name: 'Other', title: '', status: 'active', scopeKind: 'company' });
     expect(await db.select().from(invites).where(eq(invites.personId, other!.id))).toEqual([]);
+  });
+
+  it('saves a name and a title together and shows the new name to the list and the map, wherever the person sits', async () => {
+    const { app, db } = await testApp();
+    const ceo = await setUpCompany(app);
+    const { departmentId } = await addTeam(db);
+    const maria = await inviteAndAccept(app, ceo, { name: 'Maria', email: 'maria@acme.com', title: '', access: { whole: true } });
+    const olga = await inviteAndAccept(app, ceo, { name: 'Olga', email: 'olga@acme.com', title: '', access: { departments: [departmentId] } });
+
+    for (const [person, name] of [[maria, 'Maria Ray'], [olga, 'Olga Lee']] as const) {
+      const res = await app.inject({ method: 'PATCH', url: `/api/people/${person.id}`, payload: { name, title: 'Head' }, ...as(ceo) });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().person).toMatchObject({ name, title: 'Head' });
+    }
+
+    const listed = (await app.inject({ url: '/api/people', ...as(ceo) })).json().people as { id: string; name: string; title: string }[];
+    expect(listed.find(p => p.id === maria.id)).toMatchObject({ name: 'Maria Ray', title: 'Head' });
+    const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json() as { people: { id: string; name: string }[]; departments: { people: { id: string; name: string }[] }[] };
+    expect(org.people.find(p => p.id === maria.id)?.name).toBe('Maria Ray');
+    expect(org.departments.flatMap(d => d.people).find(p => p.id === olga.id)?.name).toBe('Olga Lee');
+  });
+
+  it('tells open maps when a name changes, and nothing about access', async () => {
+    const { app } = await testApp();
+    const ceo = await setUpCompany(app);
+    const maria = await inviteAndAccept(app, ceo, { name: 'Maria', email: 'maria@acme.com', title: '', access: { whole: true } });
+    const heard = vi.spyOn(app.ctx.bus, 'publish');
+    const access = vi.spyOn(app.ctx.bus, 'accessChanged');
+    const said = () => heard.mock.calls.filter(([, message]) => message.type === 'org').length;
+
+    await app.inject({ method: 'PATCH', url: `/api/people/${maria.id}`, payload: { title: 'Head' }, ...as(ceo) });
+    expect(said()).toBe(0);
+    await app.inject({ method: 'PATCH', url: `/api/people/${maria.id}`, payload: { name: 'Maria' }, ...as(ceo) });
+    expect(said()).toBe(0);
+    await app.inject({ method: 'PATCH', url: `/api/people/${maria.id}`, payload: { name: 'Maria Ray' }, ...as(ceo) });
+    expect(said()).toBe(1);
+    expect(access).not.toHaveBeenCalled();
   });
 
   it('lets only the CEO or an active delegate rename another person and records the actor', async () => {

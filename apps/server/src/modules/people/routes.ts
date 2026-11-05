@@ -75,6 +75,12 @@ function guardDisable(me: Person, target: Pick<Person, 'id' | 'isOwner'>, body: 
   if (target.id === me.id) throw new ApiError(403, 'forbidden', 'You cannot disable yourself.', 'self_locked');
 }
 
+/* New access changes what each person may reach; a new name only what the map and the lists show. */
+function tellOfChange(ctx: Ctx, companyId: string, access: boolean, renamed: boolean): void {
+  if (access) ctx.bus.accessChanged(companyId);
+  if (access || renamed) ctx.bus.publish(companyId, { type: 'org' });
+}
+
 /* The mark goes with the whole company and an active account, and does not come back with them. */
 function markAfter(status: string | undefined, body: Patch): { isCeoDelegate?: false } {
   const narrowed = body.access !== undefined && !('whole' in body.access);
@@ -273,10 +279,7 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
       await disconnectMachines(ctx, theirs.map(m => m.id));
     }
     if (changes.status === 'disabled' || body.access) await releasePlansOf(ctx, person, me);
-    if (changes.status || body.access) {
-      ctx.bus.accessChanged(me.companyId);
-      ctx.bus.publish(me.companyId, { type: 'org' });
-    }
+    tellOfChange(ctx, me.companyId, Boolean(changes.status || body.access), person.name !== target.name);
     return { person: await personView(db, person) };
   });
 
