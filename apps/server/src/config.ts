@@ -35,7 +35,7 @@ export type Config = {
   templatesDir: string;
   /* The service that hands out public links like acme.hornhoof.org and relays them to this server. */
   relayUrl: string;
-  /* The tunnel container's host name: only requests from it may say they came in over https. */
+  /* The keeper container's host name: only requests from it may say they came in over https. */
   tunnelHost?: string;
   /* Set by compose when a keeper sits in front: the app then takes its mode from the keeper's word. */
   keeper: boolean;
@@ -45,6 +45,8 @@ export type Config = {
   acmeDirectory: string | null;
   /* The computer the server runs on, as a hash of the key a join from it sends; null for a server installed before. */
   hostId: string | null;
+  /* This install's id, which install.sh writes once and never changes; null for one installed before. */
+  machineId: string | null;
 };
 
 /* Both src/ and dist/ sit one level below apps/server, so this finds apps/web/dist either way. */
@@ -76,7 +78,7 @@ const Env = z.object({
   UPDATE_CHECK_MS: milliseconds('UPDATE_CHECK_MS', 0, '1800000'),
   REGISTRY_URL: webAddress('REGISTRY_URL must be an http:// or https:// address.'),
   RELAY_URL: webAddress('RELAY_URL must be an http:// or https:// address, like https://hornhoof.org.'),
-  TUNNEL_HOST: z.preprocess(unset, z.string().regex(/^[A-Za-z0-9.-]{1,253}$/, 'TUNNEL_HOST must be the host name of the tunnel container, like tunnel.').optional()),
+  TUNNEL_HOST: z.preprocess(unset, z.string().regex(/^[A-Za-z0-9.-]{1,253}$/, 'TUNNEL_HOST must be the host name of the keeper container, like keeper.').optional()),
   HORNHOOF_KEEPER: z.preprocess(unset, z.literal('on', { error: 'HORNHOOF_KEEPER must be on, or not set.' }).optional()),
   TASK_FILES_MB: wholeNumber(1, 1_000_000, 'TASK_FILES_MB must be a whole number of megabytes, like 2048.'),
   ACME_DIRECTORY: z.preprocess(
@@ -86,6 +88,10 @@ const Env = z.object({
   HORNHOOF_HOST_ID: z.preprocess(
     unset,
     z.string().regex(/^[0-9a-f]{64}$/, 'HORNHOOF_HOST_ID must be the 64 characters install.sh writes. Remove the line from .env, or run the install command again.').optional(),
+  ),
+  HORNHOOF_MACHINE_ID: z.preprocess(
+    unset,
+    z.string().regex(/^(?:[0-9a-f]{32}|[0-9a-f]{64})$/, 'HORNHOOF_MACHINE_ID must be the hex install.sh writes. Remove the line from .env, or run the install command again.').optional(),
   ),
 });
 
@@ -167,5 +173,6 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     keeper: set.HORNHOOF_KEEPER === 'on',
     acmeDirectory: acmeDirectoryOf(set.ACME_DIRECTORY),
     hostId: set.HORNHOOF_HOST_ID ?? null,
+    machineId: set.HORNHOOF_MACHINE_ID ?? null,
   };
 }
