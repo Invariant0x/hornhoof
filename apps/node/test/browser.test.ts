@@ -24,6 +24,7 @@ import { FIRST_UID } from '../src/isolation.js';
 import * as programs from '../src/providers/process.js';
 
 const tempDirs: string[] = [];
+const realRunProgram = programs.runProgram;
 
 function makeTemp(prefix = 'hh-browser-'): string {
   const dir = mkdtempSync(join(tmpdir(), prefix));
@@ -31,11 +32,23 @@ function makeTemp(prefix = 'hh-browser-'): string {
   return dir;
 }
 
+function startupToolsOnPath(missing?: string): string {
+  const bin = makeTemp('hh-startup-tools-');
+  for (const name of ['unzip', 'gh', 'shellcheck', 'time', 'strings', 'patch', 'ss', 'objdump']) {
+    if (name === missing) continue;
+    writeFileSync(join(bin, name), '#!/bin/sh\nprintf "%s\\n" "$*" > "$0.args"\necho "fixture version 1"\n', { mode: 0o755 });
+  }
+  vi.spyOn(programs, 'runProgram').mockImplementation(options => realRunProgram({
+    ...options, bin: options.bin === '/usr/bin/time' ? join(bin, 'time') : options.bin,
+  }));
+  vi.stubEnv('PATH', bin);
+  return bin;
+}
+
 function unzipOnPath(body: string): string {
-  const bin = makeTemp('hh-unzip-');
+  const bin = startupToolsOnPath();
   const executable = join(bin, 'unzip');
   writeFileSync(executable, '#!/bin/sh\nprintf "%s\\n" "$*" > "$0.args"\n' + body + '\n', { mode: 0o755 });
-  vi.stubEnv('PATH', `${bin}:${process.env.PATH ?? '/usr/bin:/bin'}`);
   return executable + '.args';
 }
 
@@ -76,6 +89,39 @@ afterEach(() => {
 });
 
 describe('startup tool readiness', () => {
+  it.each(['gh', 'shellcheck', 'time', 'strings', 'patch', 'ss', 'objdump'])('names missing %s before preparing any browsers', async name => {
+    startupToolsOnPath(name);
+    const dir = makeTemp();
+    const error = await startupBrowserCheck(dir, null);
+    expect(error).not.toBeNull();
+    expect(error).toContain(name === 'time' ? '/usr/bin/time --version' : `${name} --version`);
+    expect(error).toContain('ENOENT');
+    expect(existsSync(browsersDir(dir))).toBe(false);
+  });
+
+  it('checks the complete runtime tool set with the required version arguments', async () => {
+    const bin = startupToolsOnPath();
+    expect(await startupBrowserCheck(makeTemp(), null)).toBeNull();
+    for (const [name, args] of [
+      ['unzip', '-v'], ['gh', '--version'], ['shellcheck', '--version'], ['time', '--version'],
+      ['strings', '--version'], ['patch', '--version'], ['ss', '--version'], ['objdump', '--version'],
+    ]) {
+      const recorded = join(bin, `${name}.args`);
+      expect(existsSync(recorded)).toBe(true);
+      expect(readFileSync(recorded, 'utf8').trim()).toBe(args);
+    }
+  });
+
+  it('bounds a later tool check with the normal timeout and verification user', async () => {
+    const bin = startupToolsOnPath();
+    const user = { uid: process.getuid!(), gid: process.getgid!() };
+    const checked = vi.spyOn(programs, 'runProgram').mockImplementation(options => options.bin === 'ss'
+      ? Promise.resolve({ code: null, signal: 'SIGTERM', at: new Date().toISOString(), output: '', timedOut: true })
+      : realRunProgram({ ...options, bin: options.bin === '/usr/bin/time' ? join(bin, 'time') : options.bin }));
+    expect(await startupBrowserCheck(makeTemp(), user)).toBe('ss --version timed out.');
+    expect(checked.mock.calls.find(([options]) => options.bin === 'ss')?.[0]).toMatchObject({ user, timeoutMs: 30_000 });
+  });
+
   it('refuses work when unzip is absent, before preparing any browsers', async () => {
     const dir = makeTemp();
     vi.stubEnv('PATH', makeTemp('hh-no-tools-'));

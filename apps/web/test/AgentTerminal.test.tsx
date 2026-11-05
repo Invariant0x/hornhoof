@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
@@ -93,7 +93,7 @@ vi.mock('@xterm/xterm', () => ({
       },
     };
     constructor(options: Record<string, unknown>) {
-      this.options = options;
+      this.options = { ...options };
       terms.push(this as unknown as FakeTerminal);
     }
     loadAddon() {}
@@ -234,10 +234,13 @@ class FakeSocket {
     this.readyState = 3;
   }
   /* What the server does. */
-  opened(write = true) {
+  opened(write = true, message = write) {
     this.readyState = 1;
     this.onopen?.();
-    this.onmessage?.({ data: JSON.stringify({ type: 'ready', write }) });
+    this.onmessage?.({ data: JSON.stringify({ type: 'ready', write, message }) });
+  }
+  refused(reason: 'control' | 'message') {
+    this.onmessage?.({ data: JSON.stringify({ type: 'refused', reason }) });
   }
   screen(data: string) {
     this.onmessage?.({ data: JSON.stringify({ type: 'data', data }) });
@@ -255,12 +258,13 @@ const EVENTS = '/api/agents/orchestrator/events';
 const READY: OrchestratorState = { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 };
 const LOG: EventView[] = [{ seq: 1, kind: 'text', data: { kind: 'text', text: 'Hello from the log' }, jobId: 'j1', person: null, at: '2026-10-30T10:00:00Z' }];
 
-function open(terminal = true, more: Partial<OrchestratorState> = {}) {
+function open(terminal = true, more: Partial<OrchestratorState> = {}, extra: Parameters<typeof mockApi>[0] = {}) {
   const calls = mockApi({
     [`GET ${EVENTS}?after=0`]: [200, { events: LOG, state: { ...READY, ...more, terminal } }],
     [`GET ${EVENTS}?after=1`]: [200, { events: [], state: { ...READY, ...more, terminal } }],
     'POST /api/agents/orchestrator/start': [200, { started: false }],
     'POST /api/agents/orchestrator/stop': [202],
+    ...extra,
   });
   return { calls, ...view() };
 }
@@ -393,6 +397,27 @@ describe("an agent's live terminal in its window", () => {
     expect(pieces.map(p => p.data).join('')).toHaveLength(40_000);
   });
 
+  it('keeps automatic query answers for the subscription owner', async () => {
+    open();
+    const ws = await socket();
+    ws.opened(true);
+    terms[0]!.type('\x1b[I');
+    terms[0]!.type('\x1b[>0;276;0c');
+    expect(ws.sent).toEqual([
+      { type: 'input', data: '\x1b[I' },
+      { type: 'input', data: '\x1b[>0;276;0c' },
+    ]);
+  });
+
+  it.each([false, true])('keeps one bracketed paste in one frame when write=%s', async write => {
+    open();
+    const ws = await socket();
+    ws.opened(write, true);
+    const data = `\x1b[200~${'x'.repeat(40_000)}\x1b[201~`;
+    terms[0]!.type(data);
+    expect(ws.sent).toEqual([{ type: 'input', data }]);
+  });
+
   it('shows the log with what was said, and the terminal again', async () => {
     const user = userEvent.setup();
     open();
@@ -468,6 +493,93 @@ describe("an agent's live terminal in its window", () => {
     });
     view();
     expect(await screen.findByText(/Hornhoof could not tell who wrote/)).toBeInTheDocument();
+  });
+
+  it.each([
+    ['who typed there last', { id: 'p1', name: 'Zed' }, /Zed typed in this terminal last/],
+    ['that nobody knows who wrote them', null, /Hornhoof cannot tell who wrote them/],
+  ] as const)('keeps words left in the input in the log of what happened, and says %s', async (_, person, says) => {
+    const left: EventView = { seq: 2, kind: 'input_left', data: { text: 'a <b>draft</b>\nof two lines', ref: 'r1' }, jobId: null, person, at: '2026-10-30T10:00:01Z' };
+    mockApi({
+      [`GET ${EVENTS}?after=0`]: [200, { events: [...LOG, left], state: { ...READY, terminal: false } }],
+      [`GET ${EVENTS}?after=2`]: [200, { events: [], state: { ...READY, terminal: false } }],
+      'POST /api/agents/orchestrator/start': [200, { started: false }],
+    });
+    view();
+    expect(await screen.findByText(/were left unsent in the program's input/)).toBeInTheDocument();
+    expect(screen.getByText(says)).toBeInTheDocument();
+    expect(screen.getByText(/a <b>draft<\/b>\s+of two lines/)).toBeInTheDocument();
+  });
+
+  it('keeps what the person types while the view connects again, and sends it in order once it is back', async () => {
+    open();
+    const first = await socket();
+    first.opened();
+    first.ended(4410, 'node_offline');
+    terms[0]!.type('first question');
+    terms[0]!.type('\r');
+    terms[0]!.resized(90, 30);
+    await waitFor(() => expect(FakeSocket.all).toHaveLength(2), { timeout: 3000 });
+    const again = FakeSocket.all[1]!;
+    again.opened();
+    expect(again.sent.filter(m => (m as { type: string }).type === 'input')).toEqual([
+      { type: 'input', data: 'first question' },
+      { type: 'input', data: '\r' },
+    ]);
+    expect(again.sent).not.toContainEqual({ type: 'resize', cols: 90, rows: 30 });
+    terms[0]!.type('next');
+    expect(again.sent.at(-1)).toEqual({ type: 'input', data: 'next' });
+  });
+
+  it('sends what it kept once, and nothing that had gone already, however often the view connects again', async () => {
+    open();
+    const first = await socket();
+    first.opened();
+    terms[0]!.type('went\r');
+    first.ended(4410, 'node_offline');
+    terms[0]!.type('kept\r');
+    await waitFor(() => expect(FakeSocket.all).toHaveLength(2), { timeout: 3000 });
+    FakeSocket.all[1]!.opened();
+    expect(FakeSocket.all[1]!.sent).toEqual([{ type: 'input', data: 'kept\r' }]);
+    FakeSocket.all[1]!.ended(4410, 'node_offline');
+    await waitFor(() => expect(FakeSocket.all).toHaveLength(3), { timeout: 3000 });
+    FakeSocket.all[2]!.opened();
+    expect(FakeSocket.all[2]!.sent).toEqual([]);
+  });
+
+  it('keeps what the person types before the first connection is up', async () => {
+    open();
+    const ws = await socket();
+    terms[0]!.type('hi\r');
+    expect(ws.sent).toEqual([]);
+    ws.opened();
+    expect(ws.sent).toEqual([{ type: 'input', data: 'hi\r' }]);
+  });
+
+  it('sends none of it when the view comes back for someone who may only watch now', async () => {
+    open();
+    const first = await socket();
+    first.opened();
+    first.ended(4410, 'node_offline');
+    terms[0]!.type('hi\r');
+    await waitFor(() => expect(FakeSocket.all).toHaveLength(2), { timeout: 3000 });
+    FakeSocket.all[1]!.opened(false);
+    expect(FakeSocket.all[1]!.sent).toEqual([]);
+  });
+
+  it('sends none of it after a minute, when the person may have gone on, and keeps a bounded amount', async () => {
+    open();
+    const ws = await socket();
+    const now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+    terms[0]!.type('old\r');
+    clock.mockReturnValue(now + 60_000);
+    for (let i = 0; i < 300; i++) terms[0]!.type('k');
+    expect(await screen.findByText('Not sent: too much text was typed while the terminal was disconnected. Wait for it to connect, then type again.')).toHaveAttribute('role', 'alert');
+    ws.opened();
+    clock.mockRestore();
+    expect(ws.sent).toHaveLength(255);
+    expect(ws.sent).not.toContainEqual({ type: 'input', data: 'old\r' });
   });
 
   it('shows the bottom of the screen, where the line to type in is, after a card below the terminal comes or goes', async () => {
@@ -730,5 +842,107 @@ describe("an agent's live terminal in its window", () => {
     for (const ro of FakeResizeObserver.all) ro.resized();
     expect(term.cols).toBe(47);
     expect(ws.sent).toEqual([{ type: 'resize', cols: 47, rows: 35 }]);
+  });
+
+  it('lets a person write messages without control of the program, and silently drops automatic terminal reports', async () => {
+    const { container } = open();
+    const ws = await socket();
+    act(() => ws.opened(false, true));
+    const term = terms[0]!;
+    expect(term.options.disableStdin).toBe(false);
+    term.type('hello\r');
+    expect(ws.sent).toEqual([{ type: 'input', data: 'hello\r' }]);
+    term.type('/login');
+    expect(ws.sent).toHaveLength(1);
+    expect(await screen.findByText("Only the owner of this agent's subscription can control its program. Ask the owner, or write an ordinary message.")).toHaveAttribute('role', 'alert');
+    term.type('!rm');
+    term.type('\x03');
+    term.type('\x1b[A');
+    expect(ws.sent).toHaveLength(1);
+    term.type('\x1b[<64;10;5M');
+    term.type('\x1b[I');
+    term.type('\x1b[>0;276;0c');
+    expect(ws.sent).toHaveLength(1);
+    expect(within(container.querySelector<HTMLElement>('.t-term')!).getAllByRole('alert')).toHaveLength(1);
+  });
+
+  it('shows a refusal the server sends when access changed', async () => {
+    open();
+    const ws = await socket();
+    act(() => ws.opened(false, true));
+    ws.refused('message');
+    expect(await screen.findByText('You cannot write to this agent. Ask someone who has access to its department.')).toHaveAttribute('role', 'alert');
+  });
+
+  it('checks input kept during reconnect against the rights the new view grants', async () => {
+    open();
+    const first = await socket();
+    first.opened();
+    first.ended(4410, 'node_offline');
+    terms[0]!.type('hello\r');
+    terms[0]!.type('/login\r');
+    await waitFor(() => expect(FakeSocket.all).toHaveLength(2), { timeout: 3000 });
+    FakeSocket.all[1]!.opened(false, true);
+    expect(FakeSocket.all[1]!.sent).toEqual([{ type: 'input', data: 'hello\r' }]);
+    expect(await screen.findByText("Only the owner of this agent's subscription can control its program. Ask the owner, or write an ordinary message.")).toHaveAttribute('role', 'alert');
+  });
+});
+
+
+const png = (name = 'screen.png') => new File([new Uint8Array(64)], name, { type: 'image/png' });
+const dragged = (...files: File[]) => ({ dataTransfer: { types: ['Files'], files, dropEffect: 'none' } });
+const copied = (files: File[]) => ({ clipboardData: { files, types: ['Files'], getData: () => '' } });
+const pictureUploads = (calls: ReturnType<typeof mockApi>) => calls.filter(c => c.method === 'POST' && c.path.startsWith('/api/agents/orchestrator/pictures'));
+
+describe('pictures directly in the live terminal', () => {
+  it('pastes a picture, uploads it and inserts the prepared path without Enter', async () => {
+    const { container, calls } = open(true, {}, {
+      'POST /api/agents/orchestrator/pictures?name=screen.png': [201, { id: 'p1', name: 'screen.png', insert: "'/home/agent/screen.png' " }],
+    });
+    const ws = await socket();
+    act(() => ws.opened(false, true));
+    fireEvent.paste(container.querySelector<HTMLElement>('.t-xterm')!, copied([png()]));
+    await waitFor(() => expect(pictureUploads(calls)).toHaveLength(1));
+    expect(await screen.findByText('The picture path is in the terminal. Press Enter to send it.')).toHaveAttribute('role', 'status');
+    expect(ws.sent).toEqual([{ type: 'input', data: "'/home/agent/screen.png' " }]);
+    expect(pictureUploads(calls)).toHaveLength(1);
+  });
+
+  it('drops a picture and uses the fetch instruction with an older server', async () => {
+    const { container, calls } = open(true, {}, {
+      'POST /api/agents/orchestrator/pictures?name=screen.png': [201, { id: 'p1', name: 'screen.png' }],
+    });
+    const ws = await socket();
+    act(() => ws.opened(false, true));
+    fireEvent.drop(container.querySelector<HTMLElement>('.t-xterm')!, dragged(png()));
+    expect(await screen.findByText('The picture path is in the terminal. Press Enter to send it.')).toBeInTheDocument();
+    expect(ws.sent).toEqual([{ type: 'input', data: 'screen.png: hh-fetch message p1' }]);
+    expect(pictureUploads(calls)).toHaveLength(1);
+  });
+
+  it('does not upload or insert a picture without message access', async () => {
+    const { container, calls } = open(true, {}, {
+      'POST /api/agents/orchestrator/pictures?name=screen.png': [201, { id: 'p1', name: 'screen.png' }],
+    });
+    const ws = await socket();
+    ws.opened(false, false);
+    const terminal = container.querySelector<HTMLElement>('.t-xterm')!;
+    fireEvent.paste(terminal, copied([png()]));
+    fireEvent.drop(terminal, dragged(png()));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(pictureUploads(calls)).toEqual([]);
+    expect(ws.sent).toEqual([]);
+  });
+
+  it('shows an upload refusal and inserts nothing', async () => {
+    const { container } = open(true, {}, {
+      'POST /api/agents/orchestrator/pictures?name=screen.png': [403, { error: { code: 'forbidden', message: 'No access.', reason: 'forbidden' } }],
+    });
+    const ws = await socket();
+    act(() => ws.opened(false, true));
+    fireEvent.drop(container.querySelector<HTMLElement>('.t-xterm')!, dragged(png()));
+    expect(await screen.findByText('No access.')).toHaveAttribute('role', 'alert');
+    expect(ws.sent).toEqual([]);
   });
 });

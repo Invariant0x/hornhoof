@@ -405,6 +405,8 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
         return shownBy(login, host, m.termId)?.close(m);
       case 'turn.opened':
         return host?.opened(m);
+      case 'agent.input_kept':
+        return host?.inputKept(m);
       case 'agent.say':
         return answerLiveWords(host, m, log, emit);
       case 'agent.restart': {

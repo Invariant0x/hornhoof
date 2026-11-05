@@ -5,6 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { accessOf } from '../../auth/access.js';
+import { viewerOf } from '../../auth/agent-view.js';
 import type { DecisionSubject } from '../../auth/decision-owner.js';
 import { requireDecision } from '../../auth/decisions.js';
 import { actorOf, changedBy, personOf, requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
@@ -20,7 +21,7 @@ import type { Tx } from '../tasks/engine.js';
 import { backOn } from '../tasks/wake.js';
 import { checkStaff, departmentOf, HireLine, requiredState, runsTier, servingSubscriptions, spotIn } from '../tools/staff.js';
 import { BuildItem, checkItems, inPlaces, isNew, type TeamChange } from '../tools/structure.js';
-import { linesToHire, type Present } from '../operations/ensure.js';
+import { linesToHire, tryPlaceOperator, type Present } from '../operations/ensure.js';
 import { approvalPolicyRoutes } from './approval-policy.js';
 import { hireEmployee, type Hired } from './hire.js';
 import { repoView } from './repository.js';
@@ -173,6 +174,13 @@ function teamRoutes(app: FastifyInstance, ctx: Ctx): void {
 }
 
 /* Departments come and go here: the CEO's click on a structure card, or the orchestrator's build_structure. */
+/* Who holds a role is who an employee is: it goes with the full view, as the employees do. */
+async function stateSeen(db: Db, me: Person, dept: Parameters<typeof requiredState>[1]) {
+  const held = await requiredState(db, dept);
+  const { full } = await viewerOf(db, me);
+  return (role: string) => (full ? held(role) : { ...held(role), holder: null });
+}
+
 export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
 
@@ -343,7 +351,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (!dept) throw new ApiError(404, 'not_found', 'This department does not exist.', 'department_unknown');
     const products = await db.select().from(departments).where(eq(departments.parentId, dept.id)).orderBy(asc(departments.position));
     const serving = await servingSubscriptions(ctx, me.companyId, spotIn(dept));
-    const state = await requiredState(db, dept);
+    const state = await stateSeen(db, me, dept);
     const roles = (dept.templateKey ? ctx.templates.roster(dept.templateKey) : []).map(role => ({
       id: role.id,
       title: role.title,
@@ -399,6 +407,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
       for (const line of lines) hired.push(await hireEmployee(ctx, tx, { companyId: me.companyId, departmentId: dept.id }, line, changedBy(me)));
       return { hired, present, agentId };
     }));
+    await tryPlaceOperator(ctx, me.companyId);
 
     const orchestrator = await orchestratorOf(ctx, me.companyId);
     const agentId = result.agentId ?? orchestrator?.id;

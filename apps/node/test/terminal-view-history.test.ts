@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Tmux } from '../src/terminal/tmux.js';
-import { readViewHistory } from '../src/terminal/view-stream.js';
+import { ViewHistory } from '../src/terminal/view-stream.js';
 
 const hasTmux = (() => {
   try { execFileSync('tmux', ['-V']); return true; } catch { return false; }
@@ -39,14 +39,13 @@ describe.skipIf(!hasTmux)('initial terminal history', () => {
       const child = tmux.attach('agent', 80, 24, false);
       const value = fixtures.at(-1)!;
       value.child = child;
-      const initial = await readViewHistory(tmux, 'agent');
-      expect(initial).toContain('LINE-0');
-      expect(initial).toContain('CURRENT');
-      expect(initial).toMatch(/\x1b\[[0-9;]*2mCURRENT/);
-      let streamed = initial;
+      let streamed = '';
+      await new ViewHistory(tmux, 'agent', text => { streamed += text; }, async () => {}).open();
+      expect(streamed).toContain('LINE-0');
       child.stdout.on('data', chunk => { streamed += chunk.toString(); });
       child.stderr.resume();
       await expect.poll(() => streamed.includes('LIVE-UPDATE')).toBe(true);
+      expect(streamed).toMatch(/\x1b\[[0-9;]*2m\s*CURRENT/);
       expect(streamed.indexOf('LINE-0')).toBeLessThan(streamed.indexOf('LIVE-UPDATE'));
     });
   }

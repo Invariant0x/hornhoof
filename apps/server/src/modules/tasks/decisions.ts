@@ -1,12 +1,15 @@
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { accessOf, canReach, WHOLE, withOwned } from '../../auth/access.js';
+import { seesAgentId, viewerOf, type AgentViewer } from '../../auth/agent-view.js';
+import { canReach, WHOLE, withOwned } from '../../auth/access.js';
 import { decisionOwner, namedOwner, type Candidate, type DecisionSubject } from '../../auth/decision-owner.js';
 import { canDecide, decidedBy, type DecidedBy } from '../../auth/decisions.js';
 import type { Person } from '../../auth/session.js';
+import type { Db } from '../../db/client.js';
 import { agents, departments, people, personAccess, proposals, requests, tasks } from '../../db/schema.js';
 import { canViewComputer, type Asked } from '../computer/access.js';
-import { requestSubject, taskSpot } from './engine.js';
+import { requestSubject, taskSpot, type Request, type Task } from './engine.js';
+import { seesTask, type TaskPlace } from './sight.js';
 
 /* What waits for people, as each person may see it: whose card counts each decision and whose filter shows it, and whether
    this person may take it (auth/decisions.ts). */
@@ -24,7 +27,8 @@ export type Counts = { byPerson: Record<string, number>; byAgent: Record<string,
 /* What waits for people as one person may see it, each with its owner and whether this person may answer it, and the counts
    of all of it. */
 export type Decisions = {
-  requests: { request: RequestRow; task: TaskRow; ownerPersonId: string; canAnswer: boolean; decidedBy: DecidedBy }[];
+  /* known: read with its task and agent; otherwise it shows only because it is this person's to answer. */
+  requests: { request: RequestRow; task: TaskRow; ownerPersonId: string; canAnswer: boolean; decidedBy: DecidedBy; known: boolean }[];
   proposals: { proposal: ProposalRow; ownerPersonId: string; canAnswer: boolean; decidedBy: DecidedBy }[];
   computer: { asked: Asked; agentId: string; ownerPersonId: string; canAnswer: boolean; decidedBy: DecidedBy } | null;
   counts: Counts;
@@ -68,21 +72,46 @@ function heldElsewhere(subject: DecisionSubject, everyone: readonly Candidate[],
 
 const byTimeAndId = <T extends { createdAt: Date; id: string }>(a: T, b: T) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id);
 
-function counted(owners: { ownerPersonId: string; agentId: string; elsewhere?: boolean }[]): Counts {
+function counted(viewer: AgentViewer, owners: { ownerPersonId: string; agentId: string; elsewhere?: boolean }[]): Counts {
   const byPerson: Record<string, number> = {};
   const byAgent: Record<string, number> = {};
   for (const d of owners) {
     byPerson[d.ownerPersonId] = (byPerson[d.ownerPersonId] ?? 0) + 1;
-    byAgent[d.agentId] = (byAgent[d.agentId] ?? 0) + 1;
+    if (seesAgentId(viewer, d.agentId)) byAgent[d.agentId] = (byAgent[d.agentId] ?? 0) + 1;
   }
   return { byPerson, byAgent, total: owners.filter(d => !d.elsewhere).length };
 }
 
-/* Everything waiting for people that this person may see: requests on tasks they reach, the orchestrator's pending cards
-   and its request for the computer for people who see the whole company, each with whether this person may take it. */
+/* Whether a person reads a request with the work around it: the task and the agent who asks, both seen. */
+export const knowsRequest = (viewer: AgentViewer, request: Pick<Request, 'agentId'>, task: TaskPlace): boolean => seesTask(viewer, task) && seesAgentId(viewer, request.agentId);
+
+/* Whether a person opens what shows with a request: when they read it with its work, or while it is open and theirs to
+   answer, and then this and nothing around it. */
+export async function mayOpenRequest(db: Db, me: Person, request: Request, task: Task): Promise<boolean> {
+  const viewer = await viewerOf(db, me);
+  return knowsRequest(viewer, request, task) || (request.status === 'open' && canDecide(requestSubject(request, task), me, viewer.access, me.companyId));
+}
+
+const shows = (r: { known: boolean; canAnswer: boolean }) => r.known || r.canAnswer;
+
+/* What the orchestrator asks of people, for those who see him: his pending cards for people who see the whole company, and
+   his request for the computer. The control folder is read once, for the item and for the counts alike. Only a screen of a
+   person takes it. */
+async function orchestratorAsks(ctx: Pick<Ctx, 'db' | 'computer'>, me: Person, viewer: AgentViewer): Promise<{ id: string | null; cards: ProposalRow[]; asked: Asked | null }> {
+  const { db } = ctx;
+  const [orchestrator] = await db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, me.companyId), eq(agents.kind, 'orchestrator')));
+  if (!seesAgentId(viewer, orchestrator?.id)) return { id: null, cards: [], asked: null };
+  const cards = me.scopeKind === 'company' ? (await db.select().from(proposals).where(and(eq(proposals.companyId, me.companyId), eq(proposals.status, 'pending')))).sort(byTimeAndId) : [];
+  return { id: orchestrator?.id ?? null, cards, asked: canViewComputer(me) ? ctx.computer.view().asked : null };
+}
+
+/* Everything waiting for people that this person may see, each with whether they may take it: requests on tasks they see,
+   by an agent they see, or that are theirs to answer, and the orchestrator's pending cards and its request for the
+   computer for people who see the whole company and see him. */
 export async function visibleDecisions(ctx: Pick<Ctx, 'db' | 'computer'>, me: Person): Promise<Decisions> {
   const { db } = ctx;
-  const access = await accessOf(db, me);
+  const viewer = await viewerOf(db, me);
+  const { access } = viewer;
   const everyone = await candidates(ctx, me.companyId);
   const rows = await db
     .select({ request: requests, task: tasks })
@@ -90,17 +119,16 @@ export async function visibleDecisions(ctx: Pick<Ctx, 'db' | 'computer'>, me: Pe
     .innerJoin(tasks, eq(tasks.id, requests.taskId))
     .where(and(eq(requests.companyId, me.companyId), eq(requests.status, 'open')))
     .orderBy(asc(requests.createdAt), asc(requests.id));
-  const whole = me.scopeKind === 'company';
   /* As the routes that take them let them. */
   const judged = (subject: DecisionSubject) => ({ ownerPersonId: decisionOwner(subject, everyone), canAnswer: canDecide(subject, me, access, me.companyId), decidedBy: decidedBy(subject, everyone) });
-  const seen = rows.filter(r => canReach(access, taskSpot(r.task))).map(r => ({ ...r, ...judged(requestSubject(r.request, r.task)) }));
-  const cards = whole ? (await db.select().from(proposals).where(and(eq(proposals.companyId, me.companyId), eq(proposals.status, 'pending')))).sort(byTimeAndId) : [];
+  const seen = rows
+    .filter(r => canReach(access, taskSpot(r.task)))
+    .map(r => ({ ...r, ...judged(requestSubject(r.request, r.task)), known: knowsRequest(viewer, r.request, r.task) }))
+    .filter(shows);
+  const { id: orchestratorId, cards, asked } = await orchestratorAsks(ctx, me, viewer);
   const shownCards = cards.map(proposal => ({ proposal, ...judged({ source: 'proposal' }) }));
-  /* The control folder is read once, for the item and for the counts alike. Only a screen of a person takes it. */
-  const asked = canViewComputer(me) ? ctx.computer.view().asked : null;
-  const [orchestrator] = asked ? await db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, me.companyId), eq(agents.kind, 'orchestrator'))) : [];
-  const computer = asked && orchestrator ? { asked, agentId: orchestrator.id, ...judged({ source: 'computer_access' }) } : null;
-  const counts = counted([
+  const computer = asked && orchestratorId ? { asked, agentId: orchestratorId, ...judged({ source: 'computer_access' }) } : null;
+  const counts = counted(viewer, [
     ...seen.map(r => ({ ownerPersonId: r.ownerPersonId, agentId: r.request.agentId, elsewhere: heldElsewhere(requestSubject(r.request, r.task), everyone, me.id) })),
     ...shownCards.map(c => ({ ownerPersonId: c.ownerPersonId, agentId: c.proposal.agentId })),
     ...(computer ? [{ ownerPersonId: computer.ownerPersonId, agentId: computer.agentId }] : []),

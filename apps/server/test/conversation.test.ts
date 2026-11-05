@@ -7,7 +7,7 @@ import { renderInstructions } from '../src/modules/agents/instructions.js';
 import { FIRST_TURN, FIRST_TURN_TEMPLATE, ORCHESTRATOR_INSTRUCTIONS } from '../src/modules/conversation/prompt.js';
 import { enqueueTurn, pumpWaiting } from '../src/modules/conversation/queue.js';
 import { holdTurns } from '../src/modules/updates/drain.js';
-import { as, connectNode, invitePerson, listen, openStream, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
+import { as, connectNode, invitePerson, listen, openStream, setUpCompany, testApp, until, type FakeNode, takePlan } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
 const IVAN_TO_ORCHESTRATOR = 'From Ivan (CEO) to Orchestrator:\n\n';
@@ -233,7 +233,7 @@ describe('the orchestrator\'s conversation', () => {
   it('sends two people\'s messages in the order they wrote', async () => {
     const { app, db, ceo, builtin } = await live();
     const olga = await invitePerson(app, ceo, { name: 'Olga', email: 'olga@acme.com', access: { whole: true } });
-    await db.update(people).set({ title: 'Deputy' }).where(eq(people.name, 'Olga'));
+    await db.update(people).set({ title: 'Deputy', isCeoDelegate: true }).where(eq(people.name, 'Olga'));
     await start(app, ceo);
     const first = await nextRun(builtin);
     await say(app, ceo, 'Schools first');
@@ -612,11 +612,12 @@ describe('the orchestrator\'s conversation', () => {
       await app.inject({ url: '/api/agents/orchestrator/events', ...as(maria) }),
       await say(app, maria, 'hi'),
       await start(app, maria),
-      await app.inject({ method: 'POST', url: `/api/jobs/${run.jobId}/cancel`, ...as(maria) }),
     ]) {
       expect(res.statusCode).toBe(403);
-      expect(res.json().error.reason).toBe('company_scope_only');
+      expect(res.json().error.reason).toBe('agent_hidden');
     }
+    const cancelled = await app.inject({ method: 'POST', url: `/api/jobs/${run.jobId}/cancel`, ...as(maria) });
+    expect([cancelled.statusCode, cancelled.json().error.reason]).toEqual([403, 'company_scope_only']);
     expect(await db.select().from(agents)).toHaveLength(1);
   });
 });
@@ -751,17 +752,18 @@ describe("an employee's conversation", () => {
     expect((await nextRun(builtin)).prompt).toContain('Hello');
   });
 
-  it("lets a person with the department write to its employees and nobody else's", async () => {
+  it("lets a person with the department write to employees on their plan and nobody else's", async () => {
     const { app, ceo, builtin, dev, sales, hire, bruno } = await withEmployee();
     const seller = await hire('Sam', sales.id);
     const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [dev.id] } });
+    await takePlan(app.ctx.db, 'maria@acme.com', bruno.id);
     expect((await sayTo(app, maria, bruno.id, 'Hi Bruno')).statusCode).toBe(202);
     expect((await nextRun(builtin)).prompt).toBe('From Maria to Bruno (Backend engineer, Development):\n\nMaria: Hi Bruno');
     for (const res of [await sayTo(app, maria, seller.id, 'Hi Sam'), await app.inject({ url: `/api/agents/${seller.id}/events`, ...as(maria) })]) {
       expect(res.statusCode).toBe(403);
-      expect(res.json().error.reason).toBe('not_your_department');
+      expect(res.json().error.reason).toBe('agent_hidden');
     }
-    expect((await sayTo(app, maria, 'orchestrator', 'Hi')).json().error.reason).toBe('company_scope_only');
+    expect((await sayTo(app, maria, 'orchestrator', 'Hi')).json().error.reason).toBe('agent_hidden');
     expect((await sayTo(app, ceo, '00000000-0000-4000-8000-000000000000', 'Hi')).statusCode).toBe(404);
   });
 

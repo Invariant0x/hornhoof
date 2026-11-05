@@ -5,10 +5,11 @@ import { z } from 'zod';
 import type { Db } from '../../db/client.js';
 import { agentEvents, agents, jobs, taskEvents, tasks, TASK_STATUSES } from '../../db/schema.js';
 import { requestedPromptOf } from '../conversation/requested-prompt.js';
+import { wordsForTurn } from '../conversation/turn-words.js';
 import { CLOSED, type Task, type Tx, type Wake } from './engine.js';
 
 /* Kept in the wake's existing message JSON, so its purpose and phase survive a server restart. */
-const State = z.object({ why: z.string(), status: z.enum(TASK_STATUSES), stage: z.number().int().nonnegative(), merging: z.boolean(), version: z.number().int().nonnegative().optional(), to: z.string().optional() });
+const State = z.object({ why: z.string(), again: z.boolean().optional(), status: z.enum(TASK_STATUSES), stage: z.number().int().nonnegative(), merging: z.boolean(), version: z.number().int().nonnegative().optional(), to: z.string().optional() });
 export type TaskWake = z.infer<typeof State>;
 type TaskTurn = { id: string; agentId: string | null; taskId: string | null };
 type Store = Db | Tx;
@@ -18,7 +19,8 @@ const GIVER_NEWS = new Set(['blocked', 'stuck_at_gate', 'tests', 'work']);
 const REVIEW = new Set(['review', 'turn_review']);
 const RUN_ENDS = new Set(['tests', 'work']);
 
-export const taskWakeOf = (task: Task, wake: Pick<Wake, 'why' | 'version'>): TaskWake => ({ why: wake.why, status: task.status, stage: task.stage, merging: task.merging, version: wake.version });
+/* A review wake carries words only for the reviewer who sent the work back: its own findings, to check the fixes for. */
+export const taskWakeOf = (task: Task, wake: Pick<Wake, 'why' | 'version' | 'text'>): TaskWake => ({ why: wake.why, ...(wake.why === 'review' && wake.text ? { again: true } : {}), status: task.status, stage: task.stage, merging: task.merging, version: wake.version });
 
 /* Legacy turns have no snapshot. Only their known server-written notice prefixes identify a notice to the giver. */
 const isNotice = (state: TaskWake | null): boolean => state !== null && NOTICES.has(state.why);
@@ -123,11 +125,22 @@ async function logSkipped(db: Store, task: Task, agentId: string, wake: string, 
   await db.insert(taskEvents).values({ companyId: task.companyId, taskId: task.id, agentId, kind: 'wake_skipped', text: `Run skipped: task is already closed. ${agent!.name}: ${wake}.`, data: { wake, job } });
 }
 
+const wakeIn = (data: unknown): TaskWake | null => {
+  const parsed = z.object({ taskWake: State }).safeParse(data);
+  return parsed.success ? parsed.data.taskWake : null;
+};
+
 async function stateOf(db: Store, jobId: string): Promise<TaskWake | null> {
   const [message] = await db.select({ data: agentEvents.data }).from(agentEvents)
     .where(and(eq(agentEvents.jobId, jobId), inArray(agentEvents.kind, ['message', 'typed']))).orderBy(asc(agentEvents.seq)).limit(1);
-  const parsed = z.object({ taskWake: State }).safeParse(message?.data);
-  return parsed.success ? parsed.data.taskWake : null;
+  return wakeIn(message?.data);
+}
+
+/* What brought each of a turn's words, as words join a turn while it waits: null for words no wake brought, like a
+   person's, and for a turn with no words at all. */
+export async function wakesOfTurn(db: Db, agentId: string, jobId: string): Promise<(TaskWake | null)[]> {
+  const words = await wordsForTurn({ db }, agentId, jobId);
+  return words.length ? words.map(word => wakeIn(word.data)) : [null];
 }
 
 /* Retain an unsent job and its explanation; it neither starts work nor triggers afterJob's continuation logic. */

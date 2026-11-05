@@ -1,9 +1,12 @@
 import { Terminal, type ITerminalOptions, type ITheme } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
-import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
-import { useT } from '../i18n';
+import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { errorText, useT, type Messages } from '../i18n';
+import { usePictureDrop } from './MessagePictures';
 import { fitTerminal, observeTerminalFit } from './terminal-fit';
-import { attachTerminalScroll, restoreLiveTerminal } from './terminal-scroll';
+import { isBracketedPaste, TerminalInput, type InputRefusal, type TerminalRights } from './terminal-input';
+import { uploadTerminalPictures } from './terminal-pictures';
+import { attachTerminalScroll, restoreLiveTerminal, writeTerminalData } from './terminal-scroll';
 import { isHidden } from './visibility';
 
 /* Ivan's iTerm2 profile in dark mode, which the terminal repeats on any page: Claude Code and Codex run their dark theme,
@@ -31,6 +34,9 @@ const OPTIONS: ITerminalOptions = {
 
 /* What one frame of keys or a paste carries; the server takes up to 64 KB. */
 const PIECE = 16_384;
+/* Keys typed while the view has no connection wait for it, a bounded amount: after a minute they do not go to the program. */
+const KEPT_KEYS = 256;
+const KEPT_MS = 60_000;
 const RETRY_MS = 500;
 const RETRY_MAX_MS = 10_000;
 /* How a view ends: the node cannot show one, or the person may no longer reach the agent. */
@@ -41,10 +47,10 @@ const NO_ACCESS = 4403;
    watching: this person types elsewhere, so the terminal leaves the focus there as it opens. */
 type Props = { path: string; program: string; onGone(): void; watching?: boolean };
 type Size = { cols: number; rows: number };
-type Frame = { type: string; data?: string; write?: boolean; running?: boolean };
+type Frame = { type: string; data?: string; write?: boolean; message?: boolean; running?: boolean; reason?: InputRefusal };
 type Send = (m: unknown) => void;
 /* What one view of the session learned so far. */
-type View = { term: Terminal; send: Send; setUp(up: boolean): void; asked: Size; told: boolean; unconfirmed: Size | null; ready(): void };
+type View = { term: Terminal; send: Send; setUp(up: boolean): void; asked: Size; told: boolean; unconfirmed: Size | null; ready(rights: TerminalRights): void; refused(reason: InputRefusal): void };
 
 /* A card that came or went while the view connected changed the terminal's size, and that resize was lost: sent before
    the socket opened, or after the server said ready but before the node held the view. The session's first screen comes
@@ -53,18 +59,20 @@ function confirmSize(term: Terminal, opened: Size | null, send: Send) {
   if (opened && (term.cols !== opened.cols || term.rows !== opened.rows)) send({ type: 'resize', cols: term.cols, rows: term.rows });
 }
 
-/* The session draws its whole screen for each new view. Only its subscription's owner types into it. The node says
-   whether the program is up before it sends the screen; one that says nothing, as for a watcher of an agent that sleeps
-   or a node from before, shows its screen as it comes. */
+/* The session draws its whole screen for each new view. The server says separately who may control the program and who
+   may write a message. A program starts on its first screen if the view says nothing about whether it is running. */
 function received(view: View, m: Frame) {
   if (m.type === 'ready') {
-    view.ready();
+    const control = Boolean(m.write);
+    const rights = { control, message: m.message ?? control };
+    view.ready(rights);
     view.told = false;
     restoreLiveTerminal(view.term);
     view.term.reset();
-    view.term.options.disableStdin = !m.write;
+    view.term.options.disableStdin = !(rights.control || rights.message);
     view.unconfirmed = view.asked;
   }
+  if (m.type === 'refused' && m.reason) view.refused(m.reason);
   if (m.type === 'program') {
     view.told = true;
     view.setUp(Boolean(m.running));
@@ -74,8 +82,7 @@ function received(view: View, m: Frame) {
 
 function screenCame(view: View, data: string) {
   if (!view.told) view.setUp(true);
-  restoreLiveTerminal(view.term);
-  view.term.write(data);
+  writeTerminalData(view.term, data);
   /* Forgotten before the resize goes, since the screen it brings may come before send returns. */
   const opened = view.unconfirmed;
   view.unconfirmed = null;
@@ -90,20 +97,69 @@ function viewUrl(path: string, size: Size) {
 /* The node cannot show a view, or the person may no longer reach the agent: trying again changes nothing. */
 const final = (code: number) => code === NO_TERMINAL || code === NO_ACCESS;
 
+class KeptKeys {
+  private kept: { keys: unknown; at: number }[] = [];
+
+  constructor(private refused: () => void) {}
+
+  keep(m: unknown) {
+    if ((m as { type?: string }).type !== 'input') return;
+    if (this.kept.length === KEPT_KEYS) return this.refused();
+    this.kept.push({ keys: m, at: Date.now() });
+  }
+
+  go(send: Send) {
+    const { kept } = this;
+    this.kept = [];
+    for (const { keys, at } of kept) if (Date.now() - at < KEPT_MS) send(keys);
+  }
+}
+
+type LiveSocket = { socket: WebSocket | null; open: boolean; rights: TerminalRights };
+
+function deliver(connection: LiveSocket, m: unknown, input: TerminalInput, refused: (reason: InputRefusal) => void) {
+  if ((m as { type?: string }).type === 'input') {
+    const data = String((m as { data?: unknown }).data ?? '');
+    if (!connection.rights.control && isAutomaticReport(data)) return;
+    const taken = input.take(data, connection.rights);
+    if (taken.denied) return refused(taken.denied);
+    m = { type: 'input', data: taken.data };
+  }
+  if (connection.open && connection.socket?.readyState === 1) connection.socket.send(JSON.stringify(m));
+}
+
+function sendOrKeep(connection: LiveSocket, m: unknown, kept: KeptKeys, deliverNow: Send) {
+  if (connection.open && connection.socket?.readyState === 1) deliverNow(m);
+  else kept.keep(m);
+}
+
 /* The view of the session over a socket, opened again after a machine went away for a moment, until it ends. */
-function connectView(term: Terminal, path: string, setUp: (up: boolean) => void, gone: () => void) {
-  let socket: WebSocket | null = null;
+function connectView(term: Terminal, path: string, setUp: (up: boolean) => void, gone: () => void, overflow: () => void, refused: (reason: InputRefusal) => void, rightsChanged: (rights: TerminalRights) => void) {
+  const connection: LiveSocket = { socket: null, open: false, rights: { control: true, message: true } };
   let ended = false;
   let retry: ReturnType<typeof setTimeout> | null = null;
   let tries = 0;
-  const send: Send = m => socket?.readyState === 1 && socket.send(JSON.stringify(m));
+  const kept = new KeptKeys(overflow);
+  const input = new TerminalInput();
+  const deliverNow: Send = m => deliver(connection, m, input, refused);
+  const send: Send = m => sendOrKeep(connection, m, kept, deliverNow);
   const connect = () => {
-    const view: View = { term, send, setUp, asked: { cols: term.cols, rows: term.rows }, told: false, unconfirmed: null, ready: () => (tries = 0) };
+    connection.open = false;
+    const ready = (next: TerminalRights) => {
+      connection.rights = next;
+      connection.open = true;
+      rightsChanged(next);
+      tries = 0;
+      kept.go(deliverNow);
+    };
+    const view: View = { term, send, setUp, asked: { cols: term.cols, rows: term.rows }, told: false, unconfirmed: null, ready, refused };
     const ws = new WebSocket(viewUrl(path, view.asked));
-    socket = ws;
+    connection.socket = ws;
     ws.onmessage = e => received(view, JSON.parse(String(e.data)) as Frame);
     ws.onclose = e => {
-      if (ended || socket !== ws) return;
+      if (ended || connection.socket !== ws) return;
+      connection.open = false;
+      rightsChanged({ control: false, message: false });
       setUp(false);
       if (final(e.code)) return gone();
       retry = setTimeout(connect, Math.min(RETRY_MAX_MS, RETRY_MS * 2 ** tries++));
@@ -115,7 +171,7 @@ function connectView(term: Terminal, path: string, setUp: (up: boolean) => void,
     end() {
       ended = true;
       if (retry) clearTimeout(retry);
-      socket?.close();
+      connection.socket?.close();
     },
   };
 }
@@ -125,6 +181,13 @@ const SGR_MOUSE = /^\x1b\[<(\d+);\d+;\d+[Mm]$/;
 
 function isMouseReport(data: string) {
   return SGR_MOUSE.test(data);
+}
+
+/* Focus and answers to the program's queries are not keys the person typed, and watchers never send them. */
+const AUTOMATIC_REPORT = /^(?:\x1b\[[IO]|\x1b\[[>?][0-9;]*c|\x1b\[[0-9;]*R)$/;
+
+function isAutomaticReport(data: string) {
+  return isMouseReport(data) || AUTOMATIC_REPORT.test(data);
 }
 
 function copyByCommand(text: string) {
@@ -285,10 +348,11 @@ function shouldIgnoreInput(term: Terminal, data: string) {
   return Boolean(term.options.disableStdin) || isMouseReport(data);
 }
 
-/* What the person types goes to the session in pieces the server takes, and so does each new size of the terminal. */
+/* What the person types goes in pieces the server takes, except a bracketed paste, whose markers stay around one frame. */
 function forward(term: Terminal, send: Send) {
   term.onData(data => {
     if (shouldIgnoreInput(term, data)) return;
+    if (isBracketedPaste(data)) return send({ type: 'input', data });
     for (let i = 0; i < data.length; i += PIECE) send({ type: 'input', data: data.slice(i, i + PIECE) });
   });
   term.onResize(({ cols, rows }) => send({ type: 'resize', cols, rows }));
@@ -346,20 +410,82 @@ function disposeLater(term: Terminal) {
   requestAnimationFrame(() => setTimeout(() => term.dispose()));
 }
 
+const refusalText = (reason: InputRefusal, control: string, message: string) => reason === 'control' ? control : message;
+
+type PictureResult = { current(run: number): boolean; send: Send; uploaded(): void; failed(failure: unknown): void };
+
+function insertUploadedPictures(path: string, files: File[], run: number, result: PictureResult) {
+  void uploadTerminalPictures(path, files).then(input => {
+    if (!result.current(run)) return;
+    result.send({ type: 'input', data: input });
+    result.uploaded();
+  }, failure => {
+    if (!result.current(run)) return;
+    result.failed(failure);
+  });
+}
+
+type TerminalNoticesProps = {
+  t: Messages;
+  dropped: boolean;
+  denied: InputRefusal | null;
+  pictureFailure: unknown;
+  pictureState: 'uploading' | 'uploaded' | null;
+};
+
+function TerminalNotices({ t, dropped, denied, pictureFailure, pictureState }: TerminalNoticesProps) {
+  if (!dropped && !denied && pictureFailure === null && !pictureState) return null;
+  return (
+    <div className="t-menu glass" style={{ left: 12, right: 12, bottom: 8, padding: '2px 0 6px', pointerEvents: 'none' }}>
+      {dropped && <div className="t-why" role="alert">{t.window.inputDropped}</div>}
+      {denied && <div className="t-why" role="alert">{refusalText(denied, t.window.controlDenied, t.window.messageDenied)}</div>}
+      {pictureFailure !== null && <div className="t-why" role="alert">{errorText(t, pictureFailure)}</div>}
+      {pictureState && <div className="t-why" role="status">{pictureState === 'uploading' ? t.window.pictureUploading : t.window.pictureUploaded}</div>}
+    </div>
+  );
+}
+
 /* A live terminal: an agent's session on the node, or a plan's sign-in, as it is, with the person's keys going back to it. */
 export function AgentTerminal({ path, program, onGone, watching = false }: Props) {
   const t = useT();
   const box = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
+  const sendPicture = useRef<Send>(() => {});
+  const pictureRun = useRef(0);
   /* Until the view is open and the program is up, a loader hides what the session shows meanwhile. */
   const [up, setUp] = useState(false);
   const [menu, setMenu] = useState<MenuState | null>(null);
+  const [dropped, setDropped] = useState(false);
+  const [denied, setDenied] = useState<InputRefusal | null>(null);
+  const [rights, setRights] = useState<TerminalRights>({ control: false, message: false });
+  const [pictureState, setPictureState] = useState<'uploading' | 'uploaded' | null>(null);
+  const [pictureFailure, setPictureFailure] = useState<unknown>(null);
   const gone = useRef(onGone);
   gone.current = onGone;
   const leavesFocus = useRef(watching);
   leavesFocus.current = watching;
+  const addPictures = useCallback((files: File[]) => {
+    const run = ++pictureRun.current;
+    setDenied(null);
+    setPictureFailure(null);
+    setPictureState('uploading');
+    insertUploadedPictures(path, files, run, {
+      current: candidate => candidate === pictureRun.current,
+      send: input => sendPicture.current(input),
+      uploaded: () => setPictureState('uploaded'),
+      failed: failure => {
+        setPictureState(null);
+        setPictureFailure(failure);
+      },
+    });
+  }, [path]);
+  const dragging = usePictureDrop(box, true, rights.message, addPictures, true);
 
   useEffect(() => {
+    setDropped(false);
+    setDenied(null);
+    setPictureState(null);
+    setPictureFailure(null);
     const term = new Terminal(OPTIONS);
     termRef.current = term;
     const container = box.current!;
@@ -368,11 +494,14 @@ export function AgentTerminal({ path, program, onGone, watching = false }: Props
     attachTerminalScroll(term);
     bindCopy(term);
     fitTerminal(term, container);
-    const view = connectView(term, path, setUp, () => gone.current());
+    const view = connectView(term, path, setUp, () => gone.current(), () => setDropped(true), setDenied, setRights);
+    sendPicture.current = view.send;
     forward(term, view.send);
     const unfit = keepFitted(term, container);
     if (!leavesFocus.current) term.focus();
     return () => {
+      pictureRun.current++;
+      sendPicture.current = () => {};
       termRef.current = null;
       view.end();
       unfit();
@@ -384,6 +513,8 @@ export function AgentTerminal({ path, program, onGone, watching = false }: Props
     <div className="t-term" onContextMenu={e => openMenu(e, termRef.current, setMenu)}>
       <div className="t-xterm" ref={box} />
       <CopyMenu menu={menu} termRef={termRef} onClose={() => setMenu(null)} label={t.common.copy} />
+      {dragging && <div className="t-drop" role="status">{t.window.dropPictures}</div>}
+      <TerminalNotices t={t} dropped={dropped} denied={denied} pictureFailure={pictureFailure} pictureState={pictureState} />
       {!up && (
         <div className="t-load" role="status">
           <span className="spinner" aria-hidden="true" />

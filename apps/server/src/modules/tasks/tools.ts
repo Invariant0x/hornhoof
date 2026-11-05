@@ -8,7 +8,8 @@ import { ApiError } from '../../errors.js';
 import { ask, blocked, cancel, CLOSED, comment, createTask, gateLeads, inRepository, listed, openAfter, refuse, report, submit, taskSpot, updateTask, verdict, type Moved, type Task } from './engine.js';
 import { requireBlockingGate } from './gate-triggers.js';
 import { carriesFile, encodedHint } from './attachments.js';
-import { taskByRef, taskDetail, taskLines, type TaskDetail } from './views.js';
+import { Text } from './long-text.js';
+import { agentSeesTask as sees, taskByRef, taskDetail, taskLines, type TaskDetail } from './views.js';
 import { addTasks, editTurn, mergeTurn, planTurn, settle, tell, TURN_MESSAGES, turnName, turnRows } from './turns.js';
 import { stopTurns, wakeAll } from './wake.js';
 import { orchestratorOf } from '../conversation/queue.js';
@@ -96,11 +97,6 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
   const boss = job.agentKind === 'orchestrator';
   const me = async (): Promise<Agent> => (await db.select().from(agents).where(eq(agents.id, job.agentId)))[0]!;
   const startedAt = async () => (await db.select({ at: jobs.startedAt }).from(jobs).where(eq(jobs.id, job.id)))[0]?.at ?? new Date(0);
-
-  /* The orchestrator sees every task; an employee its department's, and any it holds or reviews, once its turn started. */
-  const sees = (agent: Agent, t: Task) =>
-    agent.kind === 'orchestrator' ||
-    (t.status !== 'planned' && ((agent.departmentId !== null && t.departmentId === agent.departmentId) || t.assigneeAgentId === agent.id || t.executorAgentId === agent.id || t.gates.includes(agent.id) || t.panel.includes(agent.id)));
 
   async function find(ref: number | string): Promise<{ agent: Agent; task: Task }> {
     const agent = await me();
@@ -216,7 +212,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
       description:
         "Adds a note to a task's log for everyone on it. Whoever gave out a member task that is blocked can answer it with a comment, " +
         'which opens it again and wakes its executor with your words. A comment from a person or another agent also ends an external wait and wakes its holder. To hand work on, use the task\'s own moves.',
-      inputSchema: { task: Ref, text: z.string().trim().min(1).max(4000) },
+      inputSchema: { task: Ref, text: Text.trim().min(1) },
     },
     async ({ task: ref, text }) =>
       run(async () => {
@@ -414,7 +410,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
       'report',
       {
         description: 'Closes a task you own that has no executor (a department task, a turn, a person\'s task): done with what came of it, or not done with what blocks it. Whoever gave it is told.',
-        inputSchema: { task: Ref, done: z.boolean(), summary: z.string().trim().min(1).max(4000) },
+        inputSchema: { task: Ref, done: z.boolean(), summary: Text.trim().min(1) },
       },
       async ({ task: ref, done, summary }) =>
         run(async () => {
@@ -446,7 +442,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
       'submit',
       {
         description: 'Hands your finished work on a task to its first gate (or closes it when it has none). summary: what you did; evidence: the command you ran and what it printed, the link, the check.',
-        inputSchema: { task: Ref, summary: z.string().trim().min(1).max(4000), evidence: z.string().trim().min(1).max(4000) },
+        inputSchema: { task: Ref, summary: Text.trim().min(1), evidence: Text.trim().min(1) },
       },
       async ({ task: ref, summary, evidence }) =>
         run(async () => {
@@ -471,7 +467,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
       {
         description:
           'Your verdict as the gate a task stands at: pass sends it to the next gate (or finishes it), changes sends it back to its executor. comment: your reasons, always. findings: how many separate problems your comment names, 0 when there are none. Its log keeps the test runs it stood on, with the commits they pinned.',
-        inputSchema: { task: Ref, pass: z.boolean(), comment: z.string().trim().min(1).max(4000), findings: z.number().int().min(0).max(99).optional() },
+        inputSchema: { task: Ref, pass: z.boolean(), comment: Text.trim().min(1), findings: z.number().int().min(0).max(99).optional() },
       },
       async ({ task: ref, pass, comment: why, findings }) =>
         run(async () => {

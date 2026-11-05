@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { canReach, type Access } from '../src/auth/access.js';
 import { agents, companies, departments, people, personAccess, teams } from '../src/db/schema.js';
 import { appendEvent } from '../src/modules/events/store.js';
-import { as, invitePerson, listen, openStream, setUpCompany, testApp, until } from './helpers.js';
+import { as, invitePerson, listen, openStream, ownPlan, setUpCompany, testApp, until } from './helpers.js';
 
 async function company() {
   const { app, db } = await testApp();
@@ -113,12 +113,13 @@ describe('access by departments', () => {
     expect(byName).toEqual({ Sales: ['Kate'], Marketing: ['Sasha'] });
   });
 
-  it("sends a department's live events only to people who reach it", async () => {
+  it("sends a department's live events only to people who reach it and own the agent's plan", async () => {
     const { app, db, ceo, companyId, sales, marketing } = await company();
     await listen(app);
     const [seller] = await db.insert(agents).values({ companyId, kind: 'worker', name: 'Seller', model: '', departmentId: sales.id }).returning();
     const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [sales.id] } });
     const kate = await invitePerson(app, ceo, { name: 'Kate', email: 'kate@acme.com', access: { departments: [marketing.id] } });
+    await ownPlan(db, 'maria@acme.com', seller!.id);
     const streams = await Promise.all([ceo, maria, kate].map(t => openStream(app, t)));
     await new Promise(r => setTimeout(r, 50));
     await appendEvent(app.ctx, { companyId, agentId: seller!.id, kind: 'text', data: { text: 'Two schools signed.' } });

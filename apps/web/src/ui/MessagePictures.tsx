@@ -55,7 +55,7 @@ async function shrunk(file: File): Promise<Blob | null> {
 const asJpeg = (name: string) => `${name.replace(/\.[^.]*$/, '')}.jpg`;
 
 /* The bytes to send of a file, or why it does not go. */
-async function readied(file: File): Promise<{ file: Blob; name: string } | Refusal> {
+export async function readied(file: File): Promise<{ file: Blob; name: string } | Refusal> {
   if (!TAKEN.includes(file.type)) return 'picture_invalid';
   if (file.size <= PICTURE_BYTES) return { file, name: file.name };
   const smaller = await shrunk(file);
@@ -156,28 +156,36 @@ export function useDraftPictures(path: string) {
   return { drafts, sending, refused, setRefused, add, remove, notPicture, deliver };
 }
 
-type Drags = { accepting: boolean; depth: { current: number }; setDragging(on: boolean): void; add(files: File[]): void };
+type Drags = { accepting: boolean; exclusive: boolean; depth: { current: number }; setDragging(on: boolean): void; add(files: File[]): void };
 
 const takes = (e: DragEvent, d: Drags) => d.accepting && hasFiles(e) && !inPanel(e.target);
+const owns = (e: DragEvent, d: Drags) => d.exclusive && hasFiles(e) && !inPanel(e.target);
 
 function dragIn(e: DragEvent, d: Drags) {
+  if (owns(e, d)) e.stopPropagation();
   if (!takes(e, d)) return;
   d.depth.current += 1;
   d.setDragging(true);
 }
 
 function dragOut(e: DragEvent, d: Drags) {
+  if (owns(e, d)) e.stopPropagation();
   if (!takes(e, d)) return;
   d.depth.current = Math.max(0, d.depth.current - 1);
   if (!d.depth.current) d.setDragging(false);
 }
 
 function dragOver(e: DragEvent, d: Drags) {
+  if (owns(e, d)) e.stopPropagation();
   if (hasFiles(e) && e.dataTransfer) e.dataTransfer.dropEffect = takes(e, d) ? 'copy' : 'none';
 }
 
 function dropped(e: DragEvent, d: Drags) {
   if (!hasFiles(e)) return;
+  if (owns(e, d)) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
   d.depth.current = 0;
   d.setDragging(false);
   if (takes(e, d)) d.add(Array.from(e.dataTransfer?.files ?? []));
@@ -188,28 +196,28 @@ function keepPage(e: DragEvent) {
   if (hasFiles(e)) e.preventDefault();
 }
 
-function pasted(e: ClipboardEvent, box: HTMLElement, add: (files: File[]) => void) {
+function pasted(e: ClipboardEvent, box: HTMLElement, accepting: boolean, add: (files: File[]) => void) {
   const said = e.clipboardData;
   if (!said || said.getData('text/plain')) return;
   const files = Array.from(said.files);
   if (!files.some(f => f.type.startsWith('image/')) || !pasteIsForLine(e.target, box)) return;
   e.preventDefault();
   e.stopPropagation();
-  add(files);
+  if (accepting) add(files);
 }
 
 /* Dragging files over the window and pasting a picture while it shows. A file that misses the window stays from replacing
    the page, for as long as it is open. Native listeners, from the commit the window shows in: the program in the terminal
    must not see an image pasted, the box holds panels with their own fields, and a file dropped a moment too early would
-   replace the page. */
-export function usePictureDrop(box: RefObject<HTMLElement | null>, on: boolean, accepting: boolean, add: (files: File[]) => void): boolean {
+   replace the page. An exclusive box takes its own paste before an outer window and keeps its drops from that window. */
+export function usePictureDrop(box: RefObject<HTMLElement | null>, on: boolean, accepting: boolean, add: (files: File[]) => void, exclusive = false): boolean {
   const [dragging, setDragging] = useState(false);
   const depth = useRef(0);
 
   useLayoutEffect(() => {
     const el = box.current;
     if (!on || !el) return;
-    const d: Drags = { accepting, depth, setDragging, add };
+    const d: Drags = { accepting, exclusive, depth, setDragging, add };
     const onEnter = (e: DragEvent) => dragIn(e, d);
     const onLeave = (e: DragEvent) => dragOut(e, d);
     const onOver = (e: DragEvent) => dragOver(e, d);
@@ -230,15 +238,16 @@ export function usePictureDrop(box: RefObject<HTMLElement | null>, on: boolean, 
       depth.current = 0;
       setDragging(false);
     };
-  }, [accepting, add, box, on]);
+  }, [accepting, add, box, exclusive, on]);
 
   useLayoutEffect(() => {
     const el = box.current;
-    if (!on || !accepting || !el) return;
-    const onPaste = (e: ClipboardEvent) => pasted(e, el, add);
-    document.addEventListener('paste', onPaste, true);
-    return () => document.removeEventListener('paste', onPaste, true);
-  }, [accepting, add, box, on]);
+    if (!on || (!accepting && !exclusive) || !el) return;
+    const root = exclusive ? window : document;
+    const onPaste = (e: Event) => pasted(e as ClipboardEvent, el, accepting, add);
+    root.addEventListener('paste', onPaste, true);
+    return () => root.removeEventListener('paste', onPaste, true);
+  }, [accepting, add, box, exclusive, on]);
 
   return dragging;
 }

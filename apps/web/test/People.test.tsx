@@ -1,8 +1,10 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { LanguageProvider } from '../src/i18n';
+import { ru } from '../src/i18n/ru';
 import { People } from '../src/screens/People';
-import type { PersonView } from '../src/types';
+import type { Me, PersonView } from '../src/types';
 import { ME, mockApi, ORG_WITH_TEAMS, PEOPLE } from './api-mock';
 
 const rowOf = (name: string) => screen.getByRole('row', { name: new RegExp(`^${name}\\b`) });
@@ -195,5 +197,132 @@ describe('People row actions', () => {
     });
     expect(await screen.findByRole('cell', { name: 'Head of social' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
+  });
+});
+
+describe('the name in the edit form', () => {
+  /* Who may rename whom, as the server's guard says: anyone their own, the CEO and the deputy with the whole company anyone's. */
+  const DEPUTY: Me = { ...ME, person: { ...ME.person, id: 'p2', name: 'Maria', isOwner: false, isCeoDelegate: true } };
+  const WHOLE_COMPANY: Me = { ...ME, person: { ...ME.person, id: 'p2', name: 'Maria', isOwner: false } };
+  const LISTED: Me = { ...ME, person: { ...ME.person, id: 'p3', name: 'Sasha', isOwner: false, scopeKind: 'listed' } };
+
+  const open = async (me: Me, who: string, routes: Parameters<typeof mockApi>[0] = {}, onRenamed?: (name: string) => void) => {
+    const calls = mockApi({ 'GET /api/people': [200, { people: PEOPLE }], 'GET /api/org': [200, ORG_WITH_TEAMS], ...routes });
+    const user = userEvent.setup();
+    render(<People me={me} onRenamed={onRenamed} />);
+    await user.click(await screen.findByRole('button', { name: `Edit ${who}` }));
+    return { calls, user };
+  };
+  const retype = async (user: ReturnType<typeof userEvent.setup>, label: string, words: string) => {
+    await user.clear(screen.getByLabelText(label));
+    await user.type(screen.getByLabelText(label), words);
+  };
+  const patched = (calls: Awaited<ReturnType<typeof open>>['calls']) => calls.find(c => c.method === 'PATCH');
+
+  afterEach(() => localStorage.clear());
+
+  it('lets the CEO rename another person above the title, saves both together and shows the name in the list', async () => {
+    const { calls, user } = await open(ME, 'Maria', { 'PATCH /api/people/p2': [200, { person: { ...PEOPLE[1], name: 'Maria Ray', title: 'COO' } }] });
+    const name = screen.getByLabelText('Name');
+    expect(name).toHaveValue('Maria');
+    expect(name).toHaveFocus();
+    expect(name.compareDocumentPosition(screen.getByLabelText('Title')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await retype(user, 'Name', '  Maria Ray  ');
+    await retype(user, 'Title', 'COO');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(patched(calls)).toEqual({ method: 'PATCH', path: '/api/people/p2', body: { name: 'Maria Ray', title: 'COO', access: { whole: true } } });
+    expect(await screen.findByRole('cell', { name: 'Maria Ray' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
+  });
+
+  it('lets the deputy with the whole company rename another person', async () => {
+    const { calls, user } = await open(DEPUTY, 'Sasha', { 'PATCH /api/people/p3': [200, { person: { ...PEOPLE[2], name: 'Sasha Lee' } }] });
+    await retype(user, 'Name', 'Sasha Lee');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(patched(calls)!.body).toMatchObject({ name: 'Sasha Lee' });
+    expect(await screen.findByRole('cell', { name: 'Sasha Lee' })).toBeInTheDocument();
+  });
+
+  it('shows the deputy the field on the CEO too, as the server lets them, with nothing else to change', async () => {
+    const { calls, user } = await open(DEPUTY, 'Ivan', { 'PATCH /api/people/p1': [200, { person: { ...PEOPLE[0], name: 'Ivan K' } }] });
+    expect(screen.queryByRole('checkbox', { name: 'Whole company' })).not.toBeInTheDocument();
+    await retype(user, 'Name', 'Ivan K');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(patched(calls)!.body).toEqual({ name: 'Ivan K', title: 'CEO' });
+  });
+
+  it('lets someone with a narrow reach change their own name, and tells the shell', async () => {
+    const onRenamed = vi.fn();
+    const { calls, user } = await open(LISTED, 'Sasha', { 'PATCH /api/people/p3': [200, { person: { ...PEOPLE[2], name: 'Sasha Lee' } }] }, onRenamed);
+    await retype(user, 'Name', 'Sasha Lee');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(patched(calls)!.body).toEqual({ name: 'Sasha Lee', title: 'SMM' });
+    expect(await screen.findByRole('cell', { name: 'Sasha Lee' })).toBeInTheDocument();
+    expect(onRenamed).toHaveBeenCalledWith('Sasha Lee');
+  });
+
+  it('does not tell the shell when the name is someone else\'s', async () => {
+    const onRenamed = vi.fn();
+    const { user } = await open(ME, 'Maria', { 'PATCH /api/people/p2': [200, { person: { ...PEOPLE[1], name: 'Maria Ray' } }] }, onRenamed);
+    await retype(user, 'Name', 'Maria Ray');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(await screen.findByRole('cell', { name: 'Maria Ray' })).toBeInTheDocument();
+    expect(onRenamed).not.toHaveBeenCalled();
+  });
+
+  it.each([['another person', 'Sasha', 'p3', 2], ['the CEO', 'Ivan', 'p1', 0]] as const)('hides the field from someone with the whole company on %s, whose title still saves', async (_who, name, id, row) => {
+    const { calls, user } = await open(WHOLE_COMPANY, name, { [`PATCH /api/people/${id}`]: [200, { person: { ...PEOPLE[row]!, title: 'New title' } }] });
+    expect(screen.queryByLabelText('Name')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Title')).toHaveFocus();
+    await retype(user, 'Title', 'New title');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(patched(calls)!.body).not.toHaveProperty('name');
+    expect(patched(calls)!.body).toMatchObject({ title: 'New title' });
+    expect(await screen.findByRole('cell', { name: 'New title' })).toBeInTheDocument();
+  });
+
+  it('hides the field from someone who may only look at another person', async () => {
+    mockApi({ 'GET /api/people': [200, { people: PEOPLE }], 'GET /api/org': [200, ORG_WITH_TEAMS] });
+    render(<People me={LISTED} selected="p2" onSelect={() => {}} />);
+    expect(await screen.findByRole('heading', { name: 'Maria' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('Name')).not.toBeInTheDocument();
+  });
+
+  it('sends the name only when it changed', async () => {
+    const { calls, user } = await open(ME, 'Maria', { 'PATCH /api/people/p2': [200, { person: { ...PEOPLE[1], title: 'COO' } }] });
+    await retype(user, 'Title', 'COO');
+    await retype(user, 'Name', ' Maria ');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(patched(calls)!.body).toEqual({ title: 'COO', access: { whole: true } });
+  });
+
+  it('will not save an empty name', async () => {
+    const { user } = await open(ME, 'Maria');
+    await user.clear(screen.getByLabelText('Name'));
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    await user.type(screen.getByLabelText('Name'), '   ');
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    await user.type(screen.getByLabelText('Name'), 'M');
+    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
+    expect(screen.getByLabelText('Name')).toHaveAttribute('maxlength', '80');
+  });
+
+  it('keeps the form and says why when the server refuses the name', async () => {
+    const { user } = await open(ME, 'Maria', { 'PATCH /api/people/p2': [403, { error: { code: 'forbidden', message: 'Only the CEO or the CEO delegate changes another person\'s name.', reason: 'owner_locked' } }] });
+    await retype(user, 'Name', 'Maria Ray');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect(screen.getByLabelText('Name')).toHaveValue('Maria Ray');
+    expect(within(rowOf('Maria')).queryByText('Maria Ray')).not.toBeInTheDocument();
+  });
+
+  it('labels the field in Russian', async () => {
+    localStorage.setItem('hh-lang', 'ru');
+    mockApi({ 'GET /api/people': [200, { people: PEOPLE }], 'GET /api/org': [200, ORG_WITH_TEAMS] });
+    const user = userEvent.setup();
+    render(<LanguageProvider><People me={ME} /></LanguageProvider>);
+    await user.click(await screen.findByRole('button', { name: ru.people.editLabel('Maria') }));
+    expect(screen.getByLabelText('Имя')).toHaveValue('Maria');
+    expect(screen.getByLabelText('Должность')).toBeInTheDocument();
   });
 });

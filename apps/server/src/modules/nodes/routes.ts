@@ -4,6 +4,7 @@ import { and, asc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
+import { seesAgentId, viewerOf } from '../../auth/agent-view.js';
 import { requirePerson } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
@@ -187,18 +188,20 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     const placed = await runningAgents(ctx, me);
     const programHost = await builtinMachine(db, config.hostId, me.companyId);
     const serverMachine = me.scopeKind === 'company' ? programHost : null;
-    const parts = await db
-      .select({ machineId: testParts.machineId, builtin: testParts.builtin, run: testRuns.number, kind: testRuns.kind, task: tasks.number, part: testParts.part, parts: testRuns.parts, agent: agents.name, startedAt: testParts.startedAt })
+    const sight = await viewerOf(db, me);
+    const allParts = await db
+      .select({ machineId: testParts.machineId, builtin: testParts.builtin, runBy: testRuns.agentId, run: testRuns.number, kind: testRuns.kind, task: tasks.number, part: testParts.part, parts: testRuns.parts, agent: agents.name, startedAt: testParts.startedAt })
       .from(testParts)
       .innerJoin(testRuns, eq(testRuns.id, testParts.runId))
       .leftJoin(tasks, eq(tasks.id, testRuns.taskId))
       .leftJoin(agents, eq(agents.id, testRuns.agentId))
       .where(and(eq(testParts.companyId, me.companyId), eq(testParts.status, 'running')))
       .orderBy(asc(testParts.startedAt), asc(testRuns.number), asc(testParts.part));
+    const parts = allParts.filter(p => seesAgentId(sight, p.runBy));
     const running = (holds: (a: (typeof placed)[number]) => boolean, runs: (p: (typeof parts)[number]) => boolean) => ({
       agents: placed.filter(holds).map(a => a.view),
       // eslint-disable-next-line @typescript-eslint/no-unused-vars -- strip placement keys used only for filtering
-      parts: parts.filter(runs).map(({ machineId: _, builtin: __, ...p }) => p),
+      parts: parts.filter(runs).map(({ machineId: _, builtin: __, runBy: ___, ...p }) => p),
     });
     return {
       /* The node that comes with the server runs the company's API keys and test runs too, and names the company's machine

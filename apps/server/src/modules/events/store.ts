@@ -124,12 +124,13 @@ export async function messageForJob(ctx: Pick<Ctx, 'db' | 'templates'>, job: { i
   return automaticMessage(message, job);
 }
 
-/* Agents with a job running right now. */
-export async function workingCount(db: Db, companyId: string): Promise<number> {
+/* Agents with a job running right now, of these only when named. */
+export async function workingCount(db: Db, companyId: string, among?: string[]): Promise<number> {
+  if (among?.length === 0) return 0;
   const [row] = await db
     .select({ n: countDistinct(jobs.agentId) })
     .from(jobs)
-    .where(and(eq(jobs.companyId, companyId), eq(jobs.status, 'running'), isNotNull(jobs.agentId)));
+    .where(and(eq(jobs.companyId, companyId), eq(jobs.status, 'running'), isNotNull(jobs.agentId), among ? inArray(jobs.agentId, among) : undefined));
   return Number(row?.n ?? 0);
 }
 

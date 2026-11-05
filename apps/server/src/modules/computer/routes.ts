@@ -1,6 +1,7 @@
 import { notificationMessage } from '../events/notifications.js';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Ctx } from '../../app.js';
+import { seesAgentId, viewerOf } from '../../auth/agent-view.js';
 import { actsAsCeo } from '../../auth/decisions.js';
 import { requirePerson, type Person } from '../../auth/session.js';
 import { ApiError } from '../../errors.js';
@@ -34,8 +35,15 @@ export function computerRoutes(app: FastifyInstance, ctx: Ctx): void {
     return orchestrator;
   }
 
+  /* What the orchestrator asked goes only to people who see him. */
+  async function seenAsk(me: Person) {
+    const shown = ctx.computer.view();
+    const orchestrator = await orchestratorOf(ctx, me.companyId);
+    return seesAgentId(await viewerOf(ctx.db, me), orchestrator?.id) ? shown : { ...shown, asked: null };
+  }
+
   /* What people see: the state, which machine it is, the same from every screen, and whether they may change it. */
-  const view = async (me: Person) => ({ ...ctx.computer.view(), machine: await serverMachine(ctx, me.companyId), canAnswer: actsAsCeo(me) });
+  const view = async (me: Person) => ({ ...(await seenAsk(me)), machine: await serverMachine(ctx, me.companyId), canAnswer: actsAsCeo(me) });
   /* The CEO's other screens fetch it again, once the file says the new state. */
   const changed = (companyId: string) => ctx.bus.publish(companyId, { type: 'computer' });
 

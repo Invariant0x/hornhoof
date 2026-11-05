@@ -25,7 +25,7 @@ function recordUnheard(ctx: Ctx, agentId: string, job: Job, now: Date): Promise<
   return onAgent(ctx, agentId, () => logTurnFact(ctx, job, UNHEARD_NOTE, { unheardAt: now.toISOString() }));
 }
 
-async function repeatWords(ctx: Ctx, { agent, original }: NonNullable<Awaited<ReturnType<typeof unheardFrom>>>, text: string, now: Date): Promise<void> {
+async function repeatWords(ctx: Ctx, { agent, original }: NonNullable<Awaited<ReturnType<typeof wordsFrom>>>, text: string, now: Date): Promise<void> {
   const next = await storeUnheard(ctx, agent.companyId, agent.id, text, original);
   const [job] = original ? [original] : await ctx.db.select().from(jobs).where(eq(jobs.id, next));
   await recordUnheard(ctx, agent.id, job!, now);
@@ -35,12 +35,13 @@ async function repeatWords(ctx: Ctx, { agent, original }: NonNullable<Awaited<Re
 /* Words that were already sent keep their sender, and wait for the next turn instead of trying live again. Words with a
    delivery go back by that delivery. */
 export async function unheard(ctx: Ctx, node: NodeIdentity, msg: Unheard, now: Date): Promise<void> {
-  const received = await unheardFrom(ctx, node, msg);
+  const received = await wordsFrom(ctx, node, msg);
   if (!received || (await requeueOperatorWords(ctx, node, msg, now))) return;
   await repeatWords(ctx, received, msg.text, now);
 }
 
-async function unheardFrom(ctx: Ctx, node: NodeIdentity, msg: Unheard) {
+/* The agent these words are of, and the turn they name, if this node runs them. */
+export async function wordsFrom(ctx: Ctx, node: NodeIdentity, msg: Pick<Unheard, 'agentKey' | 'jobId'>) {
   if (!z.uuid().safeParse(msg.agentKey).success) return null;
   const origin = await wordsOrigin(ctx, node, msg.agentKey, msg.jobId);
   if (!origin) return null;

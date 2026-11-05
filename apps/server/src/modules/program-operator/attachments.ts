@@ -2,7 +2,7 @@ import { PROGRAM_OPERATOR_ROLE } from '@hornhoof/protocol/program-operator';
 import { and, eq, isNull, lte, sql } from 'drizzle-orm';
 import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
-import { accessOf, agentSpot, canReach } from '../../auth/access.js';
+import { canViewAgent } from '../../auth/agent-view.js';
 import type { Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { agents, attachments, departments, jobs, programOperatorCases, subscriptions } from '../../db/schema.js';
@@ -65,13 +65,11 @@ export async function agentCasePicture(db: Db, job: ToolJob, ref: string, file: 
   return found.bytes;
 }
 
-/* People follow the target employee's current company, department, product and team visibility. */
+/* A person sees the picture when they see the target employee, on the one rule of who sees whom. To anyone else it does
+   not exist, as for an agent above: its refusal does not tell a real picture from a made up id. */
 export async function personCasePicture(db: Db, person: Person, id: string): Promise<Buffer> {
   const found = await casePicture(db, person.companyId, id);
-  if (!found) throw casePictureUnknown();
-  const access = await accessOf(db, person);
-  const allowed = found.target.kind === 'orchestrator' ? access.whole : canReach(access, await agentSpot(db, found.target));
-  if (!allowed) throw casePictureUnknown();
+  if (!found || !(await canViewAgent(db, person, found.target))) throw casePictureUnknown();
   return found.bytes;
 }
 

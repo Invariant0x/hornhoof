@@ -104,7 +104,7 @@ describe('pictures, links and choices in requests', () => {
     expect((await app.inject({ method: 'GET', url: `/api/attachments/${loose}`, ...as(ceoSession) })).statusCode).toBe(404);
     expect((await app.inject({ method: 'GET', url: `/api/attachments/${shot}` })).statusCode).toBe(401);
     const seller = await invitePerson(app, ceoSession, { name: 'Sara', email: 'sara@acme.com', access: { departments: [sales.id] } });
-    expect((await app.inject({ method: 'GET', url: `/api/attachments/${shot}`, ...as(seller) })).statusCode).toBe(404);
+    expect((await app.inject({ method: 'GET', url: `/api/attachments/${shot}`, ...as(seller) })).statusCode).toBe(403);
   });
 
   it("refuses another agent's picture and one already shown", async () => {
@@ -147,7 +147,7 @@ describe('pictures, links and choices in requests', () => {
     expect((await app.inject({ method: 'GET', url: `/api/attachments/${square}`, ...as(ceoSession) })).statusCode).toBe(200);
 
     expect((await app.inject({ method: 'POST', url: `/api/requests/${waiting.id}`, payload: { pick: 2 }, ...as(ceoSession) })).json().error.reason).toBe('task_invalid');
-    expect((await app.inject({ method: 'POST', url: `/api/requests/${waiting.id}`, payload: { answer: 'Round' }, ...as(ceoSession) })).json().error.reason).toBe('task_invalid');
+    expect((await app.inject({ method: 'POST', url: `/api/requests/${waiting.id}`, payload: { pick: 2, answer: 'Round' }, ...as(ceoSession) })).json().error.reason).toBe('task_invalid');
     const picked = await app.inject({ method: 'POST', url: `/api/requests/${waiting.id}`, payload: { pick: 1, answer: 'A bit smaller.' }, ...as(ceoSession) });
     expect(picked.json()).toMatchObject({ request: { status: 'answered' } });
     const said = await db.select().from(taskEvents).where(eq(taskEvents.taskId, task.id));

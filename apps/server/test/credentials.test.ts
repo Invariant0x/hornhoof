@@ -4,7 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { orchestratorHeaders } from '../src/auth/internal.js';
-import { agents, companies, departments, machines, nodes, people, planCredentials, subscriptions } from '../src/db/schema.js';
+import { agents, companies, departments, machines, nodes, people, planCredentials, sessions, subscriptions } from '../src/db/schema.js';
 import { LEASE_MOVE_MS, moveLeases } from '../src/modules/subscriptions/lease.js';
 import { companyView } from '../src/modules/tools/company.js';
 import { as, connectNode, invitePerson, listen, openStream, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
@@ -331,6 +331,56 @@ describe('signing a plan in from Hornhoof', () => {
     await expect(loginScreen(url, ceo, olegsPlan, o.nodeId)).rejects.toThrow('HTTP 403');
   });
 
+  it('passes a new size to the sign-in terminal and goes on past what is no frame', async () => {
+    const { ceo, plan, a, online, url } = await plans();
+    const na = await online(a, KEY('a'), false);
+    const screen = await loginScreen(url, ceo, plan, a.nodeId);
+    const open = await nextOf(na, 'term.open');
+    screen.ws.send('not a frame');
+    screen.ws.send(JSON.stringify({ type: 'nonsense', data: 'x' }));
+    screen.ws.send(JSON.stringify({ type: 'resize', cols: 90, rows: 20 }));
+    expect(await nextOf(na, 'term.resize')).toEqual({ type: 'term.resize', termId: open.termId, cols: 90, rows: 20 });
+  });
+
+  it('closes the sign-in terminal of a machine that is away, or shows no terminals', async () => {
+    const { db, ceo, plan, a, b, url } = await plans();
+    const closes = async (nodeId: string) => {
+      const screen = await loginScreen(url, ceo, plan, nodeId);
+      return new Promise<number>(resolve => screen.ws.on('close', code => resolve(code)));
+    };
+    expect(await closes(a.nodeId)).toBe(4410);
+    const nb = await connectNode(url, b.key);
+    nb.send({ type: 'hello', version: '0.9.0', loggedIn: false, running: [], publicKey: KEY('b'), terminals: false });
+    await until(async () => (await db.select({ k: nodes.publicKey }).from(nodes).where(eq(nodes.id, b.nodeId)))[0]?.k === KEY('b'));
+    expect(await closes(b.nodeId)).toBe(4404);
+  });
+
+  it('ends the sign-in terminal at once when its owner signs out, on the node too', async () => {
+    const { app, ceo, plan, a, online, url } = await plans();
+    const na = await online(a, KEY('a'), false);
+    const screen = await loginScreen(url, ceo, plan, a.nodeId);
+    const open = await nextOf(na, 'term.open');
+    const closed = new Promise<number>(resolve => screen.ws.on('close', code => resolve(code)));
+    await app.inject({ method: 'POST', url: '/api/auth/logout', ...as(ceo) });
+    expect(await closed).toBe(4403);
+    expect(await nextOf(na, 'term.close')).toEqual({ type: 'term.close', termId: open.termId });
+  });
+
+  it('passes no key of an owner whose session ended with nobody told, and closes', async () => {
+    const { db, ceo, plan, a, online, url } = await plans();
+    const na = await online(a, KEY('a'), false);
+    const screen = await loginScreen(url, ceo, plan, a.nodeId);
+    await nextOf(na, 'term.open');
+    const closed = new Promise<number>(resolve => screen.ws.on('close', code => resolve(code)));
+    screen.ws.send(JSON.stringify({ type: 'input', data: 'before' }));
+    expect((await nextOf(na, 'term.input')).data).toBe('before');
+    await db.delete(sessions);
+    await new Promise(resolve => setTimeout(resolve, 1100));
+    screen.ws.send(JSON.stringify({ type: 'input', data: 'after' }));
+    expect(await closed).toBe(4403);
+    await expect(nextOf(na, 'term.input', 200)).rejects.toThrow('No term.input');
+  });
+
   it("tells the owner how it ended, seals the new sign-in for the plan's nodes and is ready once the node says so", async () => {
     const { app, db, ceo, plan, a, b, online } = await plans();
     const stream = await openStream(app, ceo);
@@ -380,13 +430,13 @@ describe('which account a plan runs on', () => {
     await until(async () => (await db.select({ account: nodes.account }).from(nodes).where(eq(nodes.id, a.nodeId)))[0]?.account?.tier === 'max');
     expect(await mine(app, ceo, plan)).toMatchObject({ accounts: [{ nodeId: a.nodeId, hostname: 'ivan-mac', tier: 'max', email: 'ivan.plans@example.com' }], tier: 'max', accountsDiffer: false, signedInOnce: false, leaseMachine: null });
 
-    /* Dana works in Sales only. The map shows her the orchestrator's plan, which is Ivan's, without his address. */
+    /* Dana works in Sales only. The map shows her no orchestrator, so neither his plan nor Ivan's address. */
     const [acme] = await db.select().from(companies);
     const [sales] = await db.insert(departments).values({ companyId: acme!.id, name: 'Sales', roleCode: 'SAL' }).returning();
     const dana = await invitePerson(app, ceo, { name: 'Dana', email: 'dana@acme.com', access: { departments: [sales!.id] } });
     await db.update(agents).set({ subscriptionId: plan }).where(eq(agents.kind, 'orchestrator'));
     const org = (await app.inject({ method: 'GET', url: '/api/org', ...as(dana) })).json();
-    expect(org.orchestrator.subscription).toMatchObject({ id: plan, tier: 'max', accounts: [{ nodeId: a.nodeId, tier: 'max' }] });
+    expect(org.orchestrator).toBeUndefined();
     expect(JSON.stringify(org)).not.toContain('ivan.plans@example.com');
     const ceoOrg = (await app.inject({ method: 'GET', url: '/api/org', ...as(ceo) })).json();
     expect(ceoOrg.orchestrator.subscription.accounts[0].email).toBe('ivan.plans@example.com');

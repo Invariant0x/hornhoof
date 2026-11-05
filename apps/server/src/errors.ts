@@ -54,6 +54,10 @@ export type ErrorReason =
   | 'agent_unknown'
   | 'agent_not_ready'
   | 'not_your_department'
+  | 'agent_hidden'
+  | 'task_hidden'
+  | 'ceo_view_only'
+  | 'attachment_hidden'
   | 'orchestrator_card'
   | 'orchestrator_locked'
   | 'subscription_cannot_serve'
@@ -145,6 +149,15 @@ export function loggable(err: unknown, depth = 0): Record<string, unknown> {
 /* Optional handler for unmatched requests that are not errors, like the web app's own routes. */
 export type Fallback = (req: FastifyRequest, reply: FastifyReply) => FastifyReply | Promise<FastifyReply> | undefined;
 
+/* A rejected transport body keeps its original text with the caller and names the file path forward. */
+function requestError(status: number, message: string, url: string) {
+  if (status !== 413 || !/^\/(mcp|api\/(tasks\/[^/]+\/comments|requests\/[^/]+|agents\/[^/]+\/messages))(?:\?|$)/.test(url)) return body('validation', message);
+  const next = url.startsWith('/mcp')
+    ? 'Save the full text as a file and attach it with hh-attach --task <task number> FILE. Then send its file name.'
+    : 'Keep the full text in a file on its task and send the file link. Your text has not been submitted.';
+  return body('validation', `The text is too large to send in one request. ${next}`, 'attachment_invalid');
+}
+
 export function registerErrorHandling(app: FastifyInstance, fallback?: Fallback): void {
   app.setErrorHandler((err: FastifyError | Error, req, reply) => {
     if (err instanceof ApiError) return reply.status(err.status).send(body(err.code, err.message, err.reason, err.details));
@@ -154,7 +167,7 @@ export function registerErrorHandling(app: FastifyInstance, fallback?: Fallback)
       return reply.status(400).send(body('validation', where + (first?.message ?? 'Invalid input.')));
     }
     const status = 'statusCode' in err && typeof err.statusCode === 'number' ? err.statusCode : 500;
-    if (status < 500) return reply.status(status).send(body('validation', err.message));
+    if (status < 500) return reply.status(status).send(requestError(status, err.message, req.url));
     req.log.error({ error: loggable(err), method: req.method, route: req.routeOptions.url }, 'A request failed.');
     return reply.status(500).send({ error: { code: 'internal', message: 'Something went wrong.' } });
   });

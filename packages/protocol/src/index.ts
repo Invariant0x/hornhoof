@@ -318,6 +318,8 @@ const Cols = z.number().int().min(10).max(500);
 const Rows = z.number().int().min(4).max(200);
 /* What one frame carries of a terminal's screen or of a person's keys and pastes. */
 export const TERM_CHUNK = 64 * 1024;
+/* Keys that may leave words in a program's input. Scrolling, clicks, arrows and a lone Enter leave none. */
+export const typesWords = (data: string): boolean => /[^\x00-\x20\x7f]/.test(data.replace(/\x1b(?:\[[0-9;<?]*[ -/]*[@-~]|O.)/g, ''));
 
 /* How busy a node's machine is: its processors, the load average over the last minute, its free and total memory in
    bytes, and how many test runs and agent jobs the node runs now. A node sends it with its hello and every LOAD_MS.
@@ -542,6 +544,10 @@ const NodeMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('agent.said'), ref: z.string().max(64), ok: z.boolean() }),
   z.object({ type: z.literal('agent.unheard'), agentKey: Id, jobId: Id.nullable(), text: z.string().max(100_000) }),
   z.object({ type: z.literal('agent.words_settled'), agentKey: Id, jobId: Id }),
+  /* Words a program's input held, that nobody sent, before a new turn: Hornhoof keeps them and answers, and only then does
+     the node clear the input. typed: someone typed at the terminal since Hornhoof last typed there. The same ref means the
+     same words for the same turn, so words sent again are kept once. */
+  z.object({ type: z.literal('agent.input_left'), agentKey: Id, jobId: Id.nullable(), text: z.string().max(100_000), typed: z.boolean(), ref: z.string().min(1).max(64) }),
   /* How a restart Hornhoof asked for went: done, or why the node did not do it. */
   z.object({ type: z.literal('agent.restarted'), agentKey: Id, jobId: Id, ok: z.boolean(), reason: z.string().max(300).nullable() }),
 ]);
@@ -662,6 +668,8 @@ const ServerMessage = z.discriminatedUnion('type', [
      the program as a person types, so the turn takes them in. The optional within budget, in milliseconds from receipt,
      limits how long the node can wait to type them without depending on the server's clock. */
   z.object({ type: z.literal('agent.say'), agentKey: Id, text: z.string().max(100_000), ref: z.string().max(64), within: z.number().int().nonnegative().optional() }),
+  /* Hornhoof keeps the words named by ref, so the node may clear them from the program's input. */
+  z.object({ type: z.literal('agent.input_kept'), agentKey: Id, ref: z.string().min(1).max(64) }),
   /* Restart the agent's program in the same session, when it cannot come back by itself. The node checks the same
      conditions against its own events first, then types the note and the turn's words the program had not taken in. */
   z.object({ type: z.literal('agent.restart'), agentKey: Id, jobId: Id, note: z.string().max(4000) }),

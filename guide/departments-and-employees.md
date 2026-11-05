@@ -41,6 +41,8 @@ The last employee in each of the four cannot be removed. Switch it off for a whi
 
 The program operator starts on the oldest subscription that may serve Operations. When there is none yet it waits, and the first that may serve Operations goes to it without a question, even one still waiting for its machine. A subscription you pick for it yourself stays as long as it may serve Operations. When it no longer may, the operator moves to the next one after its current turn ends.
 
+When a program does not record the words it was given for a minute, the operator gets a turn on any connected machine of its subscription, even if it has never had a turn before. If nobody gets the words through, they are not lost: they go with that employee's next turn, after a wait that grows from one minute to ten, and they are not repeated if the program recorded them after all. However many tries fail in a row, the news comes once. When it is the orchestrator's program, the orchestrator gets no turn about it: you see it in the orchestrator's window, with a picture of its screen, and the head of Operations hears of it.
+
 ## What is in an employee's window?
 
 Click an employee to open its window, with its terminal or its log. A small mark next to its name says whether it works in Claude, Codex, Kimi, GLM or Antigravity.
@@ -111,6 +113,16 @@ Reviewers of different models find different things. So at each gate, one employ
 - The gate passes when all of them pass.
 - A send-back gives the executor all their reasons in one list.
 - Work handed in again goes straight back to that gate, and only to the reviewers who sent it back. Each of them checks the fixes for its own findings.
+
+## How hard does an employee think?
+
+Hornhoof picks the level when a turn starts, by why it starts, and the level stays until that turn ends.
+
+- Plans, first looks, security checks and work run at the role's level, or at the level set on the employee's card.
+- A second look at the fixes for a reviewer's own finding and a merge of what passed its gates run at medium, or at the nearest level above it that the model has. A lower level stays as it is.
+- A turn that also brings anything else, such as a comment or a person's words, keeps the full level.
+- The card keeps the level you set. A model that names no levels gets none from Hornhoof.
+- A change of level starts the program again between turns, and the conversation goes on in the same session.
 
 ## What if a role has nobody switched on?
 
