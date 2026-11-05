@@ -40,7 +40,7 @@ For each link, the relay keeps:
 - whether it is blocked, when it was blocked, and why;
 - which client holds its route, with that client's run id, since when, and in which registration (a counter that grows by one at every registration); the route's state (pending, held, empty) and type (http, https). The relay reads whether a route is live from frps itself, so it never answers "empty" for a name it is not sure of;
 - its sync record: on or off, the copy's machine, its epoch, the registration it came in and when. Only the live route's holder can set a newer epoch. The relay commits it to SQLite with full synchronization before answering, and keeps it across restarts;
-- the hashes of its earlier keys, after a key change, so that a tunnel already logged in keeps its heartbeat. Nothing but a heartbeat can use them;
+- the hashes of its earlier keys, after a key change, so that a tunnel already logged in keeps its heartbeat and its new connections. They open nothing else: no API call, no login and no registration;
 - a hash of its visitor key, the key a visitor-only client logs in with. The key itself is handed out once and never stored or logged.
 
 Releasing a name deletes its key hashes and its sync record. Its route record stays, so that the registration counter keeps growing for the next owner.
