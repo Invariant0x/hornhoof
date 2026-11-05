@@ -6,6 +6,7 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
 import pg from 'pg';
+import { AFTER_MIGRATIONS, BEFORE_MIGRATIONS } from './net.js';
 import * as schema from './schema.js';
 
 export type Db = PgDatabase<PgQueryResultHKT, typeof schema>;
@@ -38,17 +39,37 @@ export function openDb(url: string, name: string, opts: { statementTimeoutMs?: n
 
 /* Runs on a pool with no timeouts, since a migration may take as long as it needs. Answers how many migrations the
    database has recorded. */
-export async function migrateDb(url: string): Promise<number> {
+export async function migrateDb(url: string, folder: string = MIGRATIONS): Promise<number> {
   const pool = openPool(url, warnDropped, MIGRATE_NAME);
   try {
     const db = drizzle(pool, { schema });
-    await migrate(db, { migrationsFolder: MIGRATIONS });
-    await applyMissingMigrations(db, { migrationsFolder: MIGRATIONS });
+    await pool.query(BEFORE_MIGRATIONS);
+    await withJournalBackAfter(pool, async () => {
+      await migrate(db, { migrationsFolder: folder });
+      await applyMissingMigrations(db, { migrationsFolder: folder });
+    });
     const { rows } = await pool.query<{ count: string }>('SELECT count(*) FROM drizzle.__drizzle_migrations');
     return Number(rows[0]!.count);
   } finally {
     await pool.end();
   }
+}
+
+/* The journal goes back also after a failed run, whose failure stays what the caller gets. A failure to put it back after a
+   good run is thrown too: the company must not go on without it. An older database has no such function yet. */
+async function withJournalBackAfter(pool: pg.Pool, migrations: () => Promise<void>): Promise<void> {
+  try {
+    await migrations();
+  } catch (err) {
+    await putJournalBack(pool).catch((failed: Error) => console.warn(`Could not put the journal back after a failed migration: ${failed.message}`));
+    throw err;
+  }
+  await putJournalBack(pool);
+}
+
+async function putJournalBack(pool: pg.Pool): Promise<void> {
+  const { rows } = await pool.query<{ there: boolean }>(`SELECT to_regprocedure('net.attach_journal()') IS NOT NULL AS there`);
+  if (rows[0]!.there) await pool.query(AFTER_MIGRATIONS);
 }
 
 /* Merged branches can put an unrecorded migration below Drizzle's newest timestamp. */
