@@ -1,0 +1,257 @@
+{
+  "run": 106,
+  "outerCommit": "449aea949f51794f40d6886b59d7851c4c3620f9",
+  "control": "05c63819d59c0cbba044132c89c503f30cb49856",
+  "optimized": "54340764df895693cabdad4027fdad2ffcf48e38",
+  "status": "failed",
+  "acceptedPerformanceResult": false,
+  "transportInvalid": [
+    {
+      "message": "Complete evidence exceeds the 700 KiB runner tail budget"
+    }
+  ],
+  "recordKinds": {
+    "HH_PAIR_ENV": 1,
+    "HH_PAIR_CONFIG": 1,
+    "HH_PAIR_PART": 8,
+    "HH_PAIR_COMMAND": 54,
+    "HH_PAIR_RESOURCE": 1128,
+    "HH_PAIR_STAGE": 54,
+    "HH_PAIR_TIMING": 760,
+    "HH_PAIR_FAILED_OUTPUT": 6,
+    "HH_PAIR_RESULT": 1,
+    "HH_PAIR_INVALID": 1
+  },
+  "rawStageLogs": 54,
+  "packageSummaryRecords": 26,
+  "fileTimingRecords": 734,
+  "counts": {
+    "control": {
+      "packages/protocol": 218,
+      "apps/server": 2965,
+      "apps/node": 1712,
+      "apps/web": 1430
+    },
+    "optimized": {
+      "packages/protocol": 218,
+      "apps/server": 2965,
+      "apps/node": 1712,
+      "apps/web": 1430
+    }
+  },
+  "fileCounts": {
+    "control": {
+      "packages/protocol": 14,
+      "apps/server": 169,
+      "apps/node": 111,
+      "apps/web": 68
+    },
+    "optimized": {
+      "packages/protocol": 14,
+      "apps/server": 179,
+      "apps/node": 111,
+      "apps/web": 68
+    }
+  },
+  "ownPassedCases": {
+    "control": {
+      "server": 252,
+      "node": 17,
+      "serverFiles": 3,
+      "nodeFiles": 5
+    },
+    "optimized": {
+      "server": 252,
+      "node": 17,
+      "serverFiles": 13,
+      "nodeFiles": 5
+    }
+  },
+  "failedCasesPerVariant": 6,
+  "passedCasesPerVariant": 6319,
+  "identity": {
+    "platform": "linux",
+    "release": "6.8.0-147-generic",
+    "arch": "x64",
+    "node": "v22.23.4",
+    "cpus": 8,
+    "hostCpus": 8,
+    "model": "Intel(R) Xeon(R) CPU E5-1620 v2 @ 3.70GHz",
+    "cpuMax": "max 100000",
+    "cpuPeriod": "max 100000",
+    "cpuset": "0-7",
+    "memoryMax": "max"
+  },
+  "resources": {
+    "control": {
+      "samples": 567,
+      "first": "2026-11-05T17:53:14.985Z",
+      "last": "2026-11-05T18:37:12.032Z",
+      "load1Min": 0.61,
+      "load1Median": 3.54,
+      "load1Max": 5.54,
+      "minAvailableGiB": 81.7573013305664,
+      "maxMemoryCurrentGiB": 4.3603363037109375,
+      "throttledPeriodsDelta": 0,
+      "oomKillDelta": 0,
+      "cpuPressureMaxSomeAvg10": 2.03,
+      "cpuPressureMaxFullAvg10": 0.59,
+      "memoryPressureMaxSomeAvg10": 0.0,
+      "memoryPressureMaxFullAvg10": 0.0
+    },
+    "optimized": {
+      "samples": 561,
+      "first": "2026-11-05T18:37:12.036Z",
+      "last": "2026-11-05T19:20:45.403Z",
+      "load1Min": 1.15,
+      "load1Median": 3.32,
+      "load1Max": 6.73,
+      "minAvailableGiB": 81.31912612915039,
+      "maxMemoryCurrentGiB": 6.345970153808594,
+      "throttledPeriodsDelta": 0,
+      "oomKillDelta": 0,
+      "cpuPressureMaxSomeAvg10": 3.04,
+      "cpuPressureMaxFullAvg10": 1.09,
+      "memoryPressureMaxSomeAvg10": 0.0,
+      "memoryPressureMaxFullAvg10": 0.0
+    }
+  },
+  "stageTotalsMs": {
+    "control": {
+      "apps/node": 559848,
+      "apps/server": 1506545,
+      "apps/web": 137980,
+      "install": 186853,
+      "lint": 92696,
+      "packages/protocol": 4551,
+      "protocol-build": 14906,
+      "release-check": 50,
+      "release-tests": 89604,
+      "shell-syntax": 5,
+      "shellcheck": 1293,
+      "typecheck-tests": 42554
+    },
+    "optimized": {
+      "apps/node": 513152,
+      "apps/server": 1548423,
+      "apps/web": 139178,
+      "install": 166486,
+      "lint": 92286,
+      "packages/protocol": 4470,
+      "protocol-build": 14974,
+      "release-check": 49,
+      "release-tests": 90046,
+      "shell-syntax": 5,
+      "shellcheck": 1307,
+      "typecheck-tests": 42847
+    }
+  },
+  "failedStages": [
+    {
+      "variant": "control",
+      "part": 1,
+      "stage": "apps/server",
+      "exitCode": 1,
+      "headers": [
+        " FAIL  test/timers.test.ts > timers > sends a turn that was left waiting with nothing running on the next minute round",
+        " FAIL  test/timers.test.ts > timers > wakes an employee once each interval with its order, outside any task"
+      ],
+      "summary": [
+        "Test Files  1 failed | 42 passed (43)",
+        "Tests  2 failed | 796 passed (798)",
+        "Duration  316.80s (tests 93%, import 7%)"
+      ]
+    },
+    {
+      "variant": "control",
+      "part": 2,
+      "stage": "apps/web",
+      "exitCode": 1,
+      "headers": [
+        " FAIL  test/css.test.ts > paints what an agent does from the theme's tokens, and an alarm and the frame around it red, light and dark"
+      ],
+      "summary": [
+        "Test Files  1 failed | 16 passed (17)",
+        "Tests  1 failed | 221 passed (222)",
+        "Duration  19.17s (environment 41%, tests 39%, setup 7%, import 7%, transform 5%)"
+      ]
+    },
+    {
+      "variant": "control",
+      "part": 3,
+      "stage": "apps/node",
+      "exitCode": 1,
+      "headers": [
+        " FAIL  test/check-command.test.ts > heavy command bridge > makes the CLI preserve command output and its nonzero exit status",
+        " FAIL  test/check-command.test.ts > heavy command bridge > allows nested wrappers and hooks from its own checked command while rejecting another agent",
+        " FAIL  test/check-command.test.ts > heavy command bridge > retains the slot while a cancelled command ignores TERM and is killed after its grace"
+      ],
+      "summary": [
+        "Test Files  1 failed | 27 passed (28)",
+        "Tests  3 failed | 327 passed (330)",
+        "Duration  133.19s (tests 97%, import 2%)"
+      ]
+    },
+    {
+      "variant": "optimized",
+      "part": 1,
+      "stage": "apps/server",
+      "exitCode": 1,
+      "headers": [
+        " FAIL  test/timers.test.ts > timers > sends a turn that was left waiting with nothing running on the next minute round",
+        " FAIL  test/timers.test.ts > timers > wakes an employee once each interval with its order, outside any task"
+      ],
+      "summary": [
+        "Test Files  1 failed | 44 passed (45)",
+        "Tests  2 failed | 797 passed (799)",
+        "Duration  333.80s (tests 93%, import 7%)"
+      ]
+    },
+    {
+      "variant": "optimized",
+      "part": 2,
+      "stage": "apps/web",
+      "exitCode": 1,
+      "headers": [
+        " FAIL  test/css.test.ts > paints what an agent does from the theme's tokens, and an alarm and the frame around it red, light and dark"
+      ],
+      "summary": [
+        "Test Files  1 failed | 16 passed (17)",
+        "Tests  1 failed | 221 passed (222)",
+        "Duration  19.77s (environment 41%, tests 39%, setup 7%, import 7%, transform 5%)"
+      ]
+    },
+    {
+      "variant": "optimized",
+      "part": 3,
+      "stage": "apps/node",
+      "exitCode": 1,
+      "headers": [
+        " FAIL  test/check-command.test.ts > heavy command bridge > makes the CLI preserve command output and its nonzero exit status",
+        " FAIL  test/check-command.test.ts > heavy command bridge > allows nested wrappers and hooks from its own checked command while rejecting another agent",
+        " FAIL  test/check-command.test.ts > heavy command bridge > retains the slot while a cancelled command ignores TERM and is killed after its grace"
+      ],
+      "summary": [
+        "Test Files  1 failed | 27 passed (28)",
+        "Tests  3 failed | 327 passed (330)",
+        "Duration  96.27s (tests 97%, import 2%, transform 1%)"
+      ]
+    }
+  ],
+  "reconstructedArchive": {
+    "records": 2067,
+    "rawOutputs": 54,
+    "gzipBytes": 539967,
+    "encodedFrameBytes": 720061,
+    "budgetBytes": 716800,
+    "sha256": "5eba17bd6c8823b11d5e73703e8e7fc85fc0dd651db97589d9cf0b68a78f5a29",
+    "accepted": false,
+    "reason": "Forensic reconstruction after driver overflow; original invalid result remains in force"
+  },
+  "inputHashes": {
+    "work-106-1-pair-measurements.log": "82860a28bd3e1c8ac1397ca578a20ed5a017e01f32697f4ea0db1f10acdf4a89",
+    "work-106-1.log": "5aa313b0c9ca81fd71de93f57765ada5139ad3239e823ebbba47a83649a676db",
+    "work-106-1-pair-stage-logs.tar.gz": "99f4cbd21f4421c8dd0ef7030e981dfc3038f0f65e9f006ce501503041f03d0d"
+  },
+  "note": "Diagnostic observations from a rejected sequential replay; no accepted speedup or historical turn-7 comparison."
+}

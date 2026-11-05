@@ -111,9 +111,11 @@ Execution note after run 103: same command and all package counts verified, full
 
 **Interfaces:** Consumes the reviewed driver, two pinned SHAs and completed targeted diagnostics. Produces one parts1 run_tests result with both variants, then a qualified final report.
 
-- [ ] Ensure409 is common to both variants and all required targeted checks have completed at original limits. Push the final branch and attach driver/manifest before launching.
-- [ ] Launch one parts1 run_tests job, replaying four logical shards sequentially per SHA. Use wait_for for30minutes and end the turn.
-- [ ] Parse variant/part/package/file records and counts, compare load/limits, preserve failures, and label sequential timing correctly. If load is still incomparable, report the exact observed limitation for Operations.
+- [x] Ensure409 is common to both variants and all required targeted checks have completed at original limits. Push the final branch and attach driver/manifest before launching.
+- [x] Launch one parts1 run_tests job, replaying four logical shards sequentially per SHA. Use wait_for for30minutes and end the turn.
+- [x] Parse variant/part/package/file records and counts, compare load/limits, preserve failures, and label sequential timing correctly. If load is still incomparable, report the exact observed limitation for Operations.
 - [ ] Recheck required scoped gates after any source changes, commit/push report and submit with all concerns; do not claim an unmeasured historical turn7 percentage.
 
 Controlled attempt105 ran only bootstrap: GitHub authentication unavailable after initial clone, exit128, no measurement stages. Prepared an attached shallow source archive and checked offline/output bootstrap at unchanged pinned SHAs. Further full execution awaits head authorization of a replacement one-part run_work, not a blind rerun.
+
+Replay106 disposition: one authorized run_work was launched instead of failed-bootstrap105, then completed once. Both full outputs and all54 raw logs are retained. Independent analysis verified equal6325-case totals, own252server+17node cases passing,54commands,26package summaries,734file timings,1128stable-identity resource records. Six common cases failed per variant; console archive overflow remains INVALID. One selected3-case diagnostic after building node passed without source changes. Documentation/evidence are complete; acceptance and any future validation plan remain a head decision. No new paired run and no foreign-source/assertion fix.
