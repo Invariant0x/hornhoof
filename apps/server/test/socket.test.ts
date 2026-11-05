@@ -272,11 +272,13 @@ describe('node socket', () => {
 
     await db.update(nodes).set({ status: 'ready', lastSeenAt: silentSince }).where(eq(nodes.id, nodeId));
     await db.update(subscriptions).set({ status: 'ready' }).where(eq(subscriptions.id, subId));
+    await expireStaleNodes(db, now);
     const machinesRes = (await app.inject({ url: '/api/machines', ...as(ceo) })).json();
     expect(machinesRes.machines[0].plans[0].status).toBe('needs_login');
 
     await db.update(nodes).set({ status: 'ready', lastSeenAt: silentSince }).where(eq(nodes.id, nodeId));
     await db.update(subscriptions).set({ status: 'ready' }).where(eq(subscriptions.id, subId));
+    await expireStaleNodes(db, now);
     const staleSub = await subOf(app, ceo, subId);
     expect(staleSub.status).toBe('needs_login');
     expect(staleSub.machines[0].status).toBe('needs_login');

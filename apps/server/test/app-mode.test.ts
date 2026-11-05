@@ -1,11 +1,14 @@
 import { eq } from 'drizzle-orm';
+import type { FastifyInstance } from 'fastify';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it, onTestFinished } from 'vitest';
-import { sessions } from '../src/db/schema.js';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import WebSocket from 'ws';
+import { agents, nodes, sessions, subscriptions } from '../src/db/schema.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { AppMode, modeGate, refusalOf, whileLeading } from '../src/modules/keeper/app-mode.js';
+import { NODE_STALE_MS } from '../src/modules/nodes/nodes.js';
 import { freshState, KEEPER_FILE, readKeeperState, writeKeeperState, type KeeperState, type Mode } from '../src/modules/keeper/state.js';
 import { as, connectNode, listen, setUpCompany, testApp, TUNNEL, until, viaLink } from './helpers.js';
 
@@ -24,6 +27,13 @@ function modeIn(dir: string, extra: Partial<ConstructorParameters<typeof AppMode
   const lines: string[] = [];
   const mode = new AppMode({ dir, fromKeeper: true, now: () => NOW, log: line => lines.push(line), ...extra });
   return { mode, lines };
+}
+
+/* A promise the test opens by hand, so a hook stays in the middle of its work for as long as the test needs. */
+function gate() {
+  let open!: () => void;
+  const opened = new Promise<void>(done => (open = done));
+  return { opened, open };
 }
 
 describe('the keeper file', () => {
@@ -50,6 +60,14 @@ describe('the keeper file', () => {
     writeKeeperState(dir, stateOf('lead', NOW - 10_001));
     expect(freshState(dir, NOW)).toBeNull();
     expect(freshState(dir, NOW, 20_000)?.mode).toBe('lead');
+  });
+
+  it('counts a word from the future as no word, however little ahead', () => {
+    const dir = folder();
+    writeKeeperState(dir, stateOf('lead', NOW + 1));
+    expect(freshState(dir, NOW)).toBeNull();
+    writeKeeperState(dir, stateOf('lead', NOW));
+    expect(freshState(dir, NOW)?.mode).toBe('lead');
   });
 });
 
@@ -101,7 +119,7 @@ describe('AppMode', () => {
     expect(counts).toEqual({ enter: 2, leave: 2 });
   });
 
-  it('enters a hook registered while leading at once, and in the order hooks were registered', async () => {
+  it('enters a hook registered while leading, and in the order hooks were registered', async () => {
     const dir = folder();
     const { mode } = modeIn(dir);
     const order: string[] = [];
@@ -109,10 +127,89 @@ describe('AppMode', () => {
     writeKeeperState(dir, stateOf('lead'));
     await mode.check();
     mode.whenLead(() => void order.push('late in'), () => void order.push('late out'));
+    await mode.settled();
     expect(order).toEqual(['first in', 'late in']);
     writeKeeperState(dir, stateOf('read'));
     await mode.check();
     expect(order.slice(2)).toEqual(['first out', 'late out']);
+  });
+
+  it('enters a hook registered after start only once the hooks before it have ended', async () => {
+    const { mode } = modeIn(folder(), { fromKeeper: false });
+    const order: string[] = [];
+    const first = gate();
+    mode.whenLead(async () => {
+      order.push('first in');
+      await first.opened;
+      order.push('first done');
+    }, () => undefined);
+    mode.start();
+    mode.whenLead(() => void order.push('second in'), () => undefined);
+    await Promise.resolve();
+    first.open();
+    await mode.settled();
+    expect(order).toEqual(['first in', 'first done', 'second in']);
+  });
+
+  /* The app is in lead with a first hook still entering, the second waiting behind it. */
+  async function midwayIntoLead(dir: string, order: string[]) {
+    const { mode } = modeIn(dir);
+    const reached = gate();
+    const slow = gate();
+    mode.whenLead(async () => {
+      order.push('slow in');
+      reached.open();
+      await slow.opened;
+    }, () => void order.push('slow out'));
+    mode.whenLead(() => void order.push('next in'), () => void order.push('next out'));
+    writeKeeperState(dir, stateOf('lead'));
+    void mode.check();
+    await reached.opened;
+    return { mode, slow };
+  }
+
+  it('stops the remaining hooks of a stay in lead that ended, and leaves only those it entered', async () => {
+    const dir = folder();
+    const order: string[] = [];
+    const { mode, slow } = await midwayIntoLead(dir, order);
+    mode.whenLead(() => void order.push('late in'), () => void order.push('late out'));
+    writeKeeperState(dir, stateOf('read'));
+    void mode.check();
+    slow.open();
+    await mode.settled();
+    expect(order).toEqual(['slow in', 'slow out']);
+  });
+
+  it('finishes leaving before it enters again, on a quick lead, read, lead', async () => {
+    const dir = folder();
+    const order: string[] = [];
+    const { mode, slow } = await midwayIntoLead(dir, order);
+    writeKeeperState(dir, stateOf('read'));
+    void mode.check();
+    writeKeeperState(dir, stateOf('lead'));
+    void mode.check();
+    slow.open();
+    await mode.settled();
+    expect(order).toEqual(['slow in', 'slow out', 'slow in', 'next in']);
+  });
+
+  it('runs whenLeaving in the very call that leaves lead, ahead of a hook still at work', async () => {
+    const dir = folder();
+    const { mode, slow } = await midwayIntoLead(dir, []);
+    const left: string[] = [];
+    mode.whenLeaving(() => {
+      left.push('first');
+      throw new Error('boom');
+    });
+    mode.whenLeaving(() => void left.push('second'));
+    writeKeeperState(dir, stateOf('read'));
+    void mode.check();
+    expect(left).toEqual(['first', 'second']);
+    writeKeeperState(dir, stateOf('maintenance'));
+    void mode.check();
+    expect(left).toEqual(['first', 'second']);
+    slow.open();
+    await mode.settled();
   });
 
   it('lets the next hook run when one throws, and says so in one log line', async () => {
@@ -128,6 +225,16 @@ describe('AppMode', () => {
     expect(lines.filter(line => line.includes('boom'))).toHaveLength(1);
   });
 
+  it('hides a password in what a failed hook logs', async () => {
+    const dir = folder();
+    const { mode, lines } = modeIn(dir);
+    mode.whenLead(() => { throw new Error('no database at postgres://hornhoof:hunter2@db/x'); }, () => undefined);
+    writeKeeperState(dir, stateOf('lead'));
+    await mode.check();
+    expect(lines.filter(line => line.includes('hunter2'))).toEqual([]);
+    expect(lines.filter(line => line.includes('no database at'))).toHaveLength(1);
+  });
+
   it('waits for a slow leave hook in the check that leaves', async () => {
     const dir = folder();
     const { mode } = modeIn(dir);
@@ -138,6 +245,46 @@ describe('AppMode', () => {
     writeKeeperState(dir, stateOf('maintenance'));
     await mode.check();
     expect(finished).toBe(true);
+  });
+});
+
+describe('AppMode on the clock, behind a keeper', () => {
+  function clocked() {
+    vi.useFakeTimers();
+    onTestFinished(() => void vi.useRealTimers());
+    const dir = folder();
+    return { dir, ...modeIn(dir) };
+  }
+
+  it('takes the keeper\'s word in the start itself, and acts on a new word within 2 s, ahead of any hook', async () => {
+    const { dir, mode } = clocked();
+    const told: Mode[] = [];
+    writeKeeperState(dir, stateOf('lead'));
+    mode.whenLead(() => new Promise(() => undefined), () => undefined);
+    mode.whenLeaving(() => void told.push(mode.current()));
+    mode.start();
+    expect(mode.current()).toBe('lead');
+    writeKeeperState(dir, stateOf('maintenance'));
+    vi.advanceTimersByTime(2000);
+    expect(told).toEqual(['maintenance']);
+  });
+
+  it('reads no more once stopped, though it was started twice', async () => {
+    const { dir, mode } = clocked();
+    mode.start();
+    mode.start();
+    await mode.stop();
+    writeKeeperState(dir, stateOf('lead'));
+    vi.advanceTimersByTime(2000);
+    expect(mode.current()).toBe('off');
+  });
+
+  it('takes no word in a late check after stop', async () => {
+    const { dir, mode } = clocked();
+    await mode.stop();
+    writeKeeperState(dir, stateOf('lead'));
+    await mode.check();
+    expect(mode.current()).toBe('off');
   });
 });
 
@@ -212,13 +359,26 @@ describe('what each mode allows', () => {
 
 async function appWithKeeper(first?: Mode) {
   const dir = folder();
-  if (first) writeKeeperState(dir, stateOf(first, Date.now()));
   const made = await testApp({ HORNHOOF_KEEPER: 'on', HORNHOOF_CONTROL_DIR: dir, NODE_KEY, TUNNEL_HOST: TUNNEL });
   const say = (mode: Mode) => writeKeeperState(dir, stateOf(mode, Date.now()));
+  /* Said once the app is built and not yet started, so a slow build cannot make the word stale. */
+  if (first) say(first);
   const modeNow = async () => (await made.app.inject({ url: '/api/health' })).json().mode;
-  const reaches = (mode: Mode) => until(async () => (await modeNow()) === mode, 4000);
+  /* How soon the poll comes is shown on the clock above, so this bound only has to outlast a loaded machine. */
+  const reaches = (mode: Mode) => until(async () => (await modeNow()) === mode, 15_000);
   return { ...made, dir, say, reaches };
 }
+
+/* A company with a plan and a node for it, whose key the test can connect with. */
+async function companyWithNode(app: FastifyInstance) {
+  const ceo = await setUpCompany(app);
+  const connected = await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(ceo) });
+  const code = connected.json().command.split('--join ')[1];
+  const payload = { code, machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' };
+  const [node] = (await app.inject({ method: 'POST', url: '/api/nodes/join', payload })).json().nodes;
+  return { ceo, nodeId: node.nodeId as string, subId: node.subscriptionId as string, key: node.key as string };
+}
+type CompanyWithNode = Awaited<ReturnType<typeof companyWithNode>>;
 
 describe('the app behind a keeper', () => {
   it('answers only health while off', async () => {
@@ -268,13 +428,80 @@ describe('the app behind a keeper', () => {
     expect(await db.select().from(sessions)).toEqual(before);
   });
 
+  it('writes nothing on the screens that show nodes, with a node silent for over a day', async () => {
+    const { app, db, say, reaches } = await appWithKeeper('lead');
+    const { ceo, nodeId, subId } = await companyWithNode(app);
+    await db.update(nodes).set({ status: 'ready', lastSeenAt: new Date(Date.now() - NODE_STALE_MS - 60_000) }).where(eq(nodes.id, nodeId));
+    await db.update(subscriptions).set({ status: 'ready' }).where(eq(subscriptions.id, subId));
+    const [orchestrator] = await db.select({ id: agents.id }).from(agents);
+    say('read');
+    await reaches('read');
+    for (const url of ['/api/org', '/api/subscriptions', `/api/agents/${orchestrator!.id}`, '/api/machines', '/api/pool']) {
+      expect((await app.inject({ url, ...as(ceo) })).statusCode).toBe(200);
+      expect((await db.select().from(nodes).where(eq(nodes.id, nodeId)))[0]!.status, url).toBe('ready');
+      expect((await db.select().from(subscriptions).where(eq(subscriptions.id, subId)))[0]!.status, url).toBe('ready');
+    }
+  });
+
+  /* That the poll comes within 2 s is shown on the clock above; this is the way from the keeper's word to the socket. */
   it('closes open sockets when it leaves lead, and refuses new ones while it is away', async () => {
     const { app, say } = await appWithKeeper('lead');
     const url = await listen(app);
     const node = await connectNode(url, NODE_KEY);
     say('maintenance');
-    const code = await Promise.race([node.closed, new Promise<number>(done => setTimeout(() => done(-1), 4000))]);
-    expect(code).toBe(1012);
+    expect(await node.closed).toBe(1012);
     await expect(connectNode(url, NODE_KEY)).rejects.toThrow(/503/);
+  });
+
+  it('closes open sockets at once on leaving lead, though the way in is still at work', async () => {
+    const { app, say, reaches } = await appWithKeeper('read');
+    const url = await listen(app);
+    const stuck = gate();
+    onTestFinished(stuck.open);
+    app.ctx.links.sync = () => stuck.opened;
+    say('lead');
+    await reaches('lead');
+    const node = await connectNode(url, NODE_KEY);
+    say('maintenance');
+    expect(await node.closed).toBe(1012);
+  });
+});
+
+describe('a socket whose connect crosses a step-down', () => {
+  /* The app steps down once the first gate has let the connect through, as it may while a route's own checks wait for
+     the database. */
+  async function steppingDown(path: (at: CompanyWithNode) => string, headers: (at: CompanyWithNode) => Record<string, string>) {
+    const { app, say } = await appWithKeeper('lead');
+    let armed = false;
+    app.addHook('preValidation', async req => {
+      if (!armed || !req.ws) return;
+      say('read');
+      await app.ctx.mode.check();
+    });
+    const nodeSocket = await listen(app);
+    const at = await companyWithNode(app);
+    armed = true;
+    return new Promise<number>((resolve, reject) => {
+      const ws = new WebSocket(nodeSocket.replace('/api/nodes/socket', path(at)), { headers: headers(at) });
+      ws.on('unexpected-response', (_req, res) => resolve(res.statusCode ?? 0));
+      ws.on('open', () => {
+        ws.close();
+        resolve(101);
+      });
+      ws.on('error', reject);
+    });
+  }
+
+  it("is refused on a node's socket", async () => {
+    expect(await steppingDown(() => '/api/nodes/socket', at => ({ authorization: `Bearer ${at.key}` }))).toBe(503);
+  });
+
+  it("is refused on an agent's terminal", async () => {
+    expect(await steppingDown(() => '/api/agents/orchestrator/terminal?cols=100&rows=30', at => ({ cookie: `hh_session=${at.ceo}` }))).toBe(503);
+  });
+
+  it("is refused on a plan's sign-in terminal", async () => {
+    const path = (at: CompanyWithNode) => `/api/subscriptions/${at.subId}/signin/terminal?nodeId=${at.nodeId}&cols=100&rows=30`;
+    expect(await steppingDown(path, at => ({ cookie: `hh_session=${at.ceo}` }))).toBe(503);
   });
 });
