@@ -47,7 +47,8 @@ const newKey = () => randomBytes(24).toString('base64url');
 const NO_SYNC: FakeSync = { state: 'off', copy: null, epoch: 0, generation: 0, at: null };
 const UNKNOWN = { error: 'unknown', message: 'The relay cannot tell whether the route is live.' };
 
-/* The sync record R2.4 takes: exactly these fields, a copy only when the sync is on. */
+/* The sync record R2.4 takes: exactly these fields, and a sync that is on names its copy. One that is off may name one
+   or none, as relay.py's sync_copy reads it. */
 const text = z.string().min(1).max(100);
 const SyncRecord = z
   .strictObject({ client: text, generation: z.int().min(1), state: z.enum(['on', 'off']), copy: text.nullable(), epoch: z.int().min(1) })
@@ -179,6 +180,7 @@ export async function fakeRelay(): Promise<FakeRelay> {
   app.delete<{ Params: { name: string } }>('/api/v1/bindings/:name', { preHandler: authorize }, async (req, reply) => {
     relay.bindings.delete(req.params.name);
     relay.visitorKeys.delete(req.params.name);
+    relay.syncs.delete(req.params.name);
     return reply.code(204).send();
   });
   app.get<{ Params: { name: string } }>('/api/v1/links/:name/route', { preHandler: authorize }, async (req, reply) => {
