@@ -315,9 +315,9 @@ def default_iface(proc: str = '/proc') -> str | None:
     return None
 
 
-def sent_bytes(iface: str, sys: str = '/sys') -> int | None:
+def sent_bytes(iface: str, sysfs: str = '/sys') -> int | None:
     """The interface's tx_bytes counter, None when it cannot be read as a number."""
-    text = read_text(f'{sys}/class/net/{iface}/statistics/tx_bytes')
+    text = read_text(f'{sysfs}/class/net/{iface}/statistics/tx_bytes')
     return int(text) if text and text.strip().isdigit() else None
 
 
@@ -341,12 +341,12 @@ def utc_month(at: int) -> str:
     return time.strftime('%Y-%m', time.gmtime(at))
 
 
-def count_traffic(at: int, proc: str = '/proc', sys: str = '/sys') -> int | None:
+def count_traffic(at: int, proc: str = '/proc', sysfs: str = '/sys') -> int | None:
     """Add what was sent since the last read to the UTC month of `at` and answer that month's total. None, and nothing
     changed, when the interface or its counter cannot be read. Both writes are one transaction, so a crash between them
     cannot count the same bytes twice."""
     iface = default_iface(proc)
-    sent = sent_bytes(iface, sys) if iface else None
+    sent = sent_bytes(iface, sysfs) if iface else None
     boot = boot_id(proc)
     if iface is None or sent is None or boot is None:
         return None
@@ -361,13 +361,13 @@ def count_traffic(at: int, proc: str = '/proc', sys: str = '/sys') -> int | None
         return db().execute('SELECT COALESCE(SUM(bytes), 0) FROM traffic WHERE month = ?', (month,)).fetchone()[0]
 
 
-def traffic_round(at: int, warned_day: str | None, proc: str = '/proc', sys: str = '/sys') -> str | None:
+def traffic_round(at: int, warned_day: str | None, proc: str = '/proc', sysfs: str = '/sys') -> str | None:
     """One count. Past the limit it logs one line per UTC day; answers the day it last warned."""
-    total = count_traffic(at, proc, sys)
+    total = count_traffic(at, proc, sysfs)
     day = time.strftime('%Y-%m-%d', time.gmtime(at))
     if total is None or total <= TRAFFIC_WARN_BYTES or warned_day == day:
         return warned_day
-    print(f'Sent {total / 10**9:.1f} GB this month, past 300 GB: time to resize the server.', flush=True)
+    log_line(f'Sent {total / 10**9:.1f} GB this month, past {TRAFFIC_WARN_BYTES // 10**9} GB: time to resize the server.')
     return day
 
 
@@ -376,7 +376,7 @@ def safe_traffic_round(run_round, at: int, warned_day: str | None) -> str | None
     try:
         return run_round(at, warned_day)
     except Exception as failure:
-        print(f'Traffic count failed: {type(failure).__name__}: {failure}', flush=True)
+        log_line(f'Traffic count failed: {type(failure).__name__}: {failure}')
         return warned_day
 
 
@@ -1399,7 +1399,8 @@ def new_link_key(body: object, current_key: str) -> str:
     """R6.1: the key a change ends on: the one the body chose, or with none chosen a new random one.
 
     A caller that chose its key holds it before it asks, so an answer lost on the way does not lose the link. Only what the
-    relay's own keys look like is taken, and anything else raises KeyRefused.
+    relay's own keys look like is taken, and anything else raises KeyRefused. A body that is not an object, a JSON `null`
+    included, is refused 400 `invalid`.
     """
     if not isinstance(body, dict) or not body.keys() <= {'key'}:
         raise KeyRefused('invalid', BAD_KEY_BODY)
@@ -1987,7 +1988,8 @@ def admin_add(name: str) -> int:
     try:
         reason = requested_name_reason(name)
     except FrpsUnknown:
-        reason = 'the relay cannot tell whether its old route is gone, nothing changed'
+        reason = ('the relay cannot reach frps to check the name, nothing changed; '
+                  'see the frps settings in /etc/hornhoof-relay.env')
     if reason:
         print(f'{name}: {reason}', file=sys.stderr)
         return 1

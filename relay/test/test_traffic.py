@@ -1,15 +1,15 @@
 """The relay counts the bytes its public interface sent each month: plan 9c Task 12, addendum A2 to plan 1."""
 
 import calendar
-import contextlib
 import importlib.util
-import io
 import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 if __package__:
     from .harness import ROOT
@@ -38,7 +38,7 @@ class TrafficCase(unittest.TestCase):
         self.relay.init_db()
         self.addCleanup(self.relay.db().close)
         self.proc = self.tmp / 'proc'
-        self.sys = self.tmp / 'sys'
+        self.sysfs = self.tmp / 'sys'
         self.set_route('eth0')
         self.set_boot('boot-a')
 
@@ -52,12 +52,12 @@ class TrafficCase(unittest.TestCase):
         (folder / 'boot_id').write_text(boot + '\n')
 
     def set_sent(self, iface: str, sent: int) -> None:
-        folder = self.sys / 'class' / 'net' / iface / 'statistics'
+        folder = self.sysfs / 'class' / 'net' / iface / 'statistics'
         folder.mkdir(parents=True, exist_ok=True)
         (folder / 'tx_bytes').write_text(f'{sent}\n')
 
     def count(self, at: int) -> int | None:
-        return self.relay.count_traffic(at, str(self.proc), str(self.sys))
+        return self.relay.count_traffic(at, str(self.proc), str(self.sysfs))
 
     def months(self) -> dict[str, int]:
         return dict(self.relay.db().execute('SELECT month, bytes FROM traffic'))
@@ -81,7 +81,7 @@ class ReadingTests(TrafficCase):
 
     def test_sent_bytes_and_boot_id(self) -> None:
         self.set_sent('eth0', 1234)
-        self.assertEqual(self.relay.sent_bytes('eth0', str(self.sys)), 1234)
+        self.assertEqual(self.relay.sent_bytes('eth0', str(self.sysfs)), 1234)
         self.assertEqual(self.relay.boot_id(str(self.proc)), 'boot-a')
 
 
@@ -108,6 +108,27 @@ class CountingTests(TrafficCase):
         self.count(utc(2026, 11, 1, 0, 0, 30))
         self.assertEqual(self.months(), {'2026-11': 700})
 
+    def test_a_new_boot_or_interface_adds_the_whole_reading_even_when_it_is_larger(self) -> None:
+        seen = ('boot-a', 'eth0', 100)
+        self.assertEqual(self.relay.traffic_added(seen, 'boot-b', 'eth0', 500), 500)
+        self.assertEqual(self.relay.traffic_added(seen, 'boot-a', 'eth1', 500), 500)
+        self.assertEqual(self.relay.traffic_added(seen, 'boot-a', 'eth0', 500), 400)
+
+    def test_utc_month_ignores_the_local_time_zone(self) -> None:
+        before = os.environ.get('TZ')
+        self.addCleanup(self.restore_zone, before)
+        os.environ['TZ'] = 'Pacific/Kiritimati'  # UTC+14: local time is already the next month
+        time.tzset()
+        self.assertEqual(self.relay.utc_month(utc(2026, 10, 31, 23, 59, 30)), '2026-10')
+
+    @staticmethod
+    def restore_zone(before: str | None) -> None:
+        if before is None:
+            os.environ.pop('TZ', None)
+        else:
+            os.environ['TZ'] = before
+        time.tzset()
+
     def test_unreadable_counts_nothing(self) -> None:
         (self.proc / 'net' / 'route').unlink()
         self.assertIsNone(self.count(utc(2026, 11, 5)))
@@ -117,7 +138,7 @@ class CountingTests(TrafficCase):
     def test_unreadable_counter_changes_nothing(self) -> None:
         self.set_sent('eth0', 1000)
         self.count(utc(2026, 11, 5))
-        (self.sys / 'class' / 'net' / 'eth0' / 'statistics' / 'tx_bytes').unlink()
+        (self.sysfs / 'class' / 'net' / 'eth0' / 'statistics' / 'tx_bytes').unlink()
         self.assertIsNone(self.count(utc(2026, 11, 5, 0, 1)))
         self.assertEqual(self.relay.db().execute('SELECT sent FROM traffic_seen').fetchone(), (1000,))
 
@@ -147,11 +168,11 @@ class AdminTrafficTests(TrafficCase):
 
 
 class WarningTests(TrafficCase):
-    def round_at(self, at: int, warned: str | None) -> tuple[str | None, str]:
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out):
-            warned = self.relay.traffic_round(at, warned, str(self.proc), str(self.sys))
-        return warned, out.getvalue()
+    def round_at(self, at: int, warned: str | None) -> tuple[str | None, list[str]]:
+        lines: list[str] = []
+        with patch.object(self.relay, 'log_line', lines.append):
+            warned = self.relay.traffic_round(at, warned, str(self.proc), str(self.sysfs))
+        return warned, lines
 
     def test_warns_once_a_day(self) -> None:
         self.relay.write('INSERT INTO traffic (month, bytes) VALUES (?, ?)', ('2026-11', 300 * GB + 60_000_000))
@@ -160,25 +181,51 @@ class WarningTests(TrafficCase):
         warned, first = self.round_at(day, None)
         warned, second = self.round_at(day + 3600, warned)
         warned, third = self.round_at(utc(2026, 11, 6, 8), warned)
-        said = 'Sent 300.1 GB this month, past 300 GB: time to resize the server.'
-        self.assertEqual((first.strip(), second, third.strip()), (said, '', said))
+        said = ['Sent 300.1 GB this month, past 300 GB: time to resize the server.']
+        self.assertEqual((first, second, third), (said, [], said))
+
+    def test_the_limit_in_the_message_is_the_limit_used(self) -> None:
+        self.relay.TRAFFIC_WARN_BYTES = 5 * GB
+        self.relay.write('INSERT INTO traffic (month, bytes) VALUES (?, ?)', ('2026-11', 6 * GB))
+        self.set_sent('eth0', 10)
+        _warned, lines = self.round_at(utc(2026, 11, 5), None)
+        self.assertEqual(lines, ['Sent 6.0 GB this month, past 5 GB: time to resize the server.'])
 
     def test_a_month_below_the_limit_is_quiet(self) -> None:
         self.relay.write('INSERT INTO traffic (month, bytes) VALUES (?, ?)', ('2026-11', 299 * GB))
         self.set_sent('eth0', 10)
-        self.assertEqual(self.round_at(utc(2026, 11, 5), None), (None, ''))
+        self.assertEqual(self.round_at(utc(2026, 11, 5), None), (None, []))
 
     def test_an_unreadable_round_goes_on(self) -> None:
         (self.proc / 'net' / 'route').unlink()
-        self.assertEqual(self.round_at(utc(2026, 11, 5), '2026-11-04'), ('2026-11-04', ''))
+        self.assertEqual(self.round_at(utc(2026, 11, 5), '2026-11-04'), ('2026-11-04', []))
 
     def test_a_failing_round_is_one_log_line(self) -> None:
         def broken(*_args: object) -> None:
             raise OSError('disk gone')
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out):
+        lines: list[str] = []
+        with patch.object(self.relay, 'log_line', lines.append):
             self.assertEqual(self.relay.safe_traffic_round(broken, 1, '2026-11-04'), '2026-11-04')
-        self.assertEqual(out.getvalue().strip(), 'Traffic count failed: OSError: disk gone')
+        self.assertEqual(lines, ['Traffic count failed: OSError: disk gone'])
+
+
+class StartTests(TrafficCase):
+    def test_main_starts_the_traffic_counter(self) -> None:
+        names: list[str] = []
+
+        def record(*_args: object, name: str = '', **_kwargs: object) -> object:
+            names.append(name)
+            return type('Started', (), {'start': lambda self: None})()
+
+        class StopServing:
+            def __init__(self, *_args: object) -> None: ...
+            daemon_threads = False
+            def serve_forever(self) -> None: ...
+
+        with patch.object(sys, 'argv', ['relay.py']), patch.object(self.relay.threading, 'Thread', record), \
+                patch.object(self.relay, 'RelayServer', StopServing), patch.object(self.relay, 'log_line'):
+            self.relay.main()
+        self.assertIn('traffic-counter', names)
 
 
 if __name__ == '__main__':

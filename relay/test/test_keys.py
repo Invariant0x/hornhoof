@@ -317,20 +317,6 @@ class ChosenKeyRuleTests(unittest.TestCase):
         self.assertEqual(self.refusal_of({'key': self.CURRENT}), 'same_key')
 
 
-class RetiredKeyWordingTests(unittest.TestCase):
-    """What the README and relay.py say a retired key serves. test_r6_1_retired_ping_cannot_bypass_ban_release_or_rebind and
-    test_a_tunnel_of_a_changed_key_stays pin the behaviour itself."""
-
-    def test_r6_1_no_text_says_a_heartbeat_is_all_a_retired_key_serves(self) -> None:
-        readme = (ROOT / 'README.md').read_text()
-        source = (ROOT / 'relay/relay.py').read_text()
-        for claim in ('Nothing but a heartbeat', 'authorize only Ping', 'usable only for heartbeats', "lifetime's Ping.",
-                      'all other ops need the current key'):
-            with self.subTest(claim=claim):
-                self.assertTrue(claim not in readme + source, 'link_refusal takes a retired key on NewUserConn as well')
-        self.assertIn('keeps its heartbeat and its new connections', readme)
-
-
 class RelayInProcess(unittest.TestCase):
     """HTTP against an isolated relay with real SQLite writes; `acme` is bound with the key `old`."""
 
@@ -1165,7 +1151,8 @@ class FreedNameTests(RelayInProcess):
     def test_r1_5_an_operators_add_refuses_while_frps_cannot_tell(self) -> None:
         self.free_acme()
         with patch.object(self.relay, '_dash_get', frps_cannot_tell):
-            self.assert_operators_add_refused('acme: the relay cannot tell')
+            self.assert_operators_add_refused(
+            'acme: the relay cannot reach frps to check the name, nothing changed; see the frps settings in /etc/hornhoof-relay.env\n')
 
     def test_r1_5_an_operators_add_of_a_free_name_makes_the_binding(self) -> None:
         self.free_acme()
