@@ -16,6 +16,7 @@ type Store = Db | Tx;
 const NOTICES = new Set(['done', 'reported', 'cancelled', 'turn', 'reviewed', 'review_passed']);
 const GIVER_NEWS = new Set(['blocked', 'stuck_at_gate', 'tests', 'work']);
 const REVIEW = new Set(['review', 'turn_review']);
+const RUN_ENDS = new Set(['tests', 'work']);
 
 export const taskWakeOf = (task: Task, wake: Pick<Wake, 'why' | 'version'>): TaskWake => ({ why: wake.why, status: task.status, stage: task.stage, merging: task.merging, version: wake.version });
 
@@ -71,9 +72,13 @@ async function wakeRecipient(db: Store, task: Task, agentId: string, why = ''): 
   return orchestrator?.id === agentId;
 }
 
+/* A wait holds back what would set its task's holder to work. The end of a run is the result someone asked for, told once
+   and nowhere else, so no wait hides it. */
+const heldByWait = (task: Task, state: TaskWake | null): boolean => Boolean(task.externalWait) && !RUN_ENDS.has(state?.why ?? '');
+
 async function applies(db: Store, task: Task, agentId: string, state: TaskWake | null): Promise<boolean> {
   if (isNotice(state) || directMessage(task, agentId, state)) return true;
-  return !task.externalWait && !CLOSED.includes(task.status) && samePhase(task, state) && (await wakeRecipient(db, task, agentId, state?.why));
+  return !heldByWait(task, state) && !CLOSED.includes(task.status) && samePhase(task, state) && (await wakeRecipient(db, task, agentId, state?.why));
 }
 
 /* Validate again when a delayed outbox wake is queued, before it can reach a live terminal. */
