@@ -48,7 +48,7 @@ It is your own virtual cloud. It runs on the computers you connect, one or many,
 
 3. Connect your AI plans, add your computers with one command each, and invite friends with a link so they bring theirs.
 
-   ![Connecting AI plans](.github/assets/subscriptions.png)
+   ![Connecting AI plans](.github/assets/subscriptions.gif)
 
 4. Tell the orchestrator what you are building. He proposes departments, and you create them with one click.
 
@@ -72,7 +72,7 @@ Works with **Claude Code**, **Codex** (ChatGPT plans), **Kimi Code**, the **GLM 
 
 ![The Development department at work](.github/assets/development.gif)
 
-![The pool of machines](.github/assets/machines.png)
+![The pool of machines](.github/assets/machines.gif)
 
 ## For your home
 
