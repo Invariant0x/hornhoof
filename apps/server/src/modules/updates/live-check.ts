@@ -19,13 +19,16 @@ export async function requireProvenBuild(ctx: Ctx): Promise<void> {
 }
 
 export type GateInput = { commit: string; tag?: string; proof?: unknown; image: string; base?: string };
+export type GateVerdict = Exclude<LiveCheckVerdict, { ok: true }> | { ok: true; images: { app: string; node: string; updater: string } };
 
-/* What the release workflow asks before it moves a tag every machine reads: the images under that tag are those of this
+/* What the release workflow asks before it moves a tag every machine reads: all the images under that tag are those of this
    commit, and the live check speaks of exactly them. With proof, it judges a check not yet published. */
-export async function liveCheckGate({ commit, tag, proof, image, base }: GateInput): Promise<LiveCheckVerdict> {
+export async function liveCheckGate({ commit, tag, proof, image, base }: GateInput): Promise<GateVerdict> {
   const images = registry({ image, arch: archOf(), base });
   const build = await images.buildOf(tag ?? commit);
   if (!build) return { ok: false, reason: 'missing' };
   if (build.commit !== commit) return { ok: false, reason: 'foreign' };
-  return judgeLiveCheck(proof === undefined ? await images.liveCheck(commit) : proof, { ...build, ...await images.siblings(commit) });
+  const siblings = await images.siblings(tag ?? commit);
+  const verdict = judgeLiveCheck(proof === undefined ? await images.liveCheck(commit) : proof, { ...build, ...siblings });
+  return verdict.ok ? { ok: true, images: { app: build.digest, node: siblings.node, updater: siblings.updater } } : verdict;
 }

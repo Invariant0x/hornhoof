@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, departments, jobs, programOperatorCases } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
+import { liveSubscription } from '../conversation/queue.js';
 import { agentParty } from '../events/parties.js';
 import { logTurnFact } from '../tasks/turn-log.js';
 import { operatorRefused, type OperatorCaller } from './authorization.js';
@@ -20,7 +21,8 @@ const RELEASE_ROLE_KIND: Record<string, 'worker' | 'head'> = { 'OPS-FIX': 'worke
 type Agent = typeof agents.$inferSelect;
 type Case = typeof programOperatorCases.$inferSelect;
 export type ReleaseInput = { case: string; reason: string };
-export type ReleaseResult = { result: 'released'; continuation: string | null } | { result: 'no_hold'; status: Case['status']; continuation: string | null } | { result: 'refused'; reason: OperatorError };
+type Refusal = OperatorError | 'no_plan';
+export type ReleaseResult = { result: 'released'; continuation: string | null } | { result: 'no_hold'; status: Case['status']; continuation: string | null } | { result: 'refused'; reason: Refusal };
 
 /* The advertised role is no authority: the current employee, department and running turn are. */
 async function authorizeRelease(ctx: Ctx, caller: OperatorCaller): Promise<Agent> {
@@ -69,7 +71,7 @@ export async function releaseRecoveryHold(ctx: Ctx, caller: OperatorCaller, inpu
 }
 
 async function decide(ctx: Ctx, me: Agent, row: Case, reason: string, state: OperatorRecoveryState | null): Promise<ReleaseResult> {
-  const refusal = refusalOf(state) ?? (await otherTurnRuns(ctx, row) ? 'program_busy' : null);
+  const refusal = refusalOf(state) ?? (await otherTurnRuns(ctx, row) ? 'program_busy' : null) ?? (await liveSubscription(ctx, row.agentId) ? null : 'no_plan');
   if (refusal) return refused(ctx, me, row, reason, state, refusal);
   const actor = await agentParty(ctx, row.companyId, me.id);
   await continueRecovery(ctx, row, { outcome: 'released', text: `${me.name} of Operations released the hold; the original words continue once.`, actor });
@@ -79,7 +81,7 @@ async function decide(ctx: Ctx, me: Agent, row: Case, reason: string, state: Ope
   return { result: 'released', continuation: after?.continuationJobId ?? null };
 }
 
-async function refused(ctx: Ctx, me: Agent, row: Case, reason: string, state: OperatorRecoveryState | null, refusal: OperatorError): Promise<ReleaseResult> {
+async function refused(ctx: Ctx, me: Agent, row: Case, reason: string, state: OperatorRecoveryState | null, refusal: Refusal): Promise<ReleaseResult> {
   await audit(ctx, me, row, reason, state, { result: 'refused', refusal }, `${me.name} of Operations tried to release the recovery hold, refused (${refusal}): ${reason}`);
   return { result: 'refused', reason: refusal };
 }
@@ -97,7 +99,7 @@ const text = (value: unknown, isError = false) => ({ content: [{ type: 'text' as
 
 export function registerReleaseTool(server: McpServer, ctx: Ctx, caller: OperatorCaller): void {
   server.registerTool('program_recovery_release', {
-    description: "Release one program operator case's recovery hold and deliver the agent's saved words once. Hornhoof asks the node what the program shows now and refuses while it asks a question, runs a tool, retries or holds other words; those stay with its owner. Say why: the reason goes in the turn's log with your name. Repeating it changes nothing.",
+    description: "Release one program operator case's recovery hold and deliver the agent's saved words once. Hornhoof asks the node what the program shows now and refuses while it asks a question, runs a tool, retries or holds other words, which stay with its owner, or when the agent has no plan to run them. Say why: the reason goes in the turn's log with your name. Repeating it changes nothing.",
     inputSchema: { case: z.uuid(), reason: z.string().trim().min(1).max(500) },
   }, async input => {
     try { return text(await releaseRecoveryHold(ctx, caller, input)); }

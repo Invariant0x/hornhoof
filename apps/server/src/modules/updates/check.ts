@@ -63,11 +63,25 @@ export class UpdateCheck {
   async #check(): Promise<void> {
     try {
       const [latest, versions] = await Promise.all([this.opts.registry.latest(), this.opts.registry.versions()]);
-      const liveCheck = latest ? await this.liveCheck(latest, await this.opts.registry.siblings(FULL_SHA.test(latest.commit) ? latest.commit : latest.tag)) : null;
-      this.#state = { checkedAt: new Date().toISOString(), latest, liveCheck, versions, error: null };
+      this.#state = { checkedAt: new Date().toISOString(), latest, versions, ...await this.#verdict(latest) };
     } catch (err) {
-      this.#state = { ...this.#state, error: err instanceof Error ? err.message : String(err) };
-      this.opts.onError?.(err);
+      this.#state = { ...this.#state, error: this.#failed(err) };
     }
+  }
+
+  /* A proof that cannot be read is no yes, and takes nothing from what was read of the build itself. */
+  async #verdict(latest: Build | null): Promise<Pick<UpdateState, 'liveCheck' | 'error'>> {
+    if (!latest) return { liveCheck: null, error: null };
+    if (!FULL_SHA.test(latest.commit)) return { liveCheck: NO_PROOF, error: null };
+    try {
+      return { liveCheck: await this.liveCheck(latest, await this.opts.registry.siblings(latest.commit)), error: null };
+    } catch (err) {
+      return { liveCheck: null, error: this.#failed(err) };
+    }
+  }
+
+  #failed(err: unknown): string {
+    this.opts.onError?.(err);
+    return err instanceof Error ? err.message : String(err);
   }
 }

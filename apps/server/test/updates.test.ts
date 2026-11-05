@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmdirSync, utimesSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { LIVE_CHECK_LABEL, LIVE_CHECK_PROGRAMS, liveCheckTag } from '@hornhoof/protocol/live-check';
@@ -76,16 +76,18 @@ async function fakeRegistry(
   tags: Record<string, FakeBuild>,
   lacking: string[] = [],
   proofs: Record<string, unknown> = tags.latest && /^[0-9a-f]{40}$/.test(tags.latest.commit) ? { [tags.latest.commit]: proofOf('latest', tags.latest) } : {},
-): Promise<{ base: string; set(tag: string, build: FakeBuild): void; prove(commit: string, proof: unknown): void; fail(status: number | null): void; calls: string[]; digests: Record<string, string> }> {
+): Promise<{ base: string; set(tag: string, build: FakeBuild): void; prove(commit: string, proof: unknown): void; holds(part: string, tag: string, commit: string): void; fail(status: number | null, only?: RegExp): void; calls: string[]; digests: Record<string, string> }> {
   const calls: string[] = [];
   /* The digest of each tag's index: the SHA-256 of the bytes the registry sent for it; "hornhoof-node:<tag>" for the
      node image's. */
   const digests: Record<string, string> = {};
-  let failing: number | null = null;
+  let failing: number | null = null, failingOnly: RegExp | undefined;
+  /* A node or updater tag that holds the image of another commit than the app image under that tag. */
+  const held: Record<string, string> = {};
   const reg: FastifyInstance = Fastify();
   reg.addHook('onRequest', async (req, reply) => {
     calls.push(req.url);
-    if (failing) return reply.code(failing).send({ errors: [{ code: 'TOOMANYREQUESTS' }] });
+    if (failing && (!failingOnly || failingOnly.test(req.url))) return reply.code(failing).send({ errors: [{ code: 'TOOMANYREQUESTS' }] });
   });
   reg.get('/token', async req => {
     const scope = (req.query as { scope: string }).scope;
@@ -99,7 +101,7 @@ async function fakeRegistry(
       const known = Object.entries(tags).some(([tag, b]) => tag === ref || b.commit === ref);
       if (!known || lacking.includes(part)) return reply.code(404).send({ errors: [{ code: 'MANIFEST_UNKNOWN' }] });
       expect(req.headers.accept).toContain(OCI_INDEX);
-      const index = partIndex(part, ref);
+      const index = partIndex(part, held[`${part}:${ref}`] ?? tags[ref]?.commit ?? ref);
       digests[`${part}:${ref}`] = digestOf(index);
       return reply.type(OCI_INDEX).send(index);
     });
@@ -141,7 +143,8 @@ async function fakeRegistry(
     base: `http://127.0.0.1:${(reg.server.address() as AddressInfo).port}`,
     set: (tag, build) => (tags[tag] = build),
     prove: (commit, proof) => { if (proof === null) delete proofs[commit]; else proofs[commit] = proof; },
-    fail: status => (failing = status),
+    holds: (part, tag, commit) => { held[`${part}:${tag}`] = commit; },
+    fail: (status, only) => { failing = status; failingOnly = only; },
     calls,
     digests,
   };
@@ -331,6 +334,16 @@ describe('the live check of a build', () => {
     expect(request(control)).toBeNull();
   });
 
+  it('keeps what it read of a build when only its proof could not be read, and offers nothing', async () => {
+    const registry = await fakeRegistry({ latest: LATEST });
+    registry.fail(500, /live-check-/);
+    const { app, ceo } = await company(registry);
+    const view = (await app.inject({ method: 'POST', url: '/api/updates/check', ...as(ceo) })).json();
+    expect(view).toMatchObject({ available: false, liveCheck: null, latest: { version: '0.4.1' } });
+    expect(view.checkedAt).toEqual(expect.any(String));
+    expect(view.error).toEqual(expect.any(String));
+  });
+
   it('refuses an older version without a proof of its own, though the latest has one', async () => {
     const registry = await fakeRegistry({ latest: LATEST, '0.3.9': { commit: 'd'.repeat(40), version: '0.3.9' } });
     const { app, ceo, control } = await company(registry);
@@ -379,6 +392,33 @@ describe('the live check of a build', () => {
     it('stops the release of a commit with no images', async () => {
       const registry = await fakeRegistry({}, [], {});
       expect((await gate(registry, '--commit', SHA)).status).toBe(1);
+    });
+
+    it('names the images it judged, for the release to move exactly those, and only with a yes', async () => {
+      const registry = await fakeRegistry({ [SHA]: LATEST }, [], { [SHA]: proofOf(SHA, LATEST) });
+      const file = join(mkdtempSync(join(tmpdir(), 'hh-gate-')), 'outputs');
+      expect((await gate(registry, '--commit', SHA, '--outputs', file)).status).toBe(0);
+      const { app, node, updater } = proofOf(SHA, LATEST).images;
+      expect(readFileSync(file, 'utf8')).toBe(`app=${app}\nnode=${node}\nupdater=${updater}\n`);
+      registry.prove(SHA, null);
+      const refused = join(dirname(file), 'refused');
+      expect((await gate(registry, '--commit', SHA, '--outputs', refused)).status).toBe(1);
+      expect(existsSync(refused)).toBe(false);
+    });
+
+    it('passes a tag that holds all three images of this commit', async () => {
+      const registry = await fakeRegistry({ latest: LATEST }, [], { [SHA]: proofOf('latest', LATEST) });
+      const result = await gate(registry, '--commit', SHA, '--tag', 'latest');
+      expect(result.stderr).toBe('');
+      expect(result.status).toBe(0);
+    });
+
+    it.each(['hornhoof-node', 'hornhoof-updater'])('stops when %s under the tag is of another build, though the app image is this one', async part => {
+      const registry = await fakeRegistry({ latest: LATEST }, [], { [SHA]: proofOf('latest', LATEST) });
+      registry.holds(part, 'latest', 'c'.repeat(40));
+      const result = await gate(registry, '--commit', SHA, '--tag', 'latest');
+      expect(result.status).toBe(1);
+      expect(result.stderr).toMatch(/foreign/);
     });
 
     it('stops when a tag does not hold the images of this commit', async () => {

@@ -23,10 +23,17 @@ test('only the publish job can move a tag every machine reads', () => {
 });
 
 test('the publish job asks the live check before it moves a tag, and looks again after', () => {
-  const asked = images.publish.indexOf('live-check-gate.js --commit "$GITHUB_SHA"\n');
+  const asked = images.publish.indexOf('live-check-gate.js --commit "$GITHUB_SHA" --outputs');
   const moved = images.publish.indexOf('imagetools create');
   const again = images.publish.indexOf('live-check-gate.js --commit "$GITHUB_SHA" --tag latest');
   assert.ok(asked > 0 && moved > asked && again > moved, `${asked} ${moved} ${again}`);
+});
+
+test('the publish job moves exactly the images the gate judged, by digest, and the app image last', () => {
+  assert.match(images.publish, /live-check-gate\.js --commit "\$GITHUB_SHA" --outputs "\$GITHUB_OUTPUT"/);
+  assert.doesNotMatch(images.publish, /:\$GITHUB_SHA"/);
+  const moved = ['hornhoof-updater "', 'hornhoof-node "', 'hornhoof "'].map(name => images.publish.indexOf(`move ${name}`));
+  assert.ok(moved[0] > 0 && moved[1] > moved[0] && moved[2] > moved[1], moved.join(' '));
 });
 
 test('the publish job runs only for a push to main, after the tests', () => {

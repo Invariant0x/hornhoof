@@ -1,7 +1,7 @@
 import { and, asc, eq, inArray, isNull, or } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, departments, jobs, taskEvents, tasks, type Interruption, type RestartCause } from '../../db/schema.js';
-import { enqueueTurn, insertTurn, liveSubscription, onAgent } from '../conversation/queue.js';
+import { enqueueTurn, insertTurn, liveSubscription, NoSubscription, onAgent } from '../conversation/queue.js';
 import { repeatedTurn as repeatedWords, wordsForTurn } from '../conversation/turn-words.js';
 import { turnAgain } from './again.js';
 import { published } from './engine.js';
@@ -52,9 +52,15 @@ export async function afterRestart(ctx: Ctx, jobId: string): Promise<'retried' |
   return 'retried';
 }
 
+/* The turn these words already go on in: the recovery of a hold this restart ended may have been first. */
+async function goingOn(ctx: Ctx, jobId: string): Promise<string | null> {
+  const [next] = await ctx.db.select({ id: jobs.id }).from(jobs).where(or(eq(jobs.retryOf, jobId), eq(jobs.continueOf, jobId))).limit(1);
+  return next?.id ?? null;
+}
+
 async function retry(ctx: Ctx, { job, task, agent, cut, taskWake }: Ended & { taskWake: TaskWake }): Promise<void> {
   const note = `Your last turn on #${task.number} "${task.title}" ${cutOff(cut)}. Hornhoof runs it once more: check what that turn already did, then go on.`;
-  const retried = await onAgent(ctx, agent.id, () => turnAgain(ctx, { job, task, agent, taskWake }, note, { retryOf: job.id }));
+  const retried = await onAgent(ctx, agent.id, async () => (await goingOn(ctx, job.id)) ?? turnAgain(ctx, { job, task, agent, taskWake }, note, { retryOf: job.id }));
   const again = retried ? `Hornhoof runs it again: retry 1 of ${RETRIES}, turn ${retried}.` : `Hornhoof could not run it again: ${agent.name} has no subscription.`;
   await logCut(ctx, task, agent, cut, `${agent.name}'s turn ${job.id} on #${task.number} ${cutOff(cut)}. ${again}`, { retry: retried ? { job: retried, n: 1, of: RETRIES } : null });
 }
@@ -67,7 +73,7 @@ export async function operationsOnDuty(ctx: Ctx, companyId: string): Promise<Age
     .from(agents)
     .where(and(or(inArray(agents.departmentId, ops), inArray(agents.departmentId, ctx.db.select({ id: departments.id }).from(departments).where(inArray(departments.parentId, ops)))), isNull(agents.removedAt), isNull(agents.switchedOffAt)))
     .orderBy(asc(agents.createdAt));
-  return [staff.find(a => a.kind === 'worker' && a.roleKey === 'OPS-FIX'), staff.find(a => a.kind === 'head')].filter(a => a !== undefined);
+  return [staff.find(a => a.kind === 'worker' && a.roleKey === 'OPS-FIX'), staff.find(a => a.kind === 'head' && a.roleKey === 'OPS-HEAD') ?? staff.find(a => a.kind === 'head')].filter(a => a !== undefined);
 }
 
 /* The first on duty with a plan to take the turn. */
@@ -107,11 +113,11 @@ async function callOperations(ctx: Ctx, ended: Ended): Promise<void> {
   });
 }
 
-/* Whether someone asked for this turn: a person or another agent. A timer's round and Hornhoof's notices come again by themselves. */
+/* Whether someone asked for this turn: a person, another agent or the orchestrator. A timer's round and Hornhoof's notices come again by themselves. */
 async function someoneAsked(ctx: Ctx, job: Job): Promise<boolean> {
   if (job.createdBy) return true;
   const said = await wordsForTurn(ctx, job.agentId!, job.id);
-  return said.some(word => word.personId !== null || (word.data as { from?: unknown }).from === 'agent');
+  return said.some(word => word.personId !== null || ['agent', 'orchestrator'].includes((word.data as { from?: string }).from ?? ''));
 }
 
 const cutOffOutsideTask = (job: Job) => `Your last turn ${job.interruption ? `was cut off at ${when(job.interruption.at)}: its node restarted, ${CAUSES[job.interruption.cause]}` : 'was cut off when its node restarted'}. Hornhoof runs it once more: check what that turn already did, then go on.`;
@@ -125,8 +131,10 @@ export async function afterRestartOutsideTask(ctx: Ctx, jobId: string): Promise<
   const agentId = job.agentId, repeated = await repeatedWords(ctx, job);
   const words = job.requestedPrompt ?? job.prompt;
   await onAgent(ctx, agentId, async () => {
-    const [before] = await ctx.db.select({ id: jobs.id }).from(jobs).where(eq(jobs.retryOf, job.id)).limit(1);
-    if (!before) await insertTurn(ctx, { companyId: job.companyId, agentId, prompt: `${cutOffOutsideTask(job)}\n\n${words}`, retryOf: job.id, continueOf: job.id, ...repeated });
+    if (await goingOn(ctx, job.id)) return;
+    await insertTurn(ctx, { companyId: job.companyId, agentId, prompt: `${cutOffOutsideTask(job)}\n\n${words}`, retryOf: job.id, ...repeated }).catch((err: unknown) => {
+      if (!(err instanceof NoSubscription)) throw err;
+    });
   });
 }
 

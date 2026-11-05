@@ -161,20 +161,27 @@ jobs:
           npm ci --prefer-offline --no-audit --no-fund
           npm run build -w @hornhoof/protocol
           npm run build -w @hornhoof/server
-      - name: Ask for the live check of this exact build
-        run: node apps/server/dist/live-check-gate.js --commit "$GITHUB_SHA"
+      - id: checked
+        name: Ask for the live check of this exact build
+        run: node apps/server/dist/live-check-gate.js --commit "$GITHUB_SHA" --outputs "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Move the version and latest onto the checked images
+      - name: Move the version and latest onto exactly those images
+        env:
+          APP: ${{ steps.checked.outputs.app }}
+          NODE: ${{ steps.checked.outputs.node }}
+          UPDATER: ${{ steps.checked.outputs.updater }}
         run: |
           version=$(node -p "require('./package.json').version")
-          for image in hornhoof hornhoof-node hornhoof-updater; do
-            docker buildx imagetools create --tag "ghcr.io/invariant0x/$image:latest" --tag "ghcr.io/invariant0x/$image:$version" "ghcr.io/invariant0x/$image:$GITHUB_SHA"
-          done
+          move() { docker buildx imagetools create --tag "ghcr.io/invariant0x/$1:latest" --tag "ghcr.io/invariant0x/$1:$version" "ghcr.io/invariant0x/$1@$2"; }
+          # Servers read the app image first, so it moves once what it goes with is there.
+          move hornhoof-updater "$UPDATER"
+          move hornhoof-node "$NODE"
+          move hornhoof "$APP"
       - name: Check that latest holds exactly those images
         run: node apps/server/dist/live-check-gate.js --commit "$GITHUB_SHA" --tag latest
 
