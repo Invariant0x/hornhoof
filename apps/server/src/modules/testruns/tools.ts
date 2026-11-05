@@ -38,7 +38,8 @@ export function registerTestTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         "a part that checked another one fails the run. The command runs there as in CI, so it installs what it needs first. When every part has ended, however it ended, any wait_for of yours on the task ends and you are woken on it " +
         `with the result: passed or failed, the pinned commit, each part's machine and time, and the last lines of what failed; each part's full log goes on the task as tests-<run>-<part>.log. ` +
         `parts splits the run into up to ${MAX_TEST_PARTS} parts on several machines at once, for a runner that can split: the command says which part with {part} and how many with {parts}, ` +
-        'as in --shard={part}/{parts}, and HH_TEST_PART and HH_TEST_PARTS hold them too.',
+        'as in --shard={part}/{parts}, and HH_TEST_PART and HH_TEST_PARTS hold them too. ' +
+        "A run of exactly the command its repository declared as its full test command sets the GitHub status hornhoof/tests on the pinned commit as it ends, so GitHub need not run the tests again; the answer says whether this run will.",
       inputSchema: {
         command: z.string().trim().min(1).max(4000).describe('What runs the suite in the fresh clone, for example installing and then testing.'),
         task: TaskRef('whose branch it tests'),

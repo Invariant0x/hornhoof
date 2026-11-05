@@ -19,6 +19,7 @@ import {
   writeBrowserError,
 } from '../src/browser.js';
 import { FIRST_UID } from '../src/isolation.js';
+import * as programs from '../src/providers/process.js';
 
 const tempDirs: string[] = [];
 
@@ -26,6 +27,14 @@ function makeTemp(prefix = 'hh-browser-'): string {
   const dir = mkdtempSync(join(tmpdir(), prefix));
   tempDirs.push(dir);
   return dir;
+}
+
+function unzipOnPath(body: string): string {
+  const bin = makeTemp('hh-unzip-');
+  const executable = join(bin, 'unzip');
+  writeFileSync(executable, '#!/bin/sh\nprintf "%s\\n" "$*" > "$0.args"\n' + body + '\n', { mode: 0o755 });
+  vi.stubEnv('PATH', `${bin}:${process.env.PATH ?? '/usr/bin:/bin'}`);
+  return executable + '.args';
 }
 
 function fakePlaywrightPackage(root: string, version: string, rev: string): string {
@@ -59,8 +68,54 @@ function markInstalled(baseDir: string, folders: string[]): void {
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllEnvs();
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+describe('startup tool readiness', () => {
+  it('refuses work when unzip is absent, before preparing any browsers', async () => {
+    const dir = makeTemp();
+    vi.stubEnv('PATH', makeTemp('hh-no-tools-'));
+    const error = await startupBrowserCheck(dir, null);
+    expect(error).toContain('unzip');
+    expect(error).toContain('ENOENT');
+    expect(existsSync(browsersDir(dir))).toBe(false);
+  });
+
+  it('refuses work when unzip cannot run successfully and names the failed command', async () => {
+    const dir = makeTemp();
+    const args = unzipOnPath('echo "unzip binary is broken" >&2\nexit 3');
+    const error = await startupBrowserCheck(dir, null);
+    expect(error).toContain('unzip -v');
+    expect(error).toContain('unzip binary is broken');
+    expect(existsSync(args)).toBe(true);
+    expect(readFileSync(args, 'utf8').trim()).toBe('-v');
+    expect(existsSync(browsersDir(dir))).toBe(false);
+  });
+
+  it('reports the exit code when unzip fails without output', async () => {
+    unzipOnPath('exit 7');
+    const error = await startupBrowserCheck(makeTemp(), null);
+    expect(error).toContain('unzip -v');
+    expect(error).toContain('code 7');
+  });
+
+  it('reports a timed out unzip check as a readiness failure', async () => {
+    vi.spyOn(programs, 'runProgram').mockResolvedValue({
+      code: null, signal: 'SIGTERM', at: new Date().toISOString(), output: '', timedOut: true,
+    });
+    const error = await startupBrowserCheck(makeTemp(), null);
+    expect(error).toContain('unzip -v');
+    expect(error).toContain('timed out');
+  });
+
+  it('continues readiness after unzip -v succeeds', async () => {
+    const args = unzipOnPath('echo "UnZip 6.00"\nexit 0');
+    expect(await startupBrowserCheck(makeTemp(), null)).toBeNull();
+    expect(existsSync(args)).toBe(true);
+    expect(readFileSync(args, 'utf8').trim()).toBe('-v');
+  });
 });
 
 describe('playwrightVersionIn', () => {
@@ -615,6 +670,7 @@ describe('verifyBrowser and prepareAndVerifyBrowser', () => {
   });
 
   it('persists and clears browser-error files and runs startupBrowserCheck / ensureRepoBrowser with passwd setup', async () => {
+    unzipOnPath('exit 0');
     const dir = makeTemp('hh-err-state-');
     expect(readBrowserError(dir)).toBeNull();
     writeBrowserError(dir, 'libnss3.so missing');

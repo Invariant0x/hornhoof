@@ -40,6 +40,7 @@ import { nodeUpdateRoutes } from './modules/updates/node-routes.js';
 import { attachmentRoutes } from './modules/tasks/attachments.js';
 import { partFileRoutes } from './modules/testruns/files.js';
 import { readCommit, type CommitReader } from './modules/testruns/refs.js';
+import { markCommit, type CommitMarker } from './modules/testruns/github-status.js';
 import { poolRoutes } from './modules/testruns/pool.js';
 import { taskRoutes } from './modules/tasks/routes.js';
 import { TerminalRelay } from './modules/terminals/relay.js';
@@ -52,13 +53,14 @@ import type { AgentSql } from './db/agent-sql.js';
 import type { Db } from './db/client.js';
 
 /* logger is off unless given: tests stay quiet, main.ts turns it on so errors reach the container log. */
-export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logger']; agentSql?: AgentSql | null; readCommit?: CommitReader };
+export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logger']; agentSql?: AgentSql | null; readCommit?: CommitReader; markCommit?: CommitMarker };
 
 /* What routes get: the deps, the live node connections, the live stream to browsers, the terminals people watch, the
-   check for newer builds, access to the computer the server runs on, the company's public link and the commit a
-   repository's branch is at. */
+   check for newer builds, access to the computer the server runs on, the company's public link, the commit a
+   repository's branch is at and the mark a full test run leaves on a commit. */
 export type Ctx = Deps & {
   readCommit: CommitReader;
+  markCommit: CommitMarker;
   log: FastifyBaseLogger;
   hub: NodeHub;
   bus: EventBus;
@@ -82,7 +84,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   const web = hasWebApp(deps.config.webDist);
   addSecurityHeaders(app);
   registerErrorHandling(app, web ? webAppRoutes : undefined);
-  const ctx = { readCommit, ...deps, log: app.log, bus: new EventBus(), terminals: new TerminalRelay() } as Ctx;
+  const ctx = { readCommit, markCommit, ...deps, log: app.log, bus: new EventBus(), terminals: new TerminalRelay() } as Ctx;
   app.decorate('ctx', ctx);
   ctx.hub = new NodeHub({
     pingMs: deps.config.nodePingMs,

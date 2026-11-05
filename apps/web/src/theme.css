@@ -901,6 +901,7 @@ body:has(.dview) .version-mark { display: none; }
 .repo-form { gap: 10px; justify-items: stretch; }
 .repo p { margin: 0; font-size: 13px; }
 .repo-url { font-family: var(--f-mono); font-size: 12.5px; overflow-wrap: anywhere; }
+.repo-command { overflow-wrap: anywhere; }
 .repo-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 4px; font-size: 13px; }
 .dv-side li .repo { margin-top: 6px; }
 
