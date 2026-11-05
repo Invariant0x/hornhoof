@@ -256,6 +256,41 @@ describe("a Codex plan's lease on a node", () => {
     expect(sealedCount(server.received)).toBe(2);
   });
 
+  it('seals a renewed sign-in for a node that joined under the same number too, and takes no list under an older one', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-cred-'));
+    holder(dir);
+    const { server, me } = await node({ leaseCheckMs: 50 }, dir);
+    const peer = await nodeIdentity(mkdtempSync(join(tmpdir(), 'hh-peer-')));
+    const askToSeal = (version: number, nodeId: string, publicKey: string) => server.send({ type: 'cred.seal', kind: 'codex_auth', version, recipients: [{ nodeId, publicKey }] });
+    server.send({ type: 'cred.seal', kind: 'codex_auth', version: 4, recipients: [{ nodeId: 'n-self', publicKey: me.recipient }, { nodeId: 'n-peer', publicKey: peer.recipient }] });
+    await server.wait(() => sealedCount(server.received) === 1);
+    askToSeal(4, 'n-late', peer.recipient);
+    await server.wait(() => sealedCount(server.received) === 2);
+    askToSeal(4, 'n-peer', peer.recipient);
+    await server.wait(() => sealedCount(server.received) === 3);
+    askToSeal(3, 'n-old', peer.recipient);
+    await server.wait(() => sealedCount(server.received) === 4);
+    writeFileSync(join(dir, 'home', 'auth.json'), auth(2));
+    await server.wait(() => sealedCount(server.received) === 5);
+    const renewed = server.received.filter((m): m is { type: string; version: number; envelopes: { nodeId: string }[] } & { [k: string]: unknown } => m.type === 'cred.sealed')[4]!;
+    expect(renewed.version).toBe(5);
+    expect(renewed.envelopes.map(e => e.nodeId).sort()).toEqual(['n-late', 'n-peer', 'n-self']);
+  });
+
+  it('holds no sign-in of a plan on the built-in node, whatever it is told', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-cred-'));
+    const server = await fakeServer();
+    const running = await runNode({ dir, adapter, log: () => {}, builtin: { server: server.url, key: 'node-key-1234567890' } });
+    onTestFinished(() => running.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    const me = await nodeIdentity(dir);
+    server.send({ type: 'cred.lease', hold: true });
+    server.send({ type: 'cred.put', kind: 'codex_auth', version: 1, sealed: await seal(bytes(auth(1)), [me.recipient]) });
+    await new Promise(r => setTimeout(r, 200));
+    expect(existsSync(join(dir, 'codex-lease'))).toBe(false);
+    expect(existsSync(join(dir, 'home', 'auth.json'))).toBe(false);
+  });
+
   it('seals a sign-in Codex renewed between turns when it looks again', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'hh-cred-'));
     holder(dir);
