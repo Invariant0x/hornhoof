@@ -2,11 +2,11 @@ import type { LineState } from '@hornhoof/protocol/map';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { api } from '../api';
 import { deptLabel, errorText, useLanguage, useT } from '../i18n';
-import { PROVIDER_NAMES } from '../providers';
 import { useStream } from '../live';
 import { useDepartmentTree, useTasks } from '../tasks';
 import type { Department, Employee, EmployeeStatus, Me, PersonView } from '../types';
 import { Bar, percent } from '../ui/Bar';
+import { Chip, agentWorking, doingLine, modelLine, Switch, STATUS_CLASS } from '../ui/Chip';
 import { CANVAS_NARROW as NARROW, LEFT_PANEL_COVER, canvasSpace, usePanZoom, ZoomBar } from '../ui/canvas';
 import { Edge } from '../ui/Edge';
 import { AgentIcon, BackIcon, MapIcon, PersonIcon, ProviderMark, SpeedIcon, TreeIcon } from '../ui/icons';
@@ -19,11 +19,11 @@ import { byState, TaskRow } from '../ui/TaskRow';
 import { LiveWay, Pulse, motionSpeed, pulseSeconds, toD, useReducedMotion, type Point } from '../ui/wires';
 import { useWorkLines } from '../ui/work-lines';
 import { useRework } from '../ui/use-rework';
-import { AgentState, type AgentLive } from '../ui/AgentState';
+import { AgentState } from '../ui/AgentState';
 import { TreeView } from './TreeView';
 import { useOpenAgent } from './AgentWindowContext';
 import { SpeedPanel } from './SpeedPanel';
-import { arrowD, CH, CW, CY, FT, FW, HH, HW, PH, PW, schemaLayout, stepPaths, type Frame, type Line, type Schema } from './schema';
+import { arrowD, CY, FT, FW, HH, HW, PH, PW, schemaLayout, stepPaths, type Frame, type Line, type Schema } from './schema';
 import { takeEscape } from '../ui/escape';
 
 export { employeeGroups };
@@ -63,8 +63,6 @@ const START_K = 0.62;
 const PULSE_SPEED = 160;
 const FLASH_MS = 1400;
 
-const STATUS_CLASS: Record<EmployeeStatus, string> = { working: 's-w', queued: 's-q', handed: 's-r', waiting: 's-h', idle: 's-i', off: 's-o' };
-
 type Shot = { key: number; pts: Point[]; tone: 'c' | 'a' };
 type Said = { key: number; at: string; text: string } | null;
 type SeenState = { status: EmployeeStatus; taskId: string | null; bounces: number };
@@ -77,71 +75,6 @@ function employeeChange(e: Employee, was: SeenState) {
   const taskId = e.task?.id ?? null;
   const cameBack = !!e.task && was.taskId === taskId && e.task.bounces > was.bounces;
   return { taskId, cameBack };
-}
-
-function modelLine(t: ReturnType<typeof useT>, e: Employee): string {
-  /* Hornhoof names the level whenever it knows it, the Default's too; else it says the program picks it. */
-  const effort = e.effort ? t.agent.effortLine(t.agent.efforts[e.effort] ?? e.effort) : e.provider && t.agent.effortDefault;
-  return [e.modelName || e.model || t.agent.default, effort, e.provider && PROVIDER_NAMES[e.provider]].filter(Boolean).join(', ');
-}
-
-/* What an employee's third line says: its task, or why it has none. */
-function doingLine(t: ReturnType<typeof useT>, e: Employee): string {
-  if (e.task) return taskText(e);
-  if (!e.on) return t.dept.switchedOff;
-  if (e.status === 'off') return t.dept.needsSubscription;
-  if (e.timer && e.status === 'idle') return t.dept.onTimer(t.agent.every(e.timer));
-  return e.status === 'idle' ? t.dept.waitsForTask : '';
-}
-
-/* What an employee's program does, the server's alarm, a plan hold and any waiting retry; its chip's own lines say what its turn waits for. */
-const working = ({ id, program, alarm, held, retry }: Employee): AgentLive => ({ id, program, alarm, held, retry });
-
-/* The tick that switches an agent off for now and on again; it sits beside the chip's button, not inside it. */
-function Switch({ e, onSwitch }: { e: Employee; onSwitch?(on: boolean): void }) {
-  const t = useT();
-  if (!onSwitch) return null;
-  return (
-    <input
-      type="checkbox"
-      className="sw"
-      checked={e.on}
-      aria-label={t.dept.isOn(e.name)}
-      title={t.dept.isOn(e.name)}
-      onPointerDown={ev => ev.stopPropagation()}
-      onChange={ev => onSwitch(ev.target.checked)}
-    />
-  );
-}
-
-function Chip({ e, x, y, on, flash, serverNow, onOpen, onSwitch }: { e: Employee; x: number; y: number; on: boolean; flash: boolean; serverNow?: string; onOpen(): void; onSwitch?(on: boolean): void }) {
-  const t = useT();
-  return (
-    <div className={`sslot${e.on ? '' : ' off'}${onSwitch ? ' has-sw' : ''}`} style={{ left: x, top: y, width: CW, height: CH }}>
-      <button
-        type="button"
-        className={`schip ${STATUS_CLASS[e.status]}${on ? ' on' : ''}${flash ? ' flash' : ''}`}
-        aria-pressed={on}
-        onClick={onOpen}
-      >
-        <Edge cut={10}>
-          <span className="r1">
-            <AgentIcon />
-            <span className="mn">{e.name}</span>
-            <ProviderMark provider={e.provider} />
-            <span className="st" title={t.dept.status[e.status]}>{t.dept.status[e.status]}</span>
-          </span>
-          <span className="r2">{modelLine(t, e)}</span>
-          <span className="r3">
-            <AgentState agent={working(e)} serverNow={serverNow} />
-            {doingLine(t, e)}
-          </span>
-          {e.context !== null && <Bar used={e.context} className="cx" title={t.dept.contextUsed(percent(e.context))} />}
-        </Edge>
-      </button>
-      <Switch e={e} onSwitch={onSwitch} />
-    </div>
-  );
 }
 
 function HeadCard({ d, head, stats, on, flash, serverNow, onOpen, onSwitch }: { d: Department; head: Employee | null; stats: string; on: boolean; flash: boolean; serverNow?: string; onOpen(id: string): void; onSwitch?(on: boolean): void }) {
@@ -176,7 +109,7 @@ function HeadCard({ d, head, stats, on, flash, serverNow, onOpen, onSwitch }: { 
           <span className="meta">{stats}</span>
           <span className="hx">
             <span className="st">{t.dept.status[head.status]}</span>
-            <AgentState agent={working(head)} serverNow={serverNow} />
+            <AgentState agent={agentWorking(head)} serverNow={serverNow} />
             <span className="hx-task">{doingLine(t, head)}</span>
           </span>
           {head.context !== null && (

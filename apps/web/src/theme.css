@@ -1143,6 +1143,8 @@ summary.turn-head:focus-visible { outline: 2px solid var(--cyan); outline-offset
 .tview .tv-in { display: flex; width: max-content; transform-origin: 0 0; }
 .tview .tv-labs { position: relative; z-index: 3; flex: none; background: linear-gradient(to right, var(--bg) calc(100% - 12px), transparent); }
 .tview .tv-in > svg { display: block; flex: none; }
+/* Agent lanes use the shared fixed-size Chip; these are the trunk plates only. */
+.tview .tv-labs .dept-chip { position: absolute; }
 .tview .lchip { --cut: 8px; position: absolute; left: 0; right: 10px; display: grid; box-sizing: border-box; padding: 1px; border: 0; background: var(--line2); cursor: pointer; text-align: left; clip-path: polygon(0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, var(--cut) 100%, 0 calc(100% - var(--cut))); }
 .tview .lchip > .in { display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 7px 12px; background: var(--hud); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); clip-path: inherit; }
 .tview .lchip:hover { background: var(--muted); }
@@ -1150,12 +1152,6 @@ summary.turn-head:focus-visible { outline: 2px solid var(--cyan); outline-offset
 .tview .lchip.on { background: var(--cyan); }
 .tview .lchip.on > .in { background: color-mix(in srgb, var(--cyan) 10%, var(--surface)); }
 .tview .lchip:focus-visible { outline: none; background: var(--cyan); }
-/* Nothing on a plate is cut or smaller on a small screen: long text wraps and the plate grows. */
-.tview .lchip .r1 { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 6px; min-width: 0; }
-.tview .lchip .r1 b { min-width: 0; overflow-wrap: anywhere; font-family: var(--f-display); font-size: 13.5px; font-weight: 600; }
-.tview .tv-role { min-width: 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
-.tview .lchip .r2 { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
-.tview .lchip .ast { align-self: flex-start; max-width: 100%; box-sizing: border-box; white-space: normal; overflow-wrap: anywhere; }
 .tview .lchip.tk > .in { padding-block: 4px; }
 .tview .lchip.tk b { font-family: var(--f-mono); font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
 .tview .lchip.tk.turn b { color: var(--cyan-ink); }
@@ -1583,7 +1579,7 @@ summary.turn-head:focus-visible { outline: 2px solid var(--cyan); outline-offset
    window, so the terminal keeps its place and size. --edge: how far the window stands from the screen's left side, --inset:
    from its right, where strips may stand too. --frame: the
    window's border. A percentage here is the width of the window, inside its border. */
-.orch { --edge: 16px; --strip-room: 0px; --inset: calc(var(--edge) + var(--strip-room)); --frame: 1px; --panel-width: min(400px, calc(100vw - var(--edge) - var(--inset))); right: var(--inset); max-width: calc(100vw - var(--edge) - var(--inset)); }
+.orch { --edge: 16px; --strip-room: 0px; --inset: calc(var(--edge) + var(--strip-room)); --frame: 1px; --top-frame: 2px; --panel-width: min(400px, calc(100vw - var(--edge) - var(--inset))); right: var(--inset); max-width: calc(100vw - var(--edge) - var(--inset)); }
 .orch.fullscreen { --edge: 0px; }
 .side-panels {
   --gap: 8px;
@@ -1633,6 +1629,9 @@ summary.turn-head:focus-visible { outline: 2px solid var(--cyan); outline-offset
 }
 
 @media (min-width: 761px) {
+  /* A floating panel shares the window's outer frame. Fullscreen keeps its panels below the bar, as on a phone. */
+  .orch:not(.fullscreen) > .agent-workspace { position: static; }
+  .orch:not(.fullscreen) .side-panels { top: calc(-1 * var(--top-frame)); bottom: calc(-1 * var(--frame)); }
   .shell:has(.dv-drawer) .orch:not(.fullscreen) { max-width: calc(100vw - 432px - var(--inset)); }
   /* Strips take the room from the window's right side; its left side stays, and so does the room for panels. */
   .shell:has(.agent-strip) .orch { --strip-room: 24px; }
