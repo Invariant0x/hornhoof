@@ -16,7 +16,7 @@ It runs on your own machines. No sign-up, no account with us, no Hornhoof cloud.
 curl -fsSL https://raw.githubusercontent.com/Invariant0x/hornhoof/main/scripts/install.sh | bash -s -- server
 ```
 
-Works with Claude Code, Codex (ChatGPT plans), Kimi Code, the GLM Coding Plan and Google Antigravity, plus Anthropic and OpenAI API keys. macOS and Linux.
+Works with Claude Code, Codex (ChatGPT plans), Kimi Code, the GLM Coding Plan and Google Antigravity, plus Anthropic and OpenAI API keys.
 
 > **Hornhoof is built by a Hornhoof company.** Its development runs inside Hornhoof itself: 32 agents on Claude, ChatGPT, Kimi and Google plans, in Development and Operations, on two computers, with the CEO approving each release. So far they have run 8 turns and closed more than 330 tasks.
 
@@ -72,7 +72,7 @@ Works with Claude Code, Codex (ChatGPT plans), Kimi Code, the GLM Coding Plan an
 
 ## All your computers, one company
 
-- **One pool.** Connect any Mac or Linux machine with one command. It does not need an AI plan: it can simply lend its power. The Machines tab shows the whole pool: cores, free memory and load, and what runs where right now.
+- **One pool.** Connect any computer with one command. It does not need an AI plan: it can simply lend its power. The Machines tab shows the whole pool: cores, free memory and load, and what runs where right now.
 - **No single point of failure.** Your machines get numbers: 1 runs the company server, 2 and 3 keep a full copy of its data. If machine 1 stops, machine 2 takes over within about a minute, by itself, under the same link. You can move the server to any machine with one click.
 - **Every machine opens the company.** It is at `localhost` on each of your computers, and at your public link from anywhere.
 - **Sign in once, run anywhere.** A plan you sign in to works on any of your machines. A ChatGPT plan moves by itself when its machine goes offline.
@@ -135,7 +135,6 @@ More, with what to set up for each, is in [EXAMPLES.md](EXAMPLES.md).
 - **Agents still make mistakes.** Reviews catch many of them, not all. That is why nothing ships without your approval. Give agents only the access they need, like a token for one repository.
 - **Read your AI plan's terms.** Each maker has its own rules for how its plan may be used.
 - **Each agent is a real program on your machine.** More agents need more memory and processor. Spare computers help.
-- **macOS and Linux only.** Windows is not supported.
 - **Machines in different homes talk through the public link.** If the way to it is down, they wait and catch up later. Machines in the same home keep working directly.
 - **Hornhoof is young.** It works and changes fast. Expect rough edges, and tell us about them.
 
@@ -161,9 +160,9 @@ More, with what to set up for each, is in [EXAMPLES.md](EXAMPLES.md).
 
 ## Install
 
-You need a computer with macOS or Linux. Docker is installed for you if it is missing.
+Docker is installed for you if it is missing.
 
-1. Open a terminal. On a Mac, press `Cmd` and `Space`, type `Terminal` and press `Enter`. On Linux, like Ubuntu, press `Ctrl`, `Alt` and `T`.
+1. Open a terminal. On a Mac, press `Cmd` and `Space`, type `Terminal` and press `Enter`. On Linux, like Ubuntu, press `Ctrl`, `Alt` and `T`. On Windows, open the Ubuntu terminal of WSL.
 
 2. Copy this line, paste it into the terminal and press `Enter`:
 
