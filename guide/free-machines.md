@@ -23,7 +23,7 @@ Each machine's card adds:
 
 On a Mac, Docker runs in a smaller system of its own. So the card shows what Hornhoof can use there, and says when that is less than the Mac has. What a node of an older build does not tell shows as unknown.
 
-![The pool of machines](../.github/assets/machines.png)
+![The pool of machines](../.github/assets/machines.gif)
 
 ## Is the server's own machine counted twice?
 
