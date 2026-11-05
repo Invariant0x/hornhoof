@@ -49,7 +49,8 @@ const recorded = (text: string) => PASTED.exec(text)?.[2] ?? text;
 /* Whether the program's record is these words: as they are, or inside Claude's paste wrapper. */
 const same = (words: string, got: string) => flat(words) === flat(got) || flat(words) === flat(recorded(got));
 type WordState = 'waiting' | 'queued' | 'held' | 'taken' | 'removed' | 'discarded';
-export type WordReceipt = { text: string; jobId: string | null; state: WordState; accepted: boolean; sources: Set<string>; shown?: string | null; operatorDelivery?: OperatorDelivery };
+/* typed: the words of a person at the terminal, not of Hornhoof, which never types them again. */
+export type WordReceipt = { text: string; jobId: string | null; state: WordState; accepted: boolean; sources: Set<string>; shown?: string | null; operatorDelivery?: OperatorDelivery; typed?: boolean };
 type ReceiptHooks = { preserveOriginal?: boolean; original?(phase: 'queued' | 'taken'): void; word?(word: WordReceipt, phase: 'queued' | 'taken' | 'not_taken'): void };
 
 function removeQueued(text: string, enqueued: string[]): string {
@@ -90,6 +91,11 @@ export class TurnWords {
     return word;
   }
 
+  /* Words the owner typed that the program queued: they hold the turn after and open their own, as live words do. */
+  addTyped(text: string, jobId: string): void {
+    this.words.push({ text: recorded(text), jobId, state: 'queued', accepted: true, sources: new Set(['transcript']), typed: true });
+  }
+
   clear(): void {
     this.original = originalAfterClear(this.original, this.receipts);
   }
@@ -111,6 +117,11 @@ export class TurnWords {
   }
 
   settled(): boolean { return this.endedAt !== null && this.pending().length === 0; }
+
+  /* These words wait in the program's queue: taking them is a request of their own. */
+  isQueued(text: string): boolean {
+    return this.words.some(word => word.state === 'queued' && same(word.text, text));
+  }
 
   removed(text: string): boolean {
     const word = this.words.find(word => this.waiting(word) && same(word.text, text));
@@ -185,11 +196,13 @@ export class TurnWords {
 
   unheard(now: number, gone = false, idle = true): { text: string; jobId: string | null; reason?: string; operatorDelivery?: OperatorDelivery }[] {
     const expired = gone || (this.endedAt !== null && now - this.endedAt >= UNHEARD_MS);
-    return this.words.filter(word => this.returnWords(word, expired, gone || idle)).map(word => {
+    return this.words.filter(word => this.returnWords(word, expired, gone || idle)).flatMap(word => {
       const reason = word.state === 'removed' ? 'the program removed the queued words' : null;
       word.state = 'discarded';
+      /* A person who took their words back, or whose words the program kept, has them; Hornhoof does not type them. */
+      if (word.typed) return [];
       this.told(word, 'not_taken');
-      return { text: word.text, jobId: word.jobId, ...(reason ? { reason } : {}), ...withDelivery(word.operatorDelivery) };
+      return [{ text: word.text, jobId: word.jobId, ...(reason ? { reason } : {}), ...withDelivery(word.operatorDelivery) }];
     });
   }
 

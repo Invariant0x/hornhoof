@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
-import { TERM_CHUNK, UNHEARD_MS, type AgentEvent, type Failure, type Limits, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
+import { isProgramOwnPrompt, TERM_CHUNK, UNHEARD_MS, type AgentEvent, type Failure, type Limits, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
 import type { OperatorDelivery, OperatorQuestion, OperatorServerMessage } from '@hornhoof/protocol/program-operator';
 import { agyRules, COLORS_NOT_TAKEN, colorsNotTaken, pastColors, SETUP_NEEDED } from '../providers/antigravity.js';
 import { claudeEvents, claudeInterrupted } from '../providers/claude.js';
@@ -127,6 +127,11 @@ type Agent = {
   waitingWords: TurnWords[];
   retainedAssignments?: { jobId: string; text: string; words: TurnWords }[];
   originalTaken?: { jobId: string; text: string; operatorDelivery?: OperatorDelivery };
+  /* The owner's last Enter in a running turn, as Hornhoof tells of it: a prompt the program queues from it, or takes right
+     after that turn, opens a turn of theirs. It counts until shortly after that turn ended. */
+  pressed?: { jobId: string; at: number; until: number | null } | null;
+  /* Words Claude took out of its queue in a turn that seemed to run, with nothing from it since. */
+  unanswered?: TakenWords | null;
   /* Claude's queue, in the order its log enqueued the words. */
   enqueuedWords: string[];
   /* Reports waiting words even when no later log line or Enter comes. */
@@ -241,6 +246,7 @@ const STOP_WAIT_MS = 5000;
 const ENTER_TRIES = 3;
 /* What a typed turn keeps at most while Hornhoof has not answered it. */
 const EARLY_MAX = 1000;
+const MAX_EARLY_KEYS = 256;
 /* A stop hook can precede the program's last log lines; the turn waits this long for them. */
 const SETTLE_MS = 3000;
 /* How long the plan's limits may take to come after a turn of a program that does not log them. */
@@ -341,6 +347,8 @@ export class TerminalHost {
   private readonly reportMs: number;
   /* Views being opened, and those Hornhoof closed meanwhile. */
   private readonly viewsOpening = new Set<string>();
+  /* What the owner types while their view opens: Hornhoof told them the terminal is there. */
+  private readonly earlyKeys = new Map<string, Msg<'term.input'>[]>();
   private readonly viewsClosed = new Set<string>();
   /* Windows opening one agent wait for the same session to be created. */
   private readonly sessionsOpening = new Map<string, Promise<void>>();
@@ -1215,6 +1223,8 @@ export class TerminalHost {
     a.retry = null;
     a.failure = a.apiError = null;
     a.stopped = false;
+    a.pressed = null;
+    a.unanswered = null;
   }
 
   private interrupted(a: Agent, id?: string): void {
@@ -1230,9 +1240,20 @@ export class TerminalHost {
     const decision = a.ends.end(end.status, this.stoppable(a) || Boolean(blocked && a.turn), id);
     if (decision.conflict) this.log(`Agent ${a.key} (${a.program?.kind}): turn end channels disagree. The first end was kept.`);
     if (!decision.accept) return;
+    const unanswered = end.status === 'stopped' ? null : a.unanswered;
+    a.unanswered = null;
+    this.acceptedEnd(a, end);
+    if (unanswered) {
+      a.originalTaken = { jobId: unanswered.jobId!, text: unanswered.text, operatorDelivery: unanswered.operatorDelivery };
+      void this.openTyped(a, unanswered.text, true);
+    }
+  }
+
+  private acceptedEnd(a: Agent, end: TurnEnd): void {
     this.clearQuestion(a);
     this.operator?.intentional(a.key, end.status === 'stopped' ? 'cancelled' : 'completed');
     if (a.turn) this.endWords(a, a.turn);
+    if (a.pressed) a.pressed.until ??= Date.now() + UNHEARD_MS;
     a.busy = false;
     a.retry = null;
     a.calls.clear();
@@ -1436,7 +1457,7 @@ export class TerminalHost {
         continue;
       }
       const news = codexRollout(data);
-      if (news.typed !== undefined && (!a.turn || a.turn.starting || this.overIn(a))) void this.openTyped(a, news.typed, true);
+      if (news.typed !== undefined) this.codexTyped(a, news.typed);
       for (const e of news.events) this.emit(a, e);
       if (news.limits) a.limits = news.limits;
       if (news.context !== undefined) this.context(a, news.context);
@@ -1448,6 +1469,11 @@ export class TerminalHost {
       else if (news.aborted) this.interrupted(a, id);
       else if (news.ended) this.endTurn(a, { status: 'done', message: news.ended.message }, id);
     }
+  }
+
+  private codexTyped(a: Agent, text: string): void {
+    if (!a.turn || a.turn.starting || this.overIn(a)) void this.openTyped(a, text, true);
+    else a.pressed = null;
   }
 
   private findCodexTail(a: Agent): void {
@@ -1483,8 +1509,30 @@ export class TerminalHost {
     const receipt = claudeWordReceipt(line, a.enqueuedWords);
     if (!receipt) return;
     for (const words of waitingWords(a)) {
-      if (this.receiveClaudeWord(words, receipt)) break;
+      if (this.receiveClaudeWord(words, receipt)) return;
     }
+    if (receipt.state === 'queued') this.ownerQueued(a, receipt.text);
+  }
+
+  /* Words the program queued that Hornhoof did not type, right after the owner's Enter, are what the owner typed. */
+  private ownerQueued(a: Agent, text: string): void {
+    const pressed = this.pressedFor(a, text);
+    if (!pressed) return;
+    a.pressed = null;
+    const words = a.turn?.words ?? new TurnWords([], { word: this.wordReceipt(a) });
+    words.addTyped(text, pressed.jobId);
+    if (!a.turn) words.end(Date.now());
+    if (!a.waitingWords.includes(words)) a.waitingWords.push(words);
+  }
+
+  /* The owner's Enter a prompt Hornhoof does not know may come from, if it is no news of the program's own. Claude logs what
+     it queues, so there only one just pressed counts. */
+  private pressedFor(a: Agent, text: string): NonNullable<Agent['pressed']> | null {
+    const pressed = a.pressed;
+    if (!pressed || isProgramOwnPrompt(text)) return null;
+    const now = Date.now();
+    if (pressed.until !== null && now >= pressed.until) return null;
+    return a.program?.kind === 'claude' && now - pressed.at >= UNHEARD_MS ? null : pressed;
   }
 
   private receiveClaudeWord(words: TurnWords, receipt: NonNullable<ReturnType<typeof claudeWordReceipt>>): boolean {
@@ -1508,6 +1556,7 @@ export class TerminalHost {
   }
 
   private dequeuedPrompt(a: Agent, line: Record<string, unknown>): void {
+    if (line.type === 'assistant' || (line.type === 'queue-operation' && line.operation !== 'dequeue')) a.unanswered = null;
     if (line.type === 'queue-operation' && line.operation === 'dequeue') a.dequeued = true;
     if (!a.dequeued || line.type !== 'user' || !isRecord(line.message)) return;
     a.dequeued = false;
@@ -1518,7 +1567,17 @@ export class TerminalHost {
 
   private dequeuedWords(a: Agent, text: string): void {
     if (!a.turn || !a.busy || this.overIn(a)) { void this.openTyped(a, text, true); return; }
-    for (const words of a.waitingWords) if (words.taken(text)) break;
+    this.dequeuedInTurn(a, text);
+  }
+
+  /* Claude took what it queued in a turn that seems to run. That turn may have ended already, with its Stop refused and its
+     end still to come in the log: if that end is the next thing it tells of, the words are a request of their own. */
+  private dequeuedInTurn(a: Agent, text: string): void {
+    for (const words of a.waitingWords) {
+      const queued = words.isQueued(text) ? words.takeQueued(text) : null;
+      if (queued) a.unanswered = queued;
+      if (queued || words.taken(text)) return;
+    }
   }
 
   private reportUnheard(a: Agent, gone = false, reason = gone ? 'the program is no longer running' : 'the program did not take the words before the receipt wait ended'): void {
@@ -1728,9 +1787,11 @@ export class TerminalHost {
         if (used !== null) this.context(a, used);
         return;
       }
-      case 'queued':
-        a.turn?.words.queued(contentText(data.prompt ?? data.input), 'hook');
+      case 'queued': {
+        const text = contentText(data.prompt ?? data.input);
+        if (!a.turn?.words.queued(text, 'hook')) this.ownerQueued(a, text);
         return;
+      }
       case 'prompt': {
         const prompt = typeof data.prompt === 'string' ? data.prompt : contentText(data.prompt);
         const retained = this.takeRetainedAssignment(a, prompt);
@@ -1838,6 +1899,7 @@ export class TerminalHost {
     a.busy = true;
     /* A message queued in the program starts its own turn after the previous one ends. */
     if (!a.turn || a.turn.starting || this.overIn(a)) await this.openTyped(a, prompt);
+    else a.pressed = null;
     this.tookTurn(a);
   }
 
@@ -1857,7 +1919,7 @@ export class TerminalHost {
      being read now. */
   private async openTyped(a: Agent, text: string, fromLog = false): Promise<void> {
     if (!fromLog) this.drain(a);
-    const taken = this.takeTypedWords(a, text);
+    const taken = this.typedInTurn(a, this.takeTypedWords(a, text), fromLog);
     const queuedFrom = taken.jobId;
     const sourceDelivery = taken.operatorDelivery;
     text = taken.text;
@@ -1903,6 +1965,16 @@ export class TerminalHost {
       if (queued) { taken = queued; break; }
     }
     return taken;
+  }
+
+  /* Words Hornhoof does not know, which the owner's Enter in a turn sent: the node names that turn for Hornhoof to check. A
+     prompt read from Claude's log needs a receipt of its queue. */
+  private typedInTurn(a: Agent, taken: TakenWords, fromLog: boolean): TakenWords {
+    if (taken.jobId || (fromLog && a.program?.kind === 'claude')) return taken;
+    const pressed = this.pressedFor(a, taken.text);
+    if (!pressed) return taken;
+    a.pressed = null;
+    return { ...taken, jobId: pressed.jobId };
   }
 
   /* Hornhoof's answer to turn.open, found by its ref; a Hornhoof from before refs answers in order. A typed turn gets its
@@ -2237,7 +2309,8 @@ export class TerminalHost {
     try {
       await this.openView(m);
     } catch (err) {
-      /* A view that did not open keeps no size. */
+      /* A view that did not open keeps no size, and takes no keys. */
+      this.earlyKeys.delete(m.termId);
       await this.forget(m.termId, m.agentKey);
       throw err;
     }
@@ -2270,6 +2343,7 @@ export class TerminalHost {
   private async openView(m: Msg<'term.open'>): Promise<void> {
     const a = this.agent(m.agentKey);
     this.viewsOpening.add(m.termId);
+    if (m.write) this.earlyKeys.set(m.termId, []);
     this.wanted.set(m.termId, { key: m.agentKey, size: { cols: m.cols, rows: m.rows } });
     /* Someone who may type gets the program at once, to talk to it; watchers see it once it has a turn. */
     const starts = m.write && !a.turn && !(a.hash && (await this.opts.tmux.alive(a.name)));
@@ -2280,11 +2354,16 @@ export class TerminalHost {
     } finally {
       this.viewsOpening.delete(m.termId);
     }
-    if (this.viewsClosed.delete(m.termId)) return this.forget(m.termId, m.agentKey);
+    if (this.viewsClosed.delete(m.termId)) {
+      this.earlyKeys.delete(m.termId);
+      return this.forget(m.termId, m.agentKey);
+    }
     const shown = this.fitted(m.agentKey);
     const child = this.opts.tmux.attach(a.name, shown.cols, shown.rows, m.write);
     const view: View = { child, key: m.agentKey, write: m.write, mask: new StreamMask(this.opts.secrets), decoder: new StringDecoder('utf8'), pending: '', timer: null, quiet: null, shown, applied: shown, tty: null, out: () => {} };
     this.views.set(m.termId, view);
+    for (const keys of this.earlyKeys.get(m.termId) ?? []) this.ownerTyped(view, keys);
+    this.earlyKeys.delete(m.termId);
     a.viewers++;
     /* A watcher of an agent that sleeps sees the waiting screen; anyone else, a loader until the program is up. */
     if (starts || a.turn || a.up) this.opts.send({ type: 'term.program', termId: m.termId, running: a.up && !starts });
@@ -2323,14 +2402,21 @@ export class TerminalHost {
   }
 
   input(m: Msg<'term.input'>): void {
+    const early = this.earlyKeys.get(m.termId);
+    if (early) {
+      if (early.length < MAX_EARLY_KEYS) early.push(m);
+      return;
+    }
     const view = this.views.get(m.termId);
-    if (view?.write) this.ownerTyped(view, m.data);
+    if (view?.write) this.ownerTyped(view, m);
   }
 
-  private ownerTyped(view: View, data: string): void {
+  private ownerTyped(view: View, { data, pressedIn }: Msg<'term.input'>): void {
     this.operator?.ownerInput(view.key);
     const a = this.agents.get(view.key);
-    if (a) void this.inputLane(a, async () => { view.child.stdin?.write(data); });
+    if (!a) return;
+    if (pressedIn) a.pressed = { jobId: pressedIn, at: Date.now(), until: a.turn && !this.overIn(a) ? null : Date.now() + UNHEARD_MS };
+    void this.inputLane(a, async () => { view.child.stdin?.write(data); });
   }
 
   async resize(m: Msg<'term.resize'>): Promise<void> {
