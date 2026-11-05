@@ -1,10 +1,11 @@
 import { useRef, useState, type FormEvent } from 'react';
 import { api } from '../api';
-import { errorText, useT, type Messages } from '../i18n';
+import { useT, type Messages } from '../i18n';
 import type { TaskPlace, WaitingRequest } from '../types';
 import { DecidedByNote } from './DecidedBy';
 import { Field } from './Field';
 import { Markdown } from './Markdown';
+import { proseErrorText } from './TaskAttachments';
 
 /* Whether this person's words to the agent in its window or terminal answer any of these: a question and a stuck task they
    may take take them, a pick and a commit to approve do not. */
@@ -269,7 +270,7 @@ function RequestItem({ request, onDone, ...shared }: Shared & { request: Waiting
         onDecide={approve => reply(approvalBody(approve, text))}
         onCancel={() => void send(`/api/tasks/${task.id}/cancel`, {})}
       />
-      {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
+      {failure !== null && <p className="alert" role="alert">{proseErrorText(t, failure)}</p>}
     </article>
   );
 }

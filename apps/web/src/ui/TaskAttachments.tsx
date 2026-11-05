@@ -1,13 +1,23 @@
 import { useState } from 'react';
-import { api } from '../api';
+import { api, ApiFailure } from '../api';
 import { errorText, useT, type Messages } from '../i18n';
 import type { TaskFile } from '../types';
 
 export type FullTextRef = { field: 'text' | 'evidence'; id: string; name: string; size: number };
 
+const AUTO_TEXT_FILE = /^([a-z_]+-(?:text|evidence))-[0-9a-f]{64}(\.txt)$/;
 const attachmentPath = (id: string) => `/api/attachments/${encodeURIComponent(id)}`;
 const nonEmptyString = (v: unknown): v is string => typeof v === 'string' && v.length > 0;
 const isFullTextField = (v: unknown): v is 'text' | 'evidence' => v === 'text' || v === 'evidence';
+
+export const displayFileName = (name: string): string => name.replace(AUTO_TEXT_FILE, '$1$2');
+export const proseErrorText = (t: Messages, err: unknown): string => (err instanceof ApiFailure && err.reason === 'attachment_invalid' ? t.tasks.textTooLarge : errorText(t, err));
+const fileErrorText = (t: Messages, err: unknown): string => (err instanceof ApiFailure && err.reason === 'attachment_unknown' ? t.tasks.fileMissing : errorText(t, err));
+
+function cleanPreview(preview: string, id: string): string {
+  const suffix = `\n\n[Full text](${attachmentPath(id)})`;
+  return preview.endsWith(suffix) ? `${preview.slice(0, -suffix.length)}…` : preview;
+}
 
 export function formatFileSize(t: Messages, bytes: number): string {
   const safe = Math.max(0, bytes);
@@ -69,7 +79,7 @@ function useFullText(id: string) {
 export function ExpandableLogField({ preview, fullRef, prefix = '', className }: { preview: string; fullRef: FullTextRef; prefix?: string; className?: string }) {
   const t = useT();
   const { expanded, loaded, busy, failure, toggle } = useFullText(fullRef.id);
-  const shown = expanded ? (loaded as string) : preview;
+  const shown = expanded ? (loaded as string) : cleanPreview(preview, fullRef.id);
   const buttonLabel = busy ? t.common.loading : expanded ? t.tasks.showLess : t.tasks.readFull;
 
   return (
@@ -83,12 +93,12 @@ export function ExpandableLogField({ preview, fullRef, prefix = '', className }:
           {buttonLabel}
         </button>
         <a className="req-link" href={attachmentPath(fullRef.id)} target="_blank" rel="noopener noreferrer">
-          {t.tasks.openFile(fullRef.name, formatFileSize(t, fullRef.size))}
+          {t.tasks.openFile(displayFileName(fullRef.name), formatFileSize(t, fullRef.size))}
         </a>
       </div>
       {failure !== null && (
         <p className="alert" role="alert">
-          {errorText(t, failure)}
+          {fileErrorText(t, failure)}
         </p>
       )}
     </>
@@ -116,7 +126,7 @@ export function TaskFiles({ files }: { files?: TaskFile[] }) {
         {files.map(f => (
           <li key={f.id}>
             <a className="req-link" href={attachmentPath(f.id)} target="_blank" rel="noopener noreferrer">
-              {f.name}
+              {displayFileName(f.name)}
             </a>
             <small>{formatFileSize(t, f.size)}</small>
           </li>

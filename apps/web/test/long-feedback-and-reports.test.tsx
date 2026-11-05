@@ -565,4 +565,93 @@ describe('long 12,000-character feedback, answers, and full report reading (#424
       ),
     ).toEqual({ field: 'evidence', id: 'ev-0', name: 'empty.txt', size: 0 });
   });
+
+  it('hides server [Full text] trailer and sha256 filename hashes, and shows plain file/oversized text errors instead of picture copy', async () => {
+    const sha = 'a9'.repeat(32);
+    const serverAutoName = `verdict-text-${sha}.txt`;
+    const taskFromServer: TaskDetail = {
+      ...TASK_DETAIL,
+      files: [
+        { id: 'att-hash', name: serverAutoName, size: 12_288, by: { id: 'g1', name: 'Gate Reviewer' }, at: '2026-11-05T18:20:00.000Z' },
+        { id: 'att-notes', name: 'audit-notes.txt', size: 512, by: { id: 'g1', name: 'Gate Reviewer' }, at: '2026-11-05T18:21:00.000Z' },
+      ],
+      log: [
+        {
+          kind: 'verdict',
+          text: 'Начало полного вердикта по задаче\n\n[Full text](/api/attachments/att-hash)',
+          data: {
+            pass: true,
+            fullTexts: [{ field: 'text', id: 'att-hash', name: serverAutoName, size: 12_288, sha256: sha }],
+          },
+          by: { kind: 'agent', id: 'g1', name: 'Gate Reviewer' },
+          at: '2026-11-05T18:20:00.000Z',
+        },
+      ],
+    };
+
+    stubFetchRoutes({
+      'GET /api/org': { kind: 'json', status: 200, data: DEV_ORG },
+      'GET /api/tasks/t12': { kind: 'json', status: 200, data: { task: taskFromServer } },
+      'GET /api/attachments/att-hash': {
+        kind: 'json',
+        status: 404,
+        data: { error: { code: 'not_found', reason: 'attachment_unknown', message: 'There is no such file.' } },
+      },
+      'POST /api/tasks/t12/comments': {
+        kind: 'json',
+        status: 413,
+        data: { error: { code: 'validation', reason: 'attachment_invalid', message: 'The text is too large to send in one request.' } },
+      },
+      'POST /api/requests/r-choice-long': {
+        kind: 'json',
+        status: 413,
+        data: { error: { code: 'validation', reason: 'attachment_invalid', message: 'The text is too large to send in one request.' } },
+      },
+    });
+
+    const user = userEvent.setup();
+    renderIn(
+      'ru',
+      <TaskPanel
+        taskId="t12"
+        onClose={vi.fn()}
+        onOpen={vi.fn()}
+        requests={[CHOICE]}
+        onRequestsChanged={vi.fn()}
+        onOpenAgent={vi.fn()}
+      />,
+    );
+
+    const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
+    expect(panel.textContent).toContain('Начало полного вердикта по задаче…');
+    expect(panel.textContent).not.toContain('[Full text](/api/attachments/att-hash)');
+    expect(panel.textContent).not.toContain(sha);
+
+    const filesSection = within(panel).getByRole('region', { name: 'Файлы' });
+    expect(within(filesSection).getByRole('link', { name: 'verdict-text.txt' })).toHaveAttribute('href', '/api/attachments/att-hash');
+    expect(within(filesSection).getByRole('link', { name: 'audit-notes.txt' })).toHaveAttribute('href', '/api/attachments/att-notes');
+
+    const logItem = within(within(panel).getByRole('list', { name: 'Журнал' })).getByRole('listitem');
+    expect(within(logItem).getByRole('link', { name: 'Открыть файл (verdict-text.txt, 12 КБ)' })).toHaveAttribute('href', '/api/attachments/att-hash');
+
+    await user.click(within(logItem).getByRole('button', { name: 'Показать полностью' }));
+    const fileAlert = await within(logItem).findByRole('alert');
+    expect(fileAlert).toHaveTextContent('Файл недоступен.');
+    expect(fileAlert.textContent).not.toMatch(/картин/i);
+
+    const commentBox = within(panel).getByLabelText('Комментарий') as HTMLTextAreaElement;
+    await user.type(commentBox, 'Очень большой текст');
+    await user.click(within(panel).getByRole('button', { name: 'Добавить комментарий' }));
+    const commentAlerts = await within(panel).findAllByRole('alert');
+    expect(commentAlerts.some(a => a.textContent?.includes('Приложите его файлом к задаче'))).toBe(true);
+    expect(commentAlerts.every(a => !/картин/i.test(a.textContent ?? ''))).toBe(true);
+    expect(commentBox.value).toBe('Очень большой текст');
+
+    const choiceBox = within(panel).getByLabelText(ru.tasks.choiceNote) as HTMLTextAreaElement;
+    await user.type(choiceBox, 'Свободный отзыв по макету');
+    await user.click(within(panel).getByRole('button', { name: ru.tasks.sendFeedback }));
+    const requestAlerts = await within(panel).findAllByRole('alert');
+    expect(requestAlerts.filter(a => a.textContent?.includes('Приложите его файлом к задаче'))).toHaveLength(2);
+    expect(choiceBox.value).toBe('Свободный отзыв по макету');
+  });
 });

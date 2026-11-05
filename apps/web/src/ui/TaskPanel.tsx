@@ -11,7 +11,7 @@ import { Markdown } from './Markdown';
 import { Requests, wordsAnswer } from './Requests';
 import { PanelFrame } from './SidePanels';
 import { RouteUnavailable, unavailableFailure } from '../screens/RouteUnavailable';
-import { fullTextOf, LogParagraph, TaskFiles } from './TaskAttachments';
+import { fullTextOf, LogParagraph, proseErrorText, TaskFiles } from './TaskAttachments';
 
 const field = (data: unknown, key: string): unknown => (data && typeof data === 'object' && key in data ? (data as Record<string, unknown>)[key] : undefined);
 
@@ -333,7 +333,7 @@ function Actions({ task, onChanged }: { task: TaskDetail; onChanged: () => void 
       </div>
       {failure !== null && (
         <p className="alert" role="alert">
-          {errorText(t, failure)}
+          {proseErrorText(t, failure)}
         </p>
       )}
     </>

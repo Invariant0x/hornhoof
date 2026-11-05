@@ -1033,6 +1033,8 @@ export const en = {
     fileBytes: (n: number | string) => `${n} B`,
     fileKb: (n: number | string) => `${n} KB`,
     fileMb: (n: number | string) => `${n} MB`,
+    textTooLarge: 'This text is too large to send in one request. Attach it as a file on the task and send its link. Your text is still here.',
+    fileMissing: 'This file is not available.',
     questions: 'Questions',
     log: 'Log',
     skippedRun: (by: string, run: string) => `Run skipped: task is already closed. ${by}: ${run}.`,
