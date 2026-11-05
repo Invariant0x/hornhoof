@@ -175,6 +175,20 @@ describe('the fake relay keeps the contract', () => {
     expect((await sync(relay, 'acme', { ...next, epoch: 6 })).status).toBe(200);
   });
 
+  it('R2.4 drops the sync record with the binding, so a name freed and bound again starts with none', async () => {
+    const relay = await relayWithBinding();
+    relay.register('acme', 'acme-aaaaaaaa-link');
+    const record = { client: 'acme-aaaaaaaa-link', generation: 1, state: 'on', copy: 'acme-aaaaaaaa-data', epoch: 5 };
+    await sync(relay, 'acme', record);
+    await call(relay, 'DELETE', '/bindings/acme', { key: 'k' });
+    relay.drop('acme');
+    const { key } = (await call(relay, 'POST', '/bindings', { body: { name: 'acme' } })).body;
+    expect((await route(relay, 'acme', key)).body.sync).toEqual(NO_SYNC);
+    relay.register('acme', 'globex-aaaaaaaa-link');
+    const next = { ...record, client: 'globex-aaaaaaaa-link', generation: 2, epoch: 1 };
+    expect((await sync(relay, 'acme', next, key)).status).toBe(200);
+  });
+
   it('R3.1 empties the route when the holder is dropped', async () => {
     const relay = await relayWithBinding();
     relay.register('acme', 'acme-aaaaaaaa-link');
