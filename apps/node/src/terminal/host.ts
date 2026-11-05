@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
-import { isProgramOwnPrompt, TERM_CHUNK, UNHEARD_MS, type AgentEvent, type Failure, type Limits, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
+import { isProgramOwnPrompt, UNHEARD_MS, type AgentEvent, type Failure, type Limits, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
 import type { OperatorDelivery, OperatorQuestion, OperatorServerMessage } from '@hornhoof/protocol/program-operator';
 import { agyRules, COLORS_NOT_TAKEN, colorsNotTaken, pastColors, SETUP_NEEDED } from '../providers/antigravity.js';
 import { claudeEvents, claudeInterrupted } from '../providers/claude.js';
@@ -18,6 +18,7 @@ import { plainOutput, signalName, type ProgramOutput } from '../program-exit.js'
 import { redact } from '../redact.js';
 import { Bridge, type AgentUrls } from './bridge.js';
 import { atEmptyPrompt, inputOf, withoutDim } from './input.js';
+import { readViewHistory, sendTerminalOutput } from './view-stream.js';
 import { procOwner, type OwnerFactory, type Ownership, type Panes } from './peer.js';
 import { StreamMask } from './mask.js';
 import { ProgramWatch, READY, REPORT_MS, programState, type Pending } from './program-state.js';
@@ -190,8 +191,6 @@ type View = {
   write: boolean;
   mask: StreamMask;
   decoder: StringDecoder;
-  pending: string;
-  timer: NodeJS.Timeout | null;
   quiet: NodeJS.Timeout | null;
   shown: Size;
   applied: Size;
@@ -2370,43 +2369,38 @@ export class TerminalHost {
     if (this.viewsClosed.delete(m.termId)) return this.forget(m.termId, m.agentKey);
     const shown = this.fitted(m.agentKey);
     const child = this.opts.tmux.attach(a.name, shown.cols, shown.rows, m.write);
-    const view: View = { child, key: m.agentKey, write: m.write, mask: new StreamMask(this.opts.secrets), decoder: new StringDecoder('utf8'), pending: '', timer: null, quiet: null, shown, applied: shown, tty: null, out: () => {} };
+    const view: View = { child, key: m.agentKey, write: m.write, mask: new StreamMask(this.opts.secrets), decoder: new StringDecoder('utf8'), quiet: null, shown, applied: shown, tty: null, out: () => {} };
     this.views.set(m.termId, view);
     a.viewers++;
     /* A watcher of an agent that sleeps sees the waiting screen; anyone else, a loader until the program is up. */
     if (starts || a.turn || a.up) this.opts.send({ type: 'term.program', termId: m.termId, running: a.up && !starts });
-    const flush = () => {
-      view.timer = null;
-      while (view.pending) {
-        this.opts.send({ type: 'term.data', termId: m.termId, data: view.pending.slice(0, 2 * TERM_CHUNK) });
-        view.pending = view.pending.slice(2 * TERM_CHUNK);
-      }
-    };
-    const out = (text: string) => {
-      if (!text) return;
-      view.pending += text;
-      view.timer ??= setTimeout(flush, 16);
-    };
-    view.out = out;
-    child.stdout?.on('data', (chunk: Buffer) => {
-      out(view.mask.push(view.decoder.write(chunk)));
-      if (view.quiet) clearTimeout(view.quiet);
-      view.quiet = setTimeout(() => out(view.mask.flush()), 60);
-    });
+    view.out = text => sendTerminalOutput(data => this.opts.send({ type: 'term.data', termId: m.termId, data }), text);
     child.on('exit', () => {
       if (view.quiet) clearTimeout(view.quiet);
-      out(view.mask.flush());
-      if (view.timer) clearTimeout(view.timer);
-      flush();
+      view.out(view.mask.flush());
       this.views.delete(m.termId);
       this.wanted.delete(m.termId);
       a.viewers = Math.max(0, a.viewers - 1);
       this.opts.send({ type: 'term.exit', termId: m.termId });
       void this.fit(m.agentKey);
     });
+    await this.showHistory(m.termId, view, a.name);
     if (starts) this.opts.send({ type: 'agent.start', agentKey: m.agentKey });
     /* A resize that came while it opened, or a window smaller than the others', sizes every view of the session. */
     await this.fit(m.agentKey);
+  }
+
+  /* What the attached client writes meanwhile waits in its pipe, and follows the history in its order. */
+  private async showHistory(termId: string, view: View, name: string): Promise<void> {
+    const show = (text: string) => {
+      view.out(view.mask.push(text));
+      if (view.quiet) clearTimeout(view.quiet);
+      view.quiet = setTimeout(() => view.out(view.mask.flush()), 60);
+    };
+    const history = await readViewHistory(this.opts.tmux, name);
+    if (this.views.get(termId) !== view || view.child.killed) return;
+    show(history);
+    view.child.stdout?.on('data', (chunk: Buffer) => show(view.decoder.write(chunk)));
   }
 
   input(m: Msg<'term.input'>): void {
