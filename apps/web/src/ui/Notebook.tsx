@@ -6,6 +6,10 @@ import type { NoteView } from '../types';
 
 type Editing = { number: number; text: string };
 
+const notebookBase = (departmentId: string | null) => (departmentId ? `/api/departments/${departmentId}/notebook` : '/api/notebook');
+const notebookChanged = (message: { type: string; spot?: { departmentId: string | null } }, departmentId: string | null) =>
+  (message.type === 'notebook' && message.spot?.departmentId === departmentId) || message.type === 'reconnected';
+
 function NotebookFeedback({ loading, unread, saving, failure, onRetry }: { loading: boolean; unread: unknown; saving: boolean; failure: unknown; onRetry(): void }) {
   const t = useT();
   return (
@@ -67,7 +71,7 @@ export function Notebook({ departmentId = null }: { departmentId?: string | null
   /* Why the notes could not be read, until they are read again. */
   const [unread, setUnread] = useState<unknown>(null);
 
-  const base = departmentId ? `/api/departments/${departmentId}/notebook` : '/api/notebook';
+  const base = notebookBase(departmentId);
   const load = useCallback(async () => {
     try {
       setNotes((await api.get<{ notes: NoteView[] }>(base)).notes);
@@ -78,7 +82,7 @@ export function Notebook({ departmentId = null }: { departmentId?: string | null
   }, [base]);
   useEffect(() => void load(), [load]);
   useStream(m => {
-    if ((m.type === 'notebook' && m.spot.departmentId === departmentId) || m.type === 'reconnected') void load();
+    if (notebookChanged(m, departmentId)) void load();
   });
 
   async function run(action: () => Promise<unknown>, after: () => void) {
@@ -107,10 +111,12 @@ export function Notebook({ departmentId = null }: { departmentId?: string | null
     void run(() => api.patch(`${base}/${editing.number}`, { text: editing.text.trim() }), () => setEditing(null));
   }
 
+  const loading = notes === null && unread === null;
+
   return (
-    <section className="notebook" aria-label={t.notebook.title} aria-busy={busy || (notes === null && unread === null)}>
+    <section className="notebook" aria-label={t.notebook.title} aria-busy={busy || loading}>
       <p className="muted">{departmentId ? t.notebook.departmentIntro : t.notebook.intro}</p>
-      <NotebookFeedback loading={notes === null && unread === null} unread={unread} saving={busy} failure={failure} onRetry={() => void load()} />
+      <NotebookFeedback loading={loading} unread={unread} saving={busy} failure={failure} onRetry={() => void load()} />
       <NotebookItems notes={notes} editing={editing} busy={busy} onEdit={n => setEditing({ number: n.number, text: n.text })} onSave={save} onCancel={() => setEditing(null)} onRemove={n => void run(() => api.del(`${base}/${n.number}`), () => {})} />
       <form className="notebook-add" onSubmit={add}>
         <textarea aria-label={t.notebook.newNote} placeholder={t.notebook.placeholder} value={text} maxLength={300} rows={2} onChange={e => setText(e.target.value)} />
