@@ -1,5 +1,62 @@
+import { parseTimingLines, SLOWEST_TESTS, type PartTimings, type TestFileTiming } from '@hornhoof/protocol';
+import { and, eq, inArray, isNull, notInArray } from 'drizzle-orm';
+import { basename } from 'node:path';
 import type { Db } from '../../db/client.js';
+import { attachments, testPartTimings, testParts, testRuns } from '../../db/schema.js';
 import type { Tx } from '../tasks/engine.js';
+import { logName } from './runs.js';
 
-/* Placeholder until the timing tests come next. */
-export async function keepTimings(_db: Db | Tx, _companyId: string, _taskIds: string[]): Promise<void> {}
+const RUNNER_START = /\bRUN\s+v\S+\s+(\S.*?)\s*$/;
+const FILE_LINE = /^\s*[✓❯×]\s+(\S+\.(?:test|spec)\.[cm]?[jt]sx?)\s+\(\d+ tests?[^)]*\)\s+(\d+(?:\.\d+)?)(ms|s)\s*$/;
+const TEST_LINE = /^\s+[✓×]\s+(.+?)\s+(\d+(?:\.\d+)?)(ms|s)\s*$/;
+const MOST_NAME = 500;
+
+const millis = (count: string, unit: string): number => Number(count) * (unit === 's' ? 1000 : 1);
+
+/* A part runs in a clone called repo: what lies under it names the package. */
+function packageOf(folder: string): string {
+  const under = /(?:^|\/)repo(?:\/(.+))?$/.exec(folder);
+  return under ? (under[1] ?? '.') : basename(folder);
+}
+
+function mostSlow(file: TestFileTiming): TestFileTiming {
+  return { ...file, slowest: [...file.slowest].sort((a, b) => b.ms - a.ms).slice(0, SLOWEST_TESTS) };
+}
+
+/* A log from before the timing lines still has what the runner printed of each file: its total, and its slow tests. */
+function fromRunnerOutput(log: string): PartTimings {
+  const files: TestFileTiming[] = [];
+  let where = '.';
+  for (const line of log.split('\n')) {
+    const start = RUNNER_START.exec(line);
+    const file = FILE_LINE.exec(line);
+    const test = file ? null : TEST_LINE.exec(line);
+    if (start) where = packageOf(start[1]!);
+    else if (file) files.push({ package: where, file: file[1]!, totalMs: millis(file[2]!, file[3]!), setupMs: null, testsMs: null, teardownMs: null, slowest: [] });
+    else if (test) files.at(-1)?.slowest.push({ name: test[1]!.slice(0, MOST_NAME), ms: millis(test[2]!, test[3]!) });
+  }
+  return { files: files.map(mostSlow), packages: [] };
+}
+
+/* What a part's log says of its test files. */
+export function timingsOfLog(log: string): PartTimings {
+  const said = parseTimingLines(log);
+  return said.files.length ? said : fromRunnerOutput(log);
+}
+
+/* Reads the log of each ended part of a test run of these tasks that was not read yet, once: what it said stays as it was
+   read. A part whose log has not come yet waits for the next time. Runs of work print nothing of the kind. */
+export async function keepTimings(db: Db | Tx, companyId: string, taskIds: string[]): Promise<void> {
+  const waiting = await db
+    .select({ id: testParts.id, part: testParts.part, runId: testRuns.id, number: testRuns.number, kind: testRuns.kind, taskId: testRuns.taskId })
+    .from(testParts)
+    .innerJoin(testRuns, eq(testRuns.id, testParts.runId))
+    .leftJoin(testPartTimings, eq(testPartTimings.partId, testParts.id))
+    .where(and(inArray(testRuns.taskId, taskIds), eq(testRuns.kind, 'tests'), isNull(testPartTimings.partId), notInArray(testParts.status, ['queued', 'running'])));
+  for (const part of waiting) {
+    const [log] = await db.select({ bytes: attachments.bytes }).from(attachments).where(and(eq(attachments.taskId, part.taskId), eq(attachments.name, logName(part, part.part)))).limit(1);
+    if (!log) continue;
+    const said = timingsOfLog(Buffer.from(log.bytes).toString('utf8'));
+    await db.insert(testPartTimings).values({ partId: part.id, companyId, runId: part.runId, ...said }).onConflictDoNothing();
+  }
+}

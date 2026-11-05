@@ -30,11 +30,13 @@ export const SECRET: Record<string, string[]> = {
    which only Hornhoof writes, so that it can be believed. Test and work runs too, as they
    carry a repository's token and the task's files to the machines lent to them. And what waits for people's decisions
    with the logs that say who wrote and who decided: a request closes only through answer_request, in a turn of a person
-   who may take it, and a forged message would make a turn answer someone else. */
+   who may take it, and a forged message would make a turn answer someone else. The numbers of the pipeline report, which
+   only Hornhoof works out, so that they can be believed. */
 const READ_ONLY = [
   'people', 'person_access', 'subscriptions', 'machines', 'nodes', 'node_connections', 'test_runs', 'test_parts',
   'requests', 'proposals', 'agent_events', 'task_events', 'program_instances', 'program_deliveries',
   'program_operator_cases', 'program_operator_actions', 'program_operator_signals', 'wait_notices', 'person_changes', 'attachments',
+  'turn_snapshots', 'test_part_timings',
 ];
 /* An employee's fields that give it tools, a place or the machine its turns and their tokens go to: they change only by
    hiring and on its card, which make the CEO's checks. A head's department is held by a trigger, as a column right
