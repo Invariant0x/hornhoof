@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import { TEST_SECRET } from './helpers.js';
@@ -60,7 +61,7 @@ describe('loadConfig', () => {
     expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, TUNNEL_HOST: 'tunnel' }).tunnelHost).toBe('tunnel');
     expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, TUNNEL_HOST: '172.18.0.5' }).tunnelHost).toBe('172.18.0.5');
     for (const TUNNEL_HOST of ['http://tunnel', 'tun nel', 'tunnel:8080']) {
-      expect(() => loadConfig({ HORNHOOF_SECRET: TEST_SECRET, TUNNEL_HOST })).toThrow('TUNNEL_HOST must be the host name of the tunnel container, like tunnel.');
+      expect(() => loadConfig({ HORNHOOF_SECRET: TEST_SECRET, TUNNEL_HOST })).toThrow('TUNNEL_HOST must be the host name of the keeper container, like keeper.');
     }
   });
 
@@ -72,6 +73,31 @@ describe('loadConfig', () => {
     for (const HORNHOOF_HOST_ID of ['mac-0001-abcd', 'AB'.repeat(32), 'ab'.repeat(31)]) {
       expect(() => loadConfig({ HORNHOOF_SECRET: TEST_SECRET, HORNHOOF_HOST_ID })).toThrow('HORNHOOF_HOST_ID must be the 64 characters install.sh writes. Remove the line from .env, or run the install command again.');
     }
+  });
+
+  it('knows this install by the id install.sh gives, and none without one', () => {
+    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET }).machineId).toBeNull();
+    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, HORNHOOF_MACHINE_ID: '' }).machineId).toBeNull();
+    for (const id of ['ab'.repeat(16), 'ab'.repeat(32)]) {
+      expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, HORNHOOF_MACHINE_ID: id }).machineId).toBe(id);
+    }
+    for (const HORNHOOF_MACHINE_ID of ['XYZ', 'AB'.repeat(16), 'ab'.repeat(24), 'ab'.repeat(16) + '\n']) {
+      expect(() => loadConfig({ HORNHOOF_SECRET: TEST_SECRET, HORNHOOF_MACHINE_ID })).toThrow('HORNHOOF_MACHINE_ID must be the hex install.sh writes. Remove the line from .env, or run the install command again.');
+    }
+  });
+
+  it("loads the keeper's environment and nothing more", () => {
+    const config = loadConfig({
+      DATABASE_URL: 'postgres://hornhoof:hornhoof@db:5432/hornhoof',
+      HORNHOOF_SECRET: randomBytes(32).toString('base64'),
+      ACME_DIRECTORY: '',
+      HORNHOOF_MACHINE_ID: '',
+      RELAY_URL: '',
+    });
+    expect(config.controlDir).toBe('/control');
+    expect(config.machineId).toBeNull();
+    expect(config.relayUrl).toBe('https://hornhoof.org');
+    expect(config.databaseUrl).toBe('postgres://hornhoof:hornhoof@db:5432/hornhoof');
   });
 
   it('gives task files 2 GB unless TASK_FILES_MB names other whole megabytes', () => {
