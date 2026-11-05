@@ -953,6 +953,75 @@ describe('migration 0056', () => {
   });
 });
 
+describe('migration 0061', () => {
+  const previous = async () => {
+    const source = new PGlite();
+    onTestFinished(() => source.close());
+    const db = drizzle(source);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0060_limits_freshness') });
+    const company = (await db.execute<{ id: string }>(sql`insert into companies (name) values ('Demo') returning id`)).rows[0]!.id;
+    const task = async (number: number, status: string, body: string) => {
+      const closed = status === 'done' || status === 'cancelled' ? sql`now()` : sql`null`;
+      await db.execute(sql`insert into tasks (company_id, number, title, body, status, closed_at) values (${company}, ${number}, ${`Task ${number}`}, ${body}, ${status}, ${closed})`);
+    };
+    return { db, task };
+  };
+  const labels = async (db: PgliteDatabase) => (await db.execute<{ number: number; work_kind: string | null; risk_class: string | null }>(sql`select number, work_kind, risk_class from tasks order by number`)).rows;
+
+  it('makes the fields and the tables on a fresh install, and grants no one anything', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    const columns = await db.execute<{ column_name: string }>(sql`select column_name from information_schema.columns where table_name = 'tasks' and column_name in ('work_kind', 'risk_class') order by column_name`);
+    expect(columns.rows.map(c => c.column_name)).toEqual(['risk_class', 'work_kind']);
+    expect((await db.execute(sql`select * from turn_snapshots`)).rows).toEqual([]);
+    expect((await db.execute(sql`select * from test_part_timings`)).rows).toEqual([]);
+    expect((await db.execute(sql`select grantee from information_schema.role_table_grants where table_name in ('turn_snapshots', 'test_part_timings') and grantee <> current_user`)).rows).toEqual([]);
+  });
+
+  it("moves the first line of open tasks' bodies into the fields, and changes nothing else", async () => {
+    const { db, task } = await previous();
+    await task(1, 'open', 'Вид: известное поведение. Класс риска: нет.\n\nФаза А.');
+    await task(2, 'working', 'Вид: ошибка. Класс риска: безопасность.\nТело.');
+    await task(3, 'blocked', 'Вид: неизвестный путь. Класс риска: данные');
+    await task(4, 'waiting', 'Вид: старый код. Класс риска: деньги.');
+    await task(5, 'planned', 'Вид: ошибка. Класс риска: доступ.');
+    await task(6, 'done', 'Вид: ошибка. Класс риска: данные.');
+    await task(7, 'cancelled', 'Вид: ошибка. Класс риска: данные.');
+    await task(8, 'open', 'No such line.\nВид: ошибка. Класс риска: данные.');
+    await task(9, 'open', 'Вид: что-то новое. Класс риска: не знаю.');
+    await task(10, 'open', 'Вид: ошибка.');
+    const before = (await db.execute(sql`select to_jsonb(t) as data from tasks t order by number`)).rows;
+
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+
+    expect(await labels(db)).toEqual([
+      { number: 1, work_kind: 'known_behavior', risk_class: 'none' },
+      { number: 2, work_kind: 'bug', risk_class: 'security' },
+      { number: 3, work_kind: 'unknown_path', risk_class: 'data' },
+      { number: 4, work_kind: 'legacy_code', risk_class: 'money' },
+      { number: 5, work_kind: 'bug', risk_class: 'access' },
+      { number: 6, work_kind: null, risk_class: null },
+      { number: 7, work_kind: null, risk_class: null },
+      { number: 8, work_kind: null, risk_class: null },
+      { number: 9, work_kind: null, risk_class: null },
+      { number: 10, work_kind: 'bug', risk_class: null },
+    ]);
+    expect((await db.execute(sql`select to_jsonb(t) - 'work_kind' - 'risk_class' as data from tasks t order by number`)).rows).toEqual(before);
+  });
+
+  it('refuses a kind or a risk class it does not know', async () => {
+    const { db, task } = await previous();
+    await task(1, 'open', '');
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await db.execute(sql`update tasks set work_kind = 'bug', risk_class = 'none'`);
+    await expect(db.execute(sql`update tasks set work_kind = 'feature'`)).rejects.toThrow();
+    await expect(db.execute(sql`update tasks set risk_class = 'fun'`)).rejects.toThrow();
+  });
+});
+
 describe('migration 0059', () => {
   const tableOf = (db: PgliteDatabase) =>
     db.execute<{ column_name: string; is_nullable: string }>(sql`select column_name, is_nullable from information_schema.columns where table_name = 'node_connections' order by column_name`);

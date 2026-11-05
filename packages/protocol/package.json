@@ -23,6 +23,10 @@
       "types": "./dist/map.d.ts",
       "default": "./dist/map.js"
     },
+    "./pipeline-report": {
+      "types": "./dist/pipeline-report.d.ts",
+      "default": "./dist/pipeline-report.js"
+    },
     "./signin": {
       "types": "./dist/signin.d.ts",
       "default": "./dist/signin.js"
