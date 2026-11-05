@@ -43,4 +43,39 @@ describe('Antigravity terminal transcripts', () => {
     expect(read({ type: 'GENERIC', status: 'ERROR', content: 'failed' }).events).toEqual([{ kind: 'tool_result', ok: false, summary: 'failed' }]);
     expect(read({ type: 'GENERIC', content: 'unrelated' }).events).toEqual([]);
   });
+  it('publishes a completed planner step only once when the transcript repeats it', () => {
+    const read = agySteps();
+    const step = { step_index: 8, type: 'PLANNER_RESPONSE', status: 'DONE', content: 'Using dev-security-review.', tool_calls: [{ name: 'view_file', args: {} }] };
+    expect(read(step).events).toHaveLength(2);
+    expect(read(step)).toEqual({ events: [], began: [], ended: [] });
+    expect(read({ step_index: 9, type: 'GENERIC', status: 'DONE', content: 'source' }).ended).toEqual(['8:0']);
+    expect(read({ step_index: 10, type: 'GENERIC', status: 'DONE', content: 'unrelated' }).events).toEqual([]);
+  });
+
+  it('keeps a running tool pending until its completed result', () => {
+    const read = agySteps();
+    read({ step_index: 1, type: 'PLANNER_RESPONSE', status: 'DONE', tool_calls: [{ name: 'view_file', args: {} }] });
+    expect(read({ step_index: 2, type: 'GENERIC', status: 'RUNNING', content: 'Reading' })).toEqual({ events: [], began: [], ended: [] });
+    expect(read({ step_index: 2, type: 'GENERIC', status: 'DONE', content: 'source' }).ended).toEqual(['1:0']);
+  });
+
+  it('allows step indexes to repeat after the next user input', () => {
+    const read = agySteps();
+    read({ type: 'USER_INPUT', step_index: 0, content: 'First' });
+    read({ type: 'PLANNER_RESPONSE', step_index: 1, status: 'DONE', content: 'First answer' });
+    read({ type: 'USER_INPUT', step_index: 0, content: 'Second' });
+    expect(read({ type: 'PLANNER_RESPONSE', step_index: 1, status: 'DONE', content: 'Second answer' }).events).toEqual([{ kind: 'text', text: 'Second answer' }]);
+  });
+
+  it('ignores a replayed input without closing its tool or replaying its planner response', () => {
+    const read = agySteps();
+    const input = { type: 'USER_INPUT', step_index: 0, status: 'DONE', content: 'Review this file' };
+    const response = { type: 'PLANNER_RESPONSE', step_index: 1, status: 'DONE', content: 'Using dev-security-review.', tool_calls: [{ name: 'view_file', args: {} }] };
+    read(input);
+    read(response);
+    expect(read(input)).toEqual({ events: [], began: [], ended: [] });
+    expect(read(response)).toEqual({ events: [], began: [], ended: [] });
+    expect(read({ type: 'GENERIC', step_index: 2, status: 'DONE', content: 'source' }).ended).toEqual(['1:0']);
+  });
+
 });
