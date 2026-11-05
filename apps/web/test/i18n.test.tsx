@@ -92,8 +92,8 @@ describe('errorText', () => {
 
 describe('request sending state', () => {
   it('names the in-flight request sending state in English and Russian', () => {
-    expect((en.tasks as Record<string, unknown>).sending).toBe('Sending');
-    expect((ru.tasks as Record<string, unknown>).sending).toBe('Отправка');
+    expect(en.tasks.sending).toBe('Sending');
+    expect(ru.tasks.sending).toBe('Отправка');
   });
 });
 

@@ -1014,6 +1014,7 @@ export const en = {
     choiceNote: 'Comment or feedback',
     choiceHint: 'Pick an option above, or send feedback without picking one.',
     sendFeedback: 'Send',
+    sending: 'Sending',
     cancelTask: 'Cancel task',
     department: 'Department',
     allDepartments: 'All departments',

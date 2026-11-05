@@ -1046,6 +1046,7 @@ export const ru: Messages = {
     choiceNote: 'Комментарий или замечания',
     choiceHint: 'Выберите вариант выше или отправьте замечания без выбора.',
     sendFeedback: 'Отправить',
+    sending: 'Отправка',
     cancelTask: 'Отменить задачу',
     department: 'Отдел',
     allDepartments: 'Все отделы',
