@@ -102,7 +102,7 @@ const rejectionOver = (limits: Limits, windows: Limits['windows']) => limits.sta
 export function currentLimits(limits: Limits | null, updatedAt: string | Date | null, now = Date.now()): Limits | null {
   if (!limits) return null;
   if (staleSnapshot(updatedAt, now)) return { status: 'allowed', windows: [], complete: false };
-  const windows = limits.windows.filter(w => w.resetsAt === null || Date.parse(w.resetsAt) > now);
+  const windows = limits.windows.filter(w => w.resetsAt === null || Number.isNaN(Date.parse(w.resetsAt)) || Date.parse(w.resetsAt) > now);
   return { ...limits, status: rejectionOver(limits, windows) ? 'allowed' : limits.status, windows, ...(windows.length !== limits.windows.length ? { complete: false } : {}) };
 }
 
