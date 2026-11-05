@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TERM_CHUNK } from '@hornhoof/protocol';
-import { FAKE, hasTmux, host, job, sent, SECRET, setUp, tmux, until } from './terminal-host-helpers.js';
+import { hasTmux, host, job, sent, SECRET, setUp, tmux, until } from './terminal-host-helpers.js';
 
 const frames = (termId: string) => sent.flatMap(m => (m.type === 'term.data' && m.termId === termId ? [String(m.data)] : []));
 const shown = (termId: string) => frames(termId).join('');
