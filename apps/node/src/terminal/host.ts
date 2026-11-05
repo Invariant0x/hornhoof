@@ -557,18 +557,21 @@ export class TerminalHost {
     a.lastText = null;
     a.stepSaid = false;
     this.beginTurn(a);
-    this.operator?.begin(a.key, input.jobId ?? null, job.operatorDelivery, input.prompt, goesOn, job.operatorSourceDelivery);
-    input.signal?.addEventListener('abort', () => this.operator?.intentional(a.key, 'cancelled'), { once: true });
+    this.operatorBegins(a, job, goesOn);
     this.bridge.setToken(job.key, input.tools?.token ?? null);
     const starting = input.prompt ? null : (tools ?? Promise.resolve());
-    const words = this.requestedWords(a, job);
-    const turn: Turn = { jobId: input.jobId ?? null, toolToken: input.tools?.token, words, onEvent: input.onEvent ?? (() => {}), typed: false, seq: 0, signal: input.signal, ...(starting ? { starting: true } : {}) };
+    const turn = requestedTurn(job, this.requestedWords(a, job), starting !== null);
     if (starting) a.starting = starting;
     a.turn = turn;
     a.ended = deferred();
     a.stopped = false;
     a.failure = null;
     return { turn, starting };
+  }
+
+  private operatorBegins(a: Agent, { input, operatorDelivery, operatorSourceDelivery }: TermJob, goesOn: boolean): void {
+    this.operator?.begin(a.key, input.jobId ?? null, operatorDelivery, input.prompt, goesOn, operatorSourceDelivery);
+    input.signal?.addEventListener('abort', () => this.operator?.intentional(a.key, 'cancelled'), { once: true });
   }
 
   private closesTurn(a: Agent, job: TermJob, turn: Turn, starting: Promise<unknown> | null): void {
@@ -1999,66 +2002,74 @@ export class TerminalHost {
     if (!a) return;
     if (event !== 'status') a.signAt = Date.now();
     const data = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
-    switch (event) {
-      case 'tool':
-      case 'tooldone':
-      case 'toolfail':
-      case 'ask':
-        return this.operatorToolHook(a, event, data);
-      case 'interrupt':
-        this.drain(a);
-        return this.interrupted(a, typeof data.turn_id === 'string' ? data.turn_id : undefined);
-      case 'end':
-        this.drain(a);
-        if (data.reason === 'clear') {
-          this.reportUnheard(a, true, 'the program cleared its session');
-          a.enqueuedWords = [];
-          a.dequeued = false;
-        }
-        if (await this.opts.tmux.alive(a.name)) {
-          if (data.reason === 'clear' && this.stoppable(a)) this.interrupted(a);
-          return;
-        }
-        if (this.stoppable(a)) this.turnFailed(a, 'The program session ended during the turn.', failure('crash', 'The program session ended during the turn.'));
-        this.programEnded(a);
-        return;
-      case 'start':
-        /* Claude Code starts with the id the host gave it; Kimi Code names a new session here. */
-        if (typeof data.session_id === 'string' && (a.sessionId || a.program?.kind === 'kimi')) this.follow(a, data.session_id);
-        a.started?.resolve();
-        return;
-      case 'status': {
-        const limits = claudeStatusLimits(data);
-        if (limits) a.limits = limits;
-        const used = claudeStatusContext(data);
-        if (used !== null) this.context(a, used);
-        return;
-      }
-      case 'queued':
-        return this.queuedHook(a, data);
-      case 'prompt': {
-        if (a.promptWaits) return this.personSent(a);
-        const prompt = typeof data.prompt === 'string' ? data.prompt : contentText(data.prompt);
-        const retained = this.takeRetainedAssignment(a, prompt);
-        if (a.program?.kind === 'claude' && a.busy && a.took && !this.overIn(a) && a.typing == null) {
-          /* Claude's transcript confirms queued words after this hook returns. */
-          return;
-        }
-        const first = !a.took || a.typing != null;
-        if (first && !retained) a.turn?.words.taken(prompt);
-        a.took = true;
-        /* Kimi Code hands the prompt as parts of a message. */
-        const notice = await this.promptGot(a, prompt);
-        await this.prompted(a, prompt);
-        if (first) a.turn?.words.clear();
-        return notice;
-      }
-      case 'invocation':
-        await this.invocation(a, data);
-        return;
-      case 'stop':
-        return this.stoppedHook(a, data);
+    return this.hooks.get(event)?.(a, data);
+  }
+
+  private readonly hooks = new Map<string, Hook>([
+    ...TOOL_HOOKS.map((event): [string, Hook] => [event, (a, data) => this.operatorToolHook(a, event, data)]),
+    ['interrupt', (a, data) => this.interruptHook(a, data)],
+    ['end', (a, data) => this.endHook(a, data)],
+    ['start', (a, data) => this.startHook(a, data)],
+    ['status', (a, data) => this.statusHook(a, data)],
+    ['queued', (a, data) => this.queuedHook(a, data)],
+    ['prompt', (a, data) => this.promptHook(a, data)],
+    ['invocation', (a, data) => this.invocation(a, data)],
+    ['stop', (a, data) => this.stoppedHook(a, data)],
+  ]);
+
+  private interruptHook(a: Agent, data: Record<string, unknown>): void {
+    this.drain(a);
+    this.interrupted(a, typeof data.turn_id === 'string' ? data.turn_id : undefined);
+  }
+
+  private async endHook(a: Agent, data: Record<string, unknown>): Promise<void> {
+    this.drain(a);
+    const cleared = data.reason === 'clear';
+    if (cleared) this.sessionCleared(a);
+    if (await this.opts.tmux.alive(a.name)) {
+      if (cleared && this.stoppable(a)) this.interrupted(a);
+      return;
     }
+    if (this.stoppable(a)) this.turnFailed(a, 'The program session ended during the turn.', failure('crash', 'The program session ended during the turn.'));
+    this.programEnded(a);
+  }
+
+  private sessionCleared(a: Agent): void {
+    this.reportUnheard(a, true, 'the program cleared its session');
+    a.enqueuedWords = [];
+    a.dequeued = false;
+  }
+
+  /* Claude Code starts with the id the host gave it; Kimi Code names a new session here. */
+  private startHook(a: Agent, data: Record<string, unknown>): void {
+    if (typeof data.session_id === 'string' && (a.sessionId || a.program?.kind === 'kimi')) this.follow(a, data.session_id);
+    a.started?.resolve();
+  }
+
+  private statusHook(a: Agent, data: Record<string, unknown>): void {
+    const limits = claudeStatusLimits(data);
+    if (limits) a.limits = limits;
+    const used = claudeStatusContext(data);
+    if (used !== null) this.context(a, used);
+  }
+
+  private async promptHook(a: Agent, data: Record<string, unknown>): Promise<string | void> {
+    if (a.promptWaits) return this.personSent(a);
+    const prompt = typeof data.prompt === 'string' ? data.prompt : contentText(data.prompt);
+    const retained = this.takeRetainedAssignment(a, prompt);
+    /* Claude's transcript confirms queued words after this hook returns. */
+    return queuedInClaude(a, this.overIn(a)) ? undefined : this.promptTaken(a, prompt, retained);
+  }
+
+  private async promptTaken(a: Agent, prompt: string, retained: boolean): Promise<string | void> {
+    const first = !a.took || a.typing != null;
+    if (first && !retained) a.turn?.words.taken(prompt);
+    a.took = true;
+    /* Kimi Code hands the prompt as parts of a message. */
+    const notice = await this.promptGot(a, prompt);
+    await this.prompted(a, prompt);
+    if (first) a.turn?.words.clear();
+    return notice;
   }
 
   private stoppedHook(a: Agent, data: Record<string, unknown>): Promise<void> {
@@ -2523,14 +2534,13 @@ export class TerminalHost {
   async restart(key: string, jobId: string, note: string): Promise<{ ok: boolean; reason: string | null }> {
     const a = this.agents.get(key);
     if (a && !a.restarting) this.drain(a);
-    const turn = a?.turn;
     const reason = restartRefusal(restartEvidence(a), jobId, Date.now());
     if (reason) return { ok: false, reason };
-    if (!a?.launch || !turn || a.restarting) return { ok: false, reason: 'The program launch is not available.' };
+    if (!canRestart(a)) return { ok: false, reason: 'The program launch is not available.' };
     try {
-      return await this.restartProgram(a, a.launch, turn, jobId, note);
+      return await this.restartProgram(a, a.launch, a.turn, jobId, note);
     } catch (error) {
-      return { ok: false, reason: String(error instanceof Error ? error.message : error).slice(0, 300) };
+      return { ok: false, reason: errorWords(error) };
     } finally {
       a.restarting = false;
     }
@@ -2886,6 +2896,24 @@ function restartEvidence(a: Agent | undefined): RestartEvidence | null {
 function programExitStatus(output: ProgramOutput | undefined): { code: number | null; signal: string | null } {
   return { code: output?.code ?? null, signal: signalName(output?.signal ?? null) };
 }
+
+type Hook = (a: Agent, data: Record<string, unknown>) => Promise<string | void> | void;
+const TOOL_HOOKS = ['tool', 'tooldone', 'toolfail', 'ask'];
+
+function requestedTurn({ input }: TermJob, words: TurnWords, starting: boolean): Turn {
+  return { jobId: input.jobId ?? null, toolToken: input.tools?.token, words, onEvent: input.onEvent ?? (() => {}), typed: false, seq: 0, signal: input.signal, ...(starting ? { starting: true } : {}) };
+}
+
+/* Words Claude Code queued while it works on a turn that goes on. */
+function queuedInClaude(a: Agent, over: boolean): boolean {
+  return a.program?.kind === 'claude' && Boolean(a.busy && a.took) && !over && a.typing == null;
+}
+
+function canRestart(a: Agent | undefined): a is Agent & { launch: NonNullable<Agent['launch']>; turn: Turn } {
+  return Boolean(a?.launch && a.turn && !a.restarting);
+}
+
+const errorWords = (error: unknown) => String(error instanceof Error ? error.message : error).slice(0, 300);
 
 function typedOpen(agentKey: string, text: string, ref: Turn['ref'], queuedFrom: string | null): Extract<NodeMessage, { type: 'turn.open' }> {
   return { type: 'turn.open', agentKey, text: text.slice(0, 100_000), ref, ...(queuedFrom ? { queuedFrom } : {}) };
