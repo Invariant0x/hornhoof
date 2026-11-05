@@ -16,6 +16,7 @@ export function summary(counts: StatusCounts, words: Record<EmployeeStatus, stri
 export const en = {
   routes: {
     unavailable: 'Not found or no access',
+    accessDenied: 'Insufficient permissions',
     explanation: 'This page may have moved, or you may not have access to it.',
     home: 'Go to the map',
   },
@@ -1005,6 +1006,9 @@ export const en = {
     decidedByOwner: (department: string) => `Decided by the owner of ${department}, the CEO or the CEO delegate.`,
     actedFor: (agent: string, person: string) => `${agent} for ${person}`,
     note: 'Note, if any',
+    choiceNote: 'Comment or feedback',
+    choiceHint: 'Pick an option above, or send feedback without picking one.',
+    sendFeedback: 'Send',
     cancelTask: 'Cancel task',
     department: 'Department',
     allDepartments: 'All departments',
