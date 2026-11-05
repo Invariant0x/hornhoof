@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { encryptSecret } from '../src/crypto/secrets.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, jobs, people, requests, subscriptions, taskEvents, tasks, testRuns, turns } from '../src/db/schema.js';
-import { answer, createTask, submit, type Task } from '../src/modules/tasks/engine.js';
+import { answer, ask, createTask, submit, type Task } from '../src/modules/tasks/engine.js';
 import { wakePrompt } from '../src/modules/tasks/wake.js';
 import { commitProof } from '../src/modules/testruns/commit-proof.js';
 import { as, connectNode, listen, mcp, setUpCompany, testApp, TEST_COMMIT, until } from './helpers.js';
@@ -451,6 +451,15 @@ describe('an approval of a commit', () => {
     const words = approved.wakes.find(w => w.why === 'answered')!.text!;
     expect(words).toContain(`Approved ${NEW_COMMIT}.`);
     expect(words).toContain('No passed test run checked this commit.');
+  });
+
+  it("says nothing of runs on an approval a department's policy asks for, which names no commit", async () => {
+    const c = await company();
+    await c.aRun();
+    const { request } = await ask(c.ctx, c.bruno.id, c.task.id, { kind: 'approval', text: 'Send the welcome email?', approval: { channel: 'message', kind: 'welcome email', amount: null } });
+    expect((await c.read()).requests.find(r => r.kind === 'approval')!.proof).toBeNull();
+    const approved = await answer(c.ctx, { personId: c.ceo.id }, request.id, { approve: true });
+    expect(approved.wakes.find(w => w.why === 'answered')!.text).toBe('Approved message, welcome email.');
   });
 
   it('says nothing of runs when the commit is declined', async () => {

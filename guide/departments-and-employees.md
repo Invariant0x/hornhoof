@@ -118,6 +118,22 @@ Reviewers of different models find different things. So at each gate, one employ
 - A gate whose role has people on, but none who can check it, waits with the head and says who they are. That happens, for example, when they have no subscription. It starts again once one of the role who is on can check it, or when the head gives it other gates.
 - A department whose head is off, or whose employees are all off, gets no work from the orchestrator.
 
+## Who owns a department's approvals?
+
+A department can have an owner: a person the CEO names under **About the department**, from the people with access to it. With no owner, the CEO decides. Having access never makes someone the owner, and Hornhoof never works it out on its own.
+
+The owner gets the department's approvals of any kind and sets how each kind goes: messages, prices, publications, commits, spending and everything else. There are three ways:
+
+- **Every one to me**: each one asks.
+- **Only new kinds**: a kind of work asks until someone approves it once. A declined kind asks again.
+- **No approval within limits**: up to the limit nobody is asked and the task's log keeps a line about it. Above the limit, or when the work does not say how much, the owner is asked.
+
+A kind with no rule asks every time. The rules stay as they are when the owner changes or goes away. If the owner loses access or is switched off, the CEO decides again.
+
+The CEO and the CEO delegate can always answer any request themselves, but a department's approvals no longer add to the CEO's count once it has an owner. The head brings the CEO in when the department misses a goal or its plan.
+
+To approve an exact commit for a release, an employee always asks, whatever the rules say.
+
 ## Who sees which departments?
 
 Each person sees the whole company, or the departments and teams ticked for them. Someone who reaches more than one department shows next to the CEO on the map, as a deputy.

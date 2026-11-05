@@ -1,7 +1,7 @@
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { accessOf, canReach, WHOLE } from '../../auth/access.js';
-import { decisionOwner, type Candidate, type DecisionSubject } from '../../auth/decision-owner.js';
+import { accessOf, canReach, WHOLE, withOwned } from '../../auth/access.js';
+import { decisionOwner, namedOwner, type Candidate, type DecisionSubject } from '../../auth/decision-owner.js';
 import { canDecide, decidedBy, type DecidedBy } from '../../auth/decisions.js';
 import type { Person } from '../../auth/session.js';
 import { agents, departments, people, personAccess, proposals, requests, tasks } from '../../db/schema.js';
@@ -17,6 +17,8 @@ type RequestRow = typeof requests.$inferSelect;
 type TaskRow = typeof tasks.$inferSelect;
 type ProposalRow = typeof proposals.$inferSelect;
 
+/* total: what waits for the viewer. What a department's own owner takes is that owner's: its number goes on that owner's card
+   and adds nothing to anyone else's, though the CEO and the delegate still see and may take it. */
 export type Counts = { byPerson: Record<string, number>; byAgent: Record<string, number>; total: number };
 
 /* What waits for people as one person may see it, each with its owner and whether this person may answer it, and the counts
@@ -28,21 +30,29 @@ export type Decisions = {
   counts: Counts;
 };
 
-/* The company's active and invited people with what each reaches, for owners. */
-async function candidates(ctx: Pick<Ctx, 'db'>, companyId: string): Promise<Candidate[]> {
+/* The company's active and invited people with what each reaches and owns, for owners. */
+export async function candidates(ctx: Pick<Ctx, 'db'>, companyId: string): Promise<Candidate[]> {
   const rows = await ctx.db.select({ id: people.id, status: people.status, isOwner: people.isOwner, scopeKind: people.scopeKind }).from(people).where(eq(people.companyId, companyId));
   const listed = rows.filter(p => p.scopeKind !== 'company').map(p => p.id);
   const access = listed.length ? await ctx.db.select().from(personAccess).where(inArray(personAccess.personId, listed)) : [];
+  const owned = await ctx.db.select({ id: departments.id, ownerPersonId: departments.ownerPersonId }).from(departments).where(eq(departments.companyId, companyId));
+  const namedFor = (id: string) => owned.filter(d => d.ownerPersonId === id).map(d => d.id);
   return rows.map(p => {
-    if (p.scopeKind === 'company') return { id: p.id, status: p.status, isOwner: p.isOwner, access: WHOLE };
+    if (p.scopeKind === 'company') return { id: p.id, status: p.status, isOwner: p.isOwner, access: withOwned(WHOLE, namedFor(p.id)) };
     const mine = access.filter(a => a.personId === p.id);
     return {
       id: p.id,
       status: p.status,
       isOwner: p.isOwner,
-      access: { whole: false, departments: new Set(mine.flatMap(a => (a.departmentId ? [a.departmentId] : []))), teams: new Set(mine.flatMap(a => (a.teamId ? [a.teamId] : []))) },
+      access: withOwned({ whole: false, departments: new Set(mine.flatMap(a => (a.departmentId ? [a.departmentId] : []))), teams: new Set(mine.flatMap(a => (a.teamId ? [a.teamId] : []))) }, namedFor(p.id)),
     };
   });
+}
+
+/* Each department's owner who counts now: named by the CEO, active and with access still. */
+export async function departmentOwners(ctx: Pick<Ctx, 'db'>, companyId: string): Promise<Map<string, string>> {
+  const everyone = await candidates(ctx, companyId);
+  return new Map(everyone.filter(p => p.status === 'active').flatMap(p => [...(p.access.owns ?? [])].map((department): [string, string] => [department, p.id])));
 }
 
 /* The addressee of a question uses the same ownership policy as its decision card. */
@@ -50,16 +60,22 @@ export async function decisionPerson(ctx: Pick<Ctx, 'db'>, companyId: string, su
   return decisionOwner(subject, await candidates(ctx, companyId));
 }
 
+/* Whether a decision is held by a department's named owner other than this viewer. */
+function heldElsewhere(subject: DecisionSubject, everyone: readonly Candidate[], viewer: string): boolean {
+  const named = namedOwner(subject, everyone);
+  return named !== null && named !== viewer;
+}
+
 const byTimeAndId = <T extends { createdAt: Date; id: string }>(a: T, b: T) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id);
 
-function counted(owners: { ownerPersonId: string; agentId: string }[]): Counts {
+function counted(owners: { ownerPersonId: string; agentId: string; elsewhere?: boolean }[]): Counts {
   const byPerson: Record<string, number> = {};
   const byAgent: Record<string, number> = {};
   for (const d of owners) {
     byPerson[d.ownerPersonId] = (byPerson[d.ownerPersonId] ?? 0) + 1;
     byAgent[d.agentId] = (byAgent[d.agentId] ?? 0) + 1;
   }
-  return { byPerson, byAgent, total: owners.length };
+  return { byPerson, byAgent, total: owners.filter(d => !d.elsewhere).length };
 }
 
 /* Everything waiting for people that this person may see: requests on tasks they reach, the orchestrator's pending cards
@@ -76,7 +92,7 @@ export async function visibleDecisions(ctx: Pick<Ctx, 'db' | 'computer'>, me: Pe
     .orderBy(asc(requests.createdAt), asc(requests.id));
   const whole = me.scopeKind === 'company';
   /* As the routes that take them let them. */
-  const judged = (subject: DecisionSubject) => ({ ownerPersonId: decisionOwner(subject, everyone), canAnswer: canDecide(subject, me, access, me.companyId), decidedBy: decidedBy(subject) });
+  const judged = (subject: DecisionSubject) => ({ ownerPersonId: decisionOwner(subject, everyone), canAnswer: canDecide(subject, me, access, me.companyId), decidedBy: decidedBy(subject, everyone) });
   const seen = rows.filter(r => canReach(access, taskSpot(r.task))).map(r => ({ ...r, ...judged(requestSubject(r.request, r.task)) }));
   const cards = whole ? (await db.select().from(proposals).where(and(eq(proposals.companyId, me.companyId), eq(proposals.status, 'pending')))).sort(byTimeAndId) : [];
   const shownCards = cards.map(proposal => ({ proposal, ...judged({ source: 'proposal' }) }));
@@ -85,7 +101,7 @@ export async function visibleDecisions(ctx: Pick<Ctx, 'db' | 'computer'>, me: Pe
   const [orchestrator] = asked ? await db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, me.companyId), eq(agents.kind, 'orchestrator'))) : [];
   const computer = asked && orchestrator ? { asked, agentId: orchestrator.id, ...judged({ source: 'computer_access' }) } : null;
   const counts = counted([
-    ...seen.map(r => ({ ownerPersonId: r.ownerPersonId, agentId: r.request.agentId })),
+    ...seen.map(r => ({ ownerPersonId: r.ownerPersonId, agentId: r.request.agentId, elsewhere: heldElsewhere(requestSubject(r.request, r.task), everyone, me.id) })),
     ...shownCards.map(c => ({ ownerPersonId: c.ownerPersonId, agentId: c.proposal.agentId })),
     ...(computer ? [{ ownerPersonId: computer.ownerPersonId, agentId: computer.agentId }] : []),
   ]);

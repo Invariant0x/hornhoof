@@ -1,3 +1,4 @@
+import type { ApprovalChannel, ApprovalMode, ApprovalRule as ChannelRule } from '@hornhoof/protocol/approval-policy';
 import type { ExternalWait } from '@hornhoof/protocol/waits';
 import type { Notification } from '@hornhoof/protocol';
 import type { ConnectionEnd, FailureKind, Limits, MachineDrain, ModelOption, NodeDisconnectCause, NodeLoad, NodeReconnect, ProgramInfo, ProviderId, TemplateKey } from '@hornhoof/protocol';
@@ -162,6 +163,22 @@ export type Department = {
   /* What it works on now, for people who reach it. */
   current?: { id: string; number: number; title: string } | null;
   repository?: Repository | null;
+  /* The person who takes its approvals; none means the CEO. */
+  ownerPersonId?: string | null;
+};
+
+export type { ApprovalChannel, ApprovalMode };
+/* How a department's approvals go on one channel: every one, only new kinds, or none up to a limit. */
+export type ApprovalRule = { channel: ApprovalChannel } & ChannelRule;
+/* A department's owner and rules as this person may see them; no owner means the CEO. */
+export type ApprovalPolicyView = {
+  departmentId: string;
+  owner: { id: string; name: string } | null;
+  canSetOwner: boolean;
+  canChangePolicy: boolean;
+  /* Who the CEO may name: active people with access to the department. */
+  candidates: { id: string; name: string; title: string }[];
+  rules: ApprovalRule[];
 };
 
 /* The git repository a department's or product's agents clone; the token never comes back, only its last four. */
@@ -421,8 +438,8 @@ export type WaitingRequest = {
   decidedBy?: DecidedBy;
 };
 
-/* Who takes a decision: the CEO and the CEO delegate, or also the people of its department. */
-export type DecidedBy = { kind: 'ceo_and_delegate' | 'department_and_ceo'; department: { id: string; name: string } | null };
+/* Who takes a decision: the CEO and the CEO delegate, and also the people of its department or its owner. */
+export type DecidedBy = { kind: 'ceo_and_delegate' | 'department_and_ceo' | 'owner_and_ceo'; department: { id: string; name: string } | null };
 
 /* A card of the orchestrator that waits for people: a structure to build, or people to hire into a department. */
 export type ProposalDecision = {

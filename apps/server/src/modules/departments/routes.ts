@@ -21,6 +21,7 @@ import { backOn } from '../tasks/wake.js';
 import { checkStaff, departmentOf, HireLine, requiredState, runsTier, servingSubscriptions, spotIn } from '../tools/staff.js';
 import { BuildItem, checkItems, inPlaces, isNew, type TeamChange } from '../tools/structure.js';
 import { linesToHire, type Present } from '../operations/ensure.js';
+import { approvalPolicyRoutes } from './approval-policy.js';
 import { hireEmployee, type Hired } from './hire.js';
 import { repoView } from './repository.js';
 import { deptName, TEMPLATE_TEXT } from './templates.js';
@@ -412,4 +413,5 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   teamRoutes(app, ctx);
+  approvalPolicyRoutes(app, ctx);
 }
