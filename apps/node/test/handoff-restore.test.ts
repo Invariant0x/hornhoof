@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { handoverPrompt, restoreTaskCheckpoint, type RestoreInput } from '../src/handoff-restore.js';
@@ -125,6 +125,7 @@ describe('a clean checkpoint restored', () => {
     const receipt = await capture();
     writeFileSync(join(destination.path, 'src/changed.ts'), 'half');
     mkdirSync(join(destination.path, 'deep'));
+    rmSync(join(destination.path, 'src/gone.ts'));
     accepted(await restoreTaskCheckpoint(restoreInput(receipt)));
     expect(read('src/changed.ts')).toBe('export const changed = 2;\n');
     expect(read('deep/er/renamed.ts')).toBe('export const moved = 1;\n');
@@ -140,6 +141,21 @@ describe('a restore cut short by a crash', () => {
     accepted(await restoreTaskCheckpoint(restoreInput(receipt)));
     expect(present(`src/${leftover}`)).toBe(false);
     expect(read('src/changed.ts')).toBe('export const changed = 2;\n');
+  });
+  it('refuses a folder where the manifest knows a file, and leaves no temporary file', async () => {
+    stand.write('src/changed.ts', 'export const changed = 2;\n');
+    rmSync(join(stand.source, 'src/gone.ts'));
+    const receipt = await capture();
+    rmSync(join(destination.path, 'src/changed.ts'));
+    mkdirSync(join(destination.path, 'src/changed.ts'));
+    expect(await restoreTaskCheckpoint(restoreInput(receipt))).toEqual(FAILED);
+    expect(readdirSync(join(destination.path, 'src')).filter(name => name.startsWith('.hh-restore-'))).toEqual([]);
+
+    const other = destinationOf(stand, 'destination-2');
+    destination = { ...other, binding: { ...other.binding, workspaceId: id(7) } };
+    rmSync(join(other.path, 'src/gone.ts'));
+    mkdirSync(join(other.path, 'src/gone.ts'));
+    expect(await restoreTaskCheckpoint(restoreInput(receipt))).toEqual(FAILED);
   });
   it('keeps a file that only looks like one', async () => {
     stand.write('src/changed.ts', 'export const changed = 2;\n');
