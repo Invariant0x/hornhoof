@@ -151,6 +151,77 @@ describe('a short span that hides something once decoded', () => {
   });
 });
 
+describe('a known secret spread over lines', () => {
+  const secret = ['q', 'z', '7', 'x'].join('');
+  const base64 = Buffer.from(secret).toString('base64'), hex = Buffer.from(secret).toString('hex');
+  const escaped = (text: string) => [...text].map(char => `\\x${char.charCodeAt(0).toString(16)}`).join('');
+  it.each([
+    ['a plain line break', 'qz\n7x'],
+    ['a line break in the middle of a word', 'before qz\n7x after'],
+    ['a one letter piece', 'q\nz7x'],
+    ['one letter on each of four lines', 'q\nz\n7\nx'],
+    ['a concatenation', 'const first = "qz" +\n"7x";'],
+    ['a concatenation with single quotes', "const first = 'qz' +\n  '7x';"],
+    ['a template concatenation', 'const first = `qz` +\n  `7x`;'],
+    ['a dot concatenation', "$first = 'qz' .\n  '7x';"],
+    ['a line continuation', 'first="qz"\\\n"7x"'],
+    ['implicit concatenation', 'first = ("qz"\n  "7x")'],
+    ['an array of pieces', 'const parts = [\n  "qz",\n  "7x",\n].join("");'],
+    ['pieces in two variables', 'const a = "qz";\nconst b = "7x";'],
+    ['a comment between the pieces', 'const a = "qz" + // first part\n  "7x";'],
+    ['a line between the pieces', '"qz" +\n// a note\n"7x"'],
+    ['escaped pieces', `"${escaped('qz')}" +\n"${escaped('7x')}"`],
+    ['percent encoded pieces', '%71%7a\n%37%78'],
+    ['wrapped base64', `${base64.slice(0, 4)}\n${base64.slice(4)}`],
+    ['concatenated base64', `"${base64.slice(0, 4)}" +\n"${base64.slice(4)}"`],
+    ['wrapped hex', `${hex.slice(0, 4)}\n${hex.slice(4)}`],
+    ['concatenated upper case hex', `"${hex.slice(0, 4).toUpperCase()}" +\n"${hex.slice(4).toUpperCase()}"`],
+  ])('takes out %s', (_name, spread) => {
+    const out = sanitizeText(`keep\n${spread}\nkeep too\n`, [secret]).text;
+    const alnum = out.replace(/\[redacted\]/g, '').replace(/[^a-zA-Z0-9]/g, '');
+    expect(alnum).not.toContain(secret);
+    expect(out).toContain(REDACTED);
+    expect(isSanitized(out, [secret])).toBe(true);
+    expect(isSanitized(`keep\n${spread}\nkeep too\n`, [secret])).toBe(false);
+  });
+  it('takes out a two letter secret on two lines, and leaves the lines that do not hold it', () => {
+    expect(cleaned('first\nendq\nzstart\nlast', ['qz'])).toEqual(['first', REDACTED, REDACTED, 'last']);
+  });
+  it('does not take a redaction for the piece of a secret, however short the secret', () => {
+    const text = 'value = a\nthis is fine\n';
+    expect(sanitizeText(`${REDACTED}\nyes\n`, ['dy']).text).toBe(`${REDACTED}\nyes\n`);
+    expect(sanitizeText(text, ['qz']).text).toBe(text);
+  });
+  it('keeps its answer stable when a redaction brings two pieces together', () => {
+    const text = 'q\nsays "qq" with a secret: known-one\nz\n';
+    const out = sanitizeText(text, ['qz', 'known-one']).text;
+    expect(out).toBe(`${REDACTED}\n${REDACTED}\n${REDACTED}\n`);
+    expect(isSanitized(out, ['qz', 'known-one'])).toBe(true);
+  });
+  it('gives up on a chain of such steps with everything withheld, in bounded work', () => {
+    const levels = Array.from({ length: 12 }, (_, n) => n + 1);
+    const before = levels.map(n => `p${n}x`).reverse(), after = levels.map(n => `x${n}q`);
+    const secrets = ['known-one', ...levels.map(n => `p${n}xx${n}q`)];
+    const out = sanitizeText(`keep\n${[...before, 'known-one', ...after].join('\n')}\nkeep too\n`, secrets).text;
+    expect(out).toBe(`${REDACTED}\n`.repeat(27));
+    expect(isSanitized(out, secrets)).toBe(true);
+  });
+  it.each(['ou', 'cut', 'va', 'e'])('keeps its own words from breaking the second pass with the secret %s', secret => {
+    const long = sanitizeContext(`${'plain words here\n'.repeat(200)}`, [secret], 512);
+    expect(isSanitized(long, [secret])).toBe(true);
+    expect(isSanitized(sanitizeContext(null, [secret]), [secret])).toBe(true);
+  });
+  it('stays quick on a large text of short lines with a one letter secret', () => {
+    const started = Date.now();
+    expect(sanitizeText('x\n'.repeat(200_000), ['x']).redactedRecords).toBe(200_000);
+    expect(Date.now() - started).toBeLessThan(15_000);
+  });
+  it('still leaves text without any of the pieces as it is', () => {
+    const text = 'const first = "abc" +\n"def";\n';
+    expect(sanitizeText(text, [secret, ['long', 'er', 'known', 'value'].join('-')]).text).toBe(text);
+  });
+});
+
 describe('obfuscated records', () => {
   it.each([
     ['ANSI codes', `ghp\u001b[0m_x7Kq2Lm9Pz4Rt8Vw`],

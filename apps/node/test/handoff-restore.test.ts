@@ -120,49 +120,129 @@ describe('a clean checkpoint restored', () => {
     expect(read('src/own.ts')).toBe('export const own = 1;\n');
   });
 
-  it('finishes a restore a crash cut short', async () => {
-    dirtySource();
+});
+
+describe('other work on the way of a restore', () => {
+  beforeEach(() => {
+    stand.write('src/changed.ts', 'export const changed = 2;\n');
+    stand.write('src/fresh.ts', 'export const fresh = 1;\n');
+    rmSync(join(stand.source, 'src/gone.ts'));
+  });
+  const refusedWith = async (path: string, words: string) => {
+    expect(await restoreTaskCheckpoint(restoreInput(await capture()))).toEqual(FAILED);
+    expect(read(path)).toBe(words);
+  };
+  it('keeps a different edit of a file the checkpoint replaces, and writes nothing else', async () => {
+    writeFileSync(join(destination.path, 'src/changed.ts'), 'export const changed = 300;\n');
+    await refusedWith('src/changed.ts', 'export const changed = 300;\n');
+    expect(present('src/fresh.ts')).toBe(false);
+    expect(present('src/gone.ts')).toBe(true);
+  });
+  it('keeps a different new file where the checkpoint adds one', async () => {
+    writeFileSync(join(destination.path, 'src/fresh.ts'), 'somebody else\n');
+    await refusedWith('src/fresh.ts', 'somebody else\n');
+  });
+  it('keeps an edit of a file the checkpoint deletes', async () => {
+    writeFileSync(join(destination.path, 'src/gone.ts'), 'edited, not gone\n');
+    await refusedWith('src/gone.ts', 'edited, not gone\n');
+  });
+  it('keeps the same words with other permissions as not its own', async () => {
+    writeFileSync(join(destination.path, 'src/changed.ts'), 'export const changed = 2;\n');
+    chmodSync(join(destination.path, 'src/changed.ts'), 0o755);
+    expect(await restoreTaskCheckpoint(restoreInput(await capture()))).toEqual(FAILED);
+    expect(statSync(join(destination.path, 'src/changed.ts')).mode & 0o777).toBe(0o755);
+  });
+  it('keeps a file named like a temporary one, whatever its name proves', async () => {
+    const name = `src/.hh-restore-${id(77)}`;
+    writeFileSync(join(destination.path, name), 'somebody else\n');
+    await refusedWith(name, 'somebody else\n');
+    expect(present('src/fresh.ts')).toBe(false);
+  });
+  it('keeps a file named like its own temporary one in the context folder out of the repository', async () => {
     const receipt = await capture();
-    writeFileSync(join(destination.path, 'src/changed.ts'), 'half');
-    mkdirSync(join(destination.path, 'deep'));
-    rmSync(join(destination.path, 'src/gone.ts'));
+    const context = join(stand.root, 'handoff', id(11));
+    mkdirSync(context, { recursive: true });
+    writeFileSync(join(context, `.staging-${id(77)}`), 'left by a crash');
     accepted(await restoreTaskCheckpoint(restoreInput(receipt)));
     expect(read('src/changed.ts')).toBe('export const changed = 2;\n');
-    expect(read('deep/er/renamed.ts')).toBe('export const moved = 1;\n');
+    expect(git(destination.path, 'status', '--porcelain').split('\n').map(line => line.trim()).sort()).toEqual(['?? src/fresh.ts', 'D src/gone.ts', 'M src/changed.ts']);
+  });
+  it('never has a temporary file of its own in the repository, even when a write fails', async () => {
+    stand.write('src/fresh.ts', 'export const fresh = 1;\n');
+    const receipt = await capture();
+    mkdirSync(join(destination.path, 'src/fresh.ts'));
+    expect(await restoreTaskCheckpoint(restoreInput(receipt))).toEqual(FAILED);
+    expect(git(destination.path, 'status', '--porcelain', '--untracked-files=all')).toBe('');
+    expect(readdirSync(join(stand.root, 'handoff', id(11))).filter(name => name.startsWith('.staging-'))).toEqual([]);
   });
 });
 
 describe('a restore cut short by a crash', () => {
-  it('clears the temporary file the crash left, and nothing else of that kind', async () => {
-    stand.write('src/changed.ts', 'export const changed = 2;\n');
+  it('goes on from what it had already done, with nothing of it done twice wrongly', async () => {
+    dirtySource();
     const receipt = await capture();
-    const leftover = `.hh-restore-${id(77)}`;
-    writeFileSync(join(destination.path, 'src', leftover), 'half');
+    writeFileSync(join(destination.path, 'src/changed.ts'), 'export const changed = 2;\n');
+    mkdirSync(join(destination.path, 'deep/er'), { recursive: true });
+    writeFileSync(join(destination.path, 'deep/er/renamed.ts'), 'export const moved = 1;\n');
+    rmSync(join(destination.path, 'src/gone.ts'));
     accepted(await restoreTaskCheckpoint(restoreInput(receipt)));
-    expect(present(`src/${leftover}`)).toBe(false);
+    expect(read('src/staged.ts')).toBe('export const staged = 1;\n');
     expect(read('src/changed.ts')).toBe('export const changed = 2;\n');
+    expect(present('src/moved.ts')).toBe(false);
   });
-  it('refuses a folder where the manifest knows a file, and leaves no temporary file', async () => {
-    stand.write('src/changed.ts', 'export const changed = 2;\n');
+  it('goes on after a folder took the place of a file, with its files inside', async () => {
+    rmSync(join(stand.source, 'src/keep.ts'));
+    stand.write('src/keep.ts/inside.ts', 'export const inside = 1;\n');
+    stand.write('src/keep.ts/second.ts', 'export const second = 1;\n');
+    const receipt = await capture();
+    rmSync(join(destination.path, 'src/keep.ts'));
+    mkdirSync(join(destination.path, 'src/keep.ts'));
+    writeFileSync(join(destination.path, 'src/keep.ts/inside.ts'), 'export const inside = 1;\n');
+    expect(accepted(await restoreTaskCheckpoint(restoreInput(receipt))).readyForPrompt).toBe(true);
+    expect(read('src/keep.ts/inside.ts')).toBe('export const inside = 1;\n');
+    expect(read('src/keep.ts/second.ts')).toBe('export const second = 1;\n');
+  });
+  it('goes on after only the empty folder of that step was made', async () => {
+    rmSync(join(stand.source, 'src/keep.ts'));
+    stand.write('src/keep.ts/inside.ts', 'export const inside = 1;\n');
+    const receipt = await capture();
+    rmSync(join(destination.path, 'src/keep.ts'));
+    mkdirSync(join(destination.path, 'src/keep.ts'));
+    accepted(await restoreTaskCheckpoint(restoreInput(receipt)));
+    expect(read('src/keep.ts/inside.ts')).toBe('export const inside = 1;\n');
+  });
+  it('goes on after a folder lost its last file but not yet its place to a file', async () => {
+    stand.write('only/file.ts', 'export const one = 1;\n');
+    stand.commit('A folder');
+    const base = git(stand.source, 'rev-parse', 'HEAD');
+    git(stand.source, 'push', '--quiet', 'origin', 'HEAD:refs/heads/main');
+    rmSync(join(stand.source, 'only'), { recursive: true });
+    stand.write('only', 'now a file\n');
+    const receipt = await capture({ baseSha: base });
+    const next = destinationOf(stand, 'destination-2');
+    git(next.path, 'checkout', '--quiet', base);
+    destination = { ...next, binding: { ...next.binding, workspaceId: id(7), baseSha: base }, sourceHeadSha: base };
+    rmSync(join(next.path, 'only/file.ts'));
+    accepted(await restoreTaskCheckpoint(restoreInput(receipt)));
+    expect(read('only')).toBe('now a file\n');
+  });
+  it('keeps a stranger in the folder that took the place of a file, and refuses', async () => {
+    rmSync(join(stand.source, 'src/keep.ts'));
+    stand.write('src/keep.ts/inside.ts', 'export const inside = 1;\n');
+    const receipt = await capture();
+    rmSync(join(destination.path, 'src/keep.ts'));
+    mkdirSync(join(destination.path, 'src/keep.ts'));
+    writeFileSync(join(destination.path, 'src/keep.ts/stranger.ts'), 'somebody else\n');
+    expect(await restoreTaskCheckpoint(restoreInput(receipt))).toEqual(FAILED);
+    expect(read('src/keep.ts/stranger.ts')).toBe('somebody else\n');
+  });
+  it('refuses a folder where the manifest deletes a file and expects none', async () => {
     rmSync(join(stand.source, 'src/gone.ts'));
     const receipt = await capture();
-    rmSync(join(destination.path, 'src/changed.ts'));
-    mkdirSync(join(destination.path, 'src/changed.ts'));
+    rmSync(join(destination.path, 'src/gone.ts'));
+    mkdirSync(join(destination.path, 'src/gone.ts'));
     expect(await restoreTaskCheckpoint(restoreInput(receipt))).toEqual(FAILED);
-    expect(readdirSync(join(destination.path, 'src')).filter(name => name.startsWith('.hh-restore-'))).toEqual([]);
-
-    const other = destinationOf(stand, 'destination-2');
-    destination = { ...other, binding: { ...other.binding, workspaceId: id(7) } };
-    rmSync(join(other.path, 'src/gone.ts'));
-    mkdirSync(join(other.path, 'src/gone.ts'));
-    expect(await restoreTaskCheckpoint(restoreInput(receipt))).toEqual(FAILED);
-  });
-  it('keeps a file that only looks like one', async () => {
-    stand.write('src/changed.ts', 'export const changed = 2;\n');
-    const receipt = await capture();
-    writeFileSync(join(destination.path, 'src/.hh-restore-mine'), 'somebody else\n');
-    expect(await restoreTaskCheckpoint(restoreInput(receipt))).toEqual(FAILED);
-    expect(read('src/.hh-restore-mine')).toBe('somebody else\n');
+    expect(statSync(join(destination.path, 'src/gone.ts')).isDirectory()).toBe(true);
   });
 });
 

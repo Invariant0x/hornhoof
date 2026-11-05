@@ -12,7 +12,8 @@ afterEach(() => { stand.close(); });
 
 const fileOf = (path: string) => wipManifest(stand.remote).files.find(file => file.path === path);
 const sha256 = (text: string | Buffer) => createHash('sha256').update(text).digest('hex');
-const everything = () => closure(stand.remote).map(object => object.body).join('\n');
+/* Object ids are structure: a short word turns up in a hash by chance, so what the objects say is read without them. */
+const everything = () => closure(stand.remote).map(object => object.body.replace(/\b[0-9a-f]{40}(?:[0-9a-f]{24})?\b/g, '')).join('\n');
 
 /* Every kind of change at once, and one secret line only in a commit the source already took back. */
 function dirtyWorkspace(): void {
@@ -217,6 +218,29 @@ describe('secrets do not leave', () => {
     expect(fileOf('[redacted]')).toMatchObject({ status: 'omitted', contentSha256: null, mode: null });
     expect(wipFile(stand.remote, 'meta/last-tests.txt')).toBe('ok\n[redacted]\nok again');
     expect(wipFile(stand.remote, 'meta/conversation-tail.txt')).toBe('[redacted]\nsaid nothing');
+  });
+
+  it.each([
+    ['one line break', 'export const first = "qz7" +\n  "x";\n'],
+    ['the secret across a line break in a word', 'qz\n7x\n'],
+    ['base64 across lines', `export const first = "${Buffer.from('qz7x').toString('base64').slice(0, 4)}" +\n  "${Buffer.from('qz7x').toString('base64').slice(4)}";\n`],
+    ['hex across lines', `export const first = "${Buffer.from('qz7x').toString('hex').slice(0, 4)}" +\n  "${Buffer.from('qz7x').toString('hex').slice(4)}";\n`],
+  ])('takes a short secret spread over lines out of every object: %s', async (_name, code) => {
+    const secret = ['q', 'z', '7', 'x'].join(''), forms = [secret, Buffer.from(secret).toString('base64').replace(/=+$/, ''), Buffer.from(secret).toString('hex')];
+    stand.write('src/changed.ts', code);
+    const receipt = accepted(await captureTaskCheckpoint(stand.input({ secrets: [secret], lastTests: code, conversationTail: code })));
+    expect(receipt).toMatchObject({ requiresRepair: true, redactedFiles: 1 });
+    expect(fileOf('src/changed.ts')?.status).toBe('redacted');
+    const alnum = closure(stand.remote).filter(object => object.type === 'blob').map(object => object.body.replace(/\b[0-9a-f]{40}(?:[0-9a-f]{24})?\b/g, '').replace(/[^a-zA-Z0-9]/g, ''));
+    for (const form of forms) for (const said of alnum) expect(said).not.toContain(form);
+  });
+
+  it('holds with a one letter secret, whatever it takes out', async () => {
+    stand.write('src/changed.ts', 'export const changed = 2;\n');
+    const receipt = accepted(await captureTaskCheckpoint(stand.input({ secrets: ['e'] })));
+    expect(receipt).toMatchObject({ requiresRepair: true, omittedFiles: 1 });
+    expect(fileOf('[redacted]')).toMatchObject({ status: 'omitted' });
+    expect(wipFile(stand.remote, 'meta/last-tests.txt')).toBe('[redacted]');
   });
 
   it('joins the repository token to the secrets it was told about', async () => {
