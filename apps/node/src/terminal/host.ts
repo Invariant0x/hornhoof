@@ -548,7 +548,7 @@ export class TerminalHost {
     a.stopped = false;
     a.failure = null;
     try {
-      const failed = goesOn ? null : await this.startProgram(a, job, spec, hash, urls);
+      const failed = goesOn ? null : await this.startAnew(a, job, spec, hash, urls);
       if (failed) return failed;
       return await this.runRequested(a, job, turn, tools, goesOn, a.ended);
     } finally {
@@ -720,6 +720,33 @@ export class TerminalHost {
     return sameSession && a.hash === hash && (await this.opts.tmux.alive(a.name));
   }
 
+  /* The program that goes takes its input and its question with it, so it goes only once neither is lost. */
+  private async startAnew(a: Agent, job: TermJob, spec: LaunchSpec, hash: string, urls: AgentUrls): Promise<RunResult | null> {
+    return (await this.heldByOldProgram(a, job)) ?? this.startProgram(a, job, spec, hash, urls);
+  }
+
+  /* How the turn ends when what the old program holds cannot be made safe, or null once it goes with nothing of anyone's. */
+  private async heldByOldProgram(a: Agent, job: TermJob): Promise<RunResult | null> {
+    if (!(await this.opts.tmux.alive(a.name))) return null;
+    if (a.question) {
+      a.failure = failure('unknown', 'The program is asking a person, so Hornhoof did not start it anew.', true);
+      return this.failedTurn(a, job, job.input.signal?.aborted ? 'cancelled' : 'agent_failed');
+    }
+    return !typedSinceStart(a) || (await this.freeForStart(a, job)) ? null : this.inputNotFree(a, job);
+  }
+
+  /* Its input holds nothing of anyone's, and what a person sent while this turn waited got its answer from the program it
+     went to. Another word may then be there. */
+  private freeForStart(a: Agent, job: TermJob): Promise<boolean> {
+    return this.whilePromptWaits(a, async () => {
+      for (;;) {
+        if (!(await this.inputFree(a, job))) return false;
+        if (!a.personWords || !a.busy || job.input.signal?.aborted) return true;
+        await this.waitForTurn(a, job);
+      }
+    });
+  }
+
   /* Starts the program for the turn. One that never shows it is ready ends the turn with its screen, which says why. */
   private async startProgram(a: Agent, job: TermJob, spec: LaunchSpec, hash: string, urls: AgentUrls): Promise<RunResult | null> {
     this.programIs(a, false);
@@ -820,8 +847,7 @@ export class TerminalHost {
     a.fresh = false;
     a.took = false;
     a.typing = prompt;
-    /* What a program that just started shows after its prompt is its own, not words anybody left. */
-    if ((a.typedAt ?? -Infinity) >= a.startedAt && !(await this.freeInput(a, job))) return this.inputNotFree(a, job);
+    if (typedSinceStart(a) && !(await this.freeInput(a, job))) return this.inputNotFree(a, job);
     await this.opts.tmux.paste(a.name, prompt);
     await sleep(pasteWait(prompt));
     await this.opts.tmux.keys(a.name, 'Enter');
@@ -1046,16 +1072,26 @@ export class TerminalHost {
   /* For a path with no watch to tell of words it cannot move: they are kept and gone in the time a program has to get
      ready, as a person may still be writing them, or the turn ends saying so. */
   private freeInput(a: Agent, job: TermJob): Promise<boolean> {
-    return this.whilePromptWaits(a, async () => {
-      for (const end = Date.now() + this.readyMs; !job.input.signal?.aborted; await sleep(this.pollMs)) {
-        await this.keepLeftInput(a, job);
-        const input = await this.readInput(a);
-        if (!input) return this.personHeard(a, job);
-        if (await this.inputLane(a, () => this.inputCleared(a, job, input))) return true;
-        if (Date.now() >= end) return false;
-      }
-      return false;
-    });
+    return this.whilePromptWaits(a, () => this.inputFree(a, job));
+  }
+
+  private async inputFree(a: Agent, job: TermJob): Promise<boolean> {
+    for (const end = Date.now() + this.readyMs; !job.input.signal?.aborted; await sleep(this.pollMs)) {
+      await this.keepLeftInput(a, job);
+      const input = await this.readInput(a);
+      if (!input) return this.personHeard(a, job);
+      if (await this.inputLane(a, () => this.inputCleared(a, job, input))) return true;
+      if (Date.now() >= end) return false;
+    }
+    return false;
+  }
+
+  /* Whether the input may go with its program as it is: it holds nothing of a person's, or only what Hornhoof says it has. */
+  private async inputMayGo(a: Agent, job: TermJob): Promise<boolean> {
+    if (!typedSinceStart(a)) return true;
+    await this.keepLeftInput(a, job);
+    const input = await this.readInput(a);
+    return !input || isOwnLeft(a.ownLeft, a.typedAt, input) || this.leftInputs.isKept(leftRef(job.input.jobId ?? null, input));
   }
 
   private async whilePromptWaits<T>(a: Agent, work: () => Promise<T>): Promise<T> {
@@ -2420,6 +2456,7 @@ export class TerminalHost {
     if (!a?.launch || !turn || a.restarting) return { ok: false, reason: 'The program launch is not available.' };
     try {
       await a.saying;
+      if (!(await this.inputMayGo(a, { ...a.launch.job, input: { ...a.launch.job.input, jobId } }))) return { ok: false, reason: "The program's input holds words Hornhoof could not keep." };
       this.drain(a);
       const changed = restartRefusal(restartEvidence(a), jobId, Date.now());
       if (changed) return { ok: false, reason: changed };
@@ -2738,6 +2775,9 @@ function ownership(options: Options, panes: Panes): Ownership {
 function activeTurn(a: Agent): Turn | null {
   return a.turn?.signal?.aborted ? null : a.turn;
 }
+
+/* What a program that just started shows after its prompt is its own, not words anybody left. */
+const typedSinceStart = (a: Agent): boolean => (a.typedAt ?? -Infinity) >= a.startedAt;
 
 function initialToolsNeeded({ program, input }: TermJob, goesOn: boolean): boolean {
   const lazy = (program.kind === 'kimi' && !input.sessionId) || program.kind === 'antigravity';

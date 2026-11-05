@@ -145,6 +145,17 @@ describe.skipIf(!hasTmux)('words left in the input of a program that starts anew
     expect(launch).toHaveBeenCalledTimes(1);
   });
 
+  it('does not start anew a program that asks a person, and leaves its question and input alone', async () => {
+    const c = await wordsLeft('claude');
+    const a = host['agents'].get(c.key)!;
+    a.question = { name: 'Permission', at: Date.now(), asking: true };
+    expect(await c.run('Second assignment.', 'medium', c.sessionId).running).toMatchObject({ ok: false, error: 'agent_failed', failure: { kind: 'unknown', text: expect.stringContaining('asking a person') } });
+    expect(c.launch).not.toHaveBeenCalled();
+    expect(lefts()).toEqual([]);
+    expect(c.keys).not.toHaveBeenCalled();
+    expect(await c.line()).toBe(WORDS);
+  });
+
   it('asks nothing of a program that is gone', async () => {
     const c = await wordsLeft('claude');
     await tmux.kill(host['agents'].get(c.key)!.name);
