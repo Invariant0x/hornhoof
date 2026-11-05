@@ -878,7 +878,10 @@ export class TerminalHost {
     this.drain(a);
     if (job.input.signal?.aborted) return false;
     if (this.operator?.inheritSource(a.key, job.operatorSourceDelivery) || this.agyReceiptTaken(a)) return true;
-    if (!agyAtPrompt(screen) || !(await this.inputCleared(a, job, inputOf('antigravity', screen)!))) return false;
+    return agyAtPrompt(screen) && (await this.inputCleared(a, job, inputOf('antigravity', screen)!)) && this.submitAgyAssignment(a, job, prompt);
+  }
+
+  private async submitAgyAssignment(a: Agent, job: TermJob, prompt: string): Promise<boolean> {
     this.drain(a);
     if (job.input.signal?.aborted) return false;
     return this.agyReceiptTaken(a) || this.submitOperatorAssignment(a, job, prompt);
@@ -993,11 +996,18 @@ export class TerminalHost {
      A paste the program folded is not on its screen to keep, so it stays, and the turn's watch tells of it. */
   private async keepLeftInput(a: Agent, job: TermJob): Promise<void> {
     const input = await this.readInput(a);
-    if (!input || this.stillTyping(a) || isOwnLeft(a.ownLeft, a.typedAt, input) || holdsFoldedPaste(input)) return;
+    if (!input || !this.leftByOthers(a, input)) return;
     const jobId = job.input.jobId ?? null;
-    const secrets = [...this.opts.secrets(), ...(job.input.tools?.token ? [job.input.tools.token] : [])];
-    const text = cut(redact(await this.wholeInput(a, input), secrets), 100_000);
+    const text = cut(redact(await this.wholeInput(a, input), this.secretsOf(job)), 100_000);
     await this.leftInputs.keep({ agentKey: a.key, jobId, text, typed: (a.typedAt ?? -Infinity) > (a.pastedAt ?? -Infinity), ref: leftRef(jobId, input) });
+  }
+
+  private leftByOthers(a: Agent, input: string): boolean {
+    return !this.stillTyping(a) && !isOwnLeft(a.ownLeft, a.typedAt, input) && !holdsFoldedPaste(input);
+  }
+
+  private secretsOf(job: TermJob): string[] {
+    return [...this.opts.secrets(), ...(job.input.tools?.token ? [job.input.tools.token] : [])];
   }
 
   /* Words too long for the screen go on above it. */
@@ -1069,6 +1079,10 @@ export class TerminalHost {
     a.personWords = true;
     a.pressed = null;
     a.busy = true;
+  }
+
+  private endsNoTurn(a: Agent, end: TurnEnd): boolean {
+    return a.restarting || this.personWordsAnswered(a, end);
   }
 
   private personWordsAnswered(a: Agent, end: TurnEnd): boolean {
@@ -1396,7 +1410,7 @@ export class TerminalHost {
   }
 
   private endTurn(a: Agent, end: TurnEnd, id?: string, blocked = false): void {
-    if (a.restarting || this.personWordsAnswered(a, end)) return;
+    if (this.endsNoTurn(a, end)) return;
     const decision = a.ends.end(end.status, this.stoppable(a) || Boolean(blocked && a.turn), id);
     if (decision.conflict) this.log(`Agent ${a.key} (${a.program?.kind}): turn end channels disagree. The first end was kept.`);
     if (!decision.accept) return;

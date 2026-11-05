@@ -66,7 +66,7 @@ describe.skipIf(!hasTmux)('words left unsent in the input of a program, when a n
     expect(paste.mock.calls.map(call => call[1])).toEqual(['Second assignment.']);
     expect(keys.mock.calls.flat()).not.toContain('Escape');
     expect(lefts()).toHaveLength(1);
-    expect(await c.line()).toBe('');
+    await until(async () => (await c.line()) === '');
   });
 
   it.each(KINDS)('%s: leaves the words where they are while Hornhoof has not said it keeps them', async kind => {
