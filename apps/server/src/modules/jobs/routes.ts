@@ -2,7 +2,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { accessOf, agentSpot, canReach } from '../../auth/access.js';
+import { canViewAgent } from '../../auth/agent-view.js';
 import { requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { agents, jobs, subscriptions } from '../../db/schema.js';
@@ -16,10 +16,15 @@ import { jobView, publicJob } from './views.js';
 const IdParams = z.object({ id: z.uuid() });
 
 /* A test turn is its writer's and its plan owner's; an employee's turn is for whoever reaches the employee now. */
+/* A job of an agent goes with the agent; one of no agent, a plan's test say, with who started it and whose plan it is. */
 async function mayRead(db: Db, me: Person, view: NonNullable<Awaited<ReturnType<typeof jobView>>>): Promise<boolean> {
-  if (!view.agentId) return view.createdBy === me.id || view.ownerId === me.id;
-  const [agent] = await db.select().from(agents).where(eq(agents.id, view.agentId));
-  return Boolean(agent && canReach(await accessOf(db, me), await agentSpot(db, agent)));
+  if (!view.agentId) return me.scopeKind === 'company' || view.createdBy === me.id || view.ownerId === me.id;
+  return seesAgentOfJob(db, me, view.agentId);
+}
+
+async function seesAgentOfJob(db: Db, me: Person, agentId: string): Promise<boolean> {
+  const [agent] = await db.select().from(agents).where(eq(agents.id, agentId));
+  return Boolean(agent && (await canViewAgent(db, me, agent)));
 }
 
 const notOwner = () => new ApiError(403, 'forbidden', 'Only the owner can do this.', 'not_owner');
@@ -64,7 +69,7 @@ export function jobRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const view = await jobView(db, IdParams.parse(req.params).id);
     if (!view || view.companyId !== me.companyId) throw new ApiError(404, 'not_found', 'This job does not exist.', 'job_unknown');
-    if (me.scopeKind !== 'company' && !(await mayRead(db, me, view))) throw notOwner();
+    if (!(await mayRead(db, me, view))) throw notOwner();
     return { job: publicJob(view) };
   });
 
@@ -72,7 +77,8 @@ export function jobRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     requireCompanyScope(me);
     const { id } = IdParams.parse(req.params);
-    const [job] = await db.select({ status: jobs.status }).from(jobs).where(eq(jobs.id, id));
+    const [job] = await db.select({ status: jobs.status, agentId: jobs.agentId }).from(jobs).where(and(eq(jobs.id, id), eq(jobs.companyId, me.companyId)));
+    if (job?.agentId && !(await seesAgentOfJob(db, me, job.agentId))) throw notOwner();
     if (!job) throw new ApiError(404, 'not_found', 'This job does not exist.', 'job_unknown');
     if (job.status !== 'running') throw new ApiError(409, 'conflict', 'This job is not running.', 'nothing_running');
     await cancelJob(ctx, id);

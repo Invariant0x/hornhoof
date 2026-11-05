@@ -7,7 +7,7 @@ import { agentChanges, agents, departments, jobs, people, proposals, subscriptio
 import { instructionsOf, renderInstructions } from '../src/modules/agents/instructions.js';
 import { ask, createTask, submit } from '../src/modules/tasks/engine.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
-import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
+import { as, invitePerson, setUpCompany, testApp, ownPlan } from './helpers.js';
 
 /* Development with Bruno, a backend engineer on the team key; Oleg in Development has a Codex plan. */
 async function company() {
@@ -279,14 +279,15 @@ describe('the employee card', () => {
     expect(org.departments[0].employees[0].effort).toBe('xhigh');
   });
 
-  it('lets people of the department change its employees, and only the whole company remove them', async () => {
-    const { app, ceo, oleg, sales, brunoId } = await company();
+  it('lets someone of the department who owns the plan change an employee, and only the whole company remove them', async () => {
+    const { app, db, ceo, oleg, sales, brunoId } = await company();
+    await ownPlan(db, 'oleg@acme.com', brunoId);
     expect((await open(app, oleg, brunoId)).json().canEdit).toBe(true);
     expect((await patch(app, oleg, brunoId, { name: 'Bob' })).json().name).toBe('Bob');
     expect((await app.inject({ method: 'POST', url: `/api/agents/${brunoId}/reset`, ...as(oleg) })).statusCode).toBe(200);
     expect((await app.inject({ method: 'DELETE', url: `/api/agents/${brunoId}`, ...as(oleg) })).json().error.reason).toBe('company_scope_only');
     const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.com', access: { departments: [sales.id] } });
-    expect((await open(app, maria, brunoId)).json().error.reason).toBe('not_your_department');
+    expect((await open(app, maria, brunoId)).json().error.reason).toBe('agent_hidden');
   });
 
   it('lets go of a plan whose owner lost the department or was disabled', async () => {

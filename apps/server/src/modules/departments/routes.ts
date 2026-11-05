@@ -5,6 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { accessOf } from '../../auth/access.js';
+import { viewerOf } from '../../auth/agent-view.js';
 import type { DecisionSubject } from '../../auth/decision-owner.js';
 import { requireDecision } from '../../auth/decisions.js';
 import { actorOf, changedBy, personOf, requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
@@ -173,6 +174,13 @@ function teamRoutes(app: FastifyInstance, ctx: Ctx): void {
 }
 
 /* Departments come and go here: the CEO's click on a structure card, or the orchestrator's build_structure. */
+/* Who holds a role is who an employee is: it goes with the full view, as the employees do. */
+async function stateSeen(db: Db, me: Person, dept: Parameters<typeof requiredState>[1]) {
+  const held = await requiredState(db, dept);
+  const { full } = await viewerOf(db, me);
+  return (role: string) => (full ? held(role) : { ...held(role), holder: null });
+}
+
 export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
 
@@ -343,7 +351,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (!dept) throw new ApiError(404, 'not_found', 'This department does not exist.', 'department_unknown');
     const products = await db.select().from(departments).where(eq(departments.parentId, dept.id)).orderBy(asc(departments.position));
     const serving = await servingSubscriptions(ctx, me.companyId, spotIn(dept));
-    const state = await requiredState(db, dept);
+    const state = await stateSeen(db, me, dept);
     const roles = (dept.templateKey ? ctx.templates.roster(dept.templateKey) : []).map(role => ({
       id: role.id,
       title: role.title,

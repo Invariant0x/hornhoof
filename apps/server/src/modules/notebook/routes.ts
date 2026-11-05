@@ -3,7 +3,8 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach } from '../../auth/access.js';
-import { changedBy, requireCompanyScope, requirePerson } from '../../auth/session.js';
+import { seesAgentId, viewerOf } from '../../auth/agent-view.js';
+import { changedBy, requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
 import { departments } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { addNote, type Book, companyBook, departmentBook, listNotes, NoteBody, removeNote, rewriteNote } from './book.js';
@@ -34,10 +35,12 @@ export function notebookRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { me, book: departmentBook(dept) };
   }
 
-  function routes(base: string, bookFor: (req: FastifyRequest) => Promise<{ me: Parameters<typeof changedBy>[0]; book: Book }>) {
+  function routes(base: string, bookFor: (req: FastifyRequest) => Promise<{ me: Person; book: Book }>) {
     app.get(base, async req => {
-      const { book } = await bookFor(req);
-      return { notes: await listNotes(db, book) };
+      const { me, book } = await bookFor(req);
+      const viewer = await viewerOf(db, me);
+      /* A note is the notebook's; who wrote it goes when that is an agent this person does not see. */
+      return { notes: (await listNotes(db, book)).map(n => (n.by?.kind === 'agent' && !seesAgentId(viewer, n.by.id) ? { ...n, by: null } : n)) };
     });
 
     app.post(base, async (req, reply) => {

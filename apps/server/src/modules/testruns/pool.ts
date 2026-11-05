@@ -1,6 +1,7 @@
 import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import type { Ctx } from '../../app.js';
+import { seesAgentId, viewerOf } from '../../auth/agent-view.js';
 import { requirePerson, type Person } from '../../auth/session.js';
 import { agents, machines, people, tasks, testParts, testRuns } from '../../db/schema.js';
 import { BUILTIN, nodeIdentity, type NodeIdentity } from '../nodes/hub.js';
@@ -74,8 +75,9 @@ async function whyWaits(ctx: Ctx, places: Place[], run: Run, targets: Targets): 
 }
 
 /* The company's machines, each with how busy it is and the parts of runs it runs, the built-in node, and the parts that
-   wait for a machine with why each waits. Someone who does not see the whole company sees only their own machines. */
-export async function poolOf(ctx: Ctx, who: Pick<Person, 'id' | 'companyId' | 'scopeKind'>) {
+   wait for a machine with why each waits. Someone who does not see the whole company sees only their own machines, and
+   anyone sees only the parts of agents they see. */
+export async function poolOf(ctx: Ctx, who: Person) {
   const { db, hub } = ctx;
   const whole = who.scopeKind === 'company';
   const live = and(eq(machines.companyId, who.companyId), isNull(machines.revokedAt));
@@ -86,7 +88,8 @@ export async function poolOf(ctx: Ctx, who: Pick<Person, 'id' | 'companyId' | 's
     .where(whole ? live : and(live, eq(machines.personId, who.id)))
     .orderBy(asc(machines.createdAt));
   const served = await machineNodes(db, who.companyId);
-  const open: Row[] = await db
+  const sight = await viewerOf(db, who);
+  const allOpen: Row[] = await db
     .select({ part: testParts, run: testRuns, task: tasks.number, agent: agents.name })
     .from(testParts)
     .innerJoin(testRuns, eq(testRuns.id, testParts.runId))
@@ -94,6 +97,7 @@ export async function poolOf(ctx: Ctx, who: Pick<Person, 'id' | 'companyId' | 's
     .innerJoin(agents, eq(agents.id, testRuns.agentId))
     .where(and(eq(testParts.companyId, who.companyId), inArray(testParts.status, ['running', 'queued'])))
     .orderBy(asc(testRuns.createdAt), asc(testParts.part));
+  const open = allOpen.filter(r => seesAgentId(sight, r.run.agentId));
   const on = (machineId: string | null, builtin = false) => open.filter(r => r.part.status === 'running' && (builtin ? r.part.builtin : r.part.machineId === machineId)).map(running);
   const loadOf = (ids: NodeIdentity[]) => together(ids.map(id => hub.loadOf(id)));
 

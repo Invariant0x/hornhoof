@@ -166,6 +166,21 @@ export async function invitePerson(app: FastifyInstance, ceoToken: string, input
   return sessionFrom(await app.inject({ method: 'POST', url: `/api/invites/${token}/accept`, payload: { password: 'correct horse battery' } }));
 }
 
+/* Moves these agents onto a new plan of this person's own: to see an agent one must own its plan and reach its department. */
+export async function ownPlan(db: Db, email: string, ...agentIds: string[]): Promise<string> {
+  const [person] = await db.select().from(schema.people).where(eq(schema.people.email, email));
+  const [plan] = await db.insert(schema.subscriptions).values({ companyId: person!.companyId, provider: 'claude', kind: 'personal', label: `${person!.name}'s plan`, status: 'ready', ownerPersonId: person!.id }).returning();
+  for (const id of agentIds) await db.update(schema.agents).set({ subscriptionId: plan!.id }).where(eq(schema.agents.id, id));
+  return plan!.id;
+}
+
+/* Gives this person the plan the agent runs on, so it goes on running where it does. */
+export async function takePlan(db: Db, email: string, agentId: string): Promise<void> {
+  const [person] = await db.select().from(schema.people).where(eq(schema.people.email, email));
+  const [agent] = await db.select().from(schema.agents).where(eq(schema.agents.id, agentId));
+  await db.update(schema.subscriptions).set({ ownerPersonId: person!.id }).where(eq(schema.subscriptions.id, agent!.subscriptionId!));
+}
+
 export type FakeNode = {
   ws: WebSocket;
   send(msg: NodeMessage): void;

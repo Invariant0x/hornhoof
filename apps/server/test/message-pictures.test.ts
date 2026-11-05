@@ -9,7 +9,7 @@ import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import { agentEvents, agents, attachments, departments, jobs, people } from '../src/db/schema.js';
 import { dropOldFiles, PICTURE_BYTES } from '../src/modules/tasks/attachments.js';
-import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
+import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until, type FakeNode, ownPlan } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
 const HH_FETCH = fileURLToPath(new URL('../../node/hh-fetch.cjs', import.meta.url));
@@ -65,6 +65,7 @@ const hhFetch = (args: string[], url: string, token: string, cwd: string) =>
 describe('a picture a person sends an agent', () => {
   it('is kept for that agent by whoever may write to it', async () => {
     const { app, db, maria, idOf, bruno } = await company();
+    await ownPlan(db, 'maria@example.com', bruno.id);
     const res = await upload(app, maria, bruno.id, PNG, '../shots/screen.png');
     expect(res.statusCode).toBe(201);
     expect(res.json()).toEqual({ id: expect.any(String), name: 'screen.png' });
@@ -112,7 +113,7 @@ describe('a picture a person sends an agent', () => {
 
   it('is turned away for someone who may not write to that agent, before its bytes are stored', async () => {
     const { app, db, maria, sam } = await company();
-    for (const [agent, reason] of [[sam.id, 'not_your_department'], ['orchestrator', 'company_scope_only']] as const) {
+    for (const [agent, reason] of [[sam.id, 'agent_hidden'], ['orchestrator', 'agent_hidden']] as const) {
       const res = await upload(app, maria, agent, PNG);
       expect([res.statusCode, res.json().error.reason]).toEqual([403, reason]);
     }
@@ -196,10 +197,11 @@ describe('a message with pictures', () => {
 
   it('is turned away for someone who may not write to the agent, whose picture it may be', async () => {
     const { app, db, maria, idOf, sam, bruno } = await company();
+    await ownPlan(db, 'maria@example.com', bruno.id);
     const own = await uploaded(app, maria, bruno.id);
     await db.update(attachments).set({ agentId: sam.id }).where(eq(attachments.id, own.id));
     const res = await send(app, maria, sam.id, { text: 'Look', pictures: [own.id] });
-    expect([res.statusCode, res.json().error.reason]).toEqual([403, 'not_your_department']);
+    expect([res.statusCode, res.json().error.reason]).toEqual([403, 'agent_hidden']);
     expect(await db.select().from(jobs).where(eq(jobs.createdBy, idOf('Maria')))).toEqual([]);
   });
 });
@@ -226,8 +228,10 @@ describe("getting a message's picture", () => {
     expect((await hhFetch(['12', shot.id], url, run.toolToken!, folder)).code).toBe(1);
   });
 
-  it('shows to people who reach the window, and no one else', async () => {
-    const { app, ceo, maria, lisa, bruno } = await company();
+  it('shows to people who see the agent, and no one else', async () => {
+    const { app, db, ceo, maria, lisa, bruno } = await company();
+    await ownPlan(db, 'maria@example.com', bruno.id);
+    await db.update(people).set({ isCeoDelegate: true }).where(eq(people.name, 'Lisa'));
     const shot = await uploaded(app, ceo, bruno.id);
     const toOrchestrator = await uploaded(app, ceo, 'orchestrator');
     const shown = (id: string, token: string) => app.inject({ url: `/api/attachments/${id}`, ...as(token) });
@@ -240,7 +244,7 @@ describe("getting a message's picture", () => {
       expect(res.rawPayload).toEqual(PNG);
     }
     expect((await shown(toOrchestrator.id, lisa)).statusCode).toBe(200);
-    expect((await shown(toOrchestrator.id, maria)).statusCode).toBe(404);
+    expect((await shown(toOrchestrator.id, maria)).statusCode).toBe(403);
   });
 
   it('goes after 30 days, with what was never sent', async () => {

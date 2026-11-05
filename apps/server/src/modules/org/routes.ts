@@ -2,18 +2,21 @@ import { defaultEffortOf, effortFor, effortsOf, modelsFor, ORCHESTRATOR_EFFORT, 
 import { and, asc, eq, isNull, ne } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import type { Ctx } from '../../app.js';
-import { accessOf, canReach, type Access, type Spot } from '../../auth/access.js';
+import { canReach, type Access, type Spot } from '../../auth/access.js';
+import { seesAgentId, viewerOf, type AgentViewer } from '../../auth/agent-view.js';
 import { personColumns, requirePerson } from '../../auth/session.js';
+import type { Db } from '../../db/client.js';
 import { agents, companies, departments, people, personAccess, subscriptions, teams, turns } from '../../db/schema.js';
 import { employeeOrder } from '../agents/order.js';
 import { agentWork } from '../agents/work.js';
 import { limitUntil, planHeld, planHoldView, programNode } from '../conversation/queue.js';
 import { repoView } from '../departments/repository.js';
 import { deptName } from '../departments/templates.js';
-import { CHANNEL_MS, type Endpoint } from '../events/bus.js';
-import { workingCount } from '../events/store.js';
+import { CHANNEL_MS, type Channel, type Endpoint } from '../events/bus.js';
+import { workingSeen } from '../events/stream-view.js';
 import { machineOf } from '../nodes/nodes.js';
 import { departmentOwners, pendingFor, visibleDecisions } from '../tasks/decisions.js';
+import { seesTask } from '../tasks/sight.js';
 import { agentFailureStates } from '../tasks/failures.js';
 import { agentProgramState } from '../tasks/silent.js';
 import { mapLines, type MapLine } from './map-state.js';
@@ -64,23 +67,42 @@ const teamField = (teamId: string | null) => (teamId ? { teamId } : {});
 /* Until when a plan is at its limit, from what it last read. */
 const limitOfPlan = (plan?: { limits: Limits | null; limitsUpdatedAt: Date | null }) => limitUntil(plan?.limits ?? null, plan?.limitsUpdatedAt ?? null);
 
+/* A line runs between two agents: it shows when both of its ends do. */
+const linesSeen = (viewer: AgentViewer, lines: readonly MapLine[]) => lines.filter(l => seesAgentId(viewer, l.upstreamAgentId) && seesAgentId(viewer, l.downstreamAgentId));
+
+/* The ways between two agents on a department's card, both of them seen. */
+const waysInside = (viewer: AgentViewer, ways: readonly Channel[], id: string) =>
+  ways.flatMap(w =>
+    w.from.kind === 'agent' && w.to.kind === 'agent' && w.from.departmentId === id && seesAgentId(viewer, w.from.id) && seesAgentId(viewer, w.to.id) ? [{ from: w.from.id, to: w.to.id, at: w.at, ...(w.held ? { held: w.held } : {}) }] : [],
+  );
+
+/* The ways over the map run between places: which of them are alive says what the whole company does. */
+const liveWays = (viewer: AgentViewer, ways: readonly Channel[]) => (viewer.full ? ways.filter(w => w.from.kind !== 'agent' && w.to.kind !== 'agent') : []);
+
+/* When a department's work last came back counts the work of all of its agents, so it goes with the full view. */
+async function reworksSeen(db: Db, companyId: string, now: Date, viewer: AgentViewer): Promise<ReadonlyMap<string, string>> {
+  return viewer.full ? reworkTimes(db, companyId, now, viewer.access) : new Map<string, string>();
+}
+
 export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db, hub, templates, bus } = ctx;
   app.get('/api/org', async req => {
     const me = await requirePerson(req, db);
     const [company] = await db.select({ id: companies.id, name: companies.name }).from(companies).where(eq(companies.id, me.companyId));
-    const allAgents = await db.select().from(agents).where(and(eq(agents.companyId, me.companyId), isNull(agents.removedAt)));
+    const viewer = await viewerOf(db, me);
+    const companyAgents = await db.select().from(agents).where(and(eq(agents.companyId, me.companyId), isNull(agents.removedAt)));
+    /* Everything below shows only the agents this person sees, with their work. */
+    const allAgents = companyAgents.filter(a => seesAgentId(viewer, a.id));
     const subs = new Map((await db.select({ id: subscriptions.id, provider: subscriptions.provider, models: subscriptions.models, limits: subscriptions.limits, limitsUpdatedAt: subscriptions.limitsUpdatedAt, budget: subscriptions.budget }).from(subscriptions).where(eq(subscriptions.companyId, me.companyId))).map(s => [s.id, s]));
     const orchestrator = allAgents.find(a => a.kind === 'orchestrator');
     const active = await db.select(personColumns).from(people).where(and(eq(people.companyId, me.companyId), ne(people.status, 'disabled'))).orderBy(asc(people.createdAt));
     const depts = await db.select().from(departments).where(eq(departments.companyId, me.companyId)).orderBy(asc(departments.position), asc(departments.createdAt));
     /* What each department works on now: its newest open task without an executor (the head's), else its newest open one.
-       Only for people who reach the department; the rest see that it exists, not what it does. */
-    const reach = await accessOf(db, me);
+       Only of the tasks this person sees; the rest see that it exists, not what it does. */
+    const reach = viewer.access;
     const { openTasks, running, busy, doing } = await agentWork(db, me.companyId);
     const currentOf = (id: string) => {
-      if (!canReach(reach, { departmentId: id })) return null;
-      const mine = openTasks.filter(t => t.departmentId === id);
+      const mine = openTasks.filter(t => t.departmentId === id && seesTask(viewer, t));
       const t = mine.find(x => !x.executorAgentId) ?? mine[0];
       return t ? { id: t.id, number: t.number, title: t.title } : null;
     };
@@ -111,7 +133,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
     const views = new Map((await personViews(db, active)).map(v => [v.id, { ...v, pendingDecisions: pendingFor(decisions, me, v.id) }]));
     const inDepartment = (deptId: string) => active.filter(p => p.scopeKind !== 'company' && homes.get(p.id)!.length === 1 && homes.get(p.id)![0] === deptId).map(p => views.get(p.id)!);
     /* What each agent's card shows, once: the map's lines go by the same tasks. */
-    const cards = new Map(allAgents.map(a => [a.id, doing(a)]));
+    const cards = new Map(companyAgents.map(a => [a.id, doing(a)]));
     /* A department's agents include those in its products. */
     const agentIdsOf = (deptId: string) => {
       const ids = new Set([deptId, ...depts.filter(p => p.parentId === deptId).map(p => p.id)]);
@@ -182,17 +204,14 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
        between agents on a department's card. */
     const ways = bus.channels(me.companyId, Date.now(), goesOn);
     const map = await mapLines(db, me.companyId, cards);
-    const reworks = await reworkTimes(db, me.companyId, map.serverNow, reach);
-    const linesOf = reachedLines(map.lines, reach, allAgents, depts);
-    const inside = (id: string) =>
-      ways.flatMap(w =>
-        w.from.kind === 'agent' && w.to.kind === 'agent' && w.from.departmentId === id ? [{ from: w.from.id, to: w.to.id, at: w.at, ...(w.held ? { held: w.held } : {}) }] : [],
-      );
+    const reworks = await reworksSeen(db, me.companyId, map.serverNow, viewer);
+    const linesOf = reachedLines(linesSeen(viewer, map.lines), reach, allAgents, depts);
+    const inside = (id: string) => waysInside(viewer, ways, id);
 
     return {
       company,
       serverNow: map.serverNow.toISOString(),
-      live: ways.filter(w => w.from.kind !== 'agent' && w.to.kind !== 'agent'),
+      live: liveWays(viewer, ways),
       workLines: linesOf('department'),
       orchestrator: orchestrator && {
         id: orchestrator.id,
@@ -208,7 +227,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
         subscription: orchestrator.subscriptionId ? await subView(db, node => hub.isOnline(node), orchestrator.subscriptionId, me) : null,
         machine: await machineOf(db, (await programNode(ctx, orchestrator.id))?.node ?? null),
       },
-      agents: { total: allAgents.length, working: await workingCount(db, me.companyId) },
+      agents: { total: allAgents.length, working: await workingSeen(db, me.companyId, viewer) },
       turn: turn ?? null,
       people: nextToCeo.map(p =>
         p.scopeKind === 'company'

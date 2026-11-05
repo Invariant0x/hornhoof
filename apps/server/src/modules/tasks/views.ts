@@ -66,7 +66,8 @@ export type RequestView = {
 /* A task another one comes after, and where it stands. */
 export type AfterView = { id: string; number: number; title: string; status: Task['status'] };
 /* A file an agent put on the task, which any agent downloads by its name. */
-export type FileView = { id: string; name: string; size: number; by: { id: string; name: string } | null; at: string };
+/* fromPerson: by is a person, the file's author, not the agent it is kept under. */
+export type FileView = { id: string; name: string; size: number; by: { id: string; name: string } | null; fromPerson: boolean; at: string };
 export type TaskDetail = TaskLine & {
   body: string;
   parent: { id: string; number: number; title: string } | null;
@@ -168,7 +169,8 @@ async function fileViews(db: Ctx['db'], n: Names, files: Awaited<ReturnType<type
   const authors = ids.length ? await db.select({ id: people.id, name: people.name }).from(people).where(inArray(people.id, ids)) : [];
   return files.map(f => {
     const a = n.agent(f.agentId);
-    return { id: f.id, name: f.name, size: f.size, by: authors.find(p => p.id === f.personId) ?? (a && { id: a.id, name: a.name }), at: f.at.toISOString() };
+    const author = authors.find(p => p.id === f.personId);
+    return { id: f.id, name: f.name, size: f.size, by: author ?? (a && { id: a.id, name: a.name }), fromPerson: Boolean(author), at: f.at.toISOString() };
   });
 }
 
