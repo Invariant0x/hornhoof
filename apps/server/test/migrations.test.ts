@@ -32,7 +32,7 @@ describe('department owner and approval policy migration', () => {
     const person = (await db.execute<{ id: string }>(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Dana', 'dana@acme.example', 'active', 'listed') returning id`)).rows[0]!.id;
     const dept = (await db.execute<{ id: string }>(sql`insert into departments (company_id, template_key, role_code) values (${company}, 'development', 'DEV') returning id`)).rows[0]!.id;
     await db.execute(sql`insert into person_access (company_id, person_id, department_id) values (${company}, ${person}, ${dept})`);
-    const rows = async (table: string) => (await db.execute(sql.raw(`select to_jsonb(t) - 'owner_person_id' as data from ${table} t order by id`))).rows;
+    const rows = async (table: string) => (await db.execute(sql.raw(`select to_jsonb(t) - 'owner_person_id' - 'repo_full_test_command' as data from ${table} t order by id`))).rows;
     const before = { departments: await rows('departments'), people: await rows('people'), access: await rows('person_access') };
 
     await migrate(db, { migrationsFolder: MIGRATIONS });
@@ -347,7 +347,7 @@ describe('migration 0007', () => {
     await db.execute(sql`insert into tasks (company_id, number, title) values (${C}, 1, 'Build the payment page')`);
     await expect(db.execute(sql`insert into tasks (company_id, number, title) values (${C}, 1, 'Again')`)).rejects.toThrow();
     const cols = await db.execute<{ column_name: string }>(sql`select column_name from information_schema.columns where table_name = 'departments' and column_name like 'repo_%' order by column_name`);
-    expect(cols.rows.map(r => r.column_name)).toEqual(['repo_author_email', 'repo_author_name', 'repo_branch', 'repo_test_memory_gb', 'repo_token_enc', 'repo_token_last4', 'repo_url']);
+    expect(cols.rows.map(r => r.column_name)).toEqual(['repo_author_email', 'repo_author_name', 'repo_branch', 'repo_full_test_command', 'repo_test_memory_gb', 'repo_token_enc', 'repo_token_last4', 'repo_url']);
   });
 });
 

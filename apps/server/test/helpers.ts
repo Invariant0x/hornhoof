@@ -10,6 +10,7 @@ import WebSocket from 'ws';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import { inject, onTestFinished, TestRunner, vi } from 'vitest';
 import { buildApp, type Deps } from '../src/app.js';
+import type { CommitMarker } from '../src/modules/testruns/github-status.js';
 import type { CommitReader } from '../src/modules/testruns/refs.js';
 import { loadConfig, type Config } from '../src/config.js';
 import { agentRole, grantsFor, readerGrantsFor, readerRole, type AgentSql } from '../src/db/agent-sql.js';
@@ -101,6 +102,8 @@ export async function testApp(env: NodeJS.ProcessEnv = {}, logger?: Deps['logger
 /* Tests never reach a real repository: every branch is at this commit, until a test moves it through ctx.readCommit. */
 export const TEST_COMMIT = 'a'.repeat(40);
 const atTestCommit: CommitReader = async (_repo, want) => ({ branch: 'branch' in want ? want.branch : `task-${want.task}`, commitSha: TEST_COMMIT });
+/* Nor GitHub: a test that looks at the mark on a commit puts its own here. */
+const markedInTest: CommitMarker = async () => ({ ok: true });
 
 /* The app on a database the test opened, which closes after the app: test hooks run last first, and stopping the app can
    still write to it. */
@@ -108,7 +111,7 @@ export async function appOn(client: PGlite, env: NodeJS.ProcessEnv = {}, logger?
   const db = drizzle(client, { schema }) as unknown as Db;
   /* Tests never reach the real registry unless they ask. */
   const config = loadConfig({ HORNHOOF_SECRET: TEST_SECRET, UPDATE_CHECK_MS: '0', ...env });
-  const app = await timed('setupMs', () => buildApp({ db, config, logger, agentSql: agentSqlOn(client), readCommit: atTestCommit }));
+  const app = await timed('setupMs', () => buildApp({ db, config, logger, agentSql: agentSqlOn(client), readCommit: atTestCommit, markCommit: markedInTest }));
   onTestFinished(() => timed('teardownMs', () => app.close()));
   return { app, db, config };
 }

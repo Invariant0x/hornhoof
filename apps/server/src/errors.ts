@@ -95,6 +95,7 @@ export type ErrorReason =
   | 'turn_open'
   | 'turn_unknown'
   | 'repo_invalid'
+  | 'repo_command_invalid'
   | 'attachment_invalid'
   | 'attachment_unknown'
   | 'picture_invalid'
