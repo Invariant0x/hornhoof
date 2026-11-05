@@ -48,3 +48,14 @@ describe('the updater', () => {
     expect(updater!.environment!.HORNHOOF_COMPUTER_IMAGE).toBe(updater!.image);
   });
 });
+
+describe('the real tests', () => {
+  /* The two must not drift apart: what passes there has to hold on the database a company runs. Each -c of db's command
+     is held to run.sh from the moment compose has one. */
+  it("starts the real tests' Postgres as compose starts db", () => {
+    const runScript = readFileSync(fileURLToPath(new URL('./real/run.sh', import.meta.url)), 'utf8');
+    const { image, command = [] } = compose.services.db!;
+    expect(runScript).toContain(image);
+    for (const setting of command.join(' ').match(/-c \S+/g) ?? []) expect(runScript).toContain(setting);
+  });
+});
