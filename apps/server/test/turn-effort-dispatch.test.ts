@@ -6,6 +6,7 @@ import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { turnAgain } from '../src/modules/tasks/again.js';
 import { blocked, comment, createTask, submit, verdict, type Task, type Wake } from '../src/modules/tasks/engine.js';
+import type { NewIssue } from '../src/modules/tasks/review-findings.js';
 import { repeatedTurn } from '../src/modules/tasks/wake-state.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
 import { failureCompany } from './failure-company.js';
@@ -14,6 +15,8 @@ const LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
 /* What the role templates set; templates.test.ts holds them to it. */
 const REVIEWER = 'xhigh';
 const HEAD = 'high';
+
+const finding = (category: NewIssue['category'], blocking = true): NewIssue => ({ category, blocking, path: 'src/checkout.ts', line: 1, harm: 'A buyer can be charged twice.' });
 
 async function gateCompany() {
   const c = await failureCompany();
@@ -44,7 +47,7 @@ async function gateCompany() {
     commits.set(t.number, (++handedIn).toString(16).padStart(40, '0'));
     return wake((await submit(ctx, bruno.id, t.id, { summary: `Done, take ${handedIn}.`, evidence: 'Unit checks' })).wakes);
   };
-  const sendBack = async (t: Task, by = reviewer.id) => wake((await verdict(ctx, by, t.id, { pass: false, comment: 'A test is missing.', reviewedCommit: commits.get(t.number)!, issues: [{ category: 'spec', blocking: true, path: 'src/checkout.ts', line: 1, harm: 'A buyer can be charged twice.' }] })).wakes);
+  const sendBack = async (t: Task, by = reviewer.id, issues: NewIssue[] = [finding('spec')]) => wake((await verdict(ctx, by, t.id, { pass: false, comment: 'A test is missing.', reviewedCommit: commits.get(t.number)!, issues })).wakes);
   const running = async (agentId: string) => (await db.select().from(jobs).where(and(eq(jobs.agentId, agentId), eq(jobs.status, 'running'))))[0];
   const endTurn = async (agentId: string) =>
     handleNodeMessage(ctx, BUILTIN, { type: 'job.done', jobId: (await running(agentId))!.id, ok: true, sessionId: 'session', result: 'Done.', tail: '', error: null });
@@ -137,6 +140,152 @@ describe('how hard each turn thinks', () => {
     expect(await c.levels(c.reviewer.id)).toEqual(['xhigh', 'high', 'xhigh', 'medium', 'xhigh', 'high']);
   });
 
+  describe('for fixes that come back from a gate', () => {
+    const FULL = 'xhigh';
+    const handedIn = async () => {
+      const c = await gateCompany();
+      await c.card(c.bruno.id, FULL);
+      const back = await c.task('Checkout API');
+      await c.handIn(back);
+      return { ...c, back };
+    };
+    const backWith = async (...issues: NewIssue[]) => {
+      const c = await handedIn();
+      await c.sendBack(c.back, c.reviewer.id, issues);
+      return c;
+    };
+    /* A second reviewer of another vendor joins the panel, as a gate takes one reviewer of each. */
+    const withSecondReviewer = async () => {
+      const c = await gateCompany();
+      await c.card(c.bruno.id, FULL);
+      const [person] = await c.db.select().from(people);
+      const [plan] = await c.db.insert(subscriptions).values({ companyId: c.companyId, provider: 'kimi', kind: 'personal', label: 'Second reviewer', ownerPersonId: person!.id, status: 'ready', models: [{ id: 'm', name: 'M', efforts: LEVELS }] }).returning();
+      const [second] = await c.db.insert(agents).values({ companyId: c.companyId, name: 'Sam', kind: 'worker', roleKey: 'DEV-REV', departmentId: c.dev.id, subscriptionId: plan!.id, model: '' }).returning();
+      const back = await c.task('Checkout API');
+      await c.handIn(back);
+      return { ...c, back, second: second! };
+    };
+
+    it('takes medium when every finding is marked mechanical, and leaves the card as it was', async () => {
+      const c = await backWith(finding('mechanical'), finding('mechanical', false));
+      expect(await c.levels(c.bruno.id)).toEqual(['medium']);
+      expect(await c.cardOf(c.bruno.id)).toBe(FULL);
+    });
+
+    it.each<[string, NewIssue[]]>([
+      ['a security finding', [finding('security')]],
+      ['a data finding', [finding('data')]],
+      ['a finding of the task', [finding('spec')]],
+      ['a finding of no category it knows', [finding('other')]],
+      ['a mechanical finding beside another', [finding('mechanical'), finding('other')]],
+      ['a mechanical remark beside what blocks', [finding('mechanical', false), finding('security')]],
+      ['mechanical remarks that block nothing', [finding('mechanical', false)]],
+    ])('keeps the level for %s', async (_name, issues) => {
+      const c = await backWith(...issues);
+      expect(await c.levels(c.bruno.id)).toEqual([FULL]);
+    });
+
+    it('keeps the level for a verdict that names no findings, whatever its words say', async () => {
+      const c = await handedIn();
+      await c.wake((await verdict(c.ctx, c.reviewer.id, c.back.id, { pass: false, comment: 'Only mechanical fixes: category mechanical, formatting.' })).wakes);
+      expect(await c.levels(c.bruno.id)).toEqual([FULL]);
+    });
+
+    it('keeps the level when one reviewer of a panel marks its findings and the other does not', async () => {
+      const c = await withSecondReviewer();
+      await c.sendBack(c.back, c.reviewer.id, [finding('mechanical')]);
+      await c.sendBack(c.back, c.second.id, [finding('spec')]);
+      expect(await c.levels(c.bruno.id)).toEqual([FULL]);
+    });
+
+    it('keeps the level when one reviewer of a panel marks its findings and the other names none', async () => {
+      const c = await withSecondReviewer();
+      await c.sendBack(c.back, c.reviewer.id, [finding('mechanical')]);
+      await c.wake((await verdict(c.ctx, c.second.id, c.back.id, { pass: false, comment: 'Look at the totals.' })).wakes);
+      expect(await c.levels(c.bruno.id)).toEqual([FULL]);
+    });
+
+    it('takes medium when all who sent it back marked their findings, with or without a pass beside them', async () => {
+      const both = await withSecondReviewer();
+      await both.sendBack(both.back, both.reviewer.id, [finding('mechanical')]);
+      await both.sendBack(both.back, both.second.id, [finding('mechanical')]);
+      expect(await both.levels(both.bruno.id)).toEqual(['medium']);
+
+      const one = await withSecondReviewer();
+      await one.wake((await verdict(one.ctx, one.second.id, one.back.id, { pass: true, comment: 'Fine.' })).wakes);
+      await one.sendBack(one.back, one.reviewer.id, [finding('mechanical')]);
+      expect(await one.levels(one.bruno.id)).toEqual(['medium']);
+    });
+
+    it('keeps the level when a look again finds the fixes still wanting', async () => {
+      const c = await gateCompany();
+      await c.card(c.bruno.id, FULL);
+      const task = await c.task('Checkout API');
+      await c.sentBackOnce(task);
+      await c.handIn(task);
+      await c.wake((await verdict(c.ctx, c.reviewer.id, task.id, { pass: false, comment: 'It can still charge twice.' })).wakes);
+      expect(await c.levels(c.bruno.id)).toEqual([FULL, FULL]);
+    });
+
+    it('goes back to the level on the next fixes nobody marked', async () => {
+      const c = await backWith(finding('mechanical'));
+      await c.endTurn(c.bruno.id);
+      const next = await c.task('Refunds');
+      await c.handIn(next);
+      await c.sendBack(next);
+      expect(await c.levels(c.bruno.id)).toEqual(['medium', FULL]);
+    });
+
+    it('keeps medium when the turn of the fixes is run once more', async () => {
+      const c = await backWith(finding('mechanical'));
+      const cut = (await c.running(c.bruno.id))!;
+      await c.db.update(jobs).set({ status: 'failed', error: 'machine_restarted' }).where(eq(jobs.id, cut.id));
+      const ended = await repeatedTurn(c.db, cut.id, 'restart');
+      await turnAgain(c.ctx, ended!, 'Your last turn was cut.', { retryOf: cut.id });
+      await pump(c.ctx, c.bruno.id);
+      expect(await c.levels(c.bruno.id)).toEqual(['medium', 'medium']);
+    });
+
+    it('keeps the level when new words join the turn of the fixes while it waits', async () => {
+      const c = await handedIn();
+      await c.busy(c.bruno.id);
+      await c.sendBack(c.back, c.reviewer.id, [finding('mechanical')]);
+      await c.wake((await comment(c.ctx, { agentId: c.head.id }, c.back.id, 'Rebase on the refunds first.')).wakes);
+      await c.endTurn(c.bruno.id);
+      expect(await c.turnsOf(c.bruno.id)).toHaveLength(2);
+      expect(await c.levels(c.bruno.id)).toEqual([FULL, FULL]);
+    });
+
+    it('never changes the turn that runs: the mark starts no program, and the next turn takes medium', async () => {
+      const c = await handedIn();
+      await c.busy(c.bruno.id);
+      const running = await c.running(c.bruno.id);
+      const before = c.sent.mock.calls.length;
+
+      await c.sendBack(c.back, c.reviewer.id, [finding('mechanical')]);
+
+      expect((await c.running(c.bruno.id))!.id).toBe(running!.id);
+      expect(c.sent.mock.calls.length).toBe(before);
+      await c.endTurn(c.bruno.id);
+      expect(await c.levels(c.bruno.id)).toEqual([FULL, 'medium']);
+    });
+
+    it.each<[string, string[] | undefined, string | null, string | null]>([
+      ['the nearest level above medium for a model without it', ['low', 'high', 'xhigh'], FULL, 'high'],
+      ['the card when it stands below medium, as a lighter turn never raises it', LEVELS, 'low', 'low'],
+      ['no level for a model that names none', undefined, FULL, null],
+    ])('takes %s', async (_name, efforts, card, level) => {
+      const c = await gateCompany();
+      const [own] = await c.db.select({ plan: agents.subscriptionId }).from(agents).where(eq(agents.id, c.bruno.id));
+      await c.db.update(subscriptions).set({ models: [{ id: 'm', name: 'M', ...(efforts ? { efforts } : {}) }] }).where(eq(subscriptions.id, own!.plan!));
+      await c.card(c.bruno.id, card);
+      const task = await c.task('Checkout API');
+      await c.handIn(task);
+      await c.sendBack(task, c.reviewer.id, [finding('mechanical')]);
+      expect(await c.levels(c.bruno.id)).toEqual([level]);
+    });
+  });
+
   describe('for a merge', () => {
     const withRepository = async () => {
       const c = await gateCompany();
@@ -188,6 +337,25 @@ describe('how hard each turn thinks', () => {
 
       await c.endTurn(c.reviewer.id);
       expect(await c.levels(c.reviewer.id)).toEqual([REVIEWER, 'medium']);
+    });
+
+    it('keeps a mark that comes during a typed turn for the next turn: it starts no program and changes no level', async () => {
+      const c = await gateCompany();
+      await c.card(c.bruno.id, 'xhigh');
+      await c.busy(c.bruno.id);
+      await c.endTurn(c.bruno.id);
+      const task = await c.task('Checkout API');
+      await c.handIn(task);
+      const opened = await typed(c, c.bruno.id);
+      const before = c.sent.mock.calls.length;
+
+      await c.sendBack(task, c.reviewer.id, [finding('mechanical')]);
+
+      expect(c.sent.mock.calls.length).toBe(before);
+      expect((await c.running(c.bruno.id))!.id).toBe(opened.jobId);
+      expect(await c.cardOf(c.bruno.id)).toBe('xhigh');
+      await c.endTurn(c.bruno.id);
+      expect(await c.levels(c.bruno.id)).toEqual(['xhigh', 'medium']);
     });
 
     it('takes the level of the next wake, not of the turn typed before it', async () => {
