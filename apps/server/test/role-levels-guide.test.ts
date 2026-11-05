@@ -16,12 +16,14 @@ const table = (head: string[], rows: string[][]) => [head, head.map(() => '---')
 const unique = (lists: string[][]) => [...new Set(lists.flat())];
 
 /* What each program can run, from the same lists Hornhoof runs on: the ones a machine reports are not known before it does. */
-function programs(): string {
-  return table(['Program', 'Models', 'Levels', 'Deep roles'], PROVIDER_IDS.map(id => {
-    const models = modelsFor(id, null);
-    return [PROGRAMS[id], models.length ? models.map(m => m.name).join(', ') : REPORTED, models.length ? unique(models.map(m => m.efforts ?? [])).join(', ') : REPORTED, runsTier(id, 'deep') ? 'yes' : 'no'];
-  }));
-}
+const reported = (names: string[]) => names.join(', ') || REPORTED;
+const levelsOf = (models: { efforts?: string[] }[]) => unique(models.map(m => m.efforts ?? []));
+const runsDeep = (id: ProviderId) => (runsTier(id, 'deep') ? 'yes' : 'no');
+const programRow = (id: ProviderId) => {
+  const models = modelsFor(id, null);
+  return [PROGRAMS[id], reported(models.map(m => m.name)), reported(levelsOf(models)), runsDeep(id)];
+};
+const programs = () => table(['Program', 'Models', 'Levels', 'Deep roles'], PROVIDER_IDS.map(programRow));
 
 /* What each stage runs at, from the policy itself. */
 function stages(): string {

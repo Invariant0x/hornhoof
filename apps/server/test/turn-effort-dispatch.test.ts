@@ -9,6 +9,7 @@ import { blocked, comment, createTask, submit, verdict, type Task, type Wake } f
 import type { NewIssue } from '../src/modules/tasks/review-findings.js';
 import { repeatedTurn } from '../src/modules/tasks/wake-state.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
+import type { CommitWanted } from '../src/modules/testruns/refs.js';
 import { failureCompany } from './failure-company.js';
 
 const LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
@@ -17,6 +18,13 @@ const REVIEWER = 'xhigh';
 const HEAD = 'high';
 
 const finding = (category: NewIssue['category'], blocking = true): NewIssue => ({ category, blocking, path: 'src/checkout.ts', line: 1, harm: 'A buyer can be charged twice.' });
+
+/* The commit each task's branch stands at, as the repository would tell. */
+const commitOf = (commits: Map<number, string>, want: CommitWanted) =>
+  'task' in want ? { branch: `task-${want.task}`, commitSha: commits.get(want.task)! } : { branch: want.branch, commitSha: 'a'.repeat(40) };
+
+type RunFrame = { type: string; jobId: string; effort: string | null };
+const startedOneOf = (own: Set<string>) => (frame: RunFrame) => frame.type === 'job.run' && own.has(frame.jobId);
 
 async function gateCompany() {
   const c = await failureCompany();
@@ -27,7 +35,7 @@ async function gateCompany() {
   await db.update(agents).set({ subscriptionId: authorPlan!.id }).where(eq(agents.id, c.agent.id));
   await db.update(departments).set({ repoUrl: 'https://github.com/acme/shop.git' }).where(eq(departments.id, c.dev.id));
   const commits = new Map<number, string>();
-  ctx.readCommit = async (_repo, want) => ({ branch: 'task' in want ? `task-${want.task}` : want.branch, commitSha: 'task' in want ? commits.get(want.task)! : 'a'.repeat(40) });
+  ctx.readCommit = async (_repo, want) => commitOf(commits, want);
   ctx.readCompare = async (_repo, refs) => ({ complete: true, baseSha: refs.base, headSha: refs.head, paths: ['src/checkout.ts'], diff: '@@ -1 +1 @@\n-old\n+fixed' });
   const [rita] = await db.insert(agents).values({ companyId: c.companyId, name: 'Rita', kind: 'worker', roleKey: 'DEV-REV', departmentId: c.dev.id, subscriptionId: c.sub.id, model: '' }).returning();
   const reviewer = rita!;
@@ -54,7 +62,7 @@ async function gateCompany() {
   /* The level of every turn the agent's program was started for, in the order they went out. */
   const levels = async (agentId: string) => {
     const own = new Set((await c.turnsOf(agentId)).map(j => j.id));
-    return c.sent.mock.calls.map(([, frame]) => frame as unknown as { type: string; jobId: string; effort: string | null }).filter(f => f.type === 'job.run' && own.has(f.jobId)).map(f => f.effort);
+    return c.sent.mock.calls.map(([, frame]) => frame as unknown as RunFrame).filter(startedOneOf(own)).map(f => f.effort);
   };
   /* Work sent back once and fixed, so the reviewer's next word on it is a look again. Its turns are over. */
   const sentBackOnce = async (t: Task, by = reviewer.id) => {
