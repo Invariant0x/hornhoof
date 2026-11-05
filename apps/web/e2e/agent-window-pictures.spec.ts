@@ -173,6 +173,10 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
       const server = await serve(page, 'delegate', settings);
       const window = await open(page, 'b1', lang);
       const terminal = window.locator('.t-xterm');
+      await expect(window.locator('.xterm-screen')).toBeVisible();
+      await window.locator('.xterm-screen').click();
+      await page.keyboard.type('A draft');
+      await expect.poll(() => server.keys.join('')).toBe('A draft');
       const refusal = window.getByRole('alert').filter({ hasText: t.errors.picture_invalid });
       await terminal.dispatchEvent('drop', { dataTransfer: await file(page, 'logo.svg', 'image/svg+xml', '<svg xmlns="http://www.w3.org/2000/svg"/>') });
       await expect(refusal).toBeVisible();
@@ -183,7 +187,10 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
       await expect(window.getByRole('img', { name: 'notes.png', exact: true })).toHaveCount(0);
       expect(server.uploads).toEqual([]);
       expect(server.messages).toEqual([]);
-      expect(server.keys).toEqual([]);
+      /* Nothing of the pictures went in, the words before them stay, and this person still writes. */
+      expect(server.keys.join('')).toBe('A draft');
+      await page.keyboard.type(' goes on');
+      await expect.poll(() => server.keys.join('')).toBe('A draft goes on');
       /* A file named a picture goes up from a terminal, where the server is who looks at its bytes and refuses it. */
       const refused = (e: string) => e.includes('status of 400');
       expect(errors.filter(refused)).toHaveLength(1);
