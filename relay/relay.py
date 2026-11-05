@@ -11,7 +11,7 @@ Public API (Caddy sends https://hornhoof.org/api/* here):
   POST   /api/v1/links/{name}/visitor-key Authorization: Bearer <key> -> 200 {visitorKey} (R6.2)
   GET    /api/v1/health            -> 200 {ok, frps, relayStarted, passthrough} while frps takes logins, else 503
 frps plugin (local only): POST /frp/handler?op=Login|NewProxy|Ping|NewUserConn
-Admin (as the service user): relay.py admin list|add|ban|unban|release|banned-caddy ...
+Admin (as the service user): relay.py admin list|add|ban|unban|release|banned-caddy|traffic ...
 
 Standard library only. State: SQLite in /var/lib/hornhoof-relay/relay.db. Keys are stored as SHA-256 hashes.
 """
@@ -165,6 +165,14 @@ SCHEMA = {
             link_hash TEXT NOT NULL,
             PRIMARY KEY (name, key_hash)
         )''',
+    'traffic': 'CREATE TABLE IF NOT EXISTS traffic (month TEXT PRIMARY KEY, bytes INTEGER NOT NULL)',
+    'traffic_seen': '''CREATE TABLE IF NOT EXISTS traffic_seen (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            boot TEXT NOT NULL,
+            iface TEXT NOT NULL,
+            sent INTEGER NOT NULL,
+            at INTEGER NOT NULL
+        )''',
 }
 
 
@@ -281,6 +289,103 @@ def watch_frps() -> None:
     while True:
         was_ok = watch_once(was_ok)
         time.sleep(WATCH_INTERVAL_S)
+
+
+# The relay's own outbound traffic per UTC month, so its operator knows when to resize the server.
+TRAFFIC_EVERY_S = 60
+TRAFFIC_WARN_BYTES = 300 * 10**9
+TRAFFIC_MONTHS_SHOWN = 12
+
+
+def read_text(path: str) -> str | None:
+    try:
+        with open(path) as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def default_iface(proc: str = '/proc') -> str | None:
+    """The interface of the first route to destination 00000000, the one the public traffic leaves by."""
+    table = read_text(f'{proc}/net/route')
+    for line in (table or '').splitlines()[1:]:
+        fields = line.split()
+        if len(fields) > 1 and fields[1] == '00000000':
+            return fields[0]
+    return None
+
+
+def sent_bytes(iface: str, sys: str = '/sys') -> int | None:
+    """The interface's tx_bytes counter, None when it cannot be read as a number."""
+    text = read_text(f'{sys}/class/net/{iface}/statistics/tx_bytes')
+    return int(text) if text and text.strip().isdigit() else None
+
+
+def boot_id(proc: str = '/proc') -> str | None:
+    text = read_text(f'{proc}/sys/kernel/random/boot_id')
+    return text.strip() if text and text.strip() else None
+
+
+def traffic_added(seen: tuple | None, boot: str, iface: str, sent: int) -> int:
+    """What a reading adds to the month. The counter restarts from zero after a reboot, on another interface, or when it
+    went down, so the whole reading is new then. The very first reading has nothing to compare with and adds nothing."""
+    if seen is None:
+        return 0
+    seen_boot, seen_iface, seen_sent = seen
+    if seen_boot != boot or seen_iface != iface or sent < seen_sent:
+        return sent
+    return sent - seen_sent
+
+
+def utc_month(at: int) -> str:
+    return time.strftime('%Y-%m', time.gmtime(at))
+
+
+def count_traffic(at: int, proc: str = '/proc', sys: str = '/sys') -> int | None:
+    """Add what was sent since the last read to the UTC month of `at` and answer that month's total. None, and nothing
+    changed, when the interface or its counter cannot be read. Both writes are one transaction, so a crash between them
+    cannot count the same bytes twice."""
+    iface = default_iface(proc)
+    sent = sent_bytes(iface, sys) if iface else None
+    boot = boot_id(proc)
+    if iface is None or sent is None or boot is None:
+        return None
+    month = utc_month(at)
+    with transaction():
+        added = traffic_added(db().execute('SELECT boot, iface, sent FROM traffic_seen').fetchone(), boot, iface, sent)
+        if added:
+            write('INSERT INTO traffic (month, bytes) VALUES (?, ?) '
+                  'ON CONFLICT(month) DO UPDATE SET bytes = bytes + excluded.bytes', (month, added))
+        write('INSERT OR REPLACE INTO traffic_seen (id, boot, iface, sent, at) VALUES (1, ?, ?, ?, ?)',
+              (boot, iface, sent, at))
+        return db().execute('SELECT COALESCE(SUM(bytes), 0) FROM traffic WHERE month = ?', (month,)).fetchone()[0]
+
+
+def traffic_round(at: int, warned_day: str | None, proc: str = '/proc', sys: str = '/sys') -> str | None:
+    """One count. Past the limit it logs one line per UTC day; answers the day it last warned."""
+    total = count_traffic(at, proc, sys)
+    day = time.strftime('%Y-%m-%d', time.gmtime(at))
+    if total is None or total <= TRAFFIC_WARN_BYTES or warned_day == day:
+        return warned_day
+    print(f'Sent {total / 10**9:.1f} GB this month, past 300 GB: time to resize the server.', flush=True)
+    return day
+
+
+def safe_traffic_round(run_round, at: int, warned_day: str | None) -> str | None:
+    """A round that fails is one log line, and the next round runs."""
+    try:
+        return run_round(at, warned_day)
+    except Exception as failure:
+        print(f'Traffic count failed: {type(failure).__name__}: {failure}', flush=True)
+        return warned_day
+
+
+def watch_traffic() -> None:
+    """Count the traffic every TRAFFIC_EVERY_S, forever, as watch_frps probes."""
+    warned_day = None
+    while True:
+        warned_day = safe_traffic_round(traffic_round, int(time.time()), warned_day)
+        time.sleep(TRAFFIC_EVERY_S)
 
 
 def watch_passthrough() -> None:
@@ -1855,6 +1960,15 @@ def admin_list() -> int:
     return 0
 
 
+def admin_traffic() -> int:
+    rows = db().execute('SELECT month, bytes FROM traffic ORDER BY month DESC LIMIT ?', (TRAFFIC_MONTHS_SHOWN,)).fetchall()
+    for month, sent in reversed(rows):
+        print(f'{month}  {sent / 10**9:.1f} GB')
+    if not rows:
+        print('No traffic counted yet.')
+    return 0
+
+
 def admin_banned_caddy() -> int:
     hosts = [f'{r[0]}.{DOMAIN}' for r in db().execute('SELECT name FROM bindings WHERE banned_at IS NOT NULL')]
     print('# Generated by hornhoof-relay from blocked bindings. Do not edit.')
@@ -1893,7 +2007,7 @@ def store_ban(name: str, reason: str) -> None:
 
 
 def admin_usage() -> int:
-    print(f'usage: relay.py admin list | add <name> | ban <name> [reason] [{CUT}] | unban <name> | release <name> | banned-caddy',
+    print(f'usage: relay.py admin list | add <name> | ban <name> [reason] [{CUT}] | unban <name> | release <name> | banned-caddy | traffic',
           file=sys.stderr)
     return 2
 
@@ -1929,7 +2043,7 @@ def admin_release(name: str, _words: list[str]) -> int:
     return 0
 
 
-ADMIN_REPORTS = {'list': admin_list, 'banned-caddy': admin_banned_caddy}
+ADMIN_REPORTS = {'list': admin_list, 'banned-caddy': admin_banned_caddy, 'traffic': admin_traffic}
 ADMIN_CHANGES = {'unban': admin_unban, 'release': admin_release}
 
 
@@ -1962,6 +2076,7 @@ def main() -> int:
         return run_admin(sys.argv[2:])
     init_db()
     threading.Thread(target=watch_frps, name='frps-watcher', daemon=True).start()
+    threading.Thread(target=watch_traffic, name='traffic-counter', daemon=True).start()
     threading.Thread(target=watch_passthrough, name='https-port-watcher', daemon=True).start()
     server = RelayServer(LISTEN, Handler)
     server.daemon_threads = True
