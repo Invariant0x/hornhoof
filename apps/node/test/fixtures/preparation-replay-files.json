@@ -1,0 +1,38 @@
+[
+  {
+    "path": ".hornhoof/test-environment.json",
+    "sha256": "5e2054141128ce3168ea2de723646cd57369212ad2f4024ff967da6e3c5dd6e9"
+  },
+  {
+    "path": "check.fixture",
+    "sha256": "25da4273cec132a1998cfdfb27dfbe470fc8e14be831d2d040dc9ff8a71b5ed9"
+  },
+  {
+    "path": "migration.sql",
+    "sha256": "e3a19a629c64f0a51a0ce160734f283c32e2052591bef362e004b16bf5c8e551"
+  },
+  {
+    "path": "package-lock.json",
+    "sha256": "dee9da874b30811c10b0b66e8ef0b9ec090e2cff5aff67d6f7d1ed2d5e64d546"
+  },
+  {
+    "path": "package.json",
+    "sha256": "e1d2aa873a379afd7ae6d8992649959d498d16f9bd207d10a5ea9d98548214ed"
+  },
+  {
+    "path": "prepare.cjs",
+    "sha256": "1dcb9673a74917fc49b6f47a80c7a64fb6032bc737b0f742c00154386df40525"
+  },
+  {
+    "path": "protocol-source.txt",
+    "sha256": "4240cf02cf97d67c31513ec17ac8df5704e40ad153fbba2e9f5789e399432623"
+  },
+  {
+    "path": "vendor/replay-value/index.cjs",
+    "sha256": "a2feb348065a1ab5555700568ed34450d1b5012c7bce70b55f483dc9a5074484"
+  },
+  {
+    "path": "vendor/replay-value/package.json",
+    "sha256": "8c3926dbdd3f7fd995b1248d1d96d3798dc0eec99dc0cafe8344167f0de970cb"
+  }
+]

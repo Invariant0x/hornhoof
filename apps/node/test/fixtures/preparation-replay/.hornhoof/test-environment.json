@@ -1,0 +1,139 @@
+{
+  "version": 1,
+  "defaultProfile": "preparation",
+  "runtimes": [
+    {
+      "id": "node",
+      "version": "22"
+    }
+  ],
+  "profiles": [
+    {
+      "id": "preparation",
+      "requiredSuiteIds": [
+        "ready"
+      ]
+    }
+  ],
+  "services": [],
+  "dependencies": {
+    "adapter": "npm",
+    "inputs": [
+      "package.json",
+      "package-lock.json",
+      "vendor/replay-value/**"
+    ],
+    "install": [
+      {
+        "program": "npm",
+        "args": [
+          "ci",
+          "--offline",
+          "--install-links",
+          "--ignore-scripts",
+          "--no-audit",
+          "--fund=false"
+        ],
+        "cwd": "."
+      }
+    ],
+    "paths": [
+      "node_modules"
+    ],
+    "cache": "copy"
+  },
+  "prepare": [
+    {
+      "id": "runtime-build",
+      "profiles": [
+        "preparation"
+      ],
+      "serviceIds": [],
+      "inputs": [
+        "protocol-source.txt",
+        "prepare.cjs"
+      ],
+      "commands": [
+        {
+          "program": "node",
+          "args": [
+            "prepare.cjs",
+            "build"
+          ],
+          "cwd": "."
+        }
+      ],
+      "artifacts": [
+        {
+          "path": "protocol/dist",
+          "format": "directory"
+        }
+      ]
+    },
+    {
+      "id": "template",
+      "profiles": [
+        "preparation"
+      ],
+      "serviceIds": [],
+      "inputs": [
+        "protocol/dist/**",
+        "migration.sql",
+        "prepare.cjs"
+      ],
+      "commands": [
+        {
+          "program": "node",
+          "args": [
+            "prepare.cjs",
+            "environment"
+          ],
+          "cwd": "."
+        }
+      ],
+      "artifacts": [
+        {
+          "path": "template",
+          "format": "directory"
+        }
+      ]
+    }
+  ],
+  "reset": null,
+  "suites": [
+    {
+      "id": "ready",
+      "root": ".",
+      "files": [
+        "check.fixture"
+      ],
+      "run": {
+        "program": "node",
+        "args": [
+          "prepare.cjs",
+          "ready"
+        ],
+        "cwd": "."
+      },
+      "split": {
+        "kind": "whole-package"
+      },
+      "profiles": [
+        "preparation"
+      ]
+    }
+  ],
+  "impact": {
+    "adapter": "whole-package",
+    "fullPackageGlobs": [],
+    "migrationCheck": {
+      "status": "unsupported",
+      "reason": "Service-free replay workload, not a database migration test."
+    }
+  },
+  "mutation": {
+    "status": "unsupported",
+    "language": "javascript",
+    "reason": "Preparation-only fixture; not a release quality plan."
+  }
+}

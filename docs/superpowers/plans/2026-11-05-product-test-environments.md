@@ -10,6 +10,38 @@
 
 **Spec:** Hornhoof #399 and #280, including the head's frozen contract at 2026-11-05T14:28:43.023Z; /tmp/task-399-design/task-363-design-final.md, task-363-integration-addendum-v2.md and design-280-kimi.md. The task body and later head decisions override historical illustrations.
 
+## Replay preparation follow-up, 2026-11-05 22:27 UTC
+
+The head requested an external reproducible package before admission is restored.
+Implement this increment inline. Its scope is an immutable offline workload,
+read-only audit driver and explicit execution/comparability contract. The driver
+must refuse measurement; it must never accept caller-provided admission JSON as
+authority. A runnable measurement adapter is not claimed by this increment.
+The current observed deployment is UNFIT. No production runner, admission path,
+queue, deployment or measurement is added.
+
+**Files:** `apps/node/test/preparation-replay{,.test}.ts`,
+`apps/node/test/fixtures/preparation-replay/*`,
+`docs/check-queue-replay.md`; external Git bundle and evidence archive on #399.
+
+**Interfaces:** `inspectReplayFixture(root)` validates the exact regular-file
+inventory and SHA256 bytes. `replayCommand(args,root)` accepts only `plan` and
+refuses `measure` before opening inputs or starting any workload.
+
+**Review focus:** input drift, missing inputs, preexisting generated outputs,
+symlink inputs and caller-supplied false admission must fail closed. The audit
+does not establish equivalent execution, cache behavior or isolation.
+
+- [ ] Write failing audit/refusal tests; push a RED-only checkpoint and run just
+  `preparation-replay.test.ts` through targeted command-mode `run_tests`.
+- [ ] Freeze fixture files and hashes, implement the audit/refusal driver, and
+  document exact source pins, API/call sites, phase boundaries, cache/order/load
+  policy and the unimplemented measurement adapter.
+- [ ] Run the same targeted tests with coverage, test types, scoped ESLint,
+  existing-coverage crapper and dryer through `run_tests`; no benchmark execution.
+- [ ] Obtain one fresh read-only review of this increment, attach the bundle,
+  command and raw outcomes; report UNFIT and remaining prerequisites explicitly.
+
 ## Global Constraints
 
 - Base 05d27e284dbbe51f129b3df00c9c805db193d6a6, branch task-399 in its own worktree.
