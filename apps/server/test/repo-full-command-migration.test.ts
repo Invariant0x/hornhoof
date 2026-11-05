@@ -1,26 +1,10 @@
-import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { PGlite } from '@electric-sql/pglite';
 import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { MIGRATIONS } from '../src/db/client.js';
-
-/* The migrations up to the one before this change, whatever number it has by the time it merges. */
-async function previousMigrations() {
-  const folder = await mkdtemp(join(tmpdir(), 'repo-full-command-migration-'));
-  onTestFinished(() => rm(folder, { recursive: true, force: true }));
-  await cp(MIGRATIONS, folder, { recursive: true });
-  const file = join(folder, 'meta/_journal.json');
-  const journal = JSON.parse(await readFile(file, 'utf8')) as { entries: { tag: string }[] };
-  const own = journal.entries.findIndex(entry => entry.tag.endsWith('_repo_full_test_command'));
-  expect(own).toBeGreaterThan(0);
-  journal.entries = journal.entries.slice(0, own);
-  await writeFile(file, JSON.stringify(journal));
-  return folder;
-}
+import { migrationsBefore } from './migrations-before.js';
 
 const columnOf = async (db: ReturnType<typeof drizzle>) =>
   (await db.execute(sql`select data_type, is_nullable, column_default from information_schema.columns where table_name = 'departments' and column_name = 'repo_full_test_command'`)).rows;
@@ -39,7 +23,7 @@ describe("the repository's full test command", () => {
     const client = new PGlite();
     onTestFinished(() => client.close());
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: await previousMigrations() });
+    await migrate(db, { migrationsFolder: await migrationsBefore('repo_full_test_command') });
     expect(await columnOf(db)).toEqual([]);
     const company = (await db.execute<{ id: string }>(sql`insert into companies (name) values ('Acme') returning id`)).rows[0]!.id;
     await db.execute(sql`insert into departments (company_id, template_key, role_code, repo_url, repo_branch, repo_test_memory_gb) values (${company}, 'development', 'DEV', 'https://github.com/acme/shop.git', 'main', 8)`);
