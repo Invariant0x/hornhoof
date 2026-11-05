@@ -310,7 +310,7 @@ describe('program reports and invocation hooks', () => {
     c.agent.calls.set('second', { name: 'Read', at: 20 });
     if (pending === 'question') c.agent.question = { name: 'Permission', at: 30, asking: true };
     if (pending === 'none') c.agent.calls.clear();
-    const { watch, look } = c.host['observeProgram']('job');
+    const { watch, look } = c.host['observeProgram'](c.agent, 'job');
     look.at = -Infinity;
     await c.host['reportProgram'](c.agent, watch, look);
     const report = c.sent.find(message => message.type === 'job.program');
@@ -323,7 +323,7 @@ describe('program reports and invocation hooks', () => {
     const c = fixture();
     let resolve!: (screen: string) => void;
     vi.spyOn(c.tmux, 'screen').mockReturnValue(new Promise(done => { resolve = done; }));
-    const { watch, look } = c.host['observeProgram']('job');
+    const { watch, look } = c.host['observeProgram'](c.agent, 'job');
     look.at = -Infinity;
     const reporting = c.host['reportProgram'](c.agent, watch, look);
     c.agent.turn = { ...c.agent.turn!, jobId: 'next' };

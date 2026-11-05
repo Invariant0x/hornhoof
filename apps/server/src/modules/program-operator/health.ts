@@ -37,7 +37,11 @@ async function restoreCase(ctx: Ctx, row: typeof programOperatorCases.$inferSele
     const parsed = OperatorNodeMessage.safeParse(data.operatorEvidence);
     if (parsed.success && parsed.data.type === 'program.recovery_ready') await acceptOperatorRecovery(ctx, parsed.data);
   }
-  const stillHeld = async () => (await ctx.db.select().from(programOperatorCases).where(and(eq(programOperatorCases.id, row.id), eq(programOperatorCases.recoveryHold, true))))[0];
+  await watchHold(ctx, row.id, now);
+}
+
+async function watchHold(ctx: Ctx, id: string, now: Date): Promise<void> {
+  const stillHeld = async () => (await ctx.db.select().from(programOperatorCases).where(and(eq(programOperatorCases.id, id), eq(programOperatorCases.recoveryHold, true))))[0];
   const held = await stillHeld();
   if (held) await settleOperatorHold(ctx, held);
   const waiting = await stillHeld();

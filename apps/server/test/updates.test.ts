@@ -12,6 +12,7 @@ import { agents, companies, departments, jobs, nodeCodes, subscriptions } from '
 import { publishWorking } from '../src/modules/events/store.js';
 import { as, connectNode, invitePerson, listen, sessionFrom, SETUP, setUpCompany, testApp, until } from './helpers.js';
 import { turnsHeld } from '../src/modules/updates/drain.js';
+import { liveCheckGate } from '../src/modules/updates/live-check.js';
 
 /* Lets a test hold the next count of working agents the update routes read, so something can happen meanwhile. */
 const pause = vi.hoisted(() => ({ next: undefined as undefined | { reached: () => void; resume: Promise<void> } }));
@@ -404,6 +405,25 @@ describe('the live check of a build', () => {
       const refused = join(dirname(file), 'refused');
       expect((await gate(registry, '--commit', SHA, '--outputs', refused)).status).toBe(1);
       expect(existsSync(refused)).toBe(false);
+    });
+
+    /* The same door without the process around it. */
+    it.each<[string, Parameters<typeof fakeRegistry>[0], Record<string, unknown>, { tag?: string; proof?: (build: typeof LATEST) => unknown }, string]>([
+      ['no images of the commit', {}, {}, {}, 'missing'],
+      ['a tag of another build', { latest: { commit: 'c'.repeat(40), version: '0.4.1' } }, {}, { tag: 'latest' }, 'foreign'],
+      ['no proof', { [SHA]: LATEST }, {}, {}, 'missing'],
+      ['a partial proof it was handed', { [SHA]: LATEST }, {}, { proof: build => proofOf(SHA, build, { programs: twoProgramsOnly }) }, 'partial'],
+    ])('says no for %s', async (_name, builds, proofs, { tag, proof }, reason) => {
+      const registry = await fakeRegistry(builds, [], proofs);
+      expect(await liveCheckGate({ commit: SHA, tag, proof: proof?.(LATEST), image: 'ghcr.io/acme/hornhoof', base: registry.base })).toEqual({ ok: false, reason });
+    });
+
+    it('says yes with the images it judged, for a published proof and for one it was handed', async () => {
+      const registry = await fakeRegistry({ [SHA]: LATEST }, [], { [SHA]: proofOf(SHA, LATEST) });
+      const yes = { ok: true, images: proofOf(SHA, LATEST).images };
+      expect(await liveCheckGate({ commit: SHA, image: 'ghcr.io/acme/hornhoof', base: registry.base })).toEqual(yes);
+      registry.prove(SHA, null);
+      expect(await liveCheckGate({ commit: SHA, proof: proofOf(SHA, LATEST), image: 'ghcr.io/acme/hornhoof', base: registry.base })).toEqual(yes);
     });
 
     it('passes a tag that holds all three images of this commit', async () => {

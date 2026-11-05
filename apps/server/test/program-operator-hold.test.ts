@@ -395,6 +395,57 @@ it('refuses when the node does not answer, with no guess about its program', asy
   expect(await c.children()).toEqual([]);
 });
 
+/* What a person of Operations gets from the tool itself. */
+async function throughItsTool(c: Awaited<ReturnType<typeof release>>) {
+  const token = randomUUID();
+  await c.db.update(jobs).set({ toolTokenHash: hashToken(token) }).where(eq(jobs.id, c.turn.id));
+  await listen(c.app);
+  const client = await mcp(c.app, token);
+  return async (input: { case: string; reason: string }) => await client.callTool({ name: 'program_recovery_release', arguments: input }) as { content: { text: string }[]; isError?: boolean };
+}
+
+it('answers through its tool with what came of it, and says so when it is no release at all', async () => {
+  const c = await release();
+  const tool = await throughItsTool(c);
+  const released = await tool({ case: c.incident.id, reason: 'Ready.' });
+  const children = await c.children();
+  expect(released.isError).toBeUndefined();
+  expect(JSON.parse(released.content[0]!.text)).toEqual({ result: 'released', continuation: children[0]!.id });
+  expect(JSON.parse((await tool({ case: c.incident.id, reason: 'Ready.' })).content[0]!.text)).toMatchObject({ result: 'no_hold', continuation: children[0]!.id });
+  const refused = await tool({ case: randomUUID(), reason: 'Another case.' });
+  expect(refused.isError).toBe(true);
+  expect(refused.content[0]!.text).not.toContain('released');
+  expect(await c.children()).toHaveLength(1);
+});
+
+it('asks for a reason through its tool', async () => {
+  const c = await release();
+  const tool = await throughItsTool(c);
+  const answer = await tool({ case: c.incident.id, reason: '  ' });
+  expect(answer.isError).toBe(true);
+  expect((await c.row()).recoveryHold).toBe(true);
+});
+
+it('changes nothing when the hold ended while the node answered', async () => {
+  const c = await release();
+  const answer = c.sent.getMockImplementation()!;
+  c.sent.mockImplementation((node, frame) => {
+    void c.db.update(programOperatorCases).set({ recoveryHold: false, status: 'resolved' }).where(eq(programOperatorCases.id, c.incident.id)).then(() => answer(node, frame));
+    return true;
+  });
+  expect(await c.call()).toEqual({ result: 'no_hold', status: 'resolved', continuation: null });
+  expect(await c.children()).toEqual([]);
+  expect(await c.audits()).toEqual([]);
+});
+
+it('keeps the hold and says so when the words have nowhere to go on from', async () => {
+  const c = await release();
+  await c.db.update(programOperatorCases).set({ deliveryId: null }).where(eq(programOperatorCases.id, c.incident.id));
+  expect(await c.call()).toEqual({ result: 'refused', reason: 'program_busy' });
+  expect((await c.row()).recoveryHold).toBe(true);
+  expect(await c.children()).toEqual([]);
+});
+
 it('refuses when the agent has no plan to run the words, saying so, and the hold stays', async () => {
   const c = await release();
   await c.db.update(agents).set({ subscriptionId: null }).where(eq(agents.id, c.agent.id));
@@ -544,7 +595,7 @@ it('goes on in the session the turn had when the node restarted, known only from
   await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, c.job.id));
   const first = await asked(c);
   await c.db.update(jobs).set({ sessionId: null }).where(eq(jobs.id, first));
-  await recordJobProgram(c.ctx, { type: 'job.program', jobId: first, state: 'working', since: 0, screenAt: 0, session: 'session-of-the-cut-turn' }, new Date(), sql`true`);
+  await recordJobProgram(c.ctx, { type: 'job.program', jobId: first, state: 'thinking', since: 0, screenAt: 0, session: 'session-of-the-cut-turn' }, new Date(), sql`true`);
   expect((await c.jobOf(first)).sessionId).toBe('session-of-the-cut-turn');
   await failOpenJobs(c.ctx, eq(jobs.id, first), 'machine_restarted');
   const [again] = await c.db.select().from(jobs).where(eq(jobs.retryOf, first));
@@ -554,10 +605,10 @@ it('goes on in the session the turn had when the node restarted, known only from
 
 it('keeps the session a report says only for its own running turn', async () => {
   const c = await operatorCompany(false);
-  await recordJobProgram(c.ctx, { type: 'job.program', jobId: c.job.id, state: 'working', since: 0, screenAt: 0, session: 'other' }, new Date(), sql`false`);
+  await recordJobProgram(c.ctx, { type: 'job.program', jobId: c.job.id, state: 'thinking', since: 0, screenAt: 0, session: 'other' }, new Date(), sql`false`);
   expect((await c.jobOf(c.job.id)).sessionId).not.toBe('other');
   await c.db.update(jobs).set({ status: 'done', finishedAt: new Date(), sessionId: 'kept' }).where(eq(jobs.id, c.job.id));
-  await recordJobProgram(c.ctx, { type: 'job.program', jobId: c.job.id, state: 'working', since: 0, screenAt: 0, session: 'late' }, new Date(), sql`true`);
+  await recordJobProgram(c.ctx, { type: 'job.program', jobId: c.job.id, state: 'thinking', since: 0, screenAt: 0, session: 'late' }, new Date(), sql`true`);
   expect((await c.jobOf(c.job.id)).sessionId).toBe('kept');
 });
 

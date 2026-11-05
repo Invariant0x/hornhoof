@@ -18,6 +18,19 @@ type Source = {
 };
 type Target = { identity: OperatorIdentity; control: OperatorControl; generation: number; physical: boolean; pasted: boolean; started: boolean; active: boolean; recorded: boolean; taken: boolean; sinceWords: boolean; assignment: OperatorDelivery | null; sourceDelivery: OperatorDelivery | undefined; caseId: string | null; caseReason: OperatorReason | null; ownerTouched: boolean; bound: boolean; idle: boolean; pendingActivity: boolean; pendingQuestion: { data: OperatorQuestion; at: number } | null; deadline: number | null; failed: string | null; intentional?: 'cancelled' | 'update' | 'restart' | 'offline' | 'completed' };
 
+const NO_PROGRAM = { program: 'gone', current: null, generation: 0, input: 'unknown', wait: null, runningTool: false, retrying: false, busy: false } as const;
+
+function inputShown(input: string | null): OperatorRecoveryState['input'] {
+  if (input === null) return 'unknown';
+  return input ? 'words' : 'empty';
+}
+
+/* A wait the program shows is no free prompt, however harmless it looks to whoever passes it by hand. */
+function programAt(program: ReturnType<Source['current']>): Pick<OperatorRecoveryState, 'wait' | 'runningTool' | 'retrying'> {
+  const wait = program?.wait?.kind ?? null;
+  return { wait: wait === 'harmless' ? 'unknown' : wait, runningTool: Boolean(program?.runningTool), retrying: Boolean(program?.retrying) };
+}
+
 /* Runtime glue stays outside the terminal host's provider logic; evidence and the key guard share one input lane. */
 export class OperatorRuntime {
   private readonly observer: OperatorObserver;
@@ -224,10 +237,8 @@ export class OperatorRuntime {
     const reply = { type: 'program.recovery_state' as const, agentKey, jobId, instance, request };
     const target = this.targets.get(agentKey);
     const shown = target?.physical ? await this.source.recovery(agentKey) : null;
-    if (!target || !shown?.alive) return { ...reply, program: 'gone', current: null, generation: 0, input: 'unknown', wait: null, runningTool: false, retrying: false, busy: false };
-    const source = this.source.current(agentKey);
-    const wait = source?.wait ? (source.wait.kind === 'harmless' ? 'unknown' : source.wait.kind) : null;
-    return { ...reply, program: 'here', current: target.identity.instance, generation: target.generation, input: shown.input === null ? 'unknown' : shown.input ? 'words' : 'empty', wait, runningTool: Boolean(source?.runningTool), retrying: Boolean(source?.retrying), busy: shown.busy || target.sinceWords };
+    if (!target || !shown?.alive) return { ...reply, ...NO_PROGRAM };
+    return { ...reply, program: 'here', current: target.identity.instance, generation: target.generation, input: inputShown(shown.input), ...programAt(this.source.current(agentKey)), busy: shown.busy || target.sinceWords };
   }
 
   private missingProgram(frame: Exclude<OperatorServerMessage, { type: 'program.evidence_ack' | 'program.recovery_state_get' }>): void {

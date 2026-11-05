@@ -122,16 +122,20 @@ const cutOffOutsideTask = (job: Job) => `Your last turn ${job.interruption ? `wa
    asked, and no third time. */
 export async function afterRestartOutsideTask(ctx: Ctx, jobId: string): Promise<void> {
   const [job] = await ctx.db.select().from(jobs).where(eq(jobs.id, jobId));
-  if (!job?.agentId || job.status !== 'failed' || job.error !== 'machine_restarted' || !job.prompt || !(await someoneAsked(ctx, job))) return;
+  if (!cutByRestart(job) || !(await someoneAsked(ctx, job))) return;
   if (job.retryOf) return callOperationsOutsideTask(ctx, job);
-  const agentId = job.agentId, repeated = await repeatedWords(ctx, job);
-  const words = job.requestedPrompt ?? job.prompt;
-  await onAgent(ctx, agentId, async () => {
-    if (await turnGoingOn(ctx, job.id)) return;
-    await insertTurn(ctx, { companyId: job.companyId, agentId, prompt: `${cutOffOutsideTask(job)}\n\n${words}`, retryOf: job.id, ...repeated }).catch(async (err: unknown) => {
-      if (!(err instanceof NoSubscription)) throw err;
-      await logTurnFact(ctx, job, 'Hornhoof could not run this turn again: the agent has no plan to continue.');
-    });
+  const repeated = await repeatedWords(ctx, job);
+  await onAgent(ctx, job.agentId, async () => {
+    if (!await turnGoingOn(ctx, job.id)) await runOutsideTaskAgain(ctx, job, repeated);
+  });
+}
+
+const cutByRestart = (job: Job | undefined): job is Job & { agentId: string } => job?.status === 'failed' && job.error === 'machine_restarted' && Boolean(job.agentId && job.prompt);
+
+async function runOutsideTaskAgain(ctx: Ctx, job: Job & { agentId: string }, repeated: Awaited<ReturnType<typeof repeatedWords>>): Promise<void> {
+  await insertTurn(ctx, { companyId: job.companyId, agentId: job.agentId, prompt: `${cutOffOutsideTask(job)}\n\n${job.requestedPrompt ?? job.prompt}`, retryOf: job.id, ...repeated }).catch(async (err: unknown) => {
+    if (!(err instanceof NoSubscription)) throw err;
+    await logTurnFact(ctx, job, 'Hornhoof could not run this turn again: the agent has no plan to continue.');
   });
 }
 

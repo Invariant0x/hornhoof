@@ -22,6 +22,13 @@ const OWNER_TURN: HoldEnd = { outcome: 'owner_turn', text: 'The existing owner t
 const BY_ITSELF = ['went_on', 'program_gone'];
 const stoppedOnPurpose = (job: typeof jobs.$inferSelect) => STOPPED_ON_PURPOSE.includes(job.error ?? '');
 const agentRemoved = async (ctx: Ctx, row: Case) => Boolean((await ctx.db.select({ removedAt: agents.removedAt }).from(agents).where(eq(agents.id, row.agentId)))[0]?.removedAt);
+const deliveryOf = async (ctx: Ctx, row: Case) => row.deliveryId ? (await ctx.db.select().from(programDeliveries).where(eq(programDeliveries.id, row.deliveryId)))[0] : undefined;
+const programLeft = (delivery: typeof programDeliveries.$inferSelect) => delivery.outcome === 'cancelled' || delivery.outcome === 'not_taken';
+
+export async function runsATurn(ctx: Ctx, agentId: string): Promise<boolean> {
+  const [running] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, agentId), eq(jobs.status, 'running'))).limit(1);
+  return Boolean(running);
+}
 
 export async function operatorRecoveryHolds(ctx: Ctx, agentId: string): Promise<boolean> {
   return recoveryHolds(ctx, eq(programOperatorCases.agentId, agentId));
@@ -58,8 +65,8 @@ export async function settleOperatorHold(ctx: Ctx, row: Case): Promise<void> {
   if (!job) return;
   if (stoppedOnPurpose(job) || await agentRemoved(ctx, row)) return finishRecovery(ctx, row, null, STOPPED);
   if (job.status === 'done') return finishRecovery(ctx, row, null, FINISHED);
-  const [delivery] = row.deliveryId ? await ctx.db.select().from(programDeliveries).where(eq(programDeliveries.id, row.deliveryId)) : [];
-  if (delivery && (delivery.outcome === 'cancelled' || delivery.outcome === 'not_taken') && !await wentOnBefore(ctx, row)) await continueRecovery(ctx, row, PROGRAM_GONE);
+  const delivery = await deliveryOf(ctx, row);
+  if (delivery && programLeft(delivery) && !await wentOnBefore(ctx, row)) await continueRecovery(ctx, row, PROGRAM_GONE);
 }
 
 /* The node says the program of these words ended. */
@@ -82,14 +89,16 @@ export async function resumeOperatorProcess(ctx: Ctx, agentId: string, nodeId: s
 
 export async function continueRecovery(ctx: Ctx, row: Case, end: HoldEnd): Promise<void> {
   const [original] = await ctx.db.select().from(jobs).where(eq(jobs.id, row.jobId));
-  const [delivery] = row.deliveryId ? await ctx.db.select().from(programDeliveries).where(eq(programDeliveries.id, row.deliveryId)) : [];
+  const delivery = await deliveryOf(ctx, row);
   if (!original || !recoverableJob(original) || !delivery) return;
   if (await agentRemoved(ctx, row)) return finishRecovery(ctx, row, null, STOPPED);
   if (delivery.receiptAt) return finishRecovery(ctx, row, null, RECORDED);
-  const [running] = await ctx.db.select().from(jobs).where(and(eq(jobs.agentId, row.agentId), eq(jobs.status, 'running'))).limit(1);
-  if (running) return;
-  /* A retry a node restart queued takes these words on already, as the same words must not run twice; one somebody stopped
-     leaves them stopped. */
+  if (!await runsATurn(ctx, row.agentId)) await wordsGoOn(ctx, row, original, delivery, end);
+}
+
+/* A retry a node restart queued takes these words on already, as the same words must not run twice; one somebody stopped
+   leaves them stopped. */
+async function wordsGoOn(ctx: Ctx, row: Case, original: typeof jobs.$inferSelect, delivery: typeof programDeliveries.$inferSelect, end: HoldEnd): Promise<void> {
   const next = await turnGoingOn(ctx, original.id);
   if (next?.error === 'cancelled') return finishRecovery(ctx, row, null, STOPPED);
   const continuationJobId = next?.id ?? await recoveryContinuation(ctx, row, original, delivery);

@@ -141,7 +141,7 @@ describe('program receipts for live words', () => {
     const now = signAt + RESTART_AFTER_MS.claude! + 1000;
     vi.spyOn(Date, 'now').mockReturnValue(now);
     await c.host['hook']('receipt', 'status', { context_window: { used_percentage: 25 } });
-    const observed = c.host['observeProgram']('job-receipt');
+    const observed = c.host['observeProgram'](a, 'job-receipt');
     await c.host['reportProgram'](a, observed.watch, observed.look);
     expect(c.sent.filter(m => m.type === 'job.program').at(-1)).toMatchObject({ signAt, state: 'thinking' });
     expect(a.contextUsed).toBe(0.25);

@@ -38,7 +38,7 @@ function assignment(program: TermProgram, ready: string, draft?: string) {
   });
   const running = host.run({ key: agentKey, program, bin: program.kind, home, signedOut: /signed out/i, operatorDelivery: { id: deliveryId, ordinal: 1 }, input: { agentKey, jobId, prompt: 'Check the checkout.', sessionId: null, model: null, workDir, secret: null, timeoutMs: 20000, instructions: null, tools: null, signal: abort.signal } });
   stops.push(async () => { abort.abort(); await host.stop(); await running; rmSync(home, { recursive: true, force: true }); });
-  return { paste, sent, deliveryId, styledLooks: () => screen.mock.calls.filter(([, , styled]) => styled).length };
+  return { host, tmux, agentKey, jobId, screen, paste, sent, deliveryId, styledLooks: () => screen.mock.calls.filter(([, , styled]) => styled).length };
 }
 
 it.each([
@@ -64,6 +64,36 @@ it.each([
   /* The node looked at its input and still did not type: looks at the screen before it does say nothing. */
   await until(() => styledLooks() > 2);
   expect(paste).not.toHaveBeenCalled();
+});
+
+/* What a release of a hold rests on, from the real screen through the node to the frame the server reads. */
+const recoveryState = async (c: ReturnType<typeof assignment>, agentKey = c.agentKey) => {
+  const request = randomUUID();
+  await c.host.operatorMessage({ type: 'program.recovery_state_get', agentKey, jobId: c.jobId, instance: randomUUID(), request, case: randomUUID() });
+  return c.sent.find(frame => frame.type === 'program.recovery_state' && frame.request === request);
+};
+
+it.each([
+  ['codex-0.166.0-long-session', codexProgram, 'empty'],
+  ['codex-0.166.0-draft', codexProgram, 'words'],
+  ['kimi-2.5.1-first', kimiProgram, 'empty'],
+  ['kimi-2.5.1-draft', kimiProgram, 'words'],
+] as const)('tells whoever releases a hold what the real screen %s shows', async (name, program, input) => {
+  const c = assignment(program, name, name);
+  await until(() => c.styledLooks() > 0);
+  expect(await recoveryState(c)).toMatchObject({ program: 'here', input });
+});
+
+it('says a program is gone once its terminal is, whatever its screen last showed', async () => {
+  const c = assignment(codexProgram, 'codex-0.166.0-idle');
+  await until(() => c.styledLooks() > 0);
+  vi.spyOn(c.tmux, 'alive').mockResolvedValue(false);
+  expect(await recoveryState(c)).toMatchObject({ program: 'gone', input: 'unknown' });
+});
+
+it('says a program is gone for an agent it does not run', async () => {
+  const c = assignment(codexProgram, 'codex-0.166.0-idle');
+  expect(await recoveryState(c, randomUUID())).toMatchObject({ program: 'gone', current: null });
 });
 
 it.each([

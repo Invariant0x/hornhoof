@@ -10,7 +10,7 @@ import { agentParty } from '../events/parties.js';
 import { logTurnFact } from '../tasks/turn-log.js';
 import { operatorRefused, type OperatorCaller } from './authorization.js';
 import { syncOperatorCases } from './cases.js';
-import { continueRecovery } from './recovery.js';
+import { continueRecovery, runsATurn } from './recovery.js';
 import { requestRecoveryState } from './rpc.js';
 import { operatorTransaction } from './transactions.js';
 
@@ -49,37 +49,46 @@ function refusalOf(state: OperatorRecoveryState | null): OperatorError | null {
   return state.input === 'empty' ? null : 'input_not_proven';
 }
 
-async function otherTurnRuns(ctx: Ctx, row: Case): Promise<boolean> {
-  const [running] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.agentId, row.agentId), eq(jobs.status, 'running'))).limit(1);
-  return Boolean(running);
+const noHold = (row: Case): ReleaseResult => ({ result: 'no_hold', status: row.status, continuation: row.continuationJobId });
+
+/* A case of this company, on an agent still here and not the caller itself. */
+async function caseToRelease(ctx: Ctx, me: Agent, id: string): Promise<Case> {
+  const [held] = await ctx.db.select({ row: programOperatorCases }).from(programOperatorCases).innerJoin(agents, eq(agents.id, programOperatorCases.agentId)).where(and(eq(programOperatorCases.id, id), eq(programOperatorCases.companyId, me.companyId), isNull(agents.removedAt)));
+  if (!held || held.row.agentId === me.id) throw operatorRefused();
+  return held.row;
 }
 
 export async function releaseRecoveryHold(ctx: Ctx, caller: OperatorCaller, input: ReleaseInput): Promise<ReleaseResult> {
   const me = await authorizeRelease(ctx, caller);
-  const [held] = await ctx.db.select({ row: programOperatorCases }).from(programOperatorCases).innerJoin(agents, eq(agents.id, programOperatorCases.agentId)).where(and(eq(programOperatorCases.id, input.case), eq(programOperatorCases.companyId, caller.companyId), isNull(agents.removedAt)));
-  const found = held?.row;
-  if (!found || found.agentId === me.id) throw operatorRefused();
-  if (!found.recoveryHold) return { result: 'no_hold', status: found.status, continuation: found.continuationJobId };
+  const found = await caseToRelease(ctx, me, input.case);
+  if (!found.recoveryHold) return noHold(found);
   const state = await requestRecoveryState(ctx, found);
   const result = await operatorTransaction(ctx, async (tx, inside) => {
     await tx.select({ id: agents.id }).from(agents).where(eq(agents.id, found.agentId)).for('update');
     const [row] = await tx.select().from(programOperatorCases).where(eq(programOperatorCases.id, found.id)).for('update');
-    if (!row?.recoveryHold) return { result: 'no_hold' as const, status: row?.status ?? found.status, continuation: row?.continuationJobId ?? null };
-    return decide(inside, me, row, input.reason, state);
+    return row?.recoveryHold ? decide(inside, me, row, input.reason, state) : noHold(row ?? found);
   });
   await syncOperatorCases(ctx, found.agentId);
   return result;
 }
 
+async function refusalNow(ctx: Ctx, row: Case, state: OperatorRecoveryState | null): Promise<Refusal | null> {
+  const seen = refusalOf(state);
+  if (seen) return seen;
+  if (await runsATurn(ctx, row.agentId)) return 'program_busy';
+  return await liveSubscription(ctx, row.agentId) ? null : 'no_plan';
+}
+
 async function decide(ctx: Ctx, me: Agent, row: Case, reason: string, state: OperatorRecoveryState | null): Promise<ReleaseResult> {
-  const refusal = refusalOf(state) ?? (await otherTurnRuns(ctx, row) ? 'program_busy' : null) ?? (await liveSubscription(ctx, row.agentId) ? null : 'no_plan');
+  const refusal = await refusalNow(ctx, row, state);
   if (refusal) return refused(ctx, me, row, reason, state, refusal);
   const actor = await agentParty(ctx, row.companyId, me.id);
   await continueRecovery(ctx, row, { outcome: 'released', text: `${me.name} of Operations released the hold; the original words continue once.`, actor });
   const [after] = await ctx.db.select().from(programOperatorCases).where(eq(programOperatorCases.id, row.id));
-  if (after?.recoveryHold) return refused(ctx, me, row, reason, state, 'program_busy');
-  await audit(ctx, me, row, reason, state, { result: 'released', continuation: after?.continuationJobId ?? null }, `${me.name} of Operations released the recovery hold: ${reason}`);
-  return { result: 'released', continuation: after?.continuationJobId ?? null };
+  if (after!.recoveryHold) return refused(ctx, me, row, reason, state, 'program_busy');
+  const released = { result: 'released' as const, continuation: after!.continuationJobId };
+  await audit(ctx, me, row, reason, state, released, `${me.name} of Operations released the recovery hold: ${reason}`);
+  return released;
 }
 
 async function refused(ctx: Ctx, me: Agent, row: Case, reason: string, state: OperatorRecoveryState | null, refusal: Refusal): Promise<ReleaseResult> {
@@ -87,12 +96,16 @@ async function refused(ctx: Ctx, me: Agent, row: Case, reason: string, state: Op
   return { result: 'refused', reason: refusal };
 }
 
+const whatTheNodeSaw = (row: Case, state: OperatorRecoveryState | null) => state
+  ? { instance: state.current ?? row.instance, generation: state.generation, program: state.program, input: state.input, wait: state.wait }
+  : { instance: row.instance, generation: null, program: null, input: null, wait: null };
+
 /* Who, when, why and what, with what the node saw then, in the conversation of the turn on hold. */
 async function audit(ctx: Ctx, me: Agent, row: Case, reason: string, state: OperatorRecoveryState | null, outcome: Record<string, unknown>, text: string): Promise<void> {
   const [job] = await ctx.db.select().from(jobs).where(eq(jobs.id, row.jobId));
   await logTurnFact(ctx, job!, text, { operatorRecovery: row.id, notification: { source: 'program_operator', tasks: [] }, recoveryRelease: {
     actor: { id: me.id, name: me.name, role: me.roleKey }, reason, at: new Date().toISOString(), action: 'release_and_deliver', case: row.id, job: row.jobId,
-    instance: state?.current ?? row.instance, generation: state?.generation ?? null, program: state?.program ?? null, input: state?.input ?? null, wait: state?.wait ?? null, ...outcome,
+    ...whatTheNodeSaw(row, state), ...outcome,
   } });
 }
 
