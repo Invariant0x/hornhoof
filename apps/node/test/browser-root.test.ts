@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -18,7 +18,7 @@ vi.mock('node:fs', async importOriginal => {
     lstatSync: (path: string, options?: { throwIfNoEntry?: boolean }) => {
       const stat = fs.lstatSync(path, options as { throwIfNoEntry: false });
       if (!stat || !owners.asRoot) return stat;
-      return Object.assign(stat, { uid: owners.foreign.has(path) ? FIRST_UID : 0, gid: owners.foreign.has(path) || owners.otherGroup.has(path) ? FIRST_UID : 0 });
+      return Object.assign(stat, { uid: owners.foreign.has(path) ? FIRST_UID : 0, gid: owners.otherGroup.has(path) ? FIRST_UID : 0 });
     },
   };
 });
@@ -103,6 +103,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -202,6 +203,23 @@ describe('what a node that runs as root does not trust', () => {
     expect(underBrowsers(dir).filter(call => call.startsWith(cli))).toEqual([]);
   });
 
+  it('shares what npm installed at once when the browsers need no download', async () => {
+    const dir = temp();
+    const seedDir = openSeed();
+    const madeBy = (args: string[], env: NodeJS.ProcessEnv) => {
+      leavesWhatItInstalls(args, env);
+      const pkg = join(args[args.indexOf('--prefix') + 1]!, 'node_modules', 'playwright');
+      chmodSync(join(pkg, 'cli.js'), 0o600);
+      owners.foreign.add(join(pkg, 'cli.js'));
+    };
+    programs.fake = madeBy;
+    owners.asRoot = true;
+    await expect(ready(dir, seedDir, temp('hh-root-global-'))).resolves.toMatchObject({ status: 'ready', downloaded: false });
+    const cli = join(browsersDir(dir), '.playwright', LOCKED, 'node_modules', 'playwright', 'cli.js');
+    expect(statSync(cli).mode & 0o777).toBe(0o644);
+    expect(owners.chowned).toEqual([`${cli} 0:0`]);
+  });
+
   it('keeps a cached package that is all root\'s, and installs nothing', async () => {
     const dir = temp();
     const pkg = playwrightPackage(join(browsersDir(dir), '.playwright', LOCKED));
@@ -249,6 +267,24 @@ describe('what a node that runs as root does not trust', () => {
     owners.asRoot = true;
     owners.foreign.add(target);
     shareTree(target, true);
+    expect(owners.chowned).toEqual([`${target} 0:0`]);
+  });
+
+  it('goes by the user the node really runs as, wherever nobody says otherwise', async () => {
+    vi.spyOn(process, 'getuid').mockReturnValue(0);
+    const dir = temp();
+    const target = browsersDir(dir);
+    installed(target, ['chromium-1260']);
+    const repo = lockedRepo();
+    playwrightPackage(repo);
+    owners.asRoot = true;
+    owners.foreign.add(target);
+    await ensureRepoBrowser(dir, repo, testUser);
+    /* The record never takes the owner off: each walk changes it again. */
+    expect(new Set(underBrowsers(dir))).toEqual(new Set([`${target} 0:0`]));
+    expect(programs.calls.map(c => c.bin)[0]).toBe('npm');
+    owners.chowned.length = 0;
+    shareTree(target);
     expect(owners.chowned).toEqual([`${target} 0:0`]);
   });
 

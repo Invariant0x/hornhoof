@@ -308,6 +308,28 @@ describe('links in the shared browsers', () => {
     expect(existsSync(join(elsewhere, 'evil'))).toBe(true);
   });
 
+  it('takes a folder whose name only starts like this one for another folder', async () => {
+    const { target, seedDir, ready } = setUp();
+    markInstalled(target, ['chromium-1248']);
+    mkdirSync(join(target, 'chromium-1248-other'));
+    symlinkSync('../chromium-1248-other', join(target, 'chromium-1248', 'next-door'));
+    await ready();
+    expect(readlinkSync(join(target, 'chromium-1248'))).toBe(join(seedDir, 'chromium-1248'));
+  });
+
+  it('drops every link when the image has no browsers to link to', async () => {
+    const { dir, target } = setUp();
+    symlinkSync(planted(), join(target, 'chromium-1248'));
+    const missingSeed = join(makeTemp('hh-no-seed-'), 'none');
+    const globalPlaywrightDir = fakePlaywrightPackage(makeTemp('hh-global-'), '1.64.1', '1248');
+    const runCommand = async (_bin: string, _args: string[], env: NodeJS.ProcessEnv) => {
+      markInstalled(env.PLAYWRIGHT_BROWSERS_PATH!, FOLDERS);
+      return { code: 0, output: '', timedOut: false };
+    };
+    await expect(prepareBrowser({ dir, repoDir: lockedRepo('1.64.1'), seedDir: missingSeed, globalPlaywrightDir, isRoot: false, runCommand })).resolves.toMatchObject({ status: 'ready', downloaded: true });
+    expect(lstatSync(join(target, 'chromium-1248')).isSymbolicLink()).toBe(false);
+  });
+
   it('keeps a browser folder whose links stay inside it, as Chromium for a Mac has them', async () => {
     const { target, ready } = setUp();
     markInstalled(target, FOLDERS);
