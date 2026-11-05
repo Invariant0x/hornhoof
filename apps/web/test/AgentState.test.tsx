@@ -224,4 +224,21 @@ describe('AgentState', () => {
     expect(ruEl?.textContent).toBe('ждет ввода');
     expect(ruEl?.className).toBe('ast calm');
   });
+
+  it.each([
+    ['budget', 'waiting: task share until 15:05', 'ждет: доля тарифа на задачи до 15:05'],
+    ['limit', 'waiting: plan limit until 15:05', 'ждет: лимит тарифа до 15:05'],
+  ] as const)('shows a %s hold only after ten minutes, in English and Russian', (reason, enText, ruText) => {
+    freezeClock();
+    const held = { reason, since: new Date(NOW - 10 * 60_000).toISOString(), until: new Date(clock(15, 5)).toISOString() };
+    const atBoundary: AgentLive = { id: 'b1', program: null, alarm: null, status: 'queued', held };
+    expect(shown('en', atBoundary)?.textContent).toBe('in the queue');
+    expect(shown('ru', atBoundary)?.textContent).toBe('в очереди');
+
+    const pastBoundary: AgentLive = { ...atBoundary, held: { ...held, since: new Date(NOW - 10 * 60_000 - 1).toISOString() } };
+    expect(shown('en', pastBoundary)?.textContent).toBe(enText);
+    expect(shown('en', pastBoundary)?.className).toBe('ast calm');
+    expect(shown('ru', pastBoundary)?.textContent).toBe(ruText);
+    expect(shown('ru', pastBoundary)?.className).toBe('ast calm');
+  });
 });

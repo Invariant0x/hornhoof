@@ -7,11 +7,19 @@ const MINUTE_MS = 60_000;
 /* How often a running agent's line is drawn again so its minutes and quiet-sign count stay fresh. */
 const TICK_MS = 15_000;
 
-/* What the map knows of an agent's work: its running turn's program, the server's alarm, a waiting retry, and, where asked,
-   the status that tells a turn waiting for a task or in the queue. */
-export type AgentLive = { id: string; program: ProgramView | null; alarm: TurnAlarm | null; retry?: TurnRetry | null; status?: EmployeeStatus };
+/* What the map knows of an agent's work: its running turn's program, the server's alarm, a waiting retry, a plan hold,
+   and, where asked, the status that tells a turn waiting for a task or in the queue. */
+export type AgentLive = {
+  id: string;
+  program: ProgramView | null;
+  alarm: TurnAlarm | null;
+  retry?: TurnRetry | null;
+  status?: EmployeeStatus;
+  held?: { reason: 'limit' | 'budget'; since: string; until: string } | null;
+};
 type Tone = 'alarm' | 'work' | 'person' | 'calm';
 type Line = { tone: Tone; text: string };
+const HELD_SHOWN_MS = 10 * MINUTE_MS;
 
 const minutes = (now: number, at: number) => {
   const n = Math.floor((now - at) / MINUTE_MS);
@@ -24,16 +32,28 @@ export function clockAt(at: number): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
-/* The server's alarm first, in red with its cause; else what the program does; else Hornhoof's waiting retry; else what the
-   turn waits for. */
+function heldLine(say: Messages['dept']['now'], held: NonNullable<AgentLive['held']>, now: number): Line | null {
+  if (now - Date.parse(held.since) <= HELD_SHOWN_MS) return null;
+  const at = clockAt(Date.parse(held.until));
+  return { tone: 'calm', text: held.reason === 'budget' ? say.taskShareUntil(at) : say.planLimitUntil(at) };
+}
+
+/* The server's alarm first, in red with its cause; else a long plan hold; else what the program does; else Hornhoof's
+   waiting retry; else what the turn waits for. */
+function waitingLine(t: Messages, a: AgentLive): Line | null {
+  const say = t.dept.now;
+  if (a.retry) return { tone: 'calm', text: say.turnRetry(a.retry.attempt, a.retry.max, clockAt(a.retry.at), t.failures[a.retry.kind]) };
+  if (a.status === 'idle') return { tone: 'calm', text: say.waitsForTask };
+  return a.status === 'queued' ? { tone: 'calm', text: say.queued } : null;
+}
+
 function lineOf(t: Messages, a: AgentLive | null | undefined, now: number): Line | null {
   const say = t.dept.now;
   if (!a) return null;
   if (a.alarm) return { tone: 'alarm', text: say[a.alarm.reason](minutes(now, a.alarm.since)) };
-  if (a.program) return programLine(say, a.program, now);
-  if (a.retry) return { tone: 'calm', text: say.turnRetry(a.retry.attempt, a.retry.max, clockAt(a.retry.at), t.failures[a.retry.kind]) };
-  if (a.status === 'idle') return { tone: 'calm', text: say.waitsForTask };
-  return a.status === 'queued' ? { tone: 'calm', text: say.queued } : null;
+  const held = a.held ? heldLine(say, a.held, now) : null;
+  if (held) return held;
+  return a.program ? programLine(say, a.program, now) : waitingLine(t, a);
 }
 
 function withQuietSign(say: Messages['dept']['now'], line: string, signAt: number | null, now: number): string {
@@ -71,10 +91,12 @@ function useServerNow(serverNow: string | undefined, live: boolean): number {
   return anchor.server + performance.now() - anchor.steady;
 }
 
+const hasLiveState = (agent: AgentLive | null | undefined): boolean => !!(agent?.program || agent?.alarm || agent?.held);
+
 /* What an agent does now, on its card on the map, in the tree and on its own card: red when its turn is in trouble. */
 export function AgentState({ agent, serverNow }: { agent: AgentLive | null | undefined; serverNow: string | undefined }) {
   const t = useT();
-  const now = useServerNow(serverNow, !!(agent?.program || agent?.alarm));
+  const now = useServerNow(serverNow, hasLiveState(agent));
   const line = lineOf(t, agent, now);
   return (
     line && (
