@@ -211,24 +211,35 @@ describe('frozen task workspace registry producer', () => {
   });
 
   it('refuses a regular metadata file replaced by a FIFO without blocking the node', () => {
-    const item = fixture(), path = join(item.tree, '.git');
+    const item = fixture(), path = join(item.tree, '.git'), phasesFile = join(root, 'fifo-phases.json');
     const script = `
       import fs from 'node:fs';import {execFileSync} from 'node:child_process';import {syncBuiltinESMExports} from 'node:module';
       const input=JSON.parse(process.argv[1]),options=JSON.parse(process.argv[2]);
+      const started=performance.now(),phases=[];
+      const mark=phase=>{phases.push({phase,elapsedMs:Math.round(performance.now()-started)});fs.writeFileSync(process.argv[3],JSON.stringify(phases))};
       const lstat=fs.lstatSync,fstat=fs.fstatSync;let replaced=false;
       const privatePath=path=>path===options.nodeDataDir||path.startsWith(options.nodeDataDir+'/task-workspace-registry');
-      fs.lstatSync=(path,...args)=>{const s=lstat(path,...args);if(!replaced&&path===input.tree+'/.git'){replaced=true;fs.renameSync(path,path+'.preserved');execFileSync('/usr/bin/mkfifo',[path])}return privatePath(String(path))?Object.assign(s,{uid:0,gid:0}):s};
+      fs.lstatSync=(path,...args)=>{const s=lstat(path,...args);if(!replaced&&path===input.tree+'/.git'){replaced=true;fs.renameSync(path,path+'.preserved');execFileSync('/usr/bin/mkfifo',[path]);mark('fifo-ready')}return privatePath(String(path))?Object.assign(s,{uid:0,gid:0}):s};
       fs.fstatSync=(fd,...args)=>{const s=fstat(fd,...args);return privatePath(fs.readlinkSync('/proc/self/fd/'+fd))?Object.assign(s,{uid:0,gid:0}):s};
       process.getuid=()=>0;syncBuiltinESMExports();
+      mark('import-start');
       const {createTaskWorkspaceRegistry}=await import(${JSON.stringify(new URL('../src/task-workspaces.ts', import.meta.url).href)});
-      const result=await createTaskWorkspaceRegistry(options).registerTaskWorkspace(input);process.stdout.write(JSON.stringify(result));
+      mark('import-ready');
+      const result=await createTaskWorkspaceRegistry(options).registerTaskWorkspace(input);mark('registry-replied');process.stdout.write(JSON.stringify(result));
     `;
     const run = () => execFileSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script,
-      JSON.stringify(item), JSON.stringify({ nodeDataDir: root, nodeId, nodeOwner })], {
+      JSON.stringify(item), JSON.stringify({ nodeDataDir: root, nodeId, nodeOwner }), phasesFile], {
       cwd: fileURLToPath(new URL('../../..', import.meta.url)), timeout: 3000, killSignal: 'SIGKILL', encoding: 'utf8',
       env: { PATH: '/usr/local/bin:/usr/bin:/bin', HOME: root },
     });
-    expect(JSON.parse(run())).toEqual({ code: 'workspace_ambiguous', retryable: false });
+    const started = performance.now();
+    let output: string;
+    try { output = run(); }
+    finally {
+      const phases: unknown = existsSync(phasesFile) ? JSON.parse(readFileSync(phasesFile, 'utf8')) : [];
+      process.stdout.write(JSON.stringify({ diagnostic: 'fifo-child', wallMs: Math.round(performance.now() - started), phases }) + '\n');
+    }
+    expect(JSON.parse(output)).toEqual({ code: 'workspace_ambiguous', retryable: false });
     expect(lstatSync(path).isFIFO()).toBe(true);
     expect(readFileSync(path + '.preserved', 'utf8')).toContain('gitdir:');
   });
