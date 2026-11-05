@@ -468,11 +468,19 @@ async function storeTypedTurn(
 export async function openTypedTurn(ctx: Ctx, node: NodeIdentity, agentId: string, text: string, personId: string | null, queuedFrom?: string): Promise<{ jobId: string; token: string; typedBy: string | null } | null> {
   if ((!personId && !queuedFrom) || !z.uuid().safeParse(agentId).success) return null;
   const queued = queuedFrom ? await queuedWords(ctx, agentId, queuedFrom, text) : null;
-  const pressed = queuedFrom && !queued && !personId ? ctx.terminals.takePressed(node, agentId, queuedFrom) : null;
-  const typedBy = personId ?? pressed;
-  if (queuedFrom && !queued && !typedBy) return null;
+  const pressed = queued ? null : pressedEnter(ctx, node, agentId, personId, queuedFrom);
+  const typedBy = pressed ?? personId;
+  if (!queued && !typedBy) return null;
   const run = () => onAgent(ctx, agentId, () => storeTypedTurn(ctx, node, agentId, text, typedBy, queuedFrom, queued));
-  const opened = await (queued ? withInputLock(ctx, agentId, run) : run());
+  return afterTypedTurn(ctx, agentId, await (queued ? withInputLock(ctx, agentId, run) : run()), pressed, typedBy);
+}
+
+/* The person whose Enter in the turn that the node names sent the words, when no keys came just before them. */
+const pressedEnter = (ctx: Ctx, node: NodeIdentity, agentId: string, personId: string | null, queuedFrom?: string): string | null =>
+  queuedFrom && !personId ? ctx.terminals.takePressed(node, agentId, queuedFrom) : null;
+
+/* What the window says of the last refusal ends with a turn. With none, what a person's Enter queued is in the turn that runs. */
+async function afterTypedTurn(ctx: Ctx, agentId: string, opened: { jobId: string; token: string } | null, pressed: string | null, typedBy: string | null) {
   if (opened) ctx.terminals.turnBegan(agentId);
   else if (pressed) await typedWentIn(ctx, agentId, pressed);
   return opened && { ...opened, typedBy };

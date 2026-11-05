@@ -91,21 +91,32 @@ function viewUrl(path: string, size: Size) {
 /* The node cannot show a view, or the person may no longer reach the agent: trying again changes nothing. */
 const final = (code: number) => code === NO_TERMINAL || code === NO_ACCESS;
 
+class KeptKeys {
+  private kept: { keys: unknown; at: number }[] = [];
+
+  keep(m: unknown) {
+    if ((m as { type?: string }).type === 'input' && this.kept.length < KEPT_KEYS) this.kept.push({ keys: m, at: Date.now() });
+  }
+
+  go(write: boolean, send: Send) {
+    const { kept } = this;
+    this.kept = [];
+    for (const { keys, at } of kept) if (write && Date.now() - at < KEPT_MS) send(keys);
+  }
+}
+
 /* The view of the session over a socket, opened again after a machine went away for a moment, until it ends. */
 function connectView(term: Terminal, path: string, setUp: (up: boolean) => void, gone: () => void) {
   let socket: WebSocket | null = null;
   let ended = false;
   let retry: ReturnType<typeof setTimeout> | null = null;
   let tries = 0;
-  const kept: { keys: unknown; at: number }[] = [];
-  const send: Send = m => {
-    if (socket?.readyState === 1) socket.send(JSON.stringify(m));
-    else if ((m as { type?: string }).type === 'input' && kept.length < KEPT_KEYS) kept.push({ keys: m, at: Date.now() });
-  };
+  const kept = new KeptKeys();
+  const send: Send = m => (socket?.readyState === 1 ? socket.send(JSON.stringify(m)) : kept.keep(m));
   const connect = () => {
     const ready = (write: boolean) => {
       tries = 0;
-      for (const { keys, at } of kept.splice(0)) if (write && Date.now() - at < KEPT_MS) send(keys);
+      kept.go(write, send);
     };
     const view: View = { term, send, setUp, asked: { cols: term.cols, rows: term.rows }, told: false, unconfirmed: null, ready };
     const ws = new WebSocket(viewUrl(path, view.asked));

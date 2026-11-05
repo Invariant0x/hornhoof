@@ -257,6 +257,22 @@ function WindowAfter({ offerByHand, needsOrchestrator, failure, t, onPickByHand 
 /* An agent's window: its live terminal when its node shows one, or its conversation as a log; a line to write to it for
    anyone who cannot type into that terminal; and the orchestrator's cards. Whoever reaches this window may write: the
    server opens the agent's conversation and takes a message by the same rule. */
+/* What keeps the agent from answering now, or what happened to the last words it took. */
+function StateNotes({ state, ready, sub }: { state: OrchestratorState; ready: boolean; sub: SubView | null }) {
+  const t = useT();
+  const { language } = useLanguage();
+  return (
+    <>
+      {!ready && <p className="t-why">{reasonText(t, state.reason, sub)}</p>}
+      {state.turnRefused && <p className="t-why" role="status">{t.window.turnRefused[state.turnRefused]}</p>}
+      {state.browserError && <p className="t-why">{browserWarning(t, state.browserError, sub)}</p>}
+      {state.limitUntil && <p className="t-why">{t.window.limitUntil(clock(language, state.limitUntil)!)}</p>}
+      {!state.limitUntil && state.budgetUntil && <p className="t-why">{t.window.budgetUntil(clock(language, state.budgetUntil)!)}</p>}
+      {state.machineDrain && state.machineDrain.state !== 'postponed' && <p className="t-why">{t.window.machineDrain}</p>}
+    </>
+  );
+}
+
 export function AgentWindow({ me, org, agentId, staff = null, onClose, place, requests = [], onRequestsChanged = () => {} }: Props) {
   const t = useT();
   const { language } = useLanguage();
@@ -675,12 +691,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
         </div>
       )}
       {known && <ComputerStrip machines={computer ? [computer] : []} onChange={next => mounted.current && setComputer(next)} onFailure={err => mounted.current && setFailure(err)} />}
-      {known && !ready && <p className="t-why">{reasonText(t, state.reason, sub)}</p>}
-      {known && state.turnRefused && <p className="t-why" role="status">{t.window.turnRefused[state.turnRefused]}</p>}
-      {known && state.browserError && <p className="t-why">{browserWarning(t, state.browserError, sub)}</p>}
-      {known && state?.limitUntil && <p className="t-why">{t.window.limitUntil(clock(language, state.limitUntil)!)}</p>}
-      {known && !state?.limitUntil && state?.budgetUntil && <p className="t-why">{t.window.budgetUntil(clock(language, state.budgetUntil)!)}</p>}
-      {known && state?.machineDrain && state.machineDrain.state !== 'postponed' && <p className="t-why">{t.window.machineDrain}</p>}
+      {known && <StateNotes state={state} ready={ready} sub={sub} />}
       {dragging && (
         <div className="t-drop" role="status">
           {t.window.dropPictures}

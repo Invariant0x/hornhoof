@@ -196,14 +196,16 @@ export class TurnWords {
 
   unheard(now: number, gone = false, idle = true): { text: string; jobId: string | null; reason?: string; operatorDelivery?: OperatorDelivery }[] {
     const expired = gone || (this.endedAt !== null && now - this.endedAt >= UNHEARD_MS);
-    return this.words.filter(word => this.returnWords(word, expired, gone || idle)).flatMap(word => {
-      const reason = word.state === 'removed' ? 'the program removed the queued words' : null;
-      word.state = 'discarded';
-      /* A person who took their words back, or whose words the program kept, has them; Hornhoof does not type them. */
-      if (word.typed) return [];
-      this.told(word, 'not_taken');
-      return [{ text: word.text, jobId: word.jobId, ...(reason ? { reason } : {}), ...withDelivery(word.operatorDelivery) }];
-    });
+    return this.words.filter(word => this.returnWords(word, expired, gone || idle)).flatMap(word => this.returned(word));
+  }
+
+  private returned(word: WordReceipt) {
+    const reason = word.state === 'removed' ? 'the program removed the queued words' : null;
+    word.state = 'discarded';
+    /* A person who took their words back, or whose words the program kept, has them; Hornhoof does not type them. */
+    if (word.typed) return [];
+    this.told(word, 'not_taken');
+    return [{ text: word.text, jobId: word.jobId, ...(reason ? { reason } : {}), ...withDelivery(word.operatorDelivery) }];
   }
 
   private returnWords(word: WordReceipt, expired: boolean, idle: boolean): boolean {

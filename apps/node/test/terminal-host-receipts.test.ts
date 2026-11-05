@@ -907,6 +907,21 @@ describe('a letter delivered in the last seconds of a turn, which Claude takes a
     await until(() => c.sent.some(m => m.type === 'job.done' && m.jobId === 'second'));
   });
 
+  it('counts words into the turn when they never showed in the queue, and leaves words it does not know alone', async () => {
+    const c = await atWork('claude', 'queued');
+    const words = new TurnWords();
+    words.add('words without a receipt', 'job-receipt');
+    c.host['agents'].get('receipt')!.waitingWords.push(words);
+    for (const text of ['words nobody typed', 'words without a receipt']) {
+      c.record(claudeQueue('dequeue', text));
+      c.record({ type: 'user', message: { role: 'user', content: text } });
+    }
+    c.finish();
+    await c.running;
+    expect(words.pending()).toEqual([]);
+    expect(c.sent.some(m => m.type === 'turn.open')).toBe(false);
+  });
+
   it('stays in the turn when Claude goes on after taking it', async () => {
     const c = await atWork('claude', 'pasted');
     expect(await c.host.say('receipt', TEXT)).toBe(true);
@@ -953,7 +968,7 @@ describe('keys of the owner while their view of the session opens', () => {
     vi.spyOn(tmux, 'run').mockResolvedValue('');
     let opened!: () => void;
     const held = new Promise<void>(done => (opened = done));
-    vi.spyOn(c.host as never, 'ensureSession').mockImplementation((() => held) as never);
+    vi.spyOn(c.host as unknown as { ensureSession(): Promise<void> }, 'ensureSession').mockImplementation(() => held);
     return { c, stdin, opened, child };
   };
 

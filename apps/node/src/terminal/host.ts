@@ -1243,16 +1243,26 @@ export class TerminalHost {
     const unanswered = end.status === 'stopped' ? null : a.unanswered;
     a.unanswered = null;
     this.acceptedEnd(a, end);
-    if (unanswered) {
-      a.originalTaken = { jobId: unanswered.jobId!, text: unanswered.text, operatorDelivery: unanswered.operatorDelivery };
-      void this.openTyped(a, unanswered.text, true);
-    }
+    if (unanswered) this.openUnanswered(a, unanswered);
+  }
+
+  private openUnanswered(a: Agent, words: TakenWords): void {
+    a.originalTaken = { jobId: words.jobId!, text: words.text, operatorDelivery: words.operatorDelivery };
+    void this.openTyped(a, words.text, true);
   }
 
   private acceptedEnd(a: Agent, end: TurnEnd): void {
     this.clearQuestion(a);
     this.operator?.intentional(a.key, end.status === 'stopped' ? 'cancelled' : 'completed');
     if (a.turn) this.endWords(a, a.turn);
+    this.notBusyAfter(a, end);
+    const turn = a.turn;
+    if (turn) turn.ending = end;
+    if (!turn?.typed) return a.ended?.resolve(end.message);
+    this.settleTyped(a, end, turn);
+  }
+
+  private notBusyAfter(a: Agent, end: TurnEnd): void {
     if (a.pressed) a.pressed.until ??= Date.now() + UNHEARD_MS;
     a.busy = false;
     a.retry = null;
@@ -1260,9 +1270,9 @@ export class TerminalHost {
     a.question = null;
     a.stopped = end.status === 'stopped';
     a.failure = end.failure ?? null;
-    const turn = a.turn;
-    if (turn) turn.ending = end;
-    if (!turn?.typed) return a.ended?.resolve(end.message);
+  }
+
+  private settleTyped(a: Agent, end: TurnEnd, turn: Turn): void {
     const error = endedError(a.stopped, end.failure, a.signedOut);
     const settling = this.settle(a, end.message);
     a.settling = settling;
@@ -1441,6 +1451,7 @@ export class TerminalHost {
       }
       this.called(a, data);
       if (a.program?.kind === 'claude') {
+        if (wentOn(raw)) a.unanswered = null;
         this.dequeuedPrompt(a, raw);
         if (this.stoppable(a) && claudeInterrupted(data)) this.interrupted(a);
         if (this.stoppable(a) && raw.type === 'assistant' && raw.isApiErrorMessage === true) {
@@ -1507,11 +1518,11 @@ export class TerminalHost {
 
   private claudeReceivedWords(a: Agent, line: Record<string, unknown>): void {
     const receipt = claudeWordReceipt(line, a.enqueuedWords);
-    if (!receipt) return;
-    for (const words of waitingWords(a)) {
-      if (this.receiveClaudeWord(words, receipt)) return;
-    }
-    if (receipt.state === 'queued') this.ownerQueued(a, receipt.text);
+    if (receipt && !this.knownClaudeWord(a, receipt) && receipt.state === 'queued') this.ownerQueued(a, receipt.text);
+  }
+
+  private knownClaudeWord(a: Agent, receipt: NonNullable<ReturnType<typeof claudeWordReceipt>>): boolean {
+    return [...waitingWords(a)].some(words => this.receiveClaudeWord(words, receipt));
   }
 
   /* Words the program queued that Hornhoof did not type, right after the owner's Enter, are what the owner typed. */
@@ -1556,7 +1567,6 @@ export class TerminalHost {
   }
 
   private dequeuedPrompt(a: Agent, line: Record<string, unknown>): void {
-    if (line.type === 'assistant' || (line.type === 'queue-operation' && line.operation !== 'dequeue')) a.unanswered = null;
     if (line.type === 'queue-operation' && line.operation === 'dequeue') a.dequeued = true;
     if (!a.dequeued || line.type !== 'user' || !isRecord(line.message)) return;
     a.dequeued = false;
@@ -1787,11 +1797,8 @@ export class TerminalHost {
         if (used !== null) this.context(a, used);
         return;
       }
-      case 'queued': {
-        const text = contentText(data.prompt ?? data.input);
-        if (!a.turn?.words.queued(text, 'hook')) this.ownerQueued(a, text);
-        return;
-      }
+      case 'queued':
+        return this.queuedHook(a, data);
       case 'prompt': {
         const prompt = typeof data.prompt === 'string' ? data.prompt : contentText(data.prompt);
         const retained = this.takeRetainedAssignment(a, prompt);
@@ -1885,6 +1892,11 @@ export class TerminalHost {
     const retained = this.takeRetainedAssignment(a, prompt);
     if (a.typing !== null && !retained) a.turn?.words.taken(prompt);
     a.typing = null;
+  }
+
+  private queuedHook(a: Agent, data: Record<string, unknown>): void {
+    const text = contentText(data.prompt ?? data.input);
+    if (!a.turn?.words.queued(text, 'hook')) this.ownerQueued(a, text);
   }
 
   private async prompted(a: Agent, prompt: string): Promise<void> {
@@ -2340,10 +2352,19 @@ export class TerminalHost {
     if (!a.turn) a.hash = null;
   }
 
+  private expectKeys({ termId, write }: Msg<'term.open'>): void {
+    if (write) this.earlyKeys.set(termId, []);
+  }
+
+  private earlyKeysGo(termId: string, view: View): void {
+    for (const keys of this.earlyKeys.get(termId) ?? []) this.ownerTyped(view, keys);
+    this.earlyKeys.delete(termId);
+  }
+
   private async openView(m: Msg<'term.open'>): Promise<void> {
     const a = this.agent(m.agentKey);
     this.viewsOpening.add(m.termId);
-    if (m.write) this.earlyKeys.set(m.termId, []);
+    this.expectKeys(m);
     this.wanted.set(m.termId, { key: m.agentKey, size: { cols: m.cols, rows: m.rows } });
     /* Someone who may type gets the program at once, to talk to it; watchers see it once it has a turn. */
     const starts = m.write && !a.turn && !(a.hash && (await this.opts.tmux.alive(a.name)));
@@ -2362,8 +2383,7 @@ export class TerminalHost {
     const child = this.opts.tmux.attach(a.name, shown.cols, shown.rows, m.write);
     const view: View = { child, key: m.agentKey, write: m.write, mask: new StreamMask(this.opts.secrets), decoder: new StringDecoder('utf8'), pending: '', timer: null, quiet: null, shown, applied: shown, tty: null, out: () => {} };
     this.views.set(m.termId, view);
-    for (const keys of this.earlyKeys.get(m.termId) ?? []) this.ownerTyped(view, keys);
-    this.earlyKeys.delete(m.termId);
+    this.earlyKeysGo(m.termId, view);
     a.viewers++;
     /* A watcher of an agent that sleeps sees the waiting screen; anyone else, a loader until the program is up. */
     if (starts || a.turn || a.up) this.opts.send({ type: 'term.program', termId: m.termId, running: a.up && !starts });
@@ -2402,19 +2422,23 @@ export class TerminalHost {
   }
 
   input(m: Msg<'term.input'>): void {
-    const early = this.earlyKeys.get(m.termId);
-    if (early) {
-      if (early.length < MAX_EARLY_KEYS) early.push(m);
-      return;
-    }
     const view = this.views.get(m.termId);
     if (view?.write) this.ownerTyped(view, m);
+    else this.keepEarly(m);
+  }
+
+  private keepEarly(m: Msg<'term.input'>): void {
+    const early = this.earlyKeys.get(m.termId);
+    if (early && early.length < MAX_EARLY_KEYS) early.push(m);
   }
 
   private ownerTyped(view: View, { data, pressedIn }: Msg<'term.input'>): void {
     this.operator?.ownerInput(view.key);
     const a = this.agents.get(view.key);
-    if (!a) return;
+    if (a) this.ownerKeys(a, view, data, pressedIn);
+  }
+
+  private ownerKeys(a: Agent, view: View, data: string, pressedIn?: string): void {
     if (pressedIn) a.pressed = { jobId: pressedIn, at: Date.now(), until: a.turn && !this.overIn(a) ? null : Date.now() + UNHEARD_MS };
     void this.inputLane(a, async () => { view.child.stdin?.write(data); });
   }
@@ -2561,6 +2585,9 @@ function stopsAtSetup(step: Awaited<ReturnType<typeof pastColors>>, stuck: boole
 function hasOwnThought(a: Agent, line: Record<string, unknown>): boolean {
   return Boolean(a.program && activeTurn(a) && ownThought(a.program.kind, line, a.programTurnId));
 }
+
+/* Claude tells of a step of its turn, or of its queue again: words it took before that were part of the turn. */
+const wentOn = (line: Record<string, unknown>): boolean => line.type === 'assistant' || (line.type === 'queue-operation' && line.operation !== 'dequeue');
 
 function waitingWords(a: Agent): Set<TurnWords> {
   return new Set([...a.waitingWords, ...(a.turn ? [a.turn.words] : [])]);
