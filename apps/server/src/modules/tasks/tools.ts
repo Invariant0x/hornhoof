@@ -20,7 +20,8 @@ import { WaitInput, waitFor } from './external-wait.js';
 import { pipelineReport } from './pipeline-report.js';
 import { commitProof, proofLine } from '../testruns/commit-proof.js';
 import { keptEvidence, noProofNote, taskEvidence } from '../testruns/evidence.js';
-import { ReviewSha, reviewContext } from './review-context.js';
+import { ReviewSha, ReviewSubmission, reviewContext } from './review-context.js';
+import { taskReviewPlan } from './review-plan.js';
 
 export type ToolJob = { id: string; companyId: string; agentId: string; agentKind: 'orchestrator' | 'head' | 'worker' };
 type Agent = typeof agents.$inferSelect;
@@ -188,7 +189,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     },
     async ({ task: ref }) =>
       find(ref).then(
-        async ({ agent, task }) => say(fitted({ ...await taskDetail(ctx, task, t => sees(agent, t)), review: await reviewContext(db, task.id) })),
+        async ({ agent, task }) => say(fitted({ ...await taskDetail(ctx, task, t => sees(agent, t)), review: await reviewContext(db, task.id), reviewPlan: await taskReviewPlan(db, task.id) })),
         (err: unknown) => (err instanceof ApiError ? say(err.message, true) : Promise.reject(err)),
       ),
   );
@@ -443,13 +444,13 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
       'submit',
       {
         description: 'Hands your finished work on a task to its first gate (or closes it when it has none). summary: what you did; evidence: the command you ran and what it printed, the link, the check.',
-        inputSchema: { task: Ref, summary: Text.trim().min(1), evidence: Text.trim().min(1) },
+        inputSchema: { task: Ref, summary: Text.trim().min(1), evidence: Text.trim().min(1), review: ReviewSubmission.optional() },
       },
-      async ({ task: ref, summary, evidence }) =>
+      async ({ task: ref, summary, evidence, review }) =>
         run(async () => {
           const { task } = await find(ref);
           plain(task, summary, evidence);
-          const moved = await submit(ctx, job.agentId, task.id, { summary, evidence });
+          const moved = await submit(ctx, job.agentId, task.id, { summary, evidence, review });
           return { text: `Submitted. ${await where(moved.task)}`, moved };
         }),
     );

@@ -18,14 +18,15 @@ async function company({ repository = true, reviewers = true, productRepository 
   const [ceo] = await db.select().from(people);
   const [claude] = await db.select().from(subscriptions);
   const [codex] = await db.insert(subscriptions).values({ companyId, provider: 'codex', kind: 'personal', label: 'Codex', ownerPersonId: ceo!.id, status: 'ready' }).returning();
+  const [authorPlan] = await db.insert(subscriptions).values({ companyId, provider: 'kimi', kind: 'personal', label: 'Authors', ownerPersonId: ceo!.id, status: 'ready' }).returning();
   const [dev] = await db.insert(departments).values({ companyId, templateKey: 'development', roleCode: 'DEV', repoUrl: repository && !productRepository ? 'https://github.com/acme/shop.git' : null }).returning();
   /* A product of the department, when only the product has the repository. */
   const [product] = productRepository ? await db.insert(departments).values({ companyId, parentId: dev!.id, name: 'Shop', roleCode: 'DEV', repoUrl: 'https://github.com/acme/shop.git' }).returning() : [];
   const hire = async (name: string, kind: 'head' | 'worker', roleKey: string, sub: string | null = claude!.id) =>
     (await db.insert(agents).values({ companyId, kind, name, roleKey, departmentId: dev!.id, model: '', subscriptionId: sub }).returning())[0]!;
   const head = await hire('Hana', 'head', 'DEV-HEAD');
-  const bruno = await hire('Bruno', 'worker', 'DEV-BE');
-  const kai = await hire('Kai', 'worker', 'DEV-FE');
+  const bruno = await hire('Bruno', 'worker', 'DEV-BE', authorPlan!.id);
+  const kai = await hire('Kai', 'worker', 'DEV-FE', authorPlan!.id);
   const rita = reviewers ? await hire('Rita', 'worker', 'DEV-REV') : null;
   const rex = reviewers ? await hire('Rex', 'worker', 'DEV-REV', codex!.id) : null;
   const sid = reviewers ? await hire('Sid', 'worker', 'DEV-SEC', sidPlan ? claude!.id : null) : null;
@@ -292,10 +293,10 @@ describe('the review of a turn', () => {
 
     const events = await db.select().from(taskEvents).where(and(eq(taskEvents.taskId, review!.id), eq(taskEvents.kind, 'verdict')));
     const byAgent = new Map(events.map(e => [e.agentId, e.data]));
-    expect(byAgent.get(rita!.id)).toEqual({ pass: false, stage: 1, round: 0, findings: 2 });
-    expect(byAgent.get(rex!.id)).toEqual({ pass: true, stage: 1, round: 0 });
+    expect(byAgent.get(rita!.id)).toMatchObject({ pass: false, stage: 1, round: 0, findings: 2 });
+    expect(byAgent.get(rex!.id)).toMatchObject({ pass: true, stage: 1, round: 0 });
     expect('findings' in byAgent.get(rex!.id)!).toBe(false);
-    expect(byAgent.get(sid!.id)).toEqual({ pass: true, stage: 1, round: 0, findings: 0 });
+    expect(byAgent.get(sid!.id)).toMatchObject({ pass: true, stage: 1, round: 0, findings: 0 });
   });
 
   it('never puts a sub-unit employee into a task gate, the review of a turn, or the final check even when its role fits', async () => {
