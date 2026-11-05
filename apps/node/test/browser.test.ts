@@ -1,4 +1,4 @@
-import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -12,7 +12,6 @@ import {
   prepareBrowser,
   readBrowserError,
   SEED_BROWSERS_PATH,
-  shareTree,
   startupBrowserCheck,
   summarizeBrowserError,
   verifyBrowser,
@@ -150,9 +149,6 @@ describe('prepareBrowser', () => {
     expect(existsSync(join(browsersDir(dir), 'chromium-1248', 'INSTALLATION_COMPLETE'))).toBe(true);
     expect(statSync(join(browsersDir(dir), 'chromium-1248', 'run')).mode & 0o777).toBe(0o755);
     expect(statSync(join(browsersDir(dir), 'chromium-1248', 'INSTALLATION_COMPLETE')).mode & 0o777).toBe(0o644);
-    if (process.getuid) {
-      shareTree(join(browsersDir(dir), 'chromium-1248'), { uid: process.getuid(), gid: 99999 });
-    }
     expect(browserEnv(dir)).toEqual({ PLAYWRIGHT_BROWSERS_PATH: browsersDir(dir), PLAYWRIGHT_SKIP_BROWSER_GC: '1' });
 
     const second = await prepareBrowser({
@@ -223,6 +219,168 @@ describe('prepareBrowser', () => {
       },
     });
     expect(result).toEqual({ status: 'not_needed' });
+  });
+});
+
+describe('links in the shared browsers', () => {
+  const FOLDERS = ['chromium-1248', 'chromium_headless_shell-1248', 'ffmpeg-1013'];
+
+  /* A seed every user can read, so prepareBrowser links its folders. */
+  function worldSeed(): string {
+    const seedDir = makeTemp('hh-world-seed-');
+    chmodSync(seedDir, 0o755);
+    markInstalled(seedDir, FOLDERS);
+    for (const folder of FOLDERS) {
+      chmodSync(join(seedDir, folder), 0o755);
+      chmodSync(join(seedDir, folder, 'run'), 0o755);
+      chmodSync(join(seedDir, folder, 'INSTALLATION_COMPLETE'), 0o644);
+    }
+    return seedDir;
+  }
+
+  function lockedRepo(version: string): string {
+    const repo = makeTemp('hh-repo-');
+    writeFileSync(join(repo, 'package-lock.json'), JSON.stringify({ packages: { 'node_modules/@playwright/test': { version } } }));
+    return repo;
+  }
+
+  function planted(): string {
+    const dir = makeTemp('hh-planted-');
+    markInstalled(dir, FOLDERS);
+    writeFileSync(join(dir, 'evil'), 'planted');
+    return dir;
+  }
+
+  const gone = (path: string) => lstatSync(path, { throwIfNoEntry: false }) === undefined;
+
+  /* The node as it starts: the image's package at the version the repository locks, the image's browsers. */
+  function setUp() {
+    const dir = makeTemp();
+    const target = browsersDir(dir);
+    mkdirSync(target, { recursive: true });
+    const seedDir = worldSeed();
+    const globalPlaywrightDir = fakePlaywrightPackage(makeTemp('hh-global-'), '1.64.1', '1248');
+    const repoDir = lockedRepo('1.64.1');
+    const ready = () => prepareBrowser({ dir, repoDir, seedDir, globalPlaywrightDir, isRoot: false, runCommand: async () => { throw new Error('nothing should be installed'); } });
+    return { dir, target, seedDir, ready };
+  }
+
+  it("keeps the image's own folder where a link leads elsewhere, and drops every other link", async () => {
+    const { target, seedDir, ready } = setUp();
+    const elsewhere = planted();
+    symlinkSync(join(elsewhere, 'chromium-1248'), join(target, 'chromium-1248'));
+    symlinkSync(elsewhere, join(target, 'stray'));
+    /* Into the seed, but not to the folder of its own name. */
+    symlinkSync(join(seedDir, 'ffmpeg-1013'), join(target, 'chromium_headless_shell-1248'));
+    await expect(ready()).resolves.toMatchObject({ status: 'ready', downloaded: false });
+    expect(readlinkSync(join(target, 'chromium-1248'))).toBe(join(seedDir, 'chromium-1248'));
+    expect(readlinkSync(join(target, 'chromium_headless_shell-1248'))).toBe(join(seedDir, 'chromium_headless_shell-1248'));
+    expect(gone(join(target, 'stray'))).toBe(true);
+    expect(existsSync(join(elsewhere, 'evil'))).toBe(true);
+  });
+
+  it("leaves a link of the image's own folder alone", async () => {
+    const { target, seedDir, ready } = setUp();
+    await ready();
+    const before = lstatSync(join(target, 'chromium-1248')).ino;
+    await ready();
+    expect(lstatSync(join(target, 'chromium-1248')).ino).toBe(before);
+    expect(readlinkSync(join(target, 'chromium-1248'))).toBe(join(seedDir, 'chromium-1248'));
+  });
+
+  it('drops a browser folder with a link that leads out of it, whichever way the link goes', async () => {
+    const { target, seedDir, ready } = setUp();
+    const elsewhere = planted();
+    markInstalled(target, FOLDERS);
+    /* Straight out. */
+    symlinkSync(join(elsewhere, 'evil'), join(target, 'chromium-1248', 'chrome'));
+    /* Out only once the link inside it is followed: the path alone seems to stay inside. */
+    mkdirSync(join(target, 'outside'));
+    writeFileSync(join(target, 'outside', 'evil'), 'planted');
+    const deep = join(target, 'chromium_headless_shell-1248', 'a', 'b', 'c');
+    mkdirSync(deep, { recursive: true });
+    symlinkSync('../..', join(deep, 'up'));
+    symlinkSync('up/../../outside', join(deep, 'out'));
+    /* Leads nowhere. */
+    symlinkSync(join(elsewhere, 'gone'), join(target, 'ffmpeg-1013', 'broken'));
+    await ready();
+    for (const folder of FOLDERS) expect(readlinkSync(join(target, folder))).toBe(join(seedDir, folder));
+    expect(existsSync(join(elsewhere, 'evil'))).toBe(true);
+  });
+
+  it('keeps a browser folder whose links stay inside it, as Chromium for a Mac has them', async () => {
+    const { target, ready } = setUp();
+    markInstalled(target, FOLDERS);
+    mkdirSync(join(target, 'chromium-1248', 'Versions', '130'), { recursive: true });
+    writeFileSync(join(target, 'chromium-1248', 'Versions', '130', 'kept'), '');
+    symlinkSync('130', join(target, 'chromium-1248', 'Versions', 'Current'));
+    await ready();
+    expect(lstatSync(join(target, 'chromium-1248')).isSymbolicLink()).toBe(false);
+    expect(existsSync(join(target, 'chromium-1248', 'Versions', 'Current', 'kept'))).toBe(true);
+  });
+
+  it('drops a link in place of the folder of packages, a link in the npm cache, and a link in place of the shared folder itself', async () => {
+    const { dir, target, ready } = setUp();
+    const elsewhere = planted();
+    symlinkSync(elsewhere, join(target, '.playwright'));
+    mkdirSync(join(target, '.npm-cache'));
+    symlinkSync(elsewhere, join(target, '.npm-cache', 'out'));
+    await ready();
+    expect(gone(join(target, '.playwright'))).toBe(true);
+    expect(gone(join(target, '.npm-cache'))).toBe(true);
+
+    rmSync(target, { recursive: true });
+    symlinkSync(elsewhere, target);
+    await ready();
+    expect(lstatSync(browsersDir(dir)).isSymbolicLink()).toBe(false);
+    expect(readdirSync(elsewhere).sort()).toEqual([...FOLDERS, 'evil'].sort());
+  });
+
+  it('installs a cached package again when a link in it leads out, keeps one whose links stay inside, and judges each version by itself', async () => {
+    const dir = makeTemp();
+    const target = browsersDir(dir);
+    const elsewhere = planted();
+    const version = (name: string, rev: string) => fakePlaywrightPackage(join(target, '.playwright', name), name, rev);
+    const bad = version('1.65.0', '1260');
+    const good = version('1.66.0', '1270');
+    mkdirSync(join(target, '.playwright', '1.66.0', 'node_modules', '.bin'));
+    symlinkSync('../playwright/cli.js', join(target, '.playwright', '1.66.0', 'node_modules', '.bin', 'playwright'));
+    symlinkSync(join(elsewhere, 'evil'), join(bad, 'node_modules', 'playwright-core', 'index.js'));
+
+    const npm: string[] = [];
+    const runCommand = async (bin: string, args: string[], env: NodeJS.ProcessEnv) => {
+      if (bin === 'npm') {
+        npm.push(args.at(-1)!);
+        fakePlaywrightPackage(args[args.indexOf('--prefix') + 1]!, '1.65.0', '1260');
+      } else markInstalled(env.PLAYWRIGHT_BROWSERS_PATH!, ['chromium-1260', 'chromium_headless_shell-1260', 'chromium-1270', 'chromium_headless_shell-1270']);
+      return { code: 0, output: '', timedOut: false };
+    };
+    const options = { dir, seedDir: makeTemp('hh-empty-seed-'), globalPlaywrightDir: makeTemp('hh-global-'), isRoot: false, runCommand };
+
+    await expect(prepareBrowser({ ...options, repoDir: lockedRepo('1.66.0') })).resolves.toMatchObject({ status: 'ready', playwrightDir: good });
+    expect(npm).toEqual([]);
+    expect(existsSync(bad)).toBe(false);
+
+    const again = await prepareBrowser({ ...options, repoDir: lockedRepo('1.65.0') });
+    expect(again).toMatchObject({ status: 'ready', playwrightDir: bad });
+    expect(npm).toEqual(['playwright@1.65.0']);
+    expect(gone(join(bad, 'node_modules', 'playwright-core', 'index.js'))).toBe(true);
+    expect(readFileSync(join(good, 'package.json'), 'utf8')).toContain('1.66.0');
+  });
+
+  it('keeps a copy of a restricted seed through the next start, its links as the seed has them', async () => {
+    const { dir, target, seedDir } = setUp();
+    const restricted = join(seedDir, 'ffmpeg-1013');
+    chmodSync(join(restricted, 'INSTALLATION_COMPLETE'), 0o600);
+    symlinkSync('run', join(restricted, 'run-link'));
+    const globalPlaywrightDir = fakePlaywrightPackage(makeTemp('hh-global-'), '1.64.1', '1248');
+    const ready = () => prepareBrowser({ dir, repoDir: lockedRepo('1.64.1'), seedDir, globalPlaywrightDir, isRoot: false });
+    await ready();
+    expect(lstatSync(join(target, 'ffmpeg-1013')).isSymbolicLink()).toBe(false);
+    expect(readlinkSync(join(target, 'ffmpeg-1013', 'run-link'))).toBe('run');
+    writeFileSync(join(target, 'ffmpeg-1013', 'kept'), '');
+    await ready();
+    expect(existsSync(join(target, 'ffmpeg-1013', 'kept'))).toBe(true);
   });
 });
 
@@ -410,25 +568,25 @@ describe('verifyBrowser and prepareAndVerifyBrowser', () => {
     const lowUser = { uid: FIRST_UID - 1, gid: FIRST_UID - 1 };
     const sysDir = makeTemp('hh-sysfiles-');
     const files = { passwd: join(sysDir, 'passwd'), group: join(sysDir, 'group') };
-    await ensureRepoBrowser(makeTemp('hh-low-uid-'), plainRepo, null, lowUser, files);
+    await ensureRepoBrowser(makeTemp('hh-low-uid-'), plainRepo, lowUser, files);
     expect(existsSync(files.passwd)).toBe(false);
-    await ensureRepoBrowser(dir, plainRepo, null, jobUser, files);
+    await ensureRepoBrowser(dir, plainRepo, jobUser, files);
     expect(readFileSync(files.passwd, 'utf8')).toContain(`hh${FIRST_UID}:x:${FIRST_UID}:${FIRST_UID}`);
 
     const badRepo = makeTemp('hh-bad-ensure-');
     writeFileSync(join(badRepo, 'package-lock.json'), JSON.stringify({ packages: { 'node_modules/@playwright/test': { version: '9.9.9' } } }));
     mkdirSync(join(badRepo, 'node_modules', 'playwright'), { recursive: true });
     writeFileSync(join(badRepo, 'node_modules', 'playwright', 'package.json'), JSON.stringify({ version: '9.9.9' }));
-    await expect(ensureRepoBrowser(makeTemp(), badRepo, null, null)).rejects.toThrow('Playwright Chromium could not start:');
+    await expect(ensureRepoBrowser(makeTemp(), badRepo, null)).rejects.toThrow('Playwright Chromium could not start:');
 
     if (existsSync(GLOBAL_PLAYWRIGHT_DIR) && existsSync(SEED_BROWSERS_PATH)) {
-      expect(await startupBrowserCheck(makeTemp('hh-startup-null-'), null, null)).toBeNull();
+      expect(await startupBrowserCheck(makeTemp('hh-startup-null-'), null)).toBeNull();
     }
     const sysDir2 = makeTemp('hh-sysfiles-2-');
     const files2 = { passwd: join(sysDir2, 'passwd'), group: join(sysDir2, 'group') };
-    await startupBrowserCheck(makeTemp('hh-startup-low-'), null, lowUser, files2);
+    await startupBrowserCheck(makeTemp('hh-startup-low-'), lowUser, files2);
     expect(existsSync(files2.passwd)).toBe(false);
-    await startupBrowserCheck(makeTemp('hh-startup-job-'), null, jobUser, files2);
+    await startupBrowserCheck(makeTemp('hh-startup-job-'), jobUser, files2);
     expect(readFileSync(files2.passwd, 'utf8')).toContain(`hh${FIRST_UID}:x:${FIRST_UID}:${FIRST_UID}`);
   });
 });

@@ -681,8 +681,7 @@ async function status(dir: string, io: Io): Promise<number> {
 }
 
 async function prepareBrowserCommand(dir: string, repoArg: string | undefined, io: Io): Promise<number> {
-  const owner = agentUser();
-  const res = await prepareAndVerifyBrowser({ dir, ...(repoArg ? { repoDir: resolve(repoArg) } : {}), owner, verifyUser: owner });
+  const res = await prepareAndVerifyBrowser({ dir, ...(repoArg ? { repoDir: resolve(repoArg) } : {}), verifyUser: agentUser() });
   if (!res.ok) {
     io.stderr.write(`Playwright Chromium could not start: ${res.error}\n`);
     return 1;
@@ -804,7 +803,7 @@ async function run(dir: string, builtinMode: boolean, io: Io): Promise<number | 
     if (user) secureNode(dir, user);
     /* Test runs get a user of their own, apart from the agents' sign-in and folders. */
     const testUser = user ? userFor(dir, 'tests', true) : null;
-    const checkBrowser = () => startupBrowserCheck(dir, user, user);
+    const checkBrowser = () => startupBrowserCheck(dir, user);
     if (state && !state.provider) return runNode({ dir, adapter: machineOnly, log, testUser, build, checkBrowser });
     const provider = state?.provider ?? 'claude';
     const fs = user ? agentFs(user) : ownFs;
@@ -825,8 +824,8 @@ async function run(dir: string, builtinMode: boolean, io: Io): Promise<number | 
   const pick = (job: JobRun) => withInstall(builtinPick(job), tools, job.provider);
   const managed = (['anthropic_api', 'openai_api'] as const).map(provider => ({ provider, adapter: adapterFor(provider, { home: dir, tools }) }));
   const testUser = userFor(dir, 'tests');
-  const browserOwner = agentUser();
-  const checkBrowser = () => startupBrowserCheck(dir, browserOwner, testUser || browserOwner);
+  const verifyUser = testUser || agentUser();
+  const checkBrowser = () => startupBrowserCheck(dir, verifyUser);
   return runNode({ dir, adapter: pick, programs: managedUpdates(tools, managed), builtin: { server, key }, log, testUser, build, checkBrowser });
 }
 

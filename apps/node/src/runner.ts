@@ -181,8 +181,8 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
     const repoEnv = repo ? await prepareRepo(workDir, repo, { user: adapter.owner?.user ?? null, home: adapter.owner?.home ?? null }, git) : undefined;
     if (repo) {
       const repoDir = join(workDir, repoFolder(repo.url));
-      const owner = adapter.owner ? adapter.owner.user : null;
-      await (prepareRepoBrowser ? prepareRepoBrowser(repoDir) : ensureRepoBrowser(dir, repoDir, owner, owner)).catch((err: unknown) =>
+      const verifyUser = adapter.owner ? adapter.owner.user : null;
+      await (prepareRepoBrowser ? prepareRepoBrowser(repoDir) : ensureRepoBrowser(dir, repoDir, verifyUser)).catch((err: unknown) =>
         writeBrowserError(dir, message(err).replace(/^Playwright Chromium could not start:\s*/, '')),
       );
     }

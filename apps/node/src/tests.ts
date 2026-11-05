@@ -390,7 +390,7 @@ export async function runTests(msg: TestRun, { dir, user, hidden, signal, proc =
       await git(['rev-parse', 'HEAD'], repo, head);
       commit = /^[0-9a-f]{40,64}$/.exec(head.text().trim())?.[0] ?? null;
       if (commit) out.line(`At ${commit}.`);
-      await (prepareRepoBrowser ? prepareRepoBrowser(repo) : ensureRepoBrowser(dir, repo, user, user));
+      await (prepareRepoBrowser ? prepareRepoBrowser(repo) : ensureRepoBrowser(dir, repo, user));
     }
     if (!error && work && msg.files?.length) {
       for (const name of msg.files) {
