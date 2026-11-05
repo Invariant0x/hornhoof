@@ -113,6 +113,14 @@ def db() -> sqlite3.Connection:
     return conn
 
 
+def close_db() -> None:
+    """Close this thread's connection, which db() would leave open for the garbage collector once the thread ends."""
+    conn = getattr(_local, 'conn', None)
+    if conn is not None:
+        conn.close()
+        _local.conn = None
+
+
 # Every object of the schema, by the name sqlite_master knows it by.
 SCHEMA = {
     'bindings': '''CREATE TABLE IF NOT EXISTS bindings (
@@ -196,9 +204,13 @@ def declared_body_length(headers) -> int | None:
     return int(values[0])
 
 
+def label_valid(name: str) -> bool:
+    return LABEL.fullmatch(name) is not None and name[2:4] != '--'
+
+
 def check_name(name: str):
     """None when the name can be bound, else 'invalid', 'reserved' or 'taken'. A banned name counts as reserved."""
-    if not LABEL.fullmatch(name) or name[2:4] == '--':
+    if not label_valid(name):
         return 'invalid'
     if name in reserved_names():
         return 'reserved'
@@ -441,9 +453,27 @@ def frps_route(name: str) -> tuple[str, str | None, str | None]:
     return 'absent', None, None
 
 
+def pending_lapsed(since: int, t: int) -> bool:
+    """A registration frps has not shown by now is taken never to come (R2.1)."""
+    return t - since > PENDING_S
+
+
+def route_pending(name: str) -> bool:
+    """Whether the plugin let a registration of this name through that frps has not shown yet. Only the relay's row knows
+    of it: frps asks the plugin before it makes the proxy, and its dashboard says nothing until then."""
+    row = db().execute('SELECT state, since FROM routes WHERE name = ?', (name,)).fetchone()
+    return row is not None and row[0] == 'pending' and not pending_lapsed(row[1], now())
+
+
 def name_live(name: str) -> bool:
-    """R1.5: a freed name waits for its old route; an unknown dashboard raises."""
-    return frps_route(name)[0] == 'online'
+    """R1.5: a freed name waits for its old route, shown by frps or only registered so far; an unknown dashboard raises.
+
+    The row goes first: it leaves pending only once frps shows the route, so the later look at frps sees what the row no
+    longer says. These are reads alone, so that a public question moves no row and takes no lock: no registration can land
+    after them, since this name has no binding by now and a row needs one (store_route).
+    """
+    pending = route_pending(name)
+    return frps_route(name)[0] == 'online' or pending
 
 
 def requested_name_reason(name: str) -> str | None:
@@ -705,7 +735,7 @@ def straighten_route(name: str, row, status: str, t: int) -> None:
     elif state == 'held':
         write("UPDATE routes SET state = 'empty', since = ? WHERE name = ? AND generation = ? "
               "AND state = 'held'", (t, name, generation))
-    elif state == 'pending' and t - row[5] > PENDING_S:
+    elif state == 'pending' and pending_lapsed(row[5], t):
         write("UPDATE routes SET state = 'empty', since = ? WHERE name = ? AND generation = ? "
               "AND state = 'pending'", (t, name, generation))
 
@@ -865,23 +895,36 @@ def register_locked(name: str, content: dict, user: dict) -> str | None:
     return upsert_route(name, content, user)
 
 
-def upsert_route(name: str, content: dict, user: dict) -> str | None:
-    """Write the pending row for a let-through registration; a refusal when the write cannot land."""
+def route_columns(name: str, content: dict, user: dict) -> tuple:
+    """A let-through registration's row: the next generation, its maker, and pending since now."""
     row = db().execute('SELECT generation FROM routes WHERE name = ?', (name,)).fetchone()
     generation = (row[0] if row else 0) + 1
-    metas = user.get('metas') or {}
+    client = (user.get('metas') or {}).get('client') or 'legacy'
+    return (name, generation, client, user.get('run_id') or '', content.get('proxy_type') or 'http', 'pending', now())
+
+
+def store_route(columns: tuple, name: str, link_hash: str) -> bool:
+    """Commit the row only while the binding that authorized it still stands, in the one statement, so that a release, a
+    key change or a ban since its login check refuses it. A lock could not: `relay.py admin` is another process."""
+    return write(
+        'INSERT INTO routes (name, generation, client, run_id, type, state, since) SELECT ?, ?, ?, ?, ?, ?, ? '
+        'WHERE EXISTS (SELECT 1 FROM bindings WHERE name = ? AND key_hash = ? AND banned_at IS NULL) '
+        'ON CONFLICT(name) DO UPDATE SET generation = excluded.generation, client = excluded.client, '
+        'run_id = excluded.run_id, type = excluded.type, state = excluded.state, since = excluded.since',
+        (*columns, name, link_hash)) == 1
+
+
+def upsert_route(name: str, content: dict, user: dict) -> str | None:
+    """Write the pending row for a let-through registration; a refusal when the write cannot land."""
+    metas = user['metas']
     try:
-        write(
-            'INSERT INTO routes (name, generation, client, run_id, type, state, since) VALUES (?, ?, ?, ?, ?, ?, ?) '
-            'ON CONFLICT(name) DO UPDATE SET generation = excluded.generation, client = excluded.client, '
-            'run_id = excluded.run_id, type = excluded.type, state = excluded.state, since = excluded.since',
-            (name, generation, metas.get('client') or 'legacy', user.get('run_id') or '',
-             content.get('proxy_type') or 'http', 'pending', now()))
+        if store_route(route_columns(name, content, user), name, key_hash(metas['key'])):
+            return None
     except WriteBusy:
         return 'relay error: busy'
     except sqlite3.Error:
         return 'relay error: frps does not answer'
-    return None
+    return authenticate(metas)[2] or f'no binding {name} with this key'
 
 
 def shared_route_fields(content: dict) -> str | None:
@@ -1292,10 +1335,14 @@ def binding_state(name: str):
     return row
 
 
+def link_key_matches(stored_hash: str, key: object) -> bool:
+    return isinstance(key, str) and bool(key) and hmac.compare_digest(stored_hash, key_hash(key))
+
+
 def key_kind(name: str, metas: dict, row: tuple) -> str | None:
     """'link' when the link key matches, 'visitor' when only the visitor key does."""
     key = metas.get('key')
-    if isinstance(key, str) and key and hmac.compare_digest(row[0], key_hash(key)):
+    if link_key_matches(row[0], key):
         return 'link'
     visitor = metas.get('visitor')
     if key is None and isinstance(visitor, str) and visitor and visitor_hash_matches(name, visitor):
@@ -1405,23 +1452,30 @@ def connection_link(proxy_name: object, proxy_type: object) -> str | None:
     return peer_service_link(proxy_name) if proxy_type == 'stcp' else None
 
 
-def link_refusal(link: str) -> str | None:
+def link_refusal(link: str, key: object) -> str | None:
     """R7.4: why this link takes no new connection. frps holds each new connection on this answer, so that a crowd can
-    wait on it (Review Focus 5): one read by the primary key, which under WAL waits for no commit, and never a write."""
-    row = db().execute('SELECT banned_at FROM bindings WHERE name = ?', (link,)).fetchone()
+    wait on it (Review Focus 5): one read by the primary key, which under WAL waits for no commit, and never a write. A
+    tunnel of a changed key adds one more such read (R6.1).
+
+    The name alone would not do: the proxy may have outlived its binding, and under a new one its visitors would reach the
+    old owner's machine. frps sends the key its owner logged in with, and that binding is gone, so this reads as freed.
+    """
+    row = db().execute('SELECT banned_at, key_hash FROM bindings WHERE name = ?', (link,)).fetchone()
     if row is None:
         return 'freed'
-    return 'blocked' if row[0] else None
+    if row[0]:
+        return 'blocked'
+    return None if link_key_matches(row[1], key) or ping_key_matches(link, key) else 'freed'
 
 
 def new_user_conn_reason(content: dict, metas: dict) -> str | None:
-    """R7.4: a new connection goes on only to the edge, on its token, or to a link still bound and not blocked. The name
-    decides and the owner's key does not, since a live tunnel keeps logging its old key after a key change (R6.1)."""
+    """R7.4: a new connection goes on only to the edge, on its token, or to a link still bound, not blocked, and bound
+    when its owner logged in."""
     proxy_name = content.get('proxy_name')
     if proxy_name == EDGE_CLIENT:
         return None if edge_token_matches(metas.get('edge')) else EDGE_REFUSED
     link = connection_link(proxy_name, content.get('proxy_type'))
-    return 'not a link' if link is None else link_refusal(link)
+    return 'not a link' if link is None else link_refusal(link, metas.get('key'))
 
 
 def plugin_answer(reason: str | None) -> dict:
@@ -1454,6 +1508,13 @@ class RelayServer(ThreadingHTTPServer):
     # frps keeps two connections to the relay and opens one more for each plugin call beyond those, so that a crowd of
     # visitors is as many new connections at once. Past this queue the kernel drops one, and the visitor waits for its retry.
     request_queue_size = 1024
+
+    def process_request_thread(self, request, client_address) -> None:
+        """A connection is a thread and has a SQLite connection of its own, which ends with it."""
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            close_db()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -1788,12 +1849,27 @@ def store_ban(name: str, reason: str) -> None:
               'VALUES (?, ?, ?, ?, ?, ?)', (name, '-', now(), 'operator', now(), reason))
 
 
-def admin_ban(name: str, words: list[str]) -> int:
-    """R7.4: refuses the name's new connections at once. Only the ban's last line can ask for a restart."""
-    reason = [word for word in words if word != CUT]
-    store_ban(name, ' '.join(reason) or 'blocked by the relay operator')
+def admin_usage() -> int:
+    print(f'usage: relay.py admin list | add <name> | ban <name> [reason] [{CUT}] | unban <name> | release <name> | banned-caddy',
+          file=sys.stderr)
+    return 2
+
+
+def admin_ban(args: list[str]) -> int:
+    """R7.4: refuses the name's new connections at once. Only the ban's last line can ask for a restart.
+
+    The option may stand anywhere, so it goes before the name is read, and what is read must be able to be a name: a slip
+    must not block a word and leave the name it meant live."""
+    words = [word for word in args if word != CUT]
+    if not words:
+        return admin_usage()
+    name = words[0].lower()
+    if not label_valid(name):
+        print(f'{name}: invalid', file=sys.stderr)
+        return 1
+    store_ban(name, ' '.join(words[1:]) or 'blocked by the relay operator')
     print(f'ban {name}: done')
-    if len(reason) != len(words):
+    if len(words) != len(args):
         print(RESTART_FRPS)
     return 0
 
@@ -1811,7 +1887,7 @@ def admin_release(name: str, _words: list[str]) -> int:
 
 
 ADMIN_REPORTS = {'list': admin_list, 'banned-caddy': admin_banned_caddy}
-ADMIN_CHANGES = {'ban': admin_ban, 'unban': admin_unban, 'release': admin_release}
+ADMIN_CHANGES = {'unban': admin_unban, 'release': admin_release}
 
 
 def admin(args) -> int:
@@ -1821,11 +1897,11 @@ def admin(args) -> int:
         return ADMIN_REPORTS[cmd]()
     if cmd == 'add' and len(args) == 2:
         return admin_add(args[1].lower())
+    if cmd == 'ban':
+        return admin_ban(args[1:])
     if cmd in ADMIN_CHANGES and len(args) >= 2:
         return ADMIN_CHANGES[cmd](args[1].lower(), args[2:])
-    print(f'usage: relay.py admin list | add <name> | ban <name> [reason] [{CUT}] | unban <name> | release <name> | banned-caddy',
-          file=sys.stderr)
-    return 2
+    return admin_usage()
 
 
 def run_admin(args) -> int:

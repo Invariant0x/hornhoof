@@ -2,9 +2,9 @@
 # Operator commands for the Hornhoof relay. Run as root on the droplet.
 #   hornhoof-relay list                       every binding, when it was made and last seen
 #   hornhoof-relay add <name>                 a binding made by us (no rate limit); prints {name, key} once, keep it secret
-#   hornhoof-relay ban <name> [reason] [--cut]  answer 410 at once; a ban refuses new connections at once, and its tunnel can
-#                                             never log in or register again. Connections already open stay;
-#                                             --cut also drops open ones, with every link, by restarting frps
+#   hornhoof-relay ban <name> [reason] [--cut]  a ban refuses new connections at once, and its tunnel can never log in or
+#                                             register again. Visitors get the 410 page once that tunnel is gone. Connections
+#                                             already open stay; --cut also drops open ones, with every link, by restarting frps
 #   hornhoof-relay unban <name>
 #   hornhoof-relay release <name>             free a name once its old tunnel is gone
 set -eu

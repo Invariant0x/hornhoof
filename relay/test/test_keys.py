@@ -852,5 +852,143 @@ class ConnectionTests(RelayInProcess):
                 self.assertFalse(exchange.says_close, 'a clean answer must not say Connection: close')
 
 
+def frps_shows_nothing(_path: str, cap: float = 0.5) -> tuple[int, bytes]:
+    return 404, b'{}'
+
+
+def frps_shows_acme_online(path: str, cap: float = 0.5) -> tuple[int, bytes]:
+    if '/https/' in path:
+        return 200, b'{"status":"online","clientID":"acme-aaaaaaaa-link"}'
+    return 404, b'{}'
+
+
+class FreedNameTests(RelayInProcess):
+    """A name's change of owner, at the plugin and the API, with a stand-in for frps's dashboard, so that each step lands
+    exactly where a real frps could put it and no test waits for a moment to come. frps asks the plugin before it makes a
+    proxy, so that between that answer and its dashboard showing the proxy, only the relay's row knows of the route."""
+
+    NOW = 1_900_000_000
+
+    def registration(self, key: str = 'old') -> dict:
+        metas = {'name': 'acme', 'key': key, 'client': 'acme-aaaaaaaa-link'}
+        return {'user': {'user': '', 'metas': metas, 'run_id': 'r1'},
+                'proxy_name': 'acme', 'proxy_type': 'https', 'subdomain': 'acme'}
+
+    def new_connection(self, key: str) -> dict:
+        return {'user': {'user': '', 'metas': {'name': 'acme', 'key': key}, 'run_id': 'r1'},
+                'proxy_name': 'acme', 'proxy_type': 'https', 'remote_addr': '203.0.113.9:40000'}
+
+    def at(self, seconds_later: int = 0):
+        return patch.object(self.relay, 'now', return_value=self.NOW + seconds_later)
+
+    def assert_passed(self, op: str, content: dict) -> None:
+        answer = self.relay.plugin(op, content)
+        self.assertIs(answer['reject'], False, answer.get('reject_reason'))
+
+    def assert_taken(self) -> None:
+        self.assertEqual(self.api('GET', '/api/v1/names/acme'),
+                         (200, {'name': 'acme', 'free': False, 'reason': 'taken'}))
+        status, body = self.api('POST', '/api/v1/bindings', body={'name': 'acme'})
+        self.assertEqual(status, 409, 'the name must not go to a new owner')
+        self.assertTrue(body.get('error') == 'taken', 'the refusal must say taken')
+        self.assertEqual(self.counts(), (0, 0), 'a refused binding stores nothing')
+
+    def bind_acme_for_the_next_owner(self) -> str:
+        status, body = self.api('POST', '/api/v1/bindings', body={'name': 'acme'})
+        self.assertEqual(status, 201, 'the name is free for its next owner')
+        return body['key']
+
+    def test_r1_5_a_freed_name_waits_for_a_route_frps_has_not_shown_yet(self) -> None:
+        with patch.object(self.relay, '_dash_get', frps_shows_nothing):
+            self.assert_passed('NewProxy', self.registration())
+            self.assertEqual(self.api('DELETE', '/api/v1/bindings/acme', 'old')[0], 204)
+            self.assert_taken()
+        with patch.object(self.relay, '_dash_get', frps_shows_acme_online):
+            self.assert_taken()
+
+    def test_r1_5_a_route_frps_never_showed_frees_the_name_after_its_window(self) -> None:
+        with patch.object(self.relay, '_dash_get', frps_shows_nothing):
+            with self.at():
+                self.assert_passed('NewProxy', self.registration())
+                self.assertEqual(self.api('DELETE', '/api/v1/bindings/acme', 'old')[0], 204)
+            with self.at(self.relay.PENDING_S):
+                self.assert_taken()
+            with self.at(self.relay.PENDING_S + 1):
+                self.assertEqual(self.api('GET', '/api/v1/names/acme'), (200, {'name': 'acme', 'free': True}))
+                self.bind_acme_for_the_next_owner()
+
+
+    def while_frps_is_first_read(self, happening: Callable[[], None]):
+        """frps's dashboard shows nothing, and this happens at its first read. In a NewProxy, that read comes after the
+        call's login check and before its row lands, which is the moment a release or a ban could come in."""
+        waiting = [happening]
+
+        def dashboard(_path: str, cap: float = 0.5) -> tuple[int, bytes]:
+            if waiting:
+                waiting.pop()()
+            return 404, b'{}'
+
+        return patch.object(self.relay, '_dash_get', dashboard)
+
+    def test_r1_5_a_route_shown_while_the_name_is_checked_still_counts(self) -> None:
+        # A route read of the old owner, begun before its release, may turn the row held after frps was read for the name.
+        def the_row_turns_held() -> None:
+            self.relay.write("UPDATE routes SET state = 'held' WHERE name = 'acme'", ())
+
+        with patch.object(self.relay, '_dash_get', frps_shows_nothing):
+            self.assert_passed('NewProxy', self.registration())
+            self.free_acme()
+        with self.while_frps_is_first_read(the_row_turns_held):
+            self.assertEqual(self.api('GET', '/api/v1/names/acme'),
+                             (200, {'name': 'acme', 'free': False, 'reason': 'taken'}))
+
+    def route_rows(self) -> list[tuple]:
+        return self.relay.db().execute('SELECT name, generation FROM routes').fetchall()
+
+    def assert_registration_refused(self, meanwhile: Callable[[], None], reason: str) -> None:
+        with self.while_frps_is_first_read(meanwhile):
+            answer = self.relay.plugin('NewProxy', self.registration())
+        self.assertEqual(answer, {'reject': True, 'reject_reason': reason})
+        self.assertEqual(self.route_rows(), [], 'a refused registration moves no generation')
+
+    def free_acme(self) -> None:
+        self.assertEqual(self.api('DELETE', '/api/v1/bindings/acme', 'old')[0], 204)
+
+    def test_r1_1_a_registration_racing_a_release_is_refused(self) -> None:
+        self.assert_registration_refused(self.free_acme, 'no binding acme with this key')
+
+    def test_r1_1_a_registration_racing_a_ban_is_refused(self) -> None:
+        self.assert_registration_refused(lambda: self.relay.store_ban('acme', 'a test'), 'acme.hornhoof.org is blocked')
+
+    def test_r6_1_a_registration_racing_a_key_change_is_refused(self) -> None:
+        def change_the_key() -> None:
+            self.assertEqual(self.api('POST', KEY_PATH, 'old')[0], 200)
+
+        self.assert_registration_refused(change_the_key, 'no binding acme with this key')
+
+    def test_r1_1_a_registration_racing_a_new_owner_never_reaches_it(self) -> None:
+        next_owner = []
+
+        def freed_and_bound_again() -> None:
+            self.free_acme()
+            next_owner.append(self.bind_acme_for_the_next_owner())
+
+        self.assert_registration_refused(freed_and_bound_again, 'no binding acme with this key')
+        with patch.object(self.relay, '_dash_get', frps_shows_nothing):
+            status, route = self.api('GET', ROUTE_PATH, next_owner[0])
+        self.assertEqual((status, route['state'], route['generation']), (200, 'empty', 0))
+
+    def test_r7_4_an_old_owners_route_is_refused_under_a_new_binding(self) -> None:
+        # frps shows the route later than the window allows for, when the name already has its next owner.
+        with patch.object(self.relay, '_dash_get', frps_shows_nothing):
+            with self.at():
+                self.assert_passed('NewProxy', self.registration())
+                self.free_acme()
+            with self.at(self.relay.PENDING_S + 1):
+                next_key = self.bind_acme_for_the_next_owner()
+        self.assertEqual(self.relay.plugin('NewUserConn', self.new_connection('old')),
+                         {'reject': True, 'reject_reason': 'freed'})
+        self.assert_passed('NewUserConn', self.new_connection(next_key))
+
 if __name__ == '__main__':
     unittest.main()

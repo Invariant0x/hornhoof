@@ -28,6 +28,7 @@ else:
 
 M8 = test_peers.M8
 TOKEN = 'the edge token of this test'
+OWNERS_KEY = 'k'
 BLOCKED = {'reject': True, 'reject_reason': 'blocked'}
 FREED = {'reject': True, 'reject_reason': 'freed'}
 CROWD = 200
@@ -44,8 +45,9 @@ def peer_helpers() -> type[unittest.TestCase]:
 
 
 def new_user_conn(proxy_name: object, proxy_type: object, metas: object = None) -> dict:
-    """A NewUserConn's content as frps sends it: user is the proxy owner's, remote_addr the visitor's."""
-    return {'user': {'user': '', 'metas': {} if metas is None else metas, 'run_id': 'a run'},
+    """A NewUserConn's content as frps sends it: user is the proxy owner's, with what it logged in with, remote_addr the
+    visitor's. By default the owner is the one with the key of RelayRuleCase's bindings."""
+    return {'user': {'user': '', 'metas': {'key': OWNERS_KEY} if metas is None else metas, 'run_id': 'a run'},
             'proxy_name': proxy_name, 'proxy_type': proxy_type, 'remote_addr': '203.0.113.9:40000'}
 
 
@@ -111,6 +113,14 @@ class BlockByNameTests(PassthroughCase):
         self.assertEqual(status, 200, 'changing the key must answer 200')
         answer = self.stack.https('acme.hornhoof.org')
         self.assertEqual(answer.status, 200, answer.error)
+
+    def test_r7_4_a_new_owner_never_opens_the_old_owners_tunnel(self) -> None:
+        # An operator's add does not ask frps, so it is a way for a live tunnel to find its name bound again.
+        _, key = self.holder('acme')
+        self.assertEqual(self.stack.https('acme.hornhoof.org').status, 200)
+        self.assertEqual(self.stack.api('DELETE', '/api/v1/bindings/acme', key=key)[0], 204)
+        self.stack.admin('add', 'acme')
+        self.assert_refused_at_once('acme.hornhoof.org')
 
     def crowd(self, host: str, seconds: float) -> list[Answer]:
         """CROWD connections, one request each, spread evenly over these seconds."""
@@ -179,7 +189,7 @@ class RelayRuleCase(unittest.TestCase):
 
     def bind(self, name: str, banned_at: int | None = None) -> None:
         self.relay.write('INSERT INTO bindings (name, key_hash, created_at, banned_at) VALUES (?, ?, 0, ?)',
-                         (name, self.relay.key_hash('k'), banned_at))
+                         (name, self.relay.key_hash(OWNERS_KEY), banned_at))
 
     def decide(self, content: dict) -> dict:
         return self.relay.plugin('NewUserConn', content)
@@ -229,10 +239,25 @@ class ConnectionRuleTests(RelayRuleCase):
     def test_the_edge_token_opens_only_the_edge(self) -> None:
         self.assertEqual(self.decide(new_user_conn('globex', 'https', {'edge': TOKEN})), BLOCKED)
 
-    def test_a_key_in_the_metas_changes_nothing(self) -> None:
-        # The tunnel of a changed key still sends its old key, and a live tunnel stays (R6.1).
-        metas = {'name': 'acme', 'key': 'an old key'}
-        self.assertEqual(self.decide(new_user_conn('acme', 'https', metas)), PASSED)
+    def test_a_tunnel_of_a_changed_key_stays(self) -> None:
+        # The tunnel of a changed key still sends the key it logged in with, and a live tunnel stays (R6.1).
+        self.assertTrue(self.relay.store_link_key('acme', self.relay.key_hash('new'), self.relay.key_hash(OWNERS_KEY)))
+        self.assertTrue(self.relay.store_link_key('acme', self.relay.key_hash('newer'), self.relay.key_hash('new')))
+        for key in (OWNERS_KEY, 'new', 'newer'):
+            with self.subTest(key_of_the_tunnel=key):
+                self.assertEqual(self.decide(new_user_conn('acme', 'https', {'key': key})), PASSED)
+
+    def test_a_tunnel_of_an_earlier_owner_opens_nothing_under_a_new_binding(self) -> None:
+        # frps sends its owner's login as it was. A binding it never logged in with is another company's.
+        for proxy_name, proxy_type in (('acme', 'https'), ('acme-3f2a9c1b-app', 'stcp')):
+            with self.subTest(proxy_type=proxy_type):
+                metas = {'name': 'acme', 'key': 'the key of the earlier owner'}
+                self.assertEqual(self.decide(new_user_conn(proxy_name, proxy_type, metas)), FREED)
+
+    def test_a_tunnel_with_no_usable_key_opens_nothing(self) -> None:
+        for metas in ({}, {'key': ''}, {'key': 7}, {'key': None}, 'not an object'):
+            with self.subTest(metas=metas):
+                self.assertEqual(self.decide(new_user_conn('acme', 'https', metas)), FREED)
 
 
 class NoWaitTests(RelayRuleCase):
@@ -279,13 +304,44 @@ class NoWaitTests(RelayRuleCase):
         self.assertEqual(answers, [PASSED])
 
 
+class ThreadConnectionTests(RelayRuleCase):
+    def test_a_finished_connection_leaves_no_sqlite_connection_open(self) -> None:
+        # Each connection from frps is a thread, and a crowd is that many threads, each with a connection of its own that
+        # only the garbage collector would close.
+        opened = []
+        relay = self.relay
+
+        class Watched(relay.Handler):
+            def do_GET(self) -> None:
+                opened.append(relay.db())
+                super().do_GET()
+
+        def closed(connection: sqlite3.Connection) -> bool:
+            # A closed connection refuses this from any thread, and an open one answers it from any thread.
+            try:
+                connection.total_changes
+            except sqlite3.ProgrammingError:
+                return True
+            return False
+
+        with relay.RelayServer(('127.0.0.1', 0), Watched) as server:
+            threading.Thread(target=server.handle_request, daemon=True).start()
+            client = http.client.HTTPConnection(*server.server_address, timeout=10)
+            self.addCleanup(client.close)
+            client.request('GET', '/nowhere')
+            self.assertEqual(client.getresponse().status, 404)
+            client.close()
+            self.assertTrue(_wait(lambda: closed(opened[0]), 3), 'the thread ended and its connection stayed open')
+
+
 class WaitsNoTraceLineShowsTests(RelayRuleCase):
     """A trace line's ms starts once the request is read and ends before its answer goes out. frps waits for the rest too,
     and neither wait is a matter of how loaded the machine is, so these tests hold no clock."""
 
     def test_an_answer_leaves_at_once_on_a_kept_connection(self) -> None:
         # An answer is two writes, its headers and its body. Under Nagle's rule the body waits for the ACK of the headers,
-        # which the receiver delays by 40 ms: measured 44 ms per answer, on the connections frps keeps.
+        # which the receiver delays by 40 ms: measured 44 ms per answer, on the connections frps keeps. The socket option
+        # stands in for that measurement, which would need a clock on a shared machine.
         no_delay = []
 
         class Watched(self.relay.Handler):
@@ -320,10 +376,18 @@ class AdminCase(unittest.TestCase):
 
 
 class BanCommandTests(AdminCase):
+    def run_admin(self, *args: str) -> subprocess.CompletedProcess:
+        return subprocess.run([sys.executable, str(ROOT / 'relay/relay.py'), 'admin', *args], env=self.env,
+                              capture_output=True, text=True, timeout=30)
+
     def admin(self, *args: str) -> list[str]:
-        finished = subprocess.run([sys.executable, str(ROOT / 'relay/relay.py'), 'admin', *args], env=self.env,
-                                  check=True, capture_output=True, text=True, timeout=30)
+        finished = self.run_admin(*args)
+        self.assertEqual(finished.returncode, 0, finished.stderr)
         return finished.stdout.splitlines()
+
+    def banned_names(self) -> list[str]:
+        with sqlite3.connect(self.env['RELAY_DB']) as connection:
+            return [row[0] for row in connection.execute('SELECT name FROM bindings WHERE banned_at IS NOT NULL')]
 
     def ban_reason(self, name: str) -> str:
         with sqlite3.connect(self.env['RELAY_DB']) as connection:
@@ -338,6 +402,24 @@ class BanCommandTests(AdminCase):
         self.assertEqual(self.ban_reason('acme'), 'stolen machine')
         self.admin('ban', 'globex', '--cut')
         self.assertEqual(self.ban_reason('globex'), 'blocked by the relay operator')
+
+    def test_cut_may_come_before_the_name(self) -> None:
+        self.assertEqual(self.admin('ban', '--cut', 'acme', 'stolen')[-1], 'restart frps')
+        self.assertEqual(self.banned_names(), ['acme'])
+        self.assertEqual(self.ban_reason('acme'), 'stolen')
+
+    def test_a_ban_takes_only_what_can_be_a_name(self) -> None:
+        for name in ('--cat', 'not_a_name', 'ab--cd'):
+            with self.subTest(name=name):
+                refused = self.run_admin('ban', name, 'acme')
+                self.assertEqual(refused.returncode, 1, refused.stdout)
+                self.assertEqual(self.banned_names(), [])
+
+    def test_a_ban_with_no_name_says_how_to_use_it(self) -> None:
+        refused = self.run_admin('ban', '--cut')
+        self.assertEqual(refused.returncode, 2, refused.stdout)
+        self.assertNotIn('restart frps', refused.stdout)
+        self.assertIn('usage', refused.stderr)
 
 
 class OperatorCommandTests(AdminCase):
@@ -372,6 +454,19 @@ class OperatorCommandTests(AdminCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(self.systemctl_calls(), ['reload caddy', 'restart frps'])
         self.assertIn('acme.hornhoof.org', (self.tmp / 'caddy/blocked.caddy').read_text())
+
+    def test_a_ban_with_cut_first_blocks_the_name_it_was_given(self) -> None:
+        done = self.operator('ban', '--cut', 'acme')
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(self.systemctl_calls(), ['reload caddy', 'restart frps'])
+        self.assertIn('acme.hornhoof.org', (self.tmp / 'caddy/blocked.caddy').read_text())
+
+    def test_the_help_promises_what_a_ban_does(self) -> None:
+        # A live https tunnel's visitors get a closed connection: the 410 page comes only once that tunnel is gone.
+        help_text = ' '.join(line.lstrip('# ') for line in (ROOT / 'relay/hornhoof-relay').read_text().splitlines()
+                             if line.startswith('#'))
+        self.assertNotIn('answer 410 at once', help_text)
+        self.assertIn('refuses new connections at once', help_text)
 
     def test_a_ban_without_cut_restarts_nothing(self) -> None:
         done = self.operator('ban', 'acme', 'restart', 'frps')
