@@ -19,7 +19,7 @@ export async function requestOperatorScreen(ctx: Channels, target: Target): Prom
 
 export async function requestOperatorKey(ctx: Channels, target: Target, input: { snapshot: string; generation: number; action: string; key: OperatorKey }): Promise<OperatorKeyResult | null> {
   const prepared = await requestReply(ctx, target, `prepare:${input.action}`, { type: 'program.key_prepare', ...identity(target), case: target.id, capability: target.capability, ...input });
-  if (prepared?.type !== 'program.key_prepared' || prepared.result !== 'ok' || !prepared.lease) return { type: 'program.key_result', ...identity(target), action: input.action, result: 'refused', reason: prepared?.reason ?? 'node_unavailable' };
+  if (prepared?.type !== 'program.key_prepared' || prepared.result !== 'ok' || !prepared.lease) return { type: 'program.key_result', ...identity(target), action: input.action, result: 'refused', reason: (prepared && 'reason' in prepared ? prepared.reason : null) ?? 'node_unavailable' };
   const reply = await requestReply(ctx, target, `key:${input.action}`, { type: 'program.key_send', ...identity(target), case: target.id, capability: target.capability, ...input, lease: prepared.lease, withinMs: OPERATOR_KEY_MS });
   return reply?.type === 'program.key_result' ? reply : null;
 }

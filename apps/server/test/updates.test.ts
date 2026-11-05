@@ -1,4 +1,5 @@
 import Fastify, { type FastifyInstance } from 'fastify';
+import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmdirSync, utimesSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
@@ -6,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import { LIVE_CHECK_LABEL, LIVE_CHECK_PROGRAMS, liveCheckTag } from '@hornhoof/protocol/live-check';
 import { agents, companies, departments, jobs, nodeCodes, subscriptions } from '../src/db/schema.js';
 import { publishWorking } from '../src/modules/events/store.js';
 import { as, connectNode, invitePerson, listen, sessionFrom, SETUP, setUpCompany, testApp, until } from './helpers.js';
@@ -43,12 +45,38 @@ type FakeBuild = { commit: string; version?: string; title?: string; migrations?
 const ARCH = process.arch === 'arm64' ? 'arm64' : 'amd64';
 const OCI_INDEX = 'application/vnd.oci.image.index.v1+json';
 
+const digestOf = (text: string) => `sha256:${createHash('sha256').update(text).digest('hex')}`;
+const appIndex = (ref: string) => JSON.stringify({
+  manifests: [
+    { digest: `sha256:m-${ref}-other`, platform: { os: 'linux', architecture: ARCH === 'amd64' ? 'arm64' : 'amd64' } },
+    { digest: `sha256:m-${ref}`, platform: { os: 'linux', architecture: ARCH } },
+    { digest: `sha256:m-${ref}-att`, platform: { os: 'unknown', architecture: 'unknown' } },
+  ],
+}, null, 2);
+const partIndex = (part: string, ref: string) => JSON.stringify({ manifests: [{ digest: `sha256:m-${part}-${ref}`, platform: { os: 'linux', architecture: ARCH } }] });
+const id = (n: number) => `00000000-0000-4000-8000-00000000000${n}`;
+const passedRun = (program: string, n: number) => ({
+  program, outcome: 'passed', version: `${program} 1.2.3`, machine: 'check-machine', node: id(n), session: `session-${n}`, job: id(n), instance: id(n), generations: 1,
+  asked: '2026-11-01T01:00:00.000Z', recorded: '2026-11-01T01:00:05.000Z', answered: '2026-11-01T01:00:30.000Z', finished: '2026-11-01T01:00:31.000Z',
+});
+
+/* The proof CI would hold for this build of a tag: all four programs passed on its exact images. */
+function proofOf(tag: string, build: FakeBuild, over: Record<string, unknown> = {}) {
+  return {
+    schema: 1, commit: build.commit, version: build.version ?? tag, checkedAt: '2026-11-01T01:01:00.000Z', evidence: `sha256:${'e'.repeat(64)}`,
+    images: { app: digestOf(appIndex(tag)), node: digestOf(partIndex('hornhoof-node', build.commit)), updater: digestOf(partIndex('hornhoof-updater', build.commit)) },
+    programs: LIVE_CHECK_PROGRAMS.map(passedRun), ...over,
+  };
+}
+
 /* A registry that serves an index per tag, a manifest per platform and a config blob with the build's labels. The node
-   and updater images of every build are there too, by the build's tags and its commit, unless lacking names them. */
+   and updater images of every build are there too, by the build's tags and its commit, unless lacking names them. The
+   latest build has its live check, as any release does, unless proofs says what the registry holds instead. */
 async function fakeRegistry(
   tags: Record<string, FakeBuild>,
   lacking: string[] = [],
-): Promise<{ base: string; set(tag: string, build: FakeBuild): void; fail(status: number | null): void; calls: string[]; digests: Record<string, string> }> {
+  proofs: Record<string, unknown> = tags.latest && /^[0-9a-f]{40}$/.test(tags.latest.commit) ? { [tags.latest.commit]: proofOf('latest', tags.latest) } : {},
+): Promise<{ base: string; set(tag: string, build: FakeBuild): void; prove(commit: string, proof: unknown): void; fail(status: number | null): void; calls: string[]; digests: Record<string, string> }> {
   const calls: string[] = [];
   /* The digest of each tag's index: the SHA-256 of the bytes the registry sent for it; "hornhoof-node:<tag>" for the
      node image's. */
@@ -71,8 +99,8 @@ async function fakeRegistry(
       const known = Object.entries(tags).some(([tag, b]) => tag === ref || b.commit === ref);
       if (!known || lacking.includes(part)) return reply.code(404).send({ errors: [{ code: 'MANIFEST_UNKNOWN' }] });
       expect(req.headers.accept).toContain(OCI_INDEX);
-      const index = JSON.stringify({ manifests: [{ digest: `sha256:m-${part}-${ref}`, platform: { os: 'linux', architecture: ARCH } }] });
-      digests[`${part}:${ref}`] = `sha256:${createHash('sha256').update(index).digest('hex')}`;
+      const index = partIndex(part, ref);
+      digests[`${part}:${ref}`] = digestOf(index);
       return reply.type(OCI_INDEX).send(index);
     });
   }
@@ -85,20 +113,21 @@ async function fakeRegistry(
     if (ref.startsWith('sha256:m-')) {
       return reply.type('application/vnd.oci.image.manifest.v1+json').send({ config: { digest: `sha256:c-${ref.slice(9)}` } });
     }
+    const proven = Object.keys(proofs).find(commit => liveCheckTag(commit) === ref);
+    if (proven) return reply.type('application/vnd.oci.image.manifest.v1+json').send({ config: { digest: `sha256:p-${proven}` } });
     if (!tags[ref]) return reply.code(404).send({ errors: [{ code: 'MANIFEST_UNKNOWN' }] });
     expect(req.headers.accept).toContain(OCI_INDEX);
-    const index = JSON.stringify({
-      manifests: [
-        { digest: `sha256:m-${ref}-other`, platform: { os: 'linux', architecture: ARCH === 'amd64' ? 'arm64' : 'amd64' } },
-        { digest: `sha256:m-${ref}`, platform: { os: 'linux', architecture: ARCH } },
-        { digest: `sha256:m-${ref}-att`, platform: { os: 'unknown', architecture: 'unknown' } },
-      ],
-    }, null, 2);
-    digests[ref] = `sha256:${createHash('sha256').update(index).digest('hex')}`;
+    const index = appIndex(ref);
+    digests[ref] = digestOf(index);
     return reply.type(OCI_INDEX).send(index);
   });
   reg.get('/v2/acme/hornhoof/blobs/:digest', async req => {
-    const tag = (req.params as { digest: string }).digest.slice('sha256:c-'.length);
+    const { digest } = req.params as { digest: string };
+    if (digest.startsWith('sha256:p-')) {
+      const proof = proofs[digest.slice('sha256:p-'.length)];
+      return { config: { Labels: { [LIVE_CHECK_LABEL]: typeof proof === 'string' ? proof : JSON.stringify(proof) } } };
+    }
+    const tag = digest.slice('sha256:c-'.length);
     const b = tags[tag]!;
     const labels: Record<string, string> = { 'org.opencontainers.image.revision': b.commit };
     if (b.version) labels['org.opencontainers.image.version'] = b.version;
@@ -111,6 +140,7 @@ async function fakeRegistry(
   return {
     base: `http://127.0.0.1:${(reg.server.address() as AddressInfo).port}`,
     set: (tag, build) => (tags[tag] = build),
+    prove: (commit, proof) => { if (proof === null) delete proofs[commit]; else proofs[commit] = proof; },
     fail: status => (failing = status),
     calls,
     digests,
@@ -234,16 +264,217 @@ describe('the node image install.sh names', () => {
   });
 });
 
+describe('the live check of a build', () => {
+  const LATEST = { commit: SHA, version: '0.4.1' };
+  const update = (app: FastifyInstance, ceo: Awaited<ReturnType<typeof company>>['ceo'], payload: Record<string, unknown> = { version: 'latest' }) =>
+    app.inject({ method: 'POST', url: '/api/updates', payload, ...as(ceo) });
+  const other = `sha256:${'9'.repeat(64)}`;
+  const twoProgramsOnly = LIVE_CHECK_PROGRAMS.slice(0, 2).map(passedRun);
+
+  it.each<[string, unknown, string]>([
+    ['no proof', undefined, 'live_check_missing'],
+    ['a proof that is no proof', 'all fine', 'live_check_invalid'],
+    ['a proof of two programs', { programs: twoProgramsOnly }, 'live_check_partial'],
+    ['a proof with one program not run', { programs: [{ program: 'antigravity', outcome: 'not_run', why: 'No machine.' }, ...LIVE_CHECK_PROGRAMS.slice(0, 3).map(passedRun)] }, 'live_check_partial'],
+    ['a proof of another commit', { commit: 'c'.repeat(40) }, 'live_check_foreign'],
+    ['a proof of another app image', { images: { app: other, node: digestOf(partIndex('hornhoof-node', SHA)), updater: digestOf(partIndex('hornhoof-updater', SHA)) } }, 'live_check_foreign'],
+    ['a proof of another node image', { images: { app: digestOf(appIndex('latest')), node: other, updater: digestOf(partIndex('hornhoof-updater', SHA)) } }, 'live_check_foreign'],
+    ['a proof older than the images', { programs: LIVE_CHECK_PROGRAMS.map((p, n) => ({ ...passedRun(p, n), asked: '2026-10-29T01:00:00.000Z' })) }, 'live_check_stale'],
+  ])('refuses a build with %s, by every way of asking, and offers it to nobody', async (_name, over, reason) => {
+    const proof = over === undefined ? {} : { [SHA]: typeof over === 'string' ? over : proofOf('latest', LATEST, over as Record<string, unknown>) };
+    const registry = await fakeRegistry({ latest: LATEST }, [], proof);
+    const { app, ceo, control } = await company(registry);
+    updaterAlive(control);
+    const view = (await app.inject({ method: 'POST', url: '/api/updates/check', ...as(ceo) })).json();
+    expect(view.available).toBe(false);
+    expect(view.liveCheck).toEqual({ ok: false, reason: reason.slice('live_check_'.length) });
+    for (const payload of [{ version: 'latest' }, { version: 'latest', whenIdle: false }, { version: 'latest', urgent: true }]) {
+      const res = await update(app, ceo, payload);
+      expect(res.statusCode).toBe(409);
+      expect(res.json().error.reason).toBe(reason);
+      expect(request(control)).toBeNull();
+    }
+  });
+
+  it('takes the build whose proof speaks of exactly its images, and asks the updater for those', async () => {
+    const registry = await fakeRegistry({ latest: LATEST });
+    const { app, ceo, control } = await company(registry);
+    updaterAlive(control);
+    expect((await app.inject({ method: 'POST', url: '/api/updates/check', ...as(ceo) })).json()).toMatchObject({ available: true, liveCheck: { ok: true } });
+    const res = await update(app, ceo);
+    expect(res.statusCode).toBe(202);
+    const proof = proofOf('latest', LATEST).images;
+    expect(request(control)).toMatchObject({ commit: SHA, digest: proof.app, nodeDigest: proof.node, updaterDigest: proof.updater });
+  });
+
+  it('reads the proof when someone updates, not when it last looked', async () => {
+    const registry = await fakeRegistry({ latest: LATEST });
+    const { app, ceo, control } = await company(registry);
+    updaterAlive(control);
+    await app.inject({ method: 'POST', url: '/api/updates/check', ...as(ceo) });
+    registry.prove(SHA, null);
+    const res = await update(app, ceo);
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error.reason).toBe('live_check_missing');
+    expect(request(control)).toBeNull();
+  });
+
+  it('asks the updater for nothing when the registry cannot say whether a proof exists', async () => {
+    const registry = await fakeRegistry({ latest: LATEST });
+    const { app, ceo, control } = await company(registry);
+    updaterAlive(control);
+    await app.inject({ method: 'POST', url: '/api/updates/check', ...as(ceo) });
+    registry.fail(500);
+    const res = await update(app, ceo);
+    expect(res.statusCode).toBe(503);
+    expect(res.json().error.reason).toBe('registry_unreachable');
+    expect(request(control)).toBeNull();
+  });
+
+  it('refuses an older version without a proof of its own, though the latest has one', async () => {
+    const registry = await fakeRegistry({ latest: LATEST, '0.3.9': { commit: 'd'.repeat(40), version: '0.3.9' } });
+    const { app, ceo, control } = await company(registry);
+    updaterAlive(control);
+    await app.inject({ method: 'POST', url: '/api/updates/check', ...as(ceo) });
+    const res = await update(app, ceo, { version: '0.3.9' });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error.reason).toBe('live_check_missing');
+  });
+
+  it('refuses a build CI made from no commit it can name', async () => {
+    const registry = await fakeRegistry({ latest: { commit: 'bbb', version: '0.4.1' } }, [], {});
+    const { app, ceo, control } = await company(registry);
+    updaterAlive(control);
+    await app.inject({ method: 'POST', url: '/api/updates/check', ...as(ceo) });
+    expect((await update(app, ceo)).json().error.reason).toBe('live_check_missing');
+  });
+
+  /* The door of the release workflow, as it runs there: the exit code is all it hears. */
+  describe('as the release workflow asks', () => {
+    const gate = (registry: { base: string }, ...args: string[]) => new Promise<{ status: number | null; stderr: string }>(done => {
+      const run = spawn(process.execPath, ['--import', 'tsx', 'src/live-check-gate.ts', '--image', 'ghcr.io/acme/hornhoof', '--registry', registry.base, ...args], { cwd: join(import.meta.dirname, '..'), stdio: ['ignore', 'ignore', 'pipe'] });
+      let stderr = '';
+      run.stderr.on('data', chunk => { stderr += String(chunk); });
+      run.on('close', status => done({ status, stderr }));
+    });
+
+    it('passes for exactly the build of the commit it names', async () => {
+      const registry = await fakeRegistry({ [SHA]: LATEST }, [], { [SHA]: proofOf(SHA, LATEST) });
+      const result = await gate(registry, '--commit', SHA);
+      expect(result.stderr).toBe('');
+      expect(result.status).toBe(0);
+    });
+
+    it.each<[string, Record<string, unknown>, RegExp]>([
+      ['no proof', {}, /missing/],
+      ['a partial proof', { [SHA]: proofOf(SHA, LATEST, { programs: twoProgramsOnly }) }, /partial/],
+      ['a proof of other images', { [SHA]: proofOf(SHA, LATEST, { images: { app: other, node: other, updater: other } }) }, /foreign/],
+    ])('stops the release with %s', async (_name, proofs, said) => {
+      const registry = await fakeRegistry({ [SHA]: LATEST }, [], proofs);
+      const result = await gate(registry, '--commit', SHA);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toMatch(said);
+    });
+
+    it('stops the release of a commit with no images', async () => {
+      const registry = await fakeRegistry({}, [], {});
+      expect((await gate(registry, '--commit', SHA)).status).toBe(1);
+    });
+
+    it('stops when a tag does not hold the images of this commit', async () => {
+      const registry = await fakeRegistry({ [SHA]: LATEST, latest: { commit: 'c'.repeat(40), version: '0.4.1' } }, [], { [SHA]: proofOf(SHA, LATEST) });
+      const result = await gate(registry, '--commit', SHA, '--tag', 'latest');
+      expect(result.status).toBe(1);
+      expect(result.stderr).toMatch(/foreign/);
+    });
+
+    it('fails when the registry does not answer: no answer is no proof', async () => {
+      const registry = await fakeRegistry({ [SHA]: LATEST }, [], { [SHA]: proofOf(SHA, LATEST) });
+      registry.fail(500);
+      expect((await gate(registry, '--commit', SHA)).status).not.toBe(0);
+    });
+
+    it('judges a proof not yet published, and refuses one for other images before anybody publishes it', async () => {
+      const registry = await fakeRegistry({ [SHA]: LATEST }, [], {});
+      const dir = mkdtempSync(join(tmpdir(), 'hh-proof-'));
+      const good = join(dir, 'good.json'), bad = join(dir, 'bad.json');
+      writeFileSync(good, JSON.stringify(proofOf(SHA, LATEST)));
+      writeFileSync(bad, JSON.stringify(proofOf(SHA, LATEST, { images: { app: other, node: other, updater: other } })));
+      expect((await gate(registry, '--commit', SHA, '--proof', good)).status).toBe(0);
+      expect((await gate(registry, '--commit', SHA, '--proof', bad)).status).toBe(1);
+    });
+  });
+
+  /* A node that wants its server's build first asks the server to let its work end: that is the way a build reaches nodes. */
+  describe('of the build a server hands to its nodes', () => {
+    async function nodeAsking(proofs: Record<string, unknown>, commit = SHA, control?: string) {
+      const registry = await fakeRegistry({ [SHA]: LATEST }, [], proofs);
+      const c = await company(registry, commit, control);
+      const made = (await c.app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(c.ceo) })).json();
+      const joined = (await c.app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code: /--join (\S+)/.exec(made.command)![1], machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' } })).json();
+      const ask = () => c.app.inject({ method: 'POST', url: '/api/nodes/update', headers: { authorization: `Bearer ${joined.nodes[0].key}` }, payload: {} });
+      return { ...c, registry, ask };
+    }
+
+    it.each<[string, Record<string, unknown>, string]>([
+      ['no proof', {}, 'live_check_missing'],
+      ['a proof of two programs', { [SHA]: proofOf(SHA, LATEST, { programs: twoProgramsOnly }) }, 'live_check_partial'],
+      ['a proof of other images', { [SHA]: proofOf(SHA, LATEST, { images: { app: other, node: other, updater: other } }) }, 'live_check_foreign'],
+    ])('leaves the node as it is when the server runs a build with %s', async (_name, proofs, reason) => {
+      const c = await nodeAsking(proofs);
+      const res = await c.ask();
+      expect(res.statusCode).toBe(409);
+      expect(res.json().error.reason).toBe(reason);
+    });
+
+    it('lets the node go on when the server runs a proven build', async () => {
+      const c = await nodeAsking({ [SHA]: proofOf(SHA, LATEST) });
+      const res = await c.ask();
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ ready: true });
+    });
+
+    it('asks the registry once for a proven build, as nodes ask every few seconds', async () => {
+      const c = await nodeAsking({ [SHA]: proofOf(SHA, LATEST) });
+      await c.ask();
+      const calls = c.registry.calls.length;
+      await c.ask();
+      expect(c.registry.calls).toHaveLength(calls);
+    });
+
+    it('sees a proof that came later', async () => {
+      const c = await nodeAsking({});
+      expect((await c.ask()).statusCode).toBe(409);
+      c.registry.prove(SHA, proofOf(SHA, LATEST));
+      expect((await c.ask()).statusCode).toBe(200);
+    });
+
+    it('leaves the node as it is when the registry cannot say', async () => {
+      const c = await nodeAsking({ [SHA]: proofOf(SHA, LATEST) });
+      c.registry.fail(500);
+      expect((await c.ask()).statusCode).toBe(503);
+    });
+
+    it('asks nothing for a server CI did not build, whose nodes take what was released', async () => {
+      const c = await nodeAsking({}, 'local');
+      const calls = c.registry.calls.length;
+      expect((await c.ask()).statusCode).toBe(200);
+      expect(c.registry.calls).toHaveLength(calls);
+    });
+  });
+});
+
 describe('updates', () => {
   it('finds a newer build of the main line', async () => {
-    const registry = await fakeRegistry({ latest: { commit: 'bbb', version: '0.4.1', title: 'Hire from the staff card', migrations: 6 } });
+    const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1', title: 'Hire from the staff card', migrations: 6 } });
     const { app, ceo } = await company(registry);
     const res = await app.inject({ method: 'POST', url: '/api/updates/check', ...as(ceo) });
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.current).toMatchObject({ version: '0.4.0', commit: 'aaa' });
     expect(body.available).toBe(true);
-    expect(body.latest).toMatchObject({ tag: 'latest', version: '0.4.1', commit: 'bbb', title: 'Hire from the staff card', migrations: 6, created: '2026-10-30T01:00:00Z' });
+    expect(body.liveCheck).toEqual({ ok: true });
+    expect(body.latest).toMatchObject({ tag: 'latest', version: '0.4.1', commit: SHA, title: 'Hire from the staff card', migrations: 6, created: '2026-10-30T01:00:00Z' });
     expect(body.checkedAt).toEqual(expect.any(String));
     expect(body.error).toBeNull();
     expect((await app.inject({ method: 'GET', url: '/api/updates', ...as(ceo) })).json()).toEqual(body);
@@ -272,7 +503,7 @@ describe('updates', () => {
   });
 
   it('keeps the last result when the registry fails', async () => {
-    const registry = await fakeRegistry({ latest: { commit: 'bbb', version: '0.4.1' } });
+    const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } });
     const { app, ceo } = await company(registry);
     const first = (await app.inject({ method: 'POST', url: '/api/updates/check', ...as(ceo) })).json();
     registry.fail(429);
@@ -317,13 +548,14 @@ describe('updates', () => {
     expect(again.json().error.reason).toBe('update_running');
   });
 
-  it('leaves out an image a build does not have, so the updater takes it by its tag', async () => {
+  it('takes no build that lacks an image its live check speaks of', async () => {
     const registry = await fakeRegistry({ latest: { commit: SHA, version: '0.4.1' } }, ['hornhoof-updater']);
     const { app, ceo, control } = await company(registry);
     updaterAlive(control);
     const res = await app.inject({ method: 'POST', url: '/api/updates', payload: { version: 'latest' }, ...as(ceo) });
-    expect(res.statusCode).toBe(202);
-    expect(request(control)).toEqual({ ...asked(registry, res.json().id), updaterDigest: '' });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error.reason).toBe('live_check_foreign');
+    expect(request(control)).toBeNull();
   });
 
   it('asks the updater for nothing when the registry cannot say which images the build has', async () => {

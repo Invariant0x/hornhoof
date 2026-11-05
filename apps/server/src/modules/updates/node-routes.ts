@@ -5,6 +5,7 @@ import { ApiError } from '../../errors.js';
 import type { NodeIdentity } from '../nodes/hub.js';
 import { identify } from '../nodes/socket.js';
 import { serverNodes } from './drain-work.js';
+import { requireProvenBuild } from './live-check.js';
 import { cancelNodeDrain, requestNodeDrain } from './node-drain.js';
 
 const Scope = z.object({ scope: z.enum(['node', 'server']).default('node') });
@@ -22,7 +23,9 @@ async function targets(ctx: Ctx, req: FastifyRequest): Promise<NodeIdentity[]> {
 
 export function nodeUpdateRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/nodes/update', async req => {
-    const views = await Promise.all((await targets(ctx, req)).map(n => requestNodeDrain(ctx, n)));
+    const nodes = await targets(ctx, req);
+    await requireProvenBuild(ctx);
+    const views = await Promise.all(nodes.map(n => requestNodeDrain(ctx, n)));
     const drain = views.find(v => v.state === 'waiting') ?? views.find(v => v.state === 'postponed') ?? views[0]!;
     return { ready: views.every(v => v.state === 'restarting'), drain, pollAfterMs: POLL_MS };
   });

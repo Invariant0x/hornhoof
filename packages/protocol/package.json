@@ -15,6 +15,10 @@
       "types": "./dist/efforts.d.ts",
       "default": "./dist/efforts.js"
     },
+    "./live-check": {
+      "types": "./dist/live-check.d.ts",
+      "default": "./dist/live-check.js"
+    },
     "./link": {
       "types": "./dist/link.d.ts",
       "default": "./dist/link.js"

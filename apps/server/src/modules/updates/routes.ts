@@ -10,6 +10,7 @@ import { holdTurns } from './drain.js';
 import type { UpdateRequest, UpdaterView } from './control.js';
 import { FULL_SHA, type Build } from './registry.js';
 import { drainWork, serverNodes } from './drain-work.js';
+import { refusedLiveCheck } from './live-check.js';
 
 /* urgent: a security update, which goes in at once and waits for no turn, and asks nobody about them. */
 export const UpdateBody = z.object({ version: z.string().min(1).max(128), whenIdle: z.boolean().default(true), confirmTurns: z.number().int().nonnegative().optional(), urgent: z.boolean().optional() });
@@ -67,7 +68,7 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
       status: ctx.updater.status(),
       waiting: waiting && { version: waiting.request.version, commit: waiting.request.commit },
     };
-    return { current: { version, commit, migrations }, available: Boolean(state.latest?.commit && state.latest.commit !== commit), ...state, updater };
+    return { current: { version, commit, migrations }, available: Boolean(state.latest?.commit && state.latest.commit !== commit && state.liveCheck?.ok), ...state, updater };
   }
 
   /* release: the turns held for the update start again; an update handed over keeps them for the restart. */
@@ -84,14 +85,20 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   /* The image tag names the build: a version tag moves when that version is built again, a commit's does not. The
      digests pin it: the updater installs only the app image the app read, and the node and updater images of the
-     same tag, read now. */
+     same tag, read now. Those exact images go only with the live check of those images, read now too. */
   async function requestFor(build: Build, id: string): Promise<UpdateRequest> {
     const tag = FULL_SHA.test(build.commit) ? build.commit : build.tag;
-    const siblings = await ctx.updates.siblings(tag).catch(err => {
-      app.log.warn({ error: loggable(err) }, 'Could not read the node and updater images of the build.');
+    const { siblings, verdict } = await readBuild(build, tag).catch(err => {
+      app.log.warn({ error: loggable(err) }, 'Could not read the node and updater images of the build and its live check.');
       throw new ApiError(503, 'unavailable', 'Could not read this version from the registry. Check the internet connection, then try again.', 'registry_unreachable');
     });
+    if (!verdict.ok) throw refusedLiveCheck(verdict.reason);
     return { id, version: build.version || build.tag, commit: build.commit, tag, digest: build.digest, nodeDigest: siblings.node, updaterDigest: siblings.updater };
+  }
+
+  async function readBuild(build: Build, tag: string) {
+    const siblings = await ctx.updates.siblings(tag);
+    return { siblings, verdict: await ctx.updates.liveCheck(build, siblings) };
   }
 
   function send(request: UpdateRequest) {
