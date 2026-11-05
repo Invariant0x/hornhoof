@@ -1,4 +1,8 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { randomUUID } from 'node:crypto';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { UNHEARD_MS } from '@hornhoof/protocol';
 import { claudeQueue, userMessage } from './fakes/word-receipts.mjs';
 import { until } from './terminal-host-helpers.js';
@@ -61,6 +65,23 @@ describe('reviewed live delivery through program events', () => {
     expect(c.unheard()).toEqual([{ type: 'agent.unheard', agentKey: 'receipt', jobId: 'job-receipt', text: TEXT }]);
     expect(c.log.mock.calls).toEqual([['Agent receipt (' + kind + '): live words were not delivered: the program did not take the words before the receipt wait ended.']]);
     expect(c.sent.filter(m => m.type === 'agent.words_settled')).toHaveLength(1);
+  });
+
+  it('tells the operator what became of live words in a turn a person typed', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-typed-receipts-'));
+    onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+    const c = await liveTerminal('claude', 'queued', { operator: { dir, connected: () => true, send: () => true } });
+    const told = vi.spyOn(c.host['operator']!, 'receipt');
+    c.finish();
+    await c.running;
+    const prompt = c.hook('prompt', { prompt: 'A human question.' });
+    await until(() => c.sent.some(m => m.type === 'turn.open'));
+    const opened = c.sent.find(m => m.type === 'turn.open');
+    c.host.opened({ type: 'turn.opened', agentKey: 'receipt', jobId: 'human', toolToken: 'human-token', ref: opened?.ref });
+    await prompt;
+    const delivery = { id: randomUUID(), ordinal: 2 };
+    expect(await c.host.say('receipt', TEXT, Infinity, delivery)).toBe(true);
+    expect(told).toHaveBeenCalledWith('receipt', delivery, 'queued');
   });
 
   it('settles once after the job ends, including words absorbed before later queued words', async () => {

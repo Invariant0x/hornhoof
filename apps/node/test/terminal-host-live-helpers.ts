@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { vi } from 'vitest';
 import type { Limits, NodeMessage } from '@hornhoof/protocol';
 import { TerminalHost } from '../src/terminal/host.js';
+import type { OperatorOptions } from '../src/terminal/operator-runtime.js';
 import { jobDone } from '../src/runner.js';
 import { claudeTranscript } from '../src/terminal/programs.js';
 import { Tmux } from '../src/terminal/tmux.js';
@@ -16,7 +17,7 @@ export const cleanups: (() => Promise<void>)[] = [];
 type Kind = 'claude' | 'codex' | 'kimi';
 type Mode = 'queued' | 'silent' | 'lost' | 'hook' | 'taken';
 
-export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued', options: { prompt?: string; openMs?: number; limits?: () => Promise<Limits | null> } = {}) {
+export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued', options: { prompt?: string; openMs?: number; limits?: () => Promise<Limits | null>; operator?: OperatorOptions } = {}) {
   const home = realpathSync(mkdtempSync(join(tmpdir(), 'hh-public-words-')));
   const workDir = join(home, 'work');
   const file = kind === 'claude' ? claudeTranscript(home, workDir, SESSION)
@@ -69,7 +70,7 @@ export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued',
       else if (kind === 'kimi' && mode === 'queued') await hook('queued', { prompt: text });
     }
   });
-  const host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: m => sent.push(m), secrets: () => [], log, pollMs: 10, enterWaitMs: 50, openMs: options.openMs ?? 50, plugins: [] });
+  const host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: m => sent.push(m), secrets: () => [], log, pollMs: 10, enterWaitMs: 50, openMs: options.openMs ?? 50, plugins: [], ...(options.operator ? { operator: options.operator } : {}) });
   await host.start();
   const results: Promise<unknown>[] = [];
   const run = (prompt = 'HANG', jobId = 'job-receipt') => {
