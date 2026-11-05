@@ -77,37 +77,36 @@ const took = (ms: number) => {
 };
 
 /* Why a part ended other than by its command passing or failing. */
-function endedBy(run: Pick<Run, 'timeoutMs' | 'kind' | 'repeatable'>, p: Part): string {
+function endedBy(run: Pick<Run, 'timeoutMs' | 'kind' | 'repeatable' | 'commitSha'>, p: Part): string {
   const kept = mayStillRun(p.error ?? '') && !mayRepeat(run, p.error ?? '') ? ', and it did not run again elsewhere, as it may still run there and run_work did not say it is repeatable' : '';
   return lostHow(run, p) + kept;
 }
 
-function lostHow(run: Pick<Run, 'timeoutMs'>, p: Part): string {
-  // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- null and other error codes use the default message
-  switch (p.error) {
-    case 'timeout':
-      return `it did not end within ${took(run.timeoutMs)}`;
-    case 'clone_failed':
-      return 'the branch could not be cloned';
-    case 'files_failed':
-      return "the task's files could not be fetched onto its machine";
-    case 'cancelled':
-      return 'it was stopped on its machine';
-    case 'machine_restarted':
-      return 'its machine restarted and lost it';
-    case 'machine_offline':
-      return 'its machine went offline';
-    case 'machine_disconnected':
-      return 'its machine was disconnected from the company';
-    case 'subscription_removed':
-      return 'its machine lost the plan its node ran for';
-    case 'no_machine':
-      return `no machine was free for it within ${took(WAIT_MS)}`;
-    case 'no_repository':
-      return 'the repository is no longer set';
-    default:
-      return p.exitCode !== null ? `exit code ${p.exitCode}` : 'it failed';
-  }
+/* A part of a pinned run that checked another commit, or passed without saying which. */
+const COMMIT_MISMATCH = 'commit_mismatch';
+
+/* Why a part ended, after its number in the result. */
+const ENDED_HOW: Record<string, (run: Pick<Run, 'timeoutMs' | 'commitSha'>, p: Part) => string> = {
+  timeout: run => `it did not end within ${took(run.timeoutMs)}`,
+  clone_failed: run => (run.commitSha ? 'the pinned commit could not be fetched' : 'the branch could not be cloned'),
+  files_failed: () => "the task's files could not be fetched onto its machine",
+  cancelled: () => 'it was stopped on its machine',
+  machine_restarted: () => 'its machine restarted and lost it',
+  machine_offline: () => 'its machine went offline',
+  machine_disconnected: () => 'its machine was disconnected from the company',
+  subscription_removed: () => 'its machine lost the plan its node ran for',
+  no_machine: () => `no machine was free for it within ${took(WAIT_MS)}`,
+  no_repository: () => 'the repository is no longer set',
+  [COMMIT_MISMATCH]: (run, p) =>
+    p.commit
+      ? `it checked ${p.commit}, not the pinned commit ${run.commitSha}, so the run proves nothing about that commit`
+      : `it did not say which commit it checked, so the run proves nothing about the pinned commit ${run.commitSha}`,
+};
+
+function lostHow(run: Pick<Run, 'timeoutMs' | 'commitSha'>, p: Part): string {
+  const how = ENDED_HOW[p.error ?? ''];
+  if (how) return how(run, p);
+  return p.exitCode !== null ? `exit code ${p.exitCode}` : 'it failed';
 }
 
 /* How a machine lost a part, after its name. */
@@ -127,10 +126,13 @@ export const lostLine = (l: LostRun) => `${l.machine} ${LOST_HOW[l.why] ?? 'lost
 /* What a part that ran again went through before. */
 const ranAgain = (lost: LostRun[]) => (lost.length ? ` It ran again after ${lost.map(lostLine).join(', and again after ')}.` : '');
 
+/* The commit a run pinned, where agents read of it. */
+const pinLine = (run: Pick<Run, 'branch' | 'commitSha'>) => (run.commitSha ? ` Pinned commit: ${run.commitSha} (${run.branch}).` : '');
+
 /* Hornhoof's account of a run that ended: each part, where it ran and how long, the end of what failed, and the files
    on the task. */
 function account(run: Run, task: Pick<Task, 'number'>, parts: Part[], files: Set<string>): string {
-  const lines = [`${named(run)} ${run.kind === 'work' && run.status === 'passed' ? 'is done' : run.status} after ${took((run.finishedAt ?? new Date()).getTime() - run.createdAt.getTime())}.`];
+  const lines = [`${named(run)} ${run.kind === 'work' && run.status === 'passed' ? 'is done' : run.status} after ${took((run.finishedAt ?? new Date()).getTime() - run.createdAt.getTime())}.${pinLine(run)}`];
   for (const p of parts) {
     const where = p.machineName ? ` on ${p.machineName}` : '';
     const time = p.startedAt && p.finishedAt ? ` in ${took(p.finishedAt.getTime() - p.startedAt.getTime())}` : '';
@@ -276,6 +278,7 @@ const partMessage = (run: Run, part: Part, repo: Repo | null, task: number) => (
   ...(run.kind === 'work' ? { kind: 'work' as const, files: run.files } : {}),
   repo: repo ? { url: repo.url, token: repo.token } : null,
   branch: run.branch,
+  commitSha: run.commitSha,
   task,
   command: commandFor(run, part.part),
   part: part.part,
@@ -422,6 +425,15 @@ export async function partStarted(ctx: Ctx, id: NodeIdentity, partId: string): P
     .where(and(eq(testParts.id, partId), eq(testParts.status, 'running'), ofNode(id)));
 }
 
+/* How a part's end counts for its run. A part of a pinned run that checked another commit, or passed without saying
+   which, proves nothing about that commit, whatever its command did. One that failed before it reached any commit keeps
+   its own reason. */
+function partEnd(run: Pick<Run, 'commitSha'>, msg: Pick<TestsDone, 'ok' | 'commit' | 'error'>): { status: 'passed' | 'failed'; error: string | null } {
+  const skewed = run.commitSha !== null && (msg.commit ? msg.commit !== run.commitSha : msg.ok);
+  if (skewed) return { status: 'failed', error: COMMIT_MISMATCH };
+  return msg.ok ? { status: 'passed', error: null } : { status: 'failed', error: msg.error ?? 'failed' };
+}
+
 /* The node's end of a part: its result, and its log on the task, also for a part that ended here first. */
 export async function partDone(ctx: Ctx, id: NodeIdentity, msg: TestsDone): Promise<void> {
   const { db } = ctx;
@@ -430,7 +442,7 @@ export async function partDone(ctx: Ctx, id: NodeIdentity, msg: TestsDone): Prom
     if (found && found.part.status !== 'queued') {
       const [ended] = await db
         .update(testParts)
-        .set({ status: msg.ok ? 'passed' : 'failed', commit: msg.commit, exitCode: msg.exitCode, error: msg.ok ? null : (msg.error ?? 'failed'), tail: tailOf(msg.log), finishedAt: new Date() })
+        .set({ ...partEnd(found.run, msg), commit: msg.commit, exitCode: msg.exitCode, tail: tailOf(msg.log), finishedAt: new Date() })
         .where(and(eq(testParts.id, msg.partId), eq(testParts.status, 'running')))
         .returning();
       await keepLog(ctx, found.run, found.part, msg.log);
@@ -503,6 +515,15 @@ async function taskFor(ctx: Ctx, job: ToolJob, ref: number | string | undefined,
 const taskDepartment = async (ctx: Ctx, task: Pick<Task, 'productId' | 'departmentId'>, kind: RunKind) =>
   (await targetOf(ctx, { kind, branch: null, departmentId: task.productId ?? task.departmentId }))?.department ?? null;
 
+/* What a run's parts check. A test run reads the exact commit from its repository here, before any part goes out, so a
+   push after this moment changes nothing about what the run proves. A run of work clones its branch as it finds it. */
+async function pinCommit(ctx: Ctx, task: Pick<Task, 'number'>, kind: RunKind, branch: string | undefined, found: { repo: Repo } | null): Promise<{ branch: string | null; commitSha: string | null }> {
+  if (kind !== 'tests' || !found) return { branch: branch ?? null, commitSha: null };
+  const at = await ctx.readCommit(found.repo, branch ? { branch } : { task: task.number });
+  if ('problem' in at) throw refuse(409, 'repo_invalid', at.problem);
+  return at;
+}
+
 export async function startRun(ctx: Ctx, job: ToolJob, input: RunInput, kind: RunKind = 'tests'): Promise<string> {
   const { db } = ctx;
   const task = await taskFor(ctx, job, input.task, kind);
@@ -533,6 +554,7 @@ export async function startRun(ctx: Ctx, job: ToolJob, input: RunInput, kind: Ru
   const department = found?.department ?? await taskDepartment(ctx, task, kind);
   const heldReason = await browserHeldRun(ctx, job.companyId, await placesOf(ctx, job.companyId), { kind }, department);
   if (heldReason) throw refuse(409, 'browser_failed', heldReason);
+  const pin = await pinCommit(ctx, task, kind, input.branch, found);
   const run = await db.transaction(async tx => {
     /* Numbers go up one by one per company, so starting a run waits on the company row. */
     await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, job.companyId)).for('update');
@@ -547,7 +569,7 @@ export async function startRun(ctx: Ctx, job: ToolJob, input: RunInput, kind: Ru
         jobId: job.id,
         departmentId: department?.id ?? null,
         kind,
-        branch: input.branch ?? null,
+        ...pin,
         command: input.command,
         files,
         memoryGb: kind === 'work' ? (input.memory ?? WORK_MEMORY_GB) : null,
@@ -569,7 +591,7 @@ export async function startRun(ctx: Ctx, job: ToolJob, input: RunInput, kind: Ru
   });
   const none = went.some(p => p.status === 'queued') && !places.length ? ' No machine that may take it is online now, so it waits until one is.' : '';
   return (
-    `${named(run)} of #${task.number} ${one && went[0]!.status === 'running' ? 'runs ' : ''}${one ? where[0] : `has ${parts} parts: ${where.join(', ')}`}.${none} ` +
+    `${named(run)} of #${task.number} ${one && went[0]!.status === 'running' ? 'runs ' : ''}${one ? where[0] : `has ${parts} parts: ${where.join(', ')}`}.${none}${pinLine(run)} ` +
     `When every part has ended you are woken on #${task.number} with the result; ${toolsOf(kind).state} ${run.number} shows how it goes.`
   );
 }
@@ -599,7 +621,7 @@ export async function runState(ctx: Ctx, job: ToolJob, number: number, kind: Run
     kind: run.kind,
     branch: work ? run.branch : (run.branch ?? `the task's own: task-${task.number} or the one that starts with task-${task.number}-`),
     command: run.command,
-    ...(work ? { files: run.files, memoryGb: run.memoryGb, repeatable: run.repeatable } : {}),
+    ...(work ? { files: run.files, memoryGb: run.memoryGb, repeatable: run.repeatable } : { commitSha: run.commitSha }),
     minutes: run.timeoutMs / 60_000,
     status: stateOf(run, run.status),
     ...(stopper ? { stoppedBy: stopper.name } : {}),

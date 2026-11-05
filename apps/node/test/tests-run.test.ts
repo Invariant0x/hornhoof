@@ -105,6 +105,24 @@ describe('a part of a test run on a node', () => {
     expect(missing).toMatchObject({ ok: false, error: 'clone_failed' });
   });
 
+  it("says why it found no branch when the repository's branches cannot be listed", async () => {
+    const dir = nodeDir();
+    const gone = join(dir, 'no-such-repository');
+    const done = await runTests(run(gone, { branch: null, command: 'echo ran-the-command' }), { dir, user: null, hidden: [] });
+    expect(done).toMatchObject({ ok: false, exitCode: null, error: 'clone_failed', commit: null });
+    expect(done.log).toContain('no-such-repository');
+    expect(done.log).not.toContain('ran-the-command');
+  });
+
+  it('says it was stopped when stopped while looking for its branch', async () => {
+    const { url } = origin();
+    const stop = new AbortController();
+    stop.abort();
+    const done = await runTests(run(url, { branch: null, command: 'echo ran-the-command' }), { dir: nodeDir(), user: null, hidden: [], signal: stop.signal });
+    expect(done).toMatchObject({ ok: false, exitCode: null, error: 'cancelled', commit: null });
+    expect(done.log).not.toContain('ran-the-command');
+  });
+
   it("fails with the command's exit code, keeping the start and the end of a long log", async () => {
     const { url } = origin();
     const command = `echo FIRST; head -c ${2 * TEST_LOG_BYTES} /dev/zero | tr '\\0' x; echo; echo LAST; exit 3`;
@@ -193,6 +211,72 @@ const stalled: PartFiles = {
   put: (_partId, _name, _bytes, signal) => new Promise((_, reject) => signal?.addEventListener('abort', () => reject(new Error('aborted')))),
 };
 
+/* A new commit on the branch, as when someone pushes after Hornhoof pinned the one before it. */
+function moveBranch(url: string, branch: string): string {
+  git(url, 'checkout', '--quiet', branch);
+  writeFileSync(join(url, 'marker.txt'), 'moved\n');
+  git(url, 'add', 'marker.txt');
+  git(url, 'commit', '--quiet', '-m', 'moved');
+  const head = git(url, 'rev-parse', 'HEAD');
+  git(url, 'checkout', '--quiet', 'main');
+  return head;
+}
+
+describe('a part pinned to one commit', () => {
+  it('checks the pinned commit after its branch moved on, and says that is what it checked', async () => {
+    const { url, commits } = origin();
+    const pinned = commits['task-12-checkout']!;
+    expect(moveBranch(url, 'task-12-checkout')).not.toBe(pinned);
+    const done = await runTests(run(url, { commitSha: pinned }), { dir: nodeDir(), user: null, hidden: [] });
+    expect(done).toMatchObject({ ok: true, exitCode: 0, error: null, commit: pinned });
+    expect(done.log).toContain('task-12-checkout\n');
+    expect(done.log).not.toContain('moved\n');
+  });
+
+  it('finds the pinned commit without a branch name', async () => {
+    const { url, commits } = origin(['elsewhere']);
+    const done = await runTests(run(url, { branch: null, commitSha: commits.elsewhere! }), { dir: nodeDir(), user: null, hidden: [] });
+    expect(done).toMatchObject({ ok: true, commit: commits.elsewhere });
+    expect(done.log).toContain('elsewhere\n');
+  });
+
+  it('never runs the command when the repository does not have the pinned commit', async () => {
+    const { url } = origin();
+    const done = await runTests(run(url, { commitSha: 'f'.repeat(40), command: 'echo ran-the-command' }), { dir: nodeDir(), user: null, hidden: [] });
+    expect(done).toMatchObject({ ok: false, exitCode: null, error: 'clone_failed', commit: null });
+    expect(done.log).not.toContain('ran-the-command');
+  });
+
+  it('never runs the command when the checkout lands on another commit, and reports the one it landed on', async () => {
+    const { url, commits } = origin();
+    /* An annotated tag's own object can be fetched, and checking it out lands on the commit it points at. */
+    git(url, 'tag', '-a', 'v1', '-m', 'v1', commits['task-12-checkout']!);
+    const tag = git(url, 'rev-parse', 'v1');
+    expect(tag).not.toBe(commits['task-12-checkout']);
+    const seen: string[] = [];
+    const done = await runTests(run(url, { commitSha: tag, command: 'echo ran-the-command' }), { dir: nodeDir(), user: null, hidden: [], prepareRepoBrowser: async repoDir => void seen.push(repoDir) });
+    expect(done).toMatchObject({ ok: false, exitCode: null, error: 'clone_failed', commit: commits['task-12-checkout'] });
+    expect(done.log).not.toContain('ran-the-command');
+    expect(seen).toEqual([]);
+  });
+
+  it('says it was stopped, not that the commit is missing, when stopped before it got there', async () => {
+    const { url, commits } = origin();
+    const stop = new AbortController();
+    stop.abort();
+    const done = await runTests(run(url, { commitSha: commits['task-12-checkout']!, command: 'echo ran-the-command' }), { dir: nodeDir(), user: null, hidden: [], signal: stop.signal });
+    expect(done).toMatchObject({ ok: false, exitCode: null, error: 'cancelled', commit: null });
+    expect(done.log).not.toContain('ran-the-command');
+  });
+
+  it('leaves the origin remote in place for commands that read it', async () => {
+    const { url, commits } = origin();
+    const done = await runTests(run(url, { commitSha: commits['task-12-checkout']!, command: 'git remote get-url origin' }), { dir: nodeDir(), user: null, hidden: [] });
+    expect(done).toMatchObject({ ok: true });
+    expect(done.log).toContain(`\n${url}\n`);
+  });
+});
+
 describe('the folder older nodes ran their parts in', () => {
   it('goes with what parts left there, read-only folders too, and nothing else goes', () => {
     const dir = nodeDir();
@@ -226,6 +310,14 @@ describe('the folder older nodes ran their parts in', () => {
 describe('a part of other work on a node', () => {
   const work = (over: Partial<TestRun> = {}): TestRun => ({
     type: 'tests.run', kind: 'work', partId: 'part-1', repo: null, branch: null, task: 12, command: 'true', part: 1, parts: 1, timeoutMs: 60_000, ...over,
+  });
+
+  it('asks for a branch when it has a repository and none is named, and does not guess the task\'s', async () => {
+    const { url } = origin(['task-12']);
+    const done = await runTests(work({ repo: { url, token: '' }, command: 'echo ran-the-command' }), { dir: nodeDir(), user: null, hidden: [] });
+    expect(done).toMatchObject({ ok: false, exitCode: null, error: 'clone_failed', commit: null });
+    expect(done.log).toContain('Name the branch to clone.');
+    expect(done.log).not.toContain('ran-the-command');
   });
 
   it('runs in runs/<part> of the data folder, beside a clone too, with its folders there', async () => {
