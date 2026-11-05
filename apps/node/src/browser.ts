@@ -482,12 +482,25 @@ export async function ensureRepoBrowser(
   if (!res.ok) throw new Error(`Playwright Chromium could not start: ${res.error}`);
 }
 
+async function startupReadinessError(dir: string, verifyUser: JobUser | null): Promise<string | null> {
+  const checked = await runProgram({
+    bin: 'unzip', args: ['-v'], user: verifyUser, timeoutMs: VERIFY_TIMEOUT_MS,
+    env: { PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin', LANG: 'C.UTF-8' },
+  });
+  if (checked.timedOut) return 'unzip -v timed out.';
+  if (checked.code !== 0) {
+    const reason = stripEscapes(checked.output).trim().slice(0, MAX_REASON_LENGTH) || `exited with code ${checked.code ?? 'unknown'}`;
+    return `unzip -v failed: ${reason}`;
+  }
+  const res = await prepareAndVerifyBrowser({ dir, verifyUser });
+  return res.ok ? null : res.error;
+}
+
 export async function startupBrowserCheck(
   dir: string,
   verifyUser: JobUser | null = agentUser(),
   files?: SystemFiles,
 ): Promise<string | null> {
   if (verifyUser && verifyUser.uid >= FIRST_UID) ensurePasswd(verifyUser, join(dir, 'home'), files);
-  const res = await prepareAndVerifyBrowser({ dir, verifyUser });
-  return res.ok ? null : res.error;
+  return startupReadinessError(dir, verifyUser);
 }
