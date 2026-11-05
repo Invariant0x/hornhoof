@@ -515,6 +515,7 @@ export const ru: Messages = {
     placeholder: 'Один факт, например «Каждый выпуск ждет согласия CEO»',
     add: 'Добавить',
     save: 'Сохранить',
+    saving: 'Сохранение',
     cancel: 'Отмена',
     change: 'Изменить',
     remove: 'Удалить',
