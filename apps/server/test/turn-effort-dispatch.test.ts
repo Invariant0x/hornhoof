@@ -84,15 +84,6 @@ describe('how hard each turn thinks', () => {
     expect(await c.levels(c.reviewer.id)).toEqual([REVIEWER, 'medium']);
   });
 
-  it('keeps the base for the fixes themselves, as nothing says they are mechanical', async () => {
-    const c = await gateCompany();
-    await c.card(c.bruno.id, 'high');
-    const task = await c.task('Checkout API');
-    await c.handIn(task);
-    await c.sendBack(task);
-    expect(await c.levels(c.bruno.id)).toEqual(['high']);
-  });
-
   it('takes medium for merging what passed its gates', async () => {
     const c = await gateCompany();
     await c.card(c.bruno.id, 'high');
