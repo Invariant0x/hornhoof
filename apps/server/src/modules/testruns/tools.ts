@@ -34,8 +34,9 @@ export function registerTestTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     {
       description:
         "Runs a branch's full test suite on whichever machine of the company is free now, not on yours, and returns at once with the run's number. " +
-        "The branch is cloned into a fresh folder there and the command runs in it as in CI, so it installs what it needs first. When every part has ended you are woken on the task " +
-        `with the result: passed or failed, each part's machine and time, and the last lines of what failed; each part's full log goes on the task as tests-<run>-<part>.log. ` +
+        "Hornhoof pins the commit the branch is at now before any part goes out, and says which: every part checks exactly that commit in a fresh folder, whatever is pushed meanwhile, and " +
+        "a part that checked another one fails the run. The command runs there as in CI, so it installs what it needs first. When every part has ended you are woken on the task " +
+        `with the result: passed or failed, the pinned commit, each part's machine and time, and the last lines of what failed; each part's full log goes on the task as tests-<run>-<part>.log. ` +
         `parts splits the run into up to ${MAX_TEST_PARTS} parts on several machines at once, for a runner that can split: the command says which part with {part} and how many with {parts}, ` +
         'as in --shard={part}/{parts}, and HH_TEST_PART and HH_TEST_PARTS hold them too.',
       inputSchema: {
@@ -50,7 +51,7 @@ export function registerTestTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
   );
   server.registerTool(
     'test_run',
-    { description: "How a test run goes: its state, and each part's state, machine, commit, exit code, log file and, for a failed one, the end of its log.", inputSchema: { run: Run } },
+    { description: "How a test run goes: its state, the commit it pinned (commitSha), and each part's state, machine, the commit it checked, exit code, log file and, for a failed one, the end of its log.", inputSchema: { run: Run } },
     async ({ run }) => answer(async () => JSON.stringify(await runState(ctx, job, run))),
   );
   server.registerTool(

@@ -10,6 +10,8 @@ An agent runs the whole test suite of a branch with `run_tests`. The suite does 
 
 A test runner that can split a suite runs it in parts, one part on each of several machines at once.
 
+Before the first part goes out, Hornhoof reads from the repository the exact commit the branch is at. Every part tests that commit, even when someone pushes to the branch meanwhile, and the result names it. A part that tested another commit fails the whole run. The server itself reads this over https, so it must be able to reach the repository: when it cannot, the run does not start and the agent is told why.
+
 ## What does the Machines tab show?
 
 Machines shows the company's machines as one pool: how many are online, their processor cores, their free memory and how busy they are now.

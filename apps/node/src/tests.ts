@@ -368,8 +368,8 @@ function commandEnv(base: NodeJS.ProcessEnv, msg: TestRun, inbox: string, outbox
   return { ...base, CI: 'true', NO_COLOR: '1', FORCE_COLOR: '0', VITEST_MAX_WORKERS: workers, ...parts, HH_TEST_PART: String(msg.part), HH_TEST_PARTS: String(msg.parts) };
 }
 
-/* One part of a run, which always ends with a tests.done: the branch, if there is one, is cloned into a fresh folder,
-   a part of work gets the task's files it names, the command runs within the time with a home and a temporary folder
+/* One part of a run, which always ends with a tests.done: the commit Hornhoof pinned, or else the branch if there is one,
+   comes into a fresh folder, a part of work gets the task's files it names, the command runs within the time with a home and a temporary folder
    of its own, what a part of work leaves in its output folder goes on the task, and the folder goes, whatever
    happened. */
 export async function runTests(msg: TestRun, { dir, user, hidden, signal, proc = '/proc', cpus, env: hostEnv, files, prepareRepoBrowser = repoDir => ensureRepoBrowser(dir, repoDir, user) }: Options): Promise<TestsDone> {

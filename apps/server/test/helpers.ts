@@ -10,6 +10,7 @@ import WebSocket from 'ws';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import { inject, onTestFinished, vi } from 'vitest';
 import { buildApp, type Deps } from '../src/app.js';
+import type { CommitReader } from '../src/modules/testruns/refs.js';
 import { loadConfig, type Config } from '../src/config.js';
 import { agentRole, grantsFor, readerGrantsFor, readerRole, type AgentSql } from '../src/db/agent-sql.js';
 import type { Db } from '../src/db/client.js';
@@ -86,13 +87,17 @@ export async function testApp(env: NodeJS.ProcessEnv = {}, logger?: Deps['logger
   return appOn(client, env, logger);
 }
 
+/* Tests never reach a real repository: every branch is at this commit, until a test moves it through ctx.readCommit. */
+export const TEST_COMMIT = 'a'.repeat(40);
+const atTestCommit: CommitReader = async (_repo, want) => ({ branch: 'branch' in want ? want.branch : `task-${want.task}`, commitSha: TEST_COMMIT });
+
 /* The app on a database the test opened, which closes after the app: test hooks run last first, and stopping the app can
    still write to it. */
 export async function appOn(client: PGlite, env: NodeJS.ProcessEnv = {}, logger?: Deps['logger']): Promise<{ app: FastifyInstance; db: Db; config: Config }> {
   const db = drizzle(client, { schema }) as unknown as Db;
   /* Tests never reach the real registry unless they ask. */
   const config = loadConfig({ HORNHOOF_SECRET: TEST_SECRET, UPDATE_CHECK_MS: '0', ...env });
-  const app = await buildApp({ db, config, logger, agentSql: agentSqlOn(client) });
+  const app = await buildApp({ db, config, logger, agentSql: agentSqlOn(client), readCommit: atTestCommit });
   onTestFinished(() => app.close());
   return { app, db, config };
 }

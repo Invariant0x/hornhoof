@@ -6,7 +6,7 @@ import { departments } from '../../db/schema.js';
 
 type Repo = NonNullable<Workspace['repo']>;
 
-/* The first of these departments and products that has a repository, with it. The token comes decrypted, for the node alone. */
+/* The first of these departments and products that has a repository, with it. The token comes decrypted, for the node and for reading the repository's branches. */
 export async function repoAt(ctx: Pick<Ctx, 'db' | 'config'>, ids: (string | null)[]): Promise<{ department: typeof departments.$inferSelect; repo: Repo } | null> {
   for (const id of ids) {
     if (!id) continue;
