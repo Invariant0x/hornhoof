@@ -6,7 +6,7 @@ import { hashToken } from '../src/crypto/tokens.js';
 import type { Db } from '../src/db/client.js';
 import { agentEvents, agents, companies, departments, jobs, requests, subscriptions, tasks } from '../src/db/schema.js';
 import { blocked, createTask } from '../src/modules/tasks/engine.js';
-import { as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until } from './helpers.js';
+import { as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until, ownPlan } from './helpers.js';
 import { agentState, enqueueTurn, GONE_ALONG } from '../src/modules/conversation/queue.js';
 import { discardStaleTurn } from '../src/modules/tasks/wake-state.js';
 
@@ -126,6 +126,7 @@ describe('tools a skill grants', () => {
   it('are turned on only by people who see the whole company, since they show all of it', async () => {
     const { app, ceo, dev, bruno } = await company([]);
     const dana = await invitePerson(app, ceo, { name: 'Dana', email: 'dana@acme.test', access: { departments: [dev.id] } });
+    await ownPlan(app.ctx.db, 'dana@acme.test', bruno.id);
     const grant = (token: string, skill: string) => app.inject({ method: 'PATCH', url: `/api/agents/${bruno.id}`, payload: { skills: { [skill]: true } }, ...as(token) });
     const refused = await grant(dana, 'ops-failure-review');
     expect([refused.statusCode, refused.json().error.reason]).toEqual([403, 'skill_company_only']);

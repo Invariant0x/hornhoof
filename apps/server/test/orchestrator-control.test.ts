@@ -12,7 +12,7 @@ import { identityOf } from '../src/modules/nodes/hub.js';
 import { ask, createTask } from '../src/modules/tasks/engine.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
 import { fakeRelay } from './fake-relay.js';
-import { as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until } from './helpers.js';
+import { as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until, takePlan } from './helpers.js';
 import { said } from '../src/modules/conversation/live.js';
 
 const NODE_KEY = 'k'.repeat(40);
@@ -635,6 +635,7 @@ describe('what only the CEO may ask for', () => {
   it('refuses them in a turn another person asked for, and in one with no message', async () => {
     const { app, db, ceo, orchestrator, lena, running } = await quiet();
     const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@example.com', access: { whole: true } });
+    await takePlan(db, 'maria@example.com', orchestrator.id);
     expect((await app.inject({ method: 'POST', url: `/api/agents/${orchestrator.id}/messages`, payload: { text: 'Invite my friend.' }, ...as(maria) })).statusCode).toBe(202);
     await newest(db, orchestrator.id, 'tool-token-maria-0123456789abcdef012');
     const asked = await call(await mcp(app, 'tool-token-maria-0123456789abcdef012'), 'invite_person', { name: 'Eve', email: 'eve@example.com', title: '', access: { whole: true } });

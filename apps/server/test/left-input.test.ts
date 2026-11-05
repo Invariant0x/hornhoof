@@ -10,7 +10,7 @@ import { BUILTIN, nodeIdentity } from '../src/modules/nodes/hub.js';
 import { handleNodeMessage } from '../src/modules/nodes/messages.js';
 import { TerminalRelay } from '../src/modules/terminals/relay.js';
 import { failureCompany } from './failure-company.js';
-import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
+import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until, type FakeNode, ownPlan } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
 const OTHER_NODE = nodeIdentity('00000000-0000-4000-8000-000000000001');
@@ -184,6 +184,7 @@ describe('words left unsent in a program\'s input', () => {
       builtin.send(left(agent.id));
       await next(builtin, 'agent.input_kept');
     }
+    await ownPlan(db, 'maria@example.com', bruno!.id, sam!.id);
     const read = (id: string) => app.inject({ url: `/api/agents/${id}/events`, ...as(maria) });
     expect((await read(bruno!.id)).json().events.map((e: { kind: string }) => e.kind)).toContain('input_left');
     expect((await read(sam!.id)).statusCode).toBe(403);

@@ -2,7 +2,7 @@ import { PROGRAM_OPERATOR_ROLE } from '@hornhoof/protocol/program-operator';
 import { and, eq, isNull, lte, sql } from 'drizzle-orm';
 import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
-import { accessOf, agentSpot, canReach } from '../../auth/access.js';
+import { canViewAgent } from '../../auth/agent-view.js';
 import type { Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { agents, attachments, departments, jobs, programOperatorCases, subscriptions } from '../../db/schema.js';
@@ -12,6 +12,7 @@ import type { ToolJob } from '../tools/job.js';
 const MAX_PICTURE_BYTES = 3 * 1024 * 1024;
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 export const casePictureUnknown = (): ApiError => new ApiError(404, 'not_found', 'There is no such picture.', 'attachment_unknown');
+const casePictureHidden = (): ApiError => new ApiError(403, 'forbidden', 'This picture belongs to work you do not see.', 'attachment_hidden');
 
 /* Bound the bytes in the query too: an invalid row never becomes an unbounded download. */
 async function casePicture(db: Db, companyId: string, id: string, caseId?: string) {
@@ -69,9 +70,7 @@ export async function agentCasePicture(db: Db, job: ToolJob, ref: string, file: 
 export async function personCasePicture(db: Db, person: Person, id: string): Promise<Buffer> {
   const found = await casePicture(db, person.companyId, id);
   if (!found) throw casePictureUnknown();
-  const access = await accessOf(db, person);
-  const allowed = found.target.kind === 'orchestrator' ? access.whole : canReach(access, await agentSpot(db, found.target));
-  if (!allowed) throw casePictureUnknown();
+  if (!(await canViewAgent(db, person, found.target))) throw casePictureHidden();
   return found.bytes;
 }
 

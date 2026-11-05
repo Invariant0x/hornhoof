@@ -3,15 +3,16 @@ import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lt, or, sql } fr
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { accessOf, canReach } from '../../auth/access.js';
+import { canViewAgent, seesAgentId, viewerOf } from '../../auth/agent-view.js';
 import { requirePerson } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { agents, attachments, departments, requests, tasks, turns, type RequestOption } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { canOpenAgent } from '../agents/running.js';
 import { jobOf, type ToolJob } from '../tools/job.js';
 import { agentCasePicture, personCasePicture, sendCasePicture } from '../program-operator/attachments.js';
-import { refuse, taskSpot, type Task } from './engine.js';
+import { mayOpenRequest } from './decisions.js';
+import { refuse, type Task } from './engine.js';
+import { seesTask } from './sight.js';
 import { agentSeesTask, taskByRef } from './views.js';
 
 /* A screenshot fits comfortably; a turn sends a few dozen at most. */
@@ -185,13 +186,15 @@ async function messagePicture(db: Db, job: ToolJob, id: string) {
   return found && { ...found, name: `${found.id.slice(0, 8)}-${found.name ?? 'picture'}` };
 }
 
-/* A task file is authorized by its task, including one a person wrote, before any picture/window fallback. */
+/* A file of a task goes with its task and with who wrote it: a person, or an agent this person sees. A picture shown with a
+   request answers to the request instead, as below. */
 async function taskFileForPerson(db: Db, me: Awaited<ReturnType<typeof requirePerson>>, id: string) {
-  const [found] = await db.select({ id: attachments.id, name: attachments.name, mediaType: attachments.mediaType, length: attachments.size, task: tasks }).from(attachments)
+  const [found] = await db.select({ id: attachments.id, name: attachments.name, mediaType: attachments.mediaType, length: attachments.size, personId: attachments.personId, agentId: attachments.agentId, task: tasks }).from(attachments)
     .innerJoin(tasks, eq(tasks.id, attachments.taskId))
-    .where(and(eq(attachments.id, id), eq(attachments.companyId, me.companyId), eq(tasks.companyId, me.companyId), isNull(attachments.operatorCaseId)));
+    .where(and(eq(attachments.id, id), eq(attachments.companyId, me.companyId), eq(tasks.companyId, me.companyId), isNull(attachments.requestId), isNull(attachments.operatorCaseId)));
   if (!found) return null;
-  if (!canReach(await accessOf(db, me), taskSpot(found.task))) throw new ApiError(404, 'not_found', 'There is no such file.', 'attachment_unknown');
+  const viewer = await viewerOf(db, me);
+  if (!seesTask(viewer, found.task) || !(found.personId || seesAgentId(viewer, found.agentId))) throw new ApiError(403, 'forbidden', 'This file belongs to work you do not see.', 'attachment_hidden');
   return found;
 }
 
@@ -255,8 +258,8 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     return sendFile(db, reply, found);
   });
 
-  /* People see a picture once a request shows it, and only where they reach the request's task; one a person sends an
-     agent, where they reach that agent's window. */
+  /* People see a picture of a request they read with its work, or of an open one that is theirs to answer; one a person
+     sends an agent, when they see that agent. */
   app.get('/api/attachments/:id', async (req, reply) => {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
@@ -265,15 +268,16 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const [picture] = await db.select({ operatorCaseId: attachments.operatorCaseId }).from(attachments).where(and(eq(attachments.id, id), eq(attachments.companyId, me.companyId)));
     if (picture?.operatorCaseId) return sendCasePicture(reply, await personCasePicture(db, me, id));
     const [found] = await db
-      .select({ mediaType: attachments.mediaType, bytes: attachments.bytes, personId: attachments.personId, agent: agents, task: tasks })
+      .select({ mediaType: attachments.mediaType, bytes: attachments.bytes, personId: attachments.personId, agent: agents, task: tasks, request: requests })
       .from(attachments)
       .innerJoin(agents, eq(agents.id, attachments.agentId))
       .leftJoin(requests, eq(requests.id, attachments.requestId))
       .leftJoin(tasks, eq(tasks.id, requests.taskId))
       .where(and(eq(attachments.id, id), eq(attachments.companyId, me.companyId), isNull(attachments.operatorCaseId)));
-    const reach = await accessOf(db, me);
-    const shows = found && (found.personId ? await canOpenAgent(ctx, reach, found.agent) : found.task && canReach(reach, taskSpot(found.task)));
-    if (!shows) throw new ApiError(404, 'not_found', 'There is no such picture.', 'attachment_unknown');
+    if (!found || (!found.personId && !found.task)) throw new ApiError(404, 'not_found', 'There is no such picture.', 'attachment_unknown');
+    if (!(found.personId ? await canViewAgent(db, me, found.agent) : await mayOpenRequest(db, me, found.request!, found.task!))) {
+      throw new ApiError(403, 'forbidden', 'This picture belongs to work you do not see.', 'attachment_hidden');
+    }
     return reply
       .header('x-content-type-options', 'nosniff')
       .header('content-security-policy', "default-src 'none'")
