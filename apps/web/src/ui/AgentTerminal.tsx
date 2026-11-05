@@ -1,8 +1,8 @@
-import { FitAddon } from '@xterm/addon-fit';
 import { Terminal, type ITerminalOptions, type ITheme } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { useT } from '../i18n';
+import { fitTerminal, observeTerminalFit } from './terminal-fit';
 import { isHidden } from './visibility';
 
 /* Ivan's iTerm2 profile in dark mode, which the terminal repeats on any page: Claude Code and Codex run their dark theme,
@@ -321,22 +321,19 @@ function scrollToAnchor(term: Terminal, { marker, cells }: ReturnType<typeof anc
 /* A card below the terminal coming or going changes its height, and a narrower or wider window its width. Rows it gains
    come back from the history and lines wrap again, which moves the view and hides the program's line to type in below
    the window, so a view at the bottom stays there, and a view the person scrolled up into the history keeps its line. */
-function fitKeepingPlace(term: Terminal, fit: FitAddon) {
+function fitKeepingPlace(term: Terminal, box: HTMLElement) {
   const { viewportY, baseY } = term.buffer.active;
   if (viewportY >= baseY || pageAtBottom(term.element?.querySelector('.xterm-viewport'))) {
-    fit.fit();
+    fitTerminal(term, box);
     return term.scrollToBottom();
   }
   const place = anchor(term);
-  fit.fit();
+  fitTerminal(term, box);
   scrollToAnchor(term, place);
 }
 
-function keepFitted(term: Terminal, fit: FitAddon, box: HTMLElement) {
-  if (typeof ResizeObserver === 'undefined') return () => {};
-  const resized = new ResizeObserver(() => fitKeepingPlace(term, fit));
-  resized.observe(box);
-  return () => resized.disconnect();
+function keepFitted(term: Terminal, box: HTMLElement) {
+  return observeTerminalFit(term, box, () => fitKeepingPlace(term, box));
 }
 
 /* xterm syncs its scroll area on a timer once it opens and on the next frame after a reset, and does not cancel them on
@@ -363,15 +360,14 @@ export function AgentTerminal({ path, program, onGone, watching = false }: Props
   useEffect(() => {
     const term = new Terminal(OPTIONS);
     termRef.current = term;
-    const fit = new FitAddon();
-    term.loadAddon(fit);
-    term.open(box.current!);
+    const container = box.current!;
+    term.open(container);
     keepSelecting(term);
     bindCopy(term);
-    fit.fit();
+    fitTerminal(term, container);
     const view = connectView(term, path, setUp, () => gone.current());
     forward(term, view.send);
-    const unfit = keepFitted(term, fit, box.current!);
+    const unfit = keepFitted(term, container);
     if (!leavesFocus.current) term.focus();
     return () => {
       termRef.current = null;
