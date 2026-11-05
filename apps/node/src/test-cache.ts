@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { constants, createReadStream } from 'node:fs';
-import { copyFile, lstat, mkdir, mkdtemp, open, readFile, readdir, readlink, rename, rm, symlink } from 'node:fs/promises';
+import { copyFile, lstat, mkdir, mkdtemp, open, readFile, readdir, readlink, realpath, rename, rm, symlink } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { EnvironmentDigest, RepositoryPath } from '@hornhoof/protocol';
 import { z } from 'zod';
@@ -193,13 +193,23 @@ export async function prepareCache(directory: string, key: string, inputDigest: 
     await publish(entry, context, build); return entry;
   });
 }
+async function restoredLinks(root: string, entries: PayloadItem[]): Promise<void> {
+  const checkout = await realpath(root);
+  for (const item of entries) {
+    if (item.kind !== 'symlink') continue;
+    const path = relative(checkout, await realpath(within(root, item.path)));
+    if (path === '..' || path.startsWith('../')) throw new Error('A restored workspace symlink escapes its checkout.');
+  }
+}
 export async function restoreCache(entry: CacheEntry, destination: string, context: CacheContext): Promise<void> {
   const ready = await readReady(entry, context);
   await mkdir(destination, { recursive: true, mode: 0o700 });
+  if (!(await lstat(destination)).isDirectory()) throw new Error('The checkout root is a symlink or is not a directory.');
   for (const path of ready.roots) {
     // Check parents before removing an old private copy. A job must never redirect a restore.
     const target = within(destination, path); await payloadParents(destination, path);
     await noLinkedParents(destination, path); await rm(target, { recursive: true, force: true });
   }
   await copyItems(join(entry.path, 'payload'), destination, ready.entries, context);
+  await restoredLinks(destination, ready.entries);
 }

@@ -169,3 +169,23 @@ it('retains a writer lock in a trusted descendant until that descendant exits', 
   const closed = once(child, 'exit'); child.kill('SIGKILL'); await closed;
   await expect(cache.withCacheLock(path, ctx, async () => 'released')).resolves.toBe('released');
 });
+
+it('refuses workspace links redirected outside the current checkout', async () => {
+  const ctx = await context(), source = join(ctx.cacheRoot, 'source');
+  await mkdir(join(source, 'node_modules'), { recursive: true }); await mkdir(join(source, 'packages/local'), { recursive: true });
+  await writeFile(join(source, 'packages/local/package.json'), '{}'); await symlink('../packages/local', join(source, 'node_modules/local'));
+  const entry = await cache.prepareCache(join(ctx.cacheRoot, 'dependencies'), 'a'.repeat(64), 'd'.repeat(64), ctx, async () => ({ root: source, paths: ['node_modules'] }));
+  const destination = join(ctx.cacheRoot, 'part'), outside = join(ctx.cacheRoot, 'outside');
+  await mkdir(join(destination, 'packages'), { recursive: true }); await mkdir(outside); await writeFile(join(outside, 'package.json'), '{}');
+  await symlink(outside, join(destination, 'packages/local'));
+  await expect(cache.restoreCache(entry, destination, ctx)).rejects.toThrow(/checkout|symlink/i);
+});
+
+it('does not restore through a symlink used as the checkout root', async () => {
+  const ctx = await context(), source = join(ctx.cacheRoot, 'source'), outside = join(ctx.cacheRoot, 'outside'), destination = join(ctx.cacheRoot, 'part');
+  await mkdir(source); await writeFile(join(source, 'artifact'), 'payload');
+  const entry = await cache.prepareCache(join(ctx.cacheRoot, 'environments'), 'a'.repeat(64), 'd'.repeat(64), ctx, async () => ({ root: source, paths: ['artifact'] }));
+  await mkdir(outside); await symlink(outside, destination);
+  await expect(cache.restoreCache(entry, destination, ctx)).rejects.toThrow(/checkout|symlink/i);
+  expect(await readdir(outside)).toEqual([]);
+});
