@@ -145,7 +145,8 @@ describe('who holds the shared browsers', () => {
     writeFileSync(join(clone, 'package-lock.json'), JSON.stringify({ packages: { 'node_modules/@playwright/test': { version: LOCKED } } }));
     expect(await startupBrowserCheck(dir, testUser)).toBeNull();
     expect(underBrowsers(dir)).toEqual([]);
-    expect(programs.calls.filter(c => c.args[0] !== '-e').map(c => c.user ?? null)).toEqual([null, null]);
+    expect(programs.calls.filter(c => c.args[0] !== '-e').map(c => c.user ?? null)).toEqual([testUser, null, null]);
+    expect(programs.calls.find(c => c.bin === 'unzip')).toMatchObject({ args: ['-v'], user: testUser });
     expect(programs.calls.find(c => c.args[0] === '-e')!.user).toEqual(testUser);
   });
 
