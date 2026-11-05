@@ -11,6 +11,7 @@ import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { applyMissingMigrations, MIGRATIONS } from '../src/db/client.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { isUniqueViolation } from '../src/db/errors.js';
+import { AFTER_MIGRATIONS } from '../src/db/net.js';
 import { tasks } from '../src/db/schema.js';
 import { appOn, approvalAsked, as } from './helpers.js';
 
@@ -930,5 +931,73 @@ describe('migration session_handover', () => {
     await db.execute(sql`insert into sessions (token_hash, person_id, expires_at) values ('older', ${person}, now() + interval '1 day')`);
     await migrate(db, { migrationsFolder: MIGRATIONS });
     expect((await db.execute(sql`select before_host_cookie from sessions`)).rows).toEqual([{ before_host_cookie: true }]);
+  });
+});
+
+describe('migration 0056', () => {
+  it('gives each task event of an older install its own uuid', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0055_link_tls') });
+    const company = (await db.execute<{ id: string }>(sql`insert into companies (name) values ('Acme') returning id`)).rows[0]!.id;
+    const task = (await db.execute<{ id: string }>(sql`insert into tasks (company_id, number, title) values (${company}, 1, 'Task') returning id`)).rows[0]!.id;
+    await db.execute(sql`insert into task_events (company_id, task_id, kind) values (${company}, ${task}, 'comment'), (${company}, ${task}, 'comment')`);
+
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+
+    const uuids = (await db.execute<{ uuid: string }>(sql`select uuid from task_events`)).rows.map(row => row.uuid);
+    expect(uuids).toHaveLength(2);
+    expect(uuids[0]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(uuids[0]).not.toBe(uuids[1]);
+  });
+});
+
+describe('migration 0057', () => {
+  const tablesOfPublic = sql`select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind = 'r' order by 1`;
+  const journaledTables = sql`select c.relname from pg_trigger t join pg_class c on c.oid = t.tgrelid join pg_namespace n on n.oid = c.relnamespace
+    where t.tgname = 'net_journal' and n.nspname = 'public' order by 1`;
+
+  async function fullyMigrated(): Promise<{ client: PGlite; db: PgliteDatabase }> {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    return { client, db };
+  }
+
+  it('adds the fences, and the journal once migrated', async () => {
+    const { client, db } = await fullyMigrated();
+    const schemas = await db.execute(sql`select nspname from pg_namespace where nspname in ('net', 'net_local') order by 1`);
+    expect(schemas.rows).toEqual([{ nspname: 'net' }, { nspname: 'net_local' }]);
+    expect((await db.execute(journaledTables)).rows).toEqual([]);
+
+    await client.exec(AFTER_MIGRATIONS);
+
+    expect((await db.execute(journaledTables)).rows).toEqual((await db.execute(tablesOfPublic)).rows);
+    const fence = await db.execute(sql`select t.tgdeferrable, t.tginitdeferred from pg_trigger t where t.tgname = 'net_fence' and t.tgrelid = 'net.journal'::regclass`);
+    expect(fence.rows).toEqual([{ tgdeferrable: true, tginitdeferred: true }]);
+    const keys = await db.execute(sql`select distinct c.condeferrable, c.condeferred from pg_constraint c join pg_namespace n on n.oid = c.connamespace where c.contype = 'f' and n.nspname = 'public'`);
+    expect(keys.rows).toEqual([{ condeferrable: true, condeferred: false }]);
+    const withoutKey = await db.execute(sql`select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = 'public' and c.relkind = 'r' and not exists (select 1 from pg_constraint k where k.conrelid = c.oid and k.contype = 'p')`);
+    expect(withoutKey.rows).toEqual([]);
+
+    const runnableByPublic = sql`select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'net' and has_function_privilege('public', p.oid, 'EXECUTE')`;
+    expect((await db.execute(runnableByPublic)).rows).toEqual([]);
+    await client.exec(`CREATE FUNCTION net.later() RETURNS integer LANGUAGE sql AS 'SELECT 1'`);
+    await client.exec(AFTER_MIGRATIONS);
+    expect((await db.execute(runnableByPublic)).rows).toEqual([]);
+
+    await client.exec('SELECT net.detach_journal()');
+    expect((await db.execute(journaledTables)).rows).toEqual([]);
+  });
+
+  it('refuses a table it could not journal, rather than leave it out', async () => {
+    const { client } = await fullyMigrated();
+    await client.exec('CREATE TABLE no_key (a integer)');
+    await expect(client.exec(AFTER_MIGRATIONS)).rejects.toThrow(/no_key/);
+    await client.exec(`DROP TABLE no_key; CREATE TABLE "${'n'.repeat(56)}" (a integer PRIMARY KEY)`);
+    await expect(client.exec(AFTER_MIGRATIONS)).rejects.toThrow(/too long/);
   });
 });
