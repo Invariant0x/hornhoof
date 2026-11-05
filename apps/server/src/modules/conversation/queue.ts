@@ -503,12 +503,14 @@ async function continuedFrom(ctx: Ctx, jobId: string, on: On, instructionsHash: 
 
 /* continueOf: a turn that goes on from one that ended without its work recorded goes on in that turn's session, or, when
    it cannot, takes what that turn was asked along into the session it gets. */
-type SessionJob = Pick<typeof jobs.$inferSelect, 'id' | 'continueOf' | 'createdAt' | 'taskId'>;
+type SessionJob = Pick<typeof jobs.$inferSelect, 'id' | 'continueOf' | 'retryOf' | 'createdAt' | 'taskId'>;
 
 async function sessionFor(ctx: Ctx, agent: Agent, on: On, instructionsHash: string, job: SessionJob): Promise<Session & Continuation> {
-  const from = job.continueOf ? await continuedFrom(ctx, job.continueOf, on, instructionsHash) : { sessionId: null, originalPrompt: null };
+  /* A turn run once more after its node restarted carries its words itself, and goes on in the session the cut turn had. */
+  const going = job.continueOf ?? job.retryOf;
+  const from = going ? await continuedFrom(ctx, going, on, instructionsHash) : { sessionId: null, originalPrompt: null };
   if (from.sessionId) return { sessionId: from.sessionId, catchUp: null, originalPrompt: null };
-  return { ...(await lastSession(ctx, agent, on, instructionsHash, job)), originalPrompt: from.originalPrompt };
+  return { ...(await lastSession(ctx, agent, on, instructionsHash, job)), originalPrompt: job.continueOf ? from.originalPrompt : null };
 }
 
 async function queuedSession(ctx: Ctx, agent: Agent, on: On, instructionsHash: string, job: SessionJob, along: readonly Along[]) {

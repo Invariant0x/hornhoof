@@ -5,6 +5,7 @@ import { OPERATOR_CASE_MS, type OperatorRecoveryState } from '@hornhoof/protocol
 import { agentEvents, agents, departments, jobs, programInstances, programOperatorActions, programOperatorCases } from '../src/db/schema.js';
 import { enqueueTurn, pump } from '../src/modules/conversation/queue.js';
 import { failOpenJobs } from '../src/modules/nodes/messages.js';
+import { recordJobProgram } from '../src/modules/tasks/silent.js';
 import { acceptOperatorEvidence } from '../src/modules/program-operator/evidence.js';
 import { checkOperatorHealth } from '../src/modules/program-operator/health.js';
 import { releaseRecoveryHold } from '../src/modules/program-operator/release.js';
@@ -352,6 +353,28 @@ it('runs a turn someone asked for once more after a node restart, outside any ta
   expect(again[0]).toMatchObject({ createdBy: c.sub.ownerPersonId, prompt: expect.stringContaining('Please look at the invoice.'), continueOf: first });
   await failOpenJobs(c.ctx, eq(jobs.id, first), 'machine_restarted');
   expect(await c.db.select().from(jobs).where(eq(jobs.retryOf, first))).toHaveLength(1);
+});
+
+it('goes on in the session the turn had when the node restarted, known only from what the node said meanwhile', async () => {
+  const c = await operatorCompany(false);
+  await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, c.job.id));
+  const first = await asked(c);
+  await c.db.update(jobs).set({ sessionId: null }).where(eq(jobs.id, first));
+  await recordJobProgram(c.ctx, { type: 'job.program', jobId: first, state: 'working', since: 0, screenAt: 0, session: 'session-of-the-cut-turn' }, new Date(), sql`true`);
+  expect((await c.jobOf(first)).sessionId).toBe('session-of-the-cut-turn');
+  await failOpenJobs(c.ctx, eq(jobs.id, first), 'machine_restarted');
+  const [again] = await c.db.select().from(jobs).where(eq(jobs.retryOf, first));
+  await pump(c.ctx, c.head.id);
+  expect((await c.jobOf(again!.id)).sessionId).toBe('session-of-the-cut-turn');
+});
+
+it('keeps the session a report says only for its own running turn', async () => {
+  const c = await operatorCompany(false);
+  await recordJobProgram(c.ctx, { type: 'job.program', jobId: c.job.id, state: 'working', since: 0, screenAt: 0, session: 'other' }, new Date(), sql`false`);
+  expect((await c.jobOf(c.job.id)).sessionId).not.toBe('other');
+  await c.db.update(jobs).set({ status: 'done', finishedAt: new Date(), sessionId: 'kept' }).where(eq(jobs.id, c.job.id));
+  await recordJobProgram(c.ctx, { type: 'job.program', jobId: c.job.id, state: 'working', since: 0, screenAt: 0, session: 'late' }, new Date(), sql`true`);
+  expect((await c.jobOf(c.job.id)).sessionId).toBe('kept');
 });
 
 it('runs it no third time, and Operations hears of it', async () => {

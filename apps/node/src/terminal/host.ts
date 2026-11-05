@@ -262,6 +262,7 @@ const PROMPT_SETTLE_MS = 500;
 const DEFAULTS = { readyMs: 120_000, pollMs: 500, openMs: 8000, toolsMs: 15_000, enterWaitMs: 4000, wordsQuietMs: 15_000, reportMs: REPORT_MS, cols: 160, rows: 48 };
 /* The options given, without those set to nothing. */
 const defined = (opts: Options): Partial<Options> => Object.fromEntries(Object.entries(opts).filter(([, value]) => value !== undefined));
+const withSession = (m: NodeMessage, session: string | null): NodeMessage => (m.type === 'job.program' && session ? { ...m, session } : m);
 /* When the host last looked at the program, and the tool it ran then. */
 type Look = { at: number; call: Pending | null; retry?: ProgramRetry | null };
 type ObservedProgram = { watch: ProgramWatch; look: Look };
@@ -773,13 +774,15 @@ export class TerminalHost {
     a.fresh = false;
     a.took = false;
     a.typing = prompt;
+    a.ownerTyped = false;
     await this.opts.tmux.paste(a.name, prompt);
     await sleep(pasteWait(prompt));
     await this.opts.tmux.keys(a.name, 'Enter');
     /* On a busy machine the program can take the prompt, and even end its turn, before the key is back: it then said so
        itself, and its turn's end must not be taken back. */
     if (!a.took) a.busy = true;
-    for (const end = Date.now() + this.readyMs; !(await this.tookPrompt(a, job.input.signal)); await this.opts.tmux.keys(a.name, 'Enter')) {
+    const lost = new LostWords(prompt, { enterMs: this.enterWaitMs, quietMs: this.wordsQuietMs }, Date.now());
+    for (const end = Date.now() + this.readyMs; !(await this.tookPrompt(a, job.input.signal)); await this.pressPlainAgain(a, job, prompt, lost)) {
       if (Date.now() < end) continue;
       a.busy = false;
       /* Its input still holds the prompt, so the next turn starts the program anew, resuming the session. */
@@ -789,6 +792,14 @@ export class TerminalHost {
       return await this.failedTurn(a, job, 'agent_failed', `${why}\n\n${await this.screen(job.key)}`);
     }
     return null;
+  }
+
+  /* With no receipt the words may be gone or still in the input, and an Enter does no harm: it goes every time, and the words
+     again once the program lost them. */
+  private async pressPlainAgain(a: Agent, job: TermJob, prompt: string, lost: LostWords): Promise<void> {
+    const gone = !a.ownerTyped && lost.step(job.program.kind, await this.opts.tmux.screen(a.name, 0, true), Date.now()) === 'type';
+    if (gone) { await this.opts.tmux.paste(a.name, prompt); await sleep(pasteWait(prompt)); }
+    await this.opts.tmux.keys(a.name, 'Enter');
   }
 
   private async typeOperatorPrompt(a: Agent, job: TermJob, prompt: string): Promise<RunResult | null> {
@@ -870,7 +881,7 @@ export class TerminalHost {
 
   /* Waits for the turn to end: the program says so, a person stops it, or the program is gone. */
   private async turnEnd(a: Agent, job: TermJob, ended: Deferred<string>, turn: Turn): Promise<RunResult> {
-    const { watch, look } = this.observeProgram(job.input.jobId);
+    const { watch, look } = this.observeProgram(a, job.input.jobId);
     for (;;) {
       this.drain(a);
       const message = await Promise.race([ended.promise, sleep(this.pollMs).then(() => null)]);
@@ -887,8 +898,8 @@ export class TerminalHost {
   }
 
   /* Both entry paths report the same program state. */
-  private observeProgram(jobId: string | null | undefined): ObservedProgram {
-    return { watch: new ProgramWatch(jobId, m => this.opts.send(m), this.reportMs, () => this.opts.secrets()), look: { at: Date.now(), call: null } };
+  private observeProgram(a: Agent, jobId: string | null | undefined): ObservedProgram {
+    return { watch: new ProgramWatch(jobId, m => this.opts.send(withSession(m, a.sessionId)), this.reportMs, () => this.opts.secrets()), look: { at: Date.now(), call: null } };
   }
 
   /* The program said the turn ended: stopped by a person, failed, or with its answer, which the turn waits to read. */
@@ -1777,7 +1788,7 @@ export class TerminalHost {
     a.ends.started(id);
     a.programTurnId = id;
     const turn: Turn = { jobId: null, onEvent: () => {}, typed: true, seq: 0, words: new TurnWords([], { word: this.wordReceipt(a) }), ref: randomUUID(), early: [], over: null, opened: deferred(), sourceDelivery, operatorInstance: this.operator?.identity(a.key)?.instance };
-    turn.observed = this.observeProgram(null);
+    turn.observed = this.observeProgram(a, null);
     a.turn = turn;
     a.busy = a.took = true;
     this.operator?.suspend(a.key);
