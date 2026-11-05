@@ -20,6 +20,7 @@ import type { ToolJob } from '../tools/job.js';
 import { computerKey, computerState, Reservations, type ComputerPlace } from './capacity.js';
 import { markPromise, markRun, type RunMark } from './github-status.js';
 import { forRun, together } from './load.js';
+import { testRunMode } from './describe.js';
 import { pickMachine } from './pick.js';
 
 type Run = typeof testRuns.$inferSelect;
@@ -562,6 +563,7 @@ async function pinCommit(ctx: Ctx, task: Pick<Task, 'number'>, kind: RunKind, br
 }
 
 export async function startRun(ctx: Ctx, job: ToolJob, input: RunInput, kind: RunKind = 'tests'): Promise<string> {
+  testRunMode(input, kind);
   const { db } = ctx;
   const task = await taskFor(ctx, job, input.task, kind);
   if (CLOSED.includes(task.status)) throw refuse(409, 'task_closed', `#${task.number} is ${task.status} already.`);
