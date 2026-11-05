@@ -2,7 +2,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { chmodSync, chownSync, closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
 import { join } from 'node:path';
-import { MAX_RUN_FILES, RUN_FILE_BYTES, TEST_LOG_BYTES, type NodeMessage, type ServerMessage, type TestError } from '@hornhoof/protocol';
+import { COMMIT_SHA, MAX_RUN_FILES, ownBranch, RUN_FILE_BYTES, TEST_LOG_BYTES, type NodeMessage, type ServerMessage, type TestError } from '@hornhoof/protocol';
 import { browserEnv, ensureRepoBrowser } from './browser.js';
 import { ensurePasswd, FIRST_UID, prepareFolder, type JobUser } from './isolation.js';
 import { stripEscapes } from './providers/process.js';
@@ -214,15 +214,68 @@ export function removeOldParts(dir: string, log: (line: string) => void): void {
 
 const within = (ms: number) => (ms >= 60_000 ? `${Math.round(ms / 60_000)} min` : `${Math.round(ms / 1000)} s`);
 
-/* The branch named after the task: task-<n> itself, or the only one that starts with task-<n>-. */
+/* The branch named after the task, among what ls-remote printed. */
 export function taskBranch(heads: string, task: number): { branch: string } | { problem: string } {
-  const names = heads.split('\n').flatMap(line => /\trefs\/heads\/(\S+)$/.exec(line.trim())?.slice(1) ?? []);
-  const own = `task-${task}`;
-  if (names.includes(own)) return { branch: own };
-  const mine = names.filter(n => n.startsWith(`${own}-`)).sort();
-  if (mine.length === 1) return { branch: mine[0]! };
-  if (mine.length) return { problem: `Several branches belong to task ${task}: ${mine.join(', ')}. Name the one to test.` };
-  return { problem: `The repository has no branch ${own} or ${own}-... Push the task's branch, or name the branch to test.` };
+  return ownBranch(heads.split('\n').flatMap(line => /\trefs\/heads\/(\S+)$/.exec(line.trim())?.slice(1) ?? []), task);
+}
+
+/* How a part reaches its code: git on its machine, what ends its commands, and where the code goes. */
+type Checkout = {
+  msg: TestRun;
+  url: string;
+  git: (args: string[], cwd: string, into?: Output) => Promise<Ended>;
+  stoppedBy: (ended: Ended) => TestError | null;
+  root: string;
+  repo: string;
+  out: Output;
+};
+
+const afterGit = (c: Checkout, ended: Ended): TestError | null => c.stoppedBy(ended) ?? (ended.code === 0 ? null : 'clone_failed');
+
+/* Exactly the commit Hornhoof pinned, whatever its branch points at by now. It is fetched by its name, so anything that
+   holds it can serve it in the repository's place, such as a mirror on the machine. */
+async function fetchCommit(c: Checkout, sha: string): Promise<TestError | null> {
+  c.out.line(`$ git fetch ${c.url} ${sha}`);
+  const steps = [['init', '--quiet'], ['remote', 'add', '--', 'origin', c.url], ['fetch', '--quiet', '--depth', '1', 'origin', sha], ['checkout', '--quiet', '--detach', 'FETCH_HEAD']];
+  for (const args of steps) {
+    const error = afterGit(c, await c.git(args, c.repo));
+    if (error) return error;
+  }
+  return null;
+}
+
+/* The tip of a branch, for a part with no pinned commit: the one named, or for tests the task's own. */
+async function cloneBranch(c: Checkout): Promise<TestError | null> {
+  let branch = c.msg.branch;
+  if (!branch && c.msg.kind !== 'work') {
+    const heads = new Output();
+    const listed = await c.git(['ls-remote', '--heads', '--', c.url], c.root, heads);
+    const stopped = c.stoppedBy(listed);
+    if (stopped) return stopped;
+    if (listed.code !== 0) {
+      c.out.line(heads.text());
+      return 'clone_failed';
+    }
+    const found = taskBranch(heads.text(), c.msg.task);
+    if ('problem' in found) {
+      c.out.line(found.problem);
+      return 'clone_failed';
+    }
+    branch = found.branch;
+  }
+  if (!branch) {
+    c.out.line('Name the branch to clone.');
+    return 'clone_failed';
+  }
+  c.out.line(`$ git clone --branch ${branch} ${c.url}`);
+  return afterGit(c, await c.git(['clone', '--quiet', '--depth', '1', '--branch', branch, '--', c.url, c.repo], c.root));
+}
+
+/* A part that landed anywhere but on its pinned commit proves nothing about it, so its command never runs. */
+function landedElsewhere(pinned: string | null | undefined, commit: string | null, out: Output): TestError | null {
+  if (!pinned || commit === pinned) return null;
+  out.line(`The checkout is at ${commit ?? 'no commit'}, not at the pinned commit ${pinned}.`);
+  return 'clone_failed';
 }
 
 /* The task's files a part of work takes in, through Hornhoof with the node's key, and the files it puts on the task. */
@@ -354,43 +407,21 @@ export async function runTests(msg: TestRun, { dir, user, hidden, signal, proc =
     const git = (args: string[], cwd: string, into = out) =>
       runIn('git', args, { cwd, env: { ...base, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', ...gitEnv(source!) }, user, deadline: Math.min(deadline, Date.now() + GIT_TIMEOUT_MS), signal, out: into });
 
-    let branch = msg.branch;
     if (!source && !work) {
       out.line('A test run needs a repository.');
       error = 'clone_failed';
     }
-    if (source && !branch && !work) {
-      const heads = new Output();
-      const listed = await git(['ls-remote', '--heads', '--', source.url], root, heads);
-      error = stoppedBy(listed);
-      if (!error && listed.code !== 0) {
-        out.line(heads.text());
-        error = 'clone_failed';
-      }
-      if (!error) {
-        const found = taskBranch(heads.text(), msg.task);
-        if ('problem' in found) {
-          out.line(found.problem);
-          error = 'clone_failed';
-        } else branch = found.branch;
-      }
-    }
-    if (!error && source) {
-      if (!branch) {
-        out.line('Name the branch to clone.');
-        error = 'clone_failed';
-      } else {
-        out.line(`$ git clone --branch ${branch} ${source.url}`);
-        const cloned = await git(['clone', '--quiet', '--depth', '1', '--branch', branch, '--', source.url, repo], root);
-        error = stoppedBy(cloned) ?? (cloned.code === 0 ? null : 'clone_failed');
-      }
+    if (source) {
+      const checkout: Checkout = { msg, url: source.url, git, stoppedBy, root, repo, out };
+      error = await (msg.commitSha ? fetchCommit(checkout, msg.commitSha) : cloneBranch(checkout));
     }
     if (!error && source) {
       const head = new Output();
       await git(['rev-parse', 'HEAD'], repo, head);
-      commit = /^[0-9a-f]{40,64}$/.exec(head.text().trim())?.[0] ?? null;
+      commit = COMMIT_SHA.exec(head.text().trim())?.[0] ?? null;
       if (commit) out.line(`At ${commit}.`);
-      await prepareRepoBrowser(repo);
+      error = landedElsewhere(msg.commitSha, commit, out);
+      if (!error) await prepareRepoBrowser(repo);
     }
     if (!error && work && msg.files?.length) {
       for (const name of msg.files) {
