@@ -317,6 +317,20 @@ class ChosenKeyRuleTests(unittest.TestCase):
         self.assertEqual(self.refusal_of({'key': self.CURRENT}), 'same_key')
 
 
+class RetiredKeyWordingTests(unittest.TestCase):
+    """What the README and relay.py say a retired key serves. test_r6_1_retired_ping_cannot_bypass_ban_release_or_rebind and
+    test_a_tunnel_of_a_changed_key_stays pin the behaviour itself."""
+
+    def test_r6_1_no_text_says_a_heartbeat_is_all_a_retired_key_serves(self) -> None:
+        readme = (ROOT / 'README.md').read_text()
+        source = (ROOT / 'relay/relay.py').read_text()
+        for claim in ('Nothing but a heartbeat', 'authorize only Ping', 'usable only for heartbeats', "lifetime's Ping.",
+                      'all other ops need the current key'):
+            with self.subTest(claim=claim):
+                self.assertTrue(claim not in readme + source, 'link_refusal takes a retired key on NewUserConn as well')
+        self.assertIn('keeps its heartbeat and its new connections', readme)
+
+
 class RelayInProcess(unittest.TestCase):
     """HTTP against an isolated relay with real SQLite writes; `acme` is bound with the key `old`."""
 
@@ -477,7 +491,7 @@ class KeyAuthorizationTests(RelayInProcess):
                 self.assertTrue(self.ping(invalid)['reject'])
         for op, content in (('Login', {'metas': {'name': 'acme', 'key': 'old'}}),
                             ('NewProxy', {'user': {'metas': {'name': 'acme', 'key': 'old'}}})):
-            self.assertTrue(self.relay.plugin(op, content)['reject'], 'retired keys may only keep heartbeats')
+            self.assertTrue(self.relay.plugin(op, content)['reject'], 'a retired key must not log in or register')
         self.relay.write("UPDATE bindings SET banned_at = 1 WHERE name = 'acme'", ())
         self.assertTrue(self.ping('old')['reject'], 'a ban must refuse retired heartbeats')
         self.relay.unban_binding('acme')
