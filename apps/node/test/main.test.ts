@@ -525,9 +525,16 @@ describe('runNode', () => {
   it('says a move to another plan of its maker when it looks for the limits, though it read none', async () => {
     const server = await fakeServer();
     let account = { email: 'x@y.z', tier: 'pro' };
-    const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, account: async () => account, limits: async () => null }, log: () => {}, limitsMs: 30 });
+    let looks = 0;
+    const limits = async () => {
+      looks++;
+      return null;
+    };
+    const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, account: async () => account, limits }, log: () => {}, limitsMs: 15 });
     onTestFinished(() => node.stop());
-    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    await server.wait(() => server.received.some(m => m.type === 'hello') && looks >= 4);
+    /* A look that read nothing has nothing to say. */
+    expect(server.received.filter(m => m.type === 'status')).toEqual([]);
     account = { email: 'x@y.z', tier: 'max' };
     await server.wait(() => server.received.some(m => m.type === 'status'));
     expect(server.received.find(m => m.type === 'status')).toMatchObject({ account, limits: null });
@@ -550,6 +557,150 @@ describe('runNode', () => {
     browser = null;
     await server.wait(() => server.received.filter(m => m.type === 'status').length >= 2);
     expect(server.received.filter(m => m.type === 'status')[1]).toMatchObject({ limits: null, browserError: null });
+  });
+
+  it('asks for no new list of models with each reading, only when the account moved', async () => {
+    const server = await fakeServer();
+    let listed = 0;
+    let account = { email: 'x@y.z', tier: 'pro' };
+    const models = async () => {
+      listed++;
+      return [{ id: 'opus', name: 'Opus' }];
+    };
+    const limits = async () => ({ status: 'allowed' as const, windows: [{ name: 'seven_day', utilization: 0.1, resetsAt: null }] });
+    const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, models, limits, account: async () => account }, log: () => {}, limitsMs: 15 });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.filter(m => m.type === 'status' && m.limits !== null).length >= 5);
+    expect(listed).toBe(1);
+    expect(server.received.filter(m => m.type === 'status').at(-1)).toMatchObject({ models: [{ id: 'opus', name: 'Opus' }] });
+    account = { email: 'x@y.z', tier: 'max' };
+    await server.wait(() => listed === 2);
+  });
+
+  describe('while Hornhoof is away', () => {
+    const readingOf = (m: { [k: string]: unknown }) => (m.limits as { windows: { utilization: number }[] }).windows[0]!.utilization;
+    const usage = (utilization: number) => ({ status: 'allowed' as const, windows: [{ name: 'seven_day', utilization, resetsAt: null }] });
+    const job = (jobId: string) => ({ type: 'job.run', jobId, subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
+    const framesAfterHello = (received: { type: string; [k: string]: unknown }[]) => received.slice(received.findLastIndex(m => m.type === 'hello') + 1);
+    const helloAgain = (server: Awaited<ReturnType<typeof fakeServer>>) => server.wait(() => server.received.filter(m => m.type === 'hello').length === 2, 6000);
+
+    it('keeps no reading in the queue, and says only the newest when it is back', async () => {
+      const server = await fakeServer();
+      let asked = 0;
+      const limits = async () => usage(++asked / 100_000);
+      const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, limits }, log: () => {}, limitsMs: 10 });
+      onTestFinished(() => node.stop());
+      await server.wait(() => server.received.some(m => m.type === 'status' && m.limits !== null));
+      const askedBefore = asked;
+      server.drop();
+      await helloAgain(server);
+      await server.wait(() => framesAfterHello(server.received).some(m => m.type === 'status'));
+      const first = framesAfterHello(server.received).find(m => m.type === 'status')!;
+      /* Hundreds were read while it was away; the oldest of them would come first from a queue. */
+      expect(readingOf(first)).toBeGreaterThan((askedBefore + 5) / 100_000);
+    });
+
+    it('puts no reading in a status that waits for the connection, and says it once it is back, before the job it came with', async () => {
+      const server = await fakeServer();
+      const turn = usage(0.3);
+      let end: () => void = () => {};
+      const run = () => new Promise<Awaited<ReturnType<ProviderAdapter['run']>>>(done => { end = () => done({ ok: true, sessionId: 'sess-9', result: 'ready', output: '', error: null, limits: turn }); });
+      const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, run, limits: async () => null }, log: () => {}, limitsMs: 60_000 });
+      onTestFinished(() => node.stop());
+      await server.wait(() => server.received.some(m => m.type === 'hello'));
+      server.send(job('j1'));
+      await server.wait(() => server.received.some(m => m.type === 'job.started'));
+      server.drop();
+      /* The node hears of the drop, and the job ends with it away. */
+      await new Promise(r => setTimeout(r, 50));
+      end();
+      await helloAgain(server);
+      await server.wait(() => framesAfterHello(server.received).some(m => m.type === 'job.done'));
+      const after = framesAfterHello(server.received);
+      const statuses = after.filter(m => m.type === 'status');
+      expect(statuses.filter(m => m.limits !== null).map(m => m.limits)).toEqual([turn]);
+      expect(after.findIndex(m => m.type === 'status' && m.limits !== null)).toBeLessThan(after.findIndex(m => m.type === 'job.done'));
+    });
+
+    it('forgets a reading that waits when the next one fails: by the time Hornhoof hears it, it would be old', async () => {
+      const server = await fakeServer();
+      let away = false;
+      let last = false;
+      const limits = async () => {
+        if (!away) return usage(0.1);
+        if (last) return null;
+        last = true;
+        return usage(0.2);
+      };
+      const run = async () => ({ ok: true, sessionId: 'sess-9', result: 'ready', output: '', error: null, limits: null });
+      const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, run, limits }, log: () => {}, limitsMs: 10 });
+      onTestFinished(() => node.stop());
+      await server.wait(() => server.received.some(m => m.type === 'status' && m.limits !== null));
+      away = true;
+      server.drop();
+      await helloAgain(server);
+      server.send(job('j1'));
+      await server.wait(() => server.received.some(m => m.type === 'job.done'));
+      const statuses = framesAfterHello(server.received).filter(m => m.type === 'status');
+      expect(statuses.length).toBeGreaterThan(0);
+      for (const status of statuses) expect(status).toMatchObject({ limits: null });
+    });
+
+    it('forgets the reading of a job that ended meanwhile the same way', async () => {
+      const server = await fakeServer();
+      const turn = usage(0.3);
+      let looks = 0;
+      let end: () => void = () => {};
+      const run = () => new Promise<Awaited<ReturnType<ProviderAdapter['run']>>>(done => { end = () => done({ ok: true, sessionId: 'sess-9', result: 'ready', output: '', error: null, limits: turn }); });
+      const limits = async () => {
+        looks++;
+        return null;
+      };
+      const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, run, limits }, log: () => {}, limitsMs: 10 });
+      onTestFinished(() => node.stop());
+      await server.wait(() => server.received.some(m => m.type === 'hello'));
+      server.send(job('j1'));
+      await server.wait(() => server.received.some(m => m.type === 'job.started'));
+      server.drop();
+      await new Promise(r => setTimeout(r, 50));
+      end();
+      /* A look or two after the job's end. */
+      const seen = looks;
+      await server.wait(() => looks >= seen + 3);
+      await helloAgain(server);
+      await server.wait(() => framesAfterHello(server.received).some(m => m.type === 'job.done'));
+      for (const status of framesAfterHello(server.received).filter(m => m.type === 'status')) expect(status).toMatchObject({ limits: null });
+    });
+
+    it('keeps a reading through a failed one while Hornhoof is there, as the status that says it is on its way', async () => {
+      const server = await fakeServer();
+      const turn = usage(0.3);
+      let asked = 0;
+      let gate: Promise<void> = Promise.resolve();
+      let open: () => void = () => {};
+      const models = async () => {
+        await gate;
+        return [{ id: 'opus', name: 'Opus' }];
+      };
+      const limits = async () => {
+        asked++;
+        return null;
+      };
+      const run = async () => ({ ok: true, sessionId: 'sess-9', result: 'ready', output: '', error: null, limits: turn });
+      const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, run, models, limits }, log: () => {}, limitsMs: 10 });
+      onTestFinished(() => node.stop());
+      await server.wait(() => server.received.some(m => m.type === 'hello'));
+      gate = new Promise(resolve => { open = resolve; });
+      server.send(job('j1'));
+      await server.wait(() => server.received.some(m => m.type === 'job.started'));
+      /* The job's status waits for the models while readings fail. */
+      await new Promise(r => setTimeout(r, 20));
+      const seen = asked;
+      await server.wait(() => asked >= seen + 3);
+      open();
+      await server.wait(() => server.received.some(m => m.type === 'job.done'));
+      expect(server.received.filter(m => m.type === 'status').map(m => m.limits)).toContainEqual(turn);
+    });
   });
 
   it('reports Antigravity limits on schedule and after a job, and invents no reached limit when the source fails', async () => {

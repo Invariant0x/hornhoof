@@ -526,6 +526,48 @@ describe('the orchestrator\'s conversation', () => {
     expect(heard).toContain('org');
   });
 
+  it('keeps a hold from a refused turn through readings that moved nothing since, and ends it with one that moved', async () => {
+    const { app, ceo, mac } = await onMac('0.3.0', 'kimi');
+    await until(async () => (await state(app, ceo)).ready);
+    const plan = async () => (await app.ctx.db.select({ limits: subscriptions.limits, at: subscriptions.limitsUpdatedAt }).from(subscriptions).where(eq(subscriptions.provider, 'kimi')))[0]!;
+    const reading = { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.4, resetsAt: null }], complete: true };
+    mac.send({ type: 'status', loggedIn: true, limits: reading });
+    await until(async () => (await plan()).limits?.status === 'allowed');
+    await say(app, ceo, 'First');
+    const first = await nextRun(mac);
+    const tail = "ERROR: You've hit your usage limit. Upgrade to Pro or try again in 2 hours 5 minutes.";
+    mac.send({ type: 'job.done', jobId: first.jobId, ok: false, sessionId: 'sess-k', result: '', tail, error: 'agent_failed' });
+    await until(async () => (await state(app, ceo)).limitUntil !== null);
+    const held = (await state(app, ceo)).limitUntil;
+    const heldAt = (await plan()).at!;
+
+    /* The same numbers: the program refused with them, so they say nothing of the refusal, and the hold counts as fresh. */
+    mac.send({ type: 'status', loggedIn: true, limits: reading });
+    await until(async () => (await plan()).at! > heldAt);
+    expect((await state(app, ceo)).limitUntil).toBe(held);
+    expect((await plan()).limits?.status).toBe('rejected');
+
+    /* The plan's usage moved: what it says now counts. */
+    const moved = { ...reading, windows: [{ name: 'five_hour', utilization: 0.05, resetsAt: null }] };
+    mac.send({ type: 'status', loggedIn: true, limits: moved });
+    await until(async () => (await state(app, ceo)).limitUntil === null);
+    expect((await plan()).limits).toEqual(moved);
+  });
+
+  it('takes a reading over a hold that is over, though it moved nothing', async () => {
+    const { app, ceo, mac } = await onMac('0.3.0', 'kimi');
+    await until(async () => (await state(app, ceo)).ready);
+    const plan = () => app.ctx.db.update(subscriptions).set({ limits: { status: 'rejected', windows: [{ name: 'five_hour', utilization: 1, resetsAt: new Date(Date.now() - 1000).toISOString() }] }, limitsUpdatedAt: new Date() }).where(eq(subscriptions.provider, 'kimi'));
+    const stored = async () => (await app.ctx.db.select({ limits: subscriptions.limits }).from(subscriptions).where(eq(subscriptions.provider, 'kimi')))[0]!.limits;
+    const reading = { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.4, resetsAt: null }], complete: true };
+    mac.send({ type: 'status', loggedIn: true, limits: reading });
+    await until(async () => (await stored())?.status === 'allowed');
+    await plan();
+    mac.send({ type: 'status', loggedIn: true, limits: reading });
+    await until(async () => (await stored())?.status === 'allowed');
+    expect(await stored()).toEqual(reading);
+  });
+
   it('does not hold turns for an agent that only spoke about usage limits in its work', async () => {
     const { app, ceo, mac } = await onMac('0.3.0', 'kimi');
     await until(async () => (await state(app, ceo)).ready);

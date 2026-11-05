@@ -118,7 +118,8 @@ function merged(known: Limits | null, news: Limits): Limits {
 
 /* What the node knows of the plan's limits, and whether Hornhoof has heard its last reading. Hornhoof counts them fresh from
    the moment it hears them, so each reading goes out once, also one that moved nothing, and a status with no reading behind
-   it says none: null, as the protocol asks for the field, which leaves what Hornhoof knows as it is. */
+   it says none: null, as the protocol asks for the field, which leaves what Hornhoof knows as it is. While Hornhoof is away
+   the newest reading waits here, and one that fails then forgets it: by the time Hornhoof heard it, it would be old. */
 class PlanLimits {
   private known: Limits | null = null;
   private unsaid = false;
@@ -129,7 +130,17 @@ class PlanLimits {
     this.unsaid = true;
   }
 
-  forStatus(): Limits | null {
+  looked(news: Limits | null, online: boolean): void {
+    this.read(news);
+    if (!news && !online) this.unsaid = false;
+  }
+
+  get waiting(): boolean {
+    return this.unsaid;
+  }
+
+  forStatus(online: boolean): Limits | null {
+    if (!online) return null;
     const reading = this.unsaid ? this.known : null;
     this.unsaid = false;
     return reading;
@@ -200,7 +211,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   const unconfirmed = new Map<string, NodeMessage>();
   const unconfirmedTests = new Map<string, NodeMessage>();
   let send: ((m: ProgramNodeMessage) => boolean) | null = null;
-  let operatorOnline = false;
+  let online = false;
   /* The kind of sign-in Hornhoof hands this plan, and what that sign-in was when the plan's program refused it: until
      it changes, the node stays signed out, so turns do not go round on a sign-in that no longer works. */
   const planProvider = builtin ? null : (state as NodeState).provider;
@@ -242,7 +253,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   const host = terminal
     ? new TerminalHost({
         tmux: terminal.tmux,
-        operator: { dir: join(dir, 'program-operator'), send: frame => send?.(frame) ?? false, connected: () => operatorOnline },
+        operator: { dir: join(dir, 'program-operator'), send: frame => send?.(frame) ?? false, connected: () => online },
         hornhoof: state.server,
         send: sendOrKeep,
         secrets: () => [...known],
@@ -290,7 +301,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   const noRunsNow = () => noRunsBecause(testUser, browserError);
   const tellStatus = () => {
     browserError = readBrowserError(dir);
-    emit({ type: 'status', loggedIn, ...setup.field(), limits: planLimits.forStatus(), ...(models ? { models } : {}), account, browserError, noRuns: noRunsNow() });
+    emit({ type: 'status', loggedIn, ...setup.field(), limits: planLimits.forStatus(online), ...(models ? { models } : {}), account, browserError, noRuns: noRunsNow() });
   };
   const status = async () => {
     /* A program that cannot list its models now keeps those it listed before. */
@@ -307,7 +318,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     log,
     onOpen(next) {
       send = next;
-      operatorOnline = true;
+      online = true;
       host?.closeViews();
       login?.closeViews();
       /* Finished jobs Hornhoof has not confirmed still count as running, so the server does not give up on them. */
@@ -317,12 +328,14 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       next({ type: 'hello', version: VERSION, loggedIn, ...setup.field(), running: [...running.keys(), ...typed, ...unconfirmed.keys()], ...(models ? { models } : {}), terminals: Boolean(host), programOperatorV1: Boolean(host), work: Boolean(testUser), ...(noRuns ? { noRuns } : {}), browserError, load: load(), tests, skillFiles: true, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
       host?.operatorReplay();
       for (const m of outbox.splice(0)) emit(m);
+      /* What it read while Hornhoof was away, before the end of any job that brought it. */
+      if (planLimits.waiting) tellStatus();
       for (const m of unconfirmed.values()) next(m);
       for (const m of unconfirmedTests.values()) next(m);
     },
     /* One message that fails is logged; it never ends the node with all its runs. */
     onMessage: m => void handle(m).catch(err => log(`A message from Hornhoof failed: ${message(err)}`)),
-    onClose: () => { operatorOnline = false; },
+    onClose: () => { online = false; },
     onRefused: () => log('Hornhoof does not know this machine any more. Run the install command from Hornhoof again to reconnect.'),
   });
   void programs.update(tellStatus).catch(err => log(`Could not update the programs: ${message(err)}`));
@@ -560,8 +573,10 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     const was = JSON.stringify(account);
     account = await readAccount();
     const now = await readLimits();
-    planLimits.read(now);
-    if (now !== null || JSON.stringify(account) !== was) void status();
+    planLimits.looked(now, online);
+    if (JSON.stringify(account) !== was) void status();
+    /* A reading alone asks for no new list of models, and while Hornhoof is away it waits with planLimits, not in the outbox. */
+    else if (now !== null && online) tellStatus();
   };
   void askLimits();
   const asking = setInterval(() => void askLimits(), limitsMs);
