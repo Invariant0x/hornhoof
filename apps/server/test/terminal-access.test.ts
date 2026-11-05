@@ -136,6 +136,10 @@ describe('the program a terminal really shows', () => {
     expect(await open(c.url, c.tokens.ann, c.crew.other.id)).toEqual({ status: 403, reason: 'agent_hidden' });
     await openedNothing(c);
     expect(await state(c, c.tokens.ann, c.crew.other.id)).toMatchObject({ terminal: false, canType: false });
+    await opened(c.url, c.tokens.bob, c.crew.other.id);
+    expect(await next(c.node, 'term.open')).toMatchObject({ agentKey: c.crew.other.id, write: true });
+    await opened(c.url, c.tokens.ceo, c.crew.other.id);
+    expect(await next(c.node, 'term.open')).toMatchObject({ write: false });
   });
 
   it("opens it to the new owner once a turn of their plan runs in its place, and closes it to the old owner", async () => {
@@ -148,6 +152,8 @@ describe('the program a terminal really shows', () => {
     await opened(c.url, c.tokens.ann, c.crew.other.id);
     expect(await next(c.node, 'term.open')).toMatchObject({ agentKey: c.crew.other.id, write: true });
     expect(await state(c, c.tokens.ann, c.crew.other.id)).toMatchObject({ terminal: true, canType: true });
+    await opened(c.url, c.tokens.ceo, c.crew.other.id);
+    expect(await next(c.node, 'term.open')).toMatchObject({ write: false });
   });
 
   it('goes by the last program on the machine when an agent came back: A, then B, then A', async () => {
