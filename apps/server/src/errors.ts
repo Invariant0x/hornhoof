@@ -72,6 +72,7 @@ export type ErrorReason =
   | 'department_unknown'
   | 'updater_missing'
   | 'update_running'
+  | 'turns_would_stop'
   | 'version_unknown'
   | 'registry_unreachable'
   | 'task_unknown'

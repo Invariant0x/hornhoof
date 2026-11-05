@@ -8,6 +8,7 @@ import type { NodeIdentity } from './hub.js';
 import { handleNodeMessage } from './messages.js';
 import { hasCurrentKey, liveNode } from './nodes.js';
 import { rememberBuiltinStop } from './restarts.js';
+import { nodeDrainHello } from '../updates/node-drain.js';
 import { acceptOperatorEvidence } from '../program-operator/evidence.js';
 import { receiveOperatorReply } from '../program-operator/rpc.js';
 import { restoreOperatorNode } from '../program-operator/health.js';
@@ -23,6 +24,7 @@ async function stopping(ctx: Ctx, id: NodeIdentity, msg: Extract<NodeMessage, { 
 const isOperatorFrame = (frame: ProgramNodeMessage): frame is OperatorNodeMessage => frame.type.startsWith('program.');
 
 export async function receiveNodeMessage(ctx: Ctx, id: NodeIdentity, msg: ProgramNodeMessage): Promise<void> {
+  if (msg.type === 'hello') nodeDrainHello(ctx, id, msg.boot?.startedAt);
   if (isOperatorFrame(msg)) {
     if (msg.type === 'program.screen' || msg.type === 'program.key_result' || msg.type === 'program.key_prepared') {
       if (await hasCurrentKey(ctx, id)) receiveOperatorReply(ctx, id, msg);

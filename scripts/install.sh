@@ -47,6 +47,12 @@ PULLED="${HORNHOOF_PULLED:-}"
 APP_REF="${HORNHOOF_APP_REF:-}"
 NODE_REF="${HORNHOOF_NODE_REF:-}"
 UPDATER_REF="${HORNHOOF_UPDATER_REF:-}"
+# An updater says so once the server let the work of the nodes on this computer end, or was told to stop it.
+NODES_FREE="${HORNHOOF_NODES_FREE:-}"
+# A security update replaces the nodes now, and what they run stops with them.
+URGENT=''
+# The nodes this run left as they are, since it could not learn when their work ends.
+LEFT=''
 
 # Docker's and Homebrew's install scripts at the commits Hornhoof was tested with. They run as root or ask for the
 # password, so each runs only when its SHA-256 is the one written here.
@@ -59,7 +65,7 @@ LABEL=hornhoof.subscription
 SERVER_LABEL=hornhoof.server
 NODE_MAIN=/app/apps/node/dist/main.js
 FIRST_PORT=8080
-USAGE='Usage: install.sh [--join <code>] | server [--name <name>] | --uninstall'
+USAGE='Usage: install.sh [--join <code>] [--urgent] | server [--name <name>] [--urgent] | --uninstall'
 
 OS=''
 ARCH=''
@@ -421,6 +427,26 @@ start_node() {
   STARTED="$STARTED $name"
 }
 
+# wait_for_node <name>: the server keeps new work off the node and says when what it runs has ended. This asks from the
+# new image, since the running one may not know how, and with the node's own settings, so its key stays in its volume.
+# The server lets go of the node soon after nobody asks, so stopping this changes nothing.
+wait_for_node() {
+  local name=$1 code=0
+  [ -z "$URGENT" ] || return 0
+  [ "$("${DOCKER[@]}" inspect --format '{{.State.Running}}' "$name" 2> /dev/null)" != false ] || return 0
+  # shellcheck disable=SC2086 # the two --add-host words appear only for a server on localhost
+  "${DOCKER[@]}" run --rm --cap-drop ALL --user 0:0 --cap-add DAC_OVERRIDE --security-opt no-new-privileges -v "$name:/data:ro" \
+    ${LOCAL_SERVER:+--add-host} ${LOCAL_SERVER:+host.docker.internal:host-gateway} "$IMAGE" wait-update || code=$?
+  [ "$code" -ne 0 ] || return 0
+  LEFT="$LEFT $name"
+  if [ "$code" -eq 3 ]; then
+    say "This Hornhoof server is from before nodes wait for their work, so $name stays as it is and what it runs goes on. Update the Hornhoof server first, then run this command again."
+  else
+    say "Could not learn when $name is free, so it stays as it is and what it runs goes on. Run this command again, or add --urgent to stop what it runs and replace it now."
+  fi
+  return 1
+}
+
 node_status() { "${DOCKER[@]}" exec "$1" node "$NODE_MAIN" status 2> /dev/null || echo offline; }
 
 # This server's nodes on this machine as "name:id" words. A node from before nodes carried their server is this
@@ -557,10 +583,11 @@ node_mode() {
       case " $removed $STARTED " in *" $name "*) continue ;; esac
       provider=${name#hornhoof-}
       provider=${provider%-*}
-      start_node "$name" "$id" "$provider"
+      if wait_for_node "$name"; then start_node "$name" "$id" "$provider"; fi
     done
   fi
 
+  if [ -z "$STARTED" ] && [ -n "$LEFT" ]; then fail "Nothing changed on this machine."; fi
   if [ -z "$STARTED" ]; then
     say "There are no Hornhoof nodes on this machine yet. Get the install command in Hornhoof under Subscriptions."
     return 0
@@ -630,6 +657,7 @@ node_mode() {
       say "To run agents here too, add one of your plans to this machine in Hornhoof under Subscriptions."
       ;;
   esac
+  if [ -n "$LEFT" ]; then fail "These nodes stay as they are:$LEFT."; fi
 }
 
 uninstall_mode() {
@@ -788,10 +816,21 @@ prepare_builtin_stop() {
   prepare_node_stop "$cid" hornhoof_update
 }
 
+# Whether the nodes stay as they are for now while the app goes in: one on another image has work to let end, so the
+# updater replaces it when the server says it is free. An updater from before this never does, and leaves that to the
+# updater it starts next. A node that does not run has nothing to wait for.
+nodes_stay() {
+  node_unchanged "$@" && return 0
+  [ -z "$NODES_FREE" ] && [ -z "$URGENT" ] || return 1
+  local cid
+  cid=$(cd "$SERVER_DIR" && "$@" ps -q node 2> /dev/null) || true
+  [ -n "$cid" ] && [ "$("${DOCKER[@]}" inspect --format '{{.State.Running}}' "$cid" 2> /dev/null)" = true ]
+}
+
 start_server_services() {
   if [ -n "$FROM_UPDATER" ]; then
     say "Starting Hornhoof ${PIN:-latest}."
-    if node_unchanged "$@"; then
+    if nodes_stay "$@"; then
       (cd "$SERVER_DIR" && "$@" up -d --no-build db app tunnel) || fail "Hornhoof did not start."
     else
       prepare_builtin_stop "$@"
@@ -801,8 +840,9 @@ start_server_services() {
     return 0
   fi
   say "Starting Hornhoof."
-  if node_unchanged "$@"; then
+  if nodes_stay "$@"; then
     (cd "$SERVER_DIR" && "$@" up -d --no-build db app tunnel updater) || fail "Hornhoof did not start. Run docker compose logs in $SERVER_DIR to see why."
+    node_unchanged "$@" || say "The updater replaces the built-in node and the other nodes on this computer when what they run has ended."
   else
     prepare_builtin_stop "$@"
     (cd "$SERVER_DIR" && "$@" up -d --no-build) || fail "Hornhoof did not start. Run docker compose logs in $SERVER_DIR to see why."
@@ -933,6 +973,7 @@ while [ $# -gt 0 ]; do
       NAME=$2
       shift
       ;;
+    --urgent) URGENT=1 ;;
     node) MODE=node ;;
     server) MODE=server ;;
     --uninstall) MODE=uninstall ;;

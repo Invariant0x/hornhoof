@@ -490,7 +490,7 @@ async function standIn(ctx: Ctx, agentId: string, task: Task): Promise<{ id: str
   for (const p of peers) {
     if ((p.productId && p.productId !== task.productId) || task.gates.includes(p.id)) continue;
     const state = await agentState(ctx, p.id);
-    if (state.ready && !state.limitUntil && !state.budgetUntil) return { id: p.id, name: p.name, provider: p.provider };
+    if (state.ready && !state.limitUntil && !state.budgetUntil && !state.machineDrain) return { id: p.id, name: p.name, provider: p.provider };
   }
   return null;
 }

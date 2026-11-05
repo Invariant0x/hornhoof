@@ -1,4 +1,7 @@
 import { eq } from 'drizzle-orm';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import { agents, companies, departments, jobs, nodes as nodeRows, subscriptions, tasks } from '../src/db/schema.js';
@@ -51,6 +54,66 @@ async function nextRun(node: FakeNode): Promise<Run> {
 const finish = (node: FakeNode, run: Run, sessionId: string) => node.send({ type: 'job.done', jobId: run.jobId, ok: true, sessionId, result: 'ok', tail: '', error: null });
 
 describe('agents of one plan on several machines', () => {
+  it('places new work on another node of the same plan while its current node waits for an update', async () => {
+    const { app, db, ceo, nodes, mac, lap, bruno } = await planOnTwoMachines({ HORNHOOF_CONTROL_DIR: mkdtempSync(join(tmpdir(), 'hh-placement-drain-')) });
+    await db.update(agents).set({ nodeId: nodes.mac.nodeId }).where(eq(agents.id, bruno.id));
+    const response = await app.inject({ method: 'POST', url: '/api/nodes/update', headers: { authorization: `Bearer ${nodes.mac.key}` }, payload: {} });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().ready).toBe(true);
+    await write(app, ceo, bruno.id, 'Use the available machine');
+    const sent = await nextRun(lap);
+    expect(sent.prompt).toContain('Use the available machine');
+    expect(mac.queued()).toBe(0);
+    expect((await db.select().from(agents).where(eq(agents.id, bruno.id)))[0]!.nodeId).toBe(nodes.laptop.nodeId);
+  });
+
+  it('queues messages with machineDrain while every node of a plan waits for an update', async () => {
+    const { app, ceo, nodes, mac, lap, bruno } = await planOnTwoMachines({ HORNHOOF_CONTROL_DIR: mkdtempSync(join(tmpdir(), 'hh-placement-drain-')) });
+    for (const node of [nodes.mac, nodes.laptop]) await app.inject({ method: 'POST', url: '/api/nodes/update', headers: { authorization: `Bearer ${node.key}` }, payload: {} });
+    await write(app, ceo, bruno.id, 'Wait for the update');
+    expect(await state(app, ceo, bruno.id)).toMatchObject({ ready: true, reason: null, machineDrain: { state: 'restarting' } });
+    expect(mac.queued() + lap.queued()).toBe(0);
+  });
+
+  it('takes a node through its update without touching its turn: work goes elsewhere, and it takes work again when it is back', async () => {
+    const { app, db, ceo, nodes, mac, lap, bruno, vera } = await planOnTwoMachines({ HORNHOOF_CONTROL_DIR: mkdtempSync(join(tmpdir(), 'hh-placement-drain-')) });
+    const prepare = async () => (await app.inject({ method: 'POST', url: '/api/nodes/update', headers: { authorization: `Bearer ${nodes.mac.key}` }, payload: {} })).json();
+    const boot = (startedAt: string, container: string) => ({ startedAt, machineUpAt: '2026-11-04T09:00:00.000Z', container });
+    mac.send({ ...hello, boot: boot('2026-11-04T10:00:00.000Z', 'first') });
+    await until(async () => (await db.select().from(nodeRows).where(eq(nodeRows.id, nodes.mac.nodeId)))[0]!.boot?.startedAt === '2026-11-04T10:00:00.000Z');
+
+    await write(app, ceo, bruno.id, 'A long turn');
+    const long = await nextRun(mac);
+    expect((await prepare())).toMatchObject({ ready: false, drain: { state: 'waiting', turnsLeft: 1 } });
+
+    /* The turn goes on, and the node hears nothing that would stop it. */
+    expect((await db.select().from(jobs).where(eq(jobs.id, long.jobId)))[0]).toMatchObject({ status: 'running', error: null });
+    expect(mac.queued()).toBe(0);
+
+    /* A new employee's turn goes to the other machine of the plan. */
+    await write(app, ceo, vera.id, 'Goes elsewhere');
+    finish(lap, await nextRun(lap), 'vera-on-laptop');
+    await until(async () => !(await state(app, ceo, vera.id)).busy);
+    expect((await db.select().from(agents).where(eq(agents.id, vera.id)))[0]!.nodeId).toBe(nodes.laptop.nodeId);
+
+    /* Its last turn ended, so the installer may replace it. Meanwhile no machine of the plan can take a new turn. */
+    finish(mac, long, 'bruno-on-mac');
+    await until(async () => (await db.select().from(jobs).where(eq(jobs.id, long.jobId)))[0]!.status === 'done');
+    expect((await prepare())).toMatchObject({ ready: true, drain: { state: 'restarting' } });
+    lap.close();
+    await until(() => !app.ctx.hub.isReady(nodeIdentity(nodes.laptop.nodeId)));
+    await write(app, ceo, vera.id, 'Waits for the machine');
+    await until(async () => (await state(app, ceo, vera.id)).machineDrain?.state === 'restarting');
+    expect(mac.queued()).toBe(0);
+
+    /* The installer replaces it; the new node's first words give it work again. */
+    mac.send({ ...hello, version: '0.9.1', boot: boot('2026-11-04T11:00:00.000Z', 'second') });
+    const after = await nextRun(mac);
+    expect(after.prompt).toContain('Waits for the machine');
+    expect((await db.select().from(jobs).where(eq(jobs.id, long.jobId)))[0]!.error).toBeNull();
+    expect((await app.inject({ url: '/api/machines', ...as(ceo) })).json().machines.flatMap((m: { drain: unknown }) => m.drain ?? [])).toEqual([]);
+  });
+
   it('starts each new employee on the machine of its plan with the fewest agents, and keeps it there', async () => {
     const { app, db, ceo, nodes, mac, lap, bruno, vera } = await planOnTwoMachines();
     await write(app, ceo, bruno.id, 'Hi');
