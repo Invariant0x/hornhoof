@@ -989,6 +989,25 @@ describe('keys of the owner while their view of the session opens', () => {
     expect(stdin.at(-1)).toBe('next');
   });
 
+  it('keep their order when more come during the last steps of opening', async () => {
+    const { c, stdin, opened } = await slowView();
+    let fitted!: () => void;
+    const fitting = new Promise<void>(done => (fitted = done));
+    const fit = vi.spyOn(c.host as unknown as { fit(key: string): Promise<void> }, 'fit').mockImplementation(() => (c.host['views'].has('view') ? fitting : Promise.resolve()));
+    const open = c.host.open({ type: 'term.open', termId: 'view', agentKey: 'receipt', cols: 80, rows: 24, write: true });
+    await until(() => c.host['viewsOpening'].has('view'));
+    c.host.input({ type: 'term.input', termId: 'view', data: 'first ' });
+    opened();
+    await until(() => c.host['views'].has('view'));
+    c.host.input({ type: 'term.input', termId: 'view', data: 'second' });
+    expect(stdin).toEqual([]);
+    fitted();
+    await open;
+    await until(() => stdin.length === 2);
+    expect(stdin).toEqual(['first ', 'second']);
+    fit.mockRestore();
+  });
+
   it('go nowhere from someone who only watches', async () => {
     const { c, stdin, opened } = await slowView();
     const open = c.host.open({ type: 'term.open', termId: 'view', agentKey: 'receipt', cols: 80, rows: 24, write: false });

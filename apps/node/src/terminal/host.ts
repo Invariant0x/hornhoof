@@ -2318,8 +2318,10 @@ export class TerminalHost {
   }
 
   async open(m: Msg<'term.open'>): Promise<void> {
+    this.expectKeys(m);
     try {
       await this.openView(m);
+      this.earlyKeysGo(m.termId);
     } catch (err) {
       /* A view that did not open keeps no size, and takes no keys. */
       this.earlyKeys.delete(m.termId);
@@ -2352,19 +2354,9 @@ export class TerminalHost {
     if (!a.turn) a.hash = null;
   }
 
-  private expectKeys({ termId, write }: Msg<'term.open'>): void {
-    if (write) this.earlyKeys.set(termId, []);
-  }
-
-  private earlyKeysGo(termId: string, view: View): void {
-    for (const keys of this.earlyKeys.get(termId) ?? []) this.ownerTyped(view, keys);
-    this.earlyKeys.delete(termId);
-  }
-
   private async openView(m: Msg<'term.open'>): Promise<void> {
     const a = this.agent(m.agentKey);
     this.viewsOpening.add(m.termId);
-    this.expectKeys(m);
     this.wanted.set(m.termId, { key: m.agentKey, size: { cols: m.cols, rows: m.rows } });
     /* Someone who may type gets the program at once, to talk to it; watchers see it once it has a turn. */
     const starts = m.write && !a.turn && !(a.hash && (await this.opts.tmux.alive(a.name)));
@@ -2375,15 +2367,11 @@ export class TerminalHost {
     } finally {
       this.viewsOpening.delete(m.termId);
     }
-    if (this.viewsClosed.delete(m.termId)) {
-      this.earlyKeys.delete(m.termId);
-      return this.forget(m.termId, m.agentKey);
-    }
+    if (this.viewsClosed.delete(m.termId)) return this.forget(m.termId, m.agentKey);
     const shown = this.fitted(m.agentKey);
     const child = this.opts.tmux.attach(a.name, shown.cols, shown.rows, m.write);
     const view: View = { child, key: m.agentKey, write: m.write, mask: new StreamMask(this.opts.secrets), decoder: new StringDecoder('utf8'), pending: '', timer: null, quiet: null, shown, applied: shown, tty: null, out: () => {} };
     this.views.set(m.termId, view);
-    this.earlyKeysGo(m.termId, view);
     a.viewers++;
     /* A watcher of an agent that sleeps sees the waiting screen; anyone else, a loader until the program is up. */
     if (starts || a.turn || a.up) this.opts.send({ type: 'term.program', termId: m.termId, running: a.up && !starts });
@@ -2422,14 +2410,30 @@ export class TerminalHost {
   }
 
   input(m: Msg<'term.input'>): void {
-    const view = this.views.get(m.termId);
+    const view = this.typingView(m.termId);
     if (view?.write) this.ownerTyped(view, m);
     else this.keepEarly(m);
+  }
+
+  /* Keys wait while what came before them still waits, for the order of what the owner typed. */
+  private typingView(termId: string): View | undefined {
+    return this.earlyKeys.has(termId) ? undefined : this.views.get(termId);
   }
 
   private keepEarly(m: Msg<'term.input'>): void {
     const early = this.earlyKeys.get(m.termId);
     if (early && early.length < MAX_EARLY_KEYS) early.push(m);
+  }
+
+  private expectKeys({ termId, write }: Msg<'term.open'>): void {
+    if (write) this.earlyKeys.set(termId, []);
+  }
+
+  private earlyKeysGo(termId: string): void {
+    const view = this.views.get(termId);
+    const keys = this.earlyKeys.get(termId) ?? [];
+    this.earlyKeys.delete(termId);
+    if (view) for (const m of keys) this.ownerTyped(view, m);
   }
 
   private ownerTyped(view: View, { data, pressedIn }: Msg<'term.input'>): void {

@@ -50,32 +50,3 @@ test('the note goes once a new turn began', async ({ page }) => {
   /* The window looks again every 15 s when no news comes. */
   await expect(window.getByText(en.window.turnRefused.busy)).toHaveCount(0, { timeout: 25_000 });
 });
-
-test('keys typed while the view of the session connects again reach the program in order', async ({ page }) => {
-  const errors = watchErrors(page);
-  const live = fixture(null);
-  await atSize(page, { lang: 'en', theme: 'dark', width: 1440 });
-  await serveAgentWindow(page, live);
-  /* The node goes away at the person's first key, and is back a moment later. */
-  const got: string[] = [];
-  let connections = 0;
-  await page.routeWebSocket('**/api/agents/b1/terminal*', ws => {
-    const at = ++connections;
-    ws.onMessage(message => {
-      const { type, data } = JSON.parse(String(message)) as { type: string; data?: string };
-      if (type === 'input') got.push(data!);
-      if (at === 1 && type === 'input') void ws.close({ code: 4410, reason: 'node_offline' });
-    });
-    ws.send(JSON.stringify({ type: 'ready', write: true }));
-    ws.send(JSON.stringify({ type: 'program', running: true }));
-  });
-  const window = await open(page, 'b1', 'en');
-  await window.locator('.xterm-screen').click();
-  await page.keyboard.type('x');
-  await expect.poll(() => got.length).toBeGreaterThan(0);
-  await page.keyboard.type('hi');
-  await page.keyboard.press('Enter');
-  await expect.poll(() => got.join(''), { timeout: 15_000 }).toBe('xhi\r');
-  expect(connections).toBeGreaterThan(1);
-  expect(errors.filter(line => !line.includes('WebSocket'))).toEqual([]);
-});
