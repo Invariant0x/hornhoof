@@ -1,12 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { sql } from 'drizzle-orm';
-import { readMigrationFiles, type MigrationConfig } from 'drizzle-orm/migrator';
-import { drizzle } from 'drizzle-orm/node-postgres';
+import { readMigrationFiles, type MigrationConfig, type MigrationMeta } from 'drizzle-orm/migrator';
+import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
 import pg from 'pg';
-import { AFTER_MIGRATIONS, BEFORE_MIGRATIONS } from './net.js';
+import { AFTER_MIGRATIONS, BEFORE_MIGRATIONS, JOURNAL_NEEDS_PUTTING_BACK } from './net.js';
 import * as schema from './schema.js';
 
 export type Db = PgDatabase<PgQueryResultHKT, typeof schema>;
@@ -43,11 +43,9 @@ export async function migrateDb(url: string, folder: string = MIGRATIONS): Promi
   const pool = openPool(url, warnDropped, MIGRATE_NAME);
   try {
     const db = drizzle(pool, { schema });
-    await pool.query(BEFORE_MIGRATIONS);
-    await withJournalBackAfter(pool, async () => {
-      await migrate(db, { migrationsFolder: folder });
-      await applyMissingMigrations(db, { migrationsFolder: folder });
-    });
+    const config = { migrationsFolder: folder };
+    if (await anyMigrationToApply(pool, db, config)) await applyMigrations(pool, db, config);
+    else await healJournal(pool);
     const { rows } = await pool.query<{ count: string }>('SELECT count(*) FROM drizzle.__drizzle_migrations');
     return Number(rows[0]!.count);
   } finally {
@@ -55,8 +53,31 @@ export async function migrateDb(url: string, folder: string = MIGRATIONS): Promi
   }
 }
 
+type MigratingDb = NodePgDatabase<typeof schema>;
+
+/* A fresh database has no record of any migration yet. */
+async function anyMigrationToApply(pool: pg.Pool, db: MigratingDb, config: MigrationConfig): Promise<boolean> {
+  const { rows } = await pool.query<{ there: boolean }>(`SELECT to_regclass('drizzle.__drizzle_migrations') IS NOT NULL AS there`);
+  return !rows[0]!.there || (await unappliedMigrations(db, config)).length > 0;
+}
+
+async function applyMigrations(pool: pg.Pool, db: MigratingDb, config: MigrationConfig): Promise<void> {
+  await pool.query(BEFORE_MIGRATIONS);
+  await withJournalBackAfter(pool, async () => {
+    await migrate(db, config);
+    await applyMissingMigrations(db, config);
+  });
+}
+
+/* With nothing to apply the journal stays on and no table is locked, as a by-hand start over a live company runs this too. */
+async function healJournal(pool: pg.Pool): Promise<void> {
+  const { rows } = await pool.query<{ needed: boolean }>(JOURNAL_NEEDS_PUTTING_BACK);
+  if (rows[0]!.needed) await pool.query(AFTER_MIGRATIONS);
+}
+
 /* The journal goes back also after a failed run, whose failure stays what the caller gets. A failure to put it back after a
-   good run is thrown too: the company must not go on without it. An older database has no such function yet. */
+   good run is thrown too: the company must not go on without it. If it cannot go back after a failed run, the journal stays
+   off, which refuses fenced sessions until the next run. An older database has no such function yet. */
 async function withJournalBackAfter(pool: pg.Pool, migrations: () => Promise<void>): Promise<void> {
   try {
     await migrations();
@@ -72,18 +93,21 @@ async function putJournalBack(pool: pg.Pool): Promise<void> {
   if (rows[0]!.there) await pool.query(AFTER_MIGRATIONS);
 }
 
-/* Merged branches can put an unrecorded migration below Drizzle's newest timestamp. */
-export async function applyMissingMigrations<T extends PgQueryResultHKT, S extends Record<string, unknown>>(db: PgDatabase<T, S>, config: MigrationConfig): Promise<void> {
+/* What no row records yet: drizzle's run applies those above its newest record, applyMissingMigrations those below it. */
+async function unappliedMigrations<T extends PgQueryResultHKT, S extends Record<string, unknown>>(db: PgDatabase<T, S>, config: MigrationConfig): Promise<MigrationMeta[]> {
   const recorded = await db.select({ when: sql<string>`created_at` }).from(sql`drizzle.__drizzle_migrations`);
   const applied = new Set(recorded.map(row => Number(row.when)));
-  const migrations = readMigrationFiles(config);
-  const journal = JSON.parse(readFileSync(`${config.migrationsFolder}/meta/_journal.json`, 'utf8')) as { entries: { tag: string }[] };
-  for (const [i, migration] of migrations.entries()) {
-    if (applied.has(migration.folderMillis)) continue;
+  return readMigrationFiles(config).filter(migration => !applied.has(migration.folderMillis));
+}
+
+/* Merged branches can put an unrecorded migration below Drizzle's newest timestamp. */
+export async function applyMissingMigrations<T extends PgQueryResultHKT, S extends Record<string, unknown>>(db: PgDatabase<T, S>, config: MigrationConfig): Promise<void> {
+  const journal = JSON.parse(readFileSync(`${config.migrationsFolder}/meta/_journal.json`, 'utf8')) as { entries: { tag: string; when: number }[] };
+  for (const migration of await unappliedMigrations(db, config)) {
     await db.transaction(async tx => {
       for (const statement of migration.sql) await tx.execute(sql.raw(statement));
       await tx.execute(sql`insert into drizzle.__drizzle_migrations (hash, created_at) values (${migration.hash}, ${migration.folderMillis})`);
     });
-    console.info(`Applied missing migration ${journal.entries[i]!.tag}`);
+    console.info(`Applied missing migration ${journal.entries.find(entry => entry.when === migration.folderMillis)!.tag}`);
   }
 }

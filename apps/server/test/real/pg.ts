@@ -21,13 +21,13 @@ async function connected(url: string): Promise<pg.Client> {
   return client;
 }
 
+/* Every statement gets its try, so one that fails leaves nothing else behind; the caller gets the first failure. */
 async function onServer(statements: string[]): Promise<void> {
   const server = await connected(realServer());
-  try {
-    for (const statement of statements) await server.query(statement);
-  } finally {
-    await server.end();
-  }
+  const failures: unknown[] = [];
+  for (const statement of statements) await server.query(statement).catch((failure: unknown) => failures.push(failure));
+  await server.end();
+  if (failures.length > 0) throw failures[0];
 }
 
 const urlOf = (database: string): string => {
@@ -49,6 +49,15 @@ export async function realDatabase(): Promise<RealDatabase> {
   };
   return { url, admin, drop };
 }
+
+/* How many sessions of a process, told apart by the name it connects with, wait for a lock right now. */
+export const sessionsWaitingOnALock = async (real: RealDatabase, name: string): Promise<number> => {
+  const { rows } = await real.admin.query<{ n: number }>(
+    "SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND application_name = $1 AND wait_event_type = 'Lock'",
+    [name],
+  );
+  return rows[0]!.n;
+};
 
 /* openDb answers the database alone, and a test has to end the connections behind it. */
 export const poolOf = (db: Db): pg.Pool => (db as unknown as { $client: pg.Pool }).$client;

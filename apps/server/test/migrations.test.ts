@@ -990,7 +990,7 @@ describe('migration 0057', () => {
     expect((await db.execute(runnableByPublic)).rows).toEqual([]);
 
     await client.exec('SELECT net.detach_journal()');
-    expect((await db.execute(journaledTables)).rows).toEqual([]);
+    expect((await db.execute(journaledTables)).rows).toEqual((await db.execute(tablesOfPublic)).rows);
   });
 
   it('refuses a table it could not journal, rather than leave it out', async () => {

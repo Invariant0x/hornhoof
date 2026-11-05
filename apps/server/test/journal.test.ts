@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { isLeaseRefused, type LeaseKind, type LeaseSync } from '../src/db/net.js';
+import { FENCED, isLeaseRefused, JOURNAL_NEEDS_PUTTING_BACK, type LeaseKind, type LeaseSync } from '../src/db/net.js';
 import { agents, attachments, companies, departments, jobs, people, subscriptions } from '../src/db/schema.js';
 import { createTestDb, setLease, testApp } from './helpers.js';
 
@@ -20,7 +20,7 @@ type JournalRow = {
 };
 
 const journalOf = async (db: TestDb, table: string): Promise<JournalRow[]> =>
-  (await db.execute<JournalRow>(sql`select *, term_number::int as term_number from net.journal where tbl = ${table} order by at, id`)).rows;
+  (await db.execute<JournalRow>(sql`select *, term_number::int as term_number from net.journal where tbl = ${table} order by at`)).rows;
 
 const columnsOf = async (db: TestDb, table: string): Promise<string[]> =>
   (await db.execute<{ column_name: string }>(sql`select column_name from information_schema.columns where table_schema = 'public' and table_name = ${table}`)).rows.map(row => row.column_name);
@@ -37,6 +37,22 @@ async function anAgent(db: TestDb): Promise<typeof agents.$inferSelect> {
 /* What a commit answered: nothing when it went through, else whether the lease refused it. */
 const refusal = (commit: Promise<unknown>): Promise<boolean | 'committed'> => commit.then(() => 'committed' as const, isLeaseRefused);
 
+const journalFunctionThere = async (db: TestDb, table: string): Promise<boolean> =>
+  (await db.execute<{ there: boolean }>(sql`select to_regprocedure(${`net.journal_${table}()`}) is not null as there`)).rows[0]!.there;
+
+const tablesWithJournalOff = async (db: TestDb): Promise<string[]> =>
+  (await db.execute<{ table_name: string }>(sql`select table_name from net.journals_off()`)).rows.map(row => row.table_name);
+
+/* A table of its own, with the journal on, for what a migration does to it. */
+async function aJournaledTable(db: TestDb, name: string, definition: string): Promise<void> {
+  await db.$client.exec(`CREATE TABLE public.${name} (${definition}); SELECT net.attach_journal();`);
+}
+
+const takeJournalOff = (db: TestDb) => db.$client.exec('SELECT net.detach_journal()');
+const putJournalOn = (db: TestDb) => db.$client.exec('SELECT net.attach_journal()');
+/* What the migration's session does: it does not say it is fenced. */
+const asMigration = (db: TestDb, text: string) => db.$client.exec(`SET ${FENCED} = off; ${text}; SET ${FENCED} = on;`);
+
 describe('the journal', () => {
   it("writes one journal row per changed row, with its transaction's uuid", async () => {
     const db = await createTestDb();
@@ -45,10 +61,11 @@ describe('the journal', () => {
     const [alone] = await db.insert(departments).values(aDepartment('Ops', companyId)).returning();
 
     const rows = await journalOf(db, 'departments');
+    const xactOf = (id: string): string => rows.find(row => row.key.id === id)!.xact;
 
-    expect(rows.map(row => row.key)).toEqual([...together, alone!].map(({ id }) => ({ id })));
-    expect(rows[0]!.xact).toBe(rows[1]!.xact);
-    expect(rows[2]!.xact).not.toBe(rows[0]!.xact);
+    expect(rows).toHaveLength(3);
+    expect(xactOf(together[0]!.id)).toBe(xactOf(together[1]!.id));
+    expect(xactOf(alone!.id)).not.toBe(xactOf(together[0]!.id));
     for (const row of rows) expect(row).toMatchObject({ term_number: 1, term_machine: 'test', term_split: false, machine: 'test', tbl: 'departments', op: 'insert' });
   });
 
@@ -103,6 +120,13 @@ describe('the journal', () => {
     const updates = (await journalOf(db, 'agents')).filter(row => row.op === 'update');
     expect(updates).toHaveLength(1);
     expect(updates[0]!.cols).toEqual([]);
+  });
+
+  it('names a row by its key alone, not by a column the key only includes', async () => {
+    const db = await createTestDb();
+    await aJournaledTable(db, 'covered', 'a integer, b integer, c integer, PRIMARY KEY (a, b) INCLUDE (c)');
+    await db.$client.exec('INSERT INTO covered VALUES (1, 2, 3)');
+    expect((await journalOf(db, 'covered'))[0]!.key).toEqual({ a: 1, b: 2 });
   });
 
   it("journals what the orchestrator's role changes", async () => {
@@ -169,5 +193,109 @@ describe('fence 1', () => {
 
     await db.$client.exec('SET hornhoof.fenced = on');
     expect(await refusal(db.insert(departments).values(aDepartment('Sales', companyId)))).toBe(true);
+  });
+});
+
+describe('the journal taken off for a migration', () => {
+  it("refuses a fenced session's write under any lease, and lets the migration's pass with no journal row", async () => {
+    const db = await createTestDb();
+    await takeJournalOff(db);
+
+    expect(await refusal(db.insert(companies).values({ name: 'Acme' }))).toBe(true);
+    expect(await db.select().from(companies)).toEqual([]);
+
+    await asMigration(db, `INSERT INTO companies (name) VALUES ('Acme')`);
+    expect(await db.select().from(companies)).toHaveLength(1);
+    expect(await journalOf(db, 'companies')).toEqual([]);
+  });
+
+  it('lets a migration drop a column and write that table, and journals the new shape once back on', async () => {
+    const db = await createTestDb();
+    await aJournaledTable(db, 'shrinking', 'id integer PRIMARY KEY, kept text, going text');
+    await db.$client.exec(`INSERT INTO shrinking VALUES (1, 'old', 'gone')`);
+    await takeJournalOff(db);
+
+    await asMigration(db, `ALTER TABLE shrinking DROP COLUMN going; UPDATE shrinking SET kept = 'by the migration'`);
+    await putJournalOn(db);
+    await db.$client.exec(`UPDATE shrinking SET kept = 'by the app'`);
+
+    const updates = (await journalOf(db, 'shrinking')).filter(row => row.op === 'update');
+    expect(updates).toHaveLength(1);
+    expect(updates[0]).toMatchObject({ cols: ['kept'], old: { kept: 'by the migration' } });
+  });
+
+  it('leaves no function behind for a table a migration dropped', async () => {
+    const db = await createTestDb();
+    await aJournaledTable(db, 'passing', 'id integer PRIMARY KEY');
+    await takeJournalOff(db);
+
+    await asMigration(db, 'DROP TABLE passing');
+    await putJournalOn(db);
+
+    expect(await journalFunctionThere(db, 'passing')).toBe(false);
+    expect(await tablesWithJournalOff(db)).toEqual([]);
+  });
+
+  it('journals a table a migration renamed under its new name, and leaves no function of the old one', async () => {
+    const db = await createTestDb();
+    await aJournaledTable(db, 'before_rename', 'id integer PRIMARY KEY');
+    await takeJournalOff(db);
+
+    await asMigration(db, 'ALTER TABLE before_rename RENAME TO after_rename');
+    await putJournalOn(db);
+    await db.$client.exec('INSERT INTO after_rename VALUES (1)');
+
+    expect(await journalOf(db, 'after_rename')).toHaveLength(1);
+    expect(await journalFunctionThere(db, 'before_rename')).toBe(false);
+  });
+
+  it("journals a table named off, whose function's name no helper of net takes", async () => {
+    const db = await createTestDb();
+    await aJournaledTable(db, 'off', 'id integer PRIMARY KEY');
+    await db.$client.exec('INSERT INTO off VALUES (1)');
+    expect(await journalOf(db, 'off')).toHaveLength(1);
+  });
+
+  it("leaves alone a function of net that is no table's journal, whatever its name", async () => {
+    const db = await createTestDb();
+    await db.$client.exec(`CREATE FUNCTION net.journal_later() RETURNS integer LANGUAGE sql AS 'SELECT 1'`);
+    await takeJournalOff(db);
+    await putJournalOn(db);
+    expect((await db.$client.query('SELECT net.journal_later() AS one')).rows).toEqual([{ one: 1 }]);
+  });
+
+  it('names the tables whose journal is off, and to no agent', async () => {
+    const { app, db } = await testApp();
+    const testDb = db as unknown as TestDb;
+    expect(await tablesWithJournalOff(testDb)).toEqual([]);
+
+    await takeJournalOff(testDb);
+    expect(await tablesWithJournalOff(testDb)).toEqual(expect.arrayContaining(['companies', 'notebook_notes']));
+    for (const mode of ['write', 'read'] as const) {
+      await expect(app.ctx.agentSql!.run('SELECT * FROM net.journals_off()', mode)).rejects.toThrow(/permission denied/);
+    }
+
+    await putJournalOn(testDb);
+    expect(await tablesWithJournalOff(testDb)).toEqual([]);
+  });
+});
+
+describe('what a killed migration can leave', () => {
+  const needsPuttingBack = async (db: TestDb): Promise<boolean> => (await db.$client.query<{ needed: boolean }>(JOURNAL_NEEDS_PUTTING_BACK)).rows[0]!.needed;
+
+  it('is nothing on a database whose journal is whole', async () => {
+    expect(await needsPuttingBack(await createTestDb())).toBe(false);
+  });
+
+  it.each([
+    ['a journal function left off', 'SELECT net.detach_journal()'],
+    ['a table without its trigger', 'DROP TRIGGER net_journal ON notebook_notes'],
+    ['a foreign key not deferrable', 'CREATE TABLE public.later (id integer PRIMARY KEY, company uuid REFERENCES companies (id)); SELECT net.attach_journal()'],
+  ])('is seen: %s', async (_name, left) => {
+    const db = await createTestDb();
+    await db.$client.exec(left);
+    expect(await needsPuttingBack(db)).toBe(true);
+    await db.$client.exec('SELECT net.attach_journal(); SELECT net.defer_foreign_keys();');
+    expect(await needsPuttingBack(db)).toBe(false);
   });
 });

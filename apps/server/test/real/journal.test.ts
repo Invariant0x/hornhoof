@@ -5,14 +5,16 @@ import { join } from 'node:path';
 import pg from 'pg';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { openAgentSql } from '../../src/db/agent-sql.js';
-import { APP_NAME, MIGRATIONS, migrateDb } from '../../src/db/client.js';
+import { APP_NAME, MIGRATE_NAME, MIGRATIONS, migrateDb } from '../../src/db/client.js';
 import { FENCED, JOURNAL_TRIGGER, LEASE_REFUSED } from '../../src/db/net.js';
 import { ENDLESS_LEASE } from '../global-setup.js';
-import { realDatabase, type RealDatabase } from './pg.js';
+import { until } from '../helpers.js';
+import { realDatabase, sessionsWaitingOnALock, type RealDatabase } from './pg.js';
 
 const END_LEASE = `UPDATE net_local.lease SET until = '-infinity'`;
 const A_NOTE = `INSERT INTO notebook_notes (company_id, number, text) SELECT id, (SELECT count(*) + 1 FROM notebook_notes), 'A note' FROM companies`;
 const FENCED_OPTION = `-c ${FENCED}=on`;
+const LOCK_WAIT_LIMIT_MS = 30_000;
 
 /* A migrated database of its own with a company, under the lease every test database holds. */
 async function leasedDatabase(): Promise<RealDatabase> {
@@ -58,6 +60,15 @@ const tablesWithoutJournal = async (real: RealDatabase): Promise<string[]> =>
 const journalOfNotes = async (real: RealDatabase): Promise<string> =>
   (await real.admin.query<{ definition: string }>(`SELECT pg_get_functiondef('net."journal_notebook_notes"'::regproc) AS definition`)).rows[0]!.definition;
 
+const tablesWithJournalOff = async (real: RealDatabase): Promise<string[]> =>
+  (await real.admin.query<{ table_name: string }>('SELECT table_name FROM net.journals_off()')).rows.map(row => row.table_name);
+
+const journalTriggers = async (real: RealDatabase): Promise<string[]> =>
+  (await real.admin.query<{ oid: string }>('SELECT oid FROM pg_trigger WHERE tgname = $1 ORDER BY oid', [JOURNAL_TRIGGER])).rows.map(row => row.oid);
+
+const journaledNotes = async (real: RealDatabase): Promise<number | null> =>
+  (await real.admin.query(`SELECT 1 FROM net.journal WHERE tbl = 'notebook_notes'`)).rowCount;
+
 describe('the fence on real Postgres', () => {
   it("fences the app's commits and lets older builds through", async () => {
     const real = await leasedDatabase();
@@ -101,6 +112,7 @@ UPDATE notebook_notes SET text = 'Changed by the migration';`);
     expect((await real.admin.query('SELECT text FROM notebook_notes')).rows).toEqual([{ text: 'Changed by the migration' }]);
     expect(await journalOfNotes(real)).not.toContain('by_orchestrator');
     expect(await tablesWithoutJournal(real)).toEqual([]);
+    expect(await tablesWithJournalOff(real)).toEqual([]);
   });
 
   it('puts the journal back after a migration that failed, and still answers with its failure', async () => {
@@ -110,6 +122,58 @@ UPDATE notebook_notes SET text = 'Changed by the migration';`);
     await expect(migrateDb(real.url, failing)).rejects.toSatisfy((err: Error) => /division by zero/.test(`${err.message} ${String(err.cause)}`));
 
     expect(await tablesWithoutJournal(real)).toEqual([]);
+    expect(await tablesWithJournalOff(real)).toEqual([]);
+  });
+
+  it('leaves the journal alone when there is nothing to apply', async () => {
+    const real = await leasedDatabase();
+    const triggers = await journalTriggers(real);
+    const app = await connected(real, { options: FENCED_OPTION });
+    /* Taking a trigger off would have to wait for this open write, so the run below would never end. */
+    await app.query('BEGIN');
+    await app.query(A_NOTE);
+
+    await migrateDb(real.url);
+
+    await app.query(A_NOTE);
+    await app.query('COMMIT');
+    expect(await journalTriggers(real)).toEqual(triggers);
+    expect(await journaledNotes(real)).toBe(2);
+  });
+
+  it('refuses a fenced session while the migrations run, under any lease, and journals it again after', async () => {
+    const real = await leasedDatabase();
+    const later = await migrationsWith('ALTER TABLE sign_in_attempts ADD COLUMN later text;');
+    const app = await connected(real, { options: FENCED_OPTION });
+    const holder = await connected(real, {});
+    await holder.query('BEGIN');
+    await holder.query('LOCK TABLE sign_in_attempts');
+    const migrating = migrateDb(real.url, later);
+    await until(async () => (await sessionsWaitingOnALock(real, MIGRATE_NAME)) === 1, LOCK_WAIT_LIMIT_MS);
+
+    await expect(app.query(A_NOTE)).rejects.toMatchObject({ code: LEASE_REFUSED });
+
+    await holder.query('COMMIT');
+    await migrating;
+    await app.query(A_NOTE);
+    expect(await journaledNotes(real)).toBe(1);
+  });
+
+  it('fails closed after a run killed with the journal off, and the next migrate heals it', async () => {
+    const real = await leasedDatabase();
+    const app = await connected(real, { options: FENCED_OPTION });
+    const agents = (await openAgentSql(real.url))!;
+    onTestFinished(() => agents.close());
+    await real.admin.query('SELECT net.detach_journal()');
+
+    await expect(app.query(A_NOTE)).rejects.toMatchObject({ code: LEASE_REFUSED });
+    await expect(agents.run(`SET ${FENCED} = off; ${A_NOTE}`, 'write')).rejects.toMatchObject({ code: LEASE_REFUSED });
+
+    await migrateDb(real.url);
+
+    await app.query(A_NOTE);
+    expect(await journaledNotes(real)).toBe(1);
+    expect(await tablesWithJournalOff(real)).toEqual([]);
   });
 });
 
