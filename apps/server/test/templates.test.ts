@@ -671,28 +671,79 @@ describe('templates', () => {
     });
 
     it('satisfies every differential review, T6/T10 evidence, slice and provenance rule in the shipped skills', () => {
-      expect(reviewSkillViolations(current())).toEqual([]);
+      expect(failedRuleIds(REVIEW_CONTRACT_RULES, current())).toEqual([]);
       for (const id of ['dev-review-diff', 'dev-review-verdict']) expect(templates.skills.get(id)!.body, id).not.toMatch(/hornhoof/i);
     });
 
     it('rejects broken-meaning skills even when required substrings remain present', () => {
       const base = current();
-      expect(reviewSkillViolations(base)).toEqual([]);
-      expect(reviewSkillViolations({ ...base, diff: `${base.diff}\nOn a second look, read the whole patch again alongside reviewedCommit..fixCommit.` })).toContain('no-repeat-full-read-or-high');
-      expect(reviewSkillViolations({ ...base, diff: `${base.diff}\nOn a second look, rerun your program's own review after reading reviewedCommit..fixCommit.` })).toContain('no-repeat-full-read-or-high');
-      expect(reviewSkillViolations({ ...base, diff: `${base.diff}\nIn Claude Code run its code-review skill at high effort on every round.` })).toEqual(
+      expect(failedRuleIds(REVIEW_CONTRACT_RULES, base)).toEqual([]);
+      expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, diff: `${base.diff}\nOn a second look, read the whole patch again alongside reviewedCommit..fixCommit.` })).toContain('no-repeat-full-read-or-high');
+      expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, diff: `${base.diff}\nOn a second look, rerun your program's own review after reading reviewedCommit..fixCommit.` })).toContain('no-repeat-full-read-or-high');
+      expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, diff: `${base.diff}\nIn Claude Code run its code-review skill at high effort on every round.` })).toEqual(
         expect.arrayContaining(['native-review-first-look-only', 'no-repeat-full-read-or-high']),
       );
-      expect(reviewSkillViolations({ ...base, security: `${base.security}\nOn a second round, run codex review --base <main line> again.` })).toEqual(
+      expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, security: `${base.security}\nOn a second round, run codex review --base <main line> again.` })).toEqual(
         expect.arrayContaining(['native-review-first-look-only', 'no-repeat-full-read-or-high']),
       );
-      expect(reviewSkillViolations({ ...base, diff: `${base.diff}\nThe general review of a turn has two rounds when fixes touch routes.` })).toContain('turn-review-one-round');
-      expect(reviewSkillViolations({ ...base, verdict: `${base.verdict}\nVerify testEvidence run and commitSha, then rerun the author's test runs to confirm.` })).toContain('t10-verify-evidence-no-rerun');
-      expect(reviewSkillViolations({ ...base, verdict: `${base.verdict}\nEven with harm to a person rules, low coverage alone is a blocking finding.` })).toContain('t6-named-harm-no-coverage-chasing');
-      expect(reviewSkillViolations({ ...base, diff: `${base.diff}\nAbove 800 lines, split across two reviewers by folders after task.reviewPlan.` })).toContain('vertical-slices-above-800');
-      expect(reviewSkillViolations({ ...base, verdict: `${base.verdict}\nA reviewer's own verdict marks its findingId confirmed for provider counts.` })).toContain('structured-findings-and-provenance');
-      expect(reviewSkillViolations({ ...base, verdict: `${base.verdict}\nAuthors of internal role or skill rules may take release approval on main when docs have no gates.` })).toContain(
+      expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, diff: `${base.diff}\nThe general review of a turn has two rounds when fixes touch routes.` })).toContain('turn-review-one-round');
+      expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, verdict: `${base.verdict}\nVerify testEvidence run and commitSha, then rerun the author's test runs to confirm.` })).toContain('t10-verify-evidence-no-rerun');
+      expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, verdict: `${base.verdict}\nEven with harm to a person rules, low coverage alone is a blocking finding.` })).toContain('t6-named-harm-no-coverage-chasing');
+      expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, diff: `${base.diff}\nAbove 800 lines, split across two reviewers by folders after task.reviewPlan.` })).toContain('vertical-slices-above-800');
+      expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, verdict: `${base.verdict}\nA reviewer's own verdict marks its findingId confirmed for provider counts.` })).toContain('structured-findings-and-provenance');
+      expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, verdict: `${base.verdict}\nAuthors of internal role or skill rules may take release approval on main when docs have no gates.` })).toContain(
         'no-self-or-role-rule-main-release-approval',
+      );
+    });
+  });
+
+  describe('mandatory UI panel wrapping, parallel non-visual work and dynamic language checks', () => {
+    const uiBody = () => templates.skills.get('dev-frontend-ui')!.body;
+
+    it('enables dev-frontend-ui by default on DEV-ENG and DEV-FE and satisfies every generic UI wrapping and language rule', () => {
+      for (const roleId of ['DEV-ENG', 'DEV-FE'] as const) {
+        expect(templates.roles.get(roleId)!.skills.find(s => s.id === 'dev-frontend-ui')?.on, roleId).toBe(true);
+      }
+      expect(failedRuleIds(FRONTEND_UI_RULES, uiBody())).toEqual([]);
+      const agentsDoc = readFileSync(join(DIR, '../AGENTS.md'), 'utf8');
+      const contributingDoc = readFileSync(join(DIR, '../CONTRIBUTING.md'), 'utf8');
+      for (const doc of [agentsDoc, contributingDoc]) {
+        expect(doc).toContain('templates/skills/dev-frontend-ui.md');
+        expect(doc).toContain('apps/web/src/i18n/index.tsx');
+        expect(doc).toMatch(/longest[\s\S]*shortest|shortest[\s\S]*longest/i);
+        expect(doc).toMatch(/whole group|one group/i);
+        expect(doc).not.toMatch(/Add screenshots in English and Russian/);
+      }
+      expect(agentsDoc).toContain('CONTRIBUTING.md#interface-panels-and-language-checks');
+      expect(contributingDoc).toContain('### Interface panels and language checks');
+    });
+
+    it('rejects UI skill text that allows clipping, hiding button groups, blocking non-visual work or fixed/pseudo locales', () => {
+      const base = uiBody();
+      expect(failedRuleIds(FRONTEND_UI_RULES, base)).toEqual([]);
+      expect(failedRuleIds(FRONTEND_UI_RULES, `${base}\nWhen a narrow panel overflows, truncate text with ellipsis to prevent horizontal scroll.`)).toContain(
+        'panel-wrap-and-whole-button-group',
+      );
+      expect(failedRuleIds(FRONTEND_UI_RULES, `${base}\nWhen space runs short, hide secondary action buttons behind clipped overflow.`)).toContain(
+        'panel-wrap-and-whole-button-group',
+      );
+      expect(failedRuleIds(FRONTEND_UI_RULES, `${base}\nWrap action buttons one by one onto separate lines with custom per-row spacing.`)).toContain(
+        'panel-wrap-and-whole-button-group',
+      );
+      expect(failedRuleIds(FRONTEND_UI_RULES, `${base}\nWait on the design mockup before starting API, state logic or temporary skeleton work.`)).toContain(
+        'parallel-nonvisual-visual-only-waits',
+      );
+      expect(failedRuleIds(FRONTEND_UI_RULES, `${base}\nWhile waiting on Design, invent custom spacing tokens for visual polish.`)).toContain(
+        'parallel-nonvisual-visual-only-waits',
+      );
+      expect(failedRuleIds(FRONTEND_UI_RULES, `${base}\nCount a pseudo-locale or demo string as a shipped language during UI checks.`)).toContain(
+        'multilang-and-dynamic-shipped-locales',
+      );
+      expect(failedRuleIds(FRONTEND_UI_RULES, `${base}\nAlways check a fixed two-language pair forever instead of measuring shipped translations.`)).toContain(
+        'multilang-and-dynamic-shipped-locales',
+      );
+      expect(failedRuleIds(FRONTEND_UI_RULES, `${base}\nFollow Hornhoof's .notebook and theme.css rules in every company.`)).toContain(
+        'project-reference-without-company-lockin',
       );
     });
   });
@@ -824,7 +875,50 @@ const REVIEW_CONTRACT_RULES: { id: string; holds: (s: ReviewSkills) => boolean }
   },
 ];
 
+const FRONTEND_UI_RULES: { id: string; holds: (text: string) => boolean }[] = [
+  {
+    id: 'panel-wrap-and-whole-button-group',
+    holds: text =>
+      /\b(?:panels?|rows?|cards?)\b[\s\S]*\bfull text\b[\s\S]*\bactions\b/i.test(text) &&
+      /\blong words\b[\s\S]*\bURLs?\b[\s\S]*\bwrap\b/i.test(text) &&
+      /\b(?:whole group|together as one group)\b[\s\S]*\b(?:one|single) even row\b/i.test(text) &&
+      /\b(?:same|shared|consistent) edge\b[\s\S]*\bspacing\b/i.test(text) &&
+      /\b(?:never|do not)\b[^.!?]*\b(?:hide|clip|truncate|ellipsis)\b/i.test(text) &&
+      forbids(text, /\b(?:truncate|clip)\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\b(?:text|words|buttons|actions|overflow|ellipsis)\b/i) &&
+      forbids(text, /\bhide\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\b(?:text|action|buttons?|controls?|group|overflow)\b/i) &&
+      forbids(text, /\bwrap\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\bbuttons?\s+one by one\b/i),
+  },
+  {
+    id: 'parallel-nonvisual-visual-only-waits',
+    holds: text =>
+      /\bnon-visual\b[\s\S]*\bdata\b[\s\S]*\bAPI\b[\s\S]*\blogic\b[\s\S]*\bstates\b[\s\S]*\bskeleton\b[\s\S]*\bin parallel\b/i.test(text) &&
+      /\bonly\b[^.!?]*\bvisual\b[^.!?]*\bwaits?\b/i.test(text) &&
+      /\b(?:never|do not)\b[^.!?]*\binvent\b[^.!?]*\b(?:tokens?|spacing)\b/i.test(text) &&
+      forbids(text, /\bwait\w*\b(?:(?!\b(?:without|instead of|only)\b)[^.!?;,])*\bdesign mockup\b[^.!?;,]*\bbefore\b[^.!?;,]*\b(?:API|state|logic|skeleton)\b/i) &&
+      forbids(text, /\binvent\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\b(?:tokens?|spacing)\b/i),
+  },
+  {
+    id: 'multilang-and-dynamic-shipped-locales',
+    holds: text =>
+      /\b20\s*(?:to|-)\s*30\s+languages\b/i.test(text) &&
+      /\b1\.5x?\b[\s\S]*\b2x?\b/i.test(text) &&
+      /\bCJK\b[\s\S]*\bDevanagari\b[\s\S]*\bline-height\b/i.test(text) &&
+      /\bRTL\b[\s\S]*\bmirror\w*\b/i.test(text) &&
+      /\blongest\b[\s\S]*\bshortest\b[\s\S]*\b(?:actually )?(?:shipped|supported)\b[\s\S]*\breal\b/i.test(text) &&
+      /\bRTL\b[^.!?]*\b(?:when|once)\b/i.test(text) &&
+      /\b(?:never|do not)\b[^.!?]*\bpseudo-locale\b/i.test(text) &&
+      forbids(text, /\bcount\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\b(?:pseudo-locale|demo string)\b[^.!?;,]*\bas a (?:real |shipped |supported )?language\b/i) &&
+      forbids(text, /\b(?:always )?check\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\bfixed two-language pair\b/i),
+  },
+  {
+    id: 'project-reference-without-company-lockin',
+    holds: text =>
+      /\brepository\b[\s\S]*\b(?:style book|design reference|UI reference)\b/i.test(text) &&
+      !/hornhoof|\.notebook|\.side-panel|theme\.css|\b(?:Russian|English)\b/i.test(text),
+  },
+];
+
 const forEvery = <Item>(items: Item[], predicate: (item: Item) => boolean): boolean => items.every(predicate);
 
-const reviewSkillViolations = (skillsInput: ReviewSkills): string[] =>
-  REVIEW_CONTRACT_RULES.filter(rule => !rule.holds(skillsInput)).map(rule => rule.id);
+const failedRuleIds = <Input>(rules: { id: string; holds: (input: Input) => boolean }[], input: Input): string[] =>
+  rules.filter(rule => !rule.holds(input)).map(rule => rule.id);
