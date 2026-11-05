@@ -91,7 +91,7 @@ async function noLinkedParents(root: string, path: string): Promise<string> {
 function safeLink(root: string, path: string, target: string): void {
   if (isAbsolute(target) || target.includes('\\') || relative(root, resolve(dirname(within(root, path)), target)).startsWith('..')) throw new Error('A payload symlink escapes the repository.');
 }
-async function fileDigest(path: string, context: CacheContext): Promise<string> {
+export async function fileDigest(path: string, context: CacheContext): Promise<string> {
   const hash = createHash('sha256');
   for await (const chunk of createReadStream(path)) { checkCacheContext(context); hash.update(chunk); }
   return hash.digest('hex');

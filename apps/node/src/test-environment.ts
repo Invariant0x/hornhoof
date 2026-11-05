@@ -1,9 +1,9 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { lstat, open, realpath } from 'node:fs/promises';
+import { lstat, open, readdir, realpath } from 'node:fs/promises';
 import { basename, join, matchesGlob, relative, resolve } from 'node:path';
-import { hashTestEnvironment, parseTestEnvironment, validateEnvironmentDescription, TEST_ENVIRONMENT_BYTES, RepositoryPath, type Command, type TestSuite, type NodeMessage, type ServerMessage, type TestsDescribed, type EnvironmentDescription, type EnvironmentProblem, type InputDigest, type RepositoryScope, type RuntimeCapability, type TestEnvironmentV1, type TestUnit } from '@hornhoof/protocol';
-import { cacheKey, checkCacheContext, privateCacheRoot, type CacheContext } from './test-cache.js';
+import { hashTestEnvironment, parseTestEnvironment, validateEnvironmentDescription, TEST_ENVIRONMENT_BYTES, RepositoryPath, type Command, type TestSuite, type TestPrepare, type NodeMessage, type ServerMessage, type TestsDescribed, type EnvironmentDescription, type EnvironmentProblem, type InputDigest, type RepositoryScope, type RuntimeCapability, type TestEnvironmentV1, type TestUnit } from '@hornhoof/protocol';
+import { cacheKey, checkCacheContext, fileDigest, privateCacheRoot, type CacheContext } from './test-cache.js';
 import { withCheckSlot } from './check-queue.js';
 import type { JobUser } from './isolation.js';
 import { readCommit, type CommitTree, type GitEntry } from './test-mirror.js';
@@ -145,13 +145,13 @@ export function dependencyCacheKey(description: EnvironmentDescription): string 
   const { dependencies } = description.manifest;
   return cacheKey({ runtime: runtimeFingerprint(description, commandRuntimes(description, dependencies.install)), settings: { format: 'hornhoof-dependencies-v1', repositoryScope: description.repositoryScope, adapter: dependencies.adapter, install: dependencies.install, paths: [...dependencies.paths].sort(), cache: dependencies.cache }, inputs: selectedInputs(description, dependencies.inputs) });
 }
-export function environmentCacheKey(description: EnvironmentDescription, unitId: string, dependencyKey: string): string {
+export function environmentCacheKey(description: EnvironmentDescription, unitId: string, dependencyKey: string, preparedInputs?: InputDigest[]): string {
   const unit = description.manifest.prepare.find(unit => unit.id === unitId);
   if (!unit) fail('environment_invalid', 'The preparation unit does not exist in the pinned manifest.');
   const services = description.manifest.services.filter(service => unit.serviceIds.includes(service.id));
   const runtimes = [...commandRuntimes(description, unit.commands), ...services.map(service => service.runtime)];
   const settings = { format: 'hornhoof-environment-v1', repositoryScope: description.repositoryScope, unitId, dependencyKey, commands: unit.commands, artifacts: unit.artifacts, reset: description.manifest.reset, services: services.map(({ id, driver, runtime, options }) => ({ id, driver, runtime, options })) };
-  return cacheKey({ runtime: runtimeFingerprint(description, runtimes), settings, inputs: selectedInputs(description, unit.inputs) });
+  return cacheKey({ runtime: runtimeFingerprint(description, runtimes), settings, inputs: preparedInputs ?? selectedInputs(description, unit.inputs) });
 }
 
 
@@ -231,4 +231,52 @@ export class NodeTestMessages {
     if (this.described.size > 20) this.described.delete(this.described.keys().next().value!);
     this.options.emit(reply);
   }
+}
+
+
+type PreparationInputContext = CacheContext & { checkout: string; profile: string; completed: string[] };
+function overlapsOutput(pattern: string, output: string): boolean {
+  if (output === '.' || match(output, pattern) || pattern.startsWith(`${output}/`)) return true;
+  const wildcard = pattern.search(/[?*[{]/);
+  if (wildcard < 0) return output.startsWith(`${pattern}/`);
+  const prefix = pattern.slice(0, wildcard), directory = prefix.slice(0, prefix.lastIndexOf('/'));
+  return !directory || directory === output || directory.startsWith(`${output}/`) || output.startsWith(`${directory}/`);
+}
+type PreparationOutput = { unit: TestPrepare; index: number; root: string };
+type PreparationReference = { pattern: string; root: string };
+function referencesForPattern(outputs: PreparationOutput[], pattern: string, current: number, context: PreparationInputContext): PreparationReference[] {
+  const owners = outputs.filter(output => overlapsOutput(pattern, output.root)), active = owners.filter(owner => owner.unit.profiles.includes(context.profile));
+  if (owners.length && !active.length) fail('environment_invalid', 'A required preparation result is unavailable in this profile.');
+  return active.map(owner => {
+    if (owner.index >= current || !context.completed.includes(owner.unit.id)) fail('environment_invalid', 'A preparation input refers to itself or an unfinished preparation result.');
+    return { pattern, root: owner.root };
+  });
+}
+function preparationReferences(description: EnvironmentDescription, unitId: string, context: PreparationInputContext): PreparationReference[] {
+  const units = description.manifest.prepare, current = units.findIndex(unit => unit.id === unitId);
+  if (current < 0 || !units[current].profiles.includes(context.profile)) fail('environment_invalid', 'The preparation unit is not eligible for this profile.');
+  const outputs = units.flatMap((unit, index) => unit.artifacts.flatMap(artifact => 'service' in artifact ? [] : [{ unit, index, root: artifact.path }]));
+  return units[current].inputs.flatMap(pattern => referencesForPattern(outputs, pattern, current, context));
+}
+async function generatedFiles(path: string, context: PreparationInputContext): Promise<string[]> {
+  checkCacheContext(context);
+  const full = await safeCheckoutPath(context.checkout, path), stat = await lstat(full);
+  if (stat.isFile()) return [path];
+  if (!stat.isDirectory()) fail('environment_invalid', 'Generated inputs must be regular files or directories.');
+  const result: string[] = [];
+  for (const name of (await readdir(full)).sort()) result.push(...await generatedFiles(`${path}/${name}`, context));
+  return result;
+}
+export async function readPreparationInputs(description: EnvironmentDescription, unitId: string, context: PreparationInputContext): Promise<InputDigest[]> {
+  const references = preparationReferences(description, unitId, context), unit = description.manifest.prepare.find(unit => unit.id === unitId)!;
+  const inputs = new Map(selectedInputs(description, unit.inputs).map(input => [input.path, input.digest]));
+  for (const reference of references) {
+    let files: string[];
+    try { files = (await generatedFiles(reference.root, context)).filter(path => match(path, reference.pattern)); }
+    catch (error) { checkCacheContext(context); if (error instanceof EnvironmentFailure) throw error; return fail('environment_invalid', `A required preparation result is missing: ${reference.root}.`); }
+    if (!files.length) fail('environment_invalid', `A required preparation input is empty: ${reference.pattern}.`);
+    inputs.delete(reference.pattern);
+    for (const path of files) inputs.set(path, await fileDigest(resolve(context.checkout, path), context));
+  }
+  return [...inputs].sort(([a], [b]) => a.localeCompare(b)).map(([path, digest]) => ({ path, digest }));
 }

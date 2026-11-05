@@ -80,7 +80,15 @@
 - [ ] Test owner preference on sibling nodes, cold ownership replacement, correct runtime eligibility and whole-package/final-check leaves without duplicating #313's staging algorithm; observe RED, implement and verify GREEN.
 - [ ] Expose snapshot/receipts/phase timings through runState without losing commitSha, queuePosition or GitHub status behavior. Commit after targeted server checks.
 
-## Task 5: Real cross-slice integration and measured evidence
+## Task 5: Atomic run completion against wait_for
+
+**Files:** apps/server/src/modules/tasks/external-wait.ts, testruns/runs.ts and targeted test-runs/external-wait tests. engine.ts remains owned by cc79818e; coordinate before editing it.
+
+- [ ] Read the head's #399 addendum and current turn-8 implementation. Reproduce unreadMessage=false -> run end with no wait -> stale move(wait) using an explicit barrier, for tests/work.
+- [ ] Apply the smallest atomic fix, preserving foreign waits and closed tasks; no timer-based repair or uncontrolled reread.
+- [ ] Verify both operation orders, one delivery, null externalWait and no extra wake at the former deadline. Record exact SHA and commands.
+
+## Task 6: Real cross-slice integration and measured evidence
 
 **Files:** owned protocol/node/server tests, docs and task evidence artifacts; no B/C source edits.
 
@@ -110,3 +118,6 @@
 - Protocol description/wire increment: RED4 ->GREEN4, malformed JSON/false environment-hit regressions RED2 ->GREEN6; frames/runtime-fields RED2 ->GREEN8. Whole protocol254/254, final targeted36/36 after CC extraction; build/types/lint passed. New maximum CC7, dryer clean.
 - Node metadata increment: discovery RED4 ->GREEN4, invocation RED2 ->GREEN6, selective keys RED1 ->GREEN7. Main discovery/cancel wiring RED2, corrected test transport to preserve HTTPS wire validation while reading local Git through the reader adapter. Refused-request tracking and timeout-code regressions each RED1 ->GREEN; affected node88/88. Node test types and scoped lint passed; existing runNode CC166->161, new maxCC7, dryer clean. Product execution/preparation and server snapshots are still outstanding.
 - Ruling: test_mode_conflict is the stable ApiError.reason with existing generic validation code, and prefixes the MCP error text. One additive ErrorReason line in src/errors.ts is necessary plumbing outside the exclusive file list; no other error behavior changes. Cost if wrong: align the transport reason name before exposing product mode.
+
+- Head resolved generated inputs at16:32: actual bytes of earlier completed artifacts participate in later keys. Self/forward references/cycles and missing results fail. Generated-input RED2/GREEN10; CC extraction follows before commit.
+- Head expanded#399 at16:46 with the existing#296/#347/#367 wait race. Reread the body and receiving-code-review skill before integrating; this is not yet reproduced or fixed. Task5 added before final integration.

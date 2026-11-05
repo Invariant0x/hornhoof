@@ -124,3 +124,32 @@ it('settles refused description requests before forgetting their active entry', 
   expect(emitted).toMatchObject([{ result: { status: 'error', problem: { code: 'isolation_missing' } } }]);
   expect(control.activeDescriptions()).toEqual([]);
 });
+
+it('keys a later preparation from actual completed artifact bytes and rejects missing results', async () => {
+  const value = manifest();
+  value.prepare.unshift({ id: 'compile', profiles: ['fast'], serviceIds: [], inputs: ['app/test/*.ts'], commands: [], artifacts: [{ path: 'build/protocol', format: 'directory' }] });
+  value.prepare[1].inputs.push('build/protocol/**');
+  const f = await fixture(value), description = await environment.readTestEnvironment(f.source, f.scope, f.sha, f.context);
+  const context = { ...f.context, checkout: f.root, profile: 'fast', completed: ['compile'] };
+  await mkdir(join(f.root, 'build/protocol'), { recursive: true }); await writeFile(join(f.root, 'build/protocol/index.js'), 'export const value=1;');
+  const inputs = await environment.readPreparationInputs(description, 'schema', context), dependencies = environment.dependencyCacheKey(description);
+  const first = environment.environmentCacheKey(description, 'schema', dependencies, inputs);
+  await writeFile(join(f.root, 'app/test/a.test.ts'), '// compiler input changed'); git(f.root, 'add', 'app/test/a.test.ts'); git(f.root, 'commit', '--quiet', '-m', 'Rebuild');
+  const rebuilt = await environment.readTestEnvironment(f.source, f.scope, git(f.root, 'rev-parse', 'HEAD'), { ...f.context, runtimes: description.runtimeCapabilities });
+  await rm(join(f.root, 'build'), { recursive: true }); await mkdir(join(f.root, 'build/protocol'), { recursive: true }); await writeFile(join(f.root, 'build/protocol/index.js'), 'export const value=1;');
+  expect(environment.environmentCacheKey(rebuilt, 'schema', dependencies, await environment.readPreparationInputs(rebuilt, 'schema', context))).toBe(first);
+  await writeFile(join(f.root, 'build/protocol/index.js'), 'export const value=2;');
+  expect(environment.environmentCacheKey(rebuilt, 'schema', dependencies, await environment.readPreparationInputs(rebuilt, 'schema', context))).not.toBe(first);
+  await rm(join(f.root, 'build'), { recursive: true });
+  await expect(environment.readPreparationInputs(rebuilt, 'schema', context)).rejects.toMatchObject({ problem: { code: 'environment_invalid' } });
+});
+
+it('refuses self references, forward references and cycles in preparation inputs', async () => {
+  const value = manifest(); value.prepare[0].inputs = ['template/**'];
+  const f = await fixture(value), description = await environment.readTestEnvironment(f.source, f.scope, f.sha, f.context);
+  const context = { ...f.context, checkout: f.root, profile: 'fast', completed: [] };
+  await expect(environment.readPreparationInputs(description, 'schema', context)).rejects.toMatchObject({ problem: { code: 'environment_invalid' } });
+  const forward = structuredClone(description); forward.manifest.prepare[0].inputs = ['future/**'];
+  forward.manifest.prepare.push({ ...forward.manifest.prepare[0], id: 'later', inputs: ['template/**'], artifacts: [{ path: 'future', format: 'directory' }] });
+  await expect(environment.readPreparationInputs(forward, 'schema', context)).rejects.toMatchObject({ problem: { code: 'environment_invalid' } });
+});
