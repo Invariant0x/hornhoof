@@ -3,15 +3,19 @@ import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { z } from 'zod';
 import { checkSlotWaiting } from '../check-queue.js';
-import type { OperatorDelivery, OperatorNodeMessage, OperatorQuestion, OperatorReason, OperatorServerMessage } from '@hornhoof/protocol/program-operator';
+import type { OperatorCheck, OperatorDelivery, OperatorInputLine, OperatorNodeMessage, OperatorQuestion, OperatorReason, OperatorServerMessage } from '@hornhoof/protocol/program-operator';
 import { OperatorControl, type OperatorProgram } from './operator-control.js';
 import { OperatorObserver, type OperatorIdentity } from './operator-observer.js';
 
-export type OperatorOptions = { dir: string; send(frame: OperatorNodeMessage): boolean; connected(): boolean; now?(): number };
+export type OperatorOptions = { dir: string; send(frame: OperatorNodeMessage): boolean; connected(): boolean; now?(): number; lookMs?: number };
+/* A look at a screen waits its turn among the keys, and the tmux behind it can hang. Neither may hold back telling of a turn. */
+const LOOK_MS = 5000;
+const NO_LOOK: OperatorCheck = { input: 'unknown', screen: null };
 type Pane = { cols: number; rows: number; cells: string };
 type Source = {
   current(key: string): Omit<OperatorProgram, keyof OperatorIdentity | 'generation'> | null;
   capture(key: string): Promise<Pane>;
+  inputLine(key: string, cells: string): OperatorInputLine;
   press(key: string, value: 'Enter' | 'Up' | 'Down' | 'Left' | 'Right' | 'Tab'): Promise<void>;
   secrets(): string[];
 };
@@ -26,7 +30,7 @@ export class OperatorRuntime {
 
   constructor(private readonly options: OperatorOptions, private readonly source: Source) {
     this.now = options.now ?? (() => performance.timeOrigin + performance.now());
-    this.observer = new OperatorObserver({ file: join(options.dir, 'evidence.json'), send: options.send, connected: options.connected, now: this.now });
+    this.observer = new OperatorObserver({ file: join(options.dir, 'evidence.json'), send: options.send, connected: options.connected, now: this.now, look: identity => this.look(identity.agentKey) });
     this.observer.retire();
   }
 
@@ -41,6 +45,18 @@ export class OperatorRuntime {
     if (words && metadata) this.observer.attempt(target.identity, metadata, 'assignment', words);
     this.restorePending(target);
     if (reuse && !target.physical) target.physical = true;
+  }
+
+  private async look(key: string): Promise<OperatorCheck> {
+    const target = this.targets.get(key);
+    if (!target) return NO_LOOK;
+    let timer: NodeJS.Timeout | undefined;
+    const late = new Promise<OperatorCheck>(done => { timer = setTimeout(() => done(NO_LOOK), this.options.lookMs ?? LOOK_MS); });
+    try {
+      return await Promise.race([target.control.check(cells => this.source.inputLine(key, cells)), late]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   private replaceTarget(key: string, jobId: string | null, reuse: boolean, previous: Target | undefined): Target {
@@ -140,6 +156,11 @@ export class OperatorRuntime {
   failureDetail(key: string): string | null {
     const target = this.targets.get(key), reason = this.failure(key);
     return reason ? `${reason}; case ${target?.caseId ?? 'not yet assigned'}` : null;
+  }
+
+  /* The turn ends because its words never got recorded, which Hornhoof's case says and Hornhoof answers for. */
+  unrecordedEnded(key: string): boolean {
+    return this.failure(key) !== null && this.targets.get(key)?.caseReason === 'assignment_unrecorded';
   }
 
   recovering(key: string): boolean {

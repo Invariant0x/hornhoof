@@ -618,6 +618,16 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
             <div>{t.window.turnRefused[(e.data as { reason: TurnRefusal }).reason]}</div>
           </div>
         );
+      case 'input_left':
+        return (
+          <div className="t-l">
+            <i>⏺</i>
+            <div>
+              {t.window.inputLeft.kept} {e.person ? t.window.inputLeft.by(e.person.name) : t.window.inputLeft.nobody}
+              <div className="t-left">{field(e.data, 'text')}</div>
+            </div>
+          </div>
+        );
       case 'stopped':
         return (
           <div className="t-l t-bad">

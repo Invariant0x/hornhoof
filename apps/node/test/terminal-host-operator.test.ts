@@ -58,9 +58,11 @@ it.each([['stable', false, false], ['changing', true, false], ['cancelled', fals
   now = 59999; host.operatorTick();
   expect(sent.filter(frame => frame.type === 'program.operator_needed')).toEqual([]);
   now = 60000; host.operatorTick(); host.operatorTick();
+  await until(() => sent.some(frame => frame.type === 'program.operator_needed'));
+  host.operatorTick();
   const needed = sent.filter(frame => frame.type === 'program.operator_needed');
   expect(needed).toHaveLength(1);
-  expect(needed[0]).toMatchObject({ reason: 'assignment_unrecorded', deliveryId });
+  expect(needed[0]).toMatchObject({ reason: 'assignment_unrecorded', deliveryId, check: { input: 'unknown', screen: { protected: false, cells: expect.stringContaining('Choose the new display theme') } } });
   const identity = { agentKey, jobId, instance: needed[0]!.instance };
   const capability = randomUUID(), caseId = randomUUID();
   const press = async (screen: Extract<OperatorNodeMessage, { type: 'program.screen' }>) => {
