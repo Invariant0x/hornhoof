@@ -1,9 +1,10 @@
+import { createHash } from 'node:crypto';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, jobs, people, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
-import { createTask, updateTask, type Task } from '../src/modules/tasks/engine.js';
+import { createTask, submit, updateTask, type Task } from '../src/modules/tasks/engine.js';
 import { TASK_ANSWER } from '../src/modules/tasks/tools.js';
 import { listEvents } from '../src/modules/events/store.js';
 import { wakePrompt } from '../src/modules/tasks/wake.js';
@@ -47,6 +48,44 @@ const call = async (c: Client, name: string, args: Record<string, unknown>) => (
 const text = (r: Res) => r.content[0]!.text;
 
 describe('task tools', () => {
+  it.each(['comment', 'submit', 'report'] as const)('keeps a long UTF-8 %s intact through MCP', async kind => {
+    const c = await company();
+    const words = 'Report: права доступа и полный текст.\n'.repeat(500).slice(0, 11999) + '!';
+    const owner = kind === 'report' ? c.head : c.bruno;
+    const task = (await createTask(c.ctx, { agentId: c.orchestrator.id }, { title: 'Long report', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: owner.id, executor: kind !== 'report', gates: [] })).task;
+    const client = await c.tools(owner);
+    const args = kind === 'comment' ? { text: words } : kind === 'submit' ? { summary: words, evidence: words } : { done: true, summary: words };
+    const result = await call(client, kind, { task: task.number, ...args });
+    expect(result.isError, text(result)).toBeFalsy();
+    const detail = JSON.parse(text(await call(client, 'task', { task: task.number })));
+    const event = detail.log.find((e: { kind: string }) => e.kind === (kind === 'submit' ? 'submitted' : kind));
+    expect(event.by.id).toBe(owner.id);
+    for (const field of kind === 'submit' ? ['text', 'evidence'] : ['text']) {
+      const ref = event.data.fullTexts?.find((f: { field: string }) => f.field === field);
+      const bytes = ref ? (await c.app.inject({ url: `/api/attachments/${ref.id}`, ...as(c.ceoToken) })).rawPayload : Buffer.from(field === 'text' ? event.text : event.data.evidence);
+      expect(bytes.equals(Buffer.from(words))).toBe(true);
+    }
+  });
+
+  it('keeps a long UTF-8 verdict intact through MCP and task readback', async () => {
+    const c = await company();
+    const words = 'Finding: проверка доступа, данные и повтор. 🌿\n'.repeat(400).slice(0, 12000);
+    expect(words.length).toBe(12000);
+    const task = (await createTask(c.ctx, { agentId: c.head.id }, { title: 'Long review', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.bruno.id, executor: true, gates: [c.rita.id] })).task;
+    await submit(c.ctx, c.bruno.id, task.id, { summary: 'Ready.', evidence: 'Targeted checks.' });
+    const client = await c.tools(c.rita);
+    const result = await call(client, 'verdict', { task: task.number, pass: true, comment: words });
+    expect(result.isError, text(result)).toBeFalsy();
+    const detail = JSON.parse(text(await call(client, 'task', { task: task.number })));
+    const event = detail.log.find((e: { kind: string }) => e.kind === 'verdict');
+    expect(event.by.id).toBe(c.rita.id);
+    const file = event.data.fullTexts?.find((f: { field: string }) => f.field === 'text');
+    const bytes = file ? (await c.app.inject({ url: `/api/attachments/${file.id}`, ...as(c.ceoToken) })).rawPayload : Buffer.from(event.text);
+    expect(bytes.equals(Buffer.from(words))).toBe(true);
+    expect(createHash('sha256').update(bytes).digest('hex')).toBe(createHash('sha256').update(words).digest('hex'));
+    expect((await c.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'verdict'))))).toHaveLength(1);
+  });
+
   it('gives each kind of agent its task tools', async () => {
     const { orchestrator, head, bruno, tools } = await company();
     const names = async (agent: { id: string }) => (await (await tools(agent)).listTools()).tools.map(t => t.name).sort();

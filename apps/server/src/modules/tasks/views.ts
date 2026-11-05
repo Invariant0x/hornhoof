@@ -8,6 +8,12 @@ import { taskEvidence, type RunEvidence } from '../testruns/evidence.js';
 import type { Lang } from '../templates/load.js';
 import { CLOSED, type Task } from './engine.js';
 
+/* Task log text and its automatic files have the same agent readership. */
+export function agentSeesTask(agent: Pick<typeof agents.$inferSelect, 'id' | 'kind' | 'departmentId'>, task: Task): boolean {
+  return agent.kind === 'orchestrator' || (task.status !== 'planned' &&
+    ((agent.departmentId !== null && task.departmentId === agent.departmentId) || task.assigneeAgentId === agent.id || task.executorAgentId === agent.id || task.gates.includes(agent.id) || task.panel.includes(agent.id)));
+}
+
 export type AgentRef = { id: string; name: string; kind: 'orchestrator' | 'head' | 'worker'; role: Lang | null };
 type Place = { id: string; name: string } | null;
 export type TaskLine = {
@@ -156,6 +162,16 @@ function byOf(n: Names, actedFor: Map<string, { id: string; name: string }>) {
 const proofsOf = (db: Ctx['db'], task: Task, asks: Pick<typeof requests.$inferSelect, 'commit'>[]) =>
   Promise.all(asks.map(async r => (r.commit ? commitProof(db, task, r.commit) : null)));
 
+/* Files retain the actual person author when their required agent field names a task recipient. */
+async function fileViews(db: Ctx['db'], n: Names, files: Awaited<ReturnType<typeof filesOf>>): Promise<FileView[]> {
+  const ids = files.flatMap(f => f.personId ? [f.personId] : []);
+  const authors = ids.length ? await db.select({ id: people.id, name: people.name }).from(people).where(inArray(people.id, ids)) : [];
+  return files.map(f => {
+    const a = n.agent(f.agentId);
+    return { id: f.id, name: f.name, size: f.size, by: authors.find(p => p.id === f.personId) ?? (a && { id: a.id, name: a.name }), at: f.at.toISOString() };
+  });
+}
+
 /* One task as people and agents read it: the body, its gates with where it stands, what it was split into, and its log.
    The task it serves and the tasks under it show only when the reader may see them too. */
 export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates' | 'config' | 'readCommit'>, task: Task, sees: (t: Task) => boolean): Promise<TaskDetail> {
@@ -223,10 +239,7 @@ export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates' | 'config' | 
       agent: n.agent(r.agentId),
       at: r.createdAt.toISOString(),
     })),
-    files: files.map(f => {
-      const a = n.agent(f.agentId);
-      return { id: f.id, name: f.name, size: f.size, by: a && { id: a.id, name: a.name }, at: f.at.toISOString() };
-    }),
+    files: await fileViews(db, n, files),
     testEvidence: await taskEvidence(ctx, task),
   };
 }

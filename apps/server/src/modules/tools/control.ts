@@ -3,6 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { and, eq } from 'drizzle-orm';
 import type { FastifyInstance, HTTPMethods } from 'fastify';
 import { z } from 'zod';
+import { Text } from '../tasks/long-text.js';
 import type { Ctx } from '../../app.js';
 import { orchestratorDecisionHeaders, orchestratorHeaders } from '../../auth/internal.js';
 import { departments, people } from '../../db/schema.js';
@@ -158,7 +159,7 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
   tool(
     'message_employee',
     'Writes to an employee in its own window, as yourself. It reads it in its next turn, or at once when it is free.' + MESSAGE_TASK_HINT,
-    { employee: Id('employee'), text: z.string().trim().min(1).max(4000), task: TaskReference.optional() },
+    { employee: Id('employee'), text: Text.trim().min(1), task: TaskReference.optional() },
     ({ employee, text, task }) => (carriesFile(text) ? encodedHint() : { method: 'POST', url: `/api/agents/${employee}/messages`, payload: { text, task } }),
   );
   tool('stop_employee', 'Stops the turn an employee runs now, as Esc in its window does.', { employee: Id('employee') }, ({ employee }) => ({ method: 'POST', url: `/api/agents/${employee}/stop` }));
@@ -169,7 +170,7 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
       'It is the decision of the person this turn answers, the last one who wrote into it, and goes through only when they may take it.',
     {
       request: Id('request'),
-      answer: z.string().max(4000).optional(),
+      answer: Text.optional(),
       approve: z.boolean().optional(),
       pick: z.number().int().min(0).max(9).optional(),
       retry: z.literal(true).optional(),

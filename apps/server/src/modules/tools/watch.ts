@@ -1,6 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { and, desc, eq, gte, inArray, isNotNull, isNull, ne, notInArray, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
+import { Text } from '../tasks/long-text.js';
 import type { Ctx } from '../../app.js';
 import { ApiError } from '../../errors.js';
 import { agentEvents, agents, departments, jobs, requests, taskEvents, tasks } from '../../db/schema.js';
@@ -290,7 +291,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
         description:
           'Writes to the orchestrator, as you, into its window, which the CEO reads: what came of your work outside the tasks it gave you, such as a timer round, what you need decided, what blocks your department. ' +
           `It decides with the CEO or the employee concerned. One turn sends at most ${TURN_NUDGES} messages.`,
-        inputSchema: { text: z.string().trim().min(1).max(4000) },
+        inputSchema: { text: Text.trim().min(1) },
       },
       async ({ text }) => {
         if (carriesFile(text)) return say(encodedHint(), true);
@@ -327,7 +328,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
       description: (anywhere
         ? `Writes to another employee, as you, into its window: one at work gets it at once in the turn it runs, one that is not in its next turn. Use it to nudge a stuck agent or to tell a head. One turn sends at most ${TURN_NUDGES}.`
         : `Writes to another employee of your department, as you, into its window: one at work gets it at once in the turn it runs, one that is not in its next turn. Ask the one whose work yours builds on, or the one whose findings you do not understand, instead of waiting for your head. One turn sends at most ${TURN_NUDGES}.`) + MESSAGE_TASK_HINT,
-      inputSchema: { employee: z.uuid().describe("The employee's id, from agents or company."), text: z.string().trim().min(1).max(4000), task: TaskReference.optional() },
+      inputSchema: { employee: z.uuid().describe("The employee's id, from agents or company."), text: Text.trim().min(1), task: TaskReference.optional() },
     },
     async ({ employee, text, task: ref }) => {
       if (carriesFile(text)) return say(encodedHint(), true);
