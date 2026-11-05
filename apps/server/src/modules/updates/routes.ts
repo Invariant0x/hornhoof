@@ -10,6 +10,7 @@ import { holdTurns } from './drain.js';
 import type { UpdateRequest, UpdaterView } from './control.js';
 import { FULL_SHA, type Build } from './registry.js';
 import { drainWork, serverNodes } from './drain-work.js';
+import { nodeWaits } from './node-drain.js';
 
 /* urgent: a security update, which goes in at once and waits for no turn, and asks nobody about them. */
 export const UpdateBody = z.object({ version: z.string().min(1).max(128), whenIdle: z.boolean().default(true), confirmTurns: z.number().int().nonnegative().optional(), urgent: z.boolean().optional() });
@@ -60,14 +61,14 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
     return me;
   }
 
-  function view() {
+  async function view(companyId: string) {
     const state = ctx.updates.state();
     const updater: UpdaterView = {
       present: ctx.updater.present(),
       status: ctx.updater.status(),
       waiting: waiting && { version: waiting.request.version, commit: waiting.request.commit },
     };
-    return { current: { version, commit, migrations }, available: Boolean(state.latest?.commit && state.latest.commit !== commit), ...state, updater };
+    return { current: { version, commit, migrations }, available: Boolean(state.latest?.commit && state.latest.commit !== commit), ...state, updater, nodeWaits: await nodeWaits(ctx, companyId) };
   }
 
   /* release: the turns held for the update start again; an update handed over keeps them for the restart. */
@@ -130,14 +131,13 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   app.get('/api/updates', async req => {
-    await companyPerson(req);
-    return view();
+    return view((await companyPerson(req)).companyId);
   });
 
   app.post('/api/updates/check', async req => {
-    await companyPerson(req);
+    const me = await companyPerson(req);
     await ctx.updates.now();
-    return view();
+    return view(me.companyId);
   });
 
   app.post('/api/updates', async (req, reply) => {

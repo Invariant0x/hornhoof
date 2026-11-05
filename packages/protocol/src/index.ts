@@ -1,6 +1,6 @@
 export { APPROVAL_CHANNELS, APPROVAL_MODES, ApprovalAmount, ApprovalChannel, ApprovalRule, DEFAULT_APPROVAL_RULE, approvalNeeded, kindKey, ruleOf, type ApprovalMode, type ApprovalWork, type StoredApprovalRule } from './approval-policy.js';
 export { NOTIFICATION_NAMES, NotificationSchema, NotificationSourceSchema, type Notification, type NotificationSource } from './notifications.js';
-export { MachineDrain } from './machine-drain.js';
+export { MachineDrain, NodeWait } from './machine-drain.js';
 export { inLane } from './lane.js';
 export * from './pipeline-report.js';
 export { COMMIT_SHA, CommitSha, ownBranch } from './test-commit.js';

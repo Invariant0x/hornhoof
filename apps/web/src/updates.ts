@@ -10,6 +10,13 @@ export const page = { reload: () => window.location.reload() };
 const POLL_MS = 5 * 60_000;
 /* While an update waits or runs, and while the server restarts. */
 const BUSY_POLL_MS = 2_000;
+/* While a node waits for an update: what it waits for changes only as turns end. */
+const NODES_POLL_MS = 15_000;
+
+export const updatesPollMs = (busy: boolean, waits: UpdatesView['nodeWaits']): number => {
+  if (busy) return BUSY_POLL_MS;
+  return waits?.length ? NODES_POLL_MS : POLL_MS;
+};
 
 /* An update asked for now that would stop this many turns, which waits for the person to say yes. */
 export type UpdateCut = { version: string; turns: number };
@@ -94,6 +101,7 @@ export function useUpdates(enabled: boolean): Updates {
   const busy = (sent !== null && !answered) || status?.state === 'running' || Boolean(view?.updater.waiting);
   const starting = sent !== null && status?.id !== sent.id;
   busyNow.current = busy;
+  const pollMs = updatesPollMs(busy, view?.nodeWaits);
 
   useEffect(() => {
     if (answered) setSent(null);
@@ -102,9 +110,9 @@ export function useUpdates(enabled: boolean): Updates {
   useEffect(() => {
     if (!enabled) return;
     void load();
-    const timer = setInterval(() => void load(), busy ? BUSY_POLL_MS : POLL_MS);
+    const timer = setInterval(() => void load(), pollMs);
     return () => clearInterval(timer);
-  }, [enabled, busy, load]);
+  }, [enabled, pollMs, load]);
 
   const dropCut = useCallback(() => setCut(null), []);
 

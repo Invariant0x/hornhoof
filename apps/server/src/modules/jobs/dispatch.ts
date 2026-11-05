@@ -18,6 +18,8 @@ type JobToSend = {
   nodeId: string | null;
   /* The role of the agent it is for: the one role that may go to a node waiting for an update. */
   role?: string | null;
+  /* It is for the orchestrator or a head, whom a node that waits for an update holds up to a limit. */
+  leader?: boolean;
   prompt: string;
   sessionId: string | null;
   model?: string | null;
@@ -53,7 +55,7 @@ const jobExtras = (job: JobToSend) => ({
 export async function dispatchJob(ctx: Ctx, job: JobToSend): Promise<boolean> {
   const [sub] = await ctx.db.select().from(subscriptions).where(eq(subscriptions.id, job.subscriptionId));
   const node = sub && identityOf(sub, job.nodeId);
-  if (!sub || sub.removedAt || !node || nodeHeldFrom(ctx, node, job.role)) return false;
+  if (!sub || sub.removedAt || !node || nodeHeldFrom(ctx, node, job.role, job.leader)) return false;
   const secret = sub.kind === 'api_key' && sub.secretEnc ? decryptSecret(sub.secretEnc, ctx.config.secret) : null;
   return ctx.hub.send(node, {
     type: 'job.run',

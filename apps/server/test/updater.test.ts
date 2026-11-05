@@ -407,7 +407,7 @@ describe('updater', () => {
       expect(r.code).toBe(0);
       expect(asked(r.calls, 'POST')).toHaveLength(1);
       expect(asked(r.calls, 'POST')[0]).toContain('http://app:8080/api/nodes/update');
-      expect(asked(r.calls, 'POST')[0]).toContain('{"scope":"server"}');
+      expect(asked(r.calls, 'POST')[0]).toContain('{"scope":"server","nodes":["builtin"]}');
       expect(installs(r.calls)).toEqual([]);
       expect(r.calls.join('\n')).not.toContain(KEY);
       expect(readFileSync(join(s.dir, 'curl-config'), 'utf8')).toBe(`header = "Authorization: Bearer ${KEY}"\n`);
@@ -477,6 +477,92 @@ describe('updater', () => {
       expect(r.code).toBe(0);
       expect(asked(r.calls, 'POST')).toEqual([]);
       expect(installs(r.calls)).toEqual([]);
+    });
+
+    describe('each by itself', () => {
+      const OLD = `${APP}-node@${NODE_DIGESTS['0.4.0']}`;
+      const NEW = `${APP}-node@${NODE_DIGESTS['0.4.1']}`;
+      const CLAUDE = '11111111-1111-4111-8111-111111111111';
+      const GOOGLE = '22222222-2222-4222-8222-222222222222';
+      const onNew = { STUB_RUNNING_IMAGES: `app=${APP}@${DIGESTS['0.4.1']} node=${NEW}` };
+      const plans = (claude: string, google: string) => ({ STUB_PLAN_NODES: `hornhoof-claude-1=${CLAUDE}=${claude} hornhoof-antigravity-2=${GOOGLE}=${google}` });
+      const only = (calls: string[]) => calls.filter(c => c.startsWith('installer told only'));
+      const body = (names: string[]) => JSON.stringify({ scope: 'server', nodes: names });
+
+      it('replaces the free ones at once and leaves the one with a long turn to its wait, asking of each', () => {
+        const r = runOnce(behind(), null, { ...running041, ...plans(OLD, OLD), STUB_NODES: 'each', STUB_FREE: `builtin ${CLAUDE}` });
+        expect(r.code).toBe(0);
+        expect(asked(r.calls, 'POST')[0]).toContain(body(['builtin', CLAUDE, GOOGLE]));
+        expect(only(r.calls)).toEqual([`installer told only builtin ${CLAUDE}`]);
+        expect(installs(r.calls)).toHaveLength(1);
+        expect(installs(r.calls)[0]).toContain(refs('0.4.1'));
+      });
+
+      it('lets go only of those it replaced, so the one that waits keeps its deadline', () => {
+        const r = runOnce(behind(), null, { ...running041, ...plans(OLD, OLD), STUB_NODES: 'each', STUB_FREE: `builtin ${CLAUDE}` });
+        expect(asked(r.calls, 'DELETE')).toHaveLength(1);
+        expect(asked(r.calls, 'DELETE')[0]).toContain(body(['builtin', CLAUDE]));
+        expect(r.calls.indexOf(asked(r.calls, 'DELETE')[0]!)).toBeGreaterThan(r.calls.indexOf(installs(r.calls)[0]!));
+      });
+
+      it('asks on about the one that waits and no more about those on the new image, which take work again', () => {
+        const r = runOnce(behind(), null, { ...onNew, ...plans(NEW, OLD), STUB_NODES: 'each', STUB_FREE: '' });
+        expect(asked(r.calls, 'POST')[0]).toContain(body([GOOGLE]));
+        expect(installs(r.calls)).toEqual([]);
+        expect(asked(r.calls, 'DELETE')).toEqual([]);
+      });
+
+      it('replaces a node behind though the built-in node runs the new image', () => {
+        const r = runOnce(behind(), null, { ...onNew, ...plans(NEW, OLD), STUB_NODES: 'each', STUB_FREE: GOOGLE });
+        expect(only(r.calls)).toEqual([`installer told only ${GOOGLE}`]);
+      });
+
+      it('asks nothing when every node runs the image the build names', () => {
+        const r = runOnce(behind(), null, { ...onNew, ...plans(NEW, NEW), STUB_NODES: 'each' });
+        expect(asked(r.calls, 'POST')).toEqual([]);
+      });
+
+      it('replaces only what it found behind itself, whatever the server names', () => {
+        const r = runOnce(behind(), null, { ...onNew, ...plans(OLD, NEW), STUB_NODES: 'each', STUB_FREE: `${CLAUDE} ${GOOGLE} builtin a-plan-of-another-server ;reboot` });
+        expect(only(r.calls)).toEqual([`installer told only ${CLAUDE}`]);
+        expect(asked(r.calls, 'DELETE')[0]).toContain(body([CLAUDE]));
+      });
+
+      it('installs nothing and lets go of nothing when the server names none, as for nodes that are not its own', () => {
+        const r = runOnce(behind(), null, { ...onNew, ...plans(OLD, OLD), STUB_NODES: 'each', STUB_FREE: '' });
+        expect(r.code).toBe(0);
+        expect(installs(r.calls)).toEqual([]);
+        expect(asked(r.calls, 'DELETE')).toEqual([]);
+      });
+
+      it('never asks about a label that is not a plain id', () => {
+        const r = runOnce(behind(), null, { ...onNew, STUB_PLAN_NODES: `hornhoof-odd-1=a;reboot=${OLD} hornhoof-claude-1=${CLAUDE}=${OLD}`, STUB_NODES: 'each', STUB_FREE: CLAUDE });
+        expect(asked(r.calls, 'POST')[0]).toContain(body([CLAUDE]));
+        expect(r.calls.join('\n')).not.toContain('reboot');
+      });
+
+      it('lets go of those it tried when the installer fails, stays up, and leaves the others to their wait', () => {
+        const r = runOnce(behind(), null, { ...running041, ...plans(OLD, OLD), STUB_NODES: 'each', STUB_FREE: 'builtin', STUB_INSTALLER_FAILS: '1' });
+        expect(r.code).toBe(0);
+        expect(asked(r.calls, 'DELETE')).toHaveLength(1);
+        expect(asked(r.calls, 'DELETE')[0]).toContain(body(['builtin']));
+        expect(r.out).toContain('Could not replace the nodes');
+      });
+
+      it('replaces them all together on a server from before this, which says only that all are free', () => {
+        const r = runOnce(behind(), null, { ...running041, ...plans(OLD, OLD), STUB_NODES: 'ready' });
+        expect(r.calls).toContain('installer told the nodes are free');
+        expect(only(r.calls)).toEqual([]);
+        expect(asked(r.calls, 'DELETE')[0]).toContain('{"scope":"server"}');
+      });
+
+      it.each(['ready', 'waiting'])('lets go of them on a server from before this that says %s when the built-in node is on the new image: its installer would move none', state => {
+        const r = runOnce(behind(), null, { ...onNew, ...plans(OLD, OLD), STUB_NODES: state });
+        expect(r.code).toBe(0);
+        expect(installs(r.calls)).toEqual([]);
+        expect(asked(r.calls, 'DELETE')).toHaveLength(1);
+        expect(asked(r.calls, 'DELETE')[0]).toContain('{"scope":"server"}');
+      });
     });
   });
 

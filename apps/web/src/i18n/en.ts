@@ -1138,6 +1138,12 @@ export const en = {
     cutTitle: 'Update now?',
     cutText: (n: number) => (n === 1 ? '1 agent turn is running. If you update now, it stops midway, and Hornhoof starts it again after the update.' : `${n} agent turns are running. If you update now, they stop midway, and Hornhoof starts them again after the update.`),
     cutYes: 'Update now',
+    /* Each node on the update screen: what it waits for before it is replaced. */
+    nodesTitle: 'Updating the nodes',
+    nodesNote: 'Each node restarts as soon as its own work ends. Nothing that runs is stopped.',
+    nodeOn: (plan: string, machine: string) => `${plan} on ${machine}`,
+    nodeFree: 'Free: being replaced now, then takes work again by itself',
+    nodeWaitsFor: (work: string) => `Waits for: ${work}`,
   },
   errors: {
     command_active: 'There is an active command for this place. Use it or wait until it expires.',

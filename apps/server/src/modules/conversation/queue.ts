@@ -9,7 +9,7 @@ import { loggable } from '../../errors.js';
 import { hashToken, newToken } from '../../crypto/tokens.js';
 import { agentEvents, agents, jobs, nodes, subscriptions, tasks, turns } from '../../db/schema.js';
 import { dispatchJob } from '../jobs/dispatch.js';
-import { nodeDrain, nodeHeld, nodeHeldFrom, turnsHeld } from '../updates/drain.js';
+import { nodeDrain, nodeHeld, nodeHeldFrom, nodeHeldLong, turnsHeld } from '../updates/drain.js';
 import { actingCeo, alsoKept, deliverLockedInput, inputKept, turnStarted, withInputLock } from './decision-context.js';
 import { BUILTIN, identityOf, nodeIdentity, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { liveNode, planNodes, type NodeRow } from '../nodes/nodes.js';
@@ -254,7 +254,7 @@ export async function windowNode(ctx: Ctx, agentId: string): Promise<ProgramNode
     const [running] = await ctx.db.select({ id: jobs.id }).from(jobs).where(and(conversationOf(agentId), eq(jobs.status, 'running'))).limit(1);
     const sub = running ? null : await liveSubscription(ctx, agentId);
     if (sub?.kind !== 'personal') return null;
-    const [agent] = await ctx.db.select({ id: agents.id, nodeId: agents.nodeId, roleKey: agents.roleKey }).from(agents).where(eq(agents.id, agentId));
+    const [agent] = await ctx.db.select({ id: agents.id, kind: agents.kind, nodeId: agents.nodeId, roleKey: agents.roleKey }).from(agents).where(eq(agents.id, agentId));
     const place = agent ? await placement(ctx, agent, sub) : null;
     if (place?.moves) await ctx.db.update(agents).set({ nodeId: place.nodeId }).where(eq(agents.id, agentId));
     if (place) return { node: place.node, ownerPersonId: sub.ownerPersonId };
@@ -607,18 +607,37 @@ const takesTurns = (ctx: Ctx, n: NodeRow, need: number[]): boolean => n.status =
 /* moves: the agent has not been on this node until now, or leaves the machine it was on for the built-in node. */
 type Placement = { node: NodeIdentity; nodeId: string | null; moves: boolean };
 
+type PlacedAgent = { id: string; kind: 'orchestrator' | 'head' | 'worker'; nodeId: string | null; roleKey: string | null };
+
+/* The ones the company waits for while a node waits for an update: a limit holds their turns, see nodeHeldFrom. */
+const isLeader = (agent: Pick<PlacedAgent, 'kind'>): boolean => agent.kind !== 'worker';
+
 /* Where the agent's next turn goes. A company key's to the built-in node. A plan's to the node its program is on while
    that one is signed in, connected and new enough, so its folder, session and terminal go on there; otherwise to the
    freest of the plan's nodes that is, unless the agent has work in progress on its own and waits for it. None while no
    node can take it. */
-async function placement(ctx: Ctx, agent: { id: string; nodeId: string | null; roleKey: string | null }, sub: { id: string; kind: 'personal' | 'api_key' }, need = CONVERSATION_NODE): Promise<Placement | null> {
-  const held = (node: NodeIdentity) => nodeHeldFrom(ctx, node, agent.roleKey);
-  if (sub.kind === 'api_key') return ctx.hub.isReady(BUILTIN) && !held(BUILTIN) ? { node: BUILTIN, nodeId: null, moves: agent.nodeId !== null } : null;
+async function placement(ctx: Ctx, agent: PlacedAgent, sub: { id: string; kind: 'personal' | 'api_key' }, need = CONVERSATION_NODE): Promise<Placement | null> {
+  if (sub.kind === 'api_key') return ctx.hub.isReady(BUILTIN) && !nodeHeldFrom(ctx, BUILTIN, agent.roleKey, isLeader(agent)) ? { node: BUILTIN, nodeId: null, moves: agent.nodeId !== null } : null;
   const all = await planNodes(ctx.db, [sub.id]);
-  const able = all.filter(n => !held(nodeIdentity(n.id)) && takesTurns(ctx, n, need));
-  const stays = all.some(n => n.id === agent.nodeId) && (await holdsWork(ctx, agent.id));
-  const pick = able.find(n => n.id === agent.nodeId) ?? (stays ? null : await freest(ctx, able));
+  const able = all.filter(n => !nodeHeldFrom(ctx, nodeIdentity(n.id), agent.roleKey) && takesTurns(ctx, n, need));
+  const pick = able.find(n => n.id === agent.nodeId) ?? (await waitsForOwnNode(ctx, agent, all) ? null : (await freest(ctx, able)) ?? (await heldNodeFor(ctx, agent, all, need)));
   return pick ? { node: nodeIdentity(pick.id), nodeId: pick.id, moves: pick.id !== agent.nodeId } : null;
+}
+
+/* Whether the agent has work in progress on a node of its plan and waits for that one: not the orchestrator or a head whom
+   an update kept off it past their limit, who go to another machine of the plan when one can take them. */
+async function waitsForOwnNode(ctx: Ctx, agent: PlacedAgent, all: NodeRow[]): Promise<boolean> {
+  if (!all.some(n => n.id === agent.nodeId)) return false;
+  if (isLeader(agent) && nodeHeldLong(ctx, nodeIdentity(agent.nodeId!))) return false;
+  return holdsWork(ctx, agent.id);
+}
+
+/* With no other machine, the node an update keeps the orchestrator's or a head's turn off past their limit: its own, if it
+   is one of those. */
+async function heldNodeFor(ctx: Ctx, agent: PlacedAgent, all: NodeRow[], need: number[]): Promise<NodeRow | null> {
+  if (!isLeader(agent)) return null;
+  const open = all.filter(n => !nodeHeldFrom(ctx, nodeIdentity(n.id), agent.roleKey, true) && takesTurns(ctx, n, need));
+  return open.find(n => n.id === agent.nodeId) ?? freest(ctx, open);
 }
 
 /* Whether the agent holds a task it works on, or stopped on to ask: its folder may hold work it has not pushed, so it
@@ -897,6 +916,7 @@ async function sendNext(ctx: Ctx, agentId: string): Promise<void> {
       subscriptionId: sub.id,
       nodeId: place.nodeId,
       role: agent.roleKey,
+      leader: isLeader(agent),
       prompt,
       sessionId,
       model,
