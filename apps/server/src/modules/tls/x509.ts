@@ -48,6 +48,11 @@ function dnsNames(cert: x509.X509Certificate): string[] {
   return (san?.names.items ?? []).filter((name) => name.type === 'dns').map((name) => name.value);
 }
 
+// DNS names are the same in any case, and a CA may write them either way.
+export function namesHost(info: Pick<CertInfo, 'names'>, host: string): boolean {
+  return info.names.some((name) => name.toLowerCase() === host.toLowerCase());
+}
+
 // Node's reader is the one TLS uses, so it picks the certificate and the library then reads the same DER bytes.
 export function certInfo(pem: string): CertInfo {
   const node = new X509Certificate(pem);
