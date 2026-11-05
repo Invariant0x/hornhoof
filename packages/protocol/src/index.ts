@@ -1,5 +1,6 @@
 export { NOTIFICATION_NAMES, NotificationSchema, NotificationSourceSchema, type Notification, type NotificationSource } from './notifications.js';
 export { MachineDrain } from './machine-drain.js';
+export { inLane } from './lane.js';
 import { z } from 'zod';
 import { NodeExit, NodeLog } from './node-exit.js';
 

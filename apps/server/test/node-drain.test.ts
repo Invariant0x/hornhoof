@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
@@ -36,6 +36,18 @@ async function serverHostNode(f: Awaited<ReturnType<typeof fixture>>) {
 }
 
 describe('planned node updates', () => {
+  it.each([['broken JSON', '{not json'], ['the wrong shape', JSON.stringify([{ key: 'builtin' }])]])('starts with no wait, says so and can wait again when the saved waits are %s', async (_name, saved) => {
+    const control = mkdtempSync(join(tmpdir(), 'hh-node-drain-'));
+    writeFileSync(join(control, 'node-drains.json'), saved);
+    const logs: string[] = [];
+    const { app } = await testApp({ NODE_KEY, HORNHOOF_CONTROL_DIR: control }, { level: 'error', stream: { write: (line: string) => void logs.push(line) } });
+    expect(logs.join('\n')).toContain('node-drains.json');
+    expect(nodeDrain(app.ctx, { kind: 'builtin' })).toBeNull();
+    const response = await app.inject({ method: 'POST', url: '/api/nodes/update', headers, payload: {} });
+    expect(response.statusCode).toBe(200);
+    expect(nodeDrain(app.ctx, { kind: 'builtin' })?.state).toBe('restarting');
+  });
+
   it('waits for the last running turn without interrupting it, then permits the update', async () => {
     const f = await fixture();
     const waiting = await f.prepare();

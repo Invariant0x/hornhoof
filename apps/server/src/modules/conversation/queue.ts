@@ -1,7 +1,7 @@
 import { combineReport, reportDelay } from './report-notices.js';
 import type { MachineDrain, Notification } from '@hornhoof/protocol';
 import type { MessageParty } from '../events/parties.js';
-import { currentLimits, effortFor, effortsOf, MAX_INSTRUCTIONS, modelsFor, OLD_NODE_INSTRUCTIONS, ORCHESTRATOR_EFFORT, UNHEARD_MS, type Limits } from '@hornhoof/protocol';
+import { currentLimits, effortFor, effortsOf, inLane, MAX_INSTRUCTIONS, modelsFor, OLD_NODE_INSTRUCTIONS, ORCHESTRATOR_EFFORT, UNHEARD_MS, type Limits } from '@hornhoof/protocol';
 import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, lte, ne, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -179,13 +179,7 @@ const chains = new WeakMap<Ctx, Map<string, Promise<unknown>>>();
 export function onAgent<T>(ctx: Ctx, agentId: string, fn: () => Promise<T>): Promise<T> {
   const mine = chains.get(ctx) ?? new Map<string, Promise<unknown>>();
   chains.set(ctx, mine);
-  const run = (mine.get(agentId) ?? Promise.resolve()).then(fn);
-  const settled = run.catch(() => undefined);
-  mine.set(agentId, settled);
-  void settled.then(() => {
-    if (mine.get(agentId) === settled) mine.delete(agentId);
-  });
-  return run;
+  return inLane(mine, agentId, fn);
 }
 
 export const conversationOf = (agentId: string) => and(eq(jobs.agentId, agentId), eq(jobs.kind, 'conversation'));

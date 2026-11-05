@@ -35,7 +35,9 @@ class NodeDrains {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
       throw err;
     }
-    for (const record of z.array(Saved).parse(JSON.parse(raw))) this.records.set(record.key, record);
+    /* A damaged file only forgets the waits: each installer asks again, and the file is written anew. */
+    try { for (const record of z.array(Saved).parse(JSON.parse(raw))) this.records.set(record.key, record); }
+    catch (err) { ctx.log.error({ error: loggable(err) }, `Could not read ${this.path}: no node waits for an update now.`); }
   }
 
   view(node: NodeIdentity): MachineDrain | null {
