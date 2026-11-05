@@ -1295,6 +1295,23 @@ summary.turn-head:focus-visible { outline: 2px solid var(--cyan); outline-offset
 .tview .lchip .pm { margin-left: 6px; vertical-align: -2px; }
 .dv-drawer.spd .who .pm, .dv-drawer.spd .ih .pm { margin-left: 6px; vertical-align: -2px; }
 .dv-drawer.spd .dv-drawer-b { gap: 16px; }
+.dv-drawer.spd .pr-turn { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.dv-drawer.spd .pr-sub, .dv-drawer.spd .pr-note { margin: 0; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.dv-drawer.spd .pr-sub b { font-weight: 600; color: var(--ink); }
+.dv-drawer.spd .pr-sec { display: grid; gap: 6px; min-width: 0; }
+.dv-drawer.spd .pr-sec h4 { margin: 0; font-family: var(--f-display); font-size: 14px; font-weight: 600; }
+.dv-drawer.spd .pr-sec h5 { margin: 8px 0 0; font-size: 12px; font-weight: 600; color: var(--muted); }
+.dv-drawer.spd .pr-rows { display: grid; margin: 0; padding: 0; list-style: none; }
+.dv-drawer.spd .pr-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, auto); gap: 1px 12px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.dv-drawer.spd .pr-l { overflow-wrap: anywhere; }
+.dv-drawer.spd .pr-path { font-family: var(--f-mono); font-size: 12px; }
+.dv-drawer.spd .pr-v { font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; overflow-wrap: anywhere; }
+.dv-drawer.spd .pr-c { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 0 12px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.dv-drawer.spd .pr-c .good { font-weight: 600; color: var(--ok); }
+.dv-drawer.spd .pr-c .bad { font-weight: 600; color: var(--pink-ink); }
+.dv-drawer.spd .pr-row small { grid-column: 1 / -1; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.dv-drawer.spd .pr-fail { display: grid; gap: 8px; justify-items: start; }
+.dv-drawer.spd .pr-fail p { margin: 0; color: var(--red); }
 @keyframes breathe { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
 @media (max-width: 760px) {
   .tview { top: 116px; right: 16px; bottom: var(--tree-bottom, 228px); }

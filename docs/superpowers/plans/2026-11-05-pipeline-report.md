@@ -31,13 +31,15 @@ Every time is in seconds unless it says otherwise. A task is "work" when it has 
 | Queue | Each turn of a task from its creation to its start. |
 | Returns | `tasks.bounces`, summed. |
 | Fix rounds | Hand-ins after the first, merges left out. |
-| Failures | Failed turns of a task, without those cut off by a restart and those Hornhoof ended itself because the task moved on (`handed_on`, `waiting`). |
+| Failures | Failed turns of a task, without those Hornhoof ended itself or that no program caused: `handed_on`, `waiting`, `cancelled`, `stale`, `removed`, `switched_off`, `message_not_delivered`, and those cut off by a restart. |
 | Interrupted | Turns with an `interruption`. |
 | Test selection misses | No source until test selection (#309) records it, so the report says there is no data rather than zero. |
 | Later bugs | Bug tasks created after a done task closed that name it as `#number`. A heuristic: a bug that only mentions a task counts too. It is read at report time, as it grows after the snapshot. |
-| Test times | For each file the median over the parts it ran in, in setup, tests and teardown. A log from before the timing lines gives a file's total only. |
+| Test times | For each file the median over the parts it ran in, in setup, tests and teardown. Hooks of the whole file count as setup or teardown when `timed` in the test helpers marks them, and the rest of a file's time around its tests as setup. A log from before the timing lines gives a file's total only. |
 
 The baseline is turn 7 when the company has run it, else its first turn that ran. Reports never use fixed minutes, only percent against these turns.
+
+The report screen colours a change only where the department wants the number lower. How much work there was (`tasks.*`, `kinds.*.tasks`, `tests.files`, `agents.total`, `agents.work`, `waits.*.parts`) gets a sign but no verdict.
 
 ## Release
 

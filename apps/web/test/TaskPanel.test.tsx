@@ -31,6 +31,28 @@ async function openTask(user: ReturnType<typeof userEvent.setup>) {
 describe('a task', () => {
   afterEach(() => localStorage.removeItem('hh-lang'));
   it.each([
+    ['en', { workKind: 'bug', riskClass: 'money' }, 'Bug, risk: money'],
+    ['ru', { workKind: 'legacy_code', riskClass: 'none' }, 'Старый код, риск: нет'],
+    ['en', { workKind: 'unknown_path', riskClass: null }, 'Unknown path'],
+    ['en', { workKind: null, riskClass: 'data' }, 'risk: data'],
+  ])('names its kind and risk class in %s', async (language, labels, line) => {
+    localStorage.setItem('hh-lang', language);
+    const user = userEvent.setup();
+    shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, ...labels } }] });
+    await user.click(await screen.findByRole('button', { name: /^(Tasks|Задачи)/ }));
+    await user.click(await screen.findByRole('button', { name: /#12/ }));
+    const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
+    expect(within(panel).getByText(line)).toHaveClass('tp-kind');
+  });
+
+  it.each([{}, { workKind: null, riskClass: null }])('has no line of kind and risk without them: %j', async labels => {
+    const user = userEvent.setup();
+    shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, ...labels } }] });
+    const panel = await openTask(user);
+    expect(panel.querySelector('.tp-kind')).toBeNull();
+  });
+
+  it.each([
     ['en', 'Run skipped: task is already closed.', ['resume after a restart', 'merge', 'continue after the program ended', 'assignment']],
     ['ru', 'Запуск пропущен: задача уже закрыта.', ['возобновление после перезапуска', 'слияние', 'продолжение после выхода программы', 'назначение']],
   ])('shows who was not woken and by which run in %s', async (language, heading, actions) => {

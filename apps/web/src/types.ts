@@ -2,6 +2,7 @@ import type { ExternalWait } from '@hornhoof/protocol/waits';
 import type { Notification } from '@hornhoof/protocol';
 import type { ConnectionEnd, FailureKind, Limits, MachineDrain, ModelOption, NodeDisconnectCause, NodeLoad, NodeReconnect, ProgramInfo, ProviderId, TemplateKey } from '@hornhoof/protocol';
 import type { RoleEffort } from '@hornhoof/protocol/efforts';
+import type { RiskClass, WorkKind } from '@hornhoof/protocol/pipeline-report';
 import type { ProgramRetry, TurnAlarm, TurnProgram, TurnRetry, WorkLine } from '@hornhoof/protocol/map';
 
 export type { FailureKind, Limits, ModelOption, ProgramRetry, ProviderId, TemplateKey, TurnAlarm, TurnRetry, WorkLine };
@@ -319,6 +320,9 @@ export type TaskLine = {
   brief: string;
   status: TaskStatus;
   externalWait?: ExternalWait | null;
+  /* What kind of work it is and what a mistake in it would cost, when someone said so. An older server sends neither. */
+  workKind?: WorkKind | null;
+  riskClass?: RiskClass | null;
   department: TaskPlace;
   product: TaskPlace;
   assignee: AgentRef | null;
