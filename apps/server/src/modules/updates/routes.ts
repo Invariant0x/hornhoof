@@ -6,6 +6,7 @@ import { requireCompanyScope, requirePerson } from '../../auth/session.js';
 import { ApiError, loggable } from '../../errors.js';
 import { pumpWaiting } from '../conversation/queue.js';
 import { workingCount } from '../events/store.js';
+import { modeGate } from '../keeper/app-mode.js';
 import { holdTurns } from './drain.js';
 import type { UpdateRequest, UpdaterView } from './control.js';
 import type { Build } from './registry.js';
@@ -24,6 +25,8 @@ type Waiting = { companyId: string; request: UpdateRequest; stop: () => void };
 export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { version, commit, migrations } = ctx.config;
   let waiting: Waiting | null = null;
+  /* What ends the hold on a company's turns once its update went to the updater. */
+  const heldAfterHandOver = new Map<string, NodeJS.Timeout>();
 
   async function companyPerson(req: FastifyRequest) {
     const me = await requirePerson(req, ctx.db);
@@ -51,6 +54,26 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
   function letTurnsGo(companyId: string) {
     holdTurns(ctx, companyId, false);
     void pumpWaiting(ctx).catch(err => app.log.error({ error: loggable(err) }, 'Could not start the turns held for an update.'));
+  }
+
+  function holdAfterHandOver(companyId: string) {
+    clearTimeout(heldAfterHandOver.get(companyId));
+    const timeout = setTimeout(() => {
+      heldAfterHandOver.delete(companyId);
+      if (waiting?.companyId !== companyId) letTurnsGo(companyId);
+    }, HELD_AFTER_MS);
+    timeout.unref();
+    heldAfterHandOver.set(companyId, timeout);
+  }
+
+  /* A machine that stopped leading waits for no agents and holds no turns. Nothing is started here, as only a leader
+     starts turns: its minute round picks up what waits. */
+  function standDown() {
+    const companies = waiting ? [waiting.companyId, ...heldAfterHandOver.keys()] : [...heldAfterHandOver.keys()];
+    callOff(false);
+    heldAfterHandOver.forEach(timeout => clearTimeout(timeout));
+    heldAfterHandOver.clear();
+    for (const companyId of companies) holdTurns(ctx, companyId, false);
   }
 
   /* The image tag names the build: a version tag moves when that version is built again, a commit's does not. The
@@ -81,7 +104,7 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
       send(request);
       done = true;
       callOff(false);
-      setTimeout(() => waiting?.companyId === companyId || letTurnsGo(companyId), HELD_AFTER_MS).unref();
+      holdAfterHandOver(companyId);
     };
     const tryCheck = () => check().catch(err => app.log.error({ error: loggable(err) }, 'Could not hand the waiting update to the updater.'));
     const unsubscribe = ctx.bus.subscribe(companyId, m => m.type === 'working' && m.working === 0 && void tryCheck());
@@ -93,7 +116,7 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
     await tryCheck();
   }
 
-  app.addHook('onClose', async () => callOff(false));
+  ctx.mode.whenLeaving(standDown);
 
   app.get('/api/updates/current', async req => {
     await requirePerson(req, ctx.db);
@@ -123,6 +146,8 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
     const build = body.version === 'latest' ? latest : versions.find(v => v.tag === body.version);
     if (!build) throw new ApiError(400, 'validation', `There is no published build ${body.version}.`, 'version_unknown');
     const request = await requestFor(build, randomUUID());
+    /* Reading the registry takes a while, and the app may have stopped leading meanwhile. */
+    await modeGate(ctx.mode)(req);
     callOff();
     if (body.whenIdle) await sendWhenIdle(me.companyId, request);
     else send(request);

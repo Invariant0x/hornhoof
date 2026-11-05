@@ -144,7 +144,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   ctx.challenges = new Challenges();
   ctx.mode.whenLead(() => ctx.updates.start(), () => ctx.updates.stop());
   ctx.mode.whenLead(() => ctx.links.sync(), () => undefined);
-  ctx.mode.whenLead(() => undefined, () => closeOpenSockets(app));
+  ctx.mode.whenLeaving(() => closeOpenSockets(app));
   app.addHook('onReady', async () => {
     ctx.mode.start();
     await ctx.mode.settled();
@@ -158,6 +158,9 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   });
   /* After the socket plugin, so a refused socket is closed by it. */
   app.addHook('onRequest', modeGate(ctx.mode));
+  /* Again after the routes' own checks, which wait for the database: a socket that passed the gate above and crossed a
+     step-down there is refused here, and from here to its upgrade nothing waits, so none opens outside lead. */
+  app.addHook('preHandler', modeGate(ctx.mode));
   app.addHook('onRequest', fromOwnPages(deps.config, deps.db));
   if (web) await serveWebApp(app, deps.config.webDist);
   publicRoutes(app, ctx);

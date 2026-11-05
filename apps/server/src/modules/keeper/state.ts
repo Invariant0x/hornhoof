@@ -35,9 +35,11 @@ export function writeKeeperState(dir: string, state: KeeperState): void {
   renameSync(partial, path);
 }
 
-/* The word, only while it is recent: a keeper that stopped writing is not obeyed. */
+/* The word, only while it is recent: a keeper that stopped writing is not obeyed. A word from the future means the clock
+   stepped back, so it says nothing about whether the keeper still lives; a live keeper's next word is obeyed anyway. */
 export function freshState(dir: string, now: number, staleMs = FRESH_MS): KeeperState | null {
   const state = readKeeperState(dir);
   if (!state) return null;
-  return now - Date.parse(state.at) <= staleMs ? state : null;
+  const age = now - Date.parse(state.at);
+  return age >= 0 && age <= staleMs ? state : null;
 }
