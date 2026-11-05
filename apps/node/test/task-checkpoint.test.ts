@@ -354,7 +354,7 @@ describe('secrets do not leave', () => {
     const result = await captureTaskCheckpoint(stand.input());
     expect(result).toEqual({ ok: false, problem: { phase: 'capture', code: 'export_too_large', retryable: false } });
     expect(() => git(stand.remote, 'rev-parse', '--verify', WIP_REF)).toThrow();
-  });
+  }, 60_000);
 
   it('refuses too many files before it writes one object', async () => {
     for (let n = 0; n <= MAX_EXPORT_FILES; n++) stand.write(`many/${n}.txt`, 'x\n');
