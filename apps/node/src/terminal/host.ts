@@ -626,8 +626,25 @@ export class TerminalHost {
   }
 
   private async waitForTurn(a: Agent, job: TermJob): Promise<void> {
+    return job.program.kind === 'antigravity' ? this.waitForAgyTurn(a, job) : this.waitTimedTurn(a, job);
+  }
+
+  private async waitTimedTurn(a: Agent, job: TermJob): Promise<void> {
     const deadline = Date.now() + job.input.timeoutMs;
     for (this.drain(a); a.busy && !job.input.signal?.aborted && Date.now() < deadline; this.drain(a)) await sleep(this.pollMs);
+    await a.settling;
+    await a.cancelling;
+  }
+
+  private async waitForAgyTurn(a: Agent, job: TermJob): Promise<void> {
+    const { watch, look } = this.observeProgram(job.input.jobId);
+    this.drain(a);
+    while (a.busy && !job.input.signal?.aborted) {
+      if (!(await this.opts.tmux.alive(a.name))) break;
+      await this.reportProgram(a, watch, look);
+      await sleep(this.pollMs);
+      this.drain(a);
+    }
     await a.settling;
     await a.cancelling;
   }
@@ -753,7 +770,11 @@ export class TerminalHost {
      Enter and keep the prompt in its input: Enter again until it takes it. An Enter into an empty input does nothing. One
      that never takes it ends the turn with its screen, which says why, rather than leave the turn waiting for nothing. */
   private typePrompt(a: Agent, job: TermJob, prompt: string): Promise<RunResult | null> {
-    return job.operatorDelivery && this.operatorEnabled(a) ? this.typeOperatorPrompt(a, job, prompt) : this.typePlainPrompt(a, job, prompt);
+    return job.operatorDelivery && this.operatorEnabled(a) ? this.typeOperatorPrompt(a, job, prompt) : this.typeUnmanagedPrompt(a, job, prompt);
+  }
+
+  private typeUnmanagedPrompt(a: Agent, job: TermJob, prompt: string): Promise<RunResult | null> {
+    return job.program.kind === 'antigravity' ? this.typeAgyPrompt(a, job, prompt) : this.typePlainPrompt(a, job, prompt);
   }
 
   private async typePlainPrompt(a: Agent, job: TermJob, prompt: string): Promise<RunResult | null> {
@@ -778,9 +799,84 @@ export class TerminalHost {
     return null;
   }
 
+  /* agy queues input as another turn. Wait for its idle footer before pasting, keep the prompt until invocation 0,
+     and report throughout the wait. A busy program has no delivery deadline and is never interrupted. */
+  private async typeAgyPrompt(a: Agent, job: TermJob, prompt: string): Promise<RunResult | null> {
+    a.fresh = false;
+    a.took = false;
+    a.typing = prompt;
+    a.turn!.observed = this.observeProgram(job.input.jobId);
+    let pasted = false;
+    while (!pasted) {
+      const failed = await this.waitAgyInput(a, job);
+      if (failed) return failed;
+      pasted = await this.inputLane(a, () => this.pasteAgyAssignment(a, job, prompt));
+    }
+    return this.waitAgyReceipt(a, job, prompt);
+  }
+
+  private async waitAgyInput(a: Agent, job: TermJob): Promise<RunResult | null> {
+    for (;;) {
+      const failed = await this.agyDeliveryStopped(a, job);
+      if (failed) return failed;
+      if (this.agyReceiptTaken(a) || agyWaits(await this.opts.tmux.screen(a.name, 0, true))) return null;
+      await sleep(this.pollMs);
+    }
+  }
+
+  private async pasteAgyAssignment(a: Agent, job: TermJob, prompt: string): Promise<boolean> {
+    const screen = await this.opts.tmux.screen(a.name, 0, true);
+    this.drain(a);
+    if (job.input.signal?.aborted) return false;
+    if (this.operator?.inheritSource(a.key, job.operatorSourceDelivery) || this.agyReceiptTaken(a)) return true;
+    if (!agyWaits(screen)) return false;
+    return this.submitOperatorAssignment(a, job, prompt);
+  }
+
+  private agyReceiptTaken(a: Agent): boolean {
+    return Boolean(a.took || a.turn?.ending || this.operator?.recorded(a.key));
+  }
+
+  private async agyDeliveryStopped(a: Agent, job: TermJob): Promise<RunResult | null> {
+    this.drain(a);
+    if (job.input.signal?.aborted) return this.failedTurn(a, job, 'cancelled');
+    const observed = a.turn!.observed!;
+    if (!(await this.opts.tmux.alive(a.name))) return this.programGone(a, job, observed.watch);
+    await this.reportProgram(a, observed.watch, observed.look);
+    if (this.operator?.inheritSource(a.key, job.operatorSourceDelivery) && !a.busy) return this.failedTurn(a, job, 'cancelled');
+    return this.operatorReceiptFailure(a, job);
+  }
+
+  private async waitAgyReceipt(a: Agent, job: TermJob, prompt: string): Promise<RunResult | null> {
+    let enteredAt = Date.now();
+    while (!this.agyReceiptTaken(a)) {
+      const failed = await this.agyDeliveryStopped(a, job);
+      if (failed) return failed;
+      if (Date.now() - enteredAt >= this.enterWaitMs) {
+        await this.inputLane(a, () => this.retryAgyEnter(a, prompt, job.input.signal));
+        enteredAt = Date.now();
+      }
+      await sleep(this.pollMs);
+    }
+    return null;
+  }
+
+  private async retryAgyEnter(a: Agent, prompt: string, signal?: AbortSignal): Promise<void> {
+    const turn = a.turn;
+    const screen = await this.opts.tmux.screen(a.name, 0, true);
+    this.drain(a);
+    if (signal?.aborted || a.turn !== turn) return;
+    /* Retry only the exact prompt still visible at idle, never a queued message or a person's draft. */
+    if (!this.agyReceiptTaken(a) && READY.antigravity(screen) && flat(inputOf('antigravity', screen) ?? '') === flat(prompt)) await this.opts.tmux.keys(a.name, 'Enter');
+  }
+
   private async typeOperatorPrompt(a: Agent, job: TermJob, prompt: string): Promise<RunResult | null> {
     if (this.operator?.inheritSource(a.key, job.operatorSourceDelivery)) return a.busy ? null : this.failedTurn(a, job, 'cancelled');
     if (this.operator?.recorded(a.key)) return null;
+    return job.program.kind === 'antigravity' ? this.typeAgyPrompt(a, job, prompt) : this.deliverOperatorPrompt(a, job, prompt);
+  }
+
+  private async deliverOperatorPrompt(a: Agent, job: TermJob, prompt: string): Promise<RunResult | null> {
     a.fresh = false; a.took = false; a.typing = prompt;
     const failed = await this.pasteOperatorPrompt(a, job, prompt);
     return failed ?? this.waitOperatorReceipt(a, job);
@@ -846,7 +942,7 @@ export class TerminalHost {
 
   /* Waits for the turn to end: the program says so, a person stops it, or the program is gone. */
   private async turnEnd(a: Agent, job: TermJob, ended: Deferred<string>, turn: Turn): Promise<RunResult> {
-    const { watch, look } = this.observeProgram(job.input.jobId);
+    const { watch, look } = this.requestedObservation(turn, job);
     for (;;) {
       this.drain(a);
       const message = await Promise.race([ended.promise, sleep(this.pollMs).then(() => null)]);
@@ -860,6 +956,10 @@ export class TerminalHost {
       if (!(await this.opts.tmux.alive(a.name))) return await this.programGone(a, job, watch);
       await Promise.race([this.reportProgram(a, watch, look), ended.promise]);
     }
+  }
+
+  private requestedObservation(turn: Turn, job: TermJob): ObservedProgram {
+    return turn.observed ?? this.observeProgram(job.input.jobId);
   }
 
   /* Both entry paths report the same program state. */
@@ -910,9 +1010,14 @@ export class TerminalHost {
     Object.assign(look, { at: now, call, retry: a.retry });
     const screen = await this.opts.tmux.screen(a.name, 0, true);
     if (a.turn !== turn) return;
-    watch.look(now, screen, call, Boolean(a.took && a.busy), a.signAt, a.retry);
+    watch.look(now, screen, call, this.programRunning(a, screen), a.signAt, a.retry);
     if (this.atInterruption(a, screen)) this.interrupted(a);
     this.agyFailed(a);
+  }
+
+  private programRunning(a: Agent, screen: string): boolean {
+    if (a.program?.kind === 'antigravity' && a.typing != null) return !READY.antigravity(screen);
+    return Boolean(a.took && a.busy);
   }
 
   private pendingCall(a: Agent): Pending | null {
@@ -1650,7 +1755,18 @@ export class TerminalHost {
     }
   }
 
-  private async stoppedHook(a: Agent, data: Record<string, unknown>): Promise<void> {
+  private stoppedHook(a: Agent, data: Record<string, unknown>): Promise<void> {
+    /* agy's Stop ends an execution; fullyIdle distinguishes the conversation's end from more work. */
+    return this.agyContinues(a, data) ? Promise.resolve() : this.finalStoppedHook(a, data);
+  }
+
+  private agyContinues(a: Agent, data: Record<string, unknown>): boolean {
+    if (a.program?.kind !== 'antigravity' || data.fullyIdle !== false) return false;
+    a.agyAnswered = false;
+    return true;
+  }
+
+  private async finalStoppedHook(a: Agent, data: Record<string, unknown>): Promise<void> {
     this.drain(a);
     if (typeof data.session_id === 'string') this.follow(a, data.session_id);
     const id = typeof data.turn_id === 'string' ? data.turn_id : undefined;
@@ -1695,6 +1811,7 @@ export class TerminalHost {
     if (a.program?.kind !== 'antigravity') return;
     if (typeof data.conversationId === 'string') this.follow(a, data.conversationId);
     if (data.invocationNum !== 0) {
+      a.agyAnswered = false;
       a.busy = true;
       return;
     }
