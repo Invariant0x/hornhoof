@@ -99,16 +99,19 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
       });
     }
 
-    test('the terminal stands under the strip of a machine the orchestrator asks for', async ({ page }, info) => {
+    test('the strip of a machine the orchestrator asks for stands under the terminal, inside the window', async ({ page }, info) => {
       const errors = watchErrors(page);
       const sent = await serve(page, 'delegate', settings);
       await page.route('**/api/computer', route => route.fulfill({ json: ASKED }));
       const window = await open(page, 'orchestrator', lang);
       const strip = window.getByRole('region', { name: t.window.computerAsks(ASKED.machine!) });
       await expect(strip).toBeVisible();
-      const above = await box(strip);
+      const below = await box(strip);
       const terminal = await box(window.locator('.t-term'));
-      expect(above.y + above.height).toBeLessThanOrEqual(terminal.y);
+      const frame = await box(window);
+      expect(terminal.y + terminal.height).toBeLessThanOrEqual(below.y);
+      expect(below.y + below.height).toBeLessThanOrEqual(frame.y + frame.height);
+      expect(terminal.height).toBeGreaterThan(200);
       await checkWrites(page, window, 'orchestrator', settings, sent);
       await shot(page, info, 'delegate-orchestrator-strip', settings);
       await checkPage(page, errors);

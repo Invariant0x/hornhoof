@@ -183,7 +183,11 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
       await expect(window.getByRole('img', { name: 'notes.png', exact: true })).toHaveCount(0);
       expect(server.uploads).toEqual([]);
       expect(server.messages).toEqual([]);
-      await checkPage(page, errors.filter(e => !e.includes('ERR_') && !e.includes('blob:')));
+      expect(server.keys).toEqual([]);
+      /* A file named a picture goes up from a terminal, where the server is who looks at its bytes and refuses it. */
+      const refused = (e: string) => e.includes('status of 400');
+      expect(errors.filter(refused)).toHaveLength(1);
+      await checkPage(page, errors.filter(e => !refused(e)));
     });
   });
 }

@@ -181,7 +181,7 @@ describe('a picture dragged into the window', () => {
   });
 
   it('leaves a picture dropped on a live terminal to the terminal, with no line of the window', async () => {
-    open({}, TERMINAL);
+    const { uploads } = open({}, TERMINAL);
     expect(await screen.findByTestId('live-terminal')).toBeInTheDocument();
     fireEvent.dragEnter(windowBox(), dragged(png()));
     expect(screen.queryByText(en.window.dropPictures)).not.toBeInTheDocument();
@@ -201,7 +201,7 @@ describe('a picture pasted into the window', () => {
   });
 
   it('is for the live terminal when one shows, which takes it itself', async () => {
-    open({}, TERMINAL);
+    const { uploads } = open({}, TERMINAL);
     const terminal = await screen.findByRole('textbox', { name: 'Terminal input' });
     expect(fireEvent.paste(terminal, copied([png('from-terminal.png')]))).toBe(true);
     expect(uploads()).toEqual([]);
