@@ -65,7 +65,7 @@ function RequestItem({ request, onDone, onOpenTask, onOpenAgent, placeName }: Sh
   }
 
   const who =
-    request.kind === 'approval' ? t.tasks.asksApproval(agent.name) : request.kind === 'stuck' ? t.tasks.stuck(agent.name) : request.kind === 'choice' ? t.tasks.asksChoice(agent.name) : t.tasks.asks(agent.name);
+    request.kind === 'approval' ? (request.commit ? t.tasks.asksApproval(agent.name) : t.tasks.asksApprovalOf(agent.name)) : request.kind === 'stuck' ? t.tasks.stuck(agent.name) : request.kind === 'choice' ? t.tasks.asksChoice(agent.name) : t.tasks.asks(agent.name);
   /* Hornhoof's own words about a stuck task are said in the person's language. */
   const said = request.kind === 'stuck' ? t.tasks.stuckText(agent.name, task.number) : request.text;
   return (
@@ -160,6 +160,8 @@ function RequestItem({ request, onDone, onOpenTask, onOpenAgent, placeName }: Sh
 
 /* The exact commit, linked on GitHub when the repository is there. */
 function Commit({ request }: { request: WaitingRequest }) {
+  /* An approval under a department's policy is about the work its words name, not a commit. */
+  if (!request.commit) return null;
   const code = <code className="req-commit">{request.commit}</code>;
   return request.commitUrl ? (
     <a className="req-commit-link" href={request.commitUrl} target="_blank" rel="noreferrer">

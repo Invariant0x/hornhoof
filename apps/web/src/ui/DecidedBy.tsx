@@ -5,7 +5,9 @@ import type { DecidedBy } from '../types';
 /* Who takes a decision this person sees and may not take, in place of its buttons. */
 export function DecidedByNote({ by = CEO_DECIDES }: { by?: DecidedBy }) {
   const t = useT();
-  return <p className="muted decided-by">{by.kind === 'department_and_ceo' && by.department ? t.tasks.decidedByDepartment(by.department.name) : t.tasks.decidedByCeo}</p>;
+  const place = by.department?.name;
+  const who = place && by.kind === 'owner_and_ceo' ? t.tasks.decidedByOwner(place) : place && by.kind === 'department_and_ceo' ? t.tasks.decidedByDepartment(place) : t.tasks.decidedByCeo;
+  return <p className="muted decided-by">{who}</p>;
 }
 
 /* The buttons that take a card's decision, or for someone who may not take it, who takes it. */

@@ -1,0 +1,135 @@
+import { expect, test, type Page } from '@playwright/test';
+import { en, type Messages } from '../src/i18n/en';
+import { ru } from '../src/i18n/ru';
+import type { ApprovalPolicyView, Org } from '../src/types';
+import { ME, serveApi } from './api';
+
+const MESSAGES: Record<'en' | 'ru', Messages> = { en, ru };
+const ORG: Org = {
+  company: ME.company,
+  orchestrator: null,
+  agents: { total: 0, working: 0 },
+  people: [],
+  departments: [{ id: 'd2', name: 'Development', templateKey: null, roleCode: 'CTO', about: '', ownerPersonId: null, agents: { total: 0, working: 0 }, products: [], teams: [], people: [], employees: [], roles: [] }],
+};
+const POLICY: ApprovalPolicyView = {
+  departmentId: 'd2',
+  owner: null,
+  canSetOwner: true,
+  canChangePolicy: true,
+  candidates: [{ id: 'p2', name: 'Dana Abramovna Konstantinopolskaya', title: 'Head of Very Long Titles' }, { id: 'p3', name: 'Wes', title: '' }],
+  rules: [
+    { channel: 'message', mode: 'new_kinds' },
+    { channel: 'price', mode: 'every' },
+    { channel: 'publication', mode: 'every' },
+    { channel: 'commit', mode: 'every' },
+    { channel: 'spend', mode: 'within_limits', limit: 100, unit: 'USD' },
+    { channel: 'other', mode: 'every' },
+  ],
+};
+
+/* The department's panel as a person meets it, with what the page logs. Every change is answered as the server would. */
+async function open(page: Page, lang: 'en' | 'ru', theme: 'light' | 'dark', width: number, policy = POLICY) {
+  await page.setViewportSize({ width, height: 900 });
+  await page.addInitScript(({ lang, theme }) => {
+    localStorage.setItem('hh-lang', lang);
+    localStorage.setItem('hh-theme', theme);
+  }, { lang, theme });
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+  await serveApi(page);
+  let shown = policy;
+  const puts: { url: string; body: unknown }[] = [];
+  await page.route('**/api/**', route => {
+    const url = new URL(route.request().url());
+    if (url.pathname === '/api/org') return route.fulfill({ json: ORG });
+    if (url.pathname === '/api/version') return route.fulfill({ json: { version: '0.7.0', commit: 'task-355' } });
+    if (url.pathname === '/api/updates') return route.fulfill({ json: { current: { version: '0.7.0', commit: 'task-355' }, available: false, latest: null, updater: { status: null, waiting: null } } });
+    if (url.pathname === '/api/departments/d2/approval-policy') return route.fulfill({ json: shown });
+    if (url.pathname === '/api/departments/d2/owner') {
+      const body = route.request().postDataJSON() as { personId: string | null };
+      puts.push({ url: url.pathname, body });
+      if (body.personId === 'p3') return route.fulfill({ status: 400, json: { error: { code: 'validation', message: en.errors.owner_no_access, reason: 'owner_no_access' } } });
+      const named = shown.candidates.find(c => c.id === body.personId);
+      shown = { ...shown, owner: named ? { id: named.id, name: named.name } : null };
+      return route.fulfill({ json: { ownerPersonId: body.personId } });
+    }
+    if (url.pathname.startsWith('/api/departments/d2/approval-policy/')) {
+      const channel = url.pathname.split('/').pop() as ApprovalPolicyView['rules'][number]['channel'];
+      const body = route.request().postDataJSON() as object;
+      puts.push({ url: url.pathname, body });
+      shown = { ...shown, rules: shown.rules.map(r => (r.channel === channel ? ({ channel, ...body } as ApprovalPolicyView['rules'][number]) : r)) };
+      return route.fulfill({ json: shown });
+    }
+    return route.fallback();
+  });
+  await page.goto('/departments/d2');
+  await page.getByRole('button', { name: MESSAGES[lang].dept.about, exact: true }).click();
+  await expect(page.getByRole('heading', { name: MESSAGES[lang].dept.approvals.title, exact: true })).toBeVisible();
+  await page.evaluate(async () => { await document.fonts.ready; });
+  /* Tall enough that the panel shows the whole section, without scrolling, in its screenshots. */
+  await page.setViewportSize({ width, height: 2000 });
+  return { errors, puts };
+}
+
+const section = (page: Page, t: Messages) => page.getByRole('region', { name: t.dept.approvals.title, exact: true }).or(page.locator('section', { has: page.getByRole('heading', { name: t.dept.approvals.title, exact: true }) })).first();
+
+async function fitsTheScreen(page: Page, width: number) {
+  const scroll = await page.evaluate(() => ({ page: document.documentElement.scrollWidth, drawer: document.querySelector('.dv-drawer')?.scrollWidth ?? 0, inner: document.querySelector('.dv-drawer')?.clientWidth ?? 0 }));
+  expect(scroll.page, 'the page has no sideways scroll').toBeLessThanOrEqual(width);
+  expect(scroll.drawer, 'the panel has no sideways scroll').toBeLessThanOrEqual(scroll.inner);
+}
+
+for (const lang of ['en', 'ru'] as const) {
+  for (const theme of ['light', 'dark'] as const) {
+    for (const width of [1440, 375]) {
+      test(`the CEO reads and changes the owner and the rules, in ${lang}, ${theme}, at ${width}px`, async ({ page }, info) => {
+        const t = MESSAGES[lang];
+        const { errors, puts } = await open(page, lang, theme, width);
+        const part = section(page, t);
+        await part.screenshot({ path: info.outputPath(`approvals-ceo-${width}-${lang}-${theme}.png`) });
+        await fitsTheScreen(page, width);
+
+        const a = t.dept.approvals;
+        const owner = part.getByRole('combobox', { name: a.owner, exact: true });
+        await expect(owner).toHaveValue('');
+        await expect(part.getByRole('group', { name: a.channels.spend, exact: true }).getByRole('spinbutton', { name: a.limit, exact: true })).toHaveValue('100');
+
+        await owner.selectOption('p2');
+        await expect.poll(() => puts.at(-1)).toEqual({ url: '/api/departments/d2/owner', body: { personId: 'p2' } });
+        await expect(owner).toHaveValue('p2');
+
+        /* Someone the server refuses: the choice stays with the owner there is, and the reason shows. */
+        await owner.selectOption('p3');
+        await expect(part.getByRole('alert')).toHaveText(t.errors.owner_no_access);
+        await expect(owner).toHaveValue('p2');
+
+        const price = part.getByRole('group', { name: a.channels.price, exact: true });
+        await price.getByRole('combobox', { name: a.mode, exact: true }).selectOption('within_limits');
+        await expect(price.getByRole('button', { name: t.common.save, exact: true })).toBeDisabled();
+        await price.getByRole('spinbutton', { name: a.limit, exact: true }).fill('250');
+        await price.getByRole('textbox', { name: a.unit, exact: true }).fill('USD');
+        await price.getByRole('button', { name: t.common.save, exact: true }).click();
+        await expect.poll(() => puts.at(-1)).toEqual({ url: '/api/departments/d2/approval-policy/price', body: { mode: 'within_limits', limit: 250, unit: 'USD' } });
+
+        await fitsTheScreen(page, width);
+        await part.screenshot({ path: info.outputPath(`approvals-ceo-open-${width}-${lang}-${theme}.png`) });
+        expect(errors.filter(e => !/400/.test(e))).toEqual([]);
+      });
+
+      test(`someone with access reads the rules and changes nothing, in ${lang}, ${theme}, at ${width}px`, async ({ page }, info) => {
+        const t = MESSAGES[lang];
+        const { errors } = await open(page, lang, theme, width, { ...POLICY, owner: { id: 'p2', name: 'Dana Abramovna Konstantinopolskaya' }, canSetOwner: false, canChangePolicy: false, candidates: [] });
+        const part = section(page, t);
+        await part.screenshot({ path: info.outputPath(`approvals-reader-${width}-${lang}-${theme}.png`) });
+        await fitsTheScreen(page, width);
+        await expect(part.getByText(t.dept.approvals.ownerIs('Dana Abramovna Konstantinopolskaya'))).toBeVisible();
+        await expect(part.getByRole('combobox')).toHaveCount(0);
+        await expect(part.getByRole('button')).toHaveCount(0);
+        await expect(part.getByText(t.dept.approvals.limitIs(100, 'USD'))).toBeVisible();
+        expect(errors).toEqual([]);
+      });
+    }
+  }
+}

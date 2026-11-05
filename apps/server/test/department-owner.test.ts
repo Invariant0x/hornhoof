@@ -171,6 +171,13 @@ describe('setting a department owner', () => {
     expect((await c.setOwner(c.wholeToken, c.dev.id, c.ids.dana)).statusCode).toBe(200);
   });
 
+  it('keeps one way to say the CEO: naming the CEO is the same as no owner', async () => {
+    const c = await company();
+    await c.setOwner(c.ceoToken, c.dev.id, c.ids.dana);
+    expect((await c.setOwner(c.ceoToken, c.dev.id, c.ids.ceo)).json()).toMatchObject({ ownerPersonId: null });
+    expect((await c.db.select({ owner: departments.ownerPersonId }).from(departments).where(eq(departments.id, c.dev.id)))[0]!.owner).toBeNull();
+  });
+
   it('takes the owner away with null, idempotently', async () => {
     const c = await company();
     await c.setOwner(c.ceoToken, c.dev.id, c.ids.dana);

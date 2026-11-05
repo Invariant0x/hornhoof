@@ -77,10 +77,13 @@ async function policyView(ctx: Pick<Ctx, 'db'>, me: Person, dept: DeptRow) {
   };
 }
 
-/* Whether this person may be named owner of the department: active, of this company, with access to the department itself. */
-async function mayOwn(ctx: Pick<Ctx, 'db'>, companyId: string, personId: string, departmentId: string): Promise<boolean> {
+/* The person to name as owner, or a refusal: active, of this company, with access to the department itself. The CEO is who
+   no owner means already, so naming the CEO names nobody. */
+async function ownerToName(ctx: Pick<Ctx, 'db'>, companyId: string, personId: string | null, departmentId: string): Promise<string | null> {
+  if (!personId) return null;
   const person = (await candidates(ctx, companyId)).find(p => p.id === personId);
-  return !!person && person.status === 'active' && listsDepartment(person.access, departmentId);
+  if (!person || person.status !== 'active' || !listsDepartment(person.access, departmentId)) throw new ApiError(400, 'validation', NO_ACCESS, 'owner_no_access');
+  return person.isOwner ? null : person.id;
 }
 
 const parseRule = (body: unknown): ApprovalRule => {
@@ -101,12 +104,11 @@ export function approvalPolicyRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     if (!actsAsCeo(me)) throw new ApiError(403, 'forbidden', 'Only the CEO or the CEO delegate names who owns a department.', 'owner_ceo_only');
     const dept = await ownDepartment(db, me.companyId, IdParams.parse(req.params).id);
-    const { personId } = OwnerBody.parse(req.body);
-    if (personId && !(await mayOwn(ctx, me.companyId, personId, dept.id))) throw new ApiError(400, 'validation', NO_ACCESS, 'owner_no_access');
-    await db.update(departments).set({ ownerPersonId: personId }).where(eq(departments.id, dept.id));
-    logged(req, me, { departmentId: dept.id, ownerPersonId: personId });
+    const ownerPersonId = await ownerToName(ctx, me.companyId, OwnerBody.parse(req.body).personId, dept.id);
+    await db.update(departments).set({ ownerPersonId }).where(eq(departments.id, dept.id));
+    logged(req, me, { departmentId: dept.id, ownerPersonId });
     changed(me.companyId, dept.id);
-    return { ownerPersonId: personId };
+    return { ownerPersonId };
   });
 
   app.get('/api/departments/:id/approval-policy', async req => {

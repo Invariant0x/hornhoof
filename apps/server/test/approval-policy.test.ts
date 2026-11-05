@@ -2,6 +2,7 @@ import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { approvalPolicies, departments, people, requests, taskEvents } from '../src/db/schema.js';
+import { createTask } from '../src/modules/tasks/engine.js';
 import { company } from './department-owner-fixture.js';
 import { as } from './helpers.js';
 
@@ -161,8 +162,8 @@ describe('asking for an approval under the policy', () => {
     const ask = await bruno(c);
     await ask({ amount: 100.5 });
     expect(await openRequests(c)).toHaveLength(1);
-    const [{ id }] = await openRequests(c) as [{ id: string }];
-    await answer(c, id, false);
+    const [first] = await openRequests(c);
+    await answer(c, first!.id, false);
     await ask();
     expect(await openRequests(c)).toHaveLength(1);
   });
@@ -278,8 +279,7 @@ describe('telling the CEO when goals are missed', () => {
     const [approval] = await openRequests(c);
     await answer(c, approval!.id, true);
     const heads = await c.tools(c.head);
-    const headTask = (await import('../src/modules/tasks/engine.js')).createTask;
-    const { task } = await headTask(c.app.ctx, { agentId: c.orchestrator.id }, { title: 'Goal', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.head.id, gates: [] });
+    const { task } = await createTask(c.app.ctx, { agentId: c.orchestrator.id }, { title: 'Goal', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.head.id, gates: [] });
     const res = await call(heads, 'escalate_missed_goal', { task: task.number, goal: 'Release 1.0 by Friday', why: 'Two weeks late.' });
     expect(res.isError).toBeFalsy();
     const ceo = (await c.app.inject({ method: 'GET', url: '/api/requests', ...as(c.ceoToken) })).json();
