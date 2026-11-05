@@ -8,5 +8,7 @@ afterEach(() => {
   const timers = vi.isFakeTimers() ? vi.getTimerCount() : 0;
   vi.unstubAllGlobals();
   window.history.replaceState(null, '', '/');
+  localStorage.clear();
+  sessionStorage.clear();
   expect(timers, 'Timers left after component cleanup').toBe(0);
 });
