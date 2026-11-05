@@ -56,7 +56,8 @@ async function resolveMatching(registry: WorkspaceRetirementContext['registry'],
   const workspace = await registry.resolveTaskWorkspace(binding);
   if ('code' in workspace) return { code: workspace.code, retryable: workspace.retryable };
   if (!matchesBinding(workspace.binding, binding)) return { code: 'binding_stale', retryable: false };
-  return workspace;
+  return { binding: structuredClone(workspace.binding), realPath: workspace.realPath, ownerUid: workspace.ownerUid,
+    gitCommonDir: workspace.gitCommonDir, sourceHeadSha: workspace.sourceHeadSha };
 }
 function sameNamespace(a: VerifiedWorkspace, b: VerifiedWorkspace): boolean {
   return a.realPath === b.realPath && a.ownerUid === b.ownerUid && a.gitCommonDir === b.gitCommonDir;
