@@ -95,6 +95,8 @@ export class OperatorRuntime {
   changed(key: string): void { const target = this.targets.get(key); if (target) target.generation++; }
   pasted(key: string): void { const target = this.targets.get(key); if (target) { target.pasted = true; target.generation++; } }
   started(key: string): void { const target = this.targets.get(key); if (target) { target.started = true; target.sinceWords = true; target.generation++; } }
+  /* What came of a session it still loads, before these words went in, says nothing of them. */
+  typed(key: string): void { const target = this.targets.get(key); if (target) target.sinceWords = false; this.pasted(key); }
 
   activity(key: string): void {
     const target = this.targets.get(key); if (!target) return;

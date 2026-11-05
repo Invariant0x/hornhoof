@@ -66,6 +66,17 @@ async function started(program: Program, { plain = false } = {}) {
 
 const empty = (over: Partial<Program> = {}): Program => ({ input: '', status: 'idle', onPaste() {}, onEnter() {}, ...over });
 
+it('types lost words again though the program still said something of before them as they went in', async () => {
+  const c = await started(empty());
+  await until(() => c.sent.some(frame => frame.type === 'program.delivery' && frame.phase === 'attempt'));
+  await until(() => {
+    try { c.record({ type: 'event_msg', payload: { type: 'item_completed', item: { type: 'AgentMessage', content: [{ type: 'Text', text: 'The end of what it said before.' }] } } }); return true; }
+    catch { return false; }
+  });
+  await until(() => c.paste.mock.calls.length > 1);
+  expect(c.paste.mock.calls.map(([, text]) => text)).toEqual([WORDS, WORDS]);
+});
+
 it('tells the server the session of a turn while it runs, as a node that restarts cannot tell it later', async () => {
   const c = await started(empty({ onEnter: () => { c.record(userMessage(WORDS)); c.record({ type: 'event_msg', payload: { type: 'task_started', turn_id: 'work' } }); } }));
   await until(() => c.reports.some(frame => frame.type === 'job.program' && frame.session === c.sessionId));

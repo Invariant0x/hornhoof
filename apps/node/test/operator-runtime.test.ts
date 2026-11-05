@@ -31,6 +31,16 @@ it('ignores an older revoke and does not move a case deadline on replay', async 
   expect(c.runtime.failure(c.identity.agentKey)).toBe('operator_timeout');
 });
 
+it('counts what a program does for its words only from the moment they go in', () => {
+  const c = fixture(), key = c.identity.agentKey;
+  c.runtime.activity(key);
+  expect(c.runtime.wordsWaiting(key)).toBe(false);
+  c.runtime.typed(key);
+  expect(c.runtime.wordsWaiting(key)).toBe(true);
+  c.runtime.activity(key);
+  expect(c.runtime.wordsWaiting(key)).toBe(false);
+});
+
 it('returns explicit no_program responses without creating a program for an unknown target', async () => {
   const c = fixture();
   const command = { ...c.identity, agentKey: randomUUID(), case: randomUUID(), capability: randomUUID() };

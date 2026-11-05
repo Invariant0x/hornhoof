@@ -54,3 +54,9 @@ test('the words of a proof never become part of a command', () => {
   assert.match(proofs.publish, /PROOF: \$\{\{ inputs\.proof \}\}/);
   assert.doesNotMatch(proofs.publish.replace(/PROOF: \$\{\{ inputs\.proof \}\}/, ''), /inputs\.proof/);
 });
+
+test('the jobs that may write to the registry build code without keeping the checkout token', () => {
+  for (const job of [images.publish, proofs.publish]) {
+    assert.match(job, /actions\/checkout@[0-9a-f]{40} # v[\d.]+\n\s+with:\n\s+persist-credentials: false\n/);
+  }
+});

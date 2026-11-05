@@ -42,7 +42,7 @@ export function agyPrompt(screen: string): { input: string; footer: string } | n
   return { input: box[1]!.trim(), footer: footer.trim() };
 }
 
-function promptedInput(kind: 'claude' | 'codex', screen: string): string | null {
+function promptedInput(kind: 'claude' | 'codex', screen: string, shown: string): string | null {
   const marker = kind === 'claude' ? '❯' : '›';
   const prompt = [...screen.matchAll(new RegExp(`^[ \\t]*${marker}[ \\t]?(.*)$`, 'gm'))].at(-1);
   if (!prompt) return null;
@@ -50,9 +50,18 @@ function promptedInput(kind: 'claude' | 'codex', screen: string): string | null 
   /* An unfinished box may hide the rest of a person's draft. Wait for its closing rule before typing. */
   const above = screen.slice(0, prompt.index).trimEnd();
   if (kind === 'claude' && /(?:^|\n)[ \t]*[─━═]{2,}[ \t]*$/.test(above)) return framedInput(prompt[1]!, rest);
-  /* Codex leaves an empty row between its input and the footer under it, whose words are not input. */
-  const below = rest.split(kind === 'codex' ? /\n[ \t]*(?:[─━═╰└]|\n|$)/ : /\n[ \t]*[─━═╰└]/, 1)[0]!;
+  const below = (kind === 'codex' ? overFooter(rest, shown) : rest).split(/\n[ \t]*[─━═╰└]/, 1)[0]!;
   return `${prompt[1]}${below}`.replace(/[ \t]+$/gm, '').trim();
+}
+
+/* Codex draws its footer last, under an empty row, in whatever words and style. A person's draft can hold empty rows too, so
+   only the last empty row of what the screen shows ends the input. */
+function overFooter(rest: string, shown: string): string {
+  const rows = rest.split('\n');
+  const seen = shown.split('\n').slice(-rows.length);
+  const last = seen.findLastIndex(row => row.trim());
+  const empty = seen.slice(0, last + 1).findLastIndex(row => !row.trim());
+  return rows.slice(0, empty < 0 ? last + 1 : empty).join('\n');
 }
 
 function framedInput(first: string, rest: string): string | null {
@@ -64,7 +73,7 @@ function framedInput(first: string, rest: string): string | null {
 export function inputOf(kind: TermProgram['kind'], screen: string): string | null {
   if (kind === 'kimi') return boxedInput(stripEscapes(screen));
   if (kind === 'antigravity') return agyPrompt(screen)?.input ?? null;
-  return promptedInput(kind, withoutDim(screen));
+  return promptedInput(kind, withoutDim(screen), stripEscapes(screen));
 }
 
 /* The program waits at its prompt with nothing typed. */

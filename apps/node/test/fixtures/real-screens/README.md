@@ -8,7 +8,9 @@ retries against the refusal; Kimi Code had no sign-in, which still shows its pro
 
 - `*-first`: the empty prompt right after the program started.
 - `*-idle`, `*-after`: the empty prompt later on, under other footers.
-- `*-draft`, `*-multi-line`: what a person typed and did not send.
+- `*-draft`, `*-multi-line`, `*-empty-rows-draft`, `*-paragraphs-draft`: what a person typed and did not send.
 - `*-busy`, `*-retrying`: the empty prompt while a turn runs.
+- `*-long-session`: the empty prompt after a turn of a resumed session, at 160x48 on a model stub, with the banner long off
+  the top of the screen.
 
 Antigravity's screens are in `../agy-tui`.

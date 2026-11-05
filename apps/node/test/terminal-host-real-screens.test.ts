@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import type { OperatorNodeMessage } from '@hornhoof/protocol/program-operator';
 import { afterEach, expect, it, vi } from 'vitest';
 import { TerminalHost } from '../src/terminal/host.js';
+import { atEmptyPrompt, inputOf } from '../src/terminal/input.js';
 import { codexProgram, kimiProgram, type TermProgram } from '../src/terminal/programs.js';
 import { Tmux } from '../src/terminal/tmux.js';
 import { until } from './terminal-host-helpers.js';
@@ -29,7 +30,7 @@ function assignment(program: TermProgram, ready: string, draft?: string) {
   vi.spyOn(tmux, 'stopAll').mockResolvedValue();
   vi.spyOn(tmux, 'exitSnapshot').mockResolvedValue(null);
   vi.spyOn(tmux, 'keys').mockResolvedValue();
-  vi.spyOn(tmux, 'screen').mockResolvedValue(real(draft ?? ready));
+  const screen = vi.spyOn(tmux, 'screen').mockResolvedValue(real(draft ?? ready));
   const paste = vi.spyOn(tmux, 'paste').mockResolvedValue();
   const abort = new AbortController();
   const host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: () => {}, secrets: () => [], plugins: [], readyMs: 20, pollMs: 5, lookMs: 10, enterWaitMs: 10,
@@ -37,12 +38,13 @@ function assignment(program: TermProgram, ready: string, draft?: string) {
   });
   const running = host.run({ key: agentKey, program, bin: program.kind, home, signedOut: /signed out/i, operatorDelivery: { id: deliveryId, ordinal: 1 }, input: { agentKey, jobId, prompt: 'Check the checkout.', sessionId: null, model: null, workDir, secret: null, timeoutMs: 20000, instructions: null, tools: null, signal: abort.signal } });
   stops.push(async () => { abort.abort(); await host.stop(); await running; rmSync(home, { recursive: true, force: true }); });
-  return { paste, sent, deliveryId };
+  return { paste, sent, deliveryId, styledLooks: () => screen.mock.calls.filter(([, , styled]) => styled).length };
 }
 
 it.each([
   ['codex', codexProgram, 'codex-0.166.0-first'],
   ['codex', codexProgram, 'codex-0.166.0-idle'],
+  ['codex', codexProgram, 'codex-0.166.0-long-session'],
   ['kimi', kimiProgram, 'kimi-2.5.1-first'],
   ['kimi', kimiProgram, 'kimi-2.2.0-first'],
 ] as const)('types the assignment into a ready %s at its empty prompt, on the real screen %s', async (_kind, program, name) => {
@@ -55,10 +57,22 @@ it.each([
 
 it.each([
   ['codex', codexProgram, 'codex-0.166.0-first', 'codex-0.166.0-draft'],
+  ['codex', codexProgram, 'codex-0.166.0-first', 'codex-0.166.0-empty-rows-draft'],
   ['kimi', kimiProgram, 'kimi-2.5.1-first', 'kimi-2.5.1-draft'],
 ] as const)('keeps the assignment out of the words a person left in real %s', async (_kind, program, ready, draft) => {
-  const { paste, sent } = assignment(program, ready, draft);
-  await until(() => sent.some(frame => frame.type === 'program.delivery' && frame.phase === 'attempt'));
-  await new Promise(done => setTimeout(done, 200));
+  const { paste, styledLooks } = assignment(program, ready, draft);
+  /* The node looked at its input and still did not type: looks at the screen before it does say nothing. */
+  await until(() => styledLooks() > 2);
   expect(paste).not.toHaveBeenCalled();
+});
+
+it.each([
+  ['codex-0.166.0-empty-rows-draft', 'Words under two empty rows'],
+  ['codex-0.166.0-paragraphs-draft', 'Words under a blank first row\n\n  A second paragraph'],
+])('reads the whole of a draft with empty rows on the real screen %s', (name, draft) => {
+  expect(inputOf('codex', real(name))).toBe(draft);
+});
+
+it.each(['first', 'idle', 'busy', 'retrying', 'long-session'])('reads no words on the real empty screen %s of Codex', name => {
+  expect(atEmptyPrompt('codex', real(`codex-0.166.0-${name}`))).toBe(true);
 });

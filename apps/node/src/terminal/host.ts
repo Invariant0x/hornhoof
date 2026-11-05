@@ -839,7 +839,7 @@ export class TerminalHost {
   }
 
   private async submitOperatorAssignment(a: Agent, job: TermJob, prompt: string): Promise<boolean> {
-    this.operator?.pasted(a.key);
+    this.operator?.typed(a.key);
     await this.opts.tmux.paste(a.name, prompt);
     await sleep(pasteWait(prompt));
     if (!job.input.signal?.aborted) await this.opts.tmux.keys(a.name, 'Enter');
@@ -1246,13 +1246,19 @@ export class TerminalHost {
   private async promptShows(a: Agent, job: TermJob, kind: keyof typeof READY, colors: { at: number }): Promise<boolean | null> {
     const screen = await this.screen(a.key);
     if (kimiSignedOut(job, kind, screen)) return false;
-    if (READY[kind](screen)) {
+    if (READY[kind](screen) || (await this.codexWaits(a, kind))) {
       await sleep(PROMPT_SETTLE_MS);
       return true;
     }
     if (kind === 'antigravity' && (await this.agyFirstRun(a, colors))) return false;
     await sleep(this.pollMs);
     return null;
+  }
+
+  /* A long session takes Codex's banner off the top of its screen: its empty prompt says it waits all the same, and only the
+     styles tell that from a suggestion in it. */
+  private async codexWaits(a: Agent, kind: keyof typeof READY): Promise<boolean> {
+    return kind === 'codex' && atEmptyPrompt(kind, await this.opts.tmux.screen(a.name, 0, true));
   }
 
   /* agy's first-run setup: the node takes the colors agy offers first, once, and goes on. Its terms are the plan owner's
