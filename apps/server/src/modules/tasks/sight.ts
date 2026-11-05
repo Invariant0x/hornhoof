@@ -46,10 +46,16 @@ export async function linesFor(ctx: Pick<Ctx, 'db' | 'templates'>, viewer: Agent
 
 const IDS = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 
-/* Log data names agents by id, among much else: only this person's own id and those of agents they see stay. */
+/* The files that keep the whole text of a log line (long-text.ts). */
+const filesOfLine = (data: unknown) => new Set(((data ?? {}) as { fullTexts?: { id: string }[] }).fullTexts?.map(f => f.id));
+
+/* Log data names agents by id, among much else: only this person's own id, those of agents they see and the line's own
+   files stay. */
 function scrubbed(viewer: AgentViewer, data: unknown): unknown {
   const text = JSON.stringify(data);
-  return text === undefined ? data : JSON.parse(text.replace(IDS, id => (id === viewer.personId || seesAgentId(viewer, id) ? id : 'hidden')));
+  if (text === undefined) return data;
+  const own = filesOfLine(data);
+  return JSON.parse(text.replace(IDS, id => (id === viewer.personId || own.has(id) || seesAgentId(viewer, id) ? id : 'hidden')));
 }
 
 /* What people and agents they see said. A line nobody signed goes too: Hornhoof's own lines name who they are about. */
@@ -67,7 +73,7 @@ function maskDetail(viewer: AgentViewer, detail: TaskDetail): TaskDetail {
     subtasks: detail.subtasks.map(s => maskLine(viewer, s, true)),
     log: shownLog(viewer, detail.log),
     requests: detail.requests.filter(r => sees(r.agent?.id)),
-    files: detail.files.filter(f => sees(f.by?.id)),
+    files: detail.files.filter(f => f.fromPerson || sees(f.by?.id)),
   };
 }
 

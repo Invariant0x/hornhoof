@@ -4,7 +4,7 @@ import { addNote, companyBook, departmentBook } from '../src/modules/notebook/bo
 import { agents, attachments, departments, improvements, jobs, machines, proposals, tasks, testParts, testRuns, turns } from '../src/db/schema.js';
 import { REQUIRED_OPERATIONS_ROLES } from '../src/modules/operations/required.js';
 import { appendEvent } from '../src/modules/events/store.js';
-import { ask } from '../src/modules/tasks/engine.js';
+import { ask, comment } from '../src/modules/tasks/engine.js';
 import { as, openStream, until } from './helpers.js';
 import { aclCompany, leaks, type AclCompany } from './agent-view-company.js';
 
@@ -59,7 +59,7 @@ describe('what waits for people', () => {
     const c = await aclCompany();
     const { task, request, picture, neighbour } = await approval(c);
     expect((await c.get(`/api/attachments/${picture.id}`, c.tokens.olga)).statusCode).toBe(200);
-    expect((await c.get(`/api/attachments/${neighbour.id}`, c.tokens.olga)).statusCode).toBe(404);
+    expect((await c.get(`/api/attachments/${neighbour.id}`, c.tokens.olga)).statusCode).toBe(403);
     expect((await c.get(`/api/tasks/${task.id}`, c.tokens.olga)).statusCode).toBe(403);
     expect((await c.get(`/api/agents/${c.crew.other.id}`, c.tokens.olga)).statusCode).toBe(403);
     expect((await c.get(`/api/agents/${c.crew.other.id}/events`, c.tokens.olga)).statusCode).toBe(403);
@@ -159,6 +159,73 @@ describe('what waits for people', () => {
       expect(full.proposals).toHaveLength(1);
       expect(full.computerAccess.view.asked.reason).toBe('Fix the disk');
     }
+  });
+});
+
+describe('a long text kept as a file of its task', () => {
+  const WORDS = 'Private long words. '.repeat(400).trim();
+  type Detail = { task: { files: { id: string; by: { id: string; name: string } | null }[]; log: { text: string; data: { fullTexts?: { id: string }[] } }[] } };
+  const fileOf = async (c: AclCompany, taskId: string) => {
+    const [file] = await c.db.select({ id: attachments.id }).from(attachments).where(eq(attachments.taskId, taskId));
+    return file!.id;
+  };
+
+  it('stays closed with a task the person does not see, and open to the full view', async () => {
+    const c = await aclCompany();
+    const task = await c.work('Hidden work', c.crew.other);
+    await comment(c.app.ctx, { agentId: c.crew.other.id }, task.id, WORDS);
+    const url = `/api/attachments/${await fileOf(c, task.id)}`;
+    for (const token of [c.tokens.ann, c.tokens.olga, c.tokens.wes]) {
+      const res = await c.get(url, token);
+      expect(res.statusCode).toBe(403);
+      expect(res.body).not.toContain('Private long words');
+    }
+    for (const token of [c.tokens.ceo, c.tokens.lisa]) expect((await c.get(url, token)).body).toBe(WORDS);
+  });
+
+  it('stays closed on a task the person sees when a hidden agent wrote it', async () => {
+    const c = await aclCompany();
+    const task = await c.work('Shared work', c.crew.mine);
+    await comment(c.app.ctx, { agentId: c.crew.other.id }, task.id, WORDS);
+    const file = await fileOf(c, task.id);
+    expect((await c.get(`/api/attachments/${file}`, c.tokens.ann)).statusCode).toBe(403);
+    const { task: detail } = (await c.get(`/api/tasks/${task.id}`, c.tokens.ann)).json<Detail>();
+    expect(detail.files).toEqual([]);
+    expect(JSON.stringify(detail.log)).not.toContain(file);
+  });
+
+  it('opens for the person who sees the agent who wrote it, with its link in the log', async () => {
+    const c = await aclCompany();
+    const task = await c.work('Own work', c.crew.mine);
+    await comment(c.app.ctx, { agentId: c.crew.mine.id }, task.id, WORDS);
+    const file = await fileOf(c, task.id);
+    expect((await c.get(`/api/attachments/${file}`, c.tokens.ann)).body).toBe(WORDS);
+    const { task: detail } = (await c.get(`/api/tasks/${task.id}`, c.tokens.ann)).json<Detail>();
+    expect(detail.files.map(f => f.id)).toEqual([file]);
+    expect(detail.log.find(l => l.data.fullTexts)?.data.fullTexts?.map(f => f.id)).toEqual([file]);
+  });
+
+  it("opens when a person wrote it on a task the person sees, though it is kept under a hidden agent", async () => {
+    const c = await aclCompany();
+    const task = await c.work('Held elsewhere', c.crew.other);
+    await c.db.update(tasks).set({ executorAgentId: c.crew.mine.id }).where(eq(tasks.id, task.id));
+    await comment(c.app.ctx, { personId: c.ids.bob }, task.id, WORDS);
+    const file = await fileOf(c, task.id);
+    expect((await c.get(`/api/attachments/${file}`, c.tokens.ann)).body).toBe(WORDS);
+    const res = await c.get(`/api/tasks/${task.id}`, c.tokens.ann);
+    expect(res.json<Detail>().task.files.map(f => [f.id, f.by?.id])).toEqual([[file, c.ids.bob]]);
+    expect(res.body).not.toContain(c.crew.other.id);
+  });
+
+  it('answers to the request, not the task, for a picture sent to a task and shown with a request', async () => {
+    const c = await aclCompany();
+    const task = await c.work('Secret launch', c.crew.other);
+    const { request } = await ask(c.app.ctx, c.crew.other.id, task.id, { text: 'May this go out?', kind: 'approval', approval: { channel: 'spend', kind: 'ads', amount: 1 } });
+    const [picture] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.crew.other.id, taskId: task.id, requestId: request.id, name: 'p.png', mediaType: 'image/png', bytes: PNG, size: PNG.length }).returning();
+    const shown = await c.get(`/api/attachments/${picture!.id}`, c.tokens.olga);
+    expect(shown.statusCode).toBe(200);
+    expect(shown.headers['content-type']).toBe('image/png');
+    expect((await c.get(`/api/attachments/${picture!.id}`, c.tokens.ann)).statusCode).toBe(403);
   });
 });
 
