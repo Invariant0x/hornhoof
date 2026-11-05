@@ -2,8 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHandoffRuntime, type CaptureRequest, type HandoffRuntime, type HandoffSource } from '../src/handoff-runtime.js';
-import type { CheckpointResult } from '../src/task-checkpoint.js';
-import { closure, destinationOf, git, id, makeStand, wipFile, wipManifest, WIP_REF, type Stand } from './handoff-stand.js';
+import { accepted, closure, destinationOf, git, id, makeStand, wipFile, wipManifest, WIP_REF, type Stand } from './handoff-stand.js';
 
 let stand: Stand;
 let runtime: HandoffRuntime;
@@ -21,10 +20,6 @@ const request = (more: Partial<CaptureRequest> = {}): CaptureRequest => ({
 });
 const LOST = { ok: false, problem: { phase: 'capture', code: 'source_context_lost', retryable: false } };
 const nothingPublished = () => { expect(() => git(stand.remote, 'rev-parse', '--verify', WIP_REF)).toThrow(); };
-function receiptOf(result: CheckpointResult) {
-  if (!result.ok) throw new Error(`Capture refused: ${JSON.stringify(result.problem)}`);
-  return result.receipt;
-}
 
 describe('the source of a capture', () => {
   it('ends the exact program instance first, then reads, and publishes the job records and the last test', async () => {
@@ -34,7 +29,7 @@ describe('the source of a capture', () => {
       readLastTest: async () => { steps.push('tests'); return 'the last completed run\n'; },
       readTaskRecords: async () => { steps.push('records'); return 'the words of this job\n'; },
     }));
-    receiptOf(await runtime.captureHandoff(request()));
+    accepted(await runtime.captureHandoff(request()));
     expect(steps).toEqual([`quiesce ${id(101)}`, 'tests', 'records']);
     expect(wipFile(stand.remote, 'meta/last-tests.txt')).toBe('the last completed run');
     expect(wipFile(stand.remote, 'meta/conversation-tail.txt')).toBe('the words of this job');
@@ -46,7 +41,7 @@ describe('the source of a capture', () => {
     stand.write('src/changed.ts', `export const one = "${early}";\nexport const fine = 1;\n`);
     runtime.registerHandoffSource(source({ knownSecrets: [early] }));
     runtime.registerHandoffSource(source({ jobId: id(102), programInstanceId: id(103), knownSecrets: [late], readTaskRecords: async () => `said ${late}\nsaid ${early}\nsaid nothing\n` }));
-    const receipt = receiptOf(await runtime.captureHandoff(request({ fromJobId: id(102) })));
+    const receipt = accepted(await runtime.captureHandoff(request({ fromJobId: id(102) })));
     expect(receipt.requiresRepair).toBe(true);
     const body = closure(stand.remote).map(object => object.body).join('\n');
     expect(body).not.toContain(early);
@@ -59,7 +54,7 @@ describe('the source of a capture', () => {
     const quiesceEndedTurn = async (instance: string) => { asked.push(instance); return true; };
     runtime.registerHandoffSource(source({ quiesceEndedTurn }));
     runtime.registerHandoffSource(source({ jobId: id(102), programInstanceId: id(103), quiesceEndedTurn }));
-    receiptOf(await runtime.captureHandoff(request()));
+    accepted(await runtime.captureHandoff(request()));
     expect(asked).toEqual([id(103)]);
   });
 
@@ -86,7 +81,7 @@ describe('the source of a capture', () => {
     const binding = { ...stand.workspace().binding, assignmentEpoch: 4 };
     expect(await runtime.captureHandoff(request({ binding }))).toEqual(LOST);
     stand.write('src/changed.ts', `const seen = "${old}";\n`);
-    const receipt = receiptOf(await runtime.captureHandoff(request({ binding, fromJobId: id(102) })));
+    const receipt = accepted(await runtime.captureHandoff(request({ binding, fromJobId: id(102) })));
     expect(receipt.requiresRepair).toBe(false);
   });
 
@@ -106,17 +101,17 @@ describe('the source of a capture', () => {
   it('says unavailable when a record cannot be read, instead of failing or guessing', async () => {
     const words = ['what', 'the', 'store', 'said'].join(' ');
     runtime.registerHandoffSource(source({ readLastTest: async () => { throw new Error(words); }, readTaskRecords: async () => null }));
-    receiptOf(await runtime.captureHandoff(request()));
+    accepted(await runtime.captureHandoff(request()));
     expect(wipManifest(stand.remote).context).toEqual({ diffStat: 'present', lastTests: 'unavailable', conversationTail: 'unavailable' });
     expect(closure(stand.remote).map(object => object.body).join('\n')).not.toContain(words);
   });
 
   it('answers a sealed capture after a node restart, without a lease and without reading anything', async () => {
     runtime.registerHandoffSource(source());
-    const first = receiptOf(await runtime.captureHandoff(request()));
+    const first = accepted(await runtime.captureHandoff(request()));
     runtime = fresh();
     stand.write('src/changed.ts', 'export const changed = 3;\n');
-    expect(receiptOf(await runtime.captureHandoff(request()))).toEqual(first);
+    expect(accepted(await runtime.captureHandoff(request()))).toEqual(first);
     expect(git(stand.remote, 'rev-list', '--count', WIP_REF)).toBe('1');
   });
 
@@ -130,7 +125,7 @@ describe('the source of a capture', () => {
 describe('the restore of a capture', () => {
   it('puts the work on the replacement workspace its own binding resolves to', async () => {
     runtime.registerHandoffSource(source());
-    const receipt = receiptOf(await runtime.captureHandoff(request()));
+    const receipt = accepted(await runtime.captureHandoff(request()));
     const destination = destinationOf(stand);
     const replacement = createHandoffRuntime({ resolveTaskWorkspace: async binding => binding.workspaceId === destination.binding.workspaceId ? destination : { code: 'workspace_missing', retryable: false }, journalRoot: join(stand.root, 'other-journal') });
     const done = await replacement.restoreHandoff({ binding: destination.binding, baseSha: receipt.baseSha, checkpointSha: receipt.checkpointSha, contentDigest: receipt.contentDigest,

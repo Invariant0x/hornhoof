@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { chmodSync, chownSync, closeSync, constants, existsSync, fsyncSync, mkdirSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, chownSync, closeSync, constants, existsSync, fsyncSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
@@ -49,17 +49,18 @@ function journalFor(input: CheckpointInput): JournalPaths {
   for (const folder of [input.journalRoot, handoffs, leases, handoff, capture]) privateFolder(folder);
   return { capture, db: join(capture, 'export.git'), readback: join(capture, 'readback.git'), sealed: join(capture, 'sealed.json'), lease: join(leases, `${input.taskId}.lock`) };
 }
-function flock(fd: number): Promise<void> {
+function flock(fd: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn('/usr/bin/flock', ['--exclusive', '3'], { cwd: '/', env: { PATH: '/usr/bin:/bin' }, stdio: ['ignore', 'ignore', 'ignore', fd] });
-    child.once('error', reject);
-    child.once('exit', code => { if (code === 0) resolve(); else reject(new HandoffFault('scan_failed')); });
+    const child = spawn('/usr/bin/flock', ['--exclusive', '3'], { cwd: '/', env: { PATH: '/usr/bin:/bin' }, stdio: ['ignore', 'ignore', 'ignore', fd], signal });
+    const fail = () => { reject(new HandoffFault(signal?.aborted ? 'cancelled' : 'scan_failed')); };
+    child.once('error', fail);
+    child.once('exit', code => { if (code === 0) resolve(); else fail(); });
   });
 }
 /* One publisher per task: the lock lives on this open file, so a crash cannot leave it taken. */
-export async function withPublisherLease<T>(file: string, work: () => Promise<T>): Promise<T> {
+export async function withPublisherLease<T>(file: string, work: () => Promise<T>, signal?: AbortSignal): Promise<T> {
   const fd = openSync(file, constants.O_CREAT | constants.O_RDWR | constants.O_NOFOLLOW, 0o600);
-  try { await flock(fd); return await work(); } finally { closeSync(fd); }
+  try { await flock(fd, signal); return await work(); } finally { closeSync(fd); }
 }
 /* Asks nothing of the workspace: an identifier that is no UUID has no attempt. */
 export function captureIsSealed(journalRoot: string, handoffId: string, captureId: string): boolean {
@@ -153,11 +154,15 @@ function untrackedDeltas(others: string, deltas: Map<string, Delta>): void {
     deltas.set(path, { path, action: known ? 'replace' : 'add', tracked: known, doubtful: path !== listed });
   }
 }
-/* A change the index was told not to look at is still a change. A flag means the comparison above proves nothing about the file. */
-function flaggedDeltas(flags: string, deltas: Map<string, Delta>): void {
-  for (const line of nulSeparated(flags)) {
-    if (line.startsWith('H ')) continue;
-    const path = line.slice(2);
+const holdsFiles = (folder: string): boolean => {
+  try { return readdirSync(folder).length > 0; } catch { return false; }
+};
+/* A change the index was told not to look at is still a change: a flag means the comparison above proves nothing about the file.
+   Neither does it about a submodule somebody checked out, which is never entered, as its own settings could run a program. */
+function flaggedDeltas(entries: string, deltas: Map<string, Delta>, root: string): void {
+  for (const line of nulSeparated(entries)) {
+    const tab = line.indexOf('\t'), [tag, mode] = line.slice(0, tab).split(' '), path = line.slice(tab + 1);
+    if (tag === 'H' && (mode !== '160000' || !holdsFiles(join(root, path)))) continue;
     deltas.set(path, { path, action: deltas.get(path)?.action ?? 'replace', tracked: true, doubtful: true });
   }
 }
@@ -167,11 +172,11 @@ function declaredDeltas(outputs: readonly string[], deltas: Map<string, Delta>):
     if (!deltas.has(path)) deltas.set(path, { path, action: 'add', tracked: true, doubtful: false });
   }
 }
-async function enumerate(git: SourceGit, baseSha: string, input: SourceReader): Promise<Delta[]> {
+async function enumerate(git: SourceGit, baseSha: string, input: SourceReader, root: string): Promise<Delta[]> {
   const deltas = new Map<string, Delta>();
-  trackedDeltas(await git(['diff', '--raw', '-z', '--no-renames', '--no-ext-diff', '--no-textconv', baseSha, '--']), deltas);
+  trackedDeltas(await git(['diff', '--raw', '-z', '--no-renames', '--no-ext-diff', '--no-textconv', '--ignore-submodules=dirty', baseSha, '--']), deltas);
   untrackedDeltas(await git(['ls-files', '--others', '--exclude-standard', '-z']), deltas);
-  flaggedDeltas(await git(['ls-files', '-v', '-z']), deltas);
+  flaggedDeltas(await git(['ls-files', '-v', '-s', '-z']), deltas, root);
   declaredDeltas(input.declaredOutputs ?? [], deltas);
   return [...deltas.values()].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
 }
@@ -181,7 +186,7 @@ export async function readDeltas(workspace: VerifiedWorkspace, input: SourceRead
       if (error instanceof GitFailed) throw new HandoffFault('ref_conflict');
       throw error;
     });
-    try { return await enumerate(git, baseSha, input); } catch (error) {
+    try { return await enumerate(git, baseSha, input, workspace.realPath); } catch (error) {
       if (error instanceof GitFailed) throw new HandoffFault('scan_failed');
       throw error;
     }
@@ -336,7 +341,7 @@ export async function captureTaskCheckpoint(input: CheckpointInput): Promise<Che
       await publish(input, paths, sealed);
       const { baseSha, checkpointSha, sanitizerVersion, contentDigest, redactedFiles, omittedFiles, requiresRepair } = sealed;
       return { ok: true, receipt: { handoffId: input.handoffId, captureId: input.captureId, baseSha, checkpointSha, sanitizerVersion, contentDigest, redactedFiles, omittedFiles, requiresRepair, quiescent: true } };
-    });
+    }, input.signal);
   } catch (error) {
     return { ok: false, problem: problemOf(error, phase) };
   }

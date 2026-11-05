@@ -103,14 +103,15 @@ function decodePercent(record: string): string {
 const holdsSecretShape = (view: string) => holdsToken(view) || CREDENTIAL_SHAPES.some(shape => shape.test(view)) || holdsBasicAuth(view) || holdsSecretAssignment(view) || holdsOpaqueSpan(view);
 
 const isPrintable = (text: string) => /^[\x20-\x7e\t\r\n]*$/.test(text);
+const decodedHolds = (decoded: string, forms: readonly string[]): boolean =>
+  isPrintable(decoded) && (holdsForm(decoded, forms) || holdsToken(decoded) || CREDENTIAL_SHAPES.some(shape => shape.test(decoded)));
 /* What a span says once decoded, one level deep and only for so many spans, so no record costs unbounded work. */
 function decodedSpansHold(record: string, forms: readonly string[]): boolean {
   const spans = record.match(/[A-Za-z0-9+/_-]{16,}={0,2}/g) ?? [];
   for (const span of spans.slice(0, MAX_DECODED_SPANS)) {
     const encodings: BufferEncoding[] = /^[0-9a-fA-F]+$/.test(span) ? ['hex', 'base64'] : ['base64'];
     for (const encoding of encodings) {
-      const decoded = Buffer.from(span, encoding).toString('latin1');
-      if (isPrintable(decoded) && (holdsForm(decoded, forms) || holdsToken(decoded) || CREDENTIAL_SHAPES.some(shape => shape.test(decoded)))) return true;
+      if (decodedHolds(Buffer.from(span, encoding).toString('latin1'), forms)) return true;
     }
   }
   return false;

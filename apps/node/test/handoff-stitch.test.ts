@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHandoffRuntime } from '../src/handoff-runtime.js';
 import { createTaskWorkspaceRegistry, type TaskWorkspaceBinding } from '../src/task-workspaces.js';
+import { accepted } from './handoff-stand.js';
 
 const id = (suffix: number) => `00000000-0000-4000-8000-${String(suffix).padStart(12, '0')}`;
 const nodeId = { kind: 'node' as const, nodeId: id(1) };
@@ -17,10 +18,10 @@ const played = vi.hoisted(() => ({ root: null as string | null }));
 vi.mock('node:fs', async importOriginal => {
   const fs = await importOriginal<typeof import('node:fs')>();
   const owned = (path: string) => played.root !== null && (path === played.root || path.startsWith(`${played.root}/task-workspace-registry`));
-  const asRoot = <T extends { uid: number; gid: number } | undefined>(value: T, path: string): T => (value && owned(path) ? Object.assign(value, { uid: 0, gid: 0 }) : value);
+  const asRoot = (value: unknown, path: string): unknown => (value && owned(path) ? Object.assign(value, { uid: 0, gid: 0 }) : value);
   return { ...fs,
-    lstatSync: new Proxy(fs.lstatSync, { apply: (target, receiver, args) => asRoot(Reflect.apply(target, receiver, args) as ReturnType<typeof fs.statSync>, String(args[0])) }),
-    fstatSync: new Proxy(fs.fstatSync, { apply: (target, receiver, args) => asRoot(Reflect.apply(target, receiver, args) as ReturnType<typeof fs.statSync>, fs.readlinkSync(`/proc/self/fd/${String(args[0])}`)) }),
+    lstatSync: new Proxy(fs.lstatSync, { apply: (target, receiver, args) => asRoot(Reflect.apply(target, receiver, args), String(args[0])) }),
+    fstatSync: new Proxy(fs.fstatSync, { apply: (target, receiver, args) => asRoot(Reflect.apply(target, receiver, args), fs.readlinkSync(`/proc/self/fd/${String(args[0])}`)) }),
   };
 });
 
@@ -85,12 +86,11 @@ describe('the checkpoint on the real workspace registry', () => {
     runtime.registerHandoffSource({ jobId: id(100), workspaceId: sourceBinding.workspaceId, assignmentEpoch: 3, programInstanceId: id(101), knownSecrets: [],
       readTaskRecords: async () => 'records\n', readLastTest: async () => null, quiesceEndedTurn: async () => true });
     const saved = await runtime.captureHandoff({ handoffId: id(50), captureId: id(51), captureSequence: 1, taskNumber: 434, fromJobId: id(100), binding: sourceBinding, owner, repo });
-    if (!saved.ok) throw new Error(`Capture refused: ${JSON.stringify(saved.problem)}`);
-    expect(saved.receipt).toMatchObject({ baseSha: sourceBinding.baseSha, requiresRepair: false, omittedFiles: 0, quiescent: true });
+    expect(accepted(saved)).toMatchObject({ baseSha: sourceBinding.baseSha, requiresRepair: false, omittedFiles: 0, quiescent: true });
 
-    const restored = await runtime.restoreHandoff({ binding: targetBinding, baseSha: saved.receipt.baseSha, checkpointSha: saved.receipt.checkpointSha, contentDigest: saved.receipt.contentDigest, owner, repo, secrets: [] });
-    if (!restored.ok) throw new Error(`Restore refused: ${JSON.stringify(restored.problem)}`);
-    expect(restored.receipt).toMatchObject({ epoch: 4, readyForPrompt: true, contextDir: join(targetTree, '..', 'handoff', id(51)) });
+    const { baseSha, checkpointSha, contentDigest } = accepted(saved);
+    const restored = await runtime.restoreHandoff({ binding: targetBinding, baseSha, checkpointSha, contentDigest, owner, repo, secrets: [] });
+    expect(accepted(restored)).toMatchObject({ epoch: 4, readyForPrompt: true, contextDir: join(targetTree, '..', 'handoff', id(51)) });
     expect(readFileSync(join(targetTree, 'src/app.ts'), 'utf8')).toBe('export const app = 2;\n');
     expect(readFileSync(join(targetTree, 'src/new.ts'), 'utf8')).toBe('export const fresh = 1;\n');
     expect(await asNode(() => registry.resolveTaskWorkspace(targetBinding))).toMatchObject({ sourceHeadSha: targetBinding.baseSha });

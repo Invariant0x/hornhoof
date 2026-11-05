@@ -1,29 +1,21 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { handoverPrompt, restoreTaskCheckpoint, type RestoreInput, type RestoreReceipt, type RestoreResult } from '../src/handoff-restore.js';
+import { handoverPrompt, restoreTaskCheckpoint, type RestoreInput } from '../src/handoff-restore.js';
 import { captureTaskCheckpoint, type CheckpointReceipt } from '../src/task-checkpoint.js';
-import { destinationOf, forgeWip, git, gitInput, id, makeStand, TASK_ID, wipManifest, WIP_REF, type Forged, type Stand } from './handoff-stand.js';
+import { accepted, destinationOf, forgeWip, git, gitInput, id, makeStand, TASK_ID, wipManifest, WIP_REF, type Forged, type Stand } from './handoff-stand.js';
 
 let stand: Stand;
 let destination: ReturnType<typeof destinationOf>;
 beforeEach(() => { stand = makeStand(); destination = destinationOf(stand); });
 afterEach(() => { stand.close(); });
 
-async function capture(more: Parameters<Stand['input']>[0] = {}): Promise<CheckpointReceipt> {
-  const result = await captureTaskCheckpoint(stand.input(more));
-  if (!result.ok) throw new Error(`Capture refused: ${JSON.stringify(result.problem)}`);
-  return result.receipt;
-}
+const capture = async (more: Parameters<Stand['input']>[0] = {}): Promise<CheckpointReceipt> => accepted(await captureTaskCheckpoint(stand.input(more)));
 const restoreInput = (receipt: Pick<CheckpointReceipt, 'baseSha' | 'checkpointSha' | 'contentDigest'>, more: Partial<RestoreInput> = {}): RestoreInput => ({
   taskId: TASK_ID, baseSha: receipt.baseSha, checkpointSha: receipt.checkpointSha, contentDigest: receipt.contentDigest,
   resolveWorkspace: async () => destination, owner: { uid: process.getuid!(), gid: process.getgid!() }, repo: { url: stand.remote, token: '' },
   journalRoot: join(stand.root, 'destination-journal'), secrets: [], ...more,
 });
-function restored(result: RestoreResult): RestoreReceipt {
-  if (!result.ok) throw new Error(`Restore refused: ${JSON.stringify(result.problem)}`);
-  return result.receipt;
-}
 const FAILED = { ok: false, problem: { phase: 'restore', code: 'restore_failed', retryable: false } };
 const read = (path: string) => readFileSync(join(destination.path, path), 'utf8');
 const present = (path: string) => existsSync(join(destination.path, path));
@@ -48,7 +40,7 @@ describe('a clean checkpoint restored', () => {
   it('gives the replacement the source files on its own clone at the base, and no more', async () => {
     dirtySource();
     const receipt = await capture();
-    const done = restored(await restoreTaskCheckpoint(restoreInput(receipt)));
+    const done = accepted(await restoreTaskCheckpoint(restoreInput(receipt)));
     expect(done).toMatchObject({ handoffId: id(10), captureId: id(11), taskId: TASK_ID, epoch: 4, baseSha: stand.baseSha, checkpointSha: receipt.checkpointSha, readyForPrompt: true });
     expect(done.restoredTreeDigest).toMatch(/^[0-9a-f]{64}$/);
     for (const path of ['src/committed.ts', 'src/staged.ts', 'src/changed.ts', 'deep/er/renamed.ts', 'src/untracked.ts', 'run.sh']) {
@@ -70,7 +62,7 @@ describe('a clean checkpoint restored', () => {
     dirtySource();
     const receipt = await capture();
     const before = git(stand.source, 'status', '--porcelain=v2', '-z'), head = git(stand.source, 'rev-parse', 'HEAD');
-    restored(await restoreTaskCheckpoint(restoreInput(receipt)));
+    accepted(await restoreTaskCheckpoint(restoreInput(receipt)));
     expect(git(stand.source, 'status', '--porcelain=v2', '-z')).toBe(before);
     expect(git(stand.source, 'rev-parse', 'HEAD')).toBe(head);
   });
@@ -80,7 +72,7 @@ describe('a clean checkpoint restored', () => {
     stand.write('src/keep.ts/inside.ts', 'export const inside = 1;\n');
     rmSync(join(stand.source, 'src/gone.ts'));
     const receipt = await capture();
-    restored(await restoreTaskCheckpoint(restoreInput(receipt)));
+    accepted(await restoreTaskCheckpoint(restoreInput(receipt)));
     expect(read('src/keep.ts/inside.ts')).toBe('export const inside = 1;\n');
   });
 
@@ -95,7 +87,7 @@ describe('a clean checkpoint restored', () => {
     rmSync(join(stand.source, 'only'), { recursive: true });
     stand.write('only', 'now a file\n');
     const receipt = await capture({ baseSha: base });
-    restored(await restoreTaskCheckpoint(restoreInput(receipt)));
+    accepted(await restoreTaskCheckpoint(restoreInput(receipt)));
     expect(read('only')).toBe('now a file\n');
   });
 
@@ -104,7 +96,7 @@ describe('a clean checkpoint restored', () => {
     const first = await capture();
     stand.write('src/changed.ts', 'export const changed = 3;\n');
     await capture({ captureId: id(12), captureSequence: 2 });
-    restored(await restoreTaskCheckpoint(restoreInput(first)));
+    accepted(await restoreTaskCheckpoint(restoreInput(first)));
     expect(read('src/changed.ts')).toBe('export const changed = 2;\n');
   });
 
@@ -113,17 +105,17 @@ describe('a clean checkpoint restored', () => {
     await capture();
     stand.write('src/changed.ts', 'export const changed = 3;\n');
     const second = await capture({ captureId: id(12), captureSequence: 2 });
-    expect(restored(await restoreTaskCheckpoint(restoreInput(second))).captureId).toBe(id(12));
+    expect(accepted(await restoreTaskCheckpoint(restoreInput(second))).captureId).toBe(id(12));
     expect(read('src/changed.ts')).toBe('export const changed = 3;\n');
   });
 
   it('a second restore answers the same and leaves what the replacement did since', async () => {
     stand.write('src/changed.ts', 'export const changed = 2;\n');
     const receipt = await capture();
-    const first = restored(await restoreTaskCheckpoint(restoreInput(receipt)));
+    const first = accepted(await restoreTaskCheckpoint(restoreInput(receipt)));
     writeFileSync(join(destination.path, 'src/changed.ts'), 'export const changed = 99;\n');
     writeFileSync(join(destination.path, 'src/own.ts'), 'export const own = 1;\n');
-    expect(restored(await restoreTaskCheckpoint(restoreInput(receipt)))).toEqual(first);
+    expect(accepted(await restoreTaskCheckpoint(restoreInput(receipt)))).toEqual(first);
     expect(read('src/changed.ts')).toBe('export const changed = 99;\n');
     expect(read('src/own.ts')).toBe('export const own = 1;\n');
   });
@@ -133,9 +125,28 @@ describe('a clean checkpoint restored', () => {
     const receipt = await capture();
     writeFileSync(join(destination.path, 'src/changed.ts'), 'half');
     mkdirSync(join(destination.path, 'deep'));
-    restored(await restoreTaskCheckpoint(restoreInput(receipt)));
+    accepted(await restoreTaskCheckpoint(restoreInput(receipt)));
     expect(read('src/changed.ts')).toBe('export const changed = 2;\n');
     expect(read('deep/er/renamed.ts')).toBe('export const moved = 1;\n');
+  });
+});
+
+describe('a restore cut short by a crash', () => {
+  it('clears the temporary file the crash left, and nothing else of that kind', async () => {
+    stand.write('src/changed.ts', 'export const changed = 2;\n');
+    const receipt = await capture();
+    const leftover = `.hh-restore-${id(77)}`;
+    writeFileSync(join(destination.path, 'src', leftover), 'half');
+    accepted(await restoreTaskCheckpoint(restoreInput(receipt)));
+    expect(present(`src/${leftover}`)).toBe(false);
+    expect(read('src/changed.ts')).toBe('export const changed = 2;\n');
+  });
+  it('keeps a file that only looks like one', async () => {
+    stand.write('src/changed.ts', 'export const changed = 2;\n');
+    const receipt = await capture();
+    writeFileSync(join(destination.path, 'src/.hh-restore-mine'), 'somebody else\n');
+    expect(await restoreTaskCheckpoint(restoreInput(receipt))).toEqual(FAILED);
+    expect(read('src/.hh-restore-mine')).toBe('somebody else\n');
   });
 });
 
@@ -145,7 +156,7 @@ describe('what the predecessor left', () => {
   it('lies beside the repository as data, and the trusted prompt carries none of it', async () => {
     stand.write('src/changed.ts', 'export const changed = 2;\n');
     const receipt = await capture({ conversationTail: `${ORDER}\n`, lastTests: `${ORDER} too\n` });
-    const done = restored(await restoreTaskCheckpoint(restoreInput(receipt)));
+    const done = accepted(await restoreTaskCheckpoint(restoreInput(receipt)));
     expect(done.contextDir).toBe(join(stand.root, 'handoff', id(11)));
     expect(readFileSync(join(done.contextDir, 'conversation-tail.txt'), 'utf8')).toBe(`${ORDER}\n`);
     expect(readFileSync(join(done.contextDir, 'last-tests.txt'), 'utf8')).toBe(`${ORDER} too\n`);
@@ -174,7 +185,7 @@ describe('what the predecessor left', () => {
     git(destination.path, 'config', 'filter.evil.smudge', script);
     git(destination.path, 'config', 'core.fsmonitor', script);
     git(destination.path, 'config', 'core.hooksPath', '.githooks');
-    restored(await restoreTaskCheckpoint(restoreInput(receipt)));
+    accepted(await restoreTaskCheckpoint(restoreInput(receipt)));
     expect(existsSync(mark)).toBe(false);
     expect(read('.husky/pre-commit')).toBe(program);
     expect(statSync(join(destination.path, '.husky/pre-commit')).mode & 0o111).toBe(0);

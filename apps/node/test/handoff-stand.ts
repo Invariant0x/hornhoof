@@ -13,6 +13,12 @@ export const WIP_REF = `refs/heads/wip/task-${TASK_ID}`;
 const GIT_ENV = { PATH: '/usr/bin:/bin', HOME: '/nonexistent', LANG: 'C', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null',
   GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@example.invalid', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@example.invalid' };
 
+/* The receipt of a result the test expects to go through, or the fixed problem in the failure. */
+export function accepted<T>(result: { ok: true; receipt: T } | { ok: false; problem: unknown }): T {
+  if (!result.ok) throw new Error(`Refused: ${JSON.stringify(result.problem)}`);
+  return result.receipt;
+}
+
 export function git(cwd: string, ...args: string[]): string {
   return execFileSync('/usr/bin/git', args, { cwd, env: GIT_ENV, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 256 * 1024 * 1024 }).trim();
 }

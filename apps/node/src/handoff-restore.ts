@@ -48,18 +48,20 @@ function assertAdoptable(snapshot: WipSnapshot, input: RestoreInput, workspace: 
   if (snapshot.digest !== input.contentDigest || manifest.baseSha !== input.baseSha || workspace.sourceHeadSha !== manifest.baseSha || manifest.requiresRepair) throw refused();
   if (workspace.binding.assignmentEpoch <= manifest.epoch) throw new HandoffFault('stale_epoch');
 }
-/* Only what this restore itself would have left: anything else there is somebody's work. */
-async function assertNoOtherWork(workspace: VerifiedWorkspace, input: RestoreInput, manifest: Manifest): Promise<void> {
+const TEMPORARY = /(?:^|\/)\.hh-restore-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/* Only what this restore itself would have left, and the temporary file a crash left: anything else there is somebody's work. */
+async function clearOwnLeftovers(workspace: VerifiedWorkspace, input: RestoreInput, manifest: Manifest): Promise<void> {
   const own = new Set(manifest.files.map(file => file.path));
   for (const delta of await readDeltas(workspace, input, manifest.baseSha)) {
-    if ((delta.tracked || classifyPath(delta.path) === 'task') && (delta.doubtful || !own.has(delta.path))) throw refused();
+    if (!delta.tracked && TEMPORARY.test(delta.path)) removeFile(workspace.realPath, delta.path);
+    else if ((delta.tracked || classifyPath(delta.path) === 'task') && (delta.doubtful || !own.has(delta.path))) throw refused();
   }
 }
 /* A folder on the way that is a link stops everything before the first write. A file or nothing there is for the deletes to settle. */
 function assertRealFolders(root: string, files: readonly ManifestFile[]): void {
   for (const file of files) {
     try { withPinnedFolder(root, file.path.split('/').slice(0, -1), () => undefined); } catch (error) {
-      if (errorCode(error) !== 'ENOENT' && errorCode(error) !== 'ENOTDIR') throw refused();
+      if (!gone(error)) throw refused();
     }
   }
 }
@@ -92,10 +94,13 @@ function writePlain(root: string, path: string, bytes: Buffer, mode: number, own
     } catch (error) { rmSync(temporary, { force: true }); throw error; }
   }, enterFolder(owner));
 }
+const gone = (error: unknown): boolean => errorCode(error) === 'ENOENT' || errorCode(error) === 'ENOTDIR';
 function removeFile(root: string, path: string): void {
   const parts = path.split('/'), name = parts.pop()!;
-  try { withPinnedFolder(root, parts, folder => { unlinkSync(under(folder, name)); }); } catch (error) {
-    if (errorCode(error) !== 'ENOENT' && errorCode(error) !== 'ENOTDIR') throw error;
+  try {
+    withPinnedFolder(root, parts, folder => { unlinkSync(under(folder, name)); });
+  } catch (error) {
+    if (!gone(error)) throw error;
   }
   pruneEmpty(root, parts);
 }
@@ -112,7 +117,7 @@ function applyManifest(root: string, snapshot: WipSnapshot, owner: JobUser): voi
 }
 /* A deleted file may have left its name to a folder of the same name. */
 function holdsNoFile(root: string, path: string): boolean {
-  try { return lstatSync(join(root, path)).isDirectory(); } catch (error) { return errorCode(error) === 'ENOENT' || errorCode(error) === 'ENOTDIR'; }
+  try { return lstatSync(join(root, path)).isDirectory(); } catch (error) { return gone(error); }
 }
 /* Read back from the workspace, against the manifest: a digest of what is there, never of what was meant to be. */
 function restoredDigest(workspace: VerifiedWorkspace, manifest: Manifest): string {
@@ -136,7 +141,7 @@ function writeContext(workspace: VerifiedWorkspace, snapshot: WipSnapshot, owner
 async function restoreOnce(input: RestoreInput, workspace: VerifiedWorkspace, scratch: string): Promise<z.infer<typeof Done>> {
   const snapshot = await fetchCheckpoint(input, scratch), { manifest } = snapshot;
   assertAdoptable(snapshot, input, workspace);
-  await assertNoOtherWork(workspace, input, manifest);
+  await clearOwnLeftovers(workspace, input, manifest);
   assertRealFolders(workspace.realPath, manifest.files);
   const contextDir = writeContext(workspace, snapshot, input.owner);
   applyManifest(workspace.realPath, snapshot, input.owner);
@@ -169,7 +174,7 @@ export async function restoreTaskCheckpoint(input: RestoreInput): Promise<Restor
     const folder = join(input.journalRoot, 'restores');
     privateFolder(input.journalRoot);
     privateFolder(folder);
-    return { ok: true, receipt: await withPublisherLease(join(folder, `${taskId}.lock`), () => restoreUnderLease(input, folder)) };
+    return { ok: true, receipt: await withPublisherLease(join(folder, `${taskId}.lock`), () => restoreUnderLease(input, folder), input.signal) };
   } catch (error) {
     return { ok: false, problem: restoreProblem(error) };
   }

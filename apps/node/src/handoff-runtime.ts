@@ -1,6 +1,6 @@
 import type { Failure, TaskWorkspaceBinding, VerifiedWorkspace, WorkspaceProblem } from '@hornhoof/protocol';
 import { restoreTaskCheckpoint, type RestoreResult } from './handoff-restore.js';
-import { problemOf, type HandoffCode, type RemoteRepo } from './handoff-wip.js';
+import type { HandoffCode, RemoteRepo } from './handoff-wip.js';
 import type { JobUser } from './isolation.js';
 import { captureIsSealed, captureTaskCheckpoint, type CheckpointResult } from './task-checkpoint.js';
 
@@ -37,39 +37,39 @@ const stopped = async (source: HandoffSource): Promise<boolean> => {
   try { return await source.quiesceEndedTurn(source.programInstanceId); } catch { return false; }
 };
 
+type Leases = Map<string, Lease>;
+
+function renewLease(leases: Leases, source: HandoffSource): void {
+  const lease = leases.get(source.workspaceId), epoch = lease?.latest.assignmentEpoch ?? -1;
+  if (source.assignmentEpoch < epoch) return;
+  const kept = lease && source.assignmentEpoch === epoch ? lease : { secrets: [], jobs: [] };
+  leases.set(source.workspaceId, { latest: source, secrets: new Set([...kept.secrets, ...source.knownSecrets]), jobs: new Set([...kept.jobs, source.jobId]) });
+}
+function runCapture(options: HandoffRuntimeOptions, request: CaptureRequest, secrets: Iterable<string>, lastTests: string | null, conversationTail: string | null): Promise<CheckpointResult> {
+  const { handoffId, captureId, captureSequence, taskNumber, owner, repo, baseSha, declaredOutputs, signal, binding } = request;
+  return captureTaskCheckpoint({ handoffId, captureId, captureSequence, taskId: binding.taskId, taskNumber, owner, repo, baseSha, declaredOutputs, signal, lastTests, conversationTail,
+    resolveWorkspace: () => options.resolveTaskWorkspace(binding), journalRoot: options.journalRoot, secrets: [...secrets] });
+}
+async function captureFromLease(options: HandoffRuntimeOptions, lease: Lease | undefined, request: CaptureRequest): Promise<CheckpointResult> {
+  if (!lease?.jobs.has(request.fromJobId)) return refused('source_context_lost');
+  if (lease.latest.assignmentEpoch !== request.binding.assignmentEpoch) return refused('stale_epoch');
+  if (!(await stopped(lease.latest))) return refused('source_not_quiescent', true);
+  const lastTests = await orNothing(lease.latest.readLastTest), records = await orNothing(lease.latest.readTaskRecords);
+  return runCapture(options, request, lease.secrets, lastTests, records);
+}
 export function createHandoffRuntime(options: HandoffRuntimeOptions): HandoffRuntime {
-  const leases = new Map<string, Lease>();
-  const { journalRoot } = options;
-
-  function registerHandoffSource(source: HandoffSource): void {
-    const lease = leases.get(source.workspaceId), epoch = lease?.latest.assignmentEpoch ?? -1;
-    if (source.assignmentEpoch < epoch) return;
-    const same = lease && source.assignmentEpoch === epoch;
-    leases.set(source.workspaceId, { latest: source, secrets: new Set([...(same ? lease.secrets : []), ...source.knownSecrets]), jobs: new Set([...(same ? lease.jobs : []), source.jobId]) });
-  }
-  const capture = (request: CaptureRequest, secrets: readonly string[], lastTests: string | null, conversationTail: string | null): Promise<CheckpointResult> =>
-    captureTaskCheckpoint({ handoffId: request.handoffId, captureId: request.captureId, captureSequence: request.captureSequence, taskId: request.binding.taskId, taskNumber: request.taskNumber,
-      resolveWorkspace: () => options.resolveTaskWorkspace(request.binding), owner: request.owner, repo: request.repo, journalRoot, secrets, lastTests, conversationTail,
-      ...(request.baseSha === undefined ? {} : { baseSha: request.baseSha }), ...(request.declaredOutputs === undefined ? {} : { declaredOutputs: request.declaredOutputs }), ...(request.signal === undefined ? {} : { signal: request.signal }) });
-
-  async function captureHandoff(request: CaptureRequest): Promise<CheckpointResult> {
-    /* A sealed attempt reads nothing, so it needs no lease: a restarted node still answers a lost acknowledgement with the same commit. */
-    if (captureIsSealed(journalRoot, request.handoffId, request.captureId)) return capture(request, [...(leases.get(request.binding.workspaceId)?.secrets ?? [])], null, null);
-    const lease = leases.get(request.binding.workspaceId);
-    if (!lease || !lease.jobs.has(request.fromJobId)) return refused('source_context_lost');
-    if (lease.latest.assignmentEpoch !== request.binding.assignmentEpoch) return refused('stale_epoch');
-    if (!(await stopped(lease.latest))) return refused('source_not_quiescent', true);
-    const lastTests = await orNothing(lease.latest.readLastTest), records = await orNothing(lease.latest.readTaskRecords);
-    return capture(request, [...lease.secrets], lastTests, records);
-  }
-  async function restoreHandoff(request: RestoreRequest): Promise<RestoreResult> {
-    try {
-      return await restoreTaskCheckpoint({ taskId: request.binding.taskId, baseSha: request.baseSha, checkpointSha: request.checkpointSha, contentDigest: request.contentDigest,
-        resolveWorkspace: () => options.resolveTaskWorkspace(request.binding), owner: request.owner, repo: request.repo, journalRoot, secrets: [...request.secrets, request.repo.token].filter(Boolean),
-        ...(request.signal === undefined ? {} : { signal: request.signal }) });
-    } catch (error) { return { ok: false, problem: problemOf(error, 'restore') }; }
-  }
-  return { registerHandoffSource, forgetHandoffSource: workspaceId => { leases.delete(workspaceId); }, captureHandoff, restoreHandoff };
+  const leases: Leases = new Map();
+  return {
+    registerHandoffSource: source => { renewLease(leases, source); },
+    forgetHandoffSource: workspaceId => { leases.delete(workspaceId); },
+    captureHandoff: request => {
+      const lease = leases.get(request.binding.workspaceId);
+      /* A sealed attempt reads nothing, so it needs no lease: a restarted node still answers a lost acknowledgement with the same commit. */
+      return captureIsSealed(options.journalRoot, request.handoffId, request.captureId) ? runCapture(options, request, lease?.secrets ?? [], null, null) : captureFromLease(options, lease, request);
+    },
+    restoreHandoff: ({ binding, secrets, ...rest }) => restoreTaskCheckpoint({ ...rest, taskId: binding.taskId, resolveWorkspace: () => options.resolveTaskWorkspace(binding),
+      journalRoot: options.journalRoot, secrets: [...secrets, rest.repo.token].filter(Boolean) }),
+  };
 }
 
 /* What a failed turn means for a handover, from the program's own typed failure of this turn and nothing else: an exit code or a screen says none of it.

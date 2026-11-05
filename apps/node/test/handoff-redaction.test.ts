@@ -136,6 +136,21 @@ describe('opaque values', () => {
   });
 });
 
+describe('a short span that hides something once decoded', () => {
+  const secret = ['sh', 'ort', '1'].join('');
+  const inside = `prefix ${secret} suffix`;
+  it.each([
+    ['base64 of a known secret among other words', Buffer.from(inside).toString('base64')],
+    ['hex of a known secret among other words', Buffer.from(`prefix ${secret}`).toString('hex')],
+    ['base64 of a credential address', Buffer.from('postgres://u:p@h/d').toString('base64')],
+  ])('redacts %s', (_name, span) => {
+    expect(sanitizeText(`keep\nvalue ${span}\nkeep too\n`, [secret]).text).toBe(`keep\n${REDACTED}\nkeep too\n`);
+  });
+  it.each(['AAAAAAAAAAAAAAAAAAAA', 'abcdefghijklmnopqrstuv', 'renderHomePageComponent', 'a-long-kebab-case-name-here'])('keeps %s, which decodes to nothing readable', span => {
+    expect(isSanitized(`value ${span}\n`, [secret])).toBe(true);
+  });
+});
+
 describe('obfuscated records', () => {
   it.each([
     ['ANSI codes', `ghp\u001b[0m_x7Kq2Lm9Pz4Rt8Vw`],

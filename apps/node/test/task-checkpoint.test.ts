@@ -3,17 +3,13 @@ import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { MAX_EXPORT_FILES, captureTaskCheckpoint, type CheckpointReceipt, type CheckpointResult } from '../src/task-checkpoint.js';
-import { closure, git, gitInput, id, makeStand, TASK_ID, wipFile, wipManifest, wipPaths, WIP_REF, type Stand } from './handoff-stand.js';
+import { MAX_EXPORT_FILES, captureTaskCheckpoint } from '../src/task-checkpoint.js';
+import { accepted, closure, git, gitInput, id, makeStand, TASK_ID, wipFile, wipManifest, wipPaths, WIP_REF, type Stand } from './handoff-stand.js';
 
 let stand: Stand;
 beforeEach(() => { stand = makeStand(); });
 afterEach(() => { stand.close(); });
 
-function saved(result: CheckpointResult): CheckpointReceipt {
-  if (!result.ok) throw new Error(`Capture refused: ${JSON.stringify(result.problem)}`);
-  return result.receipt;
-}
 const fileOf = (path: string) => wipManifest(stand.remote).files.find(file => file.path === path);
 const sha256 = (text: string | Buffer) => createHash('sha256').update(text).digest('hex');
 const everything = () => closure(stand.remote).map(object => object.body).join('\n');
@@ -39,7 +35,7 @@ describe('what a checkpoint holds', () => {
   it('is one orphan commit of fixed paths with the whole change against the base', async () => {
     dirtyWorkspace();
     const headBefore = git(stand.source, 'rev-parse', 'HEAD');
-    const receipt = saved(await captureTaskCheckpoint(stand.input()));
+    const receipt = accepted(await captureTaskCheckpoint(stand.input()));
 
     expect(git(stand.remote, 'rev-parse', WIP_REF)).toBe(receipt.checkpointSha);
     expect(git(stand.remote, 'rev-list', '--parents', WIP_REF)).toBe(receipt.checkpointSha);
@@ -65,7 +61,7 @@ describe('what a checkpoint holds', () => {
 
   it('keeps every payload entry a plain file and the fixed identity on the commit', async () => {
     dirtyWorkspace();
-    saved(await captureTaskCheckpoint(stand.input()));
+    accepted(await captureTaskCheckpoint(stand.input()));
     const modes = git(stand.remote, 'ls-tree', '-r', WIP_REF).split('\n').map(line => line.split(' ')[0]);
     expect(new Set(modes)).toEqual(new Set(['100644']));
     const commit = git(stand.remote, 'cat-file', 'commit', WIP_REF);
@@ -74,7 +70,7 @@ describe('what a checkpoint holds', () => {
 
   it('carries no project history: no base, no source commit, no blob of a commit taken back', async () => {
     dirtyWorkspace();
-    saved(await captureTaskCheckpoint(stand.input()));
+    accepted(await captureTaskCheckpoint(stand.input()));
     const objects = closure(stand.remote), shas = objects.map(object => object.sha);
     expect(shas).not.toContain(stand.baseSha);
     expect(shas).not.toContain(git(stand.source, 'rev-parse', 'HEAD'));
@@ -89,7 +85,7 @@ describe('what a checkpoint holds', () => {
   it('counts the three context parts in fixed files and says when one is unavailable', async () => {
     stand.write('src/changed.ts', 'export const changed = 2;\n');
     stand.write('.env', 'not read at all\n');
-    saved(await captureTaskCheckpoint(stand.input({ lastTests: null, conversationTail: 'line one\nline two\n' })));
+    accepted(await captureTaskCheckpoint(stand.input({ lastTests: null, conversationTail: 'line one\nline two\n' })));
     expect(wipManifest(stand.remote).context).toEqual({ diffStat: 'present', lastTests: 'unavailable', conversationTail: 'present' });
     expect(wipFile(stand.remote, 'meta/last-tests.txt')).toBe('unavailable');
     expect(wipFile(stand.remote, 'meta/conversation-tail.txt')).toBe('line one\nline two');
@@ -106,7 +102,7 @@ describe('what a checkpoint holds', () => {
     git(tree, 'add', 'src/changed.ts');
     const workspace = { ...stand.workspace(), realPath: tree, sourceHeadSha: git(tree, 'rev-parse', 'HEAD'),
       gitCommonDir: git(tree, 'rev-parse', '--path-format=absolute', '--git-common-dir') };
-    saved(await captureTaskCheckpoint(stand.input({ resolveWorkspace: async () => workspace })));
+    accepted(await captureTaskCheckpoint(stand.input({ resolveWorkspace: async () => workspace })));
     expect(wipManifest(stand.remote).files.map(file => file.path)).toEqual(['src/changed.ts']);
   });
 });
@@ -120,7 +116,7 @@ describe('the source workspace', () => {
       stash: git(stand.source, 'stash', 'list'), refs: git(stand.source, 'for-each-ref'),
     });
     const before = look(), status = git(stand.source, 'status', '--porcelain=v2', '-z');
-    saved(await captureTaskCheckpoint(stand.input()));
+    accepted(await captureTaskCheckpoint(stand.input()));
     expect(look()).toEqual({ ...before, index: look().index });
     expect(git(stand.source, 'status', '--porcelain=v2', '-z')).toBe(status);
     expect(git(stand.remote, 'rev-parse', 'refs/heads/main')).toBe(stand.baseSha);
@@ -146,7 +142,7 @@ describe('the source workspace', () => {
     for (const hook of ['post-index-change', 'pre-push', 'reference-transaction']) { writeFileSync(join(stand.root, 'hooks', hook), `#!/bin/sh\ntouch '${mark}'\n`); chmodSync(join(stand.root, 'hooks', hook), 0o755); }
     writeFileSync(join(stand.source, '.gitattributes'), '* filter=evil diff=evil\n');
     stand.write('src/changed.ts', 'export const changed = 2;\n');
-    saved(await captureTaskCheckpoint(stand.input()));
+    accepted(await captureTaskCheckpoint(stand.input()));
     expect(existsSync(mark)).toBe(false);
     expect(fileOf('src/changed.ts')?.status).toBe('clean');
   });
@@ -157,7 +153,7 @@ describe('the source workspace', () => {
     }
     stand.write('src/changed.ts', 'export const changed = 2;\n');
     stand.write('src/keep.ts', 'export const keep = 2;\n');
-    const receipt = saved(await captureTaskCheckpoint(stand.input()));
+    const receipt = accepted(await captureTaskCheckpoint(stand.input()));
     expect(receipt.requiresRepair).toBe(true);
     expect(fileOf('src/changed.ts')).toMatchObject({ status: 'omitted', contentSha256: null });
     expect(fileOf('src/keep.ts')).toMatchObject({ status: 'omitted', contentSha256: null });
@@ -173,7 +169,7 @@ describe('the source workspace', () => {
       stand.write('src/changed.ts', 'export const changed = 2;\n');
     }
     await new Promise(resolve => setTimeout(resolve, 1100));
-    saved(await captureTaskCheckpoint(stand.input()));
+    accepted(await captureTaskCheckpoint(stand.input()));
     expect(wipFile(stand.remote, `files/${fileOf('src/changed.ts')!.id}`)).toBe('export const changed = 2;');
   });
 
@@ -211,7 +207,7 @@ describe('secrets do not leave', () => {
     const secret = ['q', 'z', '7', 'x'].join('');
     stand.write('src/changed.ts', `export const changed = 2;\nconst note = "${secret}";\nconst more = "${Buffer.from(secret).toString('base64')}";\nexport const after = 1;\n`);
     stand.write(`src/${secret}/name.ts`, 'export const named = 1;\n');
-    const receipt = saved(await captureTaskCheckpoint(stand.input({ secrets: [secret],
+    const receipt = accepted(await captureTaskCheckpoint(stand.input({ secrets: [secret],
       lastTests: `ok\nthe run used ${secret} here\nok again\n`, conversationTail: `said ${secret}\nsaid nothing\n` })));
     const body = everything();
     for (const form of SECRET_FORMS(secret)) expect(body).not.toContain(form);
@@ -226,7 +222,7 @@ describe('secrets do not leave', () => {
   it('joins the repository token to the secrets it was told about', async () => {
     const token = ['tok', 'en', 'value', '9'].join('-');
     stand.write('src/changed.ts', `const seen = "${token}";\n`);
-    const receipt = saved(await captureTaskCheckpoint(stand.input({ repo: { url: `file://${stand.remote}`, token } })));
+    const receipt = accepted(await captureTaskCheckpoint(stand.input({ repo: { url: `file://${stand.remote}`, token } })));
     expect(receipt.requiresRepair).toBe(true);
     expect(everything()).not.toContain(token);
   });
@@ -234,7 +230,7 @@ describe('secrets do not leave', () => {
   it('does not let metadata alone stop a clean handover', async () => {
     stand.write('src/changed.ts', 'export const changed = 2;\n');
     const fake = ['gh', 'p_', 'A'.repeat(36)].join('');
-    const receipt = saved(await captureTaskCheckpoint(stand.input({ lastTests: `token ${fake}\n`, conversationTail: `Authorization: Bearer ${['abc', 'def', '0123456789'].join('')}\n` })));
+    const receipt = accepted(await captureTaskCheckpoint(stand.input({ lastTests: `token ${fake}\n`, conversationTail: `Authorization: Bearer ${['abc', 'def', '0123456789'].join('')}\n` })));
     expect(receipt).toMatchObject({ requiresRepair: false, redactedFiles: 0 });
     expect(everything()).not.toContain(fake);
     expect(wipFile(stand.remote, 'meta/conversation-tail.txt')).toBe('[redacted]');
@@ -244,14 +240,14 @@ describe('secrets do not leave', () => {
     const value = ['value', 'of', 'dot', 'env'].join('-');
     stand.write('.env', `PLAIN=${value}\n`);
     stand.write('config/credentials.json', `{"plain":"${value}"}\n`);
-    let receipt = saved(await captureTaskCheckpoint(stand.input()));
+    let receipt = accepted(await captureTaskCheckpoint(stand.input()));
     expect(receipt.requiresRepair).toBe(false);
     expect(everything()).not.toContain(value);
     expect(wipPaths(stand.remote).filter(path => path.startsWith('files/'))).toEqual([]);
     expect(wipFile(stand.remote, 'meta/diff-stat.txt')).toContain('left out as not task work 2');
 
     git(stand.source, 'add', '-f', '.env');
-    receipt = saved(await captureTaskCheckpoint(stand.input({ captureId: id(12), captureSequence: 2 })));
+    receipt = accepted(await captureTaskCheckpoint(stand.input({ captureId: id(12), captureSequence: 2 })));
     expect(receipt).toMatchObject({ requiresRepair: true, omittedFiles: 1 });
     expect(fileOf('.env')).toMatchObject({ status: 'omitted', contentSha256: null, mode: null });
     expect(everything()).not.toContain(value);
@@ -261,14 +257,14 @@ describe('secrets do not leave', () => {
     const generated = ['generated', 'bundle', 'text'].join('-');
     stand.write('dist/app.js', `${generated}\n`);
     stand.write('node_modules/lib/index.js', `${generated}\n`);
-    expect(saved(await captureTaskCheckpoint(stand.input())).requiresRepair).toBe(false);
+    expect(accepted(await captureTaskCheckpoint(stand.input())).requiresRepair).toBe(false);
     expect(everything()).not.toContain(generated);
 
     const refused = await captureTaskCheckpoint(stand.input({ captureId: id(12), captureSequence: 2, declaredOutputs: ['dist/app.js'] }));
     expect(refused).toEqual({ ok: false, problem: { phase: 'capture', code: 'unsupported_required_output', retryable: false } });
 
     git(stand.source, 'add', '-f', 'dist/app.js');
-    const tracked = saved(await captureTaskCheckpoint(stand.input({ captureId: id(13), captureSequence: 3 })));
+    const tracked = accepted(await captureTaskCheckpoint(stand.input({ captureId: id(13), captureSequence: 3 })));
     expect(tracked.requiresRepair).toBe(true);
     expect(fileOf('dist/app.js')?.status).toBe('omitted');
   });
@@ -276,7 +272,7 @@ describe('secrets do not leave', () => {
   it('finds a declared output Git ignores, under the same cleaning', async () => {
     writeFileSync(join(stand.source, '.gitignore'), 'report.txt\n');
     stand.write('report.txt', 'a report the task owes\n');
-    saved(await captureTaskCheckpoint(stand.input({ declaredOutputs: ['report.txt'] })));
+    accepted(await captureTaskCheckpoint(stand.input({ declaredOutputs: ['report.txt'] })));
     expect(fileOf('report.txt')).toMatchObject({ status: 'clean', action: 'add' });
     expect(wipFile(stand.remote, `files/${fileOf('report.txt')!.id}`)).toBe('a report the task owes');
   });
@@ -294,7 +290,7 @@ describe('secrets do not leave', () => {
     symlinkSync(join(stand.root), join(stand.source, 'links/folder'));
     linkSync(outside, join(stand.source, 'links/hard'));
     execFileSync('/usr/bin/mkfifo', [join(stand.source, 'links/pipe')]);
-    const receipt = saved(await captureTaskCheckpoint(stand.input()));
+    const receipt = accepted(await captureTaskCheckpoint(stand.input()));
     expect(receipt.requiresRepair).toBe(true);
     const statuses = Object.fromEntries(wipManifest(stand.remote).files.map(file => [file.path, file.status]));
     for (const path of ['bin/blob.bin', 'bad/latin.txt', 'big/large.txt', 'lfs/pointer.bin', 'links/external', 'links/internal', 'links/folder', 'links/hard']) expect(statuses[path]).toBe('omitted');
@@ -306,7 +302,7 @@ describe('secrets do not leave', () => {
   it('withholds a file whose name is no valid text, and does not spell the name', async () => {
     const name = Buffer.concat([Buffer.from(join(stand.source, 'src/caf')), Buffer.from([0xe9]), Buffer.from('.ts')]);
     writeFileSync(name, 'export const named = 1;\n');
-    const receipt = saved(await captureTaskCheckpoint(stand.input()));
+    const receipt = accepted(await captureTaskCheckpoint(stand.input()));
     expect(receipt).toMatchObject({ requiresRepair: true, omittedFiles: 1 });
     expect(wipManifest(stand.remote).files.map(file => [file.path, file.status])).toEqual([['[redacted]', 'omitted']]);
     expect(everything()).not.toContain('caf');
@@ -319,19 +315,56 @@ describe('secrets do not leave', () => {
     writeFileSync(join(nested, 'inner.txt'), 'inner\n');
     git(nested, 'add', '-A');
     git(nested, 'commit', '--quiet', '-m', 'Inner');
-    const receipt = saved(await captureTaskCheckpoint(stand.input()));
+    const receipt = accepted(await captureTaskCheckpoint(stand.input()));
     expect(receipt.requiresRepair).toBe(true);
     expect(wipManifest(stand.remote).files.map(file => [file.path, file.status])).toEqual([['nested', 'omitted']]);
     git(stand.source, 'add', 'nested');
-    const gitlink = saved(await captureTaskCheckpoint(stand.input({ captureId: id(12), captureSequence: 2 })));
+    const gitlink = accepted(await captureTaskCheckpoint(stand.input({ captureId: id(12), captureSequence: 2 })));
     expect(gitlink.requiresRepair).toBe(true);
     expect(fileOf('nested')).toMatchObject({ status: 'omitted' });
+  });
+
+  describe('a submodule', () => {
+    function submodule(): { nested: string; mark: string; program: string } {
+      const nested = join(stand.source, 'nested'), mark = join(stand.root, 'ran'), program = join(stand.root, 'program.sh');
+      writeFileSync(program, `#!/bin/sh\ntouch '${mark}'\ncat\n`);
+      chmodSync(program, 0o755);
+      git(stand.root, 'init', '--quiet', nested);
+      writeFileSync(join(nested, 'inner.txt'), 'inner\n');
+      writeFileSync(join(nested, '.gitattributes'), '* filter=evil\n');
+      git(nested, 'add', '-A');
+      git(nested, 'commit', '--quiet', '-m', 'Inner');
+      git(stand.source, 'add', 'nested');
+      return { nested, mark, program };
+    }
+    it('is not entered: its settings run nothing, and work that may lie in it is marked', async () => {
+      const { nested, mark, program } = submodule();
+      const base = stand.commit('A submodule');
+      git(nested, 'config', 'filter.evil.clean', program);
+      git(nested, 'config', 'core.fsmonitor', program);
+      writeFileSync(join(nested, 'inner.txt'), 'inner work\n');
+      const receipt = accepted(await captureTaskCheckpoint(stand.input({ baseSha: base })));
+      expect(existsSync(mark)).toBe(false);
+      expect(receipt.requiresRepair).toBe(true);
+      expect(fileOf('nested')).toMatchObject({ status: 'omitted' });
+      expect(everything()).not.toContain('inner work');
+    });
+    it('that nobody checked out holds no work and stops nothing', async () => {
+      const { nested } = submodule();
+      const base = stand.commit('A submodule');
+      rmSync(nested, { recursive: true });
+      mkdirSync(nested);
+      stand.write('src/changed.ts', 'export const changed = 2;\n');
+      const receipt = accepted(await captureTaskCheckpoint(stand.input({ baseSha: base })));
+      expect(receipt.requiresRepair).toBe(false);
+      expect(wipManifest(stand.remote).files.map(file => file.path)).toEqual(['src/changed.ts']);
+    });
   });
 
   it('keeps secrets out of the private journal too', async () => {
     const secret = ['journal', 'secret', 'value'].join('-');
     stand.write('src/changed.ts', `const seen = "${secret}";\n`);
-    saved(await captureTaskCheckpoint(stand.input({ secrets: [secret] })));
+    accepted(await captureTaskCheckpoint(stand.input({ secrets: [secret] })));
     const walk = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap(entry => entry.isDirectory() ? walk(join(dir, entry.name)) : [join(dir, entry.name)]);
     for (const file of walk(stand.journal)) expect(readFileSync(file).includes(secret)).toBe(false);
     const db = join(stand.journal, 'handoffs', id(10), id(11), 'export.git');
@@ -367,9 +400,9 @@ describe('secrets do not leave', () => {
 describe('a capture repeated', () => {
   it('returns the sealed commit for the same capture without reading the workspace again', async () => {
     stand.write('src/changed.ts', 'export const changed = 2;\n');
-    const first = saved(await captureTaskCheckpoint(stand.input()));
+    const first = accepted(await captureTaskCheckpoint(stand.input()));
     stand.write('src/changed.ts', 'export const changed = 3;\n');
-    const again = saved(await captureTaskCheckpoint(stand.input({ resolveWorkspace: async () => { throw new Error('read again'); } })));
+    const again = accepted(await captureTaskCheckpoint(stand.input({ resolveWorkspace: async () => { throw new Error('read again'); } })));
     expect(again).toEqual(first);
     expect(git(stand.remote, 'rev-list', '--count', WIP_REF)).toBe('1');
   });
@@ -381,7 +414,7 @@ describe('a capture repeated', () => {
     const lost = await captureTaskCheckpoint(stand.input());
     expect(lost).toEqual({ ok: false, problem: { phase: 'capture', code: 'network_unavailable', retryable: true } });
     execFileSync('/bin/mv', [moved, stand.remote]);
-    const first = saved(await captureTaskCheckpoint(stand.input()));
+    const first = accepted(await captureTaskCheckpoint(stand.input()));
     expect(git(stand.remote, 'rev-parse', WIP_REF)).toBe(first.checkpointSha);
   });
 
@@ -394,17 +427,17 @@ describe('a capture repeated', () => {
     expect(refused).toEqual({ ok: false, problem: { phase: 'publish', code: 'ref_conflict', retryable: false } });
     rmSync(hook);
     stand.write('src/changed.ts', 'export const changed = 3;\n');
-    const receipt = saved(await captureTaskCheckpoint(stand.input()));
+    const receipt = accepted(await captureTaskCheckpoint(stand.input()));
     expect(wipFile(stand.remote, `files/${wipManifest(stand.remote).files[0]!.id}`)).toBe('export const changed = 2;');
     expect(git(stand.remote, 'rev-parse', WIP_REF)).toBe(receipt.checkpointSha);
   });
 
   it('chains a later capture on the verified previous checkpoint alone, by fast-forward', async () => {
     stand.write('src/changed.ts', 'export const changed = 2;\n');
-    const first = saved(await captureTaskCheckpoint(stand.input()));
+    const first = accepted(await captureTaskCheckpoint(stand.input()));
     stand.write('src/changed.ts', 'export const changed = 3;\n');
     stand.commit('More work');
-    const second = saved(await captureTaskCheckpoint(stand.input({ captureId: id(12), captureSequence: 2 })));
+    const second = accepted(await captureTaskCheckpoint(stand.input({ captureId: id(12), captureSequence: 2 })));
     expect(second.checkpointSha).not.toBe(first.checkpointSha);
     expect(git(stand.remote, 'rev-list', '--parents', WIP_REF).split('\n')[0]).toBe(`${second.checkpointSha} ${first.checkpointSha}`);
     expect(wipManifest(stand.remote).previousCheckpointSha).toBe(first.checkpointSha);
@@ -414,7 +447,7 @@ describe('a capture repeated', () => {
   it('two captures at once wait for each other and end in one commit', async () => {
     stand.write('src/changed.ts', 'export const changed = 2;\n');
     const [one, two] = await Promise.all([captureTaskCheckpoint(stand.input()), captureTaskCheckpoint(stand.input())]);
-    expect(saved(one)).toEqual(saved(two));
+    expect(accepted(one)).toEqual(accepted(two));
     expect(git(stand.remote, 'rev-list', '--count', WIP_REF)).toBe('1');
   });
 
@@ -422,7 +455,7 @@ describe('a capture repeated', () => {
     stand.write('src/first.ts', 'export const first = 1;\n');
     const pushed = stand.commit('Pushed to the task branch');
     stand.write('src/second.ts', 'export const second = 1;\n');
-    saved(await captureTaskCheckpoint(stand.input({ baseSha: pushed })));
+    accepted(await captureTaskCheckpoint(stand.input({ baseSha: pushed })));
     expect(wipManifest(stand.remote).baseSha).toBe(pushed);
     expect(wipManifest(stand.remote).files.map(file => file.path)).toEqual(['src/second.ts']);
 
@@ -455,7 +488,7 @@ describe('the WIP ref and the work of others', () => {
 
   it('refuses to attach a chain with a project ancestor', async () => {
     stand.write('src/changed.ts', 'export const changed = 2;\n');
-    const first = saved(await captureTaskCheckpoint(stand.input()));
+    const first = accepted(await captureTaskCheckpoint(stand.input()));
     const tree = git(stand.remote, 'rev-parse', `${first.checkpointSha}^{tree}`);
     const forged = git(stand.remote, 'commit-tree', tree, '-p', stand.baseSha, '-m', `Task checkpoint ${id(11)}`);
     git(stand.remote, 'update-ref', WIP_REF, forged);
@@ -467,7 +500,7 @@ describe('the WIP ref and the work of others', () => {
   it('refuses a previous checkpoint that now holds a known secret and reports it', async () => {
     const later = ['learned', 'later', 'value'].join('-');
     stand.write('src/changed.ts', `const seen = "${later}";\n`);
-    const first = saved(await captureTaskCheckpoint(stand.input()));
+    const first = accepted(await captureTaskCheckpoint(stand.input()));
     expect(first.requiresRepair).toBe(false);
     const result = await captureTaskCheckpoint(stand.input({ captureId: id(12), captureSequence: 2, secrets: [later] }));
     expect(result).toEqual({ ok: false, problem: { phase: 'capture', code: 'scan_failed', retryable: false } });
@@ -487,12 +520,21 @@ describe('the WIP ref and the work of others', () => {
     expect(git(stand.remote, 'rev-parse', WIP_REF)).toBe(planted);
   });
 
+  it('reads its own ref, not one that only ends the same', async () => {
+    const planted = plantWip({ 'notes.txt': 'another ref\n' }, [], `refs/aside/${WIP_REF}`);
+    stand.write('src/changed.ts', 'export const changed = 2;\n');
+    const receipt = accepted(await captureTaskCheckpoint(stand.input()));
+    expect(receipt.checkpointSha).not.toBe(planted);
+    expect(git(stand.remote, 'rev-parse', WIP_REF)).toBe(receipt.checkpointSha);
+    expect(git(stand.remote, 'rev-parse', `refs/aside/${WIP_REF}`)).toBe(planted);
+  });
+
   it('touches no other ref of the remote', async () => {
     const other = `refs/heads/wip/task-${id(999)}`, planted = plantWip({ 'notes.txt': 'another task\n' }, [], other);
     git(stand.remote, 'update-ref', 'refs/heads/task-other', stand.baseSha);
     const before = git(stand.remote, 'for-each-ref');
     stand.write('src/changed.ts', 'export const changed = 2;\n');
-    saved(await captureTaskCheckpoint(stand.input()));
+    accepted(await captureTaskCheckpoint(stand.input()));
     const after = git(stand.remote, 'for-each-ref').split('\n').filter(line => !line.endsWith(WIP_REF)).join('\n');
     expect(after).toBe(before);
     expect(git(stand.remote, 'rev-parse', other)).toBe(planted);
@@ -526,6 +568,23 @@ describe('a capture refused', () => {
     const result = await captureTaskCheckpoint(stand.input({ captureId: '../../../outside' }));
     expect(result).toMatchObject({ ok: false, problem: { code: 'scan_failed' } });
     expect(existsSync(join(stand.root, 'outside'))).toBe(false);
+  });
+
+  it('stops at a cancel while another capture holds the task, and publishes nothing of its own', async () => {
+    stand.write('src/changed.ts', 'export const changed = 2;\n');
+    const stop = new AbortController();
+    let release = () => { /* Set below. */ };
+    const held = new Promise<void>(resolve => { release = resolve; });
+    let holding = () => { /* Set below. */ };
+    const inside = new Promise<void>(resolve => { holding = resolve; });
+    const first = captureTaskCheckpoint(stand.input({ resolveWorkspace: async () => { holding(); await held; return stand.workspace(); } }));
+    await inside;
+    const second = captureTaskCheckpoint(stand.input({ captureId: id(12), captureSequence: 2, signal: stop.signal }));
+    stop.abort();
+    expect(await second).toEqual({ ok: false, problem: { phase: 'capture', code: 'cancelled', retryable: false } });
+    release();
+    accepted(await first);
+    expect(wipManifest(stand.remote).captureId).toBe(id(11));
   });
 
   it('stops at a cancel and publishes nothing', async () => {

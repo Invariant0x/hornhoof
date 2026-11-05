@@ -75,7 +75,7 @@ const LOCKED_OPTIONS = ['core.hooksPath=/dev/null', 'core.fsmonitor=false', 'cor
 export class GitFailed extends Error {
   constructor(readonly stdout: string) { super('git failed'); }
 }
-export interface GitCall { env?: Record<string, string>; cwd?: string; user?: JobUser; input?: string | Buffer; signal?: AbortSignal | undefined }
+export interface GitCall { env?: Record<string, string>; cwd?: string; user?: JobUser; input?: string | Buffer; signal?: AbortSignal }
 
 function failureOf(error: Error & { killed?: boolean }, stdout: Buffer | string): Error {
   if (error.name === 'AbortError') return new HandoffFault('cancelled');
@@ -86,7 +86,7 @@ export function lockedGit(args: readonly string[], call: GitCall = {}): Promise<
   return new Promise((resolve, reject) => {
     const child = execFile('/usr/bin/git', [...LOCKED_OPTIONS, ...args], {
       cwd: call.cwd ?? '/', env: { ...LOCKED_ENV, ...call.env }, encoding: 'buffer', maxBuffer: MAX_GIT_OUTPUT, timeout: GIT_TIMEOUT_MS,
-      ...(call.user ? { uid: call.user.uid, gid: call.user.gid } : {}), ...(call.signal ? { signal: call.signal } : {}),
+      uid: call.user?.uid, gid: call.user?.gid, signal: call.signal,
     }, (error, stdout) => {
       if (error) reject(failureOf(error, stdout));
       else resolve(stdout);
@@ -98,7 +98,7 @@ export function lockedGit(args: readonly string[], call: GitCall = {}): Promise<
 
 export type WipDb = (args: readonly string[], more?: Pick<GitCall, 'env' | 'input'>) => Promise<Buffer>;
 export const openDb = (dir: string, signal?: AbortSignal): WipDb => (args, more = {}) =>
-  lockedGit(args, { cwd: dir, env: { GIT_DIR: dir, ...more.env }, ...(more.input === undefined ? {} : { input: more.input }), signal });
+  lockedGit(args, { cwd: dir, env: { GIT_DIR: dir, ...more.env }, input: more.input, signal });
 export async function createDb(dir: string, signal?: AbortSignal): Promise<WipDb> {
   await lockedGit(['init', '--quiet', '--bare', '--template=', dir], { signal });
   return openDb(dir, signal);
@@ -113,8 +113,9 @@ async function orFault<T>(work: Promise<T>, code: HandoffCode, retryable = false
 export interface RemoteRepo { url: string; token: string }
 export async function remoteTip(db: WipDb, repo: RemoteRepo, taskId: string): Promise<string | null> {
   const out = await orFault(db(['ls-remote', '--refs', '--', repo.url, wipRef(taskId)], { env: gitEnv(repo) }), 'network_unavailable', true);
-  const line = /^([0-9a-f]{40})\t/.exec(out.toString());
-  return line ? line[1]! : null;
+  /* Git matches a pattern by its tail, so another ref can end the same. */
+  const ref = `\t${wipRef(taskId)}`, line = out.toString().split('\n').find(entry => entry.endsWith(ref));
+  return line ? line.slice(0, -ref.length) : null;
 }
 /* The tip into this database and nowhere else, only when it is the commit that was asked for. */
 export async function fetchTip(db: WipDb, repo: RemoteRepo, taskId: string, expected: string): Promise<void> {

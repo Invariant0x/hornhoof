@@ -36,17 +36,19 @@ const CODEX: Record<string, FailureKind> = {
   cyber_policy: 'refused', bio_policy: 'refused', misalignment_policy_violation: 'refused', context_window_exceeded: 'too_big', session_budget_exceeded: 'too_big',
 };
 
+/* A model at capacity may come with no code of its own. Its words count only where they begin the report: deeper in, they are a tool's or a quote. */
+const codexNamed = (code: string, message: unknown): FailureKind => CODEX[code] ?? (/^Selected model is at capacity\b/.test(text(message)) ? 'overloaded' : 'unknown');
+
 export function codexFailure(raw: Record<string, unknown>): Failure {
   const info = raw.codex_error_info;
   const [code, details] = isRecord(info) ? Object.entries(info)[0] ?? ['', null] : [text(info), null];
   const status = isRecord(details) ? details.http_status_code : undefined;
-  let kind = CODEX[code] ?? 'unknown';
+  let kind = codexNamed(code, raw.message);
   if (status === 503 || status === 529) kind = 'overloaded';
   else if (status === 401) kind = 'auth';
   else if (code === 'response_too_many_failed_attempts' && status === 429) kind = 'rate_limited';
   else if (code === 'http_connection_failed' && status == null) kind = 'network';
   if (code === 'other' && /stream disconnected/i.test(text(raw.message))) kind = 'cut';
-  if (kind === 'unknown' && /^Selected model is at capacity\b/.test(text(raw.message))) kind = 'overloaded';
   const retryable = kind === 'unknown' && (code === 'internal_server_error' || serverError(status)) ? true : undefined;
   return failure(kind, reason(code + (typeof status === 'number' ? ` ${status}` : ''), raw.message), raw.retryable ?? retryable);
 }
