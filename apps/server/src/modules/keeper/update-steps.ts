@@ -86,26 +86,38 @@ function beginsPromise(s: UpdateSample, status: Status): UpdateAction {
   return status.step === 'promise' ? { do: 'promise', to: s.online } : NONE;
 }
 
-/* The copies must hold W before the dump; migrations that run need them stopped first, and the dump waits for the stop
-   to be acknowledged and sync to be held. */
-function settleStep(s: UpdateSample, m: UpdateMemory, w: { at: number }): UpdateAction | null {
-  const allAtW = hasAll(m.promised, s.atW);
-  const allAcked = hasAll(m.promised, m.stopAcks);
-  if (allAtW && m.migrations !== 0 && !m.stopped) return { do: 'stop_copies' };
-  if (allAtW && m.migrations === 0) return { do: 'settle', ok: true };
-  if (allAtW && m.stopped && allAcked && s.held) return { do: 'settle', ok: true };
-  if (s.now >= w.at + W_WAIT_MS) return { do: 'settle', ok: false };
-  if (m.stopped && !allAcked && !s.inFlight) return { do: 'stop_copies' };
-  return null;
+/* With every promised copy at W: no migration to run means the dump may go; otherwise the copies are stopped first,
+   and the dump waits for the stop to be acknowledged and for sync to be held. */
+function settleAtW(s: UpdateSample, m: UpdateMemory): UpdateAction | null {
+  if (m.migrations === 0) return { do: 'settle', ok: true };
+  if (!m.stopped) return { do: 'stop_copies' };
+  return hasAll(m.promised, m.stopAcks) && s.held ? { do: 'settle', ok: true } : null;
+}
+
+/* A minute after W was read the update ends with nothing changed; a copy that has not acknowledged the stop is asked
+   again unless a request is out. */
+function settleStep(s: UpdateSample, m: UpdateMemory, wAt: number): UpdateAction | null {
+  const atWAction = hasAll(m.promised, s.atW) ? settleAtW(s, m) : null;
+  if (atWAction !== null) return atWAction;
+  if (s.now >= wAt + W_WAIT_MS) return { do: 'settle', ok: false };
+  return m.stopped && !hasAll(m.promised, m.stopAcks) && !s.inFlight ? { do: 'stop_copies' } : null;
+}
+
+function settling(s: UpdateSample, m: UpdateMemory): UpdateAction | null {
+  return m.w !== null && m.wAt !== null && !m.settled ? settleStep(s, m, m.wAt) : null;
+}
+
+function afterPromise(s: UpdateSample, status: Status, m: UpdateMemory): UpdateAction {
+  if (status.step === 'backup' && s.maintenance && m.w === null) return { do: 'begin' };
+  const settled = settling(s, m);
+  if (settled !== null) return settled;
+  return status.restore && !m.dropped ? { do: 'drop_slots' } : NONE;
 }
 
 function runningStep(s: UpdateSample, status: Status, m: UpdateMemory): UpdateAction {
   if (status.step === 'promise') return answerStep(s, m);
   if (m.promised.length > 0 && s.now >= m.promisedAt + PROMISE_AGAIN_MS) return { do: 'promise_again' };
-  if (status.step === 'backup' && s.maintenance && m.w === null) return { do: 'begin' };
-  const settling = m.w !== null && m.wAt !== null && !m.settled ? settleStep(s, m, { at: m.wAt }) : null;
-  if (settling !== null) return settling;
-  return status.restore && !m.dropped ? { do: 'drop_slots' } : NONE;
+  return afterPromise(s, status, m);
 }
 
 export function nextUpdateStep(s: UpdateSample): UpdateAction {
