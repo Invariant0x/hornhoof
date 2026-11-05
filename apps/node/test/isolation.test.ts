@@ -88,11 +88,11 @@ describe('secureNode', () => {
     expect(calls2).toContain('chown1 /data/browser-error 0:0');
   });
 
-  it('takes the shared browsers back from an agent or a test run that held them, and leaves them alone once they are root\'s', () => {
+  it('takes back only the top of the shared browsers from an agent or a test run that held them: what they left in it must still read as theirs when the node looks at it', () => {
     const user = { uid: 1000, gid: 1000 };
     const held = fakeOps({ '/data/browsers': 20000 });
     secureNode('/data', user, held.ops);
-    expect(held.calls).toContain('chown /data/browsers 0:0');
+    expect(held.calls.filter(call => call.includes('browsers'))).toEqual(['chown1 /data/browsers 0:0']);
 
     const roots = fakeOps({ '/data/browsers': 0 });
     secureNode('/data', user, roots.ops);

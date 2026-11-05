@@ -1,24 +1,40 @@
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { browsersDir, ensureRepoBrowser, prepareBrowser, shareTree, startupBrowserCheck, type CommandRunner } from '../src/browser.js';
-import { FIRST_UID } from '../src/isolation.js';
+import { FIRST_UID, secureNode } from '../src/isolation.js';
 
 /* No test here runs as root, so ownership is played: on a node that runs as root every file reads as root's but the
-   paths named foreign, and an owner changes only on the record. */
-const owners = vi.hoisted(() => ({ asRoot: false, foreign: new Set<string>(), otherGroup: new Set<string>(), chowned: [] as string[] }));
+   paths named foreign, and an owner changes only on the record, or for real on the record where a test says it sticks. */
+const owners = vi.hoisted(() => ({ asRoot: false, sticks: false, foreign: new Set<string>(), otherGroup: new Set<string>(), chowned: [] as string[], steps: [] as string[] }));
 const programs = vi.hoisted(() => ({ calls: [] as { bin: string; args: string[]; user: unknown }[], fake: null as null | ((args: string[], env: NodeJS.ProcessEnv) => void) }));
 
 vi.mock('node:fs', async importOriginal => {
   const fs = await importOriginal<typeof import('node:fs')>();
+  const played = <T extends { uid: number; gid: number }>(stat: T, path: string): T =>
+    Object.assign(stat, { uid: owners.foreign.has(path) ? FIRST_UID : 0, gid: owners.otherGroup.has(path) ? FIRST_UID : 0 });
   return {
     ...fs,
-    lchownSync: (path: string, uid: number, gid: number) => void owners.chowned.push(`${path} ${uid}:${gid}`),
+    lchownSync: (path: string, uid: number, gid: number) => {
+      owners.chowned.push(`${path} ${uid}:${gid}`);
+      owners.steps.push(`chown ${path}`);
+      if (!owners.sticks) return;
+      owners.foreign.delete(path);
+      owners.otherGroup.delete(path);
+    },
+    chmodSync: (path: string, mode: number) => {
+      owners.steps.push(`chmod ${path}`);
+      fs.chmodSync(path, mode);
+    },
     lstatSync: (path: string, options?: { throwIfNoEntry?: boolean }) => {
       const stat = fs.lstatSync(path, options as { throwIfNoEntry: false });
-      if (!stat || !owners.asRoot) return stat;
-      return Object.assign(stat, { uid: owners.foreign.has(path) ? FIRST_UID : 0, gid: owners.otherGroup.has(path) ? FIRST_UID : 0 });
+      return stat && owners.asRoot ? played(stat, path) : stat;
+    },
+    statSync: (path: string) => (owners.asRoot ? played(fs.statSync(path), path) : fs.statSync(path)),
+    readdirSync: (path: string, options?: { recursive: true }) => {
+      owners.steps.push(`read ${path}`);
+      return fs.readdirSync(path, options);
     },
   };
 });
@@ -95,9 +111,11 @@ const underBrowsers = (dir: string) => owners.chowned.filter(call => call.starts
 
 beforeEach(() => {
   owners.asRoot = false;
+  owners.sticks = false;
   owners.foreign.clear();
   owners.otherGroup.clear();
   owners.chowned.length = 0;
+  owners.steps.length = 0;
   programs.calls.length = 0;
   programs.fake = leavesWhatItInstalls;
 });
@@ -258,6 +276,55 @@ describe('what a node that runs as root does not trust', () => {
     expect(readlinkSync(link)).toBe(join(seedDir, 'chromium-1260'));
     /* Made anew, by root: the record shows no owner handed on it. */
     expect(underBrowsers(dir).filter(call => call.startsWith(link))).toEqual([]);
+  });
+
+  it('drops all an agent or a test run left at the start of a node, once it took the folder back, and hands none of it to root', async () => {
+    const dir = temp();
+    const target = browsersDir(dir);
+    const cli = join(playwrightPackage(join(target, '.playwright', LOCKED)), 'cli.js');
+    writeFileSync(cli, 'planted');
+    installed(target, ['chromium-1260']);
+    writeFileSync(join(target, 'chromium-1260', 'chrome'), 'planted');
+    writeFileSync(join(target, 'stray'), 'planted');
+    const theirs = (readdirSync(target, { recursive: true }) as string[]).map(entry => join(target, entry));
+    owners.asRoot = true;
+    owners.sticks = true;
+    for (const path of [target, ...theirs]) owners.foreign.add(path);
+    secureNode(dir, { uid: 1000, gid: 1000 });
+    /* What npm writes is root's. */
+    programs.fake = (args, env) => {
+      owners.foreign.clear();
+      leavesWhatItInstalls(args, env);
+    };
+    await ready(dir, openSeed(), temp('hh-root-global-'));
+    expect(programs.calls.map(c => c.bin)).toEqual(['npm']);
+    expect(readFileSync(cli, 'utf8')).toBe('');
+    expect(lstatSync(join(target, 'chromium-1260')).isSymbolicLink()).toBe(true);
+    expect(existsSync(join(target, 'stray'))).toBe(false);
+    /* Only the two folders that hold the rest. */
+    expect(new Set(underBrowsers(dir))).toEqual(new Set([`${target} 0:0`, `${join(target, '.playwright')} 0:0`]));
+  });
+
+  it('closes a folder to whoever held it before it looks inside, so nothing is added behind its back and made root\'s after', async () => {
+    const dir = temp();
+    const target = browsersDir(dir);
+    const packages = join(target, '.playwright');
+    playwrightPackage(join(packages, LOCKED));
+    chmodSync(target, 0o777);
+    chmodSync(packages, 0o777);
+    const seedDir = openSeed();
+    owners.asRoot = true;
+    for (const path of [target, packages]) owners.foreign.add(path);
+    const global = playwrightPackage(temp('hh-root-global-'));
+    owners.steps.length = 0;
+    await ready(dir, seedDir, global);
+    for (const path of [target, packages]) {
+      for (const step of ['chown', 'chmod']) {
+        expect(owners.steps.indexOf(`${step} ${path}`)).toBeGreaterThanOrEqual(0);
+        expect(owners.steps.indexOf(`${step} ${path}`)).toBeLessThan(owners.steps.indexOf(`read ${path}`));
+      }
+      expect(statSync(path).mode & 0o777).toBe(0o755);
+    }
   });
 
   it('takes the shared folder itself back from whoever holds it', () => {

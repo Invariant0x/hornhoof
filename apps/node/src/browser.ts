@@ -193,9 +193,17 @@ function trustedEntry(path: string, seedDir: string, isRoot: boolean): boolean {
   return stat.isSymbolicLink() ? linksToSeed(path, stat, seedDir, isRoot) : trustedTree(path, realpathSync(path), isRoot);
 }
 
+/* From here only root may add to the folder, so whoever held it adds nothing behind the look that follows. */
+function closeFolder(folder: string, isRoot: boolean): void {
+  if (isRoot && !rootOwns(lstatSync(folder))) lchownSync(folder, 0, 0);
+  chmodSync(folder, 0o755);
+}
+
 /* Each browser folder, the npm cache and each version of the package stays or goes whole. What goes comes back from the
-   image, npm or Playwright's download. This comes before anything changes an owner, which would make any of it look like root's. */
+   image, npm or Playwright's download. This comes before anything inside changes an owner, which would make any of it look
+   like root's. */
 function dropUntrusted(folder: string, seedDir: string, isRoot: boolean): void {
+  closeFolder(folder, isRoot);
   for (const name of readdirSync(folder)) {
     const path = join(folder, name);
     if (name === PACKAGES && lstatSync(path).isDirectory()) dropUntrusted(path, seedDir, isRoot);

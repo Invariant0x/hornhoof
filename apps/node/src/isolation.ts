@@ -96,15 +96,16 @@ export const asAgent = (argv: string[], user: JobUser): string[] => ['setpriv', 
 
 /* A personal node that runs as root keeps its key, its records and the agent programs to itself: no agent can change
    where the node connects, read its key or swap a program or a browser another agent starts. The agents get their homes
-   and work folders. */
+   and work folders. Of the shared browsers only the top comes back here: the browser check drops what is not root's, and
+   handed to root here what an agent or a test run left in them would pass that check, and run as root. */
 export function secureNode(dir: string, user: JobUser, ops: FolderOps = REAL_OPS): void {
   if (ops.owner(dir) !== 0) ops.chown(dir, 0, 0);
   ops.chmod(dir, 0o755);
-  for (const file of ['node.json', 'sessions.json', 'users.json', 'login-url', 'removed', 'browser-error']) {
+  for (const file of ['node.json', 'sessions.json', 'users.json', 'login-url', 'removed', 'browser-error', 'browsers']) {
     const path = join(dir, file);
     if (ops.exists(path) && ops.owner(path) !== 0) ops.chown(path, 0, 0);
   }
-  for (const tree of ['tools', '.hh-recordings', 'browsers']) {
+  for (const tree of ['tools', '.hh-recordings']) {
     const path = join(dir, tree);
     if (ops.exists(path) && ops.owner(path) !== 0) ops.chownTree(path, 0, 0);
   }
