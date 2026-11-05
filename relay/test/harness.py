@@ -90,12 +90,12 @@ def _wait(predicate, within):
         time.sleep(min(0.05, remaining))
 
 
-def render_caddyfile(text: str, replacements: list[tuple[str, str]]) -> str:
+def render_caddyfile(text: str, replacements: list[tuple[str, str]], file: str = 'Caddyfile') -> str:
     """Raises on a replacement that finds nothing, so that a change to the file cannot slip past the tests unseen.
     The edge's frpc file goes through here too."""
     for old, new in replacements:
         if old not in text:
-            raise ValueError(f'The Caddyfile no longer holds: {old!r}')
+            raise ValueError(f'The {file} no longer holds: {old!r}')
         text = text.replace(old, new)
     return text
 
@@ -148,10 +148,12 @@ def _dns_names(certificate: bytes) -> list[str]:
     return list(_cached_dns_names(certificate))
 
 
-def _tls_socket(port: int, server_name: str | None) -> ssl.SSLSocket:
+def _tls_socket(port: int, server_name: str | None, alpn: tuple[str, ...] = ()) -> ssl.SSLSocket:
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     context.check_hostname = False
     context.verify_mode = ssl.CERT_NONE
+    if alpn:
+        context.set_alpn_protocols(alpn)
     plain = socket.create_connection(('127.0.0.1', port), timeout=PUBLIC_TIMEOUT)
     return context.wrap_socket(plain, server_hostname=server_name)
 
@@ -266,10 +268,11 @@ class _PassthroughEcho(ThreadingHTTPServer):
 
     daemon_threads = True
 
-    def __init__(self, cert: Path, key: Path):
-        super().__init__(('127.0.0.1', 0), _PassthroughEchoRequest)
+    def __init__(self, port: int, cert: Path, key: Path):
+        super().__init__(('127.0.0.1', port), _PassthroughEchoRequest)
         self.tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         self.tls.load_cert_chain(cert, key)
+        self.thread = threading.Thread(target=self.serve_forever, daemon=True)
 
     def finish_request(self, request: socket.socket, client_address: tuple) -> None:
         request.settimeout(PUBLIC_TIMEOUT)
@@ -449,10 +452,9 @@ class Stack:
     def close(self):
         # ExitStack runs every cleanup even if one process fails to stop.
         with ExitStack() as cleanup:
-            self._stop_echo_on(cleanup)
+            self._stop_echo_on(cleanup, self.echo, self.echo_thread)
             for echo in self.passthrough_echoes:
-                cleanup.callback(echo.server_close)
-                cleanup.callback(echo.shutdown)
+                self._stop_echo_on(cleanup, echo, echo.thread)
             for process in (self.relay, self.frps, self.caddy, self.edge):
                 if process is not None:
                     cleanup.callback(process.stop)
@@ -461,12 +463,13 @@ class Stack:
             for kept in self.kept_connections:
                 cleanup.callback(kept.close)
 
-    def _stop_echo_on(self, cleanup: ExitStack) -> None:
-        if self.echo is not None:
-            cleanup.callback(self.echo.server_close)
-            if self.echo_thread is not None and self.echo_thread.ident is not None:
-                cleanup.callback(self.echo_thread.join, timeout=5)
-                cleanup.callback(self.echo.shutdown)
+    @staticmethod
+    def _stop_echo_on(cleanup: ExitStack, echo: ThreadingHTTPServer | None, thread: threading.Thread | None) -> None:
+        if echo is not None:
+            cleanup.callback(echo.server_close)
+            if thread is not None and thread.ident is not None:
+                cleanup.callback(thread.join, timeout=5)
+                cleanup.callback(echo.shutdown)
 
     def _ready(self, process, port, path):
         def answers():
@@ -548,14 +551,16 @@ class Stack:
         folder = self.caddy_folder
         test_tls = f'tls {self.certificates.cert} {self.certificates.key}'
         return [
-            # default_bind keeps a test server off this machine's network. auto_https disable_certs makes
-            # a site this list missed fail its handshake, where it would otherwise ask for a real certificate.
+            # auto_https disable_certs makes a site this list missed fail its handshake, where it would otherwise ask
+            # for a real certificate.
             ('{\n\thttps_port 8443\n',
              f'{{\n\tadmin off\n\thttp_port {self.http_port}\n\thttps_port {self.caddy_https_port}\n'
-             '\tdefault_bind 127.0.0.1\n\tauto_https disable_certs\n'),
+             '\tauto_https disable_certs\n'),
+            # Only the http site, which listens on every address on the droplet, is kept off this machine's network
+            # here. The https sites bind by the file's own lines, so that a test of their sockets proves the file.
+            ('http:// {\n', 'http:// {\n\tbind 127.0.0.1\n'),
             ('servers 127.0.0.1:8443 {', f'servers 127.0.0.1:{self.caddy_https_port} {{'),
-            ('hornhoof.org {\n\tbind 127.0.0.1\n\t# The relay',
-             f'hornhoof.org {{\n\tbind 127.0.0.1\n\t{test_tls}\n\t# The relay'),
+            ("\t# The relay's API", f"\t{test_tls}\n\t# The relay's API"),
             ('www.hornhoof.org {\n', f'www.hornhoof.org {{\n\t{test_tls}\n'),
             ('\ttls /etc/caddy/certs/wildcard.crt /etc/caddy/certs/wildcard.key\n', f'\t{test_tls}\n'),
             ('root * /var/www/hornhoof\n', f'root * {folder}/www\n'),
@@ -601,7 +606,7 @@ class Stack:
         rendered = render_caddyfile((ROOT / 'relay/edge-frpc.toml').read_text(), [
             ('serverPort = 7000', f'serverPort = {self.bind_port}'),
             ('localPort = 8443', f'localPort = {self.caddy_https_port}'),
-        ])
+        ], file='relay/edge-frpc.toml')
         config_path = self.tmp / 'edge-frpc.toml'
         self._write_config(config_path, rendered)
         # The token comes as on the droplet, in the environment, so that the file's own template is what is tested.
@@ -609,6 +614,10 @@ class Stack:
                            env=dict(os.environ, EDGE_TOKEN=self.edge_token), private=self.private)
         if not self.edge.started('edge'):
             raise RuntimeError('The edge did not start its proxy:\n' + self.edge.log())
+
+    def restart_edge(self) -> None:
+        self.edge.stop()
+        self._start_edge()
 
     def reload_caddy(self, within: float = PUBLIC_TIMEOUT) -> None:
         self._write_blocked()
@@ -711,9 +720,10 @@ transport.proxyProtocolVersion = "v2"
         raise ValueError('Unknown proxy type')
 
     def _start_passthrough_echo(self, name: str) -> int:
-        echo = _PassthroughEcho(*_make_self_signed_certificate(self.tmp, f'{name}.hornhoof.org'))
-        threading.Thread(target=echo.serve_forever, daemon=True).start()
+        # A picked port, as the plain echo's: bind(0) may draw a port this stack has yet to start.
+        echo = _PassthroughEcho(self._free_port(), *_make_self_signed_certificate(self.tmp, f'{name}.hornhoof.org'))
         self.passthrough_echoes.append(echo)
+        echo.thread.start()
         return echo.server_port
 
     def _way_in(self, via: str) -> list[str]:

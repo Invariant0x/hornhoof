@@ -140,6 +140,11 @@ class RenderTests(unittest.TestCase):
             render_caddyfile('one\n', [('one', 'uno'), ('gone from the file', 'x')])
 
 
+    def test_the_error_names_the_file_that_lost_its_line(self) -> None:
+        with self.assertRaisesRegex(ValueError, r'relay/edge-frpc\.toml no longer holds'):
+            render_caddyfile('one\n', [('gone from the file', 'x')], file='relay/edge-frpc.toml')
+
+
 class EdgeCase(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = self.enterContext(tempfile.TemporaryDirectory(prefix='hornhoof-edge-'))
@@ -226,7 +231,8 @@ class StackRequestTests(EdgeCase):
                 refused = self.stack.https('hornhoof.org', sni=server_name)
                 self.assertIsNone(refused.status)
                 self.assertTrue(refused.error, 'a failed handshake must say why')
-        self.assertEqual(self.stack.https('nobody.hornhoof.org', sni='hornhoof.org').status, 404)
+        # Changed from 404 by batch 5's ruling: a Host that is not the handshake's name is misdirected, not served.
+        self.assertEqual(self.stack.https('nobody.hornhoof.org', sni='hornhoof.org').status, 421)
 
     def test_method_and_body_reach_the_company(self) -> None:
         recorder = ThreadingHTTPServer(('127.0.0.1', 0), _Recorder)
@@ -325,6 +331,14 @@ class StackCaddyTests(EdgeCase):
         for droplet_value in ('/etc/caddy', '/var/www', ':7600', ':7000', ':8080'):
             with self.subTest(droplet_value):
                 self.assertEqual([line for line in settings if droplet_value in line], [])
+
+    def test_rendered_file_leaves_the_https_binds_to_the_repos_own_lines(self) -> None:
+        # A global bind would keep https on loopback here with every bind gone from the file, and no test would see the
+        # droplet's Caddy open to the internet. Only the http site's bind is the test's own.
+        rendered = (self.stack.caddy_folder / 'Caddyfile').read_text()
+        self.assertNotIn('default_bind', rendered)
+        self.assertEqual(rendered.count('\tbind 127.0.0.1\n'),
+                         (ROOT / 'Caddyfile').read_text().count('\tbind 127.0.0.1\n') + 1)
 
     def test_every_site_shows_the_test_certificate(self) -> None:
         for host in ('hornhoof.org', 'www.hornhoof.org', 'acme.hornhoof.org'):
