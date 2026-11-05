@@ -309,8 +309,15 @@ function shownOf(t: Turn): NonNullable<Turn['message']> | null {
   return message.text.trim() ? message : null;
 }
 
+/* What stays with a shown message: the delivery it went by, and, for one that went into a running turn, what the program
+   got when more than the window shows, for repeating it word for word. */
+function keptWithMessage(t: Turn, message: NonNullable<Turn['message']>, live: boolean) {
+  const delivery = liveInputOf(message, t.agentId)?.delivery;
+  return { ...(delivery ? { operatorDelivery: delivery } : {}), ...(live && t.prompt !== message.text ? { livePrompt: t.prompt } : {}) };
+}
+
 /* An employee's message carries its name for the window and its id in by. kept: also kept with it. live: it went into a
-   running turn, so what the program got, when more than the window shows, is kept for repeating it word for word. */
+   running turn. */
 async function showMessage(ctx: Ctx, t: Turn, jobId: string, kept: WithEvent, live = false): Promise<void> {
   if (t.repeated) {
     await appendEvent(ctx, { companyId: t.companyId, agentId: t.agentId, jobId, kind: 'typed', ...t.repeated }, kept);
@@ -319,9 +326,7 @@ async function showMessage(ctx: Ctx, t: Turn, jobId: string, kept: WithEvent, li
   const message = shownOf(t);
   if (!message) return;
   const { personId, ...data } = message;
-  const delivery = liveInputOf(message, t.agentId)?.delivery;
-  const livePrompt = live && t.prompt !== message.text ? { livePrompt: t.prompt } : {};
-  await appendEvent(ctx, { companyId: t.companyId, agentId: t.agentId, jobId, kind: 'message', data: { ...data, ...(delivery ? { operatorDelivery: delivery } : {}), ...livePrompt }, personId }, alsoKept(t.withMessage, kept));
+  await appendEvent(ctx, { companyId: t.companyId, agentId: t.agentId, jobId, kind: 'message', data: { ...data, ...keptWithMessage(t, message, live) }, personId }, alsoKept(t.withMessage, kept));
 }
 
 /* Stores the turn, then sends it if he is free. A message for an agent at work goes into the turn it runs instead, and a

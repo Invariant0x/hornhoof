@@ -368,9 +368,19 @@ export class TerminalHost {
     this.reportMs = set.reportMs;
     this.cols = set.cols;
     this.rows = set.rows;
-    this.operator = opts.operator ? new OperatorRuntime(opts.operator, { current: key => this.operatorState(key), capture: key => this.operatorPane(key), press: (key, value) => this.opts.tmux.keys(this.agents.get(key)!.name, value), secrets: opts.secrets }) : null;
-    this.operatorTimer = this.operator ? setInterval(() => this.operatorTick(), 1000) : null;
-    this.operatorTimer?.unref();
+    this.operator = this.operatorFor(opts);
+    this.operatorTimer = this.operatorTicks();
+  }
+
+  private operatorFor(opts: Options): OperatorRuntime | null {
+    return opts.operator ? new OperatorRuntime(opts.operator, { current: key => this.operatorState(key), capture: key => this.operatorPane(key), press: (key, value) => this.opts.tmux.keys(this.agents.get(key)!.name, value), secrets: opts.secrets }) : null;
+  }
+
+  private operatorTicks(): NodeJS.Timeout | null {
+    if (!this.operator) return null;
+    const timer = setInterval(() => this.operatorTick(), 1000);
+    timer.unref();
+    return timer;
   }
 
   operatorTick(): void { this.operator?.tick(); }
@@ -394,6 +404,10 @@ export class TerminalHost {
 
   private inputLane<T>(a: Agent, run: () => Promise<T>): Promise<T> { return this.operator?.serial(a.key, run) ?? run(); }
 
+  private intentional(a: Agent, why: Parameters<OperatorRuntime['intentional']>[1]): void { this.operator?.intentional(a.key, why); }
+
+  private operatorEnabled(a: Agent): boolean { return Boolean(this.operator?.enabled(a.key)); }
+
   private hookRejected(key: string | null, event: string, reason: string): void {
     (this.opts.log ?? console.log)(`Hook ${event} rejected: ${reason}${key ? ` (agent ${key})` : ''}`);
     if (key) this.opts.send({ type: 'agent.hook_rejected', agentKey: key, event, reason });
@@ -403,18 +417,24 @@ export class TerminalHost {
     return this.bridge.start();
   }
 
-  async stop(): Promise<void> {
+  private stopReading(): void {
     if (this.operatorTimer) clearInterval(this.operatorTimer);
     for (const stop of this.limitsStops) stop.abort();
     this.limitsStops.clear();
+  }
+
+  private stopWatching(a: Agent): void {
+    this.intentional(a, 'update');
+    this.reportUnheard(a, true, 'the node is stopping');
+    for (const timer of a.unheardTimers.values()) clearTimeout(timer);
+    a.unheardTimers.clear();
+    this.unwatch(a);
+  }
+
+  async stop(): Promise<void> {
+    this.stopReading();
     this.closeViews();
-    for (const a of this.agents.values()) {
-      this.operator?.intentional(a.key, 'update');
-      this.reportUnheard(a, true, 'the node is stopping');
-      for (const timer of a.unheardTimers.values()) clearTimeout(timer);
-      a.unheardTimers.clear();
-      this.unwatch(a);
-    }
+    for (const a of this.agents.values()) this.stopWatching(a);
     this.bridge.stop();
     this.fs.stop();
     await this.opts.tmux.stopAll();
@@ -691,10 +711,18 @@ export class TerminalHost {
 
   /* A program still there that never showed its prompt fails its turn saying so in short, for the retry to say; its screen
      goes with the turn's output. One that met a failure, ended or is signed out says that instead. */
+  private operatorEnded(a: Agent): Failure | null {
+    return this.operator?.failure(a.key) ? failure('unknown', `Program operator recovery ended: ${this.operator.failureDetail(a.key)}.`, false) : null;
+  }
+
+  private async knowsWhyNotReady(a: Agent, job: TermJob, screen: string): Promise<boolean> {
+    return Boolean(a.failure) || job.signedOut.test(screen) || !(await this.opts.tmux.alive(a.name));
+  }
+
   private async whyNotReady(a: Agent, job: TermJob, screen: string): Promise<void> {
-    const operatorFailure = this.operator?.failure(a.key);
-    if (operatorFailure) { a.failure = failure('unknown', `Program operator recovery ended: ${this.operator?.failureDetail(a.key)}.`, false); return; }
-    if (a.failure || job.signedOut.test(screen) || !(await this.opts.tmux.alive(a.name))) return;
+    const ended = this.operatorEnded(a);
+    if (ended) { a.failure = ended; return; }
+    if (await this.knowsWhyNotReady(a, job, screen)) return;
     a.failure = failure('unknown', `The program did not show its prompt within ${Math.round(this.readyMs / 1000)} s.`, true);
   }
 
@@ -724,8 +752,11 @@ export class TerminalHost {
   /* Types Hornhoof's prompt. A program that just started, or that still loads a long session it resumed, can miss the
      Enter and keep the prompt in its input: Enter again until it takes it. An Enter into an empty input does nothing. One
      that never takes it ends the turn with its screen, which says why, rather than leave the turn waiting for nothing. */
-  private async typePrompt(a: Agent, job: TermJob, prompt: string): Promise<RunResult | null> {
-    if (job.operatorDelivery && this.operator?.enabled(a.key)) return this.typeOperatorPrompt(a, job, prompt);
+  private typePrompt(a: Agent, job: TermJob, prompt: string): Promise<RunResult | null> {
+    return job.operatorDelivery && this.operatorEnabled(a) ? this.typeOperatorPrompt(a, job, prompt) : this.typePlainPrompt(a, job, prompt);
+  }
+
+  private async typePlainPrompt(a: Agent, job: TermJob, prompt: string): Promise<RunResult | null> {
     a.fresh = false;
     a.took = false;
     a.typing = prompt;
@@ -854,7 +885,7 @@ export class TerminalHost {
   }
 
   private async stopTurn(a: Agent, job: TermJob, ended: Deferred<string>): Promise<RunResult> {
-    this.operator?.intentional(a.key, 'cancelled');
+    this.intentional(a, 'cancelled');
     await this.inputLane(a, () => this.opts.tmux.keys(a.name, 'Escape'));
     await Promise.race([ended.promise, sleep(STOP_WAIT_MS)]);
     a.busy = false;
@@ -1041,14 +1072,18 @@ export class TerminalHost {
   /* Programs that do not log their plan's limits are asked after a turn, for a while. */
   private async planLimits(a: Agent): Promise<void> {
     if (!a.program?.limits) return;
+    const limits = await this.readLimits(a, a.program.limits);
+    if (limits) a.limits = limits;
+  }
+
+  private async readLimits(a: Agent, read: NonNullable<TermProgram['limits']>) {
     const stop = new AbortController();
     this.limitsStops.add(stop);
     try {
-      const limits = await Promise.race([
-        a.program.limits(a.home, { bin: a.launch?.job.bin, user: this.opts.user, signal: stop.signal }).catch(() => null),
+      return await Promise.race([
+        read(a.home, { bin: a.launch?.job.bin, user: this.opts.user, signal: stop.signal }).catch(() => null),
         sleep(LIMITS_WAIT_MS),
       ]);
-      if (limits) a.limits = limits;
     } finally {
       stop.abort();
       this.limitsStops.delete(stop);
@@ -1111,8 +1146,10 @@ export class TerminalHost {
     });
   }
 
+  private operatorStarted(a: Agent): void { this.operator?.started(a.key); }
+
   private tookTurn(a: Agent, id?: string): void {
-    this.operator?.started(a.key);
+    this.operatorStarted(a);
     const first = !a.took;
     a.busy = a.took = true;
     a.ends.started(id);
@@ -1173,7 +1210,7 @@ export class TerminalHost {
      not signed in, with a word to sign in; agy may first ask for its first-run setup. */
   private async promptShows(a: Agent, job: TermJob, kind: keyof typeof READY, colors: { at: number }): Promise<boolean | null> {
     const screen = await this.screen(a.key);
-    if (!job.operatorDelivery && kind === 'kimi' && job.signedOut.test(screen)) return false;
+    if (kimiSignedOut(job, kind, screen)) return false;
     if (READY[kind](screen)) {
       await sleep(PROMPT_SETTLE_MS);
       return true;
@@ -1190,8 +1227,7 @@ export class TerminalHost {
   private async agyFirstRun(a: Agent, colors: { at: number }): Promise<boolean> {
     const step = await this.inputLane(a, async () => pastColors(await this.opts.tmux.screen(a.name, 0), () => this.opts.tmux.keys(a.name, 'Enter'), colors));
     const stuck = colorsNotTaken(step, colors);
-    if (step !== 'terms' && !stuck) return false;
-    if (this.operator?.enabled(a.key)) return false;
+    if (!stopsAtSetup(step, stuck) || this.operatorEnabled(a)) return false;
     a.failure = stuck ? failure('unknown', COLORS_NOT_TAKEN, true) : failure('setup', SETUP_NEEDED, false);
     a.hash = null;
     return true;
@@ -1517,8 +1553,7 @@ export class TerminalHost {
   private emit(a: Agent, event: AgentEvent): void {
     const turn = activeTurn(a);
     if (!turn) return;
-    if (event.kind === 'text') this.ownActivity(a);
-    if (event.kind === 'text') { a.lastText = event.text; a.retry = null; }
+    if (event.kind === 'text') { this.ownActivity(a); a.lastText = event.text; a.retry = null; }
     if (!turn.typed) return turn.onEvent(event);
     this.typedEvent(turn, event);
   }
@@ -1887,8 +1922,14 @@ export class TerminalHost {
       receipt.accepted = went;
       return went;
     } finally {
-      if (!went) { receipt.state = 'discarded'; this.operator?.receipt(a.key, words.operatorDelivery, 'not_taken'); await this.discardWords(a, words, receipt); }
+      if (!went) await this.wordsNotTaken(a, words, receipt);
     }
+  }
+
+  private async wordsNotTaken(a: Agent, words: LiveWords, receipt: WordReceipt): Promise<void> {
+    receipt.state = 'discarded';
+    this.operator?.receipt(a.key, words.operatorDelivery, 'not_taken');
+    await this.discardWords(a, words, receipt);
   }
 
   private liveReceipt(a: Agent, words: LiveWords): WordReceipt {
@@ -2043,7 +2084,7 @@ export class TerminalHost {
   async cancel(jobId: string): Promise<void> {
     const a = [...this.agents.values()].find(x => x.turn?.typed && x.turn.jobId === jobId);
     if (!a) return;
-    this.operator?.intentional(a.key, 'cancelled');
+    this.intentional(a, 'cancelled');
     this.finishTyped(a, '', 'cancelled');
     /* A session that is gone took its program with it; the turn ends all the same. */
     a.cancelling = this.inputLane(a, () => this.opts.tmux.keys(a.name, 'Escape')).catch(() => {});
@@ -2166,11 +2207,13 @@ export class TerminalHost {
 
   input(m: Msg<'term.input'>): void {
     const view = this.views.get(m.termId);
-    if (view?.write) {
-      this.operator?.ownerInput(view.key);
-      const a = this.agents.get(view.key);
-      if (a) void this.inputLane(a, async () => { view.child.stdin?.write(m.data); });
-    }
+    if (view?.write) this.ownerTyped(view, m.data);
+  }
+
+  private ownerTyped(view: View, data: string): void {
+    this.operator?.ownerInput(view.key);
+    const a = this.agents.get(view.key);
+    if (a) void this.inputLane(a, async () => { view.child.stdin?.write(data); });
   }
 
   async resize(m: Msg<'term.resize'>): Promise<void> {
@@ -2301,6 +2344,15 @@ function endedError(stopped: boolean, detail: Failure | undefined, signedOut: Re
   if (stopped) return 'cancelled';
   if (!detail) return null;
   return detail.kind === 'auth' || signedOut?.test(detail.text) ? 'not_logged_in' : 'agent_failed';
+}
+
+/* A signed-out Kimi Code fails at once, unless the operator answers for this assignment. */
+function kimiSignedOut(job: TermJob, kind: keyof typeof READY, screen: string): boolean {
+  return !job.operatorDelivery && kind === 'kimi' && job.signedOut.test(screen);
+}
+
+function stopsAtSetup(step: Awaited<ReturnType<typeof pastColors>>, stuck: boolean): boolean {
+  return step === 'terms' || stuck;
 }
 
 function hasOwnThought(a: Agent, line: Record<string, unknown>): boolean {

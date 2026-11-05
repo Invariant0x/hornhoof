@@ -57,6 +57,10 @@ function removeQueued(text: string, enqueued: string[]): string {
   return at < 0 ? text : enqueued.splice(at, 1).join('');
 }
 
+const withDelivery = (operatorDelivery?: OperatorDelivery) => (operatorDelivery ? { operatorDelivery } : {});
+/* An assignment the operator answers for stays until the program's own record shows it taken. */
+const originalAfterClear = (original: string[], receipts: ReceiptHooks) => (receipts.preserveOriginal ? original : []);
+
 /* Claude can omit the words from a removal; its queue belongs to the program, across turns. */
 export function claudeWordReceipt(line: Record<string, unknown>, enqueued: string[]): { state: 'queued' | 'taken' | 'removed'; text: string } | null {
   if (line.type !== 'queue-operation') return null;
@@ -81,14 +85,13 @@ export class TurnWords {
   constructor(words: string[] = [], private readonly receipts: ReceiptHooks = {}) { this.original = words; }
 
   add(text: string, jobId: string | null = null, operatorDelivery?: OperatorDelivery): WordReceipt {
-    const word: WordReceipt = { text, jobId, state: 'waiting', accepted: false, sources: new Set(), ...(operatorDelivery ? { operatorDelivery } : {}) };
+    const word: WordReceipt = { text, jobId, state: 'waiting', accepted: false, sources: new Set(), ...withDelivery(operatorDelivery) };
     this.words.push(word);
     return word;
   }
 
   clear(): void {
-    if (this.receipts.preserveOriginal) return;
-    this.original = [];
+    this.original = originalAfterClear(this.original, this.receipts);
   }
 
   pending(): string[] { return [...this.original, ...this.words.filter(word => this.waiting(word)).map(word => word.text)]; }
@@ -117,13 +120,26 @@ export class TurnWords {
   }
 
   queued(text: string, source: string): boolean {
-    if (this.receipts.original && this.original.some(word => same(word, text))) { this.receipts.original('queued'); return true; }
+    return this.queuedOriginal(text) || this.queuedWord(text, source);
+  }
+
+  private queuedOriginal(text: string): boolean {
+    if (!this.receipts.original || !this.original.some(word => same(word, text))) return false;
+    this.receipts.original('queued');
+    return true;
+  }
+
+  private queuedWord(text: string, source: string): boolean {
     const word = this.words.find(word => this.waiting(word) && same(word.text, text) && !word.sources.has(source));
     if (!word) return false;
     word.sources.add(source);
     word.state = 'queued';
-    this.receipts.word?.(word, 'queued');
+    this.told(word, 'queued');
     return true;
+  }
+
+  private told(word: WordReceipt, phase: 'queued' | 'taken' | 'not_taken'): void {
+    this.receipts.word?.(word, phase);
   }
 
   taken(text: string): boolean {
@@ -159,8 +175,8 @@ export class TurnWords {
     const word = this.words.find(word => this.waiting(word) && same(word.text, text));
     if (!word) return null;
     word.state = 'taken';
-    this.receipts.word?.(word, 'taken');
-    return { jobId: word.jobId, text: word.text, ...(word.operatorDelivery ? { operatorDelivery: word.operatorDelivery } : {}) };
+    this.told(word, 'taken');
+    return { jobId: word.jobId, text: word.text, ...withDelivery(word.operatorDelivery) };
   }
 
   bind(jobId: string): void {
@@ -172,8 +188,8 @@ export class TurnWords {
     return this.words.filter(word => this.returnWords(word, expired, gone || idle)).map(word => {
       const reason = word.state === 'removed' ? 'the program removed the queued words' : null;
       word.state = 'discarded';
-      this.receipts.word?.(word, 'not_taken');
-      return { text: word.text, jobId: word.jobId, ...(reason ? { reason } : {}), ...(word.operatorDelivery ? { operatorDelivery: word.operatorDelivery } : {}) };
+      this.told(word, 'not_taken');
+      return { text: word.text, jobId: word.jobId, ...(reason ? { reason } : {}), ...withDelivery(word.operatorDelivery) };
     });
   }
 

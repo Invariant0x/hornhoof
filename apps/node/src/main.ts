@@ -728,13 +728,17 @@ async function setKey(dir: string, io: Io): Promise<number> {
   return 0;
 }
 
+/* A machine ready for turns that could not prepare its browser says why. */
+function withBrowserProblem(dir: string, word: string): string {
+  const problem = word === 'ready' ? readBrowserError(dir) : null;
+  return problem ? `browser_failed: ${problem}` : word;
+}
+
 async function status(dir: string, io: Io): Promise<number> {
   const state = readState(dir);
   /* spare: another machine of the plan runs Codex now, and this one takes over when that one is away. */
-  let word = isRemoved(dir) ? 'removed' : !state ? 'no_key' : isSpare(dir) ? 'spare' : state.provider ? await planWord(dir, state.provider) : 'ready';
-  const browserProblem = word === 'ready' ? readBrowserError(dir) : null;
-  if (browserProblem) word = `browser_failed: ${browserProblem}`;
-  io.stdout.write(word + '\n');
+  const word = isRemoved(dir) ? 'removed' : !state ? 'no_key' : isSpare(dir) ? 'spare' : state.provider ? await planWord(dir, state.provider) : 'ready';
+  io.stdout.write(withBrowserProblem(dir, word) + '\n');
   return 0;
 }
 
@@ -894,6 +898,14 @@ async function run(dir: string, builtinMode: boolean, io: Io): Promise<number | 
 }
 
 /* One command line. A running node answers its handle and keeps the process up; the others answer an exit code. */
+/* What the node's updater and its machine's setup call, or the usage for anything else. */
+async function upkeepCommand(dir: string, args: string[], io: Io): Promise<number> {
+  if (args[0] === 'wait-update') return waitUpdate(dir, io);
+  if (args[0] === 'prepare-browser') return prepareBrowserCommand(dir, args[1], io);
+  io.stderr.write(USAGE + '\n');
+  return 1;
+}
+
 export async function command(args: string[], io: Io): Promise<number | { stop(): void }> {
   const dir = dataDir();
   switch (args[0]) {
@@ -905,13 +917,8 @@ export async function command(args: string[], io: Io): Promise<number | { stop()
       return status(dir, io);
     case 'set-key':
       return setKey(dir, io);
-    case 'wait-update':
-      return waitUpdate(dir, io);
-    case 'prepare-browser':
-      return prepareBrowserCommand(dir, args[1], io);
     default:
-      io.stderr.write(USAGE + '\n');
-      return 1;
+      return upkeepCommand(dir, args, io);
   }
 }
 

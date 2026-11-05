@@ -25,13 +25,16 @@ export const WaitInput = z.object({
   on: WaitOnInput.optional().describe('Who you wait for: an employee, or time, the CEO, a machine or another external event. Omitted means an external event.'),
 });
 
+/* Who the wait is on, when it names someone. */
+const withOn = <T>(on: T | null | undefined) => (on ? { on } : {});
+
 function waitOf(input: z.infer<typeof WaitInput>, now: Date): ExternalWait {
   const parsed = WaitInput.safeParse(input);
   if (!parsed.success) throw refuse(400, 'task_invalid', 'Name the external event in one line and give its deadline as an ISO date and time.');
   const until = new Date(parsed.data.until);
   const delay = until.getTime() - now.getTime();
   if (delay <= 0 || delay > EXTERNAL_WAIT_MS) throw refuse(400, 'task_invalid', 'The wait must end in the future, at most two hours from now.');
-  return { reason: parsed.data.reason, since: now.toISOString(), until: until.toISOString(), ...(parsed.data.on ? { on: parsed.data.on } : {}) };
+  return { reason: parsed.data.reason, since: now.toISOString(), until: until.toISOString(), ...withOn(parsed.data.on) };
 }
 
 /* A holder can end its turn while an external system works; the task keeps its workflow status. */
@@ -42,10 +45,8 @@ export async function waitFor(ctx: Ctx, agentId: string, taskId: string, input: 
   return moved;
 }
 
-async function placeWait(ctx: Ctx, agentId: string, taskId: string, input: z.infer<typeof WaitInput>, now: Date): Promise<Moved> {
-  const task = await loadTask(ctx.db, taskId);
-  requireHolder(task, agentId);
-  await waitingTaskTurn(ctx.db, agentId, taskId);
+/* Whether words on the task wait for its holder: in a turn, or still in the outbox. */
+async function unreadMessage(ctx: Ctx, agentId: string, taskId: string): Promise<boolean> {
   const [message] = await ctx.db.select({ id: jobs.id }).from(jobs).innerJoin(agentEvents, eq(agentEvents.jobId, jobs.id)).where(and(
     eq(jobs.agentId, agentId), eq(jobs.taskId, taskId), eq(jobs.status, 'queued'), eq(agentEvents.kind, 'message'),
     sql`${agentEvents.data}->'taskWake'->>'why' in ('message', 'comment', 'unblocked')`,
@@ -53,12 +54,23 @@ async function placeWait(ctx: Ctx, agentId: string, taskId: string, input: z.inf
   const [comment] = await ctx.db.select({ id: pendingWakes.id }).from(pendingWakes).where(and(
     eq(pendingWakes.agentId, agentId), eq(pendingWakes.taskId, taskId), inArray(pendingWakes.why, ['comment', 'unblocked']),
   )).limit(1);
-  if (message || comment) throw refuse(409, 'task_invalid', `A message on #${task.number} waits for you. End this turn and read it before waiting.`);
+  return Boolean(message || comment);
+}
+
+/* The notice the wait asks for, kept in the same write as the wait. */
+const keepNotice = (notice: Awaited<ReturnType<typeof requestedWaitNotice>>) => async (tx: Parameters<typeof recordWaitNotice>[0]) => {
+  if (notice) await recordWaitNotice(tx, notice);
+};
+
+async function placeWait(ctx: Ctx, agentId: string, taskId: string, input: z.infer<typeof WaitInput>, now: Date): Promise<Moved> {
+  const task = await loadTask(ctx.db, taskId);
+  requireHolder(task, agentId);
+  await waitingTaskTurn(ctx.db, agentId, taskId);
+  if (await unreadMessage(ctx, agentId, taskId)) throw refuse(409, 'task_invalid', `A message on #${task.number} waits for you. End this turn and read it before waiting.`);
   const wait = waitOf(input, now);
-  const on = await checkedWaitTarget(ctx, task.companyId, agentId, wait.on);
-  const externalWait = { ...wait, ...(on ? { on } : {}) };
+  const externalWait = { ...wait, ...withOn(await checkedWaitTarget(ctx, task.companyId, agentId, wait.on)) };
   const notice = await requestedWaitNotice(ctx, { ...task, externalWait, version: task.version + 1 }, agentId);
-  const row = await move(ctx, task, { externalWait, silent: 0 }, { kind: 'updated', actor: { agentId }, text: `Waiting for "${externalWait.reason}" until ${externalWait.until}.`, data: { externalWait } }, async tx => { if (notice) await recordWaitNotice(tx, notice); });
+  const row = await move(ctx, task, { externalWait, silent: 0 }, { kind: 'updated', actor: { agentId }, text: `Waiting for "${externalWait.reason}" until ${externalWait.until}.`, data: { externalWait } }, keepNotice(notice));
   return { task: row, wakes: [] };
 }
 
@@ -155,11 +167,17 @@ function taskTurn(task: Task, agentId: string, message: TurnMessage): { message:
   return { taskId: task.id, message: { ...message, task: { id: task.id, number: task.number }, taskWake: { ...taskWakeOf(task, { why: 'comment' }), why: 'message', ...to } } };
 }
 
+const waitEndedWake = (task: Task, agentId: string, reason: string, unavailable?: string): Wake =>
+  ({ agentId, taskId: task.id, why: 'wait_ended', text: reason, ...(unavailable ? { note: unavailable } : {}), version: task.version + 1 });
+
+const waitEndedFact = (agentId: string, reason: string, unavailable?: string) =>
+  ({ kind: 'updated' as const, actor: { agentId }, text: unavailable ?? `The wait for "${reason}" ended.`, data: { externalWait: null, reason }, ...(unavailable ? { automatic: 'wait_unavailable' as const } : {}) });
+
 export async function expireWait(ctx: Ctx, task: Task, unavailable?: string): Promise<boolean> {
   if (!task.externalWait || !task.assigneeAgentId) return false;
-  const wakes: Wake[] = [{ agentId: task.assigneeAgentId, taskId: task.id, why: 'wait_ended', text: task.externalWait.reason, ...(unavailable ? { note: unavailable } : {}), version: task.version + 1 }];
+  const wakes = [waitEndedWake(task, task.assigneeAgentId, task.externalWait.reason, unavailable)];
   try {
-    await move(ctx, task, { externalWait: null, silent: 0 }, { kind: 'updated', actor: { agentId: task.assigneeAgentId }, text: unavailable ?? `The wait for "${task.externalWait.reason}" ended.`, data: { externalWait: null, reason: task.externalWait.reason }, ...(unavailable ? { automatic: 'wait_unavailable' as const } : {}) }, undefined, wakes);
+    await move(ctx, task, { externalWait: null, silent: 0 }, waitEndedFact(task.assigneeAgentId, task.externalWait.reason, unavailable), undefined, wakes);
   } catch (error) {
     if (error instanceof ApiError && error.reason === 'task_changed') return false;
     throw error;
