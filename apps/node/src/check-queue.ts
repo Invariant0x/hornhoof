@@ -15,7 +15,7 @@ export class CheckQueue {
     await this.acquire(options);
     const context = { active: true };
     return this.context.run(context, async () => {
-      try { return await run(); }
+      try { options.signal?.throwIfAborted(); return await run(); }
       finally { context.active = false; this.running--; this.pump(); }
     });
   }

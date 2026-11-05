@@ -77,4 +77,41 @@ describe('the machine check queue', () => {
     const result = queue.withSlot(async () => queue.withSlot(async () => 'nested'));
     expect(await result).toBe('nested');
   });
+
+  it('keeps an aborted running slot occupied until the command and its children have finished', async () => {
+    const queue = new CheckQueue(() => 1), cancel = new AbortController();
+    const started = gate(), stopped = gate();
+    let nextRan = false;
+    const run = queue.withSlot(async () => { started.open(); await stopped.waiting; return 'stopped'; }, { signal: cancel.signal });
+    await started.waiting;
+    const next = queue.withSlot(async () => { nextRan = true; });
+    cancel.abort(new Error('stop process group'));
+    await Promise.resolve();
+    expect(nextRan).toBe(false);
+    stopped.open();
+    expect(await run).toBe('stopped');
+    await next;
+    expect(nextRan).toBe(true);
+  });
+
+  it('preserves the exact cancellation reason and never runs a cancelled waiter', async () => {
+    const queue = new CheckQueue(() => 0), cancel = new AbortController();
+    const reason = { code: 'deadline' };
+    let ran = false;
+    const run = queue.withSlot(async () => { ran = true; }, { signal: cancel.signal });
+    cancel.abort(reason);
+    await expect(run).rejects.toBe(reason);
+    expect(ran).toBe(false);
+  });
+
+  it('does not start a command cancelled between receiving a slot and entering its callback', async () => {
+    const queue = new CheckQueue(() => 1), cancel = new AbortController();
+    let ran = false;
+    const reason = new Error('cancelled before command start');
+    const run = queue.withSlot(async () => { ran = true; }, { signal: cancel.signal });
+    cancel.abort(reason);
+    await expect(run).rejects.toBe(reason);
+    expect(ran).toBe(false);
+    expect(await queue.withSlot(async () => 'next')).toBe('next');
+  });
 });
