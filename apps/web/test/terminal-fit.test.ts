@@ -25,6 +25,7 @@ const MeasuredTerminal = vi.hoisted(() => class MeasuredTerminalImpl {
   clearCalls = 0;
 
   _core = {
+    buffers: { active: { hasScrollback: false, ybase: 0, ydisp: 0 }, normal: { hasScrollback: false, ybase: 0, ydisp: 0 }, alt: { hasScrollback: false, ybase: 0, ydisp: 0 } },
     _selectionService: { shouldForceSelection: () => false, enable() {} },
     coreMouseService: { _protocols: {}, onProtocolChange: () => ({ dispose() {} }) },
     viewport: { scrollBarWidth: 15 },
@@ -71,6 +72,9 @@ const MeasuredTerminal = vi.hoisted(() => class MeasuredTerminalImpl {
     return { dispose() {} };
   }
   attachCustomKeyEventHandler() {}
+  attachCustomWheelEventHandler() {}
+  scrollLines() {}
+  refresh() {}
   onData() {}
   onResize(fn: (s: { cols: number; rows: number }) => void) {
     this.onSize.push(fn);
