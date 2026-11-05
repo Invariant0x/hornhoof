@@ -7,6 +7,9 @@ const KEY_CURVE = 'P-256';
 const REQUEST_TIMEOUT_MS = 15000;
 const DETAIL_LIMIT = 200;
 const NO_ANSWER = 'no answer';
+const PROBLEM_TYPE = 'application/problem+json';
+// The form an HTTP date is sent in. Date.parse alone also takes words like "retry 10" for some date.
+const HTTP_DATE = /^[A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} GMT$/;
 const DEFAULT_BACKOFF: Backoff = { attempts: 10, min: 2000, max: 10000 };
 
 export type ChallengeHooks = { answer(token: string, keyAuthorization: string): void; forget(token: string): void };
@@ -40,14 +43,15 @@ export class AcmeError extends Error {
 // A Retry-After is either seconds or an HTTP date, and anything else says nothing.
 export function retryAfterSeconds(header: unknown, nowMs: number = Date.now()): number | null {
   if (typeof header !== 'string') return null;
-  if (/^\d+$/.test(header.trim())) return Number(header);
-  const at = Date.parse(header);
+  const value = header.trim();
+  if (/^\d+$/.test(value)) return Number(value);
+  const at = HTTP_DATE.test(value) ? Date.parse(value) : Number.NaN;
   return Number.isNaN(at) ? null : Math.max(0, Math.ceil((at - nowMs) / 1000));
 }
 
 // The ACME problem document in an answer, or null when the answer is not one.
 export function problemOf(status: number, contentType: unknown, body: unknown, retryAfter: unknown): Problem | null {
-  if (typeof contentType !== 'string' || !contentType.startsWith('application/problem+json')) return null;
+  if (typeof contentType !== 'string' || !contentType.toLowerCase().startsWith(PROBLEM_TYPE)) return null;
   const parsed = ProblemBody.safeParse(body);
   if (!parsed.success) return null;
   return { status, type: parsed.data.type, detail: parsed.data.detail ?? null, retryAfterS: retryAfterSeconds(retryAfter) };
@@ -128,16 +132,18 @@ export class AcmeAccount {
     });
   }
 
+  // A URL already held is given back unasked: nothing is verified, so nothing false is said. The next order is what
+  // meets the CA.
   account(): Promise<string> {
     return saying(async () => {
-      await this.makeOrFind();
+      if (!this.holdsAccountUrl()) await this.makeOrFind();
       return this.client.getAccountUrl();
     });
   }
 
   issue(host: string, hooks: ChallengeHooks, opts: { replaces?: string; selfCheck?: boolean } = {}): Promise<Issued> {
     return saying(async () => {
-      if (!this.holdsAccountUrl()) await this.account();
+      await this.account();
       const order = await this.client.createOrder(orderRequest(host, opts.replaces));
       for (const authz of await this.client.getAuthorizations(order)) {
         if (authz.status !== 'valid') await this.prove(authz, order, hooks, opts.selfCheck ?? true);
@@ -148,12 +154,14 @@ export class AcmeAccount {
 
   // No contact is sent, by decision: the first order accepts the CA's terms and gives no one's address. For a key the CA
   // knows, acme-client follows the first answer with an update that says nothing new, and a CA may refuse that update, as
-  // Pebble does. The account's URL came with the first answer, so such a refusal changes nothing.
+  // Pebble does. Called with no URL held, so a URL held after a throw came with this first answer, and such a refusal
+  // changes nothing: no later failure may read it as its own.
   private async makeOrFind(): Promise<void> {
     try {
       await this.client.createAccount({ termsOfServiceAgreed: true });
     } catch (err) {
       if (!this.holdsAccountUrl()) throw err;
+      lastProblem = null;
     }
   }
 

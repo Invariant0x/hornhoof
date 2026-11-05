@@ -4,6 +4,7 @@ import * as peculiar from '@peculiar/x509';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { certId, certIdFrom, renewalInfo } from '../src/modules/tls/ari.js';
 import { selfSigned } from '../src/modules/tls/x509.js';
+import { closedPort } from './closed-port.js';
 
 const HOST = 'acme.hornhoof.org';
 const WINDOW = { start: '2026-12-01T00:00:00Z', end: '2026-12-02T00:00:00Z' };
@@ -33,14 +34,6 @@ async function ariServer(answer: Answer, renewalInfoPath: string | null = '/rene
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   onTestFinished(() => new Promise<void>((resolve) => server.close(() => resolve())));
   return { directory: `http://127.0.0.1:${(server.address() as AddressInfo).port}/dir`, paths };
-}
-
-async function closedPort(): Promise<number> {
-  const server = createServer();
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const { port } = server.address() as AddressInfo;
-  await new Promise<void>((resolve) => server.close(() => resolve()));
-  return port;
 }
 
 describe('the certificate id', () => {

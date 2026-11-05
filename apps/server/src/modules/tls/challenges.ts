@@ -20,10 +20,11 @@ export class Challenges {
   }
 }
 
-// The CA asks with no session and over any port, so this route needs neither and says nothing but the answer.
+// The CA asks with no session and over any port, so this route needs neither and says nothing but the answer. A wildcard,
+// since a named parameter stops at Fastify's maxParamLength of 100, under what TOKEN allows; TOKEN is the bound.
 export function challengeRoutes(app: FastifyInstance, challenges: Challenges): void {
-  app.get<{ Params: { token: string } }>('/.well-known/acme-challenge/:token', async (req, reply) => {
-    const { token } = req.params;
+  app.get<{ Params: { '*': string } }>('/.well-known/acme-challenge/*', async (req, reply) => {
+    const token = req.params['*'];
     const keyAuthorization = TOKEN.test(token) ? challenges.get(token) : undefined;
     if (keyAuthorization === undefined) throw new ApiError(404, 'not_found', 'Not found.');
     return reply.type('text/plain').send(keyAuthorization);

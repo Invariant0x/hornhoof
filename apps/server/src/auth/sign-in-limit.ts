@@ -20,7 +20,6 @@ const KEEP_MS = Math.max(...LIMIT_NAMES.map(name => SIGN_IN_LIMITS[name].windowM
 /* The pg_advisory_xact_lock key of sign-in tries, used for nothing else. */
 export const SIGN_IN_LOCK = 0x68680001;
 
-const IPV4_MAPPED = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i;
 const DOTTED_TAIL = /(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
 
 const hexGroup = (n: number) => n.toString(16);
@@ -34,19 +33,24 @@ function withoutDottedTail(address: string): string {
   return `${address.slice(0, tail.index)}${hexGroup(a * 256 + b)}:${hexGroup(c * 256 + d)}`;
 }
 
-function firstFourGroups(address: string): string[] {
+/* The eight groups of a colon address, in whatever form it came: with `::`, a dotted tail or a zone, in any case. */
+function eightGroups(address: string): number[] {
   const [left = '', right = ''] = withoutDottedTail(address.split('%')[0]!).split('::');
   const head = asGroups(left);
-  const tail = address.includes('::') ? asGroups(right) : [];
+  const tail = asGroups(right);
   const gap = Array<string>(Math.max(0, 8 - head.length - tail.length)).fill('0');
-  return [...head, ...gap, ...tail].slice(0, 4).map(group => hexGroup(parseInt(group, 16)));
+  return [...head, ...gap, ...tail].map(group => parseInt(group, 16));
 }
 
-/* What the limit counts an address as: an IPv4 as its text, an IPv6 as its /64, since one visitor holds a whole /64. */
+const isIpv4Mapped = (groups: number[]) => groups.slice(0, 5).every(group => group === 0) && groups[5] === 0xffff;
+const asIpv4 = ([high, low]: number[]) => [high! >> 8, high! & 0xff, low! >> 8, low! & 0xff].join('.');
+
+/* What the limit counts an address as: an IPv4 as its text, in whichever form it came, an IPv6 as its /64, since one
+   visitor holds a whole /64. */
 export function addressKey(address: string): string {
-  const mapped = IPV4_MAPPED.exec(address);
-  if (mapped) return mapped[1]!;
-  return address.includes(':') ? `${firstFourGroups(address).join(':')}::/64` : address;
+  if (!address.includes(':')) return address;
+  const groups = eightGroups(address);
+  return isIpv4Mapped(groups) ? asIpv4(groups.slice(6)) : `${groups.slice(0, 4).map(hexGroup).join(':')}::/64`;
 }
 
 export interface FullLimit {
@@ -57,7 +61,7 @@ export interface FullLimit {
 /* How long to wait: the longest of the full limits, each free again when its oldest try leaves its window. */
 export function longestWait(full: FullLimit[], now: Date): { retryAfterS: number; windowMs: number } {
   const waits = full.map(({ oldest, windowMs }) => ({ retryAfterS: Math.ceil((oldest.getTime() + windowMs - now.getTime()) / 1000), windowMs }));
-  const longest = waits.reduce((a, b) => (b.retryAfterS > a.retryAfterS ? b : a), { retryAfterS: 1, windowMs: SIGN_IN_LIMITS.emailAddress.windowMs });
+  const longest = waits.reduce((a, b) => (b.retryAfterS > a.retryAfterS ? b : a), waits[0] ?? { retryAfterS: 1, windowMs: SIGN_IN_LIMITS.emailAddress.windowMs });
   return { ...longest, retryAfterS: Math.max(1, longest.retryAfterS) };
 }
 

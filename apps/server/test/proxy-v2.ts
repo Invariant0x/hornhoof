@@ -3,6 +3,7 @@ const SIGNATURE = Buffer.from('0d0a0d0a000d0a515549540a', 'hex');
 
 const PROXY_V2 = 0x21;
 const TCP_OVER_IPV4 = 0x11;
+export const TCP_OVER_IPV6 = 0x21;
 const PORTS = Buffer.from([0xc7, 0x38, 0x20, 0xfb]); // 51000 and 8443
 
 export type ProxyV2Fields = {
@@ -25,6 +26,13 @@ export function proxyV2(fields: ProxyV2Fields = {}): Buffer {
 
 export const ipv4Addresses = (source: string): Buffer =>
   Buffer.concat([Buffer.from(source.split('.').map(Number)), Buffer.from([127, 0, 0, 1]), PORTS]);
+
+/* Room for both IPv6 addresses and ports, with the source's groups given and the rest zero. */
+export function ipv6Addresses(source: number[]): Buffer {
+  const addresses = Buffer.alloc(36);
+  source.forEach((group, i) => addresses.writeUInt16BE(group, i * 2));
+  return addresses;
+}
 
 /* A PROXY header over IPv4 from this visitor to the listener. */
 export const visitorHeader = (visitor: string): Buffer => proxyV2({ addresses: ipv4Addresses(visitor) });

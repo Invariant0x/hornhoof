@@ -2,8 +2,9 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import type { AddressInfo } from 'node:net';
 import * as acme from 'acme-client';
 import { afterEach, describe, expect, it, onTestFinished } from 'vitest';
-import { AcmeAccount, AcmeError, type ChallengeHooks, LETS_ENCRYPT, newAccountKey, retryAfterSeconds } from '../src/modules/tls/acme.js';
+import { AcmeAccount, AcmeError, type ChallengeHooks, LETS_ENCRYPT, newAccountKey, problemOf, retryAfterSeconds } from '../src/modules/tls/acme.js';
 import { selfSigned } from '../src/modules/tls/x509.js';
+import { closedPort } from './closed-port.js';
 
 const RATE_LIMITED = 'urn:ietf:params:acme:error:rateLimited';
 const BAD_NONCE = 'urn:ietf:params:acme:error:badNonce';
@@ -48,7 +49,7 @@ async function fakeAcme(routes: Record<string, Handler>) {
     void readBody(req).then((raw) => {
       const path = req.url ?? '';
       const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-      if (path === '/dir') return send(res, { body: { newNonce: `${base}/nonce`, newAccount: `${base}/new-account`, newOrder: `${base}/new-order` } });
+      if (path === '/dir') return send(res, routes[path]?.(base) ?? { body: { newNonce: `${base}/nonce`, newAccount: `${base}/new-account`, newOrder: `${base}/new-order` } });
       if (path === '/nonce') return send(res, {});
       seen.push({ path, payload: payloadOf(raw) });
       return send(res, routes[path]?.(base) ?? { status: 404, text: 'not here' });
@@ -121,14 +122,6 @@ function orderToProve(chain: string, authz: Handler, more: Record<string, Handle
     '/cert': chainAnswer(chain),
     ...more,
   };
-}
-
-async function closedPort(): Promise<number> {
-  const server = createServer();
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const { port } = server.address() as AddressInfo;
-  await new Promise<void>((resolve) => server.close(() => resolve()));
-  return port;
 }
 
 function recordingHooks() {
@@ -245,6 +238,32 @@ describe('AcmeAccount, on a fake ACME server', () => {
     });
     expect(await (await newAccountOn(fake)).account()).toBe(fake.accountUrl);
     expect(fake.hits('/account/1')).toBe(1);
+  });
+
+  it('leaves nothing of a refused update behind for a later failure to read', async () => {
+    const fake = await fakeAcme({
+      // With no newOrder, the step after the account fails on this side, before a new answer could replace the last one.
+      '/dir': (base) => ({ body: { newNonce: `${base}/nonce`, newAccount: `${base}/new-account` } }),
+      '/new-account': (base) => ({ ...accountMade(base), status: 200 }),
+      '/account/1': () => problem(400, 'urn:ietf:params:acme:error:malformed', 'Use POST-as-GET'),
+    });
+    const { hooks } = recordingHooks();
+    await expect((await newAccountOn(fake)).issue(HOST, hooks, { selfCheck: false })).rejects.toMatchObject({ kind: 'unreachable', type: null });
+  });
+
+  it('gives back a URL it was given and asks the CA nothing, since it can vouch for nothing', async () => {
+    const fake = await fakeAcme({ '/new-account': accountMade, '/account/1': () => ({ status: 500 }) });
+    const account = new AcmeAccount(fake.directoryUrl, await newAccountKey(), fake.accountUrl, QUICK);
+    expect(await account.account()).toBe(fake.accountUrl);
+    expect(fake.paths()).toEqual([]);
+  });
+
+  it('asks the CA for the account once, however often it is asked', async () => {
+    const fake = await fakeAcme({ '/new-account': accountMade });
+    const account = await newAccountOn(fake);
+    expect(await account.account()).toBe(fake.accountUrl);
+    expect(await account.account()).toBe(fake.accountUrl);
+    expect(fake.paths()).toEqual(['/new-account']);
   });
 
   it('accepts the terms and gives no contact', async () => {
@@ -402,5 +421,16 @@ describe('Retry-After', () => {
   it('has nothing to say for no header or for nonsense', () => {
     expect(retryAfterSeconds(undefined, NOW)).toBeNull();
     expect(retryAfterSeconds('soon', NOW)).toBeNull();
+  });
+
+  it.each(['-5', 'retry 10', '12 Nov', 'Sunny 10', '2026-11-04'])('does not take %s for a date', (header) => {
+    expect(retryAfterSeconds(header, NOW)).toBeNull();
+  });
+});
+
+describe('a problem document', () => {
+  it('is known by its content type in any case', () => {
+    const body = { type: BAD_NONCE, detail: 'stale' };
+    expect(problemOf(400, 'Application/Problem+JSON; charset=utf-8', body, undefined)).toEqual({ status: 400, ...body, retryAfterS: null });
   });
 });

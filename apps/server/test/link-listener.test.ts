@@ -90,13 +90,20 @@ function ask(socket: TLSSocket, { method = 'GET', path, body, headers = {} }: As
 
 const health = { path: '/api/health' };
 
-async function wrongSignIn(port: number, visitor: string, headers: Record<string, string> = {}): Promise<number> {
-  const body = { email: 'x@acme.com', password: 'not the password' };
+async function wrongSignIn(port: number, visitor: string, headers: Record<string, string> = {}, email = 'x@acme.com'): Promise<number> {
+  const body = { email, password: 'not the password' };
   return (await ask(await overTls(port, visitor), { method: 'POST', path: '/api/auth/login', body, headers })).status;
 }
 
 /* The per email and address limit stops the eleventh. */
 const LIMITED_AFTER = 10;
+
+/* Wrong sign-ins from one visitor, each with another email, so that only the limit per address fills. */
+const ADDRESS_LIMIT = 30;
+async function fillAddressLimit(port: number, visitor: string): Promise<void> {
+  for (let i = 0; i < ADDRESS_LIMIT; i++) expect(await wrongSignIn(port, visitor, {}, `x${i}@acme.com`)).toBe(401);
+}
+const wrongWithNewEmail = (port: number, visitor: string) => wrongSignIn(port, visitor, {}, `new-${visitor}@acme.com`);
 
 async function closedAfterMs(socket: net.Socket): Promise<number> {
   const started = performance.now();
@@ -191,8 +198,17 @@ describe('a request through the TLS listener', () => {
     expect(await wrongSignIn(other.port, OTHER_VISITOR)).toBe(429);
   });
 
-  /* The plan's own form of the test above, 30 wrong sign-ins with other emails, needs the address limit of its Task 3. */
-  it.todo('counts the limit of 30 an hour per address by the visitor of the PROXY header');
+  it('counts the limit of 30 an hour per address by the visitor of the PROXY header', async () => {
+    const trusted = await listening(IS_TUNNEL);
+    await fillAddressLimit(trusted.port, VISITOR);
+    expect(await wrongWithNewEmail(trusted.port, VISITOR)).toBe(429);
+    expect(await wrongWithNewEmail(trusted.port, OTHER_VISITOR)).toBe(401);
+
+    /* From any other address the header is not believed, so both visitors are 127.0.0.1 here. */
+    const other = await listening(NOT_TUNNEL);
+    await fillAddressLimit(other.port, VISITOR);
+    expect(await wrongWithNewEmail(other.port, OTHER_VISITOR)).toBe(429);
+  });
 
   it('does not believe an X-Forwarded-For the visitor wrote', async () => {
     const { port } = await listening();
