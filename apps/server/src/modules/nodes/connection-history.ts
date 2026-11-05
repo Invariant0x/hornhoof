@@ -39,20 +39,21 @@ export type MachineDrop = { at: Date; back: Date | null; offlineMs: number | nul
 
 export type ConnectionHistory = { summary: { drops: number; averageMs: number | null; cause: DropCause | null }; events: MachineDrop[] };
 
-/* A node's lost connections, each with its next connection, which is when it came back. A node taken off its machine in
-   Hornhoof lost nothing. */
+/* The connection a node lost, if it lost one, with when it came back. A node taken off its machine in Hornhoof lost nothing. */
+function dropOf(row: ConnectionRow, back: Date | null): NodeDrop[] {
+  if (!row.disconnectedAt || !row.cause || row.cause === 'disconnected') return [];
+  const { nodeId, subscriptionId, closeCode, closeReason, error, report } = row;
+  const offlineMs = back && Math.max(back.getTime() - row.disconnectedAt.getTime(), report?.offlineMs ?? 0);
+  return [{ nodeId, subscriptionId, at: row.disconnectedAt, back, offlineMs, cause: row.cause, closeCode, closeReason, error, report }];
+}
+
+/* A node's lost connections, each with its next connection, which is when it came back. */
 function nodeDrops(rows: ConnectionRow[]): NodeDrop[] {
   const ofNode = new Map<string, ConnectionRow[]>();
   for (const row of rows) ofNode.set(row.nodeId, [...(ofNode.get(row.nodeId) ?? []), row]);
   return [...ofNode.values()].flatMap(own => {
     const sorted = own.toSorted((a, b) => a.connectedAt.getTime() - b.connectedAt.getTime());
-    return sorted.flatMap((row, i) => {
-      if (!row.disconnectedAt || !row.cause || row.cause === 'disconnected') return [];
-      const back = sorted[i + 1]?.connectedAt ?? null;
-      const { nodeId, subscriptionId, closeCode, closeReason, error, report } = row;
-      const offlineMs = back && Math.max(back.getTime() - row.disconnectedAt.getTime(), report?.offlineMs ?? 0);
-      return [{ nodeId, subscriptionId, at: row.disconnectedAt, back, offlineMs, cause: row.cause, closeCode, closeReason, error, report }];
-    });
+    return sorted.flatMap((row, i) => dropOf(row, sorted[i + 1]?.connectedAt ?? null));
   });
 }
 

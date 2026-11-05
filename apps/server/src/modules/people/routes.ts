@@ -63,6 +63,18 @@ function guardDelegate(me: Person, target: { isCeoDelegate: boolean }, body: Pat
   if (touches && target.isCeoDelegate && !me.isOwner) throw delegateLocked();
 }
 
+/* Only the CEO or the CEO delegate changes another person's name. */
+function guardRename(me: Person, id: string, body: Patch): void {
+  const canRenameOther = me.isOwner || (me.isCeoDelegate && me.scopeKind === 'company');
+  if (id !== me.id && body.name !== undefined && !canRenameOther) throw new ApiError(403, 'forbidden', 'Only the CEO or the CEO delegate changes another person\'s name.', 'owner_locked');
+}
+
+function guardDisable(me: Person, target: Pick<Person, 'id' | 'isOwner'>, body: Patch): void {
+  if (body.status !== 'disabled') return;
+  if (target.isOwner) throw new ApiError(403, 'forbidden', 'The owner cannot be disabled.', 'owner_locked');
+  if (target.id === me.id) throw new ApiError(403, 'forbidden', 'You cannot disable yourself.', 'self_locked');
+}
+
 /* The mark goes with the whole company and an active account, and does not come back with them. */
 function markAfter(status: string | undefined, body: Patch): { isCeoDelegate?: false } {
   const narrowed = body.access !== undefined && !('whole' in body.access);
@@ -232,11 +244,8 @@ export function peopleRoutes(app: FastifyInstance, ctx: Ctx): void {
 
     const [target] = await db.select({ ...personColumns, passwordHash: people.passwordHash }).from(people).where(and(eq(people.id, id), eq(people.companyId, me.companyId)));
     if (!target) throw new ApiError(404, 'not_found', 'This person does not exist.', 'person_unknown');
-    const canRenameOther = me.isOwner || (me.isCeoDelegate && me.scopeKind === 'company');
-    if (id !== me.id && body.name !== undefined && !canRenameOther) throw new ApiError(403, 'forbidden', 'Only the CEO or the CEO delegate changes another person\'s name.', 'owner_locked');
-    if (body.status === 'disabled' && (target.isOwner || target.id === me.id)) {
-      throw new ApiError(403, 'forbidden', target.isOwner ? 'The owner cannot be disabled.' : 'You cannot disable yourself.', target.isOwner ? 'owner_locked' : 'self_locked');
-    }
+    guardRename(me, id, body);
+    guardDisable(me, target, body);
     if (body.access && target.isOwner) throw new ApiError(403, 'forbidden', 'The owner always has access to the whole company.', 'owner_locked');
     guardDelegate(me, target, body);
     if (body.access) await checkAccess(db, me.companyId, body.access);

@@ -11,7 +11,7 @@ export const FIRST_UID = 20000;
 
 type JobRun = Extract<ServerMessage, { type: 'job.run' }>;
 
-const isRootUser = () => process.getuid?.() === 0;
+export const isRootUser = () => process.getuid?.() === 0;
 
 /* Stable per subscription or agent, kept in <dir>/users.json. Null unless the node runs as root. */
 export function userFor(dir: string, subscriptionId: string, isRoot = isRootUser()): JobUser | null {
@@ -95,12 +95,13 @@ export function agentUser({ status = '/proc/self/status', passwd = '/etc/passwd'
 export const asAgent = (argv: string[], user: JobUser): string[] => ['setpriv', `--reuid=${user.uid}`, `--regid=${user.gid}`, '--init-groups', '--', ...argv];
 
 /* A personal node that runs as root keeps its key, its records and the agent programs to itself: no agent can change
-   where the node connects, read its key or swap a program another agent starts. The agents get their homes and work
-   folders. */
+   where the node connects, read its key or swap a program or a browser another agent starts. The agents get their homes
+   and work folders. Of the shared browsers only the top comes back here: the browser check drops what is not root's, and
+   handed to root here what an agent or a test run left in them would pass that check, and run as root. */
 export function secureNode(dir: string, user: JobUser, ops: FolderOps = REAL_OPS): void {
   if (ops.owner(dir) !== 0) ops.chown(dir, 0, 0);
   ops.chmod(dir, 0o755);
-  for (const file of ['node.json', 'sessions.json', 'users.json', 'login-url', 'removed', 'browser-error']) {
+  for (const file of ['node.json', 'sessions.json', 'users.json', 'login-url', 'removed', 'browser-error', 'browsers']) {
     const path = join(dir, file);
     if (ops.exists(path) && ops.owner(path) !== 0) ops.chown(path, 0, 0);
   }

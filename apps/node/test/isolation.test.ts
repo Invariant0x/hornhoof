@@ -66,7 +66,7 @@ describe('agentUser', () => {
 describe('secureNode', () => {
   it("keeps the node's own files and programs to root and gives the agents their homes and work folders", () => {
     const user = { uid: 1000, gid: 1000 };
-    const { ops, calls } = fakeOps({ '/data': 1000, '/data/node.json': 1000, '/data/tools': 1000, '/data/sessions.json': 0, '/data/home': 1000 }, ['/data/users.json', '/data/login-url', '/data/removed', '/data/.hh-recordings']);
+    const { ops, calls } = fakeOps({ '/data': 1000, '/data/node.json': 1000, '/data/tools': 1000, '/data/sessions.json': 0, '/data/home': 1000 }, ['/data/users.json', '/data/login-url', '/data/removed', '/data/.hh-recordings', '/data/browsers']);
     secureNode('/data', user, ops);
     expect(calls).toEqual([
       'chown1 /data 0:0',
@@ -82,10 +82,21 @@ describe('secureNode', () => {
 
     const { ops: ops2, calls: calls2 } = fakeOps(
       { '/data': 0, '/data/browser-error': 1000, '/data/home': 1000, '/data/work': 1000 },
-      ['/data/node.json', '/data/sessions.json', '/data/users.json', '/data/login-url', '/data/removed', '/data/tools', '/data/.hh-recordings'],
+      ['/data/node.json', '/data/sessions.json', '/data/users.json', '/data/login-url', '/data/removed', '/data/tools', '/data/.hh-recordings', '/data/browsers'],
     );
     secureNode('/data', user, ops2);
     expect(calls2).toContain('chown1 /data/browser-error 0:0');
+  });
+
+  it('takes back only the top of the shared browsers from an agent or a test run that held them: what they left in it must still read as theirs when the node looks at it', () => {
+    const user = { uid: 1000, gid: 1000 };
+    const held = fakeOps({ '/data/browsers': 20000 });
+    secureNode('/data', user, held.ops);
+    expect(held.calls.filter(call => call.includes('browsers'))).toEqual(['chown1 /data/browsers 0:0']);
+
+    const roots = fakeOps({ '/data/browsers': 0 });
+    secureNode('/data', user, roots.ops);
+    expect(roots.calls.filter(call => call.includes('browsers'))).toEqual([]);
   });
 });
 

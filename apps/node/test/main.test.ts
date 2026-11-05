@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { WebSocketServer, type WebSocket } from 'ws';
+import { parseNodeMessage } from '@hornhoof/protocol';
 import { buildOf, runNode } from '../src/main.js';
 import { prepareNodeStop } from '../src/lifecycle.js';
 import { ProgramUpdates } from '../src/program-updates.js';
@@ -299,6 +300,31 @@ describe('a node that runs agents in terminals', () => {
     expect(server.received.find(m => m.type === 'job.done' && m.jobId === 'j2')).toMatchObject({ ok: true, result: 'ready' });
   });
 
+  it.skipIf(!hasTmux)('leaves a turn in a session to say the limits itself, and asks the program only after a job outside one', async () => {
+    const server = await fakeServer();
+    const dir = nodeDir(server.url);
+    const tmux = new Tmux({ socket: `hh-main-${process.pid}`, env: { PATH: process.env.PATH ?? '', HOME: dir } });
+    const fake = new URL('./fakes/fake-term.mjs', import.meta.url).pathname;
+    let asked = 0;
+    const limits = async () => {
+      asked++;
+      return { status: 'allowed' as const, windows: [] };
+    };
+    const run = async () => ({ ok: true, sessionId: null, result: 'ready', output: '', error: null, limits: null });
+    const node = await runNode({ dir, adapter: { ...adapter, run, limits }, log: () => {}, limitsMs: 60_000, terminal: { tmux, program: claudeProgram, bin: fake, home: join(dir, 'home'), signedOut: /not logged in/i } });
+    onTestFinished(() => node.stop());
+    await server.wait(() => asked === 1 && server.received.some(m => m.type === 'hello'));
+
+    const job = { type: 'job.run', subscriptionId: 's1', provider: 'claude', sessionId: null, model: null, timeoutMs: 20000, secret: null, instructions: 'Be brief.', toolToken: 'tok-1' };
+    server.send({ ...job, jobId: 'j1', prompt: 'NOLIMITS', workspace: { key: 'agent-1', repo: null } });
+    await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'j1'), 15000);
+    expect(asked).toBe(1);
+
+    server.send({ ...job, jobId: 'j2', prompt: 'test', toolToken: null });
+    await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'j2'));
+    expect(asked).toBe(2);
+  });
+
   it.skipIf(!hasTmux)("installs the agents' program before a turn in a session, and says the turn failed when it cannot", async () => {
     const server = await fakeServer();
     const dir = nodeDir(server.url);
@@ -450,17 +476,231 @@ describe('runNode', () => {
     expect(server.received.find(m => m.type === 'status')).toMatchObject({ models: [{ id: 'opus', name: 'Opus' }] });
   });
 
-  it("asks its program for the plan's limits on its own, now and then, and says when they change", async () => {
+  it("asks its program for the plan's limits on its own, now and then, and says each reading, also one that moved nothing, so they do not go stale in Hornhoof", async () => {
     const server = await fakeServer();
     const seen = [0.1, 0.1, 0.25];
     let asked = 0;
     const limits = async () => ({ status: 'allowed' as const, windows: [{ name: 'seven_day', utilization: seen[Math.min(asked++, seen.length - 1)]!, resetsAt: null }] });
     const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, limits }, log: () => {}, limitsMs: 40 });
     onTestFinished(() => node.stop());
+    const readings = () => server.received.filter(m => m.type === 'status' && m.limits !== null).map(m => (m.limits as { windows: { utilization: number }[] }).windows[0]!.utilization);
+    await server.wait(() => readings().length >= 3);
+    expect(readings().slice(0, 3)).toEqual([0.1, 0.1, 0.25]);
+  });
+
+  it('says no limits in a status with no reading behind it, so Hornhoof does not take old ones for fresh, in a frame Hornhoof still reads', async () => {
+    const server = await fakeServer();
+    const reading = { status: 'allowed' as const, windows: [{ name: 'seven_day', utilization: 0.4, resetsAt: null }], complete: true };
+    const answers: (() => Promise<typeof reading | null>)[] = [async () => reading];
+    const limits = () => (answers.shift() ?? (async () => { throw new Error('the source is down'); }))();
+    const run = async (input: RunInput) => ({ ok: input.prompt !== 'signed out', sessionId: 'sess-9', result: 'ready', output: '', error: input.prompt === 'signed out' ? 'not_logged_in' as const : null, limits: null });
+    const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, run, limits }, log: () => {}, limitsMs: 60_000 });
+    onTestFinished(() => node.stop());
+    const statuses = () => server.received.filter(m => m.type === 'status');
+    const job = (jobId: string, prompt: string) => ({ type: 'job.run', jobId, subscriptionId: 's1', provider: 'claude', prompt, sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
+    await server.wait(() => statuses().some(m => m.limits !== null));
+
+    /* The reading after the job fails: the status that says the job is over knows nothing new of the limits. */
+    const told = statuses().length;
+    server.send(job('j1', 'hi'));
+    await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'j1'));
+    expect(statuses().length).toBeGreaterThan(told);
+
+    /* It reads nothing and fails nothing: the program cannot tell now. */
+    answers.push(async () => null);
+    server.send(job('j2', 'hi'));
+    await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'j2'));
+
+    /* The status of a sign-in lost, sent apart from the job's end. */
+    const before = statuses().length;
+    server.send(job('j3', 'signed out'));
+    await server.wait(() => statuses().length >= before + 2);
+
+    const after = statuses().slice(told);
+    expect(after.length).toBeGreaterThanOrEqual(4);
+    for (const status of after) expect(status).toMatchObject({ limits: null });
+    for (const status of after) expect(parseNodeMessage(JSON.stringify(status))).not.toBeNull();
+  });
+
+  it('says a move to another plan of its maker when it looks for the limits, though it read none', async () => {
+    const server = await fakeServer();
+    let account = { email: 'x@y.z', tier: 'pro' };
+    let looks = 0;
+    const limits = async () => {
+      looks++;
+      return null;
+    };
+    const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, account: async () => account, limits }, log: () => {}, limitsMs: 15 });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello') && looks >= 4);
+    /* A look that read nothing has nothing to say. */
+    expect(server.received.filter(m => m.type === 'status')).toEqual([]);
+    account = { email: 'x@y.z', tier: 'max' };
+    await server.wait(() => server.received.some(m => m.type === 'status'));
+    expect(server.received.find(m => m.type === 'status')).toMatchObject({ account, limits: null });
+  });
+
+  it('says a reading once, in the next status that goes out, whichever that is', async () => {
+    const server = await fakeServer();
+    const dir = nodeDir(server.url);
+    let browser: string | null = 'libnss3.so missing';
+    const turn = { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.2, resetsAt: null }] };
+    const run = async () => ({ ok: true, sessionId: 'sess-9', result: 'ready', output: '', error: null, limits: turn });
+    const node = await runNode({ dir, adapter: { ...adapter, run }, log: () => {}, checkBrowser: async () => browser, browserCheckMs: 30 });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
+    await server.wait(() => server.received.some(m => m.type === 'job.done'));
+    expect(server.received.filter(m => m.type === 'status').map(m => m.limits)).toEqual([turn]);
+
+    /* A browser that recovers has nothing to say of the limits. */
+    browser = null;
     await server.wait(() => server.received.filter(m => m.type === 'status').length >= 2);
-    const statuses = server.received.filter(m => m.type === 'status').map(m => (m.limits as { windows: { utilization: number }[] }).windows[0]!.utilization);
-    expect(statuses.slice(0, 2)).toEqual([0.1, 0.25]);
-    expect(asked).toBeGreaterThanOrEqual(3);
+    expect(server.received.filter(m => m.type === 'status')[1]).toMatchObject({ limits: null, browserError: null });
+  });
+
+  it('asks for no new list of models with each reading, only when the account moved', async () => {
+    const server = await fakeServer();
+    let listed = 0;
+    let account = { email: 'x@y.z', tier: 'pro' };
+    const models = async () => {
+      listed++;
+      return [{ id: 'opus', name: 'Opus' }];
+    };
+    const limits = async () => ({ status: 'allowed' as const, windows: [{ name: 'seven_day', utilization: 0.1, resetsAt: null }] });
+    const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, models, limits, account: async () => account }, log: () => {}, limitsMs: 15 });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.filter(m => m.type === 'status' && m.limits !== null).length >= 5);
+    expect(listed).toBe(1);
+    expect(server.received.filter(m => m.type === 'status').at(-1)).toMatchObject({ models: [{ id: 'opus', name: 'Opus' }] });
+    account = { email: 'x@y.z', tier: 'max' };
+    await server.wait(() => listed === 2);
+  });
+
+  describe('while Hornhoof is away', () => {
+    const readingOf = (m: { [k: string]: unknown }) => (m.limits as { windows: { utilization: number }[] }).windows[0]!.utilization;
+    const usage = (utilization: number) => ({ status: 'allowed' as const, windows: [{ name: 'seven_day', utilization, resetsAt: null }] });
+    const job = (jobId: string) => ({ type: 'job.run', jobId, subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
+    const framesAfterHello = (received: { type: string; [k: string]: unknown }[]) => received.slice(received.findLastIndex(m => m.type === 'hello') + 1);
+    const helloAgain = (server: Awaited<ReturnType<typeof fakeServer>>) => server.wait(() => server.received.filter(m => m.type === 'hello').length === 2, 6000);
+
+    it('keeps no reading in the queue, and says only the newest when it is back', async () => {
+      const server = await fakeServer();
+      let asked = 0;
+      const limits = async () => usage(++asked / 100_000);
+      const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, limits }, log: () => {}, limitsMs: 10 });
+      onTestFinished(() => node.stop());
+      await server.wait(() => server.received.some(m => m.type === 'status' && m.limits !== null));
+      const askedBefore = asked;
+      server.drop();
+      await helloAgain(server);
+      await server.wait(() => framesAfterHello(server.received).some(m => m.type === 'status'));
+      const first = framesAfterHello(server.received).find(m => m.type === 'status')!;
+      /* Hundreds were read while it was away; the oldest of them would come first from a queue. */
+      expect(readingOf(first)).toBeGreaterThan((askedBefore + 5) / 100_000);
+    });
+
+    it('puts no reading in a status that waits for the connection, and says it once it is back, before the job it came with', async () => {
+      const server = await fakeServer();
+      const turn = usage(0.3);
+      let end: () => void = () => {};
+      const run = () => new Promise<Awaited<ReturnType<ProviderAdapter['run']>>>(done => { end = () => done({ ok: true, sessionId: 'sess-9', result: 'ready', output: '', error: null, limits: turn }); });
+      const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, run, limits: async () => null }, log: () => {}, limitsMs: 60_000 });
+      onTestFinished(() => node.stop());
+      await server.wait(() => server.received.some(m => m.type === 'hello'));
+      server.send(job('j1'));
+      await server.wait(() => server.received.some(m => m.type === 'job.started'));
+      server.drop();
+      /* The node hears of the drop, and the job ends with it away. */
+      await new Promise(r => setTimeout(r, 50));
+      end();
+      await helloAgain(server);
+      await server.wait(() => framesAfterHello(server.received).some(m => m.type === 'job.done'));
+      const after = framesAfterHello(server.received);
+      const statuses = after.filter(m => m.type === 'status');
+      expect(statuses.filter(m => m.limits !== null).map(m => m.limits)).toEqual([turn]);
+      expect(after.findIndex(m => m.type === 'status' && m.limits !== null)).toBeLessThan(after.findIndex(m => m.type === 'job.done'));
+    });
+
+    it('forgets a reading that waits when the next one fails: by the time Hornhoof hears it, it would be old', async () => {
+      const server = await fakeServer();
+      let away = false;
+      let last = false;
+      const limits = async () => {
+        if (!away) return usage(0.1);
+        if (last) return null;
+        last = true;
+        return usage(0.2);
+      };
+      const run = async () => ({ ok: true, sessionId: 'sess-9', result: 'ready', output: '', error: null, limits: null });
+      const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, run, limits }, log: () => {}, limitsMs: 10 });
+      onTestFinished(() => node.stop());
+      await server.wait(() => server.received.some(m => m.type === 'status' && m.limits !== null));
+      away = true;
+      server.drop();
+      await helloAgain(server);
+      server.send(job('j1'));
+      await server.wait(() => server.received.some(m => m.type === 'job.done'));
+      const statuses = framesAfterHello(server.received).filter(m => m.type === 'status');
+      expect(statuses.length).toBeGreaterThan(0);
+      for (const status of statuses) expect(status).toMatchObject({ limits: null });
+    });
+
+    it('forgets the reading of a job that ended meanwhile the same way', async () => {
+      const server = await fakeServer();
+      const turn = usage(0.3);
+      let looks = 0;
+      let end: () => void = () => {};
+      const run = () => new Promise<Awaited<ReturnType<ProviderAdapter['run']>>>(done => { end = () => done({ ok: true, sessionId: 'sess-9', result: 'ready', output: '', error: null, limits: turn }); });
+      const limits = async () => {
+        looks++;
+        return null;
+      };
+      const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, run, limits }, log: () => {}, limitsMs: 10 });
+      onTestFinished(() => node.stop());
+      await server.wait(() => server.received.some(m => m.type === 'hello'));
+      server.send(job('j1'));
+      await server.wait(() => server.received.some(m => m.type === 'job.started'));
+      server.drop();
+      await new Promise(r => setTimeout(r, 50));
+      end();
+      /* A look or two after the job's end. */
+      const seen = looks;
+      await server.wait(() => looks >= seen + 3);
+      await helloAgain(server);
+      await server.wait(() => framesAfterHello(server.received).some(m => m.type === 'job.done'));
+      for (const status of framesAfterHello(server.received).filter(m => m.type === 'status')) expect(status).toMatchObject({ limits: null });
+    });
+
+    it('keeps a reading through a failed one while Hornhoof is there, as the status that says it is on its way', async () => {
+      const server = await fakeServer();
+      const turn = usage(0.3);
+      let asked = 0;
+      let gate: Promise<void> = Promise.resolve();
+      let open: () => void = () => {};
+      const models = async () => {
+        await gate;
+        return [{ id: 'opus', name: 'Opus' }];
+      };
+      const limits = async () => {
+        asked++;
+        return null;
+      };
+      const run = async () => ({ ok: true, sessionId: 'sess-9', result: 'ready', output: '', error: null, limits: turn });
+      const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, run, models, limits }, log: () => {}, limitsMs: 10 });
+      onTestFinished(() => node.stop());
+      await server.wait(() => server.received.some(m => m.type === 'hello'));
+      gate = new Promise(resolve => { open = resolve; });
+      server.send(job('j1'));
+      await server.wait(() => server.received.some(m => m.type === 'job.started'));
+      /* The job's status waits for the models while readings fail. */
+      await new Promise(r => setTimeout(r, 20));
+      const seen = asked;
+      await server.wait(() => asked >= seen + 3);
+      open();
+      await server.wait(() => server.received.some(m => m.type === 'job.done'));
+      expect(server.received.filter(m => m.type === 'status').map(m => m.limits)).toContainEqual(turn);
+    });
   });
 
   it('reports Antigravity limits on schedule and after a job, and invents no reached limit when the source fails', async () => {
@@ -515,7 +755,9 @@ describe('runNode', () => {
     server.send({ type: 'job.run', jobId: 'j-agy', subscriptionId: 's1', provider: 'antigravity', prompt: 'say ready', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
     await server.wait(() => server.received.some(m => m.type === 'job.done' && m.jobId === 'j-agy'));
     expect(server.received.filter(m => m.type === 'status').length).toBeGreaterThan(statusesBefore);
-    expect(server.received.filter(m => m.type === 'status').at(-1)!.limits).toEqual({
+    const done = server.received.findIndex(m => m.type === 'job.done' && m.jobId === 'j-agy');
+    /* Among the statuses before the job's end: a reading on schedule may still come after it. */
+    expect(server.received.slice(0, done).filter(m => m.type === 'status').map(m => m.limits)).toContainEqual({
       status: 'allowed',
       windows: [
         { name: 'five_hour', utilization: 0.75, resetsAt: '2026-11-04T21:41:44.000Z' },
@@ -560,6 +802,23 @@ describe('runNode', () => {
     server.send({ type: 'job.run', jobId: 'j1', subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
     await server.wait(() => server.received.filter(m => m.type === 'status').length >= 2);
     expect(server.received.filter(m => m.type === 'status').at(-1)!.limits).toMatchObject({ status: 'rejected' });
+  });
+
+  it('keeps the last fifty ends of jobs a server does not confirm', async () => {
+    const server = await fakeServer();
+    const run = async () => ({ ok: true, sessionId: null, result: 'ready', output: '', error: null, limits: null });
+    const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, run }, log: () => {} });
+    onTestFinished(() => node.stop());
+    const hellos = () => server.received.filter(m => m.type === 'hello');
+    await server.wait(() => hellos().length === 1);
+    for (let i = 1; i <= 52; i++) server.send({ type: 'job.run', jobId: `j${i}`, subscriptionId: 's1', provider: 'claude', prompt: 'hi', sessionId: null, model: null, timeoutMs: 5000, secret: null, instructions: null, toolToken: null });
+    await server.wait(() => server.received.filter(m => m.type === 'job.done').length === 52, 15000);
+    server.drop();
+    await server.wait(() => hellos().length === 2, 5000);
+    const running = hellos()[1]!.running as string[];
+    expect(running).toHaveLength(50);
+    expect(running).not.toContain('j1');
+    expect(running).toContain('j52');
   });
 
   it('says in hello how it came up: the same after a dropped connection, anew once it starts again', async () => {

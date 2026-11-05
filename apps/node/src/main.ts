@@ -116,6 +116,61 @@ function merged(known: Limits | null, news: Limits): Limits {
   return { status: full ? 'rejected' : news.status, windows: windows.slice(0, 8), ...(known.complete ? { complete: true } : {}) };
 }
 
+/* What the node knows of the plan's limits, and whether Hornhoof has heard its last reading. Hornhoof counts them fresh from
+   the moment it hears them, so each reading goes out once, also one that moved nothing, and a status with no reading behind
+   it says none: null, as the protocol asks for the field, which leaves what Hornhoof knows as it is. While Hornhoof is away
+   the newest reading waits here, and one that fails then forgets it: by the time Hornhoof heard it, it would be old. */
+class PlanLimits {
+  private known: Limits | null = null;
+  private unsaid = false;
+
+  read(news: Limits | null): void {
+    if (!news) return;
+    this.known = merged(this.known, news);
+    this.unsaid = true;
+  }
+
+  looked(news: Limits | null, online: boolean): void {
+    this.read(news);
+    if (!news && !online) this.unsaid = false;
+  }
+
+  get waiting(): boolean {
+    return this.unsaid;
+  }
+
+  forStatus(online: boolean): Limits | null {
+    if (!online) return null;
+    const reading = this.unsaid ? this.known : null;
+    this.unsaid = false;
+    return reading;
+  }
+}
+
+/* Why a node takes no part of any run; none when it takes them. */
+const noRunsBecause = (testUser: JobUser | null, browserError: string | null): string | null =>
+  !testUser ? NO_RUNS : browserError ? `Playwright Chromium could not start: ${browserError}` : null;
+
+/* A server that never confirms the ends of jobs leaves the node with only the last few. */
+function keepLast(kept: Map<string, NodeMessage>, id: string, m: NodeMessage): void {
+  kept.set(id, m);
+  if (kept.size > MAX_UNCONFIRMED) kept.delete(kept.keys().next().value!);
+}
+
+/* A screen's messages go to the sign-in that shows it, else to the agents' host. */
+const shownBy = (login: LoginTerminal | null, host: TerminalHost | null, termId: string) => (login?.owns(termId) ? login : host);
+
+/* What a Codex holder last sealed its sign-in for. */
+type CodexSealed = { version: number; recipients: Recipient[]; digest: string };
+
+/* A list of the plan's nodes under a newer number replaces what the holder kept, one more node under the same number joins it. */
+function sealedFor(known: CodexSealed | null, version: number, recipients: Recipient[], held: Uint8Array): CodexSealed | null {
+  if (known !== null && version === known.version) {
+    return { ...known, recipients: [...known.recipients.filter(r => !recipients.some(n => n.nodeId === r.nodeId)), ...recipients].slice(-20) };
+  }
+  return version > (known?.version ?? 0) ? { version, recipients, digest: digestOf(held) } : known;
+}
+
 /* The node's life: stay connected, run jobs, report the sign-in state and the limits, clean up when removed. */
 export async function runNode({ dir, adapter, builtin, terminal, login: loginSetup, log: writeLog = console.log, loginCheckMs = LOGIN_CHECK_MS, setupCheckMs = SETUP_CHECK_MS, learnMs = LEARN_MS, limitsMs = LIMITS_MS, loadMs = LOAD_MS, leaseCheckMs = LEASE_CHECK_MS, install, programs = new ProgramUpdates([]), testUser = null, runPart = runTests, build, checkBrowser = async () => null, browserCheckMs = BROWSER_CHECK_MS }: RunOptions): Promise<{ stop(reason?: NodeStopReason): void }> {
   if (!builtin && isRemoved(dir)) {
@@ -143,6 +198,8 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   /* The built-in node serves API keys, which need no sign-in. */
   const single = typeof adapter === 'function' ? null : adapter;
   const pick = typeof adapter === 'function' ? adapter : () => adapter;
+  /* A plan's sign-in is the node's to hold only on a personal node. */
+  const holdsSignIn = single !== null && !builtin;
 
   /* Each running job with the way to call it off and the promise of its end, and the same for parts of test runs. */
   const running = new Map<string, { stop: AbortController; done: Promise<void> }>();
@@ -154,11 +211,11 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   const unconfirmed = new Map<string, NodeMessage>();
   const unconfirmedTests = new Map<string, NodeMessage>();
   let send: ((m: ProgramNodeMessage) => boolean) | null = null;
-  let operatorOnline = false;
+  let online = false;
   /* The kind of sign-in Hornhoof hands this plan, and what that sign-in was when the plan's program refused it: until
      it changes, the node stays signed out, so turns do not go round on a sign-in that no longer works. */
   const planProvider = builtin ? null : (state as NodeState).provider;
-  const credKind: CredKind | null = single && !builtin && planProvider ? (CRED_KINDS[planProvider] ?? null) : null;
+  const credKind: CredKind | null = holdsSignIn && planProvider ? (CRED_KINDS[planProvider] ?? null) : null;
   let refused: string | null = null;
   const signedInHere = async (): Promise<boolean> => {
     if (!single) return true;
@@ -174,7 +231,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   let loggedIn = await signedInHere();
   const setup = new SetupWait(single, setupCheckMs);
   await setup.check(loggedIn);
-  let limits: Limits | null = null;
+  const planLimits = new PlanLimits();
   let stopped = false;
 
   const emit = (m: NodeMessage) => {
@@ -183,14 +240,8 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     const current = withPrograms(m, programs);
     if (!send?.(current) && m.type !== 'job.done' && m.type !== 'tests.done') outbox.push(current);
   };
-  const keep = (jobId: string, m: NodeMessage) => {
-    unconfirmed.set(jobId, m);
-    if (unconfirmed.size > MAX_UNCONFIRMED) unconfirmed.delete(unconfirmed.keys().next().value!);
-  };
-  const keepTest = (partId: string, m: NodeMessage) => {
-    unconfirmedTests.set(partId, m);
-    if (unconfirmedTests.size > MAX_UNCONFIRMED) unconfirmedTests.delete(unconfirmedTests.keys().next().value!);
-  };
+  const keep = (jobId: string, m: NodeMessage) => keepLast(unconfirmed, jobId, m);
+  const keepTest = (partId: string, m: NodeMessage) => keepLast(unconfirmedTests, partId, m);
   /* Values no screen shows: the node's key, the programs' tokens and each turn's tokens. */
   const learn = async (more: (string | null | undefined)[] = []) => {
     for (const s of more) if (s) known.add(s);
@@ -198,12 +249,13 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   };
   await learn();
   /* A screen nobody receives is not worth keeping; everything else waits for the connection like any message. */
+  const sendOrKeep = (m: NodeMessage) => (m.type === 'term.data' || m.type === 'term.exit' ? void send?.(m) : emit(m));
   const host = terminal
     ? new TerminalHost({
         tmux: terminal.tmux,
-        operator: { dir: join(dir, 'program-operator'), send: frame => send?.(frame) ?? false, connected: () => operatorOnline },
+        operator: { dir: join(dir, 'program-operator'), send: frame => send?.(frame) ?? false, connected: () => online },
         hornhoof: state.server,
-        send: m => (m.type === 'term.data' || m.type === 'term.exit' ? void send?.(m) : emit(m)),
+        send: sendOrKeep,
         secrets: () => [...known],
         log,
         remember: (sessionId, workDir) => rememberSession(dir, sessionId, workDir),
@@ -218,7 +270,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
           setup: loginSetup,
           dir,
           home: credHome,
-          send: m => (m.type === 'term.data' || m.type === 'term.exit' ? void send?.(m) : emit(m)),
+          send: sendOrKeep,
           secrets: () => [...known],
           signedIn: () => signedInNow(),
           install,
@@ -241,14 +293,15 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   /* Which account and plan the program is signed in to, read at the start, after a sign-in and with the limits. */
   const readAccount = async () => (single?.account ? await single.account().catch(() => null) : null);
   let account = await readAccount();
+  /* The plan's limits now, asked of its program; none when it cannot tell. */
+  const readLimits = async () => (single?.limits ? single.limits().catch(() => null) : null);
   let browserError = await checkBrowser().catch(err => message(err));
   writeBrowserError(dir, browserError);
   if (browserError) log(`Playwright Chromium could not start: ${browserError}`);
-  const noRunsNow = (): string | null =>
-    !testUser ? NO_RUNS : browserError ? `Playwright Chromium could not start: ${browserError}` : null;
+  const noRunsNow = () => noRunsBecause(testUser, browserError);
   const tellStatus = () => {
     browserError = readBrowserError(dir);
-    emit({ type: 'status', loggedIn, ...setup.field(), limits, ...(models ? { models } : {}), account, browserError, noRuns: noRunsNow() });
+    emit({ type: 'status', loggedIn, ...setup.field(), limits: planLimits.forStatus(online), ...(models ? { models } : {}), account, browserError, noRuns: noRunsNow() });
   };
   const status = async () => {
     /* A program that cannot list its models now keeps those it listed before. */
@@ -265,7 +318,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     log,
     onOpen(next) {
       send = next;
-      operatorOnline = true;
+      online = true;
       host?.closeViews();
       login?.closeViews();
       /* Finished jobs Hornhoof has not confirmed still count as running, so the server does not give up on them. */
@@ -275,12 +328,14 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       next({ type: 'hello', version: VERSION, loggedIn, ...setup.field(), running: [...running.keys(), ...typed, ...unconfirmed.keys()], ...(models ? { models } : {}), terminals: Boolean(host), programOperatorV1: Boolean(host), work: Boolean(testUser), ...(noRuns ? { noRuns } : {}), browserError, load: load(), tests, skillFiles: true, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
       host?.operatorReplay();
       for (const m of outbox.splice(0)) emit(m);
+      /* What it read while Hornhoof was away, before the end of any job that brought it. */
+      if (planLimits.waiting) tellStatus();
       for (const m of unconfirmed.values()) next(m);
       for (const m of unconfirmedTests.values()) next(m);
     },
     /* One message that fails is logged; it never ends the node with all its runs. */
     onMessage: m => void handle(m).catch(err => log(`A message from Hornhoof failed: ${message(err)}`)),
-    onClose: () => { operatorOnline = false; },
+    onClose: () => { online = false; },
     onRefused: () => log('Hornhoof does not know this machine any more. Run the install command from Hornhoof again to reconnect.'),
   });
   void programs.update(tellStatus).catch(err => log(`Could not update the programs: ${message(err)}`));
@@ -327,11 +382,11 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
         return shows.open(m).catch(() => void send?.({ type: 'term.exit', termId: m.termId }));
       }
       case 'term.input':
-        return login?.owns(m.termId) ? login.input(m) : host?.input(m);
+        return shownBy(login, host, m.termId)?.input(m);
       case 'term.resize':
-        return login?.owns(m.termId) ? login.resize(m) : host?.resize(m);
+        return shownBy(login, host, m.termId)?.resize(m);
       case 'term.close':
-        return login?.owns(m.termId) ? login.close(m) : host?.close(m);
+        return shownBy(login, host, m.termId)?.close(m);
       case 'turn.opened':
         return host?.opened(m);
       case 'agent.say': {
@@ -346,7 +401,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
         return inOrder(() => putCredential(m.kind, m.sealed));
       case 'cred.drop':
         return inOrder(() => {
-          if (!single || builtin) return;
+          if (!holdsSignIn) return;
           dropCredential(dir, credHome, m.kind, credUser);
           return signedInNow();
         });
@@ -355,7 +410,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       /* A Codex plan runs on one of its machines at a time: the one that holds its lease keeps its sign-in. */
       case 'cred.lease':
         return inOrder(() => {
-          if (!single || builtin) return;
+          if (!holdsSignIn) return;
           if (m.hold) return takeLease(dir);
           codexSealed = null;
           giveUpLease(dir, credHome, credUser);
@@ -377,7 +432,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   /* A plan's sign-in Hornhoof sealed to this node: opened with its key and kept where the program reads it. What goes into
      the log never carries it, not even in the words of an error. */
   async function putCredential(kind: CredKind, sealed: string) {
-    if (!single || builtin) return;
+    if (!holdsSignIn) return;
     let plain: Uint8Array;
     try {
       plain = await unseal(sealed, keyPair.identity);
@@ -393,17 +448,11 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   }
 
   /* The sign-in this node holds, sealed for each of the plan's nodes Hornhoof names, one envelope for each. A Codex
-     holder keeps whom it sealed for, under which number and what the file was, to seal it again once Codex renews it:
-     a list of the plan's nodes replaces what it kept, one more node under the same number joins it. */
+     holder keeps whom it sealed for, under which number and what the file was, to seal it again once Codex renews it. */
   async function sealCredential(kind: CredKind, version: number, recipients: Recipient[]) {
-    const held = single && !builtin ? heldCredential(credHome, kind) : null;
+    const held = holdsSignIn ? heldCredential(credHome, kind) : null;
     if (!held) return;
-    if (kind === 'codex_auth' && holdsLease(dir)) {
-      const joins = codexSealed !== null && version === codexSealed.version;
-      codexSealed = joins
-        ? { ...codexSealed!, recipients: [...codexSealed!.recipients.filter(r => !recipients.some(n => n.nodeId === r.nodeId)), ...recipients].slice(-20) }
-        : version > (codexSealed?.version ?? 0) ? { version, recipients, digest: digestOf(held) } : codexSealed;
-    }
+    if (kind === 'codex_auth' && holdsLease(dir)) codexSealed = sealedFor(codexSealed, version, recipients, held);
     emit({ type: 'cred.sealed', kind, version, envelopes: await sealFor(held, recipients) });
   }
 
@@ -412,7 +461,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   /* Codex renews its sign-in as it runs, and the old one stops working: the holder seals the new one for the plan's
      other machines, under the next number, so one of them can take over. */
   async function renewedCodex() {
-    if (!codexSealed || !single || builtin || !holdsLease(dir)) return;
+    if (!codexSealed || !holdsSignIn || !holdsLease(dir)) return;
     const held = heldCredential(credHome, 'codex_auth');
     if (!held || digestOf(held) === codexSealed.digest) return;
     const version = codexSealed.version + 1;
@@ -429,8 +478,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     return next;
   }
 
-  /* What a Codex holder last sealed its sign-in for. */
-  let codexSealed: { version: number; recipients: Recipient[]; digest: string } | null = null;
+  let codexSealed: CodexSealed | null = null;
 
   /* After a sign-in came or went: what the screens hide, and whether the program is signed in, said at once. */
   async function signedInNow() {
@@ -479,8 +527,8 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
         ...chosen,
         run: async input => {
           const res = await runUnlessStopped(input, () => runIn(input));
-          const fresh = res.limits ?? (!(host && terminal && input.agentKey) && single?.limits ? await single.limits().catch(() => null) : null);
-          if (fresh) limits = merged(limits, fresh);
+          /* A turn in a session says them itself. */
+          planLimits.read(res.limits ?? (host && terminal && input.agentKey ? null : await readLimits()));
           return res;
         },
       };
@@ -524,10 +572,11 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     /* A program that renewed its sign-in, or one signed in again by hand, may be on another plan of its maker now. */
     const was = JSON.stringify(account);
     account = await readAccount();
-    const now = single?.limits ? await single.limits().catch(() => null) : null;
-    const moved = now !== null && JSON.stringify(merged(limits, now)) !== JSON.stringify(limits);
-    if (moved) limits = merged(limits, now);
-    if (moved || JSON.stringify(account) !== was) void status();
+    const now = await readLimits();
+    planLimits.looked(now, online);
+    if (JSON.stringify(account) !== was) void status();
+    /* A reading alone asks for no new list of models, and while Hornhoof is away it waits with planLimits, not in the outbox. */
+    else if (now !== null && online) tellStatus();
   };
   void askLimits();
   const asking = setInterval(() => void askLimits(), limitsMs);
@@ -681,8 +730,7 @@ async function status(dir: string, io: Io): Promise<number> {
 }
 
 async function prepareBrowserCommand(dir: string, repoArg: string | undefined, io: Io): Promise<number> {
-  const owner = agentUser();
-  const res = await prepareAndVerifyBrowser({ dir, ...(repoArg ? { repoDir: resolve(repoArg) } : {}), owner, verifyUser: owner });
+  const res = await prepareAndVerifyBrowser({ dir, ...(repoArg ? { repoDir: resolve(repoArg) } : {}), verifyUser: agentUser() });
   if (!res.ok) {
     io.stderr.write(`Playwright Chromium could not start: ${res.error}\n`);
     return 1;
@@ -790,6 +838,14 @@ export function terminalOwner(on: NodeJS.Platform = process.platform, run?: Comm
   return owners[on];
 }
 
+/* A personal node that runs as root keeps its own files to itself. Its test runs get a user of their own, apart from the
+   agents' sign-in and folders. */
+function securedTestUser(dir: string, user: JobUser | null): JobUser | null {
+  if (!user) return null;
+  secureNode(dir, user);
+  return userFor(dir, 'tests', true);
+}
+
 async function run(dir: string, builtinMode: boolean, io: Io): Promise<number | { stop(): void }> {
   const log = (line: string) => void io.stdout.write(line + '\n');
   const tools = join(dir, 'tools');
@@ -801,10 +857,8 @@ async function run(dir: string, builtinMode: boolean, io: Io): Promise<number | 
       return 1;
     }
     const user = agentUser();
-    if (user) secureNode(dir, user);
-    /* Test runs get a user of their own, apart from the agents' sign-in and folders. */
-    const testUser = user ? userFor(dir, 'tests', true) : null;
-    const checkBrowser = () => startupBrowserCheck(dir, user, user);
+    const testUser = securedTestUser(dir, user);
+    const checkBrowser = () => startupBrowserCheck(dir, user);
     if (state && !state.provider) return runNode({ dir, adapter: machineOnly, log, testUser, build, checkBrowser });
     const provider = state?.provider ?? 'claude';
     const fs = user ? agentFs(user) : ownFs;
@@ -825,8 +879,8 @@ async function run(dir: string, builtinMode: boolean, io: Io): Promise<number | 
   const pick = (job: JobRun) => withInstall(builtinPick(job), tools, job.provider);
   const managed = (['anthropic_api', 'openai_api'] as const).map(provider => ({ provider, adapter: adapterFor(provider, { home: dir, tools }) }));
   const testUser = userFor(dir, 'tests');
-  const browserOwner = agentUser();
-  const checkBrowser = () => startupBrowserCheck(dir, browserOwner, testUser || browserOwner);
+  const verifyUser = testUser || agentUser();
+  const checkBrowser = () => startupBrowserCheck(dir, verifyUser);
   return runNode({ dir, adapter: pick, programs: managedUpdates(tools, managed), builtin: { server, key }, log, testUser, build, checkBrowser });
 }
 

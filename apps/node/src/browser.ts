@@ -1,7 +1,7 @@
-import { chmodSync, cpSync, existsSync, lchownSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, lchownSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync, type Stats } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { agentUser, ensurePasswd, FIRST_UID, type JobUser, type SystemFiles } from './isolation.js';
+import { basename, join, sep } from 'node:path';
+import { agentUser, ensurePasswd, FIRST_UID, isRootUser, type JobUser, type SystemFiles } from './isolation.js';
 import { runProgram, stripEscapes } from './providers/process.js';
 
 export const SEED_BROWSERS_PATH = '/opt/ms-playwright';
@@ -12,6 +12,8 @@ const VERIFY_TIMEOUT_MS = 30_000;
 const MAX_REASON_LENGTH = 240;
 const SAFE_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 const PLAYWRIGHT_PACKAGES = ['@playwright/test', 'playwright', 'playwright-core'] as const;
+/* The folder of the shared browsers that holds the Playwright packages the node installed, one folder for each version. */
+const PACKAGES = '.playwright';
 const CHROMIUM_COMPONENTS = new Set(['chromium', 'chromium-headless-shell', 'ffmpeg']);
 const SPECIFIC_CAUSE = /shared libraries|Executable doesn't exist|EACCES|ENOENT|permission denied|Exec format error|Download failed|cannot open/i;
 const NOISE_LINE = /^[╔║╚╠╣═─┌┐└┘│]|^(?:Call log:|Browser logs:|<launching>|<launched>)/i;
@@ -40,7 +42,8 @@ export type PrepareBrowserOptions = {
   repoDir?: string;
   seedDir?: string;
   globalPlaywrightDir?: string;
-  owner?: JobUser | null;
+  /* A node that runs as root keeps the shared browsers its own; tests say so without being root. */
+  isRoot?: boolean;
   runCommand?: CommandRunner;
 };
 
@@ -145,16 +148,74 @@ function findWorkspacePlaywrightVersion(dir: string): string | null {
   return null;
 }
 
-export function shareTree(path: string, owner: JobUser | null = null): void {
+const rootOwns = (stat: Stats): boolean => stat.uid === 0 && stat.gid === 0;
+
+/* Every user may read and run the shared browsers, and only their owner may change them. On a node that runs as root that
+   owner is root, never the user of an agent or a test run: whoever could write here could swap the Chromium another agent
+   starts, with that agent's sign-in. The owner changes first, so nobody can put anything else in place of what comes next. */
+export function shareTree(path: string, isRoot = isRootUser()): void {
   const stat = lstatSync(path);
-  if (owner && stat.uid !== owner.uid) lchownSync(path, owner.uid, owner.gid);
+  if (isRoot && !rootOwns(stat)) lchownSync(path, 0, 0);
   if (stat.isSymbolicLink()) return;
   if (stat.isDirectory()) {
     chmodSync(path, 0o755);
-    for (const entry of readdirSync(path)) shareTree(join(path, entry), owner);
+    for (const entry of readdirSync(path)) shareTree(join(path, entry), isRoot);
     return;
   }
   chmodSync(path, (stat.mode & 0o111) !== 0 ? 0o755 : 0o644);
+}
+
+/* Where a link really ends, following every link on the way; none when it ends nowhere. */
+function realOf(path: string): string | null {
+  try {
+    return realpathSync(path);
+  } catch {
+    return null;
+  }
+}
+
+/* A tree stays when, on a node that runs as root, all of it is root's, and no link in it ends outside it. */
+function trustedTree(path: string, top: string, isRoot: boolean): boolean {
+  const stat = lstatSync(path);
+  if (isRoot && !rootOwns(stat)) return false;
+  if (stat.isSymbolicLink()) return (realOf(path) ?? '').startsWith(top + sep);
+  return !stat.isDirectory() || readdirSync(path).every(entry => trustedTree(join(path, entry), top, isRoot));
+}
+
+/* What seedFromImage leaves: a browser folder's link, straight to the folder of that name in the image. */
+function linksToSeed(path: string, stat: Stats, seedDir: string, isRoot: boolean): boolean {
+  const seed = realOf(seedDir);
+  return (!isRoot || rootOwns(stat)) && seed !== null && realOf(path) === join(seed, basename(path));
+}
+
+function trustedEntry(path: string, seedDir: string, isRoot: boolean): boolean {
+  const stat = lstatSync(path);
+  return stat.isSymbolicLink() ? linksToSeed(path, stat, seedDir, isRoot) : trustedTree(path, realpathSync(path), isRoot);
+}
+
+/* From here only root may add to the folder, so whoever held it adds nothing behind the look that follows. */
+function closeFolder(folder: string, isRoot: boolean): void {
+  if (isRoot && !rootOwns(lstatSync(folder))) lchownSync(folder, 0, 0);
+  chmodSync(folder, 0o755);
+}
+
+/* Each browser folder, the npm cache and each version of the package stays or goes whole. What goes comes back from the
+   image, npm or Playwright's download. This comes before anything inside changes an owner, which would make any of it look
+   like root's. */
+function dropUntrusted(folder: string, seedDir: string, isRoot: boolean): void {
+  closeFolder(folder, isRoot);
+  for (const name of readdirSync(folder)) {
+    const path = join(folder, name);
+    if (name === PACKAGES && lstatSync(path).isDirectory()) dropUntrusted(path, seedDir, isRoot);
+    else if (!trustedEntry(path, seedDir, isRoot)) rmSync(path, { recursive: true, force: true });
+  }
+}
+
+function openSharedFolder(targetDir: string, seedDir: string, isRoot: boolean): void {
+  if (lstatSync(targetDir, { throwIfNoEntry: false })?.isSymbolicLink()) rmSync(targetDir);
+  mkdirSync(targetDir, { recursive: true });
+  dropUntrusted(targetDir, seedDir, isRoot);
+  shareTree(targetDir, isRoot);
 }
 
 function isInstalled(baseDir: string, folder: string): boolean {
@@ -200,7 +261,7 @@ function clearBrokenEntries(targetDir: string, folders: string[]): void {
   }
 }
 
-function seedFromImage(targetDir: string, seedDir: string, folders: string[], owner: JobUser | null): void {
+function seedFromImage(targetDir: string, seedDir: string, folders: string[], isRoot: boolean): void {
   clearBrokenEntries(targetDir, folders);
   if (!existsSync(seedDir)) return;
   for (const folder of folders) {
@@ -209,12 +270,11 @@ function seedFromImage(targetDir: string, seedDir: string, folders: string[], ow
     const dest = join(targetDir, folder);
     if (isWorldAccessible(src)) {
       symlinkSync(src, dest);
-      if (owner) lchownSync(dest, owner.uid, owner.gid);
       continue;
     }
     const tmp = join(targetDir, `.${folder}.seed-${process.pid}-${Date.now()}`);
-    cpSync(src, tmp, { recursive: true });
-    shareTree(tmp, owner);
+    cpSync(src, tmp, { recursive: true, verbatimSymlinks: true });
+    shareTree(tmp, isRoot);
     renameSync(tmp, dest);
   }
 }
@@ -258,16 +318,16 @@ async function withTempHome<T>(prefix: string, user: JobUser | null, work: (home
 async function resolvePlaywrightDir(
   targetDir: string,
   version: string,
-  opts: { repoDir?: string; globalPlaywrightDir: string; owner: JobUser | null; runCommand: CommandRunner },
+  opts: { repoDir?: string; globalPlaywrightDir: string; isRoot: boolean; runCommand: CommandRunner },
 ): Promise<string> {
-  const prefix = join(targetDir, '.playwright', version);
+  const prefix = join(targetDir, PACKAGES, version);
   const cached = join(prefix, 'node_modules', 'playwright');
-  const candidates = [opts.repoDir ? join(opts.repoDir, 'node_modules', 'playwright') : null, opts.globalPlaywrightDir, cached];
-  for (const candidate of candidates) {
+  /* What a node runs as root comes from its image or its own cache: a repository's package is whatever its branch holds. */
+  const inRepo = opts.repoDir && !opts.isRoot ? join(opts.repoDir, 'node_modules', 'playwright') : null;
+  for (const candidate of [inRepo, opts.globalPlaywrightDir, cached]) {
     if (candidate && readPackageVersion(candidate) === version) return candidate;
   }
   mkdirSync(prefix, { recursive: true });
-  if (opts.owner) shareTree(prefix, opts.owner);
   const env: NodeJS.ProcessEnv = {
     PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin',
     HOME: prefix,
@@ -279,10 +339,9 @@ async function resolvePlaywrightDir(
     'npm',
     ['install', '--prefix', prefix, '--no-save', '--no-package-lock', '--no-audit', '--no-fund', '--ignore-scripts', `playwright@${version}`],
     env,
-    opts.owner,
   );
   if (done.code !== 0) throw new Error(summarizeBrowserError(done.output, done.code, done.timedOut));
-  shareTree(prefix, opts.owner);
+  shareTree(targetDir, opts.isRoot);
   return cached;
 }
 
@@ -314,7 +373,7 @@ export async function prepareBrowser({
   repoDir,
   seedDir = SEED_BROWSERS_PATH,
   globalPlaywrightDir = GLOBAL_PLAYWRIGHT_DIR,
-  owner = null,
+  isRoot = isRootUser(),
   runCommand = defaultRunner(INSTALL_TIMEOUT_MS),
 }: PrepareBrowserOptions): Promise<PrepareBrowserResult> {
   const workspaceVersion = repoDir ? null : findWorkspacePlaywrightVersion(dir);
@@ -324,15 +383,14 @@ export async function prepareBrowser({
 
   const targetDir = browsersDir(dir);
   return withBrowserLock(targetDir, async () => {
-    mkdirSync(targetDir, { recursive: true });
-    shareTree(targetDir, owner);
-    const playwrightDir = await resolvePlaywrightDir(targetDir, version, { repoDir, globalPlaywrightDir, owner, runCommand });
+    openSharedFolder(targetDir, seedDir, isRoot);
+    const playwrightDir = await resolvePlaywrightDir(targetDir, version, { repoDir, globalPlaywrightDir, isRoot, runCommand });
     const folders = requiredFolders(playwrightDir);
-    seedFromImage(targetDir, seedDir, folders, owner);
+    seedFromImage(targetDir, seedDir, folders, isRoot);
     if (hasRequiredInstall(targetDir, folders, fullChromium)) {
       return { status: 'ready', version, playwrightDir, downloaded: false };
     }
-    return withTempHome('hh-pw-install-', owner, async homeDir => {
+    return withTempHome('hh-pw-install-', null, async homeDir => {
       const env: NodeJS.ProcessEnv = {
         PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin',
         HOME: homeDir,
@@ -340,9 +398,9 @@ export async function prepareBrowser({
         LANG: 'C.UTF-8',
         ...browserEnv(dir),
       };
-      const done = await runCommand(process.execPath, [join(playwrightDir, 'cli.js'), 'install', 'chromium'], env, owner);
+      const done = await runCommand(process.execPath, [join(playwrightDir, 'cli.js'), 'install', 'chromium'], env);
       if (done.code !== 0) throw new Error(summarizeBrowserError(done.output, done.code, done.timedOut));
-      shareTree(targetDir, owner);
+      shareTree(targetDir, isRoot);
       return { status: 'ready', version, playwrightDir, downloaded: true };
     });
   });
@@ -384,7 +442,7 @@ export async function prepareAndVerifyBrowser(
     const checked = await verifyBrowser({
       browsersDir: browsersDir(opts.dir),
       playwrightDir: prepared.playwrightDir,
-      user: opts.verifyUser || opts.owner || null,
+      user: opts.verifyUser ?? null,
       runCommand: opts.runCommand,
     });
     if (!checked.ok) return checked;
@@ -420,25 +478,24 @@ export function readBrowserError(dir: string): string | null {
   }
 }
 
+/* verifyUser only checks that Chromium starts: the shared browsers stay out of its hands. */
 export async function ensureRepoBrowser(
   dir: string,
   repoDir: string,
-  owner: JobUser | null = agentUser(),
-  verifyUser: JobUser | null = owner,
+  verifyUser: JobUser | null = agentUser(),
   files?: SystemFiles,
 ): Promise<void> {
   if (verifyUser && verifyUser.uid >= FIRST_UID) ensurePasswd(verifyUser, join(dir, 'home'), files);
-  const res = await prepareAndVerifyBrowser({ dir, repoDir, owner, verifyUser });
+  const res = await prepareAndVerifyBrowser({ dir, repoDir, verifyUser });
   if (!res.ok) throw new Error(`Playwright Chromium could not start: ${res.error}`);
 }
 
 export async function startupBrowserCheck(
   dir: string,
-  owner: JobUser | null = agentUser(),
-  verifyUser: JobUser | null = owner,
+  verifyUser: JobUser | null = agentUser(),
   files?: SystemFiles,
 ): Promise<string | null> {
   if (verifyUser && verifyUser.uid >= FIRST_UID) ensurePasswd(verifyUser, join(dir, 'home'), files);
-  const res = await prepareAndVerifyBrowser({ dir, owner, verifyUser });
+  const res = await prepareAndVerifyBrowser({ dir, verifyUser });
   return res.ok ? null : res.error;
 }

@@ -1,11 +1,11 @@
-import { lastBytes, type NodeMessage } from '@hornhoof/protocol';
+import { lastBytes, type Limits, type NodeMessage } from '@hornhoof/protocol';
 import { and, eq, inArray, isNull, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, jobs, machines, nodes, planCredentials, subscriptions, tasks, type NodeStatus } from '../../db/schema.js';
 import { said } from '../conversation/live.js';
 import { unheard } from '../conversation/unheard.js';
-import { holdForWords, nodeOfAgent, onAgent, pumpWaiting, refusedLimits, startProgram } from '../conversation/queue.js';
+import { holdForWords, limitUntil, nodeOfAgent, onAgent, pumpWaiting, refusedLimits, startProgram } from '../conversation/queue.js';
 import { workStarts } from '../org/map-state.js';
 import { startWork } from '../tasks/engine.js';
 import { programRestarted } from '../tasks/program-restarts.js';
@@ -36,6 +36,15 @@ function jobsOf(id: NodeIdentity, ctx: Ctx): SQL {
    A queued conversation turn still waits in Hornhoof and goes out later. */
 const ON_NODE = or(eq(jobs.status, 'running'), and(eq(jobs.status, 'queued'), eq(jobs.kind, 'test')));
 
+type FinishedJob = { agentId: string | null; kind: typeof jobs.$inferSelect.kind };
+
+function holdForWaitingWords(ctx: Ctx, msg: Extract<NodeMessage, { type: 'job.done' }>, finished: FinishedJob[], now: Date): void {
+  if (!msg.wordsWaiting) return;
+  for (const job of finished) {
+    if (job.agentId && job.kind === 'conversation') holdForWords(ctx, job.agentId, msg.jobId, now);
+  }
+}
+
 async function jobEnded(ctx: Ctx, id: NodeIdentity, msg: Extract<NodeMessage, { type: 'job.done' }>, now: Date) {
   const [job] = await ctx.db.select({ agentId: jobs.agentId }).from(jobs).where(and(eq(jobs.id, msg.jobId), jobsOf(id, ctx)));
   const finish = async () => {
@@ -59,9 +68,7 @@ async function jobEnded(ctx: Ctx, id: NodeIdentity, msg: Extract<NodeMessage, { 
       })
       .where(and(eq(jobs.id, msg.jobId), inArray(jobs.status, OPEN_JOBS), jobsOf(id, ctx)))
       .returning({ companyId: jobs.companyId, agentId: jobs.agentId, kind: jobs.kind });
-    if (msg.wordsWaiting) for (const job of finished) {
-      if (job.agentId && job.kind === 'conversation') holdForWords(ctx, job.agentId, msg.jobId, now);
-    }
+    holdForWaitingWords(ctx, msg, finished, now);
     return finished;
   };
   return job?.agentId ? onAgent(ctx, job.agentId, finish) : finish();
@@ -138,11 +145,29 @@ const builtinCut = (ctx: Ctx, id: NodeIdentity, msg: Hello, now: Date) =>
 const nodeCut = (ctx: Ctx, nodeId: string, row: { node: typeof nodes.$inferSelect; host: string | null }, msg: Hello, now: Date) =>
   interruptionOf(ctx, { id: nodeId, name: row.host || 'a machine with no name', machine: { id: row.node.machineId, name: row.host }, said: { version: row.node.version, boot: row.node.boot } }, msg, now);
 
+/* The last reading of each plan's limits. */
+const lastReadings = new WeakMap<Ctx, Map<string, string>>();
+
+/* What a reading changes of a plan. A plan may refuse a turn while its numbers say it has room. A reading that moved nothing
+   since then says nothing of that refusal, so the hold it left stays until its time, as fresh as the reading. */
+async function afterReading(ctx: Ctx, planId: string, reading: Limits, now: Date): Promise<{ limits?: Limits; limitsUpdatedAt: Date }> {
+  const seen = lastReadings.get(ctx) ?? new Map<string, string>();
+  lastReadings.set(ctx, seen);
+  const said = JSON.stringify(reading);
+  const unmoved = seen.get(planId) === said;
+  seen.set(planId, said);
+  if (unmoved) {
+    const [plan] = await ctx.db.select({ limits: subscriptions.limits, at: subscriptions.limitsUpdatedAt }).from(subscriptions).where(eq(subscriptions.id, planId));
+    if (limitUntil(plan?.limits ?? null, plan?.at ?? null, now.getTime())) return { limitsUpdatedAt: now };
+  }
+  return { limits: reading, limitsUpdatedAt: now };
+}
+
 async function savePlanMetadata(ctx: Ctx, planId: string, msg: Extract<NodeMessage, { type: 'status' }>, now: Date): Promise<void> {
   if (!msg.limits && !msg.models) return;
   await ctx.db
     .update(subscriptions)
-    .set({ ...(msg.limits ? { limits: msg.limits, limitsUpdatedAt: now } : {}), ...(msg.models ? { models: msg.models } : {}) })
+    .set({ ...(msg.limits ? await afterReading(ctx, planId, msg.limits, now) : {}), ...(msg.models ? { models: msg.models } : {}) })
     .where(and(eq(subscriptions.id, planId), isNull(subscriptions.removedAt)));
 }
 

@@ -73,6 +73,30 @@ describe('node socket', () => {
     expect(await subOf(app, ceo, subId)).toMatchObject({ limits: fresh, limitsUpdatedAt: freshAt });
   });
 
+  it('keeps the limits and when they were read through a status with no reading in it, so they go stale when readings stop', async () => {
+    const { app, db, subId, nodeId } = await liveCompany();
+    const identity = { kind: 'node' as const, nodeId };
+    const reading = { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.3, resetsAt: null }], complete: true };
+    const readAt = new Date('2026-11-03T00:40:00.000Z');
+    await handleNodeMessage(app.ctx, identity, { type: 'status', loggedIn: true, limits: reading }, readAt);
+    await handleNodeMessage(app.ctx, identity, { type: 'status', loggedIn: true, limits: null, models: [{ id: 'opus', name: 'Opus' }] }, new Date('2026-11-03T01:40:00.000Z'));
+    expect((await db.select().from(subscriptions).where(eq(subscriptions.id, subId)))[0]).toMatchObject({ limits: reading, limitsUpdatedAt: readAt, models: [{ id: 'opus', name: 'Opus' }] });
+  });
+
+  it("leaves a plan's hold to that plan's own readings: the same numbers from another plan say nothing of it", async () => {
+    const { app, db, ceo, nodeId } = await liveCompany();
+    const connected = await app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['codex'] }, ...as(ceo) });
+    const joined = await app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code: connected.json().command.split('--join ')[1], machineId: 'mac-0002-abcd', hostname: 'other-mac', os: 'darwin', arch: 'arm64' } });
+    const other = joined.json().nodes[0] as { nodeId: string; subscriptionId: string };
+    const reading = { status: 'allowed' as const, windows: [{ name: 'five_hour', utilization: 0.3, resetsAt: null }], complete: true };
+    const at = new Date();
+    const hold = { status: 'rejected' as const, windows: [{ name: 'five_hour', utilization: 1, resetsAt: new Date(at.getTime() + 3_600_000).toISOString() }] };
+    await handleNodeMessage(app.ctx, { kind: 'node', nodeId }, { type: 'status', loggedIn: true, limits: reading }, at);
+    await db.update(subscriptions).set({ limits: hold, limitsUpdatedAt: at }).where(eq(subscriptions.id, other.subscriptionId));
+    await handleNodeMessage(app.ctx, { kind: 'node', nodeId: other.nodeId }, { type: 'status', loggedIn: true, limits: reading }, at);
+    expect((await db.select().from(subscriptions).where(eq(subscriptions.id, other.subscriptionId)))[0]!.limits).toEqual(reading);
+  });
+
   it('keeps the models a node reports, and keeps them when a message has none', async () => {
     const { db, url, subId, key } = await liveCompany();
     const node = await connectNode(url, key);
