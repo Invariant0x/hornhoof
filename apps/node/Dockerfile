@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # The node: runs the agent programs (Claude Code, Codex, Kimi Code, Antigravity CLI) for one subscription, or for the company's API keys with --builtin.
-# Every step that runs Node runs on the builder's own platform: what it makes is plain JavaScript or a download for the
-# target, and Node under the emulation that builds the other platform crashes. The image itself only copies and runs apt.
+# Build steps that prepare JavaScript or browser downloads run on the builder's own platform. The final PostgreSQL
+# smoke runs in the target image so an unsupported runtime cannot pass the image build.
 FROM --platform=$BUILDPLATFORM node:22.23.4-bookworm-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da AS build
 WORKDIR /app
 COPY package.json package-lock.json tsconfig.base.json ./
@@ -98,7 +98,19 @@ ARG SHELLCHECK_ARM64_SHA256=68a8133197a50beb8803f8d42f9908d1af1c5540d4bb05fdfca8
 COPY --from=browser /opt/browser-packages /opt/browser-packages
 # procps gives agents ps and free, python-is-python3 the python that scripts call, and python3-pil Pillow for image checks.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends git ca-certificates curl ripgrep jq file tmux procps unzip python3 python3-venv python-is-python3 python3-pil $(cat /opt/browser-packages) \
+  && apt-get install -y --no-install-recommends git ca-certificates curl gpg ripgrep jq file tmux procps unzip python3 python3-venv python-is-python3 python3-pil $(cat /opt/browser-packages) \
+  && install -d /usr/share/keyrings \
+  && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc -o /usr/share/keyrings/postgresql-pgdg.asc \
+  && GNUPGHOME="$(mktemp -d)" && export GNUPGHOME \
+  && gpg --batch --show-keys --with-colons /usr/share/keyrings/postgresql-pgdg.asc > /tmp/pgdg-key \
+  && test "$(awk -F: '$1 == "fpr" { print $10 }' /tmp/pgdg-key)" = B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8 \
+  && rm -rf "$GNUPGHOME" /tmp/pgdg-key && unset GNUPGHOME \
+  && printf '%s\n' 'deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/postgresql-pgdg.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main' > /etc/apt/sources.list.d/pgdg.list \
+  && printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d && chmod 755 /usr/sbin/policy-rc.d \
+  && apt-get update -o APT::Update::Error-Mode=any \
+  && apt-get install -y --no-install-recommends postgresql-common \
+  && printf '%s\n' 'create_main_cluster = false' 'start_conf = manual' > /etc/postgresql-common/createcluster.conf \
+  && apt-get install -y --no-install-recommends postgresql-17 postgresql-client-17 \
   && rm -rf /var/lib/apt/lists/* \
   && unzip -v \
   && arch="${TARGETARCH:-$(dpkg --print-architecture)}" \
@@ -113,6 +125,9 @@ RUN apt-get update \
   && tar -xzf /tmp/shellcheck.tar.gz --no-same-owner -C /usr/local/bin --strip-components=1 "shellcheck-v${SHELLCHECK_VERSION}/shellcheck" \
   && rm -f /tmp/shellcheck.tar.gz \
   && shellcheck --version
+ENV PATH=/usr/lib/postgresql/17/bin:$PATH
+COPY apps/node/service-runtime-smoke.mjs /app/apps/node/service-runtime-smoke.mjs
+RUN node /app/apps/node/service-runtime-smoke.mjs
 COPY --from=quality /opt/hornhoof/ub /opt/hornhoof/ub
 COPY --from=quality /opt/hornhoof/rules /opt/hornhoof/rules
 COPY --from=quality /opt/hornhoof/superpowers /opt/hornhoof/superpowers
@@ -148,6 +163,7 @@ RUN mkdir -p /data && chown node:node /data
 # back in front, so an agent finds codex, claude, kimi and agy by name, and Playwright finds /data/browsers.
 RUN printf '%s\n' \
   'case ":$PATH:" in *:/data/tools/bin:*) ;; *) PATH=/data/tools/bin:$PATH ;; esac' \
+  'case ":$PATH:" in *:/usr/lib/postgresql/17/bin:*) ;; *) PATH=/usr/lib/postgresql/17/bin:$PATH ;; esac' \
   ': "${PLAYWRIGHT_BROWSERS_PATH:=/data/browsers}"' \
   ': "${PLAYWRIGHT_SKIP_BROWSER_GC:=1}"' \
   'export PATH PLAYWRIGHT_BROWSERS_PATH PLAYWRIGHT_SKIP_BROWSER_GC' > /etc/profile.d/hornhoof-tools.sh

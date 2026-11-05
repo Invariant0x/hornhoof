@@ -426,7 +426,7 @@ describe('templates', () => {
       return [role, ...own].map(x => `${x.title.en} ${x.title.ru} ${x.description.en} ${x.description.ru} ${x.body}`).join('\n');
     };
     expect(templates.roles.get('DEV-RED')!.skills.map(k => k.id)).not.toContain('dev-threat-model');
-    expect(textOf('DEV-RED')).not.toMatch(/attack|hostile|exploit|secur|threat|inject|token|secret|атак|враждеб|безопасн|угроз|взлом/i);
+    expect(textOf('DEV-RED')).not.toMatch(/attack|hostile|exploit|steal|атак|враждеб|взлом/i);
     expect(textOf('DEV-SEC')).not.toMatch(/attack|hostile|exploit|steal|атак|враждеб|эксплуат|взлом/i);
   });
 
@@ -523,11 +523,13 @@ describe('templates', () => {
     expect(gates).toMatch(/access, sign-in, secrets or permissions/);
     expect(gates).toMatch(/one reviewer of each provider/);
     expect(gates).toMatch(/once per turn, on the turn's branch/);
-    expect(gates).toMatch(/risky or public-facing/);
+    expect(gates).toMatch(/sensitive changed paths, risky added diff or explicit pre-release mode/);
+    expect(gates).not.toContain('risky or public-facing');
     expect(templates.roles.get('DEV-QA')!.gate).toBeNull();
     expect(body('dev-review-diff')).toMatch(/[Oo]bvious security problems/);
     expect(body('hh-task-flow')).toMatch(/only if you sent it back/);
-    expect(templates.roles.get('DEV-RED')!.body).toMatch(/risky or public-facing/);
+    expect(templates.roles.get('DEV-RED')!.body).toMatch(/declared risk, sensitive paths, risky diff or pre-release mode/);
+    expect(templates.roles.get('DEV-RED')!.body).not.toContain('or public-facing');
     expect([...roles, ...skills].map(x => x.body).join('\n')).not.toMatch(/[Ee]very (employee|one) of a gate's role/);
     expect(gates).not.toMatch(/doubled/i);
     for (const id of ['dev-gates', 'dev-review-verdict', 'dev-review-diff']) expect(body(id), id).toMatch(/only the fixes/);
