@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config.js';
+import { LETS_ENCRYPT } from '../src/modules/tls/acme.js';
 import { TEST_SECRET } from './helpers.js';
 
 describe('loadConfig', () => {
@@ -37,6 +38,16 @@ describe('loadConfig', () => {
     expect([set.nodePingMs, set.streamPingMs, set.updateCheckMs]).toEqual([500, 100, 0]);
     const defaults = loadConfig({ HORNHOOF_SECRET: TEST_SECRET, NODE_PING_MS: '' });
     expect([defaults.nodePingMs, defaults.streamPingMs, defaults.updateCheckMs]).toEqual([20000, 25000, 1800000]);
+  });
+
+  it("gets the link's certificate from Let's Encrypt unless ACME_DIRECTORY names another CA or says off", () => {
+    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET }).acmeDirectory).toBe(LETS_ENCRYPT);
+    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, ACME_DIRECTORY: '' }).acmeDirectory).toBe(LETS_ENCRYPT);
+    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, ACME_DIRECTORY: 'off' }).acmeDirectory).toBeNull();
+    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, ACME_DIRECTORY: 'https://ca.test/dir' }).acmeDirectory).toBe('https://ca.test/dir');
+    for (const ACME_DIRECTORY of ['http://x', 'ca.test/dir', 'https://', 'OFF']) {
+      expect(() => loadConfig({ HORNHOOF_SECRET: TEST_SECRET, ACME_DIRECTORY })).toThrow('ACME_DIRECTORY must be off or an https:// ACME directory address.');
+    }
   });
 
   it('asks hornhoof.org for public links unless RELAY_URL names another relay', () => {

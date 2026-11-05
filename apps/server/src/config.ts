@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { NodeBuild } from '@hornhoof/protocol';
 import { z } from 'zod';
+import { LETS_ENCRYPT } from './modules/tls/acme.js';
 
 export type Config = {
   databaseUrl?: string;
@@ -38,6 +39,8 @@ export type Config = {
   tunnelHost?: string;
   /* Set by compose when a keeper sits in front: the app then takes its mode from the keeper's word. */
   keeper: boolean;
+  /* The ACME directory the link's certificate comes from; null with certificates off. */
+  acmeDirectory: string | null;
   /* How much all the files on the company's tasks may take together. */
   taskFilesBytes: number;
   /* The computer the server runs on, as a hash of the key a join from it sends; null for a server installed before. */
@@ -60,6 +63,7 @@ const wholeNumber = (min: number, max: number, message: string) =>
 const milliseconds = (name: string, min: number, example: string) =>
   wholeNumber(min, MAX_TIMER_MS, `${name} must be a whole number of milliseconds${min === 0 ? ', or 0' : ''}, like ${example}.`);
 const webAddress = (message: string) => z.preprocess(unset, z.url({ protocol: /^https?$/, error: message }).optional());
+const CERTIFICATES_OFF = 'off';
 
 /* The settings read from the environment, checked once at start so a typo stops the server with a clear message
    instead of running with a broken address or a timer that fires every millisecond. */
@@ -74,6 +78,10 @@ const Env = z.object({
   RELAY_URL: webAddress('RELAY_URL must be an http:// or https:// address, like https://hornhoof.org.'),
   TUNNEL_HOST: z.preprocess(unset, z.string().regex(/^[A-Za-z0-9.-]{1,253}$/, 'TUNNEL_HOST must be the host name of the tunnel container, like tunnel.').optional()),
   HORNHOOF_KEEPER: z.preprocess(unset, z.literal('on', { error: 'HORNHOOF_KEEPER must be on, or not set.' }).optional()),
+  ACME_DIRECTORY: z.preprocess(
+    unset,
+    z.union([z.literal(CERTIFICATES_OFF), z.url({ protocol: /^https$/, error: 'ACME_DIRECTORY must be off or an https:// ACME directory address.' })]).optional(),
+  ),
   TASK_FILES_MB: wholeNumber(1, 1_000_000, 'TASK_FILES_MB must be a whole number of megabytes, like 2048.'),
   HORNHOOF_HOST_ID: z.preprocess(
     unset,
@@ -83,6 +91,7 @@ const Env = z.object({
 
 /* CI sets it, so one that is not a commit counts as none rather than stopping the server. */
 const nodeBuildOf = (env: NodeJS.ProcessEnv): string | null => NodeBuild.safeParse(env.HORNHOOF_NODE_BUILD).data ?? null;
+const acmeDirectoryOf = (set: string | undefined): string | null => (set === CERTIFICATES_OFF ? null : (set ?? LETS_ENCRYPT));
 const productVersion = (): string => (JSON.parse(readFileSync(ROOT_PACKAGE, 'utf8')) as { version: string }).version;
 const migrationCount = (): number => readdirSync(MIGRATIONS).filter(f => f.endsWith('.sql')).length;
 
@@ -156,6 +165,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     relayUrl: (set.RELAY_URL ?? 'https://hornhoof.org').replace(/\/+$/, ''),
     tunnelHost: set.TUNNEL_HOST,
     keeper: set.HORNHOOF_KEEPER === 'on',
+    acmeDirectory: acmeDirectoryOf(set.ACME_DIRECTORY),
     hostId: set.HORNHOOF_HOST_ID ?? null,
   };
 }
