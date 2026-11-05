@@ -219,6 +219,8 @@ export type OrchestratorState = {
   terminal?: boolean;
   /* This person types into that terminal, as the owner of the agent's plan. The agent's own window gets it. */
   canType?: boolean;
+  /* Why the last prompt its program took has no turn, until a new turn begins; older servers do not say. */
+  turnRefused?: TurnRefusal | null;
 };
 
 /* One part of an agent's instructions: who it is (written by Hornhoof), its role, or a skill between markers. */
@@ -290,7 +292,8 @@ export type StructureItem = NewItem | ChangeItem;
 /* Who a pulse on the map runs between. */
 export type Endpoint = { kind: 'person'; id: string } | { kind: 'orchestrator' } | { kind: 'department'; id: string } | { kind: 'agent'; id: string; departmentId: string };
 
-export type AgentEventKind = 'program' | 'message' | 'text' | 'tool' | 'tool_result' | 'todo' | 'proposal' | 'applied' | 'stopped' | 'failed' | 'computer' | 'typed';
+export type AgentEventKind = 'program' | 'message' | 'text' | 'tool' | 'tool_result' | 'todo' | 'proposal' | 'applied' | 'stopped' | 'failed' | 'computer' | 'typed' | 'turn_refused';
+export type TurnRefusal = 'busy' | 'unknown_words';
 
 /* Who wrote or got a message: a person (id null: the company's people at large), an agent, or Hornhoof itself. */
 export type MessageParty = {

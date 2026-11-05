@@ -578,6 +578,10 @@ export const en = {
     limitUntil: (at: string) => `The plan is at its limit. Turns wait until ${at} and go on by themselves then.`,
     budgetUntil: (at: string) => `The plan used the share set for tasks. Task turns wait until ${at}; messages from people still go.`,
     machineDrain: 'The machine is finishing its work before an update. New turns wait and go on by themselves after it.',
+    turnRefused: {
+      busy: 'What was just typed got no turn of its own: it went into the turn that was running. Check the answer there, and type it again if it is missing.',
+      unknown_words: 'The agent is answering words, but Hornhoof could not tell who wrote them, so no turn opened and its tools are closed for this answer. Please type your message again.',
+    },
     failed: {
       timeout: 'The orchestrator did not finish within 15 minutes.',
       not_logged_in: 'The orchestrator\'s subscription is signed out on its machine. Sign in again, then write once more.',

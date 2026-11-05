@@ -5,7 +5,7 @@ import { deptLabel, errorText, useLanguage, useT, type Language, type Messages }
 import { useStream } from '../live';
 import { liveOf } from '../org';
 import { PROGRAM_NAMES, PROVIDER_NAMES } from '../providers';
-import type { AgentCardView, ComputerView, DecidedBy, Decisions, EventView, Me, OrchestratorState, Org, ShownCommand, StaffLine, StructureItem, SubView, TemplateKey, WaitingRequest } from '../types';
+import type { AgentCardView, ComputerView, DecidedBy, Decisions, EventView, Me, OrchestratorState, Org, ShownCommand, StaffLine, StructureItem, SubView, TemplateKey, TurnRefusal, WaitingRequest } from '../types';
 import { EventMessage, isMessage, messageKey, useFolding } from '../ui/AgentMessage';
 import { AgentCard } from '../ui/AgentCard';
 import { AddPicture, PictureTray, SentPictures, useDraftPictures, usePictureDrop } from '../ui/MessagePictures';
@@ -595,6 +595,13 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
             <div>{failedText(t, e.data, !orchestrator)}</div>
           </div>
         );
+      case 'turn_refused':
+        return (
+          <div className="t-l t-bad">
+            <i>⏺</i>
+            <div>{t.window.turnRefused[(e.data as { reason: TurnRefusal }).reason]}</div>
+          </div>
+        );
       case 'stopped':
         return (
           <div className="t-l t-bad">
@@ -669,6 +676,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
       )}
       {known && <ComputerStrip machines={computer ? [computer] : []} onChange={next => mounted.current && setComputer(next)} onFailure={err => mounted.current && setFailure(err)} />}
       {known && !ready && <p className="t-why">{reasonText(t, state.reason, sub)}</p>}
+      {known && state.turnRefused && <p className="t-why" role="status">{t.window.turnRefused[state.turnRefused]}</p>}
       {known && state.browserError && <p className="t-why">{browserWarning(t, state.browserError, sub)}</p>}
       {known && state?.limitUntil && <p className="t-why">{t.window.limitUntil(clock(language, state.limitUntil)!)}</p>}
       {known && !state?.limitUntil && state?.budgetUntil && <p className="t-why">{t.window.budgetUntil(clock(language, state.budgetUntil)!)}</p>}

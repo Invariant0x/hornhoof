@@ -87,7 +87,7 @@ vi.mock('@xterm/xterm', () => ({
       },
     };
     constructor(options: Record<string, unknown>) {
-      this.options = options;
+      this.options = { ...options };
       terms.push(this as unknown as FakeTerminal);
     }
     loadAddon() {}
@@ -396,6 +396,88 @@ describe("an agent's live terminal in its window", () => {
     FakeSocket.all[1]!.opened();
     FakeSocket.all[1]!.screen('new screen');
     expect(terms[0]!.written).toEqual(['new screen']);
+  });
+
+  it('keeps what the person types while the view connects again, and sends it in order once it is back', async () => {
+    open();
+    const first = await socket();
+    first.opened();
+    first.ended(4410, 'node_offline');
+    terms[0]!.type('first question');
+    terms[0]!.type('\r');
+    terms[0]!.resized(90, 30);
+    await waitFor(() => expect(FakeSocket.all).toHaveLength(2), { timeout: 3000 });
+    const again = FakeSocket.all[1]!;
+    again.opened();
+    expect(again.sent.filter(m => (m as { type: string }).type === 'input')).toEqual([
+      { type: 'input', data: 'first question' },
+      { type: 'input', data: '\r' },
+    ]);
+    expect(again.sent).not.toContainEqual({ type: 'resize', cols: 90, rows: 30 });
+    terms[0]!.type('next');
+    expect(again.sent.at(-1)).toEqual({ type: 'input', data: 'next' });
+  });
+
+  it('keeps what the person types before the first connection is up', async () => {
+    open();
+    const ws = await socket();
+    terms[0]!.type('hi\r');
+    expect(ws.sent).toEqual([]);
+    ws.opened();
+    expect(ws.sent).toEqual([{ type: 'input', data: 'hi\r' }]);
+  });
+
+  it('sends none of it when the view comes back for someone who may only watch now', async () => {
+    open();
+    const first = await socket();
+    first.opened();
+    first.ended(4410, 'node_offline');
+    terms[0]!.type('hi\r');
+    await waitFor(() => expect(FakeSocket.all).toHaveLength(2), { timeout: 3000 });
+    FakeSocket.all[1]!.opened(false);
+    expect(FakeSocket.all[1]!.sent).toEqual([]);
+  });
+
+  it('sends none of it after a minute, when the person may have gone on, and keeps a bounded amount', async () => {
+    open();
+    const ws = await socket();
+    const now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+    terms[0]!.type('old\r');
+    clock.mockReturnValue(now + 60_000);
+    for (let i = 0; i < 300; i++) terms[0]!.type('k');
+    ws.opened();
+    clock.mockRestore();
+    /* 256 kept: the old keys and 255 of the new, which go. */
+    expect(ws.sent).toHaveLength(255);
+    expect(ws.sent).not.toContainEqual({ type: 'input', data: 'old\r' });
+  });
+
+  it.each([
+    ['busy', /went into the turn that was running/],
+    ['unknown_words', /Hornhoof could not tell who wrote/],
+  ] as const)('says at once in the window why a turn could not open: %s', async (turnRefused, says) => {
+    open(true, { turnRefused });
+    const why = await screen.findByText(says);
+    expect(why).toHaveClass('t-why');
+    expect(why).toBeVisible();
+  });
+
+  it('says nothing of a refused turn while none was refused', async () => {
+    open(true, { turnRefused: null });
+    await socket();
+    await waitFor(() => expect(screen.queryByText(/went into the turn that was running|Hornhoof could not tell who wrote/)).toBeNull());
+  });
+
+  it('keeps the refused turn in the log of what happened', async () => {
+    const refused: EventView = { seq: 2, kind: 'turn_refused', data: { reason: 'unknown_words' }, jobId: null, person: null, at: '2026-10-30T10:00:01Z' };
+    mockApi({
+      [`GET ${EVENTS}?after=0`]: [200, { events: [...LOG, refused], state: { ...READY, terminal: false } }],
+      [`GET ${EVENTS}?after=2`]: [200, { events: [], state: { ...READY, terminal: false } }],
+      'POST /api/agents/orchestrator/start': [200, { started: false }],
+    });
+    view();
+    expect(await screen.findByText(/Hornhoof could not tell who wrote/)).toBeInTheDocument();
   });
 
   it('shows the bottom of the screen, where the line to type in is, after a card below the terminal comes or goes', async () => {

@@ -30,6 +30,10 @@ const OPTIONS: ITerminalOptions = {
 
 /* What one frame of keys or a paste carries; the server takes up to 64 KB. */
 const PIECE = 16_384;
+/* Keys the person typed while the view has no connection wait for it, a bounded amount: after a minute the person may have
+   gone on, and they do not go to the program. */
+const KEPT_KEYS = 256;
+const KEPT_MS = 60_000;
 const RETRY_MS = 500;
 const RETRY_MAX_MS = 10_000;
 /* How a view ends: the node cannot show one, or the person may no longer reach the agent. */
@@ -43,7 +47,7 @@ type Size = { cols: number; rows: number };
 type Frame = { type: string; data?: string; write?: boolean; running?: boolean };
 type Send = (m: unknown) => void;
 /* What one view of the session learned so far. */
-type View = { term: Terminal; send: Send; setUp(up: boolean): void; asked: Size; told: boolean; unconfirmed: Size | null; ready(): void };
+type View = { term: Terminal; send: Send; setUp(up: boolean): void; asked: Size; told: boolean; unconfirmed: Size | null; ready(write: boolean): void };
 
 /* A card that came or went while the view connected changed the terminal's size, and that resize was lost: sent before
    the socket opened, or after the server said ready but before the node held the view. The session's first screen comes
@@ -57,7 +61,7 @@ function confirmSize(term: Terminal, opened: Size | null, send: Send) {
    or a node from before, shows its screen as it comes. */
 function received(view: View, m: Frame) {
   if (m.type === 'ready') {
-    view.ready();
+    view.ready(Boolean(m.write));
     view.told = false;
     view.term.reset();
     view.term.options.disableStdin = !m.write;
@@ -93,9 +97,17 @@ function connectView(term: Terminal, path: string, setUp: (up: boolean) => void,
   let ended = false;
   let retry: ReturnType<typeof setTimeout> | null = null;
   let tries = 0;
-  const send: Send = m => socket?.readyState === 1 && socket.send(JSON.stringify(m));
+  const kept: { keys: unknown; at: number }[] = [];
+  const send: Send = m => {
+    if (socket?.readyState === 1) socket.send(JSON.stringify(m));
+    else if ((m as { type?: string }).type === 'input' && kept.length < KEPT_KEYS) kept.push({ keys: m, at: Date.now() });
+  };
   const connect = () => {
-    const view: View = { term, send, setUp, asked: { cols: term.cols, rows: term.rows }, told: false, unconfirmed: null, ready: () => (tries = 0) };
+    const ready = (write: boolean) => {
+      tries = 0;
+      for (const { keys, at } of kept.splice(0)) if (write && Date.now() - at < KEPT_MS) send(keys);
+    };
+    const view: View = { term, send, setUp, asked: { cols: term.cols, rows: term.rows }, told: false, unconfirmed: null, ready };
     const ws = new WebSocket(viewUrl(path, view.asked));
     socket = ws;
     ws.onmessage = e => received(view, JSON.parse(String(e.data)) as Frame);
