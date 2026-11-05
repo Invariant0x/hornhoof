@@ -2150,7 +2150,8 @@ export class TerminalHost {
   }
 
   private async prompted(a: Agent, prompt: string): Promise<void> {
-    a.took = true;
+    /* It works from here on, while what follows reads where it stands: whoever looks meanwhile must not take it for idle. */
+    a.busy = a.took = true;
     await a.settling;
     if (a.program?.kind === 'antigravity') {
       a.agyAnswered = false;
