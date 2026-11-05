@@ -59,7 +59,7 @@ const input = createInterface({ input: process.stdin });
 input.on('close', () => void c.app.close().then(() => process.exit(0)));
 input.on('line', line => {
   const { control } = JSON.parse(line);
-  void Promise.resolve(commands[control]?.()).then(() => process.stdout.write(JSON.stringify({ control }) + '\\n');
+  void Promise.resolve(commands[control]?.()).then(() => process.stdout.write(JSON.stringify({ control }) + '\\n'));
 });
 process.stdout.write(JSON.stringify({
   url: c.url.replace('ws://', 'http://'), tokens: c.tokens, ids: c.ids, plans: c.plans,
