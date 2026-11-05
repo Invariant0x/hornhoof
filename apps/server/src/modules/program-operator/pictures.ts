@@ -28,14 +28,14 @@ export async function readProgramScreen(ctx: Ctx, caller: OperatorCaller, input:
   return { case: input.case, employee: input.employee, snapshot: screen.snapshot, generation: screen.generation, state: screen.state, keysAllowed: screen.keysAllowed && !protectedScreen, reason: protectedScreen ? 'protected_screen' : screen.reason, pictureId, png: rendered.png, text: rendered.text };
 }
 
-function renderPicture(screen: OperatorScreen, secrets: string[]) {
+export function renderPicture(screen: Pick<OperatorScreen, 'protected' | 'cols' | 'rows' | 'cells'> & Partial<Pick<OperatorScreen, 'reason'>>, secrets: string[]) {
   const protectedScreen = screen.protected || screen.reason === 'protected_screen';
   const rendered = renderOperatorScreen({ cells: protectedScreen ? OPERATOR_PROTECTED_SCREEN : screen.cells, cols: screen.cols, rows: screen.rows, secrets });
   if (rendered.png.length > OPERATOR_PICTURE_BYTES) throw new ApiError(413, 'validation', 'The program picture is too large.', 'attachment_invalid');
   return { protectedScreen, rendered };
 }
 
-async function pictureSecrets(ctx: Ctx, companyId: string): Promise<string[]> {
+export async function pictureSecrets(ctx: Ctx, companyId: string): Promise<string[]> {
   const rows = await ctx.db.select({ secret: subscriptions.secretEnc }).from(subscriptions).where(and(eq(subscriptions.companyId, companyId), isNotNull(subscriptions.secretEnc)));
   return rows.flatMap(row => row.secret ? [decryptSecret(row.secret, ctx.config.secret)] : []);
 }

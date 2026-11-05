@@ -10,7 +10,7 @@ import { ApiError, type ErrorReason } from '../../errors.js';
 import { liveSubscription, onAgent, planHeld, planHoldView, programNode, pump, pumpWaiting } from '../conversation/queue.js';
 import { deptName } from '../departments/templates.js';
 import { machineOf } from '../nodes/nodes.js';
-import { checkRemoval } from '../operations/ensure.js';
+import { checkRemoval, tryPlaceOperator } from '../operations/ensure.js';
 import { subViews, type IsOnline, type SubView } from '../subscriptions/views.js';
 import { agentFailureState, type FailureState } from '../tasks/failures.js';
 import { CLOSED, dropGate } from '../tasks/engine.js';
@@ -263,6 +263,7 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
       if (next.subscriptionId !== agent.subscriptionId) {
         if (next.subscriptionId && !agent.subscriptionId) await resumeAgent(ctx, agent.id);
         await (agent.kind === 'orchestrator' ? pumpWaiting(ctx) : pump(ctx, agent.id));
+        await tryPlaceOperator(ctx, agent.companyId);
       }
       /* Back on: gates that waited for its role start again and the task turns it missed go out. Off: its work goes back
          once no turn of it runs. */

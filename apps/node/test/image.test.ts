@@ -1,5 +1,9 @@
-import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { spawnSync } from 'node:child_process';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { afterEach, describe, expect, it } from 'vitest';
 
 const dockerfile = readFileSync(new URL('../Dockerfile', import.meta.url), 'utf8');
 /* The packages of the last stage, the one agents run in. */
@@ -7,6 +11,33 @@ const runtime = dockerfile.slice(dockerfile.lastIndexOf('\nFROM '));
 const installed = new Set([...runtime.matchAll(/apt-get install -y --no-install-recommends ([^\\\n]+)/g)].flatMap(m => m[1]!.split(/\s+/)));
 
 describe('the node image', () => {
+  it('installs PostgreSQL 17 from the fingerprint-checked signed bookworm repository without a default cluster', () => {
+    expect(installed).toContain('postgresql-17');
+    expect(installed).toContain('postgresql-client-17');
+    expect(runtime).toContain('https://www.postgresql.org/media/keys/ACCC4CF8.asc');
+    expect(runtime).toContain('gpg --batch --show-keys --with-colons');
+    expect(runtime).toContain('B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8');
+    expect(runtime).toContain('deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/postgresql-pgdg.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main');
+    expect(runtime).not.toMatch(/trusted=yes|allow-unauthenticated|AllowInsecureRepositories/);
+    expect(runtime.indexOf('apt-get install -y --no-install-recommends postgresql-common')).toBeGreaterThan(0);
+    expect(runtime.indexOf('apt-get install -y --no-install-recommends postgresql-common')).toBeLessThan(runtime.indexOf('create_main_cluster = false'));
+    expect(runtime.indexOf('create_main_cluster = false')).toBeLessThan(runtime.indexOf('postgresql-17 postgresql-client-17'));
+    expect(runtime).toContain('start_conf = manual');
+    expect(runtime).toContain('exit 101');
+    const layer = runtime.slice(runtime.indexOf('RUN apt-get update'), runtime.indexOf('\nCOPY --from=quality'));
+    expect(layer).toContain('apt-get update -o APT::Update::Error-Mode=any');
+    expect(layer.indexOf('rm -rf /var/lib/apt/lists/*')).toBeGreaterThan(layer.indexOf('postgresql-17 postgresql-client-17'));
+  });
+
+  it('exposes the PostgreSQL 17 tools in normal and login shells and runs their lifecycle smoke at build time', () => {
+    expect(runtime).toContain('ENV PATH=/usr/lib/postgresql/17/bin:$PATH');
+    const profile = runtime.slice(runtime.lastIndexOf('RUN printf'), runtime.indexOf('> /etc/profile.d/hornhoof-tools.sh'));
+    expect(profile).toContain('PATH=/usr/lib/postgresql/17/bin:$PATH');
+    expect(runtime).toContain('COPY apps/node/service-runtime-smoke.mjs /app/apps/node/service-runtime-smoke.mjs');
+    expect(runtime).toContain('RUN node /app/apps/node/service-runtime-smoke.mjs');
+    expect(runtime.indexOf('RUN node /app/apps/node/service-runtime-smoke.mjs')).toBeLessThan(runtime.indexOf('USER node'));
+  });
+
   it('patches mutator worker modules before installation and runs its bootstrap regression in the quality stage', () => {
     const patch = 'patch --directory=$ub/mutator --strip=1 < /tmp/hornhoof-quality/mutator-worker-modules.patch';
     expect(dockerfile).toContain('COPY apps/node/quality/ /tmp/hornhoof-quality/');
@@ -100,5 +131,138 @@ describe('the node image', () => {
     expect(runtime).toContain('PLAYWRIGHT_BROWSERS_PATH=/data/browsers');
     expect(runtime).toContain('PLAYWRIGHT_SKIP_BROWSER_GC=1');
     expect(runtime.indexOf('PLAYWRIGHT_BROWSERS_PATH=/data/browsers')).toBeLessThan(runtime.indexOf('USER node'));
+  });
+});
+
+interface SmokeEvent { program: string; args: string[]; uid: number; config?: string; socket?: string; mode?: number; data?: string; dataMode?: number }
+const fixtures: string[] = [];
+afterEach(() => { for (const dir of fixtures.splice(0)) rmSync(dir, { recursive: true, force: true }); });
+
+function smokeFixture(options: { versions?: Record<string, string>; missing?: string; fail?: string; query?: string; rootAccount?: 'postgres' | 'node' | 'root-only' } = {}) {
+  const dir = mkdtempSync(join(tmpdir(), 'hh-smoke-fixture-'));
+  fixtures.push(dir);
+  chmodSync(dir, 0o755);
+  const log = join(dir, 'events');
+  writeFileSync(log, '');
+  chmodSync(log, 0o666);
+  for (const program of ['postgres', 'initdb', 'pg_ctl', 'psql']) {
+    if (program === options.missing) continue;
+    writeFileSync(join(dir, program), `#!${process.execPath}
+const fs = require('node:fs');
+const path = require('node:path');
+const program = ${JSON.stringify(program)};
+const args = process.argv.slice(2);
+const event = { program, args, uid: process.getuid() };
+const data = args[args.indexOf('-D') + 1];
+if (program === 'pg_ctl' && args.includes('start')) {
+  event.config = fs.readFileSync(path.join(data, 'postgresql.conf'), 'utf8');
+  event.socket = event.config.match(/unix_socket_directories = '([^']+)'/)[1];
+  event.mode = fs.statSync(event.socket).mode & 0o777;
+  event.data = data;
+  event.dataMode = fs.statSync(data).mode & 0o777;
+  fs.writeFileSync(path.join(data, 'postmaster.pid'), String(process.pid));
+}
+fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(event) + '\\n');
+if (args.includes('--version')) {
+  process.stdout.write(program + ' (PostgreSQL) ${options.versions?.[program] ?? '17.6'}\\n');
+} else if (program === 'initdb') {
+  fs.mkdirSync(data, { mode: 0o700 });
+  fs.writeFileSync(path.join(data, 'postgresql.conf'), '');
+} else if (${JSON.stringify(options.fail ?? '')} === program && !args.includes('stop')) {
+  process.stderr.write('controlled ' + program + ' failure\\n');
+  process.exitCode = 1;
+} else if (program === 'psql') {
+  process.stdout.write(${JSON.stringify(options.query ?? '17|2|\n')});
+} else if (program === 'pg_ctl' && args.includes('stop')) {
+  fs.unlinkSync(path.join(data, 'postmaster.pid'));
+}
+`, { mode: 0o755 });
+  }
+  const args = [fileURLToPath(new URL('../service-runtime-smoke.mjs', import.meta.url))];
+  if (options.rootAccount) {
+    // Simulate the root build parent at the OS boundary; every executable still runs with a real unprivileged UID.
+    const uid = process.getuid!() || 1000;
+    const gid = process.getgid!() || 1000;
+    const passwd = options.rootAccount === 'root-only' ? 'root:x:0:0::/root:/bin/sh' : `${options.rootAccount}:x:${uid}:${gid}::/tmp:/bin/sh`;
+    const preload = join(dir, 'root-parent.mjs');
+    writeFileSync(preload, `
+import fs from 'node:fs';
+import process from 'node:process';
+import { syncBuiltinESMExports } from 'node:module';
+const readFileSync = fs.readFileSync;
+fs.readFileSync = (path, ...args) => path === '/etc/passwd' ? ${JSON.stringify(passwd)} : readFileSync(path, ...args);
+process.getuid = () => 0;
+syncBuiltinESMExports();
+`);
+    args.unshift('--import', preload);
+  }
+  const result = spawnSync(process.execPath, args, {
+    encoding: 'utf8', timeout: 15000, env: { ...process.env, PATH: dir, PGHOST: 'outside.invalid', PGPORT: '1' },
+  });
+  const events = readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as SmokeEvent);
+  return { result, events };
+}
+
+describe('the PostgreSQL runtime smoke', () => {
+  it.each(['postgres', 'node'] as const)('uses the trusted %s account for a root build parent', rootAccount => {
+    const { result, events } = smokeFixture({ rootAccount });
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
+    expect(events.every(event => event.uid > 0)).toBe(true);
+    expect(events.find(event => event.program === 'initdb' && event.args[0] !== '--version')).toBeDefined();
+  });
+
+  it('refuses to initialize as root when no trusted unprivileged account exists', () => {
+    const { result, events } = smokeFixture({ rootAccount: 'root-only' });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('requires a trusted unprivileged');
+    expect(events).toEqual([]);
+  });
+
+  it.each(['postgres', 'initdb', 'pg_ctl', 'psql'])('rejects %s from another major before initializing a database', program => {
+    const { result, events } = smokeFixture({ versions: { [program]: '18.1' } });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`PostgreSQL 17 required: ${program}`);
+    expect(events.every(event => event.args[0] === '--version')).toBe(true);
+  });
+
+  it('rejects a missing PostgreSQL executable before initializing a database', () => {
+    const { result, events } = smokeFixture({ missing: 'initdb' });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('PostgreSQL 17 required: initdb');
+    expect(events.every(event => event.args[0] === '--version')).toBe(true);
+  });
+
+  it('initializes as an unprivileged owner, queries its private socket without TCP and removes the stopped cluster', () => {
+    const { result, events } = smokeFixture();
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('PostgreSQL 17 runtime smoke passed');
+    expect(events.filter(event => event.args[0] === '--version').map(event => event.program)).toEqual(['postgres', 'initdb', 'pg_ctl', 'psql']);
+    expect(events.every(event => event.uid > 0)).toBe(true);
+    expect(events.find(event => event.program === 'initdb' && event.args[0] !== '--version')?.args).toContain('--locale=C.UTF-8');
+    const start = events.find(event => event.program === 'pg_ctl' && event.args.includes('start'))!;
+    expect(start.config).toContain("listen_addresses = ''");
+    expect(start.config).toContain('unix_socket_permissions = 0700');
+    expect(start.mode).toBe(0o700);
+    expect(start.dataMode).toBe(0o700);
+    expect(start.socket!.length).toBeLessThan(80);
+    const query = events.find(event => event.program === 'psql' && event.args[0] !== '--version')!;
+    expect(query.args).toContain(start.socket);
+    expect(query.args).toContain('ON_ERROR_STOP=1');
+    expect(query.args.join(' ')).toContain('SELECT');
+    expect(events.at(-1)?.args).toEqual(['-D', start.data, '-m', 'fast', '-w', '-t', '20', 'stop']);
+    expect(existsSync(start.data!)).toBe(false);
+    expect(existsSync(start.socket!)).toBe(false);
+  });
+
+  it.each([{ fail: 'psql' }, { query: '16|2|\n' }, { fail: 'pg_ctl' }])('stops and removes the cluster when startup or the real query fails: %j', options => {
+    const { result, events } = smokeFixture(options);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toMatch(/controlled|Unexpected PostgreSQL smoke query/);
+    const start = events.find(event => event.program === 'pg_ctl' && event.args.includes('start'))!;
+    expect(events.at(-1)?.args).toContain('stop');
+    expect(existsSync(start.data!)).toBe(false);
+    expect(existsSync(start.socket!)).toBe(false);
   });
 });
