@@ -13,14 +13,23 @@ type Standing = Pick<typeof jobs.$inferSelect, 'id' | 'agentId' | 'createdBy' | 
 export type RepeatedTurn = { createdBy: string | null; answersCeo: boolean; repeated: TurnWords };
 const flat = (text: string) => text.replace(/\s+/g, ' ').trim();
 
+/* The words as they went to the program: what a message shows, or what is kept with it when more went (who said it, how to
+   fetch its pictures), under the heading of its envelope. Null for an event without words. */
+export function deliveredWords(stored: unknown): string | null {
+  const { data, message } = readMessage(stored);
+  const { text, livePrompt } = (data ?? {}) as { text?: unknown; livePrompt?: unknown };
+  const said = typeof livePrompt === 'string' ? livePrompt : text;
+  if (typeof said !== 'string') return null;
+  return message ? addressed(said, message) : said;
+}
+
 export async function wordsForTurn(ctx: Pick<Ctx, 'db'>, agentId: string, jobId: string, text?: string) {
   const words = await ctx.db.select({ seq: agentEvents.seq, personId: agentEvents.personId, data: agentEvents.data }).from(agentEvents)
     .where(and(eq(agentEvents.agentId, agentId), eq(agentEvents.jobId, jobId), inArray(agentEvents.kind, ['message', 'typed']), incomingWords)).orderBy(desc(agentEvents.seq));
   if (text === undefined) return words;
   return words.filter(event => {
-    const { data, message } = readMessage(event.data);
-    const said = (data as { text?: unknown }).text;
-    return typeof said === 'string' && flat(message ? addressed(said, message) : said) === flat(text);
+    const said = deliveredWords(event.data);
+    return said !== null && flat(said) === flat(text);
   });
 }
 

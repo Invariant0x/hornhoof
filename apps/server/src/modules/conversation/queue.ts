@@ -299,8 +299,9 @@ function shownOf(t: Turn): NonNullable<Turn['message']> | null {
   return message.text.trim() ? message : null;
 }
 
-/* An employee's message carries its name for the window and its id in by. kept: also kept with it. */
-async function showMessage(ctx: Ctx, t: Turn, jobId: string, kept: WithEvent): Promise<void> {
+/* An employee's message carries its name for the window and its id in by. kept: also kept with it. live: it went into a
+   running turn, so what the program got, when more than the window shows, is kept for repeating it word for word. */
+async function showMessage(ctx: Ctx, t: Turn, jobId: string, kept: WithEvent, live = false): Promise<void> {
   if (t.repeated) {
     await appendEvent(ctx, { companyId: t.companyId, agentId: t.agentId, jobId, kind: 'typed', ...t.repeated }, kept);
     return;
@@ -309,7 +310,8 @@ async function showMessage(ctx: Ctx, t: Turn, jobId: string, kept: WithEvent): P
   if (!message) return;
   const { personId, ...data } = message;
   const delivery = liveInputOf(message, t.agentId)?.delivery;
-  await appendEvent(ctx, { companyId: t.companyId, agentId: t.agentId, jobId, kind: 'message', data: { ...data, ...(delivery ? { operatorDelivery: delivery } : {}) }, personId }, alsoKept(t.withMessage, kept));
+  const livePrompt = live && t.prompt !== message.text ? { livePrompt: t.prompt } : {};
+  await appendEvent(ctx, { companyId: t.companyId, agentId: t.agentId, jobId, kind: 'message', data: { ...data, ...(delivery ? { operatorDelivery: delivery } : {}), ...livePrompt }, personId }, alsoKept(t.withMessage, kept));
 }
 
 /* Stores the turn, then sends it if he is free. A message for an agent at work goes into the turn it runs instead, and a
@@ -328,7 +330,7 @@ export async function insertOrDeliverTurn(ctx: Ctx, t: Turn, required = false): 
   const into = message
     ? await deliverLockedInput(ctx, t.agentId, t.prompt, { source: { personId: message.personId, data: message }, required }, async (jobId, kept) => {
         if (await actsForCeo(ctx, message.personId)) await ctx.db.update(jobs).set({ answersCeo: true }).where(eq(jobs.id, jobId));
-        await showMessage(ctx, t, jobId, kept);
+        await showMessage(ctx, t, jobId, kept, true);
       })
     : null;
   if (into) return into;
