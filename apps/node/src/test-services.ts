@@ -175,7 +175,7 @@ async function binaries(context: ServiceContext): Promise<string> {
     const program = join(context.postgresBin ?? PG_BIN, name);
     try {
       const version = await command(program, ['--version'], '/tmp', {}, context, []);
-      if (!/\b17(?:\.|\b)/.test(version) || !version.includes('PostgreSQL')) throw new Error('Wrong major');
+      if (!/\(PostgreSQL\) 17(?:\.\d+)*(?:\s|$)/.test(version)) throw new Error('Wrong major');
       versions.push(`${version}:${hash(readFileSync(program))}`);
     } catch (error) {
       if (context.signal.aborted) throw new Error('Service operation cancelled');
@@ -229,18 +229,24 @@ async function stopPostgres(server: Running, state: string, socket: string, cont
   try {
     await command(join(context.postgresBin ?? PG_BIN, 'pg_ctl'), ['-D', state, 'stop', '-m', 'fast', '-w', '-t', '5'], '/tmp', {}, cleanupContext(context), hidden);
   } catch (error) { failure = error; }
-  finally { await server.stop(); rmSync(socket, { recursive: true, force: true }); }
+  finally { try { await server.stop(); } finally { rmSync(socket, { recursive: true, force: true }); } }
   if (failure) throw failure;
   if (existsSync(join(state, 'postmaster.pid'))) throw new Error('PostgreSQL did not stop cleanly; template cannot be published');
 }
+function postgresLocale(service: Postgres): string {
+  const locale = service.options.locale ?? 'C.UTF-8';
+  if (locale !== 'C.UTF-8') throw new Error('PostgreSQL services require the deterministic locale C.UTF-8');
+  return locale;
+}
 async function postgres(service: Postgres, state: string, context: ServiceContext, hidden: string[], fresh: boolean): Promise<Active> {
   const bin = context.postgresBin ?? PG_BIN;
+  const locale = postgresLocale(service);
   const passwords = credentials(context, hidden);
   directory(state, context);
   if (fresh) {
     const pwfile = join(dirname(state), `.pw-${randomBytes(8).toString('hex')}`);
     writeFileSync(pwfile, passwords.admin + '\n', { mode: 0o600 }); ownTree(pwfile, context);
-    try { await command(join(bin, 'initdb'), ['-D', state, '--username=postgres', '--locale=C.UTF-8', '--encoding=UTF8', '--auth-local=scram-sha-256', '--auth-host=scram-sha-256', `--pwfile=${pwfile}`], '/tmp', {}, context, hidden); }
+    try { await command(join(bin, 'initdb'), ['-D', state, '--username=postgres', `--locale=${locale}`, '--encoding=UTF8', '--auth-local=scram-sha-256', '--auth-host=scram-sha-256', `--pwfile=${pwfile}`], '/tmp', {}, context, hidden); }
     finally { rmSync(pwfile, { force: true }); }
   } else {
     /* Single-user mode rotates stopped-template credentials before a socket can accept any connection. */

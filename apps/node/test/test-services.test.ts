@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, watch, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -29,7 +29,7 @@ function fakePostgres(): void {
   executable('initdb', `${common} if(process.env.INIT_MARKER) fs.appendFileSync(process.env.INIT_MARKER,'init\\n'); const dir=a[a.indexOf('-D')+1]; fs.mkdirSync(dir,{recursive:true}); fs.writeFileSync(p.join(dir,'PG_VERSION'),'17'); fs.writeFileSync(p.join(dir,'pg_hba.conf'),''); fs.writeFileSync(p.join(dir,'postgresql.conf'),'');`);
   executable('postgres', `${common} if(a.includes('--single')) {process.stdin.resume(); process.stdin.on('end',()=>process.exit(0));} else { const dir=a[a.indexOf('-D')+1]; fs.writeFileSync(p.join(dir,'postmaster.pid'),String(process.pid)); process.on('SIGTERM',()=>{fs.unlinkSync(p.join(dir,'postmaster.pid'));process.exit(0)}); setInterval(()=>{},100); }`);
   executable('pg_ctl', `${common} const dir=a[a.indexOf('-D')+1]; const file=p.join(dir,'postmaster.pid'); if(fs.existsSync(file)) process.kill(Number(fs.readFileSync(file,'utf8')),'SIGTERM');`);
-  executable('psql', `${common} let input=''; process.stdin.on('data',x=>input+=x); process.stdin.on('end',()=>{if(process.env.FAIL_SQL==='1') {console.error('SQL failed '+process.env.PGPASSWORD);process.exit(9)} console.log(input.includes('SELECT 1')?'1':'OK');});`);
+  executable('psql', `${common} let input=''; process.stdin.on('data',x=>input+=x); process.stdin.on('end',()=>{if(process.env.SOCKET_TRACE) fs.writeFileSync(process.env.SOCKET_TRACE,process.env.PGHOST); if(process.env.FAIL_SQL==='1') {console.error('SQL failed '+process.env.PGPASSWORD);process.exit(9)} console.log(input.includes('SELECT 1')?'1':'OK');});`);
 }
 
 beforeEach(() => {
@@ -53,9 +53,14 @@ describe('prepared native services', () => {
     await expect(prep()).rejects.toThrow(/PostgreSQL 17/);
     expect(existsSync(join(root, 'cache', 'a'.repeat(64), 'READY.json'))).toBe(false);
   });
-  it('rejects a different major even when all executables exist', async () => {
-    executable('psql', "console.log('psql (PostgreSQL) 16.9')");
+  it.each(['16.9', '16.17', '18.17', '117.2'])('rejects PostgreSQL %s even when all executables exist', async version => {
+    executable('psql', `console.log('psql (PostgreSQL) ${version}')`);
     await expect(prep()).rejects.toThrow(/PostgreSQL 17/);
+  });
+  it('rejects an unsupported locale instead of certifying a different configuration', async () => {
+    const defs: ServiceDefinitions = { services: [{ ...definitions.services[0]!, driver: 'postgres', options: { database: 'hornhoof', locale: 'en_US.UTF-8' } }], prepare: [] };
+    await expect(prepareServiceArtifacts(defs, root, { ...context, cacheRoot: join(root, 'cache'), envKey: 'a'.repeat(64), inputDigest: 'b'.repeat(64) })).rejects.toThrow(/C.UTF-8/);
+    expect(existsSync(join(root, 'cache', 'a'.repeat(64), 'READY.json'))).toBe(false);
   });
   it('publishes stopped state and opens independent private SCRAM attempts', async () => {
     const artifacts = await prep();
@@ -90,13 +95,37 @@ describe('prepared native services', () => {
     expect(existsSync(join(root, 'cache', 'a'.repeat(64), 'READY.json'))).toBe(false);
     expect(log.join('\n')).not.toContain(secrets[0] ?? 'never-secret');
   });
-  it('cancels supervised preparation before publication', async () => {
+  it('cancels an observed readiness query and removes both supervised processes and their socket', async () => {
     const controller = new AbortController();
-    executable('psql', "process.on('SIGTERM',()=>process.exit(0)); setInterval(()=>{},100)");
+    const marker = join(root, 'readiness');
+    executable('psql', `const fs=require('node:fs'),p=require('node:path');if(process.argv.includes('--version')){console.log('psql (PostgreSQL) 17.4');process.exit(0)}fs.writeFileSync(${JSON.stringify(marker)},JSON.stringify({pid:process.pid,postgresPid:Number(fs.readFileSync(p.join(process.cwd(),'postmaster.pid'),'utf8')),host:process.env.PGHOST}));process.on('SIGTERM',()=>process.exit(0));setInterval(()=>{},100);`);
+    const watcher = watch(root);
+    const entered = new Promise<{ pid: number; postgresPid: number; host: string }>(resolve => {
+      watcher.on('change', () => {
+        try { resolve(JSON.parse(readFileSync(marker, 'utf8')) as { pid: number; postgresPid: number; host: string }); }
+        catch { /* Creation can be observed before the marker's write finishes. */ }
+      });
+    });
     const running = prepareServiceArtifacts(definitions, root, { ...context, signal: controller.signal, cacheRoot: join(root, 'cache'), envKey: 'a'.repeat(64), inputDigest: 'b'.repeat(64) });
-    const cancelled = setTimeout(() => controller.abort(), 150);
-    await expect(running).rejects.toThrow(/cancel|abort/i);
-    clearTimeout(cancelled);
+    void running.catch(() => {});
+    try {
+      const observed = await Promise.race([entered, running.then(() => { throw new Error('Preparation ended without reaching readiness'); })]);
+      expect(existsSync(observed.host)).toBe(true);
+      controller.abort();
+      await expect(running).rejects.toThrow(/cancel|abort/i);
+      expect(existsSync(observed.host)).toBe(false);
+      expect(() => process.kill(observed.pid, 0)).toThrow();
+      expect(() => process.kill(observed.postgresPid, 0)).toThrow();
+    } finally { watcher.close(); controller.abort(); await running.catch(() => {}); }
+    expect(existsSync(join(root, 'cache', 'a'.repeat(64), 'READY.json'))).toBe(false);
+  });
+  it('removes a private socket even when PostgreSQL requires a forced stop', async () => {
+    const version = "if(process.argv.includes('--version')){console.log('postgres (PostgreSQL) 17.4');process.exit(0)}";
+    executable('postgres', `${version}const fs=require('node:fs'),p=require('node:path');const a=process.argv.slice(2);fs.writeFileSync(p.join(a[a.indexOf('-D')+1],'postmaster.pid'),String(process.pid));process.on('SIGTERM',()=>{});setInterval(()=>{},100);`);
+    executable('pg_ctl', `${version}process.exit(1);`);
+    const trace = join(root, 'socket');
+    await expect(prepareServiceArtifacts(definitions, root, { ...context, env: { SOCKET_TRACE: trace }, cacheRoot: join(root, 'cache'), envKey: 'a'.repeat(64), inputDigest: 'b'.repeat(64) })).rejects.toThrow(/stop|cleanup|failed/i);
+    expect(existsSync(readFileSync(trace, 'utf8'))).toBe(false);
     expect(existsSync(join(root, 'cache', 'a'.repeat(64), 'READY.json'))).toBe(false);
   });
   it('deduplicates concurrent preparation and keeps the stopped cache reusable', async () => {
