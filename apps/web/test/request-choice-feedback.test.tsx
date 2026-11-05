@@ -46,6 +46,41 @@ function makeProps(overrides: Partial<Parameters<typeof Requests>[0]> = {}) {
   };
 }
 
+function jsonResponse(status: number, payload: unknown): Response {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+function stubDeferredFetch() {
+  const pending: { url: string; resolve: (res: Response) => void }[] = [];
+  const posted: { url: string; body: unknown }[] = [];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.pathname : input.url;
+      posted.push({ url, body: init?.body ? (JSON.parse(String(init.body)) as unknown) : null });
+      return new Promise<Response>(resolve => {
+        pending.push({ url, resolve });
+      });
+    }),
+  );
+  return {
+    posted,
+    answerNext(status: number, payload: unknown) {
+      const next = pending.shift();
+      if (!next) throw new Error('No pending request');
+      next.resolve(jsonResponse(status, payload));
+    },
+    answerUrl(url: string, status: number, payload: unknown) {
+      const idx = pending.findIndex(p => p.url === url);
+      if (idx === -1) throw new Error(`No pending request for ${url}`);
+      pending.splice(idx, 1)[0]!.resolve(jsonResponse(status, payload));
+    },
+  };
+}
+
 describe('choice request free-form feedback and option picking', () => {
   afterEach(() => {
     localStorage.removeItem('hh-lang');
@@ -214,6 +249,10 @@ describe('choice request free-form feedback and option picking', () => {
 
   it('keeps read-only view strict when canAnswer is false, without options buttons or Send', () => {
     renderIn('ru', <Requests {...makeProps({ requests: [{ ...CHOICE, canAnswer: false }] })} />);
+    const card = screen.getByRole('article', { name: '#402 Turn progress options' });
+    expect(card).toHaveAttribute('aria-busy', 'false');
+    expect(within(card).queryByRole('status')).not.toBeInTheDocument();
+    expect(within(card).queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.getAllByRole('listitem').map(li => li.textContent)).toEqual([
       'Option A (Argon): compact row below the circle',
       'Option B (Neon): wide strip with counters',
@@ -222,6 +261,117 @@ describe('choice request free-form feedback and option picking', () => {
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Отправить' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Option A/ })).not.toBeInTheDocument();
+  });
+
+  it('distinguishes in-flight sending from server failure, keeps the full draft, and sends once on retry', async () => {
+    const net = stubDeferredFetch();
+    const props = makeProps();
+    const user = userEvent.setup();
+    renderIn('ru', <Requests {...props} />);
+
+    const card = screen.getByRole('article', { name: '#402 Turn progress options' });
+    expect(card).toHaveAttribute('aria-busy', 'false');
+    expect(within(card).queryByRole('status')).not.toBeInTheDocument();
+    expect(within(card).queryByRole('alert')).not.toBeInTheDocument();
+
+    const feedback = 'Первая строка замечаний.\nВторая строка: сохранить весь черновик при сбое.';
+    const box = within(card).getByLabelText('Комментарий или замечания');
+    await user.type(box, feedback);
+    const send = within(card).getByRole('button', { name: 'Отправить' });
+    const optA = within(card).getByRole('button', { name: /Option A/ });
+
+    await user.click(send);
+    expect(card).toHaveAttribute('aria-busy', 'true');
+    expect(within(card).getByRole('status')).toHaveTextContent('Отправка');
+    expect(within(card).queryByRole('alert')).not.toBeInTheDocument();
+    expect(send).toBeDisabled();
+    expect(optA).toBeDisabled();
+    expect(box).toHaveValue(feedback);
+
+    fireEvent.click(send);
+    fireEvent.click(optA);
+    fireEvent.submit(box.closest('form')!);
+    expect(net.posted).toHaveLength(1);
+
+    net.answerNext(503, { error: { code: 'unavailable' } });
+
+    expect(await within(card).findByRole('alert')).toHaveTextContent(ru.errors.codes.unavailable);
+    expect(card).toHaveAttribute('aria-busy', 'false');
+    expect(within(card).queryByRole('status')).not.toBeInTheDocument();
+    expect(box).toHaveValue(feedback);
+    expect(send).toBeEnabled();
+    expect(optA).toBeEnabled();
+    expect(props.onChanged).not.toHaveBeenCalled();
+
+    await user.click(send);
+    expect(card).toHaveAttribute('aria-busy', 'true');
+    expect(within(card).getByRole('status')).toHaveTextContent('Отправка');
+    expect(within(card).queryByRole('alert')).not.toBeInTheDocument();
+    expect(net.posted).toHaveLength(2);
+    expect(net.posted[1]).toEqual({ url: '/api/requests/r-choice', body: { answer: feedback } });
+
+    net.answerNext(200, { request: { id: 'r-choice', status: 'answered', picked: null } });
+    await vi.waitFor(() => expect(props.onChanged).toHaveBeenCalledTimes(1));
+    expect(send).toBeDisabled();
+  });
+
+  it('tracks independent sending and error states on approval and stuck cards without extra confirmation steps', async () => {
+    const net = stubDeferredFetch();
+    const approval: WaitingRequest = {
+      ...CHOICE,
+      id: 'r-approval',
+      kind: 'approval',
+      commit: 'c'.repeat(40),
+      commitUrl: 'https://github.com/acme/repo/commit/' + 'c'.repeat(40),
+      options: [],
+      images: [],
+      link: null,
+      task: { id: 't403', number: 403, title: 'Release budget approval', department: DEV },
+    };
+    const stuck: WaitingRequest = {
+      ...CHOICE,
+      id: 'r-stuck-ind',
+      kind: 'stuck',
+      options: [],
+      images: [],
+      link: null,
+      task: { id: 't404', number: 404, title: 'Stuck worker recovery', department: DEV },
+    };
+    const props = makeProps({ requests: [approval, stuck] });
+    const user = userEvent.setup();
+    renderIn('en', <Requests {...props} />);
+
+    const approvalCard = screen.getByRole('article', { name: '#403 Release budget approval' });
+    const stuckCard = screen.getByRole('article', { name: '#404 Stuck worker recovery' });
+
+    const noteBox = within(approvalCard).getByLabelText(en.tasks.note);
+    await user.type(noteBox, 'Within Q4 limit');
+    await user.click(within(approvalCard).getByRole('button', { name: en.tasks.approve }));
+
+    expect(net.posted).toEqual([{ url: '/api/requests/r-approval', body: { approve: true, answer: 'Within Q4 limit' } }]);
+    expect(approvalCard).toHaveAttribute('aria-busy', 'true');
+    expect(within(approvalCard).getByRole('status')).toHaveTextContent('Sending');
+    expect(within(approvalCard).getByRole('button', { name: en.tasks.approve })).toBeDisabled();
+    expect(within(approvalCard).getByRole('button', { name: en.tasks.decline })).toBeDisabled();
+    expect(stuckCard).toHaveAttribute('aria-busy', 'false');
+    expect(within(stuckCard).queryByRole('status')).not.toBeInTheDocument();
+
+    net.answerUrl('/api/requests/r-approval', 409, { error: { code: 'conflict', reason: 'task_changed' } });
+
+    expect(await within(approvalCard).findByRole('alert')).toHaveTextContent(en.errors.task_changed);
+    expect(approvalCard).toHaveAttribute('aria-busy', 'false');
+    expect(within(approvalCard).queryByRole('status')).not.toBeInTheDocument();
+    expect(noteBox).toHaveValue('Within Q4 limit');
+    expect(within(approvalCard).getByRole('button', { name: en.tasks.decline })).toBeEnabled();
+
+    await user.click(within(stuckCard).getByRole('button', { name: en.tasks.cancelTask }));
+    expect(net.posted.at(-1)).toEqual({ url: '/api/tasks/t404/cancel', body: {} });
+    expect(stuckCard).toHaveAttribute('aria-busy', 'true');
+    expect(within(stuckCard).getByRole('status')).toHaveTextContent('Sending');
+    expect(within(stuckCard).getByRole('button', { name: en.tasks.cancelTask })).toBeDisabled();
+
+    net.answerUrl('/api/tasks/t404/cancel', 200, {});
+    await vi.waitFor(() => expect(props.onChanged).toHaveBeenCalledTimes(1));
   });
 
   it('supports full keyboard navigation for both multi-line feedback submit and option pick', async () => {

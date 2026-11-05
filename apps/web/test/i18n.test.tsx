@@ -90,6 +90,13 @@ describe('errorText', () => {
   });
 });
 
+describe('request sending state', () => {
+  it('names the in-flight request sending state in English and Russian', () => {
+    expect(en.tasks.sending).toBe('Sending');
+    expect(ru.tasks.sending).toBe('Отправка');
+  });
+});
+
 describe('work tree words', () => {
   it('uses the actual turn, branch and times in both languages', () => {
     for (const L of [en.dept.tree, ru.dept.tree]) {
@@ -127,5 +134,10 @@ describe('work tree words', () => {
   it('names the notebook saving state in English and Russian', () => {
     expect(en.notebook.saving).toBe('Saving');
     expect(ru.notebook.saving).toBe('Сохранение');
+  });
+
+  it('names a hidden employee in English and Russian', () => {
+    expect(en.window.hiddenEmployee).toBe('Employee');
+    expect(ru.window.hiddenEmployee).toBe('Сотрудник');
   });
 });
