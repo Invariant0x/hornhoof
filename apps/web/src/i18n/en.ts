@@ -773,6 +773,8 @@ export const en = {
     lastGate: 'last gate',
     sentBackLine: 'Sent back for rework',
     reportLine: 'Report to the head',
+    finalTurnCheck: 'final turn check, once per turn',
+    turnObserver: 'turn observer',
     stats: (working: number, total: number, roles: number, gates: number) =>
       [`${working} of ${total} ${plural('en', total, { one: 'agent', other: 'agents' })} working`, `${roles} ${plural('en', roles, { one: 'role', other: 'roles' })}`, ...(gates ? [`${gates} ${plural('en', gates, { one: 'gate', other: 'gates' })}`] : [])].join(', '),
     agents: (n: number) => (n ? `${n} ${plural('en', n, { one: 'agent', other: 'agents' })}` : 'Nobody yet'),

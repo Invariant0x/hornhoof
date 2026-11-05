@@ -31,6 +31,9 @@ export { employeeGroups };
 const frameTitle = (f: Frame, language: 'en' | 'ru', others: string) =>
   f.team ? f.team.name : f.role ? f.role.title[language] : others;
 
+const frameDescription = (f: Frame, language: 'en' | 'ru', t: ReturnType<typeof useT>) =>
+  f.role?.schema === 'final_check' ? t.dept.finalTurnCheck : f.role?.schema === 'observer' ? t.dept.turnObserver : f.role?.description[language] ?? '';
+
 type Props = {
   me: Me;
   department: Department;
@@ -521,7 +524,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
               <Edge cut={14} corner>
                 <span className={`fh${f.role && canGive ? ' has-sw' : ''}`}>
                   <span className="fn">{frameTitle(f, language, t.dept.others)}</span>
-                  {f.role && <span className="fa">{f.role.description[language]}</span>}
+                  {f.role && <span className="fa">{frameDescription(f, language, t)}</span>}
                   <span className="fc">{t.dept.agents(f.members.length)}</span>
                 </span>
               </Edge>
@@ -557,7 +560,7 @@ export function DepartmentView({ me, department: d, deputies, selected, selected
           </svg>
           {s.gates.map(g => (
             <span key={g.x} className="gl" style={{ left: g.x, top: CY + 12 }}>
-              {g.last ? t.dept.lastGate : t.dept.gate(g.n)}
+              {t.dept.gate(g.n)}
             </span>
           ))}
           {rework && s.back && (

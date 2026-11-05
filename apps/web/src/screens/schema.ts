@@ -3,7 +3,7 @@ import type { Point } from '../ui/wires';
 
 /* A department's schema in world pixels, laid out like the prototype. From the top: the head with the people who reach the
    department at its right, the bus from the head to every frame, the amber line back from the gates, the pipeline between
-   stages, then a frame per role. Work goes left to right: the roles without a gate first, then each gate in its order. */
+   stages, then a frame per role. Work goes left to right: design, ordinary work, each gate in order, then the final check. */
 export const FW = 280, GS = 44, G = 150, CW = 240, CH = 84, PY = 96, HW = 380, HH = 184, PW = 220, PH = 56;
 export const BUS = HH + 44, RY = BUS + 44, CY = BUS + 84, FT = CY + 50, FHEAD = 100, REP = 92;
 const PEOPLE_Y = 12, PEOPLE_STEP = 66;
@@ -55,7 +55,7 @@ function splitMembers(d: Department) {
   return { teamFrames, members: all.filter(e => !e.teamId || !teamIds.has(e.teamId)), startX: last ? teamEnd + G : 0, teamEnd };
 }
 
-/* Direct lines from the head's left edge into each sub-unit frame, with no stage bus or pipeline connection. */
+/* Direct lines from the head's left edge into sub-unit and observer frames, with no stage bus or pipeline connection. */
 function addTeamLines(lines: Line[], vias: Point[], teamFrames: Frame[], hx: number) {
   for (const [i, tf] of teamFrames.entries()) {
     const y = HH / 2 - i * 20;
@@ -67,23 +67,49 @@ function addTeamLines(lines: Line[], vias: Point[], teamFrames: Frame[], hx: num
   }
 }
 
+type Group = { role: DeptRole | null; key: string; gate: number | null }[];
+
+/* Role metadata, not role ids, decides the pipeline: design, ordinary work, gates in order, then the final check. */
+function pipelineGroups(known: ReadonlyMap<string, DeptRole>, loose: Employee[]) {
+  const roles = [...known.values()];
+  const before = roles.filter(r => r.schema === 'before_work');
+  const plain = roles.filter(r => r.gate === null && !r.schema);
+  const final = roles.filter(r => r.schema === 'final_check');
+  const gateNumbers = [...new Set(roles.flatMap(r => (r.gate === null ? [] : [r.gate])))].sort((a, b) => a - b);
+  const groups: Group[] = [];
+  if (before.length) groups.push(before.map(r => ({ role: r, key: r.id, gate: null })));
+  const workGroup: Group = [...plain.map(r => ({ role: r, key: r.id, gate: null })), ...(loose.length ? [{ role: null, key: '', gate: null }] : [])];
+  if (workGroup.length) groups.push(workGroup);
+  for (const n of gateNumbers) groups.push(roles.filter(r => r.gate === n).map(r => ({ role: r, key: r.id, gate: n })));
+  if (final.length) groups.push(final.map(r => ({ role: r, key: r.id, gate: null })));
+  return { groups, workGroup };
+}
+
+/* Observers sit beside the pipeline and connect directly to the head, like sub-unit frames. */
+function observerFrames(known: ReadonlyMap<string, DeptRole>, members: Employee[], startX: number): Frame[] {
+  return [...known.values()].filter(r => r.schema === 'observer').map((role, i) => {
+    const x = startX + i * (FW + GS);
+    const held = members.filter(e => e.roleId === role.id);
+    return { key: role.id, role, x, h: FHEAD + Math.max(1, held.length) * PY + 8, stage: -1, members: placeMembers(held, x) };
+  });
+}
+
 export function schemaLayout(d: Department, people: number): Schema {
   const head = d.employees.find(e => e.kind === 'head') ?? null;
   const { teamFrames, members, startX, teamEnd } = splitMembers(d);
   const known = new Map(d.roles.filter(r => members.some(e => e.roleId === r.id)).map(r => [r.id, r]));
   const loose = members.filter(e => !e.roleId || !known.has(e.roleId));
-
-  /* Stage 0 holds the roles without a gate and the loose employees; each gate number makes a stage of its own. */
-  const plain = [...known.values()].filter(r => r.gate === null);
-  const gateNumbers = [...new Set([...known.values()].flatMap(r => (r.gate === null ? [] : [r.gate])))].sort((a, b) => a - b);
-  const groups: { role: DeptRole | null; key: string; gate: number | null }[][] = [];
-  if (plain.length || loose.length) groups.push([...plain.map(r => ({ role: r, key: r.id, gate: null })), ...(loose.length ? [{ role: null, key: '', gate: null }] : [])]);
-  for (const n of gateNumbers) groups.push([...known.values()].filter(r => r.gate === n).map(r => ({ role: r, key: r.id, gate: n })));
+  const { groups, workGroup } = pipelineGroups(known, loose);
+  const workStage = groups.indexOf(workGroup);
+  const observers = observerFrames(known, members, startX);
+  const lastObserver = observers[observers.length - 1];
+  const outsideEnd = lastObserver ? lastObserver.x + FW : teamEnd;
+  const pipelineStart = lastObserver ? outsideEnd + G : startX;
 
   const stages: Frame[][] = [];
   const starts: number[] = [];
   const ends: number[] = [];
-  let x = startX;
+  let x = pipelineStart;
   for (const [k, group] of groups.entries()) {
     starts.push(x);
     const frames = group.map(g => {
@@ -104,21 +130,20 @@ export function schemaLayout(d: Department, people: number): Schema {
     stages.push(frames);
   }
   const stageFrames = stages.flat();
-  const frames = [...teamFrames, ...stageFrames];
-  const w = ends.length ? ends[ends.length - 1]! : teamEnd;
+  const frames = [...teamFrames, ...observers, ...stageFrames];
+  const w = ends.length ? ends[ends.length - 1]! : outsideEnd;
   const h = FT + Math.max(0, ...frames.map(f => f.h));
-  const hx = Math.max(teamEnd + HW / 2, w / 2);
-  const firstGated = gateNumbers.length && plain.length + loose.length ? 1 : 0;
+  const hx = Math.max(outsideEnd + HW / 2, w / 2);
 
   const lines: Line[] = [];
   const vias: Point[] = [];
-  addTeamLines(lines, vias, teamFrames, hx);
+  addTeamLines(lines, vias, [...teamFrames, ...observers], hx);
   /* Between stages, a dotted divider; on the pipeline, a diamond where a stage is a gate. */
   const gates: Schema['gates'] = [];
   for (let k = 1; k < stages.length; k++) {
     const sx = (ends[k - 1]! + starts[k]!) / 2;
     lines.push({ cls: 'gate', pts: [[sx, RY + 16], [sx, h]] });
-    if (groups[k]![0]!.gate !== null) gates.push({ x: sx, n: k - firstGated + 1, last: false });
+    if (groups[k]![0]!.gate !== null) gates.push({ x: sx, n: gates.length + 1, last: false });
   }
   if (gates.length) gates[gates.length - 1]!.last = true;
 
@@ -149,10 +174,10 @@ export function schemaLayout(d: Department, people: number): Schema {
     for (const f of b) lines.push({ cls: 'pl', pts: [[inX(f), CY], [inX(f), FT]], arrow: true });
   }
 
-  /* The way back: any gate can send work back to the first stage. */
+  /* The way back: any gate can send work back to ordinary work, not to design or the final check. */
   let back: Point | null = null;
-  const gated = stageFrames.filter(f => f.stage >= firstGated && groups[f.stage]![0]!.gate !== null);
-  const first = firstGated ? stages[0]! : [];
+  const gated = stageFrames.filter(f => groups[f.stage]![0]!.gate !== null);
+  const first = workStage >= 0 ? stages[workStage]! : [];
   if (gated.length && first.length) {
     for (const g of gated) lines.push({ cls: 'rl', pts: [[midX(g), FT], [midX(g), RY]] });
     lines.push({ cls: 'rl', pts: [[Math.min(...first.map(midX)), RY], [Math.max(...gated.map(midX)), RY]] });

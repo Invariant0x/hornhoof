@@ -797,6 +797,8 @@ export const ru: Messages = {
     lastGate: 'последний рубеж',
     sentBackLine: 'Вернули на доработку',
     reportLine: 'Доклад руководителю',
+    finalTurnCheck: 'финальная проверка хода, один раз за ход',
+    turnObserver: 'наблюдатель хода',
     stats: (working, total, roles, gates) =>
       [
         `${working} из ${total} ${plural('ru', total, { one: 'агента', few: 'агентов', many: 'агентов', other: 'агента' })} в работе`,
