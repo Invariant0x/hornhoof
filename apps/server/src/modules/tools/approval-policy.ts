@@ -7,7 +7,7 @@ import type { Ctx } from '../../app.js';
 import { orchestratorHeaders } from '../../auth/internal.js';
 import { approvalPolicies, departments, jobs, requests } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { ceoPrincipal, decisionPrincipal, withInputLock } from '../conversation/decision-context.js';
+import { decisionPrincipal, withInputLock } from '../conversation/decision-context.js';
 import { departmentOwner, departmentRules, kindKnown } from '../departments/approval-policy.js';
 import { personParty } from '../events/parties.js';
 import { appendOutgoing } from '../events/store.js';
@@ -149,13 +149,15 @@ export function registerApprovalTools(server: McpServer, ctx: Ctx, job: ToolJob)
   );
 }
 
+const NO_PERSON = 'This turn answers no person who may change this: the last message in it came from an employee or from Hornhoof. Nothing was changed. Ask the CEO or the CEO delegate, or for a rule the department\'s owner.';
+
 /* The orchestrator's tools to change them. Each calls the route the screen calls, as the person whose words its turn answers
-   now, under the input lock, so it may do what that person may and no employee, timer or task can ask it to. */
+   now, under the input lock, so the route allows it what that person may, and no employee, timer or task can ask it to. */
 export function registerApprovalControlTools(server: McpServer, ctx: Ctx, app: FastifyInstance, job: ToolJob): void {
-  const asPerson = (find: () => Promise<string | null>, nobody: string, url: string, payload: object) =>
+  const asPerson = (url: string, payload: object) =>
     withInputLock(ctx, job.agentId, async () => {
-      const personId = await find();
-      if (!personId) return say(nobody, true);
+      const personId = (await decisionPrincipal(ctx.db, job.id))?.personId;
+      if (!personId) return say(NO_PERSON, true);
       const res = await app.inject({ method: 'PUT', url, headers: orchestratorHeaders(personId, job.agentId), payload });
       if (res.statusCode < 400) return say(res.body);
       return say((JSON.parse(res.body) as { error?: { message?: string } }).error?.message ?? `Hornhoof answered ${res.statusCode}.`, true);
@@ -167,13 +169,7 @@ export function registerApprovalControlTools(server: McpServer, ctx: Ctx, app: F
       description: 'Names who owns a department: they take its approvals and set its policy. person: someone active with access to the department, or null to leave it to the CEO. Access alone never makes anyone an owner, and the rules stay as they are when the owner changes. Only in a turn that answers the CEO or the CEO delegate.',
       inputSchema: { department: Department, person: z.uuid().nullable() },
     },
-    ({ department, person }) =>
-      asPerson(
-        () => ceoPrincipal(ctx.db, job.id),
-        'Only the CEO or the CEO delegate names a department\'s owner, in a turn that answers them: the last person who wrote into it. Nothing was changed. Ask the CEO first.',
-        `/api/departments/${department}/owner`,
-        { personId: person },
-      ),
+    ({ department, person }) => asPerson(`/api/departments/${department}/owner`, { personId: person }),
   );
 
   server.registerTool(
@@ -184,12 +180,6 @@ export function registerApprovalControlTools(server: McpServer, ctx: Ctx, app: F
         "Only in a turn that answers the department's owner, the CEO or the CEO delegate, as their decision.",
       inputSchema: { department: Department, channel: ApprovalChannel, mode: z.enum(APPROVAL_MODES), limit: ApprovalAmount.optional(), unit: z.string().trim().min(1).max(16).optional() },
     },
-    ({ department, channel, mode, limit, unit }) =>
-      asPerson(
-        async () => (await decisionPrincipal(ctx.db, job.id))?.personId ?? null,
-        'This turn answers no person who may change this: the last message in it came from an employee or from Hornhoof. Nothing was changed. Ask the department\'s owner, the CEO or the CEO delegate.',
-        `/api/departments/${department}/approval-policy/${channel}`,
-        { mode, ...(limit === undefined ? {} : { limit }), ...(unit === undefined ? {} : { unit }) },
-      ),
+    ({ department, channel, mode, limit, unit }) => asPerson(`/api/departments/${department}/approval-policy/${channel}`, { mode, ...(limit === undefined ? {} : { limit }), ...(unit === undefined ? {} : { unit }) }),
   );
 }

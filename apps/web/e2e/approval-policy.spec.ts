@@ -88,6 +88,7 @@ for (const lang of ['en', 'ru'] as const) {
         const t = MESSAGES[lang];
         const { errors, puts } = await open(page, lang, theme, width);
         const part = section(page, t);
+        await page.screenshot({ path: info.outputPath(`approvals-page-${width}-${lang}-${theme}.png`) });
         await part.screenshot({ path: info.outputPath(`approvals-ceo-${width}-${lang}-${theme}.png`) });
         await fitsTheScreen(page, width);
 

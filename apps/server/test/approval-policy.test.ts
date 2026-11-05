@@ -183,7 +183,7 @@ describe('asking for an approval under the policy', () => {
     await ask({ channel: 'message', kind: 'Welcome  email' });
     const [first] = await openRequests(c);
     expect((await answer(c, first!.id, true)).statusCode).toBe(200);
-    const again = await ask({ channel: 'message', kind: 'welcome email' });
+    const again = await ask({ channel: 'message', kind: ' WELCOME   Email' });
     expect(said(again)).toMatch(/no approval/i);
     expect(await openRequests(c)).toEqual([]);
     await ask({ channel: 'message', kind: 'invoice reminder' });
@@ -337,7 +337,9 @@ describe('the orchestrator\'s tools for owners and rules', () => {
     await c.setOwner(c.ceoToken, c.dev.id, c.ids.dana);
     const hers = await c.tools(c.orchestrator, c.ids.dana);
     expect((await call(hers, 'set_approval_policy', { department: c.dev.id, channel: 'price', mode: 'new_kinds' })).isError).toBeFalsy();
-    expect((await call(hers, 'set_department_owner', { department: c.dev.id, person: null })).isError).toBe(true);
+    const refused = await call(hers, 'set_department_owner', { department: c.dev.id, person: null });
+    expect(refused.isError).toBe(true);
+    expect(said(refused)).toContain('Only the CEO');
   });
 
   it('gives setting tools to the orchestrator alone', async () => {

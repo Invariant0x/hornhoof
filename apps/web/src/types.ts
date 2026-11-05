@@ -1,3 +1,4 @@
+import type { ApprovalChannel, ApprovalMode, ApprovalRule as ChannelRule } from '@hornhoof/protocol/approval-policy';
 import type { ExternalWait } from '@hornhoof/protocol/waits';
 import type { Notification } from '@hornhoof/protocol';
 import type { ConnectionEnd, FailureKind, Limits, MachineDrain, ModelOption, NodeDisconnectCause, NodeLoad, NodeReconnect, ProgramInfo, ProviderId, TemplateKey } from '@hornhoof/protocol';
@@ -163,10 +164,9 @@ export type Department = {
   ownerPersonId?: string | null;
 };
 
+export type { ApprovalChannel, ApprovalMode };
 /* How a department's approvals go on one channel: every one, only new kinds, or none up to a limit. */
-export type ApprovalChannel = 'message' | 'price' | 'publication' | 'commit' | 'spend' | 'other';
-export type ApprovalMode = 'every' | 'new_kinds' | 'within_limits';
-export type ApprovalRule = { channel: ApprovalChannel } & ({ mode: 'every' | 'new_kinds' } | { mode: 'within_limits'; limit: number; unit?: string });
+export type ApprovalRule = { channel: ApprovalChannel } & ChannelRule;
 /* A department's owner and rules as this person may see them; no owner means the CEO. */
 export type ApprovalPolicyView = {
   departmentId: string;
