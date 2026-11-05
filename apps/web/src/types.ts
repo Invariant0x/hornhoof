@@ -366,7 +366,8 @@ export type TaskLine = {
 
 /* by.for: the person the orchestrator acted for. */
 export type TaskLogLine = { kind: string; text: string; data: unknown; by: { kind: 'person' | 'agent'; id: string; name: string; for?: { id: string; name: string } } | null; at: string };
-export type TaskRequest = { id: string; kind: 'question' | 'approval' | 'stuck'; text: string; commit: string | null; status: string; answer: string | null; agent: AgentRef | null; at: string };
+export type TaskRequest = { id: string; kind: 'question' | 'choice' | 'approval' | 'stuck'; text: string; commit: string | null; status: string; answer: string | null; agent: AgentRef | null; at: string };
+export type TaskFile = { id: string; name: string; size: number; by: { id: string; name: string } | null; at: string };
 
 export type TaskDetail = TaskLine & {
   body: string;
@@ -382,6 +383,7 @@ export type TaskDetail = TaskLine & {
   subtasks: TaskLine[];
   log: TaskLogLine[];
   requests: TaskRequest[];
+  files?: TaskFile[];
 };
 
 /* What an agent asks of people, under "Waiting for you". */
