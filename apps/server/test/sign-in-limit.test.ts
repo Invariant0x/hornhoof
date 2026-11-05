@@ -1,12 +1,34 @@
 import type { PGlite } from '@electric-sql/pglite';
 import { sql } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { PglitePreparedQuery } from 'drizzle-orm/pglite';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { addressKey, longestWait, SIGN_IN_LIMITS, SIGN_IN_LOCK } from '../src/auth/sign-in-limit.js';
+import { readProxyV2 } from '../src/modules/tls/proxy-header.js';
 import { appOn, SETUP, setUpCompany, statements, testApp } from './helpers.js';
+import { ipv6Addresses, proxyV2, TCP_OVER_IPV6 } from './proxy-v2.js';
 
 const login = (email: string, password: string, remoteAddress: string) => ({ method: 'POST' as const, url: '/api/auth/login', payload: { email, password }, remoteAddress });
 const WRONG = 'wrong password!';
 const rowsOf = (result: unknown) => (result as { rows: Record<string, unknown>[] }).rows;
+const SIGN_IN_LOCK_HOLDERS = `SELECT count(*)::int AS n FROM pg_locks WHERE locktype = 'advisory' AND objid = ${SIGN_IN_LOCK}`;
+
+/* How many hold the sign-in lock as each try's insert starts, as the database itself says, asked on the insert's own
+   connection handle. A transaction's lock lasts until its commit, and without a transaction it is gone with its own
+   statement, so this tells the two apart where PGlite's one connection cannot race them. */
+function lockHoldersAtEachInsert(): number[] {
+  const holders: number[] = [];
+  const execute = PglitePreparedQuery.prototype.execute;
+  const spy = vi.spyOn(PglitePreparedQuery.prototype, 'execute').mockImplementation(async function (this: PglitePreparedQuery<never>, values) {
+    const { queryString, client } = this as unknown as { queryString: string; client: PGlite };
+    if (queryString.includes('INSERT INTO sign_in_attempts')) {
+      const { rows } = await client.query<{ n: number }>(SIGN_IN_LOCK_HOLDERS);
+      holders.push(rows[0]!.n);
+    }
+    return execute.call(this, values);
+  });
+  onTestFinished(() => spy.mockRestore());
+  return holders;
+}
 
 describe('addressKey', () => {
   it('reads an address as the limit counts it', () => {
@@ -16,6 +38,33 @@ describe('addressKey', () => {
     expect(addressKey('2001:0db8:0001:0002::ffff')).toBe('2001:db8:1:2::/64');
     expect(addressKey('2001:db8::1')).toBe('2001:db8:0:0::/64');
     expect(addressKey('::1')).toBe('0:0:0:0::/64');
+  });
+
+  it.each([
+    ['with a dotted tail', '::ffff:203.0.113.5'],
+    ['in capitals', '::FFFF:203.0.113.5'],
+    ['as eight groups', '0:0:0:0:0:ffff:cb00:7105'],
+    ['as eight groups with their zeros', '0000:0000:0000:0000:0000:FFFF:CB00:7105'],
+    ['shortened, in hex', '::ffff:cb00:7105'],
+    ['as six groups and a dotted tail', '0:0:0:0:0:ffff:203.0.113.5'],
+    ['with a zone', '::ffff:203.0.113.5%eth0'],
+  ])('counts an IPv4-mapped address by its IPv4 %s', (_form, address) => {
+    expect(addressKey(address)).toBe('203.0.113.5');
+  });
+
+  it('counts by its /64 an address that only looks IPv4-mapped', () => {
+    expect(addressKey('::fffe:cb00:7105')).toBe('0:0:0:0::/64');
+    expect(addressKey('1::ffff:cb00:7105')).toBe('1:0:0:0::/64');
+  });
+
+  it('reads the source a PROXY header over IPv6 gives', () => {
+    const keyOf = (groups: number[]) => {
+      const header = readProxyV2(proxyV2({ family: TCP_OVER_IPV6, addresses: ipv6Addresses(groups) }));
+      return addressKey((header as { source: string }).source);
+    };
+    expect(keyOf([0, 0, 0, 0, 0, 0xffff, 0xcb00, 0x7107])).toBe('203.0.113.7');
+    expect(keyOf([0, 0, 0, 0, 0, 0xffff, 0xc633, 0x6414])).toBe('198.51.100.20');
+    expect(keyOf([0x2001, 0xdb8, 1, 2, 3, 4, 5, 6])).toBe('2001:db8:1:2::/64');
   });
 });
 
@@ -33,6 +82,11 @@ describe('longestWait', () => {
     const short = { oldest: minutesAgo(14), windowMs: SIGN_IN_LIMITS.emailAddress.windowMs };
     const long = { oldest: minutesAgo(5), windowMs: SIGN_IN_LIMITS.address.windowMs };
     expect(longestWait([short, long], now)).toEqual({ retryAfterS: 55 * 60, windowMs: SIGN_IN_LIMITS.address.windowMs });
+  });
+
+  it('names the window of a full limit in its last second', () => {
+    const lastSecond = new Date(minutesAgo(60).getTime() + 500);
+    expect(longestWait([{ oldest: lastSecond, windowMs: SIGN_IN_LIMITS.address.windowMs }], now)).toEqual({ retryAfterS: 1, windowMs: SIGN_IN_LIMITS.address.windowMs });
   });
 
   it('answers one second when no limit is full any more', () => {
@@ -109,12 +163,22 @@ describe('POST /api/auth/login limits in the database', () => {
     const answers = await Promise.all(Array.from({ length: 100 }, (_, i) => app.inject(login(`x${i}@acme.com`, WRONG, '203.0.113.7'))));
     expect(answers.filter(a => a.statusCode === 401)).toHaveLength(30);
     expect(answers.filter(a => a.statusCode === 429)).toHaveLength(70);
-    /* PGlite has one connection, so the order of the statements is what shows the lock holds the limit on a pool. */
+    /* PGlite has one connection, so this shows the order of the lock and the insert, and the next test their one
+       transaction; tries really racing on a pool of connections wait for plan 3's Postgres harness. */
     const inserts = seen.flatMap((s, at) => (s.sql.includes('INSERT INTO sign_in_attempts') ? [at] : []));
     expect(inserts).toHaveLength(100);
     for (const at of inserts) {
       expect(seen[at - 1]?.sql).toContain('pg_advisory_xact_lock');
       expect(seen[at - 1]?.params).toEqual([SIGN_IN_LOCK]);
     }
+  });
+
+  it('still holds the lock when the insert of a try runs, and lets it go with the try', async () => {
+    const { app, db } = await testApp();
+    await setUpCompany(app);
+    const holders = lockHoldersAtEachInsert();
+    await Promise.all(Array.from({ length: 5 }, (_, i) => app.inject(login(`x${i}@acme.com`, WRONG, '203.0.113.7'))));
+    expect(holders).toEqual([1, 1, 1, 1, 1]);
+    expect(rowsOf(await db.execute(sql.raw(SIGN_IN_LOCK_HOLDERS)))).toEqual([{ n: 0 }]);
   });
 });

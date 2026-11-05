@@ -1,16 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { readProxyV2 } from '../src/modules/tls/proxy-header.js';
-import { ipv4Addresses, proxyV2, visitorHeader } from './proxy-v2.js';
+import { ipv4Addresses, ipv6Addresses, proxyV2, TCP_OVER_IPV6, visitorHeader } from './proxy-v2.js';
 
 const LOCAL_V2 = 0x20;
 const TCP_OVER_IPV4 = 0x11;
-const TCP_OVER_IPV6 = 0x21;
-
-function ipv6Addresses(source: number[]): Buffer {
-  const addresses = Buffer.alloc(36);
-  source.forEach((group, i) => addresses.writeUInt16BE(group, i * 2));
-  return addresses;
-}
 
 describe('readProxyV2', () => {
   it('reads an IPv4 visitor', () => {
