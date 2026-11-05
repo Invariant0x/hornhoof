@@ -8,7 +8,7 @@ When you work with several AI programs at once, it is easy to lose track of whic
 
 Hornhoof brings all of it together into one team. You describe the task in plain words. Hornhoof splits it between departments of AI agents, runs them on everyone's plans and computers, has agents of different makers check each other's work, and gives you the finished result.
 
-Open source, on your own machines, no sign-up.
+In effect, you get your own private cloud with no cloud provider. It runs on your own devices, joined with the devices of the friends who build the startup or the project with you. Open source, no sign-up.
 
 ![The company map](.github/assets/map.gif)
 
