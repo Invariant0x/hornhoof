@@ -75,7 +75,7 @@ it('makes source bytes available to the actual minimal template-input consumer',
   const manifestSource = await readFile(join(root, '.hornhoof/test-environment.json'), 'utf8');
   const description: EnvironmentDescription = {
     version: 1, repositoryScope: { companyId: '11111111-1111-4111-8111-111111111111', repositoryOwnerId: '22222222-2222-4222-8222-222222222222', repoUrlHash: 'f'.repeat(64) },
-    commitSha: 'bb6882c520a0180f28610fbf8690a2ae52a56050', manifestSource, manifestHash: createHash('sha256').update(manifestSource).digest('hex'),
+    commitSha: '810762059c8d011d41ecedbc4c5b2337f382a1f1', manifestSource, manifestHash: createHash('sha256').update(manifestSource).digest('hex'),
     manifest: parseTestEnvironment(manifestSource), inputDigests: audit.files.map(file => ({ path: file.path, digest: file.sha256 })), inventory: [], runtimeCapabilities: [],
   };
   await mkdir(join(root, 'protocol/dist'), { recursive: true });

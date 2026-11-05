@@ -11,7 +11,7 @@ measured execution adapter is not implemented or accepted by this package.
 | --- | --- |
 | Turn-7 baseline source | `f289196b97c9d6fea391248d76e422214f2638ad` |
 | Candidate product source | `06f67aebce8bb2653d87c787535e1dd93a620405` |
-| Fixture base | `bb6882c520a0180f28610fbf8690a2ae52a56050` |
+| Fixture base | `810762059c8d011d41ecedbc4c5b2337f382a1f1` |
 | Audit driver | This package's task-399 commit, recorded in its evidence receipt |
 | Fixture bytes | `apps/node/test/fixtures/preparation-replay-files.json` |
 | Fixture variations | `apps/node/test/fixtures/preparation-replay-pins.json` |
@@ -51,8 +51,9 @@ At candidate source 06f67 the required outer owner is
 `apps/node/src/main.ts:508 testOne` -> `check-runtime.ts:29 runQueuedPart` ->
 `check-queue.ts:27 withCheckSlot` -> `CheckClient.acquire` -> authenticated
 `check.acquire` -> server `nodes/check-slots.ts:37 receiveCheckRequest` ->
-`queueFor(ctx).acquire(machineKey,actor)`. The server's `machineKey` uses trusted
-node/machine identity. The lease precedes `tests.started`, all checkout/cache/
+`checkQueueLoad` registers the authenticated node key with the trusted
+`machineKey`, then `queue.acquire(nodeKey,actor)` admits that node's request.
+The server's `machineKey` uses trusted node/machine identity. The lease precedes `tests.started`, all checkout/cache/
 preparation, the command and cleanup; it remains held until `runPart` settles.
 The part-user mutex inside it is a UID resource, not a second global admission.
 

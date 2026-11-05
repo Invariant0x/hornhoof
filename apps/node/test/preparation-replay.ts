@@ -7,11 +7,14 @@ import { z } from 'zod';
 const FileDigest = z.strictObject({ path: z.string(), sha256: z.string().regex(/^[a-f0-9]{64}$/) });
 const fixtureRoot = fileURLToPath(new URL('./fixtures/preparation-replay/', import.meta.url));
 
-async function regularFiles(root: string, prefix = ''): Promise<string[]> {
+async function regularFiles(root: string, directories: ReadonlySet<string>, prefix = ''): Promise<string[]> {
   const paths: string[] = [];
   for (const name of await readdir(join(root, prefix))) {
     const path = prefix ? `${prefix}/${name}` : name, stat = await lstat(join(root, path));
-    if (stat.isDirectory()) paths.push(...await regularFiles(root, path));
+    if (stat.isDirectory()) {
+      if (!directories.has(path)) throw new Error('Fixture inventory differs: an undeclared directory exists.');
+      paths.push(...await regularFiles(root, directories, path));
+    }
     else if (stat.isFile()) paths.push(path);
     else throw new Error('The replay fixture requires regular files without links.');
   }
@@ -19,8 +22,10 @@ async function regularFiles(root: string, prefix = ''): Promise<string[]> {
 }
 
 export async function inspectReplayFixture(root: string) {
+  if (!(await lstat(root)).isDirectory()) throw new Error('The fixture root must be a real directory without links.');
   const expected = FileDigest.array().parse(JSON.parse(await readFile(new URL('./fixtures/preparation-replay-files.json', import.meta.url), 'utf8')));
-  const paths = await regularFiles(root);
+  const directories = new Set(expected.flatMap(file => file.path.split('/').slice(0, -1).map((_, index, parts) => parts.slice(0, index + 1).join('/'))));
+  const paths = await regularFiles(root, directories);
   if (JSON.stringify(paths) !== JSON.stringify(expected.map(file => file.path))) throw new Error('Fixture inventory differs from the pinned workload.');
   for (const file of expected) {
     const digest = createHash('sha256').update(await readFile(join(root, file.path))).digest('hex');

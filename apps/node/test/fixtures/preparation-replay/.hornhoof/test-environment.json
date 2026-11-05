@@ -80,7 +80,8 @@
       "inputs": [
         "protocol/dist/**",
         "migration.sql",
-        "prepare.cjs"
+        "prepare.cjs",
+        "protocol-source.txt"
       ],
       "commands": [
         {
