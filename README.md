@@ -150,9 +150,6 @@ Start with [CONTRIBUTING.md](CONTRIBUTING.md). Please read the [code of conduct]
 
 ## Good to know
 
-- **It spends your plans.** A busy company uses its limits much faster than one person in one chat. You choose how much of each plan the company may take, from 50 to 90%, so some is always left for you.
-- **Agents still make mistakes.** Reviews catch many of them, not all, so nothing ships without approval. Give agents only the access they need, like a token for one repository.
-- **Read your AI plan's terms.** Each maker has its own rules for how its plan may be used.
 - **Each agent is a real program on your machine.** More agents need more memory. Spare computers help.
 - **Hornhoof is young.** It works and changes fast. Expect rough edges, and tell me about them.
 
