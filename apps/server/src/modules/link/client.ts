@@ -29,6 +29,8 @@ function configFor(settings: TunnelSettings): string {
   const server = Server.parse(settings.tunnel);
   if (!isLinkName(settings.name)) throw new Error(`${settings.name} is not a link name`);
   if (!settings.key) throw new Error('the link has no key');
+  /* The table's own names only: an object also answers to the names it inherits, such as toString. */
+  if (!Object.hasOwn(PROXY, settings.mode)) throw new Error(`${settings.mode} is not a tunnel mode`);
   const proxy = PROXY[settings.mode];
   return `serverAddr = ${quoted(server.serverAddr)}
 serverPort = ${server.serverPort}

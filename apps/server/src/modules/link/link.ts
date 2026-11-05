@@ -35,11 +35,11 @@ export async function saveLink(tx: Db | Tx, config: Config, companyId: string, b
 
 /* Writes the tunnel's settings for the link the database holds, or takes them away, written whole and then moved so
    the tunnel never reads half a file. The link's key in them is for the tunnel container alone. */
-export async function writeTunnelSettings(db: Db, config: Config): Promise<void> {
+export async function writeTunnelSettings(db: Db, config: Config, log?: FastifyBaseLogger): Promise<void> {
   const file = join(config.controlDir, TUNNEL_FILE);
   const [row] = await db.select().from(publicLinks).limit(1);
   if (!row) return rmSync(file, { force: true });
-  const settings = { url: row.url, name: row.name, key: decryptSecret(row.keyEnc, config.secret), tunnel: JSON.parse(decryptSecret(row.tunnelEnc, config.secret)) as unknown, mode: await linkMode(db, config) };
+  const settings = { url: row.url, name: row.name, key: decryptSecret(row.keyEnc, config.secret), tunnel: JSON.parse(decryptSecret(row.tunnelEnc, config.secret)) as unknown, mode: await linkMode(db, config, log) };
   rmSync(`${file}.new`, { force: true });
   writeFileSync(`${file}.new`, JSON.stringify(settings), { mode: 0o600 });
   renameSync(`${file}.new`, file);
@@ -109,7 +109,7 @@ export class PublicLinks {
      runs outside compose, goes to the log: the link works once the tunnel reads the settings. */
   async sync(): Promise<void> {
     try {
-      await writeTunnelSettings(this.ctx.db, this.ctx.config);
+      await writeTunnelSettings(this.ctx.db, this.ctx.config, this.ctx.log);
     } catch (err) {
       this.ctx.log.error({ error: loggable(err) }, 'Could not write the tunnel settings for the public link.');
     }
