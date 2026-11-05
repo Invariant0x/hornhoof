@@ -1301,3 +1301,29 @@ it('reports a metadata deadline and replays its settled reply without acquiring 
   server.send(request); await server.wait(() => server.received.filter(frame => frame.type === 'tests.described').length === 2);
   expect(server.received.filter(frame => frame.type === 'check.acquire')).toHaveLength(1);
 });
+
+it('keeps a stopped part cleanup exclusive when another machine slot is granted to the same test user', async () => {
+  const server = await fakeServer(), dir = nodeDir(server.url);
+  let release!: () => void, cleaning = false;
+  const cleanup = new Promise<void>(done => { release = done; });
+  const runPart = vi.fn<typeof runTests>(async (message, options) => {
+    if (message.partId === 'first') {
+      await new Promise<void>(done => { if (options.signal!.aborted) done(); else options.signal!.addEventListener('abort', () => done(), { once: true }); });
+      cleaning = true; await cleanup;
+    }
+    return { type: 'tests.done', partId: message.partId, ok: message.partId !== 'first', exitCode: message.partId === 'first' ? null : 0, error: message.partId === 'first' ? 'cancelled' : null, commit: null, log: 'cleanup finished' };
+  });
+  const node = await runNode({ dir, adapter, testUser: { uid: 20000, gid: 20000 }, runPart, log: () => {} });
+  onTestFinished(() => { release(); node.stop(); });
+  await server.wait(() => server.received.some(frame => frame.type === 'hello'));
+  const part = { type: 'tests.run', repo: { url: 'https://example.test/repo.git', token: '' }, branch: null, task: 1, command: 'check', part: 1, parts: 1, timeoutMs: 1000 };
+  server.send({ ...part, partId: 'first' }); await server.wait(() => vi.mocked(runPart).mock.calls.length === 1);
+  server.send({ type: 'tests.cancel', partId: 'first' }); await server.wait(() => cleaning);
+  server.send({ ...part, partId: 'second' }); await server.wait(() => server.received.filter(frame => frame.type === 'check.acquire').length === 2);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  expect(runPart).toHaveBeenCalledTimes(1);
+  expect(server.received.some(frame => frame.type === 'tests.started' && frame.partId === 'second')).toBe(false);
+  expect(server.received).toContainEqual({ type: 'tests.waiting', partId: 'second', position: 1 });
+  release(); await server.wait(() => server.received.some(frame => frame.type === 'tests.done' && frame.partId === 'second'));
+  expect(runPart).toHaveBeenCalledTimes(2);
+});

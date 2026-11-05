@@ -24,7 +24,8 @@ const Text = Argument.min(1).refine(value => value.trim().length > 0);
 const Ids = z.array(Id).max(1000).refine(values => new Set(values).size === values.length, 'Identifiers must be distinct.');
 const Inputs = z.array(RepositoryPath).max(10_000);
 const ProfileIds = Ids.min(1);
-const ServiceBase = { id: Id, runtime: Id, profiles: ProfileIds };
+const ServiceId = z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/);
+const ServiceBase = { id: ServiceId, runtime: Id, profiles: ProfileIds };
 
 export const TestService = z.discriminatedUnion('driver', [
   z.strictObject({ ...ServiceBase, driver: z.literal('postgres'), options: z.strictObject({ database: Text.max(63), locale: Text.optional(), extensions: z.array(Text).max(128).optional() }) }),
@@ -243,3 +244,16 @@ export const TestsDescribed = z.strictObject({
   ]),
 }).refine(value => value.result.status !== 'ready' || value.result.description.commitSha === value.commitSha, 'The described commit differs from the requested commit.').superRefine(descriptionSize);
 export type TestsDescribed = z.infer<typeof TestsDescribed>;
+
+export function runtimeVersionMatches(requested: string, actual: string): boolean {
+  if (!/^\d+(?:\.\d+){0,2}$/.test(requested) || !/^\d+(?:\.\d+){1,2}$/.test(actual)) return false;
+  return requested.split('.').every((value, index) => value === actual.split('.')[index]);
+}
+export function requiredTestRuntimes(manifest: TestEnvironmentV1, profile: string): TestEnvironmentV1['runtimes'] {
+  const services = new Set(manifest.services.map(service => service.runtime));
+  const active = new Set(manifest.services.filter(service => service.profiles.includes(profile)).map(service => service.runtime));
+  return manifest.runtimes.filter(runtime => !services.has(runtime.id) || active.has(runtime.id));
+}
+export function supportsTestProfile(snapshot: EnvironmentSnapshot, capabilities: RuntimeCapability[]): boolean {
+  return requiredTestRuntimes(snapshot.description.manifest, snapshot.profile).every(requested => capabilities.some(actual => actual.id === requested.id && runtimeVersionMatches(requested.version, actual.version)));
+}

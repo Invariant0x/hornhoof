@@ -1,10 +1,11 @@
 import { execFile } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { lstat, open, readdir, realpath } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { cp, lstat, mkdir, mkdtemp, open, readdir, realpath, rm } from 'node:fs/promises';
 import { basename, join, matchesGlob, relative, resolve } from 'node:path';
-import { hashTestEnvironment, parseTestEnvironment, validateEnvironmentDescription, TEST_ENVIRONMENT_BYTES, RepositoryPath, type Command, type TestSuite, type TestPrepare, type NodeMessage, type ServerMessage, type TestsDescribed, type EnvironmentDescription, type EnvironmentProblem, type InputDigest, type RepositoryScope, type RuntimeCapability, type TestEnvironmentV1, type TestUnit } from '@hornhoof/protocol';
-import { cacheKey, checkCacheContext, fileDigest, privateCacheRoot, type CacheContext } from './test-cache.js';
+import { CheckSlotQueue, hashTestEnvironment, parseTestEnvironment, validateEnvironmentDescription, TEST_ENVIRONMENT_BYTES, RepositoryPath, type Command, type TestSuite, type TestPrepare, type NodeMessage, type ServerMessage, type TestsDescribed, type EnvironmentDescription, type EnvironmentProblem, type InputDigest, type RepositoryScope, type RuntimeCapability, type TestEnvironmentV1, type TestUnit } from '@hornhoof/protocol';
+import { cacheKey, checkCacheContext, fileDigest, prepareCache, restoreCache, privateCacheRoot, type CacheEntry, type CacheContext } from './test-cache.js';
 import { withCheckSlot } from './check-queue.js';
+import { prepareServiceArtifacts, openServices, type OpenedServices, type ServiceArtifacts, type ServiceContext, type ServiceDefinition, type ServiceDefinitions } from './test-services.js';
 import type { JobUser } from './isolation.js';
 import { readCommit, type CommitTree, type GitEntry } from './test-mirror.js';
 
@@ -209,11 +210,15 @@ export class NodeTestMessages {
   }
   private describe(message: DescribeMessage): Promise<void> | void {
     const signature = describeSignature(message), previous = this.described.get(message.requestId), active = this.describing.get(message.requestId);
-    if (previous) return previous.signature === signature ? this.options.emit(previous.reply) : this.mismatch(message);
+    if (previous) return this.replayCached(message, signature, previous);
     if (active) return active.signature === signature ? active.done : this.mismatch(message);
     if (this.options.stopped()) return;
     const stop = new AbortController(), done = Promise.resolve().then(() => this.discover(message, stop.signal));
     this.describing.set(message.requestId, { signature, stop, done }); return done;
+  }
+  private replayCached(message: DescribeMessage, signature: string, previous: { signature: string; reply: TestsDescribed }): void {
+    if (previous.signature === signature) this.options.emit(previous.reply);
+    else this.mismatch(message);
   }
   private async discover(message: DescribeMessage, signal: AbortSignal): Promise<void> {
     let executionSignal = signal, result: TestsDescribed['result'];
@@ -271,12 +276,169 @@ export async function readPreparationInputs(description: EnvironmentDescription,
   const references = preparationReferences(description, unitId, context), unit = description.manifest.prepare.find(unit => unit.id === unitId)!;
   const inputs = new Map(selectedInputs(description, unit.inputs).map(input => [input.path, input.digest]));
   for (const reference of references) {
-    let files: string[];
-    try { files = (await generatedFiles(reference.root, context)).filter(path => match(path, reference.pattern)); }
-    catch (error) { checkCacheContext(context); if (error instanceof EnvironmentFailure) throw error; return fail('environment_invalid', `A required preparation result is missing: ${reference.root}.`); }
-    if (!files.length) fail('environment_invalid', `A required preparation input is empty: ${reference.pattern}.`);
+    const files = await preparationFiles(reference, context);
     inputs.delete(reference.pattern);
     for (const path of files) inputs.set(path, await fileDigest(resolve(context.checkout, path), context));
   }
   return [...inputs].sort(([a], [b]) => a.localeCompare(b)).map(([path, digest]) => ({ path, digest }));
+}
+
+export type PreparationBuilder = {
+  root: string; user: JobUser; env: Record<string, string>;
+  run: (command: Command, env?: Record<string, string>) => Promise<void>;
+  quiesce: () => Promise<void>; close: () => Promise<void>;
+};
+export type PreparationContext = CacheContext & {
+  checkout: string; profile: string; attemptRoot: string; nodeOwner: JobUser; jobUser: JobUser;
+  env: Record<string, string>; registerSecrets: (values: string[]) => void;
+  builder: (inputs: InputDigest[], dependencies: CacheEntry | null) => Promise<PreparationBuilder>;
+  run: (command: Command, env?: Record<string, string>) => Promise<void>; quiesce: () => Promise<void>;
+};
+export type PreparedDependencies = { entry: CacheEntry | null; receipt: { key: string | null; hit: boolean } };
+type PreparedUnit = { definitions: ServiceDefinitions; artifacts: ServiceArtifacts };
+export type PreparedEnvironment = { env: Record<string, string>; receipts: { unitId: string; key: string | null; hit: boolean }[]; services: PreparedUnit[] };
+const SERVICE_PAYLOAD = '.hornhoof-services';
+async function runPreparation(commands: Command[], builder: Pick<PreparationBuilder, 'run' | 'quiesce'>): Promise<void> {
+  try { for (const command of commands) await builder.run(command); }
+  finally { await builder.quiesce(); }
+}
+export async function prepareDependencies(description: EnvironmentDescription, context: PreparationContext): Promise<PreparedDependencies> {
+  const dependencies = description.manifest.dependencies;
+  if (dependencies.cache === 'none') { await runPreparation(dependencies.install, context); return { entry: null, receipt: { key: null, hit: false } }; }
+  const key = dependencyCacheKey(description);
+  let builder: PreparationBuilder | undefined;
+  try {
+    const entry = await prepareCache(join(context.cacheRoot, 'dependencies'), key, key, context, async () => {
+      builder = await context.builder(selectedInputs(description, dependencies.inputs), null);
+      await runPreparation(dependencies.install, builder);
+      return { root: builder.root, paths: dependencies.paths };
+    });
+    await restoreCache(entry, context.checkout, context);
+    return { entry, receipt: { key, hit: entry.hit } };
+  } finally { await builder?.close(); }
+}
+function definitionsFor(description: EnvironmentDescription, unit: TestPrepare): ServiceDefinitions {
+  const services = description.manifest.services.filter(service => unit.serviceIds.includes(service.id) && service.driver !== 'browser') as ServiceDefinition[];
+  return { services, prepare: [{ id: unit.id, serviceIds: services.map(service => service.id), commands: unit.commands }] };
+}
+function serviceContext(context: PreparationContext, jobUser = context.jobUser, env = context.env): ServiceContext {
+  return { nodeOwner: context.nodeOwner, jobUser, deadline: context.deadline, signal: context.signal, log: context.log, registerSecrets: context.registerSecrets, env };
+}
+async function servicePaths(unit: TestPrepare, artifacts: ServiceArtifacts): Promise<void> {
+  for (const artifact of unit.artifacts) {
+    if (!('service' in artifact)) continue;
+    const root = artifacts.paths[artifact.service];
+    if (!root) fail('environment_invalid', 'A requested service artifact was not produced.');
+    await safeCheckoutPath(root, artifact.path);
+  }
+}
+async function buildUnit(description: EnvironmentDescription, unit: TestPrepare, key: string, builder: PreparationBuilder, context: PreparationContext): Promise<string[]> {
+  const definitions = definitionsFor(description, unit), paths = unit.artifacts.flatMap(artifact => 'service' in artifact ? [] : [artifact.path]);
+  if (!definitions.services.length) { await runPreparation(unit.commands, builder); return paths; }
+  const serviceRoot = await mkdtemp(join(await privateCacheRoot(context.cacheRoot), '.service-build-'));
+  try {
+    const artifacts = await prepareServiceArtifacts(definitions, builder.root, { ...serviceContext(context, builder.user, builder.env), cacheRoot: serviceRoot, envKey: key, inputDigest: key });
+    await builder.quiesce(); await servicePaths(unit, artifacts);
+    const destination = join(builder.root, SERVICE_PAYLOAD);
+    if (paths.some(path => match(SERVICE_PAYLOAD, path) || match(path, SERVICE_PAYLOAD))) fail('environment_invalid', 'A file artifact overlaps the reserved service payload.');
+    await rm(destination, { recursive: true, force: true });
+    await cp(serviceRoot, destination, { recursive: true, dereference: false, errorOnExist: true });
+    return [...paths, SERVICE_PAYLOAD];
+  } finally { await builder.quiesce(); await rm(serviceRoot, { recursive: true, force: true }); }
+}
+async function cachedUnit(description: EnvironmentDescription, unit: TestPrepare, dependencies: PreparedDependencies, key: string, inputs: InputDigest[], context: PreparationContext): Promise<CacheEntry> {
+  let builder: PreparationBuilder | undefined;
+  try {
+    const entry = await prepareCache(join(context.cacheRoot, 'environments'), key, key, context, async () => {
+      builder = await context.builder([...new Map([...selectedInputs(description, description.manifest.dependencies.inputs), ...inputs].map(input => [input.path, input])).values()], dependencies.entry);
+      return { root: builder.root, paths: await buildUnit(description, unit, key, builder, context) };
+    });
+    await restoreCache(entry, context.checkout, context); return entry;
+  } finally { await builder?.close(); }
+}
+async function uncachedUnit(description: EnvironmentDescription, unit: TestPrepare, context: PreparationContext): Promise<PreparedUnit | null> {
+  const definitions = definitionsFor(description, unit);
+  if (!definitions.services.length) { await runPreparation(unit.commands, context); return null; }
+  const key = digest(randomUUID());
+  const artifacts = await prepareServiceArtifacts(definitions, context.checkout, { ...serviceContext(context), cacheRoot: join(context.attemptRoot, 'service-templates', unit.id), envKey: key, inputDigest: key });
+  await context.quiesce(); await servicePaths(unit, artifacts); return { definitions, artifacts };
+}
+function cachedServices(description: EnvironmentDescription, unit: TestPrepare, entry: CacheEntry): PreparedUnit | null {
+  const definitions = definitionsFor(description, unit);
+  if (!definitions.services.length) return null;
+  const paths = Object.fromEntries(definitions.services.map(service => [service.id, join(entry.path, 'payload', SERVICE_PAYLOAD, entry.key, 'payload', service.id)]));
+  return { definitions, artifacts: { paths, format: 'hornhoof-services-v1', inputDigest: entry.inputDigest } };
+}
+async function artifactEnvironment(unit: TestPrepare, checkout: string, env: Record<string, string>): Promise<void> {
+  for (const artifact of unit.artifacts) {
+    if ('service' in artifact) continue;
+    const path = await safeCheckoutPath(checkout, artifact.path);
+    if (artifact.env) addEnvironment(env, { [artifact.env]: path });
+  }
+}
+function addEnvironment(target: Record<string, string>, values: Record<string, string>): void {
+  for (const [name, value] of Object.entries(values)) {
+    if (Object.hasOwn(target, name) && target[name] !== value) fail('environment_invalid', `Two preparation units define conflicting ${name} values.`);
+    target[name] = value;
+  }
+}
+async function prepareUnit(description: EnvironmentDescription, unit: TestPrepare, dependencies: PreparedDependencies, prepared: PreparedEnvironment, completed: string[], context: PreparationContext): Promise<void> {
+  const inputs = await readPreparationInputs(description, unit.id, { ...context, completed });
+  if (dependencies.receipt.key === null) {
+    const services = await uncachedUnit(description, unit, context);
+    if (services) prepared.services.push(services);
+    prepared.receipts.push({ unitId: unit.id, key: null, hit: false });
+  } else {
+    const key = environmentCacheKey(description, unit.id, dependencies.receipt.key, inputs), entry = await cachedUnit(description, unit, dependencies, key, inputs, context);
+    const services = cachedServices(description, unit, entry);
+    if (services) prepared.services.push(services);
+    prepared.receipts.push({ unitId: unit.id, key, hit: entry.hit });
+  }
+  await artifactEnvironment(unit, context.checkout, prepared.env); completed.push(unit.id);
+}
+export async function prepareEnvironment(description: EnvironmentDescription, dependencies: PreparedDependencies, context: PreparationContext): Promise<PreparedEnvironment> {
+  const prepared: PreparedEnvironment = { env: {}, receipts: [], services: [] }, completed: string[] = [];
+  for (const unit of description.manifest.prepare.filter(unit => unit.profiles.includes(context.profile))) await prepareUnit(description, unit, dependencies, prepared, completed, context);
+  await freshServiceArtifacts(description, prepared, context);
+  return prepared;
+}
+export async function openEnvironment(prepared: PreparedEnvironment, context: PreparationContext): Promise<OpenedServices> {
+  const opened: OpenedServices[] = [], env = { ...prepared.env };
+  let closing: Promise<void> | undefined;
+  const close = () => closing ??= (async () => { const results = await Promise.allSettled(opened.map(service => service.close())); for (const result of results) if (result.status === 'rejected') throw result.reason; })();
+  try {
+    await mkdir(join(context.attemptRoot, 'services'), { recursive: true, mode: 0o755 });
+    for (const [index, service] of prepared.services.entries()) {
+      const current = await openServices(service.definitions, service.artifacts, { ...serviceContext(context), checkout: context.checkout, attemptRoot: join(context.attemptRoot, 'services', String(index)) });
+      opened.push(current); addEnvironment(env, current.env);
+    }
+    return { env, close };
+  } catch (error) { await close(); throw error; }
+}
+
+async function freshServiceArtifacts(description: EnvironmentDescription, prepared: PreparedEnvironment, context: PreparationContext): Promise<void> {
+  const covered = new Set(prepared.services.flatMap(item => item.definitions.services.map(service => service.id)));
+  const fresh = description.manifest.services.filter(service => service.driver !== 'browser' && service.profiles.includes(context.profile) && !covered.has(service.id)) as ServiceDefinition[];
+  for (const service of fresh) {
+    const definitions = { services: [service] }, key = digest(randomUUID());
+    const artifacts = await prepareServiceArtifacts(definitions, context.checkout, { ...serviceContext(context), cacheRoot: join(context.attemptRoot, 'fresh-services', service.id), envKey: key, inputDigest: key });
+    await context.quiesce(); prepared.services.push({ definitions, artifacts });
+  }
+}
+
+async function preparationFiles(reference: PreparationReference, context: PreparationInputContext): Promise<string[]> {
+  let files: string[];
+  try { files = (await generatedFiles(reference.root, context)).filter(path => match(path, reference.pattern)); }
+  catch (error) { checkCacheContext(context); if (error instanceof EnvironmentFailure) throw error; return fail('environment_invalid', `A required preparation result is missing: ${reference.root}.`); }
+  if (!files.length) fail('environment_invalid', `A required preparation input is empty: ${reference.pattern}.`);
+  return files;
+}
+
+/* A node's parts share one disposable UID. Its cleanup must finish before the next part uses it,
+   even if the machine coordinator has spare CPU slots. This resource guard runs inside that slot. */
+export class TestPartUser {
+  private readonly user = new CheckSlotQueue(() => 1);
+  run<T>(signal: AbortSignal | undefined, run: () => Promise<T>, waiting: (position: number) => void): Promise<T> {
+    return this.user.withSlot(run, { signal, onPosition: waiting });
+  }
 }

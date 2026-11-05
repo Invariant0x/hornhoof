@@ -14,7 +14,7 @@ import { connect } from './connection.js';
 import type { ProgramNodeMessage, ProgramServerMessage } from '@hornhoof/protocol/program-operator';
 import { agentUser, builtinAdapters, secureNode, userFor, type JobUser } from './isolation.js';
 import { startCheckClient, stopChecks, isProgramControl, applyProgramControl, runQueuedPart, checkGuidance } from './check-runtime.js';
-import { NodeTestMessages, isNodeTestMessage, nodeTestCapabilities, readTestEnvironment } from './test-environment.js';
+import { TestPartUser, NodeTestMessages, isNodeTestMessage, nodeTestCapabilities, readTestEnvironment } from './test-environment.js';
 import { machineLoad } from './load.js';
 import { adapterFor, programFor } from './providers/index.js';
 import { runJob, type ProviderAdapter, type RunInput, type RunResult } from './runner.js';
@@ -314,6 +314,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   writeBrowserError(dir, browserError);
   if (browserError) log(`Playwright Chromium could not start: ${browserError}`);
   const testCapabilities = await nodeTestCapabilities(dir, testUser).catch(() => { log('Product test environments are unavailable on this node.'); return {}; });
+  const partUser = new TestPartUser();
   const testMessages = new NodeTestMessages({ dir, describe: describeEnvironment, capabilities: testCapabilities, stopped: () => stopped, testing, unconfirmed: unconfirmedTests, run: testOne, emit });
   const noRunsNow = () => noRunsBecause(testUser, browserError);
   const tellStatus = () => {
@@ -510,9 +511,10 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       testing.delete(m.partId);
       return emit(refusedPart);
     }
-    const done = await runQueuedPart(m, runPart, { dir, user: testUser, hidden: [...known], signal, files },
-      position => emit({ type: 'tests.waiting', partId: m.partId, position }),
-      () => emit({ type: 'tests.started', partId: m.partId }));
+    const waiting = (position: number) => emit({ type: 'tests.waiting', partId: m.partId, position });
+    const done = await runQueuedPart(m, (part, options) => partUser.run(options.signal, () => {
+      emit({ type: 'tests.started', partId: part.partId }); return runPart(part, options);
+    }, waiting), { dir, user: testUser, hidden: [...known], signal, files }, waiting, () => {});
     keepTest(m.partId, done);
     testing.delete(m.partId);
     emit(done);

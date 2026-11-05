@@ -4,7 +4,7 @@ import { access, readFile, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished } from 'vitest';
 import { parseTestEnvironment } from '@hornhoof/protocol';
 import * as environment from '../src/test-environment.js';
 
@@ -152,4 +152,18 @@ it('refuses self references, forward references and cycles in preparation inputs
   const forward = structuredClone(description); forward.manifest.prepare[0].inputs = ['future/**'];
   forward.manifest.prepare.push({ ...forward.manifest.prepare[0], id: 'later', inputs: ['template/**'], artifacts: [{ path: 'future', format: 'directory' }] });
   await expect(environment.readPreparationInputs(forward, 'schema', context)).rejects.toMatchObject({ problem: { code: 'environment_invalid' } });
+});
+
+it('cancels a granted part waiting for its disposable user without starting it or blocking the next part', async () => {
+  const user = new environment.TestPartUser(), abort = new AbortController(), positions: number[] = [];
+  let release!: () => void, started = false;
+  const first = user.run(undefined, () => new Promise<void>(done => { release = done; }), () => {});
+  await Promise.resolve(); onTestFinished(() => release());
+  const second = user.run(abort.signal, async () => { started = true; }, position => { positions.push(position); });
+  let cancelled = false; void second.catch(() => { cancelled = true; });
+  const reason = new Error('The granted lease ended'); abort.abort(reason);
+  await new Promise(resolve => setImmediate(resolve)); expect(cancelled).toBe(true);
+  const rejected = expect(second).rejects.toBe(reason); release(); await first; await rejected;
+  expect(started).toBe(false); expect(positions).toEqual([1]);
+  await expect(user.run(undefined, async () => 'next', () => {})).resolves.toBe('next');
 });

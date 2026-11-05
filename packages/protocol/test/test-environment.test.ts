@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { hashTestEnvironment, parseTestEnvironment } from '../src/index.js';
+import { hashTestEnvironment, parseTestEnvironment, TestService } from '../src/index.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { TestEnvironmentV1 as environment } from '../src/index.js';
 import { describe, expect, it } from 'vitest';
@@ -109,4 +109,17 @@ describe('bounded source bytes and their snapshot identity', () => {
     expect(await hashTestEnvironment(source)).toBe(createHash('sha256').update(source).digest('hex'));
     expect(await hashTestEnvironment(source + '\n')).not.toBe(await hashTestEnvironment(source));
   });
+});
+it('matches numeric runtime prefixes and excludes services outside the selected profile', async () => {
+  const module = await import('../src/test-environment.js');
+  expect(module.runtimeVersionMatches('22', '22.15.0')).toBe(true);
+  expect(module.runtimeVersionMatches('22.1', '22.10.0')).toBe(false);
+  expect(module.runtimeVersionMatches('>=22', '22.15.0')).toBe(false);
+  const manifest = parseTestEnvironment(JSON.parse(readFileSync(new URL('../../../.hornhoof/test-environment.json', import.meta.url), 'utf8')));
+  expect(module.requiredTestRuntimes(manifest, 'fast')).toEqual([{ id: 'node', version: '22' }]);
+  expect(module.requiredTestRuntimes(manifest, 'final')).toContainEqual({ id: 'postgres', version: '17' });
+});
+
+it('rejects service identifiers the integrated provider cannot prepare', () => {
+  expect(TestService.safeParse({ id: 'db.primary', driver: 'postgres', runtime: 'pg', profiles: ['all'], options: { database: 'test' } }).success).toBe(false);
 });

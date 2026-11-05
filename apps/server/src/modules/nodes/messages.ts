@@ -13,6 +13,7 @@ import { recordJobProgram } from '../tasks/silent.js';
 import { afterJob, typedTurn } from '../tasks/wake.js';
 import { staleOutput } from '../tasks/wake-state.js';
 import { appendTurnEvent, publishWorking } from '../events/store.js';
+import { acceptDescription, noteTestCapabilities, resetDescriptionDelivery } from '../testruns/describe.js';
 import { partDone, partStarted, pumpTests, testsHello } from '../testruns/runs.js';
 import { sameNode, type NodeIdentity } from './hub.js';
 import { deliver, pushCredentials, signedIn, storeEnvelopes } from '../subscriptions/credentials.js';
@@ -189,7 +190,7 @@ async function handleNodeStatus(ctx: Ctx, id: NodeIdentity, msg: Extract<NodeMes
   const unblocked = ctx.hub.noteStatus(id, msg.noRuns, msg.browserError);
   const ready = id.kind === 'node' ? await updatePlanStatus(ctx, id.nodeId, msg, now) : false;
   if (ready) await pumpWaiting(ctx);
-  if (unblocked) await pumpTests(ctx);
+  if (testStatusReady(unblocked, msg)) await pumpTests(ctx);
 }
 
 async function wordMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage, now: Date): Promise<void> {
@@ -202,12 +203,14 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
   if (!(await hasCurrentKey(ctx, id))) return;
   await routeCheckMessage(ctx, id, msg, jobsOf(id, ctx));
   await wordMessage(ctx, id, msg, now);
+  if (await testNodeMessage(ctx, id, msg)) return;
   const { db } = ctx;
   // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- Terminal and live word messages have their own handlers.
   switch (msg.type) {
 
     case 'hello': {
       clearNodeWords(ctx, id);
+      resetDescriptionDelivery(ctx);
       let cut = await builtinCut(ctx, id, msg, now);
       if (id.kind === 'node') {
         const [row] = await db
@@ -271,12 +274,6 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       return;
     }
 
-    case 'tests.started':
-      await partStarted(ctx, id, msg.partId);
-      return;
-    case 'tests.done':
-      await partDone(ctx, id, msg);
-      return;
     case 'job.event': {
       await appendTurnEvent(ctx, msg.jobId, msg.event, jobsOf(id, ctx));
       return;
@@ -356,4 +353,16 @@ export async function handleNodeClose(ctx: Ctx, id: NodeIdentity): Promise<void>
   if (!ctx.hub.isOnline(id)) { ctx.terminals.nodeGone(id); nodeCheckQueueLost(ctx, id); }
   if (id.kind !== 'node') return;
   await ctx.db.update(nodes).set({ lastSeenAt: new Date() }).where(eq(nodes.id, id.nodeId));
+}
+
+const testStatusReady = (unblocked: boolean, msg: Extract<NodeMessage, { type: 'status' }>): boolean => unblocked || msg.testEnvironmentVersion === 1;
+async function testNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMessage): Promise<boolean> {
+  // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- Other node frames remain with their owning handler.
+  switch (msg.type) {
+    case 'hello': case 'status': noteTestCapabilities(ctx, id, msg); return false;
+    case 'tests.described': await acceptDescription(ctx, id, msg); await pumpTests(ctx); return true;
+    case 'tests.started': await partStarted(ctx, id, msg.partId); return true;
+    case 'tests.done': await partDone(ctx, id, msg); return true;
+    default: return false;
+  }
 }

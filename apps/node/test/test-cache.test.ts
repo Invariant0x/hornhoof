@@ -202,3 +202,17 @@ it('breaks internal payload hardlinks into independent cache and consumer files'
   expect(await readFile(join(destination, 'deps/b'), 'utf8')).toBe('original');
   expect(await readFile(join(entry.path, 'payload/deps/a'), 'utf8')).toBe('original');
 });
+
+it('never serves a payload whose publisher was killed before READY and lets a later publisher rebuild', async () => {
+  const ctx = await context(), source = join(ctx.cacheRoot, 'source'), directory = join(ctx.cacheRoot, 'environments');
+  await mkdir(source); await writeFile(join(source, 'template'), 'unfinished');
+  const modulePath = new URL('../src/test-cache.ts', import.meta.url).href;
+  const script = `import { prepareCache } from ${JSON.stringify(modulePath)}; await prepareCache(process.argv[1], 'a'.repeat(64), 'd'.repeat(64), {cacheRoot:process.argv[2],deadline:Date.now()+10000,signal:new AbortController().signal,log:()=>{}},async()=>{process.stdout.write('building');process.stdin.resume();await new Promise(resolve=>process.stdin.once('end',resolve));return {root:process.argv[3],paths:['template']};});`;
+  const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script, directory, ctx.cacheRoot, source], { stdio: ['pipe', 'pipe', 'pipe'] });
+  onTestFinished(() => { child.kill('SIGKILL'); });
+  expect(String((await once(child.stdout, 'data'))[0])).toBe('building');
+  const ended = once(child, 'exit'); child.kill('SIGKILL'); await ended;
+  await expect(readFile(join(directory, 'a'.repeat(64), 'READY.json'))).rejects.toThrow();
+  const entry = await cache.prepareCache(directory, 'a'.repeat(64), 'd'.repeat(64), ctx, async () => { await writeFile(join(source, 'template'), 'rebuilt'); return { root: source, paths: ['template'] }; });
+  expect(entry.hit).toBe(false); expect(await readFile(join(entry.path, 'payload/template'), 'utf8')).toBe('rebuilt');
+});
