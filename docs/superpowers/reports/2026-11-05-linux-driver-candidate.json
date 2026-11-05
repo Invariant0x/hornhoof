@@ -1,0 +1,381 @@
+{
+  "version": 1,
+  "task": 378,
+  "parent": 222,
+  "disposition": "candidate-only; acceptance pending",
+  "acceptedPerformanceResult": false,
+  "newFullSuiteOrReplay": false,
+  "branch": "task-378-driver-candidate",
+  "testedCodeCommit": "edc370c5c1472453649d26cd81ccda3b6ee41347",
+  "driverArchive": {
+    "name": "driver-candidate-edc370c5.tar",
+    "bytes": 51200,
+    "files": {
+      "docs/superpowers/reports/2026-11-05-linux-pair-offline.sh": {
+        "bytes": 795,
+        "mode": "0o664",
+        "sha256": "8f0b7a4dc8ca8a9a790b9a882deb5a9f8bff724f9c726aed83315c62aaef20d8"
+      },
+      "scripts/benchmarks/linux-pair-evidence.mjs": {
+        "bytes": 4613,
+        "mode": "0o664",
+        "sha256": "ee255d499893cbbc814b016bee3806ceebaf3395f0924e570961ca7d66001ec9"
+      },
+      "scripts/benchmarks/linux-pair-evidence.test.mjs": {
+        "bytes": 2604,
+        "mode": "0o664",
+        "sha256": "fa1745a535e1b4e035d3de0c0b2aa78530b8be3dae5fae55a0baf3437e2ffa2c"
+      },
+      "scripts/benchmarks/linux-pair.mjs": {
+        "bytes": 11686,
+        "mode": "0o664",
+        "sha256": "763cf461e67290355858d6f3064f2c6c9c14c93dfad0ae66255230110a6de293"
+      },
+      "scripts/benchmarks/linux-pair.test.mjs": {
+        "bytes": 19882,
+        "mode": "0o664",
+        "sha256": "2f160fab8f16834da31ac7a7f31da6c61b3b8a397fad664557997be055a126ef"
+      }
+    },
+    "fullSuite": false,
+    "members": 10,
+    "pairedReplay": false,
+    "payloadMismatch": 0,
+    "sha256": "c856c8b8d2217d56f1b8c3740e616374a5a966de2a78f6f7a65415a06161307d",
+    "unsafePathsOrTypes": 0
+  },
+  "preserved": {
+    "oldBranch": "task-378",
+    "oldCommit": "47fab392236820f33fa38f71e23653db8fa63d76",
+    "oldDriverSha256": "3f18d46d4d629302c7bdbeb3396b742395cc0b418640fcdda2ada0f6cb2a72ac",
+    "oldTestSha256": "c51df1376a705d25474e9be0e73444483371e3b037b88f6691b6e721bce5e136",
+    "sourceArchive": {
+      "name": "pinned-sources.tar.gz",
+      "bytes": 11281217,
+      "sha256": "66b0a5f749b0a43db012cbcc8fa60f1ca102a74f9edc2ab31da384a104f787d6",
+      "attachment": "5c46c034-074a-4b04-a6b1-0d69f0ea0003",
+      "newRemoteAssetDeliveryCheck": false
+    },
+    "diagnosticControl": "05c63819d59c0cbba044132c89c503f30cb49856",
+    "diagnosticOptimized": "54340764df895693cabdad4027fdad2ffcf48e38",
+    "run106": {
+      "status": "failed",
+      "exitCode": 1,
+      "invalid": true,
+      "casesEach": 6325,
+      "passedEach": 6319,
+      "failedEach": 6,
+      "acceptedPerformanceResult": false
+    }
+  },
+  "bounds": {
+    "frameBytes": 716800,
+    "transportFileBytes": 52428800,
+    "transportFiles": 20,
+    "reservedWrapperFiles": 2,
+    "maxEvidenceFiles": 18,
+    "workers": 2,
+    "stageCount": 62,
+    "preparationStages": 24,
+    "suiteStages": 26,
+    "checkStages": 12,
+    "resourceIntervalMs": 5000,
+    "timeoutsOrAssertionsChanged": false,
+    "cachePolicy": "fresh worktree and empty npm cache per logical shard; host page cache not controlled",
+    "backgroundLoad": "observed, not controlled"
+  },
+  "checks": [
+    {
+      "run": 111,
+      "part": 1,
+      "status": "failed",
+      "commit": "ef327d905b5dc02a8e4c250ce3a553cd2082f254",
+      "machine": "the built-in node",
+      "startedAt": "2026-11-05T21:54:24.928Z",
+      "finishedAt": "2026-11-05T21:54:31.162Z",
+      "exitCode": 1,
+      "log": "tests-111-1.log",
+      "logSha256": "374916cb55eb9c1c63f5dd758352879dd10e2f85018e2e3fa8b3d8f6405186a7",
+      "commandFile": "authorcheck-111.sh",
+      "stages": [
+        {
+          "stage": "install",
+          "args": [
+            "npm",
+            "ci",
+            "--prefer-offline",
+            "--no-audit",
+            "--no-fund"
+          ],
+          "code": 0,
+          "signal": null,
+          "ms": 2973
+        },
+        {
+          "stage": "review-regressions-expected-RED",
+          "args": [
+            "node",
+            "--test",
+            "--test-name-pattern=transport|completed-stage",
+            "scripts/benchmarks/linux-pair-evidence.test.mjs",
+            "scripts/benchmarks/linux-pair.test.mjs"
+          ],
+          "code": 1,
+          "signal": null,
+          "ms": 880
+        }
+      ],
+      "resourceSamples": 4,
+      "firstResource": {
+        "stage": "install",
+        "point": "before",
+        "at": "2026-11-05T21:54:27.046Z",
+        "platform": "linux",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "4b437a4f2c1e",
+        "cpus": 16,
+        "load": [
+          0.72,
+          0.67,
+          1
+        ],
+        "free": 8715526144,
+        "cpuMax": "max 100000",
+        "cpuset": "0-15",
+        "memoryMax": "max",
+        "memoryCurrent": "212828160"
+      },
+      "load1Min": 0.72,
+      "load1Max": 0.98,
+      "freeMinBytes": 8327249920,
+      "memoryCurrentMaxBytes": 707780608
+    },
+    {
+      "run": 114,
+      "part": 1,
+      "status": "passed",
+      "commit": "edc370c5c1472453649d26cd81ccda3b6ee41347",
+      "machine": "the built-in node",
+      "startedAt": "2026-11-05T22:01:18.735Z",
+      "finishedAt": "2026-11-05T22:02:13.614Z",
+      "exitCode": 0,
+      "log": "tests-114-1.log",
+      "logSha256": "11cd83cb65b5c6d3c83a5ecd3427c7badf5de32eef9c558b3cb4a209b1d775e8",
+      "commandFile": "authorcheck-114.sh",
+      "stages": [
+        {
+          "stage": "install",
+          "args": [
+            "npm",
+            "ci",
+            "--prefer-offline",
+            "--no-audit",
+            "--no-fund"
+          ],
+          "code": 0,
+          "signal": null,
+          "ms": 3590
+        },
+        {
+          "stage": "mini-fixtures-coverage",
+          "args": [
+            "node",
+            "--test",
+            "--experimental-test-coverage",
+            "--test-coverage-include=scripts/benchmarks/linux-pair*.mjs",
+            "--test-reporter=tap",
+            "--test-reporter-destination=stdout",
+            "--test-reporter=lcov",
+            "--test-reporter-destination=coverage/lcov.info",
+            "scripts/benchmarks/linux-pair.test.mjs",
+            "scripts/benchmarks/linux-pair-evidence.test.mjs"
+          ],
+          "code": 0,
+          "signal": null,
+          "ms": 45160
+        },
+        {
+          "stage": "syntax:scripts/benchmarks/linux-pair.mjs",
+          "args": [
+            "node",
+            "--check",
+            "scripts/benchmarks/linux-pair.mjs"
+          ],
+          "code": 0,
+          "signal": null,
+          "ms": 18
+        },
+        {
+          "stage": "syntax:scripts/benchmarks/linux-pair-evidence.mjs",
+          "args": [
+            "node",
+            "--check",
+            "scripts/benchmarks/linux-pair-evidence.mjs"
+          ],
+          "code": 0,
+          "signal": null,
+          "ms": 18
+        },
+        {
+          "stage": "syntax:scripts/benchmarks/linux-pair.test.mjs",
+          "args": [
+            "node",
+            "--check",
+            "scripts/benchmarks/linux-pair.test.mjs"
+          ],
+          "code": 0,
+          "signal": null,
+          "ms": 14
+        },
+        {
+          "stage": "syntax:scripts/benchmarks/linux-pair-evidence.test.mjs",
+          "args": [
+            "node",
+            "--check",
+            "scripts/benchmarks/linux-pair-evidence.test.mjs"
+          ],
+          "code": 0,
+          "signal": null,
+          "ms": 17
+        },
+        {
+          "stage": "eslint",
+          "args": [
+            "npx",
+            "--no-install",
+            "eslint",
+            "scripts/benchmarks/linux-pair.mjs",
+            "scripts/benchmarks/linux-pair-evidence.mjs",
+            "scripts/benchmarks/linux-pair.test.mjs",
+            "scripts/benchmarks/linux-pair-evidence.test.mjs"
+          ],
+          "code": 0,
+          "signal": null,
+          "ms": 530
+        },
+        {
+          "stage": "crapper",
+          "args": [
+            "crapper",
+            "--use-existing-coverage",
+            "--threshold",
+            "10",
+            "scripts/benchmarks/linux-pair.mjs",
+            "scripts/benchmarks/linux-pair-evidence.mjs",
+            "scripts/benchmarks/linux-pair.test.mjs",
+            "scripts/benchmarks/linux-pair-evidence.test.mjs"
+          ],
+          "code": 0,
+          "signal": null,
+          "ms": 2300
+        },
+        {
+          "stage": "dryer",
+          "args": [
+            "dryer",
+            "--threshold",
+            "0.8",
+            "scripts/benchmarks/linux-pair.mjs",
+            "scripts/benchmarks/linux-pair-evidence.mjs",
+            "scripts/benchmarks/linux-pair.test.mjs",
+            "scripts/benchmarks/linux-pair-evidence.test.mjs"
+          ],
+          "code": 0,
+          "signal": null,
+          "ms": 96
+        }
+      ],
+      "resourceSamples": 27,
+      "firstResource": {
+        "stage": "install",
+        "point": "before",
+        "at": "2026-11-05T22:01:21.594Z",
+        "platform": "linux",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "4b437a4f2c1e",
+        "cpus": 16,
+        "load": [
+          0.32,
+          0.59,
+          0.85
+        ],
+        "free": 8368021504,
+        "cpuMax": "max 100000",
+        "cpuset": "0-15",
+        "memoryMax": "max",
+        "memoryCurrent": "306319360"
+      },
+      "load1Min": 0.32,
+      "load1Max": 0.91,
+      "freeMinBytes": 8056147968,
+      "memoryCurrentMaxBytes": 1039388672
+    },
+    {
+      "run": 138,
+      "part": 1,
+      "status": "passed",
+      "commit": "edc370c5c1472453649d26cd81ccda3b6ee41347",
+      "machine": "the built-in node",
+      "startedAt": "2026-11-05T22:41:00.426Z",
+      "finishedAt": "2026-11-05T22:41:02.683Z",
+      "exitCode": 0,
+      "log": "tests-138-1.log",
+      "logSha256": "c138eb343390c28e4aa28cd1c53d333bbb8251791a034aa375309172f42b86f3",
+      "commandFile": "authorcheck-138.sh",
+      "stages": [
+        {
+          "stage": "archive-integrity",
+          "code": 0,
+          "signal": null,
+          "ms": 100
+        }
+      ],
+      "resourceSamples": 2,
+      "firstResource": {
+        "stage": "archive-integrity",
+        "point": "before",
+        "at": "2026-11-05T22:41:02.554Z",
+        "platform": "linux",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "4b437a4f2c1e",
+        "cpus": 16,
+        "load": [
+          1.14,
+          0.93,
+          0.75
+        ],
+        "free": 7667564544,
+        "cpuMax": "max 100000",
+        "cpuset": "0-15",
+        "memoryMax": "max",
+        "memoryCurrent": "326402048"
+      },
+      "load1Min": 1.14,
+      "load1Max": 1.14,
+      "freeMinBytes": 7665790976,
+      "memoryCurrentMaxBytes": 326754304
+    }
+  ],
+  "coverage114": {
+    "linesPercent": 100,
+    "evidenceBranchesPercent": 100,
+    "driverBranchesPercent": 87.5,
+    "lcov": "lcov.info",
+    "lcovSha256": "0c52dbb71ce4ccbe34bb2afb526d4b868593ed2d80fb40b06e7b566d96725fb3",
+    "crapMaximum": 7.2,
+    "crapThreshold": 10,
+    "miniTestsPassed": 22,
+    "miniTestsFailed": 0,
+    "miniTestsSkipped": 0
+  },
+  "concerns": [
+    "Dryer did not analyze MJS: No source files to analyze; exit0 is not duplication evidence.",
+    "Mini CLI build is a source-copy fixture; it does not rebuild the production node. Earlier real production build/3-case CLI diagnosis keeps its original provenance.",
+    "run_tests command mode exposes no files/HH_IN/HH_OUT delivery API. The code archive was reproduced byte-for-byte from the same pinned Git commit remotely; full work artifact delivery was not exercised again.",
+    "The unchanged source archive still holds the diagnostic run106 source pair, without the later CSS441 fix or pending timers489 fix. A future comparison requires a new common source pair and archive plus a separate head decision.",
+    "Historical103/0049/106 failures and the turn7 performance evidence gap remain."
+  ]
+}
