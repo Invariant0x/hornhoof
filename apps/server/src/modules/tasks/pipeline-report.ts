@@ -149,25 +149,25 @@ const turnView = (t: Turn, source: PipelineTurn['source']): PipelineTurn => ({
 
 type Read = { head: PipelineHead; now: TurnFacts; previous: TurnFacts | null; baseline: TurnFacts | null };
 
+/* A turn the report compares with, when it has one. */
+async function comparedOf(db: Reader, turn: Turn | null | undefined): Promise<{ view: PipelineTurn | null; facts: TurnFacts | null }> {
+  if (!turn) return { view: null, facts: null };
+  const kept = await snapshotOf(db, turn);
+  return { view: turnView(turn, kept.source), facts: kept.facts };
+}
+
 async function readReport(db: Reader, companyId: string, number: number | undefined): Promise<Read> {
   const rows = await db.select().from(turns).where(eq(turns.companyId, companyId)).orderBy(asc(turns.number));
   const turn = pickTurn(rows, number);
   const running = rows.filter(ran);
-  const before = running.filter(t => t.number < turn.number).at(-1) ?? null;
-  const first = baselineOf(running, turn);
   const now = await liveOrKept(db, turn);
-  const previous = before ? await snapshotOf(db, before) : null;
-  const baseline = first ? await snapshotOf(db, first) : null;
+  const previous = await comparedOf(db, running.filter(t => t.number < turn.number).at(-1));
+  const baseline = await comparedOf(db, baselineOf(running, turn));
   return {
-    head: {
-      turn: turnView(turn, now.source),
-      previous: before && previous ? turnView(before, previous.source) : null,
-      baseline: first && baseline ? turnView(first, baseline.source) : null,
-      turns: running.map(t => t.number).reverse(),
-    },
+    head: { turn: turnView(turn, now.source), previous: previous.view, baseline: baseline.view, turns: running.map(t => t.number).reverse() },
     now: now.facts,
-    previous: previous?.facts ?? null,
-    baseline: baseline?.facts ?? null,
+    previous: previous.facts,
+    baseline: baseline.facts,
   };
 }
 
@@ -198,16 +198,16 @@ async function earliestBugs(db: Reader, companyId: string, read: Read): Promise<
   return bugsSince(db, companyId, new Date(Math.min(...opened)));
 }
 
-async function aboutOf(db: Reader, ids: string[]): Promise<Map<string, string>> {
-  if (!ids.length) return new Map();
-  return new Map((await db.select({ id: departments.id, about: departments.about }).from(departments).where(inArray(departments.id, ids))).map(d => [d.id, d.about]));
+async function aboutOf(db: Reader, companyId: string): Promise<Map<string, string>> {
+  const rows = await db.select({ id: departments.id, about: departments.about }).from(departments).where(eq(departments.companyId, companyId));
+  return new Map(rows.map(d => [d.id, d.about]));
 }
 
 /* The report of a turn for the whole company, by default the open one or else the last that ran. */
 export async function pipelineReport(db: Reader, companyId: string, number?: number): Promise<PipelineReport> {
   const read = await readReport(db, companyId, number);
   const bugs = await earliestBugs(db, companyId, read);
-  const about = await aboutOf(db, read.now.departments.map(d => d.department.id));
+  const about = await aboutOf(db, companyId);
   return {
     ...read.head,
     whole: reportRows(counted(read.now.whole, bugs)!, counted(read.previous?.whole, bugs), counted(read.baseline?.whole, bugs)),
@@ -220,5 +220,5 @@ export async function departmentPipeline(db: Reader, companyId: string, departme
   const read = await readReport(db, companyId, number);
   const facts = read.now.departments.find(d => d.department.id === departmentId);
   if (!facts) return { ...read.head, department: null };
-  return { ...read.head, department: departmentReport(facts, read, await earliestBugs(db, companyId, read), await aboutOf(db, [departmentId])) };
+  return { ...read.head, department: departmentReport(facts, read, await earliestBugs(db, companyId, read), await aboutOf(db, companyId)) };
 }

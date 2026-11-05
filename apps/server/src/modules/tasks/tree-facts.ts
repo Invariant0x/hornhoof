@@ -1,11 +1,11 @@
-import { and, asc, eq, gte, inArray, isNotNull, lte, notInArray, or, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, isNotNull, notInArray, or, sql } from 'drizzle-orm';
 import { unionAll } from 'drizzle-orm/pg-core';
 import type { Db } from '../../db/client.js';
 import { agentEvents, agents, departments, jobs, requests, taskEvents, tasks, turns } from '../../db/schema.js';
 import type { Task, Tx } from './engine.js';
 import { NUDGES, type FactJobState, type FactRequest, type FactSign, type FactTask, type FactTaskEvent, type TreeFacts } from './tree.js';
 
-import { readTurnHistory } from './tree-history.js';
+import { readTurnHistory, upTo } from './tree-history.js';
 
 type Reader = Db | Tx;
 
@@ -20,7 +20,7 @@ async function readSigns(db: Reader, taskIds: string[], turnStarted: Date, until
       createdAt: sql<Date>`${taskEvents.createdAt}`.as('created_at'),
     })
     .from(taskEvents)
-    .where(and(inArray(taskEvents.taskId, taskIds), notInArray(taskEvents.kind, [...NUDGES]), gte(taskEvents.createdAt, turnStarted), until ? lte(taskEvents.createdAt, until) : undefined));
+    .where(and(inArray(taskEvents.taskId, taskIds), notInArray(taskEvents.kind, [...NUDGES]), gte(taskEvents.createdAt, turnStarted), upTo(taskEvents.createdAt, until)));
 
   const fromAgents = db
     .select({
@@ -30,7 +30,7 @@ async function readSigns(db: Reader, taskIds: string[], turnStarted: Date, until
     })
     .from(agentEvents)
     .innerJoin(jobs, eq(jobs.id, agentEvents.jobId))
-    .where(and(inArray(jobs.taskId, taskIds), gte(agentEvents.createdAt, turnStarted), until ? lte(agentEvents.createdAt, until) : undefined));
+    .where(and(inArray(jobs.taskId, taskIds), gte(agentEvents.createdAt, turnStarted), upTo(agentEvents.createdAt, until)));
 
   const raw = unionAll(fromTasks, fromAgents).as('raw');
   const buckets = await db

@@ -8,14 +8,14 @@ type TestMeta = { setupMs?: number; teardownMs?: number };
 
 const sum = (values: number[]): number => values.reduce((a, b) => a + b, 0);
 
-function repositoryOf(folder: string): string {
+export function repositoryOf(folder: string): string {
   for (let at = folder; ; at = dirname(at)) {
     if (existsSync(join(at, '.git'))) return at;
     if (dirname(at) === at) return folder;
   }
 }
 
-function median(sorted: number[]): number {
+export function median(sorted: number[]): number {
   const middle = sorted.length >> 1;
   return sorted.length % 2 ? sorted[middle]! : ((sorted[middle - 1] ?? 0) + (sorted[middle] ?? 0)) / 2;
 }
@@ -25,7 +25,7 @@ const fullTime = (test: TestCase): number => test.diagnostic()?.duration ?? 0;
 /* A test's own time, without what it says went to its database and app. */
 const ownTime = (test: TestCase): number => Math.max(0, fullTime(test) - (metaOf(test).setupMs ?? 0) - (metaOf(test).teardownMs ?? 0));
 
-function fileTiming(module: TestModule, name: string): TestFileTiming {
+export function fileTiming(module: TestModule, name: string): TestFileTiming {
   const tests = [...module.children.allTests()];
   const d = module.diagnostic();
   const inTests = sum(tests.map(fullTime));
@@ -38,7 +38,7 @@ function fileTiming(module: TestModule, name: string): TestFileTiming {
   return { package: name, file: module.relativeModuleId.slice(0, 500), totalMs: setupMs + testsMs + teardownMs, setupMs, testsMs, teardownMs, slowest };
 }
 
-function packageTiming(modules: readonly TestModule[], name: string): TestPackageTiming {
+export function packageTiming(modules: readonly TestModule[], name: string): TestPackageTiming {
   const times = modules.flatMap(m => [...m.children.allTests()].map(ownTime)).sort((a, b) => a - b);
   const middle = median(times);
   return { package: name, tests: times.length, medianTestMs: Math.round(middle), slowerThanMedian: times.filter(t => t > middle).length };

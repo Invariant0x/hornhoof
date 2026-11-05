@@ -35,7 +35,7 @@ Every time is in seconds unless it says otherwise. A task is "work" when it has 
 | Interrupted | Turns with an `interruption`. |
 | Test selection misses | No source until test selection (#309) records it, so the report says there is no data rather than zero. |
 | Later bugs | Bug tasks created after a done task closed that name it as `#number`. A heuristic: a bug that only mentions a task counts too. It is read at report time, as it grows after the snapshot. |
-| Test times | For each file the median over the parts it ran in, in setup, tests and teardown. Hooks of the whole file count as setup or teardown when `timed` in the test helpers marks them, and the rest of a file's time around its tests as setup. A log from before the timing lines gives a file's total only. |
+| Test times | For each file the median over the parts it ran in, in setup, tests and teardown. Setup is a file's time outside its tests (the runner's preparing and collecting, and the hooks of the whole file, which have no time of their own) plus what `timed` in the test helpers marks. Teardown is what `timed` marks. A log from before the timing lines gives a file's total only. |
 
 The baseline is turn 7 when the company has run it, else its first turn that ran. Reports never use fixed minutes, only percent against these turns.
 

@@ -88,18 +88,22 @@ function stageAfterLook(verdict: FactsEvent | undefined, isLast: boolean, gates:
   return gates ? 'review' : 'merge';
 }
 
-/* Work up to the first hand-in; then for each hand-in its look, up to the last verdict on it, and what came after that. */
+/* One hand-in: its look, up to the last verdict on it, and what came after that up to stop. */
+function addHandIn(stages: Record<PipelineStage, number>, line: Line, handIn: FactsEvent, next: Date | undefined, stop: Date): void {
+  const verdict = line.events.findLast(e => e.kind === 'verdict' && e.createdAt >= handIn.createdAt && e.createdAt <= stop);
+  const lookEnd = verdict?.createdAt ?? handIn.createdAt;
+  stages.review += seconds(handIn.createdAt, lookEnd);
+  stages[stageAfterLook(verdict, !next, line.task.gates)] += seconds(lookEnd, stop);
+}
+
+/* Work up to the first hand-in, then each hand-in up to the next one or the merge. */
 function addStages(stages: Record<PipelineStage, number>, line: Line): void {
   const handIns = handInsOf(line);
   stages.work += seconds(line.issued, handIns[0]?.createdAt ?? line.end);
   const merged = line.events.find(isMerge)?.createdAt ?? line.end;
   handIns.forEach((handIn, i) => {
     const next = handIns[i + 1]?.createdAt;
-    const stop = next ?? merged;
-    const verdict = line.events.findLast(e => e.kind === 'verdict' && e.createdAt >= handIn.createdAt && e.createdAt <= stop);
-    const lookEnd = verdict?.createdAt ?? handIn.createdAt;
-    stages.review += seconds(handIn.createdAt, lookEnd);
-    stages[stageAfterLook(verdict, !next, line.task.gates)] += seconds(lookEnd, stop);
+    addHandIn(stages, line, handIn, next, next ?? merged);
   });
 }
 
