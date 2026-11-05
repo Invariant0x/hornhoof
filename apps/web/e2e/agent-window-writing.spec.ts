@@ -42,43 +42,30 @@ async function serve(page: Page, viewer: Viewer, settings: Settings): Promise<Se
       const frame = JSON.parse(String(raw)) as { type: string; data?: string };
       if (frame.type === 'input') sent.keys.push(frame.data!);
     });
-    ws.send(JSON.stringify({ type: 'ready', write: types }));
+    ws.send(JSON.stringify({ type: 'ready', write: types, message: true }));
     ws.send(JSON.stringify({ type: 'program', running: true }));
     ws.send(JSON.stringify({ type: 'data', data: 'The program runs on its plan.\r\n> ' }));
   });
   return sent;
 }
 
-/* The line stands under the terminal inside the window, with room left for the terminal. */
-async function checkLineUnderTerminal(window: Locator, line: Locator) {
-  const frame = await box(window);
-  const screen = await box(window.locator('.t-term'));
-  const form = await box(line.locator('xpath=ancestor::form'));
-  expect(form.y).toBeGreaterThanOrEqual(screen.y + screen.height);
-  expect(form.y + form.height).toBeLessThanOrEqual(frame.y + frame.height);
-  expect(form.x).toBeGreaterThanOrEqual(frame.x);
-  expect(form.x + form.width).toBeLessThanOrEqual(frame.x + frame.width);
-  expect(screen.height).toBeGreaterThan(200);
-}
-
-/* Someone who only watches: keys in the terminal go nowhere, and the line sends to the agent in the person's name. */
+/* Someone on the plan of another: words and Enter go into the terminal, whose server opens their turn, and no second line
+   stands under it. A key that steers stays here, and the window says why. */
 async function checkWrites(page: Page, window: Locator, agent: Agent, settings: Settings, sent: Sent) {
   const t = settings.lang === 'en' ? en : ru;
   const name = agent === 'orchestrator' ? t.window.placeholder : t.window.writeTo('Bruno');
-  const line = window.getByRole('textbox', { name, exact: true });
-  await expect(line).toBeVisible();
-  await expect(line).toBeFocused();
-  await expect(window.getByText(t.window.hint)).toBeVisible();
-  await checkLineUnderTerminal(window, line);
   await expect(window.locator('.xterm-screen')).toBeVisible();
+  await expect(window.getByRole('textbox', { name, exact: true })).toHaveCount(0);
+  await expect(window.locator('form.t-in')).toHaveCount(0);
+  await expect(window.getByText(t.window.hint)).toHaveCount(0);
   await window.locator('.xterm-screen').click();
-  await page.keyboard.type('keys');
+  await page.keyboard.type('Please check');
   await page.keyboard.press('Enter');
-  await line.fill('Please check the release');
-  await line.press('Enter');
-  await expect.poll(() => sent.messages).toEqual([{ agent, text: 'Please check the release' }]);
-  await expect(line).toHaveValue('');
-  expect(sent.keys).toEqual([]);
+  await expect.poll(() => sent.keys.join('')).toBe('Please check\r');
+  await page.keyboard.press('Escape');
+  await expect(window.getByRole('alert').filter({ hasText: t.window.controlDenied })).toBeVisible();
+  expect(sent.keys.join('')).toBe('Please check\r');
+  expect(sent.messages).toEqual([]);
 }
 
 for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] as const) for (const width of [1440, 375]) {
@@ -86,7 +73,7 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
   const t = lang === 'en' ? en : ru;
   test.describe(`writing to an agent in ${lang}, ${theme}, at ${width}px`, () => {
     for (const agent of ['orchestrator', 'b1'] as const) {
-      test(`the CEO delegate writes to ${agent} under its terminal`, async ({ page }, info) => {
+      test(`the CEO delegate writes to ${agent} in its terminal`, async ({ page }, info) => {
         const errors = watchErrors(page);
         const sent = await serve(page, 'delegate', settings);
         const window = await open(page, agent, lang);
@@ -112,18 +99,16 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
       });
     }
 
-    test('the line stands under the strip of a machine the orchestrator asks for', async ({ page }, info) => {
+    test('the terminal stands under the strip of a machine the orchestrator asks for', async ({ page }, info) => {
       const errors = watchErrors(page);
       const sent = await serve(page, 'delegate', settings);
       await page.route('**/api/computer', route => route.fulfill({ json: ASKED }));
       const window = await open(page, 'orchestrator', lang);
-      const line = window.getByRole('textbox', { name: t.window.placeholder, exact: true });
       const strip = window.getByRole('region', { name: t.window.computerAsks(ASKED.machine!) });
       await expect(strip).toBeVisible();
-      const below = await box(strip);
-      const form = await box(line.locator('xpath=ancestor::form'));
-      expect(below.y + below.height).toBeLessThanOrEqual(form.y);
-      await checkLineUnderTerminal(window, line);
+      const above = await box(strip);
+      const terminal = await box(window.locator('.t-term'));
+      expect(above.y + above.height).toBeLessThanOrEqual(terminal.y);
       await checkWrites(page, window, 'orchestrator', settings, sent);
       await shot(page, info, 'delegate-orchestrator-strip', settings);
       await checkPage(page, errors);
@@ -166,33 +151,20 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
   });
 }
 
-test('the line grows with a long message and leaves the terminal on a phone', async ({ page }) => {
-  const settings = { lang: 'en', theme: 'dark', width: 375 } as const;
-  const errors = watchErrors(page);
-  const sent = await serve(page, 'delegate', settings);
-  const window = await open(page, 'orchestrator', 'en');
-  const line = window.getByRole('textbox', { name: en.window.placeholder, exact: true });
-  await line.fill(Array.from({ length: 20 }, (_, i) => `Line ${i + 1}, a long one that wraps at phone width`).join('\n'));
-  await checkLineUnderTerminal(window, line);
-  await line.press('Enter');
-  await expect.poll(() => sent.messages.length).toBe(1);
-  await checkPage(page, errors);
-});
-
-test('the line stays when the person looks at the log and comes back to the terminal', async ({ page }) => {
+test('the line of the log keeps its draft while the person looks at the terminal, which has no line', async ({ page }) => {
   const settings = { lang: 'en', theme: 'light', width: 1440 } as const;
   const errors = watchErrors(page);
   await serve(page, 'delegate', settings);
   const window = await open(page, 'orchestrator', 'en');
   const line = window.getByRole('textbox', { name: en.window.placeholder, exact: true });
-  await expect(line).toBeFocused();
-  await line.fill('A draft');
+  await expect(line).toHaveCount(0);
   await window.getByRole('button', { name: en.window.showLog, exact: true }).click();
   await expect(window.getByRole('log')).toBeVisible();
-  await expect(line).toHaveValue('A draft');
+  await line.fill('A draft');
   await window.getByRole('button', { name: en.window.showTerminal, exact: true }).click();
   await expect(window.locator('.xterm-screen')).toBeVisible();
+  await expect(line).toHaveCount(0);
+  await window.getByRole('button', { name: en.window.showLog, exact: true }).click();
   await expect(line).toHaveValue('A draft');
-  await expect(line).toBeFocused();
   await checkPage(page, errors);
 });
