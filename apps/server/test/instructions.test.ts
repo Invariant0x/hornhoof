@@ -1,8 +1,9 @@
+import { fileURLToPath } from 'node:url';
 import { OLD_NODE_INSTRUCTIONS } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
 import type { agents } from '../src/db/schema.js';
 import { orchestratorSteady, renderInstructions } from '../src/modules/agents/instructions.js';
-import { textHash, type Role, type Skill, type SkillKind, type Templates } from '../src/modules/templates/load.js';
+import { loadTemplates, textHash, type Role, type Skill, type SkillKind, type Templates } from '../src/modules/templates/load.js';
 
 const skill = (id: string, title: string, body: string, kind: SkillKind = 'procedure', description = ''): Skill => ({
   id,
@@ -171,5 +172,25 @@ describe('renderInstructions', () => {
     const { parts } = renderInstructions(T, agent({ templateHashes: { 'DEV-BE': 'old000000000', 'hh-report-to-head': SKILLS[0]!.hash, 'dev-tdd': 'old111111111' } }), { ...PLACE, product: null });
     expect(parts.map(p => p.templateChanged)).toEqual([false, true, false, true]);
     expect(parts[0]!.text).toContain('the Backend engineer of the Development department at Acme.');
+  });
+
+  it('delivers differential second-look, author evidence and provenance rules in DEV-REV and DEV-SEC skill files', () => {
+    const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
+    for (const roleKey of ['DEV-REV', 'DEV-SEC'] as const) {
+      const role = shipped.roles.get(roleKey)!;
+      const rendered = renderInstructions(shipped, agent({ roleKey, skills: role.skills.filter(s => s.on).map(s => s.id), templateHashes: {} }), PLACE);
+      const delivered = rendered.skills.map(s => s.body).join('\n\n');
+      expect(delivered, roleKey).toContain('first look');
+      expect(delivered, roleKey).toContain('reviewedCommit..fixCommit');
+      expect(delivered, roleKey).not.toContain('at high effort');
+      expect(rendered.whole, roleKey).toContain('reviewedCommit..fixCommit');
+    }
+    const revRole = shipped.roles.get('DEV-REV')!;
+    const revRendered = renderInstructions(shipped, agent({ roleKey: 'DEV-REV', skills: revRole.skills.filter(s => s.on).map(s => s.id), templateHashes: {} }), PLACE);
+    const revFiles = new Map(revRendered.skills.map(s => [s.name, s.body]));
+    expect(revFiles.get('dev-review-diff')).toContain('task.reviewPlan');
+    expect(revFiles.get('dev-review-diff')).toContain('task.fixReview');
+    expect(revFiles.get('dev-review-verdict')).toContain('confirm_finding');
+    expect(revFiles.get('dev-review-verdict')).toMatch(/internal role or skill rules[^.!?]*never[^.!?]*(?:main|release) approval/i);
   });
 });
