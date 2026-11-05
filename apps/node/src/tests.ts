@@ -319,7 +319,7 @@ function commandEnv(base: NodeJS.ProcessEnv, msg: TestRun, inbox: string, outbox
    a part of work gets the task's files it names, the command runs within the time with a home and a temporary folder
    of its own, what a part of work leaves in its output folder goes on the task, and the folder goes, whatever
    happened. */
-export async function runTests(msg: TestRun, { dir, user, hidden, signal, proc = '/proc', cpus, env: hostEnv, files, prepareRepoBrowser }: Options): Promise<TestsDone> {
+export async function runTests(msg: TestRun, { dir, user, hidden, signal, proc = '/proc', cpus, env: hostEnv, files, prepareRepoBrowser = repoDir => ensureRepoBrowser(dir, repoDir, user) }: Options): Promise<TestsDone> {
   const deadline = Date.now() + msg.timeoutMs;
   const work = msg.kind === 'work';
   const parts = partsFolder(dir);
@@ -390,7 +390,7 @@ export async function runTests(msg: TestRun, { dir, user, hidden, signal, proc =
       await git(['rev-parse', 'HEAD'], repo, head);
       commit = /^[0-9a-f]{40,64}$/.exec(head.text().trim())?.[0] ?? null;
       if (commit) out.line(`At ${commit}.`);
-      await (prepareRepoBrowser ? prepareRepoBrowser(repo) : ensureRepoBrowser(dir, repo, user));
+      await prepareRepoBrowser(repo);
     }
     if (!error && work && msg.files?.length) {
       for (const name of msg.files) {
