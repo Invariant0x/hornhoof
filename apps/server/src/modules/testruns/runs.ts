@@ -11,13 +11,14 @@ import { repoAt, TEST_MEMORY_GB } from '../departments/repository.js';
 import { BUILTIN, nodeIdentity, type NodeIdentity } from '../nodes/hub.js';
 import { liveNode } from '../nodes/nodes.js';
 import { onTask } from '../tasks/attachments.js';
-import { CLOSED, published, refuse, type Task, type Tx, type Wake } from '../tasks/engine.js';
+import { CLOSED, note, published, refuse, type Task, type Tx, type Wake } from '../tasks/engine.js';
 import { endWaitForRun } from '../tasks/external-wait.js';
 import { keepWakes } from '../tasks/outbox.js';
 import { taskByRef } from '../tasks/views.js';
 import { wakeAll } from '../tasks/wake.js';
 import type { ToolJob } from '../tools/job.js';
 import { computerKey, computerState, Reservations, type ComputerPlace } from './capacity.js';
+import { markPromise, markRun, type RunMark } from './github-status.js';
 import { forRun, together } from './load.js';
 import { pickMachine } from './pick.js';
 
@@ -132,6 +133,8 @@ const ranAgain = (lost: LostRun[]) => (lost.length ? ` It ran again after ${lost
 
 /* The commit a run pinned, where agents read of it. */
 const pinLine = (run: Pick<Run, 'branch' | 'commitSha'>) => (run.commitSha ? ` Pinned commit: ${run.commitSha} (${run.branch}).` : '');
+/* Only a test run can leave a mark on its commit. */
+const markLine = (kind: RunKind, found: { department: { repoFullTestCommand: string | null } } | null, command: string) => (kind === 'tests' ? markPromise(found?.department.repoFullTestCommand, command) : '');
 
 /* Hornhoof's account of a run that ended: each part, where it ran and how long, the end of what failed, and the files
    on the task. */
@@ -364,12 +367,22 @@ async function told(ctx: Ctx, end: RunEnd): Promise<void> {
   await wakeAll(ctx, end.wakes);
 }
 
-/* A run whose parts all ended ends with them, and its agent hears how it went on its task. */
+/* What a mark on the run's commit adds: a line in the log of its task, where the one who decides reads it later. It is no
+   move of the task, whoever's turn is running. */
+async function keepMark(tx: Tx, run: Run, task: Task, mark: RunMark | null): Promise<string> {
+  if (!mark) return '';
+  await note(tx, task, { kind: 'comment', actor: { agentId: run.agentId }, text: mark.line, data: { testsMark: mark.data } });
+  return `\n\n${mark.line}`;
+}
+
+/* A run whose parts all ended ends with them, and its agent hears how it went on its task. The mark goes out before the
+   write that ends the run, so the one result the agent hears says how it went; a crash in between ends and marks it again. */
 async function settleRun(ctx: Ctx, runId: string): Promise<void> {
   const { db } = ctx;
   const parts = await db.select().from(testParts).where(eq(testParts.runId, runId)).orderBy(asc(testParts.part));
   if (!parts.length || parts.some(p => p.status === 'queued' || p.status === 'running')) return;
   const status = parts.every(p => p.status === 'passed') ? 'passed' : 'failed';
+  const mark = await markRun(ctx, runId, status);
   const end = await db.transaction(async tx => {
     const [run] = await tx
       .update(testRuns)
@@ -380,7 +393,8 @@ async function settleRun(ctx: Ctx, runId: string): Promise<void> {
     const [task] = await tx.select().from(tasks).where(eq(tasks.id, run.taskId));
     if (!task) return null;
     const files = await tx.select({ name: attachments.name }).from(attachments).where(and(eq(attachments.taskId, run.taskId), filesOf(run)));
-    return tellEnd(tx, run, task, account(run, task, parts, new Set(files.map(l => l.name!))), true);
+    const marked = await keepMark(tx, run, task, mark);
+    return tellEnd(tx, run, task, account(run, task, parts, new Set(files.map(l => l.name!))) + marked, true);
   });
   if (end) await told(ctx, end);
 }
@@ -614,7 +628,7 @@ export async function startRun(ctx: Ctx, job: ToolJob, input: RunInput, kind: Ru
   });
   const none = went.some(p => p.status === 'queued') && !places.length ? ' No machine that may take it is online now, so it waits until one is.' : '';
   return (
-    `${named(run)} of #${task.number} ${one && went[0]!.status === 'running' ? 'runs ' : ''}${one ? where[0] : `has ${parts} parts: ${where.join(', ')}`}.${none}${pinLine(run)} ` +
+    `${named(run)} of #${task.number} ${one && went[0]!.status === 'running' ? 'runs ' : ''}${one ? where[0] : `has ${parts} parts: ${where.join(', ')}`}.${none}${pinLine(run)}${markLine(kind, found, run.command)} ` +
     `When every part has ended you are woken on #${task.number} with the result; ${toolsOf(kind).state} ${run.number} shows how it goes.`
   );
 }

@@ -90,6 +90,8 @@ export const departments = pgTable('departments', {
   repoAuthorEmail: text('repo_author_email'),
   /* The free memory, in GB, a machine needs to take one of the repository's test runs; none takes the default. */
   repoTestMemoryGb: integer('repo_test_memory_gb'),
+  /* The command that runs the repository's whole test suite. Only a passed run of exactly this one lets GitHub skip its own tests. */
+  repoFullTestCommand: text('repo_full_test_command'),
   /* The person the CEO named to take the department's approvals and set its policy; none means the CEO. Only the CEO sets it,
      and it is never worked out from who has access. It counts only while that person is active and still has access. */
   ownerPersonId: uuid('owner_person_id').references((): AnyPgColumn => people.id),

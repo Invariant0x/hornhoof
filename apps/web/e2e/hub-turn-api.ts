@@ -20,7 +20,7 @@ declare global {
 }
 
 /* The server stream is external to the page; the real stream listeners and refetch paths still run. */
-async function taskStream(page: Page) {
+export async function taskStream(page: Page) {
   await page.addInitScript(() => {
     const sources: (EventTarget & { readyState: number })[] = [];
     class Source extends EventTarget {
