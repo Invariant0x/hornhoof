@@ -1863,8 +1863,15 @@ def admin_banned_caddy() -> int:
 
 
 def admin_add(name: str) -> int:
-    """Operator-made binding, no rate limit. Prints {name, key} as JSON once; keep it secret."""
-    reason = check_name(name)
+    """Operator-made binding, no rate limit. Prints {name, key} as JSON once; keep it secret.
+
+    Like the public API it waits for a freed name's old route (R1.5): an http-mode tunnel gets no NewUserConn to stop it, so
+    a new owner's name would still send its visitors to the old owner's machine.
+    """
+    try:
+        reason = requested_name_reason(name)
+    except FrpsUnknown:
+        reason = 'the relay cannot tell whether its old route is gone, nothing changed'
     if reason:
         print(f'{name}: {reason}', file=sys.stderr)
         return 1
