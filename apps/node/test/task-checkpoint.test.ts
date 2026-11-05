@@ -303,6 +303,16 @@ describe('secrets do not leave', () => {
     expect(wipPaths(stand.remote).filter(path => path.startsWith('files/'))).toEqual([]);
   });
 
+  it('withholds a file whose name is no valid text, and does not spell the name', async () => {
+    const name = Buffer.concat([Buffer.from(join(stand.source, 'src/caf')), Buffer.from([0xe9]), Buffer.from('.ts')]);
+    writeFileSync(name, 'export const named = 1;\n');
+    const receipt = saved(await captureTaskCheckpoint(stand.input()));
+    expect(receipt).toMatchObject({ requiresRepair: true, omittedFiles: 1 });
+    expect(wipManifest(stand.remote).files.map(file => [file.path, file.status])).toEqual([['[redacted]', 'omitted']]);
+    expect(everything()).not.toContain('caf');
+    expect(everything()).not.toContain('export const named');
+  });
+
   it('withholds a submodule and a nested repository', async () => {
     const nested = join(stand.source, 'nested');
     git(stand.root, 'init', '--quiet', nested);
@@ -336,6 +346,14 @@ describe('secrets do not leave', () => {
     chmodSync(stand.journal, 0o755);
     const result = await captureTaskCheckpoint(stand.input());
     expect(result).toEqual({ ok: false, problem: { phase: 'capture', code: 'scan_failed', retryable: false } });
+  });
+
+  it('refuses more bytes than it may export before it writes one object', async () => {
+    const mebibyte = `${'a'.repeat(1023)}\n`.repeat(1024);
+    for (let n = 0; n <= 64; n++) stand.write(`large/${n}.txt`, mebibyte);
+    const result = await captureTaskCheckpoint(stand.input());
+    expect(result).toEqual({ ok: false, problem: { phase: 'capture', code: 'export_too_large', retryable: false } });
+    expect(() => git(stand.remote, 'rev-parse', '--verify', WIP_REF)).toThrow();
   });
 
   it('refuses too many files before it writes one object', async () => {

@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { closeSync, constants, fstatSync, openSync, readSync } from 'node:fs';
+import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readSync } from 'node:fs';
 import { z } from 'zod';
 import { WorkspaceCommitSha } from '@hornhoof/protocol';
 import type { JobUser } from './isolation.js';
@@ -53,13 +53,14 @@ export type Manifest = z.infer<typeof Manifest>;
 export function validRepoPath(path: string): boolean {
   return !path.includes('\\') && path.split('/').every(part => part !== '' && part !== '.' && part !== '..');
 }
-function fileIsConsistent(file: ManifestFile, index: number): boolean {
-  if (file.id !== fileId(index) || (file.path !== REDACTED && !validRepoPath(file.path))) return false;
+function contentFits(file: ManifestFile): boolean {
   const carries = file.contentSha256 !== null && file.mode !== null, empty = file.contentSha256 === null && file.mode === null;
   if (file.status === 'omitted') return empty;
   if (file.path === REDACTED || classifyPath(file.path) !== 'task') return false;
   return file.action === 'delete' ? file.status === 'clean' && empty : carries;
 }
+const fileIsConsistent = (file: ManifestFile, index: number): boolean =>
+  file.id === fileId(index) && (file.path === REDACTED || validRepoPath(file.path)) && contentFits(file);
 function manifestIsConsistent(manifest: Manifest): boolean {
   const named = manifest.files.map(file => file.path).filter(path => path !== REDACTED);
   return new Set(named).size === named.length && manifest.files.every(fileIsConsistent)
@@ -145,14 +146,14 @@ function assertClean(bytes: Buffer, secrets: readonly string[]): void {
 }
 
 interface Listing { meta: TreeEntry[]; files: TreeEntry[] }
+const fixedMeta = (entries: readonly TreeEntry[]): boolean => entries.every(plainFile) && entries.map(entry => entry.name).sort().join('\n') === META_NAMES.join('\n');
+const numberedFiles = (entries: readonly TreeEntry[]): boolean => entries.every(entry => plainFile(entry) && /^\d{6}$/.test(entry.name));
 async function listSnapshot(db: WipDb, tree: string): Promise<Listing> {
-  const root = await treeEntries(db, tree), by = (name: string) => root.find(entry => entry.name === name && entry.mode === '040000' && entry.type === 'tree');
-  const meta = by('meta'), files = by('files');
+  const root = await treeEntries(db, tree), folder = (name: string) => root.find(entry => entry.name === name && entry.mode === '040000' && entry.type === 'tree');
+  const meta = folder('meta'), files = folder('files');
   if (!meta || root.length !== (files ? 2 : 1)) throw notAChain();
   const listing = { meta: await treeEntries(db, meta.sha), files: files ? await treeEntries(db, files.sha) : [] };
-  const names = listing.meta.map(entry => entry.name).sort();
-  if (names.join('\n') !== META_NAMES.join('\n') || !listing.meta.every(plainFile)) throw notAChain();
-  if (!listing.files.every(entry => plainFile(entry) && /^\d{6}$/.test(entry.name))) throw notAChain();
+  if (!fixedMeta(listing.meta) || !numberedFiles(listing.files)) throw notAChain();
   return listing;
 }
 function parseManifest(bytes: Buffer): Manifest {
@@ -204,6 +205,16 @@ export async function verifyWipChain(db: WipDb, tip: string, expect: WipExpectat
     next = (await readSnapshot(db, next, expect)).manifest.previousCheckpointSha;
   }
   return top;
+}
+
+export const processUid = (): number => process.getuid?.() ?? 0;
+/* The node's own: a folder anybody else can read or change holds nothing of this. */
+export function privateFolder(path: string): void {
+  try { mkdirSync(path, { mode: 0o700 }); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+  }
+  const stat = lstatSync(path);
+  if (!stat.isDirectory() || stat.uid !== processUid() || stat.mode & 0o077) throw new HandoffFault('scan_failed');
 }
 
 const DIRECTORY = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW;

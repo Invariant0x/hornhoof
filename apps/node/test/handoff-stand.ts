@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -62,6 +63,35 @@ export function makeStand(): Stand {
     lastTests: 'npm test passed at some commit\n', conversationTail: 'the last words of the source\n', ...more,
   });
   return { root, remote, source, journal, baseSha, write, commit, workspace, input, close: () => rmSync(root, { recursive: true, force: true }) };
+}
+
+/* The replacement's own clone at the base, one assignment later. */
+export function destinationOf(stand: Stand, name = 'destination'): VerifiedWorkspace & { path: string } {
+  const path = join(stand.root, name);
+  git(stand.root, 'clone', '--quiet', '--branch', 'main', stand.remote, path);
+  git(path, 'checkout', '--quiet', '-b', 'task-1', stand.baseSha);
+  return { path, binding: { ...stand.workspace().binding, workspaceId: id(5), agentId: id(6), assignmentEpoch: 4 }, realPath: path, ownerUid: process.getuid!(),
+    gitCommonDir: join(path, '.git'), sourceHeadSha: stand.baseSha };
+}
+
+const WIP_IDENTITY = { GIT_AUTHOR_NAME: 'Hornhoof', GIT_AUTHOR_EMAIL: 'checkpoint@hornhoof.invalid', GIT_AUTHOR_DATE: '@1 +0000', GIT_COMMITTER_NAME: 'Hornhoof', GIT_COMMITTER_EMAIL: 'checkpoint@hornhoof.invalid', GIT_COMMITTER_DATE: '@1 +0000' };
+export interface Forged { sha: string; digest: string }
+export interface Forgery { manifest?: (manifest: ReadManifest) => unknown; tree?: string; message?: string; parents?: string[]; files?: Record<string, string> }
+/* A commit that looks like a checkpoint, on the WIP ref, made by nothing of the code under test. */
+export function forgeWip(remote: string, change: Forgery, ref = WIP_REF): Forged {
+  const blob = (text: string) => gitInput(remote, text, 'hash-object', '-w', '--stdin');
+  const manifest = JSON.stringify(change.manifest ? change.manifest(wipManifest(remote, ref)) : wipManifest(remote, ref));
+  const entries = (tree: string) => git(remote, 'ls-tree', tree).split('\n').filter(Boolean);
+  const meta = entries(`${ref}:meta`).map(line => line.endsWith('\tmanifest.json') ? `100644 blob ${blob(manifest)}\tmanifest.json` : line);
+  const payloads = [...git(remote, 'ls-tree', ref).includes('\tfiles') ? entries(`${ref}:files`) : [], ...Object.entries(change.files ?? {}).map(([name, text]) => `100644 blob ${blob(text)}\t${name}`)];
+  const lines = [`040000 tree ${gitInput(remote, meta.join('\n') + '\n', 'mktree')}\tmeta`];
+  if (payloads.length) lines.push(`040000 tree ${gitInput(remote, payloads.join('\n') + '\n', 'mktree')}\tfiles`);
+  const tree = change.tree ?? gitInput(remote, lines.join('\n') + '\n', 'mktree');
+  const parent = change.parents ?? git(remote, 'rev-list', '--parents', '--max-count=1', ref).split(' ').slice(1);
+  const message = change.message ?? `Task checkpoint ${wipManifest(remote, ref).captureId}`;
+  const sha = execFileSync('/usr/bin/git', ['commit-tree', tree, ...parent.flatMap(sha => ['-p', sha]), '-m', message], { cwd: remote, env: { ...GIT_ENV, ...WIP_IDENTITY }, encoding: 'utf8' }).trim();
+  git(remote, 'update-ref', ref, sha);
+  return { sha, digest: createHash('sha256').update(manifest).digest('hex') };
 }
 
 export interface WipObject { sha: string; type: string; body: string }

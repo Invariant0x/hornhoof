@@ -46,6 +46,7 @@ export function codexFailure(raw: Record<string, unknown>): Failure {
   else if (code === 'response_too_many_failed_attempts' && status === 429) kind = 'rate_limited';
   else if (code === 'http_connection_failed' && status == null) kind = 'network';
   if (code === 'other' && /stream disconnected/i.test(text(raw.message))) kind = 'cut';
+  if (kind === 'unknown' && /^Selected model is at capacity\b/.test(text(raw.message))) kind = 'overloaded';
   const retryable = kind === 'unknown' && (code === 'internal_server_error' || serverError(status)) ? true : undefined;
   return failure(kind, reason(code + (typeof status === 'number' ? ` ${status}` : ''), raw.message), raw.retryable ?? retryable);
 }

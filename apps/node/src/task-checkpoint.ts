@@ -1,11 +1,11 @@
 import { spawn } from 'node:child_process';
-import { chmodSync, chownSync, closeSync, constants, fsyncSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, chownSync, closeSync, constants, existsSync, fsyncSync, mkdirSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import { WorkspaceCommitSha, type VerifiedWorkspace, type WorkspaceProblem } from '@hornhoof/protocol';
 import { classifyPath, isSanitized, MAX_FILE_BYTES, REDACTED, sanitizeContent, sanitizeContext, sanitizePath, SANITIZER_VERSION } from './handoff-redaction.js';
-import { commitMessage, COMMIT_IDENTITY, createDb, fetchTip, fileId, GitFailed, HandoffFault, lockedGit, Manifest, MAX_EXPORT_BYTES, MAX_EXPORT_FILES, META_FILES, openDb, problemOf, readVerifiedFile,
+import { commitMessage, COMMIT_IDENTITY, createDb, fetchTip, fileId, GitFailed, HandoffFault, lockedGit, Manifest, MAX_EXPORT_BYTES, MAX_EXPORT_FILES, META_FILES, openDb, privateFolder, problemOf, processUid, readVerifiedFile,
   remoteTip, sha256, validRepoPath, verifyWipChain, wipRef, type HandoffCode, type HandoffPhase, type HandoffProblem, type ManifestFile, type RemoteRepo, type WipDb, type WipSnapshot } from './handoff-wip.js';
 import type { JobUser } from './isolation.js';
 import { gitEnv } from './workspace.js';
@@ -38,18 +38,10 @@ type Sealed = z.infer<typeof Sealed>;
 
 const MAX_INDEX_BYTES = 256 * 1024 * 1024;
 const notQuiescent = (): HandoffFault => new HandoffFault('source_not_quiescent', true);
-const processUid = (): number => process.getuid?.() ?? 0;
 const allSecrets = (input: CheckpointInput): string[] => [...input.secrets, input.repo.token].filter(Boolean);
 
 interface JournalPaths { capture: string; db: string; readback: string; sealed: string; lease: string }
 
-function privateFolder(path: string): void {
-  try { mkdirSync(path, { mode: 0o700 }); } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-  }
-  const stat = lstatSync(path);
-  if (!stat.isDirectory() || stat.uid !== processUid() || stat.mode & 0o077) throw new HandoffFault('scan_failed');
-}
 /* Node's own, outside the repository and every agent's home: a folder anybody else can read holds no attempt. */
 function journalFor(input: CheckpointInput): JournalPaths {
   mkdirSync(dirname(input.journalRoot), { recursive: true });
@@ -65,9 +57,14 @@ function flock(fd: number): Promise<void> {
   });
 }
 /* One publisher per task: the lock lives on this open file, so a crash cannot leave it taken. */
-async function withPublisherLease<T>(file: string, work: () => Promise<T>): Promise<T> {
+export async function withPublisherLease<T>(file: string, work: () => Promise<T>): Promise<T> {
   const fd = openSync(file, constants.O_CREAT | constants.O_RDWR | constants.O_NOFOLLOW, 0o600);
   try { await flock(fd); return await work(); } finally { closeSync(fd); }
+}
+/* Asks nothing of the workspace: an identifier that is no UUID has no attempt. */
+export function captureIsSealed(journalRoot: string, handoffId: string, captureId: string): boolean {
+  const ids = z.object({ handoffId: z.uuid(), captureId: z.uuid() }).safeParse({ handoffId, captureId });
+  return ids.success && existsSync(join(journalRoot, 'handoffs', ids.data.handoffId, ids.data.captureId, 'sealed.json'));
 }
 function readSealed(paths: JournalPaths, taskId: string): Sealed | null {
   let raw: string;
@@ -85,7 +82,7 @@ function writeSealed(paths: JournalPaths, sealed: Sealed): void {
 }
 
 const WORKSPACE_CODES: Partial<Record<WorkspaceProblem['code'], HandoffCode>> = { workspace_missing: 'workspace_missing', binding_stale: 'stale_epoch', node_offline: 'target_unavailable' };
-async function resolved(input: CheckpointInput): Promise<VerifiedWorkspace> {
+export async function resolved(input: Pick<CheckpointInput, 'resolveWorkspace' | 'taskId' | 'owner'>): Promise<VerifiedWorkspace> {
   const result = await input.resolveWorkspace();
   if ('code' in result) throw new HandoffFault(WORKSPACE_CODES[result.code] ?? 'workspace_ambiguous', result.retryable);
   if (result.binding.taskId !== input.taskId || result.ownerUid !== input.owner.uid) throw new HandoffFault('workspace_ambiguous');
@@ -128,7 +125,8 @@ function openView(workspace: VerifiedWorkspace, owner: JobUser): string {
   }
   return dir;
 }
-async function withSourceView<T>(workspace: VerifiedWorkspace, input: CheckpointInput, work: (git: SourceGit) => Promise<T>): Promise<T> {
+export type SourceReader = Pick<CheckpointInput, 'owner' | 'signal' | 'declaredOutputs'>;
+async function withSourceView<T>(workspace: VerifiedWorkspace, input: SourceReader, work: (git: SourceGit) => Promise<T>): Promise<T> {
   const dir = openView(workspace, input.owner);
   const env = { GIT_DIR: dir, GIT_WORK_TREE: workspace.realPath, GIT_INDEX_FILE: join(dir, 'index'), GIT_OBJECT_DIRECTORY: join(workspace.gitCommonDir, 'objects') };
   try {
@@ -137,7 +135,7 @@ async function withSourceView<T>(workspace: VerifiedWorkspace, input: Checkpoint
 }
 
 type Action = ManifestFile['action'];
-interface Delta { path: string; action: Action; tracked: boolean; doubtful: boolean }
+export interface Delta { path: string; action: Action; tracked: boolean; doubtful: boolean }
 const ACTIONS: Record<string, Action> = { A: 'add', M: 'replace', T: 'replace', D: 'delete' };
 const nulSeparated = (text: string): string[] => text.split('\0').filter(Boolean);
 
@@ -169,7 +167,7 @@ function declaredDeltas(outputs: readonly string[], deltas: Map<string, Delta>):
     if (!deltas.has(path)) deltas.set(path, { path, action: 'add', tracked: true, doubtful: false });
   }
 }
-async function enumerate(git: SourceGit, baseSha: string, input: CheckpointInput): Promise<Delta[]> {
+async function enumerate(git: SourceGit, baseSha: string, input: SourceReader): Promise<Delta[]> {
   const deltas = new Map<string, Delta>();
   trackedDeltas(await git(['diff', '--raw', '-z', '--no-renames', '--no-ext-diff', '--no-textconv', baseSha, '--']), deltas);
   untrackedDeltas(await git(['ls-files', '--others', '--exclude-standard', '-z']), deltas);
@@ -177,7 +175,7 @@ async function enumerate(git: SourceGit, baseSha: string, input: CheckpointInput
   declaredDeltas(input.declaredOutputs ?? [], deltas);
   return [...deltas.values()].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
 }
-async function readDeltas(workspace: VerifiedWorkspace, input: CheckpointInput, baseSha: string): Promise<Delta[]> {
+export async function readDeltas(workspace: VerifiedWorkspace, input: SourceReader, baseSha: string): Promise<Delta[]> {
   return withSourceView(workspace, input, async git => {
     await git(['merge-base', '--is-ancestor', baseSha, workspace.sourceHeadSha]).catch((error: unknown) => {
       if (error instanceof GitFailed) throw new HandoffFault('ref_conflict');
