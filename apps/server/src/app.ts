@@ -41,6 +41,7 @@ import { taskRoutes } from './modules/tasks/routes.js';
 import { TerminalRelay } from './modules/terminals/relay.js';
 import { terminalRoutes } from './modules/terminals/routes.js';
 import { Challenges, challengeRoutes } from './modules/tls/challenges.js';
+import { LinkTls } from './modules/tls/manager.js';
 import { addSecurityHeaders, hasWebApp, serveWebApp, webAppRoutes } from './web.js';
 
 export type { Db } from './db/client.js';
@@ -61,7 +62,8 @@ export type Deps = {
 };
 
 /* What routes get: the deps, the live node connections, the live stream to browsers, the terminals people watch, the
-   check for newer builds, access to the computer the server runs on, the company's public link and its ACME answers. */
+   check for newer builds, access to the computer the server runs on, the company's public link, its ACME answers and
+   its certificate. */
 export type Ctx = Deps & {
   log: FastifyBaseLogger;
   hub: NodeHub;
@@ -73,6 +75,7 @@ export type Ctx = Deps & {
   templates: Templates;
   links: PublicLinks;
   challenges: Challenges;
+  tls: LinkTls;
   mode: AppMode;
 };
 
@@ -142,6 +145,8 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   ctx.templates = loadTemplates(config.templatesDir);
   ctx.links = new PublicLinks(ctx);
   ctx.challenges = new Challenges();
+  ctx.tls = new LinkTls(ctx);
+  app.addHook('onClose', async () => ctx.tls.stop());
   ctx.mode.whenLead(() => ctx.updates.start(), () => ctx.updates.stop());
   ctx.mode.whenLead(() => ctx.links.sync(), () => undefined);
   ctx.mode.whenLeaving(() => closeOpenSockets(app));
