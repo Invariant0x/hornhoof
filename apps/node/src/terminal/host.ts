@@ -816,7 +816,10 @@ export class TerminalHost {
     if (a.restarting) return;
     const decision = a.ends.end(end.status, this.stoppable(a) || Boolean(blocked && a.turn), id);
     if (decision.conflict) this.logDisagreement(a);
-    if (!decision.accept) return;
+    if (decision.accept) this.acceptEnd(a, end);
+  }
+
+  private acceptEnd(a: Agent, end: TurnEnd): void {
     if (a.turn) this.endWords(a, a.turn);
     a.busy = false;
     a.retry = null;
@@ -827,7 +830,12 @@ export class TerminalHost {
     const turn = a.turn;
     if (turn) turn.ending = end;
     if (!turn?.typed) return a.ended?.resolve(end.message);
-    const error = a.stopped ? 'cancelled' : end.failure ? (end.failure.kind === 'auth' || a.signedOut?.test(end.failure.text) ? 'not_logged_in' : 'agent_failed') : null;
+    this.endTyped(a, turn, end);
+  }
+
+  /* A typed turn's end goes out once the rest of its log is read. */
+  private endTyped(a: Agent, turn: Turn, end: TurnEnd): void {
+    const error = typedEndError(a, end);
     const settling = this.settle(a, end.message);
     a.settling = settling;
     void settling.finally(() => { if (a.settling === settling) a.settling = null; });
@@ -1756,6 +1764,13 @@ export async function parentOf(pid: number): Promise<number | null> {
 function ownership(options: Options, panes: Panes): Ownership {
   if (options.owner) return options.owner(panes);
   return options.proc ? procOwner(options.proc)(panes) : { owns: null };
+}
+
+/* How a typed turn's job ended, as Hornhoof hears it. */
+function typedEndError(a: Agent, end: TurnEnd): JobError {
+  if (a.stopped) return 'cancelled';
+  if (!end.failure) return null;
+  return end.failure.kind === 'auth' || a.signedOut?.test(end.failure.text) ? 'not_logged_in' : 'agent_failed';
 }
 
 /* A cancelled turn can still wait for Escape and its final session, but takes no more input or events. */
