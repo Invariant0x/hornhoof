@@ -12,7 +12,7 @@ import { canOpenAgent } from '../agents/running.js';
 import { jobOf, type ToolJob } from '../tools/job.js';
 import { agentCasePicture, personCasePicture, sendCasePicture } from '../program-operator/attachments.js';
 import { refuse, taskSpot, type Task } from './engine.js';
-import { taskByRef } from './views.js';
+import { agentSeesTask, taskByRef } from './views.js';
 
 /* A screenshot fits comfortably; a turn sends a few dozen at most. */
 export const PICTURE_BYTES = 3 * 1024 * 1024;
@@ -181,7 +181,7 @@ async function messagePicture(db: Db, job: ToolJob, id: string) {
   const [found] = await db
     .select({ id: attachments.id, name: attachments.name, length: sql<number>`octet_length(${attachments.bytes})`.mapWith(Number) })
     .from(attachments)
-    .where(and(eq(attachments.id, id), eq(attachments.companyId, job.companyId), eq(attachments.agentId, job.agentId), isNotNull(attachments.personId), isNull(attachments.operatorCaseId)));
+    .where(and(eq(attachments.id, id), eq(attachments.companyId, job.companyId), eq(attachments.agentId, job.agentId), isNotNull(attachments.personId), isNull(attachments.taskId), isNull(attachments.operatorCaseId)));
   return found && { ...found, name: `${found.id.slice(0, 8)}-${found.name ?? 'picture'}` };
 }
 
@@ -193,6 +193,11 @@ async function taskFileForPerson(db: Db, me: Awaited<ReturnType<typeof requirePe
   if (!found) return null;
   if (!canReach(await accessOf(db, me), taskSpot(found.task))) throw new ApiError(404, 'not_found', 'There is no such file.', 'attachment_unknown');
   return found;
+}
+
+/* Ordinary uploaded files keep their sharing rule; automatic plain-text logs keep the task's read boundary. */
+function readsTaskFile(job: ToolJob, task: Task | null, file: { mediaType: string }): boolean {
+  return file.mediaType !== 'text/plain' || (task !== null && agentSeesTask({ id: job.agentId, kind: job.agentKind, departmentId: job.departmentId }, task));
 }
 
 export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
@@ -225,7 +230,7 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     });
   });
 
-  /* Any agent of the company downloads a task's file, by its name or id, with its tool token, through hh-fetch. A name
+  /* Any agent of the company downloads an ordinary task file; automatic log files require access to their task, by its name or id, with its tool token, through hh-fetch. A name
      put on twice gives the newest. "message" in place of the task gets a picture that came with a message to this agent. */
   app.get('/api/attachments/file', async (req, reply) => {
     const job = await jobOf(ctx, req);
@@ -240,13 +245,13 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const byId = z.uuid().safeParse(file).success;
     const [found] = task
       ? await db
-          .select({ id: attachments.id, name: attachments.name, length: sql<number>`octet_length(${attachments.bytes})`.mapWith(Number) })
+          .select({ id: attachments.id, name: attachments.name, mediaType: attachments.mediaType, length: sql<number>`octet_length(${attachments.bytes})`.mapWith(Number) })
           .from(attachments)
           .where(and(eq(attachments.taskId, task.id), isNull(attachments.operatorCaseId), byId ? or(eq(attachments.id, file), eq(attachments.name, file)) : eq(attachments.name, file)))
           .orderBy(desc(attachments.createdAt))
           .limit(1)
       : [];
-    if (!found) throw new ApiError(404, 'not_found', `Task ${ref} has no file ${file}. Its card lists its files.`, 'attachment_unknown');
+    if (!found || !readsTaskFile(job, task, found)) throw new ApiError(404, 'not_found', `Task ${ref} has no file ${file}. Its card lists its files.`, 'attachment_unknown');
     return sendFile(db, reply, found);
   });
 

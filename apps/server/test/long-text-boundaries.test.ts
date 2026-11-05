@@ -4,8 +4,9 @@ import type { ServerMessage } from '@hornhoof/protocol';
 import { and, eq } from 'drizzle-orm';
 import { expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agentEvents, agents, companies, departments, jobs, people, requests, subscriptions, taskEvents } from '../src/db/schema.js';
+import { agentEvents, agents, companies, departments, attachments, jobs, people, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
 import { ask, answerDirectly, createTask } from '../src/modules/tasks/engine.js';
+import { waitFor } from '../src/modules/tasks/external-wait.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
 import { as, connectNode, listen, mcp, setUpCompany, testApp, until } from './helpers.js';
 
@@ -47,9 +48,15 @@ async function fixture() {
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 const call = async (client: Client, name: string, args: Record<string, unknown>) => await client.callTool({ name, arguments: args }) as { content: { text: string }[]; isError?: boolean };
-async function message(c: Fixture, recipient: string) {
+async function deliveredMessages(c: Fixture, recipient: string) {
   const rows = await c.db.select().from(agentEvents).where(and(eq(agentEvents.agentId, recipient), eq(agentEvents.kind, 'message')));
-  return rows.find(row => (row.data as { text?: string }).text === WORDS);
+  return rows.filter(row => {
+    const data = row.data as { text?: string; notification?: unknown };
+    return data.text === WORDS && data.notification === undefined;
+  });
+}
+async function message(c: Fixture, recipient: string) {
+  return (await deliveredMessages(c, recipient))[0];
 }
 
 it('accepts a long HTTP comment and reads its full text', async () => {
@@ -124,4 +131,39 @@ it('keeps the transport limit and explains the supported file step', async () =>
   expect(response.json().error.message).toContain('hh-attach');
   expect(response.json().error.message).toContain('file');
   expect(await c.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, c.task.id), eq(taskEvents.kind, 'comment')))).toEqual([]);
+});
+
+it('does not fail an already delivered person message when implicit answer files have no room', async () => {
+  const c = await fixture();
+  const request = (await ask(c.app.ctx, c.worker.id, c.task.id, { kind: 'question', text: 'Please reply.' })).request;
+  c.app.ctx.config.taskFilesBytes = 0;
+  const response = await c.app.inject({ method: 'POST', url: `/api/agents/${c.worker.id}/messages`, payload: { text: WORDS }, ...as(c.session) });
+  expect(response.statusCode, response.body).toBe(202);
+  expect(await c.saved(request.id)).toMatchObject({ status: 'answered', answer: WORDS });
+  const events = await c.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, c.task.id), eq(taskEvents.kind, 'answered')));
+  expect(events).toHaveLength(1);
+  expect(events[0]!.text).toBe(WORDS);
+  expect(await deliveredMessages(c, c.worker.id)).toHaveLength(1);
+  expect(await c.db.select().from(attachments).where(eq(attachments.taskId, c.task.id))).toEqual([]);
+  const duplicate = await c.app.inject({ method: 'POST', url: `/api/requests/${request.id}`, payload: { answer: WORDS }, ...as(c.session) });
+  expect(duplicate.statusCode).toBe(409);
+  expect(await c.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, c.task.id), eq(taskEvents.kind, 'answered')))).toHaveLength(1);
+});
+
+it('ends a task-bound message wait once even when full-text file quota is exhausted', async () => {
+  const c = await fixture();
+  await c.db.update(tasks).set({ status: 'working' }).where(eq(tasks.id, c.task.id));
+  await waitFor(c.app.ctx, c.worker.id, c.task.id, { reason: 'Waiting for the report.', until: new Date(Date.now() + 30 * 60 * 1000).toISOString() });
+  const [before] = await c.db.select().from(tasks).where(eq(tasks.id, c.task.id));
+  c.app.ctx.config.taskFilesBytes = 0;
+  const result = await call(await c.client(c.head), 'message_employee', { employee: c.worker.id, task: c.task.number, text: WORDS });
+  expect(result.isError, result.content[0]?.text).toBeFalsy();
+  const [after] = await c.db.select().from(tasks).where(eq(tasks.id, c.task.id));
+  expect(after!.externalWait).toBeNull();
+  expect(after!.version).toBe(before!.version + 1);
+  expect(await deliveredMessages(c, c.worker.id)).toHaveLength(1);
+  const events = await c.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, c.task.id), eq(taskEvents.kind, 'comment')));
+  expect(events).toHaveLength(1);
+  expect(events[0]!.text).toBe(WORDS);
+  expect(await c.db.select().from(attachments).where(eq(attachments.taskId, c.task.id))).toEqual([]);
 });

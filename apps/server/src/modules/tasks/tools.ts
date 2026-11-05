@@ -9,7 +9,7 @@ import { ask, blocked, cancel, CLOSED, comment, createTask, gateLeads, inReposit
 import { requireBlockingGate } from './gate-triggers.js';
 import { carriesFile, encodedHint } from './attachments.js';
 import { Text } from './long-text.js';
-import { taskByRef, taskDetail, taskLines, type TaskDetail } from './views.js';
+import { agentSeesTask as sees, taskByRef, taskDetail, taskLines, type TaskDetail } from './views.js';
 import { addTasks, editTurn, mergeTurn, planTurn, settle, tell, TURN_MESSAGES, turnName, turnRows } from './turns.js';
 import { stopTurns, wakeAll } from './wake.js';
 import { orchestratorOf } from '../conversation/queue.js';
@@ -97,11 +97,6 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
   const boss = job.agentKind === 'orchestrator';
   const me = async (): Promise<Agent> => (await db.select().from(agents).where(eq(agents.id, job.agentId)))[0]!;
   const startedAt = async () => (await db.select({ at: jobs.startedAt }).from(jobs).where(eq(jobs.id, job.id)))[0]?.at ?? new Date(0);
-
-  /* The orchestrator sees every task; an employee its department's, and any it holds or reviews, once its turn started. */
-  const sees = (agent: Agent, t: Task) =>
-    agent.kind === 'orchestrator' ||
-    (t.status !== 'planned' && ((agent.departmentId !== null && t.departmentId === agent.departmentId) || t.assigneeAgentId === agent.id || t.executorAgentId === agent.id || t.gates.includes(agent.id) || t.panel.includes(agent.id)));
 
   async function find(ref: number | string): Promise<{ agent: Agent; task: Task }> {
     const agent = await me();

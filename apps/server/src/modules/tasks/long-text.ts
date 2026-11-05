@@ -15,7 +15,7 @@ const PREVIEW = 3000;
 type Budget = Pick<Ctx['config'], 'taskFilesBytes'>;
 type Scope = { id: string; companyId: string };
 type Owner = { agentId: string; personId: string | null };
-type Note = { kind: string; actor: Actor; text?: string; data?: Record<string, unknown> };
+type Note = { kind: string; actor: Actor; text?: string; data?: Record<string, unknown>; inlineText?: true };
 export type FullText = { field: 'text' | 'evidence'; id: string; name: string; size: number; sha256: string };
 const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 const forbidden = () => new ApiError(403, 'forbidden', 'You cannot attach text to this task.', 'task_not_yours');
@@ -69,7 +69,7 @@ export async function preserveNote(db: Db | Tx, task: Scope, note: Note, config?
   const fields: { field: FullText['field']; text: string }[] = [{ field: 'text', text }];
   if (typeof data.evidence === 'string') fields.push({ field: 'evidence', text: data.evidence });
   const long = fields.filter(f => f.text.length > INLINE);
-  if (!config || !long.length) return { text, data };
+  if (note.inlineText || !config || !long.length) return { text, data };
   const author = await owner(db, task, note.actor);
   let shown = text;
   const refs: FullText[] = [];

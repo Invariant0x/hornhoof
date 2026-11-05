@@ -322,7 +322,7 @@ export const taskSpot = (t: Pick<Task, 'departmentId' | 'productId'>): Spot =>
 const actorColumns = (a: Actor) => ({ personId: a.personId ?? null, agentId: a.agentId ?? null });
 
 /* returned: the agent gives its work back to the one above it with this move, which the map shows on their line. */
-type Note = { kind: TaskEventKind; actor: Actor; text?: string; data?: Record<string, unknown>; returned?: true; automatic?: NotificationSource };
+type Note = { kind: TaskEventKind; actor: Actor; text?: string; data?: Record<string, unknown>; inlineText?: true; returned?: true; automatic?: NotificationSource };
 
 export async function note(tx: Tx | Db, task: Pick<Task, 'id' | 'companyId'>, n: Note, config?: Pick<Ctx['config'], 'taskFilesBytes'>): Promise<{ id: number; createdAt: Date }> {
   const kept = await preserveNote(tx, task, n, config);
@@ -1475,7 +1475,7 @@ function checkChoiceAnswer(found: Pick<Request, 'options'>, a: Answer, text: str
   if (!option && !text) throw refuse(400, 'task_invalid', 'Write an answer.');
 }
 
-export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answer, on?: Delegation): Promise<{ request: Request; task: Task; wakes: Wake[] }> {
+export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answer, on?: Delegation, inlineText?: true): Promise<{ request: Request; task: Task; wakes: Wake[] }> {
   const [found] = await ctx.db.select().from(requests).where(eq(requests.id, requestId));
   if (!found) throw refuse(404, 'request_unknown', 'There is no such request.');
   if (found.status !== 'open') throw refuse(409, 'request_closed', 'This request is answered already.');
@@ -1511,7 +1511,7 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
     if (!request) throw refuse(409, 'request_closed', 'This request is answered already.');
     await tx.update(tasks).set({ externalWait: null, silent: 0, version: sql`${tasks.version} + 1`, updatedAt: new Date() })
       .where(and(eq(tasks.id, task.id), isNotNull(tasks.externalWait)));
-    const event = await note(tx, task, { kind: 'answered', actor, text: said, data: { requestId, kind: found.kind, status, ...forWhom } }, ctx.config);
+    const event = await note(tx, task, { kind: 'answered', actor, text: said, data: { requestId, kind: found.kind, status, ...forWhom }, inlineText }, ctx.config);
     const [left] = await tx.select({ n: count() }).from(requests).where(and(eq(requests.taskId, task.id), eq(requests.status, 'open')));
     if (current?.status === 'waiting' && !Number(left?.n ?? 0)) {
       await tx
@@ -1567,7 +1567,8 @@ export async function answerDirectly(ctx: Live, personId: string, agentId: strin
     /* Only what this person may take: the words still reach the agent, and someone else's question stays open. */
     if (!takes(person, access, r)) continue;
     try {
-      wakes.push(...(await answer(ctx, { personId }, r.id, { answer: said })).wakes);
+      /* The window already delivered these words; its complete mirror must not introduce a later file-quota failure. */
+      wakes.push(...(await answer(ctx, { personId }, r.id, { answer: said }, undefined, true)).wakes);
     } catch (err) {
       /* Someone answered it in the task meanwhile, or the person's right went meanwhile. */
       if (!(err instanceof ApiError && PASSED_OVER.has(err.reason))) throw err;

@@ -8,6 +8,12 @@ import { taskEvidence, type RunEvidence } from '../testruns/evidence.js';
 import type { Lang } from '../templates/load.js';
 import { CLOSED, type Task } from './engine.js';
 
+/* Task log text and its automatic files have the same agent readership. */
+export function agentSeesTask(agent: Pick<typeof agents.$inferSelect, 'id' | 'kind' | 'departmentId'>, task: Task): boolean {
+  return agent.kind === 'orchestrator' || (task.status !== 'planned' &&
+    ((agent.departmentId !== null && task.departmentId === agent.departmentId) || task.assigneeAgentId === agent.id || task.executorAgentId === agent.id || task.gates.includes(agent.id) || task.panel.includes(agent.id)));
+}
+
 export type AgentRef = { id: string; name: string; kind: 'orchestrator' | 'head' | 'worker'; role: Lang | null };
 type Place = { id: string; name: string } | null;
 export type TaskLine = {
