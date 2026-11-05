@@ -10,9 +10,9 @@ export function unavailableFailure(failure: unknown): boolean {
 export function RouteUnavailable({ onHome = () => location.assign('/'), dialog = false }: { onHome?: () => void; dialog?: boolean }) {
   const t = useT();
   const content = <section className={dialog ? 'settings-part' : 'people'}>
-    <h1>{t.routes.unavailable}</h1>
+    <h1>{t.routes.accessDenied}</h1>
     <p className="muted">{t.routes.explanation}</p>
     <button className="btn" type="button" onClick={onHome}>{t.routes.home}</button>
   </section>;
-  return dialog ? <div className="dialog-back"><div className="dialog" role="dialog" aria-label={t.routes.unavailable}>{content}</div></div> : content;
+  return dialog ? <div className="dialog-back"><div className="dialog" role="dialog" aria-label={t.routes.accessDenied}>{content}</div></div> : content;
 }

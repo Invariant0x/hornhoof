@@ -69,7 +69,7 @@ for (const settings of SETTINGS) {
     await expect(page.getByRole('heading', { name: t.improvements.title, exact: true })).toBeVisible();
 
     await page.goto('/unknown');
-    await expect(page.getByRole('heading', { name: t.routes.unavailable, exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: t.routes.accessDenied, exact: true })).toBeVisible();
     await page.screenshot({ path: info.outputPath(`unavailable-${lang}-${theme}-${width}.png`), animations: 'disabled' });
     await page.getByRole('button', { name: t.routes.home, exact: true }).click();
     await expect(page).toHaveURL(/\/$/);

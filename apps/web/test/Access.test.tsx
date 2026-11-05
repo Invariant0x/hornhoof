@@ -1,0 +1,97 @@
+import { render, screen } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
+import { LanguageProvider } from '../src/i18n';
+import { AgentWindows, useAgentWindows } from '../src/screens/AgentWindows';
+import { RouteUnavailable } from '../src/screens/RouteUnavailable';
+import { TreeView } from '../src/screens/TreeView';
+import type { Me, Org } from '../src/types';
+import { CARD, DEV_ORG, DEV_TREE, ME, mockApi, TREE_ORG } from './api-mock';
+import { fakeStream } from './fake-stream';
+import { visibleDepartmentTree } from '../src/screens/tree-access';
+
+const STATE = { ready: true, reason: null, busy: false, runningJobId: null, queued: 0, terminal: false };
+const SECRET = 'Private journal of an inaccessible agent';
+const EVENTS_REPLY: [number, unknown] = [200, { events: [{ seq: 1, kind: 'text', data: { text: SECRET }, jobId: null, person: null, at: '2026-10-30T09:00:00.000Z' }], state: STATE }];
+const allowed: Parameters<typeof mockApi>[0] = {
+  'GET /api/agents/b1': [200, CARD],
+  'GET /api/agents/b1/events?after=0': EVENTS_REPLY,
+  'GET /api/nodes/commands': [200, { commands: [] }],
+  'GET /api/computer': [200, { available: false, until: null, asked: null }],
+};
+const refused: [number, unknown] = [403, { error: { code: 'forbidden', message: 'Hidden resource details.' } }];
+
+function Windows({ me = ME, org = DEV_ORG, id = 'b1' }: { me?: Me; org?: Org; id?: string }) {
+  const windows = useAgentWindows(id);
+  return <LanguageProvider><AgentWindows windows={windows} onOpen={() => {}} me={me} org={org} staff={null} requests={[]} onRequestsChanged={() => {}} /></LanguageProvider>;
+}
+
+describe('restricted access screens', () => {
+  it('uses the plain access-denied wording', () => {
+    render(<LanguageProvider><RouteUnavailable /></LanguageProvider>);
+    expect(screen.getByRole('heading', { name: 'Insufficient permissions' })).toBeInTheDocument();
+  });
+
+  it('shows only the employees and work present in a restricted department', () => {
+    const full = TREE_ORG.departments.find(d => d.id === 'd2')!;
+    const department = { ...full, employees: full.employees.filter(e => e.id === 'b1') };
+    render(<LanguageProvider><TreeView tree={DEV_TREE} department={department} onOpenTask={() => {}} /></LanguageProvider>);
+    expect(document.querySelectorAll('.tv-labs .dept-chip')).toHaveLength(1);
+    expect(screen.getByText('Bruno')).toBeInTheDocument();
+    expect(screen.queryByText('Timur')).not.toBeInTheDocument();
+    expect(screen.queryByText('Payment screen in the app')).not.toBeInTheDocument();
+    expect(document.querySelector('.tv-in')).not.toHaveTextContent('Payment screen in the app');
+  });
+
+  it('shows an access-denied window without the agent name or payload after 403', async () => {
+    mockApi({ 'GET /api/agents/b1': refused, 'GET /api/agents/b1/events?after=0': refused });
+    render(<Windows />);
+    expect(await screen.findByRole('heading', { name: 'Insufficient permissions' })).toBeInTheDocument();
+    expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
+    expect(screen.queryByText('Bruno')).not.toBeInTheDocument();
+    expect(screen.queryByText('Hidden resource details.')).not.toBeInTheDocument();
+    expect(screen.queryByText(SECRET)).not.toBeInTheDocument();
+  });
+
+  it('drops an open agent journal as soon as a new org removes the agent', async () => {
+    mockApi(allowed);
+    const { rerender } = render(<Windows />);
+    expect(await screen.findByText(SECRET)).toBeInTheDocument();
+    const restricted = { ...DEV_ORG, departments: DEV_ORG.departments.map(d => ({ ...d, employees: d.employees.filter(e => e.id !== 'b1') })) };
+    rerender(<Windows org={restricted} />);
+    expect(await screen.findByRole('heading', { name: 'Insufficient permissions' })).toBeInTheDocument();
+    expect(screen.queryByText(SECRET)).not.toBeInTheDocument();
+    expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
+  });
+
+  it('drops an open agent journal when a stream refresh returns 403', async () => {
+    const stream = fakeStream();
+    let access = true;
+    mockApi({
+      ...allowed,
+      'GET /api/agents/b1': () => access ? [200, CARD] : refused,
+      'GET /api/agents/b1/events?after=0': () => access ? EVENTS_REPLY : refused,
+    });
+    render(<Windows />);
+    expect(await screen.findByText(SECRET)).toBeInTheDocument();
+    access = false;
+    stream.send({ type: 'org' });
+    expect(await screen.findByRole('heading', { name: 'Insufficient permissions' })).toBeInTheDocument();
+    expect(screen.queryByText(SECRET)).not.toBeInTheDocument();
+    expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
+  });
+
+  it('shows a network failure without rendering an unchecked agent window', async () => {
+    mockApi({ 'GET /api/agents/b1': [0, { error: { code: 'network', message: '' } }] });
+    render(<Windows />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Hornhoof cannot reach its server');
+    expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
+  });
+
+  it('removes waiting relationships to hidden agents', () => {
+    const full = TREE_ORG.departments.find(d => d.id === 'd2')!;
+    const department = { ...full, employees: full.employees.filter(e => e.id === 'b1') };
+    const own = DEV_TREE.lines[0]!, hidden = DEV_TREE.lines[1]!;
+    const waiting = [own, hidden].map(line => ({ agent: line.agent, waitsForAgent: line.agent, from: '2026-10-30T09:00:00.000Z', kind: 'stall' as const, taskId: line.taskId, number: line.number, title: line.title }));
+    expect(visibleDepartmentTree({ ...DEV_TREE, waiting }, department).waiting).toEqual([waiting[0]]);
+  });
+});
