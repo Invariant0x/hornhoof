@@ -78,3 +78,40 @@
 - [ ] Read all logs. Report per-part/package/file times and percentage deltas with hardware caveats, exact package counts after >= before, and all unrelated failures without hiding them. Submit evidence and branch SHA.
 
 Execution note after run 103: same command and all package counts verified, full result failed. Twenty-four new timeouts on the changed part-3 worker include one moved case; the full local affected file passed 24/24 diagnostically. The failed remote result remains unmodified. Comparable full-suite validation and submit remain pending a suitable Linux pool/slot or a head decision. The earlier wait_for acknowledgment timed out.
+
+
+## Controlled continuation
+
+### Task 5: Common integration control and targeted diagnosis
+
+**Files:** Own `apps/node/test/terminal-host-waits.test.ts` on task-378-control; integrate existing upstream fixes without editing protected files. Record provenance in the report.
+
+**Interfaces:** Consumes origin/turn-8 initially 0b4b238ce6a84007974cea919a8e032aa5639081 (includes408/374), plus409 when supplied. Produces pinned control and optimized SHAs, with control an ancestor of optimized and source differences limited to378 optimizations.
+
+- [ ] Pin and record the integration commit and the408/374 provenance. Await409's supplied commit; do not implement its fix.
+- [ ] On task-378-control characterize the two existing idle-boundary failures. Apply only accepted-report prefix selection, retaining all no-idle, PID/session, tool/screen assertions and real wait durations. Run the full10-case file green; prove an old-window idle fault still fails.
+- [ ] Merge this common control into task-378. Preserve the upstream new queued-run test when integrating the split file. Compare expanded registration names and assertion multisets against the updated control.
+- [ ] Read the full24 timeout/cleanup failure records and lifecycle code; no unproven fixes to excluded files. Run departments, migration-metadata, migrations, program-operator-evidence/migration/recovery, program-updates, test-runs-commit, watch-machine-drain, work-tree-route with maxWorkers2 and original limits. Record load/limits alongside diagnostics.
+- [ ] Commit/push both branches and record exact control/optimized/fix SHAs, candidate-only paths, config/lock equality and test counts.
+
+### Task 6: One-worker paired driver
+
+**Files:** Task artifact `.metrics/task-378/controlled/paired-driver.mjs` and its Node test fixture; attach the tested files. No production runner changes.
+
+**Interfaces:** Consumes full40-character control/optimized SHAs as explicit arguments and an ancestor check. Produces labeled HH_PAIR environment/resource/stage/timing/result records for control/optimized x logical shards1..4.
+
+- [ ] Write a small fixture-repository acceptance test first: eight fresh worktrees, exact commits, stages, maxWorkers2, logical HH_TEST_PART/PARTS, separate empty npm caches, failures retained, and differing configs rejected. Initially missing driver must fail.
+- [ ] Implement async child execution and5-second resource snapshots so sampling continues during tests. Run each logical shard with the same commands as command.sh, including ancillary stages only on logical part1. Keep all checks; report every failed stage and continue the paired comparison unless setup/identity makes it invalid.
+- [ ] Filter routine console output into labeled structured timing summaries; retain complete output of failed stages. Never print credentials or full environment. Validate constant identity/limits/config hashes across the pair; preserve all package counts.
+- [ ] Run fixture tests green, bash/Node syntax checks where applicable, and get one fresh read-only review of this new measurement driver before a full run. Record limits on page-cache/background-load control.
+
+### Task 7: Authorized paired run and report
+
+**Files:** Existing measurement report and task attachments.
+
+**Interfaces:** Consumes the reviewed driver, two pinned SHAs and completed targeted diagnostics. Produces one parts1 run_tests result with both variants, then a qualified final report.
+
+- [ ] Ensure409 is common to both variants and all required targeted checks have completed at original limits. Push the final branch and attach driver/manifest before launching.
+- [ ] Launch one parts1 run_tests job, replaying four logical shards sequentially per SHA. Use wait_for for30minutes and end the turn.
+- [ ] Parse variant/part/package/file records and counts, compare load/limits, preserve failures, and label sequential timing correctly. If load is still incomparable, report the exact observed limitation for Operations.
+- [ ] Recheck required scoped gates after any source changes, commit/push report and submit with all concerns; do not claim an unmeasured historical turn7 percentage.
