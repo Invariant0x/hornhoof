@@ -84,9 +84,9 @@
 
 **Files:** apps/server/src/modules/tasks/external-wait.ts, testruns/runs.ts and targeted test-runs/external-wait tests. engine.ts remains owned by cc79818e; coordinate before editing it.
 
-- [ ] Read the head's #399 addendum and current turn-8 implementation. Reproduce unreadMessage=false -> run end with no wait -> stale move(wait) using an explicit barrier, for tests/work.
-- [ ] Apply the smallest atomic fix, preserving foreign waits and closed tasks; no timer-based repair or uncontrolled reread.
-- [ ] Verify both operation orders, one delivery, null externalWait and no extra wake at the former deadline. Record exact SHA and commands.
+- [x] Read the head's #399 addendum and current turn-8 implementation. Reproduce unreadMessage=false -> run end with no wait -> stale move(wait) using an explicit barrier, for tests/work.
+- [x] Apply the smallest atomic fix, preserving foreign waits and closed tasks; no timer-based repair or uncontrolled reread.
+- [x] Verify both operation orders, one delivery, null externalWait and no extra wake at the former deadline. Record exact SHA and commands.
 
 ## Task 6: Real cross-slice integration and measured evidence
 
@@ -121,3 +121,6 @@
 
 - Head resolved generated inputs at16:32: actual bytes of earlier completed artifacts participate in later keys. Self/forward references/cycles and missing results fail. Generated-input RED2/GREEN10; CC extraction follows before commit.
 - Head expanded#399 at16:46 with the existing#296/#347/#367 wait race. Reread the body and receiving-code-review skill before integrating; this is not yet reproduced or fixed. Task5 added before final integration.
+
+- Native migration0066 was regenerated after fresh turn-8/#391 atcaa01f45. SQL is byte-identical to the independently checked preview. Native migration2/2 passed; journal65->66 preserved. B is now available directly in turn-8; do not retain a temporary service adapter.
+- Controlled wait race RED2 showed stale acceptance and one deadline expiration for both modes. Atomic task-version change before result commit gives GREEN2. Affected server tests147/147; source tsc, typecheck:tests and scoped ESLint0; endWaitForRun CC4->3, new helpers CC<=3, dryer clean. A task result now advances the current holder's task revision even without an installed wait, requiring a reread for concurrent actions; foreign/closed state stays unchanged.

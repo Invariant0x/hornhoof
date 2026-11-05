@@ -3,12 +3,14 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { and, asc, eq, inArray } from 'drizzle-orm';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import { ApiError } from '../src/errors.js';
+import * as waitNotices from '../src/modules/tasks/wait-notices.js';
 import { encryptSecret } from '../src/crypto/secrets.js';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agents, attachments, companies, departments, jobs, pendingWakes, subscriptions, taskEvents, tasks, testParts, testRuns } from '../src/db/schema.js';
 import { createTask } from '../src/modules/tasks/engine.js';
-import { checkExternalWaits } from '../src/modules/tasks/external-wait.js';
+import { checkExternalWaits, waitFor } from '../src/modules/tasks/external-wait.js';
 import { afterJob } from '../src/modules/tasks/wake.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
 import { evidenceOf, freshnessOf } from '../src/modules/testruns/evidence.js';
@@ -1329,8 +1331,8 @@ describe('a run that ends while the one who started it waits', () => {
       ivan.node.send(done(await nextOf(ivan.node, 'tests.run')));
       await nextOf(ivan.node, 'tests.ack');
       await endedOnce(c, new RegExp(`${run.name} 1 (passed|is done)`));
-      /* With no wait to end, the task itself did not move. */
-      expect((await taskRow(c)).version).toBe(before.version);
+      /* A new result invalidates a concurrent wait built from the old task revision. */
+      expect((await taskRow(c)).version).toBe(before.version + 1);
     });
 
     it('wakes nobody on a task cancelled meanwhile', async () => {
@@ -1421,21 +1423,22 @@ describe('a run that ends while the one who started it waits', () => {
     expect(told.prompts[0]).toMatch(/Test run 1 passed[\s\S]*Test run 2 passed/);
   });
 
-  it("leaves the wait of someone else alone and still tells the one who started the run", async () => {
+  it.each(RUN_TOOLS)("leaves another holder's wait alone when $tool ends and still tells its starter", async run => {
     const c = await company();
     const ivan = await c.machine(c.ceo, 'ivan-mac');
     const head = await c.turn(c.head, c.task.id);
-    expect((await head.call('run_tests', { command: 'make check' })).error).toBe(false);
+    expect((await head.call(run.tool, { command: 'make check', ...run.args })).error).toBe(false);
     await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, head.job.id));
     const bruno = await c.turn(c.bruno);
     expect((await bruno.call('wait_for', { task: c.task.number, reason: 'A deployment', until: anHour() })).error).toBe(false);
     await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, bruno.job.id));
 
+    const before = await taskRow(c);
     ivan.node.send(done(await nextOf(ivan.node, 'tests.run')));
     await until(async () => (await toldOf(c, c.head.id, c.task.id)).turns.length > 0);
 
-    expect((await toldOf(c, c.head.id, c.task.id)).prompts).toEqual([expect.stringContaining('Test run 1 passed')]);
-    expect((await taskRow(c)).externalWait).toMatchObject({ reason: 'A deployment' });
+    expect((await toldOf(c, c.head.id, c.task.id)).prompts).toEqual([expect.stringMatching(new RegExp(`${run.name} 1 (passed|is done)`))]);
+    expect(await taskRow(c)).toMatchObject({ externalWait: { reason: 'A deployment' }, version: before.version });
     expect((await toldOf(c, c.bruno.id, c.task.id)).turns).toEqual([]);
   });
 
@@ -1464,4 +1467,45 @@ describe('a run that ends while the one who started it waits', () => {
     expect(refused.error).toBe(true);
     expect((await taskRow(c)).externalWait).toBeNull();
   });
+});
+
+
+function waitRaceBarrier() {
+  let resolve!: () => void;
+  const promise = new Promise<void>(done => { resolve = done; });
+  return { promise, resolve };
+}
+
+it.each(RUN_TOOLS)('rejects a stale wait after unread check when $tool commits its result before the wait write', async run => {
+  const c = await company(), machine = await c.machine(c.ceo, 'wait-race');
+  const turn = await c.turn(c.bruno);
+  expect((await turn.call(run.tool, { command: 'make check', ...run.args })).error).toBe(false);
+  const part = await nextOf(machine.node, 'tests.run');
+  const [stored] = await c.db.select().from(testParts).where(eq(testParts.id, part.partId));
+  const checked = waitRaceBarrier(), resume = waitRaceBarrier(), original = waitNotices.requestedWaitNotice;
+  // This production boundary runs after unreadMessage=false and before move starts its transaction.
+  const paused = vi.spyOn(waitNotices, 'requestedWaitNotice').mockImplementation(async (...args) => {
+    const notice = await original(...args);
+    if (args[1].id === c.task.id) { checked.resolve(); await resume.promise; }
+    return notice;
+  });
+  onTestFinished(() => { resume.resolve(); paused.mockRestore(); });
+  const deadline = anHour();
+  const waiting = waitFor(c.app.ctx, c.bruno.id, c.task.id, { reason: 'The run result', until: deadline }).then(
+    () => ({ accepted: true, reason: null }),
+    (error: unknown) => ({ accepted: false, reason: error instanceof ApiError ? error.reason : 'unexpected' }),
+  );
+  await checked.promise;
+  expect((await taskRow(c)).externalWait).toBeNull();
+  machine.node.send(done(part));
+  await until(async () => (await c.db.select().from(testRuns).where(eq(testRuns.id, stored.runId)))[0]!.status === 'passed');
+  expect((await taskRow(c)).externalWait).toBeNull();
+  expect((await c.db.select().from(pendingWakes).where(and(eq(pendingWakes.taskId, c.task.id), eq(pendingWakes.why, run.why))))).toHaveLength(1);
+  resume.resolve(); const outcome = await waiting;
+  await nextOf(machine.node, 'tests.ack');
+  await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, turn.job.id));
+  const before = await taskRow(c), told = await toldOf(c, c.bruno.id, c.task.id);
+  const expired = await checkExternalWaits(c.app.ctx, new Date(new Date(deadline).getTime() + 1));
+  const after = await toldOf(c, c.bruno.id, c.task.id);
+  expect({ ...outcome, externalWait: before.externalWait, results: told.news, expired, resultsAfter: after.news }).toEqual({ accepted: false, reason: 'task_changed', externalWait: null, results: 1, expired: 0, resultsAfter: 1 });
 });
