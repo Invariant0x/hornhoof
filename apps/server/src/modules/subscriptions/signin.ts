@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { TERM_CHUNK } from '@hornhoof/protocol';
 import { and, eq, isNull } from 'drizzle-orm';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
@@ -11,6 +10,7 @@ import { publicUrl } from '../link/link.js';
 import { updateCommand } from '../nodes/command.js';
 import { nodeIdentity, type NodeIdentity } from '../nodes/hub.js';
 import { liveNode } from '../nodes/nodes.js';
+import { cols, followFrames, keepLooking, rows } from '../terminals/look.js';
 import { CLOSE } from '../terminals/relay.js';
 import { LOGIN_KEY } from './credentials.js';
 
@@ -21,13 +21,7 @@ const TERMINAL_SIGNIN = new Set(['claude', 'codex']);
 const IdParams = z.object({ id: z.uuid() });
 const SigninBody = z.object({ nodeId: z.uuid().optional(), fresh: z.boolean() });
 const StopBody = z.object({ nodeId: z.uuid() });
-const cols = z.coerce.number().int().min(10).max(500);
-const rows = z.coerce.number().int().min(4).max(200);
 const TerminalQuery = z.object({ nodeId: z.uuid(), cols: cols.catch(120), rows: rows.catch(36) });
-const FromBrowser = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('input'), data: z.string().min(1).max(TERM_CHUNK) }),
-  z.object({ type: z.literal('resize'), cols, rows }),
-]);
 
 const unknown = () => new ApiError(404, 'not_found', 'This subscription does not exist.', 'subscription_unknown');
 const notOwner = () => new ApiError(403, 'forbidden', 'Only the owner of this plan signs it in.', 'not_owner');
@@ -87,7 +81,7 @@ export function signinRoutes(app: FastifyInstance, ctx: Ctx): void {
     return reply.code(204).send();
   });
 
-  const found = new WeakMap<FastifyRequest, { personId: string; node: NodeIdentity; cols: number; rows: number }>();
+  const found = new WeakMap<FastifyRequest, { personId: string; companyId: string; node: NodeIdentity; cols: number; rows: number }>();
   app.get(
     '/api/subscriptions/:id/signin/terminal',
     {
@@ -97,11 +91,11 @@ export function signinRoutes(app: FastifyInstance, ctx: Ctx): void {
         const q = TerminalQuery.parse(req.query ?? {});
         const [node] = await db.select({ id: nodes.id }).from(nodes).where(and(eq(nodes.id, q.nodeId), eq(nodes.subscriptionId, sub.id), liveNode));
         if (!node) throw noNode();
-        found.set(req, { personId: me.id, node: nodeIdentity(node.id), cols: q.cols, rows: q.rows });
+        found.set(req, { personId: me.id, companyId: me.companyId, node: nodeIdentity(node.id), cols: q.cols, rows: q.rows });
       },
     },
     (socket, req) => {
-      const { personId, node, cols, rows } = found.get(req)!;
+      const { personId, companyId, node, cols, rows } = found.get(req)!;
       const termId = randomUUID();
       if (!hub.isReady(node)) return socket.close(...CLOSE.nodeOffline);
       if (!hub.hasTerminals(node)) return socket.close(...CLOSE.noTerminal);
@@ -111,23 +105,12 @@ export function signinRoutes(app: FastifyInstance, ctx: Ctx): void {
         return socket.close(...CLOSE.nodeOffline);
       }
       socket.send(JSON.stringify({ type: 'ready', write: true }));
-      socket.on('message', raw => {
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(String(raw));
-        } catch {
-          return;
-        }
-        const msg = FromBrowser.safeParse(parsed);
-        if (!msg.success) return;
-        if (msg.data.type === 'input') hub.send(node, { type: 'term.input', termId, data: msg.data.data });
-        else hub.send(node, { type: 'term.resize', termId, cols: msg.data.cols, rows: msg.data.rows });
-      });
-      /* A person who signed out stops seeing it. */
-      const check = setInterval(() => void ownPlan(req).catch(() => socket.close(...CLOSE.noAccess)), ctx.config.streamPingMs);
-      socket.on('close', () => {
-        clearInterval(check);
-        if (ctx.terminals.remove(termId)) hub.send(node, { type: 'term.close', termId });
+      /* A person who signed out or lost the plan stops seeing it, and their keys stop. */
+      const mayGoOn = keepLooking(ctx, socket, { termId, node, companyId }, () => ownPlan(req).then(() => null));
+      followFrames(ctx, socket, async data => {
+        if (!(await mayGoOn())) return;
+        if (data.type === 'input') hub.send(node, { type: 'term.input', termId, data: data.data });
+        else hub.send(node, { type: 'term.resize', termId, cols: data.cols, rows: data.rows });
       });
     },
   );
