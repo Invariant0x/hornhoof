@@ -1,14 +1,11 @@
 import { and, asc, desc, eq, isNull } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { accessOf, agentSpot, canReach, type Access } from '../../auth/access.js';
+import { canReach, type Access } from '../../auth/access.js';
+import { seesAgentId, viewerOf } from '../../auth/agent-view.js';
 import type { Person } from '../../auth/session.js';
 import { agents, departments, jobs, people, subscriptions, tasks } from '../../db/schema.js';
 import { deptName } from '../departments/templates.js';
 import { taskSpot } from '../tasks/engine.js';
-
-export async function canOpenAgent(ctx: Ctx, reach: Access, agent: typeof agents.$inferSelect): Promise<boolean> {
-  return agent.kind === 'orchestrator' ? reach.whole : canReach(reach, await agentSpot(ctx.db, agent));
-}
 
 /* startedByCeo: null for a turn no person started. One the CEO delegate started answers the delegate, not the CEO. */
 function currentWork(current: { job: typeof jobs.$inferSelect; task: typeof tasks.$inferSelect | null; startedByCeo: boolean | null } | undefined, reach: Access) {
@@ -21,10 +18,12 @@ function currentWork(current: { job: typeof jobs.$inferSelect; task: typeof task
   };
 }
 
-/* Both lists describe the same employees. Placement stays private to their callers, outside the public view. */
+/* Both lists describe the same employees, those this person sees. Placement stays private to their callers, outside the
+   public view. */
 export async function runningAgents(ctx: Ctx, viewer: Person) {
   const { db, templates } = ctx;
-  const reach = await accessOf(db, viewer);
+  const sight = await viewerOf(db, viewer);
+  const reach = sight.access;
   const rows = await db.select({ agent: agents, department: departments, subscription: subscriptions })
     .from(agents)
     .innerJoin(subscriptions, eq(subscriptions.id, agents.subscriptionId))
@@ -36,19 +35,19 @@ export async function runningAgents(ctx: Ctx, viewer: Person) {
     .leftJoin(people, eq(people.id, jobs.createdBy))
     .where(and(eq(jobs.companyId, viewer.companyId), eq(jobs.status, 'running')))
     .orderBy(desc(jobs.startedAt), desc(jobs.createdAt));
-  return Promise.all(rows.sort((a, b) => Number(b.agent.kind === 'orchestrator') - Number(a.agent.kind === 'orchestrator')).map(async ({ agent: a, department: d, subscription: s }) => {
+  return rows.filter(r => seesAgentId(sight, r.agent.id)).sort((a, b) => Number(b.agent.kind === 'orchestrator') - Number(a.agent.kind === 'orchestrator')).map(({ agent: a, department: d, subscription: s }) => {
     const current = work.find(w => w.job.agentId === a.id);
     return {
       subscriptionId: s.id,
       nodeId: a.nodeId,
       builtin: s.kind === 'api_key',
       view: {
-        id: a.id, name: a.name, canOpen: await canOpenAgent(ctx, reach, a),
+        id: a.id, name: a.name, canOpen: true,
         title: (a.roleKey && templates.roles.get(a.roleKey)?.title) || null,
         department: d ? { id: d.id, name: deptName(d) } : null,
         provider: s.provider,
         ...currentWork(current, reach),
       },
     };
-  }));
+  });
 }

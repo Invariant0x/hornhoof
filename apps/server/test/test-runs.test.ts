@@ -6,14 +6,14 @@ import { and, asc, eq, inArray } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { encryptSecret } from '../src/crypto/secrets.js';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agentEvents, agents, attachments, companies, departments, jobs, pendingWakes, subscriptions, taskEvents, tasks, testParts, testRuns } from '../src/db/schema.js';
+import { agentEvents, agents, attachments, companies, departments, jobs, pendingWakes, subscriptions, taskEvents, tasks, testParts, testRuns , people } from '../src/db/schema.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import { checkExternalWaits } from '../src/modules/tasks/external-wait.js';
 import { afterJob } from '../src/modules/tasks/wake.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
 import { evidenceOf, freshnessOf } from '../src/modules/testruns/evidence.js';
 import { checkTestTimes, placesOf, pumpTests } from '../src/modules/testruns/runs.js';
-import { as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, TEST_COMMIT, until, type FakeNode } from './helpers.js';
+import { as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, TEST_COMMIT, until, type FakeNode, ownPlan } from './helpers.js';
 
 const GIB = 1024 ** 3;
 const NODE_KEY = 'builtin-node-key-0123456789abcdef';
@@ -917,6 +917,10 @@ describe('the pool of machines', () => {
     const { call } = await c.turn(c.bruno);
     await call('run_tests', { command: 'npm test' });
     const part = await nextOf(ann.node, 'tests.run');
+    /* A part on her own machine stays nameless to her while the agent who runs it is on someone else's plan. */
+    expect((await c.app.inject({ method: 'GET', url: '/api/pool', ...as(c.ann) })).json().machines[0].parts).toEqual([]);
+    const [annRow] = await c.db.select().from(people).where(eq(people.name, 'Ann'));
+    await ownPlan(c.db, annRow!.email, c.bruno.id);
     const seen = (await c.app.inject({ method: 'GET', url: '/api/pool', ...as(c.ann) })).json();
     expect(seen.machines.map((m: { name: string }) => m.name)).toEqual(['ann-pc']);
     expect(seen.machines[0].parts).toEqual([expect.objectContaining({ run: 1, part: 1 })]);

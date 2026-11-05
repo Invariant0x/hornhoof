@@ -7,7 +7,7 @@ import { agents, companies, departments, jobs, people, requests, subscriptions, 
 import { decisionPrincipal } from '../src/modules/conversation/decision-context.js';
 import { enqueueTurn, openTypedTurn } from '../src/modules/conversation/queue.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
-import { approvalAsked, as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
+import { approvalAsked, as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until, type FakeNode, takePlan } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
 const IVAN_TO_ORCHESTRATOR = 'From Ivan (CEO) to Orchestrator:\n\n';
@@ -131,12 +131,13 @@ describe("writing to an agent whose terminal the person only watches", () => {
     expect(await jobOf(app, opened.jobId!)).toEqual({ createdBy: zedId, answersCeo: true });
   });
 
-  it('opens the turn in the name of a person with the employee\'s department, without answering the CEO', async () => {
-    const { app, url, builtin, bruno, maria, mariaId } = await withEmployees();
+  it('opens the turn in the name of a person of the department who owns the plan, without answering the CEO', async () => {
+    const { app, db, url, builtin, bruno, maria, mariaId } = await withEmployees();
+    await takePlan(db, 'maria@example.com', bruno.id);
     const screen = await watch(url, maria, bruno.id);
-    expect((await next(builtin, 'term.open')).write).toBe(false);
+    expect((await next(builtin, 'term.open')).write).toBe(true);
     await until(() => screen.frames.length > 0);
-    expect(screen.frames[0]).toEqual({ type: 'ready', write: false });
+    expect(screen.frames[0]).toEqual({ type: 'ready', write: true });
     const said = await say(app, maria, bruno.id, 'Please check the cart');
     expect(said.statusCode).toBe(202);
     const run = await next(builtin, 'job.run');
@@ -183,6 +184,7 @@ describe("writing to an agent whose terminal the person only watches", () => {
   it('gives a person with a department and a CEO delegate mark no answers_ceo in the window, as anyone of the department', async () => {
     const { app, db, bruno, maria, mariaId } = await withEmployees();
     await db.update(people).set({ isCeoDelegate: true }).where(eq(people.id, mariaId));
+    await takePlan(db, 'maria@example.com', bruno.id);
     const said = await say(app, maria, bruno.id, 'Please check the cart');
     expect(said.statusCode).toBe(202);
     expect(await jobOf(app, said.json().jobId)).toEqual({ createdBy: mariaId, answersCeo: false });
@@ -191,7 +193,7 @@ describe("writing to an agent whose terminal the person only watches", () => {
   it('turns away someone without the right to write, on every door of the window, and opens no turn', async () => {
     const { app, url, db, sam, maria } = await withEmployees();
     const turnsBefore = (await db.select().from(jobs)).length;
-    for (const [agent, reason] of [[sam.id, 'not_your_department'], ['orchestrator', 'company_scope_only']] as const) {
+    for (const [agent, reason] of [[sam.id, 'agent_hidden'], ['orchestrator', 'agent_hidden']] as const) {
       for (const res of [await say(app, maria, agent, 'Hi'), await app.inject({ url: `/api/agents/${agent}/events`, ...as(maria) }), await app.inject({ url: `/api/agents/${agent}`, ...as(maria) })]) {
         expect(res.statusCode).toBe(403);
         expect(res.json().error.reason).toBe(reason);
@@ -212,15 +214,19 @@ describe("writing to an agent whose terminal the person only watches", () => {
     }
   });
 
-  it('tells a person with the department of an employee on another plan that they cannot type', async () => {
+  it('tells the owner of the plan they type, and closes the window to a person with the department on another plan', async () => {
     const { app, bruno, zed, maria } = await withEmployees();
-    const typing = async (person: string) => (await app.inject({ url: `/api/agents/${bruno.id}/events`, ...as(person) })).json().state.canType;
-    expect(await typing(maria)).toBe(false);
-    expect(await typing(zed)).toBe(true);
+    const read = (person: string) => app.inject({ url: `/api/agents/${bruno.id}/events`, ...as(person) });
+    expect((await read(maria)).statusCode).toBe(403);
+    await takePlan(app.ctx.db, 'zed@example.com', bruno.id);
+    await app.ctx.db.update(people).set({ isCeoDelegate: true }).where(eq(people.name, 'Zed'));
+    expect((await read(zed)).json().state.canType).toBe(true);
   });
 
   it('goes by the plan the running turn is on when the agent moved to another plan mid-turn', async () => {
-    const { app, db, url, builtin, ceo, zed, orchestratorId } = await lent();
+    const { app, db, url, builtin, ceo, zed, zedId, orchestratorId } = await lent();
+    /* The CEO delegate sees the agent whichever plan it is on: this is about who types, not who sees. */
+    await delegate(app, ceo, zedId);
     const [agent] = await db.select().from(agents).where(eq(agents.id, orchestratorId));
     const [running] = await db.insert(jobs).values({ companyId: agent!.companyId, subscriptionId: agent!.subscriptionId!, agentId: orchestratorId, kind: 'conversation', prompt: 'A long turn.', timeoutMs: 900000, status: 'running', startedAt: new Date() }).returning();
     const [owner] = await db.select().from(people).where(eq(people.isOwner, true));
@@ -304,9 +310,10 @@ describe("an agent's live terminal", () => {
     expect(await state(plain.app, plain.ceo)).toMatchObject({ terminal: false });
   });
 
-  it("lets only the subscription's owner type: anyone else who reaches the agent watches", async () => {
-    const { app, url, ceo, builtin } = await live();
+  it("lets only the subscription's owner type: a CEO delegate who sees the agent watches", async () => {
+    const { app, db, url, ceo, builtin } = await live();
     const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.test', access: { whole: true } });
+    await db.update(people).set({ isCeoDelegate: true }).where(eq(people.name, 'Maria'));
     const screen = await watch(url, maria);
     const open = await next(builtin, 'term.open');
     expect(open.write).toBe(false);
@@ -391,6 +398,7 @@ describe("an agent's live terminal", () => {
     const [acme] = await db.select().from(companies);
     const [sales] = await db.insert(departments).values({ companyId: acme!.id, name: 'Sales', roleCode: 'SAL' }).returning();
     const maria = await invitePerson(app, ceo, { name: 'Maria', email: 'maria@acme.test', access: { whole: true } });
+    await db.update(people).set({ isCeoDelegate: true }).where(eq(people.name, 'Maria'));
     const screen = await watch(url, maria);
     await next(builtin, 'term.open');
     const [row] = await db.select().from(people).where(eq(people.name, 'Maria'));

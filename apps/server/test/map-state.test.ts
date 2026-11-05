@@ -14,7 +14,7 @@ import { ask, brokeDown, comment, createTask, leaveWork, loadTask, report, start
 import { agentState } from '../src/modules/conversation/queue.js';
 import { afterJob, wakeAll } from '../src/modules/tasks/wake.js';
 import type { Db } from '../src/db/client.js';
-import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
+import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until, type FakeNode, ownPlan } from './helpers.js';
 import { rowsRead } from './rows-read.js';
 
 type Org = { serverNow: string; workLines: WorkLine[]; departments: { id: string; workLines: WorkLine[]; reworkAt: string | null }[] };
@@ -386,7 +386,7 @@ describe('the cycles of a line', () => {
 });
 
 describe('who sees the lines', () => {
-  it("shows a person only the lines of the departments they reach, and no task or job of them", async () => {
+  it("shows a person only the lines between agents they see, and no task or job of them", async () => {
     const { app, ctx, ceo, dev, sales, orchestrator, bruno, hana, member, run, org } = await company();
     const api = await member('Checkout API', bruno.id);
     await run(bruno.id, api.id);
@@ -396,6 +396,10 @@ describe('who sees the lines', () => {
     expect(lineOf(hers, hana.id, bruno.id)).toBeUndefined();
     expect(lineOf(hers, orchestrator.id, hana.id)).toBeUndefined();
     const dan = await invitePerson(app, ceo, { name: 'Dan', email: 'dan@acme.com', access: { departments: [dev.id] } });
+    /* A line takes both of its ends: on his plan only Bruno, it does not show; with Hana too, it does. */
+    await ownPlan(ctx.db, 'dan@acme.com', bruno.id);
+    expect(lineOf(await org(dan), hana.id, bruno.id)).toBeUndefined();
+    await ownPlan(ctx.db, 'dan@acme.com', hana.id, bruno.id);
     const his = await org(dan);
     expect(stateOf(his, hana, bruno)).toBe('yellow');
     expect(Object.keys(lineOf(his, hana.id, bruno.id)!).sort()).toEqual(['downstreamAgentId', 'returnedAt', 'returnedEpoch', 'upstreamAgentId', 'workEpoch', 'working']);

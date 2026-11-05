@@ -217,7 +217,8 @@ describe('setting a department owner', () => {
   });
 });
 
-type Waiting = { requests: { id: string; ownerPersonId: string; canAnswer: boolean; decidedBy: { kind: string; department: { id: string } | null } }[]; counts: { byPerson: Record<string, number>; total: number } };
+type WaitingLine = { id: string; ownerPersonId: string; canAnswer: boolean; decidedBy: { kind: string; department: { id: string } | null } };
+type Waiting = { requests: WaitingLine[]; addressed: WaitingLine[]; counts: { byPerson: Record<string, number>; total: number } };
 
 describe('approvals with a department owner', () => {
   const asked = async (c: Awaited<ReturnType<typeof company>>) => (await ask(c.app.ctx, c.worker.id, c.task.id, { kind: 'approval', text: 'Merge?', commit: COMMIT })).request;
@@ -228,7 +229,8 @@ describe('approvals with a department owner', () => {
     await c.setOwner(c.ceoToken, c.dev.id, c.ids.dana);
     const request = await asked(c);
     const hers = await waiting(c, c.danaToken);
-    expect(hers.requests).toMatchObject([{ id: request.id, ownerPersonId: c.ids.dana, canAnswer: true, decidedBy: { kind: 'owner_and_ceo', department: { id: c.dev.id } } }]);
+    expect(hers.requests).toEqual([]);
+    expect(hers.addressed).toMatchObject([{ id: request.id, ownerPersonId: c.ids.dana, canAnswer: true, decidedBy: { kind: 'owner_and_ceo', department: { id: c.dev.id } } }]);
     expect(hers.counts.byPerson[c.ids.dana]).toBe(1);
   });
 
@@ -238,7 +240,9 @@ describe('approvals with a department owner', () => {
     const his = await waiting(c, c.ceoToken);
     expect(his.requests).toMatchObject([{ ownerPersonId: c.ids.ceo, canAnswer: true, decidedBy: { kind: 'ceo_and_delegate', department: null } }]);
     expect(his.counts).toMatchObject({ byPerson: { [c.ids.ceo]: 1 }, total: 1 });
-    expect((await waiting(c, c.danaToken)).requests).toMatchObject([{ canAnswer: false }]);
+    /* An approval no owner takes is the CEO's: it is nothing of Dana's, nor is the agent's work she does not see. */
+    expect((await waiting(c, c.danaToken)).requests).toEqual([]);
+    expect((await waiting(c, c.danaToken)).addressed).toEqual([]);
   });
 
   it('adds nothing to the number the CEO waits on while the department has its own owner, and still lists it for the CEO', async () => {
@@ -259,7 +263,7 @@ describe('approvals with a department owner', () => {
     const answer = (id: string, token: string) => c.app.inject({ method: 'POST', url: `/api/requests/${id}`, payload: { approve: true }, ...as(token) });
     const again = async () => {
       const r = await asked(c);
-      expect((await answer(r.id, c.samToken)).statusCode).toBe(404);
+      expect((await answer(r.id, c.samToken)).statusCode).toBe(403);
       return r;
     };
     for (const token of [c.danaToken, c.ceoToken, c.wholeToken]) {
@@ -277,6 +281,6 @@ describe('approvals with a department owner', () => {
     await c.setOwner(c.ceoToken, c.dev.id, c.ids.wes);
     const refused = await c.app.inject({ method: 'POST', url: `/api/requests/${request.id}`, payload: { approve: true }, ...as(c.danaToken) });
     expect(refused.statusCode).toBe(403);
-    expect((await waiting(c, c.wholeToken)).requests).toMatchObject([{ id: request.id, ownerPersonId: c.ids.wes, canAnswer: true }]);
+    expect((await waiting(c, c.wholeToken)).addressed).toMatchObject([{ id: request.id, ownerPersonId: c.ids.wes, canAnswer: true }]);
   });
 });

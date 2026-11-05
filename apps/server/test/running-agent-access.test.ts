@@ -3,7 +3,7 @@ import { expect, it } from 'vitest';
 import { agents, departments, jobs, people, tasks } from '../src/db/schema.js';
 import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
 
-it('lists canOpen with the same product and orchestrator access as the agent API', async () => {
+it('lists only the agents the agent API opens, on a plan and on a machine', async () => {
   const { app, db } = await testApp();
   const ceo = await setUpCompany(app);
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
@@ -27,10 +27,11 @@ it('lists canOpen with the same product and orchestrator access as the agent API
   const response = await app.inject({ url: '/api/subscriptions', ...as(viewer) });
   expect(response.statusCode).toBe(200);
   const shown = response.json().subscriptions[0].agents;
-  const byName = Object.fromEntries(shown.map((a: { name: string }) => [a.name, a]));
-  expect(byName['Product agent']).toMatchObject({ canOpen: true, busy: true, since: '2026-11-04T04:00:00.000Z', withCeo: true, title: { en: 'Backend engineer', ru: 'Бэкенд-разработчик' }, task: { number: 12, title: 'Product work' } });
-  expect(byName['Department agent']).toMatchObject({ canOpen: false, title: null, task: null });
-  expect(byName.Orchestrator).toMatchObject({ canOpen: false, busy: false, since: null, withCeo: false, task: null });
+  /* Her own plan runs an agent in a department she does not have and the orchestrator: she sees neither. */
+  expect(shown.map((a: { name: string }) => a.name)).toEqual(['Product agent']);
+  expect(shown[0]).toMatchObject({ canOpen: true, busy: true, since: '2026-11-04T04:00:00.000Z', withCeo: true, title: { en: 'Backend engineer', ru: 'Бэкенд-разработчик' }, task: { number: 12, title: 'Product work' } });
+  expect(response.body).not.toMatch(/Department agent|Private work/);
+  expect(JSON.stringify(shown)).not.toContain(orchestrator!.id);
   for (const [id, status] of [[own!.id, 200], [outside!.id, 403], [orchestrator!.id, 403]] as const) {
     expect((await app.inject({ url: `/api/agents/${id}`, ...as(viewer) })).statusCode).toBe(status);
   }
@@ -41,7 +42,7 @@ it('lists canOpen with the same product and orchestrator access as the agent API
   const nodeId = joined.json().nodes[0].nodeId as string;
   for (const id of [own!.id, outside!.id, orchestrator!.id]) await db.update(agents).set({ nodeId }).where(eq(agents.id, id));
   const machine = (await app.inject({ url: '/api/machines', ...as(viewer) })).json().machines.find((m: { hostname: string }) => m.hostname === 'maria-machine');
-  expect(machine.running.agents.map((a: { id: string; canOpen: boolean }) => [a.id, a.canOpen])).toEqual([[orchestrator!.id, false], [outside!.id, false], [own!.id, true]]);
+  expect(machine.running.agents.map((a: { id: string; canOpen: boolean }) => [a.id, a.canOpen])).toEqual([[own!.id, true]]);
 });
 
 it("says an agent is with the CEO only for a turn that answers the CEO, not the CEO's delegate", async () => {

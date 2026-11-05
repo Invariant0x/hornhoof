@@ -368,12 +368,14 @@ describe('who reads the report', () => {
     expect(res.json().report.turn.number).toBe(7);
   });
 
-  it('gives a person only the departments they reach, as if the others did not exist', async () => {
+  it('keeps the numbers of a whole department to the CEO and the delegate, whatever a person reaches', async () => {
     const c = await company();
     await closedTurn(c);
     const token = await invitePerson(c.app, c.ceoToken, { name: 'Lena', email: 'lena@acme.example', access: { departments: [c.sales.id] } });
-    expect((await get(c, token, c.sales.id, '?turn=7')).statusCode).toBe(200);
-    expect((await get(c, token, c.dev.id, '?turn=7')).statusCode).toBe(404);
+    for (const id of [c.sales.id, c.dev.id]) {
+      const res = await get(c, token, id, '?turn=7');
+      expect([res.statusCode, res.json().error.reason]).toEqual([403, 'ceo_view_only']);
+    }
   });
 
   it('gives no one who reaches only a product of the department its whole numbers', async () => {
@@ -381,7 +383,7 @@ describe('who reads the report', () => {
     await closedTurn(c);
     const [product] = await c.db.insert(departments).values({ companyId: c.companyId, name: 'Shop', parentId: c.dev.id, roleCode: 'DEV', position: 1 }).returning();
     const token = await invitePerson(c.app, c.ceoToken, { name: 'Pia', email: 'pia@acme.example', access: { departments: [product!.id] } });
-    expect((await get(c, token, c.dev.id, '?turn=7')).statusCode).toBe(404);
+    expect((await get(c, token, c.dev.id, '?turn=7')).statusCode).toBe(403);
   });
 
   it('refuses an unknown department, a bad turn, and no sign-in', async () => {

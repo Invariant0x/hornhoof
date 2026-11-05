@@ -8,7 +8,7 @@ import { orchestratorHeaders } from '../src/auth/internal.js';
 import { agents, companies, departments, people, proposals, requests, subscriptions, teams } from '../src/db/schema.js';
 import { decisionOwner, type Candidate } from '../src/modules/tasks/decisions.js';
 import { ask, cancel, createTask, report } from '../src/modules/tasks/engine.js';
-import { as, invitePerson, listen, openStream, setUpCompany, testApp, until } from './helpers.js';
+import { as, invitePerson, listen, openStream, setUpCompany, testApp, until, ownPlan } from './helpers.js';
 
 const listed = (departmentIds: string[], teamIds: string[] = []): Access => ({ whole: false, departments: new Set(departmentIds), teams: new Set(teamIds) });
 const person = (id: string, access: Access, extra: Partial<Candidate> = {}): Candidate => ({ id, status: 'active', isOwner: false, access, ...extra });
@@ -75,6 +75,7 @@ type DecidedBy = { kind: 'ceo_and_delegate' | 'department_and_ceo'; department: 
 type View = {
   requests: { id: string; ownerPersonId: string; canAnswer: boolean; decidedBy: DecidedBy; explained: string | null; task: { number: number } }[];
   proposals: { id: string; kind: string; ownerPersonId: string; canAnswer: boolean; decidedBy: DecidedBy; brief: string; department: { id: string } | null }[];
+  addressed: { id: string; canAnswer: boolean; ownerPersonId: string }[];
   computerAccess: { kind: string; id: string; ownerPersonId: string; canAnswer: boolean; decidedBy: DecidedBy; view: { asked: { reason: string } | null } } | null;
   counts: { byPerson: Record<string, number>; byAgent: Record<string, number>; total: number };
 };
@@ -169,12 +170,19 @@ describe('decisions waiting for people', () => {
     const all = await c.view(c.tokens.ceo);
     expect(ownersOf(all)).toEqual({ [itsOwn.request.id]: c.ids.ivan, [release.request.id]: c.ids.ivan });
     expect(all.counts).toEqual({ byPerson: { [c.ids.ivan]: 2 }, byAgent: { [c.orchestrator.id]: 1, [c.workers.dev.id]: 1 }, total: 2 });
-    /* Development's person sees the release of his department, not what the orchestrator asks the CEO. */
+    /* Development's person who owns its worker's plan sees the release of his agent, not what the orchestrator asks the CEO. */
+    await ownPlan(c.db, 'dan@acme.com', c.workers.dev.id);
     expect((await c.view(c.tokens.dan)).requests.map(r => r.id)).toEqual([release.request.id]);
   });
 
-  it("are counted from what the viewer may read: a department's person sees only the department's", async () => {
+  it("are counted from what the viewer may read: a department's person sees the work of their agents, and what is theirs to take", async () => {
     const c = await everyKind();
+    /* The worker on someone else's plan: only the decision that is his to take shows, by itself. */
+    const before = await c.view(c.tokens.dan);
+    expect(before.requests).toEqual([]);
+    expect(before.addressed.map(r => [r.id, r.canAnswer])).toEqual([[c.devQuestion.request.id, true]]);
+    expect(before.counts).toEqual({ byPerson: { [c.ids.dan]: 1 }, byAgent: {}, total: 1 });
+    await ownPlan(c.db, 'dan@acme.com', c.workers.dev.id);
     const his = await c.view(c.tokens.dan);
     expect(his.requests.map(r => r.id).sort()).toEqual([c.devQuestion, c.devApproval, c.devPeople, c.devPlain].map(x => x.request.id).sort());
     expect(his.proposals).toEqual([]);
@@ -195,21 +203,25 @@ describe('decisions waiting for people', () => {
     });
     const tias = await c.view(c.tokens.tia);
     expect(tias.requests).toEqual([]);
+    expect(tias.addressed).toEqual([]);
     expect(tias.counts).toEqual({ byPerson: {}, byAgent: {}, total: 0 });
   });
 
-  it('show a person of the whole company without the delegate mark every decision, and let them take none', async () => {
+  it('show a person of the whole company without the delegate mark only what their agents ask, and let them take none', async () => {
     const c = await everyKind();
+    const none = await c.view(c.tokens.zed);
+    expect([none.requests, none.addressed, none.proposals, none.computerAccess, none.counts.total]).toEqual([[], [], [], null, 0]);
+    await ownPlan(c.db, 'zed@acme.com', c.workers.dev.id, c.orchestrator.id);
     const his = await c.view(c.tokens.zed);
-    expect(his.requests).toHaveLength(6);
+    expect(his.requests).toHaveLength(4);
     expect(his.requests.every(r => !r.canAnswer)).toBe(true);
     expect(his.proposals.map(p => [p.id, p.canAnswer, p.decidedBy])).toEqual([
       [c.structure.id, false, { kind: 'ceo_and_delegate', department: null }],
       [c.staff.id, false, { kind: 'ceo_and_delegate', department: null }],
     ]);
     expect(his.computerAccess).toMatchObject({ canAnswer: false, decidedBy: { kind: 'ceo_and_delegate', department: null }, view: { asked: { reason: 'Inspect disk space.' } } });
-    expect(his.counts.total).toBe(9);
-    expect(his.counts.byPerson[c.ids.ivan]).toBe(8);
+    expect(his.counts.total).toBe(7);
+    expect(his.counts.byPerson[c.ids.ivan]).toBe(6);
   });
 
   it('let the CEO and the CEO delegate take every decision they see', async () => {
@@ -234,6 +246,7 @@ describe('decisions waiting for people', () => {
     expect(ceos.proposals).toHaveLength(2);
     expect(ceos.computerAccess).not.toBeNull();
     /* The filter is no key: someone else's decisions stay out of sight, and a stranger's filter shows nothing. */
+    await ownPlan(c.db, 'dan@acme.com', c.workers.dev.id);
     const sarasForDan = await c.view(c.tokens.dan, `?person=${c.ids.ivan}`);
     expect(sarasForDan.requests.map(r => r.id).sort()).toEqual([c.devApproval, c.devPeople, c.devPlain].map(x => x.request.id).sort());
     expect((await c.view(c.tokens.dan, '?person=00000000-0000-4000-8000-000000000999')).requests).toEqual([]);
@@ -280,12 +293,12 @@ describe('who may answer, by the rules of #49', () => {
     mktQuestion: { answer: 'Email.' },
   };
   const matrix: Record<Kind, Partial<Record<Who, 200 | 403 | 404>>> = {
-    devQuestion: { ceo: 200, delegate: 200, zed: 403, dan: 200, eve: 200, sara: 404, tia: 404 },
-    devApproval: { ceo: 200, delegate: 200, zed: 403, dan: 403, sara: 404, tia: 404 },
-    devPeople: { ceo: 200, delegate: 200, zed: 403, dan: 403, sara: 404 },
-    devPlain: { ceo: 200, delegate: 200, zed: 403, dan: 403, sara: 404 },
-    salesQuestion: { ceo: 200, delegate: 200, zed: 403, sara: 200, olga: 200, dan: 404 },
-    mktQuestion: { ceo: 200, delegate: 200, zed: 403, dan: 404, sara: 404 },
+    devQuestion: { ceo: 200, delegate: 200, zed: 403, dan: 200, eve: 200, sara: 403, tia: 403 },
+    devApproval: { ceo: 200, delegate: 200, zed: 403, dan: 403, sara: 403, tia: 403 },
+    devPeople: { ceo: 200, delegate: 200, zed: 403, dan: 403, sara: 403 },
+    devPlain: { ceo: 200, delegate: 200, zed: 403, dan: 403, sara: 403 },
+    salesQuestion: { ceo: 200, delegate: 200, zed: 403, sara: 200, olga: 200, dan: 403 },
+    mktQuestion: { ceo: 200, delegate: 200, zed: 403, dan: 403, sara: 403 },
   };
 
   async function staffed() {
@@ -307,13 +320,12 @@ describe('who may answer, by the rules of #49', () => {
         const res = await c.app.inject({ method: 'POST', url: `/api/requests/${id}`, payload: answers[kind], ...as(c.tokens[who]) });
         expect(res.statusCode).toBe(status);
         if (status === 403) expect(res.json().error.reason).toBe('decision_not_allowed');
-        if (status === 404) expect(res.json().error.reason).toBe('request_unknown');
         const [row] = await c.db.select().from(requests).where(eq(requests.id, id));
         expect(row!.status === 'open').toBe(status !== 200);
         if (status !== 200) expect(row).toMatchObject({ answeredBy: null, answer: null, picked: null });
-        const shown = (await c.view(c.tokens[who])).requests.find(r => r.id === id);
-        if (status === 404) expect(shown).toBeUndefined();
-        if (status === 403) expect(shown?.canAnswer).toBe(false);
+        /* What is not theirs to take and comes with no agent of theirs does not show at all. */
+        const seen = await c.view(c.tokens[who]);
+        if (status === 403) expect([...seen.requests, ...seen.addressed].find(r => r.id === id)).toBeUndefined();
       });
     }
   }
@@ -329,8 +341,8 @@ describe('who may answer, by the rules of #49', () => {
 
   it('shows the computer to people of the whole company and lets only the CEO and the delegate decide it, from their own screen', async () => {
     const c = await staffed();
-    expect((await c.app.inject({ url: '/api/computer', ...as(c.tokens.zed) })).json()).toMatchObject({ asked: { reason: 'Inspect disk space.' }, canAnswer: false });
-    expect((await c.app.inject({ url: '/api/computer', ...as(c.tokens.delegate) })).json()).toMatchObject({ canAnswer: true });
+    expect((await c.app.inject({ url: '/api/computer', ...as(c.tokens.zed) })).json()).toMatchObject({ asked: null, canAnswer: false });
+    expect((await c.app.inject({ url: '/api/computer', ...as(c.tokens.delegate) })).json()).toMatchObject({ asked: { reason: 'Inspect disk space.' }, canAnswer: true });
     expect((await c.app.inject({ url: '/api/computer', ...as(c.tokens.dan) })).statusCode).toBe(403);
     expect((await c.app.inject({ url: '/api/computer', headers: orchestratorHeaders(c.ids.ivan, c.orchestrator.id) })).statusCode).toBe(403);
     for (const action of ['decline', 'close', 'open']) {
@@ -379,8 +391,8 @@ describe('decisions on the map', () => {
     const c = await everyKind();
     const org = async (token: string): Promise<OrgView> => (await c.app.inject({ url: '/api/org', ...as(token) })).json();
     expect(cards(await org(c.tokens.ceo))).toEqual({ [c.ids.ivan]: 8, [c.ids.zed]: 0, [c.ids.dan]: 1, [c.ids.sara]: 0, [c.ids.olga]: 0, [c.ids.tia]: 0 });
-    expect(cards(await org(c.tokens.zed))).toEqual({ [c.ids.ivan]: 8, [c.ids.zed]: 0, [c.ids.dan]: 1, [c.ids.sara]: 0, [c.ids.olga]: 0, [c.ids.tia]: 0 });
-    expect(cards(await org(c.tokens.dan))).toEqual({ [c.ids.ivan]: 3, [c.ids.zed]: null, [c.ids.dan]: 1, [c.ids.sara]: null, [c.ids.olga]: null, [c.ids.tia]: null });
+    expect(cards(await org(c.tokens.zed))).toEqual({ [c.ids.ivan]: 0, [c.ids.zed]: 0, [c.ids.dan]: 0, [c.ids.sara]: 0, [c.ids.olga]: 0, [c.ids.tia]: 0 });
+    expect(cards(await org(c.tokens.dan))).toEqual({ [c.ids.ivan]: null, [c.ids.zed]: null, [c.ids.dan]: 1, [c.ids.sara]: null, [c.ids.olga]: null, [c.ids.tia]: null });
     expect(cards(await org(c.tokens.sara))).toEqual({ [c.ids.ivan]: 1, [c.ids.zed]: null, [c.ids.dan]: null, [c.ids.sara]: 0, [c.ids.olga]: null, [c.ids.tia]: null });
   });
 });
