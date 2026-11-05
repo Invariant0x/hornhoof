@@ -1,4 +1,4 @@
-import { defaultEffortOf, effortFor, effortsOf, modelsFor, ORCHESTRATOR_EFFORT, type ModelOption, type ProviderId } from '@hornhoof/protocol';
+import { defaultEffortOf, effortFor, effortsOf, modelsFor, ORCHESTRATOR_EFFORT, type Limits, type ModelOption, type ProviderId } from '@hornhoof/protocol';
 import { and, asc, eq, isNull, ne } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import type { Ctx } from '../../app.js';
@@ -57,6 +57,9 @@ function reachedLines(lines: readonly MapLine[], reach: Access, allAgents: reado
 }
 
 const teamField = (teamId: string | null) => (teamId ? { teamId } : {});
+
+/* Until when a plan is at its limit, from what it last read. */
+const limitOfPlan = (plan?: { limits: Limits | null; limitsUpdatedAt: Date | null }) => limitUntil(plan?.limits ?? null, plan?.limitsUpdatedAt ?? null);
 
 export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db, hub, templates, bus } = ctx;
@@ -194,7 +197,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
         ...agentProgramState(ctx, running.find(j => j.agentId === orchestrator.id), reach.whole),
         ...(reach.whole ? failures.get(orchestrator.id)! : { retry: null, failure: null, obsolete: null }),
         /* His plan is at its limit until then: he waits for the reset on it, and the CEO decides whether he moves. */
-        limitUntil: limitUntil((orchestrator.subscriptionId && subs.get(orchestrator.subscriptionId)?.limits) || null, (orchestrator.subscriptionId && subs.get(orchestrator.subscriptionId)?.limitsUpdatedAt) || null),
+        limitUntil: limitOfPlan(orchestrator.subscriptionId ? subs.get(orchestrator.subscriptionId) : undefined),
         subscription: orchestrator.subscriptionId ? await subView(db, node => hub.isOnline(node), orchestrator.subscriptionId, me) : null,
         machine: await machineOf(db, (await programNode(ctx, orchestrator.id))?.node ?? null),
       },

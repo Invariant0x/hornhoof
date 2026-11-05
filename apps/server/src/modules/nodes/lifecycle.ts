@@ -4,7 +4,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { nodes } from '../../db/schema.js';
 import { nodeReported } from './connections.js';
-import type { NodeIdentity } from './hub.js';
+import { isOperatorReply, type NodeIdentity } from './hub.js';
 import { handleNodeMessage } from './messages.js';
 import { hasCurrentKey, liveNode } from './nodes.js';
 import { rememberBuiltinStop } from './restarts.js';
@@ -23,16 +23,22 @@ async function stopping(ctx: Ctx, id: NodeIdentity, msg: Extract<NodeMessage, { 
 
 const isOperatorFrame = (frame: ProgramNodeMessage): frame is OperatorNodeMessage => frame.type.startsWith('program.');
 
-export async function receiveNodeMessage(ctx: Ctx, id: NodeIdentity, msg: ProgramNodeMessage): Promise<void> {
-  if (msg.type === 'hello') nodeDrainHello(ctx, id, msg.boot?.startedAt);
-  if (isOperatorFrame(msg)) {
-    if (msg.type === 'program.screen' || msg.type === 'program.key_result' || msg.type === 'program.key_prepared') {
-      if (await hasCurrentKey(ctx, id)) receiveOperatorReply(ctx, id, msg);
-    } else await acceptOperatorEvidence(ctx, id, msg);
+async function receiveOperatorFrame(ctx: Ctx, id: NodeIdentity, msg: OperatorNodeMessage): Promise<void> {
+  if (!isOperatorReply(msg)) {
+    await acceptOperatorEvidence(ctx, id, msg);
     return;
   }
+  if (await hasCurrentKey(ctx, id)) receiveOperatorReply(ctx, id, msg);
+}
+
+async function receiveBaseFrame(ctx: Ctx, id: NodeIdentity, msg: Exclude<ProgramNodeMessage, OperatorNodeMessage>): Promise<void> {
+  if (msg.type === 'hello') nodeDrainHello(ctx, id, msg.boot?.startedAt);
   if (msg.type === 'node.stopping') return stopping(ctx, id, msg);
   if (msg.type === 'node.reconnect') return nodeReported(ctx, id, msg);
   await handleNodeMessage(ctx, id, msg);
   if (msg.type === 'hello') await restoreOperatorNode(ctx, id);
+}
+
+export async function receiveNodeMessage(ctx: Ctx, id: NodeIdentity, msg: ProgramNodeMessage): Promise<void> {
+  return isOperatorFrame(msg) ? receiveOperatorFrame(ctx, id, msg) : receiveBaseFrame(ctx, id, msg);
 }

@@ -122,6 +122,7 @@ describe('planned node updates', () => {
 
   it('waits an hour and a half and retries a quarter of an hour later, unless set otherwise', () => {
     expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET })).toMatchObject({ nodeDrainMs: 5_400_000, nodeUpdateRetryMs: 900_000 });
+    expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, NODE_DRAIN_MS: '', NODE_UPDATE_RETRY_MS: '' })).toMatchObject({ nodeDrainMs: 5_400_000, nodeUpdateRetryMs: 900_000 });
     expect(loadConfig({ HORNHOOF_SECRET: TEST_SECRET, NODE_DRAIN_MS: '60000', NODE_UPDATE_RETRY_MS: '1000' })).toMatchObject({ nodeDrainMs: 60_000, nodeUpdateRetryMs: 1000 });
   });
 

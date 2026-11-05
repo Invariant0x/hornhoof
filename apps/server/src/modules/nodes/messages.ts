@@ -36,6 +36,15 @@ function jobsOf(id: NodeIdentity, ctx: Ctx): SQL {
    A queued conversation turn still waits in Hornhoof and goes out later. */
 const ON_NODE = or(eq(jobs.status, 'running'), and(eq(jobs.status, 'queued'), eq(jobs.kind, 'test')));
 
+type FinishedJob = { agentId: string | null; kind: typeof jobs.$inferSelect.kind };
+
+function holdForWaitingWords(ctx: Ctx, msg: Extract<NodeMessage, { type: 'job.done' }>, finished: FinishedJob[], now: Date): void {
+  if (!msg.wordsWaiting) return;
+  for (const job of finished) {
+    if (job.agentId && job.kind === 'conversation') holdForWords(ctx, job.agentId, msg.jobId, now);
+  }
+}
+
 async function jobEnded(ctx: Ctx, id: NodeIdentity, msg: Extract<NodeMessage, { type: 'job.done' }>, now: Date) {
   const [job] = await ctx.db.select({ agentId: jobs.agentId }).from(jobs).where(and(eq(jobs.id, msg.jobId), jobsOf(id, ctx)));
   const finish = async () => {
@@ -59,9 +68,7 @@ async function jobEnded(ctx: Ctx, id: NodeIdentity, msg: Extract<NodeMessage, { 
       })
       .where(and(eq(jobs.id, msg.jobId), inArray(jobs.status, OPEN_JOBS), jobsOf(id, ctx)))
       .returning({ companyId: jobs.companyId, agentId: jobs.agentId, kind: jobs.kind });
-    if (msg.wordsWaiting) for (const job of finished) {
-      if (job.agentId && job.kind === 'conversation') holdForWords(ctx, job.agentId, msg.jobId, now);
-    }
+    holdForWaitingWords(ctx, msg, finished, now);
     return finished;
   };
   return job?.agentId ? onAgent(ctx, job.agentId, finish) : finish();

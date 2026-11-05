@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { parseNodeMessage, type ConnectionEnd, type NodeLoad, type NodeMessage, type ProgramInfo } from '@hornhoof/protocol';
-import { OperatorDeliveryMetadata, OperatorNodeMessage, type ProgramNodeMessage, type ProgramServerMessage } from '@hornhoof/protocol/program-operator';
+import { OperatorDeliveryMetadata, OperatorNodeMessage, type OperatorKeyPrepared, type OperatorKeyResult, type OperatorScreen, type ProgramNodeMessage, type ProgramServerMessage } from '@hornhoof/protocol/program-operator';
 import type { WebSocket } from 'ws';
 import { z } from 'zod';
 
@@ -62,6 +62,15 @@ export type TerminalMessage = Extract<NodeMessage, { type: 'term.data' | 'term.e
 
 const isTerminalFrame = (msg: ProgramNodeMessage): msg is TerminalMessage =>
   msg.type === 'term.data' || msg.type === 'term.exit' || msg.type === 'term.program';
+
+/* What a node answers a program operator's request with. */
+export const isOperatorReply = (msg: ProgramNodeMessage): msg is OperatorScreen | OperatorKeyResult | OperatorKeyPrepared =>
+  msg.type === 'program.screen' || msg.type === 'program.key_result' || msg.type === 'program.key_prepared';
+
+/* A message before it may wait for this word, as a finished job waits for words typed into another agent's turn. */
+const isAwaitedFrame = (msg: ProgramNodeMessage) => msg.type === 'agent.said' || isOperatorReply(msg);
+
+const closeReason = (reason?: Buffer) => (reason?.length ? reason.toString() : null);
 
 type HubOptions = {
   pingMs: number;
@@ -128,7 +137,7 @@ export class NodeHub {
   private closed(entry: Entry, code: number, reason?: Buffer): Omit<LinkEnd, 'link'> {
     const known = entry.ending;
     const said = code === NO_CLOSE_FRAME ? 'network' : 'node_closed';
-    return { at: known?.at ?? new Date(), cause: this.leaving ? 'server_stopped' : (known?.cause ?? said), code, reason: reason?.length ? reason.toString() : null, error: known?.error ?? null };
+    return { at: known?.at ?? new Date(), cause: this.leaving ? 'server_stopped' : (known?.cause ?? said), code, reason: closeReason(reason), error: known?.error ?? null };
   }
 
   private endLink(id: NodeIdentity, entry: Entry, end: Omit<LinkEnd, 'link'>): void {
@@ -156,8 +165,7 @@ export class NodeHub {
     }
     const deliver = () => (this.sockets.get(key) === entry ? this.opts.onMessage(id, msg) : Promise.resolve());
     const report = (err: unknown) => this.opts.onError?.(err);
-    /* A message before it may wait for this word, as a finished job waits for words typed into another agent's turn. */
-    if (msg.type === 'agent.said' || msg.type === 'program.screen' || msg.type === 'program.key_result' || msg.type === 'program.key_prepared') {
+    if (isAwaitedFrame(msg)) {
       void deliver().catch(report);
       return chain;
     }
