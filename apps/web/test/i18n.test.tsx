@@ -90,6 +90,13 @@ describe('errorText', () => {
   });
 });
 
+describe('request sending state', () => {
+  it('names the in-flight request sending state in English and Russian', () => {
+    expect((en.tasks as Record<string, unknown>).sending).toBe('Sending');
+    expect((ru.tasks as Record<string, unknown>).sending).toBe('Отправка');
+  });
+});
+
 describe('work tree words', () => {
   it('uses the actual turn, branch and times in both languages', () => {
     for (const L of [en.dept.tree, ru.dept.tree]) {
