@@ -1,0 +1,17 @@
+{
+  "name": "hornhoof-quality-pilot",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test cache.test.mjs run.test.mjs",
+    "pilot": "node run.mjs"
+  },
+  "devDependencies": {
+    "@stryker-mutator/core": "10.1.1",
+    "@stryker-mutator/vitest-runner": "10.1.1",
+    "@vitest/coverage-v8": "5.0.5",
+    "typescript": "5.9.3",
+    "vitest": "5.0.5",
+    "vite": "8.3.5"
+  }
+}
