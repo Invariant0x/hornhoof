@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type RefObject, type UIEvent } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type RefObject, type UIEvent } from 'react';
 import { useT } from '../i18n';
-import type { Department, DepartmentTree } from '../types';
+import type { Department, DepartmentTree, Employee } from '../types';
 import { Pulse, motionSpeed, toD, useReducedMotion } from '../ui/wires';
 import {
   idleClass, plateHeight, plateKey, plateRoom, treeClock, treeLayout, trunkBranch, reviewsOf, statePriority,
@@ -223,7 +223,7 @@ function Target({ hit, tree, department, selected, select }: Omit<CanvasProps, '
     : <rect {...props} x={hit.x} y={hit.y} width={hit.width} height={hit.height}><title>{label}</title></rect>;
 }
 
-function Graph(props: CanvasProps) {
+const Graph = memo(function Graph(props: CanvasProps) {
   const { layout, tree } = props, L = useT().dept.tree, still = useReducedMotion();
   const targets = (round: boolean) => layout.targets
     .filter(h => h.round === round).sort((a, b) => hitPriority(a) - hitPriority(b))
@@ -233,6 +233,7 @@ function Graph(props: CanvasProps) {
       width={layout.width}
       height={layout.height}
       viewBox={`0 0 ${layout.width} ${layout.height}`}
+      style={{ willChange: 'transform' }}
       role="group"
       aria-label={L.treeAria(tree.turn!.number)}
     >
@@ -255,7 +256,7 @@ function Graph(props: CanvasProps) {
       {targets(true)}
     </svg>
   );
-}
+});
 
 function labelClass(row: TreeRow, selected: TreePick | null): string {
   const trunk = row.type === 'lane' ? '' : ` tk ${row.type}`;
@@ -263,14 +264,25 @@ function labelClass(row: TreeRow, selected: TreePick | null): string {
   return `lchip${trunk}${on ? ' on' : ''}`;
 }
 
-function LaneChip({ row, tree, department, selected, select }: Omit<CanvasProps, 'layout'> & { row: TreeRow }) {
-  const employee = department.employees.find(e => e.id === row.agent!.id);
-  if (!employee) return null;
-  return <Chip row={plateKey(row)} e={employee} x={0} y={row.y + plateRoom(row)} on={selected?.agentId === row.agent!.id} flash={false} serverNow={tree.now} onOpen={e => select(row.pick!, e)} />;
+type LaneChipProps = Pick<CanvasProps, 'select'> & { row: TreeRow; employee: Employee; serverNow: string; on: boolean };
+
+function sameLaneChip(a: LaneChipProps, b: LaneChipProps): boolean {
+  return JSON.stringify(a.employee) === JSON.stringify(b.employee) && a.serverNow === b.serverNow && a.on === b.on && a.select === b.select
+    && plateKey(a.row) === plateKey(b.row) && a.row.y === b.row.y && pickKey(a.row.pick!) === pickKey(b.row.pick!);
 }
 
+const LaneChip = memo(function LaneChip({ row, employee, serverNow, on, select }: LaneChipProps) {
+  const open = useCallback((event: MouseEvent<HTMLButtonElement>) => select(row.pick!, event), [row, select]);
+  return <Chip row={plateKey(row)} e={employee} x={0} y={row.y + plateRoom(row)} on={on} flash={false} serverNow={serverNow} onOpen={open} />;
+}, sameLaneChip);
+
 function RowLabel({ row, tree, department, selected, select }: Omit<CanvasProps, 'layout'> & { row: TreeRow }) {
-  if (row.agent) return <LaneChip row={row} tree={tree} department={department} selected={selected} select={select} />;
+  if (row.agent) {
+    const employee = department.employees.find(e => e.id === row.agent!.id);
+    return employee
+      ? <LaneChip row={row} employee={employee} serverNow={tree.now} on={selected?.agentId === row.agent.id} select={select} />
+      : null;
+  }
   return (
     <button
       type="button"
@@ -337,15 +349,16 @@ function useTreeSelection(root: RefObject<HTMLDivElement | null>) {
       document.removeEventListener('pointerdown', outside);
     };
   }, [selection]);
-  function select(pick: TreePick, e: MouseEvent) {
+  const select = useCallback((pick: TreePick, e: MouseEvent) => {
     const rect = root.current!.getBoundingClientRect(), anchor = e.currentTarget.getBoundingClientRect();
     const chip = e.currentTarget.closest('.lchip,.dept-chip');
     const x = chip
       ? anchor.right - rect.left + 8
       : (e.clientX || anchor.left + anchor.width / 2) - rect.left - 40;
     setSelection({ pick, x, y: anchor.bottom - rect.top + 8 });
-  }
-  return { selection, card, select, close: () => setSelection(null) };
+  }, [root]);
+  const close = useCallback(() => setSelection(null), []);
+  return { selection, card, select, close };
 }
 
 type FloatingCardProps = Pick<Props, 'tree' | 'department' | 'onOpenTask'> & {
@@ -394,7 +407,8 @@ export function TreeView(props: Props) {
   const { tree, department } = props, t = useT();
   const root = useRef<HTMLDivElement>(null), scroll = useRef<HTMLDivElement>(null);
   const box = useTreeBox(root);
-  const layout = useMemo(() => fitBadges(treeLayout(tree, { ...box, agentOrder: department.employees.map(e => e.id) }, 1), t), [tree, department, box, t]);
+  const order = department.employees.map(e => e.id).join('\0');
+  const layout = useMemo(() => fitBadges(treeLayout(tree, { ...box, agentOrder: order ? order.split('\0') : [] }, 1), t), [tree, order, box, t]);
   const { view, zoomAt, handlers, dragged, fit, onScroll } = useTreeNavigation(scroll, layout, box, !!tree.turn);
   const { selection, card, select, close } = useTreeSelection(root);
   const canvas = { layout, tree, department, selected: selection?.pick ?? null, select };
@@ -405,7 +419,7 @@ export function TreeView(props: Props) {
           <>
             <div className="tv-scroll" ref={scroll} role="region" aria-label={t.dept.treeCanvas} {...handlers} onScroll={onScroll}
               onClickCapture={e => ignoreDraggedClick(e, dragged)}>
-              <div className="tv-in" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})` }}>
+              <div className="tv-in" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})`, willChange: 'transform' }}>
                 <Labels {...canvas} />
                 <Graph {...canvas} />
               </div>
