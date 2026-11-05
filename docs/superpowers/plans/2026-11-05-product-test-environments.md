@@ -10,6 +10,19 @@
 
 **Spec:** Hornhoof #399 and #280, including the head's frozen contract at 2026-11-05T14:28:43.023Z; /tmp/task-399-design/task-363-design-final.md, task-363-integration-addendum-v2.md and design-280-kimi.md. The task body and later head decisions override historical illustrations.
 
+## Current phase boundary
+
+The orchestrator rewrote #399 on 2026-11-05 to cover the implemented
+source/integration checkpoint after fresh turn-8 integration and affected remote
+authorchecks. The head created mandatory parent-280 continuation #529 before
+submission. It retains the unimplemented measured adapter, actual shared-lease
+runtime binding, comparable cold/warm/invalidation replay and percentages,
+native UID/builder, PG17 and image checks. No earlier criterion is waived.
+Historical #121/#149 prove only their own source states. The final integration
+receipt records the new pinned commit, production wiring and both controlled
+tests/work completion-wait cases. #529 must not block independent source work
+through the whole task, and types alone never stand for an actual port.
+
 ## Replay preparation follow-up, 2026-11-05 22:27 UTC
 
 The head requested an external reproducible package before admission is restored.

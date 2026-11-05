@@ -5,6 +5,14 @@ speedup is reported. This is a measured-replay proposal for turn-7 source on
 current hardware, not historical timing. The audit driver is executable; a
 measured execution adapter is not implemented or accepted by this package.
 
+The rewritten #399 covers the source/integration checkpoint. Mandatory parent
+#280 continuation #529 retains the execution adapter, actual shared lease/runtime
+binding, comparable replay and percentages, native UID/builder, PG17 and image
+acceptance. Merging the source checkpoint does not complete those requirements
+or authorise deployment, new probes or measurement. The historical #121/#149
+receipts retain their original source identities; a new integration candidate
+requires its own affected authorcheck receipt.
+
 ## Pins and workload
 
 | Subject | Immutable identity |
