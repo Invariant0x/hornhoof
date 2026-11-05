@@ -10,6 +10,18 @@ const notebookBase = (departmentId: string | null) => (departmentId ? `/api/depa
 const notebookChanged = (message: { type: string; spot?: { departmentId: string | null } }, departmentId: string | null) =>
   (message.type === 'notebook' && message.spot?.departmentId === departmentId) || message.type === 'reconnected';
 
+function addNote(event: FormEvent, text: string, base: string, run: (action: () => Promise<unknown>, after: () => void) => void, setText: (text: string) => void) {
+  event.preventDefault();
+  if (!text.trim()) return;
+  void run(() => api.post(base, { text: text.trim() }), () => setText(''));
+}
+
+function saveNote(event: FormEvent, editing: Editing | null, base: string, run: (action: () => Promise<unknown>, after: () => void) => void, setEditing: (editing: Editing | null) => void) {
+  event.preventDefault();
+  if (!editing?.text.trim()) return;
+  void run(() => api.patch(`${base}/${editing.number}`, { text: editing.text.trim() }), () => setEditing(null));
+}
+
 function NotebookFeedback({ loading, unread, saving, failure, onRetry }: { loading: boolean; unread: unknown; saving: boolean; failure: unknown; onRetry(): void }) {
   const t = useT();
   return (
@@ -99,26 +111,14 @@ export function Notebook({ departmentId = null }: { departmentId?: string | null
     }
   }
 
-  function add(e: FormEvent) {
-    e.preventDefault();
-    if (!text.trim()) return;
-    void run(() => api.post(base, { text: text.trim() }), () => setText(''));
-  }
-
-  function save(e: FormEvent) {
-    e.preventDefault();
-    if (!editing?.text.trim()) return;
-    void run(() => api.patch(`${base}/${editing.number}`, { text: editing.text.trim() }), () => setEditing(null));
-  }
-
   const loading = notes === null && unread === null;
 
   return (
     <section className="notebook" aria-label={t.notebook.title} aria-busy={busy || loading}>
       <p className="muted">{departmentId ? t.notebook.departmentIntro : t.notebook.intro}</p>
       <NotebookFeedback loading={loading} unread={unread} saving={busy} failure={failure} onRetry={() => void load()} />
-      <NotebookItems notes={notes} editing={editing} busy={busy} onEdit={n => setEditing({ number: n.number, text: n.text })} onSave={save} onCancel={() => setEditing(null)} onRemove={n => void run(() => api.del(`${base}/${n.number}`), () => {})} />
-      <form className="notebook-add" onSubmit={add}>
+      <NotebookItems notes={notes} editing={editing} busy={busy} onEdit={n => setEditing({ number: n.number, text: n.text })} onSave={e => saveNote(e, editing, base, run, setEditing)} onCancel={() => setEditing(null)} onRemove={n => void run(() => api.del(`${base}/${n.number}`), () => {})} />
+      <form className="notebook-add" onSubmit={e => addNote(e, text, base, run, setText)}>
         <textarea aria-label={t.notebook.newNote} placeholder={t.notebook.placeholder} value={text} maxLength={300} rows={2} onChange={e => setText(e.target.value)} />
         <button className="btn small" type="submit" disabled={busy || !text.trim()}>
           {t.notebook.add}
