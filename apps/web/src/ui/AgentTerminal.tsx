@@ -1,7 +1,7 @@
 import { Terminal, type ITerminalOptions, type ITheme } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
-import { errorText, useT } from '../i18n';
+import { errorText, useT, type Messages } from '../i18n';
 import { usePictureDrop } from './MessagePictures';
 import { fitTerminal, observeTerminalFit } from './terminal-fit';
 import { isBracketedPaste, TerminalInput, type InputRefusal, type TerminalRights } from './terminal-input';
@@ -425,6 +425,26 @@ function insertUploadedPictures(path: string, files: File[], run: number, result
   });
 }
 
+type TerminalNoticesProps = {
+  t: Messages;
+  dropped: boolean;
+  denied: InputRefusal | null;
+  pictureFailure: unknown;
+  pictureState: 'uploading' | 'uploaded' | null;
+};
+
+function TerminalNotices({ t, dropped, denied, pictureFailure, pictureState }: TerminalNoticesProps) {
+  if (!dropped && !denied && pictureFailure === null && !pictureState) return null;
+  return (
+    <div className="t-menu glass" style={{ left: 12, right: 12, bottom: 8, padding: '2px 0 6px', pointerEvents: 'none' }}>
+      {dropped && <div className="t-why" role="alert">{t.window.inputDropped}</div>}
+      {denied && <div className="t-why" role="alert">{refusalText(denied, t.window.controlDenied, t.window.messageDenied)}</div>}
+      {pictureFailure !== null && <div className="t-why" role="alert">{errorText(t, pictureFailure)}</div>}
+      {pictureState && <div className="t-why" role="status">{pictureState === 'uploading' ? t.window.pictureUploading : t.window.pictureUploaded}</div>}
+    </div>
+  );
+}
+
 /* A live terminal: an agent's session on the node, or a plan's sign-in, as it is, with the person's keys going back to it. */
 export function AgentTerminal({ path, program, onGone, watching = false }: Props) {
   const t = useT();
@@ -494,10 +514,7 @@ export function AgentTerminal({ path, program, onGone, watching = false }: Props
       <div className="t-xterm" ref={box} />
       <CopyMenu menu={menu} termRef={termRef} onClose={() => setMenu(null)} label={t.common.copy} />
       {dragging && <div className="t-drop" role="status">{t.window.dropPictures}</div>}
-      {dropped && <div className="t-why" role="alert">{t.window.inputDropped}</div>}
-      {denied && <div className="t-why" role="alert">{refusalText(denied, t.window.controlDenied, t.window.messageDenied)}</div>}
-      {pictureFailure !== null && <div className="t-why" role="alert">{errorText(t, pictureFailure)}</div>}
-      {pictureState && <div className="t-why" role="status">{pictureState === 'uploading' ? t.window.pictureUploading : t.window.pictureUploaded}</div>}
+      <TerminalNotices t={t} dropped={dropped} denied={denied} pictureFailure={pictureFailure} pictureState={pictureState} />
       {!up && (
         <div className="t-load" role="status">
           <span className="spinner" aria-hidden="true" />

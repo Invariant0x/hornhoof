@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { serveAgentWindow, type AgentFixture } from './agent-window-api';
 
 type Options = {
@@ -85,6 +85,14 @@ async function pictureEvent(page: Page, kind: 'paste' | 'drop') {
   }, kind);
 }
 
+async function expectInsideTerminal(window: Locator, notice: Locator) {
+  const outer = await window.locator('.t-term').boundingBox();
+  const inner = await notice.boundingBox();
+  expect(inner).not.toBeNull();
+  expect(inner!.y).toBeGreaterThanOrEqual(outer!.y);
+  expect(inner!.y + inner!.height).toBeLessThanOrEqual(outer!.y + outer!.height);
+}
+
 for (const options of [
   { lang: 'en', theme: 'light', width: 1440, message: true },
   { lang: 'en', theme: 'dark', width: 375, message: true },
@@ -95,7 +103,9 @@ for (const options of [
     const terminal = await openTerminal(page, options);
     await pictureEvent(page, options.width === 375 ? 'drop' : 'paste');
     await expect(terminal.window.getByRole('status').filter({ hasText: COPY[options.lang].uploading })).toBeVisible();
-    await expect(terminal.window.getByRole('status').filter({ hasText: COPY[options.lang].uploaded })).toBeVisible();
+    const uploaded = terminal.window.getByRole('status').filter({ hasText: COPY[options.lang].uploaded });
+    await expect(uploaded).toBeVisible();
+    await expectInsideTerminal(terminal.window, uploaded);
     const inserted = options.legacyPicture ? 'screen.png: hh-fetch message p1' : "'/home/agent/screen.png' ";
     expect(terminal.inputs.join('')).toBe(inserted);
     expect(terminal.uploads()).toBe(1);
