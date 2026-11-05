@@ -1,7 +1,7 @@
-import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { runCli } from '../src/cli.js';
 import { decryptSecret, encryptSecret } from '../src/crypto/secrets.js';
 import { companies, departments, linkTls, publicLinks } from '../src/db/schema.js';
@@ -10,7 +10,7 @@ import { newAccountKey } from '../src/modules/tls/acme.js';
 import { mayRunHttps, saveTls, tlsOf, updateTls } from '../src/modules/tls/store.js';
 import { selfSigned } from '../src/modules/tls/x509.js';
 import { fakeRelay } from './fake-relay.js';
-import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
+import { as, invitePerson, setUpCompany, testApp, until } from './helpers.js';
 
 /* A company with its own control folder, asking the fake relay for links. */
 async function company(env: NodeJS.ProcessEnv = {}) {
@@ -128,6 +128,13 @@ describe("the tunnel's mode", () => {
     }
   });
 
+  it('reads the names in a certificate in any case', async () => {
+    const secret = Buffer.alloc(32, 3);
+    const pair = await selfSigned('ACME.hornhoof.test');
+    const row = { mode: 'https' as const, name: 'acme', certPem: pair.certPem, certKeyEnc: encryptSecret(pair.keyPem, secret) };
+    expect(mayRunHttps(row, { name: 'acme', url: `https://${LINK_HOST}` }, secret, new Date())).toBe(true);
+  });
+
   it('asks for more than a day left on the certificate, read from the first of a chain', async () => {
     const secret = Buffer.alloc(32, 3);
     const notBefore = new Date('2026-11-04T12:00:00.000Z');
@@ -192,7 +199,7 @@ describe("the certificate's row", () => {
 describe('binding the company to a public link', () => {
   it('takes the name at the relay, keeps the key encrypted and writes the tunnel settings', async () => {
     const { app, db, config, relay, ceo, put, tunnelFile } = await company();
-    expect((await app.inject({ url: '/api/link', ...as(ceo) })).json()).toEqual({ link: null, domain: '127.0.0.1' });
+    expect((await app.inject({ url: '/api/link', ...as(ceo) })).json()).toEqual({ link: null, domain: '127.0.0.1', tls: null });
     const res = await put({ name: 'acme' });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ link: { name: 'acme', url: 'https://acme.hornhoof.test' } });
@@ -215,7 +222,11 @@ describe('binding the company to a public link', () => {
     });
     /* The link's key is for the tunnel container alone. */
     expect(statSync(tunnelFile).mode & 0o077).toBe(0);
-    expect((await app.inject({ url: '/api/link', ...as(ceo) })).json()).toEqual({ link: { name: 'acme', url: 'https://acme.hornhoof.test' }, domain: '127.0.0.1' });
+    expect((await app.inject({ url: '/api/link', ...as(ceo) })).json()).toEqual({
+      link: { name: 'acme', url: 'https://acme.hornhoof.test' },
+      domain: '127.0.0.1',
+      tls: { mode: 'http', certificate: false, expiresAt: null, failedAt: null },
+    });
   });
 
   it('gets a long random name when none is asked for', async () => {
@@ -433,6 +444,39 @@ describe('the tunnel settings', () => {
     writeFileSync(tunnelFile, '{}');
     await app.ctx.links.sync();
     expect(JSON.parse(readFileSync(tunnelFile, 'utf8')).url).toBe('https://acme.hornhoof.test');
+  });
+
+  it('say whether they were written, and a failure goes to the log', async () => {
+    const { app, put, tunnelFile, control } = await company();
+    await put({ name: 'acme' });
+    expect(await app.ctx.links.sync()).toBe(true);
+    rmSync(control, { recursive: true });
+    const error = vi.spyOn(app.ctx.log, 'error');
+    expect(await app.ctx.links.sync()).toBe(false);
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(existsSync(tunnelFile)).toBe(false);
+  });
+
+  it('wait for a change of the link under way, so they never write what it replaced', async () => {
+    const { app, put, tunnelFile, db } = await company();
+    await put({ name: 'acme' });
+    const [acme] = await db.select().from(companies);
+    const { relay } = app.ctx.links;
+    const bind = relay.bind.bind(relay);
+    let letBind: () => void = () => {};
+    const held = new Promise<void>(resolve => (letBind = resolve));
+    const binding = vi.spyOn(relay, 'bind').mockImplementation(async name => {
+      await held;
+      return bind(name);
+    });
+    const finished: string[] = [];
+    const renamed = app.ctx.links.set(acme!.id, 'globex').then(() => finished.push('rename'));
+    await until(() => binding.mock.calls.length === 1);
+    const synced = app.ctx.links.sync().then(() => finished.push('sync'));
+    letBind();
+    await Promise.all([renamed, synced]);
+    expect(finished).toEqual(['rename', 'sync']);
+    expect(JSON.parse(readFileSync(tunnelFile, 'utf8')).name).toBe('globex');
   });
 
   it('go when there is no link', async () => {

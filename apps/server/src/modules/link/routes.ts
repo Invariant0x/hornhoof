@@ -19,7 +19,7 @@ export function linkRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.get('/api/link', async req => {
     await companyPerson(req);
-    return { link: await linkOf(ctx.db), domain: ctx.links.domain() };
+    return { link: await linkOf(ctx.db), domain: ctx.links.domain(), tls: await ctx.tls.view() };
   });
 
   app.get('/api/link/names/:name', async req => {
