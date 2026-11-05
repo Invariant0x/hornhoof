@@ -46,5 +46,5 @@ export async function verdictReview(db: Db, task: Task, agentId: string, verdict
   assertFix(fix, verdict);
   const issues = await issuesForVerdict(db, task, agentId, review, plan, verdict.issues ?? [], verdict.pass);
   const resolution = fix ? { [verdict.pass ? 'resolvedFindingIds' : 'unresolvedFindingIds']: fix.findingIds, fixReviews: [fix] } : {};
-  return { ...(review ? { review: await visibleReview(db, task.id, review) } : {}), ...(verdict.evidence ? { evidence: bindReviewEvidence(verdict.evidence, review?.commit ?? null) } : {}), ...(verdict.issues !== undefined ? { issues } : {}), ...resolution };
+  return { ...(review ? { review: await visibleReview(db, task.id, review) } : {}), ...(verdict.evidence?.length ? { evidence: bindReviewEvidence(verdict.evidence, review?.commit ?? null) } : {}), ...(verdict.issues !== undefined ? { issues } : {}), ...resolution };
 }
