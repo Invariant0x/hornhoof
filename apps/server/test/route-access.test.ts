@@ -30,6 +30,7 @@ const publicRoutes = new Map([
 const guards: { name: string; path: RegExp; rule: string }[] = [
   { name: 'requirePerson', path: /^\/api\//, rule: 'human session and company scope' },
   { name: 'agentFor', path: /^\/api\/agents\//, rule: 'human session and reachable agent' },
+  { name: 'programFor', path: /^\/api\/agents\/:id\/terminal$/, rule: 'human session and the plan the program really runs on' },
   { name: 'jobOf', path: /^(?:\/mcp|\/api\/attachments(?:\/file)?)$/, rule: 'agent job token' },
   { name: 'setupOnly', path: /^\/api\/setup(?:\/names\/:name)?$/, rule: 'first setup code' },
   { name: 'openInvite', path: /^\/api\/invites\/:token(?:\/accept)?$/, rule: 'valid invitation token' },
