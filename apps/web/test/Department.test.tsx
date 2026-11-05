@@ -210,7 +210,7 @@ describe('Department view', () => {
     expect(runningDots('c', d)).toHaveLength(2);
   });
 
-  it('turns the line yellow over its whole length when the employee gave a result back, for what is left of five minutes', async () => {
+  it('runs the yellow signal over the drawn return line from a gate to the employee', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     onTestFinished(() => {
       vi.useRealTimers();
@@ -218,17 +218,36 @@ describe('Department view', () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     const [dev] = DEV_ORG.departments;
     const now = Date.now();
+    const reviewer = { ...dev!.roles[1]!, id: 'DEV-REV', kind: 'member' as const, gate: 1 };
+    const rita = { ...dev!.employees[1]!, id: 'b2', name: 'Rita', roleId: 'DEV-REV' };
+    const withGate = { ...dev!, roles: [...dev!.roles, reviewer], employees: [...dev!.employees, rita] };
+    const lines = [{ upstreamAgentId: 'b0', downstreamAgentId: 'b1', working: false, workEpoch: 4, returnedEpoch: 4, returnedAt: new Date(now - 4.5 * 60_000).toISOString() }];
+    shell({}, { ...DEV_ORG, serverNow: new Date(now).toISOString(), departments: [{ ...withGate, workLines: lines }] });
+    await flyIn(user);
+    const work = () => document.querySelector('.wires path[data-work="b1"]');
+    expect(work()).toHaveClass('tr', 'live', 'a');
+    const s = schemaLayout(withGate, 1);
+    const back = stepPaths(s).back('b2', 'b1')!;
+    expect(work()!.getAttribute('d')).toBe(toD(back));
+    expect(runningDots('a', toD(back))).toHaveLength(2);
+    const drawn = [...document.querySelectorAll('.dview .wires .rl')].map(path => path.getAttribute('d'));
+    for (let i = 1; i < back.length; i++) {
+      const segment = [back[i - 1]!, back[i]!];
+      expect(drawn.some(d => d === toD(segment) || d === toD([...segment].reverse()))).toBe(true);
+    }
+    await act(() => vi.advanceTimersByTimeAsync(30_000));
+    expect(work()).toBeNull();
+  });
+
+  it('draws no yellow signal on empty space when the schema has no return line', async () => {
+    const user = userEvent.setup();
+    const [dev] = DEV_ORG.departments;
+    const now = Date.now();
     const lines = [{ upstreamAgentId: 'b0', downstreamAgentId: 'b1', working: false, workEpoch: 4, returnedEpoch: 4, returnedAt: new Date(now - 4.5 * 60_000).toISOString() }];
     shell({}, { ...DEV_ORG, serverNow: new Date(now).toISOString(), departments: [{ ...dev!, workLines: lines }] });
     await flyIn(user);
-    const work = () => document.querySelector('.wires path[data-work="b1"]');
-    /* Amber dashes and dots run back up, from the employee's card to the head's. */
-    expect(work()).toHaveClass('tr', 'live', 'a');
-    const back = [...stepPaths(schemaLayout(dev!, 1)).toMember('b1')!].reverse();
-    expect(work()!.getAttribute('d')).toBe(toD(back));
-    expect(runningDots('a', toD(back))).toHaveLength(2);
-    await act(() => vi.advanceTimersByTimeAsync(30_000));
-    expect(work()).toBeNull();
+    expect(document.querySelector('.dview .wires path.live.a')).toBeNull();
+    expect(document.querySelectorAll('.dview circle.pt.a')).toHaveLength(0);
   });
 
   it.each([false, true])('runs a message dot until arrival, reduced motion %s', async reduce => {
@@ -369,7 +388,7 @@ describe('Department view', () => {
     expect(within(schema).getByText('Code reviewer')).toBeInTheDocument();
     expect(within(schema).getByText('gate 1')).toBeInTheDocument();
     expect(within(schema).queryByText('Sent back for rework')).not.toBeInTheDocument();
-    expect(schema.querySelectorAll('.wires .rl, .wires .rah')).toHaveLength(0);
+    expect(schema.querySelectorAll('.wires .rl, .wires .rah').length).toBeGreaterThan(0);
     expect(within(schema).getByText('Report to the head')).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Head' })).toHaveTextContent('1 of 3 agents working, 2 roles, 1 gate');
   });
@@ -389,7 +408,7 @@ describe('Department view', () => {
     expect(document.querySelectorAll('.dview .wires .rl').length).toBeGreaterThan(0);
     await act(() => vi.advanceTimersByTimeAsync(60_000));
     expect(screen.queryByText('Sent back for rework')).not.toBeInTheDocument();
-    expect(document.querySelectorAll('.dview .wires .rl, .dview .wires .rah')).toHaveLength(0);
+    expect(document.querySelectorAll('.dview .wires .rl, .dview .wires .rah').length).toBeGreaterThan(0);
   });
 
   it('hires through the orchestrator', async () => {
