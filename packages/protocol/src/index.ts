@@ -7,6 +7,8 @@ export { COMMIT_SHA, CommitSha, ownBranch } from './test-commit.js';
 import { z } from 'zod';
 import { NodeExit, NodeLog } from './node-exit.js';
 import { CommitSha } from './test-commit.js';
+import { CheckAcquire, CheckRelease, CheckQueueReply } from './check-queue.js';
+export { CHECK_LEASE_MS, checkCapacity, CheckSlotQueue, CheckQueueRequest, CheckQueueReply, type CheckOptions } from './check-queue.js';
 
 export { NODE_LOG_BYTES, NODE_LOG_LINES, NodeExit, NodeLog, NodeStopReason } from './node-exit.js';
 
@@ -410,6 +412,7 @@ export const NodeReconnect = z.object({
 export type NodeReconnect = z.infer<typeof NodeReconnect>;
 
 const NodeMessage = z.discriminatedUnion('type', [
+  CheckAcquire, CheckRelease,
   /* terminals: the node runs agents in sessions people can watch and type into. */
   /* tests: the parts of test runs it runs, or ran and Hornhoof has not confirmed. */
   /* skillFiles: it writes a turn's skills as files where the agent's program finds them; a node without it gets them in
@@ -446,6 +449,7 @@ const NodeMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('node.stopping'), startedAt: z.iso.datetime(), exit: NodeExit }),
   z.object({ type: z.literal('node.reconnect'), ...NodeReconnect.shape }),
   z.object({ type: z.literal('load'), ...Load.shape }),
+  z.object({ type: z.literal('tests.waiting'), partId: z.string(), position: z.number().int().positive() }),
   z.object({ type: z.literal('tests.started'), partId: z.string() }),
   /* exitCode: the command's, none when it never ran or was killed. commit: what its clone was at when the command ran. */
   z.object({
@@ -578,6 +582,7 @@ export function repoFolder(url: string): string {
 }
 
 const ServerMessage = z.discriminatedUnion('type', [
+  CheckQueueReply,
   z.object({
     type: z.literal('job.run'),
     jobId: Id,

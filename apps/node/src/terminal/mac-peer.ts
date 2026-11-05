@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import type { OwnerFactory, Peer } from './peer.js';
+import { checkProcesses } from '../check-processes.js';
 
 export type Command = (file: string, args: string[], options: { timeout: number }) => Promise<string>;
 const command: Command = (file, args, options) => new Promise((resolve, reject) => {
@@ -53,7 +54,7 @@ export function macOwner(run: Command = command): OwnerFactory {
       const pid = peer.acceptedPid;
       if (!pid || (peer.pid !== undefined && peer.pid !== pid)) return false;
       const lineage = await lineageOf(pid, run);
-      return lineage !== null && (await panes(key)).some(root => lineage.has(root));
+      return lineage !== null && [...await panes(key), ...checkProcesses(key)].some(root => lineage.has(root));
     },
   });
 }
