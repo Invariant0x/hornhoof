@@ -1015,17 +1015,22 @@ export class TerminalHost {
     a.retainedAssignments = a.retainedAssignments?.filter(retained => retained.jobId !== jobId);
   }
 
-  /* For a path with no watch to tell of words it cannot move: they are kept and gone, or the turn ends saying so. */
+  /* For a path with no watch to tell of words it cannot move: they are kept and gone in the time a program has to get
+     ready, as a person may still be writing them, or the turn ends saying so. */
   private async freeInput(a: Agent, job: TermJob): Promise<boolean> {
-    await this.keepLeftInput(a, job);
-    const input = await this.readInput(a);
-    return !input || this.inputLane(a, () => this.inputCleared(a, job, input));
+    for (const end = Date.now() + this.readyMs; !job.input.signal?.aborted; await sleep(this.pollMs)) {
+      await this.keepLeftInput(a, job);
+      const input = await this.readInput(a);
+      if (!input || (await this.inputLane(a, () => this.inputCleared(a, job, input)))) return true;
+      if (Date.now() >= end) return false;
+    }
+    return false;
   }
 
   private inputNotFree(a: Agent, job: TermJob): Promise<RunResult> {
     a.busy = false;
     a.failure = failure('unknown', "The program's input holds words Hornhoof could not keep, so it typed nothing into them.", true);
-    return this.failedTurn(a, job, 'agent_failed');
+    return this.failedTurn(a, job, job.input.signal?.aborted ? 'cancelled' : 'agent_failed');
   }
 
   private async waitOperatorReceipt(a: Agent, job: TermJob): Promise<RunResult | null> {

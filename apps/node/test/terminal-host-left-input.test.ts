@@ -356,8 +356,8 @@ describe.skipIf(!hasTmux)('a turn whose words did not get recorded within 60 s',
 describe.skipIf(!hasTmux)('words left unsent, on a node with no operator', () => {
   afterEach(async () => { vi.restoreAllMocks(); await host?.stop(); });
 
-  const started = async (kind: 'claude' | 'codex') => {
-    await setUp({ plugins: [], cols: 120, rows: 40, readyMs: 3000, typingQuietMs: 50, keptWaitMs: 300, enterWaitMs: 300 });
+  const started = async (kind: Kind, more: Parameters<typeof setUp>[0] = {}) => {
+    await setUp({ plugins: [], cols: 120, rows: 40, readyMs: 3000, toolsMs: 5000, typingQuietMs: 50, keptWaitMs: 300, enterWaitMs: 300, ...more });
     const key = randomUUID();
     const first = await host.run(PROGRAMS[kind](key, 'First assignment.', { jobId: randomUUID() }));
     expect(first).toMatchObject({ ok: true });
@@ -368,7 +368,45 @@ describe.skipIf(!hasTmux)('words left unsent, on a node with no operator', () =>
     return { key, sessionId: first.sessionId };
   };
 
-  it.each(['claude', 'codex'] as const)('%s: keeps them before it types', async kind => {
+  it.each(KINDS)('%s: waits while a person still writes instead of ending the turn, then keeps what they wrote', async kind => {
+    const { key, sessionId } = await started(kind, { typingQuietMs: 1000 });
+    const paste = vi.spyOn(tmux, 'paste');
+    let ended = false;
+    const next = host.run(PROGRAMS[kind](key, 'Next assignment.', { jobId: randomUUID(), sessionId })).finally(() => { ended = true; });
+    await new Promise(done => setTimeout(done, 300));
+    expect(ended).toBe(false);
+    expect(lefts()).toEqual([]);
+    await until(() => lefts().length > 0, 3000);
+    expect(lefts()[0]).toMatchObject({ text: WORDS, typed: true });
+    host.inputKept({ type: 'agent.input_kept', agentKey: key, ref: lefts()[0]!.ref });
+    expect(await next).toMatchObject({ ok: true });
+    expect(paste.mock.calls.map(call => call[1])).toEqual(['Next assignment.']);
+  });
+
+  it('goes on at once when a person sends what they wrote while the turn waits', async () => {
+    const { key, sessionId } = await started('codex', { typingQuietMs: 60_000 });
+    const paste = vi.spyOn(tmux, 'paste');
+    const next = host.run(PROGRAMS.codex(key, 'Next assignment.', { jobId: randomUUID(), sessionId }));
+    await new Promise(done => setTimeout(done, 200));
+    host.input({ type: 'term.input', termId: `view-${key}`, data: '\r' });
+    expect(await next).toMatchObject({ ok: true });
+    expect(lefts()).toEqual([]);
+    expect(paste.mock.calls.map(call => call[1])).toEqual(['Next assignment.']);
+  });
+
+  it('says a stopped turn was stopped when it stops while waiting for a person to finish', async () => {
+    const { key, sessionId } = await started('codex', { typingQuietMs: 60_000, readyMs: 60_000 });
+    const stop = new AbortController();
+    const paste = vi.spyOn(tmux, 'paste');
+    const next = host.run(PROGRAMS.codex(key, 'Next assignment.', { jobId: randomUUID(), sessionId, signal: stop.signal }));
+    await new Promise(done => setTimeout(done, 200));
+    stop.abort();
+    expect(await next).toMatchObject({ ok: false, error: 'cancelled' });
+    expect(paste).not.toHaveBeenCalled();
+    expect(await host.screen(key)).toContain(WORDS);
+  });
+
+  it.each(KINDS)('%s: keeps them before it types', async kind => {
     const { key, sessionId } = await started(kind);
     const paste = vi.spyOn(tmux, 'paste');
     const next = host.run(PROGRAMS[kind](key, 'Next assignment.', { jobId: randomUUID(), sessionId }));
