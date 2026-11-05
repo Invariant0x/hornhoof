@@ -14,13 +14,17 @@ function report(buffers: Buffers, activeBuffer: ScrollBuffer, inactiveBuffer: Sc
   buffers._onBufferActivate?.fire({ activeBuffer, inactiveBuffer });
 }
 
+function borrowNormal(buffers: Buffers): void {
+  Object.defineProperty(buffers, 'active', { configurable: true, get: () => buffers.normal });
+  report(buffers, buffers.normal, buffers.alt);
+}
+
 /* The alt buffer has no scrollback. Borrow the normal one without activating it, which would clear the live screen. */
 export function scrollTerminal(term: Terminal, amount: number): void {
   const buffers = buffersOf(term);
   if (!buffers.active.hasScrollback) {
     if (buffers.normal.ybase === 0) return;
-    Object.defineProperty(buffers, 'active', { configurable: true, get: () => buffers.normal });
-    report(buffers, buffers.normal, buffers.alt);
+    borrowNormal(buffers);
   }
   term.scrollLines(amount);
   if (buffers.active.hasScrollback && buffers.normal.ydisp < buffers.normal.ybase) {
@@ -37,6 +41,22 @@ export function restoreLiveTerminal(term: Terminal): void {
   Reflect.deleteProperty(buffers, 'active');
   report(buffers, buffers.alt, buffers.normal);
   term.refresh(0, term.rows - 1);
+}
+
+/* While someone reads alternate history, output grows it and the live screen in order, without moving the reader. */
+export function writeTerminalData(term: Terminal, data: string): void {
+  const buffers = buffersOf(term);
+  if (!Object.getOwnPropertyDescriptor(buffers, 'active')?.get) {
+    term.write(data);
+    return;
+  }
+  term.write(data, () => {
+    restoreLiveTerminal(term);
+    term.write(data, () => {
+      borrowNormal(buffers);
+      term.refresh(0, term.rows - 1);
+    });
+  });
 }
 
 /* Both xterm's mouse protocol and its alt-screen arrows are suppressed before they can become terminal data. */
