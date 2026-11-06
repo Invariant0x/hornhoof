@@ -117,8 +117,8 @@ export function Notebook({ departmentId = null }: { departmentId?: string | null
     <section className="notebook" aria-label={t.notebook.title} aria-busy={busy || loading}>
       <p className="muted">{departmentId ? t.notebook.departmentIntro : t.notebook.intro}</p>
       <NotebookFeedback loading={loading} unread={unread} saving={busy} failure={failure} onRetry={() => void load()} />
-      <NotebookItems notes={notes} editing={editing} busy={busy} onEdit={n => setEditing({ number: n.number, text: n.text })} onSave={e => saveNote(e, editing, base, run, setEditing)} onCancel={() => setEditing(null)} onRemove={n => void run(() => api.del(`${base}/${n.number}`), () => {})} />
-      <form className="notebook-add" onSubmit={e => addNote(e, text, base, run, setText)}>
+      <NotebookItems notes={notes} editing={editing} busy={busy} onEdit={n => setEditing({ number: n.number, text: n.text })} onSave={e => void saveNote(e, editing, base, run, setEditing)} onCancel={() => setEditing(null)} onRemove={n => void run(() => api.del(`${base}/${n.number}`), () => {})} />
+      <form className="notebook-add" onSubmit={e => void addNote(e, text, base, run, setText)}>
         <textarea aria-label={t.notebook.newNote} placeholder={t.notebook.placeholder} value={text} maxLength={300} rows={2} onChange={e => setText(e.target.value)} />
         <button className="btn small" type="submit" disabled={busy || !text.trim()}>
           {t.notebook.add}
