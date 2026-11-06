@@ -109,3 +109,26 @@ describe('bounded contract metadata', () => {
     }
   });
 });
+
+
+describe('legacy public material compatibility', () => {
+  const legacyImages = Array.from({ length: 6 }, (_, n) => {
+    const id = `00000000-0000-4000-8000-${String(n + 10).padStart(12, '0')}`;
+    return { ...image, id, contentUrl: `/api/requests/${OTHER}/materials/${id}/content` };
+  });
+  const links = [
+    { id: ID, kind: 'link', name: 'Original link', state: 'available', url: 'https://example.com/evidence' },
+    { id: OTHER, kind: 'link', name: 'Commit', state: 'available', url: `https://github.com/example/repo/commit/${'a'.repeat(40)}` },
+  ];
+  it.each([1, 2])('retains six legacy images and %s independent links in the public manifest', count => {
+    const manifest = { materialRevision: 1, materialDigest: HASH, common: [...legacyImages, ...links.slice(0, count)], options: [] };
+    expect(MaterialManifest.parse(manifest)).toEqual(manifest);
+  });
+  it('still refuses nine public common materials', () => {
+    expect(MaterialManifest.safeParse({ materialRevision: 1, materialDigest: HASH, common: [...legacyImages, ...links, image], options: [] }).success).toBe(false);
+  });
+  it('keeps new input and per-option output bounds at six', () => {
+    expect(QuestionMaterials.safeParse({ presentation: 'action', common: Array(7).fill(file), options: [] }).success).toBe(false);
+    expect(MaterialManifest.safeParse({ materialRevision: 1, materialDigest: HASH, common: [], options: [{ id: OTHER, materials: [...legacyImages, image] }] }).success).toBe(false);
+  });
+});
