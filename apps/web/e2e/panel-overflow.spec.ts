@@ -178,6 +178,7 @@ for (const lang of ['en', 'ru'] as const) {
         const edit = group.getByRole('button', { name: m.people.editLabel(LONG_PERSON.name), exact: true });
         await expect(edit).toHaveCSS('min-height', '44px');
         await expect(name).toBeVisible();
+        await expect(row.locator('xpath=ancestor::table')).toHaveAttribute('data-fit', 'entries');
         await capture(page, info, `people-${look}`);
         const cells = row.locator('td');
         for (const [index, column] of (['name', 'title', 'access', 'status', 'actions'] as const).entries()) {
