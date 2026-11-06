@@ -1,0 +1,2 @@
+# Fixture-local framework only, installed through the remote authorcheck.
+pytest==8.4.2

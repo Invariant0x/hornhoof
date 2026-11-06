@@ -357,6 +357,9 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
       addressed: shown.filter(r => !r.known).map(r => addressedView(r, pictures.get(r.request.id) ?? [], places)),
       proposals: cards.map(c => proposalView(c, names, places)),
       computerAccess: computer && (await computerView(ctx, me.companyId, computer, names)),
+      machinesAway: decisions.machines
+        .filter(card => !person || person === me.id || person === card.owner?.id)
+        .map(card => ({ ...card, since: card.since.toISOString(), back: card.back?.toISOString() ?? null })),
       counts: decisions.counts,
     };
   });
