@@ -68,17 +68,23 @@ it('measures the time to the first test', async () => {
   const asked = (sha: string): Extract<ServerMessage, { type: 'tests.harness' }> => ({ type: 'tests.harness', requestId: randomUUID(), repositoryScope, repo, commitSha: sha });
   const ready = (done: Awaited<ReturnType<typeof syncHarness>>) => { if (done.result.status !== 'ready') throw new Error(JSON.stringify(done.result)); return `${done.result.keys.length} units`; };
 
-  /* Before: a fresh folder, as a run with a command starts, with nothing to reuse. */
+  /* Before: a fresh folder, as a run with a command starts, with nothing to reuse. Commands ran npm with its audit, which the
+     harness now leaves out, so what the same steps take without it is measured too. */
   const fresh = join(work, 'before'), home = join(work, 'before-home'), env = { HOME: home, npm_config_cache: join(home, 'npm') };
   await mkdir(home);
   const started = performance.now();
   await timed('before: clone', () => run(work, env, 'git', 'clone', '--quiet', '--depth', '1', repo.url, fresh));
-  await timed('before: npm ci', () => run(fresh, env, 'npm', 'ci', '--no-audit', '--no-fund'));
+  const install = await timed('before: npm ci', () => { const at = performance.now(); run(fresh, env, 'npm', 'ci'); return performance.now() - at; });
   await timed('before: build protocol', () => run(fresh, env, 'npm', 'run', 'build', '-w', '@hornhoof/protocol'));
   await timed('before: build node', () => run(fresh, env, 'npm', 'run', 'build', '-w', '@hornhoof/node'));
   await timed('before: database template', () => run(join(fresh, 'apps/server'), env, 'node', '--import', 'tsx', 'test/prepare-environment.ts', '--output', '../../.hornhoof/prepared/pglite'));
-  results.push({ step: 'before: total to the first test', seconds: Math.round((performance.now() - started) / 10) / 100 });
+  const total = performance.now() - started;
+  results.push({ step: 'before: total to the first test', seconds: Math.round(total / 10) / 100 });
   console.log(`before total: ${results.at(-1)!.seconds} s`);
+  await rm(join(home, 'npm'), { recursive: true, force: true }); await rm(join(fresh, 'node_modules'), { recursive: true, force: true });
+  const quiet = await timed('before: npm ci without its audit', () => { const at = performance.now(); run(fresh, env, 'npm', 'ci', '--no-audit', '--no-fund'); return performance.now() - at; });
+  results.push({ step: 'before: total without npm audit', seconds: Math.round((total - install + quiet) / 10) / 100 });
+  console.log(`before total without npm audit: ${results.at(-1)!.seconds} s`);
   await rm(fresh, { recursive: true, force: true }); await rm(home, { recursive: true, force: true });
 
   /* After: one machine builds for all, another takes it, and a run on either finds it there. */

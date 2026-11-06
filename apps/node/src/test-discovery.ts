@@ -26,7 +26,7 @@ type PackageFile = { scripts?: Record<string, unknown>; workspaces?: unknown };
 const at = (program: string, ...args: string[]): Command => ({ program, args, cwd: '.' });
 
 function lockedManager(tracked: Set<string>, yarnLock: () => Promise<string>): Promise<Manager | null> {
-  if (tracked.has('package-lock.json')) return Promise.resolve({ adapter: 'npm', lock: 'package-lock.json', install: ['npm', 'ci'] });
+  if (tracked.has('package-lock.json')) return Promise.resolve({ adapter: 'npm', lock: 'package-lock.json', install: ['npm', 'ci', '--no-audit', '--no-fund'] });
   if (tracked.has('pnpm-lock.yaml')) return Promise.resolve({ adapter: 'pnpm', lock: 'pnpm-lock.yaml', install: ['corepack', 'pnpm', 'install', '--frozen-lockfile', '--package-import-method=copy'] });
   if (!tracked.has('yarn.lock')) return Promise.resolve(null);
   return yarnLock().then(text => ({ adapter: 'yarn', lock: 'yarn.lock', install: ['corepack', 'yarn', 'install', text.includes('yarn lockfile v1') ? '--frozen-lockfile' : '--immutable'] }));

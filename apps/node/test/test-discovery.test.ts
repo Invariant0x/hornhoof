@@ -14,7 +14,7 @@ describe('finding a test environment by a repository\'s language', () => {
     const manifest = await discoverEnvironment(tree({ 'package.json': pkg(), 'package-lock.json': '{}' }));
     expect(parseTestEnvironment(JSON.stringify(manifest))).toEqual(manifest);
     expect(manifest.dependencies).toMatchObject({ adapter: 'npm', cache: 'link', inputs: ['package.json', 'package-lock.json'], paths: ['node_modules'] });
-    expect(manifest.dependencies.install[0]).toEqual({ program: 'npm', args: ['ci'], cwd: '.' });
+    expect(manifest.dependencies.install[0]).toEqual({ program: 'npm', args: ['ci', '--no-audit', '--no-fund'], cwd: '.' });
     expect(manifest.suites).toMatchObject([{ id: 'javascript', split: { kind: 'whole-package' }, run: { program: 'npm', args: ['test'] } }]);
     expect(manifest.profiles).toEqual([{ id: 'default', requiredSuiteIds: ['javascript'] }]);
   });

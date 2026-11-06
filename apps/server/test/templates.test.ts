@@ -691,20 +691,19 @@ describe('templates', () => {
     expect(lead).toMatch(/one task that adds everything missing to the project itself/);
   });
 
-  it.each(['DEV-ENG', 'DEV-REV', 'DEV-SEC'])('gives %s the project dependency setup before its checks', roleId => {
+  it.each(['DEV-ENG', 'DEV-REV', 'DEV-SEC'])('tells %s that a run starts with its dependencies prepared, and what to do when it did not', roleId => {
     const role = templates.roles.get(roleId)!;
     const agent = { id: 'a', companyId: 'c', kind: 'worker', name: 'Bruno', roleKey: roleId, skills: role.skills.filter(s => s.on).map(s => s.id), overrides: {}, templateHashes: {} };
     const rendered = renderInstructions(templates, agent as Parameters<typeof renderInstructions>[1], { company: 'Acme', department: 'Development', product: null });
     const rules = rendered.skills.find(s => s.name === 'dev-language-rules')!.body;
-    expect(rules).toMatch(/dependencies before checks/);
-    expect(rules).toMatch(/fresh clone or worktree/);
-    expect(rules).toMatch(/after its lockfile changes/);
-    expect(rules).toMatch(/from its lockfile with the project's standard command/);
-    expect(rules).toMatch(/in any language/);
-    for (const example of ['ESLint', 'Vite', 'Vitest', 'Playwright', 'npm ci', 'npm scripts', 'npx --no-install']) expect(rules, example).toContain(example);
+    expect(rules).toMatch(/dependencies come prepared/);
+    expect(rules).toMatch(/installs and builds nothing first, in any language/);
+    expect(rules).toMatch(/started without the harness, install from the lockfile with the project's standard command/);
+    expect(rules).toMatch(/never run dependency installers locally/i);
+    for (const example of ['npm scripts', 'npx --no-install']) expect(rules, example).toContain(example);
     expect(rules).toMatch(/temporary JavaScript scripts inside the repository's package or workspace that owns their dependencies/);
     expect(rules).toMatch(/imports resolve its `node_modules`/);
-    expect(rules).toMatch(/ERR_MODULE_NOT_FOUND` before installing dependencies is not an application defect/);
+    expect(rules).toMatch(/ERR_MODULE_NOT_FOUND` when a run started without the harness is not an application defect/);
   });
 
   it('credits every source a skill names in SOURCES.md', () => {

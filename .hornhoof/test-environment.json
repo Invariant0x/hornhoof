@@ -46,7 +46,9 @@
       {
         "program": "npm",
         "args": [
-          "ci"
+          "ci",
+          "--no-audit",
+          "--no-fund"
         ],
         "cwd": "."
       }

@@ -5,11 +5,13 @@ description: { en: "Use when a product repository arrives or its dependencies, s
 kind: procedure
 sources: []
 ---
-Own one versioned `.hornhoof/test-environment.json` per product, based on repository evidence. A proposed description, a schema-valid description and a working environment are three different results. Report which one was proved.
+Hornhoof brings a product's test harness up by itself: all a test needs before it starts, read from the repository's lock and build files, built once per architecture and kept on every machine, so any machine can test and no run installs or builds anything first. When one of its inputs changes, only what that input touches is built again. A failed update leaves the last good version in use, and the run on the broken commit says why. `test_harness` shows where it stands.
+
+A repository whose files do not say enough gets one versioned `.hornhoof/test-environment.json`, based on repository evidence. A proposed description, a schema-valid description and a working environment are three different results. Report which one was proved.
 
 ## Ownership
 
-- **DEV-TEST** owns discovery and maintenance. When no DEV-TEST is assigned, **DEV-QA** owns them. **DEV-HEAD** assigns one owner on the first turn of every new product or repository, including a new company; when neither role exists, the head creates the first task to establish ownership. The head also arranges a mutation command for a language without the default tool.
+- **DEV-HEAD** answers for each product's harness and hears when an update fails. Nobody builds it by hand. When a repository needs a description, **DEV-TEST** writes and maintains it; when no DEV-TEST is assigned, **DEV-QA** does; when neither role exists, the head creates the first task to establish ownership. The head also arranges a mutation command for a language without the default tool.
 - **OPS-INTEG** provisions pinned runtimes and services through the approved image or integration path. **OPS-FIX** verifies readiness, private mutable state and recovery after interrupted preparation. **OPS-HEAD** owns machine readiness, capacity, storage and recovery. Request shared changes through the head, without hand-editing running containers.
 
 ## Discover before describing
@@ -30,7 +32,7 @@ Use the canonical `TestEnvironmentV1` parser and examples supplied by the runtim
 
 Record `version: 1`, runtimes, explicit `defaultProfile` referring to a top-level `profiles[].id`, and these sections:
 
-- `dependencies`: one object with adapter, inputs, install commands, paths and cache policy. Include locks, workspace manifests and every install/generation input. With no frozen lock, incomplete inputs or an unverified relocation adapter, use `cache: "none"`; blindly copying a virtual environment is not prepared dependencies.
+- `dependencies`: one object with adapter, inputs, install commands, paths and cache policy. Include locks, workspace manifests and every install/generation input. `cache: "link"` gives every part read-only links to one stored tree, which suits a tree its tests never write into; `cache: "copy"` gives each part its own. With no frozen lock, incomplete inputs or an unverified relocation adapter, use `cache: "none"`; blindly copying a virtual environment is not prepared dependencies.
 - `services`: a required array of profile-scoped service definitions. `services: []` is valid for a product without services and requests none. Missing services is not equivalent to an empty array.
 - `prepare`: units with id, profiles, serviceIds, inputs, commands and artifacts. Include migrations, scripts, journals, seeds and configuration. Share immutable prepared versions, with a private writable state per attempt; publish only after readiness, successful preparation and stopped writers.
 - `reset`: null or a nonempty array of suite-scoped entries with scope, command and inputs. When the runner fixture performs reset, record an entry with its test/file scope, `command: null` and that fixture's path in inputs; the lack of a standalone reset command does not mean there is no reset. Use `reset: null` only when no reset is needed; an empty array is invalid. The node isolates parts. Prove the fixture's behavior instead of assuming that truncate undoes schema, role or background-process changes.
