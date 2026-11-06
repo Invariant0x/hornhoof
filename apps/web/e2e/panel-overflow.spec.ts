@@ -305,7 +305,9 @@ for (const lang of ['en', 'ru'] as const) {
           expect(pseudo.weight, 'record label weight is width-independent').toBe('400');
           expect(pseudo.color).toBe(theme === 'light' ? 'rgb(76, 90, 104)' : 'rgb(147, 160, 174)');
         }
-        await expect(actions).toHaveCSS('margin-block-start', '8px');
+        await expect(actions).toHaveCSS('margin-block-start', '2px');
+        const editBox = (await edit.boundingBox())!;
+        expect(editBox.y - (statusBox.y + statusBox.height), 'the last value-to-action gap is 8px').toBe(8);
         await expectWrappedText(name);
         await expectInside(row, [name, actions]);
         await expectInside(actions, [edit]);
