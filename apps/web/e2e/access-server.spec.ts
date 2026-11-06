@@ -90,8 +90,14 @@ for (const lang of ['en', 'ru'] as const) {
         try {
           const page = await signedIn(browser, server, 'ann', lang, theme, width);
           const heading = lang === 'en' ? 'Insufficient permissions' : 'Недостаточно прав';
+          page.on('response', response => { if (response.url().includes('/api/tasks/')) console.log('ACL TASK RESPONSE', response.status()); });
           await page.goto(`/tasks/${server.hiddenTask.id}`);
-          await expect(page.getByRole('heading', { name: heading })).toBeVisible();
+          try {
+            await expect(page.getByRole('heading', { name: heading })).toBeVisible();
+          } catch (error) {
+            console.log('ACL TASK BODY', await page.locator('body').innerText());
+            throw error;
+          }
           await expect(page.locator('body')).not.toContainText('Hidden work');
           await page.screenshot({ path: info.outputPath(`real-closed-task-${lang}-${theme}-${width}.png`) });
           await page.goto(`/departments/${server.sales.id}`);
