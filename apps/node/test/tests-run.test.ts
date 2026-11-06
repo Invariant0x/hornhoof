@@ -516,3 +516,15 @@ describe("the shared folders after a part", () => {
     expect(readdirSync(elsewhere)).toEqual(['keep.txt']);
   });
 });
+
+it('uses the scoped mirror for repeated pinned manual runs and leaves no alternate object store', async () => {
+  const source = origin(), commits = source.commits, dir = nodeDir();
+  const { pathToFileURL } = await import('node:url');
+  const url = pathToFileURL(source.url).href;
+  const { createHash } = await import('node:crypto');
+  const repositoryScope = { companyId: '11111111-1111-4111-8111-111111111111', repositoryOwnerId: '22222222-2222-4222-8222-222222222222', repoUrlHash: createHash('sha256').update(url).digest('hex') };
+  const msg = run(url, { commitSha: commits['task-12-checkout'], repositoryScope, command: 'test ! -e .git/objects/info/alternates && cat marker.txt' });
+  expect(await runTests(msg, { dir, user: null, hidden: [] })).toMatchObject({ ok: true, commit: commits['task-12-checkout'] });
+  expect(existsSync(join(dir, 'cache', repositoryScope.companyId, repositoryScope.repositoryOwnerId, repositoryScope.repoUrlHash, 'mirror.git', 'objects'))).toBe(true);
+  expect(await runTests({ ...msg, partId: 'part-2' }, { dir, user: null, hidden: [] })).toMatchObject({ ok: true });
+});

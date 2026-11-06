@@ -2,6 +2,7 @@ import type { NodeLoad, NodeMessage, RunKind, Workspace } from '@hornhoof/protoc
 import { and, asc, count, eq, inArray, isNull, like, max, notInArray, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
+import { hashToken } from '../../crypto/tokens.js';
 import { nodeHeld } from '../updates/drain.js';
 import { accessOf, canReach, type Access } from '../../auth/access.js';
 import { agents, attachments, companies, departments, jobs, machines, nodes, people, subscriptions, tasks, testParts, testRuns, type LostRun } from '../../db/schema.js';
@@ -19,7 +20,8 @@ import { wakeAll } from '../tasks/wake.js';
 import type { ToolJob } from '../tools/job.js';
 import { computerKey, computerState, Reservations, type ComputerPlace } from './capacity.js';
 import { markPromise, markRun, type RunMark } from './github-status.js';
-import { forRun, together } from './load.js';
+import { forRun, noteProductOwner, productPlaces, together } from './load.js';
+import { cancelDescription, newEnvironmentRequest, pumpDescriptions, productReceipt, repositoryScope, testCapabilities, testRunMode } from './describe.js';
 import { pickMachine } from './pick.js';
 
 type Run = typeof testRuns.$inferSelect;
@@ -282,6 +284,7 @@ function placeFor(open: Place[], run: Run, part: Part, department: Department | 
 
 const partMessage = (run: Run, part: Part, repo: Repo | null, task: number) => ({
   type: 'tests.run' as const,
+  ...productMessage(run, part, repo),
   partId: part.id,
   ...(run.kind === 'work' ? { kind: 'work' as const, files: run.files } : {}),
   repo: repo ? { url: repo.url, token: repo.token } : null,
@@ -297,6 +300,7 @@ const partMessage = (run: Run, part: Part, repo: Repo | null, task: number) => (
 /* Gives waiting parts out oldest first, keeping a shared count of reservations on each physical computer. */
 async function giveOut(ctx: Ctx): Promise<void> {
   const { db } = ctx;
+  await pumpDescriptions(ctx, companyId => placesOf(ctx, companyId), run => targetOf(ctx, run), id => settleRun(ctx, id));
   const waiting = await db
     .select({ part: testParts, run: testRuns, task: { number: tasks.number } })
     .from(testParts)
@@ -307,32 +311,7 @@ async function giveOut(ctx: Ctx): Promise<void> {
   const places = await queuePlaces(ctx, waiting.map(w => w.run.companyId));
   const reserved = new Reservations(ctx.config.runsPerHost);
   const targets = new Map<string, Awaited<ReturnType<typeof targetOf>>>();
-  for (const { part, run, task } of waiting) {
-    if (!targets.has(run.id)) targets.set(run.id, await targetOf(ctx, run));
-    const found = targets.get(run.id)!;
-    if (!found) {
-      await endParts(ctx, and(eq(testParts.id, part.id), eq(testParts.status, 'queued'))!, 'no_repository');
-      continue;
-    }
-    const place = placeFor(places.get(run.companyId)!, run, part, found.department, reserved);
-    if (!place) continue;
-    const [taken] = await db
-      .update(testParts)
-      .set({ status: 'running', nodeId: place.nodeId, builtin: place.builtin, machineId: place.machineId, machineName: place.name, computer: computerKey(place), startedAt: new Date() })
-      .where(and(eq(testParts.id, part.id), eq(testParts.status, 'queued')))
-      .returning();
-    if (!taken) continue;
-    const sent = !nodeHeld(ctx, place.node) && ctx.hub.send(place.node, partMessage(run, part, found.repo, task.number));
-    /* The node went away or began to wait for an update meanwhile: the part waits for the next machine. */
-    if (!sent) {
-      await db
-        .update(testParts)
-        .set({ status: 'queued', nodeId: null, builtin: false, machineId: null, machineName: null, computer: null, startedAt: null })
-        .where(and(eq(testParts.id, part.id), eq(testParts.status, 'running')));
-    } else {
-      reserved.take(place);
-    }
-  }
+  for (const entry of waiting) await givePart(ctx, entry, places, reserved, targets);
 }
 
 /* The free memory, in GB, a part of the run needs: what its agent said for work, else what its repository says. */
@@ -479,7 +458,7 @@ export async function partDone(ctx: Ctx, id: NodeIdentity, msg: TestsDone): Prom
     if (found && found.part.status !== 'queued') {
       const [ended] = await db
         .update(testParts)
-        .set({ ...partEnd(found.run, msg), commit: msg.commit, exitCode: msg.exitCode, tail: tailOf(msg.log), finishedAt: new Date() })
+        .set({ ...productPartEnd(ctx, id, found.run, found.part, msg), commit: msg.commit, exitCode: msg.exitCode, tail: tailOf(msg.log), finishedAt: new Date() })
         .where(and(eq(testParts.id, msg.partId), eq(testParts.status, 'running')))
         .returning();
       await keepLog(ctx, found.run, found.part, msg.log);
@@ -531,7 +510,7 @@ export async function checkTestTimes(ctx: Ctx, now = new Date()): Promise<void> 
 }
 
 /* files: the task's files a part of work takes in; memory: the free memory, in GB, it needs; repeatable: it may run twice. */
-export type RunInput = { task?: number | string; branch?: string; command: string; parts?: number; minutes?: number; files?: string[]; memory?: number; repeatable?: boolean };
+export type RunInput = { task?: number | string; branch?: string; command?: string; suite?: string; profile?: string; parts?: number; minutes?: number; files?: string[]; memory?: number; repeatable?: boolean };
 
 /* The task a run is for: the one named, else the one the turn is on. */
 async function taskFor(ctx: Ctx, job: ToolJob, ref: number | string | undefined, kind: RunKind): Promise<Task> {
@@ -562,6 +541,7 @@ async function pinCommit(ctx: Ctx, task: Pick<Task, 'number'>, kind: RunKind, br
 }
 
 export async function startRun(ctx: Ctx, job: ToolJob, input: RunInput, kind: RunKind = 'tests'): Promise<string> {
+  const mode = testRunMode(input, kind);
   const { db } = ctx;
   const task = await taskFor(ctx, job, input.task, kind);
   if (CLOSED.includes(task.status)) throw refuse(409, 'task_closed', `#${task.number} is ${task.status} already.`);
@@ -582,16 +562,15 @@ export async function startRun(ctx: Ctx, job: ToolJob, input: RunInput, kind: Ru
     const missing = files.find(f => !had.some(h => h.name === f));
     if (missing) throw refuse(404, 'attachment_unknown', `#${task.number} has no file ${missing}. Put it on the task with hh-attach --task ${task.number} first.`);
   }
-  const parts = input.parts ?? 1;
-  if (parts > 1 && !input.command.includes('{part}')) {
-    throw refuse(400, 'task_invalid', 'A command split into parts says which part it runs with {part}, and with {parts} how many there are, as in --shard={part}/{parts}.');
-  }
+  const parts = mode.mode === 'manual' ? mode.parts : 0;
+  checkManualParts(input.command ?? '', parts);
   const [open] = await db.select({ n: count() }).from(testRuns).where(and(eq(testRuns.agentId, job.agentId), eq(testRuns.status, 'running')));
   if (Number(open?.n ?? 0) >= OPEN_RUNS) throw refuse(409, 'task_invalid', `You have ${OPEN_RUNS} runs going on already. Wait for one to end, or stop one with stop_tests or stop_work.`);
   const department = found?.department ?? await taskDepartment(ctx, task, kind);
   const heldReason = await browserHeldRun(ctx, job.companyId, await placesOf(ctx, job.companyId), { kind }, department);
   if (heldReason) throw refuse(409, 'browser_failed', heldReason);
   const pin = await pinCommit(ctx, task, kind, input.branch, found);
+  checkProductPin(mode.mode, pin.commitSha);
   const run = await db.transaction(async tx => {
     /* Numbers go up one by one per company, so starting a run waits on the company row. */
     await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, job.companyId)).for('update');
@@ -607,7 +586,8 @@ export async function startRun(ctx: Ctx, job: ToolJob, input: RunInput, kind: Ru
         departmentId: department?.id ?? null,
         kind,
         ...pin,
-        command: input.command,
+        command: input.command ?? '',
+        environmentRequest: mode.mode === 'product' ? newEnvironmentRequest(repositoryScope(job.companyId, found!.department.id, found!.repo.url), mode) : null,
         files,
         memoryGb: kind === 'work' ? (input.memory ?? WORK_MEMORY_GB) : null,
         repeatable: kind === 'work' && input.repeatable === true,
@@ -615,22 +595,12 @@ export async function startRun(ctx: Ctx, job: ToolJob, input: RunInput, kind: Ru
         timeoutMs: (input.minutes ?? TEST_MINUTES) * 60_000,
       })
       .returning();
-    await tx.insert(testParts).values(Array.from({ length: parts }, (_, i) => ({ companyId: job.companyId, runId: row!.id, part: i + 1 })));
+    if (parts) await tx.insert(testParts).values(Array.from({ length: parts }, (_, i) => ({ companyId: job.companyId, runId: row!.id, part: i + 1 })));
     return row!;
   });
   await pumpTests(ctx);
-  const went = await db.select().from(testParts).where(eq(testParts.runId, run.id)).orderBy(asc(testParts.part));
-  const places = (await placesOf(ctx, job.companyId)).filter(p => mayTake(p, run, department));
-  const one = went.length === 1;
-  const where = went.map(p => {
-    const at = p.status === 'running' ? `on ${p.machineName}` : 'waits for a free machine';
-    return one ? at : `part ${p.part} ${p.status === 'running' ? 'runs ' : ''}${at}`;
-  });
-  const none = went.some(p => p.status === 'queued') && !places.length ? ' No machine that may take it is online now, so it waits until one is.' : '';
-  return (
-    `${named(run)} of #${task.number} ${one && went[0]!.status === 'running' ? 'runs ' : ''}${one ? where[0] : `has ${parts} parts: ${where.join(', ')}`}.${none}${pinLine(run)}${markLine(kind, found, run.command)} ` +
-    `When every part has ended you are woken on #${task.number} with the result; ${toolsOf(kind).state} ${run.number} shows how it goes.`
-  );
+  if (mode.mode === 'product') return `${named(run)} of #${task.number} waits for its pinned product environment description.${pinLine(run)} test_run ${run.number} shows the environment and parts; you are woken with its result.`;
+  return startedRunSummary(ctx, run, task, found, department);
 }
 
 /* A run the agent may see and stop: its own, or one on a task it works on. */
@@ -658,6 +628,7 @@ export async function runState(ctx: Ctx, job: ToolJob, number: number, kind: Run
     kind: run.kind,
     branch: work ? run.branch : (run.branch ?? `the task's own: task-${task.number} or the one that starts with task-${task.number}-`),
     command: run.command,
+    ...productRunView(run),
     ...(work ? { files: run.files, memoryGb: run.memoryGb, repeatable: run.repeatable } : { commitSha: run.commitSha }),
     minutes: run.timeoutMs / 60_000,
     status: stateOf(run, run.status),
@@ -666,6 +637,7 @@ export async function runState(ctx: Ctx, job: ToolJob, number: number, kind: Run
     finishedAt: run.finishedAt?.toISOString() ?? null,
     parts: parts.map(p => ({
       part: p.part,
+      ...productPartView(p),
       status: stateOf(run, p.status),
       machine: p.machineName,
       commit: p.commit,
@@ -709,6 +681,7 @@ export async function stopRun(ctx: Ctx, job: ToolJob, number: number, kind: RunK
     const node = nodeOf(p);
     if (node) ctx.hub.send(node, { type: 'tests.cancel', partId: p.id });
   }
+  cancelDescription(ctx, run.environmentRequest);
   await told(ctx, stopped.end);
   await pumpTests(ctx);
   return `${named(run)} is stopped.`;
@@ -724,4 +697,94 @@ export async function workPartOn(ctx: Ctx, id: NodeIdentity, partId: string): Pr
     .innerJoin(tasks, eq(tasks.id, testRuns.taskId))
     .where(and(eq(testParts.id, partId), eq(testParts.status, 'running'), eq(testRuns.kind, 'work'), ofNode(id)));
   return found ?? null;
+}
+
+function checkManualParts(command: string, parts: number): void {
+  if (parts > 1 && !command.includes('{part}')) throw refuse(400, 'task_invalid', 'A command split into parts says which part it runs with {part}, and with {parts} how many there are, as in --shard={part}/{parts}.');
+}
+function productMessage(run: Run, part: Part, repo: Repo | null): object {
+  const repository = repo && run.departmentId ? { repositoryScope: repositoryScope(run.companyId, run.departmentId, repo.url) } : {};
+  if (!run.environmentSnapshot || !part.environmentSelection) return repository;
+  return { ...repository, environment: { snapshot: run.environmentSnapshot, selection: part.environmentSelection.selection } };
+}
+async function productPartReady(ctx: Ctx, part: Part): Promise<boolean> {
+  const after = part.environmentSelection?.after ?? [];
+  if (!after.length) return true;
+  const prerequisites = await ctx.db.select().from(testParts).where(and(eq(testParts.runId, part.runId), inArray(testParts.part, after)));
+  if (prerequisites.some(p => p.status === 'failed' || p.status === 'stopped')) {
+    await endParts(ctx, eq(testParts.id, part.id), 'prerequisite_failed', 'A required suite part failed; final checks did not run.'); return false;
+  }
+  return prerequisites.length === after.length && prerequisites.every(p => p.status === 'passed');
+}
+function productRunView(run: Run): object {
+  if (!run.environmentRequest) return {};
+  return { mode: 'product', environment: run.environmentSnapshot, environmentHash: run.environmentHash, environmentStatus: run.environmentSnapshot ? 'ready' : run.environmentRequest.problem ? 'failed' : 'describing', environmentProblem: run.environmentRequest.problem };
+}
+function productPartView(part: Part): object {
+  return part.environmentSelection ? { selection: part.environmentSelection.selection, environmentReceipt: part.environmentReceipt } : {};
+}
+
+function productPartEnd(ctx: Ctx, id: NodeIdentity, run: Run, part: Part, message: TestsDone): { status: 'passed' | 'failed'; error: string | null; environmentReceipt: Part['environmentReceipt'] } {
+  const end = partEnd(run, message), environmentReceipt = productReceipt(run.environmentSnapshot, part.environmentSelection, message, testCapabilities(ctx, id).testRuntimes ?? []);
+  if (run.environmentSnapshot && message.ok && !environmentReceipt) return { status: 'failed', error: 'environment_invalid', environmentReceipt: null };
+  return { ...end, environmentReceipt };
+}
+
+function partDispatchLine(part: Part, one: boolean): string {
+  const at = part.status === 'running' ? `on ${part.machineName}` : 'waits for a free machine';
+  return one ? at : `part ${part.part} ${part.status === 'running' ? 'runs ' : ''}${at}`;
+}
+async function startedRunSummary(ctx: Ctx, run: Run, task: Task, found: Awaited<ReturnType<typeof repoAt>>, department: Department | null): Promise<string> {
+  const went = await ctx.db.select().from(testParts).where(eq(testParts.runId, run.id)).orderBy(asc(testParts.part));
+  const places = (await placesOf(ctx, run.companyId)).filter(p => mayTake(p, run, department));
+  const one = went.length === 1;
+  const where = went.map(p => partDispatchLine(p, one));
+  const none = went.some(p => p.status === 'queued') && !places.length ? ' No machine that may take it is online now, so it waits until one is.' : '';
+  return (
+    `${named(run)} of #${task.number} ${one && went[0]!.status === 'running' ? 'runs ' : ''}${one ? where[0] : `has ${run.parts} parts: ${where.join(', ')}`}.${none}${pinLine(run)}${markLine(run.kind, found, run.command)} ` +
+    `When every part has ended you are woken on #${task.number} with the result; ${toolsOf(run.kind).state} ${run.number} shows how it goes.`
+  );
+}
+
+async function givePart(ctx: Ctx, { part, run, task }: { part: Part; run: Run; task: { number: number } }, places: Map<string, Place[]>, reserved: Reservations, targets: Map<string, Awaited<ReturnType<typeof targetOf>>>): Promise<void> {
+  const { db } = ctx;
+    if (!targets.has(run.id)) targets.set(run.id, await targetOf(ctx, run));
+    const found = targets.get(run.id)!;
+    if (!sameRunTarget(run, found)) {
+      await endParts(ctx, and(eq(testParts.id, part.id), eq(testParts.status, 'queued'))!, 'no_repository', 'The pinned repository configuration changed or is no longer available.');
+      return;
+    }
+    if (!await productPartReady(ctx, part)) return;
+    const candidates = await productPlaces(ctx, places.get(run.companyId)!, run, needOf(run, found.department) * GIB);
+    const place = placeFor(candidates, run, part, found.department, reserved);
+    if (!place) return;
+    const [taken] = await db
+      .update(testParts)
+      .set({ status: 'running', nodeId: place.nodeId, builtin: place.builtin, machineId: place.machineId, machineName: place.name, computer: computerKey(place), startedAt: new Date() })
+      .where(and(eq(testParts.id, part.id), eq(testParts.status, 'queued')))
+      .returning();
+    if (!taken) return;
+    const sent = !nodeHeld(ctx, place.node) && ctx.hub.send(place.node, partMessage(run, part, found.repo, task.number));
+    /* The node went away or began to wait for an update meanwhile: the part waits for the next machine. */
+    if (!sent) {
+      await db
+        .update(testParts)
+        .set({ status: 'queued', nodeId: null, builtin: false, machineId: null, machineName: null, computer: null, startedAt: null })
+        .where(and(eq(testParts.id, part.id), eq(testParts.status, 'running')));
+    } else {
+      reserved.take(place);
+      noteProductOwner(ctx, place, run);
+    }
+}
+
+function checkProductPin(mode: 'manual' | 'product', commit: string | null): void {
+  if (mode === 'product' && !/^[a-f0-9]{40}$/.test(commit ?? '')) throw refuse(409, 'repo_invalid', 'Product tests need an exact lowercase 40-character commit SHA.');
+}
+
+function sameRunTarget(run: Run, target: Awaited<ReturnType<typeof targetOf>>): target is NonNullable<Awaited<ReturnType<typeof targetOf>>> {
+  if (!target) return false;
+  if (!run.environmentSnapshot) return true;
+  if (!target.repo || !target.department) return false;
+  const scope = run.environmentSnapshot.description.repositoryScope;
+  return scope.companyId === run.companyId && scope.repositoryOwnerId === target.department.id && scope.repoUrlHash === hashToken(target.repo.url);
 }
