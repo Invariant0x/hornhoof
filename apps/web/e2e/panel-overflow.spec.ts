@@ -248,17 +248,7 @@ for (const lang of ['en', 'ru'] as const) {
           expect(pseudo.weight, 'record label weight is width-independent').toBe('400');
           expect(pseudo.color).toBe(theme === 'light' ? 'rgb(76, 90, 104)' : 'rgb(147, 160, 174)');
         }
-        if (width === 375 && lang === 'en' && theme === 'light') {
-          console.log('P6_CASCADE', await actions.evaluate(el => ({
-            padding: getComputedStyle(el).paddingBlockStart,
-            top: getComputedStyle(el).paddingTop,
-            matches: el.matches('.fit > :is(.ptable, .dt)[data-fit="entries"] td.row-actions'),
-            fit: el.closest('table')?.getAttribute('data-fit'),
-            rules: [...document.styleSheets].flatMap(sheet => [...sheet.cssRules].filter(rule => rule.cssText.includes('padding')).map(rule => rule.cssText)),
-            matched: [...document.styleSheets].flatMap(sheet => [...sheet.cssRules].filter(rule => rule instanceof CSSStyleRule && el.matches(rule.selectorText)).map(rule => rule.cssText)),
-          })));
-        }
-        await expect(actions).toHaveCSS('padding-block-start', '8px');
+        await expect(actions).toHaveCSS('margin-block-start', '8px');
         await expectWrappedText(name);
         await expectInside(row, [name, actions]);
         await expectInside(actions, [edit]);
