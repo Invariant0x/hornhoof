@@ -44,7 +44,6 @@ it('gives neither production SQL role anything on any table of the gateway, sign
   fixture.cleanup(() => sql.close());
   const tables = await gatewayTables(fixture);
   expect(tables.length).toBeGreaterThanOrEqual(23);
-  expect(HIDDEN).toEqual(expect.arrayContaining(tables));
   const owners = await fixture.admin.query<{ tableowner: string }>('SELECT DISTINCT tableowner FROM pg_tables WHERE tablename = ANY($1)', [tables]);
   for (const [mode, role] of [['write', agentRole(fixture.name)], ['read', readerRole(fixture.name)]] as const) {
     expect(owners.rows.map(row => row.tableowner)).not.toContain(role);
@@ -55,4 +54,6 @@ it('gives neither production SQL role anything on any table of the gateway, sign
     await settingsClosed(sql, mode);
   }
   expect((await fixture.admin.query("SELECT proname FROM pg_proc WHERE prosecdef AND pronamespace = 'public'::regnamespace")).rows).toEqual([]);
+  /* Last, so that an open table shows up as the right it really has, not as a name missing from a list. */
+  expect(HIDDEN).toEqual(expect.arrayContaining(tables));
 });
