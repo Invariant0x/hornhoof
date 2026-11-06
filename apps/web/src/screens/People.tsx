@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import { api } from '../api';
-import { errorText, useT } from '../i18n';
+import { errorText, useLanguage, useT } from '../i18n';
+import { fitTable } from '../ui/fit-table';
 import type { AccessInput, Me, Org, PersonView } from '../types';
 import { accessEmpty, accessInput, AccessPicker, accessText } from '../ui/AccessPicker';
 import { CopyButton } from '../ui/CopyButton';
@@ -247,26 +248,28 @@ function PersonRow({ p, me, org, routed, openPerson, newLink, setStatus }: { p: 
   const { manageable, titleOnly } = rightsOn(me, p);
   return (
     <tr className={p.status}>
-      <td>
+      <td data-label={t.people.columns.name}>
         {routed ? <button className="linkish pname" type="button" onClick={() => openPerson(p)}><PersonIcon />{p.name}{p.isCeoDelegate && <DeputyMark />}</button> : <span className="pname"><PersonIcon />{p.name}{p.isCeoDelegate && <DeputyMark />}</span>}
       </td>
-      <td>{p.title}</td>
-      <td>{accessText(t, p.access, org)}</td>
-      <td><span className={`status ${p.status}`}>{t.people.status[p.status]}</span></td>
-      <td className="row-actions">
-        {(manageable || titleOnly) && (
-          <button className="act" type="button" aria-label={t.people.editLabel(p.name)} onClick={() => openPerson(p)}>{t.people.edit}</button>
-        )}
-        {manageable && (
-          <>
-            <button className="act" type="button" aria-label={t.people.newLinkLabel(p.name)} onClick={() => void newLink(p)}>{t.people.newLink}</button>
-            {p.status === 'disabled' ? (
-              <button className="act" type="button" aria-label={t.people.enableLabel(p.name)} onClick={() => void setStatus(p, 'active')}>{t.people.enable}</button>
-            ) : (
-              <button className="act danger" type="button" aria-label={t.people.disableLabel(p.name)} onClick={() => void setStatus(p, 'disabled')}>{t.people.disable}</button>
-            )}
-          </>
-        )}
+      <td data-label={t.people.columns.title}>{p.title}</td>
+      <td data-label={t.people.columns.access}>{accessText(t, p.access, org)}</td>
+      <td data-label={t.people.columns.status}><span className={`status ${p.status}`}>{t.people.status[p.status]}</span></td>
+      <td className="row-actions" data-label={t.people.columns.actions}>
+        <div className="entry-actions" role="group" aria-label={`${t.people.columns.actions}: ${p.name}`}>
+          {(manageable || titleOnly) && (
+            <button className="act" type="button" aria-label={t.people.editLabel(p.name)} onClick={() => openPerson(p)}>{t.people.edit}</button>
+          )}
+          {manageable && (
+            <>
+              <button className="act" type="button" aria-label={t.people.newLinkLabel(p.name)} onClick={() => void newLink(p)}>{t.people.newLink}</button>
+              {p.status === 'disabled' ? (
+                <button className="act" type="button" aria-label={t.people.enableLabel(p.name)} onClick={() => void setStatus(p, 'active')}>{t.people.enable}</button>
+              ) : (
+                <button className="act danger" type="button" aria-label={t.people.disableLabel(p.name)} onClick={() => void setStatus(p, 'disabled')}>{t.people.disable}</button>
+              )}
+            </>
+          )}
+        </div>
       </td>
     </tr>
   );
@@ -284,6 +287,21 @@ export function People({ me, selected, onSelect, onHome, onRenamed }: { me: Me; 
   const [panel, setPanel] = useState<Panel>(null);
   const [failure, setFailure] = useState<unknown>(null);
   const canManage = me.person.scopeKind === 'company';
+  const { language } = useLanguage();
+  const tableHost = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    const host = tableHost.current;
+    const table = host?.querySelector('table');
+    if (!host || !table) return;
+    const measure = () => fitTable(table);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(host);
+    void document.fonts.ready.then(measure);
+    return () => observer.disconnect();
+  }, [people, language]);
 
   const load = useCallback(async () => {
     try {
@@ -373,20 +391,22 @@ export function People({ me, selected, onSelect, onHome, onRenamed }: { me: Me; 
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
 
       {people && (
-        <table className="ptable">
-          <thead>
-            <tr>
-              <th scope="col">{t.people.columns.name}</th>
-              <th scope="col">{t.people.columns.title}</th>
-              <th scope="col">{t.people.columns.access}</th>
-              <th scope="col">{t.people.columns.status}</th>
-              <th scope="col"><span className="sr">{t.people.columns.actions}</span></th>
-            </tr>
-          </thead>
-          <tbody>
-            {people.map(p => <PersonRow key={p.id} p={p} me={me} org={org} routed={Boolean(onSelect)} openPerson={openPerson} newLink={newLink} setStatus={setStatus} />)}
-          </tbody>
-        </table>
+        <div className="fit" ref={tableHost}>
+          <table className="ptable">
+            <thead>
+              <tr>
+                <th scope="col">{t.people.columns.name}</th>
+                <th scope="col">{t.people.columns.title}</th>
+                <th scope="col">{t.people.columns.access}</th>
+                <th scope="col">{t.people.columns.status}</th>
+                <th scope="col"><span className="sr">{t.people.columns.actions}</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              {people.map(p => <PersonRow key={p.id} p={p} me={me} org={org} routed={Boolean(onSelect)} openPerson={openPerson} newLink={newLink} setStatus={setStatus} />)}
+            </tbody>
+          </table>
+        </div>
       )}
       {me.person.isOwner && <p className="muted">{t.people.ceoDelegate}: {t.people.ceoDelegateHint}</p>}
       <p className="muted people-foot"><AgentIcon /> {t.people.agentsNote}</p>

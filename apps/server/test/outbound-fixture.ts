@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { OutboundPolicyValue } from '@hornhoof/protocol';
+import type { CatalogValue, OutboundPolicyValue } from '@hornhoof/protocol';
 import { agents, companies, departments, modelCheckDatasets, modelCheckEvaluations, modelCheckRevisions, modelChecks, outboundAccounts, outboundApprovals, outboundBindings, outboundCatalogRevisions, outboundChannels, outboundContacts, outboundDailyUsage, outboundMessageRevisions, outboundMessages, outboundPermissions, outboundPolicies, people, requests, supportClassifications, supportTickets, tasks } from '../src/db/schema.js';
+import type { Place, Source } from '../src/modules/outbound/checks.js';
 import type { createTestDb } from './helpers.js';
 import { binding } from './model-check-fixture.js';
 
@@ -15,6 +16,14 @@ export const POLICY: OutboundPolicyValue = {
 };
 export const PRICE = { kind: 'price', amount: '10.00', currency: 'USD', scale: 2, rounding: 'half_up', discountId: null, termsId: null, validFrom: '2026-11-01T00:00:00.000Z', validUntil: null } as const;
 const NOW = new Date('2026-11-06T10:00:00.000Z');
+
+const localeOf = (value: CatalogValue): string | null => ('locale' in value ? value.locale : null);
+
+/* A published revision as the pure checks read it. */
+export const aSource = (place: Place, value: CatalogValue, over: Partial<Source> = {}): Source => ({
+  entryId: randomUUID(), revision: 1, kind: value.kind, locale: localeOf(value), value, digest: sha(JSON.stringify(value)), status: 'published',
+  validFrom: new Date('2026-11-01T00:00:00.000Z'), validUntil: null, departmentId: place.departmentId, productId: null, channelId: null, ...over,
+});
 
 /* A company with a department and a product in it, a person who owns them and two possible authors. A deployment holds
    one company, so any other is one only tests make, to prove that rows do not reach across. */

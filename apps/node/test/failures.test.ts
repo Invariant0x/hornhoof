@@ -44,3 +44,15 @@ it('recognizes the captured Kimi StopFailure auth class with its 401 message', a
   const hook = hooks.find(h => h.program === 'kimi' && h.event === 'StopFailure' && h.input.error_type === 'APIStatusError')!;
   expect(FAILURE.kimi(hook.input)).toMatchObject({ kind: 'auth', retryable: false });
 });
+
+describe('model access denial', () => {
+  it('classifies the current Codex access diagnostic explicitly, not as unknown or overload', () => {
+    expect(FAILURE.codex({ codex_error_info: { model_access_denied: { http_status_code: 403 } }, message: 'Unable to verify model access' })).toMatchObject({ kind: 'model_access_denied', retryable: false });
+  });
+
+  it('keeps server overload separate from access denial and unknown failures', () => {
+    expect(FAILURE.codex({ codex_error_info: { server_overloaded: { http_status_code: 503 } }, message: 'Selected model is at capacity' })).toMatchObject({ kind: 'overloaded', retryable: true });
+    expect(FAILURE.codex({ codex_error_info: { unauthorized: { http_status_code: 403 } }, message: 'Unauthorized' })).toMatchObject({ kind: 'auth', retryable: false });
+    expect(FAILURE.codex({ codex_error_info: { other: { http_status_code: 500 } }, message: 'Internal Server Error' })).toMatchObject({ kind: 'unknown', retryable: true });
+  });
+});

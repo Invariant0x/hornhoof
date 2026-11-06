@@ -512,6 +512,20 @@
       "when": 1793942944520,
       "tag": "0073_task_wait_ownership",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1793950158136,
+      "tag": "0074_wait_cards_and_goals",
+      "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1793954747150,
+      "tag": "0075_internal_first_questions",
+      "breakpoints": true
     }
   ]
 }
