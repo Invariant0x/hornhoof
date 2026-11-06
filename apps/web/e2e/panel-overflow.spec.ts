@@ -222,8 +222,11 @@ for (const lang of ['en', 'ru'] as const) {
         await expect(dialog).toBeVisible();
         await dialog.getByRole('button', { name: m.settings.remove, exact: true }).click();
         const actions = dialog.locator('.settings-actions');
-        const question = actions.locator('span');
-        const buttons = actions.getByRole('button');
+        const question = actions.locator('.entry-main');
+        const group = actions.locator('.entry-actions');
+        await expect(group).toHaveAttribute('role', 'group');
+        const buttons = group.getByRole('button');
+        for (const button of await buttons.all()) await expect(button).toHaveCSS('min-height', '44px');
         await capture(page, info, `settings-remove-${look}`);
         await expectWrappedText(question);
         await expectInside(actions, [question, ...await buttons.all()]);
