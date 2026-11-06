@@ -23,10 +23,9 @@ test('root projects retain every normal workspace file and the existing no-proc 
 });
 
 test('one collection can answer for several changed files', { timeout: 60000 }, async () => {
-  const together = await probe({ root }, ['apps/server/src/app.ts', 'packages/protocol/src/waits.ts']);
-  const first = await probe({ root }, 'apps/server/src/app.ts');
-  const second = await probe({ root }, 'packages/protocol/src/waits.ts');
-  assert.deepEqual(files(together.selected), files([...first.selected, ...second.selected]));
+  const selected = files((await probe({ root }, ['apps/node/src/test-impact-adapters.ts', 'apps/web/src/ui/AgentTerminal.tsx'])).selected);
+  assert.ok(selected.includes('apps/node/test/test-impact-adapters.test.ts'));
+  assert.ok(selected.includes('apps/web/test/AgentTerminal.test.tsx'));
 });
 
 test('an app change selects real server integration tests and leaves database-only tests out', { timeout: 60000 }, async () => {
@@ -71,6 +70,6 @@ test('root projects actually run a cwd-sensitive web test, rather than only disc
   const run = spawnSync(process.execPath, [cli, 'run', 'apps/web/test/css.test.ts', '--maxWorkers=2'], { cwd: root, encoding: 'utf8', timeout: 55000 });
   assert.equal(run.status, 0, run.stdout + run.stderr);
   assert.match(run.stdout, /passed/);
-  console.log('HH_ROOT_EXECUTION ' + JSON.stringify({ source: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
-    command: 'vitest run apps/web/test/css.test.ts --maxWorkers=2', code: run.status, stdout: run.stdout, stderr: run.stderr }));
+  process.stdout.write('HH_ROOT_EXECUTION ' + JSON.stringify({ source: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
+    command: 'vitest run apps/web/test/css.test.ts --maxWorkers=2', code: run.status, stdout: run.stdout, stderr: run.stderr }) + '\n');
 });

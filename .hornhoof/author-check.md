@@ -6,7 +6,7 @@ One command checks what an author hands in, at an exact commit against its base.
 npm run -s check:author -- --sha <40 hex> --base <40 hex>
 ```
 
-It checks only inside `run_tests`, which sets `HH_TEST_PART`, so no check uses the CPU of an agent's container. The clone of a run holds one commit and has no token, so a run cannot read the base. Run the command above outside `run_tests` first. It reads `git diff` and the complexity of the changed files at the base, runs nothing else, and prints the line to give `run_tests`, with `--plan <text>` added. The line has to fit the 4000 characters of a command, so a change too large for that is refused with `plan_too_long`. When the base can be read in the clone, the plan is not needed.
+It checks only inside `run_tests`, which sets `HH_TEST_PART`, so no check uses the CPU of an agent's container. The clone of a run holds one commit and has no token, so a run cannot read the base. Run the command above outside `run_tests` first. It reads `git diff` and the complexity of the changed files at the base, runs nothing else, and prints the line to give `run_tests`, with `--plan <text>` added. The line has to fit the 4000 characters of a command, so a change too large for that is refused with `plan_too_long`. A plan not copied exactly is refused with `plan_invalid`: copy the printed line again. When the base can be read in the clone, the plan is not needed.
 
 ## What each stage does
 

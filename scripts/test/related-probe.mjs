@@ -24,6 +24,6 @@ export function workspaceOptions(folder, config) {
 }
 
 export function evidence(mode, changed, result) {
-  console.log('HH_RELATED_WIDTH ' + JSON.stringify({ mode, changed, projects: result.projects, total: result.all.length,
-    selected: result.selected.length, files: result.selected }));
+  process.stdout.write('HH_RELATED_WIDTH ' + JSON.stringify({ mode, changed, projects: result.projects, total: result.all.length,
+    selected: result.selected.length, files: result.selected }) + '\n');
 }
