@@ -27,7 +27,7 @@ interface FullRule { code: string; globs: string[]; global?: boolean }
 export const DEFAULT_FULL_PACKAGE_RULES: readonly FullRule[] = [
   { code: 'migration', globs: ['**/migrations/**', '**/drizzle/**', '**/*.migration.*'] },
   { code: 'schema', globs: ['**/schema.*', '**/schema/**'] },
-  { code: 'configuration', globs: ['**/*config*', '**/package.json', '**/*lock*', '**/pyproject.toml', '**/pytest.ini', '**/Dockerfile', '**/.hornhoof/**', '**/.github/**'] },
+  { code: 'configuration', globs: ['**/*config*', '**/package.json', '**/package-lock.json', '**/npm-shrinkwrap.json', '**/yarn.lock', '**/pnpm-lock.yaml', '**/poetry.lock', '**/Pipfile.lock', '**/uv.lock', '**/Cargo.lock', '**/pyproject.toml', '**/pytest.ini', '**/Dockerfile', '**/.hornhoof/**', '**/.github/**'] },
   { code: 'environment', globs: ['**/.env*', '**/env.*', '**/environment.*'] },
   { code: 'routes', globs: ['**/routes/**', '**/routes.*', '**/router.*'] },
   { code: 'fixtures', globs: ['**/fixtures/**', '**/fixture.*', '**/conftest.py'] },
@@ -39,7 +39,7 @@ export const DEFAULT_FULL_PACKAGE_RULES: readonly FullRule[] = [
   { code: 'shared_package', globs: ['packages/**'], global: true },
   { code: 'api_contract', globs: ['**/contracts/**', '**/contracts.*', '**/openapi.*'], global: true },
 ];
-const ADAPTERS: Record<string, ImpactAdapter> = { typescript: 'vitest-related', javascript: 'vitest-related', python: 'pytest' };
+const ADAPTERS = new Map<string, ImpactAdapter>([['typescript', 'vitest-related'], ['javascript', 'vitest-related'], ['python', 'pytest']]);
 const EXTENSIONS: Record<ImpactAdapter, string[]> = { 'vitest-related': ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.cts'], pytest: ['.py', '.pyi'] };
 interface Choice { mode: ImpactPackageSelection['mode']; units: Map<string, TestUnit>; reasons: Map<string, ImpactReason> }
 interface SelectionState {
@@ -79,11 +79,14 @@ function broadPackages(state: SelectionState, path: string): ImpactPackage[] {
   const owner = ownerOf(state.environment, path);
   return owner ? [owner] : state.environment.packages;
 }
+function matchesPolicy(path: string, pattern: string): boolean {
+  return path === pattern || path.startsWith(`${pattern.replace(/\/$/, '')}/`) || matchesGlob(path, pattern);
+}
 function policy(state: SelectionState, path: string): boolean {
-  const targets = state.environment.impact.fullPackageGlobs.filter(rule => rule.globs.some(glob => matchesGlob(path, glob)))
+  const targets = state.environment.impact.fullPackageGlobs.filter(rule => rule.globs.some(glob => matchesPolicy(path, glob)))
     .flatMap(rule => state.environment.packages.filter(pkg => pkg.suiteIds.some(id => rule.suiteIds.includes(id))));
   whole(state, targets, { code: 'full_package_rule', path });
-  const rule = DEFAULT_FULL_PACKAGE_RULES.find(value => value.globs.some(glob => matchesGlob(path, glob)));
+  const rule = DEFAULT_FULL_PACKAGE_RULES.find(value => value.globs.some(glob => matchesPolicy(path, glob)));
   if (!rule) return targets.length > 0;
   if (rule.code === 'migration') state.migration = true;
   whole(state, rule.global ? state.environment.packages : broadPackages(state, path), { code: rule.code, path });
@@ -103,7 +106,7 @@ function validGraph(state: SelectionState, graph: ImpactGraph): boolean {
   return graph.units.every(unit => state.inventory.get(unitKey(unit))?.selectionUnit === unit.selectionUnit && packageOfUnit(state.environment, unit) !== undefined);
 }
 function related(state: SelectionState, graphs: ImpactGraph[], pkg: ImpactPackage, path: string): void {
-  const adapter = ADAPTERS[pkg.language ?? state.environment.impact.adapter];
+  const adapter = ADAPTERS.get(pkg.language ?? state.environment.impact.adapter);
   if (!adapter) return whole(state, [pkg], { code: 'unsupported_language', path });
   if (!EXTENSIONS[adapter].includes(extname(path))) return whole(state, [pkg], { code: 'unsupported_file', path });
   const found = graphs.filter(graph => graph.adapter === adapter);
