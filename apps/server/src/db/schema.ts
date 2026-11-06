@@ -144,6 +144,8 @@ export const departments = pgTable('departments', {
   repoUrl: text('repo_url'),
   repoBranch: text('repo_branch'),
   repoTokenEnc: text('repo_token_enc'),
+  /* Server-only credential scope; every token write or clear advances it. */
+  repoTokenRevision: integer('repo_token_revision').notNull().default(1),
   repoTokenLast4: text('repo_token_last4'),
   /* Who the agents' commits are by; without one each agent's program sets its own. */
   repoAuthorName: text('repo_author_name'),
@@ -156,7 +158,7 @@ export const departments = pgTable('departments', {
      and it is never worked out from who has access. It counts only while that person is active and still has access. */
   ownerPersonId: uuid('owner_person_id').references((): AnyPgColumn => people.id),
   createdAt: createdAt(),
-}, t => [unique('departments_company_id').on(t.companyId, t.id), index('departments_owner_person_id').on(t.ownerPersonId), check('departments_work_mode', sql`${t.workMode} IN ('turns', 'continuous')`)]);
+}, t => [unique('departments_company_id').on(t.companyId, t.id), index('departments_owner_person_id').on(t.ownerPersonId), check('departments_work_mode', sql`${t.workMode} IN ('turns', 'continuous')`), check('departments_repo_token_revision', sql`${t.repoTokenRevision} > 0`)]);
 
 /* How a department's approvals go, one rule per channel; a channel with no rule asks every time. The rules belong to the
    department, not to its owner, so they stay when the owner changes or goes. */

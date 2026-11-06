@@ -4,6 +4,7 @@ import { z } from 'zod';
 export const NOTIFICATION_NAMES = {
   assigned: 'task assigned', review: 'gate review', changes: 'gate returned the work', stuck_at_gate: 'repeated gate returns',
   done: 'task completed', reported: 'work reported', blocked: 'work blocked', cancelled: 'task cancelled', answered: 'answer recorded',
+  question: 'internal question', resolved: 'internal question resolved',
   comment: 'task comment', updated: 'task rewritten', reminder: 'turn ended without a task move', go_on: 'turn ended before the work',
   turn: 'turn closed', switched: 'employee switched off', explain: 'question waiting for people', subtasks: 'last subtask closed',
   after_cancelled: 'dependency cancelled', merge: 'gates passed', unblocked: 'block answered', tests: 'test run ended', work: 'work run ended',
