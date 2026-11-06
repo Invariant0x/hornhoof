@@ -4,7 +4,7 @@ import type { MaterialManifest } from '../src/types';
 import { afterEach, describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Shell } from '../src/screens/Shell';
-import { CARD, decisions, DEV_ORG, ME, mockApi, REQUESTS, TASK_DETAIL, TASKS, TURN } from './api-mock';
+import { CARD, decisions, DEV_ORG, MACHINES, ME, mockApi, REQUESTS, RUNNING_AGENTS, SUBS, TASK_DETAIL, TASKS, TURN } from './api-mock';
 
 function shell(routes: Record<string, unknown> = {}) {
   const calls = mockApi({
@@ -460,6 +460,43 @@ describe('a task', () => {
     await user.type(within(waiting).getByLabelText('Your answer'), 'The result is ready.');
     await user.click(within(waiting).getByRole('button', { name: 'Send answer' }));
     expect(calls.find(call => call.method === 'POST')?.body).toEqual({ materialRevision: 1, materialDigest, answer: 'The result is ready.' });
+  });
+
+  it('forwards native proposal stamps from the decisions list to the material manifest loader', async () => {
+    const user = userEvent.setup();
+    const materialDigest = 'd'.repeat(64);
+    const proposal: import('../src/types').ProposalDecision = {
+      id: 'pr-native', kind: 'structure', agent: { id: 'a1', name: 'Orchestrator' }, department: null,
+      brief: 'Build the approved structure.', at: '2026-11-03T10:00:00.000Z', ownerPersonId: 'p1', canAnswer: true,
+      items: [{ template: 'design', checked: true, note: '' }], materialRevision: 1, materialDigest, hasMaterials: true,
+    };
+    const manifest = { materialRevision: 1, materialDigest, common: [], options: [] } satisfies MaterialManifest;
+    const calls = shell({
+      'GET /api/requests': [200, decisions([], { proposals: [proposal] })],
+      'GET /api/proposals/pr-native/materials': [200, manifest],
+    });
+    await user.click(await screen.findByRole('button', { name: /^Tasks/ }));
+    await waitFor(() => expect(calls.some(call => call.method === 'GET' && call.path === '/api/proposals/pr-native/materials')).toBe(true));
+  });
+
+  it('forwards native proposal stamps from the orchestrator window to the material manifest loader', async () => {
+    const user = userEvent.setup();
+    const materialDigest = 'e'.repeat(64);
+    const agents = [{ ...RUNNING_AGENTS[0]!, id: 'a1', name: 'Orchestrator' }];
+    const proposal = { proposalId: 'pr-window', brief: 'Build the approved structure.', items: [], materialRevision: 1, materialDigest };
+    const manifest = { materialRevision: 1, materialDigest, common: [], options: [] } satisfies MaterialManifest;
+    const calls = shell({
+      'GET /api/subscriptions': [200, { subscriptions: [{ ...SUBS[0]!, agents }] }],
+      'GET /api/machines': [200, { machines: [{ ...MACHINES[0]!, running: { agents, parts: [] } }] }],
+      'GET /api/agents/orchestrator': [200, { ...CARD, id: 'a1', kind: 'orchestrator', name: 'Orchestrator', role: null, department: null }],
+      'GET /api/agents/orchestrator/events?after=0': [200, { events: [{ seq: 1, kind: 'proposal', data: proposal, jobId: null, person: null, at: '2026-11-03T10:00:00.000Z' }], state: { ready: true, reason: null, busy: false, runningJobId: null, queued: 0 } }],
+      'POST /api/agents/orchestrator/start': [200, { started: false }],
+      'GET /api/proposals/pr-window/materials': [200, manifest],
+    });
+    await user.click(await screen.findByRole('button', { name: 'Machines' }));
+    await user.click(await screen.findByRole('button', { name: 'Open the card of ivan-mbp' }));
+    await user.click(screen.getByRole('button', { name: 'Open Orchestrator' }));
+    await waitFor(() => expect(calls.some(call => call.method === 'GET' && call.path === '/api/proposals/pr-window/materials')).toBe(true));
   });
 
   it('closes with its cross and with Escape', async () => {
