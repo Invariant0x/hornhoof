@@ -19,7 +19,7 @@ async function legacy() {
     { companyId: company!.id, templateKey: 'sales', roleCode: 'SAL' },
   ]).returning();
   const [task] = await db.insert(tasks).values({ companyId: company!.id, number: 1, departmentId: dev!.id, title: 'Original result', status: 'waiting' }).returning();
-  const [job] = await db.insert(jobs).values({ companyId: company!.id, agentId: author!.id, kind: 'conversation', prompt: 'Original result', timeoutMs: 1000 }).returning();
+  const [job] = await db.insert(jobs).values({ companyId: company!.id, subscriptionId: author!.subscriptionId!, agentId: author!.id, kind: 'conversation', prompt: 'Original result', timeoutMs: 1000 }).returning();
   const [question] = await db.insert(requests).values({ companyId: company!.id, taskId: task!.id, agentId: author!.id, kind: 'choice', text: 'Choose a shape', options: [] }).returning();
   const put = async (requestId: string | null, name: string) => (await db.insert(attachments).values({ companyId: company!.id, jobId: job!.id, agentId: author!.id, requestId, name, mediaType: 'image/png', bytes: PNG, size: PNG.length }).returning())[0]!;
   const common = await put(question!.id, 'private-source-path.png');
