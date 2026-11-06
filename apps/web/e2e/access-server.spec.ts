@@ -59,7 +59,7 @@ async function startServer(): Promise<Server> {
 
 async function signedIn(browser: Browser, server: Server, who: keyof Boot['tokens'], lang: 'en' | 'ru', theme: 'light' | 'dark', width: number): Promise<Page> {
   const context = await browser.newContext({ baseURL: server.url, viewport: { width, height: 900 }, hasTouch: width === 375 });
-  await context.addCookies([{ name: 'hh_session', value: server.tokens[who], url: server.url }]);
+  await context.addCookies([{ name: 'hh_session', value: server.tokens[who], url: new URL(server.url).origin }]);
   await context.addInitScript(({ lang, theme }) => {
     localStorage.setItem('hh-lang', lang);
     localStorage.setItem('hh-theme', theme);
@@ -90,14 +90,8 @@ for (const lang of ['en', 'ru'] as const) {
         try {
           const page = await signedIn(browser, server, 'ann', lang, theme, width);
           const heading = lang === 'en' ? 'Insufficient permissions' : 'Недостаточно прав';
-          page.on('response', response => { if (response.url().includes('/api/tasks/')) console.log('ACL TASK RESPONSE', response.status()); });
           await page.goto(`/tasks/${server.hiddenTask.id}`);
-          try {
-            await expect(page.getByRole('heading', { name: heading })).toBeVisible();
-          } catch (error) {
-            console.log('ACL TASK BODY', await page.locator('body').innerText());
-            throw error;
-          }
+          await expect(page.getByRole('heading', { name: heading })).toBeVisible();
           await expect(page.locator('body')).not.toContainText('Hidden work');
           await page.screenshot({ path: info.outputPath(`real-closed-task-${lang}-${theme}-${width}.png`) });
           await page.goto(`/departments/${server.sales.id}`);
