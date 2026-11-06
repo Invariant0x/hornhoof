@@ -63,15 +63,22 @@ for (const role of roles) {
     await page.addInitScript(() => localStorage.setItem('hh-lang', 'en'));
     const full = fullDepartment(), shown = role.me.person.scopeKind === 'company' ? full : restricted(full, role.me, role.departmentAccess);
     await serveAccess(page, role.me, shown, { agentStatus: role.status });
-    await openOwnChip(page);
-    if (role.allowed) {
-      await expect(page.getByRole('complementary', { name: /Bruno/ })).toBeVisible();
-    } else {
-      const denied = page.getByRole('dialog', { name: 'Insufficient permissions' });
-      await expect(denied).toBeVisible();
-      await expect(denied).not.toContainText('Bruno');
-      await expect(denied).not.toContainText('Hidden resource details.');
+    if (!role.departmentAccess) {
+      await expect(page.getByRole('heading', { name: 'Insufficient permissions' })).toBeVisible();
+      await expect(page.locator('body')).not.toContainText('Bruno');
+      await expect(page.locator('body')).not.toContainText('Hidden resource details.');
       await expect(page.getByRole('complementary')).toHaveCount(0);
+    } else {
+      await openOwnChip(page);
+      if (role.allowed) {
+        await expect(page.getByRole('complementary', { name: /Bruno/ })).toBeVisible();
+      } else {
+        const denied = page.getByRole('dialog', { name: 'Insufficient permissions' });
+        await expect(denied).toBeVisible();
+        await expect(denied).not.toContainText('Bruno');
+        await expect(denied).not.toContainText('Hidden resource details.');
+        await expect(page.getByRole('complementary')).toHaveCount(0);
+      }
     }
   });
 }
