@@ -9,7 +9,7 @@ Check that a change keeps the company's data, access and secrets protected. The 
 
 **Your program's own review on a first look only**, from inside the clone on the branch or slice under review: in Claude Code its security-review skill, in Codex `codex review --base <main line>`, in Antigravity its review-agent subagent; Kimi Code has none. When you only recheck fixes, skip it and read only the fixes.
 
-Follow every input in the change from where it enters to where it is used, and check that:
+Follow every input in the change from where it enters to where it is used, and check what the change touches of this list:
 
 - **Access**: every entry point (a route, a command, a message, a job) checks who is asking and what they may reach, on the side that owns the data. Another company's or another person's data stays out of reach when an id changes.
 - **Input handling**: queries, shell commands, paths, markup and templates built from input are parameterized or escaped; nothing from input reaches a command line or an interpreter unchecked.
@@ -18,7 +18,7 @@ Follow every input in the change from where it enters to where it is used, and c
 - **Sessions**, where the product has them: cookies flagged, tokens expire, sign-out ends the session, invites and one-time codes work once.
 - **Agents and tools**: text an agent reads cannot widen what it may do; tool calls check the caller; prompts carry no secrets.
 - **Dependencies**: new ones are needed, maintained and pinned; scripts from the internet are not run blind.
-- **Infrastructure**: containers run without needless privileges; a mounted Docker socket or host folder is justified.
+- **Infrastructure**: containers run without needless privileges; a mounted container socket or host folder is justified.
 
 Report only weak spots you confirmed in the code: the file and line, who could reach what they should not and how, the impact, and the fix. Check each finding against the code again before reporting it, to rule out false alarms. A confirmed hole blocks; hardening that would be good to have is a note.
 

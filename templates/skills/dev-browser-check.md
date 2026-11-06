@@ -1,11 +1,11 @@
 ---
 id: dev-browser-check
 title: { en: "Checking the running product", ru: "Проверка запущенного продукта" }
-description: { en: "When a change has something a user meets, runs it that way, walks the flow and keeps evidence; a browser only for a screen.", ru: "Когда у изменения есть то, что встречает пользователь, запускает его так же, проходит сценарий и сохраняет доказательства; браузер только для экрана." }
+description: { en: "When a change has something a user meets, runs it that way, walks the flow and keeps evidence; a browser only for a web page.", ru: "Когда у изменения есть то, что встречает пользователь, запускает его так же, проходит сценарий и сохраняет доказательства; браузер только для веб-страницы." }
 kind: procedure
 sources: [openai/skills skills/.curated/playwright/SKILL.md, anthropics/skills skills/webapp-testing/SKILL.md]
 ---
-Unit tests do not show what a user meets. This is for a change that has something a user meets: a screen, a command, a service's API, a library's public interface. A change nothing reaches that way has no run to do here: its tests are the check. Check the scope your task names: the flow your change touches, or the whole turn at the testing gate (dev-testing-policy).
+Unit tests do not show what a user meets. This is for a change that has something a user meets: a web page or another screen, a command, a service's API, a library's public interface. A change nothing reaches that way has no run to do here: its tests are the check. Check the scope your task names: the flow your change touches, or the whole turn at the testing gate (dev-testing-policy).
 
 1. Start the product the way the project documents it, or use the preview your head gave you. Never test against production data.
 2. Use it through the surface its user uses: a web page with Playwright through `run_tests` on a free compatible machine where browsers are already prepared (verify the browser opens instead of running `playwright install` by hand; follow `hh-run-checks`) or your browser tool; a command-line tool through its commands; a service through its public API; a library through a small program that calls it the way its users do; any other app through its own test driver, emulator or simulator. A lightweight screenshot capture of a single view for visual inspection is distinct from a browser test suite, and a browser binary name alone does not make that capture a suite. Act as a person or a calling program would.
