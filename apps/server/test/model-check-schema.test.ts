@@ -61,7 +61,7 @@ describe('the tables of checks made by a model', () => {
 
   it('refuse a state nobody named', async () => {
     const { db, check } = await aCheck();
-    const change = sql`update model_checks set status = 'maybe' where id = ${check.id}`;
+    const change = sql`update model_checks set status = 'maybe', binding_digest = 'x', valid_until = now(), thresholds = '{}' where id = ${check.id}`;
     await expect(db.execute(change)).rejects.toMatchObject(refusedBy('model_checks_status'));
   });
 
