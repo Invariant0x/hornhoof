@@ -4,7 +4,7 @@ import { agents, companies, departments, people, subscriptions, taskEvents, task
 import { blocked, createTask, submit, updateTask, verdict } from '../src/modules/tasks/engine.js';
 import { taskDetail } from '../src/modules/tasks/views.js';
 import { wakePrompt } from '../src/modules/tasks/wake.js';
-import { setUpCompany, statements, testApp } from './helpers.js';
+import { setUpCompany, statements, testApp, TEST_COMMIT } from './helpers.js';
 
 /* Development works in a repository; Bruno's task passes Rita's gate. */
 async function company(repository = true) {
@@ -58,10 +58,20 @@ describe('a task that passed its last gate', () => {
     expect(prompt).toContain("passed its gates. Merge your branch into the turn's branch and report");
     expect(prompt).toContain('submit');
     expect(prompt).toContain('If the merge fails, report what blocks it with blocked');
+    const beforeMerge = await db.select({ kind: taskEvents.kind, data: taskEvents.data }).from(taskEvents).where(eq(taskEvents.taskId, task.id)).orderBy(taskEvents.id);
+    const review = beforeMerge.find(event => event.kind === 'submitted')!.data.review;
+    expect(review).toEqual({
+      revision: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i),
+      commit: TEST_COMMIT, branch: `task-${task.number}`, authorId: bruno.id, authorVendor: 'claude',
+      status: 'pinned', reason: null, qualityTaskId: task.id,
+      gateCounts: { source: 'review-lifecycle', passed: 0, returned: 0 },
+      quality: { status: 'unavailable', reason: 'author-check-record-unavailable', record: null, sourceEventId: null },
+      runs: [], source: null,
+    });
     const merged = await submit(ctx, bruno.id, task.id, { summary: 'Merged into turn-3.', evidence: 'git log: 1a2b3c4' });
     expect(merged.task).toMatchObject({ status: 'done', assigneeAgentId: null });
     const [handedIn] = await db.select({ kind: taskEvents.kind, data: taskEvents.data }).from(taskEvents).where(eq(taskEvents.taskId, task.id)).orderBy(taskEvents.id).then(r => r.slice(-1));
-    expect(handedIn).toEqual({ kind: 'submitted', data: { evidence: 'git log: 1a2b3c4', merged: true } });
+    expect(handedIn).toEqual({ kind: 'submitted', data: { evidence: 'git log: 1a2b3c4', merged: true, review } });
   });
 
   it("names the turn's branch to merge into", async () => {
