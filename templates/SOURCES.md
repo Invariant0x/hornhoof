@@ -1,6 +1,6 @@
 # Where these templates learned from
 
-Every role and skill text in this folder is written for Hornhoof, with one exception: dev-engineering-rules starts from unclebob/ub-mode's SKILL.md, as its README asks people to copy it, with Hornhoof's branch, tooling and testing adaptations. No other text in this folder is copied from the sources below; they taught us what a role does and which steps a procedure needs. Outside this folder, every node also carries obra/superpowers whole, word for word with its licence, as its row says. Each skill names its sources in its `sources` field as `<repo> <path>`.
+Every role and skill text in this folder is written for Hornhoof, with one exception: dev-engineering-rules is unclebob/ub-mode's SKILL.md word for word at commit 3da62bf3fcfd2034de41f30d920d2739e566171f, as its README asks people to copy it, and Hornhoof's branch, tooling and testing adaptations are in dev-testing-policy. No other text in this folder is copied from the sources below; they taught us what a role does and which steps a procedure needs. Outside this folder, every node also carries obra/superpowers whole, word for word with its licence, as its row says. Each skill names its sources in its `sources` field as `<repo> <path>`.
 
 The list at the end names every template, what it learned from and its licence. Hornhoof in the licence column means the text is Hornhoof's own and falls under this repository's licence, MIT. A skill that names no source is a procedure of Hornhoof itself, such as its task flow, an approval step or work in a second language. A role is a short prompt in the shape paperclipai/paperclip uses, and its skills carry the sources of what it does.
 
@@ -9,8 +9,8 @@ The development templates carry Hornhoof's own T1-T11 testing policy and coding 
 | Source | Licence | What we learned from it |
 |---|---|---|
 | obra/superpowers | MIT | The development process: brainstorming, plans, test-driven development, verification before completion, subagent-driven work and the head's protocol for briefs, reports and fix loops. The orchestrator's own skills: asking before laying out, turns of checkable tasks, done only when proven, finding the cause when work goes wrong. Also shipped whole, word for word at commit bb92a77741419a4ab5f06e711a283343f1ada0c3 (version 7.0.0), in the node image: Claude Code agents load it as a plugin, the other programs get its skills as files in the agent's folder, each with the MIT licence. |
-| unclebob/ub-mode | none; its README asks to copy SKILL.md | The core engineering rules for development roles: make it work, then make it right, then follow practice. Hornhoof adapts branch and testing rules. |
-| unclebob/crapper, unclebob/dryer, unclebob/mutator | 0BSD | Installed on every node: CRAP scores, structural duplicates and mutation testing for Clojure, Java, Go, TypeScript, Rust and Python. The review gate holds CRAP under 10 and duplicates under 0.8; the assigned test engineer or QA handles surviving mutants under T4. |
+| unclebob/ub-mode | none; its README asks to copy SKILL.md | The core engineering rules for development roles: make it work, then make it right, then follow practice. Kept word for word; dev-testing-policy says how a company applies them. |
+| unclebob/crapper, unclebob/dryer, unclebob/mutator | 0BSD | Installed on every node: CRAP scores, structural duplicates and mutation testing for Clojure, Java, Go, TypeScript, Rust and Python. T11 holds CRAP under 10 and duplicates under 0.8, and T4 sends surviving mutants to their authors; the assigned test engineer or QA runs them once per turn. |
 | affaan-m/ECC | MIT | Reviewer and security reviewer checklists, agent hardening, safety guard, cross-checks with several reviewers. Its rules for each language (style, patterns, security, testing) come with every node in /opt/hornhoof/rules, with its licence. |
 | msitarzewski/agency-agents | MIT | Domain knowledge for sales, finance, support, design and QA roles, such as the reality checker and evidence collector. |
 | wshobson/agents | MIT | Task coordination for teams, deployment pipelines, incident response, startup analysis. |
@@ -27,7 +27,7 @@ The development templates carry Hornhoof's own T1-T11 testing policy and coding 
 | openai/skills | Apache-2.0 | Fixing CI, Playwright checks, threat models. |
 | paperclipai/paperclip | MIT | Short role prompts with procedures in skills, hiring through a capabilities view, low-trust roles for hostile input. |
 
-Development authors write a failing test before the change, run only affected tests through run_tests, and submit tests written, green results and commit SHA. The test engineer or QA owns the full suite, browser engines, mutation, coverage and CRAP, dryer and live checks once per turn on the final candidate; findings return to authors as tasks, small fixes by the fast path. The pipeline procedures also separate shared checks from nonblocking improvement lanes, assign each work area to one owner, bound waits and preserve author-check and run evidence without duplicate runs. This verification ownership adapts the development roles and skills below.
+Development authors write a failing test before the change, run only affected tests through run_tests, and submit tests written, green results and commit SHA. The test engineer or QA owns the full suite, browser engines, mutation, coverage and CRAP, dryer and live checks once per turn on the final candidate; findings in logic return to authors as tasks, small fixes by the fast path, and the tester fixes a flaky or outdated test or an obvious trifle itself in a separate commit. The pipeline procedures also separate shared checks from nonblocking improvement lanes, assign each work area to one owner, bound waits and preserve author-check and run evidence without duplicate runs. This verification ownership adapts the development roles and skills below.
 
 ## Every template
 
@@ -45,6 +45,7 @@ Development authors write a failing test before the change, run only affected te
 | `roles/development/DEV-DOCS.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `roles/development/DEV-ENG.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `roles/development/DEV-FE.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
+| `roles/development/DEV-GEN.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `roles/development/DEV-HEAD.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources; project-owned test-environment responsibilities | Hornhoof |
 | `roles/development/DEV-OPS.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `roles/development/DEV-PERF.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
@@ -92,11 +93,12 @@ Development authors write a failing test before the change, run only affected te
 | `skills/dev-api-design.md` | Written for Hornhoof | addyosmani/agent-skills skills/api-and-interface-design/SKILL.md; wshobson/agents plugins/backend-development/skills/api-design-principles/SKILL.md | Hornhoof |
 | `skills/dev-browser-check.md` | Written for Hornhoof | openai/skills skills/.curated/playwright/SKILL.md; anthropics/skills skills/webapp-testing/SKILL.md | Hornhoof |
 | `skills/dev-ci-release.md` | Written for Hornhoof | addyosmani/agent-skills skills/ci-cd-and-automation/SKILL.md; wshobson/agents plugins/cicd-automation/skills/deployment-pipeline-design/SKILL.md; openai/skills skills/.curated/gh-fix-ci/SKILL.md | Hornhoof |
+| `skills/dev-cleanup.md` | Written for Hornhoof | affaan-m/ECC agents/refactor-cleaner.md; addyosmani/agent-skills skills/code-simplification/SKILL.md | Hornhoof |
 | `skills/dev-debugging.md` | Written for Hornhoof | obra/superpowers skills/systematic-debugging/SKILL.md | Hornhoof |
 | `skills/dev-deploy-rollback.md` | Written for Hornhoof | anthropics/knowledge-work-plugins engineering/skills/deploy-checklist/SKILL.md; addyosmani/agent-skills skills/shipping-and-launch/SKILL.md; affaan-m/ECC skills/docker-patterns/SKILL.md | Hornhoof |
 | `skills/dev-docs.md` | Written for Hornhoof | affaan-m/ECC agents/doc-updater.md; anthropics/knowledge-work-plugins engineering/skills/documentation/SKILL.md | Hornhoof |
 | `skills/dev-e2e-tests.md` | Written for Hornhoof | affaan-m/ECC skills/e2e-testing/SKILL.md; openai/skills skills/.curated/playwright/SKILL.md; obra/superpowers skills/systematic-debugging/condition-based-waiting.md | Hornhoof |
-| `skills/dev-engineering-rules.md` | unclebob/ub-mode SKILL.md with Hornhoof's branch, tooling and T1-T11 testing adaptations | unclebob/ub-mode SKILL.md; unclebob/crapper README.md; unclebob/dryer README.md; unclebob/mutator README.md | ub-mode names no licence, and its README asks people to copy SKILL.md; the adaptations are Hornhoof's |
+| `skills/dev-engineering-rules.md` | unclebob/ub-mode SKILL.md word for word at the commit named above | unclebob/ub-mode SKILL.md | ub-mode names no licence, and its README asks people to copy SKILL.md |
 | `skills/dev-frontend-ui.md` | Written for Hornhoof | addyosmani/agent-skills skills/frontend-ui-engineering/SKILL.md; anthropics/skills skills/frontend-design/SKILL.md | Hornhoof |
 | `skills/dev-gates.md` | Written for Hornhoof | obra/superpowers skills/subagent-driven-development/SKILL.md; affaan-m/ECC skills/council-multi-model/SKILL.md; affaan-m/ECC skills/santa-method/SKILL.md | Hornhoof |
 | `skills/dev-i18n-en-ru.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
@@ -114,6 +116,7 @@ Development authors write a failing test before the change, run only affected te
 | `skills/dev-tdd.md` | Written for Hornhoof | obra/superpowers skills/test-driven-development/SKILL.md; obra/superpowers skills/test-driven-development/writing-good-tests.md | Hornhoof |
 | `skills/dev-test-environment.md` | Written for Hornhoof | No outside source: product test-environment discovery and ownership procedure | Hornhoof |
 | `skills/dev-test-gaps.md` | Written for Hornhoof | anthropics/claude-plugins-official plugins/pr-review-toolkit/agents/pr-test-analyzer.md; garrytan/gstack review/specialists/testing.md; anthropics/knowledge-work-plugins engineering/skills/testing-strategy/SKILL.md | Hornhoof |
+| `skills/dev-testing-policy.md` | Written for Hornhoof | unclebob/crapper README.md; unclebob/dryer README.md; unclebob/mutator README.md | Hornhoof |
 | `skills/dev-threat-model.md` | Written for Hornhoof | openai/skills skills/.curated/security-threat-model/SKILL.md; wshobson/agents plugins/security-scanning/skills/stride-analysis-patterns/SKILL.md; wshobson/agents plugins/security-scanning/skills/attack-tree-construction/SKILL.md | Hornhoof |
 | `skills/dev-work-pipeline.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/dev-worktrees.md` | Written for Hornhoof | obra/superpowers skills/using-git-worktrees/SKILL.md; obra/superpowers skills/finishing-a-development-branch/SKILL.md | Hornhoof |
@@ -164,6 +167,7 @@ Development authors write a failing test before the change, run only affected te
 | `skills/hh-stay-in-scope.md` | Written for Hornhoof | affaan-m/ECC skills/safety-guard/SKILL.md | Hornhoof |
 | `skills/hh-task-flow.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/hh-verify-before-done.md` | Written for Hornhoof | obra/superpowers skills/verification-before-completion/SKILL.md | Hornhoof |
+| `skills/hh-work-fast.md` | Written for Hornhoof | unclebob/ub-mode SKILL.md; addyosmani/agent-skills skills/incremental-implementation/SKILL.md; addyosmani/agent-skills skills/context-engineering/SKILL.md; affaan-m/ECC skills/iterative-retrieval/SKILL.md; affaan-m/ECC skills/search-first/SKILL.md; affaan-m/ECC skills/parallel-execution-optimizer/SKILL.md; affaan-m/ECC skills/agentic-engineering/SKILL.md; obra/superpowers skills/subagent-driven-development/SKILL.md; garrytan/gstack ETHOS.md | Hornhoof |
 | `skills/home-work-pipeline.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/mkt-ai-search.md` | Written for Hornhoof | coreyhaines31/marketingskills skills/ai-seo/SKILL.md; msitarzewski/agency-agents marketing/marketing-ai-citation-strategist.md | Hornhoof |
 | `skills/mkt-brand-voice.md` | Written for Hornhoof | affaan-m/ECC skills/brand-voice/SKILL.md | Hornhoof |
