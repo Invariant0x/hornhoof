@@ -460,6 +460,16 @@
       },
       {
         "globs": [
+          "apps/node/src/test-impact*.ts",
+          "apps/node/src/test-environment.ts"
+        ],
+        "suiteIds": [
+          "node",
+          "release-scripts"
+        ]
+      },
+      {
+        "globs": [
           "templates/**"
         ],
         "suiteIds": [

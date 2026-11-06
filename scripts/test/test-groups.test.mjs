@@ -4,26 +4,24 @@ import { existsSync, readFileSync } from 'node:fs';
 import { before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { selectTests } from '../author-check/select.mjs';
-import { tracked } from '../author-check/wired.mjs';
-import { probe } from './related-probe.mjs';
+import { selectionPorts, tracked } from '../author-check/wired.mjs';
 
 /* The real test environment, the real selector and the real import graph: what a change of each group runs. */
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const git = args => execFileSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 1 << 28 });
 const ALL = ['node', 'protocol', 'release-scripts', 'server', 'web'];
+const BUILT = ['packages/protocol/dist/index.js', 'apps/node/dist/test-impact.js'];
 let manifest, ports;
 
 before(async () => {
-  if (!existsSync(`${root}apps/node/dist/test-impact.js`)) for (const name of ['protocol', 'node']) execFileSync('npm', ['run', '-s', 'build', '-w', `@hornhoof/${name}`], { cwd: root, stdio: 'ignore' });
+  if (!BUILT.every(file => existsSync(root + file))) for (const name of ['protocol', 'node']) execFileSync('npm', ['run', '-s', 'build', '-w', `@hornhoof/${name}`], { cwd: root, stdio: 'ignore' });
   const { parseTestEnvironment } = await import('@hornhoof/protocol');
-  const { selectAffectedTests } = await import(new URL('../../apps/node/dist/test-impact.js', import.meta.url));
-  const { collectVitestImpact } = await import(new URL('../../apps/node/dist/test-impact-adapters.js', import.meta.url));
-  const { listTestUnits } = await import(new URL('../../apps/node/dist/test-environment.js', import.meta.url));
   manifest = parseTestEnvironment(readFileSync(`${root}.hornhoof/test-environment.json`, 'utf8'));
-  ports = { selectAffectedTests, collectVitestImpact, listTestUnits, collect: changed => probe({ root }, changed) };
+  ports = await selectionPorts(root);
 });
 
-const runs = path => selectTests({ changes: [{ path, kind: 'modified' }], manifest, tracked: tracked(git), allowWhole: false }, ports);
+const select = (changes, added = []) => selectTests({ changes, manifest, tracked: [...tracked(git), ...added], allowWhole: false }, ports);
+const runs = path => select([{ path, kind: 'modified' }]);
 const suites = selection => (selection.packages ?? []).map(item => item.packageId).sort();
 
 for (const [group, path, expected] of [
@@ -35,6 +33,8 @@ for (const [group, path, expected] of [
   ['a fixture of the shared protocol', 'packages/protocol/test/fixtures/hornhoof-test-environment-v1.json', ['protocol', 'server']],
   ['the database', 'apps/server/drizzle/0075_internal_first_questions.sql', ['server']],
   ['the database schema', 'apps/server/src/db/schema.ts', ['server']],
+  ['a test only the final profile runs', 'apps/server/test/postgres/locking.pg.spec.ts', []],
+  ['the selection itself', 'apps/node/src/test-impact.ts', ['node', 'release-scripts']],
   ['the templates', 'templates/roles/operations/OPS-HEAD.md', ['node', 'server']],
   ['the skills', 'templates/skills/dev-tdd.md', ['node', 'server']],
   ['the workflow of a build', '.github/workflows/images.yml', ['release-scripts', 'server']],
@@ -52,11 +52,33 @@ for (const [group, path, expected] of [
   });
 }
 
-test('a change a person sees names the browser scenarios of its screen, and a scenario names itself alone', { timeout: 60_000 }, async () => {
+test('a change a person sees names the browser scenarios of its screen, says when it has none, and a scenario names itself alone', { timeout: 60_000 }, async () => {
   const named = async path => (await runs(path)).notes.filter(note => note.startsWith('browser '));
   assert.deepEqual(await named('apps/web/e2e/about.spec.ts'), ['browser scenario: apps/web/e2e/about.spec.ts']);
+  assert.deepEqual(await named('apps/web/e2e/gone.spec.ts'), []);
+  assert.deepEqual(await named('apps/web/e2e/README.md'), []);
   assert.deepEqual(await named('apps/web/e2e/api.ts'), ['browser helper, its scenarios run at the release: apps/web/e2e/api.ts']);
   assert.deepEqual(await named('apps/web/src/ui/AgentTerminal.tsx'), ['browser scenario: apps/web/e2e/agent-terminal-fit.spec.ts']);
-  assert.deepEqual(await named('apps/web/src/App.tsx'), []);
+  assert.deepEqual(await named('apps/web/src/App.tsx'), ['browser scenario by hand, none is named after: apps/web/src/App.tsx']);
   assert.deepEqual(await named('apps/server/src/modules/tasks/wait-policy.ts'), []);
+});
+
+test('a file moved into the scenarios still runs the tests of where it was', { timeout: 60_000 }, async () => {
+  const selection = await select([{ kind: 'renamed', previousPath: 'apps/web/src/ui/AgentTerminal.tsx', path: 'apps/web/e2e/moved.ts' }]);
+  assert.deepEqual(suites(selection), ['web']);
+});
+
+test('a new test only the final profile runs does not stop the check, and says where it runs', { timeout: 60_000 }, async () => {
+  const path = 'apps/server/test/postgres/new.pg.spec.ts';
+  const selection = await select([{ path, kind: 'added' }], [{ path, mode: '100644', oid: 'a'.repeat(40) }]);
+  assert.equal(selection.unavailable, undefined);
+  assert.deepEqual(suites(selection), []);
+  assert.deepEqual(selection.notes, [`runs in the final profile: ${path}`]);
+});
+
+test('the shared protocol takes every suite without being asked, unless another path asks for everything by itself', { timeout: 60_000 }, async () => {
+  const modified = path => ({ path, kind: 'modified' });
+  assert.deepEqual(suites(await select(['packages/protocol/src/index.ts', 'apps/server/drizzle/0075_internal_first_questions.sql'].map(modified))), ALL);
+  assert.equal((await select(['package.json', 'packages/protocol/package.json'].map(modified))).unavailable, 'selection_is_whole_suite');
+  assert.equal((await runs('package.json')).unavailable, 'selection_is_whole_suite');
 });

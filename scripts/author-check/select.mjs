@@ -6,6 +6,8 @@ const PROJECT_SUITES = {
 };
 const ONLY_A_NOTE = 'migration_check_unsupported';
 const E2E = 'apps/web/e2e/';
+const SPEC = '.spec.ts';
+const SCREEN = /^apps\/web\/src\/(?:.*\/)?([^/]+)\.tsx$/;
 
 export function adapterOf(run) {
   if (run.args.includes('vitest')) return 'vitest';
@@ -62,33 +64,51 @@ function isWholeSuite(packages, suites) {
   return suites.every(suite => packages.some(item => item.packageId === suite.id && item.mode === 'whole-package'));
 }
 
-/* A change of a shared package reaches everyone who uses it, so its whole selection is the one asked for. */
-const reachesEveryone = packages => packages.some(item => item.reasons?.some(reason => reason.code === 'shared_package'));
+/* A shared package reaches everyone who uses it, so its whole selection needs no asking. Another path that takes every suite by itself still asks. */
+function reachesEveryone(packages) {
+  const everywhere = (packages[0]?.reasons ?? []).filter(reason => packages.every(item => item.reasons?.some(other => other.path === reason.path)));
+  const shared = new Set(everywhere.filter(reason => reason.code === 'shared_package').map(reason => reason.path));
+  return shared.size > 0 && everywhere.every(reason => shared.has(reason.path));
+}
 
 const kebab = name => name.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
 
 /* What a change a person sees asks of a browser: a scenario that changed, and the scenarios named after a screen that changed. */
-function browserNotes(changes, tracked) {
-  const specs = tracked.map(file => file.path).filter(path => path.startsWith(E2E) && path.endsWith('.spec.ts'));
-  const ofScreen = path => {
-    const screen = /^apps\/web\/src\/(?:.*\/)?([^/]+)\.tsx$/.exec(path)?.[1];
-    return screen ? specs.filter(spec => `${spec.slice(E2E.length, -'.spec.ts'.length)}-`.startsWith(`${kebab(screen)}-`)) : [];
-  };
-  const changed = changes.map(change => change.path);
-  const helpers = changed.filter(path => path.startsWith(E2E) && !path.endsWith('.spec.ts'));
-  const scenarios = changed.flatMap(path => (specs.includes(path) ? [path] : ofScreen(path)));
-  return [...new Set(scenarios)].map(spec => `browser scenario: ${spec}`).concat(helpers.map(path => `browser helper, its scenarios run at the release: ${path}`));
+function browserNote(path, specs) {
+  const scenario = spec => `browser scenario: ${spec}`;
+  if (specs.includes(path)) return [scenario(path)];
+  if (path.startsWith(E2E)) return path.endsWith(SPEC) || isDocument(path) ? [] : [`browser helper, its scenarios run at the release: ${path}`];
+  const screen = SCREEN.exec(path)?.[1];
+  if (!screen) return [];
+  const named = specs.filter(spec => `${spec.slice(E2E.length, -SPEC.length)}-`.startsWith(`${kebab(screen)}-`));
+  return named.length ? named.map(scenario) : [`browser scenario by hand, none is named after: ${path}`];
 }
+
+function browserNotes(changes, tracked) {
+  const specs = tracked.map(file => file.path).filter(path => path.startsWith(E2E) && path.endsWith(SPEC));
+  return [...new Set(changes.flatMap(change => browserNote(change.path, specs)))];
+}
+
+/* The tests only a later profile than this one runs. */
+function laterTests(environment, units) {
+  const fast = new Set(environment.inventory.map(unit => unit.file));
+  return new Set(units.map(unit => unit.file).filter(file => !fast.has(file)));
+}
+
+/* A file moved here from where the fast suites run still counts for where it was. */
+const outsideFast = (change, later) => [change.path, change.previousPath ?? change.path].every(path => path.startsWith(E2E) || later.has(path));
 
 export async function selectTests({ changes, manifest, tracked, allowWhole }, ports) {
   const suites = fastSuites(manifest);
-  const environment = impactEnvironment(manifest, ports.listTestUnits(manifest, tracked));
+  const units = ports.listTestUnits(manifest, tracked);
+  const environment = impactEnvironment(manifest, units);
+  const later = laterTests(environment, units);
   const documents = changes.filter(change => isDocument(change.path));
-  const kept = changes.filter(change => !isDocument(change.path) && !change.path.startsWith(E2E));
+  const kept = changes.filter(change => !isDocument(change.path) && !outsideFast(change, later));
   const opaque = kept.filter(change => opaqueOwner(suites, change.path));
   const rest = kept.filter(change => !opaqueOwner(suites, change.path));
   const selection = await adapterSelection(environment, rest, suites, ports);
-  const notes = [...documents.map(change => `document without tests: ${change.path}`), ...browserNotes(changes, tracked), ...selection.problems.filter(problem => problem.code === ONLY_A_NOTE).map(problem => problem.code)];
+  const notes = [...documents.map(change => `document without tests: ${change.path}`), ...browserNotes(changes, tracked), ...changes.filter(change => later.has(change.path)).map(change => `runs in the final profile: ${change.path}`), ...selection.problems.filter(problem => problem.code === ONLY_A_NOTE).map(problem => problem.code)];
   const problem = selection.problems.find(item => item.code !== ONLY_A_NOTE);
   if (problem) return { unavailable: problem.code, notes };
   const packages = [...selection.packages, ...wholeOf(environment, suites, opaque)];

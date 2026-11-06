@@ -33,13 +33,14 @@ The selection goes by the paths a change touches, and within a package by the im
 | Frontend | `apps/web` without `e2e` | `web` by the graph; strings and configuration take it whole |
 | Node and terminals | `apps/node` | `node` by the graph |
 | Shared protocol | `packages` | every suite of the fast profile, whole, without `--allow-whole`; its own tests only `protocol`, its fixtures also `server` |
-| Database | `apps/server/drizzle`, `apps/server/src/db/schema.ts` | `server` whole; `server-postgres` runs in the final profile |
+| Database | `apps/server/drizzle`, `apps/server/src/db/schema.ts` | `server` whole; a test of `server-postgres` runs no suite here: `NOTE runs in the final profile` says so |
+| The selection itself | `apps/node/src/test-impact*.ts`, `apps/node/src/test-environment.ts` | `node` and `release-scripts`, whole |
 | Templates and skills | `templates` | `server` and `node`, whole |
-| Browser scenarios | `apps/web/e2e`, and the screens under `apps/web/src` | no suite: `NOTE browser scenario` names a changed scenario and those named after a changed screen |
+| Browser scenarios | `apps/web/e2e`, and the screens under `apps/web/src` | no suite: `NOTE browser scenario` names a changed scenario and those named after a changed screen, and says so when a screen has none |
 | Build and release | `.github/workflows`, `scripts/install.sh`, `apps/updater`, `Dockerfile`, `compose.yaml`, `.dockerignore` | `release-scripts` and `server`, whole |
-| Everything | `package.json`, the lockfile, `tsconfig.base.json`, `eslint.config.js`, the test environment, the Vitest configs | `selection_is_whole_suite`, until `--allow-whole` |
+| Everything | `package.json`, the lockfile, `tsconfig.base.json`, `eslint.config.js`, the test environment, the Vitest configs | `selection_is_whole_suite`, until `--allow-whole`, also beside a change of the protocol |
 
-The rules are `impact.fullPackageGlobs` of `test-environment.json`, and `scripts/test/test-groups.test.mjs` holds them to the real graph. The machines of `run_tests` have no browsers yet, so a check names scenarios and does not run them. The whole suite runs once per release, by the tester.
+The rules are `impact.fullPackageGlobs` of `test-environment.json`: a rule names who reads a file that belongs to no one package, in place of the default that takes everyone. `scripts/test/test-groups.test.mjs` holds them to the real graph. The machines of `run_tests` have no browsers yet, so a check names scenarios and does not run them. The whole suite runs once per release, by the tester.
 
 ## What decides
 
