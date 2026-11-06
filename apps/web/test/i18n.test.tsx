@@ -90,6 +90,13 @@ describe('errorText', () => {
   });
 });
 
+describe('request sending state', () => {
+  it('names the in-flight request sending state in English and Russian', () => {
+    expect(en.tasks.sending).toBe('Sending');
+    expect(ru.tasks.sending).toBe('Отправка');
+  });
+});
+
 describe('work tree words', () => {
   it('uses the actual turn, branch and times in both languages', () => {
     for (const L of [en.dept.tree, ru.dept.tree]) {
@@ -122,5 +129,15 @@ describe('work tree words', () => {
     expect(ru.window.pictureUploading).toBe('Картинка загружается...');
     expect(en.window.pictureUploaded).toBe('The picture path is in the terminal. Press Enter to send it.');
     expect(ru.window.pictureUploaded).toBe('Путь к картинке вставлен в терминал. Нажмите Enter для отправки.');
+  });
+
+  it('names the notebook saving state in English and Russian', () => {
+    expect(en.notebook.saving).toBe('Saving');
+    expect(ru.notebook.saving).toBe('Сохранение');
+  });
+
+  it('names a hidden employee in English and Russian', () => {
+    expect(en.window.hiddenEmployee).toBe('Employee');
+    expect(ru.window.hiddenEmployee).toBe('Сотрудник');
   });
 });

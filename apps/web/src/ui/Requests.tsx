@@ -239,6 +239,13 @@ function useRequestSend(onDone: () => void) {
   return { busy, failure, send };
 }
 
+function RequestFeedback({ busy, failure }: { busy: boolean; failure: unknown }) {
+  const t = useT();
+  if (busy) return <p className="muted" role="status">{t.tasks.sending}</p>;
+  if (failure !== null) return <p className="alert" role="alert">{proseErrorText(t, failure)}</p>;
+  return null;
+}
+
 /* One thing an agent waits for: a question to answer, a choice to answer or pick, a commit to approve, or a stuck task.
    Its answers show only to a person the server lets take it; anyone else reads who takes it. */
 function RequestItem({ request, onDone, ...shared }: Shared & { request: WaitingRequest; onDone: () => void }) {
@@ -256,7 +263,7 @@ function RequestItem({ request, onDone, ...shared }: Shared & { request: Waiting
   /* Hornhoof's own words about a stuck task are said in the person's language. */
   const said = request.kind === 'stuck' ? t.tasks.stuckText(agent.name, task.number) : request.text;
   return (
-    <article className={`req req-${request.kind}`} aria-label={`#${task.number} ${task.title}`}>
+    <article className={`req req-${request.kind}`} aria-label={`#${task.number} ${task.title}`} aria-busy={busy}>
       <RequestHeader who={whoAsked(t, request)} request={request} {...shared} />
       <RequestWords request={request} said={said} />
       <RequestMedia request={request} />
@@ -270,7 +277,7 @@ function RequestItem({ request, onDone, ...shared }: Shared & { request: Waiting
         onDecide={approve => reply(approvalBody(approve, text))}
         onCancel={() => void send(`/api/tasks/${task.id}/cancel`, {})}
       />
-      {failure !== null && <p className="alert" role="alert">{proseErrorText(t, failure)}</p>}
+      <RequestFeedback busy={busy} failure={failure} />
     </article>
   );
 }

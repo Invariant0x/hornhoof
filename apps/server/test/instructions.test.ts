@@ -210,6 +210,8 @@ describe('renderInstructions', () => {
         expect(delivered, roleKey).toMatch(/whole group|together as one group/i);
         expect(delivered, roleKey).toMatch(/non-visual[\s\S]*in parallel/i);
         expect(delivered, roleKey).toMatch(/longest[\s\S]*shortest[\s\S]*(?:shipped|supported)/i);
+        expect(delivered, roleKey).toMatch(/explicit[\s\S]*browser default[\s\S]*scrollbar space/i);
+        expect(delivered, roleKey).toMatch(/Chromium[\s\S]*Firefox[\s\S]*WebKit/);
       }
     }
   });

@@ -95,6 +95,7 @@ describe('the purpose-bound challenge and raw P1363 signature codec', () => {
   it.each([
     '', CHALLENGE + '=', CHALLENGE.slice(1), CHALLENGE.replace(/.$/, '*'),
     Buffer.concat([Buffer.from('other-purpose\0'), NONCE_BYTES]).toString('base64url'),
+    Buffer.concat([Buffer.from('Hornhoof:test-terminal:view-proof:v1\0'), NONCE_BYTES]).toString('base64url'),
     Buffer.concat([Buffer.from('hornhoof:test-terminal:view-proof:v1\\0'), NONCE_BYTES]).toString('base64url'),
     Buffer.concat([MESSAGE, Buffer.from([0])]).toString('base64url'),
   ])('rejects malformed challenge %j', value => {

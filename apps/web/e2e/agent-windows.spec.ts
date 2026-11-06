@@ -169,11 +169,32 @@ for (const width of [1440, 375]) {
   });
 }
 
-test('a picture pasted beside a strip goes to the window on the screen only, and waits there through its own strip', async ({ page }) => {
-  const { errors, windowOf, stripOf, openEmployee, minimize } = await openCompany(page, { lang: 'en', theme: 'dark', width: 1440 });
+test('a picture pasted beside a strip goes into the terminal on the screen only', async ({ page }) => {
+  const { errors, live, windowOf, stripOf, openEmployee, minimize } = await openCompany(page, { lang: 'en', theme: 'dark', width: 1440 });
+  const line = { clara: ['screen.png: hh-fetch message pic1'] };
   await openEmployee('Bruno');
   await minimize('Bruno');
   await openEmployee('Clara');
+  await expect(windowOf('Clara').locator('.xterm-rows')).toContainText('clara is at work');
+  await pastePicture(page, 'screen.png');
+  await expect.poll(() => live.keys).toEqual(line);
+  expect(live.pictures).toEqual(['clara']);
+  await stripOf('Bruno').click();
+  await expect(windowOf('Bruno')).toBeVisible();
+  await stripOf('Clara').click();
+  await expect(windowOf('Clara')).toBeVisible();
+  expect(live.keys).toEqual(line);
+  expect(live.pictures).toEqual(['clara']);
+  expect(errors).toEqual([]);
+});
+
+test('a picture pasted beside a strip goes to the log on the screen only, and waits there through its own strip', async ({ page }) => {
+  const { words, errors, windowOf, stripOf, openEmployee, minimize, barButton } = await openCompany(page, { lang: 'en', theme: 'dark', width: 1440 });
+  await openEmployee('Bruno');
+  await barButton('Bruno', words.log).click();
+  await minimize('Bruno');
+  await openEmployee('Clara');
+  await barButton('Clara', words.log).click();
   await pastePicture(page, 'screen.png');
   const pasted = (name: string) => windowOf(name).getByRole('img', { name: 'screen.png', exact: true });
   await expect(pasted('Clara')).toBeVisible();
