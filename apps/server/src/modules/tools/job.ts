@@ -14,6 +14,7 @@ export type ToolJob = {
   departmentId: string | null;
   skills: string[];
 };
+export type RunJob = Pick<ToolJob, 'id' | 'companyId' | 'agentId' | 'agentKind'> & Partial<Pick<ToolJob, 'departmentId'>>;
 
 /* The token works only while its job runs, and only for a job that belongs to an agent. */
 export async function jobOf(ctx: Ctx, req: FastifyRequest): Promise<ToolJob> {
