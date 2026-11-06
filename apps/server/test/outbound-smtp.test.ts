@@ -33,9 +33,10 @@ const parts = (raw: Buffer) => {
   return { headers: text.slice(0, end).replace(/\r\n[ \t]+/g, ' '), body: text.slice(end + 4) };
 };
 const header = (headers: string, name: string) => new RegExp(`^${name}: (.*)$`, 'im').exec(headers)?.[1];
+const isBase64 = (headers: string) => String(header(headers, 'content-transfer-encoding')).toLowerCase() === 'base64';
 const wordsOf = (raw: Buffer) => {
   const { headers, body } = parts(raw);
-  if (header(headers, 'content-transfer-encoding')?.toLowerCase() === 'base64') return Buffer.from(body, 'base64').toString('utf8');
+  if (isBase64(headers)) return Buffer.from(body, 'base64').toString('utf8');
   return body.replace(/\r\n/g, '\n');
 };
 const subjectOf = (raw: Buffer) => (header(parts(raw).headers, 'subject') ?? '').replace(/=\?utf-8\?B\?([^?]+)\?=\s?/gi, (_all, word: string) => Buffer.from(word, 'base64').toString('utf8'));
@@ -165,7 +166,7 @@ describe('the SMTP adapter', () => {
       ['a display name', { recipient: 'Buyer <buyer@example.test>' }],
       ['a recipient without a domain', { recipient: 'buyer' }],
       ['a second header in the subject', { subject: 'Your order\r\nBcc: other@example.test' }],
-      ['a Unicode line break in the subject', { subject: 'Your order Bcc: other@example.test' }],
+      ['a Unicode line break in the subject', { subject: 'Your order\u2028Bcc: other@example.test' }],
       ['a control character in the words', { text: 'Plain\u0000words' }],
       ['a bare carriage return in the words, which a server would change', { text: 'Plain\rwords' }],
       ['a broken character in the words, which could not go out as it is', { text: 'Plain\uD800words' }],
