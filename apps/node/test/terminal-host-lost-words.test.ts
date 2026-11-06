@@ -162,6 +162,21 @@ it('leaves the input to a person who started typing', async () => {
   expect(c.enters()).toBe(before);
 });
 
+/* What the browser of a person who opens the view says by itself, as tmux attaches or its window takes focus. */
+const TERMINAL_ANSWERS = ['\x1b[>0;276;0c', '\x1b[I', '\x1b[O'];
+
+it('goes on typing lost words though the terminal of a person who opens the view answers by itself', async () => {
+  const c = await started(empty());
+  await until(() => c.paste.mock.calls.length === 1);
+  const owner = vi.spyOn(c.host['operator']!, 'ownerInput');
+  const written: string[] = [];
+  for (const data of TERMINAL_ANSWERS) c.host['ownerTyped']({ key: c.agentKey, child: { stdin: { write: (keys: string) => { written.push(keys); } } } } as never, { type: 'term.input', termId: 'x', data });
+  await until(() => c.paste.mock.calls.length > 1);
+  await until(() => written.length === TERMINAL_ANSWERS.length);
+  expect(written).toEqual(TERMINAL_ANSWERS);
+  expect(owner).not.toHaveBeenCalled();
+});
+
 it('takes a shown paste for its words, as the programs fold a long one', async () => {
   const program: Program = empty();
   let presses = 0;
@@ -194,6 +209,15 @@ describe('a program a node types into without a receipt, as a plan with no opera
     c.finish();
     expect(await c.running).toMatchObject({ ok: true });
     expect(c.paste).toHaveBeenCalledTimes(1);
+  });
+
+  it('goes on typing lost words though the terminal of a person who opens the view answers by itself', async () => {
+    const c = await started(empty(), { plain: true });
+    await until(() => c.paste.mock.calls.length === 1);
+    for (const data of TERMINAL_ANSWERS) c.host['ownerTyped']({ key: c.agentKey, child: { stdin: { write() {} } } } as never, { type: 'term.input', termId: 'x', data });
+    await until(() => c.paste.mock.calls.length > 1);
+    c.finish();
+    expect(await c.running).toMatchObject({ ok: true });
   });
 
   it('leaves the input to a person who started typing', async () => {

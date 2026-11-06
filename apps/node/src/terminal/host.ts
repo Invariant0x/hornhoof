@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
-import { cut, isProgramOwnPrompt, typesWords, UNHEARD_MS, type AgentEvent, type Failure, type Limits, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
+import { cut, isProgramOwnPrompt, isTerminalReport, typesWords, UNHEARD_MS, type AgentEvent, type Failure, type Limits, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
 import type { OperatorDelivery, OperatorInputLine, OperatorQuestion, OperatorServerMessage } from '@hornhoof/protocol/program-operator';
 import { agyRules, COLORS_NOT_TAKEN, colorsNotTaken, pastColors, SETUP_NEEDED } from '../providers/antigravity.js';
 import { programDirOf, toldPlace } from '../program-folder.js';
@@ -2922,8 +2922,10 @@ export class TerminalHost {
     if (view) for (const m of keys) this.ownerTyped(view, m);
   }
 
+  /* What a person's terminal answers by itself goes to tmux, which asked for it, and is nobody's key: a program waits on no
+     person because someone opened its view or came back to the window. */
   private ownerTyped(view: View, { data, pressedIn }: Msg<'term.input'>): void {
-    this.operator?.ownerInput(view.key);
+    if (!isTerminalReport(data)) this.operator?.ownerInput(view.key);
     const a = this.agents.get(view.key);
     if (a) this.ownerKeys(a, view, data, pressedIn);
   }
@@ -2931,7 +2933,7 @@ export class TerminalHost {
   private ownerKeys(a: Agent, view: View, data: string, pressedIn?: string): void {
     if (pressedIn) a.pressed = { jobId: pressedIn, at: Date.now(), until: a.turn && !this.overIn(a) ? null : Date.now() + UNHEARD_MS };
     if (typesWords(data)) a.typedAt = Date.now();
-    a.ownerTyped = true;
+    a.ownerTyped ||= !isTerminalReport(data);
     void this.inputLane(a, async () => { view.child.stdin?.write(data); });
   }
 
