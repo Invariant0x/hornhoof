@@ -84,3 +84,17 @@ check keeps waiting.
 
 A binding's `inferenceConfigHash` must be `FRESH_INFERENCE_HASH`, and its `revisionId` must be the model name the vendor's answer gives.
 An answer from any other model is `unavailable`.
+
+## What runs it on the server's minute
+
+- Model check runs go through a fresh call straight to a vendor's API. A run that passed certifies its binding, and only then does
+  a message or a ticket get a live review.
+- Waiting messages are read in a round of their own, so a slow model does not hold up sending. What no model can read now, such as
+  with no API key of another vendor, keeps waiting and is asked about at the next minute.
+
+## Tickets through an agent's tools
+
+An agent replies to a ticket with two tools. `support_classify` has a fresh model of another vendor sort the ticket, without the
+draft, and answers `ready` or `unavailable` with a receipt. `support_submit` takes that receipt and a published template. A class
+that wants a person holds the reply for one, and so does a reply naming no money under a limit, as no limit covers it.
+

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Case, CheckInput, ModelCheckKind, ModelIdentity, OutboundPolicyValue } from '@hornhoof/protocol';
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
-import { modelCheckCertificates, modelChecks, outboundChannels, subscriptions } from '../src/db/schema.js';
+import { modelCheckCertificates, modelChecks, outboundApprovals, outboundChannels, subscriptions } from '../src/db/schema.js';
 import { minuteRound } from '../src/modules/agents/timers.js';
 import { FRESH_INFERENCE_HASH } from '../src/modules/jobs/dispatch.js';
 import { saveDataset, saveThresholds } from '../src/modules/model-checks/store.js';
@@ -236,7 +236,12 @@ describe('a reply to a ticket through an agent\'s tools', () => {
       ticketId: ticket.ticketId, ticketRevision: 1, classificationReceiptId: classified['classificationReceiptId'],
       document: w.documentEn, scheduledAt: '2026-01-02T00:00:00.000Z',
     });
-    expect(submitted['status']).toBe('scheduled');
+    /* It names no money, so no limit covers it and a person lets these very bytes go. */
+    expect(submitted['status']).toBe('waiting_approval');
+    await minute(LATER());
+    expect(server.seen.messages).toEqual([]);
+    const [approval] = await w.c.db.select().from(outboundApprovals).where(eq(outboundApprovals.messageId, submitted['messageId']!));
+    expect((await w.c.app.inject({ method: 'POST', url: `/api/requests/${approval!.requestId}`, payload: { approve: true }, ...as(w.c.samToken) })).statusCode).toBe(200);
     await minute(LATER());
     await minute(LATER());
     expect(server.seen.messages).toHaveLength(1);
