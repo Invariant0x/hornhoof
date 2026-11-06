@@ -1774,7 +1774,7 @@ export const externalRecoveryAttempts = pgTable('external_recovery_attempts', {
 }, t => [
   foreignKey({ columns: [t.operationId, t.companyId], foreignColumns: [externalOperations.id, externalOperations.companyId] }),
   unique('external_attempts_generation').on(t.operationId, t.generation),
-  check('external_attempts_generation', sql`${t.generation} > 0`),
+  check('external_attempts_generation_positive', sql`${t.generation} > 0`),
   check('external_attempts_receipt', sql`${t.receiptDigest} IS NULL OR ${t.receiptDigest} ~ '^[a-f0-9]{64}$'`),
   check('external_attempts_outcome_bound', sql`${t.outcome} IS NULL OR (jsonb_typeof(${t.outcome}) = 'object' AND octet_length(${t.outcome}::text) <= 65536)`),
   check('external_attempts_settlement_bound', sql`${t.settlement} IS NULL OR (jsonb_typeof(${t.settlement}) = 'object' AND octet_length(${t.settlement}::text) <= 4096)`),
