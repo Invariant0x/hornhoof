@@ -152,9 +152,9 @@ describe('the webhook adapter', () => {
       expect(hook.seen).toEqual([]);
     });
 
-    it('refuses an address written in the endpoint', async () => {
+    it.each(['127.0.0.1', '[::1]', '[::ffff:127.0.0.1]'])('refuses the address %s written in the endpoint', async address => {
       const hook = await receiver(takes);
-      expect(await send(account(`https://127.0.0.1:${hook.port}/hook`), {})).toEqual({ kind: 'definitely_not_accepted', safeCode: 'address_refused' });
+      expect(await send(account(`https://${address}:${hook.port}/hook`), {})).toEqual({ kind: 'definitely_not_accepted', safeCode: 'address_refused' });
       expect(hook.seen).toEqual([]);
     });
 
