@@ -19,7 +19,8 @@
         "node",
         "server",
         "web",
-        "release-scripts"
+        "release-scripts",
+        "samples"
       ]
     },
     {
@@ -30,7 +31,8 @@
         "server",
         "web",
         "release-scripts",
-        "server-postgres"
+        "server-postgres",
+        "samples"
       ]
     }
   ],
@@ -416,6 +418,28 @@
         "kind": "argv-files"
       },
       "profiles": [
+        "final"
+      ],
+      "finalChecks": []
+    },
+    {
+      "id": "samples",
+      "root": "samples",
+      "files": [
+        "samples/*_test.rb"
+      ],
+      "run": {
+        "program": "sh",
+        "args": [
+          "samples/run.sh"
+        ],
+        "cwd": "."
+      },
+      "split": {
+        "kind": "whole-package"
+      },
+      "profiles": [
+        "fast",
         "final"
       ],
       "finalChecks": []
