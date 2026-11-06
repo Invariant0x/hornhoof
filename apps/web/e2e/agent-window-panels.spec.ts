@@ -18,6 +18,7 @@ for (const who of PEOPLE) {
       const connected = connections();
       for (const name of ['card', 'notebook', 'task'] as const) {
         const shown = await openPanel(name);
+        await expect(shown.locator('.ac-body')).toHaveCSS('scrollbar-gutter', 'stable');
         await expect.poll(() => box(terminal)).toEqual(before);
         const rect = await box(shown);
         if (name === 'card') await page.screenshot({ path: test.info().outputPath(`desktop-one-${s.lang}-${s.theme}.png`) });
