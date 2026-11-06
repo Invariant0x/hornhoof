@@ -63,11 +63,14 @@ describe('restricted access screens', () => {
   });
 
   it('drops an open agent journal as soon as a new org removes the agent', async () => {
-    mockApi(allowed);
+    let access = true;
+    mockApi({ ...allowed, 'GET /api/agents/b1': () => access ? [200, CARD] : refused });
     const { rerender } = render(<Windows />);
     expect(await screen.findByText(SECRET)).toBeInTheDocument();
     const restricted = { ...DEV_ORG, departments: DEV_ORG.departments.map(d => ({ ...d, employees: d.employees.filter(e => e.id !== 'b1') })) };
+    access = false;
     rerender(<Windows org={restricted} />);
+    expect(screen.queryByText(SECRET)).not.toBeInTheDocument();
     expect(await screen.findByRole('heading', { name: 'Insufficient permissions' })).toBeInTheDocument();
     expect(screen.queryByText(SECRET)).not.toBeInTheDocument();
     expect(screen.queryByRole('complementary')).not.toBeInTheDocument();

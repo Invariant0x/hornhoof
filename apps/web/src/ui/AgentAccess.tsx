@@ -14,8 +14,7 @@ function listed(org: Org, agentId: string): boolean {
 }
 
 function statusOf(failure: unknown): Status {
-  if (failure instanceof ApiFailure && failure.status === 403) return 'denied';
-  if (failure instanceof ApiFailure && failure.status === 404) return 'allowed';
+  if (failure instanceof ApiFailure && [403, 404].includes(failure.status)) return 'denied';
   return 'failure';
 }
 
@@ -28,26 +27,21 @@ export function AgentAccess({ agentId, org, onClose, children }: { agentId: stri
   const t = useT();
   const path = `/api/agents/${agentId}`;
   const sequence = useRef(0);
-  const [status, setStatus] = useState<Status>('checking');
-  const [failure, setFailure] = useState<unknown>(null);
+  const [access, setAccess] = useState<{ status: Status; org: Org; failure: unknown }>(() => ({ status: listed(org, agentId) ? 'allowed' : 'checking', org, failure: null }));
   const check = useCallback(async () => {
     const own = ++sequence.current;
     try {
       await api.get(path);
       if (sequence.current === own) {
-        setStatus('allowed');
-        setFailure(null);
+        setAccess({ status: 'allowed', org, failure: null });
       }
     } catch (err) {
       if (sequence.current !== own) return;
-      const next = statusOf(err);
-      setStatus(next);
-      if (next === 'failure') setFailure(err);
+      setAccess({ status: statusOf(err), org, failure: err });
     }
-  }, [path]);
+  }, [path, org]);
 
   useEffect(() => {
-    setStatus('checking');
     void check();
     const timer = setInterval(() => void check(), RECHECK_MS);
     return () => {
@@ -60,6 +54,9 @@ export function AgentAccess({ agentId, org, onClose, children }: { agentId: stri
     if (['org', 'task', 'working', 'reconnected'].includes(message.type)) void check();
   });
 
-  if (status === 'denied' || !listed(org, agentId)) return <RouteUnavailable dialog onHome={onClose} />;
-  return contentOf(status, t, failure, children);
+  if (access.status === 'denied') return <RouteUnavailable dialog onHome={onClose} />;
+  /* An organization refresh can revoke access. Hide unlisted content until this snapshot is checked; a product's
+     employee may be absent from the department roster and still have an authorized card on the server. */
+  if (!listed(org, agentId) && access.org !== org) return null;
+  return contentOf(access.status, t, access.failure, children);
 }

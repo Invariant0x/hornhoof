@@ -76,8 +76,8 @@ it('upgrades the previous schema with original question/proposal evidence intact
   const beforeRequest = await client.query('SELECT to_jsonb(r) AS row FROM requests r');
   const beforeProposal = await client.query('SELECT to_jsonb(p) AS row FROM proposals p');
   await migrate(db, { migrationsFolder: MIGRATIONS });
-  expect((await client.query("SELECT to_jsonb(r) - ARRAY['material_revision','material_digest'] AS row FROM requests r")).rows).toEqual(beforeRequest.rows);
-  expect((await client.query("SELECT to_jsonb(p) - ARRAY['material_revision','material_digest','material_snapshot'] AS row FROM proposals p")).rows).toEqual(beforeProposal.rows);
+  expect((await client.query('SELECT to_jsonb(r) AS row FROM requests r')).rows).toMatchObject(beforeRequest.rows);
+  expect((await client.query('SELECT to_jsonb(p) AS row FROM proposals p')).rows).toMatchObject(beforeProposal.rows);
   expect((await client.query('SELECT material_revision,material_digest FROM requests')).rows).toEqual([{ material_revision: null, material_digest: null }]);
   const history = await client.query('SELECT * FROM drizzle.__drizzle_migrations ORDER BY id');
   await migrate(db, { migrationsFolder: MIGRATIONS });
