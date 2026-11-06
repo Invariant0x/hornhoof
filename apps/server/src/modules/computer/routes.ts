@@ -39,7 +39,7 @@ export function computerRoutes(app: FastifyInstance, ctx: Ctx): void {
   /* What the orchestrator asked goes only to people who see him. */
   async function seenAsk(me: Person) {
     const asked = await computerAsked(ctx, me.companyId);
-    const shown = { ...ctx.computer.view(), asked: asked && { reason: asked.reason, at: asked.at } };
+    const shown = { ...ctx.computer.view(), asked: asked && { reason: asked.reason, at: asked.at, purpose: asked.purpose } };
     const orchestrator = await orchestratorOf(ctx, me.companyId);
     return seesAgentId(await viewerOf(ctx.db, me), orchestrator?.id) ? shown : { ...shown, asked: null };
   }

@@ -38,7 +38,7 @@ async function company() {
   const classify = (id: string, more: Record<string, unknown> = {}) => call(client, 'classify_human_intent', { ...guard(id), classification: ceoAccess, humanEnvelope: envelope, ...more });
   const intent = async (id: string) => (await db.select().from(computerAccessIntents).where(eq(computerAccessIntents.id, id)))[0]!;
   const seen = async () => (await app.inject({ url: '/api/requests', ...as(ceo) })).json() as { computerAccess: { envelope: unknown; purpose: unknown; view: { asked: { reason: string } | null } } | null; counts: { total: number } };
-  const computer = async () => (await app.inject({ url: '/api/computer', ...as(ceo) })).json() as { asked: { reason: string } | null; until: string | null };
+  const computer = async () => (await app.inject({ url: '/api/computer', ...as(ceo) })).json() as { asked: { reason: string; purpose?: unknown } | null; until: string | null };
   const click = (what: 'open' | 'close' | 'decline', token = ceo) => app.inject({ method: 'POST', url: `/api/computer/${what}`, ...as(token) });
   const lines = async () => (await db.select().from(agentEvents).where(and(eq(agentEvents.agentId, orchestrator!.id), eq(agentEvents.kind, 'computer')))).map(e => e.data as { state: string; reason?: string; until?: string });
   const turns = () => db.select().from(jobs).where(and(eq(jobs.agentId, orchestrator!.id), eq(jobs.status, 'queued')));
@@ -77,6 +77,7 @@ describe('asking for the computer', () => {
     expect(JSON.stringify(seen)).not.toContain('sudo');
     const asked = (await c.computer()).asked!;
     expect(asked.reason).toContain('only its computer can do');
+    expect(asked.purpose).toEqual(seen.computerAccess!.purpose);
     expect(JSON.stringify(await c.lines())).not.toContain('sudo');
     expect(await c.lines()).toMatchObject([{ state: 'asked' }]);
   });
