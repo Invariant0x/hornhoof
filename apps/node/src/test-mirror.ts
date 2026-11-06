@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { access, lstat, mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -31,11 +31,19 @@ function failedGit(code: number | null, signal: NodeJS.Signals | null, failure: 
   return gitCancellation(error, stopped);
 }
 
+/* A child that stopped reading fails by its own exit code. */
+function feed(child: ChildProcess, input: string | undefined): void {
+  if (input === undefined) return;
+  child.stdin!.on('error', () => {});
+  child.stdin!.end(input);
+}
+const stdinFor = (input: string | undefined): 'ignore' | 'pipe' => input === undefined ? 'ignore' : 'pipe';
+
 function gitBytes(args: string[], context: CacheContext, limit = 3 * 1024 * 1024, auth: Record<string, string> = {}, network = false, input?: string): Promise<Buffer> {
   checkCacheContext(context);
   return new Promise((resolve, reject) => {
     const signal = AbortSignal.any([context.signal, AbortSignal.timeout(Math.max(1, context.deadline - Date.now()))]);
-    const child = spawn('/usr/bin/git', [...GIT_FLAGS, ...args], { detached: true, stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe', ...cacheLockDescriptors()], env: { PATH: '/usr/local/bin:/usr/bin:/bin', HOME: context.cacheRoot, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', ...auth } });
+    const child = spawn('/usr/bin/git', [...GIT_FLAGS, ...args], { detached: true, stdio: [stdinFor(input), 'pipe', 'pipe', ...cacheLockDescriptors()], env: { PATH: '/usr/local/bin:/usr/bin:/bin', HOME: context.cacheRoot, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', ...auth } });
     const chunks: Buffer[] = []; let size = 0, failure: Error | undefined, killTimer: NodeJS.Timeout | undefined;
     const mask = new GitCredentialMask([auth.HH_GIT_PASSWORD ?? '']);
     let stderr = '', stderrTruncated = false;
@@ -52,8 +60,7 @@ function gitBytes(args: string[], context: CacheContext, limit = 3 * 1024 * 1024
       else chunks.push(chunk);
     });
     child.once('error', error => { failure = error; });
-    /* A child that stopped reading fails by its own exit code. */
-    if (input !== undefined) { child.stdin!.on('error', () => {}); child.stdin!.end(input); }
+    feed(child, input);
     signal.addEventListener('abort', stop, { once: true }); if (signal.aborted) stop();
     child.once('close', (code, signalName) => {
       signal.removeEventListener('abort', stop); clearTimeout(killTimer); stopGit(child.pid, 'SIGKILL');

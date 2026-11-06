@@ -57,21 +57,21 @@ export function restoreKept(checkout: string, keep: string[], files: Kept[]): vo
   for (const file of files) if (RepositoryPath.safeParse(file.path).success && keep.some(folder => under(file.path, folder))) restoreFile(checkout, file);
 }
 
+type Collecting = { checkout: string; owner: number; before: Map<string, string>; found: Kept[]; bytes: number };
+function collectFrom(state: Collecting, path: string): void {
+  const full = join(state.checkout, path), stat = lstatSync(full, { throwIfNoEntry: false });
+  if (!stat || stat.isSymbolicLink()) return;
+  if (stat.isDirectory()) { for (const name of readdirSync(full).sort()) collectFrom(state, `${path}/${name}`); return; }
+  const text = readJobFile(full, state.owner, KEPT_BYTES);
+  if (text !== null && state.before.get(path) === text) return;
+  state.bytes += stat.size;
+  if (text !== null) state.found.push({ path, text });
+}
 /* What a suite leaves under what it keeps, read once its processes have stopped, without what came back as it went in: another
    part of the run may change that file meanwhile. What is too much goes whole: part of a tool's memory could mislead it, and
    none only costs it time. */
 export function collectKept(checkout: string, keep: string[], owner: number, restored: Kept[] = []): Kept[] {
-  const found: Kept[] = [], before = new Map(restored.map(file => [file.path, file.text]));
-  let bytes = 0;
-  const visit = (path: string): void => {
-    const full = join(checkout, path), stat = lstatSync(full, { throwIfNoEntry: false });
-    if (!stat || stat.isSymbolicLink()) return;
-    if (stat.isDirectory()) { for (const name of readdirSync(full).sort()) visit(`${path}/${name}`); return; }
-    const text = readJobFile(full, owner, KEPT_BYTES);
-    if (text !== null && before.get(path) === text) return;
-    bytes += stat.size;
-    if (text !== null) found.push({ path, text });
-  };
-  for (const folder of keep) if (plainWay(checkout, folder, false)) visit(folder);
-  return bytes > KEPT_BYTES ? [] : found;
+  const state: Collecting = { checkout, owner, before: new Map(restored.map(file => [file.path, file.text])), found: [], bytes: 0 };
+  for (const folder of keep) if (plainWay(checkout, folder, false)) collectFrom(state, folder);
+  return state.bytes > KEPT_BYTES ? [] : state.found;
 }

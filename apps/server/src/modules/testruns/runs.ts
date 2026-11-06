@@ -1,4 +1,4 @@
-import type { NodeLoad, NodeMessage, RunKind, Workspace } from '@hornhoof/protocol';
+import type { KeptFiles, NodeLoad, NodeMessage, RunKind, Workspace } from '@hornhoof/protocol';
 import { and, asc, count, eq, inArray, isNotNull, isNull, like, max, notInArray, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -867,6 +867,7 @@ async function startedRunSummary(ctx: Ctx, run: Run, task: Task, found: Awaited<
 
 const runReached = (ctx: Ctx, run: Run, stage: Parameters<typeof moveRunStage>[2]): Promise<void> => ctx.db.transaction(tx => moveRunStage(tx, run, stage, new Date()));
 
+const withKept = <Message extends object>(message: Message, kept: KeptFiles | undefined) => kept ? { ...message, kept } : message;
 async function givePart(ctx: Ctx, { part, run, task }: { part: Part; run: Run; task: { number: number } }, places: Map<string, Place[]>, reserved: Reservations, targets: Map<string, Awaited<ReturnType<typeof targetOf>>>): Promise<void> {
   const { db } = ctx;
     if (!targets.has(run.id)) targets.set(run.id, await targetOf(ctx, run));
@@ -890,7 +891,7 @@ async function givePart(ctx: Ctx, { part, run, task }: { part: Part; run: Run; t
       .where(and(eq(testParts.id, part.id), eq(testParts.status, 'queued')))
       .returning();
     if (!taken) return;
-    const sent = !nodeHeld(ctx, place.node) && ctx.hub.send(place.node, { ...partMessage(run, part, found.repo, task.number), ...(kept ? { kept } : {}) });
+    const sent = !nodeHeld(ctx, place.node) && ctx.hub.send(place.node, withKept(partMessage(run, part, found.repo, task.number), kept));
     /* The node went away or began to wait for an update meanwhile: the part waits for the next machine. */
     if (!sent) {
       await db

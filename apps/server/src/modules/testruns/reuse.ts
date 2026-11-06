@@ -200,14 +200,18 @@ export async function closeFileCache(tx: Pick<Db, 'select' | 'update' | 'delete'
   return { ...run, fileCache };
 }
 
+const memoryOf = (scope: RepositoryScope) => and(eq(testSuiteMemory.companyId, scope.companyId), eq(testSuiteMemory.repositoryOwnerId, scope.repositoryOwnerId), eq(testSuiteMemory.repoUrlHash, scope.repoUrlHash));
+function suitesThatKeep(snapshot: EnvironmentSnapshot, selection: Selection): string[] {
+  const selected = new Set(selectedFiles(snapshot, selection).map(file => file.suiteId));
+  return snapshot.description.manifest.suites.filter(suite => selected.has(suite.id) && suite.keep?.length).map(suite => suite.id);
+}
 /* What a suite's last run left, for the suites of a part that keep something. A full run starts without it. */
 export async function keptFor(ctx: Pick<Ctx, 'db'>, run: Run, part: Part): Promise<KeptFiles | undefined> {
   const snapshot = run.environmentSnapshot, selection = part.environmentSelection?.selection;
   if (!snapshot || !selection || run.fileCache?.mode !== 'cached') return undefined;
-  const scope = snapshot.description.repositoryScope, suiteIds = [...new Set(selectedFiles(snapshot, selection).map(file => file.suiteId))];
-  const keeping = snapshot.description.manifest.suites.filter(suite => suiteIds.includes(suite.id) && suite.keep?.length).map(suite => suite.id);
+  const keeping = suitesThatKeep(snapshot, selection);
   if (!keeping.length) return undefined;
-  const rows = await ctx.db.select({ suiteId: testSuiteMemory.suiteId, files: testSuiteMemory.files }).from(testSuiteMemory).where(and(eq(testSuiteMemory.companyId, scope.companyId), eq(testSuiteMemory.repositoryOwnerId, scope.repositoryOwnerId), eq(testSuiteMemory.repoUrlHash, scope.repoUrlHash), inArray(testSuiteMemory.suiteId, keeping)));
+  const rows = await ctx.db.select({ suiteId: testSuiteMemory.suiteId, files: testSuiteMemory.files }).from(testSuiteMemory).where(and(memoryOf(snapshot.description.repositoryScope), inArray(testSuiteMemory.suiteId, keeping)));
   const kept = KeptFiles.safeParse(rows);
   return kept.success && kept.data.length ? kept.data : undefined;
 }
@@ -218,21 +222,23 @@ const fitsOneMessage = (suiteId: string, files: KeptFile[]): boolean => KeptFile
    longer fits one message the part's own go on alone: to a tool, no memory only costs time. */
 async function mergeKept(db: Db, scope: RepositoryScope, suiteId: string, files: KeptFile[]): Promise<void> {
   await db.transaction(async tx => {
-    const [kept] = await tx.select({ files: testSuiteMemory.files }).from(testSuiteMemory).where(and(eq(testSuiteMemory.companyId, scope.companyId), eq(testSuiteMemory.repositoryOwnerId, scope.repositoryOwnerId), eq(testSuiteMemory.repoUrlHash, scope.repoUrlHash), eq(testSuiteMemory.suiteId, suiteId))).for('update');
+    const [kept] = await tx.select({ files: testSuiteMemory.files }).from(testSuiteMemory).where(and(memoryOf(scope), eq(testSuiteMemory.suiteId, suiteId))).for('update');
     const paths = new Set(files.map(file => file.path)), merged = [...(kept?.files ?? []).filter(file => !paths.has(file.path)), ...files];
     const value = fitsOneMessage(suiteId, merged) ? merged : files;
     await tx.insert(testSuiteMemory).values({ companyId: scope.companyId, repositoryOwnerId: scope.repositoryOwnerId, repoUrlHash: scope.repoUrlHash, suiteId, files: value })
       .onConflictDoUpdate({ target: [testSuiteMemory.companyId, testSuiteMemory.repositoryOwnerId, testSuiteMemory.repoUrlHash, testSuiteMemory.suiteId], set: { files: value, updatedAt: new Date() } });
   });
 }
+function allowedKept(manifest: TestEnvironmentV1, suiteId: string, files: KeptFile[]): KeptFile[] {
+  const keep = manifest.suites.find(suite => suite.id === suiteId)?.keep ?? [];
+  return files.filter(file => keep.some(path => file.path === path || file.path.startsWith(`${path}/`)));
+}
 /* Keeps what a part left, only under the paths its suite's manifest names, and only from a part that checked this commit. */
 export async function rememberKept(ctx: Pick<Ctx, 'db'>, run: Run, message: { commit: string | null; kept?: KeptFiles }): Promise<void> {
   const snapshot = run.environmentSnapshot;
   if (!snapshot || !message.kept || message.commit !== run.commitSha || !run.fileCache) return;
-  const scope = snapshot.description.repositoryScope, { suites } = snapshot.description.manifest;
   for (const { suiteId, files } of message.kept) {
-    const keep = suites.find(suite => suite.id === suiteId)?.keep ?? [];
-    const allowed = files.filter(file => keep.some(path => file.path === path || file.path.startsWith(`${path}/`)));
-    if (allowed.length && fitsOneMessage(suiteId, allowed)) await mergeKept(ctx.db, scope, suiteId, allowed);
+    const allowed = allowedKept(snapshot.description.manifest, suiteId, files);
+    if (allowed.length && fitsOneMessage(suiteId, allowed)) await mergeKept(ctx.db, snapshot.description.repositoryScope, suiteId, allowed);
   }
 }

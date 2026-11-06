@@ -705,8 +705,13 @@ async function cleanupProduct(state: ProductState | undefined, out: Output): Pro
     }); return null;
   } catch (error) { out.line(error instanceof Error ? error.message : String(error)); return 'failed'; }
 }
+/* How a part's files went and what its suites leave, when it has any of that to say. */
+function partResults(state: ProductState | undefined): Pick<TestsDone, 'files' | 'kept'> {
+  if (!state) return {};
+  return { ...(state.files.length ? { files: state.files } : {}), ...(state.kept.length ? { kept: state.kept } : {}) };
+}
 function productDone(msg: TestRun, state: ProductState | undefined, error: TestError | null, out: Output, hidden: string[]): TestsDone {
-  return { type: 'tests.done', partId: msg.partId, ok: error === null, exitCode: state?.exitCode ?? null, error, commit: state?.receipt.runtimes.length ? msg.commitSha! : null, log: redact(stripEscapes(out.text()), hidden), ...(state ? { environmentReceipt: state.receipt } : {}), ...(state?.files.length ? { files: state.files } : {}), ...(state?.kept.length ? { kept: state.kept } : {}) };
+  return { type: 'tests.done', partId: msg.partId, ok: error === null, exitCode: state?.exitCode ?? null, error, commit: state?.receipt.runtimes.length ? msg.commitSha! : null, log: redact(stripEscapes(out.text()), hidden), ...(state ? { environmentReceipt: state.receipt } : {}), ...partResults(state) };
 }
 async function runProductPart(msg: TestRun, options: Options): Promise<TestsDone> {
   const out = new Output(), hidden = productSecrets(msg, options.hidden);

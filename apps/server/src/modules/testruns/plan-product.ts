@@ -44,10 +44,18 @@ function planEstimate(planned: EnvironmentPartPlan | null): TestPartPlan | null 
   if (!planned) return null;
   return planned.testPlan;
 }
+type ReusingInput = PreparedEnvironmentPlanInput & { reuse?: ReuseDecision };
+/* What is left to run once what was reused and what the preparation runs are left out. */
+function remainingWork(input: ReusingInput) {
+  const policy = preparationFor(input), onceIds = policy?.suiteIds ?? [];
+  return {
+    onceIds, preparation: input.reuse?.preparation ? undefined : policy,
+    remaining: input.units.filter(unit => !onceIds.includes(unit.suiteId) && !input.reuse?.reused.has(unitKey(unit))),
+  };
+}
 /* Plans what is left to run. Only what runs has final checks; a reused preparation leaves nothing for the rest to wait for. */
-export async function planProductParts(input: PreparedEnvironmentPlanInput & { reuse?: ReuseDecision }): Promise<ProductPlan> {
-  const policy = preparationFor(input), preparation = input.reuse?.preparation ? undefined : policy, onceIds = policy?.suiteIds ?? [];
-  const remaining = input.units.filter(unit => !onceIds.includes(unit.suiteId) && !input.reuse?.reused.has(unitKey(unit)));
+export async function planProductParts(input: ReusingInput): Promise<ProductPlan> {
+  const { onceIds, preparation, remaining } = remainingWork(input);
   const finals = finalSuites(input, remaining, preparation?.suiteIds ?? []);
   const budget = MAX_TEST_PARTS - (preparation ? 1 : 0) - finals.length;
   if (budget < (remaining.length ? 1 : 0)) throw new Error('The product plan exceeds the supported part count.');

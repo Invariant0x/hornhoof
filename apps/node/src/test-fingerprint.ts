@@ -142,17 +142,21 @@ class Tree {
 
 /* An import names a file, a package of the repository or a package installed from its lockfile. Anything else, as a path
    alias, is something this cannot follow. */
-function importedBy(tree: Tree, from: string, literal: string): string[] | null {
-  const specifier = bare(literal);
-  if (relativeLike(specifier) || specifier === '.' || specifier === '..') {
-    const target = posix.join(posix.dirname(from), specifier), found = tree.resolve(target);
-    return found ? [found] : tree.builtFrom(target) ?? null;
-  }
-  if (specifier.startsWith('node:')) return [];
-  if (specifier.startsWith('/') || specifier.includes(':')) return null;
+function importedFile(tree: Tree, from: string, specifier: string): string[] | null {
+  const target = posix.join(posix.dirname(from), specifier), found = tree.resolve(target);
+  return found ? [found] : tree.builtFrom(target) ?? null;
+}
+function importedPackage(tree: Tree, specifier: string): string[] | null {
   const name = packageName(specifier), root = tree.workspaces.get(name);
   if (root) return tree.packageCode(root);
   return tree.declared.has(name) ? [] : null;
+}
+function importedBy(tree: Tree, from: string, literal: string): string[] | null {
+  const specifier = bare(literal);
+  if (relativeLike(specifier) || specifier === '.' || specifier === '..') return importedFile(tree, from, specifier);
+  if (specifier.startsWith('node:')) return [];
+  if (specifier.startsWith('/') || specifier.includes(':')) return null;
+  return importedPackage(tree, specifier);
 }
 
 /* One file a piece of code reads by name, or the many that a folder, a pattern or a package's name stands for. */
@@ -171,10 +175,11 @@ function relativeNamed(tree: Tree, from: string, literal: string): Named {
   return manyFiles(/(?:^|\/)\.\.?\/?$/.test(literal) ? [] : tree.under(target));
 }
 
+const couldBePath = (text: string): boolean => text.length > 0 && text.length <= LONGEST_PATH && !/\$\{| |\n/.test(text);
 /* A path named in the code, as for a file read from disk: relative, from the package or from the repository. */
 function namedBy(tree: Tree, from: string, literal: string): Named {
   const text = bare(literal);
-  if (!text || text.length > LONGEST_PATH || text.includes('${') || text.includes(' ') || text.includes('\n')) return oneFile([]);
+  if (!couldBePath(text)) return oneFile([]);
   if (relativeLike(text)) return relativeNamed(tree, from, text);
   const workspace = tree.workspaces.get(packageName(text));
   if (workspace) return manyFiles(tree.packageCode(workspace));
@@ -206,33 +211,47 @@ function scanFile(tree: Tree, path: string): Scan {
 }
 
 /* Groups of files that import each other, what they import first: Tarjan's algorithm, on its own stack as imports run deep. */
-function components(starts: string[], edgesOf: (path: string) => string[]): string[][] {
-  const order = new Map<string, number>(), low = new Map<string, number>(), open = new Set<string>(), stack: string[] = [], found: string[][] = [];
-  const work: { path: string; edges: string[]; next: number }[] = [];
-  const enter = (path: string): void => { order.set(path, order.size); low.set(path, order.get(path)!); stack.push(path); open.add(path); work.push({ path, edges: edgesOf(path), next: 0 }); };
-  const lower = (path: string, value: number): void => { low.set(path, Math.min(low.get(path)!, value)); };
-  const close = (path: string): void => {
+class Components {
+  readonly found: string[][] = [];
+  private readonly order = new Map<string, number>();
+  private readonly low = new Map<string, number>();
+  private readonly open = new Set<string>();
+  private readonly stack: string[] = [];
+  private readonly work: { path: string; edges: string[]; next: number }[] = [];
+  constructor(private readonly edgesOf: (path: string) => string[]) {}
+  private enter(path: string): void {
+    this.order.set(path, this.order.size); this.low.set(path, this.order.get(path)!);
+    this.stack.push(path); this.open.add(path);
+    this.work.push({ path, edges: this.edgesOf(path), next: 0 });
+  }
+  private lower(path: string, value: number): void { this.low.set(path, Math.min(this.low.get(path)!, value)); }
+  private close(path: string): void {
     const group: string[] = [];
     let member: string;
-    do { member = stack.pop()!; open.delete(member); group.push(member); } while (member !== path);
-    found.push(group);
-  };
-  const leave = (path: string): void => {
-    work.pop();
-    if (work.length) lower(work.at(-1)!.path, low.get(path)!);
-    if (low.get(path) === order.get(path)) close(path);
-  };
-  for (const start of starts) {
-    if (order.has(start)) continue;
-    enter(start);
-    while (work.length) {
-      const top = work.at(-1)!, edge = top.edges[top.next++];
-      if (edge === undefined) leave(top.path);
-      else if (!order.has(edge)) enter(edge);
-      else if (open.has(edge)) lower(top.path, order.get(edge)!);
-    }
+    do { member = this.stack.pop()!; this.open.delete(member); group.push(member); } while (member !== path);
+    this.found.push(group);
   }
-  return found;
+  private leave(path: string): void {
+    this.work.pop();
+    if (this.work.length) this.lower(this.work.at(-1)!.path, this.low.get(path)!);
+    if (this.low.get(path) === this.order.get(path)) this.close(path);
+  }
+  private step(): void {
+    const top = this.work.at(-1)!, edge = top.edges[top.next++];
+    if (edge === undefined) this.leave(top.path);
+    else if (!this.order.has(edge)) this.enter(edge);
+    else if (this.open.has(edge)) this.lower(top.path, this.order.get(edge)!);
+  }
+  walkFrom(start: string): void {
+    if (this.order.has(start)) return;
+    this.enter(start);
+    while (this.work.length) this.step();
+  }
+}
+function components(starts: string[], edgesOf: (path: string) => string[]): string[][] {
+  const groups = new Components(edgesOf);
+  for (const start of starts) groups.walkFrom(start);
+  return groups.found;
 }
 
 /* The import graph of the pinned tree. One digest stands for all a file reaches, built from what it imports, so a change of
@@ -322,28 +341,39 @@ function verdictOn(environment: ImpactEnvironment, path: string): Verdict {
   return { packages: taken.map(item => item.packageId), expands: taken.some(item => item.reasons.some(reason => RUNS_AROUND_TESTS.has(reason.code))) };
 }
 
+/* What runs around a package's tests counts with what it runs: a file of the repository's own, or of that package. A rule may also
+   give a package a file of another one, and that file then counts by itself, or a tool of one package would tie all the others to
+   what it imports. So does a source given to every scenario: a scenario follows its own screen, and all the screens that source
+   imports would make each follow all of them. */
+function countsWith(graph: Graph, units: ReadonlySet<string>): (path: string, verdict: Verdict, id: string) => string[] {
+  const { tree } = graph, scenarios = tree.input.description.manifest.suites.flatMap(suite => suite.scenarioSources ?? []);
+  return (path, verdict, id) => {
+    const owner = tree.rootOf(path), around = verdict.expands && !scenarios.some(folder => isInside(path, folder)) && (owner === '.' || owner === id);
+    return around ? [...graph.ranBy(path, units)].filter(file => !isDocument(file)) : [path];
+  };
+}
+function verdictsBy(environment: ImpactEnvironment, kept: Map<string, Verdict>, pause: Pause): (path: string) => Promise<Verdict> {
+  let asked = 0;
+  return async path => {
+    const known = kept.get(path);
+    if (known) return known;
+    const verdict = verdictOn(environment, path);
+    kept.set(path, verdict);
+    if (++asked % VERDICTS_BETWEEN_PAUSES === 0) await pause();
+    return verdict;
+  };
+}
 /* What #309 says the graph cannot see, per package: for each tracked file, whether it takes a package whole. A file that is a
-   test itself changes only itself, and a document changes nothing. What runs around a package's tests counts with what it runs:
-   a file of the repository's own, or of that package. A rule may also give a package a file of another one, and that file then
-   counts by itself, or a tool of one package would tie all the others to what it imports. So does a source given to every scenario:
-   a scenario follows its own screen, and all the screens that source imports would make each follow all of them. */
+   test itself changes only itself, and a document changes nothing. */
 async function outOfGraph(graph: Graph, pause: Pause): Promise<Map<string, string>> {
   const { tree } = graph, { manifest, inventory } = tree.input.description, packages = packagesOf(manifest);
-  const units = new Set(inventory.map(unit => unit.file)), kept = keptVerdicts(digest([packages, manifest.impact]));
-  const environment: ImpactEnvironment = { packages, impact: manifest.impact, inventory: [] };
-  const scenarios = manifest.suites.flatMap(suite => suite.scenarioSources ?? []);
-  const around = (path: string): string[] => [...graph.ranBy(path, units)].filter(file => !isDocument(file));
+  const units = new Set(inventory.map(unit => unit.file)), counted = countsWith(graph, units);
+  const verdictOf = verdictsBy({ packages, impact: manifest.impact, inventory: [] }, keptVerdicts(digest([packages, manifest.impact])), pause);
   const found = new Map<string, string[]>(packages.map(item => [item.id, []]));
-  let asked = 0;
   for (const path of tree.paths) {
     if (isDocument(path) || units.has(path)) continue;
-    let verdict = kept.get(path);
-    if (!verdict) {
-      verdict = verdictOn(environment, path); kept.set(path, verdict);
-      if (++asked % VERDICTS_BETWEEN_PAUSES === 0) await pause();
-    }
-    const owner = tree.rootOf(path), counts = verdict.expands && !scenarios.some(folder => isInside(path, folder));
-    for (const id of verdict.packages) found.get(id)!.push(...(counts && (owner === '.' || owner === id) ? around(path) : [path]));
+    const verdict = await verdictOf(path);
+    for (const id of verdict.packages) found.get(id)!.push(...counted(path, verdict, id));
   }
   return new Map([...found].map(([id, files]) => [id, tree.pairsDigest(files)]));
 }

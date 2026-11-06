@@ -134,6 +134,17 @@ describe('reusing green test results', () => {
     expect((await f.runOf(next)).fileCache).toMatchObject({ mode: 'cached', turn: 5, reused: 3 });
   });
 
+  it('counts a task without a turn by the turn open now, and runs no full run with none open', async () => {
+    const f = await fixture(5);
+    await f.db.update(tasks).set({ turnId: null }).where(eq(tasks.id, f.task.id));
+    await f.finish(await f.start({ profile: 'fast' }));
+    const full = await f.start({ profile: 'final' });
+    expect((await f.runOf(full)).fileCache).toMatchObject({ mode: 'full', turn: 5 });
+    await f.finish(full);
+    await f.db.update(turns).set({ status: 'closed' }).where(eq(turns.companyId, f.companyId));
+    expect((await f.runOf(await f.start({ profile: 'final' }))).fileCache).toMatchObject({ mode: 'cached', turn: null });
+  });
+
   it('runs everything sooner at a lower number from the manifest', async () => {
     const f = await fixture(3, 3);
     const first = await f.start({ profile: 'fast' });

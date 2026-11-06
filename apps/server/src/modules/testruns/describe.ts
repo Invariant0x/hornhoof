@@ -118,6 +118,10 @@ async function assignedDescription(ctx: Ctx, id: NodeIdentity, message: TestsDes
 async function descriptionProblem(ctx: Ctx, run: Run, message: TestsDescribed, problem: EnvironmentProblem): Promise<void> {
   await ctx.db.update(testRuns).set({ environmentRequest: { ...run.environmentRequest!, problem } }).where(requestMatches(run.id, message.requestId));
 }
+/* A run whose every file was reused has no part to add. */
+async function addParts(tx: Pick<Ctx['db'], 'insert'>, run: Run, leaves: TestEnvironmentSelection[]): Promise<void> {
+  if (leaves.length) await tx.insert(testParts).values(leaves.map((environmentSelection, index) => ({ companyId: run.companyId, runId: run.id, part: index + 1, environmentSelection })));
+}
 async function storeDescription(ctx: Ctx, run: Run, message: TestsDescribed, snapshot: EnvironmentSnapshot, leaves: TestEnvironmentSelection[], plan: ProductPlan | null, fileCache: TestRunFileCache | null): Promise<boolean> {
   const description = snapshot.description;
   return ctx.db.transaction(async tx => {
@@ -126,7 +130,7 @@ async function storeDescription(ctx: Ctx, run: Run, message: TestsDescribed, sna
     if (locked.commitSha !== description.commitSha || scopeKey(locked.environmentRequest!.repositoryScope) !== scopeKey(description.repositoryScope)) throw new Error('The locked run differs from the planned source.');
     if (plan) await planningPorts.get(ctx)?.record?.(tx, locked, plan);
     await tx.update(testRuns).set({ environmentSnapshot: snapshot, environmentHash: description.manifestHash, parts: leaves.length, fileCache }).where(eq(testRuns.id, run.id));
-    if (leaves.length) await tx.insert(testParts).values(leaves.map((environmentSelection, index) => ({ companyId: run.companyId, runId: run.id, part: index + 1, environmentSelection })));
+    await addParts(tx, run, leaves);
     return true;
   });
 }
