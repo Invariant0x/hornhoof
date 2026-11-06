@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { WaitPlan } from '@hornhoof/protocol/waits';
 import { and, eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agents, companies, departments, people, subscriptions, taskEvents, tasks, taskWaits, waitNotices } from '../src/db/schema.js';
+import { agents, companies, departments, people, taskEvents, tasks, taskWaits, waitNotices } from '../src/db/schema.js';
 import type { Db } from '../src/db/client.js';
 import { ApiError } from '../src/errors.js';
 import { claimFinalReview, endSourceWait, endTaskWaits, operationSourceKey, recordLegacyWait, replanWait, setWaitStage, syncSourceWaits, waitForSourceKey } from '../src/modules/tasks/wait-state.js';
@@ -14,11 +14,10 @@ const at = (hours: number) => new Date(Date.UTC(2030, 0, 1, hours)).toISOString(
 
 async function fixture() {
   const db = await createTestDb();
-  const [company, otherCompany] = await db.insert(companies).values([{ name: 'Acme' }, { name: 'Other' }]).returning();
-  const [sub] = await db.insert(subscriptions).values({ companyId: company!.id, name: 'Plan', kind: 'api_key' } as never).returning();
+  const [company, otherCompany] = await db.insert(companies).values([{ name: 'Acme' }, { name: 'Other', singleton: false }]).returning();
   const [department] = await db.insert(departments).values({ companyId: company!.id, templateKey: 'development', roleCode: 'DEV' }).returning();
   const agent = async (kind: 'head' | 'worker' | 'orchestrator', name: string, companyId = company!.id, removedAt?: Date) => (await db.insert(agents).values({
-    companyId, departmentId: kind === 'orchestrator' || companyId !== company!.id ? null : department!.id, kind, name, model: '', subscriptionId: sub!.id, removedAt: removedAt ?? null,
+    companyId, departmentId: kind === 'orchestrator' || companyId !== company!.id ? null : department!.id, kind, name, model: '', removedAt: removedAt ?? null,
   }).returning())[0]!;
   const person = async (name: string, status: 'active' | 'disabled', isOwner = false, companyId = company!.id) => (await db.insert(people).values({
     companyId, name, email: `${name}@example.test`, status, scopeKind: 'company', isOwner,
@@ -28,7 +27,7 @@ async function fixture() {
     await agent('worker', 'Sam', otherCompany!.id), await agent('worker', 'Gus', company!.id, new Date()),
   ];
   const [ceo, disabled, outsider] = [await person('ceo', 'active', true), await person('off', 'disabled'), await person('outsider', 'active', false, otherCompany!.id)];
-  const newTask = async (number: number, status: 'working' | 'done' = 'working') => (await db.insert(tasks).values({ companyId: company!.id, number, title: `Task ${number}`, departmentId: department!.id, status, assigneeAgentId: worker.id }).returning())[0]!;
+  const newTask = async (number: number, status: 'working' | 'done' = 'working') => (await db.insert(tasks).values({ companyId: company!.id, number, title: `Task ${number}`, departmentId: department!.id, status, assigneeAgentId: status === 'done' ? null : worker.id, closedAt: status === 'done' ? new Date() : null }).returning())[0]!;
   const task = await newTask(1);
   const plan = (change: Partial<WaitPlan> = {}): WaitPlan => ({
     version: 1,
@@ -63,7 +62,7 @@ async function fixture() {
 const refusal = async (work: Promise<unknown>) => {
   const error = await work.then(() => null, (e: unknown) => e);
   expect(error, 'it should have been refused').toBeInstanceOf(ApiError);
-  return { status: (error as ApiError).statusCode, reason: (error as ApiError).reason };
+  return { status: (error as ApiError).status, reason: (error as ApiError).reason };
 };
 
 describe('syncSourceWaits', () => {

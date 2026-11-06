@@ -38,6 +38,30 @@ it.each([
   }
 });
 
+it.each(['task_waits', 'wait_policies'])('keeps %s away from both SQL roles, reading included', async table => {
+  const run = await roles();
+  const statements = [
+    `SELECT * FROM ${table}`,
+    `SELECT id FROM ${table}`,
+    `INSERT INTO ${table} (id) SELECT id FROM ${table} WHERE false`,
+    `UPDATE ${table} SET id = id WHERE false`,
+    `DELETE FROM ${table} WHERE false`,
+  ];
+  for (const mode of ['write', 'read'] as const) {
+    for (const statement of statements) {
+      await expect(run(mode, statement), `${mode}: ${statement}`).rejects.toThrow(/permission denied/);
+    }
+  }
+});
+
+it.each(['wait_id', 'generation', 'level', 'purpose', 'route_revision'])('keeps the new %s of a notice readable and not writable, as the rest of it', async column => {
+  const run = await roles();
+  for (const mode of ['write', 'read'] as const) {
+    expect((await run(mode, `SELECT ${column} FROM wait_notices`))[0]!.rows).toEqual([]);
+    await expect(run(mode, `UPDATE wait_notices SET ${column} = ${column} WHERE false`), mode).rejects.toThrow(/permission denied/);
+  }
+});
+
 it.each([
   { table: 'program_operator_cases', secret: 'capability', metadata: 'id, status, reason' },
   { table: 'attachments', secret: 'bytes', metadata: 'id, media_type, size, operator_case_id' },

@@ -17,7 +17,7 @@ const plan = {
   provenance: { kind: 'explicit_promise' as const, actor: { agentId: AGENT }, ref: 'promise-1', revision: 1, origin: 'wait_for' },
   finalReview: { headAgentId: AGENT, anchorAt: '2030-01-01T13:00:00.000Z', intervalMs: 3_600_000 },
 };
-const sync = { taskId: TASK, kind: 'external' as const, sourceKey: `operation:${OPERATION}`, sourceRevision: 1, ownerBinding: { agentId: AGENT }, plan, sourceState: {} };
+const sync = { taskId: TASK, kind: 'external' as const, sourceKey: `wait_for:${OPERATION}`, sourceRevision: 1, ownerBinding: { agentId: AGENT }, plan, sourceState: {} };
 
 describe('who owns a wait', () => {
   it.each([{ agentId: AGENT }, { personId: PERSON }])('takes one real agent or person %#', binding => {
@@ -148,6 +148,10 @@ describe('a source that signals once', () => {
     expect(signalsOnce(kind as 'external', sourceKey)).toBe(false);
   });
 
+  it('gives an external operation no repeats at all', () => {
+    expect(SyncSourceWaits.safeParse({ ...sync, sourceKey: `operation:${OPERATION}` }).success).toBe(false);
+  });
+
   it('adds no other number and no zero for it', () => {
     expect(WaitFinalReview.safeParse({ ...plan.finalReview, intervalMs: 0 }).success).toBe(false);
     expect(WaitFinalReview.safeParse({ ...plan.finalReview, intervalMs: undefined }).success).toBe(false);
@@ -157,7 +161,7 @@ describe('a source that signals once', () => {
   it('takes three equal dates from the source contract', () => {
     const at = '2030-01-01T12:00:00.000Z';
     const contract = { ...once, ownerDueAt: at, headDueAt: at, decisionDueAt: at, provenance: { ...plan.provenance, kind: 'source_contract' } };
-    expect(SyncSourceWaits.safeParse({ ...sync, plan: contract }).success).toBe(true);
+    expect(SyncSourceWaits.safeParse({ ...sync, sourceKey: `operation:${OPERATION}`, plan: contract }).success).toBe(true);
   });
 });
 
