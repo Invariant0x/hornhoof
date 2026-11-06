@@ -1274,6 +1274,7 @@ export const en = {
     task_closed: 'This task is closed already.',
     urgent_not_allowed: 'Only the CEO or the CEO delegate can say that work is urgent.',
     urgent_follows_parent: 'This task is as urgent as the task above it. Change the task at the top.',
+    urgent_only_team: 'This employee is in a team that takes only urgent work, and this work is not urgent. Give it to someone else.',
     request_closed: 'This was answered already.',
     improvement_decided: 'Someone decided on this already.',
     turn_open: 'A turn is running. Close it before starting the next.',
