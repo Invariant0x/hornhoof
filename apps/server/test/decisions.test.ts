@@ -275,7 +275,9 @@ describe('decisions waiting for people', () => {
     await report(c.ctx, c.heads.dev.id, task.id, { done: false, summary: 'Stuck on the provider.' });
     const [stuck] = await c.db.select({ topic: requests.decisionTopic, kind: requests.kind }).from(requests).where(eq(requests.taskId, task.id));
     expect(stuck).toEqual({ topic: 'task', kind: 'stuck' });
-    expect(ownersOf(await c.view(c.tokens.ceo))[(await c.db.select().from(requests).where(eq(requests.taskId, task.id)))[0]!.id]).toBe(c.ids.dan);
+    const [internal] = await c.db.select().from(requests).where(eq(requests.taskId, task.id));
+    expect(ownersOf(await c.view(c.tokens.ceo))[internal!.id]).toBeUndefined();
+    expect((await c.app.inject({ method: 'POST', url: `/api/requests/${internal!.id}`, payload: { retry: true }, ...as(c.tokens.ceo) })).statusCode).toBe(409);
   });
 });
 

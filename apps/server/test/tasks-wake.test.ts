@@ -814,6 +814,8 @@ describe('a head', () => {
       await afterJob(ctx, busy!.id);
       const run = await nextRun(builtin);
       expect(run.prompt).toContain('Several of your tasks moved while you were busy');
+      await db.insert(agentEvents).values({ companyId, agentId: head.id, jobId: run.jobId, kind: 'program', data: { program: { state: 'thinking', since: Date.now() - 1000, tool: null }, alarm: null } });
+      await db.insert(agentEvents).values(taskIds.map(taskId => ({ companyId, agentId: head.id, jobId: run.jobId, kind: 'tool' as const, data: { name: 'hornhoof.task', input: '{}', task: { id: taskId } } })));
       await during();
       await db.update(jobs).set({ ...ended, finishedAt: new Date() }).where(eq(jobs.id, run.jobId));
       await afterJob(ctx, run.jobId);
@@ -826,9 +828,9 @@ describe('a head', () => {
     const { db, held, together, reminded } = await busyHead();
     const [payments, refunds] = [await held('Payments'), await held('Refunds')];
     await together([payments.id, refunds.id], { status: 'failed', error: 'agent_failed' });
-    /* A turn that broke is no silence: each of them goes on. */
+    /* A turn that broke goes on without advancing the stuck counter. */
     const wentOn = async (taskId: string) => (await db.select().from(taskEvents).where(and(eq(taskEvents.taskId, taskId), eq(taskEvents.kind, 'continued')))).length;
-    expect([await wentOn(payments.id), await wentOn(refunds.id)]).toEqual([1, 1]);
+    expect([await wentOn(payments.id), await wentOn(refunds.id)]).toEqual([0, 0]);
     expect([await reminded(payments.id), await reminded(refunds.id)]).toEqual([0, 0]);
   });
 
@@ -840,7 +842,7 @@ describe('a head', () => {
     /* Its own task gets the retry, which waits on it, so it does not go on a second way. */
     expect([await count(payments.id, 'interrupted'), await count(payments.id, 'continued')]).toEqual([1, 0]);
     expect((await db.select({ taskId: jobs.taskId }).from(jobs).where(isNotNull(jobs.retryOf))).map(j => j.taskId)).toEqual([payments.id]);
-    expect([await count(refunds.id, 'interrupted'), await count(refunds.id, 'continued')]).toEqual([0, 1]);
+    expect([await count(refunds.id, 'interrupted'), await count(refunds.id, 'continued')]).toEqual([0, 0]);
     expect([await reminded(payments.id), await reminded(refunds.id)]).toEqual([0, 0]);
   });
 

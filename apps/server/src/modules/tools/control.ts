@@ -177,7 +177,7 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
   tool(
     'answer_request',
     'Answers what an employee asked people (see /api/requests): answer for a question; approve true or false, with an optional answer, for a commit; pick (0 for the first way) for a choice; retry true for a stuck task. ' +
-      'It is the decision of the person this turn answers, the last one who wrote into it, and goes through only when they may take it.',
+      'A human decision belongs to the person this turn answers. An internal stuck request assigned to the orchestrator is answered by the orchestrator itself, without a person principal.',
     {
       request: Id('request'),
       answer: Text.optional(),

@@ -118,7 +118,7 @@ function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
       /* Its text names the cancelled tasks. */
       return `${ref} comes after ${w.text ?? 'a task'}, which was cancelled, so it still waits and nobody works on it. ${read} Give it what it waits for from now on with update_task (after, [] to start it now), or cancel it with cancel_task.`;
     case 'answered':
-      return `A person answered on ${ref}${said}Go on with it.`;
+      return `An answer arrived on ${ref}${said}Go on with it.`;
     case 'unblocked':
       return `Whoever gave you ${ref} answered what blocked it${said}Go on with the work, then ${finish}. If you still cannot go on, ${stuck}.`;
     case 'comment':
@@ -295,7 +295,7 @@ async function explainRequest(ctx: Ctx, w: Wake): Promise<void> {
   if (!into) await pump(ctx, w.agentId);
 }
 
-/* A turn that was to put requests into words ended: people see again that nobody is on them, whether or not it did. */
+/* A request turn ended: its readers see again that nobody is on it, whether or not it did its work. */
 export async function explainEnded(ctx: Ctx, jobId: string): Promise<void> {
   const asked = sql<string>`${agentEvents.data}->>'request'`;
   const ended = await ctx.db
@@ -422,16 +422,33 @@ async function programWorked(ctx: Ctx, jobId: string): Promise<boolean> {
   return Boolean(fact);
 }
 
-/* After a turn on its own task: an agent that went idle holding the task without moving it is reminded, and after
-   SILENT_TURNS such turns its head is asked. Only a turn with a durable program or tool fact counts. Coalesced turns and
-   turns of other tasks carried inside it have no such fact of their own and never advance a task's counters.
+async function programWorkedOnTask(ctx: Ctx, jobId: string, taskId: string): Promise<boolean> {
+  const [fact] = await ctx.db
+    .select({ id: agentEvents.id })
+    .from(agentEvents)
+    .where(and(eq(agentEvents.jobId, jobId), inArray(agentEvents.kind, ['tool', 'tool_result', 'todo']), sql`${agentEvents.data}->'task'->>'id' = ${taskId}`))
+    .limit(1);
+  return Boolean(fact);
+}
+
+/* After a turn on a task: an agent that went idle holding the task without moving it is reminded, and after
+   SILENT_TURNS such turns its head is asked. Its own task needs a durable program or tool fact. A task carried inside that
+   turn needs a tool fact naming it, so a coalesced backlog alone never advances a counter.
    Nothing is checked while the agent has another turn waiting on the task, or while the task waits on its subtasks, on the
    tasks it comes after or on people. */
-export async function checkLiveness(ctx: Ctx, jobId: string, _carried: string[] = [], { carriedOnly = false } = {}): Promise<void> {
+export async function checkLiveness(ctx: Ctx, jobId: string, carried: string[] = [], { carriedOnly = false } = {}): Promise<void> {
   const [job] = await ctx.db.select().from(jobs).where(eq(jobs.id, jobId));
-  if (!job?.taskId || !job.agentId || !job.startedAt || job.error === 'cancelled' || job.result === GONE_ALONG || carriedOnly) return;
-  const task = await heldTask(ctx, job.agentId, job.taskId);
-  if (task) await checkHeld(ctx, { ...job, agentId: job.agentId, startedAt: job.startedAt }, task, await programWorked(ctx, jobId));
+  if (!job?.taskId || !job.agentId || !job.startedAt || job.error === 'cancelled' || job.result === GONE_ALONG) return;
+  const own = carriedOnly ? await heldTask(ctx, job.agentId, job.taskId) : null;
+  const held = new Map<string, Task>();
+  for (const taskId of carriedOnly ? carried : [job.taskId, ...carried]) {
+    const task = await heldTask(ctx, job.agentId, taskId);
+    if (task && task.id !== own?.id && !held.has(task.id)) held.set(task.id, task);
+  }
+  for (const task of held.values()) {
+    const worked = task.id === job.taskId ? await programWorked(ctx, jobId) : await programWorkedOnTask(ctx, jobId, task.id);
+    await checkHeld(ctx, { ...job, agentId: job.agentId, startedAt: job.startedAt }, task, worked);
+  }
 }
 
 /* Turns that broke this soon after they started, this many in a row on one task, stop Hornhoof waking the agent there. */
@@ -596,8 +613,10 @@ async function checkHeld(ctx: Ctx, job: typeof jobs.$inferSelect & { agentId: st
     if (moved) await wakeAll(ctx, moved.wakes);
     return;
   }
-  /* Failures stay with afterFailure. A timeout or a comment says the program worked and continues under the other counter. */
-  if (!worked || (job.status === 'failed' && job.error !== 'timeout')) return;
+  /* A failure still goes on where the existing failure path says so, but never advances either stuck counter. */
+  if (job.status === 'failed' && job.error !== 'timeout') return wakeAll(ctx, [{ agentId, taskId: task.id, why: 'go_on' }]);
+  if (!worked) return;
+  /* A timeout or a comment says the program worked and continues under the other counter. */
   const [told] = await db
     .select({ n: count() })
     .from(taskEvents)

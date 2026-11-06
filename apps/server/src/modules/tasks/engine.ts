@@ -44,9 +44,9 @@ type Live = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'templates' | 'config' |
 export const CLOSED: readonly Task['status'][] = ['done', 'cancelled'];
 /* The send-back at one gate that also calls the head in. */
 export const GATE_ROUNDS = 3;
-/* Turns in a row that end without moving the task before a person is asked to step in. */
+/* Turns in a row that end without moving the task before the agent's head is asked to step in. */
 export const SILENT_TURNS = 3;
-/* Turns in a row an agent may go on in, saying how far it got or working until its time runs out, before a person is asked:
+/* Turns in a row an agent may go on in, saying how far it got or working until its time runs out, before its head is asked:
    about six hours of work without handing anything in. */
 export const GOING_ON_TURNS = 8;
 const COMMIT = /^[0-9a-f]{40}$/;
@@ -1564,7 +1564,7 @@ async function explaining(db: Db | Tx, task: Task, agentId: string, requestId: s
   return orchestrator && orchestrator.id !== agentId ? [{ agentId: orchestrator.id, taskId: task.id, why: 'explain', text: requestId }] : [];
 }
 
-/* The agent holding the task ended a turn without moving it: a reminder, and from SILENT_TURNS on a person is asked. */
+/* The agent holding the task ended a turn without moving it: a reminder, and from SILENT_TURNS its head is asked. */
 export async function silentTurn(ctx: Live, agentId: string, task: Task): Promise<Moved> {
   if (task.externalWait) return { task, wakes: [] };
   return remindOnSilence(ctx, agentId, task);
@@ -1642,7 +1642,7 @@ export async function lastMove(db: Db | Tx, taskId: string) {
 }
 
 /* The agent holding the task worked through a turn without handing anything in, but said in the task how far it got or
-   worked until its time ran out: it goes on in another turn, from GOING_ON_TURNS such turns in a row a person is asked. */
+   worked until its time ran out: it goes on in another turn, from GOING_ON_TURNS such turns in a row its head is asked. */
 export async function wentOn(ctx: Live, agentId: string, task: Task): Promise<Moved> {
   const last = await lastMove(ctx.db, task.id);
   const [before] = await ctx.db
