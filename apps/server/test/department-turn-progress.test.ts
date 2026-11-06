@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { expect, it, onTestFinished, vi } from 'vitest';
-import { agents, companies, departments, people, tasks, turns, TASK_STATUSES } from '../src/db/schema.js';
+import { agents, companies, departments, people, tasks, teams, turns, TASK_STATUSES } from '../src/db/schema.js';
 import { turnCounts } from '../src/modules/tasks/turn-progress.js';
 import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
 
@@ -107,4 +107,23 @@ it('propagates a failed count instead of returning an invented zero', async () =
   onTestFinished(() => select.mockRestore());
   const viewer = { full: true, personId: randomUUID(), access: { whole: true, departments: new Set<string>(), teams: new Set<string>() }, plans: new Set<string>(), agents: new Set<string>() };
   await expect(turnCounts(c.db, c.turn, viewer, c.dev.id)).rejects.toBe(failure);
+});
+
+
+it('shows viewer-filtered department progress through product-only and team-only access', async () => {
+  const c = await fixture();
+  const [product] = await c.db.insert(departments).values({ companyId: c.companyId, roleCode: 'DEV', parentId: c.dev.id, name: 'Product' }).returning();
+  const productToken = await invitePerson(c.app, c.ceo, { name: 'Product reader', email: 'product@example.test', access: { departments: [product!.id] } });
+  const [person] = await c.db.select().from(people).where(eq(people.email, 'product@example.test'));
+  await c.add(c.dev.id, { status: 'done', productId: product!.id, createdByPersonId: person!.id });
+  await c.add(c.dev.id, { status: 'done' });
+  expect((await c.org(productToken)).departments.find(d => d.id === c.dev.id)!.turnProgress).toEqual({ turnNumber: 8, total: 1, done: 1 });
+  expect((await c.current(productToken)).tasks).toEqual({ total: 1, done: 1 });
+  const [team] = await c.db.insert(teams).values({ companyId: c.companyId, departmentId: c.dev.id, name: 'One team' }).returning();
+  const teamToken = await invitePerson(c.app, c.ceo, { name: 'Team reader', email: 'team@example.test', access: { teams: [team!.id] } });
+  expect((await c.org(teamToken)).departments.find(d => d.id === c.dev.id)!.turnProgress).toEqual({ turnNumber: 8, total: 0, done: 0 });
+  expect((await c.current(teamToken)).tasks).toEqual({ total: 0, done: 0 });
+  for (const token of [productToken, teamToken]) {
+    expect((await c.app.inject({ method: 'PUT', url: `/api/departments/${c.dev.id}/work-mode`, payload: { workMode: 'continuous' }, ...as(token) })).statusCode).toBe(403);
+  }
 });
