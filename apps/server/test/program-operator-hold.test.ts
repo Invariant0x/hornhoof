@@ -499,8 +499,7 @@ it('refuses a reliability engineer who is the one on hold', async () => {
 
 /* A second machine with a node of another plan, whose program lost its words too: #438 stood on another node than #455. */
 async function anotherNode(c: Awaited<ReturnType<typeof operatorCompany>>) {
-  const { id: _plan, ...plan } = c.sub;
-  const [sub] = await c.db.insert(subscriptions).values({ ...plan, kind: 'personal', provider: 'kimi', status: 'ready' }).returning();
+  const [sub] = await c.db.insert(subscriptions).values({ ...c.sub, id: randomUUID(), kind: 'personal', provider: 'kimi', status: 'ready' }).returning();
   const [machine] = await c.db.insert(machines).values({ companyId: c.companyId, personId: c.sub.ownerPersonId, machineKey: randomUUID(), hostname: 'Another node' }).returning();
   const [node] = await c.db.insert(nodes).values({ companyId: c.companyId, machineId: machine!.id, subscriptionId: sub!.id, keyHash: randomUUID(), status: 'ready', version: '0.7.1' }).returning();
   const [agent] = await c.db.insert(agents).values({ companyId: c.companyId, name: 'Dana', kind: 'worker', roleKey: 'DEV-FE', departmentId: c.agent.departmentId, subscriptionId: sub!.id, nodeId: node!.id, model: '' }).returning();
