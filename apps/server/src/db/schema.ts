@@ -4,6 +4,7 @@ import { APPROVAL_CHANNELS, APPROVAL_MODES, CATALOG_KINDS, COMPANY_TEMPLATE_KEYS
 import type { OperatorError, OperatorInputLine, OperatorQuestion, OperatorReason } from '@hornhoof/protocol/program-operator';
 import type { MessageParty } from '../modules/events/parties.js';
 import type { BindingPart } from '../modules/model-checks/lifecycle.js';
+import type { IntegrationTarget, NodeRef, WorkspaceProblemCode } from '@hornhoof/protocol';
 import type { RunProblem, Thresholds } from '../modules/model-checks/score.js';
 import { sql } from 'drizzle-orm';
 import { bigint, bigserial, boolean, check, customType, date, doublePrecision, foreignKey, index, integer, jsonb, pgTable, primaryKey, real, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
@@ -483,6 +484,9 @@ export const jobs = pgTable(
     createdBy: uuid('created_by').references(() => people.id),
     /* The task a turn works on, when a task woke the agent. */
     taskId: uuid('task_id').references((): AnyPgColumn => tasks.id),
+    assignmentEpoch: bigint('assignment_epoch', { mode: 'number' }).notNull().default(0),
+    workspaceId: uuid('workspace_id').references((): AnyPgColumn => taskWorkspaces.id),
+    workspaceSpecVersion: integer('workspace_spec_version'),
     /* The turn this one runs once more, after a node restart cut it off. */
     retryOf: uuid('retry_of').references((): AnyPgColumn => jobs.id),
     interruption: jsonb('interruption').$type<Interruption>(),
@@ -495,7 +499,11 @@ export const jobs = pgTable(
     startedAt: timestamp('started_at', { withTimezone: true }),
     finishedAt: timestamp('finished_at', { withTimezone: true }),
   },
-  t => [index('jobs_subscription_id').on(t.subscriptionId), index('jobs_task_id').on(t.taskId), index('jobs_agent_id_status').on(t.agentId, t.status)],
+  t => [index('jobs_subscription_id').on(t.subscriptionId), index('jobs_task_id').on(t.taskId), index('jobs_agent_id_status').on(t.agentId, t.status),
+    check('jobs_assignment_epoch', sql`${t.assignmentEpoch} BETWEEN 0 AND 9007199254740991`),
+    check('jobs_workspace_pair', sql`(${t.workspaceId} IS NULL AND ${t.workspaceSpecVersion} IS NULL) OR (${t.workspaceId} IS NOT NULL AND ${t.workspaceSpecVersion} IS NOT NULL AND ${t.workspaceSpecVersion} > 0)`),
+    index('jobs_workspace_id').on(t.workspaceId),
+  ],
 );
 
 /* computer: the orchestrator asked for the computer the server runs on, or the CEO opened, closed or declined it. typed: a
@@ -625,6 +633,7 @@ export const tasks = pgTable(
     assigneeAgentId: uuid('assignee_agent_id').references(() => agents.id),
     /* A member task's executor; its gates are employees in order and stage 0 is the executor's turn. */
     executorAgentId: uuid('executor_agent_id').references(() => agents.id),
+    assignmentEpoch: bigint('assignment_epoch', { mode: 'number' }).notNull().default(0),
     gates: jsonb('gates').$type<string[]>().notNull().default([]),
     /* Everyone who checks the work at the current gate: each employee of its reviewer's role that is on. */
     panel: jsonb('panel').$type<string[]>().notNull().default([]),
@@ -643,6 +652,8 @@ export const tasks = pgTable(
     riskClass: text('risk_class', { enum: RISK_CLASSES }),
     /* Said by the CEO, never read from its words; work under a task is as urgent as it is. */
     urgent: boolean('urgent').notNull().default(false),
+    /* Marked by whoever gives the work out for the short path. */
+    small: boolean('small').notNull().default(false),
     /* Grows with every move, so two moves that read the same task cannot both land. */
     version: integer('version').notNull().default(0),
     createdByPersonId: uuid('created_by_person_id').references(() => people.id),
@@ -663,6 +674,7 @@ export const tasks = pgTable(
        under itself, gates that are not lists. */
     check('tasks_review_has_executor', sql`${t.status} <> 'review' OR ${t.executorAgentId} IS NOT NULL`),
     check('tasks_counts', sql`${t.stage} >= 0 AND ${t.bounces} >= 0 AND ${t.silent} >= 0`),
+    check('tasks_assignment_epoch', sql`${t.assignmentEpoch} BETWEEN 0 AND 9007199254740991`),
     check('tasks_closed_at', sql`${t.status} NOT IN ('done', 'cancelled') OR ${t.closedAt} IS NOT NULL`),
     check('tasks_not_own_parent', sql`${t.parentId} IS NULL OR ${t.parentId} <> ${t.id}`),
     check('tasks_gates_lists', sql`jsonb_typeof(${t.gates}) = 'array' AND jsonb_typeof(${t.panel}) = 'array'`),
@@ -1985,4 +1997,156 @@ export const externalRecoveryNotices = pgTable('external_recovery_notices', {
   foreignKey({ columns: [t.caseId, t.companyId], foreignColumns: [externalRecoveryCases.id, externalRecoveryCases.companyId] }),
   unique('external_notices_one_logical_signal').on(t.companyId, t.caseId, t.noticeKind),
   check('external_notices_kind', sql`${t.noticeKind} = 'operations'`),
+]);
+
+/* Private repository guard rows carry identity only, never a Git credential. */
+export const workspaceRepositories = pgTable('workspace_repositories', {
+  id: id(), companyId: companyId(), canonicalUrl: text('canonical_url').notNull(), createdAt: createdAt(),
+}, t => [
+  unique('workspace_repositories_company_identity').on(t.companyId, t.canonicalUrl),
+  unique('workspace_repositories_company_id').on(t.companyId, t.id),
+  check('workspace_repositories_https', sql`${t.canonicalUrl} ~ '^https://[^/@?#[:space:]]+/[^?#[:space:]]+$'`),
+]);
+
+const workspaceCount = (column: AnyPgColumn, minimum: 0 | 1 = 0) => sql`${column} BETWEEN ${sql.raw(String(minimum))} AND 9007199254740991`;
+const workspaceSha = (column: AnyPgColumn) => sql`${column} ~ '^[0-9a-f]{40}$'`;
+const workspaceList = (column: AnyPgColumn) => sql`jsonb_typeof(${column}) = 'array' AND jsonb_array_length(${column}) > 0 AND octet_length(${column}::text) <= 65536`;
+export const WORKSPACE_PHASES = ['reserved', 'preparing', 'work', 'submitting', 'submission_waiting', 'review', 'merge_pending', 'merged', 'cleanup_pending', 'removed', 'return_pending', 'pausing_other', 'paused', 'retained', 'problem'] as const;
+
+/* A planned task without an integration plan has no row here and owns no slot or area. */
+export const taskWorkspaces = pgTable('task_workspaces', {
+  id: id(), companyId: companyId(),
+  repositoryId: uuid('repository_id').notNull(),
+  taskId: uuid('task_id').notNull().references(() => tasks.id),
+  agentId: uuid('agent_id').notNull().references(() => agents.id),
+  nodeId: uuid('node_id').references(() => nodes.id), builtin: boolean('builtin').notNull(),
+  assignmentEpoch: bigint('assignment_epoch', { mode: 'number' }).notNull(),
+  bindingVersion: bigint('binding_version', { mode: 'number' }).notNull(),
+  taskBranch: text('task_branch').notNull(), baseSha: text('base_sha').notNull(), baseRef: text('base_ref').notNull(),
+  specVersion: integer('spec_version').notNull().default(1),
+  areas: jsonb('areas').$type<string[]>().notNull(),
+  requiredIntegrations: jsonb('required_integrations').$type<IntegrationTarget[]>().notNull(),
+  phase: text('phase', { enum: WORKSPACE_PHASES }).notNull().default('reserved'),
+  isCurrent: boolean('is_current').notNull().default(true),
+  submissionRevision: bigint('submission_revision', { mode: 'number' }).notNull().default(0),
+  switchGeneration: bigint('switch_generation', { mode: 'number' }).notNull().default(0),
+  problem: text('problem').$type<WorkspaceProblemCode>(),
+  createdAt: createdAt(), updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [
+  foreignKey({ name: 'task_workspaces_company_repository_fk', columns: [t.companyId, t.repositoryId], foreignColumns: [workspaceRepositories.companyId, workspaceRepositories.id] }),
+  unique('task_workspaces_binding_identity').on(t.companyId, t.id, t.bindingVersion),
+  uniqueIndex('task_workspaces_current_assignment').on(t.companyId, t.taskId, t.assignmentEpoch).where(sql`${t.isCurrent}`),
+  index('task_workspaces_author_phase').on(t.companyId, t.agentId, t.phase),
+  check('task_workspaces_node', sql`(${t.builtin} AND ${t.nodeId} IS NULL) OR (NOT ${t.builtin} AND ${t.nodeId} IS NOT NULL)`),
+  check('task_workspaces_counts', sql`${workspaceCount(t.assignmentEpoch)} AND ${workspaceCount(t.bindingVersion, 1)} AND ${workspaceCount(t.submissionRevision)} AND ${workspaceCount(t.switchGeneration)}`),
+  check('task_workspaces_pin', sql`${workspaceSha(t.baseSha)} AND ${t.specVersion} = 1 AND length(${t.taskBranch}) BETWEEN 1 AND 240 AND length(${t.baseRef}) BETWEEN 1 AND 240`),
+  check('task_workspaces_policy', sql`${workspaceList(t.areas)} AND ${workspaceList(t.requiredIntegrations)}`),
+  check('task_workspaces_phase', sql`${t.phase} IN ('reserved','preparing','work','submitting','submission_waiting','review','merge_pending','merged','cleanup_pending','removed','return_pending','pausing_other','paused','retained','problem')`),
+]);
+
+/* Durable capacity is not reconstructed from task workflow status or reviewer panel membership. */
+export const authorWorkspaceSlots = pgTable('author_workspace_slots', {
+  companyId: companyId(), agentId: uuid('agent_id').notNull().references(() => agents.id),
+  heldTaskIds: uuid('held_task_ids').array().notNull().default(sql`'{}'::uuid[]`),
+  executionTaskId: uuid('execution_task_id').references(() => tasks.id),
+  executionJobId: uuid('execution_job_id').references(() => jobs.id),
+  reviewTaskId: uuid('review_task_id').references(() => tasks.id),
+  pausedTaskId: uuid('paused_task_id').references(() => tasks.id),
+  switchGeneration: bigint('switch_generation', { mode: 'number' }).notNull().default(0),
+  version: bigint('version', { mode: 'number' }).notNull().default(0),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [
+  primaryKey({ columns: [t.companyId, t.agentId] }),
+  check('author_workspace_slots_held', sql`cardinality(${t.heldTaskIds}) <= 2 AND array_position(${t.heldTaskIds}, NULL) IS NULL AND (cardinality(${t.heldTaskIds}) < 2 OR ${t.heldTaskIds}[1] <> ${t.heldTaskIds}[2])`),
+  check('author_workspace_slots_execution', sql`(${t.executionTaskId} IS NULL OR ${t.executionTaskId} = ANY(${t.heldTaskIds})) AND (${t.executionJobId} IS NULL OR ${t.executionTaskId} IS NOT NULL)`),
+  check('author_workspace_slots_review', sql`${t.reviewTaskId} IS NULL OR ${t.reviewTaskId} = ANY(${t.heldTaskIds})`),
+  check('author_workspace_slots_paused', sql`${t.pausedTaskId} IS NULL OR ${t.pausedTaskId} = ANY(${t.heldTaskIds})`),
+  check('author_workspace_slots_counts', sql`${workspaceCount(t.switchGeneration)} AND ${workspaceCount(t.version)}`),
+]);
+
+const workspaceLink = () => ({
+  companyId: companyId(), workspaceId: uuid('workspace_id').notNull(),
+  bindingVersion: bigint('binding_version', { mode: 'number' }).notNull(),
+});
+const workspaceForeignKey = (name: string, columns: { companyId: AnyPgColumn; workspaceId: AnyPgColumn; bindingVersion: AnyPgColumn }) =>
+  foreignKey({ name, columns: [columns.companyId, columns.workspaceId, columns.bindingVersion], foreignColumns: [taskWorkspaces.companyId, taskWorkspaces.id, taskWorkspaces.bindingVersion] });
+
+export const taskAreaLocks = pgTable('task_area_locks', {
+  id: id(), ...workspaceLink(),
+  repositoryId: uuid('repository_id').notNull(), taskId: uuid('task_id').notNull().references(() => tasks.id),
+  area: text('area').notNull(), areaKey: text('area_key').notNull(),
+  createdAt: createdAt(), releasedAt: timestamp('released_at', { withTimezone: true }),
+}, t => [
+  workspaceForeignKey('task_area_locks_binding_fk', t),
+  foreignKey({ name: 'task_area_locks_repository_fk', columns: [t.companyId, t.repositoryId], foreignColumns: [workspaceRepositories.companyId, workspaceRepositories.id] }),
+  uniqueIndex('task_area_locks_active_claim').on(t.companyId, t.workspaceId, t.areaKey).where(sql`${t.releasedAt} IS NULL`),
+  index('task_area_locks_repository').on(t.companyId, t.repositoryId),
+  check('task_area_locks_nonempty', sql`length(${t.area}) BETWEEN 1 AND 4096 AND length(${t.areaKey}) BETWEEN 1 AND 4096`),
+]);
+
+/* Pending plan metadata has no physical workspace. Other records are private durable outbox intents. */
+export const taskWorkspaceOperations = pgTable('task_workspace_operations', {
+  id: id(), companyId: companyId(), taskId: uuid('task_id').notNull().references(() => tasks.id),
+  jobId: uuid('job_id').references(() => jobs.id), workspaceId: uuid('workspace_id'),
+  assignmentEpoch: bigint('assignment_epoch', { mode: 'number' }).notNull(),
+  bindingVersion: bigint('binding_version', { mode: 'number' }),
+  sourceNode: jsonb('source_node').$type<NodeRef>(),
+  kind: text('kind').notNull(), phase: text('phase').notNull(), idempotencyKey: text('idempotency_key').notNull(),
+  payload: jsonb('payload').$type<Record<string, unknown>>().notNull().default({}),
+  version: bigint('version', { mode: 'number' }).notNull().default(0),
+  createdAt: createdAt(), sentAt: timestamp('sent_at', { withTimezone: true }),
+  settledAt: timestamp('settled_at', { withTimezone: true }),
+}, t => [
+  workspaceForeignKey('task_workspace_operations_binding_fk', t),
+  unique('task_workspace_operations_idempotent').on(t.companyId, t.idempotencyKey),
+  index('task_workspace_operations_outbox').on(t.companyId, t.phase, t.createdAt),
+  check('task_workspace_operations_pending', sql`${t.phase} <> 'pending_integration_plan' OR (${t.workspaceId} IS NULL AND ${t.bindingVersion} IS NULL)`),
+  check('task_workspace_operations_binding_pair', sql`(${t.workspaceId} IS NULL) = (${t.bindingVersion} IS NULL)`),
+  check('task_workspace_operations_counts', sql`${workspaceCount(t.assignmentEpoch)} AND ${workspaceCount(t.version)} AND (${t.bindingVersion} IS NULL OR ${workspaceCount(t.bindingVersion, 1)})`),
+  check('task_workspace_operations_payload', sql`jsonb_typeof(${t.payload}) = 'object' AND octet_length(${t.payload}::text) <= 1048576`),
+]);
+
+export const taskWorkspaceSubmissions = pgTable('task_workspace_submissions', {
+  id: id(), ...workspaceLink(), revision: bigint('revision', { mode: 'number' }).notNull(),
+  headSha: text('head_sha').notNull(), publicationReceiptId: uuid('publication_receipt_id'),
+  publication: jsonb('publication').$type<Record<string, unknown>>(),
+  sourceOperationId: uuid('source_operation_id').references(() => taskWorkspaceOperations.id),
+  phase: text('phase').notNull(), createdAt: createdAt(), sealedAt: timestamp('sealed_at', { withTimezone: true }),
+}, t => [
+  workspaceForeignKey('task_workspace_submissions_binding_fk', t),
+  unique('task_workspace_submissions_revision').on(t.companyId, t.workspaceId, t.bindingVersion, t.revision),
+  check('task_workspace_submissions_revision_positive', workspaceCount(t.revision, 1)),
+  check('task_workspace_submissions_pin', workspaceSha(t.headSha)),
+  check('task_workspace_submissions_publication_pair', sql`(${t.publicationReceiptId} IS NULL) = (${t.publication} IS NULL)`),
+]);
+
+export const taskWorkspaceSessions = pgTable('task_workspace_sessions', {
+  id: id(), ...workspaceLink(), provider: text('provider').notNull(),
+  subscriptionId: uuid('subscription_id').notNull().references(() => subscriptions.id),
+  model: text('model'), instructionsHash: text('instructions_hash').notNull(),
+  nativeSessionId: text('native_session_id'), lastJobId: uuid('last_job_id').references(() => jobs.id),
+  createdAt: createdAt(), endedAt: timestamp('ended_at', { withTimezone: true }),
+}, t => [
+  workspaceForeignKey('task_workspace_sessions_binding_fk', t),
+  index('task_workspace_sessions_lookup').on(t.companyId, t.workspaceId, t.bindingVersion, t.provider),
+  check('task_workspace_sessions_instructions', sql`${t.instructionsHash} ~ '^[0-9a-f]{64}$'`),
+]);
+
+/* Only the registered integration producer supplies this exact H -> M receipt and confirmation time. */
+export const taskWorkspaceMergeReceipts = pgTable('task_workspace_merge_receipts', {
+  id: uuid('id').primaryKey(), ...workspaceLink(),
+  repositoryId: uuid('repository_id').notNull(), taskId: uuid('task_id').notNull().references(() => tasks.id),
+  submissionRevision: bigint('submission_revision', { mode: 'number' }).notNull(),
+  taskBranch: text('task_branch').notNull(), submittedHeadSha: text('submitted_head_sha').notNull(),
+  publicationReceiptId: uuid('publication_receipt_id').notNull(),
+  integrationKind: text('integration_kind', { enum: ['turn', 'main'] }).notNull(), integrationRef: text('integration_ref').notNull(),
+  integrationCommitSha: text('integration_commit_sha').notNull(), batchOrReleaseId: text('batch_or_release_id').notNull(),
+  confirmedAt: timestamp('confirmed_at', { withTimezone: true }).notNull(),
+}, t => [
+  workspaceForeignKey('task_workspace_merge_receipts_binding_fk', t),
+  foreignKey({ name: 'workspace_receipts_repository_fk', columns: [t.companyId, t.repositoryId], foreignColumns: [workspaceRepositories.companyId, workspaceRepositories.id] }),
+  foreignKey({ name: 'workspace_receipts_submission_fk', columns: [t.companyId, t.workspaceId, t.bindingVersion, t.submissionRevision], foreignColumns: [taskWorkspaceSubmissions.companyId, taskWorkspaceSubmissions.workspaceId, taskWorkspaceSubmissions.bindingVersion, taskWorkspaceSubmissions.revision] }),
+  unique('task_workspace_receipts_target').on(t.companyId, t.workspaceId, t.bindingVersion, t.submissionRevision, t.integrationKind, t.integrationRef),
+  check('task_workspace_receipts_pins', sql`${workspaceSha(t.submittedHeadSha)} AND ${workspaceSha(t.integrationCommitSha)}`),
+  check('task_workspace_receipts_target_kind', sql`${t.integrationKind} IN ('turn','main')`),
 ]);

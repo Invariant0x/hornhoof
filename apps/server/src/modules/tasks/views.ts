@@ -46,6 +46,7 @@ export type TaskLine = {
   workKind: Task['workKind'];
   riskClass: Task['riskClass'];
   urgent: boolean;
+  small: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -160,6 +161,7 @@ const line = (t: Task, n: Names, sees: (t: Task) => boolean): TaskLine => ({
   workKind: t.workKind,
   riskClass: t.riskClass,
   urgent: t.urgent,
+  small: t.small,
   createdAt: t.createdAt.toISOString(),
   updatedAt: t.updatedAt.toISOString(),
 });
