@@ -80,6 +80,12 @@ describe('test environment discovery from pinned Git blobs', () => {
 
 
 describe('literal test invocations', () => {
+  it('versioned node execution advertises its actual executor capability', async () => {
+    const f = await fixture();
+    const capabilities = await environment.trustedTestRuntimes(f.context);
+    expect(capabilities).toContainEqual({ id: 'hornhoof-test-execution', version: '2.0.0', fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/) });
+  });
+
   it('converts inventory paths to the working directory and protects option-like filenames', async () => {
     const f = await fixture(), suite = parseTestEnvironment(manifest()).suites[0];
     const invocation = await environment.buildTestInvocation(suite, ['app/test/-option.test.ts', 'app/test/a.test.ts'], { checkout: f.root, filesPath: join(f.root, 'files.json') });

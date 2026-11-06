@@ -1,10 +1,10 @@
 import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 const sharedState = vi.hoisted(() => ({ builderFiles: new Set<string>(), jobUid: 2_000_000_000 + (process.getuid?.() ?? 0) % 1_000_000, builderUid: 2_001_000_000 + (process.getuid?.() ?? 0) % 1_000_000 }));
 import type { TestEnvironmentV1, TestService, ServerMessage } from '@hornhoof/protocol';
 // Only the unavailable OS identity operations are doubled. Git, files, cache, commands and cleanup are real.
@@ -39,7 +39,7 @@ import { runTests } from '../src/tests.js';
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
 const command = (code: string) => ({ program: 'node', args: ['-e', code], cwd: '.' });
-async function fixture(configure?: (manifest: TestEnvironmentV1) => void) {
+async function fixture(configure?: (manifest: TestEnvironmentV1) => void, files: Record<string, string> = {}) {
   const root = await mkdtemp(join(tmpdir(), 'hh-product-contract-')); roots.push(root);
   const source = join(root, 'source'); await mkdir(join(source, '.hornhoof'), { recursive: true }); await mkdir(join(root, 'proc'));
   const manifest: TestEnvironmentV1 = { version: 1, defaultProfile: 'fast', profiles: [{ id: 'fast', requiredSuiteIds: ['unit'] }], runtimes: [{ id: 'node', version: process.versions.node.split('.')[0] }],
@@ -49,6 +49,7 @@ async function fixture(configure?: (manifest: TestEnvironmentV1) => void) {
   configure?.(manifest);
   await writeFile(join(source, '.hornhoof/test-environment.json'), JSON.stringify(manifest)); await writeFile(join(source, 'package-lock.json'), '{"lockfileVersion":3}'); await writeFile(join(source, 'migration.sql'), 'schema ready');
   await writeFile(join(source, 'test.js'), "const f=require('fs');if(f.readFileSync(process.env.HH_TEMPLATE+'/ready','utf8')!=='schema ready'||f.readFileSync('node_modules/ready','utf8')!=='dep')process.exit(7);console.log('product ready',JSON.stringify(process.argv.slice(2))); ");
+  for (const [file, contents] of Object.entries(files)) await writeFile(join(source, file), contents);
   const git = (...args: string[]) => execFileSync('git', args, { cwd: source, env: { ...process.env, GIT_AUTHOR_NAME: 'Fixture', GIT_AUTHOR_EMAIL: 'fixture@example.test', GIT_COMMITTER_NAME: 'Fixture', GIT_COMMITTER_EMAIL: 'fixture@example.test' }, encoding: 'utf8' }).trim();
   git('init', '-q'); git('add', '.'); git('commit', '-qm', 'Product fixture');
   const commitSha = git('rev-parse', 'HEAD'), repo = { url: pathToFileURL(source).href, token: '' };
@@ -170,4 +171,56 @@ it('does not return a manual part until its disposable UID has quiesced', async 
     expect(finished).toBe(false);
   } finally { await rm(processDir, { recursive: true }); await running; spy.mockRestore(); }
   expect((await running).ok).toBe(true);
+});
+
+async function batchFixture(codes: string[], prepare = false) {
+  const files = codes.map((_, index) => index === 0 ? 'test.js' : `test-${index}.js`);
+  const f = await fixture(manifest => {
+    manifest.dependencies = { adapter: 'none', inputs: [], install: [], paths: [], cache: 'none' }; manifest.prepare = [];
+    manifest.suites = codes.map((code, index) => ({ id: `suite-${index}`, root: '.', files: [files[index]!], run: command(code), split: { kind: 'argv-files' }, profiles: ['fast'] }));
+    manifest.profiles[0]!.requiredSuiteIds = manifest.suites.map(suite => suite.id);
+    manifest.execution = { version: 2, ...(prepare ? { oncePreparation: { profiles: ['fast'], suiteIds: ['suite-0'], commands: [command("console.log('once static command')")] } } : {}) };
+  }, Object.fromEntries(files.slice(1).map(file => [file, '// canonical tracked input'])));
+  f.msg.environment!.selection = prepare ? { kind: 'prepare', version: 2, expectedCommitSha: f.msg.commitSha! } : {
+    kind: 'batch', version: 2, expectedCommitSha: f.msg.commitSha!, selections: files.map((file, index) => ({ kind: 'suite', suiteId: `suite-${index}`, files: [file], shard: { index: 1, count: 1 } })),
+  };
+  return { ...f, options: { dir: f.dir, proc: join(f.root, 'proc'), user: { uid: sharedState.jobUid, gid: sharedState.jobUid }, hidden: [], prepareRepoBrowser: async () => {} } };
+}
+describe('versioned node execution', () => {
+  it('executes every suite and returns every successful outcome in order', async () => {
+    const f = await batchFixture(["console.log('first batch member')", "console.log('second batch member')"]);
+    const result = await runTests(f.msg, f.options);
+    expect(result, result.log).toMatchObject({ ok: true, commit: f.msg.commitSha, environmentReceipt: { version: 2, profile: 'fast', selection: f.msg.environment!.selection,
+      outcomes: [{ index: 0, status: 'passed', exitCode: 0 }, { index: 1, status: 'passed', exitCode: 0 }] } });
+    expect(result.log).toContain('first batch member'); expect(result.log).toContain('second batch member');
+    await expect(access(join(f.dir, 'runs', f.msg.partId))).rejects.toThrow();
+  });
+  it.each([0, 9])('keeps the first failing exit while executing the later suite with exit %s', async lastExit => {
+    const f = await batchFixture(['process.exit(7)', `console.log('later suite reached');process.exit(${lastExit})`]);
+    const result = await runTests(f.msg, f.options);
+    expect(result, result.log).toMatchObject({ ok: false, error: 'failed', exitCode: 7, environmentReceipt: { outcomes: [
+      { index: 0, status: 'failed', exitCode: 7 }, { index: 1, status: lastExit === 0 ? 'passed' : 'failed', exitCode: lastExit },
+    ] } });
+    expect(result.log).toContain('later suite reached');
+  });
+  it('runs the declared once-only suite and static command without executing the batch suite', async () => {
+    const f = await batchFixture(["console.log('once suite reached')", "console.log('batch suite must wait')"], true);
+    const result = await runTests(f.msg, f.options);
+    expect(result, result.log).toMatchObject({ ok: true, environmentReceipt: { version: 2, outcomes: [{ index: 0, status: 'passed', exitCode: 0 }, { index: 1, status: 'passed', exitCode: 0 }] } });
+    expect(result.log).toContain('once suite reached'); expect(result.log).toContain('once static command'); expect(result.log).not.toContain('batch suite must wait');
+  });
+  it('stops preparation on failure and records the unrun command', async () => {
+    const f = await batchFixture(['process.exit(8)', "console.log('batch suite must wait')"], true);
+    const result = await runTests(f.msg, f.options);
+    expect(result, result.log).toMatchObject({ ok: false, exitCode: 8, environmentReceipt: { outcomes: [{ index: 0, status: 'failed', exitCode: 8 }, { index: 1, status: 'not-run', exitCode: null }] } });
+    expect(result.log).not.toContain('once static command'); expect(result.log).not.toContain('batch suite must wait');
+  });
+  it.each(['commit', 'scope'])('rejects message %s disagreement before creating an attempt or preparing the browser', async changed => {
+    const f = await batchFixture(["console.log('forged source must not execute')"]); let prepared = false;
+    if (changed === 'commit') f.msg.commitSha = 'f'.repeat(40);
+    else f.msg.repositoryScope = { ...f.msg.repositoryScope!, companyId: '33333333-3333-4333-8333-333333333333' };
+    const result = await runTests(f.msg, { ...f.options, prepareRepoBrowser: async () => { prepared = true; } });
+    expect(result).toMatchObject({ ok: false, commit: null }); expect(result.log).toContain('description_mismatch'); expect(prepared).toBe(false);
+    await expect(access(join(f.dir, 'runs'))).rejects.toThrow();
+  });
 });
