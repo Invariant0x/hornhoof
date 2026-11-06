@@ -10,6 +10,9 @@ import { placeSkills, superpowersIn } from './skills.js';
 import { readSessions, rememberSession } from './state.js';
 import { prepareRepo, type Git } from './workspace.js';
 
+/* The task's folder this turn runs in, once Hornhoof's node admitted and prepared it. */
+export type ProgramWorkspace = { programDir: string; binding: { workspaceId: string; bindingVersion: number }; catchUp?: string | null };
+
 export type RunInput = {
   /* The agent whose turn this is, from its workspace; a test job has none. */
   agentKey?: string | null;
