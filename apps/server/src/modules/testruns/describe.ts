@@ -58,9 +58,12 @@ function snapshotFor(description: EnvironmentDescription, request: TestEnvironme
   const snapshot = EnvironmentSnapshot.parse({ description, profile });
   return snapshot;
 }
+function requestedSuiteIds(snapshot: EnvironmentSnapshot, requested?: string): string[] {
+  return requested ? [requested] : snapshot.description.manifest.profiles.find(profile => profile.id === snapshot.profile)!.requiredSuiteIds;
+}
 function productLeaves(snapshot: EnvironmentSnapshot, requested?: string): TestEnvironmentSelection[] {
   const { manifest, inventory } = snapshot.description;
-  const ids = requested ? [requested] : manifest.profiles.find(profile => profile.id === snapshot.profile)!.requiredSuiteIds;
+  const ids = requestedSuiteIds(snapshot, requested);
   const leaves: TestEnvironmentSelection[] = [];
   for (const suiteId of ids) {
     const selection = { kind: 'suite' as const, suiteId, files: inventory.filter(unit => unit.suiteId === suiteId).map(unit => unit.file) };
@@ -79,15 +82,22 @@ async function freeProductMachines(ctx: Ctx, run: Run, snapshot: EnvironmentSnap
   const free = places.filter(place => pickMachine([{ ...place, reaches: descriptionEligible(ctx, place, target) }], need) !== null);
   return new Set(free.map(computerKey)).size;
 }
+function requestedUnits(snapshot: EnvironmentSnapshot, requested?: string): EnvironmentDescription['inventory'] {
+  const ids = requestedSuiteIds(snapshot, requested);
+  const units = snapshot.description.inventory.filter(unit => ids.includes(unit.suiteId));
+  if (ids.some(id => !units.some(unit => unit.suiteId === id))) throw new Error('A requested suite has no canonical files.');
+  return units;
+}
+function planningCosts(history: PlanningHistory | null | undefined) {
+  return { durations: history?.durations ?? [], costs: history?.costs ?? { setupMs: 10_000, collectMs: 1000 }, unknownFileMs: 30_000 };
+}
 async function plannedLeaves(ctx: Ctx, run: Run, snapshot: EnvironmentSnapshot): Promise<{ leaves: TestEnvironmentSelection[]; plan: ProductPlan | null }> {
   const requested = run.environmentRequest!.suite;
   if (!snapshot.description.manifest.execution) return { leaves: productLeaves(snapshot, requested), plan: null };
-  const ids = requested ? [requested] : snapshot.description.manifest.profiles.find(profile => profile.id === snapshot.profile)!.requiredSuiteIds;
-  const units = snapshot.description.inventory.filter(unit => ids.includes(unit.suiteId));
-  if (ids.some(id => !units.some(unit => unit.suiteId === id))) throw new Error('A requested suite has no canonical files.');
+  const units = requestedUnits(snapshot, requested);
   const history = await planningPorts.get(ctx)?.history?.(run, snapshot);
   const plan = await planProductParts({ snapshot, expectedCommitSha: run.commitSha!, purpose: !requested && snapshot.profile === 'final' ? 'final' : 'affected', units,
-    durations: history?.durations ?? [], costs: history?.costs ?? { setupMs: 10_000, collectMs: 1000 }, unknownFileMs: 30_000,
+    ...planningCosts(history),
     availableMachines: await freeProductMachines(ctx, run, snapshot) });
   if (!history) plan.reason += ' Historical storage is not bound; setup and collection costs are fallback estimates.';
   return { leaves: plan.leaves, plan };
@@ -103,11 +113,9 @@ async function assignedDescription(ctx: Ctx, id: NodeIdentity, message: TestsDes
 async function descriptionProblem(ctx: Ctx, run: Run, message: TestsDescribed, problem: EnvironmentProblem): Promise<void> {
   await ctx.db.update(testRuns).set({ environmentRequest: { ...run.environmentRequest!, problem } }).where(requestMatches(run.id, message.requestId));
 }
-async function saveDescription(ctx: Ctx, run: Run, message: TestsDescribed, value: EnvironmentDescription): Promise<void> {
-  const request = run.environmentRequest!, description = await validateEnvironmentDescription(value);
-  if (description.commitSha !== run.commitSha || scopeKey(description.repositoryScope) !== scopeKey(request.repositoryScope)) throw new Error('The pinned source or repository scope differs.');
-  const snapshot = snapshotFor(description, request), { leaves, plan } = await plannedLeaves(ctx, run, snapshot);
-  const saved = await ctx.db.transaction(async tx => {
+async function storeDescription(ctx: Ctx, run: Run, message: TestsDescribed, snapshot: EnvironmentSnapshot, leaves: TestEnvironmentSelection[], plan: ProductPlan | null): Promise<boolean> {
+  const description = snapshot.description;
+  return ctx.db.transaction(async tx => {
     const [locked] = await tx.select().from(testRuns).where(requestMatches(run.id, message.requestId)).for('update');
     if (!locked || locked.environmentRequest?.problem) return false;
     if (locked.commitSha !== description.commitSha || scopeKey(locked.environmentRequest!.repositoryScope) !== scopeKey(description.repositoryScope)) throw new Error('The locked run differs from the planned source.');
@@ -116,6 +124,12 @@ async function saveDescription(ctx: Ctx, run: Run, message: TestsDescribed, valu
     await tx.insert(testParts).values(leaves.map((environmentSelection, index) => ({ companyId: run.companyId, runId: run.id, part: index + 1, environmentSelection })));
     return true;
   });
+}
+async function saveDescription(ctx: Ctx, run: Run, message: TestsDescribed, value: EnvironmentDescription): Promise<void> {
+  const request = run.environmentRequest!, description = await validateEnvironmentDescription(value);
+  if (description.commitSha !== run.commitSha || scopeKey(description.repositoryScope) !== scopeKey(request.repositoryScope)) throw new Error('The pinned source or repository scope differs.');
+  const snapshot = snapshotFor(description, request), { leaves, plan } = await plannedLeaves(ctx, run, snapshot);
+  const saved = await storeDescription(ctx, run, message, snapshot, leaves, plan);
   if (saved && plan) ctx.log.info({ runId: run.id, commitSha: description.commitSha, parts: leaves.length, reason: plan.reason, durableReason: planningPorts.get(ctx)?.record !== undefined }, 'Product test part plan');
 }
 export async function acceptDescription(ctx: Ctx, id: NodeIdentity, message: TestsDescribed): Promise<void> {
@@ -206,11 +220,13 @@ function receiptSelection(snapshot: EnvironmentSnapshot, selection: TestEnvironm
   const assigned = TestExecution.safeParse({ snapshot, selection: selection.selection }), reported = TestExecution.safeParse({ snapshot, selection: receipt.selection });
   return receipt.profile === snapshot.profile && assigned.success && reported.success && JSON.stringify(assigned.data.selection) === JSON.stringify(reported.data.selection);
 }
+function expectedOutcomes(snapshot: EnvironmentSnapshot, receipt: Extract<TestEnvironmentReceipt, { version: 2 }>): number {
+  const preparation = snapshot.description.manifest.execution?.oncePreparation;
+  return receipt.selection.kind === 'batch' ? receipt.selection.selections.length : (preparation?.suiteIds.length ?? 0) + (preparation?.commands.length ?? 0);
+}
 function receiptOutcomes(snapshot: EnvironmentSnapshot, receipt: TestEnvironmentReceipt, message: Extract<import('@hornhoof/protocol').NodeMessage, { type: 'tests.done' }>): boolean {
   if (receipt.version === 1) return true;
-  const preparation = snapshot.description.manifest.execution?.oncePreparation;
-  const count = receipt.selection.kind === 'batch' ? receipt.selection.selections.length : (preparation?.suiteIds.length ?? 0) + (preparation?.commands.length ?? 0);
-  if (message.commit !== receipt.commitSha || receipt.outcomes.length !== count) return false;
+  if (message.commit !== receipt.commitSha || receipt.outcomes.length !== expectedOutcomes(snapshot, receipt)) return false;
   return !message.ok || (message.exitCode === 0 && message.error === null && receipt.outcomes.every(outcome => outcome.status === 'passed'));
 }
 function receiptRuntimes(snapshot: EnvironmentSnapshot, receipt: TestEnvironmentReceipt, known: RuntimeCapability[]): boolean {
