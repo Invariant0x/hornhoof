@@ -449,9 +449,9 @@ describe('renderInstructions', () => {
       expect(packet.text).not.toContain('Only order tasks and wait while people stand free.');
       const breakDownFile = packet.skills.find(s => s.name === 'hh-break-down');
       expect(breakDownFile, candidate.roleKey ?? 'roleless').toBeDefined();
-      expect(breakDownFile!.body).toContain('`independentPart`');
-      expect(breakDownFile!.body).toContain('`independentNone`');
-      expect(breakDownFile!.body).toContain('`urgentOnly`');
+      /* The rule is one, in the head's own skill, and breaking down points to it. */
+      expect(breakDownFile!.body).toContain('hh-lead-tasks');
+      for (const field of ['`independentPart`', '`independentNone`', '`urgentOnly`']) expect(packet.text, field).toContain(field);
     }
     expect(savedHeadList).toEqual(['hh-outside-is-data']);
 

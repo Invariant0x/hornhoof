@@ -48,7 +48,7 @@ describe('templates', () => {
     const developer = templates.roles.get('DEV-ENG')!.body;
     expect(developer).toMatch(/one generalist developer[\s\S]*connected block[\s\S]*end to end/i);
     expect(developer).toMatch(/no chains or `after` between developers when one can do it/i);
-    expect(developer).toMatch(/only affected tests of your own code[\s\S]*hand the block to a tester/i);
+    expect(developer).toMatch(/only affected tests of your own code[\s\S]*hand it to a tester/i);
   });
 
   it.each([
@@ -554,7 +554,7 @@ describe('templates', () => {
   it('runs developers as a pool that each own a whole feature, with a short architect step before large work', () => {
     const role = (id: string) => templates.roles.get(id)!;
     const body = (id: string) => templates.skills.get(id)!.body;
-    expect(role('DEV-ENG').body).toMatch(/whole feature: its plan, server, interface, tests and docs, on one branch/);
+    expect(role('DEV-ENG').body).toMatch(/whole feature with all parts \(plan, server, interface, tests, docs\) on one branch/);
     expect(role('DEV-ENG').body).toMatch(/write each test before the code/);
     /* Debugging was taken off only to keep one prompt short; skills are files now. */
     for (const id of ['dev-implement', 'dev-migrations', 'dev-debugging', 'dev-frontend-ui', 'dev-browser-check']) expect(role('DEV-ENG').skills.find(k => k.id === id)?.on, id).toBe(true);
@@ -838,7 +838,7 @@ describe('templates', () => {
     });
 
     it('rejects UI skill text that allows clipping, hiding button groups, blocking non-visual work or fixed/pseudo locales', () => {
-      const base = uiBody();
+      const base = `${uiBody()}\n${templates.skills.get('dev-browser-check')!.body}`;
       expect(failedRuleIds(FRONTEND_UI_RULES, base)).toEqual([]);
       expect(failedRuleIds(FRONTEND_UI_RULES, `${base}\nWhen a narrow panel overflows, truncate text with ellipsis to prevent horizontal scroll.`)).toContain(
         'panel-wrap-and-whole-button-group',
@@ -1804,7 +1804,7 @@ describe('skills are independent cubes: any can be on for any role and together 
     const files = new Map(rendered.skills.map(s => [s.name, s.body]));
     for (const id of on) {
       if (skill(id).kind === 'core') expect(rendered.text, id).toContain(skill(id).body);
-      else expect(files.get(id), id).toBe(skill(id).body);
+      else expect(files.get(id), id).toContain(skill(id).body);
     }
     for (const step of ['plan', 'code', 'tests', 'own review', 'security', 'browser', 'cleanup', 'report']) expect(role.body, step).toContain(step);
     /* Urgency is not part of this role. */
@@ -1812,18 +1812,45 @@ describe('skills are independent cubes: any can be on for any role and together 
     expect(role.skills.find(k => k.id === 'dev-review-verdict')?.on).toBe(false);
   });
 
-  it('asks for a browser only where a change has a screen, on the generalist and in the check itself', () => {
+  it('asks for a browser only for a web page, on the generalist, in the check itself and at the final check', () => {
     const role = templates.roles.get('DEV-GEN')!;
     /* A skill on a card is read before the step it covers, so the role must not make that step part of every task. */
-    expect(role.body).toMatch(/When the change has something a user meets[^.]*dev-browser-check[^.]*a browser only for a screen/);
+    expect(role.body).toMatch(/When the change has something a user meets[^.]*dev-browser-check[^.]*a browser only for a web page/);
     expect(role.body).not.toMatch(/a check in the browser/);
-    expect(role.description.en).toMatch(/a browser check when the change has a screen/);
-    expect(role.description.ru).toMatch(/в браузере, если у изменения есть экран/);
+    expect(role.description.en).toMatch(/a browser only for a web page/);
+    expect(role.description.ru).toMatch(/браузер только для веб-страницы/);
     const check = skill('dev-browser-check');
-    expect(check.description.en).toMatch(/a browser only for a screen/);
+    expect(check.description.en).toMatch(/a browser only for a web page/);
     expect(check.body).toMatch(/A change nothing reaches that way has no run to do here: its tests are the check/);
     expect(check.body).toMatch(/^4\. On a screen, check every theme/m);
     expect(skill('dev-testing-policy').body).toMatch(/browser engines where the product has a web interface/);
+    for (const id of ['DEV-TEST', 'DEV-QA']) expect(templates.roles.get(id)!.body, id).toMatch(/what the product has of browser engines/);
+  });
+
+  it('binds the generalist to no language, stack or kind of product', () => {
+    const role = templates.roles.get('DEV-GEN')!;
+    const stack = /\b(?:npm|npx|node_modules|JavaScript|TypeScript|Python|pytest|Rust|cargo|Java|Clojure|Golang|React|Vite|Vitest|ESLint|Postgres\w*|SQL|Docker|Linux|macOS|Windows|[Ff]rontend|[Bb]ackend|English|Russian)\b/;
+    expect(text(role)).not.toMatch(stack);
+    /* These two name tools only as examples across languages, or for one kind of project they name first. */
+    const examples = new Set(['dev-language-rules', 'dev-testing-policy']);
+    for (const k of role.skills.filter(s => s.on && !examples.has(s.id))) expect(text(skill(k.id)), k.id).not.toMatch(stack);
+    const setup = skill('dev-language-rules').body.split('\n').find(line => line.startsWith('4.'))!;
+    expect(setup.split('In an npm project:')[0]).not.toMatch(/npm|npx|node_modules|JavaScript|ESLint|Vitest|Playwright/);
+    expect(setup).toContain('In an npm project:');
+    expect(skill('dev-language-rules').body).toMatch(/For a language without a folder, say so in your report/);
+    const selection = skill('dev-testing-policy').body.split('\n').find(line => line.startsWith('- T2.'))!;
+    for (const runner of ['vitest related', 'pytest --testmon', 'go test', 'cargo test -p']) expect(selection, runner).toContain(runner);
+    expect(skill('dev-testing-policy').body).toMatch(/A language they do not support stays `NOT_RUN`/);
+    expect(skill('dev-testing-policy').body).toMatch(/real database and live program checks where the product has them/);
+    expect(skill('dev-frontend-ui').body).toMatch(/On the web, reset browser default/);
+    expect(skill('dev-frontend-ui').body).toMatch(/on the web, logical CSS properties/);
+    expect(skill('dev-security-review').body).toMatch(/check what the change touches of this list/);
+  });
+
+  it('names no language of people outside the cubes made for one market, and those stay off by default', () => {
+    const market = new Set(['mkt-russian-copy', 'mkt-telegram-vk', 'mkt-yandex-seo']);
+    for (const x of [...roles, ...skills]) if (!market.has(x.id)) expect(text(x), x.id).not.toMatch(/\b(?:English|Russian)\b|\bboth languages\b/);
+    for (const role of roles) for (const id of market) expect(role.skills.find(k => k.id === id)?.on ?? false, `${role.id} ${id}`).toBe(false);
   });
 
   it('closes references: a skill or role on a card names only what that card can read', () => {
