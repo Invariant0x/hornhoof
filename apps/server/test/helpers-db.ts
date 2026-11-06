@@ -6,10 +6,20 @@ import * as schema from '../src/db/schema.js';
 
 /* Every test database starts from a copy of the one global-setup.ts migrated for the run. */
 let migrated: Blob | undefined;
+let opened = 0;
 type TestDb = PgliteDatabase<typeof schema> & { $client: PGlite };
+
+export const databasesOpened = () => opened;
+
+export function ownDatabases(): void {}
+
+export async function freshPglite(): Promise<PGlite> {
+  return new PGlite();
+}
 
 export async function openTestDb(): Promise<{ client: PGlite; db: TestDb }> {
   migrated ??= new Blob([readFileSync(inject('migratedDataDir'))]);
+  opened += 1;
   const client = new PGlite({ loadDataDir: migrated });
   const db = drizzle(client, { schema });
   return { client, db };

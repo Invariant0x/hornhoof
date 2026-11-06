@@ -34,6 +34,57 @@ test('ESLint rejects an unused variable in a server test instead of ignoring the
   assert.deepEqual(report.messages.map(message => message.ruleId), ['@typescript-eslint/no-unused-vars']);
 });
 
+const DDL_RULE = 'hornhoof/no-ddl-on-shared-database';
+function ddlFindings(t, folder, source) {
+  const dir = mkdtempSync(join(root, folder, 'eslint-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const file = join(dir, 'ddl.test.ts');
+  writeFileSync(file, source);
+  const result = spawnSync(process.execPath, [eslint, file, ...withoutPrograms], { cwd: root, encoding: 'utf8' });
+  return JSON.parse(result.stdout)[0].messages.filter(message => message.ruleId === DDL_RULE).map(message => message.line);
+}
+const callOf = text => `import { sql } from 'drizzle-orm';\nimport { run } from './run.js';\nawait run(${text});\nexport { sql };\n`;
+
+test('DDL in a server test on the shared database is an error, whichever way it is written', t => {
+  for (const text of [
+    "'create table notes (id int)'",
+    "'DROP TRIGGER hh_stop ON tasks'",
+    "'create or replace function stop() returns trigger'",
+    "'alter table tasks add column note text'",
+    "'create role helper'",
+    "'grant select on tasks to helper'",
+    "'REVOKE ALL ON tasks FROM helper'",
+    '`create\n  trigger ${"stop"} before update on tasks`',
+    'sql`create function stop() returns trigger`',
+    "sql.raw('revoke select on tasks from helper')",
+    'expect(await take(\'drop table notes\')).toBe(1)',
+  ]) assert.deepEqual(ddlFindings(t, 'apps/server/test', callOf(text)), [3], text);
+});
+
+test('the same DDL passes in a file that asks for databases of its own', t => {
+  assert.deepEqual(ddlFindings(t, 'apps/server/test', `import { ownDatabases } from './helpers-db.js';\nownDatabases();\n${callOf("'create table notes (id int)'")}`), []);
+});
+
+test('a call of that option anywhere but the top of the file does not count', t => {
+  assert.deepEqual(ddlFindings(t, 'apps/server/test', `import { ownDatabases } from './helpers-db.js';\nexport const later = () => ownDatabases();\nawait run('create table notes (id int)');\n`), [3]);
+});
+
+test('text a test only expects, and words that are no DDL, are no error', t => {
+  for (const text of [
+    "expect(rows).toEqual([{ indexdef: 'CREATE INDEX tasks_turn ON public.tasks USING btree (turn_id)' }])",
+    "expect(file).toContain('CREATE TABLE baskets')",
+    "expect(file).not.toContain('create table baskets')",
+    "'create a table of tasks'",
+    "'the role was revoked'",
+    "'select * from tasks'",
+  ]) assert.deepEqual(ddlFindings(t, 'apps/server/test', callOf(text)), [], text);
+});
+
+test('real Postgres specs and other workspaces are outside the rule', t => {
+  assert.deepEqual(ddlFindings(t, 'apps/server/test/postgres', callOf("'create table notes (id int)'")), []);
+  assert.deepEqual(ddlFindings(t, 'apps/node/test', callOf("'create table notes (id int)'")), []);
+});
+
 test('tests and TypeScript configs keep every rule in server, node and protocol', t => {
   const files = [];
   for (const workspace of ['apps/server', 'apps/node', 'packages/protocol']) {
