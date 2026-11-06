@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { connect } from 'node:net';
 import { dirname, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
@@ -17,6 +18,7 @@ type Boot = {
   hiddenTask: { id: string };
   ownTask: { id: string };
   awayTask: { id: string };
+  controlPort: number;
 };
 
 type Server = Boot & { child: ChildProcessWithoutNullStreams; pages: Page[]; control(command: string): Promise<void>; stop(): Promise<void> };
@@ -41,8 +43,9 @@ async function startServer(): Promise<Server> {
     });
     child.once('exit', code => fail(new Error(`The server stopped early (${code}):\n${stderr}`)));
   });
+  const controlSocket = connect(boot.controlPort, '127.0.0.1');
   const pending = new Map<string, () => void>();
-  child.stdout.on('data', chunk => {
+  controlSocket.on('data', chunk => {
     for (const line of String(chunk).split('\n')) {
       if (!line.trim().startsWith('{"control"')) continue;
       const value = JSON.parse(line) as { control: string };
@@ -51,14 +54,14 @@ async function startServer(): Promise<Server> {
   });
   const control = (command: string) => new Promise<void>(done => {
     pending.set(command, () => { pending.delete(command); done(); });
-    child.stdin.write(JSON.stringify({ control: command }) + '\n');
+    controlSocket.write(JSON.stringify({ control: command }) + '\n');
   });
   const stop = async () => {
     await Promise.all(pages.map(page => page.context().close().catch(() => undefined)));
     if (child.exitCode !== null) return;
     await new Promise<void>(done => {
       child.once('exit', () => done());
-      child.stdin.end();
+      controlSocket.end();
     });
   };
   return { ...boot, child, pages, control, stop };

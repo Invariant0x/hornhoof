@@ -1,5 +1,5 @@
 import { it } from 'vitest';
-import { createInterface } from 'node:readline';
+import { createServer } from 'node:net';
 import { eq } from 'drizzle-orm';
 import { agents, jobs, subscriptions, turns } from '../src/db/schema.js';
 import { aclCompany } from './agent-view-company.js';
@@ -35,25 +35,39 @@ it('serves the real browser integration', async () => {
     'move-other-ann-idle': async () => { await turnOn(c.crew.other.id, c.plans.bob.id, 'done'); await onPlan(c.crew.other.id, c.plans.ann.id); },
     'turn-other-ann': () => turnOn(c.crew.other.id, c.plans.ann.id),
   };
-  const input = createInterface({ input: process.stdin });
-  input.on('line', line => {
-    const { control } = JSON.parse(line);
-    console.error('ACL CONTROL', control);
-    void Promise.resolve(commands[control]?.()).then(
-      () => {
-        console.error('ACL CONTROL DONE', control);
-        process.stdout.write(JSON.stringify({ control }) + '\n');
-      },
-      error => console.error('ACL CONTROL FAILED', control, error),
-    );
+  const control = createServer(socket => {
+    let text = '';
+    socket.on('data', chunk => {
+      text += String(chunk);
+      for (;;) {
+        const end = text.indexOf('\n');
+        if (end < 0) return;
+        const line = text.slice(0, end);
+        text = text.slice(end + 1);
+        if (!line) continue;
+        const { control: name } = JSON.parse(line);
+        console.error('ACL CONTROL', name);
+        void Promise.resolve(commands[name]?.()).then(
+          () => {
+            console.error('ACL CONTROL DONE', name);
+            socket.write(JSON.stringify({ control: name }) + '\n');
+          },
+          error => console.error('ACL CONTROL FAILED', name, error),
+        );
+      }
+    });
+    socket.on('close', () => {
+      node.close();
+      void c.app.close().then(() => control.close());
+    });
   });
+  await new Promise<void>(done => control.listen(0, '127.0.0.1', done));
+  const address = control.address();
+  const controlPort = typeof address === 'object' && address ? address.port : 0;
   process.stdout.write(JSON.stringify({
-    url: c.url.replace('ws://', 'http://'), tokens: c.tokens, ids: c.ids, plans: c.plans,
+    url: c.url.replace('ws://', 'http://'), tokens: c.tokens, ids: c.ids, plans: c.plans, controlPort,
     crew: Object.fromEntries(Object.entries(c.crew).map(([name, agent]) => [name, { id: agent.id, name: agent.name }])),
     dev: c.dev, sales: c.sales, hiddenTask: { id: hiddenTask.id }, ownTask: { id: ownTask.id }, awayTask: { id: awayTask.id },
   }) + '\n');
-  await new Promise<void>(done => input.on('close', () => {
-    node.close();
-    void c.app.close().then(() => done());
-  }));
+  await new Promise<void>(done => control.on('close', () => done()));
 }, 120_000);
