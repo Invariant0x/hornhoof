@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { closeSync, constants, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readSync, realpathSync, renameSync, writeFileSync, type Stats } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
-import { repoFolder, NodeRef as Node, TaskWorkspaceBinding as Binding,
+import { repoFolder, NodeRef as Node, TaskWorkspaceBinding as Binding, TaskWorkspaceSpec as Spec, WorkspaceProblem as Problem,
   type NodeRef, type TaskWorkspaceBinding, type TaskWorkspaceSpec, type VerifiedWorkspace, type Workspace, type WorkspaceProblem } from '@hornhoof/protocol';
 import type { JobUser } from './isolation.js';
 import { inspectWorkspaceGit, repositoryIdentity, WorkspaceFault } from './task-workspace-git.js';
@@ -235,8 +235,46 @@ export function createTaskWorkspaceRegistry(options: TaskWorkspaceRegistryOption
   return { registerTaskWorkspace: input => register(context, input), resolveTaskWorkspace: binding => resolveRegistered(context, binding) };
 }
 
+function preparationInput(input: TaskWorkspacePreparationInput): { jobId: string; registration: TaskWorkspaceRegistration } {
+  const binding = Binding.safeParse(input.binding), jobId = z.uuid().safeParse(input.jobId);
+  if (!binding.success || !jobId.success) throw new WorkspaceFault('binding_stale');
+  const owner = Owner.safeParse(input.owner);
+  if (!owner.success) throw new WorkspaceFault('wrong_owner');
+  return { jobId: jobId.data, registration: { binding: binding.data,
+    repositoryUrl: repositoryIdentity(input.repo.url), owner: owner.data } };
+}
+function admittedSpec(value: unknown, binding: TaskWorkspaceBinding): TaskWorkspaceSpec | WorkspaceProblem {
+  if (value == null) return { code: 'integration_plan_missing', retryable: true };
+  const refused = Problem.safeParse(value);
+  if (refused.success) return refused.data;
+  const spec = Spec.safeParse(value);
+  if (!spec.success || !same(spec.data.binding, binding)) return { code: 'binding_stale', retryable: false };
+  return spec.data;
+}
+function preparedWorkspace(value: VerifiedWorkspace | WorkspaceProblem, registration: TaskWorkspaceRegistration): VerifiedWorkspace | WorkspaceProblem {
+  if ('code' in value) return { code: value.code, retryable: value.retryable };
+  const binding = Binding.safeParse(value.binding);
+  if (!binding.success || !same(binding.data, registration.binding)) return { code: 'binding_stale', retryable: false };
+  if (value.ownerUid !== registration.owner.uid) return { code: 'wrong_owner', retryable: false };
+  return { binding: binding.data, realPath: value.realPath, ownerUid: value.ownerUid,
+    gitCommonDir: value.gitCommonDir, sourceHeadSha: value.sourceHeadSha };
+}
+
 /* Admission-first reuse of retained trees. Clone/allocation and runtime admission integration are separate. */
-export async function prepareTaskWorkspace(_input: TaskWorkspacePreparationInput, context: TaskWorkspacePreparationContext): Promise<VerifiedWorkspace | WorkspaceProblem> {
+export async function prepareTaskWorkspace(input: TaskWorkspacePreparationInput, context: TaskWorkspacePreparationContext): Promise<VerifiedWorkspace | WorkspaceProblem> {
   context.signal.throwIfAborted();
-  return { code: 'integration_plan_missing', retryable: true };
+  if (!context.resolveAdmittedWorkspace) return { code: 'integration_plan_missing', retryable: true };
+  try {
+    const { jobId, registration } = preparationInput(input);
+    const admitted = await context.resolveAdmittedWorkspace({ jobId, binding: structuredClone(registration.binding) });
+    context.signal.throwIfAborted();
+    const spec = admittedSpec(admitted, registration.binding);
+    if ('code' in spec) return spec;
+    const workspace = await context.registry.registerTaskWorkspace(registration);
+    context.signal.throwIfAborted();
+    return preparedWorkspace(workspace, registration);
+  } catch (error) {
+    context.signal.throwIfAborted();
+    return error instanceof WorkspaceFault ? problem(error) : { code: 'workspace_switch_unavailable', retryable: true };
+  }
 }
