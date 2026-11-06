@@ -100,6 +100,7 @@ it('aligns machine action groups and gives every action a full touch target', ()
   expect(decl('.machine-actions', 'justify-content')).toBe('flex-end');
   expect(decl('.machine-actions .btn', 'min-height')).toBe('44px');
   expect(decl('.machine-actions .act', 'min-height')).toBe('44px');
+  expect(decl('.fit > :is(.ptable, .dt):not([data-fit="entries"]) .nm b', 'overflow-wrap')).toBe('normal');
 });
 
 it('wraps question materials and keeps their viewer and actions inside the available width', () => {

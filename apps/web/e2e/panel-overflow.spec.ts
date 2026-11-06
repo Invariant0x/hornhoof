@@ -263,11 +263,6 @@ for (const lang of ['en', 'ru'] as const) {
         await page.goto('/machines/m1');
         const card = page.getByRole('article', { name: LONG_HOST, exact: true });
         await expect(card).toBeVisible();
-        console.log('M3 geometry', look, await page.locator('table.dt').evaluate(table => ({
-          host: table.parentElement?.clientWidth,
-          table: { client: table.clientWidth, scroll: table.scrollWidth, display: getComputedStyle(table).display, wrap: getComputedStyle(table).overflowWrap },
-          cells: [...table.querySelectorAll('td, th')].map(cell => ({ text: cell.textContent?.slice(0, 30), client: cell.clientWidth, scroll: cell.scrollWidth, display: getComputedStyle(cell).display, wrap: getComputedStyle(cell).overflowWrap, word: getComputedStyle(cell).wordBreak })),
-        })));
         await expect(page.locator('table.dt')).toHaveAttribute('data-fit', 'entries');
         await expect(card.locator('.machine-actions').first()).toHaveCSS('justify-content', 'flex-end');
         const update = card.getByRole('button', { name: m.machines.updatePrograms, exact: true });
