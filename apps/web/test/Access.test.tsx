@@ -1,8 +1,9 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
+import { ApiFailure } from '../src/api';
 import { LanguageProvider } from '../src/i18n';
 import { AgentWindows, useAgentWindows } from '../src/screens/AgentWindows';
-import { RouteUnavailable } from '../src/screens/RouteUnavailable';
+import { departmentIsMissing, RouteUnavailable } from '../src/screens/RouteUnavailable';
 import { TreeView } from '../src/screens/TreeView';
 import type { Me, Org } from '../src/types';
 import { CARD, DEV_ORG, DEV_TREE, ME, mockApi, TREE_ORG } from './api-mock';
@@ -85,6 +86,20 @@ describe('restricted access screens', () => {
     render(<Windows />);
     expect(await screen.findByRole('alert')).toHaveTextContent('Hornhoof cannot reach its server');
     expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['no department is selected', { deptId: null }, false],
+    ['the person sees the whole company', { company: true, personId: 'p1' }, false],
+    ['the person is listed in the department', {}, false],
+    ['the person is not listed in the department', { personId: 'p1' }, true],
+    ['the department is absent', { deptId: 'closed' }, true],
+    ['the organization is still loading', { org: null }, false],
+    ['the organization read is denied', { org: null, orgFailure: new ApiFailure(403, 'forbidden', 'Hidden') }, true],
+    ['the organization is absent on the server', { org: null, orgFailure: new ApiFailure(404, 'not_found', 'Hidden') }, true],
+  ])('decides a missing department when %s', (_name, change, expected) => {
+    const input: Parameters<typeof departmentIsMissing>[0] = { deptId: 'd2', org: DEV_ORG, orgFailure: null, company: false, personId: 'p3', ...change };
+    expect(departmentIsMissing(input)).toBe(expected);
   });
 
   it('removes waiting relationships to hidden agents', () => {
