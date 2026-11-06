@@ -1,4 +1,4 @@
-import { MAX_TEST_PARTS, EnvironmentSnapshot, TestExecution, supportsTestProfile, validateEnvironmentDescription, type EnvironmentDescription, type EnvironmentProblem, type RepositoryScope, type RunKind, type RuntimeCapability, type TestEnvironmentReceipt, type TestsDescribed, type Workspace } from '@hornhoof/protocol';
+import { MAX_TEST_PARTS, EnvironmentSnapshot, TestExecution, TestEnvironmentReceipt, supportsTestProfile, validateEnvironmentDescription, type EnvironmentDescription, type EnvironmentProblem, type RepositoryScope, type RunKind, type RuntimeCapability, type TestsDescribed, type Workspace } from '@hornhoof/protocol';
 import { randomUUID } from 'node:crypto';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
@@ -9,6 +9,11 @@ import { productPlaces, scopeKey, testCapabilities } from './load.js';
 export { noteTestCapabilities, scopeKey, testCapabilities } from './load.js';
 import { canReach } from '../../auth/access.js';
 import { refuse } from '../tasks/engine.js';
+import { TEST_MEMORY_GB } from '../departments/repository.js';
+import { computerKey } from './capacity.js';
+import { pickMachine } from './pick.js';
+import { planProductParts, type ProductPlan } from './plan-product.js';
+import type { PlanningHistory } from './plan-history.js';
 
 type ModeInput = { command?: string; suite?: string; profile?: string; parts?: number };
 export type TestRunMode = { mode: 'manual'; command: string; parts: number } | { mode: 'product'; suite?: string; profile?: string };
@@ -31,6 +36,15 @@ export function repositoryScope(companyId: string, ownerId: string, url: string)
 type Run = typeof testRuns.$inferSelect;
 type Place = import('./runs.js').Place;
 type Target = { department: typeof departments.$inferSelect | null; repo: NonNullable<Workspace['repo']> | null } | null;
+type PlanningSources = { open: (companyId: string) => Promise<Place[]>; target: (run: Run) => Promise<Target> };
+type PlanningTransaction = Parameters<Parameters<Ctx['db']['transaction']>[0]>[0];
+/* The canonical repository/history and durable reason store are private integration ports, not cache-owner aliases. */
+export type ProductPlanningPorts = {
+  history?: (run: Readonly<Run>, snapshot: EnvironmentSnapshot) => Promise<PlanningHistory | null>;
+  record?: (tx: PlanningTransaction, run: Readonly<Run>, plan: ProductPlan) => Promise<void>;
+};
+const planningSources = new WeakMap<Ctx, PlanningSources>(), planningPorts = new WeakMap<Ctx, ProductPlanningPorts>();
+export function setProductPlanningPorts(ctx: Ctx, ports: ProductPlanningPorts): void { planningPorts.set(ctx, ports); }
 const requestNode = (request: TestEnvironmentRequest): NodeIdentity | null => request.builtin ? BUILTIN : request.nodeId ? nodeIdentity(request.nodeId) : null;
 export function cancelDescription(ctx: Ctx, request: TestEnvironmentRequest | null): void {
   const node = request && requestNode(request);
@@ -57,6 +71,27 @@ function productLeaves(snapshot: EnvironmentSnapshot, requested?: string): TestE
   if (leaves.length > MAX_TEST_PARTS) throw new Error('The product plan exceeds the supported part count.');
   return leaves;
 }
+async function freeProductMachines(ctx: Ctx, run: Run, snapshot: EnvironmentSnapshot): Promise<number> {
+  const sources = planningSources.get(ctx);
+  if (!sources) return 0;
+  const target = await sources.target(run), need = (run.memoryGb ?? target?.department?.repoTestMemoryGb ?? TEST_MEMORY_GB) * 1024 ** 3;
+  const places = await productPlaces(ctx, await sources.open(run.companyId), { ...run, environmentSnapshot: snapshot }, need);
+  const free = places.filter(place => pickMachine([{ ...place, reaches: descriptionEligible(ctx, place, target) }], need) !== null);
+  return new Set(free.map(computerKey)).size;
+}
+async function plannedLeaves(ctx: Ctx, run: Run, snapshot: EnvironmentSnapshot): Promise<{ leaves: TestEnvironmentSelection[]; plan: ProductPlan | null }> {
+  const requested = run.environmentRequest!.suite;
+  if (!snapshot.description.manifest.execution) return { leaves: productLeaves(snapshot, requested), plan: null };
+  const ids = requested ? [requested] : snapshot.description.manifest.profiles.find(profile => profile.id === snapshot.profile)!.requiredSuiteIds;
+  const units = snapshot.description.inventory.filter(unit => ids.includes(unit.suiteId));
+  if (ids.some(id => !units.some(unit => unit.suiteId === id))) throw new Error('A requested suite has no canonical files.');
+  const history = await planningPorts.get(ctx)?.history?.(run, snapshot);
+  const plan = await planProductParts({ snapshot, expectedCommitSha: run.commitSha!, purpose: !requested && snapshot.profile === 'final' ? 'final' : 'affected', units,
+    durations: history?.durations ?? [], costs: history?.costs ?? { setupMs: 10_000, collectMs: 1000 }, unknownFileMs: 30_000,
+    availableMachines: await freeProductMachines(ctx, run, snapshot) });
+  if (!history) plan.reason += ' Historical storage is not bound; setup and collection costs are fallback estimates.';
+  return { leaves: plan.leaves, plan };
+}
 const pendingDescription = (id: string) => and(eq(testRuns.id, id), eq(testRuns.status, 'running'), isNull(testRuns.environmentSnapshot));
 const requestMatches = (id: string, requestId: string) => and(pendingDescription(id), sql`${testRuns.environmentRequest}->>'requestId' = ${requestId}`);
 async function assignedDescription(ctx: Ctx, id: NodeIdentity, message: TestsDescribed): Promise<Run | undefined> {
@@ -70,14 +105,18 @@ async function descriptionProblem(ctx: Ctx, run: Run, message: TestsDescribed, p
 }
 async function saveDescription(ctx: Ctx, run: Run, message: TestsDescribed, value: EnvironmentDescription): Promise<void> {
   const request = run.environmentRequest!, description = await validateEnvironmentDescription(value);
-  if (scopeKey(description.repositoryScope) !== scopeKey(request.repositoryScope)) throw new Error('The repository scope differs.');
-  const snapshot = snapshotFor(description, request), leaves = productLeaves(snapshot, request.suite);
-  await ctx.db.transaction(async tx => {
+  if (description.commitSha !== run.commitSha || scopeKey(description.repositoryScope) !== scopeKey(request.repositoryScope)) throw new Error('The pinned source or repository scope differs.');
+  const snapshot = snapshotFor(description, request), { leaves, plan } = await plannedLeaves(ctx, run, snapshot);
+  const saved = await ctx.db.transaction(async tx => {
     const [locked] = await tx.select().from(testRuns).where(requestMatches(run.id, message.requestId)).for('update');
-    if (!locked || locked.environmentRequest?.problem) return;
+    if (!locked || locked.environmentRequest?.problem) return false;
+    if (locked.commitSha !== description.commitSha || scopeKey(locked.environmentRequest!.repositoryScope) !== scopeKey(description.repositoryScope)) throw new Error('The locked run differs from the planned source.');
+    if (plan) await planningPorts.get(ctx)?.record?.(tx, locked, plan);
     await tx.update(testRuns).set({ environmentSnapshot: snapshot, environmentHash: description.manifestHash, parts: leaves.length }).where(eq(testRuns.id, run.id));
     await tx.insert(testParts).values(leaves.map((environmentSelection, index) => ({ companyId: run.companyId, runId: run.id, part: index + 1, environmentSelection })));
+    return true;
   });
+  if (saved && plan) ctx.log.info({ runId: run.id, commitSha: description.commitSha, parts: leaves.length, reason: plan.reason, durableReason: planningPorts.get(ctx)?.record !== undefined }, 'Product test part plan');
 }
 export async function acceptDescription(ctx: Ctx, id: NodeIdentity, message: TestsDescribed): Promise<void> {
   const run = await assignedDescription(ctx, id, message);
@@ -141,6 +180,7 @@ function publishDescription(ctx: Ctx, run: Run, request: TestEnvironmentRequest,
 }
 
 export async function pumpDescriptions(ctx: Ctx, open: (companyId: string) => Promise<Place[]>, target: (run: Run) => Promise<Target>, finish: (id: string) => Promise<void>): Promise<void> {
+  planningSources.set(ctx, { open, target });
   const pending = await ctx.db.select().from(testRuns).where(and(eq(testRuns.status, 'running'), isNull(testRuns.environmentSnapshot), sql`${testRuns.environmentRequest} is not null`));
   for (const run of pending) {
     const request = run.environmentRequest!, problem = request.problem ?? (Date.now() - run.createdAt.getTime() > 2 * 3_600_000 ? { code: 'timeout' as const, detail: 'No product environment was described within the queue deadline.' } : null);
@@ -158,16 +198,29 @@ export async function pumpDescriptions(ctx: Ctx, open: (companyId: string) => Pr
 function receiptIdentity(snapshot: EnvironmentSnapshot, receipt: TestEnvironmentReceipt): boolean {
   return receipt.commitSha === snapshot.description.commitSha && receipt.manifestHash === snapshot.description.manifestHash;
 }
-function receiptSelection(selection: TestEnvironmentSelection, receipt: TestEnvironmentReceipt): boolean {
-  return receipt.kind === selection.selection.kind && receipt.suiteId === selection.selection.suiteId && JSON.stringify(receipt.files) === JSON.stringify(selection.selection.files);
+function receiptSelection(snapshot: EnvironmentSnapshot, selection: TestEnvironmentSelection, receipt: TestEnvironmentReceipt): boolean {
+  if (receipt.version === 1) {
+    const assigned = selection.selection;
+    return 'files' in assigned && receipt.kind === assigned.kind && receipt.suiteId === assigned.suiteId && JSON.stringify(receipt.files) === JSON.stringify(assigned.files);
+  }
+  const assigned = TestExecution.safeParse({ snapshot, selection: selection.selection }), reported = TestExecution.safeParse({ snapshot, selection: receipt.selection });
+  return receipt.profile === snapshot.profile && assigned.success && reported.success && JSON.stringify(assigned.data.selection) === JSON.stringify(reported.data.selection);
+}
+function receiptOutcomes(snapshot: EnvironmentSnapshot, receipt: TestEnvironmentReceipt, message: Extract<import('@hornhoof/protocol').NodeMessage, { type: 'tests.done' }>): boolean {
+  if (receipt.version === 1) return true;
+  const preparation = snapshot.description.manifest.execution?.oncePreparation;
+  const count = receipt.selection.kind === 'batch' ? receipt.selection.selections.length : (preparation?.suiteIds.length ?? 0) + (preparation?.commands.length ?? 0);
+  if (message.commit !== receipt.commitSha || receipt.outcomes.length !== count) return false;
+  return !message.ok || (message.exitCode === 0 && message.error === null && receipt.outcomes.every(outcome => outcome.status === 'passed'));
 }
 function receiptRuntimes(snapshot: EnvironmentSnapshot, receipt: TestEnvironmentReceipt, known: RuntimeCapability[]): boolean {
   return supportsTestProfile(snapshot, receipt.runtimes) && receipt.runtimes.every(actual => known.some(runtime => runtime.id === actual.id && runtime.fingerprint === actual.fingerprint && runtime.version === actual.version));
 }
 export function productReceipt(snapshot: EnvironmentSnapshot | null, selection: TestEnvironmentSelection | null, message: Extract<import('@hornhoof/protocol').NodeMessage, { type: 'tests.done' }>, known: RuntimeCapability[]): TestEnvironmentReceipt | null {
-  const receipt = message.environmentReceipt;
-  if (!snapshot || !selection || !receipt) return null;
-  return receiptIdentity(snapshot, receipt) && receiptSelection(selection, receipt) && receiptRuntimes(snapshot, receipt, known) ? receipt : null;
+  const parsed = TestEnvironmentReceipt.safeParse(message.environmentReceipt);
+  if (!snapshot || !selection || !parsed.success) return null;
+  const receipt = parsed.data;
+  return receiptIdentity(snapshot, receipt) && receiptSelection(snapshot, selection, receipt) && receiptOutcomes(snapshot, receipt, message) && receiptRuntimes(snapshot, receipt, known) ? receipt : null;
 }
 export function resetDescriptionDelivery(ctx: Ctx): void { sent.get(ctx)?.clear(); }
 

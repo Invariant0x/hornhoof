@@ -3,8 +3,11 @@ import type { OutboundPolicyValue } from '@hornhoof/protocol';
 import { eq } from 'drizzle-orm';
 import { expect, it } from 'vitest';
 import * as schema from '../../src/db/schema.js';
+import { encryptSecret } from '../../src/crypto/secrets.js';
+import { bindAccount, releaseAccount } from '../../src/modules/outbound/accounts.js';
 import { unsubscribe, unsubscribeToken } from '../../src/modules/outbound/contacts.js';
 import { beginDispatch, reserveDispatch, submitOutbound, type Authority } from '../../src/modules/outbound/core.js';
+import { dispatchDue, type Senders } from '../../src/modules/outbound/dispatcher.js';
 import { stopByPerson } from '../../src/modules/outbound/policies.js';
 import { aChannelOf, aContactOf, anAccountOf, aPermissionOf, aPolicyOf, documentOf, partsOf, QUIET, type Base } from '../outbound-world.js';
 import { backendPid, privatePostgres, runFixture, type Actor, type PostgresFixture } from './helpers.js';
@@ -44,7 +47,7 @@ async function gateway(pg: PostgresFixture, limits: OutboundPolicyValue = QUIET)
   };
   const usage = () => pg.db.select().from(schema.outboundDailyUsage);
   const messageOf = async (id: string) => (await pg.db.select().from(schema.outboundMessages).where(eq(schema.outboundMessages.id, id)))[0]!;
-  return { companyId, first, second, channel: one.channel, send, someone, usage, messageOf };
+  return { c, companyId, first, second, one, two, channel: one.channel, send, someone, usage, messageOf };
 }
 
 const reservedAt = (buckets: { reserved: number }[]) => buckets.map(b => b.reserved);
@@ -190,4 +193,71 @@ it('takes a stop and a burst of dispatches at once with no deadlock, and nothing
   expect(stopped.status).toBe('stopped');
   expect(outcomes.every(o => o.kind === 'begun' || (o.kind === 'refused' && o.reasonCodes.includes('channel_stopped')))).toBe(true);
   for (const id of messages) expect((await beginDispatch(g.first.ctx, id, 1)).kind).not.toBe('begun');
+});
+
+const activeBindings = (pg: PostgresFixture) => pg.db.select().from(schema.outboundBindings).where(eq(schema.outboundBindings.status, 'active'));
+const SMTP = { host: 'smtp.acme.example', port: 465, security: 'tls', username: 'sender@acme.example', password: 'synthetic-transport-secret-5f3c', from: 'sender@acme.example' };
+
+it('lets an author take one account, whichever two ask for it at once', { timeout: 120000 }, async () => {
+  const pg = await privatePostgres();
+  const g = await gateway(pg);
+  const author = g.first.job.agentId;
+  await releaseAccount(g.first.ctx, g.one.account);
+  const [spare] = await pg.db.insert(schema.outboundAccounts).values({ companyId: g.companyId, departmentId: g.channel.departmentId, channelId: g.channel.id, senderDomain: 'acme.example', label: 'Spare', configEnc: encryptSecret('{}', g.first.ctx.config.secret), createdBy: g.c.ids.ceo }).returning();
+  const asked = await Promise.allSettled([bindAccount(g.first.ctx, g.one.account, { agentId: author, createdBy: g.c.ids.ceo }), bindAccount(g.second.ctx, spare!, { agentId: author, createdBy: g.c.ids.ceo })]);
+  expect(asked.map(a => a.status).sort()).toEqual(['fulfilled', 'rejected']);
+  const refused = asked.find(a => a.status === 'rejected') as PromiseRejectedResult;
+  expect(refused.reason).toMatchObject({ status: 409, details: { reasonCodes: ['account_bound_elsewhere'] } });
+  expect((await activeBindings(pg)).filter(b => b.agentId === author)).toHaveLength(1);
+});
+
+it('gives an account one author at a time, each at its own generation, whichever two ask at once', { timeout: 120000 }, async () => {
+  const pg = await privatePostgres();
+  const g = await gateway(pg);
+  await releaseAccount(g.first.ctx, g.one.account);
+  await releaseAccount(g.second.ctx, g.two.account);
+  await Promise.all([bindAccount(g.first.ctx, g.one.account, { agentId: g.first.job.agentId, createdBy: g.c.ids.ceo }), bindAccount(g.second.ctx, g.one.account, { agentId: g.second.job.agentId, createdBy: g.c.ids.ceo })]);
+  expect((await activeBindings(pg)).filter(b => b.accountId === g.one.account.id)).toHaveLength(1);
+  const generations = (await pg.db.select().from(schema.outboundBindings).where(eq(schema.outboundBindings.accountId, g.one.account.id))).map(b => b.generation).sort();
+  expect(generations).toEqual([1, 2, 3]);
+});
+
+it('never lets an account change hands under a reservation made at the same moment', { timeout: 120000 }, async () => {
+  const pg = await privatePostgres();
+  const g = await gateway(pg);
+  const contact = await g.someone('ann@shop.example');
+  const { messageId } = await g.send(g.first, contact.id);
+  await releaseAccount(g.second.ctx, g.two.account);
+  const [reserved, bound] = await Promise.allSettled([reserveDispatch(g.first.ctx, messageId, 1), bindAccount(g.second.ctx, g.one.account, { agentId: g.second.job.agentId, createdBy: g.c.ids.ceo })]);
+  const attempts = await pg.db.select().from(schema.outboundAttempts);
+  if (bound.status === 'fulfilled') {
+    expect(attempts).toEqual([]);
+    expect(reserved).toMatchObject({ status: 'fulfilled', value: { kind: 'refused', reasonCodes: ['stale_binding'] } });
+  } else {
+    expect(attempts).toHaveLength(1);
+    expect(bound.reason).toMatchObject({ status: 409, details: { reasonCodes: ['delivery_unknown'] } });
+  }
+});
+
+it('sends once when two servers run their round at the same moment', { timeout: 120000 }, async () => {
+  const pg = await privatePostgres();
+  const g = await gateway(pg);
+  await pg.db.update(schema.outboundAccounts).set({ configEnc: encryptSecret(JSON.stringify(SMTP), g.first.ctx.config.secret) }).where(eq(schema.outboundAccounts.id, g.one.account.id));
+  const contact = await g.someone('ann@shop.example');
+  const { messageId } = await g.send(g.first, contact.id);
+  const sent: string[] = [];
+  const senders: Senders = {
+    smtp: {
+      send: async ({ attemptId }) => {
+        sent.push(attemptId);
+        return { kind: 'accepted', providerReceipt: '250 ok', acceptedAt: new Date().toISOString() };
+      },
+      reconcile: async () => ({ kind: 'pending' }),
+    },
+    webhook: { send: async () => ({ kind: 'unknown', safeCode: 'timeout' }), reconcile: async () => ({ kind: 'pending' }) },
+    deadlineMs: 5000,
+  };
+  await Promise.all([dispatchDue(g.first.ctx, new Date(), senders), dispatchDue(g.second.ctx, new Date(), senders)]);
+  expect(sent).toHaveLength(1);
+  expect(await g.messageOf(messageId)).toMatchObject({ status: 'sent' });
 });

@@ -1,4 +1,5 @@
 import { closeCheckQueue } from './modules/nodes/check-slots.js';
+import type { ProviderId } from '@hornhoof/protocol';
 import cookie from '@fastify/cookie';
 import websocket from '@fastify/websocket';
 import Fastify, { LogController, type FastifyBaseLogger, type FastifyInstance, type FastifyServerOptions } from 'fastify';
@@ -57,12 +58,14 @@ import type { Db } from './db/client.js';
 import { readCompare, type CompareReader } from './modules/testruns/compare.js';
 
 /* logger is off unless given: tests stay quiet, main.ts turns it on so errors reach the container log. */
-export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logger']; agentSql?: AgentSql | null; readCommit?: CommitReader; markCommit?: CommitMarker; readCompare?: CompareReader };
+export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logger']; agentSql?: AgentSql | null; vendorUrls?: Partial<Record<ProviderId, string>>; readCommit?: CommitReader; markCommit?: CommitMarker; readCompare?: CompareReader };
 
 /* What routes get: the deps, the live node connections, the live stream to browsers, the terminals people watch, the
    check for newer builds, access to the computer the server runs on, the company's public link, the commit a
    repository's branch is at and the mark a full test run leaves on a commit. */
 export type Ctx = Deps & {
+  /* When this server came up: it did not hear of any machine before then. */
+  startedAt: Date;
   readCommit: CommitReader;
   markCommit: CommitMarker;
   log: FastifyBaseLogger;
@@ -88,7 +91,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   const web = hasWebApp(deps.config.webDist);
   addSecurityHeaders(app);
   registerErrorHandling(app, web ? webAppRoutes : undefined);
-  const ctx = { readCommit, markCommit, readCompare, ...deps, log: app.log, bus: new EventBus(), terminals: new TerminalRelay() } as Ctx;
+  const ctx = { startedAt: new Date(), readCommit, markCommit, readCompare, ...deps, log: app.log, bus: new EventBus(), terminals: new TerminalRelay() } as Ctx;
   app.decorate('ctx', ctx);
   ctx.hub = new NodeHub({
     pingMs: deps.config.nodePingMs,
