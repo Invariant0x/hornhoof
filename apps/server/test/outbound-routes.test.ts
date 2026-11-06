@@ -406,6 +406,26 @@ describe('the page for stopping messages', () => {
     expect(await suppressed(w)).toBe(true);
   });
 
+  it('takes what a browser and a mail program really send', async () => {
+    const w = await world();
+    const form = { 'content-type': 'application/x-www-form-urlencoded' };
+    const fromPage = await w.c.app.inject({ method: 'POST', url: `/api/outbound/unsubscribe/${tokenOf(w)}`, headers: { ...form, origin: 'https://hornhoof.example' }, payload: '' });
+    expect(fromPage.statusCode).toBe(200);
+    expect(await suppressed(w)).toBe(true);
+    const oneClick = await w.c.app.inject({ method: 'POST', url: `/api/outbound/unsubscribe/${tokenOf(w)}`, headers: form, payload: 'List-Unsubscribe=One-Click' });
+    expect(oneClick.statusCode).toBe(200);
+    const asParts = await w.c.app.inject({ method: 'POST', url: `/api/outbound/unsubscribe/${tokenOf(w)}`, headers: { 'content-type': 'multipart/form-data; boundary=x' }, payload: '--x\r\nContent-Disposition: form-data; name="List-Unsubscribe"\r\n\r\nOne-Click\r\n--x--\r\n' });
+    expect(asParts.statusCode).toBe(200);
+  });
+
+  it('keeps its address to itself and stays out of frames', async () => {
+    const w = await world();
+    const page = await w.c.app.inject({ method: 'GET', url: `/api/outbound/unsubscribe/${tokenOf(w)}` });
+    expect(page.headers['referrer-policy']).toBe('no-referrer');
+    expect(page.headers['cache-control']).toBe('no-store');
+    expect(page.headers['content-security-policy']).toContain("frame-ancestors 'none'");
+  });
+
   it('knows no forged link either way, and says nothing about whom it would be for', async () => {
     const w = await world();
     const forged = `${tokenOf(w).split('.')[0]}.AAAA`;
@@ -436,6 +456,28 @@ describe('what the orchestrator may do for a person', () => {
     const w = await world();
     const tools = await control(w, null);
     const told = (await tools.callTool({ name: 'outbound_channel_stop', arguments: { channel: w.channel.id } })) as Tool;
+    expect(told.isError).toBe(true);
+    expect((await w.c.db.select().from(outboundChannels).where(eq(outboundChannels.id, w.channel.id)))[0]!.status).toBe('active');
+  });
+
+  it('what that person may, as that person', async () => {
+    const w = await world();
+    const tools = await control(w, w.c.ids.ceo);
+    const made = said(await tools.callTool({ name: 'outbound_channel_create', arguments: { department: w.c.dev.id, name: 'Letters', adapter: 'smtp', purpose: 'first_contact', audience: 'direct' } }));
+    expect(made).toMatchObject({ status: 'new', generation: 1 });
+    expect(said(await tools.callTool({ name: 'outbound_policy_set', arguments: { channel: made.channelId, value: QUIET } }))).toMatchObject({ revision: 1 });
+    expect((await w.c.db.select().from(outboundPolicies).where(eq(outboundPolicies.channelId, made.channelId)))[0]!.createdBy).toBe(w.c.ids.ceo);
+    expect(said(await tools.callTool({ name: 'outbound_channel_stop', arguments: { channel: w.channel.id } }))).toMatchObject({ status: 'stopped', generation: 2 });
+    const told = (await tools.callTool({ name: 'outbound_channel_reopen', arguments: { channel: w.channel.id } })) as Tool;
+    expect(told.isError).toBe(true);
+    expect(told.content[0]!.text).toContain('not certified');
+    expect((await tools.callTool({ name: 'outbound_contact_suppress', arguments: { contact: w.contact.id, evidence: 'by phone' } }) as Tool).isError).toBeUndefined();
+    expect((await w.c.db.select().from(outboundContacts).where(eq(outboundContacts.id, w.contact.id)))[0]!.doNotContact).toBe(true);
+  });
+
+  it('nothing that person may not', async () => {
+    const w = await world();
+    const told = (await (await control(w, w.c.ids.dana)).callTool({ name: 'outbound_channel_stop', arguments: { channel: w.channel.id } })) as Tool;
     expect(told.isError).toBe(true);
     expect((await w.c.db.select().from(outboundChannels).where(eq(outboundChannels.id, w.channel.id)))[0]!.status).toBe('active');
   });

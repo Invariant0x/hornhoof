@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { GateCode, MessageDocument, OutboundMessageView, OutboundSubmit, SubmitResult } from '@hornhoof/protocol';
-import { and, desc, eq, gte, inArray, lte, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, lte, sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
 import { agents, outboundAccounts, outboundAttempts, outboundBindings, outboundCatalogRevisions, outboundChannels, outboundContacts, outboundDailyUsage, outboundMessageRevisions, outboundMessages, outboundPermissions, outboundReviewReceipts, outboundSamplingCounters, tasks } from '../../db/schema.js';
@@ -164,12 +164,17 @@ async function catalogFor(tx: Tx, companyId: string, document: MessageDocument):
   return id => currentRevision(entries.get(id) ?? []);
 }
 
+/* What a channel's messages may use now: of each entry the revision that counts, when it is in place and in time. */
+export async function currentCatalog(db: Pick<Ctx['db'], 'select'>, channel: Channel, now: Date, only?: SQL): Promise<Source[]> {
+  const rows = await db.select(CATALOG_ROW).from(outboundCatalogRevisions).where(and(eq(outboundCatalogRevisions.companyId, channel.companyId), eq(outboundCatalogRevisions.departmentId, channel.departmentId), only));
+  return [...byEntry(rows).values()].flatMap(revisions => currentRevision(revisions) ?? []).filter(row => usable(row, placeOf(channel), now));
+}
+
 const specificity = (source: Source): number => (source.channelId ? 2 : source.productId ? 1 : 0);
 
 /* The published words of this language for stopping messages: the closest to the channel there is. */
 async function stopWords(tx: Tx, channel: Channel, locale: string, now: Date): Promise<Source | null> {
-  const rows = await tx.select(CATALOG_ROW).from(outboundCatalogRevisions).where(and(eq(outboundCatalogRevisions.companyId, channel.companyId), eq(outboundCatalogRevisions.departmentId, channel.departmentId), eq(outboundCatalogRevisions.kind, 'unsubscribe'), eq(outboundCatalogRevisions.locale, locale)));
-  const current = [...byEntry(rows).values()].flatMap(revisions => currentRevision(revisions) ?? []).filter(row => usable(row, placeOf(channel), now));
+  const current = await currentCatalog(tx, channel, now, and(eq(outboundCatalogRevisions.kind, 'unsubscribe'), eq(outboundCatalogRevisions.locale, locale)));
   return current.sort((a, b) => specificity(b) - specificity(a) || a.entryId.localeCompare(b.entryId))[0] ?? null;
 }
 

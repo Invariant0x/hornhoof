@@ -3,7 +3,8 @@ import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { encryptSecret } from '../../crypto/secrets.js';
-import { outboundContactEvents, outboundContacts, outboundPermissions } from '../../db/schema.js';
+import type { Db } from '../../db/client.js';
+import { outboundChannels, outboundContactEvents, outboundContacts, outboundPermissions } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import type { Tx } from '../tasks/engine.js';
 import { digestOf } from './checks.js';
@@ -58,6 +59,13 @@ export async function addContact(ctx: Pick<Ctx, 'db' | 'config'>, input: NewCont
     await record(tx, { contact: contact!, kind: 'consent_granted', dedupKey: `consent:${contact!.id}:${input.channel.id}:${input.channel.purpose}:${evidenceDigest}`, evidenceDigest, now });
     return { contactId: contact!.id, permissionId: permission?.id ?? null };
   });
+}
+
+/* The place a permission is of: that of its channel. */
+export async function permissionPlace(db: Pick<Db, 'select'>, companyId: string, permissionId: string): Promise<{ departmentId: string }> {
+  const [place] = await db.select({ departmentId: outboundChannels.departmentId }).from(outboundPermissions).innerJoin(outboundChannels, eq(outboundChannels.id, outboundPermissions.channelId)).where(and(eq(outboundPermissions.id, permissionId), eq(outboundPermissions.companyId, companyId)));
+  if (!place) throw notFound();
+  return place;
 }
 
 /* A permission taken back. A message waiting on it finds out at its last look. */

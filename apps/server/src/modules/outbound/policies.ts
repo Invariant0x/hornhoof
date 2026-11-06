@@ -1,11 +1,12 @@
 import { OutboundPolicyValue, type GateCode } from '@hornhoof/protocol';
-import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
-import { modelChecks, outboundAttempts, outboundChannels, outboundDailyUsage, outboundMessages, outboundPolicies } from '../../db/schema.js';
+import { modelChecks, outboundAttempts, outboundCatalogRevisions, outboundChannels, outboundDailyUsage, outboundMessages, outboundPolicies, supportTickets } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { isOn } from '../model-checks/lifecycle.js';
 import type { Tx } from '../tasks/engine.js';
+import { digestOf } from './checks.js';
 
 /* What a channel's owner decides, and what follows from it: the day a limit counts, the numbers sampling goes by, whether a
    channel takes anything at all, and how a queued message gives back what it held. */
@@ -111,6 +112,54 @@ export async function reopenChannel(ctx: Pick<Ctx, 'db'>, at: { companyId: strin
     const [row] = await tx.update(outboundChannels).set({ status: 'new', stoppedReason: null, stoppedAt: null, generation: channel.generation + 1 }).where(eq(outboundChannels.id, channel.id)).returning();
     return row!;
   });
+}
+
+export type NewChannel = Pick<typeof outboundChannels.$inferInsert, 'companyId' | 'departmentId' | 'productId' | 'name' | 'adapter' | 'purpose' | 'audience' | 'createdBy'>;
+
+/* A new channel takes nothing it does not review, and has no allowance until its owner gives it a policy. */
+export async function createChannel(db: Pick<Db, 'insert'>, channel: NewChannel): Promise<Channel> {
+  const [row] = await db.insert(outboundChannels).values(channel).onConflictDoNothing().returning();
+  if (!row) throw refused(409, 'conflict', 'This place already has a channel of this name.');
+  return row;
+}
+
+export const channelIn = async (db: Pick<Db, 'select'>, companyId: string, channelId: string): Promise<Channel> => {
+  const [channel] = await db.select().from(outboundChannels).where(and(eq(outboundChannels.id, channelId), eq(outboundChannels.companyId, companyId)));
+  if (!channel) throw refused(404, 'not_found', 'There is no such channel.');
+  return channel;
+};
+
+/* The next revision of a channel's limits. A message admitted before answers to the revision that counts at its last look. */
+export async function addPolicy(ctx: Pick<Ctx, 'db'>, at: { companyId: string; channelId: string; createdBy: string }, value: OutboundPolicyValue) {
+  const digest = digestOf(value);
+  return ctx.db.transaction(async tx => {
+    await tx.select({ id: outboundChannels.id }).from(outboundChannels).where(eq(outboundChannels.id, at.channelId)).for('update');
+    const [newest] = await tx.select({ revision: outboundPolicies.revision }).from(outboundPolicies).where(eq(outboundPolicies.channelId, at.channelId)).orderBy(desc(outboundPolicies.revision)).limit(1);
+    const [row] = await tx.insert(outboundPolicies).values({ ...at, revision: (newest?.revision ?? 0) + 1, digest, value }).returning();
+    return { id: row!.id, revision: row!.revision, digest };
+  });
+}
+
+/* A person's stop. Nothing new is admitted after it commits, and stopping what is stopped changes nothing. */
+export async function stopByPerson(ctx: Pick<Ctx, 'db'>, channelId: string, now = new Date()): Promise<Channel> {
+  return ctx.db.transaction(async tx => {
+    await tx.select({ id: outboundChannels.id }).from(outboundChannels).where(eq(outboundChannels.id, channelId)).for('update');
+    await stopChannel(tx, channelId, 'channel_stopped', now);
+    const [row] = await tx.select().from(outboundChannels).where(eq(outboundChannels.id, channelId));
+    return row!;
+  });
+}
+
+const RECORD_TABLES = [outboundChannels, outboundCatalogRevisions, supportTickets];
+
+/* Why a department cannot go: what it sent and said stays on record, and these records name it. A channel answers for the
+   accounts and messages it holds. */
+export async function outboundRecordsOf(db: Pick<Db, 'select'>, inside: string[], name: string): Promise<string | null> {
+  for (const table of RECORD_TABLES) {
+    const rows = await db.select({ id: table.id }).from(table).where(or(inArray(table.departmentId, inside), inArray(table.productId, inside))).limit(1);
+    if (rows.length) return `${name} has outbound channels, catalog or tickets on record, and cannot be removed.`;
+  }
+  return null;
 }
 
 const bucketsIn = (a: Pick<Attempt, 'accountBucketId' | 'domainBucketId'>) => [a.accountBucketId, a.domainBucketId];
