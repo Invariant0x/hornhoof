@@ -1350,7 +1350,6 @@ export const en = {
     operation_conflict: 'Another action on this request clashed with yours. Reload the page and try again.',
     classification_required: 'This question stays inside the company until a head prepares a decision for you.',
     internal_route_unavailable: 'No department head or orchestrator is available to take this question right now.',
-    source_producer_unavailable: 'The service that records this request is not ready right now. Try again shortly.',
   },
   outbound: {
     heading: 'Outbound',
