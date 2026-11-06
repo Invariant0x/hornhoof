@@ -1,6 +1,6 @@
 # Root related-test runner565
 
-Status: WORKING after head approved the exact-review expectation update. Final candidate and merge proof remain pending. The collection/config contracts are checked at8c22964eb0c4f1d7f8665a56dd229440c9a50368. Neither312 nor378 is a green whole run; the branch is not merged into turn-8. No full suite was executed.
+Status: candidate525 is remotely checked. Exact integration proof remains pending after merging the fresh turn source. The collection/config contracts are checked at8c22964eb0c4f1d7f8665a56dd229440c9a50368. Neither312 nor378 is a green whole run; the branch is not merged into turn-8. No full suite was executed.
 
 ## Change and API
 
@@ -91,3 +91,14 @@ The task-specific targeted authorcheck recipe is2026-11-06-root-related-authorch
 The previous representative score.ts related command became broad on the newer integration source through timers/store/app imports. The author stopped it instead of completing an unnecessarily broad authorcheck. Its unfinished output reports conversation.test.ts61cases/1failure, with the marked case opening a new session after a subscription change. Cancellation preceded the final error details. This remains partial failing evidence, not an unrelated test silently relabeled green. No conversation assertion or production code is edited by565.
 
 The recipe now uses the isolated benchmark/report.ts production module for server related execution. Before each server/protocol/node related callback run, the public collection probe must match an explicit expected file set. A mismatch makes the authorcheck fail and skips that callback invocation; it never filters away tests from a related run. This prevents another upstream graph expansion from turning this targeted check into a broad suite. The expected lists are printed with actual selection; the server list is one release-benchmark file, protocol one link file, node the established nine load consumers. The corrected recipe still requires exact candidate/merge native proof.
+
+
+## Candidate525: exact approved assertion GREEN
+
+525/part1 at62264631b61e79cedd413765400fdf8682e52f5f is native PASSED/exit0. All17 stages exited0. Complete tests-525-1.log is319116bytes, SHA25615699a0217fa80fef5014538ea0dca676f5640a48110fff0b91ccf490cc01048. Five root contracts passed; ten helper/API files106cases passed, including all12 tasks-merge cases and the same-vendor403 rejection. Thus the six original gate failures and the later lawful460 review-field mismatch have an observed RED-to-GREEN path, with the approved test-only fixture and stronger full expected object.
+
+The three selection guards matched exactly before callbacks: benchmark/report selects one file/eight cases, protocol link one/five, node load nine/160. Existing no-proc variants eightfiles/48cases passed, as did web Setup22cases and actual CSS3cases inside the root contract. None of the protocol's181 collected consumer files was automatically executed as a whole suite. Root checkJs, server/web types, test-types, changed lint, changed-logic CRAPmax6 and dryer0 passed. Coverage remains nonempty: basic lines100%/branches80%, DB lines60%/branches75%, probe lines/branches/functions100%; factory/worker-cwd coverage limitations remain. Legacy heavy-function110/30/12 is the explicit head exception, not a globally green quality claim.
+
+Normal inventory is219server+131node+73web+21protocol=444 files, exactly preserved under root, plus eight existing no-proc execution variants=452rows. Actual root widths: app154/452, protocol link181/452, node redact104/452. Inventory growth from earlier points is upstream composition, with no tests dropped by the root configuration.
+
+Actual execution was platform-selected0xs-MacBook-Pro.local, Linuxarm64/Node22.23.4/Docker marker,10CPUs/cpuset0-9,maxCPU/memory quotas, observed load1 6.76..10.68. This is targeted correctness evidence, not a performance comparison or exclusive-host claim. Fresh turn-8=3c9d1dd8 was merged without conflicts after525; it adds independent-part and command-guard work. The unchanged recipe and tests require a new exact integration receipt before turn-8 publication and handoff566.507 remains STOPPED with its partial unrelated conversation failure; no claim about that family's GREEN is made.
