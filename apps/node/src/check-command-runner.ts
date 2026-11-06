@@ -60,10 +60,19 @@ async function admitCommand(key: string, input: Command, signal: AbortSignal, re
   else await withCheckSlot(run, { agentId: key, label: basename(input.command[0]).slice(0, 100), signal, onPosition: position => { send(res, { type: 'queued', position }); } });
 }
 
-export async function serveCheckCommand(key: string, body: Buffer, signal: AbortSignal, res: ServerResponse): Promise<void> {
+function assertCommandUser(): void {
   if ((user?.uid ?? process.getuid?.()) === 0) throw new Error('Heavy commands require an agent user.');
+}
+
+function parseCommand(body: Buffer): Command {
   const input = Command.parse(JSON.parse(body.toString('utf8')));
   if (!input.command[0]) throw new Error('A heavy command needs a program.');
+  return input;
+}
+
+export async function serveCheckCommand(key: string, body: Buffer, signal: AbortSignal, res: ServerResponse): Promise<void> {
+  assertCommandUser();
+  const input = parseCommand(body);
   res.writeHead(200, { 'content-type': 'application/x-ndjson' });
   try {
     await assertCommandPolicy(key, input, signal);
