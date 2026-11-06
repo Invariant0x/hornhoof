@@ -193,6 +193,51 @@ describe('model checks migration', () => {
   });
 });
 
+describe('outbound gateway migration', () => {
+  /* Whatever number it ends up with. Until it exists, nothing is migrated and the tests below find no tables. */
+  const gatewayTag = async () => (JSON.parse(await readFile(join(MIGRATIONS, 'meta', '_journal.json'), 'utf8')) as { entries: { tag: string }[] }).entries.find(entry => entry.tag.endsWith('_outbound'))?.tag ?? 'none yet';
+
+  it('adds its tables empty, with nobody given anything and no row of two older companies touched', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0069_department_work_mode') });
+    for (const name of ['Acme', 'Moonfern']) {
+      const company = (await db.execute<{ id: string }>(sql`insert into companies (name) values (${name}) returning id`)).rows[0]!.id;
+      const person = (await db.execute<{ id: string }>(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Dana', ${`dana@${name}.example`}, 'active', 'listed') returning id`)).rows[0]!.id;
+      const department = (await db.execute<{ id: string }>(sql`insert into departments (company_id, template_key, role_code, owner_person_id) values (${company}, 'sales', 'SAL', ${person}) returning id`)).rows[0]!.id;
+      await db.execute(sql`insert into person_access (company_id, person_id, department_id) values (${company}, ${person}, ${department})`);
+      await db.execute(sql`insert into approval_policies (company_id, department_id, channel, mode, updated_by) values (${company}, ${department}, 'message', 'every', ${person})`);
+    }
+    const older = async () => Promise.all(['companies', 'people', 'departments', 'person_access', 'approval_policies'].map(async table => (await db.execute(sql.raw(`select to_jsonb(t) as row from ${table} t order by id`))).rows));
+    const before = await older();
+
+    const target = await migrationsUpTo(await gatewayTag());
+    await migrate(db, { migrationsFolder: target });
+    await migrate(db, { migrationsFolder: target });
+
+    expect(await older()).toEqual(before);
+    const { rows } = await db.execute<{ tablename: string }>(sql`select tablename from pg_tables where schemaname = 'public' and (tablename ~ '^(outbound_|support_)' or tablename = 'model_check_certificates') order by tablename`);
+    expect(rows).toHaveLength(19);
+    for (const { tablename } of rows) {
+      expect((await db.execute(sql.raw(`select count(*)::int as n from ${tablename}`))).rows, tablename).toEqual([{ n: 0 }]);
+    }
+  });
+
+  it('leaves its guards in place when it is run again', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    const target = await migrationsUpTo(await gatewayTag());
+    await migrate(db, { migrationsFolder: target });
+    const guards = sql`select count(*)::int as n from pg_trigger where tgname like 'outbound_guard_%' and not tgisinternal`;
+    const [{ n }] = (await db.execute<{ n: number }>(guards)).rows as [{ n: number }];
+    expect(n).toBeGreaterThan(0);
+    await migrate(db, { migrationsFolder: target });
+    expect((await db.execute(guards)).rows).toEqual([{ n }]);
+  });
+});
+
 describe('migration 0049', () => {
   it.each(['Acme', 'Moonfern'])('adds history indexes on an upgraded %s copy without changing old events', async name => {
     const source = new PGlite();
