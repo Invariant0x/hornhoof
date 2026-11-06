@@ -248,6 +248,12 @@ for (const lang of ['en', 'ru'] as const) {
           expect(pseudo.weight, 'record label weight is width-independent').toBe('400');
           expect(pseudo.color).toBe(theme === 'light' ? 'rgb(76, 90, 104)' : 'rgb(147, 160, 174)');
         }
+        if (width === 375 && lang === 'en' && theme === 'light') {
+          console.log('P6_CASCADE', await actions.evaluate(el => ({
+            padding: getComputedStyle(el).paddingBlockStart,
+            rules: [...document.styleSheets].flatMap(sheet => [...sheet.cssRules].filter(rule => rule.cssText.includes('row-actions')).map(rule => rule.cssText)),
+          })));
+        }
         await expect(actions).toHaveCSS('padding-block-start', '8px');
         await expectWrappedText(name);
         await expectInside(row, [name, actions]);
