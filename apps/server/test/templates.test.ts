@@ -815,6 +815,20 @@ describe('templates', () => {
       );
     });
   });
+
+  describe('hh-questions shared skill and materials rule', () => {
+    it('loads hh-questions as a core skill with an abstract English rule to attach materials via the question tool rather than prose paths', () => {
+      const skill = templates.skills.get('hh-questions');
+      expect(skill).toBeDefined();
+      expect(skill!.kind).toBe('core');
+      expect(skill!.grants).toEqual([]);
+      expect(skill!.body).toContain('- **Materials**:');
+      expect(skill!.body).toMatch(/attach[\s\S]*materials[\s\S]*question tool[\s\S]*rather than[\s\S]*(?:local )?file paths/i);
+      expect(skill!.body).toMatch(/inspect[\s\S]*in full[\s\S]*before answering/i);
+      const materialsLine = skill!.body.split('\n').find(line => line.startsWith('- **Materials**:')) ?? '';
+      expect(materialsLine).not.toMatch(/hornhoof|david|ivan|#\d+|202\d-/i);
+    });
+  });
 });
 
 type ReviewSkills = { diff: string; verdict: string; security: string };

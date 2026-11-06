@@ -100,7 +100,7 @@ describe('choice request free-form feedback and option picking', () => {
 
     const feedback = 'Neither option fits yet.\nPut progress inside the existing department chips.';
     await user.type(box, `  ${feedback}  `);
-    const send = within(card).getByRole('button', { name: 'Send' });
+    const send = within(card).getByRole('button', { name: 'Send without choosing' });
     expect(send).toBeEnabled();
     await user.click(send);
 
@@ -116,7 +116,7 @@ describe('choice request free-form feedback and option picking', () => {
     expect(props.onChanged).toHaveBeenCalledTimes(1);
   });
 
-  it('sends multi-line feedback without picking an option in Russian via visible Отправить button', async () => {
+  it('sends multi-line feedback without picking an option in Russian via visible Отправить без выбора button', async () => {
     const calls = mockApi({ 'POST /api/requests/r-choice': [200, { request: { id: 'r-choice', status: 'answered', picked: null } }] });
     const props = makeProps();
     const user = userEvent.setup();
@@ -128,7 +128,7 @@ describe('choice request free-form feedback and option picking', () => {
 
     const feedback = 'Ни один вариант пока не подходит.\nСделайте синие квадратики прямо внутри плашек отделов.';
     await user.type(box, feedback);
-    await user.click(within(card).getByRole('button', { name: 'Отправить' }));
+    await user.click(within(card).getByRole('button', { name: 'Отправить без выбора' }));
 
     expect(calls).toEqual([
       {
@@ -158,13 +158,13 @@ describe('choice request free-form feedback and option picking', () => {
     expect('answer' in (calls[1]!.body as Record<string, unknown>)).toBe(false);
   });
 
-  it('disables Send and refuses submission when feedback is empty or whitespace only', async () => {
+  it('disables Send without choosing and refuses submission when feedback is empty or whitespace only', async () => {
     const calls = mockApi({ 'POST /api/requests/r-choice': [200, { request: { id: 'r-choice', status: 'answered' } }] });
     const props = makeProps();
     const user = userEvent.setup();
     renderIn('en', <Requests {...props} />);
 
-    const send = screen.getByRole('button', { name: 'Send' });
+    const send = screen.getByRole('button', { name: 'Send without choosing' });
     expect(send).toBeDisabled();
 
     const box = screen.getByLabelText('Comment or feedback');
@@ -193,7 +193,7 @@ describe('choice request free-form feedback and option picking', () => {
     const feedback = 'Первая строка замечаний.\nВторая строка: не закрывать запрос выдуманным выбором.';
     const box = screen.getByLabelText('Комментарий или замечания');
     await user.type(box, feedback);
-    const send = screen.getByRole('button', { name: 'Отправить' });
+    const send = screen.getByRole('button', { name: 'Отправить без выбора' });
     await user.click(send);
 
     expect(await screen.findByRole('alert')).toHaveTextContent(ru.errors.codes.unavailable);
@@ -225,7 +225,7 @@ describe('choice request free-form feedback and option picking', () => {
 
     const box = screen.getByLabelText('Comment or feedback');
     await user.type(box, 'Hold this feedback');
-    const send = screen.getByRole('button', { name: 'Send' });
+    const send = screen.getByRole('button', { name: 'Send without choosing' });
     const optA = screen.getByRole('button', { name: /Option A/ });
 
     fireEvent.click(send);
@@ -247,7 +247,7 @@ describe('choice request free-form feedback and option picking', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps read-only view strict when canAnswer is false, without options buttons or Send', () => {
+  it('keeps read-only view strict when canAnswer is false, without options buttons or Send without choosing', () => {
     renderIn('ru', <Requests {...makeProps({ requests: [{ ...CHOICE, canAnswer: false }] })} />);
     const card = screen.getByRole('article', { name: '#402 Turn progress options' });
     expect(card).toHaveAttribute('aria-busy', 'false');
@@ -259,7 +259,7 @@ describe('choice request free-form feedback and option picking', () => {
     ]);
     expect(screen.getByText(ru.tasks.decidedByCeo)).toBeInTheDocument();
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Отправить' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Отправить без выбора' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Option A/ })).not.toBeInTheDocument();
   });
 
@@ -277,7 +277,7 @@ describe('choice request free-form feedback and option picking', () => {
     const feedback = 'Первая строка замечаний.\nВторая строка: сохранить весь черновик при сбое.';
     const box = within(card).getByLabelText('Комментарий или замечания');
     await user.type(box, feedback);
-    const send = within(card).getByRole('button', { name: 'Отправить' });
+    const send = within(card).getByRole('button', { name: 'Отправить без выбора' });
     const optA = within(card).getByRole('button', { name: /Option A/ });
 
     await user.click(send);
@@ -382,7 +382,7 @@ describe('choice request free-form feedback and option picking', () => {
     const optA = screen.getByRole('button', { name: /Option A/ });
     const optB = screen.getByRole('button', { name: /Option B/ });
     const box = screen.getByLabelText('Comment or feedback');
-    const send = screen.getByRole('button', { name: 'Send' });
+    const send = screen.getByRole('button', { name: 'Send without choosing' });
 
     optA.focus();
     expect(optA).toHaveFocus();

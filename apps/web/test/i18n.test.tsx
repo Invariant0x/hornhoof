@@ -140,4 +140,59 @@ describe('work tree words', () => {
     expect(en.window.hiddenEmployee).toBe('Employee');
     expect(ru.window.hiddenEmployee).toBe('Сотрудник');
   });
+
+  it('names separate material viewing and choice answer actions in English and Russian without changing existing labels', () => {
+    expect(en.tasks.approve).toBe('Approve');
+    expect(ru.tasks.approve).toBe('Одобрить');
+    expect(en.tasks.decline).toBe('Decline');
+    expect(ru.tasks.decline).toBe('Отклонить');
+    expect(en.tasks.sendAnswer).toBe('Send answer');
+    expect(ru.tasks.sendAnswer).toBe('Отправить ответ');
+    expect(en.tasks.cancelTask).toBe('Cancel task');
+    expect(ru.tasks.cancelTask).toBe('Отменить задачу');
+    expect(en.tasks.seeWork).toBe('See the work');
+    expect(ru.tasks.seeWork).toBe('Посмотреть работу');
+    expect(en.tasks.sendFeedback).toBe('Send without choosing');
+    expect(ru.tasks.sendFeedback).toBe('Отправить без выбора');
+    expect(en.tasks.chooseOption(2)).toBe('Choose option 2');
+    expect(ru.tasks.chooseOption(2)).toBe('Выбрать вариант 2');
+    expect(en.tasks.materials.open).toBe('Open');
+    expect(ru.tasks.materials.open).toBe('Открыть');
+    expect(en.tasks.materials.showAll(14)).toBe('Show all: 14');
+    expect(ru.tasks.materials.showAll(14)).toBe('Показать все: 14');
+    expect(en.tasks.materials.picturePos(2, 3)).toBe('Picture 2 of 3');
+    expect(ru.tasks.materials.picturePos(2, 3)).toBe('Картинка 2 из 3');
+    expect(en.tasks.materials.materialPos(1, 4)).toBe('Material 1 of 4');
+    expect(ru.tasks.materials.materialPos(1, 4)).toBe('Материал 1 из 4');
+    expect(en.tasks.materials.pageOf(1, 5)).toBe('Page 1 of 5');
+    expect(ru.tasks.materials.pageOf(1, 5)).toBe('Страница 1 из 5');
+    expect(en.tasks.materials.endOfDocument).toBe('End of document. Shown in full.');
+    expect(ru.tasks.materials.endOfDocument).toBe('Конец документа. Показано целиком.');
+    expect(en.tasks.materials.incomplete).toBe('Not all of the document is loaded yet.');
+    expect(ru.tasks.materials.incomplete).toBe('Документ загружен еще не полностью.');
+    expect(en.tasks.materials.pdfUnavailable).toBe('PDF preview is not available right now. Download the file.');
+    expect(ru.tasks.materials.pdfUnavailable).toBe('Просмотр PDF пока недоступен. Скачайте файл.');
+    expect(en.tasks.materials.proposalNote).toBe('Original proposal. Your changes are not part of it.');
+    expect(ru.tasks.materials.proposalNote).toBe('Исходное предложение. Ваши правки в него не входят.');
+  });
+
+  it('formats plural and duration helpers consistently across numeric ranges in English and Russian', () => {
+    for (const dict of [en, ru]) {
+      for (const count of [0, 1, 2, 5, 11, 21]) {
+        expect(dict.companyTemplates.employees(count)).toContain(String(count));
+        expect(dict.tasks.decisionsOf(count)).toContain(String(count));
+        expect(dict.tasks.cutText(count)).toContain(String(count));
+        expect(dict.machines.every(count)).toContain(String(count));
+        expect(dict.machines.part(1, count)).toContain('1');
+      }
+      expect(dict.machines.drainWaiting(0, 0, 0)).toBe('');
+      expect(dict.machines.drainWaiting(1, 0, 0)).toContain('1');
+      expect(dict.machines.drainWaiting(2, 5, 11)).toContain('2');
+      expect(dict.machines.drainWaiting(21, 2, 1)).toContain('21');
+      expect(dict.dept.tree.dur(45)).toContain('45');
+      expect(dict.dept.tree.dur(125)).toContain('2');
+      expect(dict.dept.tree.dur(3700)).toContain('1');
+      expect(dict.dept.tree.dur(90_000)).toContain('1');
+    }
+  });
 });
