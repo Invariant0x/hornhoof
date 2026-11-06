@@ -566,11 +566,15 @@ for (const lang of CHECKED_LOCALES) {
           await document.fonts.ready;
         });
 
-        const mainScrollWidth = await page.evaluate(() => {
+        const mainOverflow = await page.evaluate(() => {
           const scroller = document.querySelector<HTMLElement>('.screen, .page');
-          return Math.max(document.documentElement.scrollWidth, scroller?.scrollWidth ?? 0);
+          const offenders = [...document.querySelectorAll<HTMLElement>('body *')]
+            .filter(el => el.getBoundingClientRect().right > innerWidth + 1 || el.scrollWidth > el.clientWidth + 1)
+            .slice(0, 20)
+            .map(el => ({ tag: el.tagName, className: el.className, right: el.getBoundingClientRect().right, scrollWidth: el.scrollWidth, clientWidth: el.clientWidth, text: el.textContent?.slice(0, 100) }));
+          return { width: Math.max(document.documentElement.scrollWidth, scroller?.scrollWidth ?? 0), offenders };
         });
-        expect(mainScrollWidth).toBeLessThanOrEqual(width);
+        expect(mainOverflow.width, JSON.stringify(mainOverflow.offenders)).toBeLessThanOrEqual(width);
         await assertRequestCardsFit(mainCards, width);
 
         /* Open TaskPanel (aside) on #1 so the exact same 3 request cards render inside the narrow side panel. */
@@ -581,9 +585,13 @@ for (const lang of CHECKED_LOCALES) {
 
         const asideOverflow = await aside.evaluate((el: HTMLElement) => {
           const body = el.querySelector<HTMLElement>('.ac-body');
-          return el.scrollWidth > el.clientWidth + 1 || (body ? body.scrollWidth > body.clientWidth + 1 : false);
+          const offenders = [...el.querySelectorAll<HTMLElement>('*, .ac-body *')]
+            .filter(item => item.scrollWidth > item.clientWidth + 1)
+            .slice(0, 20)
+            .map(item => ({ tag: item.tagName, className: item.className, right: item.getBoundingClientRect().right, scrollWidth: item.scrollWidth, clientWidth: item.clientWidth, text: item.textContent?.slice(0, 100) }));
+          return { overflow: el.scrollWidth > el.clientWidth + 1 || (body ? body.scrollWidth > body.clientWidth + 1 : false), offenders };
         });
-        expect(asideOverflow, 'TaskPanel aside has no horizontal overflow').toBe(false);
+        expect(asideOverflow.overflow, JSON.stringify(asideOverflow.offenders)).toBe(false);
         const asideBox = await box(aside);
         expect(asideBox.x + asideBox.width).toBeLessThanOrEqual(width + 1);
         await assertRequestCardsFit(panelCards, asideBox.x + asideBox.width);
@@ -969,7 +977,7 @@ test('saves neutral feedback without pick, delivers words to author, and preserv
     /* 2. Authorized person picks option 0 with a comment on a second choice request. */
     const pickComment = 'Оставляем шаг 8px, проверьте мобильный экран 375px';
     await pickCard.getByLabel(ru.tasks.choiceNote).fill(`  ${pickComment}  `);
-    await pickCard.getByRole('button', { name: ru.tasks.chooseOption(1), exact: true }).click();
+    await pickCard.locator('.req-option').nth(0).click();
     await expect(pickCard).toBeHidden();
 
     /* Open the first task's detail panel in the real UI and verify neutral answered state and text. */
