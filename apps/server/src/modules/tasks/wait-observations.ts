@@ -29,14 +29,11 @@ export async function departmentScope(ctx: Pick<Ctx, 'db'>, companyId: string, r
   return [...scope];
 }
 
-async function waitReasons(ctx: Ctx, rows: Task[], now: Date): Promise<string[] | null> {
-  const reasons: string[] = [];
-  for (const task of rows) {
-    const reason = await taskWaitReason(ctx, task, now);
-    if (!reason) return null;
-    reasons.push(`#${task.number}: ${reason}`);
-  }
-  return reasons;
+/* Work nothing explains: no one is on it and it waits for nothing known. */
+async function unexplained(ctx: Ctx, rows: Task[], now: Date): Promise<Task[]> {
+  const silent: Task[] = [];
+  for (const task of rows) if (!(await taskWaitReason(ctx, task, now))) silent.push(task);
+  return silent;
 }
 
 async function taskWaitReason(ctx: Ctx, task: Task, now: Date): Promise<string | null> {
@@ -67,10 +64,16 @@ export async function quietDepartment(ctx: Ctx, turnId: string, departmentId: st
   const employees = ctx.db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, turn.companyId), inArray(agents.departmentId, scope)));
   const conversations = await ctx.db.select().from(jobs).where(and(eq(jobs.companyId, turn.companyId), eq(jobs.kind, 'conversation'), or(inArray(jobs.agentId, employees), inArray(jobs.taskId, work.map(task => task.id)))));
   if (conversations.some(job => job.status === 'running')) return null;
-  const reasons = await waitReasons(ctx, work, now);
-  if (!reasons) return null;
-  const since = new Date(Math.max((turn.openedAt ?? turn.createdAt).getTime(), ...work.map(t => t.updatedAt.getTime()), ...conversations.flatMap(job => job.startedAt && job.finishedAt ? [job.finishedAt.getTime()] : [])));
+  /* A department where all of it waits for something known, in time, has nothing to say. */
+  const silent = await unexplained(ctx, work, now);
+  if (!silent.length) return null;
+  const since = new Date(Math.max(
+    (turn.openedAt ?? turn.createdAt).getTime(), ...work.map(t => t.updatedAt.getTime()),
+    ...conversations.flatMap(job => job.startedAt && job.finishedAt ? [job.finishedAt.getTime()] : []),
+    /* A wait that ran out explained the work until then: the silence starts there. */
+    ...work.flatMap(t => t.externalWait ? [new Date(t.externalWait.until).getTime()] : []),
+  ));
   if (now.getTime() - since.getTime() < QUIET_DEPARTMENT_MS) return null;
   const versions = taskVersions(work);
-  return { companyId: turn.companyId, work, reasons, since, key: waitKey([turn.id, departmentId, versions, since.toISOString()]) };
+  return { companyId: turn.companyId, work, silent, since, key: waitKey([turn.id, departmentId, versions, since.toISOString()]) };
 }

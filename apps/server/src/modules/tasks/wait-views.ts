@@ -61,12 +61,12 @@ function shownOwner(viewer: AgentViewer, owner: WaitOwnerBinding | null): WaitOw
 export const maskWaits = (viewer: AgentViewer, waits: TaskWaitView[]): TaskWaitView[] => waits.map(wait => ({ ...wait, owner: shownOwner(viewer, wait.owner) }));
 
 export type WaitPage = { waits: TaskWaitView[]; next: string | null };
-type Place = { at: Date; id: string };
+export type WaitPlace = { at: Date; id: string };
 
 export const pageAfter = (wait: Pick<TaskWait, 'createdAt' | 'id'>): string => `${wait.createdAt.toISOString()}_${wait.id}`;
 
 /* Where a page goes on from, or null for what names no place in the list. */
-export function placeOf(text: string): Place | null {
+export function placeOf(text: string): WaitPlace | null {
   const [moment, id, more] = text.split('_');
   if (!moment || !id || more !== undefined) return null;
   const at = new Date(moment);
@@ -83,7 +83,7 @@ async function hiddenEdges(db: Db, task: Pick<Task, 'id'>, sees: (t: Task) => bo
 }
 
 /* The whole record of the waits on a task, newest first, a page at a time. */
-export async function waitHistory(db: Db, task: Pick<Task, 'id'>, sees: (t: Task) => boolean, page: { limit: number; before: Place | null }): Promise<WaitPage> {
+export async function waitHistory(db: Db, task: Pick<Task, 'id'>, sees: (t: Task) => boolean, page: { limit: number; before: WaitPlace | null }): Promise<WaitPage> {
   const hidden = await hiddenEdges(db, task, sees);
   const rows = await db.select().from(taskWaits).where(and(
     eq(taskWaits.taskId, task.id),

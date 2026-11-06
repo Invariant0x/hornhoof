@@ -2,7 +2,7 @@ import { EndSourceWait, ReplanWait, signalsOnce, SyncSourceWaits, validSourceKey
 import { and, asc, desc, eq, inArray, isNull, like, or, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import { agents, people, tasks, taskWaits, waitNotices } from '../../db/schema.js';
-import { CLOSED, note, refuse, type Actor, type Task, type Tx } from './engine.js';
+import { CLOSED, note, ownNote, refuse, type Actor, type Task, type Tx } from './engine.js';
 import { nextReview, planFromPolicy, setsWaitDates, waitRoute } from './wait-policy.js';
 
 /* The record of who answers for each thing a task waits on, and until when. Its source ends it: a date passing proves nothing.
@@ -371,6 +371,6 @@ export async function claimFinalReview(tx: Tx, input: { waitId: string; expected
   const next = nextReview(review, wait!.nextReviewAt, input.at);
   const ordinal = wait!.reviewOrdinal + 1;
   const [kept] = await tx.update(taskWaits).set({ reviewOrdinal: ordinal, nextReviewAt: next.at, updatedAt: new Date(), ...(next.at ? {} : { level: 3 }) }).where(eq(taskWaits.id, wait!.id)).returning();
-  await note(tx, task, { kind: 'updated', actor: { agentId: review.headAgentId }, text: 'The final review of a wait on this task is due.', data: logged(kept!, { reviewOrdinal: ordinal, skipped: next.skipped }) });
+  await ownNote(tx, task, { kind: 'wait_due', text: 'The final review of a wait on this task is due.', data: logged(kept!, { reviewOrdinal: ordinal, skipped: next.skipped }) });
   return { wait: kept!, ordinal, skipped: next.skipped };
 }

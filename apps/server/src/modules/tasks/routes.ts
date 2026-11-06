@@ -1,7 +1,7 @@
 import { turnCounts } from './turn-progress.js';
 import { and, asc, desc, eq, inArray, isNull, notInArray, sql, type SQL } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
-import { WaitPlan } from '@hornhoof/protocol/waits';
+import { WaitOwnerBinding, WaitPlan } from '@hornhoof/protocol/waits';
 import { z } from 'zod';
 import { Text } from './long-text.js';
 import type { Ctx } from '../../app.js';
@@ -9,7 +9,7 @@ import { accessOf, canReach, type Access } from '../../auth/access.js';
 import { viewerOf, type AgentViewer } from '../../auth/agent-view.js';
 import { actorOf, requireCompanyScope, requirePerson, type Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
-import { agentEvents, agents, departments, jobs, requests, tasks, turns } from '../../db/schema.js';
+import { agentEvents, agents, departments, jobs, requests, tasks, taskWaits, turns } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { orchestratorOf } from '../conversation/queue.js';
 import { serverMachine } from '../computer/access.js';
@@ -26,7 +26,9 @@ import { workTree } from './tree.js';
 import { treeFacts } from './tree-facts.js';
 import { departmentPipeline } from './pipeline-report.js';
 import { detailFor, factsFor, linesFor, seesTask } from './sight.js';
-import { maskWaits, placeOf, waitHistory } from './wait-views.js';
+import { acknowledgeCard, waitCards } from './wait-cards.js';
+import { replanWait } from './wait-state.js';
+import { maskWaits, placeOf, waitHistory, waitView, type WaitPlace } from './wait-views.js';
 import { settle, tell, turnRows, type Turn } from './turns.js';
 import { leaveIfOff, stopTurns, wakeAll } from './wake.js';
 
@@ -49,6 +51,7 @@ const NewTaskBody = z.object({
 const afterPlansOf = (given: z.infer<typeof NewTaskBody>['afterPlans'], after: Task[]) =>
   given ? Object.fromEntries(given.map(({ task, plan }) => [after.find(t => t.number === task)?.id ?? String(task), plan])) : undefined;
 
+const ReplanBody = z.strictObject({ expectedGeneration: z.number().int().positive(), ownerBinding: WaitOwnerBinding.optional(), plan: WaitPlan.optional(), reason: z.string().trim().min(1).max(600) });
 const WaitsQuery = z.strictObject({ limit: z.coerce.number().int().min(1).max(100).default(50), before: z.string().max(100).optional() });
 const ListQuery = z.object({ department: z.uuid().optional(), status: z.enum(['open', 'closed', 'all']).default('open') });
 /* person: only the decisions this person owns, among those the viewer sees anyway. */
@@ -238,17 +241,52 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     return reply.code(201).send({ task: await detail(me, moved.task) });
   });
 
+  /* A page of a list of waits: how much of it, and from where. */
+  function waitsPage(req: { query: unknown }): { limit: number; before: WaitPlace | null } {
+    const { limit, before } = WaitsQuery.parse(req.query);
+    const place = before === undefined ? null : placeOf(before);
+    if (before !== undefined && !place) throw refuse(400, 'task_invalid', 'This names no place in the list.');
+    return { limit, before: place };
+  }
+
   /* The whole record of the waits on a task, a page at a time. */
   app.get('/api/tasks/:id/waits', async req => {
     const me = await requirePerson(req, db);
     const { id } = IdParams.parse(req.params);
-    const { limit, before } = WaitsQuery.parse(req.query);
-    const place = before === undefined ? null : placeOf(before);
-    if (before !== undefined && !place) throw refuse(400, 'task_invalid', 'This names no place in the list.');
+    const place = waitsPage(req);
     const task = await shown(me, id);
     const viewer = await viewerOf(db, me);
-    const page = await waitHistory(db, task, t => seesTask(viewer, t), { limit, before: place });
+    const page = await waitHistory(db, task, t => seesTask(viewer, t), place);
     return { ...page, waits: maskWaits(viewer, page.waits) };
+  });
+
+  /* Someone who answers for a wait gives it a new owner or new dates, or a wait no one planned its first ones. */
+  app.post('/api/waits/:id/replan', async req => {
+    const me = await requirePerson(req, db);
+    const { id } = IdParams.parse(req.params);
+    const body = ReplanBody.parse(req.body);
+    const [seen] = await db.select({ taskId: taskWaits.taskId }).from(taskWaits).where(and(eq(taskWaits.id, id), eq(taskWaits.companyId, me.companyId)));
+    if (!seen) throw refuse(404, 'task_unknown', 'There is no such wait.');
+    const task = await shown(me, seen.taskId);
+    const viewer = await viewerOf(db, me);
+    const wait = await db.transaction(tx => replanWait(tx, { waitId: id, ...body, actor: actorOf(me) }));
+    ctx.bus.publish(me.companyId, { type: 'task', id: task.id, spot: taskSpot(task) });
+    return { wait: maskWaits(viewer, [waitView(wait)])[0] };
+  });
+
+  /* The cards kept for this person about waits past their dates. */
+  app.get('/api/wait-cards', async req => {
+    const me = await requirePerson(req, db);
+    return waitCards(ctx, await viewerOf(db, me), waitsPage(req));
+  });
+
+  /* This person saw their card. It decides nothing. */
+  app.post('/api/wait-cards/:id/ack', async req => {
+    const me = await requirePerson(req, db);
+    const { id } = IdParams.parse(req.params);
+    if (!(await acknowledgeCard(ctx, me.id, id))) throw refuse(404, 'task_unknown', 'This card is not yours or does not exist.');
+    ctx.bus.publish(me.companyId, { type: 'requests', spot: { departmentId: null, parentId: null } });
+    return { ok: true };
   });
 
   app.post('/api/tasks/:id/comments', async (req, reply) => {

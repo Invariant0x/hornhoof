@@ -24,6 +24,7 @@ import { verdictReview, type ReviewVerdict } from './review-verdict.js';
 import { pendingFixReviews, prepareFixReviews } from './review-fixes.js';
 import { checkIndependent, currentIndependent, type IndependentDeclaration, type IndependentPartInput } from './independent.js';
 import type { WaitPlan } from '@hornhoof/protocol/waits';
+import { alertGoal, goalColumns, type NewGoal } from './wait-goals.js';
 import { bindAfter, bindRequest, bindTurnReview, endAfter, endRequest, keepWaitsWithMove, rebindAfter, type AfterPlans } from './wait-producers.js';
 
 export type Task = typeof tasks.$inferSelect;
@@ -364,6 +365,11 @@ export async function note(tx: Tx | Db, task: Pick<Task, 'id' | 'companyId'>, n:
 }
 
 /* A move by which an agent gives its work back lights its line to the one above it on the map: the task, when it did. */
+/* A line of Hornhoof's own, which nobody signed. */
+export async function ownNote(tx: Tx, task: Pick<Task, 'id' | 'companyId'>, n: { kind: TaskEventKind; text: string; data: Record<string, unknown> }): Promise<void> {
+  await tx.insert(taskEvents).values({ companyId: task.companyId, taskId: task.id, ...n });
+}
+
 async function givesBack(tx: Tx, row: Task, n: Note, event: { id: number; createdAt: Date }): Promise<Task | null> {
   if (!n.returned || !n.actor.agentId) return null;
   return (await returnAlongLine(tx, { agentId: n.actor.agentId, sourceKey: `task:${event.id}`, sourceTaskId: row.id, returnedAt: event.createdAt })) ? row : null;
@@ -1462,6 +1468,8 @@ export type Ask = {
   plan?: WaitPlan;
   /* What must reach a person even where the department set no dates for it. */
   evenUnplanned?: boolean;
+  /* A goal in danger, as someone who may say so said it. */
+  goal?: NewGoal;
 };
 
 /* An approval of a commit lets it into the release, whatever the agent says it is about. */
@@ -1506,9 +1514,11 @@ export async function ask(ctx: Live, agentId: string, taskId: string, q: Ask): P
         link: q.link ?? null,
         decisionTopic: topicOf(q),
         ...approvalColumns(q.approval),
+        ...goalColumns(q.goal),
       })
       .returning();
-    await bindRequest(tx, task, request!, { agentId }, { plan: q.plan, strict: !q.evenUnplanned });
+    const wait = await bindRequest(tx, task, request!, { agentId }, { plan: q.plan, strict: !q.evenUnplanned });
+    if (q.goal) await alertGoal(tx, task, request!, wait);
     wakes = await explaining(tx, task, agentId, request!.id);
     await keepWakes(tx, task.companyId, wakes);
     if (!pictures.length) return;
@@ -1590,7 +1600,7 @@ async function askAboutStill(ctx: Live, agentId: string, task: Task, silent: num
 }
 
 /* Events that do not move a task: what an agent says in it and Hornhoof's own notes about its turns. */
-export const NOT_A_MOVE = ['comment', 'reminded', 'continued', 'stuck', 'interrupted', 'wake_skipped', 'wake_obsolete'] as const;
+export const NOT_A_MOVE = ['comment', 'reminded', 'continued', 'stuck', 'interrupted', 'wake_skipped', 'wake_obsolete', 'wait_due', 'wait_card'] as const;
 
 /* Comments and notes about a turn ending do not begin a new piece of work. */
 export async function lastMove(db: Db | Tx, taskId: string) {

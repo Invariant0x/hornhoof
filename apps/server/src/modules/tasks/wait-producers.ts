@@ -91,8 +91,8 @@ async function requestOwner(tx: Tx, task: Task, request: Request): Promise<WaitO
 }
 
 /* A question to a person answers to the one whose decision it is, each question on its own. */
-export async function bindRequest(tx: Tx, task: Task, request: Request, actor: Actor, how: { plan?: WaitPlan | undefined; strict: boolean }): Promise<void> {
-  await bindSource(tx, task, { kind: 'person', sourceKey: requestSourceKey(request.id), owner: await requestOwner(tx, task, request), plan: how.plan, strict: how.strict, actor });
+export async function bindRequest(tx: Tx, task: Task, request: Request, actor: Actor, how: { plan?: WaitPlan | undefined; strict: boolean }): Promise<TaskWait> {
+  return bindSource(tx, task, { kind: 'person', sourceKey: requestSourceKey(request.id), owner: await requestOwner(tx, task, request), plan: how.plan, strict: how.strict, actor });
 }
 
 /* An answer ends the wait of that one question: not the others, and it proves only that it was answered. */

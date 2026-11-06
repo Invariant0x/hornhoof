@@ -1,5 +1,5 @@
 import { RISK_CLASSES, WORK_KINDS } from '@hornhoof/protocol';
-import { WaitPlan } from '@hornhoof/protocol/waits';
+import { WaitOwnerBinding, WaitPlan } from '@hornhoof/protocol/waits';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { and, asc, count, desc, eq, gte, inArray, isNull, notInArray } from 'drizzle-orm';
 import { z } from 'zod';
@@ -8,6 +8,7 @@ import { agents, DECISION_TOPICS, departments, jobs, requests, tasks, type Decis
 import { ApiError } from '../../errors.js';
 import { ask, blocked, cancel, CLOSED, comment, createTask, gateLeads, inRepository, listed, openAfter, refuse, report, submit, taskSpot, updateTask, verdict, type Moved, type Task } from './engine.js';
 import { requireBlockingGate } from './gate-triggers.js';
+import { replanWait } from './wait-state.js';
 import { carriesFile, encodedHint } from './attachments.js';
 import { Text } from './long-text.js';
 import { agentSeesTask as sees, taskByRef, taskDetail, taskLines, type TaskDetail } from './views.js';
@@ -240,6 +241,21 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         plain(task, text);
         const moved = await comment(ctx, { agentId: job.agentId }, task.id, text);
         return { text: moved.wakes.length ? `Noted on #${task.number}. It is open again, and its executor goes on with your answer.` : `Noted on #${task.number}.`, moved };
+      }),
+  );
+
+  server.registerTool(
+    'replan_wait',
+    {
+      description:
+        'Gives a wait on a task (its id in waits, from task) a new owner or new dates, for someone who answers for it: its owner, its head or the orchestrator. Also the way to give a wait with no plan its first dates. Dates moved stay on record. Say whose promise they are in plan.provenance, and only dates someone really promised.',
+      inputSchema: { wait: z.uuid(), expectedGeneration: z.number().int().positive(), owner: WaitOwnerBinding.optional(), plan: WaitPlan.optional(), reason: z.string().trim().min(1).max(600) },
+    },
+    async ({ wait, expectedGeneration, owner, plan, reason }) =>
+      run(async () => {
+        const kept = await db.transaction(tx => replanWait(tx, { waitId: wait, expectedGeneration, ...(owner ? { ownerBinding: owner } : {}), ...(plan ? { plan } : {}), reason, actor: { agentId: job.agentId } }));
+        const { task } = await find(kept.taskId);
+        return { text: `The wait on #${task.number} is at generation ${kept.generation}, due ${kept.nextActionAt?.toISOString() ?? 'with no date'}.`, moved: { task, wakes: [] } };
       }),
   );
 

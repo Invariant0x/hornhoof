@@ -7,6 +7,7 @@ import { refuseNotUrgent } from './urgency.js';
 import { handOff } from './pulses.js';
 import { improvementsChanged, takeForPlanning } from '../improvements/store.js';
 import { keepSnapshot } from './pipeline-report.js';
+import { recordTurnSummary } from './wait-goals.js';
 
 type Live = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'log'>>;
 export type Turn = typeof turns.$inferSelect;
@@ -193,6 +194,7 @@ export async function liveIn(tx: Tx, companyId: string, turnId: string): Promise
 async function closeRunning(ctx: Live, tx: Tx, turnId: string): Promise<Turn> {
   const [closed] = await tx.update(turns).set({ status: 'closed', closedAt: new Date() }).where(eq(turns.id, turnId)).returning();
   await keepSnapshot(tx, closed!, ctx.log);
+  await recordTurnSummary(tx, closed!);
   return closed!;
 }
 
