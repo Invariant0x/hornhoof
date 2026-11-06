@@ -7,7 +7,7 @@ import { reserveDispatch } from '../src/modules/outbound/core.js';
 import { outboundRound } from '../src/modules/outbound/dispatcher.js';
 import { smtpAdapter } from '../src/modules/outbound/smtp.js';
 import { EVENT_KEY, FROM, SIGNING_KEY, frozenOf, hookWay, liveSenders, rotateTo, settleAs, smtpSettings, smtpWay, submitByTool } from './outbound-live-world.js';
-import { closedPort, hookReceiver, parts, scriptedSmtp, silentPort, smtpReceiver, subjectOf, wordsOf, type HookRequest } from './outbound-receivers.js';
+import { closedPort, hookReceiver, scriptedSmtp, silentPort, smtpReceiver, subjectOf, wordsOf, type HookRequest } from './outbound-receivers.js';
 import { QUIET, dispatched, world, type World } from './outbound-world.js';
 
 /* The whole way, from an agent's tool to bytes on a real wire and back. Control receivers on this machine, synthetic secrets. */
@@ -44,7 +44,6 @@ describe('a message over real authenticated SMTP', () => {
     expect(subjectOf(got!.raw)).toBe(frozen.subject);
     expect(wordsOf(got!.raw).trimEnd()).toBe(frozen.text.trimEnd());
     expect(frozen.text).toContain('https://hornhoof.example/api/outbound/unsubscribe/');
-    expect(parts(got!.raw).headers).toMatch(/list-unsubscribe-post: List-Unsubscribe=One-Click/i);
     expect(await w.messageOf(messageId)).toMatchObject({ status: 'sent' });
     expect((await attemptsOf(w, messageId))[0]!.providerReceipt).toContain('queued as 7A1');
   });

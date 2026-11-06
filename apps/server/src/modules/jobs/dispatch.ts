@@ -1,6 +1,8 @@
-import type { ModelCheckKind, ModelIdentity, ProviderId, SkillFile, Workspace } from '@hornhoof/protocol';
+import { createHash } from 'node:crypto';
+import { canonicalJson, type ModelCheckKind, type ModelIdentity, type ProviderId, type SkillFile, type Workspace } from '@hornhoof/protocol';
 import type { OperatorDelivery } from '@hornhoof/protocol/program-operator';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
+import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { decryptSecret } from '../../crypto/secrets.js';
 import { subscriptions } from '../../db/schema.js';
@@ -78,5 +80,71 @@ export type FreshModelRequest = { readonly kind: ModelCheckKind; readonly expect
 export type FreshModelResponse = { readonly status: 'ok'; readonly reviewer: ModelIdentity; readonly rawOutput: string; readonly isolated: true } | { readonly status: 'unavailable' };
 type FreshOptions = { endpoints?: Partial<Record<ProviderId, string>>; timeoutMs?: number };
 
-export const FRESH_INFERENCE_HASH = '0'.repeat(64);
-export const freshModelCheck = (_ctx: Ctx, _options: FreshOptions = {}) => async (_request: FreshModelRequest): Promise<FreshModelResponse> => ({ status: 'unavailable' });
+const FRESH_TIMEOUT_MS = 60_000;
+const MAX_OUTPUT_TOKENS = 1024;
+const FRESH_SETTINGS = { temperature: 0, maxOutputTokens: MAX_OUTPUT_TOKENS };
+/* What a certified model is bound to: an answer from other settings is an answer from another check. */
+export const FRESH_INFERENCE_HASH = createHash('sha256').update(canonicalJson(FRESH_SETTINGS)).digest('hex');
+
+const unavailable: FreshModelResponse = { status: 'unavailable' };
+
+const FromAnthropic = z.object({ model: z.string(), content: z.tuple([z.object({ type: z.literal('text'), text: z.string() })]) });
+const FromOpenAi = z.object({ model: z.string(), choices: z.tuple([z.object({ message: z.object({ content: z.string() }) })]) });
+type Spoken = { model: string; text: string };
+type Direct = { vendorId: string; url: string; call: (request: FreshModelRequest, key: string) => { headers: Record<string, string>; body: object }; heard: (answer: unknown) => Spoken | null };
+
+const parsedWith = <T>(schema: z.ZodType<T>, read: (value: T) => Spoken) => (answer: unknown): Spoken | null => {
+  const parsed = schema.safeParse(answer);
+  return parsed.success ? read(parsed.data) : null;
+};
+
+/* These two providers take one plain call over HTTP. Nothing is passed that could give a model a tool, a session or anyone's history. */
+const DIRECT: Partial<Record<ProviderId, Direct>> = {
+  anthropic_api: {
+    vendorId: 'anthropic',
+    url: 'https://api.anthropic.com/v1/messages',
+    call: (request, key) => ({
+      headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+      body: { model: request.expectedModel.modelId, max_tokens: MAX_OUTPUT_TOKENS, temperature: 0, system: request.systemPrompt, messages: [{ role: 'user', content: request.userPayload }] },
+    }),
+    heard: parsedWith(FromAnthropic, value => ({ model: value.model, text: value.content[0].text })),
+  },
+  openai_api: {
+    vendorId: 'openai',
+    url: 'https://api.openai.com/v1/chat/completions',
+    call: (request, key) => ({
+      headers: { authorization: `Bearer ${key}` },
+      body: { model: request.expectedModel.modelId, max_completion_tokens: MAX_OUTPUT_TOKENS, temperature: 0, messages: [{ role: 'system', content: request.systemPrompt }, { role: 'user', content: request.userPayload }] },
+    }),
+    heard: parsedWith(FromOpenAi, value => ({ model: value.model, text: value.choices[0].message.content })),
+  },
+};
+
+async function keyOf(ctx: Ctx, provider: ProviderId): Promise<string | null> {
+  const [sub] = await ctx.db.select({ secretEnc: subscriptions.secretEnc }).from(subscriptions).where(and(eq(subscriptions.provider, provider), eq(subscriptions.kind, 'api_key'), isNull(subscriptions.removedAt)));
+  return sub?.secretEnc ? decryptSecret(sub.secretEnc, ctx.config.secret) : null;
+}
+
+async function callVendor(url: string, call: ReturnType<Direct['call']>, timeoutMs: number): Promise<unknown> {
+  const answer = await fetch(url, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(timeoutMs), headers: { 'content-type': 'application/json', ...call.headers }, body: JSON.stringify(call.body) });
+  return answer.ok ? answer.json() : null;
+}
+
+/* The one model call that is not a turn: a job would run in its program, with that program's own tools, so this goes straight to the
+   vendor. It is sure of who answered, or it says it is unavailable and whatever waits for it keeps waiting. It says nothing of why, as
+   what a vendor answers may hold anything. */
+export const freshModelCheck = (ctx: Ctx, options: FreshOptions = {}) => async (request: FreshModelRequest): Promise<FreshModelResponse> => {
+  const { expectedModel } = request;
+  const direct = DIRECT[expectedModel.providerId];
+  if (!direct || direct.vendorId !== expectedModel.vendorId || expectedModel.inferenceConfigHash !== FRESH_INFERENCE_HASH) return unavailable;
+  try {
+    const key = await keyOf(ctx, expectedModel.providerId);
+    if (!key) return unavailable;
+    const url = options.endpoints?.[expectedModel.providerId] ?? direct.url;
+    const spoken = direct.heard(await callVendor(url, direct.call(request, key), options.timeoutMs ?? FRESH_TIMEOUT_MS));
+    if (spoken?.model !== expectedModel.revisionId) return unavailable;
+    return { status: 'ok', reviewer: expectedModel, rawOutput: spoken.text, isolated: true };
+  } catch {
+    return unavailable;
+  }
+};

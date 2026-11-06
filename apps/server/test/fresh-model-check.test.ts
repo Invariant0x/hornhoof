@@ -7,7 +7,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { encryptSecret } from '../src/crypto/secrets.js';
 import { subscriptions } from '../src/db/schema.js';
 import { FRESH_INFERENCE_HASH, freshModelCheck } from '../src/modules/jobs/dispatch.js';
-import { company, type C } from './outbound-fresh-fixture.js';
+import { company } from './department-owner-fixture.js';
+
+type C = Awaited<ReturnType<typeof company>>;
 
 /* A vendor's API stands in here as a real HTTP server on this machine, with a synthetic key, so a call is seen as it really goes. */
 const KEY = 'synthetic-model-key-77c1';

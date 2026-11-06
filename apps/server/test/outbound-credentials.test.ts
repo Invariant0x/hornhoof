@@ -38,9 +38,10 @@ function logged() {
 
 /* Every table of the database as it stands, whoever could or could not read it. */
 async function wholeDatabase(w: World): Promise<string> {
-  const tables = await w.c.db.execute<{ table_name: string }>(sql`select table_name from information_schema.tables where table_schema = 'public'`);
+  const rowsOf = async (query: Parameters<typeof w.c.db.execute>[0]) => ((await w.c.db.execute(query)) as unknown as { rows: Record<string, unknown>[] }).rows;
+  const tables = await rowsOf(sql`select table_name from information_schema.tables where table_schema = 'public'`);
   const dump: string[] = [];
-  for (const { table_name } of tables.rows) dump.push(JSON.stringify((await w.c.db.execute(sql.raw(`select * from "${table_name}"`))).rows));
+  for (const { table_name } of tables) dump.push(JSON.stringify(await rowsOf(sql.raw(`select * from "${String(table_name)}"`))));
   return dump.join('\n');
 }
 
