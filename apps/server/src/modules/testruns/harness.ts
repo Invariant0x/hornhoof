@@ -20,7 +20,7 @@ import { liveNode } from '../nodes/nodes.js';
 import { identify } from '../nodes/socket.js';
 import { repositoryScope } from './describe.js';
 import { harnessPlaces } from './load.js';
-import { mayTake, placesOf, reaches, type Place } from './runs.js';
+import { mayTake, placesOf, type Place } from './runs.js';
 
 /* A product's test harness as one thing for all the company's machines. A unit is built once per architecture: the first
    machine to ask holds a lease and builds, the others wait and take its bundle through here. Every minute the machines are

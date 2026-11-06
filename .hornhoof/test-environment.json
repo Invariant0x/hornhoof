@@ -58,7 +58,7 @@
       "apps/web/node_modules",
       "packages/protocol/node_modules"
     ],
-    "cache": "copy"
+    "cache": "link"
   },
   "services": [
     {

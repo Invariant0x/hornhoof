@@ -9,7 +9,7 @@ import { hashToken } from '../src/crypto/tokens.js';
 import { harnessBuilds, harnessProducts, jobs, machines } from '../src/db/schema.js';
 import { harnessRound } from '../src/modules/testruns/harness.js';
 import { nextOf, type FakeNode } from './helpers.js';
-import { company, gets, idle } from './test-runs-company.js';
+import { company, gets } from './test-runs-company.js';
 
 const folders: string[] = [];
 afterEach(async () => { await Promise.all(folders.splice(0).map(dir => rm(dir, { recursive: true, force: true }))); });
@@ -32,7 +32,7 @@ async function shared(env: NodeJS.ProcessEnv = {}) {
 }
 type Shared = Awaited<ReturnType<typeof shared>>;
 
-const takesHarnesses = (node: FakeNode) => { node.send({ type: 'status', loggedIn: true, limits: null, load: idle() as never, testEnvironmentVersion: 1, testRuntimes: [], testHarness: 1 }); };
+const takesHarnesses = (node: FakeNode) => { node.send({ type: 'status', loggedIn: true, limits: null, testEnvironmentVersion: 1, testRuntimes: [], testHarness: 1 }); };
 /* A machine that says it takes harnesses. */
 async function capable(c: Shared, token: string, name: string) {
   const machine = await c.machine(token, name);
