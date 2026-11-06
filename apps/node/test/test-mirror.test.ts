@@ -1,14 +1,20 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { createServer } from 'node:http';
 import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import * as mirror from '../src/test-mirror.js';
 
+vi.mock('node:child_process', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  return { ...actual, spawn: vi.fn(actual.spawn) };
+});
+
 const folders: string[] = [];
-afterEach(async () => { await Promise.all(folders.splice(0).map(dir => rm(dir, { recursive: true, force: true }))); });
+afterEach(async () => { vi.mocked(spawn).mockReset(); vi.mocked(spawn).mockImplementation((await vi.importActual<typeof import('node:child_process')>('node:child_process')).spawn); await Promise.all(folders.splice(0).map(dir => rm(dir, { recursive: true, force: true }))); });
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' }, encoding: 'utf8' }).trim();
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'hh-mirror-')); folders.push(root);
@@ -24,6 +30,49 @@ async function fixture() {
 }
 
 describe('pinned independent checkouts', () => {
+  it.each([['AbortError', 'cancelled'], ['TimeoutError', 'timeout']])('normalizes failed mirror cancellation %s without losing its child outcome', async (name, stopped) => {
+    const f = await fixture(), controller = new AbortController();
+    const server = createServer(() => controller.abort(new DOMException('Preparation stopped.', name)));
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    onTestFinished(() => new Promise<void>(resolve => { server.closeAllConnections(); server.close(() => resolve()); }));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('Missing controlled Git endpoint.');
+    const source = { url: `http://127.0.0.1:${address.port}/shop.git`, token: '' };
+    const scope = { ...f.scope, repoUrlHash: createHash('sha256').update(source.url).digest('hex') };
+    const destination = join(f.context.cacheRoot, 'stopped-part');
+    let error: unknown;
+    try { await mirror.checkoutCommit(source, scope, f.first, destination, { ...f.context, signal: controller.signal }); } catch (caught) { error = caught; }
+    expect(error).toMatchObject({ network: true, stopped, outcome: { kind: 'child', exitCode: null, osCode: null } });
+    expect((error as { outcome: { signal: string } }).outcome.signal).toMatch(/^SIG/);
+    await expect(access(destination)).rejects.toThrow();
+    expect(await mirror.checkoutCommit(f.source, f.scope, f.first, join(f.context.cacheRoot, 'after-stop'), f.context)).toBe(f.first);
+  });
+
+  it('normalizes failed mirror spawn with its actual OS code and releases preparation resources', async () => {
+    const f = await fixture(), actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+    vi.mocked(spawn).mockImplementation((file, args, options) => actual.spawn(args?.includes('fetch') ? join(f.root, 'missing-git') : file, args, options));
+    const destination = join(f.context.cacheRoot, 'missing-child');
+    let error: unknown;
+    try { await mirror.checkoutCommit(f.source, f.scope, f.first, destination, f.context); } catch (caught) { error = caught; }
+    expect(error).toMatchObject({ network: true, outcome: { kind: 'child', exitCode: null, signal: null, osCode: 'ENOENT', stderr: '' } });
+    await expect(access(destination)).rejects.toThrow();
+    vi.mocked(spawn).mockImplementation(actual.spawn);
+    expect(await mirror.checkoutCommit(f.source, f.scope, f.first, join(f.context.cacheRoot, 'after-spawn'), f.context)).toBe(f.first);
+  });
+
+  it('masks split short Git credentials before bounding captured child stderr', async () => {
+    const f = await fixture(), actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+    const script = "process.stderr.write('z'.repeat(9000)+' first Q');setImmediate(()=>{process.stderr.write('7x end Q7x');process.exitCode=7;});";
+    vi.mocked(spawn).mockImplementation((file, args, options) => args?.includes('fetch') ? actual.spawn(process.execPath, ['-e', script], options) : actual.spawn(file, args, options));
+    let error: unknown;
+    try { await mirror.checkoutCommit({ ...f.source, token: 'Q7x' }, f.scope, f.first, join(f.context.cacheRoot, 'masked-part'), f.context); } catch (caught) { error = caught; }
+    expect(error).toMatchObject({ outcome: { kind: 'child', exitCode: 7, stderrTruncated: true } });
+    const stderr = (error as { outcome: { stderr: string } }).outcome.stderr;
+    expect(stderr).not.toContain('Q7x');
+    expect(stderr).toContain('first [hidden] end [hidden]');
+    expect(stderr.length).toBeLessThanOrEqual(8192);
+  });
+
   it('retains typed fetch stderr and releases the cache lock and staging before reporting failure', async () => {
     const f = await fixture(), destination = join(f.context.cacheRoot, 'failed-part');
     let error: unknown;

@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import type { ServerMessage } from '@hornhoof/protocol';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { runJob, type ProviderAdapter, type RunInput, type RunResult } from '../src/runner.js';
-import { ASKPASS, prepareRepo, type Git } from '../src/workspace.js';
+import { ASKPASS, gitPreparationFailure, prepareRepo, type Git } from '../src/workspace.js';
 
 const AGENT = '7d3c2a10-0000-4000-8000-000000000001';
 const TOKEN = 'ghp_repotoken0123456789';
@@ -224,6 +224,14 @@ describe('the askpass helper in the image', () => {
 });
 
 describe('with real git', () => {
+  it.each(['§', 'Q7x', 'abc-def'])('masks every known Git credential before retaining stderr: %s', token => {
+    const error = gitPreparationFailure({ kind: 'child', exitCode: 7, signal: null, osCode: null, stderr: `${'z'.repeat(9000)} ${token} ${Buffer.from(token).toString('base64')}`, stderrTruncated: false }, true, [token]);
+    expect(error.outcome.stderr).not.toContain(token);
+    expect(error.outcome.stderr).toContain('[hidden] [hidden]');
+    expect(error.outcome.stderr).toHaveLength(8192);
+    expect(error.outcome.stderrTruncated).toBe(true);
+  });
+
   it('captures a typed preparation failure with fixed real Git instead of recursing through PATH', async () => {
     const base = mkdtempSync(join(tmpdir(), 'hh-git-capture-'));
     const bin = join(base, 'bin');
