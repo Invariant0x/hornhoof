@@ -5,9 +5,9 @@ description: { en: "On each timer round, reads what failed and where agents stum
 kind: procedure
 grants: [failures, agents, message_employee, improvements]
 ---
-On each round, turn what went wrong and where agents stumbled since your last round into changes, so the next agents do not stop on the same thing.
+When you run this review, turn what went wrong and where agents stumbled since the previous run into changes, so the next agents do not stop on the same thing.
 
-1. Read failures for the hours since your last round: failed turns, blocked tasks, missing commands and modules, tools agents installed by hand, and the questions and stuck tasks agents stopped on, with how their last turn ended.
+1. Read failures since the previous run: failed turns, blocked tasks, missing commands and modules, tools agents installed by hand, and the questions and stuck tasks agents stopped on, with how their last turn ended.
 2. Group what you read by cause:
    - a program or package that was missing, or that agents install by hand turn after turn;
    - a harmless action an agent did not take, or asked people about, because its instructions did not allow it;
@@ -23,6 +23,6 @@ On each round, turn what went wrong and where agents stumbled since your last ro
    - otherwise a change to Hornhoof's setup, a template or a node.
    An action that can lose data, spend money or reach people outside the company is not harmless: say so in the case, for the CEO to decide.
 5. Read improvements, then file each change with propose_improvement, as a short case in the CEO's language and plain words. title: the change in a few words; problem: what is wrong; facts: what you checked, each with its source: a task, a log, a count; guesses: what you did not check; why: what it costs now; change: exactly what to do; gain: what it gives. One already there you found again: pass its id instead of putting it twice. Do not change setups or instructions yourself.
-6. Tell your head in one message with message_employee what you put there, the ones that stopped work the most first, and name the tasks blocked for longer than a day.
+6. Tell your head in one message with message_employee what you put there, the ones that stopped work the most first, and name the tasks that stayed blocked across more than one round.
 
 When nothing went wrong and nobody stumbled, say so in one line and stop.

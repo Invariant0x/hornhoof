@@ -1,7 +1,7 @@
 ---
 id: biz-partner-evaluation
 title: { en: "Partner evaluation", ru: "Оценка партнера" }
-description: { en: "Decides whether a partner is worth pursuing and at what level, with a 90-day plan and exit terms.", ru: "Решает, стоит ли работать с партнером и на каком уровне, с планом на 90 дней и условиями выхода." }
+description: { en: "Decides whether a partner is worth pursuing and at what level, with a first-phase plan and exit terms.", ru: "Решает, стоит ли работать с партнером и на каком уровне, с планом первого этапа и условиями выхода." }
 kind: procedure
 sources: [alirezarezvani/claude-skills commercial/skills/partnerships-architect/SKILL.md]
 ---
@@ -12,7 +12,7 @@ For each candidate partner, write:
 3. **Type**: referral, reseller, integration, technology, co-marketing or marketplace. Each needs different work; name the one that fits.
 4. **Tier verdict**: strategic (worth engineering and leadership time), standard (a defined program, little custom work) or not now, with the reason in two sentences.
 5. **Economics**: expected deals or users per quarter, revenue share or fees, our cost to serve. Use biz-channel-economics for the numbers.
-6. **90-day plan**: three to five milestones, each with an owner department and a measurable result, such as a working integration or the first five referred customers.
+6. **First-phase plan**: three to five milestones, each with an owner department and a measurable result, such as a working integration or the first five referred customers.
 7. **Exit terms**: what ends the partnership (missed targets, conflict, breach), the notice period, and what happens to shared customers and data.
 8. **Risks**: dependence on one partner, brand, data they would see, exclusivity they ask for.
 

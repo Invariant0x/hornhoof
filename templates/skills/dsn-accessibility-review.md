@@ -15,6 +15,6 @@ Check against WCAG 2.2 level AA. Test a built screen; on a mockup, check what ca
 - [ ] **Zoom and reflow**: usable at 200 percent zoom and at 320 px width without horizontal scroll.
 - [ ] **Targets**: at least 24 by 24 px, and 44 by 44 for main touch controls.
 - [ ] **Motion**: nothing flashes more than three times a second; animation respects the reduced-motion setting.
-- [ ] **Language**: the page declares its language, and the Russian version declares Russian.
+- [ ] **Language**: the page declares its language, and each language version declares its own.
 
 Run an automated checker (for example axe through Playwright), then check by hand: tools find only part of the problems. Each finding gives the criterion number, where it is, the evidence (screenshot or tool output) and the fix.

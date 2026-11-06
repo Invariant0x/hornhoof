@@ -10,7 +10,7 @@ sources: [anthropics/knowledge-work-plugins finance, anthropics/financial-servic
 3. For each line above the threshold, find the cause in the records, not in a guess: volume, price, mix, timing (an invoice in the wrong month), a one-off, or an error. Split a difference into these parts when it has several.
 4. Tell timing from real change: timing reverses next month, real change does not.
 5. Write one or two sentences per line: what moved, by how much, why, whether it will continue, and what action it needs. Name the evidence (invoice, contract, usage report).
-6. Send the errors you find back to the bookkeeper as tasks; do not hide them in the commentary.
+6. Send the errors you find back to the maker as tasks; do not hide them in the commentary.
 7. Put the three changes that matter most at the top, for the CEO.
 
 Never explain a difference you could not trace; write "not yet explained" and the next step. Numbers in the commentary must tie exactly to the statements.

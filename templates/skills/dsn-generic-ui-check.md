@@ -14,7 +14,7 @@ Signs of a generic interface (count them):
 - [ ] Purple or blue gradients, glass effects or glows the brand gives no reason for.
 - [ ] Emoji used as icons, or icons that decorate instead of inform.
 - [ ] Shadows and rounded corners on every box, so nothing stands out.
-- [ ] Filler words: "Unlock the power of", "Seamless", "Revolutionize", or their Russian twins.
+- [ ] Filler words: "Unlock the power of", "Seamless", "Revolutionize", or their twins in another language.
 - [ ] Every section with the same height and rhythm, top to bottom.
 - [ ] Nothing a user would remember after closing the page.
 

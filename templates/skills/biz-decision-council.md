@@ -10,7 +10,7 @@ Use this for a decision that is costly to undo: an exclusive partnership, a new 
 1. Write the decision as a yes or no question, with the proposal attached.
 2. Review it in separate passes, one angle per pass, each in a fresh context, or by a member on another provider if your company has one:
    - **Customer**: would the people we sell to want this, and what do they lose?
-   - **Money**: what it costs, when it pays back, what it does to margin. Ask Finance through the orchestrator for numbers you lack.
+   - **Money**: what it costs, when it pays back, what it does to margin. Ask Finance through your head and the orchestrator for numbers you lack.
    - **Operator**: who does the work, what breaks, what it takes from current plans.
    - **Skeptic**: the strongest case against, and the most likely way this fails.
 3. Each pass gives a verdict (go, change, stop), its main reason, and the evidence that would change its mind.

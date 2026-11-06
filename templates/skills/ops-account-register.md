@@ -8,7 +8,7 @@ sources: []
 Keep one register where your company named. One row per account or subscription:
 
 - Service, plan, what it is used for, the departments that use it.
-- Owner: the company or a named person. Personal AI subscriptions (Claude, Codex, Kimi and others) stay their owner's and serve wherever the owner works.
+- Owner: the company or a named person. Personal AI subscriptions stay their owner's and serve wherever the owner works.
 - Cost per month, currency, billing date, renewal date, whether it renews on its own.
 - Its secret store entries, by name.
 - Limits that matter: seats, quotas, usage caps.
@@ -16,8 +16,8 @@ Keep one register where your company named. One row per account or subscription:
 
 Once per turn:
 
-1. Check renewals in the next 30 days and tell your head which ones still earn their cost.
-2. Flag accounts nobody used for 30 days as candidates to cancel.
+1. Check renewals that fall before the next review and tell your head which ones still earn their cost.
+2. Flag accounts nobody used since the previous check as candidates to cancel.
 3. If the CEO shares billing, compare it with the register; a charge without a row is a finding.
 
 Cancelling, like signing up, needs the CEO's approval. Never change a plan or a payment method yourself.

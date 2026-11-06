@@ -5,7 +5,7 @@ description: { en: "Keeps one shared document on who the product is for, what it
 kind: procedure
 sources: [coreyhaines31/marketingskills skills/product-marketing/SKILL.md]
 ---
-Every marketing text starts from one shared context document per product, kept where your company named. Members read it before they write; you own it.
+Every marketing text starts from one shared context document per product, kept where your company named. Everyone who writes reads it first; its owner keeps it current.
 
 It holds:
 

@@ -9,7 +9,7 @@ Run it weekly, before the pipeline review, and report counts and lists.
 
 - [ ] **No next step**: open deals without one, or with one in the past.
 - [ ] **Past close dates** on open deals.
-- [ ] **Stale deals**: no activity for 30 days in an active stage.
+- [ ] **Stale deals**: no recorded activity since the last hygiene run, in an active stage.
 - [ ] **Missing fields**: amount, stage, owner, source, main contact, close date.
 - [ ] **Stage without evidence**: a late stage with no recorded meeting or proposal.
 - [ ] **Duplicates**: companies and contacts entered twice; propose which record wins and what merges into it.

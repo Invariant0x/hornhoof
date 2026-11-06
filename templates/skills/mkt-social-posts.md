@@ -13,4 +13,4 @@ sources: [coreyhaines31/marketingskills]
 6. **Timing**: propose a time for each post based on when our audience is active, within the number of posts per network your head's plan allows.
 7. **Check facts and links**, and note what each claim relies on.
 
-Hand over each draft with its network, account, time, image and alt text. It goes to publish approval through your head. You post only the exact text the CEO approved, and only from the accounts operations set up for the company.
+Hand over each draft with its network, account, time, image and alt text. It goes to publish approval through your head. Only the exact approved text goes out, and only from the accounts operations set up for the company.

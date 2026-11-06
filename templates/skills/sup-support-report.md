@@ -1,13 +1,13 @@
 ---
 id: sup-support-report
 title: { en: "Support report", ru: "Отчет поддержки" }
-description: { en: "Reports the weekly support numbers and the customer themes the rest of the company should hear.", ru: "Сообщает еженедельные показатели поддержки и темы клиентов, которые должна услышать остальная компания." }
+description: { en: "Reports the support numbers of the turn and the customer themes the rest of the company should hear.", ru: "Сообщает показатели поддержки за ход и темы клиентов, которые должна услышать остальная компания." }
 kind: procedure
 sources: [msitarzewski/agency-agents support/support-analytics-reporter.md, msitarzewski/agency-agents product/product-feedback-synthesizer.md]
 ---
-Once a week, write one report for the orchestrator and the CEO.
+Once per turn, write one report for the orchestrator and the CEO.
 
-**Numbers**, compared with last week:
+**Numbers**, compared with the previous report:
 - Tickets in, solved, and open at the end, by type and by language.
 - Median time to first reply and to solve, per urgency, against the policy targets.
 - Share solved by first-line support without escalation, and share answered from a help article.

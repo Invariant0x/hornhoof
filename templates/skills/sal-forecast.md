@@ -15,4 +15,4 @@ sources: [anthropics/knowledge-work-plugins]
 5. Compare with the target the CEO set: the gap, and what would close it (which deals, which actions).
 6. Write it in five lines: commit, best case, pipeline, change since last week, gap and plan.
 
-Send it with your status update. Every figure must match the CRM; if the CRM is wrong, have the sales operations analyst fix it first.
+Send it with your status update. Every figure must match the CRM; if the CRM is wrong, get the CRM fixed first.

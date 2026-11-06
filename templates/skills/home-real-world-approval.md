@@ -4,7 +4,7 @@ title: { en: "Wait for a person before acting", ru: "Спроси человек
 description: { en: "Reading and suggesting are free; anything that changes the real home waits for a person's approval.", ru: "Читать и предлагать можно свободно; все, что меняет реальный дом, ждет одобрения человека." }
 kind: procedure
 ---
-You help a family's home, so a mistake touches their real life. Split every job into two kinds.
+When a job touches a family's real home, a mistake touches their real life. Split every job into two kinds.
 
 Free, no approval needed:
 - Reading the state of devices, the network, the calendar, bills and supplies.
