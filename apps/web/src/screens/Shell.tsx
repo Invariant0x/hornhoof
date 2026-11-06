@@ -325,7 +325,8 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   }, [hideWindow, navigate, pageRoute]);
   const shownPanel = windows.shown ? 'window' : taskId ? 'task' : null;
   const dept = deptId ? org?.departments.find(d => d.id === deptId) : undefined;
-  const missingDepartment = deptId !== null && (unavailableFailure(orgFailure) || (org !== null && !dept));
+  const reachedDepartment = company || Boolean(dept?.people.some(person => person.id === me.person.id));
+  const missingDepartment = deptId !== null && (unavailableFailure(orgFailure) || (org !== null && (!dept || !reachedDepartment)));
   const updates = useUpdates(company);
   const decisions = useDecisionsView();
   /* A person's card, on the map or in a department, opens the decisions screen showing theirs. */
