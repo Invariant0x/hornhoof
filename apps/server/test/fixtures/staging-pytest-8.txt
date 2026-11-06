@@ -1,0 +1,105 @@
+=========================== short test summary info ============================
+FAILED test_pytest_impact.py::test_transitive_relative_edges_select_only_dependents - AssertionError: assert {'reason': 'n...'unavailable'} == {'reason': No...tus': 'ready'}
+  
+  Differing items:
+  {'status': 'unavailable'} != {'status': 'ready'}
+  {'selected': []} != {'selected': ['tests/test_prices.py', 'tests/test_report.py']}
+  {'reason': 'not_implemented'} != {'reason': None}
+  
+  Full diff:
+    {
+  -     'reason': None,
+  +     'reason': 'not_implemented',
+  -     'selected': [
+  +     'selected': [],
+  ?                  ++
+  +     'status': 'unavailable',
+  -         'tests/test_prices.py',
+  -         'tests/test_report.py',
+  -     ],
+  -     'status': 'ready',
+    }
+FAILED test_pytest_impact.py::test_selected_files_run_with_real_pytest - AssertionError: assert 'unavailable' == 'ready'
+  
+  - ready
+  + unavailable
+FAILED test_pytest_impact.py::test_changed_test_itself_is_selected - AssertionError: assert [] == ['tests/test_labels.py']
+  
+  Right contains one more item: 'tests/test_labels.py'
+  
+  Full diff:
+  + []
+  - [
+  -     'tests/test_labels.py',
+  - ]
+FAILED test_pytest_impact.py::test_proven_unreferenced_module_has_no_tests - AssertionError: assert {'reason': 'n...'unavailable'} == {'reason': No...tus': 'ready'}
+  
+  Omitting 1 identical items, use -vv to show
+  Differing items:
+  {'status': 'unavailable'} != {'status': 'ready'}
+  {'reason': 'not_implemented'} != {'reason': None}
+  
+  Full diff:
+    {
+  -     'reason': None,
+  +     'reason': 'not_implemented',
+        'selected': [],
+  -     'status': 'ready',
+  +     'status': 'unavailable',
+    }
+FAILED test_pytest_impact.py::test_uncertain_graph_is_unavailable[extra0] - AssertionError: assert 'not_implemented' != 'not_implemented'
+FAILED test_pytest_impact.py::test_uncertain_graph_is_unavailable[extra1] - AssertionError: assert 'not_implemented' != 'not_implemented'
+FAILED test_pytest_impact.py::test_uncertain_graph_is_unavailable[extra2] - AssertionError: assert 'not_implemented' != 'not_implemented'
+FAILED test_pytest_impact.py::test_uncertain_graph_is_unavailable[extra3] - AssertionError: assert 'not_implemented' != 'not_implemented'
+FAILED test_pytest_impact.py::test_uncertain_graph_is_unavailable[extra4] - AssertionError: assert 'not_implemented' != 'not_implemented'
+FAILED test_pytest_impact.py::test_uncertain_graph_is_unavailable[extra5] - AssertionError: assert 'not_implemented' != 'not_implemented'
+FAILED test_pytest_impact.py::test_uncertain_graph_is_unavailable[extra6] - AssertionError: assert 'not_implemented' != 'not_implemented'
+FAILED test_pytest_impact.py::test_uncertain_graph_is_unavailable[extra7] - AssertionError: assert 'not_implemented' != 'not_implemented'
+FAILED test_pytest_impact.py::test_uncertain_graph_is_unavailable[extra8] - AssertionError: assert 'not_implemented' != 'not_implemented'
+FAILED test_pytest_impact.py::test_unsafe_paths_do_not_open_files[../secret.py] - AssertionError: assert 'not_implemented' == 'invalid_inventory'
+  
+  - invalid_inventory
+  + not_implemented
+FAILED test_pytest_impact.py::test_unsafe_paths_do_not_open_files[/etc/passwd] - AssertionError: assert 'not_implemented' == 'invalid_inventory'
+  
+  - invalid_inventory
+  + not_implemented
+FAILED test_pytest_impact.py::test_unsafe_paths_do_not_open_files[src/../a.py] - AssertionError: assert 'not_implemented' == 'invalid_inventory'
+  
+  - invalid_inventory
+  + not_implemented
+FAILED test_pytest_impact.py::test_symlink_cannot_import_outside_the_package - AssertionError: assert 'not_implemented' == 'invalid_inventory'
+  
+  - invalid_inventory
+  + not_implemented
+FAILED test_pytest_impact.py::test_module_cycles_terminate_and_keep_all_dependents - AssertionError: assert [] == ['tests/test_...st_report.py']
+  
+  Right contains 3 more items, first extra item: 'tests/test_labels.py'
+  
+  Full diff:
+  + []
+  - [
+  -     'tests/test_labels.py',
+  -     'tests/test_prices.py',
+  -     'tests/test_report.py',
+  - ]
+FAILED test_pytest_impact.py::test_package_initializer_is_a_dependency - AssertionError: assert [] == ['tests/test_report.py']
+  
+  Right contains one more item: 'tests/test_report.py'
+  
+  Full diff:
+  + []
+  - [
+  -     'tests/test_report.py',
+  - ]
+FAILED test_pytest_impact.py::test_cli_emits_json_without_importing_repository_modules - AssertionError: assert [] == ['tests/test_...st_report.py']
+  
+  Right contains 2 more items, first extra item: 'tests/test_prices.py'
+  
+  Full diff:
+  + []
+  - [
+  -     'tests/test_prices.py',
+  -     'tests/test_report.py',
+  - ]
+20 failed, 1 passed in 0.17s
