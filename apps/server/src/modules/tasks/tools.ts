@@ -6,7 +6,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, DECISION_TOPICS, departments, jobs, requests, tasks } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { ask, blocked, cancel, CLOSED, comment, createTask, gateLeads, inRepository, listed, openAfter, refuse, report, taskSpot, updateTask, verdict, type Moved, type Task } from './engine.js';
+import { ask, blocked, cancel, CLOSED, comment, createTask, gateLeads, inRepository, listed, openAfter, refuse, report, updateTask, verdict, type Moved, type Task } from './engine.js';
 import { requireBlockingGate } from './gate-triggers.js';
 import { replanWait } from './wait-state.js';
 import { carriesFile, encodedHint } from './attachments.js';

@@ -158,7 +158,7 @@ describe('access to the computer the server runs on', () => {
     const asked = await askedOfCeo(await mcp(app, TOKEN), 'Restart the nodes outside AppArmor.');
     expect(asked.isError).toBeFalsy();
     const shown = (await app.inject({ method: 'GET', url: '/api/computer', ...as(ceo) })).json();
-    expect(shown).toEqual({ available: true, until: null, asked: { reason: 'Restart the nodes outside AppArmor.', at: expect.any(String) }, machine: null, canAnswer: true });
+    expect(shown).toEqual({ available: true, until: null, asked: { reason: 'Restart the nodes outside AppArmor.', at: expect.any(String), purpose: { kind: 'ceo_permission', permission: 'server_computer_access', until: expect.any(String) } }, machine: null, canAnswer: true });
 
     const before = Date.now();
     const opened = await app.inject({ method: 'POST', url: '/api/computer/open', ...as(ceo) });
