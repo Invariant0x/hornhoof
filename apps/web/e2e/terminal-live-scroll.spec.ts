@@ -168,3 +168,56 @@ for (const write of [false, true]) {
     }
   });
 }
+
+test('3J preserves the reading place and the bottom on the real terminal', async ({ page }, info) => {
+  const dir = mkdtempSync(join(tmpdir(), 'hh-live-scroll-'));
+  const tmux = new Tmux({ socket: `hh-live-scroll-${process.pid}-clear`, env: { PATH: process.env.PATH ?? '', HOME: dir } });
+  const children: ReturnType<Tmux['attach']>[] = [];
+  const histories: ViewHistory[] = [];
+  try {
+    const program = `process.stdout.write(Array.from({length:1000},(_,i)=>\`LINE-\${i}\\r\\n\`).join(''));setInterval(()=>{},1000)`;
+    await tmux.launch('agent', { cwd: dir, cols: 80, rows: 24, command: [process.execPath, '-e', program] });
+    const live: AgentFixture = { awake: true, hasTask: true, messages: [], connections: 0, canType: false };
+    await serveAgentWindow(page, live);
+    let streamed = '';
+    await page.routeWebSocket('**/api/agents/b1/terminal*', async ws => {
+      const child = tmux.attach('agent', 80, 24, false);
+      children.push(child);
+      let history: ViewHistory | null = null;
+      ws.onClose(() => {
+        history?.stop();
+        child.kill();
+      });
+      ws.send(JSON.stringify({ type: 'ready', write: false }));
+      ws.send(JSON.stringify({ type: 'program', running: true }));
+      history = await streamView(tmux, child, data => {
+        streamed += data;
+        ws.send(JSON.stringify({ type: 'data', data }));
+      });
+      histories.push(history);
+    });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/');
+    await page.getByRole('button', { name: /Development/ }).click();
+    await page.getByRole('region', { name: 'Members' }).getByRole('button', { name: /Bruno/ }).click();
+    const rows = page.locator('.xterm-rows');
+    await expect(rows).toContainText('LINE-999');
+    await page.locator('.xterm-viewport').evaluate((el, line) => { el.scrollTop = el.scrollHeight * line / 1000; }, 676);
+    await expect(rows).toContainText('LINE-700');
+    histories.at(-1)!.resized();
+    await expect.poll(() => streamed).toContain('\x1b[3J');
+    await expect(rows).toContainText('LINE-700');
+    await page.screenshot({ path: info.outputPath('clear-history-reading.png') });
+    const box = await rows.boundingBox();
+    await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+    await page.mouse.wheel(0, 12000);
+    await expect(rows).toContainText('LINE-999');
+    histories.at(-1)!.resized();
+    await expect(rows).toContainText('LINE-999');
+  } finally {
+    for (const history of histories) history.stop();
+    for (const child of children) child.kill();
+    await tmux.stopAll();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
