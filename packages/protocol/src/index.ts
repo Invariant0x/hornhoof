@@ -1,14 +1,19 @@
 export * from './department-mode.js';
+export * from './external-operations.js';
 import type { DepartmentWorkMode } from './department-mode.js';
 export * from './request-materials.js';
 export * from './questions.js';
+export { WorkspaceCommitSha, NodeRef, TaskWorkspaceBinding, RepoRelativeArea, IntegrationTarget, TaskWorkspaceSpec, WorkspaceProblemCode, WorkspaceProblem, type VerifiedWorkspace } from './task-workspace.js';
 export { APPROVAL_CHANNELS, APPROVAL_MODES, ApprovalAmount, ApprovalChannel, ApprovalRule, DEFAULT_APPROVAL_RULE, approvalNeeded, kindKey, ruleOf, type ApprovalMode, type ApprovalWork, type StoredApprovalRule } from './approval-policy.js';
 export { NOTIFICATION_NAMES, NotificationSchema, NotificationSourceSchema, type Notification, type NotificationSource } from './notifications.js';
 export { MachineDrain, NodeWait } from './machine-drain.js';
 export { inLane } from './lane.js';
 export * from './pipeline-report.js';
 export * from './model-check.js';
+export * from './outbound.js';
 export * from './test-terminals.js';
+export { HandoffMessage, HandoffControlMessage, HandoffAssignment, ResetSource } from './task-handoff.js';
+import { HandoffMessage, HandoffControlMessage, HandoffAssignment, ResetSource } from './task-handoff.js';
 export { COMMIT_SHA, CommitSha, ownBranch } from './test-commit.js';
 export { runtimeVersionMatches, requiredTestRuntimes, supportsTestProfile, EnvironmentProblem, TestsDescribed, EnvironmentDescription, EnvironmentSnapshot, InputDigest, ProductCommitSha, RuntimeCapability, TestExecution, TestUnit, TestEnvironmentReceipt, TEST_DESCRIPTION_BYTES, validateEnvironmentDescription, Command, EnvironmentDigest, RepositoryPath, RepositoryScope, TestArtifact, TestEnvironmentV1, TestMutation, TestPrepare, TestReset, TestService, TestSplit, TestSuite, TEST_ENVIRONMENT_BYTES, hashTestEnvironment, parseTestEnvironment } from './test-environment.js';
 import { z } from 'zod';
@@ -32,7 +37,7 @@ export type JobError = (typeof JOB_ERRORS)[number];
    window is used up, the sign-in no longer works, the program waits for a first setup only the plan's owner may pass,
    such as accepting its terms, it did not get Hornhoof's tools, the service could not be reached, the answer broke off,
    the provider will not do this work, the context or output is too big, the program itself is gone, or anything else. */
-export const FAILURE_KINDS = ['overloaded', 'rate_limited', 'usage_limit', 'auth', 'setup', 'tools', 'network', 'cut', 'refused', 'too_big', 'crash', 'unknown'] as const;
+export const FAILURE_KINDS = ['overloaded', 'model_access_denied', 'rate_limited', 'usage_limit', 'auth', 'setup', 'tools', 'network', 'cut', 'refused', 'too_big', 'crash', 'unknown'] as const;
 export type FailureKind = (typeof FAILURE_KINDS)[number];
 /* A failed turn's kind, the program's own words for it, cut to size, and whether the program called it worth trying again. */
 export const Failure = z.object({ kind: z.enum(FAILURE_KINDS), text: z.string().max(2000), retryable: z.boolean() });
@@ -96,6 +101,7 @@ const LimitWindow = z.object({
   name: z.string().min(1).max(40),
   utilization: z.number().min(0).max(1).nullable(),
   resetsAt: z.string().max(40).nullable(),
+  resetSource: ResetSource.optional(),
 });
 
 /* Usage windows as the provider reports them, for example five hours and seven days. A complete list names every window
@@ -422,6 +428,7 @@ export const NodeReconnect = z.object({
 export type NodeReconnect = z.infer<typeof NodeReconnect>;
 
 const NodeMessage = z.discriminatedUnion('type', [
+  HandoffMessage,
   CheckAcquire, CheckRelease, TestsDescribed,
   /* terminals: the node runs agents in sessions people can watch and type into. */
   /* tests: the parts of test runs it runs, or ran and Hornhoof has not confirmed. */
@@ -607,6 +614,7 @@ function validTestMode(message: { command: string; commitSha?: string | null; en
 }
 
 const ServerMessage = z.discriminatedUnion('type', [
+  HandoffControlMessage,
   CheckQueueReply,
   z.object({
     type: z.literal('job.run'),
@@ -635,6 +643,10 @@ const ServerMessage = z.discriminatedUnion('type', [
     workspace: Workspace.nullable().optional(),
     /* The agent's skills, which the node writes as files where its program finds them; each name becomes a folder. */
     skills: z.array(SkillFile).max(MAX_SKILLS).optional(),
+    taskId: Id.optional(),
+    workspaceId: Id.optional(),
+    assignmentEpoch: z.number().int().min(0).optional(),
+    handoff: HandoffAssignment.optional(),
   }),
   z.object({ type: z.literal('programs.update') }),
   z.object({ type: z.literal('job.cancel'), jobId: Id }),

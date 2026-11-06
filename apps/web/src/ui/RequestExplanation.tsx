@@ -57,21 +57,27 @@ export const hasExecutableText = (value: string): boolean => EXECUTABLE_TEXT_RE.
 
 const isSafePlainText = (value: string | null): value is string => value !== null && !hasExecutableText(value);
 
+const isCommitArtifact = (rec: RawRecord): boolean =>
+  rec.kind === 'commit' && typeof rec.sha === 'string' && COMMIT_SHA_RE.test(rec.sha);
+
+const isDesignArtifact = (rec: RawRecord): boolean =>
+  rec.kind === 'design' && Array.isArray(rec.images) && rec.images.length > 0;
+
 function isValidReadyArtifact(artifact: unknown): boolean {
   const rec = asRecord(artifact);
-  if (!rec) return false;
-  if (rec.kind === 'commit') return typeof rec.sha === 'string' && COMMIT_SHA_RE.test(rec.sha);
-  return rec.kind === 'design' && Array.isArray(rec.images) && rec.images.length > 0;
+  return rec !== null && (isCommitArtifact(rec) || isDesignArtifact(rec));
 }
+
+const isActionKind = (kind: string | null): kind is HumanActionKind => kind !== null && ACTION_KINDS.has(kind);
 
 function parseActionBinding(raw: unknown): ActionBindingView | null {
   const rec = asRecord(raw);
   if (!rec) return null;
   const kind = cleanString(rec.kind);
   const resourceId = cleanString(rec.resourceId);
-  if (!kind || !ACTION_KINDS.has(kind) || !resourceId) return null;
+  if (!isActionKind(kind) || !resourceId) return null;
   return {
-    kind: kind as HumanActionKind,
+    kind,
     resourceId,
     scope: cleanString(rec.scope),
     duration: cleanString(rec.duration),
@@ -79,12 +85,20 @@ function parseActionBinding(raw: unknown): ActionBindingView | null {
   };
 }
 
+const readyClassification = (artifact: unknown): ParsedClassification | null =>
+  isValidReadyArtifact(artifact) ? { kind: 'ready_result', actionBinding: null } : null;
+
+function actionClassification(rawBinding: unknown): ParsedClassification | null {
+  const actionBinding = parseActionBinding(rawBinding);
+  return actionBinding ? { kind: 'human_only_action', actionBinding } : null;
+}
+
 function parseClassification(raw: unknown): ParsedClassification | null {
   const rec = asRecord(raw);
   if (!rec) return null;
-  if (rec.kind === 'ready_result') return isValidReadyArtifact(rec.artifact) ? { kind: 'ready_result', actionBinding: null } : null;
-  const actionBinding = rec.kind === 'human_only_action' ? parseActionBinding(rec.actionBinding) : null;
-  return actionBinding ? { kind: 'human_only_action', actionBinding } : null;
+  if (rec.kind === 'ready_result') return readyClassification(rec.artifact);
+  if (rec.kind === 'human_only_action') return actionClassification(rec.actionBinding);
+  return null;
 }
 
 export function isHiddenSourceRequest(request: WaitingRequest): boolean {
@@ -103,15 +117,21 @@ export function isAuthorizedHumanRequest(request: WaitingRequest): boolean {
   return rec.audience === 'human' && parseClassification(rec.classification) !== null;
 }
 
-function parseOptionItem(item: unknown): { option: HumanOptionView | null; poisoned: boolean } {
+const isPoisonedOptional = (value: string | null): boolean => value !== null && hasExecutableText(value);
+
+function readOptionRecord(item: unknown): { rec: RawRecord; label: string } | null {
   const rec = asRecord(item);
-  if (!rec) return { option: null, poisoned: false };
+  if (!rec) return null;
   const label = cleanString(rec.label);
-  if (!label) return { option: null, poisoned: false };
-  const consequence = cleanString(rec.consequence);
-  const badConsequence = consequence !== null && hasExecutableText(consequence);
-  if (hasExecutableText(label) || badConsequence) return { option: null, poisoned: true };
-  return { option: { label, consequence, image: cleanString(rec.image) }, poisoned: false };
+  return label ? { rec, label } : null;
+}
+
+function parseOptionItem(item: unknown): { option: HumanOptionView | null; poisoned: boolean } {
+  const entry = readOptionRecord(item);
+  if (!entry) return { option: null, poisoned: false };
+  const consequence = cleanString(entry.rec.consequence);
+  if (hasExecutableText(entry.label) || isPoisonedOptional(consequence)) return { option: null, poisoned: true };
+  return { option: { label: entry.label, consequence, image: cleanString(entry.rec.image) }, poisoned: false };
 }
 
 function parseEnvelopeOptions(raw: unknown): { options: HumanOptionView[]; poisoned: boolean } {

@@ -12,8 +12,16 @@ export type AgentSql = { run: (text: string, mode: SqlMode) => Promise<SqlAnswer
 
 /* Signing in, joining and installing a node stay out of reach, and so does the public link, whose address goes into
    machine commands. Plans' sealed sign-ins too: a row put there would reach a node as its plan's sign-in. Checks made by a
-   model too: their held-out examples stay away from who tunes a prompt, and no row put there can turn a check on. */
-export const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials', 'request_internal', 'model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations'];
+   model too: their held-out examples stay away from who tunes a prompt, and no row put there can turn a check on. The
+   outbound gateway too: contacts and payloads are private, and a row put there would forge an approval, a receipt, a
+   consent or a day's count, even from a turn of the orchestrator answering the CEO. Waits' owners, dates and policies
+   too: a row written by hand could move a promise or quiet an alarm, and they name private work. */
+const OUTBOUND = [
+  'outbound_channels', 'outbound_policies', 'outbound_accounts', 'outbound_bindings', 'outbound_catalog_revisions', 'outbound_contacts', 'outbound_permissions', 'outbound_contact_events',
+  'outbound_messages', 'outbound_message_revisions', 'outbound_approvals', 'outbound_review_receipts', 'outbound_daily_usage', 'outbound_attempts', 'outbound_events', 'outbound_sampling_counters',
+  'support_tickets', 'support_classifications',
+];
+export const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials', 'request_internal', 'model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations', 'model_check_certificates', 'task_waits', 'wait_policies', ...OUTBOUND, 'external_operations', 'external_recovery_cases', 'external_recovery_members', 'external_recovery_attempts', 'external_recovery_notices'];
 /* Columns that hold a password, a token or a key: neither role reads or writes them. A machine's key goes with
    every join from it, so it is one too. The account a node is signed in to names a person's email. */
 export const SECRET: Record<string, string[]> = {
@@ -33,12 +41,13 @@ export const SECRET: Record<string, string[]> = {
    carry a repository's token and the task's files to the machines lent to them. And what waits for people's decisions
    with the logs that say who wrote and who decided: a request closes only through answer_request, in a turn of a person
    who may take it, and a forged message would make a turn answer someone else. The numbers of the pipeline report, which
-   only Hornhoof works out, so that they can be believed. */
+   only Hornhoof works out, so that they can be believed. A department's rules of approval, which say what a person must
+   see first, and change only through a person's guarded API. */
 const READ_ONLY = [
   'people', 'person_access', 'subscriptions', 'machines', 'nodes', 'node_connections', 'test_runs', 'test_parts',
   'requests', 'proposals', 'agent_events', 'task_events', 'program_instances', 'program_deliveries',
   'program_operator_cases', 'program_operator_actions', 'program_operator_signals', 'wait_notices', 'person_changes', 'attachments',
-  'turn_snapshots', 'test_part_timings',
+  'turn_snapshots', 'test_part_timings', 'approval_policies',
 ];
 /* An employee's fields that give it tools, a place or the machine its turns and their tokens go to: they change only by
    hiring and on its card, which make the CEO's checks. A head's department is held by a trigger, as a column right
@@ -46,8 +55,9 @@ const READ_ONLY = [
 const AGENT_FIXED = ['kind', 'role_key', 'skills', 'subscription_id', 'node_id'];
 /* Where a department's agents push their work, and what lets a commit past GitHub's tests: set only with set_repository. */
 const REPOSITORY = ['repo_url', 'repo_branch', 'repo_token_last4', 'repo_author_name', 'repo_author_email', 'repo_full_test_command'];
-/* Settings change only through a person's guarded API, never through generic SQL. */
-const DEPARTMENT_SETTINGS = [...REPOSITORY, 'work_mode'];
+/* Settings change only through a person's guarded API, never through generic SQL. So does who owns a department, as its
+   owner decides what its agents send out. */
+const DEPARTMENT_SETTINGS = [...REPOSITORY, 'work_mode', 'owner_person_id'];
 /* What of a turn the orchestrator may change, to close one that hangs. */
 const JOB_STATUS = ['status', 'error', 'finished_at'];
 /* How urgent work is changes only through the CEO's route and tools, which keep a tree of tasks as urgent as its top. */

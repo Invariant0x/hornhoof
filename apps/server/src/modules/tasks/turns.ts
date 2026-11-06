@@ -3,6 +3,7 @@ import type { Ctx } from '../../app.js';
 import { agentEvents, agents, companies, departments, people, tasks, turns, type TurnMessage } from '../../db/schema.js';
 import { CLOSED, note, published, refuse, type Task, type Tx, type Wake } from './engine.js';
 import { keepWakes } from './outbox.js';
+import { refuseNotUrgent } from './urgency.js';
 import { handOff } from './pulses.js';
 import { improvementsChanged, takeForPlanning } from '../improvements/store.js';
 import { keepSnapshot } from './pipeline-report.js';
@@ -39,8 +40,12 @@ async function switchedOff(db: Live['db'] | Tx, departmentId: string, head: { of
   return staff.length > 0 && staff.every(a => a.off);
 }
 
+/* A head takes what is placed with it as anyone else takes work. */
+const headMayHold = (ctx: Ctx, by: Pick<By, 'agentId'>, companyId: string, item: PlanItem, head: Head) =>
+  refuseNotUrgent(ctx, { agentId: by.agentId }, companyId, { urgent: item.urgent === true, productId: item.product ?? null, gates: [] }, [head.id]);
+
 /* Every item names a department of the company, a product inside it, and the department has a head to take it. */
-async function place(ctx: Live, companyId: string, items: PlanItem[]): Promise<Placed[]> {
+async function place(ctx: Ctx, by: Pick<By, 'agentId'>, companyId: string, items: PlanItem[]): Promise<Placed[]> {
   if (!items.length) throw refuse(400, 'task_invalid', 'A turn needs at least one task.');
   const placed: Placed[] = [];
   for (const item of items) {
@@ -54,6 +59,7 @@ async function place(ctx: Live, companyId: string, items: PlanItem[]): Promise<P
     const head = await headOf(ctx.db, dept.id);
     if (!head) throw refuse(409, 'no_head', `"${item.title}": its department has no head yet. Propose staff for it first.`);
     if (await switchedOff(ctx.db, dept.id, head)) throw refuse(409, 'switched_off', `"${item.title}": its department is switched off right now. Give it no work until people switch it on.`);
+    await headMayHold(ctx, by, companyId, item, head);
     placed.push({ ...item, head });
   }
   return placed;
@@ -227,9 +233,9 @@ const numbers = (rows: Task[]) => rows.map(t => `#${t.number}`).join(', ');
 export type TurnMove = { turn: Turn; text: string; wakes: Wake[] };
 
 /* A new turn with its tasks: it starts at once when no turn runs, else it waits after the planned ones. */
-export async function planTurn(ctx: Live, by: By, input: { title: string; goal: string; tasks: PlanItem[]; words?: number; improvement?: string }): Promise<TurnMove> {
+export async function planTurn(ctx: Ctx, by: By, input: { title: string; goal: string; tasks: PlanItem[]; words?: number; improvement?: string }): Promise<TurnMove> {
   const { companyId, agentId } = by;
-  const items = await place(ctx, companyId, input.tasks);
+  const items = await place(ctx, by, companyId, input.tasks);
   const done = await ctx.db.transaction(async tx => {
     await lockCompany(tx, companyId);
     const [last] = await tx.select({ n: max(turns.number) }).from(turns).where(eq(turns.companyId, companyId));
@@ -261,10 +267,10 @@ async function liveTurn(tx: Tx | Live['db'], companyId: string, number: number):
 }
 
 /* More tasks for a turn that has not closed: in the open one they go out at once, in a planned one they wait with it. */
-export async function addTasks(ctx: Live, by: By, number: number, items: PlanItem[], words = 1, improvement?: string): Promise<TurnMove> {
+export async function addTasks(ctx: Ctx, by: By, number: number, items: PlanItem[], words = 1, improvement?: string): Promise<TurnMove> {
   const { companyId, agentId } = by;
   await liveTurn(ctx.db, companyId, number);
-  const placed = await place(ctx, companyId, items);
+  const placed = await place(ctx, by, companyId, items);
   const done = await ctx.db.transaction(async tx => {
     await lockCompany(tx, companyId);
     const turn = await liveTurn(tx, companyId, number);

@@ -17,6 +17,7 @@ import { TurnProgress } from '../ui/TurnProgress';
 type Props = {
   onHome?: () => void;
   decisions: Decisions | undefined;
+  decisionsFailure?: unknown;
   onDecisionsChanged: () => void;
   /* Opened from a person's card: only that person's decisions show until the filter is taken off. */
   personId: string | null;
@@ -202,7 +203,7 @@ function TaskGroups({ tasks = [], turns, rows }: { tasks: TaskLine[] | undefined
   );
 }
 
-type Waiting = Pick<Props, 'decisions' | 'onDecisionsChanged' | 'personId' | 'onClearPerson' | 'onOpenTask' | 'onOpenAgent' | 'onOpenOrchestrator'> & {
+type Waiting = Pick<Props, 'decisions' | 'decisionsFailure' | 'onDecisionsChanged' | 'personId' | 'onClearPerson' | 'onOpenTask' | 'onOpenAgent' | 'onOpenOrchestrator'> & {
   org: Org | null;
   place: (p: TaskLine['department']) => string;
 };
@@ -270,7 +271,7 @@ function DecisionList({ shown, onDecisionsChanged, onOpenTask, onOpenAgent, onOp
 
 /* What waits for the person: what agents ask, the orchestrator's cards and his request for the computer. Opened from a
    person's card, only theirs, with the filter in sight. */
-function WaitingForYou({ decisions, personId, onClearPerson, ...rest }: Waiting) {
+function WaitingForYou({ decisions, decisionsFailure, personId, onClearPerson, ...rest }: Waiting) {
   const t = useT();
   const [failure, setFailure] = useState<unknown>(null);
   const shown = shownOf(decisions, personId);
@@ -282,6 +283,12 @@ function WaitingForYou({ decisions, personId, onClearPerson, ...rest }: Waiting)
       {personId && <PersonFilter name={name} onClear={onClearPerson} />}
       <DecisionList shown={shown} onFailure={setFailure} {...rest} />
       {decisions && shownNone(shown) && <p className="muted">{personId ? t.tasks.nothingFor(name) : t.tasks.nothingWaiting}</p>}
+      {decisionsFailure !== undefined && decisionsFailure !== null && (
+        <div className="notebook-unread">
+          <p className="alert" role="alert">{errorText(t, decisionsFailure)}</p>
+          <button className="btn small ghost" type="button" onClick={rest.onDecisionsChanged}>{t.app.tryAgain}</button>
+        </div>
+      )}
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
     </section>
   );
@@ -289,7 +296,7 @@ function WaitingForYou({ decisions, personId, onClearPerson, ...rest }: Waiting)
 
 /* The tracker shows the work and changes nothing by itself: what waits for the person, then the turns as the orchestrator
    laid them out, the running one first, the planned ones in order and the finished ones folded away. */
-export function Tasks({ decisions, onDecisionsChanged, personId, onClearPerson, selected, onOpenTask, onOpenAgent, onOpenOrchestrator, onHome }: Props) {
+export function Tasks({ decisions, decisionsFailure, onDecisionsChanged, personId, onClearPerson, selected, onOpenTask, onOpenAgent, onOpenOrchestrator, onHome }: Props) {
   const t = useT();
   const { org } = useOrg();
   const [department, setDepartment] = useState<string | null>(null);
@@ -317,6 +324,7 @@ export function Tasks({ decisions, onDecisionsChanged, personId, onClearPerson, 
 
       <WaitingForYou
         decisions={decisions}
+        decisionsFailure={decisionsFailure}
         onDecisionsChanged={onDecisionsChanged}
         personId={personId}
         onClearPerson={onClearPerson}

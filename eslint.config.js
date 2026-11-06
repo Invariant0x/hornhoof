@@ -52,7 +52,7 @@ export default [
     languageOptions: { parserOptions: { project: [`./${workspace}/${tsconfig}`] } },
   })),
   {
-    files: ['scripts/**/*.mjs'],
+    files: ['scripts/**/*.mjs', 'vitest.config.mjs'],
     languageOptions: { globals: { process: 'readonly' } },
     rules: {
       'no-unused-vars': 'error',

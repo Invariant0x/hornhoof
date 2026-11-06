@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { parseNodeMessage } from '@hornhoof/protocol';
+import { parseNodeMessage, parseTestEnvironment } from '@hornhoof/protocol';
 import { readTestEnvironment } from '../src/test-environment.js';
 import { buildOf, runNode } from '../src/main.js';
 import { prepareNodeStop } from '../src/lifecycle.js';
@@ -241,6 +241,29 @@ describe('reporting managed programs', () => {
     const hello = server.received.findLastIndex(m => m.type === 'hello');
     expect(server.received[hello]).toMatchObject({ programs: [{ id: 'codex', version: '3.0.0', updating: false, failed: false }] });
     for (const status of server.received.slice(hello + 1).filter(m => m.type === 'status')) expect(status.programs).toEqual(programs.snapshot());
+  });
+  it('ignores unsupported handoff controls without starting or acknowledging a job', async () => {
+    const server = await fakeServer();
+    let runs = 0;
+    const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, run: async input => { runs++; return adapter.run(input); } }, log: () => {} });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    const binding = {
+      workspaceId: '88888888-8888-4888-8888-888888888888', taskId: '22222222-2222-4222-8222-222222222222', agentId: '99999999-9999-4999-8999-999999999999',
+      nodeId: { kind: 'node', nodeId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }, assignmentEpoch: 3, bindingVersion: 2,
+      repositoryId: '77777777-7777-4777-8777-777777777777', taskBranch: 'task-abc', baseSha: 'a'.repeat(40),
+    };
+    const base = { version: 1, handoffId: '11111111-1111-4111-8111-111111111111', taskId: binding.taskId, binding };
+    const deadline = '2026-11-06T07:00:00.000Z';
+    server.send({ ...base, type: 'task.handoff.capture', fromJobId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', workspaceId: binding.workspaceId, repositoryId: binding.repositoryId, expectedWipSha: null, deadline });
+    server.send({ ...base, type: 'task.handoff.offer', candidateAgentId: '66666666-6666-4666-8666-666666666666', repositoryId: binding.repositoryId, baseSha: binding.baseSha, checkpointSha: binding.baseSha, deadline });
+    server.send({ ...base, type: 'task.handoff.resume_source', cancelId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', workspaceId: binding.workspaceId });
+    server.send({ ...base, type: 'task.handoff.release', reservationId: '44444444-4444-4444-8444-444444444444', reason: 'stale' });
+    server.send({ type: 'agent.say', agentKey: 'none', text: 'barrier', ref: 'handoff-controls-ignored' });
+    await server.wait(() => server.received.some(m => m.type === 'agent.said' && m.ref === 'handoff-controls-ignored'));
+    expect(runs).toBe(0);
+    expect(server.received.some(m => m.type === 'job.done')).toBe(false);
+    expect(server.received.some(m => m.type.startsWith('task.handoff.'))).toBe(false);
   });
 });
 
@@ -1357,4 +1380,70 @@ it.skipIf(!hasTmux)('delivers input_kept through the node socket before starting
   server.send({ type: 'agent.input_kept', agentKey: key, ref: left.ref });
   await server.wait(() => server.received.some(message => message.type === 'job.done' && message.jobId === 'kept-second'), 8000);
   expect(server.received.find(message => message.type === 'job.done' && message.jobId === 'kept-second')).toMatchObject({ ok: true, result: 'echo: Second assignment.' });
+});
+
+
+describe('checking work before admission', () => {
+  it.each(['npm ci && npm run build', 'vitest run first.test.ts', 'crapper --use-existing-coverage src/a.ts', 'npm run ordinary'])('refuses %s before any part preparation', async command => {
+    const server = await fakeServer(), dir = nodeDir(server.url);
+    const sentinel = join(dir, 'payload-started');
+    const runPart: typeof runTests = async part => {
+      writeFileSync(sentinel, 'part preparation started');
+      return { type: 'tests.done', partId: part.partId, ok: true, exitCode: 0, error: null, commit: null, log: 'fixture part ran' };
+    };
+    const node = await runNode({ dir, adapter, testUser: environmentTestUser, runPart, log: () => {} });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(frame => frame.type === 'hello'));
+    const stale = join(dir, 'runs', 'checking-work', 'work');
+    mkdirSync(stale, { recursive: true });
+    writeFileSync(join(stale, 'package.json'), JSON.stringify({ scripts: { ordinary: 'echo stale-authorization' } }));
+    server.send({ type: 'tests.run', kind: 'work', partId: 'checking-work', repo: null, branch: null, task: 1, command, part: 1, parts: 1, timeoutMs: 1000 });
+    await server.wait(() => server.received.some(frame => frame.type === 'tests.done' && frame.partId === 'checking-work'));
+    expect(existsSync(sentinel)).toBe(false);
+    expect(server.received.filter(frame => frame.type === 'check.acquire')).toEqual([]);
+    expect(server.received.filter(frame => frame.type === 'tests.started')).toEqual([]);
+    expect(server.received.find(frame => frame.type === 'tests.done' && frame.partId === 'checking-work')).toMatchObject({ ok: false, exitCode: null, error: 'failed', commit: null, log: expect.stringContaining('запусти через run_tests') });
+  });
+
+  it('refuses a product selection labelled work before its lifecycle starts', async () => {
+    const server = await fakeServer(), dir = nodeDir(server.url), sentinel = join(dir, 'product-started');
+    const runPart: typeof runTests = async part => {
+      writeFileSync(sentinel, 'product preparation started');
+      return { type: 'tests.done', partId: part.partId, ok: true, exitCode: 0, error: null, commit: null, log: 'unexpected product execution' };
+    };
+    const node = await runNode({ dir, adapter, testUser: environmentTestUser, runPart, log: () => {} });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(frame => frame.type === 'hello'));
+    const manifest = parseTestEnvironment({ version: 1, defaultProfile: 'fast', runtimes: [], profiles: [{ id: 'fast', requiredSuiteIds: ['unit'] }],
+      dependencies: { adapter: 'npm', inputs: [], install: [], paths: [], cache: 'none' }, services: [], prepare: [], reset: null,
+      suites: [{ id: 'unit', root: '.', files: ['one.test.js'], run: { program: 'node', args: ['one.test.js'], cwd: '.' }, split: { kind: 'argv-files' }, profiles: ['fast'] }],
+      impact: { adapter: 'whole-package', fullPackageGlobs: [], migrationCheck: { status: 'unsupported', reason: 'Fixture.' } }, mutation: { status: 'unsupported', language: 'javascript', reason: 'Fixture.' } });
+    const manifestSource = JSON.stringify(manifest), commitSha = 'a'.repeat(40);
+    const repositoryScope = { companyId: '11111111-1111-4111-8111-111111111111', repositoryOwnerId: '22222222-2222-4222-8222-222222222222', repoUrlHash: 'b'.repeat(64) };
+    const description = { version: 1, repositoryScope, commitSha, manifestSource, manifestHash: createHash('sha256').update(manifestSource).digest('hex'), manifest, inputDigests: [], inventory: [{ suiteId: 'unit', file: 'one.test.js', selectionUnit: 'one.test.js' }], runtimeCapabilities: [] };
+    server.send({ type: 'tests.run', kind: 'work', partId: 'product-work', repo: { url: 'https://example.test/product.git', token: '' }, repositoryScope, commitSha, branch: null, task: 1, command: '', part: 1, parts: 1, timeoutMs: 1000,
+      environment: { snapshot: { description, profile: 'fast' }, selection: { kind: 'suite', suiteId: 'unit', files: ['one.test.js'] } } });
+    await server.wait(() => server.received.some(frame => frame.type === 'tests.done' && frame.partId === 'product-work'));
+    expect(existsSync(sentinel)).toBe(false);
+    expect(server.received.filter(frame => frame.type === 'check.acquire' || frame.type === 'tests.started')).toEqual([]);
+    expect(server.received.find(frame => frame.type === 'tests.done' && frame.partId === 'product-work')).toMatchObject({ ok: false, exitCode: null, log: expect.stringMatching(/^запусти через run_tests\n/) });
+  });
+
+  it.each(['npm ci', 'echo prepared'])('keeps non-check work %s inside one existing slot', async command => {
+    const server = await fakeServer(), dir = nodeDir(server.url);
+    const sentinel = join(dir, 'payload-started');
+    const runPart: typeof runTests = async part => {
+      writeFileSync(sentinel, part.kind ?? 'test');
+      return { type: 'tests.done', partId: part.partId, ok: false, exitCode: 7, error: 'failed', commit: null, log: 'original work output' };
+    };
+    const node = await runNode({ dir, adapter, testUser: environmentTestUser, runPart, log: () => {} });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(frame => frame.type === 'hello'));
+    server.send({ type: 'tests.run', kind: 'work', partId: 'ordinary-work', repo: null, branch: null, task: 1, command, part: 1, parts: 1, timeoutMs: 1000 });
+    await server.wait(() => server.received.some(frame => frame.type === 'tests.done' && frame.partId === 'ordinary-work'));
+    expect(readFileSync(sentinel, 'utf8')).toBe('work');
+    expect(server.received.filter(frame => frame.type === 'check.acquire')).toHaveLength(1);
+    expect(server.received.filter(frame => frame.type === 'tests.started')).toHaveLength(1);
+    expect(server.received.find(frame => frame.type === 'tests.done' && frame.partId === 'ordinary-work')).toMatchObject({ ok: false, exitCode: 7, log: 'original work output' });
+  });
 });

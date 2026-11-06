@@ -5,7 +5,7 @@ import { accessOf, canReach, type Access, type Spot } from '../../auth/access.js
 import type { Db } from '../../db/client.js';
 import { agents, attachments, companies, departments, jobs, people, requests, subscriptions, taskEvents, tasks, turns, type DecisionTopic, type RequestOption, type TaskEventKind } from '../../db/schema.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
-import { urgencyOfNew } from './urgency.js';
+import { refuseNotUrgent, urgencyOfNew } from './urgency.js';
 import { canDecide } from '../../auth/decisions.js';
 import type { DecisionSubject } from '../../auth/decision-owner.js';
 import { checkDelegation, contextMissing, requireDecider, type Delegation } from '../conversation/decision-context.js';
@@ -22,6 +22,7 @@ import { degradedReviewNotes, reviewPanel, turnReviewPlan, type Plan } from './r
 import { mechanicalVerdict } from './review-findings.js';
 import { verdictReview, type ReviewVerdict } from './review-verdict.js';
 import { pendingFixReviews, prepareFixReviews } from './review-fixes.js';
+import { checkIndependent, currentIndependent, type IndependentDeclaration, type IndependentPartInput } from './independent.js';
 
 export type Task = typeof tasks.$inferSelect;
 export type Request = typeof requests.$inferSelect;
@@ -75,7 +76,7 @@ async function workUnderDone(tx: Tx, templates: Live['templates'], closed: Task,
   const holder = parent?.assigneeAgentId;
   if (!parent || CLOSED.includes(parent.status) || !holder || (await isTurnReview(tx, closed.id))) return [];
   const [open] = await tx.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.parentId, parent.id), notInArray(tasks.status, [...CLOSED]))).limit(1);
-  if (open) return [];
+  if (open || (await openAfter(tx, parent)).length) return [];
   const due = templates ? await reviewDue(tx, parent) : null;
   let note: string | undefined;
   if (due?.waiting.length) {
@@ -493,6 +494,8 @@ export type NewTask = {
   gates?: string[];
   /* Tasks of the same turn that must be done first. */
   after?: string[];
+  independentPart?: IndependentPartInput;
+  independentNone?: string;
   /* Code given out without gates of its own: the review of its department's turn checks it. */
   inTurnReview?: boolean;
   workKind?: Task['workKind'];
@@ -526,14 +529,59 @@ async function checkGates(db: Db, companyId: string, executor: string, gates: st
   for (const id of gates) requireBlockingGate(templates, (await workingAgent(db, companyId, id, true)).roleKey);
 }
 
-export async function createTask(ctx: Live, actor: Actor, input: NewTask): Promise<Moved> {
+async function checkIndependentExecutor(db: Db, departmentId: string | null, part: IndependentPartInput): Promise<void> {
+  const agent = await workingAgent(db, null, part.executor);
+  if (agent.departmentId !== departmentId) throw refuse(403, 'task_not_yours', `${agent.name} does not work in this department.`);
+}
+
+async function insertIndependent(tx: Tx, parent: Task, part: IndependentPartInput, actor: Actor, inTurnReview?: boolean): Promise<{ child: Task; wake: Wake }> {
+  const [last] = await tx.select({ n: max(tasks.number) }).from(tasks).where(eq(tasks.companyId, parent.companyId));
+  const [child] = await tx.insert(tasks).values({
+    companyId: parent.companyId,
+    number: (last?.n ?? 0) + 1,
+    turnId: parent.turnId,
+    parentId: parent.id,
+    departmentId: parent.departmentId,
+    productId: parent.productId,
+    title: part.title.trim(),
+    brief: part.brief.trim(),
+    body: part.body,
+    assigneeAgentId: part.executor,
+    executorAgentId: part.executor,
+    gates: parent.gates,
+    after: [],
+    workKind: parent.workKind,
+    riskClass: parent.riskClass,
+    urgent: parent.urgent,
+    createdByPersonId: actor.personId ?? null,
+    createdByAgentId: actor.agentId ?? null,
+    updatedAt: new Date(),
+  }).returning();
+  const event = await note(tx, child!, { kind: 'created', actor, text: child!.brief, data: { assignee: child!.assigneeAgentId, gates: child!.gates, after: [], independentPartOf: parent.id, ...(inTurnReview ? { inTurnReview: true } : {}) } });
+  const wake: Wake = { agentId: child!.assigneeAgentId!, taskId: child!.id, why: 'assigned' };
+  recordCause([wake], { kind: 'created', actor }, event.id, child!);
+  return { child: child!, wake };
+}
+
+/* Who a new task gives work to, as urgent as it comes out: a word nobody may say is refused when the task is made. */
+function checkNewHolders(ctx: Ctx, actor: Actor, companyId: string, parent: Task | null, input: NewTask, gates: string[], declaration: IndependentDeclaration | null): Promise<void> {
+  const urgent = parent ? parent.urgent : input.urgent === true;
+  const part = declaration?.kind === 'part' ? [declaration.part.executor] : [];
+  return refuseNotUrgent(ctx, actor, companyId, { urgent, productId: input.productId ?? null, gates }, [input.assigneeAgentId, ...part]);
+}
+
+export async function createTask(ctx: Ctx, actor: Actor, input: NewTask): Promise<Moved> {
   const assignee = await workingAgent(ctx.db, null, input.assigneeAgentId);
   const gates = input.executor ? (input.gates ?? []) : [];
   if (!input.executor && input.gates?.length) throw refuse(400, 'task_invalid', 'Only a task with an executor has gates.');
   if (input.executor) await checkGates(ctx.db, assignee.companyId, assignee.id, gates, ctx.templates);
   if (!input.title.trim()) throw refuse(400, 'task_invalid', 'A task needs a title.');
+  const declaration = checkIndependent(input.after ?? [], input.independentPart, input.independentNone, null);
+  if (declaration?.kind === 'part') await checkIndependentExecutor(ctx.db, input.departmentId, declaration.part);
   const parent = input.parentId ? await loadTask(ctx.db, input.parentId) : null;
   if (parent) stillOpen(parent);
+  await checkNewHolders(ctx, actor, assignee.companyId, parent, input, gates, declaration);
+  let independent: Task | null = null;
   let waits = false;
   const wakes: Wake[] = [];
   const task = await ctx.db.transaction(async tx => {
@@ -585,17 +633,28 @@ export async function createTask(ctx: Live, actor: Actor, input: NewTask): Promi
         updatedAt: new Date(),
       })
       .returning();
-    const event = await note(tx, row!, { kind: 'created', actor, text: row!.brief, data: { assignee: assignee.id, gates, after: row!.after, ...(input.inTurnReview ? { inTurnReview: true } : {}) } });
-    /* One that waits for what it comes after is not given out yet: the move that finishes the last of them wakes its holder. */
-    if (!waits) {
-      wakes.push({ agentId: assignee.id, taskId: row!.id, why: 'assigned' });
-      recordCause(wakes, { kind: 'created', actor }, event.id, row!);
-      await keepWakes(tx, row!.companyId, wakes);
+    const event = await note(tx, row!, { kind: 'created', actor, text: row!.brief, data: {
+      assignee: assignee.id,
+      gates,
+      after: row!.after,
+      ...(declaration?.kind === 'part' ? { independentPart: declaration.part } : declaration?.kind === 'none' ? { independentNone: declaration.reason } : {}),
+      ...(input.inTurnReview ? { inTurnReview: true } : {}),
+    } });
+    if (declaration?.kind === 'part') {
+      const made = await insertIndependent(tx, row!, declaration.part, actor, input.inTurnReview);
+      independent = made.child;
+      wakes.push(made.wake);
     }
+    /* One that waits for what it comes after is not given out yet: the move that finishes the last of them wakes its holder. */
+    if (!waits) wakes.push({ agentId: assignee.id, taskId: row!.id, why: 'assigned' });
+    recordCause(wakes, { kind: 'created', actor }, event.id, row!);
+    await keepWakes(tx, row!.companyId, wakes);
     return row!;
   });
   published(ctx, task);
+  if (independent) published(ctx, independent);
   await handOff(ctx, actor, task);
+  if (independent) await handOff(ctx, actor, independent);
   return { task, wakes };
 }
 
@@ -1032,7 +1091,7 @@ export async function dropGate(ctx: Live, actor: Actor, task: Task, agentId: str
   return move(ctx, task, { gates }, { kind: 'updated', actor, data: { fields: ['gates'] } });
 }
 
-export type TaskChange = { title?: string; brief?: string; body?: string; executor?: string; gates?: string[]; after?: string[]; workKind?: NonNullable<Task['workKind']>; riskClass?: NonNullable<Task['riskClass']> };
+export type TaskChange = { title?: string; brief?: string; body?: string; executor?: string; gates?: string[]; after?: string[]; independentPart?: IndependentPartInput; independentNone?: string; workKind?: NonNullable<Task['workKind']>; riskClass?: NonNullable<Task['riskClass']> };
 
 /* Runs fn on the task, and again on a fresh read of it when someone moved it meanwhile; null when it kept moving. */
 async function onFresh<T>(ctx: Live, task: Task, fn: (task: Task) => Promise<T>): Promise<T | null> {
@@ -1216,6 +1275,7 @@ function rewrite(task: Task, c: TaskChange): { set: Partial<Task>; fields: strin
 }
 
 const LABELS: ReadonlySet<string> = new Set(['workKind', 'riskClass']);
+const onlyLabels = (fields: string[], createsIndependent: boolean) => fields.every(field => LABELS.has(field)) && !createsIndependent;
 
 /* What kind of work it is changes nothing of the work: whoever holds it is not woken, its wait stays and wakes on their way
    still come. Nothing else changes with them, so no move that read the task loses its place. */
@@ -1230,8 +1290,14 @@ async function relabel(ctx: Live, agentId: string, task: Task, set: Partial<Task
   return { task: row, wakes: [] };
 }
 
+/* Who takes work from a change of a task for the first time: what someone holds already stays theirs. */
+const newHolders = (task: Task, executor: string | null, declaration: IndependentDeclaration | null, existing: IndependentDeclaration | null): string[] => [
+  ...(executor && executor !== task.executorAgentId ? [executor] : []),
+  ...(declaration?.kind === 'part' && existing?.kind !== 'part' ? [declaration.part.executor] : []),
+];
+
 /* The owner rewrites the task so it reads as the current truth, or hands it to another executor or other gates. */
-export async function updateTask(ctx: Live, agentId: string, taskId: string, c: TaskChange): Promise<Moved> {
+export async function updateTask(ctx: Ctx, agentId: string, taskId: string, c: TaskChange): Promise<Moved> {
   const task = await loadTask(ctx.db, taskId);
   stillOpen(task);
   if ((c.executor !== undefined || c.gates !== undefined) && !task.executorAgentId) throw refuse(400, 'task_invalid', `#${task.number} has no executor or gates.`);
@@ -1256,6 +1322,14 @@ export async function updateTask(ctx: Live, agentId: string, taskId: string, c: 
     fields.push('gates');
   }
   const waited = (await openAfter(ctx.db, task)).length > 0;
+  const declarationInput = c.after !== undefined || c.independentPart !== undefined || c.independentNone !== undefined;
+  const existing = declarationInput ? await currentIndependent(ctx.db, task.id) : null;
+  const declaration = declarationInput ? checkIndependent(c.after ?? task.after, c.independentPart, c.independentNone, existing) : null;
+  if (declaration?.kind === 'part') await checkIndependentExecutor(ctx.db, task.departmentId, declaration.part);
+  await refuseNotUrgent(ctx, { agentId }, task.companyId, task, newHolders(task, executor, declaration, existing));
+  const createsIndependent = declaration?.kind === 'part' && existing?.kind !== 'part';
+  const reviewIndependent = createsIndependent && (await createdData(ctx.db, task.id)).inTurnReview === true;
+  let independent: Task | null = null;
   if (c.after !== undefined && JSON.stringify(c.after) !== JSON.stringify(task.after)) {
     await checkAfter(ctx.db, task.companyId, task.turnId, c.after);
     await refuseAbove(ctx.db, task.parentId, c.after);
@@ -1263,7 +1337,7 @@ export async function updateTask(ctx: Live, agentId: string, taskId: string, c: 
     set.after = c.after;
     fields.push('after');
   }
-  if (fields.every(f => LABELS.has(f))) return relabel(ctx, agentId, task, set, fields);
+  if (onlyLabels(fields, createsIndependent)) return relabel(ctx, agentId, task, set, fields);
   /* A rewrite answers a blocked executor. A task nobody holds stays blocked until someone can take it. */
   if (task.status === 'blocked' && (set.assigneeAgentId ?? task.assigneeAgentId)) set.status = 'open';
   /* Another one takes it up, so Hornhoof's note that it stood still is over; a person's word asked for still waits. */
@@ -1285,16 +1359,26 @@ export async function updateTask(ctx: Live, agentId: string, taskId: string, c: 
     if (holder) await tx.update(jobs).set({ status: 'failed', error: 'waiting', finishedAt: new Date() }).where(and(eq(jobs.agentId, holder), eq(jobs.taskId, task.id), eq(jobs.status, 'queued')));
   };
   const wakes: Wake[] = [];
-  const also = async (tx: Tx) => {
+  const also = async (tx: Tx, row: Task) => {
     if (handedOn) await handOver(tx);
+    if (createsIndependent) {
+      const made = await insertIndependent(tx, row, declaration.part, { agentId }, reviewIndependent);
+      independent = made.child;
+      wakes.push(made.wake);
+    }
     /* It waits now for what it comes after, so nobody sets to work on it yet; one that waited and waits no more starts.
        Seen inside the move, where what it comes after is held. */
     if ((await openAfter(tx, { after: set.after ?? task.after })).length) return holdBack(tx);
     if (set.assigneeAgentId || (waited && holder)) wakes.push({ agentId: (set.assigneeAgentId ?? holder)!, taskId, why: 'assigned' });
     else if (holder && holder !== agentId) wakes.push({ agentId: holder, taskId, why: 'updated' });
   };
-  const row = await move(ctx, task, set, { kind: 'updated', actor: { agentId }, data: { fields } }, also, wakes);
+  const row = await move(ctx, task, set, { kind: 'updated', actor: { agentId }, data: {
+    fields,
+    ...(declaration?.kind === 'part' ? { independentPart: declaration.part } : declaration?.kind === 'none' ? { independentNone: declaration.reason } : {}),
+  } }, also, wakes);
+  if (independent) published(ctx, independent);
   unstuck.tell();
+  if (independent) await handOff(ctx, { agentId }, independent);
   return { task: row, wakes };
 }
 
@@ -1356,6 +1440,8 @@ export type Ask = {
   options?: RequestOption[];
   link?: string | null;
   topic?: DecisionTopic;
+  /* The server's own: what must be kept in the step that makes the request. No tool passes it. */
+  onCreated?: (tx: Tx, request: Request) => Promise<void>;
 };
 
 /* An approval of a commit lets it into the release, whatever the agent says it is about. */
@@ -1402,6 +1488,7 @@ export async function ask(ctx: Live, agentId: string, taskId: string, q: Ask): P
         ...approvalColumns(q.approval),
       })
       .returning();
+    await q.onCreated?.(tx, request!);
     wakes = await explaining(tx, task, agentId, request!.id);
     await keepWakes(tx, task.companyId, wakes);
     if (!pictures.length) return;

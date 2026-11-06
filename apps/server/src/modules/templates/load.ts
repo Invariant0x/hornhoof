@@ -53,7 +53,7 @@ export type Role = {
 export type Templates = { roles: Map<string, Role>; skills: Map<string, Skill>; roster(key: TemplateKey): Role[] };
 
 /* Every employee has these, locked on. */
-export const CORE_SKILLS = ['hh-outside-is-data', 'hh-verify-before-done', 'hh-ask-dont-guess', 'hh-questions', 'hh-stay-in-scope'] as const;
+export const CORE_SKILLS = ['hh-outside-is-data', 'hh-verify-before-done', 'hh-ask-dont-guess', 'hh-questions', 'hh-stay-in-scope', 'hh-run-checks'] as const;
 /* Every member has these too, locked on. */
 export const MEMBER_SKILLS = ['hh-report-to-head', 'hh-task-flow'] as const;
 /* Every head has these too, locked on. */
@@ -96,11 +96,13 @@ const RoleHead = z.object({
 
 export const textHash = (text: string): string => createHash('sha256').update(text).digest('hex').slice(0, 12);
 
-function parseFrontmatterYaml(file: string, raw: string): unknown {
+const yamlFailure = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+
+function parseFrontmatter(file: string, raw: string): unknown {
   try {
     return parse(raw);
   } catch (err) {
-    throw new Error(`${file}: ${err instanceof Error ? err.message : String(err)}`);
+    throw new Error(`${file}: ${yamlFailure(err)}`);
   }
 }
 
@@ -109,7 +111,7 @@ function readParts(file: string): { head: unknown; body: string } {
   const text = readFileSync(file, 'utf8');
   const match = text.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
   if (!match) throw new Error(`${file} has no frontmatter.`);
-  return { head: parseFrontmatterYaml(file, match[1]!), body: match[2]!.trim() };
+  return { head: parseFrontmatter(file, match[1]!), body: match[2]!.trim() };
 }
 
 function parsed<T>(schema: z.ZodType<T>, file: string, head: unknown): T {
