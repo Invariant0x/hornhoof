@@ -22,11 +22,11 @@ describe('notification lines', () => {
     expect(messageLine(t, language, message)).toBe(expected);
   });
   it.each([
-    ['en', en, 'question', 'Hornhoof, internal question on #223 to Bruno'],
-    ['en', en, 'resolved', 'Hornhoof, internal question resolved on #223 to Bruno'],
-    ['ru', ru, 'question', 'Hornhoof, внутренний вопрос по #223 для Bruno'],
-    ['ru', ru, 'resolved', 'Hornhoof, внутренний вопрос решен по #223 для Bruno'],
-  ] as const)('names internal source %s/%s without implying a human answer', (language, t, source, expected) => {
+    { language: 'en', t: en, source: 'question', expected: 'Hornhoof, internal question on #223 to Bruno' },
+    { language: 'en', t: en, source: 'resolved', expected: 'Hornhoof, internal question resolved on #223 to Bruno' },
+    { language: 'ru', t: ru, source: 'question', expected: 'Hornhoof, внутренний вопрос по #223 для Bruno' },
+    { language: 'ru', t: ru, source: 'resolved', expected: 'Hornhoof, внутренний вопрос решен по #223 для Bruno' },
+  ] as const)('names $language/$source without implying a human answer', ({ language, t, source, expected }) => {
     const received = NotificationSchema.parse({ source, tasks: notification.tasks });
     const message = { direction: 'in', from: service, to: recipient, notification: received } satisfies AgentMessageView;
     expect(messageLine(t, language, message)).toBe(expected);
