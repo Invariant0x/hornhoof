@@ -146,7 +146,7 @@ export function harnessRemote(server: string, nodeKey: string): HarnessRemote {
         for (let start = 0; start < claim.size; start += claim.partBytes) {
           const range = `bytes=${start}-${Math.min(start + claim.partBytes, claim.size) - 1}`;
           const part = await again(signal, async () => Buffer.from(await (await answered(await fetch(at(`/${key}/bundle`), { headers: { ...headers, range }, signal }))).arrayBuffer()));
-          if (!out.write(part)) await new Promise(resolve => out.once('drain', resolve));
+          if (!out.write(part)) await new Promise<void>(resolve => { out.once('drain', () => { resolve(); }); });
         }
       } finally { await new Promise<void>(resolve => { out.end(() => { resolve(); }); }); }
       if (await digestOf(path) !== claim.digest) throw new Error('The bundle that came differs from what Hornhoof holds.');

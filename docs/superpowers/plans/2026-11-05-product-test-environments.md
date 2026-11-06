@@ -35,7 +35,7 @@ queue, deployment or measurement is added.
 
 **Files:** `apps/node/test/preparation-replay{,.test}.ts`,
 `apps/node/test/fixtures/preparation-replay/*`,
-`docs/check-queue-replay.md`; external Git bundle and evidence archive on #399.
+`docs/check-queue-replay.md` (all removed by #641, which measures the harness itself); external Git bundle and evidence archive on #399.
 
 **Interfaces:** `inspectReplayFixture(root)` validates the exact regular-file
 inventory and SHA256 bytes. `replayCommand(args,root)` accepts only `plan` and

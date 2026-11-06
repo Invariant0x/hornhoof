@@ -13,6 +13,7 @@ import { prepareAndVerifyBrowser, readBrowserError, startupBrowserCheck, writeBr
 import { connect } from './connection.js';
 import type { ProgramNodeMessage, ProgramServerMessage } from '@hornhoof/protocol/program-operator';
 import { agentUser, builtinAdapters, secureNode, userFor, type JobUser } from './isolation.js';
+import { withCheckSlot } from './check-queue.js';
 import { startCheckClient, stopChecks, isProgramControl, applyProgramControl, runQueuedPart } from './check-runtime.js';
 import { TestPartUser, NodeTestMessages, isNodeTestMessage, nodeTestCapabilities, readTestEnvironment } from './test-environment.js';
 import { machineLoad } from './load.js';
@@ -24,7 +25,8 @@ import { LOGIN_KEY, LoginTerminal, type LoginSetup } from './login.js';
 import { dataDir, isRemoved, markRemoved, readState, rememberSession, writeState, type NodeState } from './state.js';
 import { waitUpdate } from './wait-update.js';
 import { SETUP_CHECK_MS, SetupWait } from './setup-wait.js';
-import { partFiles, removeOldParts, runTests } from './tests.js';
+import { harnessRemote } from './test-harness.js';
+import { partFiles, removeOldParts, runTests, syncHarness } from './tests.js';
 import { SIGNED_OUT as AGY_SIGNED_OUT } from './providers/antigravity.js';
 import { SIGNED_OUT as CLAUDE_SIGNED_OUT } from './providers/claude.js';
 import { SIGNED_OUT as CODEX_SIGNED_OUT } from './providers/codex.js';
@@ -64,6 +66,7 @@ const digestOf = (bytes: Uint8Array): string => createHash('sha256').update(byte
 /* The sign-in Hornhoof hands each kind of plan. */
 const CRED_KINDS: Record<string, CredKind> = { claude: 'claude_token', codex: 'codex_auth', kimi: 'kimi_key', glm: 'glm_key' };
 type TestRun = Extract<ServerMessage, { type: 'tests.run' }>;
+type HarnessRun = Extract<ServerMessage, { type: 'tests.harness' }>;
 type TestsDone = Extract<NodeMessage, { type: 'tests.done' }>;
 
 async function sayToAgent(host: TerminalHost | null, m: Extract<ProgramServerMessage, { type: 'agent.say' }>, log: (line: string) => void): Promise<boolean> {
@@ -209,6 +212,8 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   const toolsUrl = `${state.server}/mcp`;
   /* The task's files a part of work takes in and puts back. */
   const files = partFiles(state.server, state.key);
+  /* What this machine lacks of a harness, and what it built for the others. */
+  const harness = harnessRemote(state.server, state.key);
   /* The built-in node serves API keys, which need no sign-in. */
   const single = typeof adapter === 'function' ? null : adapter;
   const pick = typeof adapter === 'function' ? adapter : () => adapter;
@@ -315,7 +320,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   if (browserError) log(`Playwright Chromium could not start: ${browserError}`);
   const testCapabilities = await nodeTestCapabilities(dir, testUser).catch(() => { log('Product test environments are unavailable on this node.'); return {}; });
   const partUser = new TestPartUser();
-  const testMessages = new NodeTestMessages({ dir, describe: describeEnvironment, capabilities: testCapabilities, stopped: () => stopped, testing, unconfirmed: unconfirmedTests, run: testOne, emit });
+  const testMessages = new NodeTestMessages({ dir, describe: describeEnvironment, capabilities: testCapabilities, stopped: () => stopped, testing, unconfirmed: unconfirmedTests, run: testOne, harness: syncOne, emit });
   const noRunsNow = () => noRunsBecause(testUser, browserError);
   const tellStatus = () => {
     browserError = readBrowserError(dir);
@@ -518,10 +523,15 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     const waiting = (position: number) => emit({ type: 'tests.waiting', partId: m.partId, position });
     const done = await runQueuedPart(m, (part, options) => partUser.run(options.signal, () => {
       emit({ type: 'tests.started', partId: part.partId }); return runPart(part, options);
-    }, waiting), { dir, user: testUser, hidden: [...known], signal, files }, waiting, () => {});
+    }, waiting), { dir, user: testUser, hidden: [...known], signal, files, harness }, waiting, () => {});
     keepTest(m.partId, done);
     testing.delete(m.partId);
     emit(done);
+  }
+
+  /* A product's harness, ahead of any run: it waits its turn like a part does, as it uses the same user. */
+  function syncOne(m: HarnessRun, signal: AbortSignal) {
+    return withCheckSlot(granted => partUser.run(granted, () => syncHarness(m, { dir, user: testUser, hidden: [...known], signal: granted, harness }), () => {}), { signal, label: 'Get a product test harness ready' });
   }
 
   async function runOne(m: JobRun, signal: AbortSignal) {

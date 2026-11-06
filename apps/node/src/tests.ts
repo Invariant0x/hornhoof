@@ -1,15 +1,17 @@
 import { execFileSync, spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { chmodSync, chownSync, closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
 import { dirname, join } from 'node:path';
-import { TestExecution, supportsTestProfile, validateEnvironmentDescription, type Command, type EnvironmentDescription, type EnvironmentProblem, type InputDigest, type TestEnvironmentReceipt, COMMIT_SHA, MAX_RUN_FILES, ownBranch, RUN_FILE_BYTES, TEST_LOG_BYTES, type NodeMessage, type ServerMessage, type TestError } from '@hornhoof/protocol';
+import { TestExecution, supportsTestProfile, validateEnvironmentDescription, type HarnessSynced, type Command, type EnvironmentDescription, type EnvironmentProblem, type InputDigest, type TestEnvironmentReceipt, COMMIT_SHA, MAX_RUN_FILES, ownBranch, RUN_FILE_BYTES, TEST_LOG_BYTES, type NodeMessage, type ServerMessage, type TestError } from '@hornhoof/protocol';
 import { browserEnv, ensureRepoBrowser } from './browser.js';
 import { ensurePasswd, FIRST_UID, prepareFolder, userFor, type JobUser } from './isolation.js';
 import { stripEscapes } from './providers/process.js';
 import { redact } from './redact.js';
-import { copyFile as fsCopyFile, mkdir as fsMkdir, mkdtemp as fsMkdtemp, stat as fsStat } from 'node:fs/promises';
-import { fileDigest, privateCacheRoot, restoreCache, type CacheContext, type CacheEntry } from './test-cache.js';
-import { EnvironmentFailure, buildTestInvocation, openEnvironment, prepareDependencies, prepareEnvironment, readTestEnvironment, safeCheckoutPath, type PreparationBuilder, type PreparationContext } from './test-environment.js';
+import { copyFile as fsCopyFile, mkdir as fsMkdir, mkdtemp as fsMkdtemp, readFile as fsReadFile, stat as fsStat, writeFile as fsWriteFile } from 'node:fs/promises';
+import { fileDigest, privateCacheRoot, pruneCache, restoreCache, type CacheContext, type CacheEntry } from './test-cache.js';
+import { EnvironmentFailure, buildTestInvocation, harnessPlatform, harnessVersion, openEnvironment, prepareDependencies, prepareEnvironment, readTestEnvironment, safeCheckoutPath, type BuilderSetup, type PreparationBuilder, type PreparationContext } from './test-environment.js';
+import { harnessShare, type HarnessRemote } from './test-harness.js';
 import { checkoutCommit } from './test-mirror.js';
 import { gitEnv } from './workspace.js';
 
@@ -41,6 +43,8 @@ type Options = {
   files?: PartFiles;
   /* Ensures the repository lockfile's Playwright Chromium is ready and launchable before the check runs. */
   prepareRepoBrowser?: (repoDir: string) => Promise<void>;
+  /* Where a harness unit this machine lacks comes from. None: what a part needs is built here. */
+  harness?: HarnessRemote;
 };
 
 /* What a command prints, at most TEST_LOG_BYTES of it: its first quarter and its end, where a runner sums up. */
@@ -394,6 +398,7 @@ export async function runTests(msg: TestRun, options: Options): Promise<TestsDon
   let exitCode: number | null = null;
   let error: TestError | null = null;
   let ran = false;
+  const harnessEnv: Record<string, string> = {};
   const stoppedBy = (ended: Ended): TestError | null => {
     if (ended.stopped === 'timeout') out.line(`The ${work ? 'command' : 'tests'} did not finish within ${within(msg.timeoutMs)}.`);
     if (ended.stopped === 'cancelled') out.line('Stopped.');
@@ -427,7 +432,10 @@ export async function runTests(msg: TestRun, options: Options): Promise<TestsDon
       commit = COMMIT_SHA.exec(head.text().trim())?.[0] ?? null;
       if (commit) out.line(`At ${commit}.`);
       error = landedElsewhere(msg.commitSha, commit, out);
-      if (!error) await prepareRepoBrowser(repo);
+      if (!error) {
+        Object.assign(harnessEnv, await manualHarness(msg, options, { root, repo, out, base, deadline }));
+        await prepareRepoBrowser(repo);
+      }
     }
     if (!error && work && msg.files?.length) {
       for (const name of msg.files) {
@@ -454,7 +462,7 @@ export async function runTests(msg: TestRun, options: Options): Promise<TestsDon
     }
     if (!error) {
       out.line(`$ ${msg.command}`);
-      const env = commandEnv(base, msg, inbox, outbox, vitestWorkers(cpus, hostEnv));
+      const env = { ...commandEnv(base, msg, inbox, outbox, vitestWorkers(cpus, hostEnv)), ...harnessEnv };
       const ended = await runIn('/bin/bash', ['-c', msg.command], { cwd: repo, env, user, deadline, signal, out });
       ran = true;
       error = stoppedBy(ended);
@@ -494,11 +502,35 @@ async function checkoutForPart(checkout: Checkout, options: { dir: string; user:
   prepareFolder(checkout.repo, options.user); return null;
 }
 
+/* The harness of a manual part's commit goes in place before its command, so the command starts with its dependencies there.
+   A command may still install for itself, so what goes wrong here only costs it the head start, and at most this long. */
+const MANUAL_HARNESS_MS = 10 * 60_000;
+const SHARED_OK = (msg: TestRun, options: Options) => msg.kind !== 'work' && !!msg.repo && !!msg.repositoryScope && msg.commitSha?.length === 40 && !!options.harness;
+async function manualHarness(msg: TestRun, options: Options, part: { root: string; repo: string; out: Output; base: Record<string, string>; deadline: number }): Promise<Record<string, string>> {
+  if (!SHARED_OK(msg, options)) return {};
+  const started = performance.now();
+  try {
+    const deadline = Math.min(part.deadline, Date.now() + MANUAL_HARNESS_MS), state: PreparationState = { ...productUser(options.user), ...part, deadline, signal: productSignal(options.signal, deadline), options };
+    const context = preparationContext(state, '', [...options.hidden]);
+    const description = await readTestEnvironment(msg.repo!, msg.repositoryScope!, msg.commitSha!, context);
+    if (description.manifest.dependencies.cache === 'none') return {};
+    const profiled = { ...context, profile: description.manifest.defaultProfile }, dependencies = await prepareDependencies(description, profiled);
+    const { env } = await prepareEnvironment(description, dependencies, profiled, { serviceUnits: false, freshServices: false });
+    part.out.line(`The harness is in place after ${within(performance.now() - started)}.`);
+    return env;
+  } catch (error) {
+    options.signal?.throwIfAborted();
+    part.out.line(`The command starts without the prepared harness: ${error instanceof Error ? error.message : String(error)}`);
+    return {};
+  }
+}
+
 const productSignal = (signal: AbortSignal | undefined, deadline: number): AbortSignal => AbortSignal.any([signal ?? new AbortController().signal, AbortSignal.timeout(Math.max(1, deadline - Date.now()))]);
-type ProductState = {
+type PreparationState = {
   root: string; repo: string; out: Output; user: JobUser; nodeOwner: JobUser; deadline: number; signal: AbortSignal;
-  base: Record<string, string>; options: Options; receipt: TestEnvironmentReceipt; exitCode: number | null;
+  base: Record<string, string>; options: Options;
 };
+type ProductState = PreparationState & { receipt: TestEnvironmentReceipt; exitCode: number | null };
 type ProductOperation = { kind: 'suite'; suiteId: string; files: string[]; shard?: { index: number; count: number } } | { kind: 'command'; command: Command };
 function environmentError(code: EnvironmentProblem['code'], detail: string): never { throw new EnvironmentFailure({ code, detail: `${code}: ${detail}` }); }
 function productUser(user: JobUser | null): { user: JobUser; nodeOwner: JobUser } {
@@ -526,11 +558,7 @@ function liveUserProcess(path: string, uid: number): boolean {
 function productUserAlive(uid: number, proc: string): boolean {
   return readdirSync(proc).some(name => /^\d+$/.test(name) && liveUserProcess(join(proc, name, 'status'), uid));
 }
-function giveCheckout(state: ProductState, path: string, user: JobUser): void {
-  // Force a complete handoff after restoring node-owned files into an existing job checkout.
-  chownSync(path, state.nodeOwner.uid, state.nodeOwner.gid); prepareFolder(path, user);
-}
-async function productCommand(state: ProductState, checkout: string, user: JobUser, command: Command, env: Record<string, string>): Promise<void> {
+async function productCommand(state: PreparationState, checkout: string, user: JobUser, command: Command, env: Record<string, string>): Promise<void> {
   state.signal.throwIfAborted();
   if (Date.now() >= state.deadline) throw new DOMException('The product command deadline expired.', 'TimeoutError');
   state.out.line(`$ ${JSON.stringify([command.program, ...command.args])}`);
@@ -547,7 +575,7 @@ async function builderInputs(inputs: InputDigest[], source: string, target: stri
     await fsCopyFile(full, destination);
   }
 }
-async function productBuilder(state: ProductState, inputs: InputDigest[], dependencies: CacheEntry | null, context: CacheContext): Promise<PreparationBuilder> {
+async function productBuilder(state: PreparationState, inputs: InputDigest[], dependencies: CacheEntry | null, setup: BuilderSetup, context: CacheContext): Promise<PreparationBuilder> {
   const user = userFor(state.options.dir, 'product-test-builder');
   if (!user || user.uid === state.user.uid || user.uid === state.nodeOwner.uid || user.uid === 0) environmentError('isolation_missing', 'A distinct preparation builder user is unavailable.');
   const builders = join(state.root, 'builders'); await fsMkdir(builders, { recursive: true, mode: 0o755 });
@@ -555,10 +583,12 @@ async function productBuilder(state: ProductState, inputs: InputDigest[], depend
   const quiesce = () => stopTestUser(user, state.options.proc);
   try {
     await builderInputs(inputs, state.repo, root, context);
-    if (dependencies) await restoreCache(dependencies, root, context);
+    /* The builder gets its folder first: what comes linked stays the node's and read-only. */
     for (const path of [root, join(root, '.home'), join(root, '.tmp')]) prepareFolder(path, user);
+    if (dependencies) await restoreCache(dependencies, root, context, { link: setup.link, owner: user });
     ensurePasswd(user, partsFolder(state.options.dir));
-    const env = { ...state.base, HOME: join(root, '.home'), TMPDIR: join(root, '.tmp'), CI: 'true' };
+    const named = Object.fromEntries(Object.entries(setup.env).map(([name, path]) => [name, join(root, path)]));
+    const env = { ...state.base, ...named, HOME: join(root, '.home'), TMPDIR: join(root, '.tmp'), CI: 'true' };
     return { root, user, env, run: (command, extra = {}) => productCommand(state, root, user, command, { ...env, ...extra }), quiesce, close: () => closeBuilder(user, root, state.options.proc) };
   } catch (error) { await closeBuilder(user, root, state.options.proc); throw error; }
 }
@@ -567,13 +597,18 @@ async function closeBuilder(user: JobUser, root: string, proc = '/proc'): Promis
   if (user.uid >= FIRST_UID) clearShared(user.uid, SHARED);
   remove(root);
 }
-function preparationContext(state: ProductState, profile: string, hidden: string[]): PreparationContext {
+/* A unit that failed tells what the build said last. */
+const BUILD_TAIL = 4000;
+function preparationContext(state: PreparationState, profile: string, hidden: string[]): PreparationContext {
+  const { harness } = state.options;
+  const share: PreparationContext['share'] = harness && ((unit, description) => harnessShare(harness, { repositoryScope: description.repositoryScope, version: harnessVersion(description), unit, commitSha: description.commitSha, platform: harnessPlatform() }, { tail: () => redact(stripEscapes(state.out.text()), hidden).slice(-BUILD_TAIL) }));
   const context: PreparationContext = {
     cacheRoot: join(state.options.dir, 'cache'), checkout: state.repo, profile, attemptRoot: state.root, nodeOwner: state.nodeOwner, jobUser: state.user,
     deadline: state.deadline, signal: state.signal, env: state.base, log: line => state.out.line(line), registerSecrets: values => { hidden.push(...values); },
-    builder: (inputs, dependencies) => productBuilder(state, inputs, dependencies, context),
-    run: async (command, extra = {}) => { giveCheckout(state, state.repo, state.user); await productCommand(state, state.repo, state.user, command, { ...state.base, ...extra, CI: 'true' }); },
+    builder: (inputs, dependencies, setup = { link: false, env: {} }) => productBuilder(state, inputs, dependencies, setup, context),
+    run: (command, extra = {}) => productCommand(state, state.repo, state.user, command, { ...state.base, ...extra, CI: 'true' }),
     quiesce: () => stopTestUser(state.user, state.options.proc),
+    ...(share ? { share } : {}),
   };
   return context;
 }
@@ -594,6 +629,9 @@ function productOperations(execution: TestExecution): ProductOperation[] {
 async function productCheckout(msg: TestRun, state: ProductState, context: PreparationContext): Promise<EnvironmentDescription> {
   const expected = await productDescription(msg.environment!.snapshot.description);
   await checkoutCommit(msg.repo!, expected.repositoryScope, expected.commitSha, state.repo, context);
+  /* The job user gets its checkout before anything is restored into it: a handover afterwards would reach through shared
+     links into the files every part reads. */
+  prepareFolder(state.repo, state.user);
   const actual = await readTestEnvironment(msg.repo!, expected.repositoryScope, expected.commitSha, context);
   if (expected.manifestHash !== actual.manifestHash || JSON.stringify(expected.inputDigests) !== JSON.stringify(actual.inputDigests) || JSON.stringify(expected.inventory) !== JSON.stringify(actual.inventory)) environmentError('description_mismatch', 'The pinned checkout differs from the accepted environment snapshot.');
   if (!supportsTestProfile({ description: actual, profile: context.profile }, actual.runtimeCapabilities)) environmentError('runtime_missing', 'The node lacks a runtime required by this product profile.');
@@ -648,7 +686,6 @@ async function executeProduct(msg: TestRun, state: ProductState, hidden: string[
     const dependencies = await timedPhase(state.receipt, 'dependenciesMs', () => prepareDependencies(description, context)); state.receipt.dependencies = dependencies.receipt;
     await timedPhase(state.receipt, 'servicesMs', () => (state.options.prepareRepoBrowser ?? (repo => ensureRepoBrowser(state.options.dir, repo, state.user)))(state.repo));
     const prepared = await timedPhase(state.receipt, 'environmentMs', () => prepareEnvironment(description, dependencies, context)); state.receipt.environments = prepared.receipts;
-    giveCheckout(state, state.repo, state.user);
     services = await timedPhase(state.receipt, 'servicesMs', () => openEnvironment(prepared, context));
     await timedPhase(state.receipt, 'commandMs', () => productSelection(msg, state, { ...state.base, ...services!.env, CI: 'true', NO_COLOR: '1', VITEST_MAX_WORKERS: vitestWorkers(state.options.cpus, state.options.env) }));
   } finally { await timedPhase(state.receipt, 'cleanupMs', async () => { try { await services?.close(); } finally { await stopTestUser(state.user, state.options.proc); } }); }
@@ -664,21 +701,22 @@ async function productState(msg: TestRun, options: Options, out: Output): Promis
   const identity = productUser(options.user), root = join(partsFolder(options.dir), msg.partId), deadline = Date.now() + msg.timeoutMs;
   return { ...identity, root, repo: join(root, 'repo'), out, deadline, signal: productSignal(options.signal, deadline), options, receipt: receiptFor(execution), exitCode: null, base: { PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin', HOME: join(root, 'home'), TMPDIR: join(root, 'tmp'), LANG: 'C.UTF-8', ...browserEnv(options.dir) } };
 }
-async function productFolders(state: ProductState): Promise<void> {
+async function productFolders(state: PreparationState): Promise<void> {
   await privateCacheRoot(join(state.options.dir, 'cache')); remove(state.root); prepareFolder(state.root, null); chmodSync(state.root, 0o755);
   for (const path of ['home', 'tmp']) prepareFolder(join(state.root, path), state.user);
   ensurePasswd(state.user, partsFolder(state.options.dir));
 }
-const productSecrets = (msg: TestRun, hidden: string[]): string[] => [...hidden, ...(msg.repo?.token ? [msg.repo.token] : [])];
+const productSecrets = (msg: Pick<TestRun, 'repo'>, hidden: string[]): string[] => [...hidden, ...(msg.repo?.token ? [msg.repo.token] : [])];
 function failedProductSignal(state: ProductState | undefined, options: Options): AbortSignal { return state?.signal ?? options.signal ?? new AbortController().signal; }
+async function leaveNothing(state: PreparationState): Promise<void> {
+  await stopTestUser(state.user, state.options.proc);
+  if (state.user.uid >= FIRST_UID) clearShared(state.user.uid, SHARED);
+  remove(state.root);
+}
 async function cleanupProduct(state: ProductState | undefined, out: Output): Promise<TestError | null> {
   if (!state) return null;
   try {
-    await timedPhase(state.receipt, 'cleanupMs', async () => {
-      await stopTestUser(state.user, state.options.proc);
-      if (state.user.uid >= FIRST_UID) clearShared(state.user.uid, SHARED);
-      remove(state.root);
-    }); return null;
+    await timedPhase(state.receipt, 'cleanupMs', () => leaveNothing(state)); return null;
   } catch (error) { out.line(error instanceof Error ? error.message : String(error)); return 'failed'; }
 }
 function productDone(msg: TestRun, state: ProductState | undefined, error: TestError | null, out: Output, hidden: string[]): TestsDone {
@@ -710,4 +748,69 @@ async function selectedProductCommand(state: ProductState, command: Command, env
   state.exitCode = null;
   try { await productCommand(state, state.repo, state.user, command, env); state.exitCode = 0; }
   catch (error) { if (error instanceof ProductCommandFailure) state.exitCode = error.exitCode; throw error; }
+}
+
+type HarnessRequest = Extract<ServerMessage, { type: 'tests.harness' }>;
+/* A machine gets a commit's harness ready within this. */
+const SYNC_MS = 60 * 60_000;
+/* How many trees of each kind a machine keeps for what it last used. */
+const KEEP_DEPENDENCIES = 8;
+const KEEP_ENVIRONMENTS = 64;
+const syncedFile = (dir: string, version: string, fingerprint: string) => join(dir, 'cache', 'harness', `${createHash('sha256').update(`${version}:${fingerprint}`).digest('hex')}.json`);
+
+async function alreadySynced(file: string, cacheRoot: string): Promise<string[] | null> {
+  const keys = await fsReadFile(file, 'utf8').then(text => JSON.parse(text) as string[], () => null);
+  if (!keys) return null;
+  const stored = await Promise.all(keys.map(key => Promise.any(['dependencies', 'environments'].map(kind => fsStat(join(cacheRoot, kind, key, 'READY.json')))).then(() => true, () => false)));
+  return stored.every(Boolean) ? keys : null;
+}
+
+/* Everything a run of this commit could need, on this machine: its dependencies, its browser, what each profile the machine can
+   run prepares. All of it hits, or comes from another machine's build, or is built here for all of them. */
+async function syncedHarness(msg: HarnessRequest, state: PreparationState, hidden: string[]): Promise<{ version: string; keys: string[] }> {
+  const context = preparationContext(state, '', hidden), { dir, prepareRepoBrowser = repo => ensureRepoBrowser(dir, repo, state.user) } = state.options;
+  const description = await readTestEnvironment(msg.repo, msg.repositoryScope, msg.commitSha, context).catch((error: unknown) => {
+    if (error instanceof EnvironmentFailure) throw error;
+    context.signal.throwIfAborted();
+    throw new EnvironmentFailure({ code: 'commit_unavailable', detail: 'The machine could not read this commit of the repository.' });
+  });
+  const version = harnessVersion(description), { dependencies: wanted, profiles } = description.manifest;
+  if (wanted.cache === 'none') return { version, keys: [] };
+  const marker = syncedFile(dir, version, JSON.stringify(description.runtimeCapabilities)), known = await alreadySynced(marker, context.cacheRoot);
+  if (known) return { version, keys: known };
+  await checkoutCommit(msg.repo, msg.repositoryScope, msg.commitSha, state.repo, context);
+  prepareFolder(state.repo, state.user);
+  const dependencies = await prepareDependencies(description, context);
+  await prepareRepoBrowser(state.repo);
+  const keys = new Set([dependencies.receipt.key]);
+  for (const { id } of profiles.filter(profile => supportsTestProfile({ description, profile: profile.id }, description.runtimeCapabilities))) {
+    const prepared = await prepareEnvironment(description, dependencies, { ...context, profile: id }, { freshServices: false });
+    for (const receipt of prepared.receipts) keys.add(receipt.key);
+  }
+  const held = [...keys].filter((key): key is string => key !== null);
+  await fsMkdir(dirname(marker), { recursive: true, mode: 0o700 });
+  await fsWriteFile(marker, JSON.stringify(held), { mode: 0o600 });
+  await pruneCache(join(context.cacheRoot, 'dependencies'), KEEP_DEPENDENCIES, context);
+  await pruneCache(join(context.cacheRoot, 'environments'), KEEP_ENVIRONMENTS, context);
+  return { version, keys: held };
+}
+
+function syncProblem(error: unknown, signal: AbortSignal, hidden: string[]): EnvironmentProblem {
+  if (signal.aborted) return signal.reason instanceof DOMException && signal.reason.name === 'TimeoutError' ? { code: 'timeout', detail: 'The harness did not come ready in time.' } : { code: 'cancelled', detail: 'Getting the harness ready was stopped.' };
+  if (error instanceof EnvironmentFailure) return error.problem;
+  return { code: 'build_failed', detail: redact(error instanceof Error ? error.message : String(error), hidden).slice(-2000) || 'The harness could not be built.' };
+}
+
+/* What Hornhoof asks of every machine ahead of any run. The folder goes, whatever happened. */
+export async function syncHarness(msg: HarnessRequest, options: Options): Promise<HarnessSynced> {
+  const hidden = productSecrets(msg, options.hidden), out = new Output();
+  const root = join(partsFolder(options.dir), `harness-${msg.requestId}`), deadline = Date.now() + SYNC_MS, signal = productSignal(options.signal, deadline);
+  let state: PreparationState | undefined, result: HarnessSynced['result'];
+  try {
+    state = { ...productUser(options.user), root, repo: join(root, 'repo'), out, deadline, signal, options, base: { PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin', HOME: join(root, 'home'), TMPDIR: join(root, 'tmp'), LANG: 'C.UTF-8', ...browserEnv(options.dir) } };
+    await productFolders(state);
+    result = { status: 'ready', ...await syncedHarness(msg, state, hidden) };
+  } catch (error) { result = { status: 'error', problem: syncProblem(error, signal, hidden) }; }
+  finally { if (state) await leaveNothing(state).catch(() => {}); }
+  return { type: 'tests.harness.done', requestId: msg.requestId, commitSha: msg.commitSha, result };
 }

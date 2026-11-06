@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { constants, createReadStream, type Stats } from 'node:fs';
-import { chmod, chown, copyFile, link, lstat, mkdir, mkdtemp, open, readFile, readdir, readlink, realpath, rename, rm, symlink } from 'node:fs/promises';
+import { chmod, chown, copyFile, link, lstat, mkdir, mkdtemp, open, readFile, readdir, readlink, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { EnvironmentDigest, RepositoryPath } from '@hornhoof/protocol';
 import { z } from 'zod';
@@ -80,7 +80,7 @@ type CacheBuild = () => Promise<{ root: string; paths: string[] }>;
 /* Decides where a missing tree comes from, and returns the entry once it is stored: publish builds it on this machine. */
 export type CacheShare = (entry: CacheEntry, context: CacheContext, publish: () => Promise<CacheReady>) => Promise<CacheEntry>;
 /* link: the part gets read-only links to the one stored file instead of copies. owner: who gets what is restored. */
-export type RestoreOptions = { link?: boolean; owner?: JobUser };
+export type RestoreOptions = { link?: boolean; owner?: JobUser; except?: string };
 /* Stored files nobody may write. A part that holds a link to one can read it and replace it, and never change it. */
 export const storedMode = (mode: number): number => (mode & 0o111 ? 0o555 : 0o444);
 const BATCH = 256;
@@ -251,10 +251,10 @@ export async function prepareCache(directory: string, key: string, inputDigest: 
   await privateCacheRoot(directory); const locks = await privateCacheRoot(join(directory, '.locks'));
   return withCacheLock(join(locks, key), context, async () => {
     const entry: CacheEntry = { path: join(directory, key), key, inputDigest, hit: false };
-    const ready = await cached(entry, context);
-    if (ready) return { ...entry, hit: true, ready };
-    const store = () => publish(entry, context, build);
-    return share ? share(entry, context, store) : { ...entry, ready: await store() };
+    const ready = await cached(entry, context), store = () => publish(entry, context, build);
+    const prepared = ready ? { ...entry, hit: true, ready } : share ? await share(entry, context, store) : { ...entry, ready: await store() };
+    await markUsed(prepared);
+    return prepared;
   });
 }
 async function restoredLinks(root: string, entries: PayloadItem[]): Promise<void> {
@@ -294,15 +294,40 @@ async function restoredItem(source: string, target: string, item: PayloadItem, o
   await (options.link ? linkedFile : copiedFile)(within(source, item.path), to, item, options.owner);
 }
 export async function restoreCache(entry: CacheEntry, destination: string, context: CacheContext, options: RestoreOptions = {}): Promise<void> {
-  const ready = entry.ready ?? await readReady(entry, context);
+  const ready = entry.ready ?? await readReady(entry, context), { except } = options;
+  const wanted = (path: string) => except === undefined || (path !== except && !path.startsWith(`${except}/`));
+  const items = ready.entries.filter(item => wanted(item.path));
   await mkdir(destination, { recursive: true, mode: 0o700 });
   if (!(await lstat(destination)).isDirectory()) throw new Error('The checkout root is a symlink or is not a directory.');
-  for (const path of ready.roots) {
+  for (const path of ready.roots.filter(wanted)) {
     // Check parents before removing an old private copy. A job must never redirect a restore.
     const target = within(destination, path); await restoredParents(destination, path, options.owner);
     await noLinkedParents(destination, path); await rm(target, { recursive: true, force: true });
   }
-  for (const item of ready.entries) if (item.kind === 'directory') await restoredFolder(within(destination, item.path), options.owner);
-  await inBatches(ready.entries, context, item => restoredItem(join(entry.path, 'payload'), destination, item, options));
-  await restoredLinks(destination, ready.entries);
+  for (const item of items) if (item.kind === 'directory') await restoredFolder(within(destination, item.path), options.owner);
+  await inBatches(items, context, item => restoredItem(join(entry.path, 'payload'), destination, item, options));
+  await restoredLinks(destination, items);
+}
+
+/* Machines keep what they are likely to need again: the last ones used, for as long as they stay in use. A part takes a tree
+   right after it is prepared, and a part lasts at most two hours, so nothing used more recently than that goes. */
+const LAST_USED = 'USED';
+const IN_USE_MS = 3 * 60 * 60_000;
+const IDLE_MS = 7 * 24 * 60 * 60_000;
+const LEFT_BEHIND_MS = 24 * 60 * 60_000;
+const markUsed = (entry: Pick<CacheEntry, 'path'>) => writeFile(join(entry.path, LAST_USED), '');
+const changedAt = (path: string) => lstat(path).then(stat => stat.mtimeMs, () => 0);
+async function usedAt(path: string): Promise<number> {
+  return await changedAt(join(path, LAST_USED)) || changedAt(join(path, 'READY.json'));
+}
+export async function pruneCache(directory: string, keep: number, context: CacheContext, now = Date.now()): Promise<void> {
+  const names = await readdir(directory).catch(() => [] as string[]);
+  for (const name of names.filter(name => /^\.(?:staging|bundle|corrupt)-/.test(name))) {
+    if (now - await changedAt(join(directory, name)) > LEFT_BEHIND_MS) await rm(join(directory, name), { recursive: true, force: true });
+  }
+  const stored = await Promise.all(names.filter(name => /^[a-f0-9]{64}$/.test(name)).map(async name => ({ name, used: await usedAt(join(directory, name)) })));
+  for (const [index, { name, used }] of stored.sort((a, b) => b.used - a.used).entries()) {
+    if (now - used < IN_USE_MS || (index < keep && now - used < IDLE_MS)) continue;
+    await withCacheLock(join(directory, '.locks', name), context, () => rm(join(directory, name), { recursive: true, force: true }));
+  }
 }

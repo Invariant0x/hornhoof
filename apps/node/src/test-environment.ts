@@ -3,7 +3,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { cp, lstat, mkdir, mkdtemp, open, readdir, realpath, rm } from 'node:fs/promises';
 import { basename, join, matchesGlob, relative, resolve } from 'node:path';
 import { CheckSlotQueue, hashTestEnvironment, parseTestEnvironment, validateEnvironmentDescription, TEST_ENVIRONMENT_BYTES, RepositoryPath, type Command, type TestSuite, type TestPrepare, type NodeMessage, type ServerMessage, type TestsDescribed, type EnvironmentDescription, type EnvironmentProblem, type InputDigest, type RepositoryScope, type RuntimeCapability, type TestEnvironmentV1, type TestUnit } from '@hornhoof/protocol';
-import { cacheKey, checkCacheContext, fileDigest, prepareCache, restoreCache, privateCacheRoot, type CacheEntry, type CacheContext } from './test-cache.js';
+import { cacheKey, checkCacheContext, fileDigest, prepareCache, restoreCache, privateCacheRoot, type CacheEntry, type CacheContext, type CacheShare } from './test-cache.js';
+import { DiscoveryProblem, discoverEnvironment } from './test-discovery.js';
 import { withCheckSlot } from './check-queue.js';
 import { prepareServiceArtifacts, openServices, type OpenedServices, type ServiceArtifacts, type ServiceContext, type ServiceDefinition, type ServiceDefinitions } from './test-services.js';
 import type { JobUser } from './isolation.js';
@@ -64,10 +65,15 @@ function manifestFrom(bytes: Buffer): TestEnvironmentV1 {
   try { return parseTestEnvironment(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); }
   catch { return fail('environment_invalid', 'The pinned test environment is not a valid version 1 manifest.'); }
 }
+/* The repository's own description, or else what its files say of it, which then goes on as if it had written that. */
+async function manifestBytes(tree: CommitTree): Promise<Buffer> {
+  if (tree.entries.some(entry => entry.path === MANIFEST)) return blob(tree, MANIFEST, TEST_ENVIRONMENT_BYTES);
+  try { return Buffer.from(JSON.stringify(await discoverEnvironment(tree))); }
+  catch (error) { if (error instanceof DiscoveryProblem) fail(error.code, error.message); throw error; }
+}
 export async function readTestEnvironment(source: Source, repositoryScope: RepositoryScope, commitSha: string, context: DescriptionContext): Promise<EnvironmentDescription> {
   const tree = await readCommit(source, repositoryScope, commitSha, context);
-  if (!tree.entries.some(entry => entry.path === MANIFEST)) fail('environment_missing', 'No test environment exists at the pinned commit.');
-  const bytes = await blob(tree, MANIFEST, TEST_ENVIRONMENT_BYTES), manifest = manifestFrom(bytes);
+  const bytes = await manifestBytes(tree), manifest = manifestFrom(bytes);
   fixtureInputs(tree, manifest);
   return validateEnvironmentDescription({ version: 1, repositoryScope, commitSha, manifestSource: bytes.toString('utf8'), manifestHash: await hashTestEnvironment(bytes), manifest, inputDigests: await inputDigests(tree, manifest), inventory: listTestUnits(manifest, tree.entries), runtimeCapabilities: context.runtimes ?? await trustedTestRuntimes(context) });
 }
@@ -137,7 +143,7 @@ function selectedInputs(description: EnvironmentDescription, patterns: string[])
 }
 function commandRuntime(command: Command): string[] {
   const program = basename(command.program);
-  if (['node', 'npm', 'npx', 'pnpm', 'yarn'].includes(program)) return ['node'];
+  if (['node', 'npm', 'npx', 'pnpm', 'yarn', 'corepack'].includes(program)) return ['node'];
   return /^python(?:[23](?:\.\d+)?)?$/.test(program) ? ['python'] : [];
 }
 function commandRuntimes(description: EnvironmentDescription, commands: Command[]): string[] {
@@ -166,23 +172,32 @@ export function environmentCacheKey(description: EnvironmentDescription, unitId:
 }
 
 
-export type TestCapabilities = { testEnvironmentVersion?: 1; testRuntimes?: RuntimeCapability[] };
+/* One version of a product's harness, the same on every architecture while nothing it is built from changes. What a machine
+   builds from it has a key of its own, as that also holds the machine's program and architecture. */
+export function harnessVersion(description: EnvironmentDescription): string {
+  const { dependencies, prepare, services, reset } = description.manifest;
+  return digest(JSON.stringify({ dependencies, prepare, services, reset, inputs: description.inputDigests }));
+}
+export const harnessPlatform = (): string => `${process.platform}-${process.arch}`;
+export type TestCapabilities = { testEnvironmentVersion?: 1; testRuntimes?: RuntimeCapability[]; testHarness?: 1 };
 export async function nodeTestCapabilities(dir: string, user: JobUser | null): Promise<TestCapabilities> {
   if (!user || user.uid === 0 || user.uid === process.getuid?.()) return {};
   const cacheRoot = await privateCacheRoot(join(dir, 'cache'));
-  return { testEnvironmentVersion: 1, testRuntimes: await trustedTestRuntimes({ cacheRoot, signal: new AbortController().signal, deadline: Date.now() + 10_000, log: () => {} }) };
+  return { testEnvironmentVersion: 1, testHarness: 1, testRuntimes: await trustedTestRuntimes({ cacheRoot, signal: new AbortController().signal, deadline: Date.now() + 10_000, log: () => {} }) };
 }
 type TestRunMessage = Extract<ServerMessage, { type: 'tests.run' }>;
 type DescribeMessage = Extract<ServerMessage, { type: 'tests.describe' }>;
-type TestMessage = Extract<ServerMessage, { type: 'tests.run' | 'tests.cancel' | 'tests.describe' | 'tests.describe.cancel' }>;
+type HarnessMessage = Extract<ServerMessage, { type: 'tests.harness' }>;
+type TestMessage = Extract<ServerMessage, { type: 'tests.run' | 'tests.cancel' | 'tests.describe' | 'tests.describe.cancel' | 'tests.harness' }>;
 type ActiveTest = { stop: AbortController; done: Promise<void> };
 export function isNodeTestMessage(message: { type: string }): message is TestMessage {
-  return ['tests.run', 'tests.cancel', 'tests.describe', 'tests.describe.cancel'].includes(message.type);
+  return ['tests.run', 'tests.cancel', 'tests.describe', 'tests.describe.cancel', 'tests.harness'].includes(message.type);
 }
 type TestMessageOptions = {
   dir: string; describe?: typeof readTestEnvironment; capabilities: TestCapabilities; stopped: () => boolean;
   testing: Map<string, ActiveTest>; unconfirmed: Map<string, NodeMessage>;
   run: (message: TestRunMessage, signal: AbortSignal) => Promise<void>;
+  harness?: (message: HarnessMessage, signal: AbortSignal) => Promise<NodeMessage>;
   emit: (message: NodeMessage) => void;
 };
 function describeSignature(message: DescribeMessage): string {
@@ -197,6 +212,7 @@ function descriptionProblem(error: unknown, signal: AbortSignal): EnvironmentPro
 export class NodeTestMessages {
   private readonly describing = new Map<string, ActiveTest & { signature: string }>();
   private readonly described = new Map<string, { signature: string; reply: TestsDescribed }>();
+  private readonly syncing = new Map<string, ActiveTest>();
   constructor(private readonly options: TestMessageOptions) {}
   handle(message: TestMessage): Promise<void> | void {
     switch (message.type) {
@@ -204,7 +220,18 @@ export class NodeTestMessages {
       case 'tests.cancel': return this.options.testing.get(message.partId)?.stop.abort();
       case 'tests.describe': return this.describe(message);
       case 'tests.describe.cancel': return this.describing.get(message.requestId)?.stop.abort();
+      case 'tests.harness': return this.harness(message);
     }
+  }
+  private harness(message: HarnessMessage): Promise<void> | void {
+    const { harness, stopped, emit } = this.options;
+    if (!harness || stopped() || this.syncing.has(message.requestId)) return;
+    const stop = new AbortController();
+    const done = Promise.resolve().then(async () => {
+      try { emit(await harness(message, stop.signal)); }
+      finally { this.syncing.delete(message.requestId); }
+    });
+    this.syncing.set(message.requestId, { stop, done }); return done;
   }
   private run(message: TestRunMessage): Promise<void> | void {
     const { options } = this;
@@ -212,8 +239,8 @@ export class NodeTestMessages {
     const stop = new AbortController(), done = Promise.resolve().then(() => options.run(message, stop.signal));
     options.testing.set(message.partId, { stop, done }); return done;
   }
-  activeDescriptions(): ActiveTest[] { return [...this.describing.values()]; }
-  cancelDescriptions(): void { for (const request of this.describing.values()) request.stop.abort(); }
+  activeDescriptions(): ActiveTest[] { return [...this.describing.values(), ...this.syncing.values()]; }
+  cancelDescriptions(): void { for (const request of this.activeDescriptions()) request.stop.abort(); }
   replay(): void { for (const { reply } of this.described.values()) this.options.emit(reply); }
   private mismatch(message: DescribeMessage): void {
     this.options.emit({ type: 'tests.described', requestId: message.requestId, commitSha: message.commitSha, result: { status: 'error', problem: { code: 'description_mismatch', detail: 'A description request ID was reused for another repository commit.' } } });
@@ -301,13 +328,22 @@ export type PreparationBuilder = {
 export type PreparationContext = CacheContext & {
   checkout: string; profile: string; attemptRoot: string; nodeOwner: JobUser; jobUser: JobUser;
   env: Record<string, string>; registerSecrets: (values: string[]) => void;
-  builder: (inputs: InputDigest[], dependencies: CacheEntry | null) => Promise<PreparationBuilder>;
+  builder: (inputs: InputDigest[], dependencies: CacheEntry | null, setup?: BuilderSetup) => Promise<PreparationBuilder>;
   run: (command: Command, env?: Record<string, string>) => Promise<void>; quiesce: () => Promise<void>;
+  /* Where what this machine lacks comes from: another machine's build, through Hornhoof. None: it builds here. */
+  share?: (unit: string, description: EnvironmentDescription) => CacheShare;
 };
-export type PreparedDependencies = { entry: CacheEntry | null; receipt: { key: string | null; hit: boolean } };
+/* How a builder gets the dependencies: linked when they are shared read-only, and the variables that name them. */
+export type BuilderSetup = { link: boolean; env: Record<string, string> };
+export type PreparedDependencies = { entry: CacheEntry | null; receipt: { key: string | null; hit: boolean; fetched?: boolean } };
 type PreparedUnit = { definitions: ServiceDefinitions; artifacts: ServiceArtifacts };
-export type PreparedEnvironment = { env: Record<string, string>; receipts: { unitId: string; key: string | null; hit: boolean }[]; services: PreparedUnit[] };
+export type PreparedEnvironment = { env: Record<string, string>; receipts: { unitId: string; key: string | null; hit: boolean; fetched?: boolean }[]; services: PreparedUnit[] };
+/* What a run needs, by default. A machine getting ready ahead of a run keeps services for it, and starts none of them; a
+   manual command gets no services at all. */
+export type PreparationScope = { serviceUnits?: boolean; freshServices?: boolean };
 const SERVICE_PAYLOAD = '.hornhoof-services';
+const builderSetup = (description: EnvironmentDescription): BuilderSetup => ({ link: description.manifest.dependencies.cache === 'link', env: description.manifest.dependencies.env ?? {} });
+const fetchedField = (entry: CacheEntry) => (entry.fetched === undefined ? {} : { fetched: entry.fetched });
 async function runPreparation(commands: Command[], builder: Pick<PreparationBuilder, 'run' | 'quiesce'>): Promise<void> {
   try { for (const command of commands) await builder.run(command); }
   finally { await builder.quiesce(); }
@@ -322,9 +358,9 @@ export async function prepareDependencies(description: EnvironmentDescription, c
       builder = await context.builder(selectedInputs(description, dependencies.inputs), null);
       await runPreparation(dependencies.install, builder);
       return { root: builder.root, paths: dependencies.paths };
-    });
-    await restoreCache(entry, context.checkout, context);
-    return { entry, receipt: { key, hit: entry.hit } };
+    }, context.share?.('dependencies', description));
+    await restoreCache(entry, context.checkout, context, { link: dependencies.cache === 'link', owner: context.jobUser });
+    return { entry, receipt: { key, hit: entry.hit, ...fetchedField(entry) } };
   } finally { await builder?.close(); }
 }
 function definitionsFor(description: EnvironmentDescription, unit: TestPrepare): ServiceDefinitions {
@@ -360,15 +396,15 @@ async function cachedUnit(description: EnvironmentDescription, unit: TestPrepare
   let builder: PreparationBuilder | undefined;
   try {
     const entry = await prepareCache(join(context.cacheRoot, 'environments'), key, key, context, async () => {
-      builder = await context.builder([...new Map([...selectedInputs(description, description.manifest.dependencies.inputs), ...inputs].map(input => [input.path, input])).values()], dependencies.entry);
+      builder = await context.builder([...new Map([...selectedInputs(description, description.manifest.dependencies.inputs), ...inputs].map(input => [input.path, input])).values()], dependencies.entry, builderSetup(description));
       return { root: builder.root, paths: await buildUnit(description, unit, key, builder, context) };
-    });
-    await restoreCache(entry, context.checkout, context); return entry;
+    }, context.share?.(unit.id, description));
+    await restoreCache(entry, context.checkout, context, { owner: context.jobUser, except: SERVICE_PAYLOAD }); return entry;
   } finally { await builder?.close(); }
 }
-async function uncachedUnit(description: EnvironmentDescription, unit: TestPrepare, context: PreparationContext): Promise<PreparedUnit | null> {
+async function uncachedUnit(description: EnvironmentDescription, unit: TestPrepare, context: PreparationContext, env: Record<string, string>): Promise<PreparedUnit | null> {
   const definitions = definitionsFor(description, unit);
-  if (!definitions.services.length) { await runPreparation(unit.commands, context); return null; }
+  if (!definitions.services.length) { await runPreparation(unit.commands, { run: (command, extra = {}) => context.run(command, { ...env, ...extra }), quiesce: context.quiesce }); return null; }
   const key = digest(randomUUID());
   const artifacts = await prepareServiceArtifacts(definitions, context.checkout, { ...serviceContext(context), cacheRoot: join(context.attemptRoot, 'service-templates', unit.id), envKey: key, inputDigest: key });
   await context.quiesce(); await servicePaths(unit, artifacts); return { definitions, artifacts };
@@ -395,21 +431,25 @@ function addEnvironment(target: Record<string, string>, values: Record<string, s
 async function prepareUnit(description: EnvironmentDescription, unit: TestPrepare, dependencies: PreparedDependencies, prepared: PreparedEnvironment, completed: string[], context: PreparationContext): Promise<void> {
   const inputs = await readPreparationInputs(description, unit.id, { ...context, completed });
   if (dependencies.receipt.key === null) {
-    const services = await uncachedUnit(description, unit, context);
+    const services = await uncachedUnit(description, unit, context, prepared.env);
     if (services) prepared.services.push(services);
     prepared.receipts.push({ unitId: unit.id, key: null, hit: false });
   } else {
     const key = environmentCacheKey(description, unit.id, dependencies.receipt.key, inputs), entry = await cachedUnit(description, unit, dependencies, key, inputs, context);
     const services = cachedServices(description, unit, entry);
     if (services) prepared.services.push(services);
-    prepared.receipts.push({ unitId: unit.id, key, hit: entry.hit });
+    prepared.receipts.push({ unitId: unit.id, key, hit: entry.hit, ...fetchedField(entry) });
   }
   await artifactEnvironment(unit, context.checkout, prepared.env); completed.push(unit.id);
 }
-export async function prepareEnvironment(description: EnvironmentDescription, dependencies: PreparedDependencies, context: PreparationContext): Promise<PreparedEnvironment> {
+async function dependencyPaths(description: EnvironmentDescription, checkout: string, env: Record<string, string>): Promise<void> {
+  for (const [name, path] of Object.entries(description.manifest.dependencies.env ?? {})) addEnvironment(env, { [name]: await safeCheckoutPath(checkout, path) });
+}
+export async function prepareEnvironment(description: EnvironmentDescription, dependencies: PreparedDependencies, context: PreparationContext, { serviceUnits = true, freshServices = true }: PreparationScope = {}): Promise<PreparedEnvironment> {
   const prepared: PreparedEnvironment = { env: {}, receipts: [], services: [] }, completed: string[] = [];
-  for (const unit of description.manifest.prepare.filter(unit => unit.profiles.includes(context.profile))) await prepareUnit(description, unit, dependencies, prepared, completed, context);
-  await freshServiceArtifacts(description, prepared, context);
+  await dependencyPaths(description, context.checkout, prepared.env);
+  for (const unit of description.manifest.prepare.filter(unit => unit.profiles.includes(context.profile) && (serviceUnits || !unit.serviceIds.length))) await prepareUnit(description, unit, dependencies, prepared, completed, context);
+  if (freshServices) await freshServiceArtifacts(description, prepared, context);
   return prepared;
 }
 export async function openEnvironment(prepared: PreparedEnvironment, context: PreparationContext): Promise<OpenedServices> {

@@ -30,6 +30,7 @@ vi.mock('node:fs', async original => {
     lstatSync: (path: import('node:fs').PathLike) => { const stat = module.lstatSync(path); return sharedState.builderFiles.has(String(path)) ? Object.assign(stat, { uid: sharedState.builderUid }) : stat; },
   };
 });
+vi.mock('node:fs/promises', async original => ({ ...await original<typeof import('node:fs/promises')>(), chown: async () => {} }));
 vi.mock('../src/isolation.js', async original => {
   const module = await original<typeof import('../src/isolation.js')>();
   return { ...module, userFor: () => ({ uid: sharedState.builderUid, gid: sharedState.builderUid }), ensurePasswd: () => {}, prepareFolder: (path: string) => module.prepareFolder(path, null) };

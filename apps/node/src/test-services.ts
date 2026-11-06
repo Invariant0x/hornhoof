@@ -118,6 +118,8 @@ function ownTree(path: string, context: ServiceContext): void {
   const st = lstatSync(path);
   if (st.isSymbolicLink()) throw new Error('Service state cannot contain symlinks');
   chownSync(path, context.jobUser.uid, context.jobUser.gid);
+  /* What is stored stays read-only; a service writes in its own copy. */
+  chmodSync(path, st.isDirectory() || st.mode & 0o100 ? 0o700 : 0o600);
   if (st.isDirectory()) for (const entry of readdirSync(path)) ownTree(join(path, entry), context);
 }
 function kill(pid: number | undefined, signal: NodeJS.Signals): void {
