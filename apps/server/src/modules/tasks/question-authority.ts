@@ -60,7 +60,7 @@ export type TriageCall = { jobId: string; agentId: string; companyId: string };
 export type TriagePlace = Place & { triageAgentId: string | null };
 export type TriageActor = { agentId: string; role: 'head' | 'orchestrator' | 'triage' };
 
-const notAllowed = () => new ApiError(403, 'forbidden', 'This question is not yours to settle or to put before a person.', 'question_not_allowed');
+export const notAllowed = () => new ApiError(403, 'forbidden', 'This question is not yours to settle or to put before a person.', 'question_not_allowed');
 
 /* The turn that calls, of an agent still here in this company, as the server knows it: a job token says no more than this. */
 async function liveTurn(tx: Tx, call: TriageCall, on: TriagePlace) {

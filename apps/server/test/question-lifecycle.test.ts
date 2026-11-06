@@ -6,6 +6,7 @@ import { agents, approvalPolicies, jobs, pendingWakes, people, requestInternal, 
 import { mayOpenRequest } from '../src/modules/tasks/decisions.js';
 import { answerDirectly, ask, createTask, handOver, silentTurn, type Task } from '../src/modules/tasks/engine.js';
 import { claimQuestions } from '../src/modules/tasks/question-intents.js';
+import { questionDisclosure } from '../src/modules/tasks/question-lifecycle.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
 import { requestSourceKey } from '../src/modules/tasks/wait-state.js';
 import { questionSourceKey } from '../src/modules/tasks/wait-producers.js';
@@ -526,6 +527,64 @@ describe('putting a question before a person', () => {
       expect(late.content[0]!.text).toContain('source_closed');
       expect((await c.questionsOf(c.work))[0]).toMatchObject({ status: 'resolved_internal', audience: 'internal', classification: null });
     });
+  });
+});
+
+describe('what a person may be shown of a question', () => {
+  const COMMIT = 'd'.repeat(40);
+  const envelope = { situation: 'The release of the new checkout is ready.', requiredAction: 'Approve it or decline it.', options: [] };
+
+  async function before() {
+    const c = await company();
+    const work = await c.task();
+    const { request } = await ask(c.ctx, c.agent.id, work.id, { kind: 'approval', text: 'Merge it.', commit: COMMIT, topic: 'release' });
+    const head = await c.run(c.head.id);
+    const source = { kind: 'task_request' as const, id: request.id };
+    const classify = () => call(head.client as Client, 'classify_human_intent', { operationId: randomUUID(), source, expectedRevision: 1, expectedRouteRevision: 1, classification: { kind: 'ready_result', artifact: { kind: 'commit', sha: COMMIT } }, humanEnvelope: envelope });
+    const [ceo] = await c.db.select().from(people).where(eq(people.isOwner, true));
+    const shown = (personId = ceo!.id, expected?: { revision: number; routeRevision: number }, companyId = c.companyId) =>
+      c.db.transaction(tx => questionDisclosure(tx, { personId, companyId }, source, expected));
+    const reason = (p: Promise<unknown>) => p.then(() => 'ok', (err: { reason?: string }) => err.reason ?? String(err));
+    return { ...c, work, request, source, classify, shown, reason, ceoId: ceo!.id };
+  }
+
+  it('binds exactly what was put before them: the source, its revisions, the classification and its material', async () => {
+    const c = await before();
+    await c.classify();
+    const [row] = await c.questionsOf(c.work);
+    const shown = await c.shown();
+    expect(shown).toMatchObject({
+      source: c.source, revision: 1, routeRevision: 1, personId: c.ceoId,
+      classificationId: row!.classification!.classificationId, digest: row!.classification!.digest, materialRevision: row!.classification!.materialRevision, materialDigest: row!.classification!.materialDigest,
+    });
+    expect(shown.request.id).toBe(c.request.id);
+    expect(shown.task.id).toBe(c.work.id);
+    expect(await c.reason(c.shown(c.ceoId, { revision: 1, routeRevision: 1 }))).toBe('ok');
+  });
+
+  it('is nothing while the question is inside the company', async () => {
+    const c = await before();
+    expect(await c.reason(c.shown())).toBe('classification_required');
+  });
+
+  it('is nothing for someone it was not put before, or from another company', async () => {
+    const c = await before();
+    await c.classify();
+    const [zed] = await c.db.insert(people).values({ companyId: c.companyId, name: 'Zed', email: 'zed@example.test', status: 'active', scopeKind: 'company' }).returning();
+    expect(await c.reason(c.shown(zed!.id))).toBe('question_not_allowed');
+    expect(await c.reason(c.shown(c.ceoId, undefined, randomUUID()))).toBe('request_unknown');
+  });
+
+  it('is nothing for what was read before, once answered, or once what it rested on changed', async () => {
+    const c = await before();
+    await c.classify();
+    expect(await c.reason(c.shown(c.ceoId, { revision: 2, routeRevision: 1 }))).toBe('stale_revision');
+    expect(await c.reason(c.shown(c.ceoId, { revision: 1, routeRevision: 2 }))).toBe('stale_route');
+    await c.db.update(tasks).set({ stage: 1 }).where(eq(tasks.id, c.work.id));
+    expect(await c.reason(c.shown())).toBe('stale_route');
+    await c.db.update(tasks).set({ stage: 0 }).where(eq(tasks.id, c.work.id));
+    await c.db.update(requests).set({ status: 'approved' }).where(eq(requests.id, c.request.id));
+    expect(await c.reason(c.shown())).toBe('source_closed');
   });
 });
 
