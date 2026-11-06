@@ -49,6 +49,14 @@ export async function evaluateCheck(binding: CheckBinding, dataset: Dataset, thr
   };
 }
 
+/* A run that could not read its set proves nothing and asks nobody: it ends as one with no answers. */
+export function unreadableSet(binding: CheckBinding, run: { reportId: string; now: Date }): RunOutcome {
+  const { missedDevCases, ...counted } = scoreCases([], new Map());
+  const decision: Decision = { status: 'incomplete', problems: ['no_result'] };
+  const evaluation = { ...counted, complete: false, bindingDigest: bindingDigest(binding), reportId: run.reportId, datasetHash: binding.datasetHash, evaluatedAt: run.now.toISOString() };
+  return { decision, evaluation, report: { status: decision.status, problems: decision.problems, infraErrors: 0, mustBlockMisses: 0, all: counted.metrics, holdout: counted.holdoutMetrics, missedDevCases } };
+}
+
 const partLine = (name: string, part: Counts): string => `${name} ${part.total} examples: ${part.falseAllows} false yes, ${part.falseDenies} false no, ${part.classErrors} wrong classes, ${part.unavailable} without an answer.`;
 
 export const reportText = (report: Report): string => [
