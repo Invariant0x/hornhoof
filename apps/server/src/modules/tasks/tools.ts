@@ -5,7 +5,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, DECISION_TOPICS, departments, jobs, requests, tasks, type DecisionTopic } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { ask, blocked, cancel, CLOSED, comment, createTask, gateLeads, inRepository, listed, openAfter, refuse, report, submit, taskSpot, updateTask, verdict, type Moved, type Task } from './engine.js';
+import { ask, blocked, cancel, CLOSED, comment, createTask, gateLeads, inRepository, listed, openAfter, refuse, report, taskSpot, updateTask, verdict, type Moved, type Task } from './engine.js';
 import { requireBlockingGate } from './gate-triggers.js';
 import { carriesFile, encodedHint } from './attachments.js';
 import { Text } from './long-text.js';
@@ -15,6 +15,7 @@ import { setUrgent } from './urgency.js';
 import { answersCeoOrDelegate } from '../conversation/decision-context.js';
 import { ONLY_CEO } from '../tools/control.js';
 import { stopTurns, wakeAll } from './wake.js';
+import { submitWithAuthorCheck } from './author-check-submit.js';
 import { orchestratorOf } from '../conversation/queue.js';
 import { appendOutgoing } from '../events/store.js';
 import { personParty } from '../events/parties.js';
@@ -487,7 +488,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         run(async () => {
           const { task } = await find(ref);
           plain(task, summary, evidence);
-          const moved = await submit(ctx, job.agentId, task.id, { summary, evidence, review });
+          const moved = await submitWithAuthorCheck(ctx, job, task.id, { summary, evidence, review });
           return { text: `Submitted. ${await where(moved.task)}`, moved };
         }),
     );
