@@ -187,6 +187,16 @@ describe('hh-git as plain git', () => {
     expect(remoteRef(s, 'refs/heads/task-1')).toBe(head(s));
   });
 
+  it('leaves a folder that is gone for real git to report', async () => {
+    const s = stand();
+    const gone = join(s.dir, 'gone');
+    mkdirSync(gone);
+    const done = spawnSync('/bin/sh', ['-c', `cd '${gone}' && rmdir '${gone}' && exec '${process.execPath}' '${SHIM}' status`], { env: baseEnv(s) as NodeJS.ProcessEnv, encoding: 'utf8' });
+    expect(done.stderr).toContain('fatal:');
+    expect(done.stderr).not.toContain('uv_cwd');
+    expect(done.status).toBe(128);
+  });
+
   it('gives a missing git binary the shell code for it', async () => {
     const s = stand();
     const ran = await runShim(['status'], s.work, baseEnv(s, { HH_REAL_GIT: join(s.dir, 'no-such-git') }));
@@ -451,6 +461,17 @@ describe('the bridge answers of the shim', () => {
     expect(calls(s, 'push')).toEqual([]);
   });
 
+  it('ends quietly when nobody reads its output any more', async () => {
+    const s = stand();
+    const env = await scriptedBridge(s, [{ type: 'stdout', data: Buffer.from('out\n').toString('base64') }, { type: 'exit', code: 0, signal: null }]);
+    const child = spawn('/bin/bash', ['-c', `set -o pipefail; '${process.execPath}' '${SHIM}' push origin task-1 | (exec <&-; sleep 0.5)`], { cwd: s.work, env: env as NodeJS.ProcessEnv, stdio: ['ignore', 'ignore', 'pipe'] });
+    let stderr = '';
+    child.stderr.on('data', chunk => { stderr += String(chunk); });
+    const status = await new Promise<number | null>(resolve => child.once('close', resolve));
+    expect(stderr).toBe('');
+    expect(status).toBe(141);
+  });
+
   it('cleans and bounds the lines of progress it prints', async () => {
     const s = stand();
     const env = await scriptedBridge(s, [
@@ -675,6 +696,16 @@ describe('a refused push while the service recovers', () => {
     expect(calls(s, 'push').every(call => call.nested === '1')).toBe(true);
   });
 
+  it('uses the credential of a job bound again during the wait', async () => {
+    const s = stand();
+    const { port, ran, adapter } = await refusedOnce(s);
+    adapter.bind(KEY, { ...jobOf(s), token: () => 'renewed-secret-token' });
+    port.release();
+    expect((await ran).code).toBe(0);
+    expect(calls(s, 'push').map(call => call.token)).toEqual(['first-secret-token', 'renewed-secret-token']);
+    expect(port.cancelled).toEqual([]);
+  });
+
   it('stops without an attempt when the remote changed during the wait', async () => {
     const s = stand();
     const { port, ran } = await refusedOnce(s);
@@ -875,6 +906,7 @@ describe('a permanent refusal', () => {
     realGit(other, 'config', 'user.email', 'test@example.test');
     commit(other, 'theirs');
     realGit(other, 'push', '--quiet', 'origin', 'task-1');
+    realGit(s.work, 'fetch', '--quiet', 'origin', 'task-1');
     commit(s.work, 'mine');
     const port = new FakePort();
     port.replies = [{ accepted: true, state: 'failed_permanent' }];
@@ -912,6 +944,26 @@ describe('what stays unmanaged at the node', () => {
     const port = new FakePort();
     const served = await serve(s, port, false);
     expect(await answer(served, pushed(s))).toEqual([{ type: 'unmanaged', reason: 'no_current_job' }]);
+    expect(port.registered).toEqual([]);
+  });
+
+  it('never runs git of an agent repository as root', async () => {
+    const s = stand();
+    const port = new FakePort();
+    const served = await serve(s, port, false);
+    served.adapter.bind(KEY, { ...jobOf(s), user: { uid: 0, gid: 0 } });
+    expect(await answer(served, pushed(s))).toEqual([{ type: 'unmanaged', reason: 'no_agent_user' }]);
+    expect(calls(s, 'remote')).toEqual([]);
+    expect(port.registered).toEqual([]);
+  });
+
+  it('takes a user it cannot become as a remote it cannot read', async () => {
+    const s = stand();
+    const port = new FakePort();
+    const served = await serve(s, port, false);
+    const other = (process.getuid?.() ?? 1000) + 1;
+    served.adapter.bind(KEY, { ...jobOf(s), user: { uid: other, gid: other } });
+    expect(await answer(served, pushed(s))).toEqual([{ type: 'unmanaged', reason: 'foreign_endpoint' }]);
     expect(port.registered).toEqual([]);
   });
 
