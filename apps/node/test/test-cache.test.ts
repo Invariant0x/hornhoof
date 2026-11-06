@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { chmod, link, mkdtemp, mkdir, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { chmod, link, mkdtemp, mkdir, readFile, readdir, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, onTestFinished } from 'vitest';
@@ -277,6 +277,77 @@ describe('sharing one prepared tree between parts', () => {
     await writeFile(join(second.path, 'payload', 'template'), 'MIGRATED');
     expect((await cache.prepareCache(directory, key, digest, ctx, build)).hit).toBe(false);
     expect(builds).toBe(3);
+  });
+
+  it.each([
+    ['a file gone', (payload: string) => rm(join(payload, 'node_modules', 'dep'), { force: true })],
+    ['a file of another size', async (payload: string) => { await chmod(join(payload, 'node_modules', 'dep'), 0o644); await writeFile(join(payload, 'node_modules', 'dep'), 'locked and more'); }],
+    ['a folder where a file was', async (payload: string) => { await rm(join(payload, 'node_modules', 'dep')); await mkdir(join(payload, 'node_modules', 'dep')); }],
+    ['a link that leads elsewhere', async (payload: string) => { await rm(join(payload, 'node_modules', 'near')); await symlink('dep', join(payload, 'node_modules', 'near')); }],
+  ])('rebuilds a stored tree with %s', async (_name, spoil) => {
+    const ctx = await context(), source = join(ctx.cacheRoot, 'source'), directory = join(ctx.cacheRoot, 'dependencies'), key = 'a'.repeat(64), digest = 'd'.repeat(64);
+    await mkdir(join(source, 'node_modules'), { recursive: true }); await writeFile(join(source, 'node_modules', 'dep'), 'locked'); await symlink('.bin', join(source, 'node_modules', 'near'));
+    const build = async () => ({ root: source, paths: ['node_modules'] });
+    const stored = await cache.prepareCache(directory, key, digest, ctx, build);
+    await spoil(join(stored.path, 'payload'));
+    expect((await cache.prepareCache(directory, key, digest, ctx, build)).hit).toBe(false);
+    expect((await cache.prepareCache(directory, key, digest, ctx, build)).hit).toBe(true);
+  });
+
+  it('knows a stored tree again whatever its names and links hold', async () => {
+    const ctx = await context(), source = join(ctx.cacheRoot, 'source'), directory = join(ctx.cacheRoot, 'dependencies'), key = 'a'.repeat(64), digest = 'd'.repeat(64), part = join(ctx.cacheRoot, 'part');
+    await mkdir(join(source, 'deps', 'with space'), { recursive: true });
+    await writeFile(join(source, 'deps', 'with space', 'two words'), 'one');
+    await writeFile(join(source, 'deps', 'new\nline'), 'two');
+    await writeFile(join(source, 'deps', 'имя'), 'three');
+    await writeFile(join(source, 'deps', 'empty'), '');
+    await symlink('with space/two words', join(source, 'deps', 'linked name'));
+    const build = async () => ({ root: source, paths: ['deps'] });
+    const first = await cache.prepareCache(directory, key, digest, ctx, build), again = await cache.prepareCache(directory, key, digest, ctx, build);
+    expect(again.hit).toBe(true);
+    expect(again.ready!.entries.map(item => item.path).sort()).toEqual(first.ready!.entries.map(item => item.path).sort());
+    await cache.restoreCache(again, part, ctx, { link: true });
+    expect(await readFile(join(part, 'deps', 'linked name'), 'utf8')).toBe('one');
+    expect(await readFile(join(part, 'deps', 'new\nline'), 'utf8')).toBe('two');
+    expect(await readFile(join(part, 'deps', 'имя'), 'utf8')).toBe('three');
+  });
+
+  it('counts a file written the moment its READY was as stored', async () => {
+    const ctx = await context(), source = join(ctx.cacheRoot, 'source'), directory = join(ctx.cacheRoot, 'dependencies'), key = 'a'.repeat(64), digest = 'd'.repeat(64);
+    await mkdir(source); await writeFile(join(source, 'template'), 'migrated');
+    const build = async () => ({ root: source, paths: ['template'] }), stored = await cache.prepareCache(directory, key, digest, ctx, build), moment = new Date();
+    await utimes(join(stored.path, 'payload', 'template'), moment, moment); await utimes(join(stored.path, 'READY.json'), moment, moment);
+    expect((await cache.prepareCache(directory, key, digest, ctx, build)).hit).toBe(true);
+  });
+
+  it('stores what lies below a folder that is not stored, in any order of its names', async () => {
+    const ctx = await context(), source = join(ctx.cacheRoot, 'source'), part = join(ctx.cacheRoot, 'part');
+    await mkdir(join(source, 'apps', 'one', 'node_modules', 'a-b'), { recursive: true }); await mkdir(join(source, 'apps', 'one', 'node_modules', 'a'), { recursive: true });
+    await writeFile(join(source, 'apps', 'one', 'node_modules', 'a', 'file'), 'one'); await writeFile(join(source, 'apps', 'one', 'node_modules', 'a-b', 'file'), 'two'); await writeFile(join(source, 'apps', 'one', 'not-stored'), 'no');
+    const entry = await cache.prepareCache(join(ctx.cacheRoot, 'dependencies'), 'a'.repeat(64), 'd'.repeat(64), ctx, async () => ({ root: source, paths: ['apps/one/node_modules'] }));
+    expect(entry.ready!.roots).toEqual(['apps/one/node_modules']);
+    await cache.restoreCache(entry, part, ctx);
+    expect(await readFile(join(part, 'apps', 'one', 'node_modules', 'a-b', 'file'), 'utf8')).toBe('two');
+    await expect(readFile(join(part, 'apps', 'one', 'not-stored'))).rejects.toThrow();
+  });
+
+  it('never stores a git folder, and refuses one a stored tree comes to say it holds', async () => {
+    const ctx = await context(), source = join(ctx.cacheRoot, 'source');
+    await mkdir(join(source, 'deps', '.git'), { recursive: true }); await writeFile(join(source, 'deps', '.git', 'config'), 'x');
+    await expect(cache.prepareCache(join(ctx.cacheRoot, 'dependencies'), 'a'.repeat(64), 'd'.repeat(64), ctx, async () => ({ root: source, paths: ['deps'] }))).rejects.toThrow(/permitted root/);
+    expect(cache.CacheReady.safeParse({ format: 2, key: 'a'.repeat(64), inputDigest: 'd'.repeat(64), roots: ['deps'], entries: [{ path: 'deps/.git', kind: 'directory' }] }).success).toBe(false);
+  });
+
+  it('refuses to store through a folder that is a link', async () => {
+    const ctx = await context(), source = join(ctx.cacheRoot, 'source'), elsewhere = join(ctx.cacheRoot, 'elsewhere');
+    await mkdir(join(elsewhere, 'deps'), { recursive: true }); await writeFile(join(elsewhere, 'deps', 'file'), 'x');
+    await mkdir(source); await symlink(elsewhere, join(source, 'through'));
+    await expect(cache.prepareCache(join(ctx.cacheRoot, 'dependencies'), 'a'.repeat(64), 'd'.repeat(64), ctx, async () => ({ root: source, paths: ['through/deps'] }))).rejects.toThrow(/symlink/i);
+  });
+
+  it('says plainly that what it was told to store is not there', async () => {
+    const ctx = await context(), source = join(ctx.cacheRoot, 'source'); await mkdir(source);
+    await expect(cache.prepareCache(join(ctx.cacheRoot, 'dependencies'), 'a'.repeat(64), 'd'.repeat(64), ctx, async () => ({ root: source, paths: ['node_modules'] }))).rejects.toThrow(/ENOENT/);
   });
 
   it('keeps a link that ends nowhere, as the install left it', async () => {

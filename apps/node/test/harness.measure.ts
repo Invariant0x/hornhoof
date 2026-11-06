@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { appendFile, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { appendFile, copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -112,6 +112,5 @@ it('measures the time to the first test', async () => {
   console.log(`bundles: ${sizes.map(size => Math.round(size / 1024 / 1024)).join(', ')} MB`);
   const out = process.env.HH_MEASURE_OUT;
   if (out) await writeFile(out, JSON.stringify({ commitSha, cpus: execFileSync('nproc', { encoding: 'utf8' }).trim(), arch: process.arch, node: process.version, bundlesMb: sizes.map(size => Math.round(size / 1024 / 1024)), results }, null, 2));
-  await readFile(join(source, '.hornhoof/test-environment.json'));
   await rm(work, { recursive: true, force: true });
 });

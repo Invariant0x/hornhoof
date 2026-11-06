@@ -2,6 +2,8 @@ import { matchesGlob } from 'node:path';
 import type { Command, TestEnvironmentV1, TestSuite } from '@hornhoof/protocol';
 import type { CommitTree } from './test-mirror.js';
 
+type Tracked = Pick<CommitTree, 'entries' | 'readBlob'>;
+
 /* What a repository's own files say of how its tests run, for a repository that describes nothing itself: the system brings
    its test environment up by its language, and nobody has to write a manifest for it to start. A suite covers the whole
    package, as only the repository's own command knows what its tests are. */
@@ -36,7 +38,7 @@ function workspacePatterns(pkg: PackageFile, pnpm: string | null): string[] {
   return Array.isArray(list) ? list.filter((item): item is string => typeof item === 'string') : [];
 }
 
-function workspaceFolders(tree: CommitTree, patterns: string[]): string[] {
+function workspaceFolders(tree: Tracked, patterns: string[]): string[] {
   const positive = patterns.filter(pattern => !pattern.startsWith('!')).map(pattern => pattern.replace(/\/$/, ''));
   const folders = tree.entries.flatMap(entry => (entry.path.endsWith('/package.json') && !entry.path.includes('node_modules/') ? [entry.path.slice(0, -'/package.json'.length)] : []))
     .filter(folder => positive.some(pattern => matchesGlob(folder, pattern)));
@@ -44,7 +46,7 @@ function workspaceFolders(tree: CommitTree, patterns: string[]): string[] {
   return folders;
 }
 
-async function readJson(tree: CommitTree, path: string): Promise<PackageFile> {
+async function readJson(tree: Tracked, path: string): Promise<PackageFile> {
   try {
     const value: unknown = JSON.parse((await tree.readBlob(path, FILE_LIMIT)).toString('utf8'));
     if (value && typeof value === 'object') return value as PackageFile;
@@ -52,7 +54,7 @@ async function readJson(tree: CommitTree, path: string): Promise<PackageFile> {
   throw new DiscoveryProblem('environment_invalid', `${path} cannot be read.`);
 }
 
-async function nodeLanguage(tree: CommitTree, tracked: Set<string>): Promise<Language | null> {
+async function nodeLanguage(tree: Tracked, tracked: Set<string>): Promise<Language | null> {
   if (!tracked.has('package.json')) return null;
   const read = async (path: string) => (await tree.readBlob(path, FILE_LIMIT)).toString('utf8');
   const manager = await lockedManager(tracked, () => read('yarn.lock'));
@@ -77,7 +79,7 @@ p = tomllib.load(open('pyproject.toml', 'rb')).get('project', {})
 wanted = p.get('dependencies', []) + sum(p.get('optional-dependencies', {}).values(), [])
 open('.hornhoof/requirements.txt', 'w').write('\n'.join(wanted))`;
 
-function pythonLanguage(tree: CommitTree, tracked: Set<string>): Language | null {
+function pythonLanguage(tree: Tracked, tracked: Set<string>): Language | null {
   const files = REQUIREMENTS.filter(path => tracked.has(path)), pyproject = tracked.has('pyproject.toml');
   if (!files.length && !pyproject) return null;
   const inputs = files.length ? files : ['pyproject.toml'];
@@ -106,7 +108,7 @@ function manifestOf(languages: Language[]): TestEnvironmentV1 {
   };
 }
 
-export async function discoverEnvironment(tree: CommitTree): Promise<TestEnvironmentV1> {
+export async function discoverEnvironment(tree: Tracked): Promise<TestEnvironmentV1> {
   const tracked = new Set(tree.entries.map(entry => entry.path));
   const languages = [await nodeLanguage(tree, tracked), pythonLanguage(tree, tracked)].filter((language): language is Language => language !== null);
   if (languages.length) return manifestOf(languages);

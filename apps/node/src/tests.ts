@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { chmodSync, chownSync, closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
 import { dirname, join } from 'node:path';
-import { TestExecution, supportsTestProfile, validateEnvironmentDescription, type HarnessSynced, type Command, type EnvironmentDescription, type EnvironmentProblem, type InputDigest, type TestEnvironmentReceipt, COMMIT_SHA, MAX_RUN_FILES, ownBranch, RUN_FILE_BYTES, TEST_LOG_BYTES, type NodeMessage, type ServerMessage, type TestError } from '@hornhoof/protocol';
+import { TestExecution, supportsTestProfile, validateEnvironmentDescription, type HarnessSynced, type Command, type EnvironmentDescription, type EnvironmentProblem, type InputDigest, type RuntimeCapability, type TestEnvironmentReceipt, COMMIT_SHA, MAX_RUN_FILES, ownBranch, RUN_FILE_BYTES, TEST_LOG_BYTES, type NodeMessage, type ServerMessage, type TestError } from '@hornhoof/protocol';
 import { browserEnv, ensureRepoBrowser } from './browser.js';
 import { ensurePasswd, FIRST_UID, prepareFolder, userFor, type JobUser } from './isolation.js';
 import { stripEscapes } from './providers/process.js';
@@ -45,6 +45,8 @@ type Options = {
   prepareRepoBrowser?: (repoDir: string) => Promise<void>;
   /* Where a harness unit this machine lacks comes from. None: what a part needs is built here. */
   harness?: HarnessRemote;
+  /* The machine's programs as it found them when it started, so a part need not ask them again. */
+  runtimes?: RuntimeCapability[] | undefined;
 };
 
 /* What a command prints, at most TEST_LOG_BYTES of it: its first quarter and its end, where a runner sums up. */
@@ -608,7 +610,7 @@ function preparationContext(state: PreparationState, profile: string, hidden: st
     builder: (inputs, dependencies, setup = { link: false, env: {} }) => productBuilder(state, inputs, dependencies, setup, context),
     run: (command, extra = {}) => productCommand(state, state.repo, state.user, command, { ...state.base, ...extra, CI: 'true' }),
     quiesce: () => stopTestUser(state.user, state.options.proc),
-    ...(share ? { share } : {}),
+    ...(share ? { share } : {}), ...(state.options.runtimes ? { runtimes: state.options.runtimes } : {}),
   };
   return context;
 }

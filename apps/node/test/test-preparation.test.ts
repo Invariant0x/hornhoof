@@ -4,8 +4,10 @@ import { createHash } from 'node:crypto';
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { parseTestEnvironment, type EnvironmentDescription, type InputDigest } from '@hornhoof/protocol';
+// Giving folders to the job user takes root, which a test machine need not have.
+vi.mock('node:fs/promises', async original => ({ ...await original<typeof import('node:fs/promises')>(), chown: async () => {} }));
 import * as environment from '../src/test-environment.js';
 import { restoreCache, type CacheEntry } from '../src/test-cache.js';
 const execute = promisify(execFile), roots: string[] = [];

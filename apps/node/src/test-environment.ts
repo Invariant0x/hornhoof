@@ -13,14 +13,23 @@ import { readCommit, type CommitTree, type GitEntry } from './test-mirror.js';
 type Source = Parameters<typeof readCommit>[0];
 type DescriptionContext = CacheContext & { runtimes?: RuntimeCapability[] };
 const MANIFEST = '.hornhoof/test-environment.json';
+const INPUT_BYTES = 16 * 1024 * 1024;
 const LFS = 'version https://git-lfs.github.com/spec/v1\n';
+const lfsPointer = (bytes: Buffer): boolean => bytes.subarray(0, LFS.length).toString('ascii') === LFS;
 export class EnvironmentFailure extends Error {
   constructor(readonly problem: EnvironmentProblem) { super(problem.detail); }
 }
 function fail(code: EnvironmentProblem['code'], detail: string): never { throw new EnvironmentFailure({ code, detail }); }
 const digest = (value: string | Buffer): string => createHash('sha256').update(value).digest('hex');
+const WILDCARD = /[?*[\]{}()!+@]/;
+const UNEVEN_PATH = /(?:^|\/)\.?(?:\/|$)/;
+/* Compiling a glob for every tracked file costs more than reading them, so what comes before its first wildcard decides first.
+   Only a path written unevenly, which the glob would read evenly, cannot go by that. */
 function match(path: string, pattern: string): boolean {
-  return path === pattern || path.startsWith(`${pattern.replace(/\/$/, '')}/`) || matchesGlob(path, pattern);
+  if (path === pattern || path.startsWith(`${pattern.replace(/\/$/, '')}/`)) return true;
+  if (UNEVEN_PATH.test(pattern)) return matchesGlob(path, pattern);
+  const wildcard = pattern.search(WILDCARD);
+  return wildcard >= 0 && path.startsWith(pattern.slice(0, wildcard)) && matchesGlob(path, pattern);
 }
 function regular(entry: GitEntry): void {
   if (!['100644', '100755'].includes(entry.mode)) fail('environment_unsupported', `A declared input is not a regular tracked file: ${entry.path}.`);
@@ -30,19 +39,21 @@ async function blob(tree: CommitTree, path: string, limit: number): Promise<Buff
   if (!entry) fail('environment_invalid', `A declared file is missing: ${path}.`);
   regular(entry);
   const bytes = await tree.readBlob(path, limit);
-  if (bytes.subarray(0, LFS.length).toString('ascii') === LFS) fail('environment_unsupported', `Git LFS materialization is not described for ${path}.`);
+  if (lfsPointer(bytes)) fail('environment_unsupported', `Git LFS materialization is not described for ${path}.`);
   return bytes;
 }
 function inputPatterns(manifest: TestEnvironmentV1): string[] {
   return [...new Set([...manifest.dependencies.inputs, ...manifest.prepare.flatMap(unit => unit.inputs), ...(manifest.reset ?? []).flatMap(reset => reset.inputs)])].sort();
 }
 async function inputDigests(tree: CommitTree, manifest: TestEnvironmentV1): Promise<InputDigest[]> {
-  const inputs = new Map<string, string | null>();
+  const inputs = new Map<string, string | null>(), wanted = new Set<string>(), pointers: string[] = [];
   for (const pattern of inputPatterns(manifest)) {
     const entries = tree.entries.filter(entry => match(entry.path, pattern));
     if (!entries.length) inputs.set(pattern, null);
-    for (const entry of entries) inputs.set(entry.path, digest(await blob(tree, entry.path, 16 * 1024 * 1024)));
+    for (const entry of entries) { regular(entry); wanted.add(entry.path); }
   }
+  await tree.readBlobs([...wanted], INPUT_BYTES, (path, bytes) => { if (lfsPointer(bytes)) pointers.push(path); inputs.set(path, digest(bytes)); });
+  if (pointers.length) fail('environment_unsupported', `Git LFS materialization is not described for ${pointers[0]}.`);
   return [...inputs].sort(([a], [b]) => a.localeCompare(b)).map(([path, digest]) => ({ path, digest }));
 }
 function fixtureInputs(tree: CommitTree, manifest: TestEnvironmentV1): void {
@@ -82,9 +93,10 @@ async function runtimeOutput(program: string, args: string[], context: CacheCont
   checkCacheContext(context);
   return new Promise(resolve => execFile(program, args, { cwd: context.cacheRoot, env: { PATH: '/usr/local/bin:/usr/bin:/bin', HOME: context.cacheRoot }, timeout: Math.max(1, Math.min(2000, context.deadline - Date.now())), signal: context.signal, maxBuffer: 16 * 1024 }, (error, stdout) => resolve(error ? null : stdout.trim())));
 }
+let libcVersion: string | undefined;
+const libc = (): string => libcVersion ??= (process.report.getReport() as { header: { glibcVersionRuntime?: string } }).header.glibcVersionRuntime ?? 'unknown';
 function capability(id: string, version: string, build: unknown): RuntimeCapability {
-  const { header } = process.report.getReport() as { header: { glibcVersionRuntime?: string } };
-  return { id, version, fingerprint: digest(JSON.stringify({ platform: process.platform, arch: process.arch, libc: header.glibcVersionRuntime ?? 'unknown', build })) };
+  return { id, version, fingerprint: digest(JSON.stringify({ platform: process.platform, arch: process.arch, libc: libc(), build })) };
 }
 async function pythonRuntime(context: CacheContext): Promise<RuntimeCapability[]> {
   const output = await runtimeOutput('/usr/bin/python3', ['-I', '-c', 'import json,sys,sysconfig;print(json.dumps({"version":".".join(map(str,sys.version_info[:3])),"build":sys.version,"abi":sysconfig.get_config_var("SOABI")}))'], context);
@@ -325,7 +337,7 @@ export type PreparationBuilder = {
   run: (command: Command, env?: Record<string, string>) => Promise<void>;
   quiesce: () => Promise<void>; close: () => Promise<void>;
 };
-export type PreparationContext = CacheContext & {
+export type PreparationContext = DescriptionContext & {
   checkout: string; profile: string; attemptRoot: string; nodeOwner: JobUser; jobUser: JobUser;
   env: Record<string, string>; registerSecrets: (values: string[]) => void;
   builder: (inputs: InputDigest[], dependencies: CacheEntry | null, setup?: BuilderSetup) => Promise<PreparationBuilder>;

@@ -3,8 +3,7 @@ import { parseTestEnvironment } from '@hornhoof/protocol';
 import { discoverEnvironment } from '../src/test-discovery.js';
 import type { CommitTree } from '../src/test-mirror.js';
 
-const tree = (files: Record<string, string>): CommitTree => ({
-  commitSha: 'a'.repeat(40),
+const tree = (files: Record<string, string>): Pick<CommitTree, 'entries' | 'readBlob'> => ({
   entries: Object.keys(files).map(path => ({ path, mode: '100644', oid: 'b'.repeat(40) })),
   readBlob: async path => Buffer.from(files[path]!),
 });

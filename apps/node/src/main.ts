@@ -15,7 +15,7 @@ import type { ProgramNodeMessage, ProgramServerMessage } from '@hornhoof/protoco
 import { agentUser, builtinAdapters, secureNode, userFor, type JobUser } from './isolation.js';
 import { withCheckSlot } from './check-queue.js';
 import { startCheckClient, stopChecks, isProgramControl, applyProgramControl, runQueuedPart } from './check-runtime.js';
-import { TestPartUser, NodeTestMessages, isNodeTestMessage, nodeTestCapabilities, readTestEnvironment } from './test-environment.js';
+import { TestPartUser, NodeTestMessages, isNodeTestMessage, nodeTestCapabilities, readTestEnvironment, type TestCapabilities } from './test-environment.js';
 import { machineLoad } from './load.js';
 import { adapterFor, programFor } from './providers/index.js';
 import { runJob, type ProviderAdapter, type RunInput, type RunResult } from './runner.js';
@@ -318,7 +318,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   let browserError = await checkBrowser().catch(err => message(err));
   writeBrowserError(dir, browserError);
   if (browserError) log(`Playwright Chromium could not start: ${browserError}`);
-  const testCapabilities = await nodeTestCapabilities(dir, testUser).catch(() => { log('Product test environments are unavailable on this node.'); return {}; });
+  const testCapabilities: TestCapabilities = await nodeTestCapabilities(dir, testUser).catch(() => { log('Product test environments are unavailable on this node.'); return {}; });
   const partUser = new TestPartUser();
   const testMessages = new NodeTestMessages({ dir, describe: describeEnvironment, capabilities: testCapabilities, stopped: () => stopped, testing, unconfirmed: unconfirmedTests, run: testOne, harness: syncOne, emit });
   const noRunsNow = () => noRunsBecause(testUser, browserError);
@@ -523,7 +523,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     const waiting = (position: number) => emit({ type: 'tests.waiting', partId: m.partId, position });
     const done = await runQueuedPart(m, (part, options) => partUser.run(options.signal, () => {
       emit({ type: 'tests.started', partId: part.partId }); return runPart(part, options);
-    }, waiting), { dir, user: testUser, hidden: [...known], signal, files, harness }, waiting, () => {});
+    }, waiting), { dir, user: testUser, hidden: [...known], signal, files, harness, runtimes: testCapabilities.testRuntimes }, waiting, () => {});
     keepTest(m.partId, done);
     testing.delete(m.partId);
     emit(done);
@@ -531,7 +531,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
 
   /* A product's harness, ahead of any run: it waits its turn like a part does, as it uses the same user. */
   function syncOne(m: HarnessRun, signal: AbortSignal) {
-    return withCheckSlot(granted => partUser.run(granted, () => syncHarness(m, { dir, user: testUser, hidden: [...known], signal: granted, harness }), () => {}), { signal, label: 'Get a product test harness ready' });
+    return withCheckSlot(granted => partUser.run(granted, () => syncHarness(m, { dir, user: testUser, hidden: [...known], signal: granted, harness, runtimes: testCapabilities.testRuntimes }), () => {}), { signal, label: 'Get a product test harness ready' });
   }
 
   async function runOne(m: JobRun, signal: AbortSignal) {

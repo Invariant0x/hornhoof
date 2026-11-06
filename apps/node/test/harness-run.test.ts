@@ -239,6 +239,14 @@ describe('what a part gets of a shared tree', () => {
     expect(part, part.log).toMatchObject({ ok: true, environmentReceipt: { dependencies: { hit: true, fetched: true }, environments: [{ hit: true, fetched: true }] } });
   });
 
+  it('does not ask a machine\'s programs again when it knows them from its start', async () => {
+    const f = await fixture(), on = machine(f, 'one'), part = await productPart(f, on), { description } = part.environment!.snapshot;
+    const known = description.runtimeCapabilities.map(runtime => (runtime.id === 'hornhoof-test-execution' ? { ...runtime, fingerprint: 'f'.repeat(64) } : runtime));
+    const done = await runTests(part, { ...on, runtimes: known });
+    expect(done, done.log).toMatchObject({ ok: true });
+    expect(done.environmentReceipt!.runtimes).toEqual(known);
+  });
+
   it('still works on a machine with no registry', async () => {
     const f = await fixture(), one = machine(f, 'one');
     const part = await runTests(await productPart(f, one), one);
