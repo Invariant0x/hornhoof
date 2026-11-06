@@ -2,12 +2,14 @@ import { randomUUID } from 'node:crypto';
 import { and, asc, eq, inArray, isNull, lte, or } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
-import { agents, tasks, waitNotices } from '../../db/schema.js';
+import { accessOf, canReach } from '../../auth/access.js';
+import { agents, people, requests, tasks, taskWaits, waitNotices } from '../../db/schema.js';
 import { loggable } from '../../errors.js';
 import { insertOrDeliverTurn, liveSubscription, pump } from '../conversation/queue.js';
 import { withInputLock } from '../conversation/decision-context.js';
 import { notificationMessage } from '../events/notifications.js';
-import type { Task } from './engine.js';
+import { ownNote, taskSpot, type Task, type Tx } from './engine.js';
+import type { WaitNoticeGuard } from './wait-notice-types.js';
 import { quietRecipient, waitOrchestrator } from './wait-recipients.js';
 import { quietDepartment } from './wait-observations.js';
 
@@ -33,7 +35,17 @@ export async function requestedWaitNotice(ctx: Ctx, task: Task, waiter: string):
   };
 }
 
+/* A notice about a wait holds while that wait stands as it was written for. A task moving on does not spoil it, and a date
+   passing is why it was written. */
+async function waitStands(db: Pick<Db, 'select'>, guard: NonNullable<WaitNoticeGuard['wait']>): Promise<boolean> {
+  const [wait] = await db.select().from(taskWaits).where(eq(taskWaits.id, guard.id));
+  if (!wait || wait.state !== 'active' || wait.generation !== guard.generation || wait.routeRevision !== guard.routeRevision) return false;
+  return guard.level !== undefined ? wait.level === guard.level : wait.reviewOrdinal === guard.ordinal;
+}
+
 async function stillCurrent(ctx: Ctx, notice: Notice, now: Date): Promise<boolean> {
+  if (notice.guard.wait) return waitStands(ctx.db, notice.guard.wait);
+  if (notice.guard.goal) return goalStands(ctx.db, notice.guard.goal);
   const expected = notice.guard.tasks;
   const rows = await ctx.db.select().from(tasks).where(and(eq(tasks.companyId, notice.companyId), inArray(tasks.id, expected.map(t => t.id))));
   if (!expected.every(t => rows.some(row => row.id === t.id && row.version === t.version))) return false;
@@ -54,7 +66,7 @@ async function deliverNotice(ctx: Ctx, notice: Notice, now: Date): Promise<boole
     await ctx.db.update(waitNotices).set({ cancelledAt: now }).where(and(eq(waitNotices.id, notice.id), eq(waitNotices.leaseId, notice.leaseId!)));
     return false;
   }
-  const [recipient] = await ctx.db.select().from(agents).where(and(eq(agents.id, notice.agentId), eq(agents.companyId, notice.companyId), isNull(agents.removedAt), isNull(agents.switchedOffAt)));
+  const [recipient] = await ctx.db.select().from(agents).where(and(eq(agents.id, notice.agentId!), eq(agents.companyId, notice.companyId), isNull(agents.removedAt), isNull(agents.switchedOffAt)));
   if (!recipient || !(await liveSubscription(ctx, recipient.id))) return false;
   const message = { ...notice.message, waitNotice: notice.id };
   await insertOrDeliverTurn(ctx, {
@@ -68,12 +80,56 @@ async function deliverNotice(ctx: Ctx, notice: Notice, now: Date): Promise<boole
 }
 
 async function noticeRecipient(ctx: Ctx, notice: Notice): Promise<string | null> {
-  if (notice.message.notification.source === 'department_quiet') return quietRecipient(ctx, notice.companyId);
+  if (notice.guard.quiet) return quietRecipient(ctx, notice.companyId, notice.guard.quiet.departmentId);
   if (notice.message.notification.source === 'wait_cycle') return waitOrchestrator(ctx, notice.companyId);
   return notice.agentId;
 }
 
+/* A goal alert holds while that episode stands at that revision: an answer to its question does not touch it. */
+async function goalStands(db: Pick<Db, 'select'>, guard: NonNullable<WaitNoticeGuard['goal']>): Promise<boolean> {
+  const [request] = await db.select({ episode: requests.goalEpisodeId, revision: requests.goalRevision, state: requests.goalState }).from(requests).where(eq(requests.id, guard.requestId));
+  return request?.state === 'open' && request.episode === guard.episodeId && request.revision === guard.revision;
+}
+
+/* What must still be true of a card. A turn's summary says what was recorded when it closed, which stays true. */
+async function cardStands(db: Pick<Db, 'select'>, guard: WaitNoticeGuard): Promise<boolean> {
+  if (guard.turn) return true;
+  if (guard.goal) return goalStands(db, guard.goal);
+  return guard.wait ? waitStands(db, guard.wait) : false;
+}
+
+async function cardTask(db: Pick<Db, 'select'>, card: Notice): Promise<Task | null> {
+  const [wait] = card.waitId ? await db.select({ taskId: taskWaits.taskId }).from(taskWaits).where(eq(taskWaits.id, card.waitId)) : [];
+  const taskId = wait?.taskId ?? card.guard.turn?.taskId;
+  const [task] = taskId ? await db.select().from(tasks).where(eq(tasks.id, taskId)) : [];
+  return task ?? null;
+}
+
+/* A person's card: the notice kept for them, its log line and that it went out are one write. What people see moves after it. */
+async function deliverCard(ctx: Ctx, notice: Notice, now: Date): Promise<void> {
+  const kept = await ctx.db.transaction(async tx => {
+    const [card] = await tx.select().from(waitNotices).where(and(eq(waitNotices.id, notice.id), pending)).for('update');
+    if (!card) return null;
+    const task = await cardTask(tx, card);
+    if (!task || !(await cardStands(tx, card.guard)) || !(await mayHear(tx, card.personId!, task))) {
+      await tx.update(waitNotices).set({ cancelledAt: now }).where(eq(waitNotices.id, card.id));
+      return null;
+    }
+    await tx.update(waitNotices).set({ deliveredAt: now }).where(eq(waitNotices.id, card.id));
+    await ownNote(tx, task, { kind: 'wait_card', text: 'A person was given a card about this task.', data: { notice: card.id, personId: card.personId, level: card.level } });
+    return task;
+  });
+  if (kept) ctx.bus.publish(kept.companyId, { type: 'requests', spot: taskSpot(kept) });
+}
+
+/* Whoever a card is for must still be here and reach the task, as of now. */
+async function mayHear(tx: Tx, personId: string, task: Task): Promise<boolean> {
+  const [person] = await tx.select({ id: people.id, status: people.status, scopeKind: people.scopeKind }).from(people).where(and(eq(people.id, personId), eq(people.companyId, task.companyId)));
+  return person?.status === 'active' && canReach(await accessOf(tx, person), taskSpot(task));
+}
+
 async function sendNotice(ctx: Ctx, pendingNotice: Notice, now: Date): Promise<void> {
+  if (pendingNotice.personId) return deliverCard(ctx, pendingNotice, now);
   const agentId = await noticeRecipient(ctx, pendingNotice);
   if (!agentId) return;
   const accepted = await withInputLock(ctx, agentId, async () => {

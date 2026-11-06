@@ -17,6 +17,13 @@ async function quietDepartment() {
   return { ...c, taskRow: task, turn: turn!, now };
 }
 
+/* Nothing runs and nothing says why. */
+async function unexplained() {
+  const c = await quietDepartment();
+  await c.db.update(tasks).set({ externalWait: null }).where(eq(tasks.id, c.taskRow.id));
+  return c;
+}
+
 async function cycle(length: number) {
   const c = await waitCompany();
   const employees = [c.agent, c.head];
@@ -72,86 +79,14 @@ describe('waiting cycles', () => {
 });
 
 describe('quiet departments', () => {
-  it('does not treat a turn that never started as recent work', async () => {
+  it('stays silent where everything waits on something known and in time: nobody is told, Operations least of all', async () => {
     const c = await quietDepartment();
-    await c.db.insert(jobs).values({ companyId: c.companyId, agentId: c.agent.id, subscriptionId: c.sub.id, kind: 'conversation', prompt: 'Unsent', status: 'failed', error: 'send_failed', finishedAt: c.now, timeoutMs: 1000 });
     await checkWaitHealth(c.ctx, c.now);
-    expect(await c.messages(c.watcher.id)).toHaveLength(1);
+    await checkWaitHealth(c.ctx, new Date(c.now.getTime() + 120 * MINUTE - 1));
+    for (const who of [c.watcher, c.head, c.orchestrator, c.agent]) expect(await c.messages(who.id)).toEqual([]);
   });
 
-  it('counts running work on a department task assigned outside the department', async () => {
-    const c = await quietDepartment();
-    await c.db.update(tasks).set({ assigneeAgentId: c.orchestrator.id }).where(eq(tasks.id, c.taskRow.id));
-    await c.run(c.orchestrator.id, c.taskRow.id);
-    await checkWaitHealth(c.ctx, c.now);
-    expect(await c.messages(c.watcher.id)).toEqual([]);
-  });
-
-  it('checks quiet waits in the minute round', async () => {
-    const c = await quietDepartment();
-    const errors: unknown[] = [];
-    await minuteRound(c.ctx, c.now, () => error => { errors.push(error); });
-    expect(errors).toEqual([]);
-    expect(await c.messages(c.watcher.id)).toHaveLength(1);
-  });
-
-  it('calls OPS-WATCH at fifteen minutes with the department, tasks and reasons, once', async () => {
-    const c = await quietDepartment();
-    await checkWaitHealth(c.ctx, new Date(c.now.getTime() - 1));
-    expect(await c.messages(c.watcher.id)).toEqual([]);
-    await checkWaitHealth(c.ctx, c.now);
-    await checkWaitHealth({ ...c.ctx }, new Date(c.now.getTime() + MINUTE));
-    const notices = await c.messages(c.watcher.id);
-    expect(notices).toHaveLength(1);
-    expect(notices[0]).toMatchObject({ data: { notification: { source: 'department_quiet', tasks: [{ id: c.taskRow.id, number: c.taskRow.number }] }, text: expect.stringContaining('Machine run') } });
-    expect(notices[0]!.data).toMatchObject({ text: expect.stringContaining('department development') });
-  });
-
-  it('sends the quiet-department call directly to the orchestrator without an active OPS-WATCH', async () => {
-    const c = await quietDepartment();
-    await c.db.update(agents).set({ switchedOffAt: c.now }).where(eq(agents.id, c.watcher.id));
-    await checkWaitHealth(c.ctx, c.now);
-    expect(await c.messages(c.watcher.id)).toEqual([]);
-    expect(await c.messages(c.orchestrator.id)).toHaveLength(1);
-  });
-
-  it('does not call for a long running conversation and starts fifteen minutes at its completion', async () => {
-    const c = await quietDepartment();
-    const running = await c.run();
-    await c.db.update(jobs).set({ startedAt: new Date(c.now.getTime() - 120 * MINUTE) }).where(eq(jobs.id, running.job.id));
-    await checkWaitHealth(c.ctx, c.now);
-    expect(await c.messages(c.watcher.id)).toEqual([]);
-    await c.db.update(jobs).set({ status: 'done', finishedAt: c.now }).where(eq(jobs.id, running.job.id));
-    await checkWaitHealth(c.ctx, new Date(c.now.getTime() + 15 * MINUTE - 1));
-    expect(await c.messages(c.watcher.id)).toEqual([]);
-    await checkWaitHealth(c.ctx, new Date(c.now.getTime() + 15 * MINUTE));
-    expect(await c.messages(c.watcher.id)).toHaveLength(1);
-  });
-
-  it('does not call while an unclosed task is available to work on', async () => {
-    const c = await quietDepartment();
-    await c.db.update(tasks).set({ externalWait: null }).where(eq(tasks.id, c.taskRow.id));
-    await checkWaitHealth(c.ctx, c.now);
-    expect(await c.messages(c.watcher.id)).toEqual([]);
-  });
-
-  it('does not call for a closed turn', async () => {
-    const c = await quietDepartment();
-    await c.db.update(turns).set({ status: 'closed', closedAt: c.now }).where(eq(turns.id, c.turn.id));
-    await checkWaitHealth(c.ctx, c.now);
-    expect(await c.messages(c.watcher.id)).toEqual([]);
-  });
-
-  it('counts a parent waiting for its open children as waiting', async () => {
-    const c = await quietDepartment();
-    const parent = await c.task(c.head.id);
-    const since = new Date(c.now.getTime() - 15 * MINUTE);
-    await c.db.update(tasks).set({ turnId: c.turn.id, updatedAt: since }).where(eq(tasks.id, parent.id));
-    await c.db.update(tasks).set({ parentId: parent.id }).where(eq(tasks.id, c.taskRow.id));
-    await checkWaitHealth(c.ctx, c.now);
-    expect(await c.messages(c.watcher.id)).toHaveLength(1);
-  });
-  it.each(['blocked', 'waiting', 'prerequisite', 'person', 'run'] as const)('recognizes a %s wait without an external timer', async kind => {
+  it.each(['blocked', 'waiting', 'prerequisite', 'person', 'run', 'children'] as const)('counts a %s wait as known with no timer of its own', async kind => {
     const c = await quietDepartment();
     await c.db.update(tasks).set({ externalWait: null, ...(kind === 'blocked' || kind === 'waiting' ? { status: kind } : {}) }).where(eq(tasks.id, c.taskRow.id));
     if (kind === 'prerequisite') {
@@ -165,42 +100,122 @@ describe('quiet departments', () => {
       await c.db.update(jobs).set({ status: 'done', finishedAt: new Date(c.now.getTime() - 16 * MINUTE) }).where(eq(jobs.id, run.job.id));
       await c.db.insert(testRuns).values({ companyId: c.companyId, taskId: c.taskRow.id, agentId: c.agent.id, jobId: run.job.id, number: 1, command: 'npm test', timeoutMs: 3_600_000 });
     }
+    if (kind === 'children') {
+      const child = await c.task();
+      await c.db.update(tasks).set({ parentId: c.taskRow.id, turnId: c.turn.id, updatedAt: new Date(c.now.getTime() - 15 * MINUTE), externalWait: { since: c.now.toISOString(), until: new Date(c.now.getTime() + 120 * MINUTE).toISOString(), reason: 'Machine run' } }).where(eq(tasks.id, child.id));
+    }
+    await c.db.update(tasks).set({ updatedAt: new Date(c.now.getTime() - 15 * MINUTE) }).where(eq(tasks.id, c.taskRow.id));
     await checkWaitHealth(c.ctx, c.now);
-    expect(await c.messages(c.watcher.id)).toHaveLength(1);
+    for (const who of [c.watcher, c.head]) expect(await c.messages(who.id)).toEqual([]);
+  });
+
+  it('asks the head at fifteen minutes about work nothing explains, naming it and no words of it, once', async () => {
+    const c = await unexplained();
+    await checkWaitHealth(c.ctx, new Date(c.now.getTime() - 1));
+    expect(await c.messages(c.head.id)).toEqual([]);
+    await checkWaitHealth(c.ctx, c.now);
+    await checkWaitHealth({ ...c.ctx }, new Date(c.now.getTime() + MINUTE));
+    const notices = await c.messages(c.head.id);
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toMatchObject({ data: { notification: { source: 'department_quiet', tasks: [{ id: c.taskRow.id, number: c.taskRow.number }] }, text: expect.stringContaining('department development') } });
+    expect(notices[0]!.data).toMatchObject({ text: expect.stringContaining(`#${c.taskRow.number}`) });
+    expect(JSON.stringify(notices[0]!.data)).not.toContain('Publish images');
+    expect(await c.messages(c.watcher.id)).toEqual([]);
+  });
+
+  it('goes on with the orchestrator where the department has no head on, and never to Operations', async () => {
+    const c = await unexplained();
+    await c.db.update(agents).set({ switchedOffAt: c.now }).where(eq(agents.id, c.head.id));
+    await checkWaitHealth(c.ctx, c.now);
+    expect(await c.messages(c.head.id)).toEqual([]);
+    expect(await c.messages(c.watcher.id)).toEqual([]);
+    expect(await c.messages(c.orchestrator.id)).toHaveLength(1);
+  });
+
+  it('asks the head of the department above for one of its products', async () => {
+    const c = await unexplained();
+    const [product] = await c.db.insert(departments).values({ companyId: c.companyId, parentId: c.dev.id, name: 'API', roleCode: 'API' }).returning();
+    await c.db.update(tasks).set({ departmentId: product!.id }).where(eq(tasks.id, c.taskRow.id));
+    await checkWaitHealth(c.ctx, c.now);
+    expect(await c.messages(c.head.id)).toHaveLength(1);
+    expect(await c.messages(c.orchestrator.id)).toEqual([]);
+  });
+
+  it('does not treat a turn that never started as recent work', async () => {
+    const c = await unexplained();
+    await c.db.insert(jobs).values({ companyId: c.companyId, agentId: c.agent.id, subscriptionId: c.sub.id, kind: 'conversation', prompt: 'Unsent', status: 'failed', error: 'send_failed', finishedAt: c.now, timeoutMs: 1000 });
+    await checkWaitHealth(c.ctx, c.now);
+    expect(await c.messages(c.head.id)).toHaveLength(1);
+  });
+
+  it('counts running work on a department task assigned outside the department', async () => {
+    const c = await unexplained();
+    await c.db.update(tasks).set({ assigneeAgentId: c.orchestrator.id }).where(eq(tasks.id, c.taskRow.id));
+    await c.run(c.orchestrator.id, c.taskRow.id);
+    await checkWaitHealth(c.ctx, c.now);
+    expect(await c.messages(c.head.id)).toEqual([]);
+  });
+
+  it('checks quiet waits in the minute round', async () => {
+    const c = await unexplained();
+    const errors: unknown[] = [];
+    await minuteRound(c.ctx, c.now, () => error => { errors.push(error); });
+    expect(errors).toEqual([]);
+    expect(await c.messages(c.head.id)).toHaveLength(1);
+  });
+
+  it('does not call for a long running conversation and starts fifteen minutes at its completion', async () => {
+    const c = await unexplained();
+    const running = await c.run();
+    await c.db.update(jobs).set({ startedAt: new Date(c.now.getTime() - 120 * MINUTE) }).where(eq(jobs.id, running.job.id));
+    await checkWaitHealth(c.ctx, c.now);
+    expect(await c.messages(c.head.id)).toEqual([]);
+    await c.db.update(jobs).set({ status: 'done', finishedAt: c.now }).where(eq(jobs.id, running.job.id));
+    await checkWaitHealth(c.ctx, new Date(c.now.getTime() + 15 * MINUTE - 1));
+    expect(await c.messages(c.head.id)).toEqual([]);
+    await checkWaitHealth(c.ctx, new Date(c.now.getTime() + 15 * MINUTE));
+    expect(await c.messages(c.head.id)).toHaveLength(1);
+  });
+
+  it('does not call for a closed turn', async () => {
+    const c = await unexplained();
+    await c.db.update(turns).set({ status: 'closed', closedAt: c.now }).where(eq(turns.id, c.turn.id));
+    await checkWaitHealth(c.ctx, c.now);
+    expect(await c.messages(c.head.id)).toEqual([]);
   });
 
   it('counts work in a descendant department as work', async () => {
-    const c = await quietDepartment();
+    const c = await unexplained();
     const [child] = await c.db.insert(departments).values({ companyId: c.companyId, parentId: c.dev.id, name: 'API', roleCode: 'API' }).returning();
     await c.db.update(agents).set({ departmentId: child!.id }).where(eq(agents.id, c.agent.id));
     await c.run();
     await checkWaitHealth(c.ctx, c.now);
-    expect(await c.messages(c.watcher.id)).toEqual([]);
+    expect(await c.messages(c.head.id)).toEqual([]);
   });
 
   it('keeps unrelated department descendants outside its quiet scope', async () => {
-    const c = await quietDepartment();
+    const c = await unexplained();
     const [other] = await c.db.insert(departments).values({ companyId: c.companyId, parentId: c.watcher.departmentId, name: 'Other', roleCode: 'OTHER' }).returning();
     const [employee] = await c.db.insert(agents).values({ companyId: c.companyId, departmentId: other!.id, kind: 'worker', roleKey: 'OPS-WATCH', name: 'Owen', model: '', subscriptionId: c.sub.id }).returning();
     await c.run(employee!.id);
     await checkWaitHealth(c.ctx, c.now);
-    expect(await c.messages(c.watcher.id)).toHaveLength(1);
+    expect(await c.messages(c.head.id)).toHaveLength(1);
   });
 
-  it('does not manufacture an observation at an expired wait boundary', async () => {
+  it('does not manufacture an observation at an expired wait boundary: its time starts then', async () => {
     const c = await quietDepartment();
     await c.db.update(tasks).set({ externalWait: { reason: 'Machine', since: new Date(c.now.getTime() - 900_000).toISOString(), until: c.now.toISOString() } }).where(eq(tasks.id, c.taskRow.id));
     expect(await observeQuiet(c.ctx, c.turn.id, c.dev.id, c.now)).toBeNull();
     expect(await waitCycles(c.ctx, c.now)).toEqual([]);
+    expect(await observeQuiet(c.ctx, c.turn.id, c.dev.id, new Date(c.now.getTime() + 15 * MINUTE))).toMatchObject({ silent: [{ id: c.taskRow.id }] });
   });
 
-  it('defers a quiet observation if no watcher or orchestrator is enabled', async () => {
-    const c = await quietDepartment();
-    await c.db.update(agents).set({ switchedOffAt: c.now }).where(eq(agents.id, c.watcher.id));
+  it('defers a quiet observation if no head or orchestrator is enabled', async () => {
+    const c = await unexplained();
+    await c.db.update(agents).set({ switchedOffAt: c.now }).where(eq(agents.id, c.head.id));
     await c.db.update(agents).set({ switchedOffAt: c.now }).where(eq(agents.id, c.orchestrator.id));
     await expect(checkWaitHealth(c.ctx, c.now)).resolves.toBeUndefined();
-    expect(await c.messages(c.watcher.id)).toEqual([]);
+    expect(await c.messages(c.head.id)).toEqual([]);
     expect(await c.messages(c.orchestrator.id)).toEqual([]);
   });
-
 });
