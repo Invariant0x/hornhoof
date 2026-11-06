@@ -8,7 +8,7 @@ import { Shell } from '../src/screens/Shell';
 import type { WaitingRequest } from '../src/types';
 import { Outbound } from '../src/ui/Outbound';
 import { Requests } from '../src/ui/Requests';
-import { DECISIONS, ME, mockApi, ORG } from './api-mock';
+import { decisions, ME, mockApi, ORG } from './api-mock';
 
 const MSG_REQ_ID = '11111111-1111-4111-8111-111111111111';
 const APP_REQ_ID = '22222222-2222-4222-8222-222222222222';
@@ -139,7 +139,7 @@ describe('Outbound screen, bound Requests snapshot, and routing (#447 T8-17)', (
 
     mockApi({
       'GET /api/org': [200, ORG],
-      'GET /api/decisions': [200, DECISIONS],
+      'GET /api/requests': [200, decisions([])],
       'GET /api/improvements': [200, { improvements: [] }],
       'GET /api/version': [200, { version: '0.7.0', commit: 'abcdef0' }],
       'GET /api/outbound': [200, OVERVIEW],
@@ -223,7 +223,7 @@ describe('Outbound screen, bound Requests snapshot, and routing (#447 T8-17)', (
         onChanged={() => {}}
         onOpenTask={() => {}}
         onOpenAgent={() => {}}
-        placeName={p => p.name}
+        placeName={p => p?.name ?? ''}
       />,
     );
 
@@ -243,7 +243,7 @@ describe('Outbound screen, bound Requests snapshot, and routing (#447 T8-17)', (
         onChanged={() => {}}
         onOpenTask={() => {}}
         onOpenAgent={() => {}}
-        placeName={p => p.name}
+        placeName={p => p?.name ?? ''}
       />,
     );
     expect(await screen.findByText('Quarterly plan overview')).toBeInTheDocument();
