@@ -253,7 +253,7 @@ function PersonRow({ p, me, org, routed, openPerson, newLink, setStatus }: { p: 
       </td>
       <td data-label={t.people.columns.title}>{p.title}</td>
       <td data-label={t.people.columns.access}>{accessText(t, p.access, org)}</td>
-      <td data-label={t.people.columns.status}><span className={`status ${p.status}`}>{t.people.status[p.status]}</span></td>
+      <td data-label={t.people.columns.status}><span><span className={`status ${p.status}`}>{t.people.status[p.status]}</span></span></td>
       <td className="row-actions">
         <div className="entry-actions" role="group" aria-label={`${t.people.columns.actions}: ${p.name}`}>
           {(manageable || titleOnly) && (

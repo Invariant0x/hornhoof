@@ -231,12 +231,6 @@ for (const lang of ['en', 'ru'] as const) {
         const nameCellBox = (await nameCell.boundingBox())!;
         expect(nameCellBox.width, 'the name is the full-width record heading').toBe(rowBox.width);
         const status = cells.nth(3).locator('.status');
-        if (width === 375 && lang === 'en' && theme === 'light') {
-          console.log('P1_CASCADE', await status.evaluate(el => ({
-            display: getComputedStyle(el).display,
-            rules: [...document.styleSheets].flatMap(sheet => [...sheet.cssRules].filter(rule => rule.cssText.includes('.status')).map(rule => rule.cssText)),
-          })));
-        }
         await expect(status).toHaveCSS('display', 'inline-block');
         await expect(status).toHaveCSS('max-inline-size', '100%');
         const statusBox = (await status.boundingBox())!;
