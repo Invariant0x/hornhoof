@@ -440,13 +440,13 @@ export async function checkLiveness(ctx: Ctx, jobId: string, carried: string[] =
   const [job] = await ctx.db.select().from(jobs).where(eq(jobs.id, jobId));
   if (!job?.taskId || !job.agentId || !job.startedAt || job.error === 'cancelled' || job.result === GONE_ALONG) return;
   const own = carriedOnly ? await heldTask(ctx, job.agentId, job.taskId) : null;
-  const held = new Map<string, Task>();
+  const held = new Map<string, { task: Task; sourceId: string }>();
   for (const taskId of carriedOnly ? carried : [job.taskId, ...carried]) {
     const task = await heldTask(ctx, job.agentId, taskId);
-    if (task && task.id !== own?.id && !held.has(task.id)) held.set(task.id, task);
+    if (task && task.id !== own?.id && !held.has(task.id)) held.set(task.id, { task, sourceId: taskId });
   }
-  for (const task of held.values()) {
-    const worked = task.id === job.taskId ? await programWorked(ctx, jobId) : await programWorkedOnTask(ctx, jobId, task.id);
+  for (const { task, sourceId } of held.values()) {
+    const worked = sourceId === job.taskId ? await programWorked(ctx, jobId) : await programWorkedOnTask(ctx, jobId, sourceId);
     await checkHeld(ctx, { ...job, agentId: job.agentId, startedAt: job.startedAt }, task, worked);
   }
 }

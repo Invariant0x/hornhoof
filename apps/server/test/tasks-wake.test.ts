@@ -828,9 +828,9 @@ describe('a head', () => {
     const { db, held, together, reminded } = await busyHead();
     const [payments, refunds] = [await held('Payments'), await held('Refunds')];
     await together([payments.id, refunds.id], { status: 'failed', error: 'agent_failed' });
-    /* A turn that broke goes on without advancing the stuck counter. */
+    /* Its own failure continuation remains; no carried failure advances the stuck counter. */
     const wentOn = async (taskId: string) => (await db.select().from(taskEvents).where(and(eq(taskEvents.taskId, taskId), eq(taskEvents.kind, 'continued')))).length;
-    expect([await wentOn(payments.id), await wentOn(refunds.id)]).toEqual([0, 0]);
+    expect([await wentOn(payments.id), await wentOn(refunds.id)]).toEqual([1, 0]);
     expect([await reminded(payments.id), await reminded(refunds.id)]).toEqual([0, 0]);
   });
 
