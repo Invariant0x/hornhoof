@@ -204,13 +204,14 @@ test('real server closes an open terminal with 4403 when the plan moves', async 
   }
 });
 
-test('real server refuses an upgraded socket and drops the stale screen on terminal:false', async ({ browser, server }) => {
+test('real server keeps the new owner card without exposing the previous owner terminal', async ({ browser, server }) => {
   try {
     await server.control('move-other-ann-running');
     const ann = await signedIn(browser, server, 'ann', 'en', 'light', 1440);
     const window = await openAgent(ann, 'Otto');
     await expect(window.locator('.xterm-screen')).toHaveCount(0);
-    await expect(window).toHaveCount(0);
+    await expect(window).toBeVisible();
+    await expect(window).not.toContainText('Mina private terminal');
     expect(errorsOf(ann)).toEqual([]);
   } finally {
     await server.closePages();

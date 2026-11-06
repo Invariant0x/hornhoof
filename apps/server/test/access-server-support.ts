@@ -2,7 +2,7 @@ import { once } from 'node:events';
 import { createServer } from 'node:net';
 import { PGlite } from '@electric-sql/pglite';
 import type { ServerMessage } from '@hornhoof/protocol';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import WebSocket from 'ws';
 import { buildApp } from '../src/app.js';
@@ -49,7 +49,12 @@ const commands: Record<string, () => unknown> = {
   'turn-mine-ann': () => turnOn(c.crew.mine.id, c.plans.ann.id),
   'move-mine-bob': () => c.app.inject({ method: 'PATCH', url: '/api/agents/' + c.crew.mine.id, payload: { subscription: c.plans.bob.id }, cookies: { hh_session: c.tokens.ceo } }),
   'move-other-ann-running': async () => { await turnOn(c.crew.other.id, c.plans.bob.id); await onPlan(c.crew.other.id, c.plans.ann.id); },
-  'move-other-ann-idle': async () => { await turnOn(c.crew.other.id, c.plans.bob.id, 'done'); await onPlan(c.crew.other.id, c.plans.ann.id); },
+  'move-other-ann-idle': async () => {
+    await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(and(eq(jobs.agentId, c.crew.other.id), eq(jobs.status, 'running')));
+    await onPlan(c.crew.other.id, c.plans.ann.id);
+    c.app.ctx.bus.publish(c.companyId, { type: 'org' });
+    c.app.ctx.bus.accessChanged(c.companyId);
+  },
   'turn-other-bob': () => turnOn(c.crew.other.id, c.plans.bob.id),
   'turn-other-ann': () => turnOn(c.crew.other.id, c.plans.ann.id),
 };

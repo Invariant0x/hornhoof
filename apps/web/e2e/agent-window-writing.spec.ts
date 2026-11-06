@@ -121,14 +121,15 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
       const sent = await serve(page, 'department', settings);
       await page.goto('/departments/d2');
       await expect(page.getByRole('region', { name: lang === 'en' ? 'Members' : 'Сотрудники' })).not.toContainText('Bruno');
+      const denied = page.waitForResponse(response => new URL(response.url()).pathname === '/api/agents/b1');
       await page.goto('/agents/b1');
+      expect((await denied).status()).toBe(403);
       await expect(page.getByRole('heading', { name: t.routes.accessDenied })).toBeVisible();
       await expect(page.locator('body')).not.toContainText('Bruno');
       await expect(page.locator('.xterm-screen')).toHaveCount(0);
       expect(sent.keys).toEqual([]);
       expect(sent.messages).toEqual([]);
       await shot(page, info, 'department-b1', settings);
-      expect(errors.filter(error => error.includes('status of 403'))).toHaveLength(1);
       await checkPage(page, errors.filter(error => !error.includes('status of 403')));
     });
 

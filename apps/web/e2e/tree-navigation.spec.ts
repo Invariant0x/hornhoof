@@ -89,6 +89,9 @@ for (const lang of ['en', 'ru'] as const) {
         const leftFrame = await box(speed);
         await speed.getByRole('button', { name: close, exact: true }).click();
         await page.locator('.tv-labs').getByRole('button', { name: /Bruno/ }).click();
+        const preview = page.locator('.tv-card');
+        await expect(preview).toBeVisible();
+        await preview.locator('h4').getByRole('button', { name: /^Bruno/ }).click();
         const agent = page.getByRole('complementary', { name: 'Bruno', exact: true });
         await expect(agent).toBeVisible();
         await expect(page.locator('.tv-card')).toHaveCount(0);

@@ -43,6 +43,9 @@ for (const lang of ['en', 'ru'] as const) {
           await oldAlarm.focus();
           await expect(oldAlarm).toBeFocused();
           await page.keyboard.press('Enter');
+          await expect(page.locator('.tv-card')).toBeVisible();
+          await page.locator('.tv-card h4').getByRole('button', { name: /^Hana/ }).focus();
+          await page.keyboard.press('Enter');
           const headWindow = page.getByRole('complementary', { name: 'Hana', exact: true });
           await expect(headWindow).toBeVisible();
           await expect(page.locator('.tv-card')).toHaveCount(0);
@@ -51,6 +54,9 @@ for (const lang of ['en', 'ru'] as const) {
           await oldTask.scrollIntoViewIfNeeded();
           await oldTask.focus();
           await page.keyboard.press('Enter');
+          await expect(page.locator('.tv-card')).toBeVisible();
+          await page.locator('.tv-card h4').getByRole('button', { name: /^Bruno/ }).focus();
+          await page.keyboard.press('Enter');
           const agentWindow = page.getByRole('complementary', { name: 'Bruno', exact: true });
           await expect(agentWindow).toBeVisible();
           await page.screenshot({ path: info.outputPath(`tree-agent-${width}-${lang}-${theme}.png`) });
@@ -58,6 +64,9 @@ for (const lang of ['en', 'ru'] as const) {
           const oldReview = graph.getByRole('button', { name: /Vera, #90/ }).first();
           await oldReview.scrollIntoViewIfNeeded();
           await oldReview.focus();
+          await page.keyboard.press('Enter');
+          await expect(page.locator('.tv-card')).toBeVisible();
+          await page.locator('.tv-card h4').getByRole('button', { name: /^Vera/ }).focus();
           await page.keyboard.press('Enter');
           const reviewer = page.getByRole('complementary', { name: 'Vera', exact: true });
           await expect(reviewer).toBeVisible();

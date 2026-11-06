@@ -11,6 +11,7 @@ export async function serveTree(page: Page, live: { during: boolean }) {
     const routes: Record<string, unknown> = {
       '/api/org': org,
       '/api/departments/d2/tree': { tree },
+      '/api/departments/d2/approval-policy': { departmentId: 'd2', owner: null, canSetOwner: true, canChangePolicy: true, candidates: [], rules: [{ channel: 'message', mode: 'every' }, { channel: 'price', mode: 'every' }, { channel: 'publication', mode: 'every' }, { channel: 'commit', mode: 'every' }, { channel: 'spend', mode: 'every' }, { channel: 'other', mode: 'every' }] },
       '/api/tasks?status=open&department=d2': { tasks: [] },
       '/api/version': { version: '0.5.0', commit: 'task-148' },
       '/api/updates': { current: { version: '0.5.0', commit: 'task-148' }, available: false, latest: null, updater: { status: null, waiting: null } },
