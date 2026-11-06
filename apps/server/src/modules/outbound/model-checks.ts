@@ -275,10 +275,11 @@ function canonicalFactValue(row: CatalogRow, rows: readonly CatalogRow[], locale
   if (row.value.kind === 'link') return row.value.url;
   if (row.value.kind === 'claim' || row.value.kind === 'knowledge') return row.value.text;
   if (row.value.kind !== 'price') return null;
-  const discountRow = row.value.discountId ? rows.find(r => r.entryId === row.value.discountId && r.value.kind === 'discount') : undefined;
+  const price = row.value;
+  const discountRow = price.discountId ? rows.find(r => r.entryId === price.discountId && r.value.kind === 'discount') : undefined;
   const discount = discountRow && discountRow.value.kind === 'discount' ? discountRow.value : null;
-  const money = priceAfterDiscount(row.value, discount);
-  return money ? formatMoney(money, locale) : `${row.value.amount} ${row.value.currency}`;
+  const money = priceAfterDiscount(price, discount);
+  return money ? formatMoney(money, locale) : `${price.amount} ${price.currency}`;
 }
 
 async function buildQueuedFacts(db: Pick<Db, 'select'>, companyId: string, document: MessageDocument): Promise<ReviewFactDto[]> {
