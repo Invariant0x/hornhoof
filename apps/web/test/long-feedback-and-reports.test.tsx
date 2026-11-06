@@ -1,16 +1,15 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { LanguageProvider } from '../src/i18n';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
-import type { TaskDetail, TaskPlace, WaitingRequest } from '../src/types';
+import type { TaskDetail, WaitingRequest } from '../src/types';
 import { Requests } from '../src/ui/Requests';
 import { formatFileSize, fullTextOf } from '../src/ui/TaskAttachments';
 import { TaskPanel } from '../src/ui/TaskPanel';
 import { DEV_ORG, mockApi, REQUESTS, TASK_DETAIL } from './api-mock';
 import { decl } from './css';
+import { renderIn, requestProps } from './request-feedback-fixture';
 
 const DEV = { id: 'd2', name: 'Development' };
 const ceoOnly = { kind: 'ceo_and_delegate' as const, department: null };
@@ -26,11 +25,6 @@ function makeLongText(prefix: string, targetLength = 12_000): string {
   const full = `${head}${middle}${tail}`;
   expect(full.length).toBe(targetLength);
   return full;
-}
-
-function renderIn(lang: 'en' | 'ru', node: ReactNode) {
-  localStorage.setItem('hh-lang', lang);
-  return render(<LanguageProvider>{node}</LanguageProvider>);
 }
 
 const CHOICE: WaitingRequest = {
@@ -49,17 +43,6 @@ const CHOICE: WaitingRequest = {
   agent: { id: 'a-design', name: 'Interface Designer' },
   task: { id: 't12', number: 12, title: 'Checkout API', department: DEV },
 };
-
-function requestProps(overrides: Partial<Parameters<typeof Requests>[0]> = {}) {
-  return {
-    requests: [CHOICE],
-    onChanged: vi.fn(),
-    onOpenTask: vi.fn(),
-    onOpenAgent: vi.fn(),
-    placeName: (p: TaskPlace) => p?.name ?? '',
-    ...overrides,
-  };
-}
 
 type MockReply =
   | { kind: 'json'; status: number; data?: unknown }
@@ -107,7 +90,7 @@ describe('long 12,000-character feedback, answers, and full report reading (#424
     const calls = mockApi({
       'POST /api/requests/r-choice-long': [200, { request: { id: 'r-choice-long', status: 'answered', picked: null, answer: feedback12k } }],
     });
-    const props = requestProps();
+    const props = requestProps(CHOICE);
     const user = userEvent.setup();
     renderIn(lang, <Requests {...props} />);
 
@@ -138,7 +121,7 @@ describe('long 12,000-character feedback, answers, and full report reading (#424
       'POST /api/requests/r-choice-long': [200, { request: { id: 'r-choice-long', status: 'answered', picked: 0, answer: comment12k } }],
     });
     const user = userEvent.setup();
-    renderIn('en', <Requests {...requestProps()} />);
+    renderIn('en', <Requests {...requestProps(CHOICE)} />);
 
     const box = screen.getByLabelText('Comment or feedback');
     await user.click(box);
@@ -168,7 +151,7 @@ describe('long 12,000-character feedback, answers, and full report reading (#424
       'POST /api/requests/r-a-12k': [200, { request: { id: 'r-a-12k', status: 'declined' } }],
     });
     const user = userEvent.setup();
-    renderIn('en', <Requests {...requestProps({ requests: [questionReq, stuckReq, approvalReq] })} />);
+    renderIn('en', <Requests {...requestProps(CHOICE, { requests: [questionReq, stuckReq, approvalReq] })} />);
 
     const [qCard, sCard, aCard] = screen.getAllByRole('article');
 
@@ -204,7 +187,7 @@ describe('long 12,000-character feedback, answers, and full report reading (#424
           ? [400, { error: { code: 'validation' } }]
           : [200, { request: { id: 'r-choice-long', status: 'answered', picked: null, answer: feedback12k } }],
     });
-    const props = requestProps();
+    const props = requestProps(CHOICE);
     const user = userEvent.setup();
     renderIn('ru', <Requests {...props} />);
 
@@ -228,7 +211,7 @@ describe('long 12,000-character feedback, answers, and full report reading (#424
   });
 
   it('keeps canAnswer: false strict read-only without exposing any long-text inputs or buttons', () => {
-    renderIn('en', <Requests {...requestProps({ requests: [{ ...CHOICE, canAnswer: false }] })} />);
+    renderIn('en', <Requests {...requestProps(CHOICE, { requests: [{ ...CHOICE, canAnswer: false }] })} />);
     expect(screen.getByText(en.tasks.decidedByCeo)).toBeInTheDocument();
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Send without choosing' })).not.toBeInTheDocument();

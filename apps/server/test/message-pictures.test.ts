@@ -3,25 +3,18 @@ import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { ServerMessage } from '@hornhoof/protocol';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it } from 'vitest';
 import { agentEvents, agents, attachments, departments, jobs, people } from '../src/db/schema.js';
 import { dropOldFiles, PICTURE_BYTES } from '../src/modules/tasks/attachments.js';
-import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until, type FakeNode, ownPlan } from './helpers.js';
+import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until, ownPlan } from './helpers.js';
+import { nextOf as next } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
 const HH_FETCH = fileURLToPath(new URL('../../node/hh-fetch.cjs', import.meta.url));
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64, 1)]);
 const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(64, 2)]);
-
-async function next<T extends ServerMessage['type']>(node: FakeNode, type: T): Promise<Extract<ServerMessage, { type: T }>> {
-  for (;;) {
-    const m = await node.next();
-    if (m.type === type) return m as Extract<ServerMessage, { type: T }>;
-  }
-}
 
 /* Acme: Bruno in Development and Sam in Sales run on one plan with the orchestrator. Maria has Development; Lisa is the CEO
    delegate. */

@@ -19,7 +19,7 @@ import { answer, cancel, CLOSED, comment, createTask, refuse, requestSubject, ta
 import { setUrgent } from './urgency.js';
 import { requireDecision } from '../../auth/decisions.js';
 import { delegationOf, lockedFor } from '../conversation/decision-context.js';
-import type { DecidedBy } from '../../auth/decisions.js';
+import { decidedByView } from './decision-views.js';
 import { commitUrl, picturesOf } from './attachments.js';
 import { departmentOf } from '../tools/staff.js';
 import { workTree } from './tree.js';
@@ -85,12 +85,6 @@ async function agentNames(db: Ctx['db'], ids: string[]): Promise<Map<string, str
 
 type Places = Awaited<ReturnType<typeof departmentNames>>;
 
-/* Whom people read a decision is for, with the department's name. */
-function decidedByView(d: DecidedBy, places: Places) {
-  const place = d.departmentId ? places.get(d.departmentId) : undefined;
-  return { kind: d.kind, department: place ? { id: place.id, name: deptName(place) } : null };
-}
-
 /* The departments the cards are for and the requests' departments decide. */
 function placesOf(cards: Decisions['proposals'], mine: Decisions['requests']): string[] {
   const ids = [...cards.map(c => c.proposal.departmentId), ...mine.map(r => r.decidedBy.departmentId)];
@@ -145,6 +139,32 @@ async function computerView(ctx: Ctx, companyId: string, computer: NonNullable<D
     at: computer.asked.at,
     view: { ...ctx.computer.view(), asked: computer.asked, machine: await serverMachine(ctx, companyId), canAnswer: computer.canAnswer },
   };
+}
+
+function machineCards(me: Person, person: string | undefined, cards: Decisions['machines']) {
+  return cards.filter(card => !person || person === me.id || person === card.owner?.id)
+    .map(card => ({ ...card, since: card.since.toISOString(), back: card.back?.toISOString() ?? null }));
+}
+
+function requestViews(mine: Decisions['requests'], lines: Awaited<ReturnType<typeof linesFor>>, commits: (string | null)[], pictures: Map<string, string[]>, names: Map<string, string>, explaining: Set<string>, places: Places) {
+  return mine.map((r, i) => ({
+    id: r.request.id,
+    kind: r.request.kind,
+    text: r.request.text,
+    commit: r.request.commit,
+    commitUrl: commits[i],
+    images: pictures.get(r.request.id) ?? [],
+    options: r.request.options,
+    link: r.request.link,
+    explained: r.request.explained,
+    explaining: explaining.has(r.request.id),
+    at: r.request.createdAt.toISOString(),
+    agent: { id: r.request.agentId, name: names.get(r.request.agentId) ?? '' },
+    task: { id: lines[i]!.id, number: lines[i]!.number, title: lines[i]!.title, department: lines[i]!.department },
+    ownerPersonId: r.ownerPersonId,
+    canAnswer: r.canAnswer,
+    decidedBy: decidedByView(r.decidedBy, places),
+  }));
 }
 
 /* The task a turn's work hangs under, for someone who sees it. */
@@ -336,30 +356,11 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const commits = await Promise.all(mine.map(r => commitUrl(db, r.task, r.request.commit)));
     const explaining = await explainingOf(db, me.companyId, mine.filter(r => !r.request.explained).map(r => r.request.id));
     return {
-      requests: mine.map((r, i) => ({
-        id: r.request.id,
-        kind: r.request.kind,
-        text: r.request.text,
-        commit: r.request.commit,
-        commitUrl: commits[i],
-        images: pictures.get(r.request.id) ?? [],
-        options: r.request.options,
-        link: r.request.link,
-        explained: r.request.explained,
-        explaining: explaining.has(r.request.id),
-        at: r.request.createdAt.toISOString(),
-        agent: { id: r.request.agentId, name: names.get(r.request.agentId) ?? '' },
-        task: { id: lines[i]!.id, number: lines[i]!.number, title: lines[i]!.title, department: lines[i]!.department },
-        ownerPersonId: r.ownerPersonId,
-        canAnswer: r.canAnswer,
-        decidedBy: decidedByView(r.decidedBy, places),
-      })),
+      requests: requestViews(mine, lines, commits, pictures, names, explaining, places),
       addressed: shown.filter(r => !r.known).map(r => addressedView(r, pictures.get(r.request.id) ?? [], places)),
       proposals: cards.map(c => proposalView(c, names, places)),
       computerAccess: computer && (await computerView(ctx, me.companyId, computer, names)),
-      machinesAway: decisions.machines
-        .filter(card => !person || person === me.id || person === card.owner?.id)
-        .map(card => ({ ...card, since: card.since.toISOString(), back: card.back?.toISOString() ?? null })),
+      machinesAway: machineCards(me, person, decisions.machines),
       counts: decisions.counts,
     };
   });

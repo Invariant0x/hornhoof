@@ -1,4 +1,4 @@
-import { HIDDEN, MIN_LENGTH, redact, secretForms } from '../redact.js';
+import { HIDDEN, MIN_LENGTH, redact, secretForms, secretPrefixLength } from '../redact.js';
 
 /* Hides secrets in a screen that arrives in pieces. The end of a piece that could be the start of a secret waits for the
    next piece, or for flush() when the screen goes quiet. A start that went out then is remembered, so the rest of the
@@ -26,7 +26,7 @@ export class StreamMask {
       if (go !== null) text = HIDDEN + text.slice(go);
     }
     text = redact(text, secrets);
-    const keep = longestStart(text, forms);
+    const keep = secretPrefixLength(text, forms);
     if (keep && keep < closingSequence(text)) {
       this.sent = text.slice(text.length - keep);
       return text;
@@ -60,18 +60,4 @@ function goOn(sent: string, text: string, values: string[]): number | 'partly' |
     }
   }
   return null;
-}
-
-/* How many characters at the end of text could begin one of the values. */
-function longestStart(text: string, values: string[]): number {
-  let best = 0;
-  for (const value of values) {
-    for (let n = Math.min(value.length - 1, text.length); n > best; n--) {
-      if (text.endsWith(value.slice(0, n))) {
-        best = n;
-        break;
-      }
-    }
-  }
-  return best;
 }

@@ -7,7 +7,7 @@ import { notificationMessage } from '../events/notifications.js';
 import { ownNote, type Task, type Tx } from './engine.js';
 import { recordWaitNotice } from './wait-notices.js';
 import { departmentHead, waitRoute, type WaitRoute } from './wait-policy.js';
-import { claimFinalReview, type TaskWait } from './wait-state.js';
+import { claimFinalReview, waitOwner, type TaskWait } from './wait-state.js';
 
 /* The sweep that raises a wait past its date one level at a time: its owner, then its head, then whom its department named.
    Dates never move, a late sweep takes one level and no more, and the next level's date is already there to be seen. It says
@@ -36,14 +36,9 @@ async function lockedWait(tx: Tx, id: string): Promise<Found | null> {
   return task && wait ? { task, wait } : null;
 }
 
-const ownerOf = (wait: TaskWait): WaitOwnerBinding | null => {
-  if (wait.ownerAgentId) return { agentId: wait.ownerAgentId };
-  return wait.ownerPersonId ? { personId: wait.ownerPersonId } : null;
-};
-
 /* A person who owns a wait and is the CEO has the question itself waiting on their card: being late asks nothing more of them. */
 async function ownerToTell(tx: Tx, wait: TaskWait): Promise<WaitOwnerBinding | null> {
-  const owner = ownerOf(wait);
+  const owner = waitOwner(wait);
   if (!owner || 'agentId' in owner) return owner;
   const [person] = await tx.select({ isOwner: people.isOwner }).from(people).where(eq(people.id, owner.personId));
   return person?.isOwner ? null : owner;

@@ -1,14 +1,14 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { createInterface } from 'node:readline';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { en } from '../src/i18n/en';
 import { LANGUAGES, type Language } from '../src/i18n/index';
 import { ru } from '../src/i18n/ru';
 import type { Decisions, Me, Org, TaskLine, WaitingRequest } from '../src/types';
+import { startServer } from './real-server';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '../../..');
@@ -556,35 +556,7 @@ process.on('SIGTERM', () => void shutdown());
 `;
 
 async function startRealServer(publicUrl: string): Promise<RealServerBoot> {
-  const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', REAL_SERVER_SCRIPT], {
-    cwd: resolve(HERE, '../../server'),
-    env: { ...process.env, HH_PUBLIC_URL: publicUrl },
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
-  let stderr = '';
-  child.stderr.on('data', chunk => {
-    stderr += String(chunk);
-  });
-  const lines = createInterface({ input: child.stdout });
-  const boot = await new Promise<Omit<RealServerBoot, 'stop'>>((resolveBoot, rejectBoot) => {
-    lines.once('line', line => {
-      try {
-        resolveBoot(JSON.parse(line) as Omit<RealServerBoot, 'stop'>);
-      } catch (err) {
-        rejectBoot(new Error(`Invalid boot JSON: ${line} (${String(err)})\n${stderr}`));
-      }
-    });
-    child.once('exit', code => rejectBoot(new Error(`Real server exited early (${code}):\n${stderr}`)));
-  });
-  return {
-    ...boot,
-    stop: () =>
-      new Promise<void>(done => {
-        if (child.exitCode !== null) return done();
-        child.once('exit', () => done());
-        child.stdin.end();
-      }),
-  };
+  return startServer<Omit<RealServerBoot, 'stop'>>(REAL_SERVER_SCRIPT, { cwd: resolve(HERE, '../../server'), publicUrl, invalidBoot: 'Invalid boot JSON' });
 }
 
 test('separates legacy option.image preview from explicit choice and send-without-choice on a real Fastify + PGlite server', async ({ page, baseURL }, info) => {

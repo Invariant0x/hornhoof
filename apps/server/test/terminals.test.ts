@@ -1,4 +1,3 @@
-import type { ServerMessage } from '@hornhoof/protocol';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
@@ -7,7 +6,8 @@ import { agents, companies, departments, jobs, people, requests, subscriptions, 
 import { decisionPrincipal } from '../src/modules/conversation/decision-context.js';
 import { enqueueTurn, openTypedTurn } from '../src/modules/conversation/queue.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
-import { approvalAsked, as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until, type FakeNode, takePlan } from './helpers.js';
+import { approvalAsked, as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until, takePlan } from './helpers.js';
+import { nextOf as next } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
 const IVAN_TO_ORCHESTRATOR = 'From Ivan (CEO) to Orchestrator:\n\n';
@@ -25,13 +25,6 @@ function watch(url: string, token: string, agent = 'orchestrator', size = 'cols=
     ws.on('error', reject);
     ws.on('open', () => resolve({ ws, frames, closed }));
   });
-}
-
-async function next<T extends ServerMessage['type']>(node: FakeNode, type: T): Promise<Extract<ServerMessage, { type: T }>> {
-  for (;;) {
-    const m = await node.next();
-    if (m.type === type) return m as Extract<ServerMessage, { type: T }>;
-  }
 }
 
 async function live(terminals = true, env: NodeJS.ProcessEnv = {}) {

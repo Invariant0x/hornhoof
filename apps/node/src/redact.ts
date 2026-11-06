@@ -21,3 +21,17 @@ export function redact(text: string, secrets: string[]): string {
   for (const value of secretForms(secrets)) out = out.replaceAll(value, HIDDEN);
   return out;
 }
+
+/* How many characters at the end of text could begin one of the values. */
+export function secretPrefixLength(text: string, values: string[]): number {
+  let best = 0;
+  for (const value of values) {
+    for (let n = Math.min(value.length - 1, text.length); n > best; n--) {
+      if (text.endsWith(value.slice(0, n))) {
+        best = n;
+        break;
+      }
+    }
+  }
+  return best;
+}

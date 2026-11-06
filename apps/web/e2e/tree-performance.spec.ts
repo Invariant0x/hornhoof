@@ -1,76 +1,11 @@
 import { execFileSync } from 'node:child_process';
 import { writeFile } from 'node:fs/promises';
 import { cpus, loadavg } from 'node:os';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import { box } from './api';
-import { fullDepartment, type Tree } from './full-department';
-import { serveTree } from './tree-api';
-
-type TraceEvent = { name: string; cat: string; ph: string; ts: number; dur?: number; pid: number; tid: number };
-type Measurement = { events: TraceEvent[]; frames: number[]; chipRenders: number; movements: number };
+import { instrumentChipRenders, resetChipRenders, chipRenderNames, chipRenders, serveFullDepartment, openDepartment, measure, summarizeFrames, taskTiming, type Measurement } from './tree-performance-helpers';
 
 test.use({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
-
-async function instrumentChipRenders(page: Page) {
-  await page.addInitScript(() => {
-    (window as unknown as { __chipRenders: string[] }).__chipRenders = [];
-  });
-  await page.route('**/src/ui/Chip.tsx*', async route => {
-    const response = await route.fetch();
-    const needle = '\tconst t = useT();\n\treturn';
-    const source = await response.text();
-    if (!source.includes(needle)) throw new Error('The Chip render instrumentation did not find its insertion point');
-    const body = source.replace(needle, '\tconst t = useT();\n\t(globalThis.__chipRenders ??= []).push(e.name);\n\treturn');
-    await route.fulfill({ response, body });
-  });
-}
-
-async function resetChipRenders(page: Page) {
-  await page.evaluate(() => {
-    (window as unknown as { __chipRenders: string[] }).__chipRenders.length = 0;
-  });
-}
-
-async function chipRenderNames(page: Page): Promise<string[]> {
-  return page.evaluate(() => [...(window as unknown as { __chipRenders: string[] }).__chipRenders]);
-}
-
-async function chipRenders(page: Page): Promise<number> {
-  return (await chipRenderNames(page)).length;
-}
-
-async function serveFullDepartment(page: Page) {
-  const full = fullDepartment();
-  let shown: Tree = full;
-  await serveTree(page, { during: true });
-  await page.route('**/api/org', route => route.fulfill({ json: shown.org }));
-  await page.route('**/api/departments/d2/tree', route => route.fulfill({ json: { tree: shown.tree } }));
-  return {
-    full,
-    renameBrunoTask(title: string) {
-      const departments = full.org.departments.map((department, index) => index ? department : {
-        ...department,
-        employees: department.employees.map(employee => employee.name === 'Bruno'
-          ? { ...employee, task: { ...employee.task!, title } }
-          : employee),
-      });
-      shown = { ...full, org: { ...full.org, departments } };
-    },
-  };
-}
-
-async function openDepartment(page: Page, tree: boolean) {
-  await page.goto('/');
-  await page.getByRole('button', { name: /Development/ }).click();
-  if (tree) {
-    await page.getByRole('button', { name: 'Tree', exact: true }).click();
-    await expect(page.locator('.tv-labs .dept-chip')).toHaveCount(12);
-  } else {
-    await expect(page.locator('.dcanvas .dept-chip')).toHaveCount(12);
-  }
-  await page.evaluate(() => document.fonts.ready);
-  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
-}
 
 test('100 pan movements move the scene without rendering its chips', async ({ page }, info) => {
   await instrumentChipRenders(page);
@@ -115,69 +50,9 @@ test('a real employee update renders only the changed chip', async ({ page }, in
   expect([...new Set(renders)], 'only Bruno has new employee data').toEqual(['Bruno']);
 });
 
-async function startFrames(page: Page) {
-  await page.evaluate(() => {
-    const state = window as unknown as { __frames: number[]; __frameRequest: number };
-    state.__frames = [];
-    const frame = (at: number) => {
-      state.__frames.push(at);
-      state.__frameRequest = requestAnimationFrame(frame);
-    };
-    state.__frameRequest = requestAnimationFrame(frame);
-  });
-}
-
-async function stopFrames(page: Page): Promise<number[]> {
-  return page.evaluate(() => {
-    const state = window as unknown as { __frames: number[]; __frameRequest: number };
-    cancelAnimationFrame(state.__frameRequest);
-    return state.__frames;
-  });
-}
-
-async function panAndZoom(page: Page, selector: string): Promise<number> {
-  const bounds = await box(page.locator(selector)), x = bounds.x + bounds.width / 2, y = bounds.y + bounds.height / 2;
-  const started = Date.now();
-  let movements = 0;
-  await page.mouse.move(x, y);
-  await page.mouse.down();
-  while (Date.now() - started < 10_000) {
-    await page.mouse.move(x + Math.sin(movements / 8) * 180, y + Math.cos(movements / 11) * 100);
-    movements++;
-    if (movements % 15 === 0) await page.mouse.wheel(0, movements % 30 ? -25 : 25);
-    await page.waitForTimeout(40);
-  }
-  await page.mouse.up();
-  return movements;
-}
-
-async function measure(page: Page, selector: string): Promise<Measurement> {
-  const session = await page.context().newCDPSession(page), events: TraceEvent[] = [];
-  session.on('Tracing.dataCollected', event => events.push(...(event.value as unknown as TraceEvent[])));
-  const complete = new Promise<void>(resolve => session.once('Tracing.tracingComplete', () => resolve()));
-  await session.send('Tracing.start', {
-    categories: 'devtools.timeline,disabled-by-default-devtools.timeline,disabled-by-default-devtools.timeline.frame,blink.user_timing',
-    transferMode: 'ReportEvents',
-  });
-  await resetChipRenders(page);
-  await startFrames(page);
-  const movements = await panAndZoom(page, selector), frames = await stopFrames(page), renders = await chipRenders(page);
-  await session.send('Tracing.end');
-  await complete;
-  await session.detach();
-  return { events, frames, chipRenders: renders, movements };
-}
-
 function summarize(measurement: Measurement) {
-  const { frames, events } = measurement;
-  const fps = frames.length > 1 ? (frames.length - 1) * 1000 / (frames.at(-1)! - frames[0]!) : 0;
-  const main = events.find(event => event.name === 'EventDispatch');
-  const tasks = events.filter(event => event.ph === 'X'
-    && ['RunTask', 'ThreadControllerImpl::RunTask'].includes(event.name) && (event.dur ?? 0) > 50_000)
-    .map(event => ({ at: event.ts, durationMs: event.dur! / 1000, pid: event.pid, tid: event.tid }));
-  const longTasks = tasks.filter(event => event.pid === main?.pid && event.tid === main?.tid);
-  const otherThreadLongTasks = tasks.filter(event => event.pid !== main?.pid || event.tid !== main?.tid);
-  return { fps, frames: frames.length, longTasks, otherThreadLongTasks, chipRenders: measurement.chipRenders, movements: measurement.movements };
+  const { mainTasks, otherTasks, ...summary } = summarizeFrames(measurement);
+  return { fps: summary.fps, frames: summary.frames, longTasks: mainTasks.map(taskTiming), otherThreadLongTasks: otherTasks.map(taskTiming), chipRenders: summary.chipRenders, movements: summary.movements };
 }
 
 test('record ten seconds of tree and department pan/zoom', async ({ page, browser }, info) => {
