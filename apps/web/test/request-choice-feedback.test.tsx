@@ -1,22 +1,16 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { LanguageProvider } from '../src/i18n';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
-import type { TaskPlace, WaitingRequest } from '../src/types';
+import type { WaitingRequest } from '../src/types';
 import { Requests, clearRequestDraftsForTests, wordsAnswer } from '../src/ui/Requests';
 import { mockApi, REQUESTS } from './api-mock';
 import { decl } from './css';
+import { renderIn, requestProps } from './request-feedback-fixture';
 
 const DEV = { id: 'd2', name: 'Development' };
 const ceoOnly = { kind: 'ceo_and_delegate' as const, department: null };
-
-function renderIn(lang: 'en' | 'ru', node: ReactNode) {
-  localStorage.setItem('hh-lang', lang);
-  return render(<LanguageProvider>{node}</LanguageProvider>);
-}
 
 const CHOICE: WaitingRequest = {
   ...REQUESTS[0]!,
@@ -34,17 +28,6 @@ const CHOICE: WaitingRequest = {
   agent: { id: 'a-design', name: 'Interface Designer (Gemini)' },
   task: { id: 't402', number: 402, title: 'Turn progress options', department: DEV },
 };
-
-function makeProps(overrides: Partial<Parameters<typeof Requests>[0]> = {}) {
-  return {
-    requests: [CHOICE],
-    onChanged: vi.fn(),
-    onOpenTask: vi.fn(),
-    onOpenAgent: vi.fn(),
-    placeName: (p: TaskPlace) => p?.name ?? '',
-    ...overrides,
-  };
-}
 
 function jsonResponse(status: number, payload: unknown): Response {
   return new Response(JSON.stringify(payload), {
@@ -90,7 +73,7 @@ describe('choice request free-form feedback and option picking', () => {
 
   it('sends multi-line feedback without picking an option in English', async () => {
     const calls = mockApi({ 'POST /api/requests/r-choice': [200, { request: { id: 'r-choice', status: 'answered', picked: null } }] });
-    const props = makeProps();
+    const props = requestProps(CHOICE);
     const user = userEvent.setup();
     renderIn('en', <Requests {...props} />);
 
@@ -119,7 +102,7 @@ describe('choice request free-form feedback and option picking', () => {
 
   it('sends multi-line feedback without picking an option in Russian via visible Отправить без выбора button', async () => {
     const calls = mockApi({ 'POST /api/requests/r-choice': [200, { request: { id: 'r-choice', status: 'answered', picked: null } }] });
-    const props = makeProps();
+    const props = requestProps(CHOICE);
     const user = userEvent.setup();
     renderIn('ru', <Requests {...props} />);
 
@@ -145,7 +128,7 @@ describe('choice request free-form feedback and option picking', () => {
   it('sends exact pick: 0 with trimmed comment, and pick: 0 alone when comment is blank', async () => {
     const calls = mockApi({ 'POST /api/requests/r-choice': [200, { request: { id: 'r-choice', status: 'answered', picked: 0 } }] });
     const user = userEvent.setup();
-    const { unmount } = renderIn('en', <Requests {...makeProps()} />);
+    const { unmount } = renderIn('en', <Requests {...requestProps(CHOICE)} />);
 
     await user.type(screen.getByLabelText('Comment or feedback'), '  Keep Argon, soften the glow  ');
     await user.click(screen.getByRole('button', { name: 'Choose option 1' }));
@@ -153,7 +136,7 @@ describe('choice request free-form feedback and option picking', () => {
     unmount();
     clearRequestDraftsForTests();
 
-    renderIn('en', <Requests {...makeProps()} />);
+    renderIn('en', <Requests {...requestProps(CHOICE)} />);
     await user.type(screen.getByLabelText('Comment or feedback'), '   \n  ');
     await user.click(screen.getByRole('button', { name: 'Choose option 1' }));
     expect(calls[1]?.body).toEqual({ pick: 0 });
@@ -162,7 +145,7 @@ describe('choice request free-form feedback and option picking', () => {
 
   it('disables Send without choosing and refuses submission when feedback is empty or whitespace only', async () => {
     const calls = mockApi({ 'POST /api/requests/r-choice': [200, { request: { id: 'r-choice', status: 'answered' } }] });
-    const props = makeProps();
+    const props = requestProps(CHOICE);
     const user = userEvent.setup();
     renderIn('en', <Requests {...props} />);
 
@@ -188,7 +171,7 @@ describe('choice request free-form feedback and option picking', () => {
           ? [503, { error: { code: 'unavailable' } }]
           : [200, { request: { id: 'r-choice', status: 'answered', picked: null } }],
     });
-    const props = makeProps();
+    const props = requestProps(CHOICE);
     const user = userEvent.setup();
     renderIn('ru', <Requests {...props} />);
 
@@ -221,7 +204,7 @@ describe('choice request free-form feedback and option picking', () => {
         }),
     );
     vi.stubGlobal('fetch', fetchSpy);
-    const props = makeProps();
+    const props = requestProps(CHOICE);
     const user = userEvent.setup();
     renderIn('en', <Requests {...props} />);
 
@@ -259,7 +242,7 @@ describe('choice request free-form feedback and option picking', () => {
       options: CHOICE.options.map(o => ({ label: o.label, image: null })),
       task: { id: 't405', number: 405, title: 'Plain turn progress options', department: DEV },
     };
-    renderIn('ru', <Requests {...makeProps({ requests: [{ ...CHOICE, canAnswer: false }, plainReadOnly] })} />);
+    renderIn('ru', <Requests {...requestProps(CHOICE, { requests: [{ ...CHOICE, canAnswer: false }, plainReadOnly] })} />);
     const card = screen.getByRole('article', { name: '#402 Turn progress options' });
     expect(card).toHaveAttribute('aria-busy', 'false');
     expect(within(card).queryByRole('status')).not.toBeInTheDocument();
@@ -282,7 +265,7 @@ describe('choice request free-form feedback and option picking', () => {
 
   it('distinguishes in-flight sending from server failure, keeps the full draft, and sends once on retry', async () => {
     const net = stubDeferredFetch();
-    const props = makeProps();
+    const props = requestProps(CHOICE);
     const user = userEvent.setup();
     renderIn('ru', <Requests {...props} />);
 
@@ -354,7 +337,7 @@ describe('choice request free-form feedback and option picking', () => {
       link: null,
       task: { id: 't404', number: 404, title: 'Stuck worker recovery', department: DEV },
     };
-    const props = makeProps({ requests: [approval, stuck] });
+    const props = requestProps(CHOICE, { requests: [approval, stuck] });
     const user = userEvent.setup();
     renderIn('en', <Requests {...props} />);
 
@@ -401,7 +384,7 @@ describe('choice request free-form feedback and option picking', () => {
     };
     const calls = mockApi({ 'POST /api/requests/r-plain-choice': [200, { request: { id: 'r-plain-choice', status: 'answered' } }] });
     const user = userEvent.setup();
-    renderIn('en', <Requests {...makeProps({ requests: [plainChoice] })} />);
+    renderIn('en', <Requests {...requestProps(CHOICE, { requests: [plainChoice] })} />);
 
     const optA = screen.getByRole('button', { name: /Option A/ });
     const optB = screen.getByRole('button', { name: /Option B/ });
@@ -483,7 +466,7 @@ describe('choice request free-form feedback and option picking', () => {
     const onOpenTask = vi.fn();
     const onOpenAgent = vi.fn();
     const user = userEvent.setup();
-    renderIn('en', <Requests {...makeProps({ requests: [stuck, policyApproval, linkedApproval], onOpenTask, onOpenAgent })} />);
+    renderIn('en', <Requests {...requestProps(CHOICE, { requests: [stuck, policyApproval, linkedApproval], onOpenTask, onOpenAgent })} />);
 
     const [stuckCard, policyCard, commitCard] = screen.getAllByRole('article');
     expect(within(stuckCard!).getByText('Plain summary')).toBeInTheDocument();

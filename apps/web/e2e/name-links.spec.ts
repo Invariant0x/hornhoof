@@ -1,8 +1,9 @@
-import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { en, type Messages } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import type { PersonView } from '../src/types';
 import { serveTree } from './tree-api';
+import { captureWith } from './capture';
 
 const MESSAGES: Record<'en' | 'ru', Messages> = { en, ru };
 const PHASE = process.env.HH_NAME_LINK_PHASE ?? 'after';
@@ -12,12 +13,7 @@ const PEOPLE: PersonView[] = [
   { id: 'p2', name: 'Dana', email: 'dana@acme.test', title: 'COO', status: 'active', isOwner: false, access: { whole: true, departments: [], teams: [] } },
 ];
 
-async function capture(page: Page, info: TestInfo, name: string) {
-  const file = `${PHASE}-${name}.png`;
-  const path = SCREENSHOT_DIR ? `${SCREENSHOT_DIR}/${file}` : info.outputPath(file);
-  await page.screenshot({ path });
-  await info.attach(file, { path, contentType: 'image/png' });
-}
+const capture = captureWith(PHASE, SCREENSHOT_DIR);
 
 async function styles(link: Locator) {
   return link.evaluate(el => {

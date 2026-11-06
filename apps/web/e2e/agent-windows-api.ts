@@ -1,4 +1,4 @@
-import { expect, type Locator, type Page } from '@playwright/test';
+import { expect, type Locator, type Page, type Route } from '@playwright/test';
 import type { AgentCardView, Employee, Org } from '../src/types';
 import { CARD, SUB } from './agent-window-api';
 import { box, ME, serveApi, TASKS } from './api';
@@ -59,6 +59,30 @@ const REQUEST = {
 /* busy: whose work Escape can stop. held: whose card and conversation have not come yet. */
 type Live = { connections: Record<string, number>; stops: string[]; busy: Set<string>; held: Set<string>; pictures: string[]; keys: Record<string, string[]> };
 
+async function agentResponse(route: Route, live: Live, agent: RegExpExecArray, wait: (id: string) => Promise<void>): Promise<void> {
+  const [, id, part] = agent as unknown as [string, string, string | undefined];
+  const card = id === 'orchestrator' ? ORCHESTRATOR_CARD : NAMES.map(cardOf).find(c => c.id === id);
+  if (!card) return route.fallback();
+  if (part === '/stop') { live.stops.push(id); return route.fulfill({ json: {} }); }
+  await wait(id);
+  if (part === '/events') return route.fulfill({ json: { events: [], state: { ready: true, reason: null, busy: live.busy.has(id), runningJobId: live.busy.has(id) ? 'j1' : null, queued: 0, terminal: true, canType: true } } });
+  return route.fulfill({ json: card });
+}
+
+async function serveTerminal(page: Page, live: Live): Promise<void> {
+  await page.routeWebSocket('**/api/agents/*/terminal*', ws => {
+    const id = /agents\/([^/]+)\/terminal/.exec(ws.url())![1]!;
+    live.connections[id] = (live.connections[id] ?? 0) + 1;
+    ws.onMessage(raw => {
+      const frame = JSON.parse(String(raw)) as { type: string; data?: string };
+      if (frame.type === 'input') (live.keys[id] ??= []).push(frame.data!);
+    });
+    ws.send(JSON.stringify({ type: 'ready', write: true, message: true }));
+    ws.send(JSON.stringify({ type: 'program', running: true }));
+    ws.send(JSON.stringify({ type: 'data', data: `${id} is at work.\r\n> ` }));
+  });
+}
+
 async function serve(page: Page, live: Live): Promise<void> {
   await serveApi(page);
   const held = new Map<string, (() => void)[]>();
@@ -73,15 +97,7 @@ async function serve(page: Page, live: Live): Promise<void> {
       return route.fulfill({ json: { id: 'pic1', name: url.searchParams.get('name') } });
     }
     const agent = /^\/api\/agents\/([^/]+)(\/events|\/stop)?$/.exec(path);
-    if (agent) {
-      const [, id, part] = agent as unknown as [string, string, string | undefined];
-      const card = id === 'orchestrator' ? ORCHESTRATOR_CARD : NAMES.map(cardOf).find(c => c.id === id);
-      if (!card) return route.fallback();
-      if (part === '/stop') { live.stops.push(id); return route.fulfill({ json: {} }); }
-      await wait(id);
-      if (part === '/events') return route.fulfill({ json: { events: [], state: { ready: true, reason: null, busy: live.busy.has(id), runningJobId: live.busy.has(id) ? 'j1' : null, queued: 0, terminal: true, canType: true } } });
-      return route.fulfill({ json: card });
-    }
+    if (agent) return agentResponse(route, live, agent, wait);
     const task = NAMES.find(name => path === `/api/tasks/${taskOf(name)}`);
     if (task) return route.fulfill({ json: { task: detailOf(task) } });
     const answers: Record<string, unknown> = {
@@ -102,17 +118,7 @@ async function serve(page: Page, live: Live): Promise<void> {
     if (path.endsWith('/structure')) return route.fulfill({ json: { departments: [] } });
     return route.fallback();
   });
-  await page.routeWebSocket('**/api/agents/*/terminal*', ws => {
-    const id = /agents\/([^/]+)\/terminal/.exec(ws.url())![1]!;
-    live.connections[id] = (live.connections[id] ?? 0) + 1;
-    ws.onMessage(raw => {
-      const frame = JSON.parse(String(raw)) as { type: string; data?: string };
-      if (frame.type === 'input') (live.keys[id] ??= []).push(frame.data!);
-    });
-    ws.send(JSON.stringify({ type: 'ready', write: true, message: true }));
-    ws.send(JSON.stringify({ type: 'program', running: true }));
-    ws.send(JSON.stringify({ type: 'data', data: `${id} is at work.\r\n> ` }));
-  });
+  await serveTerminal(page, live);
   releases.set(page, release);
 }
 
