@@ -78,7 +78,7 @@ describe('author check on submit', () => {
     const paths = Array.from({ length: 10 }, (_, index) => `${index}/${'a'.repeat(480)}.ts`);
     await finish(f, node, input(), authorLine(undefined, SHA, paths), true, 0);
     const [submitted] = await f.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, f.task.id), eq(taskEvents.kind, 'submitted')));
-    expect(submitted).toMatchObject({ data: { review: { quality: { status: 'partial', record: { scope: { paths } } } } });
+    expect(submitted).toMatchObject({ data: { review: { quality: { status: 'partial', record: { scope: { paths } } } } } });
   });
 
   it('returns a red lint result to the author without a second run or attempt on repeat', async () => {
