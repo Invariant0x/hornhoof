@@ -12,7 +12,8 @@ import { captureReview, type Review, type ReviewSubmission } from './review-cont
 
 export type AuthorCheckSubmission = { summary: string; evidence: string; review?: z.infer<typeof ReviewSubmission> };
 
-const enabled = (ctx: Ctx, input: AuthorCheckSubmission): boolean => Boolean(ctx.config.authorCheck && input.review?.authorCheckPlan);
+type SubmissionWithPlan = AuthorCheckSubmission & { review: z.infer<typeof ReviewSubmission> & { authorCheckPlan: string } };
+const enabled = (ctx: Ctx, input: AuthorCheckSubmission): input is SubmissionWithPlan => Boolean(ctx.config.authorCheck && input.review?.authorCheckPlan);
 
 export async function submitWithAuthorCheck(ctx: Ctx, job: RunJob, taskId: string, input: AuthorCheckSubmission): Promise<Moved> {
   if (!enabled(ctx, input)) return submit(ctx, job.agentId, taskId, input);
