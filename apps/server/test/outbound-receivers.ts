@@ -50,7 +50,7 @@ const readAll = async (stream: AsyncIterable<Buffer>) => {
   return Buffer.concat(chunks);
 };
 
-type SmtpOptions = { secure?: boolean; startTls?: boolean; stranger?: boolean; refuseRecipient?: boolean; refuseMessage?: number };
+type SmtpOptions = { secure?: boolean; startTls?: boolean; stranger?: boolean; refuseRecipient?: boolean; refuseMessage?: number; reply?: string };
 type Received = { from: string; to: string[]; raw: Buffer };
 
 const refusal = (message: string, responseCode: number) => Object.assign(new Error(message), { responseCode });
@@ -81,7 +81,7 @@ export async function smtpReceiver(options: SmtpOptions = {}) {
       void readAll(stream).then(raw => {
         if (options.refuseMessage) return callback(refusal('Refused', options.refuseMessage));
         seen.messages.push({ from: session.envelope.mailFrom ? session.envelope.mailFrom.address : '', to: session.envelope.rcptTo.map(r => r.address), raw });
-        callback(null, 'queued as 7A1');
+        callback(null, options.reply ?? 'queued as 7A1');
       });
     },
   });

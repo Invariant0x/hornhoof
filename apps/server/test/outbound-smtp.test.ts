@@ -61,7 +61,7 @@ describe('the SMTP adapter', () => {
 
   it('keeps a line that starts with a dot and sends plain text only, with nothing but its one recipient', async () => {
     const server = await receiver();
-    const text = 'First line\n.dot line\n..two dots\nLast line\n';
+    const text = 'First line\n.dot line\n..two dots\ntrailing spaces   \nLast line\n';
     expect((await send(account(server.port), { ...PAYLOAD, text })).kind).toBe('accepted');
     const { headers } = parts(server.seen.messages[0]!.raw);
     expect(wordsOf(server.seen.messages[0]!.raw).trimEnd()).toBe(text.trimEnd());
@@ -96,6 +96,21 @@ describe('the SMTP adapter', () => {
     expect(server.seen.messages).toEqual([]);
   });
 
+  it('keeps a long or strange server reply short and on one line', async () => {
+    const server = await receiver({ reply: `queued\u0007 as ${'x'.repeat(900)}` });
+    const outcome = await send(account(server.port));
+    expect(outcome.kind).toBe('accepted');
+    const receipt = (outcome as { providerReceipt: string }).providerReceipt;
+    expect(receipt).toMatch(/queued as x+$/);
+    expect(receipt).toHaveLength(512);
+  });
+
+  it('refuses a certificate authority that is not one, and sends no password', async () => {
+    const server = await receiver();
+    expect(await send(account(server.port, { ca: 'not a certificate' }))).toEqual({ kind: 'definitely_not_accepted', safeCode: 'tls_refused' });
+    expect(server.seen.logins).toEqual([]);
+  });
+
   it('knows the message was not accepted when nothing listens', async () => {
     expect(await send(account(await closedPort()))).toEqual({ kind: 'definitely_not_accepted', safeCode: 'connect_failed' });
   });
@@ -128,13 +143,13 @@ describe('the SMTP adapter', () => {
 
     it('says unknown when the server stays silent after the words', async () => {
       const server = await scripted('silent_after_message');
-      expect(await send(tlsAccount(server.port), PAYLOAD, { socketMs: 150 })).toEqual({ kind: 'unknown', safeCode: 'timeout' });
+      expect(await send(tlsAccount(server.port), PAYLOAD, { socketMs: 1500 })).toEqual({ kind: 'unknown', safeCode: 'timeout' });
       expect(server.seen.messages).toBe(1);
     });
 
     it('says unknown at the overall limit, whatever the socket allows', async () => {
       const server = await scripted('silent_after_message');
-      expect(await send(tlsAccount(server.port), PAYLOAD, { socketMs: 60_000, totalMs: 300 })).toEqual({ kind: 'unknown', safeCode: 'timeout' });
+      expect(await send(tlsAccount(server.port), PAYLOAD, { socketMs: 60_000, totalMs: 1500 })).toEqual({ kind: 'unknown', safeCode: 'timeout' });
     });
 
     it('says unknown when the connection dies once sending began, as it holds no proof', async () => {
@@ -152,10 +167,19 @@ describe('the SMTP adapter', () => {
       ['a second header in the subject', { subject: 'Your order\r\nBcc: other@example.test' }],
       ['a Unicode line break in the subject', { subject: 'Your order Bcc: other@example.test' }],
       ['a control character in the words', { text: 'Plain\u0000words' }],
+      ['a bare carriage return in the words, which a server would change', { text: 'Plain\rwords' }],
+      ['a broken character in the words, which could not go out as it is', { text: 'Plain\uD800words' }],
+      ['a broken character in the subject', { subject: 'Your\uD800order' }],
       ['no words', { text: '' }],
     ])('%s', async (_name, change) => {
       const server = await receiver();
       expect(await send(account(server.port), { ...PAYLOAD, ...change })).toEqual({ kind: 'definitely_not_accepted', safeCode: 'invalid_payload' });
+      expect(server.seen.connections).toBe(0);
+    });
+
+    it('an attempt id that could not stand in a header', async () => {
+      const server = await receiver();
+      expect(await send(account(server.port), PAYLOAD, undefined, 'a\r\nBcc: other@example.test')).toEqual({ kind: 'definitely_not_accepted', safeCode: 'invalid_payload' });
       expect(server.seen.connections).toBe(0);
     });
 

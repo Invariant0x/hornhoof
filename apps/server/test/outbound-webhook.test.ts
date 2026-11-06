@@ -54,6 +54,11 @@ describe('the webhook adapter', () => {
     for (const spy of logged) expect(spy).not.toHaveBeenCalled();
   });
 
+  it('keeps a strange receipt on one line', async () => {
+    const hook = await receiver(request => ({ status: 200, body: JSON.stringify({ attemptId: JSON.parse(request.body).attemptId, receipt: ' receipt\n41\u0007 ' }) }));
+    expect(await send(account(hook.url))).toMatchObject({ kind: 'accepted', providerReceipt: 'receipt 41' });
+  });
+
   it('follows no redirect, and cannot tell what the first receiver did', async () => {
     const other = await receiver(takes);
     const hook = await receiver(() => ({ status: 307, headers: { location: other.url } }));
@@ -68,7 +73,7 @@ describe('the webhook adapter', () => {
   });
 
   describe('when it cannot tell whether the message was taken', () => {
-    it.each([500, 502, 503, 504, 409])('says unknown for %i, as the receiver may have taken it', async status => {
+    it.each([500, 502, 503, 504, 408, 409, 425])('says unknown for %i, as the receiver may have taken it', async status => {
       const hook = await receiver(() => ({ status }));
       expect(await send(account(hook.url))).toEqual({ kind: 'unknown', safeCode: 'receiver_error' });
       expect(hook.seen).toHaveLength(1);
@@ -97,7 +102,7 @@ describe('the webhook adapter', () => {
 
     it('says unknown when the receiver stays silent', async () => {
       const hook = await receiver(() => 'silence');
-      expect(await send(account(hook.url), { ...LOCAL, timeoutMs: 200 })).toEqual({ kind: 'unknown', safeCode: 'timeout' });
+      expect(await send(account(hook.url), { ...LOCAL, timeoutMs: 1500 })).toEqual({ kind: 'unknown', safeCode: 'timeout' });
       expect(hook.seen).toHaveLength(1);
     });
   });
@@ -110,6 +115,18 @@ describe('the webhook adapter', () => {
     it('when it does not trust the certificate', async () => {
       const hook = await receiver(takes, { stranger: true });
       expect(await send(account(hook.url))).toEqual({ kind: 'definitely_not_accepted', safeCode: 'tls_refused' });
+      expect(hook.seen).toEqual([]);
+    });
+
+    it('when its certificate authority is not one', async () => {
+      const hook = await receiver(takes);
+      expect(await send(account(hook.url, { ca: 'not a certificate' }))).toEqual({ kind: 'definitely_not_accepted', safeCode: 'tls_refused' });
+      expect(hook.seen).toEqual([]);
+    });
+
+    it('for an attempt id that could not stand in a header', async () => {
+      const hook = await receiver(takes);
+      expect(await send(account(hook.url), LOCAL, PAYLOAD, 'a\r\nX-Other: 1')).toEqual({ kind: 'definitely_not_accepted', safeCode: 'invalid_payload' });
       expect(hook.seen).toEqual([]);
     });
 
@@ -161,7 +178,7 @@ describe('the webhook adapter', () => {
     const asking = async (answer: Parameters<typeof hookReceiver>[0], more: Partial<WebhookAccount> = { readback: true }) => {
       const hook = await receiver(answer);
       const attemptId = randomUUID();
-      const outcome = await webhookAdapter(LOCAL).reconcile({ attemptId, configuredAccount: account(hook.url, more) });
+      const outcome = await webhookAdapter({ ...LOCAL, timeoutMs: 1500 }).reconcile({ attemptId, configuredAccount: account(hook.url, more) });
       return { hook, attemptId, outcome };
     };
 
@@ -181,6 +198,7 @@ describe('the webhook adapter', () => {
       ['the receiver is down', () => ({ status: 503 })],
       ['the answer names another attempt', () => ({ status: 200, body: JSON.stringify({ attemptId: randomUUID(), receipt: 'r' }) })],
       ['the connection dies', () => 'destroy'],
+      ['the receiver stays silent', () => 'silence'],
     ])('keeps waiting when %s', async (_name, answer) => {
       expect((await asking(answer)).outcome).toEqual({ kind: 'pending' });
     });
