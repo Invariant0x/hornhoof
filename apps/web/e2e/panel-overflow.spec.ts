@@ -253,7 +253,8 @@ for (const lang of ['en', 'ru'] as const) {
             padding: getComputedStyle(el).paddingBlockStart,
             matches: el.matches('.fit > :is(.ptable, .dt)[data-fit="entries"] td.row-actions'),
             fit: el.closest('table')?.getAttribute('data-fit'),
-            rules: [...document.styleSheets].flatMap(sheet => [...sheet.cssRules].filter(rule => rule.cssText.includes('row-actions')).map(rule => rule.cssText)),
+            rules: [...document.styleSheets].flatMap(sheet => [...sheet.cssRules].filter(rule => rule.cssText.includes('padding')).map(rule => rule.cssText)),
+            matched: [...document.styleSheets].flatMap(sheet => [...sheet.cssRules].filter(rule => rule instanceof CSSStyleRule && el.matches(rule.selectorText)).map(rule => rule.cssText)),
           })));
         }
         await expect(actions).toHaveCSS('padding-block-start', '8px');
