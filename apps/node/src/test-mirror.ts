@@ -9,7 +9,7 @@ import { signalProcessGroup } from './process-group.js';
 
 type Source = Pick<NonNullable<Workspace['repo']>, 'url' | 'token'>;
 export type GitEntry = { path: string; mode: string; oid: string };
-export type CommitTree = { commitSha: string; entries: GitEntry[]; readBlob: (path: string, limit: number) => Promise<Buffer> };
+export type CommitTree = { commitSha: string; entries: GitEntry[]; readBlob: (path: string, limit: number) => Promise<Buffer>; readTexts: (paths: string[], limit: number) => Promise<Map<string, string>> };
 const GIT_FLAGS = ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-c', 'core.logAllRefUpdates=false', '-c', 'protocol.ext.allow=never'];
 
 function stopGit(pid: number | undefined, signal: NodeJS.Signals): void {
@@ -31,11 +31,11 @@ function failedGit(code: number | null, signal: NodeJS.Signals | null, failure: 
   return gitCancellation(error, stopped);
 }
 
-function gitBytes(args: string[], context: CacheContext, limit = 3 * 1024 * 1024, auth: Record<string, string> = {}, network = false): Promise<Buffer> {
+function gitBytes(args: string[], context: CacheContext, limit = 3 * 1024 * 1024, auth: Record<string, string> = {}, network = false, input?: string): Promise<Buffer> {
   checkCacheContext(context);
   return new Promise((resolve, reject) => {
     const signal = AbortSignal.any([context.signal, AbortSignal.timeout(Math.max(1, context.deadline - Date.now()))]);
-    const child = spawn('/usr/bin/git', [...GIT_FLAGS, ...args], { detached: true, stdio: ['ignore', 'pipe', 'pipe', ...cacheLockDescriptors()], env: { PATH: '/usr/local/bin:/usr/bin:/bin', HOME: context.cacheRoot, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', ...auth } });
+    const child = spawn('/usr/bin/git', [...GIT_FLAGS, ...args], { detached: true, stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe', ...cacheLockDescriptors()], env: { PATH: '/usr/local/bin:/usr/bin:/bin', HOME: context.cacheRoot, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', ...auth } });
     const chunks: Buffer[] = []; let size = 0, failure: Error | undefined, killTimer: NodeJS.Timeout | undefined;
     const mask = new GitCredentialMask([auth.HH_GIT_PASSWORD ?? '']);
     let stderr = '', stderrTruncated = false;
@@ -52,6 +52,8 @@ function gitBytes(args: string[], context: CacheContext, limit = 3 * 1024 * 1024
       else chunks.push(chunk);
     });
     child.once('error', error => { failure = error; });
+    /* A child that stopped reading fails by its own exit code. */
+    if (input !== undefined) { child.stdin!.on('error', () => {}); child.stdin!.end(input); }
     signal.addEventListener('abort', stop, { once: true }); if (signal.aborted) stop();
     child.once('close', (code, signalName) => {
       signal.removeEventListener('abort', stop); clearTimeout(killTimer); stopGit(child.pid, 'SIGKILL');
@@ -120,13 +122,32 @@ function treeEntries(output: Buffer): GitEntry[] {
   if (result.length > 10_000) throw new Error('The tracked inventory exceeds its 10000-entry limit.');
   return result;
 }
+function regularEntry(entries: GitEntry[], path: string): GitEntry {
+  const entry = entries.find(item => item.path === path);
+  if (!entry || !['100644', '100755'].includes(entry.mode)) throw new Error('The description requires a tracked regular file.');
+  return entry;
+}
+function batchTexts(output: Buffer): Map<string, string> {
+  const texts = new Map<string, string>();
+  for (let at = 0; at < output.length;) {
+    const end = output.indexOf(10, at), match = /^([a-f0-9]{40}) blob (\d+)$/.exec(output.toString('ascii', at, end));
+    if (!match) throw new Error('Git returned something other than a tracked file.');
+    const start = end + 1, next = start + Number(match[2]);
+    texts.set(match[1], output.toString('utf8', start, next));
+    at = next + 1;
+  }
+  return texts;
+}
 export async function readCommit(source: Source, scope: RepositoryScope, commitSha: string, context: CacheContext): Promise<CommitTree> {
   let entries: GitEntry[] = [];
   const mirror = await mirrorAt(source, scope, commitSha, context, async path => { entries = treeEntries(await gitBytes(['--git-dir', path, 'ls-tree', '-rz', '--full-tree', commitSha], context)); });
   return { commitSha, entries, readBlob: async (path, limit) => {
     RepositoryPath.parse(path);
-    const entry = entries.find(item => item.path === path);
-    if (!entry || !['100644', '100755'].includes(entry.mode)) throw new Error('The description requires a tracked regular file.');
-    return gitBytes(['--git-dir', mirror, 'cat-file', 'blob', entry.oid], context, limit);
+    return gitBytes(['--git-dir', mirror, 'cat-file', 'blob', regularEntry(entries, path).oid], context, limit);
+  }, readTexts: async (paths, limit) => {
+    const wanted = new Map(entries.filter(entry => ['100644', '100755'].includes(entry.mode)).map(entry => [entry.path, entry.oid]));
+    const oids = paths.map(path => { const oid = wanted.get(path); if (!oid) throw new Error('The description requires a tracked regular file.'); return oid; });
+    const texts = batchTexts(await gitBytes(['--git-dir', mirror, 'cat-file', '--batch'], context, limit, {}, false, `${[...new Set(oids)].join('\n')}\n`));
+    return new Map(paths.map((path, index) => [path, texts.get(oids[index]!)!]));
   } };
 }
