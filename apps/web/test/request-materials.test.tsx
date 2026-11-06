@@ -5,11 +5,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
-import type { WaitingRequest } from '../src/types';
+import { Tasks } from '../src/screens/Tasks';
+import type { ProposalDecision, WaitingRequest } from '../src/types';
 import { extractPdfTextItems, setPdfLoaderForTests } from '../src/ui/MaterialDocument';
 import { MaterialViewer } from '../src/ui/MaterialViewer';
 import { readMaterialStamp, type MaterialManifestView } from '../src/ui/RequestMaterials';
 import { Requests, clearRequestDraftsForTests } from '../src/ui/Requests';
+import { DEV_ORG, ROSTER, TASKS, TURN, decisions, mockApi } from './api-mock';
 
 const DEV = { id: 'd-dev', name: 'Development' };
 const REQ_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -702,5 +704,173 @@ describe('separate question materials preview and explicit answering (#512)', ()
     fireEvent.keyDown(window, { key: 'Escape' });
 
     expect(within(card).getByLabelText(en.tasks.yourAnswer)).toHaveValue('Keep my draft safe');
+  });
+
+  it('connects Tasks ProposalDecision stamps for structure and staff to the real MaterialViewer without triggering build or hire until submitted', async () => {
+    const structId = 'prop-struct-1';
+    const staffId = 'prop-staff-1';
+    const structDocId = '77777777-7777-4777-8777-777777777777';
+    const staffDocId = '88888888-8888-4888-8888-888888888888';
+    const structDigest = 'd'.repeat(64);
+    const staffDigest = 'e'.repeat(64);
+
+    const proposals: ProposalDecision[] = [
+      {
+        id: structId,
+        kind: 'structure',
+        agent: { id: 'a1', name: 'Orchestrator' },
+        department: null,
+        brief: 'Add Support and Finance departments.',
+        items: [
+          { template: 'support', checked: true, note: 'Customer helpdesk' },
+          { template: 'finance', checked: true, note: 'Budgets and invoices' },
+        ],
+        materialRevision: 2,
+        materialDigest: structDigest,
+        at: '2026-11-06T09:00:00.000Z',
+        ownerPersonId: 'p1',
+        canAnswer: true,
+      },
+      {
+        id: staffId,
+        kind: 'staff',
+        agent: { id: 'a1', name: 'Orchestrator' },
+        department: { id: 'd2', name: 'Development' },
+        brief: 'Hire Backend engineer.',
+        items: [{ role: 'DEV-BE', name: 'Bruno', subscription: 's-key', checked: true }],
+        materialRevision: 3,
+        materialDigest: staffDigest,
+        at: '2026-11-06T09:01:00.000Z',
+        ownerPersonId: 'p1',
+        canAnswer: true,
+      },
+    ];
+
+    const calls: { method: string; path: string; body: unknown }[] = [];
+    mockApi({});
+    vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit = {}) => {
+      const method = init.method ?? 'GET';
+      const body = typeof init.body === 'string' ? JSON.parse(init.body) : undefined;
+      calls.push({ method, path, body });
+      if (method === 'GET' && path === '/api/org') return new Response(JSON.stringify(DEV_ORG), { status: 200, headers: { 'content-type': 'application/json' } });
+      if (method === 'GET' && path === '/api/turns') return new Response(JSON.stringify({ turns: [TURN] }), { status: 200, headers: { 'content-type': 'application/json' } });
+      if (method === 'GET' && path === '/api/tasks?status=all') return new Response(JSON.stringify({ tasks: TASKS }), { status: 200, headers: { 'content-type': 'application/json' } });
+      if (method === 'GET' && path === '/api/departments/d2/roster') return new Response(JSON.stringify(ROSTER), { status: 200, headers: { 'content-type': 'application/json' } });
+      if (method === 'GET' && path === `/api/proposals/${structId}/materials`) {
+        return new Response(JSON.stringify({
+          materialRevision: 2,
+          materialDigest: structDigest,
+          common: [{
+            id: structDocId,
+            name: 'Structure plan.md',
+            kind: 'document',
+            format: 'markdown',
+            state: 'available',
+            contentUrl: `/api/proposals/${structId}/materials/${structDocId}/content`,
+            downloadUrl: null,
+            size: 128,
+            sha256: '1'.repeat(64),
+            mediaType: 'text/markdown',
+          }],
+          options: [],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (method === 'GET' && path === `/api/proposals/${structId}/materials/${structDocId}/content`) {
+        return new Response('## Sealed Structure\n\nIncludes Support and Finance before edits.', { status: 200, headers: { 'content-type': 'text/markdown; charset=utf-8' } });
+      }
+      if (method === 'GET' && path === `/api/proposals/${staffId}/materials`) {
+        return new Response(JSON.stringify({
+          materialRevision: 3,
+          materialDigest: staffDigest,
+          common: [{
+            id: staffDocId,
+            name: 'Staffing plan.md',
+            kind: 'document',
+            format: 'markdown',
+            state: 'available',
+            contentUrl: `/api/proposals/${staffId}/materials/${staffDocId}/content`,
+            downloadUrl: null,
+            size: 128,
+            sha256: '2'.repeat(64),
+            mediaType: 'text/markdown',
+          }],
+          options: [],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (method === 'GET' && path === `/api/proposals/${staffId}/materials/${staffDocId}/content`) {
+        return new Response('## Sealed Roster\n\nHire Bruno on Team key.', { status: 200, headers: { 'content-type': 'text/markdown; charset=utf-8' } });
+      }
+      if (method === 'POST') return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'content-type': 'application/json' } });
+      return new Response(JSON.stringify({ error: { code: 'not_found', message: 'Not found.' } }), { status: 404, headers: { 'content-type': 'application/json' } });
+    }));
+
+    const user = userEvent.setup();
+    renderWithAppShell(
+      'en',
+      <Tasks
+        decisions={decisions([], { proposals })}
+        onDecisionsChanged={vi.fn()}
+        personId={null}
+        onClearPerson={vi.fn()}
+        selected={null}
+        onOpenTask={vi.fn()}
+        onOpenAgent={vi.fn()}
+        onOpenOrchestrator={vi.fn()}
+      />,
+    );
+
+    /* Open structure proposal sealed document in MaterialViewer, verify zero business actions inside viewer and zero POSTs. */
+    const openStruct = await screen.findByRole('button', { name: /Open material: Structure plan\.md/ });
+    await user.click(openStruct);
+    const dialog = await screen.findByRole('dialog', { name: 'Structure plan.md' });
+    expect(await within(dialog).findByText('Includes Support and Finance before edits.')).toBeInTheDocument();
+    expect(within(dialog).getByText(en.tasks.materials.proposalOriginal)).toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: /Create|Hire|Correct/ })).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: en.tasks.materials.close }));
+    expect(calls.filter(c => c.method === 'POST')).toEqual([]);
+
+    /* Human edits Finance checkbox in StructureCard; reopening viewer still shows original sealed Support + Finance text. */
+    const financeBox = screen.getByRole('checkbox', { name: /Finance/ });
+    await user.click(financeBox);
+    await user.click(screen.getByRole('button', { name: /Open material: Structure plan\.md/ }));
+    const reopened = await screen.findByRole('dialog', { name: 'Structure plan.md' });
+    expect(await within(reopened).findByText('Includes Support and Finance before edits.')).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    /* Open staff proposal sealed document too, then close with zero POSTs. */
+    await user.click(await screen.findByRole('button', { name: /Open material: Staffing plan\.md/ }));
+    const staffDialog = await screen.findByRole('dialog', { name: 'Staffing plan.md' });
+    expect(await within(staffDialog).findByText('Hire Bruno on Team key.')).toBeInTheDocument();
+    expect(within(staffDialog).getByText(en.tasks.materials.proposalOriginal)).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(calls.filter(c => c.method === 'POST')).toEqual([]);
+
+    /* Submitting structure and staff sends the exact { materialRevision, materialDigest } stamps passed through Tasks.tsx. */
+    await user.click(screen.getByRole('button', { name: en.card.create(1) }));
+    await user.click(screen.getByRole('button', { name: en.staff.hire(1) }));
+
+    const postCalls = calls.filter(c => c.method === 'POST');
+    expect(postCalls).toEqual([
+      {
+        method: 'POST',
+        path: '/api/departments/build',
+        body: {
+          proposalId: structId,
+          materialRevision: 2,
+          materialDigest: structDigest,
+          items: [{ template: 'support', note: 'Customer helpdesk' }],
+        },
+      },
+      {
+        method: 'POST',
+        path: '/api/departments/d2/staff',
+        body: {
+          proposalId: staffId,
+          materialRevision: 3,
+          materialDigest: staffDigest,
+          people: [expect.objectContaining({ role: 'DEV-BE', name: 'Bruno', subscription: 's-key' })],
+        },
+      },
+    ]);
   });
 });

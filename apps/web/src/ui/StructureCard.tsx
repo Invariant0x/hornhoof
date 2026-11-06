@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { deptLabel, errorText, useT, type Messages } from '../i18n';
 import { TEMPLATES } from '../templates';
-import type { DecidedBy, NewItem, Org, StructureItem, TemplateKey } from '../types';
+import type { DecidedBy, MaterialStampView, NewItem, Org, StructureItem, TemplateKey } from '../types';
 import { Decides, frozenBy } from './DecidedBy';
 import { ProposalMaterialsSection, useProposalCardPost, useProposalMaterials } from './RequestMaterials';
 
 type Props = {
-  proposal?: { id: string; brief: string; items: StructureItem[] };
+  proposal?: MaterialStampView & { id: string; brief: string; items: StructureItem[] };
   /* Building by hand: the templates the company does not have yet, with the default ticks. */
   manual?: { existing: TemplateKey[] };
   departments: Org['departments'];
