@@ -40,6 +40,10 @@ async function switchedOff(db: Live['db'] | Tx, departmentId: string, head: { of
   return staff.length > 0 && staff.every(a => a.off);
 }
 
+/* A head takes what is placed with it as anyone else takes work. */
+const headMayHold = (ctx: Ctx, by: Pick<By, 'agentId'>, companyId: string, item: PlanItem, head: Head) =>
+  refuseNotUrgent(ctx, { agentId: by.agentId }, companyId, { urgent: item.urgent === true, productId: item.product ?? null, gates: [] }, [head.id]);
+
 /* Every item names a department of the company, a product inside it, and the department has a head to take it. */
 async function place(ctx: Ctx, by: Pick<By, 'agentId'>, companyId: string, items: PlanItem[]): Promise<Placed[]> {
   if (!items.length) throw refuse(400, 'task_invalid', 'A turn needs at least one task.');
@@ -55,7 +59,7 @@ async function place(ctx: Ctx, by: Pick<By, 'agentId'>, companyId: string, items
     const head = await headOf(ctx.db, dept.id);
     if (!head) throw refuse(409, 'no_head', `"${item.title}": its department has no head yet. Propose staff for it first.`);
     if (await switchedOff(ctx.db, dept.id, head)) throw refuse(409, 'switched_off', `"${item.title}": its department is switched off right now. Give it no work until people switch it on.`);
-    await refuseNotUrgent(ctx, { agentId: by.agentId }, companyId, { urgent: item.urgent === true, productId: item.product ?? null, gates: [] }, [head.id]);
+    await headMayHold(ctx, by, companyId, item, head);
     placed.push({ ...item, head });
   }
   return placed;

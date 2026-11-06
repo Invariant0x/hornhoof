@@ -21,7 +21,7 @@ export async function isFree(ctx: Ctx, agentId: string): Promise<boolean> {
 }
 
 /* The others of a member's role in its department who are on and have a plan. Sub-unit employees work outside the pipeline. */
-export function peersOfRole(ctx: Pick<Ctx, 'db'>, member: Member, otherThanProvider?: string) {
+export function peersOfRole(ctx: Pick<Ctx, 'db'>, member: Member, otherThanProvider?: (typeof subscriptions.$inferSelect)['provider']) {
   return ctx.db
     .select({ id: agents.id, name: agents.name, productId: agents.productId, provider: subscriptions.provider })
     .from(agents)

@@ -528,8 +528,8 @@ describe('work for someone in a team that takes only urgent work', () => {
       const first = await c.under(top.id);
       expect(await reason(c.under(top.id, { title: 'With a part', after: [first.id], independentPart: part(c) }))).toBe('urgent_only_team');
       expect(await made(c, 'With a part')).toBeUndefined();
-      const later = await c.under(top.id, { after: [first.id], independentNone: 'Nothing else can start.' });
-      expect(await reason(updateTask(c.ctx, c.head.id, later.id, { independentPart: part(c) }))).toBe('urgent_only_team');
+      const later = await c.under(top.id);
+      expect(await reason(updateTask(c.ctx, c.head.id, later.id, { after: [first.id], independentPart: part(c) }))).toBe('urgent_only_team');
       expect(await made(c, 'Examples')).toBeUndefined();
     });
 
@@ -632,8 +632,8 @@ describe('work for someone in a team that takes only urgent work', () => {
       const first = await c.under(top.id);
       await c.under(top.id, { title: 'With a part', after: [first.id], independentPart: part(c) });
       expect(await made(c, 'Examples')).toMatchObject({ urgent: true, assigneeAgentId: c.simon.id });
-      const later = await c.under(top.id, { title: 'Without one yet', after: [first.id], independentNone: 'Nothing else can start.' });
-      await updateTask(c.ctx, c.head.id, later.id, { independentPart: part(c, 'Later examples') });
+      const later = await c.under(top.id, { title: 'Without one yet' });
+      await updateTask(c.ctx, c.head.id, later.id, { after: [first.id], independentPart: part(c, 'Later examples') });
       expect(await made(c, 'Later examples')).toMatchObject({ urgent: true, assigneeAgentId: c.simon.id });
     });
   });
