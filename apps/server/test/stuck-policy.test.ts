@@ -158,7 +158,7 @@ describe('internal stuck routing', () => {
 
     await c.finish(c.worker.id, task.id);
 
-    expect((await c.db.select().from(tasks).where(eq(tasks.id, task.id)))[0]).toMatchObject({ status: 'open', silent: 1 });
+    expect((await c.db.select().from(tasks).where(eq(tasks.id, task.id)))[0]).toMatchObject({ status: 'working', silent: 1 });
     expect(await c.db.select().from(requests)).toHaveLength(1);
     const reminders = await c.db.select().from(jobs).where(and(eq(jobs.agentId, c.worker.id), eq(jobs.taskId, task.id), eq(jobs.status, 'queued')));
     expect(reminders).toHaveLength(1);
@@ -183,6 +183,7 @@ describe('internal stuck routing', () => {
   it('assigns an orchestrator stuck on its own task to the live department head', async () => {
     const c = await company();
     const { task } = await createTask(c.ctx, { agentId: c.orchestrator.id }, { title: 'Turn plan', brief: '', body: 'Finish the plan.', departmentId: c.dev.id, assigneeAgentId: c.orchestrator.id });
+    await c.db.update(taskEvents).set({ createdAt: new Date(Date.now() - 120_000) }).where(eq(taskEvents.taskId, task.id));
     for (let i = 0; i < SILENT_TURNS; i++) {
       await c.db.insert(jobs).values({ companyId: c.dev.companyId, subscriptionId: c.sub.id, agentId: c.orchestrator.id, taskId: task.id, kind: 'conversation', prompt: 'Work on the turn plan.', timeoutMs: 900000 });
       await c.finish(c.orchestrator.id, task.id);
