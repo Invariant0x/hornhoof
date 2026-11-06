@@ -3,12 +3,14 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { and, asc, eq, inArray } from 'drizzle-orm';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import { ApiError } from '../src/errors.js';
+import * as waitNotices from '../src/modules/tasks/wait-notices.js';
 import { encryptSecret } from '../src/crypto/secrets.js';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agentEvents, agents, attachments, companies, departments, jobs, pendingWakes, subscriptions, taskEvents, tasks, testParts, testRuns , people } from '../src/db/schema.js';
+import { agentEvents, agents, attachments, companies, departments, jobs, machines, pendingWakes, people, personAccess, subscriptions, taskEvents, tasks, testParts, testRuns } from '../src/db/schema.js';
 import { createTask } from '../src/modules/tasks/engine.js';
-import { checkExternalWaits } from '../src/modules/tasks/external-wait.js';
+import { checkExternalWaits, waitFor } from '../src/modules/tasks/external-wait.js';
 import { afterJob } from '../src/modules/tasks/wake.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
 import { evidenceOf, freshnessOf } from '../src/modules/testruns/evidence.js';
@@ -1333,8 +1335,8 @@ describe('a run that ends while the one who started it waits', () => {
       ivan.node.send(done(await nextOf(ivan.node, 'tests.run')));
       await nextOf(ivan.node, 'tests.ack');
       await endedOnce(c, new RegExp(`${run.name} 1 (passed|is done)`));
-      /* With no wait to end, the task itself did not move. */
-      expect((await taskRow(c)).version).toBe(before.version);
+      /* A new result invalidates a concurrent wait built from the old task revision. */
+      expect((await taskRow(c)).version).toBe(before.version + 1);
     });
 
     it('wakes nobody on a task cancelled meanwhile', async () => {
@@ -1425,21 +1427,22 @@ describe('a run that ends while the one who started it waits', () => {
     expect(told.prompts[0]).toMatch(/Test run 1 passed[\s\S]*Test run 2 passed/);
   });
 
-  it("leaves the wait of someone else alone and still tells the one who started the run", async () => {
+  it.each(RUN_TOOLS)("leaves another holder's wait alone when $tool ends and still tells its starter", async run => {
     const c = await company();
     const ivan = await c.machine(c.ceo, 'ivan-mac');
     const head = await c.turn(c.head, c.task.id);
-    expect((await head.call('run_tests', { command: 'make check' })).error).toBe(false);
+    expect((await head.call(run.tool, { command: 'make check', ...run.args })).error).toBe(false);
     await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, head.job.id));
     const bruno = await c.turn(c.bruno);
     expect((await bruno.call('wait_for', { task: c.task.number, reason: 'A deployment', until: anHour() })).error).toBe(false);
     await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, bruno.job.id));
 
+    const before = await taskRow(c);
     ivan.node.send(done(await nextOf(ivan.node, 'tests.run')));
     await until(async () => (await toldOf(c, c.head.id, c.task.id)).turns.length > 0);
 
-    expect((await toldOf(c, c.head.id, c.task.id)).prompts).toEqual([expect.stringContaining('Test run 1 passed')]);
-    expect((await taskRow(c)).externalWait).toMatchObject({ reason: 'A deployment' });
+    expect((await toldOf(c, c.head.id, c.task.id)).prompts).toEqual([expect.stringMatching(new RegExp(`${run.name} 1 (passed|is done)`))]);
+    expect(await taskRow(c)).toMatchObject({ externalWait: { reason: 'A deployment' }, version: before.version });
     expect((await toldOf(c, c.bruno.id, c.task.id)).turns).toEqual([]);
   });
 
@@ -1468,4 +1471,269 @@ describe('a run that ends while the one who started it waits', () => {
     expect(refused.error).toBe(true);
     expect((await taskRow(c)).externalWait).toBeNull();
   });
+});
+
+
+function waitRaceBarrier() {
+  let resolve!: () => void;
+  const promise = new Promise<void>(done => { resolve = done; });
+  return { promise, resolve };
+}
+
+it.each(RUN_TOOLS)('rejects a stale wait after unread check when $tool commits its result before the wait write', async run => {
+  const c = await company(), machine = await c.machine(c.ceo, 'wait-race');
+  const turn = await c.turn(c.bruno);
+  expect((await turn.call(run.tool, { command: 'make check', ...run.args })).error).toBe(false);
+  const part = await nextOf(machine.node, 'tests.run');
+  const [stored] = await c.db.select().from(testParts).where(eq(testParts.id, part.partId));
+  const checked = waitRaceBarrier(), resume = waitRaceBarrier(), original = waitNotices.requestedWaitNotice;
+  // This production boundary runs after unreadMessage=false and before move starts its transaction.
+  const paused = vi.spyOn(waitNotices, 'requestedWaitNotice').mockImplementation(async (...args) => {
+    const notice = await original(...args);
+    if (args[1].id === c.task.id) { checked.resolve(); await resume.promise; }
+    return notice;
+  });
+  onTestFinished(() => { resume.resolve(); paused.mockRestore(); });
+  const deadline = anHour();
+  const waiting = waitFor(c.app.ctx, c.bruno.id, c.task.id, { reason: 'The run result', until: deadline }).then(
+    () => ({ accepted: true, reason: null }),
+    (error: unknown) => ({ accepted: false, reason: error instanceof ApiError ? error.reason : 'unexpected' }),
+  );
+  await checked.promise;
+  expect((await taskRow(c)).externalWait).toBeNull();
+  machine.node.send(done(part));
+  await until(async () => (await c.db.select().from(testRuns).where(eq(testRuns.id, stored.runId)))[0]!.status === 'passed');
+  expect((await taskRow(c)).externalWait).toBeNull();
+  expect((await c.db.select().from(pendingWakes).where(and(eq(pendingWakes.taskId, c.task.id), eq(pendingWakes.why, run.why))))).toHaveLength(1);
+  resume.resolve(); const outcome = await waiting;
+  await nextOf(machine.node, 'tests.ack');
+  await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, turn.job.id));
+  const before = await taskRow(c), told = await toldOf(c, c.bruno.id, c.task.id);
+  const expired = await checkExternalWaits(c.app.ctx, new Date(new Date(deadline).getTime() + 1));
+  const after = await toldOf(c, c.bruno.id, c.task.id);
+  expect({ ...outcome, externalWait: before.externalWait, results: told.news, expired, resultsAfter: after.news }).toEqual({ accepted: false, reason: 'task_changed', externalWait: null, results: 1, expired: 0, resultsAfter: 1 });
+});
+
+async function productNode(c: Awaited<ReturnType<typeof company>>) {
+  const node = await c.builtin();
+  node.send({ type: 'status', loggedIn: true, limits: null, testEnvironmentVersion: 1, testRuntimes: [{ id: 'node', version: '22.15.0', fingerprint: 'b'.repeat(64) }] });
+  const { testCapabilities } = await import('../src/modules/testruns/describe.js');
+  await until(() => testCapabilities(c.app.ctx, { kind: 'builtin' }).testEnvironmentVersion === 1);
+  return node;
+}
+async function productDescription(request: Extract<ServerMessage, { type: 'tests.describe' }>) {
+  const manifest = {
+    version: 1 as const, defaultProfile: 'fast', runtimes: [{ id: 'node', version: '22' }], profiles: [{ id: 'fast', requiredSuiteIds: ['unit'] }],
+    dependencies: { adapter: 'npm', inputs: ['package-lock.json'], install: [], paths: ['node_modules'], cache: 'copy' as const }, services: [], prepare: [], reset: null,
+    suites: [{ id: 'unit', root: '.', files: ['test/*.ts'], run: { program: 'node', args: ['runner.js'], cwd: '.' }, split: { kind: 'argv-files' as const }, profiles: ['fast'], finalChecks: [{ program: 'node', args: ['final.js'], cwd: '.' }] }],
+    impact: { adapter: 'whole-package', fullPackageGlobs: [], migrationCheck: { status: 'unsupported' as const, reason: 'Not applicable.' } }, mutation: { status: 'unsupported' as const, language: 'typescript', reason: 'Not configured.' },
+  };
+  const { hashTestEnvironment } = await import('@hornhoof/protocol');
+  const manifestSource = JSON.stringify(manifest);
+  return { type: 'tests.described' as const, requestId: request.requestId, commitSha: request.commitSha, result: { status: 'ready' as const, description: {
+    version: 1 as const, repositoryScope: request.repositoryScope, commitSha: request.commitSha, manifestSource, manifestHash: await hashTestEnvironment(manifestSource), manifest,
+    inputDigests: [{ path: 'package-lock.json', digest: 'c'.repeat(64) }], inventory: ['test/a.ts', 'test/b.ts'].map(file => ({ suiteId: 'unit', file, selectionUnit: file })), runtimeCapabilities: [{ id: 'node', version: '22.15.0', fingerprint: 'b'.repeat(64) }],
+  } } };
+}
+describe('pinned product environment runs', () => {
+  it('requests metadata before parts, retains its snapshot, and runs final checks after the suite', async () => {
+    const c = await company(), node = await productNode(c), { call } = await c.turn(c.bruno);
+    const started = await call('run_tests', { suite: 'unit' });
+    expect(started).toMatchObject({ error: false }); expect(started.text).toContain('environment');
+    expect(JSON.parse((await call('test_run', { run: 1 })).text)).toMatchObject({ mode: 'product', commitSha: TEST_COMMIT, environmentStatus: 'describing', parts: [] });
+    expect((await c.db.select().from(testRuns))[0]!.environmentRequest).toMatchObject({ builtin: true, requestId: expect.any(String) });
+    const request = await nextOf(node, 'tests.describe'); expect(request.commitSha).toBe(TEST_COMMIT);
+    expect(await c.db.select().from(testParts)).toEqual([]);
+    const reply = await productDescription(request); node.send(reply);
+    await until(async () => (await c.db.select().from(testRuns))[0]?.environmentSnapshot !== null);
+    expect((await c.db.select().from(testParts).orderBy(asc(testParts.part))).map(p => p.status)).toEqual(['running', 'queued']);
+    const part = await nextOf(node, 'tests.run');
+    expect(part).toMatchObject({ command: '', environment: { snapshot: { description: reply.result.description, profile: 'fast' }, selection: { kind: 'suite', suiteId: 'unit', files: ['test/a.ts', 'test/b.ts'] } } });
+    const [before] = await c.db.select().from(testRuns); expect(before!.environmentHash).toBe(reply.result.description.manifestHash);
+    expect(JSON.parse((await call('test_run', { run: 1 })).text)).toMatchObject({ mode: 'product', commitSha: TEST_COMMIT, environmentStatus: 'ready', environment: { profile: 'fast' }, parts: [{ selection: { kind: 'suite' } }, { selection: { kind: 'final' } }] });
+    node.send({ ...reply, result: { ...reply.result, description: { ...reply.result.description, inventory: [] } } }); await pumpTests(c.app.ctx);
+    expect((await c.db.select().from(testRuns))[0]!.environmentSnapshot).toEqual(before!.environmentSnapshot);
+    node.send(productDone(part));
+    await until(async () => (await c.db.select().from(testParts)).some(p => p.part === 2 && p.status === 'running'));
+    const final = await nextOf(node, 'tests.run');
+    expect(final.environment!.selection).toEqual({ kind: 'final', suiteId: 'unit', files: [] }); node.send(productDone(final));
+    await until(async () => (await c.db.select().from(testRuns))[0]?.status === 'passed');
+  });
+  it('ignores an answer from an unassigned node and terminates invalid metadata without a successful empty run', async () => {
+    const c = await company(), node = await productNode(c), other = await c.machine(c.ceo, 'foreign'), { call } = await c.turn(c.bruno);
+    expect((await call('run_tests', { suite: 'unit' })).error).toBe(false);
+    const request = await nextOf(node, 'tests.describe'), reply = await productDescription(request); other.node.send(reply); await pumpTests(c.app.ctx);
+    expect((await c.db.select().from(testRuns))[0]!.environmentSnapshot).toBeNull();
+    node.send({ ...reply, result: { ...reply.result, description: { ...reply.result.description, manifestHash: 'f'.repeat(64) } } });
+    await until(async () => (await c.db.select().from(testRuns))[0]?.status === 'failed');
+    expect((await c.db.select().from(testParts))[0]).toMatchObject({ status: 'failed', error: 'description_mismatch' });
+    expect(JSON.parse((await call('test_run', { run: 1 })).text)).toMatchObject({ mode: 'product', commitSha: TEST_COMMIT, environmentStatus: 'failed', environmentProblem: { code: 'description_mismatch' } });
+  });
+  it('cancels a pending description and refuses a late snapshot after stop', async () => {
+    const c = await company(), node = await productNode(c), { call } = await c.turn(c.bruno);
+    expect((await call('run_tests', {})).error).toBe(false); const request = await nextOf(node, 'tests.describe');
+    expect((await call('stop_tests', { run: 1 })).error).toBe(false);
+    expect(await nextOf(node, 'tests.describe.cancel')).toMatchObject({ requestId: request.requestId }); node.send(await productDescription(request)); await pumpTests(c.app.ctx);
+    expect((await c.db.select().from(testRuns))[0]).toMatchObject({ status: 'stopped', environmentSnapshot: null }); expect(await c.db.select().from(testParts)).toEqual([]);
+  });
+});
+
+function productDone(part: TestsRun) {
+  const { snapshot, selection } = part.environment!;
+  return done(part, { commit: part.commitSha, environmentReceipt: { version: 1, commitSha: part.commitSha, manifestHash: snapshot.description.manifestHash, ...selection, runtimes: snapshot.description.runtimeCapabilities, dependencies: { key: 'd'.repeat(64), hit: false }, environments: [], phases: { checkoutMs: 1, dependenciesMs: 1, environmentMs: 0, servicesMs: 0, commandMs: 1, cleanupMs: 1 } } });
+}
+it.each(['missing', 'wrong-selection', 'wrong-hash'])('refuses a successful product result with %s receipt evidence', async kind => {
+  const c = await company(), node = await productNode(c), { call } = await c.turn(c.bruno);
+  expect((await call('run_tests', {})).error).toBe(false);
+  const request = await nextOf(node, 'tests.describe'); node.send(await productDescription(request));
+  const part = await nextOf(node, 'tests.run');
+  const message = productDone(part) as ReturnType<typeof productDone> & { environmentReceipt: import('@hornhoof/protocol').TestEnvironmentReceipt };
+  if (kind === 'missing') delete (message as { environmentReceipt?: unknown }).environmentReceipt;
+  if (kind === 'wrong-selection') message.environmentReceipt.files = ['test/a.ts'];
+  if (kind === 'wrong-hash') message.environmentReceipt.manifestHash = 'f'.repeat(64);
+  node.send(message);
+  await until(async () => (await c.db.select().from(testRuns))[0]?.status === 'failed');
+  const parts = await c.db.select().from(testParts).orderBy(asc(testParts.part));
+  expect(parts).toMatchObject([{ status: 'failed', error: 'environment_invalid', environmentReceipt: null }, { status: 'failed', error: 'prerequisite_failed' }]);
+});
+
+it('selects a capable sibling volume, keeps cache ownership across runs, and cold-fills after that owner disappears', async () => {
+  const c = await company();
+  const connect = await c.app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude', 'codex'] }, ...as(c.ceo) });
+  const code = connect.json().command.split('--join ')[1];
+  const joined = (await c.app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code, machineId: 'cache-shared-0001-abcd', hostname: 'cache-shared', os: 'linux', arch: 'x86_64' } })).json();
+  const connected: { node: FakeNode; id: string }[] = [];
+  for (const entry of joined.nodes) {
+    const node = await connectNode(c.url, entry.key);
+    node.send({ type: 'hello', version: '0.7.0', loggedIn: true, running: [], tests: [], work: true, load: idle({ host: 'a'.repeat(64) }) });
+    await until(() => c.app.ctx.hub.loadOf(nodeIdentity(entry.nodeId)) !== null); connected.push({ node, id: entry.nodeId });
+  }
+  const [base] = await placesOf(c.app.ctx, c.task.companyId), sibling = connected.find(node => node.id !== base!.nodeId)!, original = connected.find(node => node.id === base!.nodeId)!;
+  const { testCapabilities } = await import('../src/modules/testruns/describe.js');
+  const advertise = async (entry: typeof sibling, fingerprint = 'b'.repeat(64)) => {
+    entry.node.send({ type: 'status', loggedIn: true, limits: null, testEnvironmentVersion: 1, testRuntimes: [{ id: 'node', version: '22.15.0', fingerprint }] });
+    await until(() => testCapabilities(c.app.ctx, nodeIdentity(entry.id)).testEnvironmentVersion === 1);
+  };
+  await advertise(sibling);
+  const { call } = await c.turn(c.bruno);
+  expect((await call('run_tests', {})).error).toBe(false);
+  const request = await nextOf(sibling.node, 'tests.describe'); sibling.node.send(await productDescription(request));
+  const first = await nextOf(sibling.node, 'tests.run'); sibling.node.send(productDone(first));
+  const final = await nextOf(sibling.node, 'tests.run'); sibling.node.send(productDone(final));
+  await until(async () => (await c.db.select().from(testRuns))[0]?.status === 'passed');
+  await advertise(original);
+  expect((await call('run_tests', {})).error).toBe(false);
+  const nextRequest = await nextOf(original.node, 'tests.describe'); original.node.send(await productDescription(nextRequest));
+  const warm = await nextOf(sibling.node, 'tests.run');
+  expect((await c.db.select().from(testParts).where(eq(testParts.id, warm.partId)))[0]!.nodeId).toBe(sibling.id);
+  await call('stop_tests', { run: 2 }); sibling.node.close(); await sibling.node.closed;
+  expect((await call('run_tests', {})).error).toBe(false);
+  const coldRequest = await nextOf(original.node, 'tests.describe'); original.node.send(await productDescription(coldRequest));
+  const cold = await nextOf(original.node, 'tests.run'); expect(cold.environment!.snapshot.description.commitSha).toBe(TEST_COMMIT);
+  await call('stop_tests', { run: 3 });
+});
+
+it('refuses product mode when pinning returns a non-40-character commit before creating a run', async () => {
+  const c = await company(), { call } = await c.turn(c.bruno);
+  vi.spyOn(c.app.ctx, 'readCommit').mockResolvedValue({ branch: 'task-1', commitSha: 'a'.repeat(64) });
+  const result = await call('run_tests', {});
+  expect(result.error).toBe(true); expect(result.text).toContain('40'); expect(await c.db.select().from(testRuns)).toEqual([]);
+});
+
+it('stores metadata independently of its reader runtime and queues until a capable execution node appears', async () => {
+  const c = await company(), node = await productNode(c), { call } = await c.turn(c.bruno);
+  expect((await call('run_tests', {})).error).toBe(false);
+  const request = await nextOf(node, 'tests.describe'), reply = await productDescription(request);
+  reply.result.description.manifest.runtimes.push({ id: 'python', version: '3.12' });
+  reply.result.description.manifest.suites[0].finalChecks = [];
+  reply.result.description.manifestSource = JSON.stringify(reply.result.description.manifest);
+  const { hashTestEnvironment } = await import('@hornhoof/protocol'); reply.result.description.manifestHash = await hashTestEnvironment(reply.result.description.manifestSource);
+  node.send(reply);
+  await until(async () => (await c.db.select().from(testRuns))[0]?.environmentSnapshot !== null);
+  expect((await c.db.select().from(testParts)).every(part => part.status === 'queued')).toBe(true);
+  node.send({ type: 'status', loggedIn: true, limits: null, testEnvironmentVersion: 1, testRuntimes: [...reply.result.description.runtimeCapabilities, { id: 'python', version: '3.12.8', fingerprint: 'e'.repeat(64) }] });
+  const part = await nextOf(node, 'tests.run'); expect(part.environment!.snapshot.description.manifest.runtimes).toContainEqual({ id: 'python', version: '3.12' });
+  await call('stop_tests', { run: 1 });
+});
+
+it('resends its persisted describe request after server state is recreated and ignores unknown request IDs', async () => {
+  const c = await company(), node = await productNode(c), { call } = await c.turn(c.bruno);
+  expect((await call('run_tests', {})).error).toBe(false); const request = await nextOf(node, 'tests.describe');
+  const restarted = { ...c.app.ctx };
+  const { noteTestCapabilities } = await import('../src/modules/testruns/describe.js');
+  noteTestCapabilities(restarted, { kind: 'builtin' }, { testEnvironmentVersion: 1, testRuntimes: [{ id: 'node', version: '22.15.0', fingerprint: 'b'.repeat(64) }] });
+  await pumpTests(restarted);
+  expect(await nextOf(node, 'tests.describe')).toEqual(request);
+  node.send({ ...await productDescription(request), requestId: '99999999-9999-4999-8999-999999999999' }); await pumpTests(c.app.ctx);
+  expect((await c.db.select().from(testRuns))[0]!.environmentSnapshot).toBeNull();
+  node.send(await productDescription(request)); const part = await nextOf(node, 'tests.run');
+  expect(part.commitSha).toBe(request.commitSha); await call('stop_tests', { run: 1 });
+});
+it('fails an unanswered description once at its queue deadline and never passes an empty product plan', async () => {
+  const c = await company(), node = await productNode(c), { call } = await c.turn(c.bruno);
+  expect((await call('run_tests', {})).error).toBe(false); const request = await nextOf(node, 'tests.describe');
+  expect((await c.db.select().from(testRuns))[0]).toMatchObject({ status: 'running', parts: 0 });
+  await c.db.update(testRuns).set({ createdAt: new Date(Date.now() - 2 * 3_600_000 - 1000) });
+  await checkTestTimes(c.app.ctx);
+  expect((await c.db.select().from(testRuns))[0]).toMatchObject({ status: 'failed' });
+  expect((await c.db.select().from(testParts))[0]).toMatchObject({ status: 'failed', error: 'timeout' });
+  expect(await nextOf(node, 'tests.describe.cancel')).toMatchObject({ requestId: request.requestId });
+  const wakes = await c.db.select().from(pendingWakes).where(eq(pendingWakes.taskId, c.task.id));
+  expect(wakes).toHaveLength(1); await checkTestTimes(c.app.ctx); expect(await c.db.select().from(pendingWakes).where(eq(pendingWakes.taskId, c.task.id))).toEqual(wakes);
+});
+
+it('refuses to dispatch a pinned product snapshot after its repository configuration changes', async () => {
+  const c = await company(), node = await productNode(c), { call } = await c.turn(c.bruno);
+  expect((await call('run_tests', {})).error).toBe(false);
+  const request = await nextOf(node, 'tests.describe'), reply = await productDescription(request);
+  reply.result.description.manifest.runtimes.push({ id: 'python', version: '3.12' });
+  reply.result.description.manifest.suites[0].finalChecks = [];
+  reply.result.description.manifestSource = JSON.stringify(reply.result.description.manifest);
+  const { hashTestEnvironment } = await import('@hornhoof/protocol'); reply.result.description.manifestHash = await hashTestEnvironment(reply.result.description.manifestSource);
+  node.send(reply); await until(async () => (await c.db.select().from(testRuns))[0]?.environmentSnapshot !== null);
+  await c.db.update(departments).set({ repoUrl: 'https://example.test/replacement.git' }).where(eq(departments.id, c.dev.id));
+  node.send({ type: 'status', loggedIn: true, limits: null, testEnvironmentVersion: 1, testRuntimes: [...reply.result.description.runtimeCapabilities, { id: 'python', version: '3.12.8', fingerprint: 'e'.repeat(64) }] });
+  await until(async () => (await c.db.select().from(testRuns))[0]?.status === 'failed');
+  expect((await c.db.select().from(testParts))[0]).toMatchObject({ status: 'failed', error: 'no_repository', nodeId: null });
+  expect(await gets(node, 'tests.run', 30)).toBe(false);
+});
+
+it('retries interrupted metadata under new request IDs at the same pinned commit and fails once after three attempts', async () => {
+  const c = await company(), node = await productNode(c), { call } = await c.turn(c.bruno);
+  expect((await call('run_tests', {})).error).toBe(false);
+  let request = await nextOf(node, 'tests.describe');
+  const first = request;
+  for (const code of ['cancelled', 'timeout'] as const) {
+    node.send({ type: 'tests.described', requestId: request.requestId, commitSha: request.commitSha, result: { status: 'error', problem: { code, detail: 'A transient metadata interruption.' } } });
+    await until(async () => { const [run] = await c.db.select().from(testRuns); return run!.status !== 'running' || run!.environmentRequest!.requestId !== request.requestId; });
+    expect((await c.db.select().from(testRuns))[0]!.status).toBe('running');
+    const previous = request; request = await nextOf(node, 'tests.describe');
+    expect(request.requestId).not.toBe(previous.requestId); expect(request.commitSha).toBe(first.commitSha); expect(request.repositoryScope).toEqual(first.repositoryScope);
+  }
+  node.send({ type: 'tests.described', requestId: request.requestId, commitSha: request.commitSha, result: { status: 'error', problem: { code: 'commit_unavailable', detail: 'The metadata node could not complete discovery.' } } });
+  await until(async () => (await c.db.select().from(testRuns))[0]!.status === 'failed');
+  expect((await c.db.select().from(testRuns))[0]!.environmentRequest).toMatchObject({ attempts: 3, problem: { code: 'commit_unavailable' } });
+  expect(await c.db.select().from(testParts)).toHaveLength(1);
+  expect(await c.db.select().from(pendingWakes).where(eq(pendingWakes.taskId, c.task.id))).toHaveLength(1);
+});
+
+
+it.each(['lending', 'access'])('rechecks a persisted metadata node after revoking %s', async permission => {
+  const c = await company(), machine = await c.machine(c.ann, 'metadata-owner'), id = nodeIdentity(machine.nodeId);
+  const { noteTestCapabilities, testCapabilities } = await import('../src/modules/testruns/describe.js');
+  const capabilities = { testEnvironmentVersion: 1 as const, testRuntimes: [{ id: 'node', version: '22.15.0', fingerprint: 'b'.repeat(64) }] };
+  machine.node.send({ type: 'status', loggedIn: true, limits: null, ...capabilities });
+  await until(() => testCapabilities(c.app.ctx, id).testEnvironmentVersion === 1);
+  const { call } = await c.turn(c.bruno); expect((await call('run_tests', {})).error).toBe(false);
+  const request = await nextOf(machine.node, 'tests.describe');
+  if (permission === 'lending') expect((await c.app.inject({ method: 'PATCH', url: `/api/machines/${machine.machineId}`, payload: { lendsTests: false }, ...as(c.ann) })).statusCode).toBe(200);
+  else {
+    const [owner] = await c.db.select({ id: machines.personId }).from(machines).where(eq(machines.id, machine.machineId));
+    await c.db.delete(personAccess).where(eq(personAccess.personId, owner!.id));
+  }
+  const restarted = { ...c.app.ctx }; noteTestCapabilities(restarted, id, capabilities); await pumpTests(restarted);
+  expect(await gets(machine.node, 'tests.describe')).toBe(false);
+  expect((await c.db.select().from(testRuns))[0]!.environmentRequest!.requestId).toBeNull();
+  const replacement = await productNode(c), next = await nextOf(replacement, 'tests.describe');
+  expect(next.requestId).not.toBe(request.requestId); expect(next.commitSha).toBe(request.commitSha);
 });
