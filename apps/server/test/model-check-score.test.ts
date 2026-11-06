@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Case, CheckResult } from '@hornhoof/protocol';
+import type { Case, CheckInput, CheckResult } from '@hornhoof/protocol';
 import { decide, parseThresholds, scoreCases, type Thresholds } from '../src/modules/model-checks/score.js';
 import { classCase, holdout, mustBlock, reviewCase, TAXONOMY } from './model-check-fixture.js';
 
@@ -98,7 +98,8 @@ describe('scoring a classification', () => {
 
   it('keeps a class named like a built-in of every object inside its own table', () => {
     const taxonomy = [{ classId: '__proto__', requiresHuman: false, description: 'Words only a test holds' }, ...TAXONOMY];
-    const row = classCase({ input: { ...classCase().input, taxonomy }, expected: { classId: '__proto__', requiresHuman: false } });
+    const input = classCase().input as Extract<CheckInput, { kind: 'support_classification' }>;
+    const row = classCase({ input: { ...input, taxonomy }, expected: { classId: '__proto__', requiresHuman: false } });
     const scored = scoreOne(row, classified('howto', false));
     const leaked = ({} as Record<string, unknown>)['howto'];
     Reflect.deleteProperty(Object.prototype, 'howto');
