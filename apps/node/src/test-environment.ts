@@ -106,9 +106,12 @@ export async function safeCheckoutPath(checkout: string, path: string): Promise<
   if (inside === '..' || inside.startsWith('../')) fail('environment_invalid', 'A command or selected file escapes its checkout.');
   return full;
 }
+function validShardCoordinates(shard: { index: number; count: number }): boolean {
+  return Number.isInteger(shard.index) && Number.isInteger(shard.count) && shard.index >= 1 && shard.index <= shard.count && shard.count <= 10;
+}
 function shardCommand(suite: TestSuite, shard: { index: number; count: number } | undefined): Command {
   if (suite.split.kind !== 'vitest-shard') return suite.run;
-  if (!shard || !Number.isInteger(shard.index) || !Number.isInteger(shard.count) || shard.index < 1 || shard.index > shard.count || shard.count > 10) fail('environment_invalid', 'A native Vitest invocation needs valid local shard coordinates.');
+  if (!shard || !validShardCoordinates(shard)) fail('environment_invalid', 'A native Vitest invocation needs valid local shard coordinates.');
   if (suite.run.args.some(arg => arg === '--shard' || arg.startsWith('--shard='))) fail('environment_invalid', 'The pinned suite command already sets shard coordinates.');
   return { ...suite.run, args: [...suite.run.args, `--shard=${shard.index}/${shard.count}`] };
 }

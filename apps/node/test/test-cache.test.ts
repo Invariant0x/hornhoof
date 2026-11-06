@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, onTestFinished } from 'vitest';
 import * as cache from '../src/test-cache.js';
+import { deferred } from '../../../test-support/deferred.mjs';
 
 const folders: string[] = [];
 afterEach(async () => { await Promise.all(folders.splice(0).map(dir => rm(dir, { recursive: true, force: true }))); });
@@ -12,12 +13,6 @@ async function context() {
   const cacheRoot = await mkdtemp(join(tmpdir(), 'hh-prepared-')); folders.push(cacheRoot);
   return { cacheRoot, deadline: Date.now() + 10_000, signal: new AbortController().signal, log: () => {} };
 }
-function deferred() {
-  let resolve!: () => void;
-  const promise = new Promise<void>(done => { resolve = done; });
-  return { promise, resolve };
-}
-
 describe('cache writer locking', () => {
   it('holds a process lock through the callback and lets another writer proceed after failure', async () => {
     const ctx = await context(), entered = deferred(), release = deferred();
