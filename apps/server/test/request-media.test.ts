@@ -104,7 +104,7 @@ describe('pictures, links and choices in requests', () => {
     expect((await app.inject({ method: 'GET', url: `/api/attachments/${loose}`, ...as(ceoSession) })).statusCode).toBe(404);
     expect((await app.inject({ method: 'GET', url: `/api/attachments/${shot}` })).statusCode).toBe(401);
     const seller = await invitePerson(app, ceoSession, { name: 'Sara', email: 'sara@acme.com', access: { departments: [sales.id] } });
-    expect((await app.inject({ method: 'GET', url: `/api/attachments/${shot}`, ...as(seller) })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'GET', url: `/api/attachments/${shot}`, ...as(seller) })).statusCode).toBe(404);
   });
 
   it("refuses another agent's picture and one already shown", async () => {

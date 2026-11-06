@@ -228,6 +228,8 @@ async function makePersonSession(name, email, deptId) {
 
 const devMemberSession = await makePersonSession('Daria', 'daria@acme.com', dev.id);
 const opsMemberSession = await makePersonSession('Oleg', 'oleg@acme.com', ops.id);
+const [daria] = await db.select().from(schema.people).where(eq(schema.people.email, 'daria@acme.com'));
+await db.update(schema.subscriptions).set({ ownerPersonId: daria.id }).where(eq(schema.subscriptions.id, sub.id));
 
 const hire = async (name, kind, roleKey) => {
   const [agent] = await db.insert(schema.agents).values({

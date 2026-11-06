@@ -194,7 +194,7 @@ async function taskFileForPerson(db: Db, me: Awaited<ReturnType<typeof requirePe
     .where(and(eq(attachments.id, id), eq(attachments.companyId, me.companyId), eq(tasks.companyId, me.companyId), isNull(attachments.requestId), isNull(attachments.operatorCaseId)));
   if (!found) return null;
   const viewer = await viewerOf(db, me);
-  if (!seesTask(viewer, found.task) || !(found.personId || seesAgentId(viewer, found.agentId))) throw new ApiError(403, 'forbidden', 'This file belongs to work you do not see.', 'attachment_hidden');
+  if (!seesTask(viewer, found.task) || !(found.personId || seesAgentId(viewer, found.agentId))) throw new ApiError(404, 'not_found', 'There is no such file.', 'attachment_unknown');
   return found;
 }
 
@@ -276,7 +276,7 @@ export function attachmentRoutes(app: FastifyInstance, ctx: Ctx): void {
       .where(and(eq(attachments.id, id), eq(attachments.companyId, me.companyId), isNull(attachments.operatorCaseId)));
     if (!found || (!found.personId && !found.task)) throw new ApiError(404, 'not_found', 'There is no such picture.', 'attachment_unknown');
     if (!(found.personId ? await canViewAgent(db, me, found.agent) : await mayOpenRequest(db, me, found.request!, found.task!))) {
-      throw new ApiError(403, 'forbidden', 'This picture belongs to work you do not see.', 'attachment_hidden');
+      throw new ApiError(404, 'not_found', 'There is no such picture.', 'attachment_unknown');
     }
     return reply
       .header('x-content-type-options', 'nosniff')

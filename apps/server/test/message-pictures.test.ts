@@ -237,7 +237,7 @@ describe("getting a message's picture", () => {
       expect(res.rawPayload).toEqual(PNG);
     }
     expect((await shown(toOrchestrator.id, lisa)).statusCode).toBe(200);
-    expect((await shown(toOrchestrator.id, maria)).statusCode).toBe(403);
+    expect((await shown(toOrchestrator.id, maria)).statusCode).toBe(404);
   });
 
   it('goes after 30 days, with what was never sent', async () => {
