@@ -11,9 +11,7 @@ At assignment, the head decides whether a task is small: a change in a single pl
 
 Give small work to the developer already working in that area and holding its context; do not search for a free developer or start a new chain. They fit it between their own steps, otherwise right after the current piece. If they have several tasks ahead, give it to a free developer. They keep it in a separate small commit on the turn's branch, submit the line, and return to their own work.
 
-For other work, follow the process below.
-
-A turn holds the CEO's goals for it. Each goal is one task for the one department that owns it end to end.
+For other work: a turn holds the CEO's goals for it. Each goal is one task for the one department that owns it end to end.
 
 1. Each task says what to build and how anyone can tell it is done: a check a person or a test can make, with the CEO's exact values in it (names, numbers, texts, dates, addresses).
 2. No task says "handle edge cases", "TBD" or "as discussed". Write what it means.
