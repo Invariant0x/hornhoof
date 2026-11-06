@@ -40,7 +40,7 @@ export async function aPolicyOf(c: Base, channelId: string, value: OutboundPolic
   return (await c.db.insert(outboundPolicies).values({ companyId: c.companyId, channelId, revision, digest: digestOf(value), value, createdBy: c.ids.ceo }).returning())[0]!;
 }
 
-type ChannelOver = { name?: string; audience?: 'direct' | 'public'; status?: 'new' | 'active' };
+type ChannelOver = { name?: string; adapter?: 'smtp' | 'webhook'; audience?: 'direct' | 'public'; status?: 'new' | 'active' };
 
 export async function aChannelOf(c: Base, over: ChannelOver = {}) {
   const values = { companyId: c.companyId, departmentId: c.dev.id, name: 'Mail', adapter: 'smtp', purpose: 'first_contact', audience: 'direct', status: 'active', createdBy: c.ids.ceo, ...over } as const;
