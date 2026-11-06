@@ -1,3 +1,5 @@
+import type { Ctx } from '../../app.js';
+
 export const IDLE_SETTINGS = {
   signalAfterMs: 10 * 60_000,
   watchdogAfterMs: 15 * 60_000,
@@ -46,4 +48,8 @@ export function evaluateIdle(previous: IdleEpisode | null, snapshot: IdleSnapsho
   if (free.length >= IDLE_SETTINGS.minFree && elapsed >= IDLE_SETTINGS.signalAfterMs) notifications.push('signal');
   if (busyRatio < IDLE_SETTINGS.busyRatio && elapsed >= IDLE_SETTINGS.watchdogAfterMs) notifications.push('watchdog');
   return { episode: { key, since }, free, busy, busyRatio, notifications };
+}
+
+export async function checkIdleDepartments(_ctx: Ctx, _now: Date): Promise<void> {
+  throw new Error('Not implemented');
 }
