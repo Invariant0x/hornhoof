@@ -106,6 +106,7 @@ const LISTS: Listed[] = [
   { route: 'GET /api/departments/:id/tree', url: c => `/api/departments/${c.dev.id}/tree`, statuses: ALL_OK },
   { route: 'GET /api/departments/:id/pipeline', url: c => `/api/departments/${c.dev.id}/pipeline`, statuses: { ann: 403, olga: 403, wes: 403, lisa: 200, ceo: 200 } },
   { route: 'GET /api/departments/:id/roster', url: c => `/api/departments/${c.dev.id}/roster`, statuses: WHOLE_ONLY },
+  { route: 'GET /api/departments/:id/work-mode', url: c => `/api/departments/${c.dev.id}/work-mode`, statuses: ALL_OK },
   { route: 'GET /api/departments/:id/approval-policy', url: c => `/api/departments/${c.dev.id}/approval-policy`, statuses: ALL_OK },
   { route: 'GET /api/departments/:id/model-checks', url: c => `/api/departments/${c.dev.id}/model-checks`, statuses: ALL_OK },
 ];
@@ -113,6 +114,7 @@ const LISTS: Listed[] = [
 /* Elsewhere, with the reason it is not a row above. */
 const ELSEWHERE: Record<string, string> = {
   'GET /api/stream': 'agent-view-stream.test.ts: filtered per message',
+  'PUT /api/tasks/:id/urgent': 'task-urgency.test.ts: the CEO alone, 403 for everyone else who sees the task',
   'POST /api/requests/:id': 'agent-view-lists.test.ts: the request authority, 403 otherwise',
   'POST /api/tasks': 'agent-view.test.ts: the answer is read as the person who gave it',
   'POST /api/requests/:id/explained': 'the orchestrator alone',
@@ -121,9 +123,13 @@ const ELSEWHERE: Record<string, string> = {
 /* Routes that show no agent and no work. Writes keep the rights they had; their answers name nothing of other agents. */
 const NO_AGENT_DATA: string[] = [
   'POST /api/attachments', 'GET /api/attachments/file', 'POST /api/auth/login', 'POST /api/auth/logout',
+  'POST /api/outbound/messages', 'GET /api/outbound/messages/:id', 'POST /api/outbound/channels', 'POST /api/outbound/channels/:id/policies', 'POST /api/outbound/channels/:id/stop', 'POST /api/outbound/channels/:id/reopen',
+  'POST /api/outbound/catalog', 'POST /api/outbound/catalog/:id/publish', 'POST /api/outbound/catalog/:id/revoke', 'POST /api/outbound/contacts', 'POST /api/outbound/contacts/:id/suppress', 'POST /api/outbound/permissions/:id/revoke',
+  'GET /api/outbound/unsubscribe/*', 'POST /api/outbound/unsubscribe/*',
   'POST /api/computer/close', 'POST /api/computer/decline', 'POST /api/computer/open',
   'PUT /api/departments/:id/model-checks/:kind/thresholds', 'POST /api/departments/:id/model-checks/:kind/sets', 'POST /api/departments/:id/model-checks/:kind/misses',
   'PUT /api/departments/:id/approval-policy/:channel', 'POST /api/departments/:id/notebook', 'PATCH /api/departments/:id/notebook/:number', 'DELETE /api/departments/:id/notebook/:number',
+  'PUT /api/departments/:id/work-mode',
   'PUT /api/departments/:id/owner', 'PUT /api/departments/:id/repository', 'DELETE /api/departments/:id/repository', 'POST /api/departments/:id/staff',
   'POST /api/departments/:id/teams', 'PATCH /api/departments/:id/teams/:teamId', 'DELETE /api/departments/:id/teams/:teamId', 'POST /api/departments/build',
   'GET /api/health', 'GET /api/invites/:token', 'POST /api/invites/:token/accept',

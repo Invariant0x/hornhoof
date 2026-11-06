@@ -2,7 +2,7 @@ import { sql } from 'drizzle-orm';
 import { expect, it } from 'vitest';
 import { agentEvents, agents, companies, people, subscriptions } from '../src/db/schema.js';
 import { historyQuery } from '../src/modules/tasks/tree-history.js';
-import { createTestDb } from './helpers.js';
+import { createTestDb } from './helpers-db.js';
 
 it('reads a turn history without scanning thirty thousand unrelated event bodies', async () => {
   const db = await createTestDb();

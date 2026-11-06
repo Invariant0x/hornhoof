@@ -1,12 +1,20 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, jobs, pendingWakes, people, subscriptions, taskEvents, tasks, turns } from '../src/db/schema.js';
 import { pump } from '../src/modules/conversation/queue.js';
-import { cancel, comment, createTask, startWork, submit, updateTask, verdict } from '../src/modules/tasks/engine.js';
+import { cancel, comment, createTask as createTaskEngine, startWork, submit, updateTask as updateTaskEngine, verdict } from '../src/modules/tasks/engine.js';
+import { taskDetail } from '../src/modules/tasks/views.js';
 import { wakeAll, wakePrompt } from '../src/modules/tasks/wake.js';
 import { as, invitePerson, listen, mcp, setUpCompany, statements, testApp, ownPlan } from './helpers.js';
+
+const NONE = 'Genuine dependency in the existing behavior test.';
+function withDefault<T extends { after?: string[]; independentPart?: unknown; independentNone?: string }>(input: T): T {
+  return input.after?.length && !input.independentPart && input.independentNone === undefined ? { ...input, independentNone: NONE } : input;
+}
+const createTask = (ctx: Parameters<typeof createTaskEngine>[0], actor: Parameters<typeof createTaskEngine>[1], input: Parameters<typeof createTaskEngine>[2]) => createTaskEngine(ctx, actor, withDefault(input));
+const updateTask = (ctx: Parameters<typeof updateTaskEngine>[0], agentId: string, taskId: string, change: Parameters<typeof updateTaskEngine>[3]) => updateTaskEngine(ctx, agentId, taskId, withDefault(change));
 
 async function company() {
   const { app, db } = await testApp();
@@ -178,7 +186,7 @@ describe('a task that comes after others', () => {
     expect(freed.task.after).toEqual([]);
     expect(woken(freed)).toEqual([[tess.id, 'assigned']]);
     const client = await tools(head);
-    const again = await call(client, 'update_task', { task: tests.number, after: [api.number] });
+    const again = await call(client, 'update_task', { task: tests.number, after: [api.number], independentNone: NONE });
     expect(again.isError).toBeFalsy();
     expect(text(again)).toContain(`It starts once #${api.number} is done.`);
   });
@@ -292,11 +300,11 @@ describe('a task that comes after others', () => {
   it("takes the tasks a person's task comes after by number through the API", async () => {
     const { app, db, owner, dev, head, bruno, member } = await company();
     const api = (await member('Checkout API', bruno.id)).task;
-    const res = await app.inject({ method: 'POST', url: '/api/tasks', payload: { title: 'Launch', department: dev.id, after: [api.number] }, ...as(owner) });
+    const res = await app.inject({ method: 'POST', url: '/api/tasks', payload: { title: 'Launch', department: dev.id, after: [api.number], independentNone: NONE }, ...as(owner) });
     expect(res.statusCode).toBe(201);
     expect(res.json().task.waitsFor).toEqual([api.number]);
     expect(await db.select().from(jobs).where(eq(jobs.agentId, head.id))).toEqual([]);
-    const unknown = await app.inject({ method: 'POST', url: '/api/tasks', payload: { title: 'Launch', department: dev.id, after: [999] }, ...as(owner) });
+    const unknown = await app.inject({ method: 'POST', url: '/api/tasks', payload: { title: 'Launch', department: dev.id, after: [999], independentNone: NONE }, ...as(owner) });
     expect(unknown.statusCode).toBe(400);
   });
 
@@ -304,7 +312,7 @@ describe('a task that comes after others', () => {
     const { db, head, bruno, tess, member, tools } = await company();
     const api = (await member('Checkout API', bruno.id)).task;
     const client = await tools(head);
-    const made = await call(client, 'create_task', { title: 'End-to-end tests', brief: '', body: '', executor: tess.id, gates: [], after: [api.number] });
+    const made = await call(client, 'create_task', { title: 'End-to-end tests', brief: '', body: '', executor: tess.id, gates: [], after: [api.number], independentNone: NONE });
     expect(made.isError).toBeFalsy();
     expect(text(made)).toContain(`starts once #${api.number} is done`);
     const [tests] = await db.select().from(tasks).where(eq(tasks.title, 'End-to-end tests'));
@@ -312,7 +320,7 @@ describe('a task that comes after others', () => {
     const shown = JSON.parse(text(await call(await tools(tess), 'task', { task: tests!.number })));
     expect(shown.after).toEqual([{ id: api.id, number: api.number, title: 'Checkout API', status: 'open' }]);
     expect(shown.waitsFor).toEqual([api.number]);
-    const unknown = await call(client, 'create_task', { title: 'More', brief: '', body: '', executor: tess.id, gates: [], after: [999] });
+    const unknown = await call(client, 'create_task', { title: 'More', brief: '', body: '', executor: tess.id, gates: [], after: [999], independentNone: NONE });
     expect(unknown.isError).toBe(true);
   });
 });
@@ -322,7 +330,7 @@ describe('what a task comes after, as each one sees it', () => {
     const { app, ctx, owner, ceo, dev, head, outside } = await company();
     const deal = await outside();
     const dana = await invitePerson(app, owner, { name: 'Dana', email: 'dana@acme.com', access: { departments: [dev.id] } });
-    const refused = await app.inject({ method: 'POST', url: '/api/tasks', payload: { title: 'Launch', department: dev.id, after: [deal.number] }, ...as(dana) });
+    const refused = await app.inject({ method: 'POST', url: '/api/tasks', payload: { title: 'Launch', department: dev.id, after: [deal.number], independentNone: NONE }, ...as(dana) });
     expect(refused.statusCode).toBe(400);
     expect(refused.json().error.message).toBe(`There is no task #${deal.number} to come after.`);
     await ownPlan(ctx.db, 'dana@acme.com', head.id);
@@ -346,8 +354,115 @@ describe('what a task comes after, as each one sees it', () => {
   it("is refused to a head for another department's task, as a parent is", async () => {
     const { head, tools, outside } = await company();
     const deal = await outside();
-    const res = await call(await tools(head), 'create_task', { title: 'Launch', brief: '', body: '', executor: head.id, gates: [], after: [deal.number] });
+    const res = await call(await tools(head), 'create_task', { title: 'Launch', brief: '', body: '', executor: head.id, gates: [], after: [deal.number], independentNone: NONE });
     expect(res.isError).toBe(true);
     expect(text(res)).toContain(`There is no task ${deal.number} to come after`);
+  });
+});
+
+describe('an independent part of a dependent task', () => {
+  it('requires a declaration without writing a task, event, child or wake', async () => {
+    const { ctx, db, dev, head, bruno, tess, parent, member } = await company();
+    const api = (await member('Checkout API', bruno.id)).task;
+    const input = { title: 'Dependent work', brief: '', body: '', departmentId: dev.id, parentId: parent.id, assigneeAgentId: tess.id, executor: true, gates: [], after: [api.id] };
+    const before = {
+      tasks: (await db.select({ id: tasks.id }).from(tasks)).length,
+      events: (await db.select({ id: taskEvents.id }).from(taskEvents)).length,
+      wakes: (await db.select({ id: pendingWakes.id }).from(pendingWakes)).length,
+    };
+    await expect(createTaskEngine(ctx, { agentId: head.id }, input)).rejects.toMatchObject({ reason: 'task_invalid', message: 'A task with after needs independentPart or independentNone.' });
+    await expect(createTaskEngine(ctx, { agentId: head.id }, { ...input, independentPart: { title: 'Tests', brief: '', body: 'Write tests.', executor: bruno.id }, independentNone: 'Both.' })).rejects.toMatchObject({ reason: 'task_invalid' });
+    await expect(createTaskEngine(ctx, { agentId: head.id }, { ...input, after: [], independentNone: 'Not needed.' })).rejects.toMatchObject({ reason: 'task_invalid' });
+    expect((await db.select({ id: tasks.id }).from(tasks)).length).toBe(before.tasks);
+    expect((await db.select({ id: taskEvents.id }).from(taskEvents)).length).toBe(before.events);
+    expect((await db.select({ id: pendingWakes.id }).from(pendingWakes)).length).toBe(before.wakes);
+  });
+
+  it('starts the independent child while the parent waits and exposes the declaration', async () => {
+    const { ctx, db, dev, head, bruno, rita, tess, parent, member } = await company();
+    const api = (await member('Checkout API', bruno.id)).task;
+    const moved = await createTaskEngine(ctx, { agentId: head.id }, {
+      title: 'Full checkout', brief: 'All of it.', body: 'The dependent part.', departmentId: dev.id, parentId: parent.id,
+      assigneeAgentId: tess.id, executor: true, gates: [rita.id], after: [api.id], inTurnReview: true,
+      independentPart: { title: 'Contract tests', brief: 'Test first.', body: 'Cover the API contract.', executor: bruno.id },
+    });
+    expect(moved.task.after).toEqual([api.id]);
+    expect(moved.wakes.map(w => [w.agentId, w.why])).toEqual([[bruno.id, 'assigned']]);
+    const children = await db.select().from(tasks).where(eq(tasks.parentId, moved.task.id));
+    expect(children).toHaveLength(1);
+    expect(children[0]).toMatchObject({ title: 'Contract tests', after: [], assigneeAgentId: bruno.id, executorAgentId: bruno.id, gates: [rita.id] });
+    const detail = await taskDetail(ctx, moved.task, () => true);
+    expect(detail.independentPart).toMatchObject({
+      title: 'Contract tests', brief: 'Test first.', body: 'Cover the API contract.',
+      executor: { id: bruno.id }, task: { id: children[0]!.id, number: children[0]!.number, status: 'open' },
+    });
+  });
+
+  it('records the absence reason and leaves an old dependent task valid', async () => {
+    const { ctx, db, companyId, dev, head, bruno, tess, member } = await company();
+    const api = (await member('Checkout API', bruno.id)).task;
+    const declared = (await member('End-to-end tests', tess.id, [api.id])).task;
+    expect((await taskDetail(ctx, declared, () => true)).independentPart).toEqual({ reason: NONE });
+    const [old] = await db.insert(tasks).values({ companyId, number: 99, title: 'Old dependent', departmentId: dev.id, status: 'open', assigneeAgentId: tess.id, executorAgentId: tess.id, after: [api.id] }).returning();
+    expect((await taskDetail(ctx, old!, () => true)).independentPart).toBeNull();
+    expect((await updateTaskEngine(ctx, head.id, old!.id, { title: 'Old but updated' })).task.title).toBe('Old but updated');
+  });
+
+  it('creates the part when update_task changes only independentPart without changing after', async () => {
+    const { ctx, db, dev, head, bruno, tess, parent, member } = await company();
+    const api = (await member('Checkout API', bruno.id)).task;
+    const docs = (await createTask(ctx, { agentId: head.id }, { title: 'Docs', brief: '', body: '', departmentId: dev.id, parentId: parent.id, assigneeAgentId: tess.id, executor: true, gates: [], after: [api.id] })).task;
+    const moved = await updateTaskEngine(ctx, head.id, docs.id, { independentPart: { title: 'Examples', brief: 'Independent.', body: 'Write examples.', executor: bruno.id } });
+    expect(moved.wakes.map(w => [w.agentId, w.why])).toEqual([[bruno.id, 'assigned']]);
+    const children = await db.select().from(tasks).where(eq(tasks.parentId, docs.id));
+    expect(children).toHaveLength(1);
+    expect(children[0]).toMatchObject({ title: 'Examples', after: [], assigneeAgentId: bruno.id });
+    expect((await taskDetail(ctx, docs, () => true)).independentPart).toMatchObject({ title: 'Examples', task: { id: children[0]!.id } });
+  });
+
+  it('is idempotent on update and hides the current declaration when after clears without deleting history', async () => {
+    const { ctx, db, dev, head, bruno, tess, parent, member } = await company();
+    const api = (await member('Checkout API', bruno.id)).task;
+    const docs = (await createTask(ctx, { agentId: head.id }, { title: 'Docs', brief: '', body: '', departmentId: dev.id, parentId: parent.id, assigneeAgentId: tess.id, executor: true, gates: [] })).task;
+    const independentPart = { title: 'Examples', brief: 'Independent.', body: 'Write examples.', executor: bruno.id };
+    await updateTaskEngine(ctx, head.id, docs.id, { after: [api.id], independentPart });
+    await updateTaskEngine(ctx, head.id, docs.id, { after: [api.id], independentPart });
+    expect(await db.select().from(tasks).where(eq(tasks.parentId, docs.id))).toHaveLength(1);
+    await updateTaskEngine(ctx, head.id, docs.id, { after: [] });
+    expect((await taskDetail(ctx, docs, () => true)).independentPart).toBeNull();
+    await updateTaskEngine(ctx, head.id, docs.id, { after: [api.id], independentPart });
+    expect(await db.select().from(tasks).where(eq(tasks.parentId, docs.id))).toHaveLength(1);
+    expect(await db.select().from(taskEvents).where(eq(taskEvents.taskId, docs.id))).not.toHaveLength(0);
+  });
+
+  it('does not finish the parent or open turn review when the independent child finishes early', async () => {
+    const { ctx, db, dev, head, bruno, rita, tess, parent, member } = await company();
+    const api = (await member('Checkout API', bruno.id)).task;
+    const moved = await createTaskEngine(ctx, { agentId: head.id }, {
+      title: 'Full checkout', brief: '', body: '', departmentId: dev.id, parentId: parent.id,
+      assigneeAgentId: tess.id, executor: true, gates: [rita.id], after: [api.id], inTurnReview: true,
+      independentPart: { title: 'Contract tests', brief: '', body: 'Test first.', executor: bruno.id },
+    });
+    const [child] = await db.select().from(tasks).where(eq(tasks.parentId, moved.task.id));
+    await submit(ctx, bruno.id, child!.id, { summary: 'Done.', evidence: 'npm test' });
+    await verdict(ctx, rita.id, child!.id, { pass: true, comment: 'Good.' });
+    expect((await db.select().from(tasks).where(eq(tasks.id, moved.task.id)))[0]!.status).not.toBe('done');
+    expect(await db.select().from(taskEvents).where(sql`${taskEvents.data}->>'turnReview' = 'true'`)).toHaveLength(0);
+  });
+
+  it('requires the declaration through the person API and returns the linked child', async () => {
+    const { app, db, owner, dev, bruno, member } = await company();
+    const api = (await member('Checkout API', bruno.id)).task;
+    const refused = await app.inject({ method: 'POST', url: '/api/tasks', payload: { title: 'Launch', department: dev.id, after: [api.number] }, ...as(owner) });
+    expect(refused.statusCode).toBe(400);
+    expect(refused.json().error.message).toBe('A task with after needs independentPart or independentNone.');
+    expect(await db.select().from(tasks).where(eq(tasks.title, 'Launch'))).toHaveLength(0);
+    const made = await app.inject({ method: 'POST', url: '/api/tasks', payload: {
+      title: 'Launch', department: dev.id, after: [api.number],
+      independentPart: { title: 'Release notes', brief: 'Now.', body: 'Write notes.', executor: bruno.id },
+    }, ...as(owner) });
+    expect(made.statusCode).toBe(201);
+    expect(made.json().task.independentPart).toMatchObject({ title: 'Release notes', executor: { id: bruno.id }, task: { title: 'Release notes', status: 'open' } });
+    expect(await db.select().from(tasks).where(eq(tasks.parentId, made.json().task.id))).toHaveLength(1);
   });
 });

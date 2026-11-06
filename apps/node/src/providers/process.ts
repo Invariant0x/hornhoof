@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { closeSync, constants, fchownSync, fstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, fchownSync, fstatSync, lchownSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { isRootUser, type JobUser } from '../isolation.js';
 import type { LoginIo } from '../runner.js';
@@ -217,6 +217,16 @@ export function readPrivate(path: string): string | null {
 
 export function ensureDir(path: string): string {
   mkdirSync(path, { recursive: true });
+  return path;
+}
+
+/* A folder in the agent's own folder that its program's user may use. The node may run as root there, where the agent
+   could leave a link: it hands over a real folder only, and never what a link points to (lstat and lchown). */
+export function agentDir(path: string, user: JobUser | null): string {
+  mkdirSync(path, { recursive: true });
+  if (!user) return path;
+  if (!lstatSync(path).isDirectory()) throw new Error(`${path} is not a folder.`);
+  lchownSync(path, user.uid, user.gid);
   return path;
 }
 
