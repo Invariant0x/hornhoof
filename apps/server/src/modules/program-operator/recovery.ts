@@ -151,25 +151,21 @@ export async function continueRecovery(ctx: Ctx, row: Case, end: HoldEnd): Promi
 }
 
 /* A retry a node restart queued takes these words on already, as the same words must not run twice; one somebody stopped
-   leaves them stopped. With no turn to take them on, a hold stays while the agent has no plan, as the watch then calls
+   leaves them stopped. The tasks that went out inside the unheard turn were not heard either way, and a retry says only the
+   turn's own words. With no turn to take them on, a hold stays while the agent has no plan, as the watch then calls
    Operations, and ends when the task no longer waits for them. */
 async function wordsGoOn(ctx: Ctx, row: Case, original: Job, delivery: typeof programDeliveries.$inferSelect, end: HoldEnd): Promise<void> {
   const next = await turnGoingOn(ctx, original.id);
   if (next?.error === 'cancelled') return finishRecovery(ctx, row, null, STOPPED);
-  const continuationJobId = next?.id ?? await recoveryContinuation(ctx, row, original, delivery);
+  const at = new Date();
+  const continuationJobId = next?.id ?? await sayAgain(ctx, original, at, original.requestedPrompt ?? original.prompt, { operatorDelivery: { id: delivery.id, ordinal: delivery.ordinal }, operatorRecovery: row.id });
+  await tellAgainWentAlong(ctx, original, at, words => words);
   if (continuationJobId) return finishRecovery(ctx, row, continuationJobId, end);
   if (await liveSubscription(ctx, row.agentId)) await finishRecovery(ctx, row, null, NOT_AWAITED);
 }
 
 function recoverableJob(job: Job): boolean {
   return job.status === 'failed' && !stoppedOnPurpose(job);
-}
-
-async function recoveryContinuation(ctx: Ctx, row: Case, original: Job, delivery: typeof programDeliveries.$inferSelect): Promise<string | null> {
-  const at = new Date();
-  const continuationJobId = await sayAgain(ctx, original, at, original.requestedPrompt ?? original.prompt, { operatorDelivery: { id: delivery.id, ordinal: delivery.ordinal }, operatorRecovery: row.id });
-  await tellAgainWentAlong(ctx, original, at, words => words);
-  return continuationJobId;
 }
 
 async function finishRecovery(ctx: Ctx, row: Case, continuationJobId: string | null, { outcome, text, actor }: HoldEnd): Promise<void> {

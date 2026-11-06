@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { expect, it } from 'vitest';
 import { OPERATOR_CASE_MS, type OperatorRecoveryState } from '@hornhoof/protocol/program-operator';
-import { agentEvents, agents, departments, jobs, machines, nodes, programDeliveries, programInstances, programOperatorActions, programOperatorCases, subscriptions } from '../src/db/schema.js';
+import { agentEvents, agents, departments, jobs, machines, nodes, programDeliveries, programInstances, programOperatorActions, programOperatorCases, subscriptions, tasks } from '../src/db/schema.js';
 import { instructionsOf } from '../src/modules/agents/instructions.js';
 import { enqueueTurn, pump } from '../src/modules/conversation/queue.js';
 import { failOpenJobs } from '../src/modules/nodes/messages.js';
@@ -200,6 +200,17 @@ it('keeps the hold while the agent has no plan to run the words, with the round 
   await c.db.update(agents).set({ subscriptionId: c.sub.id }).where(eq(agents.id, c.agent.id));
   await checkOperatorHealth(c.ctx);
   expect(await c.children()).toHaveLength(1);
+});
+
+it('ends the hold when the task no longer waits for the words, which nothing else would ever end', async () => {
+  const c = await held();
+  const { task } = await createTask(c.ctx, { agentId: c.head.id }, { title: 'Checkout', brief: '', body: 'POST /checkout.', departmentId: c.dev.id, assigneeAgentId: c.agent.id, executor: true });
+  await c.db.update(tasks).set({ status: 'done', closedAt: new Date() }).where(eq(tasks.id, task.id));
+  await c.db.update(jobs).set({ taskId: task.id, error: 'machine_restarted', failure: null }).where(eq(jobs.id, c.job.id));
+  await c.record({ ...c.fact, phase: 'cancelled', elapsedMs: 70000 });
+  await checkOperatorHealth(c.ctx);
+  expect(await c.children()).toEqual([]);
+  expect(await c.row()).toMatchObject({ status: 'resolved', recoveryHold: false, continuationJobId: null, resolution: { outcome: 'not_awaited' } });
 });
 
 it('goes on from the minute round when the node said so before its turn failed', async () => {
