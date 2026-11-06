@@ -502,8 +502,15 @@
     {
       "idx": 72,
       "version": "7",
-      "when": 1793940342599,
-      "tag": "0072_task_wait_ownership",
+      "when": 1793940899441,
+      "tag": "0072_external_failures",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1793942944520,
+      "tag": "0073_task_wait_ownership",
       "breakpoints": true
     }
   ]

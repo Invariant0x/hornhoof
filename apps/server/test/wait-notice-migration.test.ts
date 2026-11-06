@@ -1,28 +1,12 @@
-import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { PGlite } from '@electric-sql/pglite';
 import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { MIGRATIONS } from '../src/db/client.js';
-
-/* Columns added to tasks after the schema this test upgrades from, empty on every task kept from before them. */
-const ADDED_TO_TASKS = { work_kind: null, risk_class: null, urgent: false };
+import { migrationsBefore, migrationsThrough } from './migrations-before.js';
 
 const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
-
-async function previousMigrations(last = 54) {
-  const folder = await mkdtemp(join(tmpdir(), 'wait-notice-migration-'));
-  onTestFinished(() => rm(folder, { recursive: true, force: true }));
-  await cp(MIGRATIONS, folder, { recursive: true });
-  const file = join(folder, 'meta/_journal.json');
-  const journal = JSON.parse(await readFile(file, 'utf8')) as { entries: { idx: number }[] };
-  journal.entries = journal.entries.filter(entry => entry.idx <= last);
-  await writeFile(file, JSON.stringify(journal));
-  return folder;
-}
 
 describe('durable wait notices migration', () => {
   it('creates an empty outbox with durable deduplication and a pending index on a fresh database', async () => {
@@ -44,18 +28,17 @@ describe('durable wait notices migration', () => {
     const client = new PGlite();
     onTestFinished(() => client.close());
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: await previousMigrations() });
+    await migrate(db, { migrationsFolder: await migrationsBefore('task_wait_notices') });
     await db.execute(sql`insert into companies(name) values ('Acme')`);
     await db.execute(sql`insert into agents(company_id,kind,name,model) select id,'worker','Bruno','' from companies`);
     await db.execute(sql`insert into tasks(company_id,number,title,external_wait) select id,1,'Acceptance','{"reason":"Machine","since":"2026-11-04T16:00:00Z","until":"2026-11-04T17:00:00Z"}'::jsonb from companies`);
     await db.execute(sql`insert into pending_wakes(company_id,agent_id,task_id,why) select a.company_id,a.id,t.id,'comment' from agents a join tasks t on t.company_id=a.company_id`);
-    const beforeTasks = (await db.execute<{ data: Record<string, unknown> }>(sql`select to_jsonb(t) as data from tasks t`)).rows;
+    const beforeTasks = (await db.execute(sql`select to_jsonb(t) as data from tasks t`)).rows;
     const beforeWakes = (await db.execute(sql`select to_jsonb(w) as data from pending_wakes w`)).rows;
-    await migrate(db, { migrationsFolder: MIGRATIONS });
-    await migrate(db, { migrationsFolder: MIGRATIONS });
-    expect((await db.execute(sql`select to_jsonb(t) as data from tasks t`)).rows).toEqual(beforeTasks.map(({ data }) => ({
-      data: { ...data, ...ADDED_TO_TASKS, external_wait: { ...(data.external_wait as object), operation: expect.stringMatching(new RegExp(`^${UUID}$`)) as string } },
-    })));
+    const upgraded = await migrationsThrough('task_wait_notices');
+    await migrate(db, { migrationsFolder: upgraded });
+    await migrate(db, { migrationsFolder: upgraded });
+    expect((await db.execute(sql`select to_jsonb(t) as data from tasks t`)).rows).toEqual(beforeTasks);
     expect((await db.execute(sql`select to_jsonb(w) as data from pending_wakes w`)).rows).toEqual(beforeWakes);
     expect((await db.execute(sql`select table_name from information_schema.tables where table_name = 'wait_notices'`)).rows).toHaveLength(1);
   });
@@ -65,7 +48,7 @@ describe('durable wait notices migration', () => {
     const client = new PGlite();
     onTestFinished(() => client.close());
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: await previousMigrations(71) });
+    await migrate(db, { migrationsFolder: await migrationsBefore('task_wait_ownership') });
     const one = async <T,>(statement: ReturnType<typeof sql>) => (await db.execute<T & Record<string, unknown>>(statement)).rows[0]!;
     const company = (name: string, singleton: boolean) => one<{ id: string }>(sql`insert into companies(name,singleton) values (${name},${singleton}) returning id`);
     const agent = (companyId: string, name: string) => one<{ id: string }>(sql`insert into agents(company_id,kind,name,model) values (${companyId},'worker',${name},'') returning id`);
@@ -100,9 +83,10 @@ describe('durable wait notices migration', () => {
     await db.execute(sql`insert into test_runs(company_id,number,task_id,agent_id,job_id,kind,command,parts,timeout_ms,status,finished_at) values (${acme.id},2,${following.id},${bruno.id},${job.id},'test','npm test',1,60000,'passed',now())`);
     await db.execute(sql`insert into test_parts(company_id,run_id,part,environment_selection,environment_receipt) values (${acme.id},${running.id},1,'{"selection":"kept","after":[]}'::jsonb,'{"digest":"kept"}'::jsonb)`);
     const facts = async (table: string) => (await db.execute(sql.raw(`select to_jsonb(r) as data from ${table} r order by id`))).rows;
-    const [runs, parts, requests] = [await facts('test_runs'), await facts('test_parts'), await facts('requests')];
+    const [runs, parts, requests, before] = [await facts('test_runs'), await facts('test_parts'), await facts('requests'), await facts('tasks')];
+    const upgraded = await migrationsThrough('task_wait_ownership');
 
-    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await migrate(db, { migrationsFolder: upgraded });
 
     const operation = async (id: string) => (await one<{ op: string }>(sql`select external_wait->>'operation' as op from tasks where id=${id}`)).op;
     const rows = (await db.execute<{ task_id: string; kind: string; source_key: string; owner_agent_id: string | null; company_id: string; source_state: object }>(sql`select * from task_waits`)).rows;
@@ -125,10 +109,14 @@ describe('durable wait notices migration', () => {
     expect(await facts('test_runs')).toEqual(runs);
     expect(await facts('test_parts')).toEqual(parts);
     expect(await facts('requests')).toEqual(requests);
+    expect(await facts('tasks')).toEqual(before.map(({ data }) => {
+      const kept = data as { external_wait: object | null };
+      return { data: kept.external_wait ? { ...kept, external_wait: { ...kept.external_wait, operation: expect.stringMatching(new RegExp(`^${UUID}$`)) as string } } : kept };
+    }));
     const operations = new Set([await operation(onEmployee.id), await operation(onEvent.id)]);
     expect(operations.size).toBe(2);
     for (const op of operations) expect(op).toMatch(new RegExp(`^${UUID}$`));
-    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await migrate(db, { migrationsFolder: upgraded });
     expect((await db.execute(sql`select id from task_waits`)).rows).toHaveLength(rows.length);
   });
 

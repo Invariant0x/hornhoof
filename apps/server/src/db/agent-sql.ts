@@ -21,7 +21,7 @@ const OUTBOUND = [
   'outbound_messages', 'outbound_message_revisions', 'outbound_approvals', 'outbound_review_receipts', 'outbound_daily_usage', 'outbound_attempts', 'outbound_events', 'outbound_sampling_counters',
   'support_tickets', 'support_classifications',
 ];
-export const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials', 'request_internal', 'model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations', 'model_check_certificates', 'task_waits', 'wait_policies', ...OUTBOUND];
+export const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials', 'request_internal', 'model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations', 'model_check_certificates', 'task_waits', 'wait_policies', ...OUTBOUND, 'external_operations', 'external_recovery_cases', 'external_recovery_members', 'external_recovery_attempts', 'external_recovery_notices'];
 /* Columns that hold a password, a token or a key: neither role reads or writes them. A machine's key goes with
    every join from it, so it is one too. The account a node is signed in to names a person's email. */
 export const SECRET: Record<string, string[]> = {

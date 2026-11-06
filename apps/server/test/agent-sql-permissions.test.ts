@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { agentRole, grantsFor, readerGrantsFor, readerRole, type SqlMode } from '../src/db/agent-sql.js';
-import { createTestDb } from './helpers.js';
+import { createTestDb } from './helpers-db.js';
 
 async function roles() {
   const { $client: client } = await createTestDb();
