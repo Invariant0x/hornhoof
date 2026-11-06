@@ -44,28 +44,27 @@ describe('a change of the check', () => {
 
   it.each(changes)('in its %s turns it off and starts a run', (part, change) => {
     const next = { ...base, ...change };
-    const done = afterChange(on(bindingDigest(base)), base, next, NOW)!;
+    const done = afterChange(base, next, NOW)!;
     expect(done.state).toEqual({ status: 'off', bindingDigest: bindingDigest(next), validUntil: null });
     expect(done.run).toMatchObject({ bindingDigest: bindingDigest(next), trigger: 'change', parts: [part] });
   });
 
   it('names every part that changed', () => {
-    expect(afterChange(off(), base, { ...base, promptHash: hashOf('other'), sourceListHash: hashOf('other') }, NOW)!.run.parts).toEqual(['prompt', 'list']);
+    expect(afterChange(base, { ...base, promptHash: hashOf('other'), sourceListHash: hashOf('other') }, NOW)!.run.parts).toEqual(['prompt', 'list']);
   });
 
   it('starts nothing when nothing changed', () => {
-    expect(afterChange(on(bindingDigest(base)), base, { ...base }, NOW)).toBeNull();
+    expect(afterChange(base, { ...base }, NOW)).toBeNull();
   });
 
   it('starts the first run of a new check, and it stays off', () => {
-    expect(afterChange(off(), null, base, NOW)).toMatchObject({ state: { status: 'off' }, run: { trigger: 'change', parts: ['code', 'prompt', 'output_schema', 'list', 'taxonomy', 'model', 'dataset', 'thresholds', 'scope'] } });
+    expect(afterChange(null, base, NOW)).toMatchObject({ state: { status: 'off' }, run: { trigger: 'change', parts: ['code', 'prompt', 'output_schema', 'list', 'taxonomy', 'model', 'dataset', 'thresholds', 'scope'] } });
   });
 
   it('gives a change back to an earlier value a run of its own', () => {
     const next = { ...base, thresholdsHash: hashOf('other') };
-    const first = afterChange(off(), base, next, NOW)!;
-    const back = afterChange(first.state, next, base, later(1))!;
-    const again = afterChange(back.state, base, next, later(2))!;
+    const first = afterChange(base, next, NOW)!;
+    const again = afterChange(base, next, later(2))!;
     expect(again.run.bindingDigest).toBe(first.run.bindingDigest);
     expect(again.run.dedupKey).not.toBe(first.run.dedupKey);
   });

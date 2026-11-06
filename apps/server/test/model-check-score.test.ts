@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Case, CheckResult } from '../src/modules/model-checks/contract.js';
-import { decide, scoreCases, type Thresholds } from '../src/modules/model-checks/score.js';
+import { decide, parseThresholds, scoreCases, type Thresholds } from '../src/modules/model-checks/score.js';
 import { classCase, holdout, mustBlock, reviewCase } from './model-check-fixture.js';
 
 const review = (decision: 'allow' | 'block' | 'escalate'): CheckResult => ({ kind: 'review', decision, reasonCodes: [] });
@@ -163,5 +163,24 @@ describe('what a run comes to', () => {
       expect(decide(scored, HAS_ALL, allowed({ falseDenyRate: 0.2 }))).toEqual({ status: 'failed', problems: ['over_threshold'] });
       expect(decide(scored, HAS_ALL, allowed({ falseDenyRate: 0.5 })).status).toBe('passed');
     });
+  });
+});
+
+describe('the limits an owner gives', () => {
+  it('takes three shares between 0 and 1', () => {
+    expect(parseThresholds({ falseAllowRate: 0, falseDenyRate: 0.1, classErrorRate: 1 })).toEqual({ falseAllowRate: 0, falseDenyRate: 0.1, classErrorRate: 1 });
+  });
+
+  it.each<[string, unknown]>([
+    ['nothing', null],
+    ['a share that is not a number', { falseAllowRate: Number.NaN, falseDenyRate: 0, classErrorRate: 0 }],
+    ['an endless share', { falseAllowRate: Number.POSITIVE_INFINITY, falseDenyRate: 0, classErrorRate: 0 }],
+    ['a share above 1', { falseAllowRate: 1.5, falseDenyRate: 0, classErrorRate: 0 }],
+    ['a share below 0', { falseAllowRate: -0.1, falseDenyRate: 0, classErrorRate: 0 }],
+    ['a share as words', { falseAllowRate: '0', falseDenyRate: 0, classErrorRate: 0 }],
+    ['a share left out', { falseAllowRate: 0, falseDenyRate: 0 }],
+    ['a field nobody knows', { falseAllowRate: 0, falseDenyRate: 0, classErrorRate: 0, mustBlockRate: 1 }],
+  ])('takes %s as no limits, so a check stays off', (_name, given) => {
+    expect(parseThresholds(given)).toBeNull();
   });
 });
