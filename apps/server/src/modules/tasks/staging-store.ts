@@ -33,7 +33,7 @@ export async function settleRegisteredStagingTrial(ctx: StagingPrivateContext, i
     const parts = await tx.select().from(testParts).where(eq(testParts.runId, run.id));
     const proof = evaluateStagingPin({ companyId, runId: run.id, taskId: run.taskId, jobId: run.jobId,
       agentId: run.agentId, commitSha: trial.candidateSha, parts: run.parts }, run, parts);
-    if (proof.status === 'waiting' || proof.status === 'unavailable') return { status: proof.status };
+    if (!('partIds' in proof)) return { status: proof.status };
     if (!run.finishedAt || parts.some(part => !part.finishedAt)) return { status: 'unavailable' };
     const status = proof.status === 'passed' ? 'passed' : 'unattributed';
     if (replay) {
