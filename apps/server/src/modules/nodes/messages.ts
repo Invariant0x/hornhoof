@@ -24,6 +24,7 @@ import { interruptionValue, type RestartCut } from './restart-evidence.js';
 import { hookRejected } from './hook-rejections.js';
 import { checkQueueLoad, nodeCheckQueueLost, routeCheckMessage } from './check-slots.js';
 import { adoptOperatorOwnerTurn } from '../program-operator/recovery.js';
+import { releaseProgramsOfLeftPlans } from '../agents/left-programs.js';
 
 const OPEN_JOBS = ['queued', 'running'] as const;
 
@@ -240,6 +241,7 @@ export async function handleNodeMessage(ctx: Ctx, id: NodeIdentity, msg: NodeMes
       ctx.hub.greet(id, msg.terminals === true, msg.skillFiles === true, msg.work === true, msg.noRuns || null, msg.build, msg.browserError || null);
       if (msg.load) { ctx.hub.report(id, msg.load); await checkQueueLoad(ctx, id); }
       await testsHello(ctx, id, msg.tests);
+      await releaseProgramsOfLeftPlans(ctx, id, jobsOf(id, ctx));
       /* Hornhoof ended these while the node was away, with a stop or a removed subscription; the node stops them now. */
       if (msg.running.length) {
         const open = await db.select({ id: jobs.id }).from(jobs).where(and(inArray(jobs.id, msg.running), inArray(jobs.status, OPEN_JOBS), jobsOf(id, ctx)));

@@ -78,3 +78,13 @@ it('exposes safe request/proposal digests while refusing private proposal histor
     }
   }
 });
+
+it.each(['model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations'])('closes %s to both SQL roles, reading too', async table => {
+  const run = await roles();
+  const statements = [`SELECT * FROM ${table}`, `INSERT INTO ${table} (id) SELECT id FROM ${table} WHERE false`, `UPDATE ${table} SET id = id WHERE false`, `DELETE FROM ${table} WHERE false`];
+  for (const mode of ['write', 'read'] as const) {
+    for (const statement of statements) {
+      await expect(run(mode, statement), `${mode}: ${statement}`).rejects.toThrow(/permission denied/);
+    }
+  }
+});
