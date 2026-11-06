@@ -1,17 +1,17 @@
 import type { TemplateKey } from './types';
 
 /* The department templates in card order, as the server has them; kept here so the browser does not load the protocol's validators. */
-export const TEMPLATES: readonly { key: TemplateKey; roleCode: string; ticked: boolean; always: boolean }[] = [
-  { key: 'operations', roleCode: 'OPS', ticked: true, always: true },
-  { key: 'development', roleCode: 'DEV', ticked: true, always: false },
-  { key: 'marketing', roleCode: 'MKT', ticked: true, always: false },
-  { key: 'sales', roleCode: 'SAL', ticked: true, always: false },
-  { key: 'business_development', roleCode: 'BIZ', ticked: true, always: false },
-  { key: 'design', roleCode: 'DSN', ticked: false, always: false },
-  { key: 'support', roleCode: 'SUP', ticked: false, always: false },
-  { key: 'finance', roleCode: 'FIN', ticked: false, always: false },
-  { key: 'home_devices', roleCode: 'HOM', ticked: false, always: false },
-  { key: 'household', roleCode: 'HHD', ticked: false, always: false },
+export const TEMPLATES: readonly { key: TemplateKey; roleCode: string; ticked: boolean; always: boolean; workMode: 'turns' | 'continuous' }[] = [
+  { key: 'operations', roleCode: 'OPS', ticked: true, always: true, workMode: 'continuous' },
+  { key: 'development', roleCode: 'DEV', ticked: true, always: false, workMode: 'turns' },
+  { key: 'marketing', roleCode: 'MKT', ticked: true, always: false, workMode: 'turns' },
+  { key: 'sales', roleCode: 'SAL', ticked: true, always: false, workMode: 'turns' },
+  { key: 'business_development', roleCode: 'BIZ', ticked: true, always: false, workMode: 'turns' },
+  { key: 'design', roleCode: 'DSN', ticked: false, always: false, workMode: 'turns' },
+  { key: 'support', roleCode: 'SUP', ticked: false, always: false, workMode: 'turns' },
+  { key: 'finance', roleCode: 'FIN', ticked: false, always: false, workMode: 'turns' },
+  { key: 'home_devices', roleCode: 'HOM', ticked: false, always: false, workMode: 'turns' },
+  { key: 'household', roleCode: 'HHD', ticked: false, always: false, workMode: 'turns' },
 ];
 
 export type CompanyTemplateKey = 'project' | 'startup' | 'studio' | 'corporation' | 'security' | 'opensource' | 'agency' | 'lab' | 'home';
