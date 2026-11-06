@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:
 import { hostname, uptime } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { LOAD_MS, NodeBuild, type AgentEvent, type CredKind, type Limits, type NodeLoad, type NodeMessage, type NodeStopReason, type ProviderId, type ServerMessage } from '@hornhoof/protocol';
+import { HandoffControlMessage, LOAD_MS, NodeBuild, type AgentEvent, type CredKind, type Limits, type NodeLoad, type NodeMessage, type NodeStopReason, type ProviderId, type ServerMessage } from '@hornhoof/protocol';
 import { SIGNIN_ERRORS } from '@hornhoof/protocol/signin';
 import { agentFs, ownFs, type AgentFs } from './agent-fs.js';
 import { bootFacts } from './boot.js';
@@ -659,7 +659,7 @@ function withPrograms(message: NodeMessage, programs: ProgramUpdates): NodeMessa
   return message.type === 'status' ? { ...message, programs: programs.snapshot() } : message;
 }
 
-function acknowledged(message: ServerMessage, jobs: Map<string, NodeMessage>, tests: Map<string, NodeMessage>): message is Extract<ServerMessage, { type: 'job.ack' | 'tests.ack' }> {
+function acknowledged(message: ServerMessage, jobs: Map<string, NodeMessage>, tests: Map<string, NodeMessage>): message is Extract<ServerMessage, { type: 'job.ack' | 'tests.ack' }> | HandoffControlMessage {
   if (message.type === 'job.ack') {
     jobs.delete(message.jobId);
     return true;
@@ -668,7 +668,7 @@ function acknowledged(message: ServerMessage, jobs: Map<string, NodeMessage>, te
     tests.delete(message.partId);
     return true;
   }
-  return false;
+  return HandoffControlMessage.safeParse(message).success;
 }
 
 function runUnlessStopped(input: RunInput, run: () => Promise<RunResult>): Promise<RunResult> {
