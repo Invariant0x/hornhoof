@@ -1,18 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import { and, desc, eq } from 'drizzle-orm';
-import { z } from 'zod';
+import type { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { taskEvents, testRuns } from '../../db/schema.js';
 import type { ToolJob } from '../tools/job.js';
 import { startRun } from '../testruns/runs.js';
 import { loadTask, move, refuse, submissionTask, submit, type Moved, type Task } from './engine.js';
-import { captureReview, ReviewRecord, type ReviewSubmission } from './review-context.js';
+import { AuthorCheckPending, pendingSubmission, type PendingSubmission } from './author-check-pending.js';
+import { finishAuthorCheck } from './author-check-completion.js';
+import { captureReview, type ReviewSubmission } from './review-context.js';
 
 export type AuthorCheckSubmission = { summary: string; evidence: string; review?: z.infer<typeof ReviewSubmission> };
-const Pending = z.object({
-  version: z.literal(1), runId: z.string().uuid(), summary: z.string(), evidence: z.string(), baseCommit: z.string(), authorCheckPlan: z.string(), review: ReviewRecord,
-}).strict();
-type PendingSubmission = z.infer<typeof Pending>;
 
 export async function submitWithAuthorCheck(ctx: Ctx, job: Pick<ToolJob, 'id' | 'companyId' | 'agentId' | 'agentKind' | 'departmentId'>, taskId: string, input: AuthorCheckSubmission): Promise<Moved> {
   if (!ctx.config.authorCheck || !input.review?.authorCheckPlan) return submit(ctx, job.agentId, taskId, input);
@@ -32,6 +30,7 @@ export async function submitWithAuthorCheck(ctx: Ctx, job: Pick<ToolJob, 'id' | 
     status: 'working', silent: 0,
     externalWait: { reason: `Author check ${run.number} on ${review.commit}.`, since: new Date().toISOString(), until, operation: randomUUID(), on: { kind: 'external', event: 'machine' }, run: run.id },
   }, { kind: 'updated', actor: { agentId: job.agentId }, text: `Author check ${run.number} runs on ${review.commit}.`, data: { authorCheckPending: data } });
+  if (run.status !== 'running') return finishAuthorCheck(ctx, run.id);
   return { task: row, wakes: [] };
 }
 
@@ -41,8 +40,8 @@ async function samePending(ctx: Ctx, taskId: string, input: AuthorCheckSubmissio
   if (!runId || !input.review?.authorCheckPlan) return null;
   const events = await ctx.db.select({ data: taskEvents.data }).from(taskEvents).where(and(eq(taskEvents.taskId, taskId), eq(taskEvents.kind, 'updated'))).orderBy(desc(taskEvents.id));
   for (const event of events) {
-    const parsed = Pending.safeParse(event.data.authorCheckPending);
-    if (parsed.success && parsed.data.runId === runId && parsed.data.summary === input.summary && parsed.data.evidence === input.evidence && parsed.data.baseCommit === input.review.baseCommit && parsed.data.authorCheckPlan === input.review.authorCheckPlan) return task;
+    const pending = pendingSubmission(event.data);
+    if (pending && pending.runId === runId && pending.summary === input.summary && pending.evidence === input.evidence && pending.baseCommit === input.review.baseCommit && pending.authorCheckPlan === input.review.authorCheckPlan) return task;
   }
   return null;
 }
@@ -54,3 +53,5 @@ function authorCommand(commit: string, base: string, plan: string): string {
 }
 
 const shellQuote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
+
+export { AuthorCheckPending };

@@ -14,6 +14,9 @@ import { liveNode } from '../nodes/nodes.js';
 import { onTask } from '../tasks/attachments.js';
 import { CLOSED, note, published, refuse, type Task, type Tx, type Wake } from '../tasks/engine.js';
 import { endWaitForRun } from '../tasks/external-wait.js';
+import { endAuthorCheckWait, finishAuthorCheck, pendingAuthorCheckRun } from '../tasks/author-check-completion.js';
+import { settle, tell } from '../tasks/turns.js';
+import { orchestratorOf } from '../conversation/queue.js';
 import { endRunWaits, moveRunStage, recordRunWait } from '../tasks/wait-state.js';
 import { keepWakes } from '../tasks/outbox.js';
 import { taskByRef } from '../tasks/views.js';
@@ -350,6 +353,12 @@ async function told(ctx: Ctx, end: RunEnd): Promise<void> {
   await wakeAll(ctx, end.wakes);
 }
 
+async function toldSubmission(ctx: Ctx, actorId: string, moved: { task: Task; wakes: Wake[] }): Promise<void> {
+  const settled = await settle(ctx, moved.task);
+  const orchestrator = settled ? await orchestratorOf(ctx, moved.task.companyId) : null;
+  await wakeAll(ctx, tell(moved.wakes, settled, orchestrator?.id ?? null, moved.task.id, actorId));
+}
+
 /* What a mark on the run's commit adds: a line in the log of its task, where the one who decides reads it later. It is no
    move of the task, whoever's turn is running. */
 async function keepMark(tx: Tx, run: Run, task: Task, mark: RunMark | null): Promise<string> {
@@ -377,11 +386,19 @@ async function settleRun(ctx: Ctx, runId: string): Promise<void> {
       .where(and(eq(testRuns.id, runId), eq(testRuns.status, 'running')))
       .returning();
     if (!run) return null;
+    if (await pendingAuthorCheckRun(tx, task.id, run.id)) {
+      await endAuthorCheckWait(tx, run, task);
+      return { authorCheck: run.agentId };
+    }
     const files = await tx.select({ name: attachments.name }).from(attachments).where(and(eq(attachments.taskId, run.taskId), filesOf(run)));
     const marked = await keepMark(tx, run, task, mark);
     return tellEnd(tx, run, task, account(run, task, parts, new Set(files.map(l => l.name!))) + marked, true);
   });
-  if (end) await told(ctx, end);
+  if (!end) return;
+  if ('authorCheck' in end) {
+    const moved = await finishAuthorCheck(ctx, runId);
+    await toldSubmission(ctx, end.authorCheck, moved);
+  } else await told(ctx, end);
 }
 
 /* Parts that end without a word from their node, and the runs they finish. */
@@ -688,6 +705,10 @@ export async function stopRun(ctx: Ctx, job: ToolJob, number: number, kind: RunK
       .set({ status: 'stopped', finishedAt: now })
       .where(and(eq(testParts.runId, run.id), inArray(testParts.status, ['queued', 'running'])))
       .returning();
+    if (await pendingAuthorCheckRun(tx, task.id, row.id)) {
+      await endAuthorCheckWait(tx, row, task);
+      return { parts, authorCheck: row.agentId };
+    }
     return { parts, end: await tellEnd(tx, row, task, `${named(run)} was stopped by ${stopper}. ${readAgain(run)}`, other) };
   });
   if (!stopped) throw refuse(409, 'task_invalid', `${named(run)} ended meanwhile.`);
@@ -696,7 +717,10 @@ export async function stopRun(ctx: Ctx, job: ToolJob, number: number, kind: RunK
     if (node) ctx.hub.send(node, { type: 'tests.cancel', partId: p.id });
   }
   cancelDescription(ctx, run.environmentRequest);
-  await told(ctx, stopped.end);
+  if ('authorCheck' in stopped) {
+    const moved = await finishAuthorCheck(ctx, run.id);
+    await toldSubmission(ctx, stopped.authorCheck, moved);
+  } else await told(ctx, stopped.end);
   await pumpTests(ctx);
   return `${named(run)} is stopped.`;
 }
