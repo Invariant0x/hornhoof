@@ -5,6 +5,8 @@ description: { en: "Gives each member a self-contained brief and the right model
 kind: procedure
 sources: [obra/superpowers skills/subagent-driven-development/SKILL.md]
 ---
+For `small: true`, the brief states only the change and its check in a few lines. Use the fast path in hh-lead-tasks, with detailed reports and matrices deferred to the shared turn review. The full brief below is for other tasks.
+
 A member knows only what your brief says. Write it once, so they need nothing else:
 
 - **Goal**: what this task is for, in one sentence.

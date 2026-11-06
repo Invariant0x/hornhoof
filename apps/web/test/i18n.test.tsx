@@ -87,6 +87,37 @@ describe('errorText', () => {
     const err = new ApiFailure(401, 'unauthorized', 'Some new server text.', 'not_a_reason_yet');
     expect(errorText(ru, err)).toBe(ru.errors.codes.unauthorized);
     expect(errorText(en, err)).toBe('Some new server text.');
+    const unavailableProducer = new ApiFailure(503, 'unavailable', '', 'source_producer_unavailable');
+    expect(errorText(en, unavailableProducer)).toBe(en.errors.source_producer_unavailable);
+    expect(errorText(ru, unavailableProducer)).toBe(ru.errors.source_producer_unavailable);
+  });
+
+  it('streams bytes across arrayBuffer fallback and content-length headers', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (path: string) => {
+        if (path === '/no-body-short') {
+          const fake = {
+            ok: true,
+            status: 200,
+            headers: new Headers({ 'content-length': '10' }),
+            body: null,
+            arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
+          };
+          return fake as unknown as Response;
+        }
+        return new Response(new Uint8Array([4, 5]), {
+          status: 200,
+          headers: { 'content-length': 'not-a-number' },
+        });
+      }),
+    );
+    const shortRes = await api.streamBytes('/no-body-short');
+    expect(shortRes.complete).toBe(false);
+    expect(shortRes.error).toBe('incomplete');
+    const badHeaderRes = await api.streamBytes('/bad-len');
+    expect(badHeaderRes.complete).toBe(true);
+    expect( Array.from(badHeaderRes.bytes) ).toEqual([4, 5]);
   });
 });
 
@@ -139,5 +170,77 @@ describe('work tree words', () => {
   it('names a hidden employee in English and Russian', () => {
     expect(en.window.hiddenEmployee).toBe('Employee');
     expect(ru.window.hiddenEmployee).toBe('Сотрудник');
+  });
+
+  it('names separate material viewing and choice answer actions in English and Russian without changing existing labels', () => {
+    expect(en.tasks.approve).toBe('Approve');
+    expect(ru.tasks.approve).toBe('Одобрить');
+    expect(en.tasks.decline).toBe('Decline');
+    expect(ru.tasks.decline).toBe('Отклонить');
+    expect(en.tasks.sendAnswer).toBe('Send answer');
+    expect(ru.tasks.sendAnswer).toBe('Отправить ответ');
+    expect(en.tasks.cancelTask).toBe('Cancel task');
+    expect(ru.tasks.cancelTask).toBe('Отменить задачу');
+    expect(en.tasks.seeWork).toBe('See the work');
+    expect(ru.tasks.seeWork).toBe('Посмотреть работу');
+    expect(en.tasks.sendFeedback).toBe('Send without choosing');
+    expect(ru.tasks.sendFeedback).toBe('Отправить без выбора');
+    expect(en.tasks.chooseOption(2)).toBe('Choose option 2');
+    expect(ru.tasks.chooseOption(2)).toBe('Выбрать вариант 2');
+    expect(en.tasks.materials.open).toBe('Open');
+    expect(ru.tasks.materials.open).toBe('Открыть');
+    expect(en.tasks.materials.showAll(14)).toBe('Show all: 14');
+    expect(ru.tasks.materials.showAll(14)).toBe('Показать все: 14');
+    expect(en.tasks.materials.picturePos(2, 3)).toBe('Picture 2 of 3');
+    expect(ru.tasks.materials.picturePos(2, 3)).toBe('Картинка 2 из 3');
+    expect(en.tasks.materials.materialPos(1, 4)).toBe('Material 1 of 4');
+    expect(ru.tasks.materials.materialPos(1, 4)).toBe('Материал 1 из 4');
+    expect(en.tasks.materials.pageOf(1, 5)).toBe('Page 1 of 5');
+    expect(ru.tasks.materials.pageOf(1, 5)).toBe('Страница 1 из 5');
+    expect(en.tasks.materials.endOfDocument).toBe('End of document. Shown in full.');
+    expect(ru.tasks.materials.endOfDocument).toBe('Конец документа. Показано целиком.');
+    expect(en.tasks.materials.incomplete).toBe('Not all of the document is loaded yet.');
+    expect(ru.tasks.materials.incomplete).toBe('Документ загружен еще не полностью.');
+    expect(en.tasks.materials.pdfUnavailable).toBe('PDF preview is not available right now. Download the file.');
+    expect(ru.tasks.materials.pdfUnavailable).toBe('Просмотр PDF пока недоступен. Скачайте файл.');
+    expect(en.tasks.materials.proposalNote).toBe('Original proposal. Your changes are not part of it.');
+    expect(ru.tasks.materials.proposalNote).toBe('Исходное предложение. Ваши правки в него не входят.');
+    expect(en.failures.model_access_denied).toBe('this plan cannot use the selected model');
+    expect(ru.failures.model_access_denied).toBe('этот тариф не дает доступ к выбранной модели');
+  });
+
+  it('formats plural and duration helpers consistently across numeric ranges in English and Russian', () => {
+    for (const dict of [en, ru]) {
+      for (const count of [0, 1, 2, 5, 11, 21]) {
+        expect(dict.companyTemplates.employees(count)).toContain(String(count));
+        expect(dict.map.decisionsOf('Ivan', count)).toContain('Ivan');
+        expect(dict.updates.cutText(count)).toContain(String(count || 0));
+      }
+      expect(dict.map.decisionsOf('Ivan', null)).toContain('Ivan');
+      expect(dict.agent.every(15)).toContain('15');
+      expect(dict.agent.every(60).length).toBeGreaterThan(0);
+      expect(dict.agent.every(120)).toContain('2');
+      expect(dict.machines.part({ kind: 'tests', run: 7, task: null, part: 1, parts: 1 })).toContain('7');
+      expect(dict.machines.part({ kind: 'work', run: 8, task: 512, part: 2, parts: 4 })).toContain('512');
+      expect(dict.machines.drainWaiting(0, 0, '12:00')).toContain('12:00');
+      expect(dict.machines.drainWaiting(1, 0, '12:00')).toContain('1');
+      expect(dict.machines.drainWaiting(0, 2, '12:00')).toContain('2');
+      expect(dict.machines.drainWaiting(5, 11, '12:00')).toContain('5');
+      expect(dict.dept.tree.dur(0)).toContain('0');
+      expect(dict.dept.tree.dur(45)).toContain('45');
+      expect(dict.dept.tree.dur(60)).toContain('1');
+      expect(dict.dept.tree.dur(125)).toContain('2');
+      expect(dict.dept.tree.verdict(true, null).length).toBeGreaterThan(0);
+      expect(dict.dept.tree.verdict(false, 2)).toContain('2');
+      expect(dict.dept.now.retryAttempt(1, null, null)).toContain('1');
+      expect(dict.dept.now.retryAttempt(2, 5, '12:05')).toContain('5');
+      expect(dict.dept.stats(1, 2, 3, 0)).toContain('1');
+      expect(dict.dept.stats(1, 1, 1, 2)).toContain('2');
+      expect(dict.dept.statusSummary({ working: 1, idle: 2 })).toContain('1');
+      expect(dict.updates.result({ state: 'done', version: '0.8.0' }, '0.7.0')).toContain('0.8.0');
+      expect(dict.updates.result({ state: 'rolled_back', version: '0.8.0' }, '0.7.0')).toContain('0.7.0');
+      expect(dict.updates.result({ state: 'failed', version: '0.8.0' }, '0.7.0')).toContain('0.8.0');
+      expect(dict.window.noticeSource('task', '', '', 'Agent')).toContain('Agent');
+    }
   });
 });
