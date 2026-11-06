@@ -43,7 +43,7 @@ function gitBytes(args: string[], context: CacheContext, limit = 3 * 1024 * 1024
       capture(mask.flush());
       if (signal.aborted) reject(signal.reason);
       else if (failure) reject(failure);
-      else if (code !== 0) reject(gitPreparationFailure({ kind: 'child', exitCode: code, signal: signalName, osCode: null, stderr, stderrTruncated }, network, [auth.HH_GIT_PASSWORD ?? '']));
+      else if (code !== 0) reject(gitPreparationFailure({ kind: 'child', exitCode: code, signal: signalName, osCode: null, stderr, stderrTruncated }, network, [auth.HH_GIT_PASSWORD ?? ''], network ? 'fetch' : 'local'));
       else resolve(Buffer.concat(chunks));
     });
   });
