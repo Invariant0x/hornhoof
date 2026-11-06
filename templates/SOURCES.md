@@ -230,6 +230,7 @@ The development templates carry Hornhoof's own T1-T11 testing policy and coding 
 | `skills/sup-support-policy.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/sup-support-report.md` | Written for Hornhoof | msitarzewski/agency-agents support/support-analytics-reporter.md; msitarzewski/agency-agents product/product-feedback-synthesizer.md | Hornhoof |
 | `skills/sup-ticket-triage.md` | Written for Hornhoof | anthropics/knowledge-work-plugins customer-support | Hornhoof |
+| `skills/sup-work-pipeline.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `roles/home_devices/HOM-HEAD.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `roles/home_devices/HOM-NET.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `roles/home_devices/HOM-SMART.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
@@ -242,5 +243,4 @@ The development templates carry Hornhoof's own T1-T11 testing policy and coding 
 | `skills/home-smart-control.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/home-shopping.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/home-bills.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
-| `skills/sup-work-pipeline.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/home-calendar.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
