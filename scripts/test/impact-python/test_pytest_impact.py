@@ -33,13 +33,13 @@ def project(root: Path, extra: dict[str, str] | None = None) -> list[str]:
     return sorted(sources)
 
 
-def tests(files: list[str]) -> list[str]:
+def inventory_tests(files: list[str]) -> list[str]:
     return [file for file in files if file.startswith("tests/test_")]
 
 
 def test_transitive_relative_edges_select_only_dependents(tmp_path: Path) -> None:
     files = project(tmp_path)
-    result = select_tests(tmp_path, files, tests(files), ["src/prices.py"])
+    result = select_tests(tmp_path, files, inventory_tests(files), ["src/prices.py"])
     assert result == {
         "status": "ready",
         "selected": ["tests/test_prices.py", "tests/test_report.py"],
@@ -49,7 +49,7 @@ def test_transitive_relative_edges_select_only_dependents(tmp_path: Path) -> Non
 
 def test_selected_files_run_with_real_pytest(tmp_path: Path) -> None:
     files = project(tmp_path)
-    result = select_tests(tmp_path, files, tests(files), ["src/labels.py"])
+    result = select_tests(tmp_path, files, inventory_tests(files), ["src/labels.py"])
     assert result["status"] == "ready"
     assert result["selected"] == ["tests/test_labels.py"]
     output = subprocess.run(
@@ -67,14 +67,14 @@ def test_selected_files_run_with_real_pytest(tmp_path: Path) -> None:
 
 def test_changed_test_itself_is_selected(tmp_path: Path) -> None:
     files = project(tmp_path)
-    assert select_tests(tmp_path, files, tests(files), ["tests/test_labels.py"])[
+    assert select_tests(tmp_path, files, inventory_tests(files), ["tests/test_labels.py"])[
         "selected"
     ] == ["tests/test_labels.py"]
 
 
 def test_proven_unreferenced_module_has_no_tests(tmp_path: Path) -> None:
     files = project(tmp_path, {"src/unreferenced.py": "unused = 1\n"})
-    assert select_tests(tmp_path, files, tests(files), ["src/unreferenced.py"]) == {
+    assert select_tests(tmp_path, files, inventory_tests(files), ["src/unreferenced.py"]) == {
         "status": "ready",
         "selected": [],
         "reason": None,
@@ -95,11 +95,9 @@ def test_proven_unreferenced_module_has_no_tests(tmp_path: Path) -> None:
         {"prices.py": "value = 99\n"},
     ],
 )
-def test_uncertain_graph_is_unavailable(
-    tmp_path: Path, extra: dict[str, str]
-) -> None:
+def test_uncertain_graph_is_unavailable(tmp_path: Path, extra: dict[str, str]) -> None:
     files = project(tmp_path, extra)
-    result = select_tests(tmp_path, files, tests(files), ["src/prices.py"])
+    result = select_tests(tmp_path, files, inventory_tests(files), ["src/prices.py"])
     assert result["status"] == "unavailable"
     assert result["selected"] == []
     assert result["reason"] != "not_implemented"
@@ -108,7 +106,7 @@ def test_uncertain_graph_is_unavailable(
 @pytest.mark.parametrize("path", ["../secret.py", "/etc/passwd", "src/../a.py"])
 def test_unsafe_paths_do_not_open_files(tmp_path: Path, path: str) -> None:
     files = project(tmp_path)
-    assert select_tests(tmp_path, files, tests(files), [path])["reason"] == (
+    assert select_tests(tmp_path, files, inventory_tests(files), [path])["reason"] == (
         "invalid_inventory"
     )
 
@@ -118,19 +116,22 @@ def test_symlink_cannot_import_outside_the_package(tmp_path: Path) -> None:
     path = tmp_path / "src/prices.py"
     path.unlink()
     path.symlink_to(Path(__file__).resolve())
-    assert select_tests(tmp_path, files, tests(files), ["src/prices.py"])[
-        "reason"
-    ] == "invalid_inventory"
+    assert (
+        select_tests(tmp_path, files, inventory_tests(files), ["src/prices.py"])["reason"]
+        == "invalid_inventory"
+    )
 
 
 def test_missing_or_uninventoried_files_are_unavailable(tmp_path: Path) -> None:
     files = project(tmp_path)
-    assert select_tests(tmp_path, files, tests(files), ["src/missing.py"])[
-        "status"
-    ] == "unavailable"
-    assert select_tests(tmp_path, files, ["tests/missing.py"], ["src/prices.py"])[
-        "status"
-    ] == "unavailable"
+    assert (
+        select_tests(tmp_path, files, inventory_tests(files), ["src/missing.py"])["status"]
+        == "unavailable"
+    )
+    assert (
+        select_tests(tmp_path, files, ["tests/missing.py"], ["src/prices.py"])["status"]
+        == "unavailable"
+    )
 
 
 def test_module_cycles_terminate_and_keep_all_dependents(tmp_path: Path) -> None:
@@ -138,14 +139,14 @@ def test_module_cycles_terminate_and_keep_all_dependents(tmp_path: Path) -> None
         tmp_path,
         {"src/prices.py": "import labels\n", "src/labels.py": "import prices\n"},
     )
-    assert select_tests(tmp_path, files, tests(files), ["src/labels.py"])[
+    assert select_tests(tmp_path, files, inventory_tests(files), ["src/labels.py"])[
         "selected"
     ] == ["tests/test_labels.py", "tests/test_prices.py", "tests/test_report.py"]
 
 
 def test_package_initializer_is_a_dependency(tmp_path: Path) -> None:
     files = project(tmp_path)
-    assert select_tests(tmp_path, files, tests(files), ["src/basket/__init__.py"])[
+    assert select_tests(tmp_path, files, inventory_tests(files), ["src/basket/__init__.py"])[
         "selected"
     ] == ["tests/test_report.py"]
 
@@ -159,7 +160,7 @@ def test_cli_emits_json_without_importing_repository_modules(tmp_path: Path) -> 
             {
                 "root": str(tmp_path),
                 "files": files,
-                "tests": tests(files),
+                "tests": inventory_tests(files),
                 "changed": ["src/prices.py"],
             }
         ),
