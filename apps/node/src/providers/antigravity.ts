@@ -1,14 +1,15 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { chmodSync, existsSync, lchownSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { AgentEvent, Limits, ModelOption } from '@hornhoof/protocol';
 import { asAgent, type JobUser } from '../isolation.js';
+import { programDirOf, toldPlace } from '../program-folder.js';
 import type { LoginIo, ProviderAdapter, RunInput, RunResult } from '../runner.js';
 import { withProgramExit } from '../program-exit.js';
 import { READY } from '../terminal/program-state.js';
 import { Tmux } from '../terminal/tmux.js';
 import { contentText, inputText, isRecord, objectLine, toolName } from './events.js';
-import { childEnv, ensureDir, exitsCleanly, firstLine, lastUrl, runInstaller, runProgram, tokensIn, writePrivate } from './process.js';
+import { agentDir, childEnv, ensureDir, exitsCleanly, firstLine, lastUrl, runInstaller, runProgram, tokensIn, writePrivate } from './process.js';
 
 type Options = { home: string; tools: string; bin?: string; user?: JobUser | null; person?: Person };
 
@@ -56,9 +57,9 @@ export const SETUP_NEEDED =
 const AGY_RULES = 24_000;
 const AGY_START = 22_000;
 
-/* What AGENTS.md says to agy, and the whole text for the file it then names. */
-export function agyRules(text: string, file: string): { rules: string; whole: string | null } {
-  if (Buffer.byteLength(text) < AGY_RULES) return { rules: text, whole: null };
+/* What a rules file says to agy, and the whole text for the file it then names. room: what comes before it in that file. */
+export function agyRules(text: string, file: string, room = 0): { rules: string; whole: string | null } {
+  if (Buffer.byteLength(text) + room < AGY_RULES) return { rules: text, whole: null };
   const start: string[] = [];
   let bytes = 0;
   for (const line of text.split('\n')) {
@@ -421,14 +422,17 @@ async function setUpOnScreen(io: LoginIo, { recordingsDir, person, ...look }: Se
   if (await setupShown(look)) throw new Error('Antigravity CLI was closed before its terms were accepted.');
 }
 
-/* A folder in the agent's own folder that its program's user may use. The node may run as root there, where the agent
-   could leave a link: it hands over a real folder only, and never what a link points to (lstat and lchown). */
-function agentDir(path: string, user: JobUser | null): string {
-  mkdirSync(path, { recursive: true });
-  if (!user) return path;
-  if (!lstatSync(path).isDirectory()) throw new Error(`${path} is not a folder.`);
-  lchownSync(path, user.uid, user.gid);
-  return path;
+/* agy reads AGENTS.md in the folder it works in as the folder's rules, and a task's folder has a rules file of its own. */
+function tellAgy(input: RunInput, instructions: string, user: JobUser | null): void {
+  const whole = join(input.workDir, '.hh-instructions.md');
+  const { file, head } = toldPlace('antigravity', input);
+  const said = agyRules(instructions, whole, Buffer.byteLength(head));
+  if (said.whole) writePrivate(whole, said.whole + '\n', user);
+  if (input.programDir) {
+    agentDir(join(input.programDir, '.agents'), user);
+    agentDir(dirname(file), user);
+  }
+  writePrivate(file, head + said.rules + '\n', user);
 }
 
 export function antigravityAdapter({ home, tools, bin = join(tools, 'bin', 'agy'), user = null, person = onOwnTerminal }: Options): ProviderAdapter {
@@ -478,19 +482,14 @@ export function antigravityAdapter({ home, tools, bin = join(tools, 'bin', 'agy'
 
       /* agy takes MCP servers from settings files only, and the token as a header in them: the folder's own file, which
          only the program's user reads, for this run alone. */
-      const mcpJson = join(input.workDir, '.agents', 'mcp_config.json');
+      const programDir = programDirOf(input);
+      const mcpJson = join(programDir, '.agents', 'mcp_config.json');
       if (input.tools) {
-        agentDir(join(input.workDir, '.agents'), user);
+        agentDir(join(programDir, '.agents'), user);
         const server = { serverUrl: input.tools.url, headers: { Authorization: `Bearer ${input.tools.token}` } };
         writePrivate(mcpJson, JSON.stringify({ mcpServers: { hornhoof: server } }), user);
       }
-      /* agy reads AGENTS.md in the folder it works in as the folder's rules. */
-      if (input.instructions) {
-        const file = join(input.workDir, '.hh-instructions.md');
-        const { rules, whole } = agyRules(input.instructions, file);
-        if (whole) writePrivate(file, whole + '\n', user);
-        writePrivate(join(input.workDir, 'AGENTS.md'), rules + '\n', user);
-      }
+      if (input.instructions) tellAgy(input, input.instructions, user);
 
       let sessionId: string | null = input.sessionId;
       let result: Record<string, unknown> | null = null;
@@ -500,7 +499,7 @@ export function antigravityAdapter({ home, tools, bin = join(tools, 'bin', 'agy'
         args,
         env: { ...env(), ...input.env },
         user,
-        cwd: input.workDir,
+        cwd: programDir,
         timeoutMs: input.timeoutMs,
         signal: input.signal,
         onLine(line) {

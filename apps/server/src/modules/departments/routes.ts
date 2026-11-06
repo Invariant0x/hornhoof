@@ -1,5 +1,5 @@
 import { notificationMessage } from '../events/notifications.js';
-import { DEPARTMENT_TEMPLATES, type TemplateKey } from '@hornhoof/protocol';
+import { defaultDepartmentWorkMode, DEPARTMENT_TEMPLATES, type TemplateKey } from '@hornhoof/protocol';
 import { and, asc, eq, inArray, isNotNull, isNull, max, or } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -23,6 +23,7 @@ import { checkStaff, departmentOf, HireLine, requiredState, runsTier, servingSub
 import { BuildItem, checkItems, inPlaces, isNew, type TeamChange } from '../tools/structure.js';
 import { linesToHire, tryPlaceOperator, type Present } from '../operations/ensure.js';
 import { approvalPolicyRoutes } from './approval-policy.js';
+import { workModeRoutes } from './work-mode.js';
 import { modelCheckRoutes } from '../model-checks/routes.js';
 import { hireEmployee, type Hired } from './hire.js';
 import { repoView } from './repository.js';
@@ -32,6 +33,7 @@ import { deptName, TEMPLATE_TEXT } from './templates.js';
 const IdParams = z.object({ id: z.uuid() });
 const TeamParams = z.object({ id: z.uuid(), teamId: z.uuid() });
 const TeamBody = z.object({ name: z.string().trim().min(1).max(60) }).strict();
+const TeamPatch = TeamBody.partial().extend({ urgentOnly: z.boolean().optional() }).strict().refine(patch => patch.name !== undefined || patch.urgentOnly !== undefined, { message: 'Say what changes.' });
 export const StaffBody = z.object({ proposalId: z.uuid().optional(), people: z.array(HireLine).min(1).max(30) });
 
 export const BuildBody = z.object({ proposalId: z.uuid().optional(), brief: z.string().trim().max(1500).optional(), items: z.array(BuildItem).min(1).max(20) });
@@ -134,7 +136,7 @@ async function wakeFreed(ctx: Ctx, me: Person, freed: string[]): Promise<void> {
 /* Sub-unit routes on a department: create, rename and delete a sub-unit outside the pipeline. */
 function teamRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
-  const view = (t: typeof teams.$inferSelect) => ({ id: t.id, name: t.name, about: t.about, stage: t.stage, gate: t.gate });
+  const view = (t: typeof teams.$inferSelect) => ({ id: t.id, name: t.name, about: t.about, stage: t.stage, gate: t.gate, urgentOnly: t.urgentOnly });
 
   app.post('/api/departments/:id/teams', async (req, reply) => {
     const me = await requirePerson(req, db);
@@ -152,10 +154,10 @@ function teamRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     requireCompanyScope(me);
     const { id, teamId } = TeamParams.parse(req.params);
-    const body = TeamBody.parse(req.body);
+    const body = TeamPatch.parse(req.body);
     const [team] = await db
       .update(teams)
-      .set({ name: body.name })
+      .set(body)
       .where(and(eq(teams.id, teamId), eq(teams.departmentId, id), eq(teams.companyId, me.companyId)))
       .returning();
     if (!team) throw new ApiError(404, 'not_found', 'This sub-unit does not exist.', 'unknown_place');
@@ -236,7 +238,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
         if (isNew(item)) {
           const [dept] = await tx
             .insert(departments)
-            .values({ companyId: me.companyId, templateKey: item.template, name: item.name ?? null, roleCode: roleOf(item.template), about: item.note, position: position++ })
+            .values({ companyId: me.companyId, templateKey: item.template, workMode: defaultDepartmentWorkMode(item.template), name: item.name ?? null, roleCode: roleOf(item.template), about: item.note, position: position++ })
             .returning();
           await addProducts(dept!, item.products ?? []);
           await applyTeams(tx, me, dept!.id, item.teams);
@@ -434,5 +436,6 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   teamRoutes(app, ctx);
   approvalPolicyRoutes(app, ctx);
+  workModeRoutes(app, ctx);
   modelCheckRoutes(app, ctx);
 }

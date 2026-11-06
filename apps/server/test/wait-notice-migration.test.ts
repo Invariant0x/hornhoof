@@ -9,7 +9,7 @@ import { describe, expect, it, onTestFinished } from 'vitest';
 import { MIGRATIONS } from '../src/db/client.js';
 
 /* Columns added to tasks after the schema this test upgrades from, empty on every task kept from before them. */
-const ADDED_TO_TASKS = { work_kind: null, risk_class: null };
+const ADDED_TO_TASKS = { work_kind: null, risk_class: null, urgent: false };
 
 const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 
@@ -65,7 +65,7 @@ describe('durable wait notices migration', () => {
     const client = new PGlite();
     onTestFinished(() => client.close());
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: await previousMigrations(69) });
+    await migrate(db, { migrationsFolder: await previousMigrations(70) });
     const one = async <T,>(statement: ReturnType<typeof sql>) => (await db.execute<T & Record<string, unknown>>(statement)).rows[0]!;
     const company = (name: string, singleton: boolean) => one<{ id: string }>(sql`insert into companies(name,singleton) values (${name},${singleton}) returning id`);
     const agent = (companyId: string, name: string) => one<{ id: string }>(sql`insert into agents(company_id,kind,name,model) values (${companyId},'worker',${name},'') returning id`);
