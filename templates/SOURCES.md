@@ -27,7 +27,7 @@ The development templates carry Hornhoof's own T1-T11 testing policy and coding 
 | openai/skills | Apache-2.0 | Fixing CI, Playwright checks, threat models. |
 | paperclipai/paperclip | MIT | Short role prompts with procedures in skills, hiring through a capabilities view, low-trust roles for hostile input. |
 
-Development authors write a failing test before the change, run only affected tests through run_tests, and submit tests written, green results and commit SHA. The test engineer or QA owns the full suite, browser engines, mutation, coverage and CRAP, dryer and live checks once per turn on the final candidate; findings return to authors as tasks, small fixes by the fast path. This verification ownership adapts the development roles and skills below.
+Development authors write a failing test before the change, run only affected tests through run_tests, and submit tests written, green results and commit SHA. The test engineer or QA owns the full suite, browser engines, mutation, coverage and CRAP, dryer and live checks once per turn on the final candidate; findings return to authors as tasks, small fixes by the fast path. The pipeline procedures also separate shared checks from nonblocking improvement lanes, assign each work area to one owner, bound waits and preserve author-check and run evidence without duplicate runs. This verification ownership adapts the development roles and skills below.
 
 ## Every template
 
