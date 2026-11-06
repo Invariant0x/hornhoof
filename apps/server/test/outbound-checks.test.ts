@@ -68,7 +68,7 @@ describe('exact money', () => {
     ['ja', '$12,345,678,901,234.56'],
   ])('writes it out in %s with every digit', (locale, digits) => {
     const money: Money = { minor: 1234567890123456n, currency: 'USD', scale: 2 };
-    const written = formatMoney(money, locale).replace(/[\s  ‏؜]/g, ' ');
+    const written = formatMoney(money, locale).replace(/[\s\u00A0\u202F\u200F\u061C]/g, ' ');
     expect(written.replace(/[^\p{N},.٬٫]/gu, '')).toBe(digits.replace(/[^\p{N},.٬٫]/gu, ''));
   });
 
@@ -209,7 +209,7 @@ describe('what no catalog text may carry', () => {
     expect(scanText(text)).toContain('template_unapproved');
   });
 
-  it.each(['safe‮txet', 'safe⁦text⁩', 'tag\u{E0041}'])('finds characters that hide what a text says: %j', text => {
+  it.each(['safe\u202Etxet', 'safe\u2066text\u2069', 'tag\u{E0041}'])('finds characters that hide what a text says: %j', text => {
     expect(scanText(text)).toContain('template_unapproved');
   });
 
@@ -226,7 +226,7 @@ describe('what no catalog text may carry', () => {
     'Наш сервис уже готов. Цена указана ниже, 3.5 процента за год.',
     'خدمتنا جاهزة اليوم. السعر أدناه.',
     'השירות שלנו מוכן היום. המחיר למטה.',
-    'می‌توانید امروز شروع کنید',
+    'می\u200Cتوانید امروز شروع کنید',
     'サービスは本日からご利用いただけます。価格は下記のとおりです。',
     'Order 1234 5678 stays open, version 2.5 is out. Ask about e.g. shipping.',
     'A & B < C',

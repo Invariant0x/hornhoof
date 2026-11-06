@@ -157,7 +157,7 @@ export function checkPrice(block: { id: string; revision: number }, catalog: Cat
 const LINKS = [/\b[a-z][a-z0-9+.-]*:\/\//i, /\bwww\./i, /\bmailto:/i, /(?:^|\s)\/\/\S/, /[\p{L}\p{N}-]+\.\p{L}{2,}/u];
 const MARKUP = [/<[a-z/!?]/i, /&#?\w+;/, /\]\(/, /\{\{/, /\$\{/];
 /* Characters that make a text read otherwise than it is stored. Joiners and direction marks stay: some scripts need them. */
-const HIDING = /[‪-‮⁦-⁩\u{E0000}-\u{E007F}]/u;
+const HIDING = /[\u202A-\u202E\u2066-\u2069\u{E0000}-\u{E007F}]/u;
 const SECRETS = [/\bsk-[A-Za-z0-9_-]{20,}/, /\bAKIA[0-9A-Z]{16}\b/, /\bgh[pousr]_[A-Za-z0-9]{36,}/, /-----BEGIN [A-Z ]*PRIVATE KEY-----/, /\bxox[abprs]-[A-Za-z0-9-]{10,}/];
 const EMAIL = /[\p{L}\p{N}._%+-]+@[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+/u;
 const LONG_NUMBER = /(?<![\p{N}])\p{Nd}(?:[ -]?\p{Nd}){12,18}(?![\p{N}])/gu;
