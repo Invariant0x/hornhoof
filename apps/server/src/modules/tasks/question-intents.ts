@@ -1,4 +1,4 @@
-import { QuestionClassificationInput, QuestionMutationGuard, QuestionRouteTarget } from '@hornhoof/protocol';
+import { QuestionClassificationInput } from '@hornhoof/protocol';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { and, asc, eq, gt, inArray, or, sql } from 'drizzle-orm';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
@@ -81,8 +81,6 @@ const readable = async (fn: () => Promise<unknown>) => {
   }
 };
 
-const guard = QuestionMutationGuard.shape;
-
 export function registerQuestionTools(server: McpServer, ctx: Ctx, job: ToolJob): void {
   server.registerTool(
     'internal_questions',
@@ -93,13 +91,13 @@ export function registerQuestionTools(server: McpServer, ctx: Ctx, job: ToolJob)
     'resolve_question',
     {
       description: 'Settles a question inside the company that is yours: resolution is what the one who goes on hears, executorInstruction the technical detail only they get. It approves and grants nothing, and no person is named as answering. Use a new operationId for each decision; the same one again returns what it did.',
-      inputSchema: { ...guard, resolution: ResolveInput.shape.resolution, executorInstruction: ResolveInput.shape.executorInstruction },
+      inputSchema: ResolveInput,
     },
     input => readable(async () => done(ctx, await answerInternal(ctx, call(job), ResolveInput.parse(input)))),
   );
   server.registerTool(
     'route_question',
-    { description: 'Hands a question inside the company that is yours on to the head, the orchestrator or Operations. Handing it to Operations gives it the work, and no right to put it before a person.', inputSchema: { ...guard, target: QuestionRouteTarget } },
+    { description: 'Hands a question inside the company that is yours on to the head, the orchestrator or Operations. Handing it to Operations gives it the work, and no right to put it before a person.', inputSchema: RouteInput },
     input => readable(async () => done(ctx, await routeInternal(ctx, call(job), RouteInput.parse(input)))),
   );
   server.registerTool(
@@ -107,7 +105,7 @@ export function registerQuestionTools(server: McpServer, ctx: Ctx, job: ToolJob)
     {
       description: 'Puts a question before the person who takes it, the only way one comes to a person. Only the head of its department or the orchestrator may, and only for a ready result (classification kind ready_result, with the exact commit or pictures) or what only a person can do (kind human_only_action). ' +
         'humanEnvelope is all the person reads: situation, requiredAction and options, in plain words with no commands, code or markup. It approves, pays and grants nothing. The person is worked out by Hornhoof.',
-      inputSchema: QuestionClassificationInput.shape,
+      inputSchema: QuestionClassificationInput,
     },
     input => readable(async () => done(ctx, await classifyInternal(ctx, call(job), QuestionClassificationInput.parse(input)))),
   );

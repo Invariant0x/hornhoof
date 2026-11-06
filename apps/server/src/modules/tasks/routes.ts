@@ -15,11 +15,12 @@ import { orchestratorOf } from '../conversation/queue.js';
 import { serverMachine } from '../computer/access.js';
 import { deptName } from '../departments/templates.js';
 import { departmentNames, visibleDecisions, type Decisions } from './decisions.js';
-import { answer, cancel, CLOSED, comment, createTask, refuse, requestSubject, taskSpot, type Task } from './engine.js';
+import { addresseesOf, answer, cancel, CLOSED, comment, createTask, refuse, requestSubject, taskSpot, type Task } from './engine.js';
 import { classificationRequired } from './question-authority.js';
 import { questionRoutes } from './question-intents.js';
+import { humanView } from './question-lifecycle.js';
 import { setUrgent } from './urgency.js';
-import { requireDecision } from '../../auth/decisions.js';
+import { requireDecision, notAllowed } from '../../auth/decisions.js';
 import { delegationOf, lockedFor } from '../conversation/decision-context.js';
 import type { DecidedBy } from '../../auth/decisions.js';
 import { commitUrl, picturesOf } from './attachments.js';
@@ -107,6 +108,7 @@ function addressedView({ request: r, ownerPersonId, canAnswer, decidedBy }: Deci
     id: r.id,
     kind: r.kind,
     text: r.text,
+    ...humanView(r),
     options: r.options,
     commit: r.commit,
     approval: r.approvalChannel ? { channel: r.approvalChannel, kind: r.approvalKind, amount: r.approvalAmount } : null,
@@ -343,6 +345,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
         id: r.request.id,
         kind: r.request.kind,
         text: r.request.text,
+        ...humanView(r.request),
         commit: r.request.commit,
         commitUrl: commits[i],
         images: pictures.get(r.request.id) ?? [],
@@ -375,7 +378,9 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (!task) throw refuse(404, 'request_unknown', 'There is no such request.');
     /* The orchestrator answers only for the person its turn answers, under its input lock, checked again as it is kept. */
     const on = delegationOf(me);
-    requireDecision(requestSubject(found, task), me, await accessOf(db, me), me.companyId);
+    const addressees = addresseesOf(found);
+    if (!addressees) requireDecision(requestSubject(found, task), me, await accessOf(db, me), me.companyId);
+    else if (!addressees.includes(me.id)) throw notAllowed();
     const done = await lockedFor(ctx, on, () => answer(ctx, actorOf(me), id, body, on));
     await wakeAll(ctx, done.wakes);
     /* An agent switched off while it waited for this answer leaves the work now. */

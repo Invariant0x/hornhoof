@@ -8,7 +8,8 @@ import type { Person } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { agents, departments, people, personAccess, proposals, requests, tasks } from '../../db/schema.js';
 import { canViewComputer, type Asked } from '../computer/access.js';
-import { requestSubject, taskSpot, type Request, type Task } from './engine.js';
+import { addresseesOf, requestSubject, taskSpot, type Request, type Task } from './engine.js';
+import { shownQuestion } from './question-lifecycle.js';
 import { seesTask, type TaskPlace } from './sight.js';
 
 /* What waits for people, as each person may see it: whose card counts each decision and whose filter shows it, and whether
@@ -91,7 +92,9 @@ export async function mayOpenRequest(db: Db, me: Person, request: Request, task:
   /* What is still inside the company has no reader among people yet, however well they see its work. */
   if (request.audience === 'internal') return false;
   const viewer = await viewerOf(db, me);
-  return knowsRequest(viewer, request, task) || (request.status === 'open' && canDecide(requestSubject(request, task), me, viewer.access, me.companyId));
+  if (knowsRequest(viewer, request, task)) return true;
+  if (request.status !== 'open') return false;
+  return addresseesOf(request)?.includes(me.id) ?? canDecide(requestSubject(request, task), me, viewer.access, me.companyId);
 }
 
 const shows = (r: { known: boolean; canAnswer: boolean }) => r.known || r.canAnswer;
@@ -123,15 +126,21 @@ export async function visibleDecisions(ctx: Pick<Ctx, 'db' | 'computer'>, me: Pe
     .orderBy(asc(requests.createdAt), asc(requests.id));
   /* As the routes that take them let them. */
   const judged = (subject: DecisionSubject) => ({ ownerPersonId: decisionOwner(subject, everyone), canAnswer: canDecide(subject, me, access, me.companyId), decidedBy: decidedBy(subject, everyone) });
+  /* What only certain people can do goes to them, with what it needs and nothing around it. */
+  const judgedRequest = (r: { request: RequestRow; task: TaskRow }) => {
+    const addressees = addresseesOf(r.request);
+    if (!addressees) return judged(requestSubject(r.request, r.task));
+    return { ownerPersonId: addressees[0]!, canAnswer: addressees.includes(me.id), decidedBy: { kind: 'owner_and_ceo' as const, departmentId: null } };
+  };
   const seen = rows
-    .filter(r => canReach(access, taskSpot(r.task)))
-    .map(r => ({ ...r, ...judged(requestSubject(r.request, r.task)), known: knowsRequest(viewer, r.request, r.task) }))
+    .filter(r => canReach(access, taskSpot(r.task)) || addresseesOf(r.request)?.includes(me.id))
+    .map(r => ({ ...r, request: shownQuestion(r.request), ...judgedRequest(r), known: knowsRequest(viewer, r.request, r.task) }))
     .filter(shows);
   const { id: orchestratorId, cards, asked } = await orchestratorAsks(ctx, me, viewer);
   const shownCards = cards.map(proposal => ({ proposal, ...judged({ source: 'proposal' }) }));
   const computer = asked && orchestratorId ? { asked, agentId: orchestratorId, ...judged({ source: 'computer_access' }) } : null;
   const counts = counted(viewer, [
-    ...seen.map(r => ({ ownerPersonId: r.ownerPersonId, agentId: r.request.agentId, elsewhere: heldElsewhere(requestSubject(r.request, r.task), everyone, me.id) })),
+    ...seen.map(r => ({ ownerPersonId: r.ownerPersonId, agentId: r.request.agentId, elsewhere: addresseesOf(r.request) ? !r.canAnswer : heldElsewhere(requestSubject(r.request, r.task), everyone, me.id) })),
     ...shownCards.map(c => ({ ownerPersonId: c.ownerPersonId, agentId: c.proposal.agentId })),
     ...(computer ? [{ ownerPersonId: computer.ownerPersonId, agentId: computer.agentId }] : []),
   ]);

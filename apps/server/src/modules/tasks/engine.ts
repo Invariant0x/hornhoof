@@ -6,7 +6,7 @@ import type { Db } from '../../db/client.js';
 import { agents, attachments, companies, departments, jobs, people, requests, subscriptions, taskEvents, tasks, turns, type DecisionTopic, type RequestOption, type TaskEventKind } from '../../db/schema.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
 import { refuseNotUrgent, urgencyOfNew } from './urgency.js';
-import { canDecide } from '../../auth/decisions.js';
+import { canDecide, notAllowed } from '../../auth/decisions.js';
 import type { DecisionSubject } from '../../auth/decision-owner.js';
 import { checkDelegation, contextMissing, requireDecider, type Delegation } from '../conversation/decision-context.js';
 import { compareForTask, comparisonForReview, comparisonProof, type CompareSnapshot } from '../testruns/compare.js';
@@ -25,9 +25,9 @@ import { pendingFixReviews, prepareFixReviews } from './review-fixes.js';
 import { checkIndependent, currentIndependent, type IndependentDeclaration, type IndependentPartInput } from './independent.js';
 import type { WaitPlan } from '@hornhoof/protocol/waits';
 import { alertGoal, goalColumns, type NewGoal } from './wait-goals.js';
-import { classificationRequired, internalRoute } from './question-authority.js';
-import { ASKED_INSIDE, raiseQuestion } from './question-lifecycle.js';
-import { bindAfter, bindRequest, bindTurnReview, endAfter, endRequest, keepWaitsWithMove, rebindAfter, type AfterPlans } from './wait-producers.js';
+import { classificationRequired, internalRoute, staleRoute } from './question-authority.js';
+import { ASKED_INSIDE, raiseQuestion, refuseWhatChanged, staleClassification } from './question-lifecycle.js';
+import { bindAfter, bindRequest, bindTurnReview, endAfter, endQuestionWait, endRequest, keepWaitsWithMove, rebindAfter, type AfterPlans } from './wait-producers.js';
 
 export type Task = typeof tasks.$inferSelect;
 export type Request = typeof requests.$inferSelect;
@@ -1665,14 +1665,35 @@ export const requestSubject = (r: Pick<Request, 'kind' | 'decisionTopic'>, t: Pi
   spot: taskSpot(t),
 });
 
+/* What was put before a person for what only they can do is theirs alone; every other decision has its rule. */
+export const addresseesOf = (r: Pick<Request, 'classification'>): string[] | null => {
+  const authority = r.classification?.authority;
+  return authority && authority.purpose.kind !== 'decision' ? authority.recipientPersonIds : null;
+};
+
 /* Who answers, as the request is kept: a person with the right to take it, or the orchestrator for one, in a turn that
    still answers that person. */
 async function mayAnswer(tx: Tx, actor: Actor, found: Request, task: Task, on?: Delegation): Promise<string> {
   if (on) await checkDelegation(tx, on);
   const personId = on?.personId ?? actor.personId;
   if (!personId) throw contextMissing();
-  await requireDecider(tx, found.companyId, personId, requestSubject(found, task));
+  const addressees = addresseesOf(found);
+  if (!addressees) await requireDecider(tx, found.companyId, personId, requestSubject(found, task));
+  else if (!addressees.includes(personId)) throw notAllowed();
   return personId;
+}
+
+/* What changed since it was read is refused in the step that keeps the answer as well. */
+async function stillCurrent(tx: Tx, taskId: string, requestId: string): Promise<void> {
+  const [task] = await tx.select().from(tasks).where(eq(tasks.id, taskId));
+  const [request] = await tx.select().from(requests).where(eq(requests.id, requestId)).for('update');
+  if (request && task && await staleClassification(tx, task, request)) throw staleRoute();
+}
+
+/* The wait a question answered had: of its own source once it was put before a person, under its older name otherwise. */
+async function endAnswered(tx: Tx, request: Request, status: Request['status'], actor: Actor): Promise<void> {
+  if (!request.classification) return endRequest(tx, request, status, actor);
+  await endQuestionWait(tx, { taskId: request.taskId, requestId: request.id, expectedRevision: request.questionRevision, expectedRouteRevision: request.routeRevision, actor, outcome: 'resolved', proofRef: `request:${request.id}:${status}` });
 }
 
 /* What the request and its log keep of the orchestrator's answer for a person: which turn, on whose words. */
@@ -1740,6 +1761,7 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
   if (!found) throw refuse(404, 'request_unknown', 'There is no such request.');
   if (found.status !== 'open') throw refuse(409, 'request_closed', 'This request is answered already.');
   if (found.audience === 'internal') throw classificationRequired();
+  await refuseWhatChanged(ctx, requestId);
   const text = a.answer?.trim() ?? '';
   let status: Request['status'];
   const option = found.kind === 'choice' && a.pick !== undefined ? found.options[a.pick] : undefined;
@@ -1762,6 +1784,7 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
     /* The task first and then its request, in the order a cancel takes them, so the two never wait on each other. As the task
        is now, not as it was read before: one closed meanwhile stays closed. */
     const [current] = await tx.select({ status: tasks.status, stage: tasks.stage }).from(tasks).where(eq(tasks.id, task.id)).for('update');
+    await stillCurrent(tx, task.id, requestId);
     const answeredBy = await mayAnswer(tx, actor, found, task, on);
     const { audit, forWhom } = auditOf(on);
     const [request] = await tx
@@ -1770,7 +1793,7 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
       .where(and(eq(requests.id, requestId), eq(requests.status, 'open')))
       .returning();
     if (!request) throw refuse(409, 'request_closed', 'This request is answered already.');
-    await endRequest(tx, request, status, answerer(answeredBy, actor));
+    await endAnswered(tx, request, status, answerer(answeredBy, actor));
     await tx.update(tasks).set({ externalWait: null, silent: 0, version: sql`${tasks.version} + 1`, updatedAt: new Date() })
       .where(and(eq(tasks.id, task.id), isNotNull(tasks.externalWait)));
     const event = await note(tx, task, { kind: 'answered', actor, text: said, data: { requestId, kind: found.kind, status, ...forWhom }, inlineText }, ctx.config);

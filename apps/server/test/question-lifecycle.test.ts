@@ -2,11 +2,11 @@ import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { randomUUID } from 'node:crypto';
 import { asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agents, jobs, people, requestInternal, requests, taskEvents, tasks, taskWaits, waitPolicies } from '../src/db/schema.js';
+import { agents, jobs, pendingWakes, people, requestInternal, requests, subscriptions, taskEvents, tasks, taskWaits, waitPolicies } from '../src/db/schema.js';
 import { mayOpenRequest } from '../src/modules/tasks/decisions.js';
 import { answerDirectly, ask, createTask, type Task } from '../src/modules/tasks/engine.js';
 import { questionSourceKey } from '../src/modules/tasks/wait-producers.js';
-import { as } from './helpers.js';
+import { as, invitePerson } from './helpers.js';
 import { waitCompany } from './wait-company.js';
 
 type Res = { content: { text: string }[]; isError?: boolean };
@@ -331,5 +331,197 @@ describe('whoever has a question inside', () => {
     expect(classify.content[0]!.text).toContain('not yours');
     const settled = await call(ops.client as Client, 'resolve_question', { ...guard, resolution: 'Rotated.' });
     expect(settled.isError, settled.content[0]!.text).toBeFalsy();
+  });
+});
+
+describe('putting a question before a person', () => {
+  const envelope = { situation: 'The release of the new checkout is ready.', requiredAction: 'Approve it or decline it.', options: [] };
+  const COMMIT = 'd'.repeat(40);
+
+  async function approval() {
+    const c = await company();
+    const work = await c.task();
+    const { request } = await ask(c.ctx, c.agent.id, work.id, { kind: 'approval', text: 'Run npm publish on the node, then merge.', commit: COMMIT, topic: 'release' });
+    const head = await c.run(c.head.id);
+    const guard = { operationId: randomUUID(), source: { kind: 'task_request', id: request.id }, expectedRevision: 1, expectedRouteRevision: 1 };
+    const ready = { kind: 'ready_result', artifact: { kind: 'commit', sha: COMMIT } };
+    const classify = (more: Record<string, unknown> = {}, client = head.client as Client) => call(client, 'classify_human_intent', { ...guard, classification: ready, humanEnvelope: envelope, ...more });
+    return { ...c, work, request, guard, ready, classify, head: { ...c.head, client: head.client as Client, job: head.job } };
+  }
+
+  it('shows the person what whoever put it there wrote, and never the words of the agent', async () => {
+    const c = await approval();
+    const res = await c.classify();
+    expect(res.isError, res.content[0]!.text).toBeFalsy();
+    expect(JSON.parse(res.content[0]!.text)).toMatchObject({ source: c.guard.source, audience: 'human', revision: 1, routeRevision: 1, classificationId: expect.any(String), digest: expect.stringMatching(/^[0-9a-f]{64}$/) });
+    const seen = await c.seen();
+    expect(seen.counts.total).toBe(1);
+    const text = JSON.stringify(seen);
+    expect(text).toContain('The release of the new checkout is ready.');
+    expect(text).not.toContain('npm publish');
+    const shown = (await c.app.inject({ url: `/api/tasks/${c.work.id}`, ...as(c.ceo) })).json();
+    expect(JSON.stringify(shown.task.requests)).not.toContain('npm publish');
+    expect((await c.questionsOf(c.work))[0]).toMatchObject({ audience: 'human', status: 'open', triageAgentId: c.head.id });
+  });
+
+  it('keeps everything it rests on: the source, its revisions, who asked, the task as it was, and who takes it', async () => {
+    const c = await approval();
+    await c.classify();
+    const [ceo] = await c.db.select().from(people).where(eq(people.isOwner, true));
+    const snapshot = (await c.questionsOf(c.work))[0]!.classification!;
+    expect(snapshot).toMatchObject({
+      source: c.guard.source, revision: 1, routeRevision: 1, classification: c.ready, humanEnvelope: envelope, materialRevision: 1,
+      sourceBinding: { companyId: c.companyId, authorAgentId: c.agent.id, taskAssignment: { taskId: c.work.id, assigneeAgentId: c.agent.id, executorAgentId: c.agent.id, stage: 0 } },
+      authority: { recipientPersonIds: [ceo!.id], purpose: { kind: 'decision', decisionKind: 'approval' } },
+    });
+    expect(snapshot.authority.authorityDigest).toMatch(/^[0-9a-f]{64}$/);
+    expect(snapshot.materialDigest).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('moves its wait from the one who had it to the person, of that one question', async () => {
+    const c = await approval();
+    await c.classify();
+    const [ceo] = await c.db.select().from(people).where(eq(people.isOwner, true));
+    const waits = await c.waitsOf(c.work);
+    expect(waits.find(w => w.kind === 'external')).toMatchObject({ sourceKey: questionSourceKey(c.request.id), state: 'superseded' });
+    expect(waits.find(w => w.kind === 'person')).toMatchObject({ sourceKey: questionSourceKey(c.request.id), ownerPersonId: ceo!.id, sourceRevision: 1, state: 'legacy_needs_plan' });
+  });
+
+  it('lets the person answer, with the real person kept and the task going on', async () => {
+    const c = await approval();
+    await c.classify();
+    const res = await c.app.inject({ method: 'POST', url: `/api/requests/${c.request.id}`, payload: { approve: true }, ...as(c.ceo) });
+    expect(res.statusCode, res.body).toBe(200);
+    const [ceo] = await c.db.select().from(people).where(eq(people.isOwner, true));
+    expect((await c.questionsOf(c.work))[0]).toMatchObject({ status: 'approved', answeredBy: ceo!.id, commit: COMMIT });
+    expect(await c.statusOf(c.work)).toBe('working');
+    expect((await c.waitsOf(c.work)).find(w => w.kind === 'person')).toMatchObject({ state: 'resolved' });
+  });
+
+  it('refuses a commit the question does not show, and pictures it does not show', async () => {
+    const c = await approval();
+    const other = await c.classify({ classification: { kind: 'ready_result', artifact: { kind: 'commit', sha: 'e'.repeat(40) } } });
+    expect(other.isError).toBe(true);
+    const pictures = await c.classify({ classification: { kind: 'ready_result', artifact: { kind: 'design', imageIds: [randomUUID()] } } });
+    expect(pictures.isError).toBe(true);
+    expect((await c.questionsOf(c.work))[0]).toMatchObject({ audience: 'internal', classification: null });
+  });
+
+  it('takes no commands, code or markup in what the person reads, and nothing of the agent falls back in their place', async () => {
+    const c = await approval();
+    for (const situation of ['Run `npm publish` now.', 'Then git push origin main', '<script>x</script>', '**Approve**']) {
+      const res = await c.classify({ humanEnvelope: { ...envelope, situation } });
+      expect(res.isError, situation).toBe(true);
+    }
+    expect((await c.questionsOf(c.work))[0]).toMatchObject({ audience: 'internal', classification: null });
+  });
+
+  it('takes no field it does not know: not a person, not a role, not who is asking', async () => {
+    const c = await approval();
+    for (const more of [{ recipientPersonId: randomUUID() }, { actorKind: 'person' }, { authority: { recipientPersonIds: [randomUUID()] } }]) {
+      const res = await c.app.inject({ method: 'POST', url: '/api/internal-intents/classify', headers: { authorization: `Bearer wait-flow-${c.head.id}` }, payload: { ...c.guard, classification: c.ready, humanEnvelope: envelope, ...more } });
+      expect(res.statusCode).toBe(400);
+      const tool = await c.classify(more);
+      expect(tool.isError, JSON.stringify(more)).toBe(true);
+    }
+    expect((await c.questionsOf(c.work))[0]).toMatchObject({ audience: 'internal' });
+  });
+
+  it('refuses the asker, whoever it quotes, and an outsider', async () => {
+    const c = await approval();
+    const worker = await c.run(c.agent.id);
+    const own = await c.classify({}, worker.client as Client);
+    expect(own.content[0]!.text).toContain('not yours');
+    const outsider = await c.run(c.watcher.id);
+    expect((await c.classify({}, outsider.client as Client)).content[0]!.text).toContain('not yours');
+    const delegated = await c.app.inject({ method: 'POST', url: '/api/internal-intents/classify', payload: { ...c.guard, classification: c.ready, humanEnvelope: envelope }, ...as(c.ceo) });
+    expect(delegated.statusCode).toBe(401);
+    expect((await c.questionsOf(c.work))[0]).toMatchObject({ audience: 'internal' });
+  });
+
+  it('says plainly that what has no real way to be done cannot go to a person, and keeps nothing', async () => {
+    const c = await approval();
+    for (const kind of ['payment', 'manual_machine_action']) {
+      const res = await c.classify({ classification: { kind: 'human_only_action', actionBinding: { kind, resourceId: 'res-1' } } });
+      expect(res.isError, kind).toBe(true);
+      expect(res.content[0]!.text).toContain('source_producer_unavailable');
+    }
+    expect((await c.questionsOf(c.work))[0]).toMatchObject({ audience: 'internal', classification: null });
+  });
+
+  it('gives a login to the one who owns the plan, and it takes that and nothing else', async () => {
+    const c = await company();
+    const work = await c.task();
+    const { request } = await ask(c.ctx, c.agent.id, work.id, { kind: 'question', text: 'The plan needs its owner to log in.' });
+    const token = await invitePerson(c.app, c.ceo, { name: 'Olga', email: 'olga@example.com', access: { departments: [c.watcher.departmentId!], teams: [] } });
+    const [olga] = await c.db.select().from(people).where(eq(people.email, 'olga@example.com'));
+    await c.db.update(subscriptions).set({ ownerPersonId: olga!.id }).where(eq(subscriptions.id, c.sub.id));
+    const head = await c.run(c.head.id);
+    const res = await call(head.client as Client, 'classify_human_intent', { operationId: randomUUID(), source: { kind: 'task_request', id: request.id }, expectedRevision: 1, expectedRouteRevision: 1, classification: { kind: 'human_only_action', actionBinding: { kind: 'owner_login', resourceId: c.sub.id } }, humanEnvelope: { situation: 'The plan stopped working.', requiredAction: 'Log in to it again.', options: [] } });
+    expect(res.isError, res.content[0]!.text).toBeFalsy();
+    const seen = (await c.app.inject({ url: '/api/requests', ...as(token) })).json();
+    expect(seen.requests).toEqual([]);
+    expect(seen.addressed).toMatchObject([{ id: request.id, canAnswer: true, text: expect.stringContaining('The plan stopped working.') }]);
+    expect(JSON.stringify(seen.addressed)).not.toContain(work.title);
+    expect(JSON.stringify(seen.addressed)).not.toContain('Bruno');
+    expect((await c.app.inject({ url: `/api/tasks/${work.id}`, ...as(token) })).statusCode).toBe(403);
+    const taken = await c.app.inject({ method: 'POST', url: `/api/requests/${request.id}`, payload: { answer: 'Done.' }, ...as(token) });
+    expect(taken.statusCode, taken.body).toBe(200);
+    expect((await c.questionsOf(work))[0]).toMatchObject({ status: 'answered', answeredBy: olga!.id });
+  });
+
+  describe('once things changed under it', () => {
+    it('sends it back inside when the task has another holder, and the person cannot take the old one', async () => {
+      const c = await approval();
+      await c.classify();
+      await c.db.update(tasks).set({ assigneeAgentId: c.head.id, executorAgentId: c.head.id }).where(eq(tasks.id, c.work.id));
+      const res = await c.app.inject({ method: 'POST', url: `/api/requests/${c.request.id}`, payload: { approve: true }, ...as(c.ceo) });
+      expect(res.statusCode).toBe(409);
+      expect(res.json().error.reason).toBe('stale_route');
+      expect((await c.questionsOf(c.work))[0]).toMatchObject({ audience: 'internal', status: 'open', routeRevision: 2, answeredBy: null, classification: null });
+      expect((await c.seen()).counts.total).toBe(0);
+      expect(await c.db.select({ why: pendingWakes.why, agentId: pendingWakes.agentId }).from(pendingWakes)).toContainEqual({ why: 'question', agentId: c.head.id });
+    });
+
+    it('sends it back inside when who may take it changed', async () => {
+      const c = await approval();
+      await c.classify();
+      const [ceo] = await c.db.select().from(people).where(eq(people.isOwner, true));
+      const token = await invitePerson(c.app, c.ceo, { name: 'Dana', email: 'dana@example.com', access: { whole: true } });
+      expect(token).toBeTruthy();
+      await c.db.update(people).set({ isCeoDelegate: true }).where(eq(people.email, 'dana@example.com'));
+      const res = await c.app.inject({ method: 'POST', url: `/api/requests/${c.request.id}`, payload: { approve: true }, ...as(c.ceo) });
+      expect(res.statusCode).toBe(409);
+      expect((await c.questionsOf(c.work))[0]).toMatchObject({ audience: 'internal', answeredBy: null });
+      expect(ceo).toBeTruthy();
+    });
+
+    it('refuses to classify on what was read before, retries give what they gave', async () => {
+      const c = await approval();
+      const first = await c.classify();
+      const again = await c.classify();
+      expect(again.isError, again.content[0]!.text).toBeFalsy();
+      expect(JSON.parse(again.content[0]!.text)).toEqual(JSON.parse(first.content[0]!.text));
+      const other = await c.classify({ humanEnvelope: { ...envelope, situation: 'Something else entirely.' } });
+      expect(other.content[0]!.text).toContain('operation_conflict');
+      const later = await c.classify({ operationId: randomUUID() });
+      expect(later.content[0]!.text).toContain('stale_route');
+    });
+
+    it('cannot be settled inside any more once a person has it', async () => {
+      const c = await approval();
+      await c.classify();
+      const late = await call(c.head.client, 'resolve_question', { ...c.guard, operationId: randomUUID(), resolution: 'No need.' });
+      expect(late.content[0]!.text).toContain('stale_route');
+      expect((await c.questionsOf(c.work))[0]).toMatchObject({ status: 'open', audience: 'human' });
+    });
+
+    it('cannot be classified once it is settled', async () => {
+      const c = await approval();
+      await call(c.head.client, 'resolve_question', { ...c.guard, operationId: randomUUID(), resolution: 'No need.' });
+      const late = await c.classify();
+      expect(late.content[0]!.text).toContain('source_closed');
+      expect((await c.questionsOf(c.work))[0]).toMatchObject({ status: 'resolved_internal', audience: 'internal', classification: null });
+    });
   });
 });

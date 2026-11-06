@@ -68,7 +68,16 @@ export const ASKED_INSIDE = 'Asked inside the company.';
 export function shownQuestion<R extends Pick<Request, 'audience' | 'text' | 'answer' | 'commit' | 'options' | 'link' | 'classification'>>(r: R): R {
   if (r.audience === 'internal') return { ...r, text: ASKED_INSIDE, answer: null, commit: null, options: [], link: null };
   const envelope = r.classification?.humanEnvelope;
-  return envelope ? { ...r, text: `${envelope.situation}\n\n${envelope.requiredAction}` } : r;
+  if (!envelope) return r;
+  return { ...r, text: `${envelope.situation}\n\n${envelope.requiredAction}`, options: r.options.map((o, i) => ({ ...o, label: envelope.options[i]?.label ?? o.label })) };
+}
+
+/* What a screen is given besides: the plain words whole and what kind of thing it is, with no person, digest or source. */
+export function humanView(r: Pick<Request, 'classification'>) {
+  const snapshot = r.classification;
+  if (!snapshot) return { envelope: null, purpose: null };
+  const { purpose } = snapshot.authority;
+  return { envelope: snapshot.humanEnvelope, purpose: purpose.kind === 'decision' ? { kind: purpose.kind, decisionKind: purpose.decisionKind } : purpose.kind === 'owner_login' ? { kind: purpose.kind, provider: purpose.provider } : { kind: purpose.kind } };
 }
 
 type Turn = { id: string; agentId: string; companyId: string };
@@ -257,4 +266,40 @@ export async function classifyInternal(ctx: Ctx, call: TriageCall, input: Questi
   });
   if (moved.task) ctx.bus.publish(moved.task.companyId, { type: 'requests', spot: taskSpot(moved.task) });
   return { result: moved.result, wakes: moved.wakes };
+}
+
+/* Whether what a person was shown is still what it rested on: the same source, the same hands on the task, the same people to take
+   it and the same work. */
+export async function staleClassification(tx: Tx, task: Task, request: Request): Promise<boolean> {
+  const snapshot = request.classification;
+  if (!snapshot) return false;
+  if (snapshot.revision !== request.questionRevision || snapshot.routeRevision !== request.routeRevision) return true;
+  const was = snapshot.sourceBinding.taskAssignment;
+  if (was?.assigneeAgentId !== task.assigneeAgentId || was?.executorAgentId !== task.executorAgentId || was?.stage !== task.stage) return true;
+  const authority = await questionAuthority(tx, task, request, snapshot.classification).catch((err: unknown) => {
+    if (err instanceof ApiError) return null;
+    throw err;
+  });
+  if (authority?.authorityDigest !== snapshot.authority.authorityDigest) return true;
+  return snapshot.classification.kind === 'ready_result' && (await materialStamp(tx, request)).materialDigest !== snapshot.materialDigest;
+}
+
+/* A person cannot take what changed under it. It goes back to whoever has questions there now, kept and told; nothing of what they
+   were shown decides anything. Its record of what it was stays in the log. */
+export async function refuseWhatChanged(ctx: Pick<Ctx, 'db' | 'bus'>, requestId: string): Promise<void> {
+  const task = await ctx.db.transaction(async (tx): Promise<Task | null> => {
+    const [found] = await tx.select({ taskId: requests.taskId }).from(requests).where(eq(requests.id, requestId));
+    const [task] = await tx.select().from(tasks).where(eq(tasks.id, found!.taskId)).for('update');
+    const [request] = await tx.select().from(requests).where(eq(requests.id, requestId)).for('update');
+    if (request!.status !== 'open' || !(await staleClassification(tx, task!, request!))) return null;
+    const route = await internalRoute(tx, { companyId: task!.companyId, departmentId: task!.departmentId }, request!.agentId);
+    const [back] = await tx.update(requests).set({ audience: 'internal', classification: null, routeRevision: request!.routeRevision + 1, triageAgentId: route?.agentId ?? null }).where(eq(requests.id, requestId)).returning();
+    await syncQuestionWait(tx, questionGuard(task!, back!, request!.agentId));
+    await note(tx, task!, { kind: 'asked', actor: { agentId: request!.agentId }, text: 'Back inside the company: what it rested on changed.', data: { question: { transition: 'back_inside', classificationId: request!.classification!.classificationId, digest: request!.classification!.digest, routeRevision: back!.routeRevision } } });
+    await keepWakes(tx, task!.companyId, questionWakes(task!, request!.agentId, route, requestId));
+    return task!;
+  });
+  if (!task) return;
+  ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
+  throw staleRoute();
 }
