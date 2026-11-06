@@ -18,7 +18,7 @@ export async function waitCycles(ctx: Ctx, now: Date) {
   return waitingCycles(edges);
 }
 
-async function departmentScope(ctx: Ctx, companyId: string, root: string): Promise<string[]> {
+export async function departmentScope(ctx: Pick<Ctx, 'db'>, companyId: string, root: string): Promise<string[]> {
   const rows = await ctx.db.select().from(departments).where(eq(departments.companyId, companyId));
   const scope = new Set([root]);
   let previous = 0;

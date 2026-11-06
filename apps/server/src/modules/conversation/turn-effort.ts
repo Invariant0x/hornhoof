@@ -8,11 +8,12 @@ const LIGHTER = 'medium';
 const ORDER: readonly string[] = [...ROLE_EFFORTS, 'ultra'];
 const rank = (level: string): number => ORDER.indexOf(level);
 
-type TurnWake = { why: string; again?: boolean };
+type TurnWake = { why: string; again?: boolean; mechanical?: boolean };
 
-/* A look again at the fixes for one's own finding, or merging what passed its gates. Anything else may need all the
-   thought the work had: a plan, a first look, security, or fixes, which nothing marks as mechanical. */
-const needsLess = (wake: TurnWake | null): boolean => wake?.why === 'merge' || (wake?.why === 'review' && wake.again === true);
+/* A look again at the fixes for one's own finding, merging what passed its gates, or fixes the server marked as mechanical
+   from the verdicts that asked for them. Anything else may need all the thought the work had: a plan, a first look,
+   security, or fixes nobody marked. A merge that fails is reported, and what comes after that is no merge wake. */
+const needsLess = (wake: TurnWake | null): boolean => wake?.why === 'merge' || (wake?.why === 'review' && wake.again === true) || (wake?.why === 'changes' && wake.mechanical === true);
 
 /* How hard a turn thinks, from its base and every wake that brought its words. A lighter turn takes medium, or the nearest
    level above it that the model takes, and never raises the base. A model with no known levels is claimed to take none. */
