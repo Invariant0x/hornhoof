@@ -99,7 +99,7 @@ describe('a task', () => {
     const text = language === 'ru' ? `ждет: Images on the registry, до ${clock}` : `waits: Images on the registry, until ${clock}`;
     expect(within(panel).getByText(text)).toHaveClass('muted');
     mockApi({ 'POST /api/tasks/t12/comments': [201, { task: TASK_DETAIL }], 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, externalWait: null } }] });
-    await user.type(within(panel).getByLabelText(language === 'ru' ? 'Комментарий' : 'Comment'), 'Images ready.');
+    await user.type(within(panel).getByRole('textbox', { name: language === 'ru' ? 'Комментарий' : 'Comment' }), 'Images ready.');
     await user.click(within(panel).getByRole('button', { name: language === 'ru' ? 'Добавить комментарий' : 'Add comment' }));
     await waitFor(() => expect(within(panel).queryByText(text)).toBeNull());
     localStorage.removeItem('hh-lang');
@@ -327,7 +327,7 @@ describe('a task', () => {
     const user = userEvent.setup();
     const calls = shell({ 'POST /api/tasks/t12/comments': [201, { task: TASK_DETAIL }] });
     const panel = await openTask(user);
-    await user.type(within(panel).getByLabelText('Comment'), 'Ship it today.');
+    await user.type(within(panel).getByRole('textbox', { name: 'Comment' }), 'Ship it today.');
     await user.click(within(panel).getByRole('button', { name: 'Add comment' }));
     expect(calls.find(c => c.path === '/api/tasks/t12/comments')?.body).toEqual({ text: 'Ship it today.' });
   });
@@ -423,7 +423,9 @@ describe('a task', () => {
       [`GET ${materialRoot}`]: [200, manifest],
       [`POST /api/requests/${requestId}`]: [200, { request: { id: requestId, status: 'answered' } }],
     });
-    const panel = await openTask(user);
+    await user.click(await screen.findByRole('button', { name: /^Tasks/ }));
+    await user.click(within(await screen.findByRole('region', { name: 'Waiting for you' })).getByRole('button', { name: /#12/ }));
+    const panel = await screen.findByRole('complementary', { name: '#12 Checkout API' });
     const waiting = await within(panel).findByRole('region', { name: 'Waiting for your answer' });
     await user.click(await within(waiting).findByRole('button', { name: /Release notes\.txt/ }));
     const dialog = await screen.findByRole('dialog', { name: 'Release notes.txt' });
