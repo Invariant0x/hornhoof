@@ -8,7 +8,7 @@ import { requirePerson } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { agents, attachments, departments, requests, tasks, turns, type RequestOption } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { jobOf, type RunJob } from '../tools/job.js';
+import { jobOf, type RunJob, type ToolJob } from '../tools/job.js';
 import { agentCasePicture, personCasePicture, sendCasePicture } from '../program-operator/attachments.js';
 import { mayOpenRequest } from './decisions.js';
 import { refuse, type Task } from './engine.js';

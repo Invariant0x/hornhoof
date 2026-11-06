@@ -397,7 +397,7 @@ async function settleRun(ctx: Ctx, runId: string): Promise<void> {
   if (!end) return;
   if ('authorCheck' in end) {
     const moved = await finishAuthorCheck(ctx, runId);
-    await toldSubmission(ctx, run.agentId, moved);
+    await toldSubmission(ctx, end.authorCheck, moved);
   } else await told(ctx, end);
 }
 
