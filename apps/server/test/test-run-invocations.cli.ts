@@ -34,6 +34,15 @@ async function vitestFixture(): Promise<Fixture> {
   return { root, files, extension: 'json', suite: { id: 'vitest', root: '.', files: ['tests/*.test.js'], profiles: ['fast'],
     split: { kind: 'argv-files' }, run: { program: process.execPath, args: [cli, 'run', '--config', 'vitest.config.mjs', '--root', '.', '--reporter=json'], cwd: '.' } } };
 }
+async function plannedVitestFixture(projects = false): Promise<Fixture> {
+  const fixture = await vitestFixture();
+  const sequencer = new URL('./planned-vitest-sequencer.ts', import.meta.url).href;
+  const test = projects
+    ? "projects: [{ test: { name: 'first', include: ['tests/*.test.js'], sequence: { groupOrder: 0 } } }, { test: { name: 'second', include: ['tests/*.test.js'], sequence: { groupOrder: 1 } } }],"
+    : "include: ['tests/*.test.js'],";
+  await writeFile(join(fixture.root, 'vitest.config.mjs'), `import PlannedVitestSequencer from ${JSON.stringify(sequencer)};\nexport default { test: { ${test} pool: 'forks', maxWorkers: 1, sequence: { sequencer: PlannedVitestSequencer } } };\n`);
+  return { ...fixture, suite: { ...fixture.suite, split: { kind: 'json-file' } } };
+}
 function python(): string {
   if (!process.env.HH588_PYTHON) throw new Error('The authorcheck must prepare its fixture-local pytest interpreter.');
   return process.env.HH588_PYTHON;
@@ -72,6 +81,33 @@ async function invoke(fixture: Fixture, name: string, files: string[], options: 
 const reportOf = (result: { report: string | null }): VitestReport => JSON.parse(result.report!) as VitestReport;
 
 describe('real framework invocations of planned fixture selections', () => {
+  it('uses native --shard with the exact weighted JSON selection instead of sharding it twice', async () => {
+    const fixture = await plannedVitestFixture(), plan = fixturePlan(fixture), seen: string[] = [];
+    expect(plan.parts.map(part => part.units.map(unit => unit.file))).toEqual([['tests/first.test.js'], ['tests/second.test.js', 'tests/third.test.js']]);
+    for (const [index, part] of plan.parts.entries()) {
+      const result = await invoke(fixture, `vitest-planned-shard-${index + 1}`, part.units.map(unit => unit.file), [`--shard=${index + 1}/2`]);
+      expect(result.code, result.stderr).toBe(0);
+      const files = reportOf(result).testResults.map(file => relative(fixture.root, file.name)).sort();
+      expect(files).toEqual(part.units.map(unit => unit.file).sort()); seen.push(...files);
+    }
+    expect(seen.sort()).toEqual([...fixture.files].sort());
+  });
+
+  it('retains both real project variants when Vitest calls the sequencer for separate groups', async () => {
+    const fixture = await plannedVitestFixture(true);
+    const result = await invoke(fixture, 'vitest-planned-projects', [fixture.files[0]!], ['--shard=1/2']);
+    expect(result.code, result.stderr).toBe(0);
+    expect(reportOf(result).numPassedTests).toBe(2);
+    expect(reportOf(result).testResults.map(file => relative(fixture.root, file.name))).toEqual(['tests/first.test.js', 'tests/first.test.js']);
+  });
+
+  it('refuses a planned sequencer without --shard before the unselected failing file can run', async () => {
+    const fixture = await plannedVitestFixture();
+    const result = await invoke(fixture, 'vitest-planned-missing-shard', [fixture.files[0]!]);
+    expect(result.code).toBe(1); expect(result.stderr).toContain('requires --shard');
+    expect(result.report).toBeNull();
+  });
+
   it('runs the weighted Vitest file selections without discovering the failing unselected file', async () => {
     const fixture = await vitestFixture(), plan = fixturePlan(fixture), seen: string[] = [];
     expect(plan.parts.map(part => part.units.length).sort()).toEqual([1, 2]);
