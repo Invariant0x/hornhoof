@@ -1,12 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { URL } from 'node:url';
 import { changedLines, countDuplicates, exitCodeOf, judgeFunctions, parseCrapEdn, parseLcov, parseTap, parseVitestJson, worstCrap } from '../author-check/judge.mjs';
-import { baseTable, buildPlan, decodePlan, encodePlan, isCode, isDocument, isLintable, isSource, parseHunks, parseNameStatus, PLAN_CHARS } from '../author-check/plan.mjs';
+import { buildPlan, decodePlan, encodePlan, grownFunctions, isCode, isDocument, isLintable, isSource, parseHunks, parseNameStatus, PLAN_CHARS } from '../author-check/plan.mjs';
 import { adapterOf, impactEnvironment, selectTests } from '../author-check/select.mjs';
 import { allUnavailable, runStages } from '../author-check/stages.mjs';
 import { main, parseArgs, realPorts } from '../author-check/main.mjs';
@@ -24,8 +25,9 @@ const FILES = {
   [LCOV]: 'TN:\nSF:src/a.ts\nDA:1,1\nDA:2,0\nDA:3,4\nDA:9,1\nend_of_record\n',
   [CRAP]: edn(['a', 'a', 2, 100, 3]),
 };
-function given({ changes = CHANGES, suites = [vitestSuite], selection, hunks = { 'apps/node/src/a.ts': [[1, 3]] }, baseCc = {}, scripts = {} } = {}) {
-  return { sha: SHA, tmp: '/tmp/check', scripts, suites, plan: { v: 1, sha: SHA, base: BASE, changes, hunks, baseCc },
+const grownIn = (cwd, name, cc, base = null) => ({ [cwd]: [{ namespace: 'a', name, cc, base }] });
+function given({ changes = CHANGES, suites = [vitestSuite], selection, hunks = { 'apps/node/src/a.ts': [[1, 3]] }, grown = {}, scripts = {} } = {}) {
+  return { sha: SHA, tmp: '/tmp/check', scripts, suites, plan: { sha: SHA, base: BASE, changes, hunks, grown },
     selection: selection ?? { packages: [{ packageId: 'node', mode: 'related', units: [unit('apps/node/test/a.test.ts')] }], notes: [] } };
 }
 function fake(answer = () => undefined, files = FILES) {
@@ -71,7 +73,7 @@ test('a formatter the repository declares runs as the format stage', async () =>
 
 test('CRAP of 10 or more on a new function fails with its numbers', async () => {
   const ports = fake(undefined, { ...FILES, [CRAP]: edn(['bad', 'a', 12, 40, 43.1], ['a', 'a', 2, 100, 3]) });
-  const result = await runStages(given(), ports);
+  const result = await runStages(given({ grown: grownIn('apps/node', 'bad', 12) }), ports);
   assert.deepEqual([stage(result, 'crapper').status, stage(result, 'crapper').exitCode], ['failed', 2]);
   assert.equal(result.numbers.worstCrap, 43.1);
   assert.equal(exitCodeOf(result.stages), 1);
@@ -80,18 +82,18 @@ test('CRAP of 10 or more on a new function fails with its numbers', async () => 
 
 test('CRAP of 10 or more fails when the complexity grew over the base', async () => {
   const ports = fake(undefined, { ...FILES, [CRAP]: edn(['bad', 'a', 12, 40, 43.1]) });
-  const result = await runStages(given({ baseCc: { 'apps/node': { 'a bad': [11] } } }), ports);
+  const result = await runStages(given({ grown: grownIn('apps/node', 'bad', 12, 11) }), ports);
   assert.equal(stage(result, 'crapper').status, 'failed');
   assert.ok(isLine(ports, /^FAILS a bad cc=12 base=11 /));
 });
 
 test('a function whose complexity did not grow is shown as touched and does not fail', async () => {
   const ports = fake(undefined, { ...FILES, [CRAP]: edn(['old', 'a', 12, 40, 43.1], ['a', 'a', 2, 100, 3]) });
-  const result = await runStages(given({ baseCc: { 'apps/node': { 'a old': [12] } } }), ports);
+  const result = await runStages(given(), ports);
   assert.equal(stage(result, 'crapper').status, 'passed');
   assert.equal(result.numbers.worstCrap, 3);
   assert.equal(exitCodeOf(result.stages), 0);
-  assert.ok(isLine(ports, /^TOUCHED a old cc=12 base=12 cov=40 crap=43\.1/));
+  assert.ok(isLine(ports, /^TOUCHED a old cc=12 base=kept cov=40 crap=43\.1/));
 });
 
 test('dryer flags are counted and never fail the check', async () => {
@@ -166,7 +168,7 @@ test('a changed source without any selected test scores on zero coverage of that
   const selection = { packages: [], notes: [] };
   const files = { [CRAP]: edn(['bad', 'a', 4, 0, 20]) };
   const ports = fake(undefined, files);
-  const result = await runStages(given({ selection }), ports);
+  const result = await runStages(given({ selection, grown: grownIn('apps/node', 'bad', 4) }), ports);
   assert.equal(stage(result, 'tests').status, 'unavailable');
   assert.ok(isLine(ports, /^STAGE tests unavailable .*reason=nothing_selected/));
   assert.equal(stage(result, 'crapper').status, 'failed');
@@ -265,16 +267,17 @@ test('crap.edn entries read back with unknown numbers as null', () => {
   assert.deepEqual(parseCrapEdn('{:entries [\n]}\n'), []);
 });
 
-test('functions of one name are paired with the base from the most complex down', () => {
+test('of functions of one name only the one that grew fails', () => {
   const judged = judgeFunctions([
     { name: 'f', namespace: 'x', complexity: 12, coverage: 0, crap: 150 },
     { name: 'f', namespace: 'x', complexity: 15, coverage: 0, crap: 240 },
     { name: 'g', namespace: 'x', complexity: 2, coverage: 100, crap: 2 },
     { name: 'h', namespace: 'x', complexity: 2, coverage: null, crap: null },
-  ], { 'x f': [15] });
-  assert.deepEqual(judged.map(item => [item.name, item.complexity, item.baseCc, item.verdict]), [
-    ['f', 12, null, 'fails'], ['f', 15, 15, 'touched'], ['g', 2, null, 'ok'], ['h', 2, null, 'unknown'],
+  ], [{ namespace: 'x', name: 'f', cc: 12, base: null }]);
+  assert.deepEqual(judged.map(item => [item.name, item.complexity, item.verdict, item.baseCc]), [
+    ['f', 12, 'fails', null], ['f', 15, 'touched', null], ['g', 2, 'ok', null], ['h', 2, 'unknown', null],
   ]);
+  assert.equal(judgeFunctions([{ name: 'f', namespace: 'x', complexity: 12, coverage: 0, crap: 150 }], [{ namespace: 'x', name: 'f', cc: 12, base: 9 }])[0].baseCc, 9);
 });
 
 test('the worst number leaves out what is excused and is unknown when anything is', () => {
@@ -291,6 +294,10 @@ test('changed lines count only what coverage calls executable', () => {
   assert.deepEqual(changedLines({ 'a.ts': [[1, 3]], 'b.ts': [[5, 1]] }, coverage, ['a.ts', 'b.ts']), { covered: 1, total: 2 });
   assert.equal(changedLines({ 'c.ts': [[1, 1]] }, coverage, ['c.ts']), null);
   assert.equal(changedLines({}, coverage, []), null);
+});
+
+test('without the lines of a plan the changed lines stay unknown', () => {
+  assert.equal(changedLines(null, { 'a.ts': { 1: 1 } }, ['a.ts']), null);
 });
 
 test('test reports give counts or nothing', () => {
@@ -327,11 +334,19 @@ test('which paths are code, sources, lintable or documents', () => {
   assert.deepEqual(['docs/a.md', 'README.md', 'templates/a.md', 'a.ts'].map(isDocument), [true, true, false, false]);
 });
 
-test('the base table keeps only what could ever reach CRAP 10', () => {
-  assert.deepEqual(baseTable([{ namespace: 'x', name: 'small', complexity: 2 }, { namespace: 'x', name: 'f', complexity: 3 }, { namespace: 'x', name: 'f', complexity: 9 }]), { 'x f': [9, 3] });
+test('only what is new or grew, and could ever reach CRAP 10, counts as grown', () => {
+  const row = (name, complexity) => ({ namespace: 'x', name, complexity });
+  assert.deepEqual(grownFunctions([row('small', 2), row('fresh', 3), row('same', 9), row('more', 7), row('less', 4)], [row('same', 9), row('more', 6), row('less', 5)]), [
+    { namespace: 'x', name: 'more', cc: 7, base: 6 }, { namespace: 'x', name: 'fresh', cc: 3, base: null },
+  ]);
 });
 
-test('a plan comes from the diff and the complexity of the base, under the new path of a moved file', () => {
+test('functions of one name are paired with the base from the most complex down', () => {
+  const row = complexity => ({ namespace: 'x', name: 'f', complexity });
+  assert.deepEqual(grownFunctions([row(12), row(15)], [row(15)]), [{ namespace: 'x', name: 'f', cc: 12, base: null }]);
+});
+
+test('a plan compares the commit with its base, with a moved file under its new path', () => {
   const asked = [];
   const git = args => {
     asked.push(args);
@@ -340,26 +355,67 @@ test('a plan comes from the diff and the complexity of the base, under the new p
     throw new Error('unexpected');
   };
   const groups = [];
-  const complexity = (cwd, files) => { groups.push([cwd, files]); return [{ namespace: 'a', name: 'f', complexity: 5 }]; };
+  const complexity = (cwd, commit, files) => {
+    groups.push([cwd, commit === SHA ? 'sha' : 'base', files]);
+    return commit === SHA ? [{ namespace: 'a', name: 'f', complexity: 5 }] : [{ namespace: 'a', name: 'f', complexity: cwd === '.' ? 5 : 4 }];
+  };
   const plan = buildPlan({ sha: SHA, base: BASE, cwdOf: path => path.startsWith('apps/node/') ? 'apps/node' : '.' }, { git, complexity });
   assert.deepEqual(plan.hunks, { 'apps/node/src/a.ts': [[1, 1]] });
   assert.deepEqual(groups, [
-    ['apps/node', [{ path: 'src/a.ts', from: 'apps/node/src/a.ts' }, { path: 'src/moved.ts', from: 'apps/node/src/old.ts' }]],
-    ['.', [{ path: 'other.ts', from: 'other.ts' }]],
+    ['apps/node', 'sha', [{ path: 'src/a.ts', from: 'apps/node/src/a.ts' }, { path: 'src/new.ts', from: 'apps/node/src/new.ts' }, { path: 'src/moved.ts', from: 'apps/node/src/moved.ts' }]],
+    ['apps/node', 'base', [{ path: 'src/a.ts', from: 'apps/node/src/a.ts' }, { path: 'src/moved.ts', from: 'apps/node/src/old.ts' }]],
+    ['.', 'sha', [{ path: 'other.ts', from: 'other.ts' }]],
+    ['.', 'base', [{ path: 'other.ts', from: 'other.ts' }]],
   ]);
-  assert.deepEqual(plan.baseCc, { 'apps/node': { 'a f': [5] }, '.': { 'a f': [5] } });
-  assert.deepEqual([plan.v, plan.sha, plan.base, plan.changes.length], [1, SHA, BASE, 6]);
+  assert.deepEqual(plan.grown, { 'apps/node': [{ namespace: 'a', name: 'f', cc: 5, base: 4 }] });
+  assert.deepEqual([plan.sha, plan.base, plan.changes.length], [SHA, BASE, 6]);
   assert.ok(asked.every(args => args.includes(BASE) && args.includes(SHA)));
 });
 
-test('a plan survives the command line and a broken one is refused', () => {
-  const plan = { v: 1, sha: SHA, base: BASE, changes: CHANGES, hunks: {}, baseCc: {} };
-  const text = encodePlan(plan);
-  assert.match(text, /^[\w-]+$/);
-  assert.ok(text.length < PLAN_CHARS);
-  assert.deepEqual(decodePlan(text), plan);
-  assert.throws(() => decodePlan('nonsense'), /plan_invalid/);
-  assert.throws(() => decodePlan(encodePlan({ ...plan, v: 2 })), /plan_invalid/);
+test('a plan of new files only never asks for a base it does not need', () => {
+  const git = args => (args.includes('--name-status') ? 'A\0a.ts\0' : '');
+  const commits = [];
+  buildPlan({ sha: SHA, base: BASE, cwdOf: () => '.' }, { git, complexity: (_cwd, commit) => { commits.push(commit); return []; } });
+  assert.deepEqual(commits, [SHA]);
+});
+
+const FULL_PLAN = {
+  sha: SHA, base: BASE,
+  changes: [{ kind: 'modified', path: 'apps/node/src/a b.ts' }, { kind: 'added', path: 'apps/node/test/a.test.ts' }, { kind: 'deleted', path: 'docs/gone.md' }, { kind: 'renamed', previousPath: 'x/old.ts', path: 'x/new.ts' }],
+  hunks: { 'apps/node/src/a b.ts': [[1, 3], [20, 1]], 'apps/node/test/a.test.ts': [[1, 9]], 'x/new.ts': [[5, 2]] },
+  grown: { 'apps/node': [{ namespace: 'a b', name: 'f', cc: 12, base: 9 }, { namespace: 'a b', name: 'g', cc: 3, base: null }, { namespace: 'c', name: 'Guard.run', cc: 4, base: null }] },
+};
+
+test('a plan is plain words an agent can copy, and reads back', () => {
+  const text = encodePlan(FULL_PLAN);
+  assert.ok(text.startsWith(`v1 ${SHA.slice(0, 12)} ${BASE.slice(0, 12)};M apps/node/src/a b.ts @1+3,20;A apps/node/test/a.test.ts;D docs/gone.md;R x/old.ts>x/new.ts @5+2;`), text);
+  assert.ok(text.includes(';G apps/node a b f=12<9,g=3;G apps/node c Guard.run=4;#'), text);
+  const plan = decodePlan(text);
+  assert.deepEqual(plan.changes, FULL_PLAN.changes);
+  assert.deepEqual(plan.hunks, { 'apps/node/src/a b.ts': [[1, 3], [20, 1]], 'x/new.ts': [[5, 2]] });
+  assert.deepEqual(plan.grown, FULL_PLAN.grown);
+  assert.deepEqual([plan.sha, plan.base], [SHA.slice(0, 12), BASE.slice(0, 12)]);
+});
+
+test('a plan without lines says so, so changed lines stay unknown', () => {
+  const plan = decodePlan(encodePlan({ ...FULL_PLAN, hunks: null }));
+  assert.equal(plan.hunks, null);
+  assert.deepEqual(plan.changes, FULL_PLAN.changes);
+});
+
+test('any change to the words of a plan is refused', () => {
+  const text = encodePlan(FULL_PLAN);
+  for (const broken of [text.replace('@1+3', '@1+4'), text.replace(/#.*$/, '#00000000'), text.replace(';#', ';'), 'nonsense', '', text.replace('v1', 'v2').replace(/#.*$/, '#')]) assert.throws(() => decodePlan(broken), /plan_invalid/, broken);
+});
+
+test('a broken body with a right digest is refused too', () => {
+  const sign = body => `${body};#${createHash('sha256').update(body).digest('hex').slice(0, 8)}`;
+  for (const body of ['v2 111111111111 222222222222', `v1 ${'1'.repeat(12)} ${'2'.repeat(12)};Q what`, `v1 ${'1'.repeat(12)} ${'2'.repeat(12)};G apps/node a nothing`]) assert.throws(() => decodePlan(sign(body)), /plan_invalid/, body);
+});
+
+test('a name a plan cannot hold is refused when it is made, not read wrong later', () => {
+  for (const path of ["a'b.ts", 'a;b.ts', 'a>b.ts', 'a@b.ts']) assert.throws(() => encodePlan({ ...FULL_PLAN, changes: [{ kind: 'modified', path }] }), /plan_unsupported/, path);
+  assert.throws(() => encodePlan({ ...FULL_PLAN, grown: { '.': [{ namespace: 'a', name: 'b,c', cc: 3, base: null }] } }), /plan_unsupported/);
 });
 
 test('arguments need exact commits', () => {
@@ -430,7 +486,7 @@ function runner(overrides = {}) {
   const lines = [], calls = [];
   return { lines, calls, log: line => lines.push(line), head: () => SHA, hasCommit: () => false, exists: () => true,
     exec: async (program, args) => { calls.push([program, ...args]); return { code: 0, output: '' }; },
-    prepare: async () => null, makePlan: () => ({ v: 1, sha: SHA, base: BASE, changes: [], hunks: {}, baseCc: {} }),
+    prepare: async () => null, makePlan: () => ({ sha: SHA, base: BASE, changes: [], hunks: {}, grown: {} }),
     check: async () => ({ code: 0 }), ...overrides };
 }
 const ARGS = ['--sha', SHA, '--base', BASE];
@@ -442,16 +498,32 @@ test('outside run_tests the command checks nothing and prints the line to run th
   assert.equal(await main(ARGS, {}, ports), 0);
   assert.deepEqual(ports.calls, []);
   const printed = ports.lines.find(line => line.startsWith('npm run -s check:author -- '));
-  assert.ok(printed.includes(`--sha ${SHA} --base ${BASE} --plan `));
+  assert.ok(printed.includes(`--sha ${SHA} --base ${BASE} --plan '`));
+  assert.ok(printed.endsWith("'"));
   assert.ok(printed.length < 4000);
 });
 
 test('a plan too long for one command is refused with the reason', async () => {
   const big = Array.from({ length: 4000 }, (_, index) => ({ path: `apps/node/src/${index}-${Math.random()}.ts`, kind: 'modified' }));
-  const ports = runner({ makePlan: () => ({ v: 1, sha: SHA, base: BASE, changes: big, hunks: {}, baseCc: {} }) });
+  const ports = runner({ makePlan: () => ({ sha: SHA, base: BASE, changes: big, hunks: {}, grown: {} }) });
   assert.equal(await main(ARGS, {}, ports), 2);
   assert.ok(ports.lines.some(line => line.includes('plan_too_long')));
   assert.equal(ports.lines.some(line => line.startsWith('npm run')), false);
+});
+
+test('a plan too long with its lines goes without them, and says what that costs', async () => {
+  const hunks = { 'src/a.ts': Array.from({ length: 2000 }, (_, index) => [index * 3 + 1, 1]) };
+  const ports = runner({ makePlan: () => ({ sha: SHA, base: BASE, changes: [{ kind: 'modified', path: 'src/a.ts' }], hunks, grown: {} }) });
+  assert.equal(await main(ARGS, {}, ports), 0);
+  assert.ok(ports.lines.some(line => line.includes('changedLines')));
+  const printed = ports.lines.find(line => line.startsWith('npm run -s check:author -- '));
+  assert.ok(printed.includes(' nolines;M src/a.ts;#'));
+});
+
+test('a plan that cannot be written is reported', async () => {
+  const ports = runner({ makePlan: () => ({ sha: SHA, base: BASE, changes: [{ kind: 'modified', path: "a'b.ts" }], hunks: {}, grown: {} }) });
+  assert.equal(await main(ARGS, {}, ports), 2);
+  assert.ok(ports.lines.some(line => line.includes('plan_unsupported')));
 });
 
 test('a plan that cannot be made outside the run is reported', async () => {
@@ -481,8 +553,8 @@ test('on a run with neither a base nor a plan every stage is unavailable and it 
 });
 
 test('on a run a plan for another commit or base is refused', async () => {
-  for (const other of [{ sha: BASE }, { base: SHA }, { v: 2 }]) {
-    const plan = encodePlan({ v: 1, sha: SHA, base: BASE, changes: [], hunks: {}, baseCc: {}, ...other });
+  for (const other of [{ sha: BASE }, { base: SHA }]) {
+    const plan = encodePlan({ sha: SHA, base: BASE, changes: [], hunks: {}, grown: {}, ...other });
     const ports = runner({ check: async () => assert.fail('must not check') });
     assert.equal(await main([...ARGS, '--plan', plan], ON_RUN, ports), 2);
     assert.ok(ports.lines.some(line => line.includes('reason=plan_invalid')), JSON.stringify(other));
@@ -497,15 +569,16 @@ test('on a run a reachable base needs no plan', async () => {
 });
 
 test('on a run the plan given reaches the check and the code of the check is the code of the command', async () => {
-  const plan = encodePlan({ v: 1, sha: SHA, base: BASE, changes: CHANGES, hunks: {}, baseCc: {} });
+  const plan = encodePlan({ sha: SHA, base: BASE, changes: CHANGES, hunks: {}, grown: {} });
   let seen = null;
   const ports = runner({ check: async (args, value) => { seen = value; return { code: 1 }; } });
   assert.equal(await main([...ARGS, '--plan', plan], ON_RUN, ports), 1);
   assert.deepEqual(seen.changes, CHANGES);
+  assert.deepEqual([seen.sha, seen.base], [SHA, BASE]);
 });
 
 test('on a run a failed preparation leaves every stage unavailable', async () => {
-  const plan = encodePlan({ v: 1, sha: SHA, base: BASE, changes: CHANGES, hunks: {}, baseCc: {} });
+  const plan = encodePlan({ sha: SHA, base: BASE, changes: CHANGES, hunks: {}, grown: {} });
   const ports = runner({ prepare: async () => 'prepare_failed', check: async () => assert.fail('must not check') });
   assert.equal(await main([...ARGS, '--plan', plan], ON_RUN, ports), 2);
   assert.ok(ports.lines.some(line => line.includes('reason=prepare_failed')));
@@ -544,6 +617,7 @@ test('the real git port reads commits, a plan of a real repository included', { 
     assert.equal(ports.hasCommit(base), true);
     assert.equal(ports.hasCommit('3'.repeat(40)), false);
     const plan = buildPlan({ sha, base, cwdOf: () => '.' }, { git: ports.git, complexity: () => assert.fail('no source changed') });
+    assert.deepEqual(plan.grown, {});
     assert.deepEqual(plan.changes, [{ kind: 'modified', path: 'a.md' }]);
     assert.deepEqual(plan.hunks, { 'a.md': [[2, 1]] });
   } finally { rmSync(dir, { recursive: true, force: true }); }
@@ -567,14 +641,14 @@ test('the tracked files of the index keep paths with spaces', () => {
 
 const hasCrapper = spawnSync('crapper', ['--help'], { stdio: 'ignore' }).status === 0;
 
-test('the complexity of the base is read at the path the file has now', { skip: !hasCrapper }, () => {
+test('the complexity of a commit is read at the path the file has now', { skip: !hasCrapper }, () => {
   const source = 'export function f(x: number) {\n  if (x > 1) return 1;\n  if (x > 2) return 2;\n  return 3;\n}\n';
   const shown = [];
-  const entries = complexityAt(BASE, args => { shown.push(args); return source; })('apps/node', [{ path: 'src/deep/moved.ts', from: 'apps/node/src/old.ts' }]);
+  const entries = complexityAt(args => { shown.push(args); return source; })('apps/node', BASE, [{ path: 'src/deep/moved.ts', from: 'apps/node/src/old.ts' }]);
   assert.deepEqual(shown, [['show', `${BASE}:apps/node/src/old.ts`]]);
   assert.deepEqual(entries.map(({ name, namespace, complexity }) => [name, namespace, complexity]), [['f', 'deep.moved', 3]]);
 });
 
-test('a missing tool for the base is said, not taken for a simple base', () => {
-  assert.throws(() => complexityAt(BASE, () => 'x', 'no-such-tool-at-all')('.', [{ path: 'a.ts', from: 'a.ts' }]), /crapper_unavailable/);
+test('a missing tool for the plan is said, not taken for a simple commit', () => {
+  assert.throws(() => complexityAt(() => 'x', 'no-such-tool-at-all')('.', BASE, [{ path: 'a.ts', from: 'a.ts' }]), /crapper_unavailable/);
 });

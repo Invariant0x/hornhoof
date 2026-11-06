@@ -13,13 +13,13 @@ const COLLECT_MS = 5 * 60 * 1000;
 const COLLECT_BYTES = 64 * 1024 * 1024;
 const PROBE = "const {probe}=await import('./scripts/test/related-probe.mjs');process.stdout.write(JSON.stringify(await probe({root:process.cwd()},JSON.parse(process.argv[1]))));";
 
-/* The base of a file under the path it has now, read by the same tool from the same folder depth as the run reads it. */
-export const complexityAt = (base, git, tool = 'crapper') => (_cwd, files) => {
+/* A commit's files under the paths they have now, read by the same tool from the same folder depth as the run reads them. */
+export const complexityAt = (git, tool = 'crapper') => (_cwd, commit, files) => {
   const dir = mkdtempSync(join(tmpdir(), 'hh-author-base-'));
   try {
     for (const { path, from } of files) {
       mkdirSync(dirname(join(dir, path)), { recursive: true });
-      writeFileSync(join(dir, path), git(['show', `${base}:${from}`]));
+      writeFileSync(join(dir, path), git(['show', `${commit}:${from}`]));
     }
     if (spawnSync(tool, ['--no-coverage', ...files.map(file => file.path)], { cwd: dir, stdio: 'ignore' }).status !== 0) throw new Error('crapper_unavailable');
     return parseCrapEdn(readFileSync(join(dir, '.metrics/crap.edn'), 'utf8'));
@@ -28,7 +28,7 @@ export const complexityAt = (base, git, tool = 'crapper') => (_cwd, files) => {
 
 function makePlan({ sha, base }, ports) {
   const suites = fastSuites(JSON.parse(ports.git(['show', `${sha}:${MANIFEST}`])));
-  return buildPlan({ sha, base, cwdOf: path => cwdOf(suites, path) }, { git: ports.git, complexity: complexityAt(base, ports.git) });
+  return buildPlan({ sha, base, cwdOf: path => cwdOf(suites, path) }, { git: ports.git, complexity: complexityAt(ports.git) });
 }
 
 export async function prepare(ports) {

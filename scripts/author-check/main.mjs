@@ -56,14 +56,20 @@ export function realPorts(root, write = text => process.stdout.write(text)) {
   };
 }
 
+function writtenPlan(plan, log) {
+  const whole = encodePlan(plan);
+  if (whole.length <= PLAN_CHARS) return whole;
+  log('This change is too large to carry its lines in one command, so changedLines stays unknown in the record.');
+  return encodePlan({ ...plan, hunks: null });
+}
+
 function outsideRun(args, ports) {
-  let plan;
-  try { plan = ports.makePlan(args); }
+  let text;
+  try { text = writtenPlan(ports.makePlan(args), ports.log); }
   catch (error) { ports.log(`plan_failed: ${error.message}`); return 2; }
-  const text = encodePlan(plan);
   if (text.length > PLAN_CHARS) { ports.log(`plan_too_long: ${text.length} characters, at most ${PLAN_CHARS}. A run cannot read the base of a change this large.`); return 2; }
   ports.log(`Nothing was checked here. Run this line through run_tests, on the branch at ${args.sha}:`);
-  ports.log(`npm run -s check:author -- --sha ${args.sha} --base ${args.base} --plan ${text}${args.allowWhole ? ' --allow-whole' : ''}`);
+  ports.log(`npm run -s check:author -- --sha ${args.sha} --base ${args.base} --plan '${text}'${args.allowWhole ? ' --allow-whole' : ''}`);
   return 0;
 }
 
@@ -75,8 +81,8 @@ function refuse(args, reason, paths, ports) {
 
 function givenPlan(args) {
   const plan = decodePlan(args.plan);
-  if (plan.sha !== args.sha || plan.base !== args.base) throw new Error('plan_invalid');
-  return plan;
+  if (!args.sha.startsWith(plan.sha) || !args.base.startsWith(plan.base)) throw new Error('plan_invalid');
+  return { ...plan, sha: args.sha, base: args.base };
 }
 
 function planOnRun(args, ports) {

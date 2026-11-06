@@ -108,7 +108,7 @@ function sourceGroups({ paths, suites }) {
 function showJudged(judged, log) {
   for (const item of judged) {
     if (item.verdict !== 'fails' && item.verdict !== 'touched') continue;
-    log(`${item.verdict === 'fails' ? 'FAILS' : 'TOUCHED'} ${item.namespace} ${item.name} cc=${item.complexity} base=${item.baseCc ?? 'new'} cov=${item.coverage} crap=${item.crap}`);
+    log(`${item.verdict === 'fails' ? 'FAILS' : 'TOUCHED'} ${item.namespace} ${item.name} cc=${item.complexity} base=${item.verdict === 'touched' ? 'kept' : item.baseCc ?? 'new'} cov=${item.coverage} crap=${item.crap}`);
   }
 }
 
@@ -127,7 +127,7 @@ async function crapperStage(context) {
     const { code } = await context.ports.exec('crapper', [group.measured ? '--use-existing-coverage' : '--no-coverage', ...group.files], { cwd: group.cwd });
     if (code !== 0) return broken('crapper', code);
     const entries = parseCrapEdn(context.ports.read(join(group.cwd, '.metrics/crap.edn')) ?? '');
-    judged.push(...judgeFunctions(entries, context.plan.baseCc[group.cwd] ?? {}));
+    judged.push(...judgeFunctions(entries, context.plan.grown[group.cwd] ?? []));
   }
   showJudged(judged, context.ports.log);
   context.numbers.worstCrap = worstCrap(judged);
