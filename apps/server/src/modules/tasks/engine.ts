@@ -5,6 +5,7 @@ import { accessOf, canReach, type Access, type Spot } from '../../auth/access.js
 import type { Db } from '../../db/client.js';
 import { agents, attachments, companies, departments, jobs, people, requests, subscriptions, taskEvents, tasks, turns, type DecisionTopic, type RequestOption, type TaskEventKind } from '../../db/schema.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
+import { refuseNotUrgent, urgencyOfNew } from './urgency.js';
 import { canDecide } from '../../auth/decisions.js';
 import type { DecisionSubject } from '../../auth/decision-owner.js';
 import { checkDelegation, contextMissing, requireDecider, type Delegation } from '../conversation/decision-context.js';
@@ -16,6 +17,12 @@ import { returnAlongLine } from '../org/map-state.js';
 import { handOff } from './pulses.js';
 import { recordCause, type WakeCause } from './notification-cause.js';
 import { preserveNote } from './long-text.js';
+import { authorVendor, captureReview, reviewContext, reviewVendor, turnReviewContext } from './review-context.js';
+import { degradedReviewNotes, reviewPanel, turnReviewPlan, type Plan } from './review-plan.js';
+import { mechanicalVerdict } from './review-findings.js';
+import { verdictReview, type ReviewVerdict } from './review-verdict.js';
+import { pendingFixReviews, prepareFixReviews } from './review-fixes.js';
+import { checkIndependent, currentIndependent, type IndependentDeclaration, type IndependentPartInput } from './independent.js';
 
 export type Task = typeof tasks.$inferSelect;
 export type Request = typeof requests.$inferSelect;
@@ -23,12 +30,12 @@ export type Request = typeof requests.$inferSelect;
 export type Actor = { personId: string; agentId?: undefined } | { agentId: string; personId?: undefined };
 export type WakeWhy = 'assigned' | 'review' | 'changes' | 'stuck_at_gate' | 'done' | 'reported' | 'blocked' | 'cancelled' | 'answered' | 'comment' | 'updated' | 'reminder' | 'go_on' | 'turn' | 'switched' | 'explain' | 'subtasks' | 'after_cancelled' | 'merge' | 'unblocked' | 'tests' | 'work' | 'turn_review' | 'reviewed' | 'review_passed' | 'wait_ended';
 /* An agent that has to act on a task now; Hornhoof queues a turn for it. note: what else it should know, after the rest. */
-export type Wake = { agentId: string; taskId: string; why: WakeWhy; text?: string; note?: string; version?: number; cause?: WakeCause };
+export type Wake = { agentId: string; taskId: string; why: WakeWhy; text?: string; note?: string; again?: boolean; mechanical?: boolean; version?: number; cause?: WakeCause };
 export type Moved = { task: Task; wakes: Wake[] };
 
 export type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 /* The templates name a department's gate roles, for the review of a turn; without them none opens. */
-type Live = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'templates' | 'config' | 'readCompare'>>;
+type Live = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'templates' | 'config' | 'readCompare' | 'readCommit'>>;
 
 export const CLOSED: readonly Task['status'][] = ['done', 'cancelled'];
 /* The send-back at one gate that also calls the head in. */
@@ -69,7 +76,7 @@ async function workUnderDone(tx: Tx, templates: Live['templates'], closed: Task,
   const holder = parent?.assigneeAgentId;
   if (!parent || CLOSED.includes(parent.status) || !holder || (await isTurnReview(tx, closed.id))) return [];
   const [open] = await tx.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.parentId, parent.id), notInArray(tasks.status, [...CLOSED]))).limit(1);
-  if (open) return [];
+  if (open || (await openAfter(tx, parent)).length) return [];
   const due = templates ? await reviewDue(tx, parent) : null;
   let note: string | undefined;
   if (due?.waiting.length) {
@@ -164,17 +171,19 @@ async function openTurnReview(tx: Tx, templates: Ctx['templates'], parent: Task,
   const leads = await gateLeads(tx, templates, parent.departmentId!, head, changes);
   const gateTriggers = Object.fromEntries([...templates.roles.values()].filter(role => role.gate !== null).map(role => [role.id, gateReasons(role, changes)]));
   const draft = { ...parent, executorAgentId: head, gates: leads };
-  const roles = await Promise.all(leads.map((_, i) => panelFor(tx, draft, i + 1)));
-  const panel = [...new Set(roles.flatMap(p => p.panel))];
+  const roles = await Promise.all(leads.map((_, i) => panelFor(tx, draft, i + 1, [], true)));
+  const pool = [...new Set(roles.flatMap(p => p.panel))];
   /* A role none of whose reviewers has a subscription does not check it, and the head hears who. */
   const unable = roles.filter(p => !p.panel.length).flatMap(p => p.idle);
-  if (!panel.length) {
-    const who = joined(unable.map(a => a.name));
-    return unable.length ? { note: `Nobody could review the turn: ${who} ${unable.length === 1 ? 'has' : 'have'} no subscription to run on. Give them one on their cards, or give the final check without the review.` } : {};
-  }
+  if (!pool.length) return unavailableTurnReview(unable);
   const [turn] = await tx.select({ number: turns.number }).from(turns).where(eq(turns.id, parent.turnId!));
   const [last] = await tx.select({ n: max(tasks.number) }).from(tasks).where(eq(tasks.companyId, parent.companyId));
   const branch = `turn-${turn!.number}`;
+  const candidates = await Promise.all(roles.flatMap((role, i) => role.panel.map(async reviewerId => ({ reviewerId, vendor: await authorVendor(tx, reviewerId), role: String(i) }))));
+  const reviewPlan = await turnReviewPlan(tx, scoped, candidates, result);
+  const panel = reviewPanel(reviewPlan);
+  const assignee = panel[0] ?? head;
+  const review = await turnReviewContext(tx, parent, head, branch, result);
   const titles = joined(covered.map(t => `"${t.title}"`));
   const under = joined(covered.map(t => `#${t.number} "${t.title}"`));
   const [row] = await tx
@@ -186,12 +195,13 @@ async function openTurnReview(tx: Tx, templates: Ctx['templates'], parent: Task,
       parentId: parent.id,
       departmentId: parent.departmentId,
       productId: parent.productId,
+      urgent: parent.urgent,
       title: `Review of turn ${turn!.number}`,
       brief: `Every reviewer checks all that turn ${turn!.number} changed for ${titles} at once, on ${branch}.`,
       body: `Review ${branch} against the main line: everything the turn changed under ${under}. The verdicts go to the head in one list.`,
       status: 'review',
       stage: 1,
-      assigneeAgentId: panel[0]!,
+      assigneeAgentId: assignee,
       executorAgentId: head,
       gates: leads,
       panel,
@@ -203,9 +213,20 @@ async function openTurnReview(tx: Tx, templates: Ctx['templates'], parent: Task,
     kind: 'created',
     actor: { agentId: head },
     text: row!.brief,
-    data: { assignee: panel[0], gates: leads, after: [], panel, unable: unable.map(a => a.id), covers: covered.map(t => t.id), turnReview: true, gateTriggers, comparison: comparisonProof(result) },
+    data: { assignee, gates: leads, after: [], panel, unable: unable.map(a => a.id), covers: covered.map(t => t.id), turnReview: true, gateTriggers, comparison: comparisonProof(result), review, reviewPlan },
   });
-  return { row: row!, wakes: panel.map(agentId => ({ agentId, taskId: row!.id, why: 'turn_review', text: branch })) };
+  return { row: row!, wakes: turnReviewWakes(row!, head, branch, reviewPlan) };
+}
+
+function unavailableTurnReview(unable: { name: string }[]): { note?: string } {
+  const who = joined(unable.map(agent => agent.name));
+  return unable.length ? { note: `Nobody could review the turn: ${who} ${unable.length === 1 ? 'has' : 'have'} no subscription to run on. Give them one on their cards, or give the final check without the review.` } : {};
+}
+
+function turnReviewWakes(task: Task, head: string, branch: string, plan: Plan): Wake[] {
+  const wakes: Wake[] = task.panel.map(agentId => ({ agentId, taskId: task.id, why: 'turn_review', text: branch, note: 'Read reviewPlan in the task tool: use the source ranges to identify your task areas, and inspect those paths at review.commit with common contracts. The integrationReviewerId checks the connections. Verify author run IDs and commits; do not rerun their checks.' }));
+  if (!task.panel.length) wakes.push({ agentId: head, taskId: task.id, why: 'switched', text: `The turn review is blocked: ${plan.degraded.join(', ')}. Supply independent reviewers; no author vendor may pass its own slice.` });
+  return wakes;
 }
 
 /* Names as a reader says them: "A", "A and B", "A, B and C". */
@@ -473,10 +494,14 @@ export type NewTask = {
   gates?: string[];
   /* Tasks of the same turn that must be done first. */
   after?: string[];
+  independentPart?: IndependentPartInput;
+  independentNone?: string;
   /* Code given out without gates of its own: the review of its department's turn checks it. */
   inTurnReview?: boolean;
   workKind?: Task['workKind'];
   riskClass?: Task['riskClass'];
+  /* Of a task with nothing above it; one under a task is what that task is. */
+  urgent?: boolean;
 };
 
 /* A live employee or orchestrator of the company. */
@@ -504,22 +529,69 @@ async function checkGates(db: Db, companyId: string, executor: string, gates: st
   for (const id of gates) requireBlockingGate(templates, (await workingAgent(db, companyId, id, true)).roleKey);
 }
 
-export async function createTask(ctx: Live, actor: Actor, input: NewTask): Promise<Moved> {
+async function checkIndependentExecutor(db: Db, departmentId: string | null, part: IndependentPartInput): Promise<void> {
+  const agent = await workingAgent(db, null, part.executor);
+  if (agent.departmentId !== departmentId) throw refuse(403, 'task_not_yours', `${agent.name} does not work in this department.`);
+}
+
+async function insertIndependent(tx: Tx, parent: Task, part: IndependentPartInput, actor: Actor, inTurnReview?: boolean): Promise<{ child: Task; wake: Wake }> {
+  const [last] = await tx.select({ n: max(tasks.number) }).from(tasks).where(eq(tasks.companyId, parent.companyId));
+  const [child] = await tx.insert(tasks).values({
+    companyId: parent.companyId,
+    number: (last?.n ?? 0) + 1,
+    turnId: parent.turnId,
+    parentId: parent.id,
+    departmentId: parent.departmentId,
+    productId: parent.productId,
+    title: part.title.trim(),
+    brief: part.brief.trim(),
+    body: part.body,
+    assigneeAgentId: part.executor,
+    executorAgentId: part.executor,
+    gates: parent.gates,
+    after: [],
+    workKind: parent.workKind,
+    riskClass: parent.riskClass,
+    urgent: parent.urgent,
+    createdByPersonId: actor.personId ?? null,
+    createdByAgentId: actor.agentId ?? null,
+    updatedAt: new Date(),
+  }).returning();
+  const event = await note(tx, child!, { kind: 'created', actor, text: child!.brief, data: { assignee: child!.assigneeAgentId, gates: child!.gates, after: [], independentPartOf: parent.id, ...(inTurnReview ? { inTurnReview: true } : {}) } });
+  const wake: Wake = { agentId: child!.assigneeAgentId!, taskId: child!.id, why: 'assigned' };
+  recordCause([wake], { kind: 'created', actor }, event.id, child!);
+  return { child: child!, wake };
+}
+
+/* Who a new task gives work to, as urgent as it comes out: a word nobody may say is refused when the task is made. */
+function checkNewHolders(ctx: Ctx, actor: Actor, companyId: string, parent: Task | null, input: NewTask, gates: string[], declaration: IndependentDeclaration | null): Promise<void> {
+  const urgent = parent ? parent.urgent : input.urgent === true;
+  const part = declaration?.kind === 'part' ? [declaration.part.executor] : [];
+  return refuseNotUrgent(ctx, actor, companyId, { urgent, productId: input.productId ?? null, gates }, [input.assigneeAgentId, ...part]);
+}
+
+export async function createTask(ctx: Ctx, actor: Actor, input: NewTask): Promise<Moved> {
   const assignee = await workingAgent(ctx.db, null, input.assigneeAgentId);
   const gates = input.executor ? (input.gates ?? []) : [];
   if (!input.executor && input.gates?.length) throw refuse(400, 'task_invalid', 'Only a task with an executor has gates.');
   if (input.executor) await checkGates(ctx.db, assignee.companyId, assignee.id, gates, ctx.templates);
   if (!input.title.trim()) throw refuse(400, 'task_invalid', 'A task needs a title.');
+  const declaration = checkIndependent(input.after ?? [], input.independentPart, input.independentNone, null);
+  if (declaration?.kind === 'part') await checkIndependentExecutor(ctx.db, input.departmentId, declaration.part);
   const parent = input.parentId ? await loadTask(ctx.db, input.parentId) : null;
   if (parent) stillOpen(parent);
+  await checkNewHolders(ctx, actor, assignee.companyId, parent, input, gates, declaration);
+  let independent: Task | null = null;
   let waits = false;
   const wakes: Wake[] = [];
   const task = await ctx.db.transaction(async tx => {
     /* Numbers go up one by one per company, so creating tasks waits on the company row. */
     await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, assignee.companyId)).for('update');
     /* A parent cancelled meanwhile takes no new work; one cancelled after this waits and cancels the new task with it. */
+    let above: Task | null = null;
     if (parent) {
       const [now] = await tx.select().from(tasks).where(eq(tasks.id, parent.id)).for('update');
+      above = now!;
       stillOpen(now!);
       /* Its gates check the work as handed in; more work under it starts once they send it back. */
       if (now!.stage > 0) throw refuse(409, 'task_invalid', `#${now!.number} is being checked at its gates, so no work goes under it now. Give it once the gates send it back, or as a task of its own.`);
@@ -527,6 +599,8 @@ export async function createTask(ctx: Live, actor: Actor, input: NewTask): Promi
       const open = await openAfter(tx, now!);
       if (open.length) throw refuse(409, 'task_invalid', `#${now!.number} waits for ${listed(open)} first, so no work goes under it yet. You are woken once it can start.`);
     }
+    /* With the company held, so a change of urgency on its way reaches this task, or waits for it. */
+    const urgent = await urgencyOfNew(tx, assignee.companyId, actor, above, input.urgent);
     const [last] = await tx.select({ n: max(tasks.number) }).from(tasks).where(eq(tasks.companyId, assignee.companyId));
     const [turn] = parent ? [] : await tx.select({ id: turns.id }).from(turns).where(and(eq(turns.companyId, assignee.companyId), eq(turns.status, 'open')));
     const turnId = parent ? parent.turnId : (turn?.id ?? null);
@@ -553,27 +627,69 @@ export async function createTask(ctx: Live, actor: Actor, input: NewTask): Promi
         after: input.after ?? [],
         workKind: input.workKind,
         riskClass: input.riskClass,
+        urgent,
         createdByPersonId: actor.personId ?? null,
         createdByAgentId: actor.agentId ?? null,
         updatedAt: new Date(),
       })
       .returning();
-    const event = await note(tx, row!, { kind: 'created', actor, text: row!.brief, data: { assignee: assignee.id, gates, after: row!.after, ...(input.inTurnReview ? { inTurnReview: true } : {}) } });
-    /* One that waits for what it comes after is not given out yet: the move that finishes the last of them wakes its holder. */
-    if (!waits) {
-      wakes.push({ agentId: assignee.id, taskId: row!.id, why: 'assigned' });
-      recordCause(wakes, { kind: 'created', actor }, event.id, row!);
-      await keepWakes(tx, row!.companyId, wakes);
+    const event = await note(tx, row!, { kind: 'created', actor, text: row!.brief, data: {
+      assignee: assignee.id,
+      gates,
+      after: row!.after,
+      ...(declaration?.kind === 'part' ? { independentPart: declaration.part } : declaration?.kind === 'none' ? { independentNone: declaration.reason } : {}),
+      ...(input.inTurnReview ? { inTurnReview: true } : {}),
+    } });
+    if (declaration?.kind === 'part') {
+      const made = await insertIndependent(tx, row!, declaration.part, actor, input.inTurnReview);
+      independent = made.child;
+      wakes.push(made.wake);
     }
+    /* One that waits for what it comes after is not given out yet: the move that finishes the last of them wakes its holder. */
+    if (!waits) wakes.push({ agentId: assignee.id, taskId: row!.id, why: 'assigned' });
+    recordCause(wakes, { kind: 'created', actor }, event.id, row!);
+    await keepWakes(tx, row!.companyId, wakes);
     return row!;
   });
   published(ctx, task);
+  if (independent) published(ctx, independent);
   await handOff(ctx, actor, task);
+  if (independent) await handOff(ctx, actor, independent);
   return { task, wakes };
 }
 
+type GateMove = { set: Partial<Task>; wakes: Wake[] };
+type ReturnedGate = NonNullable<Awaited<ReturnType<typeof sentBack>>>;
+type ReviewSubmissionMove = { gate: GateMove; data: Record<string, unknown> };
+
+function fixWakes(wakes: Wake[], fixes: import('./review-fixes.js').Fix[]): Wake[] {
+  return wakes.map(wake => {
+    if (wake.why !== 'review') return wake;
+    const fix = fixes.find(plan => plan.reviewerId === wake.agentId);
+    return fix ? { ...wake, again: true, note: `Read fixReview in the task tool. Check only findingIds ${fix.findingIds.join(', ')} in git diff ${fix.reviewedCommit}..${fix.fixCommit}. Unchanged code gives no new findings. Verify author run IDs and commit; do not rerun checks.` } : wake;
+  });
+}
+
+async function reviewedSubmission(ctx: Live, task: Task, review: import('./review-context.js').Review, back: ReturnedGate): Promise<ReviewSubmissionMove> {
+  const fixes = await prepareFixReviews(ctx, task, review);
+  if (!fixes.length) {
+    const proof = review.runs.filter(run => run.verified);
+    if (!proof.length) throw refuse(409, 'task_invalid', 'A noneligible fix needs author evidence on its exact commit, not another review.');
+    return { gate: await atGate(ctx.db, task, back.stage + 1), data: { fixReviews: [], authorVerifiedFixRunIds: proof.map(run => run.id) } };
+  }
+  const findings = new Map(fixes.map(fix => [fix.reviewerId, back.findings.get(fix.reviewerId) ?? 'Check your original blocking finding.']));
+  const gate = await atGate(ctx.db, task, back.stage, findings, true);
+  return { gate: { ...gate, wakes: fixWakes(gate.wakes, fixes) }, data: { fixReviews: fixes } };
+}
+
+async function submissionGate(ctx: Live, task: Task, review: import('./review-context.js').Review | null): Promise<ReviewSubmissionMove> {
+  const back = await sentBack(ctx.db, task);
+  if (back && review) return reviewedSubmission(ctx, task, review, back);
+  return { gate: await atGate(ctx.db, task, back?.stage ?? 1, back?.findings), data: { fixReviews: [] } };
+}
+
 /* The executor hands its work to the first gate, or finishes a task without gates. */
-export async function submit(ctx: Live, agentId: string, taskId: string, r: { summary: string; evidence: string }): Promise<Moved> {
+export async function submit(ctx: Live, agentId: string, taskId: string, r: { summary: string; evidence: string; review?: { baseCommit: string } }): Promise<Moved> {
   const task = await loadTask(ctx.db, taskId);
   stillOpen(task);
   if (!task.executorAgentId) throw refuse(400, 'task_invalid', `#${task.number} has no executor; its owner closes it with report.`);
@@ -581,12 +697,14 @@ export async function submit(ctx: Live, agentId: string, taskId: string, r: { su
   if (task.status === 'waiting' && (await waitsForPerson(ctx.db, task.id))) throw refuse(409, 'task_invalid', `#${task.number} waits for a person's answer first.`);
   await refuseWaiting(ctx.db, task);
   await refuseOpenUnder(ctx.db, task);
-  const n: Note = { kind: 'submitted', actor: { agentId }, text: r.summary, data: { evidence: r.evidence, ...(task.merging ? { merged: true } : {}) }, returned: true };
+  const review = task.merging ? await reviewContext(ctx.db, task.id) : await captureReview(ctx, task, r.review);
+  const n: Note = { kind: 'submitted', actor: { agentId }, text: r.summary, data: { evidence: r.evidence, ...(review ? { review } : {}), ...(task.merging ? { merged: true } : {}) }, returned: true };
   const unstuck = stuckGoes(ctx, task);
   /* Its gates passed it already: handing the merge in finishes it. Work sent back goes straight to the gate that sent it. */
   if (task.gates.length && !task.merging) {
-    const back = await sentBack(ctx.db, task);
-    const gate = await atGate(ctx.db, task, back?.stage ?? 1, back?.findings);
+    const next = await submissionGate(ctx, task, review);
+    const gate = next.gate;
+    n.data = { ...n.data, ...next.data };
     const row = await move(ctx, task, gate.set, n, unstuck.also, gate.wakes);
     unstuck.tell();
     return { task: row, wakes: gate.wakes };
@@ -598,9 +716,6 @@ export async function submit(ctx: Live, agentId: string, taskId: string, r: { su
   return { task: row, wakes: past.wakes };
 }
 
-/* An API key runs the models of the maker whose plans it stands beside. */
-const MAKER: Partial<Record<string, string>> = { anthropic_api: 'claude', openai_api: 'codex' };
-
 /* The panels of the other tasks at a gate now that name any of these reviewers. A task at a gate is open, so it is in the
    open turn or in none: the closed turns are not read. */
 async function panelsNaming(db: Db | Tx, task: Task, ids: string[]): Promise<{ panel: string[] }[]> {
@@ -611,13 +726,27 @@ async function panelsNaming(db: Db | Tx, task: Task, ids: string[]): Promise<{ p
     .where(and(eq(tasks.companyId, task.companyId), inTurns([open?.id ?? null, null]), inArray(tasks.status, ['review', 'waiting']), ne(tasks.id, task.id), holdsAny(tasks.panel, ids)));
 }
 
+async function gateAuthorVendor(db: Db | Tx, task: Task, allCandidates: boolean): Promise<string | null | undefined> {
+  if (allCandidates || !task.executorAgentId || !await inRepository(db, task)) return undefined;
+  return authorVendor(db, task.executorAgentId);
+}
+
+function independentProvider(provider: string | null, ownVendor: string | null | undefined): boolean {
+  if (ownVendor === undefined) return true;
+  return ownVendor !== null && provider !== null && reviewVendor(provider) !== ownVendor;
+}
+
+function fitsProduct(candidate: { id: string; productId: string | null }, executor: string | null, product: string | null): boolean {
+  return candidate.id !== executor && (!candidate.productId || candidate.productId === product);
+}
+
 /* Who checks the work at a gate. Reviewers of different models find different things, so one of each maker's models
    checks the same work at once: among the live employees of the gate's role in its department that are on, for the
    task's product or for none, never the executor, the one with the fewest tasks at a gate, the oldest on a tie. The
    reviewer the gate names is one of them like any other. A reviewer without a role checks alone. again: those who sent
    the work back from this gate, who check the fixes alone while any of them is still there. idle: those without a
    subscription to run on. */
-async function panelFor(db: Db | Tx, task: Task, stage: number, again: string[] = []): Promise<{ panel: string[]; idle: { id: string; name: string }[] }> {
+async function panelFor(db: Db | Tx, task: Task, stage: number, again: string[] = [], allCandidates = false, strictAgain = false): Promise<{ panel: string[]; idle: { id: string; name: string }[] }> {
   const named = task.gates[stage - 1];
   if (!named) return { panel: [], idle: [] };
   const [lead] = await db.select().from(agents).where(eq(agents.id, named));
@@ -630,16 +759,18 @@ async function panelFor(db: Db | Tx, task: Task, stage: number, again: string[] 
     .where(and(same, isNull(agents.removedAt), isNull(agents.switchedOffAt), isNull(agents.teamId)))
     .orderBy(asc(agents.createdAt));
   const product = task.productId ?? lead.productId;
-  const fit = rows.filter(a => a.id !== task.executorAgentId && (!a.productId || a.productId === product));
+  const ownVendor = await gateAuthorVendor(db, task, allCandidates);
+  const fit = rows.filter(a => fitsProduct(a, task.executorAgentId, product) && independentProvider(a.provider, ownVendor));
   const idle = fit.filter(a => !a.sub).map(a => ({ id: a.id, name: a.name }));
   const able = fit.filter(a => a.sub);
   const back = able.filter(a => again.includes(a.id));
-  if (back.length) return { panel: back.map(a => a.id), idle };
+  if (back.length || strictAgain) return { panel: back.map(a => a.id), idle };
+  if (allCandidates) return { panel: able.map(a => a.id), idle };
   const checking = able.length ? await panelsNaming(db, task, able.map(a => a.id)) : [];
   const busy = (id: string) => checking.filter(t => t.panel.includes(id)).length;
   const picked = new Map<string, string>();
   for (const a of able) {
-    const maker = MAKER[a.provider!] ?? a.provider!;
+    const maker = reviewVendor(a.provider!);
     const best = picked.get(maker);
     if (best === undefined || busy(a.id) < busy(best)) picked.set(maker, a.id);
   }
@@ -689,34 +820,57 @@ async function checkedBefore(db: Db | Tx, task: Task, stage: number): Promise<bo
   return false;
 }
 
+async function skipGate(db: Db | Tx, task: Task, at: number, from: number, hasFindings: boolean, strictAgain: boolean): Promise<boolean> {
+  if (strictAgain && at === from) return false;
+  if (!await roleOn(db, task.gates[at - 1]!)) return true;
+  return !(at === from && hasFindings) && await checkedBefore(db, task, at);
+}
+
 /* The task reaches a gate: its whole panel checks it at once. A gate whose role has nobody switched on takes no part,
    nor one whose role a gate before it has, so the task goes on to the next one, and past the last it is done. While nobody of the role who is on can check it, it
    waits with whoever gave it out. findings: what each reviewer sent the work back from this gate for, in the last round;
    those reviewers check their own fixes. */
-async function atGate(db: Db | Tx, task: Task, from: number, findings = new Map<string, string>()): Promise<{ set: Partial<Task>; wakes: Wake[] }> {
+async function atGate(db: Db | Tx, task: Task, from: number, findings = new Map<string, string>(), strictAgain = false): Promise<GateMove> {
+  const fixes = strictAgain ? [] : await pendingFixReviews(db, task, from);
+  const original = fixes.length ? new Map(fixes.map(fix => [fix.reviewerId, 'Check only your original blocking finding IDs in the pinned fix range.'])) : findings;
+  const gate = await gateForFindings(db, task, from, original, strictAgain || fixes.length > 0);
+  return { ...gate, wakes: fixWakes(gate.wakes, fixes) };
+}
+
+async function gateForFindings(db: Db | Tx, task: Task, from: number, findings: Map<string, string>, strictAgain: boolean): Promise<GateMove> {
   let stage = from;
   /* Work sent back from a gate goes back to it, to those who sent it back. */
-  const skip = async (at: number) => !(await roleOn(db, task.gates[at - 1]!)) || (!(at === from && findings.size) && (await checkedBefore(db, task, at)));
-  while (task.gates[stage - 1] && (await skip(stage))) stage++;
+  while (task.gates[stage - 1] && await skipGate(db, task, stage, from, findings.size > 0, strictAgain)) stage++;
   if (!task.gates[stage - 1]) {
     const passed = await passedGates(db, task, doneFor(task));
     return { set: { stage: task.gates.length, ...passed.set }, wakes: passed.wakes };
   }
   const again = stage === from ? [...findings.keys()] : [];
-  const { panel, idle } = await panelFor(db, task, stage, again);
-  if (panel.length) {
-    const wakes = panel.map(agentId => ({ agentId, taskId: task.id, why: 'review' as const, ...(again.includes(agentId) ? { text: findings.get(agentId)! } : {}) }));
-    return { set: { status: 'review', stage, panel, silent: 0, assigneeAgentId: panel[0]! }, wakes };
-  }
+  const picked = await panelFor(db, task, stage, again, false, strictAgain);
+  const panel = strictAgain && picked.panel.length !== again.length ? [] : picked.panel;
+  const idle = picked.idle;
+  return panel.length ? readyGate(task, stage, panel, findings) : waitingGate(db, task, stage, idle, strictAgain);
+}
+
+function readyGate(task: Task, stage: number, panel: string[], findings: Map<string, string>): GateMove {
+  const wakes = panel.map(agentId => ({ agentId, taskId: task.id, why: 'review' as const, ...(findings.has(agentId) ? { text: findings.get(agentId)! } : {}) }));
+  return { set: { status: 'review', stage, panel, silent: 0, assigneeAgentId: panel[0]! }, wakes };
+}
+
+async function waitingGate(db: Db | Tx, task: Task, stage: number, idle: { id: string; name: string }[], strictAgain: boolean): Promise<GateMove> {
   const [lead] = await db.select({ name: agents.name, roleKey: agents.roleKey }).from(agents).where(eq(agents.id, task.gates[stage - 1]!));
-  const who = lead?.roleKey ?? lead?.name ?? 'its reviewer';
-  const text = idle.length
-    ? `${idle.map(a => a.name).join(', ')} ${idle.length === 1 ? 'has' : 'have'} no subscription to run on, so gate ${stage} (${who}) cannot check it. Give them one on their card and then give the task its gates again with update_task, switch them off, or give it other gates.`
-    : `Nobody who can check it at gate ${stage} (${who}) is on. Give it other gates with update_task, or tell the CEO it waits for one of them.`;
+  const who = lead ? lead.roleKey ?? lead.name : 'its reviewer';
+  const text = strictAgain ? `The original finding reviewer at gate ${stage} (${who}) is unavailable. The fix check stays blocked; another reviewer cannot silently replace it. Restore the original reviewer or ask the head to settle replacement under the review policy.` : ordinaryGateWaitText(stage, who, idle);
   return { set: { status: 'review', stage, panel: [], silent: 0, assigneeAgentId: task.createdByAgentId }, wakes: giver(task, 'switched', undefined, text) };
 }
 
-type Given = { agentId: string; name: string; pass: boolean; comment: string };
+function ordinaryGateWaitText(stage: number, who: string, idle: { id: string; name: string }[]): string {
+  return idle.length
+    ? `${idle.map(a => a.name).join(', ')} ${idle.length === 1 ? 'has' : 'have'} no subscription to run on, so gate ${stage} (${who}) cannot check it. Give them one on their card and then give the task its gates again with update_task, switch them off, or give it other gates.`
+    : `Nobody who can check it at gate ${stage} (${who}) is on. Give it other gates with update_task, or tell the CEO it waits for one of them.`;
+}
+
+type Given = { agentId: string; name: string; pass: boolean; comment: string; mechanical?: boolean };
 
 /* The verdicts given at the task's gate in this round, oldest first. */
 export async function gateVerdicts(db: Db | Tx, task: Task): Promise<Given[]> {
@@ -733,7 +887,7 @@ export async function gateVerdicts(db: Db | Tx, task: Task): Promise<Given[]> {
       ),
     )
     .orderBy(asc(taskEvents.id));
-  return rows.map(r => ({ agentId: r.agentId!, name: r.name, pass: r.data.pass === true, comment: r.text }));
+  return rows.map(r => ({ agentId: r.agentId!, name: r.name, pass: r.data.pass === true, comment: r.text, mechanical: mechanicalVerdict(r.data) }));
 }
 
 /* Repeated returns at one gate call in whoever gave the work out. */
@@ -755,10 +909,10 @@ async function asked(db: Db, task: Task, agentId: string): Promise<boolean> {
   return !!mine;
 }
 
-type Verdict = { pass: boolean; comment: string; findings?: number; evidence?: object[] };
+type Verdict = ReviewVerdict & { comment: string; findings?: number; evidence?: object[] };
 
 /* What the log keeps of a verdict: evidence names the test runs it stood on, with the commits they pinned. */
-const verdictData = (task: Task, v: Verdict) => ({ pass: v.pass, stage: task.stage, round: task.bounces, ...(v.findings !== undefined ? { findings: v.findings } : {}), ...(v.evidence?.length ? { evidence: v.evidence } : {}) });
+const verdictData = (task: Task, v: Verdict) => ({ pass: v.pass, stage: task.stage, round: task.bounces, reviewPolicyVersion: 1, ...(v.findings !== undefined ? { findings: v.findings } : {}), ...(v.evidence?.length ? { evidence: v.evidence } : {}) });
 
 /* A reviewer at the task's gate gives its verdict. The gate decides once its whole panel has. */
 export async function verdict(ctx: Live, agentId: string, taskId: string, v: Verdict): Promise<Moved> {
@@ -768,17 +922,22 @@ export async function verdict(ctx: Live, agentId: string, taskId: string, v: Ver
   if (!v.comment.trim()) throw refuse(400, 'task_invalid', 'A verdict needs its reasons.');
   /* The others at the gate go on while one of them waits for a person; that one decides once the answer is in. */
   if (task.status === 'waiting' && (await asked(ctx.db, task, agentId))) throw refuse(409, 'task_invalid', `#${task.number} waits for the answer to your question first.`);
-  const n: Note = { kind: 'verdict', actor: { agentId }, text: v.comment.trim(), data: verdictData(task, v), returned: true };
+  const review = await verdictReview(ctx.db, task, agentId, v);
+  const n: Note = { kind: 'verdict', actor: { agentId }, text: v.comment.trim(), data: { ...verdictData(task, v), ...review }, returned: true };
   const panel = task.panel.filter(id => id !== agentId);
   if (panel.length) return { task: await move(ctx, task, { panel, assigneeAgentId: panel[0]!, silent: 0 }, n), wakes: [] };
   const [me] = await ctx.db.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId));
-  return closeGate(ctx, task, n, [...(await gateVerdicts(ctx.db, task)), { agentId, name: me?.name ?? '', pass: v.pass, comment: v.comment.trim() }]);
+  return closeGate(ctx, task, n, [...(await gateVerdicts(ctx.db, task)), { agentId, name: me?.name ?? '', pass: v.pass, comment: v.comment.trim(), mechanical: mechanicalVerdict(n.data!) }]);
 }
 
 /* Everyone at the gate has given a verdict: it passes the task on (or finishes it) when all of them passed, else the work
    goes back to its executor with every reason in one list. n is the move that closes the gate. */
 /* Who sent the work back, as each wake that says so tells. */
 const returnedBy = (task: Task, failed: Given[]): WakeCause => ({ actor: { agentId: failed[0]!.agentId }, actors: failed.map(g => ({ agentId: g.agentId })), action: 'returned work', task: { id: task.id, number: task.number } });
+
+function mechanicalChanges(failed: Given[]): Pick<Wake, 'mechanical'> {
+  return failed.every(verdict => verdict.mechanical === true) ? { mechanical: true } : {};
+}
 
 async function closeGate(ctx: Live, task: Task, n: Note, given: Given[]): Promise<Moved> {
   if (await isTurnReview(ctx.db, task.id)) return closeTurnReview(ctx, task, n, given);
@@ -800,7 +959,7 @@ async function closeGate(ctx: Live, task: Task, n: Note, given: Given[]): Promis
   const cause = returnedBy(task, failed);
   const wakes: Wake[] = away
     ? [{ agentId: away, taskId: task.id, why: 'switched', text: `${name} does it and is switched off, and gate ${task.stage} sent it back with changes to make: ${reasons}\n\nGive it to someone who is on with update_task, or tell the CEO it waits for ${name}.`, cause }]
-    : [{ agentId: task.executorAgentId!, taskId: task.id, why: 'changes', text: reasons, cause }];
+    : [{ agentId: task.executorAgentId!, taskId: task.id, why: 'changes', text: reasons, cause, ...mechanicalChanges(failed) }];
   const rework: Note = { ...n, data: { ...n.data, rework: true } };
   const row = await move(ctx, task, { status: 'open', stage: 0, panel: [], assigneeAgentId: away ?? task.executorAgentId, bounces: task.bounces + 1, silent: 0 }, rework, async tx => {
     wakes.push(...(await stuckAtGate(tx, task, task.stage, actorId)));
@@ -824,6 +983,7 @@ async function closeTurnReview(ctx: Live, task: Task, n: Note, given: Given[]): 
   const text = [
     ...(blocking.length ? [`Blocking:\n\n${said(blocking)}`, ...(notes.length ? [`Passed, with their notes:\n\n${said(notes)}`] : [])] : notes.length ? [said(notes)] : []),
     ...(missed.length ? [`Did not check: ${missed.join(', ')}.`] : []),
+    ...await degradedReviewNotes(ctx.db, task.id),
   ].join('\n\n');
   const [parent] = blocking.length && task.parentId ? await ctx.db.select({ number: tasks.number, title: tasks.title }).from(tasks).where(eq(tasks.id, task.parentId)) : [];
   const where = parent ? { note: `Put the fixes under #${parent.number} "${parent.title}": create_task with parent ${parent.number}.` } : {};
@@ -931,7 +1091,7 @@ export async function dropGate(ctx: Live, actor: Actor, task: Task, agentId: str
   return move(ctx, task, { gates }, { kind: 'updated', actor, data: { fields: ['gates'] } });
 }
 
-export type TaskChange = { title?: string; brief?: string; body?: string; executor?: string; gates?: string[]; after?: string[]; workKind?: NonNullable<Task['workKind']>; riskClass?: NonNullable<Task['riskClass']> };
+export type TaskChange = { title?: string; brief?: string; body?: string; executor?: string; gates?: string[]; after?: string[]; independentPart?: IndependentPartInput; independentNone?: string; workKind?: NonNullable<Task['workKind']>; riskClass?: NonNullable<Task['riskClass']> };
 
 /* Runs fn on the task, and again on a fresh read of it when someone moved it meanwhile; null when it kept moving. */
 async function onFresh<T>(ctx: Live, task: Task, fn: (task: Task) => Promise<T>): Promise<T | null> {
@@ -1020,6 +1180,15 @@ async function releaseGateQuestions(ctx: Live, n: Note, agent: Leaver, task: Tas
 /* The agent leaves the panel of a task's current gate; null when it is not on the panel. */
 async function leaveGate(ctx: Live, n: Note, agent: Leaver, task: Task, wakes: Wake[] = []): Promise<{ wakes: Wake[]; closed: Task | null } | null> {
   if (task.stage < 1 || !task.panel.includes(agent.id)) return null;
+  if ((await pendingFixReviews(ctx.db, task, task.stage)).some(fix => fix.reviewerId === agent.id)) {
+    const gate = await atGate(ctx.db, task, task.stage);
+    await move(ctx, task, gate.set, n, undefined, gate.wakes);
+    return { wakes: gate.wakes, closed: null };
+  }
+  return leaveOrdinaryGate(ctx, n, agent, task, wakes);
+}
+
+async function leaveOrdinaryGate(ctx: Live, n: Note, agent: Leaver, task: Task, wakes: Wake[]): Promise<{ wakes: Wake[]; closed: Task | null } | null> {
   const panel = task.panel.filter(id => id !== agent.id);
   /* Someone else at the gate asked a person, so someone is left to decide it. */
   if (task.status === 'waiting' && (!panel.length || (await asked(ctx.db, task, agent.id)))) return null;
@@ -1106,6 +1275,7 @@ function rewrite(task: Task, c: TaskChange): { set: Partial<Task>; fields: strin
 }
 
 const LABELS: ReadonlySet<string> = new Set(['workKind', 'riskClass']);
+const onlyLabels = (fields: string[], createsIndependent: boolean) => fields.every(field => LABELS.has(field)) && !createsIndependent;
 
 /* What kind of work it is changes nothing of the work: whoever holds it is not woken, its wait stays and wakes on their way
    still come. Nothing else changes with them, so no move that read the task loses its place. */
@@ -1120,8 +1290,14 @@ async function relabel(ctx: Live, agentId: string, task: Task, set: Partial<Task
   return { task: row, wakes: [] };
 }
 
+/* Who takes work from a change of a task for the first time: what someone holds already stays theirs. */
+const newHolders = (task: Task, executor: string | null, declaration: IndependentDeclaration | null, existing: IndependentDeclaration | null): string[] => [
+  ...(executor && executor !== task.executorAgentId ? [executor] : []),
+  ...(declaration?.kind === 'part' && existing?.kind !== 'part' ? [declaration.part.executor] : []),
+];
+
 /* The owner rewrites the task so it reads as the current truth, or hands it to another executor or other gates. */
-export async function updateTask(ctx: Live, agentId: string, taskId: string, c: TaskChange): Promise<Moved> {
+export async function updateTask(ctx: Ctx, agentId: string, taskId: string, c: TaskChange): Promise<Moved> {
   const task = await loadTask(ctx.db, taskId);
   stillOpen(task);
   if ((c.executor !== undefined || c.gates !== undefined) && !task.executorAgentId) throw refuse(400, 'task_invalid', `#${task.number} has no executor or gates.`);
@@ -1146,6 +1322,14 @@ export async function updateTask(ctx: Live, agentId: string, taskId: string, c: 
     fields.push('gates');
   }
   const waited = (await openAfter(ctx.db, task)).length > 0;
+  const declarationInput = c.after !== undefined || c.independentPart !== undefined || c.independentNone !== undefined;
+  const existing = declarationInput ? await currentIndependent(ctx.db, task.id) : null;
+  const declaration = declarationInput ? checkIndependent(c.after ?? task.after, c.independentPart, c.independentNone, existing) : null;
+  if (declaration?.kind === 'part') await checkIndependentExecutor(ctx.db, task.departmentId, declaration.part);
+  await refuseNotUrgent(ctx, { agentId }, task.companyId, task, newHolders(task, executor, declaration, existing));
+  const createsIndependent = declaration?.kind === 'part' && existing?.kind !== 'part';
+  const reviewIndependent = createsIndependent && (await createdData(ctx.db, task.id)).inTurnReview === true;
+  let independent: Task | null = null;
   if (c.after !== undefined && JSON.stringify(c.after) !== JSON.stringify(task.after)) {
     await checkAfter(ctx.db, task.companyId, task.turnId, c.after);
     await refuseAbove(ctx.db, task.parentId, c.after);
@@ -1153,7 +1337,7 @@ export async function updateTask(ctx: Live, agentId: string, taskId: string, c: 
     set.after = c.after;
     fields.push('after');
   }
-  if (fields.every(f => LABELS.has(f))) return relabel(ctx, agentId, task, set, fields);
+  if (onlyLabels(fields, createsIndependent)) return relabel(ctx, agentId, task, set, fields);
   /* A rewrite answers a blocked executor. A task nobody holds stays blocked until someone can take it. */
   if (task.status === 'blocked' && (set.assigneeAgentId ?? task.assigneeAgentId)) set.status = 'open';
   /* Another one takes it up, so Hornhoof's note that it stood still is over; a person's word asked for still waits. */
@@ -1175,16 +1359,26 @@ export async function updateTask(ctx: Live, agentId: string, taskId: string, c: 
     if (holder) await tx.update(jobs).set({ status: 'failed', error: 'waiting', finishedAt: new Date() }).where(and(eq(jobs.agentId, holder), eq(jobs.taskId, task.id), eq(jobs.status, 'queued')));
   };
   const wakes: Wake[] = [];
-  const also = async (tx: Tx) => {
+  const also = async (tx: Tx, row: Task) => {
     if (handedOn) await handOver(tx);
+    if (createsIndependent) {
+      const made = await insertIndependent(tx, row, declaration.part, { agentId }, reviewIndependent);
+      independent = made.child;
+      wakes.push(made.wake);
+    }
     /* It waits now for what it comes after, so nobody sets to work on it yet; one that waited and waits no more starts.
        Seen inside the move, where what it comes after is held. */
     if ((await openAfter(tx, { after: set.after ?? task.after })).length) return holdBack(tx);
     if (set.assigneeAgentId || (waited && holder)) wakes.push({ agentId: (set.assigneeAgentId ?? holder)!, taskId, why: 'assigned' });
     else if (holder && holder !== agentId) wakes.push({ agentId: holder, taskId, why: 'updated' });
   };
-  const row = await move(ctx, task, set, { kind: 'updated', actor: { agentId }, data: { fields } }, also, wakes);
+  const row = await move(ctx, task, set, { kind: 'updated', actor: { agentId }, data: {
+    fields,
+    ...(declaration?.kind === 'part' ? { independentPart: declaration.part } : declaration?.kind === 'none' ? { independentNone: declaration.reason } : {}),
+  } }, also, wakes);
+  if (independent) published(ctx, independent);
   unstuck.tell();
+  if (independent) await handOff(ctx, { agentId }, independent);
   return { task: row, wakes };
 }
 
@@ -1246,6 +1440,8 @@ export type Ask = {
   options?: RequestOption[];
   link?: string | null;
   topic?: DecisionTopic;
+  /* The server's own: what must be kept in the step that makes the request. No tool passes it. */
+  onCreated?: (tx: Tx, request: Request) => Promise<void>;
 };
 
 /* An approval of a commit lets it into the release, whatever the agent says it is about. */
@@ -1292,6 +1488,7 @@ export async function ask(ctx: Live, agentId: string, taskId: string, q: Ask): P
         ...approvalColumns(q.approval),
       })
       .returning();
+    await q.onCreated?.(tx, request!);
     wakes = await explaining(tx, task, agentId, request!.id);
     await keepWakes(tx, task.companyId, wakes);
     if (!pictures.length) return;

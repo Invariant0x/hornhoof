@@ -146,10 +146,10 @@ async function localRepository(fixture: PostgresFixture, held: boolean) {
   return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/fixture.git`, token, ready: arrived.promise, release, requests: () => requests };
 }
 
-async function appContext(fixture: PostgresFixture, label: string, secret: string): Promise<{ ctx: Ctx; pool: pg.Pool }> {
+async function appContext(fixture: PostgresFixture, label: string, secret: string, env: NodeJS.ProcessEnv): Promise<{ ctx: Ctx; pool: pg.Pool }> {
   const folder = await mkdtemp(join(tmpdir(), 'hh-pg-app-'));
   fixture.cleanup(() => rm(folder, { recursive: true, force: true }));
-  const config = loadConfig({ HORNHOOF_SECRET: secret, UPDATE_CHECK_MS: '0', HORNHOOF_CONTROL_DIR: folder, WEB_DIST: join(folder, 'web') });
+  const config = loadConfig({ HORNHOOF_SECRET: secret, UPDATE_CHECK_MS: '0', HORNHOOF_CONTROL_DIR: folder, WEB_DIST: join(folder, 'web'), ...env });
   const pool = fixture.pool(label);
   const app = await buildApp({ db: drizzle(pool, { schema }), config });
   fixture.cleanup(() => app.close());
@@ -164,12 +164,12 @@ async function seedActor(fixture: PostgresFixture, context: { ctx: Ctx; pool: pg
   return { ...context, task: task!, job: { id: job!.id, companyId, agentId: agent!.id, agentKind: 'worker', roleKey: 'DEV-BE', departmentId, skills: [] } };
 }
 
-export async function runFixture(fixture: PostgresFixture, options: { barrier?: boolean } = {}): Promise<{ companyId: string; departmentId: string; actors: [Actor, Actor]; repository: Awaited<ReturnType<typeof localRepository>> }> {
+export async function runFixture(fixture: PostgresFixture, options: { barrier?: boolean; env?: NodeJS.ProcessEnv } = {}): Promise<{ companyId: string; departmentId: string; actors: [Actor, Actor]; repository: Awaited<ReturnType<typeof localRepository>> }> {
   const repository = await localRepository(fixture, options.barrier === true);
   /* Ready the real apps before inserting a company, so setup restoration has no queued turns to start. */
   const secret = randomBytes(32).toString('base64');
-  const first = await appContext(fixture, 'actor_a', secret);
-  const second = await appContext(fixture, 'actor_b', secret);
+  const first = await appContext(fixture, 'actor_a', secret, options.env ?? {});
+  const second = await appContext(fixture, 'actor_b', secret, options.env ?? {});
   const [company] = await fixture.db.insert(schema.companies).values({ name: 'PostgreSQL fixture' }).returning();
   const companyId = company!.id;
   const [person] = await fixture.db.insert(schema.people).values({ companyId, name: 'Fixture owner', email: 'postgres-fixture@example.test', status: 'active', scopeKind: 'company', isOwner: true }).returning();

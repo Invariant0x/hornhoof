@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { TunnelKeeper, type TunnelSettings } from '../src/modules/link/tunnel.js';
-import { until } from './helpers.js';
+import { until } from './helpers-basic.js';
 
 /* A stand-in for the tunnel client: it writes the token it was started with and its process id, then runs until it is
    stopped, or ends at once when its token says so. */

@@ -15,6 +15,7 @@ import { moveLeases } from '../subscriptions/lease.js';
 import { checkTestTimes } from '../testruns/runs.js';
 import type { AgentRow } from './find.js';
 import { checkOperatorHealth } from '../program-operator/health.js';
+import { modelCheckRound } from '../model-checks/store.js';
 
 export { checkSilentTurns, SILENT_TURN_MS };
 
@@ -113,7 +114,8 @@ async function sendWaiting(ctx: Ctx): Promise<void> {
 }
 
 /* What Hornhoof does every minute: due rounds, turns that task moves kept and nobody queued, turns left waiting though
-   their agent is free, files of turns closed a month ago, the old history of node connections, test run times and Codex plans to move. */
+   their agent is free, files of turns closed a month ago, the old history of node connections, test run times, Codex plans to
+   move and model checks to run. */
 export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) => (err: unknown) => void): Promise<void> {
   await checkExternalWaits(ctx, now).catch(failed('ending external task waits failed'));
   await checkWaitHealth(ctx, now).catch(failed('checking task waits failed'));
@@ -127,6 +129,7 @@ export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) =>
     dropOldConnections(ctx.db, now).catch(failed('removing the old history of node connections failed')),
     checkTestTimes(ctx).catch(failed('checking test run times failed')),
     moveLeases(ctx, now).catch(failed('moving Codex plans to another machine failed')),
+    modelCheckRound(ctx, now).catch(failed('running model checks failed')),
   ]);
 }
 

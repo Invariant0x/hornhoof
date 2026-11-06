@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import * as instructionBuilder from '../src/modules/agents/instructions.js';
 import { describe, expect, it, vi } from 'vitest';
-import { agentEvents, agents, companies, departments, jobs, machines, nodes, pendingWakes, people, personAccess, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
+import { agentEvents, agents, companies, departments, jobs, machines, nodes, pendingWakes, people, personAccess, requests, subscriptions, taskEvents, tasks, teams } from '../src/db/schema.js';
 import { agentState, enqueueTurn } from '../src/modules/conversation/queue.js';
 import { said } from '../src/modules/conversation/live.js';
 import { identityOf, type NodeIdentity } from '../src/modules/nodes/hub.js';
@@ -171,7 +171,7 @@ describe('a plan at its limit', () => {
 describe('a plan at its limit, with others of the role on other plans', () => {
   /* Rex is a backend engineer too, on a Codex plan whose machine is on; Bruno's plan is at its limit for an hour, and
      refuses his turn as it starts. before: what Bruno's turns did on the task until then. */
-  async function withPeer(rex: { limited?: boolean; status?: 'ready' | 'needs_login'; online?: boolean; nodeVersion?: string } = {}, before: 'nothing' | 'a turn' | 'a long refused turn' = 'nothing') {
+  async function withPeer(rex: { limited?: boolean; status?: 'ready' | 'needs_login'; online?: boolean; nodeVersion?: string; urgentOnly?: boolean } = {}, before: 'nothing' | 'a turn' | 'a long refused turn' = 'nothing') {
     const c = await company();
     const resetsAt = new Date(Date.now() + 3_600_000).toISOString();
     const rejected = { status: 'rejected' as const, windows: [{ name: 'five_hour', utilization: 1, resetsAt }] };
@@ -185,7 +185,8 @@ describe('a plan at its limit, with others of the role on other plans', () => {
     const rexs = (id: NodeIdentity) => id.kind === 'node' && id.nodeId === codex!.id;
     vi.spyOn(c.ctx.hub, 'isReady').mockImplementation(id => (rexs(id) ? rex.online ?? true : isReady(id)));
     vi.spyOn(c.ctx.hub, 'hasTerminals').mockImplementation(id => !rexs(id) && hasTerminals(id));
-    const [peer] = await c.db.insert(agents).values({ companyId: c.dev.companyId, kind: 'worker', name: 'Rex', roleKey: 'DEV-BE', departmentId: c.dev.id, model: '', subscriptionId: codex!.id }).returning();
+    const [team] = rex.urgentOnly ? await c.db.insert(teams).values({ companyId: c.dev.companyId, departmentId: c.dev.id, name: 'Quick', urgentOnly: true }).returning() : [];
+    const [peer] = await c.db.insert(agents).values({ companyId: c.dev.companyId, kind: 'worker', name: 'Rex', roleKey: 'DEV-BE', departmentId: c.dev.id, model: '', subscriptionId: codex!.id, teamId: team?.id ?? null }).returning();
     const task = await c.memberTask();
     await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: task.id, why: 'assigned' }]);
     if (before === 'a turn') await c.finish(c.bruno.id, () => comment(c.ctx, { agentId: c.bruno.id }, task.id, 'The handler is half done.'));
@@ -216,6 +217,13 @@ describe('a plan at its limit, with others of the role on other plans', () => {
       expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0], before).toMatchObject({ executorAgentId: bruno.id, assigneeAgentId: bruno.id });
       expect(await turnsOf(rex.id), before).toEqual([]);
     }
+  });
+
+  it('waits for the reset when the one who could take it is in a team that takes only urgent work', async () => {
+    const { db, bruno, rex, task, turnsOf } = await withPeer({ urgentOnly: true });
+    expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]).toMatchObject({ executorAgentId: bruno.id });
+    expect(await turnsOf(rex.id)).toEqual([]);
+    expect((await turnsOf(bruno.id)).filter(j => j.status === 'queued')).toHaveLength(1);
   });
 
   it('waits for the reset when their plans are at their limits too', async () => {
@@ -324,6 +332,38 @@ describe('a task handed to another executor', () => {
     expect((await c.db.select().from(tasks).where(eq(tasks.id, unstarted.id)))[0]).toMatchObject({ assigneeAgentId: kai!.id, executorAgentId: kai!.id, status: 'open' });
     expect((await c.turnsOf(kai!.id)).map(j => j.taskId)).toEqual([unstarted.id]);
     expect((await c.db.select().from(tasks).where(eq(tasks.id, started.id)))[0]).toMatchObject({ assigneeAgentId: c.bruno.id, executorAgentId: c.bruno.id, status: 'working' });
+  });
+
+  /* Bruno is at work, and Kai of his role is free but in a team that takes only urgent work. */
+  async function withKaiOfQuick() {
+    const c = await company();
+    const started = await c.memberTask();
+    await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: started.id, why: 'assigned' }]);
+    await c.db.update(jobs).set({ status: 'running', startedAt: new Date() }).where(eq(jobs.taskId, started.id));
+    await c.db.update(subscriptions).set({ status: 'ready' }).where(eq(subscriptions.id, c.sub.id));
+    vi.spyOn(c.ctx.hub, 'isReady').mockReturnValue(true);
+    vi.spyOn(c.ctx.hub, 'isOnline').mockReturnValue(true);
+    vi.spyOn(c.ctx.hub, 'hasTerminals').mockReturnValue(true);
+    const [quick] = await c.db.insert(teams).values({ companyId: c.dev.companyId, departmentId: c.dev.id, name: 'Quick', urgentOnly: true }).returning();
+    const worker = async (name: string, teamId: string | null) => (await c.db.insert(agents).values({ companyId: c.dev.companyId, kind: 'worker', name, roleKey: 'DEV-BE', departmentId: c.dev.id, teamId, model: '', subscriptionId: c.sub.id }).returning())[0]!;
+    return { ...c, worker, kai: await worker('Kai', quick!.id) };
+  }
+
+  it('passes over a free worker of a team that takes only urgent work', async () => {
+    const c = await withKaiOfQuick();
+    const unstarted = await c.memberTask();
+    await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: unstarted.id, why: 'assigned' }]);
+    expect((await c.db.select().from(tasks).where(eq(tasks.id, unstarted.id)))[0]).toMatchObject({ assigneeAgentId: c.bruno.id, executorAgentId: c.bruno.id, status: 'open' });
+    expect(await c.turnsOf(c.kai.id)).toEqual([]);
+  });
+
+  it('gives the work to the free worker after one of a team that takes only urgent work', async () => {
+    const c = await withKaiOfQuick();
+    const dora = await c.worker('Dora', null);
+    const unstarted = await c.memberTask();
+    await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: unstarted.id, why: 'assigned' }]);
+    expect((await c.db.select().from(tasks).where(eq(tasks.id, unstarted.id)))[0]).toMatchObject({ assigneeAgentId: dora.id, executorAgentId: dora.id });
+    expect(await c.turnsOf(c.kai.id)).toEqual([]);
   });
 
   it('keeps unstarted work queued when the worker of the same role is busy too', async () => {

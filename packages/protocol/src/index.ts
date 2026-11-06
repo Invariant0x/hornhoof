@@ -1,21 +1,31 @@
+export * from './department-mode.js';
+export * from './external-operations.js';
+import type { DepartmentWorkMode } from './department-mode.js';
+export * from './request-materials.js';
+export * from './questions.js';
 export { APPROVAL_CHANNELS, APPROVAL_MODES, ApprovalAmount, ApprovalChannel, ApprovalRule, DEFAULT_APPROVAL_RULE, approvalNeeded, kindKey, ruleOf, type ApprovalMode, type ApprovalWork, type StoredApprovalRule } from './approval-policy.js';
 export { NOTIFICATION_NAMES, NotificationSchema, NotificationSourceSchema, type Notification, type NotificationSource } from './notifications.js';
 export { MachineDrain, NodeWait } from './machine-drain.js';
 export { inLane } from './lane.js';
 export * from './pipeline-report.js';
+export * from './model-check.js';
+export * from './outbound.js';
+export * from './test-terminals.js';
 export { COMMIT_SHA, CommitSha, ownBranch } from './test-commit.js';
+export { runtimeVersionMatches, requiredTestRuntimes, supportsTestProfile, EnvironmentProblem, TestsDescribed, EnvironmentDescription, EnvironmentSnapshot, InputDigest, ProductCommitSha, RuntimeCapability, TestExecution, TestUnit, TestEnvironmentReceipt, TEST_DESCRIPTION_BYTES, validateEnvironmentDescription, Command, EnvironmentDigest, RepositoryPath, RepositoryScope, TestArtifact, TestEnvironmentV1, TestMutation, TestPrepare, TestReset, TestService, TestSplit, TestSuite, TEST_ENVIRONMENT_BYTES, hashTestEnvironment, parseTestEnvironment } from './test-environment.js';
 import { z } from 'zod';
 import { NodeExit, NodeLog } from './node-exit.js';
 import { CommitSha } from './test-commit.js';
+import { RepositoryScope, RuntimeCapability, ProductCommitSha, TestExecution, TestEnvironmentReceipt, TestsDescribed } from './test-environment.js';
 import { CheckAcquire, CheckRelease, CheckQueueReply } from './check-queue.js';
+import { PROVIDER_IDS, type ProviderId } from './providers.js';
 export { CHECK_LEASE_MS, checkCapacity, CheckSlotQueue, CheckQueueRequest, CheckQueueReply, type CheckOptions } from './check-queue.js';
 
 export { NODE_LOG_BYTES, NODE_LOG_LINES, NodeExit, NodeLog, NodeStopReason } from './node-exit.js';
 
 /* Messages between the Hornhoof server and its nodes, one JSON object per WebSocket frame. */
 
-export const PROVIDER_IDS = ['claude', 'codex', 'kimi', 'glm', 'anthropic_api', 'openai_api', 'antigravity'] as const;
-export type ProviderId = (typeof PROVIDER_IDS)[number];
+export { PROVIDER_IDS, type ProviderId };
 
 export const JOB_ERRORS = ['timeout', 'agent_failed', 'not_logged_in', 'cancelled'] as const;
 export type JobError = (typeof JOB_ERRORS)[number];
@@ -203,17 +213,17 @@ export const TEMPLATE_KEYS = ['operations', 'development', 'marketing', 'sales',
 export type TemplateKey = (typeof TEMPLATE_KEYS)[number];
 
 /* The departments the orchestrator starts from. Names and descriptions live in the web dictionaries and the server's prompt. */
-export const DEPARTMENT_TEMPLATES: readonly { key: TemplateKey; roleCode: string; ticked: boolean; always: boolean }[] = [
-  { key: 'operations', roleCode: 'OPS', ticked: true, always: true },
-  { key: 'development', roleCode: 'DEV', ticked: true, always: false },
-  { key: 'marketing', roleCode: 'MKT', ticked: true, always: false },
-  { key: 'sales', roleCode: 'SAL', ticked: true, always: false },
-  { key: 'business_development', roleCode: 'BIZ', ticked: true, always: false },
-  { key: 'design', roleCode: 'DSN', ticked: false, always: false },
-  { key: 'support', roleCode: 'SUP', ticked: false, always: false },
-  { key: 'finance', roleCode: 'FIN', ticked: false, always: false },
-  { key: 'home_devices', roleCode: 'HOM', ticked: false, always: false },
-  { key: 'household', roleCode: 'HHD', ticked: false, always: false },
+export const DEPARTMENT_TEMPLATES: readonly { key: TemplateKey; roleCode: string; ticked: boolean; always: boolean; workMode: DepartmentWorkMode }[] = [
+  { key: 'operations', roleCode: 'OPS', ticked: true, always: true, workMode: 'continuous' },
+  { key: 'development', roleCode: 'DEV', ticked: true, always: false, workMode: 'turns' },
+  { key: 'marketing', roleCode: 'MKT', ticked: true, always: false, workMode: 'turns' },
+  { key: 'sales', roleCode: 'SAL', ticked: true, always: false, workMode: 'turns' },
+  { key: 'business_development', roleCode: 'BIZ', ticked: true, always: false, workMode: 'turns' },
+  { key: 'design', roleCode: 'DSN', ticked: false, always: false, workMode: 'turns' },
+  { key: 'support', roleCode: 'SUP', ticked: false, always: false, workMode: 'turns' },
+  { key: 'finance', roleCode: 'FIN', ticked: false, always: false, workMode: 'turns' },
+  { key: 'home_devices', roleCode: 'HOM', ticked: false, always: false, workMode: 'turns' },
+  { key: 'household', roleCode: 'HHD', ticked: false, always: false, workMode: 'turns' },
 ];
 
 /* A ready-made company the CEO can pick on the first screen. Each one lists departments to create, with their products
@@ -414,7 +424,7 @@ export const NodeReconnect = z.object({
 export type NodeReconnect = z.infer<typeof NodeReconnect>;
 
 const NodeMessage = z.discriminatedUnion('type', [
-  CheckAcquire, CheckRelease,
+  CheckAcquire, CheckRelease, TestsDescribed,
   /* terminals: the node runs agents in sessions people can watch and type into. */
   /* tests: the parts of test runs it runs, or ran and Hornhoof has not confirmed. */
   /* skillFiles: it writes a turn's skills as files where the agent's program finds them; a node without it gets them in
@@ -432,6 +442,8 @@ const NodeMessage = z.discriminatedUnion('type', [
     work: z.boolean().optional(),
     /* Why the node takes no part of any run: a part runs only as a user of the node's own, which this one lacks. */
     noRuns: z.string().max(300).optional(),
+    testEnvironmentVersion: z.literal(1).optional(),
+    testRuntimes: z.array(RuntimeCapability).max(64).optional(),
     /* Why Playwright Chromium could not launch on this node before handing out tasks or runs; null when ready. */
     browserError: BrowserError.nullable().optional(),
     load: Load.optional(),
@@ -462,6 +474,7 @@ const NodeMessage = z.discriminatedUnion('type', [
     error: z.enum(TEST_ERRORS).nullable(),
     commit: CommitSha.nullable(),
     log: z.string().max(TEST_LOG_BYTES + 1024),
+    environmentReceipt: TestEnvironmentReceipt.optional(),
   }),
   z.object({
     type: z.literal('status'),
@@ -473,6 +486,8 @@ const NodeMessage = z.discriminatedUnion('type', [
     programs: Programs.optional(),
     browserError: BrowserError.nullable().optional(),
     noRuns: z.string().max(300).nullable().optional(),
+    testEnvironmentVersion: z.literal(1).optional(),
+    testRuntimes: z.array(RuntimeCapability).max(64).optional(),
   }),
   /* The sign-in this node holds, sealed for each of the plan's other nodes; version counts sign-ins of the plan. */
   z.object({
@@ -587,6 +602,12 @@ export function repoFolder(url: string): string {
   return last.replace(/\.git$/i, '').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[.-]+/, '') || 'repo';
 }
 
+function validTestMode(message: { command: string; commitSha?: string | null; environment?: TestExecution; repositoryScope?: RepositoryScope }): boolean {
+  if (!message.environment) return message.command.trim().length > 0;
+  const description = message.environment.snapshot.description;
+  return !message.command && message.commitSha === description.commitSha && JSON.stringify(message.repositoryScope) === JSON.stringify(description.repositoryScope);
+}
+
 const ServerMessage = z.discriminatedUnion('type', [
   CheckQueueReply,
   z.object({
@@ -647,6 +668,8 @@ const ServerMessage = z.discriminatedUnion('type', [
      empty folder when there is no repository, with the task's files named in files fetched first; what it leaves in its
      output folder goes on the task. commitSha: the one commit every part of the run checks, whatever its branch points
      at by now; none on a part of work, or on one of a run from before commits were pinned. */
+  z.strictObject({ type: z.literal('tests.describe'), requestId: Id, repositoryScope: RepositoryScope, repo: Repo.pick({ url: true, token: true }), commitSha: ProductCommitSha }),
+  z.strictObject({ type: z.literal('tests.describe.cancel'), requestId: Id }),
   z.object({
     type: z.literal('tests.run'),
     partId: Id,
@@ -656,11 +679,13 @@ const ServerMessage = z.discriminatedUnion('type', [
     commitSha: CommitSha.nullable().optional(),
     files: z.array(RunFile).max(MAX_RUN_FILES).optional(),
     task: z.number().int().positive(),
-    command: z.string().min(1).max(4000),
+    command: z.string().max(4000).default(''),
+    repositoryScope: RepositoryScope.optional(),
+    environment: TestExecution.optional(),
     part: z.number().int().min(1).max(MAX_TEST_PARTS),
     parts: z.number().int().min(1).max(MAX_TEST_PARTS),
     timeoutMs: z.number().int().positive().max(2 ** 31 - 1),
-  }),
+  }).refine(validTestMode, 'A product selection and a manual command are mutually exclusive.'),
   z.object({ type: z.literal('tests.cancel'), partId: Id }),
   /* Hornhoof has the part's end: the node stops sending it again after each reconnect. */
   z.object({ type: z.literal('tests.ack'), partId: Id }),
@@ -673,6 +698,9 @@ const ServerMessage = z.discriminatedUnion('type', [
   /* Restart the agent's program in the same session, when it cannot come back by itself. The node checks the same
      conditions against its own events first, then types the note and the turn's words the program had not taken in. */
   z.object({ type: z.literal('agent.restart'), agentKey: Id, jobId: Id, note: z.string().max(4000) }),
+  /* The agent left this node's plan: its program goes once it is idle. jobId is the last turn it was sent here, so a word that
+     comes late does not close a program that ran a later one. */
+  z.object({ type: z.literal('agent.release'), agentKey: Id, jobId: Id }),
 ]);
 export type ServerMessage = z.infer<typeof ServerMessage>;
 

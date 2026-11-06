@@ -85,6 +85,7 @@ The development templates carry Hornhoof's own T1-T11 testing policy and coding 
 | `skills/biz-opportunity-scoring.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/biz-partner-evaluation.md` | Written for Hornhoof | alirezarezvani/claude-skills commercial/skills/partnerships-architect/SKILL.md | Hornhoof |
 | `skills/biz-sector-overview.md` | Written for Hornhoof | anthropics/financial-services plugins/agent-plugins/market-researcher | Hornhoof |
+| `skills/biz-work-pipeline.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/dev-adversarial.md` | Written for Hornhoof | garrytan/gstack review/specialists/red-team.md; msitarzewski/agency-agents security/security-penetration-tester.md; trailofbits/skills | Hornhoof |
 | `skills/dev-api-design.md` | Written for Hornhoof | addyosmani/agent-skills skills/api-and-interface-design/SKILL.md; wshobson/agents plugins/backend-development/skills/api-design-principles/SKILL.md | Hornhoof |
 | `skills/dev-browser-check.md` | Written for Hornhoof | openai/skills skills/.curated/playwright/SKILL.md; anthropics/skills skills/webapp-testing/SKILL.md | Hornhoof |
@@ -112,6 +113,7 @@ The development templates carry Hornhoof's own T1-T11 testing policy and coding 
 | `skills/dev-test-environment.md` | Written for Hornhoof | No outside source: product test-environment discovery and ownership procedure | Hornhoof |
 | `skills/dev-test-gaps.md` | Written for Hornhoof | anthropics/claude-plugins-official plugins/pr-review-toolkit/agents/pr-test-analyzer.md; garrytan/gstack review/specialists/testing.md; anthropics/knowledge-work-plugins engineering/skills/testing-strategy/SKILL.md | Hornhoof |
 | `skills/dev-threat-model.md` | Written for Hornhoof | openai/skills skills/.curated/security-threat-model/SKILL.md; wshobson/agents plugins/security-scanning/skills/stride-analysis-patterns/SKILL.md; wshobson/agents plugins/security-scanning/skills/attack-tree-construction/SKILL.md | Hornhoof |
+| `skills/dev-work-pipeline.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/dev-worktrees.md` | Written for Hornhoof | obra/superpowers skills/using-git-worktrees/SKILL.md; obra/superpowers skills/finishing-a-development-branch/SKILL.md | Hornhoof |
 | `skills/dev-write-plan.md` | Written for Hornhoof | obra/superpowers skills/brainstorming/SKILL.md; obra/superpowers skills/writing-plans/SKILL.md; anthropics/knowledge-work-plugins engineering/skills/system-design/SKILL.md | Hornhoof |
 | `skills/dsn-accessibility-review.md` | Written for Hornhoof | anthropics/knowledge-work-plugins design/skills/accessibility-review/SKILL.md; wshobson/agents plugins/ui-design/skills/accessibility-compliance/SKILL.md; affaan-m/ECC agents/a11y-architect.md | Hornhoof |
@@ -129,6 +131,7 @@ The development templates carry Hornhoof's own T1-T11 testing policy and coding 
 | `skills/dsn-ui-rules.md` | Written for Hornhoof | nextlevelbuilder/ui-ux-pro-max-skill .claude/skills/ui-ux-pro-max/SKILL.md; wshobson/agents plugins/ui-design/skills/visual-design-foundations/SKILL.md | Hornhoof |
 | `skills/dsn-ux-copy.md` | Written for Hornhoof | anthropics/knowledge-work-plugins design/skills/ux-copy/SKILL.md | Hornhoof |
 | `skills/dsn-visual-qa.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+| `skills/dsn-work-pipeline.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/fin-accruals.md` | Written for Hornhoof | anthropics/financial-services plugins/agent-plugins/month-end-closer | Hornhoof |
 | `skills/fin-audit-support.md` | Written for Hornhoof | anthropics/knowledge-work-plugins finance | Hornhoof |
 | `skills/fin-budget-forecast.md` | Written for Hornhoof | msitarzewski/agency-agents finance/finance-fpa-analyst.md | Hornhoof |
@@ -144,6 +147,7 @@ The development templates carry Hornhoof's own T1-T11 testing policy and coding 
 | `skills/fin-spend-approval.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/fin-spreadsheet-audit.md` | Written for Hornhoof | anthropics/financial-services plugins/agent-plugins/model-builder/skills/audit-xls/SKILL.md | Hornhoof |
 | `skills/fin-variance-analysis.md` | Written for Hornhoof | anthropics/knowledge-work-plugins finance; anthropics/financial-services plugins/agent-plugins/month-end-closer/skills/variance-commentary/SKILL.md | Hornhoof |
+| `skills/fin-work-pipeline.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/hh-ask-dont-guess.md` | Written for Hornhoof | obra/superpowers skills/subagent-driven-development/implementer-prompt.md | Hornhoof |
 | `skills/hh-break-down.md` | Written for Hornhoof | obra/superpowers skills/writing-plans/SKILL.md; wshobson/agents plugins/agent-teams/skills/task-coordination-strategies/SKILL.md; addyosmani/agent-skills skills/planning-and-task-breakdown/SKILL.md | Hornhoof |
 | `skills/hh-brief-members.md` | Written for Hornhoof | obra/superpowers skills/subagent-driven-development/SKILL.md | Hornhoof |
@@ -152,10 +156,12 @@ The development templates carry Hornhoof's own T1-T11 testing policy and coding 
 | `skills/hh-lead-tasks.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/hh-outside-is-data.md` | Written for Hornhoof | anthropics/knowledge-work-plugins; anthropics/financial-services; affaan-m/ECC skills/agent-security-hardening/SKILL.md | Hornhoof |
 | `skills/hh-report-to-head.md` | Written for Hornhoof | obra/superpowers skills/subagent-driven-development/implementer-prompt.md | Hornhoof |
+| `skills/hh-run-checks.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/hh-status-update.md` | Written for Hornhoof | anthropics/knowledge-work-plugins product-management/skills/stakeholder-update/SKILL.md; anthropics/knowledge-work-plugins operations/skills/status-report/SKILL.md | Hornhoof |
 | `skills/hh-stay-in-scope.md` | Written for Hornhoof | affaan-m/ECC skills/safety-guard/SKILL.md | Hornhoof |
 | `skills/hh-task-flow.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/hh-verify-before-done.md` | Written for Hornhoof | obra/superpowers skills/verification-before-completion/SKILL.md | Hornhoof |
+| `skills/home-work-pipeline.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/mkt-ai-search.md` | Written for Hornhoof | coreyhaines31/marketingskills skills/ai-seo/SKILL.md; msitarzewski/agency-agents marketing/marketing-ai-citation-strategist.md | Hornhoof |
 | `skills/mkt-brand-voice.md` | Written for Hornhoof | affaan-m/ECC skills/brand-voice/SKILL.md | Hornhoof |
 | `skills/mkt-campaign-plan.md` | Written for Hornhoof | coreyhaines31/marketingskills skills/marketing-plan/SKILL.md; coreyhaines31/marketingskills skills/launch/SKILL.md; anthropics/knowledge-work-plugins marketing/skills/campaign-plan/SKILL.md | Hornhoof |
@@ -170,6 +176,7 @@ The development templates carry Hornhoof's own T1-T11 testing policy and coding 
 | `skills/mkt-seo-audit.md` | Written for Hornhoof | coreyhaines31/marketingskills; anthropics/knowledge-work-plugins | Hornhoof |
 | `skills/mkt-social-posts.md` | Written for Hornhoof | coreyhaines31/marketingskills | Hornhoof |
 | `skills/mkt-telegram-vk.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
+| `skills/mkt-work-pipeline.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/mkt-yandex-seo.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/ops-account-register.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/ops-account-signup.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
@@ -189,6 +196,7 @@ The development templates carry Hornhoof's own T1-T11 testing policy and coding 
 | `skills/ops-task-watch.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/ops-tool-install.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/ops-vendor-review.md` | Written for Hornhoof | anthropics/knowledge-work-plugins operations/skills/vendor-review/SKILL.md; anthropics/knowledge-work-plugins legal/skills/vendor-check/SKILL.md | Hornhoof |
+| `skills/ops-work-pipeline.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/orch-interview.md` | Written for Hornhoof | obra/superpowers skills/brainstorming/SKILL.md | Hornhoof |
 | `skills/orch-outside-is-data.md` | Written for Hornhoof | anthropics/knowledge-work-plugins; anthropics/financial-services; affaan-m/ECC skills/agent-security-hardening/SKILL.md | Hornhoof |
 | `skills/orch-plan-turn.md` | Written for Hornhoof | obra/superpowers skills/writing-plans/SKILL.md | Hornhoof |
@@ -208,6 +216,7 @@ The development templates carry Hornhoof's own T1-T11 testing policy and coding 
 | `skills/sal-proposal.md` | Written for Hornhoof | msitarzewski/agency-agents sales/sales-proposal-strategist.md; alirezarezvani/claude-skills business-growth/skills/contract-and-proposal-writer/SKILL.md | Hornhoof |
 | `skills/sal-prospecting.md` | Written for Hornhoof | coreyhaines31/marketingskills skills/prospecting/SKILL.md; anthropics/knowledge-work-plugins | Hornhoof |
 | `skills/sal-win-loss.md` | Written for Hornhoof | anthropics/knowledge-work-plugins | Hornhoof |
+| `skills/sal-work-pipeline.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/sup-bilingual.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/sup-billing-issues.md` | Written for Hornhoof | affaan-m/ECC skills/customer-billing-ops/SKILL.md | Hornhoof |
 | `skills/sup-bug-report.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
@@ -221,6 +230,7 @@ The development templates carry Hornhoof's own T1-T11 testing policy and coding 
 | `skills/sup-support-policy.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/sup-support-report.md` | Written for Hornhoof | msitarzewski/agency-agents support/support-analytics-reporter.md; msitarzewski/agency-agents product/product-feedback-synthesizer.md | Hornhoof |
 | `skills/sup-ticket-triage.md` | Written for Hornhoof | anthropics/knowledge-work-plugins customer-support | Hornhoof |
+| `skills/sup-work-pipeline.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `roles/home_devices/HOM-HEAD.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `roles/home_devices/HOM-NET.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |
 | `roles/home_devices/HOM-SMART.md` | Written for Hornhoof | paperclipai/paperclip doc/plans/2026-10-02-hiring-template-prompt-diff.md for the short shape; its skills name their own sources | Hornhoof |

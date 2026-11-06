@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gt, gte, inArray, isNotNull, isNull, ne, notInArray, or, sql } from 'drizzle-orm';
+import { and, count, desc, eq, gt, gte, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { loggable } from '../../errors.js';
 import { agentChanges, agentEvents, agents, jobs, requests, subscriptions, taskEvents, tasks, testRuns } from '../../db/schema.js';
@@ -7,6 +7,7 @@ import { deliverLive } from '../conversation/decision-context.js';
 import { quote } from '../conversation/prompt.js';
 import { appendEvent, publishWorking } from '../events/store.js';
 import { identityOf, type NodeIdentity } from '../nodes/hub.js';
+import { goesOutNow, isFree, mayTake, peersOfRole } from './role-peers.js';
 import { answerDirectly, brokeDown, CLOSED, GATE_ROUNDS, handOver, lastMove, leaveGates, leaveWork, NOT_A_MOVE, openAfter, regateWaiting, reviewWake, silentTurn, taskSpot, wentOn, type Actor, type Moved, type Task, type Wake, type WakeWhy } from './engine.js';
 import { wakeQueued, wakesLeft } from './outbox.js';
 import { taskForWake, taskWakeOf, waitingTaskTurn } from './wake-state.js';
@@ -43,7 +44,7 @@ export function wakePrompt(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): str
 
 const READ_TASK = 'Read it with the task tool first: its body is the current truth and its log has the rest.';
 /* What a reviewer may take from the test runs on a task. */
-const READ_PROOF = 'Its testEvidence names the exact commit each test run pinned and whether its branch still stands there: only a run with proves true counts, and a run on another commit proves nothing about what you review.';
+const READ_PROOF = 'For a pinned review, use review.commit and review.runs: verified evidence names the exact candidate, author run IDs, commands and part counts. Check those IDs and commits and gateCounts without rerunning author checks. testEvidence describes the live branch: only a run with proves true counts for that branch; a run on another commit proves nothing about it.';
 
 function assignedPrompt(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
   const ref = `#${task.number} "${task.title}"`;
@@ -468,9 +469,6 @@ const PROVIDER_NAMES: Record<string, string> = { claude: 'Claude', codex: 'Codex
 /* Who takes member work over while its executor's plan is at its limit: another employee of its role and department who
    is on, for the task's product or for none, on a plan of another provider that is not at its limit, and not one of the
    task's gates. Only an employee's work moves: a head and the orchestrator keep theirs and wait for the reset. */
-/* Its turn would go out now: signed in, on a machine that is on, and with plan left for tasks. */
-const goesOutNow = (state: Awaited<ReturnType<typeof agentState>>): boolean => state.ready && !state.limitUntil && !state.budgetUntil && !state.machineDrain;
-
 async function rolePeers(ctx: Ctx, agentId: string, anotherProvider: boolean) {
   const [me] = await ctx.db
     .select({ agent: agents, provider: subscriptions.provider })
@@ -478,27 +476,9 @@ async function rolePeers(ctx: Ctx, agentId: string, anotherProvider: boolean) {
     .innerJoin(subscriptions, eq(subscriptions.id, agents.subscriptionId))
     .where(and(eq(agents.id, agentId), isNull(agents.teamId)));
   if (!me || me.agent.kind !== 'worker' || !me.agent.roleKey || !me.agent.departmentId) return null;
-  const peers = await ctx.db
-    .select({ id: agents.id, name: agents.name, productId: agents.productId, provider: subscriptions.provider })
-    .from(agents)
-    .innerJoin(subscriptions, and(eq(subscriptions.id, agents.subscriptionId), isNull(subscriptions.removedAt)))
-    .where(
-      and(
-        eq(agents.departmentId, me.agent.departmentId),
-        eq(agents.roleKey, me.agent.roleKey),
-        eq(agents.kind, 'worker'),
-        isNull(agents.removedAt),
-        isNull(agents.switchedOffAt),
-        isNull(agents.teamId),
-        ne(agents.id, agentId),
-        anotherProvider ? ne(subscriptions.provider, me.provider) : undefined,
-      ),
-    )
-    .orderBy(asc(agents.createdAt));
-  return { me, peers };
+  const member = { id: agentId, departmentId: me.agent.departmentId, roleKey: me.agent.roleKey };
+  return { me, peers: await peersOfRole(ctx, member, anotherProvider ? me.provider : undefined) };
 }
-
-const mayTake = (task: Task, peer: { id: string; productId: string | null }): boolean => (!peer.productId || peer.productId === task.productId) && !task.gates.includes(peer.id);
 
 async function standIn(ctx: Ctx, agentId: string, task: Task): Promise<{ id: string; name: string; provider: string } | null> {
   if (task.executorAgentId !== agentId || task.assigneeAgentId !== agentId || task.stage !== 0 || !['open', 'working'].includes(task.status)) return null;
@@ -530,8 +510,7 @@ async function freeForQueued(ctx: Ctx, agentId: string, task: Task): Promise<{ i
   if (!found) return null;
   for (const p of found.peers) {
     if (!mayTake(task, p)) continue;
-    const state = await agentState(ctx, p.id);
-    if (goesOutNow(state) && !state.busy && state.queued === 0) return { id: p.id, name: p.name };
+    if (await isFree(ctx, p.id)) return { id: p.id, name: p.name };
   }
   return null;
 }

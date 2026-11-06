@@ -26,6 +26,7 @@ async function company() {
   const companyId = acme!.id;
   const [ceo] = await db.select().from(people);
   const [sub] = await db.select().from(subscriptions);
+  const [reviewPlan] = await db.insert(subscriptions).values({ companyId, provider: 'codex', kind: 'personal', label: 'Independent review', ownerPersonId: ceo!.id, status: 'ready' }).returning();
   const repo = (name: string) => ({ repoUrl: `https://github.com/acme/${name}.git`, repoTokenEnc: encryptSecret('ghp_shop0123456789', ctx.config.secret), repoTokenLast4: '6789' });
   const [dev, sales] = await db
     .insert(departments)
@@ -34,11 +35,11 @@ async function company() {
       { companyId, templateKey: 'sales', roleCode: 'SAL', position: 2, ...repo('crm') },
     ])
     .returning();
-  const hire = async (name: string, kind: 'head' | 'worker', roleKey: string) =>
-    (await db.insert(agents).values({ companyId, kind, name, roleKey, departmentId: dev!.id, model: '', subscriptionId: sub!.id }).returning())[0]!;
+  const hire = async (name: string, kind: 'head' | 'worker', roleKey: string, subscriptionId = sub!.id) =>
+    (await db.insert(agents).values({ companyId, kind, name, roleKey, departmentId: dev!.id, model: '', subscriptionId }).returning())[0]!;
   const head = await hire('Hana', 'head', 'DEV-HEAD');
   const bruno = await hire('Bruno', 'worker', 'DEV-BE');
-  const rita = await hire('Rita', 'worker', 'DEV-REV');
+  const rita = await hire('Rita', 'worker', 'DEV-REV', reviewPlan!.id);
   await db.insert(turns).values({ companyId, number: 4, title: 'Payments', goal: 'Card payments.', status: 'open', openedAt: new Date() });
   const parent = (await createTask(ctx, { personId: ceo!.id }, { title: 'Payments', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: head.id })).task;
   const member = async (title: string, over: object = {}) =>

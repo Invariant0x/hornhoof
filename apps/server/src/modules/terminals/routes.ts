@@ -10,6 +10,7 @@ import { enterPressed } from '../conversation/decision-context.js';
 import { windowNode } from '../conversation/queue.js';
 import { identityOf, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { programAccess } from './access.js';
+import { isReport } from './input-rights.js';
 import { readKeys } from './keys.js';
 import { cols, followFrames, keepLooking, rows, type BrowserFrame } from './look.js';
 import { CLOSE } from './relay.js';
@@ -17,8 +18,9 @@ import { CLOSE } from './relay.js';
 const Size = z.object({ cols: cols.catch(120), rows: rows.catch(36) });
 
 /* write: the person owns the subscription the agent runs on. A program's terminal runs commands on its owner's machine
-   with the owner's sign-in, so everyone else watches and writes through Hornhoof. */
-type Found = { personId: string; companyId: string; agentId: string; node: NodeIdentity | null; write: boolean };
+   with the owner's sign-in, so only they steer it. message: the person writes to the agent, which here is everyone who sees
+   the program: #398 opens this view only to them. */
+type Found = { personId: string; companyId: string; agentId: string; node: NodeIdentity | null; write: boolean; message: boolean };
 type Open = Found & { node: NodeIdentity; termId: string };
 
 /* The agent a request names, for a person who sees the program its terminal shows. Nothing moves for anyone else. */
@@ -39,12 +41,14 @@ async function whyEnd(ctx: Ctx, req: FastifyRequest, { node, personId, write }: 
 }
 
 /* Each frame goes on only while the view may. */
-function onFrames(ctx: Ctx, socket: WebSocket, { termId, node, agentId, personId, write }: Open, mayGoOn: () => Promise<boolean>): void {
+function onFrames(ctx: Ctx, socket: WebSocket, { termId, node, agentId, personId, write, message }: Open, mayGoOn: () => Promise<boolean>): void {
   let unread = '';
   followFrames(ctx, socket, async (data: BrowserFrame) => {
-    if (data.type === 'input' && !write) return;
     if (!(await mayGoOn())) return;
     if (data.type === 'resize') return void ctx.hub.send(node, { type: 'term.resize', termId, cols: data.cols, rows: data.rows });
+    if (!write && isReport(data.data)) return;
+    const refused = ctx.terminals.inputLine(agentId).take(data.data, { control: write, message });
+    if (refused) return socket.send(JSON.stringify({ type: 'refused', reason: refused }));
     /* A prompt goes in with Enter, in any of its forms; scrolling and clicks send keys too. Where the person's Enter
        counts is kept before the keys reach the program. */
     if (typesWords(data.data)) ctx.terminals.wrote(agentId, personId, node);
@@ -69,11 +73,11 @@ export function terminalRoutes(app: FastifyInstance, ctx: Ctx): void {
         const { me, agent } = await programFor(ctx, req);
         const at = await windowNode(ctx, agent.id);
         if (at) await requireAgentView(ctx.db, me, agent, at.planId);
-        found.set(req, { personId: me.id, companyId: me.companyId, agentId: agent.id, node: at?.node ?? null, write: at?.ownerPersonId === me.id });
+        found.set(req, { personId: me.id, companyId: me.companyId, agentId: agent.id, node: at?.node ?? null, write: at?.ownerPersonId === me.id, message: true });
       },
     },
     (socket, req) => {
-      const { personId, agentId, node, write } = found.get(req)!;
+      const { personId, agentId, node, write, message } = found.get(req)!;
       const { cols, rows } = Size.parse(req.query ?? {});
       const termId = randomUUID();
       if (!node) return socket.close(...CLOSE.noTerminal);
@@ -81,11 +85,12 @@ export function terminalRoutes(app: FastifyInstance, ctx: Ctx): void {
       if (!ctx.hub.isReady(node)) return socket.close(...CLOSE.nodeOffline);
       if (!ctx.hub.hasTerminals(node)) return socket.close(...CLOSE.noTerminal);
       ctx.terminals.add(termId, { socket, node, agentId, personId });
-      if (!ctx.hub.send(node, { type: 'term.open', termId, agentKey: agentId, cols, rows, write })) {
+      /* The node takes keys from everyone who may send any: they were looked at here first. */
+      if (!ctx.hub.send(node, { type: 'term.open', termId, agentKey: agentId, cols, rows, write: write || message })) {
         ctx.terminals.remove(termId);
         return socket.close(...CLOSE.nodeOffline);
       }
-      socket.send(JSON.stringify({ type: 'ready', write }));
+      socket.send(JSON.stringify({ type: 'ready', write, message }));
       const view = { ...found.get(req)!, node, termId };
       onFrames(ctx, socket, view, keepLooking(ctx, socket, view, () => whyEnd(ctx, req, view)));
     },

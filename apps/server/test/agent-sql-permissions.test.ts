@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { agentRole, grantsFor, readerGrantsFor, readerRole, type SqlMode } from '../src/db/agent-sql.js';
-import { createTestDb } from './helpers.js';
+import { createTestDb } from './helpers-db.js';
 
 async function roles() {
   const { $client: client } = await createTestDb();
@@ -38,6 +38,30 @@ it.each([
   }
 });
 
+it.each(['task_waits', 'wait_policies'])('keeps %s away from both SQL roles, reading included', async table => {
+  const run = await roles();
+  const statements = [
+    `SELECT * FROM ${table}`,
+    `SELECT id FROM ${table}`,
+    `INSERT INTO ${table} (id) SELECT id FROM ${table} WHERE false`,
+    `UPDATE ${table} SET id = id WHERE false`,
+    `DELETE FROM ${table} WHERE false`,
+  ];
+  for (const mode of ['write', 'read'] as const) {
+    for (const statement of statements) {
+      await expect(run(mode, statement), `${mode}: ${statement}`).rejects.toThrow(/permission denied/);
+    }
+  }
+});
+
+it.each(['wait_id', 'generation', 'level', 'purpose', 'route_revision'])('keeps the new %s of a notice readable and not writable, as the rest of it', async column => {
+  const run = await roles();
+  for (const mode of ['write', 'read'] as const) {
+    expect((await run(mode, `SELECT ${column} FROM wait_notices`))[0]!.rows).toEqual([]);
+    await expect(run(mode, `UPDATE wait_notices SET ${column} = ${column} WHERE false`), mode).rejects.toThrow(/permission denied/);
+  }
+});
+
 it.each([
   { table: 'program_operator_cases', secret: 'capability', metadata: 'id, status, reason' },
   { table: 'attachments', secret: 'bytes', metadata: 'id, media_type, size, operator_case_id' },
@@ -46,5 +70,45 @@ it.each([
   for (const mode of ['write', 'read'] as const) {
     await expect(run(mode, `SELECT ${secret} FROM ${table}`), mode).rejects.toThrow(/permission denied/);
     expect((await run(mode, `SELECT ${metadata} FROM ${table}`))[0]!.rows).toEqual([]);
+  }
+});
+
+it('keeps request material history invisible and immutable to both SQL roles', async () => {
+  const run = await roles();
+  for (const mode of ['write', 'read'] as const) {
+    for (const statement of [
+      'SELECT material_snapshot FROM request_internal',
+      'SELECT * FROM request_internal',
+      'INSERT INTO request_internal (request_id,company_id) SELECT request_id,company_id FROM request_internal WHERE false',
+      'UPDATE request_internal SET material_snapshot = null WHERE false',
+      'DELETE FROM request_internal WHERE false',
+    ]) {
+      await expect(run(mode, statement), `${mode}: ${statement}`).rejects.toThrow(/permission denied/);
+    }
+  }
+});
+
+it('exposes safe request/proposal digests while refusing private proposal history and writes', async () => {
+  const run = await roles();
+  for (const mode of ['write', 'read'] as const) {
+    expect((await run(mode, 'SELECT id,material_revision,material_digest FROM requests'))[0]!.rows).toEqual([]);
+    expect((await run(mode, 'SELECT id,material_revision,material_digest FROM proposals'))[0]!.rows).toEqual([]);
+    for (const statement of [
+      'SELECT material_snapshot FROM proposals', 'SELECT * FROM proposals',
+      'UPDATE proposals SET material_snapshot = null WHERE false',
+      'UPDATE requests SET material_digest = null WHERE false',
+    ]) {
+      await expect(run(mode, statement), `${mode}: ${statement}`).rejects.toThrow(/permission denied/);
+    }
+  }
+});
+
+it.each(['model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations'])('closes %s to both SQL roles, reading too', async table => {
+  const run = await roles();
+  const statements = [`SELECT * FROM ${table}`, `INSERT INTO ${table} (id) SELECT id FROM ${table} WHERE false`, `UPDATE ${table} SET id = id WHERE false`, `DELETE FROM ${table} WHERE false`];
+  for (const mode of ['write', 'read'] as const) {
+    for (const statement of statements) {
+      await expect(run(mode, statement), `${mode}: ${statement}`).rejects.toThrow(/permission denied/);
+    }
   }
 });

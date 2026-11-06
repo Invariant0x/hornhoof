@@ -3,7 +3,7 @@ import { eq, sql } from 'drizzle-orm';
 import { describe, expect, inject, it } from 'vitest';
 import { isUniqueViolation } from '../src/db/errors.js';
 import { agentChanges, agentEvents, agents, companies, departments, machines, people, personAccess, requests, subscriptions, tasks } from '../src/db/schema.js';
-import { createTestDb } from './helpers.js';
+import { createTestDb } from './helpers-db.js';
 
 describe('database', () => {
   it('runs migrations and stores a company', async () => {

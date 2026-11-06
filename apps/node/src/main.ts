@@ -13,7 +13,8 @@ import { prepareAndVerifyBrowser, readBrowserError, startupBrowserCheck, writeBr
 import { connect } from './connection.js';
 import type { ProgramNodeMessage, ProgramServerMessage } from '@hornhoof/protocol/program-operator';
 import { agentUser, builtinAdapters, secureNode, userFor, type JobUser } from './isolation.js';
-import { startCheckClient, stopChecks, isProgramControl, applyProgramControl, runQueuedPart, checkGuidance } from './check-runtime.js';
+import { startCheckClient, stopChecks, isProgramControl, applyProgramControl, runQueuedPart } from './check-runtime.js';
+import { TestPartUser, NodeTestMessages, isNodeTestMessage, nodeTestCapabilities, readTestEnvironment } from './test-environment.js';
 import { machineLoad } from './load.js';
 import { adapterFor, programFor } from './providers/index.js';
 import { runJob, type ProviderAdapter, type RunInput, type RunResult } from './runner.js';
@@ -109,6 +110,7 @@ type RunOptions = {
   testUser?: JobUser | null;
   /* Runs a part of a test run; tests pass a fake. */
   runPart?: typeof runTests;
+  describeEnvironment?: typeof readTestEnvironment;
   /* The node build it says in its hello; none from a node built by hand. */
   build?: string;
   /* Verifies that Playwright Chromium launches before Hornhoof hands tasks or runs to this node. */
@@ -184,7 +186,7 @@ function sealedFor(known: CodexSealed | null, version: number, recipients: Recip
 }
 
 /* The node's life: stay connected, run jobs, report the sign-in state and the limits, clean up when removed. */
-export async function runNode({ dir, adapter, builtin, terminal, login: loginSetup, log: writeLog = console.log, loginCheckMs = LOGIN_CHECK_MS, setupCheckMs = SETUP_CHECK_MS, learnMs = LEARN_MS, limitsMs = LIMITS_MS, loadMs = LOAD_MS, leaseCheckMs = LEASE_CHECK_MS, install, programs = new ProgramUpdates([]), testUser = null, runPart = runTests, build, checkBrowser = async () => null, browserCheckMs = BROWSER_CHECK_MS }: RunOptions): Promise<{ stop(reason?: NodeStopReason): void }> {
+export async function runNode({ dir, adapter, builtin, terminal, login: loginSetup, log: writeLog = console.log, loginCheckMs = LOGIN_CHECK_MS, setupCheckMs = SETUP_CHECK_MS, learnMs = LEARN_MS, limitsMs = LIMITS_MS, loadMs = LOAD_MS, leaseCheckMs = LEASE_CHECK_MS, install, programs = new ProgramUpdates([]), testUser = null, runPart = runTests, describeEnvironment = readTestEnvironment, build, checkBrowser = async () => null, browserCheckMs = BROWSER_CHECK_MS }: RunOptions): Promise<{ stop(reason?: NodeStopReason): void }> {
   if (!builtin && isRemoved(dir)) {
     writeLog('This node was removed in Hornhoof.');
     return { stop() {} };
@@ -311,10 +313,13 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   let browserError = await checkBrowser().catch(err => message(err));
   writeBrowserError(dir, browserError);
   if (browserError) log(`Playwright Chromium could not start: ${browserError}`);
+  const testCapabilities = await nodeTestCapabilities(dir, testUser).catch(() => { log('Product test environments are unavailable on this node.'); return {}; });
+  const partUser = new TestPartUser();
+  const testMessages = new NodeTestMessages({ dir, describe: describeEnvironment, capabilities: testCapabilities, stopped: () => stopped, testing, unconfirmed: unconfirmedTests, run: testOne, emit });
   const noRunsNow = () => noRunsBecause(testUser, browserError);
   const tellStatus = () => {
     browserError = readBrowserError(dir);
-    emit({ type: 'status', loggedIn, ...setup.field(), limits: planLimits.forStatus(online), ...(models ? { models } : {}), account, browserError, noRuns: noRunsNow() });
+    emit({ type: 'status', ...testCapabilities, loggedIn, ...setup.field(), limits: planLimits.forStatus(online), ...(models ? { models } : {}), account, browserError, noRuns: noRunsNow() });
   };
   const status = async () => {
     /* A program that cannot list its models now keeps those it listed before. */
@@ -339,8 +344,9 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       const typed = host?.typedJobs() ?? [];
       const tests = [...testing.keys(), ...unconfirmedTests.keys()];
       const noRuns = noRunsNow();
-      next({ type: 'hello', version: VERSION, loggedIn, ...setup.field(), running: [...running.keys(), ...typed, ...unconfirmed.keys()], ...(models ? { models } : {}), terminals: Boolean(host), programOperatorV1: Boolean(host), work: Boolean(testUser), ...(noRuns ? { noRuns } : {}), browserError, load: load(), tests, skillFiles: true, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
+      next({ type: 'hello', ...testCapabilities, version: VERSION, loggedIn, ...setup.field(), running: [...running.keys(), ...typed, ...unconfirmed.keys()], ...(models ? { models } : {}), terminals: Boolean(host), programOperatorV1: Boolean(host), work: Boolean(testUser), ...(noRuns ? { noRuns } : {}), browserError, load: load(), tests, skillFiles: true, publicKey: keyPair.recipient, account, boot, programs: programs.snapshot(), build, restart: life.previous, nodeLog: life.tail() });
       host?.operatorReplay();
+      testMessages.replay();
       for (const m of outbox.splice(0)) emit(m);
       /* What it read while Hornhoof was away, before the end of any job that brought it. */
       if (planLimits.waiting) tellStatus();
@@ -350,7 +356,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     /* One message that fails is logged; it never ends the node with all its runs. */
     onMessage: m => void handle(m).catch(err => log(`A message from Hornhoof failed: ${message(err)}`)),
     onClose: () => {
-      online = false; stopChecks(checks, testing);
+      online = false; stopChecks(checks, testing); testMessages.cancelDescriptions();
     },
     onRefused: () => log('Hornhoof does not know this machine any more. Run the install command from Hornhoof again to reconnect.'),
   });
@@ -363,7 +369,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       if (builtin || stopped) return;
       stopped = true;
       /* The agents stop first, so nothing writes into the folders while they go. */
-      const jobs = [...running.values(), ...testing.values()];
+      const jobs = [...running.values(), ...testing.values(), ...testMessages.activeDescriptions()];
       for (const job of jobs) job.stop.abort();
       await Promise.race([Promise.allSettled(jobs.map(j => j.done)), new Promise(r => setTimeout(r, STOP_WAIT_MS))]);
       await host?.stop();
@@ -377,14 +383,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
     }
     if (acknowledged(m, unconfirmed, unconfirmedTests)) return;
     if (m.type === 'programs.update') return programs.update(tellStatus);
-    if (m.type === 'tests.cancel') return void testing.get(m.partId)?.stop.abort();
-    if (m.type === 'tests.run') {
-      if (stopped || testing.has(m.partId) || unconfirmedTests.has(m.partId)) return;
-      const controller = new AbortController();
-      const done = testOne(m, controller.signal);
-      testing.set(m.partId, { stop: controller, done });
-      return done;
-    }
+    if (isNodeTestMessage(m)) return testMessages.handle(m);
     if (m.type === 'job.cancel') {
       running.get(m.jobId)?.stop.abort();
       await host?.cancel(m.jobId);
@@ -413,6 +412,8 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
         const result = host ? await host.restart(m.agentKey, m.jobId, m.note) : { ok: false, reason: 'The terminal host is not running.' };
         return void send?.({ type: 'agent.restarted', agentKey: m.agentKey, jobId: m.jobId, ...result });
       }
+      case 'agent.release':
+        return host?.release(m.agentKey, m.jobId);
       case 'cred.put':
         return inOrder(() => putCredential(m.kind, m.sealed));
       case 'cred.drop':
@@ -514,9 +515,10 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
       testing.delete(m.partId);
       return emit(refusedPart);
     }
-    const done = await runQueuedPart(m, runPart, { dir, user: testUser, hidden: [...known], signal, files },
-      position => emit({ type: 'tests.waiting', partId: m.partId, position }),
-      () => emit({ type: 'tests.started', partId: m.partId }));
+    const waiting = (position: number) => emit({ type: 'tests.waiting', partId: m.partId, position });
+    const done = await runQueuedPart(m, (part, options) => partUser.run(options.signal, () => {
+      emit({ type: 'tests.started', partId: part.partId }); return runPart(part, options);
+    }, waiting), { dir, user: testUser, hidden: [...known], signal, files }, waiting, () => {});
     keepTest(m.partId, done);
     testing.delete(m.partId);
     emit(done);
@@ -538,7 +540,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
           return { ok: false, sessionId: null, result: '', output: `Could not install the program: ${message(err)}`, error: 'agent_failed', limits: null };
         }
         const version = async () => { await programs.ready(input.signal); return programs.version(terminal.program.kind); };
-        return host.run({ key: input.agentKey, program: terminal.program, bin: terminal.bin, home: terminal.home, signedOut: terminal.signedOut, input: checkGuidance(input), version, operatorDelivery: m.operatorDelivery, operatorSourceDelivery: m.operatorSourceDelivery });
+        return host.run({ key: input.agentKey, program: terminal.program, bin: terminal.bin, home: terminal.home, signedOut: terminal.signedOut, input, version, operatorDelivery: m.operatorDelivery, operatorSourceDelivery: m.operatorSourceDelivery });
       };
       const tracked: ProviderAdapter = {
         ...chosen,
@@ -619,7 +621,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
   function stop(reason: NodeStopReason = 'stopped') {
     stopNode(life, send, boot.startedAt, reason);
     stopped = true;
-    stopChecks(checks, testing);
+    stopChecks(checks, testing); testMessages.cancelDescriptions();
     clearInterval(timer);
     if (learning) clearInterval(learning);
     clearInterval(asking);

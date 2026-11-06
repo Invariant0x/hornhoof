@@ -1,70 +1,22 @@
-import type { ServerMessage } from '@hornhoof/protocol';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import WebSocket from 'ws';
-import { agents, jobs, people, subscriptions } from '../src/db/schema.js';
-import { BUILTIN } from '../src/modules/nodes/hub.js';
-import { aclCompany, type AclCompany } from './agent-view-company.js';
-import { as, connectNode, invitePerson, until, type FakeNode } from './helpers.js';
-
-const NODE_KEY = 'k'.repeat(40);
-
-type Screen = { ws: WebSocket; frames: { type: string; [k: string]: unknown }[]; closed: Promise<{ code: number; reason: string }> };
-type Refused = { status: number; reason?: string };
-
-/* A browser that opens an agent's terminal: its screen, or how the server turned it away. */
-function open(url: string, token: string, agentId: string): Promise<Screen | Refused> {
-  return new Promise((resolve, reject) => {
-    const ws = new WebSocket(url.replace('/api/nodes/socket', `/api/agents/${agentId}/terminal?cols=100&rows=30`), { headers: { cookie: `hh_session=${token}` } });
-    const frames: Screen['frames'] = [];
-    ws.on('message', data => frames.push(JSON.parse(String(data))));
-    const closed = new Promise<{ code: number; reason: string }>(done => ws.on('close', (code, reason) => done({ code, reason: String(reason) })));
-    ws.on('unexpected-response', (_req, res) => {
-      let body = '';
-      res.on('data', chunk => { body += String(chunk); });
-      res.on('end', () => resolve({ status: res.statusCode ?? 0, reason: body ? JSON.parse(body).error?.reason : undefined }));
-    });
-    ws.on('error', reject);
-    ws.on('open', () => resolve({ ws, frames, closed }));
-  });
-}
-
-const opened = async (url: string, token: string, agentId: string): Promise<Screen> => {
-  const screen = await open(url, token, agentId);
-  if ('status' in screen) throw new Error(`Turned away: ${screen.status}`);
-  return screen;
-};
-
-async function next<T extends ServerMessage['type']>(node: FakeNode, type: T): Promise<Extract<ServerMessage, { type: T }>> {
-  for (;;) {
-    const m = await node.next();
-    if (m.type === type) return m as Extract<ServerMessage, { type: T }>;
-  }
-}
-
-/* The company of #398 on the built-in node, whose API key plans let an agent move between plans on one machine. */
-async function company(env: NodeJS.ProcessEnv = {}) {
-  const c = await aclCompany({ NODE_KEY, STREAM_PING_MS: '60000', ...env });
-  await c.db.update(subscriptions).set({ kind: 'api_key', targetKind: 'any' });
-  const node = await connectNode(c.url, NODE_KEY);
-  node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], terminals: true });
-  await until(() => c.app.ctx.hub.hasTerminals(BUILTIN));
-  return { ...c, node };
-}
-type Company = Awaited<ReturnType<typeof company>>;
-
-const onPlan = (c: AclCompany, agentId: string, planId: string) => c.db.update(agents).set({ subscriptionId: planId }).where(eq(agents.id, agentId));
-const moved = (c: AclCompany, agentId: string, planId: string) => c.app.inject({ method: 'PATCH', url: `/api/agents/${agentId}`, payload: { subscription: planId }, ...as(c.tokens.ceo) });
-const turnOn = async (c: AclCompany, agentId: string, planId: string, status: 'running' | 'done' = 'running') =>
-  (await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: planId, agentId, kind: 'conversation', prompt: 'A turn.', timeoutMs: 900000, status, startedAt: new Date(), ...(status === 'done' ? { finishedAt: new Date() } : {}) }).returning())[0]!;
-const ended = (c: AclCompany, jobId: string) => c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, jobId));
-const state = async (c: AclCompany, token: string, agentId: string) => (await c.app.inject({ url: `/api/agents/${agentId}/events`, ...as(token) })).json().state;
+import { agents, jobs, people } from '../src/db/schema.js';
+import { as, invitePerson, until } from './helpers.js';
+import { company, ended, moved, next, onPlan, open, opened, state, turnOn, type Company, type Screen } from './terminal-company.js';
 
 /* No view opened on the node since the last one read: the next it hears of is this one of the CEO's. */
 async function openedNothing(c: Company): Promise<void> {
   const witness = await opened(c.url, c.tokens.ceo, c.crew.wide.id);
   expect((await next(c.node, 'term.open')).agentKey).toBe(c.crew.wide.id);
   witness.ws.close();
+}
+
+/* What a window hears of its rights: the node takes keys from any window, as the server already chose them. */
+async function rights(c: Company, token: string, agentId: string) {
+  const screen = await opened(c.url, token, agentId);
+  await next(c.node, 'term.open');
+  await until(() => screen.frames.length > 0);
+  return screen.frames[0];
 }
 
 const CASES = [
@@ -92,9 +44,9 @@ describe("who gets an agent's terminal", () => {
     }
     const screen = said as Screen;
     const seen = await next(c.node, 'term.open');
-    expect(seen).toMatchObject({ agentKey: c.crew[agent].id, write: expected.write });
+    expect(seen).toMatchObject({ agentKey: c.crew[agent].id, write: true });
     await until(() => screen.frames.length > 0);
-    expect(screen.frames[0]).toEqual({ type: 'ready', write: expected.write });
+    expect(screen.frames[0]).toEqual({ type: 'ready', write: expected.write, message: true });
   });
 
   it('turns away a cookie that is no session, or no longer one, and tells the node nothing', async () => {
@@ -115,8 +67,7 @@ describe('the program a terminal really shows', () => {
     await openedNothing(c);
     await opened(c.url, c.tokens.bob, c.crew.other.id);
     expect(await next(c.node, 'term.open')).toMatchObject({ agentKey: c.crew.other.id, write: true });
-    await opened(c.url, c.tokens.ceo, c.crew.other.id);
-    expect(await next(c.node, 'term.open')).toMatchObject({ write: false });
+    expect(await rights(c, c.tokens.ceo, c.crew.other.id)).toEqual({ type: 'ready', write: false, message: true });
     await ended(c, running.id);
   });
 
@@ -138,8 +89,7 @@ describe('the program a terminal really shows', () => {
     expect(await state(c, c.tokens.ann, c.crew.other.id)).toMatchObject({ terminal: false, canType: false });
     await opened(c.url, c.tokens.bob, c.crew.other.id);
     expect(await next(c.node, 'term.open')).toMatchObject({ agentKey: c.crew.other.id, write: true });
-    await opened(c.url, c.tokens.ceo, c.crew.other.id);
-    expect(await next(c.node, 'term.open')).toMatchObject({ write: false });
+    expect(await rights(c, c.tokens.ceo, c.crew.other.id)).toEqual({ type: 'ready', write: false, message: true });
   });
 
   it("opens it to the new owner once a turn of their plan runs in its place, and closes it to the old owner", async () => {
@@ -152,8 +102,7 @@ describe('the program a terminal really shows', () => {
     await opened(c.url, c.tokens.ann, c.crew.other.id);
     expect(await next(c.node, 'term.open')).toMatchObject({ agentKey: c.crew.other.id, write: true });
     expect(await state(c, c.tokens.ann, c.crew.other.id)).toMatchObject({ terminal: true, canType: true });
-    await opened(c.url, c.tokens.ceo, c.crew.other.id);
-    expect(await next(c.node, 'term.open')).toMatchObject({ write: false });
+    expect(await rights(c, c.tokens.ceo, c.crew.other.id)).toEqual({ type: 'ready', write: false, message: true });
   });
 
   it('goes by the last program on the machine when an agent came back: A, then B, then A', async () => {
@@ -253,12 +202,11 @@ describe('a terminal open when the right to it goes', () => {
     const running = await turnOn(c, c.crew.deputy.id, c.plans.lisa.id);
     await onPlan(c, c.crew.deputy.id, c.plans.wes.id);
     const { screen } = await watching(c, c.tokens.lisa, c.crew.deputy.id);
-    expect(screen.frames[0]).toEqual({ type: 'ready', write: true });
+    expect(screen.frames[0]).toEqual({ type: 'ready', write: true, message: true });
     await turnOn(c, c.crew.deputy.id, c.plans.wes.id, 'done');
     await ended(c, running.id);
     expect(await screen.closed).toEqual({ code: 4410, reason: 'node_offline' });
-    await opened(c.url, c.tokens.lisa, c.crew.deputy.id);
-    expect(await next(c.node, 'term.open')).toMatchObject({ write: false });
+    expect(await rights(c, c.tokens.lisa, c.crew.deputy.id)).toEqual({ type: 'ready', write: false, message: true });
   });
 
   it('takes the keys of someone who may type right up to when the right goes', async () => {
@@ -270,15 +218,14 @@ describe('a terminal open when the right to it goes', () => {
   });
 });
 
-describe('a person who only watches', () => {
-  it('sends no keys, by what the server knows and not by what the browser says', async () => {
+describe('a person who may only write a message', () => {
+  it('steers nothing, by what the server knows and not by what the browser says', async () => {
     const c = await company();
     const invited = await invitePerson(c.app, c.tokens.ceo, { name: 'Dana', email: 'dana@acme.com', access: { whole: true } });
     await c.db.update(people).set({ isCeoDelegate: true }).where(eq(people.name, 'Dana'));
     const screen = await opened(c.url, invited, c.crew.other.id);
     const seen = await next(c.node, 'term.open');
-    expect(seen.write).toBe(false);
-    screen.ws.send(JSON.stringify({ type: 'input', data: 'from a watcher\r', write: true, sender: c.ids.bob }));
+    screen.ws.send(JSON.stringify({ type: 'input', data: '/login\r', write: true, sender: c.ids.bob }));
     screen.ws.send(JSON.stringify({ type: 'resize', cols: 81, rows: 21 }));
     expect(await next(c.node, 'term.resize')).toMatchObject({ termId: seen.termId, cols: 81 });
   });
