@@ -347,6 +347,18 @@ describe('the weekly run', () => {
     expect(await runsOf(place)).toEqual([]);
   });
 
+  it('turns a check that is on off and signals once when it misses what it must block', async () => {
+    const on = await aCheckThatIsOn();
+    await weeklyRound(on.ctx, later(7));
+    await runNextEvaluation(on.ctx, modelFor(on.rows, { [on.rows[1]!.id]: 'allow' }), later(7));
+    expect(await lastRun(on)).toMatchObject({ trigger: 'weekly', status: 'failed', mustBlockMisses: 1 });
+    expect(await checkOf(on)).toMatchObject({ status: 'off', offReason: 'evaluation_failed', validUntil: null });
+    expect(await noticesTo(on, on.c.head.id)).toHaveLength(1);
+    await weeklyRound(on.ctx, later(14));
+    await runNextEvaluation(on.ctx, modelFor(on.rows, { [on.rows[1]!.id]: 'allow' }), later(14));
+    expect(await noticesTo(on, on.c.head.id)).toHaveLength(1);
+  });
+
   it('keeps the check on until it ends, and turns it on again for another week', async () => {
     const on = await aCheckThatIsOn();
     await weeklyRound(on.ctx, later(7));

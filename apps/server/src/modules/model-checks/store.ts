@@ -80,8 +80,8 @@ async function rebind(tx: Writer, check: CheckRow, now: Date): Promise<void> {
   const previous = (await boundRun(tx, check.id, check.bindingDigest))?.binding ?? null;
   const change = afterChange(previous, next, now);
   if (!change) return;
-  const offReason = previous ? change.run.parts[0] ?? null : null;
-  await tx.update(modelChecks).set({ status: 'off', offReason, bindingDigest: change.state.bindingDigest, validUntil: null }).where(eq(modelChecks.id, check.id));
+  const [part = null] = change.run.parts;
+  await tx.update(modelChecks).set({ status: 'off', offReason: previous ? part : null, bindingDigest: change.state.bindingDigest, validUntil: null }).where(eq(modelChecks.id, check.id));
   await tx.insert(modelCheckEvaluations).values({ checkId: check.id, revisionId: revision.id, datasetId: set.id, binding: next, bindingDigest: change.run.bindingDigest, trigger: change.run.trigger, parts: change.run.parts, dedupKey: change.run.dedupKey }).onConflictDoNothing();
 }
 

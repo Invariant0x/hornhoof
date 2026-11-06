@@ -162,6 +162,12 @@ describe('the checks of a department as a person reads them', () => {
     expect((await list(c, c.samToken)).statusCode).toBe(404);
   });
 
+  it('say when a check has no set and no run yet', async () => {
+    const c = await owned();
+    await setLimits(c, c.danaToken, LIMITS);
+    expect((await list(c, c.danaToken)).json()).toMatchObject({ checks: [{ on: false, status: 'off', thresholds: LIMITS, set: null, lastRun: null }] });
+  });
+
   it('are empty for a department with none', async () => {
     const c = await company();
     expect((await list(c, c.ceoToken)).json()).toEqual({ canChange: true, checks: [] });

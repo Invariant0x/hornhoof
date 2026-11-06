@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
-import type { Case, CheckBinding, CheckInput, CheckReceipt } from '@hornhoof/protocol';
+import type { Case, CheckBinding, CheckInput } from '@hornhoof/protocol';
 import { parseDataset } from '../src/modules/model-checks/dataset.js';
 import { afterRun, bindingDigest } from '../src/modules/model-checks/lifecycle.js';
 import { evaluateCheck, NO_MODEL_YET, reportText, type RunModelCheck } from '../src/modules/model-checks/run.js';
