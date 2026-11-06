@@ -108,7 +108,7 @@ describe('replayable staging subset diagnosis', () => {
     const green = trial([A, B]), changed = { ...green, ...change } as StagingSubsetCheck;
     expect(nextStagingSplit(input([A, B], [green, changed]))).toEqual({ status: 'unavailable' });
   });
-  it.each([[], [A, A]])('refuses an invalid batch membership %j', members => {
+  it.each([{ members: [] }, { members: [A, A] }])('refuses an invalid batch membership %j', ({ members }) => {
     expect(nextStagingSplit(input(members))).toEqual({ status: 'unavailable' });
   });
 });
