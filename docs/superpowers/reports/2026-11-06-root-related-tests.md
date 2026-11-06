@@ -1,6 +1,6 @@
 # Root related-test runner565
 
-Status: IN_PROGRESS. The collection/config contracts are checked at8c22964eb0c4f1d7f8665a56dd229440c9a50368. Neither312 nor378 is a green whole run; the branch is not merged into turn-8. No full suite was executed.
+Status: BLOCKED on the original exact-event assertion restriction after the approved fixture correction. The collection/config contracts are checked at8c22964eb0c4f1d7f8665a56dd229440c9a50368. Neither312 nor378 is a green whole run; the branch is not merged into turn-8. No full suite was executed.
 
 ## Change and API
 
@@ -52,3 +52,24 @@ No formatter is configured in this source. MJS duplicate-analysis support is not
 The openStream,connectNode and agentSqlOn function bodies are byte-identical between473's base and the current extracted helper. Their per-function SHA256 values are in the companion JSON. The scoped CRAP failure is not removed or presented as a global passing quality matrix. No legacy helper body is refactored outside the mechanical brief.
 
 After the approved test-only fixture commits, fresh turn-8=59695b6c was merged into task-565 without conflicts, including preservation of the coordinated lightweight agent-sql import and its two552 cases. This merge brings upstream features and test files, not additional565 optimization. The next exact candidate check will rerun the dynamic root inventory/contracts, every selected helper/API case plus tasks-merge, types/lint and changed-logic quality; no full suite or private source fetch is used.
+
+
+## Current candidate486 and remaining precise blocker
+
+486/part1 at57ce0474ec21f13f1a561d29c11483aac83e0367 remains native FAILED/exit1:105pass/1fail across10 affected files,106cases. The tasks-merge family is11pass/1fail, including successful403 rejection for the distinct Claude subscription of the same vendor. The six original gate refusals are gone; five of those original cases fully pass, while the first now reaches a later exact-event assertion. It receives the review field that460 adds to merged submission events. The old expected object has only evidence and merged. The assertion has not been weakened or changed.
+
+Every other486 stage passed: root contracts5/5 on the fresh inventory, typecheck:tests, changed lint, changed-logic CRAPmax6.0 and dryer0. The legacy heavy-function110 result remains independently recorded in458/473;486 does not claim a globally green quality matrix. Original helper/data assertions, individual deadlines and production gateAuthorVendor/independentProvider are untouched.
+
+Full tests-486-1.log is287938bytes, SHA256e1945b5e2614626bae79ee914960a01beaf6af26ee69a1f9af1aeef47e8cd88b. Its only failed stage is helper-coverage-project-relative. Full raw log, nonempty LCOV and all stages/resources are preserved. Later upstream changes explain the selected106-case denominator; it is recorded from the actual output, not the earlier100+2 estimate in the command scope label.
+
+The latest graph at this source is:
+
+| Input | Selected/total | Project rows |
+| --- | ---: | --- |
+|apps/server/src/app.ts|151/448|@hornhoof/server=151|
+|packages/protocol/src/link.ts|178/448|@hornhoof/protocol=1, @hornhoof/server=161, @hornhoof/web=16|
+|apps/node/src/redact.ts|104/448|@hornhoof/node=99, @hornhoof/node:no-proc=5|
+
+The head explicitly required the original11 checks unchanged. The approved929 fixture patch cannot repair this later payload expectation without changing an assertion. The concrete NOT_APPLIED proposal4b6dc349-2652-4106-82ea-23332e2405dd keeps the full final toEqual and the existing evidence/merged checks. It additionally validates the complete initial review shape, its source/author/SHA/quality/count fields and UUID, then requires the merged event to retain that exact review object. It does not use toMatchObject, discard the review field or edit the engine. Only head can extend the original assertion boundary. No further test run or turn-8 push is justified until that answer.
+
+The stable collection API at57ce0474 remains available to566. The root runner is not declared a full565PASS; the original broader failed runs and the newly exposed expectation failure remain in the evidence.
