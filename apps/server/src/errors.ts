@@ -92,6 +92,7 @@ export type ErrorReason =
   | 'task_invalid'
   | 'request_unknown'
   | 'request_closed'
+  | 'source_producer_unavailable'
   | 'improvement_unknown'
   | 'improvement_decided'
   | 'improvement_not_requested'

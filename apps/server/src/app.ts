@@ -39,6 +39,7 @@ import { updateRoutes } from './modules/updates/routes.js';
 import { startNodeDrains } from './modules/updates/node-drain.js';
 import { nodeUpdateRoutes } from './modules/updates/node-routes.js';
 import { attachmentRoutes } from './modules/tasks/attachments.js';
+import { materialRoutes } from './modules/tasks/request-materials.js';
 import { partFileRoutes } from './modules/testruns/files.js';
 import { readCommit, type CommitReader } from './modules/testruns/refs.js';
 import { markCommit, type CommitMarker } from './modules/testruns/github-status.js';
@@ -148,6 +149,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   computerRoutes(app, ctx);
   taskRoutes(app, ctx);
   attachmentRoutes(app, ctx);
+  materialRoutes(app, ctx);
   partFileRoutes(app, ctx);
   poolRoutes(app, ctx);
   linkRoutes(app, ctx);

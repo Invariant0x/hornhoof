@@ -147,7 +147,7 @@ export async function checkRoom(ctx: { db: Pick<Ctx['db'], 'select'>; config: Pi
 }
 
 /* Sends a task file in pieces, so the server never holds a whole one. */
-export async function sendFile(db: Db, reply: FastifyReply, found: { id: string; name: string | null; length: number; mediaType?: string }) {
+export async function sendFile(db: Db, reply: FastifyReply, found: { id: string; name: string | null; length: number; mediaType?: string; inlineType?: 'image/png' | 'image/jpeg' | 'image/webp' }) {
   const [ordinary] = await db.select({ id: attachments.id }).from(attachments).where(and(eq(attachments.id, found.id), isNull(attachments.operatorCaseId)));
   if (!ordinary) throw new ApiError(404, 'not_found', 'There is no such file.', 'attachment_unknown');
   async function* pieces(id: string, length: number) {
@@ -165,7 +165,7 @@ export async function sendFile(db: Db, reply: FastifyReply, found: { id: string;
     .header('x-file-name', encodeURIComponent(found.name ?? ''))
     .header('content-security-policy', "default-src 'none'")
     .header('content-length', String(found.length))
-    .type(found.mediaType === 'text/plain' ? 'text/plain; charset=utf-8' : 'application/octet-stream')
+    .type(found.inlineType ?? (found.mediaType === 'text/plain' ? 'text/plain; charset=utf-8' : 'application/octet-stream'))
     .send(Readable.from(pieces(found.id, found.length)));
 }
 
