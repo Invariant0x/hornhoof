@@ -32,7 +32,7 @@ The selection goes by the paths a change touches, and within a package by the im
 | Backend | `apps/server` | `server` by the graph; routes, configuration and fixtures take it whole |
 | Frontend | `apps/web` without `e2e` | `web` by the graph; strings and configuration take it whole |
 | Node and terminals | `apps/node` | `node` by the graph |
-| Shared protocol | `packages` | every suite of the fast profile, whole, without `--allow-whole` |
+| Shared protocol | `packages` | every suite of the fast profile, whole, without `--allow-whole`; its own tests only `protocol`, its fixtures also `server` |
 | Database | `apps/server/drizzle`, `apps/server/src/db/schema.ts` | `server` whole; `server-postgres` runs in the final profile |
 | Templates and skills | `templates` | `server` and `node`, whole |
 | Browser scenarios | `apps/web/e2e`, and the screens under `apps/web/src` | no suite: `NOTE browser scenario` names a changed scenario and those named after a changed screen |

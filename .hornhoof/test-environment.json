@@ -443,6 +443,23 @@
       },
       {
         "globs": [
+          "packages/protocol/test/**"
+        ],
+        "suiteIds": [
+          "protocol"
+        ]
+      },
+      {
+        "globs": [
+          "packages/protocol/test/fixtures/**"
+        ],
+        "suiteIds": [
+          "protocol",
+          "server"
+        ]
+      },
+      {
+        "globs": [
           "templates/**"
         ],
         "suiteIds": [

@@ -31,6 +31,8 @@ for (const [group, path, expected] of [
   ['the frontend', 'apps/web/src/ui/AgentTerminal.tsx', ['web']],
   ['the node and its terminals', 'apps/node/src/terminal/input.ts', ['node']],
   ['the shared protocol', 'packages/protocol/src/index.ts', ALL],
+  ['a test of the shared protocol', 'packages/protocol/test/test-environment.test.ts', ['protocol']],
+  ['a fixture of the shared protocol', 'packages/protocol/test/fixtures/hornhoof-test-environment-v1.json', ['protocol', 'server']],
   ['the database', 'apps/server/drizzle/0075_internal_first_questions.sql', ['server']],
   ['the database schema', 'apps/server/src/db/schema.ts', ['server']],
   ['the templates', 'templates/roles/operations/OPS-HEAD.md', ['node', 'server']],
@@ -39,6 +41,7 @@ for (const [group, path, expected] of [
   ['the installer', 'scripts/install.sh', ['release-scripts', 'server']],
   ['the updater', 'apps/updater/updater.sh', ['release-scripts', 'server']],
   ['the image of the app', 'Dockerfile', ['release-scripts', 'server']],
+  ['the compose file', 'compose.yaml', ['release-scripts', 'server']],
   ['a browser scenario', 'apps/web/e2e/about.spec.ts', []],
   ['a document', 'README.md', []],
 ]) {
