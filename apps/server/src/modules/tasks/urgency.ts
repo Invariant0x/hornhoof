@@ -3,7 +3,9 @@ import type { Ctx } from '../../app.js';
 import { actsAsCeo } from '../../auth/decisions.js';
 import type { Db } from '../../db/client.js';
 import { agents, companies, people, tasks, teams } from '../../db/schema.js';
+import { ApiError } from '../../errors.js';
 import { CLOSED, loadTask, note, published, refuse, type Actor, type Moved, type Task, type Tx } from './engine.js';
+import { freePeers, type Work } from './role-peers.js';
 
 /* Whether work is urgent is data: the CEO says so through the orchestrator or a route, and nothing is read from its words.
    Work under a task is as urgent as it is. A team may take urgent work only, and who is in it says who that holds for. */
@@ -20,6 +22,32 @@ export async function urgentOnlyAgents(db: Db | Tx, companyId: string, agentIds:
     .innerJoin(teams, and(eq(teams.id, agents.teamId), eq(teams.companyId, companyId)))
     .where(and(eq(agents.companyId, companyId), inArray(agents.id, [...agentIds]), eq(teams.urgentOnly, true)));
   return new Set(rows.map(row => row.id));
+}
+
+/* A person acting as the CEO sees everyone, as agents who give out work do. Anyone else may not see who works where. */
+async function seesEveryone(db: Db | Tx, companyId: string, actor: Actor): Promise<boolean> {
+  if (actor.agentId !== undefined) return true;
+  const [person] = await db.select().from(people).where(and(eq(people.id, actor.personId), eq(people.companyId, companyId)));
+  return Boolean(person && actsAsCeo(person));
+}
+
+const NOT_URGENT = 'takes only urgent work, and this work is not urgent';
+
+async function notForThem(ctx: Ctx, actor: Actor, companyId: string, work: Work, agentId: string): Promise<ApiError> {
+  if (!(await seesEveryone(ctx.db, companyId, actor))) return new ApiError(409, 'conflict', `The team of this employee ${NOT_URGENT}.`, 'urgent_only_team');
+  const [found] = await ctx.db.select({ agent: agents, team: teams.name }).from(agents).innerJoin(teams, eq(teams.id, agents.teamId)).where(eq(agents.id, agentId));
+  const { agent, team } = found!;
+  const free = agent.departmentId && agent.roleKey ? await freePeers(ctx, { id: agent.id, departmentId: agent.departmentId, roleKey: agent.roleKey }, work) : [];
+  const who = free.length ? `Free now in the same role: ${free.map(p => `${p.name} (${p.id})`).join(', ')}.` : 'Nobody else in the same role is free now.';
+  return new ApiError(409, 'conflict', `${agent.name} is in ${team}, which ${NOT_URGENT}. ${who}`, 'urgent_only_team', { free });
+}
+
+/* The one check of everything that gives work to someone new, before it is written. A change of urgency or of the team on
+   its way ends the same as when the work came just before it: what someone holds stays theirs. */
+export async function refuseNotUrgent(ctx: Ctx, actor: Actor, companyId: string, work: Work & Pick<Task, 'urgent'>, takers: readonly string[]): Promise<void> {
+  const only = await urgentOnlyAgents(ctx.db, companyId, takers);
+  const who = takers.find(id => !mayHoldTask(work, { urgentOnly: only.has(id) }));
+  if (who) throw await notForThem(ctx, actor, companyId, work, who);
 }
 
 const notAllowed = () => refuse(403, 'urgent_not_allowed', 'Only the CEO or the CEO delegate says that work is urgent, by themselves or through the orchestrator. Nothing was changed.');

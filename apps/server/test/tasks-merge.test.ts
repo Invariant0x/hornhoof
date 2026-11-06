@@ -4,7 +4,7 @@ import { agents, companies, departments, people, subscriptions, taskEvents, task
 import { blocked, createTask, submit, updateTask, verdict } from '../src/modules/tasks/engine.js';
 import { taskDetail } from '../src/modules/tasks/views.js';
 import { wakePrompt } from '../src/modules/tasks/wake.js';
-import { setUpCompany, statements, testApp } from './helpers.js';
+import { setUpCompany, statements, testApp, TEST_COMMIT } from './helpers.js';
 
 /* Development works in a repository; Bruno's task passes Rita's gate. */
 async function company(repository = true) {
@@ -14,12 +14,13 @@ async function company(repository = true) {
   const companyId = acme!.id;
   const [ceo] = await db.select().from(people);
   const [sub] = await db.select().from(subscriptions);
+  const [reviewPlan] = await db.insert(subscriptions).values({ companyId, provider: 'codex', kind: 'personal', label: 'Review', ownerPersonId: ceo!.id, status: 'ready' }).returning();
   const [dev] = await db.insert(departments).values({ companyId, templateKey: 'development', roleCode: 'DEV', repoUrl: repository ? 'https://github.com/acme/shop.git' : null }).returning();
-  const hire = async (name: string, kind: 'head' | 'worker', roleKey: string) =>
-    (await db.insert(agents).values({ companyId, kind, name, roleKey, departmentId: dev!.id, model: '', subscriptionId: sub!.id }).returning())[0]!;
+  const hire = async (name: string, kind: 'head' | 'worker', roleKey: string, subscriptionId = sub!.id) =>
+    (await db.insert(agents).values({ companyId, kind, name, roleKey, departmentId: dev!.id, model: '', subscriptionId }).returning())[0]!;
   const head = await hire('Hana', 'head', 'DEV-HEAD');
   const bruno = await hire('Bruno', 'worker', 'DEV-BE');
-  const rita = await hire('Rita', 'worker', 'DEV-REV');
+  const rita = await hire('Rita', 'worker', 'DEV-REV', reviewPlan!.id);
   const ctx = app.ctx;
   const parent = (await createTask(ctx, { personId: ceo!.id }, { title: 'Payments', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: head.id })).task;
   const task = (await createTask(ctx, { agentId: head.id }, { title: 'Checkout API', brief: '', body: '', departmentId: dev!.id, parentId: parent.id, assigneeAgentId: bruno.id, executor: true, gates: [rita.id] })).task;
@@ -35,6 +36,18 @@ async function company(repository = true) {
 const woken = (r: { wakes: { agentId: string; why: string }[] }) => r.wakes.map(w => [w.agentId, w.why]);
 
 describe('a task that passed its last gate', () => {
+  it('refuses an author-vendor reviewer using another provider and subscription', async () => {
+    const { ctx, db, bruno, rita, task } = await company();
+    const [ceo] = await db.select().from(people);
+    const [authorPlan] = await db.select().from(subscriptions).where(eq(subscriptions.id, bruno.subscriptionId!));
+    const [sameVendor] = await db.insert(subscriptions).values({ companyId: task.companyId, provider: 'claude', kind: 'personal', label: 'Another Anthropic plan', ownerPersonId: ceo!.id, status: 'ready' }).returning();
+    expect([authorPlan!.provider, sameVendor!.provider]).toEqual(['anthropic_api', 'claude']);
+    await db.update(agents).set({ subscriptionId: sameVendor!.id }).where(eq(agents.id, rita.id));
+    const handed = await submit(ctx, bruno.id, task.id, { summary: 'Done.', evidence: 'npm test' });
+    expect(handed.task.panel).toEqual([]);
+    await expect(verdict(ctx, rita.id, task.id, { pass: true, comment: 'Same vendor.' })).rejects.toMatchObject({ status: 403, reason: 'task_not_yours' });
+  });
+
   it('goes back to its executor to merge into the turn branch, and its head is not woken for it', async () => {
     const { ctx, db, bruno, task, read, passed } = await company();
     const last = await passed();
@@ -45,10 +58,20 @@ describe('a task that passed its last gate', () => {
     expect(prompt).toContain("passed its gates. Merge your branch into the turn's branch and report");
     expect(prompt).toContain('submit');
     expect(prompt).toContain('If the merge fails, report what blocks it with blocked');
+    const beforeMerge = await db.select({ kind: taskEvents.kind, data: taskEvents.data }).from(taskEvents).where(eq(taskEvents.taskId, task.id)).orderBy(taskEvents.id);
+    const review = beforeMerge.find(event => event.kind === 'submitted')!.data.review;
+    expect(review).toEqual({
+      revision: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i),
+      commit: TEST_COMMIT, branch: `task-${task.number}`, authorId: bruno.id, authorVendor: 'claude',
+      status: 'pinned', reason: null, qualityTaskId: task.id,
+      gateCounts: { source: 'review-lifecycle', passed: 0, returned: 0 },
+      quality: { status: 'unavailable', reason: 'author-check-record-unavailable', record: null, sourceEventId: null },
+      runs: [], source: null,
+    });
     const merged = await submit(ctx, bruno.id, task.id, { summary: 'Merged into turn-3.', evidence: 'git log: 1a2b3c4' });
     expect(merged.task).toMatchObject({ status: 'done', assigneeAgentId: null });
     const [handedIn] = await db.select({ kind: taskEvents.kind, data: taskEvents.data }).from(taskEvents).where(eq(taskEvents.taskId, task.id)).orderBy(taskEvents.id).then(r => r.slice(-1));
-    expect(handedIn).toEqual({ kind: 'submitted', data: { evidence: 'git log: 1a2b3c4', merged: true } });
+    expect(handedIn).toEqual({ kind: 'submitted', data: { evidence: 'git log: 1a2b3c4', merged: true, review } });
   });
 
   it("names the turn's branch to merge into", async () => {
