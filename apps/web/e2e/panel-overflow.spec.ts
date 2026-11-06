@@ -278,7 +278,8 @@ for (const lang of ['en', 'ru'] as const) {
         const buttons = group.getByRole('button');
         const groupBox = (await group.boundingBox())!;
         const updateBox = (await update.boundingBox())!;
-        expect(updateBox.x + updateBox.width, 'Update shares the confirmation end').toBe(groupBox.x + groupBox.width);
+        const factsBox = (await card.locator('.blk-facts').boundingBox())!;
+        expect(updateBox.x + updateBox.width, 'Update shares the end of its own card column').toBe(factsBox.x + factsBox.width);
         expect(disconnectBox.x + disconnectBox.width, 'Disconnect shares the confirmation end').toBe(groupBox.x + groupBox.width);
         for (const button of await buttons.all()) await expect(button).toHaveCSS('min-height', '44px');
         await capture(page, info, `machine-confirm-${look}`);
