@@ -14,7 +14,7 @@ A member knows only what your brief says. Write it once, so they need nothing el
 - **Deliverable**: what to hand back and in what form.
 - **Check**: how they prove it is done (see hh-verify-before-done).
 - **Limits**: what not to touch, what needs approval, the deadline and who owns each wait.
-- **Ownership**: the area has one owner; a second task on it is never assigned until the first merges, and hot files move through one task at a time. Check collisions at assignment, not at merge.
+- **Ownership**: one owner per area; never assign a second task on it or hot files until the first merges, and check collisions at assignment.
 - **Already ruled out**: what you tried or decided, so they do not redo it.
 - **Neighbours**: who works on the other pieces, so they ask each other directly.
 

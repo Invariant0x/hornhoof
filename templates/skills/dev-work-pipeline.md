@@ -40,5 +40,3 @@ How work moves through development. Check each item only where a mistake cannot 
 - DEV-HEAD names one owner on the first turn of each product, DEV-TEST or else DEV-QA, who writes its test environment description (dev-test-environment).
 - Name the department's own measures in the department description: ask the orchestrator with "tell_orchestrator" to set it. The pipeline report of a turn says when a department has no description.
 - A new company has these rules from its start and writes its descriptions on its first turn.
-
-Before you ask the CEO to approve a release: follow the project's version scheme; without one, a turn N releases as `X.N.0` (dev-ci-release). Set the version, write the release notes and run `check-release`. For an incompatible change, propose increasing the first digit to the CEO. Show screenshots of what changes for people (`hh-attach FILE`, light and dark, each language) and a link to the branch comparison.
