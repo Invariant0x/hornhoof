@@ -319,7 +319,7 @@ for (const lang of ['en', 'ru'] as const) {
           expect(pseudo.weight, 'record label weight is width-independent').toBe('400');
           expect(pseudo.color).toBe(theme === 'light' ? 'rgb(76, 90, 104)' : 'rgb(147, 160, 174)');
         }
-        await expect(actions).toHaveCSS('margin-block-start', '4px');
+        await expect(actions).toHaveCSS('margin-block-start', width === 375 ? '2px' : '4px');
         const editBox = (await edit.boundingBox())!;
         expect(editBox.y - (statusBox.y + statusBox.height), 'the last value-to-action gap is 8px').toBe(8);
         await expectWrappedText(name);
@@ -426,7 +426,7 @@ for (const lang of ['en', 'ru'] as const) {
         await expect(choice).toHaveAttribute('aria-busy', 'true');
         await capture(page, info, `requests-saving-${look}`);
         releaseAnswer();
-        await expect(choice).toHaveCount(0);
+        await expect(page.locator('.page article.req').filter({ hasText: 'Choose the next layout.' })).toHaveCount(0);
       });
 
       test(`A long machine confirmation keeps its whole action group below: ${look}`, async ({ page }, info) => {

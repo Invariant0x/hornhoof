@@ -489,6 +489,9 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .fit > :is(.ptable, .dt)[data-fit="entries"] td[data-label] { display: grid; grid-template-columns: subgrid; column-gap: 12px; align-items: baseline; }
 .fit > :is(.ptable, .dt)[data-fit="entries"] td[data-label]::before { content: attr(data-label); font-size: 12px; font-weight: 400; color: var(--muted); overflow-wrap: break-word; }
 .fit > :is(.ptable, .dt)[data-fit="entries"] td.row-actions { margin-block-start: 4px; white-space: normal; }
+@container fit (max-width: 760px) {
+  .fit > :is(.ptable, .dt)[data-fit="entries"] td.row-actions { margin-block-start: 2px; }
+}
 .row-actions { text-align: right; white-space: nowrap; }
 .row-actions .act + .act { margin: 0; }
 .people-foot { display: flex; align-items: center; gap: 8px; font-size: 13px; }

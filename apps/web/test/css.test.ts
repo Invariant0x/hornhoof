@@ -94,6 +94,7 @@ it('keeps people record status and labels compact and consistent', () => {
   expect(decl('.fit > :is(.ptable, .dt)[data-fit="entries"] td[data-label]::before', 'font-weight')).toBe('400');
   expect(decl('.fit > :is(.ptable, .dt)[data-fit="entries"] td[data-label]::before', 'color')).toBe('var(--muted)');
   expect(decl('.fit > :is(.ptable, .dt)[data-fit="entries"] td.row-actions', 'margin-block-start')).toBe('4px');
+  expect(decl('.fit > :is(.ptable, .dt)[data-fit="entries"] td.row-actions', 'margin-block-start', 'fit (max-width: 760px)')).toBe('2px');
 });
 
 it('aligns machine action groups and gives every action a full touch target', () => {
