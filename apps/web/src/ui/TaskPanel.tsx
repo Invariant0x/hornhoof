@@ -331,26 +331,28 @@ function Actions({ task, onChanged }: { task: TaskDetail; onChanged: () => void 
     <>
       <form className="tp-comment" onSubmit={comment}>
         <Field label={t.tasks.comment}>{p => <textarea {...p} rows={3} value={text} onChange={e => setText(e.target.value)} />}</Field>
-        <button className="btn small" type="submit" disabled={busy || !text.trim()}>
-          {t.tasks.addComment}
-        </button>
+        <div className="form-foot" role="group" aria-label={t.tasks.comment}>
+          <button className="btn" type="submit" disabled={busy || !text.trim()}>{t.tasks.addComment}</button>
+        </div>
       </form>
       <div className="ac-actions">
-        {asking ? (
-          <>
-            <span className="tp-ask">{t.tasks.cancelAsk(task.number)}</span>
-            <button className="btn small" type="button" disabled={busy} onClick={() => void run(() => api.post(`/api/tasks/${task.id}/cancel`, {}))}>
-              {t.tasks.yesCancel}
+        <div className="entry-actions" role="group" aria-label={task.title}>
+          {asking ? (
+            <>
+              <span className="tp-ask">{t.tasks.cancelAsk(task.number)}</span>
+              <button className="btn" type="button" disabled={busy} onClick={() => void run(() => api.post(`/api/tasks/${task.id}/cancel`, {}))}>
+                {t.tasks.yesCancel}
+              </button>
+              <button className="btn ghost" type="button" onClick={() => setAsking(false)}>
+                {t.tasks.keep}
+              </button>
+            </>
+          ) : (
+            <button className="btn ghost" type="button" onClick={() => setAsking(true)}>
+              {t.tasks.cancelTask}
             </button>
-            <button className="btn small ghost" type="button" onClick={() => setAsking(false)}>
-              {t.tasks.keep}
-            </button>
-          </>
-        ) : (
-          <button className="btn small ghost" type="button" onClick={() => setAsking(true)}>
-            {t.tasks.cancelTask}
-          </button>
-        )}
+          )}
+        </div>
       </div>
       {failure !== null && (
         <p className="alert" role="alert">
