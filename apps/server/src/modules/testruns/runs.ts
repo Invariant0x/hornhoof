@@ -367,8 +367,6 @@ async function keepMark(tx: Tx, run: Run, task: Task, mark: RunMark | null): Pro
   return `\n\n${mark.line}`;
 }
 
-/* A run whose parts all ended ends with them, and its agent hears how it went on its task. The mark goes out before the
-   write that ends the run, so the one result the agent hears says how it went; a crash in between ends and marks it again. */
 type FinishedRun = RunEnd | { authorCheck: string };
 
 async function recordRunEnd(ctx: Ctx, runId: string, parts: Part[], status: 'passed' | 'failed', mark: RunMark | null): Promise<FinishedRun | null> {
@@ -400,6 +398,8 @@ async function publishRunEnd(ctx: Ctx, runId: string, end: FinishedRun): Promise
   } else await told(ctx, end);
 }
 
+/* A run whose parts all ended ends with them, and its agent hears how it went on its task. The mark goes out before the
+   write that ends the run, so the one result the agent hears says how it went; a crash in between ends and marks it again. */
 async function settleRun(ctx: Ctx, runId: string): Promise<void> {
   const parts = await ctx.db.select().from(testParts).where(eq(testParts.runId, runId)).orderBy(asc(testParts.part));
   if (!parts.length || parts.some(p => p.status === 'queued' || p.status === 'running')) return;
@@ -627,6 +627,12 @@ function runEnvironment(job: RunJob, mode: TestRunMode, found: Awaited<ReturnTyp
   return mode.mode === 'product' ? newEnvironmentRequest(repositoryScope(job.companyId, found!.department.id, found!.repo.url), mode) : null;
 }
 
+/* The caller holds the company row while taking its next run number. */
+async function nextRunNumber(tx: Tx, companyId: string): Promise<number> {
+  const [last] = await tx.select({ n: max(testRuns.number) }).from(testRuns).where(eq(testRuns.companyId, companyId));
+  return (last?.n ?? 0) + 1;
+}
+
 async function createRun(ctx: Ctx, job: RunJob, task: Task, input: RunInput, kind: RunKind, mode: TestRunMode, found: Awaited<ReturnType<typeof repoAt>>, setup: RunSetup, files: string[], parts: number): Promise<Run> {
   const { department, pin } = setup;
   return ctx.db.transaction(async tx => {
@@ -634,12 +640,12 @@ async function createRun(ctx: Ctx, job: RunJob, task: Task, input: RunInput, kin
     await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, job.companyId)).for('update');
     const existing = await existingRun(tx, task, input, kind, pin);
     if (existing) return existing;
-    const [last] = await tx.select({ n: max(testRuns.number) }).from(testRuns).where(eq(testRuns.companyId, job.companyId));
+    const number = await nextRunNumber(tx, job.companyId);
     const [row] = await tx
       .insert(testRuns)
       .values({
         companyId: job.companyId,
-        number: (last?.n ?? 0) + 1,
+        number,
         taskId: task.id,
         agentId: job.agentId,
         jobId: job.id,
@@ -726,8 +732,6 @@ export async function runState(ctx: Ctx, job: ToolJob, number: number, kind: Run
   };
 }
 
-/* Stops a run: its waiting parts end here, its running ones on their nodes too. Its agent hears of it when another one
-   stopped it, or when it waits on the run. */
 function requireRunning(run: Run): void {
   if (run.status !== 'running') throw refuse(409, 'task_invalid', `${named(run)} ${run.status === 'stopped' ? 'is stopped' : stateOf(run, run.status) === 'done' ? 'is done' : run.status} already.`);
 }
@@ -767,6 +771,8 @@ function cancelParts(ctx: Ctx, parts: Part[]): void {
   }
 }
 
+/* Stops a run: its waiting parts end here, its running ones on their nodes too. Its agent hears of it when another one
+   stopped it, or when it waits on the run. */
 export async function stopRun(ctx: Ctx, job: ToolJob, number: number, kind: RunKind = 'tests'): Promise<string> {
   const { run, task } = await runOf(ctx, job, number, kind);
   requireRunning(run);
