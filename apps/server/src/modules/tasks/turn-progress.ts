@@ -1,8 +1,29 @@
+import type { DepartmentTurnProgress } from '@hornhoof/protocol';
+import { and, count, eq } from 'drizzle-orm';
+import { canReach } from '../../auth/access.js';
 import type { AgentViewer } from '../../auth/agent-view.js';
 import type { Db } from '../../db/client.js';
-import type { turns } from '../../db/schema.js';
+import { tasks, type departments, type turns } from '../../db/schema.js';
+import { seesTask } from './sight.js';
 
 type CountedTurn = Pick<typeof turns.$inferSelect, 'id' | 'companyId'>;
-export async function turnCounts(_db: Db, _turn: CountedTurn, _viewer: AgentViewer, _departmentId?: string): Promise<{ total: number; done: number }> {
-  throw new Error('Shared visible turn counts are not implemented.');
+type ProgressTurn = CountedTurn & { number: number };
+type ProgressDepartment = Pick<typeof departments.$inferSelect, 'id' | 'workMode'>;
+
+/* TurnView and the map count the same visible rows, roots and subtasks included.
+   A department adds only its scope; another company's malformed references never count. */
+export async function turnCounts(db: Db, turn: CountedTurn, viewer: AgentViewer, departmentId?: string): Promise<{ total: number; done: number }> {
+  const scope = and(eq(tasks.companyId, turn.companyId), eq(tasks.turnId, turn.id), departmentId ? eq(tasks.departmentId, departmentId) : undefined);
+  if (viewer.full) {
+    const [all] = await db.select({ n: count() }).from(tasks).where(scope);
+    const [done] = await db.select({ n: count() }).from(tasks).where(and(scope, eq(tasks.status, 'done')));
+    return { total: Number(all!.n), done: Number(done!.n) };
+  }
+  const seen = (await db.select().from(tasks).where(scope)).filter(t => seesTask(viewer, t));
+  return { total: seen.length, done: seen.filter(t => t.status === 'done').length };
+}
+
+export async function departmentProgress(db: Db, turn: ProgressTurn | undefined, viewer: AgentViewer, department: ProgressDepartment): Promise<DepartmentTurnProgress | null> {
+  if (!turn || department.workMode === 'continuous' || !canReach(viewer.access, { departmentId: department.id })) return null;
+  return { turnNumber: turn.number, ...await turnCounts(db, turn, viewer, department.id) };
 }
