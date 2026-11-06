@@ -901,7 +901,7 @@ test('renders real 2-page PDF via bundled pdfjs-dist without OpenAction or exter
   await page.getByRole('button', { name: /План структуры компании\.md/ }).click();
   await expect(dialog).toBeVisible();
   await expect(dialog).toContainText('КОНЕЦ_ПЛАНА');
-  await expect(dialog).toContainText(ru.tasks.materials.proposalOriginal);
+  await expect(dialog).toContainText(ru.tasks.materials.proposalNote);
   await expect(dialog.getByRole('button', { name: ru.card.create(1) })).toHaveCount(0);
   await saveShot(page, info, `viewer-native-proposal-ru-dark-1440-${SOURCE_SHA.slice(0, 8)}.png`, true);
   await page.keyboard.press('Escape');

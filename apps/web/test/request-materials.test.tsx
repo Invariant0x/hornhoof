@@ -824,7 +824,7 @@ describe('separate question materials preview and explicit answering (#512)', ()
     await user.click(openStruct);
     const dialog = await screen.findByRole('dialog', { name: 'Structure plan.md' });
     expect(await within(dialog).findByText('Includes Support and Finance before edits.')).toBeInTheDocument();
-    expect(within(dialog).getByText(en.tasks.materials.proposalOriginal)).toBeInTheDocument();
+    expect(within(dialog).getByText(en.tasks.materials.proposalNote)).toBeInTheDocument();
     expect(within(dialog).queryByRole('button', { name: /Create|Hire|Correct/ })).not.toBeInTheDocument();
     await user.click(within(dialog).getByRole('button', { name: en.tasks.materials.close }));
     expect(calls.filter(c => c.method === 'POST')).toEqual([]);
@@ -841,7 +841,7 @@ describe('separate question materials preview and explicit answering (#512)', ()
     await user.click(await screen.findByRole('button', { name: /Open material: Staffing plan\.md/ }));
     const staffDialog = await screen.findByRole('dialog', { name: 'Staffing plan.md' });
     expect(await within(staffDialog).findByText('Hire Bruno on Team key.')).toBeInTheDocument();
-    expect(within(staffDialog).getByText(en.tasks.materials.proposalOriginal)).toBeInTheDocument();
+    expect(within(staffDialog).getByText(en.tasks.materials.proposalNote)).toBeInTheDocument();
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(calls.filter(c => c.method === 'POST')).toEqual([]);
 
