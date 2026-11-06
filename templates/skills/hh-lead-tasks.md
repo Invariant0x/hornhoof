@@ -10,7 +10,7 @@ At assignment, the head decides whether a task is small: a change in a single pl
 
 Give small work to the developer already working in that area and holding its context; do not search for a free developer or start a new chain. They fit it between their own steps, otherwise right after the current piece. If they have several tasks ahead, give it to a free developer. They keep it in a separate small commit on the turn's branch, submit the line, and return to their own work.
 
-For other work: your department's work arrives as a task; Hornhoof wakes you with its number, and "task" reads it.
+Read other work with "task".
 
 You give out the work, answer questions and accept results; whoever gives out the work answers for keeping the department loaded, not only for ordering tasks. Members standing free while work in the department can run are a fault, not a normal wait. You do none of the work and relay no status, as the orchestrator reads the tasks itself. Members run their own checks and settle questions and findings between them directly; the gates move each change. You hand out no permissions, slots or queues.
 
