@@ -339,7 +339,7 @@ describe('an approved approach', () => {
     await w.c.setRule(w.c.ceoToken, w.c.dev.id, 'publication', { mode: 'new_kinds' });
     const audience = await published(w.c, { kind: 'audience', name: 'Blog', destination: 'https://blog.example/' });
     const template = await published(w.c, { kind: 'template', locale: 'en', subject: 'News', parts: [{ kind: 'text', text: 'News.' }] });
-    const post = { target: { kind: 'audience', audienceId: audience.entryId }, document: { locale: 'en', templateId: template.entryId, templateRevision: 1, blocks: [], variables: [] } } as const;
+    const post = { target: { kind: 'audience' as const, audienceId: audience.entryId }, document: { locale: 'en', templateId: template.entryId, templateRevision: 1, blocks: [], variables: [] } };
     const { messageId } = await w.submit(post);
     expect(await bindingsOf(w)).toMatchObject([{ kind: 'message', messageId }]);
     expect((await requestOf(w)).approvalChannel).toBe('publication');

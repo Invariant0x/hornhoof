@@ -225,6 +225,7 @@ describe('who may submit, to whom and from where', () => {
     const w = await world();
     const channel = await aChannelOf(w.c, { name: 'No policy' });
     const { account } = await anAccountOf(w.c, channel.id, w.c.head.id, 'Two');
+    await aPermissionOf(w.c, w.contact.id, channel.id);
     await w.c.db.update(tasks).set({ assigneeAgentId: w.c.head.id, executorAgentId: w.c.head.id }).where(eq(tasks.id, w.c.task.id));
     const refused = await submitOutbound(w.ctx, { ...w.authority, agentId: w.c.head.id }, w.input({ channelId: channel.id, accountId: account.id }));
     expect(refused).toMatchObject({ status: 'rejected', reasonCodes: ['daily_limit_exceeded'] });
@@ -514,6 +515,14 @@ describe('the daily limits', () => {
     const d = await w.submit();
     await aPolicyOf(w.c, w.channel.id, withLimits(1, 100), 3);
     expect(await reserveDispatch(w.ctx, d.messageId, 1, NOON)).toEqual({ kind: 'refused', reasonCodes: ['daily_limit_exceeded'] });
+  });
+
+  it('reserving again finds the same reservation and takes no second place', async () => {
+    const w = await world();
+    const { messageId } = await w.submit();
+    const first = await reserveDispatch(w.ctx, messageId, 1, NOON);
+    expect(await reserveDispatch(w.ctx, messageId, 1, NOON)).toEqual(first);
+    expect((await bucketsOf(w)).find(b => b.scope === 'account')!.reserved).toBe(1);
   });
 
   it('a surely failed send gives its place back; an unknown or accepted one keeps it', async () => {
