@@ -519,7 +519,7 @@ export class TerminalHost {
     a.signedOut = job.signedOut;
     const launch = await this.launchFor(a, job);
     if (input.signal?.aborted) return this.failedTurn(a, job, 'cancelled');
-    const goesOn = await this.goesOn(a, input.sessionId, launch.hash);
+    const goesOn = await this.goesOn(a, job, launch.hash);
     if (!goesOn && (await this.asksPerson(a))) return this.leftAsking(a, job);
     a.launch = { job, spec: launch.spec };
     return this.turnOn(a, job, launch, goesOn);
@@ -736,10 +736,11 @@ export class TerminalHost {
   }
 
   /* The program runs as this turn would start it, in the session it asks for. A new session asked for goes on in a program
-     started for a person that nothing was said in yet. */
-  private async goesOn(a: Agent, sessionId: string | null, hash: string): Promise<boolean> {
+     started for a person that nothing was said in yet. A continuation of words a program took has nothing to type, so nothing to
+     start a program for, whatever session its owner's words moved it to meanwhile. */
+  private async goesOn(a: Agent, { input: { sessionId }, operatorSourceDelivery }: TermJob, hash: string): Promise<boolean> {
     const sameSession = sessionId === null ? a.fresh : sessionId === a.sessionId || a.cleared.has(sessionId);
-    return sameSession && a.hash === hash && (await this.opts.tmux.alive(a.name));
+    return (sameSession || Boolean(this.operator?.sourceRecorded(operatorSourceDelivery))) && a.hash === hash && (await this.opts.tmux.alive(a.name));
   }
 
   /* The program that goes takes its input with it, so it goes only once that holds nothing of anyone's. */
