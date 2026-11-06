@@ -6,7 +6,6 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { proposals } from '../../db/schema.js';
 import { deptName } from '../departments/templates.js';
-import { appendEvent } from '../events/store.js';
 import { isOperations } from '../operations/required.js';
 import { companyView } from './company.js';
 import { jobOf, type ToolJob } from './job.js';
@@ -17,6 +16,7 @@ import { registerDatabaseTool } from './database.js';
 import { checkStaff, departmentOf, requiredState, StaffProposal, staffingOptions, withRequiredRoles } from './staff.js';
 import { checkItems, Proposal } from './structure.js';
 import { registerQuestionTools } from '../tasks/question-intents.js';
+import { cardKept, newCard } from '../tasks/question-proposals.js';
 import { registerTaskTools } from '../tasks/tools.js';
 import { registerTestTools } from '../testruns/tools.js';
 import { registerWatchTools } from './watch.js';
@@ -78,12 +78,11 @@ function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob): McpServer {
       if (problem) return say(problem, true);
       const proposal = await ctx.db.transaction(async tx => {
         await tx.update(proposals).set({ status: 'dismissed' }).where(and(eq(proposals.companyId, job.companyId), eq(proposals.kind, 'structure'), eq(proposals.status, 'pending')));
-        const [row] = await tx.insert(proposals).values({ companyId: job.companyId, agentId: job.agentId, jobId: job.id, brief, items }).returning({ id: proposals.id });
+        const [row] = await tx.insert(proposals).values({ ...newCard(job), companyId: job.companyId, agentId: job.agentId, jobId: job.id, brief, items }).returning();
         return row!;
       });
-      await appendEvent(ctx, { companyId: job.companyId, agentId: job.agentId, jobId: job.id, kind: 'proposal', data: { proposalId: proposal.id, brief, items } });
       ctx.bus.publish(job.companyId, { type: 'requests', spot: { departmentId: null } });
-      return say('Shown to the CEO. Wait for their answer.');
+      return say(cardKept(proposal));
     },
   );
   server.registerTool(
@@ -124,13 +123,12 @@ function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob): McpServer {
           .where(and(eq(proposals.companyId, job.companyId), eq(proposals.kind, 'staff'), eq(proposals.departmentId, dept.id), eq(proposals.status, 'pending')));
         const [row] = await tx
           .insert(proposals)
-          .values({ companyId: job.companyId, agentId: job.agentId, jobId: job.id, kind: 'staff', departmentId: dept.id, brief, items: lines })
-          .returning({ id: proposals.id });
+          .values({ ...newCard(job), companyId: job.companyId, agentId: job.agentId, jobId: job.id, kind: 'staff', departmentId: dept.id, brief, items: lines })
+          .returning();
         return row!;
       });
-      await appendEvent(ctx, { companyId: job.companyId, agentId: job.agentId, jobId: job.id, kind: 'proposal', data: { proposalId: proposal.id, kind: 'staff', department: dept.id, brief, people: lines } });
       ctx.bus.publish(job.companyId, { type: 'requests', spot: { departmentId: null } });
-      return say('Shown to the CEO. Wait for their answer.');
+      return say(cardKept(proposal));
     },
   );
   registerControlTools(server, ctx, app, job);

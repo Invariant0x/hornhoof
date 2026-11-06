@@ -105,10 +105,10 @@ export const RouteInput = z.strictObject({ ...QuestionMutationGuard.shape, targe
 export type RouteInput = z.infer<typeof RouteInput>;
 
 type Guard = z.infer<typeof QuestionMutationGuard>;
-export type QuestionResult = { source: SourceRef; status: Request['status']; audience: Request['audience']; revision: number; routeRevision: number; classificationId?: string; digest?: string };
+export type QuestionResult = { source: SourceRef; status: Request['status'] | 'pending' | 'applied' | 'dismissed'; audience: Request['audience']; revision: number; routeRevision: number; classificationId?: string; digest?: string };
 export type Settled = { result: QuestionResult; wakes: Wake[] };
 
-const noSuchSource = () => new ApiError(404, 'not_found', 'There is no such question.', 'request_unknown');
+export const noSuchSource = () => new ApiError(404, 'not_found', 'There is no such question.', 'request_unknown');
 
 const resultOf = (r: Request): QuestionResult => ({
   source: { kind: 'task_request', id: r.id }, status: r.status, audience: r.audience, revision: r.questionRevision, routeRevision: r.routeRevision,
@@ -147,7 +147,7 @@ function stillAsRead(request: Request, guard: Guard): void {
 
 const questionGuard = (task: Task, request: Request, agentId: string) => ({ taskId: task.id, requestId: request.id, expectedRevision: request.questionRevision, expectedRouteRevision: request.routeRevision, actor: { agentId } });
 
-const audited = (transition: string, guard: Guard, inputDigest: string, result: QuestionResult) => ({ question: { transition, operationId: guard.operationId, inputDigest, result } });
+export const audited = (transition: string, guard: Guard, inputDigest: string, result: QuestionResult) => ({ question: { transition, operationId: guard.operationId, inputDigest, result } });
 
 /* Whoever has the question settles it: the real one is kept beside it, never as a person who answered, and it approves or grants
    nothing. What it says goes to whoever goes on with the task, and to nobody else. */

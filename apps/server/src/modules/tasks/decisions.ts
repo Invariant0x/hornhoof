@@ -106,7 +106,7 @@ async function orchestratorAsks(ctx: Pick<Ctx, 'db' | 'computer'>, me: Person, v
   const { db } = ctx;
   const [orchestrator] = await db.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, me.companyId), eq(agents.kind, 'orchestrator')));
   if (!seesAgentId(viewer, orchestrator?.id)) return { id: null, cards: [], asked: null };
-  const cards = me.scopeKind === 'company' ? (await db.select().from(proposals).where(and(eq(proposals.companyId, me.companyId), eq(proposals.status, 'pending')))).sort(byTimeAndId) : [];
+  const cards = me.scopeKind === 'company' ? (await db.select().from(proposals).where(and(eq(proposals.companyId, me.companyId), eq(proposals.status, 'pending'), eq(proposals.audience, 'human')))).sort(byTimeAndId) : [];
   return { id: orchestrator?.id ?? null, cards, asked: canViewComputer(me) ? ctx.computer.view().asked : null };
 }
 

@@ -132,8 +132,8 @@ async function everyKind() {
   /* The cards a second apart, structure first: two written in the same millisecond would be put in order by their
      random ids. */
   const at = Date.now();
-  const [structure] = await c.db.insert(proposals).values({ companyId: c.acme.id, agentId: c.orchestrator.id, brief: 'Add Support.', items: [], createdAt: new Date(at) }).returning();
-  const [staff] = await c.db.insert(proposals).values({ companyId: c.acme.id, agentId: c.orchestrator.id, kind: 'staff', departmentId: c.dev.id, brief: 'Hire a reviewer.', items: [], createdAt: new Date(at + 1000) }).returning();
+  const [structure] = await c.db.insert(proposals).values({ audience: 'human', companyId: c.acme.id, agentId: c.orchestrator.id, brief: 'Add Support.', items: [], createdAt: new Date(at) }).returning();
+  const [staff] = await c.db.insert(proposals).values({ audience: 'human', companyId: c.acme.id, agentId: c.orchestrator.id, kind: 'staff', departmentId: c.dev.id, brief: 'Hire a reviewer.', items: [], createdAt: new Date(at + 1000) }).returning();
   c.ctx.computer.ask('Inspect disk space.');
   return { ...c, devQuestion, devApproval, devPeople, devPlain, salesQuestion, mktQuestion, structure: structure!, staff: staff! };
 }
@@ -432,7 +432,7 @@ describe('telling screens that decisions changed', () => {
     await listen(c.app);
     const streams = { zed: await openStream(c.app, c.tokens.zed), dan: await openStream(c.app, c.tokens.dan) };
     await new Promise(r => setTimeout(r, 50));
-    const [card] = await c.db.insert(proposals).values({ companyId: c.acme.id, agentId: c.orchestrator.id, brief: 'Add Support.', items: [] }).returning();
+    const [card] = await c.db.insert(proposals).values({ audience: 'human', companyId: c.acme.id, agentId: c.orchestrator.id, brief: 'Add Support.', items: [] }).returning();
     const built = await c.app.inject({ method: 'POST', url: '/api/departments/build', payload: { proposalId: card!.id, items: [{ template: 'support', checked: true, note: 'Answers customers.' }] }, ...as(c.tokens.ceo) });
     expect(built.statusCode).toBe(201);
     await until(() => streams.zed.messages.some(m => m.type === 'requests'));

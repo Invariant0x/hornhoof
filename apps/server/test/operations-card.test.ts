@@ -41,7 +41,7 @@ const apply = (c: Company, body: object, departmentId = c.ops.id) => c.app.injec
 async function oldCard(c: Company, roles: string[]) {
   const [card] = await c.db
     .insert(proposals)
-    .values({ companyId: c.companyId, agentId: c.orchestrator.id, kind: 'staff', departmentId: c.ops.id, brief: 'Old', items: roles.map(role => ({ role, checked: true })) })
+    .values({ audience: 'human', companyId: c.companyId, agentId: c.orchestrator.id, kind: 'staff', departmentId: c.ops.id, brief: 'Old', items: roles.map(role => ({ role, checked: true })) })
     .returning({ id: proposals.id });
   return card!.id;
 }
@@ -105,8 +105,6 @@ describe('a staff proposal for Operations', () => {
     expect(items.find(i => i.role === 'OPS-WATCH')!.name).toBe('Argus');
     expect(items.find(i => i.role === 'OPS-FIX')!.checked).toBe(true);
     expect(items.find(i => i.role === 'OPS-INTEG')!.checked).toBe(false);
-    const [shown] = await c.db.select().from(agentEvents).where(eq(agentEvents.kind, 'proposal'));
-    expect((shown!.data as { people: unknown }).people).toEqual(items);
   });
 
   it('leaves another department as the orchestrator sent it', async () => {

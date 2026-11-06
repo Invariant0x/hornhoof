@@ -18,6 +18,8 @@ import { delegationOf, lockedFor, stillDecides, type Delegation } from '../conve
 import { enqueueTurn, orchestratorOf, orchestratorState } from '../conversation/queue.js';
 import { appendEvent } from '../events/store.js';
 import type { Tx } from '../tasks/engine.js';
+import { digestOf } from '../tasks/question-authority.js';
+import { cardAsItStands, decisionOnCard, refuseChangedCard, withinCard } from '../tasks/question-proposals.js';
 import { backOn } from '../tasks/wake.js';
 import { checkStaff, departmentOf, HireLine, requiredState, runsTier, servingSubscriptions, spotIn } from '../tools/staff.js';
 import { BuildItem, checkItems, inPlaces, isNew, type TeamChange } from '../tools/structure.js';
@@ -204,18 +206,23 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     const me = await requirePerson(req, db);
     const on = await cardDecision(me);
     const body = BuildBody.parse(req.body);
+    if (body.proposalId) await refuseChangedCard(ctx, me.companyId, body.proposalId);
 
     const result = await lockedFor(ctx, on, () => db.transaction(async tx => {
       await stillDecides(tx, me.companyId, me.id, CARD, on);
       let brief = body.brief;
       let agentId: string | null = null;
+      let decision: ReturnType<typeof decisionOnCard> | null = null;
       if (body.proposalId) {
         const [taken] = await tx
           .update(proposals)
           .set({ status: 'applied', appliedBy: appliedBy(me, on), appliedAt: new Date() })
-          .where(and(eq(proposals.id, body.proposalId), eq(proposals.companyId, me.companyId), eq(proposals.kind, 'structure'), eq(proposals.status, 'pending')))
-          .returning({ brief: proposals.brief, agentId: proposals.agentId });
+          .where(and(eq(proposals.id, body.proposalId), eq(proposals.companyId, me.companyId), eq(proposals.kind, 'structure'), eq(proposals.status, 'pending'), eq(proposals.audience, 'human')))
+          .returning();
         if (!taken) throw new ApiError(409, 'conflict', 'This card was already applied or replaced by a newer one.', 'proposal_closed');
+        const edited = digestOf(body.items) !== digestOf(taken.items);
+        if (on && edited) throw cardAsItStands();
+        decision = decisionOnCard(taken, body.items, edited);
         brief ??= taken.brief;
         agentId = taken.agentId;
       }
@@ -275,7 +282,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
         freed.push(...(await applyTeams(tx, me, dept.id, item.teams)));
       }
       if (brief) await tx.update(companies).set({ brief }).where(eq(companies.id, me.companyId));
-      return { created, removed, fresh, freed, agentId };
+      return { created, removed, fresh, freed, agentId, decision };
     }));
     await wakeFreed(ctx, me, result.freed);
 
@@ -286,7 +293,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
         companyId: me.companyId,
         agentId,
         kind: 'applied',
-        data: { proposalId: body.proposalId ?? null, created: result.created, removed: result.removed, ...forWhom(on) },
+        data: { proposalId: body.proposalId ?? null, ...(result.decision ? { decision: result.decision } : {}), created: result.created, removed: result.removed, ...forWhom(on) },
         personId: personOf(me),
       });
     }
@@ -384,17 +391,22 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (!dept) throw new ApiError(404, 'not_found', 'This department does not exist.', 'department_unknown');
     const body = StaffBody.parse(req.body);
     const invalid = (message: string) => new ApiError(400, 'validation', message, 'staff_invalid');
+    if (body.proposalId) await refuseChangedCard(ctx, me.companyId, body.proposalId);
 
     const result = await lockedFor(ctx, on, () => db.transaction(async tx => {
       await stillDecides(tx, me.companyId, me.id, CARD, on);
       let agentId: string | null = null;
+      let decision: ReturnType<typeof decisionOnCard> | null = null;
       if (body.proposalId) {
         const [taken] = await tx
           .update(proposals)
           .set({ status: 'applied', appliedBy: appliedBy(me, on), appliedAt: new Date() })
-          .where(and(eq(proposals.id, body.proposalId), eq(proposals.companyId, me.companyId), eq(proposals.kind, 'staff'), eq(proposals.departmentId, dept.id), eq(proposals.status, 'pending')))
-          .returning({ agentId: proposals.agentId });
+          .where(and(eq(proposals.id, body.proposalId), eq(proposals.companyId, me.companyId), eq(proposals.kind, 'staff'), eq(proposals.departmentId, dept.id), eq(proposals.status, 'pending'), eq(proposals.audience, 'human')))
+          .returning();
         if (!taken) throw new ApiError(409, 'conflict', 'This card was already applied or replaced by a newer one.', 'proposal_closed');
+        const within = withinCard(body.people, taken);
+        if (on && !within) throw cardAsItStands();
+        decision = decisionOnCard(taken, body.people, !within || body.people.length !== (taken.items as { checked?: boolean }[]).filter(c => c.checked !== false).length);
         agentId = taken.agentId;
       }
       const { lines, present } = await linesToHire(ctx, tx, dept, body.people, Boolean(body.proposalId));
@@ -409,7 +421,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
 
       const hired: Hired[] = [];
       for (const line of lines) hired.push(await hireEmployee(ctx, tx, { companyId: me.companyId, departmentId: dept.id }, line, changedBy(me)));
-      return { hired, present, agentId };
+      return { hired, present, agentId, decision };
     }));
     await tryPlaceOperator(ctx, me.companyId);
 
@@ -420,7 +432,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
         companyId: me.companyId,
         agentId,
         kind: 'applied',
-        data: { proposalId: body.proposalId ?? null, kind: 'staff', department: dept.id, hired: result.hired.map(({ id, name, role }) => ({ id, name, role })), ...(result.present.length ? { present: result.present } : {}), ...forWhom(on) },
+        data: { proposalId: body.proposalId ?? null, ...(result.decision ? { decision: result.decision } : {}), kind: 'staff', department: dept.id, hired: result.hired.map(({ id, name, role }) => ({ id, name, role })), ...(result.present.length ? { present: result.present } : {}), ...forWhom(on) },
         personId: personOf(me),
       });
     }

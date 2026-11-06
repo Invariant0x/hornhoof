@@ -130,6 +130,7 @@ function proposalView({ proposal: p, ownerPersonId, canAnswer, decidedBy }: Deci
     department: place ? { id: place.id, name: deptName(place) } : null,
     brief: p.brief,
     items: Array.isArray(p.items) ? p.items : [],
+    ...humanView(p),
     at: p.createdAt.toISOString(),
     ownerPersonId,
     canAnswer,

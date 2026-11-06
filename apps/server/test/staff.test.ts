@@ -8,7 +8,7 @@ import { describe, expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { runsTier } from '../src/modules/tools/staff.js';
 import { agentChanges, agentEvents, agents, companies, departments, jobs, people, proposals, subscriptions, teams } from '../src/db/schema.js';
-import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
+import { allCardsBeforePerson, as, connectNode, invitePerson, listen, setUpCompany, testApp, type FakeNode, until } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
 const TOKEN = 'tool-token-0123456789abcdef0123456789';
@@ -115,8 +115,7 @@ describe('staffing', () => {
       ['staff', 'pending'],
     ]);
     expect(rows[2]).toMatchObject({ departmentId: c.dev.id, brief: 'API and the web app.' });
-    const events = await c.db.select().from(agentEvents).where(eq(agentEvents.kind, 'proposal')).orderBy(asc(agentEvents.seq));
-    expect(events[2]!.data).toMatchObject({ proposalId: rows[2]!.id, kind: 'staff', department: c.dev.id, brief: 'API and the web app.' });
+    expect(await c.db.select().from(agentEvents).where(eq(agentEvents.kind, 'proposal'))).toEqual([]);
   });
 
   it('refuses a role from another department, a model the subscription cannot run, a subscription that cannot serve the department', async () => {
@@ -143,6 +142,7 @@ describe('staffing', () => {
     const c = await company();
     const client = await tools(c);
     await client.callTool({ name: 'propose_staff', arguments: { department: c.dev.id, brief: 'Start with the API.', people: [{ role: 'DEV-HEAD', checked: true }] } });
+    await allCardsBeforePerson(c.app.ctx);
     const [proposal] = await c.db.select().from(proposals);
     const be = c.app.ctx.templates.roles.get('DEV-BE')!;
     const skills = [...be.skills.filter(s => s.on).map(s => s.id), 'dev-api-design'];

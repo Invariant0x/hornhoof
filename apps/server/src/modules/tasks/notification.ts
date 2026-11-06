@@ -32,13 +32,10 @@ function reportField(wake: Wake): { report?: string } {
   return wake.cause?.report ? { report: wake.cause.report } : {};
 }
 
-/* The names a notice has in the protocol, where a question for someone inside and its end have none of their own yet. */
-const sourceOf = (why: Wake['why']): Exclude<Wake['why'], 'question' | 'resolved'> => (why === 'question' ? 'explain' : why === 'resolved' ? 'answered' : why);
-
 export async function wakeNotice(ctx: Ctx, task: Task, wake: Wake) {
   const cause = wake.cause;
   const actor = await actorParty(ctx, task.companyId, cause?.actor);
   const senders = cause?.actors ? await Promise.all(cause.actors.map(a => actorParty(ctx, task.companyId, a))) : [actor];
-  const notification: Notification = { source: cause?.source ?? sourceOf(wake.why), tasks: taskRefs(task, wake), detail: await waitDetail(ctx, task, wake) };
+  const notification: Notification = { source: cause?.source ?? wake.why, tasks: taskRefs(task, wake), detail: await waitDetail(ctx, task, wake) };
   return { notification, actor, action: actionLine(task, wake, senders), senders, ...reportField(wake) };
 }

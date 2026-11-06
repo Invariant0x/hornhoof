@@ -10,6 +10,8 @@ import { jobOf, type ToolJob } from '../tools/job.js';
 import { picturesOf } from './attachments.js';
 import type { Request } from './engine.js';
 import { answerInternal, approvalDigest, claimQuestion, classifyInternal, ResolveInput, RouteInput, routeInternal, type Settled } from './question-lifecycle.js';
+import { claimProposals, classifyProposal, internalCards, resolveProposal } from './question-proposals.js';
+import type { TriageCall } from './question-authority.js';
 import { wakeAll } from './wake.js';
 
 /* The same questions over tools and HTTP: what whoever has them reads, and the one way each is settled or put before a person. The
@@ -70,7 +72,7 @@ export async function internalQuestions(ctx: Ctx, job: ToolJob, after?: string) 
     .limit(PAGE + 1);
   const page = rows.slice(0, PAGE);
   const pictures = await picturesOf(ctx.db, page.map(r => r.request));
-  return { questions: page.map(row => questionLine(row, pictures.get(row.request.id) ?? [])), next: nextCursor(rows) };
+  return { questions: page.map(row => questionLine(row, pictures.get(row.request.id) ?? [])), cards: from ? [] : await internalCards(ctx, job), next: nextCursor(rows) };
 }
 
 const call = (job: Pick<ToolJob, 'id' | 'agentId' | 'companyId'>) => ({ jobId: job.id, agentId: job.agentId, companyId: job.companyId });
@@ -80,6 +82,10 @@ async function done(ctx: Ctx, settled: Settled) {
   await wakeAll(ctx, settled.wakes);
   return settled.result;
 }
+
+/* One way in for every kind of question: each goes on by the rules of its own kind. */
+const resolveAny = (ctx: Ctx, by: TriageCall, input: ResolveInput): Promise<Settled> => (input.source.kind === 'proposal' ? resolveProposal(ctx, by, input) : answerInternal(ctx, by, input));
+const classifyAny = (ctx: Ctx, by: TriageCall, input: QuestionClassificationInput): Promise<Settled> => (input.source.kind === 'proposal' ? classifyProposal(ctx, by, input) : classifyInternal(ctx, by, input));
 
 const readable = async (fn: () => Promise<unknown>) => {
   try {
@@ -103,7 +109,7 @@ export function registerQuestionTools(server: McpServer, ctx: Ctx, job: ToolJob)
       description: 'Settles a question inside the company that is yours: resolution is what the one who goes on hears, executorInstruction the technical detail only they get. It approves and grants nothing, and no person is named as answering. Use a new operationId for each decision; the same one again returns what it did.',
       inputSchema: ResolveInput,
     },
-    input => readable(async () => done(ctx, await answerInternal(ctx, call(job), ResolveInput.parse(input)))),
+    input => readable(async () => done(ctx, await resolveAny(ctx, call(job), ResolveInput.parse(input)))),
   );
   server.registerTool(
     'route_question',
@@ -117,7 +123,7 @@ export function registerQuestionTools(server: McpServer, ctx: Ctx, job: ToolJob)
         'humanEnvelope is all the person reads: situation, requiredAction and options, in plain words with no commands, code or markup. It approves, pays and grants nothing. The person is worked out by Hornhoof.',
       inputSchema: QuestionClassificationInput,
     },
-    input => readable(async () => done(ctx, await classifyInternal(ctx, call(job), QuestionClassificationInput.parse(input)))),
+    input => readable(async () => done(ctx, await classifyAny(ctx, call(job), QuestionClassificationInput.parse(input)))),
   );
 }
 
@@ -131,6 +137,7 @@ export async function claimQuestions(ctx: Ctx): Promise<void> {
       ctx.log.error({ error: loggable(err) }, 'A question could not go to someone who can look at it and is tried again in a minute.');
     }
   }
+  await claimProposals(ctx).catch((err: unknown) => ctx.log.error({ error: loggable(err) }, 'A card could not go to the orchestrator and is tried again in a minute.'));
 }
 
 const refused = async (req: FastifyRequest, ctx: Ctx): Promise<ToolJob> => jobOf(ctx, req);
@@ -143,10 +150,10 @@ export function questionRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
   app.post('/api/internal-intents/resolve', async req => {
     const job = await refused(req, ctx);
-    return done(ctx, await answerInternal(ctx, call(job), ResolveInput.parse(req.body)));
+    return done(ctx, await resolveAny(ctx, call(job), ResolveInput.parse(req.body)));
   });
   app.post('/api/internal-intents/classify', async req => {
     const job = await refused(req, ctx);
-    return done(ctx, await classifyInternal(ctx, call(job), QuestionClassificationInput.parse(req.body)));
+    return done(ctx, await classifyAny(ctx, call(job), QuestionClassificationInput.parse(req.body)));
   });
 }

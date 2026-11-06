@@ -11,7 +11,7 @@ import { afterJob } from '../src/modules/tasks/wake.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
 import { ask, createTask } from '../src/modules/tasks/engine.js';
 import { fakeRelay } from './fake-relay.js';
-import { as, askedOfPerson, connectNode, invitePerson, listen, mcp, setUpCompany, takePlan, testApp, until } from './helpers.js';
+import { allCardsBeforePerson, as, askedOfPerson, connectNode, invitePerson, listen, mcp, setUpCompany, takePlan, testApp, until } from './helpers.js';
 import { said } from '../src/modules/conversation/live.js';
 
 const NODE_KEY = 'k'.repeat(40);
@@ -305,6 +305,7 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
     const { app, db, dev } = await company();
     const client = await mcp(app, TOKEN);
     await call(client, 'propose_staff', { department: dev.id, brief: 'Acceptance first.', people: [{ role: 'DEV-QA', checked: true }] });
+    await allCardsBeforePerson(app.ctx);
     const [card] = await db.select().from(proposals).where(eq(proposals.kind, 'staff'));
     const res = await call(client, 'hire', { department: dev.id, proposalId: card!.id, people: [{ role: 'DEV-QA' }] });
     expect(res.isError).toBeFalsy();

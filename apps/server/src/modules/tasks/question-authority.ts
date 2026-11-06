@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { QuestionAuthorityBinding, QuestionClassificationInput, QuestionPurpose } from '@hornhoof/protocol';
 import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
+import type { DecisionSubject } from '../../auth/decision-owner.js';
 import { canDecide, decidedBy } from '../../auth/decisions.js';
 import type { Db } from '../../db/client.js';
 import { agents, departments, jobs, people, subscriptions } from '../../db/schema.js';
@@ -86,16 +87,20 @@ export const digestOf = (value: unknown): string => createHash('sha256').update(
 const bound = (purpose: QuestionPurpose, recipientPersonIds: string[]): QuestionAuthorityBinding => ({ recipientPersonIds, purpose, authorityDigest: digestOf({ purpose, recipientPersonIds }) });
 
 /* Who takes a decision is the rule every other decision follows: nobody is picked here, and nobody gains a right. */
-async function decisionAuthority(tx: Tx, task: Task, request: Request): Promise<QuestionAuthorityBinding> {
-  const subject = requestSubject(request, task);
-  const everyone = await candidates({ db: tx as unknown as Db }, task.companyId);
+async function authorityOver(tx: Tx, companyId: string, subject: DecisionSubject, decisionKind: Extract<QuestionPurpose, { kind: 'decision' }>['decisionKind']): Promise<QuestionAuthorityBinding> {
+  const everyone = await candidates({ db: tx as unknown as Db }, companyId);
   const access = new Map(everyone.map(p => [p.id, p.access]));
-  const rows = await tx.select({ id: people.id, companyId: people.companyId, status: people.status, scopeKind: people.scopeKind, isOwner: people.isOwner, isCeoDelegate: people.isCeoDelegate }).from(people).where(eq(people.companyId, task.companyId));
-  const recipients = rows.filter(p => canDecide(subject, p, access.get(p.id)!, task.companyId)).map(p => p.id).sort();
+  const rows = await tx.select({ id: people.id, companyId: people.companyId, status: people.status, scopeKind: people.scopeKind, isOwner: people.isOwner, isCeoDelegate: people.isCeoDelegate }).from(people).where(eq(people.companyId, companyId));
+  const recipients = rows.filter(p => canDecide(subject, p, access.get(p.id)!, companyId)).map(p => p.id).sort();
   if (!recipients.length) throw producerUnavailable('Nobody can take this decision now.');
   const by = decidedBy(subject, everyone);
-  return bound({ kind: 'decision', decisionKind: request.kind, authorityKind: by.kind, departmentId: by.departmentId }, recipients);
+  return bound({ kind: 'decision', decisionKind, authorityKind: by.kind, departmentId: by.departmentId }, recipients);
 }
+
+const decisionAuthority = (tx: Tx, task: Task, request: Request): Promise<QuestionAuthorityBinding> => authorityOver(tx, task.companyId, requestSubject(request, task), request.kind);
+
+/* A card of the orchestrator is decided as every card is. */
+export const cardAuthority = (tx: Tx, card: { companyId: string; kind: 'structure' | 'staff' }): Promise<QuestionAuthorityBinding> => authorityOver(tx, card.companyId, { source: 'proposal' }, card.kind);
 
 const notARealResource = () => new ApiError(400, 'validation', 'There is no such resource of this company, or it has nobody who owns it.', 'task_invalid');
 

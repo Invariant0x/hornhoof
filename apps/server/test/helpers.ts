@@ -133,6 +133,10 @@ export async function allBeforePerson(ctx: { db: Db }, taskId: string): Promise<
   for (const { id } of open) await beforePerson(ctx, id);
 }
 
+/* Every card still inside, already before a person. classify_human_intent takes one there, as question-proposals.test.ts proves; a
+   test of what comes after a person has it starts here. */
+export const allCardsBeforePerson = (ctx: { db: Db }) => ctx.db.update(schema.proposals).set({ audience: 'human' }).where(and(eq(schema.proposals.status, 'pending'), eq(schema.proposals.audience, 'internal')));
+
 /* An agent asks, and the question is already before a person. */
 export async function askedOfPerson(ctx: Parameters<typeof ask>[0], agentId: string, taskId: string, q: Ask) {
   const asked = await ask(ctx, agentId, taskId, q);

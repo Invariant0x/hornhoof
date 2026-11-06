@@ -146,7 +146,7 @@ describe('what waits for people', () => {
 
   it("keeps the orchestrator's cards and his ask for the computer from anyone who does not see him", async () => {
     const c = await aclCompany();
-    await c.db.insert(proposals).values({ companyId: c.companyId, agentId: c.orchestrator.id, kind: 'staff', brief: 'Hire Zed', items: [], departmentId: c.dev.id });
+    await c.db.insert(proposals).values({ audience: 'human', companyId: c.companyId, agentId: c.orchestrator.id, kind: 'staff', brief: 'Hire Zed', items: [], departmentId: c.dev.id });
     const view = c.app.ctx.computer.view;
     c.app.ctx.computer.view = () => ({ ...view.call(c.app.ctx.computer), asked: { reason: 'Fix the disk', at: new Date().toISOString() } });
     const wes = await c.get('/api/requests', c.tokens.wes);

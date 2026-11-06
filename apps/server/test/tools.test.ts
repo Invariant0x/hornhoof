@@ -136,18 +136,18 @@ describe('/mcp', () => {
     expect(await stored(db)).toEqual({ proposals: [], events: [] });
   });
 
-  it('shows a valid structure to the CEO, and a newer one replaces it', async () => {
+  it('keeps a valid structure inside the company, and a newer one replaces it', async () => {
     const { app, db, orchestrator, job } = await company();
     const running = await job('running');
     const client = await mcp(app, TOKEN);
     const first = await propose(client, [SALES]);
     expect(first.isError).toBeFalsy();
-    expect(text(first)).toBe('Shown to the CEO. Wait for their answer.');
+    expect(text(first)).toContain('Kept inside the company');
     await propose(client, [SALES, { template: 'sales', name: 'Sales Europe', checked: true, note: 'Later' }]);
     const { proposals: rows, events } = await stored(db);
     expect(rows.map(p => p.status)).toEqual(['dismissed', 'pending']);
     expect(rows[1]).toMatchObject({ agentId: orchestrator.id, jobId: running.id, brief: 'Acme sells characters to schools. Two products.' });
-    expect(events).toHaveLength(2);
-    expect(events[1]!.data).toMatchObject({ proposalId: rows[1]!.id, items: [SALES, { name: 'Sales Europe' }] });
+    expect(events).toEqual([]);
+    expect(rows[1]!.items).toMatchObject([SALES, { name: 'Sales Europe' }]);
   });
 });
