@@ -8,13 +8,16 @@ import { z } from 'zod';
 import type { JobUser } from './isolation.js';
 import { currentCheckLease, reuseCheckLease, withCheckSlot } from './check-queue.js';
 import { trackCheckProcess } from './check-processes.js';
+import type { AgentCommandVerdict, CommandInput } from './command-guard.js';
+
+export type CheckCommandGuard = (key: string, input: Pick<CommandInput, 'command' | 'cwd'>) => Promise<AgentCommandVerdict>;
 
 const Word = z.string().max(100_000).refine(value => !value.includes('\0'));
 const Command = z.object({ command: z.array(Word).min(1).max(1000), cwd: Word, env: z.record(z.string().regex(/^[^=\0]+$/), Word), lease: z.uuid().optional() });
 type Command = z.infer<typeof Command>;
 let user: JobUser | null = null;
 
-export function configureCheckCommands(owner: JobUser | null): void { user = owner; }
+export function configureCheckCommands(owner: JobUser | null, guard?: CheckCommandGuard): void { user = owner; void guard; }
 
 export function installCheckCommand(dir: string): void {
   const bin = join(dir, 'tools', 'bin'), target = fileURLToPath(new URL('./check-command.js', import.meta.url));

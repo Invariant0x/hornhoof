@@ -1,7 +1,9 @@
-import { describe, expect, it, onTestFinished } from 'vitest';
+import { beforeEach, describe, expect, it, onTestFinished } from 'vitest';
 import { CheckClient } from '../src/check-client.js';
 import { currentCheckLease, setCheckClient, withCheckSlot } from '../src/check-queue.js';
 import { configureCheckCommands } from '../src/check-command-runner.js';
+import { classifyAgentCommand } from '../src/command-guard.js';
+import { createAgentCommandGuard } from '../src/check-runtime.js';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,6 +13,10 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 describe('heavy command bridge', () => {
+  beforeEach(() => {
+    configureCheckCommands(null, (_key, input) => classifyAgentCommand({ ...input, workspaceRoot: '/tmp' }));
+    onTestFinished(() => configureCheckCommands(null));
+  });
   it('runs a command through a granted slot with its output and exit code', async () => {
     const key = '10000000-0000-4000-8000-000000000001';
     const client = new CheckClient(frame => {
@@ -144,7 +150,10 @@ describe('heavy command bridge', () => {
 /* Real child sentinel and queue protocol, but no real compiler or native CLI.
    The fixture executable only records whether the forbidden payload started. */
 async function guardedCommandFixture() {
-  const root = mkdtempSync(join(tmpdir(), 'hh-guard-command-'));
+  const dir = mkdtempSync(join(tmpdir(), 'hh-guard-command-'));
+  const key = '10000000-0000-4000-8000-000000000050';
+  const root = join(dir, 'work', 'agents', key);
+  mkdirSync(root, { recursive: true });
   const bin = join(root, 'bin'), sentinel = join(root, 'payload-started');
   mkdirSync(bin);
   const compiler = join(bin, 'tsc');
@@ -159,17 +168,16 @@ async function guardedCommandFixture() {
     return true;
   });
   client.online(true); setCheckClient(client); configureCheckCommands(null);
-  const key = '10000000-0000-4000-8000-000000000050';
   const bridge = new Bridge('http://127.0.0.1:1', () => {});
   await bridge.start(); bridge.setToken(key, 'current-fixture-turn');
-  onTestFinished(() => { bridge.stop(); client.online(false); setCheckClient(null); configureCheckCommands(null); rmSync(root, { recursive: true, force: true }); });
+  onTestFinished(() => { bridge.stop(); client.online(false); setCheckClient(null); configureCheckCommands(null); rmSync(dir, { recursive: true, force: true }); });
   const run = async (lease?: string) => {
     const response = await fetch(bridge.agent(key).hookUrl.replace('/hook/', '/check/'), {
       method: 'POST', body: JSON.stringify({ command: ['tsc', '--noEmit'], cwd: root, env: { PATH: bin, HH_GUARD_SENTINEL: sentinel, HH_CHECK_SLOT: lease ?? 'forged-claim' }, ...(lease ? { lease } : {}) }),
     });
     return response.text();
   };
-  return { key, run, acquired: () => acquired, sentinel };
+  return { dir, root, key, run, acquired: () => acquired, sentinel };
 }
 
 describe('command policy boundary', () => {
@@ -184,10 +192,20 @@ describe('command policy boundary', () => {
 
   it('denies heavy agent payload even while the same agent holds a genuine lease', async () => {
     const c = await guardedCommandFixture();
+    configureCheckCommands(null, createAgentCommandGuard(c.dir));
     const text = await withCheckSlot(() => c.run(currentCheckLease()), { agentId: c.key });
     expect(existsSync(c.sentinel)).toBe(false);
     expect(c.acquired()).toBe(1);
     expect(text).toContain('запусти через run_tests');
     expect(text).not.toContain('"type":"exit"');
+  });
+
+  it('turns a throwing policy into a closed refusal before admission', async () => {
+    const c = await guardedCommandFixture();
+    configureCheckCommands(null, async () => { throw new Error('private diagnostic'); });
+    const text = await c.run();
+    expect({ started: existsSync(c.sentinel), acquired: c.acquired() }).toEqual({ started: false, acquired: 0 });
+    expect(text).toContain('запусти через run_tests');
+    expect(text).not.toContain('private diagnostic');
   });
 });

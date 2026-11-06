@@ -1,12 +1,17 @@
 import type { CheckQueueReply } from '@hornhoof/protocol';
 import type { OperatorServerMessage, ProgramNodeMessage, ProgramServerMessage } from '@hornhoof/protocol/program-operator';
 import { CheckClient } from './check-client.js';
-import { configureCheckCommands, installCheckCommand } from './check-command-runner.js';
+import { configureCheckCommands, installCheckCommand, type CheckCommandGuard } from './check-command-runner.js';
 import { setCheckClient, withCheckSlot } from './check-queue.js';
 import type { JobUser } from './isolation.js';
 import type { RunInput } from './runner.js';
 import type { TerminalHost } from './terminal/host.js';
 import type { runTests, TestsDone } from './tests.js';
+
+export function createAgentCommandGuard(dir: string): CheckCommandGuard {
+  void dir;
+  return async () => { throw new Error('Node-owned command context is not implemented.'); };
+}
 
 export function startCheckClient(dir: string, terminal: { user?: JobUser | null } | undefined, transport: () => ((frame: ProgramNodeMessage) => boolean) | null): CheckClient {
   const checks = new CheckClient(frame => transport()?.(frame) ?? false);
