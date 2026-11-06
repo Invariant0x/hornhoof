@@ -22,7 +22,7 @@ export async function refuseUnclassifiedProposal(tx: Tx, companyId: string, id: 
 
 /* Native documents must come from the sealed actual proposal and its current
    classification/disclosure producer, never a reconstruction of mutable items. */
-async function unavailableProposalMaterials(ctx: Pick<Ctx, 'db' | 'computer'>, me: Person, id: string): Promise<never> {
+async function unavailableProposalMaterials(ctx: Pick<Ctx, 'db' | 'computer' | 'startedAt'>, me: Person, id: string): Promise<never> {
   const visible = await visibleDecisions(ctx, me);
   if (!visible.proposals.some(item => item.proposal.id === id)) throw new ApiError(404, 'not_found', 'There is no such proposal you can see.');
   throw unavailable();
