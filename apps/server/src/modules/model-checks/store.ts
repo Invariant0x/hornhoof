@@ -1,12 +1,12 @@
 import { createHash } from 'node:crypto';
-import type { Case, CheckBinding, ModelCheckKind } from '@hornhoof/protocol';
+import { canonicalJson, type Case, type CheckBinding, type ModelCheckKind } from '@hornhoof/protocol';
 import { and, desc, eq, inArray, isNotNull, isNull, lt, max, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
 import { modelCheckDatasets, modelCheckEvaluations, modelCheckRevisions, modelChecks } from '../../db/schema.js';
 import { parseDataset, withLiveMiss, type Dataset, type DatasetProblem, type DatasetRules, type Party } from './dataset.js';
-import { afterChange, afterRun, canonicalJson, isOn, weeklyRun } from './lifecycle.js';
+import { afterChange, afterRun, isOn, weeklyRun } from './lifecycle.js';
 import { evaluateCheck, NO_MODEL_YET, unreadableSet, type RunModelCheck, type RunOutcome } from './run.js';
 import { parseThresholds, type Thresholds } from './score.js';
 import { recordCheckSignal } from './signal.js';

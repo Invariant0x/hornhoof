@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { CheckBinding, InvalidationCode } from '@hornhoof/protocol';
+import { canonicalJson, type CheckBinding, type InvalidationCode } from '@hornhoof/protocol';
 import type { Decision } from './score.js';
 
 export type BindingPart = Exclude<InvalidationCode, 'evaluation_failed'>;
@@ -24,14 +24,6 @@ const PARTS: readonly [BindingPart, readonly (keyof CheckBinding)[]][] = [
   ['scope', ['companyId', 'departmentId', 'productId', 'checkId', 'kind']],
 ];
 
-const sortedValue = (value: unknown): unknown => {
-  if (Array.isArray(value)) return value.map(sortedValue);
-  if (value === null || typeof value !== 'object') return value;
-  return Object.fromEntries(Object.entries(value).sort(([a], [b]) => (a < b ? -1 : 1)).map(([key, item]) => [key, sortedValue(item)]));
-};
-
-/* UTF-8 JSON with sorted keys and no spaces, the canonical form of the frozen contract. */
-export const canonicalJson = (value: unknown): string => JSON.stringify(sortedValue(value));
 export const bindingDigest = (binding: CheckBinding): string => createHash('sha256').update(canonicalJson(binding)).digest('hex');
 
 const changedParts = (previous: CheckBinding | null, next: CheckBinding): BindingPart[] =>
