@@ -184,8 +184,8 @@ describe('internal stuck routing', () => {
     const c = await company();
     const { task } = await createTask(c.ctx, { agentId: c.orchestrator.id }, { title: 'Turn plan', brief: '', body: 'Finish the plan.', departmentId: c.dev.id, assigneeAgentId: c.orchestrator.id });
     await c.db.update(taskEvents).set({ createdAt: new Date(Date.now() - 120_000) }).where(eq(taskEvents.taskId, task.id));
+    await c.db.insert(jobs).values({ companyId: c.dev.companyId, subscriptionId: c.sub.id, agentId: c.orchestrator.id, taskId: task.id, kind: 'conversation', prompt: 'Work on the turn plan.', timeoutMs: 900000 });
     for (let i = 0; i < SILENT_TURNS; i++) {
-      await c.db.insert(jobs).values({ companyId: c.dev.companyId, subscriptionId: c.sub.id, agentId: c.orchestrator.id, taskId: task.id, kind: 'conversation', prompt: 'Work on the turn plan.', timeoutMs: 900000 });
       await c.finish(c.orchestrator.id, task.id);
       const [current] = await c.db.select({ silent: tasks.silent }).from(tasks).where(eq(tasks.id, task.id));
       expect(current?.silent, `silent turns after ${i + 1}`).toBe(i + 1);
