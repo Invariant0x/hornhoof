@@ -104,26 +104,18 @@ type ApprovalBase = {
   decidedBy: ReturnType<typeof decidedByDto>;
 };
 
-type MessageApprovalFields = {
-  messageId: string;
-  messageRevision: number;
-  accountId: string;
-  bindingGeneration: number;
-  contentDigest: string;
-};
+const MESSAGE_APPROVAL_KEYS = ['messageId', 'messageRevision', 'accountId', 'bindingGeneration', 'contentDigest'] as const;
+type MessageApprovalFields = { [K in (typeof MESSAGE_APPROVAL_KEYS)[number]]: NonNullable<ApprovalRow[K]> };
 
-function requireFields<T extends Record<string, unknown>>(raw: { [K in keyof T]: T[K] | null | undefined }): T | null {
-  return Object.values(raw).every(Boolean) ? (raw as T) : null;
+function pickApprovalFields<K extends keyof ApprovalRow>(
+  bound: ApprovalRow,
+  keys: readonly K[],
+): { [P in K]: NonNullable<ApprovalRow[P]> } | null {
+  for (const k of keys) {
+    if (!bound[k]) return null;
+  }
+  return bound as unknown as { [P in K]: NonNullable<ApprovalRow[P]> };
 }
-
-const readMessageApprovalFields = (bound: ApprovalRow): MessageApprovalFields | null =>
-  requireFields<MessageApprovalFields>({
-    messageId: bound.messageId,
-    messageRevision: bound.messageRevision,
-    accountId: bound.accountId,
-    bindingGeneration: bound.bindingGeneration,
-    contentDigest: bound.contentDigest,
-  });
 
 async function loadMessageApprovalRows(db: Db, fields: MessageApprovalFields) {
   const [[msg], [rev], [account]] = await Promise.all([
@@ -140,7 +132,7 @@ async function loadMessageApprovalRows(db: Db, fields: MessageApprovalFields) {
 }
 
 async function buildMessageApprovalDto(ctx: Ctx, bound: ApprovalRow, base: ApprovalBase) {
-  const fields = readMessageApprovalFields(bound);
+  const fields = pickApprovalFields(bound, MESSAGE_APPROVAL_KEYS);
   if (!fields) return null;
   const loaded = await loadMessageApprovalRows(ctx.db, fields);
   if (!loaded) return null;
@@ -181,22 +173,8 @@ async function latestCatalogRow(db: Pick<Db, 'select'>, companyId: string, entry
   return row ?? null;
 }
 
-type ApproachApprovalFields = {
-  channelId: string;
-  templateId: string;
-  templateRevision: number;
-  segmentId: string;
-  locale: string;
-};
-
-const readApproachApprovalFields = (bound: ApprovalRow): ApproachApprovalFields | null =>
-  requireFields<ApproachApprovalFields>({
-    channelId: bound.channelId,
-    templateId: bound.templateId,
-    templateRevision: bound.templateRevision,
-    segmentId: bound.segmentId,
-    locale: bound.locale,
-  });
+const APPROACH_APPROVAL_KEYS = ['channelId', 'templateId', 'templateRevision', 'segmentId', 'locale'] as const;
+type ApproachApprovalFields = { [K in (typeof APPROACH_APPROVAL_KEYS)[number]]: NonNullable<ApprovalRow[K]> };
 
 type SegmentCatalogRow = CatalogRow & { value: Extract<CatalogValue, { kind: 'segment' }> };
 type TemplateCatalogRow = CatalogRow & { value: Extract<CatalogValue, { kind: 'template' }> };
@@ -228,7 +206,7 @@ async function loadApproachApprovalRows(db: Db, companyId: string, fields: Appro
 }
 
 async function buildApproachApprovalDto(ctx: Ctx, bound: ApprovalRow, base: ApprovalBase) {
-  const fields = readApproachApprovalFields(bound);
+  const fields = pickApprovalFields(bound, APPROACH_APPROVAL_KEYS);
   if (!fields) return null;
   const loaded = await loadApproachApprovalRows(ctx.db, bound.companyId, fields);
   if (!loaded) return null;
