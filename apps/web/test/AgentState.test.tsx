@@ -178,6 +178,7 @@ describe('AgentState', () => {
     const at = clock(14, 5);
     const kinds: [FailureKind, string, string][] = [
       ['overloaded', 'provider overloaded', 'провайдер перегружен'],
+      ['model_access_denied', 'this plan cannot use the selected model', 'этот тариф не дает доступ к выбранной модели'],
       ['rate_limited', 'too many requests', 'слишком много запросов'],
       ['usage_limit', 'plan limit reached', 'лимит тарифа'],
       ['auth', 'sign-in needed', 'нужен вход'],
