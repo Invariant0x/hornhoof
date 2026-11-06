@@ -49,7 +49,7 @@ async function company() {
 
   const parent = (await createTask(ctx, { personId: ceo!.id }, { title: 'Payments', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: head.id })).task;
   const member = async (title: string, executor: string, after: string[] = []) =>
-    (await createTask(ctx, { agentId: head.id }, { title, brief: '', body: '', departmentId: dev!.id, parentId: parent.id, assigneeAgentId: executor, executor: true, gates: [rita.id], after })).task;
+    (await createTask(ctx, { agentId: head.id }, { title, brief: '', body: '', departmentId: dev!.id, parentId: parent.id, assigneeAgentId: executor, executor: true, gates: [rita.id], after, ...(after.length ? { independentNone: 'Genuine dependency in the existing behavior test.' } : {}) })).task;
   const read = async (id: string) => (await db.select().from(tasks).where(eq(tasks.id, id)))[0]!;
   const started = async (id: string) => (await db.select().from(taskEvents).where(and(eq(taskEvents.taskId, id), eq(taskEvents.kind, 'started')))).map(e => e.text);
   return { app, ctx, db, companyId, ceo: ceo!, orchestrator: orchestrator!, dev: dev!, open: open!, head, bruno, tess, rex, rita, parent, member, read, started };

@@ -32,6 +32,7 @@
 ### Task 1: Declaration and Atomic Independent Child
 
 **Files:**
+- Create: `apps/server/src/modules/tasks/independent.ts`
 - Modify: `apps/server/src/modules/tasks/engine.ts`
 - Modify: `apps/server/src/modules/tasks/tools.ts`
 - Modify: `apps/server/src/modules/tasks/routes.ts`
@@ -51,7 +52,7 @@ Run `test/tasks-after.test.ts` and `test/tasks-routes.test.ts`. Expected: declar
 
 - [ ] **Step 3: Implement the declaration and child creation**
 
-Validate before writing. Insert parent and child atomically. Store declaration metadata in the existing created/updated event JSON. The child has `after:[]`; the parent is unchanged otherwise. `workUnderDone` returns without opening review while the parent has `openAfter`.
+Validate before writing. Insert parent and child atomically. Store declaration metadata in the existing created/updated event JSON. The child has `after:[]`; the parent is unchanged otherwise. `workUnderDone` returns without opening review while the parent has `openAfter`. Repeating an update reuses the child. Clearing `after` hides the current declaration from DTO while retaining event history and the historical child.
 
 - [ ] **Step 4: Verify GREEN through run_tests**
 
