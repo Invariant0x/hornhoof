@@ -7,7 +7,7 @@ import { mayOpenRequest } from '../src/modules/tasks/decisions.js';
 import { answerDirectly, ask, createTask, handOver, silentTurn, type Task } from '../src/modules/tasks/engine.js';
 import { claimQuestions } from '../src/modules/tasks/question-intents.js';
 import { questionDisclosure } from '../src/modules/tasks/question-lifecycle.js';
-import { wakeAll } from '../src/modules/tasks/wake.js';
+import { wakeAll, wakePrompt } from '../src/modules/tasks/wake.js';
 import { requestSourceKey } from '../src/modules/tasks/wait-state.js';
 import { questionSourceKey } from '../src/modules/tasks/wait-producers.js';
 import { as, invitePerson } from './helpers.js';
@@ -792,5 +792,26 @@ describe('what was already there when questions moved inside', () => {
     const c = await legacy('open');
     const shown = (await c.app.inject({ url: `/api/tasks/${c.work.id}`, ...as(c.ceo) })).json();
     expect(JSON.stringify(shown.task.requests)).not.toContain('It stood still.');
+  });
+});
+
+describe('what an agent reads about asking', () => {
+  it('says a question goes inside first, and that a person sees it only when a head or the orchestrator says so', async () => {
+    const c = await company();
+    const work = await c.task();
+    const { client } = await c.run(c.agent.id, work.id);
+    const { tools } = await client.listTools();
+    const about = (name: string) => tools.find(t => t.name === name)!.description!;
+    expect(about('ask_person')).toContain('It goes first to your head');
+    expect(about('ask_person')).not.toContain('the people responsible');
+    expect(about('request_approval')).toContain('your head or the orchestrator looks at it first');
+  });
+
+  it('never tells one who holds the work that a person is the way out', async () => {
+    const c = await company();
+    const work = await c.task();
+    const told = wakePrompt(c.agent, work, { agentId: c.agent.id, taskId: work.id, why: 'assigned' });
+    expect(told).toContain('use ask_person');
+    expect(told).not.toContain('only a person can answer');
   });
 });
