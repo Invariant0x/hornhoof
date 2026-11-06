@@ -64,18 +64,28 @@ export function legacyRequestMaterials(request: WaitingRequest, t: Messages): Ma
 const isPositiveRevision = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v > 0;
 const isHexDigest = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
 
-function readMaterialRevision(source: unknown): number | null {
-  const rev = (source as { materialRevision?: unknown } | null | undefined)?.materialRevision;
+function readMaterialRevision(holder: unknown): number | null {
+  const rev = (holder as { materialRevision?: unknown } | null | undefined)?.materialRevision;
   return isPositiveRevision(rev) ? rev : null;
+}
+
+function readMaterialDigest(holder: unknown): string | null {
+  const digest = (holder as { materialDigest?: unknown } | null | undefined)?.materialDigest;
+  return isHexDigest(digest) ? digest : null;
+}
+
+function stampPair(holder: unknown): { materialRevision: number; materialDigest: string } | null {
+  const rev = readMaterialRevision(holder);
+  const digest = readMaterialDigest(holder);
+  return rev !== null && digest !== null ? { materialRevision: rev, materialDigest: digest } : null;
 }
 
 export function readMaterialStamp(
   source: unknown,
   manifest?: MaterialManifestView | null,
 ): { materialRevision: number; materialDigest: string } | Record<string, never> {
-  const rev = manifest?.materialRevision || (source as { materialRevision?: unknown } | undefined)?.materialRevision;
-  const digest = manifest?.materialDigest || (source as { materialDigest?: unknown } | undefined)?.materialDigest;
-  return isPositiveRevision(rev) && isHexDigest(digest) ? { materialRevision: rev, materialDigest: digest } : {};
+  if (readMaterialRevision(source) === null) return {};
+  return stampPair(manifest) ?? stampPair(source) ?? {};
 }
 
 export function useSourceMaterials(sourceKind: 'requests' | 'proposals', sourceId: string | undefined, materialRevision: number | null) {

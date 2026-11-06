@@ -24,7 +24,7 @@ function storeRequestDraft(requestId: string, value: string): void {
   else draftsByRequest.delete(requestId);
 }
 
-const defaultPlaceName = (p: TaskPlace) => p.name;
+const defaultPlaceName = (p: TaskPlace) => p?.name ?? '';
 
 /* onOpenAgent opens the asking agent's window, to see in its terminal what it did. */
 type Shared = { onOpenTask: (id: string) => void; onOpenAgent: (id: string) => void; placeName?: (p: TaskPlace) => string };

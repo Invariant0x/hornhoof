@@ -14,7 +14,7 @@ export type PdfPageView = {
 export type PdfDocumentHandle = {
   numPages: number;
   getPage: (pageNumber: number) => Promise<PdfPageView>;
-  destroy: () => Promise<void> | void;
+  destroy: () => Promise<void>;
 };
 
 export type PdfLoader = (bytes: Uint8Array) => Promise<PdfDocumentHandle>;

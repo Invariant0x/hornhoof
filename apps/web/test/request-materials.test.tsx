@@ -7,8 +7,8 @@ import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import type { WaitingRequest } from '../src/types';
 import { setPdfLoaderForTests } from '../src/ui/MaterialDocument';
+import { readMaterialStamp, type MaterialManifestView } from '../src/ui/RequestMaterials';
 import { Requests, clearRequestDraftsForTests } from '../src/ui/Requests';
-import { PEOPLE } from './api-mock';
 
 const DEV = { id: 'd-dev', name: 'Development' };
 const REQ_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -50,10 +50,9 @@ function renderWithAppShell(lang: 'en' | 'ru', ui: ReactNode, dir?: 'ltr' | 'rtl
   );
 }
 
-function makeRequestsProps(overrides: Partial<Parameters<typeof Requests>[0]> = {}) {
+function makeRequestsProps(overrides: Partial<Parameters<typeof Requests>[0]> = {}): Parameters<typeof Requests>[0] {
   return {
     requests: [LEGACY_CHOICE],
-    people: PEOPLE,
     onChanged: vi.fn(),
     onOpenTask: vi.fn(),
     onOpenAgent: vi.fn(),
@@ -528,5 +527,36 @@ describe('separate question materials preview and explicit answering (#512)', ()
     ]);
     expect(await within(card).findByRole('alert')).toHaveTextContent('Materials changed since you opened this question.');
     expect(within(card).getByLabelText(en.tasks.yourAnswer)).toHaveValue('Reviewed all four materials');
+  });
+
+  it('keeps unstamped canonical decisions free of derived manifest stamps while binding stamps on versioned DTOs and rendering null department tasks', () => {
+    const derivedLegacyManifest: MaterialManifestView = {
+      materialRevision: 1,
+      materialDigest: 'a'.repeat(64),
+      common: [],
+      options: [],
+    };
+    expect(readMaterialStamp(LEGACY_CHOICE, derivedLegacyManifest)).toEqual({});
+    expect(readMaterialStamp({ id: 'r-null-rev', materialRevision: null }, derivedLegacyManifest)).toEqual({});
+    expect(readMaterialStamp({ id: 'r-zero-rev', materialRevision: 0 }, derivedLegacyManifest)).toEqual({});
+    expect(readMaterialStamp({ id: 'r-v1', materialRevision: 1, materialDigest: 'b'.repeat(64) }, null)).toEqual({
+      materialRevision: 1,
+      materialDigest: 'b'.repeat(64),
+    });
+    expect(readMaterialStamp({ id: 'r-v1', materialRevision: 1 }, derivedLegacyManifest)).toEqual({
+      materialRevision: 1,
+      materialDigest: 'a'.repeat(64),
+    });
+    expect(readMaterialStamp({ id: 'r-v1', materialRevision: 1 }, null)).toEqual({});
+
+    renderWithAppShell(
+      'en',
+      <Requests
+        {...makeRequestsProps({
+          requests: [{ ...LEGACY_CHOICE, id: 'r-company-wide', task: { id: 't479', number: 479, title: 'Whole company check', department: null } }],
+        })}
+      />,
+    );
+    expect(screen.getByRole('article', { name: '#479 Whole company check' })).toBeInTheDocument();
   });
 });
