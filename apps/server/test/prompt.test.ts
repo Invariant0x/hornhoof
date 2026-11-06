@@ -71,6 +71,17 @@ describe('orchestrator instructions', () => {
     expect(ORCHESTRATOR_INSTRUCTIONS).toMatch(/[Ss]witch off the employees that have no work in the turn/);
     expect(ORCHESTRATOR_INSTRUCTIONS).toMatch(/only when something it holds changes/);
   });
+
+  it('keeps routine questions internal, promotes only ready_result or human_only_action, and writes plain human explanations without commands or history rewrites', () => {
+    expect(ORCHESTRATOR_INSTRUCTIONS).toContain('ready_result');
+    expect(ORCHESTRATOR_INSTRUCTIONS).toContain('human_only_action');
+    expect(ORCHESTRATOR_INSTRUCTIONS).toMatch(/internal authority[\s\S]*(?:employee|Hornhoof)/i);
+    expect(ORCHESTRATOR_INSTRUCTIONS).toMatch(/explain_request[\s\S]*situation[\s\S]*consequences/i);
+    expect(ORCHESTRATOR_INSTRUCTIONS).toMatch(/(?:no|never|without)[^.!?]*(?:commands|SQL|code|scripts)/i);
+    expect(ORCHESTRATOR_INSTRUCTIONS).toMatch(/executor[\s\S]*message_employee/);
+    expect(ORCHESTRATOR_INSTRUCTIONS).toMatch(/never[^.!?]*rewrite[^.!?]*closed/i);
+    expect(ORCHESTRATOR_INSTRUCTIONS).not.toMatch(/\b(?:David|8eb9c651|#425|resolve_question|internal_questions|classify_human_intent)\b/);
+  });
 });
 
 describe('catching a new session up', () => {

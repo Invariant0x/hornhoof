@@ -141,3 +141,64 @@ describe('work tree words', () => {
     expect(ru.window.hiddenEmployee).toBe('Сотрудник');
   });
 });
+
+describe('internal-first question explanations and error reasons', () => {
+  it('provides plain human explanation labels and action kinds in English and Russian', () => {
+    expect(en.tasks.situationLabel).toBe('Situation');
+    expect(ru.tasks.situationLabel).toBe('Ситуация');
+    expect(en.tasks.requiredActionLabel).toBe('What is needed from you');
+    expect(ru.tasks.requiredActionLabel).toBe('Что нужно от вас');
+    expect(en.tasks.consequenceLabel).toBe('Consequence');
+    expect(ru.tasks.consequenceLabel).toBe('Последствия');
+    expect(en.tasks.actionResourceLabel).toBe('Resource');
+    expect(ru.tasks.actionResourceLabel).toBe('Ресурс');
+    expect(en.tasks.actionScopeLabel).toBe('Scope');
+    expect(ru.tasks.actionScopeLabel).toBe('Объем доступа');
+    expect(en.tasks.actionDurationLabel).toBe('Duration');
+    expect(ru.tasks.actionDurationLabel).toBe('Срок');
+    expect(en.tasks.actionAmountLabel).toBe('Amount');
+    expect(ru.tasks.actionAmountLabel).toBe('Сумма');
+    expect(en.tasks.plainExplanationPending).toBe('A plain summary without code or commands is being prepared.');
+    expect(ru.tasks.plainExplanationPending).toBe('Готовится простое объяснение без кода и команд.');
+    expect(en.tasks.hiddenDecisionLabel).toBe('Decision');
+    expect(ru.tasks.hiddenDecisionLabel).toBe('Решение');
+    expect(en.tasks.actionKinds).toEqual({
+      payment: 'Payment',
+      owner_login: 'Subscription owner sign-in',
+      manual_machine_action: 'Action on a machine',
+      ceo_permission: 'CEO permission',
+    });
+    expect(ru.tasks.actionKinds).toEqual({
+      payment: 'Оплата',
+      owner_login: 'Вход владельца подписки',
+      manual_machine_action: 'Действие на машине',
+      ceo_permission: 'Разрешение CEO',
+    });
+  });
+
+  it('translates 409 and 503 question routing and classification error reasons in both languages', () => {
+    const reasons409 = [
+      'stale_revision',
+      'stale_route',
+      'source_closed',
+      'operation_conflict',
+      'classification_required',
+    ] as const;
+    for (const reason of reasons409) {
+      const failure = new ApiFailure(409, 'conflict', 'Server conflict.', reason);
+      expect(errorText(en, failure)).toBe(en.errors[reason]);
+      expect(errorText(ru, failure)).toBe(ru.errors[reason]);
+      expect(en.errors[reason].length).toBeGreaterThan(10);
+      expect(ru.errors[reason].length).toBeGreaterThan(10);
+    }
+
+    const reasons503 = ['internal_route_unavailable', 'source_producer_unavailable'] as const;
+    for (const reason of reasons503) {
+      const failure = new ApiFailure(503, 'unavailable', 'Service unavailable.', reason);
+      expect(errorText(en, failure)).toBe(en.errors[reason]);
+      expect(errorText(ru, failure)).toBe(ru.errors[reason]);
+      expect(en.errors[reason].length).toBeGreaterThan(10);
+      expect(ru.errors[reason].length).toBeGreaterThan(10);
+    }
+  });
+});

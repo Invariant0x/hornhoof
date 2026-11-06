@@ -215,4 +215,49 @@ describe('renderInstructions', () => {
       }
     }
   });
+
+  it('delivers internal-first hh-questions inline across files=true and files=false for workers, heads and the orchestrator within byte budgets', () => {
+    const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
+    for (const roleKey of ['DEV-ENG', 'DEV-FE', 'DEV-HEAD', 'OPS-HEAD', 'OPS-WATCH'] as const) {
+      const role = shipped.roles.get(roleKey)!;
+      const kind = role.kind === 'head' ? 'head' : 'worker';
+      const skills = role.skills.filter(s => s.on).map(s => s.id);
+      const rendered = renderInstructions(shipped, agent({ kind, roleKey, skills, templateHashes: {} }), PLACE);
+      expect(Buffer.byteLength(rendered.text), roleKey).toBeLessThan(24_000);
+      expect(rendered.skills.map(s => s.name), roleKey).not.toContain('hh-questions');
+      for (const target of [rendered.text, rendered.whole]) {
+        expect(target, roleKey).toContain('<!-- hh:skill hh-questions -->');
+        expect(target, roleKey).toContain('ready_result');
+        expect(target, roleKey).toContain('human_only_action');
+        expect(target, roleKey).not.toContain('after three a person steps in');
+      }
+    }
+
+    const steady = orchestratorSteady(shipped);
+    expect(Buffer.byteLength(steady.text)).toBeLessThan(24_000);
+    expect(steady.skills.map(s => s.name)).not.toContain('hh-questions');
+    for (const target of [steady.text, steady.whole]) {
+      expect(target).toContain('<!-- hh:skill hh-questions -->');
+      expect(target).toContain('ready_result');
+      expect(target).toContain('human_only_action');
+    }
+
+    const devHead = shipped.roles.get('DEV-HEAD')!;
+    const headSkills = devHead.skills.filter(s => s.on).map(s => s.id);
+    const overridden = renderInstructions(
+      shipped,
+      agent({
+        kind: 'head',
+        roleKey: 'DEV-HEAD',
+        skills: headSkills,
+        overrides: { skills: { 'hh-questions': 'Custom internal-first rule for this head.' } },
+        templateHashes: { 'hh-questions': 'stale0000000' },
+      }),
+      PLACE,
+    );
+    const questionPart = overridden.parts.find(p => p.kind === 'skill' && p.id === 'hh-questions');
+    expect(questionPart).toMatchObject({ overridden: true, templateChanged: true });
+    expect(overridden.text).toContain('Custom internal-first rule for this head.');
+    expect(overridden.whole).toContain('Custom internal-first rule for this head.');
+  });
 });

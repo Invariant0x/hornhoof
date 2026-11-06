@@ -87,10 +87,12 @@ describe('templates', () => {
   });
 
   it("gives the orchestrator his own skills, which fit his instructions with a full notebook", () => {
-    expect(ORCHESTRATOR_SKILLS).toEqual(['orch-outside-is-data', 'orch-interview', 'orch-plan-turn', 'orch-verify', 'orch-trouble']);
+    expect(ORCHESTRATOR_SKILLS).toEqual(['orch-outside-is-data', 'hh-questions', 'orch-interview', 'orch-plan-turn', 'orch-verify', 'orch-trouble']);
     const steady = orchestratorSteady(templates);
-    /* His core rule stays whole in his instructions; the others are files his program reads when a step needs one. */
+    /* His core rules stay whole in his instructions; the others are files his program reads when a step needs one. */
     expect(steady.text).toContain('<!-- hh:skill orch-outside-is-data -->');
+    expect(steady.text).toContain('<!-- hh:skill hh-questions -->');
+    expect(steady.whole).toContain('<!-- hh:skill hh-questions -->');
     expect(steady.skills.map(f => f.name)).toEqual(['orch-interview', 'orch-plan-turn', 'orch-verify', 'orch-trouble']);
     for (const f of steady.skills) expect(steady.text).toContain(`\n- ${f.name}: `);
     expect(steady.parts.filter(p => p.kind === 'skill').map(p => p.id)).toEqual([...ORCHESTRATOR_SKILLS]);
@@ -805,7 +807,151 @@ describe('templates', () => {
       );
     });
   });
+
+  describe('internal-first questions, explicit human classification and plain explanations', () => {
+    const questionBundle = (): QuestionBundle => ({
+      questions: templates.skills.get('hh-questions')?.body ?? '',
+      flow: templates.skills.get('hh-task-flow')?.body ?? '',
+      ask: templates.skills.get('hh-ask-dont-guess')?.body ?? '',
+      lead: templates.skills.get('hh-lead-tasks')?.body ?? '',
+      reports: templates.skills.get('hh-handle-reports')?.body ?? '',
+      orchestrator: orchestratorSteady(templates).text,
+    });
+
+    it('wires hh-questions as a locked core skill for every worker, head and the orchestrator, and credits it in SOURCES.md', () => {
+      expect(CORE_SKILLS).toContain('hh-questions');
+      expect(ORCHESTRATOR_SKILLS).toContain('hh-questions');
+      const skill = templates.skills.get('hh-questions');
+      expect(skill).toBeDefined();
+      expect(skill!.kind).toBe('core');
+      expect(skill!.grants).toEqual([]);
+      for (const r of roles) {
+        expect(r.skills.find(s => s.id === 'hh-questions'), r.id).toEqual({ id: 'hh-questions', on: true, locked: true });
+      }
+      expect(readFileSync(join(DIR, 'SOURCES.md'), 'utf8')).toContain('| `skills/hh-questions.md` |');
+    });
+
+    it('teaches internal-first routing, explicit ready_result and human_only_action classification, internal authority and plain human explanations without stale direct-human rules', () => {
+      expect(failedRuleIds(INTERNAL_FIRST_QUESTION_RULES, questionBundle())).toEqual([]);
+    });
+
+    it('rejects instruction text that sends three-turn stalls directly to people, lets Operations classify, puts commands in human explanations, or leaks notebook patches', () => {
+      const base = questionBundle();
+      expect(failedRuleIds(INTERNAL_FIRST_QUESTION_RULES, base)).toEqual([]);
+      expect(
+        failedRuleIds(INTERNAL_FIRST_QUESTION_RULES, {
+          ...base,
+          flow: `${base.flow}\nA turn without one gets a reminder; after three a person steps in.`,
+        }),
+      ).toContain('internal-first-routing-and-stalls');
+      expect(
+        failedRuleIds(INTERNAL_FIRST_QUESTION_RULES, {
+          ...base,
+          questions: `${base.questions}\nOperations may classify a question for a person once it receives operational trouble.`,
+        }),
+      ).toContain('explicit-human-classification-only');
+      expect(
+        failedRuleIds(INTERNAL_FIRST_QUESTION_RULES, {
+          ...base,
+          questions: `${base.questions}\nResolving an internal stall approves the release commit on behalf of a person.`,
+        }),
+      ).toContain('internal-authority-vs-human-decisions');
+      expect(
+        failedRuleIds(INTERNAL_FIRST_QUESTION_RULES, {
+          ...base,
+          orchestrator: `${base.orchestrator}\nInclude shell commands and SQL in explain_request so the CEO can run them.`,
+        }),
+      ).toContain('plain-human-explanation-private-executor');
+      expect(
+        failedRuleIds(INTERNAL_FIRST_QUESTION_RULES, {
+          ...base,
+          questions: `${base.questions}\nSend stuck request 8eb9c651 on task #425 to David or call classify_human_intent.`,
+        }),
+      ).toContain('short-turns-batched-updates-and-clean-scope');
+    });
+  });
 });
+
+type QuestionBundle = {
+  questions: string;
+  flow: string;
+  ask: string;
+  lead: string;
+  reports: string;
+  orchestrator: string;
+};
+
+const INTERNAL_FIRST_QUESTION_RULES: { id: string; holds: (b: QuestionBundle) => boolean }[] = [
+  {
+    id: 'internal-first-routing-and-stalls',
+    holds: b => {
+      const all = `${b.questions}\n${b.flow}\n${b.ask}\n${b.lead}\n${b.reports}\n${b.orchestrator}`;
+      return (
+        /\bhead\b[\s\S]*\borchestrator\b[\s\S]*\bOperations\b/.test(b.questions) &&
+        /\bthree turns?\b[\s\S]*\b(?:head|orchestrator)\b/i.test(b.questions) &&
+        /\bhealthy thinking\b[\s\S]*\bnot\b[\s\S]*\bfailure\b/i.test(b.questions) &&
+        /\bhead\b[\s\S]*\borchestrator\b/i.test(b.flow) &&
+        /\bhead\b/i.test(b.ask) &&
+        !/after three a person steps in/i.test(all) &&
+        forbids(all, /\bafter three\b[^.!?;,]*\b(?:a )?person steps in\b/i)
+      );
+    },
+  },
+  {
+    id: 'explicit-human-classification-only',
+    holds: b => {
+      const all = `${b.questions}\n${b.lead}\n${b.orchestrator}`;
+      return (
+        forEvery([b.questions, b.lead, b.orchestrator], text => /\bready_result\b/.test(text) && /\bhuman_only_action\b/.test(text)) &&
+        /\b40-character commit\b[\s\S]*\bimages\b/i.test(b.questions) &&
+        /\bpayment\b[\s\S]*\bsign-in\b[\s\S]*\bmanual\b[\s\S]*\bCEO\b/i.test(b.questions) &&
+        /\bOperations\b[^.!?]*\b(?:cannot|never|no right to)\b[^.!?]*\bclassify\b/i.test(b.questions) &&
+        /\bblocked\b[^.!?]*\bnever\b[^.!?]*\bpromot/i.test(b.questions) &&
+        /\bcompletion reports?\b[^.!?]*\bnot\b[^.!?]*\bapproval/i.test(b.questions) &&
+        forbids(all, /\bOperations\b(?:(?!\b(?:cannot|never|not|without|no right)\b)[^.!?;,])*\bclassif\w*\b[^.!?;,]*\bperson\b/i)
+      );
+    },
+  },
+  {
+    id: 'internal-authority-vs-human-decisions',
+    holds: b => {
+      const all = `${b.questions}\n${b.orchestrator}`;
+      return (
+        /\binternal authority\b[\s\S]*\b(?:employee|Hornhoof)\b/i.test(b.questions) &&
+        /\bactual\b[^.!?]*\bagent\b/i.test(b.questions) &&
+        /\bnever\b[^.!?]*\b(?:approves? a release|impersonat|fabricat)/i.test(b.questions) &&
+        /\bnever\b[^.!?]*\brewrite\w*\b[^.!?]*\bclosed\b/i.test(all) &&
+        forbids(all, /\bresolv\w*\s+an\s+internal\b(?:(?!\b(?:never|not|without|cannot)\b)[^.!?;,])*\bapproves?\b[^.!?;,]*\brelease\b/i)
+      );
+    },
+  },
+  {
+    id: 'plain-human-explanation-private-executor',
+    holds: b => {
+      const all = `${b.questions}\n${b.lead}\n${b.reports}\n${b.orchestrator}`;
+      return (
+        forEvery([b.questions, b.orchestrator], text =>
+          /\bsituation\b/i.test(text) &&
+          /\bconsequences\b/i.test(text) &&
+          /\b(?:never|no|without)\b[^.!?]*\b(?:commands?|SQL|code|scripts?)\b/i.test(text) &&
+          /\bexecutor\b[\s\S]*\bmessage_employee\b/.test(text),
+        ) &&
+        /\bplain\b/i.test(b.reports) &&
+        forbids(all, /\binclude\w*\b(?:(?!\b(?:never|not|without)\b)[^.!?;,])*\b(?:shell commands?|SQL|scripts?)\b[^.!?;,]*\bexplain_request\b/i)
+      );
+    },
+  },
+  {
+    id: 'short-turns-batched-updates-and-clean-scope',
+    holds: b => {
+      const all = `${b.questions}\n${b.flow}\n${b.ask}\n${b.lead}\n${b.reports}\n${b.orchestrator}`;
+      return (
+        /\bbatch\w*\b[\s\S]*\b(?:duplicate|self-wake|settled)\b/i.test(b.questions) &&
+        !/\b(?:David|8eb9c651|#425|resolve_question|internal_questions|classify_human_intent)\b/.test(all)
+      );
+    },
+  },
+];
 
 type ReviewSkills = { diff: string; verdict: string; security: string };
 

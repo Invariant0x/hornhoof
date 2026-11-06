@@ -483,9 +483,11 @@ async function assertRequestCardsFit(cards: Locator, rightLimit: number) {
     expect(cardOverflows, 'request card has no internal horizontal overflow').toBe(false);
 
     const term = card.locator('.req-term');
-    const termBox = await box(term);
-    expect(termBox.x).toBeGreaterThanOrEqual(cardBox.x - 1);
-    expect(termBox.x + termBox.width).toBeLessThanOrEqual(cardBox.x + cardBox.width + 1);
+    if ((await term.count()) > 0) {
+      const termBox = await box(term);
+      expect(termBox.x).toBeGreaterThanOrEqual(cardBox.x - 1);
+      expect(termBox.x + termBox.width).toBeLessThanOrEqual(cardBox.x + cardBox.width + 1);
+    }
 
     const commit = card.locator('.req-commit');
     if ((await commit.count()) > 0) {
@@ -1087,3 +1089,208 @@ test('saves neutral feedback without pick, delivers words to author, and preserv
     await srv.stop();
   }
 });
+
+function makeInternalFirstBrowserRequests(lang: Language): WaitingRequest[] {
+  const ruLang = lang === 'ru';
+  const sha = 'f'.repeat(40);
+  const items: Record<string, unknown>[] = [
+    {
+      id: 'req-internal-499',
+      kind: 'question',
+      audience: 'internal',
+      classification: null,
+      text: 'BLOCKED: internal migration question for head only',
+      options: [],
+      commit: null,
+      commitUrl: null,
+      images: [],
+      link: null,
+      explained: null,
+      explaining: false,
+      at: '2026-11-06T00:10:00.000Z',
+      ownerPersonId: 'p1',
+      canAnswer: true,
+      agent: { id: 'agent-worker-1', name: 'Backend Developer' },
+      task: { id: 't1', number: 1, title: TASKS[0]!.title, department: { id: 'd2', name: ruLang ? 'Разработка' : 'Development' } },
+    },
+    {
+      id: 'req-unclassified-499',
+      kind: 'stuck',
+      audience: 'human',
+      classification: null,
+      clientPromote: true,
+      text: 'BLOCKED: forged client promotion without server classification',
+      options: [],
+      commit: null,
+      commitUrl: null,
+      images: [],
+      link: null,
+      explained: null,
+      explaining: false,
+      at: '2026-11-06T00:11:00.000Z',
+      ownerPersonId: 'p1',
+      canAnswer: true,
+      agent: { id: 'agent-worker-2', name: 'Worker Two' },
+      task: { id: 't1', number: 1, title: TASKS[0]!.title, department: { id: 'd2', name: ruLang ? 'Разработка' : 'Development' } },
+    },
+    {
+      id: 'req-ready-499',
+      kind: 'approval',
+      audience: 'human',
+      classification: { kind: 'ready_result', artifact: { kind: 'commit', sha } },
+      text: 'PRIVATE_RAW_GIT_DIFF_DO_NOT_SHOW',
+      executorInstruction: 'PRIVATE_EXECUTOR_STEP_DO_NOT_SHOW',
+      explained: null,
+      explaining: false,
+      images: [],
+      options: [],
+      link: null,
+      commit: sha,
+      commitUrl: `https://github.com/acme/hornhoof/commit/${sha}`,
+      at: '2026-11-06T00:12:00.000Z',
+      ownerPersonId: 'p1',
+      canAnswer: true,
+      decidedBy: { kind: 'ceo_and_delegate', department: null },
+      agent: { id: 'agent-head-1', name: ruLang ? 'Глава разработки' : 'Head of development' },
+      task: { id: 't1', number: 1, title: TASKS[0]!.title, department: { id: 'd2', name: ruLang ? 'Разработка' : 'Development' } },
+      humanEnvelope: {
+        situation: ruLang
+          ? 'Кандидат выпуска хода 8 прошел все рубежи проверки.'
+          : 'Turn 8 release candidate passed every verification gate.',
+        requiredAction: ruLang
+          ? 'Одобрите или отклоните выпуск этого точного коммита.'
+          : 'Approve or decline publishing this exact commit.',
+        options: [
+          {
+            id: 'ship',
+            label: ruLang ? 'Выпустить сейчас' : 'Publish now',
+            consequence: ruLang ? 'Обновляет рабочую сборку сразу.' : 'Updates the live build right away.',
+          },
+        ],
+      },
+    },
+    {
+      id: 'req-hidden-499',
+      kind: 'question',
+      audience: 'human',
+      known: false,
+      classification: {
+        kind: 'human_only_action',
+        actionBinding: {
+          kind: 'owner_login',
+          resourceId: 'sub-claude-max',
+          scope: ruLang ? 'Повторный вход в личную подписку Claude на ivan-mbp' : 'Sign in again to personal Claude plan on ivan-mbp',
+          duration: ruLang ? 'До истечения сессии подписки' : 'Until the subscription session expires',
+        },
+      },
+      text: 'HIDDEN_TASK_999_SECRET_TRACE',
+      options: [],
+      commit: null,
+      images: [],
+      at: '2026-11-06T00:14:00.000Z',
+      ownerPersonId: 'p1',
+      canAnswer: true,
+      decidedBy: { kind: 'ceo_and_delegate', department: null },
+      task: null,
+      agent: null,
+      humanEnvelope: {
+        situation: ruLang
+          ? 'На машине ivan-mbp завершилась сессия личной подписки Claude.'
+          : 'Your personal Claude subscription session ended on machine ivan-mbp.',
+        requiredAction: ruLang
+          ? 'Войдите снова в разделе Подписки и подтвердите здесь.'
+          : 'Sign in again under Subscriptions and confirm here.',
+      },
+    },
+  ];
+  return items as unknown as WaitingRequest[];
+}
+
+for (const lang of CHECKED_LOCALES) {
+  for (const theme of ['light', 'dark'] as const) {
+    for (const width of [1440, 375] as const) {
+      test(`shows only server-classified plain requests and hides internal or hidden-source internals in ${lang}, ${theme}, at ${width}px`, async ({ page }, info) => {
+        await page.setViewportSize({ width, height: 960 });
+        await page.addInitScript(
+          ({ l, th }) => {
+            localStorage.setItem('hh-lang', l);
+            localStorage.setItem('hh-theme', th);
+          },
+          { l: lang, th: theme },
+        );
+        const errors: string[] = [];
+        page.on('pageerror', err => errors.push(err.message));
+        page.on('console', msg => {
+          if (msg.type() === 'error') errors.push(msg.text());
+        });
+
+        await serveApi(page);
+        let current = makeInternalFirstBrowserRequests(lang);
+        const posts: { url: string; body: unknown }[] = [];
+        await page.route('**/api/**', async route => {
+          if (await fulfillShellRequestsRoute(route, () => current)) return;
+          const url = new URL(route.request().url());
+          if (url.pathname === '/api/requests/req-hidden-499' && route.request().method() === 'POST') {
+            posts.push({ url: url.pathname, body: route.request().postDataJSON() });
+            current = current.filter(r => r.id !== 'req-hidden-499');
+            return route.fulfill({ json: { request: { id: 'req-hidden-499', status: 'answered' } } });
+          }
+          return route.fallback();
+        });
+
+        await page.goto('/tasks');
+        const t = MESSAGES[lang];
+        const cards = page.locator('.page article.req');
+        await expect(cards).toHaveCount(2);
+        await page.evaluate(async () => {
+          await document.fonts.ready;
+        });
+
+        const waitingSection = page.locator('section.waiting');
+        await expect(waitingSection).not.toContainText('internal migration question');
+        await expect(waitingSection).not.toContainText('forged client promotion');
+        await expect(waitingSection).not.toContainText('PRIVATE_RAW_GIT_DIFF_DO_NOT_SHOW');
+        await expect(waitingSection).not.toContainText('PRIVATE_EXECUTOR_STEP_DO_NOT_SHOW');
+        await expect(waitingSection).not.toContainText('HIDDEN_TASK_999_SECRET_TRACE');
+        await expect(waitingSection).not.toContainText('#undefined');
+
+        const readyCard = cards.nth(0);
+        const hiddenCard = cards.nth(1);
+        await expect(readyCard).toContainText(t.tasks.situationLabel);
+        await expect(readyCard).toContainText(t.tasks.requiredActionLabel);
+        await expect(hiddenCard).toContainText(t.tasks.asks(t.window.hiddenEmployee));
+        await expect(hiddenCard).toContainText(t.tasks.actionKinds.owner_login);
+        await expect(hiddenCard).toContainText('sub-claude-max');
+        await expect(hiddenCard.locator('.req-term')).toHaveCount(0);
+
+        const docScrollWidth = await page.evaluate(() => {
+          const scroller = document.querySelector<HTMLElement>('.screen, .page');
+          return Math.max(document.documentElement.scrollWidth, scroller?.scrollWidth ?? 0);
+        });
+        expect(docScrollWidth).toBeLessThanOrEqual(width);
+        await assertRequestCardsFit(cards, width);
+
+        await saveScreenshot(
+          page,
+          info,
+          {
+            file: `requests-internal-first-${lang}-${theme}-${width}.png`,
+            provenance: 'playwright-route-fixture',
+            lang,
+            theme,
+            width,
+            surface: '/tasks WaitingForYou classified ready_result + hidden-source human_only_action',
+          },
+          theme === 'dark',
+        );
+
+        const answerText = lang === 'ru' ? 'Вход обновлен' : 'Signed in again';
+        await hiddenCard.getByLabel(t.tasks.yourAnswer).fill(answerText);
+        await hiddenCard.getByRole('button', { name: t.tasks.sendAnswer, exact: true }).click();
+        await expect.poll(() => posts).toEqual([{ url: '/api/requests/req-hidden-499', body: { answer: answerText } }]);
+        await expect(cards).toHaveCount(1);
+        expect(errors).toEqual([]);
+      });
+    }
+  }
+}
