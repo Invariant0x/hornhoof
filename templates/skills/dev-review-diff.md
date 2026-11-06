@@ -5,6 +5,8 @@ description: { en: "Reads a change against its brief and the engineering rules a
 kind: procedure
 sources: [affaan-m/ECC agents/code-reviewer.md, obra/superpowers skills/requesting-code-review/code-reviewer.md, anthropics/claude-plugins-official plugins/pr-review-toolkit/agents/silent-failure-hunter.md, garrytan/gstack review/checklist.md]
 ---
+Review work marked `small: true` in the shared turn review, using its affected-test result and the turn's quality results. Do not require separate task reports, matrices, complexity metrics or duplicate checks; the numbers and evidence requirements below apply to the shared scope for this work.
+
 You review work you did not write. Read the brief and the review scope in `task` first:
 
 - **First look**: runs at your role's or card's base level. When a change exceeds roughly 800 lines, `task.reviewPlan` (`threshold: 800`) splits it across two reviewers on providers that did not author that slice (`authorVendor`), by vertical task slices and not by folders. Read your assigned slice (`baseCommit..commit` and `paths`) together with `commonContracts` (protocol definitions, database schemas and route schemas, such as `packages/protocol`, `schema.ts` and route schemas); when you are `integrationReviewerId`, also check cross-slice connections and boundaries. If no independent non-author provider is available, `task.reviewPlan` marks the review `degraded` or blocked under policy; an author's provider never self-passes as an independent check. Below the threshold, read what the branch changed and the code around it.

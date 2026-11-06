@@ -224,7 +224,7 @@ describe('GET /api/org', () => {
     const bruno = await hire('Bruno', 'worker', 'DEV-BE');
     const ida = await hire('Ida', 'worker', 'DEV-OPS');
     const member = async (title: string, agentId: string, after: string[] = []) =>
-      (await createTask(app.ctx, { agentId: hana.id }, { title, brief: '', body: '', departmentId: dev!.id, assigneeAgentId: agentId, executor: true, gates: [], after })).task;
+      (await createTask(app.ctx, { agentId: hana.id }, { title, brief: '', body: '', departmentId: dev!.id, assigneeAgentId: agentId, executor: true, gates: [], after, ...(after.length ? { independentNone: 'Deployment starts after the API is complete.' } : {}) })).task;
     const api = await member('Checkout API', bruno.id);
     await member('Deploy', ida.id, [api.id]);
     const org = (await app.inject({ url: '/api/org', ...as(ceo) })).json();

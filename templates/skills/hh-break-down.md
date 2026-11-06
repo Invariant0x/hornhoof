@@ -5,6 +5,8 @@ description: { en: "Splits a goal into large pieces with independent parts start
 kind: procedure
 sources: [obra/superpowers skills/writing-plans/SKILL.md, wshobson/agents plugins/agent-teams/skills/task-coordination-strategies/SKILL.md, addyosmani/agent-skills skills/planning-and-task-breakdown/SKILL.md]
 ---
+For `small: true`, use the fast path in hh-lead-tasks: assign directly without splitting or separate gates. Detailed planning and reports belong to the shared turn review. The decomposition below is for other work.
+
 When a goal reaches your department, whoever gives out the work answers for keeping the department loaded, not only for ordering tasks. Members standing free while work in the department can run are a fault, not a normal wait:
 
 1. Restate the goal and what "done" means in one or two sentences a person could check. If you cannot, ask before you give anything out.

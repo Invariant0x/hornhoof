@@ -1,5 +1,5 @@
 {
-  "id": "a2fb4952-6270-4817-993c-b32320413935",
+  "id": "19411194-317e-4944-872d-7400de7f7d92",
   "prevId": "ab1d4c81-c9c4-44c5-bd35-1f6a5c6cb18e",
   "version": "7",
   "dialect": "postgresql",
@@ -1601,6 +1601,13 @@
           "primaryKey": false,
           "notNull": false
         },
+        "repo_token_revision": {
+          "name": "repo_token_revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
         "repo_token_last4": {
           "name": "repo_token_last4",
           "type": "text",
@@ -1719,6 +1726,10 @@
         "departments_work_mode": {
           "name": "departments_work_mode",
           "value": "\"departments\".\"work_mode\" IN ('turns', 'continuous')"
+        },
+        "departments_repo_token_revision": {
+          "name": "departments_repo_token_revision",
+          "value": "\"departments\".\"repo_token_revision\" > 0"
         }
       },
       "isRLSEnabled": false
@@ -11812,13 +11823,6 @@
         },
         "urgent": {
           "name": "urgent",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "small": {
-          "name": "small",
           "type": "boolean",
           "primaryKey": false,
           "notNull": true,
