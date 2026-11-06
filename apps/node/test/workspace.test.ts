@@ -242,7 +242,7 @@ describe('with real git', () => {
     try { await prepareRepo(base, repo, { user: null, home: base }); } catch (caught) { error = caught; }
     expect(existsSync(marker)).toBe(false);
     expect(error).toMatchObject({ network: true, outcome: { kind: 'child', exitCode: 128, signal: null, stderrTruncated: false } });
-    expect(JSON.stringify(error)).not.toContain(TOKEN);
+    expect(JSON.stringify({ error, message: String(error) })).not.toContain(TOKEN);
     expect((error as { outcome: { stderr: string } }).outcome.stderr).toContain('503');
   });
 
