@@ -466,7 +466,7 @@ function ActiveMaterialViewer({
   proposalSource = false,
   onSelect,
   onClose,
-}: Omit<Props, 'activeId'> & { active: ViewerItem }) {
+}: Omit<Props, 'activeId'> & { active: ViewerAvailableMaterial }) {
   const titleId = useId();
   const portalRef = useRef<HTMLDivElement | null>(null);
   const dialogRef = useRef<HTMLDivElement | null>(null);
