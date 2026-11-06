@@ -1,9 +1,9 @@
 import { EndSourceWait, ReplanWait, signalsOnce, SyncSourceWaits, validSourceKey, WaitOwnerBinding, WaitPlan, WaitSourceKind, WaitSourceState, type WaitOutcome } from '@hornhoof/protocol/waits';
-import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, like, or, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import { agents, people, tasks, taskWaits, waitNotices } from '../../db/schema.js';
 import { CLOSED, note, refuse, type Actor, type Task, type Tx } from './engine.js';
-import { nextReview, waitRoute } from './wait-policy.js';
+import { nextReview, planFromPolicy, waitRoute } from './wait-policy.js';
 
 /* The record of who answers for each thing a task waits on, and until when. Its source ends it: a date passing proves nothing.
    Every port runs in the caller's transaction, so a source's change and its wait commit together, with no network inside.
@@ -210,7 +210,8 @@ async function closeWait(tx: Tx, task: Task, wait: TaskWait, end: { outcome: Wai
     state: end.outcome, outcome: end.outcome, proofRef: end.proofRef, endedAt: now, sourceRevision: Math.max(wait.sourceRevision, end.sourceRevision), updatedAt: now,
   }).where(eq(taskWaits.id, wait.id)).returning();
   await cancelNotices(tx, wait.id, now);
-  await note(tx, task, { kind: 'updated', actor: end.actor, text: `A wait on this task ended: ${end.outcome}.`, data: logged(kept!, { outcome: end.outcome }) });
+  /* One nobody planned promised nothing, so its end is news to nobody: the source's own move says what happened. */
+  if (wait.state === 'active') await note(tx, task, { kind: 'updated', actor: end.actor, text: `A wait on this task ended: ${end.outcome}.`, data: logged(kept!, { outcome: end.outcome }) });
   return kept!;
 }
 
@@ -235,9 +236,54 @@ export async function endSourceWait(tx: Tx, input: EndSourceWait & { actor: Acto
 export async function endTaskWaits(tx: Tx, input: { taskId: string; outcome: WaitOutcome; proofRef: string; actor: Actor }): Promise<TaskWait[]> {
   const task = await lockedTask(tx, input.taskId);
   const open = await tx.select().from(taskWaits).where(and(eq(taskWaits.taskId, task.id), inArray(taskWaits.state, OPEN_STATES))).orderBy(asc(taskWaits.id)).for('update');
-  const ended: TaskWait[] = [];
-  for (const wait of open) ended.push(await closeWait(tx, task, wait, { ...input, sourceRevision: wait.sourceRevision }));
-  return ended;
+  return Promise.all(open.map(wait => closeWait(tx, task, wait, { ...input, sourceRevision: wait.sourceRevision })));
+}
+
+async function closeOpen(tx: Tx, task: Task, which: SQL, end: { outcome: WaitOutcome; proofRef: string; actor: Actor }): Promise<void> {
+  const open = await tx.select().from(taskWaits).where(and(eq(taskWaits.taskId, task.id), inArray(taskWaits.state, OPEN_STATES), which)).orderBy(asc(taskWaits.id)).for('update');
+  for (const wait of open) await closeWait(tx, task, wait, { ...end, sourceRevision: wait.sourceRevision });
+}
+
+/* A new wait_for takes the place of the one before it on the task, which may have come back and still be open. */
+export async function supersedeWaitFor(tx: Tx, input: { taskId: string; by: string; actor: Actor }): Promise<void> {
+  const task = await lockedTask(tx, input.taskId);
+  await closeOpen(tx, task, and(eq(taskWaits.kind, 'external'), like(taskWaits.sourceKey, 'wait_for:%'))!, { outcome: 'superseded', proofRef: input.by, actor: input.actor });
+}
+
+/* A run ended: its own wait ends, and each wait_for that named it, and nothing else on the task. */
+export async function endRunWaits(tx: Tx, input: { taskId: string; runId: string; outcome: WaitOutcome; proofRef: string; actor: Actor }): Promise<void> {
+  const task = await lockedTask(tx, input.taskId);
+  const ofRun = or(
+    and(eq(taskWaits.kind, 'run'), eq(taskWaits.sourceKey, runSourceKey(input.runId))),
+    and(eq(taskWaits.kind, 'external'), sql`${taskWaits.sourceState}->>'run' = ${input.runId}`),
+  )!;
+  await closeOpen(tx, task, ofRun, input);
+}
+
+type RunSource = { id: string; taskId: string; companyId: string; agentId: string; departmentId: string | null };
+type RunStage = NonNullable<WaitSourceState['stage']>;
+const planOfStage = async (tx: Tx, run: RunSource, stage: RunStage, at: Date): Promise<WaitPlan | null> =>
+  run.departmentId ? planFromPolicy(tx, { companyId: run.companyId, departmentId: run.departmentId, kind: 'run', stage, at }) : null;
+
+/* Whoever starts a run answers for it. Its dates come from what the department set for each stage: nothing else, not its limit. */
+export async function recordRunWait(tx: Tx, run: RunSource, stage: RunStage, at: Date): Promise<TaskWait> {
+  const source = { taskId: run.taskId, kind: 'run' as const, sourceKey: runSourceKey(run.id), sourceRevision: 0, ownerBinding: { agentId: run.agentId }, sourceState: { stage }, actor: { agentId: run.agentId } };
+  const plan = await planOfStage(tx, run, stage, at);
+  return plan ? syncSourceWaits(tx, { ...source, plan }) : recordLegacyWait(tx, source);
+}
+
+/* A run moved to another stage. A stage with a policy has a clock of its own, from now; without one the dates it has stay. */
+export async function moveRunStage(tx: Tx, run: RunSource, stage: RunStage, at: Date): Promise<void> {
+  const sourceKey = runSourceKey(run.id);
+  const [seen] = await tx.select({ sourceState: taskWaits.sourceState }).from(taskWaits).where(and(eq(taskWaits.taskId, run.taskId), eq(taskWaits.sourceKey, sourceKey), inArray(taskWaits.state, OPEN_STATES)));
+  if (!seen || seen.sourceState.stage === stage) return;
+  const task = await lockedTask(tx, run.taskId);
+  const wait = await lastOfSource(tx, task, 'run', sourceKey);
+  if (!wait || !isOpen(wait)) return;
+  const moved = { sourceState: { ...wait.sourceState, stage }, sourceRevision: wait.sourceRevision + 1 };
+  const plan = await planOfStage(tx, run, stage, at);
+  if (plan) await rebind(tx, task, wait, { ...moved, owner: { agentId: run.agentId }, plan }, { agentId: run.agentId }, `A run on this task reached its ${stage} stage, with dates of its own.`);
+  else await tx.update(taskWaits).set({ ...moved, updatedAt: at }).where(eq(taskWaits.id, wait.id));
 }
 
 /* Those who answer for the wait may change it: naming someone in a plan gives them no more than that. */

@@ -79,6 +79,8 @@ export const WaitSourceState = z.strictObject({
   stage: z.enum(WAIT_STAGES).optional(),
   nextActionAt: moment.optional(),
   route: z.string().trim().min(1).max(120).optional(),
+  /* The one run a wait_for is for: that run's end ends its record, however far its deadline came. */
+  run: z.uuid().optional(),
 });
 export type WaitSourceState = z.infer<typeof WaitSourceState>;
 
