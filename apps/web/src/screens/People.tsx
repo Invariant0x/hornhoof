@@ -296,6 +296,7 @@ export function People({ me, selected, onSelect, onHome, onRenamed }: { me: Me; 
     if (!host || !table) return;
     const measure = () => fitTable(table);
     measure();
+    if (typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(measure);
     observer.observe(host);
     void document.fonts.ready.then(measure);
