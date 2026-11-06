@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test } from 'vitest';
 import { compareGeometry } from './geometry-compare.mjs';
 
 /* These are unit inputs, not browser executions or a TestEnvironment readiness receipt. */

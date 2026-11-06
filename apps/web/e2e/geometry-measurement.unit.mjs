@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test } from 'vitest';
 import { geometryMeasurement } from './geometry-measurement.ts';
 import { compareGeometry } from './geometry-compare.mjs';
 

@@ -27,39 +27,49 @@ async function step(stage, args) {
 if (platform() !== 'linux') throw new Error('Linux is required');
 console.log('HH_AUTHOR_SCOPE ' + JSON.stringify({ task: 535, source: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
   fullSuite: false, liveBrowsers: false, runtimeReadiness: 'NOT_VERIFIED',
-  coverage: 'Node child report retained as unmapped diagnostic; mapped Vitest TS wrapper only feeds quality checks' }));
+  coverage: 'Node child report retained outside coverage discovery as unmapped diagnostic; only mapped Vitest reports feed quality checks' }));
 let code = await step('install', ['npm', 'ci', '--prefer-offline', '--no-audit', '--no-fund']);
 if (!code) code = await step('protocol-build', ['npm', 'run', 'build', '-w', '@hornhoof/protocol']);
 if (!code) code = await step('web-build', ['npm', 'run', 'build', '-w', '@hornhoof/web']);
 if (!code) {
-  mkdirSync('coverage/raw-child', { recursive: true });
+  mkdirSync('.metrics/task-535', { recursive: true });
   const fixture = 'apps/web/e2e/geometry-fixture.ts', worker = 'apps/web/e2e/geometry-server.mjs';
   code |= await step('real-http-child-raw-coverage', ['node', '--import', 'tsx', '--test', '--experimental-test-coverage',
     '--test-coverage-include=' + fixture, '--test-coverage-include=' + worker,
     '--test-reporter=tap', '--test-reporter-destination=stdout', '--test-reporter=lcov',
-    '--test-reporter-destination=coverage/raw-child/lcov.info', 'apps/web/e2e/geometry-server.unit.mjs']);
-  code |= await step('mapped-wrapper-contracts', ['npx', '--no-install', 'vitest', 'run',
+    '--test-reporter-destination=.metrics/task-535/raw-child.lcov.txt', 'apps/web/e2e/geometry-server.unit.mjs']);
+  code |= await step('mapped-geometry-contracts', ['npx', '--no-install', 'vitest', 'run',
     '--config', 'apps/web/vitest.geometry-fixture.config.mjs', '--maxWorkers=2', '--coverage.enabled', '--coverage.reportOnFailure']);
   code |= await step('geometry-types', ['npx', '--no-install', 'tsc', '-p', 'apps/web/tsconfig.geometry.json', '--noEmit']);
-  code |= await step('fixture-typescript-eslint', ['npx', '--no-install', 'eslint', fixture, 'apps/web/e2e/geometry-fixture.vitest.ts']);
+  code |= await step('fixture-typescript-eslint', ['npx', '--no-install', 'eslint', fixture, 'apps/web/e2e/geometry-measurement.ts',
+    'apps/web/e2e/geometry-fixture.vitest.ts']);
   code |= await step('fixture-javascript-eslint', ['npx', '--no-install', 'eslint', worker, 'apps/web/e2e/geometry-server.unit.mjs',
+    'apps/web/e2e/geometry-measurement.unit.mjs', 'apps/web/e2e/geometry-compare.unit.mjs', 'apps/web/e2e/geometry-compare.mjs',
     'apps/web/vitest.geometry-fixture.config.mjs', '--rule', 'no-undef:error', '--rule', 'no-unused-vars:error',
     '--global', 'fetch', '--global', 'process', '--global', 'console', '--global', 'Buffer']);
-  console.log('HH_AUTHOR_UNMAPPED_DIAGNOSTIC_LCOV_BEGIN'); console.log(read('coverage/raw-child/lcov.info'));
+  console.log('HH_AUTHOR_UNMAPPED_DIAGNOSTIC_LCOV_BEGIN'); console.log(read('.metrics/task-535/raw-child.lcov.txt'));
   console.log('HH_AUTHOR_UNMAPPED_DIAGNOSTIC_LCOV_END');
-  const mapped = read('coverage/geometry-wrapper/lcov.info');
+  const mapped = read('coverage/geometry-mapped/lcov.info');
   console.log('HH_AUTHOR_MAPPED_LCOV_BEGIN'); console.log(mapped); console.log('HH_AUTHOR_MAPPED_LCOV_END');
-  const sourceLine = read(fixture).split('\n').findIndex(line => line.startsWith('export async function geometryServer')) + 1;
-  const functionLine = Number(/^FN:(\d+),geometryServer$/m.exec(mapped ?? '')?.[1]);
-  const valid = sourceLine > 0 && functionLine === sourceLine;
-  console.log('HH_AUTHOR_COVERAGE_BINDING ' + JSON.stringify({ fixture, sourceLine, functionLine, valid }));
+  let valid = Boolean(mapped);
+  for (const [file, name] of [[fixture, 'geometryServer'], ['apps/web/e2e/geometry-measurement.ts', 'geometryMeasurement'],
+    ['apps/web/e2e/geometry-compare.mjs', 'compareGeometry']]) {
+    const sourceLine = read(file).split('\n').findIndex(line => line.startsWith('export ') && line.includes('function ' + name + '(')) + 1;
+    const block = (mapped ?? '').split('end_of_record').find(record => record.includes('SF:' + file + '\n')) ?? '';
+    const functionLine = Number(new RegExp('^FN:(\\d+),' + name + '$', 'm').exec(block)?.[1]);
+    const matches = sourceLine > 0 && functionLine === sourceLine;
+    valid &&= matches;
+    console.log('HH_AUTHOR_COVERAGE_BINDING ' + JSON.stringify({ file, name, sourceLine, functionLine, valid: matches }));
+  }
   if (!valid) code |= 1;
   else {
     /* No counters are edited. Worker coverage is unavailable here, so its CRAP uses the conservative zero-coverage bound. */
     writeFileSync('coverage/lcov.info', mapped + '\n');
-    code |= await step('mapped-fixture-crapper', ['crapper', '--use-existing-coverage', '--threshold', '10', fixture, worker]);
+    code |= await step('mapped-geometry-crapper', ['crapper', '--use-existing-coverage', '--threshold', '10', fixture, worker,
+      'apps/web/e2e/geometry-measurement.ts', 'apps/web/e2e/geometry-compare.mjs']);
   }
-  code |= await step('fixture-typescript-dryer', ['dryer', '--threshold', '0.8', fixture, 'apps/web/e2e/geometry-fixture.vitest.ts']);
+  code |= await step('fixture-typescript-dryer', ['dryer', '--threshold', '0.8', fixture,
+    'apps/web/e2e/geometry-measurement.ts', 'apps/web/e2e/geometry-fixture.vitest.ts']);
 }
 process.exitCode = code;
 AUTHOR
