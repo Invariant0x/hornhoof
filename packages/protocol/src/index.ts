@@ -428,7 +428,7 @@ export const NodeReconnect = z.object({
 export type NodeReconnect = z.infer<typeof NodeReconnect>;
 
 const NodeMessage = z.discriminatedUnion('type', [
-  HandoffMessage,
+  ...HandoffMessage.options,
   CheckAcquire, CheckRelease, TestsDescribed,
   /* terminals: the node runs agents in sessions people can watch and type into. */
   /* tests: the parts of test runs it runs, or ran and Hornhoof has not confirmed. */
@@ -614,7 +614,7 @@ function validTestMode(message: { command: string; commitSha?: string | null; en
 }
 
 const ServerMessage = z.discriminatedUnion('type', [
-  HandoffControlMessage,
+  ...HandoffControlMessage.options,
   CheckQueueReply,
   z.object({
     type: z.literal('job.run'),
