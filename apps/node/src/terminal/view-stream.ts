@@ -40,12 +40,11 @@ const OPEN_SEQUENCE = /\x1b(?:\[[0-?]*[ -/]*|[\]PX^_][^\x07\x1b]*\x1b?|[ -/]*)$/
 /* The end of a stream that a terminal sequence has not finished in: anything put after it would break the sequence. */
 export const openSequence = (stream: string): string => OPEN_SEQUENCE.exec(stream)?.[0] ?? '';
 
-/* How many rows a view's terminal needs of what a pane's history took in since it was last read. At its limit tmux drops a
-   tenth of it at once. A history cleared, or rows gone back on a taller screen, took nothing in, and at a new width all its
-   rows are other rows. A terminal that gets lower keeps the rows it loses by itself, as tmux does. */
-export function rowsGone(was: Pick<Pane, 'size' | 'limit' | 'width' | 'height'>, now: Pick<Pane, 'size' | 'limit' | 'width' | 'height'>): number {
+/* How many rows a view's terminal needs of what a pane's history took in since it was last read, at one height. At its limit
+   tmux drops a tenth of it at once. A history cleared took nothing in, and at a new width all its rows are other rows. */
+export function rowsGone(was: Pick<Pane, 'size' | 'limit' | 'width'>, now: Pick<Pane, 'size' | 'limit' | 'width'>): number {
   if (now.width !== was.width) return 0;
-  if (now.size >= was.size) return Math.max(0, now.size - was.size - Math.max(0, was.height - now.height));
+  if (now.size >= was.size) return now.size - was.size;
   const dropped = Math.max(1, Math.floor(now.limit / 10));
   return Math.min(now.size, was.size) >= now.limit - dropped ? now.size + dropped - was.size : 0;
 }
@@ -56,7 +55,11 @@ export function rowsGone(was: Pick<Pane, 'size' | 'limit' | 'width' | 'height'>,
    Rows are counted in tmux's history, which only a read at one moment can tell apart: when it moved between the count and
    the read, the read is of other rows, and is done again. Under output that never pauses the history waits for a pause.
    A program on its alternate screen left a screen of lines that are in neither its history nor that screen. They go to the
-   history at once, and are skipped when they get there. */
+   history at once, and are skipped when they get there.
+   A change of height moves rows between history and screen, and not the same in tmux and in a terminal. A taller tmux always
+   takes rows back from its history; a terminal does only with its cursor on its last row, and also when only its own window
+   got taller. A lower terminal keeps what it loses, where a program on its alternate screen has no history in tmux. No sequence
+   takes single rows back from a terminal's history, so all of it goes and comes again, once the height stops changing. */
 export class ViewHistory {
   private pane = paneOf();
   private given: string[] = [];
@@ -64,6 +67,8 @@ export class ViewHistory {
   private timer: NodeJS.Timeout | null = null;
   private again = false;
   private stopped = false;
+  private stale = false;
+  private reading = false;
 
   constructor(
     private readonly tmux: Pick<Tmux, 'run'>,
@@ -87,6 +92,16 @@ export class ViewHistory {
     this.wake();
   }
 
+  /* The view's own window changed height, which its terminal followed at once. */
+  resized(): void {
+    this.stale = true;
+    if (this.timer && !this.reading) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+    this.wake();
+  }
+
   stop(): void {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
@@ -98,7 +113,13 @@ export class ViewHistory {
       this.again = true;
       return;
     }
-    this.timer = setTimeout(() => void this.sync().finally(() => this.slept()), SYNC_MS);
+    this.timer = setTimeout(() => {
+      this.reading = true;
+      void this.sync().finally(() => {
+        this.reading = false;
+        this.slept();
+      });
+    }, SYNC_MS);
   }
 
   private slept(): void {
@@ -118,6 +139,7 @@ export class ViewHistory {
     const [status] = await this.say();
     if (!status || this.stopped) return true;
     const now = paneOf(status);
+    if (this.stale || now.height !== this.pane.height) return this.gaveAll(now);
     const rows = Math.min(rowsGone(this.pane, now), VIEW_HISTORY_LINES);
     const left = now.alternate && !this.pane.alternate;
     if (rows || left) return this.gave(now, rows, left);
@@ -136,6 +158,24 @@ export class ViewHistory {
     if (left) lines.push(...this.keep(savedRows(saved)));
     if (!lines.length) return true;
     this.give(intoHistory(lines, { rows: top, row: now.row, col: now.col }));
+    await this.repaint();
+    return true;
+  }
+
+  /* A height that comes during the read moved a terminal's rows again, so it counts for the next read. */
+  private async gaveAll(wanted: Pane): Promise<boolean> {
+    this.stale = false;
+    const said = await this.say(this.capture('-S', String(-VIEW_HISTORY_LINES), '-E', '-1'), this.capture('-a', '-q'), this.capture('-S', '0', '-E', '1'));
+    const now = paneOf(said.at(-1));
+    if (this.stopped) return true;
+    if (this.sequence || !sameRows(now, wanted) || now.height !== wanted.height) {
+      this.stale = true;
+      return false;
+    }
+    const [history = '', saved = '', top = ''] = said.slice(0, -1);
+    this.pane = now;
+    this.given = savedRows(saved);
+    this.give(`\x1b[3J${intoHistory([...(now.size ? linesOf(history) : []), ...this.given], { rows: top, row: now.row, col: now.col })}`);
     await this.repaint();
     return true;
   }

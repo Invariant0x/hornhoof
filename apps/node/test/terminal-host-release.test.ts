@@ -37,7 +37,8 @@ const binding = (key: string, more: { workspaceId?: string; bindingVersion?: num
 async function boundProgram(key: string): Promise<RetireIdleWorkspace> {
   const jobId = randomUUID();
   const workspaceBinding = binding(key);
-  const result = await host.run({ ...job(key, 'first', { jobId }), workspaceBinding });
+  const first = job(key, 'first', { jobId });
+  const result = await host.run({ ...first, input: { ...first.input, workspaceBinding } });
   expect(result.ok).toBe(true);
   return { agentKey: key, expectedInstance: host.instanceOf(key)!, expectedJobId: jobId, workspaceId: workspaceBinding.workspaceId, bindingVersion: workspaceBinding.bindingVersion };
 }
@@ -277,7 +278,7 @@ describe.skipIf(!hasTmux)('retiring the idle program of a workspace', () => {
     const keys = vi.spyOn(tmux, 'keys');
     const started = Date.now();
     const jobId = randomUUID();
-    const turn = host.run({ ...job(key, 'SLOW work', { jobId, sessionId: host['agents'].get(key)!.sessionId }), workspaceBinding: undefined });
+    const turn = host.run(job(key, 'SLOW work', { jobId, sessionId: host['agents'].get(key)!.sessionId }));
     await expect(host.retireIdleWorkspace(request)).resolves.toMatchObject({ status: 'busy', instanceGone: false });
     expect(Date.now() - started).toBeLessThan(1000);
     await expect(turn).resolves.toMatchObject({ ok: true });
