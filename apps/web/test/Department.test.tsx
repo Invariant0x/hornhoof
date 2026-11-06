@@ -29,6 +29,7 @@ const listed = (id: string, name: string): Me => ({ ...ME, person: { ...ME.perso
 function shell(routes: Record<string, unknown> = {}, org: Org = DEV_ORG, me: Me = ME) {
   const calls = mockApi({
     'GET /api/org': [200, org],
+    'GET /api/agents/orchestrator': [200, { ...CARD, id: 'a1', kind: 'orchestrator', name: 'Orchestrator', role: null, department: null }],
     [`GET ${EVENTS}`]: [200, { events: [], state: READY }],
     'POST /api/agents/orchestrator/start': [200, { started: false }],
     ...(routes as Record<string, [number, unknown]>),

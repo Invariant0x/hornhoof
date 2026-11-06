@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { Shell } from '../src/screens/Shell';
 import type { ComputerAccessDecision, Me, Org, ProposalDecision } from '../src/types';
-import { CLOSED_TASKS, decisions, DEV_ORG, FINISHED_TURN, ME, mockApi, PLANNED_TURN, REQUESTS, ROSTER, TASKS, TURN } from './api-mock';
+import { CARD, CLOSED_TASKS, decisions, DEV_ORG, FINISHED_TURN, ME, mockApi, PLANNED_TURN, REQUESTS, ROSTER, TASKS, TURN } from './api-mock';
 import { fakeStream } from './fake-stream';
 
 const ALL = '/api/tasks?status=all';
@@ -14,6 +14,7 @@ const SUBTASK = { ...TASKS[1]!, id: 't13', number: 13, title: 'Card form', brief
 function shell(routes: Record<string, unknown> = {}, me: Me = ME) {
   const calls = mockApi({
     'GET /api/org': [200, DEV_ORG],
+    'GET /api/agents/orchestrator': [200, { ...CARD, id: 'a1', kind: 'orchestrator', name: 'Orchestrator', role: null, department: null }],
     'GET /api/requests': [200, decisions(REQUESTS)],
     'GET /api/turns': [200, { turns: [FINISHED_TURN, TURN, PLANNED_TURN] }],
     [`GET ${ALL}`]: [200, { tasks: [...TASKS, SUBTASK, PLANNED, { ...CLOSED_TASKS[0]!, turn: 2 }] }],
