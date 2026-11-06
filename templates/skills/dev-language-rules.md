@@ -5,6 +5,8 @@ description: { en: "Follows the style, patterns, security and testing rules of e
 kind: procedure
 sources: [affaan-m/ECC rules]
 ---
+For `small: true`, follow the language's coding rules and run only affected tests through run_tests. Extra language checks and detailed reports belong to the shared turn review and checks. The full per-task check and report requirements below apply to ordinary work.
+
 Before you write or review code:
 
 1. **Find the languages** the work touches, from its files and build files. When the task or a person names one, use it.
