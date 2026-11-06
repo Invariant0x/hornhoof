@@ -258,6 +258,8 @@ describe('the orchestrator\'s conversation', () => {
       ...as(ceo),
     });
     expect(moved.statusCode).toBe(201);
+    /* The node that ran him on the plan he left closes that program. */
+    expect((await builtin.next()).type).toBe('agent.release');
     await say(app, ceo, 'What next?');
     const run = await nextRun(builtin);
     expect(run.sessionId).toBeNull();

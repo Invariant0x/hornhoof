@@ -9,7 +9,7 @@ When a task stalls, fails or comes back again, or something looks broken, find o
 
 1. Look first: the task's comments and events with "task", the employee's window and card with "view", then "database": agent_changes (who changed an employee and when), jobs (each turn and its error), task_events (each move of a task), agent_events (what an employee said and did). One query beats a question to a head or the CEO.
 2. Name the cause in one line before you act: a sign-in that ran out, a full limit, a machine offline, an unclear task, the wrong department, a wrong row.
-3. Decide and fix the cause yourself, not the symptom: an unclear task is made clear with update_task, work in the wrong department becomes a task where it belongs, a wrong row is fixed with "database" after you read it. A fix to the schema or to Hornhoof itself goes to the head of Operations as one task. Only sign-ins, payments and machines go to the CEO; never ask the CEO to run SQL.
+3. Decide and fix the cause yourself, not the symptom: an unclear task is made clear with update_task, work in the wrong department becomes a task where it belongs, a wrong row is fixed with "database" after you read it. Only sign-ins, payments and machines go to the CEO.
 4. Change one thing at a time and check it worked before the next.
 5. Trouble with your own session or tools never outranks the CEO's goals: keep their work moving first.
 6. When the same internal fix fails a second time, give the cause to the head of Operations as one task and tell the CEO in a line what you saw and did; a transient external service failure needs no diagnosis task unless the service stays broken.

@@ -2,7 +2,7 @@ import type { AddressInfo } from 'node:net';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { eq } from 'drizzle-orm';
-import { MAX_INSTRUCTIONS, parseServerMessage } from '@hornhoof/protocol';
+import { MAX_INSTRUCTIONS, OLD_NODE_INSTRUCTIONS, parseServerMessage } from '@hornhoof/protocol';
 import type { FastifyInstance } from 'fastify';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
@@ -23,6 +23,23 @@ const notes = async (app: FastifyInstance, token: string) => (await app.inject({
 const write = (app: FastifyInstance, token: string, text: string) => app.inject({ method: 'POST', url: '/api/notebook', payload: { text }, ...as(token) });
 
 describe("the company's notebook", () => {
+  it('goes to a node from before skill files as far as it fits, so the orchestrator still gets its turn there', async () => {
+    const { app, db, ceo } = await company();
+    const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    const empty = await instructionsOf(app.ctx, orchestrator!, false);
+    expect(empty.text).toContain('The notebook is empty.');
+    expect(empty.text.length).toBeLessThanOrEqual(OLD_NODE_INSTRUCTIONS);
+
+    for (let i = 0; i < 20; i++) expect((await write(app, ceo, `Note ${i} ${'x'.repeat(100)}.`)).statusCode).toBe(201);
+    const old = await instructionsOf(app.ctx, orchestrator!, false);
+    expect(old.text.length).toBeLessThanOrEqual(OLD_NODE_INSTRUCTIONS);
+    expect(old.text).toContain('[#1] Note 0 ');
+    expect(old.text).not.toContain('[#20] Note 19 ');
+    expect(old.text).toContain('The rest of the notebook did not fit here. Read it whole with the notebook tool.');
+
+    expect((await instructionsOf(app.ctx, orchestrator!, true)).text).toContain('[#20] Note 19 ');
+  });
+
   it('keeps numbered notes that people who see the whole company write, rewrite and remove', async () => {
     const { app, ceo } = await company();
     expect(await notes(app, ceo)).toEqual([]);
