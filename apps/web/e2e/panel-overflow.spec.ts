@@ -138,7 +138,7 @@ const LONG_MACHINE: MachineView = {
   id: 'm1', hostname: LONG_HOST, owner: { id: 'p1', name: 'Ivan' }, os: 'linux', arch: 'x86_64', online: false,
   lastSeenAt: null, load: null, plans: [], lendsTests: true, running: { agents: [], parts: [] },
 };
-const LONG_COMMAND: ShownCommand = { id: 'cmd1', kind: 'machine', plans: [], machine: null, command: LONG_URL, expiresAt: '2026-11-06T00:00:00.000Z' };
+const LONG_COMMAND: ShownCommand = { id: 'cmd1', kind: 'machine', plans: [], machine: null, command: LONG_URL, expiresAt: new Date(Date.now() + 3_600_000).toISOString() };
 
 async function prepareRoutes(page: Page, lang: 'en' | 'ru', theme: 'light' | 'dark', width: number) {
   await page.setViewportSize({ width, height: 900 });
