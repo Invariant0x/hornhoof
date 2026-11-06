@@ -1,0 +1,61 @@
+import { eq } from 'drizzle-orm';
+import { describe, expect, it } from 'vitest';
+import { orchestratorHeaders } from '../src/auth/internal.js';
+import { people, proposals, requests } from '../src/db/schema.js';
+import { everyKind, registerAnswerCases, staffed } from './decisions-company.js';
+import { as } from './helpers.js';
+
+describe('who may answer, by the rules of #49', () => {
+  registerAnswerCases(['devPlain','mktQuestion']);
+  it("refuses the orchestrator's own call that carries no turn of a person with the right", async () => {
+    const c = await everyKind();
+    const res = await c.app.inject({ method: 'POST', url: `/api/requests/${c.salesQuestion.request.id}`, payload: { pick: 0 }, headers: orchestratorHeaders(c.ids.ivan, c.orchestrator.id) });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error.reason).toBe('decision_context_missing');
+    const [row] = await c.db.select().from(requests).where(eq(requests.id, c.salesQuestion.request.id));
+    expect(row!.status).toBe('open');
+  });
+
+  it('shows the computer to people of the whole company and lets only the CEO and the delegate decide it, from their own screen', async () => {
+    const c = await staffed();
+    expect((await c.app.inject({ url: '/api/computer', ...as(c.tokens.zed) })).json()).toMatchObject({ asked: { reason: 'Inspect disk space.' }, canAnswer: false });
+    expect((await c.app.inject({ url: '/api/computer', ...as(c.tokens.delegate) })).json()).toMatchObject({ canAnswer: true });
+    expect((await c.app.inject({ url: '/api/computer', ...as(c.tokens.dan) })).statusCode).toBe(403);
+    expect((await c.app.inject({ url: '/api/computer', headers: orchestratorHeaders(c.ids.ivan, c.orchestrator.id) })).statusCode).toBe(403);
+    for (const action of ['decline', 'close', 'open']) {
+      for (const token of [c.tokens.zed, c.tokens.dan]) {
+        const res = await c.app.inject({ method: 'POST', url: `/api/computer/${action}`, ...as(token) });
+        expect(res.statusCode, `${action} by a person without the right`).toBe(403);
+      }
+      const viaOrchestrator = await c.app.inject({ method: 'POST', url: `/api/computer/${action}`, headers: orchestratorHeaders(c.ids.ivan, c.orchestrator.id) });
+      expect(viaOrchestrator.statusCode, `${action} by the orchestrator`).toBe(403);
+    }
+    expect(c.ctx.computer.view().asked).not.toBeNull();
+    expect((await c.app.inject({ method: 'POST', url: '/api/computer/decline', ...as(c.tokens.delegate) })).statusCode).toBe(200);
+    expect(c.ctx.computer.view().asked).toBeNull();
+  });
+
+  it('lets only the CEO and the delegate apply the cards, with or without the card', async () => {
+    const c = await staffed();
+    for (const token of [c.tokens.zed, c.tokens.dan]) {
+      for (const payload of [{ proposalId: c.structure.id, items: [] }, { items: [] }]) {
+        const res = await c.app.inject({ method: 'POST', url: '/api/departments/build', payload, ...as(token) });
+        expect(res.statusCode).toBe(403);
+      }
+      for (const payload of [{ proposalId: c.staff.id, people: [] }, { people: [] }]) {
+        const res = await c.app.inject({ method: 'POST', url: `/api/departments/${c.dev.id}/staff`, payload, ...as(token) });
+        expect([403, 404]).toContain(res.statusCode);
+      }
+    }
+    const zedsTry = await c.app.inject({ method: 'POST', url: '/api/departments/build', payload: { proposalId: c.structure.id, items: [] }, ...as(c.tokens.zed) });
+    expect(zedsTry.json().error.reason).toBe('decision_not_allowed');
+    const [still] = await c.db.select().from(proposals).where(eq(proposals.id, c.structure.id));
+    expect(still!.status).toBe('pending');
+    const byDelegate = await c.app.inject({ method: 'POST', url: '/api/departments/build', payload: { proposalId: c.structure.id, items: [{ template: 'support', checked: true, note: 'Answers customers.' }] }, ...as(c.tokens.delegate) });
+    expect(byDelegate.statusCode).toBe(201);
+    const [applied] = await c.db.select().from(proposals).where(eq(proposals.id, c.structure.id));
+    const [dave] = await c.db.select().from(people).where(eq(people.name, 'Dave'));
+    expect(applied).toMatchObject({ status: 'applied', appliedBy: dave!.id });
+  });
+
+});
