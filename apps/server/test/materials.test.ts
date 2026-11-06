@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { ApiError } from '../src/errors.js';
 import { parseMaterialSubmission } from '../src/modules/tasks/request-materials.js';
-import { agentEvents, agents, attachments, companies, departments, jobs, people, proposals, requestInternal, requests, taskEvents, tasks } from '../src/db/schema.js';
+import { agentChanges, agentEvents, agents, attachments, companies, departments, jobs, people, proposals, requestInternal, requests, taskEvents, tasks } from '../src/db/schema.js';
 import { as, invitePerson, listen, mcp, openStream, ownPlan, setUpCompany, testApp, until } from './helpers.js';
 
 const PNG = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.alloc(64, 1)]);
@@ -179,6 +179,69 @@ describe('legacy scoped materials', () => {
     expect(response.json().error.reason).toBe('source_producer_unavailable');
     expect(response.body).not.toContain(f.common.id);
     expect((await f.db.select().from(requests).where(eq(requests.id, f.question.id)))[0]!.status).toBe('open');
+  });
+});
+
+describe('native material boundaries', () => {
+  async function native(kind: 'structure' | 'staff', state: 'legacy' | 'private-staging' | 'public-stamp') {
+    const f = await legacy();
+    const items = kind === 'structure' ? [{ template: 'finance', note: 'Proposed department' }] : [{ role: 'DEV-DEV', name: 'New employee', model: 'default', subscription: f.author.subscriptionId, skills: [] }];
+    const [proposal] = await f.db.insert(proposals).values({
+      companyId: f.company.id, agentId: f.author.id, kind, departmentId: kind === 'staff' ? f.dev.id : null,
+      brief: 'Review the original proposal', items,
+      ...(state === 'private-staging' ? { materialSnapshot: { schemaVersion: 1 as const, versions: [] } } : {}),
+      ...(state === 'public-stamp' ? { materialRevision: 1, materialDigest: 'a'.repeat(64) } : {}),
+    }).returning();
+    const url = `/api/proposals/${proposal!.id}/materials`;
+    const applyUrl = kind === 'structure' ? '/api/departments/build' : `/api/departments/${f.dev.id}/staff`;
+    const payload = { proposalId: proposal!.id, ...(kind === 'structure' ? { items } : { people: items }) };
+    const stateOf = async () => ({
+      proposal: await f.db.select().from(proposals),
+      company: await f.db.select().from(companies),
+      departments: await f.db.select().from(departments),
+      agents: await f.db.select().from(agents),
+      changes: await f.db.select().from(agentChanges),
+      outgoing: await f.db.select().from(agentEvents),
+      jobs: await f.db.select().from(jobs),
+    });
+    return { ...f, proposal: proposal!, url, applyUrl, payload, stateOf };
+  }
+
+  it.each(['structure', 'staff'] as const)('reports the missing real %s material producer without inventing a snapshot', async kind => {
+    const f = await native(kind, 'legacy');
+    const before = await f.stateOf();
+    for (const url of [f.url, `${f.url}/${randomUUID()}/content`, `${f.url}/${randomUUID()}/download`]) {
+      const response = await f.app.inject({ url, ...as(f.ceo) });
+      expect(response.statusCode).toBe(503);
+      expect(response.json().error.reason).toBe('source_producer_unavailable');
+      expect(response.body).not.toContain(f.author.id);
+      expect(response.body).not.toContain('items');
+    }
+    expect(await f.stateOf()).toEqual(before);
+  });
+
+  it.each(['structure', 'staff'] as const)('requires current source visibility before returning the %s producer state', async kind => {
+    const f = await native(kind, 'private-staging');
+    expect((await f.app.inject({ url: f.url })).statusCode).toBe(401);
+    const stranger = await invitePerson(f.app, f.ceo, { name: 'Sales reader', email: 'native-reader@acme.com', access: { departments: [f.sales.id] } });
+    for (const url of [f.url, `${f.url}/${randomUUID()}/content`]) expect((await f.app.inject({ url, ...as(stranger) })).statusCode).toBe(404);
+    expect((await f.app.inject({ url: `/api/proposals/${randomUUID()}/materials`, ...as(f.ceo) })).statusCode).toBe(404);
+  });
+
+  it.each([
+    ['structure', 'private-staging'], ['structure', 'public-stamp'],
+    ['staff', 'private-staging'], ['staff', 'public-stamp'],
+  ] as const)('does not apply an unclassified %s card with %s evidence', async (kind, state) => {
+    const f = await native(kind, state);
+    const before = await f.stateOf();
+    const stream = await openStream(f.app, f.ceo);
+    const response = await f.app.inject({ method: 'POST', url: f.applyUrl, payload: f.payload, ...as(f.ceo) });
+    expect(response.statusCode).toBe(503);
+    expect(response.json().error.reason).toBe('source_producer_unavailable');
+    expect(await f.stateOf()).toEqual(before);
+    f.app.ctx.bus.publish(f.company.id, { type: 'working', working: 123 });
+    await until(() => stream.messages.some(m => m.type === 'working' && m.working === 123));
+    expect(stream.messages.filter(m => m.type !== 'working')).toEqual([]);
   });
 });
 
