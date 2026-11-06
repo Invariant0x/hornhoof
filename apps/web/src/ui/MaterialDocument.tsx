@@ -47,22 +47,40 @@ export function extractPdfTextItems(items: readonly unknown[]): string {
   return items.map(pdfItemText).filter(Boolean).join(' ');
 }
 
+async function renderPdfPageSurface(
+  page: PdfRawPage,
+  viewport: PdfRawViewport,
+  width: number,
+  height: number,
+  annotationDisable: number,
+): Promise<HTMLCanvasElement> {
+  const surface = document.createElement('canvas');
+  surface.width = width;
+  surface.height = height;
+  await page.render({ canvas: surface, viewport, annotationMode: annotationDisable }).promise;
+  return surface;
+}
+
+function copyCanvasSurface(source: HTMLCanvasElement, target: HTMLCanvasElement, width: number, height: number): void {
+  target.width = width;
+  target.height = height;
+  const ctx = target.getContext('2d');
+  if (ctx) ctx.drawImage(source, 0, 0);
+}
+
 async function loadPdfPage(doc: PdfRawDocument, annotationDisable: number, pageNumber: number): Promise<PdfPageView> {
   const page = await doc.getPage(pageNumber);
   const viewport = page.getViewport({ scale: 1.5 });
   const width = Math.max(1, Math.ceil(viewport.width));
   const height = Math.max(1, Math.ceil(viewport.height));
   const textContent = await page.getTextContent();
+  const surface = await renderPdfPageSurface(page, viewport, width, height, annotationDisable);
   return {
     pageNumber,
     width,
     height,
     text: extractPdfTextItems(textContent.items),
-    renderToCanvas: async canvas => {
-      canvas.width = width;
-      canvas.height = height;
-      await page.render({ canvas, viewport, annotationMode: annotationDisable }).promise;
-    },
+    renderToCanvas: canvas => copyCanvasSurface(surface, canvas, width, height),
   };
 }
 
@@ -72,7 +90,6 @@ async function defaultPdfLoader(bytes: Uint8Array): Promise<PdfDocumentHandle> {
   pdfjs.GlobalWorkerOptions.workerSrc = workerAsset.default;
   const task = pdfjs.getDocument({
     data: bytes.slice(),
-    isEvalSupported: false,
     enableXfa: false,
     useWorkerFetch: false,
     disableAutoFetch: true,
@@ -98,6 +115,7 @@ async function readAllPdfPages(handle: PdfDocumentHandle): Promise<PdfPageView[]
 type DocState =
   | { kind: 'loading' }
   | { kind: 'text'; text: string; complete: boolean; error: string | null }
+  | { kind: 'incomplete'; message: string }
   | { kind: 'pdf'; pages: PdfPageView[] }
   | { kind: 'pdf-unavailable' }
   | { kind: 'error'; message: string };
@@ -125,7 +143,7 @@ async function parsePdfBytes(bytes: Uint8Array): Promise<DocState> {
 
 async function fetchPdfState(contentUrl: string, signal: AbortSignal, t: Messages): Promise<DocState> {
   const streamed = await api.streamBytes(contentUrl, signal);
-  if (!streamed.complete) return { kind: 'text', text: '', complete: false, error: t.tasks.materials.loadFailed };
+  if (!streamed.complete) return { kind: 'incomplete', message: t.tasks.materials.loadFailed };
   return parsePdfBytes(streamed.bytes);
 }
 
@@ -215,6 +233,28 @@ function notifyPdfFallback(onPdfFallbackChange: ((unavailable: boolean) => void)
   if (onPdfFallbackChange) onPdfFallbackChange(unavailable);
 }
 
+type LoadGuard = { live: boolean; signal: AbortSignal };
+
+function isLoadGuardActive(guard: LoadGuard): boolean {
+  return guard.live && !guard.signal.aborted;
+}
+
+function applyDocSuccess(
+  guard: LoadGuard,
+  next: DocState,
+  setState: (s: DocState) => void,
+  onPdfFallbackChange?: (unavailable: boolean) => void,
+): void {
+  if (!guard.live) return;
+  setState(next);
+  notifyPdfFallback(onPdfFallbackChange, next.kind === 'pdf-unavailable');
+}
+
+function applyDocError(guard: LoadGuard, err: unknown, t: Messages, setState: (s: DocState) => void): void {
+  if (!isLoadGuardActive(guard)) return;
+  setState({ kind: 'error', message: errorText(t, err) });
+}
+
 function useLoadedDocState(
   format: 'text' | 'markdown' | 'pdf',
   contentUrl: string,
@@ -226,22 +266,15 @@ function useLoadedDocState(
 
   useEffect(() => {
     const ctrl = new AbortController();
-    let live = true;
+    const guard: LoadGuard = { live: true, signal: ctrl.signal };
     setState({ kind: 'loading' });
     notifyPdfFallback(onPdfFallbackChange, false);
     void loadDocState(format, contentUrl, ctrl.signal, t).then(
-      next => {
-        if (!live) return;
-        setState(next);
-        notifyPdfFallback(onPdfFallbackChange, next.kind === 'pdf-unavailable');
-      },
-      err => {
-        if (!live || ctrl.signal.aborted) return;
-        setState({ kind: 'error', message: errorText(t, err) });
-      },
+      next => applyDocSuccess(guard, next, setState, onPdfFallbackChange),
+      err => applyDocError(guard, err, t, setState),
     );
     return () => {
-      live = false;
+      guard.live = false;
       ctrl.abort();
     };
   }, [contentUrl, format, attempt, t, onPdfFallbackChange]);
@@ -263,6 +296,16 @@ function PdfPagesView({ pages }: { pages: PdfPageView[] }) {
   );
 }
 
+function IncompleteDocView({ message, onRetry }: { message: string; onRetry: () => void }) {
+  const t = useT();
+  return (
+    <div className="mv-doc">
+      <p className="mv-reading">{t.tasks.materials.incomplete}</p>
+      <RetryAlert message={message} onRetry={onRetry} />
+    </div>
+  );
+}
+
 function MaterialDocView({
   state,
   format,
@@ -275,11 +318,20 @@ function MaterialDocView({
   onRetry: () => void;
 }) {
   const t = useT();
-  if (state.kind === 'loading') return <p className="mv-reading" role="status">{t.common.loading}</p>;
-  if (state.kind === 'error') return <RetryAlert message={state.message} onRetry={onRetry} />;
-  if (state.kind === 'pdf-unavailable') return <PdfUnavailableCard downloadUrl={downloadUrl} />;
-  if (state.kind === 'pdf') return <PdfPagesView pages={state.pages} />;
-  return <TextBody format={format} text={state.text} complete={state.complete} error={state.error} onRetry={onRetry} />;
+  switch (state.kind) {
+    case 'loading':
+      return <p className="mv-reading" role="status">{t.common.loading}</p>;
+    case 'error':
+      return <RetryAlert message={state.message} onRetry={onRetry} />;
+    case 'incomplete':
+      return <IncompleteDocView message={state.message} onRetry={onRetry} />;
+    case 'pdf-unavailable':
+      return <PdfUnavailableCard downloadUrl={downloadUrl} />;
+    case 'pdf':
+      return <PdfPagesView pages={state.pages} />;
+    case 'text':
+      return <TextBody format={format} text={state.text} complete={state.complete} error={state.error} onRetry={onRetry} />;
+  }
 }
 
 export function MaterialDocument({ format, contentUrl, downloadUrl, onPdfFallbackChange }: Props) {

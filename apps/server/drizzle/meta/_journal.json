@@ -519,6 +519,27 @@
       "when": 1793950158136,
       "tag": "0074_wait_cards_and_goals",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1793954747150,
+      "tag": "0075_internal_first_questions",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1793962576763,
+      "tag": "0076_repo_token_revision",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1793963583864,
+      "tag": "0077_small_tasks",
+      "breakpoints": true
     }
   ]
 }

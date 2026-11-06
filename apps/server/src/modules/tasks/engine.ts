@@ -17,7 +17,7 @@ import { returnAlongLine } from '../org/map-state.js';
 import { handOff } from './pulses.js';
 import { recordCause, type WakeCause } from './notification-cause.js';
 import { preserveNote } from './long-text.js';
-import { authorVendor, captureReview, reviewContext, reviewVendor, turnReviewContext } from './review-context.js';
+import { authorVendor, captureReview, reviewContext, reviewVendor, turnReviewContext, type Review } from './review-context.js';
 import { degradedReviewNotes, reviewPanel, turnReviewPlan, type Plan } from './review-plan.js';
 import { mechanicalVerdict } from './review-findings.js';
 import { verdictReview, type ReviewVerdict } from './review-verdict.js';
@@ -520,6 +520,7 @@ export type NewTask = {
   riskClass?: Task['riskClass'];
   /* Of a task with nothing above it; one under a task is what that task is. */
   urgent?: boolean;
+  small?: boolean;
 };
 
 /* A live employee or orchestrator of the company. */
@@ -647,6 +648,7 @@ export async function createTask(ctx: Ctx, actor: Actor, input: NewTask): Promis
         workKind: input.workKind,
         riskClass: input.riskClass,
         urgent,
+        small: input.small === true,
         createdByPersonId: actor.personId ?? null,
         createdByAgentId: actor.agentId ?? null,
         updatedAt: new Date(),
@@ -708,8 +710,7 @@ async function submissionGate(ctx: Live, task: Task, review: import('./review-co
   return { gate: await atGate(ctx.db, task, back?.stage ?? 1, back?.findings), data: { fixReviews: [] } };
 }
 
-/* The executor hands its work to the first gate, or finishes a task without gates. */
-export async function submit(ctx: Live, agentId: string, taskId: string, r: { summary: string; evidence: string; review?: { baseCommit: string } }): Promise<Moved> {
+export async function submissionTask(ctx: Live, agentId: string, taskId: string): Promise<Task> {
   const task = await loadTask(ctx.db, taskId);
   stillOpen(task);
   if (!task.executorAgentId) throw refuse(400, 'task_invalid', `#${task.number} has no executor; its owner closes it with report.`);
@@ -717,8 +718,17 @@ export async function submit(ctx: Live, agentId: string, taskId: string, r: { su
   if (task.status === 'waiting' && (await waitsForPerson(ctx.db, task.id))) throw refuse(409, 'task_invalid', `#${task.number} waits for a person's answer first.`);
   await refuseWaiting(ctx.db, task);
   await refuseOpenUnder(ctx.db, task);
-  const review = task.merging ? await reviewContext(ctx.db, task.id) : await captureReview(ctx, task, r.review);
-  const n: Note = { kind: 'submitted', actor: { agentId }, text: r.summary, data: { evidence: r.evidence, ...(review ? { review } : {}), ...(task.merging ? { merged: true } : {}) }, returned: true };
+  return task;
+}
+
+export type AuthorCheckOutcome = { version: 1; runId: string; attempt: number; status: 'passed' | 'partial' | 'failed'; reason: string | null };
+type CheckedSubmission = { review: Review; outcome: AuthorCheckOutcome };
+
+/* The executor hands its work to the first gate, or finishes a task without gates. */
+export async function submit(ctx: Live, agentId: string, taskId: string, r: { summary: string; evidence: string; review?: { baseCommit: string } }, checked?: CheckedSubmission): Promise<Moved> {
+  const task = await submissionTask(ctx, agentId, taskId);
+  const review = checked?.review ?? (task.merging ? await reviewContext(ctx.db, task.id) : await captureReview(ctx, task, r.review));
+  const n: Note = { kind: 'submitted', actor: { agentId }, text: r.summary, data: { evidence: r.evidence, ...(review ? { review } : {}), ...(checked ? { authorCheckOutcome: checked.outcome } : {}), ...(task.merging ? { merged: true } : {}) }, returned: true };
   const unstuck = stuckGoes(ctx, task);
   /* Its gates passed it already: handing the merge in finishes it. Work sent back goes straight to the gate that sent it. */
   if (task.gates.length && !task.merging) {
@@ -734,6 +744,16 @@ export async function submit(ctx: Live, agentId: string, taskId: string, r: { su
   const row = await move(ctx, task, past.set, n, unstuck.also, past.wakes);
   unstuck.tell();
   return { task: row, wakes: past.wakes };
+}
+
+export async function failAuthorCheck(ctx: Live, agentId: string, taskId: string, input: { outcome: AuthorCheckOutcome; text: string }): Promise<Moved> {
+  const task = await submissionTask(ctx, agentId, taskId);
+  const third = input.outcome.attempt >= 3;
+  const wakes = third ? giver(task, 'blocked', agentId, input.text) : [{ agentId, taskId: task.id, why: 'changes' as const, text: input.text }];
+  const row = await move(ctx, task, { status: third ? 'blocked' : 'working', silent: 0 }, {
+    kind: third ? 'blocked' : 'comment', actor: { agentId }, text: input.text, data: { authorCheckOutcome: input.outcome }, ...(third ? { returned: true } : {}),
+  }, undefined, wakes);
+  return { task: row, wakes };
 }
 
 /* The panels of the other tasks at a gate now that name any of these reviewers. A task at a gate is open, so it is in the
@@ -1113,7 +1133,7 @@ export async function dropGate(ctx: Live, actor: Actor, task: Task, agentId: str
   return move(ctx, task, { gates }, { kind: 'updated', actor, data: { fields: ['gates'] } });
 }
 
-export type TaskChange = { title?: string; brief?: string; body?: string; executor?: string; gates?: string[]; after?: string[]; afterPlans?: AfterPlans; independentPart?: IndependentPartInput; independentNone?: string; workKind?: NonNullable<Task['workKind']>; riskClass?: NonNullable<Task['riskClass']> };
+export type TaskChange = { title?: string; brief?: string; body?: string; executor?: string; gates?: string[]; after?: string[]; afterPlans?: AfterPlans; independentPart?: IndependentPartInput; independentNone?: string; workKind?: NonNullable<Task['workKind']>; riskClass?: NonNullable<Task['riskClass']>; small?: boolean };
 
 /* Runs fn on the task, and again on a fresh read of it when someone moved it meanwhile; null when it kept moving. */
 async function onFresh<T>(ctx: Live, task: Task, fn: (task: Task) => Promise<T>): Promise<T | null> {
@@ -1287,7 +1307,7 @@ async function regate(ctx: Live, agentId: string, task: Task, c: TaskChange): Pr
 function rewrite(task: Task, c: TaskChange): { set: Partial<Task>; fields: string[] } {
   const set: Partial<Task> = {};
   const fields: string[] = [];
-  for (const key of ['title', 'brief', 'body', 'workKind', 'riskClass'] as const) {
+  for (const key of ['title', 'brief', 'body', 'workKind', 'riskClass', 'small'] as const) {
     if (c[key] !== undefined && c[key] !== task[key]) {
       Object.assign(set, { [key]: c[key] });
       fields.push(key);

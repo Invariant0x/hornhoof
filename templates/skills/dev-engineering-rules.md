@@ -151,6 +151,8 @@ Every time you are asked to make a change follow:
 
 ### In Hornhoof
 
+For `small: true`, use the fast path in hh-task-flow: run only affected tests on the task. Detailed reports, matrices, complexity metrics and duplicate checks belong to the shared turn review and checks. The additional per-task checks below apply to ordinary work.
+
 * Run crapper and dryer through `run_tests` on a free compatible machine (hh-run-checks), from the repository root on the files your branch changed, `git diff --name-only --diff-filter=d <main line>...HEAD`: `--changed` sees only uncommitted files. Their coverage comes from the project's own test tools (vitest: `@vitest/coverage-v8` at the same version as vitest; pytest: `pytest-cov`; Rust: `cargo-llvm-cov`; Go has coverage built in). If the project is missing a coverage provider, linter (`typescript-eslint`, `ruff`, `clippy`, `golangci-lint`) or formatter settings, do not install them locally or work around them; tell the head of Development so one task adds them to the project.
 * Push your branch, not the main line: the main line takes it after the gates and the CEO's approval.
 
@@ -159,12 +161,13 @@ Every time you are asked to make a change follow:
 These rules fit any company, project and language.
 
 - T1. Put logic in pure functions with direct fast tests: milliseconds, no database, network or processes. At each seam, such as a route or an outside-world boundary, use only the integration tests that cover its contract and named failures, usually one or two, and few end-to-end tests. Write no tests just for coverage. Split a function with CRAP above 10 first. Test races, locks, role permissions and migrations of existing data on the product's real database in the final run.
-- T2. A task runs only what its change affects, using the project's selector, such as vitest related, jest --findRelatedTests, pytest --testmon, go test of affected packages or cargo test -p, plus types, lint, crapper and dryer on changed functions. Migrations, schemas, configuration, environment variables, routes, fixtures, string tables, scripts, installation and updates run their whole package at once. Measure selection instead of trusting it: a new test file always runs; when in doubt, run the whole package. When the final run finds what selection missed, record a selection miss.
+- T2. An ordinary task runs only what its change affects, using the project's selector, such as vitest related, jest --findRelatedTests, pytest --testmon, go test of affected packages or cargo test -p, plus types, lint, crapper and dryer on changed functions. Migrations, schemas, configuration, environment variables, routes, fixtures, string tables, scripts, installation and updates run their whole package at once. Measure selection instead of trusting it: a new test file always runs; when in doubt, run the whole package. When the final run finds what selection missed, record a selection miss.
 - T3. Use this same check table everywhere:
 
 | Stage | Checks |
 |---|---|
-| In work | Tests selected by impact, types, lint, crapper and dryer (T2). |
+| Small task (`small: true`) | Failing test, change and only affected tests; extra checks at the shared turn review. |
+| In work (ordinary tasks) | Tests selected by impact, types, lint, crapper and dryer (T2). |
 | After a batch merges | The batch's affected tests on one pinned commit. |
 | Final turn candidate | The whole suite with typecheck of tests and every affected application, build, QA browser checks and real database tests (T1). |
 

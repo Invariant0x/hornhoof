@@ -203,6 +203,33 @@ describe('asking a person', () => {
   });
 });
 
+describe('a small task', () => {
+  it('is set and read by the giver, never by its executor', async () => {
+    const { app, db, ceoToken, head, bruno, orchestrator, tools } = await company();
+    const client = await tools(head);
+    const made = await call(client, 'create_task', { title: 'Small copy', brief: '', body: '', executor: bruno.id, gates: [], small: true });
+    expect(made.isError).toBeFalsy();
+    const [row] = await db.select().from(tasks);
+    expect(row).toMatchObject({ small: true });
+    expect(JSON.parse(text(await call(client, 'tasks', {})))[0]).toMatchObject({ number: row!.number, small: true });
+    expect(JSON.parse(text(await call(client, 'task', { task: row!.number })))).toMatchObject({ small: true });
+    const read = await app.inject({ method: 'GET', url: `/api/tasks/${row!.id}`, ...as(ceoToken) });
+    expect(read.json().task).toMatchObject({ small: true });
+
+    expect((await call(client, 'update_task', { task: row!.number, small: false })).isError).toBeFalsy();
+    expect((await db.select().from(tasks))[0]).toMatchObject({ small: false });
+    expect((await call(await tools(orchestrator), 'update_task', { task: row!.number, small: true })).isError).toBeFalsy();
+    expect((await call(await tools(bruno), 'update_task', { task: row!.number, small: false })).isError).toBe(true);
+    expect((await db.select().from(tasks))[0]).toMatchObject({ small: true });
+  });
+
+  it('is not small by default', async () => {
+    const { db, head, bruno, tools } = await company();
+    await call(await tools(head), 'create_task', { title: 'Ordinary', brief: '', body: '', executor: bruno.id, gates: [] });
+    expect((await db.select().from(tasks))[0]).toMatchObject({ small: false });
+  });
+});
+
 describe("a task's kind and risk class", () => {
   const work = (department: string, title: string, labels: Record<string, string> = {}) => ({ department, title, brief: 'Why.', body: 'What.', ...labels });
 

@@ -19,6 +19,28 @@ const plan = {
 };
 const sync = { taskId: TASK, kind: 'external' as const, sourceKey: `wait_for:${OPERATION}`, sourceRevision: 1, ownerBinding: { agentId: AGENT }, plan, sourceState: {} };
 
+describe('question source metadata over the existing wait kinds', () => {
+  it.each(['external', 'person'] as const)('accepts a question key for %s with the matching real-owner shape', kind => {
+    const ownerBinding = kind === 'external' ? { agentId: AGENT } : { personId: PERSON };
+    const input = { ...sync, kind, sourceKey: `question:${OPERATION}`, sourceRevision: 2, ownerBinding };
+    expect(SyncSourceWaits.parse(input)).toEqual(input);
+    expect(EndSourceWait.parse({ taskId: TASK, kind, sourceKey: input.sourceKey, sourceRevision: 2, outcome: 'resolved', proofRef: 'question-resolution:2' })).toMatchObject({ sourceRevision: 2 });
+  });
+  it.each(['after', 'review', 'run'] as const)('does not invent a question source for %s', kind => {
+    expect(validSourceKey(kind, `question:${OPERATION}`)).toBe(false);
+  });
+  it.each(['external', 'person'] as const)('requires positive route revision and a repeating plan for a %s question', kind => {
+    const input = { ...sync, kind, sourceKey: `question:${OPERATION}`, ownerBinding: kind === 'external' ? { agentId: AGENT } : { personId: PERSON } };
+    expect(SyncSourceWaits.safeParse({ ...input, sourceRevision: 0 }).success).toBe(false);
+    expect(SyncSourceWaits.safeParse({ ...input, plan: { ...plan, finalReview: { ...plan.finalReview, intervalMs: null } } }).success).toBe(false);
+    expect(signalsOnce(kind, input.sourceKey)).toBe(false);
+  });
+  it('does not exchange an internal agent owner and a human recipient', () => {
+    expect(SyncSourceWaits.safeParse({ ...sync, sourceKey: `question:${OPERATION}`, ownerBinding: { personId: PERSON } }).success).toBe(false);
+    expect(SyncSourceWaits.safeParse({ ...sync, kind: 'person', sourceKey: `question:${OPERATION}` }).success).toBe(false);
+  });
+});
+
 describe('who owns a wait', () => {
   it.each([{ agentId: AGENT }, { personId: PERSON }])('takes one real agent or person %#', binding => {
     expect(WaitOwnerBinding.parse(binding)).toEqual(binding);

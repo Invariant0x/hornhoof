@@ -6,7 +6,7 @@ import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, DECISION_TOPICS, departments, jobs, requests, tasks, type DecisionTopic } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { ask, blocked, cancel, CLOSED, comment, createTask, gateLeads, inRepository, listed, openAfter, refuse, report, submit, taskSpot, updateTask, verdict, type Moved, type Task } from './engine.js';
+import { ask, blocked, cancel, CLOSED, comment, createTask, gateLeads, inRepository, listed, openAfter, refuse, report, taskSpot, updateTask, verdict, type Moved, type Task } from './engine.js';
 import { requireBlockingGate } from './gate-triggers.js';
 import { replanWait } from './wait-state.js';
 import { carriesFile, encodedHint } from './attachments.js';
@@ -17,6 +17,7 @@ import { setUrgent } from './urgency.js';
 import { answersCeoOrDelegate } from '../conversation/decision-context.js';
 import { ONLY_CEO } from '../tools/control.js';
 import { stopTurns, wakeAll } from './wake.js';
+import { submitWithAuthorCheck } from './author-check-submit.js';
 import { orchestratorOf } from '../conversation/queue.js';
 import { appendOutgoing } from '../events/store.js';
 import { personParty } from '../events/parties.js';
@@ -424,7 +425,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         description:
           'Gives work to a member of your department: executor is an employee id from company. Name yourself only when no member can do it. gates are the reviewers it passes in order, as role ids (DEV-REV) or employee ids: ' +
           "leave them out for code in a repository under your department's task of the turn, which the review of the turn checks all at once; [] for research, reports, plans and docs; name one only where a change must not reach the turn's branch unchecked. Name a role once: one reviewer of each model of it checks the work at once there. Left out anywhere else, the department's first review stage. The executor never reviews its own work. parent: the department task it serves. after needs independentPart or independentNone.",
-        inputSchema: { title: Title, brief: Brief, body: Body, executor: z.uuid(), gates: z.array(z.string().max(40)).max(8).optional(), parent: Ref.optional(), product: z.uuid().optional(), after: After.optional(), afterPlans: AfterPlans.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional() },
+        inputSchema: { title: Title, brief: Brief, body: Body, executor: z.uuid(), gates: z.array(z.string().max(40)).max(8).optional(), parent: Ref.optional(), product: z.uuid().optional(), after: After.optional(), afterPlans: AfterPlans.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional(), small: z.boolean().optional() },
       },
       async input =>
         run(async () => {
@@ -442,7 +443,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
           const inTurnReview = await turnReviewed(db, agent, executor, parent, input);
           const gates = inTurnReview || (executor.teamId && input.gates === undefined) ? [] : await gatesFor(agent, executor.id, input.gates);
           const after = await afterIds(input.after);
-          const moved = await createTask(ctx, { agentId: agent.id }, { title: input.title, brief: input.brief, body: input.body, departmentId: agent.departmentId, productId: input.product ?? null, parentId: parent?.id ?? null, assigneeAgentId: executor.id, executor: true, gates, after, afterPlans: await afterPlansOf(input.afterPlans), independentPart: input.independentPart, independentNone: input.independentNone, inTurnReview, workKind: input.workKind, riskClass: input.riskClass });
+          const moved = await createTask(ctx, { agentId: agent.id }, { title: input.title, brief: input.brief, body: input.body, departmentId: agent.departmentId, productId: input.product ?? null, parentId: parent?.id ?? null, assigneeAgentId: executor.id, executor: true, gates, after, afterPlans: await afterPlansOf(input.afterPlans), independentPart: input.independentPart, independentNone: input.independentNone, inTurnReview, workKind: input.workKind, riskClass: input.riskClass, small: input.small });
           return { text: `Created #${moved.task.number} for ${executor.name}${gates.length ? ` with ${gates.length} gate${gates.length > 1 ? 's' : ''}` : ''}.${await waiting(moved.task)}`, moved };
         }),
     );
@@ -457,7 +458,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
             'Whoever holds it is woken with the change. A blocked task opens again. after: the tasks of its turn it waits for from now on, [] to start it now.'
           : "Rewrites one of your department's member tasks so it reads as the current truth, or hands it to another executor or gates (only while it is with its executor). " +
             'A task waiting at a gate with nobody on to check it takes new gates from that gate on. A blocked task opens again. after: the tasks of its turn it waits for from now on, [] to start it now.',
-        inputSchema: { task: Ref, title: Title.optional(), brief: Brief.optional(), body: Body.optional(), executor: z.uuid().optional(), gates: z.array(z.string().max(40)).max(8).optional(), after: After.optional(), afterPlans: AfterPlans.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional() },
+        inputSchema: { task: Ref, title: Title.optional(), brief: Brief.optional(), body: Body.optional(), executor: z.uuid().optional(), gates: z.array(z.string().max(40)).max(8).optional(), after: After.optional(), afterPlans: AfterPlans.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional(), small: z.boolean().optional() },
       },
       async ({ task: ref, executor, gates, after, afterPlans, ...text }) =>
         run(async () => {
@@ -508,14 +509,14 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     server.registerTool(
       'submit',
       {
-        description: 'Hands your finished work on a task to its first gate (or closes it when it has none). summary: what you did; evidence: the command you ran and what it printed, the link, the check. Optional review.baseCommit pins the source range for your vertical task area; the server reads its head commit.',
+        description: 'Hands your finished work on a task to its first gate (or closes it when it has none). summary: what you did; evidence: the command you ran and what it printed, the link, the check. Optional review.baseCommit pins the source range for your vertical task area; the server reads its head commit. When author checks are enabled, review.authorCheckPlan carries the plain plan printed by check:author for one remote run on that exact commit.',
         inputSchema: { task: Ref, summary: Text.trim().min(1), evidence: Text.trim().min(1), review: ReviewSubmission.optional() },
       },
       async ({ task: ref, summary, evidence, review }) =>
         run(async () => {
           const { task } = await find(ref);
           plain(task, summary, evidence);
-          const moved = await submit(ctx, job.agentId, task.id, { summary, evidence, review });
+          const moved = await submitWithAuthorCheck(ctx, job, task.id, { summary, evidence, review });
           return { text: `Submitted. ${await where(moved.task)}`, moved };
         }),
     );
