@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
-import { NO_MODEL_YET, type Case, type CheckBinding, type CheckInput, type CheckReceipt, type RunModelCheck } from '../src/modules/model-checks/contract.js';
+import type { Case, CheckBinding, CheckInput, CheckReceipt } from '@hornhoof/protocol';
 import { parseDataset } from '../src/modules/model-checks/dataset.js';
 import { afterRun, bindingDigest } from '../src/modules/model-checks/lifecycle.js';
-import { evaluateCheck, reportText } from '../src/modules/model-checks/run.js';
+import { evaluateCheck, NO_MODEL_YET, reportText, type RunModelCheck } from '../src/modules/model-checks/run.js';
 import type { Thresholds } from '../src/modules/model-checks/score.js';
 import { RULES, asJsonl, binding, holdout, mustBlock, reviewCase } from './model-check-fixture.js';
 

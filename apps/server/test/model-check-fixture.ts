@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { Case, CheckBinding, ModelCheckKind, Party } from '../src/modules/model-checks/contract.js';
+import type { Case, CheckBinding, ModelCheckKind } from '@hornhoof/protocol';
+import type { Party } from '../src/modules/model-checks/dataset.js';
 
 /* Examples made up for tests only, about nothing real. No company's data, and no suite anything may ship with. */
 const sha = (text: string) => createHash('sha256').update(text).digest('hex');
@@ -37,7 +38,7 @@ export function binding(more: Partial<CheckBinding> = {}): CheckBinding {
   return {
     schemaVersion: 1, companyId: randomUUID(), departmentId: randomUUID(), productId: null, checkId: randomUUID(), kind: 'outbound_review', definitionVersion: 1,
     checkerCodeHash: sha('code'), promptHash: sha('prompt'), outputSchemaHash: sha('output'), sourceListHash: sha('list'), taxonomyHash: null,
-    model: { providerId: 'provider-b', vendorId: 'vendor-b', modelId: 'model-b', revisionId: 'rev-1', inferenceConfigHash: sha('config') },
+    model: { providerId: 'codex', vendorId: 'vendor-b', modelId: 'model-b', revisionId: 'rev-1', inferenceConfigHash: sha('config') },
     datasetVersion: randomUUID(), datasetHash: sha('dataset'), thresholdsHash: sha('thresholds'), ...more,
   };
 }

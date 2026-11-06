@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Case, CheckResult } from '../src/modules/model-checks/contract.js';
+import type { Case, CheckResult } from '@hornhoof/protocol';
 import { decide, parseThresholds, scoreCases, type Thresholds } from '../src/modules/model-checks/score.js';
 import { classCase, holdout, mustBlock, reviewCase, TAXONOMY } from './model-check-fixture.js';
 
