@@ -104,234 +104,353 @@ async function turnReviewed(
   return inRepository(db, { departmentId: head.departmentId, productId: input.product ?? null });
 }
 
+const TurnItem = z.object({ department: z.uuid(), product: z.uuid().optional(), title: Title, brief: Brief, body: Body, workKind: WorkKind.optional(), riskClass: RiskClass.optional(), urgent: z.boolean().optional().describe('The CEO says this work is urgent, in the turn that answers them. Work under it is too. Never from its title or an employee.') });
+const Turn = z.number().int().positive().describe('The turn number, like 2.');
+const TurnWords = z
+  .number()
+  .int()
+  .min(1)
+  .max(TURN_MESSAGES)
+  .optional()
+  .describe("How many of people's messages to you this comes from, counting back from the one you are answering, when the ask took several messages. 1 by default. They are kept with the turn word for word.");
+
 /* The tools an agent gets for tasks, by its kind. Each one checks that the task is the agent's to move. */
 export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): void {
-  const { db } = ctx;
-  /* The orchestrator runs the company: it cancels and rewrites any task. */
-  const boss = job.agentKind === 'orchestrator';
-  const me = async (): Promise<Agent> => (await db.select().from(agents).where(eq(agents.id, job.agentId)))[0]!;
-  const startedAt = async () => (await db.select({ at: jobs.startedAt }).from(jobs).where(eq(jobs.id, job.id)))[0]?.at ?? new Date(0);
+  new TaskTools(server, ctx, job).register();
+}
 
-  async function find(ref: number | string): Promise<{ agent: Agent; task: Task }> {
-    const agent = await me();
-    const task = await taskByRef(ctx, job.companyId, ref);
+class TaskTools {
+  private readonly db: Ctx['db'];
+  private readonly boss: boolean;
+
+  constructor(private readonly server: McpServer, private readonly ctx: Ctx, private readonly job: ToolJob) {
+    this.db = ctx.db;
+    this.boss = job.agentKind === 'orchestrator';
+  }
+
+  register(): void {
+    this.registerTasks();
+    this.registerTask();
+    this.registerWaitFor();
+    this.registerComment();
+    this.registerReplanWait();
+    this.registerAskPerson();
+    if (this.job.agentKind === 'orchestrator') this.registerTurnTools();
+    if (this.job.agentKind === 'head') this.registerCreateTask();
+    if (this.job.agentKind !== 'worker') this.registerManagementTools();
+    if (this.job.agentKind !== 'orchestrator') this.registerExecutionTools();
+  }
+
+  private registerTurnTools(): void {
+    this.registerTurns();
+    this.registerPipelineReport();
+    this.registerPlanTurn();
+    this.registerAddTasks();
+    this.registerSetUrgent();
+    this.registerMergeTurn();
+    this.registerEditTurn();
+  }
+
+  private registerManagementTools(): void {
+    this.registerUpdateTask();
+    this.registerReport();
+    this.registerCancelTask();
+  }
+
+  private registerExecutionTools(): void {
+    this.registerSubmit();
+    this.registerBlocked();
+    this.registerVerdict();
+    this.registerConfirmFinding();
+  }
+
+  private async me(): Promise<Agent> { return (await this.db.select().from(agents).where(eq(agents.id, this.job.agentId)))[0]!; }
+
+  private async startedAt(): Promise<Date> { return (await this.db.select({ at: jobs.startedAt }).from(jobs).where(eq(jobs.id, this.job.id)))[0]?.at ?? new Date(0); }
+
+  /* Find only a task the agent can see. */
+  private async find(ref: number | string): Promise<{ agent: Agent; task: Task }> {
+    const agent = await this.me();
+    const task = await taskByRef(this.ctx, this.job.companyId, ref);
     if (!task || !sees(agent, task)) throw refuse(404, 'task_unknown', `There is no task ${ref} you can see. Call tasks for yours.`);
     return { agent, task };
   }
 
-  /* What an agent writes on a task is words: a file goes on the task itself. */
-  const plain = (task: Task, ...texts: string[]) => {
-    if (texts.some(carriesFile)) throw refuse(400, 'task_invalid', encodedHint(task.number));
-  };
-
-  /* Runs a move, wakes whoever it needs and answers in a line; a refused move comes back as a readable error. A move that
-     closed the last task of the open turn moves the company on to the next turn. */
-  const run = (fn: () => Promise<{ text: string; moved?: Pick<Moved, 'wakes'> & { task?: Task } }>) =>
-    fn().then(
-      async ({ text, moved }) => {
-        if (!moved) return say(text);
-        const settled = moved.task ? await settle(ctx, moved.task) : null;
-        const orchestrator = settled ? await orchestratorOf(ctx, job.companyId) : null;
-        await wakeAll(ctx, tell(moved.wakes, settled, orchestrator?.id ?? null, moved.task?.id ?? '', job.agentId));
-        return say(settled && orchestrator?.id === job.agentId ? `${text} ${settled.note}` : text);
-      },
-      (err: unknown) => {
-        if (err instanceof ApiError) return say(err.message, true);
-        throw err;
-      },
-    );
-
-  async function where(t: Task): Promise<string> {
-    const agent = await me();
-    const [line] = await taskLines(ctx, [t], x => sees(agent, x));
+  private async where(t: Task): Promise<string> {
+    const agent = await this.me();
+    const [line] = await taskLines(this.ctx, [t], x => sees(agent, x));
     const holder = line?.assignee ? `, with ${line.assignee.name}` : '';
-    return `#${t.number} is ${t.status}${holder}.${await waiting(t)}`;
+    return `#${t.number} is ${t.status}${holder}.${await this.waiting(t)}`;
   }
 
-  /* Tasks another one comes after, named by number or id among the tasks the agent sees: the engine keeps them to its turn. */
-  async function afterIds(refs: (number | string)[] | undefined): Promise<string[]> {
+  /* Resolve dependencies among the tasks the agent sees; the engine keeps them to its turn. */
+  private async afterIds(refs: (number | string)[] | undefined): Promise<string[]> {
     const ids: string[] = [];
-    const agent = refs?.length ? await me() : null;
+    const agent = refs?.length ? await this.me() : null;
     for (const ref of refs ?? []) {
-      const t = await taskByRef(ctx, job.companyId, ref);
+      const t = await taskByRef(this.ctx, this.job.companyId, ref);
       if (!t || !sees(agent!, t)) throw refuse(404, 'task_unknown', `There is no task ${ref} to come after. Call turns or tasks for the numbers.`);
       ids.push(t.id);
     }
     return ids;
   }
 
-  /* Promises of dates for tasks another comes after, by the id the engine knows them by. One for a task it does not come after
-     is refused with the rest of the change. */
-  async function afterPlansOf(given: { task: number | string; plan: WaitPlan }[] | undefined) {
+  /* Keep promised dates keyed by the dependency id the engine knows. */
+  private async afterPlansOf(given: { task: number | string; plan: WaitPlan }[] | undefined): Promise<Record<string, WaitPlan> | undefined> {
     if (!given) return undefined;
-    const ids = await afterIds(given.map(g => g.task));
+    const ids = await this.afterIds(given.map(g => g.task));
     return Object.fromEntries(given.map((g, i) => [ids[i]!, g.plan]));
   }
 
   /* What a task still waits for, as a sentence for the tool's answer. */
-  async function waiting(t: Task): Promise<string> {
-    const open = await openAfter(db, t);
+  private async waiting(t: Task): Promise<string> {
+    const open = await openAfter(this.db, t);
     return open.length ? ` It starts once ${listed(open)} ${open.length === 1 ? 'is' : 'are'} done.` : '';
   }
 
-  async function underCap(agent: Agent, adding = 1): Promise<void> {
-    const [made] = await db
+  private async underCap(agent: Agent, adding = 1): Promise<void> {
+    const [made] = await this.db
       .select({ n: count() })
       .from(tasks)
-      .where(and(eq(tasks.createdByAgentId, agent.id), gte(tasks.createdAt, await startedAt())));
+      .where(and(eq(tasks.createdByAgentId, agent.id), gte(tasks.createdAt, await this.startedAt())));
     if (Number(made?.n ?? 0) + adding > TURN_TASKS) throw refuse(409, 'task_invalid', `One turn creates at most ${TURN_TASKS} tasks. Finish this turn and go on in the next.`);
   }
 
-  server.registerTool(
-    'tasks',
-    { description: 'Your open tasks first, then the other open tasks you can see: number, title, brief, state, who holds it.', inputSchema: {} },
-    async () => {
-      const agent = await me();
-      const open = await db
-        .select()
-        .from(tasks)
-        .where(and(eq(tasks.companyId, job.companyId), notInArray(tasks.status, [...CLOSED])))
-        .orderBy(desc(tasks.number))
-        .limit(200);
-      const holds = (t: Task) => t.assigneeAgentId === agent.id || t.panel.includes(agent.id);
-      const mine = open.filter(t => sees(agent, t)).sort((a, b) => Number(holds(b)) - Number(holds(a)));
-      return json(await taskLines(ctx, mine.slice(0, 40), t => sees(agent, t)));
-    },
-  );
+  /* An employee of the head's department, or the head. */
+  private async member(head: Agent, id: string): Promise<Agent> {
+    const [agent] = await this.db.select().from(agents).where(and(eq(agents.id, id), isNull(agents.removedAt)));
+    if (!agent || agent.departmentId !== head.departmentId) throw refuse(403, 'task_not_yours', `${id} does not work in your department. Call company for its employees.`);
+    return agent;
+  }
 
-  server.registerTool(
-    'task',
-    {
-      description:
-        'One task in full: its body (the current truth), gates and where it stands, subtasks, open questions and its log. A long log comes with its newest lines, and logLeftOut counts the older ones left out. ' +
-        "testEvidence: its newest test runs, and in a review of a turn or a department's task of a turn those on the turn's branch, each with the exact commit it pinned and whether its branch still stands there. Only a run with proves true counts as evidence. review pins an immutable candidate and author receipts; review.quality is structured producer evidence or unavailable; gateCounts is labeled review-lifecycle. reviewPlan assigns task areas/common contracts and an integration reviewer. fixReview limits a repeat to its own original finding IDs and exact range. reviewFindings contains explicit confirmations and vendor provenance.",
-      inputSchema: { task: Ref },
-    },
-    async ({ task: ref }) =>
-      find(ref).then(
-        async ({ agent, task }) => say(fitted({ ...await taskDetail(ctx, task, t => sees(agent, t)), ...await reviewDetails(db, task.id, agent.id) })),
-        (err: unknown) => (err instanceof ApiError ? say(err.message, true) : Promise.reject(err)),
-      ),
-  );
+  /* Gates by role id or employee id; left out, the first hired gate role. */
+  private async gatesFor(head: Agent, executor: string, given: string[] | undefined): Promise<string[]> {
+    if (given === undefined) return (await gateLeads(this.db, this.ctx.templates, head.departmentId!, executor)).slice(0, 1);
+    const staff = await this.db.select().from(agents).where(and(eq(agents.departmentId, head.departmentId!), isNull(agents.removedAt), isNull(agents.teamId))).orderBy(asc(agents.createdAt));
+    return given.map(g => {
+      const role = (a: Agent) => a.roleKey === g && a.id !== executor;
+      const found = /^[A-Z]{3}-[A-Z0-9]+$/.test(g) ? (staff.find(a => role(a) && !a.switchedOffAt) ?? staff.find(role)) : staff.find(a => a.id === g);
+      if (!found) throw refuse(400, 'task_invalid', `No one in your department can be the gate ${g}.`);
+      requireBlockingGate(this.ctx.templates, found.roleKey);
+      return found.id;
+    });
+  }
 
-  server.registerTool(
-    'wait_for',
-    {
-      description: 'Waits on a task you hold for an employee or an external event. Name what you need in one line and give an ISO deadline at most two hours away. End your turn after this: no reminder or stuck request is sent while it waits. A comment, a message naming this task, or the deadline wakes you once.',
-      inputSchema: { task: Ref, ...WaitInput.shape },
-    },
-    async ({ task: ref, ...input }) => run(async () => {
-      const { task } = await find(ref);
-      plain(task, input.reason);
-      const moved = await waitFor(ctx, job.agentId, task.id, input);
-      return { text: `#${task.number} waits for "${moved.task.externalWait!.reason}" until ${moved.task.externalWait!.until}. End this turn; you will be woken.`, moved };
-    }),
-  );
+  /* A file goes on the task itself; tool text stays plain. */
+  private plain(task: Task, ...texts: string[]): void {
+    if (texts.some(carriesFile)) throw refuse(400, 'task_invalid', encodedHint(task.number));
+  }
 
-  server.registerTool(
-    'comment',
-    {
-      description:
-        "Adds a note to a task's log for everyone on it. Whoever gave out a member task that is blocked can answer it with a comment, " +
-        'which opens it again and wakes its executor with your words. A comment from a person or another agent also ends an external wait and wakes its holder. To hand work on, use the task\'s own moves.',
-      inputSchema: { task: Ref, text: Text.trim().min(1) },
-    },
-    async ({ task: ref, text }) =>
-      run(async () => {
-        const { task } = await find(ref);
-        plain(task, text);
-        const moved = await comment(ctx, { agentId: job.agentId }, task.id, text);
-        return { text: moved.wakes.length ? `Noted on #${task.number}. It is open again, and its executor goes on with your answer.` : `Noted on #${task.number}.`, moved };
-      }),
-  );
-
-  server.registerTool(
-    'replan_wait',
-    {
-      description:
-        'Gives a wait on a task (its id in waits, from task) a new owner or new dates, for someone who answers for it: its owner, its head or the orchestrator. Also the way to give a wait with no plan its first dates. Dates moved stay on record. Say whose promise they are in plan.provenance, and only dates someone really promised.',
-      inputSchema: { wait: z.uuid(), expectedGeneration: z.number().int().positive(), owner: WaitOwnerBinding.optional(), plan: WaitPlan.optional(), reason: z.string().trim().min(1).max(600) },
-    },
-    async ({ wait, expectedGeneration, owner, plan, reason }) =>
-      run(async () => {
-        const kept = await db.transaction(tx => replanWait(tx, { waitId: wait, expectedGeneration, ...(owner ? { ownerBinding: owner } : {}), ...(plan ? { plan } : {}), reason, actor: { agentId: job.agentId } }));
-        const { task } = await find(kept.taskId);
-        return { text: `The wait on #${task.number} is at generation ${kept.generation}, due ${kept.nextActionAt?.toISOString() ?? 'with no date'}.`, moved: { task, wakes: [] } };
-      }),
-  );
-
-  server.registerTool(
-    'ask_person',
-    {
-      description:
-        'Asks the people responsible for the task a question, (with commit) for approval of that exact commit before a release, or (with options) to pick one of 2 to 4 ways. The task waits; you are woken with the answer. ' +
-        'Show what people judge instead of describing it: take screenshots, send each with the shell command `hh-attach FILE` and pass the ids it prints as images, or as an option\'s image. ' +
-        'link: an https page where the work can be seen, like a branch comparison; an approval links its commit by itself. ' +
-        'An approval tells you and the person which passed test run checked that very commit, or that none did. ' +
-        `At most ${TURN_QUESTIONS} per turn; ask only what you cannot decide or find out yourself.`,
-      inputSchema: {
-        task: Ref,
-        question: z.string().trim().min(1).max(2000),
-        commit: z.string().regex(/^[0-9a-f]{40}$/).optional(),
-        images: z.array(z.uuid()).max(6).optional(),
-        options: z.array(z.object({ label: z.string().trim().min(1).max(200), image: z.uuid().optional() })).max(4).optional(),
-        link: z.url({ protocol: /^https$/ }).max(500).optional(),
-        plan: AskPlan,
-        topic: z
-          .enum(DECISION_TOPICS)
-          .optional()
-          .describe(
-            'What it is about, which says who decides: task or employee for work of your department, which its own person answers; people, access, subscriptions, machines, repositories, public_link, updates or release for what only the CEO decides. Name it on every question; without it the CEO answers.',
-          ),
+  /* Apply a move, settle its turn and wake its next owners; return readable refusals. */
+  private run(fn: () => Promise<{ text: string; moved?: Pick<Moved, 'wakes'> & { task?: Task } }>): Promise<ReturnType<typeof say>> {
+    return fn().then(
+      async ({ text, moved }) => {
+        if (!moved) return say(text);
+        const settled = moved.task ? await settle(this.ctx, moved.task) : null;
+        const orchestrator = settled ? await orchestratorOf(this.ctx, this.job.companyId) : null;
+        await wakeAll(this.ctx, tell(moved.wakes, settled, orchestrator?.id ?? null, moved.task?.id ?? '', this.job.agentId));
+        return say(settled && orchestrator?.id === this.job.agentId ? `${text} ${settled.note}` : text);
       },
-    },
-    async ({ task: ref, question, commit, images, options, link, topic, plan }) =>
-      run(async () => {
-        const { task } = await find(ref);
-        plain(task, question);
-        const [asked] = await db
-          .select({ n: count() })
-          .from(requests)
-          .where(and(eq(requests.agentId, job.agentId), inArray(requests.kind, ['question', 'approval', 'choice']), gte(requests.createdAt, await startedAt())));
-        if (Number(asked?.n ?? 0) >= TURN_QUESTIONS) throw refuse(409, 'task_invalid', `One turn asks people at most ${TURN_QUESTIONS} times.`);
-        const kind = commit ? 'approval' : options?.length ? 'choice' : 'question';
-        const ways = options?.map(o => ({ label: o.label, image: o.image ?? null }));
-        const { text, told } = await questionWords(db, task, question, commit);
-        const moved = await ask(ctx, job.agentId, task.id, { kind, text, ...(commit ? { commit } : {}), images, options: ways, link: link ?? null, topic, ...(plan ? { plan } : {}) });
-        await recordQuestion(ctx, job, task, { kind, text, topic });
-        return { text: `Asked. #${task.number} waits for a person's answer; you will be woken with it.${told}`, moved };
-      }),
-  );
+      (err: unknown) => {
+        if (err instanceof ApiError) return say(err.message, true);
+        throw err;
+      },
+    );
+  }
 
-  if (job.agentKind === 'orchestrator') {
-    const Item = z.object({ department: z.uuid(), product: z.uuid().optional(), title: Title, brief: Brief, body: Body, workKind: WorkKind.optional(), riskClass: RiskClass.optional(), urgent: z.boolean().optional().describe('The CEO says this work is urgent, in the turn that answers them. Work under it is too. Never from its title or an employee.') });
-    /* The orchestrator says work is urgent only for the CEO or the CEO delegate the turn answers. */
-    const forCeoAlone = async () => {
-      if (!(await answersCeoOrDelegate(db, job.id))) throw refuse(403, 'urgent_not_allowed', ONLY_CEO);
-    };
-    const urgentFromCeo = async (items: { urgent?: boolean | undefined }[]) => {
-      if (items.some(item => item.urgent)) await forCeoAlone();
-    };
-    const Turn = z.number().int().positive().describe('The turn number, like 2.');
-    const Words = z
-      .number()
-      .int()
-      .min(1)
-      .max(TURN_MESSAGES)
-      .optional()
-      .describe("How many of people's messages to you this comes from, counting back from the one you are answering, when the ask took several messages. 1 by default. They are kept with the turn word for word.");
-    server.registerTool(
+  /* Only the CEO or delegate answered in this turn can make work urgent. */
+  private async forCeoAlone(): Promise<void> {
+    if (!(await answersCeoOrDelegate(this.db, this.job.id))) throw refuse(403, 'urgent_not_allowed', ONLY_CEO);
+  }
+
+  private async urgentFromCeo(items: { urgent?: boolean | undefined }[]): Promise<void> {
+    if (items.some(item => item.urgent)) await this.forCeoAlone();
+  }
+
+  private async underQuestionCap(): Promise<void> {
+    const [asked] = await this.db
+      .select({ n: count() })
+      .from(requests)
+      .where(and(eq(requests.agentId, this.job.agentId), inArray(requests.kind, ['question', 'approval', 'choice']), gte(requests.createdAt, await this.startedAt())));
+    if (Number(asked?.n ?? 0) >= TURN_QUESTIONS) throw refuse(409, 'task_invalid', `One turn asks people at most ${TURN_QUESTIONS} times.`);
+  }
+
+  private async checkProduct(agent: Agent, id: string | undefined): Promise<void> {
+    if (!id) return;
+    const [product] = await this.db.select({ id: departments.id }).from(departments).where(and(eq(departments.id, id), eq(departments.parentId, agent.departmentId!)));
+    if (!product) throw refuse(404, 'department_unknown', `${id} is not a product of your department.`);
+  }
+
+  /* Code left without gates under the department's task of a turn waits for its review. */
+  private async creationGates(head: Agent, executor: Agent, parent: Task | null, input: { gates?: string[]; product?: string }): Promise<{ inTurnReview: boolean; gates: string[] }> {
+    const inTurnReview = await turnReviewed(this.db, head, executor, parent, input);
+    const gates = inTurnReview || (executor.teamId && input.gates === undefined) ? [] : await this.gatesFor(head, executor.id, input.gates);
+    return { inTurnReview, gates };
+  }
+
+  private async createdTaskText(task: Task, executor: Agent, gates: string[]): Promise<string> {
+    return `Created #${task.number} for ${executor.name}${gates.length ? ` with ${gates.length} gate${gates.length > 1 ? 's' : ''}` : ''}.${await this.waiting(task)}`;
+  }
+
+  /* The orchestrator hands a task on within the task's own department, as its head would. */
+  private updateHead(agent: Agent, task: Task): Agent {
+    if (!this.boss && (task.departmentId !== agent.departmentId || !task.executorAgentId)) throw refuse(403, 'task_not_yours', `#${task.number} is not a member task of your department.`);
+    return this.boss ? { ...agent, departmentId: task.departmentId } : agent;
+  }
+
+  private async updatedAssignment(head: Agent, task: Task, executor: string | undefined, gates: string[] | undefined, independentPart: { executor: string } | undefined): Promise<{ next: string | undefined; gateIds: string[] | undefined }> {
+    if (head.departmentId === null && (executor !== undefined || gates !== undefined)) throw refuse(400, 'task_invalid', `#${task.number} has no executor or gates.`);
+    const next = executor !== undefined ? (await this.member(head, executor)).id : undefined;
+    if (independentPart) await this.member(head, independentPart.executor);
+    const gateIds = gates !== undefined ? await this.gatesFor(head, next ?? task.executorAgentId!, gates) : undefined;
+    return { next, gateIds };
+  }
+
+  private registerTasks(): void {
+    this.server.registerTool(
+      'tasks',
+      { description: 'Your open tasks first, then the other open tasks you can see: number, title, brief, state, who holds it.', inputSchema: {} },
+      async () => {
+        const agent = await this.me();
+        const open = await this.db
+          .select()
+          .from(tasks)
+          .where(and(eq(tasks.companyId, this.job.companyId), notInArray(tasks.status, [...CLOSED])))
+          .orderBy(desc(tasks.number))
+          .limit(200);
+        const holds = (t: Task) => t.assigneeAgentId === agent.id || t.panel.includes(agent.id);
+        const mine = open.filter(t => sees(agent, t)).sort((a, b) => Number(holds(b)) - Number(holds(a)));
+        return json(await taskLines(this.ctx, mine.slice(0, 40), t => sees(agent, t)));
+      },
+    );
+  }
+
+  private registerTask(): void {
+    this.server.registerTool(
+      'task',
+      {
+        description:
+          'One task in full: its body (the current truth), gates and where it stands, subtasks, open questions and its log. A long log comes with its newest lines, and logLeftOut counts the older ones left out. ' +
+          "testEvidence: its newest test runs, and in a review of a turn or a department's task of a turn those on the turn's branch, each with the exact commit it pinned and whether its branch still stands there. Only a run with proves true counts as evidence. review pins an immutable candidate and author receipts; review.quality is structured producer evidence or unavailable; gateCounts is labeled review-lifecycle. reviewPlan assigns task areas/common contracts and an integration reviewer. fixReview limits a repeat to its own original finding IDs and exact range. reviewFindings contains explicit confirmations and vendor provenance.",
+        inputSchema: { task: Ref },
+      },
+      async ({ task: ref }) =>
+        this.find(ref).then(
+          async ({ agent, task }) => say(fitted({ ...await taskDetail(this.ctx, task, t => sees(agent, t)), ...await reviewDetails(this.db, task.id, agent.id) })),
+          (err: unknown) => (err instanceof ApiError ? say(err.message, true) : Promise.reject(err)),
+        ),
+    );
+  }
+
+  private registerWaitFor(): void {
+    this.server.registerTool(
+      'wait_for',
+      {
+        description: 'Waits on a task you hold for an employee or an external event. Name what you need in one line and give an ISO deadline at most two hours away. End your turn after this: no reminder or stuck request is sent while it waits. A comment, a message naming this task, or the deadline wakes you once.',
+        inputSchema: { task: Ref, ...WaitInput.shape },
+      },
+      async ({ task: ref, ...input }) => this.run(async () => {
+        const { task } = await this.find(ref);
+        this.plain(task, input.reason);
+        const moved = await waitFor(this.ctx, this.job.agentId, task.id, input);
+        return { text: `#${task.number} waits for "${moved.task.externalWait!.reason}" until ${moved.task.externalWait!.until}. End this turn; you will be woken.`, moved };
+      }),
+    );
+  }
+
+  private registerComment(): void {
+    this.server.registerTool(
+      'comment',
+      {
+        description:
+          "Adds a note to a task's log for everyone on it. Whoever gave out a member task that is blocked can answer it with a comment, " +
+          'which opens it again and wakes its executor with your words. A comment from a person or another agent also ends an external wait and wakes its holder. To hand work on, use the task\'s own moves.',
+        inputSchema: { task: Ref, text: Text.trim().min(1) },
+      },
+      async ({ task: ref, text }) =>
+        this.run(async () => {
+          const { task } = await this.find(ref);
+          this.plain(task, text);
+          const moved = await comment(this.ctx, { agentId: this.job.agentId }, task.id, text);
+          return { text: moved.wakes.length ? `Noted on #${task.number}. It is open again, and its executor goes on with your answer.` : `Noted on #${task.number}.`, moved };
+        }),
+    );
+  }
+
+  private registerReplanWait(): void {
+    this.server.registerTool(
+      'replan_wait',
+      {
+        description:
+          'Gives a wait on a task (its id in waits, from task) a new owner or new dates, for someone who answers for it: its owner, its head or the orchestrator. Also the way to give a wait with no plan its first dates. Dates moved stay on record. Say whose promise they are in plan.provenance, and only dates someone really promised.',
+        inputSchema: { wait: z.uuid(), expectedGeneration: z.number().int().positive(), owner: WaitOwnerBinding.optional(), plan: WaitPlan.optional(), reason: z.string().trim().min(1).max(600) },
+      },
+      async ({ wait, expectedGeneration, owner, plan, reason }) =>
+        this.run(async () => {
+          const kept = await this.db.transaction(tx => replanWait(tx, { waitId: wait, expectedGeneration, ...(owner ? { ownerBinding: owner } : {}), ...(plan ? { plan } : {}), reason, actor: { agentId: this.job.agentId } }));
+          const { task } = await this.find(kept.taskId);
+          return { text: `The wait on #${task.number} is at generation ${kept.generation}, due ${kept.nextActionAt?.toISOString() ?? 'with no date'}.`, moved: { task, wakes: [] } };
+        }),
+    );
+  }
+
+  private registerAskPerson(): void {
+    this.server.registerTool(
+      'ask_person',
+      {
+        description:
+          'Asks the people responsible for the task a question, (with commit) for approval of that exact commit before a release, or (with options) to pick one of 2 to 4 ways. The task waits; you are woken with the answer. ' +
+          'Show what people judge instead of describing it: take screenshots, send each with the shell command `hh-attach FILE` and pass the ids it prints as images, or as an option\'s image. ' +
+          'link: an https page where the work can be seen, like a branch comparison; an approval links its commit by itself. ' +
+          'An approval tells you and the person which passed test run checked that very commit, or that none did. ' +
+          `At most ${TURN_QUESTIONS} per turn; ask only what you cannot decide or find out yourself.`,
+        inputSchema: {
+          task: Ref,
+          question: z.string().trim().min(1).max(2000),
+          commit: z.string().regex(/^[0-9a-f]{40}$/).optional(),
+          images: z.array(z.uuid()).max(6).optional(),
+          options: z.array(z.object({ label: z.string().trim().min(1).max(200), image: z.uuid().optional() })).max(4).optional(),
+          link: z.url({ protocol: /^https$/ }).max(500).optional(),
+          plan: AskPlan,
+          topic: z
+            .enum(DECISION_TOPICS)
+            .optional()
+            .describe(
+              'What it is about, which says who decides: task or employee for work of your department, which its own person answers; people, access, subscriptions, machines, repositories, public_link, updates or release for what only the CEO decides. Name it on every question; without it the CEO answers.',
+            ),
+        },
+      },
+      async ({ task: ref, question, commit, images, options, link, topic, plan }) =>
+        this.run(async () => {
+          const { task } = await this.find(ref);
+          this.plain(task, question);
+          await this.underQuestionCap();
+          const kind = commit ? 'approval' : options?.length ? 'choice' : 'question';
+          const ways = options?.map(o => ({ label: o.label, image: o.image ?? null }));
+          const { text, told } = await questionWords(this.db, task, question, commit);
+          const moved = await ask(this.ctx, this.job.agentId, task.id, { kind, text, ...(commit ? { commit } : {}), images, options: ways, link: link ?? null, topic, ...(plan ? { plan } : {}) });
+          await recordQuestion(this.ctx, this.job, task, { kind, text, topic });
+          return { text: `Asked. #${task.number} waits for a person's answer; you will be woken with it.${told}`, moved };
+        }),
+    );
+  }
+
+  private registerTurns(): void {
+    this.server.registerTool(
       'turns',
       { description: 'The last closed turn, the running turn and the planned ones in order, each with its title, main point and tasks, and where each task stands.', inputSchema: {} },
       async () => {
-        const rows = (await turnRows(ctx, job.companyId)).filter((t, i, all) => t.status !== 'closed' || all[i + 1]?.status !== 'closed');
-        const top = rows.length ? await db.select().from(tasks).where(and(inArray(tasks.turnId, rows.map(t => t.id)), isNull(tasks.parentId))).orderBy(asc(tasks.number)) : [];
-        const agent = await me();
-        const lines = await taskLines(ctx, top, t => sees(agent, t));
+        const rows = (await turnRows(this.ctx, this.job.companyId)).filter((t, i, all) => t.status !== 'closed' || all[i + 1]?.status !== 'closed');
+        const top = rows.length ? await this.db.select().from(tasks).where(and(inArray(tasks.turnId, rows.map(t => t.id)), isNull(tasks.parentId))).orderBy(asc(tasks.number)) : [];
+        const agent = await this.me();
+        const lines = await taskLines(this.ctx, top, t => sees(agent, t));
         return json(rows.map(t => ({ number: t.number, title: t.title || t.goal, goal: t.goal, status: t.status, tasks: lines.filter((_, i) => top[i]!.turnId === t.id) })));
       },
     );
-    server.registerTool(
+  }
+
+  private registerPipelineReport(): void {
+    this.server.registerTool(
       'pipeline_report',
       {
         description:
@@ -339,46 +458,55 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
           'Each number comes with the previous turn and the baseline turn and its change in percent. By default the running turn, else the last that ran. A department with described false has no description to take its own numbers from.',
         inputSchema: { turn: Turn.optional() },
       },
-      async ({ turn }) => run(async () => {
-        const report = await pipelineReport(db, job.companyId, turn);
-        const reviewFindings = await pipelineFindings(db, job.companyId, report);
+      async ({ turn }) => this.run(async () => {
+        const report = await pipelineReport(this.db, this.job.companyId, turn);
+        const reviewFindings = await pipelineFindings(this.db, this.job.companyId, report);
         return { text: JSON.stringify({ ...report, reviewFindings }, english) };
       }),
     );
-    server.registerTool(
+  }
+
+  private registerPlanTurn(): void {
+    this.server.registerTool(
       'plan_turn',
       {
         description:
           "Lays out a new turn: a short title, the main point in one or two sentences, and its tasks: one for each of the CEO's goals, for the one department that owns it end to end, " +
           "going to that department's head; no separate tasks for plans, contracts or proofs. " +
           'When no turn runs it starts at once; otherwise it waits after the planned turns and starts by itself when the turn before it is done. department and product ids from company.',
-        inputSchema: { title: z.string().trim().min(1).max(80), goal: z.string().trim().min(1).max(600), tasks: z.array(Item), words: Words, improvement: Improvement.optional() },
+        inputSchema: { title: z.string().trim().min(1).max(80), goal: z.string().trim().min(1).max(600), tasks: z.array(TurnItem), words: TurnWords, improvement: Improvement.optional() },
       },
       async input =>
-        run(async () => {
-          await underCap(await me(), input.tasks.length);
-          await urgentFromCeo(input.tasks);
-          const moved = await planTurn(ctx, { companyId: job.companyId, agentId: job.agentId, jobId: job.id }, input);
+        this.run(async () => {
+          await this.underCap(await this.me(), input.tasks.length);
+          await this.urgentFromCeo(input.tasks);
+          const moved = await planTurn(this.ctx, { companyId: this.job.companyId, agentId: this.job.agentId, jobId: this.job.id }, input);
           return { text: moved.text, moved };
         }),
     );
-    server.registerTool(
+  }
+
+  private registerAddTasks(): void {
+    this.server.registerTool(
       'add_tasks',
       {
         description:
           'Adds tasks to a turn that is not over. A new ask goes into the next planned turn, into the running turn only when the CEO says now. ' +
           'In the running turn they go to the heads at once, in a planned turn they wait for it to start. Work that does not belong to any planned turn goes into a new one with plan_turn.',
-        inputSchema: { turn: Turn, tasks: z.array(Item), words: Words, improvement: Improvement.optional() },
+        inputSchema: { turn: Turn, tasks: z.array(TurnItem), words: TurnWords, improvement: Improvement.optional() },
       },
       async input =>
-        run(async () => {
-          await underCap(await me(), input.tasks.length);
-          await urgentFromCeo(input.tasks);
-          const moved = await addTasks(ctx, { companyId: job.companyId, agentId: job.agentId, jobId: job.id }, input.turn, input.tasks, input.words, input.improvement);
+        this.run(async () => {
+          await this.underCap(await this.me(), input.tasks.length);
+          await this.urgentFromCeo(input.tasks);
+          const moved = await addTasks(this.ctx, { companyId: this.job.companyId, agentId: this.job.agentId, jobId: this.job.id }, input.turn, input.tasks, input.words, input.improvement);
           return { text: moved.text, moved };
         }),
     );
-    server.registerTool(
+  }
+
+  private registerSetUrgent(): void {
+    this.server.registerTool(
       'set_urgent',
       {
         description:
@@ -386,14 +514,17 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         inputSchema: { task: Ref, urgent: z.boolean() },
       },
       async ({ task: ref, urgent }) =>
-        run(async () => {
-          await forCeoAlone();
-          const { agent, task } = await find(ref);
-          const moved = await setUrgent(ctx, { agentId: agent.id }, task.id, urgent);
+        this.run(async () => {
+          await this.forCeoAlone();
+          const { agent, task } = await this.find(ref);
+          const moved = await setUrgent(this.ctx, { agentId: agent.id }, task.id, urgent);
           return { text: `#${moved.task.number} is ${urgent ? 'urgent' : 'not urgent'} now, with all the work under it.`, moved };
         }),
     );
-    server.registerTool(
+  }
+
+  private registerMergeTurn(): void {
+    this.server.registerTool(
       'merge_turn',
       {
         description:
@@ -402,24 +533,27 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         inputSchema: { source: Turn, target: Turn },
       },
       async input =>
-        run(async () => {
-          const moved = await mergeTurn(ctx, { companyId: job.companyId, agentId: job.agentId }, input.source, input.target);
+        this.run(async () => {
+          const moved = await mergeTurn(this.ctx, { companyId: this.job.companyId, agentId: this.job.agentId }, input.source, input.target);
           return { text: moved.text, moved };
         }),
     );
-    server.registerTool(
+  }
+
+  private registerEditTurn(): void {
+    this.server.registerTool(
       'edit_turn',
       { description: 'Gives a turn that is not over a new title or main point.', inputSchema: { turn: Turn, title: z.string().max(80).optional(), goal: z.string().max(600).optional() } },
       async input =>
-        run(async () => {
-          const turn = await editTurn(ctx, job.companyId, input.turn, input);
+        this.run(async () => {
+          const turn = await editTurn(this.ctx, this.job.companyId, input.turn, input);
           return { text: `${turnName(turn)} now reads: ${turn.goal}` };
         }),
     );
   }
 
-  if (job.agentKind === 'head') {
-    server.registerTool(
+  private registerCreateTask(): void {
+    this.server.registerTool(
       'create_task',
       {
         description:
@@ -428,32 +562,26 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         inputSchema: { title: Title, brief: Brief, body: Body, executor: z.uuid(), gates: z.array(z.string().max(40)).max(8).optional(), parent: Ref.optional(), product: z.uuid().optional(), after: After.optional(), afterPlans: AfterPlans.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional(), small: z.boolean().optional() },
       },
       async input =>
-        run(async () => {
-          const agent = await me();
-          await underCap(agent);
-          const executor = await member(agent, input.executor);
-          if (input.independentPart) await member(agent, input.independentPart.executor);
-          if (input.product) {
-            const [product] = await db.select({ id: departments.id }).from(departments).where(and(eq(departments.id, input.product), eq(departments.parentId, agent.departmentId!)));
-            if (!product) throw refuse(404, 'department_unknown', `${input.product} is not a product of your department.`);
-          }
-          const parent = input.parent !== undefined ? (await find(input.parent)).task : null;
-          /* Code left without gates under the department's task of a turn waits for the review of the turn; other work left
-             without them gets the department's first review stage. Sub-unit employees work outside the pipeline. */
-          const inTurnReview = await turnReviewed(db, agent, executor, parent, input);
-          const gates = inTurnReview || (executor.teamId && input.gates === undefined) ? [] : await gatesFor(agent, executor.id, input.gates);
-          const after = await afterIds(input.after);
-          const moved = await createTask(ctx, { agentId: agent.id }, { title: input.title, brief: input.brief, body: input.body, departmentId: agent.departmentId, productId: input.product ?? null, parentId: parent?.id ?? null, assigneeAgentId: executor.id, executor: true, gates, after, afterPlans: await afterPlansOf(input.afterPlans), independentPart: input.independentPart, independentNone: input.independentNone, inTurnReview, workKind: input.workKind, riskClass: input.riskClass, small: input.small });
-          return { text: `Created #${moved.task.number} for ${executor.name}${gates.length ? ` with ${gates.length} gate${gates.length > 1 ? 's' : ''}` : ''}.${await waiting(moved.task)}`, moved };
+        this.run(async () => {
+          const agent = await this.me();
+          await this.underCap(agent);
+          const executor = await this.member(agent, input.executor);
+          if (input.independentPart) await this.member(agent, input.independentPart.executor);
+          await this.checkProduct(agent, input.product);
+          const parent = input.parent !== undefined ? (await this.find(input.parent)).task : null;
+          const { inTurnReview, gates } = await this.creationGates(agent, executor, parent, input);
+          const after = await this.afterIds(input.after);
+          const moved = await createTask(this.ctx, { agentId: agent.id }, { title: input.title, brief: input.brief, body: input.body, departmentId: agent.departmentId, productId: input.product ?? null, parentId: parent?.id ?? null, assigneeAgentId: executor.id, executor: true, gates, after, afterPlans: await this.afterPlansOf(input.afterPlans), independentPart: input.independentPart, independentNone: input.independentNone, inTurnReview, workKind: input.workKind, riskClass: input.riskClass, small: input.small });
+          return { text: await this.createdTaskText(moved.task, executor, gates), moved };
         }),
     );
   }
 
-  if (job.agentKind !== 'worker') {
-    server.registerTool(
+  private registerUpdateTask(): void {
+    this.server.registerTool(
       'update_task',
       {
-        description: boss
+        description: this.boss
           ? 'Rewrites any task that is not closed so it reads as the current truth, or hands a member task to another executor or gates of its department (only while it is with its executor). ' +
             'Whoever holds it is woken with the change. A blocked task opens again. after: the tasks of its turn it waits for from now on, [] to start it now.'
           : "Rewrites one of your department's member tasks so it reads as the current truth, or hands it to another executor or gates (only while it is with its executor). " +
@@ -461,42 +589,43 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         inputSchema: { task: Ref, title: Title.optional(), brief: Brief.optional(), body: Body.optional(), executor: z.uuid().optional(), gates: z.array(z.string().max(40)).max(8).optional(), after: After.optional(), afterPlans: AfterPlans.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional(), small: z.boolean().optional() },
       },
       async ({ task: ref, executor, gates, after, afterPlans, ...text }) =>
-        run(async () => {
-          const { agent, task } = await find(ref);
-          if (!boss && (task.departmentId !== agent.departmentId || !task.executorAgentId)) throw refuse(403, 'task_not_yours', `#${task.number} is not a member task of your department.`);
-          /* The orchestrator hands a task on within the task's own department, as its head would. */
-          const head = boss ? { ...agent, departmentId: task.departmentId } : agent;
-          if (head.departmentId === null && (executor !== undefined || gates !== undefined)) throw refuse(400, 'task_invalid', `#${task.number} has no executor or gates.`);
-          const next = executor !== undefined ? (await member(head, executor)).id : undefined;
-          if (text.independentPart) await member(head, text.independentPart.executor);
-          const gateIds = gates !== undefined ? await gatesFor(head, next ?? task.executorAgentId!, gates) : undefined;
-          const moved = await updateTask(ctx, agent.id, task.id, { ...text, executor: next, gates: gateIds, ...(after !== undefined ? { after: await afterIds(after), afterPlans: await afterPlansOf(afterPlans) } : {}) });
-          return { text: `Updated. ${await where(moved.task)}`, moved };
+        this.run(async () => {
+          const { agent, task } = await this.find(ref);
+          const head = this.updateHead(agent, task);
+          const { next, gateIds } = await this.updatedAssignment(head, task, executor, gates, text.independentPart);
+          const moved = await updateTask(this.ctx, agent.id, task.id, { ...text, executor: next, gates: gateIds, ...(after !== undefined ? { after: await this.afterIds(after), afterPlans: await this.afterPlansOf(afterPlans) } : {}) });
+          return { text: `Updated. ${await this.where(moved.task)}`, moved };
         }),
     );
-    server.registerTool(
+  }
+
+  private registerReport(): void {
+    this.server.registerTool(
       'report',
       {
         description: 'Closes a task you own that has no executor (a department task, a turn, a person\'s task): done with what came of it, or not done with what blocks it. Whoever gave it is told.',
         inputSchema: { task: Ref, done: z.boolean(), summary: Text.trim().min(1) },
       },
       async ({ task: ref, done, summary }) =>
-        run(async () => {
-          const { task } = await find(ref);
-          plain(task, summary);
-          const moved = await report(ctx, job.agentId, task.id, { done, summary });
-          return { text: `Reported. ${await where(moved.task)}`, moved };
+        this.run(async () => {
+          const { task } = await this.find(ref);
+          this.plain(task, summary);
+          const moved = await report(this.ctx, this.job.agentId, task.id, { done, summary });
+          return { text: `Reported. ${await this.where(moved.task)}`, moved };
         }),
     );
-    server.registerTool(
+  }
+
+  private registerCancelTask(): void {
+    this.server.registerTool(
       'cancel_task',
-      { description: boss ? 'Cancels any task, with every open task under it.' : 'Cancels a task you created, with every open task under it.', inputSchema: { task: Ref, why: z.string().trim().min(1).max(1000) } },
+      { description: this.boss ? 'Cancels any task, with every open task under it.' : 'Cancels a task you created, with every open task under it.', inputSchema: { task: Ref, why: z.string().trim().min(1).max(1000) } },
       async ({ task: ref, why }) =>
-        run(async () => {
-          const { task } = await find(ref);
-          if (!boss && task.createdByAgentId !== job.agentId) throw refuse(403, 'task_not_yours', `#${task.number} was not created by you.`);
-          const moved = await cancel(ctx, { agentId: job.agentId }, task.id, why);
-          await stopTurns(ctx, moved.closed, job.agentId);
+        this.run(async () => {
+          const { task } = await this.find(ref);
+          if (!this.boss && task.createdByAgentId !== this.job.agentId) throw refuse(403, 'task_not_yours', `#${task.number} was not created by you.`);
+          const moved = await cancel(this.ctx, { agentId: this.job.agentId }, task.id, why);
+          await stopTurns(this.ctx, moved.closed, this.job.agentId);
           const left = moved.waiting.length
             ? ` ${listed(moved.waiting)} ${moved.waiting.length === 1 ? 'comes after it and still waits' : 'come after it and still wait'}: give ${moved.waiting.length === 1 ? 'it' : 'them'} what to wait for with update_task (after, [] to start now), or cancel ${moved.waiting.length === 1 ? 'it' : 'them'}.`
             : '';
@@ -505,32 +634,38 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     );
   }
 
-  if (job.agentKind !== 'orchestrator') {
-    server.registerTool(
+  private registerSubmit(): void {
+    this.server.registerTool(
       'submit',
       {
         description: 'Hands your finished work on a task to its first gate (or closes it when it has none). summary: what you did; evidence: the command you ran and what it printed, the link, the check. Optional review.baseCommit pins the source range for your vertical task area; the server reads its head commit. When author checks are enabled, review.authorCheckPlan carries the plain plan printed by check:author for one remote run on that exact commit.',
         inputSchema: { task: Ref, summary: Text.trim().min(1), evidence: Text.trim().min(1), review: ReviewSubmission.optional() },
       },
       async ({ task: ref, summary, evidence, review }) =>
-        run(async () => {
-          const { task } = await find(ref);
-          plain(task, summary, evidence);
-          const moved = await submitWithAuthorCheck(ctx, job, task.id, { summary, evidence, review });
-          return { text: `Submitted. ${await where(moved.task)}`, moved };
+        this.run(async () => {
+          const { task } = await this.find(ref);
+          this.plain(task, summary, evidence);
+          const moved = await submitWithAuthorCheck(this.ctx, this.job, task.id, { summary, evidence, review });
+          return { text: `Submitted. ${await this.where(moved.task)}`, moved };
         }),
     );
-    server.registerTool(
+  }
+
+  private registerBlocked(): void {
+    this.server.registerTool(
       'blocked',
       { description: 'Tells your head you cannot go on with a task, and why. Your head answers by rewriting the task.', inputSchema: { task: Ref, why: z.string().trim().min(1).max(2000) } },
       async ({ task: ref, why }) =>
-        run(async () => {
-          const { task } = await find(ref);
-          plain(task, why);
-          return { text: `Your head is told. ${task.title} waits.`, moved: await blocked(ctx, job.agentId, task.id, why) };
+        this.run(async () => {
+          const { task } = await this.find(ref);
+          this.plain(task, why);
+          return { text: `Your head is told. ${task.title} waits.`, moved: await blocked(this.ctx, this.job.agentId, task.id, why) };
         }),
     );
-    server.registerTool(
+  }
+
+  private registerVerdict(): void {
+    this.server.registerTool(
       'verdict',
       {
         description:
@@ -538,43 +673,26 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         inputSchema: { task: Ref, pass: z.boolean(), comment: Text.trim().min(1), findings: z.number().int().min(0).max(99).optional(), reviewedCommit: ReviewSha.optional(), issues: z.array(IssueInput).max(99).optional() },
       },
       async ({ task: ref, pass, comment: why, findings, reviewedCommit, issues }) =>
-        run(async () => {
-          const { task } = await find(ref);
-          plain(task, why);
-          const review = await reviewContext(ctx.db, task.id);
-          const evidence = bindReviewEvidence(await taskEvidence(ctx, task), review?.commit ?? null);
-          const moved = await verdict(ctx, job.agentId, task.id, { pass, comment: why, findings, reviewedCommit, issues, evidence: keptEvidence(evidence) });
-          return { text: `Recorded. ${await where(moved.task)}${noProofNote(evidence, pass)}`, moved };
+        this.run(async () => {
+          const { task } = await this.find(ref);
+          this.plain(task, why);
+          const review = await reviewContext(this.ctx.db, task.id);
+          const evidence = bindReviewEvidence(await taskEvidence(this.ctx, task), review?.commit ?? null);
+          const moved = await verdict(this.ctx, this.job.agentId, task.id, { pass, comment: why, findings, reviewedCommit, issues, evidence: keptEvidence(evidence) });
+          return { text: `Recorded. ${await this.where(moved.task)}${noProofNote(evidence, pass)}`, moved };
         }),
     );
-    server.registerTool(
+  }
+
+  private registerConfirmFinding(): void {
+    this.server.registerTool(
       'confirm_finding',
       { description: 'The actual area author or its head explicitly confirms or rejects a structured finding. Read its findingId and revision from task.reviewFindings. An author must name its current exact fixCommit; a head may confirm existence before a fix. This records existence only; it never passes a gate or removes a blocking finding. History and vendor counts retain provenance.', inputSchema: { task: Ref, ...ConfirmationInput.shape } },
-      async ({ task: ref, ...input }) => run(async () => {
-        const { task } = await find(ref);
-        await confirmFinding(ctx, job.agentId, task, input);
+      async ({ task: ref, ...input }) => this.run(async () => {
+        const { task } = await this.find(ref);
+        await confirmFinding(this.ctx, this.job.agentId, task, input);
         return { text: 'The finding confirmation is recorded; its gate and fix status are unchanged.' };
       }),
     );
-  }
-
-  /* An employee of the head's department, or the head. */
-  async function member(head: Agent, id: string): Promise<Agent> {
-    const [agent] = await db.select().from(agents).where(and(eq(agents.id, id), isNull(agents.removedAt)));
-    if (!agent || agent.departmentId !== head.departmentId) throw refuse(403, 'task_not_yours', `${id} does not work in your department. Call company for its employees.`);
-    return agent;
-  }
-
-  /* Gates by role id or employee id. Left out, the department's first gate role that is hired. */
-  async function gatesFor(head: Agent, executor: string, given: string[] | undefined): Promise<string[]> {
-    if (given === undefined) return (await gateLeads(db, ctx.templates, head.departmentId!, executor)).slice(0, 1);
-    const staff = await db.select().from(agents).where(and(eq(agents.departmentId, head.departmentId!), isNull(agents.removedAt), isNull(agents.teamId))).orderBy(asc(agents.createdAt));
-    return given.map(g => {
-      const role = (a: Agent) => a.roleKey === g && a.id !== executor;
-      const found = /^[A-Z]{3}-[A-Z0-9]+$/.test(g) ? (staff.find(a => role(a) && !a.switchedOffAt) ?? staff.find(role)) : staff.find(a => a.id === g);
-      if (!found) throw refuse(400, 'task_invalid', `No one in your department can be the gate ${g}.`);
-      requireBlockingGate(ctx.templates, found.roleKey);
-      return found.id;
-    });
   }
 }
