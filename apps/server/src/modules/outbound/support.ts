@@ -438,7 +438,7 @@ export async function submitSupportReply(
 ): Promise<SubmitResultDto> {
   const input = SupportSubmit.parse(rawInput);
   const task = await requireAssignedTask(ctx, caller, input.task);
-  const { ticket, channel, account, contact } = await loadSupportEntities(ctx.db, caller.companyId, input);
+  const { ticket, channel, contact } = await loadSupportEntities(ctx.db, caller.companyId, input);
 
   const reasons = new Set<GateCode>();
   const [classification] = await ctx.db
