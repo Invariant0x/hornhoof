@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHmac, randomUUID } from 'node:crypto';
 import type { SealedPayload } from '../src/modules/outbound/delivery.js';
 import { isPublicAddress, webhookAdapter, type WebhookAccount, type WebhookOptions } from '../src/modules/outbound/webhook.js';
-import { CERT, closedPort, hookReceiver, type HookRequest } from './outbound-receivers.js';
+import { CERT, closedPort, hookReceiver, silentPort, type HookRequest } from './outbound-receivers.js';
 
 const KEY = 'synthetic-signing-secret-9d21';
 const PAYLOAD: SealedPayload = { recipient: 'buyer@example.test', subject: 'Your order', text: 'Цена 100 ₽ שלום\n<b>inert</b>\n' };
@@ -20,7 +20,7 @@ afterEach(async () => {
 });
 
 const account = (endpoint: string, more: Partial<WebhookAccount> = {}): WebhookAccount => ({ endpoint, signingKey: KEY, ca: CERT, ...more });
-const send = (acc: WebhookAccount, options: Partial<WebhookOptions> = LOCAL, sealedPayload = PAYLOAD, attemptId = randomUUID()) => webhookAdapter(options).send({ attemptId, sealedPayload, configuredAccount: acc });
+const send = (acc: WebhookAccount, options: Partial<WebhookOptions> = LOCAL, sealedPayload = PAYLOAD, attemptId: string = randomUUID()) => webhookAdapter(options).send({ attemptId, sealedPayload, configuredAccount: acc });
 const takes = (request: HookRequest) => ({ status: 200, body: JSON.stringify({ attemptId: JSON.parse(request.body).attemptId, receipt: 'receipt-41' }) });
 
 describe('the webhook adapter', () => {
@@ -100,6 +100,11 @@ describe('the webhook adapter', () => {
       expect(hook.seen).toHaveLength(1);
     });
 
+    it('says unknown when the answer is cut off', async () => {
+      const hook = await receiver(() => 'cut');
+      expect(await send(account(hook.url))).toEqual({ kind: 'unknown', safeCode: 'connection_lost' });
+    });
+
     it('says unknown when the receiver stays silent', async () => {
       const hook = await receiver(() => 'silence');
       expect(await send(account(hook.url), { ...LOCAL, timeoutMs: 1500 })).toEqual({ kind: 'unknown', safeCode: 'timeout' });
@@ -110,6 +115,16 @@ describe('the webhook adapter', () => {
   describe('knows no words left', () => {
     it('when nothing listens', async () => {
       expect(await send(account(`https://localhost:${await closedPort()}/hook`))).toEqual({ kind: 'definitely_not_accepted', safeCode: 'connect_failed' });
+    });
+
+    it('when TLS never comes up in time', async () => {
+      const silent = await silentPort();
+      closing.push(silent.close);
+      expect(await send(account(`https://localhost:${silent.port}/hook`), { ...LOCAL, timeoutMs: 400 })).toEqual({ kind: 'definitely_not_accepted', safeCode: 'connect_timeout' });
+    });
+
+    it('when its name resolves to nothing', async () => {
+      expect(await send(account('https://no-such-name.invalid/hook'))).toEqual({ kind: 'definitely_not_accepted', safeCode: 'connect_failed' });
     });
 
     it('when it does not trust the certificate', async () => {
@@ -201,6 +216,11 @@ describe('the webhook adapter', () => {
       ['the receiver stays silent', () => 'silence'],
     ])('keeps waiting when %s', async (_name, answer) => {
       expect((await asking(answer)).outcome).toEqual({ kind: 'pending' });
+    });
+
+    it('keeps waiting when its endpoint cannot be used', async () => {
+      const outcome = await webhookAdapter(LOCAL).reconcile({ attemptId: randomUUID(), configuredAccount: account('http://localhost/hook', { readback: true }) });
+      expect(outcome).toEqual({ kind: 'pending' });
     });
 
     it('says it cannot tell for a receiver that offers no readback, and asks it nothing', async () => {

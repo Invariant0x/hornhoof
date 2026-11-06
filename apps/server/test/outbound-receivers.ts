@@ -1,7 +1,7 @@
 import { once } from 'node:events';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createServer as createHttps, type Server as HttpsServer } from 'node:https';
-import type { AddressInfo } from 'node:net';
+import { createServer as createPlain, type AddressInfo, type Socket } from 'node:net';
 import { createServer as createTls, type TLSSocket } from 'node:tls';
 import { SMTPServer, type SMTPServerAuthentication, type SMTPServerSession } from 'smtp-server';
 
@@ -105,17 +105,28 @@ export async function smtpReceiver(given: SmtpOptions = {}) {
   return { port: portOf(server.server), seen, close: () => new Promise<void>(resolve => server.close(() => resolve())) };
 }
 
-type Script = 'close_after_message' | 'silent_after_message' | 'close_at_mail';
-type Talk = { script: Script; seen: { messages: number }; socket: TLSSocket; inMessage: boolean; held: string };
+type Script = keyof typeof SCRIPTS;
+type Talk = { script: typeof AS_USUAL; seen: { messages: number }; socket: TLSSocket; inMessage: boolean; held: string };
 
 const REPLIES: Record<string, string> = { EHLO: '250-scripted\r\n250 AUTH PLAIN\r\n', AUTH: '235 ok\r\n', MAIL: '250 ok\r\n', RCPT: '250 ok\r\n', DATA: '354 go on\r\n' };
-const AT_END_OF_WORDS: Record<Script, (socket: TLSSocket) => void> = { close_after_message: socket => socket.destroy(), silent_after_message: () => undefined, close_at_mail: () => undefined };
-const dropsAt = (talk: Talk, verb: string) => verb === 'MAIL' && talk.script === 'close_at_mail';
+const quiet = (_socket: TLSSocket) => undefined;
+const drop = (socket: TLSSocket) => socket.destroy();
+const AS_USUAL = { atStart: quiet, greeting: '220 scripted ESMTP\r\n', replies: REPLIES, dropVerb: '', atEnd: quiet };
+const SCRIPTS = {
+  close_after_message: { atEnd: drop },
+  silent_after_message: {},
+  odd_reply_after_message: { atEnd: (socket: TLSSocket) => socket.write('354 what now\r\n') },
+  close_at_mail: { dropVerb: 'MAIL' },
+  refuse_at_mail: { replies: { ...REPLIES, MAIL: '550 not from you\r\n' } },
+  refuse_at_data: { replies: { ...REPLIES, DATA: '554 not now\r\n' } },
+  no_greeting: { greeting: '' },
+  close_at_greeting: { greeting: '', atStart: drop },
+};
 
 function answerCommand(talk: Talk, verb: string) {
-  if (dropsAt(talk, verb)) return talk.socket.destroy();
+  if (verb === talk.script.dropVerb) return talk.socket.destroy();
   talk.inMessage = verb === 'DATA';
-  talk.socket.write(`${REPLIES[verb]}`);
+  talk.socket.write(`${talk.script.replies[verb]}`);
 }
 
 function heardCommand(talk: Talk) {
@@ -127,7 +138,8 @@ function heardCommand(talk: Talk) {
 function heardWords(talk: Talk) {
   if (!talk.held.endsWith('\r\n.\r\n')) return;
   talk.seen.messages += 1;
-  AT_END_OF_WORDS[talk.script](talk.socket);
+  talk.held = '';
+  talk.script.atEnd(talk.socket);
 }
 
 function hear(talk: Talk, chunk: Buffer) {
@@ -136,13 +148,15 @@ function hear(talk: Talk, chunk: Buffer) {
 }
 
 /* A TLS server that speaks just enough SMTP to fail at the exact moment a test names, which a whole server cannot do. */
-export async function scriptedSmtp(script: Script) {
+export async function scriptedSmtp(name: Script) {
   const seen = { messages: 0 };
+  const script = { ...AS_USUAL, ...SCRIPTS[name] };
   const server = createTls(keysOf(), socket => {
     const talk: Talk = { script, seen, socket, inMessage: false, held: '' };
     socket.on('error', () => undefined);
-    socket.write('220 scripted ESMTP\r\n');
     socket.on('data', (chunk: Buffer) => hear(talk, chunk));
+    socket.write(script.greeting);
+    script.atStart(socket);
   });
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
@@ -150,12 +164,17 @@ export async function scriptedSmtp(script: Script) {
 }
 
 export type HookRequest = { method: string; url: string; headers: Record<string, string | string[] | undefined>; body: string };
-type HookAnswer = { status: number; body?: string; headers?: Record<string, string> } | 'silence' | 'destroy';
+type HookAnswer = { status: number; body?: string; headers?: Record<string, string> } | 'silence' | 'destroy' | 'cut';
 
-const WITHOUT_AN_ANSWER: Record<'silence' | 'destroy', (request: IncomingMessage) => void> = { silence: () => undefined, destroy: request => request.socket.destroy() };
+function cutOff(request: IncomingMessage, response: ServerResponse) {
+  response.writeHead(200, { 'content-length': '1000' });
+  response.write('{"attemptId":', () => request.socket.destroy());
+}
+
+const WITHOUT_AN_ANSWER: Record<'silence' | 'destroy' | 'cut', (request: IncomingMessage, response: ServerResponse) => void> = { silence: () => undefined, destroy: request => request.socket.destroy(), cut: cutOff };
 
 function respond(reply: HookAnswer, request: IncomingMessage, response: ServerResponse) {
-  if (typeof reply === 'string') return WITHOUT_AN_ANSWER[reply](request);
+  if (typeof reply === 'string') return WITHOUT_AN_ANSWER[reply](request, response);
   response.writeHead(reply.status, { 'content-type': 'application/json', ...reply.headers });
   response.end(reply.body);
 }
@@ -175,6 +194,19 @@ export async function hookReceiver(answer: (request: HookRequest) => HookAnswer,
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   return { port: portOf(server), url: `https://localhost:${portOf(server)}/hook`, seen, close: () => closeHttps(server) };
+}
+
+/* A plain TCP port that takes connections and never starts TLS. */
+export async function silentPort() {
+  const sockets: Socket[] = [];
+  const server = createPlain(socket => sockets.push(socket.on('error', () => undefined)));
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const close = () => {
+    sockets.forEach(socket => socket.destroy());
+    return closeTls(server);
+  };
+  return { port: portOf(server), close };
 }
 
 /* The first free port found and let go again: nothing listens there. */

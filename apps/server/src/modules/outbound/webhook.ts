@@ -1,7 +1,7 @@
 import { createHmac } from 'node:crypto';
 import { lookup as resolveName } from 'node:dns';
 import type { IncomingMessage } from 'node:http';
-import { request } from 'node:https';
+import { Agent, request } from 'node:https';
 import { BlockList, isIP, type LookupFunction, type Socket } from 'node:net';
 import { z } from 'zod';
 import { acceptedWith, definitelyNot, isSendable, isTlsFailure, unknownOutcome, type ReconcileOutcome, type SafeCode, type SealedPayload, type SendOutcome, type TransportAdapter } from './delivery.js';
@@ -43,13 +43,13 @@ function endpointOf(raw: string): URL | null {
 }
 
 /* Every address a name resolves to must be allowed, and the connection uses only these: a second answer from the name
-   server cannot move it. */
+   server cannot move it. The agent of each request asks for all of them. */
 function guardedLookup(mayReach: WebhookOptions['mayReach']): LookupFunction {
   return (host, options, answer) => {
     resolveName(host, { ...options, all: true }, (failure, found) => {
       if (failure) return answer(failure, '');
       if (!found.every(entry => mayReach(entry.address))) return answer(Object.assign(new Error('Address refused'), { code: ADDRESS_REFUSED }), '');
-      return options.all ? answer(null, found) : answer(null, found[0]!.address, found[0]!.family);
+      return answer(null, found);
     });
   };
 }
@@ -75,11 +75,11 @@ function readAnswer(response: IncomingMessage, status: number, settle: (answer: 
   response.on('error', () => settle({ failed: 'connection_lost', secured: true }));
 }
 
-/* One request on its own connection: no agent, no keep-alive, no proxy, and a redirect is only an answer. */
+/* One request on its own connection: no shared agent, no keep-alive, no proxy, and a redirect is only an answer. */
 function exchange(call: Call, account: WebhookAccount, options: WebhookOptions): Promise<Answer> {
   return new Promise(resolve => {
     let secured = false;
-    const sent = request(call.url, { method: call.method, headers: call.headers, agent: false, lookup: guardedLookup(options.mayReach), ca: account.ca, rejectUnauthorized: true, minVersion: 'TLSv1.2' });
+    const sent = request(call.url, { method: call.method, headers: call.headers, agent: new Agent({ keepAlive: false, autoSelectFamily: true }), lookup: guardedLookup(options.mayReach), ca: account.ca, rejectUnauthorized: true, minVersion: 'TLSv1.2' });
     const settle = (answer: Answer) => {
       clearTimeout(limit);
       resolve(answer);
@@ -89,7 +89,7 @@ function exchange(call: Call, account: WebhookAccount, options: WebhookOptions):
     sent.on('socket', (socket: Socket) => socket.once('secureConnect', () => { secured = true; }));
     sent.on('error', (failure: NodeFailure) => settle(failureOf(failure, secured)));
     sent.on('response', response => {
-      const status = response.statusCode ?? 0;
+      const status = Number(response.statusCode);
       if (isSuccess(status)) readAnswer(response, status, settle);
       else settle({ status, body: null });
     });

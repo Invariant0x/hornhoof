@@ -24,7 +24,7 @@ afterEach(async () => {
 });
 
 const account = (port: number, more: Partial<SmtpAccount> = {}): SmtpAccount => ({ host: 'localhost', port, security: 'starttls', username: USERNAME, password: PASSWORD, from: FROM, ca: CERT, ...more });
-const send = (acc: SmtpAccount, sealedPayload = PAYLOAD, timeouts?: Partial<SmtpTimeouts>, attemptId = randomUUID()) => smtpAdapter(timeouts).send({ attemptId, sealedPayload, configuredAccount: acc });
+const send = (acc: SmtpAccount, sealedPayload = PAYLOAD, timeouts?: Partial<SmtpTimeouts>, attemptId: string = randomUUID()) => smtpAdapter(timeouts).send({ attemptId, sealedPayload, configuredAccount: acc });
 
 /* The part of a raw message after its headers, as the words it carries. */
 const parts = (raw: Buffer) => {
@@ -102,7 +102,8 @@ describe('the SMTP adapter', () => {
     const outcome = await send(account(server.port));
     expect(outcome.kind).toBe('accepted');
     const receipt = (outcome as { providerReceipt: string }).providerReceipt;
-    expect(receipt).toMatch(/queued as x+$/);
+    expect(receipt).toMatch(/queued\s+as x+$/);
+    expect(receipt).not.toMatch(/\p{Cc}/u);
     expect(receipt).toHaveLength(512);
   });
 
@@ -114,6 +115,31 @@ describe('the SMTP adapter', () => {
 
   it('knows the message was not accepted when nothing listens', async () => {
     expect(await send(account(await closedPort()))).toEqual({ kind: 'definitely_not_accepted', safeCode: 'connect_failed' });
+  });
+
+  describe('knows the message was not accepted before it began', () => {
+    const tlsAccount = (port: number) => account(port, { security: 'tls' });
+
+    it('when the server closes instead of greeting', async () => {
+      const server = await scripted('close_at_greeting');
+      expect(await send(tlsAccount(server.port))).toEqual({ kind: 'definitely_not_accepted', safeCode: 'connect_failed' });
+    });
+
+    it('when the server never greets', async () => {
+      const server = await scripted('no_greeting');
+      expect(await send(tlsAccount(server.port), PAYLOAD, { greetingMs: 400 })).toEqual({ kind: 'definitely_not_accepted', safeCode: 'connect_timeout' });
+    });
+
+    it('at the overall limit, as sending had not begun', async () => {
+      const server = await scripted('no_greeting');
+      expect(await send(tlsAccount(server.port), PAYLOAD, { totalMs: 400 })).toEqual({ kind: 'definitely_not_accepted', safeCode: 'connect_timeout' });
+    });
+
+    it.each(['refuse_at_mail', 'refuse_at_data'] as const)('on %s', async script => {
+      const server = await scripted(script);
+      expect(await send(tlsAccount(server.port))).toEqual({ kind: 'definitely_not_accepted', safeCode: 'message_refused' });
+      expect(server.seen.messages).toBe(0);
+    });
   });
 
   it('knows the message was not accepted when the server refuses the recipient', async () => {
@@ -145,6 +171,12 @@ describe('the SMTP adapter', () => {
     it('says unknown when the server stays silent after the words', async () => {
       const server = await scripted('silent_after_message');
       expect(await send(tlsAccount(server.port), PAYLOAD, { socketMs: 1500 })).toEqual({ kind: 'unknown', safeCode: 'timeout' });
+      expect(server.seen.messages).toBe(1);
+    });
+
+    it('says unknown when the answer to its words is neither yes nor no', async () => {
+      const server = await scripted('odd_reply_after_message');
+      expect(await send(tlsAccount(server.port))).toEqual({ kind: 'unknown', safeCode: 'connection_lost' });
       expect(server.seen.messages).toBe(1);
     });
 
