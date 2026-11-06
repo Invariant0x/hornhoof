@@ -216,4 +216,110 @@ describe('StaffCard', () => {
       }
     });
   });
+
+  it('opens a sealed native staffing proposal document in MaterialViewer without calling hire or altering the original snapshot on card edits', async () => {
+    const user = userEvent.setup();
+    const proposalDocId = '11111111-1111-4111-8111-111111111111';
+    const contentUrl = `/api/proposals/pr9/materials/${proposalDocId}/content`;
+    const sealedText = 'Proposed Development staffing:\n- Head of development\n- Bruno (Backend engineer)\n- Frontend (Mascot)';
+    const calls: { method: string; path: string; body: unknown }[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit = {}) => {
+      const method = init.method ?? 'GET';
+      const body = typeof init.body === 'string' ? JSON.parse(init.body) : undefined;
+      calls.push({ method, path, body });
+      if (method === 'GET' && path === '/api/departments/d2/roster') {
+        return new Response(JSON.stringify(ROSTER), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (method === 'GET' && path === '/api/proposals/pr9/materials') {
+        return new Response(JSON.stringify({
+          materialRevision: 1,
+          materialDigest: 'a'.repeat(64),
+          common: [{
+            id: proposalDocId,
+            name: 'Staffing proposal.txt',
+            kind: 'document',
+            format: 'text',
+            state: 'available',
+            contentUrl,
+            downloadUrl: null,
+            size: sealedText.length,
+            sha256: 'b'.repeat(64),
+            mediaType: 'text/plain',
+          }],
+          options: [],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (method === 'GET' && path === contentUrl) {
+        return new Response(sealedText, { status: 200, headers: { 'content-type': 'text/plain; charset=utf-8' } });
+      }
+      return new Response(JSON.stringify({ hired: ['x1'] }), { status: 201, headers: { 'content-type': 'application/json' } });
+    }));
+
+    const proposalWithMaterials = {
+      id: 'pr9',
+      brief: 'Start with the API.',
+      materialRevision: 1,
+      people: [
+        { role: 'DEV-HEAD', checked: true },
+        { role: 'DEV-BE', name: 'Bruno', checked: true },
+      ],
+    } as unknown as { id: string; brief: string; people: StaffLine[] };
+
+    render(
+      <LanguageProvider>
+        <StaffCard department={DEPT} proposal={proposalWithMaterials} onCorrect={() => {}} />
+      </LanguageProvider>,
+    );
+
+    const openBtn = await screen.findByRole('button', { name: /Open material: Staffing proposal\.txt/ });
+    /* Edit the card before and after preview: uncheck Bruno on the card. */
+    await user.click(screen.getByRole('checkbox', { name: /Bruno/ }));
+    await user.click(openBtn);
+
+    const dialog = await screen.findByRole('dialog', { name: 'Staffing proposal.txt' });
+    expect(await within(dialog).findByText(/Bruno \(Backend engineer\)/)).toBeInTheDocument();
+    expect(within(dialog).getByText('Original proposal. Your changes are not part of it.')).toBeInTheDocument();
+    expect(within(dialog).getByText('End of document. Shown in full.')).toBeInTheDocument();
+    expect(calls.filter(c => c.method === 'POST')).toEqual([]);
+
+    await user.click(within(dialog).getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /Bruno/ })).not.toBeChecked();
+    expect(calls.filter(c => c.method === 'POST')).toEqual([]);
+
+    await user.click(screen.getByRole('button', { name: 'Hire (1)' }));
+    await vi.waitFor(() =>
+      expect(calls.find(c => c.method === 'POST')?.body).toMatchObject({
+        proposalId: 'pr9',
+        materialRevision: 1,
+        materialDigest: 'a'.repeat(64),
+      }),
+    );
+  });
+
+  it('renders no fake document and keeps hiring ticks intact when GET /api/proposals/:id/materials returns 503 source_producer_unavailable', async () => {
+    mockApi({
+      'GET /api/departments/d2/roster': [200, ROSTER],
+      'GET /api/proposals/pr9/materials': [503, { error: { code: 'unavailable', reason: 'source_producer_unavailable' } }],
+    });
+    const proposalWithMaterials = {
+      id: 'pr9',
+      brief: 'Start with the API.',
+      materialRevision: 1,
+      people: [
+        { role: 'DEV-HEAD', checked: true },
+        { role: 'DEV-BE', name: 'Bruno', checked: true },
+      ],
+    } as unknown as { id: string; brief: string; people: StaffLine[] };
+
+    const { container } = render(
+      <LanguageProvider>
+        <StaffCard department={DEPT} proposal={proposalWithMaterials} onCorrect={() => {}} />
+      </LanguageProvider>,
+    );
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('The original proposal document is not available right now. Try again later.');
+    expect(container.querySelectorAll('.mat')).toHaveLength(0);
+    expect(await screen.findByRole('button', { name: 'Hire (2)' })).toBeEnabled();
+  });
 });

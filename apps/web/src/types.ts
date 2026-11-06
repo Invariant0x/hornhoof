@@ -1,11 +1,12 @@
 import type { ApprovalChannel, ApprovalMode, ApprovalRule as ChannelRule } from '@hornhoof/protocol/approval-policy';
 import type { ExternalWait } from '@hornhoof/protocol/waits';
 import type { Notification } from '@hornhoof/protocol';
-import type { ConnectionEnd, FailureKind, Limits, MachineDrain, ModelOption, NodeWait, NodeDisconnectCause, NodeLoad, NodeReconnect, ProgramInfo, ProviderId, TemplateKey } from '@hornhoof/protocol';
+import type { ConnectionEnd, FailureKind, Limits, MachineDrain, MaterialManifest, ModelOption, NodeWait, NodeDisconnectCause, NodeLoad, NodeReconnect, ProgramInfo, ProviderId, TemplateKey } from '@hornhoof/protocol';
 import type { RoleEffort } from '@hornhoof/protocol/efforts';
 import type { RiskClass, WorkKind } from '@hornhoof/protocol/pipeline-report';
 import type { ProgramRetry, TurnAlarm, TurnProgram, TurnRetry, WorkLine } from '@hornhoof/protocol/map';
 
+export type { MaterialManifest, MaterialView } from '@hornhoof/protocol';
 export type { FailureKind, Limits, ModelOption, ProgramRetry, ProviderId, TemplateKey, TurnAlarm, TurnRetry, WorkLine };
 
 /* Template text that comes in both languages. */
@@ -418,7 +419,13 @@ export type Improvement = {
   parts?: ImprovementParts | null;
 };
 
-export type WaitingRequest = {
+export type MaterialStampView = {
+  materialRevision?: MaterialManifest['materialRevision'] | null;
+  materialDigest?: MaterialManifest['materialDigest'] | null;
+  hasMaterials?: boolean;
+};
+
+export type WaitingRequest = MaterialStampView & {
   id: string;
   kind: 'question' | 'choice' | 'approval' | 'stuck';
   text: string;
@@ -448,7 +455,7 @@ export type WaitingRequest = {
 export type DecidedBy = { kind: 'ceo_and_delegate' | 'department_and_ceo' | 'owner_and_ceo'; department: { id: string; name: string } | null };
 
 /* A card of the orchestrator that waits for people: a structure to build, or people to hire into a department. */
-export type ProposalDecision = {
+export type ProposalDecision = MaterialStampView & {
   id: string;
   agent: { id: string; name: string };
   department: { id: string; name: string } | null;

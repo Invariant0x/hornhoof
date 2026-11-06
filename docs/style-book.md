@@ -1,6 +1,6 @@
 # Hornhoof style book
 
-**Version 1.0, approved by the head of Design on 2026-11-05.** The head of Design owns this book (section 8).
+**Version 1.1, approved by the head of Design on 2026-11-06.** The head of Design owns this book (section 8).
 
 **Base.** `apps/web/src/theme.css` at commit `2fed0c54662d69d24e5b158200d3ef9c4205642a`, SHA256 `689f607b4abb4879a46972b779e4a0d59474a8fb99ee2bfe6b57a125474daa92`. Colours, type and sizes come from that file. Components, fonts, documents and languages were read at commit `c4053494f51a1f26be4708a0124169ebc90ad4d7`, the newest code the author could read. Between the two commits `theme.css` gains one line, so a component added in that line's commit may be missing here.
 
@@ -278,6 +278,21 @@ Which states exist, from the check with Development recorded on #478. That check
 
 `Remove` in the notebook has no confirmation. Development decided on #478 that this is not a defect and that no confirmation will be added. `templates/skills/dsn-ui-rules.md` asks for one in general, so the case stands in the exceptions list of section 8.
 
+### Materials of a question
+
+A question that shows a result carries materials: pictures, documents, files and links, shared by the question or belonging to one option.
+
+**RULE.**
+
+1. A material and an answer are never nested and never look alike. A material is a flat frame in `--f-body` with the word of its kind and the word to open it. An answer is a button of section 6, under the materials of its option.
+2. Opening, zooming, paging, closing and downloading choose nothing and send nothing. The draft of the answer survives all of them.
+3. In a list of options, a picture takes the whole width of the option, so the difference shows before opening.
+4. The viewer covers the window, follows the theme and keeps its close button on screen. A document reads to its end, and a part that did not load is said in words, never hidden.
+5. A refused or failed material keeps its name and says why in words.
+6. A download mark appears only on what can be downloaded.
+
+Class names are not fixed until it is built. What each field means is decided with Development; a field not in the code yet is marked as proposed.
+
 ### Tables
 
 | Class | Behaviour | Source |
@@ -401,6 +416,7 @@ Real sources in the repository:
 | Version | Date | Change | Approved by |
 |---|---|---|---|
 | 1.0 | 2026-11-05 | First version: built from the code, numbers of section 6 after the CEO's choice, rules 11 to 13, section 9 | Head of Design |
+| 1.1 | 2026-11-06 | Rules for materials of a question | Head of Design |
 
 ## 9. Browsers
 
