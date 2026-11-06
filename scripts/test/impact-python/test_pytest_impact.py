@@ -67,14 +67,16 @@ def test_selected_files_run_with_real_pytest(tmp_path: Path) -> None:
 
 def test_changed_test_itself_is_selected(tmp_path: Path) -> None:
     files = project(tmp_path)
-    assert select_tests(tmp_path, files, inventory_tests(files), ["tests/test_labels.py"])[
-        "selected"
-    ] == ["tests/test_labels.py"]
+    assert select_tests(
+        tmp_path, files, inventory_tests(files), ["tests/test_labels.py"]
+    )["selected"] == ["tests/test_labels.py"]
 
 
 def test_proven_unreferenced_module_has_no_tests(tmp_path: Path) -> None:
     files = project(tmp_path, {"src/unreferenced.py": "unused = 1\n"})
-    assert select_tests(tmp_path, files, inventory_tests(files), ["src/unreferenced.py"]) == {
+    assert select_tests(
+        tmp_path, files, inventory_tests(files), ["src/unreferenced.py"]
+    ) == {
         "status": "ready",
         "selected": [],
         "reason": None,
@@ -117,7 +119,9 @@ def test_symlink_cannot_import_outside_the_package(tmp_path: Path) -> None:
     path.unlink()
     path.symlink_to(Path(__file__).resolve())
     assert (
-        select_tests(tmp_path, files, inventory_tests(files), ["src/prices.py"])["reason"]
+        select_tests(tmp_path, files, inventory_tests(files), ["src/prices.py"])[
+            "reason"
+        ]
         == "invalid_inventory"
     )
 
@@ -125,7 +129,9 @@ def test_symlink_cannot_import_outside_the_package(tmp_path: Path) -> None:
 def test_missing_or_uninventoried_files_are_unavailable(tmp_path: Path) -> None:
     files = project(tmp_path)
     assert (
-        select_tests(tmp_path, files, inventory_tests(files), ["src/missing.py"])["status"]
+        select_tests(tmp_path, files, inventory_tests(files), ["src/missing.py"])[
+            "status"
+        ]
         == "unavailable"
     )
     assert (
@@ -146,9 +152,9 @@ def test_module_cycles_terminate_and_keep_all_dependents(tmp_path: Path) -> None
 
 def test_package_initializer_is_a_dependency(tmp_path: Path) -> None:
     files = project(tmp_path)
-    assert select_tests(tmp_path, files, inventory_tests(files), ["src/basket/__init__.py"])[
-        "selected"
-    ] == ["tests/test_report.py"]
+    assert select_tests(
+        tmp_path, files, inventory_tests(files), ["src/basket/__init__.py"]
+    )["selected"] == ["tests/test_report.py"]
 
 
 def test_cli_emits_json_without_importing_repository_modules(tmp_path: Path) -> None:
