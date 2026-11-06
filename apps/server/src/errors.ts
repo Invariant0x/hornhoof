@@ -96,6 +96,7 @@ export type ErrorReason =
   | 'task_invalid'
   | 'urgent_not_allowed'
   | 'urgent_follows_parent'
+  | 'urgent_only_team'
   | 'request_unknown'
   | 'request_closed'
   | 'improvement_unknown'
