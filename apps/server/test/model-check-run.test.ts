@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
-import type { Case, CheckBinding, CheckInput, CheckReceipt } from '@hornhoof/protocol';
+import type { Case, CheckBinding, CheckInput } from '@hornhoof/protocol';
 import { parseDataset } from '../src/modules/model-checks/dataset.js';
 import { afterRun, bindingDigest } from '../src/modules/model-checks/lifecycle.js';
 import { evaluateCheck, NO_MODEL_YET, reportText, type RunModelCheck } from '../src/modules/model-checks/run.js';
 import type { Thresholds } from '../src/modules/model-checks/score.js';
-import { RULES, asJsonl, binding, holdout, mustBlock, reviewCase } from './model-check-fixture.js';
+import { RULES, SET, asJsonl, binding, holdout, modelFor, mustBlock, receipt, reviewCase } from './model-check-fixture.js';
 
 const NOW = new Date('2026-11-06T12:00:00.000Z');
 const ids = { reportId: randomUUID(), now: NOW };
@@ -15,22 +15,6 @@ const datasetOf = (rows: Case[]) => {
   if (!result.ok) throw new Error(JSON.stringify(result.problems));
   return result.dataset;
 };
-const subjectOf = (input: CheckInput) => input.subject.contentDigest;
-const receipt = (given: CheckBinding, input: CheckInput, decision: 'allow' | 'block' | 'escalate', more: Partial<CheckReceipt> = {}): CheckReceipt => ({
-  schemaVersion: 1, checkId: given.checkId, bindingDigest: bindingDigest(given), subjectDigest: subjectOf(input), reviewer: given.model, result: { kind: 'review', decision, reasonCodes: ['uncertain'] }, ...more,
-});
-const expectedDecision = (row: Case) => ('decision' in row.expected ? row.expected.decision : 'allow');
-
-/* A model that answers each example the way the labeller did, except for the examples named as wrong. */
-function modelFor(rows: Case[], wrong: Record<string, 'allow' | 'block' | 'escalate'> = {}): RunModelCheck {
-  const byDigest = new Map(rows.map(row => [row.input.subject.id, row]));
-  return async (given, input) => {
-    const row = byDigest.get(input.subject.id)!;
-    return receipt(given, input, wrong[row.id] ?? expectedDecision(row));
-  };
-}
-const SET = () => [reviewCase(), mustBlock(), holdout(), holdout({ expected: { decision: 'block' }, mustBlock: true })];
-
 describe('a run of a set of examples', () => {
   it('asks the model once for each example with its binding, and passes when all come out right', async () => {
     const rows = SET();
