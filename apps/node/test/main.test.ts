@@ -1378,4 +1378,22 @@ describe('checking work before admission', () => {
     expect(server.received.filter(frame => frame.type === 'tests.started')).toEqual([]);
     expect(server.received.find(frame => frame.type === 'tests.done' && frame.partId === 'checking-work')).toMatchObject({ ok: false, exitCode: null, error: 'failed', commit: null, log: expect.stringContaining('запусти через run_tests') });
   });
+
+  it.each(['npm ci', 'echo prepared'])('keeps non-check work %s inside one existing slot', async command => {
+    const server = await fakeServer(), dir = nodeDir(server.url);
+    const sentinel = join(dir, 'payload-started');
+    const runPart: typeof runTests = async part => {
+      writeFileSync(sentinel, part.kind ?? 'test');
+      return { type: 'tests.done', partId: part.partId, ok: false, exitCode: 7, error: 'failed', commit: null, log: 'original work output' };
+    };
+    const node = await runNode({ dir, adapter, testUser: environmentTestUser, runPart, log: () => {} });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(frame => frame.type === 'hello'));
+    server.send({ type: 'tests.run', kind: 'work', partId: 'ordinary-work', repo: null, branch: null, task: 1, command, part: 1, parts: 1, timeoutMs: 1000 });
+    await server.wait(() => server.received.some(frame => frame.type === 'tests.done' && frame.partId === 'ordinary-work'));
+    expect(readFileSync(sentinel, 'utf8')).toBe('work');
+    expect(server.received.filter(frame => frame.type === 'check.acquire')).toHaveLength(1);
+    expect(server.received.filter(frame => frame.type === 'tests.started')).toHaveLength(1);
+    expect(server.received.find(frame => frame.type === 'tests.done' && frame.partId === 'ordinary-work')).toMatchObject({ ok: false, exitCode: 7, log: 'original work output' });
+  });
 });

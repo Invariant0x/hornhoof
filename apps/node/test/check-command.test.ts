@@ -171,13 +171,13 @@ async function guardedCommandFixture() {
   const bridge = new Bridge('http://127.0.0.1:1', () => {});
   await bridge.start(); bridge.setToken(key, 'current-fixture-turn');
   onTestFinished(() => { bridge.stop(); client.online(false); setCheckClient(null); configureCheckCommands(null); rmSync(dir, { recursive: true, force: true }); });
-  const run = async (lease?: string) => {
+  const run = async (lease?: string, command = ['tsc', '--noEmit'], signal?: AbortSignal) => {
     const response = await fetch(bridge.agent(key).hookUrl.replace('/hook/', '/check/'), {
-      method: 'POST', body: JSON.stringify({ command: ['tsc', '--noEmit'], cwd: root, env: { PATH: bin, HH_GUARD_SENTINEL: sentinel, HH_CHECK_SLOT: lease ?? 'forged-claim' }, ...(lease ? { lease } : {}) }),
+      method: 'POST', signal, body: JSON.stringify({ command, cwd: root, env: { PATH: bin, HH_GUARD_SENTINEL: sentinel, HH_CHECK_SLOT: lease ?? 'forged-claim' }, ...(lease ? { lease } : {}) }),
     });
     return response.text();
   };
-  return { dir, root, key, run, acquired: () => acquired, sentinel };
+  return { dir, root, bin, key, run, acquired: () => acquired, sentinel };
 }
 
 describe('command policy boundary', () => {
@@ -207,5 +207,31 @@ describe('command policy boundary', () => {
     expect({ started: existsSync(c.sentinel), acquired: c.acquired() }).toEqual({ started: false, acquired: 0 });
     expect(text).toContain('запусти через run_tests');
     expect(text).not.toContain('private diagnostic');
+  });
+
+  it('preserves a classified single-file command output and original nonzero exit', async () => {
+    const c = await guardedCommandFixture();
+    const program = join(c.bin, 'vitest');
+    writeFileSync(program, '#!/bin/sh\nprintf single-file-output\nexit 7\n'); chmodSync(program, 0o755);
+    writeFileSync(join(c.root, 'one.test.ts'), 'export {};');
+    configureCheckCommands(null, createAgentCommandGuard(c.dir));
+    const text = await c.run(undefined, ['vitest', 'run', 'one.test.ts']);
+    expect(text).toContain(Buffer.from('single-file-output').toString('base64'));
+    expect(text).toContain('"type":"exit","code":7');
+    expect(c.acquired()).toBe(1);
+  });
+
+  it('does not admit a command cancelled while its guard is pending', async () => {
+    const c = await guardedCommandFixture(), stop = new AbortController();
+    let entered!: () => void, release!: () => void, settled!: () => void;
+    const began = new Promise<void>(resolve => { entered = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const finished = new Promise<void>(resolve => { settled = resolve; });
+    configureCheckCommands(null, async () => { entered(); await gate; settled(); return { allow: true, kind: 'ordinary', coverage: 'opaque' }; });
+    const request = c.run(undefined, undefined, stop.signal).catch(() => null);
+    await began; stop.abort(); await request;
+    release(); await finished;
+    await new Promise(resolve => setImmediate(resolve));
+    expect({ started: existsSync(c.sentinel), acquired: c.acquired() }).toEqual({ started: false, acquired: 0 });
   });
 });

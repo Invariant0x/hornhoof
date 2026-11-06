@@ -8,7 +8,7 @@ import { z } from 'zod';
 import type { JobUser } from './isolation.js';
 import { currentCheckLease, reuseCheckLease, withCheckSlot } from './check-queue.js';
 import { trackCheckProcess } from './check-processes.js';
-import type { AgentCommandVerdict, CommandInput } from './command-guard.js';
+import { refusalText, type AgentCommandVerdict, type CommandInput } from './command-guard.js';
 
 export type CheckCommandGuard = (key: string, input: Pick<CommandInput, 'command' | 'cwd'>) => Promise<AgentCommandVerdict>;
 
@@ -16,8 +16,16 @@ const Word = z.string().max(100_000).refine(value => !value.includes('\0'));
 const Command = z.object({ command: z.array(Word).min(1).max(1000), cwd: Word, env: z.record(z.string().regex(/^[^=\0]+$/), Word), lease: z.uuid().optional() });
 type Command = z.infer<typeof Command>;
 let user: JobUser | null = null;
+let commandGuard: CheckCommandGuard | undefined;
 
-export function configureCheckCommands(owner: JobUser | null, guard?: CheckCommandGuard): void { user = owner; void guard; }
+export function configureCheckCommands(owner: JobUser | null, guard?: CheckCommandGuard): void { user = owner; commandGuard = guard; }
+
+async function commandPolicy(key: string, input: Command): Promise<AgentCommandVerdict> {
+  try {
+    if (commandGuard) return await commandGuard(key, input);
+  } catch { /* Policy failure cannot authorize a command or disclose its diagnostics. */ }
+  return { allow: false, code: 'command_guard_unavailable', category: 'command_context' };
+}
 
 export function installCheckCommand(dir: string): void {
   const bin = join(dir, 'tools', 'bin'), target = fileURLToPath(new URL('./check-command.js', import.meta.url));
@@ -46,6 +54,10 @@ export async function serveCheckCommand(key: string, body: Buffer, signal: Abort
   res.writeHead(200, { 'content-type': 'application/x-ndjson' });
   const run = (slotSignal: AbortSignal) => runCommand(key, input, slotSignal, res);
   try {
+    signal.throwIfAborted();
+    const verdict = await commandPolicy(key, input);
+    signal.throwIfAborted();
+    if (!verdict.allow) { send(res, { type: 'error', message: refusalText(verdict) }); return; }
     if (input.lease) await reuseCheckLease(input.lease, key, signal, run);
     else await withCheckSlot(run, { agentId: key, label: basename(input.command[0]).slice(0, 100), signal, onPosition: position => { send(res, { type: 'queued', position }); } });
   } catch (error) {
