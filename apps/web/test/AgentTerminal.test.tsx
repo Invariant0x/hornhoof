@@ -35,7 +35,7 @@ type FakeTerminal = {
     coreMouseService: { _protocols: Record<string, { events: number }>; fireProtocol(events: number): void };
   };
   type(data: string): void;
-  write(data: string): void;
+  write(data: string, onWritten?: () => void): void;
   wheel(deltaY: number): boolean;
   pressKey(init: KeyboardEventInit): KeyboardEvent;
   selectText(text: string): void;
@@ -170,8 +170,9 @@ vi.mock('@xterm/xterm', () => ({
     private synced(after: string) {
       if (this.disposed) late.push(after);
     }
-    write(data: string) {
+    write(data: string, onWritten?: () => void) {
       this.written.push(data);
+      onWritten?.();
     }
     onData(fn: (d: string) => void) {
       this.onKeys.push(fn);
@@ -392,19 +393,26 @@ describe("an agent's live terminal in its window", () => {
     const term = terms[0]!;
     term.buffer.active.viewportY = saved;
     const write = term.write.bind(term);
-    term.write = data => {
+    const written: (() => void)[] = [];
+    term.write = (data, onWritten) => {
       write(data);
-      if (data.includes('\x1b[3J')) {
+      if (data.includes('\x1b[3J') || data === '3J') {
         term.buffer.active.baseY = 0;
         term.buffer.active.viewportY = 0;
       }
-      if (data.includes('history')) term.buffer.active.baseY = after;
+      written.push(() => {
+        if (data.includes('history')) term.buffer.active.baseY = after;
+        onWritten?.();
+      });
     };
     act(() => {
       ws.screen('\x1b[');
       ws.screen('3J');
       ws.screen('\x1b[1;2r history');
       ws.screen('repaint');
+    });
+    act(() => {
+      for (const done of written) done();
     });
     expect(term.buffer.active.viewportY).toBe(expected);
     expect(term.wheel(-3)).toBe(false);

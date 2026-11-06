@@ -1110,6 +1110,7 @@ export const en = {
     } as Record<string, string>,
     evidence: 'Evidence',
     comment: 'Comment',
+    actions: 'Actions',
     addComment: 'Add comment',
     cancelAsk: (n: number) => `Cancel #${n} and its open subtasks?`,
     yesCancel: 'Yes, cancel it',

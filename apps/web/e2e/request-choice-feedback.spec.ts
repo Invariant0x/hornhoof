@@ -310,7 +310,7 @@ for (const lang of ['ru', 'en'] as const) {
       test(`aligns choice options and feedback form cleanly in ${lang}, ${theme}, at ${width}px`, async ({ page }, info) => {
         const { t, card, errors, posts } = await openTasksWithChoice(page, lang, theme, width);
 
-        const options = card.locator('.req-option');
+        const options = card.locator('.opts > .opt');
         await expect(options).toHaveCount(2);
         const field = card.getByLabel(t.tasks.choiceNote);
         const send = card.getByRole('button', { name: t.tasks.sendFeedback, exact: true });
@@ -566,11 +566,15 @@ for (const lang of CHECKED_LOCALES) {
           await document.fonts.ready;
         });
 
-        const mainScrollWidth = await page.evaluate(() => {
+        const mainOverflow = await page.evaluate(() => {
           const scroller = document.querySelector<HTMLElement>('.screen, .page');
-          return Math.max(document.documentElement.scrollWidth, scroller?.scrollWidth ?? 0);
+          const offenders = [...document.querySelectorAll<HTMLElement>('body *')]
+            .filter(el => el.getBoundingClientRect().right > innerWidth + 1 || el.scrollWidth > el.clientWidth + 1)
+            .slice(0, 20)
+            .map(el => ({ tag: el.tagName, className: el.className, right: el.getBoundingClientRect().right, scrollWidth: el.scrollWidth, clientWidth: el.clientWidth, text: el.textContent?.slice(0, 100) }));
+          return { width: Math.max(document.documentElement.scrollWidth, scroller?.scrollWidth ?? 0), offenders };
         });
-        expect(mainScrollWidth).toBeLessThanOrEqual(width);
+        expect(mainOverflow.width, JSON.stringify(mainOverflow.offenders)).toBeLessThanOrEqual(width);
         await assertRequestCardsFit(mainCards, width);
 
         /* Open TaskPanel (aside) on #1 so the exact same 3 request cards render inside the narrow side panel. */
@@ -581,9 +585,13 @@ for (const lang of CHECKED_LOCALES) {
 
         const asideOverflow = await aside.evaluate((el: HTMLElement) => {
           const body = el.querySelector<HTMLElement>('.ac-body');
-          return el.scrollWidth > el.clientWidth + 1 || (body ? body.scrollWidth > body.clientWidth + 1 : false);
+          const offenders = [...el.querySelectorAll<HTMLElement>('*, .ac-body *')]
+            .filter(item => item.scrollWidth > item.clientWidth + 1)
+            .slice(0, 20)
+            .map(item => ({ tag: item.tagName, className: item.className, right: item.getBoundingClientRect().right, scrollWidth: item.scrollWidth, clientWidth: item.clientWidth, text: item.textContent?.slice(0, 100) }));
+          return { overflow: el.scrollWidth > el.clientWidth + 1 || (body ? body.scrollWidth > body.clientWidth + 1 : false), offenders };
         });
-        expect(asideOverflow, 'TaskPanel aside has no horizontal overflow').toBe(false);
+        expect(asideOverflow.overflow, JSON.stringify(asideOverflow.offenders)).toBe(false);
         const asideBox = await box(aside);
         expect(asideBox.x + asideBox.width).toBeLessThanOrEqual(width + 1);
         await assertRequestCardsFit(panelCards, asideBox.x + asideBox.width);
@@ -742,7 +750,7 @@ test('preserves multi-line feedback on server error and succeeds on retry, and k
   await expect(send).toBeEnabled();
 
   /* Choosing option 0 after editing note sends exact pick: 0 with comment. */
-  await card.locator('.req-option').nth(0).click();
+  await card.getByRole('button', { name: t.tasks.chooseOption(1), exact: true }).click();
   await expect.poll(() => posts).toEqual([
     { url: '/api/requests/req-choice-demo', body: { answer: feedback } },
     { url: '/api/requests/req-choice-demo', body: { pick: 0, answer: feedback } },

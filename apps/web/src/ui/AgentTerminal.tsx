@@ -127,14 +127,15 @@ function writeKeepingPlace(term: Terminal, data: string) {
   state.tail = stream.slice(-2);
   if (state.reading === null) return writeTerminalData(term, data);
   if (intoHistory) state.history = true;
-  writeTerminalData(term, data);
-  if (!state.history) return;
+  if (!state.history) return writeTerminalData(term, data);
   const reading = state.reading;
   if (!intoHistory) {
     state.reading = null;
     state.history = false;
   }
-  if (term.buffer.active.baseY > 0) term.scrollToLine(Math.min(reading, term.buffer.active.baseY));
+  writeTerminalData(term, data, () => {
+    if (term.buffer.active.baseY > 0) term.scrollToLine(Math.min(reading, term.buffer.active.baseY));
+  });
 }
 
 function screenCame(view: View, data: string) {
