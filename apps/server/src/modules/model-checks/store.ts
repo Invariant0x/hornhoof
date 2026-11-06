@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { canonicalJson, type Case, type CheckBinding, type ModelCheckKind } from '@hornhoof/protocol';
+import { canonicalJson, type Case, type CheckBinding } from '@hornhoof/protocol';
 import { and, desc, eq, inArray, isNotNull, isNull, lt, max, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
@@ -11,11 +11,12 @@ import { evaluateCheck, NO_MODEL_YET, unreadableSet, type Evaluation, type RunMo
 import { parseThresholds, type Thresholds } from './score.js';
 import { recordCheckSignal } from './signal.js';
 import { departmentHasWork } from './work.js';
+import { sameCheckPlace, type CheckPlace } from './place.js';
+export type { CheckPlace } from './place.js';
 
 /* Checks made by a model as they stand in the database. Each write goes under a lock on its check, so that a change and the
    end of a run see each other. Whatever changes a binding turns the check off and queues one run in the same transaction. */
 
-export type CheckPlace = { companyId: string; departmentId: string; productId: string | null; kind: ModelCheckKind };
 export type CheckDefinition = Pick<CheckBinding, 'checkerCodeHash' | 'promptHash' | 'outputSchemaHash' | 'sourceListHash' | 'taxonomyHash' | 'model'>;
 export type SavedSet = { ok: true; version: number; hash: string } | { ok: false; problems: DatasetProblem[] };
 
@@ -30,16 +31,9 @@ type RunRow = typeof modelCheckEvaluations.$inferSelect;
 const RUN_LEASE_MS = 3 * 60 * 60_000;
 const NO_SET: SavedSet = { ok: false, problems: [{ line: 1, code: 'empty' }] };
 
-const samePlace = (place: CheckPlace) => and(
-  eq(modelChecks.companyId, place.companyId),
-  eq(modelChecks.departmentId, place.departmentId),
-  place.productId ? eq(modelChecks.productId, place.productId) : isNull(modelChecks.productId),
-  eq(modelChecks.kind, place.kind),
-);
-
 async function lockedCheck(tx: Writer, place: CheckPlace): Promise<CheckRow> {
   await tx.insert(modelChecks).values(place).onConflictDoNothing();
-  const [check] = await tx.select().from(modelChecks).where(samePlace(place)).for('update');
+  const [check] = await tx.select().from(modelChecks).where(sameCheckPlace(place)).for('update');
   return check!;
 }
 
@@ -55,7 +49,7 @@ const boundRun = async (db: Reader, checkId: string, digest: string | null): Pro
 /* Whoever wrote any version of a check labels none of its examples, so a set is read against all of them. */
 async function rulesOf(db: Reader, place: CheckPlace): Promise<DatasetRules> {
   const authors = await db.select({ kind: modelCheckRevisions.authorKind, id: modelCheckRevisions.authorId }).from(modelCheckRevisions)
-    .innerJoin(modelChecks, eq(modelChecks.id, modelCheckRevisions.checkId)).where(samePlace(place));
+    .innerJoin(modelChecks, eq(modelChecks.id, modelCheckRevisions.checkId)).where(sameCheckPlace(place));
   return { kind: place.kind, authors };
 }
 
@@ -114,7 +108,7 @@ export async function saveDataset(ctx: Pick<Ctx, 'db' | 'config'>, place: CheckP
 /* Under the lock, as two misses at once must not each make a version that lacks the other. */
 export async function addLiveMiss(ctx: Pick<Ctx, 'db' | 'config'>, place: CheckPlace, miss: Case, by: Party, now: Date): Promise<SavedSet> {
   return ctx.db.transaction(async (tx): Promise<SavedSet> => {
-    const [check] = await tx.select().from(modelChecks).where(samePlace(place)).for('update');
+    const [check] = await tx.select().from(modelChecks).where(sameCheckPlace(place)).for('update');
     const last = check ? await latestSet(tx, check.id) : null;
     if (!check || !last) return NO_SET;
     const next = withLiveMiss(Buffer.from(decryptSecret(last.jsonlEnc, ctx.config.secret)), miss, await rulesOf(tx, place));
@@ -233,6 +227,6 @@ export async function modelCheckRound(ctx: Pick<Ctx, 'db' | 'config' | 'template
 }
 
 export async function checkIsOn(ctx: Pick<Ctx, 'db'>, place: CheckPlace, now: Date): Promise<boolean> {
-  const [check] = await ctx.db.select().from(modelChecks).where(samePlace(place));
+  const [check] = await ctx.db.select().from(modelChecks).where(sameCheckPlace(place));
   return check !== undefined && isOn(check, now);
 }
