@@ -6,6 +6,8 @@
 
 Whole-package policy keeps known consumer packages and expands them completely. When no complete graph bounds those consumers, selection widens to all declared packages. Overlapping policy rules are combined. Canonical `(suiteId, selectionUnit)` groups always remain complete, including newly added tests.
 
+A changed `.test` or `.spec` file absent from the Vitest collection makes that adapter unavailable, even if other tests were selected. An E2E test outside the configured projects cannot prove an empty impact. Whole-package fallback covers the declared inventory; supplying other runners and their complete inventories remains the caller's responsibility.
+
 The Python helper under `impact-python/` parses a complete package file list without importing repository modules. It supports local imports in package-root and `src/` layouts, transitive and relative imports, package initializers and cycles. Conftest hooks, unknown external dependencies, dynamic imports, star imports, syntax errors, ambiguous modules and invalid paths make the graph unavailable. The standalone adapter supports one canonical suite per Python package; ambiguous multiple-suite packages use a whole-package fallback. Its scoped, pinned check dependencies and formatting settings are not a repository-wide Python standard.
 
 ## Standalone report

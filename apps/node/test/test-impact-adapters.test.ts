@@ -38,6 +38,10 @@ describe('explicit Vitest collection adapter', () => {
     if (selection === 'empty') collection.selected = [];
     expect(await collectVitestImpact(input, async () => collection)).toEqual(unavailable);
   });
+  it('keeps a changed test that belongs to the complete collection selectable', async () => {
+    const { input, collection } = setup(); input.changed = ['apps/node/test/a.test.ts'];
+    expect(await collectVitestImpact(input, async () => collection)).toEqual({ adapter: 'vitest-related', status: 'ready', units: [unit('node', 'apps/node/test/a.test.ts')] });
+  });
   it('does not collect when there are no changes', async () => {
     const { input } = setup(); input.changed = [];
     expect(await collectVitestImpact(input, async () => { throw new Error('unused'); })).toMatchObject({ status: 'ready', units: [] });

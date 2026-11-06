@@ -34,6 +34,10 @@ function checkCollection(collection: ImpactCollection, input: VitestImpactInput)
   if (suites.size !== required.size || [...required].some(suite => !suites.has(suite))) throw new Error('impact_suite_mapping_incomplete');
   if (input.inventory.some(unit => required.has(unit.suiteId) && !covered.has(unitKey(unit)))) throw new Error('impact_collection_incomplete');
 }
+function checkChangedTest(changed: string, collection: ImpactCollection): void {
+  if (!/\.(?:test|spec)\.[cm]?[jt]sx?$/.test(changed)) return;
+  if (!collection.all.some(row => row.file === changed)) throw new Error('impact_changed_test_not_collected');
+}
 
 export async function collectVitestImpact(input: VitestImpactInput, collect: RelatedCollector): Promise<ImpactGraph> {
   try {
@@ -41,6 +45,7 @@ export async function collectVitestImpact(input: VitestImpactInput, collect: Rel
     for (const changed of new Set(input.changed)) {
       const collection = await collect(changed);
       checkCollection(collection, input);
+      checkChangedTest(changed, collection);
       units.push(...mapRows(collection.selected, input));
     }
     return { adapter: 'vitest-related', status: 'ready', units: unique(units) };
