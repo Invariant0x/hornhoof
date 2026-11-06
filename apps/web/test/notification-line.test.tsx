@@ -1,4 +1,4 @@
-import { NOTIFICATION_NAMES } from '@hornhoof/protocol';
+import { NOTIFICATION_NAMES, NotificationSchema } from '@hornhoof/protocol';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { en } from '../src/i18n/en';
@@ -19,6 +19,16 @@ describe('notification lines', () => {
     ['ru', ru, 'Hornhoof, ход закончился раньше работы по #223 для Bruno'],
   ] as const)('shows the source and cause in %s', (language, t, expected) => {
     const message = { direction: 'in', from: service, to: recipient, notification: { ...notification, tasks: [...notification.tasks] } } satisfies AgentMessageView;
+    expect(messageLine(t, language, message)).toBe(expected);
+  });
+  it.each([
+    ['en', en, 'question', 'Hornhoof, internal question on #223 to Bruno'],
+    ['en', en, 'resolved', 'Hornhoof, internal question resolved on #223 to Bruno'],
+    ['ru', ru, 'question', 'Hornhoof, внутренний вопрос по #223 для Bruno'],
+    ['ru', ru, 'resolved', 'Hornhoof, внутренний вопрос решен по #223 для Bruno'],
+  ] as const)('names internal source %s/%s without implying a human answer', (language, t, source, expected) => {
+    const received = NotificationSchema.parse({ source, tasks: notification.tasks });
+    const message = { direction: 'in', from: service, to: recipient, notification: received } satisfies AgentMessageView;
     expect(messageLine(t, language, message)).toBe(expected);
   });
   it.each([['en', en, 'Message from Hana via Hornhoof to Bruno'], ['ru', ru, 'Сообщение от Hana через Hornhoof для Bruno']] as const)('names an actor through Hornhoof in %s', (language, t, expected) => {
