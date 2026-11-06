@@ -40,6 +40,9 @@ async function checkLeftControls(window: Locator, labels: string[]) {
   const frame = await box(header);
   const controls = await Promise.all(labels.map(label => box(header.getByRole('button', { name: label, exact: true }))));
   const [close, minimize, full] = controls;
+  const closeButton = header.getByRole('button', { name: labels[0]!, exact: true });
+  await closeButton.focus();
+  await expect(closeButton).toHaveCSS('outline-offset', '-2px');
   for (const [index, label] of labels.entries()) {
     const button = header.getByRole('button', { name: label, exact: true });
     const icon = await box(button.locator('svg'));
