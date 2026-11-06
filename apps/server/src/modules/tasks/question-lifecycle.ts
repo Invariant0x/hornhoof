@@ -222,6 +222,10 @@ async function materialStamp(tx: Tx, request: Request): Promise<{ materialRevisi
   return { materialRevision: 1, materialDigest: digestOf({ commit: request.commit, link: request.link, options: request.options, files }) };
 }
 
+/* What a department's approval is of, as the server keeps it: the digest a caller names has to be of this and nothing else. */
+export const approvalDigest = (r: Pick<Request, 'id' | 'taskId' | 'text' | 'link' | 'approvalChannel' | 'approvalKind' | 'approvalAmount'>): string =>
+  digestOf({ request: r.id, task: r.taskId, channel: r.approvalChannel, kind: r.approvalKind, amount: r.approvalAmount, text: r.text, link: r.link });
+
 const notThisResult = (what: string) => new ApiError(400, 'validation', `${what} Name exactly what this question shows.`, 'task_invalid');
 
 /* A ready result is the exact thing the question shows, and not something like it. */
@@ -230,6 +234,7 @@ async function requireTheResult(tx: Tx, request: Request, classification: Questi
   const { artifact } = classification;
   if (artifact.kind === 'commit' && (request.kind !== 'approval' || request.commit !== artifact.sha)) throw notThisResult('This question does not ask to approve that commit.');
   if (artifact.kind === 'staff' || artifact.kind === 'structure') throw notThisResult('A card of the orchestrator is not a question on a task.');
+  if (artifact.kind === 'policy' && (request.kind !== 'approval' || !request.approvalChannel || artifact.digest !== approvalDigest(request))) throw notThisResult('This is not the approval this question asks for.');
   if (artifact.kind === 'design') {
     const shown = await tx.select({ id: attachments.id }).from(attachments).where(eq(attachments.requestId, request.id));
     const same = shown.length === artifact.imageIds.length && shown.every(f => artifact.imageIds.includes(f.id));

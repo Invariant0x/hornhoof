@@ -8,7 +8,7 @@ import { agents, departments, jobs, requestInternal, requests, tasks } from '../
 import { ApiError } from '../../errors.js';
 import { jobOf, type ToolJob } from '../tools/job.js';
 import { picturesOf } from './attachments.js';
-import { answerInternal, classifyInternal, ResolveInput, RouteInput, routeInternal, type Settled } from './question-lifecycle.js';
+import { answerInternal, approvalDigest, classifyInternal, ResolveInput, RouteInput, routeInternal, type Settled } from './question-lifecycle.js';
 import { wakeAll } from './wake.js';
 
 /* The same questions over tools and HTTP: what whoever has them reads, and the one way each is settled or put before a person. The
@@ -57,7 +57,7 @@ export async function internalQuestions(ctx: Ctx, job: ToolJob, after?: string) 
   return {
     questions: page.map(({ request: r, task, asker, words }) => ({
       source: { kind: 'task_request' as const, id: r.id }, kind: r.kind, text: words ?? r.text, revision: r.questionRevision, routeRevision: r.routeRevision, triageAgentId: r.triageAgentId,
-      task, asker, commit: r.commit, options: r.options, link: r.link, images: pictures.get(r.id) ?? [], topic: r.decisionTopic, approval: r.approvalChannel ? { channel: r.approvalChannel, kind: r.approvalKind, amount: r.approvalAmount } : null, at: r.createdAt.toISOString(),
+      task, asker, commit: r.commit, options: r.options, link: r.link, images: pictures.get(r.id) ?? [], topic: r.decisionTopic, approval: r.approvalChannel ? { channel: r.approvalChannel, kind: r.approvalKind, amount: r.approvalAmount, digest: approvalDigest(r) } : null, at: r.createdAt.toISOString(),
     })),
     next: rows.length > PAGE && last ? encoded({ at: last.request.createdAt.toISOString(), id: last.request.id }) : null,
   };

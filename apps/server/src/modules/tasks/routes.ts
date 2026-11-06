@@ -346,6 +346,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
         kind: r.request.kind,
         text: r.request.text,
         ...humanView(r.request),
+        approval: r.request.approvalChannel ? { channel: r.request.approvalChannel, kind: r.request.approvalKind, amount: r.request.approvalAmount } : null,
         commit: r.request.commit,
         commitUrl: commits[i],
         images: pictures.get(r.request.id) ?? [],

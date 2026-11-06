@@ -2,7 +2,7 @@ import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { randomUUID } from 'node:crypto';
 import { asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agents, jobs, pendingWakes, people, requestInternal, requests, subscriptions, taskEvents, tasks, taskWaits, waitPolicies } from '../src/db/schema.js';
+import { agents, approvalPolicies, jobs, pendingWakes, people, requestInternal, requests, subscriptions, taskEvents, tasks, taskWaits, waitPolicies } from '../src/db/schema.js';
 import { mayOpenRequest } from '../src/modules/tasks/decisions.js';
 import { answerDirectly, ask, createTask, type Task } from '../src/modules/tasks/engine.js';
 import { questionSourceKey } from '../src/modules/tasks/wait-producers.js';
@@ -523,5 +523,69 @@ describe('putting a question before a person', () => {
       expect(late.content[0]!.text).toContain('source_closed');
       expect((await c.questionsOf(c.work))[0]).toMatchObject({ status: 'resolved_internal', audience: 'internal', classification: null });
     });
+  });
+});
+
+describe('an approval a department asks for', () => {
+  const envelope = { situation: 'A price change of 40 euros is ready to go out.', requiredAction: 'Approve it or decline it.', options: [] };
+
+  async function policyApproval() {
+    const c = await company();
+    const work = await c.task();
+    const asker = await c.run(c.agent.id, work.id);
+    const res = await call(asker.client as Client, 'request_approval', { task: work.number, channel: 'price', kind: 'price change', amount: 40, text: 'Change the price with the admin script.' });
+    expect(res.isError, res.content[0]!.text).toBeFalsy();
+    expect(res.content[0]!.text).toContain('Hana');
+    const [request] = await c.questionsOf(work);
+    const head = await c.run(c.head.id);
+    const { questions } = JSON.parse((await call(head.client as Client, 'internal_questions', {})).content[0]!.text) as { questions: { approval: { digest: string } }[] };
+    const guard = { operationId: randomUUID(), source: { kind: 'task_request', id: request!.id }, expectedRevision: 1, expectedRouteRevision: 1 };
+    return { ...c, work, request: request!, guard, lead: head.client as Client, digest: questions[0]!.approval.digest };
+  }
+
+  it('stays inside first like any other, and reaches no person by its channel', async () => {
+    const c = await policyApproval();
+    expect(c.request).toMatchObject({ audience: 'internal', triageAgentId: c.head.id, approvalChannel: 'price' });
+    expect(await c.seen()).toMatchObject({ requests: [], counts: { total: 0 } });
+  });
+
+  it('comes before the person with its exact channel, kind and amount, and is taken as an approval', async () => {
+    const c = await policyApproval();
+    const res = await call(c.lead, 'classify_human_intent', { ...c.guard, classification: { kind: 'ready_result', artifact: { kind: 'policy', digest: c.digest } }, humanEnvelope: envelope });
+    expect(res.isError, res.content[0]!.text).toBeFalsy();
+    const seen = (await c.seen()) as unknown as { requests: { approval: unknown; text: string }[] };
+    expect(seen.requests[0]).toMatchObject({ approval: { channel: 'price', kind: 'price change', amount: 40 } });
+    expect(JSON.stringify(seen)).not.toContain('admin script');
+    expect((await c.questionsOf(c.work))[0]!.classification).toMatchObject({ authority: { purpose: { kind: 'decision', decisionKind: 'approval' } } });
+    const taken = await c.app.inject({ method: 'POST', url: `/api/requests/${c.request.id}`, payload: { approve: true }, ...as(c.ceo) });
+    expect(taken.statusCode, taken.body).toBe(200);
+    expect((await c.questionsOf(c.work))[0]).toMatchObject({ status: 'approved' });
+  });
+
+  it('refuses a digest of anything else: the client does not decide what it approves', async () => {
+    const c = await policyApproval();
+    const res = await call(c.lead, 'classify_human_intent', { ...c.guard, classification: { kind: 'ready_result', artifact: { kind: 'policy', digest: 'f'.repeat(64) } }, humanEnvelope: envelope });
+    expect(res.isError).toBe(true);
+    expect((await c.questionsOf(c.work))[0]).toMatchObject({ audience: 'internal', classification: null });
+  });
+
+  it('is not taken for a commit, and a commit approval is not taken for it', async () => {
+    const c = await policyApproval();
+    const commit = await call(c.lead, 'classify_human_intent', { ...c.guard, classification: { kind: 'ready_result', artifact: { kind: 'commit', sha: 'a'.repeat(40) } }, humanEnvelope: envelope });
+    expect(commit.isError).toBe(true);
+    const work = await c.task();
+    const { request } = await ask(c.ctx, c.agent.id, work.id, { kind: 'approval', text: 'Release?', commit: 'a'.repeat(40) });
+    const policy = await call(c.lead, 'classify_human_intent', { operationId: randomUUID(), source: { kind: 'task_request', id: request.id }, expectedRevision: 1, expectedRouteRevision: 1, classification: { kind: 'ready_result', artifact: { kind: 'policy', digest: c.digest } }, humanEnvelope: envelope });
+    expect(policy.isError).toBe(true);
+  });
+
+  it('goes without a question where the policy lets the work go, as before', async () => {
+    const c = await company();
+    const work = await c.task();
+    await c.db.insert(approvalPolicies).values({ companyId: c.companyId, departmentId: c.dev.id, channel: 'price', mode: 'within_limits', limitAmount: 100 });
+    const asker = await c.run(c.agent.id, work.id);
+    const res = await call(asker.client as Client, 'request_approval', { task: work.number, channel: 'price', kind: 'price change', amount: 40, text: 'Small change.' });
+    expect(res.content[0]!.text).toContain('No approval needed');
+    expect(await c.questionsOf(work)).toEqual([]);
   });
 });
