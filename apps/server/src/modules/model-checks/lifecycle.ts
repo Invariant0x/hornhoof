@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
-import type { CheckBinding } from './contract.js';
+import type { CheckBinding, InvalidationCode } from '@hornhoof/protocol';
 import type { Decision } from './score.js';
 
-export type BindingPart = 'code' | 'prompt' | 'output_schema' | 'list' | 'taxonomy' | 'model' | 'dataset' | 'thresholds' | 'scope';
+export type BindingPart = Exclude<InvalidationCode, 'evaluation_failed'>;
 export type CheckState = { status: 'on' | 'off'; bindingDigest: string | null; validUntil: Date | null };
 export type DueRun = { bindingDigest: string; trigger: 'change' | 'weekly'; parts: BindingPart[]; dedupKey: string };
 export type Signal = { dedupKey: string; problems: Decision['problems'] };
