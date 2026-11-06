@@ -162,6 +162,18 @@ describe('canonical private question storage', () => {
   });
 });
 
+/* Only the head or orchestrator named on an internal stuck request can answer it, and one from before names nobody. */
+it('leaves a stuck request open at the upgrade with the people it already asked', async () => {
+  const client = new PGlite(); onTestFinished(() => client.close());
+  const db = drizzle(client);
+  await migrate(db, { migrationsFolder: await migrationsBefore('internal_first_questions') });
+  await client.exec(LEGACY);
+  await client.exec(`INSERT INTO requests(company_id,task_id,agent_id,kind,text,status) VALUES ('${COMPANY}','00000000-0000-4000-8000-000000000004','00000000-0000-4000-8000-000000000003','stuck','Hornhoof stopped waking the agent','open')`);
+  await migrate(db, { migrationsFolder: await migrationsThrough('internal_first_questions') });
+  expect((await client.query("SELECT status,audience,triage_agent_id FROM requests WHERE kind='stuck'")).rows).toEqual([{ status: 'open', audience: 'human', triage_agent_id: null }]);
+  expect((await client.query("SELECT DISTINCT audience FROM requests WHERE kind='question' AND status='open'")).rows).toEqual([{ audience: 'internal' }]);
+});
+
 it('upgrades only its prefix, retaining terminal decisions and independent open source identities', async () => {
   const beforeFolder = await migrationsBefore('internal_first_questions');
   const throughFolder = await migrationsThrough('internal_first_questions');
