@@ -193,7 +193,7 @@ describe('internal stuck routing', () => {
 
     const [request] = await c.db.select().from(requests);
     expect(request).toMatchObject({ kind: 'stuck', audience: 'internal', triageAgentId: c.head.id, status: 'open' });
-    const addressed = await c.db.select().from(jobs).where(and(eq(jobs.agentId, c.head.id), eq(jobs.taskId, task.id), eq(jobs.status, 'queued')));
+    const addressed = await c.db.select().from(jobs).where(and(eq(jobs.agentId, c.head.id), eq(jobs.status, 'queued')));
     expect(addressed).toHaveLength(1);
     expect(addressed[0]!.prompt).toContain(request!.id);
   });
