@@ -393,7 +393,7 @@ describe('a task', () => {
     shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, requests } }] });
     const panel = await openTask(user);
     const questions = within(panel).getByRole('heading', { name: 'Questions' }).closest('section')!;
-    expect(questions).toHaveTextContent('Hornhoof: Use the existing token? Answered');
+    expect(questions).toHaveTextContent('Hornhoof: Use the existing token? answered');
     expect(questions).toHaveTextContent('Yes, keep it.');
     expect(questions).toHaveTextContent('Bruno: Which layout ships? awaiting_review');
     expect(questions).not.toHaveTextContent('undefined');
