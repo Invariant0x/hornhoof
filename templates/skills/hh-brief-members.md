@@ -13,7 +13,8 @@ A member knows only what your brief says. Write it once, so they need nothing el
 - **Inputs**: the files, records, links and earlier results to use, by exact name. Files go as task attachments (`hh-attach --task N FILE`), named here, never pasted into the text.
 - **Deliverable**: what to hand back and in what form.
 - **Check**: how they prove it is done (see hh-verify-before-done).
-- **Limits**: what not to touch, what needs approval, the deadline.
+- **Limits**: what not to touch, what needs approval, the deadline and who owns each wait.
+- **Ownership**: one owner per area; a second task on it or hot files is never assigned until the first merges, and collisions are checked at assignment.
 - **Already ruled out**: what you tried or decided, so they do not redo it.
 - **Neighbours**: who works on the other pieces, so they ask each other directly.
 
