@@ -4,6 +4,7 @@ import { agents, companies, departments, jobs, requests, subscriptions, tasks } 
 import { ask, createTask, submit } from '../src/modules/tasks/engine.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
 import { as, invitePerson, listen, openStream, setUpCompany, testApp, until, ownPlan } from './helpers.js';
+import { legacyApproval } from './legacy-request-fixture.js';
 
 async function company() {
   const { app, db } = await testApp();
@@ -172,7 +173,7 @@ describe('tasks for people', () => {
     const { ctx, db, head, bruno, dev, oleg, ceo, post, get } = await company();
     await ownPlan(db, 'oleg@acme.com', bruno.id);
     const { task } = await createTask(ctx, { agentId: head.id }, { title: 'Release', brief: '', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true });
-    const { request } = await ask(ctx, bruno.id, task.id, { kind: 'approval', text: 'Release 0.5.0 to main.', commit: 'a'.repeat(40) });
+    const { request } = await legacyApproval(db, task, bruno.id, { text: 'Release 0.5.0 to main.', commit: 'a'.repeat(40) });
     expect((await get(oleg, '/api/requests')).json().requests.map((r: { id: string }) => r.id)).toEqual([request.id]);
     expect((await post(oleg, `/api/requests/${request.id}`, { approve: true })).json().error.reason).toBe('decision_not_allowed');
     expect((await post(ceo, `/api/requests/${request.id}`, { approve: true })).json().request.status).toBe('approved');

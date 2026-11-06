@@ -6,6 +6,7 @@ import { orchestratorDecisionHeaders, orchestratorHeaders } from '../src/auth/in
 import { appendEvent } from '../src/modules/events/store.js';
 import { answer, ask, createTask } from '../src/modules/tasks/engine.js';
 import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
+import { legacyApproval } from './legacy-request-fixture.js';
 
 const FEEDBACK = 'Neither option fits. Keep the labels readable.';
 
@@ -93,7 +94,7 @@ it('keeps a 4000-character feedback after trimming', async () => {
 
 it('requires explicit approval for an approval request', async () => {
   const c = await company();
-  const approval = (await ask(c.app.ctx, c.worker.id, c.task.id, { kind: 'approval', text: 'Approve this test commit?', commit: 'a'.repeat(40) })).request;
+  const approval = (await legacyApproval(c.db, c.task, c.worker.id, { text: 'Approve this test commit?', commit: 'a'.repeat(40) })).request;
   const feedback = await c.app.inject({ method: 'POST', url: `/api/requests/${approval.id}`, payload: { answer: FEEDBACK }, ...as(c.session) });
   expect(feedback.statusCode).toBe(400);
   expect((await c.db.select().from(requests).where(eq(requests.id, approval.id)))[0]).toMatchObject({ status: 'open', answeredBy: null });

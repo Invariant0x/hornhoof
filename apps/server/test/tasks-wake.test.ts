@@ -8,6 +8,7 @@ import { identityOf, type NodeIdentity } from '../src/modules/nodes/hub.js';
 import { answer, ask, blocked, cancel, comment, createTask, GOING_ON_TURNS, report, submit, updateTask } from '../src/modules/tasks/engine.js';
 import { afterJob, SILENT_TURNS, startWork, typedTurn, wakeAll, wakeLeftBehind, wakePrompt } from '../src/modules/tasks/wake.js';
 import { as, connectNode, listen, setUpCompany, statements, testApp, until, type FakeNode } from './helpers.js';
+import { legacyApproval } from './legacy-request-fixture.js';
 
 async function company(env?: NodeJS.ProcessEnv) {
   const { app, db } = await testApp(env);
@@ -92,7 +93,7 @@ describe('a person who speaks to an agent directly', () => {
     const bruno = await hire('Bruno', null);
     const mine = await task(bruno.id);
     await ask(app.ctx, bruno.id, mine.id, { kind: 'question', text: 'EUR or USD?' });
-    await ask(app.ctx, bruno.id, mine.id, { kind: 'approval', text: 'Merge it?', commit: 'a'.repeat(40) });
+    await legacyApproval(db, mine, bruno.id, { text: 'Merge it?', commit: 'a'.repeat(40) });
     const [me] = await db.select().from(people);
     await until(async () => (await agentState(app.ctx, bruno.id)).ready);
     expect((await app.inject({ method: 'POST', url: `/api/agents/${bruno.id}/messages`, payload: { text: 'EUR only.' }, ...as(ceo) })).statusCode).toBe(202);

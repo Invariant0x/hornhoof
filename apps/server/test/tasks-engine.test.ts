@@ -4,6 +4,7 @@ import { agents, companies, departments, people, requests, subscriptions, taskEv
 import { answer, ask, blocked, cancel, comment, createTask, leaveWork, report, submit, updateTask, verdict } from '../src/modules/tasks/engine.js';
 import { wakePrompt } from '../src/modules/tasks/wake.js';
 import { setUpCompany, testApp } from './helpers.js';
+import { legacyApproval } from './legacy-request-fixture.js';
 
 async function company() {
   const { app, db } = await testApp();
@@ -191,7 +192,7 @@ describe('the task engine', () => {
   });
 
   it('waits for a person and wakes the agent with the answer', async () => {
-    const { ctx, CEO, bruno, memberTask, read } = await company();
+    const { ctx, db, CEO, bruno, memberTask, read } = await company();
     const task = await memberTask();
     const asked = await ask(ctx, bruno.id, task.id, { kind: 'question', text: 'Which currency?' });
     expect((await read(task.id)).status).toBe('waiting');
@@ -200,7 +201,7 @@ describe('the task engine', () => {
     expect((await read(task.id)).status).toBe('working');
     expect(woken(answered)).toEqual([[bruno.id, 'answered']]);
     expect(await reason(ask(ctx, bruno.id, task.id, { kind: 'approval', text: 'Release?', commit: 'abc' }))).toBe('task_invalid');
-    const approval = await ask(ctx, bruno.id, task.id, { kind: 'approval', text: 'Release 0.5.0?', commit: 'a'.repeat(40) });
+    const approval = await legacyApproval(db, task, bruno.id, { text: 'Release 0.5.0?', commit: 'a'.repeat(40) });
     expect(await reason(answer(ctx, CEO, approval.request.id, { answer: 'yes' }))).toBe('task_invalid');
     expect((await answer(ctx, CEO, approval.request.id, { approve: true })).request.status).toBe('approved');
     expect(await reason(answer(ctx, CEO, approval.request.id, { approve: false }))).toBe('request_closed');
@@ -283,7 +284,7 @@ describe('the task engine', () => {
     const { ctx, db, CEO, bruno, memberTask, read } = await company();
     const task = await memberTask();
     const commit = 'b'.repeat(40);
-    const approval = await ask(ctx, bruno.id, task.id, { kind: 'approval', text: 'Merge the checkout?', commit });
+    const approval = await legacyApproval(db, task, bruno.id, { text: 'Merge the checkout?', commit });
     expect((await read(task.id)).status).toBe('waiting');
     const declined = await answer(ctx, CEO, approval.request.id, { approve: false, answer: 'Refunds first.' });
     expect(declined.request).toMatchObject({ status: 'declined', answer: 'Refunds first.', answeredBy: CEO.personId });
