@@ -7,7 +7,8 @@ import { serveApi } from './api';
 export type Settings = { lang: 'en' | 'ru'; theme: 'light' | 'dark'; width: number };
 
 export const REASON = 'Restart the nodes outside AppArmor, then clean the Docker images that the last three releases left on the disk of this machine.';
-export const UNTIL = '2026-11-05T14:30:00.000Z';
+/* A day from now: access whose time is over is no access, and the window shows none. */
+export const UNTIL = new Date(Date.now() + 24 * 3600_000).toISOString();
 export const OPEN: ComputerView = { available: true, until: UNTIL, asked: null, machine: 'a-host', canAnswer: true };
 export const ASKED: ComputerView = { available: true, until: null, asked: { reason: REASON, at: '2026-11-04T14:30:00.000Z' }, machine: 'a-host', canAnswer: true };
 export const CLOSED: ComputerView = { available: true, until: null, asked: null, machine: 'a-host', canAnswer: true };

@@ -52,7 +52,7 @@ function open(routes: Record<string, unknown> = {}, org: Org = ORG) {
 }
 
 describe('AgentWindow', () => {
-  it("sends a correction of the orchestrator's card to the live terminal's own line", async () => {
+  it("sends a correction of the orchestrator's card to the live terminal, where its owner writes", async () => {
     const user = userEvent.setup();
     const card = ev(1, 'proposal', { proposalId: 'pr1', brief: 'Acme.', items: [{ template: 'operations', checked: true, note: '' }] });
     open({ [`GET ${EVENTS}?after=0`]: [200, { events: [card], state: { ...READY, terminal: true, canType: true } }] });
@@ -60,7 +60,7 @@ describe('AgentWindow', () => {
     expect(screen.getByRole('textbox', { name: 'Terminal input' })).toHaveFocus();
   });
 
-  it('leaves typing to the live terminal, which has its own line, and keeps the line in the log', async () => {
+  it('leaves typing to the live terminal, and keeps the line in the log', async () => {
     const user = userEvent.setup();
     open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, terminal: true, canType: true } }] });
     expect(await screen.findByTestId('live-terminal')).toBeInTheDocument();
@@ -860,7 +860,7 @@ describe("who takes the orchestrator's card", () => {
   });
 });
 
-describe('writing to an agent whose live terminal the person only watches', () => {
+describe('writing to an agent whose live terminal runs on the plan of someone else', () => {
   const WATCHING = { ...READY, terminal: true, canType: false };
   const LISA: Me = { ...ME, person: { ...ME.person, id: 'p2', name: 'Lisa', isOwner: false, isCeoDelegate: true }, canDecideCompany: true };
   const MARIA: Me = { ...ME, person: { ...ME.person, id: 'p3', name: 'Maria', isOwner: false, scopeKind: 'listed' }, canDecideCompany: false };
@@ -869,61 +869,57 @@ describe('writing to an agent whose live terminal the person only watches', () =
     render(<LanguageProvider><AgentWindow me={me} org={DEV_ORG} agentId="b1" onClose={() => {}} /></LanguageProvider>);
     return calls;
   };
+  const noSecondLine = (name: string) => {
+    expect(screen.queryByRole('textbox', { name })).not.toBeInTheDocument();
+    expect(screen.queryByText('Enter to send, Shift+Enter for a new line')).not.toBeInTheDocument();
+  };
 
-  it('gives the CEO delegate a line under the orchestrator\'s terminal, ready to type in, that writes to it', async () => {
-    const user = userEvent.setup();
-    const calls = mockApi({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: WATCHING }], 'POST /api/agents/orchestrator/start': [200, { started: false }], 'POST /api/agents/orchestrator/messages': [202, { jobId: 'j1' }] });
+  it('has the CEO delegate write in the terminal, with no second line under it', async () => {
+    mockApi({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: WATCHING }], 'POST /api/agents/orchestrator/start': [200, { started: false }] });
     render(<LanguageProvider><AgentWindow me={LISA} org={ORG} agentId="orchestrator" onClose={() => {}} /></LanguageProvider>);
     expect(await screen.findByTestId('live-terminal')).toBeInTheDocument();
-    const line = screen.getByRole('textbox', { name: 'Write to the orchestrator' });
-    expect(line).toHaveFocus();
-    expect(screen.getByText('Enter to send, Shift+Enter for a new line')).toBeInTheDocument();
-    await user.type(line, 'Please check the release{Enter}');
-    expect(calls).toContainEqual({ method: 'POST', path: '/api/agents/orchestrator/messages', body: { text: 'Please check the release' } });
-    expect(line).toHaveValue('');
-    expect(screen.getByTestId('live-terminal')).toBeInTheDocument();
+    noSecondLine('Write to the orchestrator');
   });
 
-  it('gives a person with the department a line under the terminal of an employee on someone else\'s plan', async () => {
-    const user = userEvent.setup();
-    const calls = employee(MARIA, { 'GET /api/agents/b1/events?after=0': [200, { events: [], state: WATCHING }], 'POST /api/agents/b1/messages': [202, { jobId: 'j1' }] });
+  it('has a person with the department write in the terminal of an employee, with no second line under it', async () => {
+    employee(MARIA, { 'GET /api/agents/b1/events?after=0': [200, { events: [], state: WATCHING }] });
     expect(await screen.findByTestId('live-terminal')).toBeInTheDocument();
-    await user.type(screen.getByRole('textbox', { name: 'Write to Bruno' }), 'Please check the cart{Enter}');
-    expect(calls).toContainEqual({ method: 'POST', path: '/api/agents/b1/messages', body: { text: 'Please check the cart' } });
+    noSecondLine('Write to Bruno');
   });
 
-  it('keeps the line and shows why while the agent cannot answer', async () => {
+  it('shows why while the agent cannot answer, and the terminal with it', async () => {
     open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...WATCHING, ready: false, reason: 'machine_offline' } }] });
-    expect(await screen.findByRole('textbox', { name: 'Write to the orchestrator' })).toBeDisabled();
-    expect(screen.getByTestId('live-terminal')).toBeInTheDocument();
+    expect(await screen.findByTestId('live-terminal')).toBeInTheDocument();
     expect(screen.getByText('The built-in machine is offline')).toBeInTheDocument();
+    noSecondLine('Write to the orchestrator');
   });
 
-  it('keeps the words and says why when the server turns the message down', async () => {
+  it('writes from the line of the log, which keeps the words and says why when the server turns the message down', async () => {
     const user = userEvent.setup();
     open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: WATCHING }], 'POST /api/agents/orchestrator/messages': [403, { error: { code: 'forbidden', message: 'No.', reason: 'company_scope_only' } }] });
-    const line = await screen.findByRole('textbox', { name: 'Write to the orchestrator' });
+    await screen.findByTestId('live-terminal');
+    await user.click(screen.getByRole('button', { name: 'Log' }));
+    const line = screen.getByRole('textbox', { name: 'Write to the orchestrator' });
     await user.type(line, 'Please check{Enter}');
     expect(await screen.findByRole('alert')).toHaveTextContent('Only people with access to the whole company can do this.');
     expect(line).toHaveValue('Please check');
   });
 
-  it("sends a correction of the orchestrator's card to the line, since the terminal takes no keys from them", async () => {
+  it("sends a correction of the orchestrator's card to the terminal, where they write", async () => {
     const user = userEvent.setup();
     const card = ev(1, 'proposal', { proposalId: 'pr1', brief: 'Acme.', items: [{ template: 'operations', checked: true, note: '' }] });
     open({ [`GET ${EVENTS}?after=0`]: [200, { events: [card], state: WATCHING }] });
     await user.click(await screen.findByRole('button', { name: 'Correct in words' }));
-    expect(screen.getByRole('textbox', { name: 'Write to the orchestrator' })).toHaveFocus();
+    expect(screen.getByRole('textbox', { name: 'Terminal input' })).toHaveFocus();
   });
 
   it('leaves the owner of the plan with the terminal alone, and focus stays in it', async () => {
     open({ [`GET ${EVENTS}?after=0`]: [200, { events: [], state: { ...READY, terminal: true, canType: true } }] });
     expect(await screen.findByTestId('live-terminal')).toBeInTheDocument();
-    expect(screen.queryByRole('textbox', { name: 'Write to the orchestrator' })).not.toBeInTheDocument();
-    expect(screen.queryByText('Enter to send, Shift+Enter for a new line')).not.toBeInTheDocument();
+    noSecondLine('Write to the orchestrator');
   });
 
-  it('takes the line away from someone who loses access while the window is open', async () => {
+  it('takes the terminal away from someone who loses access while the window is open', async () => {
     const stream = fakeStream();
     let allowed = true;
     mockApi({
@@ -931,7 +927,7 @@ describe('writing to an agent whose live terminal the person only watches', () =
       'POST /api/agents/orchestrator/start': [200, { started: false }],
     });
     render(<LanguageProvider><AgentWindow me={LISA} org={ORG} agentId="orchestrator" onClose={() => {}} /></LanguageProvider>);
-    expect(await screen.findByRole('textbox', { name: 'Write to the orchestrator' })).toBeInTheDocument();
+    expect(await screen.findByTestId('live-terminal')).toBeInTheDocument();
     allowed = false;
     await act(async () => stream.send({ type: 'reconnected' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Only people with access to the whole company can do this.');
@@ -939,7 +935,7 @@ describe('writing to an agent whose live terminal the person only watches', () =
     expect(screen.queryByTestId('live-terminal')).not.toBeInTheDocument();
   });
 
-  it('keeps the line through a failure that says nothing of access', async () => {
+  it('keeps the terminal through a failure that says nothing of access', async () => {
     const stream = fakeStream();
     let down = false;
     mockApi({
@@ -947,11 +943,11 @@ describe('writing to an agent whose live terminal the person only watches', () =
       'POST /api/agents/orchestrator/start': [200, { started: false }],
     });
     render(<LanguageProvider><AgentWindow me={LISA} org={ORG} agentId="orchestrator" onClose={() => {}} /></LanguageProvider>);
-    expect(await screen.findByRole('textbox', { name: 'Write to the orchestrator' })).toBeInTheDocument();
+    expect(await screen.findByTestId('live-terminal')).toBeInTheDocument();
     down = true;
     await act(async () => stream.send({ type: 'reconnected' }));
     expect(await screen.findByRole('alert')).toBeInTheDocument();
-    expect(screen.getByRole('textbox', { name: 'Write to the orchestrator' })).toBeInTheDocument();
+    expect(screen.getByTestId('live-terminal')).toBeInTheDocument();
   });
 
   it.each([

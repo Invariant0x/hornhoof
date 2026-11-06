@@ -57,7 +57,7 @@ const REQUEST = {
 };
 
 /* busy: whose work Escape can stop. held: whose card and conversation have not come yet. */
-type Live = { connections: Record<string, number>; stops: string[]; busy: Set<string>; held: Set<string> };
+type Live = { connections: Record<string, number>; stops: string[]; busy: Set<string>; held: Set<string>; pictures: string[]; keys: Record<string, string[]> };
 
 async function serve(page: Page, live: Live): Promise<void> {
   await serveApi(page);
@@ -67,6 +67,11 @@ async function serve(page: Page, live: Live): Promise<void> {
   await page.route('**/api/**', async route => {
     const url = new URL(route.request().url());
     const path = url.pathname;
+    const picture = /^\/api\/agents\/([^/]+)\/pictures$/.exec(path);
+    if (picture) {
+      live.pictures.push(picture[1]!);
+      return route.fulfill({ json: { id: 'pic1', name: url.searchParams.get('name') } });
+    }
     const agent = /^\/api\/agents\/([^/]+)(\/events|\/stop)?$/.exec(path);
     if (agent) {
       const [, id, part] = agent as unknown as [string, string, string | undefined];
@@ -100,7 +105,11 @@ async function serve(page: Page, live: Live): Promise<void> {
   await page.routeWebSocket('**/api/agents/*/terminal*', ws => {
     const id = /agents\/([^/]+)\/terminal/.exec(ws.url())![1]!;
     live.connections[id] = (live.connections[id] ?? 0) + 1;
-    ws.send(JSON.stringify({ type: 'ready', write: true }));
+    ws.onMessage(raw => {
+      const frame = JSON.parse(String(raw)) as { type: string; data?: string };
+      if (frame.type === 'input') (live.keys[id] ??= []).push(frame.data!);
+    });
+    ws.send(JSON.stringify({ type: 'ready', write: true, message: true }));
     ws.send(JSON.stringify({ type: 'program', running: true }));
     ws.send(JSON.stringify({ type: 'data', data: `${id} is at work.\r\n> ` }));
   });
@@ -121,7 +130,7 @@ export async function openCompany(page: Page, { lang, theme, width }: Settings, 
   const errors: string[] = [];
   page.on('pageerror', e => errors.push(e.message));
   page.on('console', m => { if (m.type() === 'error') errors.push(`${m.text()} ${m.location().url}`); });
-  const live: Live = { connections: {}, stops: [], busy: new Set(state.busy), held: new Set(state.held) };
+  const live: Live = { connections: {}, stops: [], busy: new Set(state.busy), held: new Set(state.held), pictures: [], keys: {} };
   await serve(page, live);
   await page.goto('/');
   const words = WORDS[lang];
