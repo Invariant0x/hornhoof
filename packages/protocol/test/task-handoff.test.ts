@@ -72,7 +72,7 @@ describe('bounded task handoff wire', () => {
   });
 
   it('rejects forged stale binding and a second signal hidden in text', () => {
-    expect(() => HandoffMessage.parse({ ...valid.saved, binding: { ...binding, assignmentEpoch: 0, bindingVersion: 0 })).toThrow();
+    expect(() => HandoffMessage.parse({ ...valid.saved, binding: { ...binding, assignmentEpoch: 0, bindingVersion: 0 } })).toThrow();
     expect(() => HandoffMessage.parse({ ...valid.saved, text: 'model access denied' })).toThrow();
     expect(() => HandoffControlMessage.parse({ ...valid.offer, exitCode: 1 })).toThrow();
   });
