@@ -68,10 +68,17 @@ describe('fingerprints on the wire', () => {
     expect(TestsDescribed.safeParse(await reply([{ ...good, file: '../a.ts' }])).success).toBe(false);
   });
 
-  it('leaves room for the description in one frame', () => {
+  it('leaves room for the description in one frame', async () => {
     const many = (count: number) => Array.from({ length: count }, (_, index) => ({ suiteId: 'unit', file: `test/${index}.ts`, fingerprint: digest }));
     expect(UnitFingerprints.safeParse(many(1000)).success).toBe(true);
     expect(UnitFingerprints.safeParse(many(10_000)).success).toBe(false);
+    const message = await reply(many(8000)), described = message.result.description;
+    const long = (index: number) => `test/${'x'.repeat(280)}${index}.ts`;
+    described.inventory = Array.from({ length: 4400 }, (_, index) => ({ suiteId: 'unit', file: long(index), selectionUnit: long(index) }));
+    expect(JSON.stringify(described).length).toBeGreaterThan(2.5 * 1024 * 1024);
+    expect(JSON.stringify(message).length).toBeGreaterThan(3 * 1024 * 1024);
+    expect(JSON.stringify(message).length).toBeLessThan(4 * 1024 * 1024);
+    expect(TestsDescribed.safeParse(message).error?.issues).toBeUndefined();
   });
 });
 

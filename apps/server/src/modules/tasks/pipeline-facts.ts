@@ -349,9 +349,9 @@ export function pipelineFacts(input: FactsInput): PipelineFacts {
   };
 }
 
-/* What the full runs of a turn found red that the kept results called green. No number where no full run could find any. */
+/* What the full runs of a turn found red that the kept results called green. No number where none of them got to compare. */
 function selectionMissesOf(runs: FactsRun[]): number | null {
-  const full = runs.flatMap(run => run.fileCache?.mode === 'full' ? [run.fileCache] : []);
+  const full = runs.flatMap(run => run.fileCache?.mode === 'full' && (run.fileCache.compared || run.fileCache.mismatches.length) ? [run.fileCache] : []);
   return full.length ? sum(full.map(cache => cache.mismatches.length)) : null;
 }
 

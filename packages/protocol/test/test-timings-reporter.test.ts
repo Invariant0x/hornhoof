@@ -25,12 +25,12 @@ it('opens a database', async ({ task }) => {
 `;
 
 /* A real run of the runner on a test file of its own, as a part of a run makes one. */
-async function runner(env: Record<string, string>, extra: Record<string, string> = {}) {
+async function runner(env: Record<string, string>, extra: Record<string, string> = {}, options: string[] = []) {
   const dir = await mkdtemp(join(ROOT, 'test/.timings-'));
   onTestFinished(() => rm(dir, { recursive: true, force: true }));
   await writeFile(join(dir, 'sample.test.ts'), SPEC);
   for (const [name, text] of Object.entries(extra)) await writeFile(join(dir, name), text);
-  const child = spawn('npx', ['--no-install', 'vitest', 'run', '--root', dir, `--reporter=${REPORTER}`, '--reporter=default'], { cwd: ROOT, env: { ...process.env, ...env, NO_COLOR: '1', HH_TEST_PART: env.HH_TEST_PART ?? '', HH_TEST_REPORT: env.HH_TEST_REPORT ?? '' } });
+  const child = spawn('npx', ['--no-install', 'vitest', 'run', '--root', dir, `--reporter=${REPORTER}`, '--reporter=default', ...options], { cwd: ROOT, env: { ...process.env, ...env, NO_COLOR: '1', HH_TEST_PART: env.HH_TEST_PART ?? '', HH_TEST_REPORT: env.HH_TEST_REPORT ?? '' } });
   let out = '';
   child.stdout.on('data', chunk => (out += String(chunk)));
   child.stderr.on('data', chunk => (out += String(chunk)));
@@ -72,7 +72,20 @@ describe('the timing reporter', () => {
     expect(code).toBe(1);
     const { files } = JSON.parse(await readFile(report, 'utf8')) as { files: { file: string; status: string; ms: number }[] };
     const status = Object.fromEntries(files.map(file => [file.file.slice(dir.length + 1), file.status]));
-    expect(status).toEqual({ 'sample.test.ts': 'passed', 'failing.test.ts': 'failed', 'skipped.test.ts': 'passed' });
+    expect(status).toEqual({ 'sample.test.ts': 'passed', 'failing.test.ts': 'failed' });
     expect(files.every(file => file.file.startsWith('/') && file.ms >= 0)).toBe(true);
+  }, 60_000);
+
+  it('says nothing of a file a run left when it stopped at the first failure', async () => {
+    const report = join(tmpdir(), `hh-report-bail-${process.pid}-${Date.now()}.json`);
+    onTestFinished(() => rm(report, { force: true }));
+    /* The runner starts with the largest file it knows nothing of. */
+    const first = `import { expect, it } from 'vitest';\nit('fails', () => expect(1).toBe(2));\n// ${'x'.repeat(5000)}\n`;
+    const { dir } = await runner({ HH_TEST_REPORT: report }, { 'first.test.ts': first, 'left.test.ts': "import { it } from 'vitest';\nit('never starts', () => {});\n" }, ['--bail=1', '--no-file-parallelism']);
+    const { files } = JSON.parse(await readFile(report, 'utf8')) as { files: { file: string; status: string }[] };
+    const status = Object.fromEntries(files.map(file => [file.file.slice(dir.length + 1), file.status]));
+    expect(status['first.test.ts']).toBe('failed');
+    expect(status['left.test.ts']).not.toBe('passed');
+    expect(status['sample.test.ts']).not.toBe('passed');
   }, 60_000);
 });

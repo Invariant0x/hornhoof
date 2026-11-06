@@ -41,11 +41,11 @@ async function fixture(turnNumber = 3, everyTurns = 5) {
   const scope = repositoryScope(companyId, department!.id, department!.repoUrl!);
   let number = 0;
 
-  /* A run through the real path: requested, described by the node, planned, given out. */
-  const start = async (request: { profile?: string; suite?: string }, given?: ReturnType<typeof fingerprints> | null) => {
+  /* A run through the real path: requested, described by the node, planned, given out. It is of the turn's branch unless it says. */
+  const start = async (request: { profile?: string; suite?: string }, given?: ReturnType<typeof fingerprints> | null, branch = `turn-${turnNumber}`) => {
     const prints = given === undefined ? fingerprints() : given;
     number += 1;
-    const [run] = await db.insert(testRuns).values({ companyId, departmentId: department!.id, taskId: task!.id, agentId: agent!.id, jobId: job!.id, number, command: '', commitSha: TEST_COMMIT, timeoutMs: 600_000,
+    const [run] = await db.insert(testRuns).values({ companyId, departmentId: department!.id, taskId: task!.id, agentId: agent!.id, jobId: job!.id, number, branch, command: '', commitSha: TEST_COMMIT, timeoutMs: 600_000,
       environmentRequest: newEnvironmentRequest(scope, { mode: 'product', ...request }) }).returning();
     await pumpTests(app.ctx);
     const [stored] = await db.select().from(testRuns).where(eq(testRuns.id, run!.id));
@@ -166,6 +166,70 @@ describe('reusing green test results', () => {
     const next = await f.start({ profile: 'final' });
     expect((await f.runOf(next)).fileCache).toMatchObject({ mode: 'cached', turn: 5 });
     expect(await f.ranFiles(next)).toEqual(['test/a.test.ts']);
+  });
+
+  it('takes back a green result when the file then fails at the same fingerprint, as in two runs at once', async () => {
+    const f = await fixture();
+    const one = await f.start({}), two = await f.start({});
+    await f.finish(one);
+    await f.finish(two, { ok: false, files: [{ suiteId: 'unit', file: 'test/a.test.ts', status: 'failed' }] });
+    expect(await f.ranFiles(await f.start({}))).toEqual(['test/a.test.ts']);
+  });
+
+  describe('what a release relies on', () => {
+    const TASK_BRANCH = 'task-1';
+
+    it('takes no result of a task branch: its job wrote its own report', async () => {
+      const f = await fixture();
+      await f.finish(await f.start({ profile: 'final' }, undefined, TASK_BRANCH));
+      expect(await f.ranFiles(await f.start({ profile: 'final' }))).toEqual(FILES);
+    });
+
+    it('takes the results of the main branch and of the turn, and a task branch takes them too', async () => {
+      const f = await fixture();
+      await f.finish(await f.start({ profile: 'final' }, undefined, 'main'));
+      expect(await f.ranFiles(await f.start({ profile: 'final' }))).toEqual([]);
+      expect(await f.ranFiles(await f.start({ profile: 'final' }, undefined, TASK_BRANCH))).toEqual([]);
+      expect(await f.ranFiles(await f.start({ profile: 'fast' }, undefined, TASK_BRANCH))).toEqual([]);
+    });
+
+    it('leaves other work free to reuse what a task branch proved', async () => {
+      const f = await fixture();
+      await f.finish(await f.start({ profile: 'fast' }, undefined, TASK_BRANCH));
+      expect(await f.ranFiles(await f.start({ profile: 'fast' }, undefined, 'task-2'))).toEqual([]);
+    });
+
+    it('does not let a task branch change what the turn proved', async () => {
+      const f = await fixture();
+      await f.finish(await f.start({ profile: 'final' }));
+      await f.db.update(testFileResults).set({ note: 'from the turn' });
+      await f.finish(await f.start({ profile: 'full' }, undefined, TASK_BRANCH), { files: FILES.map(file => ({ suiteId: 'unit', file, status: 'passed' as const, note: 'from a task branch' })) });
+      expect((await f.greenRows()).map(row => row.note)).toEqual(['from the turn', 'from the turn', 'from the turn']);
+    });
+
+    it('runs the full run on the turn\'s branch alone, and a run of a task branch does not stand in for it', async () => {
+      const f = await fixture(5);
+      const onTask = await f.start({ profile: 'final' }, undefined, TASK_BRANCH);
+      expect((await f.runOf(onTask)).fileCache).toMatchObject({ mode: 'cached', turn: 5 });
+      await f.finish(onTask);
+      const named = await f.start({ profile: 'full' }, undefined, TASK_BRANCH);
+      expect((await f.runOf(named)).fileCache).toMatchObject({ mode: 'full', turn: 5 });
+      await f.finish(named);
+      const full = await f.start({ profile: 'final' });
+      expect((await f.runOf(full)).fileCache).toMatchObject({ mode: 'full', turn: 5 });
+      expect(await f.ranFiles(full)).toEqual(FILES);
+    });
+
+    it('keeps what a suite left only from its own line', async () => {
+      const f = await fixture();
+      const kept = [{ suiteId: 'unit', files: [{ path: '.metrics/mutate/a.edn', text: '{}' }] }];
+      const onTask = await f.runOf(await f.start({ profile: 'final' }, undefined, TASK_BRANCH));
+      await rememberKept(f.app.ctx, onTask, { commit: TEST_COMMIT, kept });
+      expect(await f.db.select().from(testSuiteMemory)).toEqual([]);
+      const onTurn = await f.runOf(await f.start({ profile: 'final' }));
+      await rememberKept(f.app.ctx, onTurn, { commit: TEST_COMMIT, kept });
+      expect((await f.db.select().from(testSuiteMemory)).map(row => row.files)).toEqual([kept[0]!.files]);
+    });
   });
 
   it('runs everything sooner at a lower number from the manifest', async () => {

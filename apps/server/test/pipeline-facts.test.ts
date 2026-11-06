@@ -236,14 +236,19 @@ describe('returns, failures and interrupted turns', () => {
 
   it('says it has no number for test selection misses while no full run could find any', () => {
     expect(pipelineFacts(input()).selectionMisses).toBeNull();
-    const cached = { mode: 'cached' as const, turn: 1, fingerprints: [], reused: 3, preparationReused: false, wouldSkip: [], mismatches: [], notes: [] };
+    const cached = { mode: 'cached' as const, turn: 1, mainLine: true, fingerprints: [], reused: 3, preparationReused: false, wouldSkip: [], compared: 0, mismatches: [], notes: [] };
     expect(pipelineFacts(input({ runs: [run({ fileCache: cached })] })).selectionMisses).toBeNull();
   });
 
+  const full = (files: string[], compared: number) => ({ mode: 'full' as const, turn: 5, mainLine: true, fingerprints: [], reused: 0, preparationReused: false, wouldSkip: [], compared, mismatches: files.map(file => ({ suiteId: 'unit', file })), notes: [] });
+
+  it('has no number either for a full run that had nothing to compare or did not get to all of it', () => {
+    expect(pipelineFacts(input({ runs: [run({ fileCache: full([], 0) })] })).selectionMisses).toBeNull();
+  });
+
   it('counts what the full runs of a turn found that the kept results called green', () => {
-    const full = (files: string[]) => ({ mode: 'full' as const, turn: 5, fingerprints: [], reused: 0, preparationReused: false, wouldSkip: [], mismatches: files.map(file => ({ suiteId: 'unit', file })), notes: [] });
-    expect(pipelineFacts(input({ runs: [run({ fileCache: full([]) })] })).selectionMisses).toBe(0);
-    expect(pipelineFacts(input({ runs: [run({ fileCache: full(['a.ts', 'b.ts']) }), run({ fileCache: full(['c.ts']) })] })).selectionMisses).toBe(3);
+    expect(pipelineFacts(input({ runs: [run({ fileCache: full([], 40) })] })).selectionMisses).toBe(0);
+    expect(pipelineFacts(input({ runs: [run({ fileCache: full(['a.ts', 'b.ts'], 40) }), run({ fileCache: full(['c.ts'], 0) })] })).selectionMisses).toBe(3);
   });
 });
 

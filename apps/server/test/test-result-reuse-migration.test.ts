@@ -39,6 +39,7 @@ it('leaves the runs of a database at the previous release as they were', async (
   await expect(db.execute(greenRow(found, 'b'.repeat(64)))).rejects.toThrow();
   await db.execute(greenRow(found, 'c'.repeat(64)));
   expect((await db.execute<{ n: number }>(sql`select count(*)::int as n from test_file_results`)).rows[0]!.n).toBe(2);
+  expect((await db.execute(sql`select distinct main_line from test_file_results`)).rows).toEqual([{ main_line: false }]);
 }, 60_000);
 
 it('creates what reuse needs on a fresh database, and a removed department takes its results along', async () => {

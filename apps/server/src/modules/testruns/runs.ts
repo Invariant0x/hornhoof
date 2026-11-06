@@ -384,7 +384,7 @@ async function recordRunEnd(ctx: Ctx, runId: string, parts: Part[], status: 'pas
       .where(and(eq(testRuns.id, runId), eq(testRuns.status, 'running')))
       .returning();
     if (!ended) return null;
-    const run = await closeFileCache(tx, ended, parts);
+    const run = await closeFileCache(tx, ended);
     if (await pendingAuthorCheckRun(tx, task.id, run.id)) {
       await endAuthorCheckWait(tx, run, task);
       return { authorCheck: run.agentId };
@@ -775,6 +775,7 @@ async function recordRunStop(ctx: Ctx, job: ToolJob, run: Run, task: Task, other
       .set({ status: 'stopped', finishedAt: now })
       .where(and(eq(testParts.runId, run.id), inArray(testParts.status, ['queued', 'running'])))
       .returning();
+    await closeFileCache(tx, row);
     if (await pendingAuthorCheckRun(tx, task.id, row.id)) {
       await endAuthorCheckWait(tx, row, task);
       return { parts, authorCheck: row.agentId };

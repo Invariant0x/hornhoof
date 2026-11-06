@@ -23,8 +23,8 @@ function preparationFor(input: PreparedEnvironmentPlanInput) {
   const policy = manifest.execution.oncePreparation;
   return policy?.profiles.includes(input.snapshot.profile) ? policy : undefined;
 }
-function finalSuites(input: PreparedEnvironmentPlanInput, remaining: PreparedEnvironmentPlanInput['units'], onceIds: string[]): string[] {
-  const selected = new Set([...remaining.map(unit => unit.suiteId), ...onceIds]);
+function finalSuites(input: PreparedEnvironmentPlanInput, onceIds: string[]): string[] {
+  const selected = new Set([...input.units.map(unit => unit.suiteId), ...onceIds]);
   return input.snapshot.description.manifest.suites.filter(suite => selected.has(suite.id) && suite.finalChecks?.length).map(suite => suite.id);
 }
 async function remainingPlan(input: PreparedEnvironmentPlanInput, remaining: PreparedEnvironmentPlanInput['units']): Promise<EnvironmentPartPlan | null> {
@@ -34,7 +34,7 @@ async function remainingPlan(input: PreparedEnvironmentPlanInput, remaining: Pre
 }
 function planReason(preparation: ReturnType<typeof preparationFor>, planned: EnvironmentPartPlan | null): string {
   const prefix = preparation ? `One explicit preparation runs ${preparation.suiteIds.length} suites and ${preparation.commands.length} commands before batches. ` : '';
-  return prefix + (planned?.testPlan.reason ?? (preparation ? 'All selected suites run once in preparation; no batch is needed.' : 'Every selected file was reused; nothing runs.'));
+  return prefix + (planned?.testPlan.reason ?? (preparation ? 'All selected suites run once in preparation; no batch is needed.' : 'Every selected file was reused; no batch is needed.'));
 }
 function preparationLeaves(input: PreparedEnvironmentPlanInput, preparation: ReturnType<typeof preparationFor>): ProductPlan['leaves'] {
   if (!preparation) return [];
@@ -53,16 +53,16 @@ function remainingWork(input: ReusingInput) {
     remaining: input.units.filter(unit => !onceIds.includes(unit.suiteId) && !input.reuse?.reused.has(unitKey(unit))),
   };
 }
-/* Plans what is left to run. Only what runs has final checks; a reused preparation leaves nothing for the rest to wait for. */
+/* Plans what is left to run. No file proves a final check, so it stays; a reused preparation leaves nothing for the rest to wait for. */
 export async function planProductParts(input: ReusingInput): Promise<ProductPlan> {
   const { onceIds, preparation, remaining } = remainingWork(input);
-  const finals = finalSuites(input, remaining, preparation?.suiteIds ?? []);
+  const finals = finalSuites(input, onceIds);
   const budget = MAX_TEST_PARTS - (preparation ? 1 : 0) - finals.length;
   if (budget < (remaining.length ? 1 : 0)) throw new Error('The product plan exceeds the supported part count.');
   const availableMachines = Math.min(input.availableMachines, Math.max(0, budget));
   const planned = await remainingPlan({ ...input, availableMachines }, remaining);
   const leaves = preparationLeaves(input, preparation);
   leaves.push(...batchLeaves(input, planned, preparation !== undefined));
-  leaves.push(...finalLeaves(leaves, finals, onceIds));
+  leaves.push(...finalLeaves(leaves, finals, preparation?.suiteIds ?? []));
   return { leaves, estimate: planEstimate(planned), reason: planReason(preparation, planned) };
 }

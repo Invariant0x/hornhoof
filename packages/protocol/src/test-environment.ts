@@ -328,7 +328,7 @@ export const TestsDescribed = z.strictObject({
     z.strictObject({ status: z.literal('ready'), description: EnvironmentDescription, fingerprints: UnitFingerprints.optional() }),
     z.strictObject({ status: z.literal('error'), problem: EnvironmentProblem }),
   ]),
-}).refine(value => value.result.status !== 'ready' || value.result.description.commitSha === value.commitSha, 'The described commit differs from the requested commit.').superRefine(descriptionSize);
+}).refine(value => value.result.status !== 'ready' || value.result.description.commitSha === value.commitSha, 'The described commit differs from the requested commit.');
 export type TestsDescribed = z.infer<typeof TestsDescribed>;
 
 export function runtimeVersionMatches(requested: string, actual: string): boolean {

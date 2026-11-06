@@ -1,7 +1,7 @@
 import { KeptFiles, PREPARATION_UNIT, type EnvironmentSnapshot, type FileOutcome, type RepositoryScope, type TestEnvironmentV1, type TestExecution, type TestUnit, type UnitFingerprint } from '@hornhoof/protocol';
 import { and, eq, inArray, isNotNull, isNull, lt, notExists, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { tasks, testFileResults, testParts, testRuns, testSuiteMemory, turns, type TestFileKey, type TestRunFileCache } from '../../db/schema.js';
+import { departments, tasks, testFileResults, testParts, testRuns, testSuiteMemory, turns, type TestFileKey, type TestRunFileCache } from '../../db/schema.js';
 import { unitKey as keyOf } from './plan-environment.js';
 
 /* Reusing green test results. A file that passed at a fingerprint need not run again at that fingerprint. Every doubt runs the
@@ -115,34 +115,46 @@ async function turnOfRun(db: Db, run: Pick<Run, 'taskId' | 'companyId'>): Promis
   const [open] = await db.select({ number: turns.number }).from(turns).where(and(eq(turns.companyId, run.companyId), eq(turns.status, 'open')));
   return open?.number ?? null;
 }
-/* A full run stopped halfway, or with a part that failed without naming a file (no machine, out of time, no preparation), did not
-   get to all it had to check, so the next one is the full run. One still going counts, so two do not start. */
+/* What a release relies on was proved on its own line: the repository's main branch or the turn's. A job writes its own report, so
+   what another branch says holds for that branch's work and no further, and a turn's full run is of the turn's branch. */
+async function onMainLine(db: Db, run: Pick<Run, 'branch' | 'departmentId'>, turn: number | null): Promise<boolean> {
+  if (turn !== null && run.branch === `turn-${turn}`) return true;
+  const [owner] = await db.select({ branch: departments.repoBranch }).from(departments).where(eq(departments.id, run.departmentId));
+  return run.branch === (owner?.branch ?? 'main');
+}
+/* A full run of another branch, stopped halfway, or with a part that failed without naming a file (no machine, out of time, no
+   preparation) did not get to all the turn needs, so the next one is the full run. One still going counts, so two do not start. */
 async function lastFullTurnOf(db: Db, run: Pick<Run, 'id' | 'companyId'>, scope: RepositoryScope): Promise<number | null> {
   const [last] = await db.select({ turn: sql<number | null>`max((${testRuns.fileCache}->>'turn')::int)` }).from(testRuns).where(and(
     eq(testRuns.companyId, run.companyId), eq(testRuns.departmentId, scope.repositoryOwnerId), inArray(testRuns.status, ['running', 'passed', 'failed']),
-    sql`${testRuns.fileCache}->>'mode' = 'full'`, sql`${testRuns.environmentRequest}->'repositoryScope'->>'repoUrlHash' = ${scope.repoUrlHash}`,
+    sql`${testRuns.fileCache}->>'mode' = 'full'`, sql`(${testRuns.fileCache}->>'mainLine')::boolean`, sql`${testRuns.environmentRequest}->'repositoryScope'->>'repoUrlHash' = ${scope.repoUrlHash}`,
     notExists(db.select({ part: testParts.id }).from(testParts).where(and(eq(testParts.runId, testRuns.id), eq(testParts.status, 'failed'), isNull(testParts.failedFiles)))),
   ));
   return last?.turn ?? null;
 }
 
-export type RunMode = { mode: Mode; profile: string; turn: number | null } | null;
+export type RunMode = { mode: Mode; profile: string; turn: number | null; mainLine: boolean } | null;
 export async function runModeOf(ctx: Pick<Ctx, 'db'>, run: Run, manifest: TestEnvironmentV1, scope: RepositoryScope, printed: boolean): Promise<RunMode> {
   const request = run.environmentRequest!, fullRun = manifest.execution?.fullRun;
   if (!fullRun) return null;
-  const turn = await turnOfRun(ctx.db, run);
-  const due = fullRunDue({ turn, everyTurns: fullRun.everyTurns, lastFullTurn: await lastFullTurnOf(ctx.db, run, scope) });
+  const turn = await turnOfRun(ctx.db, run), mainLine = await onMainLine(ctx.db, run, turn);
+  const due = mainLine && fullRunDue({ turn, everyTurns: fullRun.everyTurns, lastFullTurn: await lastFullTurnOf(ctx.db, run, scope) });
   const chosen = chooseRunMode(manifest, request, due, printed);
-  return chosen && { ...chosen, turn };
+  return chosen && { ...chosen, turn, mainLine };
 }
 
 const ofRepository = (scope: RepositoryScope) => and(eq(testFileResults.companyId, scope.companyId), eq(testFileResults.repositoryOwnerId, scope.repositoryOwnerId), eq(testFileResults.repoUrlHash, scope.repoUrlHash));
 
 /* What was green at these fingerprints in this one repository, with what each result came to. */
-async function greenAt(db: Db, scope: RepositoryScope, prints: UnitFingerprint[]): Promise<Map<string, string | null>> {
+async function greenAt(db: Db, scope: RepositoryScope, prints: UnitFingerprint[], onlyMainLine: boolean): Promise<Map<string, string | null>> {
   if (!prints.length) return new Map();
-  const rows = await db.select({ suiteId: testFileResults.suiteId, file: testFileResults.file, fingerprint: testFileResults.fingerprint, note: testFileResults.note }).from(testFileResults).where(and(ofRepository(scope), inArray(testFileResults.fingerprint, [...new Set(prints.map(print => print.fingerprint))])));
+  const rows = await db.select({ suiteId: testFileResults.suiteId, file: testFileResults.file, fingerprint: testFileResults.fingerprint, note: testFileResults.note }).from(testFileResults).where(and(ofRepository(scope), inArray(testFileResults.fingerprint, [...new Set(prints.map(print => print.fingerprint))]), onlyMainLine ? eq(testFileResults.mainLine, true) : undefined));
   return new Map(rows.map(row => [printKey(row, row.fingerprint), row.note]));
+}
+/* The profiles of a release, which take a result only from its own line. */
+function ofRelease(manifest: TestEnvironmentV1, profile: string): boolean {
+  const fullRun = manifest.execution?.fullRun;
+  return profile === fullRun?.replaces || profile === fullRun?.profile;
 }
 /* What the results a run takes over came to. */
 function notesOf(units: TestUnit[], prints: UnitFingerprint[], green: Map<string, string | null>, taken: ReuseDecision): TestRunFileCache['notes'] {
@@ -159,25 +171,37 @@ export async function reuseFor(ctx: Pick<Ctx, 'db'>, mode: RunMode, snapshot: En
   if (!mode) return { decision: NO_REUSE, fileCache: null };
   const { description } = snapshot, policy = description.manifest.execution?.oncePreparation;
   const once = policy?.profiles.includes(snapshot.profile) ? policy.suiteIds : [];
-  const green = await greenAt(ctx.db, description.repositoryScope, prints), decision = decideReuse({ units, prints, green, once });
+  const green = await greenAt(ctx.db, description.repositoryScope, prints, ofRelease(description.manifest, snapshot.profile)), decision = decideReuse({ units, prints, green, once });
   const full = mode.mode === 'full';
   const wouldSkip = full ? units.filter(unit => decision.reused.has(keyOf(unit))).map(unit => ({ suiteId: unit.suiteId, file: unit.file })) : [];
   const taken = mode.mode === 'cached' ? decision : NO_REUSE;
-  return { decision: taken, fileCache: { mode: mode.mode, turn: mode.turn, fingerprints: prints, reused: taken.reused.size, preparationReused: taken.preparation, wouldSkip, mismatches: [], notes: notesOf(units, prints, green, taken) } };
+  return { decision: taken, fileCache: { mode: mode.mode, turn: mode.turn, mainLine: mode.mainLine, fingerprints: prints, reused: taken.reused.size, preparationReused: taken.preparation, wouldSkip, compared: 0, mismatches: [], notes: notesOf(units, prints, green, taken) } };
 }
 
+const printsOf = (cache: TestRunFileCache): Map<string, string> => new Map(cache.fingerprints.map(print => [keyOf(print), print.fingerprint]));
+/* What another branch proved leaves what the main line proved as it was. */
 async function keepGreen(db: Db, run: Run, cache: TestRunFileCache, scope: RepositoryScope, green: GreenFile[]): Promise<void> {
-  const prints = new Map(cache.fingerprints.map(print => [keyOf(print), print.fingerprint]));
+  const prints = printsOf(cache);
   const values = green.flatMap(file => {
     const fingerprint = prints.get(keyOf(file));
-    return fingerprint ? [{ companyId: scope.companyId, repositoryOwnerId: scope.repositoryOwnerId, repoUrlHash: scope.repoUrlHash, fingerprint, suiteId: file.suiteId, file: file.file, runId: run.id, commitSha: run.commitSha!, ms: file.ms === undefined ? null : Math.round(file.ms), note: file.note ?? null }] : [];
+    return fingerprint ? [{ companyId: scope.companyId, repositoryOwnerId: scope.repositoryOwnerId, repoUrlHash: scope.repoUrlHash, fingerprint, suiteId: file.suiteId, file: file.file, runId: run.id, commitSha: run.commitSha!, ms: file.ms === undefined ? null : Math.round(file.ms), note: file.note ?? null, mainLine: cache.mainLine }] : [];
   });
   if (!values.length) return;
   await db.insert(testFileResults).values(values).onConflictDoUpdate({
     target: [testFileResults.companyId, testFileResults.repositoryOwnerId, testFileResults.repoUrlHash, testFileResults.fingerprint, testFileResults.suiteId, testFileResults.file],
-    set: { runId: run.id, commitSha: run.commitSha!, ms: sql`excluded.ms`, note: sql`excluded.note`, createdAt: sql`now()` },
+    set: { runId: run.id, commitSha: run.commitSha!, ms: sql`excluded.ms`, note: sql`excluded.note`, mainLine: sql`excluded.main_line`, createdAt: sql`now()` },
+    setWhere: sql`excluded.main_line or not ${testFileResults.mainLine}`,
   });
   await db.delete(testFileResults).where(and(eq(testFileResults.companyId, scope.companyId), lt(testFileResults.createdAt, new Date(Date.now() - KEPT_DAYS * 86_400_000))));
+}
+/* A file that failed at a fingerprint has no green result there, whatever an earlier run left: it may belong to a group that had to
+   run again, or to a run beside this one. */
+async function forgetFailed(db: Db, cache: TestRunFileCache, scope: RepositoryScope, failed: TestFileKey[]): Promise<void> {
+  const prints = printsOf(cache);
+  for (const file of failed) {
+    const fingerprint = prints.get(keyOf(file));
+    if (fingerprint) await db.delete(testFileResults).where(and(ofRepository(scope), eq(testFileResults.fingerprint, fingerprint), eq(testFileResults.suiteId, file.suiteId), eq(testFileResults.file, file.file)));
+  }
 }
 
 type PartEnd = { ok: boolean; commit: string | null; files?: FileOutcome[] };
@@ -188,22 +212,23 @@ export async function recordPartFiles(ctx: Pick<Ctx, 'db'>, run: Run, part: Part
   if (message.ok && ended.status !== 'passed') return;
   const { green, failed } = partFileResults(snapshot, selection, message.ok, message.files);
   await keepGreen(ctx.db, run, cache, snapshot.description.repositoryScope, green);
-  if (failed.length) await ctx.db.update(testParts).set({ failedFiles: failed }).where(eq(testParts.id, part.id));
+  if (!failed.length) return;
+  await forgetFailed(ctx.db, cache, snapshot.description.repositoryScope, failed);
+  await ctx.db.update(testParts).set({ failedFiles: failed }).where(eq(testParts.id, part.id));
 }
 
-/* Files a full run found red that the kept results called green. Their results go, as they were wrong, and a run that ended
-   no longer needs its fingerprints. What the files it did run came to joins what it took over. */
-export async function closeFileCache(tx: Pick<Db, 'select' | 'update' | 'delete'>, run: Run, parts: Pick<Part, 'failedFiles'>[]): Promise<Run> {
+/* A run that ended no longer needs its fingerprints. A full run says which files it found red that the kept results called green, and
+   how many it got to compare: a part that failed without naming a file leaves that unknown. What the files it did run came to joins
+   what it took over. */
+export async function closeFileCache(tx: Pick<Db, 'select' | 'update'>, run: Run): Promise<Run> {
   const cache = run.fileCache, scope = run.environmentSnapshot?.description.repositoryScope;
   if (!cache || !scope) return run;
+  const parts = await tx.select({ status: testParts.status, failedFiles: testParts.failedFiles }).from(testParts).where(eq(testParts.runId, run.id));
   const failed = new Set(parts.flatMap(part => part.failedFiles ?? []).map(keyOf));
-  const mismatches = cache.wouldSkip.filter(file => failed.has(keyOf(file))), prints = new Map(cache.fingerprints.map(print => [keyOf(print), print.fingerprint]));
-  for (const file of mismatches) {
-    await tx.delete(testFileResults).where(and(ofRepository(scope), eq(testFileResults.fingerprint, prints.get(keyOf(file))!), eq(testFileResults.suiteId, file.suiteId), eq(testFileResults.file, file.file)));
-  }
+  const toldAll = parts.every(part => part.status === 'passed' || part.failedFiles);
   const ran = await tx.select({ file: testFileResults.file, note: testFileResults.note }).from(testFileResults).where(and(ofRepository(scope), eq(testFileResults.runId, run.id), isNotNull(testFileResults.note)));
   const notes = [...cache.notes, ...ran.map(({ file, note }) => ({ file, note: note! }))].sort((a, b) => a.file.localeCompare(b.file));
-  const fileCache: TestRunFileCache = { ...cache, fingerprints: [], wouldSkip: [], mismatches, notes };
+  const fileCache: TestRunFileCache = { ...cache, fingerprints: [], wouldSkip: [], compared: toldAll ? cache.wouldSkip.length : 0, mismatches: cache.wouldSkip.filter(file => failed.has(keyOf(file))), notes };
   await tx.update(testRuns).set({ fileCache }).where(eq(testRuns.id, run.id));
   return { ...run, fileCache };
 }
@@ -241,10 +266,11 @@ function allowedKept(manifest: TestEnvironmentV1, suiteId: string, files: KeptFi
   const keep = manifest.suites.find(suite => suite.id === suiteId)?.keep ?? [];
   return files.filter(file => keep.some(path => file.path === path || file.path.startsWith(`${path}/`)));
 }
-/* Keeps what a part left, only under the paths its suite's manifest names, and only from a part that checked this commit. */
+/* Keeps what a part left, only under the paths its suite's manifest names, only from a part that checked this commit, and only from
+   the main line: every later run of the repository starts from it. */
 export async function rememberKept(ctx: Pick<Ctx, 'db'>, run: Run, message: { commit: string | null; kept?: KeptFiles }): Promise<void> {
   const snapshot = run.environmentSnapshot;
-  if (!snapshot || !message.kept || message.commit !== run.commitSha || !run.fileCache) return;
+  if (!snapshot || !message.kept || message.commit !== run.commitSha || !run.fileCache?.mainLine) return;
   for (const { suiteId, files } of message.kept) {
     const allowed = allowedKept(snapshot.description.manifest, suiteId, files);
     if (allowed.length && fitsOneMessage(suiteId, allowed)) await mergeKept(ctx.db, snapshot.description.repositoryScope, suiteId, allowed);

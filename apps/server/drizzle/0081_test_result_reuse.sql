@@ -9,6 +9,7 @@ CREATE TABLE "test_file_results" (
 	"commit_sha" text NOT NULL,
 	"ms" integer,
 	"note" text,
+	"main_line" boolean DEFAULT false NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "test_file_results_pk" PRIMARY KEY("company_id","repository_owner_id","repo_url_hash","fingerprint","suite_id","file")
 );

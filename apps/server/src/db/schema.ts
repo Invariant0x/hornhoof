@@ -1008,8 +1008,8 @@ export type TestFileKey = { suiteId: string; file: string };
 /* How a run reused green results. mode: cached reuses what kept its fingerprint, full runs everything, off had no fingerprints
    to go by. fingerprints and wouldSkip serve the run's parts and go when it ends. */
 export type TestRunFileCache = {
-  mode: 'cached' | 'full' | 'off'; turn: number | null; fingerprints: UnitFingerprint[]; reused: number; preparationReused: boolean;
-  wouldSkip: TestFileKey[]; mismatches: TestFileKey[]; notes: { file: string; note: string }[];
+  mode: 'cached' | 'full' | 'off'; turn: number | null; mainLine: boolean; fingerprints: UnitFingerprint[]; reused: number; preparationReused: boolean;
+  wouldSkip: TestFileKey[]; compared: number; mismatches: TestFileKey[]; notes: { file: string; note: string }[];
 };
 
 export const testRuns = pgTable(
@@ -1126,6 +1126,8 @@ export const testFileResults = pgTable(
     ms: integer('ms'),
     /* What the result came to, as its runner put it. */
     note: text('note'),
+    /* Proved on the repository's main branch or the turn's, the only results a release takes. */
+    mainLine: boolean('main_line').notNull().default(false),
     createdAt: createdAt(),
   },
   t => [primaryKey({ name: 'test_file_results_pk', columns: [t.companyId, t.repositoryOwnerId, t.repoUrlHash, t.fingerprint, t.suiteId, t.file] }), index('test_file_results_age').on(t.companyId, t.createdAt)],
