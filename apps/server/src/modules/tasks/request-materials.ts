@@ -59,6 +59,25 @@ function linkView(sourceId: string, slot: string, name: string, raw: string): Ma
   return MaterialView.safeParse(available).success ? available : { ...base, state: 'unsupported' };
 }
 
+async function optionViews(db: Db, source: MaterialRequest, pictures: Map<string, Picture>, files: Map<string, Target>): Promise<MaterialManifest['options']> {
+  const result: MaterialManifest['options'] = [];
+  for (const [index, option] of source.request.options.entries()) {
+    const materials = option.image ? [await imageView(db, source, option.image, `option:${index}`, index + 1, pictures.get(option.image), files)] : [];
+    result.push({ id: materialId(source.request.id, `option:${index}`), materials });
+  }
+  return result;
+}
+
+/* Addressed-only picture permission does not reveal hidden repository links. */
+async function legacyLinks(db: Db, source: MaterialRequest): Promise<MaterialView[]> {
+  if (!source.known) return [];
+  const result: MaterialView[] = [];
+  if (source.request.link) result.push(linkView(source.request.id, 'link', 'Result', source.request.link));
+  const commit = await commitUrl(db, source.task, source.request.commit);
+  if (commit) result.push(linkView(source.request.id, 'commit', 'Commit', commit));
+  return result;
+}
+
 async function legacyCollection(db: Db, source: MaterialRequest): Promise<Collection> {
   await requireLegacyMaterials(db, source);
   const { request } = source;
@@ -70,17 +89,8 @@ async function legacyCollection(db: Db, source: MaterialRequest): Promise<Collec
   const files = new Map<string, Target>();
   const common: MaterialView[] = [];
   for (const file of pictures.filter(file => !inOptions.has(file.id))) common.push(await imageView(db, source, file.id, 'common', common.length + 1, file, files));
-  const options: MaterialManifest['options'] = [];
-  for (const [index, option] of request.options.entries()) {
-    const shown = option.image ? [await imageView(db, source, option.image, `option:${index}`, index + 1, byId.get(option.image), files)] : [];
-    options.push({ id: materialId(request.id, `option:${index}`), materials: shown });
-  }
-  /* Addressed-only picture permission does not reveal hidden repository links. */
-  if (source.known) {
-    if (request.link) common.push(linkView(request.id, 'link', 'Result', request.link));
-    const commit = await commitUrl(db, source.task, request.commit);
-    if (commit) common.push(linkView(request.id, 'commit', 'Commit', commit));
-  }
+  const options = await optionViews(db, source, byId, files);
+  common.push(...await legacyLinks(db, source));
   const materialDigest = digest(JSON.stringify({ common, options }));
   return { manifest: MaterialManifest.parse({ materialRevision: 1, materialDigest, common, options }), files };
 }
