@@ -10,6 +10,7 @@ The browser acceptance matrix is NOT_RUN. None of the following unit/HTTP checks
 |233/1|9fc6fda5d710a85003e43edadaec3b01da9312a0|PASS:31 comparator unit cases, types/lint/syntax/collection, pure CRAPmax8.1. Lines/functions100%, branches96.72%.|
 |251/1|93a01f1d877b1bce9d383c6fe770a4630be51a28|FAIL: real setup/HTTP/notebook works, new data identity absent;2 source/build precondition contracts pass.|
 |278/1|2788ddbcf6bbe315d06b2b8d921d5458236c7782|FAIL overall:3/3 real HTTP/source/font contracts pass, types and CRAP pass; MJS lint reports undeclared URL in the test. No browser launch.|
+|318/1|97268f5e12876f4ccb78c5ed65b1490fb0a173be|FAIL expected adapter RED:18fail/6pass; the6 negative matches are insufficient proof. Real HTTP3/3, types, TS/MJS lint, fixture CRAP and mixed dryer exit0. No browser launch.|
 
 Full commands and complete logs are the native tests-228-1.log, tests-233-1.log, tests-251-1.log and tests-278-1.log on535. They were fetched/read and retained under the task's local.metrics directory.228 and251 remain RED receipts;278 is not relabeled as a passed run.
 
@@ -36,3 +37,12 @@ Requests500 handoff is read-only. The Requests.tsx blob at b5b73ca9/9b8f2b33/91a
 The original89 rows/states stay in the coverage catalog. The first window/company notebook spec is prepared but unexecuted; other per-view real-server fixtures and ranking, normalized live capture integration, the cross-engine1px acceptance, full335/369/411 checks and all real PNG outcomes remain unfinished. Common fields in unit data do not replace them.
 
 546 still has no delivered canonical source-pair/context/export example or actual image/engine/artifact receipt in the task readback. No repeat of completed543 diagnostics, new wire fields, run_work, host browser, local heavy checks/install or daemon fallback is introduced. Ordinary publication and independent targeted authorchecks are authorized. The old49c11276 preparation bundle/report remains a historical unexecuted checkpoint, not the current test result.
+
+
+## Capture-boundary RED refinement after318
+
+The complete318 log was reconciled: platform-selected home-api, actual Linuxx64/Node22.23.4/DockerMarkertrue,8 logical CPUs, cpuset0-7,cpu.max=max100000,memory.max=max. Observed load1 was1.57..5.35. All ten stages exited0 except capture-normalization-expected-RED, which exited1 with18fail/6pass/0skip. The fixture's undeclared URL lint error is fixed on this source. HTTP data/fonts and child coverage remain real HTTP evidence; no engine, image or export readiness is inferred.
+
+The six missing-geometry tests only matched the word geometry, which also occurred in the placeholder's error. They are strengthened to identify the actual absent field. Additional malformed capture/hash/DPR/rectangle cases defend the unknown-input boundary. This is a test-only refinement before implementation; another small targeted remote RED is required. The earlier18fail/6pass is preserved rather than relabeled24 failures. No test assertion, count or threshold is weakened.
+
+The read-only C23 input from512 is recorded at aa6b8df9a5e8ff6687f01528148a47d70885e525, with fixtures in request-materials.spec.ts. Its run362 and product GREEN remain unverified here; it is not silently merged into this harness base. The runtime89-row matrix, per-view fixtures/ranking and546 support gap remain unchanged.

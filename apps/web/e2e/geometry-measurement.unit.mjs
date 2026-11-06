@@ -73,11 +73,41 @@ test('rejects a substituted engine', () => { assert.throws(() => geometryMeasure
 test('rejects an absent case denominator identity', () => { assert.throws(() => geometryMeasurement({ ...capture(), caseId: '' }), /case/i); });
 test('rejects missing screenshot identity', () => { const raw = capture(); delete raw.screenshotSha256; assert.throws(() => geometryMeasurement(raw), /screenshot/i); });
 for (const field of ['clips', 'horizontalOverflow', 'pageHorizontalOverflow', 'viewport', 'icons', 'body']) test('rejects missing raw geometry evidence: ' + field, () => {
-  const raw = capture(); delete raw.geometry[field]; assert.throws(() => geometryMeasurement(raw), /geometry/i);
+  const raw = capture(); delete raw.geometry[field];
+  assert.throws(() => geometryMeasurement(raw), new RegExp('geometry.*' + field, 'i'));
 });
 test('rejects an icon without its stable identity', () => {
   const raw = capture(); delete raw.geometry.icons[0].id; assert.throws(() => geometryMeasurement(raw), /icon/i);
 });
 test('rejects missing SVG rectangles rather than dropping a control', () => {
   const raw = capture(); delete raw.geometry.icons[0].svg; assert.throws(() => geometryMeasurement(raw), /rectangle/i);
+});
+
+for (const value of [null, []]) test('rejects a non-object capture: ' + JSON.stringify(value), () => {
+  assert.throws(() => geometryMeasurement(value), /capture.*object/i);
+});
+test('rejects missing panel evidence', () => {
+  const raw = capture(); delete raw.geometry.panel;
+  assert.throws(() => geometryMeasurement(raw), /geometry.*panel/i);
+});
+for (const field of Object.keys(identities)) test('rejects malformed capture identity: ' + field, () => {
+  assert.throws(() => geometryMeasurement({ ...capture(), [field]: 'wrong-length' }), /identity/i);
+});
+test('rejects a malformed screenshot hash', () => {
+  assert.throws(() => geometryMeasurement({ ...capture(), screenshotSha256: 'wrong-length' }), /screenshot/i);
+});
+test('rejects a whitespace-only case identity', () => {
+  assert.throws(() => geometryMeasurement({ ...capture(), caseId: '  ' }), /case/i);
+});
+for (const dpr of [0, Number.NaN]) test('rejects an invalid measured DPR: ' + dpr, () => {
+  const raw = capture(); raw.geometry.viewport.dpr = dpr;
+  assert.throws(() => geometryMeasurement(raw), /geometry.*viewport.*dpr/i);
+});
+test('rejects a nonfinite panel rectangle', () => {
+  const raw = capture(); raw.geometry.panel.x = Number.NaN;
+  assert.throws(() => geometryMeasurement(raw), /rectangle/i);
+});
+test('rejects an invisible button rectangle', () => {
+  const raw = capture(); raw.geometry.icons[0].button.width = 0;
+  assert.throws(() => geometryMeasurement(raw), /rectangle/i);
 });
