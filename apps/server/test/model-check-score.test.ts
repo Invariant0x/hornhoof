@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Case, CheckResult } from '../src/modules/model-checks/contract.js';
 import { decide, parseThresholds, scoreCases, type Thresholds } from '../src/modules/model-checks/score.js';
-import { classCase, holdout, mustBlock, reviewCase } from './model-check-fixture.js';
+import { classCase, holdout, mustBlock, reviewCase, TAXONOMY } from './model-check-fixture.js';
 
 const review = (decision: 'allow' | 'block' | 'escalate'): CheckResult => ({ kind: 'review', decision, reasonCodes: [] });
 const classified = (classId: string, requiresHuman: boolean): CheckResult => ({ kind: 'classification', classId, requiresHuman, reasonCodes: [] });
@@ -94,6 +94,16 @@ describe('scoring a classification', () => {
     const scored = scoreOne(classCase(), classified('howto', false));
     expect(scored.metrics).toMatchObject({ falseAllows: 0, falseDenies: 0, classErrors: 0 });
     expect(scored.missedDevCases).toEqual([]);
+  });
+
+  it('keeps a class named like a built-in of every object inside its own table', () => {
+    const taxonomy = [{ classId: '__proto__', requiresHuman: false, description: 'Words only a test holds' }, ...TAXONOMY];
+    const row = classCase({ input: { ...classCase().input, taxonomy }, expected: { classId: '__proto__', requiresHuman: false } });
+    const scored = scoreOne(row, classified('howto', false));
+    const leaked = ({} as Record<string, unknown>)['howto'];
+    Reflect.deleteProperty(Object.prototype, 'howto');
+    expect(leaked).toBeUndefined();
+    expect(Object.keys(scored.metrics.confusion ?? {})).toEqual(['__proto__']);
   });
 
   it('adds up what each class was taken for, apart for the held-out part', () => {
