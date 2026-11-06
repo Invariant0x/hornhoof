@@ -106,6 +106,7 @@ const LISTS: Listed[] = [
   { route: 'GET /api/departments/:id/tree', url: c => `/api/departments/${c.dev.id}/tree`, statuses: ALL_OK },
   { route: 'GET /api/departments/:id/pipeline', url: c => `/api/departments/${c.dev.id}/pipeline`, statuses: { ann: 403, olga: 403, wes: 403, lisa: 200, ceo: 200 } },
   { route: 'GET /api/departments/:id/roster', url: c => `/api/departments/${c.dev.id}/roster`, statuses: WHOLE_ONLY },
+  { route: 'GET /api/departments/:id/work-mode', url: c => `/api/departments/${c.dev.id}/work-mode`, statuses: ALL_OK },
   { route: 'GET /api/departments/:id/approval-policy', url: c => `/api/departments/${c.dev.id}/approval-policy`, statuses: ALL_OK },
   { route: 'GET /api/departments/:id/model-checks', url: c => `/api/departments/${c.dev.id}/model-checks`, statuses: ALL_OK },
 ];
@@ -124,6 +125,7 @@ const NO_AGENT_DATA: string[] = [
   'POST /api/computer/close', 'POST /api/computer/decline', 'POST /api/computer/open',
   'PUT /api/departments/:id/model-checks/:kind/thresholds', 'POST /api/departments/:id/model-checks/:kind/sets', 'POST /api/departments/:id/model-checks/:kind/misses',
   'PUT /api/departments/:id/approval-policy/:channel', 'POST /api/departments/:id/notebook', 'PATCH /api/departments/:id/notebook/:number', 'DELETE /api/departments/:id/notebook/:number',
+  'PUT /api/departments/:id/work-mode',
   'PUT /api/departments/:id/owner', 'PUT /api/departments/:id/repository', 'DELETE /api/departments/:id/repository', 'POST /api/departments/:id/staff',
   'POST /api/departments/:id/teams', 'PATCH /api/departments/:id/teams/:teamId', 'DELETE /api/departments/:id/teams/:teamId', 'POST /api/departments/build',
   'GET /api/health', 'GET /api/invites/:token', 'POST /api/invites/:token/accept',

@@ -1,4 +1,5 @@
-import { and, asc, count, desc, eq, inArray, isNull, notInArray, sql, type SQL } from 'drizzle-orm';
+import { turnCounts } from './turn-progress.js';
+import { and, asc, desc, eq, inArray, isNull, notInArray, sql, type SQL } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { Text } from './long-text.js';
@@ -130,17 +131,6 @@ async function computerView(ctx: Ctx, companyId: string, computer: NonNullable<D
     at: computer.asked.at,
     view: { ...ctx.computer.view(), asked: computer.asked, machine: await serverMachine(ctx, companyId), canAnswer: computer.canAnswer },
   };
-}
-
-/* How many tasks of a turn are there and done, of those this person sees. */
-async function turnCounts(db: Db, turn: Turn, viewer: AgentViewer) {
-  if (viewer.full) {
-    const [all] = await db.select({ n: count() }).from(tasks).where(eq(tasks.turnId, turn.id));
-    const [done] = await db.select({ n: count() }).from(tasks).where(and(eq(tasks.turnId, turn.id), eq(tasks.status, 'done')));
-    return { total: Number(all?.n ?? 0), done: Number(done?.n ?? 0) };
-  }
-  const seen = (await db.select().from(tasks).where(eq(tasks.turnId, turn.id))).filter(t => seesTask(viewer, t));
-  return { total: seen.length, done: seen.filter(t => t.status === 'done').length };
 }
 
 /* The task a turn's work hangs under, for someone who sees it. */
