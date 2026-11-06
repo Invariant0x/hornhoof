@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CheckBinding } from '../src/modules/model-checks/contract.js';
-import { afterChange, afterRun, bindingDigest, isOn, weeklyRun, type BindingPart, type CheckState } from '../src/modules/model-checks/lifecycle.js';
+import { afterChange, afterRun, bindingDigest, canonicalJson, isOn, weeklyRun, type BindingPart, type CheckState } from '../src/modules/model-checks/lifecycle.js';
 import type { Decision } from '../src/modules/model-checks/score.js';
 import { binding, hashOf } from './model-check-fixture.js';
 
@@ -19,6 +19,10 @@ describe('the digest of a check', () => {
     const reordered = Object.fromEntries(Object.entries(given).reverse()) as CheckBinding;
     expect(bindingDigest(reordered)).toBe(bindingDigest(given));
     expect(bindingDigest(given)).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('has sorted keys at every depth, keeps the order of a list, and has no spaces', () => {
+    expect(canonicalJson({ b: [{ d: 1, c: 'x y' }, 2], a: null })).toBe('{"a":null,"b":[{"c":"x y","d":1},2]}');
   });
 
   it('changes with a nested value', () => {

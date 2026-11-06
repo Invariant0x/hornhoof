@@ -13,7 +13,7 @@ const REPORT: Report = { status: 'failed', problems: ['must_block_missed'], infr
 const SIGNAL = { dedupKey: 'digest:must_block_missed', problems: ['must_block_missed' as const] };
 
 describe('whether a department has work', () => {
-  const setStatus = async (c: Awaited<ReturnType<typeof company>>, status: (typeof TASK_STATUSES)[number]) => c.db.update(tasks).set({ status }).where(eq(tasks.id, c.task.id));
+  const setStatus = async (c: Awaited<ReturnType<typeof company>>, status: (typeof TASK_STATUSES)[number]) => c.db.update(tasks).set({ status, closedAt: new Date() }).where(eq(tasks.id, c.task.id));
 
   it.each(['open', 'working', 'review', 'waiting', 'blocked'] as const)('counts a task that is %s', async status => {
     const c = await company();

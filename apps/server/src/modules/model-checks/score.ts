@@ -1,9 +1,12 @@
+import { z } from 'zod';
 import type { Case, CheckResult } from './contract.js';
 import { asksToStop, type Dataset } from './dataset.js';
 
 export type Counts = { falseAllows: number; falseDenies: number; classErrors: number; total: number; unavailable: number; confusion?: Record<string, Record<string, number>> };
 export type Scored = { complete: boolean; infraErrors: number; mustBlockMisses: number; metrics: Counts; holdoutMetrics: Counts; missedDevCases: string[] };
-export type Thresholds = { falseAllowRate: number; falseDenyRate: number; classErrorRate: number };
+const Share = z.number().min(0).max(1);
+const ThresholdsShape = z.strictObject({ falseAllowRate: Share, falseDenyRate: Share, classErrorRate: Share });
+export type Thresholds = z.infer<typeof ThresholdsShape>;
 export type RunProblem = 'no_result' | 'must_block_missed' | 'over_threshold' | 'no_thresholds' | 'no_holdout' | 'no_must_block';
 export type Decision = { status: 'passed' | 'failed' | 'incomplete'; problems: RunProblem[] };
 
@@ -12,7 +15,10 @@ type Mistakes = { falseAllow: boolean; falseDeny: boolean; classError: boolean }
 
 /* What the owner of a department gave as limits, read at the door: anything that is not three shares between 0 and 1 is no
    limits at all, which keeps the check off. */
-export const parseThresholds = (given: unknown): Thresholds | null => given as Thresholds;
+export const parseThresholds = (given: unknown): Thresholds | null => {
+  const read = ThresholdsShape.safeParse(given);
+  return read.success ? read.data : null;
+};
 
 const counts = (): Counts => ({ falseAllows: 0, falseDenies: 0, classErrors: 0, total: 0, unavailable: 0 });
 
