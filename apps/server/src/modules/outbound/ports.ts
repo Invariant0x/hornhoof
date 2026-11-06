@@ -8,7 +8,7 @@ import type { RunModelCheck } from '../model-checks/run.js';
 /* What a transport says about one attempt, in codes that never carry a provider's words. */
 export type SafeCode =
   | 'invalid_payload' | 'endpoint_invalid' | 'address_refused' | 'connect_failed' | 'connect_timeout' | 'tls_refused' | 'auth_refused' | 'recipient_refused'
-  | 'message_refused' | 'receiver_refused' | 'receiver_error' | 'redirect_refused' | 'bad_receipt' | 'timeout' | 'connection_lost' | 'no_readback';
+  | 'message_refused' | 'receiver_refused' | 'receiver_error' | 'redirect_refused' | 'bad_receipt' | 'timeout' | 'connection_lost' | 'no_readback' | 'person_confirmed' | 'settings_changed';
 
 /* "accepted" means the transport took the message, not that anyone received it. "unknown" means it may have left: it keeps
    its quota and its account, and nothing sends it again blindly. "definitely_not_accepted" needs proof. */

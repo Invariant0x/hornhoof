@@ -1630,3 +1630,121 @@ describe('outbound and support gateway templates', () => {
     expect(templates.roles.get('SUP-HEAD')!.body).toMatch(/\bdepartment owner\b/i);
   });
 });
+
+type ImpactSelectionSkills = { implement: string; gates: string; engineering: string };
+
+const inHornhoofSection = (engineering: string): string => {
+  const start = engineering.indexOf('### In Hornhoof');
+  if (start === -1) return '';
+  const rest = engineering.slice(start);
+  const next = rest.indexOf('\n### ', 4);
+  return next === -1 ? rest : rest.slice(0, next);
+};
+
+const IMPACT_SELECTION_RULES: { id: string; holds: (s: ImpactSelectionSkills) => boolean }[] = [
+  {
+    id: 'author-dependent-tests-via-run-tests-and-new-tests-always',
+    holds: s =>
+      forEvery([s.implement, s.gates, s.engineering], text =>
+        matchesAll(text, [
+          /\brun_tests\b/,
+          /\b(?:dependent|selected|affected)\s+tests?\b/i,
+          /\bnew(?:ly\s+added)?\s+test\b[\s\S]*\balways\b|\balways\b[\s\S]*\bnew(?:ly\s+added)?\s+test\b/i,
+        ]),
+      ) &&
+      matchesAll(s.implement, [
+        /\bselector input\b[\s\S]*\bselected inventory\b[\s\S]*\bfallback reasons?\b/i,
+        /\brun\b[\s\S]*\bpart\b[\s\S]*\bcommit\b/i,
+      ]) &&
+      forbidsAll(`${s.implement}\n${s.gates}\n${s.engineering}`, [
+        /\bskip\w*\s+new(?:ly\s+added)?\s+tests?\s+when\s+no\s+graph\s+edge\s+reaches\s+them\b/i,
+      ]),
+  },
+  {
+    id: 'outside-graph-uncertain-whole-package-and-migrations-up-down',
+    holds: s => {
+      const hh = inHornhoofSection(s.engineering);
+      return (
+        matchesAll(hh, [
+          /\bmigrations\b[\s\S]*\bschema\b[\s\S]*\bconfiguration\b[\s\S]*\benvironment\b[\s\S]*\broutes\b[\s\S]*\bfixtures\b[\s\S]*\bstring tables\b[\s\S]*\bscripts\b[\s\S]*\binstallation\b[\s\S]*\bupdates\b[\s\S]*\bshared packages\b[\s\S]*\bAPI contracts\b[\s\S]*\btemplates\b/i,
+          /\bup and down\b/i,
+          /\bunsupported\b[^.!?]*\breport\b/i,
+        ]) &&
+        forEvery([s.implement, s.gates, hh], text =>
+          matchesAll(text, [
+            /\b(?:outside\s+(?:the\s+)?import\s+graphs?|outside\s+import\s+graphs?)\b/i,
+            /\b(?:complete\s+affected\s+packages?|whole\s+package)\b/i,
+            /\bup and down\b/i,
+          ]),
+        ) &&
+        forbidsAll(`${s.implement}\n${s.gates}\n${s.engineering}`, [
+          /\btreat\w*\s+an\s+unavailable\s+adapter\s+as\s+an\s+empty\s+selection\b/i,
+          /\brun\w*\s+migrations?\s+up\s+only\s+without\s+reporting\b/i,
+        ])
+      );
+    },
+  },
+  {
+    id: 'explicit-selector-commands-no-auto-promise-and-execution-distinct',
+    holds: s => {
+      const hh = inHornhoofSection(s.engineering);
+      return (
+        matchesAll(hh, [
+          /scripts\/test\/impact-README\.md/,
+          /scripts\/test\/related-probe\.mjs/,
+          /scripts\/test\/impact-python\/pytest_impact\.py/,
+          /scripts\/test\/replay-impact\.mjs/,
+          /\bNOT_RUN\b/,
+        ]) &&
+        matchesAll(s.implement, [/scripts\/test/, /\bNOT_RUN\b/]) &&
+        matchesAll(s.gates, [
+          /scripts\/test/,
+          /\bcollected graph\b[\s\S]*\bcompleted\b[^.!?]*\breceipts?\b/i,
+          /\bunavailable\b[^.!?]*\bnot\s+zero\s+misses\b/i,
+          /\btest engineer\b/i,
+        ]) &&
+        forbidsAll(`${s.implement}\n${s.gates}\n${s.engineering}`, [
+          /\brun_tests\s+automatically\s+selects\s+impact\s+tests\s+from\s+the\s+test\s+environment\b/i,
+          /\btreat\w*\s+a\s+collected\s+graph\s+as\s+completed\s+test\s+execution\b/i,
+          /\btreat\w*\s+missing\s+comparator\s+evidence\s+as\s+zero\s+misses\b/i,
+        ])
+      );
+    },
+  },
+  {
+    id: 'abstract-english-no-dates-names-or-numbers',
+    holds: s => {
+      const combined = `${s.implement}\n${s.gates}\n${inHornhoofSection(s.engineering)}`;
+      return !/\b(?:david|ivan|simon|Russian|English)\b|\bturn\s+7\b|#\d+|\b202\d-\d{2}-\d{2}\b|\b\d{1,2}\.\d{1,2}\b|\bv?\d+\.\d+\.\d+\b|[\u2014\u0451\u0401]/i.test(combined);
+    },
+  },
+];
+
+describe('T2 impact-selection rules across dev-implement, dev-gates and In Hornhoof', () => {
+  const impactSkills = (): ImpactSelectionSkills => ({
+    implement: templates.skills.get('dev-implement')!.body,
+    gates: templates.skills.get('dev-gates')!.body,
+    engineering: templates.skills.get('dev-engineering-rules')!.body,
+  });
+
+  it('teaches explicit impact selection, whole-package fallbacks, bidirectional migrations, execution vs collection evidence, and explicit scripts/test commands without promising unshipped runner wiring', () => {
+    const current = impactSkills();
+    expect(inHornhoofSection(current.engineering).length).toBeGreaterThan(200);
+    expect(failedRuleIds(IMPACT_SELECTION_RULES, current)).toEqual([]);
+  });
+
+  it('rejects skill text that promises unshipped automatic runner selection, conflates graph collection with execution, skips new tests, or leaks dates, names or task numbers', () => {
+    const base = impactSkills();
+    expect(failedRuleIds(IMPACT_SELECTION_RULES, base)).toEqual([]);
+    const cases: [keyof ImpactSelectionSkills, string, string][] = [
+      ['implement', 'Skip newly added tests when no graph edge reaches them.', 'author-dependent-tests-via-run-tests-and-new-tests-always'],
+      ['engineering', 'Treat an unavailable adapter as an empty selection and run migrations up only without reporting.', 'outside-graph-uncertain-whole-package-and-migrations-up-down'],
+      ['gates', 'Today run_tests automatically selects impact tests from the test environment.', 'explicit-selector-commands-no-auto-promise-and-execution-distinct'],
+      ['gates', 'Treat a collected graph as completed test execution and treat missing comparator evidence as zero misses.', 'explicit-selector-commands-no-auto-promise-and-execution-distinct'],
+      ['implement', 'Added by David on 2026-11-06 for #309 against turn 7.', 'abstract-english-no-dates-names-or-numbers'],
+    ];
+    for (const [target, extra, expectedRule] of cases) {
+      expect(failedRuleIds(IMPACT_SELECTION_RULES, { ...base, [target]: `${base[target]}\n${extra}` }), extra).toContain(expectedRule);
+    }
+  });
+});
