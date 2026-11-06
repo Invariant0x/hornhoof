@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { agents, companies, departments, people, taskEvents, tasks, taskWaits, waitNotices } from '../src/db/schema.js';
 import type { Db } from '../src/db/client.js';
 import { ApiError } from '../src/errors.js';
-import { claimFinalReview, endSourceWait, endTaskWaits, operationSourceKey, recordLegacyWait, replanWait, setWaitStage, syncSourceWaits, waitForSourceKey } from '../src/modules/tasks/wait-state.js';
+import { claimFinalReview, endSourceWait, endTaskWaits, operationSourceKey, recordLegacyWait, replanWait, requestSourceKey, setWaitStage, syncSourceWaits, waitForSourceKey } from '../src/modules/tasks/wait-state.js';
 import { recordWaitNotice } from '../src/modules/tasks/wait-notices.js';
 import { createTestDb } from './helpers.js';
 
@@ -402,6 +402,38 @@ describe('replanWait', () => {
     expect(await by({ agentId: c.head.id }, 2)).toMatchObject({ generation: 3 });
     expect(await by({ agentId: c.orchestrator.id }, 3)).toMatchObject({ generation: 4 });
     expect(await by({ personId: c.ceo.id }, 4)).toMatchObject({ generation: 5 });
+  });
+
+  it('is for a person who answers for the wait or for the company, and for no one else there', async () => {
+    const c = await fixture();
+    const [owner, delegate, plain] = await c.db.insert(people).values([
+      { companyId: c.company.id, name: 'Ann', email: 'ann@example.test', status: 'active', scopeKind: 'company' },
+      { companyId: c.company.id, name: 'Dan', email: 'dan@example.test', status: 'active', scopeKind: 'company', isCeoDelegate: true },
+      { companyId: c.company.id, name: 'Pat', email: 'pat@example.test', status: 'active', scopeKind: 'company' },
+    ]).returning();
+    await c.db.update(departments).set({ ownerPersonId: owner!.id }).where(eq(departments.id, c.department.id));
+    const wait = await c.sync();
+    expect(wait.finalDecisionPersonId).toBe(owner!.id);
+    const by = (personId: string, expectedGeneration: number, ownerBinding: { agentId: string } | { personId: string } = { agentId: c.worker.id }) => c.replan({ waitId: wait.id, expectedGeneration, ownerBinding, actor: { personId } });
+    expect(await refusal(by(plain!.id, 1))).toEqual({ status: 403, reason: 'task_not_yours' });
+    expect(await by(owner!.id, 1)).toMatchObject({ generation: 2 });
+    expect(await by(delegate!.id, 2)).toMatchObject({ generation: 3 });
+    expect(await by(c.ceo.id, 3, { personId: plain!.id })).toMatchObject({ generation: 4, ownerPersonId: plain!.id });
+    expect(await by(plain!.id, 4)).toMatchObject({ generation: 5 });
+  });
+
+  it('keeps the person who owns the wait when only its plan changes', async () => {
+    const c = await fixture();
+    const wait = await c.sync({ ownerBinding: { personId: c.ceo.id } });
+    const moved = await c.replan({ waitId: wait.id, expectedGeneration: 1, plan: c.plan({ ownerDueAt: at(9) }), actor: { personId: c.ceo.id } });
+    expect(moved).toMatchObject({ generation: 2, ownerAgentId: null, ownerPersonId: c.ceo.id, ownerDueAt: new Date(at(9)) });
+  });
+
+  it('asks a wait with no owner for one, even with a whole plan', async () => {
+    const c = await fixture();
+    const legacy = await c.db.transaction(tx => recordLegacyWait(tx, { taskId: c.task.id, kind: 'person', sourceKey: requestSourceKey(randomUUID()), sourceRevision: 1, sourceState: {}, actor: { agentId: c.worker.id } }));
+    expect(await refusal(c.replan({ waitId: legacy.id, expectedGeneration: 1, plan: c.plan() }))).toEqual({ status: 400, reason: 'task_invalid' });
+    expect((await c.rows())[0]).toMatchObject({ state: 'legacy_needs_plan', generation: 1 });
   });
 
   it('gives a wait with no plan a whole plan only', async () => {

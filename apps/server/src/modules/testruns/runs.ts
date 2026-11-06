@@ -368,9 +368,9 @@ async function settleRun(ctx: Ctx, runId: string): Promise<void> {
   const mark = await markRun(ctx, runId, status);
   const end = await db.transaction(async tx => {
     /* The task first, then the run: the order every write that holds both takes. */
-    const [owner] = await tx.select({ taskId: testRuns.taskId }).from(testRuns).where(eq(testRuns.id, runId));
-    const [task] = owner ? await tx.select().from(tasks).where(eq(tasks.id, owner.taskId)).for('update') : [];
-    if (!task) return null;
+    const [found] = await tx.select({ task: tasks }).from(testRuns).innerJoin(tasks, eq(tasks.id, testRuns.taskId)).where(eq(testRuns.id, runId)).for('update', { of: tasks });
+    if (!found) return null;
+    const { task } = found;
     const [run] = await tx
       .update(testRuns)
       .set({ status, finishedAt: new Date() })
