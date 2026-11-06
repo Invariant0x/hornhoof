@@ -59,6 +59,8 @@ const REPOSITORY = ['repo_url', 'repo_branch', 'repo_token_last4', 'repo_author_
 const DEPARTMENT_SETTINGS = [...REPOSITORY, 'work_mode', 'owner_person_id'];
 /* What of a turn the orchestrator may change, to close one that hangs. */
 const JOB_STATUS = ['status', 'error', 'finished_at'];
+/* How urgent work is changes only through the CEO's route and tools, which keep a tree of tasks as urgent as its top. */
+const URGENCY: Record<string, string[]> = { tasks: ['urgent'], teams: ['urgent_only'] };
 const WRITES = new Set(['INSERT', 'UPDATE', 'DELETE', 'MERGE']);
 
 /* One pair of roles per database, so two Hornhoofs on one Postgres do not share them. */
@@ -100,7 +102,8 @@ const eachTable = (but: string[], grant: string) => `  FOR t IN SELECT tablename
 export const grantsFor = (name: string) =>
   role(
     name,
-    `${eachTable([...READ_ONLY, 'agents', 'jobs', 'departments', ...Object.keys(SECRET)], `GRANT SELECT, INSERT, UPDATE, DELETE ON %I TO "${name}"`)}
+    `${eachTable([...READ_ONLY, 'agents', 'jobs', 'departments', ...Object.keys(URGENCY), ...Object.keys(SECRET)], `GRANT SELECT, INSERT, UPDATE, DELETE ON %I TO "${name}"`)}
+${Object.entries(URGENCY).map(([table, but]) => `  EXECUTE format('GRANT SELECT, DELETE ON ${table} TO "${name}"; GRANT INSERT (%1$s), UPDATE (%1$s) ON ${table} TO "${name}"', ${columns(table, but)});`).join('\n')}
 ${READ_ONLY.map(table => `  EXECUTE format('GRANT SELECT (%s) ON ${table} TO "${name}"', ${visible(table)});`).join('\n')}
   EXECUTE format('GRANT SELECT (%1$s), INSERT (%2$s), UPDATE (%2$s), DELETE ON departments TO "${name}"', ${visible('departments')}, ${columns('departments', [...SECRET.departments!, ...DEPARTMENT_SETTINGS])});
   EXECUTE format('GRANT SELECT (%s), UPDATE (%s) ON agents TO "${name}"', ${visible('agents')}, ${columns('agents', AGENT_FIXED)});

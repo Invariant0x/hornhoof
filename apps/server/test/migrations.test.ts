@@ -147,7 +147,7 @@ describe('migration 0050', () => {
     const beforeWakes = (await db.execute(sql`select to_jsonb(w) as data from pending_wakes w order by id`)).rows;
     await migrate(db, { migrationsFolder: MIGRATIONS });
     await migrate(db, { migrationsFolder: MIGRATIONS });
-    expect((await db.execute(sql`select to_jsonb(t) - 'external_wait' - 'work_kind' - 'risk_class' as data from tasks t order by number`)).rows).toEqual(before);
+    expect((await db.execute(sql`select to_jsonb(t) - 'external_wait' - 'work_kind' - 'risk_class' - 'urgent' as data from tasks t order by number`)).rows).toEqual(before);
     expect((await db.execute(sql`select to_jsonb(w) - 'task_version' - 'cause' as data from pending_wakes w order by id`)).rows).toEqual(beforeWakes);
     expect((await db.execute(sql`select task_version, cause from pending_wakes`)).rows).toEqual([{ task_version: null, cause: null }]);
     const rows = (await db.execute(sql`select * from tasks order by number`)).rows;
@@ -194,14 +194,19 @@ describe('model checks migration', () => {
 });
 
 describe('outbound gateway migration', () => {
-  /* Whatever number it ends up with. Until it exists, nothing is migrated and the tests below find no tables. */
-  const gatewayTag = async () => (JSON.parse(await readFile(join(MIGRATIONS, 'meta', '_journal.json'), 'utf8')) as { entries: { tag: string }[] }).entries.find(entry => entry.tag.endsWith('_outbound'))?.tag ?? 'none yet';
+  /* Whatever number it ends up with: the journal says which it is and which comes just before it. */
+  const journalTags = async () => (JSON.parse(await readFile(join(MIGRATIONS, 'meta', '_journal.json'), 'utf8')) as { entries: { tag: string }[] }).entries.map(entry => entry.tag);
+  const gatewayTag = async () => (await journalTags()).find(tag => tag.endsWith('_outbound'))!;
+  const tagBeforeGateway = async () => {
+    const tags = await journalTags();
+    return tags[tags.indexOf(await gatewayTag()) - 1]!;
+  };
 
   it('adds its tables empty, with nobody given anything and no row of two older companies touched', async () => {
     const client = new PGlite();
     onTestFinished(() => client.close());
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: await migrationsUpTo('0069_department_work_mode') });
+    await migrate(db, { migrationsFolder: await migrationsUpTo(await tagBeforeGateway()) });
     for (const name of ['Acme', 'Moonfern']) {
       const company = (await db.execute<{ id: string }>(sql`insert into companies (name, singleton) values (${name}, ${name === 'Acme'}) returning id`)).rows[0]!.id;
       const person = (await db.execute<{ id: string }>(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Dana', ${`dana@${name}.example`}, 'active', 'listed') returning id`)).rows[0]!.id;
@@ -877,7 +882,7 @@ describe('migration 0045', () => {
       from generate_series(1, 20000) n`);
     await db.execute(sql`insert into tasks (company_id, number, title) values (${C}, 20001, 'No turn or product')`);
     /* Migrations 0050 and 0062 check their new nullable fields separately; every earlier field must stay identical. */
-    const fingerprint = sql`select count(*)::int as n, md5(string_agg((to_jsonb(t) - 'external_wait' - 'work_kind' - 'risk_class')::text, '' order by number)) as checksum from tasks t`;
+    const fingerprint = sql`select count(*)::int as n, md5(string_agg((to_jsonb(t) - 'external_wait' - 'work_kind' - 'risk_class' - 'urgent')::text, '' order by number)) as checksum from tasks t`;
     const before = await db.execute(fingerprint);
     expect(before.rows[0]).toMatchObject({ n: 20001 });
 
@@ -1139,7 +1144,7 @@ describe('migration 0062', () => {
       { number: 9, work_kind: null, risk_class: null },
       { number: 10, work_kind: 'bug', risk_class: null },
     ]);
-    expect((await db.execute(sql`select to_jsonb(t) - 'work_kind' - 'risk_class' as data from tasks t order by number`)).rows).toEqual(before);
+    expect((await db.execute(sql`select to_jsonb(t) - 'work_kind' - 'risk_class' - 'urgent' as data from tasks t order by number`)).rows).toEqual(before);
   });
 
   it('refuses a kind or a risk class it does not know', async () => {
