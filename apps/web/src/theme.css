@@ -582,7 +582,7 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .t-bar .lights { flex: none; display: flex; gap: 6px; }
 .t-bar .lights i { width: 10px; height: 10px; border-radius: 50%; background: var(--idle); }
 .t-bar > span:not(.lights) { flex: 1; min-width: 0; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.t-bar button { width: 34px; height: 34px; border: 0; background: none; color: var(--muted); cursor: pointer; display: grid; place-items: center; }
+.t-bar button { width: 34px; height: 34px; padding: 0; border: 0; background: none; color: var(--muted); cursor: pointer; display: grid; place-items: center; }
 .t-bar button:hover { color: var(--ink); }
 .t-bar button.btn { width: auto; height: 26px; padding: 0 10px; display: inline-flex; }
 .t-bar svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
