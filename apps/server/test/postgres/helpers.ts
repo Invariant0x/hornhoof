@@ -1,3 +1,4 @@
+import { deferred } from '../../../../test-support/deferred.mjs';
 import { randomBytes } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { createServer, type ServerResponse } from 'node:http';
@@ -101,12 +102,6 @@ export async function privatePostgres(options: { migrate?: boolean } = {}): Prom
 
 export async function backendPid(pool: pg.Pool): Promise<number> {
   return (await pool.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0]!.pid;
-}
-
-function deferred(): { promise: Promise<void>; resolve: () => void } {
-  let resolve!: () => void;
-  const promise = new Promise<void>(done => { resolve = done; });
-  return { promise, resolve };
 }
 
 function advertisement(): Buffer {

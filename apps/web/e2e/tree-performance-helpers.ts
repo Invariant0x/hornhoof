@@ -48,7 +48,7 @@ export async function chipRenderNames(page: Page): Promise<string[]> {
 }
 
 export async function chipRenders(page: Page): Promise<number> {
-  return (await chipRenderNames(page)).length;
+  return page.evaluate(() => (window as unknown as { __chipRenders: string[] }).__chipRenders.length);
 }
 
 export async function serveFullDepartment(page: Page): Promise<{ full: Tree; renameBrunoTask: (title: string) => void }> {
