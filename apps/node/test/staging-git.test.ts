@@ -197,7 +197,7 @@ describe('ordinary staging and turn fast-forward effects', () => {
     const f = await targetFixture();
     await git(f.writer, ['push', '--quiet', 'origin', `${f.request.heads[0]!.headSha}:refs/heads/turn-8`]);
     expect(await publishStagingTarget(f.target, f.context)).toEqual({ status: 'conflict' });
-    expect((await rawGit(f.origin, ['show-ref', '--verify', 'refs/heads/turn-8-staging'])).code).toBe(1);
+    expect(await git(f.origin, ['for-each-ref', '--format=%(refname)', 'refs/heads/turn-8-staging'])).toBe('');
     const g = await targetFixture();
     await git(g.writer, ['push', '--quiet', 'origin', `${g.request.heads[0]!.headSha}:refs/heads/turn-8-staging`]);
     expect(await publishStagingTarget(g.target, g.context)).toEqual({ status: 'conflict' });
