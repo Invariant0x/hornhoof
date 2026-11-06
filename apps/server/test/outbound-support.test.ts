@@ -112,8 +112,7 @@ describe('a ticket of another place', () => {
   it('is not there for a classify from another department, which reads none of its words and spends none of its check', async () => {
     const w = await seedSupportWorld();
     const model = fakeModelRunner({});
-    const theirs = await w.addTicket('Where is my order?', 1, randomUUID(), w.contact.id, { departmentId: w.c.dev.id });
-    await w.c.db.update(supportTickets).set({ textEnc: 'nothing that opens' }).where(eq(supportTickets.id, theirs.id));
+    const theirs = await w.addTicket('Where is my order?', 1, randomUUID(), w.contact.id, { departmentId: w.c.dev.id, textEnc: 'nothing that opens' });
 
     await expect(classify(w, model, theirs.ticketId)).rejects.toMatchObject({ status: 404, code: 'ticket_unknown' });
     expect(model.calls).toEqual([]);
@@ -685,26 +684,25 @@ describe('outbound support classification and reply gates (#447 T8-10, T8-15)', 
     expect(await w.c.db.select().from(outboundMessages)).toHaveLength(0);
   });
 
-  it('reads a reply again that lost the word of its check, and then it goes', async () => {
+  it('reads a reply again that lost the word of its check, and then it goes on to its person', async () => {
     const w = await seedSupportWorld();
     const ticket = await w.addTicket('How do I reset my password?');
     const model = fakeModelRunner({});
     const { classificationReceiptId } = await classifySupportTicket(w.c.app.ctx, model, w.caller, { task: w.taskId, idempotencyKey: randomUUID(), ticketId: ticket.ticketId, ticketRevision: 1 }, NOW);
     const document = { locale: 'en', templateId: w.enTemplate.entryId, templateRevision: 1, blocks: [{ kind: 'knowledge' as const, id: w.enKb.entryId, revision: 1 }, { kind: 'link' as const, id: w.enLink.entryId, revision: 1 }], variables: [] };
     const { messageId, status } = await submitSupportReply(w.c.app.ctx, model, w.caller, { task: w.taskId, idempotencyKey: randomUUID(), channelId: w.channel.id, accountId: w.account.id, bindingGeneration: 1, scheduledAt: NOW.toISOString(), ticketId: ticket.ticketId, ticketRevision: 1, classificationReceiptId, document }, NOW);
-    expect(status).toBe('scheduled');
+    expect(status).toBe('waiting_approval');
     const reviews = model.calls.filter(call => call.kind === 'support_reply_review').length;
     expect(reviews).toBe(1);
 
     /* As after its check was certified again: a word given under the old one is no word now. */
     await w.c.db.delete(outboundReviewReceipts).where(eq(outboundReviewReceipts.messageId, messageId));
-    expect(await reserveDispatch(w.c.app.ctx, messageId, 1, NOW)).toEqual({ kind: 'refused', reasonCodes: ['review_unavailable'] });
-    expect((await w.c.db.select().from(outboundMessages).where(eq(outboundMessages.id, messageId)))[0]).toMatchObject({ status: 'waiting_checks', reasonCodes: ['review_unavailable'] });
+    expect(await reserveDispatch(w.c.app.ctx, messageId, 1, NOW)).toEqual({ kind: 'refused', reasonCodes: ['review_unavailable', 'approval_required'] });
+    expect((await w.c.db.select().from(outboundMessages).where(eq(outboundMessages.id, messageId)))[0]).toMatchObject({ status: 'waiting_checks' });
 
     await outboundReviewRound(w.c.app.ctx, NOW, model);
     expect(model.calls.filter(call => call.kind === 'support_reply_review')).toHaveLength(reviews + 1);
-    expect((await w.c.db.select().from(outboundMessages).where(eq(outboundMessages.id, messageId)))[0]).toMatchObject({ status: 'scheduled', reasonCodes: [] });
-    expect(await reserveDispatch(w.c.app.ctx, messageId, 1, NOW)).toMatchObject({ kind: 'reserved' });
+    expect((await w.c.db.select().from(outboundMessages).where(eq(outboundMessages.id, messageId)))[0]).toMatchObject({ status: 'waiting_approval', reasonCodes: ['approval_required'] });
   });
 
   it('holds sampled replies in waiting_checks when review is unavailable and stops the channel through recordReview on block', async () => {

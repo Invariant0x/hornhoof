@@ -297,18 +297,18 @@ export async function supportWorld() {
     },
   });
 
-  const addTicket = async (text: string, revision = 1, ticketId: string = randomUUID(), forContactId: string = contact!.id, place: { departmentId?: string; productId?: string } = {}) => {
+  const addTicket = async (text: string, revision = 1, ticketId: string = randomUUID(), forContactId: string = contact!.id, over: { departmentId?: string; productId?: string; textEnc?: string } = {}) => {
     const [row] = await c.db
       .insert(supportTickets)
       .values({
         companyId: c.companyId,
         departmentId: c.sales.id,
-        ...place,
         ticketId,
         revision,
         contactId: forContactId,
         textEnc: encryptSecret(text, c.app.ctx.config.secret),
         digest: sha(`${ticketId}:${revision}:${text}`),
+        ...over,
       })
       .returning();
     return row!;
