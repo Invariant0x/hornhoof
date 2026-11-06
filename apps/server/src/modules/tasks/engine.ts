@@ -1,4 +1,4 @@
-import type { ApprovalChannel, NotificationSource } from '@hornhoof/protocol';
+import type { ApprovalChannel, NotificationSource, QuestionMaterials } from '@hornhoof/protocol';
 import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, max, ne, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { accessOf, canReach, type Access, type Spot } from '../../auth/access.js';
@@ -23,6 +23,7 @@ import { mechanicalVerdict } from './review-findings.js';
 import { verdictReview, type ReviewVerdict } from './review-verdict.js';
 import { pendingFixReviews, prepareFixReviews } from './review-fixes.js';
 import { checkIndependent, currentIndependent, type IndependentPartInput } from './independent.js';
+import { refuseUnclassifiedMaterials } from './request-materials.js';
 
 export type Task = typeof tasks.$inferSelect;
 export type Request = typeof requests.$inferSelect;
@@ -1419,6 +1420,7 @@ export type Ask = {
   /* What an approval a department's policy asks for is about, in place of a commit. */
   approval?: { channel: ApprovalChannel; kind: string; amount: number | null };
   images?: string[];
+  materials?: QuestionMaterials;
   options?: RequestOption[];
   link?: string | null;
   topic?: DecisionTopic;
@@ -1448,6 +1450,7 @@ export async function ask(ctx: Live, agentId: string, taskId: string, q: Ask): P
   const options = q.kind === 'choice' ? (q.options ?? []) : [];
   if (q.kind === 'choice' && (options.length < 2 || options.length > 4)) throw refuse(400, 'task_invalid', 'A choice offers 2 to 4 ways.');
   if (q.kind !== 'choice' && q.options?.length) throw refuse(400, 'task_invalid', 'Ways to pick from make a choice; a choice names no commit.');
+  refuseUnclassifiedMaterials(q.materials, options.length, q.commit !== undefined);
   const pictures = [...(q.images ?? []), ...options.flatMap(o => (o.image ? [o.image] : []))];
   await checkPictures(ctx.db, task.companyId, agentId, pictures);
   let request: Request | undefined;

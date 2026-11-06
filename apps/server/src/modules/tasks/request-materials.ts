@@ -38,6 +38,13 @@ export function parseMaterialSubmission(input: unknown, optionCount: number, res
   return parsed.data;
 }
 
+/* A declaration, including action, cannot substitute for the real classified
+   source producer. Refuse before the request, wait, events or pictures change. */
+export function refuseUnclassifiedMaterials(input: unknown, optionCount: number, resultRequired: boolean): void {
+  if (parseMaterialSubmission(input, optionCount, resultRequired) === undefined) return;
+  throw new ApiError(503, 'unavailable', 'The source classification and material producer is not available yet. Keep your files and try again later.', 'source_producer_unavailable');
+}
+
 const digest = (text: string): string => createHash('sha256').update(text).digest('hex');
 
 /* Stable selectors for existing immutable records, not exposed attachment ids. */

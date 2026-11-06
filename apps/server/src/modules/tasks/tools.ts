@@ -1,4 +1,4 @@
-import { RISK_CLASSES, WORK_KINDS } from '@hornhoof/protocol';
+import { QuestionMaterials, RISK_CLASSES, WORK_KINDS } from '@hornhoof/protocol';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { and, asc, count, desc, eq, gte, inArray, isNull, notInArray } from 'drizzle-orm';
 import { z } from 'zod';
@@ -246,6 +246,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         question: z.string().trim().min(1).max(2000),
         commit: z.string().regex(/^[0-9a-f]{40}$/).optional(),
         images: z.array(z.uuid()).max(6).optional(),
+        materials: QuestionMaterials.optional().describe('Structured result or action materials. Give each result option its own materials; use attachment ids from hh-attach or HTTPS links. This declaration gives no classification or disclosure permission.'),
         options: z.array(z.object({ label: z.string().trim().min(1).max(200), image: z.uuid().optional() })).max(4).optional(),
         link: z.url({ protocol: /^https$/ }).max(500).optional(),
         topic: z
@@ -256,7 +257,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
           ),
       },
     },
-    async ({ task: ref, question, commit, images, options, link, topic }) =>
+    async ({ task: ref, question, commit, images, materials, options, link, topic }) =>
       run(async () => {
         const { task } = await find(ref);
         plain(task, question);
@@ -268,7 +269,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         const kind = commit ? 'approval' : options?.length ? 'choice' : 'question';
         const ways = options?.map(o => ({ label: o.label, image: o.image ?? null }));
         const { text, told } = await questionWords(db, task, question, commit);
-        const moved = await ask(ctx, job.agentId, task.id, { kind, text, ...(commit ? { commit } : {}), images, options: ways, link: link ?? null, topic });
+        const moved = await ask(ctx, job.agentId, task.id, { kind, text, ...(commit ? { commit } : {}), images, materials, options: ways, link: link ?? null, topic });
         await recordQuestion(ctx, job, task, { kind, text, topic });
         return { text: `Asked. #${task.number} waits for a person's answer; you will be woken with it.${told}`, moved };
       }),
