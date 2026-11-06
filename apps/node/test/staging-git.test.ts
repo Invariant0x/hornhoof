@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { prepareStagingCandidate, publishStagingTrial, type StagingGitContext, type StagingGitOptions, type StagingPreparationRequest, type StagingPreparationResult, type StagingTrialPublicationRequest } from '../src/staging-git.js';
+import { prepareStagingCandidate, publishStagingTarget, publishStagingTrial, type StagingGitContext, type StagingGitOptions, type StagingPreparationRequest, type StagingPreparationResult, type StagingTrialPublicationRequest, type StagingTargetPublicationRequest } from '../src/staging-git.js';
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const identity = { name: 'Fixture Publisher', email: 'publisher@example.invalid' };
@@ -156,6 +156,99 @@ async function trialFixture() {
   const publication: StagingTrialPublicationRequest = { batchId: f.request.batchId, trialId: f.request.trialId, turn: f.request.turn, commitSha: candidate.commitSha };
   return { ...f, ...cache, candidate, publication, fullRef: `refs/tags/${candidate.ref}` };
 }
+
+async function targetFixture() {
+  const f = await trialFixture();
+  expect((await publishStagingTrial(f.publication, f.context)).status).toBe('published');
+  const target: StagingTargetPublicationRequest = { ...f.publication, baseSha: f.request.baseSha, target: 'staging' };
+  return { ...f, target };
+}
+
+describe('ordinary staging and turn fast-forward effects', () => {
+  it('publishes the one-commit candidate through staging before turn, with no task branch mutation', async () => {
+    const f = await targetFixture(), calls: string[][] = [], real = f.context.git;
+    f.context.git = (args, options) => { calls.push(args); return real(args, options); };
+    expect(await publishStagingTarget(f.target, f.context)).toEqual({ status: 'published', ref: 'refs/heads/turn-8-staging', commitSha: f.candidate.commitSha });
+    expect(await git(f.origin, ['rev-parse', 'refs/heads/turn-8'])).toBe(f.request.baseSha);
+    expect(await publishStagingTarget({ ...f.target, target: 'turn' }, f.context)).toEqual({ status: 'published', ref: 'refs/heads/turn-8', commitSha: f.candidate.commitSha });
+    expect(await git(f.origin, ['rev-parse', 'refs/heads/turn-8'])).toBe(f.candidate.commitSha);
+    expect(await git(f.origin, ['rev-list', '--count', `${f.request.baseSha}..turn-8`])).toBe('1');
+    expect(await git(f.origin, ['rev-parse', 'refs/heads/task-a'])).toBe(f.request.heads[0]!.headSha);
+    expect(calls.filter(args => args[0] === 'push')).toEqual([
+      ['push', '--porcelain', '--no-follow-tags', 'origin', `${f.candidate.commitSha}:refs/heads/turn-8-staging`],
+      ['push', '--porcelain', '--no-follow-tags', 'origin', `${f.candidate.commitSha}:refs/heads/turn-8`],
+    ]);
+  });
+  it('does not move turn before the exact candidate is on canonical staging', async () => {
+    const f = await targetFixture();
+    expect(await publishStagingTarget({ ...f.target, target: 'turn' }, f.context)).toEqual({ status: 'conflict' });
+    expect(await git(f.origin, ['rev-parse', 'refs/heads/turn-8'])).toBe(f.request.baseSha);
+  });
+  it('reconciles a lost push response from independent readback and replays from a new cache without pushing again', async () => {
+    const f = await targetFixture(), real = f.context.git;
+    f.context.git = async (args, options) => { const result = await real(args, options); return args[0] === 'push' ? { code: 128, stdout: '' } : result; };
+    expect((await publishStagingTarget(f.target, f.context)).status).toBe('published');
+    const fresh = await f.cache(), calls: string[][] = [], freshGit = fresh.context.git;
+    fresh.context.git = (args, options) => { calls.push(args); return freshGit(args, options); };
+    expect(await publishStagingTarget(f.target, fresh.context)).toEqual({ status: 'published', ref: 'refs/heads/turn-8-staging', commitSha: f.candidate.commitSha });
+    expect(calls.some(args => args[0] === 'push')).toBe(false);
+  });
+  it('refuses a different current turn pin or canonical staging pin', async () => {
+    const f = await targetFixture();
+    await git(f.writer, ['push', '--quiet', 'origin', `${f.request.heads[0]!.headSha}:refs/heads/turn-8`]);
+    expect(await publishStagingTarget(f.target, f.context)).toEqual({ status: 'conflict' });
+    expect(await git(f.origin, ['for-each-ref', '--format=%(refname)', 'refs/heads/turn-8-staging'])).toBe('');
+    const g = await targetFixture();
+    await git(g.writer, ['push', '--quiet', 'origin', `${g.request.heads[0]!.headSha}:refs/heads/turn-8-staging`]);
+    expect(await publishStagingTarget(g.target, g.context)).toEqual({ status: 'conflict' });
+  });
+  it('refuses missing or mismatched immutable trial identity', async () => {
+    const f = await trialFixture();
+    const target: StagingTargetPublicationRequest = { ...f.publication, baseSha: f.request.baseSha, target: 'staging' };
+    expect(await publishStagingTarget(target, f.context)).toEqual({ status: 'conflict' });
+    expect((await publishStagingTrial(f.publication, f.context)).status).toBe('published');
+    expect(await publishStagingTarget({ ...target, trialId: id(99) }, f.context)).toEqual({ status: 'conflict' });
+  });
+  it('requires the candidate to have only the registered base as its single parent', async () => {
+    const f = await trialFixture();
+    const tree = await git(f.bare, ['rev-parse', `${f.candidate.commitSha}^{tree}`]);
+    const merge = await rawGit(f.bare, ['commit-tree', tree, '-p', f.request.baseSha, '-p', f.request.heads[0]!.headSha], { input: 'Unapproved two-parent candidate\n' });
+    expect(merge.code).toBe(0);
+    const source = { ...f.publication, commitSha: merge.stdout.trim() };
+    expect((await publishStagingTrial(source, f.context)).status).toBe('published');
+    expect(await publishStagingTarget({ ...source, baseSha: f.request.baseSha, target: 'staging' }, f.context)).toEqual({ status: 'conflict' });
+  });
+  it('does not overwrite a concurrent different fast-forward winner', async () => {
+    const f = await targetFixture(), real = f.context.git;
+    f.context.git = async (args, options) => {
+      if (args[0] === 'push') await git(f.writer, ['push', '--quiet', 'origin', `${f.request.heads[0]!.headSha}:refs/heads/turn-8-staging`]);
+      return real(args, options);
+    };
+    expect(await publishStagingTarget(f.target, f.context)).toEqual({ status: 'conflict' });
+    expect(await git(f.origin, ['rev-parse', 'refs/heads/turn-8-staging'])).toBe(f.request.heads[0]!.headSha);
+  });
+  it('does not call a refused push successful without exact readback', async () => {
+    const f = await targetFixture(), real = f.context.git;
+    f.context.git = (args, options) => args[0] === 'push' ? Promise.resolve({ code: 128, stdout: '' }) : real(args, options);
+    expect(await publishStagingTarget(f.target, f.context)).toEqual({ status: 'unavailable' });
+  });
+  it('refuses malformed or free-form target refs before touching Git', async () => {
+    const f = await targetFixture(); let calls = 0;
+    f.context.git = async () => { calls++; return { code: 128, stdout: '' }; };
+    expect(await publishStagingTarget({ ...f.target, target: 'main' as 'turn' }, f.context)).toEqual({ status: 'unavailable' });
+    expect(calls).toBe(0);
+  });
+  it('settles the in-flight Git child before rejecting an abort', async () => {
+    const f = await targetFixture(), stop = new AbortController(), reason = new Error('Stopped');
+    let entered!: () => void, release!: () => void, settled = false;
+    const started = new Promise<void>(resolve => { entered = resolve; }); f.context.signal = stop.signal;
+    f.context.git = async () => { entered(); await new Promise<void>(resolve => { release = resolve; }); return { code: 128, stdout: '' }; };
+    const pending = publishStagingTarget(f.target, f.context); void pending.catch(() => { settled = true; });
+    expect(await Promise.race([started.then(() => true), pending.then(() => false)])).toBe(true);
+    stop.abort(reason); await Promise.resolve(); expect(settled).toBe(false);
+    release(); await expect(pending).rejects.toBe(reason);
+  });
+});
 
 /* Force the real receive-pack processes to compete, then verify after both have settled. No Git outcome is replaced. */
 function pairedPublishers(contexts: [StagingGitContext, StagingGitContext]): void {
