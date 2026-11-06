@@ -17,7 +17,7 @@ const datasetOf = (rows: Case[]) => {
 };
 const subjectOf = (input: CheckInput) => input.subject.contentDigest;
 const receipt = (given: CheckBinding, input: CheckInput, decision: 'allow' | 'block' | 'escalate', more: Partial<CheckReceipt> = {}): CheckReceipt => ({
-  schemaVersion: 1, checkId: given.checkId, bindingDigest: bindingDigest(given), subjectDigest: subjectOf(input), reviewer: given.model, result: { kind: 'review', decision, reasonCodes: ['fixture'] }, ...more,
+  schemaVersion: 1, checkId: given.checkId, bindingDigest: bindingDigest(given), subjectDigest: subjectOf(input), reviewer: given.model, result: { kind: 'review', decision, reasonCodes: ['uncertain'] }, ...more,
 });
 const expectedDecision = (row: Case) => ('decision' in row.expected ? row.expected.decision : 'allow');
 
