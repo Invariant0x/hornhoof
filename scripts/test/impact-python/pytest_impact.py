@@ -94,7 +94,9 @@ def import_dependencies(
     node: ast.Import | ast.ImportFrom, file: str, modules: dict[str, str]
 ) -> set[str]:
     if isinstance(node, ast.Import):
-        return set().union(*(resolve_module(alias.name, modules) for alias in node.names))
+        return set().union(
+            *(resolve_module(alias.name, modules) for alias in node.names)
+        )
     if any(alias.name == "*" for alias in node.names):
         raise ValueError("star_import")
     base = relative_module(node, file)
