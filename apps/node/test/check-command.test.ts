@@ -177,7 +177,7 @@ async function guardedCommandFixture() {
     });
     return response.text();
   };
-  return { dir, root, bin, key, run, acquired: () => acquired, sentinel };
+  return { dir, root, bin, key, bridge, run, acquired: () => acquired, sentinel };
 }
 
 describe('command policy boundary', () => {
@@ -221,17 +221,19 @@ describe('command policy boundary', () => {
     expect(c.acquired()).toBe(1);
   });
 
-  it('does not admit a command cancelled while its guard is pending', async () => {
-    const c = await guardedCommandFixture(), stop = new AbortController();
+  it('does not admit a command whose current turn ends while its guard is pending', async () => {
+    const c = await guardedCommandFixture();
     let entered!: () => void, release!: () => void, settled!: () => void;
     const began = new Promise<void>(resolve => { entered = resolve; });
     const gate = new Promise<void>(resolve => { release = resolve; });
     const finished = new Promise<void>(resolve => { settled = resolve; });
     configureCheckCommands(null, async () => { entered(); await gate; settled(); return { allow: true, kind: 'ordinary', coverage: 'opaque' }; });
-    const request = c.run(undefined, undefined, stop.signal).catch(() => null);
-    await began; stop.abort(); await request;
+    const request = c.run();
+    await began;
+    // Revocation aborts the server-owned signal synchronously, before policy settles.
+    c.bridge.setToken(c.key, null);
     release(); await finished;
-    await new Promise(resolve => setImmediate(resolve));
+    await request;
     expect({ started: existsSync(c.sentinel), acquired: c.acquired() }).toEqual({ started: false, acquired: 0 });
   });
 });

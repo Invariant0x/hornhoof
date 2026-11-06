@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { parseNodeMessage } from '@hornhoof/protocol';
+import { parseNodeMessage, parseTestEnvironment } from '@hornhoof/protocol';
 import { readTestEnvironment } from '../src/test-environment.js';
 import { buildOf, runNode } from '../src/main.js';
 import { prepareNodeStop } from '../src/lifecycle.js';
@@ -1361,7 +1361,7 @@ it.skipIf(!hasTmux)('delivers input_kept through the node socket before starting
 
 
 describe('checking work before admission', () => {
-  it.each(['npm ci && npm run build', 'vitest run first.test.ts', 'crapper --use-existing-coverage src/a.ts'])('refuses %s before any part preparation', async command => {
+  it.each(['npm ci && npm run build', 'vitest run first.test.ts', 'crapper --use-existing-coverage src/a.ts', 'npm run ordinary'])('refuses %s before any part preparation', async command => {
     const server = await fakeServer(), dir = nodeDir(server.url);
     const sentinel = join(dir, 'payload-started');
     const runPart: typeof runTests = async part => {
@@ -1371,12 +1371,39 @@ describe('checking work before admission', () => {
     const node = await runNode({ dir, adapter, testUser: environmentTestUser, runPart, log: () => {} });
     onTestFinished(() => node.stop());
     await server.wait(() => server.received.some(frame => frame.type === 'hello'));
+    const stale = join(dir, 'runs', 'checking-work', 'work');
+    mkdirSync(stale, { recursive: true });
+    writeFileSync(join(stale, 'package.json'), JSON.stringify({ scripts: { ordinary: 'echo stale-authorization' } }));
     server.send({ type: 'tests.run', kind: 'work', partId: 'checking-work', repo: null, branch: null, task: 1, command, part: 1, parts: 1, timeoutMs: 1000 });
     await server.wait(() => server.received.some(frame => frame.type === 'tests.done' && frame.partId === 'checking-work'));
     expect(existsSync(sentinel)).toBe(false);
     expect(server.received.filter(frame => frame.type === 'check.acquire')).toEqual([]);
     expect(server.received.filter(frame => frame.type === 'tests.started')).toEqual([]);
     expect(server.received.find(frame => frame.type === 'tests.done' && frame.partId === 'checking-work')).toMatchObject({ ok: false, exitCode: null, error: 'failed', commit: null, log: expect.stringContaining('запусти через run_tests') });
+  });
+
+  it('refuses a product selection labelled work before its lifecycle starts', async () => {
+    const server = await fakeServer(), dir = nodeDir(server.url), sentinel = join(dir, 'product-started');
+    const runPart: typeof runTests = async part => {
+      writeFileSync(sentinel, 'product preparation started');
+      return { type: 'tests.done', partId: part.partId, ok: true, exitCode: 0, error: null, commit: null, log: 'unexpected product execution' };
+    };
+    const node = await runNode({ dir, adapter, testUser: environmentTestUser, runPart, log: () => {} });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(frame => frame.type === 'hello'));
+    const manifest = parseTestEnvironment({ version: 1, defaultProfile: 'fast', runtimes: [], profiles: [{ id: 'fast', requiredSuiteIds: ['unit'] }],
+      dependencies: { adapter: 'npm', inputs: [], install: [], paths: [], cache: 'none' }, services: [], prepare: [], reset: null,
+      suites: [{ id: 'unit', root: '.', files: ['one.test.js'], run: { program: 'node', args: ['one.test.js'], cwd: '.' }, split: { kind: 'argv-files' }, profiles: ['fast'] }],
+      impact: { adapter: 'whole-package', fullPackageGlobs: [], migrationCheck: { status: 'unsupported', reason: 'Fixture.' } }, mutation: { status: 'unsupported', language: 'javascript', reason: 'Fixture.' } });
+    const manifestSource = JSON.stringify(manifest), commitSha = 'a'.repeat(40);
+    const repositoryScope = { companyId: '11111111-1111-4111-8111-111111111111', repositoryOwnerId: '22222222-2222-4222-8222-222222222222', repoUrlHash: 'b'.repeat(64) };
+    const description = { version: 1, repositoryScope, commitSha, manifestSource, manifestHash: createHash('sha256').update(manifestSource).digest('hex'), manifest, inputDigests: [], inventory: [{ suiteId: 'unit', file: 'one.test.js', selectionUnit: 'one.test.js' }], runtimeCapabilities: [] };
+    server.send({ type: 'tests.run', kind: 'work', partId: 'product-work', repo: { url: 'https://example.test/product.git', token: '' }, repositoryScope, commitSha, branch: null, task: 1, command: '', part: 1, parts: 1, timeoutMs: 1000,
+      environment: { snapshot: { description, profile: 'fast' }, selection: { kind: 'suite', suiteId: 'unit', files: ['one.test.js'] } } });
+    await server.wait(() => server.received.some(frame => frame.type === 'tests.done' && frame.partId === 'product-work'));
+    expect(existsSync(sentinel)).toBe(false);
+    expect(server.received.filter(frame => frame.type === 'check.acquire' || frame.type === 'tests.started')).toEqual([]);
+    expect(server.received.find(frame => frame.type === 'tests.done' && frame.partId === 'product-work')).toMatchObject({ ok: false, exitCode: null, log: expect.stringMatching(/^запусти через run_tests\n/) });
   });
 
   it.each(['npm ci', 'echo prepared'])('keeps non-check work %s inside one existing slot', async command => {
