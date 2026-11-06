@@ -109,7 +109,7 @@ type Script = keyof typeof SCRIPTS;
 type Talk = { script: typeof AS_USUAL; seen: { messages: number }; socket: TLSSocket; inMessage: boolean; held: string };
 
 const REPLIES: Record<string, string> = { EHLO: '250-scripted\r\n250 AUTH PLAIN\r\n', AUTH: '235 ok\r\n', MAIL: '250 ok\r\n', RCPT: '250 ok\r\n', DATA: '354 go on\r\n' };
-const quiet = (_socket: TLSSocket) => undefined;
+const quiet: (socket: TLSSocket) => unknown = () => undefined;
 const drop = (socket: TLSSocket) => socket.destroy();
 const AS_USUAL = { atStart: quiet, greeting: '220 scripted ESMTP\r\n', replies: REPLIES, dropVerb: '', atEnd: quiet };
 const SCRIPTS = {
