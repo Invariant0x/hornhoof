@@ -8,6 +8,7 @@ import {
 } from './tree';
 import { TreeCardBody } from './TreeCard';
 import { segmentText } from './tree-state';
+import { visibleDepartmentTree } from './tree-access';
 import { Chip } from '../ui/Chip';
 import { CANVAS_ZOOM_LIMITS, usePanZoom, ZoomBar } from '../ui/canvas';
 
@@ -407,15 +408,16 @@ export function TreeView(props: Props) {
   const { tree, department } = props, t = useT();
   const root = useRef<HTMLDivElement>(null), scroll = useRef<HTMLDivElement>(null);
   const box = useTreeBox(root);
+  const visibleTree = useMemo(() => visibleDepartmentTree(tree, department), [tree, department]);
   const order = department.employees.map(e => e.id).join('\0');
-  const layout = useMemo(() => fitBadges(treeLayout(tree, { ...box, agentOrder: order ? order.split('\0') : [] }, 1), t), [tree, order, box, t]);
-  const { view, zoomAt, handlers, dragged, fit, onScroll } = useTreeNavigation(scroll, layout, box, !!tree.turn);
+  const layout = useMemo(() => fitBadges(treeLayout(visibleTree, { ...box, agentOrder: order ? order.split('\0') : [] }, 1), t), [visibleTree, order, box, t]);
+  const { view, zoomAt, handlers, dragged, fit, onScroll } = useTreeNavigation(scroll, layout, box, !!visibleTree.turn);
   const { selection, card, select, close } = useTreeSelection(root);
-  const canvas = { layout, tree, department, selected: selection?.pick ?? null, select };
+  const canvas = { layout, tree: visibleTree, department, selected: selection?.pick ?? null, select };
   return (
     <>
       <div className="tview" ref={root}>
-        {!tree.turn ? <p className="tv-empty glass">{t.dept.treeNoTurn}</p> : (
+        {!visibleTree.turn ? <p className="tv-empty glass">{t.dept.treeNoTurn}</p> : (
           <>
             <div className="tv-scroll" ref={scroll} role="region" aria-label={t.dept.treeCanvas} {...handlers} onScroll={onScroll}
               onClickCapture={e => ignoreDraggedClick(e, dragged)}>
@@ -424,8 +426,8 @@ export function TreeView(props: Props) {
                 <Graph {...canvas} />
               </div>
             </div>
-            <Legend tree={tree} />
-            {selection && <FloatingCard {...props} selection={selection} card={card} box={box} onClose={close} />}
+            <Legend tree={visibleTree} />
+            {selection && <FloatingCard {...props} tree={visibleTree} selection={selection} card={card} box={box} onClose={close} />}
           </>
         )}
       </div>
