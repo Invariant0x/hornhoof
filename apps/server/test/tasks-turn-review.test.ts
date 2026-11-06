@@ -1,7 +1,7 @@
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, companies, departments, jobs, people, subscriptions, taskEvents, tasks, teams, turns } from '../src/db/schema.js';
+import { agents, companies, departments, jobs, people, subscriptions, taskEvents, tasks, taskWaits, teams, turns, waitPolicies } from '../src/db/schema.js';
 import { answer, ask, createTask, leaveWork, submit, verdict, type Moved } from '../src/modules/tasks/engine.js';
 import { taskDetail } from '../src/modules/tasks/views.js';
 import { resumeAgent, wakePrompt } from '../src/modules/tasks/wake.js';
@@ -55,6 +55,32 @@ async function company({ repository = true, reviewers = true, productRepository 
 const woken = (r: Moved) => r.wakes.map(w => [w.agentId, w.why]);
 
 describe('the review of a turn', () => {
+  it('waits for each of its reviewers from the moment it opens, under the dates the department set, and each verdict ends that one', async () => {
+    const { ctx, db, companyId, ceo, dev, bruno, member, merged, reviews } = await company();
+    await db.insert(waitPolicies).values({ companyId, departmentId: dev.id, kind: 'review', stage: '', version: 1, ownerMs: 3_600_000, headMs: 7_200_000, decisionMs: 10_800_000, reviewIntervalMs: 14_400_000, createdByPersonId: ceo.id });
+    const api = await member(bruno.id, 'Checkout API');
+    await merged(bruno.id, api.id);
+    const [review] = await reviews();
+    const waits = () => db.select().from(taskWaits).where(eq(taskWaits.taskId, review!.id));
+    expect((await waits()).map(w => [w.kind, w.ownerAgentId, w.state]).sort()).toEqual(review!.panel.map(id => ['review', id, 'active']).sort());
+    const first = review!.panel[0]!;
+    await verdict(ctx, first, review!.id, { pass: true, comment: 'Fine.' });
+    expect((await waits()).find(w => w.ownerAgentId === first)).toMatchObject({ state: 'resolved', proofRef: expect.stringMatching(/^verdict:\d+$/) as string });
+    expect((await waits()).filter(w => w.state === 'active')).toHaveLength(review!.panel.length - 1);
+  });
+
+  it('opens in a department that set dates and none for reviews: nothing that stops the turn, and no date made up', async () => {
+    const { db, companyId, ceo, dev, bruno, member, merged, reviews } = await company();
+    await db.insert(waitPolicies).values({ companyId, departmentId: dev.id, kind: 'external', stage: '', version: 1, ownerMs: 3_600_000, headMs: 7_200_000, decisionMs: 10_800_000, reviewIntervalMs: 14_400_000, createdByPersonId: ceo.id });
+    const api = await member(bruno.id, 'Checkout API');
+    await merged(bruno.id, api.id);
+    const [review] = await reviews();
+    expect(review).toBeDefined();
+    const waits = await db.select().from(taskWaits).where(eq(taskWaits.taskId, review!.id));
+    expect(waits.map(w => w.state).every(state => state === 'legacy_needs_plan')).toBe(true);
+    expect(waits).toHaveLength(review!.panel.length);
+  });
+
   it('gives code in a repository no gate of its own: it merges into the turn branch as it is handed in', async () => {
     const { db, head, bruno, rita, parent, tools } = await company();
     const made = await (await tools(head)).callTool({ name: 'create_task', arguments: { title: 'Checkout API', brief: 'The API.', body: 'POST /checkout.', executor: bruno.id, parent: parent.number } });

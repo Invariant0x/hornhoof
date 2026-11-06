@@ -5,6 +5,7 @@ import { useOrg } from '../org';
 import { currentTheme, setTheme, type Theme } from '../theme';
 import type { Me, Org } from '../types';
 import { LogoMark } from '../ui/icons';
+import { Outbound } from '../ui/Outbound';
 import { UpdateBanner } from '../ui/UpdateBanner';
 import { UpdateCut } from '../ui/UpdateCut';
 import { useVersion, versionText } from '../ui/VersionMark';
@@ -27,7 +28,7 @@ import { Tasks } from './Tasks';
 import { Versions } from './Versions';
 import { takeEscape } from '../ui/escape';
 import { useRoute, type Route } from '../routes';
-import { RouteUnavailable, unavailableFailure } from './RouteUnavailable';
+import { departmentIsMissing, RouteUnavailable, unavailableFailure } from './RouteUnavailable';
 
 type Tab = 'map' | 'tasks' | 'people' | 'subscriptions' | 'machines' | 'improvements';
 const TABS: Tab[] = ['map', 'tasks', 'people', 'subscriptions', 'machines'];
@@ -64,6 +65,7 @@ function AccountMenu({
   me,
   onClose,
   onSignOut,
+  onOutbound,
   onImprovements,
   onVersions,
   onProfile,
@@ -74,6 +76,7 @@ function AccountMenu({
   me: Me;
   onClose: () => void;
   onSignOut: () => void;
+  onOutbound: () => void;
   onImprovements?: () => void;
   onVersions?: () => void;
   onProfile: () => void;
@@ -118,6 +121,16 @@ function AccountMenu({
         </div>
       </div>
       {version && <p className="menu-version">{t.shell.version(versionText(version))}</p>}
+      <button
+        className="btn small ghost"
+        type="button"
+        onClick={() => {
+          onClose();
+          onOutbound();
+        }}
+      >
+        {t.shell.tabs.outbound}
+      </button>
       {onImprovements && (
         <button
           className="btn small ghost"
@@ -215,7 +228,7 @@ function ShellAccount({ me, menu, setMenu, company, navigate, openAccount, onSig
         <button ref={accountButton} className="avatar glass" type="button" aria-label={t.shell.account} aria-expanded={menu} onClick={() => setMenu(!menu)}>
           {me.person.name.trim().charAt(0).toUpperCase()}
         </button>
-        {menu && <AccountMenu me={me} onClose={() => setMenu(false)} onSignOut={onSignOut} onImprovements={company ? () => navigate({ kind: 'improvements' }) : undefined} onVersions={company ? () => openAccount('versions') : undefined} onProfile={() => openAccount('profile')} onSettings={company ? () => openAccount('settings') : undefined} onAbout={() => openAccount('about')} toDecide={toDecide} />}
+        {menu && <AccountMenu me={me} onClose={() => setMenu(false)} onSignOut={onSignOut} onOutbound={() => navigate({ kind: 'outbound' })} onImprovements={company ? () => navigate({ kind: 'improvements' }) : undefined} onVersions={company ? () => openAccount('versions') : undefined} onProfile={() => openAccount('profile')} onSettings={company ? () => openAccount('settings') : undefined} onAbout={() => openAccount('about')} toDecide={toDecide} />}
       </div>
     </div>
   );
@@ -326,7 +339,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
   }, [hideWindow, navigate, pageRoute]);
   const shownPanel = windows.shown ? 'window' : taskId ? 'task' : null;
   const dept = deptId ? org?.departments.find(d => d.id === deptId) : undefined;
-  const missingDepartment = deptId !== null && (unavailableFailure(orgFailure) || (org !== null && !dept));
+  const missingDepartment = departmentIsMissing({ deptId, org, orgFailure, company, personId: me.person.id });
   const updates = useUpdates(company);
   const decisions = useDecisionsView();
   /* A person's card, on the map or in a department, opens the decisions screen showing theirs. */
@@ -402,6 +415,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
         {pageRoute.kind === 'people' && <People me={currentMe} selected={pageRoute.id ?? null} onSelect={id => navigate(id ? { kind: 'people', id } : { kind: 'people' })} onHome={goHome} onRenamed={setSelfName} />}
         {tab === 'subscriptions' && <Subscriptions me={me} onHome={goHome} />}
         {pageRoute.kind === 'machines' && <Machines me={me} selected={pageRoute.id ?? null} onSelect={id => navigate(id ? { kind: 'machines', id } : { kind: 'machines' })} onHome={goHome} />}
+        {tab === 'outbound' && <Outbound onOpenTask={openTask} onHome={goHome} />}
         {tab === 'improvements' && company && <Improvements improvements={improvements} failure={improvementsFailure} onChanged={loadImprovements} onTask={openTask} onHome={goHome} />}
       </main>
       <AgentWindows windows={windows} onOpen={openAgent} me={me} org={org} staff={staff} requests={decisions.requests} onRequestsChanged={decisions.load} />

@@ -244,11 +244,11 @@ const lockOf = (card: ProposalDecision) => (card.canAnswer ? undefined : (card.d
 function ProposalCard({ card, org, onCorrect = nothing, onDone }: { card: ProposalDecision; org: Org | null; onCorrect?: () => void; onDone: () => void }) {
   const t = useT();
   const locked = lockOf(card);
-  if (card.kind === 'structure') return <StructureCard proposal={{ id: card.id, brief: card.brief, items: card.items }} departments={org?.departments ?? []} onCorrect={onCorrect} onDone={onDone} locked={locked} />;
+  if (card.kind === 'structure') return <StructureCard proposal={{ id: card.id, brief: card.brief, items: card.items, ...{ materialRevision: card.materialRevision, materialDigest: card.materialDigest } }} departments={org?.departments ?? []} onCorrect={onCorrect} onDone={onDone} locked={locked} />;
   if (!card.department) return null;
   const known = org?.departments.find(d => d.id === card.department!.id);
   const department = { id: card.department.id, name: known ? deptLabel(t, known) : card.department.name };
-  return <StaffCard department={department} proposal={{ id: card.id, brief: card.brief, people: card.items }} onCorrect={onCorrect} onDone={onDone} locked={locked} />;
+  return <StaffCard department={department} proposal={{ id: card.id, brief: card.brief, people: card.items, ...{ materialRevision: card.materialRevision, materialDigest: card.materialDigest } }} onCorrect={onCorrect} onDone={onDone} locked={locked} />;
 }
 
 type Listed = Pick<Waiting, 'onDecisionsChanged' | 'onOpenTask' | 'onOpenAgent' | 'onOpenOrchestrator' | 'org' | 'place'> & { shown: Shown; onFailure: (err: unknown) => void };

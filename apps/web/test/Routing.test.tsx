@@ -156,7 +156,7 @@ describe('shareable workspace', () => {
     fixture({ 'GET /api/tasks/foreign': [403, { error: { code: 'forbidden' } }] });
     history.replaceState(null, '', path);
     render(<App />);
-    expect(await screen.findByRole('heading', { name: 'Not found or no access' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Insufficient permissions' })).toBeInTheDocument();
     expect(screen.queryByText('Foreign secret')).not.toBeInTheDocument();
     await userEvent.setup().click(screen.getByRole('button', { name: 'Go to the map' }));
     await waitFor(() => expect(location.pathname).toBe('/'));
@@ -212,7 +212,7 @@ describe('shareable workspace', () => {
     fixture();
     history.replaceState(null, '', `/${kind}`);
     render(<Shell me={{ ...ME, person: { ...ME.person, scopeKind: 'listed', isOwner: false } }} onSignOut={() => {}} />);
-    expect(await screen.findByRole('heading', { name: 'Not found or no access' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Insufficient permissions' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Open the orchestrator/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
@@ -225,7 +225,7 @@ describe('shareable workspace', () => {
     fixture({ [`GET ${api}`]: [403, { error: { code: 'forbidden' } }] });
     history.replaceState(null, '', path!);
     render(<App />);
-    expect(await screen.findByRole('heading', { name: 'Not found or no access' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Insufficient permissions' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Go to the map' })).toBeInTheDocument();
   });
 
