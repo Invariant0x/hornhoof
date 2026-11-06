@@ -170,7 +170,7 @@ for (const lang of ['en', 'ru'] as const) {
           await expect(notebook.getByRole('status')).toHaveText(m.notebook.saving);
           await capture(page, info, `notebook-saving-${look}`);
           releaseSave();
-          await expect(notebook.getByRole('alert')).toContainText(m.common.somethingWrong);
+          await expect(notebook.getByRole('alert')).toContainText(lang === 'en' ? 'Save failed.' : m.common.somethingWrong);
           await capture(page, info, `notebook-save-error-${look}`);
         });
       }
