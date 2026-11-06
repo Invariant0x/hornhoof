@@ -3,7 +3,7 @@ import type { GateCode, MessageDocument, OutboundMessageView, OutboundSubmit, Su
 import { and, desc, eq, gte, inArray, lte, sql, type SQL } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
-import { agents, outboundAccounts, outboundAttempts, outboundBindings, outboundCatalogRevisions, outboundChannels, outboundContacts, outboundDailyUsage, outboundMessageRevisions, outboundMessages, outboundPermissions, outboundReviewReceipts, outboundSamplingCounters, tasks } from '../../db/schema.js';
+import { agents, outboundAccounts, outboundAttempts, outboundBindings, outboundCatalogRevisions, outboundChannels, outboundContacts, outboundDailyUsage, outboundMessageRevisions, outboundMessages, outboundPermissions, outboundReviewReceipts, outboundSamplingCounters, supportClassifications, tasks } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { publicUrl } from '../link/link.js';
 import { isOn } from '../model-checks/lifecycle.js';
@@ -294,7 +294,7 @@ const messageValues = (a: Admission, channel: Channel) => ({
   companyId: a.authority.companyId, departmentId: channel.departmentId, productId: channel.productId, taskId: a.task.id, authorAgentId: a.authority.agentId, authorJobId: a.authority.jobId, idempotencyKey: a.draft.idempotencyKey, requestDigest: a.requestDigest,
   channelId: channel.id, accountId: a.draft.accountId, bindingGeneration: a.draft.bindingGeneration, targetKind: a.draft.target.kind, segmentId: a.draft.segmentId, scheduledAt: new Date(a.draft.scheduledAt),
   contactId: 'contactId' in a.draft.target ? a.draft.target.contactId : null, audienceEntryId: a.draft.target.kind === 'audience' ? a.draft.target.audienceId : null,
-  ticketId: a.draft.target.kind === 'ticket' ? a.draft.target.ticketId : null, ticketRevision: a.draft.target.kind === 'ticket' ? a.draft.target.ticketRevision : null, classificationId: a.draft.target.kind === 'ticket' ? a.draft.target.classificationId : null,
+  ticketId: a.draft.target.kind === 'ticket' ? a.draft.target.ticketId : null, ticketRevision: a.draft.target.kind === 'ticket' ? a.draft.target.ticketRevision : null, classificationId: classificationOf(a.draft.target),
 });
 
 /* A refusal is kept, so that the same request has the same answer later. Its row says only why. */
@@ -343,10 +343,19 @@ async function admitHolding(a: Admission): Promise<Admitted> {
   return freeze(a, channel, account, policy!, reached, drawn);
 }
 
+const classificationOf = (target: Target): string | null => (target.kind === 'ticket' ? target.classificationId : null);
+
+/* A class of ticket that wants a person wants one for this very reply. A classifier that has not said so yes or no counts. */
+async function wantsPerson(tx: Tx, companyId: string, classificationId: string | null): Promise<boolean> {
+  if (!classificationId) return false;
+  const [classified] = await tx.select({ requiresHuman: supportClassifications.requiresHuman }).from(supportClassifications).where(and(eq(supportClassifications.id, classificationId), eq(supportClassifications.companyId, companyId)));
+  return classified?.requiresHuman !== false;
+}
+
 async function freeze(a: Admission, channel: Channel, account: Account, policy: CurrentPolicy, reached: Reached, drawn: Extract<Drawn, { ok: true }>): Promise<Admitted> {
   const messageId = randomUUID();
   const contentDigest = frozenOf(a, channel, account, reached.recipient, drawn);
-  const asked = await approvalGate(a.tx, { channel, account, bindingGeneration: a.draft.bindingGeneration, decider: a.prepared.decider, policy, sources: drawn.sourcesDigest, money: drawn.rendered.money, escalated: false, document: a.draft.document, segmentId: a.draft.segmentId, messageId, revision: 1, contentDigest });
+  const asked = await approvalGate(a.tx, { channel, account, bindingGeneration: a.draft.bindingGeneration, decider: a.prepared.decider, policy, sources: drawn.sourcesDigest, money: drawn.rendered.money, escalated: await wantsPerson(a.tx, a.authority.companyId, classificationOf(a.draft.target)), document: a.draft.document, segmentId: a.draft.segmentId, messageId, revision: 1, contentDigest });
   if (asked.state === 'declined') return refuseAdmission(a, channel, ['approval_required']);
   const samplingOrdinals = await takeNumbers(a.tx, channel, policy, a.authority.agentId, a.draft.segmentId);
   const review = await reviewGate(a.tx, channel, { id: messageId, revision: 1, contentDigest, samplingOrdinals, targetKind: a.draft.target.kind }, a.prepared.now);
@@ -463,7 +472,7 @@ async function peopleAndChecks(tx: Tx, ctx: Ctx, l: Look, drawn: Extract<Drawn, 
   const { message: m, revision, channel, account, prepared } = l;
   const review = await reviewGate(tx, channel, { id: m.id, revision: revision.revision, contentDigest: revision.contentDigest, samplingOrdinals: m.samplingOrdinals, targetKind: m.targetKind }, prepared.now);
   if (review.codes.includes('review_failed')) return ended(['review_failed']);
-  const asked = await approvalGate(tx, { channel, account, bindingGeneration: m.bindingGeneration, decider: prepared.decider, policy, sources: drawn.sourcesDigest, money: drawn.rendered.money, escalated: review.escalated, document: revision.document, segmentId: m.segmentId, messageId: m.id, revision: revision.revision, contentDigest: revision.contentDigest });
+  const asked = await approvalGate(tx, { channel, account, bindingGeneration: m.bindingGeneration, decider: prepared.decider, policy, sources: drawn.sourcesDigest, money: drawn.rendered.money, escalated: review.escalated || (await wantsPerson(tx, m.companyId, m.classificationId)), document: revision.document, segmentId: m.segmentId, messageId: m.id, revision: revision.revision, contentDigest: revision.contentDigest });
   if (asked.state === 'declined') return ended(['approval_required']);
   const hold = [...(channel.status === 'stopped' ? (['channel_stopped'] as const) : []), ...review.codes, ...stateReasons(asked)];
   const stop = m.contactId ? stopAddress(ctx, { channel, account, document: revision.document, contactId: m.contactId, segment: null, audience: null, base: prepared.base, now: prepared.now }) : null;
