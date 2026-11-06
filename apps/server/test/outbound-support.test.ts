@@ -25,7 +25,7 @@ import { bindingDigest } from '../src/modules/model-checks/lifecycle.js';
 import { readUnsubscribeToken, recipientDigest } from '../src/modules/outbound/contacts.js';
 import { beginDispatch, reserveDispatch, settleAttempt } from '../src/modules/outbound/core.js';
 import { classifySupportTicket, containsForbiddenSupportPromise, containsSecretMaterial, containsThirdPartyPii, submitSupportReply } from '../src/modules/outbound/support.js';
-import { as } from './helpers.js';
+import { as, beforePerson } from './helpers.js';
 import { sha } from './outbound-fixture.js';
 import { addCatalogRevision, REVIEWER_MODEL, supportWorld, type SupportWorld } from './outbound-support-world.js';
 
@@ -253,6 +253,7 @@ describe('outbound support classification and reply gates (#447 T8-10, T8-15)', 
     });
     const [enBound] = await w.c.db.select().from(outboundApprovals).where(eq(outboundApprovals.messageId, enSent.messageId));
     expect(enBound?.kind).toBe('message');
+    await beforePerson(w.c, enBound!.requestId);
     const approveEn = await w.c.app.inject({
       method: 'POST',
       url: `/api/requests/${enBound!.requestId}`,
@@ -308,6 +309,7 @@ describe('outbound support classification and reply gates (#447 T8-10, T8-15)', 
     );
     expect(ruSent).toMatchObject({ status: 'waiting_approval', reasonCodes: ['approval_required'] });
     const [ruBound] = await w.c.db.select().from(outboundApprovals).where(eq(outboundApprovals.messageId, ruSent.messageId));
+    await beforePerson(w.c, ruBound!.requestId);
     expect((await w.c.app.inject({ method: 'POST', url: `/api/requests/${ruBound!.requestId}`, payload: { approve: true }, ...as(w.c.samToken) })).statusCode).toBe(200);
     expect((await reserveDispatch(w.c.app.ctx, ruSent.messageId, 1, NOW)).kind).toBe('reserved');
     const begunRu = await beginDispatch(w.c.app.ctx, ruSent.messageId, 1, NOW);
@@ -347,6 +349,7 @@ describe('outbound support classification and reply gates (#447 T8-10, T8-15)', 
     );
     expect(arSent).toMatchObject({ status: 'waiting_approval', reasonCodes: ['approval_required'] });
     const [arBound] = await w.c.db.select().from(outboundApprovals).where(eq(outboundApprovals.messageId, arSent.messageId));
+    await beforePerson(w.c, arBound!.requestId);
     expect((await w.c.app.inject({ method: 'POST', url: `/api/requests/${arBound!.requestId}`, payload: { approve: true }, ...as(w.c.samToken) })).statusCode).toBe(200);
     expect((await reserveDispatch(w.c.app.ctx, arSent.messageId, 1, NOW)).kind).toBe('reserved');
     const begunAr = await beginDispatch(w.c.app.ctx, arSent.messageId, 1, NOW);

@@ -7,7 +7,7 @@ import { minuteRound } from '../src/modules/agents/timers.js';
 import { FRESH_INFERENCE_HASH } from '../src/modules/jobs/dispatch.js';
 import { saveDataset, saveThresholds } from '../src/modules/model-checks/store.js';
 import { OUTBOUND_CHECK_PROMPTS, syncOutboundCheckDefinition } from '../src/modules/outbound/evaluation-port.js';
-import { as } from './helpers.js';
+import { as, beforePerson } from './helpers.js';
 import { AUTHOR, LABELLER, SET, asJsonl, classCase, hashOf } from './model-check-fixture.js';
 import { closeKept, EVENT_KEY, frozenOf, keep, rotateTo, SIGNING_KEY, smtpSettings, smtpWay, submitByTool } from './outbound-live-world.js';
 import { PASSWORD, smtpReceiver, vendorApi, vendorJson, wordsOf, type VendorAnswer, type VendorCall } from './outbound-receivers.js';
@@ -241,6 +241,7 @@ describe('a reply to a ticket through an agent\'s tools', () => {
     await minute(LATER());
     expect(server.seen.messages).toEqual([]);
     const [approval] = await w.c.db.select().from(outboundApprovals).where(eq(outboundApprovals.messageId, submitted['messageId']!));
+    await beforePerson(w.c, approval!.requestId);
     expect((await w.c.app.inject({ method: 'POST', url: `/api/requests/${approval!.requestId}`, payload: { approve: true }, ...as(w.c.samToken) })).statusCode).toBe(200);
     await minute(LATER());
     await minute(LATER());

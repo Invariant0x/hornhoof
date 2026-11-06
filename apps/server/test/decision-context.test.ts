@@ -236,7 +236,7 @@ describe('answer_request in a turn', () => {
   it('applies cards only in a turn of the CEO or the delegate', async () => {
     const c = await company();
     const client = await mcp(c.app, TOKEN);
-    const [card] = await c.db.insert(proposals).values({ audience: 'human', companyId: c.acme.id, agentId: c.orchestrator.id, kind: 'staff', departmentId: c.dev.id, brief: 'QA.', items: [] }).returning();
+    const [card] = await c.db.insert(proposals).values({ audience: 'human', companyId: c.acme.id, agentId: c.orchestrator.id, kind: 'staff', departmentId: c.dev.id, brief: 'QA.', items: [{ role: 'DEV-QA', checked: true }] }).returning();
     for (const who of ['zed', 'dan'] as const) {
       await c.wrote(c.ids[who], 'Build it and hire.');
       expect((await call(client, 'build_structure', { items: [{ template: 'design', note: 'Screens.' }] })).isError).toBe(true);

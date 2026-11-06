@@ -253,6 +253,7 @@ async function seedOutboundViewWorld() {
     .insert(requests)
     .values({
       companyId: c.companyId,
+      audience: 'human',
       taskId: c.salesTask.id,
       agentId: c.seller.id,
       kind: 'approval',
@@ -280,6 +281,7 @@ async function seedOutboundViewWorld() {
     .insert(requests)
     .values({
       companyId: c.companyId,
+      audience: 'human',
       taskId: c.salesTask.id,
       agentId: c.seller.id,
       kind: 'approval',
