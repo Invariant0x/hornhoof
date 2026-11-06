@@ -116,6 +116,17 @@ async function names(ctx: Pick<Ctx, 'db' | 'templates'>, rows: Pick<Task, 'id' |
   const afterIds = [...new Set(rows.flatMap(t => t.after))];
   const afterRows = afterIds.length ? await ctx.db.select().from(tasks).where(inArray(tasks.id, afterIds)) : [];
   const waits = await openWaitsOf(ctx.db, rows.map(t => t.id));
+  return nameLookups(ctx, { agentRows, placeRows, turnRows, afterRows }, independent, waits);
+}
+
+type NamedRows = {
+  agentRows: Pick<typeof agents.$inferSelect, 'id' | 'name' | 'kind' | 'roleKey'>[];
+  placeRows: (typeof departments.$inferSelect)[];
+  turnRows: Pick<typeof turns.$inferSelect, 'id' | 'number'>[];
+  afterRows: Task[];
+};
+
+function nameLookups(ctx: Pick<Ctx, 'templates'>, { agentRows, placeRows, turnRows, afterRows }: NamedRows, independent: Map<string, IndependentRecord>, waits: Map<string, TaskWait[]>): Names {
   return {
     agent: id => {
       const a = agentRows.find(r => r.id === id);
