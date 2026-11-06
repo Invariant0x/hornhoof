@@ -7,6 +7,8 @@ export { WorkspaceCommitSha, NodeRef, TaskWorkspaceBinding, RepoRelativeArea, In
 export { APPROVAL_CHANNELS, APPROVAL_MODES, ApprovalAmount, ApprovalChannel, ApprovalRule, DEFAULT_APPROVAL_RULE, approvalNeeded, kindKey, ruleOf, type ApprovalMode, type ApprovalWork, type StoredApprovalRule } from './approval-policy.js';
 export { NOTIFICATION_NAMES, NotificationSchema, NotificationSourceSchema, type Notification, type NotificationSource } from './notifications.js';
 export { TestOutput, TestOutputList, TestOutputReceipt } from './test-output.js';
+export { MAX_RUN_FILES, RUN_FILE_BYTES, RunFile } from './run-files.js';
+import { MAX_RUN_FILES, RunFile } from './run-files.js';
 export { MachineDrain, NodeWait } from './machine-drain.js';
 export { inLane } from './lane.js';
 export * from './pipeline-report.js';
@@ -73,17 +75,6 @@ export type RunKind = (typeof RUN_KINDS)[number];
    own kind once a node for it exists. */
 export const MACHINE_KINDS = ['computer', 'phone', 'browser'] as const;
 export type MachineKind = (typeof MACHINE_KINDS)[number];
-/* The most task files a part of work takes in, and the most files one part puts on the task. */
-export const MAX_RUN_FILES = 20;
-/* The biggest file a part puts on the task, as big as any task file may be. */
-export const RUN_FILE_BYTES = 50 * 1024 * 1024;
-/* A file's plain name, never a folder or a way out of one. */
-export const RunFile = z
-  .string()
-  .min(1)
-  .max(200)
-  .refine(n => !/[\/\\\u0000-\u001f\u007f]/.test(n) && n !== '.' && n !== '..', 'Not a plain file name.');
-
 /* The last bytes of a job's output kept for people to read when something fails. */
 export const TAIL_BYTES = 4096;
 
