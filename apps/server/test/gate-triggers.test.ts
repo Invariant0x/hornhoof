@@ -61,7 +61,7 @@ describe('release improvement procedure', () => {
       expect(rendered.skills.map(s => s.name), id).toContain('dev-release-improvements');
     }
     const procedure = templates.skills.get('dev-release-improvements')!.body;
-    for (const topic of ['pipeline_report', 'issue-to-acceptance', '30%', 'turn 7', 'T7', 'reviewer usefulness', 'released version', 'nonblocking', 'Before', 'Target after', 'unknown', 'company isolation', 'outbound']) expect(procedure, topic).toContain(topic);
+    for (const topic of ['pipeline_report', 'issue-to-acceptance', '30%', 'reviewer usefulness', 'released version', 'nonblocking', 'Before', 'Target after', 'unknown', 'company isolation', 'outbound']) expect(procedure, topic).toContain(topic);
     expect(role('DEV-RED').body).not.toContain('or public-facing');
   });
 });

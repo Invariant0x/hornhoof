@@ -14,8 +14,8 @@ describe('pipeline guidance', () => {
 
   it('hands submission to the existing author check and review to its run evidence', () => {
     expect(body('dev-implement')).toMatch(/submit[\s\S]*author check/i);
+    expect(body('dev-review-verdict')).toMatch(/run ID and number/);
     for (const id of ['dev-review-diff', 'dev-review-verdict']) {
-      expect(body(id), id).toMatch(/ID\/number|run ID and number/);
       expect(body(id), id).toMatch(/commit/);
       expect(body(id), id).toMatch(/instead of rerunning|without rerunning/);
     }

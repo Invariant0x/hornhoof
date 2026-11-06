@@ -202,8 +202,8 @@ describe('renderInstructions', () => {
     const revRole = shipped.roles.get('DEV-REV')!;
     const revRendered = renderInstructions(shipped, agent({ roleKey: 'DEV-REV', skills: revRole.skills.filter(s => s.on).map(s => s.id), templateHashes: {} }), PLACE);
     const revFiles = new Map(revRendered.skills.map(s => [s.name, s.body]));
-    expect(revFiles.get('dev-review-diff')).toContain('task.reviewPlan');
-    expect(revFiles.get('dev-review-diff')).toContain('task.fixReview');
+    expect(revFiles.get('dev-review-verdict')).toContain('task.reviewPlan');
+    expect(revFiles.get('dev-review-verdict')).toContain('task.fixReview');
     expect(revFiles.get('dev-review-verdict')).toContain('confirm_finding');
     expect(revFiles.get('dev-review-verdict')).toMatch(/internal role or skill rules[^.!?]*never[^.!?]*(?:main|release) approval/i);
   });
@@ -220,11 +220,15 @@ describe('renderInstructions', () => {
       const uiSkill = rendered.skills.find(s => s.name === 'dev-frontend-ui');
       expect(uiSkill, roleKey).toBeDefined();
       expect(Buffer.byteLength(uiSkill!.body), roleKey).toBeLessThan(22_000);
+      const browserSkill = rendered.skills.find(s => s.name === 'dev-browser-check');
+      expect(browserSkill, roleKey).toBeDefined();
       for (const delivered of [uiSkill!.body, rendered.whole]) {
         expect(delivered, roleKey).toMatch(/whole group|together as one group/i);
         expect(delivered, roleKey).toMatch(/non-visual[\s\S]*in parallel/i);
-        expect(delivered, roleKey).toMatch(/longest[\s\S]*shortest[\s\S]*(?:shipped|supported)/i);
         expect(delivered, roleKey).toMatch(/explicit[\s\S]*browser default[\s\S]*scrollbar space/i);
+      }
+      for (const delivered of [browserSkill!.body, rendered.whole]) {
+        expect(delivered, roleKey).toMatch(/longest[\s\S]*shortest[\s\S]*(?:shipped|supported)/i);
         expect(delivered, roleKey).toMatch(/Chromium[\s\S]*Firefox[\s\S]*WebKit/);
       }
     }
@@ -358,14 +362,12 @@ describe('renderInstructions', () => {
     expect(rendered.text).toContain('\n- dev-review-diff: Reviewing a change.');
     expect(rendered.text).toContain('\n- dev-review-verdict: Review verdict.');
     const files = new Map(rendered.skills.map(s => [s.name, s.body]));
-    for (const id of ['dev-review-diff', 'dev-review-verdict'] as const) {
-      const body = files.get(id)!;
-      expect(Buffer.byteLength(body), id).toBeLessThan(22_000);
-      expect(body, id).toContain('mechanical');
-      expect(body, id).toContain('Wake.mechanical');
-      expect(body, id).toMatch(/provably cannot change[^.!?]*behaviour/i);
-      expect(body, id).toMatch(/when in doubt[^.!?]*regular category[\s\S]*full base level/i);
-    }
+    const verdict = files.get('dev-review-verdict')!;
+    expect(Buffer.byteLength(verdict)).toBeLessThan(22_000);
+    expect(verdict).toContain('mechanical');
+    expect(verdict).toContain('Wake.mechanical');
+    expect(verdict).toMatch(/provably cannot change[^.!?]*behaviour/i);
+    expect(verdict).toMatch(/when in doubt[^.!?]*regular category[\s\S]*full base level/i);
     expect(rendered.whole).toContain('Wake.mechanical');
     expect(rendered.whole).toMatch(/provably cannot change[^.!?]*behaviour/i);
   });
@@ -475,17 +477,14 @@ describe('renderInstructions', () => {
       expect(Buffer.byteLength(rendered.text), roleKey).toBeLessThan(24_000);
       const files = new Map(rendered.skills.map(s => [s.name, s.body]));
       const impl = files.get('dev-implement')!;
-      const eng = files.get('dev-engineering-rules')!;
+      const policy = files.get('dev-testing-policy')!;
       expect(Buffer.byteLength(impl), `${roleKey} dev-implement`).toBeLessThan(22_000);
-      expect(Buffer.byteLength(eng), `${roleKey} dev-engineering-rules`).toBeLessThan(22_000);
-      expect(impl, roleKey).toContain('scripts/test/');
-      expect(impl, roleKey).toContain('NOT_RUN');
-      expect(impl, roleKey).toMatch(/up and down/i);
-      expect(eng, roleKey).toContain('scripts/test/impact-README.md');
-      expect(eng, roleKey).toContain('scripts/test/related-probe.mjs');
-      expect(eng, roleKey).toContain('scripts/test/impact-python/pytest_impact.py');
-      expect(eng, roleKey).toContain('scripts/test/replay-impact.mjs');
-      expect(rendered.whole, roleKey).toContain('scripts/test/impact-README.md');
+      expect(Buffer.byteLength(policy), `${roleKey} dev-testing-policy`).toBeLessThan(22_000);
+      expect(impl, roleKey).toMatch(/T2 in dev-testing-policy/);
+      expect(policy, roleKey).toContain('NOT_RUN');
+      expect(policy, roleKey).toMatch(/up and down/i);
+      expect(policy, roleKey).toMatch(/never assume `run_tests` selects by itself/);
+      expect(rendered.whole, roleKey).toContain('NOT_RUN');
     }
 
     const headRole = shipped.roles.get('DEV-HEAD')!;
@@ -495,20 +494,18 @@ describe('renderInstructions', () => {
       PLACE,
     );
     expect(Buffer.byteLength(headRendered.text)).toBeLessThan(24_000);
-    const gatesBody = headRendered.skills.find(s => s.name === 'dev-gates')?.body ?? '';
-    expect(Buffer.byteLength(gatesBody)).toBeLessThan(22_000);
-    expect(gatesBody).toContain('scripts/test/');
-    expect(gatesBody).toMatch(/collected graph[\s\S]*completed[^.!?]*receipts?/i);
-    expect(gatesBody).toMatch(/unavailable[^.!?]*not zero misses/i);
+    const headPolicy = headRendered.skills.find(s => s.name === 'dev-testing-policy')?.body ?? '';
+    expect(Buffer.byteLength(headPolicy)).toBeLessThan(22_000);
+    expect(headPolicy).toMatch(/collected graph[\s\S]*completed[^.!?]*receipts?/i);
+    expect(headPolicy).toMatch(/unavailable[^.!?]*not zero misses/i);
     expect(headRendered.whole).toMatch(/collected graph[\s\S]*completed[^.!?]*receipts?/i);
 
     for (const roleKey of ['DEV-REV', 'DEV-TEST'] as const) {
       const role = shipped.roles.get(roleKey)!;
       const rendered = renderInstructions(shipped, agent({ roleKey, skills: role.skills.filter(s => s.on).map(s => s.id), templateHashes: {} }), PLACE);
       expect(Buffer.byteLength(rendered.text), roleKey).toBeLessThan(24_000);
-      const eng = rendered.skills.find(s => s.name === 'dev-engineering-rules')?.body ?? '';
-      expect(eng, roleKey).toContain('scripts/test/impact-README.md');
-      expect(eng, roleKey).toMatch(/shared packages[\s\S]*API contracts[\s\S]*templates/i);
+      const policy = rendered.skills.find(s => s.name === 'dev-testing-policy')?.body ?? '';
+      expect(policy, roleKey).toMatch(/shared packages[\s\S]*API contracts[\s\S]*templates/i);
     }
   });
 });

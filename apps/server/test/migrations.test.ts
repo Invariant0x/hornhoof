@@ -526,6 +526,39 @@ describe('migration 0020', () => {
   });
 });
 
+describe('migration 0081', () => {
+  const C = '00000000-0000-4000-8000-000000000001';
+
+  it('keeps the moved testing policy and the gate of a security review on the cards that held their text', async () => {
+    const client = await freshPglite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0080_live_stuck_recipients') });
+    await db.execute(sql`insert into companies (id, name) values (${C}, 'Acme')`);
+    const cards = {
+      Developer: ['hh-task-flow', 'dev-engineering-rules'],
+      Tester: ['dev-engineering-rules', 'dev-testing-policy'],
+      Security: ['dev-security-review'],
+      Reviewer: ['dev-security-review', 'dev-review-verdict'],
+      Sales: ['sal-prospecting'],
+    };
+    for (const [name, skills] of Object.entries(cards)) {
+      await db.execute(sql`insert into agents (company_id, kind, name, model, skills) values (${C}, 'worker', ${name}, '', ${JSON.stringify(skills)}::jsonb)`);
+    }
+
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+
+    const rows = await db.execute<{ name: string; skills: string[] }>(sql`select name, skills from agents order by name`);
+    expect(rows.rows).toEqual([
+      { name: 'Developer', skills: ['hh-task-flow', 'dev-engineering-rules', 'dev-testing-policy'] },
+      { name: 'Reviewer', skills: ['dev-security-review', 'dev-review-verdict'] },
+      { name: 'Sales', skills: ['sal-prospecting'] },
+      { name: 'Security', skills: ['dev-security-review', 'dev-review-verdict'] },
+      { name: 'Tester', skills: ['dev-engineering-rules', 'dev-testing-policy'] },
+    ]);
+  });
+});
+
 describe('migration 0023', () => {
   const C = '00000000-0000-4000-8000-000000000001';
   const D = '00000000-0000-4000-8000-0000000000d1';
