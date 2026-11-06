@@ -10,6 +10,6 @@ export function canonicalWorkspaceRepositoryUrl(value: string): string | null {
 }
 
 function repositoryUrl(value: string): URL | null {
-  if (!/^https:\/\/[^/]/i.test(value) || /[\u0000-\u0020\u007f\\?#]/.test(value)) return null;
+  if (!/^https:\/\/[^/]/i.test(value) || /[\s\u0000-\u0020\u007f\\?#]/u.test(value)) return null;
   try { return new URL(value); } catch { return null; }
 }
