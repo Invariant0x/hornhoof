@@ -11,8 +11,9 @@ export type SqlMode = 'write' | 'read';
 export type AgentSql = { run: (text: string, mode: SqlMode) => Promise<SqlAnswer[]>; close: () => Promise<void> };
 
 /* Signing in, joining and installing a node stay out of reach, and so does the public link, whose address goes into
-   machine commands. Plans' sealed sign-ins too: a row put there would reach a node as its plan's sign-in. */
-export const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials', 'request_internal'];
+   machine commands. Plans' sealed sign-ins too: a row put there would reach a node as its plan's sign-in. Checks made by a
+   model too: their held-out examples stay away from who tunes a prompt, and no row put there can turn a check on. */
+export const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials', 'request_internal', 'model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations'];
 /* Columns that hold a password, a token or a key: neither role reads or writes them. A machine's key goes with
    every join from it, so it is one too. The account a node is signed in to names a person's email. */
 export const SECRET: Record<string, string[]> = {
