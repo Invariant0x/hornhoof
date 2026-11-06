@@ -1,4 +1,4 @@
-import { COMPANY_TEMPLATES, COMPANY_TEMPLATE_KEYS, DEPARTMENT_TEMPLATES } from '@hornhoof/protocol';
+import { defaultDepartmentWorkMode, COMPANY_TEMPLATES, COMPANY_TEMPLATE_KEYS, DEPARTMENT_TEMPLATES } from '@hornhoof/protocol';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -139,7 +139,7 @@ export function setupRoutes(app: FastifyInstance, ctx: Ctx): void {
             const roleCode = roleCodeOf(dept.template);
             const [row] = await tx
               .insert(departments)
-              .values({ companyId: company!.id, templateKey: dept.template, name: dept.name ?? null, roleCode, position: position++ })
+              .values({ companyId: company!.id, templateKey: dept.template, workMode: defaultDepartmentWorkMode(dept.template), name: dept.name ?? null, roleCode, position: position++ })
               .returning({ id: departments.id });
             for (const product of dept.products ?? []) {
               await tx.insert(departments).values({ companyId: company!.id, name: product, parentId: row!.id, roleCode, position: position++ });

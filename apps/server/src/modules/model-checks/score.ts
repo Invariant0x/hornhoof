@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { Case, CheckResult } from './contract.js';
+import type { Case, CheckResult } from '@hornhoof/protocol';
 import { asksToStop, type Dataset } from './dataset.js';
 
 export type Counts = { falseAllows: number; falseDenies: number; classErrors: number; total: number; unavailable: number; confusion?: Record<string, Record<string, number>> };
@@ -10,6 +10,8 @@ export type Thresholds = z.infer<typeof ThresholdsShape>;
 export type RunProblem = 'no_result' | 'must_block_missed' | 'over_threshold' | 'no_thresholds' | 'no_holdout' | 'no_must_block';
 export type Decision = { status: 'passed' | 'failed' | 'incomplete'; problems: RunProblem[] };
 
+/* Class names come from a list people write, so a table of them has no built-in keys like __proto__ to land on. */
+type Table = Record<string, Record<string, number>>;
 type ClassResult = Extract<CheckResult, { kind: 'classification' }>;
 type Mistakes = { falseAllow: boolean; falseDeny: boolean; classError: boolean };
 
@@ -45,8 +47,8 @@ function mistakesOf(row: Case, result: CheckResult): Mistakes {
 }
 
 function addConfusion(into: Counts, expected: string, actual: string): void {
-  const table = (into.confusion ??= {});
-  const row = (table[expected] ??= {});
+  const table: Table = (into.confusion ??= Object.create(null) as Table);
+  const row = (table[expected] ??= Object.create(null) as Record<string, number>);
   row[actual] = (row[actual] ?? 0) + 1;
 }
 

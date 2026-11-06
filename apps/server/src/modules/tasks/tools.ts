@@ -11,6 +11,9 @@ import { carriesFile, encodedHint } from './attachments.js';
 import { Text } from './long-text.js';
 import { agentSeesTask as sees, taskByRef, taskDetail, taskLines, type TaskDetail } from './views.js';
 import { addTasks, editTurn, mergeTurn, planTurn, settle, tell, TURN_MESSAGES, turnName, turnRows } from './turns.js';
+import { setUrgent } from './urgency.js';
+import { answersCeoOrDelegate } from '../conversation/decision-context.js';
+import { ONLY_CEO } from '../tools/control.js';
 import { stopTurns, wakeAll } from './wake.js';
 import { orchestratorOf } from '../conversation/queue.js';
 import { appendOutgoing } from '../events/store.js';
@@ -59,6 +62,8 @@ const After = z
   .array(Ref)
   .max(10)
   .describe('Tasks of this turn that must be done first, by number. The task waits, and its executor is woken by itself once the last of them is done.');
+const IndependentPart = z.strictObject({ title: Title, brief: Brief, body: Body, executor: z.uuid() }).describe('The part that can start before the tasks in after finish, and who does it.');
+const IndependentNone = z.string().trim().min(1).max(2000).describe('Why no independent part exists: one file author, a genuine dependency, or a release boundary.');
 const WorkKind = z.enum(WORK_KINDS).describe('What kind of work it is: a bug, known behavior to build, an unknown path, or old code. The pipeline report counts by it.');
 const RiskClass = z.enum(RISK_CLASSES).describe('What a mistake in it would cost: money, access, security, data, or none.');
 const Improvement = z.uuid().describe("The improvement these tasks take into work after a person's instruction, from improvements.");
@@ -270,7 +275,14 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
   );
 
   if (job.agentKind === 'orchestrator') {
-    const Item = z.object({ department: z.uuid(), product: z.uuid().optional(), title: Title, brief: Brief, body: Body, workKind: WorkKind.optional(), riskClass: RiskClass.optional() });
+    const Item = z.object({ department: z.uuid(), product: z.uuid().optional(), title: Title, brief: Brief, body: Body, workKind: WorkKind.optional(), riskClass: RiskClass.optional(), urgent: z.boolean().optional().describe('The CEO says this work is urgent, in the turn that answers them. Work under it is too. Never from its title or an employee.') });
+    /* The orchestrator says work is urgent only for the CEO or the CEO delegate the turn answers. */
+    const forCeoAlone = async () => {
+      if (!(await answersCeoOrDelegate(db, job.id))) throw refuse(403, 'urgent_not_allowed', ONLY_CEO);
+    };
+    const urgentFromCeo = async (items: { urgent?: boolean | undefined }[]) => {
+      if (items.some(item => item.urgent)) await forCeoAlone();
+    };
     const Turn = z.number().int().positive().describe('The turn number, like 2.');
     const Words = z
       .number()
@@ -316,6 +328,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
       async input =>
         run(async () => {
           await underCap(await me(), input.tasks.length);
+          await urgentFromCeo(input.tasks);
           const moved = await planTurn(ctx, { companyId: job.companyId, agentId: job.agentId, jobId: job.id }, input);
           return { text: moved.text, moved };
         }),
@@ -331,8 +344,24 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
       async input =>
         run(async () => {
           await underCap(await me(), input.tasks.length);
+          await urgentFromCeo(input.tasks);
           const moved = await addTasks(ctx, { companyId: job.companyId, agentId: job.agentId, jobId: job.id }, input.turn, input.tasks, input.words, input.improvement);
           return { text: moved.text, moved };
+        }),
+    );
+    server.registerTool(
+      'set_urgent',
+      {
+        description:
+          'Says whether a task with nothing above it is urgent, with all the work under it: only when the CEO or the CEO delegate says so, in the turn that answers them, and never from a task\'s title or an employee. Nobody is woken and nothing else of the work changes.',
+        inputSchema: { task: Ref, urgent: z.boolean() },
+      },
+      async ({ task: ref, urgent }) =>
+        run(async () => {
+          await forCeoAlone();
+          const { agent, task } = await find(ref);
+          const moved = await setUrgent(ctx, { agentId: agent.id }, task.id, urgent);
+          return { text: `#${moved.task.number} is ${urgent ? 'urgent' : 'not urgent'} now, with all the work under it.`, moved };
         }),
     );
     server.registerTool(
@@ -366,14 +395,15 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
       {
         description:
           'Gives work to a member of your department: executor is an employee id from company. Name yourself only when no member can do it. gates are the reviewers it passes in order, as role ids (DEV-REV) or employee ids: ' +
-          "leave them out for code in a repository under your department's task of the turn, which the review of the turn checks all at once; [] for research, reports, plans and docs; name one only where a change must not reach the turn's branch unchecked. Name a role once: one reviewer of each model of it checks the work at once there. Left out anywhere else, the department's first review stage. The executor never reviews its own work. parent: the department task it serves.",
-        inputSchema: { title: Title, brief: Brief, body: Body, executor: z.uuid(), gates: z.array(z.string().max(40)).max(8).optional(), parent: Ref.optional(), product: z.uuid().optional(), after: After.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional() },
+          "leave them out for code in a repository under your department's task of the turn, which the review of the turn checks all at once; [] for research, reports, plans and docs; name one only where a change must not reach the turn's branch unchecked. Name a role once: one reviewer of each model of it checks the work at once there. Left out anywhere else, the department's first review stage. The executor never reviews its own work. parent: the department task it serves. after needs independentPart or independentNone.",
+        inputSchema: { title: Title, brief: Brief, body: Body, executor: z.uuid(), gates: z.array(z.string().max(40)).max(8).optional(), parent: Ref.optional(), product: z.uuid().optional(), after: After.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional() },
       },
       async input =>
         run(async () => {
           const agent = await me();
           await underCap(agent);
           const executor = await member(agent, input.executor);
+          if (input.independentPart) await member(agent, input.independentPart.executor);
           if (input.product) {
             const [product] = await db.select({ id: departments.id }).from(departments).where(and(eq(departments.id, input.product), eq(departments.parentId, agent.departmentId!)));
             if (!product) throw refuse(404, 'department_unknown', `${input.product} is not a product of your department.`);
@@ -384,7 +414,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
           const inTurnReview = await turnReviewed(db, agent, executor, parent, input);
           const gates = inTurnReview || (executor.teamId && input.gates === undefined) ? [] : await gatesFor(agent, executor.id, input.gates);
           const after = await afterIds(input.after);
-          const moved = await createTask(ctx, { agentId: agent.id }, { title: input.title, brief: input.brief, body: input.body, departmentId: agent.departmentId, productId: input.product ?? null, parentId: parent?.id ?? null, assigneeAgentId: executor.id, executor: true, gates, after, inTurnReview, workKind: input.workKind, riskClass: input.riskClass });
+          const moved = await createTask(ctx, { agentId: agent.id }, { title: input.title, brief: input.brief, body: input.body, departmentId: agent.departmentId, productId: input.product ?? null, parentId: parent?.id ?? null, assigneeAgentId: executor.id, executor: true, gates, after, independentPart: input.independentPart, independentNone: input.independentNone, inTurnReview, workKind: input.workKind, riskClass: input.riskClass });
           return { text: `Created #${moved.task.number} for ${executor.name}${gates.length ? ` with ${gates.length} gate${gates.length > 1 ? 's' : ''}` : ''}.${await waiting(moved.task)}`, moved };
         }),
     );
@@ -399,7 +429,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
             'Whoever holds it is woken with the change. A blocked task opens again. after: the tasks of its turn it waits for from now on, [] to start it now.'
           : "Rewrites one of your department's member tasks so it reads as the current truth, or hands it to another executor or gates (only while it is with its executor). " +
             'A task waiting at a gate with nobody on to check it takes new gates from that gate on. A blocked task opens again. after: the tasks of its turn it waits for from now on, [] to start it now.',
-        inputSchema: { task: Ref, title: Title.optional(), brief: Brief.optional(), body: Body.optional(), executor: z.uuid().optional(), gates: z.array(z.string().max(40)).max(8).optional(), after: After.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional() },
+        inputSchema: { task: Ref, title: Title.optional(), brief: Brief.optional(), body: Body.optional(), executor: z.uuid().optional(), gates: z.array(z.string().max(40)).max(8).optional(), after: After.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional() },
       },
       async ({ task: ref, executor, gates, after, ...text }) =>
         run(async () => {
@@ -409,6 +439,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
           const head = boss ? { ...agent, departmentId: task.departmentId } : agent;
           if (head.departmentId === null && (executor !== undefined || gates !== undefined)) throw refuse(400, 'task_invalid', `#${task.number} has no executor or gates.`);
           const next = executor !== undefined ? (await member(head, executor)).id : undefined;
+          if (text.independentPart) await member(head, text.independentPart.executor);
           const gateIds = gates !== undefined ? await gatesFor(head, next ?? task.executorAgentId!, gates) : undefined;
           const moved = await updateTask(ctx, agent.id, task.id, { ...text, executor: next, gates: gateIds, ...(after !== undefined ? { after: await afterIds(after) } : {}) });
           return { text: `Updated. ${await where(moved.task)}`, moved };

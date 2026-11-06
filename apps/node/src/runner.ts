@@ -1,14 +1,21 @@
 import { mkdirSync } from 'node:fs';
-import { join } from 'node:path';
-import { cut, lastBytes, repoFolder, type Account, type AgentEvent, type Failure, type JobError, type Limits, type ModelOption, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
+import { dirname, join } from 'node:path';
+import { cut, lastBytes, repoFolder, type Account, type AgentEvent, type Failure, type JobError, type Limits, type ModelOption, type NodeMessage, type ProviderId, type ServerMessage } from '@hornhoof/protocol';
 import { agentFs, ownFs, type AgentFs } from './agent-fs.js';
 import { ensureRepoBrowser, writeBrowserError } from './browser.js';
 import type { JobUser } from './isolation.js';
 import { redact } from './redact.js';
 import { plainOutput, programEnded, signalName, type ProgramOutput } from './program-exit.js';
-import { placeSkills, superpowersIn } from './skills.js';
+import { carrySession, CARRIES, freshStart, programDirOf, readyProgramFolder } from './program-folder.js';
+import { placeSkills, skillPaths, superpowersIn } from './skills.js';
 import { readSessions, rememberSession } from './state.js';
 import { prepareRepo, type Git } from './workspace.js';
+
+/* The task's folder a turn runs in, from the node itself once it admitted and prepared it, and never from a message. The
+   worktree stands right inside the task's context folder. binding: what retiring its program goes by. catchUp: what a session
+   that starts anew there knows of the task, short and of this task alone. */
+export type ProgramBinding = { workspaceId: string; bindingVersion: number };
+export type ProgramWorkspace = { programDir: string; binding: ProgramBinding; catchUp?: string | null };
 
 export type RunInput = {
   /* The agent whose turn this is, from its workspace; a test job has none. */
@@ -22,7 +29,12 @@ export type RunInput = {
   effort?: string | null;
   /* How full Claude Code's context gets before it compacts the conversation; none leaves it at the program's own. */
   compactWindow?: number | null;
+  /* The folder of Hornhoof's own files for this turn: what it tells the program, and what it keeps. */
   workDir: string;
+  /* The task's worktree the program works in, when its turn belongs to a task; it works in workDir otherwise. */
+  programDir?: string;
+  /* What ties the program to its task, kept from when it starts. */
+  workspaceBinding?: ProgramBinding;
   secret: string | null;
   timeoutMs: number;
   /* Aborted when the job is called off, for example when Hornhoof removes the subscription. */
@@ -103,14 +115,63 @@ const message = (err: unknown) => (err instanceof Error ? err.message : String(e
 /* An agent's turn works in the agent's own folder; a session this node saved in another folder cannot go on there, so
    the turn starts a new one. Other jobs work in the folder of the session they resume, or a new one. Only sessions this
    node saved count: one from another machine, or from before a fresh volume, is not here to resume, so the turn starts a new one. */
-function workDirFor(msg: JobRun, dir: string): { workDir: string; sessionId: string | null } {
+function workDirFor(msg: JobRun, dir: string, programDir: string | null, carries: ReadonlySet<ProviderId>): { workDir: string; sessionId: string | null } {
   const saved = msg.sessionId ? readSessions(dir) : {};
   const known = msg.sessionId && Object.hasOwn(saved, msg.sessionId) ? saved[msg.sessionId] : undefined;
+  if (programDir) return { workDir: dirname(programDir), sessionId: sessionInTask(msg, programDir, known, carries) };
   if (msg.workspace) {
     const workDir = join(dir, 'work', 'agents', msg.workspace.key);
     return { workDir, sessionId: known === workDir ? msg.sessionId : null };
   }
   return typeof known === 'string' ? { workDir: known, sessionId: msg.sessionId } : { workDir: join(dir, 'work', msg.jobId), sessionId: null };
+}
+
+/* A session goes on in the task's folder it was saved in. From another folder only a program proven to take it along keeps it. */
+function sessionInTask(msg: JobRun, programDir: string, known: string | undefined, carries: ReadonlySet<ProviderId>): string | null {
+  if (known === programDir) return msg.sessionId;
+  return known && carrySession(msg.provider, carries) === 'carried' ? msg.sessionId : null;
+}
+
+/* The agent's files as its program's user has them, for the time this work takes. */
+async function withOwnFs(adapter: ProviderAdapter, work: (own: AgentFs) => Promise<void>): Promise<void> {
+  const own = adapter.owner?.fs ?? (adapter.owner?.user ? agentFs(adapter.owner.user) : ownFs);
+  try {
+    await work(own);
+  } finally {
+    if (own !== adapter.owner?.fs) own.stop();
+  }
+}
+
+/* Gets the folders of a turn ready and its skills in place, in the folder its program works in. */
+async function readyFolders(adapter: ProviderAdapter, { provider, skills }: JobRun, workDir: string, programDir: string | null, superpowers: string | null): Promise<void> {
+  if (!skills && !programDir) return;
+  await withOwnFs(adapter, async own => {
+    if (programDir) await readyProgramFolder(own, provider, workDir, programDir, skills ? skillPaths(provider, skills, superpowers) : []);
+    if (skills) await placeSkills(own, programDir ?? workDir, provider, skills, superpowers);
+  });
+}
+
+type TurnPlace = Pick<RunInput, 'workDir' | 'programDir' | 'workspaceBinding'> & { sessionId: string | null; context: string | null };
+
+async function readyWorkDir({ owner }: ProviderAdapter, workDir: string): Promise<void> {
+  if (owner?.mkdir) await owner.mkdir(workDir);
+  else mkdirSync(workDir, { recursive: true });
+  owner?.prepare(workDir);
+}
+
+/* A session the program loses with its folder is told of, and what it may know from before goes with the new one. */
+const anewInTask = (inTask: ProgramWorkspace | undefined, known: string | null, sessionId: string | null) => (inTask && known && !sessionId ? freshStart(inTask.catchUp) : null);
+
+/* Where a turn runs and what it goes on from, in folders ready for it. */
+async function placeOfTurn(adapter: ProviderAdapter, msg: JobRun, dir: string, emit: (event: AgentEvent) => void, { workspace, carries, superpowers }: { workspace: ProgramWorkspace | undefined; carries: ReadonlySet<ProviderId>; superpowers: string | null }): Promise<TurnPlace> {
+  const inTask = msg.workspace ? workspace : undefined;
+  const programDir = inTask?.programDir ?? null;
+  const { workDir, sessionId } = workDirFor(msg, dir, programDir, carries);
+  await readyWorkDir(adapter, workDir);
+  await readyFolders(adapter, msg, workDir, programDir, superpowers);
+  const anew = anewInTask(inTask, msg.sessionId, sessionId);
+  if (anew) emit({ kind: 'text', text: anew.note });
+  return { workDir, sessionId, context: anew?.context ?? msg.context ?? null, ...(inTask && { programDir: inTask.programDir, workspaceBinding: inTask.binding }) };
 }
 
 type RunOptions = {
@@ -130,6 +191,10 @@ type RunOptions = {
   superpowers?: string | null;
   /* Ensures the repository lockfile's Playwright Chromium is ready and launchable before the turn starts. */
   prepareRepoBrowser?: (repoDir: string, verifyUser: JobUser | null) => Promise<void>;
+  /* The task's folder this turn runs in. */
+  workspace?: ProgramWorkspace;
+  /* The programs that take a session along into a task's folder; those a live check proved by default. */
+  carries?: ReadonlySet<ProviderId>;
 };
 
 /* The repository a turn works in, with its lockfile's browser. A browser that cannot start is told in browser-error, and the
@@ -158,7 +223,7 @@ export function tidy(event: AgentEvent, secrets: string[]): AgentEvent {
 }
 
 /* Always ends with a job.done, whatever breaks on the way. */
-export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string, { hidden = [], signal, toolsUrl, onEvent, git, beforeRun = async () => {}, untimed = false, superpowers = superpowersIn(), prepareRepoBrowser = (repoDir, verifyUser) => ensureRepoBrowser(dir, repoDir, verifyUser) }: RunOptions = {}): Promise<JobDone> {
+export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string, { hidden = [], signal, toolsUrl, onEvent, git, beforeRun = async () => {}, untimed = false, superpowers = superpowersIn(), prepareRepoBrowser = (repoDir, verifyUser) => ensureRepoBrowser(dir, repoDir, verifyUser), workspace, carries = CARRIES }: RunOptions = {}): Promise<JobDone> {
   /* Programs refresh their tokens during a run, so the values from before, during and after are all hidden. */
   const before = await adapter.secrets().catch(() => []);
   const repo = msg.workspace?.repo ?? null;
@@ -177,19 +242,8 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
   };
   let res: RunResult;
   try {
-    const { workDir, sessionId } = workDirFor(msg, dir);
-    if (adapter.owner?.mkdir) await adapter.owner.mkdir(workDir);
-    else mkdirSync(workDir, { recursive: true });
-    adapter.owner?.prepare(workDir);
-    if (msg.skills) {
-      const own = adapter.owner?.fs ?? (adapter.owner?.user ? agentFs(adapter.owner.user) : ownFs);
-      try {
-        await placeSkills(own, workDir, msg.provider, msg.skills, superpowers);
-      } finally {
-        if (own !== adapter.owner?.fs) own.stop();
-      }
-    }
-    const repoEnv = repo ? await openRepo(repo, workDir, { user: adapter.owner?.user ?? null, home: adapter.owner?.home ?? null }, dir, git, prepareRepoBrowser) : undefined;
+    const place = await placeOfTurn(adapter, msg, dir, emit, { workspace, carries, superpowers });
+    const repoEnv = repo ? await openRepo(repo, place.workDir, { user: adapter.owner?.user ?? null, home: adapter.owner?.home ?? null }, dir, git, prepareRepoBrowser) : undefined;
     /* hh-attach sends the turn's pictures with its token. The name has no KEY, SECRET or TOKEN in it, so Codex passes it on. */
     const attachEnv = tools ? { HH_ATTACH_URL: tools.url.replace(/\/mcp$/, '/api/attachments'), HH_ATTACH_PASS: tools.token } : undefined;
     const env = repoEnv || attachEnv ? { ...repoEnv, ...attachEnv } : undefined;
@@ -197,16 +251,14 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
       agentKey: msg.workspace?.key ?? null,
       jobId: msg.jobId,
       prompt: msg.prompt,
-      sessionId,
       model: msg.model,
       effort: msg.effort ?? null,
       compactWindow: msg.compactWindow ?? null,
-      workDir,
+      ...place,
       secret: msg.secret,
       timeoutMs: msg.timeoutMs,
       signal,
       instructions: msg.instructions,
-      context: msg.context ?? null,
       guidance: msg.guidance ?? null,
       tools,
       onEvent: emit,
@@ -215,7 +267,7 @@ export async function runJob(adapter: ProviderAdapter, msg: JobRun, dir: string,
     await beforeRun();
     const run = adapter.run(input).catch((err: unknown) => failed(message(err), 'agent_failed'));
     res = await (untimed ? run : withTimeout(run, msg.timeoutMs));
-    if (res.sessionId) rememberSession(dir, res.sessionId, workDir);
+    if (res.sessionId) rememberSession(dir, res.sessionId, programDirOf(place));
   } catch (err) {
     res = failed(message(err), 'agent_failed');
   }

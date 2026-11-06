@@ -1,13 +1,14 @@
 import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { AgentEvent, ModelOption } from '@hornhoof/protocol';
 import { CRED_FILES, credentialSecrets } from '../credentials.js';
 import type { JobUser } from '../isolation.js';
+import { programDirOf, toldPlace } from '../program-folder.js';
 import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
 import { withProgramExit } from '../program-exit.js';
 import { kimiPlanLimits } from '../terminal/programs.js';
 import { contentText, inputText, isRecord, objectLine, toolName } from './events.js';
-import { childEnv, ensureDir, installPackage, interactiveLogin, runProgram, tokensIn, withEfforts, writePrivate } from './process.js';
+import { agentDir, childEnv, ensureDir, installPackage, interactiveLogin, runProgram, tokensIn, withEfforts, writePrivate } from './process.js';
 import { KIMI_NO_AUTO_UPDATE } from './session-updates.js';
 import { NPM_PACKAGES } from './packages.js';
 
@@ -91,6 +92,13 @@ export function kimiContextSize(config: string, model: string | null): number | 
   return Number.isInteger(size) && size > 0 ? size : null;
 }
 
+/* Kimi Code reads what it is told from the folder it works in; in a task's folder, from a file of its own there. */
+function tellKimi(input: RunInput, instructions: string, user: JobUser | null): void {
+  const { file } = toldPlace('kimi', input);
+  if (input.programDir) agentDir(dirname(file), user);
+  writePrivate(file, instructions + '\n', user);
+}
+
 export function kimiAdapter({ home, tools, bin = join(tools, 'bin', 'kimi'), user = null }: Options): ProviderAdapter {
   const env = (toolToken: string | null = null) => {
     const own = childEnv(tools, { KIMI_CODE_HOME: ensureDir(home), ...KIMI_NO_AUTO_UPDATE, ...(toolToken ? { HH_TOOL_TOKEN: toolToken } : {}) });
@@ -138,7 +146,7 @@ export function kimiAdapter({ home, tools, bin = join(tools, 'bin', 'kimi'), use
         const server = { transport: 'http', url: input.tools.url, bearerTokenEnvVar: 'HH_TOOL_TOKEN' };
         writePrivate(mcpJson, JSON.stringify({ mcpServers: { hornhoof: server } }), user);
       } else rmSync(mcpJson, { force: true });
-      if (input.instructions) writePrivate(join(input.workDir, 'AGENTS.md'), input.instructions + '\n', user);
+      if (input.instructions) tellKimi(input, input.instructions, user);
 
       let sessionId: string | null = input.sessionId;
       let answer = '';
@@ -147,7 +155,7 @@ export function kimiAdapter({ home, tools, bin = join(tools, 'bin', 'kimi'), use
         args,
         env: { ...env(input.tools?.token ?? null), ...(input.effort ? { KIMI_MODEL_THINKING_EFFORT: input.effort } : {}), ...input.env },
         user,
-        cwd: input.workDir,
+        cwd: programDirOf(input),
         timeoutMs: input.timeoutMs,
         signal: input.signal,
         onLine(line) {

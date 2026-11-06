@@ -272,4 +272,16 @@ describe('tasks for people', () => {
     expect((await post(ceo, '/api/departments/build', { items: [{ department: dev.id, note: '', remove: true }] })).statusCode).toBe(201);
     expect((await db.select().from(tasks))[0]).toMatchObject({ departmentId: null, status: 'cancelled' });
   });
+
+  it('hides an independent executor from a person who does not see that agent', async () => {
+    const { app, ctx, db, dev, head, bruno, oleg } = await company();
+    await ownPlan(db, 'oleg@acme.com', head.id);
+    const prerequisite = (await createTask(ctx, { agentId: head.id }, { title: 'Prerequisite', brief: '', body: '', departmentId: dev.id, assigneeAgentId: head.id })).task;
+    const made = await app.inject({ method: 'POST', url: '/api/tasks', payload: {
+      title: 'Launch', department: dev.id, after: [prerequisite.number],
+      independentPart: { title: 'Examples', brief: '', body: 'Write examples.', executor: bruno.id },
+    }, ...as(oleg) });
+    expect(made.statusCode).toBe(201);
+    expect(made.json().task.independentPart).toBeNull();
+  });
 });

@@ -9,7 +9,7 @@ sources: [addyosmani/agent-skills skills/ci-cd-and-automation/SKILL.md, wshobson
 
 **The turn's final check.** When the head gives it, run the whole pipeline once on the turn's branch, into which each executor merged its own work, with the tests the turn added, and hand back the commit and, for each failure, the test and the change that broke it. The test suite goes through run_tests, so it runs on a free machine of the company and not on yours; when its runner can split, run it in parts with {part} and {parts}, and read each part's log on the task.
 
-**Fixing CI.** Read the failing job's log from the top of the first error. Reproduce it locally with the same command. Fix the cause; never skip, mute or retry a check to get green. Note flaky jobs and hand them to tests.
+**Fixing CI.** Read the failing job's log from the top of the first error. Diagnose and reproduce a heavy failure on the same pinned commit and command through `run_tests` (`hh-run-checks`), using your local terminal only when one regular test file isolates the fault during RED/GREEN. Fix the cause; never skip, mute or retry a check to get green. Note flaky jobs and hand them to tests.
 
 **Version scheme.** Follow the project's own scheme. If it has none, use SemVer syntax `X.N.P` with one version for the repository and all its packages:
 - A turn N ships as `X.N.0`, even if it contains only fixes. N stays the turn number after 1.0, without resetting: an approved first-digit increase from `0.150.0` gives `1.150.0`.
