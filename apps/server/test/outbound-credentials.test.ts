@@ -5,19 +5,12 @@ import { outboundAccounts } from '../src/db/schema.js';
 import { outboundRound } from '../src/modules/outbound/dispatcher.js';
 import { smtpAdapter } from '../src/modules/outbound/smtp.js';
 import { as } from './helpers.js';
-import { FROM, SIGNING_KEY, EVENT_KEY, hookWay, liveSenders, smtpSettings, smtpWay, submitByTool } from './outbound-live-world.js';
+import { FROM, SIGNING_KEY, EVENT_KEY, closeKept, hookWay, keep, liveSenders, smtpSettings, smtpWay, submitByTool } from './outbound-live-world.js';
 import { CERT, PASSWORD, USERNAME, hookReceiver, smtpReceiver, type HookRequest } from './outbound-receivers.js';
 import { QUIET, world, type World } from './outbound-world.js';
 
 /* A known synthetic secret, really used against control receivers, and then looked for in everything an author can reach. */
-const closing: (() => Promise<unknown>)[] = [];
-const keep = <T extends { close: () => Promise<unknown> }>(running: T): T => {
-  closing.push(running.close);
-  return running;
-};
-afterEach(async () => {
-  await Promise.all(closing.splice(0).map(close => close()));
-});
+afterEach(closeKept);
 
 const SECRETS = [PASSWORD, SIGNING_KEY, EVENT_KEY];
 const expectNoSecretIn = (seen: string) => {

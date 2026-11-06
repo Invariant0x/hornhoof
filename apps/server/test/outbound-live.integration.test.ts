@@ -7,19 +7,12 @@ import { reserveDispatch } from '../src/modules/outbound/core.js';
 import { outboundRound } from '../src/modules/outbound/dispatcher.js';
 import { smtpAdapter } from '../src/modules/outbound/smtp.js';
 import { as } from './helpers.js';
-import { EVENT_KEY, FROM, SIGNING_KEY, frozenOf, hookWay, liveSenders, rotateTo, settleAs, smtpSettings, smtpWay, submitByTool } from './outbound-live-world.js';
+import { EVENT_KEY, FROM, SIGNING_KEY, closeKept, frozenOf, hookWay, keep, liveSenders, rotateTo, settleAs, smtpSettings, smtpWay, submitByTool } from './outbound-live-world.js';
 import { closedPort, hookReceiver, scriptedSmtp, silentPort, smtpReceiver, subjectOf, wordsOf, type HookRequest } from './outbound-receivers.js';
 import { QUIET, anAccountOf, dispatched, world, type World } from './outbound-world.js';
 
 /* The whole way, from an agent's tool to bytes on a real wire and back. Control receivers on this machine, synthetic secrets. */
-const closing: (() => Promise<unknown>)[] = [];
-const keep = <T extends { close: () => Promise<unknown> }>(running: T): T => {
-  closing.push(running.close);
-  return running;
-};
-afterEach(async () => {
-  await Promise.all(closing.splice(0).map(close => close()));
-});
+afterEach(closeKept);
 
 const attemptsOf = (w: World, messageId: string) => w.c.db.select().from(outboundAttempts).where(eq(outboundAttempts.messageId, messageId));
 const round = (w: World, senders = liveSenders()) => outboundRound(w.ctx, new Date(), senders);

@@ -12,6 +12,16 @@ import { aChannelOf, aPermissionOf, aPolicyOf, documentOf, partsOf, type World }
 
 /* The way an owner really sets a sending account up and an author really sends, against control receivers on this machine,
    with synthetic secrets. Nothing here reaches anyone else. */
+const kept: (() => Promise<unknown>)[] = [];
+/* A receiver that closes when the test ends. */
+export const keep = <T extends { close: () => Promise<unknown> }>(running: T): T => {
+  kept.push(running.close);
+  return running;
+};
+export const closeKept = async (): Promise<void> => {
+  await Promise.all(kept.splice(0).map(close => close()));
+};
+
 export const EVENT_KEY = `${PASSWORD}-events-0123456789abcdef`;
 export const SIGNING_KEY = `${PASSWORD}-signing-0123456789abcdef`;
 export const FROM = 'sender@acme.test';
