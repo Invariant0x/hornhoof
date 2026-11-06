@@ -18,7 +18,7 @@ type Mode = TestRunFileCache['mode'];
 const KEPT_DAYS = 30;
 const SHOWN_FILES = 30;
 
-const printKey = (unit: TestFileKey, fingerprint: string): string => `${keyOf(unit)}\0${fingerprint}`;
+export const printKey = (unit: TestFileKey, fingerprint: string): string => `${keyOf(unit)}\0${fingerprint}`;
 
 /* Due on a multiple of the interval, or when a multiple went by without one, and not twice in one turn. */
 export function fullRunDue({ turn, everyTurns, lastFullTurn }: { turn: number | null; everyTurns: number; lastFullTurn: number | null }): boolean {

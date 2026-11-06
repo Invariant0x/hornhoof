@@ -43,7 +43,7 @@ export async function mutateSources(sources, fastTests, mutate) {
 }
 
 function mutate(tool, source, tests) {
-  const { HH_TEST_FILES, HH_TEST_REPORT, ...env } = process.env;
+  const env = { ...process.env, HH_TEST_FILES: '', HH_TEST_REPORT: '' };
   const args = ['--root', '.', '--source-root', source, '--no-coverage', '--max-workers', WORKERS, '--test-command', testCommand(tests)];
   return new Promise(done => {
     const child = spawn(tool, args, { env, stdio: ['ignore', 'pipe', 'inherit'] });

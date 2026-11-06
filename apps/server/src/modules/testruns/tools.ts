@@ -37,7 +37,8 @@ export function registerTestTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     'run_tests',
     {
       description:
-        "Without command, runs the pinned product manifest suite/profile with reusable isolated preparation. With command, runs the manual command. Runs a branch's full test suite on whichever machine of the company is free now, not on yours, and returns at once with the run's number. " +
+        "Without command, runs the pinned product manifest suite/profile with reusable isolated preparation, splits it over the free machines and collects the result. Where the manifest declares a full run, a test file whose fingerprint (the file, the code it depends on, the environment) already has a green result does not run again, a failed file always does, and every so many turns everything runs and any mismatch with the kept results is named. " +
+        "With command, runs the manual command. Runs a branch's full test suite on whichever machine of the company is free now, not on yours, and returns at once with the run's number. " +
         "Hornhoof pins the commit the branch is at now before any part goes out, and says which: every part checks exactly that commit in a fresh folder, whatever is pushed meanwhile, and " +
         "a part that checked another one fails the run. The command runs there as in CI, so it installs what it needs first. When every part has ended, however it ended, you are woken on the task, even in a wait_for of yours there, and a wait_for that named this run ends. " +
         `The result says passed or failed, the pinned commit, each part's machine and time, and the last lines of what failed; each part's full log goes on the task as tests-<run>-<part>.log. ` +
@@ -58,7 +59,7 @@ export function registerTestTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
   );
   server.registerTool(
     'test_run',
-    { description: "How a test run goes: its state, the commit it pinned (commitSha), and each part's state, machine, the commit it checked, exit code, log file and, for a failed one, the end of its log.", inputSchema: { run: Run } },
+    { description: "How a test run goes: its state, the commit it pinned (commitSha), and each part's state, machine, the commit it checked, exit code, log file and, for a failed one, the end of its log. A product run that reuses results also says in reuse how many it reused, which test files failed, any mismatch with the kept results and what results came to, as mutation's survivors.", inputSchema: { run: Run } },
     async ({ run }) => answer(async () => JSON.stringify(await queuedRunState(ctx, job, run))),
   );
   server.registerTool(

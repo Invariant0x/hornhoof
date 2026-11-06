@@ -280,7 +280,7 @@ describe('what the scanner follows', () => {
   });
 
   it('files that import each other change together, and what imports them with them', async () => {
-    const files = { ...app, 'apps/a/src/deep.ts': "import { used } from './used.js';\nexport const deep = used;\n" };
+    const files: Files = { ...app, 'apps/a/src/deep.ts': "import { used } from './used.js';\nexport const deep = used;\n" };
     expect(reaching(files, 'apps/a/test/used.test.ts')).toContain('apps/a/src/deep.ts');
     expect(await changed(input(files, manifest(suites)), input({ ...files, 'apps/a/src/deep.ts': `${files['apps/a/src/deep.ts']}// more\n` }, manifest(suites)))).toEqual(['a:apps/a/test/used.test.ts']);
     expect(await changed(input(files, manifest(suites)), input({ ...files, 'apps/a/src/used.ts': `${files['apps/a/src/used.ts']}// more\n` }, manifest(suites)))).toEqual(['a:apps/a/test/used.test.ts']);
@@ -322,8 +322,8 @@ describe('scenarios that drive a screen', () => {
   });
 
   it('a scenario named for a family of screens follows that family', async () => {
-    const family = { ...web, 'apps/web/src/screens/TreeCard.tsx': 'export const TreeCard = 1;\n', 'apps/web/src/Tree.tsx': '' };
-    delete family['apps/web/src/screens/Tree.tsx']; delete family['apps/web/src/Tree.tsx'];
+    const family: Files = { ...web, 'apps/web/src/screens/TreeCard.tsx': 'export const TreeCard = 1;\n' };
+    delete family['apps/web/src/screens/Tree.tsx'];
     const edited = await changed(input(family, value), input({ ...family, 'apps/web/src/screens/TreeCard.tsx': 'export const TreeCard = 2;\n' }, value));
     expect(edited).toContain('browser:apps/web/e2e/tree.spec.ts');
     expect(await changed(input(family, value), input({ ...family, 'apps/web/src/ui/AgentCard.tsx': 'export const AgentCard = 2;\n' }, value))).not.toContain('browser:apps/web/e2e/tree.spec.ts');

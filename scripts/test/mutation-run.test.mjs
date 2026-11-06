@@ -41,6 +41,6 @@ test('a source no fast test reaches fails without running, and the others still 
     return { code: 3, output: table(1, 1, 0, 2) };
   });
   assert.deepEqual(ran, [['a/some.ts', ['a/test/some.test.ts']]]);
-  assert.deepEqual(files.map(({ ms, ...file }) => file), [{ file: 'a/none.ts', status: 'failed' }, { file: 'a/some.ts', status: 'passed', note: '1 killed, 1 survived, 0 uncovered of 2 sites' }]);
   assert.ok(files.every(file => file.ms >= 0));
+  assert.deepEqual(files.map(file => ({ ...file, ms: 0 })), [{ file: 'a/none.ts', status: 'failed', ms: 0 }, { file: 'a/some.ts', status: 'passed', note: '1 killed, 1 survived, 0 uncovered of 2 sites', ms: 0 }]);
 });

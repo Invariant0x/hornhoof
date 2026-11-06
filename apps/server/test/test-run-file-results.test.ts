@@ -63,13 +63,14 @@ async function fixture(turnNumber = 3, everyTurns = 5) {
     return selection.kind === 'batch' ? selection.selections.flatMap(member => member.files) : [];
   }).sort();
   /* The node's end of every open part of a run. */
-  const finish = async (runId: string, how: { ok?: boolean; files?: { suiteId: string; file: string; status: 'passed' | 'failed'; note?: string }[]; commit?: string; error?: string } = {}) => {
+  const finish = async (runId: string, how: { ok?: boolean; files?: { suiteId: string; file: string; status: 'passed' | 'failed'; note?: string }[]; commit?: string } = {}) => {
     const { ok = true, commit = TEST_COMMIT } = how, run = await runOf(runId);
     for (const part of await partsOf(runId)) {
       if (part.status !== 'running') continue;
       const selection = part.environmentSelection!.selection;
+      if (selection.kind !== 'batch' && selection.kind !== 'prepare') throw new Error('This fixture plans versioned parts.');
       const count = selection.kind === 'batch' ? selection.selections.length : 0;
-      const message: Extract<NodeMessage, { type: 'tests.done' }> = { type: 'tests.done', partId: part.id, ok, error: ok ? null : how.error ?? 'failed', exitCode: ok ? 0 : 1, commit, log: 'Fixture result',
+      const message: Extract<NodeMessage, { type: 'tests.done' }> = { type: 'tests.done', partId: part.id, ok, error: ok ? null : 'failed', exitCode: ok ? 0 : 1, commit, log: 'Fixture result',
         ...(how.files ? { files: how.files } : {}),
         environmentReceipt: { version: 2, profile: run.environmentSnapshot!.profile, selection, commitSha: TEST_COMMIT, manifestHash: run.environmentSnapshot!.description.manifestHash, runtimes,
           outcomes: Array.from({ length: count }, (_, index) => ok ? { index, status: 'passed' as const, exitCode: 0 } : { index, status: 'failed' as const, exitCode: 1 }),
