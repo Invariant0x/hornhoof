@@ -19,7 +19,10 @@ for (const who of PEOPLE) {
       for (const name of ['card', 'notebook', 'task'] as const) {
         const shown = await openPanel(name);
         await expect(shown.locator('.ac-body')).toHaveCSS('scrollbar-gutter', 'stable');
-        if (name === 'notebook') await expect(shown.locator('.notebook-add textarea')).toHaveCSS('padding', '8px 12px');
+        if (name === 'notebook') {
+          await expect(shown.locator('.notebook')).toHaveCSS('scrollbar-gutter', 'stable');
+          await expect(shown.locator('.notebook-add textarea')).toHaveCSS('padding', '8px 12px');
+        }
         await expect.poll(() => box(terminal)).toEqual(before);
         const rect = await box(shown);
         if (name === 'card') await page.screenshot({ path: test.info().outputPath(`desktop-one-${s.lang}-${s.theme}.png`) });
