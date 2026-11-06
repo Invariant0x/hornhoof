@@ -28,7 +28,7 @@ type Viewer = keyof AclCompany['tokens'];
 type Call = { method: 'GET' | 'POST' | 'PATCH' | 'DELETE'; url: string; payload?: object };
 
 /* One thing of one agent, and how a route reaches it. companyOnly: the route asks for the whole company before anything. */
-type Pointed = { route: string; of: (c: AclCompany, agent: Crew) => Promise<Call>; companyOnly?: boolean };
+type Pointed = { route: string; of: (c: AclCompany, agent: Crew) => Promise<Call>; companyOnly?: boolean; closedStatus?: 403 | 404 };
 
 const anAgent = (method: Call['method'], end: string, payload?: object) => async (c: AclCompany, agent: Crew): Promise<Call> => ({ method, url: `/api/agents/${c.crew[agent].id}${end}`, ...(payload ? { payload } : {}) });
 const aTask = (method: Call['method'], end: string, payload?: object) => async (c: AclCompany, agent: Crew): Promise<Call> => {
@@ -67,7 +67,8 @@ const POINTED: Pointed[] = [
   { route: 'POST /api/jobs/:id/cancel', of: aJob('POST', '/cancel'), companyOnly: true },
   { route: 'POST /api/improvements/:id/take', of: anIdea('take'), companyOnly: true },
   { route: 'POST /api/improvements/:id/dismiss', of: anIdea('dismiss'), companyOnly: true },
-  { route: 'GET /api/attachments/:id', of: aPicture },
+  /* Hidden attachments have the same answer as missing files; other closed resources still answer 403. */
+  { route: 'GET /api/attachments/:id', of: aPicture, closedStatus: 404 },
 ];
 
 /* Who asks about whose: closed in every case but their own agent and the full view. */
@@ -195,7 +196,7 @@ describe('every real route', () => {
 });
 
 describe('one thing of one agent', () => {
-  it.each(POINTED)('$route', async ({ route, of, companyOnly }) => {
+  it.each(POINTED)('$route', async ({ route, of, companyOnly, closedStatus = 403 }) => {
     const c = await aclCompany();
     const got: string[] = [];
     /* Those that are closed first: what opens may change or remove what it is given. */
@@ -203,8 +204,8 @@ describe('one thing of one agent', () => {
       const res = await call(c, await of(c, agent), viewer);
       got.push(`${name}: ${res.statusCode}`);
       const scoped = companyOnly && (viewer === 'ann' || viewer === 'olga');
-      if (closed || scoped) expect(res.statusCode, `${route}, ${name}`).toBe(403);
-      else expect(res.statusCode, `${route}, ${name}`).not.toBe(403);
+      if (closed || scoped) expect(res.statusCode, `${route}, ${name}`).toBe(closedStatus);
+      else expect([403, closedStatus], `${route}, ${name}`).not.toContain(res.statusCode);
       if (closed) expect(leaks(res, [c.crew[agent]]), `${route}, ${name}`).toEqual([]);
     }
     lines.push(`| ${route} | ${got.join('; ')} |`);

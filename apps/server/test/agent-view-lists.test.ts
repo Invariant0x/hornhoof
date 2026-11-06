@@ -59,7 +59,7 @@ describe('what waits for people', () => {
     const c = await aclCompany();
     const { task, request, picture, neighbour } = await approval(c);
     expect((await c.get(`/api/attachments/${picture.id}`, c.tokens.olga)).statusCode).toBe(200);
-    expect((await c.get(`/api/attachments/${neighbour.id}`, c.tokens.olga)).statusCode).toBe(403);
+    expect((await c.get(`/api/attachments/${neighbour.id}`, c.tokens.olga)).statusCode).toBe(404);
     expect((await c.get(`/api/tasks/${task.id}`, c.tokens.olga)).statusCode).toBe(403);
     expect((await c.get(`/api/agents/${c.crew.other.id}`, c.tokens.olga)).statusCode).toBe(403);
     expect((await c.get(`/api/agents/${c.crew.other.id}/events`, c.tokens.olga)).statusCode).toBe(403);
@@ -83,7 +83,7 @@ describe('what waits for people', () => {
     const again = await answer(c, request.id, c.tokens.olga, { approve: false });
     expect(again.statusCode).toBe(409);
     for (const word of taskWords(task)) expect(again.body).not.toContain(word);
-    expect((await c.get(`/api/attachments/${picture.id}`, c.tokens.olga)).statusCode).toBe(403);
+    expect((await c.get(`/api/attachments/${picture.id}`, c.tokens.olga)).statusCode).toBe(404);
   });
 
   it('takes the decision away from an owner who is one no more', async () => {
@@ -92,7 +92,7 @@ describe('what waits for people', () => {
     expect((await c.app.inject({ method: 'PUT', url: `/api/departments/${c.dev.id}/owner`, payload: { personId: c.ids.ann }, ...as(c.tokens.ceo) })).statusCode).toBe(200);
     expect((await c.get('/api/requests', c.tokens.olga)).json().addressed).toEqual([]);
     expect((await answer(c, request.id, c.tokens.olga, { approve: true })).statusCode).toBe(403);
-    expect((await c.get(`/api/attachments/${picture.id}`, c.tokens.olga)).statusCode).toBe(403);
+    expect((await c.get(`/api/attachments/${picture.id}`, c.tokens.olga)).statusCode).toBe(404);
     expect((await c.get('/api/requests', c.tokens.ann)).json().addressed.map((r: { id: string }) => r.id)).toEqual([request.id]);
   });
 
@@ -106,7 +106,7 @@ describe('what waits for people', () => {
       expect(res.json().counts.total).toBe(0);
       expect(res.body).not.toContain('May this go out?');
       expect((await answer(c, request.id, c.tokens[viewer], { approve: true })).statusCode).toBe(403);
-      expect((await c.get(`/api/attachments/${picture.id}`, c.tokens[viewer])).statusCode).toBe(403);
+      expect((await c.get(`/api/attachments/${picture.id}`, c.tokens[viewer])).statusCode).toBe(404);
     }
   });
 
@@ -177,7 +177,7 @@ describe('a long text kept as a file of its task', () => {
     const url = `/api/attachments/${await fileOf(c, task.id)}`;
     for (const token of [c.tokens.ann, c.tokens.olga, c.tokens.wes]) {
       const res = await c.get(url, token);
-      expect(res.statusCode).toBe(403);
+      expect(res.statusCode).toBe(404);
       expect(res.body).not.toContain('Private long words');
     }
     for (const token of [c.tokens.ceo, c.tokens.lisa]) expect((await c.get(url, token)).body).toBe(WORDS);
@@ -188,7 +188,7 @@ describe('a long text kept as a file of its task', () => {
     const task = await c.work('Shared work', c.crew.mine);
     await comment(c.app.ctx, { agentId: c.crew.other.id }, task.id, WORDS);
     const file = await fileOf(c, task.id);
-    expect((await c.get(`/api/attachments/${file}`, c.tokens.ann)).statusCode).toBe(403);
+    expect((await c.get(`/api/attachments/${file}`, c.tokens.ann)).statusCode).toBe(404);
     const { task: detail } = (await c.get(`/api/tasks/${task.id}`, c.tokens.ann)).json<Detail>();
     expect(detail.files).toEqual([]);
     expect(JSON.stringify(detail.log)).not.toContain(file);
@@ -225,7 +225,7 @@ describe('a long text kept as a file of its task', () => {
     const shown = await c.get(`/api/attachments/${picture!.id}`, c.tokens.olga);
     expect(shown.statusCode).toBe(200);
     expect(shown.headers['content-type']).toBe('image/png');
-    expect((await c.get(`/api/attachments/${picture!.id}`, c.tokens.ann)).statusCode).toBe(403);
+    expect((await c.get(`/api/attachments/${picture!.id}`, c.tokens.ann)).statusCode).toBe(404);
   });
 });
 
@@ -411,7 +411,7 @@ describe('pictures', () => {
     const [picture] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.crew.other.id, personId: c.ids.bob, name: 'shot.png', mediaType: 'image/png', bytes: PNG, size: PNG.length }).returning();
     expect((await c.get(`/api/attachments/${picture!.id}`, c.tokens.bob)).statusCode).toBe(200);
     expect((await c.get(`/api/attachments/${picture!.id}`, c.tokens.lisa)).statusCode).toBe(200);
-    for (const viewer of ['ann', 'olga', 'wes'] as const) expect((await c.get(`/api/attachments/${picture!.id}`, c.tokens[viewer])).statusCode).toBe(403);
+    for (const viewer of ['ann', 'olga', 'wes'] as const) expect((await c.get(`/api/attachments/${picture!.id}`, c.tokens[viewer])).statusCode).toBe(404);
     expect((await c.get('/api/attachments/00000000-0000-4000-8000-000000000000', c.tokens.ann)).statusCode).toBe(404);
   });
 
@@ -421,7 +421,7 @@ describe('pictures', () => {
     const { request } = await ask(c.app.ctx, c.crew.other.id, hiddenWork.id, { text: 'Look', kind: 'question', topic: 'task' });
     const [picture] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.crew.other.id, requestId: request.id, name: 'shot.png', mediaType: 'image/png', bytes: PNG, size: PNG.length }).returning();
     expect((await c.get(`/api/attachments/${picture!.id}`, c.tokens.olga)).statusCode).toBe(200);
-    expect((await c.get(`/api/attachments/${picture!.id}`, c.tokens.wes)).statusCode).toBe(403);
+    expect((await c.get(`/api/attachments/${picture!.id}`, c.tokens.wes)).statusCode).toBe(404);
   });
 });
 
