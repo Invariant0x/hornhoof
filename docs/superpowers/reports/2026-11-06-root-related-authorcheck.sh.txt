@@ -42,11 +42,21 @@ if (!code) {
   const cli = ['npx', '--no-install', 'vitest'], tsc = ['npx', '--no-install', 'tsc'];
   code |= await step('helper-and-merge-fixture-coverage', [...cli, 'run', ...tests, '--project', '@hornhoof/server', '--maxWorkers=2',
     '--coverage.enabled', '--coverage.reportOnFailure', '--coverage.include=test/helpers*.ts', '--coverage.exclude=**/*.test.*', '--coverage.reporter=text', '--coverage.reporter=lcov']);
-  for (const [stage, file, project] of [
-    ['server-related', 'apps/server/src/modules/model-checks/score.ts', '@hornhoof/server'],
-    ['protocol-related', 'packages/protocol/src/link.ts', '@hornhoof/protocol'],
-    ['node-related', 'apps/node/src/load.ts', '@hornhoof/node'],
-  ]) code |= await step(stage, [...cli, 'related', file, '--project', project, '--run', '--maxWorkers=2']);
+  const { probe } = await import('./scripts/test/related-probe.mjs');
+  for (const [stage, file, project, expected] of [
+    ['server-related', 'apps/server/src/benchmark/report.ts', '@hornhoof/server', ['release-benchmark']],
+    ['protocol-related', 'packages/protocol/src/link.ts', '@hornhoof/protocol', ['link']],
+    ['node-related', 'apps/node/src/load.ts', '@hornhoof/node', ['account', 'commands', 'credentials', 'first-setup', 'load', 'login', 'main', 'terminal-mac-peer', 'wait-update']],
+  ]) {
+    const selection = await probe({ root: process.cwd() }, file);
+    const selected = selection.selected.filter(row => row.project === project).map(row => row.file).sort();
+    const folder = project.replace('@hornhoof/', '') === 'protocol' ? 'packages/protocol' : 'apps/' + project.replace('@hornhoof/', '');
+    const expectedFiles = expected.map(name => folder + '/test/' + name + '.test.ts').sort();
+    const bounded = JSON.stringify(selected) === JSON.stringify(expectedFiles);
+    console.log('HH_AUTHOR_RELATED_GUARD ' + JSON.stringify({ stage, file, project, selected, expectedFiles, bounded }));
+    if (bounded) code |= await step(stage, [...cli, 'related', file, '--project', project, '--run', '--maxWorkers=2']);
+    else code |= 1;
+  }
   code |= await step('no-proc-variant', [...cli, 'run', '--project', '@hornhoof/node:no-proc', '--maxWorkers=2']);
   code |= await step('web-setup-consumer', [...cli, 'run', 'apps/web/test/Setup.test.tsx', '--project', '@hornhoof/web', '--maxWorkers=2']);
   code |= await step('root-config-types', [...tsc, '--allowJs', '--checkJs', '--noEmit', '--skipLibCheck', '--module', 'NodeNext', '--target', 'ES2023', '--types', 'node', 'vitest.config.mjs']);
