@@ -1,4 +1,5 @@
 import { MAX_TEST_PARTS, type TestUnit } from '@hornhoof/protocol';
+import { median } from './plan-statistics.js';
 
 export type FileDuration = { suiteId: string; file: string; ms: number };
 export type TestPartPlanInput = {
@@ -50,10 +51,6 @@ function durationIndex(durations: FileDuration[]): Map<string, number[]> {
     index.set(key, values);
   }
   return index;
-}
-function median(values: number[]): number {
-  const sorted = [...values].sort((a, b) => a - b), middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? sorted[middle]! : sorted[middle - 1]! + (sorted[middle]! - sorted[middle - 1]!) / 2;
 }
 function timedUnits(input: TestPartPlanInput): TimedUnit[] {
   const index = durationIndex(input.durations);
