@@ -24,6 +24,16 @@ async function fixture() {
 }
 
 describe('pinned independent checkouts', () => {
+  it('retains typed fetch stderr and releases the cache lock and staging before reporting failure', async () => {
+    const f = await fixture(), destination = join(f.context.cacheRoot, 'failed-part');
+    let error: unknown;
+    try { await mirror.checkoutCommit(f.source, f.scope, 'f'.repeat(40), destination, f.context); } catch (caught) { error = caught; }
+    expect(error).toMatchObject({ network: true, outcome: { kind: 'child', exitCode: 128, signal: null, stderrTruncated: false } });
+    expect((error as { outcome: { stderr: string } }).outcome.stderr.length).toBeGreaterThan(0);
+    await expect(access(destination)).rejects.toThrow();
+    expect(await mirror.checkoutCommit(f.source, f.scope, f.first, join(f.context.cacheRoot, 'next-part'), f.context)).toBe(f.first);
+  });
+
   it('checks out the old exact SHA after the branch moves with no alternates or shared objects', async () => {
     const f = await fixture(), destination = join(f.context.cacheRoot, 'part');
     expect(await mirror.checkoutCommit(f.source, f.scope, f.first, destination, f.context)).toBe(f.first);

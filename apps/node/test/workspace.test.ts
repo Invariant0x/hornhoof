@@ -1,9 +1,10 @@
 import { spawnSync } from 'node:child_process';
+import { createServer } from 'node:http';
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ServerMessage } from '@hornhoof/protocol';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { runJob, type ProviderAdapter, type RunInput, type RunResult } from '../src/runner.js';
 import { ASKPASS, prepareRepo, type Git } from '../src/workspace.js';
 
@@ -223,6 +224,28 @@ describe('the askpass helper in the image', () => {
 });
 
 describe('with real git', () => {
+  it('captures a typed preparation failure with fixed real Git instead of recursing through PATH', async () => {
+    const base = mkdtempSync(join(tmpdir(), 'hh-git-capture-'));
+    const bin = join(base, 'bin');
+    mkdirSync(bin);
+    const marker = join(base, 'shim-used');
+    writeFileSync(join(bin, 'git'), `#!/bin/sh\nprintf shim > '${marker}'\nexit 19\n`, { mode: 0o755 });
+    vi.stubEnv('PATH', `${bin}:${process.env.PATH}`);
+    onTestFinished(() => vi.unstubAllEnvs());
+    const server = createServer((_req, res) => { res.writeHead(503); res.end('Temporarily unavailable'); });
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    onTestFinished(() => new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('Missing controlled Git endpoint.');
+    const repo = { url: `http://127.0.0.1:${address.port}/shop.git`, branch: 'main', token: TOKEN };
+    let error: unknown;
+    try { await prepareRepo(base, repo, { user: null, home: base }); } catch (caught) { error = caught; }
+    expect(existsSync(marker)).toBe(false);
+    expect(error).toMatchObject({ network: true, outcome: { kind: 'child', exitCode: 128, signal: null, stderrTruncated: false } });
+    expect(JSON.stringify(error)).not.toContain(TOKEN);
+    expect((error as { outcome: { stderr: string } }).outcome.stderr).toContain('503');
+  });
+
   it('clones a branch once, then keeps the clone and the work in it', async () => {
     const base = mkdtempSync(join(tmpdir(), 'hh-git-'));
     const git = (cwd: string, ...args: string[]) => spawnSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@example.com' } });
