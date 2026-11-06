@@ -1,0 +1,514 @@
+{
+  "task": 378,
+  "parent": 222,
+  "disposition": "PROPOSAL_ONLY",
+  "fullReplayAuthorized": false,
+  "acceptedPerformanceResult": false,
+  "control": "6d0c79b0ced4ab2fc4f771a46479680664d6b663",
+  "optimized": "b98035e6d1b6b75715a5839ff0a4ea243878e65a",
+  "preservedPair": {
+    "control": "05c63819d59c0cbba044132c89c503f30cb49856",
+    "optimized": "54340764df895693cabdad4027fdad2ffcf48e38"
+  },
+  "commonFixes": {
+    "existingBase": {
+      "task408": "5e3bc796029e1f95da626b62e66038c5ce4fb8a2",
+      "task374": "0b4b238ce6a84007974cea919a8e032aa5639081",
+      "task409Original": "b05a79fbce4e8c89b85f8696c037827117621c27",
+      "task409CherryPick": "0c4644d5c3858653149452e67d000a0534cbaec6",
+      "acceptedBoundary": "2eb0d12f9f67fc6e94f75fcf118d3ed788a134f3",
+      "driver": "05c63819d59c0cbba044132c89c503f30cb49856"
+    },
+    "css441": {
+      "source": "c7116367cf1005c7656dda180a283170e2d143a4",
+      "onlyPath": "apps/web/test/css.test.ts"
+    },
+    "timers489": {
+      "source": "93e6798ffd77adc433e8e2f1b897c8a6ad65a6a8",
+      "parent": "12bef523305a37b02204b1806e471d782c5e4c5c",
+      "onlyPath": "apps/server/test/timers.test.ts"
+    }
+  },
+  "commonFixFileHashes": {
+    "apps/web/test/css.test.ts": {
+      "control": "c560d130d8754e8f83339f9762f1a6389b44897c8c9d7820d1de7ea1a6af72f8",
+      "optimized": "c560d130d8754e8f83339f9762f1a6389b44897c8c9d7820d1de7ea1a6af72f8"
+    },
+    "apps/server/test/timers.test.ts": {
+      "control": "807031175fcabfa1a44db1cfa31ab075120d0e55cf560ca1cb0ff98add3b98b1",
+      "optimized": "807031175fcabfa1a44db1cfa31ab075120d0e55cf560ca1cb0ff98add3b98b1"
+    }
+  },
+  "configHashes": {
+    "package.json": "42dd75b4384fdc07dc844ec513fd55b185d11a9aa8d1ee4245a9213fb1269f26",
+    "package-lock.json": "0737176b95ecbdb2a68f6003b60c7055a7f893107269c11c163c8cc953b3daa2",
+    "tsconfig.base.json": "a87a4cd3341ea6f410f5bc10d216166ec805d9b0fbd37dcb232307106f224b67",
+    "apps/server/package.json": "beedc556e2a013486c5f96cde19d9e47ab7364810f3ad99e4938de93d7fe478b",
+    "apps/node/package.json": "3622bc37e28cdc9ccb864fa0c00ac0fd2d20d94b5e0a1e32c5d0b1d6a9cd4131",
+    "apps/web/package.json": "efb3fa63fff1d1acb20b1e97be5770a18fa53c140a296238281734d5e71dd525",
+    "packages/protocol/package.json": "0f8eda3b8b0e72e532eae0f88e0180ae4c78ce4dfbf5a011f9c54c4733e441e6",
+    "apps/node/tsconfig.json": "0b9f34bdc22816f91107b36a6fef112243dabb973d4859e4bdf4481622e0ac0c",
+    "packages/protocol/tsconfig.json": "443b6e9eb0a6275fb159a966b2b883bd5c77650382fc4e6e8d4c4e2ed76e3cdc",
+    "apps/server/vitest.config.ts": "8e9c172f2630e3140b84312f6c180299cb66c577c3b0cc7e460f01ce83c6f7bf",
+    "apps/node/vitest.config.ts": "b8504edbf12a24ae808482d0f7e6af2b4f8e60332e4f92e25ed0d01c33e99454",
+    "apps/web/vite.config.ts": "4f5dc31a5c9811f44bd51e7e78ca0f07b6223124fe686802691a87eb2c8c7ab9",
+    "packages/protocol/vitest.config.ts": "343b338e8d0c8252491d23c2a0145c656892e2cf268aa09d2797e3b0b42ad4df",
+    "apps/server/test/global-setup.ts": "4fa305d103f0e701d50c4eb7612b9766849d81785b51c03fd09799c225997aa8",
+    "apps/server/test/helpers.ts": "00d47800386e709f4d14cf10115d92cc194b156b609ad69d2d642adfa4c8c9c4"
+  },
+  "configIdentical": {
+    "package.json": true,
+    "package-lock.json": true,
+    "tsconfig.base.json": true,
+    "apps/server/package.json": true,
+    "apps/node/package.json": true,
+    "apps/web/package.json": true,
+    "packages/protocol/package.json": true,
+    "apps/node/tsconfig.json": true,
+    "packages/protocol/tsconfig.json": true,
+    "apps/server/vitest.config.ts": true,
+    "apps/node/vitest.config.ts": true,
+    "apps/web/vite.config.ts": true,
+    "packages/protocol/vitest.config.ts": true,
+    "apps/server/test/global-setup.ts": true,
+    "apps/server/test/helpers.ts": true
+  },
+  "optimizationPaths": [
+    "apps/node/test/fakes/hook-clock.cjs",
+    "apps/node/test/hook-client.test.ts",
+    "apps/node/test/hook-delivery.test.ts",
+    "apps/node/test/hook-retry-delivery.test.ts",
+    "apps/node/test/hook-test-client.ts",
+    "apps/node/test/hook-test-clock.ts",
+    "apps/node/test/terminal-host-hook-delivery.test.ts",
+    "apps/node/test/terminal-host-waits.test.ts",
+    "apps/node/test/terminal-test-clock.ts",
+    "apps/server/test/decisions-answers-ceo.test.ts",
+    "apps/server/test/decisions-answers-department.test.ts",
+    "apps/server/test/decisions-answers-fallback.test.ts",
+    "apps/server/test/decisions-company.ts",
+    "apps/server/test/decisions.test.ts",
+    "apps/server/test/install-script-browser.test.ts",
+    "apps/server/test/install-script-helpers.ts",
+    "apps/server/test/install-script-join.test.ts",
+    "apps/server/test/install-script-served.test.ts",
+    "apps/server/test/install-script.test.ts",
+    "apps/server/test/test-runs-commit.test.ts",
+    "apps/server/test/test-runs-company.ts",
+    "apps/server/test/test-runs-hosts.test.ts",
+    "apps/server/test/test-runs-wait.test.ts",
+    "apps/server/test/test-runs-work.test.ts",
+    "apps/server/test/test-runs.test.ts",
+    "docs/superpowers/plans/2026-11-05-linux-test-runtime.md",
+    "docs/superpowers/reports/2026-11-05-linux-test-runtime.md",
+    "docs/superpowers/specs/2026-11-05-linux-test-runtime.md"
+  ],
+  "oldOptimizationPatchSha256": "0cf85f8bcc52e24882ed43aeada7bf76e16bb13b358bd9728548a21b4261bf1b",
+  "newOptimizationPatchSha256": "0cf85f8bcc52e24882ed43aeada7bf76e16bb13b358bd9728548a21b4261bf1b",
+  "sourceArchive": {
+    "name": "fixed-sources-6d0c79b0-b98035e6.tar.gz",
+    "bytes": 11211338,
+    "sha256": "037b48a88284eebfca0f52c909731b338ab74cc45fe33972b882398614e5752d",
+    "localPackagingOnly": true,
+    "remoteAssetDelivery": "NOT_VERIFIED",
+    "remoteArchivePreflight": "NOT_RUN",
+    "attachment": "7f16d32c-5439-46a0-b3da-b025b380a258"
+  },
+  "pinnedDriver": {
+    "source": "edc370c5c1472453649d26cd81ccda3b6ee41347",
+    "name": "driver-candidate-edc370c5.tar",
+    "bytes": 51200,
+    "sha256": "c856c8b8d2217d56f1b8c3740e616374a5a966de2a78f6f7a65415a06161307d",
+    "oldIncludedWrapper": "DO_NOT_EXECUTE",
+    "sourceChecks": "114/1 and138/1 preserved; not repeated",
+    "attachment": "79371b56-ed45-4bf5-945c-9367d8948ab2"
+  },
+  "counts": {
+    "expectedEachFromHistorical106": 6325,
+    "newFullCounts": "NOT_RUN",
+    "assertionsAndTimeouts": "unchanged by common fixes; CSS assertions updated by441 contract"
+  },
+  "resources": {
+    "workers": 2,
+    "logicalShards": 4,
+    "parts": 1,
+    "slot": "common approved slot required; NOT_RESERVED",
+    "assetInputOutput": "supported command-mode route pending, no HH_IN/HH_OUT request fields invented",
+    "backgroundLoad": "observed, not controlled",
+    "historicalTurn7Comparison": false
+  },
+  "harnessBranch": "task-378-driver-candidate",
+  "harnessCommit": "6e53d43312e96a8bdab629dd91f3618e078c2af8",
+  "authorChecks": [
+    {
+      "run": 329,
+      "part": 1,
+      "sourceSha": "6d0c79b0ced4ab2fc4f771a46479680664d6b663",
+      "status": "passed",
+      "exitCode": 0,
+      "machine": "home-api",
+      "log": "tests-329-1.log",
+      "logSha256": "4a871b9949b43ad5ca0ca24da6aa58e9a5b2932ae3bc2886c8b2d0390f8810d6",
+      "scope": "targeted preconditions only, not paired performance",
+      "testCounts": {
+        "apps/server/timers": 14,
+        "apps/web/css": 3,
+        "apps/node/check-command": 6
+      },
+      "stages": [
+        {
+          "stage": "install",
+          "args": [
+            "npm",
+            "ci",
+            "--prefer-offline",
+            "--no-audit",
+            "--no-fund"
+          ],
+          "cwd": ".",
+          "code": 0,
+          "signal": null,
+          "ms": 36357
+        },
+        {
+          "stage": "protocol-build-preparation",
+          "args": [
+            "npm",
+            "run",
+            "build",
+            "-w",
+            "@hornhoof/protocol"
+          ],
+          "cwd": ".",
+          "code": 0,
+          "signal": null,
+          "ms": 3797
+        },
+        {
+          "stage": "node-build-preparation",
+          "args": [
+            "npm",
+            "run",
+            "build",
+            "-w",
+            "@hornhoof/node"
+          ],
+          "cwd": ".",
+          "code": 0,
+          "signal": null,
+          "ms": 5172
+        },
+        {
+          "stage": "timers-original-limits",
+          "args": [
+            "npx",
+            "--no-install",
+            "vitest",
+            "run",
+            "test/timers.test.ts",
+            "--maxWorkers=2"
+          ],
+          "cwd": "apps/server",
+          "code": 0,
+          "signal": null,
+          "ms": 22890
+        },
+        {
+          "stage": "css-owner-contract",
+          "args": [
+            "npx",
+            "--no-install",
+            "vitest",
+            "run",
+            "test/css.test.ts",
+            "--maxWorkers=2"
+          ],
+          "cwd": "apps/web",
+          "code": 0,
+          "signal": null,
+          "ms": 2087
+        },
+        {
+          "stage": "check-command-build-prerequisite",
+          "args": [
+            "npx",
+            "--no-install",
+            "vitest",
+            "run",
+            "test/check-command.test.ts",
+            "--maxWorkers=2"
+          ],
+          "cwd": "apps/node",
+          "code": 0,
+          "signal": null,
+          "ms": 7562
+        },
+        {
+          "stage": "server-types",
+          "args": [
+            "npx",
+            "--no-install",
+            "tsc",
+            "-p",
+            "apps/server/tsconfig.json",
+            "--noEmit"
+          ],
+          "cwd": ".",
+          "code": 0,
+          "signal": null,
+          "ms": 15212
+        },
+        {
+          "stage": "web-types",
+          "args": [
+            "npx",
+            "--no-install",
+            "tsc",
+            "-p",
+            "apps/web/tsconfig.json",
+            "--noEmit"
+          ],
+          "cwd": ".",
+          "code": 0,
+          "signal": null,
+          "ms": 15111
+        },
+        {
+          "stage": "test-types",
+          "args": [
+            "npm",
+            "run",
+            "typecheck:tests"
+          ],
+          "cwd": ".",
+          "code": 0,
+          "signal": null,
+          "ms": 42110
+        },
+        {
+          "stage": "common-fix-eslint",
+          "args": [
+            "npx",
+            "--no-install",
+            "eslint",
+            "apps/server/test/timers.test.ts",
+            "apps/web/test/css.test.ts"
+          ],
+          "cwd": ".",
+          "code": 0,
+          "signal": null,
+          "ms": 10527
+        }
+      ],
+      "firstSample": {
+        "stage": "install",
+        "point": "before",
+        "at": "2026-11-06T02:57:04.451Z",
+        "node": "v22.23.4",
+        "os": "linux",
+        "arch": "x64",
+        "host": "9f3e5200d8f2",
+        "cpus": 8,
+        "load": [
+          0.85,
+          1.9,
+          2.44
+        ],
+        "free": 91183132672,
+        "dockerMarker": true,
+        "cpuMax": "max 100000",
+        "cpuset": "0-7",
+        "memoryMax": "max",
+        "memoryCurrent": "209608704"
+      },
+      "load1Min": 0.81,
+      "load1Max": 2.09,
+      "minFreeBytes": 89411821568
+    },
+    {
+      "run": 330,
+      "part": 1,
+      "sourceSha": "b98035e6d1b6b75715a5839ff0a4ea243878e65a",
+      "status": "passed",
+      "exitCode": 0,
+      "machine": "the built-in node",
+      "log": "tests-330-1.log",
+      "logSha256": "ee7956d5e5ab20496075f5ca220258fd9b9a3169ed3fec688a5749d29345f189",
+      "scope": "targeted preconditions only, not paired performance",
+      "testCounts": {
+        "apps/server/timers": 14,
+        "apps/web/css": 3,
+        "apps/node/check-command": 6
+      },
+      "stages": [
+        {
+          "stage": "install",
+          "args": [
+            "npm",
+            "ci",
+            "--prefer-offline",
+            "--no-audit",
+            "--no-fund"
+          ],
+          "cwd": ".",
+          "code": 0,
+          "signal": null,
+          "ms": 2852
+        },
+        {
+          "stage": "protocol-build-preparation",
+          "args": [
+            "npm",
+            "run",
+            "build",
+            "-w",
+            "@hornhoof/protocol"
+          ],
+          "cwd": ".",
+          "code": 0,
+          "signal": null,
+          "ms": 1260
+        },
+        {
+          "stage": "node-build-preparation",
+          "args": [
+            "npm",
+            "run",
+            "build",
+            "-w",
+            "@hornhoof/node"
+          ],
+          "cwd": ".",
+          "code": 0,
+          "signal": null,
+          "ms": 1770
+        },
+        {
+          "stage": "timers-original-limits",
+          "args": [
+            "npx",
+            "--no-install",
+            "vitest",
+            "run",
+            "test/timers.test.ts",
+            "--maxWorkers=2"
+          ],
+          "cwd": "apps/server",
+          "code": 0,
+          "signal": null,
+          "ms": 9063
+        },
+        {
+          "stage": "css-owner-contract",
+          "args": [
+            "npx",
+            "--no-install",
+            "vitest",
+            "run",
+            "test/css.test.ts",
+            "--maxWorkers=2"
+          ],
+          "cwd": "apps/web",
+          "code": 0,
+          "signal": null,
+          "ms": 854
+        },
+        {
+          "stage": "check-command-build-prerequisite",
+          "args": [
+            "npx",
+            "--no-install",
+            "vitest",
+            "run",
+            "test/check-command.test.ts",
+            "--maxWorkers=2"
+          ],
+          "cwd": "apps/node",
+          "code": 0,
+          "signal": null,
+          "ms": 6032
+        },
+        {
+          "stage": "server-types",
+          "args": [
+            "npx",
+            "--no-install",
+            "tsc",
+            "-p",
+            "apps/server/tsconfig.json",
+            "--noEmit"
+          ],
+          "cwd": ".",
+          "code": 0,
+          "signal": null,
+          "ms": 5148
+        },
+        {
+          "stage": "web-types",
+          "args": [
+            "npx",
+            "--no-install",
+            "tsc",
+            "-p",
+            "apps/web/tsconfig.json",
+            "--noEmit"
+          ],
+          "cwd": ".",
+          "code": 0,
+          "signal": null,
+          "ms": 5162
+        },
+        {
+          "stage": "test-types",
+          "args": [
+            "npm",
+            "run",
+            "typecheck:tests"
+          ],
+          "cwd": ".",
+          "code": 0,
+          "signal": null,
+          "ms": 14462
+        },
+        {
+          "stage": "common-fix-eslint",
+          "args": [
+            "npx",
+            "--no-install",
+            "eslint",
+            "apps/server/test/timers.test.ts",
+            "apps/web/test/css.test.ts"
+          ],
+          "cwd": ".",
+          "code": 0,
+          "signal": null,
+          "ms": 3717
+        }
+      ],
+      "firstSample": {
+        "stage": "install",
+        "point": "before",
+        "at": "2026-11-06T02:57:03.992Z",
+        "node": "v22.23.4",
+        "os": "linux",
+        "arch": "x64",
+        "host": "4b437a4f2c1e",
+        "cpus": 16,
+        "load": [
+          0.76,
+          1.58,
+          1.26
+        ],
+        "free": 9004679168,
+        "dockerMarker": true,
+        "cpuMax": "max 100000",
+        "cpuset": "0-15",
+        "memoryMax": "max",
+        "memoryCurrent": "603947008"
+      },
+      "load1Min": 0.75,
+      "load1Max": 1.56,
+      "minFreeBytes": 7413739520
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+# PROPOSAL ONLY. Requires a separate head decision, asset preflight and admitted common slot.
+set -euo pipefail
+test "$(git rev-parse HEAD)" = 6e53d43312e96a8bdab629dd91f3618e078c2af8
+: "${HH_IN:?NOT_READY: canonical test input delivery required}"
+: "${HH_OUT:?NOT_READY: durable author-readable test output delivery required}"
+export CI=true NO_COLOR=1 FORCE_COLOR=0 VITEST_MAX_WORKERS=2
+sha256sum --check <<'DRIVER'
+763cf461e67290355858d6f3064f2c6c9c14c93dfad0ae66255230110a6de293  scripts/benchmarks/linux-pair.mjs
+ee255d499893cbbc814b016bee3806ceebaf3395f0924e570961ca7d66001ec9  scripts/benchmarks/linux-pair-evidence.mjs
+DRIVER
+printf '%s  %s\n' '037b48a88284eebfca0f52c909731b338ab74cc45fe33972b882398614e5752d' "$HH_IN/fixed-sources-6d0c79b0-b98035e6.tar.gz" | sha256sum --check
+mkdir -p .metrics/fixed-pair-source
+tar -xzf "$HH_IN/fixed-sources-6d0c79b0-b98035e6.tar.gz" -C .metrics/fixed-pair-source
+git fetch --quiet --update-shallow --no-tags "$PWD/.metrics/fixed-pair-source/source.git" refs/heads/control refs/heads/optimized
+status=0
+node scripts/benchmarks/linux-pair.mjs 6d0c79b0ced4ab2fc4f771a46479680664d6b663 b98035e6d1b6b75715a5839ff0a4ea243878e65a | tee "$HH_OUT/pair-measurements.log" || status=$?
+shopt -s nullglob
+logs=(.metrics/paired-tests/*.log)
+if ((${#logs[@]})); then tar -czf "$HH_OUT/pair-stage-logs.tar.gz" -- "${logs[@]}"; fi
+exit "$status"
