@@ -162,8 +162,11 @@ function commandRuntimes(description: EnvironmentDescription, commands: Command[
   const serviceRuntimes = new Set(description.manifest.services.map(service => service.runtime));
   return [...new Set([...description.manifest.runtimes.filter(runtime => !serviceRuntimes.has(runtime.id)).map(runtime => runtime.id), ...commands.flatMap(commandRuntime)])];
 }
+/* What any command builds depends on the machine, whichever program it names, and this runtime holds the machine's platform,
+   architecture and libc. So a key always holds it, and another architecture always builds its own. */
+const MACHINE_RUNTIME = 'hornhoof-test-execution';
 function runtimeFingerprint(description: EnvironmentDescription, ids: string[]): string {
-  const fingerprints = [...new Set(ids)].sort().map(id => {
+  const fingerprints = [...new Set([...ids, MACHINE_RUNTIME])].sort().map(id => {
     const actual = description.runtimeCapabilities.find(runtime => runtime.id === id);
     if (!actual) fail('runtime_missing', `The node lacks the ${id} runtime.`);
     return { id, fingerprint: actual.fingerprint };
@@ -172,7 +175,7 @@ function runtimeFingerprint(description: EnvironmentDescription, ids: string[]):
 }
 export function dependencyCacheKey(description: EnvironmentDescription): string {
   const { dependencies } = description.manifest;
-  return cacheKey({ runtime: runtimeFingerprint(description, commandRuntimes(description, dependencies.install)), settings: { format: 'hornhoof-dependencies-v1', repositoryScope: description.repositoryScope, adapter: dependencies.adapter, install: dependencies.install, paths: [...dependencies.paths].sort(), cache: dependencies.cache }, inputs: selectedInputs(description, dependencies.inputs) });
+  return cacheKey({ runtime: runtimeFingerprint(description, commandRuntimes(description, dependencies.install)), settings: { format: 'hornhoof-dependencies-v1', repositoryScope: description.repositoryScope, adapter: dependencies.adapter, install: dependencies.install, paths: [...dependencies.paths].sort(), cache: dependencies.cache, env: dependencies.env ?? {}, bin: dependencies.bin ?? [] }, inputs: selectedInputs(description, dependencies.inputs) });
 }
 export function environmentCacheKey(description: EnvironmentDescription, unitId: string, dependencyKey: string, preparedInputs?: InputDigest[]): string {
   const unit = description.manifest.prepare.find(unit => unit.id === unitId);
@@ -345,8 +348,8 @@ export type PreparationContext = DescriptionContext & {
   /* Where what this machine lacks comes from: another machine's build, through Hornhoof. None: it builds here. */
   share?: (unit: string, description: EnvironmentDescription) => CacheShare;
 };
-/* How a builder gets the dependencies: linked when they are shared read-only, and the variables that name them. */
-export type BuilderSetup = { link: boolean; env: Record<string, string> };
+/* How a builder gets the dependencies: linked when they are shared read-only, and the variables and folders that name them. */
+export type BuilderSetup = { link: boolean; env: Record<string, string>; bin: string[] };
 export type PreparedDependencies = { entry: CacheEntry | null; receipt: { key: string | null; hit: boolean; fetched?: boolean } };
 type PreparedUnit = { definitions: ServiceDefinitions; artifacts: ServiceArtifacts };
 export type PreparedEnvironment = { env: Record<string, string>; receipts: { unitId: string; key: string | null; hit: boolean; fetched?: boolean }[]; services: PreparedUnit[] };
@@ -354,7 +357,12 @@ export type PreparedEnvironment = { env: Record<string, string>; receipts: { uni
    manual command gets no services at all. */
 export type PreparationScope = { serviceUnits?: boolean; freshServices?: boolean };
 const SERVICE_PAYLOAD = '.hornhoof-services';
-const builderSetup = (description: EnvironmentDescription): BuilderSetup => ({ link: description.manifest.dependencies.cache === 'link', env: description.manifest.dependencies.env ?? {} });
+const builderSetup = (description: EnvironmentDescription): BuilderSetup => ({ link: description.manifest.dependencies.cache === 'link', env: description.manifest.dependencies.env ?? {}, bin: description.manifest.dependencies.bin ?? [] });
+const withBin = (folders: string[], path: string | undefined): string => [...folders, path].filter(Boolean).join(':');
+/* The variables of a harness whose folder is root, before there need be anything in it: for whatever is building it. */
+export function setupEnv(setup: Pick<BuilderSetup, 'env' | 'bin'>, root: string, path: string | undefined): Record<string, string> {
+  return { ...Object.fromEntries(Object.entries(setup.env).map(([name, value]) => [name, join(root, value)])), ...(setup.bin.length ? { PATH: withBin(setup.bin.map(folder => join(root, folder)), path) } : {}) };
+}
 const fetchedField = (entry: CacheEntry) => (entry.fetched === undefined ? {} : { fetched: entry.fetched });
 async function runPreparation(commands: Command[], builder: Pick<PreparationBuilder, 'run' | 'quiesce'>): Promise<void> {
   try { for (const command of commands) await builder.run(command); }
@@ -362,12 +370,16 @@ async function runPreparation(commands: Command[], builder: Pick<PreparationBuil
 }
 export async function prepareDependencies(description: EnvironmentDescription, context: PreparationContext): Promise<PreparedDependencies> {
   const dependencies = description.manifest.dependencies;
-  if (dependencies.cache === 'none') { await runPreparation(dependencies.install, context); return { entry: null, receipt: { key: null, hit: false } }; }
+  if (dependencies.cache === 'none') {
+    const env = setupEnv(builderSetup(description), context.checkout, context.env.PATH);
+    await runPreparation(dependencies.install, { run: (command, extra = {}) => context.run(command, { ...env, ...extra }), quiesce: context.quiesce });
+    return { entry: null, receipt: { key: null, hit: false } };
+  }
   const key = dependencyCacheKey(description);
   let builder: PreparationBuilder | undefined;
   try {
     const entry = await prepareCache(join(context.cacheRoot, 'dependencies'), key, key, context, async () => {
-      builder = await context.builder(selectedInputs(description, dependencies.inputs), null);
+      builder = await context.builder(selectedInputs(description, dependencies.inputs), null, builderSetup(description));
       await runPreparation(dependencies.install, builder);
       return { root: builder.root, paths: dependencies.paths };
     }, context.share?.('dependencies', description));
@@ -411,7 +423,8 @@ async function cachedUnit(description: EnvironmentDescription, unit: TestPrepare
       builder = await context.builder([...new Map([...selectedInputs(description, description.manifest.dependencies.inputs), ...inputs].map(input => [input.path, input])).values()], dependencies.entry, builderSetup(description));
       return { root: builder.root, paths: await buildUnit(description, unit, key, builder, context) };
     }, context.share?.(unit.id, description));
-    await restoreCache(entry, context.checkout, context, { owner: context.jobUser, except: SERVICE_PAYLOAD }); return entry;
+    const shared = unit.artifacts.flatMap(artifact => ('link' in artifact && artifact.link ? [artifact.path] : []));
+    await restoreCache(entry, context.checkout, context, { owner: context.jobUser, except: SERVICE_PAYLOAD, link: shared }); return entry;
   } finally { await builder?.close(); }
 }
 async function uncachedUnit(description: EnvironmentDescription, unit: TestPrepare, context: PreparationContext, env: Record<string, string>): Promise<PreparedUnit | null> {
@@ -454,12 +467,14 @@ async function prepareUnit(description: EnvironmentDescription, unit: TestPrepar
   }
   await artifactEnvironment(unit, context.checkout, prepared.env); completed.push(unit.id);
 }
-async function dependencyPaths(description: EnvironmentDescription, checkout: string, env: Record<string, string>): Promise<void> {
-  for (const [name, path] of Object.entries(description.manifest.dependencies.env ?? {})) addEnvironment(env, { [name]: await safeCheckoutPath(checkout, path) });
+async function dependencyPaths(description: EnvironmentDescription, context: Pick<PreparationContext, 'checkout' | 'env'>, env: Record<string, string>): Promise<void> {
+  const { env: named = {}, bin = [] } = description.manifest.dependencies;
+  for (const [name, path] of Object.entries(named)) addEnvironment(env, { [name]: await safeCheckoutPath(context.checkout, path) });
+  if (bin.length) addEnvironment(env, { PATH: withBin(await Promise.all(bin.map(folder => safeCheckoutPath(context.checkout, folder))), context.env.PATH) });
 }
 export async function prepareEnvironment(description: EnvironmentDescription, dependencies: PreparedDependencies, context: PreparationContext, { serviceUnits = true, freshServices = true }: PreparationScope = {}): Promise<PreparedEnvironment> {
   const prepared: PreparedEnvironment = { env: {}, receipts: [], services: [] }, completed: string[] = [];
-  await dependencyPaths(description, context.checkout, prepared.env);
+  await dependencyPaths(description, context, prepared.env);
   for (const unit of description.manifest.prepare.filter(unit => unit.profiles.includes(context.profile) && (serviceUnits || !unit.serviceIds.length))) await prepareUnit(description, unit, dependencies, prepared, completed, context);
   if (freshServices) await freshServiceArtifacts(description, prepared, context);
   return prepared;

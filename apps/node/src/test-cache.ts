@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { constants, createReadStream } from 'node:fs';
-import { chmod, chown, copyFile, link, lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, chown, copyFile, link, lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { EnvironmentDigest, RepositoryPath } from '@hornhoof/protocol';
 import { z } from 'zod';
@@ -81,10 +81,16 @@ export type CacheEntry = { path: string; key: string; inputDigest: string; hit: 
 type CacheBuild = () => Promise<{ root: string; paths: string[] }>;
 /* Decides where a missing tree comes from, and returns the entry once it is stored: publish builds it on this machine. */
 export type CacheShare = (entry: CacheEntry, context: CacheContext, publish: () => Promise<CacheReady>) => Promise<CacheEntry>;
-/* link: the part gets read-only links to the one stored file instead of copies. owner: who gets what is restored. */
-export type RestoreOptions = { link?: boolean; owner?: JobUser; except?: string };
+/* link: the part gets read-only links to the one stored file instead of copies, for all of it or for these paths. owner: who
+   gets what is restored. */
+export type RestoreOptions = { link?: boolean | string[]; owner?: JobUser; except?: string };
 /* Stored files nobody may write. A part that holds a link to one can read it and replace it, and never change it. */
 export const storedMode = (mode: number): number => (mode & 0o111 ? 0o555 : 0o444);
+/* The one time every stored file carries, on any machine. A tree that was moved here has no times of its own worth reading, and
+   tools that compare times read equal ones as up to date, in whatever order the files came. As many digits as today's times,
+   which are compared as text; older than any source a part checks out, so nothing it holds passes for newer than that. */
+export const STORED_AT = new Date(1_000_000_000_000);
+const atStoredTime = (path: string) => utimes(path, STORED_AT, STORED_AT);
 const BATCH = 256;
 
 export function within(root: string, path: string): string {
@@ -241,7 +247,7 @@ async function publish(entry: CacheEntry, context: CacheContext, build: CacheBui
     await mkdir(payload, { mode: 0o700 }); await copyItems(source.root, payload, entries, context);
     const copied = await scanTree(payload, ['.'], context, false);
     if (!importMatches(entries, copied)) throw new Error('A preparation payload changed during import.');
-    await inBatches(copied, context, async item => { if (item.kind === 'file') await chmod(join(payload, item.path), storedMode(item.mode)); });
+    await inBatches(copied, context, async item => { if (item.kind === 'file') { await atStoredTime(join(payload, item.path)); await chmod(join(payload, item.path), storedMode(item.mode)); } });
     return await storeStaged(entry, staging, { format: 2, key: entry.key, inputDigest: entry.inputDigest, roots, entries: copied }, context);
   } finally { await rm(staging, { recursive: true, force: true }); }
 }
@@ -275,6 +281,7 @@ async function restoredParents(root: string, path: string, owner: JobUser | unde
 }
 async function copiedFile(from: string, to: string, item: Extract<PayloadItem, { kind: 'file' }>, owner: JobUser | undefined): Promise<void> {
   await copyFile(from, to, constants.COPYFILE_EXCL);
+  await atStoredTime(to);
   await chmod(to, item.mode);
   if (owner) await chown(to, owner.uid, owner.gid);
 }
@@ -286,11 +293,12 @@ async function linkedFile(from: string, to: string, item: Extract<PayloadItem, {
     await copiedFile(from, to, item, owner);
   }
 }
+const linkedBy = (link: RestoreOptions['link'], path: string): boolean => (Array.isArray(link) ? link.some(root => path === root || path.startsWith(`${root}/`)) : !!link);
 async function restoredItem(source: string, target: string, item: PayloadItem, options: RestoreOptions): Promise<void> {
   const to = join(target, item.path);
   if (item.kind === 'symlink') { safeLink(target, item.path, item.target); await symlink(item.target, to); return; }
   if (item.kind === 'directory') return;
-  await (options.link ? linkedFile : copiedFile)(join(source, item.path), to, item, options.owner);
+  await (linkedBy(options.link, item.path) ? linkedFile : copiedFile)(join(source, item.path), to, item, options.owner);
 }
 export async function restoreCache(entry: CacheEntry, destination: string, context: CacheContext, options: RestoreOptions = {}): Promise<void> {
   const ready = entry.ready ?? await readReady(entry, context), { except } = options;

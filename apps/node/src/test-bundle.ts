@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { constants, createZstdCompress, createZstdDecompress } from 'node:zlib';
-import { CacheReady, checkCacheContext, readReady, safeLink, storedMode, storeStaged, within, type CacheContext, type CacheEntry, type PayloadItem } from './test-cache.js';
+import { CacheReady, checkCacheContext, readReady, safeLink, STORED_AT, storedMode, storeStaged, within, type CacheContext, type CacheEntry, type PayloadItem } from './test-cache.js';
 
 /* A stored tree as one file another machine can take: what its READY says, a line of JSON, then the bytes of its files in
    that order, all of it compressed. A machine reads it knowing nothing but its digest, so whatever the line asks for is
@@ -84,6 +84,7 @@ async function unpackFile(bytes: Bytes, payload: string, item: Extract<PayloadIt
   try {
     for await (const part of bytes.take(item.size)) { hash.update(part); await out.writeFile(part); }
     if (hash.digest('hex') !== item.digest) throw new Error(`A bundle holds other bytes than it says for ${item.path}.`);
+    await out.utimes(STORED_AT, STORED_AT);
     await out.chmod(storedMode(item.mode));
   } finally { await out.close(); }
 }

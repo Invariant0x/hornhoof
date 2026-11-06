@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { zstdCompressSync } from 'node:zlib';
 import { afterEach, describe, expect, it, onTestFinished } from 'vitest';
 import { packBundle, unpackBundle } from '../src/test-bundle.js';
-import { prepareCache, restoreCache, type CacheEntry, type CacheContext } from '../src/test-cache.js';
+import { prepareCache, restoreCache, STORED_AT, type CacheEntry, type CacheContext } from '../src/test-cache.js';
 import { harnessRemote, harnessShare, type HarnessRemote } from '../src/test-harness.js';
 
 const folders: string[] = [];
@@ -40,6 +40,21 @@ const fileItem = (path: string, text: string, mode = 0o644) => ({ path, kind: 'f
 const target = (context: CacheContext & { dir: string }) => ({ path: join(context.dir, KEY), key: KEY, inputDigest: INPUT });
 
 describe('a stored tree as one file for another machine', () => {
+  it('gives every file one time wherever it was stored, taken from or copied to, so a tool comparing times finds all of it up to date', async () => {
+    const here = await machine(), there = await machine(), entry = await built(here), file = join(here.cacheRoot, 'bundle');
+    const times = async (root: string) => Promise.all(['node_modules/dep', 'node_modules/.bin/tool'].map(async path => (await stat(join(root, path))).mtimeMs));
+    expect(await times(join(entry.path, 'payload'))).toEqual([STORED_AT.getTime(), STORED_AT.getTime()]);
+    await packBundle(entry, file, here);
+    await mkdir(there.dir, { mode: 0o700 });
+    const taken = await unpackBundle(file, target(there), there);
+    expect(await times(join(target(there).path, 'payload'))).toEqual([STORED_AT.getTime(), STORED_AT.getTime()]);
+    await restoreCache({ ...target(there), hit: true, ready: taken }, join(there.cacheRoot, 'part'), there);
+    expect(await times(join(there.cacheRoot, 'part'))).toEqual([STORED_AT.getTime(), STORED_AT.getTime()]);
+    await restoreCache({ ...target(there), hit: true, ready: taken }, join(there.cacheRoot, 'linked'), there, { link: true });
+    expect(await times(join(there.cacheRoot, 'linked'))).toEqual([STORED_AT.getTime(), STORED_AT.getTime()]);
+    expect((await prepareCache(there.dir, KEY, INPUT, there, async () => { throw new Error('It holds this already.'); })).hit).toBe(true);
+  });
+
   it('arrives whole on another machine, and is a hit there from then on', async () => {
     const here = await machine(), there = await machine(), file = join(here.cacheRoot, 'bundle');
     const packed = await packBundle(await built(here), file, here);

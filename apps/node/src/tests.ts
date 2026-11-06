@@ -10,7 +10,7 @@ import { stripEscapes } from './providers/process.js';
 import { redact } from './redact.js';
 import { copyFile as fsCopyFile, mkdir as fsMkdir, mkdtemp as fsMkdtemp, readFile as fsReadFile, stat as fsStat, writeFile as fsWriteFile } from 'node:fs/promises';
 import { fileDigest, privateCacheRoot, pruneCache, restoreCache, type CacheContext, type CacheEntry } from './test-cache.js';
-import { EnvironmentFailure, buildTestInvocation, harnessPlatform, harnessVersion, openEnvironment, prepareDependencies, prepareEnvironment, readTestEnvironment, safeCheckoutPath, type BuilderSetup, type PreparationBuilder, type PreparationContext } from './test-environment.js';
+import { EnvironmentFailure, buildTestInvocation, harnessPlatform, harnessVersion, openEnvironment, prepareDependencies, prepareEnvironment, readTestEnvironment, safeCheckoutPath, setupEnv, type BuilderSetup, type PreparationBuilder, type PreparationContext } from './test-environment.js';
 import { harnessShare, type HarnessRemote } from './test-harness.js';
 import { checkoutCommit } from './test-mirror.js';
 import { gitEnv } from './workspace.js';
@@ -589,8 +589,7 @@ async function productBuilder(state: PreparationState, inputs: InputDigest[], de
     for (const path of [root, join(root, '.home'), join(root, '.tmp')]) prepareFolder(path, user);
     if (dependencies) await restoreCache(dependencies, root, context, { link: setup.link, owner: user });
     ensurePasswd(user, partsFolder(state.options.dir));
-    const named = Object.fromEntries(Object.entries(setup.env).map(([name, path]) => [name, join(root, path)]));
-    const env = { ...state.base, ...named, HOME: join(root, '.home'), TMPDIR: join(root, '.tmp'), CI: 'true' };
+    const env = { ...state.base, ...setupEnv(setup, root, state.base.PATH), HOME: join(root, '.home'), TMPDIR: join(root, '.tmp'), CI: 'true' };
     return { root, user, env, run: (command, extra = {}) => productCommand(state, root, user, command, { ...env, ...extra }), quiesce, close: () => closeBuilder(user, root, state.options.proc) };
   } catch (error) { await closeBuilder(user, root, state.options.proc); throw error; }
 }
@@ -607,7 +606,7 @@ function preparationContext(state: PreparationState, profile: string, hidden: st
   const context: PreparationContext = {
     cacheRoot: join(state.options.dir, 'cache'), checkout: state.repo, profile, attemptRoot: state.root, nodeOwner: state.nodeOwner, jobUser: state.user,
     deadline: state.deadline, signal: state.signal, env: state.base, log: line => state.out.line(line), registerSecrets: values => { hidden.push(...values); },
-    builder: (inputs, dependencies, setup = { link: false, env: {} }) => productBuilder(state, inputs, dependencies, setup, context),
+    builder: (inputs, dependencies, setup = { link: false, env: {}, bin: [] }) => productBuilder(state, inputs, dependencies, setup, context),
     run: (command, extra = {}) => productCommand(state, state.repo, state.user, command, { ...state.base, ...extra, CI: 'true' }),
     quiesce: () => stopTestUser(state.user, state.options.proc),
     ...(share ? { share } : {}), ...(state.options.runtimes ? { runtimes: state.options.runtimes } : {}),

@@ -35,7 +35,8 @@ export const TestService = z.discriminatedUnion('driver', [
 export type TestService = z.infer<typeof TestService>;
 
 export const TestArtifact = z.union([
-  z.strictObject({ path: RepositoryPath, format: Text, env: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/).optional() }),
+  /* link: every part shares it read-only through hard links, for what nothing writes into; else each part gets its own copy. */
+  z.strictObject({ path: RepositoryPath, format: Text, env: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/).optional(), link: z.literal(true).optional() }),
   z.strictObject({ service: Id, path: RepositoryPath }),
 ]);
 export type TestArtifact = z.infer<typeof TestArtifact>;
@@ -71,8 +72,9 @@ const EnvironmentShape = z.strictObject({
   profiles: z.array(z.strictObject({ id: Id, requiredSuiteIds: Ids.min(1) })).min(1).max(128),
   /* cache link: every part shares one read-only tree through hard links, which is for dependencies nothing writes into;
      copy: each part gets its own; none: each part installs. env: variables that name a path of the repository once it is
-     installed, for a language that finds its packages that way. */
-  dependencies: z.strictObject({ adapter: Id, inputs: Inputs, install: z.array(Command).max(1000), paths: Inputs, cache: z.enum(['copy', 'link', 'none']), env: z.record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/), RepositoryPath).optional() }),
+     installed, for a language that finds its packages that way. bin: folders of the repository that go first on PATH then,
+     for a language whose tools come with its harness. Both hold while it installs, in what is prepared, and in every command. */
+  dependencies: z.strictObject({ adapter: Id, inputs: Inputs, install: z.array(Command).max(1000), paths: Inputs, cache: z.enum(['copy', 'link', 'none']), env: z.record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/), RepositoryPath).optional(), bin: z.array(RepositoryPath).max(64).optional() }),
   services: z.array(TestService).max(128), prepare: z.array(TestPrepare).max(1000),
   reset: z.array(TestReset).min(1).max(1000).nullable(), suites: z.array(TestSuite).min(1).max(1000),
   impact: z.strictObject({ adapter: Id, fullPackageGlobs: z.array(z.strictObject({ globs: Inputs.min(1), suiteIds: Ids.min(1) })).max(1000), migrationCheck: MigrationCheck }),

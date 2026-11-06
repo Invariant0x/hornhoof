@@ -20,7 +20,7 @@ vi.mock('../src/isolation.js', async original => {
   return { ...module, userFor: () => ({ uid: ids.builderUid, gid: ids.builderUid }), ensurePasswd: () => {}, prepareFolder: (path: string, user: unknown) => { if (user) ids.handedOver.push({ path, dependencies: existsSync(`${path}/node_modules`) }); return module.prepareFolder(path, null); } };
 });
 import { pruneCache } from '../src/test-cache.js';
-import { harnessVersion, readTestEnvironment } from '../src/test-environment.js';
+import { dependencyCacheKey, environmentCacheKey, harnessVersion, readTestEnvironment } from '../src/test-environment.js';
 import { type HarnessRemote } from '../src/test-harness.js';
 import { runTests, syncHarness } from '../src/tests.js';
 
@@ -144,9 +144,18 @@ describe('a harness that reaches every machine', () => {
   it('builds each architecture its own, under one version', async () => {
     const f = await fixture(), description = await readTestEnvironment(f.repo, f.repositoryScope, f.head(), { cacheRoot: join(f.root, 'cache'), deadline: Date.now() + 10_000, signal: new AbortController().signal, log: () => {} });
     const other = { ...description, runtimeCapabilities: description.runtimeCapabilities.map(runtime => ({ ...runtime, fingerprint: 'a'.repeat(64) })) };
-    const { dependencyCacheKey } = await import('../src/test-environment.js');
     expect(harnessVersion(other)).toBe(harnessVersion(description));
     expect(dependencyCacheKey(other)).not.toBe(dependencyCacheKey(description));
+  });
+
+  it('builds each architecture its own whatever program builds it, as nothing else in a key need name the machine', async () => {
+    const plain = (code: string) => ({ program: 'sh', args: ['-c', code], cwd: '.' });
+    const f = await fixture(manifest => { manifest.runtimes = []; manifest.dependencies.install = [plain('mkdir node_modules')]; manifest.prepare[0]!.commands = [plain('mkdir template')]; });
+    const description = await readTestEnvironment(f.repo, f.repositoryScope, f.head(), { cacheRoot: join(f.root, 'cache'), deadline: Date.now() + 10_000, signal: new AbortController().signal, log: () => {} });
+    const other = { ...description, runtimeCapabilities: description.runtimeCapabilities.map(runtime => ({ ...runtime, fingerprint: 'a'.repeat(64) })) };
+    expect(harnessVersion(other)).toBe(harnessVersion(description));
+    expect(dependencyCacheKey(other)).not.toBe(dependencyCacheKey(description));
+    expect(environmentCacheKey(other, 'schema', 'k')).not.toBe(environmentCacheKey(description, 'schema', 'k'));
   });
 
   it('answers at once for a version it holds, without a checkout', async () => {
@@ -251,6 +260,43 @@ describe('what a part gets of a shared tree', () => {
     const f = await fixture(), one = machine(f, 'one');
     const part = await runTests(await productPart(f, one), one);
     expect(part, part.log).toMatchObject({ ok: true, environmentReceipt: { dependencies: { hit: false } } });
+  });
+});
+
+describe('a project whose tools come with its harness', () => {
+  const plain = (code: string) => ({ program: 'sh', args: ['-c', code], cwd: '.' });
+  const tools = (manifest: TestEnvironmentV1) => {
+    manifest.runtimes = [];
+    manifest.dependencies = { adapter: 'tools', inputs: [], install: [plain('mkdir -p .tools/bin && printf "#!/bin/sh\\necho the tool at \\$TOOL_HOME\\n" > .tools/bin/hello && chmod +x .tools/bin/hello'), { program: 'hello', args: [], cwd: '.' }], paths: ['.tools'], cache: 'link', env: { TOOL_HOME: '.tools' }, bin: ['.tools/bin'] };
+    manifest.prepare = [{ id: 'schema', profiles: ['fast'], serviceIds: [], inputs: ['migration.sql'], commands: [plain('mkdir template shared && hello > template/ready && hello > shared/ready')], artifacts: [{ path: 'template', format: 'directory', env: 'HH_TEMPLATE' }, { path: 'shared', format: 'directory', link: true }] }];
+    manifest.suites[0]!.run = { program: 'hello', args: [], cwd: '.' };
+  };
+
+  it('finds them by name while it is built, in what it prepares, in its tests and in a manual command, at the path of each', async () => {
+    const f = await fixture(tools), one = machine(f, 'one', registry().remote('one'));
+    const part = await runTests(await productPart(f, one), one);
+    expect(part, part.log).toMatchObject({ ok: true });
+    expect(part.log).toMatch(/the tool at \S*\/runs\/[^/\s]+\/repo\/\.tools/);
+    const manual = await runTests(manualPart(f, 'hello'), one);
+    expect(manual, manual.log).toMatchObject({ ok: true, exitCode: 0 });
+    expect(manual.log).toMatch(/the tool at \S*\/repo\/\.tools/);
+  });
+
+  it('builds again when what names them changes, as what it builds may depend on it', async () => {
+    const f = await fixture(tools), a = await readTestEnvironment(f.repo, f.repositoryScope, f.head(), { cacheRoot: join(f.root, 'cache'), deadline: Date.now() + 10_000, signal: new AbortController().signal, log: () => {} });
+    const moved = { ...a, manifest: { ...a.manifest, dependencies: { ...a.manifest.dependencies, bin: ['.tools'] } } };
+    expect(dependencyCacheKey(moved)).not.toBe(dependencyCacheKey(a));
+    const named = { ...a, manifest: { ...a.manifest, dependencies: { ...a.manifest.dependencies, env: { OTHER_HOME: '.tools' } } } };
+    expect(dependencyCacheKey(named)).not.toBe(dependencyCacheKey(a));
+  });
+
+  it('shares what a unit marks read-only by links, and gives the rest of it as a part\'s own copy', async () => {
+    const check = "const f=require('fs');f.writeFileSync('template/ready','mine');try{f.writeFileSync('shared/ready','spoiled');process.exit(5)}catch(e){if(e.code!=='EACCES')throw e}console.log('the shared part stays')";
+    const f = await fixture(manifest => { tools(manifest); manifest.runtimes = [{ id: 'node', version: process.versions.node.split('.')[0]! }]; manifest.suites[0]!.run = sh(check); }), one = machine(f, 'one', registry().remote('one'));
+    const part = await runTests(await productPart(f, one), one);
+    expect(part, part.log).toMatchObject({ ok: true }); expect(part.log).toContain('the shared part stays');
+    const again = await runTests(await productPart(f, one), one);
+    expect(again, again.log).toMatchObject({ ok: true, environmentReceipt: { environments: [{ hit: true }] } });
   });
 });
 
