@@ -680,15 +680,20 @@ export const settleAttempt: (...args: [...Parameters<SettleAttempt>, now?: Date]
   });
 };
 
-/* What the dispatcher may look at now. Being listed decides nothing: its last look does. */
-export async function dueMessages(ctx: Pick<Ctx, 'db'>, now: Date, limit = 100): Promise<{ messageId: string; revision: number }[]> {
-  const rows = await ctx.db
-    .select({ messageId: outboundMessages.id, revision: outboundMessages.revision })
+/* What the dispatcher may look at now, oldest first and a part of each account's queue, so a long or stuck one holds no other
+   back. Being listed decides nothing: its last look does. */
+export async function dueMessages(ctx: Pick<Ctx, 'db'>, now: Date, perAccount = 20): Promise<{ messageId: string; revision: number }[]> {
+  const ranked = ctx.db
+    .select({
+      messageId: outboundMessages.id,
+      revision: outboundMessages.revision,
+      scheduledAt: outboundMessages.scheduledAt,
+      place: sql<number>`row_number() over (partition by ${outboundMessages.accountId} order by ${outboundMessages.scheduledAt}, ${outboundMessages.id})`.as('place'),
+    })
     .from(outboundMessages)
     .where(and(inArray(outboundMessages.status, ['scheduled', 'waiting_approval', 'reserved']), lte(outboundMessages.scheduledAt, now)))
-    .orderBy(outboundMessages.scheduledAt)
-    .limit(limit);
-  return rows;
+    .as('ranked');
+  return ctx.db.select({ messageId: ranked.messageId, revision: ranked.revision }).from(ranked).where(lte(ranked.place, perAccount)).orderBy(ranked.scheduledAt);
 }
 
 export type Review = { messageId: string; revision: number; checkId: string; bindingDigest: string; subjectDigest: string; reviewer: typeof outboundReviewReceipts.$inferInsert.reviewer; result: typeof outboundReviewReceipts.$inferInsert.result };

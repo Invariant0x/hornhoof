@@ -14,6 +14,7 @@ import { catalogRow, proposeRevision, ProposalInput, publishRevision, requirePro
 import { digestOf } from './checks.js';
 import { addContact, permissionPlace, readUnsubscribeToken, revokePermission, suppressContact, unsubscribe } from './contacts.js';
 import { outboundStatus, submitOutbound } from './core.js';
+import { receiptRoutes } from './dispatcher.js';
 import { addPolicy, channelIn, createChannel, reopenChannel, stopByPerson, type Channel } from './policies.js';
 import { authorityOf } from './tools.js';
 
@@ -198,5 +199,6 @@ export function outboundRoutes(app: FastifyInstance, ctx: Ctx): void {
   catalogRoutes(app, ctx);
   contactRoutes(app, ctx);
   accountRoutes(app, ctx);
+  receiptRoutes(app, ctx);
   unsubscribeRoutes(app, ctx);
 }

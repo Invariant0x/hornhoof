@@ -1285,6 +1285,7 @@ const at = (name: string) => timestamp(name, { withTimezone: true });
 
 /* A way out of the company: one adapter, one purpose, direct to contacts or public. A stop holds a reason and only a
    person's decision ends it; each stop or reopening is a new generation, so what was admitted under an older one is stale. */
+export type StopReason = GateCode | 'complaint_threshold' | 'refusal_threshold' | 'bounce_threshold';
 export const outboundChannels = pgTable('outbound_channels', {
   id: id(),
   ...placeColumns(),
@@ -1294,7 +1295,7 @@ export const outboundChannels = pgTable('outbound_channels', {
   audience: text('audience', { enum: ['direct', 'public'] }).notNull(),
   status: text('status', { enum: ['new', 'active', 'stopped'] }).notNull().default('new'),
   generation: integer('generation').notNull().default(1),
-  stoppedReason: text('stopped_reason').$type<GateCode>(),
+  stoppedReason: text('stopped_reason').$type<StopReason>(),
   stoppedAt: at('stopped_at'),
   createdBy: uuid('created_by').notNull().references(() => people.id),
   createdAt: createdAt(),

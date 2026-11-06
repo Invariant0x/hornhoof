@@ -97,7 +97,7 @@ function exchange(call: Call, account: WebhookAccount, options: WebhookOptions):
   });
 }
 
-const signature = (key: string, stamp: string, signed: string): string => `v1=${createHmac('sha256', key).update(`${stamp}.${signed}`).digest('hex')}`;
+export const signature = (key: string, stamp: string, signed: string): string => `v1=${createHmac('sha256', key).update(`${stamp}.${signed}`).digest('hex')}`;
 const signedHeaders = (key: string, signed: string): Record<string, string> => {
   const stamp = String(Math.floor(Date.now() / 1000));
   return { 'x-hornhoof-timestamp': stamp, 'x-hornhoof-signature': signature(key, stamp, signed) };

@@ -16,6 +16,7 @@ import { checkTestTimes } from '../testruns/runs.js';
 import type { AgentRow } from './find.js';
 import { checkOperatorHealth } from '../program-operator/health.js';
 import { modelCheckRound } from '../model-checks/store.js';
+import { outboundRound, reconcileOutbound } from '../outbound/dispatcher.js';
 
 export { checkSilentTurns, SILENT_TURN_MS };
 
@@ -130,6 +131,7 @@ export async function minuteRound(ctx: Ctx, now: Date, failed: (what: string) =>
     checkTestTimes(ctx).catch(failed('checking test run times failed')),
     moveLeases(ctx, now).catch(failed('moving Codex plans to another machine failed')),
     modelCheckRound(ctx, now).catch(failed('running model checks failed')),
+    outboundRound(ctx, now).catch(failed('sending outbound messages failed')),
   ]);
 }
 
@@ -143,6 +145,7 @@ export function startTimers(app: FastifyInstance, ctx: Ctx): void {
     await checkOperatorHealth(ctx).catch(failed('restoring program operator cases failed'));
     void wakeLeftBehind(ctx).catch(failed('queueing left-behind turns failed'));
     void dropOldFiles(ctx.db, new Date()).catch(failed('removing the files of old turns failed'));
+    void reconcileOutbound(ctx).catch(failed('finding out how outbound attempts ended failed'));
   });
   const timer = setInterval(() => void minuteRound(ctx, new Date(), failed), TICK_MS);
   timer.unref();
