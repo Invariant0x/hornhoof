@@ -34,8 +34,8 @@
 
 - [x] Write Node integration contracts for five project identities, exact preservation of workspace file inventories, real server/protocol/node selection and a negative unrelated DB selection.
 - [x] Remote RED on the unchanged config after npmci/protocol preparation; save full before inventories and widths. Run300 at67891cce: five expected failures, install/build/lint0. Normal workspace files201+125+73+17=416; the unconfigured root discovers476, including unrelated runner inputs.
-- [ ] Add the root config, test-only aliases and cwd setup; connect the existing no-proc variant under a unique name.
-- [ ] Remote GREEN of contracts plus narrow actual root related executions for server/protocol/node and a cwd-sensitive web test. No full test callbacks run.
+- [x] Add the root config, test-only aliases and cwd setup; connect the existing no-proc variant under a unique name.
+- [x] Remote312 contracts5/5 and narrow actual server/protocol/node/no-proc/CSS executions passed.312 overall remains failed because of separate tasks-merge/coverage failures. No full suite callbacks run.
 - [x] Publish early test-only67891cce/API in566 and direct70032; both tools accepted.70032 reports455 as its active task, so this is a recorded handoff, not proof that566 consumed it.
 
 ### Task2: Separate light helpers and verify the selection reduction
@@ -44,10 +44,10 @@
 
 **Interfaces:** Existing heavy helpers keep their app API and cleanup order. Direct light imports must not reach buildApp. No production behavior changes.
 
-- [ ] Keep the failing app-change-excludes-DB assertion from Task1 and record the before selection.
-- [ ] Move existing bodies without behavior edits, then change only the needed consumer imports.
+- [x] Keep the failing app-change-excludes-DB assertion from Task1 and record the before selection.
+- [x] Move existing bodies without behavior edits, then change only the needed consumer imports.
 - [ ] Run affected light/helper tests, types/test-types, lint, scoped coverage/CRAP/dryer remotely; preserve unsupported-tool output as a concern.
-- [ ] Record before/after widths for real server, protocol and node files; all baseline test files must still exist in the root normal projects.
+- [x] Record before/after widths for real server, protocol and node files;312 proves all baseline normal workspace files remain. Upstream five-file addition and no-proc variants are separate.
 
 ### Task3: Handoff and turn integration
 

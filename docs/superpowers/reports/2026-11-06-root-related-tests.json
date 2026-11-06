@@ -1,0 +1,922 @@
+{
+  "task": 565,
+  "status": "IN_PROGRESS",
+  "executedSource": "8c22964eb0c4f1d7f8665a56dd229440c9a50368",
+  "redSource": "67891cce7c3a3ad6fe15be821a161562cc8c7060",
+  "runs": {
+    "300": {
+      "status": "failed",
+      "rootContracts": {
+        "pass": 0,
+        "fail": 5
+      }
+    },
+    "312": {
+      "source": "8c22964eb0c4f1d7f8665a56dd229440c9a50368",
+      "status": "failed",
+      "exitCode": 3,
+      "stages": [
+        {
+          "stage": "install",
+          "args": [
+            "npm",
+            "ci",
+            "--prefer-offline",
+            "--no-audit",
+            "--no-fund"
+          ],
+          "code": 0,
+          "signal": null,
+          "ms": 4556
+        },
+        {
+          "stage": "protocol-build",
+          "args": [
+            "npm",
+            "run",
+            "build",
+            "-w",
+            "@hornhoof/protocol"
+          ],
+          "code": 0,
+          "signal": null,
+          "ms": 1607
+        },
+        {
+          "stage": "node-build",
+          "args": [
+            "npm",
+            "run",
+            "build",
+            "-w",
+            "@hornhoof/node"
+          ],
+          "code": 0,
+          "signal": null,
+          "ms": 2220
+        },
+        {
+          "stage": "root-contracts",
+          "args": [
+            "node",
+            "--test",
+            "scripts/test/root-vitest.test.mjs"
+          ],
+          "code": 0,
+          "signal": null,
+          "ms": 11086
+        },
+        {
+          "stage": "helper-affected-coverage",
+          "args": [
+            "npx",
+            "--no-install",
+            "vitest",
+            "run",
+            "apps/server/test/db.test.ts",
+            "apps/server/test/agent-sql-permissions.test.ts",
+            "apps/server/test/program-operator-deliveries.test.ts",
+            "apps/server/test/tree-history-query.test.ts",
+            "apps/server/test/config.test.ts",
+            "apps/server/test/tunnel.test.ts",
+            "apps/server/test/auth.test.ts",
+            "apps/server/test/setup.test.ts",
+            "apps/server/test/tasks-merge.test.ts",
+            "--project",
+            "@hornhoof/server",
+            "--maxWorkers=2",
+            "--coverage",
+            "--coverage.include=apps/server/test/helpers*.ts",
+            "--coverage.exclude=**/*.test.*",
+            "--coverage.reporter=text",
+            "--coverage.reporter=lcov"
+          ],
+          "code": 1,
+          "signal": null,
+          "ms": 37266
+        },
+        {
+          "stage": "server-related",
+          "args": [
+            "npx",
+            "--no-install",
+            "vitest",
+            "related",
+            "apps/server/src/modules/model-checks/score.ts",
+            "--project",
+            "@hornhoof/server",
+            "--run",
+            "--maxWorkers=2"
+          ],
+          "code": 0,
+          "signal": null,
+          "ms": 14712
+        },
+        {
+          "stage": "protocol-related",
+          "args": [
+            "npx",
+            "--no-install",
+            "vitest",
+            "related",
+            "packages/protocol/src/link.ts",
+            "--project",
+            "@hornhoof/protocol",
+            "--run",
+            "--maxWorkers=2"
+          ],
+          "code": 0,
+          "signal": null,
+          "ms": 803
+        },
+        {
+          "stage": "node-related",
+          "args": [
+            "npx",
+            "--no-install",
+            "vitest",
+            "related",
+            "apps/node/src/load.ts",
+            "--project",
+            "@hornhoof/node",
+            "--run",
+            "--maxWorkers=2"
+          ],
+          "code": 0,
+          "signal": null,
+          "ms": 28950
+        },
+        {
+          "stage": "no-proc-variant",
+          "args": [
+            "npx",
+            "--no-install",
+            "vitest",
+            "run",
+            "--project",
+            "@hornhoof/node:no-proc",
+            "--maxWorkers=2"
+          ],
+          "code": 0,
+          "signal": null,
+          "ms": 45346
+        },
+        {
+          "stage": "root-config-types",
+          "args": [
+            "npx",
+            "--no-install",
+            "tsc",
+            "--allowJs",
+            "--checkJs",
+            "--noEmit",
+            "--skipLibCheck",
+            "--module",
+            "NodeNext",
+            "--target",
+            "ES2023",
+            "--types",
+            "node",
+            "vitest.config.mjs"
+          ],
+          "code": 0,
+          "signal": null,
+          "ms": 742
+        },
+        {
+          "stage": "server-types",
+          "args": [
+            "npx",
+            "--no-install",
+            "tsc",
+            "-p",
+            "apps/server/tsconfig.json",
+            "--noEmit"
+          ],
+          "code": 0,
+          "signal": null,
+          "ms": 6262
+        },
+        {
+          "stage": "test-types",
+          "args": [
+            "npm",
+            "run",
+            "typecheck:tests"
+          ],
+          "code": 0,
+          "signal": null,
+          "ms": 17946
+        },
+        {
+          "stage": "changed-eslint",
+          "args": [
+            "npx",
+            "--no-install",
+            "eslint",
+            "vitest.config.mjs",
+            "scripts/test/root-vitest.test.mjs",
+            "scripts/test/related-probe.mjs",
+            "scripts/test/workspace-cwd.mjs",
+            "apps/server/test/helpers.ts",
+            "apps/server/test/helpers-db.ts",
+            "apps/server/test/helpers-basic.ts",
+            "apps/server/test/db.test.ts",
+            "apps/server/test/agent-sql-permissions.test.ts",
+            "apps/server/test/program-operator-deliveries.test.ts",
+            "apps/server/test/tree-history-query.test.ts",
+            "apps/server/test/config.test.ts",
+            "apps/server/test/tunnel.test.ts",
+            "apps/server/test/auth.test.ts",
+            "apps/server/test/setup.test.ts",
+            "apps/server/test/tasks-merge.test.ts",
+            "--global",
+            "console"
+          ],
+          "code": 0,
+          "signal": null,
+          "ms": 3828
+        },
+        {
+          "stage": "helper-crapper",
+          "args": [
+            "crapper",
+            "--use-existing-coverage",
+            "--threshold",
+            "10",
+            "apps/server/test/helpers.ts",
+            "apps/server/test/helpers-db.ts",
+            "apps/server/test/helpers-basic.ts"
+          ],
+          "code": 2,
+          "signal": null,
+          "ms": 3077
+        },
+        {
+          "stage": "changed-dryer",
+          "args": [
+            "dryer",
+            "--threshold",
+            "0.8",
+            "apps/server/test/helpers.ts",
+            "apps/server/test/helpers-db.ts",
+            "apps/server/test/helpers-basic.ts",
+            "vitest.config.mjs",
+            "scripts/test/root-vitest.test.mjs",
+            "scripts/test/related-probe.mjs",
+            "scripts/test/workspace-cwd.mjs"
+          ],
+          "code": 0,
+          "signal": null,
+          "ms": 123
+        }
+      ],
+      "rootContracts": {
+        "pass": 5,
+        "fail": 0
+      },
+      "helperAffected": {
+        "pass": 91,
+        "fail": 6,
+        "allFailuresIn": "apps/server/test/tasks-merge.test.ts",
+        "message": "#2 is not at your gate."
+      },
+      "coverage": "absent after affected failure; lcov null; subsequent CRAP 110 at zero coverage; no green quality claim",
+      "logBytes": 311631,
+      "logSha256": "a8dc9d47e43b4f87e37d869141c2633f5bb109b0ee95a4c6d18d2aed1f4dfab1"
+    },
+    "378": {
+      "task": 565,
+      "run": 378,
+      "part": 1,
+      "source": "8c22964eb0c4f1d7f8665a56dd229440c9a50368",
+      "status": "failed",
+      "exitCode": 3,
+      "logBytes": 166991,
+      "logSha256": "aedf6cbb2d20577b7eba730e0272ef31888276b33f685fb3cec2d81d40151fb8",
+      "stages": [
+        {
+          "stage": "install",
+          "args": [
+            "npm",
+            "ci",
+            "--prefer-offline",
+            "--no-audit",
+            "--no-fund"
+          ],
+          "cwd": "/data/tests/e676ced3-99b0-4224-85f8-2e8aa79f3fe4/repo",
+          "code": 0,
+          "signal": null,
+          "ms": 4095
+        },
+        {
+          "stage": "protocol-build",
+          "args": [
+            "npm",
+            "run",
+            "build",
+            "-w",
+            "@hornhoof/protocol"
+          ],
+          "cwd": "/data/tests/e676ced3-99b0-4224-85f8-2e8aa79f3fe4/repo",
+          "code": 0,
+          "signal": null,
+          "ms": 1674
+        },
+        {
+          "stage": "standalone-merge-fixture",
+          "args": [
+            "npx",
+            "--no-install",
+            "vitest",
+            "run",
+            "test/tasks-merge.test.ts",
+            "--maxWorkers=2"
+          ],
+          "cwd": "/data/tests/e676ced3-99b0-4224-85f8-2e8aa79f3fe4/repo/apps/server",
+          "code": 1,
+          "signal": null,
+          "ms": 9113
+        },
+        {
+          "stage": "root-affected-retain-failed-coverage",
+          "args": [
+            "npx",
+            "--no-install",
+            "vitest",
+            "run",
+            "apps/server/test/db.test.ts",
+            "apps/server/test/agent-sql-permissions.test.ts",
+            "apps/server/test/program-operator-deliveries.test.ts",
+            "apps/server/test/tree-history-query.test.ts",
+            "apps/server/test/config.test.ts",
+            "apps/server/test/tunnel.test.ts",
+            "apps/server/test/auth.test.ts",
+            "apps/server/test/setup.test.ts",
+            "apps/server/test/tasks-merge.test.ts",
+            "--project",
+            "@hornhoof/server",
+            "--maxWorkers=2",
+            "--coverage",
+            "--coverage.reportOnFailure",
+            "--coverage.reportsDirectory=/data/tests/e676ced3-99b0-4224-85f8-2e8aa79f3fe4/repo/coverage",
+            "--coverage.include=apps/server/test/helpers*.ts",
+            "--coverage.exclude=**/*.test.*",
+            "--coverage.reporter=text",
+            "--coverage.reporter=lcov"
+          ],
+          "cwd": "/data/tests/e676ced3-99b0-4224-85f8-2e8aa79f3fe4/repo",
+          "code": 1,
+          "signal": null,
+          "ms": 24781
+        },
+        {
+          "stage": "all-helper-crapper-retained-failure",
+          "args": [
+            "crapper",
+            "--use-existing-coverage",
+            "--threshold",
+            "10",
+            "apps/server/test/helpers.ts",
+            "apps/server/test/helpers-db.ts",
+            "apps/server/test/helpers-basic.ts"
+          ],
+          "cwd": "/data/tests/e676ced3-99b0-4224-85f8-2e8aa79f3fe4/repo",
+          "code": 2,
+          "signal": null,
+          "ms": 2002
+        }
+      ],
+      "resources": [
+        {
+          "stage": "install",
+          "point": "before",
+          "at": "2026-11-06T03:34:27.309Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "5b416d9dfc2b",
+          "cpus": 10,
+          "load": [
+            7.87,
+            7.68,
+            7.24
+          ],
+          "free": 5697060864,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-9",
+          "memoryMax": "max",
+          "memoryCurrent": "2257080320"
+        },
+        {
+          "stage": "install",
+          "point": "after",
+          "at": "2026-11-06T03:34:31.404Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "5b416d9dfc2b",
+          "cpus": 10,
+          "load": [
+            7.72,
+            7.65,
+            7.24
+          ],
+          "free": 5765156864,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-9",
+          "memoryMax": "max",
+          "memoryCurrent": "2755502080"
+        },
+        {
+          "stage": "protocol-build",
+          "point": "before",
+          "at": "2026-11-06T03:34:31.405Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "5b416d9dfc2b",
+          "cpus": 10,
+          "load": [
+            7.72,
+            7.65,
+            7.24
+          ],
+          "free": 5765156864,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-9",
+          "memoryMax": "max",
+          "memoryCurrent": "2755764224"
+        },
+        {
+          "stage": "protocol-build",
+          "point": "after",
+          "at": "2026-11-06T03:34:33.079Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "5b416d9dfc2b",
+          "cpus": 10,
+          "load": [
+            7.72,
+            7.65,
+            7.24
+          ],
+          "free": 5631733760,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-9",
+          "memoryMax": "max",
+          "memoryCurrent": "2765008896"
+        },
+        {
+          "stage": "standalone-merge-fixture",
+          "point": "before",
+          "at": "2026-11-06T03:34:33.080Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "5b416d9dfc2b",
+          "cpus": 10,
+          "load": [
+            7.72,
+            7.65,
+            7.24
+          ],
+          "free": 5631733760,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-9",
+          "memoryMax": "max",
+          "memoryCurrent": "2764996608"
+        },
+        {
+          "stage": "standalone-merge-fixture",
+          "point": "during",
+          "at": "2026-11-06T03:34:38.084Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "5b416d9dfc2b",
+          "cpus": 10,
+          "load": [
+            7.66,
+            7.64,
+            7.24
+          ],
+          "free": 5065023488,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-9",
+          "memoryMax": "max",
+          "memoryCurrent": "3647229952"
+        },
+        {
+          "stage": "standalone-merge-fixture",
+          "point": "after",
+          "at": "2026-11-06T03:34:42.190Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "5b416d9dfc2b",
+          "cpus": 10,
+          "load": [
+            7.61,
+            7.63,
+            7.23
+          ],
+          "free": 5855268864,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-9",
+          "memoryMax": "max",
+          "memoryCurrent": "2775482368"
+        },
+        {
+          "stage": "root-affected-retain-failed-coverage",
+          "point": "before",
+          "at": "2026-11-06T03:34:42.194Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "5b416d9dfc2b",
+          "cpus": 10,
+          "load": [
+            7.61,
+            7.63,
+            7.23
+          ],
+          "free": 5855285248,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-9",
+          "memoryMax": "max",
+          "memoryCurrent": "2775433216"
+        },
+        {
+          "stage": "root-affected-retain-failed-coverage",
+          "point": "during",
+          "at": "2026-11-06T03:34:47.195Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "5b416d9dfc2b",
+          "cpus": 10,
+          "load": [
+            7.72,
+            7.65,
+            7.24
+          ],
+          "free": 3485274112,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-9",
+          "memoryMax": "max",
+          "memoryCurrent": "5248049152"
+        },
+        {
+          "stage": "root-affected-retain-failed-coverage",
+          "point": "during",
+          "at": "2026-11-06T03:34:52.196Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "5b416d9dfc2b",
+          "cpus": 10,
+          "load": [
+            10.15,
+            8.15,
+            7.41
+          ],
+          "free": 2192281600,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-9",
+          "memoryMax": "max",
+          "memoryCurrent": "6419288064"
+        },
+        {
+          "stage": "root-affected-retain-failed-coverage",
+          "point": "during",
+          "at": "2026-11-06T03:34:57.197Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "5b416d9dfc2b",
+          "cpus": 10,
+          "load": [
+            10.37,
+            8.23,
+            7.44
+          ],
+          "free": 2265636864,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-9",
+          "memoryMax": "max",
+          "memoryCurrent": "6421401600"
+        },
+        {
+          "stage": "root-affected-retain-failed-coverage",
+          "point": "during",
+          "at": "2026-11-06T03:35:02.198Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "5b416d9dfc2b",
+          "cpus": 10,
+          "load": [
+            11.63,
+            8.53,
+            7.54
+          ],
+          "free": 2787942400,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-9",
+          "memoryMax": "max",
+          "memoryCurrent": "5936214016"
+        },
+        {
+          "stage": "root-affected-retain-failed-coverage",
+          "point": "after",
+          "at": "2026-11-06T03:35:06.973Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "5b416d9dfc2b",
+          "cpus": 10,
+          "load": [
+            11.66,
+            8.59,
+            7.56
+          ],
+          "free": 5754109952,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-9",
+          "memoryMax": "max",
+          "memoryCurrent": "2802540544"
+        },
+        {
+          "stage": "all-helper-crapper-retained-failure",
+          "point": "before",
+          "at": "2026-11-06T03:35:06.974Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "5b416d9dfc2b",
+          "cpus": 10,
+          "load": [
+            11.66,
+            8.59,
+            7.56
+          ],
+          "free": 5754109952,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-9",
+          "memoryMax": "max",
+          "memoryCurrent": "2802479104"
+        },
+        {
+          "stage": "all-helper-crapper-retained-failure",
+          "point": "after",
+          "at": "2026-11-06T03:35:08.975Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "5b416d9dfc2b",
+          "cpus": 10,
+          "load": [
+            11.28,
+            8.56,
+            7.56
+          ],
+          "free": 5738250240,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-9",
+          "memoryMax": "max",
+          "memoryCurrent": "2829565952"
+        }
+      ],
+      "standalone": {
+        "pass": 5,
+        "fail": 6,
+        "file": "apps/server/test/tasks-merge.test.ts"
+      },
+      "rootAffected": {
+        "pass": 91,
+        "fail": 6,
+        "files": 9
+      },
+      "coverage": "report exists but empty; project-relative include was incorrectly prefixed apps/server",
+      "crap": "110 with zero coverage, retained as failure"
+    }
+  },
+  "widths": [
+    {
+      "mode": "workspace-before",
+      "changed": "apps/server/src/app.ts",
+      "total": 201,
+      "selected": 148,
+      "phase": "before",
+      "byProject": {
+        "": 148
+      }
+    },
+    {
+      "mode": "root",
+      "changed": "apps/server/src/app.ts",
+      "total": 476,
+      "selected": 152,
+      "phase": "before",
+      "byProject": {
+        "": 152
+      }
+    },
+    {
+      "mode": "workspace-before",
+      "changed": "packages/protocol/src/link.ts",
+      "total": 201,
+      "selected": 0,
+      "phase": "before",
+      "byProject": {}
+    },
+    {
+      "mode": "workspace-before",
+      "changed": "packages/protocol/src/link.ts",
+      "total": 125,
+      "selected": 0,
+      "phase": "before",
+      "byProject": {}
+    },
+    {
+      "mode": "workspace-before",
+      "changed": "packages/protocol/src/link.ts",
+      "total": 73,
+      "selected": 0,
+      "phase": "before",
+      "byProject": {}
+    },
+    {
+      "mode": "workspace-before",
+      "changed": "packages/protocol/src/link.ts",
+      "total": 17,
+      "selected": 1,
+      "phase": "before",
+      "byProject": {
+        "": 1
+      }
+    },
+    {
+      "mode": "root",
+      "changed": "packages/protocol/src/link.ts",
+      "total": 476,
+      "selected": 1,
+      "phase": "before",
+      "byProject": {
+        "": 1
+      }
+    },
+    {
+      "mode": "workspace-before",
+      "changed": "apps/node/src/redact.ts",
+      "total": 125,
+      "selected": 95,
+      "phase": "before",
+      "byProject": {
+        "": 95
+      }
+    },
+    {
+      "mode": "root",
+      "changed": "apps/node/src/redact.ts",
+      "total": 476,
+      "selected": 96,
+      "phase": "before",
+      "byProject": {
+        "": 96
+      }
+    },
+    {
+      "mode": "workspace-before",
+      "changed": "apps/server/src/app.ts",
+      "total": 206,
+      "selected": 143,
+      "phase": "after",
+      "byProject": {
+        "": 143
+      }
+    },
+    {
+      "mode": "root",
+      "changed": "apps/server/src/app.ts",
+      "total": 429,
+      "selected": 143,
+      "phase": "after",
+      "byProject": {
+        "@hornhoof/server": 143
+      }
+    },
+    {
+      "mode": "workspace-before",
+      "changed": "packages/protocol/src/link.ts",
+      "total": 206,
+      "selected": 0,
+      "phase": "after",
+      "byProject": {}
+    },
+    {
+      "mode": "workspace-before",
+      "changed": "packages/protocol/src/link.ts",
+      "total": 125,
+      "selected": 0,
+      "phase": "after",
+      "byProject": {}
+    },
+    {
+      "mode": "workspace-before",
+      "changed": "packages/protocol/src/link.ts",
+      "total": 73,
+      "selected": 0,
+      "phase": "after",
+      "byProject": {}
+    },
+    {
+      "mode": "workspace-before",
+      "changed": "packages/protocol/src/link.ts",
+      "total": 17,
+      "selected": 1,
+      "phase": "after",
+      "byProject": {
+        "": 1
+      }
+    },
+    {
+      "mode": "root",
+      "changed": "packages/protocol/src/link.ts",
+      "total": 429,
+      "selected": 170,
+      "phase": "after",
+      "byProject": {
+        "@hornhoof/protocol": 1,
+        "@hornhoof/server": 153,
+        "@hornhoof/web": 16
+      }
+    },
+    {
+      "mode": "workspace-before",
+      "changed": "apps/node/src/redact.ts",
+      "total": 125,
+      "selected": 95,
+      "phase": "after",
+      "byProject": {
+        "": 95
+      }
+    },
+    {
+      "mode": "root",
+      "changed": "apps/node/src/redact.ts",
+      "total": 429,
+      "selected": 100,
+      "phase": "after",
+      "byProject": {
+        "@hornhoof/node": 95,
+        "@hornhoof/node:no-proc": 5
+      }
+    }
+  ],
+  "inventory": {
+    "beforeNormal": {
+      "server": 201,
+      "node": 125,
+      "web": 73,
+      "protocol": 17,
+      "total": 416
+    },
+    "after312Normal": {
+      "server": 206,
+      "node": 125,
+      "web": 73,
+      "protocol": 17,
+      "total": 421
+    },
+    "normalDeltaFromUpstream": 5,
+    "after312ExtraNoProcVariants": 8,
+    "normalFilesPreservedByContract": true,
+    "fullTestCallbackCountsExecuted": false
+  },
+  "pending": [
+    "Correct project-relative coverage glob; previous 378 LCOV empty",
+    "Two fast until-behavior pins added after312, not executed yet",
+    "Proposed independent-reviewer fixture patch not applied; head scope question pending",
+    "MJS duplicate-analysis coverage not proved; no formatter configured",
+    "Fresh turn merge and merge checks not done"
+  ],
+  "fullSuite": false
+}
