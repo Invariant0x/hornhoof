@@ -4,7 +4,7 @@ title: { en: "Work through tasks", ru: "Работа через задачи" }
 description: { en: "How a member takes a task, hands it to its gates and keeps it moving.", ru: "Как сотрудник берет задачу, передает ее на ворота и не дает ей встать." }
 kind: core
 ---
-For `small: true`, use the fast path: write a failing test, make the change, run only affected tests, merge into the turn's branch, then submit a line stating the change and commit SHA. Detailed reports, matrices, complexity metrics and duplicate checks belong to the shared turn review and checks. If the work grows, tell the head and take the normal path. The steps below describe ordinary work.
+For `small: true`, use the fast path: make the change and its check (for code: write a failing test, make the change, run only affected tests, merge into the turn's branch), then submit a line stating the change and commit SHA. Detailed reports, matrices, complexity metrics and duplicate checks belong to the shared turn review and checks. If the work grows, tell the head and take the normal path. The steps below describe ordinary work.
 
 Hornhoof wakes you with a task number and the reason. Read the task with "task" first: its body is the current truth, its log has verdicts, comments and answers. "tasks" lists what you hold.
 

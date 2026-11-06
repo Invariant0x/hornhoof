@@ -40,11 +40,11 @@ Record `version: 1`, runtimes, explicit `defaultProfile` referring to a top-leve
 
 Commands are `{program, args, cwd}`; cwd and input/output paths stay within the checkout's declared boundaries. Pass selected files as literal arguments or JSON, without shell interpolation. Do not invent nested contract shapes or claim validation against an unpublished parser.
 
-## Mutation scope (T4)
+## Mutation scope
 
-Describe mutation work here; only the assigned release mutation work executes it. Select risky **pure logic modules** and their **fast unit tests**, requiring no database, browser, network or external service. Inspect imports and fixture scope before calling a test pure.
+Describe mutation work here; the testing gate alone executes it. Select risky **pure logic modules** and their **fast unit tests**, requiring no database, browser, network or external service. Inspect imports and fixture scope before calling a test pure.
 
-For Python, JavaScript/TypeScript, Go, Rust, Java and Clojure, read the installed Uncle Bob mutator documentation/source to establish the adapter command. For other languages, ask DEV-HEAD for the configured tool or record unsupported with its reason. A test runner alone is not a mutation tool.
+For Python, JavaScript/TypeScript, Go, Rust, Java and Clojure, read the installed mutation tool's documentation and source to establish the adapter command. For other languages, ask DEV-HEAD for the configured tool or record unsupported with its reason. A test runner alone is not a mutation tool.
 
 Record `sourcePaths`, `fastTestPaths`, `coverageCommands`, `coverageFiles` and the mutation `command`. Both coverage generation and baseline/mutant execution must use the **same selected pure test scope**, never the full database/browser/network suite. A test-command flag alone may leave an automatic coverage phase running the full suite: verify the tool's coverage behavior too. Generate fresh successful coverage reports bound to the candidate commit and exact source/test selection, then require their reuse or an explicitly narrowed coverage command. Stale or missing reports fail preparation. Keep coverage enabled and required fixtures intact; neither disabling coverage nor removing a fixture to make a test look pure is valid.
 
