@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TerminalHost } from '../src/terminal/host.js';
 import { Tmux } from '../src/terminal/tmux.js';
 import { codexJob, until } from './terminal-host-helpers.js';
+import { codexPrompt } from './real-screens.js';
 
 const SESSION = 'c3b66b04-872b-4fbe-a3a4-058a026ef20a';
 const cleanups: (() => Promise<void>)[] = [];
@@ -29,7 +30,7 @@ async function atWork(takePrompt = true) {
   });
   const alive = vi.spyOn(tmux, 'alive').mockResolvedValue(true);
   vi.spyOn(tmux, 'stopAll').mockResolvedValue();
-  const screen = vi.spyOn(tmux, 'screen').mockImplementation(async () => `${history}OpenAI Codex\n› ${input}\n`);
+  const screen = vi.spyOn(tmux, 'screen').mockImplementation(async () => `${history}OpenAI Codex\n${codexPrompt(input)}`);
   const paste = vi.spyOn(tmux, 'paste').mockImplementation(async (_name, text) => { input += text; });
   const keys = vi.spyOn(tmux, 'keys').mockImplementation(async (_name, ...pressed) => {
     for (const key of pressed) {
@@ -147,7 +148,7 @@ describe('words typed into a running turn', () => {
 
   it('refuses hidden input without reading an old empty prompt from history', async () => {
     const c = await atWork();
-    c.screen.mockImplementation(async (_name, history = 200) => history === 0 ? 'Input is hidden.' : '› \n');
+    c.screen.mockImplementation(async (_name, history = 200) => history === 0 ? 'Input is hidden.' : codexPrompt(''));
     expect(await c.host.say('say', 'Use the new schema.')).toBe(false);
     expect(c.screen.mock.calls.every(([, history]) => history === 0)).toBe(true);
   });
@@ -169,7 +170,7 @@ describe('words typed into a running turn', () => {
 
   it('uses the receipt if the input disappears after Enter', async () => {
     const c = await atWork();
-    c.screen.mockResolvedValueOnce('OpenAI Codex\n› \n').mockResolvedValue('Input is hidden.');
+    c.screen.mockResolvedValueOnce(`OpenAI Codex\n${codexPrompt('')}`).mockResolvedValue('Input is hidden.');
     expect(await c.host.say('say', 'Use the new schema.')).toBe(true);
     expect(c.logMessage).not.toHaveBeenCalled();
   });
@@ -190,7 +191,7 @@ describe('words typed into a running turn', () => {
     c.screen.mockImplementationOnce(async () => {
       c.finish();
       await c.running;
-      return 'OpenAI Codex\n› \n';
+      return `OpenAI Codex\n${codexPrompt('')}`;
     });
     expect(await c.host.say('say', 'Use the new schema.')).toBe(false);
     expect(c.paste).not.toHaveBeenCalled();
@@ -216,7 +217,7 @@ describe('words typed into a running turn', () => {
 
   it('uses the program receipt even if the screen still shows the words', async () => {
     const c = await atWork();
-    c.screen.mockResolvedValueOnce('OpenAI Codex\n› \n').mockResolvedValueOnce('OpenAI Codex\n› Use the new schema.\n');
+    c.screen.mockResolvedValueOnce(`OpenAI Codex\n${codexPrompt('')}`).mockResolvedValueOnce('OpenAI Codex\n› Use the new schema.\n');
     expect(await c.host.say('say', 'Use the new schema.')).toBe(true);
     expect(c.keys.mock.calls.filter(([, key]) => key === 'Enter')).toHaveLength(1);
   });

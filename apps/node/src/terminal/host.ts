@@ -1,9 +1,9 @@
 import { execFile, type ChildProcess } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { readFileSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
-import { cut, isProgramOwnPrompt, typesWords, UNHEARD_MS, type AgentEvent, type Failure, type Limits, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
+import { cut, isProgramOwnPrompt, isTerminalReport, typesWords, UNHEARD_MS, type AgentEvent, type Failure, type Limits, type NodeMessage, type ServerMessage } from '@hornhoof/protocol';
 import type { OperatorDelivery, OperatorInputLine, OperatorQuestion, OperatorServerMessage } from '@hornhoof/protocol/program-operator';
 import { agyRules, COLORS_NOT_TAKEN, colorsNotTaken, pastColors, SETUP_NEEDED } from '../providers/antigravity.js';
 import { programDirOf, toldPlace } from '../program-folder.js';
@@ -33,6 +33,7 @@ import { CALLS } from './tool-calls.js';
 import { agyError, agySteps, claudeStatusContext, claudeStatusLimits, codexRollout, kimiWire, LineTail, type WireNews } from './transcripts.js';
 import type { RecordingCursor } from './recordings.js';
 import { envFile, type Tmux } from './tmux.js';
+import { LostWords } from './lost-words.js';
 import { OperatorRuntime, type OperatorOptions } from './operator-runtime.js';
 import { ownThought } from './operator-activity.js';
 import type { OperatorProgram } from './operator-control.js';
@@ -119,6 +120,8 @@ type Agent = {
   busy: boolean;
   /* The program took the prompt Hornhoof typed: its prompt hook ran or its log says the turn started. */
   took?: boolean;
+  /* A person typed into the program since Hornhoof's words went in: its input is theirs from then on. */
+  ownerTyped?: boolean;
   /* The prompt Hornhoof typed, until the program's prompt hook says what it got. */
   typing?: string | null;
   limits: Limits | null;
@@ -258,6 +261,8 @@ type Options = {
   typingQuietMs?: number;
   /* How long the host waits for Hornhoof to say it keeps words left in the input, before it tells them again. */
   keptWaitMs?: number;
+  /* How long a program shows an empty input and no change at all before words it did not record count as lost. */
+  wordsQuietMs?: number;
   /* How often the host observes the program and reports its state again when nothing changed. */
   lookMs?: number;
   reportMs?: number;
@@ -295,9 +300,10 @@ const SLASH_MS = 500;
 /* How long a program that just showed its prompt takes before it reads what is typed. */
 const PROMPT_SETTLE_MS = 500;
 /* What the options leave out: how long the host waits for what, and the terminal's size. */
-const DEFAULTS = { readyMs: 120_000, pollMs: 500, openMs: 8000, toolsMs: 15_000, enterWaitMs: 4000, typingQuietMs: 15_000, keptWaitMs: 10_000, reportMs: REPORT_MS, cols: 160, rows: 48 };
+const DEFAULTS = { readyMs: 120_000, pollMs: 500, openMs: 8000, toolsMs: 15_000, enterWaitMs: 4000, typingQuietMs: 15_000, keptWaitMs: 10_000, wordsQuietMs: 15_000, reportMs: REPORT_MS, cols: 160, rows: 48 };
 /* The options given, without those set to nothing. */
 const defined = (opts: Options): Partial<Options> => Object.fromEntries(Object.entries(opts).filter(([, value]) => value !== undefined));
+const withSession = (m: NodeMessage, session: string | null): NodeMessage => (m.type === 'job.program' && session ? { ...m, session } : m);
 /* When the host last looked at the program, and the tool it ran then. */
 type Look = { at: number; call: Pending | null; retry?: ProgramRetry | null };
 type ObservedProgram = { watch: ProgramWatch; look: Look };
@@ -382,8 +388,10 @@ export class TerminalHost {
   private readonly enterWaitMs: number;
   private readonly typingQuietMs: number;
   private readonly leftInputs: LeftInputs;
+  private readonly wordsQuietMs: number;
   private readonly lookMs: number;
   private readonly reportMs: number;
+  private readonly remembered = new Set<string>();
   /* Views being opened, and those Hornhoof closed meanwhile. */
   private readonly viewsOpening = new Set<string>();
   /* What the owner types while their view opens: Hornhoof told them the terminal is there. */
@@ -413,6 +421,7 @@ export class TerminalHost {
     this.enterWaitMs = set.enterWaitMs;
     this.typingQuietMs = set.typingQuietMs;
     this.leftInputs = new LeftInputs(frame => opts.send(frame), set.keptWaitMs);
+    this.wordsQuietMs = set.wordsQuietMs;
     this.lookMs = opts.lookMs ?? LOOK_MS;
     this.reportMs = set.reportMs;
     this.cols = set.cols;
@@ -422,7 +431,7 @@ export class TerminalHost {
   }
 
   private operatorFor(opts: Options): OperatorRuntime | null {
-    return opts.operator ? new OperatorRuntime(opts.operator, { current: key => this.operatorState(key), capture: key => this.operatorPane(key), inputLine: (key, cells) => this.operatorInputLine(key, cells), press: (key, value) => this.opts.tmux.keys(this.agents.get(key)!.name, value), secrets: opts.secrets }) : null;
+    return opts.operator ? new OperatorRuntime(opts.operator, { current: key => this.operatorState(key), capture: key => this.operatorPane(key), inputLine: (key, cells) => this.operatorInputLine(key, cells), press: (key, value) => this.opts.tmux.keys(this.agents.get(key)!.name, value), recovery: key => this.operatorRecovery(key), secrets: opts.secrets }) : null;
   }
 
   private operatorTicks(): NodeJS.Timeout | null {
@@ -441,6 +450,12 @@ export class TerminalHost {
     this.drain(a);
     const wait = a.operatorQuestion ? { id: a.operatorQuestion.id, kind: a.operatorQuestion.kind } : null;
     return { agentProgram: Boolean(a.program && a.hash), alive: true, pasted: false, turnStarted: a.took === true, active: false, runningTool: [...a.calls.values()].some(call => call.name !== 'AskUserQuestion'), retrying: Boolean(a.retry || a.restarting), wait };
+  }
+
+  private async operatorRecovery(key: string): Promise<{ alive: boolean; input: string | null; busy: boolean }> {
+    const a = this.agents.get(key);
+    if (!a?.program || !(await this.opts.tmux.alive(a.name))) return { alive: false, input: null, busy: false };
+    return { alive: true, input: inputOf(a.program.kind, await this.opts.tmux.screen(a.name, 0, true)), busy: a.busy };
   }
 
   private async operatorPane(key: string): Promise<{ cols: number; rows: number; cells: string }> {
@@ -726,7 +741,7 @@ export class TerminalHost {
   }
 
   private async waitForAgyTurn(a: Agent, job: TermJob): Promise<void> {
-    const { watch, look } = this.observeProgram(job.input.jobId);
+    const { watch, look } = this.observeProgram(a, job.input.jobId);
     this.drain(a);
     while (a.busy && !job.input.signal?.aborted) {
       if (!(await this.opts.tmux.alive(a.name))) break;
@@ -904,13 +919,15 @@ export class TerminalHost {
     a.took = false;
     a.typing = prompt;
     if (typedSinceStart(a) && !(await this.freeInput(a, job))) return this.inputNotFree(a, job);
+    a.ownerTyped = false;
     await this.opts.tmux.paste(a.name, prompt);
     await sleep(pasteWait(prompt));
     await this.opts.tmux.keys(a.name, 'Enter');
     /* On a busy machine the program can take the prompt, and even end its turn, before the key is back: it then said so
        itself, and its turn's end must not be taken back. */
     if (!a.took) a.busy = true;
-    for (const end = Date.now() + this.readyMs; !(await this.tookPrompt(a, job.input.signal)); await this.opts.tmux.keys(a.name, 'Enter')) {
+    const lost = new LostWords(prompt, { enterMs: this.enterWaitMs, quietMs: this.wordsQuietMs }, Date.now());
+    for (const end = Date.now() + this.readyMs; !(await this.tookPrompt(a, job.input.signal)); await this.pressPlainAgain(a, job, prompt, lost)) {
       if (Date.now() < end) continue;
       a.busy = false;
       /* Its input still holds the prompt, so the next turn starts the program anew, resuming the session. */
@@ -922,13 +939,21 @@ export class TerminalHost {
     return null;
   }
 
+  /* With no receipt the words may be gone or still in the input, and an Enter does no harm: it goes every time, and the words
+     again once the program lost them. */
+  private async pressPlainAgain(a: Agent, job: TermJob, prompt: string, lost: LostWords): Promise<void> {
+    const gone = !a.ownerTyped && lost.step(job.program.kind, await this.opts.tmux.screen(a.name, 0, true), Date.now()) === 'type';
+    if (gone) { await this.opts.tmux.paste(a.name, prompt); await sleep(pasteWait(prompt)); }
+    await this.opts.tmux.keys(a.name, 'Enter');
+  }
+
   /* agy queues input as another turn. Wait for its idle footer before pasting, keep the prompt until invocation 0,
      and report throughout the wait. A busy program has no delivery deadline and is never interrupted. */
   private async typeAgyPrompt(a: Agent, job: TermJob, prompt: string): Promise<RunResult | null> {
     a.fresh = false;
     a.took = false;
     a.typing = prompt;
-    a.turn!.observed = this.observeProgram(job.input.jobId);
+    a.turn!.observed = this.observeProgram(a, job.input.jobId);
     const failed = await this.whilePromptWaits(a, () => this.pasteAgyPrompt(a, job, prompt));
     return failed ?? this.waitAgyReceipt(a, job, prompt);
   }
@@ -1013,9 +1038,9 @@ export class TerminalHost {
   }
 
   private async deliverOperatorPrompt(a: Agent, job: TermJob, prompt: string): Promise<RunResult | null> {
-    a.fresh = false; a.took = false; a.typing = prompt;
+    a.fresh = false; a.took = false; a.typing = prompt; a.ownerTyped = false;
     const failed = await this.pasteOperatorPrompt(a, job, prompt);
-    return failed ?? this.waitOperatorReceipt(a, job);
+    return failed ?? this.waitOperatorReceipt(a, job, prompt);
   }
 
   private operatorPending(a: Agent): boolean {
@@ -1056,7 +1081,7 @@ export class TerminalHost {
   }
 
   private async submitOperatorAssignment(a: Agent, job: TermJob, prompt: string): Promise<boolean> {
-    this.operator?.pasted(a.key);
+    this.operator?.typed(a.key);
     a.pastedAt = Date.now();
     /* On a busy machine the program can tell of the prompt before the key is back. */
     a.promptWaits = false;
@@ -1193,15 +1218,26 @@ export class TerminalHost {
     return this.failedTurn(a, job, job.input.signal?.aborted ? 'cancelled' : 'agent_failed');
   }
 
-  private async waitOperatorReceipt(a: Agent, job: TermJob): Promise<RunResult | null> {
+  private async waitOperatorReceipt(a: Agent, job: TermJob, prompt: string): Promise<RunResult | null> {
+    const lost = new LostWords(prompt, { enterMs: this.enterWaitMs, quietMs: this.wordsQuietMs }, Date.now());
     while (this.operatorPending(a)) {
       this.drain(a); this.operatorTick();
       if (job.input.signal?.aborted) return this.failedTurn(a, job, 'cancelled');
       const failed = await this.operatorReceiptFailure(a, job);
       if (failed) return failed;
+      await this.inputLane(a, () => this.repeatLostWords(a, job, prompt, lost));
       await sleep(this.pollMs);
     }
     return null;
+  }
+
+  /* A program can miss the Enter or lose the words, more so as it starts or resumes a long session: the same turn tries again,
+     as long as nothing shows the program took them and nobody else is at its input. */
+  private async repeatLostWords(a: Agent, job: TermJob, prompt: string, lost: LostWords): Promise<void> {
+    if (a.ownerTyped || a.took || job.input.signal?.aborted || !this.operator?.wordsWaiting(a.key)) return;
+    const step = lost.step(job.program.kind, await this.opts.tmux.screen(a.name, 0, true), Date.now());
+    if (step === 'enter') await this.opts.tmux.keys(a.name, 'Enter');
+    if (step === 'type') await this.submitOperatorAssignment(a, job, prompt);
   }
 
   private async operatorReceiptFailure(a: Agent, job: TermJob): Promise<RunResult | null> {
@@ -1217,7 +1253,7 @@ export class TerminalHost {
 
   /* Waits for the turn to end: the program says so, a person stops it, or the program is gone. */
   private async turnEnd(a: Agent, job: TermJob, ended: Deferred<string>, turn: Turn): Promise<RunResult> {
-    const { watch, look } = this.requestedObservation(turn, job);
+    const { watch, look } = this.requestedObservation(a, turn, job);
     for (;;) {
       this.drain(a);
       const message = await Promise.race([ended.promise, sleep(this.pollMs).then(() => null)]);
@@ -1233,13 +1269,33 @@ export class TerminalHost {
     }
   }
 
-  private requestedObservation(turn: Turn, job: TermJob): ObservedProgram {
-    return turn.observed ?? this.observeProgram(job.input.jobId);
+  private requestedObservation(a: Agent, turn: Turn, job: TermJob): ObservedProgram {
+    return turn.observed ?? this.observeProgram(a, job.input.jobId);
   }
 
   /* Both entry paths report the same program state. */
-  private observeProgram(jobId: string | null | undefined): ObservedProgram {
-    return { watch: new ProgramWatch(jobId, m => this.opts.send(m), this.reportMs, () => this.opts.secrets()), look: { at: Date.now(), call: null } };
+  private observeProgram(a: Agent, jobId: string | null | undefined): ObservedProgram {
+    return { watch: new ProgramWatch(jobId, m => this.opts.send(withSession(m, this.sessionToTell(a))), this.reportMs, () => this.opts.secrets()), look: { at: Date.now(), call: null } };
+  }
+
+  /* After a restart Hornhoof asks the node to go on in the session it heard of, and a node goes on only in one it remembers:
+     a turn its restart cut never told it by ending. A session with no log yet has nothing to go on from, so the turn starts
+     a new one. */
+  private sessionToTell(a: Agent): string | null {
+    if (a.sessionId && !this.remembered.has(a.sessionId) && this.hasLog(a)) {
+      this.remembered.add(a.sessionId);
+      this.opts.remember?.(a.sessionId, a.workDir);
+    }
+    return a.sessionId;
+  }
+
+  private hasLog(a: Agent): boolean {
+    try {
+      const file = this.transcriptFile(a);
+      return file !== null && existsSync(file);
+    } catch {
+      return false;
+    }
   }
 
   /* The program said the turn ended: stopped by a person, failed, or with its answer, which the turn waits to read. */
@@ -1619,13 +1675,19 @@ export class TerminalHost {
   private async promptShows(a: Agent, job: TermJob, kind: keyof typeof READY, colors: { at: number }): Promise<boolean | null> {
     const screen = await this.screen(a.key);
     if (kimiSignedOut(job, kind, screen)) return false;
-    if (READY[kind](screen)) {
+    if (READY[kind](screen) || (await this.codexWaits(a, kind))) {
       await sleep(PROMPT_SETTLE_MS);
       return true;
     }
     if (kind === 'antigravity' && (await this.agyFirstRun(a, colors))) return false;
     await sleep(this.pollMs);
     return null;
+  }
+
+  /* A long session takes Codex's banner off the top of its screen: its empty prompt still shows, and only the styles tell that
+     from a suggestion in it. A turn it still runs was waited for before this. */
+  private async codexWaits(a: Agent, kind: keyof typeof READY): Promise<boolean> {
+    return kind === 'codex' && atEmptyPrompt(kind, await this.opts.tmux.screen(a.name, 0, true));
   }
 
   /* agy's first-run setup: the node takes the colors agy offers first, once, and goes on. Its terms are the plan owner's
@@ -2148,6 +2210,9 @@ export class TerminalHost {
 
   private completeStop(a: Agent, data: Record<string, unknown>, id: string | undefined): void {
     if (a.program?.kind === 'antigravity') return this.agyStopped(a);
+    /* Codex stays in its turn after this hook, for as long as a busy machine makes it. Words that come before task_complete in its
+       log go into that same turn with no task_started to tell they were taken, and they would be given again. That line ends it. */
+    if (a.program?.kind === 'codex') return;
     const message = a.program?.kind === 'kimi' ? a.lastText ?? '' : String(data.last_assistant_message ?? '');
     this.endTurn(a, { status: 'done', message }, id);
   }
@@ -2227,7 +2292,7 @@ export class TerminalHost {
     a.ends.started(id);
     a.programTurnId = id;
     const turn: Turn = { jobId: null, onEvent: () => {}, typed: true, seq: 0, words: new TurnWords([], { word: this.wordReceipt(a) }), ref: randomUUID(), early: [], over: null, opened: deferred(), sourceDelivery, operatorInstance: this.operator?.identity(a.key)?.instance };
-    turn.observed = this.observeProgram(null);
+    turn.observed = this.observeProgram(a, null);
     a.turn = turn;
     a.busy = a.took = true;
     this.operator?.suspend(a.key);
@@ -2857,8 +2922,10 @@ export class TerminalHost {
     if (view) for (const m of keys) this.ownerTyped(view, m);
   }
 
+  /* What a person's terminal answers by itself goes to tmux, which asked for it, and is nobody's key: a program waits on no
+     person because someone opened its view or came back to the window. */
   private ownerTyped(view: View, { data, pressedIn }: Msg<'term.input'>): void {
-    this.operator?.ownerInput(view.key);
+    if (!isTerminalReport(data)) this.operator?.ownerInput(view.key);
     const a = this.agents.get(view.key);
     if (a) this.ownerKeys(a, view, data, pressedIn);
   }
@@ -2866,6 +2933,7 @@ export class TerminalHost {
   private ownerKeys(a: Agent, view: View, data: string, pressedIn?: string): void {
     if (pressedIn) a.pressed = { jobId: pressedIn, at: Date.now(), until: a.turn && !this.overIn(a) ? null : Date.now() + UNHEARD_MS };
     if (typesWords(data)) a.typedAt = Date.now();
+    a.ownerTyped ||= !isTerminalReport(data);
     void this.inputLane(a, async () => { view.child.stdin?.write(data); });
   }
 

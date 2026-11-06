@@ -8,12 +8,8 @@ const PASTE = /^\x1b\[200~([\s\S]*)\x1b\[201~$/;
 /* Enter and the keys that erase write nothing into the program. In a paste, Enter is all that may stand among the words. */
 const STEERS = /[\x00-\x07\x09\x0b\x0c\x0e-\x1f\x80-\x9f]/;
 const STEERS_IN_PASTE = /[\x00-\x09\x0b\x0c\x0e-\x1f\x7f-\x9f]/;
-/* Focus, the answers to a program's queries and the mouse are no keys a person typed. */
-const REPORT = /^\x1b\[(?:[IO]|[>?][0-9;]*c|[0-9;]*R|<[0-9]+;[0-9]+;[0-9]+[Mm])$/;
 /* How long a line counts as holding words with no key from anyone: a program may have taken them by then. */
 const LINE_MS = 30_000;
-
-export const isReport = (data: string): boolean => REPORT.test(data);
 
 const newLine = (key: string) => key === '\r' || key === '\n';
 /* How much is surely on the line: never more than a program holds, so that no line counts as holding words once it may be empty.

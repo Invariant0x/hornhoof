@@ -5,7 +5,8 @@ import { agentEvents, agents, departments, jobs, programOperatorCases, subscript
 import { limitUntil } from '../conversation/queue.js';
 import type { NodeIdentity } from '../nodes/hub.js';
 import { escalateCase, expireOperatorCases, queueEscalation, syncOperatorCases } from './cases.js';
-import { acceptOperatorRecovery } from './recovery.js';
+import { callOperationsOnHold } from './hold-watch.js';
+import { acceptOperatorRecovery, settleOperatorHold } from './recovery.js';
 import { operatorTransaction } from './transactions.js';
 import { reconcileOperatorFallbacks } from './requeue.js';
 
@@ -36,6 +37,15 @@ async function restoreCase(ctx: Ctx, row: typeof programOperatorCases.$inferSele
     const parsed = OperatorNodeMessage.safeParse(data.operatorEvidence);
     if (parsed.success && parsed.data.type === 'program.recovery_ready') await acceptOperatorRecovery(ctx, parsed.data);
   }
+  await watchHold(ctx, row.id, now);
+}
+
+async function watchHold(ctx: Ctx, id: string, now: Date): Promise<void> {
+  const stillHeld = async () => (await ctx.db.select().from(programOperatorCases).where(and(eq(programOperatorCases.id, id), eq(programOperatorCases.recoveryHold, true))))[0];
+  const held = await stillHeld();
+  if (held) await settleOperatorHold(ctx, held);
+  const waiting = await stillHeld();
+  if (waiting) await callOperationsOnHold(ctx, waiting, now);
 }
 
 async function operatorAvailable(ctx: Ctx, row: typeof programOperatorCases.$inferSelect): Promise<boolean> {

@@ -89,10 +89,14 @@ export const claudeProgram: TermProgram = {
   },
 };
 
+/* With 90% of its plan used, Codex asks after a turn whether to switch to a cheaper model. Nobody is there to answer. Words typed into
+   that question are lost and Enter answers it with the first choice, so the agent gets another model and the turn waits for nothing. */
+const CODEX_NO_MODEL_QUESTION = ['-c', 'notice.hide_rate_limit_model_nudge=true'];
+
 export const codexProgram: TermProgram = {
   kind: 'codex',
   launch({ bin, home, workDir, bound = false, sessionId, model, effort, urls }) {
-    const config = ['-c', `mcp_servers.hornhoof.url=${JSON.stringify(urls.mcpUrl)}`, ...WHOLE_AGENTS_MD, ...codexRootFlags(bound), ...CODEX_NO_AUTO_UPDATE, ...(effort ? ['-c', `model_reasoning_effort=${JSON.stringify(effort)}`] : [])];
+    const config = ['-c', `mcp_servers.hornhoof.url=${JSON.stringify(urls.mcpUrl)}`, ...WHOLE_AGENTS_MD, ...codexRootFlags(bound), ...CODEX_NO_AUTO_UPDATE, ...CODEX_NO_MODEL_QUESTION, ...(effort ? ['-c', `model_reasoning_effort=${JSON.stringify(effort)}`] : [])];
     const hooks = Object.entries({ Stop: 'stop', Interrupt: 'interrupt', PreToolUse: 'tool', PostToolUse: 'tooldone', SessionEnd: 'end' }).flatMap(([name, event]) => ['-c', `hooks.${name}=[{hooks=[{type="command",command="hh-hook ${event}"}]}]`]);
     const rest = ['--dangerously-bypass-approvals-and-sandbox', '--dangerously-bypass-hook-trust', ...hooks, ...config, ...(model ? ['-m', model] : [])];
     /* A resumed session works in the folder it started in, which is the pane's. */
