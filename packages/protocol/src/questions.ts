@@ -10,3 +10,15 @@ const Result = z.strictObject({ presentation: z.literal('result'), ...lists }).r
 export const QuestionMaterials = z.discriminatedUnion('presentation', [Result, z.strictObject({ presentation: z.literal('action'), ...lists })])
   .refine(materialMetadataFits, 'Oversized material metadata.');
 export type QuestionMaterials = z.infer<typeof QuestionMaterials>;
+
+// Protocol scaffolds stay unavailable until their targeted RED is followed by implementation.
+export const SourceRef = z.never();
+export type SourceRef = z.infer<typeof SourceRef>;
+export const QuestionAudience = z.never();
+export type QuestionAudience = z.infer<typeof QuestionAudience>;
+export const QuestionRouteTarget = z.never();
+export type QuestionRouteTarget = z.infer<typeof QuestionRouteTarget>;
+export const QuestionMutationGuard = z.never();
+export type QuestionMutationGuard = z.infer<typeof QuestionMutationGuard>;
+export const HumanActionBinding = z.never();
+export type HumanActionBinding = z.infer<typeof HumanActionBinding>;
