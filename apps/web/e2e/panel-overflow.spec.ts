@@ -86,6 +86,14 @@ for (const lang of ['en', 'ru'] as const) {
 
           await change.click();
           await expect(notebook.getByRole('textbox', { name: m.notebook.note(1), exact: true })).toBeVisible();
+          const save = notebook.getByRole('button', { name: m.notebook.save, exact: true });
+          await save.focus();
+          await page.keyboard.press('Shift+Tab');
+          await page.keyboard.press('Tab');
+          await expect(save).toBeFocused();
+          await expect(save).toHaveCSS('clip-path', 'none');
+          await expect(save).toHaveCSS('outline-width', '2px');
+          await expect(save).toHaveCSS('outline-style', 'solid');
           await notebook.getByRole('button', { name: m.notebook.cancel, exact: true }).click();
           await change.focus();
           await page.keyboard.press('Enter');
@@ -98,14 +106,6 @@ for (const lang of ['en', 'ru'] as const) {
           }
           await remove.click();
           await expect.poll(() => removed.length).toBe(1);
-          const add = notebook.getByRole('button', { name: m.notebook.add, exact: true });
-          await add.focus();
-          await page.keyboard.press('Shift+Tab');
-          await page.keyboard.press('Tab');
-          await expect(add).toBeFocused();
-          await expect(add).toHaveCSS('clip-path', 'none');
-          await expect(add).toHaveCSS('outline-width', '2px');
-          await expect(add).toHaveCSS('outline-style', 'solid');
           expect(errors).toEqual([]);
         });
       }
