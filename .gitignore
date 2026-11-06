@@ -1,5 +1,7 @@
 node_modules/
 dist/
+target/
+.metrics/
 .env
 .env.*
 .DS_Store
