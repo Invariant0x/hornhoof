@@ -15,6 +15,32 @@ const roles = [...templates.roles.values()];
 const skills = [...templates.skills.values()];
 
 describe('templates', () => {
+  it.each(roles.filter(role => role.kind === 'head'))('gives $id the marked small-task fast path', role => {
+    expect(role.body).toMatch(/small: true/);
+    expect(role.body).toMatch(/fast path/);
+  });
+
+  it.each(['hh-lead-tasks', 'orch-plan-turn'])('defines the complete small-task path in %s', id => {
+    const body = templates.skills.get(id)!.body;
+    expect(body).toMatch(/small: true/);
+    expect(body).toMatch(/single place[\s\S]*clear result[\s\S]*no dependencies[\s\S]*work turn/);
+    expect(body).toMatch(/change and (its|the) check/);
+    expect(body).toMatch(/without splitting or separate gates/);
+    expect(body).toMatch(/failing test[\s\S]*only affected tests[\s\S]*turn's branch[\s\S]*line[\s\S]*SHA/);
+    expect(body).toMatch(/Reports, matrices, complexity metrics and duplicate checks[\s\S]*shared turn review/);
+    expect(body).toMatch(/grows[\s\S]*tells the head[\s\S]*normal path/);
+  });
+
+  it.each([
+    'hh-break-down', 'hh-brief-members', 'hh-report-to-head', 'hh-handle-reports', 'hh-task-flow',
+    'hh-verify-before-done', 'dev-implement', 'dev-language-rules', 'dev-engineering-rules',
+    'dev-work-pipeline', 'dev-gates', 'dev-review-diff', 'dev-review-verdict',
+  ])('keeps %s from restoring per-task overhead for marked small work', id => {
+    const body = templates.skills.get(id)!.body;
+    expect(body).toMatch(/small: true/);
+    expect(body).toMatch(/shared turn/);
+  });
+
   it('teaches every department head not to repeat a task report in a separate message', () => {
     for (const role of roles.filter(r => r.kind === 'head')) {
       const instructions = renderInstructions(templates, { id: 'a', companyId: 'c', kind: 'head', name: 'Hana', roleKey: role.id, skills: role.skills.filter(s => s.on).map(s => s.id), overrides: {}, templateHashes: {} } as Parameters<typeof renderInstructions>[1], { company: 'Acme', department: 'Work', product: null });
