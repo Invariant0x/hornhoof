@@ -95,3 +95,9 @@ it('keeps people record status and labels compact and consistent', () => {
   expect(decl('.fit > :is(.ptable, .dt)[data-fit="entries"] td[data-label]::before', 'color')).toBe('var(--muted)');
   expect(decl('.fit > :is(.ptable, .dt)[data-fit="entries"] td.row-actions', 'margin-block-start')).toBe('8px');
 });
+
+it('aligns machine action groups and gives every action a full touch target', () => {
+  expect(decl('.machine-actions', 'justify-content')).toBe('flex-end');
+  expect(decl('.machine-actions .btn', 'min-height')).toBe('44px');
+  expect(decl('.machine-actions .act', 'min-height')).toBe('44px');
+});
