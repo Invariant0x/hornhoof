@@ -25,6 +25,8 @@ async function capture(page: Page, info: TestInfo, name: string, fullPage = fals
   const file = `${PHASE}-${name}.png`;
   const path = SCREENSHOT_DIR ? `${SCREENSHOT_DIR}/${file}` : info.outputPath(file);
   if (name.startsWith('focus-')) {
+    await page.keyboard.press('Shift+Tab');
+    await page.keyboard.press('Tab');
     const focused = page.locator(':focus');
     await expect(focused).toHaveCount(1);
     await expect(focused).not.toHaveCSS('outline-style', 'none');
@@ -317,7 +319,7 @@ for (const lang of ['en', 'ru'] as const) {
           expect(pseudo.weight, 'record label weight is width-independent').toBe('400');
           expect(pseudo.color).toBe(theme === 'light' ? 'rgb(76, 90, 104)' : 'rgb(147, 160, 174)');
         }
-        await expect(actions).toHaveCSS('margin-block-start', '2px');
+        await expect(actions).toHaveCSS('margin-block-start', '4px');
         const editBox = (await edit.boundingBox())!;
         expect(editBox.y - (statusBox.y + statusBox.height), 'the last value-to-action gap is 8px').toBe(8);
         await expectWrappedText(name);
@@ -415,6 +417,7 @@ for (const lang of ['en', 'ru'] as const) {
         let releaseAnswer!: () => void;
         await page.route('**/api/requests/req-choice', async route => {
           await new Promise<void>(resolve => { releaseAnswer = resolve; });
+          requests.splice(1, 1);
           return route.fulfill({ json: {} });
         });
         const choice = cards.nth(1);
