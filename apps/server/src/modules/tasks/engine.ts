@@ -1464,7 +1464,10 @@ async function wakeAfterRewrite(tx: Tx, task: Task, set: Partial<Task>, holder: 
   wakes.push(...rewriteWake(task.id, set.assigneeAgentId, holder, agentId, waited));
 }
 
-async function applyTaskRewrite(ctx: Ctx, agentId: string, taskId: string, task: Task, c: TaskChange, set: Partial<Task>, fields: string[], waited: boolean, declaration: IndependentDeclaration | null, createsIndependent: boolean, reviewIndependent: boolean) {
+type TaskRewrite = { set: Partial<Task>; fields: string[]; waited: boolean; declaration: IndependentDeclaration | null; createsIndependent: boolean; reviewIndependent: boolean };
+
+async function applyTaskRewrite(ctx: Ctx, agentId: string, task: Task, c: TaskChange, change: TaskRewrite): Promise<Moved> {
+  const { set, fields, waited, declaration, createsIndependent, reviewIndependent } = change;
   let independent: Task | null = null;
   const handedOn = await resumeRewrittenTask(ctx, task, set);
   const unstuck = stuckGoes(ctx, task);
@@ -1522,7 +1525,7 @@ export async function updateTask(ctx: Ctx, agentId: string, taskId: string, c: T
   const reviewIndependent = createsIndependent && (await createdData(ctx.db, task.id)).inTurnReview === true;
   await rewriteDependencies(ctx, task, c, set, fields);
   if (onlyLabels(fields, createsIndependent)) return relabel(ctx, agentId, task, set, fields);
-  return applyTaskRewrite(ctx, agentId, taskId, task, c, set, fields, waited, declaration, createsIndependent, reviewIndependent);
+  return applyTaskRewrite(ctx, agentId, task, c, { set, fields, waited, declaration, createsIndependent, reviewIndependent });
 }
 
 /* Comments from others end an external wait. A giver's answer also opens a blocked member task for its executor. */
