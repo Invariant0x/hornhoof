@@ -251,6 +251,7 @@ for (const lang of ['en', 'ru'] as const) {
         if (width === 375 && lang === 'en' && theme === 'light') {
           console.log('P6_CASCADE', await actions.evaluate(el => ({
             padding: getComputedStyle(el).paddingBlockStart,
+            top: getComputedStyle(el).paddingTop,
             matches: el.matches('.fit > :is(.ptable, .dt)[data-fit="entries"] td.row-actions'),
             fit: el.closest('table')?.getAttribute('data-fit'),
             rules: [...document.styleSheets].flatMap(sheet => [...sheet.cssRules].filter(rule => rule.cssText.includes('padding')).map(rule => rule.cssText)),
