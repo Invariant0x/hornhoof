@@ -1,7 +1,7 @@
 import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { en, type Messages } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
-import type { MachineView, NoteView, PersonView, ShownCommand } from '../src/types';
+import type { MachineView, NoteView, PersonView, ShownCommand, WaitingRequest } from '../src/types';
 import { SUB } from './agent-window-api';
 import { openAgent } from './agent-window-panels-api';
 import { serveApi, TASKS } from './api';
@@ -370,6 +370,33 @@ for (const lang of ['en', 'ru'] as const) {
         await page.reload();
         await expect(page.getByRole('alert').first()).toBeVisible();
         await capture(page, info, `requests-read-error-${look}`);
+      });
+
+      test(`Question, choice, approval and stuck cards with keyboard focus: ${look}`, async ({ page }, info) => {
+        await prepareRoutes(page, lang, theme, width);
+        const common = {
+          explained: null, explaining: false, images: [], options: [], link: null, commit: null, commitUrl: null,
+          at: '2026-11-05T16:10:00.000Z', ownerPersonId: 'p1', canAnswer: true,
+          decidedBy: { kind: 'ceo_and_delegate', department: null },
+          agent: { id: 'agent-dev', name: 'Developer' },
+          task: { id: 't1', number: 1, title: 'Checkout step 1', department: { id: 'd2', name: 'Development' } },
+        } satisfies Omit<WaitingRequest, 'id' | 'kind' | 'text'>;
+        const requests: WaitingRequest[] = [
+          { ...common, id: 'req-question', kind: 'question', text: 'Continue with the current approach?' },
+          { ...common, id: 'req-choice', kind: 'choice', text: 'Choose the next layout.', options: [{ label: 'First layout', image: null }, { label: 'Second layout', image: null }] },
+          { ...common, id: 'req-approval', kind: 'approval', text: 'Approve the verified change?' },
+          { ...common, id: 'req-stuck', kind: 'stuck', text: '' },
+        ];
+        await page.route('**/api/requests', route => route.fulfill({ json: { requests, proposals: [], computerAccess: null, counts: { byPerson: { p1: 4 }, byAgent: {}, total: 4 } } }));
+        await page.goto('/tasks');
+        const cards = page.locator('.page article.req');
+        await expect(cards).toHaveCount(4);
+        await capture(page, info, `requests-waiting-${look}`, true);
+        const option = cards.nth(1).locator('.req-option').first();
+        await expect(option).toBeVisible();
+        await option.focus();
+        await expect(option).toBeFocused();
+        await capture(page, info, `focus-req-option-${look}`);
       });
 
       test(`A long machine confirmation keeps its whole action group below: ${look}`, async ({ page }, info) => {
