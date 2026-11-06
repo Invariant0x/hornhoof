@@ -1,9 +1,10 @@
+import { randomUUID } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { NodeMessage, ServerMessage } from '@hornhoof/protocol';
 import { PGlite } from '@electric-sql/pglite';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import WebSocket from 'ws';
 import type { FastifyInstance } from 'fastify';
@@ -16,7 +17,10 @@ import { agentRole, grantsFor, readerGrantsFor, readerRole, type AgentSql } from
 import type { Db } from '../src/db/client.js';
 import * as schema from '../src/db/schema.js';
 import { setupCode } from '../src/modules/setup/code.js';
-import { ask, createTask } from '../src/modules/tasks/engine.js';
+import { ask, createTask, type Ask, type Request } from '../src/modules/tasks/engine.js';
+import { classifyComputerIntent, raiseComputerIntent } from '../src/modules/tasks/question-computer.js';
+import { bindRequest, questionSourceKey } from '../src/modules/tasks/wait-producers.js';
+import { endOpenSource } from '../src/modules/tasks/wait-state.js';
 import { openTestDb, timed } from './helpers-db.js';
 import { as, sessionFrom, TEST_SECRET } from './helpers-basic.js';
 export { createTestDb, statements } from './helpers-db.js';
@@ -106,7 +110,51 @@ export async function approvalAsked(app: FastifyInstance) {
   const [head] = await db.insert(schema.agents).values({ ...on, kind: 'head', name: 'Head', roleKey: 'DEV-HEAD', departmentId: dev!.id }).returning();
   const [worker] = await db.insert(schema.agents).values({ ...on, kind: 'worker', name: 'Worker', roleKey: 'DEV-BE', departmentId: dev!.id }).returning();
   const { task } = await createTask(app.ctx, { agentId: head!.id }, { title: 'Checkout', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: worker!.id, executor: true, gates: [] });
-  return (await ask(app.ctx, worker!.id, task.id, { kind: 'approval', text: 'Merge?', commit: 'a'.repeat(40) })).request;
+  return (await askedOfPerson(app.ctx, worker!.id, task.id, { kind: 'approval', text: 'Merge?', commit: 'a'.repeat(40) })).request;
+}
+
+/* A question already before a person. An agent's question gets there only through classify_human_intent, which
+   question-lifecycle.test.ts and wait-producers.test.ts prove on the real route. Tests of what people read and answer start
+   from here, with the row kept as a goal question is: for a person, unclassified, its wait on that person. */
+export function beforePerson(ctx: { db: Db }, requestId: string): Promise<Request> {
+  return ctx.db.transaction(async tx => {
+    const [asked] = await tx.select().from(schema.requests).where(eq(schema.requests.id, requestId));
+    if (asked!.audience !== 'internal' || asked!.status !== 'open') return asked!;
+    const [held] = await tx.update(schema.requests).set({ audience: 'human', triageAgentId: null }).where(eq(schema.requests.id, requestId)).returning();
+    const [task] = await tx.select().from(schema.tasks).where(eq(schema.tasks.id, held!.taskId));
+    await tx.delete(schema.pendingWakes).where(and(eq(schema.pendingWakes.why, 'question'), eq(schema.pendingWakes.text, requestId)));
+    const [inside] = await tx.delete(schema.taskWaits).where(and(eq(schema.taskWaits.taskId, task!.id), eq(schema.taskWaits.sourceKey, questionSourceKey(requestId)))).returning();
+    await bindRequest(tx, task!, held!, { agentId: held!.agentId }, { plan: inside?.plan ?? undefined, strict: false });
+    return held!;
+  });
+}
+
+/* Every question still inside on this task, already before a person, for flows that ask through a tool. */
+export async function allBeforePerson(ctx: { db: Db }, taskId: string): Promise<void> {
+  const open = await ctx.db.select({ id: schema.requests.id }).from(schema.requests).where(and(eq(schema.requests.taskId, taskId), eq(schema.requests.status, 'open'), eq(schema.requests.audience, 'internal')));
+  for (const { id } of open) await beforePerson(ctx, id);
+}
+
+/* Every card still inside, already before a person. classify_human_intent takes one there, as question-proposals.test.ts proves; a
+   test of what comes after a person has it starts here. */
+export const allCardsBeforePerson = (ctx: { db: Db }) => ctx.db.update(schema.proposals).set({ audience: 'human' }).where(and(eq(schema.proposals.status, 'pending'), eq(schema.proposals.audience, 'internal')));
+
+/* The orchestrator's request for the computer before the CEO, the way it gets there. */
+export async function computerBeforePerson(ctx: FastifyInstance['ctx'], reason: string) {
+  const [orchestrator] = await ctx.db.select().from(schema.agents).where(eq(schema.agents.kind, 'orchestrator'));
+  const { id: agentId, companyId, subscriptionId } = orchestrator!;
+  const [job] = await ctx.db.insert(schema.jobs).values({ companyId, agentId, subscriptionId: subscriptionId!, kind: 'conversation', prompt: 'Work.', status: 'running', startedAt: new Date(), timeoutMs: 1000 }).returning();
+  const by = { id: job!.id, agentId, companyId };
+  const intent = await raiseComputerIntent(ctx, by, reason);
+  await classifyComputerIntent(ctx, { jobId: job!.id, agentId, companyId }, { operationId: randomUUID(), source: { kind: 'computer_access', id: intent.id }, expectedRevision: 1, expectedRouteRevision: 1, classification: { kind: 'human_only_action', actionBinding: { kind: 'ceo_permission', resourceId: 'server' } }, humanEnvelope: { situation: reason, requiredAction: 'Open it or say no.', options: [] } });
+  await ctx.db.update(schema.jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(schema.jobs.id, job!.id));
+  return intent;
+}
+
+/* An agent asks, and the question is already before a person. */
+export async function askedOfPerson(ctx: Parameters<typeof ask>[0], agentId: string, taskId: string, q: Ask) {
+  const asked = await ask(ctx, agentId, taskId, q);
+  return { ...asked, wakes: [], request: await beforePerson(ctx, asked.request.id) };
 }
 
 /* Invites a person, accepts the invite with a password and returns their session token. */

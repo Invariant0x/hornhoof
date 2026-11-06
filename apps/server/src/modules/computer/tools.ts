@@ -2,12 +2,10 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { computerPrincipal, withInputLock } from '../conversation/decision-context.js';
-import { appendEvent, appendOutgoing } from '../events/store.js';
-import { personParty } from '../events/parties.js';
-import { decisionPerson } from '../tasks/decisions.js';
+import { intentKept, raiseComputerIntent } from '../tasks/question-computer.js';
 import { ONLY_CEO } from '../tools/control.js';
 import type { ToolJob } from '../tools/job.js';
-import { onMachine, RUN_DEFAULT_S, RUN_MAX_S, serverMachine, type Waited } from './access.js';
+import { RUN_DEFAULT_S, RUN_MAX_S, type Waited } from './access.js';
 
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
 
@@ -41,19 +39,14 @@ export function registerComputerTools(server: McpServer, ctx: Ctx, job: ToolJob)
     {
       description:
         'Asks the CEO for access to the computer the server runs on, for a day, when a fix needs the computer itself: Docker, the system, files outside Hornhoof. ' +
-        'The CEO sees the reason in your window and opens it with one click; then you get a note and go on by yourself. Never ask the CEO to type commands.',
+        'It stays inside the company until you put it before the CEO with classify_human_intent, in plain words; the CEO then opens it with one click, you get a note and go on by yourself. Never ask the CEO to type commands.',
       inputSchema: { reason: z.string().trim().min(1).max(500).describe('What you need the computer for, in a line.') },
     },
     async ({ reason }) => {
       if (!ctx.computer.available()) return say(UNREACHABLE, true);
       const until = ctx.computer.openUntil();
       if (until) return say(`Access to the computer is open until ${until}. Use computer.`);
-      ctx.computer.ask(reason);
-      ctx.bus.publish(job.companyId, { type: 'computer' });
-      await appendEvent(ctx, { companyId: job.companyId, agentId: job.agentId, jobId: job.id, kind: 'computer', data: { state: 'asked', reason, ...onMachine(await serverMachine(ctx, job.companyId)) } });
-      const personId = await decisionPerson(ctx, job.companyId, { source: 'computer_access' });
-      await appendOutgoing(ctx, { ...job, jobId: job.id, text: reason, to: await personParty(ctx, job.companyId, personId) });
-      return say('The CEO sees your request in your window and opens access with one click. You get a note then and go on; until then go on with other work or end your turn.');
+      return say(intentKept(await raiseComputerIntent(ctx, job, reason)));
     },
   );
 

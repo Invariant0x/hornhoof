@@ -5,6 +5,8 @@ description: { en: "Where development checks item by item, in a batch, by sample
 kind: procedure
 sources: []
 ---
+For `small: true`, use the fast path in hh-lead-tasks and hh-task-flow: only affected tests on the task, no separate gates or reports. Matrices, complexity metrics, duplicate checks and extra quality checks belong to the shared turn review and checks.
+
 How work moves through development. Check each item only where a mistake cannot be undone, risk adds up item by item, or code cannot check it. Everything else goes in a batch, with a sample on top. The department owner is the person named for this department, or the CEO when there is none.
 
 ## Item by item
@@ -20,11 +22,12 @@ How work moves through development. Check each item only where a mistake cannot 
 
 ## By sample
 
-- Mutation testing runs once per release, only on the riskiest pure logic and only against its fast tests (dev-engineering-rules).
+- The test engineer or QA runs mutation testing once per turn on its final candidate, only on the riskiest pure logic and only against its fast tests (dev-engineering-rules).
 
 ## By code
 
-- On every task, the tests selected by impact, types, lint, crapper and dryer run on what it changed.
+- Developers write a failing test before the change, run only affected tests selected by impact through run_tests, and submit the tests written, green results and commit SHA. The test engineer or QA owns the remaining checks once per turn on the final candidate (dev-gates), without duplicate runs.
+- The test engineer or QA runs types, lint, crapper and dryer as shared final checks.
 - Each code check has fast tests, including cases it must reject. A check named here that your tools do not run yet stays with a person, item by item, until they do.
 
 ## By a model

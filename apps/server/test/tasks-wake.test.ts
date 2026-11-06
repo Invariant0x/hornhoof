@@ -1,14 +1,13 @@
 import { and, asc, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import * as instructionBuilder from '../src/modules/agents/instructions.js';
 import { describe, expect, it, vi } from 'vitest';
-import { agentEvents, agents, companies, departments, jobs, machines, nodes, pendingWakes, people, personAccess, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
+import { agentEvents, agents, companies, departments, jobs, machines, nodes, pendingWakes, people, personAccess, requests, subscriptions, taskEvents, tasks, teams } from '../src/db/schema.js';
 import { agentState, enqueueTurn } from '../src/modules/conversation/queue.js';
 import { said } from '../src/modules/conversation/live.js';
 import { identityOf, type NodeIdentity } from '../src/modules/nodes/hub.js';
-import { answer, ask, blocked, cancel, comment, createTask, GOING_ON_TURNS, report, submit, updateTask } from '../src/modules/tasks/engine.js';
+import { answer, blocked, cancel, comment, createTask, GOING_ON_TURNS, report, submit, updateTask } from '../src/modules/tasks/engine.js';
 import { afterJob, SILENT_TURNS, startWork, typedTurn, wakeAll, wakeLeftBehind, wakePrompt } from '../src/modules/tasks/wake.js';
-import { as, connectNode, listen, setUpCompany, statements, testApp, until, type FakeNode } from './helpers.js';
-import { legacyApproval } from './legacy-request-fixture.js';
+import { as, askedOfPerson, beforePerson, connectNode, listen, setUpCompany, statements, testApp, type FakeNode, until } from './helpers.js';
 
 async function company(env?: NodeJS.ProcessEnv) {
   const { app, db } = await testApp(env);
@@ -68,6 +67,8 @@ describe('a person who speaks to an agent directly', () => {
 
   it("tells a stuck agent how to go on by typing into its terminal, and the task goes on", async () => {
     const c = await stuck();
+    const [note] = await c.db.select({ id: requests.id }).from(requests);
+    await beforePerson(c.ctx, note!.id);
     expect(await c.db.select({ status: tasks.status }).from(tasks).where(eq(tasks.id, c.task.id))).toEqual([{ status: 'waiting' }]);
     expect(await typedTurn(c.ctx, identityOf(c.sub, null)!, c.bruno.id, 'Run the tests first, then submit.', c.ceo.id)).not.toBeNull();
     expect(await requestsOf(c)).toEqual([{ kind: 'stuck', status: 'answered', answer: 'Run the tests first, then submit.', answeredBy: c.ceo.id }]);
@@ -92,8 +93,8 @@ describe('a person who speaks to an agent directly', () => {
     const { app, db, ceo, hire, task } = await withRepositories();
     const bruno = await hire('Bruno', null);
     const mine = await task(bruno.id);
-    await ask(app.ctx, bruno.id, mine.id, { kind: 'question', text: 'EUR or USD?' });
-    await legacyApproval(db, mine, bruno.id, { text: 'Merge it?', commit: 'a'.repeat(40) });
+    await askedOfPerson(app.ctx, bruno.id, mine.id, { kind: 'question', text: 'EUR or USD?' });
+    await askedOfPerson(app.ctx, bruno.id, mine.id, { kind: 'approval', text: 'Merge it?', commit: 'a'.repeat(40) });
     const [me] = await db.select().from(people);
     await until(async () => (await agentState(app.ctx, bruno.id)).ready);
     expect((await app.inject({ method: 'POST', url: `/api/agents/${bruno.id}/messages`, payload: { text: 'EUR only.' }, ...as(ceo) })).statusCode).toBe(202);
@@ -172,7 +173,7 @@ describe('a plan at its limit', () => {
 describe('a plan at its limit, with others of the role on other plans', () => {
   /* Rex is a backend engineer too, on a Codex plan whose machine is on; Bruno's plan is at its limit for an hour, and
      refuses his turn as it starts. before: what Bruno's turns did on the task until then. */
-  async function withPeer(rex: { limited?: boolean; status?: 'ready' | 'needs_login'; online?: boolean; nodeVersion?: string } = {}, before: 'nothing' | 'a turn' | 'a long refused turn' = 'nothing') {
+  async function withPeer(rex: { limited?: boolean; status?: 'ready' | 'needs_login'; online?: boolean; nodeVersion?: string; urgentOnly?: boolean } = {}, before: 'nothing' | 'a turn' | 'a long refused turn' = 'nothing') {
     const c = await company();
     const resetsAt = new Date(Date.now() + 3_600_000).toISOString();
     const rejected = { status: 'rejected' as const, windows: [{ name: 'five_hour', utilization: 1, resetsAt }] };
@@ -186,7 +187,8 @@ describe('a plan at its limit, with others of the role on other plans', () => {
     const rexs = (id: NodeIdentity) => id.kind === 'node' && id.nodeId === codex!.id;
     vi.spyOn(c.ctx.hub, 'isReady').mockImplementation(id => (rexs(id) ? rex.online ?? true : isReady(id)));
     vi.spyOn(c.ctx.hub, 'hasTerminals').mockImplementation(id => !rexs(id) && hasTerminals(id));
-    const [peer] = await c.db.insert(agents).values({ companyId: c.dev.companyId, kind: 'worker', name: 'Rex', roleKey: 'DEV-BE', departmentId: c.dev.id, model: '', subscriptionId: codex!.id }).returning();
+    const [team] = rex.urgentOnly ? await c.db.insert(teams).values({ companyId: c.dev.companyId, departmentId: c.dev.id, name: 'Quick', urgentOnly: true }).returning() : [];
+    const [peer] = await c.db.insert(agents).values({ companyId: c.dev.companyId, kind: 'worker', name: 'Rex', roleKey: 'DEV-BE', departmentId: c.dev.id, model: '', subscriptionId: codex!.id, teamId: team?.id ?? null }).returning();
     const task = await c.memberTask();
     await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: task.id, why: 'assigned' }]);
     if (before === 'a turn') await c.finish(c.bruno.id, () => comment(c.ctx, { agentId: c.bruno.id }, task.id, 'The handler is half done.'));
@@ -217,6 +219,13 @@ describe('a plan at its limit, with others of the role on other plans', () => {
       expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0], before).toMatchObject({ executorAgentId: bruno.id, assigneeAgentId: bruno.id });
       expect(await turnsOf(rex.id), before).toEqual([]);
     }
+  });
+
+  it('waits for the reset when the one who could take it is in a team that takes only urgent work', async () => {
+    const { db, bruno, rex, task, turnsOf } = await withPeer({ urgentOnly: true });
+    expect((await db.select().from(tasks).where(eq(tasks.id, task.id)))[0]).toMatchObject({ executorAgentId: bruno.id });
+    expect(await turnsOf(rex.id)).toEqual([]);
+    expect((await turnsOf(bruno.id)).filter(j => j.status === 'queued')).toHaveLength(1);
   });
 
   it('waits for the reset when their plans are at their limits too', async () => {
@@ -327,6 +336,38 @@ describe('a task handed to another executor', () => {
     expect((await c.db.select().from(tasks).where(eq(tasks.id, started.id)))[0]).toMatchObject({ assigneeAgentId: c.bruno.id, executorAgentId: c.bruno.id, status: 'working' });
   });
 
+  /* Bruno is at work, and Kai of his role is free but in a team that takes only urgent work. */
+  async function withKaiOfQuick() {
+    const c = await company();
+    const started = await c.memberTask();
+    await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: started.id, why: 'assigned' }]);
+    await c.db.update(jobs).set({ status: 'running', startedAt: new Date() }).where(eq(jobs.taskId, started.id));
+    await c.db.update(subscriptions).set({ status: 'ready' }).where(eq(subscriptions.id, c.sub.id));
+    vi.spyOn(c.ctx.hub, 'isReady').mockReturnValue(true);
+    vi.spyOn(c.ctx.hub, 'isOnline').mockReturnValue(true);
+    vi.spyOn(c.ctx.hub, 'hasTerminals').mockReturnValue(true);
+    const [quick] = await c.db.insert(teams).values({ companyId: c.dev.companyId, departmentId: c.dev.id, name: 'Quick', urgentOnly: true }).returning();
+    const worker = async (name: string, teamId: string | null) => (await c.db.insert(agents).values({ companyId: c.dev.companyId, kind: 'worker', name, roleKey: 'DEV-BE', departmentId: c.dev.id, teamId, model: '', subscriptionId: c.sub.id }).returning())[0]!;
+    return { ...c, worker, kai: await worker('Kai', quick!.id) };
+  }
+
+  it('passes over a free worker of a team that takes only urgent work', async () => {
+    const c = await withKaiOfQuick();
+    const unstarted = await c.memberTask();
+    await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: unstarted.id, why: 'assigned' }]);
+    expect((await c.db.select().from(tasks).where(eq(tasks.id, unstarted.id)))[0]).toMatchObject({ assigneeAgentId: c.bruno.id, executorAgentId: c.bruno.id, status: 'open' });
+    expect(await c.turnsOf(c.kai.id)).toEqual([]);
+  });
+
+  it('gives the work to the free worker after one of a team that takes only urgent work', async () => {
+    const c = await withKaiOfQuick();
+    const dora = await c.worker('Dora', null);
+    const unstarted = await c.memberTask();
+    await wakeAll(c.ctx, [{ agentId: c.bruno.id, taskId: unstarted.id, why: 'assigned' }]);
+    expect((await c.db.select().from(tasks).where(eq(tasks.id, unstarted.id)))[0]).toMatchObject({ assigneeAgentId: dora.id, executorAgentId: dora.id });
+    expect(await c.turnsOf(c.kai.id)).toEqual([]);
+  });
+
   it('keeps unstarted work queued when the worker of the same role is busy too', async () => {
     const c = await company();
     const started = await c.memberTask();
@@ -412,16 +453,16 @@ describe("Hornhoof's note that a task stands still", () => {
     const c = await stuck();
     await c.db.update(requests).set({ status: 'answered' });
     await c.db.update(tasks).set({ status: 'working' }).where(eq(tasks.id, c.task.id));
-    await ask(c.ctx, c.bruno.id, c.task.id, { kind: 'question', text: 'EUR or USD?' });
+    await askedOfPerson(c.ctx, c.bruno.id, c.task.id, { kind: 'question', text: 'EUR or USD?' });
     await expect(submit(c.ctx, c.bruno.id, c.task.id, { summary: 'Done.', evidence: 'npm test' })).rejects.toThrow(/waits for a person's answer/);
   });
 
-  it('asks the orchestrator to put the note into plain words for people', async () => {
+  it('asks whoever has it inside the company how it goes on', async () => {
     const c = await stuck();
-    const [note] = await c.db.select({ id: requests.id }).from(requests);
-    const asked = (await c.turnsOf(c.orchestrator.id)).filter(j => j.prompt.includes(note!.id));
+    const [note] = await c.db.select({ id: requests.id, triageAgentId: requests.triageAgentId }).from(requests);
+    const asked = (await c.turnsOf(note!.triageAgentId!)).filter(j => j.prompt.includes(note!.id));
     expect(asked).toHaveLength(1);
-    expect(asked[0]!.prompt).toContain('explain_request');
+    expect(asked[0]!.prompt).toContain('resolve_question');
   });
 
   it('wakes whoever holds the task now when a person says try again', async () => {
@@ -429,6 +470,7 @@ describe("Hornhoof's note that a task stands still", () => {
     /* Handed on before Hornhoof let such notes go. */
     await c.db.update(tasks).set({ executorAgentId: c.kai.id, assigneeAgentId: c.kai.id }).where(eq(tasks.id, c.task.id));
     const [note] = await c.db.select({ id: requests.id }).from(requests);
+    await beforePerson(c.ctx, note!.id);
     const { wakes } = await answer(c.ctx, { personId: c.ceo.id }, note!.id, { retry: true });
     expect(wakes.map(w => w.agentId)).toEqual([c.kai.id]);
   });

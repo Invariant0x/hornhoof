@@ -1,0 +1,164 @@
+import { QuestionClassificationInput } from '@hornhoof/protocol';
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { and, asc, eq, gt, inArray, or } from 'drizzle-orm';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { z } from 'zod';
+import type { Ctx } from '../../app.js';
+import { agents, departments, requestInternal, requests, tasks } from '../../db/schema.js';
+import { ApiError, loggable } from '../../errors.js';
+import { jobOf, type ToolJob } from '../tools/job.js';
+import { picturesOf } from './attachments.js';
+import type { Request } from './engine.js';
+import { answerInternal, approvalDigest, claimQuestion, classifyInternal, ResolveInput, RouteInput, routeInternal, type Settled } from './question-lifecycle.js';
+import { classifyComputerIntent, importAskedFromFile, internalIntents, resolveComputerIntent, settleComputerIntents } from './question-computer.js';
+import { claimProposals, classifyProposal, internalCards, resolveProposal } from './question-proposals.js';
+import type { TriageCall } from './question-authority.js';
+import { wakeAll } from './wake.js';
+
+/* The same questions over tools and HTTP: what whoever has them reads, and the one way each is settled or put before a person. The
+   caller is the turn its token belongs to, never anything it says it is. */
+
+const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
+const PAGE = 50;
+const Cursor = z.strictObject({ at: z.iso.datetime(), id: z.uuid() });
+type Cursor = z.infer<typeof Cursor>;
+
+const encoded = (cursor: Cursor) => Buffer.from(JSON.stringify(cursor)).toString('base64url');
+function decoded(text: string | undefined): Cursor | null {
+  if (!text) return null;
+  try {
+    return Cursor.parse(JSON.parse(Buffer.from(text, 'base64url').toString()));
+  } catch {
+    throw new ApiError(400, 'validation', 'This cursor is not one this page gave.', 'task_invalid');
+  }
+}
+
+/* What this turn's agent has to read: the orchestrator every question inside, a head those on its department's work, anyone what was
+   handed to it. Nobody else's is even named. */
+async function questionsOf(db: Ctx['db'], job: Pick<ToolJob, 'agentId' | 'companyId' | 'agentKind' | 'departmentId'>) {
+  const inside = and(eq(requests.companyId, job.companyId), eq(requests.status, 'open'), eq(requests.audience, 'internal'));
+  if (job.agentKind === 'orchestrator') return inside;
+  const mine = eq(requests.triageAgentId, job.agentId);
+  if (job.agentKind !== 'head' || !job.departmentId) return and(inside, mine);
+  const products = await db.select({ id: departments.id }).from(departments).where(eq(departments.parentId, job.departmentId));
+  return and(inside, or(mine, inArray(tasks.departmentId, [job.departmentId, ...products.map(p => p.id)])));
+}
+
+const afterCursor = (from: ReturnType<typeof decoded>) => (from ? or(gt(requests.createdAt, new Date(from.at)), and(eq(requests.createdAt, new Date(from.at)), gt(requests.id, from.id))) : undefined);
+
+const nextCursor = (rows: { request: Request }[]): string | null => {
+  const last = rows[PAGE - 1];
+  return rows.length > PAGE && last ? encoded({ at: last.request.createdAt.toISOString(), id: last.request.id }) : null;
+};
+
+const approvalOf = (r: Request) => (r.approvalChannel ? { channel: r.approvalChannel, kind: r.approvalKind, amount: r.approvalAmount, digest: approvalDigest(r) } : null);
+
+type QuestionRow = { request: Request; task: { id: string; number: number; title: string }; asker: { id: string; name: string }; words: string | null };
+
+const questionLine = ({ request: r, task, asker, words }: QuestionRow, images: unknown[]) => ({
+  source: { kind: 'task_request' as const, id: r.id }, kind: r.kind, text: words ?? r.text, revision: r.questionRevision, routeRevision: r.routeRevision, triageAgentId: r.triageAgentId,
+  task, asker, commit: r.commit, options: r.options, link: r.link, images, topic: r.decisionTopic, approval: approvalOf(r), at: r.createdAt.toISOString(),
+});
+
+export async function internalQuestions(ctx: Ctx, job: ToolJob, after?: string) {
+  const from = decoded(after);
+  const rows = await ctx.db
+    .select({ request: requests, task: { id: tasks.id, number: tasks.number, title: tasks.title }, asker: { id: agents.id, name: agents.name }, words: requestInternal.technicalText })
+    .from(requests)
+    .innerJoin(tasks, eq(tasks.id, requests.taskId))
+    .innerJoin(agents, eq(agents.id, requests.agentId))
+    .leftJoin(requestInternal, eq(requestInternal.requestId, requests.id))
+    .where(and(await questionsOf(ctx.db, job), afterCursor(from)))
+    .orderBy(asc(requests.createdAt), asc(requests.id))
+    .limit(PAGE + 1);
+  const page = rows.slice(0, PAGE);
+  const pictures = await picturesOf(ctx.db, page.map(r => r.request));
+  return { questions: page.map(row => questionLine(row, pictures.get(row.request.id) ?? [])), cards: from ? [] : await internalCards(ctx, job), access: from ? [] : await internalIntents(ctx, job), next: nextCursor(rows) };
+}
+
+const call = (job: Pick<ToolJob, 'id' | 'agentId' | 'companyId'>) => ({ jobId: job.id, agentId: job.agentId, companyId: job.companyId });
+
+/* The wakes are kept with the move; a retry that changed nothing has none. */
+async function done(ctx: Ctx, settled: Settled) {
+  await wakeAll(ctx, settled.wakes);
+  return settled.result;
+}
+
+/* One way in for every kind of question: each goes on by the rules of its own kind. */
+const RESOLVES = { task_request: answerInternal, proposal: resolveProposal, computer_access: resolveComputerIntent };
+const CLASSIFIES = { task_request: classifyInternal, proposal: classifyProposal, computer_access: classifyComputerIntent };
+const resolveAny = (ctx: Ctx, by: TriageCall, input: ResolveInput): Promise<Settled> => RESOLVES[input.source.kind](ctx, by, input);
+const classifyAny = (ctx: Ctx, by: TriageCall, input: QuestionClassificationInput): Promise<Settled> => CLASSIFIES[input.source.kind](ctx, by, input);
+
+const readable = async (fn: () => Promise<unknown>) => {
+  try {
+    return say(JSON.stringify(await fn()));
+  } catch (err) {
+    if (err instanceof ApiError) return say(err.message, true);
+    if (err instanceof z.ZodError) return say(err.issues.map(i => `${i.path.join('.')}: ${i.message}`).join(' '), true);
+    throw err;
+  }
+};
+
+export function registerQuestionTools(server: McpServer, ctx: Ctx, job: ToolJob): void {
+  server.registerTool(
+    'internal_questions',
+    { description: 'The questions inside the company that are yours to settle, with their words and the revisions to act on them with. after: the next value of the page before.', inputSchema: { after: z.string().max(400).optional() } },
+    ({ after }) => readable(() => internalQuestions(ctx, job, after)),
+  );
+  server.registerTool(
+    'resolve_question',
+    {
+      description: 'Settles a question inside the company that is yours: resolution is what the one who goes on hears, executorInstruction the technical detail only they get. It approves and grants nothing, and no person is named as answering. Use a new operationId for each decision; the same one again returns what it did.',
+      inputSchema: ResolveInput,
+    },
+    input => readable(async () => done(ctx, await resolveAny(ctx, call(job), ResolveInput.parse(input)))),
+  );
+  server.registerTool(
+    'route_question',
+    { description: 'Hands a question inside the company that is yours on to the head, the orchestrator or Operations. Handing it to Operations gives it the work, and no right to put it before a person.', inputSchema: RouteInput },
+    input => readable(async () => done(ctx, await routeInternal(ctx, call(job), RouteInput.parse(input)))),
+  );
+  server.registerTool(
+    'classify_human_intent',
+    {
+      description: 'Puts a question before the person who takes it, the only way one comes to a person. Only the head of its department or the orchestrator may, and only for a ready result (classification kind ready_result, with the exact commit or pictures) or what only a person can do (kind human_only_action). ' +
+        'humanEnvelope is all the person reads: situation, requiredAction and options, in plain words with no commands, code or markup. It approves, pays and grants nothing. The person is worked out by Hornhoof.',
+      inputSchema: QuestionClassificationInput,
+    },
+    input => readable(async () => done(ctx, await classifyAny(ctx, call(job), QuestionClassificationInput.parse(input)))),
+  );
+}
+
+/* Called with the wait sweep: each question on its own, so that one that breaks leaves the others going. */
+export async function claimQuestions(ctx: Ctx): Promise<void> {
+  const open = await ctx.db.select({ id: requests.id }).from(requests).where(and(eq(requests.status, 'open'), eq(requests.audience, 'internal')));
+  for (const { id } of open) {
+    try {
+      await wakeAll(ctx, await claimQuestion(ctx, id));
+    } catch (err) {
+      ctx.log.error({ error: loggable(err) }, 'A question could not go to someone who can look at it and is tried again in a minute.');
+    }
+  }
+  await claimProposals(ctx).catch((err: unknown) => ctx.log.error({ error: loggable(err) }, 'A card could not go to the orchestrator and is tried again in a minute.'));
+  await settleComputerIntents(ctx).catch((err: unknown) => ctx.log.error({ error: loggable(err) }, 'What was left of opening the computer could not be settled and is tried again in a minute.'));
+  await importAskedFromFile(ctx).catch((err: unknown) => ctx.log.error({ error: loggable(err) }, 'A request for the computer could not go inside and is tried again in a minute.'));
+}
+
+const refused = async (req: FastifyRequest, ctx: Ctx): Promise<ToolJob> => jobOf(ctx, req);
+
+export function questionRoutes(app: FastifyInstance, ctx: Ctx): void {
+  app.get('/api/internal-intents', async req => {
+    const job = await refused(req, ctx);
+    const { after } = z.strictObject({ after: z.string().max(400).optional() }).parse(req.query);
+    return internalQuestions(ctx, job, after);
+  });
+  app.post('/api/internal-intents/resolve', async req => {
+    const job = await refused(req, ctx);
+    return done(ctx, await resolveAny(ctx, call(job), ResolveInput.parse(req.body)));
+  });
+  app.post('/api/internal-intents/classify', async req => {
+    const job = await refused(req, ctx);
+    return done(ctx, await classifyAny(ctx, call(job), QuestionClassificationInput.parse(req.body)));
+  });
+}

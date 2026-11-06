@@ -2,8 +2,8 @@ import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agents, companies, departments, people, subscriptions } from '../src/db/schema.js';
 import type { StreamMessage } from '../src/modules/events/bus.js';
-import { answer, ask, cancel, createTask, report, submit } from '../src/modules/tasks/engine.js';
-import { setUpCompany, testApp } from './helpers.js';
+import { answer, cancel, createTask, report, submit } from '../src/modules/tasks/engine.js';
+import { askedOfPerson, setUpCompany, testApp } from './helpers.js';
 
 async function company() {
   const { app, db } = await testApp();
@@ -60,7 +60,7 @@ describe('pulses on the map for tasks', () => {
     const parent = (await createTask(ctx, CEO, { title: 'Icons', brief: '', body: '', departmentId: dev.id, assigneeAgentId: head.id })).task;
     const { task } = await createTask(ctx, { agentId: head.id }, { title: 'Chips', brief: '', body: '', departmentId: dev.id, parentId: parent.id, assigneeAgentId: bruno.id, executor: true });
     pulses();
-    const { request } = await ask(ctx, bruno.id, task.id, { kind: 'question', text: 'Round or square?' });
+    const { request } = await askedOfPerson(ctx, bruno.id, task.id, { kind: 'question', text: 'Round or square?' });
     expect(pulses()).toEqual([`department:${dev.id} -> person:${ceo.id}`]);
     await answer(ctx, { personId: ceo.id }, request.id, { answer: 'Round.' });
     expect(pulses()).toEqual([`person:${ceo.id} -> department:${dev.id}`]);

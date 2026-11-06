@@ -1,10 +1,9 @@
 import { eq, inArray } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { agents, companies, departments, jobs, requests, subscriptions, tasks } from '../src/db/schema.js';
-import { ask, createTask, submit } from '../src/modules/tasks/engine.js';
+import { createTask, submit } from '../src/modules/tasks/engine.js';
 import { wakeAll } from '../src/modules/tasks/wake.js';
-import { as, invitePerson, listen, openStream, setUpCompany, testApp, until, ownPlan } from './helpers.js';
-import { legacyApproval } from './legacy-request-fixture.js';
+import { as, askedOfPerson, invitePerson, listen, openStream, ownPlan, setUpCompany, testApp, until } from './helpers.js';
 
 async function company() {
   const { app, db } = await testApp();
@@ -37,7 +36,7 @@ describe('tasks for people', () => {
     const { ctx, db, head, bruno, dev, ceo, oleg, maria, get } = await company();
     await ownPlan(db, 'oleg@acme.com', bruno.id);
     const { task } = await createTask(ctx, { agentId: head.id }, { title: 'Checkout API', brief: 'The API.', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true });
-    await ask(ctx, bruno.id, task.id, { kind: 'question', text: 'Which currency?' });
+    await askedOfPerson(ctx, bruno.id, task.id, { kind: 'question', text: 'Which currency?' });
     expect((await get(oleg, '/api/tasks')).json().tasks.map((t: { number: number }) => t.number)).toEqual([1]);
     expect((await get(maria, '/api/tasks')).json().tasks).toEqual([]);
     expect((await get(maria, `/api/tasks/${task.id}`)).statusCode).toBe(403);
@@ -77,10 +76,10 @@ describe('tasks for people', () => {
     expect((await post(oleg, `/api/tasks/${task.id}/comments`, { text: 'EUR only.' })).statusCode).toBe(201);
     expect((await post(maria, `/api/tasks/${task.id}/comments`, { text: 'Hi.' })).statusCode).toBe(403);
     /* A question without its topic is the CEO's: the department's people take the ones about its tasks and employees. */
-    const { request: plain } = await ask(ctx, bruno.id, task.id, { kind: 'question', text: 'Which bank?' });
+    const { request: plain } = await askedOfPerson(ctx, bruno.id, task.id, { kind: 'question', text: 'Which bank?' });
     expect((await post(oleg, `/api/requests/${plain.id}`, { answer: 'Any.' })).json().error.reason).toBe('decision_not_allowed');
     expect((await post(ceo, `/api/requests/${plain.id}`, { answer: 'Any.' })).statusCode).toBe(200);
-    const { request } = await ask(ctx, bruno.id, task.id, { kind: 'question', text: 'Which currency?', topic: 'task' });
+    const { request } = await askedOfPerson(ctx, bruno.id, task.id, { kind: 'question', text: 'Which currency?', topic: 'task' });
     expect((await post(oleg, `/api/requests/${request.id}`, { approve: true })).json().error.reason).toBe('task_invalid');
     expect((await post(maria, `/api/requests/${request.id}`, { answer: 'EUR' })).statusCode).toBe(403);
     expect((await post(oleg, `/api/requests/${request.id}`, { answer: 'EUR' })).statusCode).toBe(200);
@@ -173,7 +172,7 @@ describe('tasks for people', () => {
     const { ctx, db, head, bruno, dev, oleg, ceo, post, get } = await company();
     await ownPlan(db, 'oleg@acme.com', bruno.id);
     const { task } = await createTask(ctx, { agentId: head.id }, { title: 'Release', brief: '', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true });
-    const { request } = await legacyApproval(db, task, bruno.id, { text: 'Release 0.5.0 to main.', commit: 'a'.repeat(40) });
+    const { request } = await askedOfPerson(ctx, bruno.id, task.id, { kind: 'approval', text: 'Release 0.5.0 to main.', commit: 'a'.repeat(40) });
     expect((await get(oleg, '/api/requests')).json().requests.map((r: { id: string }) => r.id)).toEqual([request.id]);
     expect((await post(oleg, `/api/requests/${request.id}`, { approve: true })).json().error.reason).toBe('decision_not_allowed');
     expect((await post(ceo, `/api/requests/${request.id}`, { approve: true })).json().request.status).toBe('approved');

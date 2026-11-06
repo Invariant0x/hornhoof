@@ -5,10 +5,10 @@ import { and, eq } from 'drizzle-orm';
 import { expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agents, companies, departments, attachments, jobs, people, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
-import { ask, answerDirectly, createTask } from '../src/modules/tasks/engine.js';
+import { answerDirectly, createTask } from '../src/modules/tasks/engine.js';
 import { waitFor } from '../src/modules/tasks/external-wait.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
-import { as, connectNode, listen, mcp, setUpCompany, testApp, until } from './helpers.js';
+import { as, askedOfPerson, connectNode, listen, mcp, setUpCompany, testApp, until } from './helpers.js';
 
 const WORDS = ('Полный текст 🌿.\n' + 'Finding: keep every word and its author.\n'.repeat(400)).slice(0, 11999) + '!';
 const sha = (bytes: string | Buffer) => createHash('sha256').update(bytes).digest('hex');
@@ -73,7 +73,7 @@ it('accepts a long HTTP comment and reads its full text', async () => {
 
 it.each(['question', 'choice', 'approval'] as const)('keeps a long HTTP %s answer in full', async kind => {
   const c = await fixture();
-  const request = (await ask(c.app.ctx, c.worker.id, c.task.id, { kind, text: 'Please reply.', ...(kind === 'choice' ? { options: [{ label: 'One', image: null }, { label: 'Two', image: null }] } : {}), ...(kind === 'approval' ? { commit: 'a'.repeat(40) } : {}) })).request;
+  const request = (await askedOfPerson(c.app.ctx, c.worker.id, c.task.id, { kind, text: 'Please reply.', ...(kind === 'choice' ? { options: [{ label: 'One', image: null }, { label: 'Two', image: null }] } : {}), ...(kind === 'approval' ? { commit: 'a'.repeat(40) } : {}) })).request;
   const response = await c.app.inject({ method: 'POST', url: `/api/requests/${request.id}`, payload: { answer: WORDS, ...(kind === 'approval' ? { approve: true } : {}) }, ...as(c.session) });
   expect(response.statusCode, response.body).toBe(200);
   expect(await c.saved(request.id)).toMatchObject({ answer: WORDS, picked: null, answeredBy: c.ceo.id });
@@ -83,7 +83,7 @@ it.each(['question', 'choice', 'approval'] as const)('keeps a long HTTP %s answe
 
 it('keeps an answer from the person window intact without answerDirectly truncation', async () => {
   const c = await fixture();
-  const request = (await ask(c.app.ctx, c.worker.id, c.task.id, { kind: 'question', text: 'Please reply.' })).request;
+  const request = (await askedOfPerson(c.app.ctx, c.worker.id, c.task.id, { kind: 'question', text: 'Please reply.' })).request;
   await answerDirectly(c.app.ctx, c.ceo.id, c.worker.id, WORDS);
   expect((await c.saved(request.id)).answer).toBe(WORDS);
 });
@@ -118,7 +118,7 @@ it('accepts the long head tell_orchestrator path', async () => {
 
 it('accepts a long delegated answer_request without changing its principal', async () => {
   const c = await fixture();
-  const request = (await ask(c.app.ctx, c.worker.id, c.task.id, { kind: 'question', text: 'Please reply.' })).request;
+  const request = (await askedOfPerson(c.app.ctx, c.worker.id, c.task.id, { kind: 'question', text: 'Please reply.' })).request;
   const result = await call(await c.client(c.orchestrator), 'answer_request', { request: request.id, answer: WORDS });
   expect(result.isError, result.content[0]?.text).toBeFalsy();
   expect(await c.saved(request.id)).toMatchObject({ answer: WORDS, answeredBy: c.ceo.id, answeredByAgentId: c.orchestrator.id });
@@ -135,7 +135,7 @@ it('keeps the transport limit and explains the supported file step', async () =>
 
 it('does not fail an already delivered person message when implicit answer files have no room', async () => {
   const c = await fixture();
-  const request = (await ask(c.app.ctx, c.worker.id, c.task.id, { kind: 'question', text: 'Please reply.' })).request;
+  const request = (await askedOfPerson(c.app.ctx, c.worker.id, c.task.id, { kind: 'question', text: 'Please reply.' })).request;
   c.app.ctx.config.taskFilesBytes = 0;
   const response = await c.app.inject({ method: 'POST', url: `/api/agents/${c.worker.id}/messages`, payload: { text: WORDS }, ...as(c.session) });
   expect(response.statusCode, response.body).toBe(202);

@@ -1,9 +1,10 @@
 import type { ServerMessage } from '@hornhoof/protocol';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { randomUUID } from 'node:crypto';
 import { and, eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agentEvents, agents, companies, departments, jobs, requests, subscriptions, tasks, teams } from '../src/db/schema.js';
+import { agentEvents, agents, companies, departments, jobs, requests, subscriptions, tasks, taskWaits, teams } from '../src/db/schema.js';
 import { cancel, createTask, silentTurn, updateTask } from '../src/modules/tasks/engine.js';
 import { checkLiveness, wakeAll } from '../src/modules/tasks/wake.js';
 import { agentProgramState, checkSilentTurns } from '../src/modules/tasks/silent.js';
@@ -13,7 +14,7 @@ import { discardStaleTurn } from '../src/modules/tasks/wake-state.js';
 import { checkExternalWaits, waitFor } from '../src/modules/tasks/external-wait.js';
 import { insertTurn } from '../src/modules/conversation/queue.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
-import { as, connectNode, listen, mcp, setUpCompany, testApp, until } from './helpers.js';
+import { allBeforePerson, as, connectNode, listen, mcp, setUpCompany, testApp, until } from './helpers.js';
 
 const NODE_KEY = 'external-wait-test-node-key-0123456789abcdef';
 
@@ -57,10 +58,119 @@ async function messaging() {
     const message = JSON.parse(String(raw)) as ServerMessage;
     if (message.type === 'agent.say') node.send({ type: 'agent.said', ref: message.ref, ok: true });
   });
-  node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], terminals: true });
+  node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], terminals: true, skillFiles: true });
   await until(() => c.ctx.hub.isReady(identityOf(c.sub, null)!));
   return { ...c, node };
 }
+
+describe('the record of a wait_for', () => {
+  const HOUR = 3_600_000;
+  const recordOf = async (c: Awaited<ReturnType<typeof fixture>>, id: string) => {
+    const operation = (await c.read(id)).externalWait!.operation!;
+    return { operation, wait: (await c.db.select().from(taskWaits).where(eq(taskWaits.sourceKey, `wait_for:${operation}`)))[0]! };
+  };
+  const planOf = (c: Awaited<ReturnType<typeof fixture>>, change: object = {}) => {
+    const after = (hours: number) => new Date(Date.now() + hours * HOUR).toISOString();
+    return { version: 1, ownerDueAt: after(3), headDueAt: after(4), decisionDueAt: after(5), provenance: { kind: 'explicit_promise', actor: { agentId: c.head.id }, ref: 'promise-1', revision: 1, origin: 'wait_for' }, finalReview: { headAgentId: c.head.id, anchorAt: after(6), intervalMs: HOUR }, ...change };
+  };
+  const anHour = () => new Date(Date.now() + HOUR).toISOString();
+
+  it('keeps it for the holder with no plan, its deadline being no promise', async () => {
+    const c = await fixture();
+    const task = await c.task();
+    await waitFor(c.ctx, c.worker.id, task.id, { reason: 'Images', until: anHour(), on: { kind: 'external', event: 'machine' } });
+    const { operation, wait } = await recordOf(c, task.id);
+    expect(operation).toMatch(/^[0-9a-f-]{36}$/);
+    expect(wait).toMatchObject({ taskId: task.id, kind: 'external', state: 'legacy_needs_plan', ownerAgentId: c.worker.id, plan: null, ownerDueAt: null, nextActionAt: null, sourceRevision: 0, sourceState: { stage: 'waiting' } });
+  });
+
+  it('has the employee it names answer for it', async () => {
+    const c = await fixture();
+    const task = await c.task();
+    await waitFor(c.ctx, c.worker.id, task.id, { reason: 'Images', until: anHour(), on: { kind: 'employee', employee: c.peer.id } });
+    expect((await recordOf(c, task.id)).wait).toMatchObject({ ownerAgentId: c.peer.id });
+  });
+
+  it('takes a plan, and holds its dates apart from the deadline of the wait', async () => {
+    const c = await fixture();
+    const task = await c.task();
+    const plan = planOf(c);
+    await waitFor(c.ctx, c.worker.id, task.id, { reason: 'Images', until: anHour(), plan: plan as never });
+    const { wait } = await recordOf(c, task.id);
+    expect(wait).toMatchObject({ state: 'active', generation: 1, ownerAgentId: c.worker.id });
+    expect(wait.ownerDueAt!.toISOString()).toBe(plan.ownerDueAt);
+    expect(wait.nextActionAt!.toISOString()).toBe(plan.ownerDueAt);
+  });
+
+  it('refuses the whole wait when its plan is no plan, leaving the task as it was', async () => {
+    const c = await fixture();
+    const task = await c.task();
+    const before = await c.read(task.id);
+    for (const plan of [planOf(c, { finalReview: { headAgentId: c.worker.id, anchorAt: anHour(), intervalMs: HOUR } }), planOf(c, { ownerDueAt: undefined }), planOf(c, { finalReview: { headAgentId: c.head.id, anchorAt: anHour(), intervalMs: null } })]) {
+      await expect(waitFor(c.ctx, c.worker.id, task.id, { reason: 'Images', until: anHour(), plan: plan as never })).rejects.toMatchObject({ reason: 'task_invalid' });
+    }
+    expect(await c.read(task.id)).toEqual(before);
+    expect(await c.db.select().from(taskWaits)).toEqual([]);
+  });
+
+  it('gets a new operation with a new wait, which takes the place of the old one', async () => {
+    const c = await fixture();
+    const task = await c.task();
+    await waitFor(c.ctx, c.worker.id, task.id, { reason: 'Images', until: anHour() });
+    const first = await recordOf(c, task.id);
+    await waitFor(c.ctx, c.worker.id, task.id, { reason: 'Images', until: anHour() });
+    const second = await recordOf(c, task.id);
+    expect(second.operation).not.toBe(first.operation);
+    expect((await c.db.select().from(taskWaits).where(eq(taskWaits.id, first.wait.id)))[0]).toMatchObject({ state: 'superseded', proofRef: `wait_for:${second.operation}` });
+    expect(second.wait).toMatchObject({ state: 'legacy_needs_plan' });
+  });
+
+  it('leaves another source of the task alone when it is replaced', async () => {
+    const c = await fixture();
+    const task = await c.task();
+    await waitFor(c.ctx, c.worker.id, task.id, { reason: 'Images', until: anHour() });
+    const [other] = await c.db.insert(taskWaits).values({ companyId: c.company.id, taskId: task.id, kind: 'external', sourceKey: `operation:${randomUUID()}`, sourceRevision: 0, state: 'legacy_needs_plan' }).returning();
+    await waitFor(c.ctx, c.worker.id, task.id, { reason: 'Images', until: anHour() });
+    expect((await c.db.select().from(taskWaits).where(eq(taskWaits.id, other!.id)))[0]).toMatchObject({ state: 'legacy_needs_plan' });
+  });
+
+  it('stays at its deadline, come back to be looked at, with one wake: a date passing proves nothing', async () => {
+    const c = await fixture();
+    const task = await c.task();
+    const plan = planOf(c);
+    const until = anHour();
+    await waitFor(c.ctx, c.worker.id, task.id, { reason: 'Images', until, plan: plan as never });
+    const { wait } = await recordOf(c, task.id);
+    expect(await checkExternalWaits(c.ctx, new Date(Date.parse(until) + 1))).toBe(1);
+    expect(await checkExternalWaits(c.ctx, new Date(Date.parse(until) + 2))).toBe(0);
+    const [back] = await c.db.select().from(taskWaits).where(eq(taskWaits.id, wait.id));
+    expect(back).toMatchObject({ state: 'active', generation: 1, sourceRevision: 0, sourceState: { stage: 'check_back' }, ownerAgentId: c.worker.id, outcome: null, proofRef: null });
+    expect(back!.ownerDueAt!.toISOString()).toBe(plan.ownerDueAt);
+    expect(await c.db.select().from(jobs).where(eq(jobs.taskId, task.id))).toHaveLength(1);
+  });
+
+  it('comes back when a message on the task ends the wait, and goes on when the message does not go out', async () => {
+    const c = await messaging();
+    const task = await c.task();
+    await c.wait(task.number, 'Images', anHour());
+    const { wait } = await recordOf(c, task.id);
+    const stageOf = async () => ((await c.db.select().from(taskWaits).where(eq(taskWaits.id, wait.id)))[0]!).sourceState.stage;
+    expect(await stageOf()).toBe('waiting');
+    const client = await c.tools(c.head.id);
+    expect((await client.callTool({ name: 'message_employee', arguments: { employee: c.worker.id, task: task.number, text: 'Look at this.' } })).isError).toBeFalsy();
+    expect((await c.read(task.id)).externalWait).toBeNull();
+    expect(await stageOf()).toBe('check_back');
+  });
+
+  it('keeps every wait the machines kept before, with no operation of its own, ending as it did', async () => {
+    const c = await fixture();
+    const task = await c.task();
+    const until = new Date(Date.now() + HOUR);
+    await c.db.update(tasks).set({ externalWait: { reason: 'Images', since: new Date().toISOString(), until: until.toISOString() } }).where(eq(tasks.id, task.id));
+    expect(await checkExternalWaits(c.ctx, new Date(until.getTime() + 1))).toBe(1);
+    expect(await c.db.select().from(taskWaits)).toEqual([]);
+  });
+});
 
 describe('external task wait', () => {
   it('stores the holder wait for two hours without changing the workflow status', async () => {
@@ -300,6 +410,7 @@ describe('external task wait', () => {
     expect(result.isError).toBeFalsy();
     const another = await (await c.tools()).callTool({ name: 'ask_person', arguments: { task: task.number, question: 'Which region?', topic: 'task' } });
     expect(another.isError).toBeFalsy();
+    await allBeforePerson(c, task.id);
     await c.wait(task.number, 'Images', new Date(Date.now() + 3_600_000).toISOString());
     const [request] = await c.db.select().from(requests).where(eq(requests.taskId, task.id));
     const response = await c.app.inject({ method: 'POST', url: `/api/requests/${request!.id}`, payload: { answer: 'The images are ready.' }, ...as(c.owner) });

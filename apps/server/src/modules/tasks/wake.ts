@@ -1,14 +1,15 @@
-import { and, asc, count, desc, eq, gt, gte, inArray, isNotNull, isNull, ne, notInArray, or, sql } from 'drizzle-orm';
+import { and, count, desc, eq, gt, gte, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { loggable } from '../../errors.js';
-import { agentChanges, agentEvents, agents, jobs, requests, subscriptions, taskEvents, tasks, testRuns } from '../../db/schema.js';
+import { agentChanges, agentEvents, agents, jobs, requestInternal, requests, subscriptions, taskEvents, tasks, testRuns } from '../../db/schema.js';
 import { agentState, conversationOf, insertTurn, limitUntil, liveSubscription, onAgent, openTypedTurn, orchestratorOf, pump, refusedLimits, turnRefused, UNSENT, type TurnMessage } from '../conversation/queue.js';
 import { deliverLive } from '../conversation/decision-context.js';
 import { quote } from '../conversation/prompt.js';
 import { appendEvent, publishWorking } from '../events/store.js';
 import { identityOf, type NodeIdentity } from '../nodes/hub.js';
+import { goesOutNow, isFree, mayTake, peersOfRole } from './role-peers.js';
 import { answerDirectly, brokeDown, CLOSED, GATE_ROUNDS, handOver, lastMove, leaveGates, leaveWork, NOT_A_MOVE, openAfter, regateWaiting, reviewWake, silentTurn, taskSpot, wentOn, type Actor, type Moved, type Task, type Wake, type WakeWhy } from './engine.js';
-import { wakeQueued, wakesLeft } from './outbox.js';
+import { QUESTION_WAKES, wakeQueued, wakesLeft } from './outbox.js';
 import { taskForWake, taskWakeOf, waitingTaskTurn } from './wake-state.js';
 import { carriedTasks, continueOnce, doneIfRecorded } from './endings.js';
 import { afterRestart } from './restarts.js';
@@ -23,7 +24,7 @@ type Agent = typeof agents.$inferSelect;
 
 /* What finishes the task for whoever holds it, and what to do when that cannot happen. */
 function nextStep(task: Task, agentId: string): { finish: string; stuck: string } {
-  if (task.stage > 0 && task.panel.includes(agentId)) return { finish: 'give your verdict with your reasons', stuck: 'ask a person with ask_person' };
+  if (task.stage > 0 && task.panel.includes(agentId)) return { finish: 'give your verdict with your reasons', stuck: 'ask with ask_person' };
   if (task.merging && task.executorAgentId === agentId) return { finish: "merge your branch into the turn's branch and report it with submit", stuck: 'report what blocks the merge with blocked' };
   if (task.executorAgentId === agentId) return { finish: 'submit it with what you did and the evidence (the commands you ran and what they showed)', stuck: 'say so with blocked' };
   /* Member work that waits with whoever gave it out, while nobody who does or checks it is on. */
@@ -48,7 +49,7 @@ const READ_PROOF = 'For a pinned review, use review.commit and review.runs: veri
 function assignedPrompt(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
   const ref = `#${task.number} "${task.title}"`;
   const { finish, stuck } = nextStep(task, w.agentId);
-  if (task.executorAgentId) return `${ref} is yours to do. ${READ_TASK} Do the work, then ${finish}. If you cannot go on, ${stuck}; if only a person can answer, use ask_person.`;
+  if (task.executorAgentId) return `${ref} is yours to do. ${READ_TASK} Do the work, then ${finish}. If you cannot go on, ${stuck}; if you need an answer you cannot find yourself, use ask_person.`;
   if (agent.kind === 'orchestrator') return `${ref} is yours. ${READ_TASK} Lay the work out as tasks for the departments with add_tasks or plan_turn, and report it when every part is done.`;
   return `${ref} is your department's. ${READ_TASK} Give it out in 2-4 large self-contained pieces to different members at once with create_task, each under it (parent ${task.number}) with its executor and no gates for code: the review of the turn checks all of it once the last piece is in. Report it when they are done.`;
 }
@@ -142,8 +143,11 @@ function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
       /* Its text is Hornhoof's account of the run, or who stopped it. */
       return `The work you ran on ${ref} ended${said}Go on with the task, then ${finish}. If you cannot go on, ${stuck}.`;
     case 'explain':
-      /* Hornhoof writes this turn itself, from the request. */
-      return `${ref} waits for people. See /api/requests and put what is asked into plain words with explain_request.`;
+    case 'question':
+      /* Hornhoof writes this turn itself, from the question. */
+      return `${ref} has a question for you. Read it with internal_questions.`;
+    case 'resolved':
+      return `Your question on ${ref} was settled${said}Go on with it.`;
   }
 }
 
@@ -217,8 +221,8 @@ export async function wakeAll(ctx: Ctx, wakes: Wake[]): Promise<void> {
   const seen = new Set<string>();
   for (const w of wakes) {
     try {
-      if (w.why === 'explain') {
-        await explainRequest(ctx, w);
+      if (QUESTION_WAKES.includes(w.why)) {
+        await questionTurn(ctx, w);
         await wakeQueued(ctx.db, w);
         continue;
       }
@@ -254,35 +258,35 @@ export async function wakeLeftBehind(ctx: Ctx, now = new Date()): Promise<number
   }
 }
 
-/* An employee waits for people: the orchestrator finds out what it needs and puts it into plain words for them, which
-   people read above their answer. Typed into the orchestrator's turn when it works, else its own turn, one per request. */
-async function explainRequest(ctx: Ctx, w: Wake): Promise<void> {
+/* Whoever has a question hears it, in its turn when it works, else in a turn of its own, one per question. As it is now: one
+   settled or handed on meanwhile says nothing. */
+async function questionTurn(ctx: Ctx, w: Wake): Promise<void> {
   const [found] = await ctx.db
-    .select({ request: requests, asker: agents.name, task: tasks })
+    .select({ request: requests, asker: agents.name, task: tasks, words: requestInternal.technicalText })
     .from(requests)
     .innerJoin(agents, eq(agents.id, requests.agentId))
     .innerJoin(tasks, eq(tasks.id, requests.taskId))
+    .leftJoin(requestInternal, eq(requestInternal.requestId, requests.id))
     .where(eq(requests.id, w.text ?? ''));
-  if (!found || found.request.status !== 'open' || !(await liveSubscription(ctx, w.agentId))) return;
+  if (!found || found.request.status !== 'open' || found.request.audience !== 'internal' || found.request.triageAgentId !== w.agentId || !(await liveSubscription(ctx, w.agentId))) return;
   const { request, asker, task } = found;
   const ref = `#${task.number} "${task.title}"`;
+  const words = found.words ?? request.text;
   const what =
     request.kind === 'stuck'
-      ? `Hornhoof stopped waking ${asker} on ${ref} and waits for people to say how it goes on (request ${request.id}). Hornhoof noted: ${request.text}`
-      : `${asker} asks people on ${ref} (request ${request.id}, a ${request.kind}):\n\n${quote(request.text)}`;
+      ? `Hornhoof stopped waking ${asker} on ${ref} and it is yours to say how it goes on. Hornhoof noted: ${words}`
+      : `${asker} asks on ${ref} (a ${request.kind}):\n\n${quote(words)}`;
   const text =
-    `${what}\n\nBefore a person answers, find out what it needs: read the task with "task", and ask ${asker} with "message_employee" when its words are not enough. ` +
-    `Then call "explain_request" with request ${request.id} and a few lines for the person, in the CEO's language and plain words without IT terms: ` +
-    'which task and what for, what is needed from them and why, and the ways to go with what each leads to. Do not answer it yourself unless the CEO told you how.';
-  const cause = request.kind === 'stuck' ? w.cause : { actor: { agentId: request.agentId }, action: 'asked people', task: { id: task.id, number: task.number } };
+    `${what}\n\nThis is question ${request.id}, revision ${request.questionRevision}, route ${request.routeRevision}. It stays inside the company unless you say otherwise. ` +
+    'Read the task with "task", and ask the employee with "message_employee" when its words are not enough. Settle it with "resolve_question", or hand technical work on with "route_question". ' +
+    'Only a ready result or what only a person can do goes to a person, with "classify_human_intent": being blocked, a missing tool or an unclear brief are not reasons to.';
+  const cause = request.kind === 'stuck' ? w.cause : { actor: { agentId: request.agentId }, action: 'asked', task: { id: task.id, number: task.number } };
   const notice = await wakeNotice(ctx, task, { ...w, cause });
   const message = { personId: null, text, task: { id: task.id, number: task.number }, request: request.id, ...notice };
-  /* The request names the turn that explains it, so people see the orchestrator is on it. */
   const into = await deliverLive(ctx, w.agentId, text, { source: { data: message } }, (jobId, kept) =>
     appendEvent(ctx, { companyId: task.companyId, agentId: w.agentId, jobId, kind: 'message', data: message }, kept).then(() => {}),
   );
   if (!into) await insertTurn(ctx, { companyId: task.companyId, agentId: w.agentId, prompt: text, createdBy: null, message });
-  ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
   if (!into) await pump(ctx, w.agentId);
 }
 
@@ -336,9 +340,9 @@ export async function stopTurns(ctx: Ctx, taskIds: string[], keep?: string): Pro
 }
 
 /* Wakes that bring the agent new words on its task, which a turn on that task takes in while it runs. */
-const LIVE_WAKES: WakeWhy[] = ['comment', 'unblocked', 'answered', 'updated', 'tests', 'work'];
+const LIVE_WAKES: WakeWhy[] = ['comment', 'unblocked', 'answered', 'resolved', 'updated', 'tests', 'work'];
 /* Wakes that would set the holder to work on its task, held back while the task waits for the tasks it comes after. */
-const TO_WORK: WakeWhy[] = ['assigned', 'updated', 'comment', 'answered', 'unblocked', 'reminder', 'go_on', 'subtasks'];
+const TO_WORK: WakeWhy[] = ['assigned', 'updated', 'comment', 'answered', 'resolved', 'unblocked', 'reminder', 'go_on', 'subtasks'];
 
 /* What a wake says, kept as the message of its turn. */
 async function wakeMessage(ctx: Ctx, agent: typeof agents.$inferSelect, task: Task, w: Wake) {
@@ -468,9 +472,6 @@ const PROVIDER_NAMES: Record<string, string> = { claude: 'Claude', codex: 'Codex
 /* Who takes member work over while its executor's plan is at its limit: another employee of its role and department who
    is on, for the task's product or for none, on a plan of another provider that is not at its limit, and not one of the
    task's gates. Only an employee's work moves: a head and the orchestrator keep theirs and wait for the reset. */
-/* Its turn would go out now: signed in, on a machine that is on, and with plan left for tasks. */
-const goesOutNow = (state: Awaited<ReturnType<typeof agentState>>): boolean => state.ready && !state.limitUntil && !state.budgetUntil && !state.machineDrain;
-
 async function rolePeers(ctx: Ctx, agentId: string, anotherProvider: boolean) {
   const [me] = await ctx.db
     .select({ agent: agents, provider: subscriptions.provider })
@@ -478,27 +479,9 @@ async function rolePeers(ctx: Ctx, agentId: string, anotherProvider: boolean) {
     .innerJoin(subscriptions, eq(subscriptions.id, agents.subscriptionId))
     .where(and(eq(agents.id, agentId), isNull(agents.teamId)));
   if (!me || me.agent.kind !== 'worker' || !me.agent.roleKey || !me.agent.departmentId) return null;
-  const peers = await ctx.db
-    .select({ id: agents.id, name: agents.name, productId: agents.productId, provider: subscriptions.provider })
-    .from(agents)
-    .innerJoin(subscriptions, and(eq(subscriptions.id, agents.subscriptionId), isNull(subscriptions.removedAt)))
-    .where(
-      and(
-        eq(agents.departmentId, me.agent.departmentId),
-        eq(agents.roleKey, me.agent.roleKey),
-        eq(agents.kind, 'worker'),
-        isNull(agents.removedAt),
-        isNull(agents.switchedOffAt),
-        isNull(agents.teamId),
-        ne(agents.id, agentId),
-        anotherProvider ? ne(subscriptions.provider, me.provider) : undefined,
-      ),
-    )
-    .orderBy(asc(agents.createdAt));
-  return { me, peers };
+  const member = { id: agentId, departmentId: me.agent.departmentId, roleKey: me.agent.roleKey };
+  return { me, peers: await peersOfRole(ctx, member, anotherProvider ? me.provider : undefined) };
 }
-
-const mayTake = (task: Task, peer: { id: string; productId: string | null }): boolean => (!peer.productId || peer.productId === task.productId) && !task.gates.includes(peer.id);
 
 async function standIn(ctx: Ctx, agentId: string, task: Task): Promise<{ id: string; name: string; provider: string } | null> {
   if (task.executorAgentId !== agentId || task.assigneeAgentId !== agentId || task.stage !== 0 || !['open', 'working'].includes(task.status)) return null;
@@ -530,8 +513,7 @@ async function freeForQueued(ctx: Ctx, agentId: string, task: Task): Promise<{ i
   if (!found) return null;
   for (const p of found.peers) {
     if (!mayTake(task, p)) continue;
-    const state = await agentState(ctx, p.id);
-    if (goesOutNow(state) && !state.busy && state.queued === 0) return { id: p.id, name: p.name };
+    if (await isFree(ctx, p.id)) return { id: p.id, name: p.name };
   }
   return null;
 }

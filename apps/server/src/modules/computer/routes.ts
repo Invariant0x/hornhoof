@@ -7,6 +7,7 @@ import { requirePerson, type Person } from '../../auth/session.js';
 import { ApiError } from '../../errors.js';
 import { enqueueTurn, NoSubscription, orchestratorOf } from '../conversation/queue.js';
 import { appendEvent } from '../events/store.js';
+import { computerAsked, declineComputerIntent, grantComputerIntent } from '../tasks/question-computer.js';
 import { canViewComputer, onMachine, serverMachine } from './access.js';
 
 /* The note that starts the orchestrator's turn once the CEO or the delegate opened access: the CEO's order, so it may use
@@ -37,7 +38,8 @@ export function computerRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   /* What the orchestrator asked goes only to people who see him. */
   async function seenAsk(me: Person) {
-    const shown = ctx.computer.view();
+    const asked = await computerAsked(ctx, me.companyId);
+    const shown = { ...ctx.computer.view(), asked: asked && { reason: asked.reason, at: asked.at, purpose: asked.purpose } };
     const orchestrator = await orchestratorOf(ctx, me.companyId);
     return seesAgentId(await viewerOf(ctx.db, me), orchestrator?.id) ? shown : { ...shown, asked: null };
   }
@@ -54,13 +56,14 @@ export function computerRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (!ctx.computer.available()) {
       throw new ApiError(409, 'conflict', "Hornhoof cannot reach this computer: its updater does not run. Run this server's install command again, it adds it.", 'updater_missing');
     }
-    const { until, asked } = ctx.computer.open();
+    const granted = await grantComputerIntent(ctx, me);
+    const until = granted?.until ?? ctx.computer.open().until;
     changed(me.companyId);
     const machine = await serverMachine(ctx, me.companyId);
     const orchestrator = await line(me.companyId, { state: 'opened', until, ...onMachine(machine) }, me.id);
     /* The note waits in his line while his machine is offline, and goes out when it is back. */
-    if (orchestrator && asked) {
-      const message = await notificationMessage(ctx, me.companyId, 'computer_access', openedNote(me, until, asked.reason, machine), { actor: { personId: me.id } });
+    if (orchestrator && granted) {
+      const message = await notificationMessage(ctx, me.companyId, 'computer_access', openedNote(me, until, granted.reason, machine), { actor: { personId: me.id } });
       await enqueueTurn(ctx, { companyId: me.companyId, agentId: orchestrator.id, prompt: message.text, createdBy: me.id, answersCeo: true, message }).catch(err => {
         if (!(err instanceof NoSubscription)) throw err;
       });
@@ -78,7 +81,7 @@ export function computerRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.post('/api/computer/decline', async req => {
     const me = await ceo(req);
-    if (ctx.computer.decline()) {
+    if (await declineComputerIntent(ctx, me)) {
       changed(me.companyId);
       await line(me.companyId, { state: 'declined', ...onMachine(await serverMachine(ctx, me.companyId)) }, me.id);
     }

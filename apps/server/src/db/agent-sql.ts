@@ -14,25 +14,30 @@ export type AgentSql = { run: (text: string, mode: SqlMode) => Promise<SqlAnswer
    machine commands. Plans' sealed sign-ins too: a row put there would reach a node as its plan's sign-in. Checks made by a
    model too: their held-out examples stay away from who tunes a prompt, and no row put there can turn a check on. The
    outbound gateway too: contacts and payloads are private, and a row put there would forge an approval, a receipt, a
-   consent or a day's count, even from a turn of the orchestrator answering the CEO. */
+   consent or a day's count, even from a turn of the orchestrator answering the CEO. Waits' owners, dates and policies
+   too: a row written by hand could move a promise or quiet an alarm, and they name private work. */
 const OUTBOUND = [
   'outbound_channels', 'outbound_policies', 'outbound_accounts', 'outbound_bindings', 'outbound_catalog_revisions', 'outbound_contacts', 'outbound_permissions', 'outbound_contact_events',
   'outbound_messages', 'outbound_message_revisions', 'outbound_approvals', 'outbound_review_receipts', 'outbound_daily_usage', 'outbound_attempts', 'outbound_events', 'outbound_sampling_counters',
   'support_tickets', 'support_classifications',
 ];
-export const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials', 'request_internal', 'model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations', 'model_check_certificates', ...OUTBOUND, 'external_operations', 'external_recovery_cases', 'external_recovery_members', 'external_recovery_attempts', 'external_recovery_notices'];
+const WORKSPACES = ['workspace_repositories', 'task_workspaces', 'author_workspace_slots', 'task_area_locks', 'task_workspace_operations', 'task_workspace_submissions', 'task_workspace_sessions', 'task_workspace_merge_receipts'];
+const STAGING = ['staging_plans', 'staging_batches', 'staging_trials', 'staging_operations'];
+export const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials', 'request_internal', 'computer_access_intents', 'model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations', 'model_check_certificates', 'task_waits', 'wait_policies', ...OUTBOUND, ...WORKSPACES, ...STAGING, 'external_operations', 'external_recovery_cases', 'external_recovery_members', 'external_recovery_attempts', 'external_recovery_notices'];
 /* Columns that hold a password, a token or a key: neither role reads or writes them. A machine's key goes with
    every join from it, so it is one too. The account a node is signed in to names a person's email. */
 export const SECRET: Record<string, string[]> = {
   people: ['password_hash'],
-  jobs: ['tool_token_hash'],
+  jobs: ['tool_token_hash', 'assignment_epoch', 'workspace_id', 'workspace_spec_version'],
+  tasks: ['assignment_epoch'],
   subscriptions: ['secret_enc'],
   nodes: ['key_hash', 'account'],
   machines: ['machine_key'],
-  departments: ['repo_token_enc'],
+  departments: ['repo_token_enc', 'repo_token_revision'],
   program_operator_cases: ['capability'],
   attachments: ['bytes'],
-  proposals: ['material_snapshot'],
+  requests: ['text', 'options', 'explained', 'answer', 'link', 'source_key', 'source_job_id', 'source_sequence', 'triage_agent_id', 'classification'],
+  proposals: ['material_snapshot', 'brief', 'items', 'source_key', 'source_job_id', 'source_sequence', 'triage_agent_id', 'classification'],
 };
 /* Who people are and what they reach, and the subscriptions, machines and nodes the company runs on: the orchestrator's
    role reads them, and they change only through the tools the CEO alone may ask for. The history of the nodes' connections,
@@ -103,7 +108,7 @@ export const grantsFor = (name: string) =>
   role(
     name,
     `${eachTable([...READ_ONLY, 'agents', 'jobs', 'departments', ...Object.keys(URGENCY), ...Object.keys(SECRET)], `GRANT SELECT, INSERT, UPDATE, DELETE ON %I TO "${name}"`)}
-${Object.entries(URGENCY).map(([table, but]) => `  EXECUTE format('GRANT SELECT, DELETE ON ${table} TO "${name}"; GRANT INSERT (%1$s), UPDATE (%1$s) ON ${table} TO "${name}"', ${columns(table, but)});`).join('\n')}
+${Object.entries(URGENCY).map(([table, but]) => `  EXECUTE format('GRANT SELECT (%1$s), DELETE ON ${table} TO "${name}"; GRANT INSERT (%2$s), UPDATE (%2$s) ON ${table} TO "${name}"', ${visible(table)}, ${columns(table, [...but, ...(SECRET[table] ?? [])])});`).join('\n')}
 ${READ_ONLY.map(table => `  EXECUTE format('GRANT SELECT (%s) ON ${table} TO "${name}"', ${visible(table)});`).join('\n')}
   EXECUTE format('GRANT SELECT (%1$s), INSERT (%2$s), UPDATE (%2$s), DELETE ON departments TO "${name}"', ${visible('departments')}, ${columns('departments', [...SECRET.departments!, ...DEPARTMENT_SETTINGS])});
   EXECUTE format('GRANT SELECT (%s), UPDATE (%s) ON agents TO "${name}"', ${visible('agents')}, ${columns('agents', AGENT_FIXED)});

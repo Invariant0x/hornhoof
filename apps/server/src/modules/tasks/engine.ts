@@ -5,8 +5,8 @@ import { accessOf, canReach, type Access, type Spot } from '../../auth/access.js
 import type { Db } from '../../db/client.js';
 import { agents, attachments, companies, departments, jobs, people, requests, subscriptions, taskEvents, tasks, turns, type DecisionTopic, type RequestOption, type TaskEventKind } from '../../db/schema.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
-import { urgencyOfNew } from './urgency.js';
-import { canDecide } from '../../auth/decisions.js';
+import { refuseNotUrgent, urgencyOfNew } from './urgency.js';
+import { canDecide, notAllowed } from '../../auth/decisions.js';
 import type { DecisionSubject } from '../../auth/decision-owner.js';
 import { checkDelegation, contextMissing, requireDecider, type Delegation } from '../conversation/decision-context.js';
 import { compareForTask, comparisonForReview, comparisonProof, type CompareSnapshot } from '../testruns/compare.js';
@@ -17,19 +17,24 @@ import { returnAlongLine } from '../org/map-state.js';
 import { handOff } from './pulses.js';
 import { recordCause, type WakeCause } from './notification-cause.js';
 import { preserveNote } from './long-text.js';
-import { authorVendor, captureReview, reviewContext, reviewVendor, turnReviewContext } from './review-context.js';
+import { authorVendor, captureReview, reviewContext, reviewVendor, turnReviewContext, type Review } from './review-context.js';
 import { degradedReviewNotes, reviewPanel, turnReviewPlan, type Plan } from './review-plan.js';
 import { mechanicalVerdict } from './review-findings.js';
 import { verdictReview, type ReviewVerdict } from './review-verdict.js';
 import { pendingFixReviews, prepareFixReviews } from './review-fixes.js';
-import { checkIndependent, currentIndependent, type IndependentPartInput } from './independent.js';
+import { checkIndependent, currentIndependent, type IndependentDeclaration, type IndependentPartInput } from './independent.js';
 import { refuseUnclassifiedMaterials } from './request-materials.js';
+import type { WaitPlan } from '@hornhoof/protocol/waits';
+import { alertGoal, goalColumns, type NewGoal } from './wait-goals.js';
+import { classificationRequired, internalRoute, staleRoute } from './question-authority.js';
+import { ASKED_INSIDE, raiseQuestion, refuseWhatChanged, staleClassification } from './question-lifecycle.js';
+import { bindAfter, bindRequest, bindTurnReview, endAfter, endQuestionWait, endRequest, keepWaitsWithMove, rebindAfter, type AfterPlans } from './wait-producers.js';
 
 export type Task = typeof tasks.$inferSelect;
 export type Request = typeof requests.$inferSelect;
 /* Who moves a task: a person from the web app, or an agent from its tools. */
 export type Actor = { personId: string; agentId?: undefined } | { agentId: string; personId?: undefined };
-export type WakeWhy = 'assigned' | 'review' | 'changes' | 'stuck_at_gate' | 'done' | 'reported' | 'blocked' | 'cancelled' | 'answered' | 'comment' | 'updated' | 'reminder' | 'go_on' | 'turn' | 'switched' | 'explain' | 'subtasks' | 'after_cancelled' | 'merge' | 'unblocked' | 'tests' | 'work' | 'turn_review' | 'reviewed' | 'review_passed' | 'wait_ended';
+export type WakeWhy = 'assigned' | 'review' | 'changes' | 'stuck_at_gate' | 'done' | 'reported' | 'blocked' | 'cancelled' | 'answered' | 'comment' | 'updated' | 'reminder' | 'go_on' | 'turn' | 'switched' | 'explain' | 'question' | 'resolved' | 'subtasks' | 'after_cancelled' | 'merge' | 'unblocked' | 'tests' | 'work' | 'turn_review' | 'reviewed' | 'review_passed' | 'wait_ended';
 /* An agent that has to act on a task now; Hornhoof queues a turn for it. note: what else it should know, after the rest. */
 export type Wake = { agentId: string; taskId: string; why: WakeWhy; text?: string; note?: string; again?: boolean; mechanical?: boolean; version?: number; cause?: WakeCause };
 export type Moved = { task: Task; wakes: Wake[] };
@@ -210,12 +215,13 @@ async function openTurnReview(tx: Tx, templates: Ctx['templates'], parent: Task,
       updatedAt: new Date(),
     })
     .returning();
-  await note(tx, row!, {
+  const event = await note(tx, row!, {
     kind: 'created',
     actor: { agentId: head },
     text: row!.brief,
     data: { assignee, gates: leads, after: [], panel, unable: unable.map(a => a.id), covers: covered.map(t => t.id), turnReview: true, gateTriggers, comparison: comparisonProof(result), review, reviewPlan },
   });
+  await bindTurnReview(tx, row!, { kind: 'created', actor: { agentId: head }, eventId: event.id });
   return { row: row!, wakes: turnReviewWakes(row!, head, branch, reviewPlan) };
 }
 
@@ -250,6 +256,11 @@ export async function openAfter(db: Db | Tx, task: Pick<Task, 'after'>): Promise
 async function refuseWaiting(db: Db | Tx, task: Task): Promise<void> {
   const open = await openAfter(db, task);
   if (open.length) throw refuse(409, 'task_invalid', `#${task.number} waits for ${listed(open)} first. You are woken once it can start.`);
+}
+
+/* A promise stands for one of the tasks it comes after, and for nothing else. */
+function checkAfterPlans(after: string[], plans: AfterPlans | undefined): void {
+  if (Object.keys(plans ?? {}).some(id => !after.includes(id))) throw refuse(400, 'task_invalid', 'A plan names a task this one does not come after.');
 }
 
 /* What a task comes after: tasks of the company in its own turn, each once and none cancelled. hold: they stay as read
@@ -316,7 +327,7 @@ const comingAfter = (of: Task[], waits: SQL) => and(eq(tasks.companyId, of[0]!.c
 /* A task is done: each task that came after it and waits for nothing else any more goes on with whoever holds it, and
    its log says why. rows: the tasks that started. Two tasks it waits for done at once would each see the other still
    open, so the waiting tasks are taken first and the second to be done sees the first. */
-async function startAfter(tx: Tx, done: Task): Promise<{ wakes: Wake[]; rows: Task[] }> {
+async function startAfter(tx: Tx, done: Task, actor: Actor): Promise<{ wakes: Wake[]; rows: Task[] }> {
   const waiting = await tx
     .select()
     .from(tasks)
@@ -326,6 +337,7 @@ async function startAfter(tx: Tx, done: Task): Promise<{ wakes: Wake[]; rows: Ta
   const wakes: Wake[] = [];
   const rows: Task[] = [];
   for (const t of waiting) {
+    await endAfter(tx, t, done, actor);
     if ((await openAfter(tx, t)).length) continue;
     const [row] = await tx.update(tasks).set({ version: sql`${tasks.version} + 1`, updatedAt: new Date() }).where(eq(tasks.id, t.id)).returning();
     const before = await tx.select({ number: tasks.number }).from(tasks).where(inArray(tasks.id, t.after)).orderBy(asc(tasks.number));
@@ -356,6 +368,11 @@ export async function note(tx: Tx | Db, task: Pick<Task, 'id' | 'companyId'>, n:
 }
 
 /* A move by which an agent gives its work back lights its line to the one above it on the map: the task, when it did. */
+/* A line of Hornhoof's own, which nobody signed. */
+export async function ownNote(tx: Tx, task: Pick<Task, 'id' | 'companyId'>, n: { kind: TaskEventKind; text: string; data: Record<string, unknown> }): Promise<void> {
+  await tx.insert(taskEvents).values({ companyId: task.companyId, taskId: task.id, ...n });
+}
+
 async function givesBack(tx: Tx, row: Task, n: Note, event: { id: number; createdAt: Date }): Promise<Task | null> {
   if (!n.returned || !n.actor.agentId) return null;
   return (await returnAlongLine(tx, { agentId: n.actor.agentId, sourceKey: `task:${event.id}`, sourceTaskId: row.id, returnedAt: event.createdAt })) ? row : null;
@@ -401,10 +418,11 @@ export async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, a
     const event = await note(tx, row, n, ctx.config);
     lit = await givesBack(tx, row, n, event);
     await also?.(tx, row);
+    await keepWaitsWithMove(tx, task, row, { kind: n.kind, actor: n.actor, eventId: event.id });
     if (CLOSED.includes(row.status) && row.parentId) wakes.push(...(await workUnderDone(tx, ctx.templates, row, n.actor.agentId, opened, comparison)));
     /* What waited for it starts with the same move, so its turn is kept with it. */
     if (row.status === 'done') {
-      const after = await startAfter(tx, row);
+      const after = await startAfter(tx, row, n.actor);
       wakes.push(...after.wakes);
       started = after.rows;
     }
@@ -495,6 +513,8 @@ export type NewTask = {
   gates?: string[];
   /* Tasks of the same turn that must be done first. */
   after?: string[];
+  /* What the giver promises for each of them, by id, in place of the department's dates. */
+  afterPlans?: AfterPlans;
   independentPart?: IndependentPartInput;
   independentNone?: string;
   /* Code given out without gates of its own: the review of its department's turn checks it. */
@@ -503,6 +523,7 @@ export type NewTask = {
   riskClass?: Task['riskClass'];
   /* Of a task with nothing above it; one under a task is what that task is. */
   urgent?: boolean;
+  small?: boolean;
 };
 
 /* A live employee or orchestrator of the company. */
@@ -553,6 +574,7 @@ async function insertIndependent(tx: Tx, parent: Task, part: IndependentPartInpu
     after: [],
     workKind: parent.workKind,
     riskClass: parent.riskClass,
+    urgent: parent.urgent,
     createdByPersonId: actor.personId ?? null,
     createdByAgentId: actor.agentId ?? null,
     updatedAt: new Date(),
@@ -563,16 +585,25 @@ async function insertIndependent(tx: Tx, parent: Task, part: IndependentPartInpu
   return { child: child!, wake };
 }
 
-export async function createTask(ctx: Live, actor: Actor, input: NewTask): Promise<Moved> {
+/* Who a new task gives work to, as urgent as it comes out: a word nobody may say is refused when the task is made. */
+function checkNewHolders(ctx: Ctx, actor: Actor, companyId: string, parent: Task | null, input: NewTask, gates: string[], declaration: IndependentDeclaration | null): Promise<void> {
+  const urgent = parent ? parent.urgent : input.urgent === true;
+  const part = declaration?.kind === 'part' ? [declaration.part.executor] : [];
+  return refuseNotUrgent(ctx, actor, companyId, { urgent, productId: input.productId ?? null, gates }, [input.assigneeAgentId, ...part]);
+}
+
+export async function createTask(ctx: Ctx, actor: Actor, input: NewTask): Promise<Moved> {
   const assignee = await workingAgent(ctx.db, null, input.assigneeAgentId);
   const gates = input.executor ? (input.gates ?? []) : [];
   if (!input.executor && input.gates?.length) throw refuse(400, 'task_invalid', 'Only a task with an executor has gates.');
   if (input.executor) await checkGates(ctx.db, assignee.companyId, assignee.id, gates, ctx.templates);
   if (!input.title.trim()) throw refuse(400, 'task_invalid', 'A task needs a title.');
+  checkAfterPlans(input.after ?? [], input.afterPlans);
   const declaration = checkIndependent(input.after ?? [], input.independentPart, input.independentNone, null);
   if (declaration?.kind === 'part') await checkIndependentExecutor(ctx.db, input.departmentId, declaration.part);
   const parent = input.parentId ? await loadTask(ctx.db, input.parentId) : null;
   if (parent) stillOpen(parent);
+  await checkNewHolders(ctx, actor, assignee.companyId, parent, input, gates, declaration);
   let independent: Task | null = null;
   let waits = false;
   const wakes: Wake[] = [];
@@ -620,6 +651,7 @@ export async function createTask(ctx: Live, actor: Actor, input: NewTask): Promi
         workKind: input.workKind,
         riskClass: input.riskClass,
         urgent,
+        small: input.small === true,
         createdByPersonId: actor.personId ?? null,
         createdByAgentId: actor.agentId ?? null,
         updatedAt: new Date(),
@@ -632,6 +664,7 @@ export async function createTask(ctx: Live, actor: Actor, input: NewTask): Promi
       ...(declaration?.kind === 'part' ? { independentPart: declaration.part } : declaration?.kind === 'none' ? { independentNone: declaration.reason } : {}),
       ...(input.inTurnReview ? { inTurnReview: true } : {}),
     } });
+    await bindAfter(tx, row!, after, input.afterPlans, actor);
     if (declaration?.kind === 'part') {
       const made = await insertIndependent(tx, row!, declaration.part, actor, input.inTurnReview);
       independent = made.child;
@@ -680,8 +713,7 @@ async function submissionGate(ctx: Live, task: Task, review: import('./review-co
   return { gate: await atGate(ctx.db, task, back?.stage ?? 1, back?.findings), data: { fixReviews: [] } };
 }
 
-/* The executor hands its work to the first gate, or finishes a task without gates. */
-export async function submit(ctx: Live, agentId: string, taskId: string, r: { summary: string; evidence: string; review?: { baseCommit: string } }): Promise<Moved> {
+export async function submissionTask(ctx: Live, agentId: string, taskId: string): Promise<Task> {
   const task = await loadTask(ctx.db, taskId);
   stillOpen(task);
   if (!task.executorAgentId) throw refuse(400, 'task_invalid', `#${task.number} has no executor; its owner closes it with report.`);
@@ -689,8 +721,17 @@ export async function submit(ctx: Live, agentId: string, taskId: string, r: { su
   if (task.status === 'waiting' && (await waitsForPerson(ctx.db, task.id))) throw refuse(409, 'task_invalid', `#${task.number} waits for a person's answer first.`);
   await refuseWaiting(ctx.db, task);
   await refuseOpenUnder(ctx.db, task);
-  const review = task.merging ? await reviewContext(ctx.db, task.id) : await captureReview(ctx, task, r.review);
-  const n: Note = { kind: 'submitted', actor: { agentId }, text: r.summary, data: { evidence: r.evidence, ...(review ? { review } : {}), ...(task.merging ? { merged: true } : {}) }, returned: true };
+  return task;
+}
+
+export type AuthorCheckOutcome = { version: 1; runId: string; attempt: number; status: 'passed' | 'partial' | 'failed'; reason: string | null };
+type CheckedSubmission = { review: Review; outcome: AuthorCheckOutcome };
+
+/* The executor hands its work to the first gate, or finishes a task without gates. */
+export async function submit(ctx: Live, agentId: string, taskId: string, r: { summary: string; evidence: string; review?: { baseCommit: string } }, checked?: CheckedSubmission): Promise<Moved> {
+  const task = await submissionTask(ctx, agentId, taskId);
+  const review = checked?.review ?? (task.merging ? await reviewContext(ctx.db, task.id) : await captureReview(ctx, task, r.review));
+  const n: Note = { kind: 'submitted', actor: { agentId }, text: r.summary, data: { evidence: r.evidence, ...(review ? { review } : {}), ...(checked ? { authorCheckOutcome: checked.outcome } : {}), ...(task.merging ? { merged: true } : {}) }, returned: true };
   const unstuck = stuckGoes(ctx, task);
   /* Its gates passed it already: handing the merge in finishes it. Work sent back goes straight to the gate that sent it. */
   if (task.gates.length && !task.merging) {
@@ -706,6 +747,16 @@ export async function submit(ctx: Live, agentId: string, taskId: string, r: { su
   const row = await move(ctx, task, past.set, n, unstuck.also, past.wakes);
   unstuck.tell();
   return { task: row, wakes: past.wakes };
+}
+
+export async function failAuthorCheck(ctx: Live, agentId: string, taskId: string, input: { outcome: AuthorCheckOutcome; text: string }): Promise<Moved> {
+  const task = await submissionTask(ctx, agentId, taskId);
+  const third = input.outcome.attempt >= 3;
+  const wakes = third ? giver(task, 'blocked', agentId, input.text) : [{ agentId, taskId: task.id, why: 'changes' as const, text: input.text }];
+  const row = await move(ctx, task, { status: third ? 'blocked' : 'working', silent: 0 }, {
+    kind: third ? 'blocked' : 'comment', actor: { agentId }, text: input.text, data: { authorCheckOutcome: input.outcome }, ...(third ? { returned: true } : {}),
+  }, undefined, wakes);
+  return { task: row, wakes };
 }
 
 /* The panels of the other tasks at a gate now that name any of these reviewers. A task at a gate is open, so it is in the
@@ -998,13 +1049,12 @@ export async function report(ctx: Live, agentId: string, taskId: string, r: { do
     unstuck.tell();
     return { task: row, wakes };
   }
-  /* A person gave it, so a person has to unblock it. */
+  /* A person gave it, so its question of how to go on has nobody who gave it out to go to: it goes where every question goes. */
   let wakes: Wake[] = [];
   const row = await move(ctx, task, { status: 'waiting' }, n, async tx => {
     await letStuckGo(tx, task.id);
-    const [note] = await tx.insert(requests).values({ companyId: task.companyId, taskId, agentId, kind: 'stuck', text: r.summary, decisionTopic: 'task' }).returning();
-    wakes = await explaining(tx, task, agentId, note!.id);
-    await keepWakes(tx, task.companyId, wakes);
+    const raised = await raiseQuestion(tx, task, { agentId, question: { kind: 'stuck', text: r.summary, decisionTopic: 'task' }, trigger: 'explicit' });
+    wakes = raised?.wakes ?? [];
   });
   ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
   return { task: row, wakes };
@@ -1057,7 +1107,8 @@ export async function cancel(ctx: Live, actor: Actor, taskId: string, why: strin
         .where(and(inArray(tasks.parentId, level), notInArray(tasks.status, [...CLOSED])))
         .returning();
       for (const t of below) {
-        await note(tx, t, { kind: 'cancelled', actor, text: `#${task.number} was cancelled.` });
+        const event = await note(tx, t, { kind: 'cancelled', actor, text: `#${task.number} was cancelled.` });
+        await keepWaitsWithMove(tx, t, t, { kind: 'cancelled', actor, eventId: event.id });
         /* Work cancelled with the task above it needs none of the turns kept for it. */
         await dropEarlierWakes(tx, t.id);
       }
@@ -1083,7 +1134,7 @@ export async function dropGate(ctx: Live, actor: Actor, task: Task, agentId: str
   return move(ctx, task, { gates }, { kind: 'updated', actor, data: { fields: ['gates'] } });
 }
 
-export type TaskChange = { title?: string; brief?: string; body?: string; executor?: string; gates?: string[]; after?: string[]; independentPart?: IndependentPartInput; independentNone?: string; workKind?: NonNullable<Task['workKind']>; riskClass?: NonNullable<Task['riskClass']> };
+export type TaskChange = { title?: string; brief?: string; body?: string; executor?: string; gates?: string[]; after?: string[]; afterPlans?: AfterPlans; independentPart?: IndependentPartInput; independentNone?: string; workKind?: NonNullable<Task['workKind']>; riskClass?: NonNullable<Task['riskClass']>; small?: boolean };
 
 /* Runs fn on the task, and again on a fresh read of it when someone moved it meanwhile; null when it kept moving. */
 async function onFresh<T>(ctx: Live, task: Task, fn: (task: Task) => Promise<T>): Promise<T | null> {
@@ -1257,7 +1308,7 @@ async function regate(ctx: Live, agentId: string, task: Task, c: TaskChange): Pr
 function rewrite(task: Task, c: TaskChange): { set: Partial<Task>; fields: string[] } {
   const set: Partial<Task> = {};
   const fields: string[] = [];
-  for (const key of ['title', 'brief', 'body', 'workKind', 'riskClass'] as const) {
+  for (const key of ['title', 'brief', 'body', 'workKind', 'riskClass', 'small'] as const) {
     if (c[key] !== undefined && c[key] !== task[key]) {
       Object.assign(set, { [key]: c[key] });
       fields.push(key);
@@ -1267,6 +1318,7 @@ function rewrite(task: Task, c: TaskChange): { set: Partial<Task>; fields: strin
 }
 
 const LABELS: ReadonlySet<string> = new Set(['workKind', 'riskClass']);
+const onlyLabels = (fields: string[], createsIndependent: boolean) => fields.every(field => LABELS.has(field)) && !createsIndependent;
 
 /* What kind of work it is changes nothing of the work: whoever holds it is not woken, its wait stays and wakes on their way
    still come. Nothing else changes with them, so no move that read the task loses its place. */
@@ -1281,8 +1333,14 @@ async function relabel(ctx: Live, agentId: string, task: Task, set: Partial<Task
   return { task: row, wakes: [] };
 }
 
+/* Who takes work from a change of a task for the first time: what someone holds already stays theirs. */
+const newHolders = (task: Task, executor: string | null, declaration: IndependentDeclaration | null, existing: IndependentDeclaration | null): string[] => [
+  ...(executor && executor !== task.executorAgentId ? [executor] : []),
+  ...(declaration?.kind === 'part' && existing?.kind !== 'part' ? [declaration.part.executor] : []),
+];
+
 /* The owner rewrites the task so it reads as the current truth, or hands it to another executor or other gates. */
-export async function updateTask(ctx: Live, agentId: string, taskId: string, c: TaskChange): Promise<Moved> {
+export async function updateTask(ctx: Ctx, agentId: string, taskId: string, c: TaskChange): Promise<Moved> {
   const task = await loadTask(ctx.db, taskId);
   stillOpen(task);
   if ((c.executor !== undefined || c.gates !== undefined) && !task.executorAgentId) throw refuse(400, 'task_invalid', `#${task.number} has no executor or gates.`);
@@ -1307,11 +1365,14 @@ export async function updateTask(ctx: Live, agentId: string, taskId: string, c: 
     fields.push('gates');
   }
   const waited = (await openAfter(ctx.db, task)).length > 0;
+  checkAfterPlans(c.after ?? task.after, c.afterPlans);
   const declarationInput = c.after !== undefined || c.independentPart !== undefined || c.independentNone !== undefined;
   const existing = declarationInput ? await currentIndependent(ctx.db, task.id) : null;
   const declaration = declarationInput ? checkIndependent(c.after ?? task.after, c.independentPart, c.independentNone, existing) : null;
   if (declaration?.kind === 'part') await checkIndependentExecutor(ctx.db, task.departmentId, declaration.part);
-  const reviewIndependent = declaration?.kind === 'part' && existing?.kind !== 'part' && (await createdData(ctx.db, task.id)).inTurnReview === true;
+  await refuseNotUrgent(ctx, { agentId }, task.companyId, task, newHolders(task, executor, declaration, existing));
+  const createsIndependent = declaration?.kind === 'part' && existing?.kind !== 'part';
+  const reviewIndependent = createsIndependent && (await createdData(ctx.db, task.id)).inTurnReview === true;
   let independent: Task | null = null;
   if (c.after !== undefined && JSON.stringify(c.after) !== JSON.stringify(task.after)) {
     await checkAfter(ctx.db, task.companyId, task.turnId, c.after);
@@ -1320,7 +1381,7 @@ export async function updateTask(ctx: Live, agentId: string, taskId: string, c: 
     set.after = c.after;
     fields.push('after');
   }
-  if (fields.every(f => LABELS.has(f))) return relabel(ctx, agentId, task, set, fields);
+  if (onlyLabels(fields, createsIndependent)) return relabel(ctx, agentId, task, set, fields);
   /* A rewrite answers a blocked executor. A task nobody holds stays blocked until someone can take it. */
   if (task.status === 'blocked' && (set.assigneeAgentId ?? task.assigneeAgentId)) set.status = 'open';
   /* Another one takes it up, so Hornhoof's note that it stood still is over; a person's word asked for still waits. */
@@ -1344,7 +1405,8 @@ export async function updateTask(ctx: Live, agentId: string, taskId: string, c: 
   const wakes: Wake[] = [];
   const also = async (tx: Tx, row: Task) => {
     if (handedOn) await handOver(tx);
-    if (declaration?.kind === 'part' && existing?.kind !== 'part') {
+    if (set.after) await rebindAfter(tx, row, await checkAfter(tx, task.companyId, task.turnId, set.after), c.afterPlans, { agentId });
+    if (createsIndependent) {
       const made = await insertIndependent(tx, row, declaration.part, { agentId }, reviewIndependent);
       independent = made.child;
       wakes.push(made.wake);
@@ -1424,6 +1486,16 @@ export type Ask = {
   options?: RequestOption[];
   link?: string | null;
   topic?: DecisionTopic;
+  /* Who answers by when, if someone promised dates. */
+  plan?: WaitPlan;
+  /* What must reach a person even where the department set no dates for it. */
+  evenUnplanned?: boolean;
+  /* A goal in danger, as someone who may say so said it. */
+  goal?: NewGoal;
+  /* The server's own: what must be kept in the step that makes the request. No tool passes it. */
+  onCreated?: (tx: Tx, request: Request) => Promise<void>;
+  /* The server's own: the turn that asks. */
+  sourceJobId?: string;
 };
 
 /* An approval of a commit lets it into the release, whatever the agent says it is about. */
@@ -1455,24 +1527,20 @@ export async function ask(ctx: Live, agentId: string, taskId: string, q: Ask): P
   await checkPictures(ctx.db, task.companyId, agentId, pictures);
   let request: Request | undefined;
   let wakes: Wake[] = [];
-  const row = await move(ctx, task, { status: 'waiting', silent: 0 }, { kind: 'asked', actor: { agentId }, text: q.text.trim(), data: { kind: q.kind, commit: q.commit ?? null } }, async tx => {
-    [request] = await tx
-      .insert(requests)
-      .values({
-        companyId: task.companyId,
-        taskId,
-        agentId,
-        kind: q.kind,
-        text: q.text.trim(),
-        commit: q.commit ?? null,
-        options,
-        link: q.link ?? null,
-        decisionTopic: topicOf(q),
-        ...approvalColumns(q.approval),
-      })
-      .returning();
-    wakes = await explaining(tx, task, agentId, request!.id);
-    await keepWakes(tx, task.companyId, wakes);
+  const question = { kind: q.kind, text: q.text.trim(), commit: q.commit ?? null, options, link: q.link ?? null, decisionTopic: topicOf(q), ...approvalColumns(q.approval) };
+  /* A goal in danger is said by who may say it, and stands for itself; every other question starts inside the company. */
+  const logged = q.goal ? question.text : ASKED_INSIDE;
+  const row = await move(ctx, task, { status: 'waiting', silent: 0 }, { kind: 'asked', actor: { agentId }, text: logged, data: { kind: q.kind, commit: q.commit ?? null } }, async tx => {
+    if (q.goal) {
+      [request] = await tx.insert(requests).values({ ...question, companyId: task.companyId, taskId, agentId, audience: 'human', sourceJobId: q.sourceJobId ?? null, ...goalColumns(q.goal) }).returning();
+      const wait = await bindRequest(tx, task, request!, { agentId }, { plan: q.plan, strict: !q.evenUnplanned });
+      await alertGoal(tx, task, request!, wait);
+    } else {
+      const raised = await raiseQuestion(tx, task, { agentId, question, trigger: 'explicit', sourceJobId: q.sourceJobId, plan: q.plan });
+      request = raised!.request;
+      wakes = raised!.wakes;
+    }
+    await q.onCreated?.(tx, request!);
     if (!pictures.length) return;
     const shown = await tx
       .update(attachments)
@@ -1483,15 +1551,6 @@ export async function ask(ctx: Live, agentId: string, taskId: string, q: Ask): P
   });
   ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
   return { task: row, request: request!, wakes };
-}
-
-/* What an employee asks people reaches the orchestrator first, to put into plain words for them; not what it asks itself. */
-async function explaining(db: Db | Tx, task: Task, agentId: string, requestId: string): Promise<Wake[]> {
-  const [orchestrator] = await db
-    .select({ id: agents.id })
-    .from(agents)
-    .where(and(eq(agents.companyId, task.companyId), eq(agents.kind, 'orchestrator'), isNull(agents.removedAt)));
-  return orchestrator && orchestrator.id !== agentId ? [{ agentId: orchestrator.id, taskId: task.id, why: 'explain', text: requestId }] : [];
 }
 
 /* The agent holding the task ended a turn without moving it: a reminder, and from SILENT_TURNS on a person is asked. */
@@ -1538,20 +1597,26 @@ export async function brokeDown(ctx: Live, agentId: string, task: Task, text: st
   return askAboutStill(ctx, agentId, task, task.silent, text);
 }
 
-/* Hornhoof stops waking the agent on the task and asks a person how it should go on. */
+/* Hornhoof stops waking the agent on the task and whoever has its questions hears how it stands. The episode is the piece of
+   work since the task last moved, so telling it twice adds nothing. With nobody to tell, the question is kept for when someone
+   is, and the task stays as it is: there is nobody it could wait for. */
 async function askAboutStill(ctx: Live, agentId: string, task: Task, silent: number, text: string): Promise<Moved> {
+  const last = await lastMove(ctx.db, task.id);
+  const sourceKey = `stuck:${task.id}:${last?.id ?? 0}`;
+  const place = { companyId: task.companyId, departmentId: task.departmentId };
+  const routed = (await internalRoute(ctx.db, place, agentId)) !== null;
   let wakes: Wake[] = [];
-  const row = await move(ctx, task, { silent, status: 'waiting' }, { kind: 'stuck', actor: { agentId }, text }, async tx => {
-    const [note] = await tx.insert(requests).values({ companyId: task.companyId, taskId: task.id, agentId, kind: 'stuck', text, decisionTopic: 'task' }).returning();
-    wakes = await explaining(tx, task, agentId, note!.id);
-    await keepWakes(tx, task.companyId, wakes);
+  const set: Partial<Task> = routed ? { silent, status: 'waiting' } : { silent };
+  const row = await move(ctx, task, set, { kind: 'stuck', actor: { agentId }, text: ASKED_INSIDE }, async tx => {
+    const raised = await raiseQuestion(tx, task, { agentId, question: { kind: 'stuck', text, decisionTopic: 'task' }, trigger: 'silent', sourceKey });
+    wakes = raised?.wakes ?? [];
   });
   ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
   return { task: row, wakes };
 }
 
 /* Events that do not move a task: what an agent says in it and Hornhoof's own notes about its turns. */
-export const NOT_A_MOVE = ['comment', 'reminded', 'continued', 'stuck', 'interrupted', 'wake_skipped', 'wake_obsolete'] as const;
+export const NOT_A_MOVE = ['comment', 'reminded', 'continued', 'stuck', 'interrupted', 'wake_skipped', 'wake_obsolete', 'wait_due', 'wait_card'] as const;
 
 /* Comments and notes about a turn ending do not begin a new piece of work. */
 export async function lastMove(db: Db | Tx, taskId: string) {
@@ -1605,14 +1670,35 @@ export const requestSubject = (r: Pick<Request, 'kind' | 'decisionTopic'>, t: Pi
   spot: taskSpot(t),
 });
 
+/* What was put before a person for what only they can do is theirs alone; every other decision has its rule. */
+export const addresseesOf = (r: Pick<Request, 'classification'>): string[] | null => {
+  const authority = r.classification?.authority;
+  return authority && authority.purpose.kind !== 'decision' ? authority.recipientPersonIds : null;
+};
+
 /* Who answers, as the request is kept: a person with the right to take it, or the orchestrator for one, in a turn that
    still answers that person. */
 async function mayAnswer(tx: Tx, actor: Actor, found: Request, task: Task, on?: Delegation): Promise<string> {
   if (on) await checkDelegation(tx, on);
   const personId = on?.personId ?? actor.personId;
   if (!personId) throw contextMissing();
-  await requireDecider(tx, found.companyId, personId, requestSubject(found, task));
+  const addressees = addresseesOf(found);
+  if (!addressees) await requireDecider(tx, found.companyId, personId, requestSubject(found, task));
+  else if (!addressees.includes(personId)) throw notAllowed();
   return personId;
+}
+
+/* What changed since it was read is refused in the step that keeps the answer as well. */
+async function stillCurrent(tx: Tx, taskId: string, requestId: string): Promise<void> {
+  const [task] = await tx.select().from(tasks).where(eq(tasks.id, taskId));
+  const [request] = await tx.select().from(requests).where(eq(requests.id, requestId)).for('update');
+  if (request && task && await staleClassification(tx, task, request)) throw staleRoute();
+}
+
+/* The wait a question answered had: of its own source once it was put before a person, under its older name otherwise. */
+async function endAnswered(tx: Tx, request: Request, status: Request['status'], actor: Actor): Promise<void> {
+  if (!request.classification) return endRequest(tx, request, status, actor);
+  await endQuestionWait(tx, { taskId: request.taskId, requestId: request.id, expectedRevision: request.questionRevision, expectedRouteRevision: request.routeRevision, actor, outcome: 'resolved', proofRef: `request:${request.id}:${status}` });
 }
 
 /* What the request and its log keep of the orchestrator's answer for a person: which turn, on whose words. */
@@ -1654,10 +1740,33 @@ function checkChoiceAnswer(found: Pick<Request, 'options'>, a: Answer, text: str
   if (!option && !text) throw refuse(400, 'task_invalid', 'Write an answer.');
 }
 
+/* A question ended: with none left open the task goes on where it stood, and whoever it is for now is told, one turn each. */
+export async function goesOnAfter(tx: Tx, task: Task, found: Request, current: { status: Task['status']; stage: number } | undefined, told: { why: 'answered' | 'resolved'; text: string }): Promise<Wake[]> {
+  const [left] = await tx.select({ n: count() }).from(requests).where(and(eq(requests.taskId, task.id), eq(requests.status, 'open')));
+  if (current?.status === 'waiting' && !Number(left?.n ?? 0)) {
+    await tx
+      .update(tasks)
+      .set({ status: current.stage > 0 ? 'review' : 'working', silent: 0, version: sql`${tasks.version} + 1`, updatedAt: new Date() })
+      .where(and(eq(tasks.id, task.id), eq(tasks.status, 'waiting')));
+  }
+  const [after] = await tx.select().from(tasks).where(eq(tasks.id, task.id));
+  /* A task that stood still goes on with whoever holds it now. */
+  const goesOn = found.kind === 'stuck' && after!.stage === 0 && after!.assigneeAgentId ? after!.assigneeAgentId : found.agentId;
+  const wakes: Wake[] = CLOSED.includes(after!.status) ? [] : [{ agentId: goesOn, taskId: task.id, ...told }];
+  /* The last answer at a gate: everyone else still to give a verdict there goes on too, also after a turn spent waiting. */
+  if (current?.status === 'waiting' && after!.status === 'review') {
+    const back = await reviewWake(tx, after!);
+    wakes.push(...after!.panel.filter(id => id !== found.agentId).map(agentId => ({ agentId, taskId: task.id, ...back })));
+  }
+  return wakes;
+}
+
 export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answer, on?: Delegation, inlineText?: true): Promise<{ request: Request; task: Task; wakes: Wake[] }> {
   const [found] = await ctx.db.select().from(requests).where(eq(requests.id, requestId));
   if (!found) throw refuse(404, 'request_unknown', 'There is no such request.');
   if (found.status !== 'open') throw refuse(409, 'request_closed', 'This request is answered already.');
+  if (found.audience === 'internal') throw classificationRequired();
+  await refuseWhatChanged(ctx, requestId);
   const text = a.answer?.trim() ?? '';
   let status: Request['status'];
   const option = found.kind === 'choice' && a.pick !== undefined ? found.options[a.pick] : undefined;
@@ -1680,6 +1789,7 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
     /* The task first and then its request, in the order a cancel takes them, so the two never wait on each other. As the task
        is now, not as it was read before: one closed meanwhile stays closed. */
     const [current] = await tx.select({ status: tasks.status, stage: tasks.stage }).from(tasks).where(eq(tasks.id, task.id)).for('update');
+    await stillCurrent(tx, task.id, requestId);
     const answeredBy = await mayAnswer(tx, actor, found, task, on);
     const { audit, forWhom } = auditOf(on);
     const [request] = await tx
@@ -1688,25 +1798,11 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
       .where(and(eq(requests.id, requestId), eq(requests.status, 'open')))
       .returning();
     if (!request) throw refuse(409, 'request_closed', 'This request is answered already.');
+    await endAnswered(tx, request, status, answerer(answeredBy, actor));
     await tx.update(tasks).set({ externalWait: null, silent: 0, version: sql`${tasks.version} + 1`, updatedAt: new Date() })
       .where(and(eq(tasks.id, task.id), isNotNull(tasks.externalWait)));
     const event = await note(tx, task, { kind: 'answered', actor, text: said, data: { requestId, kind: found.kind, status, ...forWhom }, inlineText }, ctx.config);
-    const [left] = await tx.select({ n: count() }).from(requests).where(and(eq(requests.taskId, task.id), eq(requests.status, 'open')));
-    if (current?.status === 'waiting' && !Number(left?.n ?? 0)) {
-      await tx
-        .update(tasks)
-        .set({ status: current.stage > 0 ? 'review' : 'working', silent: 0, version: sql`${tasks.version} + 1`, updatedAt: new Date() })
-        .where(and(eq(tasks.id, task.id), eq(tasks.status, 'waiting')));
-    }
-    const [after] = await tx.select().from(tasks).where(eq(tasks.id, task.id));
-    /* A task that stood still goes on with whoever holds it now. */
-    const goesOn = found.kind === 'stuck' && after!.stage === 0 && after!.assigneeAgentId ? after!.assigneeAgentId : found.agentId;
-    wakes = CLOSED.includes(after!.status) ? [] : [{ agentId: goesOn, taskId: task.id, why: 'answered', text: said }];
-    /* The last answer at a gate: everyone else still to give a verdict there goes on too, also after a turn spent waiting. */
-    if (current?.status === 'waiting' && after!.status === 'review') {
-      const back = await reviewWake(tx, after!);
-      wakes.push(...after!.panel.filter(id => id !== found.agentId).map(agentId => ({ agentId, taskId: task.id, ...back })));
-    }
+    wakes = await goesOnAfter(tx, task, found, current, { why: 'answered', text: said });
     recordCause(wakes, { kind: 'answered', actor: answerer(answeredBy, actor), text: said, data: { status, commit: answeredWork(found) } }, event.id, task);
     await keepWakes(tx, task.companyId, wakes);
     return request;
@@ -1739,7 +1835,7 @@ export async function answerDirectly(ctx: Live, personId: string, agentId: strin
     .select({ id: requests.id, companyId: requests.companyId, kind: requests.kind, decisionTopic: requests.decisionTopic, departmentId: tasks.departmentId, productId: tasks.productId })
     .from(requests)
     .innerJoin(tasks, eq(tasks.id, requests.taskId))
-    .where(and(eq(requests.agentId, agentId), eq(requests.status, 'open'), inArray(requests.kind, ['question', 'stuck'])))
+    .where(and(eq(requests.agentId, agentId), eq(requests.status, 'open'), eq(requests.audience, 'human'), inArray(requests.kind, ['question', 'stuck'])))
     .orderBy(asc(requests.createdAt));
   const wakes: Wake[] = [];
   for (const r of open) {

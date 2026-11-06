@@ -29,7 +29,7 @@ type Row = { seq: number; kind: AgentEventKind; data: unknown; jobId: string | n
 
 /* A machine command's code stays with the person it was made for: a conversation keeps the command with its code hidden. */
 const JOIN_CODE = /--join [A-Za-z0-9_-]+/g;
-function hideCodes(data: unknown): unknown {
+export function hideCodes(data: unknown): unknown {
   const text = JSON.stringify(data);
   return text?.includes('--join ') ? JSON.parse(text.replace(JOIN_CODE, '--join [hidden]')) : data;
 }

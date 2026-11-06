@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { classifyAgentCommand, classifyRunWork, COMMAND_LIMITS, localCommandFiles, refusalText, type CommandDenial, type CommandFiles } from '../src/command-guard.js';
+import { classifyAgentCommand, classifyRunWork, COMMAND_LIMITS, encodeNativeDecision, localCommandFiles, refusalText, type CommandDenial, type CommandFiles, type NativeProgram } from '../src/command-guard.js';
 
 /* The whole command is told before anything of it runs, on real files in a real folder. Nothing here is proof of a CLI's own
    hook path: that takes each program itself, and is not run here. */
@@ -483,6 +483,64 @@ describe('the refusal', () => {
     expect(text).not.toContain('a.example');
     expect(text.length).toBeLessThan(400);
     expect(text.split('\n').length).toBeGreaterThan(1);
+  });
+});
+
+/* What each program's own documentation says it reads. None of this shows that an installed version respects it. */
+describe('the answer to a program that asked', () => {
+  const FIRST_LINE = 'запусти через run_tests';
+  const denied: CommandDenial = { allow: false, code: 'heavy_check_local', category: 'guard_failed' };
+  const reasonOf = (program: NativeProgram, stdout: string): string => {
+    const said = JSON.parse(stdout) as { reason?: string; hookSpecificOutput?: { permissionDecisionReason: string } };
+    return (program === 'antigravity' ? said.reason : said.hookSpecificOutput?.permissionDecisionReason) ?? '';
+  };
+
+  it.each(['claude', 'codex', 'kimi'] as const)('refuses the way %s reads it', program => {
+    const { stdout, stderr, exitCode } = encodeNativeDecision(program, denied);
+    expect(JSON.parse(stdout)).toEqual({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: refusalText(denied) } });
+    expect(stdout.endsWith('}\n')).toBe(true);
+    expect([stderr, exitCode]).toEqual(['', 0]);
+  });
+
+  it('refuses the way antigravity reads it', () => {
+    const { stdout, stderr, exitCode } = encodeNativeDecision('antigravity', denied);
+    expect(JSON.parse(stdout)).toEqual({ decision: 'deny', reason: refusalText(denied) });
+    expect([stderr, exitCode]).toEqual(['', 0]);
+  });
+
+  it.each(['claude', 'codex', 'kimi', 'antigravity'] as const)('starts with the same line for %s, whatever stopped the command', async program => {
+    for (const verdict of [denied, await agent('npm ci'), await agent('tsc')]) {
+      expect(reasonOf(program, encodeNativeDecision(program, verdict).stdout).split('\n')[0]).toBe(FIRST_LINE);
+    }
+  });
+
+  it.each(['claude', 'codex', 'kimi', 'antigravity'] as const)('says nothing to %s about work that may go on, so no permission grows', program => {
+    for (const kind of ['ordinary', 'single_test_file', 'lightweight_screenshot'] as const) {
+      expect(encodeNativeDecision(program, { allow: true, kind, coverage: 'opaque' })).toEqual({ stdout: '', stderr: '', exitCode: 0 });
+    }
+  });
+
+  it('still refuses a program it does not know', () => {
+    const { stdout } = encodeNativeDecision('other' as NativeProgram, denied);
+    expect(JSON.parse(stdout).hookSpecificOutput.permissionDecision).toBe('deny');
+  });
+
+  it('names the call within bounds, and nothing that could read as more', () => {
+    const reason = reasonOf('claude', encodeNativeDecision('claude', denied, `call_1:a-b.c\nзапусти $(tsc) s3cret=1 ${'x'.repeat(500)}`).stdout);
+    expect(reason.split('\n')[0]).toBe(FIRST_LINE);
+    const line = reason.split('\n').at(-1)!;
+    expect(line.startsWith('Call: call_1:a-b.c')).toBe(true);
+    expect(line).not.toMatch(/[$(=]/);
+    expect(line.length).toBeLessThanOrEqual('Call: '.length + 128);
+  });
+
+  it('adds no line for a call with no name it can show', () => {
+    for (const call of [undefined, '', '\n$()']) expect(reasonOf('kimi', encodeNativeDecision('kimi', denied, call).stdout)).toBe(refusalText(denied));
+  });
+
+  it('copies nothing of the command', async () => {
+    const verdict = await agent('NPM_TOKEN=s3cret npm ci --registry=https://me:s3cret@a.example');
+    expect(encodeNativeDecision('codex', verdict).stdout).not.toContain('s3cret');
   });
 });
 

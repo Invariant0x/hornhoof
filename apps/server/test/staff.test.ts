@@ -8,7 +8,7 @@ import { describe, expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { runsTier } from '../src/modules/tools/staff.js';
 import { agentChanges, agentEvents, agents, companies, departments, jobs, people, proposals, subscriptions, teams } from '../src/db/schema.js';
-import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
+import { allCardsBeforePerson, as, connectNode, invitePerson, listen, setUpCompany, testApp, type FakeNode, until } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
 const TOKEN = 'tool-token-0123456789abcdef0123456789';
@@ -79,7 +79,7 @@ describe('staffing', () => {
   it('lists what a department can be staffed with', async () => {
     const c = await company();
     const client = await tools(c);
-    expect((await client.listTools()).tools.map(t => t.name).sort()).toEqual(['add_api_key', 'add_plan_to_machine', 'add_tasks', 'answer_request', 'approval_policy', 'ask_computer_access', 'ask_person', 'build_structure', 'cancel_task', 'cancel_update', 'change_employee', 'change_orchestrator', 'change_person', 'check_updates', 'close_improvement', 'comment', 'company', 'computer', 'computer_result', 'connect_plans', 'database', 'disconnect_machine', 'edit_turn', 'escalate_missed_goal', 'explain_request', 'fire_employee', 'forget', 'hire', 'improvements', 'invite_again', 'invite_person', 'lend_machine', 'machine_command', 'merge_turn', 'message_employee', 'move_orchestrator', 'notebook', 'pipeline_report', 'plan_command', 'plan_turn', 'pool', 'propose_staff', 'propose_structure', 'remember', 'remove_public_link', 'remove_repository', 'remove_subscription', 'report', 'request_approval', 'reset_employee', 'rewrite_note', 'set_approval_policy', 'set_budget', 'set_department_owner', 'set_public_link', 'set_repository', 'set_team_urgent_only', 'set_urgent', 'staffing_options', 'stop_employee', 'task', 'tasks', 'test_subscription', 'turns', 'update_hornhoof', 'update_task', 'view', 'wait_for']);
+    expect((await client.listTools()).tools.map(t => t.name).sort()).toEqual(['add_api_key', 'add_plan_to_machine', 'add_tasks', 'answer_request', 'approval_policy', 'ask_computer_access', 'ask_person', 'build_structure', 'cancel_task', 'cancel_update', 'change_employee', 'change_orchestrator', 'change_person', 'check_updates', 'classify_human_intent', 'close_improvement', 'comment', 'company', 'computer', 'computer_result', 'connect_plans', 'database', 'disconnect_machine', 'edit_turn', 'escalate_missed_goal', 'explain_request', 'fire_employee', 'forget', 'hire', 'improvements', 'internal_questions', 'invite_again', 'invite_person', 'lend_machine', 'machine_command', 'merge_turn', 'message_employee', 'move_orchestrator', 'notebook', 'outbound_channel_create', 'outbound_channel_reopen', 'outbound_channel_stop', 'outbound_contact_suppress', 'outbound_options', 'outbound_policy_set', 'outbound_propose', 'outbound_status', 'outbound_submit', 'pipeline_report', 'plan_command', 'plan_turn', 'pool', 'propose_staff', 'propose_structure', 'remember', 'remove_public_link', 'remove_repository', 'remove_subscription', 'replan_wait', 'report', 'request_approval', 'reset_employee', 'resolve_goal_risk', 'resolve_question', 'rewrite_note', 'route_question', 'set_approval_policy', 'set_budget', 'set_department_owner', 'set_public_link', 'set_repository', 'set_team_urgent_only', 'set_urgent', 'set_wait_policy', 'staffing_options', 'stop_employee', 'support_classify', 'support_submit', 'task', 'tasks', 'test_subscription', 'turns', 'update_hornhoof', 'update_task', 'view', 'wait_for']);
     const res = await client.callTool({ name: 'staffing_options', arguments: { department: c.dev.id } });
     const options = JSON.parse(text(res));
     expect(options.department).toEqual({ id: c.dev.id, name: 'Development', products: c.products.map(p => ({ id: p.id, name: p.name })), employees: [] });
@@ -115,8 +115,7 @@ describe('staffing', () => {
       ['staff', 'pending'],
     ]);
     expect(rows[2]).toMatchObject({ departmentId: c.dev.id, brief: 'API and the web app.' });
-    const events = await c.db.select().from(agentEvents).where(eq(agentEvents.kind, 'proposal')).orderBy(asc(agentEvents.seq));
-    expect(events[2]!.data).toMatchObject({ proposalId: rows[2]!.id, kind: 'staff', department: c.dev.id, brief: 'API and the web app.' });
+    expect(await c.db.select().from(agentEvents).where(eq(agentEvents.kind, 'proposal'))).toEqual([]);
   });
 
   it('refuses a role from another department, a model the subscription cannot run, a subscription that cannot serve the department', async () => {
@@ -143,6 +142,7 @@ describe('staffing', () => {
     const c = await company();
     const client = await tools(c);
     await client.callTool({ name: 'propose_staff', arguments: { department: c.dev.id, brief: 'Start with the API.', people: [{ role: 'DEV-HEAD', checked: true }] } });
+    await allCardsBeforePerson(c.app.ctx);
     const [proposal] = await c.db.select().from(proposals);
     const be = c.app.ctx.templates.roles.get('DEV-BE')!;
     const skills = [...be.skills.filter(s => s.on).map(s => s.id), 'dev-api-design'];

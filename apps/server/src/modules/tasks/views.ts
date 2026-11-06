@@ -1,13 +1,17 @@
+import type { TaskWaitView } from '@hornhoof/protocol/waits';
 import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, departments, people, requests, taskEvents, tasks, turns, type RequestOption } from '../../db/schema.js';
 import { commitUrl, filesOf, picturesOf } from './attachments.js';
+import { shownQuestion } from './question-lifecycle.js';
 import { deptName } from '../departments/templates.js';
 import { commitProof, type CommitProof } from '../testruns/commit-proof.js';
 import { taskEvidence, type RunEvidence } from '../testruns/evidence.js';
 import type { Lang } from '../templates/load.js';
 import { CLOSED, type Task } from './engine.js';
 import { independentViews, type IndependentPartInput, type IndependentRecord } from './independent.js';
+import type { TaskWait } from './wait-state.js';
+import { openWaitsOf, shownWaits } from './wait-views.js';
 
 /* Task log text and its automatic files have the same agent readership. */
 export function agentSeesTask(agent: Pick<typeof agents.$inferSelect, 'id' | 'kind' | 'departmentId'>, task: Task): boolean {
@@ -35,11 +39,14 @@ export type TaskLine = {
   parentId: string | null;
   /* The numbers of the tasks it comes after that are not done yet: until they are, it waits. */
   waitsFor: number[];
+  /* Who answers for each thing it waits on, by when: what is open on it, of what this reader may see. */
+  waits: TaskWaitView[];
   independentPart?: (Omit<IndependentPartInput, 'executor'> & { executor: AgentRef; task: AfterView }) | { reason: string } | null;
   externalWait?: Task['externalWait'];
   workKind: Task['workKind'];
   riskClass: Task['riskClass'];
   urgent: boolean;
+  small: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -94,6 +101,7 @@ type Names = {
   turn(id: string | null): number | null;
   after(t: Pick<Task, 'after'>): Task[];
   independent(t: Pick<Task, 'id'>): IndependentRecord | undefined;
+  waits(t: Pick<Task, 'id'>): TaskWait[];
 };
 
 /* Names for everything the tasks point at, read in one go. */
@@ -108,6 +116,7 @@ async function names(ctx: Pick<Ctx, 'db' | 'templates'>, rows: Pick<Task, 'id' |
   const turnRows = turnIds.length ? await ctx.db.select({ id: turns.id, number: turns.number }).from(turns).where(inArray(turns.id, turnIds)) : [];
   const afterIds = [...new Set(rows.flatMap(t => t.after))];
   const afterRows = afterIds.length ? await ctx.db.select().from(tasks).where(inArray(tasks.id, afterIds)) : [];
+  const waits = await openWaitsOf(ctx.db, rows.map(t => t.id));
   return {
     agent: id => {
       const a = agentRows.find(r => r.id === id);
@@ -120,6 +129,7 @@ async function names(ctx: Pick<Ctx, 'db' | 'templates'>, rows: Pick<Task, 'id' |
     turn: id => turnRows.find(r => r.id === id)?.number ?? null,
     after: t => t.after.flatMap(id => afterRows.filter(r => r.id === id)).sort((a, b) => a.number - b.number),
     independent: t => independent.get(t.id),
+    waits: t => waits.get(t.id) ?? [],
   };
 }
 
@@ -140,6 +150,7 @@ const line = (t: Task, n: Names, sees: (t: Task) => boolean): TaskLine => ({
   turn: n.turn(t.turnId),
   parentId: t.parentId,
   waitsFor: n.after(t).filter(a => a.status !== 'done' && sees(a)).map(a => a.number),
+  waits: shownWaits(n.waits(t), id => n.after(t).some(a => a.id === id && sees(a))),
   independentPart: (() => {
     const part = t.after.length ? n.independent(t) : null;
     if (!part) return null;
@@ -150,6 +161,7 @@ const line = (t: Task, n: Names, sees: (t: Task) => boolean): TaskLine => ({
   workKind: t.workKind,
   riskClass: t.riskClass,
   urgent: t.urgent,
+  small: t.small,
   createdAt: t.createdAt.toISOString(),
   updatedAt: t.updatedAt.toISOString(),
 });
@@ -207,8 +219,8 @@ export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates' | 'config' | 
     .where(eq(taskEvents.taskId, task.id))
     .orderBy(desc(taskEvents.id))
     .limit(LOG_SHOWN);
-  const asks = await db.select().from(requests).where(eq(requests.taskId, task.id)).orderBy(asc(requests.createdAt));
-  const pictures = await picturesOf(db, asks);
+  const asks = (await db.select().from(requests).where(eq(requests.taskId, task.id)).orderBy(asc(requests.createdAt))).map(shownQuestion);
+  const pictures = await picturesOf(db, asks.filter(r => r.audience !== 'internal'));
   const commits = await Promise.all(asks.map(r => commitUrl(db, task, r.commit)));
   const proofs = await proofsOf(db, task, asks);
   const files = await filesOf(db, task.id);

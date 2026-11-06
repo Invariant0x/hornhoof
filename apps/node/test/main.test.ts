@@ -242,6 +242,29 @@ describe('reporting managed programs', () => {
     expect(server.received[hello]).toMatchObject({ programs: [{ id: 'codex', version: '3.0.0', updating: false, failed: false }] });
     for (const status of server.received.slice(hello + 1).filter(m => m.type === 'status')) expect(status.programs).toEqual(programs.snapshot());
   });
+  it('ignores unsupported handoff controls without starting or acknowledging a job', async () => {
+    const server = await fakeServer();
+    let runs = 0;
+    const node = await runNode({ dir: nodeDir(server.url), adapter: { ...adapter, run: async input => { runs++; return adapter.run(input); } }, log: () => {} });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(m => m.type === 'hello'));
+    const binding = {
+      workspaceId: '88888888-8888-4888-8888-888888888888', taskId: '22222222-2222-4222-8222-222222222222', agentId: '99999999-9999-4999-8999-999999999999',
+      nodeId: { kind: 'node', nodeId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }, assignmentEpoch: 3, bindingVersion: 2,
+      repositoryId: '77777777-7777-4777-8777-777777777777', taskBranch: 'task-abc', baseSha: 'a'.repeat(40),
+    };
+    const base = { version: 1, handoffId: '11111111-1111-4111-8111-111111111111', taskId: binding.taskId, binding };
+    const deadline = '2026-11-06T07:00:00.000Z';
+    server.send({ ...base, type: 'task.handoff.capture', fromJobId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', workspaceId: binding.workspaceId, repositoryId: binding.repositoryId, expectedWipSha: null, deadline });
+    server.send({ ...base, type: 'task.handoff.offer', candidateAgentId: '66666666-6666-4666-8666-666666666666', repositoryId: binding.repositoryId, baseSha: binding.baseSha, checkpointSha: binding.baseSha, deadline });
+    server.send({ ...base, type: 'task.handoff.resume_source', cancelId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', workspaceId: binding.workspaceId });
+    server.send({ ...base, type: 'task.handoff.release', reservationId: '44444444-4444-4444-8444-444444444444', reason: 'stale' });
+    server.send({ type: 'agent.say', agentKey: 'none', text: 'barrier', ref: 'handoff-controls-ignored' });
+    await server.wait(() => server.received.some(m => m.type === 'agent.said' && m.ref === 'handoff-controls-ignored'));
+    expect(runs).toBe(0);
+    expect(server.received.some(m => m.type === 'job.done')).toBe(false);
+    expect(server.received.some(m => m.type.startsWith('task.handoff.'))).toBe(false);
+  });
 });
 
 describe('a node that runs agents in terminals', () => {
@@ -913,20 +936,26 @@ describe('runNode', () => {
     expect(server.received.find(m => m.type === 'status')).toMatchObject({ models });
   });
 
-  it('cleans up and says so when Hornhoof removes the subscription', async () => {
+  it('revokes sign-in and retains workspaces, source and journals when removed', async () => {
     const server = await fakeServer();
     const dir = nodeDir(server.url);
+    const retained = ['work/agents/a/repositories/r/repo/unpublished.txt', 'work/agents/a/task-workspaces/w/repo/dirty.txt', 'work/agents/a/task-workspaces/w/private-context', 'workspace-journals/operation.json'];
+    for (const path of retained) {
+      const target = join(dir, path);
+      mkdirSync(join(target, '..'), { recursive: true });
+      writeFileSync(target, `retained:${path}`);
+    }
     const node = await runNode({ dir, adapter, log: () => {} });
     onTestFinished(() => node.stop());
     await server.wait(() => server.received.some(m => m.type === 'hello'));
     server.send({ type: 'remove' });
     await server.wait(() => server.received.some(m => m.type === 'removed'));
     expect(existsSync(join(dir, 'home'))).toBe(false);
-    expect(existsSync(join(dir, 'work'))).toBe(false);
+    for (const path of retained) expect(readFileSync(join(dir, path), 'utf8')).toBe(`retained:${path}`);
     expect(isRemoved(dir)).toBe(true);
   });
 
-  it('stops its running jobs before it deletes their folders on removal', async () => {
+  it('settles running jobs before revocation while retaining their work on removal', async () => {
     const server = await fakeServer();
     const dir = nodeDir(server.url);
     let folderAtStop: boolean | null = null;
@@ -948,7 +977,7 @@ describe('runNode', () => {
     server.send({ type: 'remove' });
     await server.wait(() => server.received.some(m => m.type === 'removed'));
     expect(folderAtStop).toBe(true);
-    expect(existsSync(join(dir, 'work'))).toBe(false);
+    expect(readFileSync(join(dir, 'work', 'file'), 'utf8')).toBe('x');
   });
 
   it('answers agent_failed and keeps serving when a job cannot even start', async () => {

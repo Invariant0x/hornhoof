@@ -1,4 +1,4 @@
-import { and, asc, eq, lt, ne, sql } from 'drizzle-orm';
+import { and, asc, eq, lt, notInArray, sql } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import { pendingWakes } from '../../db/schema.js';
 import type { Tx, Wake, WakeWhy } from './engine.js';
@@ -16,17 +16,21 @@ export async function keepWakes(tx: Tx | Db, companyId: string, wakes: Wake[]): 
   await tx.insert(pendingWakes).values(wakes.map(w => wakeRow(companyId, w)));
 }
 
+/* The wake that tells who has a question now names that question and stays until it runs. 'explain' is its old name, which
+   wakes written before internal questions still carry. */
+export const QUESTION_WAKES: readonly string[] = ['question', 'explain'];
+
 /* A move keeps the wakes its task needs now, so those an earlier move kept for it are dropped. A request still waiting to
    be put into words keeps its wake, which reads the request again when it runs. */
 export async function dropEarlierWakes(tx: Tx, taskId: string): Promise<void> {
-  await tx.delete(pendingWakes).where(and(eq(pendingWakes.taskId, taskId), ne(pendingWakes.why, 'explain'), sql`${pendingWakes.cause}->>'report' is null`));
+  await tx.delete(pendingWakes).where(and(eq(pendingWakes.taskId, taskId), notInArray(pendingWakes.why, [...QUESTION_WAKES]), sql`${pendingWakes.cause}->>'report' is null`));
 }
 
 /* The turn for this wake is queued, or another one for the same agent and task covers it. */
 export async function wakeQueued(db: Db, w: Wake): Promise<void> {
   const same = and(eq(pendingWakes.agentId, w.agentId), eq(pendingWakes.taskId, w.taskId), eq(pendingWakes.why, w.why));
   const action = w.cause?.eventId === undefined ? sql`${pendingWakes.cause}->>'report' is null` : sql`${pendingWakes.cause}->>'eventId' = ${String(w.cause.eventId)}`;
-  await db.delete(pendingWakes).where(and(same, action, w.why === 'explain' ? eq(pendingWakes.text, w.text ?? '') : undefined));
+  await db.delete(pendingWakes).where(and(same, action, QUESTION_WAKES.includes(w.why) ? eq(pendingWakes.text, w.text ?? '') : undefined));
 }
 
 /* Wakes written before the given time that nobody queued, oldest first. */

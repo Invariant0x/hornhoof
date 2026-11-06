@@ -8,7 +8,7 @@ import { orchestratorHeaders } from '../src/auth/internal.js';
 import { agents, companies, departments, people, proposals, requests, subscriptions, teams } from '../src/db/schema.js';
 import { decisionOwner, type Candidate } from '../src/modules/tasks/decisions.js';
 import { ask, cancel, createTask, report } from '../src/modules/tasks/engine.js';
-import { as, invitePerson, listen, openStream, setUpCompany, testApp, until, ownPlan } from './helpers.js';
+import { as, askedOfPerson, beforePerson, computerBeforePerson, invitePerson, listen, openStream, ownPlan, setUpCompany, testApp, until } from './helpers.js';
 
 const listed = (departmentIds: string[], teamIds: string[] = []): Access => ({ whole: false, departments: new Set(departmentIds), teams: new Set(teamIds) });
 const person = (id: string, access: Access, extra: Partial<Candidate> = {}): Candidate => ({ id, status: 'active', isOwner: false, access, ...extra });
@@ -112,7 +112,7 @@ async function company() {
   const asking = async (where: keyof typeof workers, q: Parameters<typeof ask>[3]) => {
     const deptId = { dev: dev.id, sales: sales.id, mkt: mkt.id }[where];
     const { task } = await createTask(ctx, { agentId: heads[where].id }, { title: `About ${q.text}`, brief: '', body: '', departmentId: deptId, assigneeAgentId: workers[where].id, executor: true, gates: [] });
-    return { task, request: (await ask(ctx, workers[where].id, task.id, q)).request };
+    return { task, request: (await askedOfPerson(ctx, workers[where].id, task.id, q)).request };
   };
   const view = async (token: string, query = ''): Promise<View> => (await app.inject({ url: `/api/requests${query}`, ...as(token) })).json();
   return { app, db, ctx, control, acme: acme!, sub: sub!, orchestrator: orchestrator!, dev, sales, mkt, devTeam: devTeam!, heads, workers, tokens, ids, asking, view };
@@ -132,9 +132,9 @@ async function everyKind() {
   /* The cards a second apart, structure first: two written in the same millisecond would be put in order by their
      random ids. */
   const at = Date.now();
-  const [structure] = await c.db.insert(proposals).values({ companyId: c.acme.id, agentId: c.orchestrator.id, brief: 'Add Support.', items: [], createdAt: new Date(at) }).returning();
-  const [staff] = await c.db.insert(proposals).values({ companyId: c.acme.id, agentId: c.orchestrator.id, kind: 'staff', departmentId: c.dev.id, brief: 'Hire a reviewer.', items: [], createdAt: new Date(at + 1000) }).returning();
-  c.ctx.computer.ask('Inspect disk space.');
+  const [structure] = await c.db.insert(proposals).values({ audience: 'human', companyId: c.acme.id, agentId: c.orchestrator.id, brief: 'Add Support.', items: [], createdAt: new Date(at) }).returning();
+  const [staff] = await c.db.insert(proposals).values({ audience: 'human', companyId: c.acme.id, agentId: c.orchestrator.id, kind: 'staff', departmentId: c.dev.id, brief: 'Hire a reviewer.', items: [], createdAt: new Date(at + 1000) }).returning();
+  await computerBeforePerson(c.ctx, 'Inspect disk space.');
   return { ...c, devQuestion, devApproval, devPeople, devPlain, salesQuestion, mktQuestion, structure: structure!, staff: staff! };
 }
 
@@ -165,7 +165,7 @@ describe('decisions waiting for people', () => {
   it("take in the orchestrator's own question and a release confirmation as the requests they are, both the CEO's", async () => {
     const c = await company();
     const { task } = await createTask(c.ctx, { personId: c.ids.ivan }, { title: 'Turn 3: Launch', brief: '', body: '', departmentId: null, assigneeAgentId: c.orchestrator.id });
-    const itsOwn = await ask(c.ctx, c.orchestrator.id, task.id, { kind: 'question', text: 'Which goal goes first?', topic: 'task' });
+    const itsOwn = await askedOfPerson(c.ctx, c.orchestrator.id, task.id, { kind: 'question', text: 'Which goal goes first?', topic: 'task' });
     const release = await c.asking('dev', { kind: 'approval', text: 'Release 0.6?', commit: 'c'.repeat(40) });
     const all = await c.view(c.tokens.ceo);
     expect(ownersOf(all)).toEqual({ [itsOwn.request.id]: c.ids.ivan, [release.request.id]: c.ids.ivan });
@@ -275,7 +275,9 @@ describe('decisions waiting for people', () => {
     await report(c.ctx, c.heads.dev.id, task.id, { done: false, summary: 'Stuck on the provider.' });
     const [stuck] = await c.db.select({ topic: requests.decisionTopic, kind: requests.kind }).from(requests).where(eq(requests.taskId, task.id));
     expect(stuck).toEqual({ topic: 'task', kind: 'stuck' });
-    expect(ownersOf(await c.view(c.tokens.ceo))[(await c.db.select().from(requests).where(eq(requests.taskId, task.id)))[0]!.id]).toBe(c.ids.dan);
+    const [note] = await c.db.select().from(requests).where(eq(requests.taskId, task.id));
+    await beforePerson(c.ctx, note!.id);
+    expect(ownersOf(await c.view(c.tokens.ceo))[note!.id]).toBe(c.ids.dan);
   });
 });
 
@@ -353,9 +355,10 @@ describe('who may answer, by the rules of #49', () => {
       const viaOrchestrator = await c.app.inject({ method: 'POST', url: `/api/computer/${action}`, headers: orchestratorHeaders(c.ids.ivan, c.orchestrator.id) });
       expect(viaOrchestrator.statusCode, `${action} by the orchestrator`).toBe(403);
     }
-    expect(c.ctx.computer.view().asked).not.toBeNull();
+    const asked = async () => (await c.app.inject({ url: '/api/computer', ...as(c.tokens.delegate) })).json().asked;
+    expect(await asked()).not.toBeNull();
     expect((await c.app.inject({ method: 'POST', url: '/api/computer/decline', ...as(c.tokens.delegate) })).statusCode).toBe(200);
-    expect(c.ctx.computer.view().asked).toBeNull();
+    expect(await asked()).toBeNull();
   });
 
   it('lets only the CEO and the delegate apply the cards, with or without the card', async () => {
@@ -403,10 +406,10 @@ describe('telling screens that decisions changed', () => {
     await listen(c.app);
     const streams = { ceo: await openStream(c.app, c.tokens.ceo), zed: await openStream(c.app, c.tokens.zed), dan: await openStream(c.app, c.tokens.dan) };
     await new Promise(r => setTimeout(r, 50));
-    c.ctx.computer.ask('Inspect disk space.');
+    await computerBeforePerson(c.ctx, 'Inspect disk space.');
     expect((await c.app.inject({ method: 'POST', url: '/api/computer/decline', ...as(c.tokens.ceo) })).statusCode).toBe(200);
     await until(() => streams.ceo.messages.some(m => m.type === 'computer'));
-    expect(streams.ceo.messages.filter(m => m.type === 'computer')).toEqual([{ type: 'computer' }]);
+    expect(streams.ceo.messages.filter(m => m.type === 'computer').every(m => Object.keys(m).join() === 'type')).toBe(true);
     await until(() => streams.zed.messages.some(m => m.type === 'computer'));
     expect(streams.dan.messages.some(m => m.type === 'computer')).toBe(false);
   });
@@ -419,7 +422,7 @@ describe('telling screens that decisions changed', () => {
     const inside = await openStream(c.app, undefined, headers);
     expect(inside.res.status).toBe(200);
     await new Promise(r => setTimeout(r, 50));
-    c.ctx.computer.ask('Inspect disk space.');
+    await computerBeforePerson(c.ctx, 'Inspect disk space.');
     expect((await c.app.inject({ method: 'POST', url: '/api/computer/decline', ...as(c.tokens.ceo) })).statusCode).toBe(200);
     /* What comes after the change on the same stream shows the change itself went by. */
     c.ctx.bus.publish(c.acme.id, { type: 'org' });
@@ -432,7 +435,7 @@ describe('telling screens that decisions changed', () => {
     await listen(c.app);
     const streams = { zed: await openStream(c.app, c.tokens.zed), dan: await openStream(c.app, c.tokens.dan) };
     await new Promise(r => setTimeout(r, 50));
-    const [card] = await c.db.insert(proposals).values({ companyId: c.acme.id, agentId: c.orchestrator.id, brief: 'Add Support.', items: [] }).returning();
+    const [card] = await c.db.insert(proposals).values({ audience: 'human', companyId: c.acme.id, agentId: c.orchestrator.id, brief: 'Add Support.', items: [] }).returning();
     const built = await c.app.inject({ method: 'POST', url: '/api/departments/build', payload: { proposalId: card!.id, items: [{ template: 'support', checked: true, note: 'Answers customers.' }] }, ...as(c.tokens.ceo) });
     expect(built.statusCode).toBe(201);
     await until(() => streams.zed.messages.some(m => m.type === 'requests'));

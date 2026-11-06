@@ -9,9 +9,9 @@ import { agentChanges, agents, companies, departments, jobs, people, requests, s
 import { pumpWaiting } from '../src/modules/conversation/queue.js';
 import { afterJob } from '../src/modules/tasks/wake.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
-import { answer, ask, createTask, submit, updateTask, verdict } from '../src/modules/tasks/engine.js';
+import { answer, createTask, submit, updateTask, verdict } from '../src/modules/tasks/engine.js';
 import { wakeAll, wakePrompt } from '../src/modules/tasks/wake.js';
-import { as, connectNode, listen, setUpCompany, testApp, until, type FakeNode } from './helpers.js';
+import { as, askedOfPerson, connectNode, listen, setUpCompany, testApp, type FakeNode, until } from './helpers.js';
 
 const NODE_KEY = 'k'.repeat(40);
 
@@ -400,7 +400,7 @@ describe('reviewers of one role checking the same work', () => {
     const task = await memberTask();
     const sent = await submit(ctx, bruno.id, task.id, done);
     expect(sent.task.assigneeAgentId).toBe(rita.id);
-    const asked = await ask(ctx, rex.id, task.id, { kind: 'question', text: 'Is tax in scope?' });
+    const asked = await askedOfPerson(ctx, rex.id, task.id, { kind: 'question', text: 'Is tax in scope?' });
     expect(asked.task).toMatchObject({ status: 'waiting', panel: [rita.id, rex.id] });
   });
 
@@ -408,7 +408,7 @@ describe('reviewers of one role checking the same work', () => {
     const { app, ctx, db, ceo, bruno, rita, rex, hana, memberTask } = await company();
     const task = await memberTask();
     await submit(ctx, bruno.id, task.id, done);
-    const { request } = await ask(ctx, rita.id, task.id, { kind: 'question', text: 'Is tax in scope?' });
+    const { request } = await askedOfPerson(ctx, rita.id, task.id, { kind: 'question', text: 'Is tax in scope?' });
     const other = await verdict(ctx, rex.id, task.id, { pass: true, comment: 'Tests cover it.' });
     expect(other.task).toMatchObject({ status: 'waiting', panel: [rita.id], assigneeAgentId: rita.id });
     await expect(verdict(ctx, rita.id, task.id, { pass: true, comment: 'Fine.' })).rejects.toMatchObject({ reason: 'task_invalid' });
@@ -449,7 +449,7 @@ describe('work an agent held when it was switched off', () => {
     await patch(bruno.id, { on: true });
     const other = await memberTask(rex.id, [rita.id]);
     await submit(ctx, rex.id, other.id, done);
-    await ask(ctx, rita.id, other.id, { kind: 'question', text: 'Is tax in scope?' });
+    await askedOfPerson(ctx, rita.id, other.id, { kind: 'question', text: 'Is tax in scope?' });
     const waiting = await row(db, other.id);
     expect(waiting.status).toBe('waiting');
     expect(wakePrompt(rita, waiting, { agentId: rita.id, taskId: other.id, why: 'reminder' })).toContain('give your verdict');
@@ -538,7 +538,7 @@ describe('work an agent held when it was switched off', () => {
     const { app, ctx, db, ceo, bruno, rita, rex, patch, memberTask } = await company();
     const task = await memberTask();
     await submit(ctx, bruno.id, task.id, done);
-    const { request } = await ask(ctx, rita.id, task.id, { kind: 'question', text: 'Is tax in scope?' });
+    const { request } = await askedOfPerson(ctx, rita.id, task.id, { kind: 'question', text: 'Is tax in scope?' });
     await patch(rex.id, { on: false });
     expect(await row(db, task.id)).toMatchObject({ status: 'waiting', panel: [rita.id] });
     await app.inject({ method: 'POST', url: `/api/requests/${request.id}`, payload: { answer: 'Yes, with tax.' }, ...as(ceo) });
@@ -549,7 +549,7 @@ describe('work an agent held when it was switched off', () => {
     const { app, ctx, db, ceo, bruno, rita, rex, patch, memberTask } = await company();
     const task = await memberTask();
     await submit(ctx, bruno.id, task.id, done);
-    const { request } = await ask(ctx, rita.id, task.id, { kind: 'question', text: 'Is tax in scope?' });
+    const { request } = await askedOfPerson(ctx, rita.id, task.id, { kind: 'question', text: 'Is tax in scope?' });
     await patch(rita.id, { on: false });
     expect(await row(db, task.id)).toMatchObject({ status: 'waiting', panel: [rita.id, rex.id] });
     await app.inject({ method: 'POST', url: `/api/requests/${request.id}`, payload: { answer: 'Yes, with tax.' }, ...as(ceo) });
@@ -561,8 +561,8 @@ describe('work an agent held when it was switched off', () => {
     const { ctx, db, bruno, rita, rex, memberTask } = await company();
     const task = await memberTask();
     await submit(ctx, bruno.id, task.id, done);
-    const first = await ask(ctx, rita.id, task.id, { kind: 'question', text: 'Is tax in scope?' });
-    const second = await ask(ctx, rex.id, task.id, { kind: 'question', text: 'Which currency?' });
+    const first = await askedOfPerson(ctx, rita.id, task.id, { kind: 'question', text: 'Is tax in scope?' });
+    const second = await askedOfPerson(ctx, rex.id, task.id, { kind: 'question', text: 'Which currency?' });
     const [ceo] = await db.select().from(people);
     const early = await answer(ctx, { personId: ceo!.id }, first.request.id, { answer: 'Yes, with tax.' });
     expect(early.task.status).toBe('waiting');

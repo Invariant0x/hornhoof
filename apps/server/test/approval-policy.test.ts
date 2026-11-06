@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { approvalPolicies, departments, people, requests, taskEvents } from '../src/db/schema.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import { company } from './department-owner-fixture.js';
-import { as } from './helpers.js';
+import { allBeforePerson, as } from './helpers.js';
 
 type C = Awaited<ReturnType<typeof company>>;
 type Res = { content: { type: string; text: string }[]; isError?: boolean };
@@ -119,7 +119,11 @@ describe('asking for an approval under the policy', () => {
   /* Bruno's tools, on the task he holds. */
   const bruno = async (c: C) => {
     const tools = await c.tools(c.worker);
-    return (over: Record<string, unknown> = {}) => call(tools, 'request_approval', asks({ task: c.task.number, ...over }));
+    return async (over: Record<string, unknown> = {}) => {
+      const res = await call(tools, 'request_approval', asks({ task: c.task.number, ...over }));
+      await allBeforePerson(c, c.task.id);
+      return res;
+    };
   };
 
   it('asks every time on a channel with no rule, and sends it to the CEO with no owner', async () => {

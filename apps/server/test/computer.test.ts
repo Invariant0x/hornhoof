@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -50,6 +50,13 @@ async function company({ updater = true, env = {} as NodeJS.ProcessEnv } = {}) {
 type Result = { content: { type: string; text: string }[]; isError?: boolean };
 const call = async (client: Client, name: string, args: Record<string, unknown>) => (await client.callTool({ name, arguments: args })) as Result;
 const text = (res: Result) => res.content[0]!.text;
+/* The orchestrator asks, and puts it before the CEO in those words, as it does in the same turn. */
+async function askedOfCeo(client: Client, reason: string) {
+  const asked = await call(client, 'ask_computer_access', { reason });
+  if (asked.isError) return asked;
+  const { id } = JSON.parse(text(asked).slice(text(asked).indexOf('{'))) as { id: string };
+  return call(client, 'classify_human_intent', { operationId: randomUUID(), source: { kind: 'computer_access', id }, expectedRevision: 1, expectedRouteRevision: 1, classification: { kind: 'human_only_action', actionBinding: { kind: 'ceo_permission', resourceId: 'server' } }, humanEnvelope: { situation: reason, requiredAction: 'Open it or say no.', options: [] } });
+}
 const settings = (control: string) => JSON.parse(readFileSync(join(control, 'computer.json'), 'utf8'));
 const lines = async (db: Awaited<ReturnType<typeof company>>['db'], agentId: string) =>
   (await db.select().from(agentEvents).where(and(eq(agentEvents.agentId, agentId), eq(agentEvents.kind, 'computer')))).map(e => e.data);
@@ -75,7 +82,7 @@ async function retryTurnOn(c: Awaited<ReturnType<typeof company>>, failedJobId: 
 }
 
 async function openClickedRetry(c: Awaited<ReturnType<typeof company>>) {
-  await call(await mcp(c.app, TOKEN), 'ask_computer_access', { reason: 'Inspect service logs.' });
+  await askedOfCeo(await mcp(c.app, TOKEN), 'Inspect service logs.');
   await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.agentId, c.orchestrator.id));
   await c.app.inject({ method: 'POST', url: '/api/computer/open', ...as(c.ceo) });
   let note = await c.builtin.next();
@@ -141,17 +148,17 @@ describe('access to the computer the server runs on', () => {
   it('keeps the access question as an outgoing message from the orchestrator to the CEO', async () => {
     const { app, db, orchestrator } = await company();
     const [ceo] = await db.select().from(people).where(eq(people.isOwner, true));
-    expect((await call(await mcp(app, TOKEN), 'ask_computer_access', { reason: 'Restart the nodes outside AppArmor.' })).isError).toBeFalsy();
+    expect((await askedOfCeo(await mcp(app, TOKEN), 'Restart the nodes outside AppArmor.')).isError).toBeFalsy();
     const outgoing = (await listEvents(db, orchestrator.id, 0)).find(e => e.message?.direction === 'out');
     expect(outgoing).toMatchObject({ kind: 'message', data: { text: 'Restart the nodes outside AppArmor.' }, message: { direction: 'out', from: { kind: 'agent', id: orchestrator.id, agentKind: 'orchestrator' }, to: { kind: 'person', id: ceo!.id, name: 'Ivan', role: { en: 'CEO', ru: 'CEO' } } } });
   });
 
   it('opens for a day with one click of the CEO when the orchestrator asks, and the orchestrator goes on by itself', async () => {
     const { app, db, ceo, control, orchestrator } = await company();
-    const asked = await call(await mcp(app, TOKEN), 'ask_computer_access', { reason: 'Restart the nodes outside AppArmor.' });
+    const asked = await askedOfCeo(await mcp(app, TOKEN), 'Restart the nodes outside AppArmor.');
     expect(asked.isError).toBeFalsy();
     const shown = (await app.inject({ method: 'GET', url: '/api/computer', ...as(ceo) })).json();
-    expect(shown).toEqual({ available: true, until: null, asked: { reason: 'Restart the nodes outside AppArmor.', at: expect.any(String) }, machine: null, canAnswer: true });
+    expect(shown).toEqual({ available: true, until: null, asked: { reason: 'Restart the nodes outside AppArmor.', at: expect.any(String), purpose: { kind: 'ceo_permission', permission: 'server_computer_access', until: expect.any(String) } }, machine: null, canAnswer: true });
 
     const before = Date.now();
     const opened = await app.inject({ method: 'POST', url: '/api/computer/open', ...as(ceo) });
@@ -161,7 +168,7 @@ describe('access to the computer the server runs on', () => {
     expect(until_).toBeLessThanOrEqual(Date.now() + DAY_MS);
     expect(settings(control)).toMatchObject({ untilSec: Math.floor(until_ / 1000), asked: null });
     expect((await app.inject({ method: 'GET', url: '/api/computer', ...as(ceo) })).json()).toEqual({ available: true, until: opened.json().until, asked: null, machine: null, canAnswer: true });
-    expect(await lines(db, orchestrator.id)).toEqual([
+    expect(await lines(db, orchestrator.id)).toMatchObject([
       { state: 'asked', reason: 'Restart the nodes outside AppArmor.' },
       { state: 'opened', until: opened.json().until },
     ]);
@@ -202,7 +209,7 @@ describe('access to the computer the server runs on', () => {
 
   it("queues the orchestrator's note while its machine is offline, so it goes on once the machine is back", async () => {
     const { app, db, ceo, orchestrator, builtin } = await company();
-    await call(await mcp(app, TOKEN), 'ask_computer_access', { reason: 'Free disk space.' });
+    await askedOfCeo(await mcp(app, TOKEN), 'Free disk space.');
     builtin.close();
     await until(async () => !(await app.inject({ method: 'GET', url: '/api/agents/orchestrator/events?after=0', ...as(ceo) })).json().state.ready);
     expect((await app.inject({ method: 'POST', url: '/api/computer/open', ...as(ceo) })).statusCode).toBe(200);
@@ -242,7 +249,7 @@ describe('access to the computer the server runs on', () => {
     app.ctx.computer = new ComputerAccess(control, app.ctx.updater, { waitMs: 3000 });
     await invitePerson(app, ceo, { name: 'Zed', email: 'zed@example.com', access: { whole: true } });
     const [zed] = await db.select().from(people).where(eq(people.name, 'Zed'));
-    await call(await mcp(app, TOKEN), 'ask_computer_access', { reason: 'Free disk space.' });
+    await askedOfCeo(await mcp(app, TOKEN), 'Free disk space.');
     await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.agentId, orchestrator.id));
     await app.inject({ method: 'POST', url: '/api/computer/open', ...as(ceo) });
     let note = await builtin.next();
@@ -267,7 +274,7 @@ describe('access to the computer the server runs on', () => {
     await invitePerson(app, ceo, { name: 'Zed', email: 'zed@example.com', access: { whole: true } });
     const [zed] = await db.select().from(people).where(eq(people.name, 'Zed'));
 
-    await call(await mcp(app, TOKEN), 'ask_computer_access', { reason: 'Inspect service logs.' });
+    await askedOfCeo(await mcp(app, TOKEN), 'Inspect service logs.');
     await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.agentId, orchestrator.id));
     builtin.send({ type: 'hello', version: '0.6.0', loggedIn: true, terminals: true, running: [] });
     await until(() => app.ctx.hub.hasTerminals({ kind: 'builtin' }));
@@ -318,7 +325,7 @@ describe('access to the computer the server runs on', () => {
       return msg;
     };
 
-    await call(await mcp(app, TOKEN), 'ask_computer_access', { reason: 'Inspect service logs.' });
+    await askedOfCeo(await mcp(app, TOKEN), 'Inspect service logs.');
     await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.agentId, orchestrator.id));
     await app.inject({ method: 'POST', url: '/api/computer/open', ...as(ceo) });
     let note = await builtin.next();
@@ -455,7 +462,7 @@ describe('access to the computer the server runs on', () => {
     expect(settings(control)).toMatchObject({ untilSec: null, until: null });
     expect((await call(await mcp(app, TOKEN), 'computer', { command: 'uname -a' })).isError).toBe(true);
 
-    await call(await mcp(app, TOKEN), 'ask_computer_access', { reason: 'Clean Docker images.' });
+    await askedOfCeo(await mcp(app, TOKEN), 'Clean Docker images.');
     expect((await app.inject({ method: 'POST', url: '/api/computer/decline', ...as(ceo) })).statusCode).toBe(200);
     expect((await app.inject({ method: 'GET', url: '/api/computer', ...as(ceo) })).json().asked).toBeNull();
     expect((await lines(db, orchestrator.id)).map(l => (l as { state: string }).state)).toEqual(['opened', 'closed', 'asked', 'declined']);
@@ -469,11 +476,11 @@ describe('access to the computer the server runs on', () => {
     const join_ = { code: command.split('--join ')[1], machineId: 'debian-0001-abcd', hostname: 'debian-box', os: 'linux', arch: 'x86_64' };
     expect((await app.inject({ method: 'POST', url: '/api/nodes/join', payload: join_ })).statusCode).toBe(200);
 
-    await call(await mcp(app, TOKEN), 'ask_computer_access', { reason: 'Clean Docker images.' });
+    await askedOfCeo(await mcp(app, TOKEN), 'Clean Docker images.');
     expect((await app.inject({ method: 'GET', url: '/api/computer', ...as(ceo) })).json().machine).toBe('debian-box');
     expect((await app.inject({ method: 'POST', url: '/api/computer/open', ...as(ceo) })).json().machine).toBe('debian-box');
     await app.inject({ method: 'POST', url: '/api/computer/close', ...as(ceo) });
-    expect(await lines(db, orchestrator.id)).toEqual([
+    expect(await lines(db, orchestrator.id)).toMatchObject([
       { state: 'asked', reason: 'Clean Docker images.', machine: 'debian-box' },
       { state: 'opened', until: expect.any(String), machine: 'debian-box' },
       { state: 'closed', machine: 'debian-box' },
@@ -507,7 +514,7 @@ describe('access to the computer the server runs on', () => {
     const { app, ceo } = await company({ updater: false });
     expect((await app.inject({ method: 'GET', url: '/api/computer', ...as(ceo) })).json()).toMatchObject({ available: false });
     expect((await app.inject({ method: 'POST', url: '/api/computer/open', ...as(ceo) })).statusCode).toBe(409);
-    const asked = await call(await mcp(app, TOKEN), 'ask_computer_access', { reason: 'Look at the disk.' });
+    const asked = await askedOfCeo(await mcp(app, TOKEN), 'Look at the disk.');
     expect(asked.isError).toBe(true);
     expect(text(asked)).toContain('cannot reach');
   });

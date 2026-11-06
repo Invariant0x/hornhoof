@@ -7,8 +7,7 @@ import { describe, expect, it, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, attachments, companies, departments, jobs, people, subscriptions, taskEvents } from '../src/db/schema.js';
 import { createTask } from '../src/modules/tasks/engine.js';
-import { as, invitePerson, listen, setUpCompany, testApp } from './helpers.js';
-import { legacyApproval } from './legacy-request-fixture.js';
+import { allBeforePerson, as, invitePerson, listen, setUpCompany, testApp } from './helpers.js';
 
 /* The smallest bytes each format starts with, padded out like a picture. */
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64, 1)]);
@@ -92,6 +91,7 @@ describe('pictures, links and choices in requests', () => {
     const loose = (await upload(token, JPEG)).json().id as string;
     const asked = await call(tools, 'ask_person', { task: task.number, question: 'Do the icons read well?', images: [shot] });
     expect(asked.isError).toBeFalsy();
+    await allBeforePerson(app.ctx, task.id);
 
     const waiting = (await app.inject({ method: 'GET', url: '/api/requests', ...as(ceoSession) })).json().requests;
     expect(waiting).toMatchObject([{ kind: 'question', images: [shot], options: [], link: null }]);
@@ -143,6 +143,7 @@ describe('pictures, links and choices in requests', () => {
       ],
     });
     expect(asked.isError).toBeFalsy();
+    await allBeforePerson(app.ctx, task.id);
     const [waiting] = (await app.inject({ method: 'GET', url: '/api/requests', ...as(ceoSession) })).json().requests;
     expect(waiting).toMatchObject({ kind: 'choice', options: [{ label: 'Round', image: round }, { label: 'Square', image: square }] });
     expect((await app.inject({ method: 'GET', url: `/api/attachments/${square}`, ...as(ceoSession) })).statusCode).toBe(200);
@@ -168,7 +169,8 @@ describe('pictures, links and choices in requests', () => {
   it('links an approval to its commit on GitHub, and keeps a link the agent gives', async () => {
     const { app, db, turn, fran, task, ceoSession } = await company();
     const { tools } = await turn(fran);
-    await legacyApproval(db, task, fran.id, { text: 'Release the icons?', commit: COMMIT, link: 'https://github.com/acme/app/compare/main...task-4-icons' });
+    await call(tools, 'ask_person', { task: task.number, question: 'Release the icons?', commit: COMMIT, link: 'https://github.com/acme/app/compare/main...task-4-icons' });
+    await allBeforePerson(app.ctx, task.id);
     const [waiting] = (await app.inject({ method: 'GET', url: '/api/requests', ...as(ceoSession) })).json().requests;
     expect(waiting).toMatchObject({
       kind: 'approval',

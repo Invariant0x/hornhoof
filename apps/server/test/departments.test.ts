@@ -39,7 +39,7 @@ async function nextPrompt(node: FakeNode): Promise<string> {
 describe('POST /api/departments/build', () => {
   it('builds the proposed departments with their products and tells the orchestrator', async () => {
     const { app, db, ceo, builtin, acme, orchestrator } = await withOrchestrator();
-    const [proposal] = await db.insert(proposals).values({ companyId: acme.id, agentId: orchestrator.id, brief: 'Acme makes characters for schools.', items: ITEMS }).returning();
+    const [proposal] = await db.insert(proposals).values({ audience: 'human', companyId: acme.id, agentId: orchestrator.id, brief: 'Acme makes characters for schools.', items: ITEMS }).returning();
     const stream = await openStream(app, ceo);
 
     const res = await build(app, ceo, { proposalId: proposal!.id, items: ITEMS });
@@ -78,7 +78,7 @@ describe('POST /api/departments/build', () => {
 
   it('applies a proposal only once', async () => {
     const { app, db, ceo, acme, orchestrator } = await withOrchestrator();
-    const [proposal] = await db.insert(proposals).values({ companyId: acme.id, agentId: orchestrator.id, brief: 'Acme.', items: ITEMS }).returning();
+    const [proposal] = await db.insert(proposals).values({ audience: 'human', companyId: acme.id, agentId: orchestrator.id, brief: 'Acme.', items: ITEMS }).returning();
     expect((await build(app, ceo, { proposalId: proposal!.id, items: ITEMS })).statusCode).toBe(201);
     const again = await build(app, ceo, { proposalId: proposal!.id, items: ITEMS });
     expect(again.statusCode).toBe(409);
