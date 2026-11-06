@@ -74,31 +74,31 @@ it('never reserves past an account\'s limit, however many dispatchers ask at onc
   expect(await pg.db.select().from(schema.outboundAttempts)).toHaveLength(3);
 });
 
-it('counts a sender domain across its accounts, whichever comes first', { timeout: 120000 }, async () => {
+it('counts a sender domain across its channels, whichever comes first', { timeout: 120000 }, async () => {
   const pg = await privatePostgres();
-  const g = await gateway(pg, LIMITED(100, 2));
+  const g = await gateway(pg, LIMITED(100, 3));
   const messages = [];
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 16; i++) {
     const actor = i % 2 ? g.first : g.second;
     messages.push(await g.send(actor, (await g.someone(`both${i}@shop.example`, actor)).id));
   }
   const asked = await Promise.all(messages.map((m, i) => reserveDispatch((i % 2 ? g.first : g.second).ctx, m.messageId, 1)));
-  expect(asked.filter(a => a.kind === 'reserved')).toHaveLength(2);
+  expect(asked.filter(a => a.kind === 'reserved')).toHaveLength(3);
   const domain = (await g.usage()).filter(b => b.scope === 'domain');
-  expect(reservedAt(domain)).toEqual([2]);
+  expect(reservedAt(domain)).toEqual([3]);
 });
 
-/* A row held on one connection until someone is seen waiting for it, then changed and let go. */
-async function holding<T>(pg: PostgresFixture, table: string, id: string, work: () => Promise<T>, change: string): Promise<T> {
+/* Something held on one connection until someone is seen waiting for it, then changed and let go. */
+async function holding<T>(pg: PostgresFixture, hold: [string, unknown[]], work: () => Promise<T>, change?: [string, unknown[]]): Promise<T> {
   const locker = await pg.pool('locker').connect();
   try {
     await locker.query('BEGIN');
-    await locker.query(`SELECT id FROM ${table} WHERE id = $1 FOR UPDATE`, [id]);
+    await locker.query(...hold);
     const lockerPid = (await locker.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0]!.pid;
     const pending = work();
     void pending.catch(() => {});
     await expect.poll(async () => (await pg.admin.query<{ waits: boolean }>('SELECT count(*) > 0 AS waits FROM pg_stat_activity WHERE $1::int = ANY(pg_blocking_pids(pid))', [lockerPid])).rows[0]!.waits, { timeout: 5000, interval: 10 }).toBe(true);
-    await locker.query(change, [id]);
+    if (change) await locker.query(...change);
     await locker.query('COMMIT');
     return await pending;
   } finally {
@@ -107,12 +107,22 @@ async function holding<T>(pg: PostgresFixture, table: string, id: string, work: 
   }
 }
 
+const rowHeld = (table: string, id: string): [string, unknown[]] => [`SELECT id FROM ${table} WHERE id = $1 FOR UPDATE`, [id]];
+
+it('takes the places of one sender domain one at a time, across channels', { timeout: 120000 }, async () => {
+  const pg = await privatePostgres();
+  const g = await gateway(pg);
+  const { messageId } = await g.send(g.second, (await g.someone('wait@shop.example', g.second)).id);
+  const asked = await holding(pg, ['SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))', [`outbound:${g.companyId}:acme.example`]], () => reserveDispatch(g.second.ctx, messageId, 1));
+  expect(asked.kind).toBe('reserved');
+});
+
 it('a stop that commits first wins over a dispatch that waited for it', { timeout: 120000 }, async () => {
   const pg = await privatePostgres();
   const g = await gateway(pg);
   const { messageId } = await g.send(g.first, (await g.someone('stop@shop.example')).id);
   expect((await reserveDispatch(g.first.ctx, messageId, 1)).kind).toBe('reserved');
-  const begun = await holding(pg, 'outbound_channels', g.channel.id, () => beginDispatch(g.second.ctx, messageId, 1), "UPDATE outbound_channels SET status = 'stopped', stopped_reason = 'channel_stopped', stopped_at = now(), generation = generation + 1 WHERE id = $1");
+  const begun = await holding(pg, rowHeld('outbound_channels', g.channel.id), () => beginDispatch(g.second.ctx, messageId, 1), ["UPDATE outbound_channels SET status = 'stopped', stopped_reason = 'channel_stopped', stopped_at = now(), generation = generation + 1 WHERE id = $1", [g.channel.id]]);
   expect(begun).toEqual({ kind: 'refused', reasonCodes: ['channel_stopped'] });
   expect((await g.messageOf(messageId)).status).not.toBe('sending');
   expect((await pg.db.select().from(schema.outboundAttempts))[0]!.status).not.toBe('sending');
@@ -125,7 +135,7 @@ it('a refusal that commits first wins over a dispatch that waited for it, and gi
   const contact = await g.someone('no@shop.example');
   const { messageId } = await g.send(g.first, contact.id);
   expect((await reserveDispatch(g.first.ctx, messageId, 1)).kind).toBe('reserved');
-  const begun = await holding(pg, 'outbound_contacts', contact.id, () => beginDispatch(g.second.ctx, messageId, 1), 'UPDATE outbound_contacts SET do_not_contact = true, suppressed_at = now() WHERE id = $1');
+  const begun = await holding(pg, rowHeld('outbound_contacts', contact.id), () => beginDispatch(g.second.ctx, messageId, 1), ['UPDATE outbound_contacts SET do_not_contact = true, suppressed_at = now() WHERE id = $1', [contact.id]]);
   expect(begun).toEqual({ kind: 'refused', reasonCodes: ['contact_suppressed'] });
   expect((await g.messageOf(messageId)).status).toBe('cancelled');
   expect(reservedAt(await g.usage())).toEqual([0, 0]);

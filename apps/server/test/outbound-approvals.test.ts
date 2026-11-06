@@ -2,9 +2,9 @@ import { randomUUID } from 'node:crypto';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { modelChecks, outboundAccounts, outboundApprovals, outboundBindings, outboundChannels, requests, tasks } from '../src/db/schema.js';
+import { modelChecks, outboundAccounts, outboundApprovals, outboundBindings, outboundChannels, requests, supportClassifications, supportTickets, tasks } from '../src/db/schema.js';
 import { approvalNeed, authorityFingerprint } from '../src/modules/outbound/approvals.js';
-import { recordReview, reserveDispatch } from '../src/modules/outbound/core.js';
+import { admit, recordReview, reserveDispatch } from '../src/modules/outbound/core.js';
 import { ask } from '../src/modules/tasks/engine.js';
 import { as } from './helpers.js';
 import { binding as checkBinding } from './model-check-fixture.js';
@@ -373,5 +373,41 @@ describe('the hook on asking', () => {
     let seen = '';
     const moved = await ask(w.ctx, w.c.worker.id, w.c.task.id, { kind: 'approval', text: 'Send?', approval: { channel: 'message', kind: 'x', amount: null }, onCreated: async (_tx, request) => { seen = request.id; } });
     expect(seen).toBe(moved.request.id);
+  });
+});
+
+describe('a reply to a ticket', () => {
+  const READY = { status: 'ready', classId: 'refund', reviewer: { providerId: 'codex', vendorId: 'openai', modelId: 'm', revisionId: 'r', inferenceConfigHash: sha('config') }, decidedAt: new Date() } as const;
+  type Decided = { status: 'pending' } | (typeof READY & { requiresHuman: boolean });
+
+  /* A reply to a ticket the server's classifier decided this way. */
+  async function aReply(w: World, decided: Decided) {
+    const ticketId = randomUUID();
+    await w.c.db.insert(supportTickets).values({ companyId: w.c.companyId, departmentId: w.c.dev.id, ticketId, revision: 1, contactId: w.contact.id, textEnc: 'sealed', digest: sha('ticket') });
+    const [classification] = await w.c.db.insert(supportClassifications).values({ companyId: w.c.companyId, ticketId, ticketRevision: 1, ticketDigest: sha('ticket'), bindingDigest: sha('binding'), idempotencyKey: randomUUID(), ...decided }).returning();
+    return admit(w.ctx, w.authority, { ...w.input(), segmentId: null, target: { kind: 'ticket', contactId: w.contact.id, ticketId, ticketRevision: 1, classificationId: classification!.id } });
+  }
+
+  it('goes by the rules when its class wants no person', async () => {
+    const w = await world();
+    const { status, messageId } = await aReply(w, { ...READY, requiresHuman: false });
+    expect(status).toBe('scheduled');
+    expect(await openRequests(w)).toEqual([]);
+    expect((await dispatched(w, messageId, NOON)).kind).toBe('begun');
+  });
+
+  it('asks a person about this very reply when its class wants one, whatever the rules let go', async () => {
+    const w = await world();
+    const { status, reasonCodes, messageId } = await aReply(w, { ...READY, requiresHuman: true });
+    expect({ status, reasonCodes }).toEqual({ status: 'waiting_approval', reasonCodes: ['approval_required'] });
+    expect(await bindingsOf(w)).toMatchObject([{ kind: 'message', messageId }]);
+    expect(await reserveDispatch(w.ctx, messageId, 1, NOON)).toEqual(APPROVAL_REQUIRED);
+    expect((await answerAs(w, w.c.ceoToken, (await requestOf(w)).id, true)).statusCode).toBe(200);
+    expect((await dispatched(w, messageId, NOON)).kind).toBe('begun');
+  });
+
+  it('asks a person when the classifier has not decided', async () => {
+    const w = await world();
+    expect((await aReply(w, { status: 'pending' })).status).toBe('waiting_approval');
   });
 });
