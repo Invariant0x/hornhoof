@@ -8,7 +8,7 @@ import { requirePerson } from '../../auth/session.js';
 import type { Db } from '../../db/client.js';
 import { agents, attachments, departments, requests, tasks, turns, type RequestOption } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { jobOf, type ToolJob } from '../tools/job.js';
+import { jobOf, type RunJob } from '../tools/job.js';
 import { agentCasePicture, personCasePicture, sendCasePicture } from '../program-operator/attachments.js';
 import { mayOpenRequest } from './decisions.js';
 import { refuse, type Task } from './engine.js';
@@ -60,8 +60,8 @@ export const encodedHint = (task?: number) =>
   `This text carries an encoded file. Put the file on ${task ? `the task with hh-attach --task ${task} FILE` : 'the task it is for with hh-attach --task <task number> FILE'} and write its name instead: anyone downloads it with hh-fetch.`;
 
 /* An agent works on a task when it runs the company, the task is its department's, or it holds, does, checks or made it. */
-export const onTask = (job: ToolJob, t: Task) =>
-  job.agentKind === 'orchestrator' || (job.departmentId !== null && t.departmentId === job.departmentId) || [t.assigneeAgentId, t.executorAgentId, t.createdByAgentId, ...t.gates, ...t.panel].includes(job.agentId);
+export const onTask = (job: RunJob, t: Task) =>
+  job.agentKind === 'orchestrator' || (job.departmentId != null && t.departmentId === job.departmentId) || [t.assigneeAgentId, t.executorAgentId, t.createdByAgentId, ...t.gates, ...t.panel].includes(job.agentId);
 
 /* The files on a task, the newest under each name, without their bytes. */
 export async function filesOf(db: Db, taskId: string): Promise<{ id: string; name: string; size: number; agentId: string; personId: string | null; at: Date }[]> {

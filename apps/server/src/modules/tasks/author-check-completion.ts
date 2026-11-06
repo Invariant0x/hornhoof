@@ -50,7 +50,7 @@ async function complete(ctx: Ctx, run: typeof testRuns.$inferSelect, task: Task,
   const output = parts.map(part => part.tail).filter(Boolean).join('\n') || `Author check ${run.number} ended without a structured result.`;
   const failures = events.filter(event => outcomeRun(event.data)?.status === 'failed').length;
   const outcome: AuthorCheckOutcome = { version: 1, runId: run.id, attempt: failures + 1, status: 'failed', reason: printed ? quality?.status ?? 'record-unavailable' : 'output-unavailable' };
-  if (printed && run.status === 'passed' && (quality?.status === 'passed' || quality.status === 'partial')) {
+  if (printed && run.status === 'passed' && quality && (quality.status === 'passed' || quality.status === 'partial')) {
     const review = await captureReview(ctx, task, { baseCommit: pending.baseCommit, authorCheckPlan: pending.authorCheckPlan });
     if (review?.commit === run.commitSha) {
       const accepted: AuthorCheckOutcome = { ...outcome, status: quality.status, reason: null };

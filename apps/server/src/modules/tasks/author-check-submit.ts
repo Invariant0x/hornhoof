@@ -3,7 +3,7 @@ import { and, desc, eq } from 'drizzle-orm';
 import type { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { taskEvents, testRuns } from '../../db/schema.js';
-import type { ToolJob } from '../tools/job.js';
+import type { RunJob } from '../tools/job.js';
 import { startRun } from '../testruns/runs.js';
 import { loadTask, move, refuse, submissionTask, submit, type Moved, type Task } from './engine.js';
 import { AuthorCheckPending, pendingSubmission, type PendingSubmission } from './author-check-pending.js';
@@ -12,7 +12,7 @@ import { captureReview, type ReviewSubmission } from './review-context.js';
 
 export type AuthorCheckSubmission = { summary: string; evidence: string; review?: z.infer<typeof ReviewSubmission> };
 
-export async function submitWithAuthorCheck(ctx: Ctx, job: Pick<ToolJob, 'id' | 'companyId' | 'agentId' | 'agentKind' | 'departmentId'>, taskId: string, input: AuthorCheckSubmission): Promise<Moved> {
+export async function submitWithAuthorCheck(ctx: Ctx, job: RunJob, taskId: string, input: AuthorCheckSubmission): Promise<Moved> {
   if (!ctx.config.authorCheck || !input.review?.authorCheckPlan) return submit(ctx, job.agentId, taskId, input);
   const pending = await samePending(ctx, taskId, input);
   if (pending) return { task: pending, wakes: [] };

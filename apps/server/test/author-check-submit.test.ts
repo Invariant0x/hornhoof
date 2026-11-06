@@ -71,6 +71,16 @@ describe('author check on submit', () => {
     expect((await currentTask(f)).externalWait).toBeNull();
   });
 
+  it('reads a structured result larger than the part tail from the stored log', async () => {
+    const f = await qualityFixture({ NODE_KEY });
+    f.app.ctx.config.authorCheck = true;
+    const node = await nodeOf(f);
+    const paths = Array.from({ length: 10 }, (_, index) => `${index}/${'a'.repeat(480)}.ts`);
+    await finish(f, node, input(), authorLine(undefined, SHA, paths), true, 0);
+    const [submitted] = await f.db.select().from(taskEvents).where(and(eq(taskEvents.taskId, f.task.id), eq(taskEvents.kind, 'submitted')));
+    expect(submitted).toMatchObject({ data: { review: { quality: { status: 'partial', record: { scope: { paths } } } } });
+  });
+
   it('returns a red lint result to the author without a second run or attempt on repeat', async () => {
     const f = await qualityFixture({ NODE_KEY });
     f.app.ctx.config.authorCheck = true;
@@ -161,7 +171,7 @@ async function finish(f: Fixture, node: FakeNode, submission: ReturnType<typeof 
   return { run: run! };
 }
 
-function authorLine(failedStage?: string, commit = SHA) {
+function authorLine(failedStage?: string, commit = SHA, paths = ['logic/totals.ts']) {
   const stages = ['format', 'lint', 'types', 'tests', 'crapper', 'dryer'].map(name => ({
     name,
     status: name === failedStage ? 'failed' : name === 'format' ? 'unavailable' : 'passed',
@@ -169,7 +179,7 @@ function authorLine(failedStage?: string, commit = SHA) {
     partId: null,
   }));
   return `AUTHOR_CHECK ${JSON.stringify({
-    version: 1, submissionCommit: commit, checkCommit: commit, scope: { kind: 'changed', paths: ['logic/totals.ts'] }, stages,
+    version: 1, submissionCommit: commit, checkCommit: commit, scope: { kind: 'changed', paths }, stages,
     numbers: { tests: { passed: 12, failed: 0, skipped: 1, total: 13 }, changedLines: { covered: 18, total: 20 }, worstCrap: 6.5, dryerFlags: 2 },
   })}`;
 }

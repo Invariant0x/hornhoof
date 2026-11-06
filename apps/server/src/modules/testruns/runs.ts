@@ -21,7 +21,7 @@ import { endRunWaits, moveRunStage, recordRunWait } from '../tasks/wait-state.js
 import { keepWakes } from '../tasks/outbox.js';
 import { taskByRef } from '../tasks/views.js';
 import { wakeAll } from '../tasks/wake.js';
-import type { ToolJob } from '../tools/job.js';
+import type { RunJob, ToolJob } from '../tools/job.js';
 import { computerKey, computerState, Reservations, type ComputerPlace } from './capacity.js';
 import { markPromise, markRun, type RunMark } from './github-status.js';
 import { forRun, noteProductOwner, productPlaces, together } from './load.js';
@@ -397,7 +397,7 @@ async function settleRun(ctx: Ctx, runId: string): Promise<void> {
   if (!end) return;
   if ('authorCheck' in end) {
     const moved = await finishAuthorCheck(ctx, runId);
-    await toldSubmission(ctx, end.authorCheck, moved);
+    await toldSubmission(ctx, run.agentId, moved);
   } else await told(ctx, end);
 }
 
@@ -537,7 +537,7 @@ export async function checkTestTimes(ctx: Ctx, now = new Date()): Promise<void> 
 export type RunInput = { task?: number | string; branch?: string; command?: string; suite?: string; profile?: string; parts?: number; minutes?: number; files?: string[]; memory?: number; repeatable?: boolean; expectedCommit?: string; dedupe?: boolean };
 
 /* The task a run is for: the one named, else the one the turn is on. */
-async function taskFor(ctx: Ctx, job: Pick<ToolJob, 'id' | 'companyId' | 'agentId' | 'agentKind' | 'departmentId'>, ref: number | string | undefined, kind: RunKind): Promise<Task> {
+async function taskFor(ctx: Ctx, job: RunJob, ref: number | string | undefined, kind: RunKind): Promise<Task> {
   if (ref === undefined) {
     const [turn] = await ctx.db.select({ taskId: jobs.taskId }).from(jobs).where(eq(jobs.id, job.id));
     const [task] = turn?.taskId ? await ctx.db.select().from(tasks).where(eq(tasks.id, turn.taskId)) : [];
@@ -564,7 +564,7 @@ async function pinCommit(ctx: Ctx, task: Pick<Task, 'number'>, kind: RunKind, br
   return at;
 }
 
-export async function startRun(ctx: Ctx, job: Pick<ToolJob, 'id' | 'companyId' | 'agentId' | 'agentKind' | 'departmentId'>, input: RunInput, kind: RunKind = 'tests'): Promise<string> {
+export async function startRun(ctx: Ctx, job: RunJob, input: RunInput, kind: RunKind = 'tests'): Promise<string> {
   const mode = testRunMode(input, kind);
   const { db } = ctx;
   const task = await taskFor(ctx, job, input.task, kind);
@@ -719,7 +719,7 @@ export async function stopRun(ctx: Ctx, job: ToolJob, number: number, kind: RunK
   cancelDescription(ctx, run.environmentRequest);
   if ('authorCheck' in stopped) {
     const moved = await finishAuthorCheck(ctx, run.id);
-    await toldSubmission(ctx, stopped.authorCheck, moved);
+    await toldSubmission(ctx, run.agentId, moved);
   } else await told(ctx, stopped.end);
   await pumpTests(ctx);
   return `${named(run)} is stopped.`;
