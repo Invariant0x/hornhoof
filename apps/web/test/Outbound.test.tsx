@@ -86,7 +86,7 @@ const OVERVIEW = {
       revision: 1,
       contentDigest: '9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08',
       status: 'unknown' as const,
-      reasonCodes: ['unknown_delivery' as const],
+      reasonCodes: ['delivery_unknown' as const],
       scheduledAt: '2026-11-06T12:00:00.000Z',
       updatedAt: '2026-11-06T12:02:00.000Z',
       unknownRecovery: {
@@ -106,7 +106,7 @@ const OVERVIEW = {
       productId: null,
       status: 'escalated' as const,
       classId: 'refund_request',
-      reasonCodes: ['approval_required' as const],
+      reasonCodes: ['requires_human' as const],
       requestId: MSG_REQ_ID,
       taskId: TASK_ID,
       ownerPersonId: 'p2',
@@ -141,7 +141,6 @@ describe('Outbound screen, bound Requests snapshot, and routing (#447 T8-17)', (
       'GET /api/org': [200, ORG],
       'GET /api/decisions': [200, DECISIONS],
       'GET /api/improvements': [200, { improvements: [] }],
-      'GET /api/updates': [200, { current: '0.7.0', latest: null, cut: null }],
       'GET /api/version': [200, { version: '0.7.0', commit: 'abcdef0' }],
       'GET /api/outbound': [200, OVERVIEW],
     });

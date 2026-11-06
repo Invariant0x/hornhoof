@@ -1,4 +1,4 @@
-import type { CheckBinding, CheckInput, CheckReceipt, CheckUnavailable, ModelCheckKind, ModelIdentity, ProviderId } from '@hornhoof/protocol';
+import type { CheckBinding, CheckReceipt, CheckUnavailable, ModelCheckKind, ModelIdentity, ProviderId, ReviewInput } from '@hornhoof/protocol';
 import type { Ctx } from '../../app.js';
 import type { RunModelCheck } from '../model-checks/run.js';
 import type { ModelCheckPorts } from './ports.js';
@@ -60,7 +60,7 @@ export async function reviewOutboundMessageRevision(
     messageId: string;
     messageRevision: number;
     binding: CheckBinding;
-    input: Extract<CheckInput, { kind: 'outbound_review' | 'support_reply_review' }>;
+    input: ReviewInput;
   },
 ): Promise<CheckReceipt | CheckUnavailable> {
   return { kind: 'unavailable', code: 'unavailable' };

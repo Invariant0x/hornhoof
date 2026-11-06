@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
-import type { CheckBinding, CheckInput, ModelIdentity } from '@hornhoof/protocol';
+import type { CheckBinding, CheckInput, ModelIdentity, ReviewInput } from '@hornhoof/protocol';
 import { outboundReviewReceipts } from '../src/db/schema.js';
 import { bindingDigest } from '../src/modules/model-checks/lifecycle.js';
 import {
@@ -78,7 +78,7 @@ describe('independent-vendor fresh model checks (T8-09)', () => {
       getCertifiedCheck: async () => null,
       invoke,
     });
-    const input = reviewCase({ input: { ...reviewCase().input as Extract<CheckInput, { kind: 'outbound_review' }>, authorVendorId: 'anthropic' } }).input;
+    const input = reviewCase({ input: { ...(reviewCase().input as ReviewInput), authorVendorId: 'anthropic' } }).input;
     await expect(run(checkBinding, input)).resolves.toEqual({ kind: 'unavailable', code: 'uncertified' });
     expect(invoke).not.toHaveBeenCalled();
   });
@@ -96,7 +96,7 @@ describe('independent-vendor fresh model checks (T8-09)', () => {
     }));
     const run = createLiveModelCheckRunner({ getCertifiedCheck, invoke });
     const sameVendorInput: CheckInput = {
-      ...(reviewCase().input as Extract<CheckInput, { kind: 'outbound_review' }>),
+      ...(reviewCase().input as ReviewInput),
       authorVendorId: 'codex',
     };
     await expect(run(checkBinding, sameVendorInput)).resolves.toEqual({ kind: 'unavailable', code: 'vendor_conflict' });
@@ -113,7 +113,7 @@ describe('independent-vendor fresh model checks (T8-09)', () => {
       }),
     });
     const crossVendorInput: CheckInput = {
-      ...(reviewCase().input as Extract<CheckInput, { kind: 'outbound_review' }>),
+      ...(reviewCase().input as ReviewInput),
       authorVendorId: 'anthropic',
     };
     await expect(nonIsolated(checkBinding, crossVendorInput)).resolves.toEqual({ kind: 'unavailable', code: 'unavailable' });
@@ -134,7 +134,7 @@ describe('independent-vendor fresh model checks (T8-09)', () => {
   it('rejects malformed JSON, extra fields, wrong result kind, unknown taxonomy class, weakened requiresHuman and provider exceptions without leaking raw error text', async () => {
     const reviewBind = binding({ kind: 'outbound_review', model: OPENAI_MODEL });
     const reviewIn: CheckInput = {
-      ...(reviewCase().input as Extract<CheckInput, { kind: 'outbound_review' }>),
+      ...(reviewCase().input as ReviewInput),
       authorVendorId: 'anthropic',
     };
 
@@ -207,7 +207,7 @@ describe('independent-vendor fresh model checks (T8-09)', () => {
     });
     const runModelCheck = createLiveModelCheckRunner({ getCertifiedCheck, invoke });
 
-    const input: Extract<CheckInput, { kind: 'outbound_review' }> = {
+    const input: ReviewInput = {
       schemaVersion: 1,
       kind: 'outbound_review',
       locale: 'en',

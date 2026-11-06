@@ -1225,11 +1225,10 @@ const styleBookSources = (book: string): string[] => [
 ];
 
 describe('outbound and support gateway templates', () => {
-  it('routes sales, marketing and support skills through the server-checked outbound gateway and department owner', async () => {
-    const loaded = await loadTemplates();
-    const sal = loaded.skills.get('sal-outbound-approval')?.body ?? '';
-    const mkt = loaded.skills.get('mkt-publish-approval')?.body ?? '';
-    const sup = loaded.skills.get('sup-support-policy')?.body ?? '';
+  it('routes sales, marketing and support skills through the server-checked outbound gateway and department owner', () => {
+    const sal = templates.skills.get('sal-outbound-approval')?.body ?? '';
+    const mkt = templates.skills.get('mkt-publish-approval')?.body ?? '';
+    const sup = templates.skills.get('sup-support-policy')?.body ?? '';
 
     for (const [id, body] of [
       ['sal-outbound-approval', sal],
@@ -1254,26 +1253,21 @@ describe('outbound and support gateway templates', () => {
     expect(sup).toMatch(/\b(?:never|do not)\b[^.!?]*\b(?:refund|price|legal|contract|delivery[- ]date)\b/i);
   });
 
-  it('aligns all four support role templates with separate classification, catalog replies, and owner escalation', async () => {
-    const loaded = await loadTemplates();
-    const supportDept = loaded.departments.get('support');
-    expect(supportDept).toBeDefined();
-    const byId = new Map(supportDept!.roles.map(r => [r.id, r]));
-
-    expect(byId.get('SUP-T2')?.effort).toBe('high');
+  it('aligns all four support role templates with separate classification, catalog replies, and owner escalation', () => {
+    expect(templates.roles.get('SUP-T2')?.effort).toBe('high');
     for (const id of ['SUP-HEAD', 'SUP-KB', 'SUP-T1', 'SUP-T2'] as const) {
-      const role = byId.get(id)!;
+      const role = templates.roles.get(id)!;
       expect(role, id).toBeDefined();
       expect(role.body.length, id).toBeLessThanOrEqual(600);
       expect(role.body, id).not.toMatch(INCIDENT_OR_BRAND_LEAK_RE);
       expect(role.body, id).not.toMatch(/[\u0451\u0401\u2014]/);
     }
 
-    expect(byId.get('SUP-T1')!.body).toMatch(/"support_classify"/);
-    expect(byId.get('SUP-T1')!.body).toMatch(/"support_submit"/);
-    expect(byId.get('SUP-T2')!.body).toMatch(/"support_classify"/);
-    expect(byId.get('SUP-T2')!.body).toMatch(/\bdepartment owner\b/i);
-    expect(byId.get('SUP-KB')!.body).toMatch(/\bcatalog\b/i);
-    expect(byId.get('SUP-HEAD')!.body).toMatch(/\bdepartment owner\b/i);
+    expect(templates.roles.get('SUP-T1')!.body).toMatch(/"support_classify"/);
+    expect(templates.roles.get('SUP-T1')!.body).toMatch(/"support_submit"/);
+    expect(templates.roles.get('SUP-T2')!.body).toMatch(/"support_classify"/);
+    expect(templates.roles.get('SUP-T2')!.body).toMatch(/\bdepartment owner\b/i);
+    expect(templates.roles.get('SUP-KB')!.body).toMatch(/\bcatalog\b/i);
+    expect(templates.roles.get('SUP-HEAD')!.body).toMatch(/\bdepartment owner\b/i);
   });
 });

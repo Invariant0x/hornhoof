@@ -1,14 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { canonicalJson } from '@hornhoof/protocol';
-import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { encryptSecret } from '../src/crypto/secrets.js';
 import {
-  agents,
   outboundAccounts,
   outboundApprovals,
+  outboundAttempts,
   outboundBindings,
-  outboundCatalogEntries,
   outboundCatalogRevisions,
   outboundChannels,
   outboundContacts,
@@ -16,16 +14,16 @@ import {
   outboundMessageRevisions,
   outboundMessages,
   outboundPolicies,
-  outboundSegments,
-  outboundSendAttempts,
   requests,
   supportClassifications,
   supportTickets,
 } from '../src/db/schema.js';
 import type { SealedPayload } from '../src/modules/outbound/ports.js';
 import { outboundViewRoutes } from '../src/modules/outbound/views.js';
-import { company, type Company } from './department-owner-fixture.js';
+import { company } from './department-owner-fixture.js';
 import { POLICY, sha } from './outbound-fixture.js';
+
+type Company = Awaited<ReturnType<typeof company>>;
 
 const NOW = new Date('2026-11-06T12:00:00.000Z');
 const SECRET_CFG = 'SECRET_CFG_MARKER_991_SMTP_PASSWORD';
@@ -43,70 +41,66 @@ async function seedOutboundViewWorld() {
   const c = await company();
   current = c;
   outboundViewRoutes(c.app, c.app.ctx);
-  await c.setOwner(c.sales, c.ids.dana);
-  await c.db.update(agents).set({ departmentId: c.sales }).where(eq(agents.id, c.worker));
-  const taskId = await c.task({ department: c.sales, assignee: c.worker, title: 'Send verified updates' });
+  await c.setOwner(c.ceoToken, c.sales.id, c.ids.sam);
 
   const [channel] = await c.db
     .insert(outboundChannels)
     .values({
       companyId: c.companyId,
-      departmentId: c.sales,
+      departmentId: c.sales.id,
       name: 'Sales Mail',
       adapter: 'smtp',
       purpose: 'first_contact',
       audience: 'direct',
       status: 'active',
-      createdBy: c.ids.dana,
+      createdBy: c.ids.sam,
     })
     .returning();
   const [policy] = await c.db
     .insert(outboundPolicies)
-    .values({ companyId: c.companyId, channelId: channel!.id, revision: 1, digest: sha('sales-policy-1'), value: POLICY, createdBy: c.ids.dana })
+    .values({ companyId: c.companyId, channelId: channel!.id, revision: 1, digest: sha('sales-policy-1'), value: POLICY, createdBy: c.ids.sam })
     .returning();
   const [account] = await c.db
     .insert(outboundAccounts)
     .values({
       companyId: c.companyId,
-      departmentId: c.sales,
+      departmentId: c.sales.id,
       channelId: channel!.id,
       senderDomain: 'mail.acme.example',
       label: 'Sales Primary',
-      configEnc: encryptSecret(JSON.stringify({ smtpPassword: SECRET_CFG }), c.app.ctx.config.secretKey),
-      createdBy: c.ids.dana,
+      configEnc: encryptSecret(JSON.stringify({ smtpPassword: SECRET_CFG }), c.app.ctx.config.secret),
+      createdBy: c.ids.sam,
     })
     .returning();
-  await c.db.insert(outboundBindings).values({ companyId: c.companyId, accountId: account!.id, agentId: c.worker, generation: 2, createdBy: c.ids.dana });
+  await c.db.insert(outboundBindings).values({ companyId: c.companyId, accountId: account!.id, agentId: c.seller.id, generation: 2, createdBy: c.ids.sam });
 
   const [contact] = await c.db
     .insert(outboundContacts)
     .values({
       companyId: c.companyId,
       kind: 'email',
-      addressEnc: encryptSecret(SECRET_PII, c.app.ctx.config.secretKey),
+      addressEnc: encryptSecret(SECRET_PII, c.app.ctx.config.secret),
       addressHash: sha(SECRET_PII),
     })
     .returning();
 
-  const [tplEntry] = await c.db
-    .insert(outboundCatalogEntries)
-    .values({ companyId: c.companyId, departmentId: c.sales, kind: 'template', slug: 'intro-en', createdBy: c.ids.dana })
-    .returning();
+  const tplId = randomUUID();
   const tplValue = {
     kind: 'template' as const,
+    locale: 'en',
     subject: 'Quarterly plan overview',
     parts: [
       { kind: 'text' as const, text: 'Plan price: ' },
-      { kind: 'slot' as const, slotId: 'p1', type: 'price' as const },
+      { kind: 'slot' as const, slotId: randomUUID(), type: 'price' as const },
       { kind: 'text' as const, text: '\nDetails: ' },
-      { kind: 'slot' as const, slotId: 'l1', type: 'link' as const },
+      { kind: 'slot' as const, slotId: randomUUID(), type: 'link' as const },
     ],
   };
   await c.db.insert(outboundCatalogRevisions).values({
     companyId: c.companyId,
-    entryId: tplEntry!.id,
+    entryId: tplId,
     revision: 3,
-    departmentId: c.sales,
+    departmentId: c.sales.id,
     kind: 'template',
     locale: 'en',
     status: 'published',
@@ -114,15 +108,12 @@ async function seedOutboundViewWorld() {
     digest: sha(canonicalJson(tplValue)),
     validFrom: new Date('2026-11-01T00:00:00.000Z'),
     createdByKind: 'person',
-    createdById: c.ids.dana,
-    approvedBy: c.ids.dana,
-    approvedAt: NOW,
+    createdById: c.ids.sam,
+    publishedBy: c.ids.sam,
+    publishedAt: NOW,
   });
 
-  const [priceEntry] = await c.db
-    .insert(outboundCatalogEntries)
-    .values({ companyId: c.companyId, departmentId: c.sales, kind: 'price', slug: 'pro-monthly', createdBy: c.ids.dana })
-    .returning();
+  const priceId = randomUUID();
   const priceValue = {
     kind: 'price' as const,
     amount: '29.00',
@@ -136,9 +127,9 @@ async function seedOutboundViewWorld() {
   };
   await c.db.insert(outboundCatalogRevisions).values({
     companyId: c.companyId,
-    entryId: priceEntry!.id,
+    entryId: priceId,
     revision: 2,
-    departmentId: c.sales,
+    departmentId: c.sales.id,
     kind: 'price',
     locale: null,
     status: 'published',
@@ -146,21 +137,18 @@ async function seedOutboundViewWorld() {
     digest: sha(canonicalJson(priceValue)),
     validFrom: new Date('2026-11-01T00:00:00.000Z'),
     createdByKind: 'person',
-    createdById: c.ids.dana,
-    approvedBy: c.ids.dana,
-    approvedAt: NOW,
+    createdById: c.ids.sam,
+    publishedBy: c.ids.sam,
+    publishedAt: NOW,
   });
 
-  const [linkEntry] = await c.db
-    .insert(outboundCatalogEntries)
-    .values({ companyId: c.companyId, departmentId: c.sales, kind: 'link', slug: 'pricing-page', createdBy: c.ids.dana })
-    .returning();
+  const linkId = randomUUID();
   const linkValue = { kind: 'link' as const, url: 'https://acme.example/pricing' };
   await c.db.insert(outboundCatalogRevisions).values({
     companyId: c.companyId,
-    entryId: linkEntry!.id,
+    entryId: linkId,
     revision: 1,
-    departmentId: c.sales,
+    departmentId: c.sales.id,
     kind: 'link',
     locale: null,
     status: 'published',
@@ -168,23 +156,37 @@ async function seedOutboundViewWorld() {
     digest: sha(canonicalJson(linkValue)),
     validFrom: new Date('2026-11-01T00:00:00.000Z'),
     createdByKind: 'person',
-    createdById: c.ids.dana,
-    approvedBy: c.ids.dana,
-    approvedAt: NOW,
+    createdById: c.ids.sam,
+    publishedBy: c.ids.sam,
+    publishedAt: NOW,
   });
 
-  const [segment] = await c.db
-    .insert(outboundSegments)
-    .values({ companyId: c.companyId, departmentId: c.sales, revision: 1, name: 'Verified retail leads', digest: sha('seg-1'), createdBy: c.ids.dana })
-    .returning();
+  const segmentId = randomUUID();
+  const segmentValue = { kind: 'segment' as const, name: 'Verified retail leads' };
+  await c.db.insert(outboundCatalogRevisions).values({
+    companyId: c.companyId,
+    entryId: segmentId,
+    revision: 1,
+    departmentId: c.sales.id,
+    kind: 'segment',
+    locale: null,
+    status: 'published',
+    value: segmentValue,
+    digest: sha(canonicalJson(segmentValue)),
+    validFrom: new Date('2026-11-01T00:00:00.000Z'),
+    createdByKind: 'person',
+    createdById: c.ids.sam,
+    publishedBy: c.ids.sam,
+    publishedAt: NOW,
+  });
 
   const [waitingMsg] = await c.db
     .insert(outboundMessages)
     .values({
       companyId: c.companyId,
-      departmentId: c.sales,
-      taskId,
-      authorAgentId: c.worker,
+      departmentId: c.sales.id,
+      taskId: c.salesTask.id,
+      authorAgentId: c.seller.id,
       idempotencyKey: randomUUID(),
       requestDigest: sha('req-1'),
       channelId: channel!.id,
@@ -192,7 +194,7 @@ async function seedOutboundViewWorld() {
       bindingGeneration: 2,
       targetKind: 'contact',
       contactId: contact!.id,
-      segmentId: segment!.id,
+      segmentId,
       status: 'waiting_approval',
       reasonCodes: ['approval_required'],
       scheduledAt: NOW,
@@ -212,16 +214,16 @@ async function seedOutboundViewWorld() {
     revision: 1,
     document: {
       locale: 'en',
-      templateId: tplEntry!.id,
+      templateId: tplId,
       templateRevision: 3,
       blocks: [
-        { kind: 'price', id: priceEntry!.id, revision: 2 },
-        { kind: 'link', id: linkEntry!.id, revision: 1 },
+        { kind: 'price', id: priceId, revision: 2 },
+        { kind: 'link', id: linkId, revision: 1 },
       ],
       variables: [],
     },
     contentDigest,
-    sealedEnc: encryptSecret(canonicalJson(sealedPayload), c.app.ctx.config.secretKey),
+    sealedEnc: encryptSecret(canonicalJson(sealedPayload), c.app.ctx.config.secret),
     sourceRevisionsDigest: sourcesDigest,
     policyId: policy!.id,
     policyDigest: policy!.digest,
@@ -231,8 +233,8 @@ async function seedOutboundViewWorld() {
     .insert(requests)
     .values({
       companyId: c.companyId,
-      taskId,
-      agentId: c.worker,
+      taskId: c.salesTask.id,
+      agentId: c.seller.id,
       kind: 'approval',
       text: 'Approve outbound message to verified retail lead',
       decisionTopic: 'department',
@@ -251,15 +253,15 @@ async function seedOutboundViewWorld() {
     bindingGeneration: 2,
     policyDigest: policy!.digest,
     sourceRevisionsDigest: sourcesDigest,
-    authorityFingerprint: sha('dana-sales-owner'),
+    authorityFingerprint: sha('sam-sales-owner'),
   });
 
   const [approachReq] = await c.db
     .insert(requests)
     .values({
       companyId: c.companyId,
-      taskId,
-      agentId: c.worker,
+      taskId: c.salesTask.id,
+      agentId: c.seller.id,
       kind: 'approval',
       text: 'Approve outbound approach for Verified retail leads',
       decisionTopic: 'department',
@@ -272,22 +274,22 @@ async function seedOutboundViewWorld() {
     requestId: approachReq!.id,
     kind: 'approach',
     channelId: channel!.id,
-    templateId: tplEntry!.id,
+    templateId: tplId,
     templateRevision: 3,
-    segmentId: segment!.id,
+    segmentId,
     locale: 'en',
     policyDigest: policy!.digest,
     sourceRevisionsDigest: sourcesDigest,
-    authorityFingerprint: sha('dana-sales-owner'),
+    authorityFingerprint: sha('sam-sales-owner'),
   });
 
   const [unknownMsg] = await c.db
     .insert(outboundMessages)
     .values({
       companyId: c.companyId,
-      departmentId: c.sales,
-      taskId,
-      authorAgentId: c.worker,
+      departmentId: c.sales.id,
+      taskId: c.salesTask.id,
+      authorAgentId: c.seller.id,
       idempotencyKey: randomUUID(),
       requestDigest: sha('req-unknown'),
       channelId: channel!.id,
@@ -295,9 +297,9 @@ async function seedOutboundViewWorld() {
       bindingGeneration: 2,
       targetKind: 'contact',
       contactId: contact!.id,
-      segmentId: segment!.id,
+      segmentId,
       status: 'unknown',
-      reasonCodes: ['unknown_delivery'],
+      reasonCodes: ['delivery_unknown'],
       scheduledAt: NOW,
     })
     .returning();
@@ -305,22 +307,69 @@ async function seedOutboundViewWorld() {
     companyId: c.companyId,
     messageId: unknownMsg!.id,
     revision: 1,
-    document: { locale: 'en', templateId: tplEntry!.id, templateRevision: 3, blocks: [], variables: [] },
+    document: { locale: 'en', templateId: tplId, templateRevision: 3, blocks: [], variables: [] },
     contentDigest: sha('unknown-bytes'),
-    sealedEnc: encryptSecret(canonicalJson(sealedPayload), c.app.ctx.config.secretKey),
+    sealedEnc: encryptSecret(canonicalJson(sealedPayload), c.app.ctx.config.secret),
     sourceRevisionsDigest: sourcesDigest,
     policyId: policy!.id,
     policyDigest: policy!.digest,
   });
+  const [sentMsg] = await c.db
+    .insert(outboundMessages)
+    .values({
+      companyId: c.companyId,
+      departmentId: c.sales.id,
+      taskId: c.salesTask.id,
+      authorAgentId: c.seller.id,
+      idempotencyKey: randomUUID(),
+      requestDigest: sha('req-sent'),
+      channelId: channel!.id,
+      accountId: account!.id,
+      bindingGeneration: 2,
+      targetKind: 'contact',
+      contactId: contact!.id,
+      segmentId,
+      status: 'sent',
+      reasonCodes: [],
+      scheduledAt: NOW,
+    })
+    .returning();
+  await c.db.insert(outboundMessageRevisions).values({
+    companyId: c.companyId,
+    messageId: sentMsg!.id,
+    revision: 1,
+    document: { locale: 'en', templateId: tplId, templateRevision: 3, blocks: [], variables: [] },
+    contentDigest: sha('sent-bytes'),
+    sealedEnc: encryptSecret(canonicalJson(sealedPayload), c.app.ctx.config.secret),
+    sourceRevisionsDigest: sourcesDigest,
+    policyId: policy!.id,
+    policyDigest: policy!.digest,
+  });
+
   const [acctBucket] = await c.db
     .insert(outboundDailyUsage)
-    .values({ companyId: c.companyId, scope: 'account', scopeKey: account!.id, day: '2026-11-06', timezone: 'Europe/Lisbon', reserved: 1, limitVersion: 1 })
+    .values({ companyId: c.companyId, scope: 'account', scopeKey: account!.id, day: '2026-11-06', timezone: 'Europe/Lisbon', reserved: 1, unknown: 1, accepted: 1, limitVersion: 1 })
     .returning();
   const [domBucket] = await c.db
     .insert(outboundDailyUsage)
-    .values({ companyId: c.companyId, scope: 'domain', scopeKey: account!.senderDomain, day: '2026-11-06', timezone: 'Europe/Lisbon', reserved: 1, limitVersion: 1 })
+    .values({ companyId: c.companyId, scope: 'domain', scopeKey: account!.senderDomain, day: '2026-11-06', timezone: 'Europe/Lisbon', reserved: 1, unknown: 1, accepted: 1, limitVersion: 1 })
     .returning();
-  await c.db.insert(outboundSendAttempts).values({
+  await c.db.insert(outboundAttempts).values({
+    companyId: c.companyId,
+    messageId: sentMsg!.id,
+    messageRevision: 1,
+    accountId: account!.id,
+    bindingGeneration: 2,
+    configGeneration: 1,
+    channelGeneration: 1,
+    accountBucketId: acctBucket!.id,
+    domainBucketId: domBucket!.id,
+    status: 'accepted',
+    providerReceipt: SECRET_PROVIDER_RECEIPT,
+    startedAt: NOW,
+    endedAt: NOW,
+  });
+  await c.db.insert(outboundAttempts).values({
     companyId: c.companyId,
     messageId: unknownMsg!.id,
     messageRevision: 1,
@@ -332,21 +381,22 @@ async function seedOutboundViewWorld() {
     domainBucketId: domBucket!.id,
     status: 'unknown',
     safeCode: 'timeout',
-    providerReceipt: SECRET_PROVIDER_RECEIPT,
     startedAt: NOW,
     endedAt: NOW,
   });
 
+  const ticketUuid = randomUUID();
   const [ticket] = await c.db
     .insert(supportTickets)
     .values({
       companyId: c.companyId,
-      departmentId: c.sales,
-      ticketId: 'TKT-77',
+      departmentId: c.sales.id,
+      ticketId: ticketUuid,
       revision: 1,
       contactId: contact!.id,
       status: 'escalated',
-      textEnc: encryptSecret(SECRET_TICKET, c.app.ctx.config.secretKey),
+      externalRef: 'TKT-77',
+      textEnc: encryptSecret(SECRET_TICKET, c.app.ctx.config.secret),
       digest: sha(SECRET_TICKET),
     })
     .returning();
@@ -360,12 +410,18 @@ async function seedOutboundViewWorld() {
     status: 'ready',
     classId: 'refund_request',
     requiresHuman: true,
-    reasonCodes: ['approval_required'],
-    reviewer: { providerId: 'openai_api', vendorId: 'openai', modelId: 'gpt-5.4', modelRevision: 'gpt-5.4-2026-08-01' },
+    reasonCodes: ['requires_human'],
+    reviewer: {
+      providerId: 'openai_api',
+      vendorId: 'openai',
+      modelId: 'gpt-5-mini',
+      revisionId: 'gpt-5-mini-2026-10',
+      inferenceConfigHash: sha('cfg'),
+    },
     decidedAt: NOW,
   });
 
-  return { c, msgReq: msgReq!, approachReq: approachReq!, waitingMsg: waitingMsg!, unknownMsg: unknownMsg!, channel: channel!, account: account! };
+  return { c, msgReq: msgReq!, approachReq: approachReq!, waitingMsg: waitingMsg!, unknownMsg: unknownMsg!, ticketUuid, channel: channel!, account: account! };
 }
 
 describe('safe outbound & bound approval read views (#447 T8-17)', () => {
@@ -375,7 +431,7 @@ describe('safe outbound & bound approval read views (#447 T8-17)', () => {
     const overviewRes = await w.c.app.inject({
       method: 'GET',
       url: '/api/outbound',
-      headers: { cookie: w.c.danaToken },
+      headers: { cookie: w.c.samToken },
     });
     expect(overviewRes.statusCode).toBe(200);
     const overviewBody = overviewRes.body;
@@ -403,17 +459,17 @@ describe('safe outbound & bound approval read views (#447 T8-17)', () => {
 
     expect(dto.escalations).toHaveLength(1);
     expect(dto.escalations[0]).toMatchObject({
-      ticketId: 'TKT-77',
+      ticketId: w.ticketUuid,
       status: 'escalated',
       classId: 'refund_request',
       canAnswer: true,
-      ownerPersonId: w.c.ids.dana,
+      ownerPersonId: w.c.ids.sam,
     });
 
     const msgApprovalRes = await w.c.app.inject({
       method: 'GET',
       url: `/api/requests/${w.msgReq.id}/outbound-approval`,
-      headers: { cookie: w.c.danaToken },
+      headers: { cookie: w.c.samToken },
     });
     expect(msgApprovalRes.statusCode).toBe(200);
     for (const forbidden of [SECRET_CFG, SECRET_PII, SECRET_TICKET, 'ann@customer.example']) {
@@ -438,7 +494,7 @@ describe('safe outbound & bound approval read views (#447 T8-17)', () => {
     const approachRes = await w.c.app.inject({
       method: 'GET',
       url: `/api/requests/${w.approachReq.id}/outbound-approval`,
-      headers: { cookie: w.c.danaToken },
+      headers: { cookie: w.c.samToken },
     });
     expect(approachRes.statusCode).toBe(200);
     expect(approachRes.json()).toMatchObject({
@@ -474,19 +530,19 @@ describe('safe outbound & bound approval read views (#447 T8-17)', () => {
       decidedBy: { kind: 'owner_and_ceo' },
     });
 
-    const samOverview = await w.c.app.inject({
+    const danaOverview = await w.c.app.inject({
       method: 'GET',
-      url: `/api/outbound?department=${w.c.sales}`,
-      headers: { cookie: w.c.samToken },
+      url: `/api/outbound?department=${w.c.sales.id}`,
+      headers: { cookie: w.c.danaToken },
     });
-    expect(samOverview.statusCode).toBe(404);
+    expect(danaOverview.statusCode).toBe(404);
 
-    const samBound = await w.c.app.inject({
+    const danaBound = await w.c.app.inject({
       method: 'GET',
       url: `/api/requests/${w.msgReq.id}/outbound-approval`,
-      headers: { cookie: w.c.samToken },
+      headers: { cookie: w.c.danaToken },
     });
-    expect(samBound.statusCode).toBe(404);
+    expect(danaBound.statusCode).toBe(404);
 
     const anonBound = await w.c.app.inject({
       method: 'GET',
