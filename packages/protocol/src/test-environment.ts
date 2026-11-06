@@ -51,7 +51,8 @@ export const TestSplit = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('vitest-shard') }),
   z.strictObject({ kind: z.literal('whole-package') }),
 ]);
-export const TestSuite = z.strictObject({ id: Id, root: RepositoryPath, files: Inputs.min(1), run: Command, split: TestSplit, profiles: ProfileIds, finalChecks: z.array(Command).max(1000).optional() });
+/* scenarioSources: the code a suite drives without importing it, as browser scenarios drive screens. keep: what its runs leave for its next run. */
+export const TestSuite = z.strictObject({ id: Id, root: RepositoryPath, files: Inputs.min(1), run: Command, split: TestSplit, profiles: ProfileIds, finalChecks: z.array(Command).max(1000).optional(), scenarioSources: RepositoryPath.optional(), keep: z.array(RepositoryPath).max(16).optional() });
 export type TestSuite = z.infer<typeof TestSuite>;
 
 const MigrationCheck = z.discriminatedUnion('status', [
@@ -64,7 +65,9 @@ export const TestMutation = z.discriminatedUnion('status', [
 ]);
 const OncePreparation = z.strictObject({ profiles: ProfileIds, suiteIds: Ids, commands: z.array(Command).max(1000) })
   .refine(value => value.suiteIds.length + value.commands.length > 0, 'An explicit preparation must contain work.');
-const ExecutionPolicy = z.strictObject({ version: z.literal(2), oncePreparation: OncePreparation.optional() });
+/* A run of the profile it replaces, on a due turn, runs as profile and reuses nothing. */
+const FullRun = z.strictObject({ everyTurns: z.number().int().min(1).max(1000), replaces: Id, profile: Id });
+const ExecutionPolicy = z.strictObject({ version: z.literal(2), oncePreparation: OncePreparation.optional(), fullRun: FullRun.optional() });
 const EnvironmentShape = z.strictObject({
   version: z.literal(1), defaultProfile: Id,
   runtimes: z.array(z.strictObject({ id: Id, version: Text.max(100) })).max(64),
@@ -143,12 +146,20 @@ function oncePreparationReferences(env: EnvironmentShape, profiles: ReadonlySet<
     references(preparation.suiteIds, new Set(profile.requiredSuiteIds), [...path, 'suiteIds'], ctx);
   }
 }
+function fullRunReferences(env: EnvironmentShape, ctx: z.RefinementCtx): void {
+  const full = env.execution?.fullRun;
+  if (!full) return;
+  const path = ['execution', 'fullRun'], requiredOf = (id: string) => env.profiles.find(profile => profile.id === id)?.requiredSuiteIds;
+  const whole = requiredOf(full.profile), replaced = requiredOf(full.replaces);
+  if (!whole || !replaced || full.profile === full.replaces) { ctx.addIssue({ code: 'custom', path, message: 'A full run names two known profiles.' }); return; }
+  if (replaced.some(id => !whole.includes(id))) ctx.addIssue({ code: 'custom', path, message: 'A full run covers every suite of the profile it replaces.' });
+}
 function environmentReferences(env: EnvironmentShape, ctx: z.RefinementCtx): void {
   const profiles = identities(env.profiles, 'profiles', ctx), suites = identities(env.suites, 'suites', ctx), services = identities(env.services, 'services', ctx);
   reference(env.defaultProfile, profiles, ['defaultProfile'], ctx);
   requiredSuites(env, suites, ctx); serviceProfiles(env, profiles, ctx);
   preparations(env, profiles, services, ctx); suiteReferences(env, suites, profiles, ctx);
-  oncePreparationReferences(env, profiles, ctx);
+  oncePreparationReferences(env, profiles, ctx); fullRunReferences(env, ctx);
 }
 
 export const TEST_ENVIRONMENT_BYTES = 64 * 1024;
@@ -288,6 +299,22 @@ export const TestEnvironmentReceipt = z.union([
 ]).superRefine(descriptionSize);
 export type TestEnvironmentReceipt = z.infer<typeof TestEnvironmentReceipt>;
 
+/* One test file's digest of what its result depends on, at the pinned commit. */
+export const UnitFingerprint = z.strictObject({ suiteId: Id, file: RepositoryPath, fingerprint: EnvironmentDigest });
+export type UnitFingerprint = z.infer<typeof UnitFingerprint>;
+/* With a description at its own limit, they still fit one frame between a node and the server. */
+export const UnitFingerprints = z.array(UnitFingerprint).max(10_001).refine(prints => byteLength(JSON.stringify(prints)) <= 960 * 1024, 'The fingerprints exceed their limit.');
+/* What stands for the one explicit preparation among the units: its work depends on the whole tree. */
+export const PREPARATION_UNIT = { suiteId: 'hornhoof-preparation', file: '.hornhoof/test-environment.json' } as const;
+/* How one test file went, as its runner reported it. */
+export const FileOutcome = z.strictObject({ suiteId: Id, file: RepositoryPath, status: z.enum(['passed', 'failed']), ms: Duration.optional() });
+export type FileOutcome = z.infer<typeof FileOutcome>;
+export const KEPT_BYTES = 1024 * 1024;
+/* What a suite's run left for its next run, as its manifest's keep names it. */
+export const KeptFiles = z.array(z.strictObject({ suiteId: Id, files: z.array(z.strictObject({ path: RepositoryPath, text: z.string() })).max(1000) })).max(100)
+  .refine(kept => byteLength(JSON.stringify(kept)) <= KEPT_BYTES, 'Kept files exceed their limit.');
+export type KeptFiles = z.infer<typeof KeptFiles>;
+
 export const EnvironmentProblem = z.strictObject({
   code: z.enum(['environment_missing', 'environment_invalid', 'environment_unsupported', 'environment_too_large', 'runtime_missing', 'isolation_missing', 'commit_unavailable', 'description_mismatch', 'cancelled', 'timeout']),
   detail: Text.max(2000),
@@ -296,7 +323,7 @@ export type EnvironmentProblem = z.infer<typeof EnvironmentProblem>;
 export const TestsDescribed = z.strictObject({
   type: z.literal('tests.described'), requestId: z.uuid(), commitSha: ProductCommitSha,
   result: z.discriminatedUnion('status', [
-    z.strictObject({ status: z.literal('ready'), description: EnvironmentDescription }),
+    z.strictObject({ status: z.literal('ready'), description: EnvironmentDescription, fingerprints: UnitFingerprints.optional() }),
     z.strictObject({ status: z.literal('error'), problem: EnvironmentProblem }),
   ]),
 }).refine(value => value.result.status !== 'ready' || value.result.description.commitSha === value.commitSha, 'The described commit differs from the requested commit.').superRefine(descriptionSize);

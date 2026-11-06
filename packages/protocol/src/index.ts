@@ -15,11 +15,11 @@ export * from './test-terminals.js';
 export { HandoffMessage, HandoffControlMessage, HandoffAssignment, ResetSource } from './task-handoff.js';
 import { HandoffMessage, HandoffControlMessage, HandoffAssignment, ResetSource } from './task-handoff.js';
 export { COMMIT_SHA, CommitSha, ownBranch } from './test-commit.js';
-export { runtimeVersionMatches, requiredTestRuntimes, supportsTestProfile, EnvironmentProblem, TestsDescribed, EnvironmentDescription, EnvironmentSnapshot, InputDigest, ProductCommitSha, RuntimeCapability, TestExecution, TestUnit, TestEnvironmentReceipt, TEST_DESCRIPTION_BYTES, validateEnvironmentDescription, Command, EnvironmentDigest, RepositoryPath, RepositoryScope, TestArtifact, TestEnvironmentV1, TestMutation, TestPrepare, TestReset, TestService, TestSplit, TestSuite, TEST_ENVIRONMENT_BYTES, hashTestEnvironment, parseTestEnvironment } from './test-environment.js';
+export { runtimeVersionMatches, requiredTestRuntimes, supportsTestProfile, EnvironmentProblem, FileOutcome, KEPT_BYTES, KeptFiles, PREPARATION_UNIT, UnitFingerprint, UnitFingerprints, TestsDescribed, EnvironmentDescription, EnvironmentSnapshot, InputDigest, ProductCommitSha, RuntimeCapability, TestExecution, TestUnit, TestEnvironmentReceipt, TEST_DESCRIPTION_BYTES, validateEnvironmentDescription, Command, EnvironmentDigest, RepositoryPath, RepositoryScope, TestArtifact, TestEnvironmentV1, TestMutation, TestPrepare, TestReset, TestService, TestSplit, TestSuite, TEST_ENVIRONMENT_BYTES, hashTestEnvironment, parseTestEnvironment } from './test-environment.js';
 import { z } from 'zod';
 import { NodeExit, NodeLog } from './node-exit.js';
 import { CommitSha } from './test-commit.js';
-import { RepositoryScope, RuntimeCapability, ProductCommitSha, TestExecution, TestEnvironmentReceipt, TestsDescribed } from './test-environment.js';
+import { FileOutcome, KeptFiles, RepositoryScope, RuntimeCapability, ProductCommitSha, TestExecution, TestEnvironmentReceipt, TestsDescribed } from './test-environment.js';
 import { CheckAcquire, CheckRelease, CheckQueueReply } from './check-queue.js';
 import { PROVIDER_IDS, type ProviderId } from './providers.js';
 export { CHECK_LEASE_MS, checkCapacity, CheckSlotQueue, CheckQueueRequest, CheckQueueReply, type CheckOptions } from './check-queue.js';
@@ -484,6 +484,9 @@ const NodeMessage = z.discriminatedUnion('type', [
     commit: CommitSha.nullable(),
     log: z.string().max(TEST_LOG_BYTES + 1024),
     environmentReceipt: TestEnvironmentReceipt.optional(),
+    /* How each test file went, where its runner says; none means its suite's outcome is all that is known. */
+    files: z.array(FileOutcome).max(10_000).optional(),
+    kept: KeptFiles.optional(),
   }),
   z.object({
     type: z.literal('status'),
@@ -698,6 +701,8 @@ const ServerMessage = z.discriminatedUnion('type', [
     command: z.string().max(4000).default(''),
     repositoryScope: RepositoryScope.optional(),
     environment: TestExecution.optional(),
+    /* What the suites of this part left in their last run. */
+    kept: KeptFiles.optional(),
     part: z.number().int().min(1).max(MAX_TEST_PARTS),
     parts: z.number().int().min(1).max(MAX_TEST_PARTS),
     timeoutMs: z.number().int().positive().max(2 ** 31 - 1),
