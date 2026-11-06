@@ -160,6 +160,7 @@ test('real server closes an open terminal with 4403 when the plan moves', async 
   const server = await startServer();
   try {
     const ann = await signedIn(browser, server, 'ann', 'en', 'light', 1440);
+    await server.control('turn-mine-ann');
     const window = await openAgent(ann, 'Mina');
     await expect(window.locator('.xterm-screen')).toContainText('Mina private terminal');
     await server.control('move-mine-bob');
