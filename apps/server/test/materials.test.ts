@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
+import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { MaterialManifest } from '@hornhoof/protocol';
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
+import { hashToken } from '../src/crypto/tokens.js';
 import { agents, attachments, companies, departments, jobs, people, proposals, requestInternal, requests, taskEvents, tasks } from '../src/db/schema.js';
-import { as, invitePerson, ownPlan, setUpCompany, testApp } from './helpers.js';
+import { as, invitePerson, listen, mcp, openStream, ownPlan, setUpCompany, testApp, until } from './helpers.js';
 
 const PNG = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.alloc(64, 1)]);
 const PRIVATE = 'PRIVATE_MATERIAL_SOURCE_AND_RECIPIENTS';
@@ -142,5 +144,64 @@ describe('legacy scoped materials', () => {
     expect(response.json().error.reason).toBe('source_producer_unavailable');
     expect(response.body).not.toContain(f.common.id);
     expect((await f.db.select().from(requests).where(eq(requests.id, f.question.id)))[0]!.status).toBe('open');
+  });
+});
+
+type ToolReply = { content: { text: string }[]; isError?: boolean };
+const askTool = async (client: Client, args: Record<string, unknown>): Promise<ToolReply> =>
+  await client.callTool({ name: 'ask_person', arguments: args }) as ToolReply;
+
+async function intake() {
+  const f = await legacy();
+  await listen(f.app);
+  await f.db.update(tasks).set({ assigneeAgentId: f.author.id }).where(eq(tasks.id, f.task.id));
+  const token = `material-intake-${randomUUID()}`;
+  await f.db.insert(jobs).values({ companyId: f.company.id, subscriptionId: f.author.subscriptionId!, agentId: f.author.id, kind: 'conversation', prompt: 'Ask', timeoutMs: 900000, status: 'running', startedAt: new Date(), toolTokenHash: hashToken(token) });
+  const client = await mcp(f.app, token);
+  const state = async () => ({
+    task: await f.db.select().from(tasks).where(eq(tasks.id, f.task.id)),
+    requests: await f.db.select().from(requests).where(eq(requests.taskId, f.task.id)),
+    events: await f.db.select().from(taskEvents).where(eq(taskEvents.taskId, f.task.id)),
+    private: await f.db.select().from(requestInternal),
+  });
+  return { ...f, client, state };
+}
+
+describe('material intake through the real tool', () => {
+  it.each([
+    ['an exact commit without materials', { commit: 'a'.repeat(40) }],
+    ['an exact commit labelled action', { commit: 'a'.repeat(40), materials: { presentation: 'action', common: [], options: [] } }],
+    ['a result without material', { materials: { presentation: 'result', common: [], options: [] } }],
+    ['an uncovered result choice', { options: [{ label: 'A' }, { label: 'B' }], materials: { presentation: 'result', common: [{ kind: 'link', name: 'Context', url: 'https://example.com/context' }], options: [[], []] } }],
+  ] as const)('rejects %s without creating a request, wait or history', async (_name, input) => {
+    const f = await intake();
+    const before = await f.state();
+    const result = await askTool(f.client, { task: f.task.number, question: 'Review this result', ...input });
+    expect(result.isError).toBe(true);
+    expect(result.content.map(c => c.text).join('\n')).toContain('materials_required');
+    expect(await f.state()).toEqual(before);
+  });
+
+  it('refuses a positional mismatch without changing the canonical source', async () => {
+    const f = await intake();
+    const before = await f.state();
+    const result = await askTool(f.client, { task: f.task.number, question: 'Which result?', options: [{ label: 'A' }, { label: 'B' }], materials: { presentation: 'result', common: [], options: [[{ kind: 'link', name: 'Only A', url: 'https://example.com/a' }]] } });
+    expect(result.isError).toBe(true);
+    expect(result.content.map(c => c.text).join('\n')).toContain('materials_invalid');
+    expect(await f.state()).toEqual(before);
+  });
+
+  it('does not activate a private result producer or send SSE while its real authority port is unavailable', async () => {
+    const f = await intake();
+    const stream = await openStream(f.app, f.ceo);
+    expect(stream.res.status).toBe(200);
+    const before = await f.state();
+    const result = await askTool(f.client, { task: f.task.number, question: 'Review the result', materials: { presentation: 'result', common: [{ kind: 'link', name: 'Result', url: 'https://example.com/result' }], options: [] } });
+    expect(result.isError).toBe(true);
+    expect(result.content.map(c => c.text).join('\n')).toContain('not available');
+    expect(await f.state()).toEqual(before);
+    f.app.ctx.bus.publish(f.company.id, { type: 'working', working: 123 });
+    await until(() => stream.messages.some(m => m.type === 'working' && m.working === 123));
+    expect(stream.messages.filter(m => m.type !== 'working')).toEqual([]);
   });
 });
