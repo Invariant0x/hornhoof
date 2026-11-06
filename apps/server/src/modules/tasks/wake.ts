@@ -257,19 +257,11 @@ export async function wakeLeftBehind(ctx: Ctx, now = new Date()): Promise<number
 
 /* Requests reach their current addressee: a person through the orchestrator's plain words, or an internal stuck resolver
    directly. Typed into its turn when it works, else its own turn, one per request. */
-async function explainRequest(ctx: Ctx, w: Wake): Promise<void> {
-  const [found] = await ctx.db
-    .select({ request: requests, asker: agents.name, task: tasks })
-    .from(requests)
-    .innerJoin(agents, eq(agents.id, requests.agentId))
-    .innerJoin(tasks, eq(tasks.id, requests.taskId))
-    .where(eq(requests.id, w.text ?? ''));
-  if (!found || found.request.status !== 'open' || !(await liveSubscription(ctx, w.agentId))) return;
-  const { request, asker, task } = found;
+async function explanationText(ctx: Ctx, w: Wake, request: typeof requests.$inferSelect, asker: string, task: Task): Promise<string | null> {
   const ref = `#${task.number} "${task.title}"`;
   let text: string;
   if (request.kind === 'stuck' && request.audience === 'internal') {
-    if (request.triageAgentId !== w.agentId) return;
+    if (request.triageAgentId !== w.agentId) return null;
     const [recipient] = await ctx.db.select({ kind: agents.kind }).from(agents).where(eq(agents.id, w.agentId));
     const action = recipient?.kind === 'orchestrator'
       ? `Read the task, then close this request yourself with "answer_request" and request ${request.id}, with answer or retry true. Do not ask a person.`
@@ -283,6 +275,20 @@ async function explainRequest(ctx: Ctx, w: Wake): Promise<void> {
       `Then call "explain_request" with request ${request.id} and a few lines for the person, in the CEO's language and plain words without IT terms: ` +
       'which task and what for, what is needed from them and why, and the ways to go with what each leads to. Do not answer it yourself unless the CEO told you how.';
   }
+  return text;
+}
+
+async function explainRequest(ctx: Ctx, w: Wake): Promise<void> {
+  const [found] = await ctx.db
+    .select({ request: requests, asker: agents.name, task: tasks })
+    .from(requests)
+    .innerJoin(agents, eq(agents.id, requests.agentId))
+    .innerJoin(tasks, eq(tasks.id, requests.taskId))
+    .where(eq(requests.id, w.text ?? ''));
+  if (!found || found.request.status !== 'open' || !(await liveSubscription(ctx, w.agentId))) return;
+  const { request, asker, task } = found;
+  const text = await explanationText(ctx, w, request, asker, task);
+  if (text === null) return;
   const cause = request.kind === 'stuck' ? w.cause : { actor: { agentId: request.agentId }, action: 'asked people', task: { id: task.id, number: task.number } };
   const notice = await wakeNotice(ctx, task, { ...w, cause });
   const message = { personId: null, text, task: { id: task.id, number: task.number }, request: request.id, ...notice };
@@ -436,15 +442,24 @@ async function programWorkedOnTask(ctx: Ctx, jobId: string, taskId: string): Pro
    turn needs a tool fact naming it, so a coalesced backlog alone never advances a counter.
    Nothing is checked while the agent has another turn waiting on the task, or while the task waits on its subtasks, on the
    tasks it comes after or on people. */
-export async function checkLiveness(ctx: Ctx, jobId: string, carried: string[] = [], { carriedOnly = false } = {}): Promise<void> {
-  const [job] = await ctx.db.select().from(jobs).where(eq(jobs.id, jobId));
-  if (!job?.taskId || !job.agentId || !job.startedAt || job.error === 'cancelled' || job.result === GONE_ALONG) return;
+function livenessJob(job: typeof jobs.$inferSelect | undefined): job is HeldJob & { taskId: string } {
+  return !(!job?.taskId || !job.agentId || !job.startedAt || job.error === 'cancelled' || job.result === GONE_ALONG);
+}
+
+async function livenessTasks(ctx: Ctx, job: HeldJob & { taskId: string }, carried: string[], carriedOnly: boolean) {
   const own = carriedOnly ? await heldTask(ctx, job.agentId, job.taskId) : null;
   const held = new Map<string, { task: Task; sourceId: string }>();
   for (const taskId of carriedOnly ? carried : [job.taskId, ...carried]) {
     const task = await heldTask(ctx, job.agentId, taskId);
     if (task && task.id !== own?.id && !held.has(task.id)) held.set(task.id, { task, sourceId: taskId });
   }
+  return held;
+}
+
+export async function checkLiveness(ctx: Ctx, jobId: string, carried: string[] = [], { carriedOnly = false } = {}): Promise<void> {
+  const [job] = await ctx.db.select().from(jobs).where(eq(jobs.id, jobId));
+  if (!livenessJob(job)) return;
+  const held = await livenessTasks(ctx, job, carried, carriedOnly);
   for (const { task, sourceId } of held.values()) {
     const worked = sourceId === job.taskId ? await programWorked(ctx, jobId) : await programWorkedOnTask(ctx, jobId, sourceId);
     await checkHeld(ctx, { ...job, agentId: job.agentId, startedAt: job.startedAt }, task, worked);
@@ -557,10 +572,14 @@ async function planLimitUntil(db: Ctx['db'], subscriptionId: string | null): Pro
   return sub ? limitUntil(sub.limits, sub.limitsUpdatedAt) : null;
 }
 
-async function checkHeld(ctx: Ctx, job: typeof jobs.$inferSelect & { agentId: string; startedAt: Date }, task: Task, worked: boolean): Promise<void> {
+async function hasOpenTaskWork(db: Ctx['db'], task: Task): Promise<boolean> {
+  const [subtasks] = await db.select({ n: count() }).from(tasks).where(and(eq(tasks.parentId, task.id), notInArray(tasks.status, [...CLOSED])));
+  const [asked] = await db.select({ n: count() }).from(requests).where(and(eq(requests.taskId, task.id), eq(requests.status, 'open')));
+  return Boolean(Number(subtasks?.n ?? 0) || Number(asked?.n ?? 0) || (await openAfter(db, task)).length);
+}
+
+async function waitingOnTask(ctx: Ctx, agentId: string, task: Task): Promise<boolean> {
   const { db } = ctx;
-  const { agentId } = job;
-  if (!mayCheckTask(task)) return;
   /* A turn already waiting on this task, or on one it gave out, comes back to it anyway. */
   const [next] = await db
     .select({ id: jobs.id })
@@ -568,54 +587,47 @@ async function checkHeld(ctx: Ctx, job: typeof jobs.$inferSelect & { agentId: st
     .innerJoin(tasks, eq(tasks.id, jobs.taskId))
     .where(and(eq(jobs.agentId, agentId), eq(jobs.kind, 'conversation'), eq(jobs.status, 'queued'), or(eq(tasks.id, task.id), eq(tasks.parentId, task.id))))
     .limit(1);
-  if (next) return;
+  if (next) return true;
   /* Its test run's result wakes it on the task. */
   const [testing] = await db
     .select({ id: testRuns.id })
     .from(testRuns)
     .where(and(eq(testRuns.taskId, task.id), eq(testRuns.agentId, agentId), eq(testRuns.status, 'running')))
     .limit(1);
-  if (testing) return;
-  const [subtasks] = await db.select({ n: count() }).from(tasks).where(and(eq(tasks.parentId, task.id), notInArray(tasks.status, [...CLOSED])));
-  const [asked] = await db.select({ n: count() }).from(requests).where(and(eq(requests.taskId, task.id), eq(requests.status, 'open')));
-  if (Number(subtasks?.n ?? 0) || Number(asked?.n ?? 0) || (await openAfter(db, task)).length) return;
+  if (testing) return true;
+  return hasOpenTaskWork(db, task);
+}
+
+async function taskMovedInTurn(db: Ctx['db'], agentId: string, task: Task, startedAt: Date) {
   const [moves] = await db
     .select({ n: count() })
     .from(taskEvents)
-    .where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.agentId, agentId), gte(taskEvents.createdAt, job.startedAt), notInArray(taskEvents.kind, [...NOT_A_MOVE])));
+    .where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.agentId, agentId), gte(taskEvents.createdAt, startedAt), notInArray(taskEvents.kind, [...NOT_A_MOVE])));
   if (Number(moves?.n ?? 0)) {
     if (task.silent) await db.update(tasks).set({ silent: 0 }).where(eq(tasks.id, task.id));
-    return;
+    return true;
   }
-  /* A turn that ended at the plan's limit did not stand still: another of its role on another plan takes the work over,
-     or the agent goes on once the limit starts over. */
-  const until = await planLimitUntil(db, job.subscriptionId);
-  if (until) {
-    const other = await standIn(ctx, agentId, task);
-    const [me] = other ? await db.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId)) : [];
-    const at = `${until.slice(0, 16).replace('T', ' ')} UTC`;
-    const over = other
-      ? await handOver(ctx, task, other.id, `${me?.name ?? 'Its executor'}'s plan is at its limit until ${at}, so ${other.name} takes the work over on ${PROVIDER_NAMES[other.provider] ?? other.provider}.`).catch((err: { reason?: string }) => {
-          if (err.reason === 'task_changed') return null;
-          throw err;
-        })
-      : null;
-    return wakeAll(ctx, over ? over.wakes : [{ agentId, taskId: task.id, why: 'go_on' }]);
-  }
-  /* Turns that keep breaking as they start would only break again: whoever gave the task out hears of it, once. So does a
-     turn that did not go out for the length of its instructions, at once, as every next one would not either. */
-  const unsent = UNSENT.includes(job.error ?? '');
-  const broke = unsent || (crashed(job) && (await crashesInRow(ctx, agentId, task)) >= QUICK_CRASHES);
-  if (broke) {
-    const [me] = !unsent ? await db.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId)) : [];
-    const text = unsent ? (job.result ?? job.error!) : crashNote({ ...job, agentName: me?.name ?? 'the agent' }, task);
-    const moved = await brokeDown(ctx, agentId, task, text).catch((err: { reason?: string }) => err.reason === 'task_changed' ? null : Promise.reject(err));
-    if (moved) await wakeAll(ctx, moved.wakes);
-    return;
-  }
-  /* A failure still goes on where the existing failure path says so, but never advances either stuck counter. */
-  if (job.status === 'failed' && job.error !== 'timeout') return wakeAll(ctx, [{ agentId, taskId: task.id, why: 'go_on' }]);
-  if (!worked) return;
+  return false;
+}
+
+async function resumeAtPlanLimit(ctx: Ctx, agentId: string, task: Task, until: string) {
+  const { db } = ctx;
+  const other = await standIn(ctx, agentId, task);
+  const [me] = other ? await db.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId)) : [];
+  const at = `${until.slice(0, 16).replace('T', ' ')} UTC`;
+  const over = other
+    ? await handOver(ctx, task, other.id, `${me?.name ?? 'Its executor'}'s plan is at its limit until ${at}, so ${other.name} takes the work over on ${PROVIDER_NAMES[other.provider] ?? other.provider}.`).catch((err: { reason?: string }) => {
+        if (err.reason === 'task_changed') return null;
+        throw err;
+      })
+    : null;
+  return wakeAll(ctx, over ? over.wakes : [{ agentId, taskId: task.id, why: 'go_on' }]);
+}
+
+type HeldJob = typeof jobs.$inferSelect & { agentId: string; startedAt: Date };
+
+async function continueWorkedTurn(ctx: Ctx, agentId: string, task: Task, job: HeldJob) {
+  const { db } = ctx;
   /* A timeout or a comment says the program worked and continues under the other counter. */
   const [told] = await db
     .select({ n: count() })
@@ -624,6 +636,42 @@ async function checkHeld(ctx: Ctx, job: typeof jobs.$inferSelect & { agentId: st
   const working = job.error === 'timeout' || Number(told?.n ?? 0) > 0;
   const moved = await (working ? wentOn : silentTurn)(ctx, agentId, task).catch((err: { reason?: string }) => err.reason === 'task_changed' ? null : Promise.reject(err));
   if (moved) await wakeAll(ctx, moved.wakes);
+}
+
+async function wakeBrokenTurn(ctx: Ctx, job: HeldJob, task: Task): Promise<boolean> {
+  const { agentId } = job;
+  const unsent = UNSENT.includes(job.error ?? '');
+  const broke = unsent || (crashed(job) && (await crashesInRow(ctx, agentId, task)) >= QUICK_CRASHES);
+  if (!broke) return false;
+  const text = await brokenTurnText(ctx, job, task, unsent);
+  const moved = await brokeDown(ctx, agentId, task, text).catch((err: { reason?: string }) => err.reason === 'task_changed' ? null : Promise.reject(err));
+  if (moved) await wakeAll(ctx, moved.wakes);
+  return true;
+}
+
+async function brokenTurnText(ctx: Ctx, job: HeldJob, task: Task, unsent: boolean): Promise<string> {
+  if (unsent) return job.result ?? job.error!;
+  const [me] = await ctx.db.select({ name: agents.name }).from(agents).where(eq(agents.id, job.agentId));
+  return crashNote({ ...job, agentName: me?.name ?? 'the agent' }, task);
+}
+
+async function checkHeld(ctx: Ctx, job: HeldJob, task: Task, worked: boolean): Promise<void> {
+  const { db } = ctx;
+  const { agentId } = job;
+  if (!mayCheckTask(task)) return;
+  if (await waitingOnTask(ctx, agentId, task)) return;
+  if (await taskMovedInTurn(db, agentId, task, job.startedAt)) return;
+  /* A turn that ended at the plan's limit did not stand still: another of its role on another plan takes the work over,
+     or the agent goes on once the limit starts over. */
+  const until = await planLimitUntil(db, job.subscriptionId);
+  if (until) return resumeAtPlanLimit(ctx, agentId, task, until);
+  /* Turns that keep breaking as they start would only break again: whoever gave the task out hears of it, once. So does a
+     turn that did not go out for the length of its instructions, at once, as every next one would not either. */
+  if (await wakeBrokenTurn(ctx, job, task)) return;
+  /* A failure still goes on where the existing failure path says so, but never advances either stuck counter. */
+  if (job.status === 'failed' && job.error !== 'timeout') return wakeAll(ctx, [{ agentId, taskId: task.id, why: 'go_on' }]);
+  if (!worked) return;
+  await continueWorkedTurn(ctx, agentId, task, job);
 }
 
 /* A finished turn: a failure or a stop goes into the conversation, a turn a node restart cut off on a task runs once more

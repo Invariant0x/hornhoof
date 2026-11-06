@@ -75,12 +75,16 @@ async function refuseOpenUnder(db: Db | Tx, task: Task): Promise<void> {
 /* The last work under a task closed: whoever holds the task hears it can go on, once for all of it, unless it closed that
    work itself. When the code of a department's turn is in, the review of the turn opens instead, with the same move;
    opened takes it. A review of the turn that closes tells the head itself. */
+async function mayResumeParent(tx: Tx, parent: Task, closedId: string): Promise<boolean> {
+  if (CLOSED.includes(parent.status) || (await isTurnReview(tx, closedId))) return false;
+  const [open] = await tx.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.parentId, parent.id), notInArray(tasks.status, [...CLOSED]))).limit(1);
+  return !open && !(await openAfter(tx, parent)).length;
+}
+
 async function workUnderDone(tx: Tx, templates: Live['templates'], closed: Task, actorId: string | undefined, opened: Task[], comparison?: CompareSnapshot): Promise<Wake[]> {
   const [parent] = await tx.select().from(tasks).where(eq(tasks.id, closed.parentId!));
   const holder = parent?.assigneeAgentId;
-  if (!parent || CLOSED.includes(parent.status) || !holder || (await isTurnReview(tx, closed.id))) return [];
-  const [open] = await tx.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.parentId, parent.id), notInArray(tasks.status, [...CLOSED]))).limit(1);
-  if (open || (await openAfter(tx, parent)).length) return [];
+  if (!parent || !holder || !(await mayResumeParent(tx, parent, closed.id))) return [];
   const review = await reviewAfterWork(tx, templates, parent, holder, opened, comparison);
   if (review.wakes) return review.wakes;
   return holder === actorId ? [] : [{ agentId: holder, taskId: parent.id, why: 'subtasks', ...(review.note ? { note: review.note } : {}) }];
@@ -661,6 +665,18 @@ function newTaskValues(actor: Actor, input: NewTask, { assignee, gates, parent }
 
 type CreatedTask = Moved & { independent: Task | null };
 
+async function turnForNewTask(tx: Tx, companyId: string, parent: Task | null): Promise<string | null> {
+  const [turn] = parent ? [] : await tx.select({ id: turns.id }).from(turns).where(and(eq(turns.companyId, companyId), eq(turns.status, 'open')));
+  const turnId = parent ? parent.turnId : (turn?.id ?? null);
+  return turnId;
+}
+
+async function afterForNewTask(tx: Tx, companyId: string, turnId: string | null, parent: Task | null, input: NewTask): Promise<Task[]> {
+  const after = await checkAfter(tx, companyId, turnId, input.after ?? [], true);
+  await refuseAbove(tx, parent?.id ?? null, input.after ?? []);
+  return after;
+}
+
 async function insertNewTask(tx: Tx, actor: Actor, input: NewTask, setup: NewTaskSetup): Promise<CreatedTask> {
   const { assignee, gates, parent, declaration } = setup;
   let independent: Task | null = null;
@@ -672,12 +688,10 @@ async function insertNewTask(tx: Tx, actor: Actor, input: NewTask, setup: NewTas
   /* With the company held, so a change of urgency on its way reaches this task, or waits for it. */
   const urgent = await urgencyOfNew(tx, assignee.companyId, actor, above, input.urgent);
   const [last] = await tx.select({ n: max(tasks.number) }).from(tasks).where(eq(tasks.companyId, assignee.companyId));
-  const [turn] = parent ? [] : await tx.select({ id: turns.id }).from(turns).where(and(eq(turns.companyId, assignee.companyId), eq(turns.status, 'open')));
-  const turnId = parent ? parent.turnId : (turn?.id ?? null);
+  const turnId = await turnForNewTask(tx, assignee.companyId, parent);
   /* One of them done at this moment would not see the new task wait for it, so they are held while it is decided
      whether it waits: that one is done after the task is made, and starts it. */
-  const after = await checkAfter(tx, assignee.companyId, turnId, input.after ?? [], true);
-  await refuseAbove(tx, parent?.id ?? null, input.after ?? []);
+  const after = await afterForNewTask(tx, assignee.companyId, turnId, parent, input);
   const waits = after.some(t => t.status !== 'done');
   const [row] = await tx
     .insert(tasks)
@@ -1372,11 +1386,15 @@ const newHolders = (task: Task, executor: string | null, declaration: Independen
 ];
 
 /* The owner rewrites the task so it reads as the current truth, or hands it to another executor or other gates. */
+async function checkRewriteHolders(ctx: Ctx, task: Task, c: TaskChange, executor: string | null, gates: string[]): Promise<void> {
+  if (executor && c.executor !== undefined) await workingAgent(ctx.db, task.companyId, executor);
+  if (executor && (c.executor !== undefined || c.gates !== undefined)) await checkGates(ctx.db, task.companyId, executor, gates, ctx.templates);
+}
+
 async function rewriteTaskHolders(ctx: Ctx, task: Task, c: TaskChange) {
   const executor = c.executor ?? task.executorAgentId;
   const gates = c.gates ?? task.gates;
-  if (executor && c.executor !== undefined) await workingAgent(ctx.db, task.companyId, executor);
-  if (executor && (c.executor !== undefined || c.gates !== undefined)) await checkGates(ctx.db, task.companyId, executor, gates, ctx.templates);
+  await checkRewriteHolders(ctx, task, c, executor, gates);
   const { set, fields } = rewrite(task, c);
   /* Handing it to its executor again gives it back after it waited with the head. */
   if (executor !== task.executorAgentId || (c.executor !== undefined && task.assigneeAgentId !== executor)) {
