@@ -80,6 +80,22 @@ describe('test environment discovery from pinned Git blobs', () => {
 
 
 describe('literal test invocations', () => {
+  it('versioned node execution advertises its actual executor capability', async () => {
+    const f = await fixture();
+    const capabilities = await environment.trustedTestRuntimes(f.context);
+    expect(capabilities).toContainEqual({ id: 'hornhoof-test-execution', version: '2.0.0', fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/) });
+  });
+
+  it('native Vitest shard adapter passes its local coordinates and bounded JSON selection', async () => {
+    const f = await fixture(), value = manifest();
+    const parsed = parseTestEnvironment({ ...value, execution: { version: 2 }, suites: [{ ...value.suites[0], split: { kind: 'vitest-shard' } }] });
+    const filesPath = join(f.root, 'shard.json'), context = { checkout: f.root, filesPath, shard: { index: 2, count: 3 } };
+    const invocation = await environment.buildTestInvocation(parsed.suites[0]!, ['app/test/a.test.ts'], context);
+    expect(invocation).toEqual({ command: { ...parsed.suites[0]!.run, args: ['runner.js', '--shard=2/3'] }, env: { HH_TEST_FILES: filesPath } });
+    expect(JSON.parse(await readFile(filesPath, 'utf8'))).toEqual(['./test/a.test.ts']);
+    await expect(environment.buildTestInvocation(parsed.suites[0]!, ['app/test/a.test.ts'], { checkout: f.root, filesPath: join(f.root, 'missing-shard.json') })).rejects.toThrow(/shard/i);
+  });
+
   it('converts inventory paths to the working directory and protects option-like filenames', async () => {
     const f = await fixture(), suite = parseTestEnvironment(manifest()).suites[0];
     const invocation = await environment.buildTestInvocation(suite, ['app/test/-option.test.ts', 'app/test/a.test.ts'], { checkout: f.root, filesPath: join(f.root, 'files.json') });

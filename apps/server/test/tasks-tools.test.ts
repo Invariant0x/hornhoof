@@ -89,9 +89,9 @@ describe('task tools', () => {
   it('gives each kind of agent its task tools', async () => {
     const { orchestrator, head, bruno, tools } = await company();
     const names = async (agent: { id: string }) => (await (await tools(agent)).listTools()).tools.map(t => t.name).sort();
-    expect(await names(orchestrator)).toEqual(['add_api_key', 'add_plan_to_machine', 'add_tasks', 'answer_request', 'approval_policy', 'ask_computer_access', 'ask_person', 'build_structure', 'cancel_task', 'cancel_update', 'change_employee', 'change_orchestrator', 'change_person', 'check_updates', 'close_improvement', 'comment', 'company', 'computer', 'computer_result', 'connect_plans', 'database', 'disconnect_machine', 'edit_turn', 'escalate_missed_goal', 'explain_request', 'fire_employee', 'forget', 'hire', 'improvements', 'invite_again', 'invite_person', 'lend_machine', 'machine_command', 'merge_turn', 'message_employee', 'move_orchestrator', 'notebook', 'outbound_channel_create', 'outbound_channel_reopen', 'outbound_channel_stop', 'outbound_contact_suppress', 'outbound_options', 'outbound_policy_set', 'outbound_propose', 'outbound_status', 'outbound_submit', 'pipeline_report', 'plan_command', 'plan_turn', 'pool', 'propose_staff', 'propose_structure', 'remember', 'remove_public_link', 'remove_repository', 'remove_subscription', 'replan_wait', 'report', 'request_approval', 'reset_employee', 'resolve_goal_risk', 'rewrite_note', 'set_approval_policy', 'set_budget', 'set_department_owner', 'set_public_link', 'set_repository', 'set_team_urgent_only', 'set_urgent', 'set_wait_policy', 'staffing_options', 'stop_employee', 'task', 'tasks', 'test_subscription', 'turns', 'update_hornhoof', 'update_task', 'view', 'wait_for']);
-    expect(await names(head)).toEqual(['approval_policy', 'ask_person', 'blocked', 'cancel_task', 'comment', 'company', 'confirm_finding', 'create_task', 'end_wait', 'escalate_missed_goal', 'forget', 'improvements', 'message_employee', 'notebook', 'outbound_options', 'outbound_propose', 'outbound_status', 'outbound_submit', 'propose_improvement', 'remember', 'replan_wait', 'report', 'request_approval', 'resolve_goal_risk', 'rewrite_note', 'run_tests', 'run_work', 'stop_tests', 'stop_work', 'submit', 'task', 'tasks', 'tell_orchestrator', 'test_run', 'update_task', 'verdict', 'wait_for', 'work_run']);
-    expect(await names(bruno)).toEqual(['approval_policy', 'ask_person', 'blocked', 'comment', 'company', 'confirm_finding', 'end_wait', 'message_employee', 'outbound_options', 'outbound_propose', 'outbound_status', 'outbound_submit', 'replan_wait', 'request_approval', 'run_tests', 'run_work', 'stop_tests', 'stop_work', 'submit', 'task', 'tasks', 'test_run', 'verdict', 'wait_for', 'work_run']);
+    expect(await names(orchestrator)).toEqual(['add_api_key', 'add_plan_to_machine', 'add_tasks', 'answer_request', 'approval_policy', 'ask_computer_access', 'ask_person', 'build_structure', 'cancel_task', 'cancel_update', 'change_employee', 'change_orchestrator', 'change_person', 'check_updates', 'close_improvement', 'comment', 'company', 'computer', 'computer_result', 'connect_plans', 'database', 'disconnect_machine', 'edit_turn', 'escalate_missed_goal', 'explain_request', 'fire_employee', 'forget', 'hire', 'improvements', 'invite_again', 'invite_person', 'lend_machine', 'machine_command', 'merge_turn', 'message_employee', 'move_orchestrator', 'notebook', 'outbound_channel_create', 'outbound_channel_reopen', 'outbound_channel_stop', 'outbound_contact_suppress', 'outbound_options', 'outbound_policy_set', 'outbound_propose', 'outbound_status', 'outbound_submit', 'pipeline_report', 'plan_command', 'plan_turn', 'pool', 'propose_staff', 'propose_structure', 'remember', 'remove_public_link', 'remove_repository', 'remove_subscription', 'replan_wait', 'report', 'request_approval', 'reset_employee', 'resolve_goal_risk', 'rewrite_note', 'set_approval_policy', 'set_budget', 'set_department_owner', 'set_public_link', 'set_repository', 'set_team_urgent_only', 'set_urgent', 'set_wait_policy', 'staffing_options', 'stop_employee', 'support_classify', 'support_submit', 'task', 'tasks', 'test_subscription', 'turns', 'update_hornhoof', 'update_task', 'view', 'wait_for']);
+    expect(await names(head)).toEqual(['approval_policy', 'ask_person', 'blocked', 'cancel_task', 'comment', 'company', 'confirm_finding', 'create_task', 'end_wait', 'escalate_missed_goal', 'forget', 'improvements', 'message_employee', 'notebook', 'outbound_options', 'outbound_propose', 'outbound_status', 'outbound_submit', 'propose_improvement', 'remember', 'replan_wait', 'report', 'request_approval', 'resolve_goal_risk', 'rewrite_note', 'run_tests', 'run_work', 'stop_tests', 'stop_work', 'submit', 'support_classify', 'support_submit', 'task', 'tasks', 'tell_orchestrator', 'test_run', 'update_task', 'verdict', 'wait_for', 'work_run']);
+    expect(await names(bruno)).toEqual(['approval_policy', 'ask_person', 'blocked', 'comment', 'company', 'confirm_finding', 'end_wait', 'message_employee', 'outbound_options', 'outbound_propose', 'outbound_status', 'outbound_submit', 'replan_wait', 'request_approval', 'run_tests', 'run_work', 'stop_tests', 'stop_work', 'submit', 'support_classify', 'support_submit', 'task', 'tasks', 'test_run', 'verdict', 'wait_for', 'work_run']);
   });
 
   it("tells a head to give work to members, and to itself only when no member can do it", async () => {
@@ -200,6 +200,33 @@ describe('asking a person', () => {
       { text: 'Which cards do we take?', topic: 'task' },
       { text: 'Which banks?', topic: null },
     ]);
+  });
+});
+
+describe('a small task', () => {
+  it('is set and read by the giver, never by its executor', async () => {
+    const { app, db, ceoToken, head, bruno, orchestrator, tools } = await company();
+    const client = await tools(head);
+    const made = await call(client, 'create_task', { title: 'Small copy', brief: '', body: '', executor: bruno.id, gates: [], small: true });
+    expect(made.isError).toBeFalsy();
+    const [row] = await db.select().from(tasks);
+    expect(row).toMatchObject({ small: true });
+    expect(JSON.parse(text(await call(client, 'tasks', {})))[0]).toMatchObject({ number: row!.number, small: true });
+    expect(JSON.parse(text(await call(client, 'task', { task: row!.number })))).toMatchObject({ small: true });
+    const read = await app.inject({ method: 'GET', url: `/api/tasks/${row!.id}`, ...as(ceoToken) });
+    expect(read.json().task).toMatchObject({ small: true });
+
+    expect((await call(client, 'update_task', { task: row!.number, small: false })).isError).toBeFalsy();
+    expect((await db.select().from(tasks))[0]).toMatchObject({ small: false });
+    expect((await call(await tools(orchestrator), 'update_task', { task: row!.number, small: true })).isError).toBeFalsy();
+    expect((await call(await tools(bruno), 'update_task', { task: row!.number, small: false })).isError).toBe(true);
+    expect((await db.select().from(tasks))[0]).toMatchObject({ small: true });
+  });
+
+  it('is not small by default', async () => {
+    const { db, head, bruno, tools } = await company();
+    await call(await tools(head), 'create_task', { title: 'Ordinary', brief: '', body: '', executor: bruno.id, gates: [] });
+    expect((await db.select().from(tasks))[0]).toMatchObject({ small: false });
   });
 });
 
