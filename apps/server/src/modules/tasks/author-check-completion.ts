@@ -26,7 +26,10 @@ export async function finishAuthorCheck(ctx: Ctx, runId: string): Promise<Moved>
   const events = await ctx.db.select({ data: taskEvents.data }).from(taskEvents).where(eq(taskEvents.taskId, task.id)).orderBy(desc(taskEvents.id));
   const pending = events.map(event => pendingSubmission(event.data)).find(value => value?.runId === run.id);
   if (!pending) throw refuse(409, 'task_invalid', `Run ${run.number} has no author-check submission.`);
-  if (events.some(event => outcomeRun(event.data)?.runId === run.id)) return { task, wakes: [] };
+  if (events.some(event => outcomeRun(event.data)?.runId === run.id)) {
+    if (task.externalWait?.run === run.id) await ctx.db.transaction(async tx => endAuthorCheckWait(tx, run, task));
+    return { task: await loadTask(ctx.db, task.id), wakes: [] };
+  }
   try {
     return await complete(ctx, run, task, pending, events);
   } catch (error) {

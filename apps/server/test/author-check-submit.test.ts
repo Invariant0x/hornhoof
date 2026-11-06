@@ -2,7 +2,7 @@ import type { ServerMessage } from '@hornhoof/protocol';
 import { and, desc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config.js';
-import { agents, jobs, taskEvents, tasks, testRuns } from '../src/db/schema.js';
+import { agents, pendingWakes, taskEvents, tasks, testRuns } from '../src/db/schema.js';
 import { submitWithAuthorCheck } from '../src/modules/tasks/author-check-submit.js';
 import { connectNode, listen, TEST_SECRET as SECRET, until, type FakeNode } from './helpers.js';
 import { OTHER, qualityFixture, SHA } from './review-quality-fixture.js';
@@ -110,7 +110,7 @@ describe('author check on submit', () => {
       expect(await currentTask(f)).toMatchObject({ status: index === 2 ? 'blocked' : 'working', externalWait: null });
       expect((await outcomes(f, run.id)).at(-1)).toMatchObject({ data: { authorCheckOutcome: { attempt: index + 1 } } });
     }
-    const forHead = await f.db.select().from(jobs).where(and(eq(jobs.agentId, head!.id), eq(jobs.taskId, f.task.id), eq(jobs.status, 'queued')));
+    const forHead = await f.db.select().from(pendingWakes).where(and(eq(pendingWakes.agentId, head!.id), eq(pendingWakes.taskId, f.task.id)));
     expect(forHead.length).toBeGreaterThan(0);
   });
 });
