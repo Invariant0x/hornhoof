@@ -6,7 +6,7 @@ import { attachments, improvements, jobs, machines, tasks, testParts, testRuns, 
 import { addNote, companyBook, departmentBook } from '../src/modules/notebook/book.js';
 import { ask } from '../src/modules/tasks/engine.js';
 import { as, testApp } from './helpers.js';
-import { aclCompany, type AclCompany } from './agent-view-company.js';
+import { aclCompany, leaks, type AclCompany } from './agent-view-company.js';
 
 const captured = vi.hoisted(() => [] as RouteOptions[]);
 vi.mock('fastify', async importOriginal => {
@@ -198,7 +198,7 @@ describe('one thing of one agent', () => {
       const scoped = companyOnly && (viewer === 'ann' || viewer === 'olga');
       if (closed || scoped) expect(res.statusCode, `${route}, ${name}`).toBe(403);
       else expect(res.statusCode, `${route}, ${name}`).not.toBe(403);
-      if (closed) expect(res.body, `${route}, ${name}`).not.toContain(c.crew[agent].name);
+      if (closed) expect(leaks(res, [c.crew[agent]]), `${route}, ${name}`).toEqual([]);
     }
     lines.push(`| ${route} | ${got.join('; ')} |`);
   });
@@ -216,8 +216,8 @@ describe('every list', () => {
       if (!seen) continue;
       const hidden = (Object.keys(c.crew) as Crew[]).filter(k => !seen.includes(k));
       for (const key of hidden) {
-        const words = [c.crew[key].id, c.crew[key].name, c.tasksOf[key].id, c.tasksOf[key].title];
-        for (const word of words) expect(res.body, `${route} for ${viewer}: ${word}`).not.toContain(word);
+        const hiddenWork = [c.crew[key], { id: c.tasksOf[key].id, name: c.tasksOf[key].title }];
+        expect(leaks(res, hiddenWork), `${route} for ${viewer}: ${key}`).toEqual([]);
       }
       expect(res.body, `${route} for ${viewer}`).not.toContain('Secret words');
       expect(res.body, `${route} for ${viewer}`).not.toContain(c.orchestrator.id);

@@ -65,5 +65,16 @@ export type AclCompany = Awaited<ReturnType<typeof aclCompany>>;
 
 /* What the response says, with none of the given agents, their names or their ids. */
 export function leaks(res: Pick<LightMyRequestResponse, 'body'>, hidden: readonly { id: string; name: string }[]): string[] {
-  return hidden.flatMap(a => [a.id, a.name]).filter(word => res.body.includes(word));
+  const values: string[] = [], keys: string[] = [];
+  const visit = (value: unknown): void => {
+    if (typeof value === 'string') values.push(value);
+    else if (Array.isArray(value)) value.forEach(visit);
+    else if (value !== null && typeof value === 'object') for (const [key, item] of Object.entries(value)) { keys.push(key); visit(item); }
+  };
+  try { visit(JSON.parse(res.body)); } catch { values.push(res.body); }
+  return hidden.flatMap(({ id, name }) => {
+    const literal = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const word = new RegExp(`(?<![\\p{L}\\p{N}_])${literal}(?![\\p{L}\\p{N}_])`, 'u');
+    return [...(values.concat(keys).some(value => value.includes(id)) ? [id] : []), ...(values.some(value => word.test(value)) ? [name] : [])];
+  });
 }
