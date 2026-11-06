@@ -51,6 +51,14 @@ async function usedOnMail() {
   return { w, log, server, smtp, mail };
 }
 
+/* The lines of the printed route tree under /api/outbound, which is a route itself: its children print without its name. */
+function outboundBranch(lines: string[]): string[] {
+  const depth = (line: string) => line.search(/[^│├└─ ]/);
+  const top = lines.findIndex(line => line.includes('outbound'));
+  const next = lines.findIndex((line, at) => at > top && depth(line) <= depth(lines[top]!));
+  return lines.slice(top, next < 0 ? undefined : next);
+}
+
 describe('the settings of a sending account', () => {
   it('really sign in, and nothing an author can reach ever holds them', async () => {
     const { w, log, server, smtp, mail } = await usedOnMail();
@@ -134,7 +142,7 @@ describe('the settings of a sending account', () => {
 
   it('have no route of their own that sends: nothing over HTTP reaches a transport', async () => {
     const { w } = await usedOnMail();
-    const routes = w.c.app.printRoutes({ commonPrefix: false }).split('\n').filter(line => line.includes('outbound'));
+    const routes = outboundBranch(w.c.app.printRoutes({ commonPrefix: false }).split('\n'));
     expect(routes.length).toBeGreaterThan(5);
     expect(routes.filter(line => /send|dispatch|smtp|webhook|transport|deliver/i.test(line))).toEqual([]);
   });
