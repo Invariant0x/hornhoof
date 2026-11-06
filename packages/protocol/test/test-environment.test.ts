@@ -116,7 +116,7 @@ it('matches numeric runtime prefixes and excludes services outside the selected 
   expect(module.runtimeVersionMatches('22.1', '22.10.0')).toBe(false);
   expect(module.runtimeVersionMatches('>=22', '22.15.0')).toBe(false);
   const manifest = parseTestEnvironment(JSON.parse(readFileSync(new URL('../../../.hornhoof/test-environment.json', import.meta.url), 'utf8')));
-  expect(module.requiredTestRuntimes(manifest, 'fast')).toEqual([{ id: 'node', version: '22' }]);
+  expect(module.requiredTestRuntimes(manifest, 'fast')).toEqual([{ id: 'node', version: '22' }, { id: 'hornhoof-test-execution', version: '2.0.0' }]);
   expect(module.requiredTestRuntimes(manifest, 'final')).toContainEqual({ id: 'postgres', version: '17' });
 });
 
