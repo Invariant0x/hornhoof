@@ -25,13 +25,15 @@ import { pendingFixReviews, prepareFixReviews } from './review-fixes.js';
 import { checkIndependent, currentIndependent, type IndependentDeclaration, type IndependentPartInput } from './independent.js';
 import type { WaitPlan } from '@hornhoof/protocol/waits';
 import { alertGoal, goalColumns, type NewGoal } from './wait-goals.js';
+import { classificationRequired, internalRoute } from './question-authority.js';
+import { ASKED_INSIDE, raiseQuestion } from './question-lifecycle.js';
 import { bindAfter, bindRequest, bindTurnReview, endAfter, endRequest, keepWaitsWithMove, rebindAfter, type AfterPlans } from './wait-producers.js';
 
 export type Task = typeof tasks.$inferSelect;
 export type Request = typeof requests.$inferSelect;
 /* Who moves a task: a person from the web app, or an agent from its tools. */
 export type Actor = { personId: string; agentId?: undefined } | { agentId: string; personId?: undefined };
-export type WakeWhy = 'assigned' | 'review' | 'changes' | 'stuck_at_gate' | 'done' | 'reported' | 'blocked' | 'cancelled' | 'answered' | 'comment' | 'updated' | 'reminder' | 'go_on' | 'turn' | 'switched' | 'explain' | 'subtasks' | 'after_cancelled' | 'merge' | 'unblocked' | 'tests' | 'work' | 'turn_review' | 'reviewed' | 'review_passed' | 'wait_ended';
+export type WakeWhy = 'assigned' | 'review' | 'changes' | 'stuck_at_gate' | 'done' | 'reported' | 'blocked' | 'cancelled' | 'answered' | 'comment' | 'updated' | 'reminder' | 'go_on' | 'turn' | 'switched' | 'explain' | 'question' | 'resolved' | 'subtasks' | 'after_cancelled' | 'merge' | 'unblocked' | 'tests' | 'work' | 'turn_review' | 'reviewed' | 'review_passed' | 'wait_ended';
 /* An agent that has to act on a task now; Hornhoof queues a turn for it. note: what else it should know, after the rest. */
 export type Wake = { agentId: string; taskId: string; why: WakeWhy; text?: string; note?: string; again?: boolean; mechanical?: boolean; version?: number; cause?: WakeCause };
 export type Moved = { task: Task; wakes: Wake[] };
@@ -1026,14 +1028,12 @@ export async function report(ctx: Live, agentId: string, taskId: string, r: { do
     unstuck.tell();
     return { task: row, wakes };
   }
-  /* A person gave it, so a person has to unblock it. */
+  /* A person gave it, so its question of how to go on has nobody who gave it out to go to: it goes where every question goes. */
   let wakes: Wake[] = [];
   const row = await move(ctx, task, { status: 'waiting' }, n, async tx => {
     await letStuckGo(tx, task.id);
-    const [note] = await tx.insert(requests).values({ companyId: task.companyId, taskId, agentId, kind: 'stuck', text: r.summary, decisionTopic: 'task' }).returning();
-    await bindRequest(tx, task, note!, { agentId }, { strict: false });
-    wakes = await explaining(tx, task, agentId, note!.id);
-    await keepWakes(tx, task.companyId, wakes);
+    const raised = await raiseQuestion(tx, task, { agentId, question: { kind: 'stuck', text: r.summary, decisionTopic: 'task' }, trigger: 'explicit' });
+    wakes = raised?.wakes ?? [];
   });
   ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
   return { task: row, wakes };
@@ -1472,6 +1472,8 @@ export type Ask = {
   goal?: NewGoal;
   /* The server's own: what must be kept in the step that makes the request. No tool passes it. */
   onCreated?: (tx: Tx, request: Request) => Promise<void>;
+  /* The server's own: the turn that asks. */
+  sourceJobId?: string;
 };
 
 /* An approval of a commit lets it into the release, whatever the agent says it is about. */
@@ -1502,28 +1504,20 @@ export async function ask(ctx: Live, agentId: string, taskId: string, q: Ask): P
   await checkPictures(ctx.db, task.companyId, agentId, pictures);
   let request: Request | undefined;
   let wakes: Wake[] = [];
-  const row = await move(ctx, task, { status: 'waiting', silent: 0 }, { kind: 'asked', actor: { agentId }, text: q.text.trim(), data: { kind: q.kind, commit: q.commit ?? null } }, async tx => {
-    [request] = await tx
-      .insert(requests)
-      .values({
-        companyId: task.companyId,
-        taskId,
-        agentId,
-        kind: q.kind,
-        text: q.text.trim(),
-        commit: q.commit ?? null,
-        options,
-        link: q.link ?? null,
-        decisionTopic: topicOf(q),
-        ...approvalColumns(q.approval),
-        ...goalColumns(q.goal),
-      })
-      .returning();
-    const wait = await bindRequest(tx, task, request!, { agentId }, { plan: q.plan, strict: !q.evenUnplanned });
-    if (q.goal) await alertGoal(tx, task, request!, wait);
+  const question = { kind: q.kind, text: q.text.trim(), commit: q.commit ?? null, options, link: q.link ?? null, decisionTopic: topicOf(q), ...approvalColumns(q.approval) };
+  /* A goal in danger is said by who may say it, and stands for itself; every other question starts inside the company. */
+  const logged = q.goal ? question.text : ASKED_INSIDE;
+  const row = await move(ctx, task, { status: 'waiting', silent: 0 }, { kind: 'asked', actor: { agentId }, text: logged, data: { kind: q.kind, commit: q.commit ?? null } }, async tx => {
+    if (q.goal) {
+      [request] = await tx.insert(requests).values({ ...question, companyId: task.companyId, taskId, agentId, audience: 'human', sourceJobId: q.sourceJobId ?? null, ...goalColumns(q.goal) }).returning();
+      const wait = await bindRequest(tx, task, request!, { agentId }, { plan: q.plan, strict: !q.evenUnplanned });
+      await alertGoal(tx, task, request!, wait);
+    } else {
+      const raised = await raiseQuestion(tx, task, { agentId, question, trigger: 'explicit', sourceJobId: q.sourceJobId, plan: q.plan });
+      request = raised!.request;
+      wakes = raised!.wakes;
+    }
     await q.onCreated?.(tx, request!);
-    wakes = await explaining(tx, task, agentId, request!.id);
-    await keepWakes(tx, task.companyId, wakes);
     if (!pictures.length) return;
     const shown = await tx
       .update(attachments)
@@ -1534,15 +1528,6 @@ export async function ask(ctx: Live, agentId: string, taskId: string, q: Ask): P
   });
   ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
   return { task: row, request: request!, wakes };
-}
-
-/* What an employee asks people reaches the orchestrator first, to put into plain words for them; not what it asks itself. */
-async function explaining(db: Db | Tx, task: Task, agentId: string, requestId: string): Promise<Wake[]> {
-  const [orchestrator] = await db
-    .select({ id: agents.id })
-    .from(agents)
-    .where(and(eq(agents.companyId, task.companyId), eq(agents.kind, 'orchestrator'), isNull(agents.removedAt)));
-  return orchestrator && orchestrator.id !== agentId ? [{ agentId: orchestrator.id, taskId: task.id, why: 'explain', text: requestId }] : [];
 }
 
 /* The agent holding the task ended a turn without moving it: a reminder, and from SILENT_TURNS on a person is asked. */
@@ -1589,14 +1574,19 @@ export async function brokeDown(ctx: Live, agentId: string, task: Task, text: st
   return askAboutStill(ctx, agentId, task, task.silent, text);
 }
 
-/* Hornhoof stops waking the agent on the task and asks a person how it should go on. */
+/* Hornhoof stops waking the agent on the task and whoever has its questions hears how it stands. The episode is the piece of
+   work since the task last moved, so telling it twice adds nothing. With nobody to tell, the question is kept for when someone
+   is, and the task stays as it is: there is nobody it could wait for. */
 async function askAboutStill(ctx: Live, agentId: string, task: Task, silent: number, text: string): Promise<Moved> {
+  const last = await lastMove(ctx.db, task.id);
+  const sourceKey = `stuck:${task.id}:${last?.id ?? 0}`;
+  const place = { companyId: task.companyId, departmentId: task.departmentId };
+  const routed = (await internalRoute(ctx.db, place, agentId)) !== null;
   let wakes: Wake[] = [];
-  const row = await move(ctx, task, { silent, status: 'waiting' }, { kind: 'stuck', actor: { agentId }, text }, async tx => {
-    const [note] = await tx.insert(requests).values({ companyId: task.companyId, taskId: task.id, agentId, kind: 'stuck', text, decisionTopic: 'task' }).returning();
-    await bindRequest(tx, task, note!, { agentId }, { strict: false });
-    wakes = await explaining(tx, task, agentId, note!.id);
-    await keepWakes(tx, task.companyId, wakes);
+  const set: Partial<Task> = routed ? { silent, status: 'waiting' } : { silent };
+  const row = await move(ctx, task, set, { kind: 'stuck', actor: { agentId }, text: ASKED_INSIDE }, async tx => {
+    const raised = await raiseQuestion(tx, task, { agentId, question: { kind: 'stuck', text, decisionTopic: 'task' }, trigger: 'silent', sourceKey });
+    wakes = raised?.wakes ?? [];
   });
   ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
   return { task: row, wakes };
@@ -1706,10 +1696,32 @@ function checkChoiceAnswer(found: Pick<Request, 'options'>, a: Answer, text: str
   if (!option && !text) throw refuse(400, 'task_invalid', 'Write an answer.');
 }
 
+/* A question ended: with none left open the task goes on where it stood, and whoever it is for now is told, one turn each. */
+export async function goesOnAfter(tx: Tx, task: Task, found: Request, current: { status: Task['status']; stage: number } | undefined, told: { why: 'answered' | 'resolved'; text: string }): Promise<Wake[]> {
+  const [left] = await tx.select({ n: count() }).from(requests).where(and(eq(requests.taskId, task.id), eq(requests.status, 'open')));
+  if (current?.status === 'waiting' && !Number(left?.n ?? 0)) {
+    await tx
+      .update(tasks)
+      .set({ status: current.stage > 0 ? 'review' : 'working', silent: 0, version: sql`${tasks.version} + 1`, updatedAt: new Date() })
+      .where(and(eq(tasks.id, task.id), eq(tasks.status, 'waiting')));
+  }
+  const [after] = await tx.select().from(tasks).where(eq(tasks.id, task.id));
+  /* A task that stood still goes on with whoever holds it now. */
+  const goesOn = found.kind === 'stuck' && after!.stage === 0 && after!.assigneeAgentId ? after!.assigneeAgentId : found.agentId;
+  const wakes: Wake[] = CLOSED.includes(after!.status) ? [] : [{ agentId: goesOn, taskId: task.id, ...told }];
+  /* The last answer at a gate: everyone else still to give a verdict there goes on too, also after a turn spent waiting. */
+  if (current?.status === 'waiting' && after!.status === 'review') {
+    const back = await reviewWake(tx, after!);
+    wakes.push(...after!.panel.filter(id => id !== found.agentId).map(agentId => ({ agentId, taskId: task.id, ...back })));
+  }
+  return wakes;
+}
+
 export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answer, on?: Delegation, inlineText?: true): Promise<{ request: Request; task: Task; wakes: Wake[] }> {
   const [found] = await ctx.db.select().from(requests).where(eq(requests.id, requestId));
   if (!found) throw refuse(404, 'request_unknown', 'There is no such request.');
   if (found.status !== 'open') throw refuse(409, 'request_closed', 'This request is answered already.');
+  if (found.audience === 'internal') throw classificationRequired();
   const text = a.answer?.trim() ?? '';
   let status: Request['status'];
   const option = found.kind === 'choice' && a.pick !== undefined ? found.options[a.pick] : undefined;
@@ -1744,22 +1756,7 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
     await tx.update(tasks).set({ externalWait: null, silent: 0, version: sql`${tasks.version} + 1`, updatedAt: new Date() })
       .where(and(eq(tasks.id, task.id), isNotNull(tasks.externalWait)));
     const event = await note(tx, task, { kind: 'answered', actor, text: said, data: { requestId, kind: found.kind, status, ...forWhom }, inlineText }, ctx.config);
-    const [left] = await tx.select({ n: count() }).from(requests).where(and(eq(requests.taskId, task.id), eq(requests.status, 'open')));
-    if (current?.status === 'waiting' && !Number(left?.n ?? 0)) {
-      await tx
-        .update(tasks)
-        .set({ status: current.stage > 0 ? 'review' : 'working', silent: 0, version: sql`${tasks.version} + 1`, updatedAt: new Date() })
-        .where(and(eq(tasks.id, task.id), eq(tasks.status, 'waiting')));
-    }
-    const [after] = await tx.select().from(tasks).where(eq(tasks.id, task.id));
-    /* A task that stood still goes on with whoever holds it now. */
-    const goesOn = found.kind === 'stuck' && after!.stage === 0 && after!.assigneeAgentId ? after!.assigneeAgentId : found.agentId;
-    wakes = CLOSED.includes(after!.status) ? [] : [{ agentId: goesOn, taskId: task.id, why: 'answered', text: said }];
-    /* The last answer at a gate: everyone else still to give a verdict there goes on too, also after a turn spent waiting. */
-    if (current?.status === 'waiting' && after!.status === 'review') {
-      const back = await reviewWake(tx, after!);
-      wakes.push(...after!.panel.filter(id => id !== found.agentId).map(agentId => ({ agentId, taskId: task.id, ...back })));
-    }
+    wakes = await goesOnAfter(tx, task, found, current, { why: 'answered', text: said });
     recordCause(wakes, { kind: 'answered', actor: answerer(answeredBy, actor), text: said, data: { status, commit: answeredWork(found) } }, event.id, task);
     await keepWakes(tx, task.companyId, wakes);
     return request;
@@ -1792,7 +1789,7 @@ export async function answerDirectly(ctx: Live, personId: string, agentId: strin
     .select({ id: requests.id, companyId: requests.companyId, kind: requests.kind, decisionTopic: requests.decisionTopic, departmentId: tasks.departmentId, productId: tasks.productId })
     .from(requests)
     .innerJoin(tasks, eq(tasks.id, requests.taskId))
-    .where(and(eq(requests.agentId, agentId), eq(requests.status, 'open'), inArray(requests.kind, ['question', 'stuck'])))
+    .where(and(eq(requests.agentId, agentId), eq(requests.status, 'open'), eq(requests.audience, 'human'), inArray(requests.kind, ['question', 'stuck'])))
     .orderBy(asc(requests.createdAt));
   const wakes: Wake[] = [];
   for (const r of open) {

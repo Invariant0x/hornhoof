@@ -8,6 +8,7 @@ import { NUDGES, type FactJobState, type FactRequest, type FactSign, type FactTa
 
 import { readTurnHistory, upTo } from './tree-history.js';
 import { openWaitsOf, shownWaits } from './wait-views.js';
+import { ASKED_INSIDE } from './question-lifecycle.js';
 
 type Reader = Db | Tx;
 
@@ -169,7 +170,7 @@ export async function treeFactsOf(db: Reader, companyId: string, departmentId: s
     .select({
       taskId: requests.taskId,
       agentId: requests.agentId,
-      text: requests.text,
+      text: sql<string>`case when ${requests.audience} = 'internal' then ${ASKED_INSIDE} else ${requests.text} end`,
       status: requests.status,
       createdAt: requests.createdAt,
       answeredAt: requests.answeredAt,

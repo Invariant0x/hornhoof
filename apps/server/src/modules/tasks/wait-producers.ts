@@ -1,12 +1,13 @@
 import type { WaitOwnerBinding, WaitPlan, WaitSourceKind, WaitSourceState } from '@hornhoof/protocol/waits';
 import { and, eq, inArray, isNull, ne } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
-import { agents, requests, taskWaits } from '../../db/schema.js';
+import { agents, requestInternal, requests, tasks, taskWaits, type QuestionRecoveryIntent } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { candidates, decisionOwner } from './decisions.js';
 import { CLOSED, refuse, requestSubject, type Actor, type Request, type Task, type Tx } from './engine.js';
+import { classificationRequired, sourceClosed, staleRevision, staleRoute } from './question-authority.js';
 import { departmentHead, planFromPolicy, setsWaitDates } from './wait-policy.js';
-import { afterSourceKey, endOpenSource, endTaskWaits, lastOfSource, moveWaitOwner, recordLegacyWait, requestSourceKey, reviewSourceKey, syncSourceWaits, type TaskWait } from './wait-state.js';
+import { afterSourceKey, endOpenSource, endSourceWait, endTaskWaits, lastOfSource, moveWaitOwner, recordLegacyWait, requestSourceKey, reviewSourceKey, syncSourceWaits, type TaskWait } from './wait-state.js';
 
 /* strict: false for what Hornhoof asks or moves by itself and for what an owner must be able to say, which go on with no dates
    rather than stop: a reviewer's verdict, someone leaving, a task that stood still, a goal being missed. */
@@ -103,15 +104,93 @@ export async function bindRequest(tx: Tx, task: Task, request: Request, actor: A
 export const endRequest = (tx: Tx, request: Pick<Request, 'id' | 'taskId'>, status: Request['status'], actor: Actor): Promise<void> =>
   endOpenSource(tx, { taskId: request.taskId, kind: 'person', sourceKey: requestSourceKey(request.id), outcome: 'resolved', proofRef: `request:${request.id}:${status}`, actor });
 
+export const questionSourceKey = (request: string) => `question:${request}`;
+
+/* A question is named by what the caller last read of it, and acted on only if that is what it still is. */
+export type QuestionGuard = { taskId: string; requestId: string; expectedRevision: number; expectedRouteRevision: number; actor: Actor };
+
+const noSuchQuestion = () => refuse(404, 'request_unknown', 'There is no such question.');
+
+/* The task and then its question, as a cancel takes them, as they are now under their locks. */
+async function lockedQuestion(tx: Tx, guard: QuestionGuard): Promise<{ task: Task; request: Request }> {
+  const [task] = await tx.select().from(tasks).where(eq(tasks.id, guard.taskId)).for('update');
+  if (!task) throw noSuchQuestion();
+  const [request] = await tx.select().from(requests).where(and(eq(requests.id, guard.requestId), eq(requests.taskId, task.id), eq(requests.companyId, task.companyId))).for('update');
+  if (!request) throw noSuchQuestion();
+  if (request.questionRevision !== guard.expectedRevision) throw staleRevision();
+  if (request.routeRevision !== guard.expectedRouteRevision) throw staleRoute();
+  return { task, request };
+}
+
+/* The person a question put before people answers to: the one whose decision it is, or the one who alone can do what it asks. */
+async function questionPerson(tx: Tx, task: Task, request: Request): Promise<string> {
+  const authority = request.classification?.authority;
+  if (!authority) throw classificationRequired();
+  const owner = authority.purpose.kind === 'decision' ? await requestOwner(tx, task, request) : { personId: authority.recipientPersonIds[0] };
+  const personId = owner && 'personId' in owner ? owner.personId : undefined;
+  if (!personId || !authority.recipientPersonIds.includes(personId)) throw staleRoute();
+  return personId;
+}
+
+const ownerOfQuestion = async (tx: Tx, task: Task, request: Request): Promise<WaitOwnerBinding | null> => {
+  if (request.audience === 'human') return { personId: await questionPerson(tx, task, request) };
+  return request.triageAgentId ? { agentId: request.triageAgentId } : null;
+};
+
+/* What keeps a question from being lost where nobody can have it yet, or nobody gave it dates. Never a date of its own. */
+async function keepRecovery(tx: Tx, request: Request, reason: QuestionRecoveryIntent['reason'] | null): Promise<void> {
+  const recoveryIntent = reason ? { sourceKey: questionSourceKey(request.id), reason, recordedAt: new Date().toISOString() } : null;
+  await tx.insert(requestInternal).values({ requestId: request.id, companyId: request.companyId, recoveryIntent }).onConflictDoUpdate({ target: requestInternal.requestId, set: { recoveryIntent } });
+}
+
+const kindOfQuestion = (request: Pick<Request, 'audience'>): 'external' | 'person' => (request.audience === 'human' ? 'person' : 'external');
+
+/* With no dates the wait keeps what is known of it; another comes to answer for it without a plan by name alone. */
+async function withoutDates(tx: Tx, source: { taskId: string; sourceKey: string; sourceRevision: number; ownerBinding: WaitOwnerBinding; actor: Actor }, kind: 'external' | 'person', task: Task): Promise<TaskWait> {
+  const last = await lastOfSource(tx, task, kind, source.sourceKey);
+  if (!last || last.endedAt !== null) return recordLegacyWait(tx, { ...source, kind, sourceState: {} });
+  await moveWaitOwner(tx, last, source.ownerBinding, source.actor);
+  return last;
+}
+
+/* Keeps the wait of a question as the question is now, read under its locks: of an agent while it stays inside, of a person
+   once it is put before one, and the kind it was before ends in the same write. sourceRevision is the question's route.
+   With nobody to have it, or no promise and no dates from the department, no date is made up: the recovery intent stays. */
+export async function syncQuestionWait(tx: Tx, guard: QuestionGuard & { plan?: WaitPlan | undefined }): Promise<TaskWait | null> {
+  const { task, request } = await lockedQuestion(tx, guard);
+  if (request.status !== 'open') throw sourceClosed();
+  const kind = kindOfQuestion(request);
+  const sourceKey = questionSourceKey(request.id);
+  await endOpenSource(tx, { taskId: task.id, kind: kind === 'person' ? 'external' : 'person', sourceKey, outcome: 'superseded', proofRef: `question:${request.id}:route:${request.routeRevision}`, actor: guard.actor });
+  const ownerBinding = await ownerOfQuestion(tx, task, request);
+  if (!ownerBinding) {
+    await keepRecovery(tx, request, 'internal_route_unavailable');
+    return null;
+  }
+  const plan = guard.plan ?? await policyPlan(tx, task, { kind, sourceKey, owner: ownerBinding, actor: guard.actor });
+  await keepRecovery(tx, request, plan ? null : 'plan_unavailable');
+  const source = { taskId: task.id, sourceKey, sourceRevision: request.routeRevision, ownerBinding, actor: guard.actor };
+  return plan ? syncSourceWaits(tx, { ...source, kind, sourceState: {}, plan }) : withoutDates(tx, source, kind, task);
+}
+
+/* Ends the wait of that one question, of the kind it waits as now; the question itself ends in the write that calls this. */
+export async function endQuestionWait(tx: Tx, guard: QuestionGuard & { outcome: 'resolved' | 'cancelled' | 'superseded'; proofRef: string }): Promise<void> {
+  const { task, request } = await lockedQuestion(tx, guard);
+  await endSourceWait(tx, { taskId: task.id, kind: kindOfQuestion(request), sourceKey: questionSourceKey(request.id), outcome: guard.outcome, proofRef: guard.proofRef, sourceRevision: request.routeRevision, actor: guard.actor });
+}
+
 export type WaitStep = { kind: string; actor: Actor; eventId: number };
+
+const isQuestionWait = (w: TaskWait): boolean => w.kind === 'person' || (w.kind === 'external' && w.sourceKey.startsWith('question:'));
 
 /* Questions taken back in this move no longer wait for anybody. */
 async function endWithdrawn(tx: Tx, row: Task, step: WaitStep, open: TaskWait[]): Promise<void> {
-  const asked = new Map(open.filter(w => w.kind === 'person').map(w => [w.sourceKey.slice('request:'.length), w]));
+  const asked = new Map(open.filter(isQuestionWait).map(w => [w.sourceKey.slice(w.sourceKey.indexOf(':') + 1), w]));
   if (!asked.size) return;
   const gone = await tx.select({ id: requests.id, status: requests.status }).from(requests).where(and(inArray(requests.id, [...asked.keys()]), ne(requests.status, 'open')));
   for (const request of gone) {
-    await endOpenSource(tx, { taskId: row.id, kind: 'person', sourceKey: requestSourceKey(request.id), outcome: 'cancelled', proofRef: `request:${request.id}:${request.status}`, actor: step.actor });
+    const wait = asked.get(request.id)!;
+    await endOpenSource(tx, { taskId: row.id, kind: wait.kind, sourceKey: wait.sourceKey, outcome: 'cancelled', proofRef: `request:${request.id}:${request.status}`, actor: step.actor });
   }
 }
 

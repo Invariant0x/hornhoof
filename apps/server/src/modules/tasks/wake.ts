@@ -1,7 +1,7 @@
 import { and, count, desc, eq, gt, gte, inArray, isNotNull, isNull, notInArray, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { loggable } from '../../errors.js';
-import { agentChanges, agentEvents, agents, jobs, requests, subscriptions, taskEvents, tasks, testRuns } from '../../db/schema.js';
+import { agentChanges, agentEvents, agents, jobs, requestInternal, requests, subscriptions, taskEvents, tasks, testRuns } from '../../db/schema.js';
 import { agentState, conversationOf, insertTurn, limitUntil, liveSubscription, onAgent, openTypedTurn, orchestratorOf, pump, refusedLimits, turnRefused, UNSENT, type TurnMessage } from '../conversation/queue.js';
 import { deliverLive } from '../conversation/decision-context.js';
 import { quote } from '../conversation/prompt.js';
@@ -9,7 +9,7 @@ import { appendEvent, publishWorking } from '../events/store.js';
 import { identityOf, type NodeIdentity } from '../nodes/hub.js';
 import { goesOutNow, isFree, mayTake, peersOfRole } from './role-peers.js';
 import { answerDirectly, brokeDown, CLOSED, GATE_ROUNDS, handOver, lastMove, leaveGates, leaveWork, NOT_A_MOVE, openAfter, regateWaiting, reviewWake, silentTurn, taskSpot, wentOn, type Actor, type Moved, type Task, type Wake, type WakeWhy } from './engine.js';
-import { wakeQueued, wakesLeft } from './outbox.js';
+import { QUESTION_WAKES, wakeQueued, wakesLeft } from './outbox.js';
 import { taskForWake, taskWakeOf, waitingTaskTurn } from './wake-state.js';
 import { carriedTasks, continueOnce, doneIfRecorded } from './endings.js';
 import { afterRestart } from './restarts.js';
@@ -143,8 +143,11 @@ function reason(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
       /* Its text is Hornhoof's account of the run, or who stopped it. */
       return `The work you ran on ${ref} ended${said}Go on with the task, then ${finish}. If you cannot go on, ${stuck}.`;
     case 'explain':
-      /* Hornhoof writes this turn itself, from the request. */
-      return `${ref} waits for people. See /api/requests and put what is asked into plain words with explain_request.`;
+    case 'question':
+      /* Hornhoof writes this turn itself, from the question. */
+      return `${ref} has a question for you. Read it with internal_questions.`;
+    case 'resolved':
+      return `Your question on ${ref} was settled${said}Go on with it.`;
   }
 }
 
@@ -218,8 +221,8 @@ export async function wakeAll(ctx: Ctx, wakes: Wake[]): Promise<void> {
   const seen = new Set<string>();
   for (const w of wakes) {
     try {
-      if (w.why === 'explain') {
-        await explainRequest(ctx, w);
+      if (QUESTION_WAKES.includes(w.why)) {
+        await questionTurn(ctx, w);
         await wakeQueued(ctx.db, w);
         continue;
       }
@@ -255,35 +258,35 @@ export async function wakeLeftBehind(ctx: Ctx, now = new Date()): Promise<number
   }
 }
 
-/* An employee waits for people: the orchestrator finds out what it needs and puts it into plain words for them, which
-   people read above their answer. Typed into the orchestrator's turn when it works, else its own turn, one per request. */
-async function explainRequest(ctx: Ctx, w: Wake): Promise<void> {
+/* Whoever has a question hears it, in its turn when it works, else in a turn of its own, one per question. As it is now: one
+   settled or handed on meanwhile says nothing. */
+async function questionTurn(ctx: Ctx, w: Wake): Promise<void> {
   const [found] = await ctx.db
-    .select({ request: requests, asker: agents.name, task: tasks })
+    .select({ request: requests, asker: agents.name, task: tasks, words: requestInternal.technicalText })
     .from(requests)
     .innerJoin(agents, eq(agents.id, requests.agentId))
     .innerJoin(tasks, eq(tasks.id, requests.taskId))
+    .leftJoin(requestInternal, eq(requestInternal.requestId, requests.id))
     .where(eq(requests.id, w.text ?? ''));
-  if (!found || found.request.status !== 'open' || !(await liveSubscription(ctx, w.agentId))) return;
+  if (!found || found.request.status !== 'open' || found.request.audience !== 'internal' || found.request.triageAgentId !== w.agentId || !(await liveSubscription(ctx, w.agentId))) return;
   const { request, asker, task } = found;
   const ref = `#${task.number} "${task.title}"`;
+  const words = found.words ?? request.text;
   const what =
     request.kind === 'stuck'
-      ? `Hornhoof stopped waking ${asker} on ${ref} and waits for people to say how it goes on (request ${request.id}). Hornhoof noted: ${request.text}`
-      : `${asker} asks people on ${ref} (request ${request.id}, a ${request.kind}):\n\n${quote(request.text)}`;
+      ? `Hornhoof stopped waking ${asker} on ${ref} and it is yours to say how it goes on. Hornhoof noted: ${words}`
+      : `${asker} asks on ${ref} (a ${request.kind}):\n\n${quote(words)}`;
   const text =
-    `${what}\n\nBefore a person answers, find out what it needs: read the task with "task", and ask ${asker} with "message_employee" when its words are not enough. ` +
-    `Then call "explain_request" with request ${request.id} and a few lines for the person, in the CEO's language and plain words without IT terms: ` +
-    'which task and what for, what is needed from them and why, and the ways to go with what each leads to. Do not answer it yourself unless the CEO told you how.';
-  const cause = request.kind === 'stuck' ? w.cause : { actor: { agentId: request.agentId }, action: 'asked people', task: { id: task.id, number: task.number } };
+    `${what}\n\nThis is question ${request.id}, revision ${request.questionRevision}, route ${request.routeRevision}. It stays inside the company unless you say otherwise. ` +
+    'Read the task with "task", and ask the employee with "message_employee" when its words are not enough. Settle it with "resolve_question", or hand technical work on with "route_question". ' +
+    'Only a ready result or what only a person can do goes to a person, with "classify_human_intent": being blocked, a missing tool or an unclear brief are not reasons to.';
+  const cause = request.kind === 'stuck' ? w.cause : { actor: { agentId: request.agentId }, action: 'asked', task: { id: task.id, number: task.number } };
   const notice = await wakeNotice(ctx, task, { ...w, cause });
   const message = { personId: null, text, task: { id: task.id, number: task.number }, request: request.id, ...notice };
-  /* The request names the turn that explains it, so people see the orchestrator is on it. */
   const into = await deliverLive(ctx, w.agentId, text, { source: { data: message } }, (jobId, kept) =>
     appendEvent(ctx, { companyId: task.companyId, agentId: w.agentId, jobId, kind: 'message', data: message }, kept).then(() => {}),
   );
   if (!into) await insertTurn(ctx, { companyId: task.companyId, agentId: w.agentId, prompt: text, createdBy: null, message });
-  ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
   if (!into) await pump(ctx, w.agentId);
 }
 
@@ -337,9 +340,9 @@ export async function stopTurns(ctx: Ctx, taskIds: string[], keep?: string): Pro
 }
 
 /* Wakes that bring the agent new words on its task, which a turn on that task takes in while it runs. */
-const LIVE_WAKES: WakeWhy[] = ['comment', 'unblocked', 'answered', 'updated', 'tests', 'work'];
+const LIVE_WAKES: WakeWhy[] = ['comment', 'unblocked', 'answered', 'resolved', 'updated', 'tests', 'work'];
 /* Wakes that would set the holder to work on its task, held back while the task waits for the tasks it comes after. */
-const TO_WORK: WakeWhy[] = ['assigned', 'updated', 'comment', 'answered', 'unblocked', 'reminder', 'go_on', 'subtasks'];
+const TO_WORK: WakeWhy[] = ['assigned', 'updated', 'comment', 'answered', 'resolved', 'unblocked', 'reminder', 'go_on', 'subtasks'];
 
 /* What a wake says, kept as the message of its turn. */
 async function wakeMessage(ctx: Ctx, agent: typeof agents.$inferSelect, task: Task, w: Wake) {

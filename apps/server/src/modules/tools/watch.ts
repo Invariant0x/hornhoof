@@ -18,6 +18,7 @@ import { PROGRAM_OPERATOR_ROLE } from '@hornhoof/protocol/program-operator';
 import { registerOperatorTools } from '../program-operator/tools.js';
 import { INSTALL_HINT, installsIn, MISSING_HINT, missingIn, type Missing } from './stumbles.js';
 import { watchedTasks } from './watch-tasks.js';
+import { ASKED_INSIDE } from '../tasks/question-lifecycle.js';
 
 type ToolJob = { id: string; companyId: string; agentId: string; agentKind: string; roleKey?: string | null };
 
@@ -230,7 +231,7 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
         const missing = tally<Missing>((await seen('tool_result', 'summary', MISSING_HINT)).flatMap(r => missingIn(r.text).map(m => ({ ...r, key: `${m.kind} ${m.what}`, value: m, example: lineOf(r.text, m.what) }))));
         const installed = tally<string>((await seen('tool', 'input', INSTALL_HINT)).flatMap(r => installsIn(r.text).map(command => ({ ...r, key: command, value: command }))));
         const stopped = await db
-          .select({ kind: requests.kind, agentId: requests.agentId, taskId: requests.taskId, agent: agents.name, task: tasks.number, text: requests.text, status: requests.status, answer: requests.answer, at: requests.createdAt })
+          .select({ kind: requests.kind, agentId: requests.agentId, taskId: requests.taskId, agent: agents.name, task: tasks.number, text: sql<string>`case when ${requests.audience} = 'internal' then ${ASKED_INSIDE} else ${requests.text} end`, status: requests.status, answer: sql<string | null>`case when ${requests.audience} = 'internal' then null else ${requests.answer} end`, at: requests.createdAt })
           .from(requests)
           .innerJoin(agents, eq(agents.id, requests.agentId))
           .innerJoin(tasks, eq(tasks.id, requests.taskId))

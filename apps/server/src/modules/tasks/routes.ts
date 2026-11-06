@@ -16,6 +16,8 @@ import { serverMachine } from '../computer/access.js';
 import { deptName } from '../departments/templates.js';
 import { departmentNames, visibleDecisions, type Decisions } from './decisions.js';
 import { answer, cancel, CLOSED, comment, createTask, refuse, requestSubject, taskSpot, type Task } from './engine.js';
+import { classificationRequired } from './question-authority.js';
+import { questionRoutes } from './question-intents.js';
 import { setUrgent } from './urgency.js';
 import { requireDecision } from '../../auth/decisions.js';
 import { delegationOf, lockedFor } from '../conversation/decision-context.js';
@@ -176,6 +178,7 @@ async function turnView(db: Db, turn: Turn | undefined, viewer: AgentViewer) {
    reach (sight.ts). */
 export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db } = ctx;
+  questionRoutes(app, ctx);
 
   /* A task of the company this person sees: 404 for one that is not there, 403 for one they do not see. */
   async function shown(me: Person, id: string): Promise<Task> {
@@ -367,6 +370,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const body = AnswerBody.parse(req.body);
     const [found] = await db.select().from(requests).where(and(eq(requests.id, id), eq(requests.companyId, me.companyId)));
     if (!found) throw refuse(404, 'request_unknown', 'There is no such request.');
+    if (found.status === 'open' && found.audience === 'internal') throw classificationRequired();
     const [task] = await db.select().from(tasks).where(eq(tasks.id, found.taskId));
     if (!task) throw refuse(404, 'request_unknown', 'There is no such request.');
     /* The orchestrator answers only for the person its turn answers, under its input lock, checked again as it is kept. */
@@ -385,6 +389,8 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (!me.via) throw new ApiError(403, 'forbidden', 'Only the orchestrator puts a request into words for people. Answer it instead.', 'orchestrator_only');
     const { id } = IdParams.parse(req.params);
     const { text } = z.object({ text: z.string().trim().min(1).max(3000) }).parse(req.body);
+    const [asked] = await db.select({ audience: requests.audience, status: requests.status }).from(requests).where(and(eq(requests.id, id), eq(requests.companyId, me.companyId)));
+    if (asked?.status === 'open' && asked.audience === 'internal') throw classificationRequired();
     const [row] = await db
       .update(requests)
       .set({ explained: text })

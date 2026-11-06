@@ -88,6 +88,8 @@ export const knowsRequest = (viewer: AgentViewer, request: Pick<Request, 'agentI
 /* Whether a person opens what shows with a request: when they read it with its work, or while it is open and theirs to
    answer, and then this and nothing around it. */
 export async function mayOpenRequest(db: Db, me: Person, request: Request, task: Task): Promise<boolean> {
+  /* What is still inside the company has no reader among people yet, however well they see its work. */
+  if (request.audience === 'internal') return false;
   const viewer = await viewerOf(db, me);
   return knowsRequest(viewer, request, task) || (request.status === 'open' && canDecide(requestSubject(request, task), me, viewer.access, me.companyId));
 }
@@ -117,7 +119,7 @@ export async function visibleDecisions(ctx: Pick<Ctx, 'db' | 'computer'>, me: Pe
     .select({ request: requests, task: tasks })
     .from(requests)
     .innerJoin(tasks, eq(tasks.id, requests.taskId))
-    .where(and(eq(requests.companyId, me.companyId), eq(requests.status, 'open')))
+    .where(and(eq(requests.companyId, me.companyId), eq(requests.status, 'open'), eq(requests.audience, 'human')))
     .orderBy(asc(requests.createdAt), asc(requests.id));
   /* As the routes that take them let them. */
   const judged = (subject: DecisionSubject) => ({ ownerPersonId: decisionOwner(subject, everyone), canAnswer: canDecide(subject, me, access, me.companyId), decidedBy: decidedBy(subject, everyone) });

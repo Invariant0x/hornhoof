@@ -16,7 +16,8 @@ import { personParty } from '../events/parties.js';
 import { appendOutgoing } from '../events/store.js';
 import { carriesFile, encodedHint } from '../tasks/attachments.js';
 import { decisionPerson } from '../tasks/decisions.js';
-import { ask, comment, mayAsk, refuse, taskSpot, type Ask, type Task } from '../tasks/engine.js';
+import { ask, comment, mayAsk, refuse, taskSpot, type Ask, type Request as Question, type Task } from '../tasks/engine.js';
+import { askedWords, recordInternalAsk } from '../tasks/question-lifecycle.js';
 import { TURN_QUESTIONS } from '../tasks/tools.js';
 import { taskByRef } from '../tasks/views.js';
 import { openGoal, resolveGoal, reviseGoal, type GoalImpact, type GoalRef } from '../tasks/wait-goals.js';
@@ -76,13 +77,18 @@ async function askedInTurn(db: Ctx['db'], job: ToolJob): Promise<number> {
 }
 
 /* A question to people, kept with the person it goes to, within what one turn may ask. */
-async function askPerson(ctx: Ctx, job: ToolJob, task: Task, q: Ask & { kind: 'question' | 'approval' }): Promise<void> {
+async function askPerson(ctx: Ctx, job: ToolJob, task: Task, q: Ask & { kind: 'question' | 'approval' }): Promise<Question> {
   if (carriesFile(q.text)) throw refuse(400, 'task_invalid', encodedHint(task.number));
   if ((await askedInTurn(ctx.db, job)) >= TURN_QUESTIONS) throw refuse(409, 'task_invalid', `One turn asks people at most ${TURN_QUESTIONS} times.`);
-  const moved = await ask(ctx, job.agentId, task.id, q);
-  const personId = await decisionPerson(ctx, job.companyId, { source: 'request', kind: q.kind, topic: moved.request.decisionTopic, spot: taskSpot(task) });
-  await appendOutgoing(ctx, { companyId: job.companyId, agentId: job.agentId, jobId: job.id, text: q.text, to: await personParty(ctx, job.companyId, personId) });
+  const moved = await ask(ctx, job.agentId, task.id, { ...q, sourceJobId: job.id });
+  if (moved.request.audience === 'human') {
+    const personId = await decisionPerson(ctx, job.companyId, { source: 'request', kind: q.kind, topic: moved.request.decisionTopic, spot: taskSpot(task) });
+    await appendOutgoing(ctx, { companyId: job.companyId, agentId: job.agentId, jobId: job.id, text: q.text, to: await personParty(ctx, job.companyId, personId) });
+  } else {
+    await recordInternalAsk(ctx, job, moved.request, q.text);
+  }
   await wakeAll(ctx, moved.wakes);
+  return moved.request;
 }
 
 /* Why the policy lets this work go without a person, when it does. */
@@ -102,8 +108,8 @@ async function requestApproval(ctx: Ctx, job: ToolJob, ref: number | string, ask
     await wakeAll(ctx, (await comment(ctx, { agentId: job.agentId }, task.id, `Went without approval (${asked.channel}, ${kind}): ${why}. ${asked.text}`)).wakes);
     return say(`No approval needed: ${why}. Go on with the work.`);
   }
-  await askPerson(ctx, job, task, { kind: 'approval', text: asked.text, approval: { channel: asked.channel, kind, amount: asked.amount ?? null }, link: asked.link ?? null, topic: 'task', ...(asked.plan ? { plan: asked.plan } : {}) });
-  return say(`Asked. #${task.number} waits for a person's answer; you will be woken with it.`);
+  const request = await askPerson(ctx, job, task, { kind: 'approval', text: asked.text, approval: { channel: asked.channel, kind, amount: asked.amount ?? null }, link: asked.link ?? null, topic: 'task', ...(asked.plan ? { plan: asked.plan } : {}) });
+  return say(await askedWords(ctx, job, request, task.number));
 }
 
 /* A department's owner and rules as an agent reads them. */

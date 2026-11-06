@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { Text } from '../tasks/long-text.js';
 import type { Ctx } from '../../app.js';
 import { orchestratorDecisionHeaders, orchestratorHeaders } from '../../auth/internal.js';
-import { departments, people } from '../../db/schema.js';
+import { departments, people, requests } from '../../db/schema.js';
 import { AgentPatch } from '../agents/routes.js';
 import { ceoPrincipal, decisionPrincipal, withInputLock } from '../conversation/decision-context.js';
 import { deptName } from '../departments/templates.js';
@@ -16,6 +16,7 @@ import { SHOWN_TO_CEO } from '../nodes/command.js';
 import { LendBody } from '../nodes/routes.js';
 import { NOTE_MAX, NoteBody } from '../notebook/book.js';
 import { carriesFile, encodedHint } from '../tasks/attachments.js';
+import { classificationRequired } from '../tasks/question-authority.js';
 import { MESSAGE_TASK_HINT, TaskReference } from '../tasks/external-wait.js';
 import { InviteBody, PersonPatch } from '../people/routes.js';
 import { BudgetBody, ConnectBody, SubscriptionBody } from '../subscriptions/routes.js';
@@ -65,6 +66,9 @@ export const ONLY_CEO = 'Only the CEO or the CEO delegate can ask for this, in a
 
 /* The tools that take a decision for a person: the one this turn answers, who must have the right to take it. */
 const DECIDES = new Set(['answer_request', 'build_structure', 'hire']);
+/* A question inside the company has no person to answer for, whoever wrote into this turn last. */
+const staysInside = async (db: Ctx['db'], companyId: string, id: string): Promise<boolean> =>
+  (await db.select({ id: requests.id }).from(requests).where(and(eq(requests.id, id), eq(requests.companyId, companyId), eq(requests.status, 'open'), eq(requests.audience, 'internal')))).length > 0;
 const NO_PRINCIPAL =
   'This turn answers no person who may take a decision now: the last message in it came from an employee or from Hornhoof, or words for it are still on their way. ' +
   'Nothing was changed. Ask the person who takes it (the CEO, the CEO delegate or, for a department, its people) to decide it, or to tell you so in this window.';
@@ -182,7 +186,7 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
       pick: z.number().int().min(0).max(9).optional(),
       retry: z.literal(true).optional(),
     },
-    ({ request, ...body }) => ({ method: 'POST', url: `/api/requests/${request}`, payload: body }),
+    async ({ request, ...body }) => ((await staysInside(ctx.db, job.companyId, request)) ? classificationRequired().message : { method: 'POST', url: `/api/requests/${request}`, payload: body }),
   );
 
   tool(

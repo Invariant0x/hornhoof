@@ -3,6 +3,7 @@ import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { agents, departments, people, requests, taskEvents, tasks, turns, type RequestOption } from '../../db/schema.js';
 import { commitUrl, filesOf, picturesOf } from './attachments.js';
+import { shownQuestion } from './question-lifecycle.js';
 import { deptName } from '../departments/templates.js';
 import { commitProof, type CommitProof } from '../testruns/commit-proof.js';
 import { taskEvidence, type RunEvidence } from '../testruns/evidence.js';
@@ -216,8 +217,8 @@ export async function taskDetail(ctx: Pick<Ctx, 'db' | 'templates' | 'config' | 
     .where(eq(taskEvents.taskId, task.id))
     .orderBy(desc(taskEvents.id))
     .limit(LOG_SHOWN);
-  const asks = await db.select().from(requests).where(eq(requests.taskId, task.id)).orderBy(asc(requests.createdAt));
-  const pictures = await picturesOf(db, asks);
+  const asks = (await db.select().from(requests).where(eq(requests.taskId, task.id)).orderBy(asc(requests.createdAt))).map(shownQuestion);
+  const pictures = await picturesOf(db, asks.filter(r => r.audience !== 'internal'));
   const commits = await Promise.all(asks.map(r => commitUrl(db, task, r.commit)));
   const proofs = await proofsOf(db, task, asks);
   const files = await filesOf(db, task.id);

@@ -4,7 +4,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { and, asc, count, desc, eq, gte, inArray, isNull, notInArray } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { agents, DECISION_TOPICS, departments, jobs, requests, tasks, type DecisionTopic } from '../../db/schema.js';
+import { agents, DECISION_TOPICS, departments, jobs, requests, tasks } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { ask, blocked, cancel, CLOSED, comment, createTask, gateLeads, inRepository, listed, openAfter, refuse, report, submit, taskSpot, updateTask, verdict, type Moved, type Task } from './engine.js';
 import { requireBlockingGate } from './gate-triggers.js';
@@ -18,9 +18,7 @@ import { answersCeoOrDelegate } from '../conversation/decision-context.js';
 import { ONLY_CEO } from '../tools/control.js';
 import { stopTurns, wakeAll } from './wake.js';
 import { orchestratorOf } from '../conversation/queue.js';
-import { appendOutgoing } from '../events/store.js';
-import { personParty } from '../events/parties.js';
-import { decisionPerson } from './decisions.js';
+import { askedWords, recordInternalAsk } from './question-lifecycle.js';
 import { WaitInput, waitFor } from './external-wait.js';
 import { pipelineReport } from './pipeline-report.js';
 import { commitProof, proofLine } from '../testruns/commit-proof.js';
@@ -72,7 +70,6 @@ const WorkKind = z.enum(WORK_KINDS).describe('What kind of work it is: a bug, kn
 const RiskClass = z.enum(RISK_CLASSES).describe('What a mistake in it would cost: money, access, security, data, or none.');
 const Improvement = z.uuid().describe("The improvement these tasks take into work after a person's instruction, from improvements.");
 
-type Question = { kind: 'question' | 'approval' | 'choice'; text: string; topic?: DecisionTopic };
 
 /* What people read of a question, and what its asker hears besides: an approval says what test runs say of its commit as it
    is asked, which the answer says again as it comes. */
@@ -83,11 +80,6 @@ async function questionWords(db: Ctx['db'], task: Task, question: string, commit
 }
 
 /* Keep the outgoing question with the person responsible for its decision card. */
-async function recordQuestion(ctx: Ctx, job: ToolJob, task: Task, { kind, text, topic }: Question): Promise<void> {
-  const personId = await decisionPerson(ctx, job.companyId, { source: 'request', kind, topic: topic ?? null, spot: taskSpot(task) });
-  await appendOutgoing(ctx, { ...job, jobId: job.id, text, to: await personParty(ctx, job.companyId, personId) });
-}
-
 const isDepartmentTurnParent = (parent: Task | null, departmentId: string | null): parent is Task =>
   !!parent && !parent.executorAgentId && !!parent.turnId && parent.departmentId === departmentId;
 
@@ -296,9 +288,9 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         const kind = commit ? 'approval' : options?.length ? 'choice' : 'question';
         const ways = options?.map(o => ({ label: o.label, image: o.image ?? null }));
         const { text, told } = await questionWords(db, task, question, commit);
-        const moved = await ask(ctx, job.agentId, task.id, { kind, text, ...(commit ? { commit } : {}), images, options: ways, link: link ?? null, topic, ...(plan ? { plan } : {}) });
-        await recordQuestion(ctx, job, task, { kind, text, topic });
-        return { text: `Asked. #${task.number} waits for a person's answer; you will be woken with it.${told}`, moved };
+        const moved = await ask(ctx, job.agentId, task.id, { kind, text, ...(commit ? { commit } : {}), images, options: ways, link: link ?? null, topic, sourceJobId: job.id, ...(plan ? { plan } : {}) });
+        await recordInternalAsk(ctx, job, moved.request, text);
+        return { text: `${await askedWords(ctx, job, moved.request, task.number)}${told}`, moved };
       }),
   );
 

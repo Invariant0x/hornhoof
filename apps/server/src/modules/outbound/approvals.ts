@@ -5,10 +5,9 @@ import type { Ctx } from '../../app.js';
 import type { Db } from '../../db/client.js';
 import { outboundApprovals, requests } from '../../db/schema.js';
 import { departmentRules } from '../departments/approval-policy.js';
-import { personParty } from '../events/parties.js';
-import { appendOutgoing } from '../events/store.js';
 import { decisionPerson } from '../tasks/decisions.js';
 import { ask, taskSpot } from '../tasks/engine.js';
+import { recordInternalAsk } from '../tasks/question-lifecycle.js';
 import { wakeAll } from '../tasks/wake.js';
 import { digestOf, moneyWithinLimit, type Money } from './checks.js';
 
@@ -88,9 +87,6 @@ export async function askApproval(ctx: Ctx, a: Asking): Promise<void> {
       await tx.insert(outboundApprovals).values({ companyId: a.companyId, requestId: request.id, ...a.bound });
     },
   });
-  if (a.authorJobId) {
-    const personId = await decisionPerson(ctx, a.companyId, { source: 'request', kind: 'approval', topic: moved.request.decisionTopic, spot: taskSpot(moved.task) });
-    await appendOutgoing(ctx, { companyId: a.companyId, agentId: a.authorAgentId, jobId: a.authorJobId, text: a.text, to: await personParty(ctx, a.companyId, personId) });
-  }
+  if (a.authorJobId) await recordInternalAsk(ctx, { id: a.authorJobId, agentId: a.authorAgentId, companyId: a.companyId }, moved.request, a.text);
   await wakeAll(ctx, moved.wakes);
 }

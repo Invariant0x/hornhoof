@@ -16,6 +16,7 @@ import { registerComputerTools } from '../computer/tools.js';
 import { registerDatabaseTool } from './database.js';
 import { checkStaff, departmentOf, requiredState, StaffProposal, staffingOptions, withRequiredRoles } from './staff.js';
 import { checkItems, Proposal } from './structure.js';
+import { registerQuestionTools } from '../tasks/question-intents.js';
 import { registerTaskTools } from '../tasks/tools.js';
 import { registerTestTools } from '../testruns/tools.js';
 import { registerWatchTools } from './watch.js';
@@ -51,6 +52,7 @@ function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob): McpServer {
     async () => say(JSON.stringify(await companyView(ctx.db, ctx.templates, job.companyId))),
   );
   registerTaskTools(server, ctx, job);
+  registerQuestionTools(server, ctx, job);
   registerApprovalTools(server, ctx, job);
   registerOutboundTools(server, ctx, job);
   if (job.agentKind !== 'orchestrator') {
