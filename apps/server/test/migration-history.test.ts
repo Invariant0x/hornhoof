@@ -38,7 +38,7 @@ async function oldMigrations(history: typeof mainHistory): Promise<string> {
 function changedByLaterMigrations(table: string, rows: SnapshotRow[]): unknown[] {
   if (table === 'subscriptions') return rows.map(row => ({ row: { ...row.row, limits_updated_at: null } }));
   if (table !== 'tasks') return rows;
-  return rows.map(row => ({ row: { ...row.row, external_wait: { ...(row.row.external_wait as object), operation: expect.stringMatching(/^[0-9a-f-]{36}$/) as string } } }));
+  return rows.map(row => (row.row.external_wait ? { row: { ...row.row, external_wait: { ...(row.row.external_wait as object), operation: expect.stringMatching(/^[0-9a-f-]{36}$/) as string } } } : row));
 }
 
 describe('migration histories merged in turn 5', () => {
