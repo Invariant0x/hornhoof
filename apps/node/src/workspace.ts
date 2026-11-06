@@ -3,7 +3,6 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { repoFolder, type ExternalGitOutcome, type Workspace } from '@hornhoof/protocol';
 import type { JobUser } from './isolation.js';
-import { redact } from './redact.js';
 
 type Repo = NonNullable<Workspace['repo']>;
 
@@ -16,6 +15,43 @@ export type Git = (args: string[], opts: { cwd: string; env: NodeJS.ProcessEnv; 
 
 type ChildOutcome = Extract<ExternalGitOutcome, { kind: 'child' }>;
 
+/* Git credentials are known values, including short passwords. Hold a possible
+   prefix across chunks and mask it before a bounded stderr tail discards data. */
+export class GitCredentialMask {
+  private held = '';
+  private readonly forms: string[];
+  private readonly pattern: RegExp | null;
+
+  constructor(secrets: string[]) {
+    this.forms = [...new Set(secrets.filter(Boolean).flatMap(value => [value, Buffer.from(value).toString('base64'), Buffer.from(value).toString('base64url')]).flatMap(value => [value, value.replace(/=+$/, '')]))].filter(Boolean).sort((a, b) => b.length - a.length);
+    this.pattern = this.forms.length ? new RegExp(this.forms.map(value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g') : null;
+  }
+
+  push(chunk: string): string {
+    const combined = this.held + chunk;
+    const text = this.pattern ? combined.replace(this.pattern, '[hidden]') : combined;
+    const keep = credentialPrefix(text, this.forms);
+    this.held = text.slice(text.length - keep);
+    return text.slice(0, text.length - keep);
+  }
+
+  flush(): string {
+    const text = this.held ? '[hidden]' : '';
+    this.held = '';
+    return text;
+  }
+}
+
+function credentialPrefix(text: string, forms: string[]): number {
+  let keep = 0;
+  for (const value of forms) {
+    for (let size = Math.min(value.length - 1, text.length); size > keep; size--) {
+      if (text.endsWith(value.slice(0, size))) { keep = size; break; }
+    }
+  }
+  return keep;
+}
+
 /* Evidence from an owned preparation child, not a retry decision or proof that
    the whole check slot and cache have settled. The runner supplies that receipt. */
 export class GitPreparationError extends Error {
@@ -26,7 +62,8 @@ export class GitPreparationError extends Error {
 }
 
 export function gitPreparationFailure(outcome: ChildOutcome, network: boolean, secrets: string[], action = 'command'): GitPreparationError {
-  const text = redact(outcome.stderr, secrets).replace(/(https?:\/\/)[^\s/@]+@/gi, '$1[hidden]@').trim();
+  const mask = new GitCredentialMask(secrets);
+  const text = (mask.push(outcome.stderr) + mask.flush()).replace(/(https?:\/\/)[^\s/@]+@/gi, '$1[hidden]@').trim();
   return new GitPreparationError({ ...outcome, stderr: text.slice(-8192), stderrTruncated: outcome.stderrTruncated || text.length > 8192 }, network, action);
 }
 

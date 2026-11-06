@@ -4,8 +4,7 @@ import { access, lstat, mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { RepositoryPath, RepositoryScope, type Workspace } from '@hornhoof/protocol';
 import { cacheLockDescriptors, checkCacheContext, privateCacheRoot, withCacheLock, type CacheContext } from './test-cache.js';
-import { gitEnv, gitPreparationFailure } from './workspace.js';
-import { StreamMask } from './terminal/mask.js';
+import { GitCredentialMask, gitEnv, gitPreparationFailure } from './workspace.js';
 
 type Source = Pick<NonNullable<Workspace['repo']>, 'url' | 'token'>;
 export type GitEntry = { path: string; mode: string; oid: string };
@@ -16,13 +15,24 @@ function stopGit(pid: number | undefined, signal: NodeJS.Signals): void {
   if (pid === undefined) return;
   try { process.kill(-pid, signal); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error; }
 }
+
+function failedGit(code: number | null, signal: NodeJS.Signals | null, failure: Error | undefined, stopped: AbortSignal, stderr: string, stderrTruncated: boolean, network: boolean, secrets: string[]): Error {
+  const osCode = (failure as NodeJS.ErrnoException | undefined)?.code ?? null;
+  const action = network ? 'fetch' : 'local';
+  const error = gitPreparationFailure({ kind: 'child', exitCode: code !== null && code >= 0 ? code : null, signal, osCode, stderr, stderrTruncated }, network, secrets, action);
+  if (failure) error.message = gitPreparationFailure({ ...error.outcome, stderr: failure.message }, network, secrets, action).message;
+  if (!stopped.aborted) return error;
+  const timeout = stopped.reason instanceof DOMException && stopped.reason.name === 'TimeoutError';
+  return Object.assign(new DOMException(error.message, timeout ? 'TimeoutError' : 'AbortError'), { outcome: error.outcome, network, stopped: timeout ? 'timeout' : 'cancelled' });
+}
+
 function gitBytes(args: string[], context: CacheContext, limit = 3 * 1024 * 1024, auth: Record<string, string> = {}, network = false): Promise<Buffer> {
   checkCacheContext(context);
   return new Promise((resolve, reject) => {
     const signal = AbortSignal.any([context.signal, AbortSignal.timeout(Math.max(1, context.deadline - Date.now()))]);
     const child = spawn('/usr/bin/git', [...GIT_FLAGS, ...args], { detached: true, stdio: ['ignore', 'pipe', 'pipe', ...cacheLockDescriptors()], env: { PATH: '/usr/local/bin:/usr/bin:/bin', HOME: context.cacheRoot, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', ...auth } });
     const chunks: Buffer[] = []; let size = 0, failure: Error | undefined, killTimer: NodeJS.Timeout | undefined;
-    const mask = new StreamMask(() => [auth.HH_GIT_PASSWORD ?? '']);
+    const mask = new GitCredentialMask([auth.HH_GIT_PASSWORD ?? '']);
     let stderr = '', stderrTruncated = false;
     const capture = (text: string) => { const combined = stderr + text; stderrTruncated ||= combined.length > 8192; stderr = combined.slice(-8192); };
     child.stderr!.setEncoding('utf8');
@@ -41,9 +51,7 @@ function gitBytes(args: string[], context: CacheContext, limit = 3 * 1024 * 1024
     child.once('close', (code, signalName) => {
       signal.removeEventListener('abort', stop); clearTimeout(killTimer); stopGit(child.pid, 'SIGKILL');
       capture(mask.flush());
-      if (signal.aborted) reject(signal.reason);
-      else if (failure) reject(failure);
-      else if (code !== 0) reject(gitPreparationFailure({ kind: 'child', exitCode: code, signal: signalName, osCode: null, stderr, stderrTruncated }, network, [auth.HH_GIT_PASSWORD ?? ''], network ? 'fetch' : 'local'));
+      if (signal.aborted || failure || code !== 0) reject(failedGit(code, signalName, failure, signal, stderr, stderrTruncated, network, [auth.HH_GIT_PASSWORD ?? '']));
       else resolve(Buffer.concat(chunks));
     });
   });
