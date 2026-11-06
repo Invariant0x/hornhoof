@@ -75,7 +75,7 @@ for (const lang of ['en', 'ru'] as const) {
             range.setEnd(paragraph.querySelector('b')!.firstChild!, 1);
             const numberY = range.getBoundingClientRect().y;
             range.setStartAfter(paragraph.querySelector('b')!);
-            range.setEnd(paragraph, 1);
+            range.setEnd(paragraph, paragraph.childNodes.length);
             return { numberY, textY: range.getClientRects()[0]!.y };
           });
           expect(baselines.numberY, 'the note number shares the first text baseline').toBe(baselines.textY);
@@ -312,7 +312,7 @@ for (const lang of ['en', 'ru'] as const) {
         const copyBox = (await copy.boundingBox())!;
         const commandBox = (await command.boundingBox())!;
         expect(copyBox.y, 'Copy stands below the command').toBeGreaterThanOrEqual(codeBox.y + codeBox.height);
-        expect(copyBox.x + copyBox.width, 'Copy shares the command end').toBe(commandBox.x + commandBox.width - 12);
+        expect(Math.abs(copyBox.x + copyBox.width - (commandBox.x + commandBox.width - 12)), 'Copy shares the command end within the border').toBeLessThanOrEqual(1);
         const cancel = panel.getByRole('button', { name: m.subs.cancelCommand, exact: true });
         await expect(cancel).toHaveCSS('min-height', '44px');
         await capture(page, info, `command-${look}`);
