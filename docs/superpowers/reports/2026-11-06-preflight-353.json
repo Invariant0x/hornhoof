@@ -1,0 +1,144 @@
+{
+  "run": 353,
+  "part": 1,
+  "nativeStatus": "failed",
+  "nativeExitCode": 1,
+  "nativeSourceSha": "7cbfef0a51e9f437600fc3fb6c4087e7f000378d",
+  "machine": "home-api",
+  "log": "tests-353-1.log",
+  "logSha256": "8f6d832e222089c12a630a4b4fff639f897a11c8368909b06ba1fe808b0f59c5",
+  "preflight": {
+    "complete": false,
+    "error": "shared-source-fetch exit 128",
+    "stages": 1,
+    "ms": 519,
+    "stdoutBytesBeforeResult": 3813,
+    "acceptedPerformanceResult": false
+  },
+  "stage": {
+    "stage": "shared-source-fetch",
+    "args": [
+      "git",
+      "fetch",
+      "--no-tags",
+      "origin",
+      "refs/heads/task-378-fixed-control:refs/remotes/origin/task-378-fixed-control",
+      "refs/heads/task-378-fixed-optimized:refs/remotes/origin/task-378-fixed-optimized"
+    ],
+    "code": 128,
+    "signal": null,
+    "ms": 511,
+    "rawBytes": 83,
+    "sha256": "2e554a39e2bb4414b5e2c3f5a90ebc87b405b5b8231d692704ec6df4580e8f60"
+  },
+  "decodedError": "fatal: could not read Username for 'https://github.com': terminal prompts disabled\n",
+  "rawHashMatches": true,
+  "rawSizeMatches": true,
+  "recordCount": 6,
+  "recordBytesBeforeResult": 3813,
+  "footerByteCountMatches": true,
+  "resources": [
+    {
+      "scope": "bounded-preflight",
+      "stage": "preflight",
+      "point": "before",
+      "at": "2026-11-06T03:12:34.653Z",
+      "load": [
+        2.35,
+        2.3,
+        2.44
+      ],
+      "free": 91009654784,
+      "total": 101198942208,
+      "availableKb": "88876616",
+      "limits": {
+        "platform": "linux",
+        "release": "6.8.0-147-generic",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "9f3e5200d8f2",
+        "cpus": 8,
+        "hostCpus": 8,
+        "model": "Intel(R) Xeon(R) CPU E5-1620 v2 @ 3.70GHz",
+        "cpuMax": "max 100000",
+        "cpuPeriod": "max 100000",
+        "cpuset": "0-7",
+        "memoryMax": "max"
+      },
+      "cpuStat": "usage_usec 24303510873\nuser_usec 22154306823\nsystem_usec 2149204050\ncore_sched.force_idle_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "cpuPressure": "some avg10=0.00 avg60=0.00 avg300=0.31 total=331509237\nfull avg10=0.00 avg60=0.00 avg300=0.04 total=78566820",
+      "memoryCurrent": "215252992",
+      "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memoryPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=40\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=40"
+    },
+    {
+      "scope": "bounded-preflight",
+      "stage": "shared-source-fetch",
+      "point": "before",
+      "at": "2026-11-06T03:12:34.655Z",
+      "load": [
+        2.35,
+        2.3,
+        2.44
+      ],
+      "free": 91009654784,
+      "total": 101198942208,
+      "availableKb": "88876616",
+      "limits": {
+        "platform": "linux",
+        "release": "6.8.0-147-generic",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "9f3e5200d8f2",
+        "cpus": 8,
+        "hostCpus": 8,
+        "model": "Intel(R) Xeon(R) CPU E5-1620 v2 @ 3.70GHz",
+        "cpuMax": "max 100000",
+        "cpuPeriod": "max 100000",
+        "cpuset": "0-7",
+        "memoryMax": "max"
+      },
+      "cpuStat": "usage_usec 24303512919\nuser_usec 22154307863\nsystem_usec 2149205056\ncore_sched.force_idle_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "cpuPressure": "some avg10=0.00 avg60=0.00 avg300=0.31 total=331509237\nfull avg10=0.00 avg60=0.00 avg300=0.04 total=78566820",
+      "memoryCurrent": "215252992",
+      "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memoryPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=40\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=40"
+    },
+    {
+      "scope": "bounded-preflight",
+      "stage": "shared-source-fetch",
+      "point": "after",
+      "at": "2026-11-06T03:12:35.166Z",
+      "load": [
+        2.35,
+        2.3,
+        2.44
+      ],
+      "free": 91034234880,
+      "total": 101198942208,
+      "availableKb": "88900620",
+      "limits": {
+        "platform": "linux",
+        "release": "6.8.0-147-generic",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "9f3e5200d8f2",
+        "cpus": 8,
+        "hostCpus": 8,
+        "model": "Intel(R) Xeon(R) CPU E5-1620 v2 @ 3.70GHz",
+        "cpuMax": "max 100000",
+        "cpuPeriod": "max 100000",
+        "cpuset": "0-7",
+        "memoryMax": "max"
+      },
+      "cpuStat": "usage_usec 24303604076\nuser_usec 22154375063\nsystem_usec 2149229013\ncore_sched.force_idle_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "cpuPressure": "some avg10=0.00 avg60=0.00 avg300=0.31 total=331509430\nfull avg10=0.00 avg60=0.00 avg300=0.04 total=78567012",
+      "memoryCurrent": "215744512",
+      "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memoryPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=40\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=40"
+    }
+  ],
+  "sourceHalvesStarted": 0,
+  "fullSuiteStarted": false,
+  "repeatCreated": false
+}

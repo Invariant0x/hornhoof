@@ -510,5 +510,56 @@
       "load1Max": 1.56,
       "minFreeBytes": 7413739520
     }
-  ]
+  ],
+  "latestPreflight": {
+    "run": 353,
+    "part": 1,
+    "nativeStatus": "failed",
+    "nativeExitCode": 1,
+    "nativeSourceSha": "7cbfef0a51e9f437600fc3fb6c4087e7f000378d",
+    "machine": "home-api",
+    "log": "tests-353-1.log",
+    "logSha256": "8f6d832e222089c12a630a4b4fff639f897a11c8368909b06ba1fe808b0f59c5",
+    "preflight": {
+      "complete": false,
+      "error": "shared-source-fetch exit 128",
+      "stages": 1,
+      "ms": 519,
+      "stdoutBytesBeforeResult": 3813,
+      "acceptedPerformanceResult": false
+    },
+    "stage": {
+      "stage": "shared-source-fetch",
+      "args": [
+        "git",
+        "fetch",
+        "--no-tags",
+        "origin",
+        "refs/heads/task-378-fixed-control:refs/remotes/origin/task-378-fixed-control",
+        "refs/heads/task-378-fixed-optimized:refs/remotes/origin/task-378-fixed-optimized"
+      ],
+      "code": 128,
+      "signal": null,
+      "ms": 511,
+      "rawBytes": 83,
+      "sha256": "2e554a39e2bb4414b5e2c3f5a90ebc87b405b5b8231d692704ec6df4580e8f60"
+    },
+    "decodedError": "fatal: could not read Username for 'https://github.com': terminal prompts disabled\n",
+    "rawHashMatches": true,
+    "rawSizeMatches": true,
+    "recordCount": 6,
+    "recordBytesBeforeResult": 3813,
+    "footerByteCountMatches": true,
+    "sourceHalvesStarted": 0,
+    "fullSuiteStarted": false,
+    "repeatCreated": false
+  },
+  "currentHeadRoute": {
+    "input": "published Git refs through ordinary origin fetch",
+    "output": "stdout JSON/hash records in the native test log",
+    "separateAssetTransportRequired": false,
+    "archiveRequired": false,
+    "preflight353": "failed at source fetch, no source halves executed",
+    "newFullReplayAuthorized": false
+  }
 }

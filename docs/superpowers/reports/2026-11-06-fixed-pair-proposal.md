@@ -1,6 +1,6 @@
 # Fixed source pair proposal for378/222
 
-Status: proposal only. The independent source-preparation stage is complete with concerns;378/222 are not complete. No full suite, work run or paired replay was started. No acceleration percentage or whole-suite GREEN is claimed.
+Status: proposal only. The independent source-preparation stage is complete with concerns;378/222 are not complete. One later head-authorized bounded preflight353 failed at ordinary source fetch before either half started. No full suite, work run or full paired replay was started. No acceleration percentage or whole-suite GREEN is claimed.
 
 ## Pinned sources and composition
 
@@ -21,7 +21,7 @@ Local read-only Git metadata confirms the ancestry, identical hashes for all15 d
 - Unchanged checked driver: edc370c5c1472453649d26cd81ccda3b6ee41347, archive51200bytes, SHA256 `c856c8b8d2217d56f1b8c3740e616374a5a966de2a78f6f7a65415a06161307d`, existing attachment378 `79371b56-ed45-4bf5-945c-9367d8948ab2`. Source checks114/138 remain their original receipts and were not repeated.
 - Execution harness branch stays task-378-driver-candidate at6e53d43312e96a8bdab629dd91f3618e078c2af8. Its driver/evidence bytes are those checked above. This proposal lives on a separate task branch so that execution identity does not move.
 
-Do not execute the old wrapper in the driver bundle: it still names the old diagnostic pair/archive. The new exact command body is in2026-11-06-fixed-pair-command.txt. It was prepared as data and has not been executed or syntax-checked. It deliberately requires canonical durable input/output paths instead of assuming that current run_tests provides them.
+Do not execute the old wrapper in the driver bundle: it still names the old diagnostic pair/archive. The initial archive-based command body is in2026-11-06-fixed-pair-command.txt. Static remote347/1 passed bash-n and shellcheck on7cbfef0a, without executing that body. Head subsequently replaced this proposal with the ordinary Git/stdout route below. No separate asset transport is awaited or built.
 
 ## Narrow remote proof
 
@@ -56,6 +56,24 @@ The requested future shape is one admitted command-mode job, parts1, two fixed s
 
 The prior bounds remain unchanged:700KiB final frame,50MiB per artifact,20 files total with18 evidence slots and2 reserved wrapper slots. Complete raw logs and journal/gzip are retained outside bounded console; incomplete/overflow/setup failure remains INVALID. Source archive type/path/integrity verification, actual file delivery/export and a common physical-host slot are prerequisites before any full run.
 
-Current run_tests exposes branch/command/parts/minutes, but no input-files or durable author-readable output contract for this asset. The checked driver requires HH_OUT; the old observed runner's HH_IN/HH_OUT export was work-only. A source-only archive check does not close this live transport gap. No private fetch, run_work switch, new request field, environment-based authority or host fallback is proposed. Head must provide the actual supported command-mode asset/output/common-slot handoff, then decide separately on this concrete full comparison after preflight. The drafted command is not currently an executable supported request.
+The initial HH_IN/HH_OUT proposal is superseded. Head directed one ordinary run_tests command-mode preflight: driver from task-378-fixed-pair-proposal, both sources from their published Git refs via normal fetch, and stdout JSON/hashes in the native tests log. Both halves must run sequentially within one part; full replay needs a later separate decision. The source archive remains a preserved optional artifact, not a prerequisite or a new transport project.
+
+## Actual preflight353
+
+Native353/part1 ran once on platform-selected home-api at exact7cbfef0a51e9f437600fc3fb6c4087e7f000378d,03:12:32.050..03:12:35.499UTC. It failed/exit1. The ordinary Git fetch was its only completed command:
+
+```sh
+git fetch --no-tags origin \
+  refs/heads/task-378-fixed-control:refs/remotes/origin/task-378-fixed-control \
+  refs/heads/task-378-fixed-optimized:refs/remotes/origin/task-378-fixed-optimized
+```
+
+Fetch exited128 in511ms: `fatal: could not read Username for 'https://github.com': terminal prompts disabled`. The bounded script finished in519ms with complete:false. Neither source worktree/install/build/test half started. The branch clone and previous source publication succeeded; this failure is the subsequent origin fetch inside353. No credential, remote/ref, runner or work fallback was attempted, and no repeat was created.
+
+Observed actual context: Linux6.8.0-147-generic/x64,Node22.23.4,8 logical CPUs,cpuset0-7,cpu.max=max100000,memory.max=max. All three samples gave load[2.35,2.30,2.44]; free memory91009654784..91034234880bytes, cgroup memory.current215252992..215744512bytes, no recorded OOM events. These are preflight conditions, not performance conditions.
+
+The complete native tests-353-1.log was fetched/read. Its six JSON records include the final result. The3813bytes before the result match its declared count; all83 raw fetch-output bytes are recoverable and match SHA256 `2e554a39e2bb4414b5e2c3f5a90ebc87b405b5b8231d692704ec6df4580e8f60`. No stdout truncation was observed in this preflight. Full command, log digest, decoded failure and resource samples are in2026-11-06-preflight-353.json; the native run record retains the exact executable command.
+
+Next decision belongs to head: make the published source refs available through the supported command-mode Git path, then decide whether another bounded preflight is authorized. The one preflight permission was used. No full pair can be accepted from this result, and no additional execution is started automatically.
 
 The old47fab branch, source archive66b0a5f7, diagnostic05c63819/54340764 pair, rejected run106 FAIL/HH_PAIR_INVALID and all six failures per variant stay unchanged. Historical103/0049 FAIL also remains. Even a future valid paired replay is a new controlled sequential comparison, not historical distributed wall101 or proof of the30% target against turn7.
