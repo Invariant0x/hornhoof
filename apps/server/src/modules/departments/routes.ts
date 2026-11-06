@@ -24,6 +24,7 @@ import { BuildItem, checkItems, inPlaces, isNew, type TeamChange } from '../tool
 import { linesToHire, tryPlaceOperator, type Present } from '../operations/ensure.js';
 import { approvalPolicyRoutes } from './approval-policy.js';
 import { workModeRoutes } from './work-mode.js';
+import { proposalMaterialRoutes, refuseUnclassifiedProposal } from './proposal-materials.js';
 import { modelCheckRoutes } from '../model-checks/routes.js';
 import { hireEmployee, type Hired } from './hire.js';
 import { repoView } from './repository.js';
@@ -208,6 +209,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
       let brief = body.brief;
       let agentId: string | null = null;
       if (body.proposalId) {
+        await refuseUnclassifiedProposal(tx, me.companyId, body.proposalId, 'structure');
         const [taken] = await tx
           .update(proposals)
           .set({ status: 'applied', appliedBy: appliedBy(me, on), appliedAt: new Date() })
@@ -387,6 +389,7 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
       await stillDecides(tx, me.companyId, me.id, CARD, on);
       let agentId: string | null = null;
       if (body.proposalId) {
+        await refuseUnclassifiedProposal(tx, me.companyId, body.proposalId, 'staff', dept.id);
         const [taken] = await tx
           .update(proposals)
           .set({ status: 'applied', appliedBy: appliedBy(me, on), appliedAt: new Date() })
@@ -436,5 +439,6 @@ export function departmentRoutes(app: FastifyInstance, ctx: Ctx): void {
   teamRoutes(app, ctx);
   approvalPolicyRoutes(app, ctx);
   workModeRoutes(app, ctx);
+  proposalMaterialRoutes(app, ctx);
   modelCheckRoutes(app, ctx);
 }
