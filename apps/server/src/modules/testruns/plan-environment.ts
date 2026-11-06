@@ -8,12 +8,13 @@ export type PreparedEnvironmentPlanInput = TestPartPlanInput & {
   expectedCommitSha: string;
   purpose: 'affected' | 'final';
 };
+type SuiteSelection = Extract<TestExecution['selection'], { kind: 'suite' | 'final' }> & { kind: 'suite' };
 export type EnvironmentPartPlan = {
   commitSha: string;
   manifestHash: string;
   profile: string;
   testPlan: TestPartPlan;
-  parts: { selections: TestExecution['selection'][]; suiteShards: SuiteShard[] }[];
+  parts: { selections: SuiteSelection[]; suiteShards: SuiteShard[] }[];
   postSuiteChecks: { suiteId: string; commands: Command[] }[];
   ports: { suiteBatch: 'required' | 'not-required'; finalPreparation: 'missing' | 'not-required' };
 };
@@ -34,7 +35,7 @@ function canonicalUnits(snapshot: EnvironmentSnapshot, selected: TestUnit[]): Te
     return canonical;
   });
 }
-function suiteSelections(snapshot: EnvironmentSnapshot, units: TestUnit[]): TestExecution['selection'][] {
+function suiteSelections(snapshot: EnvironmentSnapshot, units: TestUnit[]): SuiteSelection[] {
   const suites = new Map<string, string[]>();
   for (const unit of units) {
     const files = suites.get(unit.suiteId) ?? [];
@@ -43,7 +44,8 @@ function suiteSelections(snapshot: EnvironmentSnapshot, units: TestUnit[]): Test
   }
   return [...suites.keys()].sort().map(suiteId => {
     const selection = { kind: 'suite' as const, suiteId, files: suites.get(suiteId)!.sort() };
-    return TestExecution.parse({ snapshot, selection }).selection;
+    TestExecution.parse({ snapshot, selection });
+    return selection;
   });
 }
 function finalInventory(snapshot: EnvironmentSnapshot, units: TestUnit[]): void {

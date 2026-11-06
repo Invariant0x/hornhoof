@@ -55,7 +55,7 @@ describe('versioned product execution planning', () => {
   });
   it('reserves the ten-part budget for preparation and all existing final leaves', async () => {
     const input = await fixture(true), manifest = input.snapshot.description.manifest, base = manifest.suites[0]!;
-    manifest.suites = Array.from({ length: 8 }, (_, index) => ({ ...base, id: `suite-${index}`, files: [`web/test/${index}.test.ts`] }));
+    manifest.suites = Array.from({ length: 8 }, (_, index) => ({ ...base, id: `suite-${index}`, profiles: ['fast'], files: [`web/test/${index}.test.ts`] }));
     manifest.profiles = [{ id: 'fast', requiredSuiteIds: manifest.suites.map(suite => suite.id) }];
     manifest.execution!.oncePreparation!.profiles = ['fast']; manifest.execution!.oncePreparation!.suiteIds = ['suite-0'];
     input.units = manifest.suites.map((suite, index) => ({ suiteId: suite.id, file: `web/test/${index}.test.ts`, selectionUnit: `web/test/${index}.test.ts` }));
