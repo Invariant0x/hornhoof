@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { InputLine, isReport } from '../src/modules/terminals/input-rights.js';
+import { isTerminalReport } from '@hornhoof/protocol';
+import { InputLine } from '../src/modules/terminals/input-rights.js';
 
 const OWNER = { control: true, message: true };
 const WRITER = { control: false, message: true };
@@ -147,7 +148,7 @@ describe('what a terminal itself answers, and no person typed', () => {
     ['cursor position', '\x1b[12;3R'],
     ['a mouse click', '\x1b[<0;10;20M'],
   ])('%s', (_what, data) => {
-    expect(isReport(data)).toBe(true);
+    expect(isTerminalReport(data)).toBe(true);
   });
 
   it.each([
@@ -157,6 +158,6 @@ describe('what a terminal itself answers, and no person typed', () => {
     ['a report after words', 'hello\x1b[I'],
     ['a function key', '\x1b[15~'],
   ])('is no %s', (_what, data) => {
-    expect(isReport(data)).toBe(false);
+    expect(isTerminalReport(data)).toBe(false);
   });
 });

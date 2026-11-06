@@ -333,7 +333,11 @@ const Rows = z.number().int().min(4).max(200);
 /* What one frame carries of a terminal's screen or of a person's keys and pastes. */
 export const TERM_CHUNK = 64 * 1024;
 /* Keys that may leave words in a program's input. Scrolling, clicks, arrows and a lone Enter leave none. */
-export const typesWords = (data: string): boolean => /[^\x00-\x20\x7f]/.test(data.replace(/\x1b(?:\[[0-9;<?]*[ -/]*[@-~]|O.)/g, ''));
+export const typesWords = (data: string): boolean => /[^\x00-\x20\x7f]/.test(data.replace(/\x1b(?:\[[0-?]*[ -/]*[@-~]|O.)/g, ''));
+/* Focus, the answers to a program's queries and the mouse: what a terminal sends by itself, as tmux attaches or its window
+   takes focus, and no person typed. */
+const TERMINAL_REPORT = /^\x1b\[(?:[IO]|[>?][0-9;]*c|[0-9;]*R|<[0-9]+;[0-9]+;[0-9]+[Mm])$/;
+export const isTerminalReport = (data: string): boolean => TERMINAL_REPORT.test(data);
 
 /* How busy a node's machine is: its processors, the load average over the last minute, its free and total memory in
    bytes, and how many test runs and agent jobs the node runs now. A node sends it with its hello and every LOAD_MS.
@@ -529,6 +533,8 @@ const NodeMessage = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('job.program'),
     jobId: z.string(),
+    /* The session the program named by now: a node that restarts mid-turn can no longer say so when the turn ends. */
+    session: z.string().min(1).max(200).optional(),
     state: z.enum(PROGRAM_STATES),
     since: z.number().int().nonnegative(),
     tool: z.string().max(100).optional(),

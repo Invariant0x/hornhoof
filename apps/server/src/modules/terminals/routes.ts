@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { typesWords } from '@hornhoof/protocol';
+import { isTerminalReport, typesWords } from '@hornhoof/protocol';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { WebSocket } from 'ws';
 import { z } from 'zod';
@@ -10,7 +10,6 @@ import { enterPressed } from '../conversation/decision-context.js';
 import { windowNode } from '../conversation/queue.js';
 import { identityOf, sameNode, type NodeIdentity } from '../nodes/hub.js';
 import { programAccess } from './access.js';
-import { isReport } from './input-rights.js';
 import { readKeys } from './keys.js';
 import { cols, followFrames, keepLooking, rows, type BrowserFrame } from './look.js';
 import { CLOSE } from './relay.js';
@@ -46,7 +45,7 @@ function onFrames(ctx: Ctx, socket: WebSocket, { termId, node, agentId, personId
   followFrames(ctx, socket, async (data: BrowserFrame) => {
     if (!(await mayGoOn())) return;
     if (data.type === 'resize') return void ctx.hub.send(node, { type: 'term.resize', termId, cols: data.cols, rows: data.rows });
-    if (!write && isReport(data.data)) return;
+    if (!write && isTerminalReport(data.data)) return;
     const refused = ctx.terminals.inputLine(agentId).take(data.data, { control: write, message });
     if (refused) return socket.send(JSON.stringify({ type: 'refused', reason: refused }));
     /* A prompt goes in with Enter, in any of its forms; scrolling and clicks send keys too. Where the person's Enter

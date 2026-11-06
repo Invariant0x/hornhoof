@@ -1,5 +1,8 @@
+import { randomUUID } from 'node:crypto';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { hasTmux, until, host, tmux, sent, setUp, job, codexJob, done, ack, typeTurn } from './terminal-host-helpers.js';
+import { hasTmux, home, until, host, tmux, sent, setUp, job, codexJob, done, ack, typeTurn } from './terminal-host-helpers.js';
 
 describe.skipIf(!hasTmux)('agents in live terminals', () => {
   afterEach(async () => host?.stop());
@@ -37,6 +40,23 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     const first = await host.run(codexJob('c3', 'LATE one'));
     expect(first).toMatchObject({ ok: true, result: 'echo: LATE one' });
     expect(await host.run(codexJob('c3', 'two', { sessionId: first.sessionId }))).toMatchObject({ ok: true, result: 'echo: two' });
+  }, 30_000);
+
+  it.each([['plainly', false], ['the way the server hands them', true]])('gives Codex the next words only once its log ended the last turn, not at its Stop hook, %s', async (_way, operator) => {
+    await setUp({ readyMs: 3000, enterWaitMs: 500, ...(operator ? { pollMs: 25, plugins: [], operator: { dir: join(home, `operator-${randomUUID()}`), connected: () => true, send: () => true } } : {}) });
+    const key = randomUUID();
+    const turn = (words: string, sessionId: string | null = null) => host.run({
+      ...codexJob(key, words, { agentKey: key, jobId: randomUUID(), sessionId, timeoutMs: 8000 }),
+      ...(operator ? { operatorDelivery: { id: randomUUID(), ordinal: 1 } } : {}),
+    });
+    const first = await turn('CLOSING one');
+    expect(first).toMatchObject({ ok: true, result: 'echo: CLOSING one' });
+    expect(await turn('two', first.sessionId)).toMatchObject({ ok: true, result: 'echo: two' });
+    const day = join(home, 'sessions', '2026', '10', '30');
+    const log = readFileSync(join(day, readdirSync(day).find(name => name.endsWith(`-${first.sessionId}.jsonl`))!), 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line).payload);
+    /* Each turn has its own start, or the words went into the one before and nothing says the program took them. */
+    expect(log.filter(line => line.type === 'task_started')).toHaveLength(2);
+    expect(log.filter(line => line.type === 'task_complete').map(line => line.last_agent_message)).toEqual(['echo: CLOSING one', 'echo: two']);
   }, 30_000);
 
   it("starts a new Codex session right after a turn without taking the last session's log for its own", async () => {
@@ -79,6 +99,7 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     await until(async () => (await host.screen('c4')).includes('echo: second typed'));
     ack('c4', 'job-1', 0);
     ack('c4', 'job-2', 1);
+    await until(() => Boolean(done('job-1') && done('job-2')));
     expect(done('job-1')).toMatchObject({ ok: true, result: 'echo: first typed' });
     expect(done('job-2')).toMatchObject({ ok: true, result: 'echo: second typed' });
     expect(sent).toContainEqual({ type: 'job.event', jobId: 'job-2', seq: 0, event: { kind: 'text', text: 'echo: second typed' } });

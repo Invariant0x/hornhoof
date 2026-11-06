@@ -14,7 +14,8 @@ import { claudeTranscript } from '../src/terminal/programs.js';
 import { restartRefusal, TurnWords } from '../src/terminal/program-restart.js';
 import { Tmux } from '../src/terminal/tmux.js';
 import { claudePasted, claudeQueue, kimiSteer, userMessage } from './fakes/word-receipts.mjs';
-import { codexJob, job, kimiJob, until } from './terminal-host-helpers.js';
+import { codexJob, job, kimiJob, kimiScreen, until } from './terminal-host-helpers.js';
+import { codexPrompt } from './real-screens.js';
 
 const SESSION = 'c3b66b04-872b-4fbe-a3a4-058a026ef20a';
 const HOOK = fileURLToPath(new URL('../hh-hook.cjs', import.meta.url));
@@ -35,8 +36,8 @@ async function atWork(kind: Kind, mode: Mode) {
   const tmux = new Tmux({ env: { HOME: home } });
   let input = '';
   let initial = true;
-  const screen = () => kind === 'claude' ? `❯ ${input}\n` : kind === 'codex' ? `OpenAI Codex\n› ${input}\n`
-    : `Welcome to Kimi Code!\n── input ────────────────────────────────────────────────────────────\n ${input}\n─────────────────────────────────────────────────────────────────────\ncontext: 0% (0/256k)\n`;
+  const screen = () => kind === 'claude' ? `❯ ${input}\n` : kind === 'codex' ? `OpenAI Codex\n${codexPrompt(input)}`
+    : kimiScreen(input);
   vi.spyOn(tmux, 'scratch').mockReturnValue(home);
   vi.spyOn(tmux, 'launch').mockImplementation(async () => {
     mkdirSync(dirname(file), { recursive: true });
@@ -142,7 +143,7 @@ describe('program receipts for live words', () => {
     const now = signAt + RESTART_AFTER_MS.claude! + 1000;
     vi.spyOn(Date, 'now').mockReturnValue(now);
     await c.host['hook']('receipt', 'status', { context_window: { used_percentage: 25 } });
-    const observed = c.host['observeProgram']('job-receipt');
+    const observed = c.host['observeProgram'](a, 'job-receipt');
     await c.host['reportProgram'](a, observed.watch, observed.look);
     expect(c.sent.filter(m => m.type === 'job.program').at(-1)).toMatchObject({ signAt, state: 'thinking' });
     expect(a.contextUsed).toBe(0.25);
@@ -531,7 +532,8 @@ describe('program receipts for live words', () => {
 
   it.each(['claude', 'codex'] as const)('completes a %s job without the flag when there are no queued words', async kind => {
     const c = await atWork(kind, 'queued');
-    await c.host['hook']('receipt', 'stop', { last_assistant_message: '' });
+    if (kind === 'claude') await c.host['hook']('receipt', 'stop', { last_assistant_message: '' });
+    else c.finish();
     await c.running;
     expect(c.sent.filter(m => m.type === 'job.done')).toHaveLength(1);
     expect(c.sent.find(m => m.type === 'job.done')).not.toHaveProperty('wordsWaiting');
@@ -558,7 +560,11 @@ describe('program receipts for live words', () => {
     await until(() => c.sent.slice(at).some(m => m.type === 'turn.open'));
     c.host.opened({ type: 'turn.opened', agentKey: 'receipt', jobId: 'human', toolToken: 'token' });
     await prompt;
-    await c.host['hook']('receipt', 'stop', { last_assistant_message: 'Human answer.' });
+    if (kind === 'claude') await c.host['hook']('receipt', 'stop', { last_assistant_message: 'Human answer.' });
+    else {
+      c.record({ type: 'event_msg', payload: { type: 'task_complete', turn_id: 'human', last_agent_message: 'Human answer.' } });
+      c.drain();
+    }
     await until(() => c.sent.some(m => m.type === 'job.done' && m.jobId === 'human'));
     c.expire();
     await c.running;

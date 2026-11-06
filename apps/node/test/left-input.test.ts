@@ -46,6 +46,7 @@ describe('what a program\'s input holds', () => {
     ['\x1bOA', false],
     ['\x1b[<64;10;20M', false],
     ['\x1b[?1;2c', false],
+    ['\x1b[>0;276;0c', false],
     ['é', true],
   ])('tells whether the keys %j leave words', (data, expected) => {
     expect(typesWords(data)).toBe(expected);

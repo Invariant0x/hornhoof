@@ -5,6 +5,68 @@ one plain summary, and short entries under `### Added`, `### Changed` and
 `### Fixed`. Include `### Before you update` only when people need to take action.
 The middle number is the turn; the last counts releases between turns.
 
+## [0.8.0] - 2026-11-06
+
+Turn 8: agents on Codex and Kimi Code get their assignments again, and a release reaches machines only after a live check of its
+exact build on all four programs. Departments get an owner and approval rules, messages to the outside go through one checked
+way, a test run checks one pinned commit, and terminals and panels hold their content on every screen.
+
+### Added
+
+- Give each department an owner and approval rules for each channel, and see and change them in its panel.
+- Send messages to people outside the company through one checked way: admission, a last look, exact approvals and model checks,
+  also for support replies, on the Outbound screen.
+- See how any turn went on the third tab of the speed panel: stages, the critical path and waits, by department.
+- Every wait says who answers for it and until when, and one past its date goes to its owner and then to their head.
+- The people of a machine hear at once when it goes away, with no agent in between.
+- Small tasks take a short way through the checks of a turn, are marked as small, and the speed panel shows how fast they close.
+- A task that comes after another gives out at once the part of it that does not depend on the other, and task views show it.
+- A team that takes only urgent work refuses the rest.
+- Send free-form feedback on a choice request.
+- Show and change a repository's full test command on its screen.
+- A product can describe its tests in a file of its own, with their services and profiles, and a run prepares them in isolation.
+
+### Changed
+
+- Everyone who may write to an agent writes in its terminal, with no second line under it, and control of the program stays with
+  the owner of its plan.
+- People see only the agents on their own plans in their departments, and only their work.
+- A stuck task goes to its head or the orchestrator, never to the CEO. A turn that failed or ran no program no longer counts
+  towards being stuck.
+- What a person types or a letter that comes at the end of a turn opens its own turn, in the sender's name.
+- How hard a turn thinks follows from why it starts.
+- Every part of a test run checks one pinned commit, and review, approval and release are tied to it.
+- Machines share one queue for heavy checks, so a machine's own load decides when the next one starts.
+- Turn reviews are assigned by the changes in a task, to independent vendors, and bound to the exact commit and evidence.
+- The task watchdog tells a head when people stand free while work waits.
+- A machine says on the Versions screen what each node waits for before an update, and until when.
+
+### Fixed
+
+- Agents on Codex and Kimi Code receive their assignments again: a node reads the real empty prompt of these programs, also
+  after a long session has moved everything else off the screen, and keeps out of a draft a person left there.
+- Words a program lost are typed again in the same turn, and words on hold go on by themselves once as soon as the program
+  stands ready with an empty input.
+- A turn cut off by a node restart runs once more in its own session and for whoever asked for it, also outside a task, and
+  never twice.
+- Your Enter at an agent's terminal sends its saved words on, also for a session that goes on.
+- Operations hears of words on hold within five minutes and can release them with a checked tool that logs who did it and why.
+- An update is offered and installed only when its exact build passed a live check on Claude, Codex, Kimi Code and
+  Antigravity. Without one, a machine stays on the version it runs, and asking for that version says why.
+- The installer holds to that check too: joining a machine, moving its nodes, `--urgent` and `install.sh server` stop with the
+  reason and change nothing for a build without one. Only a new server of its own, set up to run a live check, runs such a build.
+- Codex no longer asks near the limits of a plan whether to switch to a cheaper model. Nobody was there to answer: the next words were
+  lost, Enter answered for them, the turn failed after two minutes and the agent changed model until it started again.
+- A turn on Codex ends when Codex says so in its log, so the next words no longer go into a turn that is still closing and run twice.
+- The live check of a release runs on real nodes one at a time: `install.sh check-node` moves one named node to the build, and
+  `install.sh back-node` puts it back on 0.6.1 at once if its turn fails.
+- Words someone left in a program's input are kept before a new assignment or a restart, and the agent's log names who typed there.
+- Agent terminals show all their columns, keep your place in the history while output grows, and keep what you type while the
+  view reconnects.
+- Panels, tables, dialogs and the Notebook hold their content at any width, with room for the scrollbar and buttons in one row
+  under the text.
+- Long reports stay whole, and a person's feedback may be 12,000 characters long.
+
 ## [0.7.0] - 2026-11-05
 
 Turn 7: planned node updates wait for running turns to finish; nodes reconnect on their own and keep Chromium ready in a

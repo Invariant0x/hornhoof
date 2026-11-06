@@ -289,6 +289,12 @@ async function nextTurnNode(ctx: Ctx, agentId: string, sub: Parameters<typeof pl
   return place?.node ?? null;
 }
 
+/* The turn that goes on from this one's words, whichever way it came: a retry after a restart or a continuation. */
+export async function turnGoingOn(ctx: Ctx, jobId: string): Promise<{ id: string; error: string | null } | null> {
+  const [next] = await ctx.db.select({ id: jobs.id, error: jobs.error }).from(jobs).where(or(eq(jobs.retryOf, jobId), eq(jobs.continueOf, jobId))).limit(1);
+  return next ?? null;
+}
+
 /* Thrown before anything is stored, so the caller may undo what it did for the turn. */
 export class NoSubscription extends Error {
   constructor() {
@@ -568,12 +574,14 @@ async function continuedFrom(ctx: Ctx, jobId: string, on: On, instructionsHash: 
 
 /* continueOf: a turn that goes on from one that ended without its work recorded goes on in that turn's session, or, when
    it cannot, takes what that turn was asked along into the session it gets. */
-type SessionJob = Pick<typeof jobs.$inferSelect, 'id' | 'continueOf' | 'createdAt' | 'taskId'>;
+type SessionJob = Pick<typeof jobs.$inferSelect, 'id' | 'continueOf' | 'retryOf' | 'createdAt' | 'taskId'>;
 
 async function sessionFor(ctx: Ctx, agent: Agent, on: On, instructionsHash: string, job: SessionJob): Promise<Session & Continuation> {
-  const from = job.continueOf ? await continuedFrom(ctx, job.continueOf, on, instructionsHash) : { sessionId: null, originalPrompt: null };
+  /* A turn run once more after its node restarted carries its words itself, and goes on in the session the cut turn had. */
+  const going = job.continueOf ?? job.retryOf;
+  const from = going ? await continuedFrom(ctx, going, on, instructionsHash) : { sessionId: null, originalPrompt: null };
   if (from.sessionId) return { sessionId: from.sessionId, catchUp: null, originalPrompt: null };
-  return { ...(await lastSession(ctx, agent, on, instructionsHash, job)), originalPrompt: from.originalPrompt };
+  return { ...(await lastSession(ctx, agent, on, instructionsHash, job)), originalPrompt: job.continueOf ? from.originalPrompt : null };
 }
 
 async function queuedSession(ctx: Ctx, agent: Agent, on: On, instructionsHash: string, job: SessionJob, along: readonly Along[]) {
