@@ -55,7 +55,7 @@ const HumanEnvelope = z.strictObject({
 const Artifact = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('commit'), sha: z.string().regex(/^[0-9a-f]{40}$/) }),
   z.strictObject({ kind: z.literal('design'), imageIds: z.array(z.uuid()).min(1).max(QUESTION_LIMITS.images).refine(distinct, 'Use distinct image ids.') }),
-  z.strictObject({ kind: z.enum(['staff', 'structure']), digest: Digest }),
+  z.strictObject({ kind: z.enum(['staff', 'structure', 'policy']), digest: Digest }),
 ]);
 const Classification = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('ready_result'), artifact: Artifact }),
@@ -106,7 +106,8 @@ function snapshotMaterialsFit(value: Snapshot): boolean {
 }
 function snapshotPurposeFits(value: Snapshot): boolean {
   const purpose = value.authority.purpose;
-  if (value.classification.kind === 'ready_result') return purpose.kind === 'decision';
+  if (value.classification.kind === 'ready_result') return purpose.kind === 'decision'
+    && (value.classification.artifact.kind !== 'policy' || purpose.decisionKind === 'approval');
   return purpose.kind !== 'decision' && purpose.kind === value.classification.actionBinding.kind
     && purpose.resourceId === value.classification.actionBinding.resourceId;
 }
