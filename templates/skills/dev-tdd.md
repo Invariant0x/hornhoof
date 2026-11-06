@@ -5,6 +5,8 @@ description: { en: "Writes the failing test first, watches it fail, then writes 
 kind: procedure
 sources: [obra/superpowers skills/test-driven-development/SKILL.md, obra/superpowers skills/test-driven-development/writing-good-tests.md]
 ---
+For `small: true`, keep the failing-test, change and affected-test cycle, then merge and submit a line with the change and commit SHA (hh-task-flow). Requirement matrices and detailed reports belong to the shared turn review and checks. The full task-kind and reporting procedure below applies to ordinary work.
+
 The head marks one of four task kinds, and the kind chooses the cycle (dev-implement):
 
 - **Bug:** reproduce it with a failing test, then fix it.
@@ -15,7 +17,7 @@ The head marks one of four task kinds, and the kind chooses the cycle (dev-imple
 For every behaviour you add or change, and for every bug you fix:
 
 1. **Red.** Write one test for one behaviour, named for what it shows ("rejects an empty email"). Use the real code; mock only what you cannot run (the network, the clock, another service).
-2. **Watch it fail.** Run that single regular test file locally (hh-run-checks). It must fail because the behaviour is missing, not because of a typo or an import. A characterization test of legacy code passes immediately, and that is correct: it pins current behaviour before structural work. Any other new behaviour test that passes before the code exists tests nothing; fix the test.
+2. **Watch it fail.** Run that affected test file through `run_tests` (hh-run-checks). It must fail because the behaviour is missing, not because of a typo or an import. A characterization test of legacy code passes immediately, and that is correct: it pins current behaviour before structural work. Any other new behaviour test that passes before the code exists tests nothing; fix the test.
 3. **Green.** Write the simplest code that makes it pass. Nothing the test does not ask for.
 4. **Run the tests around it** through `run_tests` (hh-run-checks): yours, and those selected for the code you changed and its callers (T2). Every failure goes into your report, even one you did not cause. The whole suite runs only for the final turn candidate (dev-gates).
 5. **Refactor** with the tests green: names, duplication, small functions. Run again.

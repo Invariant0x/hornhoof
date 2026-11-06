@@ -111,6 +111,8 @@ export type TestsFacts = {
 
 export type PipelineFacts = {
   tasks: { total: number; done: number; cancelled: number; open: number };
+  /* Closed small tasks, from creation to closing. Older snapshots have no such line. */
+  small?: Spread;
   toAcceptance: Spread;
   toFirstSubmit: Spread;
   wholeTurn: number;

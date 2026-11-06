@@ -10,7 +10,8 @@ import { GitCredentialMask, gitEnv, gitPreparationFailure } from './workspace.js
 /* The node's side of hh-git: one typed push or fetch of the agent's current job, run by the node so that what reaches the
    server is what the node saw of its own child. No command line comes in and no secret goes out. Hornhoof's server decides
    whether and when an attempt may run; nothing here retries by itself. With no port the wire is off: the shim is told
-   so and runs plain git. */
+   so and runs plain git. What a fetch by settings turns down besides the rest: git_version, remote_settings, prune_settings
+   and branch_settings. */
 
 const REAL_GIT = '/usr/bin/git';
 const HELD_BYTES = 8 * 1024 * 1024;
@@ -21,6 +22,8 @@ const STOP_GRACE_MS = 5000;
 const READ_MS = 60_000;
 const BRANCH_PREFIX = 'refs/heads/';
 const SEEMS_DONE = 'the remote already has this commit on the branch, so nothing more was sent.';
+const REMOTE_CHANGED = 'the remote changed while this git command was waiting';
+const SETTINGS_CHANGED = 'the settings of this branch changed while this git command was waiting';
 
 const Commit = z.string().regex(/^[a-f0-9]{40}$/);
 const Flags = z.array(z.enum(['--quiet', '--verbose', '--progress', '--no-progress', '--porcelain', '--no-verify', '--no-tags'])).max(8);
@@ -29,9 +32,12 @@ const Name = z.string().max(1024).regex(/^[A-Za-z0-9][A-Za-z0-9._/-]*$/);
 const GitRequest = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('push'), cwd: Folder, remote: Name, sourceSha: Commit, destinationRef: z.string().max(1024).startsWith(BRANCH_PREFIX), upstreamBranch: Name.nullable(), flags: Flags }),
   z.strictObject({ kind: z.literal('fetch'), cwd: Folder, remote: Name, refspec: z.string().max(2100).regex(/^[A-Za-z0-9][A-Za-z0-9._/:-]*$/), flags: Flags }),
+  z.strictObject({ kind: z.literal('fetch_configured'), cwd: Folder, remote: Name, flags: Flags }),
 ]);
 type GitRequest = z.infer<typeof GitRequest>;
 type PushRequest = Extract<GitRequest, { kind: 'push' }>;
+type LiteralRequest = Exclude<GitRequest, { kind: 'fetch_configured' }>;
+type ConfiguredRequest = Extract<GitRequest, { kind: 'fetch_configured' }>;
 type ChildOutcome = Extract<ExternalGitOutcome, { kind: 'child' }>;
 
 export type GitOperationState = 'ready' | 'executing' | 'deferred' | 'outcome_unknown' | 'satisfied' | 'failed_permanent' | 'cancelled';
@@ -42,12 +48,17 @@ export type GitGrant =
   | { generation: number; disposition: 'terminal'; attemptId?: null; state: GitOperationState };
 export type GitRegistration = GitGrant & { operationId: string };
 export type GitRecord = { operationId: string; generation: number; attemptId: string; outcome: ExternalGitOutcome; settled: boolean; receiptDigest: string; observedHead?: string | null };
+/* A later read of the exact ref, as evidence of the current grant. It names the attempt it speaks about and carries no child:
+   the child of that attempt was recorded under that attempt's own receipt. No observedHead means the ref could not be read. */
+export type GitAttemptRef = { generation: number; attemptId: string; receiptDigest: string };
+export type GitReconciliation = { operationId: string; generation: number; attemptId: string; reconciles: GitAttemptRef; receiptDigest: string; observedHead?: string | null };
 export type GitRecordReply = { accepted: boolean; state: GitOperationState; releaseRevision?: number; nextAttemptAt?: string | null };
 
 /* The contract agreed for #558 and #559, not a compiled transport yet: the real server sides this from its own checks. */
 export type GitOperationPort = {
   register(input: { operationId: string; intentDigest: string; intent: ExternalGitIntent; consumer: ExternalConsumer }): Promise<GitRegistration>;
   record(input: GitRecord): Promise<GitRecordReply>;
+  reconcile(input: GitReconciliation): Promise<GitRecordReply>;
   ready(operationId: string, signal: AbortSignal): Promise<GitGrant>;
   cancel(input: { operationId: string; generation: number }): Promise<void>;
 };
@@ -60,14 +71,20 @@ export type GitAdapterOptions = { port: GitOperationPort | null; git?: string; h
 
 type Chunk = { type: 'stdout' | 'stderr'; data: Buffer };
 type Exit = { code: number | null; signal: string | null };
+type Observed = string | null | undefined;
+type ExecuteGrant = Extract<GitGrant, { disposition: 'execute' }>;
+/* What decides the for-merge marks of FETCH_HEAD besides the refspecs. git options cannot fix these two, so they are compared. */
+type FrozenMerge = { branch: string | null; refs: string[] };
+type FrozenFetch = { refspecs: string[]; merge: FrozenMerge };
+type Plan = { intent: ExternalGitIntent; args: string[]; frozen: { alias: string; merge: FrozenMerge } | null };
 type ChildSpec = { binary: string; args: string[]; job: GitJob; signal: AbortSignal; limit: number; exitGraceMs: number; stopGraceMs: number; kill: Kill };
 type Attempt = { chunks: Chunk[]; shortened: boolean; outcome: ChildOutcome; settled: boolean; ok: boolean; exit: Exit };
 type Operation = {
-  key: string; job: GitJob; request: GitRequest; operationId: string; generation: number; endpoint: string; consumer: ExternalConsumer;
-  ended: AbortController; signal: AbortSignal; res: ServerResponse; last: Attempt | null; waited: boolean; state: 'running' | 'waiting';
+  key: string; job: GitJob; request: GitRequest; args: string[]; frozen: Plan['frozen']; operationId: string; generation: number; endpoint: string; consumer: ExternalConsumer;
+  ended: AbortController; signal: AbortSignal; res: ServerResponse; last: { attempt: Attempt; receipt: GitAttemptRef } | null; waited: boolean; state: 'running' | 'waiting';
 };
 
-type Admitted = { request: GitRequest; job: GitJob; intent: ExternalGitIntent };
+type Admitted = { request: GitRequest; job: GitJob };
 
 /* A repository's settings can run commands, so git of an agent's folder never runs as root. */
 const runsAsRoot = (job: GitJob): boolean => (job.user?.uid ?? process.getuid?.()) === 0;
@@ -84,7 +101,7 @@ export function fetchTarget(refspec: string): Extract<ExternalGitIntent, { kind:
   return { kind: 'refspec', sourceRef: fullRef(source), ...(destination === undefined ? {} : { destinationRef: fullRef(destination) }) };
 }
 
-function intentFor(request: GitRequest, repositoryId: string): ExternalGitIntent | null {
+function intentFor(request: LiteralRequest, repositoryId: string): ExternalGitIntent | null {
   const asked = request.kind === 'push'
     ? { kind: 'git_push', repositoryId, sourceSha: request.sourceSha, destinationRef: request.destinationRef }
     : { kind: 'git_fetch', repositoryId, target: fetchTarget(request.refspec) };
@@ -101,10 +118,38 @@ function parseRequest(body: Buffer): GitRequest | null {
   }
 }
 
-function attemptArgs(request: GitRequest): string[] {
+function attemptArgs(request: LiteralRequest): string[] {
   return request.kind === 'push'
     ? ['push', ...request.flags, request.remote, `${request.sourceSha}:${request.destinationRef}`]
     : ['fetch', ...request.flags, request.remote, request.refspec];
+}
+
+/* A remote that exists only in this command, so that every attempt asks for the snapshot and not for what the settings hold
+   by then. Plain git takes it as a configured fetch and writes FETCH_HEAD by the same rules. Pruning cannot start later. */
+function configuredArgs(request: ConfiguredRequest, frozen: FrozenFetch, alias: string, url: string): string[] {
+  const pins = [`remote.${alias}.url=${url}`, ...frozen.refspecs.map(refspec => `remote.${alias}.fetch=${refspec}`), 'fetch.prune=false', 'fetch.pruneTags=false'];
+  if (frozen.merge.refs.length) pins.push(`branch.${frozen.merge.branch}.remote=${alias}`);
+  return [...pins.flatMap(pin => ['-c', pin]), 'fetch', ...request.flags, alias];
+}
+
+const quotedName = (name: string): string => name.replaceAll('.', '\\.');
+const remoteKeys = (name: string): string => `^(remote\\.${quotedName(name)}\\.|remotes\\.${quotedName(name)}$)`;
+const SETTINGS_OF_A_FETCH = new Set(['url', 'fetch', 'pushurl', 'push', 'gh-resolved']);
+
+/* From git 2.48 a configured fetch can also write refs/remotes/<remote>/HEAD, which the service remote would not do the same way. */
+function knownGit(version: string | null | undefined): boolean {
+  const found = /^git version (\d+)\.(\d+)/.exec(version ?? '');
+  return found !== null && (Number(found[1]) < 2 || (Number(found[1]) === 2 && Number(found[2]) < 48));
+}
+
+/* The refspecs of a remote with nothing else that changes a fetch, and an address no rewrite rule touches. */
+function remoteRefspecs(settings: string | null | undefined, remote: string, endpoint: string): string[] | null {
+  const prefix = `remote.${remote}.`;
+  const entries = (settings ?? '').split('\0').filter(Boolean).map(entry => entry.split(/\n(.*)/s));
+  const named = (name: string) => entries.filter(([key]) => key === `${prefix}${name}`).map(([, value = '']) => value);
+  const known = entries.every(([key = '']) => key.startsWith(prefix) && SETTINGS_OF_A_FETCH.has(key.slice(prefix.length)));
+  const urls = named('url');
+  return known && urls.length === 1 && urls[0] === endpoint ? named('fetch') : null;
 }
 
 const MARKER = /^hornhoof-git: operation=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}) generation=([1-9][0-9]{0,8}) state=(ready|executing|deferred|outcome_unknown|satisfied|failed_permanent|cancelled)$/;
@@ -193,8 +238,9 @@ function settleChild(child: ChildProcessByStdio<null, Readable, Readable>, spec:
     const stop = () => stopChild(spec, child.pid, later, () => finish(NOT_ENDED, null, false));
     signal.addEventListener('abort', stop, { once: true });
     child.once('error', (error: NodeJS.ErrnoException) => finish(NOT_ENDED, osCodeOf(error), true));
-    /* A daemon git left behind can hold the pipes for hours; the child itself has ended. */
-    child.once('exit', (code, exitSignal) => later(spec.exitGraceMs, () => finish({ code, signal: exitSignal }, null, true)));
+    /* A process git left behind can hold the pipes for hours, so the caller does not wait for it. That proves the end of
+       git itself, not of everything it started, so this is not settled. */
+    child.once('exit', (code, exitSignal) => later(spec.exitGraceMs, () => finish({ code, signal: exitSignal }, null, false)));
     child.once('close', (code, exitSignal) => finish({ code, signal: exitSignal }, null, true));
     if (signal.aborted) stop();
   });
@@ -229,8 +275,20 @@ async function release(res: ServerResponse, attempt: Attempt): Promise<void> {
   for (const chunk of attempt.chunks) await send(res, { type: chunk.type, data: chunk.data.toString('base64') });
 }
 
+const observedWord = (head: Observed): string | null => (head === undefined ? 'unread' : head);
+const observedField = (head: Observed): { observedHead?: string | null } => (head === undefined ? {} : { observedHead: head });
+
+/* A server that cannot answer leaves the result unknown, and what the child said goes back to the author. */
+async function asked(call: () => Promise<GitRecordReply>): Promise<GitRecordReply> {
+  try {
+    return await call();
+  } catch {
+    return { accepted: false, state: 'outcome_unknown' };
+  }
+}
+
 /* A settled unknown with a readable target is the author's to see. Only an unread target can still become known. */
-function waitReason(reply: GitRecordReply, attempt: Attempt, observedHead: string | null | undefined): 'deferred' | 'unknown' | null {
+function waitReason(reply: GitRecordReply, attempt: Attempt, observedHead: Observed): 'deferred' | 'unknown' | null {
   if (!reply.accepted) return null;
   if (reply.state === 'deferred') return 'deferred';
   return reply.state === 'outcome_unknown' && observedHead === undefined && !attempt.ok ? 'unknown' : null;
@@ -287,25 +345,81 @@ export class GitAdapter {
     const request = parseRequest(body), job = this.jobs.get(key);
     if (!request) return { reason: 'invalid_request' };
     if (!job) return { reason: 'no_current_job' };
-    if (runsAsRoot(job)) return { reason: 'no_agent_user' };
-    const intent = intentFor(request, job.repositoryId);
-    return intent ? { request, job, intent } : { reason: 'invalid_request' };
+    return runsAsRoot(job) ? { reason: 'no_agent_user' } : { request, job };
   }
 
   private async open(key: string, body: Buffer, signal: AbortSignal, res: ServerResponse): Promise<{ reason: string } | { operation: Operation; first: GitRegistration }> {
     const admitted = this.admit(key, body);
     if ('reason' in admitted) return admitted;
-    const { request, job, intent } = admitted;
+    const { request, job } = admitted;
     const endpoint = await this.endpoint(request, job, signal);
     if (endpoint !== job.url) return { reason: 'foreign_endpoint' };
     const operationId = randomUUID(), consumer: ExternalConsumer = { kind: 'agent_job', jobId: job.jobId, workspaceBinding: job.workspaceBinding };
+    const plan = await this.plan(request, job, endpoint, operationId, signal);
+    if ('reason' in plan) return plan;
     try {
-      const first = await this.options.port!.register({ operationId, intentDigest: digest(intent), intent, consumer });
+      const first = await this.options.port!.register({ operationId, intentDigest: digest(plan.intent), intent: plan.intent, consumer });
       const ended = new AbortController();
-      return { first, operation: { key, job, request, operationId, generation: first.generation, endpoint, consumer, ended, signal: AbortSignal.any([signal, ended.signal]), res, last: null, waited: false, state: 'running' } };
+      return { first, operation: { key, job, request, args: plan.args, frozen: plan.frozen, operationId, generation: first.generation, endpoint, consumer, ended, signal: AbortSignal.any([signal, ended.signal]), res, last: null, waited: false, state: 'running' } };
     } catch {
       return { reason: 'port_unavailable' };
     }
+  }
+
+  private async plan(request: GitRequest, job: GitJob, endpoint: string, operationId: string, signal: AbortSignal): Promise<{ reason: string } | Plan> {
+    if (request.kind !== 'fetch_configured') {
+      const intent = intentFor(request, job.repositoryId);
+      return intent ? { intent, args: attemptArgs(request), frozen: null } : { reason: 'invalid_request' };
+    }
+    const frozen = await this.freeze(request, job, endpoint, signal);
+    if ('reason' in frozen) return frozen;
+    const intent = ExternalGitIntent.safeParse({ kind: 'git_fetch', repositoryId: job.repositoryId, target: { kind: 'configured', ...frozen } });
+    if (!intent.success) return { reason: 'remote_settings' };
+    const alias = `hh-${operationId}`;
+    return { intent: intent.data, args: configuredArgs(request, frozen, alias, endpoint), frozen: { alias, merge: frozen.merge } };
+  }
+
+  /* Reads what the call means, once, as the agent's user: what the shim said is not taken on trust. */
+  private async freeze(request: ConfiguredRequest, job: GitJob, endpoint: string, signal: AbortSignal): Promise<{ reason: string } | FrozenFetch> {
+    const look = (...args: string[]) => this.lookup(request, job, signal, args);
+    if (!knownGit(await look('--version'))) return { reason: 'git_version' };
+    const refspecs = remoteRefspecs(await look('config', '--null', '--get-regexp', remoteKeys(request.remote)), request.remote, endpoint);
+    if (!refspecs) return { reason: 'remote_settings' };
+    const prune = await look('config', '--type=bool', '--get-regexp', '^fetch\\.(prune|prunetags)$');
+    if (prune === undefined || prune?.includes('true')) return { reason: 'prune_settings' };
+    const merge = await this.mergeState(request, job, signal);
+    return merge && (await this.branchFits(request, job, signal, merge)) ? { refspecs, merge } : { reason: 'branch_settings' };
+  }
+
+  private async mergeState(request: GitRequest, job: GitJob, signal: AbortSignal): Promise<FrozenMerge | undefined> {
+    const ref = await this.lookup(request, job, signal, ['symbolic-ref', '--quiet', 'HEAD']);
+    if (ref === null) return { branch: null, refs: [] };
+    if (!ref?.startsWith(BRANCH_PREFIX)) return undefined;
+    const branch = ref.slice(BRANCH_PREFIX.length);
+    const refs = await this.lookup(request, job, signal, ['config', '--get-all', `branch.${branch}.merge`]);
+    return refs === undefined ? undefined : { branch, refs: refs === null ? [] : refs.split('\n') };
+  }
+
+  /* No branch, a branch with neither a remote nor a merge ref, or a branch of this very remote. The rest is for plain git. */
+  private async branchFits(request: ConfiguredRequest, job: GitJob, signal: AbortSignal, merge: FrozenMerge): Promise<boolean> {
+    if (merge.branch === null) return true;
+    if (!Name.safeParse(merge.branch).success) return false;
+    const own = await this.lookup(request, job, signal, ['config', '--get', `branch.${merge.branch}.remote`]);
+    return own === request.remote || (own === null && merge.refs.length === 0);
+  }
+
+  /* The current branch, its merge refs and anything already named like the service remote add to or change what -c gives. */
+  private async settingsMoved(operation: Operation): Promise<boolean> {
+    const { request, job, signal, frozen } = operation;
+    if (!frozen) return false;
+    const merge = await this.mergeState(request, job, signal);
+    const inherited = await this.lookup(request, job, signal, ['config', '--get-regexp', remoteKeys(frozen.alias)]);
+    return inherited !== null || !merge || canonicalJson(merge) !== canonicalJson(frozen.merge);
+  }
+
+  private async movedSinceAsked(operation: Operation): Promise<string | null> {
+    if ((operation.last || operation.frozen) && await this.endpoint(operation.request, operation.job, operation.signal) !== operation.endpoint) return REMOTE_CHANGED;
+    return await this.settingsMoved(operation) ? SETTINGS_CHANGED : null;
   }
 
   private child(request: GitRequest, job: GitJob, signal: AbortSignal, args: string[], limit = STDERR_TAIL * 8): Promise<Attempt> {
@@ -314,8 +428,14 @@ export class GitAdapter {
   }
 
   private async read(request: GitRequest, job: GitJob, signal: AbortSignal, args: string[]): Promise<string | null> {
+    return (await this.lookup(request, job, signal, args)) ?? null;
+  }
+
+  /* What git says, null when it says there is none, undefined when it could not say. */
+  private async lookup(request: GitRequest, job: GitJob, signal: AbortSignal, args: string[]): Promise<Observed> {
     const done = await this.child(request, job, AbortSignal.any([signal, AbortSignal.timeout(READ_MS)]), args);
-    return done.ok ? decode(done, 'stdout').trim() : null;
+    if (done.ok) return decode(done, 'stdout').trim();
+    return done.exit.code === 1 ? null : undefined;
   }
 
   private endpoint(request: GitRequest, job: GitJob, signal: AbortSignal): Promise<string | null> {
@@ -350,33 +470,38 @@ export class GitAdapter {
     }
   }
 
-  private async execute(operation: Operation, grant: Extract<GitGrant, { disposition: 'execute' }>): Promise<Exit | null> {
+  private async execute(operation: Operation, grant: ExecuteGrant): Promise<Exit | null> {
     operation.signal.throwIfAborted();
     /* Another job would have ended this operation, so this is the same job with what it holds now. */
     operation.job = this.jobs.get(operation.key) ?? operation.job;
-    const previous = operation.last;
-    if (previous) {
-      if (await this.endpoint(operation.request, operation.job, operation.signal) !== operation.endpoint) return await this.remoteChanged(operation);
-      const already = await this.alreadyThere(operation);
-      if (already) return await this.judge(operation, await this.report(operation, grant, previous, already), previous, already);
+    const moved = await this.movedSinceAsked(operation);
+    operation.signal.throwIfAborted();
+    if (moved) return await this.gaveUp(operation, moved);
+    if (operation.last) {
+      const settled = await this.beforeRetry(operation, grant, operation.last);
+      if (settled) return settled.exit;
     }
     operation.state = 'running';
-    const attempt = await this.child(operation.request, operation.job, operation.signal, attemptArgs(operation.request), this.options.heldBytes ?? HELD_BYTES);
-    operation.last = attempt;
+    const attempt = await this.child(operation.request, operation.job, operation.signal, operation.args, this.options.heldBytes ?? HELD_BYTES);
     const observedHead = await this.observe(operation, attempt);
     const reply = await this.report(operation, grant, attempt, observedHead);
     operation.signal.throwIfAborted();
     return await this.judge(operation, reply, attempt, observedHead);
   }
 
-  /* Before a push goes out again: the commit may have reached the branch when the answer to the last attempt got lost. */
-  private async alreadyThere(operation: Operation): Promise<string | null> {
-    if (operation.request.kind !== 'push') return null;
-    const head = await this.exactRef(operation, operation.request);
-    return head === operation.request.sourceSha ? head : null;
+  /* Before a push goes out again: the commit may have reached the branch when the answer to the last attempt got lost, and
+     a target that cannot be read leaves that open. Only a target read to differ lets the attempt run. */
+  private async beforeRetry(operation: Operation, grant: ExecuteGrant, previous: NonNullable<Operation['last']>): Promise<{ exit: Exit | null } | null> {
+    const { request } = operation;
+    if (request.kind !== 'push') return null;
+    const head = await this.exactRef(operation, request);
+    if (head !== undefined && head !== request.sourceSha) return null;
+    operation.signal.throwIfAborted();
+    const reply = await this.reportRead(operation, grant, previous.receipt, head);
+    return { exit: await this.judge(operation, reply, previous.attempt, head) };
   }
 
-  private async exactRef(operation: Operation, request: PushRequest): Promise<string | null | undefined> {
+  private async exactRef(operation: Operation, request: PushRequest): Promise<Observed> {
     const listed = await this.read(request, operation.job, operation.signal, ['ls-remote', request.remote, request.destinationRef]);
     if (listed === null) return undefined;
     /* ls-remote matches the end of a name too, so another ref can end the same way. */
@@ -388,23 +513,29 @@ export class GitAdapter {
     return (await this.read(operation.request, operation.job, operation.signal, ['rev-parse', '--verify', '--quiet', 'FETCH_HEAD^{commit}'])) ?? undefined;
   }
 
-  private async observe(operation: Operation, attempt: Attempt): Promise<string | null | undefined> {
-    if (operation.signal.aborted) return undefined;
-    if (operation.request.kind === 'fetch') return attempt.ok ? await this.fetched(operation) : undefined;
-    return attempt.ok ? undefined : await this.exactRef(operation, operation.request);
+  /* A fetch by settings brings many refs, so no single commit speaks for it. */
+  private async observe(operation: Operation, attempt: Attempt): Promise<Observed> {
+    const { request } = operation;
+    if (operation.signal.aborted || request.kind === 'fetch_configured') return undefined;
+    if (request.kind === 'fetch') return attempt.ok ? await this.fetched(operation) : undefined;
+    return attempt.ok ? undefined : await this.exactRef(operation, request);
   }
 
-  private async report(operation: Operation, grant: Extract<GitGrant, { disposition: 'execute' }>, attempt: Attempt, observedHead: string | null | undefined): Promise<GitRecordReply> {
+  private async report(operation: Operation, grant: ExecuteGrant, attempt: Attempt, observedHead: Observed): Promise<GitRecordReply> {
     const { operationId, generation, consumer, key } = operation;
-    const receiptDigest = digest({ agent: key, operationId, generation, attemptId: grant.attemptId, consumer, outcome: attempt.outcome, settled: attempt.settled, observed: observedHead === undefined ? 'unread' : observedHead });
-    try {
-      return await this.options.port!.record({ operationId, generation, attemptId: grant.attemptId, outcome: attempt.outcome, settled: attempt.settled, receiptDigest, ...(observedHead === undefined ? {} : { observedHead }) });
-    } catch {
-      return { accepted: false, state: 'outcome_unknown' };
-    }
+    const { outcome, settled } = attempt;
+    const receiptDigest = digest({ agent: key, operationId, generation, attemptId: grant.attemptId, consumer, outcome, settled, observed: observedWord(observedHead) });
+    operation.last = { attempt, receipt: { generation, attemptId: grant.attemptId, receiptDigest } };
+    return await asked(() => this.options.port!.record({ operationId, generation, attemptId: grant.attemptId, outcome, settled, receiptDigest, ...observedField(observedHead) }));
   }
 
-  private async judge(operation: Operation, reply: GitRecordReply, attempt: Attempt, observedHead: string | null | undefined): Promise<Exit | null> {
+  private async reportRead(operation: Operation, grant: ExecuteGrant, reconciles: GitAttemptRef, observedHead: Observed): Promise<GitRecordReply> {
+    const { operationId, generation, consumer, key } = operation;
+    const receiptDigest = digest({ agent: key, operationId, generation, attemptId: grant.attemptId, consumer, reconciles, observed: observedWord(observedHead) });
+    return await asked(() => this.options.port!.reconcile({ operationId, generation, attemptId: grant.attemptId, reconciles, receiptDigest, ...observedField(observedHead) }));
+  }
+
+  private async judge(operation: Operation, reply: GitRecordReply, attempt: Attempt, observedHead: Observed): Promise<Exit | null> {
     const why = waitReason(reply, attempt, observedHead);
     if (!why) return await this.conclude(operation, reply.accepted ? reply.state : 'outcome_unknown', attempt, reply.accepted);
     await this.waiting(operation, why, reply.nextAttemptAt ?? null);
@@ -413,7 +544,7 @@ export class GitAdapter {
 
   private async waiting(operation: Operation, why: 'deferred' | 'unknown', next: string | null): Promise<void> {
     operation.waited = true;
-    const opening = why === 'unknown' ? 'the result of this push is not known yet because the remote branch could not be read.' : 'the remote Git service refused or did not answer.';
+    const opening = why === 'deferred' ? 'the remote Git service refused or did not answer.' : operation.request.kind === 'push' ? 'the result of this push is not known yet because the remote branch could not be read.' : 'the result of this fetch is not known yet.';
     const when = next ? ` Next check: ${next}.` : '';
     await send(operation.res, { type: 'progress', text: `${opening} This command keeps waiting and finishes by itself; there is nothing to do and nothing to investigate.${when}` });
   }
@@ -449,7 +580,7 @@ export class GitAdapter {
   }
 
   private async ended(operation: Operation, state: GitOperationState): Promise<Exit> {
-    if (operation.last) return await this.conclude(operation, state, operation.last, true);
+    if (operation.last) return await this.conclude(operation, state, operation.last.attempt, true);
     this.remember(operation, state);
     const satisfied = state === 'satisfied';
     if (!satisfied) await sendError(operation.res, 'fatal: Hornhoof ended this git operation without running it.\n');
@@ -461,16 +592,13 @@ export class GitAdapter {
     await this.options.port!.cancel({ operationId: operation.operationId, generation: operation.generation }).catch(() => {});
   }
 
-  private async remoteChanged(operation: Operation): Promise<Exit> {
+  private async gaveUp(operation: Operation, why: string): Promise<Exit> {
     await this.cancelled(operation);
-    await sendError(operation.res, 'fatal: the remote changed while this git command was waiting, so nothing more was sent.\n');
+    await sendError(operation.res, `fatal: ${why}, so nothing more was sent.\n`);
     return { code: 128, signal: null };
   }
 
-  private async stopped(operation: Operation): Promise<Exit> {
-    await this.cancelled(operation);
-    const why = operation.ended.signal.aborted ? 'the turn ended while this git command was waiting' : 'Hornhoof stopped waiting for this git command';
-    await sendError(operation.res, `fatal: ${why}, so nothing more was sent.\n`);
-    return { code: 128, signal: null };
+  private stopped(operation: Operation): Promise<Exit> {
+    return this.gaveUp(operation, operation.ended.signal.aborted ? 'the turn ended while this git command was waiting' : 'Hornhoof stopped waiting for this git command');
   }
 }

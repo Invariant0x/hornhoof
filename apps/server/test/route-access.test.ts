@@ -32,6 +32,7 @@ const guards: { name: string; path: RegExp; rule: string }[] = [
   { name: 'agentFor', path: /^\/api\/agents\//, rule: 'human session and reachable agent' },
   { name: 'programFor', path: /^\/api\/agents\/:id\/terminal$/, rule: 'human session and the plan the program really runs on' },
   { name: 'jobOf', path: /^(?:\/mcp|\/api\/attachments(?:\/file)?|\/api\/outbound\/messages(?:\/:id)?)$/, rule: 'agent job token' },
+  { name: 'openEventReceipts', path: /^\/api\/outbound\/accounts\/:id\/events$/, rule: 'body signed with the key of that account, which records what became of its messages and does nothing else' },
   { name: 'openUnsubscribe', path: /^\/api\/outbound\/unsubscribe\/\*$/, rule: 'signed stop link, which opts out and does nothing else' },
   { name: 'setupOnly', path: /^\/api\/setup(?:\/names\/:name)?$/, rule: 'first setup code' },
   { name: 'openInvite', path: /^\/api\/invites\/:token(?:\/accept)?$/, rule: 'valid invitation token' },

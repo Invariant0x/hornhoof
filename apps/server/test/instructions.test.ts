@@ -336,6 +336,26 @@ describe('renderInstructions', () => {
     expect(headWithoutNotebookCast.parts.some(p => p.id === 'hh-report-to-head')).toBe(false);
   });
 
+  it('delivers the strict mechanical finding category and Wake.mechanical boundary in loaded DEV-REV skill files and whole instructions', () => {
+    const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
+    const revRole = shipped.roles.get('DEV-REV')!;
+    const rendered = renderInstructions(shipped, agent({ roleKey: 'DEV-REV', skills: revRole.skills.filter(s => s.on).map(s => s.id), templateHashes: {} }), PLACE);
+    expect(Buffer.byteLength(rendered.text)).toBeLessThan(24_000);
+    expect(rendered.text).toContain('\n- dev-review-diff: Reviewing a change.');
+    expect(rendered.text).toContain('\n- dev-review-verdict: Review verdict.');
+    const files = new Map(rendered.skills.map(s => [s.name, s.body]));
+    for (const id of ['dev-review-diff', 'dev-review-verdict'] as const) {
+      const body = files.get(id)!;
+      expect(Buffer.byteLength(body), id).toBeLessThan(22_000);
+      expect(body, id).toContain('mechanical');
+      expect(body, id).toContain('Wake.mechanical');
+      expect(body, id).toMatch(/provably cannot change[^.!?]*behaviour/i);
+      expect(body, id).toMatch(/when in doubt[^.!?]*regular category[\s\S]*full base level/i);
+    }
+    expect(rendered.whole).toContain('Wake.mechanical');
+    expect(rendered.whole).toMatch(/provably cannot change[^.!?]*behaviour/i);
+  });
+
   it('delivers the external-outage hold, one-action unhold and ordinary-retry rules to the orchestrator and department heads, including legacy saved skill lists', () => {
     const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
     const steady = orchestratorSteady(shipped);
@@ -431,5 +451,50 @@ describe('renderInstructions', () => {
       expect(watchPacket.whole).toContain('People who stand free while work waits are a fault, not a normal wait');
     }
     expect(savedWatchList).toEqual(['ops-task-watch']);
+  });
+
+  it('delivers T2 impact-selection, explicit scripts/test selector commands, bidirectional migration and no-auto-wiring rules in loaded development role packets', () => {
+    const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
+    for (const roleKey of ['DEV-ENG', 'DEV-BE', 'DEV-FE'] as const) {
+      const role = shipped.roles.get(roleKey)!;
+      const rendered = renderInstructions(shipped, agent({ roleKey, skills: role.skills.filter(s => s.on).map(s => s.id), templateHashes: {} }), PLACE);
+      expect(Buffer.byteLength(rendered.text), roleKey).toBeLessThan(24_000);
+      const files = new Map(rendered.skills.map(s => [s.name, s.body]));
+      const impl = files.get('dev-implement')!;
+      const eng = files.get('dev-engineering-rules')!;
+      expect(Buffer.byteLength(impl), `${roleKey} dev-implement`).toBeLessThan(22_000);
+      expect(Buffer.byteLength(eng), `${roleKey} dev-engineering-rules`).toBeLessThan(22_000);
+      expect(impl, roleKey).toContain('scripts/test/');
+      expect(impl, roleKey).toContain('NOT_RUN');
+      expect(impl, roleKey).toMatch(/up and down/i);
+      expect(eng, roleKey).toContain('scripts/test/impact-README.md');
+      expect(eng, roleKey).toContain('scripts/test/related-probe.mjs');
+      expect(eng, roleKey).toContain('scripts/test/impact-python/pytest_impact.py');
+      expect(eng, roleKey).toContain('scripts/test/replay-impact.mjs');
+      expect(rendered.whole, roleKey).toContain('scripts/test/impact-README.md');
+    }
+
+    const headRole = shipped.roles.get('DEV-HEAD')!;
+    const headRendered = renderInstructions(
+      shipped,
+      agent({ kind: 'head', roleKey: 'DEV-HEAD', skills: headRole.skills.filter(s => s.on).map(s => s.id), templateHashes: {} }),
+      PLACE,
+    );
+    expect(Buffer.byteLength(headRendered.text)).toBeLessThan(24_000);
+    const gatesBody = headRendered.skills.find(s => s.name === 'dev-gates')?.body ?? '';
+    expect(Buffer.byteLength(gatesBody)).toBeLessThan(22_000);
+    expect(gatesBody).toContain('scripts/test/');
+    expect(gatesBody).toMatch(/collected graph[\s\S]*completed[^.!?]*receipts?/i);
+    expect(gatesBody).toMatch(/unavailable[^.!?]*not zero misses/i);
+    expect(headRendered.whole).toMatch(/collected graph[\s\S]*completed[^.!?]*receipts?/i);
+
+    for (const roleKey of ['DEV-REV', 'DEV-TEST'] as const) {
+      const role = shipped.roles.get(roleKey)!;
+      const rendered = renderInstructions(shipped, agent({ roleKey, skills: role.skills.filter(s => s.on).map(s => s.id), templateHashes: {} }), PLACE);
+      expect(Buffer.byteLength(rendered.text), roleKey).toBeLessThan(24_000);
+      const eng = rendered.skills.find(s => s.name === 'dev-engineering-rules')?.body ?? '';
+      expect(eng, roleKey).toContain('scripts/test/impact-README.md');
+      expect(eng, roleKey).toMatch(/shared packages[\s\S]*API contracts[\s\S]*templates/i);
+    }
   });
 });
