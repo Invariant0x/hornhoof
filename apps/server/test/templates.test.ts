@@ -1812,6 +1812,20 @@ describe('skills are independent cubes: any can be on for any role and together 
     expect(role.skills.find(k => k.id === 'dev-review-verdict')?.on).toBe(false);
   });
 
+  it('asks for a browser only where a change has a screen, on the generalist and in the check itself', () => {
+    const role = templates.roles.get('DEV-GEN')!;
+    /* A skill on a card is read before the step it covers, so the role must not make that step part of every task. */
+    expect(role.body).toMatch(/When the change has something a user meets[^.]*dev-browser-check[^.]*a browser only for a screen/);
+    expect(role.body).not.toMatch(/a check in the browser/);
+    expect(role.description.en).toMatch(/a browser check when the change has a screen/);
+    expect(role.description.ru).toMatch(/в браузере, если у изменения есть экран/);
+    const check = skill('dev-browser-check');
+    expect(check.description.en).toMatch(/a browser only for a screen/);
+    expect(check.body).toMatch(/A change nothing reaches that way has no run to do here: its tests are the check/);
+    expect(check.body).toMatch(/^4\. On a screen, check every theme/m);
+    expect(skill('dev-testing-policy').body).toMatch(/browser engines where the product has a web interface/);
+  });
+
   it('closes references: a skill or role on a card names only what that card can read', () => {
     const named = /\b(?:dev|dsn|fin|sup|ops|sal|mkt|biz|home|hh|orch)-[a-z0-9]+(?:-[a-z0-9]+)*\b/g;
     const dangling: string[] = [];
