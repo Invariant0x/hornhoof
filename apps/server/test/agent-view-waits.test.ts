@@ -33,7 +33,7 @@ async function waiting(c: AclCompany, agent: Crew) {
 
 async function card(c: AclCompany, wait: typeof taskWaits.$inferSelect, viewer: Viewer, delivered = true) {
   const [notice] = await c.db.insert(waitNotices).values({ companyId: c.companyId, personId: c.ids[viewer], dedupKey: randomUUID(),
-    waitId: wait.id, generation: wait.generation, level: 3, purpose: `fixture:${viewer}`, routeRevision: wait.routeRevision,
+    waitId: wait.id, generation: wait.generation, level: 3, purpose: `fixture:${randomUUID()}`, routeRevision: wait.routeRevision,
     guard: { tasks: [], wait: { id: wait.id, generation: wait.generation, routeRevision: wait.routeRevision } },
     message: await notificationMessage(c.app.ctx, c.companyId, 'wait_overdue', 'A wait reached its date.'), deliveredAt: delivered ? new Date() : null }).returning();
   return notice!;
