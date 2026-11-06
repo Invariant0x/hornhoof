@@ -87,6 +87,37 @@ describe('errorText', () => {
     const err = new ApiFailure(401, 'unauthorized', 'Some new server text.', 'not_a_reason_yet');
     expect(errorText(ru, err)).toBe(ru.errors.codes.unauthorized);
     expect(errorText(en, err)).toBe('Some new server text.');
+    const unavailableProducer = new ApiFailure(503, 'unavailable', '', 'source_producer_unavailable');
+    expect(errorText(en, unavailableProducer)).toBe(en.errors.source_producer_unavailable);
+    expect(errorText(ru, unavailableProducer)).toBe(ru.errors.source_producer_unavailable);
+  });
+
+  it('streams bytes across arrayBuffer fallback and content-length headers', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (path: string) => {
+        if (path === '/no-body-short') {
+          const fake = {
+            ok: true,
+            status: 200,
+            headers: new Headers({ 'content-length': '10' }),
+            body: null,
+            arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
+          };
+          return fake as unknown as Response;
+        }
+        return new Response(new Uint8Array([4, 5]), {
+          status: 200,
+          headers: { 'content-length': 'not-a-number' },
+        });
+      }),
+    );
+    const shortRes = await api.streamBytes('/no-body-short');
+    expect(shortRes.complete).toBe(false);
+    expect(shortRes.error).toBe('incomplete');
+    const badHeaderRes = await api.streamBytes('/bad-len');
+    expect(badHeaderRes.complete).toBe(true);
+    expect( Array.from(badHeaderRes.bytes) ).toEqual([4, 5]);
   });
 });
 
@@ -207,6 +238,7 @@ describe('work tree words', () => {
       expect(dict.updates.result({ state: 'done', version: '0.8.0' }, '0.7.0')).toContain('0.8.0');
       expect(dict.updates.result({ state: 'rolled_back', version: '0.8.0' }, '0.7.0')).toContain('0.7.0');
       expect(dict.updates.result({ state: 'failed', version: '0.8.0' }, '0.7.0')).toContain('0.8.0');
+      expect(dict.window.noticeSource('task', '', '', 'Agent')).toContain('Agent');
     }
   });
 });

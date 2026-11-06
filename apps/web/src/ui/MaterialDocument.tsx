@@ -38,13 +38,13 @@ export function setPdfLoaderForTests(loader: PdfLoader | null): void {
   customPdfLoader = loader;
 }
 
-function extractPdfTextItems(items: readonly unknown[]): string {
-  const parts: string[] = [];
-  for (const item of items) {
-    const str = (item as { str?: unknown } | null)?.str;
-    if (typeof str === 'string' && str.trim()) parts.push(str);
-  }
-  return parts.join(' ');
+function pdfItemText(item: unknown): string {
+  const str = (item as { str?: unknown } | null)?.str;
+  return typeof str === 'string' ? str.trim() : '';
+}
+
+export function extractPdfTextItems(items: readonly unknown[]): string {
+  return items.map(pdfItemText).filter(Boolean).join(' ');
 }
 
 async function loadPdfPage(doc: PdfRawDocument, annotationDisable: number, pageNumber: number): Promise<PdfPageView> {
@@ -131,7 +131,7 @@ async function fetchPdfState(contentUrl: string, signal: AbortSignal, t: Message
 
 function paintPdfCanvas(el: HTMLCanvasElement | null, page: PdfPageView): void {
   if (!el) return;
-  void page.renderToCanvas(el).then(() => {
+  void Promise.resolve(page.renderToCanvas(el)).then(() => {
     el.dataset.rendered = 'true';
   });
 }
@@ -207,22 +207,33 @@ type Props = {
   onPdfFallbackChange?: (unavailable: boolean) => void;
 };
 
-export function MaterialDocument({ format, contentUrl, downloadUrl, onPdfFallbackChange }: Props) {
-  const t = useT();
+function loadDocState(format: 'text' | 'markdown' | 'pdf', contentUrl: string, signal: AbortSignal, t: Messages): Promise<DocState> {
+  return format === 'pdf' ? fetchPdfState(contentUrl, signal, t) : fetchTextState(contentUrl, signal, t);
+}
+
+function notifyPdfFallback(onPdfFallbackChange: ((unavailable: boolean) => void) | undefined, unavailable: boolean) {
+  if (onPdfFallbackChange) onPdfFallbackChange(unavailable);
+}
+
+function useLoadedDocState(
+  format: 'text' | 'markdown' | 'pdf',
+  contentUrl: string,
+  attempt: number,
+  t: Messages,
+  onPdfFallbackChange?: (unavailable: boolean) => void,
+): DocState {
   const [state, setState] = useState<DocState>({ kind: 'loading' });
-  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     const ctrl = new AbortController();
     let live = true;
     setState({ kind: 'loading' });
-    onPdfFallbackChange?.(false);
-    const load = format === 'pdf' ? fetchPdfState(contentUrl, ctrl.signal, t) : fetchTextState(contentUrl, ctrl.signal, t);
-    void load.then(
+    notifyPdfFallback(onPdfFallbackChange, false);
+    void loadDocState(format, contentUrl, ctrl.signal, t).then(
       next => {
         if (!live) return;
         setState(next);
-        onPdfFallbackChange?.(next.kind === 'pdf-unavailable');
+        notifyPdfFallback(onPdfFallbackChange, next.kind === 'pdf-unavailable');
       },
       err => {
         if (!live || ctrl.signal.aborted) return;
@@ -235,21 +246,45 @@ export function MaterialDocument({ format, contentUrl, downloadUrl, onPdfFallbac
     };
   }, [contentUrl, format, attempt, t, onPdfFallbackChange]);
 
-  const retry = () => setAttempt(a => a + 1);
-  if (state.kind === 'loading') return <p className="mv-reading" role="status">{t.common.loading}</p>;
-  if (state.kind === 'error') return <RetryAlert message={state.message} onRetry={retry} />;
-  if (state.kind === 'pdf-unavailable') return <PdfUnavailableCard downloadUrl={downloadUrl} />;
-  if (state.kind === 'pdf') {
-    return (
-      <div className="mv-doc">
-        <div className="mv-pdf">
-          {state.pages.map(p => (
-            <PdfCanvasPage key={p.pageNumber} page={p} label={t.tasks.materials.pageOf(p.pageNumber, state.pages.length)} />
-          ))}
-        </div>
-        <p className="mv-end">{t.tasks.materials.endOfDocument}</p>
+  return state;
+}
+
+function PdfPagesView({ pages }: { pages: PdfPageView[] }) {
+  const t = useT();
+  return (
+    <div className="mv-doc">
+      <div className="mv-pdf">
+        {pages.map(p => (
+          <PdfCanvasPage key={p.pageNumber} page={p} label={t.tasks.materials.pageOf(p.pageNumber, pages.length)} />
+        ))}
       </div>
-    );
-  }
-  return <TextBody format={format} text={state.text} complete={state.complete} error={state.error} onRetry={retry} />;
+      <p className="mv-end">{t.tasks.materials.endOfDocument}</p>
+    </div>
+  );
+}
+
+function MaterialDocView({
+  state,
+  format,
+  downloadUrl,
+  onRetry,
+}: {
+  state: DocState;
+  format: 'text' | 'markdown' | 'pdf';
+  downloadUrl: string | null;
+  onRetry: () => void;
+}) {
+  const t = useT();
+  if (state.kind === 'loading') return <p className="mv-reading" role="status">{t.common.loading}</p>;
+  if (state.kind === 'error') return <RetryAlert message={state.message} onRetry={onRetry} />;
+  if (state.kind === 'pdf-unavailable') return <PdfUnavailableCard downloadUrl={downloadUrl} />;
+  if (state.kind === 'pdf') return <PdfPagesView pages={state.pages} />;
+  return <TextBody format={format} text={state.text} complete={state.complete} error={state.error} onRetry={onRetry} />;
+}
+
+export function MaterialDocument({ format, contentUrl, downloadUrl, onPdfFallbackChange }: Props) {
+  const t = useT();
+  const [attempt, setAttempt] = useState(0);
+  const state = useLoadedDocState(format, contentUrl, attempt, t, onPdfFallbackChange);
+  return <MaterialDocView state={state} format={format} downloadUrl={downloadUrl} onRetry={() => setAttempt(a => a + 1)} />;
 }

@@ -335,16 +335,7 @@ function focusFirstRevealedMaterial(container: HTMLDivElement | null) {
   firstInteractive?.focus();
 }
 
-export function RequestMaterialsZone({
-  items,
-  failure,
-  onOpen,
-}: {
-  items: MaterialItem[];
-  failure?: unknown;
-  onOpen: (id: string, opener: HTMLElement | null) => void;
-}) {
-  const t = useT();
+function useExpandFocus() {
   const [expanded, setExpanded] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
   const shouldFocus = useRef(false);
@@ -355,10 +346,33 @@ export function RequestMaterialsZone({
     focusFirstRevealedMaterial(listRef.current);
   }, [expanded]);
 
+  const expand = () => {
+    shouldFocus.current = true;
+    setExpanded(true);
+  };
+
+  return { expanded, listRef, expand };
+}
+
+function visibleMaterials(items: MaterialItem[], collapsed: boolean): MaterialItem[] {
+  return collapsed ? items.slice(0, INITIAL_VISIBLE) : items;
+}
+
+export function RequestMaterialsZone({
+  items,
+  failure,
+  onOpen,
+}: {
+  items: MaterialItem[];
+  failure?: unknown;
+  onOpen: (id: string, opener: HTMLElement | null) => void;
+}) {
+  const t = useT();
+  const { expanded, listRef, expand } = useExpandFocus();
   const showError = hasError(failure);
   if (!items.length && !showError) return null;
   const collapsed = !expanded && items.length >= COLLAPSE_THRESHOLD;
-  const shown = collapsed ? items.slice(0, INITIAL_VISIBLE) : items;
+  const shown = visibleMaterials(items, collapsed);
 
   return (
     <section className="mat-zone" aria-label={t.tasks.materials.heading}>
@@ -377,14 +391,7 @@ export function RequestMaterialsZone({
         ))}
       </div>
       {collapsed && (
-        <button
-          className="act mat-more"
-          type="button"
-          onClick={() => {
-            shouldFocus.current = true;
-            setExpanded(true);
-          }}
-        >
+        <button className="act mat-more" type="button" onClick={expand}>
           {t.tasks.materials.showAll(items.length)}
         </button>
       )}
@@ -393,6 +400,28 @@ export function RequestMaterialsZone({
 }
 
 const emptyManifest = (): MaterialManifestView => ({ materialRevision: 0, materialDigest: '', common: [], options: [] });
+
+export function useProposalCardPost(onDone?: () => void) {
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [failure, setFailure] = useState<unknown>(null);
+
+  async function postProposal(path: string, body: unknown) {
+    setBusy(true);
+    setFailure(null);
+    try {
+      await api.post(path, body);
+      setSent(true);
+      onDone?.();
+    } catch (err) {
+      setFailure(err);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return { busy, sent, failure, setFailure, postProposal };
+}
 
 export function useProposalMaterials(proposal: { id: string } | undefined) {
   const revision = readMaterialRevision(proposal);

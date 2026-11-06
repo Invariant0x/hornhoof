@@ -365,6 +365,34 @@ test('renders materials list and fullscreen viewer across dynamic shipped locale
         await dialog.getByRole('button', { name: t.tasks.materials.close }).click();
         await expect(dialog).toBeHidden();
         expect(posts).toEqual([]);
+
+        if (lang === 'ru' && theme === 'dark' && width === 1440) {
+          const ordinaryCard = page.getByRole('article', { name: /#508 / });
+          await ordinaryCard.scrollIntoViewIfNeeded();
+          await expect(ordinaryCard).toBeVisible();
+          await saveShot(page, info, `ordinary-question-read-states-ru-dark-1440-${SOURCE_SHA.slice(0, 8)}.png`, true);
+          await ordinaryCard.getByRole('button', { name: /What we compare and why\.md/ }).click();
+          const mdDialog = page.getByRole('dialog');
+          await expect(mdDialog).toBeVisible();
+          await expect(mdDialog).toContainText('END_OF_NOTES');
+          await saveShot(page, info, `viewer-markdown-doc-ru-dark-1440-${SOURCE_SHA.slice(0, 8)}.png`, true);
+          await mdDialog.getByRole('button', { name: t.tasks.materials.close }).click();
+          await expect(mdDialog).toBeHidden();
+        }
+        if (lang === 'en' && theme === 'dark' && width === 375) {
+          await page.evaluate(() => document.documentElement.setAttribute('dir', 'rtl'));
+          await opt1Pic.click();
+          await expect(dialog).toBeVisible();
+          const rtlOverflow = await page.evaluate(() => {
+            const mv = document.querySelector<HTMLElement>('.mv')!;
+            return mv.scrollWidth - mv.clientWidth;
+          });
+          expect(rtlOverflow, 'RTL viewer overflow at 375').toBeLessThanOrEqual(1);
+          await saveShot(page, info, `materials-viewer-rtl-en-dark-375-${SOURCE_SHA.slice(0, 8)}.png`, true);
+          await dialog.getByRole('button', { name: t.tasks.materials.close }).click();
+          await expect(dialog).toBeHidden();
+          await page.evaluate(() => document.documentElement.removeAttribute('dir'));
+        }
       }
     }
   }

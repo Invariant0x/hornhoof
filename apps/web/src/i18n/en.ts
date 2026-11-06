@@ -1270,6 +1270,7 @@ export const en = {
     orchestrator_not_ready: 'The orchestrator cannot answer right now.',
     nothing_running: 'Nothing is running now.',
     proposal_closed: 'This card was already applied or replaced by a newer one.',
+    source_producer_unavailable: 'The original proposal document is not available right now. Try again later.',
     updater_missing: 'The updater is not running. Run the install command for this server again to add it.',
     update_running: 'An update is running already. Wait for it to finish.',
     version_unknown: 'This version is not published. Check for updates and pick another one.',

@@ -73,17 +73,19 @@ async function readBodyChunks(reader: ReadableStreamDefaultReader<Uint8Array>): 
   }
 }
 
-function expectedByteLength(res: Response): number | null {
-  const raw = res.headers.get('content-length');
-  if (!raw) return null;
+function parseNonNegativeLength(raw: string): number | null {
   const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 
+function expectedByteLength(res: Response): number | null {
+  const raw = res.headers.get('content-length');
+  return raw ? parseNonNegativeLength(raw) : null;
+}
+
 async function readArrayBufferResult(res: Response, expected: number | null) {
   const bytes = new Uint8Array(await res.arrayBuffer());
-  const complete = expected === null || bytes.byteLength >= expected;
-  return { bytes, complete, error: complete ? null : 'incomplete' };
+  return finalizeStreamResult(bytes, expected, null);
 }
 
 function finalizeStreamResult(bytes: Uint8Array, expected: number | null, streamError: string | null) {

@@ -6,7 +6,7 @@ import { LanguageProvider } from '../src/i18n';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import type { WaitingRequest } from '../src/types';
-import { setPdfLoaderForTests } from '../src/ui/MaterialDocument';
+import { extractPdfTextItems, setPdfLoaderForTests } from '../src/ui/MaterialDocument';
 import { readMaterialStamp, type MaterialManifestView } from '../src/ui/RequestMaterials';
 import { Requests, clearRequestDraftsForTests } from '../src/ui/Requests';
 
@@ -550,6 +550,7 @@ describe('separate question materials preview and explicit answering (#512)', ()
       materialDigest: 'a'.repeat(64),
     });
     expect(readMaterialStamp({ id: 'r-v1', materialRevision: 1 }, null)).toEqual({});
+    expect(extractPdfTextItems([{ str: 'First' }, { str: '   ' }, { other: 1 }, null, { str: 'Second' }])).toBe('First Second');
 
     renderWithAppShell(
       'en',

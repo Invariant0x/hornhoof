@@ -232,6 +232,10 @@ function LinkStage({ item }: { item: ViewerAvailableMaterial }) {
   );
 }
 
+function DocumentStage({ item, onPdfFallbackChange }: { item: ViewerAvailableMaterial; onPdfFallbackChange: (unavailable: boolean) => void }) {
+  return <MaterialDocument format={item.format ?? 'text'} contentUrl={item.contentUrl ?? ''} downloadUrl={item.downloadUrl ?? null} onPdfFallbackChange={onPdfFallbackChange} />;
+}
+
 function StageContent({
   item,
   zoom,
@@ -246,7 +250,7 @@ function StageContent({
   if (item.kind === 'image') return <ImageStage item={item} zoom={zoom} onToggleDoubleClick={onToggleDoubleClick} />;
   if (item.kind === 'file') return <FileStage item={item} />;
   if (item.kind === 'link') return <LinkStage item={item} />;
-  return <MaterialDocument format={item.format ?? 'text'} contentUrl={item.contentUrl ?? ''} downloadUrl={item.downloadUrl ?? null} onPdfFallbackChange={onPdfFallbackChange} />;
+  return <DocumentStage item={item} onPdfFallbackChange={onPdfFallbackChange} />;
 }
 
 function ZoomControls({ zoom, onStep, onReset }: { zoom: number; onStep: (delta: number) => void; onReset: () => void }) {
@@ -389,6 +393,68 @@ type Props = {
   onClose: () => void;
 };
 
+function resolveActiveViewerItem(items: ViewerAvailableMaterial[], activeId: string): ViewerAvailableMaterial | undefined {
+  return items.find(m => m.id === activeId) ?? items[0];
+}
+
+function activeTrackIndex(track: ViewerAvailableMaterial[], active: ViewerAvailableMaterial | undefined): number {
+  return active ? track.findIndex(m => m.id === active.id) : -1;
+}
+
+function handleViewerKeyEvent(
+  e: KeyboardEvent,
+  activeKind: string | undefined,
+  onClose: () => void,
+  stepTrack: (d: number) => void,
+  stepZoom: (d: number) => void,
+  resetZoom: () => void,
+) {
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    onClose();
+    return;
+  }
+  const dir = arrowDirection(e.key);
+  if (dir !== 0) {
+    e.preventDefault();
+    stepTrack(dir * rtlMultiplier());
+    return;
+  }
+  if (activeKind === 'image' && dispatchImageZoomKey(e.key, stepZoom, resetZoom)) e.preventDefault();
+}
+
+function useViewerKeyboard(
+  activeKind: string | undefined,
+  onClose: () => void,
+  stepTrack: (d: number) => void,
+  stepZoom: (d: number) => void,
+  resetZoom: () => void,
+) {
+  useEffect(() => {
+    const listener = (e: KeyboardEvent) => handleViewerKeyEvent(e, activeKind, onClose, stepTrack, stepZoom, resetZoom);
+    window.addEventListener('keydown', listener);
+    return () => window.removeEventListener('keydown', listener);
+  }, [activeKind, onClose, stepTrack, stepZoom, resetZoom]);
+}
+
+function finishSwipeGesture(
+  swipeStart: { current: { x: number; y: number; id: number } | null },
+  e: ReactPointerEvent<HTMLDivElement>,
+  activeKind: string | undefined,
+  zoom: number,
+  stepTrack: (d: number) => void,
+) {
+  const start = swipeStart.current;
+  swipeStart.current = null;
+  if (!canSwipeImage(start, e.pointerId, activeKind, zoom)) return;
+  const step = swipeStepDelta(e.clientX - start!.x, e.clientY - start!.y);
+  if (step !== 0) stepTrack(step);
+}
+
+function toggleDoubleClickZoom(stage: HTMLDivElement | null, setZoom: (updater: (z: number) => number) => void) {
+  preserveStageCenter(stage, () => setZoom(z => (z === 1 ? 2 : 1)));
+}
+
 export function MaterialViewer({ items, activeId, opener, proposalSource = false, onSelect, onClose }: Props) {
   const titleId = useId();
   const portalRef = useRef<HTMLDivElement | null>(null);
@@ -399,9 +465,9 @@ export function MaterialViewer({ items, activeId, opener, proposalSource = false
   const [zoom, setZoom] = useState(1);
   const [pdfUnavailable, setPdfUnavailable] = useState(false);
 
-  const active = items.find(m => m.id === activeId) ?? items[0];
+  const active = resolveActiveViewerItem(items, activeId);
   const track = trackForKind(items, active?.kind);
-  const index = active ? track.findIndex(m => m.id === active.id) : -1;
+  const index = activeTrackIndex(track, active);
 
   useInertBackground(portalRef, opener);
 
@@ -425,34 +491,9 @@ export function MaterialViewer({ items, activeId, opener, proposalSource = false
   const stepZoom = useCallback((delta: number) => preserveStageCenter(stageRef.current, () => setZoom(z => clampZoom(z + delta))), []);
   const resetZoom = useCallback(() => preserveStageCenter(stageRef.current, () => setZoom(1)), []);
 
-  useEffect(() => {
-    function onWindowKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
-        return;
-      }
-      const dir = arrowDirection(e.key);
-      if (dir !== 0) {
-        e.preventDefault();
-        stepTrack(dir * rtlMultiplier());
-        return;
-      }
-      if (active?.kind === 'image' && dispatchImageZoomKey(e.key, stepZoom, resetZoom)) e.preventDefault();
-    }
-    window.addEventListener('keydown', onWindowKeyDown);
-    return () => window.removeEventListener('keydown', onWindowKeyDown);
-  }, [active?.kind, onClose, stepTrack, stepZoom, resetZoom]);
+  useViewerKeyboard(active?.kind, onClose, stepTrack, stepZoom, resetZoom);
 
   if (!active) return null;
-
-  function handleStagePointerUp(e: ReactPointerEvent<HTMLDivElement>) {
-    const start = swipeStart.current;
-    swipeStart.current = null;
-    if (!canSwipeImage(start, e.pointerId, active?.kind, zoom)) return;
-    const step = swipeStepDelta(e.clientX - start!.x, e.clientY - start!.y);
-    if (step !== 0) stepTrack(step);
-  }
 
   return createPortal(
     <div ref={portalRef} className="mv-back">
@@ -466,12 +507,12 @@ export function MaterialViewer({ items, activeId, opener, proposalSource = false
           onPointerDown={e => {
             swipeStart.current = { x: e.clientX, y: e.clientY, id: e.pointerId };
           }}
-          onPointerUp={handleStagePointerUp}
+          onPointerUp={e => finishSwipeGesture(swipeStart, e, active.kind, zoom, stepTrack)}
         >
           <StageContent
             item={active}
             zoom={zoom}
-            onToggleDoubleClick={() => preserveStageCenter(stageRef.current, () => setZoom(z => (z === 1 ? 2 : 1)))}
+            onToggleDoubleClick={() => toggleDoubleClickZoom(stageRef.current, setZoom)}
             onPdfFallbackChange={setPdfUnavailable}
           />
         </div>

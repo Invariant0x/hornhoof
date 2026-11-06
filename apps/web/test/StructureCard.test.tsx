@@ -183,6 +183,18 @@ describe('StructureCard', () => {
       }),
     );
   });
+
+  it('shows the localized alert without fake materials when GET /api/proposals/:id/materials returns 503 source_producer_unavailable', async () => {
+    mockApi({
+      'GET /api/proposals/pr1/materials': [503, { error: { code: 'unavailable', reason: 'source_producer_unavailable' } }],
+    });
+    const proposalWithMaterials = { ...PROPOSAL, materialRevision: 1 } as unknown as typeof PROPOSAL;
+    const { container } = render(<StructureCard proposal={proposalWithMaterials} departments={[]} onCorrect={noop} />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('The original proposal document is not available right now. Try again later.');
+    expect(container.querySelectorAll('.mat')).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Create departments (5)' })).toBeEnabled();
+  });
 });
 
 describe('TEMPLATES', () => {

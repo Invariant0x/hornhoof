@@ -296,4 +296,30 @@ describe('StaffCard', () => {
       }),
     );
   });
+
+  it('renders no fake document and keeps hiring ticks intact when GET /api/proposals/:id/materials returns 503 source_producer_unavailable', async () => {
+    mockApi({
+      'GET /api/departments/d2/roster': [200, ROSTER],
+      'GET /api/proposals/pr9/materials': [503, { error: { code: 'unavailable', reason: 'source_producer_unavailable' } }],
+    });
+    const proposalWithMaterials = {
+      id: 'pr9',
+      brief: 'Start with the API.',
+      materialRevision: 1,
+      people: [
+        { role: 'DEV-HEAD', checked: true },
+        { role: 'DEV-BE', name: 'Bruno', checked: true },
+      ],
+    } as unknown as { id: string; brief: string; people: StaffLine[] };
+
+    const { container } = render(
+      <LanguageProvider>
+        <StaffCard department={DEPT} proposal={proposalWithMaterials} onCorrect={() => {}} />
+      </LanguageProvider>,
+    );
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('The original proposal document is not available right now. Try again later.');
+    expect(container.querySelectorAll('.mat')).toHaveLength(0);
+    expect(await screen.findByRole('button', { name: 'Hire (2)' })).toBeEnabled();
+  });
 });
