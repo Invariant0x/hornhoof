@@ -1,12 +1,13 @@
 import { createHash } from 'node:crypto';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { zstdCompressSync } from 'node:zlib';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished } from 'vitest';
 import { packBundle, unpackBundle } from '../src/test-bundle.js';
 import { prepareCache, restoreCache, type CacheEntry, type CacheContext } from '../src/test-cache.js';
-import { harnessShare, type HarnessRemote } from '../src/test-harness.js';
+import { harnessRemote, harnessShare, type HarnessRemote } from '../src/test-harness.js';
 
 const folders: string[] = [];
 afterEach(async () => { await Promise.all(folders.splice(0).map(dir => rm(dir, { recursive: true, force: true }))); });
@@ -186,5 +187,92 @@ describe('one build for all the machines', () => {
     await prepareCache(here.dir, KEY, INPUT, here, async () => { await new Promise(resolve => setTimeout(resolve, 60)); return source; }, harnessShare(remote, UNIT, { renewMs: 10 }));
     expect(asked.length).toBeGreaterThan(2);
     await chmod(join(here.dir, KEY), 0o700);
+  });
+});
+
+describe('the registry over HTTP', () => {
+  const SIGNAL = new AbortController().signal;
+  const unit = { repositoryScope: { companyId: '11111111-1111-4111-8111-111111111111', repositoryOwnerId: '22222222-2222-4222-8222-222222222222', repoUrlHash: 'c'.repeat(64) }, version: INPUT, unit: 'dependencies', key: KEY, commitSha: 'e'.repeat(40), platform: 'linux-arm64' };
+  type Asked = { method: string; url: string; authorization: string | undefined; range: string | undefined; body: Buffer };
+  /* A server that answers each request as told, and keeps what it was asked. */
+  async function server(answer: (asked: Asked, response: ServerResponse<IncomingMessage>) => void) {
+    const heard: Asked[] = [];
+    const running = createServer((request, response) => {
+      const chunks: Buffer[] = [];
+      request.on('data', (chunk: Buffer) => chunks.push(chunk));
+      request.on('end', () => {
+        const asked = { method: request.method!, url: request.url!, authorization: request.headers.authorization, range: request.headers.range, body: Buffer.concat(chunks) };
+        heard.push(asked); answer(asked, response);
+      });
+    });
+    await new Promise<void>(resolve => { running.listen(0, '127.0.0.1', resolve); });
+    onTestFinished(() => new Promise<void>(resolve => { running.closeAllConnections(); running.close(() => { resolve(); }); }));
+    const address = running.address() as { port: number };
+    return { heard, remote: harnessRemote(`http://127.0.0.1:${address.port}`, 'the-node-key') };
+  }
+  const send = (response: ServerResponse<IncomingMessage>, status: number, body = '') => { response.writeHead(status, { 'content-type': 'application/json' }); response.end(body); };
+  async function file(text: string) {
+    const root = await mkdtemp(join(tmpdir(), 'hh-remote-')); folders.push(root);
+    await writeFile(join(root, 'bundle'), text);
+    return { root, path: join(root, 'bundle') };
+  }
+
+  it('asks with the machine\'s key and reads the answer', async () => {
+    const { heard, remote } = await server((_asked, response) => { send(response, 200, JSON.stringify({ state: 'wait', afterMs: 5 })); });
+    expect(await remote.claim(unit, SIGNAL)).toEqual({ state: 'wait', afterMs: 5 });
+    expect(heard[0]).toMatchObject({ method: 'POST', url: '/api/harness/claim', authorization: 'Bearer the-node-key' });
+    expect(JSON.parse(heard[0]!.body.toString())).toEqual(unit);
+  });
+
+  it('says what the server refused, with its words when it has any', async () => {
+    const worded = await server((_asked, response) => { send(response, 403, JSON.stringify({ error: { message: 'This machine takes no tests of this product.' } })); });
+    await expect(worded.remote.claim(unit, SIGNAL)).rejects.toThrow('Hornhoof answered 403: This machine takes no tests of this product.');
+    const bare = await server((_asked, response) => { send(response, 500, 'not json'); });
+    await expect(bare.remote.claim(unit, SIGNAL)).rejects.toThrow(/^Hornhoof answered 500\.$/);
+  });
+
+  it('sends a bundle in parts, each tried again by itself, and then says it is whole', async () => {
+    let refusals = 2;
+    const { heard, remote } = await server(({ url }, response) => { if (url.endsWith('/parts/1') && refusals-- > 0) send(response, 503); else send(response, 200, '{}'); });
+    const { path } = await file('abcdefgh');
+    await remote.upload(KEY, path, 'digest', 8, 3, SIGNAL);
+    expect(heard.map(asked => asked.url.split('/').slice(-2).join('/'))).toEqual(['parts/0', 'parts/1', 'parts/1', 'parts/1', 'parts/2', `${KEY}/done`]);
+    expect(heard.filter(asked => asked.url.includes('/parts/')).map(asked => asked.body.toString())).toEqual(['abc', 'def', 'def', 'def', 'gh']);
+    expect(JSON.parse(heard.at(-1)!.body.toString())).toEqual({ digest: 'digest', size: 8 });
+  });
+
+  it('gives up on a part after three tries, and never says the bundle is whole', async () => {
+    const { heard, remote } = await server((_asked, response) => { send(response, 503); });
+    const { path } = await file('abc');
+    await expect(remote.upload(KEY, path, 'digest', 3, 3, SIGNAL)).rejects.toThrow('Hornhoof answered 503');
+    expect(heard.map(asked => asked.url.split('/').at(-1))).toEqual(['0', '0', '0']);
+  });
+
+  it('stops trying when it is told to stop', async () => {
+    const stop = new AbortController(), { heard, remote } = await server((_asked, response) => { stop.abort(); send(response, 503); });
+    const { path } = await file('abc');
+    await expect(remote.upload(KEY, path, 'digest', 3, 3, stop.signal)).rejects.toThrow();
+    expect(heard).toHaveLength(1);
+  });
+
+  it('takes a bundle by ranges, each tried again by itself, and checks what came', async () => {
+    const bytes = 'abcdefgh'; let refusals = 1;
+    const { heard, remote } = await server(({ range }, response) => {
+      if (range === 'bytes=3-5' && refusals-- > 0) { send(response, 503); return; }
+      const [, from, to] = /bytes=(\d+)-(\d+)/.exec(range!)!;
+      response.writeHead(206); response.end(bytes.slice(Number(from), Number(to) + 1));
+    });
+    const { root } = await file('');
+    await remote.download(KEY, join(root, 'came'), { state: 'ready', digest: sha(bytes), size: 8, partBytes: 3 }, SIGNAL);
+    expect(await readFile(join(root, 'came'), 'utf8')).toBe(bytes);
+    expect(heard.map(asked => asked.range)).toEqual(['bytes=0-2', 'bytes=3-5', 'bytes=3-5', 'bytes=6-7']);
+    await expect(remote.download(KEY, join(root, 'other'), { state: 'ready', digest: sha('other bytes'), size: 8, partBytes: 3 }, SIGNAL)).rejects.toThrow('differs from what Hornhoof holds');
+  });
+
+  it('says a build failed, or was given up', async () => {
+    const { heard, remote } = await server((_asked, response) => { send(response, 200, '{}'); });
+    await remote.failed(KEY, 'npm ci ended with 1');
+    await remote.failed(KEY, null);
+    expect(heard.map(asked => [asked.url, JSON.parse(asked.body.toString())])).toEqual([[`/api/harness/${KEY}/failed`, { error: 'npm ci ended with 1' }], [`/api/harness/${KEY}/failed`, { error: null }]]);
   });
 });

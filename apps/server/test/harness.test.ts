@@ -61,6 +61,15 @@ describe('one build of a harness unit for all machines', () => {
     expect(await readdir(join(c.dir, c.dev.companyId))).toEqual([`${KEY}.zst`]);
   });
 
+  it('takes a range open to the end, one running past the end and none at all, and refuses one past the end', async () => {
+    const c = await shared(), one = await c.machine(c.ceo, 'one'), bytes = Buffer.from('a bundle of a harness unit');
+    await c.claim(one.key); await c.uploaded(one.key, bytes);
+    expect((await c.bundle(one.key, 'bytes=10-')).rawPayload.equals(bytes.subarray(10))).toBe(true);
+    expect((await c.bundle(one.key, 'bytes=10-100000')).rawPayload.equals(bytes.subarray(10))).toBe(true);
+    expect((await c.bundle(one.key, 'all of it')).rawPayload.equals(bytes)).toBe(true);
+    expect((await c.bundle(one.key, `bytes=${bytes.length}-`)).statusCode).toBe(416);
+  });
+
   it('gives a machine of another architecture a build of its own', async () => {
     const c = await shared(), one = await c.machine(c.ceo, 'one'), two = await c.machine(c.ann, 'two');
     expect((await c.claim(one.key)).json().state).toBe('build');
