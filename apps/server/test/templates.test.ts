@@ -554,8 +554,9 @@ describe('templates', () => {
   it('runs developers as a pool that each own a whole feature, with a short architect step before large work', () => {
     const role = (id: string) => templates.roles.get(id)!;
     const body = (id: string) => templates.skills.get(id)!.body;
-    expect(role('DEV-ENG').body).toMatch(/whole feature with whichever parts it has \(plan, server, interface, tests, docs\) on one branch/);
-    /* A product may have no server or no screen: the role's line names no part as if every feature had it. */
+    expect(role('DEV-ENG').body).toMatch(/whole feature with all its parts \(plan, code, tests, docs\) on one branch/);
+    /* A product may have no server or no screen: the role names no part as if every feature had it. */
+    expect(role('DEV-ENG').body).not.toMatch(/server|interface/);
     expect(role('DEV-ENG').description.en).not.toMatch(/server|interface/);
     expect(role('DEV-ENG').description.ru).not.toMatch(/сервер|интерфейс/);
     expect(role('DEV-ENG').body).toMatch(/write each test before the code/);
