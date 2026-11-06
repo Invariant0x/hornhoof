@@ -88,9 +88,10 @@ describe.skipIf(!hasTmux)('the program of a plan its agent left', () => {
   it('closes a session whose program already ended', async () => {
     await start();
     const key = randomUUID();
-    const { jobId } = await finished(key, 'EXIT now').catch(() => ({ jobId: randomUUID() }));
+    const jobId = randomUUID();
+    await host.run(job(key, 'EXIT now', { jobId }));
     await until(async () => !(await tmux.alive(nameOf(key))));
-    host['agents'].get(key)!.sinceRun.add(jobId);
+    expect(await tmux.has(nameOf(key))).toBe(true);
     await host.release(key, jobId);
     await gone(key);
   }, 30_000);
@@ -317,13 +318,39 @@ describe.skipIf(!hasTmux)('retiring the idle program of a workspace', () => {
     await expect(host.retireIdleWorkspace(request)).resolves.toMatchObject({ status: 'busy', instanceGone: false });
   }, 30_000);
 
-  it('holds a turn that comes meanwhile until it has answered, which then starts its own program', async () => {
+  it('answers busy for a turn sent while it waits for the words to be kept, and the turn goes on in that program', async () => {
     await start();
     const key = randomUUID();
     const request = await boundProgram(key);
+    const { sessionId } = host['agents'].get(key)!;
+    await host.open({ type: 'term.open', termId: 'view', agentKey: key, cols: 120, rows: 40, write: true });
+    host.input({ type: 'term.input', termId: 'view', data: 'some words' });
+    await until(async () => (await tmux.screen(nameOf(key), 0)).includes('some words'));
+    await sleep(100);
     const retiring = host.retireIdleWorkspace(request);
-    const next = randomUUID();
-    const turn = host.run(job(key, 'next', { jobId: next }));
+    await until(() => sent.some(m => m.type === 'agent.input_left'));
+    const turn = host.run(job(key, 'next', { jobId: randomUUID(), sessionId }));
+    host.inputKept({ type: 'agent.input_kept', agentKey: key, ref: sent.find((m): m is Left => m.type === 'agent.input_left')!.ref });
+    await expect(retiring).resolves.toMatchObject({ status: 'busy', instanceGone: false });
+    await expect(turn).resolves.toMatchObject({ ok: true });
+    expect(host.instanceOf(key)).toBe(request.expectedInstance);
+  }, 30_000);
+
+  it('lets a turn sent while the session closes start its own program after it', async () => {
+    await start();
+    const key = randomUUID();
+    const request = await boundProgram(key);
+    const kill = tmux.kill.bind(tmux);
+    let closing!: () => void;
+    const reached = new Promise<void>(done => (closing = done));
+    vi.spyOn(tmux, 'kill').mockImplementation(async name => {
+      closing();
+      await sleep(200);
+      await kill(name);
+    });
+    const retiring = host.retireIdleWorkspace(request);
+    await reached;
+    const turn = host.run(job(key, 'next', { jobId: randomUUID() }));
     await expect(retiring).resolves.toEqual({ status: 'retired', instanceGone: true });
     await expect(turn).resolves.toMatchObject({ ok: true });
     expect(host.instanceOf(key)).not.toBe(request.expectedInstance);

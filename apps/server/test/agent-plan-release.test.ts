@@ -6,7 +6,7 @@ import { as, connectNode, listen, setUpCompany, testApp, until, type FakeNode } 
 
 type Seen = { type: string; jobId?: string; agentKey?: string };
 
-const MACHINE = { machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'linux', arch: 'x64' };
+const MACHINE = { machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' };
 const hello = { type: 'hello' as const, version: '0.9.0', loggedIn: true, running: [] };
 const sleep = (ms: number) => new Promise(done => setTimeout(done, ms));
 const codeOf = (command: string) => command.split('--join ')[1]!;
