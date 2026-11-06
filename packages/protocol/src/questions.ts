@@ -43,8 +43,8 @@ const distinct = (values: readonly string[]): boolean => new Set(values).size ==
 function plainQuestionText(value: string, bytes: number): boolean {
   return value.trim().length > 0 && UTF8.encode(value).length <= bytes
     && !/[\u0000-\u0008\u000b-\u001f\u007f\uD800-\uDFFF]/u.test(value)
-    && !/[`<>]|\[[^\]]*\]\(|\*\*|__|(?:^|\n)\s*(?:#{1,6}\s|[-*+]\s|\d+[.)]\s)/.test(value)
-    && !/(?:^|\n)\s*(?:sudo|npm|npx|pnpm|yarn|curl|wget|bash|sh|powershell|python|node|rm|git)\s/i.test(value);
+    && !/[`<>]|\$\(|\[[^\]]*\]\(|\*\*|__|(?:^|\n)\s*(?:#{1,6}\s|[-*+]\s|\d+[.)]\s)/.test(value)
+    && !/(?:^|[\s;:])(?:sudo|npm|npx|pnpm|yarn|curl|wget|bash|sh|powershell|python|node|rm|git)\s/i.test(value);
 }
 const Plain = (bytes: number) => z.string().min(1).max(bytes).refine(value => plainQuestionText(value, bytes), 'Use bounded plain prose without commands or markup.');
 const HumanEnvelope = z.strictObject({
