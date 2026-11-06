@@ -7,8 +7,8 @@ import { setUpCompany, testApp } from './helpers.js';
 export const SHA = 'a'.repeat(40);
 export const OTHER = 'b'.repeat(40);
 
-export async function qualityFixture() {
-  const { app, db } = await testApp();
+export async function qualityFixture(env: NodeJS.ProcessEnv = {}) {
+  const { app, db } = await testApp(env);
   await setUpCompany(app);
   const [company] = await db.select().from(companies);
   const companyId = company!.id;

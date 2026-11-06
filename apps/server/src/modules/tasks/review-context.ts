@@ -15,7 +15,7 @@ const VENDORS: Partial<Record<string, string>> = { anthropic_api: 'claude', open
 export const reviewVendor = (provider: string): string => VENDORS[provider] ?? provider;
 const Counts = z.object({ passed: z.number().int().nonnegative(), failed: z.number().int().nonnegative(), other: z.number().int().nonnegative() });
 const Run = z.object({ id: z.string().uuid(), number: z.number().int(), authorId: z.string().uuid(), commit: z.string().nullable(), command: z.string(), status: z.string(), parts: Counts, receipts: z.array(CheckReceiptPart).default([]), verified: z.boolean() });
-export const ReviewSubmission = z.object({ baseCommit: ReviewSha }).strict();
+export const ReviewSubmission = z.object({ baseCommit: ReviewSha, authorCheckPlan: z.string().trim().min(1).max(3800).optional() }).strict();
 const Source = z.object({ baseCommit: ReviewSha, commit: ReviewSha, paths: z.array(z.string()), changedLines: z.number().int().nonnegative() });
 export const ReviewRecord = z.object({
   revision: z.string().uuid(), commit: ReviewSha.nullable(), branch: z.string().nullable(),
