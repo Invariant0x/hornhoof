@@ -1071,6 +1071,7 @@ export const ru: Messages = {
     givenBy: name => `Поставил ${name}`,
     details: 'Подробно',
     subtasks: 'Подзадачи',
+    independentPart: 'Можно начать сейчас',
     files: 'Файлы',
     readFull: 'Показать полностью',
     showLess: 'Свернуть',
