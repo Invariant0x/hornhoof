@@ -499,6 +499,7 @@ type ProductState = {
   root: string; repo: string; out: Output; user: JobUser; nodeOwner: JobUser; deadline: number; signal: AbortSignal;
   base: Record<string, string>; options: Options; receipt: TestEnvironmentReceipt; exitCode: number | null;
 };
+type ProductOperation = { kind: 'suite'; suiteId: string; files: string[]; shard?: { index: number; count: number } } | { kind: 'command'; command: Command };
 function environmentError(code: EnvironmentProblem['code'], detail: string): never { throw new EnvironmentFailure({ code, detail: `${code}: ${detail}` }); }
 function productUser(user: JobUser | null): { user: JobUser; nodeOwner: JobUser } {
   const uid = process.getuid?.(), gid = process.getgid?.();
@@ -578,7 +579,17 @@ function preparationContext(state: ProductState, profile: string, hidden: string
 }
 function receiptFor(execution: TestExecution): TestEnvironmentReceipt {
   const { description } = execution.snapshot, { selection } = execution;
-  return { version: 1, commitSha: description.commitSha, manifestHash: description.manifestHash, ...selection, runtimes: [], dependencies: { key: null, hit: false }, environments: [], phases: { checkoutMs: 0, dependenciesMs: 0, environmentMs: 0, servicesMs: 0, commandMs: 0, cleanupMs: 0 } };
+  const common = { commitSha: description.commitSha, manifestHash: description.manifestHash, runtimes: [], dependencies: { key: null, hit: false }, environments: [], phases: { checkoutMs: 0, dependenciesMs: 0, environmentMs: 0, servicesMs: 0, commandMs: 0, cleanupMs: 0 } };
+  if (!('version' in selection)) return { ...common, version: 1, ...selection };
+  return { ...common, version: 2, profile: execution.snapshot.profile, selection, outcomes: productOperations(execution).map((_, index) => ({ index, status: 'not-run', exitCode: null })) };
+}
+function productOperations(execution: TestExecution): ProductOperation[] {
+  const { selection, snapshot } = execution;
+  if (selection.kind === 'batch') return selection.selections;
+  if (selection.kind !== 'prepare') return [];
+  const preparation = snapshot.description.manifest.execution!.oncePreparation!;
+  const suites: ProductOperation[] = preparation.suiteIds.map(suiteId => ({ kind: 'suite', suiteId, files: snapshot.description.inventory.filter(unit => unit.suiteId === suiteId).map(unit => unit.file) }));
+  return [...suites, ...preparation.commands.map(command => ({ kind: 'command' as const, command }))];
 }
 async function productCheckout(msg: TestRun, state: ProductState, context: PreparationContext): Promise<EnvironmentDescription> {
   const expected = await productDescription(msg.environment!.snapshot.description);
@@ -589,16 +600,41 @@ async function productCheckout(msg: TestRun, state: ProductState, context: Prepa
   state.receipt.runtimes = actual.runtimeCapabilities; return actual;
 }
 async function productSelection(msg: TestRun, state: ProductState, env: Record<string, string>): Promise<void> {
-  const execution = TestExecution.parse(msg.environment), suite = execution.snapshot.description.manifest.suites.find(suite => suite.id === execution.selection.suiteId)!;
-  if (execution.selection.kind === 'final') {
+  const execution = TestExecution.parse(msg.environment), { selection } = execution;
+  if ('version' in selection) return versionedProductSelection(execution, state, env);
+  const suite = execution.snapshot.description.manifest.suites.find(suite => suite.id === selection.suiteId)!;
+  if (selection.kind === 'final') {
     for (const command of suite.finalChecks!) await selectedProductCommand(state, command, env);
     return;
   }
-  const filesPath = join(state.root, 'selection.json');
-  const invocation = await buildTestInvocation(suite, execution.selection.files, { checkout: state.repo, filesPath });
+  await productSuite(execution, { ...selection, kind: 'suite' }, state, env, 0);
+}
+async function productSuite(execution: TestExecution, operation: Extract<ProductOperation, { kind: 'suite' }>, state: ProductState, env: Record<string, string>, index: number): Promise<void> {
+  const suite = execution.snapshot.description.manifest.suites.find(suite => suite.id === operation.suiteId)!;
+  const filesPath = join(state.root, `selection-${index}.json`);
+  const invocation = await buildTestInvocation(suite, operation.files, { checkout: state.repo, filesPath, shard: operation.shard ?? { index: 1, count: 1 } });
   if (invocation.env.HH_TEST_FILES) chownSync(filesPath, state.user.uid, state.user.gid);
   await productResets(execution, suite.id, state, env);
   await selectedProductCommand(state, invocation.command, { ...env, ...invocation.env });
+}
+async function versionedProductSelection(execution: TestExecution, state: ProductState, env: Record<string, string>): Promise<void> {
+  const receipt = state.receipt;
+  if (receipt.version !== 2) environmentError('environment_invalid', 'Versioned execution requires a complete receipt.');
+  const operations = productOperations(execution);
+  let firstFailure: ProductCommandFailure | undefined;
+  for (const [index, operation] of operations.entries()) {
+    try {
+      if (operation.kind === 'command') await selectedProductCommand(state, operation.command, env);
+      else await productSuite(execution, operation, state, env, index);
+      receipt.outcomes[index] = { index, status: 'passed', exitCode: 0 };
+    } catch (error) {
+      receipt.outcomes[index] = { index, status: 'failed', exitCode: error instanceof ProductCommandFailure ? error.exitCode : null };
+      if (error instanceof ProductCommandFailure) firstFailure ??= error;
+      state.exitCode = firstFailure?.exitCode ?? null;
+      if (!(error instanceof ProductCommandFailure) || execution.selection.kind === 'prepare') throw error;
+    }
+  }
+  if (firstFailure) { state.exitCode = firstFailure.exitCode; throw firstFailure; }
 }
 async function executeProduct(msg: TestRun, state: ProductState, hidden: string[]): Promise<void> {
   const execution = TestExecution.parse(msg.environment), context = preparationContext(state, execution.snapshot.profile, hidden);
@@ -617,8 +653,11 @@ function productFailure(error: unknown, signal: AbortSignal): TestError {
   if (signal.aborted) return signal.reason instanceof DOMException && signal.reason.name === 'TimeoutError' ? 'timeout' : 'cancelled';
   return error instanceof DOMException && error.name === 'TimeoutError' ? 'timeout' : 'failed';
 }
-function productState(msg: TestRun, options: Options, out: Output): ProductState {
-  const identity = productUser(options.user), execution = TestExecution.parse(msg.environment), root = join(partsFolder(options.dir), msg.partId), deadline = Date.now() + msg.timeoutMs;
+async function productState(msg: TestRun, options: Options, out: Output): Promise<ProductState> {
+  const execution = TestExecution.parse(msg.environment), { description } = execution.snapshot, scope = msg.repositoryScope;
+  if (msg.commitSha !== description.commitSha || !scope || scope.companyId !== description.repositoryScope.companyId || scope.repositoryOwnerId !== description.repositoryScope.repositoryOwnerId || scope.repoUrlHash !== description.repositoryScope.repoUrlHash) environmentError('description_mismatch', 'The assigned source differs from the pinned environment.');
+  await productDescription(description);
+  const identity = productUser(options.user), root = join(partsFolder(options.dir), msg.partId), deadline = Date.now() + msg.timeoutMs;
   return { ...identity, root, repo: join(root, 'repo'), out, deadline, signal: productSignal(options.signal, deadline), options, receipt: receiptFor(execution), exitCode: null, base: { PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin', HOME: join(root, 'home'), TMPDIR: join(root, 'tmp'), LANG: 'C.UTF-8', ...browserEnv(options.dir) } };
 }
 async function productFolders(state: ProductState): Promise<void> {
@@ -644,7 +683,7 @@ function productDone(msg: TestRun, state: ProductState | undefined, error: TestE
 async function runProductPart(msg: TestRun, options: Options): Promise<TestsDone> {
   const out = new Output(), hidden = productSecrets(msg, options.hidden);
   let error: TestError | null = null, state: ProductState | undefined;
-  try { state = productState(msg, options, out); await productFolders(state); await executeProduct(msg, state, hidden); }
+  try { state = await productState(msg, options, out); await productFolders(state); await executeProduct(msg, state, hidden); }
   catch (failure) { out.line(failure instanceof Error ? failure.message : String(failure)); error = productFailure(failure, failedProductSignal(state, options)); }
   finally { error = await cleanupProduct(state, out) ?? error; }
   return productDone(msg, state, error, out, hidden);

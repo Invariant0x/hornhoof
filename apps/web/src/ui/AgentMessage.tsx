@@ -15,6 +15,7 @@ type Folding = { opened: ReadonlySet<number>; toggle(seq: number): void };
 export function partyName(t: Messages, language: Language, p: MessageParty): string {
   if (p.kind === 'hornhoof') return t.window.hornhoof;
   if (p.kind === 'agent' && p.agentKind === 'orchestrator') return t.window.theOrchestrator;
+  if (p.kind === 'agent' && p.id === null) return t.window.hiddenEmployee;
   if (p.kind === 'person' && p.id === null) return t.window.people;
   const role = p.role?.[language];
   return role && role.toLocaleLowerCase(language) !== p.name.toLocaleLowerCase(language) ? `${p.name} (${role})` : p.name;

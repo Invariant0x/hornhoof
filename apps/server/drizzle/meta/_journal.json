@@ -512,6 +512,41 @@
       "when": 1793942944520,
       "tag": "0073_task_wait_ownership",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1793950158136,
+      "tag": "0074_wait_cards_and_goals",
+      "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1793954747150,
+      "tag": "0075_internal_first_questions",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1793962576763,
+      "tag": "0076_repo_token_revision",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1793963435292,
+      "tag": "0077_task_workspaces",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1793966087828,
+      "tag": "0078_small_tasks",
+      "breakpoints": true
     }
   ]
 }

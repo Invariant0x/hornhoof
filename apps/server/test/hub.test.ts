@@ -5,6 +5,43 @@ import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { BUILTIN, NodeHub } from '../src/modules/nodes/hub.js';
 
 describe('the node hub', () => {
+  it('keeps the server transport link across delivery and refuses an old connection after replacement', async () => {
+    const links: string[] = [], seen: (string | undefined)[] = [];
+    let acknowledge!: () => void;
+    const delivered = () => new Promise<void>(resolve => { acknowledge = resolve; });
+    const hub = new NodeHub({
+      pingMs: 60_000,
+      onClose: async () => {},
+      onConnected: async (_id, link) => { links.push(link); },
+      onMessage: async (_id, _msg, transport?: { linkId: string }) => { seen.push(transport?.linkId); acknowledge(); },
+    });
+    onTestFinished(() => hub.stop());
+    const node = { kind: 'node' as const, nodeId: 'transport-node' };
+    const socket = () => Object.assign(new EventEmitter(), { readyState: 1, close() {}, ping() {} });
+    const old = socket();
+    hub.attach(node, old as unknown as WebSocket);
+    const first = delivered();
+    old.emit('message', JSON.stringify({ type: 'status', loggedIn: true, limits: null, linkId: 'client-forged-link' }));
+    await first;
+    expect(seen).toEqual([links[0]]);
+    expect(seen[0]).not.toBe('client-forged-link');
+    const current = hub as NodeHub & { isCurrentLink?: (id: typeof node, link: string) => boolean };
+    expect(current.isCurrentLink?.(node, links[0]!)).toBe(true);
+    const next = socket();
+    hub.attach(node, next as unknown as WebSocket);
+    expect(links[1]).not.toBe(links[0]);
+    expect(current.isCurrentLink?.(node, links[0]!)).toBe(false);
+    expect(current.isCurrentLink?.(node, links[1]!)).toBe(true);
+    const second = delivered();
+    old.emit('message', JSON.stringify({ type: 'status', loggedIn: true, limits: null }));
+    next.emit('message', JSON.stringify({ type: 'status', loggedIn: true, limits: null, linkId: links[0] }));
+    await second;
+    expect(seen).toEqual([links[0], links[1]]);
+    next.readyState = 3;
+    next.emit('close');
+    expect(current.isCurrentLink?.(node, links[1]!)).toBe(false);
+  });
+
   it('takes the word that words went in at once, though a message before it still waits for that word', async () => {
     let heard!: () => void;
     const said = new Promise<void>(done => (heard = done));

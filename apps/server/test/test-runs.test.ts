@@ -1599,12 +1599,14 @@ describe('a run that ends while the one who started it waits', () => {
     it('goes to its retry clock when a machine loses a part, and back to executing', async () => {
       const c = await company();
       const ivan = await c.machine(c.ceo, 'ivan-mac');
+      await policy(c, 'queue', 3_600_000);
       await policy(c, 'retry', 60_000);
       const t = await c.turn(c.bruno);
       await t.call('run_tests', { command: 'make check' });
       await nextOf(ivan.node, 'tests.run');
       await until(async () => (await runWait(c)).sourceState.stage === 'execution');
-      expect(await runWait(c)).toMatchObject({ state: 'legacy_needs_plan' });
+      expect(await runWait(c)).toMatchObject({ state: 'active', generation: 1 });
+      expect((await runWait(c)).plan?.provenance.origin).toBe('run:queue');
       ivan.node.send({ type: 'hello', version: '0.5.0', loggedIn: true, running: [], load: idle(), tests: [] });
       await nextOf(ivan.node, 'tests.run');
       await until(async () => (await runWait(c)).sourceState.stage === 'execution');
@@ -1614,6 +1616,7 @@ describe('a run that ends while the one who started it waits', () => {
 
     it('stands at the host slot while a machine that can take it has no room, on a clock of its own', async () => {
       const c = await company();
+      await policy(c, 'queue', 3_600_000);
       await policy(c, 'host_slot', 60_000);
       const one = await c.planless(c.ceo, 'container-one');
       const other = await c.planless(c.ceo, 'container-two');
@@ -1653,16 +1656,28 @@ describe('a run that ends while the one who started it waits', () => {
       expect(await runWait(c)).toMatchObject({ state: 'cancelled', proofRef: `run:${run!.id}:stopped` });
     });
 
-    it('ends with its run on a task closed meanwhile, though nobody hears of it', async () => {
+    it('ends with its task closed meanwhile, and the run ending later changes nothing', async () => {
       const c = await company();
       const ivan = await c.machine(c.ceo, 'ivan-mac');
       await (await c.turn(c.bruno)).call('run_tests', { command: 'make check' });
       const part = await nextOf(ivan.node, 'tests.run');
       expect((await (await c.turn(c.head, null)).call('cancel_task', { task: c.task.number, why: 'Not needed.' })).error).toBe(false);
+      const ended = await runWait(c);
+      expect(ended).toMatchObject({ state: 'cancelled', proofRef: `task:${c.task.id}:cancelled` });
       ivan.node.send(done(part));
       await nextOf(ivan.node, 'tests.ack');
-      await until(async () => (await runWait(c)).endedAt !== null);
-      expect(await runWait(c)).toMatchObject({ state: 'resolved' });
+      await until(async () => (await c.db.select().from(testRuns))[0]!.status === 'passed');
+      expect(await runWait(c)).toEqual(ended);
+    });
+
+    it('is refused with its run where the department set dates and none for where a run starts', async () => {
+      const c = await company();
+      await policy(c, 'execution', 3_600_000);
+      const started = await (await c.turn(c.bruno)).call('run_tests', { command: 'make check' });
+      expect(started.error).toBe(true);
+      expect(started.text).toContain('sets dates for its waits');
+      expect(await c.db.select().from(testRuns)).toEqual([]);
+      expect(await c.db.select().from(taskWaits).where(eq(taskWaits.kind, 'run'))).toEqual([]);
     });
 
     it('stays with no plan when no head is there to review it', async () => {
@@ -1837,7 +1852,10 @@ it.each(['missing', 'wrong-selection', 'wrong-hash'])('refuses a successful prod
   const part = await nextOf(node, 'tests.run');
   const message = productDone(part) as ReturnType<typeof productDone> & { environmentReceipt: import('@hornhoof/protocol').TestEnvironmentReceipt };
   if (kind === 'missing') delete (message as { environmentReceipt?: unknown }).environmentReceipt;
-  if (kind === 'wrong-selection') message.environmentReceipt.files = ['test/a.ts'];
+  if (kind === 'wrong-selection') {
+    if (message.environmentReceipt.version !== 1) throw new Error('This fixture requires a legacy receipt.');
+    message.environmentReceipt.files = ['test/a.ts'];
+  }
   if (kind === 'wrong-hash') message.environmentReceipt.manifestHash = 'f'.repeat(64);
   node.send(message);
   await until(async () => (await c.db.select().from(testRuns))[0]?.status === 'failed');
