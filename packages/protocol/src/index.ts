@@ -3,6 +3,7 @@ export * from './external-operations.js';
 import type { DepartmentWorkMode } from './department-mode.js';
 export * from './request-materials.js';
 export * from './questions.js';
+export { WorkspaceCommitSha, NodeRef, TaskWorkspaceBinding, RepoRelativeArea, IntegrationTarget, TaskWorkspaceSpec, WorkspaceProblemCode, WorkspaceProblem, type VerifiedWorkspace } from './task-workspace.js';
 export { APPROVAL_CHANNELS, APPROVAL_MODES, ApprovalAmount, ApprovalChannel, ApprovalRule, DEFAULT_APPROVAL_RULE, approvalNeeded, kindKey, ruleOf, type ApprovalMode, type ApprovalWork, type StoredApprovalRule } from './approval-policy.js';
 export { NOTIFICATION_NAMES, NotificationSchema, NotificationSourceSchema, type Notification, type NotificationSource } from './notifications.js';
 export { MachineDrain, NodeWait } from './machine-drain.js';
