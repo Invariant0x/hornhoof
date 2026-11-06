@@ -5,7 +5,7 @@ import { accessOf, canReach, type Access, type Spot } from '../../auth/access.js
 import type { Db } from '../../db/client.js';
 import { agents, attachments, companies, departments, jobs, people, requests, subscriptions, taskEvents, tasks, turns, type DecisionTopic, type RequestOption, type TaskEventKind } from '../../db/schema.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
-import { urgencyOfNew } from './urgency.js';
+import { refuseNotUrgent, urgencyOfNew } from './urgency.js';
 import { canDecide } from '../../auth/decisions.js';
 import type { DecisionSubject } from '../../auth/decision-owner.js';
 import { checkDelegation, contextMissing, requireDecider, type Delegation } from '../conversation/decision-context.js';
@@ -22,7 +22,7 @@ import { degradedReviewNotes, reviewPanel, turnReviewPlan, type Plan } from './r
 import { mechanicalVerdict } from './review-findings.js';
 import { verdictReview, type ReviewVerdict } from './review-verdict.js';
 import { pendingFixReviews, prepareFixReviews } from './review-fixes.js';
-import { checkIndependent, currentIndependent, type IndependentPartInput } from './independent.js';
+import { checkIndependent, currentIndependent, type IndependentDeclaration, type IndependentPartInput } from './independent.js';
 
 export type Task = typeof tasks.$inferSelect;
 export type Request = typeof requests.$inferSelect;
@@ -552,6 +552,7 @@ async function insertIndependent(tx: Tx, parent: Task, part: IndependentPartInpu
     after: [],
     workKind: parent.workKind,
     riskClass: parent.riskClass,
+    urgent: parent.urgent,
     createdByPersonId: actor.personId ?? null,
     createdByAgentId: actor.agentId ?? null,
     updatedAt: new Date(),
@@ -562,7 +563,14 @@ async function insertIndependent(tx: Tx, parent: Task, part: IndependentPartInpu
   return { child: child!, wake };
 }
 
-export async function createTask(ctx: Live, actor: Actor, input: NewTask): Promise<Moved> {
+/* Who a new task gives work to, as urgent as it comes out: a word nobody may say is refused when the task is made. */
+function checkNewHolders(ctx: Ctx, actor: Actor, companyId: string, parent: Task | null, input: NewTask, gates: string[], declaration: IndependentDeclaration | null): Promise<void> {
+  const urgent = parent ? parent.urgent : input.urgent === true;
+  const part = declaration?.kind === 'part' ? [declaration.part.executor] : [];
+  return refuseNotUrgent(ctx, actor, companyId, { urgent, productId: input.productId ?? null, gates }, [input.assigneeAgentId, ...part]);
+}
+
+export async function createTask(ctx: Ctx, actor: Actor, input: NewTask): Promise<Moved> {
   const assignee = await workingAgent(ctx.db, null, input.assigneeAgentId);
   const gates = input.executor ? (input.gates ?? []) : [];
   if (!input.executor && input.gates?.length) throw refuse(400, 'task_invalid', 'Only a task with an executor has gates.');
@@ -572,6 +580,7 @@ export async function createTask(ctx: Live, actor: Actor, input: NewTask): Promi
   if (declaration?.kind === 'part') await checkIndependentExecutor(ctx.db, input.departmentId, declaration.part);
   const parent = input.parentId ? await loadTask(ctx.db, input.parentId) : null;
   if (parent) stillOpen(parent);
+  await checkNewHolders(ctx, actor, assignee.companyId, parent, input, gates, declaration);
   let independent: Task | null = null;
   let waits = false;
   const wakes: Wake[] = [];
@@ -1266,6 +1275,7 @@ function rewrite(task: Task, c: TaskChange): { set: Partial<Task>; fields: strin
 }
 
 const LABELS: ReadonlySet<string> = new Set(['workKind', 'riskClass']);
+const onlyLabels = (fields: string[], createsIndependent: boolean) => fields.every(field => LABELS.has(field)) && !createsIndependent;
 
 /* What kind of work it is changes nothing of the work: whoever holds it is not woken, its wait stays and wakes on their way
    still come. Nothing else changes with them, so no move that read the task loses its place. */
@@ -1280,8 +1290,14 @@ async function relabel(ctx: Live, agentId: string, task: Task, set: Partial<Task
   return { task: row, wakes: [] };
 }
 
+/* Who takes work from a change of a task for the first time: what someone holds already stays theirs. */
+const newHolders = (task: Task, executor: string | null, declaration: IndependentDeclaration | null, existing: IndependentDeclaration | null): string[] => [
+  ...(executor && executor !== task.executorAgentId ? [executor] : []),
+  ...(declaration?.kind === 'part' && existing?.kind !== 'part' ? [declaration.part.executor] : []),
+];
+
 /* The owner rewrites the task so it reads as the current truth, or hands it to another executor or other gates. */
-export async function updateTask(ctx: Live, agentId: string, taskId: string, c: TaskChange): Promise<Moved> {
+export async function updateTask(ctx: Ctx, agentId: string, taskId: string, c: TaskChange): Promise<Moved> {
   const task = await loadTask(ctx.db, taskId);
   stillOpen(task);
   if ((c.executor !== undefined || c.gates !== undefined) && !task.executorAgentId) throw refuse(400, 'task_invalid', `#${task.number} has no executor or gates.`);
@@ -1310,7 +1326,9 @@ export async function updateTask(ctx: Live, agentId: string, taskId: string, c: 
   const existing = declarationInput ? await currentIndependent(ctx.db, task.id) : null;
   const declaration = declarationInput ? checkIndependent(c.after ?? task.after, c.independentPart, c.independentNone, existing) : null;
   if (declaration?.kind === 'part') await checkIndependentExecutor(ctx.db, task.departmentId, declaration.part);
-  const reviewIndependent = declaration?.kind === 'part' && existing?.kind !== 'part' && (await createdData(ctx.db, task.id)).inTurnReview === true;
+  await refuseNotUrgent(ctx, { agentId }, task.companyId, task, newHolders(task, executor, declaration, existing));
+  const createsIndependent = declaration?.kind === 'part' && existing?.kind !== 'part';
+  const reviewIndependent = createsIndependent && (await createdData(ctx.db, task.id)).inTurnReview === true;
   let independent: Task | null = null;
   if (c.after !== undefined && JSON.stringify(c.after) !== JSON.stringify(task.after)) {
     await checkAfter(ctx.db, task.companyId, task.turnId, c.after);
@@ -1319,7 +1337,7 @@ export async function updateTask(ctx: Live, agentId: string, taskId: string, c: 
     set.after = c.after;
     fields.push('after');
   }
-  if (fields.every(f => LABELS.has(f))) return relabel(ctx, agentId, task, set, fields);
+  if (onlyLabels(fields, createsIndependent)) return relabel(ctx, agentId, task, set, fields);
   /* A rewrite answers a blocked executor. A task nobody holds stays blocked until someone can take it. */
   if (task.status === 'blocked' && (set.assigneeAgentId ?? task.assigneeAgentId)) set.status = 'open';
   /* Another one takes it up, so Hornhoof's note that it stood still is over; a person's word asked for still waits. */
@@ -1343,7 +1361,7 @@ export async function updateTask(ctx: Live, agentId: string, taskId: string, c: 
   const wakes: Wake[] = [];
   const also = async (tx: Tx, row: Task) => {
     if (handedOn) await handOver(tx);
-    if (declaration?.kind === 'part' && existing?.kind !== 'part') {
+    if (createsIndependent) {
       const made = await insertIndependent(tx, row, declaration.part, { agentId }, reviewIndependent);
       independent = made.child;
       wakes.push(made.wake);

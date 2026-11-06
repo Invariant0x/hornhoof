@@ -35,6 +35,7 @@ type FakeTerminal = {
     coreMouseService: { _protocols: Record<string, { events: number }>; fireProtocol(events: number): void };
   };
   type(data: string): void;
+  write(data: string): void;
   wheel(deltaY: number): boolean;
   pressKey(init: KeyboardEventInit): KeyboardEvent;
   selectText(text: string): void;
@@ -377,6 +378,36 @@ describe("an agent's live terminal in its window", () => {
     const term = terms[0]!;
     expect(term.wheel(-3)).toBe(false);
     expect(term.buffer.active.viewportY).toBe(197);
+    expect(ws.sent).toEqual([]);
+  });
+
+  it.each([
+    { saved: 120, after: 200, expected: 120 },
+    { saved: 120, after: 80, expected: 80 },
+    { saved: 200, after: 80, expected: 80 },
+  ])('restores the reading place after 3J: $saved -> $after', async ({ saved, after, expected }) => {
+    open();
+    const ws = await socket();
+    ws.opened();
+    const term = terms[0]!;
+    term.buffer.active.viewportY = saved;
+    const write = term.write.bind(term);
+    term.write = data => {
+      write(data);
+      if (data.includes('\x1b[3J')) {
+        term.buffer.active.baseY = 0;
+        term.buffer.active.viewportY = 0;
+      }
+      if (data.includes('history')) term.buffer.active.baseY = after;
+    };
+    act(() => {
+      ws.screen('\x1b[');
+      ws.screen('3J');
+      ws.screen('\x1b[1;2r history');
+      ws.screen('repaint');
+    });
+    expect(term.buffer.active.viewportY).toBe(expected);
+    expect(term.wheel(-3)).toBe(false);
     expect(ws.sent).toEqual([]);
   });
 

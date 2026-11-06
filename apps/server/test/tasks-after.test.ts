@@ -408,6 +408,18 @@ describe('an independent part of a dependent task', () => {
     expect((await updateTaskEngine(ctx, head.id, old!.id, { title: 'Old but updated' })).task.title).toBe('Old but updated');
   });
 
+  it('creates the part when update_task changes only independentPart without changing after', async () => {
+    const { ctx, db, dev, head, bruno, tess, parent, member } = await company();
+    const api = (await member('Checkout API', bruno.id)).task;
+    const docs = (await createTask(ctx, { agentId: head.id }, { title: 'Docs', brief: '', body: '', departmentId: dev.id, parentId: parent.id, assigneeAgentId: tess.id, executor: true, gates: [], after: [api.id] })).task;
+    const moved = await updateTaskEngine(ctx, head.id, docs.id, { independentPart: { title: 'Examples', brief: 'Independent.', body: 'Write examples.', executor: bruno.id } });
+    expect(moved.wakes.map(w => [w.agentId, w.why])).toEqual([[bruno.id, 'assigned']]);
+    const children = await db.select().from(tasks).where(eq(tasks.parentId, docs.id));
+    expect(children).toHaveLength(1);
+    expect(children[0]).toMatchObject({ title: 'Examples', after: [], assigneeAgentId: bruno.id });
+    expect((await taskDetail(ctx, docs, () => true)).independentPart).toMatchObject({ title: 'Examples', task: { id: children[0]!.id } });
+  });
+
   it('is idempotent on update and hides the current declaration when after clears without deleting history', async () => {
     const { ctx, db, dev, head, bruno, tess, parent, member } = await company();
     const api = (await member('Checkout API', bruno.id)).task;
