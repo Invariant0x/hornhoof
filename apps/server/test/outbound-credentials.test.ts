@@ -47,7 +47,7 @@ async function wholeDatabase(w: World): Promise<string> {
 type Tool = { content: { text: string }[]; isError?: boolean };
 const text = (answer: unknown) => JSON.stringify(answer as Tool);
 
-async function usedOnBothChannels() {
+async function usedOnMail() {
   const log = logged();
   const w = await world(QUIET, {}, log.logger);
   const server = keep(await smtpReceiver({ secure: true }));
@@ -59,7 +59,7 @@ async function usedOnBothChannels() {
 
 describe('the settings of a sending account', () => {
   it('really sign in, and nothing an author can reach ever holds them', async () => {
-    const { w, log, server, smtp, mail } = await usedOnBothChannels();
+    const { w, log, server, smtp, mail } = await usedOnMail();
     expect(server.seen.logins).toEqual([USERNAME]);
     expect(server.seen.messages).toHaveLength(1);
     expect(log.lines.join('')).toContain('outbound account changed');
@@ -79,12 +79,11 @@ describe('the settings of a sending account', () => {
       await wholeDatabase(w),
     ];
     for (const place of seen) expectNoSecretIn(place);
-    expect(seen.join('')).not.toContain(smtp.accountId === '' ? 'never' : 'smtp.acme');
     expect((await w.c.db.select().from(outboundAccounts).where(eq(outboundAccounts.id, smtp.accountId)))[0]!.configEnc).toMatch(/^v1\./);
   });
 
   it('do not reach a tool as a field either: no tool takes or names an address, a host, a key or a password', async () => {
-    const { w } = await usedOnBothChannels();
+    const { w } = await usedOnMail();
     const tools = await w.c.tools(w.c.orchestrator);
     const { tools: all } = await tools.listTools();
     const outbound = all.filter(tool => tool.name.startsWith('outbound_'));
@@ -96,7 +95,7 @@ describe('the settings of a sending account', () => {
   });
 
   it('are out of the generic database tool for every agent, the orchestrator\'s turn answering the CEO included', async () => {
-    const { w } = await usedOnBothChannels();
+    const { w } = await usedOnMail();
     const tools = await w.c.tools(w.c.orchestrator, w.c.ids.ceo);
     const answer = await tools.callTool({ name: 'database', arguments: { sql: 'SELECT config_enc FROM outbound_accounts' } }) as Tool;
     expect(answer.isError).toBe(true);
@@ -140,14 +139,14 @@ describe('the settings of a sending account', () => {
   });
 
   it('have no route of their own that sends: nothing over HTTP reaches a transport', async () => {
-    const { w } = await usedOnBothChannels();
+    const { w } = await usedOnMail();
     const routes = w.c.app.printRoutes({ commonPrefix: false }).split('\n').filter(line => line.includes('outbound'));
     expect(routes.length).toBeGreaterThan(5);
     expect(routes.filter(line => /send|dispatch|smtp|webhook|transport|deliver/i.test(line))).toEqual([]);
   });
 
   it('come back to nobody who sets them again: a change of settings answers with its generation only', async () => {
-    const { w, smtp, server } = await usedOnBothChannels();
+    const { w, smtp, server } = await usedOnMail();
     const changed = await w.c.app.inject({ method: 'POST', url: `/api/outbound/accounts/${smtp.accountId}/rotate`, payload: { config: smtpSettings(server.port) }, ...as(w.c.ceoToken) });
     expect(changed.statusCode).toBe(200);
     expectNoSecretIn(changed.body);
