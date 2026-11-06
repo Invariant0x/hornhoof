@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 import { HandoffAssignment, HandoffControlMessage, HandoffMessage, ResetSource } from '../src/task-handoff.js';
 import { parseNodeMessage, parseServerMessage } from '../src/index.js';
 
@@ -103,6 +103,8 @@ describe('bounded task handoff wire', () => {
       type: 'job.run', jobId: IDS.jobId, subscriptionId: IDS.reservationId, provider: 'codex', prompt: 'Resume', sessionId: null, model: null,
       timeoutMs: 1000, secret: null, instructions: null, toolToken: null, taskId: IDS.taskId, workspaceId: IDS.workspaceId, assignmentEpoch: 3, handoff: assignment,
     };
-    expect(parseServerMessage(JSON.stringify(run))).toEqual(run);
+    const parsed = parseServerMessage(JSON.stringify(run));
+    expect(parsed).toEqual(run);
+    if (parsed?.type === 'job.run') expectTypeOf(parsed.jobId).toEqualTypeOf<string>();
   });
 });
