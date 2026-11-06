@@ -251,7 +251,7 @@ function batchMember(snapshot: EnvironmentSnapshot, selection: z.infer<typeof Ba
 }
 function executionSelection(value: { snapshot: EnvironmentSnapshot; selection: z.infer<typeof Selection> }, ctx: z.RefinementCtx): void {
   const { snapshot, selection } = value;
-  if (selection.kind === 'suite' || selection.kind === 'final') return legacySelection({ snapshot, selection }, ctx);
+  if (!('version' in selection)) return legacySelection({ snapshot, selection }, ctx);
   if (!snapshot.description.manifest.execution || selection.expectedCommitSha !== snapshot.description.commitSha) {
     ctx.addIssue({ code: 'custom', message: 'Versioned execution requires the pinned policy and exact source.' }); return;
   }
