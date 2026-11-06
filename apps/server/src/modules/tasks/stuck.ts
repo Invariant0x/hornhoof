@@ -3,6 +3,7 @@ import type { Ctx } from '../../app.js';
 import { agents, jobs, requestInternal, requests, tasks } from '../../db/schema.js';
 import { CLOSED, move, refuse, taskSpot, type Actor, type Answer, type Request, type Task, type Wake } from './engine.js';
 import { stuckRecipient } from './stuck-route.js';
+import { endRequest } from './wait-producers.js';
 
 type ToolJob = { id: string; companyId: string; agentId: string };
 type Found = { request: Request; task: Task; asker: typeof agents.$inferSelect };
@@ -61,6 +62,7 @@ export async function resolveStuck(ctx: Ctx, job: ToolJob, requestId: string, a:
       .where(and(eq(requests.id, requestId), eq(requests.status, 'open'), eq(requests.audience, 'internal'), eq(requests.triageAgentId, job.agentId)))
       .returning();
     if (!resolved) throw refuse(409, 'request_closed', 'This request is answered already.');
+    await endRequest(tx, resolved, 'resolved_internal', actor);
     await tx.insert(requestInternal).values({ requestId, companyId: found.task.companyId, executorInstruction: instruction, resolvedByAgentId: job.agentId, resolvedByJobId: job.id, resolvedAt: new Date() })
       .onConflictDoUpdate({ target: requestInternal.requestId, set: { executorInstruction: instruction, resolvedByAgentId: job.agentId, resolvedByJobId: job.id, resolvedAt: new Date() } });
   }, wakes);

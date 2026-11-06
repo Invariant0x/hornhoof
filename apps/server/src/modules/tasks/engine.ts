@@ -1100,6 +1100,7 @@ export async function report(ctx: Live, agentId: string, taskId: string, r: { do
   const row = await move(ctx, task, { status: 'waiting' }, n, async tx => {
     await letStuckGo(tx, task.id);
     const [note] = await tx.insert(requests).values({ companyId: task.companyId, taskId, agentId, kind: 'stuck', text: r.summary, decisionTopic: 'task', audience: 'internal', triageAgentId: recipient?.id ?? null }).returning();
+    await bindRequest(tx, task, note!, { agentId }, { strict: false });
     wakes = recipient ? [{ agentId: recipient.id, taskId: task.id, why: 'explain', text: note!.id }] : [];
     await keepWakes(tx, task.companyId, wakes);
   });
