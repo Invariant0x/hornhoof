@@ -35,7 +35,7 @@ export type TaskLine = {
   parentId: string | null;
   /* The numbers of the tasks it comes after that are not done yet: until they are, it waits. */
   waitsFor: number[];
-  independentPart: (IndependentPartInput & { executor: AgentRef; task: AfterView }) | { reason: string } | null;
+  independentPart?: (Omit<IndependentPartInput, 'executor'> & { executor: AgentRef; task: AfterView }) | { reason: string } | null;
   externalWait?: Task['externalWait'];
   workKind: Task['workKind'];
   riskClass: Task['riskClass'];
