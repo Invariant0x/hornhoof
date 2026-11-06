@@ -1,8 +1,8 @@
 /* Test-only fixture. It loads the exact source under test and serves its built UI and real API on one origin. */
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { createHash, randomBytes } from 'node:crypto';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { PGlite } from '@electric-sql/pglite';
@@ -24,10 +24,18 @@ const schema = await moduleAt('apps/server/src/db/schema.ts');
 const { LANGUAGES } = await moduleAt('apps/web/src/i18n/index.tsx');
 const webDist = join(source, 'apps/web/dist');
 assert.ok(existsSync(join(webDist, 'index.html')), 'NOT_RUN: build the pinned source UI before starting its real server');
+const digest = bytes => createHash('sha256').update(bytes).digest('hex');
+const fontAssets = readdirSync(join(webDist, 'assets')).filter(name => /\.woff2?$/.test(name)).sort().map(name => {
+  const bytes = readFileSync(join(webDist, 'assets', name));
+  return { name, bytes: bytes.length, sha256: digest(bytes) };
+});
+assert.ok(fontAssets.length > 0, 'NOT_RUN: the pinned UI build must contain its real fonts');
+const fontsSha256 = digest(JSON.stringify(fontAssets));
 
 /* The same small fixture data go through real setup/notebook routes in each source and engine. No external plan or job. */
 const author = 'Geometry Test Person With A Long Legal Name To Exercise The Real Notebook';
 const note = 'https://example.test/' + 'unbroken_identifier_'.repeat(13);
+const dataSha256 = digest(JSON.stringify({ author, note }));
 const secret = randomBytes(32).toString('base64');
 const client = new PGlite();
 const db = drizzle(client, { schema });
@@ -45,6 +53,15 @@ assert.ok(session, 'Real setup must issue its session');
 const added = await app.inject({ method: 'POST', url: '/api/notebook', cookies: { hh_session: session }, payload: { text: note } });
 assert.equal(added.statusCode, 201, 'Real notebook seed must succeed: ' + added.body);
 const number = added.json().note.number;
+const localeKeys = {
+  openOrchestrator: 'map.openOrchestrator', title: 'notebook.title', intro: 'notebook.intro',
+  newNote: 'notebook.newNote', placeholder: 'notebook.placeholder', add: 'notebook.add',
+  note: 'notebook.note', change: 'notebook.change', changeNote: 'notebook.changeNote',
+  remove: 'notebook.remove', removeNote: 'notebook.removeNote', save: 'notebook.save', cancel: 'notebook.cancel',
+  empty: 'notebook.empty', close: 'window.close', full: 'window.fullScreen', restore: 'window.restoreSize',
+  minimize: 'window.minimize', notebook: 'window.notebook',
+};
+const localeArguments = { note: [number], changeNote: [number], removeNote: [number] };
 
 const locales = [];
 for (const language of LANGUAGES) {
@@ -69,6 +86,7 @@ locales.sort((a, b) => a.score - b.score || a.id.localeCompare(b.id));
 const selected = [...new Set([locales[0].id, locales.at(-1).id, ...locales.filter(x => x.direction === 'rtl').slice(0, 1).map(x => x.id)])];
 const origin = await app.listen({ host: '127.0.0.1', port: 0 });
 process.stdout.write('HH_GEOMETRY_BOOT ' + JSON.stringify({ origin, session, sourceSha: actual, author, note, number, locales, selected,
+  dataSha256, fontAssets, fontsSha256, localeKeys, localeArguments,
   dictionaryKeys: Object.keys(locales[0].labels), scoreUnit: 'Unicode code points in the actual strings of these two regression flows',
   shippedRtl: locales.some(x => x.direction === 'rtl'), lockfileBytes: readFileSync(join(source, 'package-lock.json')).length }) + '\n');
 let stopping;

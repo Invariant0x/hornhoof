@@ -16,8 +16,8 @@
 -0.5px center tolerance per axis;1px inter-engine dimension tolerance; no hidden/clipped prose/actions.
 - Dynamic longest/shortest shipped locales and shipped RTL only, both themes, DPR1, UTC,375x812/1440x900, actual native panel widths.
 - All new T2 remotely in the approved compatible Docker context; no local npmci/browser/build/lint/type/coverage checks.
-- No new push/trace probes while536 is open, no refs/remote/grants workaround; preserve bundle/exactSHA.
--543 must confirm actual image/digest/three engines/export route before live execution.535 never installs a daemon or swaps to a host browser.
+- The CEO lifted the publication stop. Ordinary push of the current clean task branch and independent targeted run_tests are authorized; no refs/remote/grants workaround.
+-546 must confirm the canonical context/source delivery/export port and actual image/digest/three engines before live execution. Completed543 diagnostics are not repeated.535 never installs a daemon or swaps to a host browser.
 - No full suite/replay/release/main merge. A missing engine/state is NOT_RUN with a reason.
 
 ## Review Focus
@@ -37,7 +37,7 @@
 - [x] Prepare unexecuted first acceptance tests for all visible title icon centers and notebook intro/long legal URL/author/actions; retain API edit/save/cancel/remove assertions and full-screen/minimize/restore/close behavior.
 - [x] Configure unexecuted true browserName projects, same DPR/viewports/timezone; geometry config restricts execution to its own spec and disables existing mocked Vite server.
 - [x] Port all89 BEFORE inventory contracts into an explicit NOT_RUN ledger, including the8 uncaptured ones; never interpret the old observations as GREEN.
-- [ ] After536/543 handoff and remote commit identity, run the targeted test on pinned main. Require actual centering/clipping assertion RED, not setup/import/browser absence. Preserve all three real outcomes/PNGs.
+- [ ] After546 actual runtime/source delivery handoff and remote commit identity, run the targeted test on pinned main. Require actual centering/clipping assertion RED, not setup/import/browser absence. Preserve all three real outcomes/PNGs.
 - [ ] Address harness/setup errors only; product failures go to534/owners. Keep same data/test hash for candidate.
 
 ### Task2: Complete actual route/state coverage and geometry comparison
@@ -46,7 +46,7 @@
 
 **Interfaces:** Consumes permitted Requests fixture handoff through head,534 early candidate40SHA, and89-contract catalog. Produces per-contract/state/theme/locale/view-width/engine rows with captured panel geometry, available text/actions, raw images and justified intentional-scroll records.
 
-- [ ] Add direct fast failing cases for missing engine, mismatched source/data/font manifests, a0.6px center offset and1.1px dimension mismatch before comparison implementation; verify remotely.
+- [x] Add direct fast failing cases for missing engine, mismatched source/data/font manifests, a0.6px center offset and1.1px dimension mismatch before comparison implementation; verify remotely (228 RED,233 GREEN31/31; not browser proof).
 - [ ] Seed and navigate real tasks, agent cards/department notebooks, settings, machines, subscriptions, tables, dialogs and nested shared surfaces; retain explicit reasons for unsupported states until covered.
 - [ ] Measure source dictionary/actually rendered label lengths per view, select extreme locales dynamically and one real RTL when shipped; record exact keys/arguments/rankings. Keep stress-content probes separate.
 - [ ] Capture native narrow/wide profiles, both themes, all real engines; assert text/action clip bounds and clickable hit points after appropriate native scrolling. Do not add CSS to manufacture width or hide overflow.
@@ -64,4 +64,4 @@
 - [ ] Run scoped types/lint/affected tests+coverage/CRAP/dryer remotely; disclose unsupported tooling, never install a provider or claim unrun PASS.
 - [ ] Commit/push when normal publication is restored, retain bundles, attach actual JSON/PNG/logs and report requirement-to-test coverage. Submit only with complete proof or explicit concerns/blockers; no separate code gate or main merge.
 
-Checkpoint: independent first regression/config/catalog source is drafted, not executed.536 blocks remote publication;546 owns the canonical Docker/capability/export port and actual support receipt. No new push/trace probes per head. Source-only agreement does not allow live3engine execution. Next verify meaningful remote RED after these prerequisites, then extend the still-incomplete route/state/comparison work.
+Checkpoint: independent comparator/config checks passed remotely in233 at9fc6fda5. Real HTTP fixture contracts ran in251 at93a01f1d: setup/API/build preconditions worked, the new provenance contract failed on missing dataSha256. The minimal data/font/locale-key implementation is pending remote GREEN. Publication is authorized;546 blocks only live3engine execution. Actual UI regression, remaining route/state fixtures and complete runtime comparison are still NOT_RUN.

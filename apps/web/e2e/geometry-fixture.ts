@@ -5,7 +5,12 @@ import { createInterface } from 'node:readline';
 
 export type GeometryLabels = Record<'openOrchestrator' | 'title' | 'intro' | 'newNote' | 'placeholder' | 'add' | 'note' | 'change' | 'changeNote' | 'remove' | 'removeNote' | 'save' | 'cancel' | 'empty' | 'close' | 'full' | 'restore' | 'minimize' | 'notebook', string>;
 export type GeometryLocale = { id: string; direction: 'ltr' | 'rtl'; score: number; labels: GeometryLabels };
-export type GeometryBoot = { origin: string; session: string; sourceSha: string; author: string; note: string; number: number; locales: GeometryLocale[]; selected: string[]; dictionaryKeys: string[]; scoreUnit: string; shippedRtl: boolean };
+export type GeometryBoot = {
+  origin: string; session: string; sourceSha: string; author: string; note: string; number: number;
+  locales: GeometryLocale[]; selected: string[]; dictionaryKeys: string[]; scoreUnit: string; shippedRtl: boolean;
+  dataSha256: string; fontsSha256: string; fontAssets: { name: string; bytes: number; sha256: string }[];
+  localeKeys: Record<keyof GeometryLabels, string>; localeArguments: Partial<Record<keyof GeometryLabels, number[]>>;
+};
 
 export async function geometryServer(): Promise<GeometryBoot & { stop(): Promise<void> }> {
   if (!process.env.HH_GEOMETRY_SOURCE_ROOT || !process.env.HH_GEOMETRY_SOURCE_SHA) {
