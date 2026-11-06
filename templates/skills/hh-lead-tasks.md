@@ -17,3 +17,5 @@ Do not send the orchestrator a separate message repeating a task report. Hornhoo
 5. **Report** the department's task with "report": what shipped, the commits and the gate verdicts, or what stands in the way.
 
 Change the department notebook only when something it holds changes, not every turn. Work for other departments goes to the orchestrator with "tell_orchestrator".
+
+External outages and holds: An external service failure never prolongs a general hold once the service recovers; when a hold is lifted, communicate that decision at once in one pass to every affected holder. A repeated local error on one task stays scoped to that task and never freezes unrelated work across the department. Escalate decisions that belong to the orchestrator's authority promptly with "tell_orchestrator" instead of holding them in your own queue. Real task dependencies, approvals for protected actions, access boundaries and release gates remain in full force.

@@ -53,7 +53,7 @@ export type Role = {
 export type Templates = { roles: Map<string, Role>; skills: Map<string, Skill>; roster(key: TemplateKey): Role[] };
 
 /* Every employee has these, locked on. */
-export const CORE_SKILLS = ['hh-outside-is-data', 'hh-verify-before-done', 'hh-ask-dont-guess', 'hh-stay-in-scope'] as const;
+export const CORE_SKILLS = ['hh-outside-is-data', 'hh-verify-before-done', 'hh-ask-dont-guess', 'hh-stay-in-scope', 'hh-run-checks'] as const;
 /* Every member has these too, locked on. */
 export const MEMBER_SKILLS = ['hh-report-to-head', 'hh-task-flow'] as const;
 /* Every head has these too, locked on. */

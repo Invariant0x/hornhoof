@@ -5,7 +5,7 @@ import { companies, departments, type agents } from '../../db/schema.js';
 import { ANSWER_IN_HORNHOOF, ORCHESTRATOR_INSTRUCTIONS } from '../conversation/prompt.js';
 import { type Book, companyBook, departmentBook, listNotes } from '../notebook/book.js';
 import { deptName } from '../departments/templates.js';
-import { textHash, type Lang, type Skill, type Templates } from '../templates/load.js';
+import { CORE_SKILLS, HEAD_SKILLS, MEMBER_SKILLS, textHash, type Lang, type Role, type Skill, type Templates } from '../templates/load.js';
 
 /* One piece of an employee's instructions, as the card shows it. */
 export type Part = { kind: 'header' | 'base' | 'skill' | 'notebook'; id: string | null; title: Lang | null; text: string; overridden: boolean; templateChanged: boolean };
@@ -85,39 +85,80 @@ function told(kept: string[], files: SkillFile[]): string {
    go out. */
 const whole = (texts: string[]) => texts.join('\n\n');
 
+const CANONICAL_SKILLS: ReadonlySet<string> = new Set(['hh-run-checks', 'hh-lead-tasks']);
+
+const movedSinceHire = (hired: Record<string, string>, id: string, hash: string): boolean => hired[id] !== undefined && hired[id] !== hash;
+
+function effectiveSkillIds(t: Templates, agent: AgentRow): string[] {
+  const locked = agent.kind === 'head' ? HEAD_SKILLS : MEMBER_SKILLS;
+  const required = [...CORE_SKILLS, ...locked].filter(id => t.skills.has(id));
+  return [...new Set([...required, ...agent.skills])];
+}
+
+function basePart(role: Role | undefined, agent: AgentRow): Part | null {
+  const text = agent.overrides.base ?? (role ? role.body : undefined);
+  if (text === undefined) return null;
+  return {
+    kind: 'base',
+    id: role ? role.id : null,
+    title: role ? role.title : null,
+    text,
+    overridden: agent.overrides.base !== undefined,
+    templateChanged: role ? movedSinceHire(agent.templateHashes, role.id, role.hash) : false,
+  };
+}
+
+const isCanonicalSkill = (id: string, skill: Skill | undefined): boolean => skill !== undefined && CANONICAL_SKILLS.has(id);
+
+function resolveSkillBody(
+  skill: Skill | undefined,
+  overrides: Record<string, string> | undefined,
+  id: string,
+): { body: string | undefined; overridden: boolean } {
+  if (isCanonicalSkill(id, skill)) return { body: skill?.body, overridden: false };
+  const own = overrides ? overrides[id] : undefined;
+  return { body: own ?? skill?.body, overridden: own !== undefined };
+}
+
+function buildSkillPart(id: string, skill: Skill | undefined, body: string, overridden: boolean, hired: Record<string, string>): Part {
+  const title = skill ? skill.title.en : id;
+  return {
+    kind: 'skill',
+    id,
+    title: skill ? skill.title : null,
+    text: skillBlock(id, title, body),
+    overridden,
+    templateChanged: skill ? movedSinceHire(hired, id, skill.hash) : false,
+  };
+}
+
+function renderSkillEntry(t: Templates, agent: AgentRow, id: string): { part: Part; kept?: string; file?: SkillFile } | null {
+  const skill = t.skills.get(id);
+  const { body, overridden } = resolveSkillBody(skill, agent.overrides.skills, id);
+  /* A skill that left the templates and was never rewritten has nothing to say. */
+  if (body === undefined) return null;
+  const part = buildSkillPart(id, skill, body, overridden, agent.templateHashes);
+  return inline(skill) ? { part, kept: part.text } : { part, file: skillFile(id, skill, body) };
+}
+
 /* The header, the role's text and each enabled skill between markers; the employee's own text replaces a template's. */
 export function renderInstructions(t: Templates, agent: AgentRow, place: Place): Rendered {
   const role = agent.roleKey ? t.roles.get(agent.roleKey) : undefined;
-  const hired = agent.templateHashes;
-  const moved = (id: string, hash: string) => hired[id] !== undefined && hired[id] !== hash;
   const plain = header(agent, role?.title.en ?? 'employee', place);
-  const said = `${plain}\n\n${partner(agent.kind === 'head' ? 'the orchestrator' : 'your head', agent.kind === 'head')}`;
+  const head = agent.kind === 'head';
+  const said = `${plain}\n\n${partner(head ? 'the orchestrator' : 'your head', head)}`;
   const parts: Part[] = [{ kind: 'header', id: null, title: null, text: said, overridden: false, templateChanged: false }];
-
-  const base = agent.overrides.base ?? role?.body;
-  if (base !== undefined) {
-    parts.push({
-      kind: 'base',
-      id: role?.id ?? null,
-      title: role?.title ?? null,
-      text: base,
-      overridden: agent.overrides.base !== undefined,
-      templateChanged: role ? moved(role.id, role.hash) : false,
-    });
-  }
+  const base = basePart(role, agent);
+  if (base) parts.push(base);
 
   const kept = parts.map(p => p.text);
   const skills: SkillFile[] = [];
-  for (const id of agent.skills) {
-    const skill = t.skills.get(id);
-    const own = agent.overrides.skills?.[id];
-    const body = own ?? skill?.body;
-    /* A skill that left the templates and was never rewritten has nothing to say. */
-    if (body === undefined) continue;
-    const text = skillBlock(id, skill?.title.en ?? id, body);
-    parts.push({ kind: 'skill', id, title: skill?.title ?? null, text, overridden: own !== undefined, templateChanged: skill ? moved(id, skill.hash) : false });
-    if (inline(skill)) kept.push(text);
-    else skills.push(skillFile(id, skill, body));
+  for (const id of effectiveSkillIds(t, agent)) {
+    const entry = renderSkillEntry(t, agent, id);
+    if (!entry) continue;
+    parts.push(entry.part);
+    if (entry.kept !== undefined) kept.push(entry.kept);
+    if (entry.file) skills.push(entry.file);
   }
 
   const text = told(kept, skills);
@@ -137,7 +178,7 @@ export async function placeOf(db: Ctx['db'], agent: AgentRow): Promise<Place> {
 }
 
 /* The orchestrator's own skills, always on after his standing role. */
-export const ORCHESTRATOR_SKILLS = ['orch-outside-is-data', 'orch-interview', 'orch-plan-turn', 'orch-verify', 'orch-trouble'] as const;
+export const ORCHESTRATOR_SKILLS = ['orch-outside-is-data', 'hh-run-checks', 'orch-interview', 'orch-plan-turn', 'orch-verify', 'orch-trouble'] as const;
 
 /* The orchestrator's instructions apart from the notebook: his standing role, then his skills as an employee's go. */
 export function orchestratorSteady(t: Templates): { parts: Part[]; text: string; skills: SkillFile[]; whole: string } {

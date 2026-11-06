@@ -256,10 +256,16 @@ describe('renderInstructions', () => {
     expect(workerPacket.parts.find(p => p.id === 'hh-run-checks')!.overridden).toBe(false);
     expect(workerPacket.skills.map(s => s.name)).toEqual(['dev-tdd']);
 
-    const rolelessWorker = renderInstructions(shipped, agent({ kind: 'worker', roleKey: null, skills: [], templateHashes: {} }), PLACE);
+    const rolelessWorker = renderInstructions(
+      shipped,
+      agent({ kind: 'worker', roleKey: null, skills: ['retired-gone', 'retired-kept'], overrides: { skills: { 'retired-kept': 'Saved custom procedure.' } }, templateHashes: {} }),
+      PLACE,
+    );
     expect(occurrences(rolelessWorker.text, marker)).toBe(1);
     expect(rolelessWorker.text).toContain(canonicalChecks);
     expect(rolelessWorker.whole).toContain(canonicalChecks);
+    expect(rolelessWorker.parts.some(p => p.id === 'retired-gone')).toBe(false);
+    expect(rolelessWorker.skills.find(s => s.name === 'retired-kept')?.body).toContain('Saved custom procedure.');
   });
 
   it('delivers canonical hh-lead-tasks and hh-run-checks to existing department heads with stale skill lists, null roleKey or stored overrides without mutating stored skills', () => {
