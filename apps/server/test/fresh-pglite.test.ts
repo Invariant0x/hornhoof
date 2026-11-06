@@ -42,9 +42,12 @@ describe('a fresh database for a migration test', () => {
     expect((await second.query(`select tablename from pg_tables where schemaname = 'public'`)).rows).toEqual([]);
   });
 
+  /* PGlite dumps on its own while it runs initdb, so what counts is that a later open neither runs it nor dumps. */
   it('runs initdb once however many a file opens', async () => {
     await fresh();
+    const afterFirst = dumps;
     await fresh();
-    expect(dumps).toBe(1);
+    await fresh();
+    expect(dumps).toBe(afterFirst);
   });
 });

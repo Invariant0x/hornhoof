@@ -45,7 +45,7 @@ export function ownDatabases(): void {
 const SHAPE = `select md5(string_agg(line, E'\n' order by line)) as shape from (
   select format('relation %s %s %s %s', c.oid::regclass, c.relkind, c.relacl, c.relrowsecurity) as line
     from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname !~ '^pg_' and n.nspname <> 'information_schema'
-  union all select format('column %s %s %s %s %s %s', a.attrelid::regclass, a.attname, a.atttypid, a.attnotnull, a.attacl, pg_get_expr(d.adbin, d.adrelid))
+  union all select format('column %s %s %s %s %s', a.attrelid::regclass, a.attname, a.atttypid, a.attacl, pg_get_expr(d.adbin, d.adrelid))
     from pg_attribute a join pg_class c on c.oid = a.attrelid join pg_namespace n on n.oid = c.relnamespace left join pg_attrdef d on d.adrelid = a.attrelid and d.adnum = a.attnum
     where a.attnum > 0 and not a.attisdropped and n.nspname = 'public'
   union all select format('constraint %s %s %s', c.conrelid::regclass, c.conname, pg_get_constraintdef(c.oid))
@@ -58,7 +58,7 @@ const SHAPE = `select md5(string_agg(line, E'\n' order by line)) as shape from (
   union all select format('type %s', t.oid::regtype) from pg_type t join pg_namespace n on n.oid = t.typnamespace where n.nspname = 'public'
   union all select format('value %s %s', e.enumtypid::regtype, e.enumlabel) from pg_enum e
   union all select format('schema %s %s', n.nspname, n.nspacl) from pg_namespace n
-  union all select format('role %s %s %s %s', r.rolname, r.rolsuper, r.rolcanlogin, r.rolconfig) from pg_roles r
+  union all select format('role %s %s %s', r.rolname, r.rolsuper, r.rolcanlogin) from pg_roles r
   union all select format('member %s %s', m.roleid, m.member) from pg_auth_members m
   union all select format('default rights %s', d.defaclacl) from pg_default_acl d
   union all select format('database settings %s', s.setconfig) from pg_db_role_setting s

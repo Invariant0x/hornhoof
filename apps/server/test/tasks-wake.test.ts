@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import * as instructionBuilder from '../src/modules/agents/instructions.js';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { agentEvents, agents, companies, departments, jobs, machines, nodes, pendingWakes, people, personAccess, requests, subscriptions, taskEvents, tasks, teams } from '../src/db/schema.js';
 import { agentState, enqueueTurn } from '../src/modules/conversation/queue.js';
 import { said } from '../src/modules/conversation/live.js';
@@ -38,6 +38,9 @@ async function company(env?: NodeJS.ProcessEnv) {
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
   return { app, owner, ctx, db, sub: sub!, ceo: ceo!, dev: dev!, orchestrator: orchestrator!, head, bruno, rita, memberTask, turnsOf, finish };
 }
+
+/* A spy a test leaves behind would answer for the instructions of whichever test runs next. */
+afterEach(() => { vi.restoreAllMocks(); });
 
 describe('a delayed merge wake on a closed task', () => {
   it.each(['done', 'cancelled'] as const)('logs a skipped merge on %s without waking anyone', async status => {

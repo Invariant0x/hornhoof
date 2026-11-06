@@ -51,6 +51,8 @@ const LEFT_BY_A_TRUNCATE = [
   'alter table companies alter column probe set not null',
   "alter table companies add constraint probe_check check (probe <> 'y')",
   'create index probe_index on companies (probe)',
+  'drop index probe_index; create index probe_index on companies (name)',
+  'create domain probe_domain as integer',
   "create type probe_kind as enum ('one')",
   "alter type probe_kind add value 'two'",
   'create policy probe_policy on companies using (true)',
