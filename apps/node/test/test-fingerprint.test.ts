@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { EnvironmentDescription, TestEnvironmentV1, TestUnit } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
-import { codeFilesOf, fingerprintUnits, testGraph, type FingerprintInput } from '../src/test-fingerprint.js';
+import { codeFilesOf, fastTestsOf, fingerprintUnits, testGraph, type FingerprintInput } from '../src/test-fingerprint.js';
 
 type Suite = TestEnvironmentV1['suites'][number];
 const run = { program: 'npx', args: ['vitest', 'run'], cwd: '.' };
@@ -121,6 +121,71 @@ describe('what the graph does not see', () => {
   });
 });
 
+describe('a type', () => {
+  const files: Files = { ...app, 'apps/a/src/types.ts': 'export type T = number;\n', 'apps/a/test/typed.test.ts': "import type { T } from '../src/types.js';\nimport type Other from '../src/other.js';\nexport type { T as U } from '../src/types.js';\nimport { type T as V, used } from '../src/used.js';\nimport { it } from 'vitest';\nit('x', () => [used] as (T | Other | V)[]);\n" };
+  const after = (path: string, text: string) => changed(input(files, manifest(suites)), input({ ...files, [path]: text }, manifest(suites)));
+
+  it('imported on its own leaves no trace when the test runs', async () => {
+    expect(await after('apps/a/src/types.ts', 'export type T = string;\n')).toEqual([]);
+    expect(await after('apps/a/src/other.ts', 'export const other = 3;\n')).toEqual(['a:apps/a/test/other.test.ts']);
+  });
+
+  it('imported beside a value keeps the import', async () => {
+    expect(await after('apps/a/src/used.ts', `${app['apps/a/src/used.ts']}// more\n`)).toContain('a:apps/a/test/typed.test.ts');
+  });
+
+  it('is told from a default import named type', async () => {
+    const named = { ...app, 'apps/a/test/named.test.ts': "import type from '../src/other.js';\nimport { it } from 'vitest';\nit('x', () => type);\n" };
+    expect(await changed(input(named, manifest(suites)), input({ ...named, 'apps/a/src/other.ts': 'export const other = 3;\n' }, manifest(suites)))).toContain('a:apps/a/test/named.test.ts');
+  });
+});
+
+describe('a configuration that names test files', () => {
+  it('does not run what those tests import around the others', async () => {
+    const files: Files = { ...app, 'apps/a/vitest.other.config.ts': "export default { test: { include: ['test/used.test.ts'], setupFiles: ['test/setup.ts'] } };\n", 'apps/a/test/setup.ts': 'export {};\n' };
+    const after = (path: string, text: string) => changed(input(files, manifest(suites)), input({ ...files, [path]: text }, manifest(suites)));
+    expect(await after('apps/a/src/deep.ts', 'export const deep = 2;\n')).toEqual(['a:apps/a/test/used.test.ts']);
+    expect(await after('apps/a/test/setup.ts', 'export const more = 1;\n')).toEqual(['a:apps/a/test/other.test.ts', 'a:apps/a/test/used.test.ts']);
+  });
+});
+
+describe('a rule that gives a package a file of another package', () => {
+  const files: Files = { ...app, 'apps/b/test/tool.ts': "import { b } from '../src/b.js';\nexport const tool = b;\n" };
+  const value = manifest(suites, { impact: { adapter: 'typescript', fullPackageGlobs: [{ globs: ['apps/b/test/tool.ts'], suiteIds: ['a', 'b'] }], migrationCheck: { status: 'unsupported', reason: 'None.' } } });
+  const after = (path: string, text: string) => changed(input(files, value), input({ ...files, [path]: text }, value));
+
+  it('takes that file', async () => {
+    expect(await after('apps/b/test/tool.ts', `${files['apps/b/test/tool.ts']}// more\n`)).toEqual(['a:apps/a/test/other.test.ts', 'a:apps/a/test/used.test.ts', 'b:apps/b/test/b.test.ts']);
+  });
+
+  it('and not all it imports from there', async () => {
+    expect(await after('apps/b/src/b.ts', 'export const b = 4;\n')).toEqual(['b:apps/b/test/b.test.ts']);
+  });
+});
+
+describe('a configuration around the tests of several packages', () => {
+  const config = "import './apps/b/src/imported.js';\nexport default { reporter: './apps/b/src/named.ts', projects: [{ name: '@x/a', root: './apps/a' }, { name: '@x/b', root: './apps/b' }], ignores: ['./apps/a/src/*.ts'], about: './README.md' };\n";
+  const files: Files = { ...app, 'vitest.config.mjs': config, 'apps/b/src/imported.ts': 'export const imported = 1;\n', 'apps/b/src/named.ts': 'export const named = 1;\n' };
+  const value = manifest(suites, { impact: { adapter: 'typescript', fullPackageGlobs: [{ globs: ['vitest.config.mjs'], suiteIds: ['a', 'b'] }], migrationCheck: { status: 'unsupported', reason: 'None.' } } });
+  const after = (path: string, text: string) => changed(input(files, value), input({ ...files, [path]: text }, value));
+  const everyone = ['a:apps/a/test/other.test.ts', 'a:apps/a/test/used.test.ts', 'b:apps/b/test/b.test.ts'];
+
+  it('changes them all, with what it imports and each file it names', async () => {
+    expect(await after('vitest.config.mjs', `${config}// more\n`)).toEqual(everyone);
+    expect(await after('apps/b/src/imported.ts', 'export const imported = 2;\n')).toEqual(everyone);
+    expect(await after('apps/b/src/named.ts', 'export const named = 2;\n')).toEqual(everyone);
+  });
+
+  it('does not tie one package to another by naming its folder, its name or a pattern of its files', async () => {
+    expect(await after('apps/b/src/b.ts', 'export const b = 4;\n')).toEqual(['b:apps/b/test/b.test.ts']);
+    expect(await after('apps/a/src/deep.ts', 'export const deep = 2;\n')).toEqual(['a:apps/a/test/used.test.ts']);
+  });
+
+  it('changes nothing for a document it names', async () => {
+    expect(await after('README.md', 'Other')).toEqual([]);
+  });
+});
+
 describe('when the graph cannot tell', () => {
   it('a computed import makes a file depend on its whole package', async () => {
     const files = { ...app, 'apps/a/src/used.ts': `${app['apps/a/src/used.ts']}export const load = (name: string) => import(name);\n` };
@@ -176,7 +241,8 @@ describe('what the scanner follows', () => {
     const files: Files = { ...app, 'apps/a/src/one.tsx': '', 'apps/a/src/two/index.ts': '', 'apps/a/src/three.mts': '', 'apps/a/src/four.css': '', 'apps/a/src/five.json': '{}', 'apps/a/src/six.ts': '', 'apps/a/src/seven.ts': '', 'apps/a/src/eight.ts': '',
       'apps/a/src/used.ts': "import './one.js';\nexport * from './two';\nconst x = await import('./three.mjs');\nimport './four.css?raw';\nimport data from './five.json' with { type: 'json' };\nimport type { A } from './six';\nvi.mock('./seven.js');\nconst y = require('./eight');\nexport { x, y, data };\n" };
     const found = reaching(files, 'apps/a/test/used.test.ts');
-    for (const name of ['one.tsx', 'two/index.ts', 'three.mts', 'four.css', 'five.json', 'six.ts', 'seven.ts', 'eight.ts']) expect(found).toContain(`apps/a/src/${name}`);
+    for (const name of ['one.tsx', 'two/index.ts', 'three.mts', 'four.css', 'five.json', 'seven.ts', 'eight.ts']) expect(found).toContain(`apps/a/src/${name}`);
+    expect(found).not.toContain('apps/a/src/six.ts');
   });
 
   it('files named by a path in the code, relative, from the package or from the repository', async () => {
@@ -247,6 +313,22 @@ describe('scenarios that drive a screen', () => {
     expect(await after('apps/web/src/App.tsx', 'export const App = 2;\n')).toEqual(['browser:apps/web/e2e/about.spec.ts']);
   });
 
+  it('a source a rule gives to every scenario counts by itself, and not by all it imports', async () => {
+    const files = { ...web, 'apps/web/src/App.tsx': "import { Tree } from './screens/Tree';\nexport const App = Tree;\n" };
+    const rule = manifest([browser], { impact: { adapter: 'typescript', fullPackageGlobs: [{ globs: ['apps/web/src/App.tsx'], suiteIds: ['browser'] }], migrationCheck: { status: 'unsupported', reason: 'None.' } } });
+    const edited = (path: string, text: string) => changed(input(files, rule), input({ ...files, [path]: text }, rule));
+    expect(await edited('apps/web/src/App.tsx', `${files['apps/web/src/App.tsx']}// more\n`)).toEqual(['browser:apps/web/e2e/about.spec.ts', 'browser:apps/web/e2e/agent-card-long.spec.ts', 'browser:apps/web/e2e/tree.spec.ts']);
+    expect(await edited('apps/web/src/ui/dot.ts', 'export const dot = 2;\n')).toEqual(['browser:apps/web/e2e/about.spec.ts', 'browser:apps/web/e2e/agent-card-long.spec.ts']);
+  });
+
+  it('a scenario named for a family of screens follows that family', async () => {
+    const family = { ...web, 'apps/web/src/screens/TreeCard.tsx': 'export const TreeCard = 1;\n', 'apps/web/src/Tree.tsx': '' };
+    delete family['apps/web/src/screens/Tree.tsx']; delete family['apps/web/src/Tree.tsx'];
+    const edited = await changed(input(family, value), input({ ...family, 'apps/web/src/screens/TreeCard.tsx': 'export const TreeCard = 2;\n' }, value));
+    expect(edited).toContain('browser:apps/web/e2e/tree.spec.ts');
+    expect(await changed(input(family, value), input({ ...family, 'apps/web/src/ui/AgentCard.tsx': 'export const AgentCard = 2;\n' }, value))).not.toContain('browser:apps/web/e2e/tree.spec.ts');
+  });
+
   it('a helper of a scenario changes those who import it', async () => {
     expect(await after('apps/web/e2e/api.ts', 'export const open = 2;\n')).toEqual(['browser:apps/web/e2e/agent-card-long.spec.ts']);
   });
@@ -258,9 +340,20 @@ describe('source files mutation checks', () => {
   const key = 'mutation:apps/a/src/used.ts';
   const after = async (path: string, text: string) => (await changed(input(app, value), input({ ...app, [path]: text }, value))).filter(item => item === key);
 
-  it('follow their own code and the fast tests that reach it', async () => {
-    expect(await after('apps/a/src/deep.ts', 'export const deep = 2;\n')).toEqual([key]);
+  it('run against the fast tests that reach them, and only those', () => {
+    if (mutation.status !== 'supported') throw new Error('The fixture supports mutation.');
+    const reached = fastTestsOf(input(app, value), mutation, ['apps/a/src/used.ts', 'apps/a/src/deep.ts']);
+    expect(reached.get('apps/a/src/used.ts')).toEqual(['apps/a/test/used.test.ts']);
+    expect(reached.get('apps/a/src/deep.ts')).toEqual(['apps/a/test/used.test.ts']);
+  });
+
+  it('follow their own text and the fast tests that reach it', async () => {
+    expect(await after('apps/a/src/used.ts', `${app['apps/a/src/used.ts']}// more\n`)).toEqual([key]);
     expect(await after('apps/a/test/used.test.ts', `${app['apps/a/test/used.test.ts']}// more\n`)).toEqual([key]);
+  });
+
+  it('not what they import: only a changed function runs again, and the full run looks at the rest', async () => {
+    expect(await after('apps/a/src/deep.ts', 'export const deep = 2;\n')).toEqual([]);
   });
 
   it('follow what runs them', async () => {

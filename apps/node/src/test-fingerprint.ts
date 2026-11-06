@@ -19,7 +19,8 @@ export type FingerprintInput = {
 export type Pause = () => Promise<void>;
 type Manifest = TestEnvironmentV1;
 type Suite = Manifest['suites'][number];
-type Scan = { edges: string[]; opaque: boolean };
+/* edges: all a file may read. runs: what it imports and the files it names one by one. */
+type Scan = { edges: string[]; runs: string[]; opaque: boolean };
 type Reach = { digest: string; opaque: boolean };
 
 const FORMAT = 'hornhoof-fingerprint-v1';
@@ -35,6 +36,8 @@ const BARE_IMPORT = /^[ \t]*import\s*(['"])([^'"\n]+)\1/gm;
 const CALLED = /\b(?:import|require|import\.meta\.resolve|(?:vi|jest)\.(?:mock|doMock|unmock|doUnmock|importActual|importMock|requireActual|requireMock))\s*\(\s*(['"`])([^'"`\n]+)\1/g;
 const COMPUTED = /\b(?:import|require|import\.meta\.resolve)\s*\(\s*(?:[^'"`\s)]|`[^`]*\$\{)/;
 const STRING = /(['"`])((?:\\.|(?!\1)[^\\\n])*)\1/g;
+/* A type alone is gone before anything runs, as Vitest's graph knows too. */
+const TYPE_ONLY = /^[ \t]*(?:import|export)\s+type\s*(?:\{[^}]*\}|\*(?:\s+as\s+[\w$]+)?|[\w$]+(?=\s+from\b))\s*from\s*(['"])[^'"\n]+\1;?/gm;
 const SCREEN = /([^/]+)\.[jt]sx$/;
 const LONGEST_PATH = 300;
 /* What takes a package whole because it runs around its tests, so what it imports does too. */
@@ -152,45 +155,54 @@ function importedBy(tree: Tree, from: string, literal: string): string[] | null 
   return tree.declared.has(name) ? [] : null;
 }
 
-function relativeNamed(tree: Tree, from: string, literal: string): string[] {
+/* One file a piece of code reads by name, or the many that a folder, a pattern or a package's name stands for. */
+type Named = { file: string[]; many: string[] };
+const oneFile = (file: string[]): Named => ({ file, many: [] });
+const manyFiles = (many: string[]): Named => ({ file: [], many });
+
+function relativeNamed(tree: Tree, from: string, literal: string): Named {
   const target = posix.join(posix.dirname(from), literal);
-  if (literal.includes('*')) return tree.paths.filter(path => matchesGlob(path, target));
+  if (literal.includes('*')) return manyFiles(tree.paths.filter(path => matchesGlob(path, target)));
   const found = tree.resolve(target);
-  if (found) return [found];
+  if (found) return oneFile([found]);
   const built = tree.builtFrom(target);
-  if (built) return built;
+  if (built) return manyFiles(built);
   /* A folder by name. A path of dots alone is where a file is, not what it reads. */
-  return /(?:^|\/)\.\.?\/?$/.test(literal) ? [] : tree.under(target);
+  return manyFiles(/(?:^|\/)\.\.?\/?$/.test(literal) ? [] : tree.under(target));
 }
 
 /* A path named in the code, as for a file read from disk: relative, from the package or from the repository. */
-function namedBy(tree: Tree, from: string, literal: string): string[] {
+function namedBy(tree: Tree, from: string, literal: string): Named {
   const text = bare(literal);
-  if (!text || text.length > LONGEST_PATH || text.includes('${') || text.includes(' ') || text.includes('\n')) return [];
+  if (!text || text.length > LONGEST_PATH || text.includes('${') || text.includes(' ') || text.includes('\n')) return oneFile([]);
   if (relativeLike(text)) return relativeNamed(tree, from, text);
   const workspace = tree.workspaces.get(packageName(text));
-  if (workspace) return tree.packageCode(workspace);
+  if (workspace) return manyFiles(tree.packageCode(workspace));
   const inPackage = posix.join(tree.rootOf(from), text), found = [text, inPackage].filter(path => tree.oids.has(path));
-  return found.length ? found : tree.builtFrom(inPackage) ?? [];
+  return found.length ? oneFile(found) : manyFiles(tree.builtFrom(inPackage) ?? []);
 }
 
-function scanCode(tree: Tree, from: string, text: string): Scan {
-  const edges = new Set<string>();
+function scanCode(tree: Tree, from: string, source: string): Scan {
+  const runs = new Set<string>(), many = new Set<string>(), text = source.replace(TYPE_ONLY, '');
   let opaque = COMPUTED.test(text);
   for (const pattern of [STATEMENT, BARE_IMPORT, CALLED]) for (const [, , literal] of text.matchAll(pattern)) {
     const found = importedBy(tree, from, literal!);
-    if (found) for (const path of found) edges.add(path);
+    if (found) for (const path of found) runs.add(path);
     else opaque = true;
   }
-  for (const [, , literal] of text.matchAll(STRING)) for (const path of namedBy(tree, from, literal!)) edges.add(path);
-  edges.delete(from);
-  return { edges: [...edges], opaque };
+  for (const [, , literal] of text.matchAll(STRING)) {
+    const named = namedBy(tree, from, literal!);
+    for (const path of named.file) runs.add(path);
+    for (const path of named.many) many.add(path);
+  }
+  runs.delete(from); many.delete(from);
+  return { edges: [...new Set([...runs, ...many])], runs: [...runs], opaque };
 }
 function scanFile(tree: Tree, path: string): Scan {
-  if (!tree.isRegular(path)) return { edges: [], opaque: true };
-  if (!CODE.test(path)) return { edges: [], opaque: false };
+  if (!tree.isRegular(path)) return { edges: [], runs: [], opaque: true };
+  if (!CODE.test(path)) return { edges: [], runs: [], opaque: false };
   const text = tree.input.texts.get(path);
-  return text === undefined ? { edges: [], opaque: true } : scanCode(tree, path, text);
+  return text === undefined ? { edges: [], runs: [], opaque: true } : scanCode(tree, path, text);
 }
 
 /* Groups of files that import each other, what they import first: Tarjan's algorithm, on its own stack as imports run deep. */
@@ -261,11 +273,18 @@ class Graph {
     const reaches = starts.map(path => this.reaches.get(path)!);
     return { digest: digest([...new Set(reaches.map(reach => reach.digest))].sort(lexical)), opaque: reaches.some(reach => reach.opaque) };
   }
+  private walk(starts: string[], next: (scan: Scan) => string[]): Set<string> {
+    const files = new Set<string>(starts), pending = [...files];
+    while (pending.length) for (const path of next(this.scan(pending.pop()!))) if (!files.has(path)) { files.add(path); pending.push(path); }
+    return files;
+  }
   /* The files reached, for the few places that need them by name. */
   closure(starts: string | string[]): Set<string> {
-    const files = new Set<string>([starts].flat()), pending = [...files];
-    while (pending.length) for (const path of this.scan(pending.pop()!).edges) if (!files.has(path)) { files.add(path); pending.push(path); }
-    return files;
+    return this.walk([starts].flat(), scan => scan.edges);
+  }
+  /* What a configuration runs. It also names folders, packages and test files, to say where tests are, and that ties none of them to the others. */
+  ranBy(start: string, tests: ReadonlySet<string> = new Set()): Set<string> {
+    return this.walk([start], scan => scan.runs.filter(path => !tests.has(path)));
   }
 }
 
@@ -304,11 +323,16 @@ function verdictOn(environment: ImpactEnvironment, path: string): Verdict {
 }
 
 /* What #309 says the graph cannot see, per package: for each tracked file, whether it takes a package whole. A file that is a
-   test itself changes only itself, and a document changes nothing. */
+   test itself changes only itself, and a document changes nothing. What runs around a package's tests counts with what it runs:
+   a file of the repository's own, or of that package. A rule may also give a package a file of another one, and that file then
+   counts by itself, or a tool of one package would tie all the others to what it imports. So does a source given to every scenario:
+   a scenario follows its own screen, and all the screens that source imports would make each follow all of them. */
 async function outOfGraph(graph: Graph, pause: Pause): Promise<Map<string, string>> {
   const { tree } = graph, { manifest, inventory } = tree.input.description, packages = packagesOf(manifest);
   const units = new Set(inventory.map(unit => unit.file)), kept = keptVerdicts(digest([packages, manifest.impact]));
   const environment: ImpactEnvironment = { packages, impact: manifest.impact, inventory: [] };
+  const scenarios = manifest.suites.flatMap(suite => suite.scenarioSources ?? []);
+  const around = (path: string): string[] => [...graph.ranBy(path, units)].filter(file => !isDocument(file));
   const found = new Map<string, string[]>(packages.map(item => [item.id, []]));
   let asked = 0;
   for (const path of tree.paths) {
@@ -318,8 +342,8 @@ async function outOfGraph(graph: Graph, pause: Pause): Promise<Map<string, strin
       verdict = verdictOn(environment, path); kept.set(path, verdict);
       if (++asked % VERDICTS_BETWEEN_PAUSES === 0) await pause();
     }
-    const files = verdict.expands ? [...graph.closure(path)] : [path];
-    for (const id of verdict.packages) found.get(id)!.push(...files);
+    const owner = tree.rootOf(path), counts = verdict.expands && !scenarios.some(folder => isInside(path, folder));
+    for (const id of verdict.packages) found.get(id)!.push(...(counts && (owner === '.' || owner === id) ? around(path) : [path]));
   }
   return new Map([...found].map(([id, files]) => [id, tree.pairsDigest(files)]));
 }
@@ -339,7 +363,7 @@ function runtimesOf(description: FingerprintInput['description'], suite: Suite |
 
 function screensFor(tree: Tree, sources: string, spec: string): string[] {
   const name = posix.basename(spec).replace(/\.[^.]+\.[^.]+$/, ''), screens = tree.under(sources).filter(path => SCREEN.test(path));
-  const named = screens.filter(path => `${name}-`.startsWith(`${kebab(SCREEN.exec(path)![1]!)}-`));
+  const named = screens.filter(path => { const screen = `${kebab(SCREEN.exec(path)![1]!)}-`; return `${name}-`.startsWith(screen) || screen.startsWith(`${name}-`); });
   return named.length ? named : tree.under(sources);
 }
 
@@ -355,11 +379,16 @@ function testInputs(graph: Graph, suite: Suite, file: string): unknown {
 }
 
 type Supported = Extract<Manifest['mutation'], { status: 'supported' }>;
-/* A source file mutation checks depends on its code, on the fast tests that reach it and on what runs them, the suite's own
-   folder; a configuration around other tests changes nothing about its mutants. */
+const reachingTests = (graph: Graph, mutation: Supported, file: string): string[] => graph.tree.matching(mutation.fastTestPaths).filter(test => graph.closure(test).has(file));
+/* What each source file's mutants run against. The fingerprint below reads the same tests, so it changes when what judges them does. */
+export function fastTestsOf(input: FingerprintInput, mutation: Supported, files: string[]): Map<string, string[]> {
+  const graph = new Graph(new Tree(input));
+  return new Map(files.map(file => [file, reachingTests(graph, mutation, file)]));
+}
+/* A source file mutation checks depends on its own text, on the fast tests that reach it and on what runs them, the suite's own
+   folder. What it imports does not count: mutants are of its own functions, and the full run looks at the rest. */
 function mutationPrint(graph: Graph, mutation: Supported, suite: Suite, environment: string, file: string): string {
-  const fast = graph.tree.matching(mutation.fastTestPaths).filter(test => graph.closure(test).has(file));
-  return digest([FORMAT, environment, mutation.tool, graph.tree.folderDigest(suite.root), inputsOf(graph, suite, [file, ...fast])]);
+  return digest([FORMAT, environment, mutation.tool, graph.tree.folderDigest(suite.root), graph.tree.pairsDigest([file, ...reachingTests(graph, mutation, file)])]);
 }
 
 function preparationPrint(tree: Tree, description: FingerprintInput['description'], installed: unknown): UnitFingerprint[] {

@@ -30,7 +30,23 @@
         "server",
         "web",
         "release-scripts",
-        "server-postgres"
+        "server-postgres",
+        "browser",
+        "mutation"
+      ]
+    },
+    {
+      "id": "full",
+      "requiredSuiteIds": [
+        "protocol",
+        "node",
+        "server",
+        "web",
+        "release-scripts",
+        "server-postgres",
+        "browser",
+        "browser-matrix",
+        "mutation"
       ]
     }
   ],
@@ -66,7 +82,8 @@
       "driver": "postgres",
       "runtime": "postgres",
       "profiles": [
-        "final"
+        "final",
+        "full"
       ],
       "options": {
         "database": "hornhoof_test",
@@ -80,7 +97,8 @@
       "id": "runtime-build",
       "profiles": [
         "fast",
-        "final"
+        "final",
+        "full"
       ],
       "serviceIds": [],
       "inputs": [
@@ -127,7 +145,8 @@
       "id": "pglite",
       "profiles": [
         "fast",
-        "final"
+        "final",
+        "full"
       ],
       "serviceIds": [],
       "inputs": [
@@ -163,7 +182,8 @@
     {
       "id": "postgres",
       "profiles": [
-        "final"
+        "final",
+        "full"
       ],
       "serviceIds": [
         "pg"
@@ -243,7 +263,8 @@
       },
       "profiles": [
         "fast",
-        "final"
+        "final",
+        "full"
       ],
       "finalChecks": []
     },
@@ -271,7 +292,8 @@
       },
       "profiles": [
         "fast",
-        "final"
+        "final",
+        "full"
       ],
       "finalChecks": []
     },
@@ -298,7 +320,8 @@
       },
       "profiles": [
         "fast",
-        "final"
+        "final",
+        "full"
       ],
       "finalChecks": []
     },
@@ -326,7 +349,8 @@
       },
       "profiles": [
         "fast",
-        "final"
+        "final",
+        "full"
       ],
       "finalChecks": []
     },
@@ -348,7 +372,8 @@
       },
       "profiles": [
         "fast",
-        "final"
+        "final",
+        "full"
       ],
       "finalChecks": []
     },
@@ -374,9 +399,98 @@
         "kind": "vitest-shard"
       },
       "profiles": [
-        "final"
+        "final",
+        "full"
       ],
       "finalChecks": []
+    },
+    {
+      "id": "browser",
+      "root": "apps/web/e2e",
+      "files": [
+        "apps/web/e2e/**/*.spec.ts"
+      ],
+      "run": {
+        "program": "npx",
+        "args": [
+          "--no-install",
+          "playwright",
+          "test",
+          "--project=chromium",
+          "--workers=2",
+          "--pass-with-no-tests"
+        ],
+        "cwd": "apps/web"
+      },
+      "split": {
+        "kind": "argv-files"
+      },
+      "profiles": [
+        "final",
+        "full"
+      ],
+      "finalChecks": [],
+      "scenarioSources": "apps/web/src"
+    },
+    {
+      "id": "browser-matrix",
+      "root": "apps/web/e2e",
+      "files": [
+        "apps/web/e2e/**/*.spec.ts"
+      ],
+      "run": {
+        "program": "npx",
+        "args": [
+          "--no-install",
+          "playwright",
+          "test",
+          "--project=matrix",
+          "--workers=2",
+          "--pass-with-no-tests"
+        ],
+        "cwd": "apps/web"
+      },
+      "split": {
+        "kind": "argv-files"
+      },
+      "profiles": [
+        "full"
+      ],
+      "finalChecks": [],
+      "scenarioSources": "apps/web/src"
+    },
+    {
+      "id": "mutation",
+      "root": "scripts/mutation",
+      "files": [
+        "apps/node/src/redact.ts",
+        "apps/node/src/terminal/operator-question.ts",
+        "apps/server/src/auth/decision-owner.ts",
+        "apps/server/src/auth/decisions.ts",
+        "apps/server/src/auth/limit.ts",
+        "apps/server/src/auth/password.ts",
+        "apps/server/src/modules/outbound/checks.ts",
+        "apps/server/src/modules/outbound/delivery.ts",
+        "apps/server/src/modules/outbound/render.ts"
+      ],
+      "run": {
+        "program": "node",
+        "args": [
+          "scripts/mutation/run.mjs"
+        ],
+        "cwd": "."
+      },
+      "split": {
+        "kind": "json-file"
+      },
+      "profiles": [
+        "final",
+        "full"
+      ],
+      "finalChecks": [],
+      "keep": [
+        ".metrics/mutate"
+      ]
     }
   ],
   "impact": {
@@ -397,7 +511,9 @@
           "server",
           "web",
           "release-scripts",
-          "server-postgres"
+          "server-postgres",
+          "browser",
+          "browser-matrix"
         ]
       },
       {
@@ -441,6 +557,22 @@
           "release-scripts",
           "server-postgres"
         ]
+      },
+      {
+        "globs": [
+          "apps/web/playwright.config.ts",
+          "apps/web/vite.config.ts",
+          "apps/web/index.html",
+          "apps/web/package.json",
+          "apps/web/tsconfig.json",
+          "apps/web/src/App.tsx",
+          "apps/web/src/main.tsx",
+          "apps/web/src/theme.css"
+        ],
+        "suiteIds": [
+          "browser",
+          "browser-matrix"
+        ]
       }
     ],
     "migrationCheck": {
@@ -453,10 +585,25 @@
     "tool": "mutator",
     "language": "typescript",
     "sourcePaths": [
-      "apps/node/src/redact.ts"
+      "apps/node/src/redact.ts",
+      "apps/node/src/terminal/operator-question.ts",
+      "apps/server/src/auth/decision-owner.ts",
+      "apps/server/src/auth/decisions.ts",
+      "apps/server/src/auth/limit.ts",
+      "apps/server/src/auth/password.ts",
+      "apps/server/src/modules/outbound/checks.ts",
+      "apps/server/src/modules/outbound/delivery.ts",
+      "apps/server/src/modules/outbound/render.ts"
     ],
     "fastTestPaths": [
-      "apps/node/test/redact.test.ts"
+      "apps/node/test/redact.test.ts",
+      "apps/node/test/operator-question.test.ts",
+      "apps/server/test/crypto.test.ts",
+      "apps/server/test/decision-policy.test.ts",
+      "apps/server/test/limit.test.ts",
+      "apps/server/test/outbound-checks.test.ts",
+      "apps/server/test/outbound-delivery.test.ts",
+      "apps/server/test/outbound-render.test.ts"
     ],
     "coverageCommands": [
       {
@@ -477,15 +624,9 @@
       "apps/node/coverage/lcov.info"
     ],
     "command": {
-      "program": "mutator",
+      "program": "node",
       "args": [
-        "--root",
-        ".",
-        "--source-root",
-        "apps/node/src/redact.ts",
-        "--use-existing-coverage",
-        "--test-command",
-        "npx --no-install vitest run --root apps/node test/redact.test.ts"
+        "scripts/mutation/run.mjs"
       ],
       "cwd": "."
     }
@@ -494,7 +635,8 @@
     "version": 2,
     "oncePreparation": {
       "profiles": [
-        "final"
+        "final",
+        "full"
       ],
       "suiteIds": [
         "protocol"
@@ -597,6 +739,11 @@
           "cwd": "."
         }
       ]
+    },
+    "fullRun": {
+      "everyTurns": 5,
+      "replaces": "final",
+      "profile": "full"
     }
   }
 }

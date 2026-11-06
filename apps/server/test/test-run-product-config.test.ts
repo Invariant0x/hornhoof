@@ -8,7 +8,7 @@ const original = () => parseTestEnvironment(readFileSync(new URL('../../../packa
 describe('canonical versioned product configuration', () => {
   it('declares the protocol suite and all prior static checks once before final batches', () => {
     const current = manifest(), preparation = current.execution?.oncePreparation;
-    expect(current.execution?.version).toBe(2); expect(preparation?.profiles).toEqual(['final']); expect(preparation?.suiteIds).toEqual(['protocol']);
+    expect(current.execution?.version).toBe(2); expect(preparation?.profiles).toEqual(['final', 'full']); expect(preparation?.suiteIds).toEqual(['protocol']);
     const commands = preparation?.commands.map(command => JSON.stringify(command)) ?? [];
     const checks = original().suites.flatMap(suite => suite.finalChecks ?? []).flatMap(command => command.program === 'npm' && command.args.join(' ') === 'run typecheck:tests'
       ? ['apps/server', 'apps/node', 'packages/protocol'].map(workspace => ({ program: 'npx', args: ['--no-install', 'tsc', '-p', `${workspace}/tsconfig.eslint.json`, '--noEmit'], cwd: '.' })) : [command]);
@@ -20,14 +20,23 @@ describe('canonical versioned product configuration', () => {
     expect(current.suites.flatMap(suite => suite.finalChecks ?? [])).toEqual([]);
   });
   it('uses the explicit native adapter for Vitest while retaining the other framework command', () => {
-    const current = manifest();
-    for (const suite of current.suites.filter(suite => suite.id !== 'release-scripts')) {
+    const current = manifest(), others = ['release-scripts', 'browser', 'browser-matrix', 'mutation'];
+    for (const suite of current.suites.filter(suite => !others.includes(suite.id))) {
       expect(suite.split.kind).toBe('vitest-shard'); expect(suite.run.cwd).toBe('.');
       expect(suite.run.args).toContain('vitest.product.config.mjs');
       expect(suite.run.args.some(arg => arg.startsWith('--project='))).toBe(true);
     }
     expect(current.suites.find(suite => suite.id === 'release-scripts')!.run).toEqual(original().suites.find(suite => suite.id === 'release-scripts')!.run);
     expect(existsSync(new URL('../../../vitest.product.config.mjs', import.meta.url))).toBe(true);
+  });
+  it('runs one look and mutation at a release, and everything in the full run every five turns', () => {
+    const current = manifest(), suitesOf = (profile: string) => current.profiles.find(item => item.id === profile)!.requiredSuiteIds;
+    expect(current.execution?.fullRun).toEqual({ everyTurns: 5, replaces: 'final', profile: 'full' });
+    for (const heavy of ['browser', 'browser-matrix', 'mutation']) expect(suitesOf('fast')).not.toContain(heavy);
+    expect(suitesOf('final')).toEqual(expect.arrayContaining(['browser', 'mutation']));
+    expect(suitesOf('final')).not.toContain('browser-matrix');
+    expect([...suitesOf('full')].sort()).toEqual(current.suites.map(suite => suite.id).sort());
+    expect(current.suites.find(suite => suite.id === 'mutation')?.keep).toEqual(['.metrics/mutate']);
   });
   it('declares the product config and out-of-graph adapter as full-package impact inputs', () => {
     const current = manifest(), globs = current.impact.fullPackageGlobs.flatMap(entry => entry.globs);
