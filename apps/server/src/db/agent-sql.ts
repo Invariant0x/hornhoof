@@ -12,21 +12,16 @@ export type AgentSql = { run: (text: string, mode: SqlMode) => Promise<SqlAnswer
 
 /* Signing in, joining and installing a node stay out of reach, and so does the public link, whose address goes into
    machine commands. Plans' sealed sign-ins too: a row put there would reach a node as its plan's sign-in. Checks made by a
-<<<<<<< HEAD
-   model too: their held-out examples stay away from who tunes a prompt, and no row put there can turn a check on. Waits'
-   owners, dates and policies too: a row written by hand could move a promise or quiet an alarm, and they name private work. */
-export const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials', 'request_internal', 'model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations', 'task_waits', 'wait_policies'];
-=======
    model too: their held-out examples stay away from who tunes a prompt, and no row put there can turn a check on. The
    outbound gateway too: contacts and payloads are private, and a row put there would forge an approval, a receipt, a
-   consent or a day's count, even from a turn of the orchestrator answering the CEO. */
+   consent or a day's count, even from a turn of the orchestrator answering the CEO. Waits' owners, dates and policies
+   too: a row written by hand could move a promise or quiet an alarm, and they name private work. */
 const OUTBOUND = [
   'outbound_channels', 'outbound_policies', 'outbound_accounts', 'outbound_bindings', 'outbound_catalog_revisions', 'outbound_contacts', 'outbound_permissions', 'outbound_contact_events',
   'outbound_messages', 'outbound_message_revisions', 'outbound_approvals', 'outbound_review_receipts', 'outbound_daily_usage', 'outbound_attempts', 'outbound_events', 'outbound_sampling_counters',
   'support_tickets', 'support_classifications',
 ];
-export const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials', 'request_internal', 'model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations', 'model_check_certificates', ...OUTBOUND];
->>>>>>> origin/turn-8
+export const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials', 'request_internal', 'model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations', 'model_check_certificates', 'task_waits', 'wait_policies', ...OUTBOUND];
 /* Columns that hold a password, a token or a key: neither role reads or writes them. A machine's key goes with
    every join from it, so it is one too. The account a node is signed in to names a person's email. */
 export const SECRET: Record<string, string[]> = {
