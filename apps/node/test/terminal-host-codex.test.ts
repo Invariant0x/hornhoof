@@ -99,6 +99,7 @@ describe.skipIf(!hasTmux)('agents in live terminals', () => {
     await until(async () => (await host.screen('c4')).includes('echo: second typed'));
     ack('c4', 'job-1', 0);
     ack('c4', 'job-2', 1);
+    await until(() => Boolean(done('job-1') && done('job-2')));
     expect(done('job-1')).toMatchObject({ ok: true, result: 'echo: first typed' });
     expect(done('job-2')).toMatchObject({ ok: true, result: 'echo: second typed' });
     expect(sent).toContainEqual({ type: 'job.event', jobId: 'job-2', seq: 0, event: { kind: 'text', text: 'echo: second typed' } });

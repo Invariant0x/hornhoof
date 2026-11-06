@@ -19,6 +19,7 @@ function fixture() {
     press: async () => {},
     secrets: () => [],
     recovery: async () => ({ alive: true, input: '', busy: false }),
+    inputLine: () => 'unknown',
   });
   const key = randomUUID();
   return { runtime: make(), make, sent, source, key, ready: () => sent.filter(frame => frame.type === 'program.recovery_ready') };

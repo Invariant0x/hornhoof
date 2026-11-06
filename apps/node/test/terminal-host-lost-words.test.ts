@@ -156,7 +156,7 @@ it('leaves the input to a person who started typing', async () => {
   const program: Program = empty();
   const c = await started({ ...program, get input() { return program.input; }, onPaste: text => { program.input = text; } });
   await until(() => c.paste.mock.calls.length === 1);
-  c.host['ownerTyped']({ key: c.agentKey, child: { stdin: { write() {} } } } as never, 'x');
+  c.host['ownerTyped']({ key: c.agentKey, child: { stdin: { write() {} } } } as never, { type: 'term.input', termId: 'x', data: 'x' });
   const before = c.enters();
   await new Promise(done => setTimeout(done, 150));
   expect(c.enters()).toBe(before);
@@ -199,7 +199,7 @@ describe('a program a node types into without a receipt, as a plan with no opera
   it('leaves the input to a person who started typing', async () => {
     const c = await started(empty(), { plain: true });
     await until(() => c.paste.mock.calls.length === 1);
-    c.host['ownerTyped']({ key: c.agentKey, child: { stdin: { write() {} } } } as never, 'x');
+    c.host['ownerTyped']({ key: c.agentKey, child: { stdin: { write() {} } } } as never, { type: 'term.input', termId: 'x', data: 'x' });
     await new Promise(done => setTimeout(done, 200));
     expect(c.paste).toHaveBeenCalledTimes(1);
     c.finish();

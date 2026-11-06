@@ -33,7 +33,7 @@ function assignment(program: TermProgram, ready: string, draft?: string, shown =
   const screen = vi.spyOn(tmux, 'screen').mockResolvedValue(shown);
   const paste = vi.spyOn(tmux, 'paste').mockResolvedValue();
   const abort = new AbortController();
-  const host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: () => {}, secrets: () => [], plugins: [], readyMs: 20, pollMs: 5, lookMs: 10, enterWaitMs: 10,
+  const host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: () => {}, secrets: () => [], plugins: [], readyMs: 20, pollMs: 5, lookMs: 10, enterWaitMs: 10, keptWaitMs: 20,
     operator: { dir: join(home, 'operator'), send: frame => { sent.push(frame); return true; }, connected: () => true },
   });
   const running = host.run({ key: agentKey, program, bin: program.kind, home, signedOut: /signed out/i, operatorDelivery: { id: deliveryId, ordinal: 1 }, input: { agentKey, jobId, prompt: 'Check the checkout.', sessionId: null, model: null, workDir, secret: null, timeoutMs: 20000, instructions: null, tools: null, signal: abort.signal } });

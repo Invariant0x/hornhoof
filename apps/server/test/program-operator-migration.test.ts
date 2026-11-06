@@ -42,9 +42,11 @@ it('preserves existing company, job, event and attachment data when adding empty
   const before = await Promise.all(tables.map(table => client.query(`select to_jsonb(t) as row from ${table} t`)));
   await migrate(db, { migrationsFolder: MIGRATIONS });
   await migrate(db, { migrationsFolder: MIGRATIONS });
+  /* Later migrations add columns of their own: what these rows held before stays as it was. */
   for (const [index, table] of tables.entries()) {
-    const excluded = table === 'attachments' ? " - 'operator_case_id'" : table === 'subscriptions' ? " - 'limits_updated_at'" : '';
-    expect((await client.query(`select to_jsonb(t)${excluded} as row from ${table} t`)).rows, table).toEqual(before[index]!.rows);
+    const held = before[index]!.rows as { row: Record<string, unknown> }[];
+    const rows = (await client.query<{ row: Record<string, unknown> }>(`select to_jsonb(t) as row from ${table} t`)).rows;
+    expect(rows.map((now, at) => Object.fromEntries(Object.keys(held[at]!.row).map(column => [column, now.row[column]]))), table).toEqual(held.map(then => then.row));
   }
   expect((await client.query('select operator_case_id from attachments')).rows).toEqual([{ operator_case_id: null }, { operator_case_id: null }]);
   expect((await client.query('select limits_updated_at from subscriptions')).rows).toEqual([{ limits_updated_at: null }]);

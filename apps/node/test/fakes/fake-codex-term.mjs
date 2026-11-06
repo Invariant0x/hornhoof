@@ -142,7 +142,7 @@ function endsAtOnce(line) {
 async function slow() {
   prompt();
   await sleep(2000);
-  process.stdout.write('\r\x1b[2K');
+  process.stdout.write('\r\x1b[J');
 }
 
 function steer(line) {
@@ -171,7 +171,8 @@ async function answer(line) {
   if (line.includes('CLOSING')) await closeTurn();
   event({ type: 'task_complete', turn_id: turnId, last_agent_message: lastAnswer });
   if (line.includes('LOGFIRST')) await hook('stop', 'Stop', { last_assistant_message: text });
-  process.stdout.write(`• ${text}\n`);
+  // Its answer takes the place of the empty prompt it worked under, and leaves nothing of it on its row.
+  process.stdout.write(`\r\x1b[J• ${text}\n`);
   prompt();
   if (line.includes('LATE')) setTimeout(() => event({ type: 'turn_aborted', reason: 'interrupted' }), 150);
 }
