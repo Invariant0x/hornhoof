@@ -46,9 +46,7 @@ it('serves the real browser integration', async () => {
     dev: c.dev, sales: c.sales, hiddenTask: { id: hiddenTask.id }, ownTask: { id: ownTask.id }, awayTask: { id: awayTask.id },
   }) + '\n');
   await new Promise<void>(done => input.on('close', () => {
-    void c.app.close().then(() => {
-      node.close();
-      done();
-    });
+    node.close();
+    void c.app.close().then(() => done());
   }));
 }, 120_000);
