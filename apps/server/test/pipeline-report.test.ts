@@ -6,7 +6,9 @@ import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agents, companies, departments, jobs, requests, subscriptions, taskEvents, tasks, testParts, testRuns, turnSnapshots, turns } from '../src/db/schema.js';
 import { departmentPipeline, pipelineReport, turnFacts } from '../src/modules/tasks/pipeline-report.js';
 import { settle } from '../src/modules/tasks/turns.js';
-import { as, invitePerson, listen, mcp, setUpCompany, testApp } from './helpers.js';
+import { as, invitePerson, listen, mcp, setUpCompany, testApp, ownDatabases } from './helpers.js';
+
+ownDatabases();
 
 const T0 = Date.parse('2026-11-04T14:00:00.000Z');
 const at = (minutes: number) => new Date(T0 + minutes * 60_000);

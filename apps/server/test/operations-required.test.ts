@@ -8,7 +8,9 @@ import { agentChanges, agentEvents, agents, companies, departments, jobs, people
 import { FIRST_TURN } from '../src/modules/conversation/prompt.js';
 import { checkOperations, ensureOperations } from '../src/modules/operations/ensure.js';
 import { PROGRAM_OPERATOR_ROLE, REQUIRED_OPERATIONS_ROLES } from '../src/modules/operations/required.js';
-import { appOn, as, connectNode, createTestDb, listen, sessionFrom, SETUP, statements, testApp, until } from './helpers.js';
+import { appOn, as, connectNode, createTestDb, listen, sessionFrom, SETUP, statements, testApp, until, ownDatabases } from './helpers.js';
+
+ownDatabases();
 
 const FOUR = ['OPS-BUGS', 'OPS-HEAD', 'OPS-PROGRAM', 'OPS-WATCH'];
 const NODE_KEY = 'k'.repeat(40);

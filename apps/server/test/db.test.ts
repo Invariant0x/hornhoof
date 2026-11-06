@@ -3,7 +3,9 @@ import { eq, sql } from 'drizzle-orm';
 import { describe, expect, inject, it } from 'vitest';
 import { isUniqueViolation } from '../src/db/errors.js';
 import { agentChanges, agentEvents, agents, companies, departments, machines, people, personAccess, requests, subscriptions, tasks } from '../src/db/schema.js';
-import { createTestDb } from './helpers-db.js';
+import { createTestDb, ownDatabases } from './helpers-db.js';
+
+ownDatabases();
 
 describe('database', () => {
   it('runs migrations and stores a company', async () => {
@@ -109,7 +111,7 @@ describe('indexes', () => {
 });
 
 /* Each PGlite is a whole Postgres in WASM memory; a file that leaves them open grows by gigabytes and gets killed on a small CI runner. */
-describe('test databases', () => {
+describe('test databases', { shuffle: false }, () => {
   let opened: { closed: boolean } | undefined;
 
   it('opens one for the test', async () => {

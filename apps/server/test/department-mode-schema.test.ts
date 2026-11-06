@@ -7,7 +7,9 @@ import { migrate } from 'drizzle-orm/pglite/migrator';
 import { expect, it, onTestFinished } from 'vitest';
 import { agentRole, grantsFor, readerGrantsFor, readerRole } from '../src/db/agent-sql.js';
 import { MIGRATIONS } from '../src/db/client.js';
-import { createTestDb } from './helpers.js';
+import { createTestDb, ownDatabases } from './helpers.js';
+
+ownDatabases();
 
 it('stores a work mode on the fresh department schema', async () => {
   const db = await createTestDb();
