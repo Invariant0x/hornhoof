@@ -7,13 +7,7 @@ import { testParts } from '../src/db/schema.js';
 import { nodeIdentity } from '../src/modules/nodes/hub.js';
 import { placesOf, pumpTests } from '../src/modules/testruns/runs.js';
 import { as, connectNode, until, type FakeNode } from './helpers.js';
-import { company, done, gets, GIB, idle, nextOf } from './test-runs-company.js';
-
-/* The scheduler consumes optional physical resources at the hub boundary. */
-const reportHost = (c: Awaited<ReturnType<typeof company>>, nodeId: string | null, host: string, over: object = {}) => {
-  const load = { ...idle(), host, hostCpus: 16, hostLoad: 1, hostMemFree: 12 * GIB, hostMemory: 16 * GIB, ...over };
-  c.app.ctx.hub.report(nodeId ? nodeIdentity(nodeId) : { kind: 'builtin' }, load);
-};
+import { company, done, gets, GIB, idle, nextOf, reportHost } from './test-runs-company.js';
 
 describe('parts on physical computers', () => {
   it.each(['run_tests', 'run_work'])('sends %s parts to a free machine while another waits for an update', async tool => {

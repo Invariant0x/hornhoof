@@ -121,3 +121,9 @@ export async function gets(node: FakeNode, type: ServerMessage['type'], ms = 300
 }
 
 export const done = (run: TestsRun, over: object = {}) => ({ type: 'tests.done' as const, partId: run.partId, ok: true, exitCode: 0, error: null, commit: 'a'.repeat(40), log: `part ${run.part} ok\n`, ...over });
+
+/* The scheduler consumes optional physical resources at the hub boundary. */
+export const reportHost = (c: Awaited<ReturnType<typeof company>>, nodeId: string | null, host: string, over: object = {}) => {
+  const load = { ...idle(), host, hostCpus: 16, hostLoad: 1, hostMemFree: 12 * GIB, hostMemory: 16 * GIB, ...over };
+  c.app.ctx.hub.report(nodeId ? nodeIdentity(nodeId) : { kind: 'builtin' }, load);
+};

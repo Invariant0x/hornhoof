@@ -6,7 +6,7 @@ import { agentEvents, agents, jobs, pendingWakes, people, taskEvents, tasks, tas
 import { checkExternalWaits, waitFor } from '../src/modules/tasks/external-wait.js';
 import { checkTestTimes, pumpTests } from '../src/modules/testruns/runs.js';
 import { until } from './helpers.js';
-import { company, done, idle, nextOf } from './test-runs-company.js';
+import { company, done, idle, nextOf, reportHost } from './test-runs-company.js';
 
 const anHour = () => new Date(Date.now() + 3_600_000).toISOString();
 
