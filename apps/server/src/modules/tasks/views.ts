@@ -143,7 +143,7 @@ const line = (t: Task, n: Names, sees: (t: Task) => boolean): TaskLine => ({
     const part = t.after.length ? n.independent(t) : null;
     if (!part) return null;
     if (part.kind === 'none') return { reason: part.reason };
-    return sees(part.child) ? { ...part.part, executor: n.agent(part.part.executor)!, task: { id: part.child.id, number: part.child.number, title: part.child.title, status: part.child.status } } : null;
+    return sees(part.child) ? { title: part.part.title, brief: part.part.brief, body: part.part.body, executor: n.agent(part.part.executor)!, task: { id: part.child.id, number: part.child.number, title: part.child.title, status: part.child.status } } : null;
   })(),
   externalWait: t.externalWait,
   workKind: t.workKind,
