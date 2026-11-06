@@ -55,6 +55,14 @@ async function waitingForService(ctx: Ctx, task: Task): Promise<string | null> {
   return test ? 'waiting for a test run' : null;
 }
 
+/* The last thing that says the department was at work. */
+const silentSince = (turn: typeof turns.$inferSelect, work: (typeof tasks.$inferSelect)[], conversations: (typeof jobs.$inferSelect)[]): Date => new Date(Math.max(
+  (turn.openedAt ?? turn.createdAt).getTime(), ...work.map(t => t.updatedAt.getTime()),
+  ...conversations.flatMap(job => job.startedAt && job.finishedAt ? [job.finishedAt.getTime()] : []),
+  /* A wait that ran out explained the work until then: the silence starts there. */
+  ...work.flatMap(t => t.externalWait ? [new Date(t.externalWait.until).getTime()] : []),
+));
+
 export async function quietDepartment(ctx: Ctx, turnId: string, departmentId: string, now: Date) {
   const [turn] = await ctx.db.select().from(turns).where(and(eq(turns.id, turnId), eq(turns.status, 'open')));
   if (!turn) return null;
@@ -67,12 +75,7 @@ export async function quietDepartment(ctx: Ctx, turnId: string, departmentId: st
   /* A department where all of it waits for something known, in time, has nothing to say. */
   const silent = await unexplained(ctx, work, now);
   if (!silent.length) return null;
-  const since = new Date(Math.max(
-    (turn.openedAt ?? turn.createdAt).getTime(), ...work.map(t => t.updatedAt.getTime()),
-    ...conversations.flatMap(job => job.startedAt && job.finishedAt ? [job.finishedAt.getTime()] : []),
-    /* A wait that ran out explained the work until then: the silence starts there. */
-    ...work.flatMap(t => t.externalWait ? [new Date(t.externalWait.until).getTime()] : []),
-  ));
+  const since = silentSince(turn, work, conversations);
   if (now.getTime() - since.getTime() < QUIET_DEPARTMENT_MS) return null;
   const versions = taskVersions(work);
   return { companyId: turn.companyId, work, silent, since, key: waitKey([turn.id, departmentId, versions, since.toISOString()]) };

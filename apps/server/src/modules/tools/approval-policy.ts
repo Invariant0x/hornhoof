@@ -19,7 +19,7 @@ import { decisionPerson } from '../tasks/decisions.js';
 import { ask, comment, mayAsk, refuse, taskSpot, type Ask, type Task } from '../tasks/engine.js';
 import { TURN_QUESTIONS } from '../tasks/tools.js';
 import { taskByRef } from '../tasks/views.js';
-import { openGoal, resolveGoal, reviseGoal, type GoalRef } from '../tasks/wait-goals.js';
+import { openGoal, resolveGoal, reviseGoal, type GoalImpact, type GoalRef } from '../tasks/wait-goals.js';
 import { wakeAll } from '../tasks/wake.js';
 import type { ToolJob } from './job.js';
 
@@ -115,6 +115,33 @@ async function readPolicy(ctx: Pick<Ctx, 'db'>, job: ToolJob, department: string
 }
 
 /* The tools every agent has for approvals: it reads how a department's go, and asks under them. */
+/* A goal in danger, as a head or the orchestrator says it: a new episode, or what this adds to the one that is open. */
+async function escalateGoal(ctx: Ctx, job: ToolJob, ref: number | string, said: { goal: string; why: string; impact: GoalImpact; on: 'task' | 'turn' }) {
+  const task = await heldTask(ctx, job, ref);
+  const goalRef = goalRefOf(task, said.on);
+  const open = await openGoal(ctx.db, task.companyId, goalRef);
+  if (open) return say(await reviseGoal(ctx, { agentId: job.agentId }, open, said.impact) ? 'The CEO is told it is now missed.' : `The CEO has this already, on the question in #${task.number}. Nothing changed.`);
+  try {
+    await askPerson(ctx, job, task, { kind: 'question', text: `${said.impact === 'missed' ? 'Missed goal' : 'Goal at risk'}: ${said.goal}. ${said.why}`, evenUnplanned: true, goal: { ref: goalRef, impact: said.impact } });
+  } catch (err) {
+    /* Another said it first: this one joins that episode. */
+    const first = isUniqueViolation(err) ? await openGoal(ctx.db, task.companyId, goalRef) : null;
+    if (!first) throw err;
+    await reviseGoal(ctx, { agentId: job.agentId }, first, said.impact);
+  }
+  return say(`Told the CEO. #${task.number} waits for the answer; you will be woken with it.`);
+}
+
+/* The head of the department or the orchestrator says the goal is out of danger. */
+async function endGoalRisk(ctx: Ctx, job: ToolJob, ref: number | string, why: string, on: 'task' | 'turn') {
+  const task = await taskByRef(ctx, job.companyId, ref);
+  if (!task) return say(`There is no task ${ref}. Call tasks for yours.`, true);
+  const [me] = await ctx.db.select({ kind: agents.kind, departmentId: agents.departmentId }).from(agents).where(eq(agents.id, job.agentId));
+  if (me?.kind !== 'orchestrator' && me?.departmentId !== task.departmentId) return say(`#${task.number} is not of your department.`, true);
+  await resolveGoal(ctx, { agentId: job.agentId }, job.companyId, goalRefOf(task, on), why);
+  return say('Recorded: the goal is out of danger.');
+}
+
 export function registerApprovalTools(server: McpServer, ctx: Ctx, job: ToolJob): void {
   server.registerTool(
     'approval_policy',
@@ -154,22 +181,7 @@ export function registerApprovalTools(server: McpServer, ctx: Ctx, job: ToolJob)
       description: "Puts before the CEO that the department is missing a goal or its plan (no customers, no deals, a release running late), or is about to. The CEO comes for this, not for each approval, which go to the department's owner. The task waits for the answer. goal: the goal in danger. why: what happened, with the numbers. impact: missed, or at_risk while it can still be saved. on: task for a goal of this task, turn for one of its turn. Saying it again changes nothing unless at_risk became missed. An answer does not end it: resolve_goal_risk does.",
       inputSchema: { task: Ref, goal: z.string().trim().min(1).max(300), why: z.string().trim().min(1).max(1500), impact: z.enum(['at_risk', 'missed']).default('missed'), on: GoalOn },
     },
-    ({ task: ref, goal, why, impact, on }) =>
-      readable(async () => {
-        const task = await heldTask(ctx, job, ref);
-        const goalRef = goalRefOf(task, on);
-        const open = await openGoal(ctx.db, task.companyId, goalRef);
-        if (open) return say(await reviseGoal(ctx, { agentId: job.agentId }, open, impact) ? 'The CEO is told it is now missed.' : `The CEO has this already, on the question in #${task.number}. Nothing changed.`);
-        try {
-          await askPerson(ctx, job, task, { kind: 'question', text: `${impact === 'missed' ? 'Missed goal' : 'Goal at risk'}: ${goal}. ${why}`, evenUnplanned: true, goal: { ref: goalRef, impact } });
-        } catch (err) {
-          /* Another said it first: this one joins that episode. */
-          const first = isUniqueViolation(err) ? await openGoal(ctx.db, task.companyId, goalRef) : null;
-          if (!first) throw err;
-          await reviseGoal(ctx, { agentId: job.agentId }, first, impact);
-        }
-        return say(`Told the CEO. #${task.number} waits for the answer; you will be woken with it.`);
-      }),
+    ({ task, ...said }) => readable(() => escalateGoal(ctx, job, task, said)),
   );
 
   server.registerTool(
@@ -178,15 +190,7 @@ export function registerApprovalTools(server: McpServer, ctx: Ctx, job: ToolJob)
       description: 'Records that a goal you or someone put before the CEO with escalate_missed_goal is out of danger. Only the head of the department or the orchestrator says so, with what shows it. An answer from the CEO alone does not. A later threat starts anew.',
       inputSchema: { task: Ref, why: z.string().trim().min(1).max(1500), on: GoalOn },
     },
-    ({ task: ref, why, on }) =>
-      readable(async () => {
-        const task = await taskByRef(ctx, job.companyId, ref);
-        if (!task) return say(`There is no task ${ref}. Call tasks for yours.`, true);
-        const [me] = await ctx.db.select({ kind: agents.kind, departmentId: agents.departmentId }).from(agents).where(eq(agents.id, job.agentId));
-        if (me?.kind !== 'orchestrator' && me?.departmentId !== task.departmentId) return say(`#${task.number} is not of your department.`, true);
-        await resolveGoal(ctx, { agentId: job.agentId }, job.companyId, goalRefOf(task, on), why);
-        return say('Recorded: the goal is out of danger.');
-      }),
+    ({ task, why, on }) => readable(() => endGoalRisk(ctx, job, task, why, on)),
   );
 }
 

@@ -27,10 +27,14 @@ const refusesUnplanned = async (tx: Tx, task: Task, source: Source): Promise<boo
 /* The one gate every source goes through. A department that set a policy has said its waits have dates, so a new one with no
    owner or no plan is refused with the whole move; where it set none there is no date to make up, and the wait is kept without.
    One that stands keeps what it has, unless a promise is given for it now. */
+const rowOf = (task: Task, source: Source, last: TaskWait | undefined) => ({
+  taskId: task.id, kind: source.kind, sourceKey: source.sourceKey, sourceRevision: last ? last.sourceRevision + 1 : 0, sourceState: source.sourceState ?? {}, actor: source.actor,
+});
+
 export async function bindSource(tx: Tx, task: Task, source: Source): Promise<TaskWait> {
   const last = await lastOfSource(tx, task, source.kind, source.sourceKey);
   if (last && last.endedAt === null && !source.plan) return last;
-  const common = { taskId: task.id, kind: source.kind, sourceKey: source.sourceKey, sourceRevision: last ? last.sourceRevision + 1 : 0, sourceState: source.sourceState ?? {}, actor: source.actor };
+  const common = rowOf(task, source, last);
   const plan = source.plan ?? await policyPlan(tx, task, source);
   if (plan && source.owner) return syncSourceWaits(tx, { ...common, ownerBinding: source.owner, plan });
   if (await refusesUnplanned(tx, task, source)) throw unplanned(task, source);

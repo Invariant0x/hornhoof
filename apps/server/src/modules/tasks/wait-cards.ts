@@ -21,21 +21,28 @@ const aboutOf = (card: typeof waitNotices.$inferSelect): WaitCardKind => {
   return card.guard.wait?.ordinal !== undefined ? 'final_review' : 'late';
 };
 
+const olderThan = (place: WaitPlace | null) => (place
+  ? or(lt(waitNotices.createdAt, place.at), and(eq(waitNotices.createdAt, place.at), lt(waitNotices.id, place.id)))
+  : undefined);
+
+type CardRow = { card: typeof waitNotices.$inferSelect; kind: WaitSourceKind | null; waitTask: string | null };
+const taskIdOf = (row: CardRow): string | null => row.waitTask ?? row.card.guard.turn?.taskId ?? null;
+
+const cardOf = (row: CardRow, task: typeof tasks.$inferSelect): WaitCard => ({
+  id: row.card.id, about: aboutOf(row.card), taskId: task.id, number: task.number, kind: row.kind, level: row.card.level, words: row.card.message.text, at: row.card.createdAt.toISOString(),
+});
+
 export async function waitCards(ctx: Pick<Ctx, 'db'>, viewer: AgentViewer, page: { limit: number; before: WaitPlace | null }): Promise<CardPage> {
-  const rows = await ctx.db.select({ card: waitNotices, kind: taskWaits.kind, waitTask: taskWaits.taskId }).from(waitNotices)
+  const rows: CardRow[] = await ctx.db.select({ card: waitNotices, kind: taskWaits.kind, waitTask: taskWaits.taskId }).from(waitNotices)
     .leftJoin(taskWaits, eq(taskWaits.id, waitNotices.waitId))
-    .where(and(
-      eq(waitNotices.personId, viewer.personId), isNotNull(waitNotices.deliveredAt), isNull(waitNotices.acknowledgedAt),
-      page.before ? or(lt(waitNotices.createdAt, page.before.at), and(eq(waitNotices.createdAt, page.before.at), lt(waitNotices.id, page.before.id))) : undefined,
-    )).orderBy(desc(waitNotices.createdAt), desc(waitNotices.id)).limit(page.limit + 1);
+    .where(and(eq(waitNotices.personId, viewer.personId), isNotNull(waitNotices.deliveredAt), isNull(waitNotices.acknowledgedAt), olderThan(page.before)))
+    .orderBy(desc(waitNotices.createdAt), desc(waitNotices.id)).limit(page.limit + 1);
   const shown = rows.slice(0, page.limit);
-  const taskIdOf = (row: (typeof shown)[number]) => row.waitTask ?? row.card.guard.turn?.taskId ?? null;
   const ids = shown.flatMap(row => taskIdOf(row) ?? []);
   const places = ids.length ? await ctx.db.select().from(tasks).where(inArray(tasks.id, ids)) : [];
   const cards = shown.flatMap(row => {
     const task = places.find(t => t.id === taskIdOf(row));
-    if (!task || !canReach(viewer.access, taskSpot(task))) return [];
-    return [{ id: row.card.id, about: aboutOf(row.card), taskId: task.id, number: task.number, kind: row.kind, level: row.card.level, words: row.card.message.text, at: row.card.createdAt.toISOString() }];
+    return task && canReach(viewer.access, taskSpot(task)) ? [cardOf(row, task)] : [];
   });
   return { cards, next: rows.length > page.limit ? pageAfter(shown.at(-1)!.card) : null };
 }
