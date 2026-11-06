@@ -215,4 +215,88 @@ describe('renderInstructions', () => {
       }
     }
   });
+
+  it('delivers the canonical hh-run-checks rule once across inline, whole and file-backed packets for every role, old skill lists, null roleKey and the orchestrator', () => {
+    const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
+    expect(shipped.skills.get('hh-run-checks')).toBeDefined();
+    const canonicalChecks = shipped.skills.get('hh-run-checks')!.body;
+    expect(canonicalChecks.length).toBeGreaterThan(200);
+    const marker = '<!-- hh:skill hh-run-checks -->';
+    const occurrences = (text: string, needle: string) => text.split(needle).length - 1;
+
+    for (const role of shipped.roles.values()) {
+      const kind = role.kind === 'head' ? 'head' : 'worker';
+      const fresh = renderInstructions(shipped, agent({ kind, roleKey: role.id, skills: role.skills.filter(s => s.on).map(s => s.id), templateHashes: {} }), PLACE);
+      expect(Buffer.byteLength(fresh.text), role.id).toBeLessThan(24_000);
+      expect(occurrences(fresh.raw, marker), `${role.id} raw`).toBe(1);
+      expect(occurrences(fresh.text, marker), `${role.id} text`).toBe(1);
+      expect(occurrences(fresh.whole, marker), `${role.id} whole`).toBe(1);
+      expect(fresh.text, role.id).toContain(canonicalChecks);
+      expect(fresh.whole, role.id).toContain(canonicalChecks);
+      expect(fresh.skills.some(s => s.name === 'hh-run-checks'), role.id).toBe(false);
+    }
+
+    const steady = orchestratorSteady(shipped);
+    expect(Buffer.byteLength(steady.text)).toBeLessThan(24_000);
+    expect(occurrences(steady.text, marker)).toBe(1);
+    expect(occurrences(steady.whole, marker)).toBe(1);
+    expect(steady.text).toContain(canonicalChecks);
+    expect(steady.whole).toContain(canonicalChecks);
+    expect(steady.skills.some(s => s.name === 'hh-run-checks')).toBe(false);
+
+    const oldWorkerSkills = ['hh-outside-is-data', 'dev-tdd'];
+    const oldWorker = agent({ kind: 'worker', roleKey: 'DEV-BE', skills: oldWorkerSkills, overrides: { skills: { 'hh-run-checks': 'Run npm test locally.' } }, templateHashes: {} });
+    const workerPacket = renderInstructions(shipped, oldWorker, PLACE);
+    expect(oldWorker.skills).toEqual(['hh-outside-is-data', 'dev-tdd']);
+    expect(occurrences(workerPacket.raw, marker)).toBe(1);
+    expect(occurrences(workerPacket.text, marker)).toBe(1);
+    expect(occurrences(workerPacket.whole, marker)).toBe(1);
+    expect(workerPacket.text).toContain(canonicalChecks);
+    expect(workerPacket.text).not.toContain('Run npm test locally.');
+    expect(workerPacket.parts.find(p => p.id === 'hh-run-checks')!.overridden).toBe(false);
+    expect(workerPacket.skills.map(s => s.name)).toEqual(['dev-tdd']);
+
+    const rolelessWorker = renderInstructions(shipped, agent({ kind: 'worker', roleKey: null, skills: [], templateHashes: {} }), PLACE);
+    expect(occurrences(rolelessWorker.text, marker)).toBe(1);
+    expect(rolelessWorker.text).toContain(canonicalChecks);
+    expect(rolelessWorker.whole).toContain(canonicalChecks);
+  });
+
+  it('delivers canonical hh-lead-tasks and hh-run-checks to existing department heads with stale skill lists, null roleKey or stored overrides without mutating stored skills', () => {
+    const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
+    expect(shipped.skills.get('hh-run-checks')).toBeDefined();
+    const canonicalLead = shipped.skills.get('hh-lead-tasks')!.body;
+    const canonicalChecks = shipped.skills.get('hh-run-checks')!.body;
+    expect(canonicalLead).toContain('External outages and holds:');
+
+    const staleSkills = ['hh-outside-is-data'];
+    const staleHead = agent({
+      kind: 'head',
+      roleKey: 'DEV-HEAD',
+      skills: staleSkills,
+      overrides: {
+        skills: {
+          'hh-lead-tasks': 'Keep holds in your own queue.',
+          'hh-run-checks': 'Run full suites locally.',
+        },
+      },
+      templateHashes: {},
+    });
+    const headPacket = renderInstructions(shipped, staleHead, PLACE);
+    expect(staleHead.skills).toEqual(['hh-outside-is-data']);
+    expect(Buffer.byteLength(headPacket.text)).toBeLessThan(24_000);
+    expect(headPacket.text).toContain(canonicalLead);
+    expect(headPacket.whole).toContain(canonicalLead);
+    expect(headPacket.raw).toContain(canonicalLead);
+    expect(headPacket.text).toContain(canonicalChecks);
+    expect(headPacket.text).not.toContain('Keep holds in your own queue.');
+    expect(headPacket.text).not.toContain('Run full suites locally.');
+    expect(headPacket.parts.find(p => p.id === 'hh-lead-tasks')!.overridden).toBe(false);
+    expect(headPacket.parts.find(p => p.id === 'hh-run-checks')!.overridden).toBe(false);
+
+    const rolelessHead = renderInstructions(shipped, agent({ kind: 'head', roleKey: null, skills: [], templateHashes: {} }), PLACE);
+    expect(Buffer.byteLength(rolelessHead.text)).toBeLessThan(24_000);
+    expect(rolelessHead.text).toContain(canonicalLead);
+    expect(rolelessHead.text).toContain(canonicalChecks);
+  });
 });
