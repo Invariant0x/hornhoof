@@ -835,30 +835,19 @@ describe('templates', () => {
     it('rejects review skill text that broadens mechanical to behavioral changes, mixed verdicts, mid-turn effort switches or incident facts', () => {
       const base = pair();
       expect(failedRuleIds(MECHANICAL_CATEGORY_RULES, base)).toEqual([]);
-      expect(failedRuleIds(MECHANICAL_CATEGORY_RULES, { ...base, verdict: `${base.verdict}\nClassify a public API rename as 'mechanical' when tests compile.` })).toContain(
-        'strict-behavior-unchanged-boundary',
-      );
-      expect(failedRuleIds(MECHANICAL_CATEGORY_RULES, { ...base, diff: `${base.diff}\nUse 'mechanical' when a fix may change behaviour only slightly.` })).toContain(
-        'strict-behavior-unchanged-boundary',
-      );
-      expect(failedRuleIds(MECHANICAL_CATEGORY_RULES, { ...base, verdict: `${base.verdict}\nWhen in doubt, mark the finding 'mechanical' so the fix finishes faster.` })).toContain(
-        'doubt-keeps-regular-category-and-full-base-level',
-      );
-      expect(failedRuleIds(MECHANICAL_CATEGORY_RULES, { ...base, diff: `${base.diff}\nClassify spec findings as 'mechanical' to run at medium.` })).toContain(
-        'doubt-keeps-regular-category-and-full-base-level',
-      );
-      expect(failedRuleIds(MECHANICAL_CATEGORY_RULES, { ...base, verdict: `${base.verdict}\nSet Wake.mechanical on mixed verdicts whenever one issue is mechanical.` })).toContain(
-        'server-aggregate-wake-mechanical-and-no-second-review',
-      );
-      expect(failedRuleIds(MECHANICAL_CATEGORY_RULES, { ...base, diff: `${base.diff}\nSwitch effort inside a running turn once a mechanical issue appears.` })).toContain(
-        'server-aggregate-wake-mechanical-and-no-second-review',
-      );
-      expect(failedRuleIds(MECHANICAL_CATEGORY_RULES, { ...base, verdict: `${base.verdict}\nOpen a second review for 'mechanical' findings after submission.` })).toContain(
-        'server-aggregate-wake-mechanical-and-no-second-review',
-      );
-      expect(failedRuleIds(MECHANICAL_CATEGORY_RULES, { ...base, diff: `${base.diff}\nAdded for Hornhoof task #311 by David on 2026-11-06.` })).toContain(
-        'abstract-english-no-incident-or-company-leaks',
-      );
+      const violations: [keyof MechanicalSkills, string, string][] = [
+        ['verdict', "Classify a public API rename as 'mechanical' when tests compile.", 'strict-behavior-unchanged-boundary'],
+        ['diff', "Use 'mechanical' when a fix may change behaviour only slightly.", 'strict-behavior-unchanged-boundary'],
+        ['verdict', "When in doubt, mark the finding 'mechanical' so the fix finishes faster.", 'doubt-keeps-regular-category-and-full-base-level'],
+        ['diff', "Classify spec findings as 'mechanical' to run at medium.", 'doubt-keeps-regular-category-and-full-base-level'],
+        ['verdict', 'Set Wake.mechanical on mixed verdicts whenever one issue is mechanical.', 'server-aggregate-wake-mechanical-and-no-second-review'],
+        ['diff', 'Switch effort inside a running turn once a mechanical issue appears.', 'server-aggregate-wake-mechanical-and-no-second-review'],
+        ['verdict', "Open a second review for 'mechanical' findings after submission.", 'server-aggregate-wake-mechanical-and-no-second-review'],
+        ['diff', 'Added for Hornhoof task #311 by David on 2026-11-06.', 'abstract-english-no-incident-or-company-leaks'],
+      ];
+      for (const [target, extra, expectedRule] of violations) {
+        expect(failedRuleIds(MECHANICAL_CATEGORY_RULES, { ...base, [target]: `${base[target]}\n${extra}` }), extra).toContain(expectedRule);
+      }
     });
   });
 });
