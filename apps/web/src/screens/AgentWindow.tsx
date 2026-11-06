@@ -459,7 +459,10 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
   /* Until its state and card come, the window cannot tell a terminal from a conversation, nor whether the agent can work. */
   const known = state !== null && (orchestrator || card !== null);
   const pictures = useDraftPictures(path);
-  const dragging = usePictureDrop(box, known, state?.ready ?? false, pictures.add);
+  const hasTerminal = Boolean(state?.terminal) && !noTerminal;
+  const terminal = hasTerminal && !asLog;
+  /* A terminal takes its words and pictures itself; only a window without one has a line to write in. */
+  const dragging = usePictureDrop(box, known && !terminal, state?.ready ?? false, pictures.add);
 
   useLayoutEffect(() => {
     const el = log.current;
@@ -502,22 +505,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
     void send();
   }
 
-  const hasTerminal = Boolean(state?.terminal) && !noTerminal;
-  const terminal = hasTerminal && !asLog;
   const hasPictures = pictures.drafts.length > 0;
-  /* Only the owner of the agent's plan types into its live terminal, which has its own line; a picture needs this one,
-     and stays there with the words beside it until they went. */
-  const hasLine = !terminal || !state?.canType || hasPictures || text.trim() !== '';
-  /* Someone the terminal takes no keys from starts in the line under it. */
-  const lineUnderTerminal = known && terminal && hasLine;
-  const hadLine = useRef(false);
-  /* In the commit the line comes or goes, so that no key falls between. */
-  useLayoutEffect(() => {
-    if (lineUnderTerminal) input.current?.focus();
-    /* The line was there for a picture: back to where this person types. */
-    else if (hadLine.current) focusLine();
-    hadLine.current = lineUnderTerminal;
-  }, [lineUnderTerminal]);
   useLayoutEffect(() => {
     if (hasPictures) input.current?.focus();
   }, [hasPictures]);
@@ -663,7 +651,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
         </div>
       )}
       {known && terminal && (
-        <AgentTerminal path={`/api/agents/${agentId}/terminal`} program={sub ? PROGRAM_NAMES[sub.provider] : 'Claude'} onGone={() => setNoTerminal(true)} watching={hasLine} />
+        <AgentTerminal path={`/api/agents/${agentId}/terminal`} program={sub ? PROGRAM_NAMES[sub.provider] : 'Claude'} onGone={() => setNoTerminal(true)} />
       )}
       {known && terminal && hasCards && (
         <div className="t-cards">
@@ -712,7 +700,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
           {errorText(t, pictures.refused)}
         </p>
       )}
-      {known && hasLine && (
+      {known && !terminal && (
         <form
           className="t-in"
           onSubmit={e => {
@@ -731,7 +719,7 @@ export function AgentWindow({ me, org, agentId, staff = null, onClose, place, re
       )}
       <div className="t-st">
         {known && <span>{where}</span>}
-        {known && hasLine && <span>{t.window.hint}</span>}
+        {known && !terminal && <span>{t.window.hint}</span>}
       </div>
     </AgentWindowLayout>
   );

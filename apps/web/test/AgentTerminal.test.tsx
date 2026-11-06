@@ -370,12 +370,11 @@ describe("an agent's live terminal in its window", () => {
     expect(terms.at(-1)!.focused).toBe(1);
   });
 
-  it('leaves the focus to the line under it for someone who only watches', async () => {
+  it('takes the focus for a person who writes to an agent on the plan of someone else, with no line under it', async () => {
     open(true, { canType: false });
-    const line = await screen.findByRole('textbox', { name: 'Write to the orchestrator' });
     await socket();
-    expect(terms.at(-1)!.focused).toBe(0);
-    expect(line).toHaveFocus();
+    expect(terms.at(-1)!.focused).toBe(1);
+    expect(screen.queryByRole('textbox', { name: 'Write to the orchestrator' })).not.toBeInTheDocument();
   });
 
   it('offers Stop above the terminal while the agent works', async () => {

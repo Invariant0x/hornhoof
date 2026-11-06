@@ -88,6 +88,7 @@ export type ErrorReason =
   | 'task_closed'
   | 'task_changed'
   | 'task_not_yours'
+  | 'test_mode_conflict'
   | 'task_invalid'
   | 'request_unknown'
   | 'request_closed'
