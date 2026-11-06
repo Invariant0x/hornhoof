@@ -4,11 +4,46 @@ import { MaterialManifest } from '@hornhoof/protocol';
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
+import { ApiError } from '../src/errors.js';
+import { parseMaterialSubmission } from '../src/modules/tasks/request-materials.js';
 import { agentEvents, agents, attachments, companies, departments, jobs, people, proposals, requestInternal, requests, taskEvents, tasks } from '../src/db/schema.js';
 import { as, invitePerson, listen, mcp, openStream, ownPlan, setUpCompany, testApp, until } from './helpers.js';
 
 const PNG = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.alloc(64, 1)]);
 const PRIVATE = 'PRIVATE_MATERIAL_SOURCE_AND_RECIPIENTS';
+
+describe('material submission metadata', () => {
+  const link = { kind: 'link', name: 'Result', url: 'https://example.com/result' };
+
+  it('does not invent a file for an action-only source', () => {
+    expect(parseMaterialSubmission(undefined, 0, false)).toBeUndefined();
+    const action = { presentation: 'action', common: [], options: [] };
+    expect(parseMaterialSubmission(action, 0, false)).toEqual(action);
+  });
+
+  it('retains the exact source option order and each result material', () => {
+    const input = { presentation: 'result', common: [], options: [[link], [{ ...link, name: 'Other result', url: 'https://example.com/other' }]] };
+    expect(parseMaterialSubmission(input, 2, true)).toEqual(input);
+  });
+
+  it.each([
+    [undefined, 0, true, 'materials_required'],
+    [{ presentation: 'action', common: [], options: [] }, 0, true, 'materials_required'],
+    [{ presentation: 'result', common: [], options: [] }, 0, false, 'materials_required'],
+    [{ presentation: 'result', common: [link], options: [[], []] }, 2, true, 'materials_required'],
+    [{ presentation: 'result', common: [], options: [[link]] }, 2, true, 'materials_invalid'],
+    [{ presentation: 'result', common: [link], options: [], canRead: true }, 0, true, 'materials_invalid'],
+    [{ presentation: 'result', common: [{ ...link, url: 'https://user:secret@example.com/' }], options: [] }, 0, true, 'materials_invalid'],
+  ] as const)('refuses invalid source metadata case %# with an attachment hint', (input, options, required, reason) => {
+    let error: unknown;
+    try { parseMaterialSubmission(input, options, required); } catch (caught) { error = caught; }
+    expect(error).toBeInstanceOf(ApiError);
+    const failure = error as ApiError;
+    expect(failure.reason).toBe(reason);
+    expect(failure.message).toContain('hh-attach --task');
+    expect(failure.message).not.toContain('secret');
+  });
+});
 
 /* Existing immutable pictures, not a new unclassified question producer. */
 async function legacy() {
