@@ -62,8 +62,7 @@ function NotebookItems({ notes, editing, busy, onEdit, onSave, onCancel, onRemov
           ) : (
             <>
               <div className="entry-main">
-                <b>#{n.number}</b>
-                <span>{n.text}</span>
+                <p><b>#{n.number}</b> {n.text}</p>
                 <small className="entry-meta">{who(n)}</small>
               </div>
               <div className="entry-actions" role="group" aria-label={t.notebook.note(n.number)}>
