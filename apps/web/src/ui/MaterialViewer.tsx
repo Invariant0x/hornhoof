@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useT, type Messages } from '../i18n';
 import { MaterialDocument } from './MaterialDocument';
@@ -43,6 +43,45 @@ export function materialKindLabel(t: Messages, item: { kind: 'image' | 'document
 export function materialMetaLine(t: Messages, item: { kind: 'image' | 'document' | 'file' | 'link'; format?: 'text' | 'markdown' | 'pdf'; size?: number | null }): string {
   const kind = materialKindLabel(t, item);
   return typeof item.size === 'number' ? `${kind} · ${formatFileSize(t, item.size)}` : kind;
+}
+
+export type MaterialGlyphKind = 'download' | 'image' | 'document' | 'file' | 'link';
+
+const GLYPH_ELEMENTS: Record<MaterialGlyphKind, ReactNode> = {
+  download: <path d="M12 4v11M8 11l4 4 4-4M5 20h14" />,
+  image: (
+    <>
+      <rect x="3" y="5" width="18" height="14" />
+      <circle cx="9" cy="10" r="1.6" />
+      <path d="M4 18l5-5 4 4 3-3 4 4" />
+    </>
+  ),
+  document: (
+    <>
+      <path d="M6 3h8l4 4v14H6z" />
+      <path d="M14 3v4h4M9 12h6M9 16h6" />
+    </>
+  ),
+  file: (
+    <>
+      <path d="M6 3h8l4 4v14H6z" />
+      <path d="M14 3v4h4" />
+    </>
+  ),
+  link: (
+    <>
+      <path d="M10 14a4 4 0 0 0 6 0l3-3a4 4 0 0 0-6-6l-1 1" />
+      <path d="M14 10a4 4 0 0 0-6 0l-3 3a4 4 0 0 0 6 6l1-1" />
+    </>
+  ),
+};
+
+export function MaterialGlyph({ icon }: { icon: MaterialGlyphKind }) {
+  return (
+    <svg data-icon={icon} viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {GLYPH_ELEMENTS[icon]}
+    </svg>
+  );
 }
 
 function addFreshInert(targets: HTMLElement[], el: Element | null) {
@@ -125,7 +164,7 @@ function ImageStage({ item, zoom, onToggleDoubleClick }: { item: ViewerAvailable
         </p>
         <div className="entry-actions">
           <button
-            className="btn small"
+            className="btn"
             type="button"
             onClick={() => {
               setFailed(false);
@@ -139,10 +178,11 @@ function ImageStage({ item, zoom, onToggleDoubleClick }: { item: ViewerAvailable
     );
   }
 
-  const scaledStyle = zoom > 1 ? { width: `${zoom * 100}%`, maxWidth: 'none', maxHeight: 'none' } : undefined;
+  const picStyle = zoom > 1 ? { inlineSize: `${zoom * 100}%`, blockSize: `${zoom * 100}%` } : undefined;
+  const imgStyle = zoom > 1 ? { inlineSize: '100%', blockSize: '100%', objectFit: 'contain' as const } : undefined;
   return (
-    <div className={zoom === 1 ? 'mv-pic fit' : 'mv-pic'} onDoubleClick={onToggleDoubleClick}>
-      <img key={retrySeq} src={item.contentUrl} alt={displayFileName(item.name)} style={scaledStyle} onLoad={() => setFailed(false)} onError={() => setFailed(true)} />
+    <div className={zoom === 1 ? 'mv-pic fit' : 'mv-pic'} style={picStyle} onDoubleClick={onToggleDoubleClick}>
+      <img key={retrySeq} src={item.contentUrl} alt={displayFileName(item.name)} style={imgStyle} onLoad={() => setFailed(false)} onError={() => setFailed(true)} />
     </div>
   );
 }
@@ -152,7 +192,9 @@ function FileStage({ item }: { item: ViewerAvailableMaterial }) {
   const downloadHref = item.downloadUrl ?? null;
   return (
     <div className="mv-card">
-      <p className="mv-kind">{materialMetaLine(t, item)}</p>
+      <span className="mv-kind">
+        <MaterialGlyph icon={downloadHref ? 'download' : 'file'} />
+      </span>
       <p>{downloadHref ? t.tasks.materials.noFilePreview : t.tasks.materials.noFileDownload}</p>
       {downloadHref && (
         <div className="entry-actions">
@@ -170,7 +212,9 @@ function LinkStage({ item }: { item: ViewerAvailableMaterial }) {
   const safeHref = safeExternalHttpUrl(item.url);
   return (
     <div className="mv-card">
-      <p className="mv-kind">{materialKindLabel(t, item)}</p>
+      <span className="mv-kind">
+        <MaterialGlyph icon="link" />
+      </span>
       {item.url && (
         <p className="mv-url" dir="ltr">
           {item.url}
@@ -212,7 +256,7 @@ function ZoomControls({ zoom, onStep, onReset }: { zoom: number; onStep: (delta:
       <button className="act" type="button" aria-label={t.tasks.materials.zoomOut} disabled={zoom <= ZOOM_MIN} onClick={() => onStep(-ZOOM_STEP)}>
         -
       </button>
-      <span className="mv-zval" aria-live="polite">{`×${zoom}`}</span>
+      <span className="mv-level" aria-live="polite">{`×${zoom}`}</span>
       <button className="act" type="button" aria-label={t.tasks.materials.zoomIn} disabled={zoom >= ZOOM_MAX} onClick={() => onStep(ZOOM_STEP)}>
         +
       </button>

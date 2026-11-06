@@ -23,7 +23,11 @@ const SOURCE_SHA = (() => {
 
 const DICTS = { en, ru } as const;
 const ONE_PIXEL_PNG = Buffer.from(
-  'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAFCAYAAAB4ka1VAAAAFElEQVR42mNk+M9QzwAEjDAGNzYAAIoaB/5272YjAAAAAElFTkSuQmCC',
+  'iVBORw0KGgoAAAANSUhEUgAAAUAAAADICAIAAAAWZq/8AAADmklEQVR4nO3boU1FQRRFUSrAYRGUQA30H4qgEByCYHg/+cPmrGSJkUfcLefh4f0DqDq/ALjs/ALgsq/X49MzkCBgCBMwhAkYwgQMYQKGMAFDmIAhTMAQJmAIEzCECRjCBAxhtwZ8/hMG/C8ChjABQ5iAIUzAECZgCBMwhAkYwgQMYQKGMAFDmIAh7K4BAwcJGMIEDGEChjABQ5iAIUzAECZgCBMwhAkYwgQMYQKGMAFDmIAhTMAQJmAIuzXgl9c3/pTfXsDxwXwj4GkCrhPwNAHXCXiagOsEPE3AdQKeJuA6AU8TcJ2Apwm4TsDTBFwn4GkCrhPwNAHXCXiagOsEPE3AdQKeJuA6AU8TcJ2Apwm4TsDTBFwn4GkCrhPwNAHXCXiagOsEPE3AdQKeJuA6AU8TcJ2Apwm4TsDTBFwn4GkCrhPwNAHXCXiagOsEPE3AdQKeJuA6AU8TcJ2Apwm4TsDTBFwn4GkCrhPwNAHXCXiagOsEPE3AdQKeJuA6AU8TcJ2Apwm4TsDTBFwn4GkCrhPwNAHXCXiagOsEPE3AdQKeJuA6AU8TcJ2Apwm4TsDTBFwn4GkCrhPwNAHXCXiagOsEPE3AdQKeJuA6AU8TcJ2Apwm4TsDTBFwn4GkCrhPwNAHXCXiagOsEPE3AdQKeJuA6AU8TcJ2Apwm4TsDTBFwn4GkCrhPwNAHXCXiagOsEPE3AdQKeJuA6AU8TcJ2Apwm4TsDTBFwn4GkCrhPwNAHXCXiagOsEPE3AdQKeJuA6AU8TcJ2Apwm4TsDTBFwn4GkCrhPwNAHXCXiagOsEPE3AdQKeJuA6AU8TcJ2Apwm4TsDTBFwn4GkCrhPwNAHXCXiagOsEPE3AdQKeJuA6AU8TcJ2Apwm4TsDTBFwn4GkCrhPwNAHXCXiagOsEPE3AdQKeJuA6AU8TcJ2Apwm4TsDTBFwn4GkCrhPwNAHXCXiagOsEPE3AdQKeJuA6AU8TcJ2Apwm4TsDTBFwn4GkCrhPwNAHXCXiagOsEPE3AdQKeJuA6AU8TcJ2Apwm4TsDTBFwn4GkCrhPwNAHXCXiagOsEPE3AdQKeJuA6AU8TcJ2Apwm4TsDTBFwn4GkCrhPwNAHXCXiagOsEPE3AdQKeJuA6AU8TcJ2Apwm47q4BAwcJGMIEDGEChjABQ5iAIUzAECZgCBMwhAkYwgQMYQKGMAFDmIAhTMAQJmAIEzCE/RAw0HN+AXDZ+QXAVZ86F6WhE4pguwAAAABJRU5ErkJggg==',
+  'base64',
+);
+const ALT_PREVIEW_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAUAAAADICAIAAAAWZq/8AAAChUlEQVR4nO3boRECURQEQSLAYRGEcDEQMZERAhKD4qj/bqiu6gDWjNzT87EBUafxBcDXBAxh74DPlyuQIGAIEzCECRjCBAxhAoYwAUOYgCFMwBAmYAgTMIQJGMIEDGF7Ax4/YcCfETCECRjCBAxhAoYwAUOYgCFMwBAmYAgTMIQJGMIEDGFLAwYGCRjCBAxhAoYwAUOYgCFMwBAmYAgTMIQJGMIEDGEChjABQ5iAIUzAECZgCNsb8G27Az8kYAgTMIQJGMIEDGEChjABQ5iAIUzAECZgCBMwhAkYwgQMYQKGMAFDmIAhTMAQJmAIEzCECRjCBAxhAoYwAUOYgCFMwBAmYAhbGjAwSMAQJmAIEzCECRjCBAxhAoYwAUOYgCFMwBAmYAgTMIQ5M8CxCBjCBAxhAoYwAUOYgCFMwBAmYAgTMIQJGMIEDGEChjABQ5iAIUzAECZgCBMwhAkYwgQMYQKGMAFDmIAhTMAQJmAIEzCECRjClgYMDBIwhAkYwgQMYQKGMAFDmIAhTMAQJmAIEzCECRjCBAxhzgxwLAKGMAFDmIAhTMAQJmAIEzCECRjCBAxhAoYwAUOYgCFMwBAmYAgTMIQJGMIEDGEChjABQ5iAIUzAECZgCBMwhAkYwgQMYQKGsKUBA4MEDGEChjABQ5iAIUzAECZgCBMwhAkYwgQMYQKGMAFDmDMDHIuAIUzAECZgCBMwhAkYwgQMYQKGMAFDmIAhTMAQJmAIEzCECRjCBAxhAoYwAUOYgCFMwBAmYAgTMIQJGMKWBgwMEjCECRjCBAxhAoYwAUOYgCFMwBAmYAgTMIQJGMIEDGEChjABQ5iAIUzAECZgCPsQMJAjYAgTMIS9ACDWIaizQwNAAAAAAElFTkSuQmCC',
   'base64',
 );
 
@@ -249,7 +253,8 @@ async function mountFixtureRoutes(page: Page) {
       return;
     }
     if (url.pathname.startsWith('/api/attachments/')) {
-      await route.fulfill({ status: 200, contentType: 'image/png', body: ONE_PIXEL_PNG });
+      const body = url.pathname.endsWith('/att-b') ? ALT_PREVIEW_PNG : ONE_PIXEL_PNG;
+      await route.fulfill({ status: 200, contentType: 'image/png', body });
       return;
     }
     if (url.pathname === `/api/requests/${reqId}/materials`) {
@@ -335,7 +340,13 @@ test('renders materials list and fullscreen viewer across dynamic shipped locale
         await expect(choiceCard).toBeVisible();
         const scrollOverflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
         expect(scrollOverflow, `list overflow at ${lang} ${theme} ${width}`).toBeLessThanOrEqual(1);
-        const emitKey = (lang === 'ru' && theme === 'dark' && (width === 375 || width === 1440)) || (lang === 'en' && theme === 'light' && width === 1440);
+        const termBox = await choiceCard.locator('button.req-term').boundingBox();
+        expect(termBox?.height ?? 0, `req-term >= 44px at ${lang} ${theme} ${width}`).toBeGreaterThanOrEqual(43.5);
+        const pickBox = await choiceCard.locator('ol.opts .entry-actions button').first().boundingBox();
+        expect(pickBox?.height ?? 0, `choose option >= 44px at ${lang} ${theme} ${width}`).toBeGreaterThanOrEqual(43.5);
+        const emitKey =
+          (lang === 'ru' && theme === 'dark' && (width === 375 || width === 1440)) ||
+          (lang === 'en' && theme === 'light' && (width === 375 || width === 1440));
         await saveShot(page, info, `materials-list-${lang}-${theme}-${width}-${SOURCE_SHA.slice(0, 8)}.png`, emitKey);
 
         /* Open option 1 image in fullscreen viewer and verify zero answer posts. */
@@ -348,7 +359,8 @@ test('renders materials list and fullscreen viewer across dynamic shipped locale
           return mv.scrollWidth - mv.clientWidth;
         });
         expect(viewerOverflow, `viewer overflow at ${lang} ${theme} ${width}`).toBeLessThanOrEqual(1);
-        await saveShot(page, info, `materials-viewer-${lang}-${theme}-${width}-${SOURCE_SHA.slice(0, 8)}.png`, lang === 'ru' && theme === 'dark' && width === 375);
+        const emitViewer = (lang === 'ru' && theme === 'dark' && width === 375) || (lang === 'en' && theme === 'light' && width === 1440);
+        await saveShot(page, info, `materials-viewer-${lang}-${theme}-${width}-${SOURCE_SHA.slice(0, 8)}.png`, emitViewer);
 
         await dialog.getByRole('button', { name: t.tasks.materials.close }).click();
         await expect(dialog).toBeHidden();
@@ -382,7 +394,7 @@ import { ask, createTask } from './src/modules/tasks/engine.js';
 
 const secret = Buffer.alloc(32, 9).toString('base64');
 const commit = 'a'.repeat(40);
-const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAgAAAAFCAYAAAB4ka1VAAAAFElEQVR42mNk+M9QzwAEjDAGNzYAAIoaB/5272YjAAAAAElFTkSuQmCC', 'base64');
+const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAUAAAADICAIAAAAWZq/8AAAChUlEQVR4nO3boRECURQEQSLAYRGEcDEQMZERAhKD4qj/bqiu6gDWjNzT87EBUafxBcDXBAxh74DPlyuQIGAIEzCECRjCBAxhAoYwAUOYgCFMwBAmYAgTMIQJGMIEDGF7Ax4/YcCfETCECRjCBAxhAoYwAUOYgCFMwBAmYAgTMIQJGMIEDGFLAwYGCRjCBAxhAoYwAUOYgCFMwBAmYAgTMIQJGMIEDGEChjABQ5iAIUzAECZgCNsb8G27Az8kYAgTMIQJGMIEDGEChjABQ5iAIUzAECZgCBMwhAkYwgQMYQKGMAFDmIAhTMAQJmAIEzCECRjCBAxhAoYwAUOYgCFMwBAmYAhbGjAwSMAQJmAIEzCECRjCBAxhAoYwAUOYgCFMwBAmYAgTMIQ5M8CxCBjCBAxhAoYwAUOYgCFMwBAmYAgTMIQJGMIEDGEChjABQ5iAIUzAECZgCBMwhAkYwgQMYQKGMAFDmIAhTMAQJmAIEzCECRjClgYMDBIwhAkYwgQMYQKGMAFDmIAhTMAQJmAIEzCECRjCBAxhzgxwLAKGMAFDmIAhTMAQJmAIEzCECRjCBAxhAoYwAUOYgCFMwBAmYAgTMIQJGMIEDGEChjABQ5iAIUzAECZgCBMwhAkYwgQMYQKGsKUBA4MEDGEChjABQ5iAIUzAECZgCBMwhAkYwgQMYQKGMAFDmDMDHIuAIUzAECZgCBMwhAkYwgQMYQKGMAFDmIAhTMAQJmAIEzCECRjCBAxhAoYwAUOYgCFMwBAmYAgTMIQJGMKWBgwMEjCECRjCBAxhAoYwAUOYgCFMwBAmYAgTMIQJGMIEDGEChjABQ5iAIUzAECZgCPsQMJAjYAgTMIS9ACDWIaizQwNAAAAAAElFTkSuQmCC', 'base64');
 const client = new PGlite();
 const db = drizzle(client, { schema });
 await migrate(db, { migrationsFolder: MIGRATIONS });
@@ -739,7 +751,8 @@ test('renders real 2-page PDF via bundled pdfjs-dist without OpenAction or exter
       return route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ error: { code: 'forbidden', message: 'Access revoked' } }) });
     }
     if (url.pathname.endsWith('/content')) {
-      return route.fulfill({ status: 200, contentType: 'image/png', body: ONE_PIXEL_PNG });
+      const body = url.pathname.includes(opt2Img) ? ALT_PREVIEW_PNG : ONE_PIXEL_PNG;
+      return route.fulfill({ status: 200, contentType: 'image/png', body });
     }
     if (url.pathname === '/api/stream') return route.fulfill({ status: 200, contentType: 'text/event-stream', body: ': keepalive\n\n' });
     return route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
@@ -766,13 +779,17 @@ test('renders real 2-page PDF via bundled pdfjs-dist without OpenAction or exter
   const dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible();
   await expect(dialog.locator('.mv-page')).toHaveCount(2);
+  await expect(dialog.locator('.mv-page canvas[data-rendered="true"]')).toHaveCount(2);
   await expect(dialog).toContainText('FIRST PAGE');
   await expect(dialog).toContainText('LAST PAGE SENTINEL');
   const firstCanvasNonEmpty = await dialog.locator('.mv-page canvas').first().evaluate((c: HTMLCanvasElement) => {
     const ctx = c.getContext('2d');
     if (!ctx || c.width === 0 || c.height === 0) return false;
     const data = ctx.getImageData(0, 0, c.width, c.height).data;
-    return data.some((v, i) => i % 4 !== 3 && v < 240);
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i + 3]! > 0 && (data[i]! < 240 || data[i + 1]! < 240 || data[i + 2]! < 240)) return true;
+    }
+    return false;
   });
   expect(firstCanvasNonEmpty).toBe(true);
   expect(externalPdfFetchCount).toBe(0);

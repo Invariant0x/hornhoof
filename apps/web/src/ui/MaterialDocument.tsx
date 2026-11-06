@@ -129,18 +129,24 @@ async function fetchPdfState(contentUrl: string, signal: AbortSignal, t: Message
   return parsePdfBytes(streamed.bytes);
 }
 
+function paintPdfCanvas(el: HTMLCanvasElement | null, page: PdfPageView): void {
+  if (!el) return;
+  void page.renderToCanvas(el).then(() => {
+    el.dataset.rendered = 'true';
+  });
+}
+
 function PdfCanvasPage({ page, label }: { page: PdfPageView; label: string }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
-    const el = canvasRef.current;
-    if (el) void page.renderToCanvas(el);
+    paintPdfCanvas(canvasRef.current, page);
   }, [page]);
 
   return (
     <section className="mv-page">
       <span className="mv-page-n">{label}</span>
-      <canvas ref={canvasRef} width={page.width} height={page.height} />
+      <canvas ref={canvasRef} width={page.width} height={page.height} style={{ maxInlineSize: '100%', blockSize: 'auto' }} />
       {page.text && <p className="mv-page-text">{page.text}</p>}
     </section>
   );

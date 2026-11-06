@@ -44,6 +44,15 @@ const approvalBody = (approve: boolean, text: string) => (text.trim() ? { approv
 const optionMaterialsAt = (manifest: MaterialManifestView, index: number): MaterialItem[] => manifest.options[index]?.materials ?? [];
 const anyOptionHasMaterials = (manifest: MaterialManifestView): boolean => manifest.options.some(o => o.materials.length > 0);
 
+function OptionHeading({ index, label }: { index: number; label: string }) {
+  return (
+    <p className="opt-name">
+      <span className="opt-n">{index + 1}</span>
+      <span>{label}</span>
+    </p>
+  );
+}
+
 function ReadOnlyChoice({
   options,
   manifest,
@@ -58,10 +67,8 @@ function ReadOnlyChoice({
       <ol className="opts">
         {options.map((o, i) => (
           <li key={i} className="opt">
+            <OptionHeading index={i} label={o.label} />
             <OptionMaterialItems items={optionMaterialsAt(manifest, i)} onOpen={onOpenMaterial} />
-            <div className="opt-body">
-              <p className="opt-label">{o.label}</p>
-            </div>
           </li>
         ))}
       </ol>
@@ -153,14 +160,12 @@ function OptionCardsChoice({
     <ol className="opts">
       {options.map((o, i) => (
         <li key={i} className="opt">
+          <OptionHeading index={i} label={o.label} />
           <OptionMaterialItems items={optionMaterialsAt(manifest, i)} onOpen={onOpenMaterial} />
-          <div className="opt-body">
-            <p className="opt-label">{o.label}</p>
-            <div className="entry-actions">
-              <button className="btn small" type="button" disabled={busy} onClick={() => onPick(i)}>
-                {t.tasks.chooseOption(i + 1)}
-              </button>
-            </div>
+          <div className="entry-actions">
+            <button className="btn" type="button" disabled={busy} onClick={() => onPick(i)}>
+              {t.tasks.chooseOption(i + 1)}
+            </button>
           </div>
         </li>
       ))}
@@ -172,7 +177,7 @@ function PlainChoiceButtons({ options, busy, onPick }: { options: WaitingRequest
   return (
     <div className="choice-list req-options">
       {options.map((o, i) => (
-        <button key={i} className="act req-option" type="button" disabled={busy} onClick={() => onPick(i)}>
+        <button key={i} className="req-option" type="button" disabled={busy} onClick={() => onPick(i)}>
           <span>{o.label}</span>
         </button>
       ))}
@@ -206,7 +211,7 @@ function ChoiceForm({ options, manifest, text, busy, onText, onPick, onSubmit, o
           {p => <textarea {...p} rows={3} value={text} onChange={e => onText(e.target.value)} />}
         </Field>
         <div className="req-actions entry-actions">
-          <button className="btn small" type="submit" disabled={busy || !text.trim()}>
+          <button className="btn ghost" type="submit" disabled={busy || !text.trim()}>
             {t.tasks.sendFeedback}
           </button>
         </div>
@@ -231,12 +236,12 @@ function QuestionForm({ stuck, text, busy, onText, onSubmit, onCancel }: Questio
       <Field label={t.tasks.yourAnswer}>
         {p => <textarea {...p} rows={3} value={text} onChange={e => onText(e.target.value)} />}
       </Field>
-      <div className="req-actions">
-        <button className="btn small" type="submit" disabled={busy || !text.trim()}>
+      <div className="req-actions entry-actions">
+        <button className="btn" type="submit" disabled={busy || !text.trim()}>
           {t.tasks.sendAnswer}
         </button>
         {stuck && (
-          <button className="btn small ghost" type="button" disabled={busy} onClick={onCancel}>
+          <button className="btn ghost" type="button" disabled={busy} onClick={onCancel}>
             {t.tasks.cancelTask}
           </button>
         )}
@@ -259,11 +264,11 @@ function ApprovalForm({ request, text, busy, onText, onDecide }: ApprovalProps) 
     <div className="req-form">
       <ApprovedCommit request={request} />
       <Field label={t.tasks.note}>{p => <textarea {...p} rows={3} value={text} onChange={e => onText(e.target.value)} />}</Field>
-      <div className="req-actions">
-        <button className="btn small" type="button" disabled={busy} onClick={() => onDecide(true)}>
+      <div className="req-actions entry-actions">
+        <button className="btn" type="button" disabled={busy} onClick={() => onDecide(true)}>
           {t.tasks.approve}
         </button>
-        <button className="btn small ghost" type="button" disabled={busy} onClick={() => onDecide(false)}>
+        <button className="btn ghost" type="button" disabled={busy} onClick={() => onDecide(false)}>
           {t.tasks.decline}
         </button>
       </div>

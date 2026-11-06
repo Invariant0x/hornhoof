@@ -340,11 +340,13 @@ describe('separate question materials preview and explicit answering (#512)', ()
     const fileDialog = await screen.findByRole('dialog', { name: 'bundle.zip' });
     expect(within(fileDialog).getByText('Material 1 of 3')).toBeInTheDocument();
     expect(within(fileDialog).getByRole('link', { name: 'Download file' })).toHaveAttribute('href', fileDownloadHref);
+    expect(fileDialog.querySelector('.mv-kind [data-icon="download"]')).not.toBeNull();
 
     fireEvent.keyDown(window, { key: 'ArrowLeft' });
     expect(within(fileDialog).getByRole('heading', { name: 'restricted-archive.bin' })).toBeInTheDocument();
     expect(within(fileDialog).getByText('Material 2 of 3')).toBeInTheDocument();
     expect(within(fileDialog).queryByRole('link', { name: 'Download file' })).not.toBeInTheDocument();
+    expect(fileDialog.querySelector('.mv-kind [data-icon="file"]')).not.toBeNull();
 
     fireEvent.keyDown(window, { key: 'ArrowLeft' });
     expect(within(fileDialog).getByRole('heading', { name: 'Staging preview' })).toBeInTheDocument();
