@@ -23,6 +23,8 @@ import { mechanicalVerdict } from './review-findings.js';
 import { verdictReview, type ReviewVerdict } from './review-verdict.js';
 import { pendingFixReviews, prepareFixReviews } from './review-fixes.js';
 import { checkIndependent, currentIndependent, type IndependentDeclaration, type IndependentPartInput } from './independent.js';
+import type { WaitPlan } from '@hornhoof/protocol/waits';
+import { bindAfter, bindRequest, bindTurnReview, endAfter, endRequest, keepWaitsWithMove, rebindAfter, type AfterPlans } from './wait-producers.js';
 
 export type Task = typeof tasks.$inferSelect;
 export type Request = typeof requests.$inferSelect;
@@ -209,12 +211,13 @@ async function openTurnReview(tx: Tx, templates: Ctx['templates'], parent: Task,
       updatedAt: new Date(),
     })
     .returning();
-  await note(tx, row!, {
+  const event = await note(tx, row!, {
     kind: 'created',
     actor: { agentId: head },
     text: row!.brief,
     data: { assignee, gates: leads, after: [], panel, unable: unable.map(a => a.id), covers: covered.map(t => t.id), turnReview: true, gateTriggers, comparison: comparisonProof(result), review, reviewPlan },
   });
+  await bindTurnReview(tx, row!, { kind: 'created', actor: { agentId: head }, eventId: event.id });
   return { row: row!, wakes: turnReviewWakes(row!, head, branch, reviewPlan) };
 }
 
@@ -249,6 +252,11 @@ export async function openAfter(db: Db | Tx, task: Pick<Task, 'after'>): Promise
 async function refuseWaiting(db: Db | Tx, task: Task): Promise<void> {
   const open = await openAfter(db, task);
   if (open.length) throw refuse(409, 'task_invalid', `#${task.number} waits for ${listed(open)} first. You are woken once it can start.`);
+}
+
+/* A promise stands for one of the tasks it comes after, and for nothing else. */
+function checkAfterPlans(after: string[], plans: AfterPlans | undefined): void {
+  if (Object.keys(plans ?? {}).some(id => !after.includes(id))) throw refuse(400, 'task_invalid', 'A plan names a task this one does not come after.');
 }
 
 /* What a task comes after: tasks of the company in its own turn, each once and none cancelled. hold: they stay as read
@@ -315,7 +323,7 @@ const comingAfter = (of: Task[], waits: SQL) => and(eq(tasks.companyId, of[0]!.c
 /* A task is done: each task that came after it and waits for nothing else any more goes on with whoever holds it, and
    its log says why. rows: the tasks that started. Two tasks it waits for done at once would each see the other still
    open, so the waiting tasks are taken first and the second to be done sees the first. */
-async function startAfter(tx: Tx, done: Task): Promise<{ wakes: Wake[]; rows: Task[] }> {
+async function startAfter(tx: Tx, done: Task, actor: Actor): Promise<{ wakes: Wake[]; rows: Task[] }> {
   const waiting = await tx
     .select()
     .from(tasks)
@@ -325,6 +333,7 @@ async function startAfter(tx: Tx, done: Task): Promise<{ wakes: Wake[]; rows: Ta
   const wakes: Wake[] = [];
   const rows: Task[] = [];
   for (const t of waiting) {
+    await endAfter(tx, t, done, actor);
     if ((await openAfter(tx, t)).length) continue;
     const [row] = await tx.update(tasks).set({ version: sql`${tasks.version} + 1`, updatedAt: new Date() }).where(eq(tasks.id, t.id)).returning();
     const before = await tx.select({ number: tasks.number }).from(tasks).where(inArray(tasks.id, t.after)).orderBy(asc(tasks.number));
@@ -400,10 +409,11 @@ export async function move(ctx: Live, task: Task, set: Partial<Task>, n: Note, a
     const event = await note(tx, row, n, ctx.config);
     lit = await givesBack(tx, row, n, event);
     await also?.(tx, row);
+    await keepWaitsWithMove(tx, task, row, { kind: n.kind, actor: n.actor, eventId: event.id });
     if (CLOSED.includes(row.status) && row.parentId) wakes.push(...(await workUnderDone(tx, ctx.templates, row, n.actor.agentId, opened, comparison)));
     /* What waited for it starts with the same move, so its turn is kept with it. */
     if (row.status === 'done') {
-      const after = await startAfter(tx, row);
+      const after = await startAfter(tx, row, n.actor);
       wakes.push(...after.wakes);
       started = after.rows;
     }
@@ -494,6 +504,8 @@ export type NewTask = {
   gates?: string[];
   /* Tasks of the same turn that must be done first. */
   after?: string[];
+  /* What the giver promises for each of them, by id, in place of the department's dates. */
+  afterPlans?: AfterPlans;
   independentPart?: IndependentPartInput;
   independentNone?: string;
   /* Code given out without gates of its own: the review of its department's turn checks it. */
@@ -576,6 +588,7 @@ export async function createTask(ctx: Ctx, actor: Actor, input: NewTask): Promis
   if (!input.executor && input.gates?.length) throw refuse(400, 'task_invalid', 'Only a task with an executor has gates.');
   if (input.executor) await checkGates(ctx.db, assignee.companyId, assignee.id, gates, ctx.templates);
   if (!input.title.trim()) throw refuse(400, 'task_invalid', 'A task needs a title.');
+  checkAfterPlans(input.after ?? [], input.afterPlans);
   const declaration = checkIndependent(input.after ?? [], input.independentPart, input.independentNone, null);
   if (declaration?.kind === 'part') await checkIndependentExecutor(ctx.db, input.departmentId, declaration.part);
   const parent = input.parentId ? await loadTask(ctx.db, input.parentId) : null;
@@ -640,6 +653,7 @@ export async function createTask(ctx: Ctx, actor: Actor, input: NewTask): Promis
       ...(declaration?.kind === 'part' ? { independentPart: declaration.part } : declaration?.kind === 'none' ? { independentNone: declaration.reason } : {}),
       ...(input.inTurnReview ? { inTurnReview: true } : {}),
     } });
+    await bindAfter(tx, row!, after, input.afterPlans, actor);
     if (declaration?.kind === 'part') {
       const made = await insertIndependent(tx, row!, declaration.part, actor, input.inTurnReview);
       independent = made.child;
@@ -1011,6 +1025,7 @@ export async function report(ctx: Live, agentId: string, taskId: string, r: { do
   const row = await move(ctx, task, { status: 'waiting' }, n, async tx => {
     await letStuckGo(tx, task.id);
     const [note] = await tx.insert(requests).values({ companyId: task.companyId, taskId, agentId, kind: 'stuck', text: r.summary, decisionTopic: 'task' }).returning();
+    await bindRequest(tx, task, note!, { agentId }, { strict: false });
     wakes = await explaining(tx, task, agentId, note!.id);
     await keepWakes(tx, task.companyId, wakes);
   });
@@ -1065,7 +1080,8 @@ export async function cancel(ctx: Live, actor: Actor, taskId: string, why: strin
         .where(and(inArray(tasks.parentId, level), notInArray(tasks.status, [...CLOSED])))
         .returning();
       for (const t of below) {
-        await note(tx, t, { kind: 'cancelled', actor, text: `#${task.number} was cancelled.` });
+        const event = await note(tx, t, { kind: 'cancelled', actor, text: `#${task.number} was cancelled.` });
+        await keepWaitsWithMove(tx, t, t, { kind: 'cancelled', actor, eventId: event.id });
         /* Work cancelled with the task above it needs none of the turns kept for it. */
         await dropEarlierWakes(tx, t.id);
       }
@@ -1091,7 +1107,7 @@ export async function dropGate(ctx: Live, actor: Actor, task: Task, agentId: str
   return move(ctx, task, { gates }, { kind: 'updated', actor, data: { fields: ['gates'] } });
 }
 
-export type TaskChange = { title?: string; brief?: string; body?: string; executor?: string; gates?: string[]; after?: string[]; independentPart?: IndependentPartInput; independentNone?: string; workKind?: NonNullable<Task['workKind']>; riskClass?: NonNullable<Task['riskClass']> };
+export type TaskChange = { title?: string; brief?: string; body?: string; executor?: string; gates?: string[]; after?: string[]; afterPlans?: AfterPlans; independentPart?: IndependentPartInput; independentNone?: string; workKind?: NonNullable<Task['workKind']>; riskClass?: NonNullable<Task['riskClass']> };
 
 /* Runs fn on the task, and again on a fresh read of it when someone moved it meanwhile; null when it kept moving. */
 async function onFresh<T>(ctx: Live, task: Task, fn: (task: Task) => Promise<T>): Promise<T | null> {
@@ -1322,6 +1338,7 @@ export async function updateTask(ctx: Ctx, agentId: string, taskId: string, c: T
     fields.push('gates');
   }
   const waited = (await openAfter(ctx.db, task)).length > 0;
+  checkAfterPlans(c.after ?? task.after, c.afterPlans);
   const declarationInput = c.after !== undefined || c.independentPart !== undefined || c.independentNone !== undefined;
   const existing = declarationInput ? await currentIndependent(ctx.db, task.id) : null;
   const declaration = declarationInput ? checkIndependent(c.after ?? task.after, c.independentPart, c.independentNone, existing) : null;
@@ -1361,6 +1378,7 @@ export async function updateTask(ctx: Ctx, agentId: string, taskId: string, c: T
   const wakes: Wake[] = [];
   const also = async (tx: Tx, row: Task) => {
     if (handedOn) await handOver(tx);
+    if (set.after) await rebindAfter(tx, row, await checkAfter(tx, task.companyId, task.turnId, set.after), c.afterPlans, { agentId });
     if (createsIndependent) {
       const made = await insertIndependent(tx, row, declaration.part, { agentId }, reviewIndependent);
       independent = made.child;
@@ -1440,6 +1458,10 @@ export type Ask = {
   options?: RequestOption[];
   link?: string | null;
   topic?: DecisionTopic;
+  /* Who answers by when, if someone promised dates. */
+  plan?: WaitPlan;
+  /* What must reach a person even where the department set no dates for it. */
+  evenUnplanned?: boolean;
 };
 
 /* An approval of a commit lets it into the release, whatever the agent says it is about. */
@@ -1486,6 +1508,7 @@ export async function ask(ctx: Live, agentId: string, taskId: string, q: Ask): P
         ...approvalColumns(q.approval),
       })
       .returning();
+    await bindRequest(tx, task, request!, { agentId }, { plan: q.plan, strict: !q.evenUnplanned });
     wakes = await explaining(tx, task, agentId, request!.id);
     await keepWakes(tx, task.companyId, wakes);
     if (!pictures.length) return;
@@ -1558,6 +1581,7 @@ async function askAboutStill(ctx: Live, agentId: string, task: Task, silent: num
   let wakes: Wake[] = [];
   const row = await move(ctx, task, { silent, status: 'waiting' }, { kind: 'stuck', actor: { agentId }, text }, async tx => {
     const [note] = await tx.insert(requests).values({ companyId: task.companyId, taskId: task.id, agentId, kind: 'stuck', text, decisionTopic: 'task' }).returning();
+    await bindRequest(tx, task, note!, { agentId }, { strict: false });
     wakes = await explaining(tx, task, agentId, note!.id);
     await keepWakes(tx, task.companyId, wakes);
   });
@@ -1703,6 +1727,7 @@ export async function answer(ctx: Live, actor: Actor, requestId: string, a: Answ
       .where(and(eq(requests.id, requestId), eq(requests.status, 'open')))
       .returning();
     if (!request) throw refuse(409, 'request_closed', 'This request is answered already.');
+    await endRequest(tx, request, status, answerer(answeredBy, actor));
     await tx.update(tasks).set({ externalWait: null, silent: 0, version: sql`${tasks.version} + 1`, updatedAt: new Date() })
       .where(and(eq(tasks.id, task.id), isNotNull(tasks.externalWait)));
     const event = await note(tx, task, { kind: 'answered', actor, text: said, data: { requestId, kind: found.kind, status, ...forWhom }, inlineText }, ctx.config);

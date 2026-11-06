@@ -1,6 +1,7 @@
 import { turnCounts } from './turn-progress.js';
 import { and, asc, desc, eq, inArray, isNull, notInArray, sql, type SQL } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
+import { WaitPlan } from '@hornhoof/protocol/waits';
 import { z } from 'zod';
 import { Text } from './long-text.js';
 import type { Ctx } from '../../app.js';
@@ -25,6 +26,7 @@ import { workTree } from './tree.js';
 import { treeFacts } from './tree-facts.js';
 import { departmentPipeline } from './pipeline-report.js';
 import { detailFor, factsFor, linesFor, seesTask } from './sight.js';
+import { maskWaits, placeOf, waitHistory } from './wait-views.js';
 import { settle, tell, turnRows, type Turn } from './turns.js';
 import { leaveIfOff, stopTurns, wakeAll } from './wake.js';
 
@@ -38,9 +40,16 @@ const NewTaskBody = z.object({
   product: z.uuid().optional(),
   /* Tasks of the turn, by number, that must be done first. */
   after: z.array(z.number().int().positive()).max(10).optional(),
+  /* A promise of dates for an edge, where someone made one; without it the department's dates stand. */
+  afterPlans: z.array(z.strictObject({ task: z.number().int().positive(), plan: WaitPlan })).max(10).optional(),
   independentPart: z.strictObject({ title: z.string().trim().min(1).max(120), brief: z.string().max(600), body: z.string().trim().min(1).max(20000), executor: z.uuid() }).optional(),
   independentNone: z.string().trim().min(1).max(2000).optional(),
 });
+/* A promise of dates named by the task's number: one for a task it does not come after is refused with the rest of the change. */
+const afterPlansOf = (given: z.infer<typeof NewTaskBody>['afterPlans'], after: Task[]) =>
+  given ? Object.fromEntries(given.map(({ task, plan }) => [after.find(t => t.number === task)?.id ?? String(task), plan])) : undefined;
+
+const WaitsQuery = z.strictObject({ limit: z.coerce.number().int().min(1).max(100).default(50), before: z.string().max(100).optional() });
 const ListQuery = z.object({ department: z.uuid().optional(), status: z.enum(['open', 'closed', 'all']).default('open') });
 /* person: only the decisions this person owns, among those the viewer sees anyway. */
 const DecisionsQuery = z.object({ person: z.uuid().optional() }).strict();
@@ -224,9 +233,22 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const after = body.after?.length ? (await db.select().from(tasks).where(and(eq(tasks.companyId, me.companyId), inArray(tasks.number, body.after)))).filter(t => seesTask(viewer, t)) : [];
     const missing = (body.after ?? []).find(n => !after.some(t => t.number === n));
     if (missing !== undefined) throw refuse(400, 'task_invalid', `There is no task #${missing} to come after.`);
-    const moved = await createTask(ctx, actorOf(me), { title: body.title, brief: body.brief, body: body.body, departmentId: body.department ?? null, productId: body.product ?? null, assigneeAgentId: assignee.id, urgent: body.urgent, after: (body.after ?? []).map(n => after.find(t => t.number === n)!.id), independentPart: body.independentPart, independentNone: body.independentNone });
+    const moved = await createTask(ctx, actorOf(me), { title: body.title, brief: body.brief, body: body.body, departmentId: body.department ?? null, productId: body.product ?? null, assigneeAgentId: assignee.id, urgent: body.urgent, after: (body.after ?? []).map(n => after.find(t => t.number === n)!.id), afterPlans: afterPlansOf(body.afterPlans, after), independentPart: body.independentPart, independentNone: body.independentNone });
     await wakeAll(ctx, moved.wakes);
     return reply.code(201).send({ task: await detail(me, moved.task) });
+  });
+
+  /* The whole record of the waits on a task, a page at a time. */
+  app.get('/api/tasks/:id/waits', async req => {
+    const me = await requirePerson(req, db);
+    const { id } = IdParams.parse(req.params);
+    const { limit, before } = WaitsQuery.parse(req.query);
+    const place = before === undefined ? null : placeOf(before);
+    if (before !== undefined && !place) throw refuse(400, 'task_invalid', 'This names no place in the list.');
+    const task = await shown(me, id);
+    const viewer = await viewerOf(db, me);
+    const page = await waitHistory(db, task, t => seesTask(viewer, t), { limit, before: place });
+    return { ...page, waits: maskWaits(viewer, page.waits) };
   });
 
   app.post('/api/tasks/:id/comments', async (req, reply) => {

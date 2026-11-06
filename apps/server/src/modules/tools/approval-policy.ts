@@ -1,3 +1,4 @@
+import { WaitPlan } from '@hornhoof/protocol/waits';
 import { APPROVAL_MODES, ApprovalAmount, ApprovalChannel, approvalNeeded, kindKey, ruleOf } from '@hornhoof/protocol';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { and, count, eq, gte, inArray } from 'drizzle-orm';
@@ -33,7 +34,7 @@ const readable = async (fn: () => Promise<ReturnType<typeof say>>) => {
   }
 };
 
-type Asked = { channel: ApprovalChannel; kind: string; amount?: number | undefined; text: string; link?: string | undefined };
+type Asked = { channel: ApprovalChannel; kind: string; amount?: number | undefined; text: string; link?: string | undefined; plan?: WaitPlan | undefined };
 
 /* The rule of a channel of the task's department; a task of no department asks every time. */
 async function ruleFor(ctx: Pick<Ctx, 'db'>, task: Task, channel: ApprovalChannel) {
@@ -89,7 +90,7 @@ async function requestApproval(ctx: Ctx, job: ToolJob, ref: number | string, ask
     await wakeAll(ctx, (await comment(ctx, { agentId: job.agentId }, task.id, `Went without approval (${asked.channel}, ${kind}): ${why}. ${asked.text}`)).wakes);
     return say(`No approval needed: ${why}. Go on with the work.`);
   }
-  await askPerson(ctx, job, task, { kind: 'approval', text: asked.text, approval: { channel: asked.channel, kind, amount: asked.amount ?? null }, link: asked.link ?? null, topic: 'task' });
+  await askPerson(ctx, job, task, { kind: 'approval', text: asked.text, approval: { channel: asked.channel, kind, amount: asked.amount ?? null }, link: asked.link ?? null, topic: 'task', ...(asked.plan ? { plan: asked.plan } : {}) });
   return say(`Asked. #${task.number} waits for a person's answer; you will be woken with it.`);
 }
 
@@ -128,6 +129,7 @@ export function registerApprovalTools(server: McpServer, ctx: Ctx, job: ToolJob)
         amount: ApprovalAmount.optional(),
         text: z.string().trim().min(1).max(2000),
         link: z.url({ protocol: /^https$/ }).max(500).optional(),
+        plan: WaitPlan.optional().describe('Who answers by when, where someone promised dates. Without one the department\'s dates stand; a department that sets dates and has none for this refuses the request.'),
       },
     },
     ({ task, ...asked }: Asked & { task: number | string }) => readable(() => requestApproval(ctx, job, task, asked)),
@@ -143,7 +145,7 @@ export function registerApprovalTools(server: McpServer, ctx: Ctx, job: ToolJob)
     ({ task: ref, goal, why }) =>
       readable(async () => {
         const task = await heldTask(ctx, job, ref);
-        await askPerson(ctx, job, task, { kind: 'question', text: `Missed goal: ${goal}. ${why}` });
+        await askPerson(ctx, job, task, { kind: 'question', text: `Missed goal: ${goal}. ${why}`, evenUnplanned: true });
         return say(`Told the CEO. #${task.number} waits for the answer; you will be woken with it.`);
       }),
   );

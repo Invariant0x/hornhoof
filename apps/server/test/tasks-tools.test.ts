@@ -3,7 +3,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, companies, departments, jobs, people, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
+import { agents, companies, departments, jobs, people, requests, subscriptions, taskEvents, tasks, taskWaits, waitPolicies } from '../src/db/schema.js';
 import { createTask, submit, updateTask, type Task } from '../src/modules/tasks/engine.js';
 import { TASK_ANSWER } from '../src/modules/tasks/tools.js';
 import { listEvents } from '../src/modules/events/store.js';
@@ -284,5 +284,77 @@ describe("a task's kind and risk class", () => {
     expect((await asked({ workKind: 'feature' })).isError).toBe(true);
     expect((await asked({ riskClass: 'fun' })).isError).toBe(true);
     expect(await db.select().from(tasks)).toEqual([]);
+  });
+});
+
+describe('dates through the tools', () => {
+  const later = (hours: number) => new Date(Date.now() + hours * 3_600_000).toISOString();
+  const promise = (c: Awaited<ReturnType<typeof company>>) => ({
+    version: 1, ownerDueAt: later(1), headDueAt: later(2), decisionDueAt: later(3),
+    provenance: { kind: 'explicit_promise', actor: { personId: c.ceo.id }, ref: 'promise-1', revision: 1, origin: 'test' },
+    finalReview: { headAgentId: c.head.id, anchorAt: later(4), intervalMs: 3_600_000 },
+  });
+  const strict = (c: Awaited<ReturnType<typeof company>>) => c.db.insert(waitPolicies).values({ companyId: c.companyId, departmentId: c.dev.id, kind: 'review', stage: '', version: 1, ownerMs: 3_600_000, headMs: 7_200_000, decisionMs: 10_800_000, reviewIntervalMs: 14_400_000, createdByPersonId: c.ceo.id });
+  const piece = (title: string, executor: string, more: object = {}) => ({ title, brief: '', body: '', executor, gates: [], ...more });
+
+  it('takes a promise for one edge in create_task, and refuses what comes without one where dates are set', async () => {
+    const c = await company();
+    await strict(c);
+    const client = await c.tools(c.head);
+    const first = JSON.parse(text(await call(client, 'task', { task: (await createTask(c.ctx, { agentId: c.head.id }, { title: 'First', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.bruno.id, executor: true, gates: [] })).task.number })));
+    const without = await call(client, 'create_task', piece('Follow', c.rita.id, { after: [first.number], independentNone: 'One piece.' }));
+    expect(without.isError).toBe(true);
+    expect(text(without)).toContain('sets dates for its waits');
+    const made = await call(client, 'create_task', piece('Follow', c.rita.id, { after: [first.number], independentNone: 'One piece.', afterPlans: [{ task: first.number, plan: promise(c) }] }));
+    expect(made.isError, text(made)).toBeFalsy();
+    const [follow] = await c.db.select().from(tasks).where(eq(tasks.title, 'Follow'));
+    expect(await c.db.select().from(taskWaits).where(eq(taskWaits.taskId, follow!.id))).toMatchObject([{ kind: 'after', state: 'active', plan: { provenance: { kind: 'explicit_promise' } } }]);
+    const seen = JSON.parse(text(await call(client, 'task', { task: follow!.number })));
+    expect(seen.waits).toMatchObject([{ kind: 'after', state: 'active', owner: { agentId: c.bruno.id } }]);
+  });
+
+  it('takes a promise for what update_task adds', async () => {
+    const c = await company();
+    await strict(c);
+    const client = await c.tools(c.head);
+    const first = (await createTask(c.ctx, { agentId: c.head.id }, { title: 'First', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.bruno.id, executor: true, gates: [] })).task;
+    const later = (await createTask(c.ctx, { agentId: c.head.id }, { title: 'Later', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.rita.id, executor: true, gates: [] })).task;
+    const updated = await call(client, 'update_task', { task: later.number, after: [first.number], independentNone: 'One piece.', afterPlans: [{ task: first.number, plan: promise(c) }] });
+    expect(updated.isError, text(updated)).toBeFalsy();
+    expect(await c.db.select().from(taskWaits).where(eq(taskWaits.taskId, later.id))).toMatchObject([{ state: 'active' }]);
+  });
+
+  it('takes a promise in ask_person and request_approval, and says the same refusal without one', async () => {
+    const c = await company();
+    await strict(c);
+    const client = await c.tools(c.bruno);
+    const work = (await createTask(c.ctx, { agentId: c.head.id }, { title: 'Work', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.bruno.id, executor: true, gates: [] })).task;
+    const refused = await call(client, 'ask_person', { task: work.number, question: 'Which?', topic: 'task' });
+    expect(refused.isError).toBe(true);
+    expect(text(refused)).toContain('sets dates for its waits');
+    expect(await c.db.select().from(requests).where(eq(requests.taskId, work.id))).toEqual([]);
+    const asked = await call(client, 'ask_person', { task: work.number, question: 'Which?', topic: 'task', plan: promise(c) });
+    expect(asked.isError, text(asked)).toBeFalsy();
+    const approval = await call(client, 'request_approval', { task: work.number, channel: 'message', kind: 'welcome email', text: 'Send it?', plan: promise(c) });
+    expect(approval.isError, text(approval)).toBeFalsy();
+    expect((await c.db.select().from(taskWaits).where(eq(taskWaits.taskId, work.id))).map(w => w.kind)).toEqual(['person', 'person']);
+  });
+});
+
+describe('dates over HTTP', () => {
+  it('takes a promise for an edge in POST /api/tasks, and refuses without one where dates are set, with the same words', async () => {
+    const c = await company();
+    await c.db.insert(waitPolicies).values({ companyId: c.companyId, departmentId: c.dev.id, kind: 'review', stage: '', version: 1, ownerMs: 3_600_000, headMs: 7_200_000, decisionMs: 10_800_000, reviewIntervalMs: 14_400_000, createdByPersonId: c.ceo.id });
+    const first = (await createTask(c.ctx, { agentId: c.head.id }, { title: 'First', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.bruno.id, executor: true, gates: [] })).task;
+    const post = (payload: object) => c.app.inject({ method: 'POST', url: '/api/tasks', payload: { title: 'Follow', department: c.dev.id, after: [first.number], independentNone: 'One piece.', ...payload }, ...as(c.ceoToken) });
+    const refused = await post({});
+    expect(refused.statusCode).toBe(400);
+    expect(refused.json().reason ?? refused.json().error).toBeDefined();
+    expect(refused.body).toContain('sets dates for its waits');
+    const later = (hours: number) => new Date(Date.now() + hours * 3_600_000).toISOString();
+    const plan = { version: 1, ownerDueAt: later(1), headDueAt: later(2), decisionDueAt: later(3), provenance: { kind: 'explicit_promise', actor: { personId: c.ceo.id }, ref: 'promise-1', revision: 1, origin: 'test' }, finalReview: { headAgentId: c.head.id, anchorAt: later(4), intervalMs: 3_600_000 } };
+    const made = await post({ afterPlans: [{ task: first.number, plan }] });
+    expect(made.statusCode, made.body).toBe(201);
+    expect(made.json().task.waits).toMatchObject([{ kind: 'after', state: 'active' }]);
   });
 });
