@@ -3,6 +3,7 @@ export { NOTIFICATION_NAMES, NotificationSchema, NotificationSourceSchema, type 
 export { MachineDrain, NodeWait } from './machine-drain.js';
 export { inLane } from './lane.js';
 export * from './pipeline-report.js';
+export * from './test-terminals.js';
 export { COMMIT_SHA, CommitSha, ownBranch } from './test-commit.js';
 import { z } from 'zod';
 import { NodeExit, NodeLog } from './node-exit.js';
