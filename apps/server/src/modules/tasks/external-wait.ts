@@ -189,10 +189,15 @@ export async function expireWait(ctx: Ctx, task: Task, unavailable?: string): Pr
 /* A run ended, and the one who started it waits on its task: the wait goes in the write that ends the run and keeps its
    wake, so a crash cannot leave one without the other. It keeps the wakes other moves kept, which are other news. Someone
    else's wait stays: they wait for something else. */
+const ownsRunTask = (task: Task | undefined, agentId: string): task is Task => Boolean(task && OPEN.has(task.status) && task.assigneeAgentId === agentId);
+const runEndUpdate = (task: Task) => ({ version: task.version + 1, updatedAt: new Date(), ...(task.externalWait ? { externalWait: null, silent: 0 } : {}) });
+
 export async function endWaitForRun(tx: Tx, taskId: string, agentId: string, run: string): Promise<boolean> {
   const [task] = await tx.select().from(tasks).where(eq(tasks.id, taskId)).for('update');
-  if (!task?.externalWait || task.assigneeAgentId !== agentId) return false;
-  await tx.update(tasks).set({ externalWait: null, silent: 0, version: task.version + 1, updatedAt: new Date() }).where(eq(tasks.id, taskId));
+  if (!ownsRunTask(task, agentId)) return false;
+  // Invalidate a wait that checked unread messages before this result committed, even when no wait is installed yet.
+  await tx.update(tasks).set(runEndUpdate(task)).where(eq(tasks.id, taskId));
+  if (!task.externalWait) return false;
   const { reason } = task.externalWait;
   await note(tx, task, { kind: 'updated', actor: { agentId }, text: `${run} ended, and with it the wait for "${reason}".`, data: { externalWait: null, reason } });
   return true;
