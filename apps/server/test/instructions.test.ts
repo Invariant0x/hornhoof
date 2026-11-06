@@ -336,6 +336,26 @@ describe('renderInstructions', () => {
     expect(headWithoutNotebookCast.parts.some(p => p.id === 'hh-report-to-head')).toBe(false);
   });
 
+  it('delivers the strict mechanical finding category and Wake.mechanical boundary in loaded DEV-REV skill files and whole instructions', () => {
+    const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
+    const revRole = shipped.roles.get('DEV-REV')!;
+    const rendered = renderInstructions(shipped, agent({ roleKey: 'DEV-REV', skills: revRole.skills.filter(s => s.on).map(s => s.id), templateHashes: {} }), PLACE);
+    expect(Buffer.byteLength(rendered.text)).toBeLessThan(24_000);
+    expect(rendered.text).toContain('\n- dev-review-diff: Reviewing a change.');
+    expect(rendered.text).toContain('\n- dev-review-verdict: Review verdict.');
+    const files = new Map(rendered.skills.map(s => [s.name, s.body]));
+    for (const id of ['dev-review-diff', 'dev-review-verdict'] as const) {
+      const body = files.get(id)!;
+      expect(Buffer.byteLength(body), id).toBeLessThan(22_000);
+      expect(body, id).toContain('mechanical');
+      expect(body, id).toContain('Wake.mechanical');
+      expect(body, id).toMatch(/provably cannot change[^.!?]*behaviour/i);
+      expect(body, id).toMatch(/when in doubt[^.!?]*regular category[\s\S]*full base level/i);
+    }
+    expect(rendered.whole).toContain('Wake.mechanical');
+    expect(rendered.whole).toMatch(/provably cannot change[^.!?]*behaviour/i);
+  });
+
   it('delivers the external-outage hold, one-action unhold and ordinary-retry rules to the orchestrator and department heads, including legacy saved skill lists', () => {
     const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
     const steady = orchestratorSteady(shipped);
