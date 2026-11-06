@@ -1,6 +1,6 @@
-import { CheckReceipt, type Case, type CheckBinding, type CheckInput, type CheckResult, type CheckUnavailable } from '@hornhoof/protocol';
+import { canonicalJson, CheckReceipt, type Case, type CheckBinding, type CheckInput, type CheckResult, type CheckUnavailable } from '@hornhoof/protocol';
 import type { Dataset } from './dataset.js';
-import { bindingDigest, canonicalJson } from './lifecycle.js';
+import { bindingDigest } from './lifecycle.js';
 import { decide, scoreCases, type Counts, type Decision, type Scored, type Thresholds } from './score.js';
 
 /* The port of a fresh, independent model call: #446 gives the call and #447 the evaluator. */
@@ -47,6 +47,14 @@ export async function evaluateCheck(binding: CheckBinding, dataset: Dataset, thr
     evaluation: { ...counted, bindingDigest: digest, reportId: run.reportId, datasetHash: dataset.hash, evaluatedAt: run.now.toISOString() },
     report: { status: decision.status, problems: decision.problems, infraErrors: counted.infraErrors, mustBlockMisses: counted.mustBlockMisses, all: counted.metrics, holdout: counted.holdoutMetrics, missedDevCases },
   };
+}
+
+/* A run that could not read its set proves nothing and asks nobody: it ends as one with no answers. */
+export function unreadableSet(binding: CheckBinding, run: { reportId: string; now: Date }): RunOutcome {
+  const { missedDevCases, ...counted } = scoreCases([], new Map());
+  const decision: Decision = { status: 'incomplete', problems: ['no_result'] };
+  const evaluation = { ...counted, complete: false, bindingDigest: bindingDigest(binding), reportId: run.reportId, datasetHash: binding.datasetHash, evaluatedAt: run.now.toISOString() };
+  return { decision, evaluation, report: { status: decision.status, problems: decision.problems, infraErrors: 0, mustBlockMisses: 0, all: counted.metrics, holdout: counted.holdoutMetrics, missedDevCases } };
 }
 
 const partLine = (name: string, part: Counts): string => `${name} ${part.total} examples: ${part.falseAllows} false yes, ${part.falseDenies} false no, ${part.classErrors} wrong classes, ${part.unavailable} without an answer.`;

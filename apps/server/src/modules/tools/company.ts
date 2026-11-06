@@ -56,7 +56,7 @@ export async function companyView(db: Db, templates: Templates, companyId: strin
         template: d.templateKey,
         about: d.about,
         products: depts.filter(p => p.parentId === d.id).map(p => ({ id: p.id, name: deptName(p) })),
-        teams: allTeams.filter(t => t.departmentId === d.id).map(t => ({ id: t.id, name: t.name })),
+        teams: allTeams.filter(t => t.departmentId === d.id).map(t => ({ id: t.id, name: t.name, urgentOnly: t.urgentOnly })),
         employees: employeesOf(d),
       })),
     subscriptions: subs.map(s => ({

@@ -10,7 +10,7 @@ import { keepSnapshot } from './pipeline-report.js';
 type Live = Pick<Ctx, 'db' | 'bus'> & Partial<Pick<Ctx, 'log'>>;
 export type Turn = typeof turns.$inferSelect;
 /* One task of a turn as the orchestrator lays it out. */
-export type PlanItem = { department: string; product?: string; title: string; brief: string; body: string; workKind?: Task['workKind']; riskClass?: Task['riskClass'] };
+export type PlanItem = { department: string; product?: string; title: string; brief: string; body: string; workKind?: Task['workKind']; riskClass?: Task['riskClass']; urgent?: boolean };
 type Head = { id: string; name: string };
 type Placed = PlanItem & { head: Head };
 /* The orchestrator and the run he lays the turn out in. */
@@ -117,6 +117,7 @@ async function insertPlanned(tx: Tx, companyId: string, agentId: string, turnId:
         body: item.body,
         workKind: item.workKind,
         riskClass: item.riskClass,
+        urgent: item.urgent,
         status: 'planned',
         createdByAgentId: agentId,
         updatedAt: new Date(),
