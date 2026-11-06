@@ -88,6 +88,8 @@ export const departments = pgTable('departments', {
   companyId: companyId(),
   name: text('name'),
   templateKey: text('template_key', { enum: TEMPLATE_KEYS }),
+  /* New departments receive their template's mode through their creation path. */
+  workMode: text('work_mode', { enum: ['turns', 'continuous'] }).notNull().default('turns'),
   parentId: uuid('parent_id').references((): AnyPgColumn => departments.id),
   about: text('about').notNull().default(''),
   roleCode: text('role_code').notNull(),
@@ -108,7 +110,7 @@ export const departments = pgTable('departments', {
      and it is never worked out from who has access. It counts only while that person is active and still has access. */
   ownerPersonId: uuid('owner_person_id').references((): AnyPgColumn => people.id),
   createdAt: createdAt(),
-}, t => [index('departments_owner_person_id').on(t.ownerPersonId)]);
+}, t => [index('departments_owner_person_id').on(t.ownerPersonId), check('departments_work_mode', sql`${t.workMode} IN ('turns', 'continuous')`)]);
 
 /* How a department's approvals go, one rule per channel; a channel with no rule asks every time. The rules belong to the
    department, not to its owner, so they stay when the owner changes or goes. */

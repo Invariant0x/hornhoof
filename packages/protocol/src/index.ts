@@ -1,3 +1,5 @@
+export * from './department-mode.js';
+import type { DepartmentWorkMode } from './department-mode.js';
 export * from './request-materials.js';
 export * from './questions.js';
 export { APPROVAL_CHANNELS, APPROVAL_MODES, ApprovalAmount, ApprovalChannel, ApprovalRule, DEFAULT_APPROVAL_RULE, approvalNeeded, kindKey, ruleOf, type ApprovalMode, type ApprovalWork, type StoredApprovalRule } from './approval-policy.js';
@@ -209,17 +211,17 @@ export const TEMPLATE_KEYS = ['operations', 'development', 'marketing', 'sales',
 export type TemplateKey = (typeof TEMPLATE_KEYS)[number];
 
 /* The departments the orchestrator starts from. Names and descriptions live in the web dictionaries and the server's prompt. */
-export const DEPARTMENT_TEMPLATES: readonly { key: TemplateKey; roleCode: string; ticked: boolean; always: boolean }[] = [
-  { key: 'operations', roleCode: 'OPS', ticked: true, always: true },
-  { key: 'development', roleCode: 'DEV', ticked: true, always: false },
-  { key: 'marketing', roleCode: 'MKT', ticked: true, always: false },
-  { key: 'sales', roleCode: 'SAL', ticked: true, always: false },
-  { key: 'business_development', roleCode: 'BIZ', ticked: true, always: false },
-  { key: 'design', roleCode: 'DSN', ticked: false, always: false },
-  { key: 'support', roleCode: 'SUP', ticked: false, always: false },
-  { key: 'finance', roleCode: 'FIN', ticked: false, always: false },
-  { key: 'home_devices', roleCode: 'HOM', ticked: false, always: false },
-  { key: 'household', roleCode: 'HHD', ticked: false, always: false },
+export const DEPARTMENT_TEMPLATES: readonly { key: TemplateKey; roleCode: string; ticked: boolean; always: boolean; workMode: DepartmentWorkMode }[] = [
+  { key: 'operations', roleCode: 'OPS', ticked: true, always: true, workMode: 'continuous' },
+  { key: 'development', roleCode: 'DEV', ticked: true, always: false, workMode: 'turns' },
+  { key: 'marketing', roleCode: 'MKT', ticked: true, always: false, workMode: 'turns' },
+  { key: 'sales', roleCode: 'SAL', ticked: true, always: false, workMode: 'turns' },
+  { key: 'business_development', roleCode: 'BIZ', ticked: true, always: false, workMode: 'turns' },
+  { key: 'design', roleCode: 'DSN', ticked: false, always: false, workMode: 'turns' },
+  { key: 'support', roleCode: 'SUP', ticked: false, always: false, workMode: 'turns' },
+  { key: 'finance', roleCode: 'FIN', ticked: false, always: false, workMode: 'turns' },
+  { key: 'home_devices', roleCode: 'HOM', ticked: false, always: false, workMode: 'turns' },
+  { key: 'household', roleCode: 'HHD', ticked: false, always: false, workMode: 'turns' },
 ];
 
 /* A ready-made company the CEO can pick on the first screen. Each one lists departments to create, with their products
