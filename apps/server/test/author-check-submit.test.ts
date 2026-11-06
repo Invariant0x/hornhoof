@@ -120,8 +120,7 @@ describe('author check on submit', () => {
       expect(await currentTask(f)).toMatchObject({ status: index === 2 ? 'blocked' : 'working', externalWait: null });
       expect((await outcomes(f, run.id)).at(-1)).toMatchObject({ data: { authorCheckOutcome: { attempt: index + 1 } } });
     }
-    const forHead = await f.db.select().from(jobs).where(and(eq(jobs.agentId, head!.id), eq(jobs.taskId, f.task.id)));
-    expect(forHead.length).toBeGreaterThan(0);
+    await until(async () => (await f.db.select().from(jobs).where(and(eq(jobs.agentId, head!.id), eq(jobs.taskId, f.task.id)))).length > 0);
   });
 });
 
