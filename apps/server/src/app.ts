@@ -16,6 +16,7 @@ import { improvementRoutes } from './modules/improvements/routes.js';
 import { jobRoutes } from './modules/jobs/routes.js';
 import { PublicLinks } from './modules/link/link.js';
 import { linkRoutes } from './modules/link/routes.js';
+import { outboundRoutes } from './modules/outbound/routes.js';
 import { nodeConnected, nodeDisconnected, serverStopping } from './modules/nodes/connections.js';
 import { NodeHub } from './modules/nodes/hub.js';
 import { handleNodeClose } from './modules/nodes/messages.js';
@@ -91,7 +92,7 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   app.decorate('ctx', ctx);
   ctx.hub = new NodeHub({
     pingMs: deps.config.nodePingMs,
-    onMessage: (id, msg) => receiveNodeMessage(ctx, id, msg),
+    onMessage: (id, msg, transport) => receiveNodeMessage(ctx, id, msg, transport),
     onTerminal: (id, msg) => ctx.terminals.fromNode(id, msg),
     onClose: id => handleNodeClose(ctx, id),
     onConnected: (id, link, at) => nodeConnected(ctx, id, link, at),
@@ -151,5 +152,6 @@ export async function buildApp(deps: Deps): Promise<FastifyInstance> {
   partFileRoutes(app, ctx);
   poolRoutes(app, ctx);
   linkRoutes(app, ctx);
+  outboundRoutes(app, ctx);
   return app;
 }

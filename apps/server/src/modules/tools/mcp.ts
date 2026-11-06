@@ -21,6 +21,8 @@ import { registerTestTools } from '../testruns/tools.js';
 import { registerWatchTools } from './watch.js';
 import { registerHeadNotebookTools } from '../notebook/tools.js';
 import { registerImprovementTools, registerOrchestratorImprovementTools } from '../improvements/tools.js';
+import { registerOutboundTools } from '../outbound/tools.js';
+import { registerOutboundControlTools } from '../outbound/tools-control.js';
 
 const say = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], ...(isError ? { isError } : {}) });
 
@@ -50,6 +52,7 @@ function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob): McpServer {
   );
   registerTaskTools(server, ctx, job);
   registerApprovalTools(server, ctx, job);
+  registerOutboundTools(server, ctx, job);
   if (job.agentKind !== 'orchestrator') {
     const grants = new Set(job.skills.flatMap(id => ctx.templates.skills.get(id)?.grants ?? []));
     registerWatchTools(server, ctx, job, grants);
@@ -130,6 +133,7 @@ function toolsFor(ctx: Ctx, app: FastifyInstance, job: ToolJob): McpServer {
   );
   registerControlTools(server, ctx, app, job);
   registerApprovalControlTools(server, ctx, app, job);
+  registerOutboundControlTools(server, ctx, app, job);
   registerComputerTools(server, ctx, job);
   registerDatabaseTool(server, ctx, job, 'write');
   registerOrchestratorImprovementTools(server, ctx, job);

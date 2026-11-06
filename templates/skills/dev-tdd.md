@@ -5,6 +5,8 @@ description: { en: "Writes the failing test first, watches it fail, then writes 
 kind: procedure
 sources: [obra/superpowers skills/test-driven-development/SKILL.md, obra/superpowers skills/test-driven-development/writing-good-tests.md]
 ---
+For `small: true`, keep the failing-test, change and affected-test cycle, then merge and submit a line with the change and commit SHA (hh-task-flow). Requirement matrices and detailed reports belong to the shared turn review and checks. The full task-kind and reporting procedure below applies to ordinary work.
+
 The head marks one of four task kinds, and the kind chooses the cycle (dev-implement):
 
 - **Bug:** reproduce it with a failing test, then fix it.

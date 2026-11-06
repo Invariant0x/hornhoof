@@ -12,7 +12,8 @@ import { withInputLock } from '../conversation/decision-context.js';
 import { messageNotDelivered } from '../conversation/live.js';
 import { recordWaitNotice, requestedWaitNotice } from './wait-notices.js';
 import { checkWaitHealth } from './wait-monitor.js';
-import { endSourceWait, recordLegacyWait, setWaitStage, supersedeWaitFor, syncSourceWaits, waitForSourceKey } from './wait-state.js';
+import { bindSource } from './wait-producers.js';
+import { endSourceWait, setWaitStage, supersedeWaitFor, waitForSourceKey } from './wait-state.js';
 import { checkedWaitTarget } from './wait-target.js';
 import { taskByRef } from './views.js';
 import type { Actor } from './engine.js';
@@ -52,16 +53,14 @@ async function namedRun(ctx: Ctx, task: Task, agentId: string, number: number): 
   return run.id;
 }
 
-/* The record of who answers for the wait, written with it: the employee it names, else the one who waits. Its plan is refused
-   with the wait; without one it stays a wait no one planned. */
+/* The record of who answers for the wait, written with it: the employee it names, else the one who waits. Its dates are its own
+   promise or the department's, and a wrong or missing plan is refused with the wait. */
 async function keepWaitRecord(tx: Tx, task: Task, wait: ExternalWait, plan: WaitAsked['plan'], agentId: string): Promise<void> {
   const sourceKey = waitForSourceKey(wait.operation!);
   const actor = { agentId };
   await supersedeWaitFor(tx, { taskId: task.id, by: sourceKey, actor });
   const ownerBinding: WaitOwnerBinding = { agentId: wait.on?.kind === 'employee' ? wait.on.employee : agentId };
-  const source = { taskId: task.id, kind: 'external' as const, sourceKey, sourceRevision: 0, ownerBinding, sourceState: { stage: 'waiting' as const, ...(wait.run ? { run: wait.run } : {}) }, actor };
-  if (plan) await syncSourceWaits(tx, { ...source, plan });
-  else await recordLegacyWait(tx, source);
+  await bindSource(tx, task, { kind: 'external', sourceKey, owner: ownerBinding, plan, sourceState: { stage: 'waiting', ...(wait.run ? { run: wait.run } : {}) }, actor });
 }
 
 /* Where the record of a wait stands now that the wait itself ended or came back: it has not ended by that. */

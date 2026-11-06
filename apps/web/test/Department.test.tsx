@@ -430,8 +430,8 @@ describe('Department view', () => {
     await flyIn(user);
     await user.click(screen.getByRole('button', { name: '+ Hire' }));
     expect(await screen.findByText('Hiring for Development')).toBeInTheDocument();
-    expect(screen.getByRole('checkbox', { name: /Head of development/ })).toBeChecked();
-    expect(screen.getByRole('button', { name: 'Hire (2)' })).toBeEnabled();
+    expect(await screen.findByRole('checkbox', { name: /Head of development/ })).toBeChecked();
+    expect(await screen.findByRole('button', { name: 'Hire (2)' })).toBeEnabled();
     expect(screen.queryByText('Company structure')).not.toBeInTheDocument();
     expect(calls.some(c => c.path === '/api/agents/orchestrator/messages')).toBe(false);
   });
@@ -638,10 +638,11 @@ describe('Department view', () => {
     expect(screen.queryByRole('region', { name: 'Repository' })).not.toBeInTheDocument();
   });
 
-  it("keeps a department's tasks from people who do not reach it", async () => {
+  it("closes a department to people who do not reach it", async () => {
     const user = userEvent.setup();
     const calls = shell({}, DEV_ORG, listed('p7', 'Kira'));
-    await flyIn(user);
+    await user.click(await screen.findByRole('button', { name: /Development/ }));
+    expect(await screen.findByRole('heading', { name: 'Insufficient permissions' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Department tasks' })).not.toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Tasks' })).not.toBeInTheDocument();
     expect(calls.some(c => c.path.startsWith('/api/tasks?'))).toBe(false);
@@ -924,7 +925,7 @@ describe('Department work tree', () => {
   it.each([
     { kind: 'lost', program: { state: 'idle', since: Date.parse(DEV_TREE.turn!.startedAt), tool: null }, text: 'turn end lost since 09:00: waiting for input', red: true },
     { kind: 'alarm', alarm: { reason: 'program_stalled', since: Date.parse(DEV_TREE.turn!.startedAt) }, text: 'program frozen since 09:00', red: true },
-    { kind: 'queued', waitsForAgent: { id: 'head', name: 'Hana' }, text: 'waits for Hana since 09:00', red: false },
+    { kind: 'queued', waitsForAgent: { id: 'b0', name: 'Dana' }, text: 'waits for Dana since 09:00', red: false },
     { kind: 'unknown', text: 'no data', red: false },
   ] as const)('keeps $kind and its cause and time on the read-only timeline', async state => {
     const user = userEvent.setup();
@@ -1084,7 +1085,7 @@ describe('Department work tree', () => {
 
   it('runs a dot with motion enabled and uses the map zoom step', async () => {
     const user = userEvent.setup();
-    shell(treeRoute());
+    shell(treeRoute(), TREE_ORG);
     await showTree(user);
     expect(document.querySelector('.tview animateMotion')).toBeInTheDocument();
     const scale = document.querySelector('.dview .zoom .zv')!;
@@ -1104,7 +1105,7 @@ describe('Department work tree', () => {
       removeEventListener(_event: string, update: () => void) { changes.delete(update); },
     }));
     const user = userEvent.setup();
-    shell(treeRoute());
+    shell(treeRoute(), TREE_ORG);
     await showTree(user);
     const dot = document.querySelector('.tview circle.pt')!;
     expect(dot).toBeInTheDocument();

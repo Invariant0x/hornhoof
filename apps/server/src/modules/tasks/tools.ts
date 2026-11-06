@@ -1,12 +1,14 @@
 import { RISK_CLASSES, WORK_KINDS } from '@hornhoof/protocol';
+import { WaitOwnerBinding, WaitPlan } from '@hornhoof/protocol/waits';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { and, asc, count, desc, eq, gte, inArray, isNull, notInArray } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { agents, DECISION_TOPICS, departments, jobs, requests, tasks, type DecisionTopic } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
-import { ask, blocked, cancel, CLOSED, comment, createTask, gateLeads, inRepository, listed, openAfter, refuse, report, submit, taskSpot, updateTask, verdict, type Moved, type Task } from './engine.js';
+import { ask, blocked, cancel, CLOSED, comment, createTask, gateLeads, inRepository, listed, openAfter, refuse, report, taskSpot, updateTask, verdict, type Moved, type Task } from './engine.js';
 import { requireBlockingGate } from './gate-triggers.js';
+import { replanWait } from './wait-state.js';
 import { carriesFile, encodedHint } from './attachments.js';
 import { Text } from './long-text.js';
 import { agentSeesTask as sees, taskByRef, taskDetail, taskLines, type TaskDetail } from './views.js';
@@ -15,6 +17,7 @@ import { setUrgent } from './urgency.js';
 import { answersCeoOrDelegate } from '../conversation/decision-context.js';
 import { ONLY_CEO } from '../tools/control.js';
 import { stopTurns, wakeAll } from './wake.js';
+import { submitWithAuthorCheck } from './author-check-submit.js';
 import { orchestratorOf } from '../conversation/queue.js';
 import { appendOutgoing } from '../events/store.js';
 import { personParty } from '../events/parties.js';
@@ -62,6 +65,8 @@ const After = z
   .array(Ref)
   .max(10)
   .describe('Tasks of this turn that must be done first, by number. The task waits, and its executor is woken by itself once the last of them is done.');
+const AfterPlans = z.array(z.strictObject({ task: Ref, plan: WaitPlan })).max(10).describe('Who answers by when for a task in after, where someone promised dates. Without one the department\'s dates stand; a department that sets dates and has none for this refuses the task.');
+const AskPlan = WaitPlan.optional().describe('Who answers by when, where someone promised dates. Without one the department\'s dates stand; a department that sets dates and has none for this refuses the question.');
 const IndependentPart = z.strictObject({ title: Title, brief: Brief, body: Body, executor: z.uuid() }).describe('The part that can start before the tasks in after finish, and who does it.');
 const IndependentNone = z.string().trim().min(1).max(2000).describe('Why no independent part exists: one file author, a genuine dependency, or a release boundary.');
 const WorkKind = z.enum(WORK_KINDS).describe('What kind of work it is: a bug, known behavior to build, an unknown path, or old code. The pipeline report counts by it.');
@@ -155,6 +160,14 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     return ids;
   }
 
+  /* Promises of dates for tasks another comes after, by the id the engine knows them by. One for a task it does not come after
+     is refused with the rest of the change. */
+  async function afterPlansOf(given: { task: number | string; plan: WaitPlan }[] | undefined) {
+    if (!given) return undefined;
+    const ids = await afterIds(given.map(g => g.task));
+    return Object.fromEntries(given.map((g, i) => [ids[i]!, g.plan]));
+  }
+
   /* What a task still waits for, as a sentence for the tool's answer. */
   async function waiting(t: Task): Promise<string> {
     const open = await openAfter(db, t);
@@ -233,6 +246,21 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
   );
 
   server.registerTool(
+    'replan_wait',
+    {
+      description:
+        'Gives a wait on a task (its id in waits, from task) a new owner or new dates, for someone who answers for it: its owner, its head or the orchestrator. Also the way to give a wait with no plan its first dates. Dates moved stay on record. Say whose promise they are in plan.provenance, and only dates someone really promised.',
+      inputSchema: { wait: z.uuid(), expectedGeneration: z.number().int().positive(), owner: WaitOwnerBinding.optional(), plan: WaitPlan.optional(), reason: z.string().trim().min(1).max(600) },
+    },
+    async ({ wait, expectedGeneration, owner, plan, reason }) =>
+      run(async () => {
+        const kept = await db.transaction(tx => replanWait(tx, { waitId: wait, expectedGeneration, ...(owner ? { ownerBinding: owner } : {}), ...(plan ? { plan } : {}), reason, actor: { agentId: job.agentId } }));
+        const { task } = await find(kept.taskId);
+        return { text: `The wait on #${task.number} is at generation ${kept.generation}, due ${kept.nextActionAt?.toISOString() ?? 'with no date'}.`, moved: { task, wakes: [] } };
+      }),
+  );
+
+  server.registerTool(
     'ask_person',
     {
       description:
@@ -248,6 +276,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         images: z.array(z.uuid()).max(6).optional(),
         options: z.array(z.object({ label: z.string().trim().min(1).max(200), image: z.uuid().optional() })).max(4).optional(),
         link: z.url({ protocol: /^https$/ }).max(500).optional(),
+        plan: AskPlan,
         topic: z
           .enum(DECISION_TOPICS)
           .optional()
@@ -256,7 +285,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
           ),
       },
     },
-    async ({ task: ref, question, commit, images, options, link, topic }) =>
+    async ({ task: ref, question, commit, images, options, link, topic, plan }) =>
       run(async () => {
         const { task } = await find(ref);
         plain(task, question);
@@ -268,7 +297,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         const kind = commit ? 'approval' : options?.length ? 'choice' : 'question';
         const ways = options?.map(o => ({ label: o.label, image: o.image ?? null }));
         const { text, told } = await questionWords(db, task, question, commit);
-        const moved = await ask(ctx, job.agentId, task.id, { kind, text, ...(commit ? { commit } : {}), images, options: ways, link: link ?? null, topic });
+        const moved = await ask(ctx, job.agentId, task.id, { kind, text, ...(commit ? { commit } : {}), images, options: ways, link: link ?? null, topic, ...(plan ? { plan } : {}) });
         await recordQuestion(ctx, job, task, { kind, text, topic });
         return { text: `Asked. #${task.number} waits for a person's answer; you will be woken with it.${told}`, moved };
       }),
@@ -396,7 +425,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
         description:
           'Gives work to a member of your department: executor is an employee id from company. Name yourself only when no member can do it. gates are the reviewers it passes in order, as role ids (DEV-REV) or employee ids: ' +
           "leave them out for code in a repository under your department's task of the turn, which the review of the turn checks all at once; [] for research, reports, plans and docs; name one only where a change must not reach the turn's branch unchecked. Name a role once: one reviewer of each model of it checks the work at once there. Left out anywhere else, the department's first review stage. The executor never reviews its own work. parent: the department task it serves. after needs independentPart or independentNone.",
-        inputSchema: { title: Title, brief: Brief, body: Body, executor: z.uuid(), gates: z.array(z.string().max(40)).max(8).optional(), parent: Ref.optional(), product: z.uuid().optional(), after: After.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional() },
+        inputSchema: { title: Title, brief: Brief, body: Body, executor: z.uuid(), gates: z.array(z.string().max(40)).max(8).optional(), parent: Ref.optional(), product: z.uuid().optional(), after: After.optional(), afterPlans: AfterPlans.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional() },
       },
       async input =>
         run(async () => {
@@ -414,7 +443,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
           const inTurnReview = await turnReviewed(db, agent, executor, parent, input);
           const gates = inTurnReview || (executor.teamId && input.gates === undefined) ? [] : await gatesFor(agent, executor.id, input.gates);
           const after = await afterIds(input.after);
-          const moved = await createTask(ctx, { agentId: agent.id }, { title: input.title, brief: input.brief, body: input.body, departmentId: agent.departmentId, productId: input.product ?? null, parentId: parent?.id ?? null, assigneeAgentId: executor.id, executor: true, gates, after, independentPart: input.independentPart, independentNone: input.independentNone, inTurnReview, workKind: input.workKind, riskClass: input.riskClass });
+          const moved = await createTask(ctx, { agentId: agent.id }, { title: input.title, brief: input.brief, body: input.body, departmentId: agent.departmentId, productId: input.product ?? null, parentId: parent?.id ?? null, assigneeAgentId: executor.id, executor: true, gates, after, afterPlans: await afterPlansOf(input.afterPlans), independentPart: input.independentPart, independentNone: input.independentNone, inTurnReview, workKind: input.workKind, riskClass: input.riskClass });
           return { text: `Created #${moved.task.number} for ${executor.name}${gates.length ? ` with ${gates.length} gate${gates.length > 1 ? 's' : ''}` : ''}.${await waiting(moved.task)}`, moved };
         }),
     );
@@ -429,9 +458,9 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
             'Whoever holds it is woken with the change. A blocked task opens again. after: the tasks of its turn it waits for from now on, [] to start it now.'
           : "Rewrites one of your department's member tasks so it reads as the current truth, or hands it to another executor or gates (only while it is with its executor). " +
             'A task waiting at a gate with nobody on to check it takes new gates from that gate on. A blocked task opens again. after: the tasks of its turn it waits for from now on, [] to start it now.',
-        inputSchema: { task: Ref, title: Title.optional(), brief: Brief.optional(), body: Body.optional(), executor: z.uuid().optional(), gates: z.array(z.string().max(40)).max(8).optional(), after: After.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional() },
+        inputSchema: { task: Ref, title: Title.optional(), brief: Brief.optional(), body: Body.optional(), executor: z.uuid().optional(), gates: z.array(z.string().max(40)).max(8).optional(), after: After.optional(), afterPlans: AfterPlans.optional(), independentPart: IndependentPart.optional(), independentNone: IndependentNone.optional(), workKind: WorkKind.optional(), riskClass: RiskClass.optional() },
       },
-      async ({ task: ref, executor, gates, after, ...text }) =>
+      async ({ task: ref, executor, gates, after, afterPlans, ...text }) =>
         run(async () => {
           const { agent, task } = await find(ref);
           if (!boss && (task.departmentId !== agent.departmentId || !task.executorAgentId)) throw refuse(403, 'task_not_yours', `#${task.number} is not a member task of your department.`);
@@ -441,7 +470,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
           const next = executor !== undefined ? (await member(head, executor)).id : undefined;
           if (text.independentPart) await member(head, text.independentPart.executor);
           const gateIds = gates !== undefined ? await gatesFor(head, next ?? task.executorAgentId!, gates) : undefined;
-          const moved = await updateTask(ctx, agent.id, task.id, { ...text, executor: next, gates: gateIds, ...(after !== undefined ? { after: await afterIds(after) } : {}) });
+          const moved = await updateTask(ctx, agent.id, task.id, { ...text, executor: next, gates: gateIds, ...(after !== undefined ? { after: await afterIds(after), afterPlans: await afterPlansOf(afterPlans) } : {}) });
           return { text: `Updated. ${await where(moved.task)}`, moved };
         }),
     );
@@ -480,14 +509,14 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     server.registerTool(
       'submit',
       {
-        description: 'Hands your finished work on a task to its first gate (or closes it when it has none). summary: what you did; evidence: the command you ran and what it printed, the link, the check. Optional review.baseCommit pins the source range for your vertical task area; the server reads its head commit.',
+        description: 'Hands your finished work on a task to its first gate (or closes it when it has none). summary: what you did; evidence: the command you ran and what it printed, the link, the check. Optional review.baseCommit pins the source range for your vertical task area; the server reads its head commit. When author checks are enabled, review.authorCheckPlan carries the plain plan printed by check:author for one remote run on that exact commit.',
         inputSchema: { task: Ref, summary: Text.trim().min(1), evidence: Text.trim().min(1), review: ReviewSubmission.optional() },
       },
       async ({ task: ref, summary, evidence, review }) =>
         run(async () => {
           const { task } = await find(ref);
           plain(task, summary, evidence);
-          const moved = await submit(ctx, job.agentId, task.id, { summary, evidence, review });
+          const moved = await submitWithAuthorCheck(ctx, job, task.id, { summary, evidence, review });
           return { text: `Submitted. ${await where(moved.task)}`, moved };
         }),
     );

@@ -112,6 +112,28 @@ describe('the company notebook', () => {
     await expect.poll(reads).toBe(before + 1);
   });
 
+  it('shows loading before the notes arrive', async () => {
+    show({ 'GET /api/notebook': () => new Promise(() => {}) });
+    expect(await screen.findByText('Loading…')).toBeInTheDocument();
+  });
+
+  it('announces saving until the answer arrives', async () => {
+    const user = userEvent.setup();
+    let release!: () => void;
+    const answer = new Promise<[number, { note: { number: number; text: string } }]>(resolve => {
+      release = () => resolve([200, { note: { number: 3, text: 'Turns stay very small.' } }]);
+    });
+    show({ 'PATCH /api/notebook/3': () => answer });
+    await screen.findByText('Turns stay small.');
+    await user.click(screen.getByRole('button', { name: 'Change note #3' }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(await screen.findByRole('status')).toHaveTextContent('Saving');
+    expect(screen.getByRole('region', { name: 'Notebook' })).toHaveAttribute('aria-busy', 'true');
+    release();
+    await expect.poll(() => screen.queryByRole('status')).toBeNull();
+    expect(screen.getByRole('region', { name: 'Notebook' })).toHaveAttribute('aria-busy', 'false');
+  });
+
   it('shows in Russian', async () => {
     localStorage.setItem('hh-lang', 'ru');
     mockApi({ 'GET /api/notebook': [200, { notes: [] }] });

@@ -22,7 +22,7 @@ const OUTBOUND = [
   'support_tickets', 'support_classifications',
 ];
 const WORKSPACES = ['workspace_repositories', 'task_workspaces', 'author_workspace_slots', 'task_area_locks', 'task_workspace_operations', 'task_workspace_submissions', 'task_workspace_sessions', 'task_workspace_merge_receipts'];
-export const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials', 'request_internal', 'model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations', 'model_check_certificates', 'task_waits', 'wait_policies', ...OUTBOUND, ...WORKSPACES, 'external_operations', 'external_recovery_cases', 'external_recovery_members', 'external_recovery_attempts', 'external_recovery_notices'];
+export const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials', 'request_internal', 'computer_access_intents', 'model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations', 'model_check_certificates', 'task_waits', 'wait_policies', ...OUTBOUND, ...WORKSPACES, 'external_operations', 'external_recovery_cases', 'external_recovery_members', 'external_recovery_attempts', 'external_recovery_notices'];
 /* Columns that hold a password, a token or a key: neither role reads or writes them. A machine's key goes with
    every join from it, so it is one too. The account a node is signed in to names a person's email. */
 export const SECRET: Record<string, string[]> = {
@@ -32,10 +32,11 @@ export const SECRET: Record<string, string[]> = {
   subscriptions: ['secret_enc'],
   nodes: ['key_hash', 'account'],
   machines: ['machine_key'],
-  departments: ['repo_token_enc'],
+  departments: ['repo_token_enc', 'repo_token_revision'],
   program_operator_cases: ['capability'],
   attachments: ['bytes'],
-  proposals: ['material_snapshot'],
+  requests: ['text', 'options', 'explained', 'answer', 'link', 'source_key', 'source_job_id', 'source_sequence', 'triage_agent_id', 'classification'],
+  proposals: ['material_snapshot', 'brief', 'items', 'source_key', 'source_job_id', 'source_sequence', 'triage_agent_id', 'classification'],
 };
 /* Who people are and what they reach, and the subscriptions, machines and nodes the company runs on: the orchestrator's
    role reads them, and they change only through the tools the CEO alone may ask for. The history of the nodes' connections,
