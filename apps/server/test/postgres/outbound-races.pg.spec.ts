@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { OutboundPolicyValue } from '@hornhoof/protocol';
 import { eq } from 'drizzle-orm';
 import { expect, it } from 'vitest';
 import * as schema from '../../src/db/schema.js';
@@ -13,29 +14,37 @@ import { backendPid, privatePostgres, runFixture, type Actor, type PostgresFixtu
 
 const LIMITED = (accountDailyLimit: number, domainDailyLimit: number) => ({ ...QUIET, accountDailyLimit, domainDailyLimit });
 
-async function gateway(pg: PostgresFixture, limits = QUIET) {
+/* A way out for one author: its own channel, as what a sender domain counts crosses channels, and no channel lock helps there. */
+async function aWay(c: Base, actor: Actor, name: string, limits: OutboundPolicyValue) {
+  const channel = await aChannelOf(c, { name });
+  await aPolicyOf(c, channel.id, limits);
+  const { account } = await anAccountOf(c, channel.id, actor.job.agentId, name);
+  const parts = await partsOf(c, channel.id);
+  return { channel, account, segmentId: parts.segment.entryId, document: documentOf(parts) };
+}
+
+async function gateway(pg: PostgresFixture, limits: OutboundPolicyValue = QUIET) {
   const { companyId, departmentId, actors } = await runFixture(pg, { env: { PUBLIC_URL: 'https://hornhoof.example' } });
   const [first, second] = actors;
   const [owner] = await pg.db.select().from(schema.people);
   const c: Base = { db: first.ctx.db, companyId, dev: { id: departmentId }, ids: { ceo: owner!.id }, app: { ctx: first.ctx } };
   for (const channel of ['message', 'price'] as const) await pg.db.insert(schema.approvalPolicies).values({ companyId, departmentId, channel, mode: 'within_limits', limitAmount: 100, limitUnit: 'USD', updatedBy: owner!.id });
-  const channel = await aChannelOf(c);
-  await aPolicyOf(c, channel.id, limits);
-  const one = await anAccountOf(c, channel.id, first.job.agentId, 'One');
-  const two = await anAccountOf(c, channel.id, second.job.agentId, 'Two');
-  const parts = await partsOf(c, channel.id);
-  const document = documentOf(parts);
-  const authorityOf = (actor: Actor): Authority => ({ companyId, agentId: actor.job.agentId, departmentId, jobId: actor.job.id });
-  const send = (actor: Actor, contactId: string, idempotencyKey: string = randomUUID()) =>
-    submitOutbound(actor.ctx, authorityOf(actor), { task: actor.task.id, idempotencyKey, channelId: channel.id, accountId: (actor === first ? one : two).account.id, bindingGeneration: 1, target: { kind: 'contact', contactId }, segmentId: parts.segment.entryId, document, scheduledAt: '2026-01-02T00:00:00.000Z' });
-  const someone = async (address: string) => {
+  const one = await aWay(c, first, 'One', limits);
+  const two = await aWay(c, second, 'Two', limits);
+  const wayOf = (actor: Actor) => (actor === first ? one : two);
+  const send = (actor: Actor, contactId: string, idempotencyKey: string = randomUUID()) => {
+    const { channel, account, segmentId, document } = wayOf(actor);
+    const authority: Authority = { companyId, agentId: actor.job.agentId, departmentId, jobId: actor.job.id };
+    return submitOutbound(actor.ctx, authority, { task: actor.task.id, idempotencyKey, channelId: channel.id, accountId: account.id, bindingGeneration: 1, target: { kind: 'contact', contactId }, segmentId, document, scheduledAt: '2026-01-02T00:00:00.000Z' });
+  };
+  const someone = async (address: string, actor: Actor = first) => {
     const contact = await aContactOf(c, address);
-    await aPermissionOf(c, contact.id, channel.id);
+    await aPermissionOf(c, contact.id, wayOf(actor).channel.id);
     return contact;
   };
   const usage = () => pg.db.select().from(schema.outboundDailyUsage);
   const messageOf = async (id: string) => (await pg.db.select().from(schema.outboundMessages).where(eq(schema.outboundMessages.id, id)))[0]!;
-  return { companyId, first, second, channel, send, someone, usage, messageOf };
+  return { companyId, first, second, channel: one.channel, send, someone, usage, messageOf };
 }
 
 const reservedAt = (buckets: { reserved: number }[]) => buckets.map(b => b.reserved);
@@ -69,7 +78,10 @@ it('counts a sender domain across its accounts, whichever comes first', { timeou
   const pg = await privatePostgres();
   const g = await gateway(pg, LIMITED(100, 2));
   const messages = [];
-  for (let i = 0; i < 6; i++) messages.push(await g.send(i % 2 ? g.first : g.second, (await g.someone(`both${i}@shop.example`)).id));
+  for (let i = 0; i < 6; i++) {
+    const actor = i % 2 ? g.first : g.second;
+    messages.push(await g.send(actor, (await g.someone(`both${i}@shop.example`, actor)).id));
+  }
   const asked = await Promise.all(messages.map((m, i) => reserveDispatch((i % 2 ? g.first : g.second).ctx, m.messageId, 1)));
   expect(asked.filter(a => a.kind === 'reserved')).toHaveLength(2);
   const domain = (await g.usage()).filter(b => b.scope === 'domain');
