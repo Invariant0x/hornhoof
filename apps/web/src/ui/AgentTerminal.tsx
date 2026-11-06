@@ -46,6 +46,35 @@ const NO_ACCESS = 4403;
 /* path: the view's address on the server, such as /api/agents/<id>/terminal; the terminal's size goes after it.
    watching: this person types elsewhere, so the terminal leaves the focus there as it opens. */
 type Props = { path: string; program: string; onGone(): void; watching?: boolean };
+type TestTerminalLease = {
+  leaseId: string;
+  expectedLeaseRevision: number;
+  registrationId: string;
+  expectedIdentityDigest: string;
+};
+
+export async function createTestTerminalBrowserKey(lease: TestTerminalLease) {
+  const pair = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign', 'verify']);
+  const publicKey = await crypto.subtle.exportKey('jwk', pair.publicKey);
+  if (!publicKey.x || !publicKey.y) throw new Error('The browser public key is incomplete.');
+  return {
+    request: {
+      ...lease,
+      operationId: crypto.randomUUID(),
+      browserPublicKey: {
+        algorithm: 'P-256/SHA-256',
+        kty: 'EC',
+        crv: 'P-256',
+        x: publicKey.x,
+        y: publicKey.y,
+      },
+    },
+    sign(challenge: Uint8Array) {
+      return crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, pair.privateKey, challenge);
+    },
+  };
+}
+
 type Size = { cols: number; rows: number };
 type Frame = { type: string; data?: string; write?: boolean; message?: boolean; running?: boolean; reason?: InputRefusal };
 type Send = (m: unknown) => void;
