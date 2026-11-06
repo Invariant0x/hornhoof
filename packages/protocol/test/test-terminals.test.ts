@@ -134,7 +134,7 @@ describe('the purpose-bound challenge and raw P1363 signature codec', () => {
     const bytes = decodeViewChallenge(CHALLENGE);
     const raw = await webcrypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, pair.privateKey, new Uint8Array(bytes));
     const signature = decodeViewSignature(encodeViewSignature(new Uint8Array(raw)));
-    const key = createPublicKey({ key: jwk, format: 'jwk' });
+    const key = createPublicKey({ key: { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y }, format: 'jwk' });
     expect(verify('sha256', MESSAGE, { key, dsaEncoding: 'ieee-p1363' }, signature)).toBe(true);
     expect(verify('sha256', Buffer.from(CHALLENGE), { key, dsaEncoding: 'ieee-p1363' }, signature)).toBe(false);
     expect(verify('sha256', Buffer.concat([MESSAGE, Buffer.from([1])]), { key, dsaEncoding: 'ieee-p1363' }, signature)).toBe(false);
