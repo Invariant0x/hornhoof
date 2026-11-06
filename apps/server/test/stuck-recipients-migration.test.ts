@@ -14,6 +14,7 @@ const HEAD_REQUEST = '00000000-0000-4000-8000-000000000107';
 const ORCHESTRATOR_REQUEST = '00000000-0000-4000-8000-000000000108';
 const CLOSED_REQUEST = '00000000-0000-4000-8000-000000000109';
 const QUESTION = '00000000-0000-4000-8000-00000000010a';
+const HUMAN_REQUEST = '00000000-0000-4000-8000-00000000010b';
 
 it('assigns live recipients and durable wakes to open legacy stuck requests only', async () => {
   const beforeFolder = await migrationsBefore('live_stuck_recipients');
@@ -39,7 +40,8 @@ it('assigns live recipients and durable wakes to open legacy stuck requests only
       ('${HEAD_REQUEST}','${COMPANY}','00000000-0000-4000-8000-000000000111','${HEAD}','stuck','Head stuck','open','internal'),
       ('${ORCHESTRATOR_REQUEST}','${COMPANY}','00000000-0000-4000-8000-000000000112','${ORCHESTRATOR}','stuck','Orchestrator stuck','open','internal'),
       ('${CLOSED_REQUEST}','${COMPANY}','00000000-0000-4000-8000-000000000113','${WORKER}','stuck','Historical stuck','answered','legacy'),
-      ('${QUESTION}','${COMPANY}','00000000-0000-4000-8000-000000000114','${WORKER}','question','Separate lifecycle','open','internal');
+      ('${QUESTION}','${COMPANY}','00000000-0000-4000-8000-000000000114','${WORKER}','question','Separate lifecycle','open','internal'),
+      ('${HUMAN_REQUEST}','${COMPANY}','00000000-0000-4000-8000-000000000114','${WORKER}','stuck','Human lifecycle preserved','open','human');
   `);
 
   await migrate(db, { migrationsFolder: throughFolder });
@@ -50,6 +52,7 @@ it('assigns live recipients and durable wakes to open legacy stuck requests only
     { id: ORCHESTRATOR_REQUEST, triage_agent_id: HEAD },
     { id: CLOSED_REQUEST, triage_agent_id: null },
     { id: QUESTION, triage_agent_id: null },
+    { id: HUMAN_REQUEST, triage_agent_id: null },
   ]);
   expect((await client.query("SELECT agent_id,task_id,why,text FROM pending_wakes ORDER BY text")).rows).toEqual([
     { agent_id: HEAD, task_id: '00000000-0000-4000-8000-000000000110', why: 'explain', text: MEMBER_REQUEST },

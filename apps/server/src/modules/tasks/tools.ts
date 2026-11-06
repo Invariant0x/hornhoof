@@ -234,7 +234,8 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     {
       description:
         "Adds a note to a task's log for everyone on it. Whoever gave out a member task that is blocked can answer it with a comment, " +
-        'which opens it again and wakes its executor with your words. A comment from a person or another agent also ends an external wait and wakes its holder. To hand work on, use the task\'s own moves.',
+        'which opens it again and wakes its executor with your words. A comment from a person or another agent also ends an external wait and wakes its holder. ' +
+        'The current head or orchestrator resolves its internal stuck request with a comment. To hand work on, use the task\'s own moves.',
       inputSchema: { task: Ref, text: Text.trim().min(1) },
     },
     async ({ task: ref, text }) =>
