@@ -81,6 +81,12 @@ async function workUnderDone(tx: Tx, templates: Live['templates'], closed: Task,
   if (!parent || CLOSED.includes(parent.status) || !holder || (await isTurnReview(tx, closed.id))) return [];
   const [open] = await tx.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.parentId, parent.id), notInArray(tasks.status, [...CLOSED]))).limit(1);
   if (open || (await openAfter(tx, parent)).length) return [];
+  const review = await reviewAfterWork(tx, templates, parent, holder, opened, comparison);
+  if (review.wakes) return review.wakes;
+  return holder === actorId ? [] : [{ agentId: holder, taskId: parent.id, why: 'subtasks', ...(review.note ? { note: review.note } : {}) }];
+}
+
+async function reviewAfterWork(tx: Tx, templates: Live['templates'], parent: Task, holder: string, opened: Task[], comparison?: CompareSnapshot): Promise<{ wakes?: Wake[]; note?: string }> {
   const due = templates ? await reviewDue(tx, parent) : null;
   let note: string | undefined;
   if (due?.waiting.length) {
@@ -89,11 +95,11 @@ async function workUnderDone(tx: Tx, templates: Live['templates'], closed: Task,
     const review = await openTurnReview(tx, templates!, parent, holder, due.covered, comparison);
     if ('row' in review) {
       opened.push(review.row);
-      return review.wakes;
+      return { wakes: review.wakes };
     }
     note = review.note;
   }
-  return holder === actorId ? [] : [{ agentId: holder, taskId: parent.id, why: 'subtasks', ...(note ? { note } : {}) }];
+  return { note };
 }
 
 const reviewMark = sql`${taskEvents.data}->>'turnReview' = 'true'`;
@@ -590,52 +596,49 @@ function checkNewHolders(ctx: Ctx, actor: Actor, companyId: string, parent: Task
   return refuseNotUrgent(ctx, actor, companyId, { urgent, productId: input.productId ?? null, gates }, [input.assigneeAgentId, ...part]);
 }
 
-export async function createTask(ctx: Ctx, actor: Actor, input: NewTask): Promise<Moved> {
-  const assignee = await workingAgent(ctx.db, null, input.assigneeAgentId);
-  const gates = input.executor ? (input.gates ?? []) : [];
+type NewTaskSetup = { assignee: Awaited<ReturnType<typeof workingAgent>>; gates: string[]; parent: Task | null; declaration: IndependentDeclaration | null };
+
+async function checkNewTaskFields(ctx: Ctx, input: NewTask, assignee: NewTaskSetup['assignee'], gates: string[]): Promise<void> {
   if (!input.executor && input.gates?.length) throw refuse(400, 'task_invalid', 'Only a task with an executor has gates.');
   if (input.executor) await checkGates(ctx.db, assignee.companyId, assignee.id, gates, ctx.templates);
   if (!input.title.trim()) throw refuse(400, 'task_invalid', 'A task needs a title.');
+}
+
+async function prepareNewTask(ctx: Ctx, actor: Actor, input: NewTask): Promise<NewTaskSetup> {
+  const assignee = await workingAgent(ctx.db, null, input.assigneeAgentId);
+  const gates = input.executor ? (input.gates ?? []) : [];
+  await checkNewTaskFields(ctx, input, assignee, gates);
   checkAfterPlans(input.after ?? [], input.afterPlans);
   const declaration = checkIndependent(input.after ?? [], input.independentPart, input.independentNone, null);
   if (declaration?.kind === 'part') await checkIndependentExecutor(ctx.db, input.departmentId, declaration.part);
   const parent = input.parentId ? await loadTask(ctx.db, input.parentId) : null;
   if (parent) stillOpen(parent);
   await checkNewHolders(ctx, actor, assignee.companyId, parent, input, gates, declaration);
-  let independent: Task | null = null;
-  let waits = false;
-  const wakes: Wake[] = [];
-  const task = await ctx.db.transaction(async tx => {
-    /* Numbers go up one by one per company, so creating tasks waits on the company row. */
-    await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, assignee.companyId)).for('update');
-    /* A parent cancelled meanwhile takes no new work; one cancelled after this waits and cancels the new task with it. */
-    let above: Task | null = null;
-    if (parent) {
-      const [now] = await tx.select().from(tasks).where(eq(tasks.id, parent.id)).for('update');
-      above = now!;
-      stillOpen(now!);
-      /* Its gates check the work as handed in; more work under it starts once they send it back. */
-      if (now!.stage > 0) throw refuse(409, 'task_invalid', `#${now!.number} is being checked at its gates, so no work goes under it now. Give it once the gates send it back, or as a task of its own.`);
-      /* Nor while it waits for what it comes after: its work starts with it. */
-      const open = await openAfter(tx, now!);
-      if (open.length) throw refuse(409, 'task_invalid', `#${now!.number} waits for ${listed(open)} first, so no work goes under it yet. You are woken once it can start.`);
-    }
-    /* With the company held, so a change of urgency on its way reaches this task, or waits for it. */
-    const urgent = await urgencyOfNew(tx, assignee.companyId, actor, above, input.urgent);
-    const [last] = await tx.select({ n: max(tasks.number) }).from(tasks).where(eq(tasks.companyId, assignee.companyId));
-    const [turn] = parent ? [] : await tx.select({ id: turns.id }).from(turns).where(and(eq(turns.companyId, assignee.companyId), eq(turns.status, 'open')));
-    const turnId = parent ? parent.turnId : (turn?.id ?? null);
-    /* One of them done at this moment would not see the new task wait for it, so they are held while it is decided
-       whether it waits: that one is done after the task is made, and starts it. */
-    const after = await checkAfter(tx, assignee.companyId, turnId, input.after ?? [], true);
-    await refuseAbove(tx, parent?.id ?? null, input.after ?? []);
-    waits = after.some(t => t.status !== 'done');
-    const [row] = await tx
-      .insert(tasks)
-      .values({
+  return { assignee, gates, parent, declaration };
+}
+
+async function parentForNewTask(tx: Tx, parent: Task | null): Promise<Task | null> {
+  if (!parent) return null;
+  const [now] = await tx.select().from(tasks).where(eq(tasks.id, parent.id)).for('update');
+  stillOpen(now!);
+  /* Its gates check the work as handed in; more work under it starts once they send it back. */
+  if (now!.stage > 0) throw refuse(409, 'task_invalid', `#${now!.number} is being checked at its gates, so no work goes under it now. Give it once the gates send it back, or as a task of its own.`);
+  const open = await openAfter(tx, now!);
+  if (open.length) throw refuse(409, 'task_invalid', `#${now!.number} waits for ${listed(open)} first, so no work goes under it yet. You are woken once it can start.`);
+  return now!;
+}
+
+function independentData(declaration: IndependentDeclaration | null): Record<string, unknown> {
+  if (declaration?.kind === 'part') return { independentPart: declaration.part };
+  if (declaration?.kind === 'none') return { independentNone: declaration.reason };
+  return {};
+}
+
+function newTaskValues(actor: Actor, input: NewTask, { assignee, gates, parent }: NewTaskSetup, position: { urgent: boolean; turnId: string | null; number: number }): typeof tasks.$inferInsert {
+  return {
         companyId: assignee.companyId,
-        number: (last?.n ?? 0) + 1,
-        turnId,
+        number: position.number,
+        turnId: position.turnId,
         parentId: parent?.id ?? null,
         departmentId: input.departmentId,
         productId: input.productId ?? null,
@@ -648,32 +651,61 @@ export async function createTask(ctx: Ctx, actor: Actor, input: NewTask): Promis
         after: input.after ?? [],
         workKind: input.workKind,
         riskClass: input.riskClass,
-        urgent,
+        urgent: position.urgent,
         small: input.small === true,
         createdByPersonId: actor.personId ?? null,
         createdByAgentId: actor.agentId ?? null,
         updatedAt: new Date(),
-      })
-      .returning();
-    const event = await note(tx, row!, { kind: 'created', actor, text: row!.brief, data: {
-      assignee: assignee.id,
-      gates,
-      after: row!.after,
-      ...(declaration?.kind === 'part' ? { independentPart: declaration.part } : declaration?.kind === 'none' ? { independentNone: declaration.reason } : {}),
-      ...(input.inTurnReview ? { inTurnReview: true } : {}),
-    } });
-    await bindAfter(tx, row!, after, input.afterPlans, actor);
-    if (declaration?.kind === 'part') {
-      const made = await insertIndependent(tx, row!, declaration.part, actor, input.inTurnReview);
-      independent = made.child;
-      wakes.push(made.wake);
-    }
-    /* One that waits for what it comes after is not given out yet: the move that finishes the last of them wakes its holder. */
-    if (!waits) wakes.push({ agentId: assignee.id, taskId: row!.id, why: 'assigned' });
-    recordCause(wakes, { kind: 'created', actor }, event.id, row!);
-    await keepWakes(tx, row!.companyId, wakes);
-    return row!;
-  });
+      };
+}
+
+type CreatedTask = Moved & { independent: Task | null };
+
+async function insertNewTask(tx: Tx, actor: Actor, input: NewTask, setup: NewTaskSetup): Promise<CreatedTask> {
+  const { assignee, gates, parent, declaration } = setup;
+  let independent: Task | null = null;
+  const wakes: Wake[] = [];
+  /* Numbers go up one by one per company, so creating tasks waits on the company row. */
+  await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, assignee.companyId)).for('update');
+  /* A parent cancelled meanwhile takes no new work; one cancelled after this waits and cancels the new task with it. */
+  const above = await parentForNewTask(tx, parent);
+  /* With the company held, so a change of urgency on its way reaches this task, or waits for it. */
+  const urgent = await urgencyOfNew(tx, assignee.companyId, actor, above, input.urgent);
+  const [last] = await tx.select({ n: max(tasks.number) }).from(tasks).where(eq(tasks.companyId, assignee.companyId));
+  const [turn] = parent ? [] : await tx.select({ id: turns.id }).from(turns).where(and(eq(turns.companyId, assignee.companyId), eq(turns.status, 'open')));
+  const turnId = parent ? parent.turnId : (turn?.id ?? null);
+  /* One of them done at this moment would not see the new task wait for it, so they are held while it is decided
+     whether it waits: that one is done after the task is made, and starts it. */
+  const after = await checkAfter(tx, assignee.companyId, turnId, input.after ?? [], true);
+  await refuseAbove(tx, parent?.id ?? null, input.after ?? []);
+  const waits = after.some(t => t.status !== 'done');
+  const [row] = await tx
+    .insert(tasks)
+    .values(newTaskValues(actor, input, setup, { urgent, turnId, number: (last?.n ?? 0) + 1 }))
+    .returning();
+  const event = await note(tx, row!, { kind: 'created', actor, text: row!.brief, data: {
+    assignee: assignee.id,
+    gates,
+    after: row!.after,
+    ...independentData(declaration),
+    ...(input.inTurnReview ? { inTurnReview: true } : {}),
+  } });
+  await bindAfter(tx, row!, after, input.afterPlans, actor);
+  if (declaration?.kind === 'part') {
+    const made = await insertIndependent(tx, row!, declaration.part, actor, input.inTurnReview);
+    independent = made.child;
+    wakes.push(made.wake);
+  }
+  /* One that waits for what it comes after is not given out yet: the move that finishes the last of them wakes its holder. */
+  if (!waits) wakes.push({ agentId: assignee.id, taskId: row!.id, why: 'assigned' });
+  recordCause(wakes, { kind: 'created', actor }, event.id, row!);
+  await keepWakes(tx, row!.companyId, wakes);
+  return { task: row!, wakes, independent };
+}
+
+export async function createTask(ctx: Ctx, actor: Actor, input: NewTask): Promise<Moved> {
+  const setup = await prepareNewTask(ctx, actor, input);
+  const { task, wakes, independent } = await ctx.db.transaction(tx => insertNewTask(tx, actor, input, setup));
   published(ctx, task);
   if (independent) published(ctx, independent);
   await handOff(ctx, actor, task);
@@ -1340,15 +1372,7 @@ const newHolders = (task: Task, executor: string | null, declaration: Independen
 ];
 
 /* The owner rewrites the task so it reads as the current truth, or hands it to another executor or other gates. */
-export async function updateTask(ctx: Ctx, agentId: string, taskId: string, c: TaskChange): Promise<Moved> {
-  const task = await loadTask(ctx.db, taskId);
-  stillOpen(task);
-  if ((c.executor !== undefined || c.gates !== undefined) && !task.executorAgentId) throw refuse(400, 'task_invalid', `#${task.number} has no executor or gates.`);
-  if (c.gates !== undefined && c.executor === undefined && task.status === 'review' && task.stage > 0 && !task.panel.length) return regate(ctx, agentId, task, c);
-  if ((c.executor !== undefined || c.gates !== undefined) && task.stage !== 0) throw refuse(409, 'task_invalid', `#${task.number} is at a gate; change who works on it after the verdict.`);
-  /* The merge hands in what its gates passed: gates given now would never check it. */
-  if (c.gates !== undefined && task.merging) throw refuse(409, 'task_invalid', `#${task.number} passed its gates and is being merged, so its gates no longer change. Give more checks as a task of their own.`);
-  if (c.after !== undefined && task.stage !== 0) throw refuse(409, 'task_invalid', `#${task.number} is at a gate already, so it waits for nothing any more.`);
+async function rewriteTaskHolders(ctx: Ctx, task: Task, c: TaskChange) {
   const executor = c.executor ?? task.executorAgentId;
   const gates = c.gates ?? task.gates;
   if (executor && c.executor !== undefined) await workingAgent(ctx.db, task.companyId, executor);
@@ -1364,16 +1388,18 @@ export async function updateTask(ctx: Ctx, agentId: string, taskId: string, c: T
     set.gates = gates;
     fields.push('gates');
   }
-  const waited = (await openAfter(ctx.db, task)).length > 0;
-  checkAfterPlans(c.after ?? task.after, c.afterPlans);
+  return { set, fields, executor };
+}
+
+async function independentForRewrite(ctx: Ctx, task: Task, c: TaskChange) {
   const declarationInput = c.after !== undefined || c.independentPart !== undefined || c.independentNone !== undefined;
   const existing = declarationInput ? await currentIndependent(ctx.db, task.id) : null;
   const declaration = declarationInput ? checkIndependent(c.after ?? task.after, c.independentPart, c.independentNone, existing) : null;
   if (declaration?.kind === 'part') await checkIndependentExecutor(ctx.db, task.departmentId, declaration.part);
-  await refuseNotUrgent(ctx, { agentId }, task.companyId, task, newHolders(task, executor, declaration, existing));
-  const createsIndependent = declaration?.kind === 'part' && existing?.kind !== 'part';
-  const reviewIndependent = createsIndependent && (await createdData(ctx.db, task.id)).inTurnReview === true;
-  let independent: Task | null = null;
+  return { existing, declaration };
+}
+
+async function rewriteDependencies(ctx: Ctx, task: Task, c: TaskChange, set: Partial<Task>, fields: string[]) {
   if (c.after !== undefined && JSON.stringify(c.after) !== JSON.stringify(task.after)) {
     await checkAfter(ctx.db, task.companyId, task.turnId, c.after);
     await refuseAbove(ctx.db, task.parentId, c.after);
@@ -1381,7 +1407,9 @@ export async function updateTask(ctx: Ctx, agentId: string, taskId: string, c: T
     set.after = c.after;
     fields.push('after');
   }
-  if (onlyLabels(fields, createsIndependent)) return relabel(ctx, agentId, task, set, fields);
+}
+
+async function resumeRewrittenTask(ctx: Ctx, task: Task, set: Partial<Task>) {
   /* A rewrite answers a blocked executor. A task nobody holds stays blocked until someone can take it. */
   if (task.status === 'blocked' && (set.assigneeAgentId ?? task.assigneeAgentId)) set.status = 'open';
   /* Another one takes it up, so Hornhoof's note that it stood still is over; a person's word asked for still waits. */
@@ -1390,41 +1418,93 @@ export async function updateTask(ctx: Ctx, agentId: string, taskId: string, c: T
     set.silent = 0;
     if (task.status === 'waiting' && !(await waitsForPerson(ctx.db, task.id))) set.status = 'open';
   }
+  return handedOn;
+}
+
+async function stopQueuedRewrite(tx: Tx, taskId: string, holder: string | null, error: 'waiting' | 'handed_on'): Promise<void> {
+  if (holder) await tx.update(jobs).set({ status: 'failed', error, finishedAt: new Date() }).where(and(eq(jobs.agentId, holder), eq(jobs.taskId, taskId), eq(jobs.status, 'queued')));
+}
+
+async function handOverRewrite(tx: Tx, task: Task, unstuck: ReturnType<typeof stuckGoes>): Promise<void> {
+  await unstuck.also(tx);
+  await stopQueuedRewrite(tx, task.id, task.assigneeAgentId, 'handed_on');
+}
+
+async function rewrittenPart(tx: Tx, row: Task, declaration: IndependentDeclaration | null, creates: boolean, agentId: string, review: boolean) {
+  if (!creates) return null;
+  return insertIndependent(tx, row, (declaration as Extract<IndependentDeclaration, { kind: 'part' }>).part, { agentId }, review);
+}
+
+function rewriteWake(taskId: string, assignee: string | null | undefined, holder: string | null, agentId: string, waited: boolean): Wake[] {
+  if (assignee || (waited && holder)) return [{ agentId: (assignee ?? holder)!, taskId, why: 'assigned' }];
+  if (holder && holder !== agentId) return [{ agentId: holder, taskId, why: 'updated' }];
+  return [];
+}
+
+async function wakeAfterRewrite(tx: Tx, task: Task, set: Partial<Task>, holder: string | null, waited: boolean, agentId: string, wakes: Wake[]): Promise<void> {
+  if ((await openAfter(tx, { after: set.after ?? task.after })).length) return stopQueuedRewrite(tx, task.id, holder, 'waiting');
+  wakes.push(...rewriteWake(task.id, set.assigneeAgentId, holder, agentId, waited));
+}
+
+async function applyTaskRewrite(ctx: Ctx, agentId: string, taskId: string, task: Task, c: TaskChange, set: Partial<Task>, fields: string[], waited: boolean, declaration: IndependentDeclaration | null, createsIndependent: boolean, reviewIndependent: boolean) {
+  let independent: Task | null = null;
+  const handedOn = await resumeRewrittenTask(ctx, task, set);
   const unstuck = stuckGoes(ctx, task);
-  const before = task.assigneeAgentId;
-  const handOver = async (tx: Tx) => {
-    await unstuck.also(tx);
-    /* The one who held it would only start on work it no longer holds. */
-    if (before) await tx.update(jobs).set({ status: 'failed', error: 'handed_on', finishedAt: new Date() }).where(and(eq(jobs.agentId, before), eq(jobs.taskId, task.id), eq(jobs.status, 'queued')));
-  };
   const holder = set.assigneeAgentId ?? task.assigneeAgentId;
-  /* A turn its holder has waiting on it would set to work on it anyway; the holder is woken again once it can start. */
-  const holdBack = async (tx: Tx) => {
-    if (holder) await tx.update(jobs).set({ status: 'failed', error: 'waiting', finishedAt: new Date() }).where(and(eq(jobs.agentId, holder), eq(jobs.taskId, task.id), eq(jobs.status, 'queued')));
-  };
   const wakes: Wake[] = [];
   const also = async (tx: Tx, row: Task) => {
-    if (handedOn) await handOver(tx);
+    if (handedOn) await handOverRewrite(tx, task, unstuck);
     if (set.after) await rebindAfter(tx, row, await checkAfter(tx, task.companyId, task.turnId, set.after), c.afterPlans, { agentId });
-    if (createsIndependent) {
-      const made = await insertIndependent(tx, row, declaration.part, { agentId }, reviewIndependent);
+    const made = await rewrittenPart(tx, row, declaration, createsIndependent, agentId, reviewIndependent);
+    if (made) {
       independent = made.child;
       wakes.push(made.wake);
     }
     /* It waits now for what it comes after, so nobody sets to work on it yet; one that waited and waits no more starts.
        Seen inside the move, where what it comes after is held. */
-    if ((await openAfter(tx, { after: set.after ?? task.after })).length) return holdBack(tx);
-    if (set.assigneeAgentId || (waited && holder)) wakes.push({ agentId: (set.assigneeAgentId ?? holder)!, taskId, why: 'assigned' });
-    else if (holder && holder !== agentId) wakes.push({ agentId: holder, taskId, why: 'updated' });
+    await wakeAfterRewrite(tx, task, set, holder, waited, agentId, wakes);
   };
   const row = await move(ctx, task, set, { kind: 'updated', actor: { agentId }, data: {
     fields,
-    ...(declaration?.kind === 'part' ? { independentPart: declaration.part } : declaration?.kind === 'none' ? { independentNone: declaration.reason } : {}),
+    ...independentData(declaration),
   } }, also, wakes);
   if (independent) published(ctx, independent);
   unstuck.tell();
   if (independent) await handOff(ctx, { agentId }, independent);
   return { task: row, wakes };
+}
+
+function refuseMissingExecutor(task: Task, c: TaskChange): void {
+  if ((c.executor !== undefined || c.gates !== undefined) && !task.executorAgentId) throw refuse(400, 'task_invalid', `#${task.number} has no executor or gates.`);
+}
+
+function emptyGateRewrite(task: Task, c: TaskChange): boolean {
+  return c.gates !== undefined && c.executor === undefined && task.status === 'review' && task.stage > 0 && !task.panel.length;
+}
+
+function refuseGateRewrite(task: Task, c: TaskChange): void {
+  if ((c.executor !== undefined || c.gates !== undefined) && task.stage !== 0) throw refuse(409, 'task_invalid', `#${task.number} is at a gate; change who works on it after the verdict.`);
+  /* The merge hands in what its gates passed: gates given now would never check it. */
+  if (c.gates !== undefined && task.merging) throw refuse(409, 'task_invalid', `#${task.number} passed its gates and is being merged, so its gates no longer change. Give more checks as a task of their own.`);
+  if (c.after !== undefined && task.stage !== 0) throw refuse(409, 'task_invalid', `#${task.number} is at a gate already, so it waits for nothing any more.`);
+}
+
+export async function updateTask(ctx: Ctx, agentId: string, taskId: string, c: TaskChange): Promise<Moved> {
+  const task = await loadTask(ctx.db, taskId);
+  stillOpen(task);
+  refuseMissingExecutor(task, c);
+  if (emptyGateRewrite(task, c)) return regate(ctx, agentId, task, c);
+  refuseGateRewrite(task, c);
+  const { set, fields, executor } = await rewriteTaskHolders(ctx, task, c);
+  const waited = (await openAfter(ctx.db, task)).length > 0;
+  checkAfterPlans(c.after ?? task.after, c.afterPlans);
+  const { existing, declaration } = await independentForRewrite(ctx, task, c);
+  await refuseNotUrgent(ctx, { agentId }, task.companyId, task, newHolders(task, executor, declaration, existing));
+  const createsIndependent = declaration?.kind === 'part' && existing?.kind !== 'part';
+  const reviewIndependent = createsIndependent && (await createdData(ctx.db, task.id)).inTurnReview === true;
+  await rewriteDependencies(ctx, task, c, set, fields);
+  if (onlyLabels(fields, createsIndependent)) return relabel(ctx, agentId, task, set, fields);
+  return applyTaskRewrite(ctx, agentId, taskId, task, c, set, fields, waited, declaration, createsIndependent, reviewIndependent);
 }
 
 /* Comments from others end an external wait. A giver's answer also opens a blocked member task for its executor. */
