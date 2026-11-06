@@ -41,6 +41,52 @@ describe('static PNG diagnostic content', () => {
     const encoded = [0x40, 0x40, 0, 0x20, 0][filter]!;
     expect(pngOutputDimensions(png(header(2, 2, 1, 3), Buffer.from([0, 0x40, filter, encoded]), [palette]))).toEqual({ width: 2, height: 2 });
   });
+  it.each([
+    { name: 'wraps a restored Sub sample into the actual palette', raw: [1, 1, 255], want: { width: 2, height: 1 } },
+    { name: 'refuses a restored Sub sample outside the actual palette', raw: [1, 1, 1], want: null },
+  ])('$name', ({ raw, want }) => {
+    const palette = chunk('PLTE', Buffer.from([0, 0, 0, 255, 255, 255]));
+    expect(pngOutputDimensions(png(header(2, 1, 8, 3), Buffer.from(raw), [palette]))).toEqual(want);
+  });
+  it.each([
+    { name: 'left', raw: [0, 1, 1, 4, 255, 4] },
+    { name: 'up', raw: [0, 1, 0, 4, 0, 4] },
+    { name: 'corner', raw: [0, 1, 2, 4, 255, 3] },
+    { name: 'left wins its tie with corner', raw: [0, 3, 4, 4, 254, 3] },
+    { name: 'up wins its tie with corner', raw: [0, 3, 1, 4, 1, 3] },
+  ])('accepts independently filtered palette rows when Paeth selects $name', ({ raw }) => {
+    expect(pngOutputDimensions(png(header(2, 2, 8, 3), Buffer.from(raw), [chunk('PLTE', Buffer.alloc(15))]))).toEqual({ width: 2, height: 2 });
+  });
+  it.each([
+    { name: 'left', raw: [0, 0, 2, 4, 2, 3] },
+    { name: 'up', raw: [0, 0, 2, 4, 0, 3] },
+    { name: 'corner', raw: [0, 2, 1, 4, 1, 3] },
+  ])('refuses a palette overflow exposed only after Paeth selects $name', ({ raw }) => {
+    expect(pngOutputDimensions(png(header(2, 2, 8, 3), Buffer.from(raw), [chunk('PLTE', Buffer.alloc(15))]))).toBeNull();
+  });
+  it('resets indexed previous-row state for each nonempty Adam7 pass', () => {
+    // 2x2 uses passes 1, 6 and 7; Up on each first row must see a zero previous row.
+    const raw = Buffer.from([0, 1, 2, 1, 2, 1, 1]);
+    expect(pngOutputDimensions(png(header(2, 2, 8, 3, 1), raw, [chunk('PLTE', Buffer.alloc(6))]))).toEqual({ width: 2, height: 2 });
+  });
+  it.each([
+    { extra: 0, want: { width: 1, height: 1 } }, { extra: 1, want: null },
+  ])('enforces the encoded byte ceiling on a fully formed PNG with $extra extra bytes', ({ extra, want }) => {
+    const limit = 50 * 1024 * 1024;
+    const padding = chunk('raNd', Buffer.alloc(limit + extra - png().length - 12));
+    expect(pngOutputDimensions(png(header(), rgba, [padding]))).toEqual(want);
+  });
+  it.each([
+    { height: 2097152, want: { width: 24, height: 2097152 } }, { height: 2097153, want: null },
+  ])('enforces decoded storage at the exact byte boundary for $height populated rows', ({ height, want }) => {
+    // 24 grayscale bytes plus one filter byte per row: 25 * 2097152 = 50MiB exactly.
+    expect(pngOutputDimensions(png(header(24, height, 8, 0), Buffer.alloc(25 * height)))).toEqual(want);
+  });
+  it.each([
+    { width: 52428800, want: { width: 52428800, height: 1 } }, { width: 52428801, want: null },
+  ])('enforces pixel work independently of decoded storage for $width one-bit samples', ({ width, want }) => {
+    expect(pngOutputDimensions(png(header(width, 1, 1, 0), Buffer.alloc(Math.ceil(width / 8) + 1)))).toEqual(want);
+  });
   it('joins consecutive IDAT pieces including empty chunks without changing the bytes', () => {
     const data = deflateSync(rgba);
     const bytes = Buffer.concat([SIGNATURE, chunk('IHDR', header()), chunk('IDAT'), chunk('IDAT', data.subarray(0, 3)), chunk('IDAT', data.subarray(3)), chunk('IEND')]);
