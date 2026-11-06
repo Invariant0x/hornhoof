@@ -5,6 +5,7 @@ import { inLane, type Limits } from '@hornhoof/protocol';
 import { ownFs, type AgentFs } from '../agent-fs.js';
 import { CRED_FILES } from '../credentials.js';
 import type { JobUser } from '../isolation.js';
+import { codexRootFlags } from '../program-folder.js';
 import { agyPlanLimits } from '../providers/antigravity.js';
 import { readPrivate } from '../providers/process.js';
 import { WHOLE_AGENTS_MD } from '../providers/codex.js';
@@ -17,6 +18,8 @@ export type LaunchInput = {
   /* Where the program keeps its sign-in, settings and session logs. */
   home: string;
   workDir: string;
+  /* Whether workDir is a task's folder, with Hornhoof's own files in the folder around it. */
+  bound?: boolean;
   /* The session to go on with, or null for a new one. */
   sessionId: string | null;
   model: string | null;
@@ -88,8 +91,8 @@ export const claudeProgram: TermProgram = {
 
 export const codexProgram: TermProgram = {
   kind: 'codex',
-  launch({ bin, home, workDir, sessionId, model, effort, urls }) {
-    const config = ['-c', `mcp_servers.hornhoof.url=${JSON.stringify(urls.mcpUrl)}`, ...WHOLE_AGENTS_MD, ...CODEX_NO_AUTO_UPDATE, ...(effort ? ['-c', `model_reasoning_effort=${JSON.stringify(effort)}`] : [])];
+  launch({ bin, home, workDir, bound = false, sessionId, model, effort, urls }) {
+    const config = ['-c', `mcp_servers.hornhoof.url=${JSON.stringify(urls.mcpUrl)}`, ...WHOLE_AGENTS_MD, ...codexRootFlags(bound), ...CODEX_NO_AUTO_UPDATE, ...(effort ? ['-c', `model_reasoning_effort=${JSON.stringify(effort)}`] : [])];
     const hooks = Object.entries({ Stop: 'stop', Interrupt: 'interrupt', PreToolUse: 'tool', PostToolUse: 'tooldone', SessionEnd: 'end' }).flatMap(([name, event]) => ['-c', `hooks.${name}=[{hooks=[{type="command",command="hh-hook ${event}"}]}]`]);
     const rest = ['--dangerously-bypass-approvals-and-sandbox', '--dangerously-bypass-hook-trust', ...hooks, ...config, ...(model ? ['-m', model] : [])];
     /* A resumed session works in the folder it started in, which is the pane's. */

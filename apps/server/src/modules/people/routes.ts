@@ -11,6 +11,7 @@ import type { Db } from '../../db/client.js';
 import { isUniqueViolation } from '../../db/errors.js';
 import { agentChanges, agents, companies, invites, machines, people, personChanges, sessions, subscriptions } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
+import { releaseLeftProgram } from '../agents/left-programs.js';
 import { onAgent } from '../conversation/queue.js';
 import { publicUrl } from '../link/link.js';
 import { disconnectMachines } from '../nodes/disconnect.js';
@@ -131,6 +132,7 @@ async function releasePlansOf(ctx: Ctx, owner: Pick<Person, 'id' | 'companyId' |
         await tx.update(agents).set({ subscriptionId: null }).where(eq(agents.id, id));
         await tx.insert(agentChanges).values({ companyId: agent.companyId, agentId: id, ...changedBy(by), field: 'subscription', before: agent.subscriptionId, after: null });
       });
+      await releaseLeftProgram(ctx, id, agent.subscriptionId);
       freed = true;
     });
   }

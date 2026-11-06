@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { Case, type ModelCheckKind, type Party } from './contract.js';
+import { Case, type ModelCheckKind } from '@hornhoof/protocol';
 
 /* A set of examples is the bytes of a JSONL file: each version is immutable, and its hash is of those very bytes. A file
    with one bad line is refused whole, as a run over part of what was labelled would prove less than it says. */
@@ -7,6 +7,7 @@ import { Case, type ModelCheckKind, type Party } from './contract.js';
 type ProblemCode = 'not_utf8' | 'empty' | 'empty_line' | 'not_json' | 'invalid_case' | 'wrong_kind' | 'input_kind' | 'expected_form' | 'must_block_expected' | 'class_unknown' | 'expected_weaker' | 'self_labelled' | 'duplicate_id' | 'no_incident';
 export type DatasetProblem = { line: number; code: ProblemCode };
 export type Dataset = { hash: string; cases: Case[]; holdout: number; mustBlock: number };
+export type Party = Case['labelledBy'];
 export type DatasetRules = { kind: ModelCheckKind; authors: readonly Party[] };
 type Refused = { ok: false; problems: DatasetProblem[] };
 type Parsed = { ok: true; dataset: Dataset } | Refused;
