@@ -43,14 +43,23 @@ describe('restricted access screens', () => {
     expect(document.querySelector('.tv-in')).not.toHaveTextContent('Payment screen in the app');
   });
 
-  it('shows an access-denied window without the agent name or payload after 403', async () => {
-    mockApi({ 'GET /api/agents/b1': refused, 'GET /api/agents/b1/events?after=0': refused });
+  it.each([403, 404])('shows an access-denied window without the agent name or payload after %s', async status => {
+    const denied: [number, unknown] = [status, { error: { code: status === 403 ? 'forbidden' : 'not_found', message: 'Hidden resource details.' } }];
+    mockApi({ 'GET /api/agents/b1': denied, 'GET /api/agents/b1/events?after=0': denied });
     render(<Windows />);
     expect(await screen.findByRole('heading', { name: 'Insufficient permissions' })).toBeInTheDocument();
     expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
     expect(screen.queryByText('Bruno')).not.toBeInTheDocument();
     expect(screen.queryByText('Hidden resource details.')).not.toBeInTheDocument();
     expect(screen.queryByText(SECRET)).not.toBeInTheDocument();
+  });
+
+  it('opens a product employee authorized by the server without a department roster entry', async () => {
+    const org = { ...DEV_ORG, departments: DEV_ORG.departments.map(d => ({ ...d, employees: [], products: [{ id: 'product', name: 'Checkout' }] })) };
+    mockApi({ ...allowed, 'GET /api/agents/b1': [200, { ...CARD, product: { id: 'product', name: 'Checkout' } }] });
+    render(<Windows org={org} />);
+    expect(await screen.findByText(SECRET)).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Insufficient permissions' })).not.toBeInTheDocument();
   });
 
   it('drops an open agent journal as soon as a new org removes the agent', async () => {
