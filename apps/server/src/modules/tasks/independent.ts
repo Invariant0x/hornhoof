@@ -13,17 +13,21 @@ export type IndependentRecord = { kind: 'part'; part: IndependentPartInput; chil
 const invalid = (message: string) => new ApiError(400, 'validation', message, 'task_invalid');
 const REQUIRED = 'A task with after needs independentPart or independentNone.';
 
+function existingIndependent(part: IndependentPartInput | undefined, none: string | undefined, current: IndependentDeclaration | null): IndependentDeclaration | null {
+  if (current?.kind !== 'part') return null;
+  if (none !== undefined) throw invalid('The independent part already exists.');
+  if (part && JSON.stringify(part) !== JSON.stringify(current.part)) throw invalid('The independent part already exists.');
+  return current;
+}
+
 export function checkIndependent(after: string[], part: IndependentPartInput | undefined, none: string | undefined, current: IndependentDeclaration | null): IndependentDeclaration | null {
   if (part && none !== undefined) throw invalid(REQUIRED);
   if (!after.length) {
     if (part || none !== undefined) throw invalid('independentPart and independentNone need a nonempty after.');
     return null;
   }
-  if (current?.kind === 'part') {
-    if (none !== undefined) throw invalid('The independent part already exists.');
-    if (part && JSON.stringify(part) !== JSON.stringify(current.part)) throw invalid('The independent part already exists.');
-    return current;
-  }
+  const existing = existingIndependent(part, none, current);
+  if (existing) return existing;
   if (part) return { kind: 'part', part: IndependentPartSchema.parse(part) };
   if (current) return current;
   if (none !== undefined) {
