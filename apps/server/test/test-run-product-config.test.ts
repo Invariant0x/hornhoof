@@ -10,10 +10,13 @@ describe('canonical versioned product configuration', () => {
     const current = manifest(), preparation = current.execution?.oncePreparation;
     expect(current.execution?.version).toBe(2); expect(preparation?.profiles).toEqual(['final']); expect(preparation?.suiteIds).toEqual(['protocol']);
     const commands = preparation?.commands.map(command => JSON.stringify(command)) ?? [];
-    for (const command of original().suites.flatMap(suite => suite.finalChecks ?? [])) expect(commands).toContain(JSON.stringify(command));
+    const checks = original().suites.flatMap(suite => suite.finalChecks ?? []).flatMap(command => command.program === 'npm' && command.args.join(' ') === 'run typecheck:tests'
+      ? ['apps/server', 'apps/node', 'packages/protocol'].map(workspace => ({ program: 'npx', args: ['--no-install', 'tsc', '-p', `${workspace}/tsconfig.eslint.json`, '--noEmit'], cwd: '.' })) : [command]);
+    for (const command of checks) expect(commands).toContain(JSON.stringify(command));
     expect(new Set(commands).size).toBe(commands.length);
     expect(preparation?.commands).toContainEqual({ program: 'node', args: ['scripts/check-release.mjs', '--local'], cwd: '.' });
-    expect(preparation?.commands).toContainEqual({ program: 'npm', args: ['run', 'lint'], cwd: '.' });
+    expect(preparation?.commands).toContainEqual({ program: 'npm', args: ['run', 'lint:part', '--workspaces', '--include-workspace-root', '--'], cwd: '.' });
+    expect(preparation?.commands.some(command => command.program === 'npm' && ['lint', 'typecheck:tests', 'build'].includes(command.args[1] ?? ''))).toBe(false);
     expect(current.suites.flatMap(suite => suite.finalChecks ?? [])).toEqual([]);
   });
   it('uses the explicit native adapter for Vitest while retaining the other framework command', () => {
