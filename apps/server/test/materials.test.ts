@@ -4,7 +4,7 @@ import { MaterialManifest } from '@hornhoof/protocol';
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, attachments, companies, departments, jobs, people, proposals, requestInternal, requests, taskEvents, tasks } from '../src/db/schema.js';
+import { agentEvents, agents, attachments, companies, departments, jobs, people, proposals, requestInternal, requests, taskEvents, tasks } from '../src/db/schema.js';
 import { as, invitePerson, listen, mcp, openStream, ownPlan, setUpCompany, testApp, until } from './helpers.js';
 
 const PNG = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.alloc(64, 1)]);
@@ -162,6 +162,8 @@ async function intake() {
     task: await f.db.select().from(tasks).where(eq(tasks.id, f.task.id)),
     requests: await f.db.select().from(requests).where(eq(requests.taskId, f.task.id)),
     events: await f.db.select().from(taskEvents).where(eq(taskEvents.taskId, f.task.id)),
+    outgoing: await f.db.select().from(agentEvents).where(eq(agentEvents.companyId, f.company.id)),
+    jobs: await f.db.select().from(jobs).where(eq(jobs.companyId, f.company.id)),
     private: await f.db.select().from(requestInternal),
   });
   return { ...f, client, state };
