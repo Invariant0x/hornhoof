@@ -4,7 +4,7 @@ import { loadConfig } from '../src/config.js';
 import { taskEvents, testRuns } from '../src/db/schema.js';
 import { submitWithAuthorCheck } from '../src/modules/tasks/author-check-submit.js';
 import { TEST_SECRET as SECRET } from './helpers.js';
-import { qualityFixture, SHA } from './review-quality-fixture.js';
+import { OTHER, qualityFixture, SHA } from './review-quality-fixture.js';
 
 const config = (env: NodeJS.ProcessEnv = {}) => loadConfig({ HORNHOOF_SECRET: SECRET, UPDATE_CHECK_MS: '0', ...env });
 
@@ -40,6 +40,16 @@ describe('author check on submit', () => {
     expect(again.task.externalWait).toMatchObject({ run: run!.id });
     await Promise.allSettled([submitWithAuthorCheck(f.app.ctx, jobOf(f), f.task.id, input), submitWithAuthorCheck(f.app.ctx, jobOf(f), f.task.id, input)]);
     expect(await authorRuns(f)).toHaveLength(1);
+  });
+
+  it('refuses a branch that moved between review capture and run pinning', async () => {
+    const f = await qualityFixture();
+    f.app.ctx.config.authorCheck = true;
+    let reads = 0;
+    f.app.ctx.readCommit = async (_repo, want) => ({ branch: 'branch' in want ? want.branch : `task-${want.task}`, commitSha: ++reads === 1 ? SHA : OTHER });
+    const input = { summary: 'Done', evidence: 'Stale check', review: { baseCommit: SHA, authorCheckPlan: 'plan-text' } };
+    await expect(submitWithAuthorCheck(f.app.ctx, jobOf(f), f.task.id, input)).rejects.toThrow(/moved|changed/);
+    expect(await authorRuns(f)).toHaveLength(0);
   });
 });
 
