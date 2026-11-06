@@ -71,20 +71,20 @@ test('real department fixture keeps its notebook separate through read, write, c
   assert.ok(department.name.length > 0 && department.name.length <= 60);
   assert.ok(department.note.length > 0 && department.note.length <= 300);
   assert.notEqual(department.note, fixture.note, 'the two real notebooks must be distinguishable');
-  const headers = { cookie: 'hh_session=' + fixture.session, 'content-type': 'application/json' };
+  const headers = { cookie: 'hh_session=' + fixture.session }, jsonHeaders = { ...headers, 'content-type': 'application/json' };
   const base = fixture.origin + `/api/departments/${department.id}/notebook`;
   const read = async url => { const response = await fetch(url, { headers }); assert.equal(response.status, 200); return (await response.json()).notes; };
   const companyBefore = await read(fixture.origin + '/api/notebook');
   assert.deepEqual((await read(base)).map(n => [n.number, n.text, n.by.name]), [[department.number, department.note, fixture.author]]);
-  const added = await fetch(base, { method: 'POST', headers, body: JSON.stringify({ text: 'Department fixture temporary note' }) });
+  const added = await fetch(base, { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ text: 'Department fixture temporary note' }) });
   assert.equal(added.status, 201);
   const next = (await added.json()).note.number;
   assert.notEqual(next, department.number);
-  const changed = await fetch(base + '/' + next, { method: 'PATCH', headers, body: JSON.stringify({ text: 'Department fixture changed note' }) });
+  const changed = await fetch(base + '/' + next, { method: 'PATCH', headers: jsonHeaders, body: JSON.stringify({ text: 'Department fixture changed note' }) });
   assert.equal(changed.status, 200);
   assert.equal((await read(base)).find(n => n.number === next).text, 'Department fixture changed note');
   const removed = await fetch(base + '/' + next, { method: 'DELETE', headers });
-  assert.equal(removed.status, 204);
+  assert.equal(removed.status, 204, await removed.text());
   assert.deepEqual((await read(base)).map(n => [n.number, n.text]), [[department.number, department.note]]);
   assert.deepEqual(await read(fixture.origin + '/api/notebook'), companyBefore);
   console.log('HH_GEOMETRY_DEPARTMENT_FIXTURE ' + JSON.stringify({ sourceSha: fixture.sourceSha,
