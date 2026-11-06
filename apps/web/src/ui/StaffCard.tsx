@@ -4,6 +4,7 @@ import { errorText, useLanguage, useT, type Language, type Messages } from '../i
 import { PROVIDER_NAMES } from '../providers';
 import type { DecidedBy, ProviderId, RoleOption, Roster, Serving, StaffLine } from '../types';
 import { Decides, frozenBy } from './DecidedBy';
+import { ProposalMaterialsSection, useProposalMaterials } from './RequestMaterials';
 
 type Props = {
   department: { id: string; name: string };
@@ -110,6 +111,7 @@ export function StaffCard({ department, proposal, onCorrect, onDone, onHide, loc
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(false);
   const [failure, setFailure] = useState<unknown>(null);
+  const proposalMaterials = useProposalMaterials(proposal);
   /* A card stays one proposal: a newer one comes as a new card. */
   const lines = useRef(proposal?.people);
 
@@ -141,7 +143,7 @@ export function StaffCard({ department, proposal, onCorrect, onDone, onHide, loc
     setFailure(null);
     try {
       const people = sending.map(r => ({ role: r.role.id, name: nameOf(r), product: r.line.product ?? null, model: r.model, subscription: r.subscription, skills: skillsOf(r.role, r.line) }));
-      await api.post(`/api/departments/${department.id}/staff`, proposal ? { proposalId: proposal.id, people } : { people });
+      await api.post(`/api/departments/${department.id}/staff`, proposal ? { proposalId: proposal.id, ...proposalMaterials.stamp, people } : { people });
       setSent(true);
       onDone?.();
     } catch (err) {
@@ -155,6 +157,7 @@ export function StaffCard({ department, proposal, onCorrect, onDone, onHide, loc
     <div className={`t-card staff${sent ? ' done' : ''}`}>
       <h4>{t.staff.title(department.name)}</h4>
       {proposal?.brief && <p className="t-card-brief">{proposal.brief}</p>}
+      <ProposalMaterialsSection state={proposalMaterials} />
       {roster && !roster.subscriptions.length && !sent && <p className="t-card-brief">{t.staff.noServing}</p>}
       {rows.map((r, i) => {
         const name = nameOf(r);

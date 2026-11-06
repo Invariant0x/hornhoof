@@ -2,7 +2,9 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { LanguageProvider, en, ru } from '../src/i18n';
+import { LanguageProvider } from '../src/i18n';
+import { en } from '../src/i18n/en';
+import { ru } from '../src/i18n/ru';
 import type { WaitingRequest } from '../src/types';
 import { setPdfLoaderForTests } from '../src/ui/MaterialDocument';
 import { Requests, clearRequestDraftsForTests } from '../src/ui/Requests';
@@ -500,5 +502,31 @@ describe('separate question materials preview and explicit answering (#512)', ()
     expect(dialog.querySelectorAll('.mv-page')).toHaveLength(0);
     expect(within(dialog).queryByText('End of document. Shown in full.')).not.toBeInTheDocument();
     expect(within(dialog).getByRole('link', { name: 'Download file' })).toHaveAttribute('href', pdfFailDl);
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    /* 5. Answering a versioned request binds { materialRevision, materialDigest }, and a 409 stale response preserves the draft. */
+    const postPayloads: unknown[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (_path: string, init: RequestInit = {}) => {
+      postPayloads.push(typeof init.body === 'string' ? JSON.parse(init.body) : undefined);
+      return new Response(JSON.stringify({ error: { code: 'conflict', message: 'Materials changed since you opened this question.' } }), {
+        status: 409,
+        headers: { 'content-type': 'application/json' },
+      });
+    }));
+
+    const card = screen.getByRole('article', { name: '#478 Panel action layout' });
+    const answerBox = within(card).getByLabelText(en.tasks.yourAnswer);
+    await user.type(answerBox, 'Reviewed all four materials');
+    await user.click(within(card).getByRole('button', { name: 'Send answer' }));
+
+    expect(postPayloads).toEqual([
+      {
+        materialRevision: 1,
+        materialDigest: '1'.repeat(64),
+        answer: 'Reviewed all four materials',
+      },
+    ]);
+    expect(await within(card).findByRole('alert')).toHaveTextContent('Materials changed since you opened this question.');
+    expect(within(card).getByLabelText(en.tasks.yourAnswer)).toHaveValue('Reviewed all four materials');
   });
 });

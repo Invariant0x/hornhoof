@@ -4,6 +4,7 @@ import { deptLabel, errorText, useT, type Messages } from '../i18n';
 import { TEMPLATES } from '../templates';
 import type { DecidedBy, NewItem, Org, StructureItem, TemplateKey } from '../types';
 import { Decides, frozenBy } from './DecidedBy';
+import { ProposalMaterialsSection, useProposalMaterials } from './RequestMaterials';
 
 type Props = {
   proposal?: { id: string; brief: string; items: StructureItem[] };
@@ -39,6 +40,7 @@ export function StructureCard({ proposal, manual, departments, onCorrect, onDone
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(false);
   const [failure, setFailure] = useState<unknown>(null);
+  const proposalMaterials = useProposalMaterials(proposal);
   const chosen = items.filter((_, i) => ticks[i]);
   const label = chosen.length && chosen.every(i => !isNew(i)) ? t.card.apply(chosen.length) : t.card.create(chosen.length);
 
@@ -48,7 +50,7 @@ export function StructureCard({ proposal, manual, departments, onCorrect, onDone
     try {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars -- strip UI-only checked flag from payload items
       const picked = chosen.map(({ checked: _checked, ...rest }) => rest);
-      await api.post('/api/departments/build', proposal ? { proposalId: proposal.id, items: picked } : { items: picked });
+      await api.post('/api/departments/build', proposal ? { proposalId: proposal.id, ...proposalMaterials.stamp, items: picked } : { items: picked });
       setSent(true);
       onDone?.();
     } catch (err) {
@@ -61,6 +63,7 @@ export function StructureCard({ proposal, manual, departments, onCorrect, onDone
   return (
     <div className={`t-card${sent ? ' done' : ''}`}>
       <h4>{t.card.title}</h4>
+      <ProposalMaterialsSection state={proposalMaterials} />
       {items.map((item, i) => {
         const note = item.note || (isNew(item) ? t.templates[item.template].description : '');
         return (

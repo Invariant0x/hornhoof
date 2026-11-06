@@ -180,19 +180,33 @@ describe('work tree words', () => {
     for (const dict of [en, ru]) {
       for (const count of [0, 1, 2, 5, 11, 21]) {
         expect(dict.companyTemplates.employees(count)).toContain(String(count));
-        expect(dict.tasks.decisionsOf(count)).toContain(String(count));
-        expect(dict.tasks.cutText(count)).toContain(String(count));
-        expect(dict.machines.every(count)).toContain(String(count));
-        expect(dict.machines.part(1, count)).toContain('1');
+        expect(dict.map.decisionsOf('Ivan', count)).toContain('Ivan');
+        expect(dict.updates.cutText(count)).toContain(String(count || 0));
       }
-      expect(dict.machines.drainWaiting(0, 0, 0)).toBe('');
-      expect(dict.machines.drainWaiting(1, 0, 0)).toContain('1');
-      expect(dict.machines.drainWaiting(2, 5, 11)).toContain('2');
-      expect(dict.machines.drainWaiting(21, 2, 1)).toContain('21');
+      expect(dict.map.decisionsOf('Ivan', null)).toContain('Ivan');
+      expect(dict.agent.every(15)).toContain('15');
+      expect(dict.agent.every(60).length).toBeGreaterThan(0);
+      expect(dict.agent.every(120)).toContain('2');
+      expect(dict.machines.part({ kind: 'tests', run: 7, task: null, part: 1, parts: 1 })).toContain('7');
+      expect(dict.machines.part({ kind: 'work', run: 8, task: 512, part: 2, parts: 4 })).toContain('512');
+      expect(dict.machines.drainWaiting(0, 0, '12:00')).toContain('12:00');
+      expect(dict.machines.drainWaiting(1, 0, '12:00')).toContain('1');
+      expect(dict.machines.drainWaiting(0, 2, '12:00')).toContain('2');
+      expect(dict.machines.drainWaiting(5, 11, '12:00')).toContain('5');
+      expect(dict.dept.tree.dur(0)).toContain('0');
       expect(dict.dept.tree.dur(45)).toContain('45');
+      expect(dict.dept.tree.dur(60)).toContain('1');
       expect(dict.dept.tree.dur(125)).toContain('2');
-      expect(dict.dept.tree.dur(3700)).toContain('1');
-      expect(dict.dept.tree.dur(90_000)).toContain('1');
+      expect(dict.dept.tree.verdict(true, null).length).toBeGreaterThan(0);
+      expect(dict.dept.tree.verdict(false, 2)).toContain('2');
+      expect(dict.dept.now.retryAttempt(1, null, null)).toContain('1');
+      expect(dict.dept.now.retryAttempt(2, 5, '12:05')).toContain('5');
+      expect(dict.dept.stats(1, 2, 3, 0)).toContain('1');
+      expect(dict.dept.stats(1, 1, 1, 2)).toContain('2');
+      expect(dict.dept.statusSummary({ working: 1, idle: 2 })).toContain('1');
+      expect(dict.updates.result({ state: 'done', version: '0.8.0' }, '0.7.0')).toContain('0.8.0');
+      expect(dict.updates.result({ state: 'rolled_back', version: '0.8.0' }, '0.7.0')).toContain('0.7.0');
+      expect(dict.updates.result({ state: 'failed', version: '0.8.0' }, '0.7.0')).toContain('0.8.0');
     }
   });
 });

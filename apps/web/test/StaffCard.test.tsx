@@ -286,5 +286,14 @@ describe('StaffCard', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(screen.getByRole('checkbox', { name: /Bruno/ })).not.toBeChecked();
     expect(calls.filter(c => c.method === 'POST')).toEqual([]);
+
+    await user.click(screen.getByRole('button', { name: 'Hire (1)' }));
+    await vi.waitFor(() =>
+      expect(calls.find(c => c.method === 'POST')?.body).toMatchObject({
+        proposalId: 'pr9',
+        materialRevision: 1,
+        materialDigest: 'a'.repeat(64),
+      }),
+    );
   });
 });

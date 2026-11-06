@@ -93,7 +93,7 @@ const ORG_FIXTURE: Org = {
           status: 'working',
           on: true,
           timer: null,
-          task: { number: 508, title: 'Question materials' },
+          task: { id: 't508', number: 508, title: 'Question materials', stage: 0, gateCount: 0, bounces: 0 },
           context: null,
           program: null,
           alarm: null,
@@ -115,7 +115,7 @@ function collectStrings(value: unknown, out: string[] = []): string[] {
 }
 
 async function selectExtremeLocales(page: Page): Promise<Language[]> {
-  const registered = LANGUAGES.map(l => l.code);
+  const registered = LANGUAGES.map(l => l.id);
   const samples = Object.fromEntries(registered.map(code => [code, collectStrings(DICTS[code]).join(' ')]));
   const ranked = await page.evaluate(async (byLang: Record<string, string>) => {
     await document.fonts.ready;

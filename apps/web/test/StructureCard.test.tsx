@@ -173,6 +173,15 @@ describe('StructureCard', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Create departments (4)' })).toBeInTheDocument();
     expect(calls.filter(c => c.method === 'POST')).toEqual([]);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create departments (4)' }));
+    await vi.waitFor(() =>
+      expect(calls.find(c => c.method === 'POST')?.body).toMatchObject({
+        proposalId: 'pr1',
+        materialRevision: 1,
+        materialDigest: 'c'.repeat(64),
+      }),
+    );
   });
 });
 

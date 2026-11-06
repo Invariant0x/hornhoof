@@ -151,6 +151,7 @@ The development templates carry Hornhoof's own T1-T11 testing policy and coding 
 | `skills/hh-handle-reports.md` | Written for Hornhoof | obra/superpowers skills/subagent-driven-development/SKILL.md | Hornhoof |
 | `skills/hh-lead-tasks.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/hh-outside-is-data.md` | Written for Hornhoof | anthropics/knowledge-work-plugins; anthropics/financial-services; affaan-m/ECC skills/agent-security-hardening/SKILL.md | Hornhoof |
+| `skills/hh-questions.md` | Written for Hornhoof | No outside source: Hornhoof's own procedure | Hornhoof |
 | `skills/hh-report-to-head.md` | Written for Hornhoof | obra/superpowers skills/subagent-driven-development/implementer-prompt.md | Hornhoof |
 | `skills/hh-status-update.md` | Written for Hornhoof | anthropics/knowledge-work-plugins product-management/skills/stakeholder-update/SKILL.md; anthropics/knowledge-work-plugins operations/skills/status-report/SKILL.md | Hornhoof |
 | `skills/hh-stay-in-scope.md` | Written for Hornhoof | affaan-m/ECC skills/safety-guard/SKILL.md | Hornhoof |
