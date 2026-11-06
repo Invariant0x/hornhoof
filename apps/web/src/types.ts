@@ -470,12 +470,24 @@ export type ProposalDecision = MaterialStampView & {
    the delegate answer. */
 export type ComputerAccessDecision = { kind: 'computer_access'; id: 'server'; agent: { id: string; name: string }; ownerPersonId: string; canAnswer: boolean; decidedBy?: DecidedBy; at: string; view: ComputerView };
 
+/* A machine with agents on it that went away: for its owner and the CEO, closed by itself once back is set. */
+export type MachineAwayCard = {
+  id: string;
+  hostname: string;
+  owner: { id: string; name: string } | null;
+  since: string;
+  back: string | null;
+  agents: number;
+  important: { name: string; kind: 'orchestrator' | 'head' }[];
+};
+
 /* Everything that waits for people as /api/requests shows it to this person, and the counts of all of it: per owner, per
    asking agent and in total. */
 export type Decisions = {
   requests: WaitingRequest[];
   proposals: ProposalDecision[];
   computerAccess: ComputerAccessDecision | null;
+  machinesAway?: MachineAwayCard[];
   counts: { byPerson: Record<string, number>; byAgent: Record<string, number>; total: number };
 };
 

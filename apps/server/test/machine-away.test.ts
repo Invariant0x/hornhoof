@@ -1,0 +1,249 @@
+import { and, eq, isNull } from 'drizzle-orm';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { agents, jobs, machines, nodeConnections, nodes, people, requests, waitNotices } from '../src/db/schema.js';
+import { minuteRound } from '../src/modules/agents/timers.js';
+import { serverStarted } from '../src/modules/nodes/connections.js';
+import { aclCompany, type AclCompany } from './agent-view-company.js';
+import { as } from './helpers.js';
+
+const MINUTE = 60_000;
+const DROP = Date.parse('2026-11-06T08:32:00.000Z');
+const after = (ms: number) => new Date(DROP + ms);
+
+type Card = {
+  id: string;
+  hostname: string;
+  owner: { id: string; name: string } | null;
+  since: string;
+  back: string | null;
+  agents: number;
+  important: { name: string; kind: string }[];
+};
+type Waiting = { machinesAway?: Card[]; counts: { total: number; byPerson: Record<string, number> } };
+
+afterEach(() => { vi.useRealTimers(); });
+const at = (time: Date) => { vi.useFakeTimers({ toFake: ['Date'], now: time }); };
+
+async function world() {
+  at(after(-60 * MINUTE));
+  const c = await aclCompany();
+  const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+  return { ...c, orchestrator: orchestrator! };
+}
+
+/* A machine of a person, connected since an hour before the drop, with these agents on it. */
+async function aMachine(c: AclCompany, owner: string, hostname: string, on: { id: string }[]) {
+  const [machine] = await c.db.insert(machines).values({ companyId: c.companyId, personId: owner, machineKey: `${hostname}-key-12345`, hostname }).returning();
+  const [node] = await c.db.insert(nodes).values({ companyId: c.companyId, machineId: machine!.id, lastSeenAt: after(0) }).returning();
+  await c.db.insert(nodeConnections).values({ companyId: c.companyId, machineId: machine!.id, nodeId: node!.id, connectedAt: after(-60 * MINUTE) });
+  for (const agent of on) await c.db.update(agents).set({ nodeId: node!.id }).where(eq(agents.id, agent.id));
+  return { machine: machine!, node: node! };
+}
+
+const standing = (nodeId: string) => and(eq(nodeConnections.nodeId, nodeId), isNull(nodeConnections.disconnectedAt));
+const drops = (c: AclCompany, node: { id: string }, time: Date, cause: 'network' | 'server_stopped' = 'network') =>
+  c.db.update(nodeConnections).set({ disconnectedAt: time, cause }).where(standing(node.id));
+const returns = (c: AclCompany, machine: { id: string }, node: { id: string }, time: Date) =>
+  c.db.insert(nodeConnections).values({ companyId: c.companyId, machineId: machine.id, nodeId: node.id, connectedAt: time });
+
+async function waiting(c: AclCompany, token: string): Promise<Waiting> {
+  const answer = await c.app.inject({ url: '/api/requests', ...as(token) });
+  expect(answer.statusCode).toBe(200);
+  return answer.json();
+}
+const cardsOf = async (c: AclCompany, token: string) => (await waiting(c, token)).machinesAway ?? [];
+
+describe('a machine with agents that has gone away', () => {
+  it('shows nothing at 4:59, and at 5:00 one card to its owner and to the CEO, with no agent asked', async () => {
+    const c = await world();
+    const { machine, node } = await aMachine(c, c.ids.bob, 'Air', [c.orchestrator, c.crew.head, c.crew.other]);
+    await drops(c, node, after(0));
+    const before = { jobs: (await c.db.select().from(jobs)).length, notices: (await c.db.select().from(waitNotices)).length };
+
+    at(after(4 * MINUTE + 59_000));
+    await minuteRound(c.app.ctx, new Date(), () => () => {});
+    expect(await cardsOf(c, c.tokens.ceo)).toEqual([]);
+    expect(await cardsOf(c, c.tokens.bob)).toEqual([]);
+
+    at(after(5 * MINUTE));
+    await minuteRound(c.app.ctx, new Date(), () => () => {});
+    const card = {
+      id: machine.id,
+      hostname: 'Air',
+      owner: { id: c.ids.bob, name: 'Bob' },
+      since: after(0).toISOString(),
+      back: null,
+      agents: 3,
+      important: [{ name: c.orchestrator.name, kind: 'orchestrator' }, { name: 'Hana', kind: 'head' }],
+    };
+    expect(await cardsOf(c, c.tokens.ceo)).toEqual([card]);
+    expect(await cardsOf(c, c.tokens.bob)).toEqual([card]);
+
+    expect(await c.db.select().from(requests)).toEqual([]);
+    expect((await c.db.select().from(jobs)).length).toBe(before.jobs);
+    expect((await c.db.select().from(waitNotices)).length).toBe(before.notices);
+  });
+
+  it('counts for its people and shows to nobody else, though they see the whole company', async () => {
+    const c = await world();
+    const { node } = await aMachine(c, c.ids.bob, 'Air', [c.crew.other]);
+    await drops(c, node, after(0));
+    at(after(5 * MINUTE));
+    expect((await waiting(c, c.tokens.ceo)).counts).toMatchObject({ total: 1, byPerson: { [c.ids.ceo]: 1, [c.ids.bob]: 1 } });
+    expect((await waiting(c, c.tokens.bob)).counts).toMatchObject({ total: 1, byPerson: { [c.ids.bob]: 1 } });
+    for (const token of [c.tokens.wes, c.tokens.lisa, c.tokens.ann, c.tokens.olga]) {
+      expect(await cardsOf(c, token)).toEqual([]);
+      expect((await waiting(c, token)).counts.total).toBe(0);
+    }
+  });
+
+  it('has one person when the owner is the CEO', async () => {
+    const c = await world();
+    const { node } = await aMachine(c, c.ids.ceo, 'Studio', [c.crew.other]);
+    await drops(c, node, after(0));
+    at(after(5 * MINUTE));
+    expect(await cardsOf(c, c.tokens.ceo)).toHaveLength(1);
+    expect((await waiting(c, c.tokens.ceo)).counts).toMatchObject({ total: 1, byPerson: { [c.ids.ceo]: 1 } });
+  });
+
+  it('goes to the CEO with no owner named when its owner has left', async () => {
+    const c = await world();
+    const { node } = await aMachine(c, c.ids.bob, 'Air', [c.crew.other]);
+    await drops(c, node, after(0));
+    await c.db.update(people).set({ status: 'disabled' }).where(eq(people.id, c.ids.bob));
+    at(after(5 * MINUTE));
+    expect(await cardsOf(c, c.tokens.ceo)).toMatchObject([{ hostname: 'Air', owner: null }]);
+  });
+
+  it('stays one card through more rounds and a restart of the server', async () => {
+    const c = await world();
+    const { node } = await aMachine(c, c.ids.bob, 'Air', [c.crew.other]);
+    await drops(c, node, after(0));
+    for (const minute of [5, 6, 7]) {
+      at(after(minute * MINUTE));
+      await minuteRound(c.app.ctx, new Date(), () => () => {});
+    }
+    await serverStarted(c.db);
+    c.app.ctx.startedAt = new Date();
+    expect(await cardsOf(c, c.tokens.ceo)).toMatchObject([{ since: after(0).toISOString() }]);
+  });
+
+  it('gives each of two machines its own card', async () => {
+    const c = await world();
+    const air = await aMachine(c, c.ids.bob, 'Air', [c.crew.other]);
+    const pro = await aMachine(c, c.ids.ann, 'Pro', [c.crew.mine]);
+    await drops(c, air.node, after(0));
+    await drops(c, pro.node, after(MINUTE));
+    at(after(6 * MINUTE));
+    expect((await cardsOf(c, c.tokens.ceo)).map(card => card.hostname)).toEqual(['Air', 'Pro']);
+    expect((await cardsOf(c, c.tokens.bob)).map(card => card.hostname)).toEqual(['Air']);
+    expect((await cardsOf(c, c.tokens.ann)).map(card => card.hostname)).toEqual(['Pro']);
+  });
+
+  it('closes by itself when the machine is back, with when, and a new drop is a new card', async () => {
+    const c = await world();
+    const { machine, node } = await aMachine(c, c.ids.bob, 'Air', [c.crew.other]);
+    await drops(c, node, after(0));
+    at(after(30 * MINUTE));
+    expect((await waiting(c, c.tokens.ceo)).counts.total).toBe(1);
+
+    await returns(c, machine, node, after(30 * MINUTE));
+    expect(await cardsOf(c, c.tokens.ceo)).toMatchObject([{ since: after(0).toISOString(), back: after(30 * MINUTE).toISOString() }]);
+    expect((await waiting(c, c.tokens.ceo)).counts.total).toBe(0);
+
+    await drops(c, node, after(40 * MINUTE));
+    at(after(45 * MINUTE));
+    expect(await cardsOf(c, c.tokens.ceo)).toMatchObject([{ since: after(40 * MINUTE).toISOString(), back: null }]);
+    expect((await waiting(c, c.tokens.ceo)).counts.total).toBe(1);
+  });
+
+  it('forgets the line about its return after a day', async () => {
+    const c = await world();
+    const { machine, node } = await aMachine(c, c.ids.bob, 'Air', [c.crew.other]);
+    await drops(c, node, after(0));
+    await returns(c, machine, node, after(30 * MINUTE));
+    at(after(30 * MINUTE + 24 * 60 * MINUTE));
+    expect(await cardsOf(c, c.tokens.ceo)).toEqual([]);
+  });
+
+  it('leaves out a blink, however it ends', async () => {
+    const c = await world();
+    const { machine, node } = await aMachine(c, c.ids.bob, 'Air', [c.crew.other]);
+    await drops(c, node, after(0));
+    await returns(c, machine, node, after(4 * MINUTE));
+    at(after(20 * MINUTE));
+    expect(await cardsOf(c, c.tokens.ceo)).toEqual([]);
+  });
+
+  it('sees a machine as back while any one of its nodes is connected', async () => {
+    const c = await world();
+    const { machine, node } = await aMachine(c, c.ids.bob, 'Air', [c.crew.other]);
+    const [second] = await c.db.insert(nodes).values({ companyId: c.companyId, machineId: machine.id, subscriptionId: c.plans.bob.id }).returning();
+    await c.db.insert(nodeConnections).values({ companyId: c.companyId, machineId: machine.id, nodeId: second!.id, connectedAt: after(-MINUTE) });
+    await drops(c, node, after(0));
+    at(after(20 * MINUTE));
+    expect(await cardsOf(c, c.tokens.ceo)).toEqual([]);
+  });
+
+  it('asks nothing of a machine with no agents, or one taken away', async () => {
+    const c = await world();
+    const empty = await aMachine(c, c.ids.bob, 'Spare', []);
+    const gone = await aMachine(c, c.ids.bob, 'Old', [c.crew.other]);
+    await drops(c, empty.node, after(0));
+    await drops(c, gone.node, after(0));
+    await c.db.update(machines).set({ revokedAt: after(MINUTE) }).where(eq(machines.id, gone.machine.id));
+    at(after(20 * MINUTE));
+    expect(await cardsOf(c, c.tokens.ceo)).toEqual([]);
+  });
+
+  it('counts no switched off agent', async () => {
+    const c = await world();
+    const { node } = await aMachine(c, c.ids.bob, 'Air', [c.crew.other]);
+    await c.db.update(agents).set({ switchedOffAt: after(-MINUTE) }).where(eq(agents.id, c.crew.other.id));
+    await drops(c, node, after(0));
+    at(after(20 * MINUTE));
+    expect(await cardsOf(c, c.tokens.ceo)).toEqual([]);
+  });
+
+  it('counts from when it was last heard of once its history has aged away', async () => {
+    const c = await world();
+    const { node } = await aMachine(c, c.ids.bob, 'Air', [c.crew.other]);
+    await c.db.delete(nodeConnections).where(eq(nodeConnections.nodeId, node.id));
+    at(after(5 * MINUTE));
+    expect(await cardsOf(c, c.tokens.ceo)).toMatchObject([{ since: after(0).toISOString() }]);
+  });
+
+  it('does not blame a machine for the time the server itself was off', async () => {
+    const c = await world();
+    const { machine, node } = await aMachine(c, c.ids.bob, 'Air', [c.crew.other]);
+    await drops(c, node, after(0), 'server_stopped');
+    at(after(30 * MINUTE));
+    c.app.ctx.startedAt = new Date();
+    expect(await cardsOf(c, c.tokens.ceo)).toEqual([]);
+
+    at(after(35 * MINUTE));
+    expect(await cardsOf(c, c.tokens.ceo)).toMatchObject([{ since: after(30 * MINUTE).toISOString(), back: null }]);
+
+    await returns(c, machine, node, after(36 * MINUTE));
+    at(after(37 * MINUTE));
+    expect((await waiting(c, c.tokens.ceo)).counts.total).toBe(0);
+  });
+
+  it('tells screens once when a card comes and once when it closes, whatever the screen may see', async () => {
+    const c = await world();
+    const { machine, node } = await aMachine(c, c.ids.bob, 'Air', [c.crew.other]);
+    await drops(c, node, after(0));
+    const told = vi.spyOn(c.app.ctx.bus, 'publish');
+    const nudges = () => told.mock.calls.filter(([, message]) => message.type === 'requests' && !('spot' in message)).length;
+    const round = async (time: Date) => { at(time); await minuteRound(c.app.ctx, time, () => () => {}); };
+    await round(after(4 * MINUTE));
+    expect(nudges()).toBe(0);
+    await round(after(5 * MINUTE));
+    await round(after(6 * MINUTE));
+    expect(nudges()).toBe(1);
+    await returns(c, machine, node, after(7 * MINUTE));
+    await round(after(7 * MINUTE));
+    await round(after(8 * MINUTE));
+    expect(nudges()).toBe(2);
+  });
+});

@@ -1,0 +1,34 @@
+import { useLanguage, useT } from '../i18n';
+import type { MachineAwayCard } from '../types';
+import { clock } from './subscription';
+
+/* A machine with agents on it that went away, in words for the person who can switch it on. Nothing here waits for an answer:
+   the card closes by itself when the machine is back, and one line says when. */
+function Away({ card }: { card: MachineAwayCard }) {
+  const t = useT();
+  const { language } = useLanguage();
+  const title = t.tasks.machineAway(card.hostname, card.owner?.name ?? null);
+  const names = card.important.map(a => `${t.tasks.machineAwayKinds[a.kind]} ${a.name}`).join(', ');
+  return (
+    <section className="machine-away" aria-label={title}>
+      <h3>{title}</h3>
+      <p>{t.tasks.machineAwaySince(clock(language, card.since)!, card.agents)}</p>
+      {names && <p>{t.tasks.machineAwayImportant(names)}</p>}
+      <p>{t.tasks.machineAwayDo}</p>
+    </section>
+  );
+}
+
+function Back({ card }: { card: MachineAwayCard }) {
+  const t = useT();
+  const { language } = useLanguage();
+  return <p className="muted">{t.tasks.machineBack(card.hostname, clock(language, card.back)!)}</p>;
+}
+
+export function MachineAway({ machines }: { machines: MachineAwayCard[] }) {
+  return (
+    <>
+      {machines.map(card => (card.back ? <Back key={card.id} card={card} /> : <Away key={card.id} card={card} />))}
+    </>
+  );
+}

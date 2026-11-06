@@ -7,6 +7,8 @@ sources: [obra/superpowers skills/verification-before-completion/SKILL.md]
 ---
 For `small: true`, still run and read the affected tests before claiming success. Keep that result in the check record and submit a line stating the change and commit SHA; detailed reports belong to the shared turn review. The report format below applies to other work.
 
+Development authors write a failing test before the change, then prove their work with only affected tests through run_tests. Submit the tests written, green result and commit SHA; the test engineer or QA owns all other checks once per turn on the final candidate. Read those final results before claiming final readiness; an author's green tests do not prove unrun final checks.
+
 Before you write DONE, fixed, passing, sent or ready, prove it in this session:
 
 1. Name the check that would show the claim is true: the test command, the build, the page you open, the record you read back, the total you recompute.

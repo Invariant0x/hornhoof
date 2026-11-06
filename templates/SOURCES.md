@@ -10,7 +10,7 @@ The development templates carry Hornhoof's own T1-T11 testing policy and coding 
 |---|---|---|
 | obra/superpowers | MIT | The development process: brainstorming, plans, test-driven development, verification before completion, subagent-driven work and the head's protocol for briefs, reports and fix loops. The orchestrator's own skills: asking before laying out, turns of checkable tasks, done only when proven, finding the cause when work goes wrong. Also shipped whole, word for word at commit bb92a77741419a4ab5f06e711a283343f1ada0c3 (version 7.0.0), in the node image: Claude Code agents load it as a plugin, the other programs get its skills as files in the agent's folder, each with the MIT licence. |
 | unclebob/ub-mode | none; its README asks to copy SKILL.md | The core engineering rules for development roles: make it work, then make it right, then follow practice. Hornhoof adapts branch and testing rules. |
-| unclebob/crapper, unclebob/dryer, unclebob/mutator | 0BSD | Installed on every node: CRAP scores, structural duplicates and mutation testing for Clojure, Java, Go, TypeScript, Rust and Python. The review gate holds CRAP under 10 and duplicates under 0.8; the assigned release reviewer handles surviving mutants under T4. |
+| unclebob/crapper, unclebob/dryer, unclebob/mutator | 0BSD | Installed on every node: CRAP scores, structural duplicates and mutation testing for Clojure, Java, Go, TypeScript, Rust and Python. The review gate holds CRAP under 10 and duplicates under 0.8; the assigned test engineer or QA handles surviving mutants under T4. |
 | affaan-m/ECC | MIT | Reviewer and security reviewer checklists, agent hardening, safety guard, cross-checks with several reviewers. Its rules for each language (style, patterns, security, testing) come with every node in /opt/hornhoof/rules, with its licence. |
 | msitarzewski/agency-agents | MIT | Domain knowledge for sales, finance, support, design and QA roles, such as the reality checker and evidence collector. |
 | wshobson/agents | MIT | Task coordination for teams, deployment pipelines, incident response, startup analysis. |
@@ -26,6 +26,8 @@ The development templates carry Hornhoof's own T1-T11 testing policy and coding 
 | alirezarezvani/claude-skills | MIT | Business development, partnerships, proposals, RFPs, SaaS metrics. |
 | openai/skills | Apache-2.0 | Fixing CI, Playwright checks, threat models. |
 | paperclipai/paperclip | MIT | Short role prompts with procedures in skills, hiring through a capabilities view, low-trust roles for hostile input. |
+
+Development authors write a failing test before the change, run only affected tests through run_tests, and submit tests written, green results and commit SHA. The test engineer or QA owns the full suite, browser engines, mutation, coverage and CRAP, dryer and live checks once per turn on the final candidate; findings return to authors as tasks, small fixes by the fast path. This verification ownership adapts the development roles and skills below.
 
 ## Every template
 
