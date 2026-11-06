@@ -452,4 +452,49 @@ describe('renderInstructions', () => {
     }
     expect(savedWatchList).toEqual(['ops-task-watch']);
   });
+
+  it('delivers T2 impact-selection, explicit scripts/test selector commands, bidirectional migration and no-auto-wiring rules in loaded development role packets', () => {
+    const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
+    for (const roleKey of ['DEV-ENG', 'DEV-BE', 'DEV-FE'] as const) {
+      const role = shipped.roles.get(roleKey)!;
+      const rendered = renderInstructions(shipped, agent({ roleKey, skills: role.skills.filter(s => s.on).map(s => s.id), templateHashes: {} }), PLACE);
+      expect(Buffer.byteLength(rendered.text), roleKey).toBeLessThan(24_000);
+      const files = new Map(rendered.skills.map(s => [s.name, s.body]));
+      const impl = files.get('dev-implement')!;
+      const eng = files.get('dev-engineering-rules')!;
+      expect(Buffer.byteLength(impl), `${roleKey} dev-implement`).toBeLessThan(22_000);
+      expect(Buffer.byteLength(eng), `${roleKey} dev-engineering-rules`).toBeLessThan(22_000);
+      expect(impl, roleKey).toContain('scripts/test/');
+      expect(impl, roleKey).toContain('NOT_RUN');
+      expect(impl, roleKey).toMatch(/up and down/i);
+      expect(eng, roleKey).toContain('scripts/test/impact-README.md');
+      expect(eng, roleKey).toContain('scripts/test/related-probe.mjs');
+      expect(eng, roleKey).toContain('scripts/test/impact-python/pytest_impact.py');
+      expect(eng, roleKey).toContain('scripts/test/replay-impact.mjs');
+      expect(rendered.whole, roleKey).toContain('scripts/test/impact-README.md');
+    }
+
+    const headRole = shipped.roles.get('DEV-HEAD')!;
+    const headRendered = renderInstructions(
+      shipped,
+      agent({ kind: 'head', roleKey: 'DEV-HEAD', skills: headRole.skills.filter(s => s.on).map(s => s.id), templateHashes: {} }),
+      PLACE,
+    );
+    expect(Buffer.byteLength(headRendered.text)).toBeLessThan(24_000);
+    const gatesBody = headRendered.skills.find(s => s.name === 'dev-gates')?.body ?? '';
+    expect(Buffer.byteLength(gatesBody)).toBeLessThan(22_000);
+    expect(gatesBody).toContain('scripts/test/');
+    expect(gatesBody).toMatch(/collected graph[\s\S]*completed[^.!?]*receipts?/i);
+    expect(gatesBody).toMatch(/unavailable[^.!?]*not zero misses/i);
+    expect(headRendered.whole).toMatch(/collected graph[\s\S]*completed[^.!?]*receipts?/i);
+
+    for (const roleKey of ['DEV-REV', 'DEV-TEST'] as const) {
+      const role = shipped.roles.get(roleKey)!;
+      const rendered = renderInstructions(shipped, agent({ roleKey, skills: role.skills.filter(s => s.on).map(s => s.id), templateHashes: {} }), PLACE);
+      expect(Buffer.byteLength(rendered.text), roleKey).toBeLessThan(24_000);
+      const eng = rendered.skills.find(s => s.name === 'dev-engineering-rules')?.body ?? '';
+      expect(eng, roleKey).toContain('scripts/test/impact-README.md');
+      expect(eng, roleKey).toMatch(/shared packages[\s\S]*API contracts[\s\S]*templates/i);
+    }
+  });
 });
