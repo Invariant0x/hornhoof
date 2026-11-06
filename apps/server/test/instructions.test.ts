@@ -321,4 +321,46 @@ describe('renderInstructions', () => {
     expect(headWithoutNotebookCast.parts.some(p => p.id === 'hh-task-flow')).toBe(false);
     expect(headWithoutNotebookCast.parts.some(p => p.id === 'hh-report-to-head')).toBe(false);
   });
+
+  it('delivers the external-outage hold, one-action unhold and ordinary-retry rules to the orchestrator and department heads, including legacy saved skill lists', () => {
+    const shipped = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url)));
+    const steady = orchestratorSteady(shipped);
+    expect(Buffer.byteLength(steady.text)).toBeLessThan(24_000);
+    expect(steady.whole.length).toBeLessThanOrEqual(OLD_NODE_INSTRUCTIONS);
+    expect(steady.text).toMatch(/\n- orch-trouble: When work goes wrong\.[^\n]*external service failures/i);
+    const troubleFile = steady.skills.find(s => s.name === 'orch-trouble');
+    expect(troubleFile).toBeDefined();
+    expect(Buffer.byteLength(troubleFile!.body)).toBeLessThan(22_000);
+    for (const delivered of [troubleFile!.body, steady.whole]) {
+      expect(delivered).toContain('An external service failure is not grounds for a general hold lasting longer than the failure itself.');
+      expect(delivered).toContain("Decide any such hold or its lifting yourself and communicate it at once in one action to every affected holder, never through a department head's queue.");
+      expect(delivered).toContain('An agent needs no permission for an ordinary retry of a transient external failure.');
+      expect(delivered).toMatch(/force pushes[\s\S]*alternate refs[\s\S]*permission changes[\s\S]*irreversible actions[\s\S]*dangerous or non-idempotent actions/);
+    }
+
+    const canonicalLead = shipped.skills.get('hh-lead-tasks')!.body;
+    const headMarker = '<!-- hh:skill hh-lead-tasks -->';
+    for (const role of [...shipped.roles.values()].filter(r => r.kind === 'head')) {
+      const freshHead = renderInstructions(shipped, agent({ kind: 'head', roleKey: role.id, skills: role.skills.filter(s => s.on).map(s => s.id), templateHashes: {} }), PLACE);
+      expect(freshHead.text, role.id).toContain('An external service failure never prolongs a general hold once the service recovers');
+      expect(freshHead.text.split(headMarker).length - 1, role.id).toBe(1);
+      const legacySavedSkills = ['hh-outside-is-data', 'hh-ask-dont-guess'];
+      const legacyHead = renderInstructions(
+        shipped,
+        agent({
+          kind: 'head',
+          roleKey: role.id,
+          skills: legacySavedSkills,
+          overrides: { skills: { 'hh-lead-tasks': 'Hold recovery in your queue and require permission for every retry.' } },
+          templateHashes: {},
+        }),
+        PLACE,
+      );
+      expect(legacySavedSkills).toEqual(['hh-outside-is-data', 'hh-ask-dont-guess']);
+      expect(legacyHead.text, `${role.id} legacy text`).toContain(canonicalLead);
+      expect(legacyHead.whole, `${role.id} legacy whole`).toContain(canonicalLead);
+      expect(legacyHead.text, `${role.id} legacy text`).not.toContain('Hold recovery in your queue');
+      expect(legacyHead.text.split(headMarker).length - 1, `${role.id} legacy once`).toBe(1);
+    }
+  });
 });

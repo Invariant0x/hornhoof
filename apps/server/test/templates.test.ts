@@ -896,6 +896,44 @@ describe('templates', () => {
         'abstract-head-rule-preserves-gates-and-dependencies',
       );
     });
+
+    it('teaches the orchestrator abstract external-outage hold, one-action unhold and ordinary-retry rules while preserving safety rules', () => {
+      const trouble = templates.skills.get('orch-trouble')!;
+      expect(trouble.kind).toBe('procedure');
+      expect(trouble.description.en).toMatch(/external service failures/i);
+      expect(failedRuleIds(ORCHESTRATOR_OUTAGE_RULES, trouble.body)).toEqual([]);
+      expect(leadTasksBody().split('External outages and holds:').length - 1).toBe(1);
+      expect(templates.skills.get('ops-api-connector')!.body).toContain('Never retry a payment or a send without first checking it did not already happen.');
+      expect(templates.skills.get('dev-worktrees')!.body).toContain('Never force-push a shared branch');
+      expect(templates.skills.get('hh-stay-in-scope')!.body).toContain('change permissions');
+      expect(templates.skills.get('hh-stay-in-scope')!.body).toContain('Anything irreversible or public waits for the approval');
+      expect(templates.skills.get('dev-ci-release')!.body).toContain('never skip, mute or retry a check to get green');
+      expect(templates.skills.get('dev-engineering-rules')!.body).toContain('without retries or quarantine');
+      expect(templates.skills.get('ops-task-watch')!.body).toContain('Never retry it unchanged.');
+      for (const s of skills) {
+        expect(s.body, s.id).not.toMatch(/\bexactly one attempt\b|\bno retries\b|\bdo not declare recovery\b/i);
+      }
+    });
+
+    it('rejects orchestrator outage instructions that prolong holds, serialize recovery through a head queue, demand permission for ordinary retries, promise unshipped automation or leak incident history', () => {
+      const base = templates.skills.get('orch-trouble')!.body;
+      expect(failedRuleIds(ORCHESTRATOR_OUTAGE_RULES, base)).toEqual([]);
+      expect(failedRuleIds(ORCHESTRATOR_OUTAGE_RULES, `${base}\nKeep a general hold active after the external service recovers.`)).toContain(
+        'outage-not-grounds-for-longer-general-hold',
+      );
+      expect(failedRuleIds(ORCHESTRATOR_OUTAGE_RULES, `${base}\nSend hold-lifting decisions one by one through a department head's queue.`)).toContain(
+        'orchestrator-decides-and-communicates-in-one-action',
+      );
+      expect(failedRuleIds(ORCHESTRATOR_OUTAGE_RULES, `${base}\nRequire permission before any ordinary retry, allow at most one attempt with no retries, and do not declare recovery.`)).toContain(
+        'ordinary-retry-needs-no-permission-or-diagnosis-chain',
+      );
+      expect(failedRuleIds(ORCHESTRATOR_OUTAGE_RULES, `${base}\nRemember the GitHub outage from Ivan on #551 on 05.11.`)).toContain(
+        'abstract-orchestrator-rule-preserves-safety-without-unshipped-promises',
+      );
+      expect(failedRuleIds(ORCHESTRATOR_OUTAGE_RULES, `${base}\nThe server automatically retries git push in the background and blocks task creation in SQL.`)).toContain(
+        'abstract-orchestrator-rule-preserves-safety-without-unshipped-promises',
+      );
+    });
   });
 });
 
@@ -1202,6 +1240,57 @@ const HEAD_OUTAGE_AND_AUTHORITY_RULES: { id: string; holds: (text: string) => bo
       return (
         matchesAll(section, [/^External outages and holds:/, /\bdependencies\b[\s\S]*\bprotected actions\b[\s\S]*\baccess boundaries\b[\s\S]*\brelease gates\b/i]) &&
         !INCIDENT_OR_BRAND_LEAK_RE.test(section)
+      );
+    },
+  },
+];
+
+const UNSHIPPED_EXTERNAL_AUTOMATION_RE = /\b(?:automatically retries|intercepts git push|blocks task creation|waits for GitHub)\b/i;
+
+const ORCHESTRATOR_OUTAGE_RULES: { id: string; holds: (text: string) => boolean }[] = [
+  {
+    id: 'outage-not-grounds-for-longer-general-hold',
+    holds: text =>
+      matchesAll(text, [/\bexternal service failure\b[^.!?]*\bnot grounds for a general hold lasting longer than the failure itself\b/i]) &&
+      forbids(text, /\bkeep\w*\s+a\s+general\s+hold\s+active\s+after\s+the\s+external\s+service\s+recovers\b/i),
+  },
+  {
+    id: 'orchestrator-decides-and-communicates-in-one-action',
+    holds: text =>
+      matchesAll(text, [
+        /\bdecide\b[^.!?]*\byourself\b[^.!?]*\bcommunicate\b[^.!?]*\bat once in one action to every affected holder\b/i,
+        /\bnever\b[^.!?]*\bdepartment head's queue\b/i,
+      ]) && forbids(text, /\bsend\w*[^.!?;,]*\bthrough a department head's queue\b/i),
+  },
+  {
+    id: 'ordinary-retry-needs-no-permission-or-diagnosis-chain',
+    holds: text =>
+      matchesAll(text, [
+        /\bsame internal fix fails a second time\b/i,
+        /\btransient external service failure\b[^.!?]*\bneeds no diagnosis task\b/i,
+        /\bagent needs no permission for an ordinary retry of a transient external failure\b/i,
+      ]) &&
+      forbidsAll(text, [
+        /\brequire\w*\s+permission\s+before\s+any\s+ordinary\s+retry\b/i,
+        /\bone attempt\b/i,
+        /\bno retries\b/i,
+        /\bdeclare recovery\b/i,
+      ]),
+  },
+  {
+    id: 'abstract-orchestrator-rule-preserves-safety-without-unshipped-promises',
+    holds: text => {
+      const idx = text.indexOf('External outages and holds:');
+      if (idx === -1) return false;
+      const section = text.slice(idx);
+      return (
+        matchesAll(section, [
+          /^External outages and holds:/,
+          /\bforce pushes\b[\s\S]*\balternate refs\b[\s\S]*\bpermission changes\b[\s\S]*\birreversible actions\b[\s\S]*\bdangerous or non-idempotent actions\b/i,
+        ]) &&
+        !INCIDENT_OR_BRAND_LEAK_RE.test(section) &&
+        !/\b\d{1,2}\.\d{1,2}\b/.test(section) &&
+        !UNSHIPPED_EXTERNAL_AUTOMATION_RE.test(text)
       );
     },
   },
