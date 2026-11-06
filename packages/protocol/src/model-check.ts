@@ -10,6 +10,8 @@ const Utc = z.iso.datetime();
 const Label = z.string().min(1);
 const Count = z.number().int().nonnegative();
 
+export const canonicalJson = (value: unknown): string => JSON.stringify(value);
+
 export const MODEL_CHECK_KINDS = ['outbound_review', 'support_reply_review', 'support_classification'] as const;
 export type ModelCheckKind = (typeof MODEL_CHECK_KINDS)[number];
 
