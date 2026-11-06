@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { MATERIAL_LIMITS, MaterialInput, materialMetadataFits } from './request-materials.js';
+import { PROVIDER_IDS } from './providers.js';
 
 const lists = { common: z.array(MaterialInput).max(MATERIAL_LIMITS.perList), options: z.array(z.array(MaterialInput).max(MATERIAL_LIMITS.perList)).max(MATERIAL_LIMITS.options) };
 const Result = z.strictObject({ presentation: z.literal('result'), ...lists }).refine(value =>
@@ -31,7 +32,56 @@ export const HumanActionBinding = z.strictObject({
 });
 export type HumanActionBinding = z.infer<typeof HumanActionBinding>;
 
-/* Deliberately unavailable until the contract's positive RED cases are observed. */
-export const QuestionClassificationInput = z.never();
-export const QuestionPurpose = z.never();
-export const QuestionAuthorityBinding = z.never();
+export const QUESTION_LIMITS = { payloadBytes: 32768, textBytes: 2048, labelBytes: 256, options: 16, recipients: 256, images: 24 } as const;
+const UTF8 = new TextEncoder();
+const Digest = z.string().regex(/^[0-9a-f]{64}$/);
+const Identifier = z.string().min(1).max(80).regex(/^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$/);
+const distinct = (values: readonly string[]): boolean => new Set(values).size === values.length;
+
+/* Conservative syntax checks only. The current classifier still verifies that
+   prose explains the actual effect and never falls back to the technical body. */
+function plainQuestionText(value: string, bytes: number): boolean {
+  return value.trim().length > 0 && UTF8.encode(value).length <= bytes
+    && !/[\u0000-\u0008\u000b-\u001f\u007f\uD800-\uDFFF]/u.test(value)
+    && !/[`<>]|\[[^\]]*\]\(|\*\*|__|(?:^|\n)\s*(?:#{1,6}\s|[-*+]\s|\d+[.)]\s)/.test(value)
+    && !/(?:^|\n)\s*(?:sudo|npm|npx|pnpm|yarn|curl|wget|bash|sh|powershell|python|node|rm|git)\s/i.test(value);
+}
+const Plain = (bytes: number) => z.string().min(1).max(bytes).refine(value => plainQuestionText(value, bytes), 'Use bounded plain prose without commands or markup.');
+const HumanEnvelope = z.strictObject({
+  situation: Plain(QUESTION_LIMITS.textBytes), requiredAction: Plain(QUESTION_LIMITS.textBytes),
+  options: z.array(z.strictObject({ id: Identifier, label: Plain(QUESTION_LIMITS.labelBytes), consequence: Plain(QUESTION_LIMITS.textBytes) }))
+    .max(QUESTION_LIMITS.options).refine(options => distinct(options.map(option => option.id)), 'Use distinct option ids.'),
+});
+const Artifact = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('commit'), sha: z.string().regex(/^[0-9a-f]{40}$/) }),
+  z.strictObject({ kind: z.literal('design'), imageIds: z.array(z.uuid()).min(1).max(QUESTION_LIMITS.images).refine(distinct, 'Use distinct image ids.') }),
+  z.strictObject({ kind: z.enum(['staff', 'structure']), digest: Digest }),
+]);
+const Classification = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('ready_result'), artifact: Artifact }),
+  z.strictObject({ kind: z.literal('human_only_action'), actionBinding: HumanActionBinding }),
+]);
+/* The client selects the result/action. It never selects a recipient, authority
+   digest or purpose. B derives those from current native rights in its tx. */
+export const QuestionClassificationInput = z.strictObject({
+  ...QuestionMutationGuard.shape, classification: Classification, humanEnvelope: HumanEnvelope,
+}).refine(materialMetadataFits, 'Oversized classification metadata.');
+export type QuestionClassificationInput = z.infer<typeof QuestionClassificationInput>;
+
+const UTC = z.iso.datetime();
+const Amount = z.string().regex(/^(?:0|[1-9][0-9]{0,23})(?:\.[0-9]{1,12})?$/).refine(value => /[1-9]/.test(value), 'Use a positive decimal amount.');
+export const QuestionPurpose = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('decision'), decisionKind: z.enum(['question', 'approval', 'choice', 'stuck', 'staff', 'structure']), authorityKind: z.enum(['ceo_and_delegate', 'department_and_ceo', 'owner_and_ceo']), departmentId: z.uuid().nullable() }),
+  z.strictObject({ kind: z.literal('payment'), resourceId: ResourceReference, amount: Amount, currency: z.string().regex(/^[A-Z]{3}$/), payee: Plain(QUESTION_LIMITS.labelBytes) }),
+  z.strictObject({ kind: z.literal('owner_login'), resourceId: ResourceReference, subscriptionId: z.uuid(), ownerPersonId: z.uuid(), provider: z.enum(PROVIDER_IDS) }),
+  z.strictObject({ kind: z.literal('manual_machine_action'), resourceId: ResourceReference, machineId: z.uuid(), nodeId: z.uuid().nullable(), actionId: Identifier, until: UTC.nullable() }),
+  z.strictObject({ kind: z.literal('ceo_permission'), resourceId: ResourceReference, permission: z.literal('server_computer_access'), machineId: z.uuid().nullable(), until: UTC }),
+]);
+export type QuestionPurpose = z.infer<typeof QuestionPurpose>;
+/* PRIVATE snapshot metadata, never a public view, a native grant or client input.
+   Unknown payment/manual adapters stay unsupported even when this shape parses. */
+export const QuestionAuthorityBinding = z.strictObject({
+  recipientPersonIds: z.array(z.uuid()).min(1).max(QUESTION_LIMITS.recipients).refine(distinct, 'Use distinct recipients.'),
+  authorityDigest: Digest, purpose: QuestionPurpose,
+}).refine(materialMetadataFits, 'Oversized authority metadata.');
+export type QuestionAuthorityBinding = z.infer<typeof QuestionAuthorityBinding>;
