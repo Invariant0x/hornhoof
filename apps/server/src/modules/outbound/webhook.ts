@@ -36,7 +36,7 @@ export const isPublicAddress = (address: string): boolean => {
 const hostOf = (url: URL): string => url.hostname.replace(/^\[|\]$/g, '');
 
 /* The one configured endpoint: nothing from a message or a model can choose or change it. */
-function endpointOf(raw: string): URL | null {
+export function endpointOf(raw: string): URL | null {
   if (!URL.canParse(raw)) return null;
   const url = new URL(raw);
   return url.protocol === 'https:' && !url.username && !url.password && !url.hash ? url : null;

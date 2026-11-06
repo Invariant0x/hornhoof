@@ -9,6 +9,7 @@ import type { Db } from '../../db/client.js';
 import { ApiError } from '../../errors.js';
 import { mayChangeRules, ownDepartment } from '../departments/approval-policy.js';
 import { jobOf } from '../tools/job.js';
+import { accountRoutes } from './accounts.js';
 import { catalogRow, proposeRevision, ProposalInput, publishRevision, requireProductOf, revokeRevision } from './catalog.js';
 import { digestOf } from './checks.js';
 import { addContact, permissionPlace, readUnsubscribeToken, revokePermission, suppressContact, unsubscribe } from './contacts.js';
@@ -196,5 +197,6 @@ export function outboundRoutes(app: FastifyInstance, ctx: Ctx): void {
   channelRoutes(app, ctx);
   catalogRoutes(app, ctx);
   contactRoutes(app, ctx);
+  accountRoutes(app, ctx);
   unsubscribeRoutes(app, ctx);
 }
