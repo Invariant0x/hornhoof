@@ -217,9 +217,10 @@ function ownedItems<T extends { ownerPersonId: string }>(items: T[], personId: s
 
 /* What of the decisions the screen lists: all of them, or one person's; nothing before the first answer. */
 function shownOf(decisions: Decisions | undefined, personId: string | null): Shown {
+  if (!decisions) return { requests: [], proposals: [], computerAccess: null, machinesAway: [] };
   const theirs = <T extends { ownerPersonId: string }>(items: T[]) => ownedItems(items, personId);
-  const computer = decisions?.computerAccess ? theirs([decisions.computerAccess]) : [];
-  return { requests: theirs(decisions?.requests ?? []), proposals: theirs(decisions?.proposals ?? []), computerAccess: computer[0] ?? null, machinesAway: decisions?.machinesAway ?? [] };
+  const computer = decisions.computerAccess ? theirs([decisions.computerAccess]) : [];
+  return { requests: theirs(decisions.requests ?? []), proposals: theirs(decisions.proposals ?? []), computerAccess: computer[0] ?? null, machinesAway: decisions.machinesAway ?? [] };
 }
 
 const shownNone = (s: Shown) => !s.requests.length && !s.proposals.length && !s.computerAccess && !s.machinesAway.some(m => !m.back);

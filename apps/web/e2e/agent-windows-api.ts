@@ -83,11 +83,16 @@ async function serveTerminal(page: Page, live: Live): Promise<void> {
   });
 }
 
-async function serve(page: Page, live: Live): Promise<void> {
-  await serveApi(page);
+function heldResponses(live: Live) {
   const held = new Map<string, (() => void)[]>();
   const release = (id: string) => { for (const go of held.get(id) ?? []) go(); held.delete(id); };
   const wait = (id: string) => live.held.has(id) ? new Promise<void>(go => held.set(id, [...(held.get(id) ?? []), go])) : Promise.resolve();
+  return { release, wait };
+}
+
+async function serve(page: Page, live: Live): Promise<void> {
+  await serveApi(page);
+  const { release, wait } = heldResponses(live);
   await page.route('**/api/**', async route => {
     const url = new URL(route.request().url());
     const path = url.pathname;
