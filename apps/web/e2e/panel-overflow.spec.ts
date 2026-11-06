@@ -64,9 +64,15 @@ for (const lang of ['en', 'ru'] as const) {
           await capture(page, info, `notebook-${look}`);
           const first = list.locator('li').nth(0);
           const second = list.locator('li').nth(1);
-          const text = first.locator(':scope > span');
+          await expect(first).toHaveClass(/(^| )entry( |$)/);
+          await expect(first.locator('.entry-main')).toHaveCount(1);
+          const actions = first.locator('.entry-actions');
+          await expect(actions).toHaveAttribute('role', 'group');
+          const text = first.locator('.entry-main > span');
           const change = first.getByRole('button', { name: m.notebook.changeNote(1), exact: true });
           const remove = first.getByRole('button', { name: m.notebook.removeNote(1), exact: true });
+          await expect(change).toHaveCSS('min-height', '44px');
+          await expect(remove).toHaveCSS('min-height', '44px');
           await expectInside(body, [notebook.locator('.notebook'), first, text, change, remove]);
           await expectWrappedText(text);
           const textBox = (await text.boundingBox())!;
