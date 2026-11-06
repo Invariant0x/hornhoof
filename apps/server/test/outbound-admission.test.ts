@@ -117,7 +117,7 @@ describe('the same request again', () => {
     const w = await world();
     const key = randomUUID();
     const first = await w.submit({ idempotencyKey: key });
-    await w.c.db.update(tasks).set({ status: 'cancelled' }).where(eq(tasks.id, w.c.task.id));
+    await w.c.db.update(tasks).set({ status: 'cancelled', closedAt: new Date() }).where(eq(tasks.id, w.c.task.id));
     expect(await w.submit({ idempotencyKey: key })).toEqual(first);
   });
 });
@@ -155,7 +155,7 @@ describe('who may submit, to whom and from where', () => {
 
   it('a task that is closed', async () => {
     const w = await world();
-    await w.c.db.update(tasks).set({ status: 'cancelled' }).where(eq(tasks.id, w.c.task.id));
+    await w.c.db.update(tasks).set({ status: 'cancelled', closedAt: new Date() }).where(eq(tasks.id, w.c.task.id));
     expect(await statusOf(w.submit())).toBe(409);
   });
 
@@ -808,7 +808,7 @@ describe('the last look', () => {
   });
 
   it.each<[string, (w: World) => Promise<unknown>, string]>([
-    ['the task was cancelled', w => w.c.db.update(tasks).set({ status: 'cancelled' }).where(eq(tasks.id, w.c.task.id)), 'stale_binding'],
+    ['the task was cancelled', w => w.c.db.update(tasks).set({ status: 'cancelled', closedAt: new Date() }).where(eq(tasks.id, w.c.task.id)), 'stale_binding'],
     ['the task went to someone else', w => w.c.db.update(tasks).set({ executorAgentId: w.c.head.id, assigneeAgentId: w.c.head.id }).where(eq(tasks.id, w.c.task.id)), 'stale_binding'],
     ['its author left', w => w.c.db.update(agents).set({ removedAt: new Date() }).where(eq(agents.id, w.c.worker.id)), 'stale_binding'],
     ['the binding was released', w => w.c.db.update(outboundBindings).set({ status: 'released', releasedAt: new Date() }).where(eq(outboundBindings.id, w.binding.id)), 'stale_binding'],
@@ -827,7 +827,7 @@ describe('the last look', () => {
   it('the task being done is no reason: its work was accepted', async () => {
     const w = await world();
     const { messageId } = await w.submit();
-    await w.c.db.update(tasks).set({ status: 'done' }).where(eq(tasks.id, w.c.task.id));
+    await w.c.db.update(tasks).set({ status: 'done', closedAt: new Date() }).where(eq(tasks.id, w.c.task.id));
     expect((await dispatched(w, messageId, NOON)).kind).toBe('begun');
   });
 
@@ -905,6 +905,22 @@ describe('the last look', () => {
     const w = await world();
     const later = await w.submit({ scheduledAt: '2036-01-01T00:00:00.000Z' });
     expect(await reserveDispatch(w.ctx, later.messageId, 1, NOON)).toEqual({ kind: 'refused', reasonCodes: [] });
+  });
+});
+
+describe('the words for stopping messages', () => {
+  it('are the closest published to the channel, and of the message\'s own language', async () => {
+    const w = await world();
+    const wholeDepartment = await published(w.c, { kind: 'unsubscribe', locale: 'en', text: 'From the department:' });
+    await published(w.c, { kind: 'unsubscribe', locale: 'ru', text: 'На другом языке:' }, { channelId: w.channel.id });
+    const sealedText = async (messageId: string) => {
+      const [revision] = await w.c.db.select().from(outboundMessageRevisions).where(eq(outboundMessageRevisions.messageId, messageId));
+      return JSON.parse(decryptSecret(revision!.sealedEnc, w.ctx.config.secret)).text as string;
+    };
+    expect(await sealedText((await w.submit()).messageId)).toContain('To stop these letters:');
+    expect(wholeDepartment.status).toBe('published');
+    await w.c.db.update(outboundCatalogRevisions).set({ status: 'revoked', revokedAt: new Date() }).where(eq(outboundCatalogRevisions.entryId, w.stop.entryId));
+    expect(await sealedText((await w.submit()).messageId)).toContain('From the department:');
   });
 });
 

@@ -19,18 +19,15 @@ const bindingsOf = (w: World) => w.c.db.select().from(outboundApprovals);
 const statusOf = async (w: World, id: string) => (await w.messageOf(id)).status;
 const requestOf = async (w: World) => (await openRequests(w))[0]!;
 
-/* A department that asks each time, as every department does until its owner says otherwise. */
-async function everyWorld() {
+/* A department with these rules for messages and for prices. */
+async function ruled(...rules: [string, object][]) {
   const w = await world();
-  await w.c.setRule(w.c.ceoToken, w.c.dev.id, 'message', { mode: 'every' });
+  for (const [channel, rule] of rules) await w.c.setRule(w.c.ceoToken, w.c.dev.id, channel, rule);
   return w;
 }
-async function newKindsWorld() {
-  const w = await world();
-  await w.c.setRule(w.c.ceoToken, w.c.dev.id, 'message', { mode: 'new_kinds' });
-  await w.c.setRule(w.c.ceoToken, w.c.dev.id, 'price', { mode: 'new_kinds' });
-  return w;
-}
+/* One that asks each time, as every department does until its owner says otherwise. */
+const everyWorld = () => ruled(['message', { mode: 'every' }]);
+const newKindsWorld = () => ruled(['message', { mode: 'new_kinds' }], ['price', { mode: 'new_kinds' }]);
 /* A message under "every" that the CEO approved. */
 async function approved(w: World) {
   const { messageId } = await w.submit();
@@ -218,7 +215,7 @@ describe('what is no approval', () => {
     const w = await everyWorld();
     const { messageId } = await w.submit();
     const [made] = await bindingsOf(w);
-    const request = await w.c.db.insert(requests).values({ companyId: w.c.companyId, taskId: w.c.task.id, agentId: w.c.worker.id, kind: 'approval', text: 'Forged', status: 'approved', answeredAt: new Date() }).returning();
+    const request = await w.c.db.insert(requests).values({ companyId: w.c.companyId, taskId: w.c.task.id, agentId: w.c.worker.id, kind: 'approval', approvalChannel: 'message', approvalKind: 'outbound mail', text: 'Forged', status: 'approved', answeredAt: new Date() }).returning();
     await w.c.db.insert(outboundApprovals).values({ ...made!, id: randomUUID(), requestId: request[0]!.id, contentDigest: sha('other bytes') });
     expect(await dispatched(w, messageId, NOON)).toEqual(APPROVAL_REQUIRED);
   });
@@ -254,7 +251,7 @@ describe('what is no approval', () => {
   });
 
   it.each<[string, (w: World) => Promise<unknown>]>([
-    ['was cancelled', w => w.c.db.update(tasks).set({ status: 'cancelled' }).where(eq(tasks.id, w.c.task.id))],
+    ['was cancelled', w => w.c.db.update(tasks).set({ status: 'cancelled', closedAt: new Date() }).where(eq(tasks.id, w.c.task.id))],
     ['went to someone else', w => w.c.db.update(tasks).set({ executorAgentId: w.c.head.id, assigneeAgentId: w.c.head.id }).where(eq(tasks.id, w.c.task.id))],
   ])('an approval, once its task %s: the message is gone', async (_name, change) => {
     const w = await everyWorld();
