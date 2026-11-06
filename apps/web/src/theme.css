@@ -456,8 +456,9 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .status { font-size: 12px; font-weight: 600; padding: 2px 8px; border: 1px solid var(--line2); }
 .status.active { color: var(--ok); border-color: currentColor; }
 .status.invited { color: var(--amber-ink); border-color: currentColor; }
+.fit { container: fit / inline-size; min-width: 0; }
 .row-actions { text-align: right; white-space: nowrap; }
-.row-actions .act + .act { margin-left: 8px; }
+.row-actions .act + .act { margin: 0; }
 .people-foot { display: flex; align-items: center; gap: 8px; font-size: 13px; }
 @media (max-width: 760px) {
   .tabs button { padding: 0 10px; }

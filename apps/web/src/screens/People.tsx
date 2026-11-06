@@ -254,19 +254,21 @@ function PersonRow({ p, me, org, routed, openPerson, newLink, setStatus }: { p: 
       <td data-label={t.people.columns.access}>{accessText(t, p.access, org)}</td>
       <td data-label={t.people.columns.status}><span className={`status ${p.status}`}>{t.people.status[p.status]}</span></td>
       <td className="row-actions" data-label={t.people.columns.actions}>
-        {(manageable || titleOnly) && (
-          <button className="act" type="button" aria-label={t.people.editLabel(p.name)} onClick={() => openPerson(p)}>{t.people.edit}</button>
-        )}
-        {manageable && (
-          <>
-            <button className="act" type="button" aria-label={t.people.newLinkLabel(p.name)} onClick={() => void newLink(p)}>{t.people.newLink}</button>
-            {p.status === 'disabled' ? (
-              <button className="act" type="button" aria-label={t.people.enableLabel(p.name)} onClick={() => void setStatus(p, 'active')}>{t.people.enable}</button>
-            ) : (
-              <button className="act danger" type="button" aria-label={t.people.disableLabel(p.name)} onClick={() => void setStatus(p, 'disabled')}>{t.people.disable}</button>
-            )}
-          </>
-        )}
+        <div className="entry-actions" role="group" aria-label={`${t.people.columns.actions}: ${p.name}`}>
+          {(manageable || titleOnly) && (
+            <button className="act" type="button" aria-label={t.people.editLabel(p.name)} onClick={() => openPerson(p)}>{t.people.edit}</button>
+          )}
+          {manageable && (
+            <>
+              <button className="act" type="button" aria-label={t.people.newLinkLabel(p.name)} onClick={() => void newLink(p)}>{t.people.newLink}</button>
+              {p.status === 'disabled' ? (
+                <button className="act" type="button" aria-label={t.people.enableLabel(p.name)} onClick={() => void setStatus(p, 'active')}>{t.people.enable}</button>
+              ) : (
+                <button className="act danger" type="button" aria-label={t.people.disableLabel(p.name)} onClick={() => void setStatus(p, 'disabled')}>{t.people.disable}</button>
+              )}
+            </>
+          )}
+        </div>
       </td>
     </tr>
   );
@@ -373,20 +375,22 @@ export function People({ me, selected, onSelect, onHome, onRenamed }: { me: Me; 
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
 
       {people && (
-        <table className="ptable">
-          <thead>
-            <tr>
-              <th scope="col">{t.people.columns.name}</th>
-              <th scope="col">{t.people.columns.title}</th>
-              <th scope="col">{t.people.columns.access}</th>
-              <th scope="col">{t.people.columns.status}</th>
-              <th scope="col"><span className="sr">{t.people.columns.actions}</span></th>
-            </tr>
-          </thead>
-          <tbody>
-            {people.map(p => <PersonRow key={p.id} p={p} me={me} org={org} routed={Boolean(onSelect)} openPerson={openPerson} newLink={newLink} setStatus={setStatus} />)}
-          </tbody>
-        </table>
+        <div className="fit">
+          <table className="ptable">
+            <thead>
+              <tr>
+                <th scope="col">{t.people.columns.name}</th>
+                <th scope="col">{t.people.columns.title}</th>
+                <th scope="col">{t.people.columns.access}</th>
+                <th scope="col">{t.people.columns.status}</th>
+                <th scope="col"><span className="sr">{t.people.columns.actions}</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              {people.map(p => <PersonRow key={p.id} p={p} me={me} org={org} routed={Boolean(onSelect)} openPerson={openPerson} newLink={newLink} setStatus={setStatus} />)}
+            </tbody>
+          </table>
+        </div>
       )}
       {me.person.isOwner && <p className="muted">{t.people.ceoDelegate}: {t.people.ceoDelegateHint}</p>}
       <p className="muted people-foot"><AgentIcon /> {t.people.agentsNote}</p>
