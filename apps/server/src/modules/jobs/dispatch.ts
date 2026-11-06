@@ -58,7 +58,7 @@ export async function dispatchJob(ctx: Ctx, job: JobToSend): Promise<boolean> {
   const [sub] = await ctx.db.select().from(subscriptions).where(eq(subscriptions.id, job.subscriptionId));
   const node = sub && identityOf(sub, job.nodeId);
   if (!sub || sub.removedAt || !node || nodeHeldFrom(ctx, node, job.role, job.leader)) return false;
-  const secret = sub.kind === 'api_key' && sub.secretEnc ? decryptSecret(sub.secretEnc, ctx.config.secret) : null;
+  const secret = sub.kind === 'api_key' ? secretOf(ctx, sub) : null;
   return ctx.hub.send(node, {
     type: 'job.run',
     jobId: job.id,
@@ -120,9 +120,12 @@ const DIRECT: Partial<Record<ProviderId, Direct>> = {
   },
 };
 
+const secretOf = (ctx: Ctx, sub: { secretEnc: string | null }): string | null => (sub.secretEnc ? decryptSecret(sub.secretEnc, ctx.config.secret) : null);
+
+/* The oldest key of the provider, so the same one answers every time. */
 async function keyOf(ctx: Ctx, provider: ProviderId): Promise<string | null> {
-  const [sub] = await ctx.db.select({ secretEnc: subscriptions.secretEnc }).from(subscriptions).where(and(eq(subscriptions.provider, provider), eq(subscriptions.kind, 'api_key'), isNull(subscriptions.removedAt)));
-  return sub?.secretEnc ? decryptSecret(sub.secretEnc, ctx.config.secret) : null;
+  const [sub] = await ctx.db.select({ secretEnc: subscriptions.secretEnc }).from(subscriptions).where(and(eq(subscriptions.provider, provider), eq(subscriptions.kind, 'api_key'), isNull(subscriptions.removedAt))).orderBy(subscriptions.createdAt).limit(1);
+  return sub ? secretOf(ctx, sub) : null;
 }
 
 async function callVendor(url: string, call: ReturnType<Direct['call']>, timeoutMs: number): Promise<unknown> {
@@ -130,21 +133,24 @@ async function callVendor(url: string, call: ReturnType<Direct['call']>, timeout
   return answer.ok ? answer.json() : null;
 }
 
+const directFor = (expected: ModelIdentity): Direct | null => {
+  const direct = DIRECT[expected.providerId];
+  return direct && direct.vendorId === expected.vendorId && expected.inferenceConfigHash === FRESH_INFERENCE_HASH ? direct : null;
+};
+
+async function askDirect(ctx: Ctx, direct: Direct, request: FreshModelRequest, options: FreshOptions): Promise<Spoken | null> {
+  const key = await keyOf(ctx, request.expectedModel.providerId);
+  if (!key) return null;
+  const url = options.endpoints?.[request.expectedModel.providerId] ?? direct.url;
+  return direct.heard(await callVendor(url, direct.call(request, key), options.timeoutMs ?? FRESH_TIMEOUT_MS));
+}
+
 /* The one model call that is not a turn: a job would run in its program, with that program's own tools, so this goes straight to the
    vendor. It is sure of who answered, or it says it is unavailable and whatever waits for it keeps waiting. It says nothing of why, as
    what a vendor answers may hold anything. */
 export const freshModelCheck = (ctx: Ctx, options: FreshOptions = {}) => async (request: FreshModelRequest): Promise<FreshModelResponse> => {
-  const { expectedModel } = request;
-  const direct = DIRECT[expectedModel.providerId];
-  if (!direct || direct.vendorId !== expectedModel.vendorId || expectedModel.inferenceConfigHash !== FRESH_INFERENCE_HASH) return unavailable;
-  try {
-    const key = await keyOf(ctx, expectedModel.providerId);
-    if (!key) return unavailable;
-    const url = options.endpoints?.[expectedModel.providerId] ?? direct.url;
-    const spoken = direct.heard(await callVendor(url, direct.call(request, key), options.timeoutMs ?? FRESH_TIMEOUT_MS));
-    if (spoken?.model !== expectedModel.revisionId) return unavailable;
-    return { status: 'ok', reviewer: expectedModel, rawOutput: spoken.text, isolated: true };
-  } catch {
-    return unavailable;
-  }
+  const direct = directFor(request.expectedModel);
+  if (!direct) return unavailable;
+  const spoken = await askDirect(ctx, direct, request, options).catch(() => null);
+  return spoken?.model === request.expectedModel.revisionId ? { status: 'ok', reviewer: request.expectedModel, rawOutput: spoken.text, isolated: true } : unavailable;
 };

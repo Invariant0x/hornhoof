@@ -7,9 +7,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { encryptSecret } from '../src/crypto/secrets.js';
 import { subscriptions } from '../src/db/schema.js';
 import { FRESH_INFERENCE_HASH, freshModelCheck } from '../src/modules/jobs/dispatch.js';
-import { company } from './department-owner-fixture.js';
+import { company as companyWithAKey } from './department-owner-fixture.js';
 
-type C = Awaited<ReturnType<typeof company>>;
+type C = Awaited<ReturnType<typeof companyWithAKey>>;
+
+/* A company with no key of any provider yet: each test gives the ones it is about. */
+async function company(): Promise<C> {
+  const c = await companyWithAKey();
+  await c.db.update(subscriptions).set({ removedAt: new Date() });
+  return c;
+}
 
 /* A vendor's API stands in here as a real HTTP server on this machine, with a synthetic key, so a call is seen as it really goes. */
 const KEY = 'synthetic-model-key-77c1';
@@ -96,6 +103,15 @@ describe('a fresh call for a model check', () => {
     const send = vi.spyOn(c.app.ctx.hub, 'send');
     await ask(c, api.url, CLAUDE);
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it('takes the oldest key of the provider, so the same one answers every time', async () => {
+    const c = await company();
+    await aKey(c, 'anthropic_api', 'synthetic-older-key');
+    await aKey(c, 'anthropic_api', 'synthetic-newer-key');
+    const api = await vendor(json(200, FROM_CLAUDE));
+    await ask(c, api.url, CLAUDE);
+    expect(api.heard[0]!.headers['x-api-key']).toBe('synthetic-older-key');
   });
 
   it('is unavailable when the model that answered is not the one certified: an alias moved', async () => {
