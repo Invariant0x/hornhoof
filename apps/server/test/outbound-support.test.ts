@@ -35,7 +35,7 @@ import {
 } from '../src/db/schema.js';
 import { bindingDigest } from '../src/modules/model-checks/lifecycle.js';
 import { readUnsubscribeToken, recipientDigest } from '../src/modules/outbound/contacts.js';
-import { beginDispatch, reserveDispatch } from '../src/modules/outbound/core.js';
+import { beginDispatch, reserveDispatch, settleAttempt } from '../src/modules/outbound/core.js';
 import { OUTBOUND_CHECK_HASHES } from '../src/modules/outbound/evaluation-port.js';
 import { classifySupportTicket, containsForbiddenSupportPromise, containsSecretMaterial, containsThirdPartyPii, submitSupportReply } from '../src/modules/outbound/support.js';
 import { company } from './department-owner-fixture.js';
@@ -601,6 +601,7 @@ describe('outbound support classification and reply gates (#447 T8-10, T8-15)', 
         channelId: w.channel.id,
         purpose: 'transactional_support',
       });
+      await settleAttempt(w.c.app.ctx, begunEn.attemptId, { kind: 'accepted', providerReceipt: 'rcpt-en', acceptedAt: NOW.toISOString() }, NOW);
     }
 
     const ticketRu = await w.addTicket('Как сбросить пароль?');
@@ -639,6 +640,7 @@ describe('outbound support classification and reply gates (#447 T8-10, T8-15)', 
     expect(begunRu.kind).toBe('begun');
     if (begunRu.kind === 'begun') {
       expect(begunRu.sealedPayload.text).toContain('Откройте настройки профиля');
+      await settleAttempt(w.c.app.ctx, begunRu.attemptId, { kind: 'accepted', providerReceipt: 'rcpt-ru', acceptedAt: NOW.toISOString() }, NOW);
     }
 
     const ticketAr = await w.addTicket('كيف أعيد تعيين كلمة المرور؟');

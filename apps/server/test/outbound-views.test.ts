@@ -24,6 +24,7 @@ import {
 import type { SealedPayload } from '../src/modules/outbound/ports.js';
 import { outboundViewRoutes } from '../src/modules/outbound/views.js';
 import { company } from './department-owner-fixture.js';
+import { as } from './helpers.js';
 import { POLICY, sha } from './outbound-fixture.js';
 
 type Company = Awaited<ReturnType<typeof company>>;
@@ -447,7 +448,7 @@ describe('safe outbound & bound approval read views (#447 T8-17)', () => {
     const overviewRes = await w.viewApp.inject({
       method: 'GET',
       url: '/api/outbound',
-      headers: { cookie: w.c.samToken },
+      ...as(w.c.samToken),
     });
     expect(overviewRes.statusCode).toBe(200);
     const overviewBody = overviewRes.body;
@@ -485,7 +486,7 @@ describe('safe outbound & bound approval read views (#447 T8-17)', () => {
     const msgApprovalRes = await w.viewApp.inject({
       method: 'GET',
       url: `/api/requests/${w.msgReq.id}/outbound-approval`,
-      headers: { cookie: w.c.samToken },
+      ...as(w.c.samToken),
     });
     expect(msgApprovalRes.statusCode).toBe(200);
     for (const forbidden of [SECRET_CFG, SECRET_PII, SECRET_TICKET, 'ann@customer.example']) {
@@ -510,7 +511,7 @@ describe('safe outbound & bound approval read views (#447 T8-17)', () => {
     const approachRes = await w.viewApp.inject({
       method: 'GET',
       url: `/api/requests/${w.approachReq.id}/outbound-approval`,
-      headers: { cookie: w.c.samToken },
+      ...as(w.c.samToken),
     });
     expect(approachRes.statusCode).toBe(200);
     expect(approachRes.json()).toMatchObject({
@@ -528,7 +529,7 @@ describe('safe outbound & bound approval read views (#447 T8-17)', () => {
     const wesOverview = await w.viewApp.inject({
       method: 'GET',
       url: '/api/outbound',
-      headers: { cookie: w.c.wholeToken },
+      ...as(w.c.wholeToken),
     });
     expect(wesOverview.statusCode).toBe(200);
     const wesDto = wesOverview.json();
@@ -538,7 +539,7 @@ describe('safe outbound & bound approval read views (#447 T8-17)', () => {
     const wesBound = await w.viewApp.inject({
       method: 'GET',
       url: `/api/requests/${w.msgReq.id}/outbound-approval`,
-      headers: { cookie: w.c.wholeToken },
+      ...as(w.c.wholeToken),
     });
     expect(wesBound.statusCode).toBe(200);
     expect(wesBound.json()).toMatchObject({
@@ -549,14 +550,14 @@ describe('safe outbound & bound approval read views (#447 T8-17)', () => {
     const danaOverview = await w.viewApp.inject({
       method: 'GET',
       url: `/api/outbound?department=${w.c.sales.id}`,
-      headers: { cookie: w.c.danaToken },
+      ...as(w.c.danaToken),
     });
     expect(danaOverview.statusCode).toBe(404);
 
     const danaBound = await w.viewApp.inject({
       method: 'GET',
       url: `/api/requests/${w.msgReq.id}/outbound-approval`,
-      headers: { cookie: w.c.danaToken },
+      ...as(w.c.danaToken),
     });
     expect(danaBound.statusCode).toBe(404);
 
