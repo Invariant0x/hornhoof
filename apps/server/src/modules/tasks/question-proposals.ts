@@ -127,7 +127,7 @@ export async function resolveProposal(ctx: Ctx, call: TriageCall, input: Resolve
   return { result: done.result, wakes: [] };
 }
 
-async function staleCard(tx: Tx, card: Card): Promise<boolean> {
+export async function staleCard(tx: Tx, card: Card): Promise<boolean> {
   const snapshot = card.classification;
   if (!snapshot) return false;
   if (snapshot.revision !== card.questionRevision || snapshot.routeRevision !== card.routeRevision || snapshot.materialDigest !== cardDigest(card)) return true;

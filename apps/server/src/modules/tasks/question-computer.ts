@@ -22,7 +22,7 @@ import { doneBefore } from './question-proposals.js';
    opens anything. The click and the control file cannot share a transaction, so what it will do is written down first, carried out
    against the file, and read back; what a crash leaves is settled from the file, never carried out again. */
 
-type Intent = typeof computerAccessIntents.$inferSelect;
+export type Intent = typeof computerAccessIntents.$inferSelect;
 type Guard = Pick<ResolveInput, 'operationId' | 'source' | 'expectedRevision' | 'expectedRouteRevision'>;
 
 /* What a crash may have left is looked at only after this, so that an operation just written down is not taken for one. */
@@ -137,7 +137,7 @@ export async function internalIntents(ctx: Pick<Ctx, 'db'>, job: Pick<ToolJob, '
 const orchestratorIdOf = async (tx: Tx, companyId: string): Promise<string | null> =>
   (await tx.select({ id: agents.id }).from(agents).where(and(eq(agents.companyId, companyId), eq(agents.kind, 'orchestrator'))))[0]?.id ?? null;
 
-async function staleIntent(tx: Tx, intent: Intent, now = Date.now()): Promise<boolean> {
+export async function staleIntent(tx: Tx, intent: Intent, now = Date.now()): Promise<boolean> {
   const snapshot = intent.classification!;
   const purpose = snapshot.authority.purpose;
   if (purpose.kind !== 'ceo_permission' || snapshot.revision !== intent.questionRevision || snapshot.routeRevision !== intent.routeRevision || Date.parse(purpose.until) <= now) return true;

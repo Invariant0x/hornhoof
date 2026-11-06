@@ -317,36 +317,6 @@ export async function staleClassification(tx: Tx, task: Task, request: Request):
   return snapshot.classification.kind === 'ready_result' && (await materialStamp(tx, request)).materialDigest !== snapshot.materialDigest;
 }
 
-/* What a person is about to read or answer of a question before them, as it stands: the one check that it is theirs, for whoever
-   then seals or hands over its material. It seals nothing itself and grants nothing beyond this question. */
-export type QuestionDisclosure = {
-  source: SourceRef; revision: number; routeRevision: number; personId: string;
-  classificationId: string; digest: string; materialRevision: number | null; materialDigest: string | null;
-  request: Request; task: Task;
-};
-
-function stillAsSeen(request: Request, expected?: { revision: number; routeRevision: number }): void {
-  if (expected && expected.revision !== request.questionRevision) throw staleRevision();
-  if (expected && expected.routeRevision !== request.routeRevision) throw staleRoute();
-  if (request.status !== 'open') throw sourceClosed();
-}
-
-export async function questionDisclosure(tx: Tx, who: { personId: string; companyId: string }, source: SourceRef, expected?: { revision: number; routeRevision: number }): Promise<QuestionDisclosure> {
-  const [found] = source.kind === 'task_request' ? await tx.select({ request: requests, task: tasks }).from(requests).innerJoin(tasks, eq(tasks.id, requests.taskId)).where(and(eq(requests.id, source.id), eq(requests.companyId, who.companyId))) : [];
-  if (!found) throw noSuchSource();
-  const { request, task } = found;
-  stillAsSeen(request, expected);
-  const snapshot = request.classification;
-  if (!snapshot) throw classificationRequired();
-  if (!snapshot.authority.recipientPersonIds.includes(who.personId)) throw notAllowed();
-  if (await staleClassification(tx, task, request)) throw staleRoute();
-  return {
-    source, revision: request.questionRevision, routeRevision: request.routeRevision, personId: who.personId,
-    classificationId: snapshot.classificationId, digest: snapshot.digest, materialRevision: snapshot.materialRevision, materialDigest: snapshot.materialDigest,
-    request, task,
-  };
-}
-
 /* A person cannot take what changed under it. It goes back to whoever has questions there now, kept and told; nothing of what they
    were shown decides anything. Its record of what it was stays in the log. */
 export async function refuseWhatChanged(ctx: Pick<Ctx, 'db' | 'bus'>, requestId: string): Promise<void> {

@@ -6,7 +6,7 @@ import { agents, approvalPolicies, jobs, pendingWakes, people, requestInternal, 
 import { mayOpenRequest } from '../src/modules/tasks/decisions.js';
 import { answerDirectly, ask, createTask, handOver, silentTurn, type Task } from '../src/modules/tasks/engine.js';
 import { claimQuestions } from '../src/modules/tasks/question-intents.js';
-import { questionDisclosure } from '../src/modules/tasks/question-lifecycle.js';
+import { questionDisclosure } from '../src/modules/tasks/question-disclosure.js';
 import { wakeAll, wakePrompt } from '../src/modules/tasks/wake.js';
 import { requestSourceKey } from '../src/modules/tasks/wait-state.js';
 import { questionSourceKey } from '../src/modules/tasks/wait-producers.js';
@@ -557,8 +557,7 @@ describe('what a person may be shown of a question', () => {
       source: c.source, revision: 1, routeRevision: 1, personId: c.ceoId,
       classificationId: row!.classification!.classificationId, digest: row!.classification!.digest, materialRevision: row!.classification!.materialRevision, materialDigest: row!.classification!.materialDigest,
     });
-    expect(shown.request.id).toBe(c.request.id);
-    expect(shown.task.id).toBe(c.work.id);
+    expect(shown).toMatchObject({ kind: 'task_request', companyId: c.companyId, request: { id: c.request.id }, task: { id: c.work.id } });
     expect(await c.reason(c.shown(c.ceoId, { revision: 1, routeRevision: 1 }))).toBe('ok');
   });
 
