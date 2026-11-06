@@ -1,0 +1,2 @@
+ALTER TABLE "departments" ADD COLUMN "repo_token_revision" integer DEFAULT 1 NOT NULL;--> statement-breakpoint
+ALTER TABLE "departments" ADD CONSTRAINT "departments_repo_token_revision" CHECK ("departments"."repo_token_revision" > 0);
