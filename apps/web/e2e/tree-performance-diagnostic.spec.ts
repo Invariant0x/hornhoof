@@ -187,7 +187,7 @@ test('diagnose ten seconds of tree and department pan/zoom', async ({ page, brow
   const map = await measure(page, '.dcanvas');
   const summary = {
     label: process.env.TREE_PERF_LABEL ?? 'unlabelled',
-    sha: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
+    sha: process.env.TREE_PERF_SHA ?? execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
     browser: browser.version(),
     viewport: { width: 1440, height: 900 },
     mode: 'vite --mode browser-test (development), reduced motion',
