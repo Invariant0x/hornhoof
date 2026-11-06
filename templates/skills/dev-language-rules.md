@@ -5,7 +5,7 @@ description: { en: "Follows each language's coding rules and separates author te
 kind: procedure
 sources: [affaan-m/ECC rules]
 ---
-For `small: true` and ordinary work, follow the language's coding rules and run only affected tests through run_tests. Submit the tests written, green results and commit SHA. The test engineer or QA owns the remaining language checks once per turn on the final candidate; detailed reports belong to those shared checks.
+For `small: true` and ordinary work, follow the language's coding rules and run only affected tests through run_tests. Submit the tests written, green results and commit SHA. The test engineer or QA owns the remaining language checks once per turn on the final candidate; detailed reports belong to the shared turn checks.
 
 Before you write or review code:
 

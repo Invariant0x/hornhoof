@@ -7,7 +7,7 @@ sources: [addyosmani/agent-skills skills/ci-cd-and-automation/SKILL.md, wshobson
 ---
 **The pipeline.** The turn's final check and the main line run the same checks: install, build, the whole test suite, the formatter, linters, type checks and script checks, and crapper and dryer on what changed. The main line is always green. A red build is fixed or reverted first, before anything new merges.
 
-**The turn's final check.** The test engineer or QA runs the whole pipeline once per turn on the final candidate (dev-gates), with the tests the turn added, and hands back the commit and findings as tasks for their authors, small fixes by the fast path. The test suite goes through run_tests, so it runs on a free compatible machine; when its runner can split, use parts and read each part's log. Developers run only affected tests for their changes and submit the tests written, green result and commit SHA.
+**The turn's final check.** The test engineer or QA runs the whole pipeline once per turn on the final candidate of the turn's branch (dev-gates), with the tests the turn added, and hands back the commit and findings as tasks for their authors, small fixes by the fast path. The test suite goes through run_tests, so it runs on a compatible free machine; when its runner can split, run in parts and read each part's log. Developers run only affected tests for their changes and submit the tests written, green result and commit SHA.
 
 **Fixing CI.** Read the failing job's log from the top of the first error. Diagnose and reproduce the failure on the same pinned commit and command through `run_tests` (`hh-run-checks`), selecting the affected tests for the fix. Fix the cause; never skip, mute or retry a check to get green. Note flaky jobs and hand them to tests.
 

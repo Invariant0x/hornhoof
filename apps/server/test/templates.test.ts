@@ -437,13 +437,14 @@ describe('templates', () => {
     }
   });
 
-  it('pins legacy characterization, requirement evidence and the assigned release reviewer', () => {
+  it('pins legacy characterization, requirement evidence and tester-owned final mutation checks', () => {
     const body = (id: string) => templates.skills.get(id)!.body;
     expect(body('dev-tdd')).toContain('A characterization test of legacy code passes immediately, and that is correct');
     for (const id of ['dev-implement', 'dev-tdd']) expect(body(id), id).toContain('four task kinds');
     for (const id of ['dev-implement', 'dev-review-verdict']) expect(body(id), id).toMatch(/verification before (saying )?done/);
     expect(templates.roles.get('DEV-HEAD')!.body).toMatch(/four task kinds/);
-    expect(templates.roles.get('DEV-REV')!.body).toMatch(/one reviewer named by the head/);
+    expect(templates.roles.get('DEV-REV')!.body).toMatch(/test engineer or QA/);
+    expect(templates.roles.get('DEV-REV')!.body).not.toMatch(/runs mutator/);
     expect(body('dev-review-diff')).toMatch(/T4/);
     expect(body('dev-review-diff')).toMatch(/repository root/);
     expect(body('dev-review-diff')).toMatch(/selection and its reason/);
@@ -609,7 +610,8 @@ describe('templates', () => {
     expect(test.gate).toBeNull();
     expect(test.body).toMatch(/never a gate on a task/);
     const gates = body('dev-gates');
-    expect(gates).toMatch(/to the test engineer, or to the DevOps engineer when there is none, or runs run_tests itself when there is neither, never to a developer/);
+    expect(gates).toMatch(/head assigns a test engineer or QA[\s\S]*once per turn[\s\S]*final pinned commit/);
+    expect(gates).not.toMatch(/or runs run_tests itself when there is neither/);
     expect(gates).toMatch(/only what failed and the tests around it/);
     for (const id of ['dev-review-diff', 'dev-review-verdict']) expect(body(id), id).toMatch(/old complexity/);
   });

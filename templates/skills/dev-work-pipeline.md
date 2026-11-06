@@ -26,7 +26,8 @@ How work moves through development. Check each item only where a mistake cannot 
 
 ## By code
 
-- Developers write a failing test before the change, run only affected tests through run_tests, and submit the tests written, green results and commit SHA. The test engineer or QA owns the remaining checks once per turn on the final candidate (dev-gates), without duplicate runs.
+- Developers write a failing test before the change, run only affected tests selected by impact through run_tests, and submit the tests written, green results and commit SHA. The test engineer or QA owns the remaining checks once per turn on the final candidate (dev-gates), without duplicate runs.
+- The test engineer or QA runs types, lint, crapper and dryer as shared final checks.
 - Each code check has fast tests, including cases it must reject. A check named here that your tools do not run yet stays with a person, item by item, until they do.
 
 ## By a model
