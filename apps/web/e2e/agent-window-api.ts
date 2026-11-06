@@ -1,6 +1,6 @@
 import type { Page, Route } from '@playwright/test';
-import type { AgentCardView, Employee, EventView, MachineView, Org, RunningAgent, SubView, TaskDetail, TurnRefusal } from '../src/types';
-import { ME, TASKS, serveApi } from './api';
+import type { AgentCardView, Employee, EventView, MachineView, Me, Org, PersonView, RunningAgent, SubView, TaskDetail, TurnRefusal } from '../src/types';
+import { AGENT_HIDDEN, ME, TASKS, serveApi } from './api';
 
 const ROLE = { en: 'Developer', ru: 'Разработчик' };
 const EMPLOYEE: Employee = {
@@ -19,18 +19,27 @@ export const CARD: AgentCardView = { id: 'b1', currentTask: null, kind: 'worker'
 const DETAIL: TaskDetail = { ...TASKS[0]!, body: 'The task details stay beside the terminal on a wide screen.', parent: null, after: [], executor: TASKS[0]!.assignee, gates: [], createdBy: null, subtasks: [], requests: [], log: [{ kind: 'comment', text: 'The checkout form is being checked.', data: {}, by: { kind: 'agent', id: 'b1', name: 'Bruno' }, at: '2026-11-04T00:00:00Z' }] };
 
 /* canType: whether this person types into the terminal, as the owner of its plan; so by default. orchestrator: the company's, for its window. */
-export type AgentFixture = { turnRefused?: TurnRefusal | null; awake: boolean; hasTask: boolean; messages: unknown[]; connections: number; events?: EventView[]; productOnly?: boolean; privateAgent?: boolean; orgFailure?: boolean; head?: boolean; sent?: string[]; canType?: boolean; orchestrator?: Org['orchestrator'] };
+export type AgentFixture = { turnRefused?: TurnRefusal | null; awake: boolean; hasTask: boolean; messages: unknown[]; connections: number; events?: EventView[]; productOnly?: boolean; privateAgent?: boolean; orgFailure?: boolean; head?: boolean; sent?: string[]; canType?: boolean; orchestrator?: Org['orchestrator']; viewer?: Me };
+
+function seesEmployee(live: AgentFixture): boolean {
+  const { person } = live.viewer ?? ME;
+  return person.isOwner || Boolean(person.isCeoDelegate && person.scopeKind === 'company') || person.id === SUB.owner?.id;
+}
 
 function agentRoutes(live: AgentFixture): Record<string, unknown> {
   const employee = { ...EMPLOYEE, task: live.hasTask ? EMPLOYEE.task : null };
   const agent = { ...AGENT, busy: live.awake };
-  const listed = live.privateAgent ? [agent, { ...agent, id: 'private', name: 'Private agent', canOpen: false, task: null }] : [agent];
-  const org: Org = { company: ME.company, orchestrator: live.orchestrator ?? null, agents: { total: 1, working: Number(live.awake) }, people: [], departments: [{ id: 'd2', name: 'Development', templateKey: null, roleCode: 'DEV', about: '', agents: { total: 1, working: Number(live.awake) }, products: [], teams: [], people: [], employees: [employee], roles: [{ id: 'DEV-ENG', title: ROLE, description: ROLE, kind: 'member', gate: null }] }] };
+  const me = live.viewer ?? ME;
+  const visible = seesEmployee(live);
+  const listed = visible ? [agent] : [];
+  const people: PersonView[] = me.person.scopeKind === 'listed' ? [{ ...me.person, access: { whole: false, departments: [{ id: 'd2', name: 'Development' }], teams: [] } }] : [];
+  const org: Org = { company: ME.company, orchestrator: me.person.scopeKind === 'company' ? live.orchestrator ?? null : null, agents: { total: Number(visible), working: Number(visible && live.awake) }, people: [], departments: [{ id: 'd2', name: 'Development', templateKey: null, roleCode: 'DEV', about: '', agents: { total: Number(visible), working: Number(visible && live.awake) }, products: [], teams: [], people, employees: visible ? [employee] : [], roles: [{ id: 'DEV-ENG', title: ROLE, description: ROLE, kind: 'member', gate: null }] }] };
   const routes: Record<string, unknown> = {
     '/api/org': org,
+    '/api/me': me,
     '/api/version': { version: '0.5.0', commit: 'b77ce08' },
     '/api/updates': { current: { version: '0.5.0', commit: 'b77ce08' }, available: false, latest: null, updater: { status: null, waiting: null } },
-    '/api/subscriptions': { subscriptions: [{ ...SUB, agents: listed }] },
+    '/api/subscriptions': { subscriptions: visible ? [{ ...SUB, agents: listed }] : [] },
     '/api/machines': { machines: [{ ...MACHINE, running: { agents: listed, parts: [] } }] },
     '/api/nodes/commands': { commands: [] },
     '/api/agents/b1': { ...CARD, kind: live.head ? 'head' : 'worker', product: live.productOnly ? { id: 'p2', name: 'Checkout' } : null, currentTask: live.hasTask ? { id: 't1', number: 1, title: 'Checkout step 1' } : null },
@@ -56,6 +65,7 @@ async function agentResponse(route: Route, live: AgentFixture): Promise<void> {
   const path = url.pathname + url.search;
   const routes = agentRoutes(live);
   if (path === '/api/org' && live.orgFailure) return route.fulfill({ status: 503, json: { error: { code: 'internal', message: 'Company temporarily unavailable' } } });
+  if ((!seesEmployee(live) && url.pathname.startsWith('/api/agents/b1')) || (live.privateAgent && url.pathname.startsWith('/api/agents/private'))) return route.fulfill({ status: 403, json: AGENT_HIDDEN });
   if (url.pathname === '/api/agents/b1/events') return route.fulfill({ json: agentEvents(url, live) });
   if (path === '/api/agents/b1/messages') { live.messages.push(route.request().postDataJSON()); return route.fulfill({ json: { queued: true } }); }
   if (path in routes) return route.fulfill({ json: routes[path] });

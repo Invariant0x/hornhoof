@@ -7,6 +7,8 @@ export const ME: Me = {
   company: { id: 'c1', name: 'Acme' },
 };
 
+export const AGENT_HIDDEN = { error: { code: 'forbidden', message: 'This employee is not on a plan of yours in a department you have.', reason: 'agent_hidden' } };
+
 const DEV = { id: 'd2', name: 'Development' };
 const BRUNO = { id: 'b1', name: 'Bruno', kind: 'worker' as const, role: { en: 'Developer', ru: 'Разработчик' } };
 
@@ -56,6 +58,8 @@ const ROUTES: Record<string, unknown> = {
   '/api/me': ME,
   '/api/org': ORG,
   '/api/requests': DECISIONS,
+  '/api/nodes/commands': { commands: [] },
+  '/api/computer': { available: false, until: null, asked: null },
   '/api/turns': { turns: [TURN] },
   '/api/tasks?status=all': { tasks: TASKS },
   '/api/improvements': { improvements: [IMPROVEMENT] },

@@ -9,9 +9,9 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
       localStorage.setItem('hh-lang', lang);
       localStorage.setItem('hh-theme', theme);
     }, { lang, theme });
-    const live: AgentFixture = { awake: false, hasTask: true, messages: [], connections: 0, productOnly: true, privateAgent: true };
+    const viewer = { ...ME, person: { ...ME.person, scopeKind: 'listed' as const, isOwner: false } };
+    const live: AgentFixture = { awake: false, hasTask: true, messages: [], connections: 0, productOnly: true, privateAgent: true, viewer };
     await serveAgentWindow(page, live);
-    await page.route('**/api/me', route => route.fulfill({ json: { ...ME, person: { ...ME.person, scopeKind: 'listed', isOwner: false } } }));
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
     const words = lang === 'en'
@@ -21,7 +21,7 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
       await page.goto('/');
       await page.getByRole('navigation').getByRole('button', { name: words[source], exact: true }).click();
       await page.getByRole('button', { name: new RegExp(`${words.card}.*${source === 'subscriptions' ? 'Codex' : 'test-machine'}`) }).click();
-      await expect(page.getByText('Private agent', { exact: true })).toBeVisible();
+      await expect(page.getByText('Private agent', { exact: true })).toHaveCount(0);
       await expect(page.getByRole('button', { name: words.privateOpen, exact: true })).toHaveCount(0);
       await page.screenshot({ path: info.outputPath(`access-${source}-${lang}-${theme}-${width}.png`) });
       await page.getByRole('button', { name: words.open, exact: true }).click();

@@ -2,12 +2,11 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import type { ComputerView } from '../src/types';
-import { box } from './api';
+import { AGENT_HIDDEN, box } from './api';
 import { serveAgentWindow, SUB, type AgentFixture } from './agent-window-api';
 import { checkPage, open, ORCHESTRATOR, ORCHESTRATOR_CARD, shot, VIEWERS, watchErrors, type Agent, type Settings, type Viewer } from './agent-window-steps';
 
 const ASKED: ComputerView = { available: true, until: null, asked: { reason: 'Restart the nodes outside AppArmor.', at: '2026-11-04T14:30:00.000Z' }, machine: 'a-host', canAnswer: true };
-const REFUSED = { error: { code: 'forbidden', message: 'This employee works in a department you do not have.', reason: 'not_your_department' } };
 
 /* What reached the server from this person, and the keys that reached the terminal. */
 type Sent = { messages: { agent: string; text: string }[]; keys: string[] };
@@ -20,7 +19,7 @@ async function serve(page: Page, viewer: Viewer, settings: Settings): Promise<Se
     localStorage.setItem('hh-lang', lang);
     localStorage.setItem('hh-theme', theme);
   }, settings);
-  const live: AgentFixture = { awake: true, hasTask: false, messages: [], connections: 0, canType: types, orchestrator: ORCHESTRATOR };
+  const live: AgentFixture = { awake: true, hasTask: false, messages: [], connections: 0, canType: types, orchestrator: ORCHESTRATOR, viewer: me };
   await serveAgentWindow(page, live);
   await page.route('**/api/**', route => {
     const url = new URL(route.request().url());
@@ -29,7 +28,7 @@ async function serve(page: Page, viewer: Viewer, settings: Settings): Promise<Se
       sent.messages.push({ agent: said[1]!, ...(route.request().postDataJSON() as { text: string }) });
       return route.fulfill({ status: 202, json: { jobId: 'j2' } });
     }
-    if (url.pathname.startsWith('/api/agents/s1')) return route.fulfill({ status: 403, json: REFUSED });
+    if (url.pathname.startsWith('/api/agents/s1')) return route.fulfill({ status: 403, json: AGENT_HIDDEN });
     if (url.pathname === '/api/me') return route.fulfill({ json: me });
     if (url.pathname === '/api/computer') return route.fulfill({ json: { available: false, until: null, asked: null } });
     if (url.pathname === '/api/agents/orchestrator') return route.fulfill({ json: ORCHESTRATOR_CARD });
@@ -117,13 +116,20 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
       await checkPage(page, errors);
     });
 
-    test('a person with the department writes to its employee on another plan', async ({ page }, info) => {
+    test('a department alone does not let a person open an employee on another plan', async ({ page }, info) => {
       const errors = watchErrors(page);
       const sent = await serve(page, 'department', settings);
-      const window = await open(page, 'b1', lang);
-      await checkWrites(page, window, 'b1', settings, sent);
+      await page.goto('/departments/d2');
+      await expect(page.getByRole('region', { name: lang === 'en' ? 'Members' : 'Сотрудники' })).not.toContainText('Bruno');
+      await page.goto('/agents/b1');
+      await expect(page.getByRole('heading', { name: t.routes.accessDenied })).toBeVisible();
+      await expect(page.locator('body')).not.toContainText('Bruno');
+      await expect(page.locator('.xterm-screen')).toHaveCount(0);
+      expect(sent.keys).toEqual([]);
+      expect(sent.messages).toEqual([]);
       await shot(page, info, 'department-b1', settings);
-      await checkPage(page, errors);
+      expect(errors.filter(error => error.includes('status of 403'))).toHaveLength(1);
+      await checkPage(page, errors.filter(error => !error.includes('status of 403')));
     });
 
     test('a person with the department is not offered the orchestrator', async ({ page }, info) => {
@@ -145,8 +151,7 @@ for (const lang of ['en', 'ru'] as const) for (const theme of ['light', 'dark'] 
       await page.getByRole('navigation', { name: lang === 'en' ? 'Sections' : 'Разделы' }).getByRole('button', { name: t.shell.tabs.subscriptions, exact: true }).click();
       await page.getByRole('button', { name: new RegExp(`${lang === 'en' ? 'Open the card of' : 'Открыть карточку'}.*Codex`) }).click();
       await page.getByRole('button', { name: t.window.openAgent('Sam'), exact: true }).click();
-      const alert = page.getByRole('alert').filter({ hasText: t.errors.not_your_department });
-      await expect(alert).toBeVisible();
+      await expect(page.getByRole('heading', { name: t.routes.accessDenied })).toBeVisible();
       await expect(page.locator('form.t-in')).toHaveCount(0);
       await expect(page.locator('.xterm-screen')).toHaveCount(0);
       await shot(page, info, 'department-other-employee', settings);

@@ -1,4 +1,6 @@
 import { expect, test } from '@playwright/test';
+import { en } from '../src/i18n/en';
+import { ru } from '../src/i18n/ru';
 import { serveApi } from './api';
 import { wholeTurn } from './whole-turn';
 import { serveTree } from './tree-api';
@@ -27,7 +29,7 @@ for (const lang of ['en', 'ru'] as const) {
           const graph = page.getByRole('group', { name: lang === 'en' ? 'Tree of turn 4' : 'Дерево хода 4' });
           await expect(graph).toBeVisible();
           const labs = page.locator('.tv-labs');
-          await expect(labs.getByRole('button', { name: /Ostap/ })).toContainText('#140 Checkout step 140');
+          await expect(labs.getByRole('button', { name: /Ostap/ })).toContainText(during ? '#140 Checkout step 140' : (lang === 'en' ? en : ru).dept.waitsForTask);
           await expect(labs.getByRole('button', { name: /Bruno/ })).toHaveCount(1);
           await expect(labs.getByRole('button', { name: /Vera/ })).toHaveCount(1);
           await expect(labs.getByRole('button', { name: /Gleb/ })).toHaveCount(1);
@@ -65,8 +67,8 @@ for (const lang of ['en', 'ru'] as const) {
 
           expect(await graph.locator('.g-now').evaluate(el => el.getBoundingClientRect().x)).toBeGreaterThan(await labs.evaluate(el => el.getBoundingClientRect().right));
           if (during) {
-            await expect(labs.getByRole('button', { name: /Bruno/ })).toContainText(lang === 'en' ? 'waits for Hana since' : 'ждет Hana с');
-            await expect(labs.getByRole('button', { name: /Ostap/ })).toContainText(lang === 'en' ? 'Image build, until' : 'Image build, до');
+            await expect(graph.locator('.bdg').filter({ hasText: lang === 'en' ? 'waits for Hana since' : 'ждет Hana с' }).first()).toBeVisible();
+            await expect(graph.locator('.bdg').filter({ hasText: lang === 'en' ? 'Image build, until' : 'Image build, до' }).first()).toBeVisible();
           } else {
             await expect(labs.getByRole('button', { name: /Sid/ })).toBeVisible();
           }

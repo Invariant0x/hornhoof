@@ -3,7 +3,7 @@ import { connect } from 'node:net';
 import { dirname, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test as base, type Browser, type Page } from '@playwright/test';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -21,10 +21,10 @@ type Boot = {
   controlPort: number;
 };
 
-type Server = Boot & { child: ChildProcessWithoutNullStreams; pages: Page[]; control(command: string): Promise<void>; stop(): Promise<void> };
+type Server = Boot & { child: ChildProcessWithoutNullStreams; pages: Page[]; control(command: string): Promise<void>; closePages(): Promise<void>; stop(): Promise<void> };
 
 async function startServer(): Promise<Server> {
-  const child = spawn(resolve(HERE, '../../../node_modules/.bin/vitest'), ['run', 'test/access-server-support.test.ts'], {
+  const child = spawn(process.execPath, ['--import', 'tsx', 'test/access-server-support.ts'], {
     cwd: resolve(HERE, '../../server'),
     stdio: ['pipe', 'pipe', 'pipe'],
   });
@@ -44,28 +44,53 @@ async function startServer(): Promise<Server> {
     child.once('exit', code => fail(new Error(`The server stopped early (${code}):\n${stderr}`)));
   });
   const controlSocket = connect(boot.controlPort, '127.0.0.1');
-  const pending = new Map<string, () => void>();
+  const pending = new Map<string, { done(): void; fail(error: Error): void }>();
+  let received = '';
   controlSocket.on('data', chunk => {
-    for (const line of String(chunk).split('\n')) {
+    received += String(chunk);
+    const lines = received.split('\n');
+    received = lines.pop()!;
+    for (const line of lines) {
       if (!line.trim().startsWith('{"control"')) continue;
-      const value = JSON.parse(line) as { control: string };
-      pending.get(value.control)?.();
+      const value = JSON.parse(line) as { control: string; error?: string };
+      const request = pending.get(value.control);
+      pending.delete(value.control);
+      if (value.error) request?.fail(new Error(value.error));
+      else request?.done();
     }
   });
-  const control = (command: string) => new Promise<void>(done => {
-    pending.set(command, () => { pending.delete(command); done(); });
+  const control = (command: string) => new Promise<void>((done, fail) => {
+    pending.set(command, { done, fail });
     controlSocket.write(JSON.stringify({ control: command }) + '\n');
   });
+  const closePages = async () => {
+    await Promise.all(pages.splice(0).map(page => page.context().close().catch(() => undefined)));
+  };
   const stop = async () => {
-    await Promise.all(pages.map(page => page.context().close().catch(() => undefined)));
+    await closePages();
     if (child.exitCode !== null) return;
     await new Promise<void>(done => {
       child.once('exit', () => done());
       controlSocket.end();
+      child.stdin.end();
     });
   };
-  return { ...boot, child, pages, control, stop };
+  return { ...boot, child, pages, control, closePages, stop };
 }
+
+const test = base.extend<{}, { server: Server }>({
+  server: [async ({}, use, info) => {
+    const server = await startServer();
+    console.log('HH_ACCESS_WORKER', JSON.stringify({ action: 'start', worker: info.workerIndex, pid: server.child.pid, prepared: Boolean(process.env.HH_PGLITE_TEMPLATE) }));
+    try { await use(server); }
+    finally {
+      await server.stop();
+      console.log('HH_ACCESS_WORKER', JSON.stringify({ action: 'stop', worker: info.workerIndex, pid: server.child.pid }));
+    }
+  }, { scope: 'worker' }],
+});
+
+test.beforeEach(async ({ server }) => { await server.control('reset'); });
 
 async function signedIn(browser: Browser, server: Server, who: keyof Boot['tokens'], lang: 'en' | 'ru', theme: 'light' | 'dark', width: number): Promise<Page> {
   const context = await browser.newContext({ baseURL: server.url, viewport: { width, height: 900 }, hasTouch: width === 375 });
@@ -97,8 +122,7 @@ async function openAgent(page: Page, name: string) {
 for (const lang of ['en', 'ru'] as const) {
   for (const theme of ['light', 'dark'] as const) {
     for (const width of [375, 1440]) {
-      test(`real server hides closed URLs and their payload: ${lang} ${theme} ${width}`, async ({ browser }, info) => {
-        const server = await startServer();
+      test(`real server hides closed URLs and their payload: ${lang} ${theme} ${width}`, async ({ browser, server }, info) => {
         try {
           const page = await signedIn(browser, server, 'ann', lang, theme, width);
           const heading = lang === 'en' ? 'Insufficient permissions' : 'Недостаточно прав';
@@ -113,15 +137,14 @@ for (const lang of ['en', 'ru'] as const) {
           await expect(page.locator('body')).not.toContainText('Otto');
           expect(errorsOf(page)).toEqual([]);
         } finally {
-          await server.stop();
+          await server.closePages();
         }
       });
     }
   }
 }
 
-test('real server applies both plan and department to map, schema, tree and lists', async ({ browser }) => {
-  const server = await startServer();
+test('real server applies both plan and department to map, schema, tree and lists', async ({ browser, server }) => {
   try {
     const ann = await signedIn(browser, server, 'ann', 'en', 'light', 1440);
     await ann.goto('/');
@@ -142,12 +165,11 @@ test('real server applies both plan and department to map, schema, tree and list
     await expect(window).toBeVisible();
     expect(errorsOf(ann)).toEqual([]);
   } finally {
-    await server.stop();
+    await server.closePages();
   }
 });
 
-test('real server lets the department owner see only their own agent and full viewers see all', async ({ browser }) => {
-  const server = await startServer();
+test('real server lets the department owner see only their own agent and full viewers see all', async ({ browser, server }) => {
   try {
     const olga = await signedIn(browser, server, 'olga', 'en', 'light', 1440);
     await olga.goto(`/departments/${server.dev.id}`);
@@ -163,12 +185,11 @@ test('real server lets the department owner see only their own agent and full vi
       await viewer.close();
     }
   } finally {
-    await server.stop();
+    await server.closePages();
   }
 });
 
-test('real server closes an open terminal with 4403 when the plan moves', async ({ browser }) => {
-  const server = await startServer();
+test('real server closes an open terminal with 4403 when the plan moves', async ({ browser, server }) => {
   try {
     const ann = await signedIn(browser, server, 'ann', 'en', 'light', 1440);
     await server.control('turn-mine-ann');
@@ -179,12 +200,11 @@ test('real server closes an open terminal with 4403 when the plan moves', async 
     await expect(window).toHaveCount(0);
     expect(errorsOf(ann)).toEqual([]);
   } finally {
-    await server.stop();
+    await server.closePages();
   }
 });
 
-test('real server refuses an upgraded socket and drops the stale screen on terminal:false', async ({ browser }) => {
-  const server = await startServer();
+test('real server refuses an upgraded socket and drops the stale screen on terminal:false', async ({ browser, server }) => {
   try {
     await server.control('move-other-ann-running');
     const ann = await signedIn(browser, server, 'ann', 'en', 'light', 1440);
@@ -193,12 +213,11 @@ test('real server refuses an upgraded socket and drops the stale screen on termi
     await expect(window).toHaveCount(0);
     expect(errorsOf(ann)).toEqual([]);
   } finally {
-    await server.stop();
+    await server.closePages();
   }
 });
 
-test('real server drops the old owner view even while their program keeps running', async ({ browser }) => {
-  const server = await startServer();
+test('real server drops the old owner view even while their program keeps running', async ({ browser, server }) => {
   try {
     await server.control('turn-other-bob');
     const bob = await signedIn(browser, server, 'bob', 'en', 'light', 1440);
@@ -210,6 +229,6 @@ test('real server drops the old owner view even while their program keeps runnin
     await expect(window).toHaveCount(0);
     expect(errorsOf(bob)).toEqual([]);
   } finally {
-    await server.stop();
+    await server.closePages();
   }
 });

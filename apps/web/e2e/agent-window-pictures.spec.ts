@@ -2,11 +2,11 @@ import { expect, test, type JSHandle, type Locator, type Page, type Route } from
 import { en } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import type { EventView } from '../src/types';
+import { AGENT_HIDDEN } from './api';
 import { serveAgentWindow, SUB, type AgentFixture } from './agent-window-api';
 import { checkPage, open, ORCHESTRATOR, ORCHESTRATOR_CARD, shot, VIEWERS, watchErrors, type Agent, type Settings, type Viewer } from './agent-window-steps';
 
 const PICTURE_BYTES = 3 * 1024 * 1024;
-const REFUSED = { error: { code: 'forbidden', message: 'This employee works in a department you do not have.', reason: 'not_your_department' } };
 
 type Upload = { agent: string; name: string; bytes: Buffer };
 type Said = { agent: string; text: string; pictures?: string[] };
@@ -26,7 +26,7 @@ async function serve(page: Page, viewer: Viewer, settings: Settings): Promise<Se
     localStorage.setItem('hh-lang', lang);
     localStorage.setItem('hh-theme', theme);
   }, settings);
-  const live: AgentFixture = { awake: false, hasTask: false, messages: [], connections: 0, canType: types, orchestrator: ORCHESTRATOR, events: events.b1 };
+  const live: AgentFixture = { awake: false, hasTask: false, messages: [], connections: 0, canType: types, orchestrator: ORCHESTRATOR, events: events.b1, viewer: me };
   await serveAgentWindow(page, live);
   await page.route('**/api/**', route => {
     const url = new URL(route.request().url());
@@ -52,7 +52,7 @@ async function serve(page: Page, viewer: Viewer, settings: Settings): Promise<Se
       });
       return route.fulfill({ status: 202, json: { jobId: 'j2' } });
     }
-    if (url.pathname.startsWith('/api/agents/s1')) return route.fulfill({ status: 403, json: REFUSED });
+    if (url.pathname.startsWith('/api/agents/s1')) return route.fulfill({ status: 403, json: AGENT_HIDDEN });
     if (url.pathname === '/api/me') return route.fulfill({ json: me });
     if (url.pathname === '/api/computer') return route.fulfill({ json: { available: false, until: null, asked: null } });
     if (url.pathname === '/api/agents/orchestrator') return route.fulfill({ json: ORCHESTRATOR_CARD });
@@ -263,13 +263,15 @@ test.describe('a picture for an agent', () => {
     await page.getByRole('navigation', { name: 'Sections' }).getByRole('button', { name: en.shell.tabs.subscriptions, exact: true }).click();
     await page.getByRole('button', { name: /Open the card of.*Codex/ }).click();
     await page.getByRole('button', { name: en.window.openAgent('Sam'), exact: true }).click();
-    const alert = page.getByRole('alert').filter({ hasText: en.errors.not_your_department });
-    await expect(alert).toBeVisible();
-    const window = page.locator('aside.orch');
+    const window = page.getByRole('dialog', { name: en.routes.accessDenied });
+    await expect(window).toBeVisible();
+    await expect(page.locator('aside.orch')).toHaveCount(0);
     await window.dispatchEvent('dragenter', { dataTransfer: await picture(page, 'screen.png') });
     await expect(window.getByText(en.window.dropPictures)).toHaveCount(0);
     await window.dispatchEvent('drop', { dataTransfer: await picture(page, 'screen.png') });
     await expect(window.locator('.t-tray')).toHaveCount(0);
     expect(server.uploads).toEqual([]);
+    expect(server.messages).toEqual([]);
+    expect(server.keys).toEqual([]);
   });
 });
