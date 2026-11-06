@@ -1,11 +1,12 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { constants, createReadStream } from 'node:fs';
-import { copyFile, lstat, mkdir, mkdtemp, open, readFile, readdir, readlink, realpath, rename, rm, symlink } from 'node:fs/promises';
+import { constants, createReadStream, type Stats } from 'node:fs';
+import { chmod, chown, copyFile, link, lstat, mkdir, mkdtemp, open, readFile, readdir, readlink, realpath, rename, rm, symlink } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { EnvironmentDigest, RepositoryPath } from '@hornhoof/protocol';
 import { z } from 'zod';
+import type { JobUser } from './isolation.js';
 import { checkDeadline } from './test-context.js';
 
 const lockDescriptors = new AsyncLocalStorage<number[]>();
@@ -67,15 +68,24 @@ export function cacheKey(value: { runtime: string; settings: unknown; inputs: { 
 
 const PayloadItem = z.discriminatedUnion('kind', [
   z.strictObject({ path: RepositoryPath, kind: z.literal('directory') }),
-  z.strictObject({ path: RepositoryPath, kind: z.literal('file'), digest: EnvironmentDigest, mode: z.number().int() }),
+  z.strictObject({ path: RepositoryPath, kind: z.literal('file'), digest: EnvironmentDigest, mode: z.number().int().min(0).max(0o777), size: z.number().int().nonnegative() }),
   z.strictObject({ path: RepositoryPath, kind: z.literal('symlink'), target: z.string() }),
 ]);
-type PayloadItem = z.infer<typeof PayloadItem>;
-const Ready = z.strictObject({ format: z.literal(1), key: EnvironmentDigest, inputDigest: EnvironmentDigest, roots: z.array(RepositoryPath), entries: z.array(PayloadItem).max(500_000) });
-export type CacheEntry = { path: string; key: string; inputDigest: string; hit: boolean };
+export type PayloadItem = z.infer<typeof PayloadItem>;
+export const CacheReady = z.strictObject({ format: z.literal(2), key: EnvironmentDigest, inputDigest: EnvironmentDigest, roots: z.array(RepositoryPath), entries: z.array(PayloadItem).max(500_000) });
+export type CacheReady = z.infer<typeof CacheReady>;
+/* hit: nothing was built for it here. fetched: another machine built it. */
+export type CacheEntry = { path: string; key: string; inputDigest: string; hit: boolean; fetched?: boolean; ready?: CacheReady };
 type CacheBuild = () => Promise<{ root: string; paths: string[] }>;
+/* Decides where a missing tree comes from, and returns the entry once it is stored: publish builds it on this machine. */
+export type CacheShare = (entry: CacheEntry, context: CacheContext, publish: () => Promise<CacheReady>) => Promise<CacheEntry>;
+/* link: the part gets read-only links to the one stored file instead of copies. owner: who gets what is restored. */
+export type RestoreOptions = { link?: boolean; owner?: JobUser };
+/* Stored files nobody may write. A part that holds a link to one can read it and replace it, and never change it. */
+export const storedMode = (mode: number): number => (mode & 0o111 ? 0o555 : 0o444);
+const BATCH = 256;
 
-function within(root: string, path: string): string {
+export function within(root: string, path: string): string {
   RepositoryPath.parse(path);
   const full = resolve(root, path);
   if (relative(root, full).startsWith('..') || path.split('/').includes('.git')) throw new Error('A payload path escapes its permitted root.');
@@ -88,7 +98,7 @@ async function noLinkedParents(root: string, path: string): Promise<string> {
   }
   return full;
 }
-function safeLink(root: string, path: string, target: string): void {
+export function safeLink(root: string, path: string, target: string): void {
   if (isAbsolute(target) || target.includes('\\') || relative(root, resolve(dirname(within(root, path)), target)).startsWith('..')) throw new Error('A payload symlink escapes the repository.');
 }
 export async function fileDigest(path: string, context: CacheContext): Promise<string> {
@@ -105,7 +115,7 @@ async function scanItem(root: string, path: string, context: CacheContext, links
   }
   if (stat.isDirectory()) return [{ path, kind: 'directory' }, ...await scanChildren(root, path, context, links)];
   if (!stat.isFile() || (stat.nlink !== 1n && !links?.has(inodeKey(stat)))) throw new Error('Cache payloads cannot contain external hardlinks.');
-  return [{ path, kind: 'file', mode: Number(stat.mode & 0o777n), digest: await fileDigest(full, context) }];
+  return [{ path, kind: 'file', mode: Number(stat.mode & 0o777n), size: Number(stat.size), digest: await fileDigest(full, context) }];
 }
 async function scanChildren(root: string, path: string, context: CacheContext, links?: ReadonlySet<string>): Promise<PayloadItem[]> {
   const items: PayloadItem[] = [];
@@ -149,31 +159,58 @@ async function copyItems(source: string, target: string, entries: PayloadItem[],
     else await copyFile(within(source, item.path), destination, constants.COPYFILE_EXCL);
   }
 }
-async function syncPath(path: string): Promise<void> {
+export async function syncPath(path: string): Promise<void> {
   const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try { await file.sync(); } finally { await file.close(); }
 }
-async function syncPayload(root: string, entries: PayloadItem[]): Promise<void> {
-  for (const item of [...entries].reverse()) if (item.kind !== 'symlink') await syncPath(within(root, item.path));
-  await syncPath(root);
+/* Everything written so far reaches the disk at once: one call, where syncing each file of a dependency tree takes minutes. */
+export function syncFileSystem(path: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn('sync', ['--file-system', path], { stdio: 'ignore', env: { PATH: '/usr/bin:/bin' } });
+    child.once('error', reject);
+    child.once('close', code => { if (code === 0) resolve(); else reject(new Error('The prepared files could not reach the disk.')); });
+  });
 }
-async function readReady(entry: CacheEntry, context: CacheContext): Promise<z.infer<typeof Ready>> {
+export async function inBatches<T>(items: T[], context: CacheContext, run: (item: T) => Promise<void>): Promise<void> {
+  for (let at = 0; at < items.length; at += BATCH) {
+    checkCacheContext(context);
+    await Promise.all(items.slice(at, at + BATCH).map(run));
+  }
+}
+/* A stored tree was hashed when it came here. After that only its shape is read: the same paths and sizes, and nothing
+   written after its READY. So a hit costs a walk over the tree, not a hash of all of it. */
+function sameShape(item: PayloadItem | undefined, stat: Stats, writtenAt: number): boolean {
+  if (!item || stat.mtimeMs > writtenAt) return false;
+  if (item.kind === 'file') return stat.isFile() && stat.size === item.size;
+  return item.kind === 'directory' ? stat.isDirectory() : stat.isSymbolicLink();
+}
+async function shapeOf(root: string, items: Map<string, PayloadItem>, writtenAt: number, context: CacheContext, parent = ''): Promise<number> {
+  checkCacheContext(context);
+  const counts = await Promise.all((await readdir(join(root, parent))).map(async name => {
+    const path = parent ? `${parent}/${name}` : name, stat = await lstat(join(root, path)), item = items.get(path);
+    if (!sameShape(item, stat, writtenAt)) throw new Error(`The stored file ${path} changed.`);
+    if (item?.kind === 'symlink' && await readlink(join(root, path)) !== item.target) throw new Error(`The stored link ${path} changed.`);
+    return 1 + (stat.isDirectory() ? await shapeOf(root, items, writtenAt, context, path) : 0);
+  }));
+  return counts.reduce((sum, count) => sum + count, 0);
+}
+export async function readReady(entry: Pick<CacheEntry, 'path' | 'key' | 'inputDigest'>, context: CacheContext): Promise<CacheReady> {
   const path = join(entry.path, 'READY.json'), stat = await lstat(path);
   if (!stat.isFile() || stat.size > 64 * 1024 * 1024) throw new Error('Invalid cache receipt.');
-  const ready = Ready.parse(JSON.parse(await readFile(path, 'utf8')));
+  const ready = CacheReady.parse(JSON.parse(await readFile(path, 'utf8')));
   if (ready.key !== entry.key || ready.inputDigest !== entry.inputDigest) throw new Error('Cache input fingerprints differ.');
-  const actual = await scanChildren(join(entry.path, 'payload'), '.', context);
-  if (canonical(actual) !== canonical(ready.entries)) throw new Error('Cache payload checksum mismatch.');
+  const found = await shapeOf(join(entry.path, 'payload'), new Map(ready.entries.map(item => [item.path, item])), stat.mtimeMs, context);
+  if (found !== ready.entries.length) throw new Error('Cache payload checksum mismatch.');
   return ready;
 }
-async function cached(entry: CacheEntry, context: CacheContext): Promise<boolean> {
-  try { await lstat(entry.path); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; }
-  try { await readReady(entry, context); return true; }
+async function cached(entry: CacheEntry, context: CacheContext): Promise<CacheReady | null> {
+  try { await lstat(entry.path); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
+  try { return await readReady(entry, context); }
   catch {
     checkCacheContext(context);
     await rename(entry.path, join(dirname(entry.path), `.corrupt-${entry.key}-${randomUUID()}`));
     context.log('A corrupt preparation cache was quarantined.');
-    return false;
+    return null;
   }
 }
 async function rootsFor(root: string, paths: string[]): Promise<string[]> {
@@ -185,7 +222,18 @@ function importMatches(expected: PayloadItem[], copied: PayloadItem[]): boolean 
   const actual = new Map(copied.map(item => [item.path, canonical(item)]));
   return expected.every(item => actual.get(item.path) === canonical(item));
 }
-async function publish(entry: CacheEntry, context: CacheContext, build: CacheBuild): Promise<void> {
+/* The last step of storing a tree: what is in staging reaches the disk, READY goes beside it, and then it all moves into
+   place at once. A crash before that leaves no entry. */
+export async function storeStaged(entry: Pick<CacheEntry, 'path' | 'key' | 'inputDigest'>, staging: string, ready: CacheReady, context: CacheContext): Promise<CacheReady> {
+  await syncFileSystem(staging);
+  const file = await open(join(staging, 'READY.json'), 'wx', 0o600);
+  try { await file.writeFile(JSON.stringify(ready)); await file.sync(); }
+  finally { await file.close(); }
+  await syncPath(staging); checkCacheContext(context);
+  await rename(staging, entry.path); await syncPath(dirname(entry.path));
+  return ready;
+}
+async function publish(entry: CacheEntry, context: CacheContext, build: CacheBuild): Promise<CacheReady> {
   const staging = await mkdtemp(join(dirname(entry.path), '.staging-'));
   try {
     const source = await build(), roots = await rootsFor(source.root, source.paths), payload = join(staging, 'payload');
@@ -194,40 +242,67 @@ async function publish(entry: CacheEntry, context: CacheContext, build: CacheBui
     await mkdir(payload, { mode: 0o700 }); await copyItems(source.root, payload, entries, context);
     const copied = await scanChildren(payload, '.', context);
     if (!importMatches(entries, copied)) throw new Error('A preparation payload changed during import.');
-    await syncPayload(payload, copied);
-    const ready = await open(join(staging, 'READY.json'), 'wx', 0o600);
-    try { await ready.writeFile(JSON.stringify({ format: 1, key: entry.key, inputDigest: entry.inputDigest, roots, entries: copied })); await ready.sync(); }
-    finally { await ready.close(); }
-    await syncPath(staging); checkCacheContext(context);
-    await rename(staging, entry.path); await syncPath(dirname(entry.path));
+    await inBatches(copied, context, async item => { if (item.kind === 'file') await chmod(within(payload, item.path), storedMode(item.mode)); });
+    return await storeStaged(entry, staging, { format: 2, key: entry.key, inputDigest: entry.inputDigest, roots, entries: copied }, context);
   } finally { await rm(staging, { recursive: true, force: true }); }
 }
-export async function prepareCache(directory: string, key: string, inputDigest: string, context: CacheContext, build: CacheBuild): Promise<CacheEntry> {
+export async function prepareCache(directory: string, key: string, inputDigest: string, context: CacheContext, build: CacheBuild, share?: CacheShare): Promise<CacheEntry> {
   EnvironmentDigest.parse(key); EnvironmentDigest.parse(inputDigest);
   await privateCacheRoot(directory); const locks = await privateCacheRoot(join(directory, '.locks'));
   return withCacheLock(join(locks, key), context, async () => {
-    const entry = { path: join(directory, key), key, inputDigest, hit: false };
-    if (await cached(entry, context)) return { ...entry, hit: true };
-    await publish(entry, context, build); return entry;
+    const entry: CacheEntry = { path: join(directory, key), key, inputDigest, hit: false };
+    const ready = await cached(entry, context);
+    if (ready) return { ...entry, hit: true, ready };
+    const store = () => publish(entry, context, build);
+    return share ? share(entry, context, store) : { ...entry, ready: await store() };
   });
 }
 async function restoredLinks(root: string, entries: PayloadItem[]): Promise<void> {
   const checkout = await realpath(root);
   for (const item of entries) {
     if (item.kind !== 'symlink') continue;
-    const path = relative(checkout, await realpath(within(root, item.path)));
+    const end = await realpath(within(root, item.path)).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return checkout; throw error; });
+    const path = relative(checkout, end);
     if (path === '..' || path.startsWith('../')) throw new Error('A restored workspace symlink escapes its checkout.');
   }
 }
-export async function restoreCache(entry: CacheEntry, destination: string, context: CacheContext): Promise<void> {
-  const ready = await readReady(entry, context);
+async function restoredFolder(path: string, owner: JobUser | undefined): Promise<void> {
+  await payloadDirectory(path);
+  if (owner) await chown(path, owner.uid, owner.gid);
+}
+async function restoredParents(root: string, path: string, owner: JobUser | undefined): Promise<void> {
+  let parent = root;
+  for (const part of relative(root, dirname(within(root, path))).split('/').filter(Boolean)) { parent = join(parent, part); await restoredFolder(parent, owner); }
+}
+async function copiedFile(from: string, to: string, item: Extract<PayloadItem, { kind: 'file' }>, owner: JobUser | undefined): Promise<void> {
+  await copyFile(from, to, constants.COPYFILE_EXCL);
+  await chmod(to, item.mode);
+  if (owner) await chown(to, owner.uid, owner.gid);
+}
+/* The same disk gives a link; anywhere else the part gets a copy of its own. */
+async function linkedFile(from: string, to: string, item: Extract<PayloadItem, { kind: 'file' }>, owner: JobUser | undefined): Promise<void> {
+  try { await link(from, to); }
+  catch (error) {
+    if (!['EXDEV', 'EPERM', 'EMLINK'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
+    await copiedFile(from, to, item, owner);
+  }
+}
+async function restoredItem(source: string, target: string, item: PayloadItem, options: RestoreOptions): Promise<void> {
+  const to = within(target, item.path);
+  if (item.kind === 'symlink') { safeLink(target, item.path, item.target); await symlink(item.target, to); return; }
+  if (item.kind === 'directory') return;
+  await (options.link ? linkedFile : copiedFile)(within(source, item.path), to, item, options.owner);
+}
+export async function restoreCache(entry: CacheEntry, destination: string, context: CacheContext, options: RestoreOptions = {}): Promise<void> {
+  const ready = entry.ready ?? await readReady(entry, context);
   await mkdir(destination, { recursive: true, mode: 0o700 });
   if (!(await lstat(destination)).isDirectory()) throw new Error('The checkout root is a symlink or is not a directory.');
   for (const path of ready.roots) {
     // Check parents before removing an old private copy. A job must never redirect a restore.
-    const target = within(destination, path); await payloadParents(destination, path);
+    const target = within(destination, path); await restoredParents(destination, path, options.owner);
     await noLinkedParents(destination, path); await rm(target, { recursive: true, force: true });
   }
-  await copyItems(join(entry.path, 'payload'), destination, ready.entries, context);
+  for (const item of ready.entries) if (item.kind === 'directory') await restoredFolder(within(destination, item.path), options.owner);
+  await inBatches(ready.entries, context, item => restoredItem(join(entry.path, 'payload'), destination, item, options));
   await restoredLinks(destination, ready.entries);
 }
