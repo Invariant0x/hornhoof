@@ -24,6 +24,8 @@ export type StreamMessage =
   | { type: 'task'; id: string; spot: Spot }
   /* What waits for people changed in this place. */
   | { type: 'requests'; spot: Spot }
+  /* A machine's card came or closed; each person asks for what is theirs, so it holds no place and nothing else. */
+  | { type: 'requests'; machines: true }
   /* The company's notebook changed; it goes to people who see the whole company. */
   | { type: 'notebook'; spot: Spot }
   /* What employees found to improve changed; it goes to people who see the whole company. */
