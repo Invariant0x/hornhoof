@@ -93,6 +93,8 @@ export type ErrorReason =
   | 'request_unknown'
   | 'request_closed'
   | 'source_producer_unavailable'
+  | 'materials_required'
+  | 'materials_invalid'
   | 'improvement_unknown'
   | 'improvement_decided'
   | 'improvement_not_requested'

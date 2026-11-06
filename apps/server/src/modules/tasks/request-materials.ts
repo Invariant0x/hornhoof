@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { MaterialManifest, MaterialView } from '@hornhoof/protocol';
+import { MaterialManifest, MaterialView, QuestionMaterials } from '@hornhoof/protocol';
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
@@ -18,6 +18,22 @@ type Picture = { id: string; mediaType: string; length: number; prefix: Uint8Arr
 type ImageType = 'image/png' | 'image/jpeg' | 'image/webp';
 type Target = { id: string; name: string; length: number; mediaType: ImageType };
 type Collection = { manifest: MaterialManifest; files: Map<string, Target> };
+
+const ATTACH_HINT = 'Upload the files with hh-attach --task <task number> FILE, then pass the returned attachment ids or HTTPS links in materials.common and each corresponding materials.options list.';
+
+/* Metadata validation only. The requirement and option count come from the
+   actual source; a parsed result is no classification or disclosure grant. */
+export function parseMaterialSubmission(input: unknown, optionCount: number, resultRequired: boolean): QuestionMaterials | undefined {
+  if (input === undefined) {
+    if (resultRequired) throw new ApiError(400, 'validation', `materials_required: Attach the result materials. ${ATTACH_HINT}`, 'materials_required', { field: 'materials', howToAttach: ATTACH_HINT });
+    return undefined;
+  }
+  const parsed = QuestionMaterials.safeParse(input);
+  if (!parsed.success) throw new ApiError(400, 'validation', `materials_invalid: ${parsed.error.issues.map(issue => issue.message).join(' ')} ${ATTACH_HINT}`, 'materials_invalid', { fields: parsed.error.issues.map(issue => issue.path), howToAttach: ATTACH_HINT });
+  if (resultRequired && parsed.data.presentation !== 'result') throw new ApiError(400, 'validation', `materials_required: This source presents a result. ${ATTACH_HINT}`, 'materials_required', { field: 'materials.presentation', howToAttach: ATTACH_HINT });
+  if (parsed.data.options.length !== optionCount) throw new ApiError(400, 'validation', `materials_invalid: Match the material lists to the source options in order. ${ATTACH_HINT}`, 'materials_invalid', { field: 'materials.options', howToAttach: ATTACH_HINT });
+  return parsed.data;
+}
 
 const digest = (text: string): string => createHash('sha256').update(text).digest('hex');
 
