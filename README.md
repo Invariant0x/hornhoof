@@ -74,6 +74,14 @@ Works with **Claude Code**, **Codex** (ChatGPT plans), **Kimi Code**, the **GLM 
 
 ![The pool of machines](.github/assets/machines.gif)
 
+## Any work, not only code
+
+*Marketing, content, sales and support run the same way as development.*
+
+- **A department for every kind of work.** Each has a head and employees who each know one part of the job. In marketing a search specialist, a social media manager and a copywriter work on one campaign; in support the first line answers, the second line takes the hard cases and an editor keeps the knowledge base. The head splits the goal, hands out the parts and checks the result.
+- **A library to start from.** 10 departments, 50 roles and over 150 skills from the best practices of each field: campaign plans, copywriting and editing, SEO audits, social posts, market sizing, marketplace listings, sales, support and finance. Development, design and operations run every day in Hornhoof's own company, and what works there goes back into the templates.
+- **Your own way of working.** Change any employee's role and skills on its card, or write your own roles, skills and departments. The company puts them to work on the next task.
+
 ## For your home
 
 *Your home is a company too.*
@@ -168,6 +176,8 @@ Start with [CONTRIBUTING.md](CONTRIBUTING.md). Please read the [code of conduct]
 - **More machines holding the company's data**, five out of ten instead of three.
 - **Phones as workers.** An old Android phone on a charger runs work, and any device with a browser lends its power by keeping a page open.
 - **Departments on their own turns.** Development on turn 8 while marketing is on turn 3, each with its own progress on the map.
+- **Checkpoints for every department.** Marketing, content and sales get stages and checks between them, the way development has them.
+- **Schemes to share.** Save a department or the whole company with its agents and skills as one file, load someone else's in a click, and its agents start working.
 - **Styles for the interface.** Pick the look you like in Settings.
 
 ## Questions
