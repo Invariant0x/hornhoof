@@ -1046,8 +1046,8 @@ describe('a standalone test terminal', () => {
     expect(await crypto.subtle.verify(
       { name: 'ECDSA', hash: 'SHA-256' },
       publicKey,
-      decodeViewSignature(proof.signature),
-      decodeViewChallenge(bindResponse.challenge),
+      new Uint8Array(decodeViewSignature(proof.signature)),
+      new Uint8Array(decodeViewChallenge(bindResponse.challenge)),
     )).toBe(true);
 
     act(() => {

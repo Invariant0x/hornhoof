@@ -76,7 +76,7 @@ export async function createTestTerminalBrowserKey(lease: TestTerminalLease) {
   return {
     request,
     sign(challenge: Uint8Array) {
-      return crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, pair.privateKey, challenge);
+      return crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, pair.privateKey, new Uint8Array(challenge));
     },
   };
 }
