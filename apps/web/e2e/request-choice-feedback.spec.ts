@@ -29,6 +29,11 @@ function requestCopyScore(t: Messages): number {
     t.tasks.choiceHint,
     t.tasks.sendFeedback,
     t.tasks.sending,
+    t.tasks.situationLabel,
+    t.tasks.requiredActionLabel,
+    t.tasks.consequenceLabel,
+    t.tasks.plainExplanationPending,
+    t.tasks.hiddenDecisionLabel,
     t.tasks.cancelTask,
     t.tasks.openTerminal('Agent'),
     t.tasks.stuckText('Agent', 404),
@@ -1090,86 +1095,111 @@ test('saves neutral feedback without pick, delivers words to author, and preserv
   }
 });
 
+const INTERNAL_FIRST_COPY: Record<
+  Language,
+  {
+    dept: string;
+    head: string;
+    readySituation: string;
+    readyAction: string;
+    readyLabel: string;
+    readyConsequence: string;
+    loginScope: string;
+    loginDuration: string;
+    loginSituation: string;
+    loginAction: string;
+    answerText: string;
+  }
+> = {
+  en: {
+    dept: 'Development',
+    head: 'Head of development',
+    readySituation: 'Turn 8 release candidate passed every verification gate.',
+    readyAction: 'Approve or decline publishing this exact commit.',
+    readyLabel: 'Publish now',
+    readyConsequence: 'Updates the live build right away.',
+    loginScope: 'Sign in again to personal Claude plan on ivan-mbp',
+    loginDuration: 'Until the subscription session expires',
+    loginSituation: 'Your personal Claude subscription session ended on machine ivan-mbp.',
+    loginAction: 'Sign in again under Subscriptions and confirm here.',
+    answerText: 'Signed in again',
+  },
+  ru: {
+    dept: 'Разработка',
+    head: 'Глава разработки',
+    readySituation: 'Кандидат выпуска хода 8 прошел все рубежи проверки.',
+    readyAction: 'Одобрите или отклоните выпуск этого точного коммита.',
+    readyLabel: 'Выпустить сейчас',
+    readyConsequence: 'Обновляет рабочую сборку сразу.',
+    loginScope: 'Повторный вход в личную подписку Claude на ivan-mbp',
+    loginDuration: 'До истечения сессии подписки',
+    loginSituation: 'На машине ivan-mbp завершилась сессия личной подписки Claude.',
+    loginAction: 'Войдите снова в разделе Подписки и подтвердите здесь.',
+    answerText: 'Вход обновлен',
+  },
+};
+
 function makeInternalFirstBrowserRequests(lang: Language): WaitingRequest[] {
-  const ruLang = lang === 'ru';
+  const c = INTERNAL_FIRST_COPY[lang];
   const sha = 'f'.repeat(40);
+  const task = { id: 't1', number: 1, title: TASKS[0]!.title, department: { id: 'd2', name: c.dept } };
+  const baseFields = {
+    options: [],
+    commit: null,
+    commitUrl: null,
+    images: [],
+    link: null,
+    explained: null,
+    explaining: false,
+    ownerPersonId: 'p1',
+    canAnswer: true,
+  };
   const items: Record<string, unknown>[] = [
     {
+      ...baseFields,
       id: 'req-internal-499',
       kind: 'question',
       audience: 'internal',
       classification: null,
       text: 'BLOCKED: internal migration question for head only',
-      options: [],
-      commit: null,
-      commitUrl: null,
-      images: [],
-      link: null,
-      explained: null,
-      explaining: false,
       at: '2026-11-06T00:10:00.000Z',
-      ownerPersonId: 'p1',
-      canAnswer: true,
       agent: { id: 'agent-worker-1', name: 'Backend Developer' },
-      task: { id: 't1', number: 1, title: TASKS[0]!.title, department: { id: 'd2', name: ruLang ? 'Разработка' : 'Development' } },
+      task,
     },
     {
+      ...baseFields,
       id: 'req-unclassified-499',
       kind: 'stuck',
       audience: 'human',
       classification: null,
       clientPromote: true,
       text: 'BLOCKED: forged client promotion without server classification',
-      options: [],
-      commit: null,
-      commitUrl: null,
-      images: [],
-      link: null,
-      explained: null,
-      explaining: false,
       at: '2026-11-06T00:11:00.000Z',
-      ownerPersonId: 'p1',
-      canAnswer: true,
       agent: { id: 'agent-worker-2', name: 'Worker Two' },
-      task: { id: 't1', number: 1, title: TASKS[0]!.title, department: { id: 'd2', name: ruLang ? 'Разработка' : 'Development' } },
+      task,
     },
     {
+      ...baseFields,
       id: 'req-ready-499',
       kind: 'approval',
       audience: 'human',
       classification: { kind: 'ready_result', artifact: { kind: 'commit', sha } },
       text: 'PRIVATE_RAW_GIT_DIFF_DO_NOT_SHOW',
       executorInstruction: 'PRIVATE_EXECUTOR_STEP_DO_NOT_SHOW',
-      explained: null,
-      explaining: false,
-      images: [],
-      options: [],
-      link: null,
       commit: sha,
       commitUrl: `https://github.com/acme/hornhoof/commit/${sha}`,
       at: '2026-11-06T00:12:00.000Z',
-      ownerPersonId: 'p1',
-      canAnswer: true,
       decidedBy: { kind: 'ceo_and_delegate', department: null },
-      agent: { id: 'agent-head-1', name: ruLang ? 'Глава разработки' : 'Head of development' },
-      task: { id: 't1', number: 1, title: TASKS[0]!.title, department: { id: 'd2', name: ruLang ? 'Разработка' : 'Development' } },
+      agent: { id: 'agent-head-1', name: c.head },
+      task,
       humanEnvelope: {
-        situation: ruLang
-          ? 'Кандидат выпуска хода 8 прошел все рубежи проверки.'
-          : 'Turn 8 release candidate passed every verification gate.',
-        requiredAction: ruLang
-          ? 'Одобрите или отклоните выпуск этого точного коммита.'
-          : 'Approve or decline publishing this exact commit.',
-        options: [
-          {
-            id: 'ship',
-            label: ruLang ? 'Выпустить сейчас' : 'Publish now',
-            consequence: ruLang ? 'Обновляет рабочую сборку сразу.' : 'Updates the live build right away.',
-          },
-        ],
+        situation: c.readySituation,
+        requiredAction: c.readyAction,
+        options: [{ id: 'ship', label: c.readyLabel, consequence: c.readyConsequence }],
       },
     },
     {
+      ...baseFields,
       id: 'req-hidden-499',
       kind: 'question',
       audience: 'human',
@@ -1179,31 +1209,29 @@ function makeInternalFirstBrowserRequests(lang: Language): WaitingRequest[] {
         actionBinding: {
           kind: 'owner_login',
           resourceId: 'sub-claude-max',
-          scope: ruLang ? 'Повторный вход в личную подписку Claude на ivan-mbp' : 'Sign in again to personal Claude plan on ivan-mbp',
-          duration: ruLang ? 'До истечения сессии подписки' : 'Until the subscription session expires',
+          scope: c.loginScope,
+          duration: c.loginDuration,
         },
       },
       text: 'HIDDEN_TASK_999_SECRET_TRACE',
-      options: [],
-      commit: null,
-      images: [],
       at: '2026-11-06T00:14:00.000Z',
-      ownerPersonId: 'p1',
-      canAnswer: true,
       decidedBy: { kind: 'ceo_and_delegate', department: null },
       task: null,
       agent: null,
-      humanEnvelope: {
-        situation: ruLang
-          ? 'На машине ivan-mbp завершилась сессия личной подписки Claude.'
-          : 'Your personal Claude subscription session ended on machine ivan-mbp.',
-        requiredAction: ruLang
-          ? 'Войдите снова в разделе Подписки и подтвердите здесь.'
-          : 'Sign in again under Subscriptions and confirm here.',
-      },
+      humanEnvelope: { situation: c.loginSituation, requiredAction: c.loginAction },
     },
   ];
   return items as unknown as WaitingRequest[];
+}
+
+const isHiddenRequestPost = (route: Route): boolean =>
+  new URL(route.request().url()).pathname === '/api/requests/req-hidden-499' && route.request().method() === 'POST';
+
+async function fulfillHiddenRequestPost(route: Route, posts: { url: string; body: unknown }[], onAnswered: () => void) {
+  if (!isHiddenRequestPost(route)) return route.fallback();
+  posts.push({ url: '/api/requests/req-hidden-499', body: route.request().postDataJSON() });
+  onAnswered();
+  return route.fulfill({ json: { request: { id: 'req-hidden-499', status: 'answered' } } });
 }
 
 for (const lang of CHECKED_LOCALES) {
@@ -1227,16 +1255,13 @@ for (const lang of CHECKED_LOCALES) {
         await serveApi(page);
         let current = makeInternalFirstBrowserRequests(lang);
         const posts: { url: string; body: unknown }[] = [];
-        await page.route('**/api/**', async route => {
-          if (await fulfillShellRequestsRoute(route, () => current)) return;
-          const url = new URL(route.request().url());
-          if (url.pathname === '/api/requests/req-hidden-499' && route.request().method() === 'POST') {
-            posts.push({ url: url.pathname, body: route.request().postDataJSON() });
-            current = current.filter(r => r.id !== 'req-hidden-499');
-            return route.fulfill({ json: { request: { id: 'req-hidden-499', status: 'answered' } } });
-          }
-          return route.fallback();
-        });
+        await page.route('**/api/**', async route =>
+          (await fulfillShellRequestsRoute(route, () => current))
+            ? undefined
+            : fulfillHiddenRequestPost(route, posts, () => {
+                current = current.filter(r => r.id !== 'req-hidden-499');
+              }),
+        );
 
         await page.goto('/tasks');
         const t = MESSAGES[lang];
@@ -1265,7 +1290,7 @@ for (const lang of CHECKED_LOCALES) {
 
         const docScrollWidth = await page.evaluate(() => {
           const scroller = document.querySelector<HTMLElement>('.screen, .page');
-          return Math.max(document.documentElement.scrollWidth, scroller?.scrollWidth ?? 0);
+          return scroller ? Math.max(document.documentElement.scrollWidth, scroller.scrollWidth) : document.documentElement.scrollWidth;
         });
         expect(docScrollWidth).toBeLessThanOrEqual(width);
         await assertRequestCardsFit(cards, width);
@@ -1284,7 +1309,7 @@ for (const lang of CHECKED_LOCALES) {
           theme === 'dark',
         );
 
-        const answerText = lang === 'ru' ? 'Вход обновлен' : 'Signed in again';
+        const answerText = INTERNAL_FIRST_COPY[lang].answerText;
         await hiddenCard.getByLabel(t.tasks.yourAnswer).fill(answerText);
         await hiddenCard.getByRole('button', { name: t.tasks.sendAnswer, exact: true }).click();
         await expect.poll(() => posts).toEqual([{ url: '/api/requests/req-hidden-499', body: { answer: answerText } }]);

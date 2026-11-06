@@ -4,12 +4,19 @@ import { useT, type Messages } from '../i18n';
 import type { TaskPlace, WaitingRequest } from '../types';
 import { DecidedByNote } from './DecidedBy';
 import { Field } from './Field';
-import { Markdown } from './Markdown';
+import {
+  isAuthorizedHumanRequest,
+  isHiddenSourceRequest,
+  RequestExplanation,
+  resolvePlainEnvelope,
+  type HumanOptionView,
+} from './RequestExplanation';
 import { proseErrorText } from './TaskAttachments';
 
 /* Whether this person's words to the agent in its window or terminal answer any of these: a question and a stuck task they
-   may take take them, a pick and a commit to approve do not. */
-export const wordsAnswer = (requests: WaitingRequest[]) => requests.some(r => r.canAnswer && (r.kind === 'question' || r.kind === 'stuck'));
+   may take take them, when the asking agent is visible to them; a pick, an approval and a hidden-source decision do not. */
+export const wordsAnswer = (requests: WaitingRequest[]) =>
+  requests.some(r => isAuthorizedHumanRequest(r) && !isHiddenSourceRequest(r) && r.canAnswer && (r.kind === 'question' || r.kind === 'stuck'));
 
 /* A picture an agent showed, as people who reach its task load it. */
 const picture = (id: string) => `/api/attachments/${id}`;
@@ -17,28 +24,37 @@ const picture = (id: string) => `/api/attachments/${id}`;
 /* onOpenAgent opens the asking agent's window, to see in its terminal what it did. */
 type Shared = { onOpenTask: (id: string) => void; onOpenAgent: (id: string) => void; placeName: (p: TaskPlace) => string };
 
+const agentNameOf = (t: Messages, request: WaitingRequest): string =>
+  isHiddenSourceRequest(request) ? t.window.hiddenEmployee : request.agent.name;
+
 /* An approval names a commit, or under a department's policy the work its words say. */
-const asksToApprove = (t: Messages, request: WaitingRequest) => (request.commit ? t.tasks.asksApproval(request.agent.name) : t.tasks.asksApprovalOf(request.agent.name));
+const asksToApprove = (t: Messages, request: WaitingRequest, name: string) =>
+  request.commit ? t.tasks.asksApproval(name) : t.tasks.asksApprovalOf(name);
 
 function whoAsked(t: Messages, request: WaitingRequest): string {
-  if (request.kind === 'approval') return asksToApprove(t, request);
-  if (request.kind === 'stuck') return t.tasks.stuck(request.agent.name);
-  if (request.kind === 'choice') return t.tasks.asksChoice(request.agent.name);
-  return t.tasks.asks(request.agent.name);
+  const name = agentNameOf(t, request);
+  if (request.kind === 'approval') return asksToApprove(t, request, name);
+  if (request.kind === 'stuck') return t.tasks.stuck(name);
+  if (request.kind === 'choice') return t.tasks.asksChoice(name);
+  return t.tasks.asks(name);
 }
 
 const pickBody = (pick: number, text: string) => (text.trim() ? { pick, answer: text.trim() } : { pick });
 const approvalBody = (approve: boolean, text: string) => (text.trim() ? { approve, answer: text.trim() } : { approve });
 
 /* A request for someone who may not take it: the commit or the ways it offers, and who takes it. */
-function ReadOnly({ request }: { request: WaitingRequest }) {
+function ReadOnly({ request, options }: { request: WaitingRequest; options: HumanOptionView[] }) {
+  const t = useT();
   return (
     <div className="req-form">
       {request.kind === 'approval' && <ApprovedCommit request={request} />}
-      {request.kind === 'choice' && (
+      {request.kind === 'choice' && options.length > 0 && (
         <ul className="req-ways">
-          {request.options.map((o, i) => (
-            <li key={i}>{o.label}</li>
+          {options.map((o, i) => (
+            <li key={i}>
+              <span>{o.label}</span>
+              {o.consequence && <span className="muted">{` (${t.tasks.consequenceLabel}: ${o.consequence})`}</span>}
+            </li>
           ))}
         </ul>
       )}
@@ -47,8 +63,15 @@ function ReadOnly({ request }: { request: WaitingRequest }) {
   );
 }
 
-function RequestHeader({ who, request, onOpenTask, onOpenAgent, placeName }: Shared & { who: string; request: WaitingRequest }) {
+function RequestHeader({ who, request, hidden, onOpenTask, onOpenAgent, placeName }: Shared & { who: string; request: WaitingRequest; hidden: boolean }) {
   const t = useT();
+  if (hidden) {
+    return (
+      <header>
+        <b>{who}</b>
+      </header>
+    );
+  }
   const { task, agent } = request;
   return (
     <header>
@@ -61,29 +84,6 @@ function RequestHeader({ who, request, onOpenTask, onOpenAgent, placeName }: Sha
         {t.tasks.openTerminal(agent.name)}
       </button>
     </header>
-  );
-}
-
-function RequestWords({ request, said }: { request: WaitingRequest; said: string }) {
-  const t = useT();
-  if (request.explained) {
-    return (
-      <>
-        <div className="req-explained">
-          <Markdown text={request.explained} />
-        </div>
-        <details className="req-more">
-          <summary>{t.tasks.inDetail}</summary>
-          <p className="req-text">{said}</p>
-        </details>
-      </>
-    );
-  }
-  return (
-    <>
-      <p className="req-text">{said}</p>
-      {request.explaining && <p className="muted">{t.tasks.explaining}</p>}
-    </>
   );
 }
 
@@ -110,7 +110,7 @@ function RequestMedia({ request }: { request: WaitingRequest }) {
 }
 
 type ChoiceProps = {
-  options: WaitingRequest['options'];
+  options: HumanOptionView[];
   text: string;
   busy: boolean;
   onText: (value: string) => void;
@@ -123,14 +123,17 @@ function ChoiceForm({ options, text, busy, onText, onPick, onSubmit }: ChoicePro
   const t = useT();
   return (
     <form className="req-form" onSubmit={onSubmit}>
-      <div className="req-options">
-        {options.map((o, i) => (
-          <button key={i} className="req-option" type="button" disabled={busy} onClick={() => onPick(i)}>
-            {o.image && <img src={picture(o.image)} alt={o.label} />}
-            <span>{o.label}</span>
-          </button>
-        ))}
-      </div>
+      {options.length > 0 && (
+        <div className="req-options">
+          {options.map((o, i) => (
+            <button key={i} className="req-option" type="button" disabled={busy} onClick={() => onPick(i)}>
+              {o.image && <img src={picture(o.image)} alt={o.label} />}
+              <span>{o.label}</span>
+              {o.consequence && <span className="muted">{`${t.tasks.consequenceLabel}: ${o.consequence}`}</span>}
+            </button>
+          ))}
+        </div>
+      )}
       <Field label={t.tasks.choiceNote} hint={t.tasks.choiceHint}>
         {p => <textarea {...p} rows={3} value={text} onChange={e => onText(e.target.value)} />}
       </Field>
@@ -144,7 +147,7 @@ function ChoiceForm({ options, text, busy, onText, onPick, onSubmit }: ChoicePro
 }
 
 type QuestionProps = {
-  stuck: boolean;
+  canCancel: boolean;
   text: string;
   busy: boolean;
   onText: (value: string) => void;
@@ -152,7 +155,7 @@ type QuestionProps = {
   onCancel: () => void;
 };
 
-function QuestionForm({ stuck, text, busy, onText, onSubmit, onCancel }: QuestionProps) {
+function QuestionForm({ canCancel, text, busy, onText, onSubmit, onCancel }: QuestionProps) {
   const t = useT();
   return (
     <form className="req-form" onSubmit={onSubmit}>
@@ -163,7 +166,7 @@ function QuestionForm({ stuck, text, busy, onText, onSubmit, onCancel }: Questio
         <button className="btn small" type="submit" disabled={busy || !text.trim()}>
           {t.tasks.sendAnswer}
         </button>
-        {stuck && (
+        {canCancel && (
           <button className="btn small ghost" type="button" disabled={busy} onClick={onCancel}>
             {t.tasks.cancelTask}
           </button>
@@ -200,6 +203,8 @@ function ApprovalForm({ request, text, busy, onText, onDecide }: ApprovalProps) 
 }
 
 type FormActions = {
+  options: HumanOptionView[];
+  canCancel: boolean;
   text: string;
   busy: boolean;
   onText: (value: string) => void;
@@ -209,11 +214,11 @@ type FormActions = {
   onCancel: () => void;
 };
 
-function RequestForm({ request, text, busy, onText, onAnswer, onPick, onDecide, onCancel }: FormActions & { request: WaitingRequest }) {
-  if (!request.canAnswer) return <ReadOnly request={request} />;
-  if (request.kind === 'choice') return <ChoiceForm options={request.options} text={text} busy={busy} onText={onText} onPick={onPick} onSubmit={onAnswer} />;
+function RequestForm({ request, options, canCancel, text, busy, onText, onAnswer, onPick, onDecide, onCancel }: FormActions & { request: WaitingRequest }) {
+  if (!request.canAnswer) return <ReadOnly request={request} options={options} />;
+  if (request.kind === 'choice') return <ChoiceForm options={options} text={text} busy={busy} onText={onText} onPick={onPick} onSubmit={onAnswer} />;
   if (request.kind === 'approval') return <ApprovalForm request={request} text={text} busy={busy} onText={onText} onDecide={onDecide} />;
-  return <QuestionForm stuck={request.kind === 'stuck'} text={text} busy={busy} onText={onText} onSubmit={onAnswer} onCancel={onCancel} />;
+  return <QuestionForm canCancel={canCancel} text={text} busy={busy} onText={onText} onSubmit={onAnswer} onCancel={onCancel} />;
 }
 
 function useRequestSend(onDone: () => void) {
@@ -252,7 +257,9 @@ function RequestItem({ request, onDone, ...shared }: Shared & { request: Waiting
   const t = useT();
   const [text, setText] = useState('');
   const { busy, failure, send } = useRequestSend(onDone);
-  const { task, agent } = request;
+  const hidden = isHiddenSourceRequest(request);
+  const envelope = resolvePlainEnvelope(request);
+  const label = hidden ? t.tasks.hiddenDecisionLabel : `#${request.task.number} ${request.task.title}`;
   const reply = (body: object) => void send(`/api/requests/${request.id}`, body);
 
   function answer(e: FormEvent) {
@@ -260,22 +267,22 @@ function RequestItem({ request, onDone, ...shared }: Shared & { request: Waiting
     if (text.trim()) reply({ answer: text.trim() });
   }
 
-  /* Hornhoof's own words about a stuck task are said in the person's language. */
-  const said = request.kind === 'stuck' ? t.tasks.stuckText(agent.name, task.number) : request.text;
   return (
-    <article className={`req req-${request.kind}`} aria-label={`#${task.number} ${task.title}`} aria-busy={busy}>
-      <RequestHeader who={whoAsked(t, request)} request={request} {...shared} />
-      <RequestWords request={request} said={said} />
+    <article className={`req req-${request.kind}`} aria-label={label} aria-busy={busy}>
+      <RequestHeader who={whoAsked(t, request)} request={request} hidden={hidden} {...shared} />
+      <RequestExplanation request={request} envelope={envelope} />
       <RequestMedia request={request} />
       <RequestForm
         request={request}
+        options={envelope.options}
+        canCancel={request.kind === 'stuck' && !hidden}
         text={text}
         busy={busy}
         onText={setText}
         onAnswer={answer}
         onPick={i => reply(pickBody(i, text))}
         onDecide={approve => reply(approvalBody(approve, text))}
-        onCancel={() => void send(`/api/tasks/${task.id}/cancel`, {})}
+        onCancel={() => void send(`/api/tasks/${request.task.id}/cancel`, {})}
       />
       <RequestFeedback busy={busy} failure={failure} />
     </article>
@@ -298,9 +305,11 @@ function Commit({ request }: { request: WaitingRequest }) {
 }
 
 export function Requests({ requests, onChanged, ...shared }: Shared & { requests: WaitingRequest[]; onChanged: () => void }) {
+  const visible = requests.filter(isAuthorizedHumanRequest);
+  if (visible.length === 0) return null;
   return (
     <div className="reqs">
-      {requests.map(r => (
+      {visible.map(r => (
         <RequestItem key={r.id} request={r} onDone={onChanged} {...shared} />
       ))}
     </div>

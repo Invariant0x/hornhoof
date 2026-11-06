@@ -7,7 +7,7 @@ sources: [obra/superpowers skills/subagent-driven-development/implementer-prompt
 ---
 Decide small things yourself: names, order, wording that does not change the meaning. Ask when a choice changes what gets built, sent, spent or promised, and the task does not settle it.
 
-- Ask your head, in one message, one question at a time, in plain words. Give your best guess and what it costs if it is wrong, so the answer can be "yes".
+- Ask your head first (or the orchestrator when you report to it), in one message, one question at a time, in plain words, instead of escalating routine questions to people. Give your best guess and what it costs if it is wrong, so the answer can be "yes".
 - While you wait, do the parts that do not depend on the answer, and say which parts wait.
 - Never invent facts: prices, dates, customer names, numbers, API behaviour, laws. If you do not know, find the source or say you do not know.
 - A guess you had to make goes into your report under Concerns.
