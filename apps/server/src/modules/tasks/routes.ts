@@ -372,6 +372,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (!found) throw refuse(404, 'request_unknown', 'There is no such request.');
     const [task] = await db.select().from(tasks).where(eq(tasks.id, found.taskId));
     if (!task) throw refuse(404, 'request_unknown', 'There is no such request.');
+    if (found.kind === 'stuck' && found.audience === 'internal') throw refuse(409, 'task_invalid', 'An internal stuck request is answered by its current head or orchestrator, not a person.');
     /* The orchestrator answers only for the person its turn answers, under its input lock, checked again as it is kept. */
     const on = delegationOf(me);
     requireDecision(requestSubject(found, task), me, await accessOf(db, me), me.companyId);

@@ -19,7 +19,7 @@ import { setupCode } from '../src/modules/setup/code.js';
 import { ask, createTask } from '../src/modules/tasks/engine.js';
 import { openTestDb, timed } from './helpers-db.js';
 import { as, sessionFrom, TEST_SECRET } from './helpers-basic.js';
-export { createTestDb, statements } from './helpers-db.js';
+export { createTestDb, ownDatabases, statements } from './helpers-db.js';
 export { as, sessionFrom, TEST_SECRET, until } from './helpers-basic.js';
 
 export const TEST_API_KEY = 'sk-ant-api03-test-key-9f3a';

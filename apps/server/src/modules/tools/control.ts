@@ -17,6 +17,9 @@ import { LendBody } from '../nodes/routes.js';
 import { NOTE_MAX, NoteBody } from '../notebook/book.js';
 import { carriesFile, encodedHint } from '../tasks/attachments.js';
 import { MESSAGE_TASK_HINT, TaskReference } from '../tasks/external-wait.js';
+import { resolveStuck } from '../tasks/stuck.js';
+import { wakeAll } from '../tasks/wake.js';
+import type { Answer } from '../tasks/engine.js';
 import { InviteBody, PersonPatch } from '../people/routes.js';
 import { BudgetBody, ConnectBody, SubscriptionBody } from '../subscriptions/routes.js';
 import { UpdateBody } from '../updates/routes.js';
@@ -174,7 +177,7 @@ export function registerControlTools(server: McpServer, ctx: Ctx, app: FastifyIn
   tool(
     'answer_request',
     'Answers what an employee asked people (see /api/requests): answer for a question; approve true or false, with an optional answer, for a commit; pick (0 for the first way) for a choice; retry true for a stuck task. ' +
-      'It is the decision of the person this turn answers, the last one who wrote into it, and goes through only when they may take it.',
+      'A human decision belongs to the person this turn answers. An internal stuck request assigned to the orchestrator is answered by the orchestrator itself, without a person principal.',
     {
       request: Id('request'),
       answer: Text.optional(),
@@ -365,7 +368,18 @@ function asCeo(ctx: Ctx, app: FastifyInstance, job: ToolJob, made: Call) {
 }
 
 /* A tool's call goes as a decision of the person this turn answers, as the CEO or the delegate, or as the owner. */
-function carry(ctx: Ctx, app: FastifyInstance, job: ToolJob, name: string, made: Call) {
+async function carry(ctx: Ctx, app: FastifyInstance, job: ToolJob, name: string, made: Call) {
+  if (name === 'answer_request' && made.url.startsWith('/api/requests/')) {
+    try {
+      const done = await resolveStuck(ctx, job, made.url.slice('/api/requests/'.length), made.payload as Answer);
+      if (done) {
+        await wakeAll(ctx, done.wakes);
+        return say(JSON.stringify({ request: { id: done.request.id, status: done.request.status, picked: done.request.picked, answer: done.request.answer } }));
+      }
+    } catch (err) {
+      return say(err instanceof Error ? err.message : 'The internal stuck answer did not go through.', true);
+    }
+  }
   if (DECIDES.has(name)) return decide(ctx, app, job, made);
   return CEO_ONLY.has(name) || made.asCeo ? asCeo(ctx, app, job, made) : send(ctx, app, job, made);
 }

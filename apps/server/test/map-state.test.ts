@@ -14,8 +14,10 @@ import { ask, brokeDown, comment, createTask, leaveWork, loadTask, report, start
 import { agentState } from '../src/modules/conversation/queue.js';
 import { afterJob, wakeAll } from '../src/modules/tasks/wake.js';
 import type { Db } from '../src/db/client.js';
-import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until, type FakeNode, ownPlan } from './helpers.js';
+import { as, connectNode, invitePerson, listen, setUpCompany, testApp, until, type FakeNode, ownPlan, ownDatabases } from './helpers.js';
 import { rowsRead } from './rows-read.js';
+
+ownDatabases();
 
 type Org = { serverNow: string; workLines: WorkLine[]; departments: { id: string; workLines: WorkLine[]; reworkAt: string | null }[] };
 

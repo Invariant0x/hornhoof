@@ -593,7 +593,7 @@ export const turns = pgTable(
     openedAt: timestamp('opened_at', { withTimezone: true }),
     closedAt: timestamp('closed_at', { withTimezone: true }),
   },
-  t => [unique('turns_company_number').on(t.companyId, t.number), uniqueIndex('turns_one_open').on(t.companyId).where(sql`status = 'open'`)],
+  t => [unique('turns_company_number').on(t.companyId, t.number), unique('turns_company_id').on(t.companyId, t.id), uniqueIndex('turns_one_open').on(t.companyId).where(sql`status = 'open'`)],
 );
 
 /* A turn's pipeline facts: kept as it closed, or rebuilt from its events for a turn that closed before this was kept. */
@@ -2149,4 +2149,92 @@ export const taskWorkspaceMergeReceipts = pgTable('task_workspace_merge_receipts
   unique('task_workspace_receipts_target').on(t.companyId, t.workspaceId, t.bindingVersion, t.submissionRevision, t.integrationKind, t.integrationRef),
   check('task_workspace_receipts_pins', sql`${workspaceSha(t.submittedHeadSha)} AND ${workspaceSha(t.integrationCommitSha)}`),
   check('task_workspace_receipts_target_kind', sql`${t.integrationKind} IN ('turn','main')`),
+]);
+
+/* Registered staging metadata stays private; a row alone is not native health or publication evidence. */
+export const stagingPlans = pgTable('staging_plans', {
+  id: id(), companyId: companyId(), repositoryId: uuid('repository_id').notNull(),
+  turnId: uuid('turn_id').notNull(), generation: bigint('generation', { mode: 'number' }).notNull(),
+  baseRef: text('base_ref').notNull(), baseSha: text('base_sha').notNull(),
+  requiredIntegrations: jsonb('required_integrations').$type<IntegrationTarget[]>().notNull(),
+  healthRunId: uuid('health_run_id').references(() => testRuns.id),
+  isCurrent: boolean('is_current').notNull().default(true),
+  enabled: boolean('enabled').notNull().default(false),
+  maxBatchSize: integer('max_batch_size').notNull().default(4),
+  maxWaitMs: bigint('max_wait_ms', { mode: 'number' }).notNull().default(0),
+  createdAt: createdAt(), updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [
+  foreignKey({ name: 'staging_plans_repository_fk', columns: [t.companyId, t.repositoryId], foreignColumns: [workspaceRepositories.companyId, workspaceRepositories.id] }),
+  foreignKey({ name: 'staging_plans_turn_fk', columns: [t.companyId, t.turnId], foreignColumns: [turns.companyId, turns.id] }),
+  unique('staging_plans_generation').on(t.companyId, t.id, t.generation),
+  uniqueIndex('staging_plans_current_root').on(t.companyId, t.repositoryId, t.turnId).where(sql`${t.isCurrent}`),
+  check('staging_plans_counts', sql`${workspaceCount(t.generation, 1)} AND ${workspaceCount(t.maxBatchSize, 1)} AND ${workspaceCount(t.maxWaitMs)}`),
+  check('staging_plans_pin', sql`${workspaceSha(t.baseSha)} AND length(${t.baseRef}) BETWEEN 1 AND 240`),
+  check('staging_plans_targets', workspaceList(t.requiredIntegrations)),
+]);
+
+export const stagingBatches = pgTable('staging_batches', {
+  id: id(), companyId: companyId(), planId: uuid('plan_id').notNull(),
+  planGeneration: bigint('plan_generation', { mode: 'number' }).notNull(), baseSha: text('base_sha').notNull(),
+  submissionIds: uuid('submission_ids').array().notNull(),
+  sourceSnapshot: jsonb('source_snapshot').$type<Record<string, unknown>[]>().notNull(),
+  idempotencyKey: text('idempotency_key').notNull(),
+  phase: text('phase').notNull().default('preparing'), version: bigint('version', { mode: 'number' }).notNull().default(0),
+  result: jsonb('result').$type<Record<string, unknown>>(),
+  createdAt: createdAt(), updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+}, t => [
+  foreignKey({ name: 'staging_batches_plan_fk', columns: [t.companyId, t.planId, t.planGeneration], foreignColumns: [stagingPlans.companyId, stagingPlans.id, stagingPlans.generation] }),
+  unique('staging_batches_company_id').on(t.companyId, t.id),
+  unique('staging_batches_idempotent').on(t.companyId, t.idempotencyKey),
+  index('staging_batches_plan_phase').on(t.companyId, t.planId, t.phase),
+  check('staging_batches_counts', sql`${workspaceCount(t.version)} AND ${workspaceCount(t.planGeneration, 1)}`),
+  check('staging_batches_members', sql`cardinality(${t.submissionIds}) > 0 AND array_position(${t.submissionIds}, NULL) IS NULL`),
+  check('staging_batches_snapshot', workspaceList(t.sourceSnapshot)),
+  check('staging_batches_pin', workspaceSha(t.baseSha)),
+  check('staging_batches_key', sql`length(${t.idempotencyKey}) BETWEEN 1 AND 512`),
+  check('staging_batches_phase', sql`${t.phase} IN ('preparing','checking','splitting','ready','publishing','published','blocked','cancelled')`),
+]);
+
+export const stagingTrials = pgTable('staging_trials', {
+  id: id(), companyId: companyId(), batchId: uuid('batch_id').notNull(), ordinal: integer('ordinal').notNull(),
+  submissionIds: uuid('submission_ids').array().notNull(),
+  candidateSha: text('candidate_sha'), candidateRef: text('candidate_ref'), treeSha: text('tree_sha'),
+  testRunId: uuid('test_run_id').references(() => testRuns.id),
+  partIds: uuid('part_ids').array().notNull().default(sql`'{}'::uuid[]`),
+  failure: jsonb('failure').$type<{ suiteId: string; file: string; test: string }>(),
+  phase: text('phase').notNull().default('preparing'), version: bigint('version', { mode: 'number' }).notNull().default(0),
+  createdAt: createdAt(), updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [
+  foreignKey({ name: 'staging_trials_batch_fk', columns: [t.companyId, t.batchId], foreignColumns: [stagingBatches.companyId, stagingBatches.id] }),
+  unique('staging_trials_batch_identity').on(t.companyId, t.batchId, t.id),
+  unique('staging_trials_ordinal').on(t.companyId, t.batchId, t.ordinal),
+  check('staging_trials_counts', sql`${workspaceCount(t.ordinal, 1)} AND ${workspaceCount(t.version)}`),
+  check('staging_trials_members', sql`cardinality(${t.submissionIds}) > 0 AND array_position(${t.submissionIds}, NULL) IS NULL`),
+  check('staging_trials_pins', sql`${workspaceSha(t.candidateSha)} AND ${workspaceSha(t.treeSha)}`),
+  check('staging_trials_phase', sql`${t.phase} IN ('preparing','prepared','checking','passed','failed','unattributed','conflict','publishing','published','stale','cancelled')`),
+  check('staging_trials_checked', sql`${t.phase} NOT IN ('passed','failed','unattributed','publishing','published') OR (${t.candidateSha} IS NOT NULL AND ${t.testRunId} IS NOT NULL AND cardinality(${t.partIds}) > 0)`),
+]);
+
+/* Intents use the existing node transport. No worker, command or credential channel is created by this outbox. */
+export const stagingOperations = pgTable('staging_operations', {
+  id: id(), companyId: companyId(), batchId: uuid('batch_id').notNull(), trialId: uuid('trial_id').notNull(),
+  kind: text('kind').notNull(), phase: text('phase').notNull().default('queued'),
+  idempotencyKey: text('idempotency_key').notNull(),
+  expectedRef: text('expected_ref'), expectedBeforeSha: text('expected_before_sha'), expectedAfterSha: text('expected_after_sha'),
+  runId: uuid('run_id').references(() => testRuns.id), sourceNode: jsonb('source_node').$type<NodeRef>(),
+  payload: jsonb('payload').$type<Record<string, unknown>>().notNull(), result: jsonb('result').$type<Record<string, unknown>>(),
+  version: bigint('version', { mode: 'number' }).notNull().default(0),
+  createdAt: createdAt(), sentAt: timestamp('sent_at', { withTimezone: true }), settledAt: timestamp('settled_at', { withTimezone: true }),
+}, t => [
+  foreignKey({ name: 'staging_operations_trial_fk', columns: [t.companyId, t.batchId, t.trialId], foreignColumns: [stagingTrials.companyId, stagingTrials.batchId, stagingTrials.id] }),
+  unique('staging_operations_idempotent').on(t.companyId, t.idempotencyKey),
+  index('staging_operations_pending').on(t.companyId, t.phase, t.createdAt),
+  check('staging_operations_kind', sql`${t.kind} IN ('prepare','publish_trial','publish_staging','publish_turn')`),
+  check('staging_operations_phase', sql`${t.phase} IN ('queued','sent','confirmed','conflict','unavailable','cancelled')`),
+  check('staging_operations_version', workspaceCount(t.version)),
+  check('staging_operations_key', sql`length(${t.idempotencyKey}) BETWEEN 1 AND 512`),
+  check('staging_operations_pins', sql`${workspaceSha(t.expectedBeforeSha)} AND ${workspaceSha(t.expectedAfterSha)}`),
+  check('staging_operations_payload', sql`jsonb_typeof(${t.payload}) = 'object' AND octet_length(${t.payload}::text) <= 1048576`),
+  check('staging_operations_confirmed', sql`${t.phase} <> 'confirmed' OR (${t.result} IS NOT NULL AND ${t.settledAt} IS NOT NULL)`),
 ]);
