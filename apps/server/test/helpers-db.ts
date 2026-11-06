@@ -24,6 +24,8 @@ let initdb: File | Blob | undefined;
 export async function freshPglite(): Promise<PGlite> {
   if (!initdb) {
     const first = new PGlite();
+    /* A dump asked for before it is ready never comes. */
+    await first.waitReady;
     initdb = await first.dumpDataDir('none');
     await first.close();
   }
