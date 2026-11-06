@@ -2,9 +2,10 @@ import { randomUUID } from 'node:crypto';
 import type { WaitPlan } from '@hornhoof/protocol/waits';
 import { and, asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agents, companies, departments, people, subscriptions, taskEvents, tasks, taskWaits, waitPolicies } from '../src/db/schema.js';
+import { agents, companies, departments, jobs, people, requests, subscriptions, taskEvents, tasks, taskWaits, waitPolicies } from '../src/db/schema.js';
 import { answer, ask, cancel, createTask, leaveWork, report, submit, updateTask, verdict, type Task } from '../src/modules/tasks/engine.js';
 import { waitFor } from '../src/modules/tasks/external-wait.js';
+import { resolveStuck } from '../src/modules/tasks/stuck.js';
 import { afterSourceKey, recordRunWait, requestSourceKey, reviewSourceKey, waitForSourceKey } from '../src/modules/tasks/wait-state.js';
 import { setUpCompany, testApp } from './helpers.js';
 
@@ -388,6 +389,22 @@ describe('a question to a person', () => {
     const work = (await createTask(c.ctx, c.CEO, { title: 'Dept', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.head.id })).task;
     await report(c.ctx, c.head.id, work.id, { done: false, summary: 'Stuck.' });
     expect(await c.waitsOf(work)).toMatchObject([{ kind: 'person', state: 'legacy_needs_plan', ownerPersonId: c.ceo.id }]);
+  });
+
+  it('ends the durable request wait when the internal resolver answers', async () => {
+    const c = await company();
+    const work = (await createTask(c.ctx, c.CEO, { title: 'Dept', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.head.id })).task;
+    await report(c.ctx, c.head.id, work.id, { done: false, summary: 'Stuck.' });
+    const [request] = await c.db.select().from(requests).where(eq(requests.taskId, work.id));
+    expect(await c.waitsOf(work)).toMatchObject([{ sourceKey: requestSourceKey(request!.id), state: 'legacy_needs_plan' }]);
+    const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    const [sub] = await c.db.select().from(subscriptions);
+    const [job] = await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: sub!.id, agentId: orchestrator!.id, kind: 'conversation', prompt: 'Resolve the request.', timeoutMs: 900000, status: 'running' }).returning();
+
+    const resolved = await resolveStuck(c.ctx, { id: job!.id, companyId: c.companyId, agentId: orchestrator!.id }, request!.id, { retry: true });
+
+    expect(resolved?.request.status).toBe('resolved_internal');
+    expect(await c.waitsOf(work)).toMatchObject([{ sourceKey: requestSourceKey(request!.id), state: 'resolved', proofRef: `request:${request!.id}:resolved_internal` }]);
   });
 });
 

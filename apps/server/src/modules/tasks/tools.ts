@@ -17,6 +17,7 @@ import { setUrgent } from './urgency.js';
 import { answersCeoOrDelegate } from '../conversation/decision-context.js';
 import { ONLY_CEO } from '../tools/control.js';
 import { stopTurns, wakeAll } from './wake.js';
+import { resolveStuckComment } from './stuck.js';
 import { submitWithAuthorCheck } from './author-check-submit.js';
 import { orchestratorOf } from '../conversation/queue.js';
 import { appendOutgoing } from '../events/store.js';
@@ -371,14 +372,15 @@ class TaskTools {
       {
         description:
           "Adds a note to a task's log for everyone on it. Whoever gave out a member task that is blocked can answer it with a comment, " +
-          'which opens it again and wakes its executor with your words. A comment from a person or another agent also ends an external wait and wakes its holder. To hand work on, use the task\'s own moves.',
+          'which opens it again and wakes its executor with your words. A comment from a person or another agent also ends an external wait and wakes its holder. ' +
+          'The current head or orchestrator resolves its internal stuck request with a comment. To hand work on, use the task\'s own moves.',
         inputSchema: { task: Ref, text: Text.trim().min(1) },
       },
       async ({ task: ref, text }) =>
         this.run(async () => {
           const { task } = await this.find(ref);
           this.plain(task, text);
-          const moved = await comment(this.ctx, { agentId: this.job.agentId }, task.id, text);
+          const moved = (await resolveStuckComment(this.ctx, this.job, task.id, text)) ?? (await comment(this.ctx, { agentId: this.job.agentId }, task.id, text));
           return { text: moved.wakes.length ? `Noted on #${task.number}. It is open again, and its executor goes on with your answer.` : `Noted on #${task.number}.`, moved };
         }),
     );
