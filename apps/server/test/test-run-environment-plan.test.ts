@@ -54,6 +54,15 @@ describe('pinned environment part planning', () => {
     await expect(planEnvironmentParts({ ...await fixture(), expectedCommitSha: 'b'.repeat(40) })).rejects.toThrow(/commit/i);
   });
 
+  it('binds suite-local coordinates to the canonical mixed environment plan', async () => {
+    const plan = await planEnvironmentParts(await fixture());
+    const coordinates = plan.parts.flatMap(part => part.suiteShards);
+    expect(coordinates.filter(shard => shard.suiteId === 'vitest')).toEqual([
+      { suiteId: 'vitest', index: 1, count: 2 }, { suiteId: 'vitest', index: 2, count: 2 },
+    ]);
+    expect(coordinates.filter(shard => shard.suiteId === 'pytest')).toEqual([{ suiteId: 'pytest', index: 1, count: 1 }]);
+  });
+
   it('rejects an unbound manifest hash', async () => {
     const input = await fixture(); input.snapshot.description.manifestHash = '0'.repeat(64);
     await expect(planEnvironmentParts(input)).rejects.toThrow(/hash/i);

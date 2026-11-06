@@ -1,5 +1,6 @@
 import { EnvironmentSnapshot, ProductCommitSha, TestExecution, validateEnvironmentDescription, type Command, type TestUnit } from '@hornhoof/protocol';
 import { planTestParts, type TestPartPlan, type TestPartPlanInput } from './plan.js';
+import { withSuiteShards, type SuiteShard } from './plan-shards.js';
 
 /* Internal data consistency, not an authorization token, dispatch capability or public free-SHA input. */
 export type PreparedEnvironmentPlanInput = TestPartPlanInput & {
@@ -12,7 +13,7 @@ export type EnvironmentPartPlan = {
   manifestHash: string;
   profile: string;
   testPlan: TestPartPlan;
-  parts: { selections: TestExecution['selection'][] }[];
+  parts: { selections: TestExecution['selection'][]; suiteShards: SuiteShard[] }[];
   postSuiteChecks: { suiteId: string; commands: Command[] }[];
   ports: { suiteBatch: 'required' | 'not-required'; finalPreparation: 'missing' | 'not-required' };
 };
@@ -65,7 +66,7 @@ export async function planEnvironmentParts(input: PreparedEnvironmentPlanInput):
   suiteSelections(snapshot, units);
   if (input.purpose === 'final') finalInventory(snapshot, units);
   const testPlan = planTestParts({ ...input, units });
-  const parts = testPlan.parts.map(part => ({ selections: suiteSelections(snapshot, part.units) }));
+  const parts = withSuiteShards(testPlan.parts.map(part => ({ selections: suiteSelections(snapshot, part.units) })));
   return { commitSha: snapshot.description.commitSha, manifestHash: snapshot.description.manifestHash, profile: snapshot.profile,
     testPlan, parts, postSuiteChecks: postSuiteChecks(snapshot, units),
     ports: { suiteBatch: parts.some(part => part.selections.length > 1) ? 'required' : 'not-required',

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, onTestFinished } from 'vitest';
 import type { TestSuite } from '@hornhoof/protocol';
 import { planTestParts } from '../src/modules/testruns/plan.js';
+import { withSuiteShards } from '../src/modules/testruns/plan-shards.js';
 
 type ProcessResult = { code: number | null; signal: NodeJS.Signals | null; stdout: string; stderr: string };
 type VitestReport = { numTotalTests: number; numPassedTests: number; numFailedTests: number;
@@ -81,6 +82,30 @@ async function invoke(fixture: Fixture, name: string, files: string[], options: 
 const reportOf = (result: { report: string | null }): VitestReport => JSON.parse(result.report!) as VitestReport;
 
 describe('real framework invocations of planned fixture selections', () => {
+  it('executes mixed five-part plans with two Vitest and three pytest local shard coordinates', async () => {
+    const vitest = await plannedVitestFixture(), pytest = await pytestFixture();
+    const units = [
+      ...vitest.files.slice(0, 2).map(file => ({ suiteId: 'vitest', file, selectionUnit: file })),
+      ...pytest.files.map(file => ({ suiteId: 'pytest', file, selectionUnit: file })),
+    ];
+    const plan = planTestParts({ units, durations: units.map(unit => ({ ...unit, ms: 30_000 })),
+      availableMachines: 5, costs: { setupMs: 10, collectMs: 1 }, unknownFileMs: 30_000 });
+    expect(plan.parts.map(part => part.units.length)).toEqual([1, 1, 1, 1, 1]);
+    const parts = withSuiteShards(plan.parts.map(part => ({ selections: [{ kind: 'suite' as const, suiteId: part.units[0]!.suiteId, files: [part.units[0]!.file] }] })));
+    const seenVitest: string[] = [], seenPytest: string[] = [];
+    for (const [index, part] of parts.entries()) {
+      const selected = part.selections[0]!, shard = part.suiteShards[0]!, fixture = selected.suiteId === 'vitest' ? vitest : pytest;
+      expect(shard.count).toBe(selected.suiteId === 'vitest' ? 2 : 3);
+      const args = selected.suiteId === 'vitest' ? [`--shard=${shard.index}/${shard.count}`] : [];
+      const result = await invoke(fixture, `mixed-suite-${index + 1}`, selected.files, args);
+      expect(result.code, result.stderr).toBe(0);
+      if (selected.suiteId === 'vitest') seenVitest.push(...reportOf(result).testResults.map(file => relative(fixture.root, file.name)));
+      else seenPytest.push(...[...result.report!.matchAll(/<testcase classname="([^"]+)" name="([^"]+)"/g)].map(match => `${match[1]}::${match[2]}`));
+    }
+    expect(seenVitest.sort()).toEqual(['tests/first.test.js', 'tests/second.test.js']);
+    expect(seenPytest.sort()).toEqual(['tests.test_first::test_first_selected_case', 'tests.test_second::test_second_selected_case', 'tests.test_third::test_third_selected_case']);
+  });
+
   it('uses native --shard with the exact weighted JSON selection instead of sharding it twice', async () => {
     const fixture = await plannedVitestFixture(), plan = fixturePlan(fixture), seen: string[] = [];
     expect(plan.parts.map(part => part.units.map(unit => unit.file))).toEqual([['tests/first.test.js'], ['tests/second.test.js', 'tests/third.test.js']]);
