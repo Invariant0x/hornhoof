@@ -945,7 +945,7 @@ async function asked(db: Db, task: Task, agentId: string): Promise<boolean> {
   const [mine] = await db
     .select({ id: requests.id })
     .from(requests)
-    .where(and(eq(requests.taskId, task.id), eq(requests.agentId, agentId), eq(requests.status, 'open')))
+    .where(and(eq(requests.taskId, task.id), eq(requests.agentId, agentId), eq(requests.status, 'open'), ne(requests.kind, 'stuck')))
     .limit(1);
   return !!mine;
 }
@@ -1047,13 +1047,14 @@ export async function report(ctx: Live, agentId: string, taskId: string, r: { do
     unstuck.tell();
     return { task: row, wakes };
   }
-  /* A person gave it, so a person has to unblock it. */
+  /* A person gave it, so an internal resolver has to unblock it. */
+  const [asker] = await ctx.db.select().from(agents).where(eq(agents.id, agentId));
+  const recipient = asker ? await stuckRecipient(ctx.db, asker, task) : null;
   let wakes: Wake[] = [];
   const row = await move(ctx, task, { status: 'waiting' }, n, async tx => {
     await letStuckGo(tx, task.id);
-    const [note] = await tx.insert(requests).values({ companyId: task.companyId, taskId, agentId, kind: 'stuck', text: r.summary, decisionTopic: 'task' }).returning();
-    await bindRequest(tx, task, note!, { agentId }, { strict: false });
-    wakes = await explaining(tx, task, agentId, note!.id);
+    const [note] = await tx.insert(requests).values({ companyId: task.companyId, taskId, agentId, kind: 'stuck', text: r.summary, decisionTopic: 'task', audience: 'internal', triageAgentId: recipient?.id ?? null }).returning();
+    wakes = recipient ? [{ agentId: recipient.id, taskId: task.id, why: 'explain', text: note!.id }] : [];
     await keepWakes(tx, task.companyId, wakes);
   });
   ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
@@ -1613,7 +1614,7 @@ export async function brokeDown(ctx: Live, agentId: string, task: Task, text: st
 /* Hornhoof stops waking the agent on the task and asks its head, or the orchestrator about a head. */
 async function askAboutStill(ctx: Live, agentId: string, task: Task, silent: number, text: string): Promise<Moved> {
   const [asker] = await ctx.db.select().from(agents).where(eq(agents.id, agentId));
-  const recipient = asker ? await stuckRecipient(ctx.db, asker) : null;
+  const recipient = asker ? await stuckRecipient(ctx.db, asker, task) : null;
   let wakes: Wake[] = [];
   const row = await move(ctx, task, { silent, status: 'waiting' }, { kind: 'stuck', actor: { agentId }, text }, async tx => {
     const [note] = await tx.insert(requests).values({

@@ -17,6 +17,7 @@ import { setUrgent } from './urgency.js';
 import { answersCeoOrDelegate } from '../conversation/decision-context.js';
 import { ONLY_CEO } from '../tools/control.js';
 import { stopTurns, wakeAll } from './wake.js';
+import { resolveStuckComment } from './stuck.js';
 import { submitWithAuthorCheck } from './author-check-submit.js';
 import { orchestratorOf } from '../conversation/queue.js';
 import { appendOutgoing } from '../events/store.js';
@@ -240,7 +241,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
       run(async () => {
         const { task } = await find(ref);
         plain(task, text);
-        const moved = await comment(ctx, { agentId: job.agentId }, task.id, text);
+        const moved = (await resolveStuckComment(ctx, job, task.id, text)) ?? (await comment(ctx, { agentId: job.agentId }, task.id, text));
         return { text: moved.wakes.length ? `Noted on #${task.number}. It is open again, and its executor goes on with your answer.` : `Noted on #${task.number}.`, moved };
       }),
   );

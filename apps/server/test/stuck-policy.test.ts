@@ -147,6 +147,7 @@ describe('internal stuck routing', () => {
     await wakeAll(c.ctx, [{ agentId: c.worker.id, taskId: task.id, why: 'assigned' }]);
     for (let i = 0; i < SILENT_TURNS; i++) await c.finish(c.worker.id, task.id);
     const [request] = await c.db.select().from(requests);
+    await c.db.insert(requestInternal).values({ requestId: request!.id, companyId: c.dev.companyId, technicalText: request!.text });
 
     const { result, answering } = await c.commentByHead(task.id, 'Run the focused test, then continue.');
 
