@@ -453,13 +453,13 @@ async function patched(ctx: Ctx, me: Person, agent: AgentRow, body: z.infer<type
   return { agent, next, changed: changed.length > 0 };
 }
 
-async function getAgent(ctx: Ctx, req: FastifyRequest): Promise<AgentCard> {
-  const { me, agent } = await agentFor(ctx, req);
+type AgentRequest = Awaited<ReturnType<typeof agentFor>>;
+
+async function getAgent(ctx: Ctx, { me, agent }: AgentRequest): Promise<AgentCard> {
   return card(ctx, agent, me);
 }
 
-async function patchAgent(ctx: Ctx, req: FastifyRequest): Promise<AgentCard> {
-  const { me, agent: found } = await agentFor(ctx, req);
+async function patchAgent(ctx: Ctx, req: FastifyRequest, { me, agent: found }: AgentRequest): Promise<AgentCard> {
   await requireEditor(ctx, me, found);
   const body = AgentPatch.parse(req.body);
   const { agent, next, changed } = await changing(ctx, found, agent => patched(ctx, me, agent, body));
@@ -475,9 +475,8 @@ async function patchAgent(ctx: Ctx, req: FastifyRequest): Promise<AgentCard> {
 }
 
 /* Back to the role as the templates have it now: its skills, texts and effort. The model and subscription stay. */
-async function resetAgent(ctx: Ctx, req: FastifyRequest): Promise<AgentCard> {
+async function resetAgent(ctx: Ctx, { me, agent: found }: AgentRequest): Promise<AgentCard> {
   const { db } = ctx;
-  const { me, agent: found } = await agentFor(ctx, req);
   await requireEditor(ctx, me, found);
   const reset = await changing(ctx, found, async agent => {
     const role = agent.roleKey ? ctx.templates.roles.get(agent.roleKey) : undefined;
@@ -495,9 +494,8 @@ async function resetAgent(ctx: Ctx, req: FastifyRequest): Promise<AgentCard> {
 }
 
 /* An employee leaves the company: its history stays, its waiting turns end. Never while it works, never the orchestrator. */
-async function removeAgent(ctx: Ctx, req: FastifyRequest, reply: FastifyReply) {
+async function removeAgent(ctx: Ctx, { me, agent: found }: AgentRequest, reply: FastifyReply) {
   const { db } = ctx;
-  const { me, agent: found } = await agentFor(ctx, req);
   requireCompanyScope(me);
   if (found.kind === 'orchestrator') throw new ApiError(403, 'forbidden', 'The orchestrator stays with the company.', 'orchestrator_locked');
   await changing(ctx, found, async agent => {
@@ -530,8 +528,8 @@ async function removeAgent(ctx: Ctx, req: FastifyRequest, reply: FastifyReply) {
 }
 
 export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
-  app.get('/api/agents/:id', req => getAgent(ctx, req));
-  app.patch('/api/agents/:id', req => patchAgent(ctx, req));
-  app.post('/api/agents/:id/reset', req => resetAgent(ctx, req));
-  app.delete('/api/agents/:id', (req, reply) => removeAgent(ctx, req, reply));
+  app.get('/api/agents/:id', async req => getAgent(ctx, await agentFor(ctx, req)));
+  app.patch('/api/agents/:id', async req => patchAgent(ctx, req, await agentFor(ctx, req)));
+  app.post('/api/agents/:id/reset', async req => resetAgent(ctx, await agentFor(ctx, req)));
+  app.delete('/api/agents/:id', async (req, reply) => removeAgent(ctx, await agentFor(ctx, req), reply));
 }
