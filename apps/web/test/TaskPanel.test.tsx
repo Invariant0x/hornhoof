@@ -384,6 +384,21 @@ describe('a task', () => {
     expect(within(panel).getByRole('region', { name: heading })).not.toHaveTextContent('Bruno');
   });
 
+  it('lists answered and open task questions with their authors and states', async () => {
+    const user = userEvent.setup();
+    const requests = [
+      { id: 'q1', kind: 'question' as const, text: 'Use the existing token?', commit: null, status: 'answered', answer: 'Yes, keep it.', agent: null, at: '2026-11-03T10:00:00.000Z' },
+      { id: 'q2', kind: 'choice' as const, text: 'Which layout ships?', commit: null, status: 'awaiting_review', answer: null, agent: { id: 'b1', name: 'Bruno', kind: 'worker' as const, role: null }, at: '2026-11-03T10:05:00.000Z' },
+    ];
+    shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, requests } }] });
+    const panel = await openTask(user);
+    const questions = within(panel).getByRole('heading', { name: 'Questions' }).closest('section')!;
+    expect(questions).toHaveTextContent('Hornhoof: Use the existing token? Answered');
+    expect(questions).toHaveTextContent('Yes, keep it.');
+    expect(questions).toHaveTextContent('Bruno: Which layout ships? awaiting_review');
+    expect(questions).not.toHaveTextContent('undefined');
+  });
+
   it('opens versioned materials without answering and sends their stamps only with the explicit answer', async () => {
     const user = userEvent.setup();
     const requestId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
