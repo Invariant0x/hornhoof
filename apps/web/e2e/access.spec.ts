@@ -64,6 +64,7 @@ for (const role of roles) {
     const full = fullDepartment(), shown = role.me.person.scopeKind === 'company' ? full : restricted(full, role.me, role.departmentAccess);
     await serveAccess(page, role.me, shown, { agentStatus: role.status });
     if (!role.departmentAccess) {
+      await page.goto('/departments/d2');
       await expect(page.getByRole('heading', { name: 'Insufficient permissions' })).toBeVisible();
       await expect(page.locator('body')).not.toContainText('Bruno');
       await expect(page.locator('body')).not.toContainText('Hidden resource details.');
