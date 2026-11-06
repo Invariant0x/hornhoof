@@ -6,6 +6,7 @@ import { COMPANY_TEMPLATES, MAX_INSTRUCTIONS, TEMPLATE_KEYS } from '@hornhoof/pr
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { ORCHESTRATOR_SKILLS, orchestratorSteady, renderInstructions } from '../src/modules/agents/instructions.js';
 import { NOTEBOOK_MAX, NOTES_MAX } from '../src/modules/notebook/book.js';
+import { IssueInput, mechanicalVerdict } from '../src/modules/tasks/review-findings.js';
 import { CORE_SKILLS, HEAD_SKILLS, loadTemplates, MEMBER_SKILLS } from '../src/modules/templates/load.js';
 
 const DIR = fileURLToPath(new URL('../../../templates', import.meta.url));
@@ -14,6 +15,41 @@ const roles = [...templates.roles.values()];
 const skills = [...templates.skills.values()];
 
 describe('templates', () => {
+  it.each(roles.filter(role => role.kind === 'head'))('gives $id the marked small-task fast path', role => {
+    expect(role.body).toMatch(/small: true/);
+    expect(role.body).toMatch(/fast path/);
+  });
+
+  it.each(['hh-lead-tasks', 'orch-plan-turn'])('defines the complete small-task path in %s', id => {
+    const body = templates.skills.get(id)!.body;
+    expect(body).toMatch(/small: true/);
+    expect(body).toMatch(/single place[\s\S]*clear result[\s\S]*no dependencies[\s\S]*work turn/);
+    expect(body).toMatch(/change and (its|the) check/);
+    expect(body).toMatch(/without splitting or separate gates/);
+    expect(body).toMatch(/failing test[\s\S]*only affected tests[\s\S]*turn's branch[\s\S]*line[\s\S]*SHA/);
+    expect(body).toMatch(/Reports, matrices, complexity metrics and duplicate checks[\s\S]*shared turn review/);
+    expect(body).toMatch(/grows[\s\S]*tells the head[\s\S]*normal path/);
+  });
+
+  it.each(['hh-lead-tasks', 'orch-plan-turn'])('keeps small work in the developer context in %s', id => {
+    const body = templates.skills.get(id)!.body;
+    expect(body).toMatch(/already working in that area[\s\S]*context/);
+    expect(body).toMatch(/do not search for a free developer or start a new chain/);
+    expect(body).toMatch(/between[\s\S]*steps[\s\S]*after the current piece/);
+    expect(body).toMatch(/several tasks ahead[\s\S]*free developer/);
+    expect(body).toMatch(/separate small commit[\s\S]*return to their own work/);
+  });
+
+  it.each([
+    'hh-break-down', 'hh-brief-members', 'hh-report-to-head', 'hh-handle-reports', 'hh-task-flow',
+    'hh-verify-before-done', 'dev-implement', 'dev-language-rules', 'dev-engineering-rules',
+    'dev-work-pipeline', 'dev-gates', 'dev-review-diff', 'dev-review-verdict',
+  ])('keeps %s from restoring per-task overhead for marked small work', id => {
+    const body = templates.skills.get(id)!.body;
+    expect(body).toMatch(/small: true/);
+    expect(body).toMatch(/shared turn/);
+  });
+
   it('teaches every department head not to repeat a task report in a separate message', () => {
     for (const role of roles.filter(r => r.kind === 'head')) {
       const instructions = renderInstructions(templates, { id: 'a', companyId: 'c', kind: 'head', name: 'Hana', roleKey: role.id, skills: role.skills.filter(s => s.on).map(s => s.id), overrides: {}, templateHashes: {} } as Parameters<typeof renderInstructions>[1], { company: 'Acme', department: 'Work', product: null });
@@ -958,6 +994,78 @@ describe('templates', () => {
         'abstract-orchestrator-rule-preserves-safety-without-unshipped-promises',
       );
     });
+
+    it('teaches department heads abstract department-load ownership, independent after-chain slices and urgent-only team boundaries while keeping watchdog idle-fault rules intact', () => {
+      const leadSkill = templates.skills.get('hh-lead-tasks')!;
+      const breakDownSkill = templates.skills.get('hh-break-down')!;
+      expect(leadSkill.description.en).toMatch(/keeps the department loaded/i);
+      expect(breakDownSkill.description.en).toMatch(/independent parts[\s\S]*loaded/i);
+      expect(failedRuleIds(HEAD_DEPARTMENT_LOAD_RULES, { lead: leadSkill.body, breakDown: breakDownSkill.body })).toEqual([]);
+      expect(templates.roles.get('OPS-WATCH')!.body).toContain('no one stands free while work waits');
+      expect(templates.skills.get('ops-task-watch')!.body).toContain('People who stand free while work waits are a fault, not a normal wait');
+    });
+
+    it('rejects head breakdown instructions that treat idle capacity as normal, omit independentPart/independentNone, assign ordinary work to urgent-only teams or leak incident names', () => {
+      const base: HeadLoadSkills = {
+        lead: leadTasksBody(),
+        breakDown: templates.skills.get('hh-break-down')!.body,
+      };
+      expect(failedRuleIds(HEAD_DEPARTMENT_LOAD_RULES, base)).toEqual([]);
+      const cases: [keyof HeadLoadSkills, string, string][] = [
+        ['lead', 'Members standing free while work waits is a normal wait, and the head only orders tasks.', 'free-members-with-runnable-work-is-fault-and-head-owns-load'],
+        ['breakDown', 'Leave after tasks without independentPart or independentNone, and send independentNone tasks out early.', 'after-chains-require-independent-part-or-none-preserving-boundaries'],
+        ['lead', 'Assign ordinary non-urgent work to an urgentOnly team whenever peers are busy.', 'urgent-only-team-refuses-non-urgent-and-names-free-peers'],
+        ['lead', 'Never give Tiger Team or Simon ordinary work on #348 after 2026-11-06.', 'abstract-no-incident-names-or-unshipped-idle-wake'],
+        ['breakDown', 'Hornhoof wakes you automatically whenever two members stand free.', 'abstract-no-incident-names-or-unshipped-idle-wake'],
+      ];
+      for (const [key, badLine, ruleId] of cases) {
+        expect(failedRuleIds(HEAD_DEPARTMENT_LOAD_RULES, { ...base, [key]: `${base[key]}\n${badLine}` }), badLine).toContain(ruleId);
+      }
+    });
+  });
+
+  describe('mechanical finding category and strict behavior-unchanged boundary', () => {
+    const pair = (): MechanicalSkills => ({
+      diff: templates.skills.get('dev-review-diff')!.body,
+      verdict: templates.skills.get('dev-review-verdict')!.body,
+    });
+
+    it('matches the IssueInput category enum and mechanicalVerdict server aggregate in both readable review skills', () => {
+      const { diff, verdict } = pair();
+      const expected = ['security', 'data', 'spec', 'other', 'mechanical'];
+      expect(documentedCategories(verdict)).toEqual(expected);
+      expect(documentedCategories(diff)).toEqual(expected);
+      for (const category of expected) {
+        expect(IssueInput.safeParse({ category, blocking: true, path: 'src/index.ts', line: 1, harm: 'Wrong behaviour.' }).success, category).toBe(true);
+      }
+      for (const invented of ['style', 'lint', 'medium']) {
+        expect(IssueInput.safeParse({ category: invented, blocking: true, path: 'src/index.ts', line: 1, harm: 'Wrong behaviour.' }).success, invented).toBe(false);
+      }
+      expect(failedRuleIds(MECHANICAL_CATEGORY_RULES, { diff, verdict })).toEqual([]);
+      expect(mechanicalVerdict({ issues: [sampleFinding('mechanical', true)] })).toBe(true);
+      expect(mechanicalVerdict({ issues: [sampleFinding('mechanical', true), sampleFinding('other', false)] })).toBe(false);
+      expect(mechanicalVerdict({ issues: [sampleFinding('mechanical', true), sampleFinding('spec', true)] })).toBe(false);
+      expect(mechanicalVerdict({ issues: [sampleFinding('mechanical', false)] })).toBe(false);
+      expect(mechanicalVerdict({ issues: [sampleFinding('mechanical', true)], unresolvedFindingIds: ['11111111-1111-4111-8111-111111111111'] })).toBe(false);
+    });
+
+    it('rejects review skill text that broadens mechanical to behavioral changes, mixed verdicts, mid-turn effort switches or incident facts', () => {
+      const base = pair();
+      expect(failedRuleIds(MECHANICAL_CATEGORY_RULES, base)).toEqual([]);
+      const violations: [keyof MechanicalSkills, string, string][] = [
+        ['verdict', "Classify a public API rename as 'mechanical' when tests compile.", 'strict-behavior-unchanged-boundary'],
+        ['diff', "Use 'mechanical' when a fix may change behaviour only slightly.", 'strict-behavior-unchanged-boundary'],
+        ['verdict', "When in doubt, mark the finding 'mechanical' so the fix finishes faster.", 'doubt-keeps-regular-category-and-full-base-level'],
+        ['diff', "Classify spec findings as 'mechanical' to run at medium.", 'doubt-keeps-regular-category-and-full-base-level'],
+        ['verdict', 'Set Wake.mechanical on mixed verdicts whenever one issue is mechanical.', 'server-aggregate-wake-mechanical-and-no-second-review'],
+        ['diff', 'Switch effort inside a running turn once a mechanical issue appears.', 'server-aggregate-wake-mechanical-and-no-second-review'],
+        ['verdict', "Open a second review for 'mechanical' findings after submission.", 'server-aggregate-wake-mechanical-and-no-second-review'],
+        ['diff', 'Added for Hornhoof task #311 by David on 2026-11-06.', 'abstract-english-no-incident-or-company-leaks'],
+      ];
+      for (const [target, extra, expectedRule] of violations) {
+        expect(failedRuleIds(MECHANICAL_CATEGORY_RULES, { ...base, [target]: `${base[target]}\n${extra}` }), extra).toContain(expectedRule);
+      }
+    });
   });
 });
 
@@ -1271,6 +1379,65 @@ const HEAD_OUTAGE_AND_AUTHORITY_RULES: { id: string; holds: (text: string) => bo
 
 const UNSHIPPED_EXTERNAL_AUTOMATION_RE = /\b(?:automatically retries|intercepts git push|blocks task creation|waits for GitHub)\b/i;
 
+type HeadLoadSkills = { lead: string; breakDown: string };
+
+const HEAD_LOAD_LEAK_RE = /\b(?:tiger team|simon|david|ivan|github|claude|codex|kimi|antigravity)\b|#\d{2,}|\b202\d-\d{2}-\d{2}\b|\b\d{1,2}\.\d{1,2}\b/i;
+const UNSHIPPED_IDLE_WAKE_RE = /\bhornhoof\s+(?:automatically\s+)?wakes\s+you[^.!?]*\b(?:free|idle)\b/i;
+
+const HEAD_DEPARTMENT_LOAD_RULES: { id: string; holds: (s: HeadLoadSkills) => boolean }[] = [
+  {
+    id: 'free-members-with-runnable-work-is-fault-and-head-owns-load',
+    holds: s =>
+      forEvery([s.lead, s.breakDown], text =>
+        matchesAll(text, [
+          /\bwhoever gives out the work answers for keeping the department loaded,\s*not only for ordering tasks\b/i,
+          /\bmembers standing free while\b[^.!?]*\bare a fault,\s*not a normal wait\b/i,
+        ]),
+      ) &&
+      forbidsAll(`${s.lead}\n${s.breakDown}`, [
+        /\bstanding free\b[^.!?;,]*\bis a normal wait\b/i,
+        /\bonly orders tasks\b/i,
+      ]),
+  },
+  {
+    id: 'after-chains-require-independent-part-or-none-preserving-boundaries',
+    holds: s =>
+      forEvery([s.lead, s.breakDown], text =>
+        matchesAll(text, [
+          /`independentPart`/,
+          /`independentNone`/,
+          /\bsingle file ownership\b[\s\S]*\bgenuine dependenc(?:y|ies)\b[\s\S]*\brelease boundar(?:y|ies)\b/i,
+          /\bpass neither when `after` is empty\b/i,
+        ]),
+      ) &&
+      matchesAll(s.lead, [
+        /\bwaits on `after` as before\b/i,
+        /\bMembers standing free while department tasks wait on `after`:[\s\S]*"update_task"[\s\S]*`independentPart`[\s\S]*"create_task"/,
+      ]) &&
+      forbidsAll(`${s.lead}\n${s.breakDown}`, [
+        /\bleave\w*\s+after\s+tasks\s+without\s+independentPart\s+or\s+independentNone\b/i,
+        /\bsend\w*\s+independentNone\s+tasks\s+out\s+early\b/i,
+      ]),
+  },
+  {
+    id: 'urgent-only-team-refuses-non-urgent-and-names-free-peers',
+    holds: s =>
+      matchesAll(s.lead, [
+        /\bNever assign ordinary or non-urgent work to members of an urgent-only team\s*\(`urgentOnly`\)/,
+        /\brefuses the assignment and names free members in the same role\b/i,
+      ]) &&
+      /\bnever assign non-urgent work to an urgent-only team\s*\(`urgentOnly`\)/i.test(s.breakDown) &&
+      forbids(`${s.lead}\n${s.breakDown}`, /\bassign\w*\s+(?:ordinary\s+(?:or\s+)?)?non-urgent\s+work\s+to\s+(?:members\s+of\s+)?an\s+urgent(?:-only|Only)\s+team\b/i),
+  },
+  {
+    id: 'abstract-no-incident-names-or-unshipped-idle-wake',
+    holds: s => {
+      const joined = `${s.lead}\n${s.breakDown}`;
+      return !HEAD_LOAD_LEAK_RE.test(joined) && !UNSHIPPED_IDLE_WAKE_RE.test(joined) && s.lead.split('External outages and holds:').length - 1 === 1;
+    },
+  },
+];
+
 const ORCHESTRATOR_OUTAGE_RULES: { id: string; holds: (text: string) => boolean }[] = [
   {
     id: 'outage-not-grounds-for-longer-general-hold',
@@ -1325,6 +1492,85 @@ const forEvery = <Item>(items: Item[], predicate: (item: Item) => boolean): bool
 const failedRuleIds = <Input>(rules: { id: string; holds: (input: Input) => boolean }[], input: Input): string[] =>
   rules.filter(rule => !rule.holds(input)).map(rule => rule.id);
 
+type MechanicalSkills = { diff: string; verdict: string };
+
+const documentedCategories = (text: string): string[] => {
+  const clause = /category(?:\s*:\s*[^,)]+|\s*\([^)]+\))/.exec(text)![0];
+  return [...clause.matchAll(/['`]([a-z_]+)['`]/g)].map(m => m[1]!);
+};
+
+const sampleFinding = (category: 'security' | 'data' | 'spec' | 'other' | 'mechanical', blocking: boolean) => ({
+  taskId: '11111111-1111-4111-8111-111111111111',
+  findingId: '22222222-2222-4222-8222-222222222222',
+  revision: '33333333-3333-4333-8333-333333333333',
+  reviewedCommit: 'a'.repeat(40),
+  authorId: '44444444-4444-4444-8444-444444444444',
+  reviewerId: '55555555-5555-4555-8555-555555555555',
+  reviewerVendor: 'anthropic',
+  category,
+  blocking,
+  path: 'src/index.ts',
+  line: 10,
+  harm: 'Wrong behaviour.',
+});
+
+const MECHANICAL_CATEGORY_RULES: { id: string; holds: (s: MechanicalSkills) => boolean }[] = [
+  {
+    id: 'strict-behavior-unchanged-boundary',
+    holds: s =>
+      forEvery([s.diff, s.verdict], text =>
+        matchesAll(text, [
+          /\bprovably cannot change\b[^.!?]*\bbehaviour\b/i,
+          /\bformatting\b[\s\S]*\blint\b[\s\S]*\bsafe local rename\b[\s\S]*\bmissing translation key\b/i,
+          /\bpublic API\b[\s\S]*\bsemantics\b/i,
+        ]),
+      ) &&
+      forbidsAll(`${s.diff}\n${s.verdict}`, [
+        /\bclassify\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\b(?:public API rename|semantic change)\b[^.!?;,]*\bas\s+['`]?mechanical['`]?/i,
+        /\buse\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\b['`]?mechanical['`]?\b[^.!?;,]*\bwhen\s+a\s+fix\s+may\s+change\s+behaviour\b/i,
+      ]),
+  },
+  {
+    id: 'doubt-keeps-regular-category-and-full-base-level',
+    holds: s =>
+      forEvery([s.diff, s.verdict], text =>
+        matchesAll(text, [
+          /\bwhen in doubt\b[^.!?]*\bregular category\b[\s\S]*\bfull base level\b/i,
+          /\b(?:never|do not)\s+classify\b[^.!?]*\bsecurity\b[\s\S]*\bdata\b[\s\S]*\bspec\b[\s\S]*\bmechanical\b[^.!?]*\bmedium\b/i,
+        ]),
+      ) &&
+      sentencesOf(`${s.diff}\n${s.verdict}`).every(sentence =>
+        negatesBefore(sentence, /\bwhen in doubt,\s*(?:mark|classify|use)\w*\b[^.!?]*\b['`]?mechanical['`]?/i),
+      ) &&
+      forbidsAll(`${s.diff}\n${s.verdict}`, [
+        /\bclassify\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\b(?:security|data|spec)\b[^.!?;,]*\bas\s+['`]?mechanical['`]?\s+to\s+run\s+at\s+medium\b/i,
+      ]),
+  },
+  {
+    id: 'server-aggregate-wake-mechanical-and-no-second-review',
+    holds: s =>
+      forEvery([s.diff, s.verdict], text =>
+        matchesAll(text, [
+          /\bWake\.mechanical\b/,
+          /\bevery\b[^.!?]*\bissue\b[\s\S]*\bfailing verdicts?\b[\s\S]*\bmechanical\b/i,
+          /\bmixed\b[^.!?]*\bunmarked\b/i,
+          /\b(?:never|does not)\s+set\w*\s+effort\b[\s\S]*\b(?:never|does not)\s+change\w*\s+effort\s+inside\s+a\s+running\s+turn\b[\s\S]*\b(?:never|does not)\s+open\w*\s+a\s+second\s+review\b/i,
+        ]),
+      ) &&
+      sentencesOf(`${s.diff}\n${s.verdict}`).every(sentence =>
+        negatesBefore(sentence, /\bset\w*\s+['`]?Wake\.mechanical['`]?\s+on\s+mixed\s+verdicts?\b/i),
+      ) &&
+      forbidsAll(`${s.diff}\n${s.verdict}`, [
+        /\bswitch\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\beffort\s+inside\s+a\s+running\s+turn\b/i,
+        /\bopen\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\bsecond\s+review\s+for\s+['`]?mechanical['`]?\s+findings\b/i,
+      ]),
+  },
+  {
+    id: 'abstract-english-no-incident-or-company-leaks',
+    holds: s => !/\b(?:hornhoof|github|david|ivan|Russian|English)\b|#\d{2,}|\b202\d-\d{2}-\d{2}\b|\bv?\d+\.\d+\.\d+\b|[\u2014\u0451\u0401]/i.test(`${s.diff}\n${s.verdict}`),
+  },
+];
+
 const themeDeclarations = (css: string, selector: string): Record<string, string> => {
   const start = css.indexOf('{', css.indexOf(selector)) + 1;
   const block = css.slice(start, css.indexOf('}', start));
@@ -1336,3 +1582,51 @@ const styleBookSources = (book: string): string[] => [
   ...[...book.matchAll(/`((?:apps|templates|guide|\.github)\/[\w./-]+\.\w+)`/g)].map(m => m[1]!),
   ...[...book.matchAll(/`([A-Z_]+\.md)`/g)].map(m => m[1]!),
 ];
+
+describe('outbound and support gateway templates', () => {
+  it('routes sales, marketing and support skills through the server-checked outbound gateway and department owner', () => {
+    const sal = templates.skills.get('sal-outbound-approval')?.body ?? '';
+    const mkt = templates.skills.get('mkt-publish-approval')?.body ?? '';
+    const sup = templates.skills.get('sup-support-policy')?.body ?? '';
+
+    for (const [id, body] of [
+      ['sal-outbound-approval', sal],
+      ['mkt-publish-approval', mkt],
+      ['sup-support-policy', sup],
+    ] as const) {
+      expect(body, id).not.toMatch(INCIDENT_OR_BRAND_LEAK_RE);
+      expect(body, id).not.toMatch(/[\u0451\u0401\u2014]/);
+      expect(body, id).toMatch(/\bserver\b[\s\S]*\bcatalog\b/i);
+      expect(body, id).toMatch(/\bdepartment owner\b[\s\S]*\bCEO\b/i);
+      expect(body, id).toMatch(/\b(?:credentials?|keys?|passwords?)\b[^.!?]*\b(?:stay|remain|kept)\b[^.!?]*\bserver\b/i);
+    }
+
+    expect(sal).toMatch(/"outbound_submit"/);
+    expect(sal).toMatch(/"outbound_status"/);
+    expect(sal).toMatch(/\bunknown\b[^.!?]*\b(?:receiver|receiving|resend)\b/i);
+    expect(mkt).toMatch(/"outbound_submit"/);
+    expect(mkt).toMatch(/\bpublic\b[^.!?]*\b(?:every|each|per-item)\b[^.!?]*\bapproval\b/i);
+    expect(sup).toMatch(/"support_classify"/);
+    expect(sup).toMatch(/"support_submit"/);
+    expect(sup).toMatch(/\buntrusted data\b/i);
+    expect(sup).toMatch(/\b(?:never|do not)\b[^.!?]*\b(?:refund|price|legal|contract|delivery[- ]date)\b/i);
+  });
+
+  it('aligns all four support role templates with separate classification, catalog replies, and owner escalation', () => {
+    expect(templates.roles.get('SUP-T2')?.effort).toBe('high');
+    for (const id of ['SUP-HEAD', 'SUP-KB', 'SUP-T1', 'SUP-T2'] as const) {
+      const role = templates.roles.get(id)!;
+      expect(role, id).toBeDefined();
+      expect(role.body.length, id).toBeLessThanOrEqual(600);
+      expect(role.body, id).not.toMatch(INCIDENT_OR_BRAND_LEAK_RE);
+      expect(role.body, id).not.toMatch(/[\u0451\u0401\u2014]/);
+    }
+
+    expect(templates.roles.get('SUP-T1')!.body).toMatch(/"support_classify"/);
+    expect(templates.roles.get('SUP-T1')!.body).toMatch(/"support_submit"/);
+    expect(templates.roles.get('SUP-T2')!.body).toMatch(/"support_classify"/);
+    expect(templates.roles.get('SUP-T2')!.body).toMatch(/\bdepartment owner\b/i);
+    expect(templates.roles.get('SUP-KB')!.body).toMatch(/\bcatalog\b/i);
+    expect(templates.roles.get('SUP-HEAD')!.body).toMatch(/\bdepartment owner\b/i);
+  });
+});

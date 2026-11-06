@@ -1,5 +1,5 @@
 import { WAIT_OUTCOMES, WAIT_SOURCE_KINDS, WAIT_STATES, type ExternalWait, type WaitPlan, type WaitSourceState } from '@hornhoof/protocol/waits';
-import type { ExternalConsumer, ExternalGitIntent, ExternalGitOutcome, ExternalPreparationSettlement } from '@hornhoof/protocol';
+import type { ExternalConsumer, ExternalGitIntent, ExternalGitOutcome, ExternalPreparationSettlement, QuestionAudience, QuestionClassificationSnapshot } from '@hornhoof/protocol';
 import { APPROVAL_CHANNELS, APPROVAL_MODES, CATALOG_KINDS, COMPANY_TEMPLATE_KEYS, CONNECTION_ENDS, CRED_KINDS, INVALIDATION_CODES, MACHINE_KINDS, MESSAGE_STATUSES, MODEL_CHECK_KINDS, RISK_CLASSES, RUN_KINDS, TEMPLATE_KEYS, WORK_KINDS, type MaterialSnapshotHistory, type CatalogValue, type CheckBinding, type CheckResult, type EvaluationCounts, type GateCode, type MessageDocument, type OutboundPolicyValue, type ReasonCode, type ModelIdentity, type EnvironmentSnapshot, type EnvironmentProblem, type RepositoryScope, type TestExecution, type TestEnvironmentReceipt, type Account, type Boot, type Failure, type Limits, type ModelOption, type NodeExit, type NodeReconnect, type TestFileTiming, type TestPackageTiming, type TurnFacts } from '@hornhoof/protocol';
 import type { OperatorError, OperatorInputLine, OperatorQuestion, OperatorReason } from '@hornhoof/protocol/program-operator';
 import type { MessageParty } from '../modules/events/parties.js';
@@ -22,6 +22,51 @@ const materialStamp = (revision: AnyPgColumn, digest: AnyPgColumn) => sql`
    structure and append-only semantics before persisting it. */
 const materialHistoryBound = (history: AnyPgColumn) => sql`
   ${history} IS NULL OR (jsonb_typeof(${history}) = 'object' AND octet_length(${history}::text) <= 1048576)`;
+
+/* Source metadata is private server state, not classification or route authority. Unknown legacy provenance stays null. */
+const questionColumns = () => ({
+  audience: text('audience').$type<QuestionAudience>().notNull().default('internal'),
+  questionRevision: bigint('question_revision', { mode: 'number' }).notNull().default(1),
+  sourceKey: text('source_key'),
+  sourceJobId: uuid('source_job_id').references(() => jobs.id),
+  sourceSequence: bigint('source_sequence', { mode: 'number' }),
+  triageAgentId: uuid('triage_agent_id').references(() => agents.id),
+  routeRevision: bigint('route_revision', { mode: 'number' }).notNull().default(1),
+  classification: jsonb('classification').$type<QuestionClassificationSnapshot>(),
+});
+type QuestionColumns = { [K in keyof ReturnType<typeof questionColumns>]: AnyPgColumn } & { companyId: AnyPgColumn };
+const safeRevision = (column: AnyPgColumn) => sql`${column} BETWEEN 1 AND 9007199254740991`;
+const safeSequence = (column: AnyPgColumn) => sql`${column} BETWEEN 0 AND 9007199254740991`;
+const questionObjectBound = (column: AnyPgColumn) => sql`jsonb_typeof(${column}) = 'object' AND octet_length(${column}::text) <= 32768`;
+const questionChecks = (name: string, t: QuestionColumns) => [
+  check(`${name}_question_audience`, sql`${t.audience} IN ('internal', 'human', 'legacy')`),
+  check(`${name}_question_revision`, safeRevision(t.questionRevision)),
+  check(`${name}_route_revision`, safeRevision(t.routeRevision)),
+  check(`${name}_source_sequence`, safeSequence(t.sourceSequence)),
+  check(`${name}_source_key`, sql`length(btrim(${t.sourceKey})) BETWEEN 1 AND 512 AND ${t.sourceKey} !~ '[[:cntrl:]]'`),
+  check(`${name}_classification_bound`, questionObjectBound(t.classification)),
+  unique(`${name}_source_episode`).on(t.companyId, t.sourceKey),
+];
+export type QuestionRecoveryIntent = {
+  sourceKey: string;
+  reason: 'internal_route_unavailable' | 'plan_unavailable';
+  recordedAt: string;
+};
+const internalResolutionColumns = () => ({
+  executorInstruction: text('executor_instruction'),
+  resolvedByAgentId: uuid('resolved_by_agent_id').references(() => agents.id),
+  resolvedByJobId: uuid('resolved_by_job_id').references(() => jobs.id),
+  resolvedSourceSequence: bigint('resolved_source_sequence', { mode: 'number' }),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+  recoveryIntent: jsonb('recovery_intent').$type<QuestionRecoveryIntent>(),
+});
+type ResolutionColumns = { [K in keyof ReturnType<typeof internalResolutionColumns>]: AnyPgColumn };
+const resolutionChecks = (name: string, t: ResolutionColumns) => [
+  check(`${name}_resolver_whole`, sql`num_nonnulls(${t.resolvedByAgentId}, ${t.resolvedByJobId}, ${t.resolvedAt}) IN (0, 3)
+    AND (${t.resolvedSourceSequence} IS NULL OR ${t.resolvedAt} IS NOT NULL)`),
+  check(`${name}_resolver_sequence`, safeSequence(t.resolvedSourceSequence)),
+  check(`${name}_recovery_bound`, questionObjectBound(t.recoveryIntent)),
+];
 
 /* One deployment serves one company: the unique singleton column makes a second row impossible. */
 export const companies = pgTable('companies', {
@@ -99,6 +144,8 @@ export const departments = pgTable('departments', {
   repoUrl: text('repo_url'),
   repoBranch: text('repo_branch'),
   repoTokenEnc: text('repo_token_enc'),
+  /* Server-only credential scope; every token write or clear advances it. */
+  repoTokenRevision: integer('repo_token_revision').notNull().default(1),
   repoTokenLast4: text('repo_token_last4'),
   /* Who the agents' commits are by; without one each agent's program sets its own. */
   repoAuthorName: text('repo_author_name'),
@@ -111,7 +158,7 @@ export const departments = pgTable('departments', {
      and it is never worked out from who has access. It counts only while that person is active and still has access. */
   ownerPersonId: uuid('owner_person_id').references((): AnyPgColumn => people.id),
   createdAt: createdAt(),
-}, t => [unique('departments_company_id').on(t.companyId, t.id), index('departments_owner_person_id').on(t.ownerPersonId), check('departments_work_mode', sql`${t.workMode} IN ('turns', 'continuous')`)]);
+}, t => [unique('departments_company_id').on(t.companyId, t.id), index('departments_owner_person_id').on(t.ownerPersonId), check('departments_work_mode', sql`${t.workMode} IN ('turns', 'continuous')`), check('departments_repo_token_revision', sql`${t.repoTokenRevision} > 0`)]);
 
 /* How a department's approvals go, one rule per channel; a channel with no rule asks every time. The rules belong to the
    department, not to its owner, so they stay when the owner changes or goes. */
@@ -491,6 +538,7 @@ export const proposals = pgTable('proposals', {
   companyId: companyId(),
   agentId: uuid('agent_id').notNull().references(() => agents.id),
   jobId: uuid('job_id').references(() => jobs.id),
+  ...questionColumns(),
   brief: text('brief').notNull().default(''),
   materialRevision: bigint('material_revision', { mode: 'number' }),
   materialDigest: text('material_digest'),
@@ -505,6 +553,7 @@ export const proposals = pgTable('proposals', {
   appliedAt: timestamp('applied_at', { withTimezone: true }),
   createdAt: createdAt(),
 }, t => [
+  ...questionChecks('proposals', t),
   check('proposals_material_stamp', materialStamp(t.materialRevision, t.materialDigest)),
   check('proposals_material_snapshot_bound', materialHistoryBound(t.materialSnapshot)),
 ]);
@@ -698,7 +747,7 @@ export const REQUEST_KINDS = ['question', 'approval', 'choice', 'stuck'] as cons
    person, the rest only to the CEO. */
 export const DECISION_TOPICS = ['task', 'employee', 'people', 'access', 'subscriptions', 'machines', 'repositories', 'public_link', 'updates', 'release'] as const;
 export type DecisionTopic = (typeof DECISION_TOPICS)[number];
-export const REQUEST_STATUSES = ['open', 'answered', 'approved', 'declined', 'withdrawn'] as const;
+export const REQUEST_STATUSES = ['open', 'answered', 'approved', 'declined', 'withdrawn', 'resolved_internal'] as const;
 
 /* One of the ways a person can pick from, with the picture that shows it. */
 export type RequestOption = { label: string; image: string | null };
@@ -713,6 +762,7 @@ export const requests = pgTable(
     taskId: uuid('task_id').notNull().references(() => tasks.id),
     agentId: uuid('agent_id').notNull().references(() => agents.id),
     kind: text('kind', { enum: REQUEST_KINDS }).notNull(),
+    ...questionColumns(),
     text: text('text').notNull(),
     commit: text('commit'),
     /* Null together on legacy sources; no private file/disclosure metadata here. */
@@ -749,6 +799,9 @@ export const requests = pgTable(
     answeredAt: timestamp('answered_at', { withTimezone: true }),
   },
   t => [
+    ...questionChecks('requests', t),
+    check('requests_internal_not_person_answer', sql`${t.status} <> 'resolved_internal' OR
+      num_nonnulls(${t.answeredBy}, ${t.answeredByAgentId}, ${t.answerJobId}, ${t.answerSourceSeq}, ${t.answeredAt}) = 0`),
     check('requests_material_stamp', materialStamp(t.materialRevision, t.materialDigest)),
     check('requests_goal_whole', sql`num_nonnulls(${t.goalRefKind}, ${t.goalRefId}, ${t.goalEpisodeId}, ${t.goalImpact}, ${t.goalRevision}, ${t.goalState}) IN (0, 6)`),
     uniqueIndex('requests_one_open_goal').on(t.companyId, t.goalRefKind, t.goalRefId).where(sql`${t.goalState} = 'open'`),
@@ -759,15 +812,50 @@ export const requests = pgTable(
   ],
 );
 
-/* Materials sidecar only. Internal question lifecycle/authority is added by its
-   own producer; SQL agents cannot read or forge these private packages. */
+/* Private content and actual internal resolver provenance, without a second lifecycle. */
 export const requestInternal = pgTable('request_internal', {
   requestId: uuid('request_id').primaryKey().references(() => requests.id),
   companyId: companyId(),
   materialSnapshot: jsonb('material_snapshot').$type<MaterialSnapshotHistory>(),
+  technicalText: text('technical_text'),
+  ...internalResolutionColumns(),
 }, t => [
+  ...resolutionChecks('request_internal', t),
+  foreignKey({ columns: [t.companyId, t.requestId], foreignColumns: [requests.companyId, requests.id], name: 'request_internal_company_request' }),
   index('request_internal_company_id').on(t.companyId),
   check('request_internal_material_snapshot_bound', materialHistoryBound(t.materialSnapshot)),
+]);
+
+/* The ASK source only. computer.json remains authoritative for native access and control revision. */
+export const computerAccessIntents = pgTable('computer_access_intents', {
+  id: id(),
+  companyId: companyId(),
+  agentId: uuid('agent_id').notNull().references(() => agents.id),
+  ...questionColumns(),
+  technicalText: text('technical_text').notNull(),
+  ...internalResolutionColumns(),
+  status: text('status', { enum: ['open', 'resolved_internal', 'granted', 'declined', 'withdrawn', 'apply_unknown'] }).notNull().default('open'),
+  applyOperationId: uuid('apply_operation_id'),
+  applyRevision: bigint('apply_revision', { mode: 'number' }),
+  applyRouteRevision: bigint('apply_route_revision', { mode: 'number' }),
+  applyControlRevision: bigint('apply_control_revision', { mode: 'number' }),
+  applyTargetUntil: timestamp('apply_target_until', { withTimezone: true }),
+  appliedAt: timestamp('applied_at', { withTimezone: true }),
+  createdAt: createdAt(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [
+  ...questionChecks('computer_access_intents', t),
+  ...resolutionChecks('computer_access_intents', t),
+  check('computer_access_intents_status', sql`${t.status} IN ('open', 'resolved_internal', 'granted', 'declined', 'withdrawn', 'apply_unknown')`),
+  check('computer_access_intents_apply_whole', sql`num_nonnulls(${t.applyOperationId}, ${t.applyRevision}, ${t.applyRouteRevision}, ${t.applyControlRevision}, ${t.applyTargetUntil}) IN (0, 5)`),
+  check('computer_access_intents_apply_started', sql`${t.applyOperationId} IS NULL OR ${t.status} IN ('apply_unknown', 'granted', 'declined', 'withdrawn')`),
+  check('computer_access_intents_apply_revision', safeRevision(t.applyRevision)),
+  check('computer_access_intents_apply_route_revision', safeRevision(t.applyRouteRevision)),
+  check('computer_access_intents_apply_control_revision', safeSequence(t.applyControlRevision)),
+  check('computer_access_intents_apply_outcome', sql`
+    (${t.status} NOT IN ('apply_unknown', 'granted') OR ${t.applyOperationId} IS NOT NULL)
+    AND (${t.status} <> 'granted' OR ${t.appliedAt} IS NOT NULL)
+    AND (${t.appliedAt} IS NULL OR ${t.status} = 'granted')`),
 ]);
 
 /* A picture an agent sent from its turn to show its work. People see it once a request of that agent shows it. Or a file

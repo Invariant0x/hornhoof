@@ -33,9 +33,9 @@ export const WAIT_LEVELS = { normal: 0, owner: 1, head: 2, department: 3 } as co
 const SOURCE_KEYS: Record<WaitSourceKind, RegExp> = {
   after: new RegExp(`^task:${UUID}$`),
   review: new RegExp(`^review:${UUID}:\\d+:${UUID}$`),
-  person: new RegExp(`^request:${UUID}$`),
+  person: new RegExp(`^(request|question):${UUID}$`),
   run: new RegExp(`^run:${UUID}$`),
-  external: new RegExp(`^(wait_for|operation):${UUID}$`),
+  external: new RegExp(`^(wait_for|operation|question):${UUID}$`),
 };
 export const validSourceKey = (kind: WaitSourceKind, key: string): boolean => SOURCE_KEYS[kind].test(key);
 export const signalsOnce = (kind: WaitSourceKind, key: string): boolean => kind === 'external' && key.startsWith('operation:');
@@ -89,6 +89,11 @@ const sourceRevision = z.number().int().min(0);
 const keyFitsKind = (input: { kind: WaitSourceKind; sourceKey: string }) => validSourceKey(input.kind, input.sourceKey);
 const KEY_OF_ANOTHER_KIND = 'This source key does not name a source of this kind.';
 const repeatsUnlessOnce = (input: { kind: WaitSourceKind; sourceKey: string; plan: WaitPlan }) => (input.plan.finalReview.intervalMs === null) === signalsOnce(input.kind, input.sourceKey);
+const questionRevisionFits = (input: { sourceKey: string; sourceRevision: number }): boolean => !input.sourceKey.startsWith('question:') || input.sourceRevision > 0;
+function questionOwnerFits(input: { kind: WaitSourceKind; sourceKey: string; ownerBinding: WaitOwnerBinding }): boolean {
+  if (!input.sourceKey.startsWith('question:')) return true;
+  return input.kind === 'external' ? 'agentId' in input.ownerBinding : input.kind === 'person' && 'personId' in input.ownerBinding;
+}
 
 export const SyncSourceWaits = z.strictObject({
   taskId: z.uuid(),
@@ -98,7 +103,9 @@ export const SyncSourceWaits = z.strictObject({
   ownerBinding: WaitOwnerBinding,
   plan: WaitPlan,
   sourceState: WaitSourceState,
-}).refine(keyFitsKind, KEY_OF_ANOTHER_KIND).refine(repeatsUnlessOnce, 'An external operation reviews once, with no repeats; every other source repeats until it ends.');
+}).refine(keyFitsKind, KEY_OF_ANOTHER_KIND).refine(repeatsUnlessOnce, 'An external operation reviews once, with no repeats; every other source repeats until it ends.')
+  .refine(questionRevisionFits, 'A question needs its positive route revision.')
+  .refine(questionOwnerFits, 'An internal question has an agent owner; a human question has a person recipient.');
 export type SyncSourceWaits = z.infer<typeof SyncSourceWaits>;
 
 export const EndSourceWait = z.strictObject({
@@ -108,7 +115,7 @@ export const EndSourceWait = z.strictObject({
   sourceRevision,
   outcome: WaitOutcome,
   proofRef: reference,
-}).refine(keyFitsKind, KEY_OF_ANOTHER_KIND);
+}).refine(keyFitsKind, KEY_OF_ANOTHER_KIND).refine(questionRevisionFits, 'A question needs its positive route revision.');
 export type EndSourceWait = z.infer<typeof EndSourceWait>;
 
 export const ReplanWait = z.strictObject({
