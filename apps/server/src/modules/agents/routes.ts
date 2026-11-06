@@ -22,6 +22,7 @@ import { agentFor, type AgentRow } from './find.js';
 import { instructionsOf, renderInstructions, placeOf, type Part } from './instructions.js';
 import { TIMER_MAX, TIMER_MIN, TIMER_ORDER_MAX, timerOf } from './timers.js';
 import { currentAgentTask } from './work.js';
+import { releaseLeftProgram } from './left-programs.js';
 
 export type AgentCard = FailureState & {
   id: string;
@@ -270,6 +271,7 @@ export function agentRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   /* Turns that waited for a subscription can go now, with the tasks it missed while it had none. */
   async function afterPlanMove(agent: AgentRow, next: AgentRow): Promise<void> {
+    if (agent.subscriptionId) await releaseLeftProgram(ctx, agent.id, agent.subscriptionId);
     if (next.subscriptionId && !agent.subscriptionId) await resumeAgent(ctx, agent.id);
     await (agent.kind === 'orchestrator' ? pumpWaiting(ctx) : pump(ctx, agent.id));
     await tryPlaceOperator(ctx, agent.companyId);

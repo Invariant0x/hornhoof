@@ -48,3 +48,43 @@ it.each([
     expect((await run(mode, `SELECT ${metadata} FROM ${table}`))[0]!.rows).toEqual([]);
   }
 });
+
+it('keeps request material history invisible and immutable to both SQL roles', async () => {
+  const run = await roles();
+  for (const mode of ['write', 'read'] as const) {
+    for (const statement of [
+      'SELECT material_snapshot FROM request_internal',
+      'SELECT * FROM request_internal',
+      'INSERT INTO request_internal (request_id,company_id) SELECT request_id,company_id FROM request_internal WHERE false',
+      'UPDATE request_internal SET material_snapshot = null WHERE false',
+      'DELETE FROM request_internal WHERE false',
+    ]) {
+      await expect(run(mode, statement), `${mode}: ${statement}`).rejects.toThrow(/permission denied/);
+    }
+  }
+});
+
+it('exposes safe request/proposal digests while refusing private proposal history and writes', async () => {
+  const run = await roles();
+  for (const mode of ['write', 'read'] as const) {
+    expect((await run(mode, 'SELECT id,material_revision,material_digest FROM requests'))[0]!.rows).toEqual([]);
+    expect((await run(mode, 'SELECT id,material_revision,material_digest FROM proposals'))[0]!.rows).toEqual([]);
+    for (const statement of [
+      'SELECT material_snapshot FROM proposals', 'SELECT * FROM proposals',
+      'UPDATE proposals SET material_snapshot = null WHERE false',
+      'UPDATE requests SET material_digest = null WHERE false',
+    ]) {
+      await expect(run(mode, statement), `${mode}: ${statement}`).rejects.toThrow(/permission denied/);
+    }
+  }
+});
+
+it.each(['model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations'])('closes %s to both SQL roles, reading too', async table => {
+  const run = await roles();
+  const statements = [`SELECT * FROM ${table}`, `INSERT INTO ${table} (id) SELECT id FROM ${table} WHERE false`, `UPDATE ${table} SET id = id WHERE false`, `DELETE FROM ${table} WHERE false`];
+  for (const mode of ['write', 'read'] as const) {
+    for (const statement of statements) {
+      await expect(run(mode, statement), `${mode}: ${statement}`).rejects.toThrow(/permission denied/);
+    }
+  }
+});

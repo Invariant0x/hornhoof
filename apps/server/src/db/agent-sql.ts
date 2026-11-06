@@ -11,8 +11,9 @@ export type SqlMode = 'write' | 'read';
 export type AgentSql = { run: (text: string, mode: SqlMode) => Promise<SqlAnswer[]>; close: () => Promise<void> };
 
 /* Signing in, joining and installing a node stay out of reach, and so does the public link, whose address goes into
-   machine commands. Plans' sealed sign-ins too: a row put there would reach a node as its plan's sign-in. */
-export const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials'];
+   machine commands. Plans' sealed sign-ins too: a row put there would reach a node as its plan's sign-in. Checks made by a
+   model too: their held-out examples stay away from who tunes a prompt, and no row put there can turn a check on. */
+export const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials', 'request_internal', 'model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations'];
 /* Columns that hold a password, a token or a key: neither role reads or writes them. A machine's key goes with
    every join from it, so it is one too. The account a node is signed in to names a person's email. */
 export const SECRET: Record<string, string[]> = {
@@ -24,6 +25,7 @@ export const SECRET: Record<string, string[]> = {
   departments: ['repo_token_enc'],
   program_operator_cases: ['capability'],
   attachments: ['bytes'],
+  proposals: ['material_snapshot'],
 };
 /* Who people are and what they reach, and the subscriptions, machines and nodes the company runs on: the orchestrator's
    role reads them, and they change only through the tools the CEO alone may ask for. The history of the nodes' connections,
@@ -44,6 +46,8 @@ const READ_ONLY = [
 const AGENT_FIXED = ['kind', 'role_key', 'skills', 'subscription_id', 'node_id'];
 /* Where a department's agents push their work, and what lets a commit past GitHub's tests: set only with set_repository. */
 const REPOSITORY = ['repo_url', 'repo_branch', 'repo_token_last4', 'repo_author_name', 'repo_author_email', 'repo_full_test_command'];
+/* Settings change only through a person's guarded API, never through generic SQL. */
+const DEPARTMENT_SETTINGS = [...REPOSITORY, 'work_mode'];
 /* What of a turn the orchestrator may change, to close one that hangs. */
 const JOB_STATUS = ['status', 'error', 'finished_at'];
 const WRITES = new Set(['INSERT', 'UPDATE', 'DELETE', 'MERGE']);
@@ -89,7 +93,7 @@ export const grantsFor = (name: string) =>
     name,
     `${eachTable([...READ_ONLY, 'agents', 'jobs', 'departments', ...Object.keys(SECRET)], `GRANT SELECT, INSERT, UPDATE, DELETE ON %I TO "${name}"`)}
 ${READ_ONLY.map(table => `  EXECUTE format('GRANT SELECT (%s) ON ${table} TO "${name}"', ${visible(table)});`).join('\n')}
-  EXECUTE format('GRANT SELECT (%1$s), INSERT (%2$s), UPDATE (%2$s), DELETE ON departments TO "${name}"', ${visible('departments')}, ${columns('departments', [...SECRET.departments!, ...REPOSITORY])});
+  EXECUTE format('GRANT SELECT (%1$s), INSERT (%2$s), UPDATE (%2$s), DELETE ON departments TO "${name}"', ${visible('departments')}, ${columns('departments', [...SECRET.departments!, ...DEPARTMENT_SETTINGS])});
   EXECUTE format('GRANT SELECT (%s), UPDATE (%s) ON agents TO "${name}"', ${visible('agents')}, ${columns('agents', AGENT_FIXED)});
   EXECUTE format('GRANT SELECT (%s), UPDATE (${JOB_STATUS.join(', ')}) ON jobs TO "${name}"', ${visible('jobs')});
   GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO "${name}";

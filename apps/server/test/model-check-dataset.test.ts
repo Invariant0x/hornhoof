@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import type { Case } from '../src/modules/model-checks/contract.js';
+import type { Case } from '@hornhoof/protocol';
 import { parseDataset, tuningCases, withLiveMiss, type Dataset } from '../src/modules/model-checks/dataset.js';
 import { AUTHOR, CLASS_RULES, LABELLER, RULES, TAXONOMY, asJsonl, classCase, holdout, mustBlock, reviewCase } from './model-check-fixture.js';
 
