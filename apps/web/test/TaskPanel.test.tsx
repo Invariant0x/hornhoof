@@ -23,7 +23,7 @@ function shell(routes: Record<string, unknown> = {}) {
 }
 
 async function openTask(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(await screen.findByRole('button', { name: /^Tasks/ }));
+  await user.click(await screen.findByRole('button', { name: /^(Tasks|Задачи)/ }));
   await user.click(await screen.findByRole('button', { name: /#12/ }));
   return screen.findByRole('complementary', { name: '#12 Checkout API' });
 }
@@ -367,7 +367,7 @@ describe('a task', () => {
     expect(part).toHaveTextContent('Cover the API contract.');
     expect(part).toHaveTextContent('Bruno');
     expect(within(part).getByRole('button', { name: '#13 Contract tests' })).toBeInTheDocument();
-    expect(part).toHaveTextContent(language === 'ru' ? 'Открыта' : 'Open');
+    expect(part).toHaveTextContent(language === 'ru' ? 'Не начата' : 'Not started');
   });
 
   it.each([
