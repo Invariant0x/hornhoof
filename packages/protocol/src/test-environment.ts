@@ -48,6 +48,7 @@ export type TestReset = z.infer<typeof TestReset>;
 export const TestSplit = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('argv-files') }),
   z.strictObject({ kind: z.literal('json-file') }),
+  z.strictObject({ kind: z.literal('vitest-shard') }),
   z.strictObject({ kind: z.literal('whole-package') }),
 ]);
 export const TestSuite = z.strictObject({ id: Id, root: RepositoryPath, files: Inputs.min(1), run: Command, split: TestSplit, profiles: ProfileIds, finalChecks: z.array(Command).max(1000).optional() });
@@ -61,6 +62,9 @@ export const TestMutation = z.discriminatedUnion('status', [
   z.strictObject({ status: z.literal('supported'), language: Id, tool: Id, command: Command, sourcePaths: Inputs.min(1), fastTestPaths: Inputs.min(1), coverageCommands: z.array(Command).min(1).max(1000), coverageFiles: Inputs.min(1) }),
   z.strictObject({ status: z.literal('unsupported'), language: Id, reason: Text }),
 ]);
+const OncePreparation = z.strictObject({ profiles: ProfileIds, suiteIds: Ids, commands: z.array(Command).max(1000) })
+  .refine(value => value.suiteIds.length + value.commands.length > 0, 'An explicit preparation must contain work.');
+const ExecutionPolicy = z.strictObject({ version: z.literal(2), oncePreparation: OncePreparation.optional() });
 const EnvironmentShape = z.strictObject({
   version: z.literal(1), defaultProfile: Id,
   runtimes: z.array(z.strictObject({ id: Id, version: Text.max(100) })).max(64),
@@ -70,6 +74,7 @@ const EnvironmentShape = z.strictObject({
   reset: z.array(TestReset).min(1).max(1000).nullable(), suites: z.array(TestSuite).min(1).max(1000),
   impact: z.strictObject({ adapter: Id, fullPackageGlobs: z.array(z.strictObject({ globs: Inputs.min(1), suiteIds: Ids.min(1) })).max(1000), migrationCheck: MigrationCheck }),
   mutation: TestMutation,
+  execution: ExecutionPolicy.optional(),
 });
 type EnvironmentShape = z.infer<typeof EnvironmentShape>;
 type IssuePath = (string | number)[];
@@ -129,11 +134,21 @@ function suiteReferences(env: EnvironmentShape, suites: ReadonlySet<string>, pro
   env.reset?.forEach((reset, index) => references(reset.suiteIds, suites, ['reset', index, 'suiteIds'], ctx));
   env.impact.fullPackageGlobs.forEach((entry, index) => references(entry.suiteIds, suites, ['impact', 'fullPackageGlobs', index, 'suiteIds'], ctx));
 }
+function oncePreparationReferences(env: EnvironmentShape, profiles: ReadonlySet<string>, ctx: z.RefinementCtx): void {
+  const preparation = env.execution?.oncePreparation;
+  if (!preparation) return;
+  const path = ['execution', 'oncePreparation'];
+  references(preparation.profiles, profiles, [...path, 'profiles'], ctx);
+  for (const profile of env.profiles.filter(value => preparation.profiles.includes(value.id))) {
+    references(preparation.suiteIds, new Set(profile.requiredSuiteIds), [...path, 'suiteIds'], ctx);
+  }
+}
 function environmentReferences(env: EnvironmentShape, ctx: z.RefinementCtx): void {
   const profiles = identities(env.profiles, 'profiles', ctx), suites = identities(env.suites, 'suites', ctx), services = identities(env.services, 'services', ctx);
   reference(env.defaultProfile, profiles, ['defaultProfile'], ctx);
   requiredSuites(env, suites, ctx); serviceProfiles(env, profiles, ctx);
   preparations(env, profiles, services, ctx); suiteReferences(env, suites, profiles, ctx);
+  oncePreparationReferences(env, profiles, ctx);
 }
 
 export const TEST_ENVIRONMENT_BYTES = 64 * 1024;
@@ -203,11 +218,18 @@ export async function validateEnvironmentDescription(value: unknown): Promise<En
 export const EnvironmentSnapshot = z.strictObject({ description: EnvironmentDescription, profile: Id })
   .refine(value => value.description.manifest.profiles.some(profile => profile.id === value.profile), 'Unknown product profile.');
 export type EnvironmentSnapshot = z.infer<typeof EnvironmentSnapshot>;
-const Selection = z.strictObject({ kind: z.enum(['suite', 'final']), suiteId: Id, files: Inputs });
-function finalSelection(selection: z.infer<typeof Selection>, suite: TestSuite, ctx: z.RefinementCtx): void {
+const LegacySelection = z.strictObject({ kind: z.enum(['suite', 'final']), suiteId: Id, files: Inputs });
+const Shard = z.strictObject({ index: z.number().int().min(1).max(10), count: z.number().int().min(1).max(10) })
+  .refine(value => value.index <= value.count, 'A shard index cannot exceed its count.');
+const BatchMember = z.strictObject({ kind: z.literal('suite'), suiteId: Id, files: Inputs.min(1), shard: Shard });
+const BatchSelection = z.strictObject({ kind: z.literal('batch'), version: z.literal(2), expectedCommitSha: ProductCommitSha, selections: z.array(BatchMember).min(1).max(1000) });
+const PrepareSelection = z.strictObject({ kind: z.literal('prepare'), version: z.literal(2), expectedCommitSha: ProductCommitSha });
+const VersionedSelection = z.discriminatedUnion('kind', [BatchSelection, PrepareSelection]);
+const Selection = z.union([LegacySelection, VersionedSelection]);
+function finalSelection(selection: z.infer<typeof LegacySelection>, suite: TestSuite, ctx: z.RefinementCtx): void {
   if (selection.files.length || !suite.finalChecks?.length) ctx.addIssue({ code: 'custom', message: 'Final checks are a separate unsplit leaf without file selection.' });
 }
-function executionSelection(value: { snapshot: EnvironmentSnapshot; selection: z.infer<typeof Selection> }, ctx: z.RefinementCtx): void {
+function legacySelection(value: { snapshot: EnvironmentSnapshot; selection: z.infer<typeof LegacySelection> }, ctx: z.RefinementCtx): void {
   const { snapshot, selection } = value;
   const suite = snapshot.description.manifest.suites.find(item => item.id === selection.suiteId);
   if (!suite || !suite.profiles.includes(snapshot.profile)) { ctx.addIssue({ code: 'custom', message: 'The suite is not eligible for this profile.' }); return; }
@@ -217,18 +239,53 @@ function executionSelection(value: { snapshot: EnvironmentSnapshot; selection: z
   distinct(selection.files, 'selection', ctx);
   if (!selection.files.length || (suite.split.kind === 'whole-package' && selection.files.length !== files.length)) ctx.addIssue({ code: 'custom', message: 'An execution needs a nonempty valid selection; whole-package suites cannot be split.' });
 }
+function oncePreparation(snapshot: EnvironmentSnapshot): z.infer<typeof OncePreparation> | undefined {
+  const preparation = snapshot.description.manifest.execution?.oncePreparation;
+  return preparation?.profiles.includes(snapshot.profile) ? preparation : undefined;
+}
+function batchMember(snapshot: EnvironmentSnapshot, selection: z.infer<typeof BatchMember>, ctx: z.RefinementCtx): void {
+  legacySelection({ snapshot, selection }, ctx);
+  if (oncePreparation(snapshot)?.suiteIds.includes(selection.suiteId)) ctx.addIssue({ code: 'custom', message: 'A once-only suite cannot execute again in a batch.' });
+  const units = snapshot.description.inventory.filter(unit => unit.suiteId === selection.suiteId), selected = new Set(selection.files);
+  const groups = new Set(units.filter(unit => selected.has(unit.file)).map(unit => unit.selectionUnit));
+  if (units.some(unit => groups.has(unit.selectionUnit) && !selected.has(unit.file))) ctx.addIssue({ code: 'custom', message: 'An indivisible selection unit cannot be split.' });
+}
+function executionSelection(value: { snapshot: EnvironmentSnapshot; selection: z.infer<typeof Selection> }, ctx: z.RefinementCtx): void {
+  const { snapshot, selection } = value;
+  if (!('version' in selection)) return legacySelection({ snapshot, selection }, ctx);
+  if (!snapshot.description.manifest.execution || selection.expectedCommitSha !== snapshot.description.commitSha) {
+    ctx.addIssue({ code: 'custom', message: 'Versioned execution requires the pinned policy and exact source.' }); return;
+  }
+  if (selection.kind === 'prepare') {
+    if (!oncePreparation(snapshot)) ctx.addIssue({ code: 'custom', message: 'This profile has no explicit once-preparation.' });
+    return;
+  }
+  distinct(selection.selections.map(member => member.suiteId), 'selection', ctx);
+  selection.selections.forEach(member => batchMember(snapshot, member, ctx));
+}
 export const TestExecution = z.strictObject({ snapshot: EnvironmentSnapshot, selection: Selection }).superRefine(executionSelection);
 export type TestExecution = z.infer<typeof TestExecution>;
 const CacheReceipt = z.strictObject({ key: EnvironmentDigest.nullable(), hit: z.boolean() })
   .refine(receipt => !receipt.hit || receipt.key !== null, 'An uncached preparation cannot be a cache hit.');
 const Duration = z.number().finite().nonnegative();
-export const TestEnvironmentReceipt = z.strictObject({
-  version: z.literal(1), commitSha: ProductCommitSha, manifestHash: EnvironmentDigest,
-  suiteId: Id, kind: z.enum(['suite', 'final']), files: Inputs,
+const ReceiptFields = {
+  commitSha: ProductCommitSha, manifestHash: EnvironmentDigest,
   runtimes: z.array(RuntimeCapability).max(64), dependencies: CacheReceipt,
   environments: z.array(CacheReceipt.safeExtend({ unitId: Id })).max(1000),
   phases: z.strictObject({ checkoutMs: Duration, dependenciesMs: Duration, environmentMs: Duration, servicesMs: Duration, commandMs: Duration, cleanupMs: Duration }),
-}).superRefine(descriptionSize);
+};
+const Outcome = z.strictObject({ index: z.number().int().nonnegative(), status: z.enum(['passed', 'failed', 'not-run']), exitCode: z.number().int().nullable() })
+  .refine(value => value.status === 'passed' ? value.exitCode === 0 : value.status === 'not-run' ? value.exitCode === null : value.exitCode !== 0, 'The outcome differs from the command exit.');
+const ReceiptV2 = z.strictObject({ ...ReceiptFields, version: z.literal(2), profile: Id, selection: VersionedSelection, outcomes: z.array(Outcome).min(1).max(2000) });
+function receiptOutcomes(receipt: z.infer<typeof ReceiptV2>, ctx: z.RefinementCtx): void {
+  if (receipt.commitSha !== receipt.selection.expectedCommitSha) ctx.addIssue({ code: 'custom', message: 'The receipt differs from its pinned source.' });
+  if (receipt.outcomes.some((outcome, index) => outcome.index !== index)) ctx.addIssue({ code: 'custom', message: 'Outcomes must preserve every command in order.' });
+  if (receipt.selection.kind === 'batch' && receipt.outcomes.length !== receipt.selection.selections.length) ctx.addIssue({ code: 'custom', message: 'A batch receipt must retain every selection outcome.' });
+}
+export const TestEnvironmentReceipt = z.union([
+  z.strictObject({ ...ReceiptFields, version: z.literal(1), suiteId: Id, kind: z.enum(['suite', 'final']), files: Inputs }),
+  ReceiptV2.superRefine(receiptOutcomes),
+]).superRefine(descriptionSize);
 export type TestEnvironmentReceipt = z.infer<typeof TestEnvironmentReceipt>;
 
 export const EnvironmentProblem = z.strictObject({
@@ -252,7 +309,8 @@ export function runtimeVersionMatches(requested: string, actual: string): boolea
 export function requiredTestRuntimes(manifest: TestEnvironmentV1, profile: string): TestEnvironmentV1['runtimes'] {
   const services = new Set(manifest.services.map(service => service.runtime));
   const active = new Set(manifest.services.filter(service => service.profiles.includes(profile)).map(service => service.runtime));
-  return manifest.runtimes.filter(runtime => !services.has(runtime.id) || active.has(runtime.id));
+  const runtimes = manifest.runtimes.filter(runtime => !services.has(runtime.id) || active.has(runtime.id));
+  return manifest.execution ? [...runtimes, { id: 'hornhoof-test-execution', version: '2.0.0' }] : runtimes;
 }
 export function supportsTestProfile(snapshot: EnvironmentSnapshot, capabilities: RuntimeCapability[]): boolean {
   return requiredTestRuntimes(snapshot.description.manifest, snapshot.profile).every(requested => capabilities.some(actual => actual.id === requested.id && runtimeVersionMatches(requested.version, actual.version)));

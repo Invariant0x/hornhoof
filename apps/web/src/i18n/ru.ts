@@ -744,7 +744,8 @@ export const ru: Messages = {
         hasAbout: 'Свои цифры отдел берет из своего описания; его инструменты пока не передают их в этот отчет.',
         sections: { tasks: 'Задачи', time: 'Сколько заняло', stages: 'Время по этапам', agents: 'Время агентов', waits: 'Ожидания по причинам', problems: 'Сдачи и сбои', quality: 'Качество после выпуска', kinds: 'По видам задач', tests: 'Время тестов' },
         metrics: {
-          'tasks.total': 'Всего задач', 'tasks.done': 'Сделано', 'tasks.cancelled': 'Отменено', 'tasks.open': 'Не закончено',
+          'tasks.total': 'Всего задач', 'tasks.done': 'Сделано', 'tasks.cancelled': 'Отменено', 'tasks.open': 'Не закончено', 'small.count': 'Мелкие задачи',
+          'small.median': 'Мелкие задачи, от создания до закрытия, медиана',
           'toAcceptance.median': 'От выдачи до принятия, медиана', 'toAcceptance.worst': 'От выдачи до принятия, худший',
           'toFirstSubmit.median': 'От выдачи до первой сдачи, медиана', 'toFirstSubmit.worst': 'От выдачи до первой сдачи, худший',
           wholeTurn: 'Весь ход', criticalPath: 'Критический путь', 'agents.total': 'Все агенты вместе',
