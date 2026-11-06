@@ -180,54 +180,32 @@ describe('a picture dragged into the window', () => {
     expect(uploads()).toEqual([`${AGENT}/pictures?name=a.png`, `${AGENT}/pictures?name=c.png`]);
   });
 
-  it('opens the line under the terminal for the one who types into it, and goes back to the terminal after sending', async () => {
-    const user = userEvent.setup();
-    const { messages } = open({ [`POST ${AGENT}/pictures?name=screen.png`]: uploaded('pic1') }, TERMINAL);
+  it('leaves a picture dropped on a live terminal to the terminal, with no line of the window', async () => {
+    const { uploads } = open({}, TERMINAL);
     expect(await screen.findByTestId('live-terminal')).toBeInTheDocument();
+    fireEvent.dragEnter(windowBox(), dragged(png()));
+    expect(screen.queryByText(en.window.dropPictures)).not.toBeInTheDocument();
+    fireEvent.drop(windowBox(), dragged(png()));
     expect(screen.queryByRole('textbox', { name: LINE })).not.toBeInTheDocument();
-    fireEvent.drop(windowBox(), dragged(png()));
-    await preview();
-    expect(await line()).toHaveFocus();
-    await user.type(await line(), 'Here{Enter}');
-    await waitFor(() => expect(messages()).toEqual([{ text: 'Here', pictures: ['pic1'] }]));
-    await waitFor(() => expect(screen.queryByRole('textbox', { name: LINE })).not.toBeInTheDocument());
-    expect(screen.getByRole('textbox', { name: 'Terminal input' })).toHaveFocus();
-  });
-
-  it('keeps the line while the owner of the terminal has words in it, with the last picture taken back', async () => {
-    const user = userEvent.setup();
-    open({}, TERMINAL);
-    await screen.findByTestId('live-terminal');
-    fireEvent.drop(windowBox(), dragged(png()));
-    await user.type(await line(), 'Words');
-    await user.click(await remove());
-    expect(await line()).toHaveValue('Words');
-  });
-
-  it('gives the keys back to the terminal when the last picture is taken back with no words', async () => {
-    const user = userEvent.setup();
-    open({}, TERMINAL);
-    await screen.findByTestId('live-terminal');
-    fireEvent.drop(windowBox(), dragged(png()));
-    await user.click(await remove());
-    await waitFor(() => expect(screen.queryByRole('textbox', { name: LINE })).not.toBeInTheDocument());
-    expect(screen.getByRole('textbox', { name: 'Terminal input' })).toHaveFocus();
+    expect(uploads()).toEqual([]);
   });
 });
 
 describe('a picture pasted into the window', () => {
-  it('comes from the line, from the terminal and from nowhere in particular, and the program never sees it', async () => {
-    open({}, TERMINAL);
-    const terminal = await screen.findByRole('textbox', { name: 'Terminal input' });
-    const seen = vi.fn();
-    terminal.addEventListener('paste', seen);
-    expect(fireEvent.paste(terminal, copied([png('from-terminal.png')]))).toBe(false);
-    expect(await preview('from-terminal.png')).toBeInTheDocument();
-    expect(seen).not.toHaveBeenCalled();
+  it('comes from the line and from nowhere in particular', async () => {
+    open();
     expect(fireEvent.paste(await line(), copied([png('from-line.png')]))).toBe(false);
     expect(await preview('from-line.png')).toBeInTheDocument();
     expect(fireEvent.paste(document.body, copied([png('from-page.png')]))).toBe(false);
     expect(await preview('from-page.png')).toBeInTheDocument();
+  });
+
+  it('is for the live terminal when one shows, which takes it itself', async () => {
+    const { uploads } = open({}, TERMINAL);
+    const terminal = await screen.findByRole('textbox', { name: 'Terminal input' });
+    expect(fireEvent.paste(terminal, copied([png('from-terminal.png')]))).toBe(true);
+    expect(uploads()).toEqual([]);
+    expect(screen.queryByRole('textbox', { name: LINE })).not.toBeInTheDocument();
   });
 
   it('leaves text to whatever takes it, with a picture in the clipboard or without', async () => {
@@ -314,14 +292,6 @@ describe('what the window turns away', () => {
     fireEvent.drop(windowBox(), dragged(new File(['words'], 'notes.txt', { type: 'text/plain' })));
     await refusedAlert(en.errors.picture_invalid);
     expect(URL.createObjectURL).not.toHaveBeenCalled();
-  });
-
-  it('says why to the owner of the terminal too, who has no line', async () => {
-    open({}, TERMINAL);
-    await screen.findByTestId('live-terminal');
-    fireEvent.drop(windowBox(), dragged(new File(['<svg/>'], 'logo.svg', { type: 'image/svg+xml' })));
-    await refusedAlert(en.errors.picture_invalid);
-    expect(screen.queryByRole('textbox', { name: LINE })).not.toBeInTheDocument();
   });
 
   it('stops saying why once the picture is taken back or another comes', async () => {
