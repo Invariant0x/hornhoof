@@ -1,4 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { PGlite } from '@electric-sql/pglite';
+import { drizzle } from 'drizzle-orm/pglite';
+import { migrate } from 'drizzle-orm/pglite/migrator';
+import { describe, expect, it, onTestFinished } from 'vitest';
+import { MIGRATIONS } from '../src/db/client.js';
 import { createTestDb } from './helpers.js';
 
 describe('private materials storage', () => {
@@ -50,4 +57,29 @@ it('bounds private JSON and keeps public revision and digest an atomic pair', as
     await expect(db.$client.exec(`UPDATE ${table} SET material_snapshot = jsonb_build_object('oversized',repeat('x',1048576))`)).rejects.toThrow(/check constraint/);
     await db.$client.exec(`UPDATE ${table} SET material_snapshot = '{"schemaVersion":1,"versions":[]}'`);
   }
+});
+
+
+it('upgrades the previous schema with original question/proposal evidence intact and is repeatable', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'hh-materials-upgrade-'));
+  onTestFinished(() => rm(directory, { recursive: true, force: true }));
+  await cp(MIGRATIONS, directory, { recursive: true });
+  const file = join(directory, 'meta/_journal.json');
+  const journal = JSON.parse(await readFile(file, 'utf8')) as { entries: { tag: string }[] };
+  journal.entries = journal.entries.filter(entry => entry.tag !== '0067_request_materials');
+  await writeFile(file, JSON.stringify(journal));
+  const client = new PGlite();
+  onTestFinished(() => client.close());
+  const db = drizzle(client);
+  await migrate(db, { migrationsFolder: directory });
+  await client.exec(LEGACY_ROWS);
+  const beforeRequest = await client.query('SELECT to_jsonb(r) AS row FROM requests r');
+  const beforeProposal = await client.query('SELECT to_jsonb(p) AS row FROM proposals p');
+  await migrate(db, { migrationsFolder: MIGRATIONS });
+  expect((await client.query("SELECT to_jsonb(r) - ARRAY['material_revision','material_digest'] AS row FROM requests r")).rows).toEqual(beforeRequest.rows);
+  expect((await client.query("SELECT to_jsonb(p) - ARRAY['material_revision','material_digest','material_snapshot'] AS row FROM proposals p")).rows).toEqual(beforeProposal.rows);
+  expect((await client.query('SELECT material_revision,material_digest FROM requests')).rows).toEqual([{ material_revision: null, material_digest: null }]);
+  const history = await client.query('SELECT * FROM drizzle.__drizzle_migrations ORDER BY id');
+  await migrate(db, { migrationsFolder: MIGRATIONS });
+  expect((await client.query('SELECT * FROM drizzle.__drizzle_migrations ORDER BY id')).rows).toEqual(history.rows);
 });

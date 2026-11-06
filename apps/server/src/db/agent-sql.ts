@@ -12,7 +12,7 @@ export type AgentSql = { run: (text: string, mode: SqlMode) => Promise<SqlAnswer
 
 /* Signing in, joining and installing a node stay out of reach, and so does the public link, whose address goes into
    machine commands. Plans' sealed sign-ins too: a row put there would reach a node as its plan's sign-in. */
-export const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials'];
+export const HIDDEN = ['sessions', 'invites', 'node_codes', 'public_links', 'plan_credentials', 'request_internal'];
 /* Columns that hold a password, a token or a key: neither role reads or writes them. A machine's key goes with
    every join from it, so it is one too. The account a node is signed in to names a person's email. */
 export const SECRET: Record<string, string[]> = {
@@ -24,6 +24,7 @@ export const SECRET: Record<string, string[]> = {
   departments: ['repo_token_enc'],
   program_operator_cases: ['capability'],
   attachments: ['bytes'],
+  proposals: ['material_snapshot'],
 };
 /* Who people are and what they reach, and the subscriptions, machines and nodes the company runs on: the orchestrator's
    role reads them, and they change only through the tools the CEO alone may ask for. The history of the nodes' connections,
