@@ -53,7 +53,6 @@ async function repoOf(fs: AgentFs, workDir: string): Promise<{ exclude: string; 
   }
 }
 
-const END = "# end of Hornhoof's skill files";
 /* A path from the repository's root, its wildcards taken as plain characters. */
 const pattern = (path: string) => `/${path.replace(/[\\*?[\]!#]/g, c => `\\${c}`)}`;
 
@@ -71,19 +70,20 @@ function inTurn<T>(path: string, fn: () => Promise<T>): Promise<T> {
   return run;
 }
 
-/* Names what the node writes in the agent's folder in its repository's excludes, one block for each folder of each
-   checkout, so git add in that repository takes none of it in; an agent's own files there stay seen. */
-async function exclude(fs: AgentFs, workDir: string, paths: string[]): Promise<void> {
+/* Names what the node writes in the agent's folder in its repository's excludes, one block for each kind of file in each
+   folder of each checkout, so git add in that repository takes none of it in; an agent's own files there stay seen. */
+export async function excludeInRepo(fs: AgentFs, workDir: string, paths: string[], what = 'skill files'): Promise<void> {
   const repo = await repoOf(fs, workDir);
   if (!repo) return;
-  const head = `# Hornhoof's skill files in /${repo.at} of the checkout ${repo.gitDir}`;
+  const head = `# Hornhoof's ${what} in /${repo.at} of the checkout ${repo.gitDir}`;
+  const end = `# end of Hornhoof's ${what}`;
   await inTurn(repo.exclude, async () => {
     const lines = ((await fs.read(repo.exclude)) ?? '').split('\n');
     const from = lines.indexOf(head);
-    const to = from < 0 ? -1 : lines.indexOf(END, from);
+    const to = from < 0 ? -1 : lines.indexOf(end, from);
     const kept = to < 0 ? lines : [...lines.slice(0, from), ...lines.slice(to + 1)];
     while (kept.length && !kept[kept.length - 1]) kept.pop();
-    const block = paths.length ? [head, ...paths.map(p => pattern(repo.at ? `${repo.at}/${p}` : p)), END] : [];
+    const block = paths.length ? [head, ...paths.map(p => pattern(repo.at ? `${repo.at}/${p}` : p)), end] : [];
     await fs.mkdir(dirname(repo.exclude));
     await fs.write(repo.exclude, `${[...kept, ...block].join('\n')}\n`);
   });
@@ -102,17 +102,28 @@ async function placed(fs: AgentFs, workDir: string): Promise<Placed> {
   }
 }
 
+/* The superpowers skills a program without its plugin gets as files, beside the agent's own. */
+const copiedSkills = (provider: ProviderId, ours: ReadonlySet<string>, superpowers: string | null): string[] =>
+  !CLAUDE.has(provider) && superpowers ? readdirSync(join(superpowers, 'skills')).filter(name => !ours.has(`${skillsFolder(provider)}/${name}`)) : [];
+
+/* Everything placing these skills puts in a folder. */
+export function skillPaths(provider: ProviderId, skills: SkillFile[], superpowers: string | null): string[] {
+  const folder = skillsFolder(provider);
+  const ours = new Set(skills.map(s => `${folder}/${s.name}`));
+  return [...ours, ...copiedSkills(provider, ours, superpowers).map(name => `${folder}/${name}`), PLACED];
+}
+
 /* Writes the agent's skills where its program finds them before each turn, so a changed skill reaches the program
    without starting it again. A program without the superpowers plugin gets its skills copied in, each with the licence. */
 export async function placeSkills(fs: AgentFs, workDir: string, provider: ProviderId, skills: SkillFile[], superpowers: string | null): Promise<void> {
   const folder = skillsFolder(provider);
   const before = await placed(fs, workDir);
   const ours = new Set(skills.map(s => `${folder}/${s.name}`));
-  const copied = !CLAUDE.has(provider) && superpowers ? readdirSync(join(superpowers, 'skills')).filter(name => !ours.has(`${folder}/${name}`)) : [];
+  const copied = copiedSkills(provider, ours, superpowers);
   const version = copied.length ? versionOf(superpowers!) : null;
   const theirs = new Set(copied.map(name => `${folder}/${name}`));
   const fresh = version !== before.superpowers;
-  await exclude(fs, workDir, [...[...ours, ...theirs].map(p => `${p}/`), PLACED]);
+  await excludeInRepo(fs, workDir, [...[...ours, ...theirs].map(p => `${p}/`), PLACED]);
 
   for (const path of before.paths) if (!ours.has(path) && (!theirs.has(path) || fresh)) await fs.remove(join(workDir, path));
   await fs.mkdir(join(workDir, folder));

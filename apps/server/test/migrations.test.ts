@@ -35,8 +35,9 @@ describe('department owner and approval policy migration', () => {
     const rows = async (table: string) => (await db.execute(sql.raw(`select to_jsonb(t) - 'owner_person_id' - 'repo_full_test_command' as data from ${table} t order by id`))).rows;
     const before = { departments: await rows('departments'), people: await rows('people'), access: await rows('person_access') };
 
-    await migrate(db, { migrationsFolder: MIGRATIONS });
-    await migrate(db, { migrationsFolder: MIGRATIONS });
+    const target = await migrationsUpTo('0063_department_owner_approval_policy');
+    await migrate(db, { migrationsFolder: target });
+    await migrate(db, { migrationsFolder: target });
 
     expect({ departments: await rows('departments'), people: await rows('people'), access: await rows('person_access') }).toEqual(before);
     expect((await db.execute(sql`select owner_person_id from departments`)).rows).toEqual([{ owner_person_id: null }]);
@@ -146,7 +147,7 @@ describe('migration 0050', () => {
     const beforeWakes = (await db.execute(sql`select to_jsonb(w) as data from pending_wakes w order by id`)).rows;
     await migrate(db, { migrationsFolder: MIGRATIONS });
     await migrate(db, { migrationsFolder: MIGRATIONS });
-    expect((await db.execute(sql`select to_jsonb(t) - 'external_wait' - 'work_kind' - 'risk_class' as data from tasks t order by number`)).rows).toEqual(before);
+    expect((await db.execute(sql`select to_jsonb(t) - 'external_wait' - 'work_kind' - 'risk_class' - 'urgent' as data from tasks t order by number`)).rows).toEqual(before);
     expect((await db.execute(sql`select to_jsonb(w) - 'task_version' - 'cause' as data from pending_wakes w order by id`)).rows).toEqual(beforeWakes);
     expect((await db.execute(sql`select task_version, cause from pending_wakes`)).rows).toEqual([{ task_version: null, cause: null }]);
     const rows = (await db.execute(sql`select * from tasks order by number`)).rows;
@@ -167,6 +168,30 @@ async function migrationsUpTo(tag: string): Promise<string> {
   await writeFile(journalPath, JSON.stringify(journal));
   return dir;
 }
+
+describe('model checks migration', () => {
+  it('adds its tables empty, with nobody given anything and no row of an older database touched', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0067_request_materials') });
+    const company = (await db.execute<{ id: string }>(sql`insert into companies (name) values ('Acme') returning id`)).rows[0]!.id;
+    const person = (await db.execute<{ id: string }>(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Dana', 'dana@acme.example', 'active', 'listed') returning id`)).rows[0]!.id;
+    const department = (await db.execute<{ id: string }>(sql`insert into departments (company_id, template_key, role_code) values (${company}, 'support', 'SUP') returning id`)).rows[0]!.id;
+    await db.execute(sql`insert into person_access (company_id, person_id, department_id) values (${company}, ${person}, ${department})`);
+    const older = async () => Promise.all(['companies', 'people', 'departments', 'person_access'].map(async table => (await db.execute(sql.raw(`select to_jsonb(t) as row from ${table} t order by id`))).rows));
+    const before = await older();
+
+    const target = await migrationsUpTo('0068_model_checks');
+    await migrate(db, { migrationsFolder: target });
+    await migrate(db, { migrationsFolder: target });
+
+    expect(await older()).toEqual(before);
+    for (const table of ['model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations']) {
+      expect((await db.execute(sql.raw(`select count(*)::int as n from ${table}`))).rows, table).toEqual([{ n: 0 }]);
+    }
+  });
+});
 
 describe('migration 0049', () => {
   it.each(['Acme', 'Moonfern'])('adds history indexes on an upgraded %s copy without changing old events', async name => {
@@ -807,7 +832,7 @@ describe('migration 0045', () => {
       from generate_series(1, 20000) n`);
     await db.execute(sql`insert into tasks (company_id, number, title) values (${C}, 20001, 'No turn or product')`);
     /* Migrations 0050 and 0062 check their new nullable fields separately; every earlier field must stay identical. */
-    const fingerprint = sql`select count(*)::int as n, md5(string_agg((to_jsonb(t) - 'external_wait' - 'work_kind' - 'risk_class')::text, '' order by number)) as checksum from tasks t`;
+    const fingerprint = sql`select count(*)::int as n, md5(string_agg((to_jsonb(t) - 'external_wait' - 'work_kind' - 'risk_class' - 'urgent')::text, '' order by number)) as checksum from tasks t`;
     const before = await db.execute(fingerprint);
     expect(before.rows[0]).toMatchObject({ n: 20001 });
 
@@ -1069,7 +1094,7 @@ describe('migration 0062', () => {
       { number: 9, work_kind: null, risk_class: null },
       { number: 10, work_kind: 'bug', risk_class: null },
     ]);
-    expect((await db.execute(sql`select to_jsonb(t) - 'work_kind' - 'risk_class' as data from tasks t order by number`)).rows).toEqual(before);
+    expect((await db.execute(sql`select to_jsonb(t) - 'work_kind' - 'risk_class' - 'urgent' as data from tasks t order by number`)).rows).toEqual(before);
   });
 
   it('refuses a kind or a risk class it does not know', async () => {

@@ -5,6 +5,7 @@ import { accessOf, canReach, type Access, type Spot } from '../../auth/access.js
 import type { Db } from '../../db/client.js';
 import { agents, attachments, companies, departments, jobs, people, requests, subscriptions, taskEvents, tasks, turns, type DecisionTopic, type RequestOption, type TaskEventKind } from '../../db/schema.js';
 import { ApiError, type ErrorReason } from '../../errors.js';
+import { urgencyOfNew } from './urgency.js';
 import { canDecide } from '../../auth/decisions.js';
 import type { DecisionSubject } from '../../auth/decision-owner.js';
 import { checkDelegation, contextMissing, requireDecider, type Delegation } from '../conversation/decision-context.js';
@@ -193,6 +194,7 @@ async function openTurnReview(tx: Tx, templates: Ctx['templates'], parent: Task,
       parentId: parent.id,
       departmentId: parent.departmentId,
       productId: parent.productId,
+      urgent: parent.urgent,
       title: `Review of turn ${turn!.number}`,
       brief: `Every reviewer checks all that turn ${turn!.number} changed for ${titles} at once, on ${branch}.`,
       body: `Review ${branch} against the main line: everything the turn changed under ${under}. The verdicts go to the head in one list.`,
@@ -495,6 +497,8 @@ export type NewTask = {
   inTurnReview?: boolean;
   workKind?: Task['workKind'];
   riskClass?: Task['riskClass'];
+  /* Of a task with nothing above it; one under a task is what that task is. */
+  urgent?: boolean;
 };
 
 /* A live employee or orchestrator of the company. */
@@ -536,8 +540,10 @@ export async function createTask(ctx: Live, actor: Actor, input: NewTask): Promi
     /* Numbers go up one by one per company, so creating tasks waits on the company row. */
     await tx.select({ id: companies.id }).from(companies).where(eq(companies.id, assignee.companyId)).for('update');
     /* A parent cancelled meanwhile takes no new work; one cancelled after this waits and cancels the new task with it. */
+    let above: Task | null = null;
     if (parent) {
       const [now] = await tx.select().from(tasks).where(eq(tasks.id, parent.id)).for('update');
+      above = now!;
       stillOpen(now!);
       /* Its gates check the work as handed in; more work under it starts once they send it back. */
       if (now!.stage > 0) throw refuse(409, 'task_invalid', `#${now!.number} is being checked at its gates, so no work goes under it now. Give it once the gates send it back, or as a task of its own.`);
@@ -545,6 +551,8 @@ export async function createTask(ctx: Live, actor: Actor, input: NewTask): Promi
       const open = await openAfter(tx, now!);
       if (open.length) throw refuse(409, 'task_invalid', `#${now!.number} waits for ${listed(open)} first, so no work goes under it yet. You are woken once it can start.`);
     }
+    /* With the company held, so a change of urgency on its way reaches this task, or waits for it. */
+    const urgent = await urgencyOfNew(tx, assignee.companyId, actor, above, input.urgent);
     const [last] = await tx.select({ n: max(tasks.number) }).from(tasks).where(eq(tasks.companyId, assignee.companyId));
     const [turn] = parent ? [] : await tx.select({ id: turns.id }).from(turns).where(and(eq(turns.companyId, assignee.companyId), eq(turns.status, 'open')));
     const turnId = parent ? parent.turnId : (turn?.id ?? null);
@@ -571,6 +579,7 @@ export async function createTask(ctx: Live, actor: Actor, input: NewTask): Promi
         after: input.after ?? [],
         workKind: input.workKind,
         riskClass: input.riskClass,
+        urgent,
         createdByPersonId: actor.personId ?? null,
         createdByAgentId: actor.agentId ?? null,
         updatedAt: new Date(),

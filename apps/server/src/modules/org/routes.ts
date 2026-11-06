@@ -1,3 +1,4 @@
+import { departmentProgress } from '../tasks/turn-progress.js';
 import { defaultEffortOf, effortFor, effortsOf, modelsFor, ORCHESTRATOR_EFFORT, type Limits, type ModelOption, type ProviderId } from '@hornhoof/protocol';
 import { and, asc, eq, isNull, ne } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
@@ -108,7 +109,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
     };
     /* Only people who see the whole company set repositories, so only they read where they are. */
     const repositoryOf = (d: (typeof depts)[number]) => (reach.whole ? repoView(d) : null);
-    const [open] = await db.select({ id: turns.id, number: turns.number, title: turns.title, goal: turns.goal }).from(turns).where(and(eq(turns.companyId, me.companyId), eq(turns.status, 'open')));
+    const [open] = await db.select({ id: turns.id, companyId: turns.companyId, number: turns.number, title: turns.title, goal: turns.goal }).from(turns).where(and(eq(turns.companyId, me.companyId), eq(turns.status, 'open')));
     /* The map shows the turn's short name. */
     const turn = open && { id: open.id, number: open.number, goal: open.title || open.goal };
     const allTeams = await db.select().from(teams).where(eq(teams.companyId, me.companyId)).orderBy(asc(teams.stage), asc(teams.createdAt));
@@ -235,10 +236,12 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
           : { ...views.get(p.id)!, deputy: true, departments: homes.get(p.id)! },
       ),
       /* Products are departments inside a department; the map shows only the top level and lists the products on it. */
-      departments: topDepts.map(d => ({
+      departments: await Promise.all(topDepts.map(async d => ({
           id: d.id,
           name: d.name,
           templateKey: d.templateKey,
+          workMode: d.workMode,
+          turnProgress: await departmentProgress(db, open, viewer, d, { departments: depts, teams: allTeams }),
           roleCode: d.roleCode,
           about: d.about,
           ownerPersonId: ownerOf(owners, d.id),
@@ -251,11 +254,11 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
           repository: repositoryOf(d),
           teams: allTeams
             .filter(t => t.departmentId === d.id)
-            .map(t => ({ id: t.id, name: t.name, about: t.about, stage: t.stage, gate: t.gate })),
+            .map(t => ({ id: t.id, name: t.name, about: t.about, stage: t.stage, gate: t.gate, urgentOnly: t.urgentOnly })),
           live: inside(d.id),
           workLines: linesOf('member', d.id),
           reworkAt: reworkAt(reworks, d.id),
-        })),
+        }))),
     };
   });
 }

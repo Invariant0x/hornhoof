@@ -1,4 +1,5 @@
-import { and, asc, count, desc, eq, inArray, isNull, notInArray, sql, type SQL } from 'drizzle-orm';
+import { turnCounts } from './turn-progress.js';
+import { and, asc, desc, eq, inArray, isNull, notInArray, sql, type SQL } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { Text } from './long-text.js';
@@ -14,6 +15,7 @@ import { serverMachine } from '../computer/access.js';
 import { deptName } from '../departments/templates.js';
 import { departmentNames, visibleDecisions, type Decisions } from './decisions.js';
 import { answer, cancel, CLOSED, comment, createTask, refuse, requestSubject, taskSpot, type Task } from './engine.js';
+import { setUrgent } from './urgency.js';
 import { requireDecision } from '../../auth/decisions.js';
 import { delegationOf, lockedFor } from '../conversation/decision-context.js';
 import type { DecidedBy } from '../../auth/decisions.js';
@@ -28,6 +30,7 @@ import { leaveIfOff, stopTurns, wakeAll } from './wake.js';
 
 const IdParams = z.object({ id: z.uuid() });
 const NewTaskBody = z.object({
+  urgent: z.boolean().optional(),
   title: z.string().trim().min(1).max(120),
   brief: z.string().max(600).default(''),
   body: z.string().max(20000).default(''),
@@ -130,17 +133,6 @@ async function computerView(ctx: Ctx, companyId: string, computer: NonNullable<D
   };
 }
 
-/* How many tasks of a turn are there and done, of those this person sees. */
-async function turnCounts(db: Db, turn: Turn, viewer: AgentViewer) {
-  if (viewer.full) {
-    const [all] = await db.select({ n: count() }).from(tasks).where(eq(tasks.turnId, turn.id));
-    const [done] = await db.select({ n: count() }).from(tasks).where(and(eq(tasks.turnId, turn.id), eq(tasks.status, 'done')));
-    return { total: Number(all?.n ?? 0), done: Number(done?.n ?? 0) };
-  }
-  const seen = (await db.select().from(tasks).where(eq(tasks.turnId, turn.id))).filter(t => seesTask(viewer, t));
-  return { total: seen.length, done: seen.filter(t => t.status === 'done').length };
-}
-
 /* The task a turn's work hangs under, for someone who sees it. */
 async function turnTask(db: Db, turn: Turn, viewer: AgentViewer): Promise<string | null> {
   if (viewer.full || !turn.taskId) return turn.taskId;
@@ -230,7 +222,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const after = body.after?.length ? (await db.select().from(tasks).where(and(eq(tasks.companyId, me.companyId), inArray(tasks.number, body.after)))).filter(t => seesTask(viewer, t)) : [];
     const missing = (body.after ?? []).find(n => !after.some(t => t.number === n));
     if (missing !== undefined) throw refuse(400, 'task_invalid', `There is no task #${missing} to come after.`);
-    const moved = await createTask(ctx, actorOf(me), { title: body.title, brief: body.brief, body: body.body, departmentId: body.department ?? null, productId: body.product ?? null, assigneeAgentId: assignee.id, after: (body.after ?? []).map(n => after.find(t => t.number === n)!.id) });
+    const moved = await createTask(ctx, actorOf(me), { title: body.title, brief: body.brief, body: body.body, departmentId: body.department ?? null, productId: body.product ?? null, assigneeAgentId: assignee.id, urgent: body.urgent, after: (body.after ?? []).map(n => after.find(t => t.number === n)!.id) });
     await wakeAll(ctx, moved.wakes);
     return reply.code(201).send({ task: await detail(me, moved.task) });
   });
@@ -242,6 +234,15 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const moved = await comment(ctx, actorOf(me), (await shown(me, id)).id, text);
     await wakeAll(ctx, moved.wakes);
     return reply.code(201).send({ task: await detail(me, moved.task) });
+  });
+
+  /* Only the CEO or the CEO delegate says so, as the engine checks. */
+  app.put('/api/tasks/:id/urgent', async req => {
+    const me = await requirePerson(req, db);
+    const { id } = IdParams.parse(req.params);
+    const { urgent } = z.object({ urgent: z.boolean() }).strict().parse(req.body);
+    const moved = await setUrgent(ctx, actorOf(me), (await shown(me, id)).id, urgent);
+    return { task: await detail(me, moved.task) };
   });
 
   app.post('/api/tasks/:id/cancel', async req => {

@@ -1,7 +1,9 @@
 import type { ExternalWait } from '@hornhoof/protocol/waits';
-import { APPROVAL_CHANNELS, APPROVAL_MODES, COMPANY_TEMPLATE_KEYS, CONNECTION_ENDS, CRED_KINDS, MACHINE_KINDS, RISK_CLASSES, RUN_KINDS, TEMPLATE_KEYS, WORK_KINDS, type EnvironmentSnapshot, type EnvironmentProblem, type RepositoryScope, type TestExecution, type TestEnvironmentReceipt, type Account, type Boot, type Failure, type Limits, type ModelOption, type NodeExit, type NodeReconnect, type TestFileTiming, type TestPackageTiming, type TurnFacts } from '@hornhoof/protocol';
+import { APPROVAL_CHANNELS, APPROVAL_MODES, COMPANY_TEMPLATE_KEYS, CONNECTION_ENDS, CRED_KINDS, INVALIDATION_CODES, MACHINE_KINDS, MODEL_CHECK_KINDS, RISK_CLASSES, RUN_KINDS, TEMPLATE_KEYS, WORK_KINDS, type MaterialSnapshotHistory, type CheckBinding, type EvaluationCounts, type ModelIdentity, type EnvironmentSnapshot, type EnvironmentProblem, type RepositoryScope, type TestExecution, type TestEnvironmentReceipt, type Account, type Boot, type Failure, type Limits, type ModelOption, type NodeExit, type NodeReconnect, type TestFileTiming, type TestPackageTiming, type TurnFacts } from '@hornhoof/protocol';
 import type { OperatorError, OperatorInputLine, OperatorQuestion, OperatorReason } from '@hornhoof/protocol/program-operator';
 import type { MessageParty } from '../modules/events/parties.js';
+import type { BindingPart } from '../modules/model-checks/lifecycle.js';
+import type { RunProblem, Thresholds } from '../modules/model-checks/score.js';
 import { sql } from 'drizzle-orm';
 import { bigint, bigserial, boolean, check, customType, doublePrecision, index, integer, jsonb, pgTable, primaryKey, real, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
 
@@ -9,6 +11,16 @@ const id = () => uuid('id').primaryKey().defaultRandom();
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
 const companyId = () => uuid('company_id').notNull().references(() => companies.id);
 const bytea = customType<{ data: Uint8Array; driverData: Uint8Array }>({ dataType: () => 'bytea' });
+
+/* Legacy rows keep null metadata. A versioned public stamp is always complete. */
+const materialStamp = (revision: AnyPgColumn, digest: AnyPgColumn) => sql`
+  (${revision} IS NULL AND ${digest} IS NULL) OR
+  (${revision} IS NOT NULL AND ${digest} IS NOT NULL AND ${revision} > 0
+   AND ${revision} <= 9007199254740991 AND ${digest} ~ '^[0-9a-f]{64}$')`;
+/* JSON bytes remain private/bounded; the sealing service validates the history
+   structure and append-only semantics before persisting it. */
+const materialHistoryBound = (history: AnyPgColumn) => sql`
+  ${history} IS NULL OR (jsonb_typeof(${history}) = 'object' AND octet_length(${history}::text) <= 1048576)`;
 
 /* One deployment serves one company: the unique singleton column makes a second row impossible. */
 export const companies = pgTable('companies', {
@@ -76,6 +88,8 @@ export const departments = pgTable('departments', {
   companyId: companyId(),
   name: text('name'),
   templateKey: text('template_key', { enum: TEMPLATE_KEYS }),
+  /* New departments receive their template's mode through their creation path. */
+  workMode: text('work_mode', { enum: ['turns', 'continuous'] }).notNull().default('turns'),
   parentId: uuid('parent_id').references((): AnyPgColumn => departments.id),
   about: text('about').notNull().default(''),
   roleCode: text('role_code').notNull(),
@@ -96,7 +110,7 @@ export const departments = pgTable('departments', {
      and it is never worked out from who has access. It counts only while that person is active and still has access. */
   ownerPersonId: uuid('owner_person_id').references((): AnyPgColumn => people.id),
   createdAt: createdAt(),
-}, t => [index('departments_owner_person_id').on(t.ownerPersonId)]);
+}, t => [index('departments_owner_person_id').on(t.ownerPersonId), check('departments_work_mode', sql`${t.workMode} IN ('turns', 'continuous')`)]);
 
 /* How a department's approvals go, one rule per channel; a channel with no rule asks every time. The rules belong to the
    department, not to its owner, so they stay when the owner changes or goes. */
@@ -125,6 +139,8 @@ export const teams = pgTable('teams', {
   about: text('about').notNull().default(''),
   stage: integer('stage').notNull().default(0),
   gate: boolean('gate').notNull().default(false),
+  /* Its members take urgent work only. */
+  urgentOnly: boolean('urgent_only').notNull().default(false),
   createdAt: createdAt(),
 });
 
@@ -475,6 +491,10 @@ export const proposals = pgTable('proposals', {
   agentId: uuid('agent_id').notNull().references(() => agents.id),
   jobId: uuid('job_id').references(() => jobs.id),
   brief: text('brief').notNull().default(''),
+  materialRevision: bigint('material_revision', { mode: 'number' }),
+  materialDigest: text('material_digest'),
+  /* Private sealed versions, never serialized as a public proposal. */
+  materialSnapshot: jsonb('material_snapshot').$type<MaterialSnapshotHistory>(),
   items: jsonb('items').notNull(),
   /* structure: departments for the company; staff: employees for one department. */
   kind: text('kind', { enum: ['structure', 'staff'] }).notNull().default('structure'),
@@ -483,7 +503,10 @@ export const proposals = pgTable('proposals', {
   appliedBy: uuid('applied_by').references(() => people.id),
   appliedAt: timestamp('applied_at', { withTimezone: true }),
   createdAt: createdAt(),
-});
+}, t => [
+  check('proposals_material_stamp', materialStamp(t.materialRevision, t.materialDigest)),
+  check('proposals_material_snapshot_bound', materialHistoryBound(t.materialSnapshot)),
+]);
 
 /* A company-wide cycle the CEO starts with a goal; one is open at a time. */
 export const TURN_STATUSES = ['planned', 'open', 'closed'] as const;
@@ -568,6 +591,8 @@ export const tasks = pgTable(
     /* What kind of work it is and what a mistake in it would cost, as whoever gave it out named them. */
     workKind: text('work_kind', { enum: WORK_KINDS }),
     riskClass: text('risk_class', { enum: RISK_CLASSES }),
+    /* Said by the CEO, never read from its words; work under a task is as urgent as it is. */
+    urgent: boolean('urgent').notNull().default(false),
     /* Grows with every move, so two moves that read the same task cannot both land. */
     version: integer('version').notNull().default(0),
     createdByPersonId: uuid('created_by_person_id').references(() => people.id),
@@ -689,6 +714,9 @@ export const requests = pgTable(
     kind: text('kind', { enum: REQUEST_KINDS }).notNull(),
     text: text('text').notNull(),
     commit: text('commit'),
+    /* Null together on legacy sources; no private file/disclosure metadata here. */
+    materialRevision: bigint('material_revision', { mode: 'number' }),
+    materialDigest: text('material_digest'),
     options: jsonb('options').$type<RequestOption[]>().notNull().default([]),
     link: text('link'),
     picked: integer('picked'),
@@ -712,11 +740,23 @@ export const requests = pgTable(
     answeredAt: timestamp('answered_at', { withTimezone: true }),
   },
   t => [
+    check('requests_material_stamp', materialStamp(t.materialRevision, t.materialDigest)),
     index('requests_task_id').on(t.taskId),
     index('requests_approved_kinds').on(t.companyId, t.approvalChannel, t.approvalKind).where(sql`${t.status} = 'approved' AND ${t.approvalChannel} IS NOT NULL`),
     check('requests_approval_commit', sql`${t.kind} <> 'approval' OR ${t.commit} IS NOT NULL OR ${t.approvalChannel} IS NOT NULL`),
   ],
 );
+
+/* Materials sidecar only. Internal question lifecycle/authority is added by its
+   own producer; SQL agents cannot read or forge these private packages. */
+export const requestInternal = pgTable('request_internal', {
+  requestId: uuid('request_id').primaryKey().references(() => requests.id),
+  companyId: companyId(),
+  materialSnapshot: jsonb('material_snapshot').$type<MaterialSnapshotHistory>(),
+}, t => [
+  index('request_internal_company_id').on(t.companyId),
+  check('request_internal_material_snapshot_bound', materialHistoryBound(t.materialSnapshot)),
+]);
 
 /* A picture an agent sent from its turn to show its work. People see it once a request of that agent shows it. Or a file
    an agent on a task put on it, of any kind, which every agent of the company downloads by its name. */
@@ -1043,4 +1083,103 @@ export const waitNotices = pgTable('wait_notices', {
 }, t => [
   unique('wait_notices_dedup').on(t.companyId, t.dedupKey),
   index('wait_notices_pending').on(t.createdAt).where(sql`${t.deliveredAt} IS NULL AND ${t.cancelledAt} IS NULL`),
+]);
+
+/* Checks made by a model. Both SQL roles stay out (HIDDEN): the examples hold private words, the held-out part must not
+   reach whoever tunes a prompt, and a status written by hand could turn a check on. */
+const MODEL_CHECK_PARTIES = ['person', 'agent'] as const;
+
+export const modelChecks = pgTable('model_checks', {
+  id: id(),
+  companyId: companyId(),
+  departmentId: uuid('department_id').notNull().references(() => departments.id, { onDelete: 'cascade' }),
+  productId: uuid('product_id').references(() => departments.id, { onDelete: 'cascade' }),
+  kind: text('kind', { enum: MODEL_CHECK_KINDS }).notNull(),
+  /* Off until a run of this very binding passes, and off again when its week ends or a part of it changes. */
+  status: text('status', { enum: ['off', 'on'] }).notNull().default('off'),
+  offReason: text('off_reason', { enum: INVALIDATION_CODES }),
+  bindingDigest: text('binding_digest'),
+  validUntil: timestamp('valid_until', { withTimezone: true }),
+  /* Set by the owner of the department, not by whoever wrote the check. */
+  thresholds: jsonb('thresholds').$type<Thresholds>(),
+  thresholdsBy: uuid('thresholds_by').references(() => people.id),
+  createdAt: createdAt(),
+}, t => [
+  unique('model_checks_place').on(t.departmentId, t.productId, t.kind).nullsNotDistinct(),
+  index('model_checks_company_id').on(t.companyId),
+  check('model_checks_status', sql`${t.status} IN ('off', 'on')`),
+  check('model_checks_on_is_bound', sql`${t.status} = 'off' OR (${t.bindingDigest} IS NOT NULL AND ${t.validUntil} IS NOT NULL AND ${t.thresholds} IS NOT NULL AND ${t.offReason} IS NULL)`),
+]);
+
+/* A definition of a check, never changed: the next change is the next version. */
+export const modelCheckRevisions = pgTable('model_check_revisions', {
+  id: id(),
+  checkId: uuid('check_id').notNull().references(() => modelChecks.id, { onDelete: 'cascade' }),
+  definitionVersion: integer('definition_version').notNull(),
+  checkerCodeHash: text('checker_code_hash').notNull(),
+  promptHash: text('prompt_hash').notNull(),
+  outputSchemaHash: text('output_schema_hash').notNull(),
+  sourceListHash: text('source_list_hash').notNull(),
+  taxonomyHash: text('taxonomy_hash'),
+  model: jsonb('model').$type<ModelIdentity>().notNull(),
+  authorKind: text('author_kind', { enum: MODEL_CHECK_PARTIES }).notNull(),
+  authorId: uuid('author_id').notNull(),
+  createdAt: createdAt(),
+}, t => [
+  unique('model_check_revisions_version').on(t.checkId, t.definitionVersion),
+  check('model_check_revisions_author', sql`${t.authorKind} IN ('person', 'agent')`),
+]);
+
+/* A set of examples, never changed: its id is the datasetVersion of a binding. Its lines stay sealed, with the counts beside them. */
+export const modelCheckDatasets = pgTable('model_check_datasets', {
+  id: id(),
+  checkId: uuid('check_id').notNull().references(() => modelChecks.id, { onDelete: 'cascade' }),
+  version: integer('version').notNull(),
+  hash: text('hash').notNull(),
+  jsonlEnc: text('jsonl_enc').notNull(),
+  cases: integer('cases').notNull(),
+  holdoutCases: integer('holdout_cases').notNull(),
+  mustBlockCases: integer('must_block_cases').notNull(),
+  addedByKind: text('added_by_kind', { enum: MODEL_CHECK_PARTIES }).notNull(),
+  addedById: uuid('added_by_id').notNull(),
+  createdAt: createdAt(),
+}, t => [
+  unique('model_check_datasets_version').on(t.checkId, t.version),
+  check('model_check_datasets_added_by', sql`${t.addedByKind} IN ('person', 'agent')`),
+  check('model_check_datasets_counts', sql`${t.cases} > 0 AND ${t.holdoutCases} >= 0 AND ${t.mustBlockCases} >= 0 AND ${t.holdoutCases} <= ${t.cases} AND ${t.mustBlockCases} <= ${t.cases}`),
+]);
+
+/* One run over one binding: its id is the reportId. The dedup key makes one change or one week a single run, however many
+   rounds see it. A pass cannot be written for a run that was cut short, had an error or missed what it must block. */
+export const modelCheckEvaluations = pgTable('model_check_evaluations', {
+  id: id(),
+  checkId: uuid('check_id').notNull().references(() => modelChecks.id, { onDelete: 'cascade' }),
+  revisionId: uuid('revision_id').notNull().references(() => modelCheckRevisions.id, { onDelete: 'cascade' }),
+  datasetId: uuid('dataset_id').notNull().references(() => modelCheckDatasets.id, { onDelete: 'cascade' }),
+  /* The binding it ran, whole: the next change compares against it, and a report says what it was about. */
+  binding: jsonb('binding').$type<CheckBinding>().notNull(),
+  bindingDigest: text('binding_digest').notNull(),
+  trigger: text('trigger', { enum: ['change', 'weekly'] }).notNull(),
+  parts: jsonb('parts').$type<BindingPart[]>().notNull().default([]),
+  dedupKey: text('dedup_key').notNull(),
+  status: text('status', { enum: ['queued', 'running', 'passed', 'failed', 'incomplete'] }).notNull().default('queued'),
+  complete: boolean('complete').notNull().default(false),
+  infraErrors: integer('infra_errors').notNull().default(0),
+  mustBlockMisses: integer('must_block_misses').notNull().default(0),
+  metrics: jsonb('metrics').$type<EvaluationCounts>(),
+  holdoutMetrics: jsonb('holdout_metrics').$type<EvaluationCounts>(),
+  problems: jsonb('problems').$type<RunProblem[]>().notNull().default([]),
+  /* Ids of missed examples of the part authors may see. Held-out ones are never named. */
+  missedDevCases: jsonb('missed_dev_cases').$type<string[]>().notNull().default([]),
+  startedAt: timestamp('started_at', { withTimezone: true }),
+  finishedAt: timestamp('finished_at', { withTimezone: true }),
+  createdAt: createdAt(),
+}, t => [
+  unique('model_check_evaluations_dedup').on(t.checkId, t.dedupKey),
+  index('model_check_evaluations_pending').on(t.createdAt).where(sql`${t.status} IN ('queued', 'running')`),
+  index('model_check_evaluations_finished').on(t.checkId, t.finishedAt),
+  check('model_check_evaluations_trigger', sql`${t.trigger} IN ('change', 'weekly')`),
+  check('model_check_evaluations_status', sql`${t.status} IN ('queued', 'running', 'passed', 'failed', 'incomplete')`),
+  check('model_check_evaluations_ended', sql`(${t.status} IN ('queued', 'running')) = (${t.finishedAt} IS NULL)`),
+  check('model_check_evaluations_clean_pass', sql`${t.status} <> 'passed' OR (${t.complete} AND ${t.infraErrors} = 0 AND ${t.mustBlockMisses} = 0 AND ${t.metrics} IS NOT NULL AND ${t.holdoutMetrics} IS NOT NULL)`),
 ]);
