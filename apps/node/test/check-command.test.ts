@@ -1,6 +1,10 @@
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { CheckClient } from '../src/check-client.js';
-import { setCheckClient } from '../src/check-queue.js';
+import { currentCheckLease, setCheckClient, withCheckSlot } from '../src/check-queue.js';
+import { configureCheckCommands } from '../src/check-command-runner.js';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Bridge } from '../src/terminal/bridge.js';
 import { procOwner } from '../src/terminal/peer.js';
 import { spawn } from 'node:child_process';
@@ -133,5 +137,57 @@ describe('heavy command bridge', () => {
     while (!released) await new Promise(resolve => setTimeout(resolve, 20));
     expect(performance.now() - started).toBeGreaterThanOrEqual(4500);
     expect(() => process.kill(pid, 0)).toThrow();
+  });
+});
+
+
+/* Real child sentinel and queue protocol, but no real compiler or native CLI.
+   The fixture executable only records whether the forbidden payload started. */
+async function guardedCommandFixture() {
+  const root = mkdtempSync(join(tmpdir(), 'hh-guard-command-'));
+  const bin = join(root, 'bin'), sentinel = join(root, 'payload-started');
+  mkdirSync(bin);
+  const compiler = join(bin, 'tsc');
+  writeFileSync(compiler, '#!/bin/sh\nprintf spawned > "$HH_GUARD_SENTINEL"\n');
+  chmodSync(compiler, 0o755);
+  let acquired = 0;
+  const client = new CheckClient(frame => {
+    if (frame.type === 'check.acquire') {
+      acquired++;
+      queueMicrotask(() => client.receive({ type: 'check.state', id: frame.id, state: 'running', position: 0 }));
+    }
+    return true;
+  });
+  client.online(true); setCheckClient(client); configureCheckCommands(null);
+  const key = '10000000-0000-4000-8000-000000000050';
+  const bridge = new Bridge('http://127.0.0.1:1', () => {});
+  await bridge.start(); bridge.setToken(key, 'current-fixture-turn');
+  onTestFinished(() => { bridge.stop(); client.online(false); setCheckClient(null); configureCheckCommands(null); rmSync(root, { recursive: true, force: true }); });
+  const run = async (lease?: string) => {
+    const response = await fetch(bridge.agent(key).hookUrl.replace('/hook/', '/check/'), {
+      method: 'POST', body: JSON.stringify({ command: ['tsc', '--noEmit'], cwd: root, env: { PATH: bin, HH_GUARD_SENTINEL: sentinel, HH_CHECK_SLOT: lease ?? 'forged-claim' }, ...(lease ? { lease } : {}) }),
+    });
+    return response.text();
+  };
+  return { key, run, acquired: () => acquired, sentinel };
+}
+
+describe('command policy boundary', () => {
+  it('denies a missing guard before a heavy sentinel or a slot can start', async () => {
+    const c = await guardedCommandFixture();
+    const text = await c.run();
+    expect(existsSync(c.sentinel)).toBe(false);
+    expect(c.acquired()).toBe(0);
+    expect(text).toContain('запусти через run_tests');
+    expect(text).not.toContain('"type":"exit"');
+  });
+
+  it('denies heavy agent payload even while the same agent holds a genuine lease', async () => {
+    const c = await guardedCommandFixture();
+    const text = await withCheckSlot(() => c.run(currentCheckLease()), { agentId: c.key });
+    expect(existsSync(c.sentinel)).toBe(false);
+    expect(c.acquired()).toBe(1);
+    expect(text).toContain('запусти через run_tests');
+    expect(text).not.toContain('"type":"exit"');
   });
 });

@@ -1358,3 +1358,24 @@ it.skipIf(!hasTmux)('delivers input_kept through the node socket before starting
   await server.wait(() => server.received.some(message => message.type === 'job.done' && message.jobId === 'kept-second'), 8000);
   expect(server.received.find(message => message.type === 'job.done' && message.jobId === 'kept-second')).toMatchObject({ ok: true, result: 'echo: Second assignment.' });
 });
+
+
+describe('checking work before admission', () => {
+  it.each(['npm ci && npm run build', 'vitest run first.test.ts', 'crapper --use-existing-coverage src/a.ts'])('refuses %s before any part preparation', async command => {
+    const server = await fakeServer(), dir = nodeDir(server.url);
+    const sentinel = join(dir, 'payload-started');
+    const runPart: typeof runTests = async part => {
+      writeFileSync(sentinel, 'part preparation started');
+      return { type: 'tests.done', partId: part.partId, ok: true, exitCode: 0, error: null, commit: null, log: 'fixture part ran' };
+    };
+    const node = await runNode({ dir, adapter, testUser: environmentTestUser, runPart, log: () => {} });
+    onTestFinished(() => node.stop());
+    await server.wait(() => server.received.some(frame => frame.type === 'hello'));
+    server.send({ type: 'tests.run', kind: 'work', partId: 'checking-work', repo: null, branch: null, task: 1, command, part: 1, parts: 1, timeoutMs: 1000 });
+    await server.wait(() => server.received.some(frame => frame.type === 'tests.done' && frame.partId === 'checking-work'));
+    expect(existsSync(sentinel)).toBe(false);
+    expect(server.received.filter(frame => frame.type === 'check.acquire')).toEqual([]);
+    expect(server.received.filter(frame => frame.type === 'tests.started')).toEqual([]);
+    expect(server.received.find(frame => frame.type === 'tests.done' && frame.partId === 'checking-work')).toMatchObject({ ok: false, exitCode: null, error: 'failed', commit: null, log: expect.stringContaining('запусти через run_tests') });
+  });
+});
