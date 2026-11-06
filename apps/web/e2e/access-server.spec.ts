@@ -176,7 +176,7 @@ test('real server closes an open terminal with 4403 when the plan moves', async 
     await expect(window.locator('.xterm-screen')).toContainText('Mina private terminal');
     await server.control('move-mine-bob');
     await expect(window.locator('.xterm-screen')).toHaveCount(0);
-    await expect(window).not.toContainText('Mina private terminal');
+    await expect(window).toHaveCount(0);
     expect(errorsOf(ann)).toEqual([]);
   } finally {
     await server.stop();
@@ -190,7 +190,7 @@ test('real server refuses an upgraded socket and drops the stale screen on termi
     const ann = await signedIn(browser, server, 'ann', 'en', 'light', 1440);
     const window = await openAgent(ann, 'Otto');
     await expect(window.locator('.xterm-screen')).toHaveCount(0);
-    await expect(window).not.toContainText('Mina private terminal');
+    await expect(window).toHaveCount(0);
     expect(errorsOf(ann)).toEqual([]);
   } finally {
     await server.stop();
@@ -206,7 +206,7 @@ test('real server drops the old owner view even while their program keeps runnin
     await expect(window.locator('.xterm-screen')).toContainText('Mina private terminal');
     await server.control('turn-other-ann');
     await expect(window.locator('.xterm-screen')).toHaveCount(0);
-    await expect(window).not.toContainText('Mina private terminal');
+    await expect(window).toHaveCount(0);
     expect(errorsOf(bob)).toEqual([]);
   } finally {
     await server.stop();
