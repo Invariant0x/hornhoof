@@ -27,6 +27,7 @@ describe('registered workspace repository identity', () => {
     'https://git.example/', 'https://git.example/.git',
     'https://git.example/team/repo?credential=fixture', 'https://git.example/team/repo#branch',
     ' https://git.example/team/repo', 'https://git.example/team/repo\n',
+    'https://git.example/team/\u00a0repo', 'https://git.example/team/\u2003repo',
     'https://git.example/team\\repo', 'https:///git.example/team/repo',
   ])('refuses unsupported or ambiguous identity %j', input => {
     expect(canonicalWorkspaceRepositoryUrl(input)).toBeNull();
