@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { canonicalJson, type Case, type CheckBinding } from '@hornhoof/protocol';
-import { and, desc, eq, inArray, isNotNull, isNull, lt, max, or, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, lt, max, or, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { decryptSecret, encryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
