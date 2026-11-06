@@ -1,12 +1,14 @@
 import { randomUUID } from 'node:crypto';
-import type { CatalogValue, OutboundPolicyValue, OutboundSubmit } from '@hornhoof/protocol';
+import type { CatalogValue, OutboundPolicyValue, OutboundSubmit, ProviderId } from '@hornhoof/protocol';
 import { eq } from 'drizzle-orm';
+import type { Deps } from '../src/app.js';
 import { encryptSecret } from '../src/crypto/secrets.js';
-import { outboundAccounts, outboundBindings, outboundCatalogRevisions, outboundChannels, outboundContacts, outboundMessages, outboundPermissions, outboundPolicies } from '../src/db/schema.js';
+import { modelChecks, outboundAccounts, outboundBindings, outboundCatalogRevisions, outboundChannels, outboundContacts, outboundMessages, outboundPermissions, outboundPolicies, subscriptions } from '../src/db/schema.js';
 import { digestOf } from '../src/modules/outbound/checks.js';
 import { recipientDigest } from '../src/modules/outbound/contacts.js';
-import { beginDispatch, reserveDispatch, submitOutbound, type Authority } from '../src/modules/outbound/core.js';
+import { beginDispatch, recordReview, reserveDispatch, submitOutbound, type Authority, type Review } from '../src/modules/outbound/core.js';
 import { company } from './department-owner-fixture.js';
+import { binding as checkBinding } from './model-check-fixture.js';
 import { sha } from './outbound-fixture.js';
 
 /* A department with one channel that works: an account bound to its worker, a contact who agreed, a policy that reviews
@@ -40,7 +42,7 @@ export async function aPolicyOf(c: Base, channelId: string, value: OutboundPolic
   return (await c.db.insert(outboundPolicies).values({ companyId: c.companyId, channelId, revision, digest: digestOf(value), value, createdBy: c.ids.ceo }).returning())[0]!;
 }
 
-type ChannelOver = { name?: string; audience?: 'direct' | 'public'; status?: 'new' | 'active' };
+type ChannelOver = { name?: string; adapter?: 'smtp' | 'webhook'; audience?: 'direct' | 'public'; status?: 'new' | 'active' };
 
 export async function aChannelOf(c: Base, over: ChannelOver = {}) {
   const values = { companyId: c.companyId, departmentId: c.dev.id, name: 'Mail', adapter: 'smtp', purpose: 'first_contact', audience: 'direct', status: 'active', createdBy: c.ids.ceo, ...over } as const;
@@ -89,8 +91,8 @@ export async function letTenDollarsGo(c: C) {
   await c.setRule(c.ceoToken, c.dev.id, 'price', { mode: 'within_limits', limit: 100, unit: 'USD' });
 }
 
-export async function world(policy: OutboundPolicyValue = QUIET, over: ChannelOver = {}) {
-  const c = await company({ PUBLIC_URL: 'https://hornhoof.example' });
+export async function world(policy: OutboundPolicyValue = QUIET, over: ChannelOver = {}, logger?: Deps['logger']) {
+  const c = await company({ PUBLIC_URL: 'https://hornhoof.example' }, logger);
   const channel = await aChannelOf(c, over);
   const policyRow = await aPolicyOf(c, channel.id, policy);
   const { account, binding } = await anAccountOf(c, channel.id, c.worker.id);
@@ -115,3 +117,22 @@ export async function dispatched(w: World, messageId: string, now?: Date) {
   const reserved = await reserveDispatch(w.ctx, messageId, 1, now);
   return reserved.kind === 'reserved' ? beginDispatch(w.ctx, messageId, 1, now) : reserved;
 }
+
+export const reviewReceipt = (messageId: string, contentDigest: string, decision: 'allow' | 'block' | 'escalate', checkId: string, bindingDigest: string): Review => ({
+  messageId, revision: 1, checkId, bindingDigest, subjectDigest: contentDigest, reviewer: checkBinding().model, result: { kind: 'review', decision, reasonCodes: [] },
+});
+/* An API key of a provider, on a plan of the company's own. */
+export async function aKeyOf(c: Pick<Base, 'db' | 'companyId' | 'app'>, provider: ProviderId, secret: string) {
+  const [plan] = await c.db.select().from(subscriptions).limit(1);
+  const values = { companyId: c.companyId, provider, kind: 'api_key', label: `${provider} key`, ownerPersonId: plan!.ownerPersonId, secretEnc: encryptSecret(secret, c.app.ctx.config.secret), last4: secret.slice(-4), status: plan!.status } as const;
+  return (await c.db.insert(subscriptions).values(values).returning())[0]!;
+}
+
+/* The check of this department as certified now, which only a passed run does in real life. */
+export async function aCertifiedCheck(w: World) {
+  const bindingDigest = sha('this binding');
+  const [check] = await w.c.db.insert(modelChecks).values({ companyId: w.c.companyId, departmentId: w.c.dev.id, kind: 'outbound_review', status: 'on', bindingDigest, validUntil: new Date('2036-01-01T00:00:00.000Z'), thresholds: { falseAllows: 0, falseDenies: 0, classErrors: 0 } as never, thresholdsBy: w.c.ids.ceo }).returning();
+  return { check: check!, bindingDigest };
+}
+export const allowed = (w: World, messageId: string, contentDigest: string, c: { check: { id: string }; bindingDigest: string }, decision: 'allow' | 'block' | 'escalate' = 'allow') =>
+  recordReview(w.ctx, reviewReceipt(messageId, contentDigest, decision, c.check.id, c.bindingDigest));

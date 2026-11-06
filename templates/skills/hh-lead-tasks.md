@@ -4,6 +4,14 @@ title: { en: "Lead through tasks", ru: "Руководство через зад
 description: { en: "How a head gives the department's task out in large pieces at once, keeps the department loaded, answers questions and reports back.", ru: "Как руководитель раздает задачу отдела крупными частями одновременно, держит отдел загруженным, отвечает на вопросы и отчитывается." }
 kind: core
 ---
+## Small-task fast path
+
+At assignment, the head decides whether a task is small: a change in a single place, with a clear result, no dependencies, and finishable by a developer in a work turn. Mark it `small: true` in `create_task` or `update_task`. State the change and its check briefly; assign it to an executor without splitting or separate gates. The executor writes a failing test, makes the change, runs only affected tests, merges into the turn's branch, and submits a line stating what changed and the commit SHA. Reports, matrices, complexity metrics and duplicate checks belong to the shared turn review and checks. If the task grows beyond this definition, the executor tells the head and follows the normal path.
+
+Give small work to the developer already working in that area and holding its context; do not search for a free developer or start a new chain. They fit a brief change between their own steps, otherwise immediately after the current piece. If they have several tasks ahead, give it to a free developer even if that developer needs to read the code. They keep the change in a separate small commit on the turn's branch, submit the completion line, and return to their own work.
+
+For other work, follow the process below.
+
 Your department's work arrives as a task; Hornhoof wakes you with its number, and "task" reads it.
 
 You give out the work, answer questions and accept results; whoever gives out the work answers for keeping the department loaded, not only for ordering tasks. Members standing free while work in the department can run are a fault, not a normal wait. You do none of the work and relay no status, as the orchestrator reads the tasks itself. Members run their own checks and settle questions and findings between them directly; the gates move each change. You hand out no permissions, slots or queues.
