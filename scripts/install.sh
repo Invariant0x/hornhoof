@@ -6,6 +6,8 @@
 #   install.sh server                                            install or update the Hornhoof server
 #   install.sh server --name <name>                              another company's server on this computer, in ~/hornhoof-<name>
 #   install.sh --uninstall                                       remove this machine's nodes
+#   install.sh check-node <node> <commit>                        one node goes to the build of a commit, for that build's live check
+#   install.sh back-node <node>                                  that node goes back to the last version before live checks
 #
 # Server installs pin the build in .env as HORNHOOF_VERSION (HORNHOOF_VERSION=<tag> picks one, latest otherwise) and
 # take compose.yaml from that build of the image. .env also names the exact app, node and updater images compose
@@ -26,14 +28,18 @@
 # Nothing here puts a build on a machine without the live check of exactly its images, as the update button does not (see
 # guide/updates.md). A server of such a build says so in NO_NODE and gives no node of it. A server install, and a node that
 # would take the latest image, ask the build before anything changes. HORNHOOF_LIVE_CHECK_STAND=1 starts the one server that
-# runs a build to check it: a new one, named with --name, whose nodes are its own.
+# runs a build to check it: a new one, named with --name, whose nodes are its own. check-node is the one way a real company's node
+# gets a build before that check exists, for the turn the check speaks of: one node, named, of a plan, on a whole commit.
 set -euo pipefail
 
 SERVER="${HORNHOOF_SERVER:-__HORNHOOF_SERVER__}"
 TTY="${HORNHOOF_TTY:-/dev/tty}"
 STATE_DIR="${HORNHOOF_HOME:-$HOME/.hornhoof}"
 BUILD_IMAGE="__HORNHOOF_NODE_IMAGE__"
-LATEST_NODE=ghcr.io/invariant0x/hornhoof-node:latest
+NODE_REPOSITORY=ghcr.io/invariant0x/hornhoof-node
+LATEST_NODE=$NODE_REPOSITORY:latest
+# Where back-node goes: 0.6.1, the last node from before live checks, by the digest of its image for every computer.
+BACK_NODE=$NODE_REPOSITORY@sha256:1703324e18e59af650d3d69be9dcac3f12352d53ecefc71ae805e91f10aa1b73
 case "$BUILD_IMAGE" in
   __HORNHOOF_* | local) DEFAULT_IMAGE=$LATEST_NODE ;;
   *) DEFAULT_IMAGE=$BUILD_IMAGE ;;
@@ -75,7 +81,7 @@ LABEL=hornhoof.subscription
 SERVER_LABEL=hornhoof.server
 NODE_MAIN=/app/apps/node/dist/main.js
 FIRST_PORT=8080
-USAGE='Usage: install.sh [--join <code>] [--urgent] | server [--name <name>] [--urgent] | --uninstall'
+USAGE='Usage: install.sh [--join <code>] [--urgent] | server [--name <name>] [--urgent] | --uninstall | check-node <node> <commit> | back-node <node>'
 
 OS=''
 ARCH=''
@@ -283,7 +289,7 @@ check_server() {
 }
 
 pull_image() {
-  if [ "$BUILD_IMAGE" = local ] && [ -z "${HORNHOOF_NODE_IMAGE:-}" ]; then
+  if [ "$BUILD_IMAGE" = local ] && [ -z "${HORNHOOF_NODE_IMAGE:-}" ] && [ -z "$ONE_NODE" ]; then
     say "This Hornhoof is a local build with no node image published for it, so this machine gets the latest node image, which may not match it."
   fi
   say "Getting the node image $IMAGE."
@@ -686,6 +692,88 @@ node_mode() {
   if [ -n "$LEFT" ]; then fail "These nodes stay as they are:$LEFT."; fi
 }
 
+# The node of that name, as "name:id", when this server has it on this machine and it has a plan to check.
+named_node() {
+  local entry
+  case "$1" in hornhoof-machine-*) fail "$1 has no plan to check, so it stays as it is." ;; esac
+  for entry in $(existing_nodes); do
+    if [ "${entry%%:*}" = "$1" ]; then
+      printf '%s' "$entry"
+      return 0
+    fi
+  done
+  fail "$SERVER has no node called $1 on this machine, so nothing changed."
+}
+
+# The check of a plan needs one node. Another of the plan on this build would be the start of an update without a check.
+only_one_of_its_plan() {
+  local name=$1 provider=$2 entry other
+  for entry in $(existing_nodes); do
+    other=${entry%%:*}
+    case "$other" in hornhoof-"$provider"-*) ;; *) continue ;; esac
+    if [ "$other" != "$name" ] && [ "$("${DOCKER[@]}" inspect --format '{{.Config.Image}}' "$other" 2> /dev/null)" = "$IMAGE" ]; then
+      fail "$other, of the same plan, runs this build already, and one node is what the check of a plan needs. So $name stays as it is."
+    fi
+  done
+}
+
+# start_one <name:id>: the node goes to IMAGE with its volume, and this says when it answers, so a way back is known to have worked.
+start_one() {
+  local entry=$1 name id provider status tries=${HORNHOOF_NODE_ANSWER_WAIT:-60}
+  name=${entry%%:*}
+  id=${entry#*:}
+  provider=${name#hornhoof-}
+  provider=${provider%-*}
+  start_node "$name" "$id" "$provider"
+  status=offline
+  while [ "$tries" -gt 0 ]; do
+    status=$(node_status "$name")
+    [ "$status" = offline ] || break
+    tries=$((tries - 1))
+    sleep 1
+  done
+  [ "$status" != offline ] || fail "$name runs $IMAGE and does not answer yet: docker logs $name shows why."
+  say "$name runs $IMAGE and says $status, $SECONDS s after this command began. Its first turn goes on from here."
+}
+
+# The live check of a release gives a real node of the build a turn, before the proof the door asks for can exist, so this does not ask
+# the door. Every machine and everything else still does. See CONTRIBUTING.md.
+check_node_mode() {
+  local entry provider
+  case "$CHECK_COMMIT" in
+    *[!0-9a-f]*) fail "check-node takes a whole commit, 40 lowercase hex characters, never a tag that moves. Nothing changed." ;;
+  esac
+  [ "${#CHECK_COMMIT}" -eq 40 ] || fail "check-node takes a whole commit, 40 lowercase hex characters, never a tag that moves. Nothing changed."
+  IMAGE=$NODE_REPOSITORY:$CHECK_COMMIT
+  detect_system
+  check_server
+  ensure_docker
+  node_server
+  entry=$(named_node "$CHECK_NODE")
+  provider=${CHECK_NODE#hornhoof-}
+  provider=${provider%-*}
+  only_one_of_its_plan "$CHECK_NODE" "$provider"
+  pull_image
+  say "Getting the way back, $BACK_NODE."
+  "${DOCKER[@]}" pull "$BACK_NODE" > /dev/null || "${DOCKER[@]}" image inspect "$BACK_NODE" > /dev/null 2>&1 ||
+    fail "Could not download $BACK_NODE, the way back. Nothing changed."
+  wait_for_node "$CHECK_NODE" || fail "Nothing changed on this machine."
+  start_one "$entry"
+}
+
+# A node whose turn failed goes back at once, whatever it runs: its turns go on after it, as after any restart.
+back_node_mode() {
+  local entry
+  IMAGE=$BACK_NODE
+  detect_system
+  check_server
+  ensure_docker
+  node_server
+  entry=$(named_node "$CHECK_NODE")
+  pull_image
+  start_one "$entry"
+}
+
 uninstall_mode() {
   local entry names='' name answer
   detect_system
@@ -1032,8 +1120,27 @@ server_mode() {
 
 MODE=node
 CODE=''
+CHECK_NODE=''
+CHECK_COMMIT=''
+ONE_NODE=''
+SEEN_MODE=''
 while [ $# -gt 0 ]; do
   case "$1" in
+    check-node)
+      [ $# -ge 3 ] || fail "check-node takes a node and a commit. $USAGE"
+      MODE=check-node
+      ONE_NODE=$((ONE_NODE + 1))
+      CHECK_NODE=$2
+      CHECK_COMMIT=$3
+      shift 2
+      ;;
+    back-node)
+      [ $# -ge 2 ] || fail "back-node takes a node. $USAGE"
+      MODE=back-node
+      ONE_NODE=$((ONE_NODE + 1))
+      CHECK_NODE=$2
+      shift
+      ;;
     --join)
       [ $# -ge 2 ] || fail "--join needs the code from Hornhoof. $USAGE"
       CODE=$2
@@ -1050,9 +1157,18 @@ while [ $# -gt 0 ]; do
       shift
       ;;
     --urgent) URGENT=1 ;;
-    node) MODE=node ;;
-    server) MODE=server ;;
-    --uninstall) MODE=uninstall ;;
+    node)
+      MODE=node
+      SEEN_MODE=1
+      ;;
+    server)
+      MODE=server
+      SEEN_MODE=1
+      ;;
+    --uninstall)
+      MODE=uninstall
+      SEEN_MODE=1
+      ;;
     -h | --help)
       say "$USAGE"
       exit 0
@@ -1061,6 +1177,12 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
+
+# One node goes alone: no words beside it that would make it more than that, and only the image it is for.
+if [ -n "$ONE_NODE" ]; then
+  [ "$ONE_NODE" = 1 ] && [ -z "$CODE$URGENT$NAME$SEEN_MODE" ] || fail "$MODE takes nothing else. $USAGE"
+  [ -z "${HORNHOOF_NODE_IMAGE:-}" ] || fail "$MODE goes to the image it is for, not the one HORNHOOF_NODE_IMAGE names. Nothing changed."
+fi
 
 if [ -n "$NAME" ]; then
   [ "$MODE" = server ] || fail "--name is for install.sh server. $USAGE"
@@ -1077,4 +1199,6 @@ case "$MODE" in
   node) node_mode "$CODE" ;;
   server) server_mode ;;
   uninstall) uninstall_mode ;;
+  check-node) check_node_mode ;;
+  back-node) back_node_mode ;;
 esac

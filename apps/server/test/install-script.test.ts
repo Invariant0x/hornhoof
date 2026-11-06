@@ -298,6 +298,142 @@ describe('install.sh a server serves', () => {
     });
   });
 
+  /* The check of a release gives a node of the build a turn, one node at a time and before any proof exists, and puts that node
+     back if the turn fails. That alone goes past the door. */
+  describe('one node for the live check of its build', () => {
+    const KIMI = 'hornhoof-kimi-1c07dac4';
+    const CODEX = 'hornhoof-codex-9f1e2d3c';
+    const MACHINE = 'hornhoof-machine-77777777';
+    const ANOTHER_KIMI = 'hornhoof-kimi-55555555';
+    const ELSEWHERE = 'hornhoof-kimi-99999999';
+    const HERE = { STUB_CONTAINERS: `${KIMI}=${SERVER} ${CODEX}=${SERVER} ${MACHINE}=${SERVER} ${ANOTHER_KIMI}=${SERVER} ${ELSEWHERE}=https://another.example.test` };
+    const BACK = 'ghcr.io/invariant0x/hornhoof-node@sha256:1703324e18e59af650d3d69be9dcac3f12352d53ecefc71ae805e91f10aa1b73';
+    const check = (node = KIMI, commit = COMMIT) => ['check-node', node, commit];
+    const changes = (r: ReturnType<typeof install>) => r.calls.filter(c => /^docker (stop|rm|run -d)/.test(c));
+    const nothingHappened = (r: ReturnType<typeof install>) => {
+      expect(r.code).toBe(1);
+      expect(changes(r)).toEqual([]);
+      expect(r.calls.some(c => c.includes('/api/nodes/join'))).toBe(false);
+    };
+
+    it('moves the one node it names to the node image of that commit, and no other', () => {
+      const r = install({ args: check(), env: HERE });
+      expect(r.code).toBe(0);
+      expect(r.calls).toContain(`docker pull ${BY_TAG}`);
+      expect(changes(r)).toEqual([`docker stop --time 5 ${KIMI}`, `docker rm -f ${KIMI}`, expect.stringMatching(new RegExp(`^docker run -d --name ${KIMI} .*-v ${KIMI}:/data .*${BY_TAG}$`))]);
+      expect(r.out).toContain(`${KIMI} runs ${BY_TAG}`);
+    });
+
+    it('asks no door, on a script of a server that gives no node of its build or from the repository', async () => {
+      for (const script of [await fromServer(DIGEST, COMMIT, { ok: false, reason: 'missing' }), SCRIPT]) {
+        const r = install({ script, args: check(), env: { ...HERE, STUB_LIVE_CHECK: 'no' } });
+        expect(r.code).toBe(0);
+        expect(r.calls.some(c => c.includes('live-check-gate'))).toBe(false);
+        expect(r.calls.find(c => c.startsWith('docker run -d'))!.endsWith(BY_TAG)).toBe(true);
+      }
+    });
+
+    it('says nothing about the latest image on a server CI did not build, which it does not take', async () => {
+      const r = install({ script: await fromServer(DIGEST, 'local'), args: check(), env: HERE });
+      expect(r.code).toBe(0);
+      expect(r.out).not.toContain(LOCAL_NOTE);
+      expect(r.calls.find(c => c.startsWith('docker run -d'))!.endsWith(BY_TAG)).toBe(true);
+    });
+
+    it('gets the way back before it touches the node, and leaves the node as it is when it cannot', () => {
+      const r = install({ args: check(), env: HERE });
+      expect(indexOf(r.calls, `docker pull ${BACK}`)).toBeGreaterThanOrEqual(0);
+      expect(indexOf(r.calls, `docker pull ${BACK}`)).toBeLessThan(indexOf(r.calls, 'docker stop'));
+      const stuck = install({ args: check(), env: { ...HERE, STUB_PULL: 'node' } });
+      nothingHappened(stuck);
+      expect(stuck.out).toContain('Could not download');
+    });
+
+    it('lets the work of the node end first, and leaves it as it is when it cannot learn when', () => {
+      const r = install({ args: check(), env: HERE });
+      expect(indexOf(r.calls, 'docker run --rm --cap-drop ALL')).toBeLessThan(indexOf(r.calls, 'docker stop'));
+      expect(r.calls.find(c => c.includes('wait-update'))).toContain(BY_TAG);
+      const left = install({ args: check(), env: { ...HERE, STUB_WAIT_UPDATE: '1' } });
+      nothingHappened(left);
+      expect(left.out).toContain('Nothing changed');
+    });
+
+    it.each(['latest', '0.7.1', COMMIT.slice(0, 12), COMMIT.toUpperCase(), `${COMMIT}0`, `x${COMMIT.slice(1)}`, 'ghcr.io/invariant0x/hornhoof-node:latest', ''])('takes only a whole commit, not %j', commit => {
+      const r = install({ args: check(KIMI, commit), env: HERE });
+      nothingHappened(r);
+      expect(r.calls.filter(c => c.startsWith('docker pull'))).toEqual([]);
+    });
+
+    it.each([['no node of that name', 'hornhoof-kimi-00000000'], ['a node of another server', ELSEWHERE], ['the node of a machine with no plan', MACHINE], ['more than a name', `${KIMI} ${CODEX}`], ['nothing', '']])('takes %s', (_what, node) => {
+      nothingHappened(install({ args: check(node), env: HERE }));
+    });
+
+    it('takes no second node of a plan, as one is what its check needs', () => {
+      const r = install({ args: check(), env: { ...HERE, STUB_NODE_IMAGES: `${ANOTHER_KIMI}=${BY_TAG}` } });
+      nothingHappened(r);
+      expect(r.out).toContain(ANOTHER_KIMI);
+      expect(install({ args: check(), env: { ...HERE, STUB_NODE_IMAGES: `${CODEX}=${BY_TAG}` } }).code).toBe(0);
+      expect(install({ args: check(), env: { ...HERE, STUB_NODE_IMAGES: `${ANOTHER_KIMI}=${BY_DIGEST}` } }).code).toBe(0);
+    });
+
+    it.each([[[...check(), '--urgent']], [['--urgent', ...check()]], [[...check(), '--join', CODE]], [[...check(), CODEX]], [['server', ...check()]], [[...check(), 'server']], [[...check(), '--uninstall']], [['check-node', KIMI]], [['check-node']]])('takes nothing more than its node and commit: %j', args => {
+      nothingHappened(install({ args, env: HERE }));
+    });
+
+    it('takes no image a person names', () => {
+      const own = 'ghcr.io/invariant0x/hornhoof-node:unchecked';
+      for (const args of [check(), ['back-node', KIMI]]) {
+        const r = install({ args, env: { ...HERE, HORNHOOF_NODE_IMAGE: own } });
+        nothingHappened(r);
+        expect(r.calls.join('\n')).not.toContain(own);
+      }
+    });
+
+    it('opens nothing else: the same script still gives no machine that build', async () => {
+      const script = await fromServer(DIGEST, COMMIT, { ok: false, reason: 'missing' });
+      expect(install({ script, args: check(), env: HERE }).code).toBe(0);
+      for (const args of [[], ['--urgent'], ['--join', CODE]]) nothingHappened(install({ script, args, env: HERE }));
+    });
+
+    it('stops when no server is known, where it would see the nodes of every server', () => {
+      nothingHappened(install({ args: check(), env: { ...HERE, HORNHOOF_SERVER: '' } }));
+    });
+
+    describe('and back', () => {
+      const back = (node = KIMI) => ['back-node', node];
+
+      it('puts the node it names back at once on that version by digest, and no other', () => {
+        const r = install({ args: back(), env: { ...HERE, STUB_WAIT_UPDATE: '1' } });
+        expect(r.code).toBe(0);
+        expect(r.calls.some(c => c.includes('wait-update'))).toBe(false);
+        expect(changes(r)).toEqual([`docker stop --time 5 ${KIMI}`, `docker rm -f ${KIMI}`, expect.stringMatching(new RegExp(`^docker run -d --name ${KIMI} .*-v ${KIMI}:/data .*${BACK}$`))]);
+        expect(r.out).toContain(`${KIMI} runs ${BACK}`);
+      });
+
+      it('goes from the image on this computer when it cannot download', () => {
+        expect(install({ args: back(), env: { ...HERE, STUB_PULL: 'node', STUB_IMAGE_LOCAL: '1' } }).code).toBe(0);
+        nothingHappened(install({ args: back(), env: { ...HERE, STUB_PULL: 'node' } }));
+      });
+
+      it('asks no door and goes on a script of a server that gives no node of its build', async () => {
+        const r = install({ script: await fromServer(DIGEST, COMMIT, { ok: false, reason: 'missing' }), args: back(), env: { ...HERE, STUB_LIVE_CHECK: 'no' } });
+        expect(r.code).toBe(0);
+        expect(r.calls.some(c => c.includes('live-check-gate'))).toBe(false);
+      });
+
+      it.each([['no node of that name', ['back-node', 'hornhoof-kimi-00000000']], ['a node of another server', back(ELSEWHERE)], ['the node of a machine with no plan', back(MACHINE)], ['no node', ['back-node']], ['two nodes', [...back(), CODEX]], ['--urgent', [...back(), '--urgent']], ['server', ['server', ...back()]]])('takes %s', (_what, args) => {
+        nothingHappened(install({ args, env: HERE }));
+      });
+
+      it('says so when the node does not answer after a while, and still has it running', () => {
+        const r = install({ args: back(), env: { ...HERE, STUB_STATUS: 'offline', HORNHOOF_NODE_ANSWER_WAIT: '1' } });
+        expect(r.code).toBe(1);
+        expect(r.out).toContain(`docker logs ${KIMI}`);
+        expect(r.calls.some(c => c.startsWith('docker run -d'))).toBe(true);
+      });
+    });
+  });
+
   it('writes what a refusal says into the script as plain words', () => {
     for (const words of [...Object.values(LIVE_CHECK_REFUSALS), LIVE_CHECK_UNREAD]) expect(words).not.toMatch(/["$`\\]/);
   });

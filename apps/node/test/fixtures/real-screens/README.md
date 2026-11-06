@@ -12,5 +12,6 @@ retries against the refusal; Kimi Code had no sign-in, which still shows its pro
 - `*-busy`, `*-retrying`: the empty prompt while a turn runs.
 - `*-long-session`: the empty prompt after a turn of a resumed session, at 160x48 on a model stub, with the banner long off
   the top of the screen.
+- `*-rate-limits-question`: what Codex shows after a turn once its plan is 90% used, here at 160x48 on a model stub that says 95%.
 
 Antigravity's screens are in `../agy-tui`.

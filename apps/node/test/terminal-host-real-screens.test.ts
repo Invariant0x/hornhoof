@@ -115,3 +115,7 @@ it.each([
 it.each(['first', 'idle', 'busy', 'retrying', 'long-session'])('reads no words on the real empty screen %s of Codex', name => {
   expect(atEmptyPrompt('codex', real(`codex-0.166.0-${name}`))).toBe(true);
 });
+
+it('does not take the question Codex asks near its limits for an empty prompt: words go nowhere there, and Enter answers it', () => {
+  expect(atEmptyPrompt('codex', real('codex-0.167.0-rate-limits-question'))).toBe(false);
+});

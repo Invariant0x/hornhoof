@@ -4,7 +4,9 @@
 // person stops a turn with Escape; LATE answers, then logs a stop of that turn a moment later. TICK works 3 s under
 // Codex's status line, with its way to stop it; WORK thinks and runs a command, 1.5 s each, and then answers. Like Codex, a new session
 // writes its log only once the first message comes. A paste comes whole, line breaks and all, as in Codex.
-// APIFAIL prompts replay API failures captured from Codex, without a Stop hook; LONG prints a long screen first.
+// APIFAIL prompts replay API failures captured from Codex, without a Stop hook; LONG prints a long screen first. CLOSING stays
+// in its turn a while after its Stop hook, and words that come then go into that same turn with no new task_started, as Codex
+// does on a busy machine.
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, mkdirSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -55,6 +57,8 @@ const show = () => {
 };
 let queue = Promise.resolve();
 let hanging = false;
+let closing = false;
+let lastAnswer = '';
 readKeys(key => {
   // Escape stops an answer; it is not part of the next line.
   if (key === 'escape') return;
@@ -68,6 +72,7 @@ readKeys(key => {
   shown = 0;
   process.stdout.write('\r\n\x1b[J');
   if (hanging && process.env.FAKE_HOLD_WORDS) { prompt(); return; }
+  if (closing) return steer(line);
   queue = queue.then(() => take(line));
 });
 
@@ -140,12 +145,31 @@ async function slow() {
   process.stdout.write('\r\x1b[2K');
 }
 
+function steer(line) {
+  item('UserMessage', line);
+  lastAnswer = `echo: ${line}`;
+  item('AgentMessage', lastAnswer);
+  process.stdout.write(`• ${lastAnswer}\n`);
+  prompt();
+}
+
+async function closeTurn() {
+  closing = true;
+  // Its empty prompt shows all through a turn (fixtures/real-screens).
+  prompt();
+  await sleep(1500);
+  closing = false;
+  process.stdout.write('\r\x1b[J');
+}
+
 async function answer(line) {
   const text = `echo: ${line}`;
+  lastAnswer = text;
   item('AgentMessage', text);
   event({ type: 'token_count', info: { last_token_usage: { total_tokens: 112000 }, model_context_window: 212000 }, rate_limits: null });
   if (!line.includes('LOGFIRST')) await hook('stop', 'Stop', { last_assistant_message: text });
-  event({ type: 'task_complete', turn_id: turnId, last_agent_message: text });
+  if (line.includes('CLOSING')) await closeTurn();
+  event({ type: 'task_complete', turn_id: turnId, last_agent_message: lastAnswer });
   if (line.includes('LOGFIRST')) await hook('stop', 'Stop', { last_assistant_message: text });
   process.stdout.write(`• ${text}\n`);
   prompt();

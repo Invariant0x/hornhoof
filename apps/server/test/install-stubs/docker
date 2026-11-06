@@ -40,6 +40,8 @@ case "$1" in
   # STUB_STOPPED words are containers that exist and do not run.
   inspect)
     if [ "${3:-}" = '{{.State.Running}}' ]; then case " ${STUB_STOPPED:-} " in *" ${!#} "*) echo false ;; *) echo true ;; esac; exit 0; fi
+    # STUB_NODE_IMAGES words are "name=image", the image a node was started from.
+    if [ "${3:-}" = '{{.Config.Image}}' ]; then for n in ${STUB_NODE_IMAGES:-}; do [ "${n%%=*}" = "${!#}" ] && echo "${n#*=}"; done; exit 0; fi
     [ "${!#}" = nodecid ] && [ -n "${STUB_NODE_RUNNING:-}" ] && id_of "$STUB_NODE_RUNNING" ;;
   # STUB_CONTAINERS words are "name" or "name=server", the server label of a node.
   # The server's own command line in its container: STUB_SETUP_LINK is the setup link of a server not set up yet.

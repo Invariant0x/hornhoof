@@ -7,8 +7,8 @@ The middle number is the turn; the last counts releases between turns.
 
 ## [0.7.1] - 2026-11-05
 
-Agents on Codex and Kimi Code get their assignments again, also after a node restart, and a release now reaches machines only
-after a live check of its exact build on all four programs.
+Agents on Codex and Kimi Code get their assignments again, also after a node restart and near the limits of a plan, and a release
+now reaches machines only after a live check of its exact build on all four programs.
 
 ### Fixed
 
@@ -25,6 +25,11 @@ after a live check of its exact build on all four programs.
 - The installer holds to that check too: joining a machine, moving its nodes, `--urgent` and `install.sh server` stop with the
   reason and change nothing for a build without one. Only a new server of its own, set up to run a live check, runs such a build.
 - A node no longer takes a person's draft for an empty Codex input: when nothing proves the input is empty, the words stay out.
+- Codex no longer asks near the limits of a plan whether to switch to a cheaper model. Nobody was there to answer: the next words were
+  lost, Enter answered for them, the turn failed after two minutes and the agent changed model until it started again.
+- A turn on Codex ends when Codex says so in its log, so the next words no longer go into a turn that is still closing and run twice.
+- The live check of a release runs on real nodes one at a time: `install.sh check-node` moves one named node to the build, and
+  `install.sh back-node` puts it back on 0.6.1 at once if its turn fails.
 
 ## [0.7.0] - 2026-11-05
 

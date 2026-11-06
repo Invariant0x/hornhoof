@@ -1745,6 +1745,9 @@ export class TerminalHost {
 
   private completeStop(a: Agent, data: Record<string, unknown>, id: string | undefined): void {
     if (a.program?.kind === 'antigravity') return this.agyStopped(a);
+    /* Codex stays in its turn after this hook, for as long as a busy machine makes it. Words that come before task_complete in its
+       log go into that same turn with no task_started to tell they were taken, and they would be given again. That line ends it. */
+    if (a.program?.kind === 'codex') return;
     const message = a.program?.kind === 'kimi' ? a.lastText ?? '' : String(data.last_assistant_message ?? '');
     this.endTurn(a, { status: 'done', message }, id);
   }
