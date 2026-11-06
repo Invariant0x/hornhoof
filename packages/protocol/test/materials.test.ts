@@ -92,3 +92,20 @@ describe('safe public views', () => {
     expect(MaterialManifest.safeParse({ ...manifest, materialRevision: 0 }).success).toBe(false);
   });
 });
+
+describe('bounded contract metadata', () => {
+  it('refuses oversized input envelopes without changing file byte limits', () => {
+    const link = { kind: 'link', name: 'n'.repeat(200), url: 'https://example.com/' + 'x'.repeat(1900) };
+    expect(MaterialInput.parse(link)).toEqual(link);
+    expect(QuestionMaterials.safeParse({ presentation: 'action', common: Array(6).fill(link), options: Array(4).fill(Array(6).fill(link)) }).success).toBe(false);
+  });
+  it('refuses wrong kind MIME and unavailable metadata for each kind', () => {
+    expect(MaterialView.safeParse({ ...image, kind: 'file', size: 50 * 1024 * 1024 + 1 }).success).toBe(false);
+    expect(MaterialView.safeParse({ ...image, mediaType: 'image/png\r\nX-Test: unsafe' }).success).toBe(false);
+    for (const kind of ['file', 'link', 'document']) {
+      const base = { id: ID, kind, name: 'Unavailable material', state: 'missing', ...(kind === 'document' ? { format: 'pdf' } : {}) };
+      expect(MaterialView.parse(base)).toEqual(base);
+      expect(MaterialView.safeParse({ ...base, attachmentId: OTHER }).success).toBe(false);
+    }
+  });
+});

@@ -18,3 +18,9 @@ describe('private materials storage', () => {
     ]);
   });
 });
+
+it('stores private history only beside its real request and rejects dangling identities', async () => {
+  const db = await createTestDb();
+  await expect(db.$client.exec(`INSERT INTO request_internal(request_id,company_id) VALUES
+    ('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000002')`)).rejects.toThrow(/foreign key/);
+});
