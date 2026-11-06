@@ -115,7 +115,7 @@ describe('real framework invocations of planned fixture selections', () => {
 
   it('refuses a CLI filename filter which excludes a file from the assigned selection', async () => {
     const fixture = await plannedVitestFixture();
-    const result = await invoke(fixture, 'vitest-planned-filter-conflict', [fixture.files[0]!], ['--shard=1/2', 'tests/second.test.js']);
+    const result = await invoke(fixture, 'vitest-planned-filter-conflict', [fixture.files[0]!], ['--shard=1/2', 'tests/second.test.js', 'tests/third.test.js']);
     expect(result.code).toBe(1); expect(result.stderr).toContain('was not collected');
     expect(reportOf(result).numTotalTests).toBe(0);
   });
