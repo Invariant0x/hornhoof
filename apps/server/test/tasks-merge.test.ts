@@ -35,6 +35,18 @@ async function company(repository = true) {
 const woken = (r: { wakes: { agentId: string; why: string }[] }) => r.wakes.map(w => [w.agentId, w.why]);
 
 describe('a task that passed its last gate', () => {
+  it('refuses an author-vendor reviewer using another provider and subscription', async () => {
+    const { ctx, db, bruno, rita, task } = await company();
+    const [ceo] = await db.select().from(people);
+    const [authorPlan] = await db.select().from(subscriptions).where(eq(subscriptions.id, bruno.subscriptionId!));
+    const [sameVendor] = await db.insert(subscriptions).values({ companyId: task.companyId, provider: 'claude', kind: 'personal', label: 'Another Anthropic plan', ownerPersonId: ceo!.id, status: 'ready' }).returning();
+    expect([authorPlan!.provider, sameVendor!.provider]).toEqual(['anthropic_api', 'claude']);
+    await db.update(agents).set({ subscriptionId: sameVendor!.id }).where(eq(agents.id, rita.id));
+    const handed = await submit(ctx, bruno.id, task.id, { summary: 'Done.', evidence: 'npm test' });
+    expect(handed.task.panel).toEqual([]);
+    await expect(verdict(ctx, rita.id, task.id, { pass: true, comment: 'Same vendor.' })).rejects.toMatchObject({ status: 403, reason: 'task_not_yours' });
+  });
+
   it('goes back to its executor to merge into the turn branch, and its head is not woken for it', async () => {
     const { ctx, db, bruno, task, read, passed } = await company();
     const last = await passed();
