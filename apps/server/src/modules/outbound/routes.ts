@@ -21,7 +21,8 @@ import { authorityOf } from './tools.js';
    transport: the dispatcher does, by itself, through the kernel's last look. */
 
 const IdParams = z.strictObject({ id: z.uuid() });
-const TokenParams = z.strictObject({ token: z.string().min(1).max(1000) });
+/* A signed link is longer than the router takes a named part of a path to be, so it is the rest of the path. */
+const TokenParams = z.object({ '*': z.string().min(1).max(1000) });
 const Name = z.string().trim().min(1).max(200);
 const Evidence = z.string().trim().min(1).max(2000);
 const ChannelBody = z.strictObject({ departmentId: z.uuid(), productId: z.uuid().optional(), name: Name, adapter: z.enum(['smtp', 'webhook']), purpose: Name, audience: z.enum(['direct', 'public']) });
@@ -156,7 +157,7 @@ const answerPage = (reply: FastifyReply, html: string) =>
 const noSuchLink = () => new ApiError(404, 'not_found', 'This link does not work.', 'outbound_unknown');
 
 function openUnsubscribe(ctx: Ctx, req: FastifyRequest): string {
-  const { token } = TokenParams.parse(req.params);
+  const token = TokenParams.parse(req.params)['*'];
   if (!readUnsubscribeToken(ctx.config.secret, token)) throw noSuchLink();
   return token;
 }
@@ -166,11 +167,11 @@ function openUnsubscribe(ctx: Ctx, req: FastifyRequest): string {
 function unsubscribeRoutes(app: FastifyInstance, ctx: Ctx): void {
   void app.register(async scope => {
     scope.addContentTypeParser(['application/x-www-form-urlencoded', 'multipart/form-data'], { parseAs: 'string', bodyLimit: 1024 }, (_req, _body, done) => done(null, undefined));
-    scope.get('/api/outbound/unsubscribe/:token', async (req, reply) => {
+    scope.get('/api/outbound/unsubscribe/*', async (req, reply) => {
       openUnsubscribe(ctx, req);
       return answerPage(reply, ASKING);
     });
-    scope.post('/api/outbound/unsubscribe/:token', async (req, reply) => {
+    scope.post('/api/outbound/unsubscribe/*', async (req, reply) => {
       const token = openUnsubscribe(ctx, req);
       if (!(await unsubscribe(ctx, token))) throw noSuchLink();
       return answerPage(reply, DONE);

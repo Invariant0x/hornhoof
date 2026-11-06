@@ -1,0 +1,171 @@
+import { randomUUID } from 'node:crypto';
+import { eq } from 'drizzle-orm';
+import { expect, it } from 'vitest';
+import * as schema from '../../src/db/schema.js';
+import { unsubscribe, unsubscribeToken } from '../../src/modules/outbound/contacts.js';
+import { beginDispatch, reserveDispatch, submitOutbound, type Authority } from '../../src/modules/outbound/core.js';
+import { stopByPerson } from '../../src/modules/outbound/policies.js';
+import { aChannelOf, aContactOf, anAccountOf, aPermissionOf, aPolicyOf, documentOf, partsOf, QUIET, type Base } from '../outbound-world.js';
+import { backendPid, privatePostgres, runFixture, type Actor, type PostgresFixture } from './helpers.js';
+
+/* Two apps on their own connections to one PostgreSQL, doing what PGlite's one connection cannot show: nothing here is
+   mocked but the transport, which no test of this file reaches. Everything is synthetic. */
+
+const LIMITED = (accountDailyLimit: number, domainDailyLimit: number) => ({ ...QUIET, accountDailyLimit, domainDailyLimit });
+
+async function gateway(pg: PostgresFixture, limits = QUIET) {
+  const { companyId, departmentId, actors } = await runFixture(pg, { env: { PUBLIC_URL: 'https://hornhoof.example' } });
+  const [first, second] = actors;
+  const [owner] = await pg.db.select().from(schema.people);
+  const c: Base = { db: first.ctx.db, companyId, dev: { id: departmentId }, ids: { ceo: owner!.id }, app: { ctx: first.ctx } };
+  for (const channel of ['message', 'price'] as const) await pg.db.insert(schema.approvalPolicies).values({ companyId, departmentId, channel, mode: 'within_limits', limitAmount: 100, limitUnit: 'USD', updatedBy: owner!.id });
+  const channel = await aChannelOf(c);
+  await aPolicyOf(c, channel.id, limits);
+  const one = await anAccountOf(c, channel.id, first.job.agentId, 'One');
+  const two = await anAccountOf(c, channel.id, second.job.agentId, 'Two');
+  const parts = await partsOf(c, channel.id);
+  const document = documentOf(parts);
+  const authorityOf = (actor: Actor): Authority => ({ companyId, agentId: actor.job.agentId, departmentId, jobId: actor.job.id });
+  const send = (actor: Actor, contactId: string, idempotencyKey: string = randomUUID()) =>
+    submitOutbound(actor.ctx, authorityOf(actor), { task: actor.task.id, idempotencyKey, channelId: channel.id, accountId: (actor === first ? one : two).account.id, bindingGeneration: 1, target: { kind: 'contact', contactId }, segmentId: parts.segment.entryId, document, scheduledAt: '2026-01-02T00:00:00.000Z' });
+  const someone = async (address: string) => {
+    const contact = await aContactOf(c, address);
+    await aPermissionOf(c, contact.id, channel.id);
+    return contact;
+  };
+  const usage = () => pg.db.select().from(schema.outboundDailyUsage);
+  const messageOf = async (id: string) => (await pg.db.select().from(schema.outboundMessages).where(eq(schema.outboundMessages.id, id)))[0]!;
+  return { companyId, first, second, channel, send, someone, usage, messageOf };
+}
+
+const reservedAt = (buckets: { reserved: number }[]) => buckets.map(b => b.reserved);
+
+it('gives the same answer to one key sent twice at once, and makes one message', { timeout: 120000 }, async () => {
+  const pg = await privatePostgres();
+  const g = await gateway(pg);
+  const contact = await g.someone('ann@shop.example');
+  const key = randomUUID();
+  const [a, b] = await Promise.all([g.send(g.first, contact.id, key), g.send(g.first, contact.id, key)]);
+  expect(a).toEqual(b);
+  expect(a.status).toBe('scheduled');
+  expect(await pg.db.select().from(schema.outboundMessages)).toHaveLength(1);
+});
+
+it('never reserves past an account\'s limit, however many dispatchers ask at once', { timeout: 120000 }, async () => {
+  const pg = await privatePostgres();
+  const g = await gateway(pg, LIMITED(3, 100));
+  const pids = await Promise.all([backendPid(g.first.pool), backendPid(g.second.pool)]);
+  expect(new Set(pids).size).toBe(2);
+  const messages = [];
+  for (let i = 0; i < 8; i++) messages.push(await g.send(g.first, (await g.someone(`one${i}@shop.example`)).id));
+  const asked = await Promise.all(messages.map((m, i) => reserveDispatch((i % 2 ? g.first : g.second).ctx, m.messageId, 1)));
+  expect(asked.filter(a => a.kind === 'reserved')).toHaveLength(3);
+  expect(asked.filter(a => a.kind === 'refused').every(a => a.kind === 'refused' && a.reasonCodes.includes('daily_limit_exceeded'))).toBe(true);
+  expect(reservedAt(await g.usage())).toEqual([3, 3]);
+  expect(await pg.db.select().from(schema.outboundAttempts)).toHaveLength(3);
+});
+
+it('counts a sender domain across its accounts, whichever comes first', { timeout: 120000 }, async () => {
+  const pg = await privatePostgres();
+  const g = await gateway(pg, LIMITED(100, 2));
+  const messages = [];
+  for (let i = 0; i < 6; i++) messages.push(await g.send(i % 2 ? g.first : g.second, (await g.someone(`both${i}@shop.example`)).id));
+  const asked = await Promise.all(messages.map((m, i) => reserveDispatch((i % 2 ? g.first : g.second).ctx, m.messageId, 1)));
+  expect(asked.filter(a => a.kind === 'reserved')).toHaveLength(2);
+  const domain = (await g.usage()).filter(b => b.scope === 'domain');
+  expect(reservedAt(domain)).toEqual([2]);
+});
+
+/* A row held on one connection until someone is seen waiting for it, then changed and let go. */
+async function holding<T>(pg: PostgresFixture, table: string, id: string, work: () => Promise<T>, change: string): Promise<T> {
+  const locker = await pg.pool('locker').connect();
+  try {
+    await locker.query('BEGIN');
+    await locker.query(`SELECT id FROM ${table} WHERE id = $1 FOR UPDATE`, [id]);
+    const lockerPid = (await locker.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0]!.pid;
+    const pending = work();
+    void pending.catch(() => {});
+    await expect.poll(async () => (await pg.admin.query<{ waits: boolean }>('SELECT count(*) > 0 AS waits FROM pg_stat_activity WHERE $1::int = ANY(pg_blocking_pids(pid))', [lockerPid])).rows[0]!.waits, { timeout: 5000, interval: 10 }).toBe(true);
+    await locker.query(change, [id]);
+    await locker.query('COMMIT');
+    return await pending;
+  } finally {
+    await locker.query('ROLLBACK').catch(() => {});
+    locker.release(true);
+  }
+}
+
+it('a stop that commits first wins over a dispatch that waited for it', { timeout: 120000 }, async () => {
+  const pg = await privatePostgres();
+  const g = await gateway(pg);
+  const { messageId } = await g.send(g.first, (await g.someone('stop@shop.example')).id);
+  expect((await reserveDispatch(g.first.ctx, messageId, 1)).kind).toBe('reserved');
+  const begun = await holding(pg, 'outbound_channels', g.channel.id, () => beginDispatch(g.second.ctx, messageId, 1), "UPDATE outbound_channels SET status = 'stopped', stopped_reason = 'channel_stopped', stopped_at = now(), generation = generation + 1 WHERE id = $1");
+  expect(begun).toEqual({ kind: 'refused', reasonCodes: ['channel_stopped'] });
+  expect((await g.messageOf(messageId)).status).not.toBe('sending');
+  expect((await pg.db.select().from(schema.outboundAttempts))[0]!.status).not.toBe('sending');
+  expect(reservedAt(await g.usage())).toEqual([0, 0]);
+});
+
+it('a refusal that commits first wins over a dispatch that waited for it, and gives its place back', { timeout: 120000 }, async () => {
+  const pg = await privatePostgres();
+  const g = await gateway(pg);
+  const contact = await g.someone('no@shop.example');
+  const { messageId } = await g.send(g.first, contact.id);
+  expect((await reserveDispatch(g.first.ctx, messageId, 1)).kind).toBe('reserved');
+  const begun = await holding(pg, 'outbound_contacts', contact.id, () => beginDispatch(g.second.ctx, messageId, 1), 'UPDATE outbound_contacts SET do_not_contact = true, suppressed_at = now() WHERE id = $1');
+  expect(begun).toEqual({ kind: 'refused', reasonCodes: ['contact_suppressed'] });
+  expect((await g.messageOf(messageId)).status).toBe('cancelled');
+  expect(reservedAt(await g.usage())).toEqual([0, 0]);
+});
+
+/* The real paths at once, with no lock of the test's: either order is fine, a deadlock or a half of each is not. */
+it('runs unsubscribes and dispatches at once with no deadlock, each message wholly one way or the other', { timeout: 180000 }, async () => {
+  const pg = await privatePostgres();
+  const g = await gateway(pg, LIMITED(100, 100));
+  const pairs = [];
+  for (let i = 0; i < 12; i++) {
+    const contact = await g.someone(`race${i}@shop.example`);
+    const { messageId } = await g.send(g.first, contact.id);
+    expect((await reserveDispatch(g.first.ctx, messageId, 1)).kind).toBe('reserved');
+    pairs.push({ contact, messageId, token: unsubscribeToken(g.first.ctx.config.secret, { companyId: g.companyId, contactId: contact.id, channelId: g.channel.id, purpose: 'first_contact' }) });
+  }
+  const outcomes = await Promise.all(pairs.map(async (p, i) => {
+    const [one, other] = i % 2 ? [g.first, g.second] : [g.second, g.first];
+    const [begun, stopped] = await Promise.all([beginDispatch(one.ctx, p.messageId, 1), unsubscribe(other.ctx, p.token)]);
+    return { begun, stopped };
+  }));
+  expect(outcomes.every(o => o.stopped === true)).toBe(true);
+  for (const [i, o] of outcomes.entries()) {
+    const message = await g.messageOf(pairs[i]!.messageId);
+    const [attempt] = await pg.db.select().from(schema.outboundAttempts).where(eq(schema.outboundAttempts.messageId, message.id));
+    if (o.begun.kind === 'begun') {
+      expect(message.status).toBe('sending');
+      expect(attempt!.status).toBe('sending');
+    } else {
+      expect(message.status).toBe('cancelled');
+      expect(attempt!.status).toBe('definitely_not_accepted');
+    }
+  }
+  const going = outcomes.filter(o => o.begun.kind === 'begun').length;
+  const sending = await pg.db.select().from(schema.outboundAttempts).where(eq(schema.outboundAttempts.status, 'sending'));
+  expect(sending).toHaveLength(going);
+  expect(reservedAt(await g.usage())).toEqual([going, going]);
+});
+
+it('takes a stop and a burst of dispatches at once with no deadlock, and nothing starts after the stop', { timeout: 180000 }, async () => {
+  const pg = await privatePostgres();
+  const g = await gateway(pg, LIMITED(100, 100));
+  const messages = [];
+  for (let i = 0; i < 10; i++) {
+    const { messageId } = await g.send(g.first, (await g.someone(`burst${i}@shop.example`)).id);
+    expect((await reserveDispatch(g.first.ctx, messageId, 1)).kind).toBe('reserved');
+    messages.push(messageId);
+  }
+  const begins = messages.map((id, i) => beginDispatch((i % 2 ? g.first : g.second).ctx, id, 1));
+  const stopped = await stopByPerson(g.second.ctx, g.channel.id);
+  const outcomes = await Promise.all(begins);
+  expect(stopped.status).toBe('stopped');
+  expect(outcomes.every(o => o.kind === 'begun' || (o.kind === 'refused' && o.reasonCodes.includes('channel_stopped')))).toBe(true);
+  for (const id of messages) expect((await beginDispatch(g.first.ctx, id, 1)).kind).not.toBe('begun');
+});
