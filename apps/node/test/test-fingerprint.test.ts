@@ -192,6 +192,33 @@ describe('when the graph cannot tell', () => {
     expect(await changed(input(files, manifest(suites)), input({ ...files, 'apps/a/src/other.ts': 'export const other = 3;\n' }, manifest(suites)))).toEqual(['a:apps/a/test/other.test.ts', 'a:apps/a/test/used.test.ts']);
   });
 
+  it('a computed import in another package makes it depend on that whole package too', async () => {
+    const files = { ...app, 'apps/a/src/loader.ts': 'export const load = (name: string) => import(`./pages/${name}.js`);\n', 'apps/a/src/pages/one.ts': 'export const one = 1;\n', 'apps/b/test/b.test.ts': "import { load } from '../../a/src/loader.js';\nimport { it } from 'vitest';\nit('b', () => load);\n" };
+    expect(await changed(input(files, manifest(suites)), input({ ...files, 'apps/a/src/pages/one.ts': 'export const one = 2;\n' }, manifest(suites)))).toEqual(['b:apps/b/test/b.test.ts']);
+  });
+
+  it('a program in a language it does not read can lead anywhere in its package', async () => {
+    const files = { ...app, 'apps/a/tools/run.sh': 'source ./lib.sh\n', 'apps/a/tools/lib.sh': 'echo 1\n', 'apps/b/test/b.test.ts': "import { it } from 'vitest';\nconst script = new URL('../../a/tools/run.sh', import.meta.url);\nit('b', () => script);\n" };
+    expect(await changed(input(files, manifest(suites)), input({ ...files, 'apps/a/tools/lib.sh': 'echo 2\n' }, manifest(suites)))).toContain('b:apps/b/test/b.test.ts');
+    expect(await changed(input(files, manifest(suites)), input({ ...files, 'apps/a/src/other.ts': 'export const other = 3;\n' }, manifest(suites)))).toContain('b:apps/b/test/b.test.ts');
+  });
+
+  it('data leads nowhere, and neither does a fixture of a test folder, which changes its package anyway', async () => {
+    const test = (name: string) => `import { it } from 'vitest';\nconst data = new URL('${name}', import.meta.url);\nit('b', () => data);\n`;
+    for (const named of ['../../a/data/values.json', '../../a/data/page.css', '../../a/LICENSE', '../../a/test/fakes/program']) {
+      const files = { ...app, 'apps/a/data/values.json': '{}', 'apps/a/data/page.css': 'a {}', 'apps/a/LICENSE': 'Yours', 'apps/a/test/fakes/program': 'echo 1', 'apps/b/test/b.test.ts': test(named) };
+      expect(await changed(input(files, manifest(suites)), input({ ...files, 'apps/a/src/other.ts': 'export const other = 3;\n' }, manifest(suites)))).not.toContain('b:apps/b/test/b.test.ts');
+    }
+  });
+
+  it('a file with no extension that may run is a program', async () => {
+    const files = { ...app, 'apps/a/tools/run': 'echo 1\n', 'apps/b/test/b.test.ts': "import { it } from 'vitest';\nconst script = new URL('../../a/tools/run', import.meta.url);\nit('b', () => script);\n" };
+    const executable = (given: FingerprintInput): FingerprintInput => ({ ...given, tracked: given.tracked.map(entry => entry.path === 'apps/a/tools/run' ? { ...entry, mode: '100755' } : entry) });
+    const after = { ...files, 'apps/a/src/other.ts': 'export const other = 3;\n' };
+    expect(await changed(executable(input(files, manifest(suites))), executable(input(after, manifest(suites))))).toContain('b:apps/b/test/b.test.ts');
+    expect(await changed(input(files, manifest(suites)), input(after, manifest(suites)))).not.toContain('b:apps/b/test/b.test.ts');
+  });
+
   it('an import of a package nobody declares does too, such as a path alias', async () => {
     const files = { ...app, 'apps/a/src/used.ts': "import { x } from '@/deep';\nexport const used = x;\n" };
     expect(await changed(input(files, manifest(suites)), input({ ...files, 'apps/a/src/other.ts': 'export const other = 3;\n' }, manifest(suites)))).toEqual(['a:apps/a/test/other.test.ts', 'a:apps/a/test/used.test.ts']);
@@ -250,6 +277,36 @@ describe('what the scanner follows', () => {
       'apps/a/test/used.test.ts': "const one = new URL('../data/one.txt', import.meta.url);\nconst two = readFileSync('two.txt');\nconst three = readFileSync('shared/three.txt');\nconst folder = new URL('../folder', import.meta.url);\nexport { one, two, three, folder };\n" };
     const found = reaching(files, 'apps/a/test/used.test.ts');
     for (const name of ['apps/a/data/one.txt', 'apps/a/two.txt', 'shared/three.txt', 'apps/a/folder/four.txt', 'apps/a/folder/deep/five.txt']) expect(found).toContain(name);
+  });
+
+  it('a folder or a pattern named from the package or from the repository', async () => {
+    const reader = (named: string) => `import { it } from 'vitest';\nconst at = '${named}';\nit('reads', () => at);\n`;
+    for (const [test, named] of [['apps/a/test/reads.test.ts', 'src/pages'], ['apps/a/test/reads.test.ts', 'src/pages/'], ['apps/a/test/reads.test.ts', 'src/**/*.ts'], ['apps/a/test/reads.test.ts', '/src/pages/*.ts'], ['apps/b/test/reads.test.ts', 'apps/a/src/pages'], ['apps/b/test/reads.test.ts', 'apps/a/src/pages/*.ts']] as const) {
+      const files: Files = { ...app, 'apps/a/src/pages/one.ts': 'export const one = 1;\n', [test]: reader(named) };
+      expect(reaching(files, test), named).toContain('apps/a/src/pages/one.ts');
+    }
+  });
+
+  it('a word, an address, a package by its folder or a pattern without a folder is not a folder it reads', async () => {
+    const reader = (named: string) => `import { it } from 'vitest';\nconst at = '${named}';\nit('reads', () => at);\n`;
+    for (const named of ['src', '/', '/src', '*', '*.ts', '*/*', 'text/plain', 'apps/a']) {
+      const files: Files = { ...app, 'apps/a/src/one.ts': 'export const one = 1;\n', 'apps/a/test/reads.test.ts': reader(named), 'apps/b/test/reads.test.ts': reader(named) };
+      expect(reaching(files, 'apps/a/test/reads.test.ts'), named).not.toContain('apps/a/src/one.ts');
+      expect(reaching(files, 'apps/b/test/reads.test.ts'), named).not.toContain('apps/a/src/one.ts');
+    }
+  });
+
+  it('a pattern in the code under test is a rule about paths, unless it imports what it names', async () => {
+    const files: Files = { ...app, 'apps/a/src/pages/one.ts': 'export const one = 1;\n', 'apps/a/src/pages/two.ts': 'export const two = 2;\n',
+      'apps/a/src/rules.ts': "export const rules = ['src/pages/*.ts', 'apps/a/src/pages/*.ts'];\n", 'apps/a/src/glob.ts': "export const pages = import.meta.glob('/src/pages/*.ts');\n" };
+    expect(reaching(files, 'apps/a/src/rules.ts')).not.toContain('apps/a/src/pages/one.ts');
+    expect(reaching(files, 'apps/a/src/glob.ts')).toContain('apps/a/src/pages/two.ts');
+  });
+
+  it('a pattern leaves out documents unless it asks for them', async () => {
+    const files: Files = { ...app, 'apps/a/docs/one.md': '1', 'apps/a/docs/one.txt': '1', 'apps/a/test/a.test.ts': "const a = 'docs/*';\n", 'apps/a/test/b.test.ts': "const b = 'docs/*.md';\n" };
+    expect([...reaching(files, 'apps/a/test/a.test.ts')].sort()).toEqual(['apps/a/docs/one.txt', 'apps/a/test/a.test.ts']);
+    expect([...reaching(files, 'apps/a/test/b.test.ts')].sort()).toEqual(['apps/a/docs/one.md', 'apps/a/test/b.test.ts']);
   });
 
   it('a path to a built folder leads to what it is built from', async () => {

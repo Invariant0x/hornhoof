@@ -21,12 +21,16 @@ type Manifest = TestEnvironmentV1;
 type Suite = Manifest['suites'][number];
 /* edges: all a file may read. runs: what it imports and the files it names one by one. */
 type Scan = { edges: string[]; runs: string[]; opaque: boolean };
-type Reach = { digest: string; opaque: boolean };
+/* opaque: the packages of what it reaches and cannot follow. */
+type Reach = { digest: string; opaque: string[] };
 
 const FORMAT = 'hornhoof-fingerprint-v1';
 const CODE = /\.(?:[cm]?[jt]sx?)$/;
 const REGULAR = new Set(['100644', '100755']);
 const DOCUMENT = /^(?!templates\/).*\.md$/;
+/* What holds data leads nowhere, as a file with no extension does unless it may run. Anything else this cannot read may be a program,
+   and a program may load anything. */
+const DATA = /\.(?:json|jsonl|md|txt|csv|sql|ya?ml|toml|ini|css|svg|png|jpe?g|gif|webp|ico|ttf|otf|woff2?|pdf|ansi|patch|snap|lock)$/;
 const TEST_FOLDER = /(?:^|\/)(?:test|tests|__tests__)\//;
 const EXTENSIONS = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs', '.json'];
 const SOURCE_OF_BUILT: Record<string, string[]> = { '.js': ['.ts', '.tsx'], '.jsx': ['.tsx'], '.mjs': ['.mts'], '.cjs': ['.cts'] };
@@ -36,6 +40,7 @@ const BARE_IMPORT = /^[ \t]*import\s*(['"])([^'"\n]+)\1/gm;
 const CALLED = /\b(?:import|require|import\.meta\.resolve|(?:vi|jest)\.(?:mock|doMock|unmock|doUnmock|importActual|importMock|requireActual|requireMock))\s*\(\s*(['"`])([^'"`\n]+)\1/g;
 const COMPUTED = /\b(?:import|require|import\.meta\.resolve)\s*\(\s*(?:[^'"`\s)]|`[^`]*\$\{)/;
 const STRING = /(['"`])((?:\\.|(?!\1)[^\\\n])*)\1/g;
+const GLOB_IMPORT = /\bimport\.meta\.glob\s*\(\s*\[?\s*(['"`])([^'"`\n]+)\1/g;
 /* A type alone is gone before anything runs, as Vitest's graph knows too. */
 const TYPE_ONLY = /^[ \t]*(?:import|export)\s+type\s*(?:\{[^}]*\}|\*(?:\s+as\s+[\w$]+)?|[\w$]+(?=\s+from\b))\s*from\s*(['"])[^'"\n]+\1;?/gm;
 const SCREEN = /([^/]+)\.[jt]sx$/;
@@ -102,6 +107,7 @@ class Tree {
     for (const group of [value.dependencies, value.devDependencies, value.peerDependencies, value.optionalDependencies]) for (const name of Object.keys(group ?? {})) this.declared.add(name);
   }
   isRegular(path: string): boolean { return REGULAR.has(this.modes.get(path) ?? ''); }
+  holdsData(path: string): boolean { return DATA.test(path) || (posix.extname(path) === '' && this.modes.get(path) !== '100755'); }
   under(folder: string): string[] {
     let found = this.folders.get(folder);
     if (!found) { found = this.paths.filter(path => isInside(path, folder) && !isDocument(path)); this.folders.set(folder, found); }
@@ -119,6 +125,7 @@ class Tree {
   packageCode(root: string): string[] { return this.under(root).filter(path => !TEST_FOLDER.test(path)); }
   matching(patterns: string[]): string[] { return this.paths.filter(path => patterns.some(pattern => matches(path, pattern))); }
   rootOf(path: string): string { return this.roots.find(root => isInside(path, root)) ?? '.'; }
+  isRoot(folder: string): boolean { return this.roots.includes(folder); }
   /* What a path that may lack its extension names: a file, the source of a built one, or a folder's index. */
   resolve(path: string): string | undefined {
     if (this.oids.has(path)) return path;
@@ -176,6 +183,19 @@ function relativeNamed(tree: Tree, from: string, literal: string): Named {
 }
 
 const couldBePath = (text: string): boolean => text.length > 0 && text.length <= LONGEST_PATH && !/\$\{| |\n/.test(text);
+/* A folder has a folder in its path, and a package's own folder says which package, as its name does. A word, an address like /x
+   and a type like text/plain say no folder of the tree. */
+const FOLDER = /^[^/*]+(?:\/[^/*]+)+\/?$/;
+const PATTERN = /^(?=.*\/)(?=.*\*)(?=.*[^/*]).*$/;
+function namedFolder(tree: Tree, text: string, inPackage: string): string[] {
+  if (!FOLDER.test(text)) return [];
+  return [text, inPackage].map(folder => folder.replace(/\/$/, '')).filter(folder => !tree.isRoot(folder)).flatMap(folder => tree.under(folder));
+}
+/* A pattern outside a test is mostly a rule about paths, as the rules of #309 are, and only a test reads what it names. */
+function namedPattern(tree: Tree, text: string, inPackage: string): string[] {
+  const patterns = text.startsWith('*') ? [inPackage] : [text, inPackage];
+  return tree.paths.filter(path => (!isDocument(path) || text.endsWith('.md')) && patterns.some(pattern => matchesGlob(path, pattern)));
+}
 /* A path named in the code, as for a file read from disk: relative, from the package or from the repository. */
 function namedBy(tree: Tree, from: string, literal: string): Named {
   const text = bare(literal);
@@ -184,7 +204,9 @@ function namedBy(tree: Tree, from: string, literal: string): Named {
   const workspace = tree.workspaces.get(packageName(text));
   if (workspace) return manyFiles(tree.packageCode(workspace));
   const inPackage = posix.join(tree.rootOf(from), text), found = [text, inPackage].filter(path => tree.oids.has(path));
-  return found.length ? oneFile(found) : manyFiles(tree.builtFrom(inPackage) ?? []);
+  if (found.length) return oneFile(found);
+  if (PATTERN.test(text)) return manyFiles(TEST_FOLDER.test(from) ? namedPattern(tree, text, inPackage) : []);
+  return manyFiles(tree.builtFrom(inPackage) ?? namedFolder(tree, text, inPackage));
 }
 
 function scanCode(tree: Tree, from: string, source: string): Scan {
@@ -200,12 +222,14 @@ function scanCode(tree: Tree, from: string, source: string): Scan {
     for (const path of named.file) runs.add(path);
     for (const path of named.many) many.add(path);
   }
+  for (const [, , literal] of text.matchAll(GLOB_IMPORT)) for (const path of namedPattern(tree, literal!, posix.join(tree.rootOf(from), literal!))) many.add(path);
   runs.delete(from); many.delete(from);
   return { edges: [...new Set([...runs, ...many])], runs: [...runs], opaque };
 }
 function scanFile(tree: Tree, path: string): Scan {
   if (!tree.isRegular(path)) return { edges: [], runs: [], opaque: true };
-  if (!CODE.test(path)) return { edges: [], runs: [], opaque: false };
+  /* A fixture of a test folder may be a program too, and #309 takes its package whole whenever it changes. */
+  if (!CODE.test(path)) return { edges: [], runs: [], opaque: !tree.holdsData(path) && !TEST_FOLDER.test(path) };
   const text = tree.input.texts.get(path);
   return text === undefined ? { edges: [], runs: [], opaque: true } : scanCode(tree, path, text);
 }
@@ -272,25 +296,25 @@ class Graph {
     }
   }
   private addGroup(group: string[]): void {
-    const members = new Set(group), imported = new Set<string>();
-    let opaque = false;
+    const members = new Set(group), imported = new Set<string>(), opaque = new Set<string>();
     for (const member of group) {
       const scan = this.scan(member);
-      opaque ||= scan.opaque;
+      if (scan.opaque) opaque.add(this.tree.rootOf(member));
       for (const edge of scan.edges) {
         if (members.has(edge)) continue;
         const reach = this.reaches.get(edge)!;
-        imported.add(reach.digest); opaque ||= reach.opaque;
+        imported.add(reach.digest);
+        for (const root of reach.opaque) opaque.add(root);
       }
     }
-    const reach = { digest: digest([this.tree.pairsDigest(group), [...imported].sort(lexical)]), opaque };
+    const reach = { digest: digest([this.tree.pairsDigest(group), [...imported].sort(lexical)]), opaque: [...opaque] };
     for (const member of group) this.reaches.set(member, reach);
   }
   /* What these files reach together. */
   reachOf(starts: string[]): Reach {
     if (!this.reaches.size) for (const group of components(this.tree.paths, path => this.scan(path).edges)) this.addGroup(group);
     const reaches = starts.map(path => this.reaches.get(path)!);
-    return { digest: digest([...new Set(reaches.map(reach => reach.digest))].sort(lexical)), opaque: reaches.some(reach => reach.opaque) };
+    return { digest: digest([...new Set(reaches.map(reach => reach.digest))].sort(lexical)), opaque: [...new Set(reaches.flatMap(reach => reach.opaque))] };
   }
   private walk(starts: string[], next: (scan: Scan) => string[]): Set<string> {
     const files = new Set<string>(starts), pending = [...files];
@@ -397,10 +421,10 @@ function screensFor(tree: Tree, sources: string, spec: string): string[] {
   return named.length ? named : tree.under(sources);
 }
 
-/* What a test file and its package read, in one digest each. */
+/* What a test file reads, and where it reaches something it cannot follow, the whole of its package and of that file's. */
 function inputsOf(graph: Graph, suite: Suite, starts: string[]): unknown {
   const { digest: reached, opaque } = graph.reachOf(starts);
-  return opaque ? [reached, graph.tree.folderDigest(suite.root)] : reached;
+  return opaque.length ? [reached, [...new Set([suite.root, ...opaque])].sort(lexical).map(root => graph.tree.folderDigest(root))] : reached;
 }
 function testInputs(graph: Graph, suite: Suite, file: string): unknown {
   const { tree } = graph;
