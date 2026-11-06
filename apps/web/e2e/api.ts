@@ -36,7 +36,7 @@ export const TASKS: TaskLine[] = Array.from({ length: 30 }, (_, i) => ({
 }));
 
 /* A body longer than any window, so the panel has to scroll. */
-const detail = (task: TaskLine): TaskDetail => ({
+export const detail = (task: TaskLine): TaskDetail => ({
   ...task,
   body: Array.from({ length: 40 }, (_, i) => `Step ${i + 1}: the card form checks the number and the date before it sends them.`).join('\n\n'),
   parent: null, after: [], executor: BRUNO, gates: [], createdBy: { kind: 'agent', id: 'b0', name: 'Dana' }, subtasks: [], log: [], requests: [],
