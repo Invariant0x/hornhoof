@@ -33,8 +33,8 @@ async function fixture() {
     { companyId: company!.id, departmentId: operations!.id, kind: 'head', name: 'Operations head', model: '' },
     { companyId: foreign!.id, kind: 'worker', name: 'Stranger', model: '' },
   ]).returning();
-  const [person] = await db.insert(people).values({ companyId: company!.id, name: 'Pat', email: 'pat@example.test' }).returning();
-  const [subscription] = await db.insert(subscriptions).values({ companyId: company!.id, ownerPersonId: person!.id, provider: 'codex', kind: 'personal', label: 'Plan' }).returning();
+  const [person] = await db.insert(people).values({ companyId: company!.id, name: 'Pat', email: 'pat@example.test', status: 'active', scopeKind: 'company' }).returning();
+  const [subscription] = await db.insert(subscriptions).values({ companyId: company!.id, ownerPersonId: person!.id, provider: 'codex', kind: 'personal', label: 'Plan', status: 'ready' }).returning();
   const unrelated = { reason: 'Unrelated promise', since: FIRST.toISOString(), until: '2030-01-02T10:00:00Z' };
   const [task] = await db.insert(tasks).values({ companyId: company!.id, departmentId: development!.id, number: 1, title: 'Original work', status: 'working', assigneeAgentId: author!.id, externalWait: unrelated }).returning();
   const [job] = await db.insert(jobs).values({ companyId: company!.id, subscriptionId: subscription!.id, agentId: author!.id, taskId: task!.id, kind: 'conversation', status: 'running', prompt: 'Original work', timeoutMs: 60000 }).returning();
@@ -46,8 +46,8 @@ async function fixture() {
   };
   const operation = await newOperation();
   const source: WaitSource = { caseId: episode!.id, operationId: operation.id, sourceRevision: 1, actor: { agentId: author!.id } };
-  const sync = (change: Partial<WaitSource> = {}) => db.transaction(tx => adapter.syncGitOperationWait?.(tx, { ...source, ...change }));
-  const end = (change: Partial<WaitSource> = {}) => db.transaction(tx => adapter.endGitOperationWait?.(tx, { ...source, ...change, proofRef: `receipt:${operation.id}` }));
+  const sync = (change: Partial<WaitSource> = {}) => db.transaction(async tx => adapter.syncGitOperationWait?.(tx, { ...source, ...change }));
+  const end = (change: Partial<WaitSource> = {}) => db.transaction(async tx => adapter.endGitOperationWait?.(tx, { ...source, ...change, proofRef: `receipt:${operation.id}` }));
   return { db, company: company!, foreign: foreign!, development: development!, operations: operations!, author: author!, owner: owner!, head: head!, stranger: stranger!, task: task!, job: job!, episode: episode!, operation, unrelated, source, sync, end, newOperation };
 }
 
