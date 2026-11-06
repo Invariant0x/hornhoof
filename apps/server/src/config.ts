@@ -31,6 +31,8 @@ export type Config = {
   nodeDrainMs: number;
   nodeUpdateRetryMs: number;
   nodeLeaderHoldMs: number;
+  /* Persisted on a new external recovery episode; later edits do not reset it. */
+  externalFailureOpsMs: number;
   /* The folder the app shares with the updater service. */
   controlDir: string;
   /* Role and skill templates, loaded once at start. */
@@ -79,6 +81,7 @@ const Env = z.object({
   /* How long a node that waits for an update keeps new turns of the orchestrator and the heads off it. Replacing a free
      node takes under a minute, so past this the node has work that runs on. */
   NODE_LEADER_HOLD_MS: milliseconds('NODE_LEADER_HOLD_MS', 1, '180000').default(180_000),
+  EXTERNAL_FAILURE_OPS_MS: milliseconds('EXTERNAL_FAILURE_OPS_MS', 1, '900000').default(900_000),
   REGISTRY_URL: webAddress('REGISTRY_URL must be an http:// or https:// address.'),
   RELAY_URL: webAddress('RELAY_URL must be an http:// or https:// address, like https://hornhoof.org.'),
   TUNNEL_HOST: z.preprocess(unset, z.string().regex(/^[A-Za-z0-9.-]{1,253}$/, 'TUNNEL_HOST must be the host name of the tunnel container, like tunnel.').optional()),
@@ -128,6 +131,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     nodeDrainMs: set.NODE_DRAIN_MS,
     nodeUpdateRetryMs: set.NODE_UPDATE_RETRY_MS,
     nodeLeaderHoldMs: set.NODE_LEADER_HOLD_MS,
+    externalFailureOpsMs: set.EXTERNAL_FAILURE_OPS_MS,
     controlDir: env.HORNHOOF_CONTROL_DIR || '/control',
     templatesDir: env.TEMPLATES_DIR || DEFAULT_TEMPLATES,
     relayUrl: (set.RELAY_URL ?? 'https://hornhoof.org').replace(/\/+$/, ''),

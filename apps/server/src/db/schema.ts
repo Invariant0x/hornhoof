@@ -1,4 +1,5 @@
 import type { ExternalWait } from '@hornhoof/protocol/waits';
+import type { ExternalConsumer, ExternalGitIntent, ExternalGitOutcome, ExternalPreparationSettlement } from '@hornhoof/protocol';
 import { APPROVAL_CHANNELS, APPROVAL_MODES, CATALOG_KINDS, COMPANY_TEMPLATE_KEYS, CONNECTION_ENDS, CRED_KINDS, INVALIDATION_CODES, MACHINE_KINDS, MESSAGE_STATUSES, MODEL_CHECK_KINDS, RISK_CLASSES, RUN_KINDS, TEMPLATE_KEYS, WORK_KINDS, type MaterialSnapshotHistory, type CatalogValue, type CheckBinding, type CheckResult, type EvaluationCounts, type GateCode, type MessageDocument, type OutboundPolicyValue, type ReasonCode, type ModelIdentity, type EnvironmentSnapshot, type EnvironmentProblem, type RepositoryScope, type TestExecution, type TestEnvironmentReceipt, type Account, type Boot, type Failure, type Limits, type ModelOption, type NodeExit, type NodeReconnect, type TestFileTiming, type TestPackageTiming, type TurnFacts } from '@hornhoof/protocol';
 import type { OperatorError, OperatorInputLine, OperatorQuestion, OperatorReason } from '@hornhoof/protocol/program-operator';
 import type { MessageParty } from '../modules/events/parties.js';
@@ -1677,4 +1678,119 @@ export const modelCheckCertificates = pgTable('model_check_certificates', {
   check('model_check_certificates_validity', sql`${t.validUntil} > ${t.evaluatedAt}`),
   check('model_check_certificates_end', sql`(${t.status} = 'invalidated') = (${t.invalidatedReason} IS NOT NULL) AND (${t.status} = 'invalidated') = (${t.invalidatedAt} IS NOT NULL)`),
   isDigest('model_check_certificates_binding', t.bindingDigest),
+]);
+
+/* Server-only coordination beside canonical jobs and test parts. A live scope
+   has one episode; closing it permits a later outage with a new identity. */
+export const externalRecoveryCases = pgTable('external_recovery_cases', {
+  id: id(),
+  companyId: companyId(),
+  scopeDigest: text('scope_digest').notNull(),
+  adapter: text('adapter', { enum: ['git'] }).notNull(),
+  endpointDigest: text('endpoint_digest').notNull(),
+  credentialRevision: integer('credential_revision').notNull(),
+  failureFamily: text('failure_family', { enum: ['transport', 'temporary', 'rate_limit'] }).notNull(),
+  generation: integer('generation').notNull().default(1),
+  firstFailureAt: timestamp('first_failure_at', { withTimezone: true }).notNull().defaultNow(),
+  nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }),
+  opsDeadlineAt: timestamp('ops_deadline_at', { withTimezone: true }).notNull(),
+  policyRevision: integer('policy_revision').notNull(),
+  ownerAgentId: uuid('owner_agent_id').references(() => agents.id),
+  claimOperationId: uuid('claim_operation_id'),
+  claimUntil: timestamp('claim_until', { withTimezone: true }),
+  releaseRevision: integer('release_revision').notNull().default(0),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+  createdAt: createdAt(),
+}, t => [
+  unique('external_cases_company_identity').on(t.id, t.companyId),
+  uniqueIndex('external_cases_open_scope').on(t.companyId, t.scopeDigest).where(sql`${t.resolvedAt} IS NULL`),
+  index('external_cases_due').on(t.nextAttemptAt).where(sql`${t.resolvedAt} IS NULL`),
+  index('external_cases_ops_due').on(t.opsDeadlineAt).where(sql`${t.resolvedAt} IS NULL`),
+  check('external_cases_scope', sql`${t.scopeDigest} ~ '^[a-f0-9]{64}$' AND ${t.endpointDigest} ~ '^[a-f0-9]{64}$'`),
+  check('external_cases_adapter', sql`${t.adapter} = 'git'`),
+  check('external_cases_family', sql`${t.failureFamily} IN ('transport','temporary','rate_limit')`),
+  check('external_cases_revisions', sql`${t.credentialRevision} > 0 AND ${t.policyRevision} > 0 AND ${t.generation} > 0 AND ${t.releaseRevision} >= 0`),
+  check('external_cases_deadline', sql`${t.opsDeadlineAt} >= ${t.firstFailureAt}`),
+  check('external_cases_claim_pair', sql`(${t.claimOperationId} IS NULL) = (${t.claimUntil} IS NULL)`),
+]);
+
+/* Intent/consumer data is sealed by the authenticated producer, never copied
+   from a public task event or a command's stdout marker. */
+export const externalOperations = pgTable('external_operations', {
+  id: id(),
+  companyId: companyId(),
+  intentDigest: text('intent_digest').notNull(),
+  intent: jsonb('intent').$type<ExternalGitIntent>().notNull(),
+  consumer: jsonb('consumer').$type<ExternalConsumer>().notNull(),
+  state: text('state', { enum: ['ready', 'executing', 'deferred', 'outcome_unknown', 'satisfied', 'failed_permanent', 'cancelled'] }).notNull().default('ready'),
+  generation: integer('generation').notNull().default(1),
+  currentAttemptId: uuid('current_attempt_id'),
+  outcome: jsonb('outcome').$type<ExternalGitOutcome>(),
+  postconditionSha: text('postcondition_sha'),
+  cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+  finishedAt: timestamp('finished_at', { withTimezone: true }),
+  createdAt: createdAt(),
+}, t => [
+  unique('external_operations_company_identity').on(t.id, t.companyId),
+  index('external_operations_state').on(t.companyId, t.state),
+  check('external_operations_digest', sql`${t.intentDigest} ~ '^[a-f0-9]{64}$'`),
+  check('external_operations_generation', sql`${t.generation} > 0`),
+  check('external_operations_state', sql`${t.state} IN ('ready','executing','deferred','outcome_unknown','satisfied','failed_permanent','cancelled')`),
+  check('external_operations_intent_bound', sql`jsonb_typeof(${t.intent}) = 'object' AND octet_length(${t.intent}::text) <= 16384`),
+  check('external_operations_consumer_bound', sql`jsonb_typeof(${t.consumer}) = 'object' AND octet_length(${t.consumer}::text) <= 4096`),
+  check('external_operations_outcome_bound', sql`${t.outcome} IS NULL OR (jsonb_typeof(${t.outcome}) = 'object' AND octet_length(${t.outcome}::text) <= 65536)`),
+  check('external_operations_postcondition', sql`${t.postconditionSha} IS NULL OR ${t.postconditionSha} ~ '^[a-f0-9]{40}$'`),
+]);
+
+export const externalRecoveryMembers = pgTable('external_recovery_members', {
+  companyId: companyId(),
+  caseId: uuid('case_id').notNull(),
+  operationId: uuid('operation_id').notNull(),
+  releaseRevision: integer('release_revision').notNull().default(0),
+  joinedAt: timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
+  endedAt: timestamp('ended_at', { withTimezone: true }),
+}, t => [
+  primaryKey({ columns: [t.caseId, t.operationId] }),
+  foreignKey({ columns: [t.caseId, t.companyId], foreignColumns: [externalRecoveryCases.id, externalRecoveryCases.companyId] }),
+  foreignKey({ columns: [t.operationId, t.companyId], foreignColumns: [externalOperations.id, externalOperations.companyId] }),
+  index('external_members_operation').on(t.operationId),
+  check('external_members_release_revision', sql`${t.releaseRevision} >= 0`),
+]);
+
+/* Attempts retain old identities and receipts after replacement. A new fence
+   alone is never evidence that the previous remote child stopped. */
+export const externalRecoveryAttempts = pgTable('external_recovery_attempts', {
+  id: id(),
+  companyId: companyId(),
+  operationId: uuid('operation_id').notNull(),
+  generation: integer('generation').notNull(),
+  producerNodeId: uuid('producer_node_id').references(() => nodes.id),
+  producerLinkId: uuid('producer_link_id'),
+  outcome: jsonb('outcome').$type<ExternalGitOutcome>(),
+  settlement: jsonb('settlement').$type<ExternalPreparationSettlement>(),
+  receiptDigest: text('receipt_digest'),
+  startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+  settledAt: timestamp('settled_at', { withTimezone: true }),
+}, t => [
+  foreignKey({ columns: [t.operationId, t.companyId], foreignColumns: [externalOperations.id, externalOperations.companyId] }),
+  unique('external_attempts_generation').on(t.operationId, t.generation),
+  check('external_attempts_generation_positive', sql`${t.generation} > 0`),
+  check('external_attempts_receipt', sql`${t.receiptDigest} IS NULL OR ${t.receiptDigest} ~ '^[a-f0-9]{64}$'`),
+  check('external_attempts_outcome_bound', sql`${t.outcome} IS NULL OR (jsonb_typeof(${t.outcome}) = 'object' AND octet_length(${t.outcome}::text) <= 65536)`),
+  check('external_attempts_settlement_bound', sql`${t.settlement} IS NULL OR (jsonb_typeof(${t.settlement}) = 'object' AND octet_length(${t.settlement}::text) <= 4096)`),
+]);
+
+/* The coordinator reserves and enqueues the same logical notification in one
+   transaction. No delivery or release is inferred from a reservation alone. */
+export const externalRecoveryNotices = pgTable('external_recovery_notices', {
+  id: id(),
+  companyId: companyId(),
+  caseId: uuid('case_id').notNull(),
+  noticeKind: text('notice_kind', { enum: ['operations'] }).notNull(),
+  notificationId: uuid('notification_id').notNull(),
+  createdAt: createdAt(),
+}, t => [
+  foreignKey({ columns: [t.caseId, t.companyId], foreignColumns: [externalRecoveryCases.id, externalRecoveryCases.companyId] }),
+  unique('external_notices_one_logical_signal').on(t.companyId, t.caseId, t.noticeKind),
+  check('external_notices_kind', sql`${t.noticeKind} = 'operations'`),
 ]);
