@@ -231,7 +231,7 @@ describe('with real git', () => {
     const marker = join(base, 'shim-used');
     writeFileSync(join(bin, 'git'), `#!/bin/sh\nprintf shim > '${marker}'\nexit 19\n`, { mode: 0o755 });
     vi.stubEnv('PATH', `${bin}:${process.env.PATH}`);
-    onTestFinished(() => vi.unstubAllEnvs());
+    onTestFinished(() => { vi.unstubAllEnvs(); });
     const server = createServer((_req, res) => { res.writeHead(503); res.end('Temporarily unavailable'); });
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
     onTestFinished(() => new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())));
