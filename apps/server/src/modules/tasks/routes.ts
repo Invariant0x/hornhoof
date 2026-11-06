@@ -14,6 +14,7 @@ import { serverMachine } from '../computer/access.js';
 import { deptName } from '../departments/templates.js';
 import { departmentNames, visibleDecisions, type Decisions } from './decisions.js';
 import { answer, cancel, CLOSED, comment, createTask, refuse, requestSubject, taskSpot, type Task } from './engine.js';
+import { setUrgent } from './urgency.js';
 import { requireDecision } from '../../auth/decisions.js';
 import { delegationOf, lockedFor } from '../conversation/decision-context.js';
 import type { DecidedBy } from '../../auth/decisions.js';
@@ -28,6 +29,7 @@ import { leaveIfOff, stopTurns, wakeAll } from './wake.js';
 
 const IdParams = z.object({ id: z.uuid() });
 const NewTaskBody = z.object({
+  urgent: z.boolean().optional(),
   title: z.string().trim().min(1).max(120),
   brief: z.string().max(600).default(''),
   body: z.string().max(20000).default(''),
@@ -230,7 +232,7 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const after = body.after?.length ? (await db.select().from(tasks).where(and(eq(tasks.companyId, me.companyId), inArray(tasks.number, body.after)))).filter(t => seesTask(viewer, t)) : [];
     const missing = (body.after ?? []).find(n => !after.some(t => t.number === n));
     if (missing !== undefined) throw refuse(400, 'task_invalid', `There is no task #${missing} to come after.`);
-    const moved = await createTask(ctx, actorOf(me), { title: body.title, brief: body.brief, body: body.body, departmentId: body.department ?? null, productId: body.product ?? null, assigneeAgentId: assignee.id, after: (body.after ?? []).map(n => after.find(t => t.number === n)!.id) });
+    const moved = await createTask(ctx, actorOf(me), { title: body.title, brief: body.brief, body: body.body, departmentId: body.department ?? null, productId: body.product ?? null, assigneeAgentId: assignee.id, urgent: body.urgent, after: (body.after ?? []).map(n => after.find(t => t.number === n)!.id) });
     await wakeAll(ctx, moved.wakes);
     return reply.code(201).send({ task: await detail(me, moved.task) });
   });
@@ -242,6 +244,15 @@ export function taskRoutes(app: FastifyInstance, ctx: Ctx): void {
     const moved = await comment(ctx, actorOf(me), (await shown(me, id)).id, text);
     await wakeAll(ctx, moved.wakes);
     return reply.code(201).send({ task: await detail(me, moved.task) });
+  });
+
+  /* Only the CEO or the CEO delegate says so, as the engine checks. */
+  app.put('/api/tasks/:id/urgent', async req => {
+    const me = await requirePerson(req, db);
+    const { id } = IdParams.parse(req.params);
+    const { urgent } = z.object({ urgent: z.boolean() }).strict().parse(req.body);
+    const moved = await setUrgent(ctx, actorOf(me), (await shown(me, id)).id, urgent);
+    return { task: await detail(me, moved.task) };
   });
 
   app.post('/api/tasks/:id/cancel', async req => {

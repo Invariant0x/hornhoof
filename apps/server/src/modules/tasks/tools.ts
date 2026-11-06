@@ -11,6 +11,9 @@ import { carriesFile, encodedHint } from './attachments.js';
 import { Text } from './long-text.js';
 import { agentSeesTask as sees, taskByRef, taskDetail, taskLines, type TaskDetail } from './views.js';
 import { addTasks, editTurn, mergeTurn, planTurn, settle, tell, TURN_MESSAGES, turnName, turnRows } from './turns.js';
+import { setUrgent } from './urgency.js';
+import { answersCeoOrDelegate } from '../conversation/decision-context.js';
+import { ONLY_CEO } from '../tools/control.js';
 import { stopTurns, wakeAll } from './wake.js';
 import { orchestratorOf } from '../conversation/queue.js';
 import { appendOutgoing } from '../events/store.js';
@@ -270,7 +273,14 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
   );
 
   if (job.agentKind === 'orchestrator') {
-    const Item = z.object({ department: z.uuid(), product: z.uuid().optional(), title: Title, brief: Brief, body: Body, workKind: WorkKind.optional(), riskClass: RiskClass.optional() });
+    const Item = z.object({ department: z.uuid(), product: z.uuid().optional(), title: Title, brief: Brief, body: Body, workKind: WorkKind.optional(), riskClass: RiskClass.optional(), urgent: z.boolean().optional().describe('The CEO says this work is urgent, in the turn that answers them. Work under it is too. Never from its title or an employee.') });
+    /* The orchestrator says work is urgent only for the CEO or the CEO delegate the turn answers. */
+    const forCeoAlone = async () => {
+      if (!(await answersCeoOrDelegate(db, job.id))) throw refuse(403, 'urgent_not_allowed', ONLY_CEO);
+    };
+    const urgentFromCeo = async (items: { urgent?: boolean | undefined }[]) => {
+      if (items.some(item => item.urgent)) await forCeoAlone();
+    };
     const Turn = z.number().int().positive().describe('The turn number, like 2.');
     const Words = z
       .number()
@@ -316,6 +326,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
       async input =>
         run(async () => {
           await underCap(await me(), input.tasks.length);
+          await urgentFromCeo(input.tasks);
           const moved = await planTurn(ctx, { companyId: job.companyId, agentId: job.agentId, jobId: job.id }, input);
           return { text: moved.text, moved };
         }),
@@ -331,8 +342,24 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
       async input =>
         run(async () => {
           await underCap(await me(), input.tasks.length);
+          await urgentFromCeo(input.tasks);
           const moved = await addTasks(ctx, { companyId: job.companyId, agentId: job.agentId, jobId: job.id }, input.turn, input.tasks, input.words, input.improvement);
           return { text: moved.text, moved };
+        }),
+    );
+    server.registerTool(
+      'set_urgent',
+      {
+        description:
+          'Says whether a task with nothing above it is urgent, with all the work under it: only when the CEO or the CEO delegate says so, in the turn that answers them, and never from a task\'s title or an employee. Nobody is woken and nothing else of the work changes.',
+        inputSchema: { task: Ref, urgent: z.boolean() },
+      },
+      async ({ task: ref, urgent }) =>
+        run(async () => {
+          await forCeoAlone();
+          const { agent, task } = await find(ref);
+          const moved = await setUrgent(ctx, { agentId: agent.id }, task.id, urgent);
+          return { text: `#${moved.task.number} is ${urgent ? 'urgent' : 'not urgent'} now, with all the work under it.`, moved };
         }),
     );
     server.registerTool(
