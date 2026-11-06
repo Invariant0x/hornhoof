@@ -1,0 +1,2020 @@
+{
+  "task": 378,
+  "run": 369,
+  "part": 1,
+  "source": "3dc9da87604d33257f323cee65f5e3a37a5f85c2",
+  "nativeStatus": "passed",
+  "nativeExitCode": 0,
+  "logBytes": 60848,
+  "logSha256": "1f0d5e7330fdab912ba241c14f15eaf23a4e2b13544f2848ee5e72f70117777f",
+  "records": 58,
+  "emittedBytesBeforeResult": 59898,
+  "result": {
+    "complete": true,
+    "summary": {
+      "control": {
+        "sha": "6d0c79b0ced4ab2fc4f771a46479680664d6b663",
+        "counts": {
+          "apps/server": 14,
+          "apps/web": 3,
+          "apps/node": 6
+        },
+        "times": {
+          "install": 3765,
+          "protocol-build": 1620,
+          "node-build": 1809,
+          "apps/server": 9105,
+          "apps/web": 855,
+          "apps/node": 6093
+        }
+      },
+      "optimized": {
+        "sha": "b98035e6d1b6b75715a5839ff0a4ea243878e65a",
+        "counts": {
+          "apps/server": 14,
+          "apps/web": 3,
+          "apps/node": 6
+        },
+        "times": {
+          "install": 3312,
+          "protocol-build": 1351,
+          "node-build": 1848,
+          "apps/server": 9419,
+          "apps/web": 881,
+          "apps/node": 6060
+        }
+      }
+    },
+    "stages": 16,
+    "ms": 46622,
+    "emittedBytesBeforeResult": 59898,
+    "load1": [
+      0.45,
+      1.37
+    ],
+    "acceptedPerformanceResult": false
+  },
+  "stages": [
+    {
+      "stage": "source-unpack",
+      "args": [
+        "tar",
+        "-xzf",
+        "/data/runs/de6594c6-2c16-4b2e-ae6e-fd023f63ef29/repo/docs/superpowers/reports/fixed-pair-assets/fixed-sources-6d0c79b0-b98035e6.tar.gz",
+        "-C",
+        "/data/runs/de6594c6-2c16-4b2e-ae6e-fd023f63ef29/tmp/hh-fixed-preflight-BqAZ4O"
+      ],
+      "code": 0,
+      "signal": null,
+      "ms": 45,
+      "rawBytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "stage": "offline-source-import",
+      "args": [
+        "git",
+        "fetch",
+        "--no-tags",
+        "--update-shallow",
+        "/data/runs/de6594c6-2c16-4b2e-ae6e-fd023f63ef29/tmp/hh-fixed-preflight-BqAZ4O/source.git",
+        "refs/heads/control:refs/remotes/preflight/control",
+        "refs/heads/optimized:refs/remotes/preflight/optimized"
+      ],
+      "code": 0,
+      "signal": null,
+      "ms": 216,
+      "rawBytes": 198,
+      "sha256": "6d9dfbaa4a191549edd66f9828544ca8ceedd9bf32f8d1ad840bae7a84ba128c"
+    },
+    {
+      "stage": "control:worktree",
+      "args": [
+        "git",
+        "worktree",
+        "add",
+        "--detach",
+        "/data/runs/de6594c6-2c16-4b2e-ae6e-fd023f63ef29/tmp/hh-fixed-preflight-BqAZ4O/control",
+        "6d0c79b0ced4ab2fc4f771a46479680664d6b663"
+      ],
+      "code": 0,
+      "signal": null,
+      "ms": 83,
+      "rawBytes": 131,
+      "sha256": "90af5f749f90ffae693061354216065fe27e4d219d3d712c7de300d0d9ee9b9a"
+    },
+    {
+      "stage": "control:install",
+      "args": [
+        "npm",
+        "ci",
+        "--prefer-offline",
+        "--no-audit",
+        "--no-fund"
+      ],
+      "code": 0,
+      "signal": null,
+      "ms": 3765,
+      "rawBytes": 634,
+      "sha256": "bd8a321ff25c9b05b605cbe1ba2b24054627b28b755752345d74ce03ff9270a4"
+    },
+    {
+      "stage": "control:protocol-build",
+      "args": [
+        "npm",
+        "run",
+        "build",
+        "-w",
+        "@hornhoof/protocol"
+      ],
+      "code": 0,
+      "signal": null,
+      "ms": 1620,
+      "rawBytes": 58,
+      "sha256": "574fdb6a0b7730c1a0a734745d01cdc4916edcd71954803009af91236eb0e1fc"
+    },
+    {
+      "stage": "control:node-build",
+      "args": [
+        "npm",
+        "run",
+        "build",
+        "-w",
+        "@hornhoof/node"
+      ],
+      "code": 0,
+      "signal": null,
+      "ms": 1809,
+      "rawBytes": 54,
+      "sha256": "b44e19c51462fc1f9280e72ef99bf1c74c645f88a2c9b64be04ac610802234bf"
+    },
+    {
+      "stage": "control:apps/server",
+      "args": [
+        "npx",
+        "--no-install",
+        "vitest",
+        "run",
+        "test/timers.test.ts",
+        "--maxWorkers=2"
+      ],
+      "code": 0,
+      "signal": null,
+      "ms": 9105,
+      "rawBytes": 3103,
+      "sha256": "70cea6f386e06d064a7d86f4800f55ec92a515de87019e55143b56a2b5672e91"
+    },
+    {
+      "stage": "control:apps/web",
+      "args": [
+        "npx",
+        "--no-install",
+        "vitest",
+        "run",
+        "test/css.test.ts",
+        "--maxWorkers=2"
+      ],
+      "code": 0,
+      "signal": null,
+      "ms": 855,
+      "rawBytes": 887,
+      "sha256": "c715fec87580d0bf4ba1d3ecee9c1a2f0c8dc07ae83f2c6876eb3768c3fa7f73"
+    },
+    {
+      "stage": "control:apps/node",
+      "args": [
+        "npx",
+        "--no-install",
+        "vitest",
+        "run",
+        "test/check-command.test.ts",
+        "--maxWorkers=2"
+      ],
+      "code": 0,
+      "signal": null,
+      "ms": 6093,
+      "rawBytes": 1310,
+      "sha256": "c2dc66878f7851ef090c1b7ab07766cd2f1d54a5baa11c77613096cdb2ff3003"
+    },
+    {
+      "stage": "optimized:worktree",
+      "args": [
+        "git",
+        "worktree",
+        "add",
+        "--detach",
+        "/data/runs/de6594c6-2c16-4b2e-ae6e-fd023f63ef29/tmp/hh-fixed-preflight-BqAZ4O/optimized",
+        "b98035e6d1b6b75715a5839ff0a4ea243878e65a"
+      ],
+      "code": 0,
+      "signal": null,
+      "ms": 84,
+      "rawBytes": 126,
+      "sha256": "f1854c28947e36a552948aa9a03f0d710947d6a4ac00ed0f2e6f7360d5d29f9e"
+    },
+    {
+      "stage": "optimized:install",
+      "args": [
+        "npm",
+        "ci",
+        "--prefer-offline",
+        "--no-audit",
+        "--no-fund"
+      ],
+      "code": 0,
+      "signal": null,
+      "ms": 3312,
+      "rawBytes": 634,
+      "sha256": "25ab6abc0207ccba718812d67c424ba37597e85da4d9b25a0451e2856d93068f"
+    },
+    {
+      "stage": "optimized:protocol-build",
+      "args": [
+        "npm",
+        "run",
+        "build",
+        "-w",
+        "@hornhoof/protocol"
+      ],
+      "code": 0,
+      "signal": null,
+      "ms": 1351,
+      "rawBytes": 58,
+      "sha256": "574fdb6a0b7730c1a0a734745d01cdc4916edcd71954803009af91236eb0e1fc"
+    },
+    {
+      "stage": "optimized:node-build",
+      "args": [
+        "npm",
+        "run",
+        "build",
+        "-w",
+        "@hornhoof/node"
+      ],
+      "code": 0,
+      "signal": null,
+      "ms": 1848,
+      "rawBytes": 54,
+      "sha256": "b44e19c51462fc1f9280e72ef99bf1c74c645f88a2c9b64be04ac610802234bf"
+    },
+    {
+      "stage": "optimized:apps/server",
+      "args": [
+        "npx",
+        "--no-install",
+        "vitest",
+        "run",
+        "test/timers.test.ts",
+        "--maxWorkers=2"
+      ],
+      "code": 0,
+      "signal": null,
+      "ms": 9419,
+      "rawBytes": 3105,
+      "sha256": "12d559507723757e22273c196562dc792cc28586117c978972cc763013acda6d"
+    },
+    {
+      "stage": "optimized:apps/web",
+      "args": [
+        "npx",
+        "--no-install",
+        "vitest",
+        "run",
+        "test/css.test.ts",
+        "--maxWorkers=2"
+      ],
+      "code": 0,
+      "signal": null,
+      "ms": 881,
+      "rawBytes": 889,
+      "sha256": "1677fb8e9e50e7a03e373edd4d9ab0175c06371d00daa42ff29e6344bf72c937"
+    },
+    {
+      "stage": "optimized:apps/node",
+      "args": [
+        "npx",
+        "--no-install",
+        "vitest",
+        "run",
+        "test/check-command.test.ts",
+        "--maxWorkers=2"
+      ],
+      "code": 0,
+      "signal": null,
+      "ms": 6060,
+      "rawBytes": 1310,
+      "sha256": "5b17131d2902983d0e39ea9aafaecbdb28d76742c4f47902e3282aae6b34d4e6"
+    }
+  ],
+  "resourceSamples": [
+    {
+      "scope": "offline-bounded-preflight",
+      "stage": "preflight",
+      "point": "before",
+      "at": "2026-11-06T03:26:09.100Z",
+      "load": [
+        0.45,
+        0.91,
+        1.07
+      ],
+      "free": 8689938432,
+      "total": 16419049472,
+      "availableKb": "8486268",
+      "limits": {
+        "platform": "linux",
+        "release": "6.12.86+deb13-amd64",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "4b437a4f2c1e",
+        "cpus": 16,
+        "hostCpus": 16,
+        "model": "13th Gen Intel(R) Core(TM) i7-13620H",
+        "cpuMax": "max 100000",
+        "cpuPeriod": "max 100000",
+        "cpuset": "0-15",
+        "memoryMax": "max"
+      },
+      "cpuStat": "usage_usec 14459820488\nuser_usec 13007861632\nsystem_usec 1451958855\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "cpuPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=66217331\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=12382426",
+      "memoryCurrent": "634396672",
+      "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memoryPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=1873031\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=1849775"
+    },
+    {
+      "scope": "offline-bounded-preflight",
+      "stage": "source-unpack",
+      "point": "before",
+      "at": "2026-11-06T03:26:09.144Z",
+      "load": [
+        0.45,
+        0.91,
+        1.07
+      ],
+      "free": 8645636096,
+      "total": 16419049472,
+      "availableKb": "8443004",
+      "limits": {
+        "platform": "linux",
+        "release": "6.12.86+deb13-amd64",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "4b437a4f2c1e",
+        "cpus": 16,
+        "hostCpus": 16,
+        "model": "13th Gen Intel(R) Core(TM) i7-13620H",
+        "cpuMax": "max 100000",
+        "cpuPeriod": "max 100000",
+        "cpuset": "0-15",
+        "memoryMax": "max"
+      },
+      "cpuStat": "usage_usec 14459867472\nuser_usec 13007885068\nsystem_usec 1451982404\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "cpuPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=66217420\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=12382515",
+      "memoryCurrent": "658165760",
+      "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memoryPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=1873031\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=1849775"
+    },
+    {
+      "scope": "offline-bounded-preflight",
+      "stage": "source-unpack",
+      "point": "after",
+      "at": "2026-11-06T03:26:09.189Z",
+      "load": [
+        0.45,
+        0.91,
+        1.07
+      ],
+      "free": 8646778880,
+      "total": 16419049472,
+      "availableKb": "8444120",
+      "limits": {
+        "platform": "linux",
+        "release": "6.12.86+deb13-amd64",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "4b437a4f2c1e",
+        "cpus": 16,
+        "hostCpus": 16,
+        "model": "13th Gen Intel(R) Core(TM) i7-13620H",
+        "cpuMax": "max 100000",
+        "cpuPeriod": "max 100000",
+        "cpuset": "0-15",
+        "memoryMax": "max"
+      },
+      "cpuStat": "usage_usec 14459917013\nuser_usec 13007922433\nsystem_usec 1451994579\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "cpuPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=66217508\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=12382603",
+      "memoryCurrent": "658591744",
+      "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memoryPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=1873031\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=1849775"
+    },
+    {
+      "scope": "offline-bounded-preflight",
+      "stage": "offline-source-import",
+      "point": "before",
+      "at": "2026-11-06T03:26:09.195Z",
+      "load": [
+        0.45,
+        0.91,
+        1.07
+      ],
+      "free": 8646778880,
+      "total": 16419049472,
+      "availableKb": "8444120",
+      "limits": {
+        "platform": "linux",
+        "release": "6.12.86+deb13-amd64",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "4b437a4f2c1e",
+        "cpus": 16,
+        "hostCpus": 16,
+        "model": "13th Gen Intel(R) Core(TM) i7-13620H",
+        "cpuMax": "max 100000",
+        "cpuPeriod": "max 100000",
+        "cpuset": "0-15",
+        "memoryMax": "max"
+      },
+      "cpuStat": "usage_usec 14459924486\nuser_usec 13007922433\nsystem_usec 1452002052\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "cpuPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=66217508\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=12382603",
+      "memoryCurrent": "658984960",
+      "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memoryPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=1873031\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=1849775"
+    },
+    {
+      "scope": "offline-bounded-preflight",
+      "stage": "offline-source-import",
+      "point": "after",
+      "at": "2026-11-06T03:26:09.411Z",
+      "load": [
+        0.45,
+        0.91,
+        1.07
+      ],
+      "free": 8680271872,
+      "total": 16419049472,
+      "availableKb": "8476828",
+      "limits": {
+        "platform": "linux",
+        "release": "6.12.86+deb13-amd64",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "4b437a4f2c1e",
+        "cpus": 16,
+        "hostCpus": 16,
+        "model": "13th Gen Intel(R) Core(TM) i7-13620H",
+        "cpuMax": "max 100000",
+        "cpuPeriod": "max 100000",
+        "cpuset": "0-15",
+        "memoryMax": "max"
+      },
+      "cpuStat": "usage_usec 14460202127\nuser_usec 13008141321\nsystem_usec 1452060805\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "cpuPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=66217744\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=12382838",
+      "memoryCurrent": "670298112",
+      "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memoryPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=1873031\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=1849775"
+    },
+    {
+      "scope": "offline-bounded-preflight",
+      "stage": "control:worktree",
+      "point": "before",
+      "at": "2026-11-06T03:26:09.414Z",
+      "load": [
+        0.45,
+        0.91,
+        1.07
+      ],
+      "free": 8679940096,
+      "total": 16419049472,
+      "availableKb": "8476504",
+      "limits": {
+        "platform": "linux",
+        "release": "6.12.86+deb13-amd64",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "4b437a4f2c1e",
+        "cpus": 16,
+        "hostCpus": 16,
+        "model": "13th Gen Intel(R) Core(TM) i7-13620H",
+        "cpuMax": "max 100000",
+        "cpuPeriod": "max 100000",
+        "cpuset": "0-15",
+        "memoryMax": "max"
+      },
+      "cpuStat": "usage_usec 14460205360\nuser_usec 13008141321\nsystem_usec 1452064039\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "cpuPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=66217744\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=12382838",
+      "memoryCurrent": "670515200",
+      "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memoryPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=1873031\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=1849775"
+    },
+    {
+      "scope": "offline-bounded-preflight",
+      "stage": "control:worktree",
+      "point": "after",
+      "at": "2026-11-06T03:26:09.498Z",
+      "load": [
+        0.45,
+        0.91,
+        1.07
+      ],
+      "free": 8710012928,
+      "total": 16419049472,
+      "availableKb": "8505872",
+      "limits": {
+        "platform": "linux",
+        "release": "6.12.86+deb13-amd64",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "4b437a4f2c1e",
+        "cpus": 16,
+        "hostCpus": 16,
+        "model": "13th Gen Intel(R) Core(TM) i7-13620H",
+        "cpuMax": "max 100000",
+        "cpuPeriod": "max 100000",
+        "cpuset": "0-15",
+        "memoryMax": "max"
+      },
+      "cpuStat": "usage_usec 14460290115\nuser_usec 13008201256\nsystem_usec 1452088858\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "cpuPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=66217832\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=12382926",
+      "memoryCurrent": "702128128",
+      "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memoryPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=1873031\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=1849775"
+    },
+    {
+      "scope": "offline-bounded-preflight",
+      "stage": "control:install",
+      "point": "before",
+      "at": "2026-11-06T03:26:09.501Z",
+      "load": [
+        0.45,
+        0.91,
+        1.07
+      ],
+      "free": 8712830976,
+      "total": 16419049472,
+      "availableKb": "8508624",
+      "limits": {
+        "platform": "linux",
+        "release": "6.12.86+deb13-amd64",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "4b437a4f2c1e",
+        "cpus": 16,
+        "hostCpus": 16,
+        "model": "13th Gen Intel(R) Core(TM) i7-13620H",
+        "cpuMax": "max 100000",
+        "cpuPeriod": "max 100000",
+        "cpuset": "0-15",
+        "memoryMax": "max"
+      },
+      "cpuStat": "usage_usec 14460292654\nuser_usec 13008203541\nsystem_usec 1452089113\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "cpuPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=66217832\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=12382926",
+      "memoryCurrent": "702312448",
+      "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memoryPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=1873031\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=1849775"
+    },
+    {
+      "scope": "offline-bounded-preflight",
+      "stage": "control:install",
+      "point": "after",
+      "at": "2026-11-06T03:26:13.267Z",
+      "load": [
+        0.58,
+        0.93,
+        1.07
+      ],
+      "free": 8711376896,
+      "total": 16419049472,
+      "availableKb": "8507204",
+      "limits": {
+        "platform": "linux",
+        "release": "6.12.86+deb13-amd64",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "4b437a4f2c1e",
+        "cpus": 16,
+        "hostCpus": 16,
+        "model": "13th Gen Intel(R) Core(TM) i7-13620H",
+        "cpuMax": "max 100000",
+        "cpuPeriod": "max 100000",
+        "cpuset": "0-15",
+        "memoryMax": "max"
+      },
+      "cpuStat": "usage_usec 14464910690\nuser_usec 13011754340\nsystem_usec 1453156349\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "cpuPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=66228667\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=12393549",
+      "memoryCurrent": "1187905536",
+      "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memoryPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=1873031\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=1849775"
+    },
+    {
+      "scope": "offline-bounded-preflight",
+      "stage": "control:protocol-build",
+      "point": "before",
+      "at": "2026-11-06T03:26:13.267Z",
+      "load": [
+        0.58,
+        0.93,
+        1.07
+      ],
+      "free": 8711376896,
+      "total": 16419049472,
+      "availableKb": "8507204",
+      "limits": {
+        "platform": "linux",
+        "release": "6.12.86+deb13-amd64",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "4b437a4f2c1e",
+        "cpus": 16,
+        "hostCpus": 16,
+        "model": "13th Gen Intel(R) Core(TM) i7-13620H",
+        "cpuMax": "max 100000",
+        "cpuPeriod": "max 100000",
+        "cpuset": "0-15",
+        "memoryMax": "max"
+      },
+      "cpuStat": "usage_usec 14464910775\nuser_usec 13011754417\nsystem_usec 1453156358\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "cpuPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=66228667\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=12393549",
+      "memoryCurrent": "1187905536",
+      "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memoryPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=1873031\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=1849775"
+    },
+    {
+      "scope": "offline-bounded-preflight",
+      "stage": "control:protocol-build",
+      "point": "after",
+      "at": "2026-11-06T03:26:14.888Z",
+      "load": [
+        0.58,
+        0.93,
+        1.07
+      ],
+      "free": 8691847168,
+      "total": 16419049472,
+      "availableKb": "8488132",
+      "limits": {
+        "platform": "linux",
+        "release": "6.12.86+deb13-amd64",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "4b437a4f2c1e",
+        "cpus": 16,
+        "hostCpus": 16,
+        "model": "13th Gen Intel(R) Core(TM) i7-13620H",
+        "cpuMax": "max 100000",
+        "cpuPeriod": "max 100000",
+        "cpuset": "0-15",
+        "memoryMax": "max"
+      },
+      "cpuStat": "usage_usec 14468106609\nuser_usec 13014782299\nsystem_usec 1453324309\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "cpuPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=66230251\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=12395133",
+      "memoryCurrent": "1189535744",
+      "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memoryPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=1873031\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=1849775"
+    },
+    {
+      "scope": "offline-bounded-preflight",
+      "stage": "control:node-build",
+      "point": "before",
+      "at": "2026-11-06T03:26:14.888Z",
+      "load": [
+        0.58,
+        0.93,
+        1.07
+      ],
+      "free": 8691847168,
+      "total": 16419049472,
+      "availableKb": "8488132",
+      "limits": {
+        "platform": "linux",
+        "release": "6.12.86+deb13-amd64",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "4b437a4f2c1e",
+        "cpus": 16,
+        "hostCpus": 16,
+        "model": "13th Gen Intel(R) Core(TM) i7-13620H",
+        "cpuMax": "max 100000",
+        "cpuPeriod": "max 100000",
+        "cpuset": "0-15",
+        "memoryMax": "max"
+      },
+      "cpuStat": "usage_usec 14468106700\nuser_usec 13014782381\nsystem_usec 1453324318\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "cpuPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=66230251\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=12395133",
+      "memoryCurrent": "1189535744",
+      "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memoryPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=1873031\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=1849775"
+    },
+    {
+      "scope": "offline-bounded-preflight",
+      "stage": "control:node-build",
+      "point": "after",
+      "at": "2026-11-06T03:26:16.697Z",
+      "load": [
+        0.93,
+        1,
+        1.09
+      ],
+      "free": 8632262656,
+      "total": 16419049472,
+      "availableKb": "8429944",
+      "limits": {
+        "platform": "linux",
+        "release": "6.12.86+deb13-amd64",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "4b437a4f2c1e",
+        "cpus": 16,
+        "hostCpus": 16,
+        "model": "13th Gen Intel(R) Core(TM) i7-13620H",
+        "cpuMax": "max 100000",
+        "cpuPeriod": "max 100000",
+        "cpuset": "0-15",
+        "memoryMax": "max"
+      },
+      "cpuStat": "usage_usec 14472837427\nuser_usec 13019349666\nsystem_usec 1453487761\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "cpuPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=66232022\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=12396903",
+      "memoryCurrent": "1190334464",
+      "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memoryPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=1873031\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=1849775"
+    },
+    {
+      "scope": "offline-bounded-preflight",
+      "stage": "control:apps/server",
+      "point": "before",
+      "at": "2026-11-06T03:26:16.698Z",
+      "load": [
+        0.93,
+        1,
+        1.09
+      ],
+      "free": 8632262656,
+      "total": 16419049472,
+      "availableKb": "8429944",
+      "limits": {
+        "platform": "linux",
+        "release": "6.12.86+deb13-amd64",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "4b437a4f2c1e",
+        "cpus": 16,
+        "hostCpus": 16,
+        "model": "13th Gen Intel(R) Core(TM) i7-13620H",
+        "cpuMax": "max 100000",
+        "cpuPeriod": "max 100000",
+        "cpuset": "0-15",
+        "memoryMax": "max"
+      },
+      "cpuStat": "usage_usec 14472837516\nuser_usec 13019349745\nsystem_usec 1453487770\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "cpuPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=66232022\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=12396903",
+      "memoryCurrent": "1190334464",
+      "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memoryPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=1873031\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=1849775"
+    },
+    {
+      "scope": "offline-bounded-preflight",
+      "stage": "control:apps/server",
+      "point": "during",
+      "at": "2026-11-06T03:26:21.702Z",
+      "load": [
+        0.94,
+        1,
+        1.09
+      ],
+      "free": 7228346368,
+      "total": 16419049472,
+      "availableKb": "7058932",
+      "limits": {
+        "platform": "linux",
+        "release": "6.12.86+deb13-amd64",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "4b437a4f2c1e",
+        "cpus": 16,
+        "hostCpus": 16,
+        "model": "13th Gen Intel(R) Core(TM) i7-13620H",
+        "cpuMax": "max 100000",
+        "cpuPeriod": "max 100000",
+        "cpuset": "0-15",
+        "memoryMax": "max"
+      },
+      "cpuStat": "usage_usec 14481783057\nuser_usec 13027229504\nsystem_usec 1454553552\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "cpuPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=66236427\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=12401185",
+      "memoryCurrent": "2510327808",
+      "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memoryPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=1873031\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=1849775"
+    },
+    {
+      "scope": "offline-bounded-preflight",
+      "stage": "control:apps/server",
+      "point": "after",
+      "at": "2026-11-06T03:26:25.803Z",
+      "load": [
+        1.02,
+        1.02,
+        1.1
+      ],
+      "free": 8554426368,
+      "total": 16419049472,
+      "availableKb": "8353932",
+      "limits": {
+        "platform": "linux",
+        "release": "6.12.86+deb13-amd64",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "4b437a4f2c1e",
+        "cpus": 16,
+        "hostCpus": 16,
+        "model": "13th Gen Intel(R) Core(TM) i7-13620H",
+        "cpuMax": "max 100000",
+        "cpuPeriod": "max 100000",
+        "cpuset": "0-15",
+        "memoryMax": "max"
+      },
+      "cpuStat": "usage_usec 14489294578\nuser_usec 13034032803\nsystem_usec 1455261775\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "cpuPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=66238595\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=12403167",
+      "memoryCurrent": "1195839488",
+      "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memoryPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=1873031\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=1849775"
+    },
+    {
+      "scope": "offline-bounded-preflight",
+      "stage": "control:apps/web",
+      "point": "before",
+      "at": "2026-11-06T03:26:25.803Z",
+      "load": [
+        1.02,
+        1.02,
+        1.1
+      ],
+      "free": 8554426368,
+      "total": 16419049472,
+      "availableKb": "8353932",
+      "limits": {
+        "platform": "linux",
+        "release": "6.12.86+deb13-amd64",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "4b437a4f2c1e",
+        "cpus": 16,
+        "hostCpus": 16,
+        "model": "13th Gen Intel(R) Core(TM) i7-13620H",
+        "cpuMax": "max 100000",
+        "cpuPeriod": "max 100000",
+        "cpuset": "0-15",
+        "memoryMax": "max"
+      },
+      "cpuStat": "usage_usec 14489294677\nuser_usec 13034032892\nsystem_usec 1455261785\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "cpuPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=66238595\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=12403167",
+      "memoryCurrent": "1195835392",
+      "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memoryPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=1873031\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=1849775"
+    },
+    {
+      "scope": "offline-bounded-preflight",
+      "stage": "control:apps/web",
+      "point": "after",
+      "at": "2026-11-06T03:26:26.658Z",
+      "load": [
+        1.02,
+        1.02,
+        1.1
+      ],
+      "free": 8588525568,
+      "total": 16419049472,
+      "availableKb": "8387232",
+      "limits": {
+        "platform": "linux",
+        "release": "6.12.86+deb13-amd64",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "4b437a4f2c1e",
+        "cpus": 16,
+        "hostCpus": 16,
+        "model": "13th Gen Intel(R) Core(TM) i7-13620H",
+        "cpuMax": "max 100000",
+        "cpuPeriod": "max 100000",
+        "cpuset": "0-15",
+        "memoryMax": "max"
+      },
+      "cpuStat": "usage_usec 14490449158\nuser_usec 13035034232\nsystem_usec 1455414925\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "cpuPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=66239432\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=12403979",
+      "memoryCurrent": "1196191744",
+      "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memoryPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=1873031\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=1849775"
+    },
+    {
+      "scope": "offline-bounded-preflight",
+      "stage": "control:apps/node",
+      "point": "before",
+      "at": "2026-11-06T03:26:26.659Z",
+      "load": [
+        1.02,
+        1.02,
+        1.1
+      ],
+      "free": 8588525568,
+      "total": 16419049472,
+      "availableKb": "8387232",
+      "limits": {
+        "platform": "linux",
+        "release": "6.12.86+deb13-amd64",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "4b437a4f2c1e",
+        "cpus": 16,
+        "hostCpus": 16,
+        "model": "13th Gen Intel(R) Core(TM) i7-13620H",
+        "cpuMax": "max 100000",
+        "cpuPeriod": "max 100000",
+        "cpuset": "0-15",
+        "memoryMax": "max"
+      },
+      "cpuStat": "usage_usec 14490449266\nuser_usec 13035034329\nsystem_usec 1455414936\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "cpuPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=66239432\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=12403979",
+      "memoryCurrent": "1196191744",
+      "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memoryPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=1873031\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=1849775"
+    },
+    {
+      "scope": "offline-bounded-preflight",
+      "stage": "control:apps/node",
+      "point": "during",
+      "at": "2026-11-06T03:26:31.662Z",
+      "load": [
+        1.1,
+        1.03,
+        1.1
+      ],
+      "free": 8518352896,
+      "total": 16419049472,
+      "availableKb": "8318704",
+      "limits": {
+        "platform": "linux",
+        "release": "6.12.86+deb13-amd64",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "4b437a4f2c1e",
+        "cpus": 16,
+        "hostCpus": 16,
+        "model": "13th Gen Intel(R) Core(TM) i7-13620H",
+        "cpuMax": "max 100000",
+        "cpuPeriod": "max 100000",
+        "cpuset": "0-15",
+        "memoryMax": "max"
+      },
+      "cpuStat": "usage_usec 14491906053\nuser_usec 13036257621\nsystem_usec 1455648431\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "cpuPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=66242713\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=12407164",
+      "memoryCurrent": "1432211456",
+      "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memoryPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=1873031\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=1849775"
+    },
+    {
+      "scope": "offline-bounded-preflight",
+      "stage": "control:apps/node",
+      "point": "after",
+      "at": "2026-11-06T03:26:32.752Z",
+      "load": [
+        1.1,
+        1.03,
+        1.1
+      ],
+      "free": 8636293120,
+      "total": 16419049472,
+      "availableKb": "8433880",
+      "limits": {
+        "platform": "linux",
+        "release": "6.12.86+deb13-amd64",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "4b437a4f2c1e",
+        "cpus": 16,
+        "hostCpus": 16,
+        "model": "13th Gen Intel(R) Core(TM) i7-13620H",
+        "cpuMax": "max 100000",
+        "cpuPeriod": "max 100000",
+        "cpuset": "0-15",
+        "memoryMax": "max"
+      },
+      "cpuStat": "usage_usec 14491948921\nuser_usec 13036280155\nsystem_usec 1455668765\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "cpuPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=66243762\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=12408211",
+      "memoryCurrent": "1197260800",
+      "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memoryPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=1873031\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=1849775"
+    },
+    {
+      "scope": "offline-bounded-preflight",
+      "stage": "optimized:worktree",
+      "point": "before",
+      "at": "2026-11-06T03:26:32.755Z",
+      "load": [
+        1.1,
+        1.03,
+        1.1
+      ],
+      "free": 8635961344,
+      "total": 16419049472,
+      "availableKb": "8433556",
+      "limits": {
+        "platform": "linux",
+        "release": "6.12.86+deb13-amd64",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "4b437a4f2c1e",
+        "cpus": 16,
+        "hostCpus": 16,
+        "model": "13th Gen Intel(R) Core(TM) i7-13620H",
+        "cpuMax": "max 100000",
+        "cpuPeriod": "max 100000",
+        "cpuset": "0-15",
+        "memoryMax": "max"
+      },
+      "cpuStat": "usage_usec 14491952399\nuser_usec 13036280155\nsystem_usec 1455672244\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "cpuPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=66243762\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=12408211",
+      "memoryCurrent": "1197264896",
+      "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memoryPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=1873031\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=1849775"
+    },
+    {
+      "scope": "offline-bounded-preflight",
+      "stage": "optimized:worktree",
+      "point": "after",
+      "at": "2026-11-06T03:26:32.840Z",
+      "load": [
+        1.1,
+        1.03,
+        1.1
+      ],
+      "free": 8632614912,
+      "total": 16419049472,
+      "availableKb": "8430288",
+      "limits": {
+        "platform": "linux",
+        "release": "6.12.86+deb13-amd64",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "4b437a4f2c1e",
+        "cpus": 16,
+        "hostCpus": 16,
+        "model": "13th Gen Intel(R) Core(TM) i7-13620H",
+        "cpuMax": "max 100000",
+        "cpuPeriod": "max 100000",
+        "cpuset": "0-15",
+        "memoryMax": "max"
+      },
+      "cpuStat": "usage_usec 14492037498\nuser_usec 13036353058\nsystem_usec 1455684440\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "cpuPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=66243781\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=12408230",
+      "memoryCurrent": "1229492224",
+      "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memoryPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=1873031\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=1849775"
+    },
+    {
+      "scope": "offline-bounded-preflight",
+      "stage": "optimized:install",
+      "point": "before",
+      "at": "2026-11-06T03:26:32.843Z",
+      "load": [
+        1.1,
+        1.03,
+        1.1
+      ],
+      "free": 8632614912,
+      "total": 16419049472,
+      "availableKb": "8430288",
+      "limits": {
+        "platform": "linux",
+        "release": "6.12.86+deb13-amd64",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "4b437a4f2c1e",
+        "cpus": 16,
+        "hostCpus": 16,
+        "model": "13th Gen Intel(R) Core(TM) i7-13620H",
+        "cpuMax": "max 100000",
+        "cpuPeriod": "max 100000",
+        "cpuset": "0-15",
+        "memoryMax": "max"
+      },
+      "cpuStat": "usage_usec 14492040529\nuser_usec 13036353058\nsystem_usec 1455687470\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "cpuPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=66243781\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=12408230",
+      "memoryCurrent": "1229979648",
+      "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memoryPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=1873031\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=1849775"
+    },
+    {
+      "scope": "offline-bounded-preflight",
+      "stage": "optimized:install",
+      "point": "after",
+      "at": "2026-11-06T03:26:36.155Z",
+      "load": [
+        1.25,
+        1.06,
+        1.11
+      ],
+      "free": 8718819328,
+      "total": 16419049472,
+      "availableKb": "8514472",
+      "limits": {
+        "platform": "linux",
+        "release": "6.12.86+deb13-amd64",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "4b437a4f2c1e",
+        "cpus": 16,
+        "hostCpus": 16,
+        "model": "13th Gen Intel(R) Core(TM) i7-13620H",
+        "cpuMax": "max 100000",
+        "cpuPeriod": "max 100000",
+        "cpuset": "0-15",
+        "memoryMax": "max"
+      },
+      "cpuStat": "usage_usec 14496658494\nuser_usec 13039700071\nsystem_usec 1456958423\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "cpuPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=66257087\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=12421446",
+      "memoryCurrent": "1722269696",
+      "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memoryPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=1873031\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=1849776"
+    },
+    {
+      "scope": "offline-bounded-preflight",
+      "stage": "optimized:protocol-build",
+      "point": "before",
+      "at": "2026-11-06T03:26:36.156Z",
+      "load": [
+        1.25,
+        1.06,
+        1.11
+      ],
+      "free": 8718819328,
+      "total": 16419049472,
+      "availableKb": "8514472",
+      "limits": {
+        "platform": "linux",
+        "release": "6.12.86+deb13-amd64",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "4b437a4f2c1e",
+        "cpus": 16,
+        "hostCpus": 16,
+        "model": "13th Gen Intel(R) Core(TM) i7-13620H",
+        "cpuMax": "max 100000",
+        "cpuPeriod": "max 100000",
+        "cpuset": "0-15",
+        "memoryMax": "max"
+      },
+      "cpuStat": "usage_usec 14496658583\nuser_usec 13039700151\nsystem_usec 1456958432\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "cpuPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=66257087\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=12421446",
+      "memoryCurrent": "1722269696",
+      "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memoryPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=1873031\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=1849776"
+    },
+    {
+      "scope": "offline-bounded-preflight",
+      "stage": "optimized:protocol-build",
+      "point": "after",
+      "at": "2026-11-06T03:26:37.506Z",
+      "load": [
+        1.25,
+        1.06,
+        1.11
+      ],
+      "free": 8683769856,
+      "total": 16419049472,
+      "availableKb": "8480244",
+      "limits": {
+        "platform": "linux",
+        "release": "6.12.86+deb13-amd64",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "4b437a4f2c1e",
+        "cpus": 16,
+        "hostCpus": 16,
+        "model": "13th Gen Intel(R) Core(TM) i7-13620H",
+        "cpuMax": "max 100000",
+        "cpuPeriod": "max 100000",
+        "cpuset": "0-15",
+        "memoryMax": "max"
+      },
+      "cpuStat": "usage_usec 14500050676\nuser_usec 13042862981\nsystem_usec 1457187695\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "cpuPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=66258660\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=12423018",
+      "memoryCurrent": "1722843136",
+      "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memoryPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=1873031\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=1849776"
+    },
+    {
+      "scope": "offline-bounded-preflight",
+      "stage": "optimized:node-build",
+      "point": "before",
+      "at": "2026-11-06T03:26:37.507Z",
+      "load": [
+        1.25,
+        1.06,
+        1.11
+      ],
+      "free": 8691732480,
+      "total": 16419049472,
+      "availableKb": "8488020",
+      "limits": {
+        "platform": "linux",
+        "release": "6.12.86+deb13-amd64",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "4b437a4f2c1e",
+        "cpus": 16,
+        "hostCpus": 16,
+        "model": "13th Gen Intel(R) Core(TM) i7-13620H",
+        "cpuMax": "max 100000",
+        "cpuPeriod": "max 100000",
+        "cpuset": "0-15",
+        "memoryMax": "max"
+      },
+      "cpuStat": "usage_usec 14500050776\nuser_usec 13042863071\nsystem_usec 1457187705\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "cpuPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=66258660\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=12423018",
+      "memoryCurrent": "1723105280",
+      "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memoryPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=1873031\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=1849776"
+    },
+    {
+      "scope": "offline-bounded-preflight",
+      "stage": "optimized:node-build",
+      "point": "after",
+      "at": "2026-11-06T03:26:39.355Z",
+      "load": [
+        1.25,
+        1.06,
+        1.11
+      ],
+      "free": 8719065088,
+      "total": 16419049472,
+      "availableKb": "8514712",
+      "limits": {
+        "platform": "linux",
+        "release": "6.12.86+deb13-amd64",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "4b437a4f2c1e",
+        "cpus": 16,
+        "hostCpus": 16,
+        "model": "13th Gen Intel(R) Core(TM) i7-13620H",
+        "cpuMax": "max 100000",
+        "cpuPeriod": "max 100000",
+        "cpuset": "0-15",
+        "memoryMax": "max"
+      },
+      "cpuStat": "usage_usec 14504877907\nuser_usec 13047477448\nsystem_usec 1457400458\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "cpuPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=66260151\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=12424509",
+      "memoryCurrent": "1724047360",
+      "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memoryPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=1873031\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=1849776"
+    },
+    {
+      "scope": "offline-bounded-preflight",
+      "stage": "optimized:apps/server",
+      "point": "before",
+      "at": "2026-11-06T03:26:39.356Z",
+      "load": [
+        1.25,
+        1.06,
+        1.11
+      ],
+      "free": 8719065088,
+      "total": 16419049472,
+      "availableKb": "8514712",
+      "limits": {
+        "platform": "linux",
+        "release": "6.12.86+deb13-amd64",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "4b437a4f2c1e",
+        "cpus": 16,
+        "hostCpus": 16,
+        "model": "13th Gen Intel(R) Core(TM) i7-13620H",
+        "cpuMax": "max 100000",
+        "cpuPeriod": "max 100000",
+        "cpuset": "0-15",
+        "memoryMax": "max"
+      },
+      "cpuStat": "usage_usec 14504877997\nuser_usec 13047477529\nsystem_usec 1457400467\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "cpuPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=66260151\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=12424509",
+      "memoryCurrent": "1723953152",
+      "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memoryPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=1873031\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=1849776"
+    },
+    {
+      "scope": "offline-bounded-preflight",
+      "stage": "optimized:apps/server",
+      "point": "during",
+      "at": "2026-11-06T03:26:44.358Z",
+      "load": [
+        1.23,
+        1.06,
+        1.11
+      ],
+      "free": 7411908608,
+      "total": 16419049472,
+      "availableKb": "7238192",
+      "limits": {
+        "platform": "linux",
+        "release": "6.12.86+deb13-amd64",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "4b437a4f2c1e",
+        "cpus": 16,
+        "hostCpus": 16,
+        "model": "13th Gen Intel(R) Core(TM) i7-13620H",
+        "cpuMax": "max 100000",
+        "cpuPeriod": "max 100000",
+        "cpuset": "0-15",
+        "memoryMax": "max"
+      },
+      "cpuStat": "usage_usec 14513636856\nuser_usec 13055206090\nsystem_usec 1458430766\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "cpuPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=66264350\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=12428469",
+      "memoryCurrent": "2905829376",
+      "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memoryPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=1873031\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=1849776"
+    },
+    {
+      "scope": "offline-bounded-preflight",
+      "stage": "optimized:apps/server",
+      "point": "after",
+      "at": "2026-11-06T03:26:48.775Z",
+      "load": [
+        1.37,
+        1.1,
+        1.12
+      ],
+      "free": 8527360000,
+      "total": 16419049472,
+      "availableKb": "8327500",
+      "limits": {
+        "platform": "linux",
+        "release": "6.12.86+deb13-amd64",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "4b437a4f2c1e",
+        "cpus": 16,
+        "hostCpus": 16,
+        "model": "13th Gen Intel(R) Core(TM) i7-13620H",
+        "cpuMax": "max 100000",
+        "cpuPeriod": "max 100000",
+        "cpuset": "0-15",
+        "memoryMax": "max"
+      },
+      "cpuStat": "usage_usec 14521775690\nuser_usec 13062597661\nsystem_usec 1459178029\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "cpuPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=66267866\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=12431789",
+      "memoryCurrent": "1732636672",
+      "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memoryPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=1873031\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=1849776"
+    },
+    {
+      "scope": "offline-bounded-preflight",
+      "stage": "optimized:apps/web",
+      "point": "before",
+      "at": "2026-11-06T03:26:48.776Z",
+      "load": [
+        1.37,
+        1.1,
+        1.12
+      ],
+      "free": 8527691776,
+      "total": 16419049472,
+      "availableKb": "8327824",
+      "limits": {
+        "platform": "linux",
+        "release": "6.12.86+deb13-amd64",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "4b437a4f2c1e",
+        "cpus": 16,
+        "hostCpus": 16,
+        "model": "13th Gen Intel(R) Core(TM) i7-13620H",
+        "cpuMax": "max 100000",
+        "cpuPeriod": "max 100000",
+        "cpuset": "0-15",
+        "memoryMax": "max"
+      },
+      "cpuStat": "usage_usec 14521775789\nuser_usec 13062597749\nsystem_usec 1459178039\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "cpuPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=66267866\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=12431789",
+      "memoryCurrent": "1732632576",
+      "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memoryPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=1873031\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=1849776"
+    },
+    {
+      "scope": "offline-bounded-preflight",
+      "stage": "optimized:apps/web",
+      "point": "after",
+      "at": "2026-11-06T03:26:49.657Z",
+      "load": [
+        1.37,
+        1.1,
+        1.12
+      ],
+      "free": 8505376768,
+      "total": 16419049472,
+      "availableKb": "8306032",
+      "limits": {
+        "platform": "linux",
+        "release": "6.12.86+deb13-amd64",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "4b437a4f2c1e",
+        "cpus": 16,
+        "hostCpus": 16,
+        "model": "13th Gen Intel(R) Core(TM) i7-13620H",
+        "cpuMax": "max 100000",
+        "cpuPeriod": "max 100000",
+        "cpuset": "0-15",
+        "memoryMax": "max"
+      },
+      "cpuStat": "usage_usec 14522963717\nuser_usec 13063569432\nsystem_usec 1459394284\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "cpuPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=66268893\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=12432669",
+      "memoryCurrent": "1732931584",
+      "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memoryPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=1873031\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=1849776"
+    },
+    {
+      "scope": "offline-bounded-preflight",
+      "stage": "optimized:apps/node",
+      "point": "before",
+      "at": "2026-11-06T03:26:49.658Z",
+      "load": [
+        1.37,
+        1.1,
+        1.12
+      ],
+      "free": 8505376768,
+      "total": 16419049472,
+      "availableKb": "8306032",
+      "limits": {
+        "platform": "linux",
+        "release": "6.12.86+deb13-amd64",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "4b437a4f2c1e",
+        "cpus": 16,
+        "hostCpus": 16,
+        "model": "13th Gen Intel(R) Core(TM) i7-13620H",
+        "cpuMax": "max 100000",
+        "cpuPeriod": "max 100000",
+        "cpuset": "0-15",
+        "memoryMax": "max"
+      },
+      "cpuStat": "usage_usec 14522965296\nuser_usec 13063569432\nsystem_usec 1459395863\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "cpuPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=66268893\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=12432669",
+      "memoryCurrent": "1732931584",
+      "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memoryPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=1873031\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=1849776"
+    },
+    {
+      "scope": "offline-bounded-preflight",
+      "stage": "optimized:apps/node",
+      "point": "during",
+      "at": "2026-11-06T03:26:54.660Z",
+      "load": [
+        1.26,
+        1.08,
+        1.12
+      ],
+      "free": 8293294080,
+      "total": 16419049472,
+      "availableKb": "8098920",
+      "limits": {
+        "platform": "linux",
+        "release": "6.12.86+deb13-amd64",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "4b437a4f2c1e",
+        "cpus": 16,
+        "hostCpus": 16,
+        "model": "13th Gen Intel(R) Core(TM) i7-13620H",
+        "cpuMax": "max 100000",
+        "cpuPeriod": "max 100000",
+        "cpuset": "0-15",
+        "memoryMax": "max"
+      },
+      "cpuStat": "usage_usec 14524368664\nuser_usec 13064702299\nsystem_usec 1459666365\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "cpuPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=66272078\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=12435751",
+      "memoryCurrent": "1962328064",
+      "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memoryPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=1873031\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=1849776"
+    },
+    {
+      "scope": "offline-bounded-preflight",
+      "stage": "optimized:apps/node",
+      "point": "after",
+      "at": "2026-11-06T03:26:55.717Z",
+      "load": [
+        1.16,
+        1.06,
+        1.11
+      ],
+      "free": 8387465216,
+      "total": 16419049472,
+      "availableKb": "8190884",
+      "limits": {
+        "platform": "linux",
+        "release": "6.12.86+deb13-amd64",
+        "arch": "x64",
+        "node": "v22.23.4",
+        "host": "4b437a4f2c1e",
+        "cpus": 16,
+        "hostCpus": 16,
+        "model": "13th Gen Intel(R) Core(TM) i7-13620H",
+        "cpuMax": "max 100000",
+        "cpuPeriod": "max 100000",
+        "cpuset": "0-15",
+        "memoryMax": "max"
+      },
+      "cpuStat": "usage_usec 14524418369\nuser_usec 13064735398\nsystem_usec 1459682970\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+      "cpuPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=66272378\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=12436042",
+      "memoryCurrent": "1734201344",
+      "memoryEvents": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memoryPressure": "some avg10=0.00 avg60=0.00 avg300=0.00 total=1873031\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=1849776"
+    }
+  ],
+  "archive": [
+    {
+      "members": 14,
+      "compressedBytes": 11211338,
+      "tarBytes": 11233280,
+      "sha256": "037b48a88284eebfca0f52c909731b338ab74cc45fe33972b882398614e5752d"
+    }
+  ],
+  "preparedSources": [
+    {
+      "variant": "control",
+      "sha": "6d0c79b0ced4ab2fc4f771a46479680664d6b663",
+      "folder": "/data/runs/de6594c6-2c16-4b2e-ae6e-fd023f63ef29/tmp/hh-fixed-preflight-BqAZ4O/control"
+    },
+    {
+      "variant": "optimized",
+      "sha": "b98035e6d1b6b75715a5839ff0a4ea243878e65a",
+      "folder": "/data/runs/de6594c6-2c16-4b2e-ae6e-fd023f63ef29/tmp/hh-fixed-preflight-BqAZ4O/optimized"
+    }
+  ],
+  "fullSuite": false,
+  "acceptedPerformanceResult": false,
+  "nativeStartedAt": "2026-11-06T03:26:06.364Z",
+  "nativeFinishedAt": "2026-11-06T03:26:56.302Z",
+  "nativeMachine": "the built-in node",
+  "command": "set -e\ntest \"$(git rev-parse HEAD)\" = 3dc9da87604d33257f323cee65f5e3a37a5f85c2\nnode --check scripts/benchmarks/linux-fixed-preflight.mjs\nnode scripts/benchmarks/linux-fixed-preflight.mjs",
+  "resourceRanges": {
+    "load1": [
+      0.45,
+      1.37
+    ],
+    "freeBytes": [
+      7228346368,
+      8719065088
+    ],
+    "memoryCurrent": [
+      634396672,
+      2905829376
+    ],
+    "availableKb": [
+      7058932,
+      8514712
+    ],
+    "identityStable": true,
+    "oomKillEvents": [
+      "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0"
+    ]
+  },
+  "stageResourceRanges": {
+    "source-unpack": {
+      "firstAt": "2026-11-06T03:26:09.144Z",
+      "lastAt": "2026-11-06T03:26:09.189Z",
+      "loadFirst": [
+        0.45,
+        0.91,
+        1.07
+      ],
+      "loadLast": [
+        0.45,
+        0.91,
+        1.07
+      ],
+      "load1Range": [
+        0.45,
+        0.45
+      ],
+      "freeBytesRange": [
+        8645636096,
+        8646778880
+      ],
+      "memoryCurrentRange": [
+        658165760,
+        658591744
+      ]
+    },
+    "offline-source-import": {
+      "firstAt": "2026-11-06T03:26:09.195Z",
+      "lastAt": "2026-11-06T03:26:09.411Z",
+      "loadFirst": [
+        0.45,
+        0.91,
+        1.07
+      ],
+      "loadLast": [
+        0.45,
+        0.91,
+        1.07
+      ],
+      "load1Range": [
+        0.45,
+        0.45
+      ],
+      "freeBytesRange": [
+        8646778880,
+        8680271872
+      ],
+      "memoryCurrentRange": [
+        658984960,
+        670298112
+      ]
+    },
+    "control:worktree": {
+      "firstAt": "2026-11-06T03:26:09.414Z",
+      "lastAt": "2026-11-06T03:26:09.498Z",
+      "loadFirst": [
+        0.45,
+        0.91,
+        1.07
+      ],
+      "loadLast": [
+        0.45,
+        0.91,
+        1.07
+      ],
+      "load1Range": [
+        0.45,
+        0.45
+      ],
+      "freeBytesRange": [
+        8679940096,
+        8710012928
+      ],
+      "memoryCurrentRange": [
+        670515200,
+        702128128
+      ]
+    },
+    "control:install": {
+      "firstAt": "2026-11-06T03:26:09.501Z",
+      "lastAt": "2026-11-06T03:26:13.267Z",
+      "loadFirst": [
+        0.45,
+        0.91,
+        1.07
+      ],
+      "loadLast": [
+        0.58,
+        0.93,
+        1.07
+      ],
+      "load1Range": [
+        0.45,
+        0.58
+      ],
+      "freeBytesRange": [
+        8711376896,
+        8712830976
+      ],
+      "memoryCurrentRange": [
+        702312448,
+        1187905536
+      ]
+    },
+    "control:protocol-build": {
+      "firstAt": "2026-11-06T03:26:13.267Z",
+      "lastAt": "2026-11-06T03:26:14.888Z",
+      "loadFirst": [
+        0.58,
+        0.93,
+        1.07
+      ],
+      "loadLast": [
+        0.58,
+        0.93,
+        1.07
+      ],
+      "load1Range": [
+        0.58,
+        0.58
+      ],
+      "freeBytesRange": [
+        8691847168,
+        8711376896
+      ],
+      "memoryCurrentRange": [
+        1187905536,
+        1189535744
+      ]
+    },
+    "control:node-build": {
+      "firstAt": "2026-11-06T03:26:14.888Z",
+      "lastAt": "2026-11-06T03:26:16.697Z",
+      "loadFirst": [
+        0.58,
+        0.93,
+        1.07
+      ],
+      "loadLast": [
+        0.93,
+        1,
+        1.09
+      ],
+      "load1Range": [
+        0.58,
+        0.93
+      ],
+      "freeBytesRange": [
+        8632262656,
+        8691847168
+      ],
+      "memoryCurrentRange": [
+        1189535744,
+        1190334464
+      ]
+    },
+    "control:apps/server": {
+      "firstAt": "2026-11-06T03:26:16.698Z",
+      "lastAt": "2026-11-06T03:26:25.803Z",
+      "loadFirst": [
+        0.93,
+        1,
+        1.09
+      ],
+      "loadLast": [
+        1.02,
+        1.02,
+        1.1
+      ],
+      "load1Range": [
+        0.93,
+        1.02
+      ],
+      "freeBytesRange": [
+        7228346368,
+        8632262656
+      ],
+      "memoryCurrentRange": [
+        1190334464,
+        2510327808
+      ]
+    },
+    "control:apps/web": {
+      "firstAt": "2026-11-06T03:26:25.803Z",
+      "lastAt": "2026-11-06T03:26:26.658Z",
+      "loadFirst": [
+        1.02,
+        1.02,
+        1.1
+      ],
+      "loadLast": [
+        1.02,
+        1.02,
+        1.1
+      ],
+      "load1Range": [
+        1.02,
+        1.02
+      ],
+      "freeBytesRange": [
+        8554426368,
+        8588525568
+      ],
+      "memoryCurrentRange": [
+        1195835392,
+        1196191744
+      ]
+    },
+    "control:apps/node": {
+      "firstAt": "2026-11-06T03:26:26.659Z",
+      "lastAt": "2026-11-06T03:26:32.752Z",
+      "loadFirst": [
+        1.02,
+        1.02,
+        1.1
+      ],
+      "loadLast": [
+        1.1,
+        1.03,
+        1.1
+      ],
+      "load1Range": [
+        1.02,
+        1.1
+      ],
+      "freeBytesRange": [
+        8518352896,
+        8636293120
+      ],
+      "memoryCurrentRange": [
+        1196191744,
+        1432211456
+      ]
+    },
+    "optimized:worktree": {
+      "firstAt": "2026-11-06T03:26:32.755Z",
+      "lastAt": "2026-11-06T03:26:32.840Z",
+      "loadFirst": [
+        1.1,
+        1.03,
+        1.1
+      ],
+      "loadLast": [
+        1.1,
+        1.03,
+        1.1
+      ],
+      "load1Range": [
+        1.1,
+        1.1
+      ],
+      "freeBytesRange": [
+        8632614912,
+        8635961344
+      ],
+      "memoryCurrentRange": [
+        1197264896,
+        1229492224
+      ]
+    },
+    "optimized:install": {
+      "firstAt": "2026-11-06T03:26:32.843Z",
+      "lastAt": "2026-11-06T03:26:36.155Z",
+      "loadFirst": [
+        1.1,
+        1.03,
+        1.1
+      ],
+      "loadLast": [
+        1.25,
+        1.06,
+        1.11
+      ],
+      "load1Range": [
+        1.1,
+        1.25
+      ],
+      "freeBytesRange": [
+        8632614912,
+        8718819328
+      ],
+      "memoryCurrentRange": [
+        1229979648,
+        1722269696
+      ]
+    },
+    "optimized:protocol-build": {
+      "firstAt": "2026-11-06T03:26:36.156Z",
+      "lastAt": "2026-11-06T03:26:37.506Z",
+      "loadFirst": [
+        1.25,
+        1.06,
+        1.11
+      ],
+      "loadLast": [
+        1.25,
+        1.06,
+        1.11
+      ],
+      "load1Range": [
+        1.25,
+        1.25
+      ],
+      "freeBytesRange": [
+        8683769856,
+        8718819328
+      ],
+      "memoryCurrentRange": [
+        1722269696,
+        1722843136
+      ]
+    },
+    "optimized:node-build": {
+      "firstAt": "2026-11-06T03:26:37.507Z",
+      "lastAt": "2026-11-06T03:26:39.355Z",
+      "loadFirst": [
+        1.25,
+        1.06,
+        1.11
+      ],
+      "loadLast": [
+        1.25,
+        1.06,
+        1.11
+      ],
+      "load1Range": [
+        1.25,
+        1.25
+      ],
+      "freeBytesRange": [
+        8691732480,
+        8719065088
+      ],
+      "memoryCurrentRange": [
+        1723105280,
+        1724047360
+      ]
+    },
+    "optimized:apps/server": {
+      "firstAt": "2026-11-06T03:26:39.356Z",
+      "lastAt": "2026-11-06T03:26:48.775Z",
+      "loadFirst": [
+        1.25,
+        1.06,
+        1.11
+      ],
+      "loadLast": [
+        1.37,
+        1.1,
+        1.12
+      ],
+      "load1Range": [
+        1.23,
+        1.37
+      ],
+      "freeBytesRange": [
+        7411908608,
+        8719065088
+      ],
+      "memoryCurrentRange": [
+        1723953152,
+        2905829376
+      ]
+    },
+    "optimized:apps/web": {
+      "firstAt": "2026-11-06T03:26:48.776Z",
+      "lastAt": "2026-11-06T03:26:49.657Z",
+      "loadFirst": [
+        1.37,
+        1.1,
+        1.12
+      ],
+      "loadLast": [
+        1.37,
+        1.1,
+        1.12
+      ],
+      "load1Range": [
+        1.37,
+        1.37
+      ],
+      "freeBytesRange": [
+        8505376768,
+        8527691776
+      ],
+      "memoryCurrentRange": [
+        1732632576,
+        1732931584
+      ]
+    },
+    "optimized:apps/node": {
+      "firstAt": "2026-11-06T03:26:49.658Z",
+      "lastAt": "2026-11-06T03:26:55.717Z",
+      "loadFirst": [
+        1.37,
+        1.1,
+        1.12
+      ],
+      "loadLast": [
+        1.16,
+        1.06,
+        1.11
+      ],
+      "load1Range": [
+        1.16,
+        1.37
+      ],
+      "freeBytesRange": [
+        8293294080,
+        8505376768
+      ],
+      "memoryCurrentRange": [
+        1732931584,
+        1962328064
+      ]
+    }
+  },
+  "verification": {
+    "rawLogs": {
+      "count": 16,
+      "allBase64Decoded": true,
+      "allByteCountsMatch": true,
+      "allSha256Match": true
+    },
+    "stdoutBudget": 716800,
+    "beforeResultBytes": 59898,
+    "completeFooterFound": true,
+    "sameExecutionIdentitySamples": 37,
+    "archiveHashMatches": true,
+    "preparedShaMatches": true,
+    "assertionsOrTimeoutsChanged": false
+  },
+  "concerns": [
+    "Only three test files per variant; no full-suite outcome, package inventory or acceleration result.",
+    "Observed background load is not controlled; future physical-host admission/resource choice needs head decision.",
+    "A future full compare must retain complete raw evidence through the native stdout route within the unchanged budget; this small preflight does not prove full-size evidence delivery.",
+    "The checked full driver remains unchanged and requires durable output storage; its old wrapper still names the rejected diagnostic pair and must not be used.",
+    "Historical106 FAIL/HH_PAIR_INVALID and103/0049 FAIL remain."
+  ]
+}

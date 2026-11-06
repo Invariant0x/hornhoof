@@ -1,6 +1,6 @@
 # Fixed source pair proposal for378/222
 
-Status: proposal only. The independent source-preparation stage is complete with concerns;378/222 are not complete. The first head-authorized bounded preflight353 failed at ordinary source fetch before either half started. Head then authorized one replacement offline bounded preflight using the existing archive committed to this temporary branch; its execution is pending. No full suite, work run or full paired replay was started. No acceleration percentage or whole-suite GREEN is claimed.
+Status: proposal only. The independent source-preparation stage is complete with concerns;378/222 are not complete. The first head-authorized bounded preflight353 failed at ordinary source fetch before either half started. Head then authorized one replacement offline bounded preflight using the existing archive committed to this temporary branch; it passed as369/part1 at3dc9da87604d33257f323cee65f5e3a37a5f85c2. No full suite, work run or full paired replay was started. No acceleration percentage or whole-suite GREEN is claimed.
 
 ## Pinned sources and composition
 
@@ -17,7 +17,7 @@ Local read-only Git metadata confirms the ancestry, identical hashes for all15 d
 
 ## Source and driver artifacts
 
-- New source archive: fixed-sources-6d0c79b0-b98035e6.tar.gz,11211338bytes, SHA256 `037b48a88284eebfca0f52c909731b338ab74cc45fe33972b882398614e5752d`, attachment378 `7f16d32c-5439-46a0-b3da-b025b380a258`. It contains an offline bare source.git for the two exact sources, constructed without a remote credential configuration. Packaging/hash is local metadata; remote archive/asset preflight remains NOT_RUN.
+- New source archive: fixed-sources-6d0c79b0-b98035e6.tar.gz,11211338bytes, SHA256 `037b48a88284eebfca0f52c909731b338ab74cc45fe33972b882398614e5752d`, attachment378 `7f16d32c-5439-46a0-b3da-b025b380a258`. It contains an offline bare source.git for the two exact sources, constructed without a remote credential configuration. Packaging/hash was local metadata; remote369 subsequently verified ordinary checkout delivery, all14 safe members, hash and both source refs.
 - Unchanged checked driver: edc370c5c1472453649d26cd81ccda3b6ee41347, archive51200bytes, SHA256 `c856c8b8d2217d56f1b8c3740e616374a5a966de2a78f6f7a65415a06161307d`, existing attachment378 `79371b56-ed45-4bf5-945c-9367d8948ab2`. Source checks114/138 remain their original receipts and were not repeated.
 - Execution harness branch stays task-378-driver-candidate at6e53d43312e96a8bdab629dd91f3618e078c2af8. Its driver/evidence bytes are those checked above. This proposal lives on a separate task branch so that execution identity does not move.
 
@@ -74,7 +74,7 @@ Observed actual context: Linux6.8.0-147-generic/x64,Node22.23.4,8 logical CPUs,c
 
 The complete native tests-353-1.log was fetched/read. Its six JSON records include the final result. The3813bytes before the result match its declared count; all83 raw fetch-output bytes are recoverable and match SHA256 `2e554a39e2bb4414b5e2c3f5a90ebc87b405b5b8231d692704ec6df4580e8f60`. No stdout truncation was observed in this preflight. Full command, log digest, decoded failure and resource samples are in2026-11-06-preflight-353.json; the native run record retains the exact executable command.
 
-Next decision belongs to head: make the published source refs available through the supported command-mode Git path, then decide whether another bounded preflight is authorized. The one preflight permission was used. No full pair can be accepted from this result, and no additional execution is started automatically.
+The353 outcome was followed by head's separately authorized replacement offline preflight below. Its earlier permission was used;353 remains failed. No full pair can be accepted from this result, and no additional execution is started automatically.
 
 The old47fab branch, source archive66b0a5f7, diagnostic05c63819/54340764 pair, rejected run106 FAIL/HH_PAIR_INVALID and all six failures per variant stay unchanged. Historical103/0049 FAIL also remains. Even a future valid paired replay is a new controlled sequential comparison, not historical distributed wall101 or proof of the30% target against turn7.
 
@@ -96,4 +96,11 @@ node --check scripts/benchmarks/linux-fixed-preflight.mjs
 node scripts/benchmarks/linux-fixed-preflight.mjs
 ```
 
-The forthcoming native receipt must name the exact proposal SHA, run/part, elapsed preparation/test times and observed machine/load facts. The one replacement preflight is not yet executed at this source checkpoint. On failure, preserve the full log and report the precise blocker to head without another attempt. Full replay remains unauthorized, and353/106/103/0049 retain their actual failure states.
+The forthcoming native receipt must name the exact proposal SHA, run/part, elapsed preparation/test times and observed machine/load facts. The one replacement preflight subsequently passed as369/part1 at3dc9da87604d33257f323cee65f5e3a37a5f85c2; see2026-11-06-preflight-369.md/json. On failure, preserve the full log and report the precise blocker to head without another attempt. Full replay remains unauthorized, and353/106/103/0049 retain their actual failure states.
+
+
+## Completed replacement369 and remaining decision
+
+369/part1 passed on exact3dc9da87604d33257f323cee65f5e3a37a5f85c2: local archive/ref validation and both sequential23-case halves, all16stages0, body46622ms. Actual Linuxx64/Node22.23.4/16CPUs/cpuset0-15/cpu.max=max100000/memory.max=max stayed stable across37 samples; observed load1 0.45..1.37. All16 raw stage payloads, byte counts/hashes and the complete59898-byte pre-result stdout were reconciled. Full native log60848bytes. This is the one authorized replacement preflight, not full comparison or acceleration evidence.
+
+The companion369 report/JSON has exact commands, stage times and all resources. Full-size raw evidence retention via the native stdout route is not proved by this small result; the checked full driver still expects output storage, and the old wrapper must not run. Head's separate decision on a concrete final command/resource/common-slot remains required. No additional run is authorized by this PASS.

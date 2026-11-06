@@ -512,55 +512,72 @@
     }
   ],
   "latestPreflight": {
-    "run": 353,
+    "run": 369,
     "part": 1,
-    "nativeStatus": "failed",
-    "nativeExitCode": 1,
-    "nativeSourceSha": "7cbfef0a51e9f437600fc3fb6c4087e7f000378d",
-    "machine": "home-api",
-    "log": "tests-353-1.log",
-    "logSha256": "8f6d832e222089c12a630a4b4fff639f897a11c8368909b06ba1fe808b0f59c5",
+    "nativeStatus": "passed",
+    "nativeExitCode": 0,
+    "nativeSourceSha": "3dc9da87604d33257f323cee65f5e3a37a5f85c2",
+    "machine": "the built-in node",
+    "log": "tests-369-1.log",
+    "logSha256": "1f0d5e7330fdab912ba241c14f15eaf23a4e2b13544f2848ee5e72f70117777f",
     "preflight": {
-      "complete": false,
-      "error": "shared-source-fetch exit 128",
-      "stages": 1,
-      "ms": 519,
-      "stdoutBytesBeforeResult": 3813,
+      "complete": true,
+      "summary": {
+        "control": {
+          "sha": "6d0c79b0ced4ab2fc4f771a46479680664d6b663",
+          "counts": {
+            "apps/server": 14,
+            "apps/web": 3,
+            "apps/node": 6
+          },
+          "times": {
+            "install": 3765,
+            "protocol-build": 1620,
+            "node-build": 1809,
+            "apps/server": 9105,
+            "apps/web": 855,
+            "apps/node": 6093
+          }
+        },
+        "optimized": {
+          "sha": "b98035e6d1b6b75715a5839ff0a4ea243878e65a",
+          "counts": {
+            "apps/server": 14,
+            "apps/web": 3,
+            "apps/node": 6
+          },
+          "times": {
+            "install": 3312,
+            "protocol-build": 1351,
+            "node-build": 1848,
+            "apps/server": 9419,
+            "apps/web": 881,
+            "apps/node": 6060
+          }
+        }
+      },
+      "stages": 16,
+      "ms": 46622,
+      "emittedBytesBeforeResult": 59898,
+      "load1": [
+        0.45,
+        1.37
+      ],
       "acceptedPerformanceResult": false
     },
-    "stage": {
-      "stage": "shared-source-fetch",
-      "args": [
-        "git",
-        "fetch",
-        "--no-tags",
-        "origin",
-        "refs/heads/task-378-fixed-control:refs/remotes/origin/task-378-fixed-control",
-        "refs/heads/task-378-fixed-optimized:refs/remotes/origin/task-378-fixed-optimized"
-      ],
-      "code": 128,
-      "signal": null,
-      "ms": 511,
-      "rawBytes": 83,
-      "sha256": "2e554a39e2bb4414b5e2c3f5a90ebc87b405b5b8231d692704ec6df4580e8f60"
-    },
-    "decodedError": "fatal: could not read Username for 'https://github.com': terminal prompts disabled\n",
-    "rawHashMatches": true,
-    "rawSizeMatches": true,
-    "recordCount": 6,
-    "recordBytesBeforeResult": 3813,
-    "footerByteCountMatches": true,
-    "sourceHalvesStarted": 0,
     "fullSuiteStarted": false,
-    "repeatCreated": false
+    "repeatCreated": false,
+    "receipt": "2026-11-06-preflight-369.json"
   },
   "currentHeadRoute": {
-    "input": "published Git refs through ordinary origin fetch",
-    "output": "stdout JSON/hash records in the native test log",
+    "authorization": "Head 2026-11-06T03:16:56.189Z replaces failed353 fetch assumption",
+    "input": "Existing pinned archive tracked in the temporary task branch; verified local bare Git import",
+    "output": "stdout JSON/hash/base64 records in native tests-369-1.log",
     "separateAssetTransportRequired": false,
-    "archiveRequired": false,
-    "preflight353": "failed at source fetch, no source halves executed",
-    "newFullReplayAuthorized": false
+    "archiveRequired": true,
+    "preflight369": "passed bounded23cases per source, exactsameexecutionidentity, no full-size-output proof",
+    "newFullReplayAuthorized": false,
+    "neverMergeBranchInto": "turn-8"
   },
   "replacementOfflinePreflight": {
     "authorization": "Head comment 2026-11-06T03:16:56.189Z; one bounded preflight only, no full suite",
@@ -580,7 +597,57 @@
       "apps/web": 3,
       "apps/node": 6
     },
-    "status": "NOT_RUN at source checkpoint",
-    "acceptedPerformanceResult": false
-  }
+    "status": "PASSED",
+    "acceptedPerformanceResult": false,
+    "run": 369,
+    "part": 1,
+    "source": "3dc9da87604d33257f323cee65f5e3a37a5f85c2",
+    "receipt": "2026-11-06-preflight-369.json",
+    "fullComparisonAuthorized": false
+  },
+  "historicalPreflights": [
+    {
+      "run": 353,
+      "part": 1,
+      "nativeStatus": "failed",
+      "nativeExitCode": 1,
+      "nativeSourceSha": "7cbfef0a51e9f437600fc3fb6c4087e7f000378d",
+      "machine": "home-api",
+      "log": "tests-353-1.log",
+      "logSha256": "8f6d832e222089c12a630a4b4fff639f897a11c8368909b06ba1fe808b0f59c5",
+      "preflight": {
+        "complete": false,
+        "error": "shared-source-fetch exit 128",
+        "stages": 1,
+        "ms": 519,
+        "stdoutBytesBeforeResult": 3813,
+        "acceptedPerformanceResult": false
+      },
+      "stage": {
+        "stage": "shared-source-fetch",
+        "args": [
+          "git",
+          "fetch",
+          "--no-tags",
+          "origin",
+          "refs/heads/task-378-fixed-control:refs/remotes/origin/task-378-fixed-control",
+          "refs/heads/task-378-fixed-optimized:refs/remotes/origin/task-378-fixed-optimized"
+        ],
+        "code": 128,
+        "signal": null,
+        "ms": 511,
+        "rawBytes": 83,
+        "sha256": "2e554a39e2bb4414b5e2c3f5a90ebc87b405b5b8231d692704ec6df4580e8f60"
+      },
+      "decodedError": "fatal: could not read Username for 'https://github.com': terminal prompts disabled\n",
+      "rawHashMatches": true,
+      "rawSizeMatches": true,
+      "recordCount": 6,
+      "recordBytesBeforeResult": 3813,
+      "footerByteCountMatches": true,
+      "sourceHalvesStarted": 0,
+      "fullSuiteStarted": false,
+      "repeatCreated": false
+    }
+  ]
 }
