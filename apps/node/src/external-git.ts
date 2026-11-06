@@ -1,6 +1,7 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import type { ServerResponse } from 'node:http';
+import type { Readable } from 'node:stream';
 import { canonicalJson, ExternalGitIntent, type ExternalConsumer, type ExternalGitOutcome } from '@hornhoof/protocol';
 import { z } from 'zod';
 import type { JobUser } from './isolation.js';
@@ -54,16 +55,22 @@ export type GitOperationPort = {
 /* From the server's assignment of this job. Neither id is worked out here: an address or a path is not an assignment. */
 export type GitJob = { jobId: string; repositoryId: string; workspaceBinding: string; url: string; token(): string | null; user: JobUser | null; home: string | null };
 export type GitMarker = { operationId: string; generation: number; state: GitOperationState };
-export type GitAdapterOptions = { port: GitOperationPort | null; git?: string; heldBytes?: number; keptReceipts?: number; exitGraceMs?: number };
+type Kill = (pid: number | undefined, signal: NodeJS.Signals) => void;
+export type GitAdapterOptions = { port: GitOperationPort | null; git?: string; heldBytes?: number; keptReceipts?: number; exitGraceMs?: number; stopGraceMs?: number; kill?: Kill };
 
 type Chunk = { type: 'stdout' | 'stderr'; data: Buffer };
 type Exit = { code: number | null; signal: string | null };
+type ChildSpec = { binary: string; args: string[]; job: GitJob; signal: AbortSignal; limit: number; exitGraceMs: number; stopGraceMs: number; kill: Kill };
 type Attempt = { chunks: Chunk[]; shortened: boolean; outcome: ChildOutcome; settled: boolean; ok: boolean; exit: Exit };
 type Operation = {
   key: string; job: GitJob; request: GitRequest; operationId: string; generation: number; endpoint: string; consumer: ExternalConsumer;
   ended: AbortController; signal: AbortSignal; res: ServerResponse; last: Attempt | null; waited: boolean; state: 'running' | 'waiting';
 };
 
+type Admitted = { request: GitRequest; job: GitJob; intent: ExternalGitIntent };
+
+/* A repository's settings can run commands, so git of an agent's folder never runs as root. */
+const runsAsRoot = (job: GitJob): boolean => (job.user?.uid ?? process.getuid?.()) === 0;
 const digest = (value: unknown): string => createHash('sha256').update(canonicalJson(value)).digest('hex');
 const decode = (attempt: Attempt, type: Chunk['type']): string => Buffer.concat(attempt.chunks.filter(chunk => chunk.type === type).map(chunk => chunk.data)).toString('utf8');
 const encodedText = (text: string): string => Buffer.from(text).toString('base64');
@@ -160,43 +167,50 @@ function attemptOf(held: HeldOutput, tail: StderrTail, exit: Exit, osCode: strin
   return { chunks: held.chunks, shortened: held.shortened, outcome: tail.outcome(exit, osCode), settled, ok: exit.code === 0 && exit.signal === null && osCode === null, exit: osCode ? { code: 127, signal: null } : exit };
 }
 
-/* A child the node owns. The credential is looked up for this run alone. Settled means it was seen to end; a child that
-   will not end even after a kill stays unsettled, which never admits a new writer. */
-function runChild(binary: string, args: string[], job: GitJob, signal: AbortSignal, limit: number, exitGraceMs: number): Promise<Attempt> {
-  const secret = job.token() ?? '';
-  const held = new HeldOutput(limit), tail = new StderrTail(secret);
-  const failed = (error: NodeJS.ErrnoException) => attemptOf(held, tail, { code: null, signal: null }, String(error.code ?? 'UNKNOWN').slice(0, 64), true);
-  let child: ChildProcessWithoutNullStreams;
-  try {
-    child = spawn(binary, args, { cwd: '/', uid: job.user?.uid, gid: job.user?.gid, env: childEnv(job, secret), detached: true, stdio: 'pipe' });
-  } catch (error) {
-    return Promise.resolve(failed(error as NodeJS.ErrnoException));
-  }
-  child.stdin.end();
+const NOT_ENDED: Exit = { code: null, signal: null };
+const osCodeOf = (error: NodeJS.ErrnoException): string => String(error.code ?? 'UNKNOWN').slice(0, 64);
+
+function stopChild(spec: ChildSpec, pid: number | undefined, later: (ms: number, work: () => void) => void, giveUp: () => void): void {
+  spec.kill(pid, 'SIGTERM');
+  later(spec.stopGraceMs, () => {
+    spec.kill(pid, 'SIGKILL');
+    later(spec.stopGraceMs, giveUp);
+  });
+}
+
+function settleChild(child: ChildProcessByStdio<null, Readable, Readable>, spec: ChildSpec, held: HeldOutput, tail: StderrTail): Promise<Attempt> {
+  const { signal } = spec;
   child.stdout.on('data', (data: Buffer) => held.add('stdout', data));
   child.stderr.on('data', (data: Buffer) => { held.add('stderr', data); tail.add(data); });
   return new Promise(resolve => {
-    const timers = new Set<NodeJS.Timeout>();
-    const later = (ms: number, work: () => void) => { timers.add(setTimeout(work, ms)); };
+    const timers: NodeJS.Timeout[] = [];
+    const later = (ms: number, work: () => void) => { timers.push(setTimeout(work, ms)); };
     const finish = (exit: Exit, osCode: string | null, settled: boolean) => {
       for (const timer of timers) clearTimeout(timer);
       signal.removeEventListener('abort', stop);
       resolve(attemptOf(held, tail, exit, osCode, settled));
     };
-    const stop = () => {
-      killGroup(child.pid, 'SIGTERM');
-      later(STOP_GRACE_MS, () => {
-        killGroup(child.pid, 'SIGKILL');
-        later(STOP_GRACE_MS, () => finish({ code: null, signal: null }, null, false));
-      });
-    };
+    const stop = () => stopChild(spec, child.pid, later, () => finish(NOT_ENDED, null, false));
     signal.addEventListener('abort', stop, { once: true });
-    child.once('error', (error: NodeJS.ErrnoException) => { for (const timer of timers) clearTimeout(timer); resolve(failed(error)); });
+    child.once('error', (error: NodeJS.ErrnoException) => finish(NOT_ENDED, osCodeOf(error), true));
     /* A daemon git left behind can hold the pipes for hours; the child itself has ended. */
-    child.once('exit', (code, exitSignal) => { later(exitGraceMs, () => finish({ code, signal: exitSignal }, null, true)); });
+    child.once('exit', (code, exitSignal) => later(spec.exitGraceMs, () => finish({ code, signal: exitSignal }, null, true)));
     child.once('close', (code, exitSignal) => finish({ code, signal: exitSignal }, null, true));
     if (signal.aborted) stop();
   });
+}
+
+/* A child the node owns. The credential is looked up for this run alone. Settled means it was seen to end; a child that
+   will not end even after a kill stays unsettled, which never admits a new writer. */
+function runChild(spec: ChildSpec): Promise<Attempt> {
+  const secret = spec.job.token() ?? '';
+  const held = new HeldOutput(spec.limit), tail = new StderrTail(secret);
+  try {
+    const child = spawn(spec.binary, spec.args, { cwd: '/', uid: spec.job.user?.uid, gid: spec.job.user?.gid, env: childEnv(spec.job, secret), detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    return settleChild(child, spec, held, tail);
+  } catch (error) {
+    return Promise.resolve(attemptOf(held, tail, NOT_ENDED, osCodeOf(error as NodeJS.ErrnoException), true));
+  }
 }
 
 function send(res: ServerResponse, frame: object): Promise<void> {
@@ -215,14 +229,19 @@ async function release(res: ServerResponse, attempt: Attempt): Promise<void> {
   for (const chunk of attempt.chunks) await send(res, { type: chunk.type, data: chunk.data.toString('base64') });
 }
 
+/* A settled unknown with a readable target is the author's to see. Only an unread target can still become known. */
+function waitReason(reply: GitRecordReply, attempt: Attempt, observedHead: string | null | undefined): 'deferred' | 'unknown' | null {
+  if (!reply.accepted) return null;
+  if (reply.state === 'deferred') return 'deferred';
+  return reply.state === 'outcome_unknown' && observedHead === undefined && !attempt.ok ? 'unknown' : null;
+}
+
 export class GitAdapter {
   private readonly jobs = new Map<string, GitJob>();
   private readonly active = new Map<string, Set<Operation>>();
   private readonly receipts = new Map<string, GitMarker[]>();
 
   constructor(private readonly options: GitAdapterOptions) {}
-
-  private get binary(): string { return this.options.git ?? REAL_GIT; }
 
   /* The job the agent runs now. A different job ends what the one before was waiting for. */
   bind(key: string, job: GitJob): void {
@@ -262,21 +281,26 @@ export class GitAdapter {
     res.end();
   }
 
-  private async open(key: string, body: Buffer, signal: AbortSignal, res: ServerResponse): Promise<{ reason: string } | { operation: Operation; first: GitRegistration }> {
-    const { port } = this.options;
-    if (!port) return { reason: 'adapter_off' };
+  /* What can be turned down without running anything. */
+  private admit(key: string, body: Buffer): { reason: string } | Admitted {
+    if (!this.options.port) return { reason: 'adapter_off' };
     const request = parseRequest(body), job = this.jobs.get(key);
     if (!request) return { reason: 'invalid_request' };
     if (!job) return { reason: 'no_current_job' };
-    /* A repository's settings can run commands, so git of an agent's folder never runs as root. */
-    if ((job.user?.uid ?? process.getuid?.()) === 0) return { reason: 'no_agent_user' };
+    if (runsAsRoot(job)) return { reason: 'no_agent_user' };
     const intent = intentFor(request, job.repositoryId);
-    if (!intent) return { reason: 'invalid_request' };
+    return intent ? { request, job, intent } : { reason: 'invalid_request' };
+  }
+
+  private async open(key: string, body: Buffer, signal: AbortSignal, res: ServerResponse): Promise<{ reason: string } | { operation: Operation; first: GitRegistration }> {
+    const admitted = this.admit(key, body);
+    if ('reason' in admitted) return admitted;
+    const { request, job, intent } = admitted;
     const endpoint = await this.endpoint(request, job, signal);
     if (endpoint !== job.url) return { reason: 'foreign_endpoint' };
     const operationId = randomUUID(), consumer: ExternalConsumer = { kind: 'agent_job', jobId: job.jobId, workspaceBinding: job.workspaceBinding };
     try {
-      const first = await port.register({ operationId, intentDigest: digest(intent), intent, consumer });
+      const first = await this.options.port!.register({ operationId, intentDigest: digest(intent), intent, consumer });
       const ended = new AbortController();
       return { first, operation: { key, job, request, operationId, generation: first.generation, endpoint, consumer, ended, signal: AbortSignal.any([signal, ended.signal]), res, last: null, waited: false, state: 'running' } };
     } catch {
@@ -284,12 +308,15 @@ export class GitAdapter {
     }
   }
 
-  private async read(request: GitRequest, job: GitJob, signal: AbortSignal, args: string[]): Promise<string | null> {
-    const done = await runChild(this.binary, ['-C', request.cwd, ...args], job, AbortSignal.any([signal, AbortSignal.timeout(READ_MS)]), STDERR_TAIL * 8, this.exitGraceMs);
-    return done.ok ? decode(done, 'stdout').trim() : null;
+  private child(request: GitRequest, job: GitJob, signal: AbortSignal, args: string[], limit = STDERR_TAIL * 8): Promise<Attempt> {
+    const { git = REAL_GIT, exitGraceMs = EXIT_GRACE_MS, stopGraceMs = STOP_GRACE_MS, kill = killGroup } = this.options;
+    return runChild({ binary: git, args: ['-C', request.cwd, ...args], job, signal, limit, exitGraceMs, stopGraceMs, kill });
   }
 
-  private get exitGraceMs(): number { return this.options.exitGraceMs ?? EXIT_GRACE_MS; }
+  private async read(request: GitRequest, job: GitJob, signal: AbortSignal, args: string[]): Promise<string | null> {
+    const done = await this.child(request, job, AbortSignal.any([signal, AbortSignal.timeout(READ_MS)]), args);
+    return done.ok ? decode(done, 'stdout').trim() : null;
+  }
 
   private endpoint(request: GitRequest, job: GitJob, signal: AbortSignal): Promise<string | null> {
     return this.read(request, job, signal, ['remote', 'get-url', ...(request.kind === 'push' ? ['--push'] : []), '--all', request.remote]);
@@ -334,7 +361,7 @@ export class GitAdapter {
       if (already) return await this.judge(operation, await this.report(operation, grant, previous, already), previous, already);
     }
     operation.state = 'running';
-    const attempt = await runChild(this.binary, ['-C', operation.request.cwd, ...attemptArgs(operation.request)], operation.job, operation.signal, this.options.heldBytes ?? HELD_BYTES, this.exitGraceMs);
+    const attempt = await this.child(operation.request, operation.job, operation.signal, attemptArgs(operation.request), this.options.heldBytes ?? HELD_BYTES);
     operation.last = attempt;
     const observedHead = await this.observe(operation, attempt);
     const reply = await this.report(operation, grant, attempt, observedHead);
@@ -378,15 +405,10 @@ export class GitAdapter {
   }
 
   private async judge(operation: Operation, reply: GitRecordReply, attempt: Attempt, observedHead: string | null | undefined): Promise<Exit | null> {
-    if (reply.accepted && reply.state === 'deferred') {
-      await this.waiting(operation, 'deferred', reply.nextAttemptAt ?? null);
-      return null;
-    }
-    if (reply.accepted && reply.state === 'outcome_unknown' && observedHead === undefined && !attempt.ok) {
-      await this.waiting(operation, 'unknown', reply.nextAttemptAt ?? null);
-      return null;
-    }
-    return await this.conclude(operation, reply.accepted ? reply.state : 'outcome_unknown', attempt, reply.accepted);
+    const why = waitReason(reply, attempt, observedHead);
+    if (!why) return await this.conclude(operation, reply.accepted ? reply.state : 'outcome_unknown', attempt, reply.accepted);
+    await this.waiting(operation, why, reply.nextAttemptAt ?? null);
+    return null;
   }
 
   private async waiting(operation: Operation, why: 'deferred' | 'unknown', next: string | null): Promise<void> {
@@ -412,7 +434,7 @@ export class GitAdapter {
     if (request.kind !== 'push' || !request.upstreamBranch) return;
     const quiet = request.flags.includes('--quiet') ? ['--quiet'] : [];
     const tracking = `${request.remote}/${request.destinationRef.slice(BRANCH_PREFIX.length)}`;
-    const done = await runChild(this.binary, ['-C', request.cwd, 'branch', ...quiet, `--set-upstream-to=${tracking}`, request.upstreamBranch], operation.job, operation.signal, STDERR_TAIL * 8, this.exitGraceMs);
+    const done = await this.child(request, operation.job, operation.signal, ['branch', ...quiet, `--set-upstream-to=${tracking}`, request.upstreamBranch]);
     await release(operation.res, done);
   }
 

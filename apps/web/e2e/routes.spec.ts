@@ -69,7 +69,7 @@ for (const settings of SETTINGS) {
     await expect(page.getByRole('heading', { name: t.improvements.title, exact: true })).toBeVisible();
 
     await page.goto('/unknown');
-    await expect(page.getByRole('heading', { name: t.routes.unavailable, exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: t.routes.accessDenied, exact: true })).toBeVisible();
     await page.screenshot({ path: info.outputPath(`unavailable-${lang}-${theme}-${width}.png`), animations: 'disabled' });
     await page.getByRole('button', { name: t.routes.home, exact: true }).click();
     await expect(page).toHaveURL(/\/$/);
@@ -219,7 +219,7 @@ test('unknown and inaccessible links show the same unavailable page', async ({ p
   page.on('pageerror', e => foreign.push(e.message));
   for (const path of ['/unknown', '/people/foreign', '/machines/foreign', '/tasks/foreign', '/departments/foreign', '/people/%25']) {
     await page.goto(path);
-    await expect(page.getByRole('heading', { name: 'Not found or no access', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Insufficient permissions', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Go to the map', exact: true })).toBeVisible();
   }
   await page.screenshot({ path: info.outputPath('unavailable.png') });
@@ -250,7 +250,7 @@ test('an inaccessible task never retains the previous task while its answer is d
   });
   await expect(page.getByText('The shared checkout task.', { exact: true })).toHaveCount(0);
   release();
-  await expect(page.getByRole('heading', { name: 'Not found or no access', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Insufficient permissions', exact: true })).toBeVisible();
   expect(flashes).toEqual([]);
 });
 
@@ -292,7 +292,7 @@ for (const [path, api] of [['/versions', '/api/updates'], ['/settings', '/api/li
     await serveRoutes(page);
     await page.route(`**${api}`, route => route.fulfill({ status: 403, json: { error: { code: 'forbidden' } } }));
     await page.goto(path!);
-    const dialog = page.getByRole('dialog', { name: 'Not found or no access', exact: true });
+    const dialog = page.getByRole('dialog', { name: 'Insufficient permissions', exact: true });
     await expect(dialog).toBeVisible();
     await dialog.getByRole('button', { name: 'Go to the map', exact: true }).click();
     await expect(page).toHaveURL(/\/$/);

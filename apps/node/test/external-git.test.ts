@@ -23,8 +23,10 @@ const OPERATION_LINE = /^hornhoof-git: operation=[0-9a-f-]{36} generation=\d+ st
 type Env = Record<string, string | undefined>;
 type Route = { kind: string; reason?: string; remote?: string; refspec?: string; flags?: string[]; setUpstream?: boolean; cwd?: string };
 type Resolved = { unmanaged?: string; request?: Record<string, unknown> };
+type Written = { write(chunk: Buffer | string): unknown };
 type Shim = {
   UNMANAGED: Record<string, string>;
+  main(argv: string[], env: Env, cwd: string, io: { stdout: Written; stderr: Written; stdio: 'ignore' | 'inherit' }): Promise<number>;
   routeGit(argv: string[], env: Env, cwd: string): Route;
   resolveRequest(route: Route, env: Env): Resolved;
   markerLine(frame: unknown): string | null;
@@ -79,6 +81,13 @@ function runShim(args: string[], cwd: string, env: Env): Promise<Ran> & { partia
 }
 
 const jobOf = (s: Stand): GitJob => ({ jobId: JOB, repositoryId: REPOSITORY, workspaceBinding: BINDING, url: s.url, token: () => s.token, user: null, home: s.dir });
+/* The same program as runShim, inside the test's own process. Real git is told its folder with -C. */
+async function inProcess(args: string[], cwd: string, env: Env): Promise<Ran> {
+  let stdout = '', stderr = '';
+  const code = await shim.main(['-C', cwd, ...args], env, cwd, { stdout: { write: chunk => { stdout += String(chunk); } }, stderr: { write: chunk => { stderr += String(chunk); } }, stdio: 'ignore' });
+  return { stdout, stderr, code };
+}
+
 const baseEnv = (s: Stand, extra: Env = {}): Env => ({ PATH: process.env.PATH, HOME: s.dir, HH_REAL_GIT: s.bin, ...extra });
 
 class FakePort implements GitOperationPort {
@@ -199,9 +208,16 @@ describe('hh-git as plain git', () => {
     expect(done.status).toBe(128);
   });
 
+  it('runs a plain command inside the program with its own exit code', async () => {
+    const s = stand();
+    expect(await inProcess(['status', '--porcelain'], s.work, baseEnv(s))).toEqual({ stdout: '', stderr: '', code: 0 });
+    expect((await inProcess(['rev-parse', '--verify', '--quiet', 'no-such-ref'], s.work, baseEnv(s))).code).toBe(1);
+    expect(process.listenerCount('SIGHUP')).toBe(0);
+  });
+
   it('gives a missing git binary the shell code for it', async () => {
     const s = stand();
-    const ran = await runShim(['status'], s.work, baseEnv(s, { HH_REAL_GIT: join(s.dir, 'no-such-git') }));
+    const ran = await inProcess(['status'], s.work, baseEnv(s, { HH_REAL_GIT: join(s.dir, 'no-such-git') }));
     expect(ran.code).toBe(127);
     expect(ran.stderr).toContain('no-such-git');
   });
@@ -405,22 +421,22 @@ describe('the bridge answers of the shim', () => {
       { type: 'stderr', data: Buffer.from('err\n').toString('base64') },
       { type: 'exit', code: 7, signal: null },
     ]);
-    expect(await runShim(['push', 'origin', 'task-1'], s.work, env)).toEqual({ stdout: 'out\n', stderr: 'err\n', code: 7 });
+    expect(await inProcess(['push', 'origin', 'task-1'], s.work, env)).toEqual({ stdout: 'out\n', stderr: 'err\n', code: 7 });
     expect(calls(s, 'push')).toEqual([]);
   });
 
   it('ends with the code of a signal the node reports', async () => {
     const s = stand();
     const env = await scriptedBridge(s, [{ type: 'exit', code: null, signal: 'SIGTERM' }]);
-    expect((await runShim(['push', 'origin', 'task-1'], s.work, env)).code).toBe(143);
+    expect((await inProcess(['push', 'origin', 'task-1'], s.work, env)).code).toBe(143);
     const unknown = await scriptedBridge(s, [{ type: 'exit', code: null, signal: 'SIGNOPE' }]);
-    expect((await runShim(['push', 'origin', 'task-1'], s.work, unknown)).code).toBe(128);
+    expect((await inProcess(['push', 'origin', 'task-1'], s.work, unknown)).code).toBe(128);
   });
 
   it.each([403, 404, 409, 503])('runs real git once when the bridge answers %i', async status => {
     const s = stand();
     const bridge = await refusingBridge(s, status);
-    const ran = await runShim(['push', 'origin', 'task-1'], s.work, bridge.env);
+    const ran = await inProcess(['push', 'origin', 'task-1'], s.work, bridge.env);
     expect(ran.code).toBe(0);
     expect(bridge.hits()).toBe(1);
     expect(calls(s, 'push')).toHaveLength(1);
@@ -429,14 +445,14 @@ describe('the bridge answers of the shim', () => {
 
   it('runs real git when the bridge cannot be reached', async () => {
     const s = stand();
-    const ran = await runShim(['push', 'origin', 'task-1'], s.work, baseEnv(s, { HH_BRIDGE: 'http://127.0.0.1:9/hook/secret' }));
+    const ran = await inProcess(['push', 'origin', 'task-1'], s.work, baseEnv(s, { HH_BRIDGE: 'http://127.0.0.1:9/hook/secret' }));
     expect(ran.code).toBe(0);
     expect(calls(s, 'push')).toHaveLength(1);
   });
 
   it('runs real git when the bridge address cannot be read', async () => {
     const s = stand();
-    const ran = await runShim(['push', 'origin', 'task-1'], s.work, baseEnv(s, { HH_BRIDGE: 'not an address' }));
+    const ran = await inProcess(['push', 'origin', 'task-1'], s.work, baseEnv(s, { HH_BRIDGE: 'not an address' }));
     expect(ran.code).toBe(0);
     expect(calls(s, 'push')).toHaveLength(1);
   });
@@ -444,7 +460,7 @@ describe('the bridge answers of the shim', () => {
   it('runs real git when the node says this operation is not managed', async () => {
     const s = stand();
     const env = await scriptedBridge(s, [{ type: 'unmanaged', reason: 'adapter_off' }]);
-    const ran = await runShim(['push', 'origin', 'task-1'], s.work, env);
+    const ran = await inProcess(['push', 'origin', 'task-1'], s.work, env);
     expect(ran.code).toBe(0);
     expect(calls(s, 'push')).toHaveLength(1);
   });
@@ -457,7 +473,7 @@ describe('the bridge answers of the shim', () => {
   ])('never repeats the push when %s', async (_name, frames, ending) => {
     const s = stand();
     const env = await scriptedBridge(s, frames, ending);
-    const ran = await runShim(['push', 'origin', 'task-1'], s.work, env);
+    const ran = await inProcess(['push', 'origin', 'task-1'], s.work, env);
     expect(ran.code).toBe(128);
     expect(ran.stderr).toContain('result of this git command is not known');
     expect(calls(s, 'push')).toEqual([]);
@@ -481,7 +497,7 @@ describe('the bridge answers of the shim', () => {
       ...Array.from({ length: 60 }, () => ({ type: 'progress', text: 'again' })),
       { type: 'exit', code: 0, signal: null },
     ]);
-    const lines = (await runShim(['push', 'origin', 'task-1'], s.work, env)).stderr.trim().split('\n');
+    const lines = (await inProcess(['push', 'origin', 'task-1'], s.work, env)).stderr.trim().split('\n');
     expect(lines[0]).toMatch(/^hornhoof-git: first\[31m line x+$/);
     expect(lines[0]!.length).toBeLessThanOrEqual(320);
     expect(lines.length).toBeLessThanOrEqual(20);
@@ -1164,6 +1180,35 @@ describe('the child the node owns', () => {
     await vi.waitFor(() => { expect(port.recorded).toHaveLength(1); }, { timeout: 10_000 });
     expect(port.recorded[0]).toMatchObject({ settled: true, outcome: { kind: 'child' } });
     await vi.waitFor(() => { expect(port.cancelled).toHaveLength(1); }, { timeout: 5000 });
+  });
+
+  it('kills a child that ignores the request to stop', async () => {
+    const s = stand();
+    planFor(s, { push: [{ do: 'ignore_term' }] });
+    const port = new FakePort();
+    const { env } = await serve(s, port, true, { stopGraceMs: 300 });
+    const ran = runShim(['push', 'origin', 'task-1'], s.work, env);
+    await vi.waitFor(() => { expect(ran.partial().code).toBeNull(); expect(calls(s, 'push')).toHaveLength(1); }, { timeout: 5000 });
+    await new Promise(resolve => setTimeout(resolve, 300));
+    ran.signal('SIGTERM');
+    await ran;
+    await vi.waitFor(() => { expect(port.recorded).toHaveLength(1); }, { timeout: 10_000 });
+    expect(port.recorded[0]).toMatchObject({ settled: true, outcome: { exitCode: null, signal: 'SIGKILL' } });
+  });
+
+  it('calls a child that cannot be stopped unsettled, which admits no new writer', async () => {
+    const s = stand();
+    planFor(s, { push: [{ do: 'hang' }] });
+    const port = new FakePort();
+    const { env } = await serve(s, port, true, { stopGraceMs: 20, kill: () => {} });
+    const ran = runShim(['push', 'origin', 'task-1'], s.work, env);
+    await vi.waitFor(() => { expect(calls(s, 'push')).toHaveLength(1); }, { timeout: 5000 });
+    ran.signal('SIGTERM');
+    await ran;
+    await vi.waitFor(() => { expect(port.recorded).toHaveLength(1); }, { timeout: 10_000 });
+    expect(port.recorded[0]!.settled).toBe(false);
+    await vi.waitFor(() => { expect(port.cancelled).toHaveLength(1); }, { timeout: 5000 });
+    expect(calls(s, 'push')).toHaveLength(1);
   });
 
   it('reports a child it could not start with its operating system code', async () => {

@@ -48,10 +48,15 @@ const STEPS = {
     say(step.stderr, step.stdout);
     return step.exit;
   },
+  /* Ends by itself in the end, so that a test that could not stop it leaves nothing behind. */
   hang() {
     say('remote: still working\n');
-    setInterval(() => {}, 1000);
+    setTimeout(() => process.exit(0), 15_000);
     return null;
+  },
+  ignore_term() {
+    process.on('SIGTERM', () => {});
+    return STEPS.hang();
   },
   /* A process git started, such as a credential daemon, outlives it and keeps its pipes. */
   leave_process() {
