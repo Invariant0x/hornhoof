@@ -1,13 +1,14 @@
 import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { AgentEvent, ModelOption } from '@hornhoof/protocol';
 import { CRED_FILES, credentialSecrets } from '../credentials.js';
 import type { JobUser } from '../isolation.js';
+import { programDirOf, toldPlace } from '../program-folder.js';
 import type { ProviderAdapter, RunInput, RunResult } from '../runner.js';
 import { withProgramExit } from '../program-exit.js';
 import { kimiPlanLimits } from '../terminal/programs.js';
 import { contentText, inputText, isRecord, objectLine, toolName } from './events.js';
-import { childEnv, ensureDir, installPackage, interactiveLogin, runProgram, tokensIn, withEfforts, writePrivate } from './process.js';
+import { agentDir, childEnv, ensureDir, installPackage, interactiveLogin, runProgram, tokensIn, withEfforts, writePrivate } from './process.js';
 import { KIMI_NO_AUTO_UPDATE } from './session-updates.js';
 import { NPM_PACKAGES } from './packages.js';
 
@@ -138,7 +139,11 @@ export function kimiAdapter({ home, tools, bin = join(tools, 'bin', 'kimi'), use
         const server = { transport: 'http', url: input.tools.url, bearerTokenEnvVar: 'HH_TOOL_TOKEN' };
         writePrivate(mcpJson, JSON.stringify({ mcpServers: { hornhoof: server } }), user);
       } else rmSync(mcpJson, { force: true });
-      if (input.instructions) writePrivate(join(input.workDir, 'AGENTS.md'), input.instructions + '\n', user);
+      if (input.instructions) {
+        const told = toldPlace('kimi', input);
+        if (input.programDir) agentDir(dirname(told.file), user);
+        writePrivate(told.file, input.instructions + '\n', user);
+      }
 
       let sessionId: string | null = input.sessionId;
       let answer = '';
@@ -147,7 +152,7 @@ export function kimiAdapter({ home, tools, bin = join(tools, 'bin', 'kimi'), use
         args,
         env: { ...env(input.tools?.token ?? null), ...(input.effort ? { KIMI_MODEL_THINKING_EFFORT: input.effort } : {}), ...input.env },
         user,
-        cwd: input.workDir,
+        cwd: programDirOf(input),
         timeoutMs: input.timeoutMs,
         signal: input.signal,
         onLine(line) {
