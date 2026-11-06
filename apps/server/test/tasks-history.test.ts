@@ -80,7 +80,7 @@ describe('the move path in a company with a long history', () => {
     expect((await c.read(docs.id)).version).toBeGreaterThan(docs.version);
 
     /* Cancelled: whoever made each task that waits for it hears so, the orchestrator for the CEO's. */
-    const ceos = (await createTask(c.ctx, { personId: c.ceo.id }, { title: 'Launch', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.head.id, after: [schema.id] })).task;
+    const ceos = (await createTask(c.ctx, { personId: c.ceo.id }, { title: 'Launch', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.head.id, after: [schema.id], independentNone: 'Genuine dependency in the existing behavior test.' })).task;
     const gone = await cancel(c.ctx, { personId: c.ceo.id }, schema.id, 'Not needed.');
     const told = gone.wakes.filter(w => w.why === 'after_cancelled').map(w => [w.agentId, w.taskId, w.text]);
     expect(told).toEqual([
