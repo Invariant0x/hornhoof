@@ -78,6 +78,7 @@ button, input, select, textarea { margin: 0; padding: 0; border: 0; background: 
   clip-path: polygon(0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, var(--cut) 100%, 0 calc(100% - var(--cut)));
 }
 .btn:hover { filter: brightness(1.08); }
+.btn:focus-visible { clip-path: none; outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
 .btn:disabled { cursor: not-allowed; opacity: .45; filter: none; }
 .btn.ghost { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1px var(--line2); clip-path: none; }
 .btn.ghost:hover { box-shadow: inset 0 0 0 1px var(--cyan); }
@@ -751,7 +752,7 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 /* A department card on the map opens the department. */
 button.dept { padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
 button.dept:hover > .edge, button.dept:focus-visible > .edge { background: var(--cyan); }
-button.dept:focus-visible { outline: none; }
+button.dept:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
 /* While someone works the frame breathes cyan, while the department waits for people it breathes amber, and it flashes
    once when work reaches or leaves it. */
 button.dept.busy, button.dept.waits { animation: dglow 2.6s ease-in-out infinite; }
@@ -770,7 +771,7 @@ button.dept.flash > .edge { animation: eflash 1.4s ease-out; }
 button.chip-btn { position: relative; display: block; width: 100%; height: 100%; padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
 button.chip-btn > .edge { height: 100%; }
 button.chip-btn:hover > .edge, button.chip-btn:focus-visible > .edge { background: var(--cyan); }
-button.chip-btn:focus-visible { outline: none; }
+button.chip-btn:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
 .chip-count { position: absolute; top: -8px; right: -8px; margin: 0; }
 button.chip-btn.attn, .hub.attn > .hub-art { --glow: var(--amber); animation: dglow 2.6s ease-in-out infinite; }
 button.chip-btn.attn > .edge { --glow: var(--amber); animation: dbreathe 2.6s ease-in-out infinite; }
@@ -860,7 +861,7 @@ button.shead, button.schip { cursor: pointer; }
 .schip .r3 .ast { margin-right: 6px; }
 button.shead:hover > .edge, button.schip:hover > .edge { background: var(--line2); }
 .shead.on > .edge, .schip.on > .edge, button.shead:focus-visible > .edge, button.schip:focus-visible > .edge { background: var(--cyan); }
-button.shead:focus-visible, button.schip:focus-visible { outline: none; }
+button.shead:focus-visible, button.schip:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; }
 .shead.flash > .edge, .schip.flash > .edge { animation: eflash 1.4s ease-out; }
 /* An agent's place on the schema: its chip, and the tick that switches it off for now. An agent that is off fades. */
 .sslot > .schip, .sslot > .shead { width: 100%; height: 100%; }
@@ -1127,7 +1128,7 @@ summary.turn-head:focus-visible { outline: 2px solid var(--cyan); outline-offset
 .req-option { display: grid; gap: 8px; align-content: start; justify-items: start; min-width: 0; min-height: 40px; padding: 10px 12px; box-sizing: border-box; border: 1px solid var(--line2); background: var(--surface2); color: var(--ink); font: inherit; text-align: left; cursor: pointer; transition: border-color .15s; }
 .req-option span { min-width: 0; overflow-wrap: anywhere; line-height: 1.4; }
 .req-option img { display: block; width: 100%; max-width: 100%; height: 150px; object-fit: contain; border: 1px solid var(--line); background: var(--bg); box-sizing: border-box; }
-.req-option:hover:not(:disabled), .req-option:focus-visible { border-color: var(--cyan); outline: none; box-shadow: 0 0 0 3px var(--glow); }
+.req-option:hover:not(:disabled), .req-option:focus-visible { border-color: var(--cyan); outline: 2px solid var(--cyan-ink); outline-offset: 2px; box-shadow: 0 0 0 3px var(--glow); }
 .req-option:disabled { opacity: .45; cursor: not-allowed; }
 .req-commit-link { justify-self: start; max-width: 100%; }
 .tp-wait { display: grid; gap: 8px; }
@@ -1204,7 +1205,7 @@ summary.turn-head:focus-visible { outline: 2px solid var(--cyan); outline-offset
 .tview .lchip:has(.ast.alarm) { background: var(--red); }
 .tview .lchip.on { background: var(--cyan); }
 .tview .lchip.on > .in { background: color-mix(in srgb, var(--cyan) 10%, var(--surface)); }
-.tview .lchip:focus-visible { outline: none; background: var(--cyan); }
+.tview .lchip:focus-visible { outline: 2px solid var(--cyan-ink); outline-offset: 2px; background: var(--cyan); }
 .tview .lchip.tk > .in { padding-block: 4px; }
 .tview .lchip.tk b { font-family: var(--f-mono); font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
 .tview .lchip.tk.turn b { color: var(--cyan-ink); }
