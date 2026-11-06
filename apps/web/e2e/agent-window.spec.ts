@@ -40,6 +40,13 @@ async function checkLeftControls(window: Locator, labels: string[]) {
   const frame = await box(header);
   const controls = await Promise.all(labels.map(label => box(header.getByRole('button', { name: label, exact: true }))));
   const [close, minimize, full] = controls;
+  for (const [index, label] of labels.entries()) {
+    const button = header.getByRole('button', { name: label, exact: true });
+    const icon = await box(button.locator('svg'));
+    const control = controls[index]!;
+    expect(Math.abs(control.x + control.width / 2 - icon.x - icon.width / 2), `${label} icon centers on x`).toBeLessThanOrEqual(0.5);
+    expect(Math.abs(control.y + control.height / 2 - icon.y - icon.height / 2), `${label} icon centers on y`).toBeLessThanOrEqual(0.5);
+  }
   expect(close!.x - frame.x).toBeLessThanOrEqual(12);
   expect(close!.x).toBeGreaterThanOrEqual(frame.x);
   expect(close!.x + close!.width).toBeLessThanOrEqual(minimize!.x);
