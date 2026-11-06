@@ -1,0 +1,122 @@
+# Prepared payload only. Execute after the resource decision, inside the existing admitted runner context.
+# Usage: bash THIS_FILE /absolute/local/repository /absolute/new/output-directory
+# The local repository must already contain the pinned source; no network Git fetch is performed.
+set -euo pipefail
+umask 077
+test "$#" -eq 2
+HH535_REPO=$(realpath -- "$1")
+HH535_OUT=$(realpath -m -- "$2")
+HH535_SHA=1b0bc54b4fbf6d1d468ced679ac2897372b29c71
+HH535_TAG=mcr.microsoft.com/playwright:v1.64.1-noble
+HH535_UID=$(id -u)
+HH535_GID=$(id -g)
+test "$HH535_UID" -ne 0
+test ! -e "$HH535_OUT"
+HH535_IMAGE=$(docker image inspect --format '{{.Id}}' "$HH535_TAG")
+[[ "$HH535_IMAGE" =~ ^sha256:[0-9a-f]{64}$ ]]
+HH535_DIGEST=''
+while IFS= read -r HH535_VALUE; do
+  if [[ "$HH535_VALUE" =~ ^mcr\.microsoft\.com/playwright@sha256:[0-9a-f]{64}$ ]]; then
+    HH535_DIGEST=$HH535_VALUE
+    break
+  fi
+done < <(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$HH535_IMAGE")
+test -n "$HH535_DIGEST"
+HH535_GIT=(env GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -c core.hooksPath=/dev/null)
+"${HH535_GIT[@]}" -C "$HH535_REPO" cat-file -e "$HH535_SHA^{commit}"
+HH535_STAGE=$(mktemp -d /tmp/hh535-official.XXXXXXXX)
+trap 'rm -rf -- "$HH535_STAGE"' EXIT
+"${HH535_GIT[@]}" init --quiet --template= "$HH535_STAGE/source"
+"${HH535_GIT[@]}" -C "$HH535_STAGE/source" fetch --quiet --no-tags --depth=1 "$HH535_REPO" "$HH535_SHA"
+"${HH535_GIT[@]}" -C "$HH535_STAGE/source" checkout --quiet --detach "$HH535_SHA"
+mkdir -m 700 -- "$HH535_OUT"
+docker image inspect --format '{"requestedTag":"mcr.microsoft.com/playwright:v1.64.1-noble","imageId":{{json .Id}},"repoDigests":{{json .RepoDigests}},"os":{{json .Os}},"arch":{{json .Architecture}},"versionLabel":{{json (index .Config.Labels "org.opencontainers.image.version")}}}' "$HH535_IMAGE" > "$HH535_OUT/image.json"
+
+if docker run --rm --init --pull=never --user "$HH535_UID:$HH535_GID" \
+  --cpus=2 --memory=4g --ipc=private --shm-size=1g --read-only \
+  --tmpfs "/work:rw,nosuid,nodev,exec,size=3g,mode=700,uid=$HH535_UID,gid=$HH535_GID" \
+  --tmpfs "/tmp:rw,nosuid,nodev,size=512m,mode=1777" \
+  --mount "type=bind,src=$HH535_STAGE/source,dst=/input,readonly" \
+  --mount "type=bind,src=$HH535_OUT,dst=/out" \
+  --env PLAYWRIGHT_BROWSERS_PATH=/ms-playwright --env PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
+  --env GIT_CONFIG_GLOBAL=/dev/null --env GIT_CONFIG_NOSYSTEM=1 \
+  --workdir /work --entrypoint /bin/bash -i "$HH535_IMAGE" -s \
+  > "$HH535_OUT/docker.log" 2>&1 <<'CONTAINER'
+set -uo pipefail
+cat > /work/task.sh <<'TASK'
+set -euo pipefail
+cp -R /input /work/repo
+cd /work/repo
+test "$(git rev-parse HEAD)" = 1b0bc54b4fbf6d1d468ced679ac2897372b29c71
+printf '%s  %s\n' 8b73f954cdfcb62bd44430a77bf9694a43a975e8e96bb1569268fdca9bcb42bb apps/web/e2e/geometry-live-probe.mjs | sha256sum --check -
+node --input-type=module <<'FACTS'
+import assert from 'node:assert/strict';
+import { readFileSync, existsSync, writeFileSync } from 'node:fs';
+import { arch, platform, loadavg, availableParallelism, freemem } from 'node:os';
+assert.equal(platform(), 'linux'); assert.notEqual(process.getuid(), 0);
+assert.ok(Number(process.versions.node.split('.')[0]) >= 22);
+const read = p => { try { return readFileSync(p, 'utf8').trim(); } catch { return null; } };
+const context = { at: new Date().toISOString(), sourceSha: '1b0bc54b4fbf6d1d468ced679ac2897372b29c71',
+  node: process.version, platform: platform(), arch: arch(), uid: process.getuid(),
+  cpus: availableParallelism(), load: loadavg(), free: freemem(), dockerMarker: existsSync('/.dockerenv'),
+  cpuMax: read('/sys/fs/cgroup/cpu.max'), cpuset: read('/sys/fs/cgroup/cpuset.cpus.effective'),
+  memoryMax: read('/sys/fs/cgroup/memory.max'), memoryCurrent: read('/sys/fs/cgroup/memory.current'),
+  image: JSON.parse(readFileSync('/out/image.json', 'utf8')), officialSupportReceipt: false };
+writeFileSync('/out/environment.json', JSON.stringify(context, null, 2) + '\n');
+console.log('HH_OFFICIAL_CONTEXT ' + JSON.stringify(context));
+FACTS
+npm --userconfig=/dev/null --globalconfig=/dev/null --cache=/work/npm-cache ci --no-audit --no-fund
+npm --userconfig=/dev/null --globalconfig=/dev/null --cache=/work/npm-cache run build -w @hornhoof/protocol
+npm --userconfig=/dev/null --globalconfig=/dev/null --cache=/work/npm-cache run build -w @hornhoof/web
+node --import tsx apps/web/e2e/geometry-live-probe.mjs
+TASK
+timeout --signal=TERM --kill-after=15s 300s /bin/bash /work/task.sh > /out/full.log 2>&1
+HH535_CODE=$?
+printf '%s\n' "$HH535_CODE" > /out/test-exit-code.txt
+export HH535_CODE
+node --input-type=module <<'OUTPUTS'
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+const digest = bytes => createHash('sha256').update(bytes).digest('hex');
+const sha = '1b0bc54b4fbf6d1d468ced679ac2897372b29c71';
+const text = readFileSync('/out/full.log', 'utf8'), rows = { input: null, geometry: [], engines: [], result: null };
+const engines = new Set(['chromium', 'firefox', 'webkit']), pictures = new Set();
+for (const line of text.split('\n')) {
+  if (!line.startsWith('HH_PROBE_')) continue;
+  const space = line.indexOf(' '), kind = line.slice(0, space), value = JSON.parse(line.slice(space + 1));
+  if (kind === 'HH_PROBE_INPUT') { assert.equal(value.sourceSha, sha); rows.input = value; }
+  else if (kind === 'HH_PROBE_GEOMETRY') rows.geometry.push(value);
+  else if (kind === 'HH_PROBE_ENGINE') rows.engines.push(value);
+  else if (kind === 'HH_PROBE_RESULT') rows.result = value;
+  else if (kind === 'HH_PROBE_PNG') {
+    assert.equal(value.sourceSha, sha); assert.ok(engines.has(value.engine)); assert.ok(!pictures.has(value.engine));
+    const bytes = Buffer.from(value.base64, 'base64');
+    assert.ok(bytes.length <= 128 * 1024); assert.equal(bytes.length, value.bytes);
+    assert.equal(bytes.subarray(0, 8).toString('hex'), '89504e470d0a1a0a'); assert.equal(digest(bytes), value.sha256);
+    writeFileSync('/out/' + value.engine + '.png', bytes, { flag: 'wx', mode: 0o600 }); pictures.add(value.engine);
+  }
+}
+writeFileSync('/out/geometry.json', JSON.stringify({ sourceSha: sha, scope: 'one-screen compatibility only',
+  acceptedGeometryResult: false, commandExitCode: Number(process.env.HH535_CODE), ...rows }, null, 2) + '\n');
+const names = ['image.json', 'environment.json', 'geometry.json', 'full.log', 'test-exit-code.txt', 'chromium.png', 'firefox.png', 'webkit.png'];
+const files = names.filter(name => existsSync('/out/' + name)).map(name => {
+  const bytes = readFileSync('/out/' + name);
+  return { name, bytes: bytes.length, sha256: digest(bytes) };
+});
+writeFileSync('/out/artifacts.json', JSON.stringify({ sourceSha: sha, commandExitCode: Number(process.env.HH535_CODE),
+  officialSupportReceipt: false, acceptedGeometryResult: false, files,
+  additionalWrapperDiagnostics: ['docker.log', 'exit-code.txt'] }, null, 2) + '\n');
+OUTPUTS
+HH535_EXPORT=$?
+if [ "$HH535_EXPORT" -ne 0 ]; then exit "$HH535_EXPORT"; fi
+exit "$HH535_CODE"
+CONTAINER
+then
+  HH535_STATUS=0
+else
+  HH535_STATUS=$?
+fi
+printf '%s\n' "$HH535_STATUS" > "$HH535_OUT/exit-code.txt"
+printf 'Return all existing files from %s; native exit %s\n' "$HH535_OUT" "$HH535_STATUS"
+exit "$HH535_STATUS"
