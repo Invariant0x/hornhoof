@@ -1,6 +1,6 @@
 import { notificationMessage } from '../events/notifications.js';
 import { defaultDepartmentWorkMode, DEPARTMENT_TEMPLATES, type TemplateKey } from '@hornhoof/protocol';
-import { and, asc, eq, inArray, isNotNull, isNull, max, or } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, isNull, max, or, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
