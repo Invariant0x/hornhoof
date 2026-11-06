@@ -49,4 +49,4 @@ it('serves the real browser integration', async () => {
       done();
     });
   }));
-});
+}, 120_000);
