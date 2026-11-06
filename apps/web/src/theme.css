@@ -270,7 +270,7 @@ select:disabled { opacity: .55; }
 .update-error { flex-basis: 100%; color: var(--pink-ink); font-size: 13px; }
 .dialog-back { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 16px; background: rgba(10, 20, 30, .35); }
 .dialog {
-  display: grid; gap: 12px; width: min(560px, 100%); max-height: calc(100vh - 32px); overflow: auto; padding: 18px;
+  display: grid; gap: 12px; width: min(560px, 100%); max-height: calc(100vh - 32px); overflow: auto; scrollbar-gutter: stable; padding: 18px;
   background: var(--surface); border: 1px solid var(--line2); box-shadow: 0 16px 40px var(--shadow);
 }
 .dialog:focus { outline: none; }
