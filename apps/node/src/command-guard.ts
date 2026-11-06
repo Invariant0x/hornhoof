@@ -79,6 +79,7 @@ const FUNCTION_PARENS = /^[ \t]*\([ \t]*\)/;
 
 const noWord = (): Word => ({ text: '', literal: true, glob: false, assign: false, scripts: [] });
 const nested = (scope: Scope, body: Step[]): Step => ({ kind: 'nested', scope, body });
+const holdsNothing = ({ words, assigns, scripts, stdin }: Simple): boolean => !words.length && !assigns.length && !scripts.length && !stdin;
 
 /* A small recursive reader of the shell's grammar. It never expands or runs anything: words it cannot know are marked so. */
 class ShellReader {
@@ -208,7 +209,7 @@ class ShellReader {
 
   private compoundStep(): Step | null {
     if (this.arithmeticEnd() !== null) return this.arithmeticCommand();
-    if (this.source[this.at] === '(') return this.subshell();
+    if (this.source[this.at] === '(') return this.enclosed(')', 'child');
     if (this.keyword('[[')) return this.testCommand();
     const word = COMMAND_WORD.exec(this.source.slice(this.at, this.at + 10))?.[0];
     return word ? this.reservedStep(word) : null;
@@ -217,11 +218,17 @@ class ShellReader {
   private reservedStep(word: string): Step {
     switch (word) {
       case 'if': return this.ifStep();
-      case 'while': case 'until': return this.whileStep(word);
-      case 'for': case 'select': return this.forStep(word);
       case 'case': return this.caseStep();
       case 'function': return this.functionStep();
-      case '{': return this.group();
+      case '{': return this.enclosed('}', 'same');
+      default: return this.loopStep(word);
+    }
+  }
+
+  private loopStep(word: string): Step {
+    switch (word) {
+      case 'while': case 'until': return this.whileStep(word);
+      case 'for': case 'select': return this.forStep(word);
       default: throw new Unreadable('malformed');
     }
   }
@@ -232,18 +239,11 @@ class ShellReader {
     return into.scripts.length ? nested('same', [step, ...into.scripts.map(script => nested('child', script))]) : step;
   }
 
-  private subshell(): Step {
+  private enclosed(close: string, scope: Scope): Step {
     this.at++;
-    const body = this.list([')']);
-    this.expect(')');
-    return nested('child', body);
-  }
-
-  private group(): Step {
-    this.at++;
-    const body = this.list(['}']);
-    this.expect('}');
-    return nested('same', body);
+    const body = this.list([close]);
+    this.expect(close);
+    return nested(scope, body);
   }
 
   private arithmeticCommand(): Step {
@@ -402,10 +402,14 @@ class ShellReader {
       if (!word) break;
       if (word.assign && !simple.words.length) this.assignment(word, simple);
       else simple.words.push(word);
-      if (simple.words.length === 1 && !simple.assigns.length && FUNCTION_PARENS.test(this.source.slice(this.at))) return this.functionAfterName();
+      if (this.namesFunction(simple)) return this.functionAfterName();
     }
-    if (!simple.words.length && !simple.assigns.length && !simple.scripts.length && !simple.stdin) throw new Unreadable('malformed');
+    if (holdsNothing(simple)) throw new Unreadable('malformed');
     return simple;
+  }
+
+  private namesFunction({ words, assigns }: Simple): boolean {
+    return words.length === 1 && !assigns.length && FUNCTION_PARENS.test(this.source.slice(this.at));
   }
 
   private functionAfterName(): Step {
@@ -631,13 +635,17 @@ class ShellReader {
     word.scripts.push(...inner.scripts);
   }
 
+  /* With no escape it is plain text. With one it says something only the shell works out. */
   private ansiQuoted(word: Word): void {
-    word.literal = false;
     this.at += 2;
+    const start = this.at;
     while (this.source[this.at] !== "'") {
       if (this.at >= this.source.length) throw new Unreadable('malformed');
       this.at += this.source[this.at] === '\\' ? 2 : 1;
     }
+    const text = this.source.slice(start, this.at);
+    if (text.includes('\\')) word.literal = false;
+    else word.text += text;
     this.at++;
   }
 
@@ -698,6 +706,21 @@ const unknownWord = (): Word => ({ ...noWord(), literal: false });
 const isFlag = (word: Word | undefined): boolean => Boolean(word?.literal && word.text.startsWith('-') && word.text !== '-');
 const quoteForShell = (text: string): string => `'${text.replaceAll("'", "'\\''")}'`;
 const flagName = (text: string): string => text.split('=', 1)[0]!;
+/* What a table holds under this word. Any word may come here, and "constructor" is one. */
+const own = <T>(table: Readonly<Record<string, T>> | undefined, word: string): T | undefined => (table && Object.hasOwn(table, word) ? table[word] : undefined);
+
+/* A flag at this place: its name, the word that is its value if it takes one, and where the next word stands then. The value may
+   be in the flag's own word: --prefix=sub, or -Csub as these short flags have it. npm's -ws is a flag of its own. */
+type Flag = { name: string; value: Word | null; after: number };
+const ATTACHED = /^-([CwFpc])(?!s$)(.+)$/;
+function flagAt(args: Word[], at: number): Flag {
+  const { text } = args[at]!;
+  const short = ATTACHED.exec(text);
+  if (short) return { name: `-${short[1]!}`, value: literalWord(short[2]!), after: at + 1 };
+  const name = flagName(text);
+  if (text.length > name.length) return { name, value: literalWord(text.slice(name.length + 1)), after: at + 1 };
+  return { name, value: args[at + 1] ?? null, after: at + 2 };
+}
 
 const COVERAGE_ENV = /^(?:NODE_V8_COVERAGE|NODE_OPTIONS|PYTEST_ADDOPTS|VITEST_[A-Z_]*|JEST_[A-Z_]*|npm_config_[a-z_]*)\+?=/;
 const taints = (word: Word): boolean => COVERAGE_ENV.test(word.text);
@@ -750,7 +773,7 @@ class Guard {
     const name = commandName(first.text);
     const args = words.slice(1);
     const known = HANDLERS.get(name) ?? toolHandler(name);
-    if (known) return ONLY_ASKS.has(args[0]?.text ?? '') && args.length === 1 ? this.note(RECOGNIZED) : known(this, args, place);
+    if (known) return onlyAsks(args) ? this.note(RECOGNIZED) : known(this, args, place);
     if (first.text.includes('/')) return this.file(first, place, false);
     this.note(ORDINARY.has(name) ? RECOGNIZED : OPAQUE);
   }
@@ -778,15 +801,26 @@ class Guard {
 
   /* A script file is read and told as its own command, in this workspace only: one outside it, or no script at all, is opaque. */
   async file(path: Word, place: Place, asShell: boolean): Promise<void> {
-    if (!path.literal || path.glob || place.cwd === null) return this.unknown(place);
-    const absolute = resolve(place.cwd, path.text);
-    const text = (await this.inside(absolute)) ? await this.read(absolute) : null;
-    if (text === null || !(asShell || isShellScript(path.text, text))) return this.reads > COMMAND_LIMITS.fileReads ? this.note(unavailable('over_budget')) : this.note(OPAQUE);
+    if (unknownPath(path, place)) return this.unknown(place);
+    const absolute = resolve(place.cwd!, path.text);
+    const text = await this.textInside(absolute);
+    if (text === null || !(asShell || isShellScript(path.text, text))) return this.note(this.overRead() ? unavailable('over_budget') : OPAQUE);
     const inner = this.deeper(place, `file:${absolute}`);
-    if (!inner) return;
+    if (inner) await this.shellFile(text, inner, place);
+  }
+
+  private async shellFile(text: string, inner: Place, place: Place): Promise<void> {
     const read = readShell(text);
     if ('category' in read) return this.unknown(place);
     await this.steps(read.steps, inner);
+  }
+
+  private async textInside(absolute: string): Promise<string | null> {
+    return (await this.inside(absolute)) ? this.read(absolute) : null;
+  }
+
+  private overRead(): boolean {
+    return this.reads > COMMAND_LIMITS.fileReads;
   }
 
   /* Whether the path stands under the workspace with no link anywhere on its way. */
@@ -803,8 +837,8 @@ class Guard {
 
   /* Whether this word is one regular file in the workspace, tracked or just written. */
   async regularFile(word: Word, place: Place): Promise<boolean> {
-    if (!word.literal || word.glob || GLOB_LETTERS.test(word.text) || place.cwd === null) return false;
-    const absolute = resolve(place.cwd, word.text);
+    if (unknownPath(word, place) || GLOB_LETTERS.test(word.text)) return false;
+    const absolute = resolve(place.cwd!, word.text);
     return (await this.inside(absolute)) && (await this.files.lstat(absolute)) === 'file';
   }
 
@@ -831,14 +865,18 @@ class Guard {
   /* A package script and what npm runs around it, read from the nearest manifest in the workspace, and told in its folder. */
   async packageScript(name: string, forwarded: Word[], from: string | null, place: Place): Promise<void> {
     if (forwarded.some(word => !word.literal)) return this.note(unavailable('dynamic_check'));
-    const folder = from === null ? null : await this.manifestFolder(from);
-    const scripts = folder === null ? null : await this.scriptsOf(folder);
-    const text = scripts?.[name];
-    if (typeof text !== 'string') return this.note(unavailable(this.reads > COMMAND_LIMITS.fileReads ? 'over_budget' : 'unresolved_script'));
-    const inner = this.deeper(place, `script:${folder!}:${name}`);
+    const found = from === null ? null : await this.nearestScripts(from);
+    const stages = found ? stagesOf(found.scripts, name, forwarded) : [];
+    if (!stages.length) return this.note(unavailable(this.overRead() ? 'over_budget' : 'unresolved_script'));
+    const inner = this.deeper(place, `script:${found!.folder}:${name}`);
     if (!inner) return;
-    const stages = [scripts?.[`pre${name}`], [text, ...forwarded.map(word => quoteForShell(word.text))].join(' '), scripts?.[`post${name}`]];
-    for (const stage of stages) if (typeof stage === 'string') await this.scriptStage(stage, { ...inner, cwd: folder, boundary: true });
+    for (const stage of stages) await this.scriptStage(stage, { ...inner, cwd: found!.folder, boundary: true });
+  }
+
+  private async nearestScripts(from: string): Promise<{ folder: string; scripts: Record<string, unknown> } | null> {
+    const folder = await this.manifestFolder(from);
+    const scripts = folder === null ? null : await this.scriptsOf(folder);
+    return scripts && { folder: folder!, scripts };
   }
 
   private async scriptStage(text: string, place: Place): Promise<void> {
@@ -858,7 +896,16 @@ class Guard {
   }
 }
 
+const unknownPath = (word: Word, place: Place): boolean => !word.literal || word.glob || place.cwd === null;
 const leavesFolder = (way: string): boolean => way === '..' || way.startsWith('../') || isAbsolute(way);
+
+/* A script with what npm runs around it, and the words it is given: nothing at all when there is no such script. */
+function stagesOf(scripts: Record<string, unknown>, name: string, forwarded: Word[]): string[] {
+  const text = scripts[name];
+  if (typeof text !== 'string') return [];
+  const called = [text, ...forwarded.map(word => quoteForShell(word.text))].join(' ');
+  return [scripts[`pre${name}`], called, scripts[`post${name}`]].filter((stage): stage is string => typeof stage === 'string');
+}
 
 function parseScripts(text: string | null): Record<string, unknown> | null {
   if (text === null) return null;
@@ -875,6 +922,7 @@ const SHELL_LINE = /^#!.*\b(?:sh|bash|dash|zsh|ksh|ash)\b/;
 const isShellScript = (path: string, text: string): boolean => !text.includes('\0') && (SHELL_LINE.test(text) || (path.endsWith('.sh') && !text.startsWith('#!')));
 const GLOB_LETTERS = /[*?[\]{}!]/;
 const ONLY_ASKS = new Set(['--version', '-v', '-V', '--help', '-h', 'version', 'help']);
+const onlyAsks = (args: Word[]): boolean => args.length === 1 && ONLY_ASKS.has(args[0]!.text);
 const PYTHON = /^(?:python[0-9.]*|py|pypy[0-9.]*)$/;
 const commandName = (text: string): string => {
   const name = basename(text);
@@ -889,7 +937,7 @@ const ORDINARY = new Set([
 ]);
 
 /* Programs that are a check of one kind, whatever they are given. */
-const HEAVY = new Map<string, Category>(Object.entries({
+const HEAVY = new Map(Object.entries<Category>({
   tsc: 'types', 'vue-tsc': 'types', mypy: 'types', pyright: 'types', pyre: 'types', flow: 'types',
   eslint: 'lint', biome: 'lint', stylelint: 'lint', oxlint: 'lint', tslint: 'lint', ruff: 'lint', flake8: 'lint', pylint: 'lint', rubocop: 'lint', 'golangci-lint': 'lint',
   prettier: 'format', black: 'format', isort: 'format', gofmt: 'format', rustfmt: 'format', yapf: 'format', autopep8: 'format', dprint: 'format',
@@ -902,7 +950,7 @@ const HEAVY = new Map<string, Category>(Object.entries({
   mutator: 'mutation', stryker: 'mutation', mutmut: 'mutation', 'cosmic-ray': 'mutation', pitest: 'mutation', mutant: 'mutation',
   cypress: 'browser', wdio: 'browser', webdriverio: 'browser', testcafe: 'browser', nightwatch: 'browser',
   nodemon: 'watch', watchexec: 'watch', entr: 'watch',
-}) as [string, Category][]);
+}));
 
 /* Programs whose first word says what they do. */
 type ToolSpec = {
@@ -920,7 +968,7 @@ type ToolSpec = {
 
 const READS = ['list', 'ls', 'show', 'search', 'info', 'freeze', 'check', 'config', 'env', 'outdated', 'tree', 'why', 'metadata', 'doc'];
 const OPAQUE_REST = { bare: OPAQUE, other: OPAQUE };
-const TOOLS = new Map<string, ToolSpec>(Object.entries({
+const TOOLS = new Map(Object.entries<ToolSpec>({
   pip: { install: ['install', 'download', 'wheel', 'uninstall'], read: READS },
   pip3: { install: ['install', 'download', 'wheel', 'uninstall'], read: READS },
   easy_install: { bare: dependency(), other: dependency() },
@@ -979,13 +1027,17 @@ async function useTool(tool: ToolSpec, guard: Guard, args: Word[], place: Place)
   if (!sub) return guard.note(tool.bare ?? RECOGNIZED);
   if (!sub.literal) return guard.note(unavailable('dynamic_check'));
   const rest = args.slice(at + 1);
-  if (tool.install?.includes(sub.text)) return guard.note(dependency());
-  const heavy = tool.heavy?.[sub.text];
-  if (heavy) return guard.note(check(heavy));
-  const inner = tool.nested?.[sub.text];
+  const inner = own(tool.nested, sub.text);
   if (inner) return useTool(inner, guard, rest, place);
   if (tool.run?.includes(sub.text)) return guard.run(withoutDashes(rest), place);
-  guard.note(tool.read?.includes(sub.text) ? RECOGNIZED : tool.other ?? unavailable('package_boundary'));
+  guard.note(toolWord(tool, sub.text));
+}
+
+function toolWord(tool: ToolSpec, word: string): Finding {
+  if (tool.install?.includes(word)) return dependency();
+  const heavy = own(tool.heavy, word);
+  if (heavy) return check(heavy);
+  return tool.read?.includes(word) ? RECOGNIZED : tool.other ?? unavailable('package_boundary');
 }
 
 const withoutDashes = (args: Word[]): Word[] => (args[0]?.text === '--' ? args.slice(1) : args);
@@ -1016,29 +1068,37 @@ const WRAPPERS: Readonly<Record<string, Wrapper>> = {
   watch: { values: ['-n', '--interval'], loop: true },
 };
 
-function changedFolder(flag: string, value: Word | undefined, place: Place): void {
+function changedFolder(flag: string, value: Word | null, place: Place): void {
   if (flag !== '-C' && flag !== '--chdir') return;
   place.cwd = place.cwd !== null && value?.literal ? resolve(place.cwd, value.text) : null;
 }
 
 function wrapperRest(wrapper: Wrapper, args: Word[], place: Place): Word[] | null {
   let at = 0;
-  for (; isFlag(args[at]); at++) {
+  while (isFlag(args[at])) {
     const text = args[at]!.text;
     if (text === '--') return args.slice(at + 1);
     if (wrapper.lookup?.includes(text)) return null;
-    const flag = flagName(text);
-    if (text.includes('=') || !wrapper.values?.includes(flag)) continue;
-    at++;
-    changedFolder(flag, args[at], place);
+    at = afterWrapperFlag(wrapper, args, at, place);
   }
-  at += wrapper.positional ?? 0;
-  /* A word nobody can know in the settings may be one more setting: what follows it is still told. */
+  return args.slice(afterSettings(wrapper, args, at + (wrapper.positional ?? 0), place));
+}
+
+function afterWrapperFlag(wrapper: Wrapper, args: Word[], at: number, place: Place): number {
+  const { name, value, after } = flagAt(args, at);
+  if (!wrapper.values?.includes(name)) return at + 1;
+  changedFolder(name, value, place);
+  return after;
+}
+
+/* A word nobody can know in the settings may be one more setting: what follows it is still told. */
+function afterSettings(wrapper: Wrapper, args: Word[], from: number, place: Place): number {
+  let at = from;
   while (wrapper.assigns && (args[at]?.assign || args[at]?.literal === false)) {
     if (taints(args[at]!)) place.tainted = true;
     at++;
   }
-  return args.slice(at);
+  return at;
 }
 
 /* The text env -S splits into a command, if it was given one. */
@@ -1165,25 +1225,22 @@ function testSelection(args: Word[], flags: Flags): { files: Word[] } | { catego
     const word = args[at]!;
     if (!word.literal) return { category: 'dynamic_check' };
     if (word.text === '--') return { files: [...files, ...args.slice(at + 1)] };
-    if (!isFlag(word)) {
-      files.push(word);
-      continue;
-    }
-    const name = flagName(word.text);
-    if (!(name in flags)) return { category: flagCategory(name) };
-    if (flags[name] && !word.text.includes('=') && !args[++at]?.literal) return { category: 'dynamic_check' };
+    if (!isFlag(word)) files.push(word);
+    else if (!(flagName(word.text) in flags)) return { category: flagCategory(flagName(word.text)) };
+    else if (takesValue(word, flags) && !args[++at]?.literal) return { category: 'dynamic_check' };
   }
   return { files };
 }
 
+const takesValue = (word: Word, flags: Flags): boolean => Boolean(flags[flagName(word.text)]) && !word.text.includes('=');
+
 async function oneTest(guard: Guard, args: Word[], flags: Flags, place: Place, selector: (word: Word) => Word = word => word): Promise<void> {
   const selection = testSelection(args, flags);
   if ('category' in selection) return guard.note(check(selection.category));
-  const [only, ...more] = selection.files;
+  const { files } = selection;
   if (place.tainted) return guard.note(check('coverage'));
-  const single = only && !more.length && !place.loop && (only.literal ? await guard.regularFile(selector(only), place) : false);
-  if (single) return guard.note({ kind: 'test_file' });
-  guard.note(check(only?.literal === false || more.some(word => !word.literal) ? 'dynamic_check' : 'test_scope'));
+  if (files.length === 1 && !place.loop && (await guard.regularFile(selector(files[0]!), place))) return guard.note({ kind: 'test_file' });
+  guard.note(check(files.some(word => !word.literal) ? 'dynamic_check' : 'test_scope'));
 }
 
 const VITEST: Handler = async (guard, args, place) => {
@@ -1204,7 +1261,7 @@ const PLAYWRIGHT_ACTIONS: Readonly<Record<string, Finding>> = {
 const PLAYWRIGHT: Handler = (guard, args) => {
   const action = args.find(word => !isFlag(word));
   if (!action?.literal) return Promise.resolve(guard.note(action ? check('dynamic_check') : RECOGNIZED));
-  guard.note(PLAYWRIGHT_ACTIONS[action.text] ?? unavailable('package_boundary'));
+  guard.note(own(PLAYWRIGHT_ACTIONS, action.text) ?? unavailable('package_boundary'));
   return Promise.resolve();
 };
 
@@ -1219,15 +1276,17 @@ function toolInNodeModules(path: string): string | null {
   const bin = /(?:^|\/)node_modules\/\.bin\/([^/]+)$/.exec(path);
   if (bin) return bin[1]!;
   const inPackage = /(?:^|\/)node_modules\/((?:@[^/]+\/)?[^/]+)\//.exec(path)?.[1];
-  return inPackage ? PACKAGE_TOOLS[inPackage] ?? inPackage : null;
+  return inPackage ? own(PACKAGE_TOOLS, inPackage) ?? inPackage : null;
 }
+
+const isTold = (name: string): boolean => HANDLERS.has(name) || toolHandler(name) !== null;
 
 const NODE: Handler = async (guard, args, place) => {
   if (args.some(word => word.literal && /^--watch(?:-|=|$)/.test(word.text))) return guard.note(check('watch'));
   if (args.some(word => word.text === '--test')) return oneTest(guard, args, NODE_FLAGS, place);
   const script = args.find(word => !isFlag(word));
   const tool = script?.literal ? toolInNodeModules(script.text) : null;
-  if (tool && (HANDLERS.has(tool) || toolHandler(tool))) return guard.run([literalWord(tool), ...args.slice(args.indexOf(script!) + 1)], place);
+  if (tool && isTold(tool)) return guard.run([literalWord(tool), ...args.slice(args.indexOf(script!) + 1)], place);
   guard.note(OPAQUE);
 };
 
@@ -1238,12 +1297,24 @@ const TSX: Handler = async (guard, args, place) => {
 };
 
 const PYTHON_VALUES = new Set(['-X', '-W']);
+/* -m and -c may stand in one word with python's other short flags, and with what they carry. */
+const PYTHON_RUNS = /^-[bBdEiIOPqRsSuvVx]*([mc])(.*)$/;
+
+type PythonModule = { module: Word | undefined; rest: Word[] };
+function pythonModule(args: Word[]): PythonModule | null {
+  for (let at = 0; isFlag(args[at]); at += PYTHON_VALUES.has(args[at]!.text) ? 2 : 1) {
+    const runs = PYTHON_RUNS.exec(args[at]!.text);
+    if (runs) return runs[1] === 'm' ? moduleAt(runs[2]!, args, at) : null;
+  }
+  return null;
+}
+
+const moduleAt = (attached: string, args: Word[], at: number): PythonModule =>
+  attached ? { module: literalWord(attached), rest: args.slice(at + 1) } : { module: args[at + 1], rest: args.slice(at + 2) };
+
 const PYTHON_HANDLER: Handler = async (guard, args, place) => {
-  let at = 0;
-  while (isFlag(args[at]) && args[at]!.text !== '-m' && args[at]!.text !== '-c') at += PYTHON_VALUES.has(args[at]!.text) ? 2 : 1;
-  const module = args[at]?.text === '-m' ? args[at + 1] : null;
-  if (!module?.literal) return guard.note(OPAQUE);
-  if (HANDLERS.has(module.text) || toolHandler(module.text)) return guard.run([literalWord(module.text), ...args.slice(at + 2)], place);
+  const called = pythonModule(args);
+  if (called?.module?.literal && isTold(called.module.text)) return guard.run([literalWord(called.module.text), ...called.rest], place);
   guard.note(OPAQUE);
 };
 
@@ -1254,34 +1325,43 @@ const PACMAN: Handler = (guard, args) => {
 
 /* npx and its like run what the workspace has, or fetch it: only the first is a local run. */
 type ExecCall = { tool: Word | null; rest: Word[]; noInstall: boolean; fetches: boolean; call: Word | null };
-const EXEC_VALUES = new Set(['-p', '--package', '-c', '--call', '--cache', '--registry', '--userconfig', '--loglevel']);
+const EXEC_NO_INSTALL = new Set(['--no-install', '--no']);
+const EXEC_PACKAGE = new Set(['-p', '--package']);
+const EXEC_CALL = new Set(['-c', '--call']);
+const EXEC_VALUES = new Set([...EXEC_PACKAGE, ...EXEC_CALL, '--cache', '--registry', '--userconfig', '--loglevel']);
 
 function readExec(args: Word[]): ExecCall {
   const exec: ExecCall = { tool: null, rest: [], noInstall: false, fetches: false, call: null };
-  for (let at = 0; at < args.length; at++) {
+  let at = 0;
+  while (at < args.length) {
     const word = args[at]!;
     if (word.text === '--') return { ...exec, tool: args[at + 1] ?? null, rest: args.slice(at + 2) };
     if (!isFlag(word)) return { ...exec, tool: word, rest: args.slice(at + 1) };
-    const name = flagName(word.text);
-    if (name === '--no-install' || name === '--no') exec.noInstall = true;
-    if (name === '-p' || name === '--package') exec.fetches = true;
-    if (!EXEC_VALUES.has(name) || word.text.includes('=')) continue;
-    at++;
-    if (name === '-c' || name === '--call') exec.call = args[at] ?? null;
+    at = afterExecFlag(exec, args, at);
   }
   return exec;
 }
 
+function afterExecFlag(exec: ExecCall, args: Word[], at: number): number {
+  const { name, value, after } = flagAt(args, at);
+  if (EXEC_NO_INSTALL.has(name)) exec.noInstall = true;
+  if (EXEC_PACKAGE.has(name)) exec.fetches = true;
+  if (EXEC_CALL.has(name)) exec.call = value;
+  return EXEC_VALUES.has(name) ? after : at + 1;
+}
+
 async function runExec(guard: Guard, args: Word[], place: Place, mayFetch: boolean): Promise<void> {
   const { tool, rest, noInstall, fetches, call } = readExec(args);
-  if (call) return call.literal ? guard.shellText(call.text, place) : guard.note(unavailable('dynamic_check'));
+  if (call) return runExecText(guard, call, place);
   if (fetches) return guard.note(dependency('implicit_install'));
   if (!tool) return guard.note(RECOGNIZED);
   if (!tool.literal) return guard.note(unavailable('dynamic_check'));
-  const pinned = tool.text.slice(1).includes('@');
-  if (mayFetch && !noInstall && (pinned || !(await guard.localBin(tool.text, place)))) return guard.note(dependency('implicit_install'));
+  if (mayFetch && !noInstall && (await wouldFetch(guard, tool.text, place))) return guard.note(dependency('implicit_install'));
   await guard.run([literalWord(tool.text), ...rest], place);
 }
+
+const runExecText = (guard: Guard, call: Word, place: Place): Promise<void> => (call.literal ? guard.shellText(call.text, place) : Promise.resolve(guard.note(unavailable('dynamic_check'))));
+const wouldFetch = async (guard: Guard, tool: string, place: Place): Promise<boolean> => tool.slice(1).includes('@') || !(await guard.localBin(tool, place));
 
 const NPX: Handler = (guard, args, place) => runExec(guard, args, place, true);
 
@@ -1290,24 +1370,27 @@ type ManagerCall = { sub: Word | null; rest: Word[]; dir: Word | null; workspace
 const DIR_FLAGS = new Set(['--prefix', '-C', '--dir', '--cwd']);
 const WORKSPACE_FLAGS = new Set(['-w', '--workspace']);
 const MANY_FLAGS = new Set(['-ws', '--workspaces', '-r', '--recursive', '--filter', '-F', '--include-workspace-root', '-A', '--all']);
-const OTHER_VALUES = new Set(['--loglevel', '--registry', '--userconfig', '--cache', '--reporter', '--store-dir']);
+const VALUE_FLAGS = new Set([...DIR_FLAGS, '--filter', '-F', '--loglevel', '--registry', '--userconfig', '--cache', '--reporter', '--store-dir']);
 
-function readManagerFlag(call: ManagerCall, args: Word[], at: number, workspaces: boolean): number {
-  const text = args[at]!.text;
-  const name = flagName(text);
-  const value = text.includes('=') ? literalWord(text.slice(name.length + 1)) : args[at + 1];
+function afterManagerFlag(call: ManagerCall, args: Word[], at: number, workspaces: boolean): number {
+  const { name, value, after } = flagAt(args, at);
+  noteManagerFlag(call, name, value, workspaces);
+  return VALUE_FLAGS.has(name) || (workspaces && WORKSPACE_FLAGS.has(name)) ? after : at + 1;
+}
+
+/* -w is a workspace's name to npm, and the root of them all to pnpm. */
+function noteManagerFlag(call: ManagerCall, name: string, value: Word | null, workspaces: boolean): void {
   if (MANY_FLAGS.has(name)) call.many = true;
-  if (DIR_FLAGS.has(name)) call.dir = value ?? null;
-  if (WORKSPACE_FLAGS.has(name) && workspaces) call.workspace = value ?? null;
-  if (name === '-w' && !workspaces) call.atRoot = true;
-  const takes = DIR_FLAGS.has(name) || (WORKSPACE_FLAGS.has(name) && workspaces) || name === '--filter' || name === '-F' || OTHER_VALUES.has(name);
-  return takes && !text.includes('=') ? at + 2 : at + 1;
+  if (DIR_FLAGS.has(name)) call.dir = value;
+  if (!WORKSPACE_FLAGS.has(name)) return;
+  if (workspaces) call.workspace = value;
+  else if (name === '-w') call.atRoot = true;
 }
 
 function readManager(args: Word[], workspaces: boolean): ManagerCall {
   const call: ManagerCall = { sub: null, rest: [], dir: null, workspace: null, many: false, atRoot: false };
   let at = 0;
-  while (at < args.length && isFlag(args[at])) at = readManagerFlag(call, args, at, workspaces);
+  while (at < args.length && isFlag(args[at])) at = afterManagerFlag(call, args, at, workspaces);
   call.sub = args[at] ?? null;
   call.rest = args.slice(at + 1);
   return call;
@@ -1401,7 +1484,7 @@ const scriptAction: ManagerAction = async (manager, guard, call, _sub, rest, pla
   if (!name.literal) return guard.note(unavailable('dynamic_check'));
   await runScriptCall(manager, guard, call, name.text, rest.filter(word => word !== name), place);
 };
-const namedAction: ManagerAction = (manager, guard, call, sub, rest, place) => runScriptCall(manager, guard, call, SCRIPT_NAMES[sub] ?? sub, rest, place);
+const namedAction: ManagerAction = (manager, guard, call, sub, rest, place) => runScriptCall(manager, guard, call, own(SCRIPT_NAMES, sub) ?? sub, rest, place);
 const execAction: ManagerAction = (manager, guard, _call, _sub, rest, place) => runExec(guard, rest, place, manager.execFetches);
 
 const SCRIPT_NAMES: Readonly<Record<string, string>> = { t: 'test', tst: 'test' };

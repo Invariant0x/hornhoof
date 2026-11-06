@@ -318,6 +318,98 @@ describe('what cannot be told is refused, not allowed', () => {
   });
 });
 
+describe('a flag and its value in one word are told like two', () => {
+  it.each(['env --chdir=apps/node npm run nested', 'env -Capps/node npm run nested', 'pnpm -Capps/node run nested', 'npm -wapps/node run nested', 'npm --prefix=apps/node run nested'])('moves to the folder it names: %s', async command => {
+    expect(await agent(command)).toEqual({ allow: true, kind: 'single_test_file', coverage: 'recognized' });
+  });
+
+  it.each(['env --chdir=apps/node npm run nestedall', 'env -Capps/node npm run nestedall', 'pnpm -Capps/node run nestedall', 'npm -wapps/node run nestedall'])('and tells the script of that folder: %s', async command => {
+    expect(await agent(command)).toEqual(denied('heavy_check_local'));
+  });
+
+  it.each(['pnpm -Fsome run one', 'pnpm --filter=some run one', 'npm -ws run one'])('works over many packages: %s', async command => {
+    expect(await agent(command)).toEqual({ allow: false, code: 'heavy_check_local', category: 'package_scope' });
+  });
+
+  it.each(['npx --call=tsc', 'npx -ctsc', "npx --call='tsc --noEmit'", 'python -mpytest', 'python -um pytest', 'python3 -mmypy x'])('runs what it carries: %s', async command => {
+    expect(await agent(command)).toEqual(denied('heavy_check_local'));
+  });
+
+  it.each(['npx -psomething tsc', 'python -mpip install x'])('fetches what it carries: %s', async command => {
+    expect(await agent(command)).toEqual(denied('dependency_install_local'));
+  });
+
+  it('stops at python -c, whose text is no module', async () => {
+    expect(await agent('python -c "1" -m pytest')).toEqual({ allow: true, kind: 'ordinary', coverage: 'opaque' });
+  });
+});
+
+describe('words the shell quotes its own way', () => {
+  it('reads a word with no escape as the word it is', async () => {
+    expect(await agent("$'tsc' --noEmit")).toEqual(denied('heavy_check_local'));
+    expect(await agent("echo $'a'")).toEqual({ allow: true, kind: 'ordinary', coverage: 'recognized' });
+  });
+
+  it('calls a word with an escape unknown, and reads past it', async () => {
+    expect(await agent("$'ts\\x63'")).toEqual({ allow: true, kind: 'ordinary', coverage: 'opaque' });
+    expect(await agent("echo $'a\\'b'; tsc")).toEqual(denied('heavy_check_local'));
+  });
+
+  it('refuses one left open', async () => {
+    expect(await agent("echo $'open")).toEqual(denied('command_guard_unavailable'));
+  });
+});
+
+describe('a word is only a word, whatever it is called', () => {
+  it.each(['cargo constructor', 'playwright constructor', 'rustup __proto__', 'pip toString'])('%s', async command => {
+    expect(await agent(command)).toEqual({ allow: false, code: 'command_guard_unavailable', category: 'package_boundary' });
+  });
+
+  it('calls the program behind it opaque where the rest of its words are', async () => {
+    expect(await agent('go toString')).toEqual({ allow: true, kind: 'ordinary', coverage: 'opaque' });
+    expect(await agent('docker constructor')).toEqual({ allow: true, kind: 'ordinary', coverage: 'opaque' });
+  });
+
+  it('reads a package script of that name like any other', async () => {
+    file('named/package.json', JSON.stringify({ scripts: { constructor: 'tsc' } }));
+    expect(await agent('npm run constructor', join(root, 'named'))).toEqual(denied('heavy_check_local'));
+    expect(await agent('pnpm toString', join(root, 'named'))).toEqual(denied('command_guard_unavailable'));
+  });
+});
+
+describe('the rest of what programs take', () => {
+  it.each(['xargs -n 1 tsc', 'xargs -0 tsc', 'parallel -j 2 tsc', 'poetry run tsc', 'poetry run -- tsc', 'docker compose build', 'python -X utf8 -m pytest', 'python -W ignore -m mypy x', 'tsx --test', 'tsx --test test/a.test.ts test/b.test.ts', 'npx -- tsc', 'pnpm exec tsc', 'bunx tsc', 'npx --no-install tsc', 'playwright $X', 'vitest run --reporter $X test/a.test.ts', 'NODE_V8_COVERAGE=x vitest run test/a.test.ts', 'while true; do vitest run test/a.test.ts; done'])('is a check: %s', async command => {
+    expect(await agent(command)).toEqual(denied('heavy_check_local'));
+  });
+
+  it.each(['pip $X', 'npx $X', 'npx -c "$X"', 'npm run "$X"', 'npm run one "$X"', 'pip --quiet'])('cannot be told: %s', async command => {
+    const told = await agent(command);
+    expect(told.allow ? told.kind : told.code).toBe(command === 'pip --quiet' ? 'ordinary' : 'command_guard_unavailable');
+  });
+
+  it.each(['xargs', 'xargs -n 1', 'playwright', 'pip', 'npx', 'playwright --version', 'env -- ls', 'env -i ls', 'nice -n 5 ls', 'timeout -k 1 5 ls', 'command -v tsc', 'echo "a\\$b\\c"', 'echo ~/a', 'echo a*'])('asks for nothing heavy: %s', async command => {
+    expect(await agent(command)).toEqual({ allow: true, kind: 'ordinary', coverage: 'recognized' });
+  });
+
+  it.each(['tsx tools/x.ts', 'python -m "$X"', 'python -m', 'python -X utf8', 'python', 'docker', 'docker compose up', 'docker ps', 'go frob', 'npx --no-install not-here', 'sudo ls $X'])('is opaque, and says so: %s', async command => {
+    expect(await agent(command)).toEqual({ allow: true, kind: 'ordinary', coverage: 'opaque' });
+  });
+
+  it.each(['case', 'case a', 'case a in', 'select', 'for', 'function', 'until true'])('is no shell at all: %s', async command => {
+    expect(await agent(command)).toEqual(denied('command_guard_unavailable'));
+  });
+
+  it('runs one test file through tsx', async () => {
+    expect(await agent('tsx --test test/a.test.ts')).toEqual({ allow: true, kind: 'single_test_file', coverage: 'recognized' });
+  });
+
+  it('tells a broken text apart from a broken script', async () => {
+    expect(await agent('sh -c "echo \'open"')).toEqual({ allow: false, code: 'command_guard_unavailable', category: 'malformed' });
+    expect(await agent('npm run dynamic')).toEqual({ allow: false, code: 'command_guard_unavailable', category: 'dynamic_check' });
+    expect(await agent('npm run broken')).toEqual({ allow: false, code: 'command_guard_unavailable', category: 'unresolved_script' });
+  });
+});
+
 describe('a claim gives nothing', () => {
   it('takes no origin, lease or runner from what it is told', async () => {
     const claims = { isRunner: true, origin: 'runner', lease: 'abc', redGreen: true, sender: 'node', kind: 'work' };
