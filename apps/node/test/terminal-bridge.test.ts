@@ -1,7 +1,8 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
-import { Bridge } from '../src/terminal/bridge.js';
+import { Bridge, type GitServe } from '../src/terminal/bridge.js';
+import type { Owns } from '../src/terminal/peer.js';
 
 type Seen = { method: string; url: string; auth: string; body: string };
 
@@ -222,5 +223,80 @@ describe('lifecycle hook events', () => {
       expect(await res.text()).toBe('');
       expect(seen).toEqual([['agent', event, { tool_name: 'Bash' }]]);
     } finally { bridge.stop(); }
+  });
+});
+
+describe('the git address of the bridge', () => {
+  const closers: (() => void)[] = [];
+  afterEach(() => closers.splice(0).forEach(c => c()));
+
+  type Call = { key: string; body: string };
+
+  async function bridgeWith(git: GitServe | undefined, owns: Owns | null = null): Promise<{ bridge: Bridge; url: string }> {
+    const bridge = new Bridge('http://127.0.0.1:1', () => {}, owns, git ? { git, capture: async () => ({}) } : { capture: async () => ({}) });
+    await bridge.start();
+    closers.push(() => bridge.stop());
+    return { bridge, url: bridge.agent('agent-1').hookUrl.replace('/hook/', '/git/') };
+  }
+
+  const answering = (calls: Call[]): GitServe => async (key, body, _signal, res) => {
+    calls.push({ key, body: body.toString() });
+    res.writeHead(200);
+    res.end('{"type":"exit","code":0,"signal":null}\n');
+  };
+
+  it('does not exist without an adapter, so the shim runs plain git', async () => {
+    const { bridge, url } = await bridgeWith(undefined);
+    bridge.setToken('agent-1', 'turn');
+    expect((await fetch(url, { method: 'POST', body: '{}' })).status).toBe(404);
+  });
+
+  it('turns a program down between turns', async () => {
+    const calls: Call[] = [];
+    const { url } = await bridgeWith(answering(calls));
+    expect((await fetch(url, { method: 'POST', body: '{}' })).status).toBe(409);
+    expect(calls).toEqual([]);
+  });
+
+  it('hands the request of the running turn to the adapter with the agent the address belongs to', async () => {
+    const calls: Call[] = [];
+    const { bridge, url } = await bridgeWith(answering(calls));
+    bridge.setToken('agent-1', 'turn');
+    const res = await fetch(url, { method: 'POST', body: '{"kind":"push"}' });
+    expect(await res.text()).toBe('{"type":"exit","code":0,"signal":null}\n');
+    expect(calls).toEqual([{ key: 'agent-1', body: '{"kind":"push"}' }]);
+  });
+
+  it('turns down a process that is not the program of that agent', async () => {
+    const calls: Call[] = [];
+    const { bridge, url } = await bridgeWith(answering(calls), async () => false);
+    bridge.setToken('agent-1', 'turn');
+    expect((await fetch(url, { method: 'POST', body: '{}' })).status).toBe(403);
+    expect(calls).toEqual([]);
+  });
+
+  it('answers an unknown address as unknown', async () => {
+    const calls: Call[] = [];
+    const { url } = await bridgeWith(answering(calls));
+    expect((await fetch(url.replace(/\/git\/.*/, '/git/nope'), { method: 'POST', body: '{}' })).status).toBe(404);
+    expect(calls).toEqual([]);
+  });
+
+  it('stops an operation when the turn changes', async () => {
+    let aborted = false, entered = () => {};
+    const inside = new Promise<void>(resolve => { entered = resolve; });
+    const { bridge, url } = await bridgeWith(async (_key, _body, signal, res) => {
+      res.writeHead(200);
+      res.flushHeaders();
+      entered();
+      await new Promise<void>(resolve => signal.addEventListener('abort', () => { aborted = true; resolve(); }, { once: true }));
+      res.end();
+    });
+    bridge.setToken('agent-1', 'turn');
+    const res = await fetch(url, { method: 'POST', body: '{}' });
+    await inside;
+    bridge.setToken('agent-1', 'next-turn');
+    await res.text();
+    expect(aborted).toBe(true);
   });
 });

@@ -161,6 +161,10 @@ COPY --chmod=755 apps/node/hh-fetch.cjs /usr/local/bin/hh-fetch
 # Agents run in tmux sessions; their hooks and status line tell the node how a turn goes through hh-hook.
 COPY --chmod=755 apps/node/hh-hook.cjs /usr/local/bin/hh-hook
 COPY apps/node/hh-hook-send.cjs /usr/local/bin/hh-hook-send.cjs
+# An agent's git: an ordinary push or fetch goes through the node, so that a failing remote service reaches Hornhoof's
+# failure mechanism. Every other command goes straight to real git, which the node itself always calls by its full path.
+COPY --chmod=755 apps/node/hh-git.cjs /usr/local/bin/hh-git
+RUN printf '%s\n' '#!/bin/sh' 'for word in "$@"; do case "$word" in push|fetch) exec /usr/local/bin/hh-git "$@" ;; esac; done' 'exec /usr/bin/git "$@"' > /usr/local/bin/git && chmod 755 /usr/local/bin/git
 # The terminal's private, bounded raw output survives programs leaving their alternate screen.
 COPY apps/node/hh-capture.cjs /app/apps/node/hh-capture.cjs
 COPY apps/node/hh-fs.cjs /app/apps/node/hh-fs.cjs

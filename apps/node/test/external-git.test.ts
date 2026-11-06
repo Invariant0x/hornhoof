@@ -8,6 +8,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { ExternalConsumer, ExternalGitIntent, ExternalGitOutcome } from '@hornhoof/protocol';
+import { Bridge } from '../src/terminal/bridge.js';
+import { procOwner, type Capture, type Owns } from '../src/terminal/peer.js';
 import { GitAdapter, fetchTarget, parseGitMarker, type GitGrant, type GitJob, type GitOperationPort, type GitRecord, type GitRecordReply, type GitRegistration } from '../src/external-git.js';
 
 const SHIM = fileURLToPath(new URL('../hh-git.cjs', import.meta.url));
@@ -1194,5 +1196,75 @@ describe('the child the node owns', () => {
     await runShim(['fetch', 'origin', 'main'], s.work, env);
     await runShim(['push', 'origin', 'task-1'], s.work, env);
     expect(calls(s, 'ls-remote')).toEqual([]);
+  });
+});
+
+describe('through the real bridge', () => {
+  async function bridged(s: Stand, port: GitOperationPort, owners: (pid: () => number) => { owns: Owns; capture: Capture } | null) {
+    const adapter = new GitAdapter({ port, git: s.bin });
+    adapter.bind(KEY, jobOf(s));
+    let pane = 0;
+    const owner = owners(() => pane);
+    const bridge = new Bridge('http://127.0.0.1:1', () => {}, owner?.owns ?? null, { ...(owner ? { capture: owner.capture } : {}), git: (key, body, signal, res) => adapter.serve(key, body, signal, res) });
+    await bridge.start();
+    bridge.setToken(KEY, 'turn');
+    onTestFinished(() => { bridge.stop(); adapter.stop(); });
+    return { bridge, setPane: (pid: number) => { pane = pid; }, env: baseEnv(s, { HH_BRIDGE: bridge.agent(KEY).hookUrl }) };
+  }
+
+  it('keeps output and exit code from the shim to the adapter and back', async () => {
+    const s = stand();
+    const port = new FakePort();
+    const { env } = await bridged(s, port, () => null);
+    const ran = await runShim(['push', 'origin', 'task-1'], s.work, env);
+    expect(ran.code).toBe(0);
+    expect(ran.stderr).toContain('-> task-1');
+    expect(port.recorded).toHaveLength(1);
+    expect(remoteRef(s, 'refs/heads/task-1')).toBe(head(s));
+  });
+
+  it('takes the operation from a process of the program and not from a foreign one', async () => {
+    const s = stand();
+    const port = new FakePort();
+    const { env, setPane } = await bridged(s, port, pane => procOwner('/proc')(async agent => (agent === KEY ? [pane()] : [])));
+    const foreign = await runShim(['push', 'origin', 'task-1'], s.work, env);
+    expect(foreign.code).toBe(0);
+    expect(port.registered).toEqual([]);
+    expect(calls(s, 'push').map(call => call.nested)).toEqual([null]);
+    const own = spawn('/bin/sh', ['-c', `'${process.execPath}' '${SHIM}' push origin task-1:other; exit $?`], { cwd: s.work, env: env as NodeJS.ProcessEnv, stdio: 'ignore' });
+    setPane(own.pid!);
+    expect(await new Promise(resolve => own.once('close', resolve))).toBe(0);
+    expect(port.registered).toHaveLength(1);
+  });
+});
+
+describe('the shim in the node image', () => {
+  const dockerfile = readFileSync(new URL('../Dockerfile', import.meta.url), 'utf8');
+  const runtime = dockerfile.slice(dockerfile.lastIndexOf('\nFROM '));
+
+  function wrapper(s: Stand): string {
+    const written = /RUN printf '%s\\n' ('#!\/bin\/sh'[^\n]*?) > \/usr\/local\/bin\/git/.exec(runtime);
+    expect(written).not.toBeNull();
+    const script = [...written![1]!.matchAll(/'([^']*)'/g)].map(line => line[1]).join('\n');
+    const path = join(s.dir, 'git-wrapper');
+    writeFileSync(path, `${script.replaceAll('/usr/local/bin/hh-git', `${process.execPath} ${SHIM}`).replaceAll('/usr/bin/git', s.bin)}\n`);
+    chmodSync(path, 0o755);
+    return path;
+  }
+
+  it('installs the program and its wrapper where a login shell finds git first', () => {
+    expect(runtime).toContain('COPY --chmod=755 apps/node/hh-git.cjs /usr/local/bin/hh-git');
+    expect(runtime).toMatch(/> \/usr\/local\/bin\/git && chmod 755 \/usr\/local\/bin\/git/);
+  });
+
+  it('sends only a push or a fetch to the program', () => {
+    const s = stand();
+    const git = wrapper(s);
+    const out = (...args: string[]) => spawnSync(git, args, { cwd: s.work, env: baseEnv(s, { HH_REAL_GIT: s.bin }) as NodeJS.ProcessEnv, encoding: 'utf8' });
+    expect(out('rev-parse', '--abbrev-ref', 'HEAD').stdout).toBe('task-1\n');
+    expect(out('rev-parse', '--verify', 'no-such-ref').status).toBe(128);
+    expect(out('push', 'origin', 'task-1').status).toBe(0);
+    expect(remoteRef(s, 'refs/heads/task-1')).toBe(head(s));
+    expect(out('-C', s.work, 'fetch', 'origin', 'main').status).toBe(0);
   });
 });

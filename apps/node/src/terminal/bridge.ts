@@ -15,6 +15,8 @@ const HOOK_WAIT_MS = 10_000;
 /* A hook's answer, if any, is text the program adds to what it got, as Claude Code and Kimi Code do with a prompt hook's. */
 export type HookHandler = (agentKey: string, event: string, body: unknown) => Promise<string | void> | string | void;
 export type AgentUrls = { mcpUrl: string; attachUrl: string; hookUrl: string };
+/* One typed git operation of an agent's program, answered as a stream. See external-git.ts. */
+export type GitServe = (key: string, body: Buffer, signal: AbortSignal, res: ServerResponse) => Promise<void>;
 
 const HOOKS = new Set(['start', 'prompt', 'invocation', 'queued', 'stop', 'status', 'tool', 'tooldone', 'toolfail', 'ask', 'interrupt', 'end']);
 const FORWARD = ['content-type', 'accept', 'mcp-protocol-version', 'mcp-session-id', 'last-event-id'];
@@ -46,7 +48,7 @@ export class Bridge {
     private readonly hornhoof: string,
     private readonly onHook: HookHandler,
     private readonly owns: Owns | null = null,
-    private readonly options: { proc?: string; capture?: Capture; rejected?: HookRejected } = {},
+    private readonly options: { proc?: string; capture?: Capture; rejected?: HookRejected; git?: GitServe } = {},
   ) { this.failures = new HookFailures(options.rejected); }
 
   async start(): Promise<void> {
@@ -230,20 +232,28 @@ export class Bridge {
     for (const stops of groups) for (const stop of stops) stop.abort();
   }
 
-  private async agentCall(req: IncomingMessage, res: ServerResponse, key: string, kind: 'hook' | 'check', event: string | undefined, body: Buffer): Promise<void> {
-    if (kind === 'check') return this.checkCommand(key, body, res);
+  private async agentCall(req: IncomingMessage, res: ServerResponse, key: string, kind: 'hook' | 'check' | 'git', event: string | undefined, body: Buffer): Promise<void> {
+    if (kind === 'check') return this.streamCall(key, res, signal => serveCheckCommand(key, body, signal, res));
+    if (kind === 'git') return this.gitCall(key, body, res);
     if (!event) return this.refused(req, res, 404, 'unknown hook event');
     let data: unknown = null;
     try { data = JSON.parse(body.toString('utf8') || 'null'); } catch { /* An empty hook still counts. */ }
     return this.hookCall(req, res, key, event, data);
   }
 
-  private async checkCommand(key: string, body: Buffer, res: ServerResponse): Promise<void> {
+  /* Without an adapter this address does not exist, and hh-git runs plain git. */
+  private gitCall(key: string, body: Buffer, res: ServerResponse): Promise<void> {
+    const { git } = this.options;
+    if (!git) { reply(res, 404, ''); return Promise.resolve(); }
+    return this.streamCall(key, res, signal => git(key, body, signal, res));
+  }
+
+  private async streamCall(key: string, res: ServerResponse, serve: (signal: AbortSignal) => Promise<void>): Promise<void> {
     if (!this.tokens.has(key)) return reply(res, 409, 'No Hornhoof turn is running for this agent.');
     const stop = new AbortController(), stops = this.checkStops.get(key) ?? new Set<AbortController>();
     this.checkStops.set(key, stops); stops.add(stop);
     const closed = () => stop.abort(); res.once('close', closed);
-    try { await serveCheckCommand(key, body, stop.signal, res); }
+    try { await serve(stop.signal); }
     finally { res.removeListener('close', closed); stops.delete(stop); }
   }
 
@@ -324,4 +334,4 @@ function hookFailure(status: number): string {
   return 'hook handler failed';
 }
 
-const agentCall = (kind: string): kind is 'hook' | 'check' => kind === 'hook' || kind === 'check';
+const agentCall = (kind: string): kind is 'hook' | 'check' | 'git' => kind === 'hook' || kind === 'check' || kind === 'git';
