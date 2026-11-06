@@ -10,5 +10,5 @@ export function route(n: number): number {
   if (n === 9) return 9;
   if (n === 10) return 10;
   if (n === 11) return 11;
-  return 0;
+  return -1;
 }
