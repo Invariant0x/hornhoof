@@ -42,6 +42,7 @@ const PARTS = Object.keys(HEADINGS) as Part[];
 
 /* What every department's skill says in the same words, and under which heading. */
 const RULE = 'Check each item only where a mistake cannot be undone, risk adds up item by item, or code cannot check it. Everything else goes in a batch, with a sample on top.';
+const OWNER = 'The department owner is the person named for this department, or the CEO when there is none.';
 const SHARED: Record<'code' | 'model' | 'about', string[]> = {
   code: ['Each code check has fast tests, including cases it must reject.', 'A check named here that your tools do not run yet stays with a person, item by item, until they do.'],
   model: [
@@ -51,7 +52,7 @@ const SHARED: Record<'code' | 'model' | 'about', string[]> = {
     'Until a set has run for a check, that check proves nothing: say so and keep a person on what it would pass.',
     'An action that cannot be undone keeps its approval item by item, whatever a set shows.',
   ],
-  about: ['A new company has these rules from its start and writes its descriptions on its first turn.', 'The pipeline report of a turn says when a department has none.'],
+  about: ['A new company has these rules from its start and writes its descriptions on its first turn.', 'The pipeline report of a turn says when a department has no description.'],
 };
 
 /* The sets a skill may link to; a check without one says that it has none. The set itself is private to the company. */
@@ -150,7 +151,7 @@ function shapeProblems(body: string): string[] {
 }
 
 function ruleProblems(body: string): string[] {
-  return [...missing(body, [RULE], 'the skill'), ...(['code', 'model', 'about'] as const).flatMap(part => missing(partOf(body, part), SHARED[part], HEADINGS[part]))];
+  return [...missing(body, [RULE, OWNER], 'the skill'), ...(['code', 'model', 'about'] as const).flatMap(part => missing(partOf(body, part), SHARED[part], HEADINGS[part]))];
 }
 
 const pointProblems = (id: string, body: string) =>
