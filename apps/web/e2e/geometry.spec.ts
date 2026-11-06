@@ -1,30 +1,37 @@
 /// <reference types="node" />
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { arch, loadavg, platform } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { geometryServer } from './geometry-fixture';
+import { geometryMeasurement } from './geometry-measurement';
 
 test.describe.configure({ timeout: 120_000 });
+const harnessRoot = fileURLToPath(new URL('../../../', import.meta.url));
+const harnessSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: harnessRoot, encoding: 'utf8' }).trim();
+const expectedIcons = ['window.close', 'window.minimize', 'window.full', 'notebook.toggle', 'notebook.close'];
 
-async function record(page: Page, info: TestInfo, name: string, metadata: Record<string, unknown>) {
+async function record(page: Page, info: TestInfo, name: string, notebookLabel: string, metadata: Record<string, unknown>) {
   await page.evaluate(async () => { await document.fonts.ready; });
-  const geometry = await page.evaluate(() => {
+  const geometry = await page.evaluate(({ notebookLabel }) => {
     const panel = document.querySelector('.side-panel .acard:has(.notebook)');
     if (!panel) throw new Error('The real notebook panel was not opened');
     const box = (element: Element) => {
       const b = element.getBoundingClientRect();
       return { x: b.x, y: b.y, width: b.width, height: b.height, right: b.right, bottom: b.bottom };
     };
-    const icons = [...document.querySelectorAll('.orch .t-bar button:not(.btn)')].flatMap(button => {
+    const icons = [...document.querySelectorAll('.orch .t-bar button:not(.btn)')].map(button => {
       const svg = button.querySelector('svg');
-      if (!svg) return [];
-      const b = box(button), s = box(svg);
-      if (!b.width || !b.height || !s.width || !s.height) return [];
+      const b = box(button), s = svg ? box(svg) : null;
+      const control = ['close', 'minimize', 'full'].find(id => button.classList.contains('window-' + id));
+      const id = control ? 'window.' + control : panel.contains(button) ? 'notebook.close'
+        : button.getAttribute('aria-label') === notebookLabel ? 'notebook.toggle' : 'unclassified-title-control';
       const style = getComputedStyle(button);
-      return [{ name: button.getAttribute('aria-label'), className: button.className, button: b, svg: s,
-        dx: (s.x + s.width / 2) - (b.x + b.width / 2), dy: (s.y + s.height / 2) - (b.y + b.height / 2),
-        padding: style.padding, font: style.font, outline: style.outline, outlineOffset: style.outlineOffset }];
+      return { id, name: button.getAttribute('aria-label'), className: button.className, button: b, svg: s,
+        dx: s ? (s.x + s.width / 2) - (b.x + b.width / 2) : null, dy: s ? (s.y + s.height / 2) - (b.y + b.height / 2) : null,
+        padding: style.padding, font: style.font, outline: style.outline, outlineOffset: style.outlineOffset };
     });
     const clips: { text: string; owner: string; left: number; right: number; availableLeft: number; availableRight: number }[] = [];
     const walker = document.createTreeWalker(panel, NodeFilter.SHOW_TEXT);
@@ -63,16 +70,20 @@ async function record(page: Page, info: TestInfo, name: string, metadata: Record
       pageHorizontalOverflow: document.documentElement.scrollWidth > innerWidth + 1,
       intentionalNavigation: [...document.querySelectorAll('.side-panels, .orch > .t-bar')].map(e => ({ className: e.className, width: e.clientWidth, scrollWidth: e.scrollWidth, scrollLeft: e.scrollLeft })),
     };
-  });
+  }, { notebookLabel });
   const picture = info.outputPath(name + '.png');
   const json = info.outputPath(name + '.json');
   await page.screenshot({ path: picture });
-  const row = { ...metadata, engine: info.project.name, screenshotSha256: createHash('sha256').update(readFileSync(picture)).digest('hex'), geometry };
+  const row = { ...metadata, engine: info.project.name, status: 'measured', screenshotSha256: createHash('sha256').update(readFileSync(picture)).digest('hex'), geometry };
   writeFileSync(json, JSON.stringify(row, null, 2) + '\n');
   await info.attach(name + '.png', { path: picture, contentType: 'image/png' });
   await info.attach(name + '.json', { path: json, contentType: 'application/json' });
+  /* Keep raw artifacts even when strict normalization rejects missing controls or invalid geometry. */
+  const measurement = geometryMeasurement(row), normalized = info.outputPath(name + '.measurement.json');
+  writeFileSync(normalized, JSON.stringify(measurement, null, 2) + '\n');
+  await info.attach(name + '.measurement.json', { path: normalized, contentType: 'application/json' });
   console.log('HH_GEOMETRY_CASE ' + JSON.stringify({ ...metadata, engine: info.project.name, panel: geometry.panel, iconCount: geometry.icons.length, clippedTextBoxes: geometry.clips.length, overflowingElements: geometry.horizontalOverflow.length }));
-  return geometry;
+  return { ...geometry, icons: measurement.icons };
 }
 
 async function actionIsAvailable(button: Locator): Promise<boolean> {
@@ -86,9 +97,9 @@ for (const theme of ['light', 'dark'] as const) for (const viewport of [{ width:
     expect(info.project.name).toBe(browserName);
     const fixture = await geometryServer();
     const identities = {
-      sourceSha: fixture.sourceSha, harnessPhase: process.env.HH_GEOMETRY_PHASE ?? 'unclassified',
+      sourceSha: fixture.sourceSha, harnessSha, harnessPhase: process.env.HH_GEOMETRY_PHASE ?? 'unclassified',
       browserName, browserVersion: browser.version(), node: process.version, os: platform(), arch: arch(), load: loadavg(),
-      sourceDataSha256: createHash('sha256').update(JSON.stringify({ note: fixture.note, author: fixture.author })).digest('hex'),
+      dataSha256: fixture.dataSha256, fontsSha256: fixture.fontsSha256, fontAssets: fixture.fontAssets,
       localeRankings: fixture.locales.map(x => ({ id: x.id, direction: x.direction, score: x.score })), selectedLocales: fixture.selected,
       dictionaryKeys: fixture.dictionaryKeys, scoreUnit: fixture.scoreUnit, shippedRtl: fixture.shippedRtl,
       theme, viewport, dpr: 1,
@@ -116,13 +127,14 @@ for (const theme of ['light', 'dark'] as const) for (const viewport of [{ width:
           const notebook = page.locator('.side-panel .acard').filter({ has: page.locator('.notebook') });
           await expect(notebook.locator('.notebook li')).toContainText(fixture.note);
           await page.evaluate(async () => { await document.fonts.ready; await document.fonts.load('14px Onest'); await document.fonts.load('14px Tektur'); });
-          const measured = await record(page, info, key + '-notebook', { ...identities, locale: locale.id, expectedDirection: locale.direction });
+          const measured = await record(page, info, key + '-notebook', locale.labels.notebook,
+            { ...identities, locale: locale.id, expectedDirection: locale.direction, caseId: `notebook/${theme}/${locale.id}/${viewport.width}/open` });
           expect.soft(measured.viewport.dpr).toBe(1);
           expect.soft(measured.direction).toBe(locale.direction);
-          expect.soft(measured.icons.length).toBeGreaterThanOrEqual(3);
+          expect.soft(measured.icons.map(icon => icon.id).sort(), 'All declared title controls are captured exactly once').toEqual([...expectedIcons].sort());
           for (const icon of measured.icons) {
-            expect.soft(Math.abs(icon.dx), `${icon.name}: horizontal SVG/button center`).toBeLessThanOrEqual(0.5);
-            expect.soft(Math.abs(icon.dy), `${icon.name}: vertical SVG/button center`).toBeLessThanOrEqual(0.5);
+            expect.soft(Math.abs(icon.dx), `${icon.id}: horizontal SVG/button center`).toBeLessThanOrEqual(0.5);
+            expect.soft(Math.abs(icon.dy), `${icon.id}: vertical SVG/button center`).toBeLessThanOrEqual(0.5);
           }
           expect.soft(measured.clips, 'Every notebook text line fits each clipping ancestor, including scrollbar space').toEqual([]);
           expect.soft(measured.horizontalOverflow, 'Notebook prose/actions are not an intentional horizontal scroll area').toEqual([]);

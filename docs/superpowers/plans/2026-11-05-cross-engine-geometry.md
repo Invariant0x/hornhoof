@@ -47,7 +47,8 @@
 **Interfaces:** Consumes permitted Requests fixture handoff through head,534 early candidate40SHA, and89-contract catalog. Produces per-contract/state/theme/locale/view-width/engine rows with captured panel geometry, available text/actions, raw images and justified intentional-scroll records.
 
 - [x] Add direct fast failing cases for missing engine, mismatched source/data/font manifests, a0.6px center offset and1.1px dimension mismatch before comparison implementation; verify remotely (228 RED,233 GREEN31/31; not browser proof).
-- [ ] Normalize captured rectangles/identities into that comparison format without rounding, missing evidence or credential copies. New24 unit contracts and a nonfunctional placeholder await their first remote RED; no DOM capture is certified by them.
+- [x] Normalize raw rectangles/identities without rounding or credential copies:396 RED37/37 then533 GREEN68/68 including31 comparator regressions. This is unit evidence; live capture remains NOT_RUN.
+- [ ] Connect the prepared DOM capture to stable case/control identities and actual source/harness/data/font hashes; source wiring is prepared after533, but actual browser behavior/export and three-engine comparison still await546.
 - [ ] Seed and navigate real tasks, agent cards/department notebooks, settings, machines, subscriptions, tables, dialogs and nested shared surfaces; retain explicit reasons for unsupported states until covered.
 - [ ] Measure source dictionary/actually rendered label lengths per view, select extreme locales dynamically and one real RTL when shipped; record exact keys/arguments/rankings. Keep stress-content probes separate.
 - [ ] Capture native narrow/wide profiles, both themes, all real engines; assert text/action clip bounds and clickable hit points after appropriate native scrolling. Do not add CSS to manufacture width or hide overflow.
