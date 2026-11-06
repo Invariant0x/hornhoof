@@ -103,12 +103,12 @@ describe('private persisted staging state', () => {
 
   it('stores an idempotent existing-transport intent without treating it as a published receipt', async () => {
     const f = await fixture(); await f.insertPlan(); await f.insertBatch(); await f.insertTrial();
-    const insert = (id: string, batch = f.batch) => f.client.query(`INSERT INTO staging_operations
-      (id,company_id,batch_id,trial_id,kind,idempotency_key,payload) VALUES($1,$2,$3,$4,'prepare','prepare:trial','{"request":"pinned"}')`, [id, f.company, batch, f.trial]);
+    const insert = (id: string, batch = f.batch, key = 'prepare:trial') => f.client.query(`INSERT INTO staging_operations
+      (id,company_id,batch_id,trial_id,kind,idempotency_key,payload) VALUES($1,$2,$3,$4,'prepare',$5,'{"request":"pinned"}')`, [id, f.company, batch, f.trial, key]);
     await insert(randomUUID());
     await expect(insert(randomUUID())).rejects.toThrow(/unique constraint/);
     const otherBatch = randomUUID(); await f.insertBatch(otherBatch);
-    await expect(insert(randomUUID(), otherBatch)).rejects.toThrow(/foreign key constraint/);
+    await expect(insert(randomUUID(), otherBatch, 'prepare:other')).rejects.toThrow(/foreign key constraint/);
     expect((await f.client.query('SELECT phase,version,result,settled_at FROM staging_operations')).rows).toEqual([{ phase: 'queued', version: 0, result: null, settled_at: null }]);
     for (const assignment of ["phase='confirmed'", "kind='shell'", "payload='[]'", 'version=-1']) {
       await expect(f.client.exec(`UPDATE staging_operations SET ${assignment}`), assignment).rejects.toThrow(/check constraint/);
