@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiFailure } from '../api';
 import { errorText, useT } from '../i18n';
+import { RouteUnavailable, unavailableFailure } from '../screens/RouteUnavailable';
 import type { DecidedBy } from '../types';
 import { DecidedByNote } from './DecidedBy';
 import { Field } from './Field';
@@ -143,15 +144,14 @@ function SourcesList({ sources }: { sources: CatalogSourceSummary[] }) {
 function MessageSnapshotBody({ item }: { item: BoundMessageApproval }) {
   const t = useT();
   return (
-    <div className="outbound-bound">
-      <p className="muted">
-        {`${t.outbound.exactContent} · ${item.channel.name} · ${item.account.label} (${item.account.senderDomain}, ${t.outbound.generation(item.account.bindingGeneration)}) · ${item.locale}`}
+    <div className="imp-case">
+      <p className="imp-meta">
+        <span>{`${t.outbound.exactContent} · ${item.channel.name} · ${item.account.label} (${item.account.senderDomain}, ${t.outbound.generation(item.account.bindingGeneration)}) · ${item.locale}`}</span>
       </p>
       <h4>{item.rendered.subject || t.outbound.noSubject}</h4>
       <pre className="req-text">{item.rendered.body}</pre>
-      <p className="muted">
+      <p className="imp-meta">
         <code>{`${t.outbound.contentDigest}: ${shortDigest(item.contentDigest)}`}</code>
-        {' · '}
         <code>{`${t.outbound.sourcesDigest}: ${shortDigest(item.sourceRevisionsDigest)}`}</code>
       </p>
       <SourcesList sources={item.sources} />
@@ -163,8 +163,8 @@ function ApproachSnapshotBody({ item }: { item: BoundApproachApproval }) {
   const t = useT();
   const tplSubject = item.template.subject || t.outbound.noSubject;
   return (
-    <div className="outbound-bound">
-      <p className="muted">{`${t.outbound.exactApproach} · ${item.channel.name}`}</p>
+    <div className="imp-case">
+      <p className="imp-meta"><span>{`${t.outbound.exactApproach} · ${item.channel.name}`}</span></p>
       <p>
         <b>{t.outbound.segment}:</b> {`${item.segment.name} (${t.outbound.revision(item.segment.revision)})`}
       </p>
@@ -258,15 +258,16 @@ function OutboundApprovalCard({ item, onChanged }: { item: BoundOutboundApproval
 function OutboundMessageRow({ item, onOpenTask }: { item: OutboundMessageItem; onOpenTask: (id: string) => void }) {
   const t = useT();
   const statusLabel = t.outbound.messageStatuses[item.status] ?? item.status;
+  const tone = item.unknownRecovery ? 'imp' : 'imp imp-taken';
   return (
-    <div className="card">
+    <div className={tone}>
       <header>
-        <b>{`${item.channelName} · ${item.accountLabel}`}</b>{' '}
-        <small className="muted">{`${statusLabel} · ${t.outbound.revision(item.revision)}`}</small>
+        <h3>{`${item.channelName} · ${item.accountLabel}`}</h3>
+        <p className="imp-meta">
+          <span>{`${statusLabel} · ${t.outbound.revision(item.revision)}`}</span>
+          <code>{`${t.outbound.contentDigest}: ${shortDigest(item.contentDigest)}`}</code>
+        </p>
       </header>
-      <p className="muted">
-        <code>{`${t.outbound.contentDigest}: ${shortDigest(item.contentDigest)}`}</code>
-      </p>
       {item.unknownRecovery && (
         <p className="alert" role="status">
           {`${t.outbound.unknownHeading} (${item.unknownRecovery.safeCode}): ${t.outbound.unknownAction}`}
@@ -285,10 +286,10 @@ function EscalationRow({ item, onOpenTask }: { item: OutboundEscalationItem; onO
   const t = useT();
   const label = item.externalRef ?? item.ticketId;
   return (
-    <div className="card">
+    <div className="imp">
       <header>
-        <b>{t.outbound.ticket(label, item.revision)}</b>{' '}
-        {item.classId && <small className="muted">{item.classId}</small>}
+        <h3>{t.outbound.ticket(label, item.revision)}</h3>
+        {item.classId && <p className="imp-meta"><span>{item.classId}</span></p>}
       </header>
       {!item.canAnswer && <DecidedByNote by={item.decidedBy} />}
       {item.taskId && (
@@ -305,12 +306,12 @@ function EscalationRow({ item, onOpenTask }: { item: OutboundEscalationItem; onO
 function ChannelRow({ channel }: { channel: OutboundChannelItem }) {
   const t = useT();
   return (
-    <div className="card">
+    <div className="imp imp-taken">
       <header>
-        <b>{channel.name}</b>{' '}
-        <small className="muted">
-          {`${channel.adapter} · ${t.outbound.channelStatuses[channel.status]} · ${t.outbound.generation(channel.generation)}`}
-        </small>
+        <h3>{channel.name}</h3>
+        <p className="imp-meta">
+          <span>{`${channel.adapter} · ${t.outbound.channelStatuses[channel.status]} · ${t.outbound.generation(channel.generation)}`}</span>
+        </p>
       </header>
       <ul className="req-ways">
         {channel.accounts.map(acc => (
@@ -339,9 +340,9 @@ function OutboundSections({
 }) {
   const t = useT();
   return (
-    <div className="stack">
-      <section>
-        <h3>{t.outbound.approvalsHeading}</h3>
+    <>
+      <section className="waiting" aria-label={t.outbound.approvalsHeading}>
+        <h2>{t.outbound.approvalsHeading}</h2>
         {data.approvals.length === 0 ? (
           <p className="muted">{t.outbound.approvalsEmpty}</p>
         ) : (
@@ -353,9 +354,9 @@ function OutboundSections({
         )}
       </section>
       {data.messages.length > 0 && (
-        <section>
-          <h3>{t.outbound.messagesHeading}</h3>
-          <div className="stack">
+        <section className="turns" aria-label={t.outbound.messagesHeading}>
+          <h2>{t.outbound.messagesHeading}</h2>
+          <div className="imps">
             {data.messages.map(msg => (
               <OutboundMessageRow key={msg.id} item={msg} onOpenTask={onOpenTask} />
             ))}
@@ -363,9 +364,9 @@ function OutboundSections({
         </section>
       )}
       {data.escalations.length > 0 && (
-        <section>
-          <h3>{t.outbound.escalationsHeading}</h3>
-          <div className="stack">
+        <section className="turns" aria-label={t.outbound.escalationsHeading}>
+          <h2>{t.outbound.escalationsHeading}</h2>
+          <div className="imps">
             {data.escalations.map(esc => (
               <EscalationRow key={`${esc.ticketId}-${esc.revision}`} item={esc} onOpenTask={onOpenTask} />
             ))}
@@ -373,20 +374,20 @@ function OutboundSections({
         </section>
       )}
       {data.channels.length > 0 && (
-        <section>
-          <h3>{t.outbound.channelsHeading}</h3>
-          <div className="stack">
+        <section className="turns" aria-label={t.outbound.channelsHeading}>
+          <h2>{t.outbound.channelsHeading}</h2>
+          <div className="imps">
             {data.channels.map(ch => (
               <ChannelRow key={ch.id} channel={ch} />
             ))}
           </div>
         </section>
       )}
-    </div>
+    </>
   );
 }
 
-export function Outbound({ onOpenTask }: { onOpenTask: (id: string) => void }) {
+export function Outbound({ onOpenTask, onHome }: { onOpenTask: (id: string) => void; onHome?: () => void }) {
   const t = useT();
   const [data, setData] = useState<OutboundOverview | null>(null);
   const [failure, setFailure] = useState<unknown>(null);
@@ -403,11 +404,15 @@ export function Outbound({ onOpenTask }: { onOpenTask: (id: string) => void }) {
     load();
   }, [load]);
 
+  if (unavailableFailure(failure)) return <RouteUnavailable onHome={onHome} />;
+
   return (
-    <section className="page-body outbound-screen">
-      <header className="page-head">
-        <h2>{t.outbound.heading}</h2>
-        <p className="muted">{t.outbound.intro}</p>
+    <section className="tasks">
+      <header className="people-head">
+        <div>
+          <h1>{t.outbound.heading}</h1>
+          <p className="muted">{t.outbound.intro}</p>
+        </div>
       </header>
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
       {!data && failure === null && <p className="muted" role="status">{t.tasks.sending}</p>}

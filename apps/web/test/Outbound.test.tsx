@@ -249,4 +249,51 @@ describe('Outbound screen, bound Requests snapshot, and routing (#447 T8-17)', (
     expect(await screen.findByText('Quarterly plan overview')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
   });
+
+  it('handles empty state, server errors, forbidden access, decline notes, and missing snapshots cleanly', async () => {
+    const user = userEvent.setup();
+    let wentHome = 0;
+
+    mockApi({ 'GET /api/outbound': [200, { channels: [], messages: [], escalations: [], approvals: [] }] });
+    const emptyView = render(<Outbound onOpenTask={() => {}} />);
+    expect(await screen.findByText('No outbound channels, messages, or escalations yet.')).toBeInTheDocument();
+    emptyView.unmount();
+
+    mockApi({ 'GET /api/outbound': [403, { error: { code: 'forbidden', message: 'Denied' } }] });
+    const deniedView = render(<Outbound onOpenTask={() => {}} onHome={() => { wentHome += 1; }} />);
+    expect(await screen.findByRole('heading', { name: 'Insufficient permissions' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Go to the map' }));
+    expect(wentHome).toBe(1);
+    deniedView.unmount();
+
+    const calls = mockApi({
+      'GET /api/outbound': [200, { ...OVERVIEW, approvals: [{ ...BOUND_MESSAGE, rendered: { subject: '', body: 'Body only' }, sources: [] }] }],
+      [`POST /api/requests/${MSG_REQ_ID}`]: [500, { error: { code: 'internal', message: 'Server busy' } }],
+    });
+    const failCard = render(<Outbound onOpenTask={() => {}} />);
+    expect(await screen.findByText('(no subject)')).toBeInTheDocument();
+    await user.type(screen.getByLabelText('Note (optional)'), 'Wrong quarter');
+    await user.click(screen.getByRole('button', { name: 'Decline' }));
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect(calls.some(c => c.method === 'POST' && (c.body as { approve?: boolean; answer?: string })?.answer === 'Wrong quarter')).toBe(true);
+    failCard.unmount();
+
+    mockApi({ [`GET /api/requests/${MSG_REQ_ID}/outbound-approval`]: [500, { error: { code: 'internal', message: 'Boom' } }] });
+    const snapErr = render(
+      <Requests
+        requests={[{
+          id: MSG_REQ_ID, kind: 'approval', text: 'Check snapshot error', commit: null, commitUrl: null,
+          images: [], options: [], link: null, explained: null, explaining: false, at: '2026-11-06T12:00:00.000Z',
+          agent: { id: 'a1', name: 'Rita' }, task: { id: TASK_ID, number: 42, title: 'Send updates', department: { id: 'd-sales', name: 'Sales' } },
+          ownerPersonId: 'p1', canAnswer: true, decidedBy: SALES_DECIDED_BY,
+        }]}
+        onChanged={() => {}}
+        onOpenTask={() => {}}
+        onOpenAgent={() => {}}
+        placeName={p => p?.name ?? ''}
+      />,
+    );
+    expect(await screen.findByText('Could not load the bound outbound revision.')).toBeInTheDocument();
+    snapErr.unmount();
+  });
 });

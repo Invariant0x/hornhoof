@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { canonicalJson } from '@hornhoof/protocol';
+import cookie from '@fastify/cookie';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
 import { encryptSecret } from '../src/crypto/secrets.js';
@@ -46,6 +47,7 @@ async function seedOutboundViewWorld() {
   const c = await company();
   current = c;
   const viewApp = Fastify();
+  await viewApp.register(cookie);
   viewApp.setErrorHandler((err, _req, reply) => {
     if (err instanceof ApiError) {
       return reply.code(err.status).send({ error: err.code, message: err.message, reason: err.reason });

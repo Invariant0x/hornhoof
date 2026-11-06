@@ -39,6 +39,7 @@ import { beginDispatch, reserveDispatch } from '../src/modules/outbound/core.js'
 import { OUTBOUND_CHECK_HASHES } from '../src/modules/outbound/evaluation-port.js';
 import { classifySupportTicket, containsForbiddenSupportPromise, containsSecretMaterial, containsThirdPartyPii, submitSupportReply } from '../src/modules/outbound/support.js';
 import { company } from './department-owner-fixture.js';
+import { as } from './helpers.js';
 import { POLICY, sha } from './outbound-fixture.js';
 
 type Company = Awaited<ReturnType<typeof company>>;
@@ -569,12 +570,29 @@ describe('outbound support classification and reply gates (#447 T8-10, T8-15)', 
       },
       NOW,
     );
-    expect(enSent).toMatchObject({ status: 'scheduled', reasonCodes: [] });
+    /* On the #445 kernel, support replies forbid price blocks (money = []) and target a ticket (segmentId = null),
+       so approvals.ts requires an exact bound message approval from the department owner before dispatch. */
+    expect(enSent).toMatchObject({ status: 'waiting_approval', reasonCodes: ['approval_required'] });
+    expect(await reserveDispatch(w.c.app.ctx, enSent.messageId, 1, NOW)).toEqual({
+      kind: 'refused',
+      reasonCodes: ['approval_required'],
+    });
+    const [enBound] = await w.c.db.select().from(outboundApprovals).where(eq(outboundApprovals.messageId, enSent.messageId));
+    expect(enBound?.kind).toBe('message');
+    const approveEn = await w.c.app.inject({
+      method: 'POST',
+      url: `/api/requests/${enBound!.requestId}`,
+      payload: { approve: true },
+      ...as(w.c.samToken),
+    });
+    expect(approveEn.statusCode).toBe(200);
+
     const reservedEn = await reserveDispatch(w.c.app.ctx, enSent.messageId, 1, NOW);
     expect(reservedEn.kind).toBe('reserved');
     const begunEn = await beginDispatch(w.c.app.ctx, enSent.messageId, 1, NOW);
     expect(begunEn.kind).toBe('begun');
     if (begunEn.kind === 'begun') {
+      expect(begunEn.sealedPayload.text).toContain('Open Settings and press Reset password');
       const tokenMatch = /https:\/\/hornhoof\.example\/api\/outbound\/unsubscribe\/(\S+)/.exec(begunEn.sealedPayload.text);
       expect(tokenMatch).not.toBeNull();
       expect(readUnsubscribeToken(w.c.app.ctx.config.secret, tokenMatch![1]!)).toEqual({
@@ -613,7 +631,15 @@ describe('outbound support classification and reply gates (#447 T8-10, T8-15)', 
       },
       NOW,
     );
-    expect(ruSent).toMatchObject({ status: 'scheduled', reasonCodes: [] });
+    expect(ruSent).toMatchObject({ status: 'waiting_approval', reasonCodes: ['approval_required'] });
+    const [ruBound] = await w.c.db.select().from(outboundApprovals).where(eq(outboundApprovals.messageId, ruSent.messageId));
+    expect((await w.c.app.inject({ method: 'POST', url: `/api/requests/${ruBound!.requestId}`, payload: { approve: true }, ...as(w.c.samToken) })).statusCode).toBe(200);
+    expect((await reserveDispatch(w.c.app.ctx, ruSent.messageId, 1, NOW)).kind).toBe('reserved');
+    const begunRu = await beginDispatch(w.c.app.ctx, ruSent.messageId, 1, NOW);
+    expect(begunRu.kind).toBe('begun');
+    if (begunRu.kind === 'begun') {
+      expect(begunRu.sealedPayload.text).toContain('Откройте настройки профиля');
+    }
 
     const ticketAr = await w.addTicket('كيف أعيد تعيين كلمة المرور؟');
     const classAr = await classifySupportTicket(
@@ -643,7 +669,15 @@ describe('outbound support classification and reply gates (#447 T8-10, T8-15)', 
       },
       NOW,
     );
-    expect(arSent).toMatchObject({ status: 'scheduled', reasonCodes: [] });
+    expect(arSent).toMatchObject({ status: 'waiting_approval', reasonCodes: ['approval_required'] });
+    const [arBound] = await w.c.db.select().from(outboundApprovals).where(eq(outboundApprovals.messageId, arSent.messageId));
+    expect((await w.c.app.inject({ method: 'POST', url: `/api/requests/${arBound!.requestId}`, payload: { approve: true }, ...as(w.c.samToken) })).statusCode).toBe(200);
+    expect((await reserveDispatch(w.c.app.ctx, arSent.messageId, 1, NOW)).kind).toBe('reserved');
+    const begunAr = await beginDispatch(w.c.app.ctx, arSent.messageId, 1, NOW);
+    expect(begunAr.kind).toBe('begun');
+    if (begunAr.kind === 'begun') {
+      expect(begunAr.sealedPayload.text).toContain('افتح الإعدادات');
+    }
 
     const revisions = await w.c.db.select().from(outboundMessageRevisions);
     expect(revisions.length).toBeGreaterThanOrEqual(3);
@@ -717,6 +751,40 @@ describe('outbound support classification and reply gates (#447 T8-10, T8-15)', 
     );
     expect(missingConsentDenied.status).toBe('rejected');
     expect(missingConsentDenied.reasonCodes).toContain('consent_missing');
+
+    await w.c.db.insert(outboundPermissions).values({
+      companyId: w.c.companyId,
+      contactId: noConsentContact!.id,
+      channelId: w.channel.id,
+      purpose: 'transactional_support',
+      source: 'asserted_import',
+      evidenceDigest: sha('imported-csv'),
+    });
+    const importedDenied = await submitSupportReply(
+      w.c.app.ctx,
+      model,
+      w.caller,
+      {
+        ...baseSubmit,
+        idempotencyKey: randomUUID(),
+        ticketId: noConsentTicket.ticketId,
+        ticketRevision: 1,
+        classificationReceiptId: noConsentClass.classificationReceiptId,
+        document: {
+          locale: 'en',
+          templateId: w.enTemplate.entryId,
+          templateRevision: 1,
+          blocks: [
+            { kind: 'knowledge', id: w.enKb.entryId, revision: 1 },
+            { kind: 'link', id: w.enLink.entryId, revision: 1 },
+          ],
+          variables: [],
+        },
+      },
+      NOW,
+    );
+    expect(importedDenied.status).toBe('rejected');
+    expect(importedDenied.reasonCodes).toContain('consent_missing');
   });
 
   it('refuses price blocks, refund/legal/date promises, secrets, third-party PII, and mismatched classification receipts', async () => {

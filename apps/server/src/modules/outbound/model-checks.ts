@@ -9,20 +9,39 @@ import {
   type CheckReceipt as CheckReceiptDto,
   type CheckResult,
   type CheckUnavailable,
+  type MessageDocument,
   type ModelCheckKind,
   type ModelIdentity,
   type ProviderId,
 } from '@hornhoof/protocol';
 import type { z } from 'zod';
-
-type ReviewInputDto = z.infer<typeof ReviewInput>;
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { outboundReviewReceipts } from '../../db/schema.js';
+import { decryptSecret } from '../../crypto/secrets.js';
+import type { Db } from '../../db/client.js';
+import {
+  agents,
+  jobs,
+  outboundCatalogRevisions,
+  outboundChannels,
+  outboundMessageRevisions,
+  outboundMessages,
+  outboundReviewReceipts,
+  subscriptions,
+} from '../../db/schema.js';
+import { publicUrl } from '../link/link.js';
 import { bindingDigest } from '../model-checks/lifecycle.js';
 import type { RunModelCheck } from '../model-checks/run.js';
-import { OUTBOUND_CHECK_PROMPTS, createEvaluationPort } from './evaluation-port.js';
-import type { ModelCheckPorts } from './ports.js';
+import { formatMoney, priceAfterDiscount } from './checks.js';
+import { unsubscribeUrl } from './contacts.js';
+import { recordReview } from './core.js';
+import { OUTBOUND_CHECK_PROMPTS, activeCheckBinding, createEvaluationPort } from './evaluation-port.js';
+import type { ModelCheckPorts, SealedPayload } from './ports.js';
+
+type ReviewInputDto = z.infer<typeof ReviewInput>;
+type ReviewFactDto = ReviewInputDto['facts'][number];
+
+export type AuthorVendorHint = string | { readonly provider?: ProviderId | null; readonly vendorId: string };
 
 export type FreshModelRequest = {
   readonly kind: ModelCheckKind;
@@ -222,5 +241,146 @@ export async function reviewOutboundMessageRevision(
       result: checked.result,
     })
     .onConflictDoNothing();
+  return checked;
+}
+
+type CatalogRow = typeof outboundCatalogRevisions.$inferSelect;
+type MessageRow = typeof outboundMessages.$inferSelect;
+type RevisionRow = typeof outboundMessageRevisions.$inferSelect;
+type ChannelRow = typeof outboundChannels.$inferSelect;
+
+function resolveHintedVendor(hint: AuthorVendorHint): string {
+  const provider = typeof hint === 'string' ? null : (hint.provider ?? null);
+  const vendorId = typeof hint === 'string' ? hint : hint.vendorId;
+  const set = resolveVendorSet(provider, vendorId);
+  return set ? [...set][0]! : 'unknown';
+}
+
+async function resolveStoredAuthorVendor(db: Pick<Db, 'select'>, message: MessageRow): Promise<string> {
+  const [[agent], [job]] = await Promise.all([
+    db.select({ model: agents.model, subscriptionId: agents.subscriptionId }).from(agents).where(eq(agents.id, message.authorAgentId)),
+    message.authorJobId
+      ? db.select({ subscriptionId: jobs.subscriptionId }).from(jobs).where(eq(jobs.id, message.authorJobId))
+      : Promise.resolve([]),
+  ]);
+  const subId = job?.subscriptionId ?? agent?.subscriptionId ?? null;
+  const [sub] = subId
+    ? await db.select({ provider: subscriptions.provider }).from(subscriptions).where(eq(subscriptions.id, subId))
+    : [];
+  const set = resolveVendorSet(sub?.provider ?? null, agent?.model ?? '');
+  return set ? [...set][0]! : 'unknown';
+}
+
+function canonicalFactValue(row: CatalogRow, rows: readonly CatalogRow[], locale: string): string | null {
+  if (row.value.kind === 'link') return row.value.url;
+  if (row.value.kind === 'claim' || row.value.kind === 'knowledge') return row.value.text;
+  if (row.value.kind !== 'price') return null;
+  const discountRow = row.value.discountId ? rows.find(r => r.entryId === row.value.discountId && r.value.kind === 'discount') : undefined;
+  const discount = discountRow && discountRow.value.kind === 'discount' ? discountRow.value : null;
+  const money = priceAfterDiscount(row.value, discount);
+  return money ? formatMoney(money, locale) : `${row.value.amount} ${row.value.currency}`;
+}
+
+async function buildQueuedFacts(db: Pick<Db, 'select'>, companyId: string, document: MessageDocument): Promise<ReviewFactDto[]> {
+  if (document.blocks.length === 0) return [];
+  const blockIds = document.blocks.map(b => b.id);
+  const blockRows = await db
+    .select()
+    .from(outboundCatalogRevisions)
+    .where(and(eq(outboundCatalogRevisions.companyId, companyId), inArray(outboundCatalogRevisions.entryId, blockIds)));
+  const discountIds = blockRows.flatMap(r => (r.value.kind === 'price' && r.value.discountId ? [r.value.discountId] : []));
+  const discountRows = discountIds.length
+    ? await db
+        .select()
+        .from(outboundCatalogRevisions)
+        .where(and(eq(outboundCatalogRevisions.companyId, companyId), inArray(outboundCatalogRevisions.entryId, discountIds)))
+    : [];
+  const allRows = [...blockRows, ...discountRows];
+  const facts: ReviewFactDto[] = [];
+  for (const block of document.blocks) {
+    const row = blockRows.find(r => r.entryId === block.id && r.revision === block.revision);
+    const canonicalValue = row ? canonicalFactValue(row, allRows, document.locale) : null;
+    if (row && canonicalValue !== null) {
+      facts.push({ kind: block.kind, id: row.entryId, revision: row.revision, canonicalValue, sourceId: row.id });
+    }
+  }
+  return facts;
+}
+
+async function unsealForReview(
+  ctx: Ctx,
+  message: MessageRow,
+  revision: RevisionRow,
+  channel: ChannelRow,
+): Promise<{ subject: string | null; body: string }> {
+  const sealed = JSON.parse(decryptSecret(revision.sealedEnc, ctx.config.secret)) as SealedPayload;
+  const stop = message.contactId
+    ? unsubscribeUrl(await publicUrl(ctx.db, ctx.config), ctx.config.secret, {
+        companyId: channel.companyId,
+        contactId: message.contactId,
+        channelId: channel.id,
+        purpose: channel.purpose,
+      })
+    : null;
+  const body = stop ? sealed.text.split(stop).join('[unsubscribe link]') : sealed.text;
+  return { subject: sealed.subject, body };
+}
+
+export async function reviewQueuedMessage(
+  ctx: Ctx,
+  ports: Pick<ModelCheckPorts, 'runModelCheck'>,
+  messageId: string,
+  now: Date = new Date(),
+  authorVendor?: AuthorVendorHint,
+): Promise<CheckReceiptDto | CheckUnavailable | null> {
+  const [message] = await ctx.db.select().from(outboundMessages).where(eq(outboundMessages.id, messageId));
+  if (!message || message.status !== 'waiting_checks') return null;
+  const [[revision], [channel]] = await Promise.all([
+    ctx.db
+      .select()
+      .from(outboundMessageRevisions)
+      .where(and(eq(outboundMessageRevisions.messageId, message.id), eq(outboundMessageRevisions.revision, message.revision))),
+    ctx.db.select().from(outboundChannels).where(eq(outboundChannels.id, message.channelId)),
+  ]);
+  if (!revision || !channel) return null;
+
+  const kind = message.targetKind === 'ticket' ? ('support_reply_review' as const) : ('outbound_review' as const);
+  const active = await activeCheckBinding(
+    ctx.db,
+    { companyId: channel.companyId, departmentId: channel.departmentId, productId: channel.productId, kind },
+    now,
+  );
+  if (!active) return unavailable('uncertified');
+
+  const [unsealed, facts, authorVendorId] = await Promise.all([
+    unsealForReview(ctx, message, revision, channel),
+    buildQueuedFacts(ctx.db, message.companyId, revision.document),
+    authorVendor ? Promise.resolve(resolveHintedVendor(authorVendor)) : resolveStoredAuthorVendor(ctx.db, message),
+  ]);
+  const input = ReviewInput.parse({
+    schemaVersion: 1,
+    kind,
+    locale: revision.document.locale,
+    subject: { id: message.id, contentDigest: revision.contentDigest },
+    message: unsealed,
+    facts,
+    policyDigest: revision.policyDigest,
+    authorVendorId,
+  });
+  const checked = await ports.runModelCheck(active.binding, input);
+  if ('code' in checked) return checked;
+  await recordReview(
+    ctx,
+    {
+      messageId: message.id,
+      revision: revision.revision,
+      checkId: checked.checkId,
+      bindingDigest: checked.bindingDigest,
+      subjectDigest: checked.subjectDigest,
+      reviewer: checked.reviewer,
+      result: checked.result,
+    },
+    now,
+  );
   return checked;
 }

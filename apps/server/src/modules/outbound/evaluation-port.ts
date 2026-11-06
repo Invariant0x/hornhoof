@@ -150,6 +150,18 @@ export async function currentCheckBinding(
   return { checkId: check.id, binding: built, bindingDigest: bindingDigest(built) };
 }
 
+export async function activeCheckBinding(
+  db: Pick<Db, 'select'>,
+  place: CheckPlace,
+  now: Date,
+): Promise<{ checkId: string; binding: CheckBindingDto; digest: string } | null> {
+  const [check] = await db.select().from(modelChecks).where(samePlace(place));
+  if (!check || !isOn(check, now)) return null;
+  const current = await currentCheckBinding(db, place);
+  if (!current || check.bindingDigest !== current.bindingDigest) return null;
+  return { checkId: check.id, binding: current.binding, digest: current.bindingDigest };
+}
+
 function matchesScope(binding: CheckBindingDto, check: typeof modelChecks.$inferSelect): boolean {
   const samePlace = check.companyId === binding.companyId && check.departmentId === binding.departmentId;
   return samePlace && check.productId === binding.productId && check.kind === binding.kind;
