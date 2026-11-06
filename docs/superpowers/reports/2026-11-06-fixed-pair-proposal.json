@@ -561,5 +561,26 @@
     "archiveRequired": false,
     "preflight353": "failed at source fetch, no source halves executed",
     "newFullReplayAuthorized": false
+  },
+  "replacementOfflinePreflight": {
+    "authorization": "Head comment 2026-11-06T03:16:56.189Z; one bounded preflight only, no full suite",
+    "branch": "task-378-fixed-pair-proposal",
+    "neverMergeInto": "turn-8",
+    "removeAfterTask": 222,
+    "archivePath": "docs/superpowers/reports/fixed-pair-assets/fixed-sources-6d0c79b0-b98035e6.tar.gz",
+    "archiveSha256": "037b48a88284eebfca0f52c909731b338ab74cc45fe33972b882398614e5752d",
+    "archiveBytes": 11211338,
+    "script": "scripts/benchmarks/linux-fixed-preflight.mjs",
+    "sourceDelivery": "Archive in ordinary run_tests branch checkout, local bare Git object import; no origin fetch",
+    "output": "Complete raw base64, hashes and resource JSON in native stdout log, 700 KiB budget",
+    "parts": 1,
+    "maxWorkers": 2,
+    "expectedTestsPerVariant": {
+      "apps/server": 14,
+      "apps/web": 3,
+      "apps/node": 6
+    },
+    "status": "NOT_RUN at source checkpoint",
+    "acceptedPerformanceResult": false
   }
 }

@@ -1,6 +1,6 @@
 # Fixed source pair proposal for378/222
 
-Status: proposal only. The independent source-preparation stage is complete with concerns;378/222 are not complete. One later head-authorized bounded preflight353 failed at ordinary source fetch before either half started. No full suite, work run or full paired replay was started. No acceleration percentage or whole-suite GREEN is claimed.
+Status: proposal only. The independent source-preparation stage is complete with concerns;378/222 are not complete. The first head-authorized bounded preflight353 failed at ordinary source fetch before either half started. Head then authorized one replacement offline bounded preflight using the existing archive committed to this temporary branch; its execution is pending. No full suite, work run or full paired replay was started. No acceleration percentage or whole-suite GREEN is claimed.
 
 ## Pinned sources and composition
 
@@ -77,3 +77,23 @@ The complete native tests-353-1.log was fetched/read. Its six JSON records inclu
 Next decision belongs to head: make the published source refs available through the supported command-mode Git path, then decide whether another bounded preflight is authorized. The one preflight permission was used. No full pair can be accepted from this result, and no additional execution is started automatically.
 
 The old47fab branch, source archive66b0a5f7, diagnostic05c63819/54340764 pair, rejected run106 FAIL/HH_PAIR_INVALID and all six failures per variant stay unchanged. Historical103/0049 FAIL also remains. Even a future valid paired replay is a new controlled sequential comparison, not historical distributed wall101 or proof of the30% target against turn7.
+
+
+## Authorized replacement offline preflight
+
+Head's 2026-11-06T03:16:56.189Z decision supersedes the ordinary fetch assumption. The existing source archive above is now tracked at `docs/superpowers/reports/fixed-pair-assets/fixed-sources-6d0c79b0-b98035e6.tar.gz` on temporary `task-378-fixed-pair-proposal` only. This branch must never merge into turn-8 and is to be removed after222, not during this preparation.
+
+The new diagnostic `scripts/benchmarks/linux-fixed-preflight.mjs` is separate from the unchanged edc driver. It checks the pinned archive hash and safe member paths/types before extraction into a fresh temporary directory, verifies both exact40SHAs and ancestry, and imports objects only from that local bare repository. It never fetches origin or reads Git credentials. No new API fields, transport or work run is used.
+
+One command-mode part will execute both halves sequentially. Each has a fresh worktree and empty npm cache, then npm ci, protocol build and node build as separate preparation stages. It runs only timers.test.ts, css.test.ts and check-command.test.ts, with maxWorkers2, original assertions and deadlines, expecting14/3/6 cases per half. Every stage retains complete raw output as base64 plus byte count/hash in stdout; resource records appear before/after stages and every five seconds. The stdout budget stays700KiB. Identity/quota drift, output overflow, setup failure or missing counts makes the result incomplete/failed. This is a bounded setup/fixture preflight, never an accepted performance result.
+
+After ordinary publication and exact SHA readback, the single authorized command is:
+
+```sh
+set -e
+# run_tests checks out the exact published proposal SHA recorded in the native run.
+node --check scripts/benchmarks/linux-fixed-preflight.mjs
+node scripts/benchmarks/linux-fixed-preflight.mjs
+```
+
+The forthcoming native receipt must name the exact proposal SHA, run/part, elapsed preparation/test times and observed machine/load facts. The one replacement preflight is not yet executed at this source checkpoint. On failure, preserve the full log and report the precise blocker to head without another attempt. Full replay remains unauthorized, and353/106/103/0049 retain their actual failure states.
