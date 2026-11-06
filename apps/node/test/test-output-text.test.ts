@@ -11,7 +11,10 @@ describe('declared diagnostic text content', () => {
   it.each(['', '{"width":', '{"x":NaN}', '{"x":1,}', '{"x":1} trailing', 'undefined'])('refuses malformed JSON %j', value => {
     expect(isValidTextOutput(Buffer.from(value), 'application/json')).toBe(false);
   });
-  it.each([[0x80], [0xc0, 0xaf], [0xe2, 0x82], [0xed, 0xa0, 0x80], [0xf4, 0x90, 0x80, 0x80], [0xff, 0xfe, 0x61, 0x00]])('never replaces malformed UTF-8 bytes %# with plausible output text', value => {
+  it.each([
+    { value: [0x80] }, { value: [0xc0, 0xaf] }, { value: [0xe2, 0x82] },
+    { value: [0xed, 0xa0, 0x80] }, { value: [0xf4, 0x90, 0x80, 0x80] }, { value: [0xff, 0xfe, 0x61, 0x00] },
+  ])('never replaces malformed UTF-8 bytes %# with plausible output text', ({ value }) => {
     const bytes = Buffer.from(value);
     expect(isValidTextOutput(bytes, 'text/plain')).toBe(false);
     expect(isValidTextOutput(Buffer.concat([Buffer.from('{"x":"'), bytes, Buffer.from('"}')]), 'application/json')).toBe(false);
