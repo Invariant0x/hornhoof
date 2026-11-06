@@ -11,7 +11,7 @@ const argv = process.argv.slice(2);
 
 function commandOf(args) {
   let i = 0;
-  while (args[i] === '-C') i += 2;
+  while (args[i] === '-C' || args[i] === '-c') i += 2;
   return args[i] ?? null;
 }
 

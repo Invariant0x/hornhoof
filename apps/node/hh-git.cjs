@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // git, as an agent calls it on a node. Everything is real git with its own output and exit code. Only an ordinary push
-// of one branch or a fetch of one literal ref goes to the node, which runs real git itself, so that a failure of the
-// remote service reaches Hornhoof's failure mechanism from what the node saw and not from anything printed here. The
-// commit of a push is fixed before anything runs; a later move of the branch cannot publish another commit.
+// of one branch, a fetch of one literal ref or a fetch by the settings of the remote goes to the node, which runs real
+// git itself, so that a failure of the remote service reaches Hornhoof's failure mechanism from what the node saw and not
+// from anything printed here. The commit of a push is fixed before anything runs; a later move of the branch cannot
+// publish another commit.
 //
 // A call that goes to the node never falls back to a second run once the node took it: the result stays unknown. A call
 // the node did not take, for any reason, is plain git, exactly as without this program. An absolute path to git, a PATH
@@ -21,11 +22,11 @@ const UNMANAGED = {
   custom_environment: 'GIT_DIR, GIT_SSH_COMMAND and other variables that change what git talks to.',
   force: 'Any force: -f, --force, --force-with-lease, --force-if-includes or a refspec starting with +.',
   delete: 'Deleting a remote ref: -d, --delete or a refspec starting with a colon.',
-  multi_ref: 'More than one ref: --all, --mirror, --tags, --prune, several refspecs or a mirror remote.',
+  multi_ref: 'More than one ref: --all, --mirror, --tags, --prune, fetch.all, several refspecs or a mirror remote.',
   dry_run: '--dry-run, which sends nothing.',
   custom_transport: '--receive-pack, --exec, --repo or --upload-pack.',
   option: 'Any other option: none is taken on trust to mean the same across retries.',
-  dynamic_refspec: 'A target only the remote can expand: git fetch, git fetch origin or a glob.',
+  dynamic_refspec: 'A glob or an empty source on the command line.',
   url_remote: 'An address or a path instead of a named remote.',
   multi_target: 'A remote with several push addresses.',
   configured_refspec: 'A remote with remote.<name>.push set.',
@@ -35,6 +36,7 @@ const UNMANAGED = {
   unknown_source: 'A source that is no commit here, which git refuses itself.',
   other_ref: 'A tag or another ref outside refs/heads as the source or the target.',
   no_destination: 'A source without a branch name and a target that is not a full ref.',
+  ambiguous_fetch: 'A git fetch without a remote, no remote set for the branch, and not exactly one remote to choose.',
 };
 
 const QUIET_AND_PROGRESS = { '-q': '--quiet', '--quiet': '--quiet', '-v': '--verbose', '--verbose': '--verbose', '--progress': '--progress', '--no-progress': '--no-progress' };
@@ -92,7 +94,7 @@ function routeManaged(kind, args, cwd) {
   const [remote = null, ...refspecs] = options.positional;
   if (refspecs.length > 1) return unmanaged('multi_ref');
   const refspec = refspecs[0] ?? null;
-  if (kind === 'fetch' && refspec === null) return unmanaged('dynamic_refspec');
+  if (kind === 'fetch' && refspec === null) return { kind: 'fetch_configured', cwd, remote, flags: options.flags };
   const refused = refspec === null ? null : OPTIONS[kind].refspec.find(([pattern]) => pattern.test(refspec));
   if (refused) return unmanaged(refused[1]);
   const shared = { kind, cwd, remote, refspec, flags: options.flags };
@@ -190,11 +192,30 @@ function resolveFetch(route, git) {
   return { request: { kind: 'fetch', cwd: route.cwd, remote: route.remote, refspec: route.refspec, flags: route.flags } };
 }
 
+/* The remote git itself takes for a fetch without one, when that is one remote and the settings say which. */
+function defaultFetchRemote(git) {
+  if (git(['config', '--type=bool', '--get', 'fetch.all']) === 'true') return { reason: 'multi_ref' };
+  const head = git(['symbolic-ref', '--quiet', 'HEAD']);
+  const own = head?.startsWith(BRANCH_PREFIX) ? git(['config', '--get', `branch.${head.slice(BRANCH_PREFIX.length)}.remote`]) : null;
+  if (own !== null) return { remote: own };
+  const remotes = (git(['remote']) ?? '').split('\n').filter(Boolean);
+  return remotes.length === 1 ? { remote: remotes[0] } : { reason: 'ambiguous_fetch' };
+}
+
+/* What the settings of the remote mean is for the node to fix: it reads them itself. */
+function resolveConfiguredFetch(route, git) {
+  const chosen = route.remote === null ? defaultFetchRemote(git) : { remote: route.remote };
+  if (chosen.reason) return { unmanaged: chosen.reason };
+  if (git(['remote', 'get-url', '--all', chosen.remote]) === null) return { unmanaged: 'url_remote' };
+  return { request: { kind: 'fetch_configured', cwd: route.cwd, remote: chosen.remote, flags: route.flags } };
+}
+
+const RESOLVERS = { push: resolvePush, fetch: resolveFetch, fetch_configured: resolveConfiguredFetch };
+
 /* Fixes what the call means now, before anything runs. Later moves of a branch or setting no longer change it. */
 function resolveRequest(route, env) {
   if (route.kind === 'unmanaged') return { unmanaged: route.reason };
-  const git = readerIn(route.cwd, env);
-  return route.kind === 'push' ? resolvePush(route, git) : resolveFetch(route, git);
+  return RESOLVERS[route.kind](route, readerIn(route.cwd, env));
 }
 
 const signalCode = signal => 128 + (constants.signals[signal] ?? 0);

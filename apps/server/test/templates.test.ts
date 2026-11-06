@@ -6,6 +6,7 @@ import { COMPANY_TEMPLATES, MAX_INSTRUCTIONS, TEMPLATE_KEYS } from '@hornhoof/pr
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { ORCHESTRATOR_SKILLS, orchestratorSteady, renderInstructions } from '../src/modules/agents/instructions.js';
 import { NOTEBOOK_MAX, NOTES_MAX } from '../src/modules/notebook/book.js';
+import { IssueInput, mechanicalVerdict } from '../src/modules/tasks/review-findings.js';
 import { CORE_SKILLS, HEAD_SKILLS, loadTemplates, MEMBER_SKILLS } from '../src/modules/templates/load.js';
 
 const DIR = fileURLToPath(new URL('../../../templates', import.meta.url));
@@ -14,6 +15,41 @@ const roles = [...templates.roles.values()];
 const skills = [...templates.skills.values()];
 
 describe('templates', () => {
+  it.each(roles.filter(role => role.kind === 'head'))('gives $id the marked small-task fast path', role => {
+    expect(role.body).toMatch(/small: true/);
+    expect(role.body).toMatch(/fast path/);
+  });
+
+  it.each(['hh-lead-tasks', 'orch-plan-turn'])('defines the complete small-task path in %s', id => {
+    const body = templates.skills.get(id)!.body;
+    expect(body).toMatch(/small: true/);
+    expect(body).toMatch(/single place[\s\S]*clear result[\s\S]*no dependencies[\s\S]*work turn/);
+    expect(body).toMatch(/change and (its|the) check/);
+    expect(body).toMatch(/without splitting or separate gates/);
+    expect(body).toMatch(/failing test[\s\S]*only affected tests[\s\S]*turn's branch[\s\S]*line[\s\S]*SHA/);
+    expect(body).toMatch(/Reports, matrices, complexity metrics and duplicate checks[\s\S]*shared turn review/);
+    expect(body).toMatch(/grows[\s\S]*tells the head[\s\S]*normal path/);
+  });
+
+  it.each(['hh-lead-tasks', 'orch-plan-turn'])('keeps small work in the developer context in %s', id => {
+    const body = templates.skills.get(id)!.body;
+    expect(body).toMatch(/already working in that area[\s\S]*context/);
+    expect(body).toMatch(/do not search for a free developer or start a new chain/);
+    expect(body).toMatch(/between[\s\S]*steps[\s\S]*after the current piece/);
+    expect(body).toMatch(/several tasks ahead[\s\S]*free developer/);
+    expect(body).toMatch(/separate small commit[\s\S]*return to their own work/);
+  });
+
+  it.each([
+    'hh-break-down', 'hh-brief-members', 'hh-report-to-head', 'hh-handle-reports', 'hh-task-flow',
+    'hh-verify-before-done', 'dev-implement', 'dev-language-rules', 'dev-engineering-rules',
+    'dev-work-pipeline', 'dev-gates', 'dev-review-diff', 'dev-review-verdict',
+  ])('keeps %s from restoring per-task overhead for marked small work', id => {
+    const body = templates.skills.get(id)!.body;
+    expect(body).toMatch(/small: true/);
+    expect(body).toMatch(/shared turn/);
+  });
+
   it('teaches every department head not to repeat a task report in a separate message', () => {
     for (const role of roles.filter(r => r.kind === 'head')) {
       const instructions = renderInstructions(templates, { id: 'a', companyId: 'c', kind: 'head', name: 'Hana', roleKey: role.id, skills: role.skills.filter(s => s.on).map(s => s.id), overrides: {}, templateHashes: {} } as Parameters<typeof renderInstructions>[1], { company: 'Acme', department: 'Work', product: null });
@@ -348,9 +384,10 @@ describe('templates', () => {
     const changed = 'git diff --name-only --diff-filter=d';
     for (const id of ['dev-engineering-rules', 'dev-review-diff']) expect(templates.skills.get(id)!.body, id).toContain(changed);
     expect(templates.skills.get('dev-review-diff')!.body).toMatch(/crapper[\s\S]*dryer/);
-    /* They are as objective as a failing test, so they block; the developer runs them before submitting. */
+    /* Shared final metrics keep their gates, but authors do not run them before submitting. */
     expect(templates.skills.get('dev-review-diff')!.body).toMatch(/0\.8 or more is blocking, like a failing test/);
-    expect(templates.skills.get('dev-review-diff')!.body).toMatch(/runs them before submitting/);
+    expect(templates.skills.get('dev-review-diff')!.body).not.toMatch(/developer runs them before submitting/);
+    expect(templates.skills.get('dev-review-diff')!.body).toMatch(/test engineer or QA[\s\S]*shared final check/);
     expect(templates.skills.get('dev-review-verdict')!.body).toMatch(/CRAP 10 or more[\s\S]*counts as a failing test/);
     expect(templates.skills.get('dev-test-gaps')!.body).toContain('break the code on purpose');
     for (const s of skills.filter(x => x.id.startsWith('dev-'))) expect(s.body, s.id).not.toMatch(/(crapper|dryer|mutator) --changed/);
@@ -372,7 +409,7 @@ describe('templates', () => {
   it('keeps test selection, release mutation testing and evidence rules consistent', () => {
     const body = (id: string) => templates.skills.get(id)!.body;
     const policy = body('dev-engineering-rules');
-    for (const words of ['pure functions', 'direct fast tests', 'integration tests', 'real database', 'vitest related', 'jest --findRelatedTests', 'pytest --testmon', 'cargo test -p', 'new test file always runs', 'selection miss', 'once per release or phase', 'fast tests', 'CRAP and change size', 'money, access and security', '--root .', 'killed, survived, uncovered, compile_error and timeout', 'zero tests fails the run', 'Do not mass-rewrite old slow tests', 'low coverage alone is not a finding', 'median of its package', 'financial recomputation', 'false accepts and false rejects', 'versioned set of examples', 'F.I.R.S.T.', 'shuffled order', 'same commit', 'any result a success', 'already completed run', 'second coverage run']) {
+    for (const words of ['pure functions', 'direct fast tests', 'integration tests', 'real database', 'vitest related', 'jest --findRelatedTests', 'pytest --testmon', 'cargo test -p', 'new test file always runs', 'selection miss', 'once per turn on the final candidate', 'fast tests', 'CRAP and change size', 'money, access and security', '--root .', 'killed, survived, uncovered, compile_error and timeout', 'zero tests fails the run', 'Do not mass-rewrite old slow tests', 'low coverage alone is not a finding', 'median of its package', 'financial recomputation', 'false accepts and false rejects', 'versioned set of examples', 'F.I.R.S.T.', 'shuffled order', 'same commit', 'any result a success', 'already completed run', 'second coverage run']) {
       expect(policy, words).toContain(words);
     }
     const table = (text: string) => text.split('\n').filter(line => line.startsWith('|')).join('\n');
@@ -400,13 +437,14 @@ describe('templates', () => {
     }
   });
 
-  it('pins legacy characterization, requirement evidence and the assigned release reviewer', () => {
+  it('pins legacy characterization, requirement evidence and tester-owned final mutation checks', () => {
     const body = (id: string) => templates.skills.get(id)!.body;
     expect(body('dev-tdd')).toContain('A characterization test of legacy code passes immediately, and that is correct');
     for (const id of ['dev-implement', 'dev-tdd']) expect(body(id), id).toContain('four task kinds');
     for (const id of ['dev-implement', 'dev-review-verdict']) expect(body(id), id).toMatch(/verification before (saying )?done/);
     expect(templates.roles.get('DEV-HEAD')!.body).toMatch(/four task kinds/);
-    expect(templates.roles.get('DEV-REV')!.body).toMatch(/one reviewer named by the head/);
+    expect(templates.roles.get('DEV-REV')!.body).toMatch(/test engineer or QA/);
+    expect(templates.roles.get('DEV-REV')!.body).not.toMatch(/runs mutator/);
     expect(body('dev-review-diff')).toMatch(/T4/);
     expect(body('dev-review-diff')).toMatch(/repository root/);
     expect(body('dev-review-diff')).toMatch(/selection and its reason/);
@@ -572,7 +610,8 @@ describe('templates', () => {
     expect(test.gate).toBeNull();
     expect(test.body).toMatch(/never a gate on a task/);
     const gates = body('dev-gates');
-    expect(gates).toMatch(/to the test engineer, or to the DevOps engineer when there is none, or runs run_tests itself when there is neither, never to a developer/);
+    expect(gates).toMatch(/head assigns a test engineer or QA[\s\S]*once per turn[\s\S]*final pinned commit/);
+    expect(gates).not.toMatch(/or runs run_tests itself when there is neither/);
     expect(gates).toMatch(/only what failed and the tests around it/);
     for (const id of ['dev-review-diff', 'dev-review-verdict']) expect(body(id), id).toMatch(/old complexity/);
   });
@@ -984,6 +1023,50 @@ describe('templates', () => {
       ];
       for (const [key, badLine, ruleId] of cases) {
         expect(failedRuleIds(HEAD_DEPARTMENT_LOAD_RULES, { ...base, [key]: `${base[key]}\n${badLine}` }), badLine).toContain(ruleId);
+      }
+    });
+  });
+
+  describe('mechanical finding category and strict behavior-unchanged boundary', () => {
+    const pair = (): MechanicalSkills => ({
+      diff: templates.skills.get('dev-review-diff')!.body,
+      verdict: templates.skills.get('dev-review-verdict')!.body,
+    });
+
+    it('matches the IssueInput category enum and mechanicalVerdict server aggregate in both readable review skills', () => {
+      const { diff, verdict } = pair();
+      const expected = ['security', 'data', 'spec', 'other', 'mechanical'];
+      expect(documentedCategories(verdict)).toEqual(expected);
+      expect(documentedCategories(diff)).toEqual(expected);
+      for (const category of expected) {
+        expect(IssueInput.safeParse({ category, blocking: true, path: 'src/index.ts', line: 1, harm: 'Wrong behaviour.' }).success, category).toBe(true);
+      }
+      for (const invented of ['style', 'lint', 'medium']) {
+        expect(IssueInput.safeParse({ category: invented, blocking: true, path: 'src/index.ts', line: 1, harm: 'Wrong behaviour.' }).success, invented).toBe(false);
+      }
+      expect(failedRuleIds(MECHANICAL_CATEGORY_RULES, { diff, verdict })).toEqual([]);
+      expect(mechanicalVerdict({ issues: [sampleFinding('mechanical', true)] })).toBe(true);
+      expect(mechanicalVerdict({ issues: [sampleFinding('mechanical', true), sampleFinding('other', false)] })).toBe(false);
+      expect(mechanicalVerdict({ issues: [sampleFinding('mechanical', true), sampleFinding('spec', true)] })).toBe(false);
+      expect(mechanicalVerdict({ issues: [sampleFinding('mechanical', false)] })).toBe(false);
+      expect(mechanicalVerdict({ issues: [sampleFinding('mechanical', true)], unresolvedFindingIds: ['11111111-1111-4111-8111-111111111111'] })).toBe(false);
+    });
+
+    it('rejects review skill text that broadens mechanical to behavioral changes, mixed verdicts, mid-turn effort switches or incident facts', () => {
+      const base = pair();
+      expect(failedRuleIds(MECHANICAL_CATEGORY_RULES, base)).toEqual([]);
+      const violations: [keyof MechanicalSkills, string, string][] = [
+        ['verdict', "Classify a public API rename as 'mechanical' when tests compile.", 'strict-behavior-unchanged-boundary'],
+        ['diff', "Use 'mechanical' when a fix may change behaviour only slightly.", 'strict-behavior-unchanged-boundary'],
+        ['verdict', "When in doubt, mark the finding 'mechanical' so the fix finishes faster.", 'doubt-keeps-regular-category-and-full-base-level'],
+        ['diff', "Classify spec findings as 'mechanical' to run at medium.", 'doubt-keeps-regular-category-and-full-base-level'],
+        ['verdict', 'Set Wake.mechanical on mixed verdicts whenever one issue is mechanical.', 'server-aggregate-wake-mechanical-and-no-second-review'],
+        ['diff', 'Switch effort inside a running turn once a mechanical issue appears.', 'server-aggregate-wake-mechanical-and-no-second-review'],
+        ['verdict', "Open a second review for 'mechanical' findings after submission.", 'server-aggregate-wake-mechanical-and-no-second-review'],
+        ['diff', 'Added for Hornhoof task #311 by David on 2026-11-06.', 'abstract-english-no-incident-or-company-leaks'],
+      ];
+      for (const [target, extra, expectedRule] of violations) {
+        expect(failedRuleIds(MECHANICAL_CATEGORY_RULES, { ...base, [target]: `${base[target]}\n${extra}` }), extra).toContain(expectedRule);
       }
     });
   });
@@ -1412,6 +1495,85 @@ const forEvery = <Item>(items: Item[], predicate: (item: Item) => boolean): bool
 const failedRuleIds = <Input>(rules: { id: string; holds: (input: Input) => boolean }[], input: Input): string[] =>
   rules.filter(rule => !rule.holds(input)).map(rule => rule.id);
 
+type MechanicalSkills = { diff: string; verdict: string };
+
+const documentedCategories = (text: string): string[] => {
+  const clause = /category(?:\s*:\s*[^,)]+|\s*\([^)]+\))/.exec(text)![0];
+  return [...clause.matchAll(/['`]([a-z_]+)['`]/g)].map(m => m[1]!);
+};
+
+const sampleFinding = (category: 'security' | 'data' | 'spec' | 'other' | 'mechanical', blocking: boolean) => ({
+  taskId: '11111111-1111-4111-8111-111111111111',
+  findingId: '22222222-2222-4222-8222-222222222222',
+  revision: '33333333-3333-4333-8333-333333333333',
+  reviewedCommit: 'a'.repeat(40),
+  authorId: '44444444-4444-4444-8444-444444444444',
+  reviewerId: '55555555-5555-4555-8555-555555555555',
+  reviewerVendor: 'anthropic',
+  category,
+  blocking,
+  path: 'src/index.ts',
+  line: 10,
+  harm: 'Wrong behaviour.',
+});
+
+const MECHANICAL_CATEGORY_RULES: { id: string; holds: (s: MechanicalSkills) => boolean }[] = [
+  {
+    id: 'strict-behavior-unchanged-boundary',
+    holds: s =>
+      forEvery([s.diff, s.verdict], text =>
+        matchesAll(text, [
+          /\bprovably cannot change\b[^.!?]*\bbehaviour\b/i,
+          /\bformatting\b[\s\S]*\blint\b[\s\S]*\bsafe local rename\b[\s\S]*\bmissing translation key\b/i,
+          /\bpublic API\b[\s\S]*\bsemantics\b/i,
+        ]),
+      ) &&
+      forbidsAll(`${s.diff}\n${s.verdict}`, [
+        /\bclassify\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\b(?:public API rename|semantic change)\b[^.!?;,]*\bas\s+['`]?mechanical['`]?/i,
+        /\buse\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\b['`]?mechanical['`]?\b[^.!?;,]*\bwhen\s+a\s+fix\s+may\s+change\s+behaviour\b/i,
+      ]),
+  },
+  {
+    id: 'doubt-keeps-regular-category-and-full-base-level',
+    holds: s =>
+      forEvery([s.diff, s.verdict], text =>
+        matchesAll(text, [
+          /\bwhen in doubt\b[^.!?]*\bregular category\b[\s\S]*\bfull base level\b/i,
+          /\b(?:never|do not)\s+classify\b[^.!?]*\bsecurity\b[\s\S]*\bdata\b[\s\S]*\bspec\b[\s\S]*\bmechanical\b[^.!?]*\bmedium\b/i,
+        ]),
+      ) &&
+      sentencesOf(`${s.diff}\n${s.verdict}`).every(sentence =>
+        negatesBefore(sentence, /\bwhen in doubt,\s*(?:mark|classify|use)\w*\b[^.!?]*\b['`]?mechanical['`]?/i),
+      ) &&
+      forbidsAll(`${s.diff}\n${s.verdict}`, [
+        /\bclassify\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\b(?:security|data|spec)\b[^.!?;,]*\bas\s+['`]?mechanical['`]?\s+to\s+run\s+at\s+medium\b/i,
+      ]),
+  },
+  {
+    id: 'server-aggregate-wake-mechanical-and-no-second-review',
+    holds: s =>
+      forEvery([s.diff, s.verdict], text =>
+        matchesAll(text, [
+          /\bWake\.mechanical\b/,
+          /\bevery\b[^.!?]*\bissue\b[\s\S]*\bfailing verdicts?\b[\s\S]*\bmechanical\b/i,
+          /\bmixed\b[^.!?]*\bunmarked\b/i,
+          /\b(?:never|does not)\s+set\w*\s+effort\b[\s\S]*\b(?:never|does not)\s+change\w*\s+effort\s+inside\s+a\s+running\s+turn\b[\s\S]*\b(?:never|does not)\s+open\w*\s+a\s+second\s+review\b/i,
+        ]),
+      ) &&
+      sentencesOf(`${s.diff}\n${s.verdict}`).every(sentence =>
+        negatesBefore(sentence, /\bset\w*\s+['`]?Wake\.mechanical['`]?\s+on\s+mixed\s+verdicts?\b/i),
+      ) &&
+      forbidsAll(`${s.diff}\n${s.verdict}`, [
+        /\bswitch\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\beffort\s+inside\s+a\s+running\s+turn\b/i,
+        /\bopen\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\bsecond\s+review\s+for\s+['`]?mechanical['`]?\s+findings\b/i,
+      ]),
+  },
+  {
+    id: 'abstract-english-no-incident-or-company-leaks',
+    holds: s => !/\b(?:hornhoof|github|david|ivan|Russian|English)\b|#\d{2,}|\b202\d-\d{2}-\d{2}\b|\bv?\d+\.\d+\.\d+\b|[\u2014\u0451\u0401]/i.test(`${s.diff}\n${s.verdict}`),
+  },
+];
+
 const themeDeclarations = (css: string, selector: string): Record<string, string> => {
   const start = css.indexOf('{', css.indexOf(selector)) + 1;
   const block = css.slice(start, css.indexOf('}', start));
@@ -1423,3 +1585,169 @@ const styleBookSources = (book: string): string[] => [
   ...[...book.matchAll(/`((?:apps|templates|guide|\.github)\/[\w./-]+\.\w+)`/g)].map(m => m[1]!),
   ...[...book.matchAll(/`([A-Z_]+\.md)`/g)].map(m => m[1]!),
 ];
+
+describe('outbound and support gateway templates', () => {
+  it('routes sales, marketing and support skills through the server-checked outbound gateway and department owner', () => {
+    const sal = templates.skills.get('sal-outbound-approval')?.body ?? '';
+    const mkt = templates.skills.get('mkt-publish-approval')?.body ?? '';
+    const sup = templates.skills.get('sup-support-policy')?.body ?? '';
+
+    for (const [id, body] of [
+      ['sal-outbound-approval', sal],
+      ['mkt-publish-approval', mkt],
+      ['sup-support-policy', sup],
+    ] as const) {
+      expect(body, id).not.toMatch(INCIDENT_OR_BRAND_LEAK_RE);
+      expect(body, id).not.toMatch(/[\u0451\u0401\u2014]/);
+      expect(body, id).toMatch(/\bserver\b[\s\S]*\bcatalog\b/i);
+      expect(body, id).toMatch(/\bdepartment owner\b[\s\S]*\bCEO\b/i);
+      expect(body, id).toMatch(/\b(?:credentials?|keys?|passwords?)\b[^.!?]*\b(?:stay|remain|kept)\b[^.!?]*\bserver\b/i);
+    }
+
+    expect(sal).toMatch(/"outbound_submit"/);
+    expect(sal).toMatch(/"outbound_status"/);
+    expect(sal).toMatch(/\bunknown\b[^.!?]*\b(?:receiver|receiving|resend)\b/i);
+    expect(mkt).toMatch(/"outbound_submit"/);
+    expect(mkt).toMatch(/\bpublic\b[^.!?]*\b(?:every|each|per-item)\b[^.!?]*\bapproval\b/i);
+    expect(sup).toMatch(/"support_classify"/);
+    expect(sup).toMatch(/"support_submit"/);
+    expect(sup).toMatch(/\buntrusted data\b/i);
+    expect(sup).toMatch(/\b(?:never|do not)\b[^.!?]*\b(?:refund|price|legal|contract|delivery[- ]date)\b/i);
+  });
+
+  it('aligns all four support role templates with separate classification, catalog replies, and owner escalation', () => {
+    expect(templates.roles.get('SUP-T2')?.effort).toBe('high');
+    for (const id of ['SUP-HEAD', 'SUP-KB', 'SUP-T1', 'SUP-T2'] as const) {
+      const role = templates.roles.get(id)!;
+      expect(role, id).toBeDefined();
+      expect(role.body.length, id).toBeLessThanOrEqual(600);
+      expect(role.body, id).not.toMatch(INCIDENT_OR_BRAND_LEAK_RE);
+      expect(role.body, id).not.toMatch(/[\u0451\u0401\u2014]/);
+    }
+
+    expect(templates.roles.get('SUP-T1')!.body).toMatch(/"support_classify"/);
+    expect(templates.roles.get('SUP-T1')!.body).toMatch(/"support_submit"/);
+    expect(templates.roles.get('SUP-T2')!.body).toMatch(/"support_classify"/);
+    expect(templates.roles.get('SUP-T2')!.body).toMatch(/\bdepartment owner\b/i);
+    expect(templates.roles.get('SUP-KB')!.body).toMatch(/\bcatalog\b/i);
+    expect(templates.roles.get('SUP-HEAD')!.body).toMatch(/\bdepartment owner\b/i);
+  });
+});
+
+type ImpactSelectionSkills = { implement: string; gates: string; engineering: string };
+
+const inHornhoofSection = (engineering: string): string => {
+  const start = engineering.indexOf('### In Hornhoof');
+  if (start === -1) return '';
+  const rest = engineering.slice(start);
+  const next = rest.indexOf('\n### ', 4);
+  return next === -1 ? rest : rest.slice(0, next);
+};
+
+const IMPACT_SELECTION_RULES: { id: string; holds: (s: ImpactSelectionSkills) => boolean }[] = [
+  {
+    id: 'author-dependent-tests-via-run-tests-and-new-tests-always',
+    holds: s =>
+      forEvery([s.implement, s.gates, s.engineering], text =>
+        matchesAll(text, [
+          /\brun_tests\b/,
+          /\b(?:dependent|selected|affected)\s+tests?\b/i,
+          /\bnew(?:ly\s+added)?\s+test\b[\s\S]*\balways\b|\balways\b[\s\S]*\bnew(?:ly\s+added)?\s+test\b/i,
+        ]),
+      ) &&
+      matchesAll(s.implement, [
+        /\bselector input\b[\s\S]*\bselected inventory\b[\s\S]*\bfallback reasons?\b/i,
+        /\brun\b[\s\S]*\bpart\b[\s\S]*\bcommit\b/i,
+      ]) &&
+      forbidsAll(`${s.implement}\n${s.gates}\n${s.engineering}`, [
+        /\bskip\w*\s+new(?:ly\s+added)?\s+tests?\s+when\s+no\s+graph\s+edge\s+reaches\s+them\b/i,
+      ]),
+  },
+  {
+    id: 'outside-graph-uncertain-whole-package-and-migrations-up-down',
+    holds: s => {
+      const hh = inHornhoofSection(s.engineering);
+      return (
+        matchesAll(hh, [
+          /\bmigrations\b[\s\S]*\bschema\b[\s\S]*\bconfiguration\b[\s\S]*\benvironment\b[\s\S]*\broutes\b[\s\S]*\bfixtures\b[\s\S]*\bstring tables\b[\s\S]*\bscripts\b[\s\S]*\binstallation\b[\s\S]*\bupdates\b[\s\S]*\bshared packages\b[\s\S]*\bAPI contracts\b[\s\S]*\btemplates\b/i,
+          /\bup and down\b/i,
+          /\bunsupported\b[^.!?]*\breport\b/i,
+        ]) &&
+        forEvery([s.implement, s.gates, hh], text =>
+          matchesAll(text, [
+            /\b(?:outside\s+(?:the\s+)?import\s+graphs?|outside\s+import\s+graphs?)\b/i,
+            /\b(?:complete\s+affected\s+packages?|whole\s+package)\b/i,
+            /\bup and down\b/i,
+          ]),
+        ) &&
+        forbidsAll(`${s.implement}\n${s.gates}\n${s.engineering}`, [
+          /\btreat\w*\s+an\s+unavailable\s+adapter\s+as\s+an\s+empty\s+selection\b/i,
+          /\brun\w*\s+migrations?\s+up\s+only\s+without\s+reporting\b/i,
+        ])
+      );
+    },
+  },
+  {
+    id: 'explicit-selector-commands-no-auto-promise-and-execution-distinct',
+    holds: s => {
+      const hh = inHornhoofSection(s.engineering);
+      return (
+        matchesAll(hh, [
+          /scripts\/test\/impact-README\.md/,
+          /scripts\/test\/related-probe\.mjs/,
+          /scripts\/test\/impact-python\/pytest_impact\.py/,
+          /scripts\/test\/replay-impact\.mjs/,
+          /\bNOT_RUN\b/,
+        ]) &&
+        matchesAll(s.implement, [/scripts\/test/, /\bNOT_RUN\b/]) &&
+        matchesAll(s.gates, [
+          /scripts\/test/,
+          /\bcollected graph\b[\s\S]*\bcompleted\b[^.!?]*\breceipts?\b/i,
+          /\bunavailable\b[^.!?]*\bnot\s+zero\s+misses\b/i,
+          /\btest engineer\b/i,
+        ]) &&
+        forbidsAll(`${s.implement}\n${s.gates}\n${s.engineering}`, [
+          /\brun_tests\s+automatically\s+selects\s+impact\s+tests\s+from\s+the\s+test\s+environment\b/i,
+          /\btreat\w*\s+a\s+collected\s+graph\s+as\s+completed\s+test\s+execution\b/i,
+          /\btreat\w*\s+missing\s+comparator\s+evidence\s+as\s+zero\s+misses\b/i,
+        ])
+      );
+    },
+  },
+  {
+    id: 'abstract-english-no-dates-names-or-numbers',
+    holds: s => {
+      const combined = `${s.implement}\n${s.gates}\n${inHornhoofSection(s.engineering)}`;
+      return !/\b(?:david|ivan|simon|Russian|English)\b|\bturn\s+7\b|#\d+|\b202\d-\d{2}-\d{2}\b|\b\d{1,2}\.\d{1,2}\b|\bv?\d+\.\d+\.\d+\b|[\u2014\u0451\u0401]/i.test(combined);
+    },
+  },
+];
+
+describe('T2 impact-selection rules across dev-implement, dev-gates and In Hornhoof', () => {
+  const impactSkills = (): ImpactSelectionSkills => ({
+    implement: templates.skills.get('dev-implement')!.body,
+    gates: templates.skills.get('dev-gates')!.body,
+    engineering: templates.skills.get('dev-engineering-rules')!.body,
+  });
+
+  it('teaches explicit impact selection, whole-package fallbacks, bidirectional migrations, execution vs collection evidence, and explicit scripts/test commands without promising unshipped runner wiring', () => {
+    const current = impactSkills();
+    expect(inHornhoofSection(current.engineering).length).toBeGreaterThan(200);
+    expect(failedRuleIds(IMPACT_SELECTION_RULES, current)).toEqual([]);
+  });
+
+  it('rejects skill text that promises unshipped automatic runner selection, conflates graph collection with execution, skips new tests, or leaks dates, names or task numbers', () => {
+    const base = impactSkills();
+    expect(failedRuleIds(IMPACT_SELECTION_RULES, base)).toEqual([]);
+    const cases: [keyof ImpactSelectionSkills, string, string][] = [
+      ['implement', 'Skip newly added tests when no graph edge reaches them.', 'author-dependent-tests-via-run-tests-and-new-tests-always'],
+      ['engineering', 'Treat an unavailable adapter as an empty selection and run migrations up only without reporting.', 'outside-graph-uncertain-whole-package-and-migrations-up-down'],
+      ['gates', 'Today run_tests automatically selects impact tests from the test environment.', 'explicit-selector-commands-no-auto-promise-and-execution-distinct'],
+      ['gates', 'Treat a collected graph as completed test execution and treat missing comparator evidence as zero misses.', 'explicit-selector-commands-no-auto-promise-and-execution-distinct'],
+      ['implement', 'Added by David on 2026-11-06 for #309 against turn 7.', 'abstract-english-no-dates-names-or-numbers'],
+    ];
+    for (const [target, extra, expectedRule] of cases) {
+      expect(failedRuleIds(IMPACT_SELECTION_RULES, { ...base, [target]: `${base[target]}\n${extra}` }), extra).toContain(expectedRule);
+    }
+  });
+});

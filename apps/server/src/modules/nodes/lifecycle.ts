@@ -4,7 +4,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { nodes } from '../../db/schema.js';
 import { nodeReported } from './connections.js';
-import { isOperatorReply, type NodeIdentity } from './hub.js';
+import { isOperatorReply, type NodeIdentity, type NodeTransport } from './hub.js';
 import { handleNodeMessage } from './messages.js';
 import { hasCurrentKey, liveNode } from './nodes.js';
 import { rememberBuiltinStop } from './restarts.js';
@@ -39,6 +39,7 @@ async function receiveBaseFrame(ctx: Ctx, id: NodeIdentity, msg: Exclude<Program
   if (msg.type === 'hello') await restoreOperatorNode(ctx, id);
 }
 
-export async function receiveNodeMessage(ctx: Ctx, id: NodeIdentity, msg: ProgramNodeMessage): Promise<void> {
+export async function receiveNodeMessage(ctx: Ctx, id: NodeIdentity, msg: ProgramNodeMessage, transport?: NodeTransport): Promise<void> {
+  if (transport && !ctx.hub.isCurrentLink(id, transport.linkId)) return;
   return isOperatorFrame(msg) ? receiveOperatorFrame(ctx, id, msg) : receiveBaseFrame(ctx, id, msg);
 }

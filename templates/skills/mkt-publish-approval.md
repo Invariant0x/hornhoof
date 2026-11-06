@@ -1,19 +1,13 @@
 ---
 id: mkt-publish-approval
 title: { en: "Publish approval", ru: "Одобрение публикации" }
-description: { en: "Lets a public text, post or page out only after two reviews, on brand and on claims, and the CEO's approval.", ru: "Выпускает публичный текст, пост или страницу только после двух проверок, по бренду и по фактам, и одобрения CEO." }
+description: { en: "Routes public posts, pages and announcements through the server outbound gateway, published catalog sources and per-item owner approval.", ru: "Проводит публичные посты, страницы и объявления через серверный шлюз исходящих, опубликованный каталог и поштучное одобрение владельца." }
 kind: gate
 sources: [affaan-m/ECC skills/operator-approval-loop/SKILL.md]
 ---
-Nothing goes public without this gate: posts, replies, articles, pages, emails to lists, ads, comments in communities, profile changes. The author never runs it on their own work.
+Every public post, announcement, newsletter or external page from Marketing goes through the server outbound gateway (`"outbound_submit"` and `"outbound_status"`). Publishing account credentials stay on the server and are never exposed to agents.
 
-1. **Freeze the draft**: the exact final text and images, where it goes (network, account, page), when, and in which language. Two languages are two drafts.
-2. **Two reviews**, each in a fresh context on the fast tier, on a provider other than the author's where one is available. They work independently and do not see each other's notes:
-   - **Brand**: voice, terms and tone match the product marketing context; spelling and grammar are right for the language; nothing generic or machine-sounding; images and links are right.
-   - **Claims**: every fact, number, comparison and promise has a source in the context or a link; nothing about competitors that cannot be proved; no promise on price, dates or results the CEO has not made; no customer named without permission; no secrets or private data.
-   Each returns pass or fail with findings. Both must pass. A fail goes back to the author through hh-fix-loop, and both reviews run again on the new version.
-3. **CEO approval**: send the frozen draft, both review results and the publishing plan to the CEO through the orchestrator. Wait for an explicit approval; silence is not approval.
-4. **Publish exactly what was approved**. Any change after approval, even one word, needs a new approval.
-5. **Record it**: what went out, where, when, the link, who approved it.
-
-If something already public turns out to be wrong, tell the CEO at once with a proposed correction. Do not edit or delete it without approval.
+1. **Build from published catalog sources**: select the registered public audience, language and published template, claim, price, terms and `https:` link revisions. Two languages are two separate submissions; never substitute another language silently.
+2. **Server verification and independent checks**: the server renders the exact bytes, blocks unapproved claims, prices, secrets or personal data, enforces channel limits, and runs certified independent-vendor model checks in a fresh context.
+3. **Per-item approval**: public publication is irreversible, so every public item requires explicit per-item approval of its exact rendered content from the department owner (or the CEO / CEO delegate when no department owner is set). Approach-level rules never waive per-item approval for public posts.
+4. **Publish and track safely**: once approved, the server dispatches the frozen bytes without modification. Any wording or source change creates a new revision that needs a new approval. If `"outbound_status"` reports `unknown`, do not republish until the destination is checked. If a live post contains an error, notify the department owner or the CEO immediately with a proposed correction; never delete or overwrite public records without approval.
