@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import { api } from '../api';
-import { errorText, useT } from '../i18n';
+import { errorText, useLanguage, useT } from '../i18n';
+import { fitTable } from '../ui/fit-table';
 import type { AccessInput, Me, Org, PersonView } from '../types';
 import { accessEmpty, accessInput, AccessPicker, accessText } from '../ui/AccessPicker';
 import { CopyButton } from '../ui/CopyButton';
@@ -286,6 +287,20 @@ export function People({ me, selected, onSelect, onHome, onRenamed }: { me: Me; 
   const [panel, setPanel] = useState<Panel>(null);
   const [failure, setFailure] = useState<unknown>(null);
   const canManage = me.person.scopeKind === 'company';
+  const { language } = useLanguage();
+  const tableHost = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    const host = tableHost.current;
+    const table = host?.querySelector('table');
+    if (!host || !table) return;
+    const measure = () => fitTable(table);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(host);
+    void document.fonts.ready.then(measure);
+    return () => observer.disconnect();
+  }, [people, language]);
 
   const load = useCallback(async () => {
     try {
@@ -375,7 +390,7 @@ export function People({ me, selected, onSelect, onHome, onRenamed }: { me: Me; 
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
 
       {people && (
-        <div className="fit">
+        <div className="fit" ref={tableHost}>
           <table className="ptable">
             <thead>
               <tr>
