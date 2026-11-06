@@ -26,8 +26,8 @@ describe('the company notebook', () => {
     show();
     const list = await screen.findByRole('list', { name: 'Notebook' });
     const [first, second] = within(list).getAllByRole('listitem');
-    expect(first).toHaveTextContent('#1Commits are made by Ivan only.Ivan');
-    expect(second).toHaveTextContent('#3Turns stay small.Orchestrator');
+    expect(first).toHaveTextContent('#1 Commits are made by Ivan only.Ivan');
+    expect(second).toHaveTextContent('#3 Turns stay small.Orchestrator');
   });
 
   it('adds, changes and removes notes', async () => {
@@ -100,7 +100,7 @@ describe('the company notebook', () => {
         <Notebook departmentId="d2" />
       </LanguageProvider>,
     );
-    expect(await screen.findByRole('listitem')).toHaveTextContent('#1Tests first.Dana');
+    expect(await screen.findByRole('listitem')).toHaveTextContent('#1 Tests first.Dana');
     await user.type(screen.getByRole('textbox', { name: 'New note' }), 'Small commits.');
     await user.click(screen.getByRole('button', { name: 'Add' }));
     expect(calls.find(c => c.method === 'POST')).toEqual({ method: 'POST', path: '/api/departments/d2/notebook', body: { text: 'Small commits.' } });
