@@ -186,7 +186,8 @@ describe('every real route', () => {
   it('has its place in the table', async () => {
     captured.length = 0;
     await testApp();
-    const real = new Set(captured.flatMap(r => [r.method].flat().filter(m => m !== 'HEAD').map(m => `${String(m)} ${r.url}`)));
+    /* The files of the built web app, which holds no agent's data and which a server has only once the web was built. */
+    const real = new Set(captured.filter(r => r.url !== '/*').flatMap(r => [r.method].flat().filter(m => m !== 'HEAD').map(m => `${String(m)} ${r.url}`)));
     const placed = new Set([...POINTED.map(p => p.route), ...LISTS.map(l => l.route), ...Object.keys(ELSEWHERE), ...NO_AGENT_DATA]);
     expect([...real].filter(r => !placed.has(r)).sort()).toEqual([]);
     expect([...placed].filter(r => !real.has(r)).sort()).toEqual([]);
