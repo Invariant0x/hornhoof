@@ -128,6 +128,13 @@ describe('what the ports take', () => {
   });
 });
 
+describe('what a wait_for says of its run', () => {
+  it('names the one run that ends it', () => {
+    expect(WaitSourceState.parse({ stage: 'waiting', run: OPERATION })).toEqual({ stage: 'waiting', run: OPERATION });
+    expect(WaitSourceState.safeParse({ run: 'Test run 3' }).success).toBe(false);
+  });
+});
+
 describe('a source that signals once', () => {
   const once = { ...plan, finalReview: { ...plan.finalReview, intervalMs: null } };
   const of = (kind: string, sourceKey: string) => ({ ...sync, kind, sourceKey, plan: once });

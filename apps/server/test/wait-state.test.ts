@@ -225,8 +225,7 @@ describe('syncSourceWaits', () => {
   it('keeps one open wait for each source, whatever writes it', async () => {
     const c = await fixture();
     const first = await c.sync();
-    const { id: _id, ...copy } = first;
-    await expect(c.db.insert(taskWaits).values(copy)).rejects.toThrow();
+    await expect(c.db.insert(taskWaits).values({ ...first, id: randomUUID() })).rejects.toThrow();
     expect(await c.sync({ sourceKey: waitForSourceKey(randomUUID()) })).toMatchObject({ generation: 1 });
     expect(await c.rows()).toHaveLength(2);
   });
