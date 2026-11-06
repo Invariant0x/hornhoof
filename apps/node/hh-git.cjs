@@ -51,6 +51,7 @@ const OPTIONS = {
   },
 };
 const SET_UPSTREAM = new Set(['-u', '--set-upstream']);
+const FORWARDED = ['SIGINT', 'SIGTERM', 'SIGHUP'];
 /* What an ordinary turn sets. Any other GIT_ variable can change the repository or the way out of it. */
 const ORDINARY_GIT_ENV = /^GIT_(ASKPASS|TERMINAL_PROMPT|AUTHOR_\w+|COMMITTER_\w+|EDITOR|SEQUENCE_EDITOR|PAGER)$/;
 const COMMIT = /^[0-9a-f]{40}$/;
@@ -118,30 +119,36 @@ function readerIn(cwd, env) {
   };
 }
 
-function defaultDestination(mode, { same, triangular, merge, auto }) {
-  if (mode === 'current') return { destination: same };
-  if (mode === 'simple' && triangular) return { destination: same };
-  if (mode !== 'simple' && mode !== 'upstream' && mode !== 'tracking') return { reason: 'ambiguous_default' };
-  if (triangular) return { reason: 'ambiguous_default' };
+function upstreamDestination(mode, { same, merge, auto }) {
   if (merge === null) return auto ? { destination: same } : { reason: 'no_upstream' };
-  if (mode === 'simple' && merge !== same) return { reason: 'ambiguous_default' };
-  return { destination: merge };
+  return mode === 'simple' && merge !== same ? { reason: 'ambiguous_default' } : { destination: merge };
+}
+
+function defaultDestination(mode, facts) {
+  if (mode === 'current' || (mode === 'simple' && facts.triangular)) return { destination: facts.same };
+  if (facts.triangular || !['simple', 'upstream', 'tracking'].includes(mode)) return { reason: 'ambiguous_default' };
+  return upstreamDestination(mode, facts);
 }
 
 /* The rules git itself follows for a push without a refspec, read from the settings as they are now. */
-function defaultTarget(route, git) {
-  const branch = git(['symbolic-ref', '--quiet', '--short', 'HEAD']);
-  if (branch === null) return { reason: 'no_current_branch' };
+function pushSettings(route, branch, git) {
   const config = key => git(['config', '--get', key]);
   const fetchRemote = config(`branch.${branch}.remote`) ?? 'origin';
   const remote = route.remote ?? config(`branch.${branch}.pushRemote`) ?? config('remote.pushDefault') ?? fetchRemote;
   const merge = config(`branch.${branch}.merge`);
   const auto = merge === null && config('push.autoSetupRemote') === 'true';
-  const target = defaultDestination(config('push.default') ?? 'simple', { same: `${BRANCH_PREFIX}${branch}`, triangular: remote !== fetchRemote, merge, auto });
+  return { mode: config('push.default') ?? 'simple', remote, merge, auto, triangular: remote !== fetchRemote, same: `${BRANCH_PREFIX}${branch}` };
+}
+
+function defaultTarget(route, git) {
+  const branch = git(['symbolic-ref', '--quiet', '--short', 'HEAD']);
+  if (branch === null) return { reason: 'no_current_branch' };
+  const settings = pushSettings(route, branch, git);
+  const target = defaultDestination(settings.mode, settings);
   if (target.reason) return target;
   const sha = git(['rev-parse', '--verify', '--quiet', 'HEAD^{commit}']);
   if (sha === null) return { reason: 'unknown_source' };
-  return { ...target, remote, sha, branch: route.setUpstream || auto ? branch : null };
+  return { ...target, remote: settings.remote, sha, branch: route.setUpstream || settings.auto ? branch : null };
 }
 
 function explicitDestination(target, full, branch) {
@@ -199,14 +206,10 @@ function markerLine(frame) {
   return known ? `hornhoof-git: operation=${frame.operationId} generation=${frame.generation} state=${frame.state}` : null;
 }
 
-function printMarker(frame) {
-  const line = markerLine(frame);
-  if (line) process.stderr.write(`${line}\n`);
-}
-
 /* The frames of one operation, in order. Once any arrived the node holds the operation: no second run from here. */
 class Frames {
-  constructor() {
+  constructor(io) {
+    this.io = io;
     this.pending = '';
     this.seen = 0;
     this.progress = 0;
@@ -234,10 +237,14 @@ class Frames {
   }
 
   show(frame) {
-    if (frame.type === 'stdout') process.stdout.write(Buffer.from(String(frame.data), 'base64'));
-    else if (frame.type === 'stderr') process.stderr.write(Buffer.from(String(frame.data), 'base64'));
-    else if (frame.type === 'marker') printMarker(frame);
-    else if (frame.type === 'progress' && this.progress++ < PROGRESS_LINES) process.stderr.write(`hornhoof-git: ${cleanLine(frame.text)}\n`);
+    if (frame.type === 'stdout') this.io.stdout.write(Buffer.from(String(frame.data), 'base64'));
+    else if (frame.type === 'stderr') this.io.stderr.write(Buffer.from(String(frame.data), 'base64'));
+    else if (frame.type === 'marker') this.say(markerLine(frame));
+    else if (frame.type === 'progress' && this.progress++ < PROGRESS_LINES) this.say(`hornhoof-git: ${cleanLine(frame.text)}`);
+  }
+
+  say(line) {
+    if (line) this.io.stderr.write(`${line}\n`);
   }
 
   ended() {
@@ -245,11 +252,11 @@ class Frames {
   }
 }
 
-function askNode(request, env) {
+function askNode(request, env, io) {
   return new Promise((done, failed) => {
     const url = new URL(env.HH_BRIDGE);
     url.pathname = url.pathname.replace('/hook/', '/git/');
-    const frames = new Frames();
+    const frames = new Frames(io);
     const call = http.request(url, { method: 'POST', headers: { 'content-type': 'application/json', 'x-hh-pid': String(process.pid) } }, answer => {
       if (answer.statusCode !== 200) {
         answer.resume();
@@ -265,26 +272,31 @@ function askNode(request, env) {
   }).catch(() => ({ plain: true }));
 }
 
-function plainGit(argv, env) {
+function plainGit(argv, env, io) {
   return new Promise(done => {
-    const child = spawn(realGit(env), argv, { stdio: 'inherit' });
-    for (const name of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(name, () => child.kill(name));
+    const child = spawn(realGit(env), argv, { stdio: io.stdio, env });
+    const forward = name => child.kill(name);
+    for (const name of FORWARDED) process.on(name, forward);
+    const finish = code => {
+      for (const name of FORWARDED) process.removeListener(name, forward);
+      done(code);
+    };
     child.once('error', error => {
-      process.stderr.write(`git: ${error.message}\n`);
-      done(127);
+      io.stderr.write(`git: ${error.message}\n`);
+      finish(127);
     });
-    child.once('close', (code, signal) => done(code ?? signalCode(signal)));
+    child.once('close', (code, signal) => finish(code ?? signalCode(signal)));
   });
 }
 
-async function main(argv, env, cwd) {
+async function main(argv, env, cwd, io) {
   const route = routeGit(argv, env, cwd);
-  if (route.kind === 'plain') return plainGit(argv, env);
+  if (route.kind === 'plain') return plainGit(argv, env, io);
   const { request } = resolveRequest(route, env);
-  if (!request) return plainGit(argv, env);
-  const answer = await askNode(request, env);
-  if (answer.plain) return plainGit(argv, env);
-  if (answer.code === null) process.stderr.write(NOT_KNOWN);
+  if (!request) return plainGit(argv, env, io);
+  const answer = await askNode(request, env, io);
+  if (answer.plain) return plainGit(argv, env, io);
+  if (answer.code === null) io.stderr.write(NOT_KNOWN);
   return answer.code ?? 128;
 }
 
@@ -300,9 +312,9 @@ function currentFolder() {
 if (require.main === module) {
   /* As a program ends when whoever read its output left; git gets SIGPIPE here. */
   for (const stream of [process.stdout, process.stderr]) stream.on('error', () => process.exit(141));
-  void main(process.argv.slice(2), process.env, currentFolder()).then(code => {
+  void main(process.argv.slice(2), process.env, currentFolder(), { stdout: process.stdout, stderr: process.stderr, stdio: 'inherit' }).then(code => {
     process.exitCode = code;
   });
 }
 
-module.exports = { UNMANAGED, routeGit, resolveRequest, markerLine };
+module.exports = { UNMANAGED, routeGit, resolveRequest, markerLine, main };
