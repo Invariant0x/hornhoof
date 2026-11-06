@@ -8,8 +8,8 @@ import { CLOSED, refuse, requestSubject, type Actor, type Request, type Task, ty
 import { departmentHead, planFromPolicy, setsWaitDates } from './wait-policy.js';
 import { afterSourceKey, endOpenSource, endTaskWaits, lastOfSource, moveWaitOwner, recordLegacyWait, requestSourceKey, reviewSourceKey, syncSourceWaits, type TaskWait } from './wait-state.js';
 
-/* strict: false for what Hornhoof asks or moves by itself and for what an owner must be able to say, which go on with no dates
-   rather than stop: a reviewer's verdict, someone leaving, a task that stood still, a goal being missed. */
+/* strict: false for what Hornhoof asks or moves by itself and for what someone must be able to say, which go on with no dates
+   rather than stop: a question to a person, a reviewer's verdict, someone leaving, a task that stood still. */
 type Source = { kind: WaitSourceKind; sourceKey: string; owner: WaitOwnerBinding | null; plan?: WaitPlan | undefined; sourceState?: WaitSourceState; actor: Actor; strict?: boolean };
 
 const policyPlan = async (tx: Tx, task: Task, source: Source): Promise<WaitPlan | null> =>
@@ -94,9 +94,10 @@ async function requestOwner(tx: Tx, task: Task, request: Request): Promise<WaitO
   return everyone.some(p => p.isOwner && p.status === 'active') ? { personId: decisionOwner(requestSubject(request, task), everyone) } : null;
 }
 
-/* A question to a person answers to the one whose decision it is, each question on its own. */
-export async function bindRequest(tx: Tx, task: Task, request: Request, actor: Actor, how: { plan?: WaitPlan | undefined; strict: boolean }): Promise<TaskWait> {
-  return bindSource(tx, task, { kind: 'person', sourceKey: requestSourceKey(request.id), owner: await requestOwner(tx, task, request), plan: how.plan, strict: how.strict, actor });
+/* A question to a person answers to the one whose decision it is, each question on its own. Wanting dates never stops one: work
+   that cannot go on must reach somebody, so with no promise and none from the department it waits with none. */
+export async function bindRequest(tx: Tx, task: Task, request: Request, actor: Actor, plan?: WaitPlan): Promise<TaskWait> {
+  return bindSource(tx, task, { kind: 'person', sourceKey: requestSourceKey(request.id), owner: await requestOwner(tx, task, request), plan, strict: false, actor });
 }
 
 /* An answer ends the wait of that one question: not the others, and it proves only that it was answered. */

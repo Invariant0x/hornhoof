@@ -362,15 +362,16 @@ describe('a question to a person', () => {
     expect((await c.waitsOf(work)).map(w => w.state)).toEqual(['cancelled', 'cancelled']);
   });
 
-  it('in a department with no policy keeps its owner with no dates, and is refused whole where dates are set for others', async () => {
+  it('keeps its owner with no dates in a department with no policy, and also where dates are set for others', async () => {
     const c = await company();
     const work = await c.task('Work');
     await ask(c.ctx, c.bruno.id, work.id, { kind: 'question', text: 'Which?' });
     expect(await c.waitsOf(work)).toMatchObject([{ state: 'legacy_needs_plan', ownerPersonId: c.ceo.id, ownerDueAt: null }]);
     await c.policy({ kind: 'review' });
     const other = await c.task('Other');
-    expect(await reason(ask(c.ctx, c.bruno.id, other.id, { kind: 'question', text: 'Which?' }))).toBe('task_invalid');
-    expect((await c.db.select().from(tasks).where(eq(tasks.id, other.id)))[0]).toMatchObject({ status: 'open', version: other.version });
+    await ask(c.ctx, c.bruno.id, other.id, { kind: 'question', text: 'Which?' });
+    expect(await c.waitsOf(other)).toMatchObject([{ state: 'legacy_needs_plan', ownerPersonId: c.ceo.id, ownerDueAt: null }]);
+    expect((await c.db.select().from(tasks).where(eq(tasks.id, other.id)))[0]).toMatchObject({ status: 'waiting' });
   });
 
   it('takes a promise in place of a policy', async () => {

@@ -229,7 +229,7 @@ describe('the line of a program, as its terminals made it', () => {
     expect(line.take('!', WRITER)).toBeNull();
     const emptied = new InputLine();
     for (const key of keys) emptied.take(key, WRITER);
-    for (const _key of keys) emptied.take('\x7f', WRITER);
+    [...keys].forEach(() => emptied.take('\x7f', WRITER));
     expect(emptied.take('!', WRITER)).toBe('control');
   });
 
