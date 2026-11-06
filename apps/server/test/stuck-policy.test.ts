@@ -1,7 +1,7 @@
 import { and, asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, companies, departments, jobs, people, requestInternal, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
+import { agentEvents, agents, companies, departments, jobs, requestInternal, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
 import { GONE_ALONG } from '../src/modules/conversation/queue.js';
 import { createTask, GOING_ON_TURNS } from '../src/modules/tasks/engine.js';
 import { afterJob, checkLiveness, SILENT_TURNS, wakeAll } from '../src/modules/tasks/wake.js';
@@ -22,13 +22,18 @@ async function company() {
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
   const taskFor = async (agentId: string, createdByAgentId: string, title = 'Checkout') =>
     (await createTask(app.ctx, { agentId: createdByAgentId }, { title, brief: '', body: 'Finish the work.', departmentId: dev!.id, assigneeAgentId: agentId, executor: true, gates: [] })).task;
+  const realProgram = async (jobId: string, agentId: string) => {
+    const [job] = await db.select().from(jobs).where(eq(jobs.id, jobId));
+    await db.insert(agentEvents).values({ companyId: job!.companyId, agentId, jobId, kind: 'program', data: { program: { state: 'thinking', since: Date.now() - 60_000, tool: null }, alarm: null } });
+  };
   const finish = async (agentId: string, taskId: string) => {
     const [job] = await db.select().from(jobs).where(and(eq(jobs.agentId, agentId), eq(jobs.taskId, taskId), eq(jobs.status, 'queued'))).orderBy(asc(jobs.createdAt));
     await db.update(jobs).set({ status: 'running', startedAt: new Date(Date.now() - 60_000) }).where(eq(jobs.id, job!.id));
+    await realProgram(job!.id, agentId);
     await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, job!.id));
     await afterJob(app.ctx, job!.id);
   };
-  return { app, db, ctx: app.ctx, ceo, dev: dev!, sub: sub!, head, worker, orchestrator: orchestrator!, taskFor, finish };
+  return { app, db, ctx: app.ctx, ceo, dev: dev!, sub: sub!, head, worker, orchestrator: orchestrator!, taskFor, realProgram, finish };
 }
 
 describe('stuck turn eligibility', () => {
@@ -44,6 +49,7 @@ describe('stuck turn eligibility', () => {
     const carrier = queued[0]!;
     const startedAt = new Date();
     await c.db.update(jobs).set({ status: 'running', startedAt }).where(eq(jobs.id, carrier.id));
+    await c.realProgram(carrier.id, c.head.id);
     await c.db.update(jobs).set({ status: 'done', result: GONE_ALONG, startedAt, finishedAt: startedAt }).where(and(eq(jobs.agentId, c.head.id), eq(jobs.status, 'queued')));
     await c.db.update(tasks).set({ silent: 0 }).where(eq(tasks.id, carrier.taskId!));
     await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, carrier.id));
@@ -53,6 +59,20 @@ describe('stuck turn eligibility', () => {
     expect(await c.db.select().from(requests)).toEqual([]);
     expect((await c.db.select({ id: tasks.id, silent: tasks.silent }).from(tasks)).find(t => t.id === carrier.taskId)?.silent).toBe(1);
     expect((await c.db.select({ id: tasks.id, silent: tasks.silent }).from(tasks)).filter(t => t.id !== carrier.taskId)).toMatchObject(work.slice(1).map(t => ({ id: t.id, silent: SILENT_TURNS - 1 })));
+  });
+
+  it('does not count a turn that opened and closed without a durable program fact', async () => {
+    const c = await company();
+    const task = await c.taskFor(c.worker.id, c.head.id);
+    await c.db.update(tasks).set({ silent: SILENT_TURNS - 1 }).where(eq(tasks.id, task.id));
+    await wakeAll(c.ctx, [{ agentId: c.worker.id, taskId: task.id, why: 'assigned' }]);
+    const [job] = await c.db.select().from(jobs).where(eq(jobs.taskId, task.id));
+    await c.db.update(jobs).set({ status: 'done', startedAt: new Date(Date.now() - 1000), finishedAt: new Date() }).where(eq(jobs.id, job!.id));
+
+    await checkLiveness(c.ctx, job!.id);
+
+    expect(await c.db.select().from(requests)).toEqual([]);
+    expect((await c.db.select().from(tasks).where(eq(tasks.id, task.id)))[0]!.silent).toBe(SILENT_TURNS - 1);
   });
 
   it('leaves an agent failure to the failure mechanism without advancing either stuck counter', async () => {
