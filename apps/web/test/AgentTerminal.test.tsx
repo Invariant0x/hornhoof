@@ -1030,7 +1030,7 @@ describe('a standalone test terminal', () => {
 
   it('binds an in-memory key, signs the exact challenge and keeps an observer strictly local', async () => {
     const bindResponse = response(firstNonceId, 7);
-    const bindView = vi.fn(async () => bindResponse);
+    const bindView = vi.fn<(request: BindViewRequest) => Promise<BindViewResponse>>(async () => bindResponse);
     const { calls, rendered } = openStandalone(bindView);
     const ws = await socket();
     expect(bindView).toHaveBeenCalledTimes(1);
@@ -1071,7 +1071,7 @@ describe('a standalone test terminal', () => {
   });
 
   it('renders no server frame before an accepted proof', async () => {
-    const bindView = vi.fn(async () => response(firstNonceId, 7));
+    const bindView = vi.fn<(request: BindViewRequest) => Promise<BindViewResponse>>(async () => response(firstNonceId, 7));
     const gone = vi.fn();
     openStandalone(bindView, gone);
     const ws = await socket();
@@ -1092,7 +1092,7 @@ describe('a standalone test terminal', () => {
   });
 
   it('rejects contradictory ready rights before the renderer and still sends only proof', async () => {
-    const bindView = vi.fn(async () => response(firstNonceId, 7));
+    const bindView = vi.fn<(request: BindViewRequest) => Promise<BindViewResponse>>(async () => response(firstNonceId, 7));
     const gone = vi.fn();
     openStandalone(bindView, gone);
     const ws = await socket();
@@ -1113,7 +1113,7 @@ describe('a standalone test terminal', () => {
     { reason: 'expired', code: 4408 },
     { reason: 'unavailable', code: 4503 },
   ] as const)('returns a post-proof $reason terminal state to its owner', async ({ reason, code }) => {
-    const bindView = vi.fn(async () => response(firstNonceId, 7));
+    const bindView = vi.fn<(request: BindViewRequest) => Promise<BindViewResponse>>(async () => response(firstNonceId, 7));
     const gone = vi.fn();
     openStandalone(bindView, gone);
     const ws = await socket();
