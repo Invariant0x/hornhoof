@@ -237,11 +237,12 @@ function ShellAccount({ me, menu, setMenu, company, navigate, openAccount, onSig
 /* What waits for people as the navigation counts it and the screens show it, and whose decisions the Tasks screen shows
    after a click on a person's card: null shows everyone's. */
 function useDecisionsView() {
-  const { decisions, load } = useDecisions();
+  const { decisions, failure, load } = useDecisions();
   const requests = decisions?.requests ?? [];
   return {
     all: decisions,
     requests,
+    failure,
     load,
     /* What agents ask, the orchestrator's cards and his request for the computer. */
     waiting: decisions?.counts.total ?? 0,
@@ -401,6 +402,7 @@ export function Shell({ me, welcome = false, onSignOut }: { me: Me; welcome?: bo
           <Tasks
             onHome={goHome}
             decisions={decisions.all}
+            decisionsFailure={decisions.failure}
             onDecisionsChanged={decisions.load}
             personId={pageRoute.kind === 'tasks' ? pageRoute.personId ?? null : null}
             onClearPerson={() => navigate({ kind: 'tasks' })}
