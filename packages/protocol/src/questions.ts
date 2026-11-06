@@ -11,14 +11,22 @@ export const QuestionMaterials = z.discriminatedUnion('presentation', [Result, z
   .refine(materialMetadataFits, 'Oversized material metadata.');
 export type QuestionMaterials = z.infer<typeof QuestionMaterials>;
 
-// Protocol scaffolds stay unavailable until their targeted RED is followed by implementation.
-export const SourceRef = z.never();
+/* Native source identity, without a synthetic task or caller-supplied authority. */
+export const SourceRef = z.strictObject({ kind: z.enum(['task_request', 'proposal', 'computer_access']), id: z.uuid() });
 export type SourceRef = z.infer<typeof SourceRef>;
-export const QuestionAudience = z.never();
+export const QuestionAudience = z.enum(['internal', 'human', 'legacy']);
 export type QuestionAudience = z.infer<typeof QuestionAudience>;
-export const QuestionRouteTarget = z.never();
+export const QuestionRouteTarget = z.enum(['head', 'orchestrator', 'operations']);
 export type QuestionRouteTarget = z.infer<typeof QuestionRouteTarget>;
-export const QuestionMutationGuard = z.never();
+const Revision = z.number().int().positive();
+export const QuestionMutationGuard = z.strictObject({
+  operationId: z.uuid(), source: SourceRef, expectedRevision: Revision, expectedRouteRevision: Revision,
+});
 export type QuestionMutationGuard = z.infer<typeof QuestionMutationGuard>;
-export const HumanActionBinding = z.never();
+const ResourceReference = z.string().min(1).max(200)
+  .refine(value => value.trim() === value && !/[\u0000-\u001f\u007f]/.test(value), 'Use the exact resource reference.');
+/* The service still verifies the resource and its actual responsible person. */
+export const HumanActionBinding = z.strictObject({
+  kind: z.enum(['payment', 'owner_login', 'manual_machine_action', 'ceo_permission']), resourceId: ResourceReference,
+});
 export type HumanActionBinding = z.infer<typeof HumanActionBinding>;
