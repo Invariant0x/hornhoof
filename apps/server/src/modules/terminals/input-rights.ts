@@ -97,11 +97,25 @@ function lineAfter(from: Line, text: string, pasted: boolean, refusing: boolean)
   const keys = [...text], whole = pasted || keys.length > 1;
   let line = whole ? { ...from, sure: false } : from;
   for (const key of keys) {
-    if (newLine(key)) line = cleared(whole);
-    else if (key === '\x7f' && line.sure) line = { ...line, length: Math.max(0, line.length - 1) };
-    else if (key === '\x7f' || key === '\b') line = cleared(whole);
-    else if (refusing && line.length === 0 && (key === '/' || key === '!')) return null;
-    else line = withKey(line, key);
+    const next = lineAfterKey(line, key, whole, refusing);
+    if (next === null) return null;
+    line = next;
   }
   return line;
+}
+
+function lineAfterKey(line: Line, key: string, whole: boolean, refusing: boolean): Line | null {
+  if (newLine(key)) return cleared(whole);
+  if (key === '\x7f' || key === '\b') return afterErase(line, key, whole);
+  if (refusing && startsCommand(line, key)) return null;
+  return withKey(line, key);
+}
+
+function afterErase(line: Line, key: string, whole: boolean): Line {
+  if (key === '\x7f' && line.sure) return { ...line, length: Math.max(0, line.length - 1) };
+  return cleared(whole);
+}
+
+function startsCommand(line: Line, key: string): boolean {
+  return line.length === 0 && (key === '/' || key === '!');
 }
