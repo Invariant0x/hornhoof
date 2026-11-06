@@ -716,6 +716,1122 @@
       },
       "coverage": "report exists but empty; project-relative include was incorrectly prefixed apps/server",
       "crap": "110 with zero coverage, retained as failure"
+    },
+    "458": {
+      "task": 565,
+      "run": 458,
+      "part": 1,
+      "source": "7fa3d6d6223d0e4d52408533b2cfef7df5ba1cd6",
+      "status": "failed",
+      "exitCode": 2,
+      "logBytes": 279753,
+      "logSha256": "9f1019efda2e9da6346cc5a5a4ac9d518ba777bb1502e69411f3e5d9a0f56f1c",
+      "stages": [
+        {
+          "stage": "install",
+          "args": [
+            "npm",
+            "ci",
+            "--prefer-offline",
+            "--no-audit",
+            "--no-fund"
+          ],
+          "code": 0,
+          "signal": null,
+          "ms": 4808
+        },
+        {
+          "stage": "protocol-build",
+          "args": [
+            "npm",
+            "run",
+            "build",
+            "-w",
+            "@hornhoof/protocol"
+          ],
+          "code": 0,
+          "signal": null,
+          "ms": 1687
+        },
+        {
+          "stage": "root-contracts-script-coverage",
+          "args": [
+            "node",
+            "--test",
+            "--experimental-test-coverage",
+            "--test-coverage-include=vitest.config.mjs",
+            "--test-coverage-include=scripts/test/related-probe.mjs",
+            "--test-coverage-include=scripts/test/workspace-cwd.mjs",
+            "--test-reporter=tap",
+            "--test-reporter-destination=stdout",
+            "--test-reporter=lcov",
+            "--test-reporter-destination=.metrics/task-565/node.lcov.info",
+            "scripts/test/root-vitest.test.mjs"
+          ],
+          "code": 0,
+          "signal": null,
+          "ms": 25157
+        },
+        {
+          "stage": "helper-coverage-project-relative",
+          "args": [
+            "npx",
+            "--no-install",
+            "vitest",
+            "run",
+            "apps/server/test/db.test.ts",
+            "apps/server/test/agent-sql-permissions.test.ts",
+            "apps/server/test/program-operator-deliveries.test.ts",
+            "apps/server/test/tree-history-query.test.ts",
+            "apps/server/test/config.test.ts",
+            "apps/server/test/tunnel.test.ts",
+            "apps/server/test/auth.test.ts",
+            "apps/server/test/setup.test.ts",
+            "apps/server/test/helpers-basic.test.ts",
+            "--project",
+            "@hornhoof/server",
+            "--maxWorkers=2",
+            "--coverage.enabled",
+            "--coverage.reportOnFailure",
+            "--coverage.include=test/helpers*.ts",
+            "--coverage.exclude=**/*.test.*",
+            "--coverage.reporter=text",
+            "--coverage.reporter=lcov"
+          ],
+          "code": 0,
+          "signal": null,
+          "ms": 22810
+        },
+        {
+          "stage": "new-test-types",
+          "args": [
+            "npm",
+            "run",
+            "typecheck:tests"
+          ],
+          "code": 0,
+          "signal": null,
+          "ms": 18646
+        },
+        {
+          "stage": "new-test-eslint",
+          "args": [
+            "npx",
+            "--no-install",
+            "eslint",
+            "apps/server/test/helpers-basic.test.ts"
+          ],
+          "code": 0,
+          "signal": null,
+          "ms": 2501
+        },
+        {
+          "stage": "moved-and-root-crapper",
+          "args": [
+            "crapper",
+            "--use-existing-coverage",
+            "--threshold",
+            "10",
+            "apps/server/test/helpers-db.ts",
+            "apps/server/test/helpers-basic.ts",
+            "vitest.config.mjs",
+            "scripts/test/related-probe.mjs",
+            "scripts/test/workspace-cwd.mjs"
+          ],
+          "code": 0,
+          "signal": null,
+          "ms": 1761
+        },
+        {
+          "stage": "existing-heavy-helper-crapper",
+          "args": [
+            "crapper",
+            "--use-existing-coverage",
+            "--threshold",
+            "10",
+            "apps/server/test/helpers.ts"
+          ],
+          "code": 2,
+          "signal": null,
+          "ms": 136
+        },
+        {
+          "stage": "changed-dryer",
+          "args": [
+            "dryer",
+            "--threshold",
+            "0.8",
+            "apps/server/test/helpers-db.ts",
+            "apps/server/test/helpers-basic.ts",
+            "apps/server/test/helpers-basic.test.ts",
+            "vitest.config.mjs",
+            "scripts/test/related-probe.mjs",
+            "scripts/test/workspace-cwd.mjs"
+          ],
+          "code": 0,
+          "signal": null,
+          "ms": 123
+        }
+      ],
+      "resources": [
+        {
+          "stage": "install",
+          "point": "before",
+          "at": "2026-11-06T04:24:36.605Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "88a73b972392",
+          "cpus": 8,
+          "load": [
+            5.29,
+            5.3,
+            5.52
+          ],
+          "free": 9003098112,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-7",
+          "memoryMax": "max",
+          "memoryCurrent": "295280640"
+        },
+        {
+          "stage": "install",
+          "point": "after",
+          "at": "2026-11-06T04:24:41.413Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "88a73b972392",
+          "cpus": 8,
+          "load": [
+            5.29,
+            5.3,
+            5.52
+          ],
+          "free": 8907046912,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-7",
+          "memoryMax": "max",
+          "memoryCurrent": "778485760"
+        },
+        {
+          "stage": "protocol-build",
+          "point": "before",
+          "at": "2026-11-06T04:24:41.413Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "88a73b972392",
+          "cpus": 8,
+          "load": [
+            5.29,
+            5.3,
+            5.52
+          ],
+          "free": 8907046912,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-7",
+          "memoryMax": "max",
+          "memoryCurrent": "778485760"
+        },
+        {
+          "stage": "protocol-build",
+          "point": "after",
+          "at": "2026-11-06T04:24:43.100Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "88a73b972392",
+          "cpus": 8,
+          "load": [
+            5.1,
+            5.26,
+            5.51
+          ],
+          "free": 8856543232,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-7",
+          "memoryMax": "max",
+          "memoryCurrent": "786755584"
+        },
+        {
+          "stage": "root-contracts-script-coverage",
+          "point": "before",
+          "at": "2026-11-06T04:24:43.100Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "88a73b972392",
+          "cpus": 8,
+          "load": [
+            5.1,
+            5.26,
+            5.51
+          ],
+          "free": 8855777280,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-7",
+          "memoryMax": "max",
+          "memoryCurrent": "786755584"
+        },
+        {
+          "stage": "root-contracts-script-coverage",
+          "point": "during",
+          "at": "2026-11-06T04:24:48.103Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "88a73b972392",
+          "cpus": 8,
+          "load": [
+            5.02,
+            5.24,
+            5.5
+          ],
+          "free": 8560173056,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-7",
+          "memoryMax": "max",
+          "memoryCurrent": "1221693440"
+        },
+        {
+          "stage": "root-contracts-script-coverage",
+          "point": "during",
+          "at": "2026-11-06T04:24:53.109Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "88a73b972392",
+          "cpus": 8,
+          "load": [
+            5.09,
+            5.25,
+            5.51
+          ],
+          "free": 8464510976,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-7",
+          "memoryMax": "max",
+          "memoryCurrent": "1334968320"
+        },
+        {
+          "stage": "root-contracts-script-coverage",
+          "point": "during",
+          "at": "2026-11-06T04:24:58.113Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "88a73b972392",
+          "cpus": 8,
+          "load": [
+            5.17,
+            5.26,
+            5.51
+          ],
+          "free": 8454955008,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-7",
+          "memoryMax": "max",
+          "memoryCurrent": "1384017920"
+        },
+        {
+          "stage": "root-contracts-script-coverage",
+          "point": "during",
+          "at": "2026-11-06T04:25:03.119Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "88a73b972392",
+          "cpus": 8,
+          "load": [
+            5.07,
+            5.24,
+            5.5
+          ],
+          "free": 8398073856,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-7",
+          "memoryMax": "max",
+          "memoryCurrent": "1463787520"
+        },
+        {
+          "stage": "root-contracts-script-coverage",
+          "point": "during",
+          "at": "2026-11-06T04:25:08.120Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "88a73b972392",
+          "cpus": 8,
+          "load": [
+            4.83,
+            5.19,
+            5.48
+          ],
+          "free": 8426975232,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-7",
+          "memoryMax": "max",
+          "memoryCurrent": "1138032640"
+        },
+        {
+          "stage": "root-contracts-script-coverage",
+          "point": "after",
+          "at": "2026-11-06T04:25:08.257Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "88a73b972392",
+          "cpus": 8,
+          "load": [
+            4.83,
+            5.19,
+            5.48
+          ],
+          "free": 8642383872,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-7",
+          "memoryMax": "max",
+          "memoryCurrent": "862466048"
+        },
+        {
+          "stage": "helper-coverage-project-relative",
+          "point": "before",
+          "at": "2026-11-06T04:25:08.258Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "88a73b972392",
+          "cpus": 8,
+          "load": [
+            4.83,
+            5.19,
+            5.48
+          ],
+          "free": 8642383872,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-7",
+          "memoryMax": "max",
+          "memoryCurrent": "862466048"
+        },
+        {
+          "stage": "helper-coverage-project-relative",
+          "point": "during",
+          "at": "2026-11-06T04:25:13.262Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "88a73b972392",
+          "cpus": 8,
+          "load": [
+            5.16,
+            5.25,
+            5.5
+          ],
+          "free": 6818869248,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-7",
+          "memoryMax": "max",
+          "memoryCurrent": "3088826368"
+        },
+        {
+          "stage": "helper-coverage-project-relative",
+          "point": "during",
+          "at": "2026-11-06T04:25:18.266Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "88a73b972392",
+          "cpus": 8,
+          "load": [
+            6.11,
+            5.44,
+            5.56
+          ],
+          "free": 5720444928,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-7",
+          "memoryMax": "max",
+          "memoryCurrent": "4078571520"
+        },
+        {
+          "stage": "helper-coverage-project-relative",
+          "point": "during",
+          "at": "2026-11-06T04:25:23.267Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "88a73b972392",
+          "cpus": 8,
+          "load": [
+            5.86,
+            5.4,
+            5.55
+          ],
+          "free": 5663371264,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-7",
+          "memoryMax": "max",
+          "memoryCurrent": "3912732672"
+        },
+        {
+          "stage": "helper-coverage-project-relative",
+          "point": "during",
+          "at": "2026-11-06T04:25:28.273Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "88a73b972392",
+          "cpus": 8,
+          "load": [
+            5.71,
+            5.38,
+            5.54
+          ],
+          "free": 6033293312,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-7",
+          "memoryMax": "max",
+          "memoryCurrent": "3625463808"
+        },
+        {
+          "stage": "helper-coverage-project-relative",
+          "point": "after",
+          "at": "2026-11-06T04:25:31.067Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "88a73b972392",
+          "cpus": 8,
+          "load": [
+            5.71,
+            5.38,
+            5.54
+          ],
+          "free": 8565092352,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-7",
+          "memoryMax": "max",
+          "memoryCurrent": "870879232"
+        },
+        {
+          "stage": "new-test-types",
+          "point": "before",
+          "at": "2026-11-06T04:25:31.068Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "88a73b972392",
+          "cpus": 8,
+          "load": [
+            5.71,
+            5.38,
+            5.54
+          ],
+          "free": 8565092352,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-7",
+          "memoryMax": "max",
+          "memoryCurrent": "871129088"
+        },
+        {
+          "stage": "new-test-types",
+          "point": "during",
+          "at": "2026-11-06T04:25:36.070Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "88a73b972392",
+          "cpus": 8,
+          "load": [
+            5.65,
+            5.37,
+            5.54
+          ],
+          "free": 8150552576,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-7",
+          "memoryMax": "max",
+          "memoryCurrent": "1583427584"
+        },
+        {
+          "stage": "new-test-types",
+          "point": "during",
+          "at": "2026-11-06T04:25:41.072Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "88a73b972392",
+          "cpus": 8,
+          "load": [
+            5.52,
+            5.35,
+            5.53
+          ],
+          "free": 7638827008,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-7",
+          "memoryMax": "max",
+          "memoryCurrent": "2148237312"
+        },
+        {
+          "stage": "new-test-types",
+          "point": "during",
+          "at": "2026-11-06T04:25:46.077Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "88a73b972392",
+          "cpus": 8,
+          "load": [
+            5.16,
+            5.28,
+            5.5
+          ],
+          "free": 8358486016,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-7",
+          "memoryMax": "max",
+          "memoryCurrent": "1274015744"
+        },
+        {
+          "stage": "new-test-types",
+          "point": "after",
+          "at": "2026-11-06T04:25:49.713Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "88a73b972392",
+          "cpus": 8,
+          "load": [
+            5.23,
+            5.29,
+            5.51
+          ],
+          "free": 8617029632,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-7",
+          "memoryMax": "max",
+          "memoryCurrent": "882917376"
+        },
+        {
+          "stage": "new-test-eslint",
+          "point": "before",
+          "at": "2026-11-06T04:25:49.714Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "88a73b972392",
+          "cpus": 8,
+          "load": [
+            5.23,
+            5.29,
+            5.51
+          ],
+          "free": 8617029632,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-7",
+          "memoryMax": "max",
+          "memoryCurrent": "882917376"
+        },
+        {
+          "stage": "new-test-eslint",
+          "point": "after",
+          "at": "2026-11-06T04:25:52.214Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "88a73b972392",
+          "cpus": 8,
+          "load": [
+            5.29,
+            5.3,
+            5.51
+          ],
+          "free": 8590503936,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-7",
+          "memoryMax": "max",
+          "memoryCurrent": "880906240"
+        },
+        {
+          "stage": "moved-and-root-crapper",
+          "point": "before",
+          "at": "2026-11-06T04:25:52.214Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "88a73b972392",
+          "cpus": 8,
+          "load": [
+            5.29,
+            5.3,
+            5.51
+          ],
+          "free": 8590503936,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-7",
+          "memoryMax": "max",
+          "memoryCurrent": "880906240"
+        },
+        {
+          "stage": "moved-and-root-crapper",
+          "point": "after",
+          "at": "2026-11-06T04:25:53.975Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "88a73b972392",
+          "cpus": 8,
+          "load": [
+            5.29,
+            5.3,
+            5.51
+          ],
+          "free": 8609570816,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-7",
+          "memoryMax": "max",
+          "memoryCurrent": "906862592"
+        },
+        {
+          "stage": "existing-heavy-helper-crapper",
+          "point": "before",
+          "at": "2026-11-06T04:25:53.975Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "88a73b972392",
+          "cpus": 8,
+          "load": [
+            5.29,
+            5.3,
+            5.51
+          ],
+          "free": 8609570816,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-7",
+          "memoryMax": "max",
+          "memoryCurrent": "906862592"
+        },
+        {
+          "stage": "existing-heavy-helper-crapper",
+          "point": "after",
+          "at": "2026-11-06T04:25:54.111Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "88a73b972392",
+          "cpus": 8,
+          "load": [
+            5.29,
+            5.3,
+            5.51
+          ],
+          "free": 8603193344,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-7",
+          "memoryMax": "max",
+          "memoryCurrent": "907096064"
+        },
+        {
+          "stage": "changed-dryer",
+          "point": "before",
+          "at": "2026-11-06T04:25:54.111Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "88a73b972392",
+          "cpus": 8,
+          "load": [
+            5.29,
+            5.3,
+            5.51
+          ],
+          "free": 8603193344,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-7",
+          "memoryMax": "max",
+          "memoryCurrent": "907096064"
+        },
+        {
+          "stage": "changed-dryer",
+          "point": "after",
+          "at": "2026-11-06T04:25:54.234Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "88a73b972392",
+          "cpus": 8,
+          "load": [
+            5.29,
+            5.3,
+            5.51
+          ],
+          "free": 8602656768,
+          "dockerMarker": true,
+          "cpuMax": "max 100000",
+          "cpuset": "0-7",
+          "memoryMax": "max",
+          "memoryCurrent": "907788288"
+        }
+      ],
+      "lcovSources": {
+        "HH_AUTHOR_NODE_LCOV_BEGIN": [
+          "scripts/test/related-probe.mjs"
+        ],
+        "HH_AUTHOR_HELPER_LCOV_BEGIN": [
+          "apps/server/test/helpers-basic.ts",
+          "apps/server/test/helpers-db.ts",
+          "apps/server/test/helpers.ts"
+        ]
+      }
+    },
+    "473": {
+      "run": 473,
+      "task": 565,
+      "status": "failed",
+      "exitCode": 3,
+      "source": "59695b6c8c91ebd24aa71d96f8c1a891f422be92",
+      "branch": "turn-8",
+      "logBytes": 22095,
+      "logSha256": "79ae8cbd61095ba39e0adab9065efc6f495422b214b7a610781f8a80fe99d03b",
+      "stages": [
+        {
+          "stage": "install",
+          "args": [
+            "npm",
+            "ci",
+            "--prefer-offline",
+            "--no-audit",
+            "--no-fund"
+          ],
+          "cwd": "/data/tests/8cd92192-6223-4f44-9d13-20e49e9754dc/repo",
+          "code": 0,
+          "signal": null,
+          "ms": 5349
+        },
+        {
+          "stage": "protocol-build",
+          "args": [
+            "npm",
+            "run",
+            "build",
+            "-w",
+            "@hornhoof/protocol"
+          ],
+          "cwd": "/data/tests/8cd92192-6223-4f44-9d13-20e49e9754dc/repo",
+          "code": 0,
+          "signal": null,
+          "ms": 1787
+        },
+        {
+          "stage": "baseline-tasks-merge",
+          "args": [
+            "npx",
+            "--no-install",
+            "vitest",
+            "run",
+            "test/tasks-merge.test.ts",
+            "--maxWorkers=2",
+            "--coverage.enabled",
+            "--coverage.reportOnFailure",
+            "--coverage.include=test/helpers.ts",
+            "--coverage.exclude=**/*.test.*",
+            "--coverage.reporter=text",
+            "--coverage.reporter=lcov"
+          ],
+          "cwd": "/data/tests/8cd92192-6223-4f44-9d13-20e49e9754dc/repo/apps/server",
+          "code": 1,
+          "signal": null,
+          "ms": 10555
+        },
+        {
+          "stage": "baseline-helper-crapper",
+          "args": [
+            "crapper",
+            "--use-existing-coverage",
+            "--threshold",
+            "10",
+            "test/helpers.ts"
+          ],
+          "cwd": "/data/tests/8cd92192-6223-4f44-9d13-20e49e9754dc/repo/apps/server",
+          "code": 2,
+          "signal": null,
+          "ms": 1142
+        }
+      ],
+      "resources": [
+        {
+          "stage": "install",
+          "point": "before",
+          "at": "2026-11-06T04:31:00.849Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "88a73b972392",
+          "cpus": 8,
+          "load": [
+            5.81,
+            5.68,
+            5.6
+          ],
+          "free": 7521144832,
+          "cpuMax": "max 100000",
+          "cpuset": "0-7",
+          "memoryMax": "max",
+          "memoryCurrent": "313872384"
+        },
+        {
+          "stage": "install",
+          "point": "during",
+          "at": "2026-11-06T04:31:05.853Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "88a73b972392",
+          "cpus": 8,
+          "load": [
+            5.51,
+            5.62,
+            5.58
+          ],
+          "free": 7180984320,
+          "cpuMax": "max 100000",
+          "cpuset": "0-7",
+          "memoryMax": "max",
+          "memoryCurrent": "1186598912"
+        },
+        {
+          "stage": "install",
+          "point": "after",
+          "at": "2026-11-06T04:31:06.199Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "88a73b972392",
+          "cpus": 8,
+          "load": [
+            5.51,
+            5.62,
+            5.58
+          ],
+          "free": 7502200832,
+          "cpuMax": "max 100000",
+          "cpuset": "0-7",
+          "memoryMax": "max",
+          "memoryCurrent": "931311616"
+        },
+        {
+          "stage": "protocol-build",
+          "point": "before",
+          "at": "2026-11-06T04:31:06.199Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "88a73b972392",
+          "cpus": 8,
+          "load": [
+            5.51,
+            5.62,
+            5.58
+          ],
+          "free": 7502200832,
+          "cpuMax": "max 100000",
+          "cpuset": "0-7",
+          "memoryMax": "max",
+          "memoryCurrent": "931311616"
+        },
+        {
+          "stage": "protocol-build",
+          "point": "after",
+          "at": "2026-11-06T04:31:07.986Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "88a73b972392",
+          "cpus": 8,
+          "load": [
+            5.46,
+            5.6,
+            5.57
+          ],
+          "free": 7355359232,
+          "cpuMax": "max 100000",
+          "cpuset": "0-7",
+          "memoryMax": "max",
+          "memoryCurrent": "939761664"
+        },
+        {
+          "stage": "baseline-tasks-merge",
+          "point": "before",
+          "at": "2026-11-06T04:31:07.986Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "88a73b972392",
+          "cpus": 8,
+          "load": [
+            5.46,
+            5.6,
+            5.57
+          ],
+          "free": 7355359232,
+          "cpuMax": "max 100000",
+          "cpuset": "0-7",
+          "memoryMax": "max",
+          "memoryCurrent": "939741184"
+        },
+        {
+          "stage": "baseline-tasks-merge",
+          "point": "during",
+          "at": "2026-11-06T04:31:12.990Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "88a73b972392",
+          "cpus": 8,
+          "load": [
+            5.51,
+            5.61,
+            5.58
+          ],
+          "free": 6656167936,
+          "cpuMax": "max 100000",
+          "cpuset": "0-7",
+          "memoryMax": "max",
+          "memoryCurrent": "1936379904"
+        },
+        {
+          "stage": "baseline-tasks-merge",
+          "point": "during",
+          "at": "2026-11-06T04:31:17.991Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "88a73b972392",
+          "cpus": 8,
+          "load": [
+            5.39,
+            5.58,
+            5.57
+          ],
+          "free": 6308388864,
+          "cpuMax": "max 100000",
+          "cpuset": "0-7",
+          "memoryMax": "max",
+          "memoryCurrent": "2038579200"
+        },
+        {
+          "stage": "baseline-tasks-merge",
+          "point": "after",
+          "at": "2026-11-06T04:31:18.541Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "88a73b972392",
+          "cpus": 8,
+          "load": [
+            5.39,
+            5.58,
+            5.57
+          ],
+          "free": 7454072832,
+          "cpuMax": "max 100000",
+          "cpuset": "0-7",
+          "memoryMax": "max",
+          "memoryCurrent": "939536384"
+        },
+        {
+          "stage": "baseline-helper-crapper",
+          "point": "before",
+          "at": "2026-11-06T04:31:18.541Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "88a73b972392",
+          "cpus": 8,
+          "load": [
+            5.39,
+            5.58,
+            5.57
+          ],
+          "free": 7454072832,
+          "cpuMax": "max 100000",
+          "cpuset": "0-7",
+          "memoryMax": "max",
+          "memoryCurrent": "939479040"
+        },
+        {
+          "stage": "baseline-helper-crapper",
+          "point": "after",
+          "at": "2026-11-06T04:31:19.682Z",
+          "node": "v22.23.4",
+          "os": "linux",
+          "arch": "arm64",
+          "host": "88a73b972392",
+          "cpus": 8,
+          "load": [
+            5.39,
+            5.58,
+            5.57
+          ],
+          "free": 7428911104,
+          "cpuMax": "max 100000",
+          "cpuset": "0-7",
+          "memoryMax": "max",
+          "memoryCurrent": "961753088"
+        }
+      ],
+      "failures": [
+        "FAIL  test/tasks-merge.test.ts > a task that passed its last gate > goes back to its executor to merge into the turn branch, and its head is not woken for it",
+        "FAIL  test/tasks-merge.test.ts > a task that passed its last gate > names the turn's branch to merge into",
+        "FAIL  test/tasks-merge.test.ts > a task that passed its last gate > shows its gates passed while its executor merges it",
+        "FAIL  test/tasks-merge.test.ts > a task that passed its last gate > lets the executor say what blocks the merge, which its head answers, and the merge goes on",
+        "FAIL  test/tasks-merge.test.ts > a task that passed its last gate > keeps its gates as they are while it is merged",
+        "FAIL  test/tasks-merge.test.ts > the head > hears it once the last of them is merged"
+      ],
+      "scope": {
+        "task": 565,
+        "kind": "unmodified shared turn-8 baseline tasks-merge and existing helper quality",
+        "source": "59695b6c8c91ebd24aa71d96f8c1a891f422be92",
+        "fullSuite": false,
+        "maxWorkers": 2,
+        "files": {
+          "apps/server/test/tasks-merge.test.ts": "84a4a7409d668333fa24c05b69bc069d61b2e949a7fffc9bb980b2a906aaa1f2",
+          "apps/server/test/helpers.ts": "d7000f91c462ebf59d2b89ff2c78e172b7e09290526425fd7aa865f4012434c1",
+          "apps/server/src/modules/tasks/engine.ts": "dadeb092ade45e7667dd953717ceacf21efa839943212bb8179816e38d47725a"
+        }
+      }
     }
   },
   "widths": [
@@ -912,11 +2028,24 @@
     "fullTestCallbackCountsExecuted": false
   },
   "pending": [
-    "Correct project-relative coverage glob; previous 378 LCOV empty",
-    "Two fast until-behavior pins added after312, not executed yet",
-    "Proposed independent-reviewer fixture patch not applied; head scope question pending",
-    "MJS duplicate-analysis coverage not proved; no formatter configured",
-    "Fresh turn merge and merge checks not done"
+    "Candidate six-failure RED to GREEN and same-vendor rejection",
+    "Candidate checks on fresh integrated source",
+    "Final turn-8 merge/readback and affected merge checks"
   ],
-  "fullSuite": false
+  "fullSuite": false,
+  "legacyHeavyFunctionHashesUnchangedFrom473": {
+    "openStream": "1d30fbdcbbb6df25fc518277e5f62fa569834edb62fe6369242a37b2764473eb",
+    "connectNode": "d23644759a956f6ab934737d774b1690bd196d719c238b03a6a9d72baff27d3c",
+    "agentSqlOn": "d33f597df18da06023d54014006a2b0623f23ba70ceee8bba4c5d6f4ffec3fe5"
+  },
+  "approvedFixtureFix": {
+    "authorization": "Head565 comment after diagnostic378, test-only patch929cdca5",
+    "patchCommit": "a9adce4a255d425785682548c81a9c5a9a0fd320",
+    "sameVendorRegressionCommit": "41191345",
+    "old11TestBodiesByteIdentical": true,
+    "productionEngineChanged": false,
+    "negativeCase": "Anthropic API author, distinct Claude provider/subscription reviewer must get403",
+    "status": "GREEN pending"
+  },
+  "latestIntegrationBase": "59695b6c8c91ebd24aa71d96f8c1a891f422be92"
 }
