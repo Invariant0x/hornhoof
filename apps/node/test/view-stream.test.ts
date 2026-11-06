@@ -295,9 +295,9 @@ describe('terminal view stream', () => {
 
       it('gives what a normal screen keeps again, and no line of it when it reaches the history', async () => {
         const { history, given } = viewHistory(
-          says('', 'left\n', pane(5, { alternate: true })),
-          says(pane(5, { alternate: true })),
-          says('old\n', 'left\n', 'top\n', pane(5, { alternate: true })),
+          says('', 'left\n', pane(5, { alternate: 1 })),
+          says(pane(5, { alternate: 1 })),
+          says('old\n', 'left\n', 'top\n', pane(5, { alternate: 1 })),
           says(pane(6)),
           says('\n', 'top\n', 'left\n', pane(6)),
         );
