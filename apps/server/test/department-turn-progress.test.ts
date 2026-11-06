@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { expect, it, onTestFinished, vi } from 'vitest';
-import { companies, departments, people, tasks, turns, TASK_STATUSES } from '../src/db/schema.js';
+import { agents, companies, departments, people, tasks, turns, TASK_STATUSES } from '../src/db/schema.js';
 import { turnCounts } from '../src/modules/tasks/turn-progress.js';
 import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
 
@@ -10,6 +10,7 @@ async function fixture() {
   const ceo = await setUpCompany(app);
   const [co] = await db.select().from(companies);
   const [person] = await db.select().from(people);
+  const [executor] = await db.select().from(agents);
   const companyId = co!.id;
   const [dev, sales, ops] = await db.insert(departments).values([
     { companyId, roleCode: 'DEV', templateKey: 'development' },
@@ -19,7 +20,7 @@ async function fixture() {
   const [turn] = await db.insert(turns).values({ companyId, number: 8, goal: 'One common turn' }).returning();
   let number = 100;
   const add = async (departmentId: string, patch: Partial<typeof tasks.$inferInsert> = {}) =>
-    (await db.insert(tasks).values({ companyId, number: ++number, turnId: turn!.id, departmentId, title: 'Count this task', createdByPersonId: person!.id, closedAt: patch.status === 'done' || patch.status === 'cancelled' ? new Date() : null, ...patch }).returning())[0]!;
+    (await db.insert(tasks).values({ companyId, number: ++number, turnId: turn!.id, departmentId, title: 'Count this task', createdByPersonId: person!.id, executorAgentId: patch.status === 'review' ? executor!.id : null, closedAt: patch.status === 'done' || patch.status === 'cancelled' ? new Date() : null, ...patch }).returning())[0]!;
   const org = async (token = ceo) => {
     const response = await app.inject({ url: '/api/org', ...as(token) });
     expect(response.statusCode).toBe(200);
