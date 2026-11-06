@@ -1,14 +1,13 @@
-import { readFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { NodeMessage, ServerMessage } from '@hornhoof/protocol';
 import { PGlite } from '@electric-sql/pglite';
 import { eq } from 'drizzle-orm';
-import { drizzle, PglitePreparedQuery, type PgliteDatabase } from 'drizzle-orm/pglite';
+import { drizzle } from 'drizzle-orm/pglite';
 import WebSocket from 'ws';
-import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
-import { inject, onTestFinished, TestRunner, vi } from 'vitest';
+import type { FastifyInstance } from 'fastify';
+import { onTestFinished } from 'vitest';
 import { buildApp, type Deps } from '../src/app.js';
 import type { CommitMarker } from '../src/modules/testruns/github-status.js';
 import type { CommitReader } from '../src/modules/testruns/refs.js';
@@ -18,8 +17,11 @@ import type { Db } from '../src/db/client.js';
 import * as schema from '../src/db/schema.js';
 import { setupCode } from '../src/modules/setup/code.js';
 import { ask, createTask } from '../src/modules/tasks/engine.js';
+import { openTestDb, timed } from './helpers-db.js';
+import { as, sessionFrom, TEST_SECRET } from './helpers-basic.js';
+export { createTestDb, statements } from './helpers-db.js';
+export { as, sessionFrom, TEST_SECRET, until } from './helpers-basic.js';
 
-export const TEST_SECRET = Buffer.alloc(32, 7).toString('base64');
 export const TEST_API_KEY = 'sk-ant-api03-test-key-9f3a';
 export const SETUP = {
   /* The code from the setup link the server logs while no company exists. */
@@ -30,49 +32,6 @@ export const SETUP = {
   password: 'correct horse battery',
   orchestrator: { mode: 'api_key', provider: 'anthropic_api', apiKey: TEST_API_KEY },
 };
-
-/* Every test database starts from a copy of the one global-setup.ts migrated for the run. */
-let migrated: Blob | undefined;
-type TestDb = PgliteDatabase<typeof schema> & { $client: PGlite };
-
-async function openTestDb(): Promise<{ client: PGlite; db: TestDb }> {
-  migrated ??= new Blob([readFileSync(inject('migratedDataDir'))]);
-  const client = new PGlite({ loadDataDir: migrated });
-  const db = drizzle(client, { schema });
-  return { client, db };
-}
-
-/* The statements the database runs from now on, in order, with their values. PGlite has one connection, so two moves
-   cannot race in a test; this shows instead that a move takes the locks that make them go one after the other. */
-export function statements(): { sql: string; params: unknown[] }[] {
-  const seen: { sql: string; params: unknown[] }[] = [];
-  const execute = PglitePreparedQuery.prototype.execute;
-  const spy = vi.spyOn(PglitePreparedQuery.prototype, 'execute').mockImplementation(function (this: PglitePreparedQuery<never>, values) {
-    const q = this as unknown as { queryString: string; params: unknown[] };
-    seen.push({ sql: q.queryString, params: q.params });
-    return execute.call(this, values);
-  });
-  onTestFinished(() => spy.mockRestore());
-  return seen;
-}
-
-/* What a test spends on its database and app is no test: the report of test times shows it apart. */
-async function timed<T>(phase: 'setupMs' | 'teardownMs', work: () => Promise<T>): Promise<T> {
-  const from = performance.now();
-  try {
-    return await work();
-  } finally {
-    const meta = TestRunner.getCurrentTest()?.meta as { setupMs?: number; teardownMs?: number } | undefined;
-    if (meta) meta[phase] = (meta[phase] ?? 0) + performance.now() - from;
-  }
-}
-
-/* Each PGlite is a whole Postgres in WASM memory, so it closes when its test ends. Call these inside a test. */
-export async function createTestDb(): Promise<TestDb> {
-  const { client, db } = await timed('setupMs', openTestDb);
-  onTestFinished(() => timed('teardownMs', () => client.close()));
-  return db;
-}
 
 /* Agents' database roles on PGlite. PGlite has one user, a superuser, so a role is taken with SET LOCAL ROLE: its rights
    hold, though a statement could take the superuser back, which on Postgres a separate sign-in rules out. */
@@ -116,12 +75,6 @@ export async function appOn(client: PGlite, env: NodeJS.ProcessEnv = {}, logger?
   return { app, db, config };
 }
 
-export function sessionFrom(res: LightMyRequestResponse): string {
-  const cookie = res.cookies.find(c => c.name === 'hh_session');
-  if (!cookie) throw new Error(`No session cookie in a ${res.statusCode} response.`);
-  return cookie.value;
-}
-
 /* Runs first-run setup and returns the CEO's session token. */
 /* Takes away the Operations every company gets at its setup, for a test that stages the departments it needs itself. */
 export async function withoutOperations(db: Db): Promise<void> {
@@ -141,8 +94,6 @@ export async function setUpCompany(app: FastifyInstance): Promise<string> {
   await withoutOperations(app.ctx.db);
   return token;
 }
-
-export const as = (token: string) => ({ cookies: { hh_session: token } });
 
 type Access = { whole: true } | { departments?: string[]; teams?: string[] };
 
@@ -222,15 +173,6 @@ export function connectNode(url: string, key: string, opts: { autoPong?: boolean
       }),
     );
   });
-}
-
-/* Waits until check() is true, for state that changes after a socket message. */
-export async function until(check: () => Promise<boolean> | boolean, ms = 2000): Promise<void> {
-  const end = Date.now() + ms;
-  while (!(await check())) {
-    if (Date.now() > end) throw new Error('Timed out waiting.');
-    await new Promise(r => setTimeout(r, 15));
-  }
 }
 
 /* Starts the app on a free local port and returns the node socket address. */

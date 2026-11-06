@@ -68,7 +68,8 @@ export const MaterialView = viewSchema.refine(validView, 'Mismatched material id
 export type MaterialView = z.infer<typeof MaterialView>;
 export const MaterialManifest = z.strictObject({
   materialRevision: Revision, materialDigest: Digest,
-  common: z.array(MaterialView).max(MATERIAL_LIMITS.perList),
+  // Legacy questions may carry six images plus their link and commit URL.
+  common: z.array(MaterialView).max(MATERIAL_LIMITS.perList + 2),
   options: z.array(z.strictObject({ id: UUID, materials: z.array(MaterialView).max(MATERIAL_LIMITS.perList) })).max(MATERIAL_LIMITS.options),
 }).refine(materialMetadataFits, 'Oversized material metadata.');
 export type MaterialManifest = z.infer<typeof MaterialManifest>;

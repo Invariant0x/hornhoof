@@ -4,11 +4,29 @@ import { PROVIDER_IDS } from './providers.js';
 /* The frozen contract of a check made by a model (#403, section 10). Every object is strict, so a field nobody agreed on
    is refused at the edge. Whatever decides anything, like a must-block example or the identity on a receipt, is built by
    the server from what it really called, not read from a model's words. */
-const Sha256 = z.string().regex(/^[0-9a-f]{64}$/);
+export const Sha256 = z.string().regex(/^[0-9a-f]{64}$/);
 const Uuid = z.uuid();
-const Utc = z.iso.datetime();
+export const UtcTime = z.iso.datetime();
 const Label = z.string().min(1);
 const Count = z.number().int().nonnegative();
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> => {
+  if (value === null || typeof value !== 'object') return false;
+  const prototype: unknown = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+};
+const isJsonLeaf = (value: unknown): boolean => value === null || typeof value === 'string' || typeof value === 'boolean' || Number.isFinite(value);
+
+function sortedValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortedValue);
+  if (isPlainObject(value)) return Object.fromEntries(Object.entries(value).sort(([a], [b]) => (a < b ? -1 : 1)).map(([key, item]) => [key, sortedValue(item)]));
+  if (isJsonLeaf(value)) return value;
+  throw new TypeError('canonicalJson takes JSON values only');
+}
+
+/* The one way to the bytes of a digest: UTF-8 JSON with sorted keys and no spaces. A value JSON would quietly change, like a
+   date that becomes an empty object or a NaN that becomes null, is refused rather than hashed to the same digest as others. */
+export const canonicalJson = (value: unknown): string => JSON.stringify(sortedValue(value));
 
 export const MODEL_CHECK_KINDS = ['outbound_review', 'support_reply_review', 'support_classification'] as const;
 export type ModelCheckKind = (typeof MODEL_CHECK_KINDS)[number];
@@ -83,7 +101,7 @@ export const Case = z.strictObject({
   expected: z.union([z.strictObject({ decision: z.enum(['allow', 'block']) }), z.strictObject({ classId: Label, requiresHuman: z.boolean() })]),
   mustBlock: z.boolean(),
   labelledBy: z.strictObject({ kind: z.enum(['person', 'agent']), id: Uuid }),
-  labelledAt: Utc,
+  labelledAt: UtcTime,
   sourceIncidentId: Uuid.nullable(),
 });
 export type Case = z.infer<typeof Case>;
@@ -99,7 +117,7 @@ export type CheckReceipt = z.infer<typeof CheckReceipt>;
 export const CheckUnavailable = z.strictObject({ kind: z.literal('unavailable'), code: z.enum(['unavailable', 'invalid_output', 'uncertified', 'vendor_conflict']) });
 export type CheckUnavailable = z.infer<typeof CheckUnavailable>;
 
-export const CertifiedCheck = z.strictObject({ certificateId: Uuid, bindingDigest: Sha256, reportId: Uuid, evaluatedAt: Utc, validUntil: Utc, status: z.literal('active') });
+export const CertifiedCheck = z.strictObject({ certificateId: Uuid, bindingDigest: Sha256, reportId: Uuid, evaluatedAt: UtcTime, validUntil: UtcTime, status: z.literal('active') });
 export type CertifiedCheck = z.infer<typeof CertifiedCheck>;
 
 /* Mistakes by kind and, for classes, what each was taken for: never one accuracy that hides an unsafe allow. */
@@ -107,5 +125,5 @@ export const EvaluationCounts = z.strictObject({ falseAllows: Count, falseDenies
 export type EvaluationCounts = z.infer<typeof EvaluationCounts>;
 
 /* What only the trusted evaluator publishes. It is no certificate: whether one follows is the gate's decision. */
-export const VerifiedEvaluation = z.strictObject({ bindingDigest: Sha256, reportId: Uuid, datasetHash: Sha256, complete: z.boolean(), infraErrors: Count, mustBlockMisses: Count, metrics: EvaluationCounts, holdoutMetrics: EvaluationCounts, evaluatedAt: Utc });
+export const VerifiedEvaluation = z.strictObject({ bindingDigest: Sha256, reportId: Uuid, datasetHash: Sha256, complete: z.boolean(), infraErrors: Count, mustBlockMisses: Count, metrics: EvaluationCounts, holdoutMetrics: EvaluationCounts, evaluatedAt: UtcTime });
 export type VerifiedEvaluation = z.infer<typeof VerifiedEvaluation>;

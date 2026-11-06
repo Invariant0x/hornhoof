@@ -14,7 +14,7 @@ sources: [obra/superpowers skills/subagent-driven-development/SKILL.md, affaan-m
 
 The turn ends with one review, one final check, then the release with the CEO's approval of the exact commit.
 
-- **Checks by stage (T3).** On a task and in the review, the executor and every reviewer run only what the change touches under T2. Nobody needs anyone's permission to run them. Use this same table everywhere:
+- **Checks by stage (T3).** On a task and in the review, the executor and every reviewer run only what the change touches under T2, sending heavy checks through `run_tests` on a free machine (hh-run-checks). Nobody needs anyone's permission to run them. Use this same table everywhere:
 
 | Stage | Checks |
 |---|---|
