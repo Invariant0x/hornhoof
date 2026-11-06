@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import type { CatalogValue, OutboundPolicyValue, OutboundSubmit } from '@hornhoof/protocol';
+import type { CatalogValue, OutboundPolicyValue, OutboundSubmit, ProviderId } from '@hornhoof/protocol';
 import { eq } from 'drizzle-orm';
 import type { Deps } from '../src/app.js';
 import { encryptSecret } from '../src/crypto/secrets.js';
-import { modelChecks, outboundAccounts, outboundBindings, outboundCatalogRevisions, outboundChannels, outboundContacts, outboundMessages, outboundPermissions, outboundPolicies } from '../src/db/schema.js';
+import { modelChecks, outboundAccounts, outboundBindings, outboundCatalogRevisions, outboundChannels, outboundContacts, outboundMessages, outboundPermissions, outboundPolicies, subscriptions } from '../src/db/schema.js';
 import { digestOf } from '../src/modules/outbound/checks.js';
 import { recipientDigest } from '../src/modules/outbound/contacts.js';
 import { beginDispatch, recordReview, reserveDispatch, submitOutbound, type Authority, type Review } from '../src/modules/outbound/core.js';
@@ -121,6 +121,13 @@ export async function dispatched(w: World, messageId: string, now?: Date) {
 export const reviewReceipt = (messageId: string, contentDigest: string, decision: 'allow' | 'block' | 'escalate', checkId: string, bindingDigest: string): Review => ({
   messageId, revision: 1, checkId, bindingDigest, subjectDigest: contentDigest, reviewer: checkBinding().model, result: { kind: 'review', decision, reasonCodes: [] },
 });
+/* An API key of a provider, on a plan of the company's own. */
+export async function aKeyOf(c: Pick<Base, 'db' | 'companyId' | 'app'>, provider: ProviderId, secret: string) {
+  const [plan] = await c.db.select().from(subscriptions).limit(1);
+  const values = { companyId: c.companyId, provider, kind: 'api_key', label: `${provider} key`, ownerPersonId: plan!.ownerPersonId, secretEnc: encryptSecret(secret, c.app.ctx.config.secret), last4: secret.slice(-4), status: plan!.status } as const;
+  return (await c.db.insert(subscriptions).values(values).returning())[0]!;
+}
+
 /* The check of this department as certified now, which only a passed run does in real life. */
 export async function aCertifiedCheck(w: World) {
   const bindingDigest = sha('this binding');

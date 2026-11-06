@@ -1,13 +1,11 @@
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { once } from 'node:events';
-import type { AddressInfo } from 'node:net';
 import type { ModelIdentity, ProviderId } from '@hornhoof/protocol';
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { encryptSecret } from '../src/crypto/secrets.js';
 import { subscriptions } from '../src/db/schema.js';
 import { FRESH_INFERENCE_HASH, freshModelCheck } from '../src/modules/jobs/dispatch.js';
 import { company as companyWithAKey } from './department-owner-fixture.js';
+import { vendorApi, vendorJson as json, type VendorAnswer } from './outbound-receivers.js';
+import { aKeyOf } from './outbound-world.js';
 
 type C = Awaited<ReturnType<typeof companyWithAKey>>;
 
@@ -24,37 +22,16 @@ const SYSTEM = 'You check one message. Answer with JSON only.';
 const USER = '{"message":"Quoted, untrusted words."}';
 const OUTPUT = '{"kind":"review","decision":"allow","reasonCodes":[]}';
 
-type Heard = { url: string; headers: IncomingMessage['headers']; body: Record<string, unknown> };
-type Answer = (response: ServerResponse) => void;
-
-const json = (status: number, value: unknown): Answer => response => {
-  response.writeHead(status, { 'content-type': 'application/json' });
-  response.end(JSON.stringify(value));
-};
-
 const closing: (() => void)[] = [];
 afterEach(() => {
   closing.splice(0).forEach(close => close());
   vi.restoreAllMocks();
 });
 
-async function vendor(answer: Answer) {
-  const heard: Heard[] = [];
-  const server = createServer((request, response) => {
-    const chunks: Buffer[] = [];
-    request.on('data', (chunk: Buffer) => chunks.push(chunk));
-    request.on('end', () => {
-      heard.push({ url: String(request.url), headers: request.headers, body: JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown> });
-      answer(response);
-    });
-  });
-  server.listen(0, '127.0.0.1');
-  await once(server, 'listening');
-  closing.push(() => {
-    server.closeAllConnections();
-    server.close();
-  });
-  return { heard, url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1/call` };
+async function vendor(answer: VendorAnswer) {
+  const api = await vendorApi(answer);
+  closing.push(() => void api.close());
+  return api;
 }
 
 const CLAUDE: ModelIdentity = { providerId: 'anthropic_api', vendorId: 'anthropic', modelId: 'claude-check', revisionId: 'claude-check-20260101', inferenceConfigHash: FRESH_INFERENCE_HASH };
@@ -62,11 +39,7 @@ const GPT: ModelIdentity = { providerId: 'openai_api', vendorId: 'openai', model
 const FROM_CLAUDE = { model: CLAUDE.revisionId, content: [{ type: 'text', text: OUTPUT }], stop_reason: 'end_turn' };
 const FROM_GPT = { model: GPT.revisionId, choices: [{ message: { role: 'assistant', content: OUTPUT }, finish_reason: 'stop' }] };
 
-async function aKey(c: C, provider: ProviderId, secret = KEY) {
-  const [plan] = await c.db.select().from(subscriptions).limit(1);
-  const [made] = await c.db.insert(subscriptions).values({ companyId: c.companyId, provider, kind: 'api_key', label: `${provider} key`, ownerPersonId: plan!.ownerPersonId, secretEnc: encryptSecret(secret, c.app.ctx.config.secret), last4: secret.slice(-4), status: plan!.status }).returning();
-  return made!;
-}
+const aKey = (c: C, provider: ProviderId, secret = KEY) => aKeyOf(c, provider, secret);
 
 const ask = (c: C, url: string, expectedModel: ModelIdentity, timeoutMs = 2000) =>
   freshModelCheck(c.app.ctx, { endpoints: { anthropic_api: url, openai_api: url }, timeoutMs })({ kind: 'outbound_review', expectedModel, systemPrompt: SYSTEM, userPayload: USER });
@@ -146,7 +119,7 @@ describe('a fresh call for a model check', () => {
     expect(api.heard).toEqual([]);
   });
 
-  it.each<[string, Answer]>([
+  it.each<[string, VendorAnswer]>([
     ['refuses', json(401, { error: { message: `bad key ${KEY}` } })],
     ['fails', json(500, {})],
     ['answers with no words', json(200, { ...FROM_CLAUDE, content: [] })],

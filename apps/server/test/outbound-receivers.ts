@@ -1,5 +1,5 @@
 import { once } from 'node:events';
-import type { IncomingMessage, ServerResponse } from 'node:http';
+import { createServer as createHttp, type IncomingHttpHeaders, type IncomingMessage, type ServerResponse } from 'node:http';
 import { createServer as createHttps, type Server as HttpsServer } from 'node:https';
 import { createServer as createPlain, type AddressInfo, type Socket } from 'node:net';
 import { createServer as createTls, type TLSSocket } from 'node:tls';
@@ -233,3 +233,32 @@ export const wordsOf = (raw: Buffer) => {
   return body.replace(/\r\n/g, '\n');
 };
 export const subjectOf = (raw: Buffer) => (header(parts(raw).headers, 'subject') ?? '').replace(/=\?utf-8\?B\?([^?]+)\?=\s?/gi, (_all, word: string) => Buffer.from(word, 'base64').toString('utf8'));
+
+/* A vendor's API stands in as a real HTTP server on this machine, so a call is seen as it really goes. */
+export type VendorCall = { url: string; headers: IncomingHttpHeaders; body: Record<string, unknown> };
+export type VendorAnswer = (response: ServerResponse, call: VendorCall) => void;
+
+export const vendorJson = (status: number, value: unknown): VendorAnswer => response => {
+  response.writeHead(status, { 'content-type': 'application/json' });
+  response.end(JSON.stringify(value));
+};
+
+export async function vendorApi(answer: VendorAnswer) {
+  const heard: VendorCall[] = [];
+  const server = createHttp((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on('data', (chunk: Buffer) => chunks.push(chunk));
+    request.on('end', () => {
+      const call = { url: String(request.url), headers: request.headers, body: JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown> };
+      heard.push(call);
+      answer(response, call);
+    });
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const close = async () => {
+    server.closeAllConnections();
+    server.close();
+  };
+  return { heard, url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1/call`, close };
+}

@@ -1,4 +1,5 @@
 import { closeCheckQueue } from './modules/nodes/check-slots.js';
+import type { ProviderId } from '@hornhoof/protocol';
 import cookie from '@fastify/cookie';
 import websocket from '@fastify/websocket';
 import Fastify, { LogController, type FastifyBaseLogger, type FastifyInstance, type FastifyServerOptions } from 'fastify';
@@ -57,7 +58,7 @@ import type { Db } from './db/client.js';
 import { readCompare, type CompareReader } from './modules/testruns/compare.js';
 
 /* logger is off unless given: tests stay quiet, main.ts turns it on so errors reach the container log. */
-export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logger']; agentSql?: AgentSql | null; readCommit?: CommitReader; markCommit?: CommitMarker; readCompare?: CompareReader };
+export type Deps = { db: Db; config: Config; logger?: FastifyServerOptions['logger']; agentSql?: AgentSql | null; vendorUrls?: Partial<Record<ProviderId, string>>; readCommit?: CommitReader; markCommit?: CommitMarker; readCompare?: CompareReader };
 
 /* What routes get: the deps, the live node connections, the live stream to browsers, the terminals people watch, the
    check for newer builds, access to the computer the server runs on, the company's public link, the commit a

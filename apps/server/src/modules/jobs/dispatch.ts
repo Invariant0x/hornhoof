@@ -141,7 +141,7 @@ const directFor = (expected: ModelIdentity): Direct | null => {
 async function askDirect(ctx: Ctx, direct: Direct, request: FreshModelRequest, options: FreshOptions): Promise<Spoken | null> {
   const key = await keyOf(ctx, request.expectedModel.providerId);
   if (!key) return null;
-  const url = options.endpoints?.[request.expectedModel.providerId] ?? direct.url;
+  const url = (options.endpoints ?? ctx.vendorUrls)?.[request.expectedModel.providerId] ?? direct.url;
   return direct.heard(await callVendor(url, direct.call(request, key), options.timeoutMs ?? FRESH_TIMEOUT_MS));
 }
 

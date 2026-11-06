@@ -33,7 +33,8 @@ export const liveSenders = (given: Partial<Senders> = {}): Senders => ({ smtp: s
 export const smtpSettings = (port: number, more: object = {}) => ({ host: 'localhost', port, security: 'tls', username: USERNAME, password: PASSWORD, from: FROM, eventKey: EVENT_KEY, ca: CERT, ...more });
 export const hookSettings = (endpoint: string, more: object = {}) => ({ endpoint, signingKey: SIGNING_KEY, ca: CERT, ...more });
 
-const askOwner = async (w: World, url: string, payload: object) => {
+type Owned = { c: Pick<World['c'], 'app' | 'ceoToken'> };
+const askOwner = async (w: Owned, url: string, payload: object) => {
   const answer = await w.c.app.inject({ method: 'POST', url, payload, ...as(w.c.ceoToken) });
   if (answer.statusCode !== 200) throw new Error(`${url} answered ${answer.statusCode}: ${answer.body}`);
   return answer.json() as Record<string, unknown>;
@@ -47,7 +48,7 @@ export async function onNewAccount(w: World, channelId: string, config: object, 
   return accountId;
 }
 
-export const rotateTo = (w: World, accountId: string, config: object) => askOwner(w, `/api/outbound/accounts/${accountId}/rotate`, { config });
+export const rotateTo = (w: Owned, accountId: string, config: object) => askOwner(w, `/api/outbound/accounts/${accountId}/rotate`, { config });
 export const settleAs = (w: World, attemptId: string, outcome: string) => askOwner(w, `/api/outbound/attempts/${attemptId}/settle`, { outcome, evidence: 'Asked the provider.' });
 
 /* What an author submits with once its account changed. */
