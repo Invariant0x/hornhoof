@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, type ExecFileException } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { repoFolder, type ExternalGitOutcome, type Workspace } from '@hornhoof/protocol';
@@ -30,10 +30,14 @@ export function gitPreparationFailure(outcome: ChildOutcome, network: boolean, s
   return new GitPreparationError({ ...outcome, stderr: text.slice(-8192), stderrTruncated: outcome.stderrTruncated || text.length > 8192 }, network, action);
 }
 
+function childFailure(error: ExecFileException, stderr: string): ChildOutcome {
+  return { kind: 'child', exitCode: typeof error.code === 'number' ? error.code : null, signal: error.signal ?? null, osCode: typeof error.code === 'string' ? error.code : null, stderr, stderrTruncated: false };
+}
+
 const realGit: Git = (args, { cwd, env, user }) =>
   new Promise((resolve, reject) => {
     execFile('/usr/bin/git', args, { cwd, env, uid: user?.uid, gid: user?.gid, timeout: GIT_TIMEOUT_MS, maxBuffer: 1 << 20 }, (err, stdout, stderr) => {
-      if (err) reject(gitPreparationFailure({ kind: 'child', exitCode: typeof err.code === 'number' ? err.code : null, signal: err.signal ?? null, osCode: typeof err.code === 'string' ? err.code : null, stderr: String(stderr), stderrTruncated: false }, ['clone', 'fetch', 'ls-remote'].includes(args[0] ?? ''), [env.HH_GIT_PASSWORD ?? ''], args[0]));
+      if (err) reject(gitPreparationFailure(childFailure(err, String(stderr)), ['clone', 'fetch', 'ls-remote'].includes(args[0] ?? ''), [env.HH_GIT_PASSWORD ?? ''], args[0]));
       else resolve(String(stdout).trim());
     });
   });
