@@ -987,6 +987,12 @@ export const en = {
     closedOutside: (n: number) => `Closed outside turns: ${n}`,
     waiting: 'Waiting for you',
     nothingWaiting: 'Nothing waits for you.',
+    machineAway: (host: string, owner: string | null) => (owner ? `Machine ${host} (${owner}) is offline` : `Machine ${host} is offline`),
+    machineAwaySince: (at: string, agents: number) => `Offline since ${at}. Agents on it: ${agents}.`,
+    machineAwayKinds: { orchestrator: 'orchestrator', head: 'head' },
+    machineAwayImportant: (names: string) => `Among them: ${names}.`,
+    machineAwayDo: 'What to do: switch it on and plug it in, sign in to the account, check that Docker has started.',
+    machineBack: (host: string, at: string) => `Machine ${host} is back: ${at}.`,
     /* The decisions screen opened from a person's card shows theirs until the filter is taken off. */
     decisionsFor: (name: string) => `Decisions for ${name}`,
     someone: 'this person',

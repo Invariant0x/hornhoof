@@ -11,6 +11,25 @@ const fullRef = (value: string): boolean => value.startsWith('refs/') && !forbid
 const Ref = z.string().max(1024).refine(fullRef, 'Expected one full literal Git ref.');
 const SourceRef = z.union([Ref, z.literal('HEAD')]);
 
+function configuredRefspec(value: string): boolean {
+  const parts = (value.startsWith('+') ? value.slice(1) : value).split(':');
+  if (parts.length !== 2) return false;
+  const [source, destination] = parts as [string, string];
+  const sourceStars = source.split('*').length - 1;
+  const destinationStars = destination.split('*').length - 1;
+  return sourceStars <= 1 && sourceStars === destinationStars && destination.startsWith('refs/remotes/')
+    && Ref.safeParse(source.replace('*', 'x')).success && Ref.safeParse(destination.replace('*', 'x')).success;
+}
+
+/* A frozen fetch map, not argv. Runtime admission also verifies the Git version,
+   effective endpoint, branch state and absence of inherited alias settings. */
+export const ConfiguredRefspec = z.string().max(2050).refine(configuredRefspec, 'Expected one configured fetch refspec.');
+export type ConfiguredRefspec = z.infer<typeof ConfiguredRefspec>;
+const ConfiguredBranch = z.string().max(1024).regex(/^[A-Za-z0-9][A-Za-z0-9._/-]*$/)
+  .refine(value => Ref.safeParse(`refs/heads/${value}`).success, 'Expected one branch name.');
+const ConfiguredMerge = z.strictObject({ branch: ConfiguredBranch.nullable(), refs: z.array(SourceRef).max(16) })
+  .refine(value => value.branch !== null || value.refs.length === 0, 'Detached HEAD has no branch merge refs.');
+
 /* These are immutable selectors, not executable argv or a repository grant.
    The producer resolves repository and credential authority separately. */
 export const ExternalGitIntent = z.discriminatedUnion('kind', [
@@ -18,6 +37,7 @@ export const ExternalGitIntent = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('git_fetch'), repositoryId: Id, target: z.discriminatedUnion('kind', [
     z.strictObject({ kind: z.literal('commit'), commitSha: Commit }),
     z.strictObject({ kind: z.literal('refspec'), sourceRef: SourceRef, destinationRef: Ref.optional() }),
+    z.strictObject({ kind: z.literal('configured'), refspecs: z.array(ConfiguredRefspec).min(1).max(16), merge: ConfiguredMerge }),
   ]) }),
   z.strictObject({ kind: z.literal('git_refs'), repositoryId: Id, selector: SourceRef }),
 ]);

@@ -384,9 +384,10 @@ describe('templates', () => {
     const changed = 'git diff --name-only --diff-filter=d';
     for (const id of ['dev-engineering-rules', 'dev-review-diff']) expect(templates.skills.get(id)!.body, id).toContain(changed);
     expect(templates.skills.get('dev-review-diff')!.body).toMatch(/crapper[\s\S]*dryer/);
-    /* They are as objective as a failing test, so they block; the developer runs them before submitting. */
+    /* Shared final metrics keep their gates, but authors do not run them before submitting. */
     expect(templates.skills.get('dev-review-diff')!.body).toMatch(/0\.8 or more is blocking, like a failing test/);
-    expect(templates.skills.get('dev-review-diff')!.body).toMatch(/runs them before submitting/);
+    expect(templates.skills.get('dev-review-diff')!.body).not.toMatch(/developer runs them before submitting/);
+    expect(templates.skills.get('dev-review-diff')!.body).toMatch(/test engineer or QA[\s\S]*shared final check/);
     expect(templates.skills.get('dev-review-verdict')!.body).toMatch(/CRAP 10 or more[\s\S]*counts as a failing test/);
     expect(templates.skills.get('dev-test-gaps')!.body).toContain('break the code on purpose');
     for (const s of skills.filter(x => x.id.startsWith('dev-'))) expect(s.body, s.id).not.toMatch(/(crapper|dryer|mutator) --changed/);
@@ -408,7 +409,7 @@ describe('templates', () => {
   it('keeps test selection, release mutation testing and evidence rules consistent', () => {
     const body = (id: string) => templates.skills.get(id)!.body;
     const policy = body('dev-engineering-rules');
-    for (const words of ['pure functions', 'direct fast tests', 'integration tests', 'real database', 'vitest related', 'jest --findRelatedTests', 'pytest --testmon', 'cargo test -p', 'new test file always runs', 'selection miss', 'once per release or phase', 'fast tests', 'CRAP and change size', 'money, access and security', '--root .', 'killed, survived, uncovered, compile_error and timeout', 'zero tests fails the run', 'Do not mass-rewrite old slow tests', 'low coverage alone is not a finding', 'median of its package', 'financial recomputation', 'false accepts and false rejects', 'versioned set of examples', 'F.I.R.S.T.', 'shuffled order', 'same commit', 'any result a success', 'already completed run', 'second coverage run']) {
+    for (const words of ['pure functions', 'direct fast tests', 'integration tests', 'real database', 'vitest related', 'jest --findRelatedTests', 'pytest --testmon', 'cargo test -p', 'new test file always runs', 'selection miss', 'once per turn on the final candidate', 'fast tests', 'CRAP and change size', 'money, access and security', '--root .', 'killed, survived, uncovered, compile_error and timeout', 'zero tests fails the run', 'Do not mass-rewrite old slow tests', 'low coverage alone is not a finding', 'median of its package', 'financial recomputation', 'false accepts and false rejects', 'versioned set of examples', 'F.I.R.S.T.', 'shuffled order', 'same commit', 'any result a success', 'already completed run', 'second coverage run']) {
       expect(policy, words).toContain(words);
     }
     const table = (text: string) => text.split('\n').filter(line => line.startsWith('|')).join('\n');
@@ -436,13 +437,14 @@ describe('templates', () => {
     }
   });
 
-  it('pins legacy characterization, requirement evidence and the assigned release reviewer', () => {
+  it('pins legacy characterization, requirement evidence and tester-owned final mutation checks', () => {
     const body = (id: string) => templates.skills.get(id)!.body;
     expect(body('dev-tdd')).toContain('A characterization test of legacy code passes immediately, and that is correct');
     for (const id of ['dev-implement', 'dev-tdd']) expect(body(id), id).toContain('four task kinds');
     for (const id of ['dev-implement', 'dev-review-verdict']) expect(body(id), id).toMatch(/verification before (saying )?done/);
     expect(templates.roles.get('DEV-HEAD')!.body).toMatch(/four task kinds/);
-    expect(templates.roles.get('DEV-REV')!.body).toMatch(/one reviewer named by the head/);
+    expect(templates.roles.get('DEV-REV')!.body).toMatch(/test engineer or QA/);
+    expect(templates.roles.get('DEV-REV')!.body).not.toMatch(/runs mutator/);
     expect(body('dev-review-diff')).toMatch(/T4/);
     expect(body('dev-review-diff')).toMatch(/repository root/);
     expect(body('dev-review-diff')).toMatch(/selection and its reason/);
@@ -608,7 +610,8 @@ describe('templates', () => {
     expect(test.gate).toBeNull();
     expect(test.body).toMatch(/never a gate on a task/);
     const gates = body('dev-gates');
-    expect(gates).toMatch(/to the test engineer, or to the DevOps engineer when there is none, or runs run_tests itself when there is neither, never to a developer/);
+    expect(gates).toMatch(/head assigns a test engineer or QA[\s\S]*once per turn[\s\S]*final pinned commit/);
+    expect(gates).not.toMatch(/or runs run_tests itself when there is neither/);
     expect(gates).toMatch(/only what failed and the tests around it/);
     for (const id of ['dev-review-diff', 'dev-review-verdict']) expect(body(id), id).toMatch(/old complexity/);
   });
@@ -1628,5 +1631,123 @@ describe('outbound and support gateway templates', () => {
     expect(templates.roles.get('SUP-T2')!.body).toMatch(/\bdepartment owner\b/i);
     expect(templates.roles.get('SUP-KB')!.body).toMatch(/\bcatalog\b/i);
     expect(templates.roles.get('SUP-HEAD')!.body).toMatch(/\bdepartment owner\b/i);
+  });
+});
+
+type ImpactSelectionSkills = { implement: string; gates: string; engineering: string };
+
+const inHornhoofSection = (engineering: string): string => {
+  const start = engineering.indexOf('### In Hornhoof');
+  if (start === -1) return '';
+  const rest = engineering.slice(start);
+  const next = rest.indexOf('\n### ', 4);
+  return next === -1 ? rest : rest.slice(0, next);
+};
+
+const IMPACT_SELECTION_RULES: { id: string; holds: (s: ImpactSelectionSkills) => boolean }[] = [
+  {
+    id: 'author-dependent-tests-via-run-tests-and-new-tests-always',
+    holds: s =>
+      forEvery([s.implement, s.gates, s.engineering], text =>
+        matchesAll(text, [
+          /\brun_tests\b/,
+          /\b(?:dependent|selected|affected)\s+tests?\b/i,
+          /\bnew(?:ly\s+added)?\s+test\b[\s\S]*\balways\b|\balways\b[\s\S]*\bnew(?:ly\s+added)?\s+test\b/i,
+        ]),
+      ) &&
+      matchesAll(s.implement, [
+        /\bselector input\b[\s\S]*\bselected inventory\b[\s\S]*\bfallback reasons?\b/i,
+        /\brun\b[\s\S]*\bpart\b[\s\S]*\bcommit\b/i,
+      ]) &&
+      forbidsAll(`${s.implement}\n${s.gates}\n${s.engineering}`, [
+        /\bskip\w*\s+new(?:ly\s+added)?\s+tests?\s+when\s+no\s+graph\s+edge\s+reaches\s+them\b/i,
+      ]),
+  },
+  {
+    id: 'outside-graph-uncertain-whole-package-and-migrations-up-down',
+    holds: s => {
+      const hh = inHornhoofSection(s.engineering);
+      return (
+        matchesAll(hh, [
+          /\bmigrations\b[\s\S]*\bschema\b[\s\S]*\bconfiguration\b[\s\S]*\benvironment\b[\s\S]*\broutes\b[\s\S]*\bfixtures\b[\s\S]*\bstring tables\b[\s\S]*\bscripts\b[\s\S]*\binstallation\b[\s\S]*\bupdates\b[\s\S]*\bshared packages\b[\s\S]*\bAPI contracts\b[\s\S]*\btemplates\b/i,
+          /\bup and down\b/i,
+          /\bunsupported\b[^.!?]*\breport\b/i,
+        ]) &&
+        forEvery([s.implement, s.gates, hh], text =>
+          matchesAll(text, [
+            /\b(?:outside\s+(?:the\s+)?import\s+graphs?|outside\s+import\s+graphs?)\b/i,
+            /\b(?:complete\s+affected\s+packages?|whole\s+package)\b/i,
+            /\bup and down\b/i,
+          ]),
+        ) &&
+        forbidsAll(`${s.implement}\n${s.gates}\n${s.engineering}`, [
+          /\btreat\w*\s+an\s+unavailable\s+adapter\s+as\s+an\s+empty\s+selection\b/i,
+          /\brun\w*\s+migrations?\s+up\s+only\s+without\s+reporting\b/i,
+        ])
+      );
+    },
+  },
+  {
+    id: 'explicit-selector-commands-no-auto-promise-and-execution-distinct',
+    holds: s => {
+      const hh = inHornhoofSection(s.engineering);
+      return (
+        matchesAll(hh, [
+          /scripts\/test\/impact-README\.md/,
+          /scripts\/test\/related-probe\.mjs/,
+          /scripts\/test\/impact-python\/pytest_impact\.py/,
+          /scripts\/test\/replay-impact\.mjs/,
+          /\bNOT_RUN\b/,
+        ]) &&
+        matchesAll(s.implement, [/scripts\/test/, /\bNOT_RUN\b/]) &&
+        matchesAll(s.gates, [
+          /scripts\/test/,
+          /\bcollected graph\b[\s\S]*\bcompleted\b[^.!?]*\breceipts?\b/i,
+          /\bunavailable\b[^.!?]*\bnot\s+zero\s+misses\b/i,
+          /\btest engineer\b/i,
+        ]) &&
+        forbidsAll(`${s.implement}\n${s.gates}\n${s.engineering}`, [
+          /\brun_tests\s+automatically\s+selects\s+impact\s+tests\s+from\s+the\s+test\s+environment\b/i,
+          /\btreat\w*\s+a\s+collected\s+graph\s+as\s+completed\s+test\s+execution\b/i,
+          /\btreat\w*\s+missing\s+comparator\s+evidence\s+as\s+zero\s+misses\b/i,
+        ])
+      );
+    },
+  },
+  {
+    id: 'abstract-english-no-dates-names-or-numbers',
+    holds: s => {
+      const combined = `${s.implement}\n${s.gates}\n${inHornhoofSection(s.engineering)}`;
+      return !/\b(?:david|ivan|simon|Russian|English)\b|\bturn\s+7\b|#\d+|\b202\d-\d{2}-\d{2}\b|\b\d{1,2}\.\d{1,2}\b|\bv?\d+\.\d+\.\d+\b|[\u2014\u0451\u0401]/i.test(combined);
+    },
+  },
+];
+
+describe('T2 impact-selection rules across dev-implement, dev-gates and In Hornhoof', () => {
+  const impactSkills = (): ImpactSelectionSkills => ({
+    implement: templates.skills.get('dev-implement')!.body,
+    gates: templates.skills.get('dev-gates')!.body,
+    engineering: templates.skills.get('dev-engineering-rules')!.body,
+  });
+
+  it('teaches explicit impact selection, whole-package fallbacks, bidirectional migrations, execution vs collection evidence, and explicit scripts/test commands without promising unshipped runner wiring', () => {
+    const current = impactSkills();
+    expect(inHornhoofSection(current.engineering).length).toBeGreaterThan(200);
+    expect(failedRuleIds(IMPACT_SELECTION_RULES, current)).toEqual([]);
+  });
+
+  it('rejects skill text that promises unshipped automatic runner selection, conflates graph collection with execution, skips new tests, or leaks dates, names or task numbers', () => {
+    const base = impactSkills();
+    expect(failedRuleIds(IMPACT_SELECTION_RULES, base)).toEqual([]);
+    const cases: [keyof ImpactSelectionSkills, string, string][] = [
+      ['implement', 'Skip newly added tests when no graph edge reaches them.', 'author-dependent-tests-via-run-tests-and-new-tests-always'],
+      ['engineering', 'Treat an unavailable adapter as an empty selection and run migrations up only without reporting.', 'outside-graph-uncertain-whole-package-and-migrations-up-down'],
+      ['gates', 'Today run_tests automatically selects impact tests from the test environment.', 'explicit-selector-commands-no-auto-promise-and-execution-distinct'],
+      ['gates', 'Treat a collected graph as completed test execution and treat missing comparator evidence as zero misses.', 'explicit-selector-commands-no-auto-promise-and-execution-distinct'],
+      ['implement', 'Added by David on 2026-11-06 for #309 against turn 7.', 'abstract-english-no-dates-names-or-numbers'],
+    ];
+    for (const [target, extra, expectedRule] of cases) {
+      expect(failedRuleIds(IMPACT_SELECTION_RULES, { ...base, [target]: `${base[target]}\n${extra}` }), extra).toContain(expectedRule);
+    }
   });
 });

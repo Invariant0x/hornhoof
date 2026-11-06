@@ -9,12 +9,15 @@ import type { Db } from '../../db/client.js';
 import { ApiError } from '../../errors.js';
 import { mayChangeRules, ownDepartment } from '../departments/approval-policy.js';
 import { jobOf } from '../tools/job.js';
+import { accountRoutes } from './accounts.js';
 import { catalogRow, proposeRevision, ProposalInput, publishRevision, requireProductOf, revokeRevision } from './catalog.js';
 import { digestOf } from './checks.js';
 import { addContact, permissionPlace, readUnsubscribeToken, revokePermission, suppressContact, unsubscribe } from './contacts.js';
 import { outboundStatus, submitOutbound } from './core.js';
+import { receiptRoutes } from './dispatcher.js';
 import { addPolicy, channelIn, createChannel, reopenChannel, stopByPerson, type Channel } from './policies.js';
 import { authorityOf } from './tools.js';
+import { outboundViewRoutes } from './views.js';
 
 /* The gateway over HTTP. An agent submits and reads with its job's token, through the same kernel as its tools. A person sets
    up what a message can be made of. The one way in for outsiders is the stop link of a message. No route here reaches a
@@ -196,5 +199,8 @@ export function outboundRoutes(app: FastifyInstance, ctx: Ctx): void {
   channelRoutes(app, ctx);
   catalogRoutes(app, ctx);
   contactRoutes(app, ctx);
+  accountRoutes(app, ctx);
+  receiptRoutes(app, ctx);
+  outboundViewRoutes(app, ctx);
   unsubscribeRoutes(app, ctx);
 }

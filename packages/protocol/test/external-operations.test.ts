@@ -46,6 +46,71 @@ describe('external operation intents', () => {
   });
 });
 
+describe('configured fetch snapshots', () => {
+  const literal = 'refs/heads/main:refs/remotes/origin/main';
+  const glob = '+refs/heads/*:refs/remotes/origin/*';
+  const target = { kind: 'configured', refspecs: [glob], merge: { branch: 'turn-8', refs: ['refs/heads/turn-8'] } };
+  const intent = (value: unknown) => ({ kind: 'git_fetch', repositoryId: ID, target: value });
+
+  it.each([
+    target,
+    { ...target, refspecs: [literal], merge: { branch: null, refs: [] } },
+    { ...target, merge: { branch: 'feature/one', refs: [] } },
+    { ...target, merge: { branch: 'feature/one', refs: ['HEAD', 'refs/heads/main'] } },
+    { ...target, refspecs: Array.from({ length: 16 }, () => literal), merge: { branch: 'main', refs: Array.from({ length: 16 }, () => 'refs/heads/main') } },
+    { ...target, refspecs: [`+refs/${'a'.repeat(1019)}:refs/remotes/${'b'.repeat(1011)}`] },
+  ])('accepts the bounded immutable configured target %#', value => {
+    expect(accepts('ExternalGitIntent', intent(value))).toBe(true);
+  });
+
+  it('preserves refspec and merge order, duplicates and the leading plus', () => {
+    const value = intent({ ...target, refspecs: [literal, glob, literal], merge: { branch: 'main', refs: ['refs/heads/next', 'refs/heads/main', 'refs/heads/next'] } });
+    expect(protocol.ExternalGitIntent.parse(value)).toEqual(value);
+  });
+
+  it.each([
+    '', '^refs/heads/private', 'refs/heads/main', ':refs/remotes/origin/main',
+    'HEAD:refs/remotes/origin/main', 'main:refs/remotes/origin/main',
+    'refs/heads/main:', 'refs/heads/main:refs/heads/main',
+    'refs/heads/main:refs/remotes/origin/main:other',
+    '++refs/heads/*:refs/remotes/origin/*',
+    'refs/heads/*:refs/remotes/origin/main', 'refs/heads/main:refs/remotes/origin/*',
+    'refs/heads/**:refs/remotes/origin/**',
+    'refs/heads/../main:refs/remotes/origin/main',
+    'refs/heads/.hidden:refs/remotes/origin/main',
+    'refs/heads/a.lock:refs/remotes/origin/main',
+    'refs/heads/main:refs/remotes/origin/a.lock',
+    'refs/heads/main:refs/remotes/origin/main/',
+    'refs/heads/a b:refs/remotes/origin/main',
+    'refs/heads/a\nb:refs/remotes/origin/main',
+    `refs/${'a'.repeat(1020)}:refs/remotes/origin/main`,
+    `refs/heads/main:refs/remotes/${'b'.repeat(1012)}`,
+  ])('refuses a malformed or overlong configured refspec %#', refspec => {
+    expect(accepts('ExternalGitIntent', intent({ ...target, refspecs: [refspec] }))).toBe(false);
+  });
+
+  it.each([
+    { ...target, refspecs: [] },
+    { ...target, refspecs: Array.from({ length: 17 }, () => literal) },
+    { ...target, refspecs: [3] },
+    { ...target, merge: undefined },
+    { ...target, merge: { branch: null, refs: ['refs/heads/main'] } },
+    { ...target, merge: { branch: 'main', refs: Array.from({ length: 17 }, () => 'refs/heads/main') } },
+    { ...target, merge: { branch: 'main', refs: ['main'] } },
+    { ...target, merge: { branch: 'main', refs: ['refs/heads/*'] } },
+    { ...target, merge: { branch: 'main', refs: [], remote: 'origin' } },
+    { ...target, observedHead: SHA },
+    { ...target, url: 'https://example.test/repo.git' },
+    { ...target, argv: ['fetch', '--all'] },
+  ])('refuses incomplete, ambiguous or authority-bearing configured targets %#', value => {
+    expect(accepts('ExternalGitIntent', intent(value))).toBe(false);
+  });
+
+  it.each(['', '-main', 'a=b', 'a b', 'a..b', 'a.lock', '.hidden', 'main/', 'a//b', 'a@{b', 'main\nother', 'a'.repeat(1014)])('refuses an unsafe configured branch %#', branch => {
+    expect(accepts('ExternalGitIntent', intent({ ...target, merge: { branch, refs: [] } }))).toBe(false);
+  });
+});
+
 describe('external consumer lifetime', () => {
   it.each([
     consumer,
