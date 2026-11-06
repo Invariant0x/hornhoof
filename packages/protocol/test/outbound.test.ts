@@ -28,6 +28,7 @@ describe('the calls of the outbound gateway, as a reader of the protocol gets th
     ['a submit to a contact', OutboundSubmit, submit],
     ['a submit to an audience', OutboundSubmit, withField(submit, { target: { kind: 'audience', audienceId: randomUUID() } })],
     ['a support reply', SupportSubmit, reply],
+    ['a task by its number sign', OutboundSubmit, withField(submit, { task: '#12' })],
     ['a result that waits', SubmitResult, result],
     ['a refusal with its reason', SubmitResult, withField(result, { status: 'rejected', reasonCodes: ['price_unapproved', 'consent_missing'] })],
     ['a safe status', OutboundMessageView, view],
@@ -106,6 +107,8 @@ describe('the calls of the outbound gateway, as a reader of the protocol gets th
     ['a subject with a new line', CatalogValue, withField(template, { subject: 'Hello\r\nBcc: a@b.example' })],
     ['a text with a control character', CatalogValue, { kind: 'claim', locale: 'en', text: 'Hello\u0007' }],
     ['a template with free parts', CatalogValue, withField(template, { parts: [{ kind: 'script', text: 'x' }] })],
+    ['a template with one slot twice', CatalogValue, withField(template, { parts: [template.parts[1], template.parts[1]] })],
+    ['a template with no parts', CatalogValue, withField(template, { parts: [] })],
     ['a template slot of no known type', CatalogValue, withField(template, { parts: [{ kind: 'slot', slotId: randomUUID(), type: 'html' }] })],
     ['a value of no known kind', CatalogValue, { kind: 'html', text: '<a>' }],
     ['a field with an expression in it', CatalogValue, { kind: 'variable', field: 'contact.first_name || 1' }],
@@ -158,6 +161,14 @@ describe('the bytes a digest is taken of', () => {
 
   it('keep a price as the decimal string it is', () => {
     expect(canonicalJson({ amount: '10.50' })).toBe('{"amount":"10.50"}');
+  });
+
+  it.each([['a date', new Date(0)], ['a number that is not one', Number.NaN], ['an infinity', Number.POSITIVE_INFINITY], ['nothing', undefined], ['a map', new Map()], ['a function', () => 1]])('refuse %s, as JSON would quietly change it', (_name, value) => {
+    expect(() => canonicalJson({ a: value })).toThrow(TypeError);
+  });
+
+  it('take an object with no prototype', () => {
+    expect(canonicalJson(Object.assign(Object.create(null) as object, { b: 1, a: 2 }))).toBe('{"a":2,"b":1}');
   });
 
   it('do not let a key named like a built-in slip away', () => {
