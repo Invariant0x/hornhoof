@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { before, test } from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, URL } from 'node:url';
 import { selectTests } from '../author-check/select.mjs';
 import { selectionPorts, tracked } from '../author-check/wired.mjs';
 
