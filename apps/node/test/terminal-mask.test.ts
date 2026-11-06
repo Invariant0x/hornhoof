@@ -52,3 +52,99 @@ describe('hiding secrets on a live screen', () => {
     expect(mask.push('en ok') + mask.flush()).toBe('en ok');
   });
 });
+
+describe('a control sequence that ends in the first letter of a secret', () => {
+  const VALUE = 'Hsecret-value-1';
+  const SEQUENCE = '\x1b[1;2H';
+  const mask = () => new StreamMask(() => [VALUE]);
+
+  it('goes out at once and whole, as it draws nothing', () => {
+    const m = mask();
+    expect(m.push(`frame${SEQUENCE}`)).toBe(`frame${SEQUENCE}`);
+    expect(m.flush()).toBe('');
+  });
+
+  it.each([['\x1b[0m', 'msecret-value'], ['\x1b[?25h', 'hsecret-value'], ['\x1b[K', 'Ksecret-value'], ['\x1b[1;2H', '2Hsecret-value']])('goes out at once for %j and a secret %s', (sequence, value) => {
+    expect(new StreamMask(() => [value]).push(`frame${sequence}`)).toBe(`frame${sequence}`);
+  });
+
+  it('hides the rest of the secret when it comes after it', () => {
+    const m = mask();
+    expect(m.push(SEQUENCE)).toBe(SEQUENCE);
+    expect(m.push('secret-value-1 end')).toBe('[hidden] end');
+  });
+
+  it('hides the rest of the secret that comes in pieces after it', () => {
+    const m = mask();
+    expect(m.push(SEQUENCE) + m.push('secre') + m.push('t-value-1 end') + m.flush()).toBe(`${SEQUENCE}[hidden] end`);
+  });
+
+  it('hides a whole secret that comes after it', () => {
+    const m = mask();
+    expect(m.push(SEQUENCE) + m.push(`${VALUE} end`) + m.flush()).toBe(`${SEQUENCE}[hidden] end`);
+  });
+
+  it('forgets it when the screen goes on with something else', () => {
+    const m = mask();
+    m.push(SEQUENCE);
+    expect(m.push('plain')).toBe('plain');
+    expect(m.push('secret-value-1')).toBe('secret-value-1');
+  });
+
+  it('shows no secret, wherever the pieces end', () => {
+    const text = `${SEQUENCE}${VALUE} end`;
+    for (let at = 1; at < text.length; at++) {
+      const m = mask();
+      expect(m.push(text.slice(0, at)) + m.push(text.slice(at)) + m.flush(), `split at ${at}`).toBe(`${SEQUENCE}[hidden] end`);
+    }
+  });
+
+  it('shows no rest of a secret right after the sequence, wherever the pieces end', () => {
+    const text = `${SEQUENCE}secret-value-1 end`;
+    for (let at = 1; at < text.length; at++) {
+      const m = mask();
+      const out = m.push(text.slice(0, at)) + m.push(text.slice(at)) + m.flush();
+      expect(out, `split at ${at}`).toContain('[hidden] end');
+      expect(out, `split at ${at}`).not.toContain('secret-value-1');
+    }
+  });
+
+  it('hides each form of a secret the same way', () => {
+    const form = Buffer.from(VALUE).toString('base64');
+    const m = new StreamMask(() => [VALUE]);
+    const sequence = `\x1b[1;2${form[0]}`;
+    expect(m.push(sequence)).toBe(sequence);
+    expect(m.push(`${form.slice(1)} end`)).toBe('[hidden] end');
+  });
+});
+
+describe('what the mask still holds at the end of a piece', () => {
+  it('holds a letter that follows a control sequence', () => {
+    const mask = new StreamMask(() => ['Hsecret-value-1']);
+    expect(mask.push('\x1b[1;2HH')).toBe('\x1b[1;2H');
+    expect(mask.flush()).toBe('H');
+  });
+
+  it('holds a letter alone', () => {
+    const mask = new StreamMask(() => ['Hsecret-value-1']);
+    expect(mask.push('H')).toBe('');
+    expect(mask.flush()).toBe('H');
+  });
+
+  it('holds what could start a secret in a sequence not finished yet', () => {
+    const mask = new StreamMask(() => ['12secret-value']);
+    expect(mask.push('\x1b[12')).toBe('\x1b[');
+  });
+
+  it('holds a whole sequence that a secret starts with', () => {
+    const mask = new StreamMask(() => ['\x1b[1mvalue-1234']);
+    expect(mask.push('text\x1b[1m')).toBe('text');
+  });
+
+  it('holds a start from before a sequence that a secret goes on through', () => {
+    const mask = new StreamMask(() => ['ab\x1b[1mvalue-1234']);
+    expect(mask.push('ab\x1b[1m')).toBe('');
+    expect(mask.push('value-1234 end')).toBe('[hidden] end');
+  });
+});
+
