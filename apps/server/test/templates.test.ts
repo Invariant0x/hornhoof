@@ -529,7 +529,8 @@ describe('templates', () => {
 
   it('has heads give out big pieces at once, answer in comments and leave the work and the status to others', () => {
     const body = (id: string) => templates.skills.get(id)!.body;
-    for (const id of ['hh-lead-tasks', 'hh-break-down']) expect(body(id), id).toMatch(/two to four/);
+    expect(body('hh-lead-tasks')).toMatch(/Give independent blocks to different members at once/);
+    expect(body('hh-break-down')).toMatch(/two to four/);
     for (const id of ['hh-lead-tasks', 'hh-brief-members']) expect(body(id), id).toMatch(/once/);
     /* A comment by whoever gave a blocked task out opens it again and wakes its executor, so a body is written once. */
     for (const id of ['hh-lead-tasks', 'hh-brief-members', 'hh-handle-reports']) expect(body(id), id).toMatch(/"comment"/);
@@ -651,8 +652,8 @@ describe('templates', () => {
 
   it('starts work that waits for another by itself, and has each executor merge into the turn branch', () => {
     for (const id of ['hh-lead-tasks', 'hh-break-down']) expect(templates.skills.get(id)!.body, id).toContain('`after`');
-    expect(templates.skills.get('hh-lead-tasks')!.body).toMatch(/touch(es)? the same files or records goes to the same member, as one batch/);
-    expect(templates.skills.get('hh-lead-tasks')!.body).toMatch(/between different members is only for a finished result/);
+    expect(templates.skills.get('hh-lead-tasks')!.body).toMatch(/each work area has one owner until its task merges/);
+    expect(templates.skills.get('hh-lead-tasks')!.body).toMatch(/Same-file dependencies stay one batch with that owner/);
     expect(templates.skills.get('hh-lead-tasks')!.body).toMatch(/moves or stays with the one it waits on, including when handing work to new employees/);
     for (const id of ['dev-gates', 'dev-ci-release', 'dev-worktrees']) expect(templates.skills.get(id)!.body, id).toContain("the turn's branch");
     expect(templates.roles.get('DEV-OPS')!.body).toContain("the turn's branch");
