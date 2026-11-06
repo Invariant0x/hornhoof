@@ -6,9 +6,10 @@ import { minuteRound } from '../src/modules/agents/timers.js';
 import { reserveDispatch } from '../src/modules/outbound/core.js';
 import { outboundRound } from '../src/modules/outbound/dispatcher.js';
 import { smtpAdapter } from '../src/modules/outbound/smtp.js';
+import { as } from './helpers.js';
 import { EVENT_KEY, FROM, SIGNING_KEY, frozenOf, hookWay, liveSenders, rotateTo, settleAs, smtpSettings, smtpWay, submitByTool } from './outbound-live-world.js';
 import { closedPort, hookReceiver, scriptedSmtp, silentPort, smtpReceiver, subjectOf, wordsOf, type HookRequest } from './outbound-receivers.js';
-import { QUIET, dispatched, world, type World } from './outbound-world.js';
+import { QUIET, anAccountOf, dispatched, world, type World } from './outbound-world.js';
 
 /* The whole way, from an agent's tool to bytes on a real wire and back. Control receivers on this machine, synthetic secrets. */
 const closing: (() => Promise<unknown>)[] = [];
@@ -124,6 +125,30 @@ describe('a message over real authenticated SMTP', () => {
     await round(w);
     expect(server.seen.connections).toBe(0);
     expect(await w.messageOf(messageId)).toMatchObject({ status: 'cancelled', reasonCodes: ['stale_binding'] });
+  });
+
+  it('after a revocation ends what was reserved without connecting, and takes nothing new', async () => {
+    const w = await world();
+    const server = keep(await smtpReceiver({ secure: true }));
+    const { accountId, input } = await smtpWay(w, server.port);
+    const { messageId } = await submitByTool(w, input());
+    await reserveDispatch(w.ctx, messageId, 1);
+    expect((await w.c.app.inject({ method: 'POST', url: `/api/outbound/accounts/${accountId}/revoke`, payload: {}, ...as(w.c.ceoToken) })).statusCode).toBe(200);
+    await round(w);
+    expect(server.seen.connections).toBe(0);
+    expect(await w.messageOf(messageId)).toMatchObject({ status: 'cancelled', reasonCodes: ['stale_binding'] });
+    await expect(submitByTool(w, input())).rejects.toThrow('cannot send now');
+  });
+
+  it('takes no message through an account its author is not bound to, whatever id it names', async () => {
+    const w = await world();
+    const server = keep(await smtpReceiver({ secure: true }));
+    const { input } = await smtpWay(w, server.port);
+    const theirs = await anAccountOf(w.c, w.channel.id, w.c.head.id, 'Theirs');
+    await expect(submitByTool(w, input({ accountId: theirs.account.id }))).rejects.toThrow('bound to someone else');
+    await expect(submitByTool(w, input({ accountId: randomUUID() }))).rejects.toThrow();
+    await round(w);
+    expect(server.seen.connections).toBe(0);
   });
 
   it('stops on a signed complaint coming back over the real route, and nothing more leaves', async () => {

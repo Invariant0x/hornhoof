@@ -12,7 +12,7 @@ import { dispatchDue, noticeStops, reconcileOutbound, recordReceipts, sendBegun,
 import type { ReconcileOutcome, SendOutcome } from '../src/modules/outbound/ports.js';
 import { stopByPerson } from '../src/modules/outbound/policies.js';
 import { PASSWORD } from './outbound-receivers.js';
-import { QUIET, anAccountOf, dispatched, world, type World } from './outbound-world.js';
+import { QUIET, aCertifiedCheck, allowed, anAccountOf, dispatched, world, type World } from './outbound-world.js';
 
 /* The dispatcher against a transport that records what it was handed and says what a test tells it to. The real wire is in the
    adapters' tests and outbound-live.integration.test.ts. */
@@ -40,8 +40,8 @@ function senders(say: () => Promise<SendOutcome> = async () => ACCEPTED, ask: ()
   return { sent, asked, use: { smtp, webhook, deadlineMs } satisfies Senders };
 }
 
-async function ready(policy = QUIET): Promise<World> {
-  const w = await world(policy);
+async function ready(policy = QUIET, over: Parameters<typeof world>[1] = {}): Promise<World> {
+  const w = await world(policy, over);
   await w.c.db.update(outboundAccounts).set({ configEnc: encryptSecret(JSON.stringify(SMTP), w.ctx.config.secret) }).where(eq(outboundAccounts.id, w.account.id));
   return w;
 }
@@ -204,6 +204,38 @@ describe('sending what is due', () => {
     const due = await dueMessages(w.ctx, new Date(), 1);
     expect(due).toHaveLength(2);
     expect(due.map(m => m.messageId)).toContain(last.messageId);
+  });
+});
+
+describe('what waits for a check of its words', () => {
+  it('stays until the check passes, and then goes once', async () => {
+    const w = await ready(QUIET, { status: 'new' });
+    const certified = await aCertifiedCheck(w);
+    const { messageId, contentDigest, status } = await w.submit();
+    expect(status).toBe('waiting_checks');
+    const { sent, use } = senders();
+    await dispatchDue(w.ctx, new Date(), use);
+    expect(sent).toEqual([]);
+    await allowed(w, messageId, contentDigest, certified);
+    await dispatchDue(w.ctx, new Date(), use);
+    await dispatchDue(w.ctx, LATER, use);
+    expect(sent).toHaveLength(1);
+    expect(await w.messageOf(messageId)).toMatchObject({ status: 'sent' });
+  });
+
+  it('ends with a failed check stopping everything after it, what had already passed included', async () => {
+    const w = await ready(QUIET, { status: 'new' });
+    const certified = await aCertifiedCheck(w);
+    const passed = await w.submit();
+    const failed = await w.submit();
+    await allowed(w, passed.messageId, passed.contentDigest, certified);
+    await allowed(w, failed.messageId, failed.contentDigest, certified, 'block');
+    const { sent, use } = senders();
+    await dispatchDue(w.ctx, new Date(), use);
+    expect(sent).toEqual([]);
+    expect(await channelOf(w)).toMatchObject({ status: 'stopped', stoppedReason: 'review_failed' });
+    expect(await w.messageOf(failed.messageId)).toMatchObject({ status: 'rejected' });
+    expect(await w.messageOf(passed.messageId)).toMatchObject({ status: 'scheduled', reasonCodes: ['channel_stopped'] });
   });
 });
 

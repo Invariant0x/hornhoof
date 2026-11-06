@@ -3,11 +3,12 @@ import type { CatalogValue, OutboundPolicyValue, OutboundSubmit } from '@hornhoo
 import { eq } from 'drizzle-orm';
 import type { Deps } from '../src/app.js';
 import { encryptSecret } from '../src/crypto/secrets.js';
-import { outboundAccounts, outboundBindings, outboundCatalogRevisions, outboundChannels, outboundContacts, outboundMessages, outboundPermissions, outboundPolicies } from '../src/db/schema.js';
+import { modelChecks, outboundAccounts, outboundBindings, outboundCatalogRevisions, outboundChannels, outboundContacts, outboundMessages, outboundPermissions, outboundPolicies } from '../src/db/schema.js';
 import { digestOf } from '../src/modules/outbound/checks.js';
 import { recipientDigest } from '../src/modules/outbound/contacts.js';
-import { beginDispatch, reserveDispatch, submitOutbound, type Authority } from '../src/modules/outbound/core.js';
+import { beginDispatch, recordReview, reserveDispatch, submitOutbound, type Authority, type Review } from '../src/modules/outbound/core.js';
 import { company } from './department-owner-fixture.js';
+import { binding as checkBinding } from './model-check-fixture.js';
 import { sha } from './outbound-fixture.js';
 
 /* A department with one channel that works: an account bound to its worker, a contact who agreed, a policy that reviews
@@ -116,3 +117,15 @@ export async function dispatched(w: World, messageId: string, now?: Date) {
   const reserved = await reserveDispatch(w.ctx, messageId, 1, now);
   return reserved.kind === 'reserved' ? beginDispatch(w.ctx, messageId, 1, now) : reserved;
 }
+
+export const reviewReceipt = (messageId: string, contentDigest: string, decision: 'allow' | 'block' | 'escalate', checkId: string, bindingDigest: string): Review => ({
+  messageId, revision: 1, checkId, bindingDigest, subjectDigest: contentDigest, reviewer: checkBinding().model, result: { kind: 'review', decision, reasonCodes: [] },
+});
+/* The check of this department as certified now, which only a passed run does in real life. */
+export async function aCertifiedCheck(w: World) {
+  const bindingDigest = sha('this binding');
+  const [check] = await w.c.db.insert(modelChecks).values({ companyId: w.c.companyId, departmentId: w.c.dev.id, kind: 'outbound_review', status: 'on', bindingDigest, validUntil: new Date('2036-01-01T00:00:00.000Z'), thresholds: { falseAllows: 0, falseDenies: 0, classErrors: 0 } as never, thresholdsBy: w.c.ids.ceo }).returning();
+  return { check: check!, bindingDigest };
+}
+export const allowed = (w: World, messageId: string, contentDigest: string, c: { check: { id: string }; bindingDigest: string }, decision: 'allow' | 'block' | 'escalate' = 'allow') =>
+  recordReview(w.ctx, reviewReceipt(messageId, contentDigest, decision, c.check.id, c.bindingDigest));

@@ -5,12 +5,11 @@ import { describe, expect, it } from 'vitest';
 import { decryptSecret, encryptSecret } from '../src/crypto/secrets.js';
 import { companies, agents, modelChecks, outboundAccounts, outboundAttempts, outboundBindings, outboundCatalogRevisions, outboundChannels, outboundContactEvents, outboundContacts, outboundDailyUsage, outboundMessageRevisions, outboundMessages, outboundPermissions, outboundSamplingCounters, tasks } from '../src/db/schema.js';
 import { addContact, readUnsubscribeToken, recipientDigest, revokePermission, suppressContact, unsubscribe, unsubscribeToken } from '../src/modules/outbound/contacts.js';
-import { beginDispatch, dueMessages, outboundStatus, recordReview, reserveDispatch, settleAttempt, submitOutbound, type Review } from '../src/modules/outbound/core.js';
+import { beginDispatch, dueMessages, outboundStatus, reserveDispatch, settleAttempt, submitOutbound } from '../src/modules/outbound/core.js';
 import { dayOf, dayWindow, reopenChannel, selectedForReview, stopChannel, usedWithin } from '../src/modules/outbound/policies.js';
 import { frozenDigest } from '../src/modules/outbound/render.js';
-import { binding as checkBinding } from './model-check-fixture.js';
 import { sha } from './outbound-fixture.js';
-import { aChannelOf, aContactOf, anAccountOf, aPermissionOf, aPolicyOf, dispatched, partsOf, published, QUIET, world, type World } from './outbound-world.js';
+import { aCertifiedCheck, aChannelOf, aContactOf, allowed, anAccountOf, aPermissionOf, aPolicyOf, dispatched, partsOf, published, QUIET, world, type World } from './outbound-world.js';
 
 const NOON = new Date('2026-11-06T12:00:00.000Z');
 const refusal = async (work: Promise<unknown>) => (await work.then(() => { throw new Error('It was not refused.'); }, (err: unknown) => err)) as { status: number; details?: { reasonCodes?: string[] } };
@@ -570,18 +569,6 @@ describe('sampling', () => {
   it('what was owed is still owed', () => {
     expect(selectedForReview(QUIET.sampling, { ...base, owed: true })).toBe(true);
   });
-
-  const reviewReceipt = (messageId: string, contentDigest: string, decision: 'allow' | 'block' | 'escalate', checkId: string, bindingDigest: string): Review => ({
-    messageId, revision: 1, checkId, bindingDigest, subjectDigest: contentDigest, reviewer: checkBinding().model, result: { kind: 'review', decision, reasonCodes: [] },
-  });
-  /* The check of this department as certified now, which only a passed run does in real life. */
-  async function aCertifiedCheck(w: World) {
-    const bindingDigest = sha('this binding');
-    const [check] = await w.c.db.insert(modelChecks).values({ companyId: w.c.companyId, departmentId: w.c.dev.id, kind: 'outbound_review', status: 'on', bindingDigest, validUntil: new Date('2036-01-01T00:00:00.000Z'), thresholds: { falseAllows: 0, falseDenies: 0, classErrors: 0 } as never, thresholdsBy: w.c.ids.ceo }).returning();
-    return { check: check!, bindingDigest };
-  }
-  const allowed = (w: World, messageId: string, contentDigest: string, c: { check: { id: string }; bindingDigest: string }, decision: 'allow' | 'block' | 'escalate' = 'allow') =>
-    recordReview(w.ctx, reviewReceipt(messageId, contentDigest, decision, c.check.id, c.bindingDigest));
 
   it('a message on a new channel waits for its check, and no check means it holds', async () => {
     const w = await world(QUIET, { status: 'new' });
