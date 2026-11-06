@@ -27,11 +27,11 @@ interface FullRule { code: string; globs: string[]; global?: boolean }
 export const DEFAULT_FULL_PACKAGE_RULES: readonly FullRule[] = [
   { code: 'migration', globs: ['**/migrations/**', '**/drizzle/**', '**/*.migration.*'] },
   { code: 'schema', globs: ['**/schema.*', '**/schema/**'] },
-  { code: 'configuration', globs: ['**/*config*', '**/package.json', '**/package-lock.json', '**/npm-shrinkwrap.json', '**/yarn.lock', '**/pnpm-lock.yaml', '**/poetry.lock', '**/Pipfile.lock', '**/uv.lock', '**/Cargo.lock', '**/pyproject.toml', '**/pytest.ini', '**/Dockerfile', '**/.hornhoof/**', '**/.github/**'] },
-  { code: 'environment', globs: ['**/.env*', '**/env.*', '**/environment.*'] },
+  { code: 'configuration', globs: ['**/*config*', '**/config/**', '**/configs/**', '**/configuration/**', '**/settings/**', '**/package.json', '**/package-lock.json', '**/npm-shrinkwrap.json', '**/yarn.lock', '**/pnpm-lock.yaml', '**/poetry.lock', '**/Pipfile.lock', '**/uv.lock', '**/Cargo.lock', '**/pyproject.toml', '**/pytest.ini', '**/Dockerfile', '**/.hornhoof/**', '**/.github/**'] },
+  { code: 'environment', globs: ['**/.env*', '**/env.*', '**/environment.*', '**/env/**', '**/environment/**', '**/environments/**'] },
   { code: 'routes', globs: ['**/routes/**', '**/routes.*', '**/router.*'] },
   { code: 'fixtures', globs: ['**/fixtures/**', '**/fixture.*', '**/conftest.py'] },
-  { code: 'strings', globs: ['**/i18n/**', '**/locales/**', '**/translations/**'] },
+  { code: 'strings', globs: ['**/i18n/**', '**/locales/**', '**/translations/**', '**/strings.*', '**/strings/**'] },
   { code: 'scripts', globs: ['**/scripts/**'] },
   { code: 'installation', globs: ['**/install*'] },
   { code: 'updates', globs: ['**/update*', '**/*updates.*'] },
@@ -65,10 +65,14 @@ function packageOfUnit(environment: ImpactEnvironment, unit: TestUnit): ImpactPa
 function addProblem(state: SelectionState, code: ImpactSelection['problems'][number]['code']): void {
   if (!state.problems.some(problem => problem.code === code)) state.problems.push({ code });
 }
+function completeGroups(state: SelectionState, units: TestUnit[]): TestUnit[] {
+  const groups = new Set(units.map(unit => `${unit.suiteId}\0${unit.selectionUnit}`));
+  return state.environment.inventory.filter(unit => groups.has(`${unit.suiteId}\0${unit.selectionUnit}`));
+}
 function add(state: SelectionState, pkg: ImpactPackage, mode: Choice['mode'], units: TestUnit[], reason: ImpactReason): void {
   const choice = state.choices.get(pkg.id) ?? { mode, units: new Map<string, TestUnit>(), reasons: new Map<string, ImpactReason>() };
   if (mode === 'whole-package') choice.mode = mode;
-  for (const unit of units) choice.units.set(unitKey(unit), unit);
+  for (const unit of completeGroups(state, units)) choice.units.set(unitKey(unit), unit);
   choice.reasons.set(`${reason.code}\0${reason.path}`, reason);
   state.choices.set(pkg.id, choice);
 }
@@ -82,14 +86,33 @@ function broadPackages(state: SelectionState, path: string): ImpactPackage[] {
 function matchesPolicy(path: string, pattern: string): boolean {
   return path === pattern || path.startsWith(`${pattern.replace(/\/$/, '')}/`) || matchesGlob(path, pattern);
 }
-function policy(state: SelectionState, path: string): boolean {
+function packageGraphs(state: SelectionState, graphs: ImpactGraph[], pkg?: ImpactPackage): ImpactGraph[] | undefined {
+  if (!pkg) return new Set(graphs.map(graph => graph.adapter)).size === graphs.length ? graphs : undefined;
+  const adapter = ADAPTERS.get(pkg.language ?? state.environment.impact.adapter);
+  const found = graphs.filter(graph => graph.adapter === adapter);
+  return adapter && found.length === 1 ? found : undefined;
+}
+function graphPackages(state: SelectionState, graphs: ImpactGraph[], pkg?: ImpactPackage): ImpactPackage[] {
+  const found = packageGraphs(state, graphs, pkg);
+  if (!found?.length || found.some(graph => graph.status !== 'ready' || !validGraph(state, graph))) return state.environment.packages;
+  const affected = new Set(found.flatMap(graph => graph.units.map(unit => packageOfUnit(state.environment, unit)!.id)));
+  return state.environment.packages.filter(value => affected.has(value.id));
+}
+function widen(state: SelectionState, graphs: ImpactGraph[], pkg: ImpactPackage, reason: ImpactReason): void {
+  whole(state, [pkg, ...graphPackages(state, graphs, pkg)], reason);
+}
+function policy(state: SelectionState, graphs: ImpactGraph[], path: string): boolean {
   const targets = state.environment.impact.fullPackageGlobs.filter(rule => rule.globs.some(glob => matchesPolicy(path, glob)))
     .flatMap(rule => state.environment.packages.filter(pkg => pkg.suiteIds.some(id => rule.suiteIds.includes(id))));
   whole(state, targets, { code: 'full_package_rule', path });
-  const rule = DEFAULT_FULL_PACKAGE_RULES.find(value => value.globs.some(glob => matchesPolicy(path, glob)));
-  if (!rule) return targets.length > 0;
-  if (rule.code === 'migration') state.migration = true;
-  whole(state, rule.global ? state.environment.packages : broadPackages(state, path), { code: rule.code, path });
+  const rules = DEFAULT_FULL_PACKAGE_RULES.filter(value => value.globs.some(glob => matchesPolicy(path, glob)));
+  for (const rule of rules) {
+    if (rule.code === 'migration') state.migration = true;
+    whole(state, rule.global ? state.environment.packages : broadPackages(state, path), { code: rule.code, path });
+  }
+  if (!targets.length && !rules.length) return false;
+  const consumers = graphPackages(state, graphs, ownerOf(state.environment, path)).filter(pkg => state.choices.get(pkg.id)?.mode !== 'whole-package');
+  whole(state, consumers, { code: 'policy_consumers', path });
   return true;
 }
 function forceNewTest(state: SelectionState, change: ImpactChange): void {
@@ -107,19 +130,19 @@ function validGraph(state: SelectionState, graph: ImpactGraph): boolean {
 }
 function related(state: SelectionState, graphs: ImpactGraph[], pkg: ImpactPackage, path: string): void {
   const adapter = ADAPTERS.get(pkg.language ?? state.environment.impact.adapter);
-  if (!adapter) return whole(state, [pkg], { code: 'unsupported_language', path });
-  if (!EXTENSIONS[adapter].includes(extname(path))) return whole(state, [pkg], { code: 'unsupported_file', path });
+  if (!adapter) return whole(state, state.environment.packages, { code: 'unsupported_language', path });
+  if (!EXTENSIONS[adapter].includes(extname(path))) return widen(state, graphs, pkg, { code: 'unsupported_file', path });
   const found = graphs.filter(graph => graph.adapter === adapter);
-  if (found.length !== 1 || found[0]!.status !== 'ready') return whole(state, [pkg], { code: 'graph_unavailable', path });
+  if (found.length !== 1 || found[0]!.status !== 'ready') return whole(state, state.environment.packages, { code: 'graph_unavailable', path });
   const graph = found[0]!;
-  if (!validGraph(state, graph)) return whole(state, [pkg], { code: 'invalid_graph', path });
+  if (!validGraph(state, graph)) return whole(state, state.environment.packages, { code: 'invalid_graph', path });
   for (const unit of graph.units) add(state, packageOfUnit(state.environment, unit)!, 'related', [unit], { code: 'related', path });
 }
 function selectPath(state: SelectionState, graphs: ImpactGraph[], change: ImpactChange, path: string): void {
-  if (policy(state, path)) return;
+  if (policy(state, graphs, path)) return;
   const pkg = ownerOf(state.environment, path);
   if (!pkg) return whole(state, state.environment.packages, { code: 'unmapped_file', path });
-  if (change.kind === 'deleted' || change.kind === 'renamed') return whole(state, [pkg], { code: `${change.kind}_source`, path });
+  if (change.kind === 'deleted' || change.kind === 'renamed') return widen(state, graphs, pkg, { code: `${change.kind}_source`, path });
   related(state, graphs, pkg, path);
 }
 function migrationChecks(state: SelectionState): ImpactSelection['migrationChecks'] {
@@ -138,10 +161,16 @@ function finish(state: SelectionState): ImpactSelection {
   const result: ImpactSelection = { version: 1, status: state.problems.length ? 'blocked' : 'ready', units: ordered(units), packages, migrationChecks: checks, problems: state.problems };
   return structuredClone(result);
 }
+function validEnvironment(environment: ImpactEnvironment): boolean {
+  const owners = new Map<string, number>();
+  for (const pkg of environment.packages) for (const suite of pkg.suiteIds) owners.set(suite, (owners.get(suite) ?? 0) + 1);
+  return new Set(environment.packages.map(pkg => pkg.id)).size === environment.packages.length && environment.inventory.every(unit => owners.get(unit.suiteId) === 1);
+}
 
 /* Explicit caller port only. Environment280 and authorcheck222 integration is intentionally separate. */
 export function selectAffectedTests(input: ImpactInput): ImpactSelection {
   const state: SelectionState = { environment: input.environment, inventory: new Map(input.environment.inventory.map(unit => [unitKey(unit), unit])), choices: new Map(), problems: [], migration: false };
+  if (!validEnvironment(input.environment)) { addProblem(state, 'impact_environment_invalid'); return finish(state); }
   if (input.changes.some(change => paths(change).some(path => !safePath(path)))) {
     addProblem(state, 'impact_path_invalid'); return finish(state);
   }

@@ -30,7 +30,9 @@ function checkCollection(collection: ImpactCollection, input: VitestImpactInput)
   if (collection.selected.some(row => !all.has(rowKey(row)))) throw new Error('impact_selection_not_collected');
   const covered = new Set(mapRows(collection.all, input).map(unitKey));
   const suites = new Set(Object.values(input.projectSuites).flat());
-  if (input.inventory.some(unit => suites.has(unit.suiteId) && !covered.has(unitKey(unit)))) throw new Error('impact_collection_incomplete');
+  const required = new Set(input.requiredSuiteIds ?? input.inventory.map(unit => unit.suiteId));
+  if (suites.size !== required.size || [...required].some(suite => !suites.has(suite))) throw new Error('impact_suite_mapping_incomplete');
+  if (input.inventory.some(unit => required.has(unit.suiteId) && !covered.has(unitKey(unit)))) throw new Error('impact_collection_incomplete');
 }
 
 export async function collectVitestImpact(input: VitestImpactInput, collect: RelatedCollector): Promise<ImpactGraph> {

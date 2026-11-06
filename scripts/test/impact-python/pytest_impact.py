@@ -108,11 +108,32 @@ def import_dependencies(
     return dependencies
 
 
+def ancestor_initializers(file: str, modules: dict[str, str]) -> set[str]:
+    parts = module_name(file).split(".")
+    parents = (modules.get(".".join(parts[:size])) for size in range(1, len(parts)))
+    return {
+        parent
+        for parent in parents
+        if parent is not None and parent.endswith("/__init__.py")
+    }
+
+
+def dynamic_name(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return None
+
+
 def file_dependencies(file: str, root: Path, modules: dict[str, str]) -> set[str]:
     tree = ast.parse(checked_path(root, file).read_text(encoding="utf-8"))
-    dependencies: set[str] = set()
+    dependencies = ancestor_initializers(file, modules)
     for node in ast.walk(tree):
-        if isinstance(node, ast.Name) and node.id in {
+        name = dynamic_name(node)
+        if name == "pytest_plugins":
+            raise ValueError("plugin_unsupported")
+        if name in {
             "__import__",
             "__builtins__",
             "eval",

@@ -34,7 +34,8 @@ function vitestCollection(root: string, changed: string): ImpactCollection {
 async function graphs(root: string, request: ImpactReplayRequest, changes: ImpactChange[]): Promise<ImpactGraph[]> {
   const result: ImpactGraph[] = [];
   const typescript = changes.map(change => change.path).filter(path => /\.[cm]?[jt]sx?$/.test(path));
-  if (typescript.length) result.push(await collectVitestImpact({ inventory: request.environment.inventory, projectSuites: request.projectSuites, changed: typescript }, async path => vitestCollection(root, path)));
+  const requiredSuiteIds = request.environment.packages.filter(pkg => ['typescript', 'javascript'].includes(pkg.language ?? request.environment.impact.adapter)).flatMap(pkg => pkg.suiteIds);
+  if (typescript.length) result.push(await collectVitestImpact({ inventory: request.environment.inventory, projectSuites: request.projectSuites, changed: typescript, requiredSuiteIds }, async path => vitestCollection(root, path)));
   const python = request.environment.packages.filter(pkg => pkg.language === 'python' && changedIn(pkg, changes).length > 0);
   if (python.length) {
     const parts = python.map(pkg => pythonGraph(root, pkg, request, changes));

@@ -49,6 +49,7 @@ function sameInventory(expected: TestUnit[], actual: TestUnit[]): boolean {
   return wanted.size === found.size && [...wanted].every(key => found.has(key));
 }
 function validReceipt(receipt: FullComparator, input: ImpactReplayInput): boolean {
+  if (!new Set(['passed', 'failed']).has(receipt.status)) return false;
   if (receipt.commit !== input.candidate || !Number.isInteger(receipt.run) || !Number.isInteger(receipt.part)) return false;
   if (receipt.run < 1 || receipt.part < 1 || !sameInventory(input.environment.inventory, receipt.inventory)) return false;
   if ((receipt.status === 'passed') !== (receipt.failedUnits.length === 0)) return false;

@@ -71,17 +71,18 @@ describe('pure commit impact selection', () => {
     expect(selectAffectedTests(input).units.map(value => value.suiteId).sort()).toEqual(['node', 'node-extra']);
   });
 
-  it('honors environment fullPackageGlobs without widening unrelated packages', () => {
+  it('honors environment fullPackageGlobs and retains graph-known consumers', () => {
     const input = fixture(); input.changes = [{ path: 'data/table.dsl', kind: 'modified' }];
     input.environment.impact.fullPackageGlobs = [{ globs: ['data/**'], suiteIds: ['server'] }];
     const result = selectAffectedTests(input);
-    expect(files(result)).toEqual(['apps/server/test/c.test.ts']); expect(mode(result, 'server')).toBe('whole-package');
+    expect(files(result)).toEqual([...nodeFiles, 'apps/server/test/c.test.ts']); expect(mode(result, 'server')).toBe('whole-package');
+    expect(mode(result, 'node')).toBe('whole-package');
   });
 
   it.each(['data', 'data/'])('honors the canonical literal directory policy %s', directory => {
     const input = fixture(); input.changes = [{ path: 'data/table.dsl', kind: 'modified' }];
     input.environment.impact.fullPackageGlobs = [{ globs: [directory], suiteIds: ['server'] }];
-    expect(files(selectAffectedTests(input))).toEqual(['apps/server/test/c.test.ts']);
+    expect(files(selectAffectedTests(input))).toEqual([...nodeFiles, 'apps/server/test/c.test.ts']);
   });
 
   it('keeps ordinary clock source changes narrow instead of treating them as lockfiles', () => {
