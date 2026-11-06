@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../src/errors.js';
 import { hashToken } from '../src/crypto/tokens.js';
-import { agents, jobs, subscriptions, tasks, teams } from '../src/db/schema.js';
+import { agents, jobs, subscriptions, tasks, taskWaits, teams } from '../src/db/schema.js';
 import { listEvents } from '../src/modules/events/store.js';
 import { said } from '../src/modules/conversation/live.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
@@ -257,6 +257,7 @@ describe('task messages reach their recipient', () => {
     const result = await head.client.callTool({ name: 'message_employee', arguments: { employee: c.agent.id, task: task.number, text: 'Please check.' } });
     expect(result.isError).toBe(true);
     expect((await c.db.select().from(tasks).where(eq(tasks.id, task.id)))[0]!.externalWait).toMatchObject({ reason: 'Registry' });
+    expect((await c.db.select().from(taskWaits).where(eq(taskWaits.taskId, task.id))).map(wait => wait.sourceState.stage)).toEqual(['waiting']);
   });
 
 

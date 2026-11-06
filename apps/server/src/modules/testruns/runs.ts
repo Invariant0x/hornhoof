@@ -5,7 +5,7 @@ import type { Ctx } from '../../app.js';
 import { hashToken } from '../../crypto/tokens.js';
 import { nodeHeld } from '../updates/drain.js';
 import { accessOf, canReach, type Access } from '../../auth/access.js';
-import { agents, attachments, companies, departments, jobs, machines, nodes, people, subscriptions, tasks, testParts, testRuns, type LostRun } from '../../db/schema.js';
+import { agents, attachments, companies, departments, jobs, machines, nodes, people, subscriptions, tasks, testParts, testRuns, type ExternalWait, type LostRun } from '../../db/schema.js';
 import { loggable } from '../../errors.js';
 import { quote } from '../conversation/prompt.js';
 import { repoAt, TEST_MEMORY_GB } from '../departments/repository.js';
@@ -14,6 +14,7 @@ import { liveNode } from '../nodes/nodes.js';
 import { onTask } from '../tasks/attachments.js';
 import { CLOSED, note, published, refuse, type Task, type Tx, type Wake } from '../tasks/engine.js';
 import { endWaitForRun } from '../tasks/external-wait.js';
+import { endRunWaits, moveRunStage, recordRunWait } from '../tasks/wait-state.js';
 import { keepWakes } from '../tasks/outbox.js';
 import { taskByRef } from '../tasks/views.js';
 import { wakeAll } from '../tasks/wake.js';
@@ -328,14 +329,17 @@ export function pumpTests(ctx: Ctx): Promise<void> {
 
 type RunEnd = { wakes: Wake[]; moved: Task | null };
 
+const goesOnLine = (wait: ExternalWait | null) => wait ? `\n\nYour wait for "${wait.reason}" goes on until ${wait.until}. If this run was what it waited for, end it with end_wait.` : '';
+
 /* What the end of a run means for its task, in the one place every way a run ends goes through and in the write that ends
-   it: the wait of the one who started it is over, and that one hears of it once. always: tell it even with no wait to end.
-   Nobody hears of a run on a closed task. */
+   it: what waits for this run is over, and the one who started it hears of it once. always: tell it even with no wait to
+   end. Nobody hears of a run on a closed task. */
 async function tellEnd(tx: Tx, run: Run, task: Task, text: string, always: boolean): Promise<RunEnd> {
+  await endRunWaits(tx, { taskId: task.id, runId: run.id, outcome: run.status === 'stopped' ? 'cancelled' : 'resolved', proofRef: `run:${run.id}:${run.status}`, actor: { agentId: run.agentId } });
   if (CLOSED.includes(task.status)) return { wakes: [], moved: null };
-  const waited = await endWaitForRun(tx, task.id, run.agentId, named(run));
+  const { waited, goesOn } = await endWaitForRun(tx, task.id, run.agentId, { id: run.id, label: named(run) });
   if (!always && !waited) return { wakes: [], moved: null };
-  const wakes: Wake[] = [{ agentId: run.agentId, taskId: run.taskId, why: run.kind, text }];
+  const wakes: Wake[] = [{ agentId: run.agentId, taskId: run.taskId, why: run.kind, text: text + goesOnLine(goesOn) }];
   await keepWakes(tx, run.companyId, wakes);
   return { wakes, moved: waited ? task : null };
 }
@@ -363,14 +367,16 @@ async function settleRun(ctx: Ctx, runId: string): Promise<void> {
   const status = parts.every(p => p.status === 'passed') ? 'passed' : 'failed';
   const mark = await markRun(ctx, runId, status);
   const end = await db.transaction(async tx => {
+    /* The task first, then the run: the order every write that holds both takes. */
+    const [found] = await tx.select({ task: tasks }).from(testRuns).innerJoin(tasks, eq(tasks.id, testRuns.taskId)).where(eq(testRuns.id, runId)).for('update', { of: tasks });
+    if (!found) return null;
+    const { task } = found;
     const [run] = await tx
       .update(testRuns)
       .set({ status, finishedAt: new Date() })
       .where(and(eq(testRuns.id, runId), eq(testRuns.status, 'running')))
       .returning();
     if (!run) return null;
-    const [task] = await tx.select().from(tasks).where(eq(tasks.id, run.taskId));
-    if (!task) return null;
     const files = await tx.select({ name: attachments.name }).from(attachments).where(and(eq(attachments.taskId, run.taskId), filesOf(run)));
     const marked = await keepMark(tx, run, task, mark);
     return tellEnd(tx, run, task, account(run, task, parts, new Set(files.map(l => l.name!))) + marked, true);
@@ -419,6 +425,7 @@ export async function loseParts(ctx: Ctx, which: SQL, why: string): Promise<void
     if (again && run.kind === 'work') {
       await ctx.db.delete(attachments).where(and(eq(attachments.taskId, run.taskId), like(attachments.name, `${madeName(run, p.part, '')}%`)));
     }
+    if (again) await runReached(ctx, run, 'retry');
   }
   await pumpTests(ctx);
 }
@@ -596,6 +603,7 @@ export async function startRun(ctx: Ctx, job: ToolJob, input: RunInput, kind: Ru
       })
       .returning();
     if (parts) await tx.insert(testParts).values(Array.from({ length: parts }, (_, i) => ({ companyId: job.companyId, runId: row!.id, part: i + 1 })));
+    await recordRunWait(tx, row!, mode.mode === 'product' ? 'prepare' : 'queue', new Date());
     return row!;
   });
   await pumpTests(ctx);
@@ -663,6 +671,7 @@ export async function stopRun(ctx: Ctx, job: ToolJob, number: number, kind: RunK
   const stopper = other ? (me?.name ?? 'another agent') : 'you';
   const now = new Date();
   const stopped = await ctx.db.transaction(async tx => {
+    await tx.select({ id: tasks.id }).from(tasks).where(eq(tasks.id, run.taskId)).for('update');
     const [row] = await tx
       .update(testRuns)
       .set({ status: 'stopped', finishedAt: now, stoppedByAgentId: other ? job.agentId : null })
@@ -746,6 +755,8 @@ async function startedRunSummary(ctx: Ctx, run: Run, task: Task, found: Awaited<
   );
 }
 
+const runReached = (ctx: Ctx, run: Run, stage: Parameters<typeof moveRunStage>[2]): Promise<void> => ctx.db.transaction(tx => moveRunStage(tx, run, stage, new Date()));
+
 async function givePart(ctx: Ctx, { part, run, task }: { part: Part; run: Run; task: { number: number } }, places: Map<string, Place[]>, reserved: Reservations, targets: Map<string, Awaited<ReturnType<typeof targetOf>>>): Promise<void> {
   const { db } = ctx;
     if (!targets.has(run.id)) targets.set(run.id, await targetOf(ctx, run));
@@ -757,7 +768,11 @@ async function givePart(ctx: Ctx, { part, run, task }: { part: Part; run: Run; t
     if (!await productPartReady(ctx, part)) return;
     const candidates = await productPlaces(ctx, places.get(run.companyId)!, run, needOf(run, found.department) * GIB);
     const place = placeFor(candidates, run, part, found.department, reserved);
-    if (!place) return;
+    if (!place) {
+      /* A machine that could take it has no room for it now; with none at all it stands in the queue as it did. */
+      if (candidates.length) await runReached(ctx, run, 'host_slot');
+      return;
+    }
     const [taken] = await db
       .update(testParts)
       .set({ status: 'running', nodeId: place.nodeId, builtin: place.builtin, machineId: place.machineId, machineName: place.name, computer: computerKey(place), startedAt: new Date() })
@@ -774,6 +789,7 @@ async function givePart(ctx: Ctx, { part, run, task }: { part: Part; run: Run; t
     } else {
       reserved.take(place);
       noteProductOwner(ctx, place, run);
+      await runReached(ctx, run, 'execution');
     }
 }
 
