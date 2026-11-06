@@ -1,4 +1,5 @@
 export * from './department-mode.js';
+export * from './external-operations.js';
 import type { DepartmentWorkMode } from './department-mode.js';
 export * from './request-materials.js';
 export * from './questions.js';
