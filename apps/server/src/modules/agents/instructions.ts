@@ -85,43 +85,64 @@ function told(kept: string[], files: SkillFile[]): string {
    go out. */
 const whole = (texts: string[]) => texts.join('\n\n');
 
+const movedSinceHire = (hired: Record<string, string>, id: string, hash: string): boolean => hired[id] !== undefined && hired[id] !== hash;
+
+function basePart(role: ReturnType<Templates['roles']['get']>, agent: AgentRow): Part | null {
+  const text = agent.overrides.base ?? role?.body;
+  if (text === undefined) return null;
+  const meta = role
+    ? { id: role.id, title: role.title, templateChanged: movedSinceHire(agent.templateHashes, role.id, role.hash) }
+    : { id: null, title: null, templateChanged: false };
+  return { kind: 'base', ...meta, text, overridden: agent.overrides.base !== undefined };
+}
+
+function buildSkillPart(id: string, skill: Skill | undefined, body: string, overridden: boolean, hired: Record<string, string>): Part {
+  const meta = skill
+    ? { title: skill.title, text: skillBlock(id, skill.title.en, body), templateChanged: movedSinceHire(hired, id, skill.hash) }
+    : { title: null, text: skillBlock(id, id, body), templateChanged: false };
+  return { kind: 'skill', id, ...meta, overridden };
+}
+
+function renderSkillEntry(t: Templates, agent: AgentRow, id: string): { part: Part; kept?: string; file?: SkillFile } | null {
+  const skill = t.skills.get(id);
+  const own = agent.overrides.skills?.[id];
+  const body = own ?? skill?.body;
+  /* A skill that left the templates and was never rewritten has nothing to say. */
+  if (body === undefined) return null;
+  const part = buildSkillPart(id, skill, body, own !== undefined, agent.templateHashes);
+  return inline(skill) ? { part, kept: part.text } : { part, file: skillFile(id, skill, body) };
+}
+
+function collectSkills(t: Templates, agent: AgentRow): { parts: Part[]; kept: string[]; files: SkillFile[] } {
+  const parts: Part[] = [];
+  const kept: string[] = [];
+  const files: SkillFile[] = [];
+  for (const id of agent.skills) {
+    const entry = renderSkillEntry(t, agent, id);
+    if (!entry) continue;
+    parts.push(entry.part);
+    if (entry.kept !== undefined) kept.push(entry.kept);
+    if (entry.file) files.push(entry.file);
+  }
+  return { parts, kept, files };
+}
+
 /* The header, the role's text and each enabled skill between markers; the employee's own text replaces a template's. */
 export function renderInstructions(t: Templates, agent: AgentRow, place: Place): Rendered {
   const role = agent.roleKey ? t.roles.get(agent.roleKey) : undefined;
-  const hired = agent.templateHashes;
-  const moved = (id: string, hash: string) => hired[id] !== undefined && hired[id] !== hash;
   const plain = header(agent, role?.title.en ?? 'employee', place);
-  const said = `${plain}\n\n${partner(agent.kind === 'head' ? 'the orchestrator' : 'your head', agent.kind === 'head')}`;
+  const head = agent.kind === 'head';
+  const said = `${plain}\n\n${partner(head ? 'the orchestrator' : 'your head', head)}`;
   const parts: Part[] = [{ kind: 'header', id: null, title: null, text: said, overridden: false, templateChanged: false }];
+  const base = basePart(role, agent);
+  if (base) parts.push(base);
+  const initialKept = parts.map(p => p.text);
 
-  const base = agent.overrides.base ?? role?.body;
-  if (base !== undefined) {
-    parts.push({
-      kind: 'base',
-      id: role?.id ?? null,
-      title: role?.title ?? null,
-      text: base,
-      overridden: agent.overrides.base !== undefined,
-      templateChanged: role ? moved(role.id, role.hash) : false,
-    });
-  }
+  const collected = collectSkills(t, agent);
+  parts.push(...collected.parts);
 
-  const kept = parts.map(p => p.text);
-  const skills: SkillFile[] = [];
-  for (const id of agent.skills) {
-    const skill = t.skills.get(id);
-    const own = agent.overrides.skills?.[id];
-    const body = own ?? skill?.body;
-    /* A skill that left the templates and was never rewritten has nothing to say. */
-    if (body === undefined) continue;
-    const text = skillBlock(id, skill?.title.en ?? id, body);
-    parts.push({ kind: 'skill', id, title: skill?.title ?? null, text, overridden: own !== undefined, templateChanged: skill ? moved(id, skill.hash) : false });
-    if (inline(skill)) kept.push(text);
-    else skills.push(skillFile(id, skill, body));
-  }
-
-  const text = told(kept, skills);
-  return { parts, raw: parts.map(p => p.text).join('\n\n'), text, hash: textHash(text), skills, whole: whole([plain, ...parts.slice(1).map(p => p.text)]) };
+  const text = told([...initialKept, ...collected.kept], collected.files);
+  return { parts, raw: parts.map(p => p.text).join('\n\n'), text, hash: textHash(text), skills: collected.files, whole: whole([plain, ...parts.slice(1).map(p => p.text)]) };
 }
 
 /* The names an employee's header uses: its company, department and product. */
@@ -179,25 +200,45 @@ export async function notebookPart(db: Ctx['db'], book: Book, room = Infinity): 
 
 const notebookOf = (text: string): Part => ({ kind: 'notebook', id: null, title: null, text, overridden: false, templateChanged: false });
 
+const forNode = (shown: Rendered, files: boolean): Rendered =>
+  files ? shown : { ...shown, text: shown.whole, hash: textHash(shown.whole), skills: [] };
+
+async function orchestratorInstructionsOf(ctx: Pick<Ctx, 'db' | 'templates'>, companyId: string, files: boolean): Promise<Rendered> {
+  const steady = orchestratorSteady(ctx.templates);
+  const said = files ? steady.text : steady.whole;
+  const skills = files ? steady.skills : [];
+  const notebook = await notebookPart(ctx.db, companyBook(companyId));
+  const parts = [...steady.parts, notebookOf(notebook)];
+  return { parts, raw: parts.map(p => p.text).join('\n\n'), text: `${said}\n\n${notebook}`, hash: textHash(said), skills, whole: steady.whole };
+}
+
+async function headDepartment(db: Ctx['db'], agent: AgentRow): Promise<typeof departments.$inferSelect | undefined> {
+  if (agent.kind !== 'head' || !agent.departmentId) return undefined;
+  const [dept] = await db.select().from(departments).where(eq(departments.id, agent.departmentId));
+  return dept;
+}
+
+async function appendDepartmentNotebook(
+  db: Ctx['db'],
+  rendered: Rendered,
+  dept: typeof departments.$inferSelect,
+  files: boolean,
+): Promise<Rendered> {
+  /* A turn carries what its node takes at most, the notebook included. */
+  const room = (files ? MAX_INSTRUCTIONS : OLD_NODE_INSTRUCTIONS) - rendered.text.length - 2;
+  const notebook = await notebookPart(db, departmentBook(dept), room);
+  if (!notebook) return rendered;
+  return { ...rendered, parts: [...rendered.parts, notebookOf(notebook)], text: `${rendered.text}\n\n${notebook}` };
+}
+
 /* What an agent runs with now: the orchestrator's standing role with the company notebook, or an employee's rendered
    instructions, a head's with its department's notebook. The hash leaves a notebook out: a new note reaches the program
    as it starts again in the same session, or as it reads the notebook with its tool. So it does a skill's body, which
    the program reads from its file. files: the agent's node writes skill files; one that does not is told every skill in
    the text, which the hash covers then. */
 export async function instructionsOf(ctx: Pick<Ctx, 'db' | 'templates'>, agent: AgentRow, files = true): Promise<Rendered> {
-  if (agent.kind === 'orchestrator') {
-    const steady = orchestratorSteady(ctx.templates);
-    const said = files ? steady.text : steady.whole;
-    const notebook = await notebookPart(ctx.db, companyBook(agent.companyId));
-    const parts = [...steady.parts, notebookOf(notebook)];
-    return { parts, raw: parts.map(p => p.text).join('\n\n'), text: `${said}\n\n${notebook}`, hash: textHash(said), skills: files ? steady.skills : [], whole: steady.whole };
-  }
-  const shown = renderInstructions(ctx.templates, agent, await placeOf(ctx.db, agent));
-  const rendered = files ? shown : { ...shown, text: shown.whole, hash: textHash(shown.whole), skills: [] };
-  const [dept] = agent.kind === 'head' && agent.departmentId ? await ctx.db.select().from(departments).where(eq(departments.id, agent.departmentId)) : [];
-  if (!dept) return rendered;
-  /* A turn carries what its node takes at most, the notebook included. */
-  const notebook = await notebookPart(ctx.db, departmentBook(dept), (files ? MAX_INSTRUCTIONS : OLD_NODE_INSTRUCTIONS) - rendered.text.length - 2);
-  if (!notebook) return rendered;
-  return { ...rendered, parts: [...rendered.parts, notebookOf(notebook)], text: `${rendered.text}\n\n${notebook}` };
+  if (agent.kind === 'orchestrator') return orchestratorInstructionsOf(ctx, agent.companyId, files);
+  const rendered = forNode(renderInstructions(ctx.templates, agent, await placeOf(ctx.db, agent)), files);
+  const dept = await headDepartment(ctx.db, agent);
+  return dept ? appendDepartmentNotebook(ctx.db, rendered, dept, files) : rendered;
 }

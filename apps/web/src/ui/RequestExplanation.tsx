@@ -66,15 +66,16 @@ function isValidReadyArtifact(artifact: unknown): boolean {
 
 function parseActionBinding(raw: unknown): ActionBindingView | null {
   const rec = asRecord(raw);
-  const kind = cleanString(rec?.kind);
-  const resourceId = cleanString(rec?.resourceId);
+  if (!rec) return null;
+  const kind = cleanString(rec.kind);
+  const resourceId = cleanString(rec.resourceId);
   if (!kind || !ACTION_KINDS.has(kind) || !resourceId) return null;
   return {
     kind: kind as HumanActionKind,
     resourceId,
-    scope: cleanString(rec?.scope),
-    duration: cleanString(rec?.duration),
-    amount: cleanString(rec?.amount),
+    scope: cleanString(rec.scope),
+    duration: cleanString(rec.duration),
+    amount: cleanString(rec.amount),
   };
 }
 
@@ -104,12 +105,13 @@ export function isAuthorizedHumanRequest(request: WaitingRequest): boolean {
 
 function parseOptionItem(item: unknown): { option: HumanOptionView | null; poisoned: boolean } {
   const rec = asRecord(item);
-  const label = cleanString(rec?.label);
+  if (!rec) return { option: null, poisoned: false };
+  const label = cleanString(rec.label);
   if (!label) return { option: null, poisoned: false };
-  const consequence = cleanString(rec?.consequence);
+  const consequence = cleanString(rec.consequence);
   const badConsequence = consequence !== null && hasExecutableText(consequence);
   if (hasExecutableText(label) || badConsequence) return { option: null, poisoned: true };
-  return { option: { label, consequence, image: cleanString(rec?.image) }, poisoned: false };
+  return { option: { label, consequence, image: cleanString(rec.image) }, poisoned: false };
 }
 
 function parseEnvelopeOptions(raw: unknown): { options: HumanOptionView[]; poisoned: boolean } {
@@ -140,17 +142,22 @@ function legacyEnvelope(request: WaitingRequest): PlainEnvelopeView {
   };
 }
 
+function parseSafeEnvelopeBody(env: RawRecord | null): { situation: string; requiredAction: string; options: HumanOptionView[] } | null {
+  if (!env) return null;
+  const situation = cleanString(env.situation);
+  const requiredAction = cleanString(env.requiredAction);
+  const parsedOpts = parseEnvelopeOptions(env.options);
+  if (!isSafePlainText(situation) || !isSafePlainText(requiredAction) || parsedOpts.poisoned) return null;
+  return { situation, requiredAction, options: parsedOpts.options };
+}
+
 export function resolvePlainEnvelope(request: WaitingRequest): PlainEnvelopeView {
   const rec = request as unknown as RawRecord;
   if (isUnclassifiedPre491Request(rec)) return legacyEnvelope(request);
   const actionBinding = parseClassification(rec.classification)?.actionBinding ?? null;
-  const env = asRecord(rec.humanEnvelope);
-  const situation = cleanString(env?.situation);
-  const requiredAction = cleanString(env?.requiredAction);
-  const parsedOpts = parseEnvelopeOptions(env?.options);
-  if (!isSafePlainText(situation) || !isSafePlainText(requiredAction)) return PENDING_ENVELOPE;
-  if (parsedOpts.poisoned || !isBindingSafe(actionBinding)) return PENDING_ENVELOPE;
-  return { classified: true, pending: false, situation, requiredAction, options: parsedOpts.options, actionBinding };
+  const body = parseSafeEnvelopeBody(asRecord(rec.humanEnvelope));
+  if (!body || !isBindingSafe(actionBinding)) return PENDING_ENVELOPE;
+  return { classified: true, pending: false, ...body, actionBinding };
 }
 
 function ActionBindingDetails({ t, binding }: { t: Messages; binding: ActionBindingView }) {

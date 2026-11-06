@@ -96,16 +96,20 @@ const RoleHead = z.object({
 
 export const textHash = (text: string): string => createHash('sha256').update(text).digest('hex').slice(0, 12);
 
+function parseFrontmatterYaml(file: string, raw: string): unknown {
+  try {
+    return parse(raw);
+  } catch (err) {
+    throw new Error(`${file}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 /* A file is YAML frontmatter between --- lines, then the body. */
 function readParts(file: string): { head: unknown; body: string } {
   const text = readFileSync(file, 'utf8');
   const match = text.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
   if (!match) throw new Error(`${file} has no frontmatter.`);
-  try {
-    return { head: parse(match[1]!), body: match[2]!.trim() };
-  } catch (err) {
-    throw new Error(`${file}: ${err instanceof Error ? err.message : String(err)}`);
-  }
+  return { head: parseFrontmatterYaml(file, match[1]!), body: match[2]!.trim() };
 }
 
 function parsed<T>(schema: z.ZodType<T>, file: string, head: unknown): T {
@@ -117,7 +121,7 @@ function parsed<T>(schema: z.ZodType<T>, file: string, head: unknown): T {
 /* A department without a folder has no roster yet. */
 const markdown = (dir: string) => (existsSync(dir) ? readdirSync(dir).filter(f => f.endsWith('.md')).sort() : []);
 
-export function loadTemplates(dir: string): Templates {
+function loadSkills(dir: string): Map<string, Skill> {
   const skills = new Map<string, Skill>();
   for (const f of markdown(join(dir, 'skills'))) {
     const file = join(dir, 'skills', f);
@@ -126,47 +130,78 @@ export function loadTemplates(dir: string): Templates {
     if (`${s.id}.md` !== f) throw new Error(`${file} must be named ${s.id}.md.`);
     skills.set(s.id, { ...s, body, hash: textHash(body) });
   }
+  return skills;
+}
 
+const toRoleSkill = (s: string | { id: string; on: boolean }): RoleSkill =>
+  typeof s === 'string' ? { id: s, on: true, locked: false } : { ...s, locked: false };
+
+function ensureSkillsExist(file: string, entries: readonly RoleSkill[], skills: ReadonlyMap<string, Skill>): void {
+  for (const entry of entries) {
+    if (!skills.has(entry.id)) throw new Error(`${file} names the skill ${entry.id}, which does not exist.`);
+  }
+}
+
+function buildRoleSkills(file: string, r: z.infer<typeof RoleHead>, skills: ReadonlyMap<string, Skill>): RoleSkill[] {
+  const lockedIds = r.kind === 'head' ? HEAD_SKILLS : MEMBER_SKILLS;
+  const locked = [...CORE_SKILLS, ...lockedIds].map(id => ({ id, on: true, locked: true }));
+  const listed = r.skills.map(toRoleSkill);
+  ensureSkillsExist(file, [...locked, ...listed], skills);
+  return [...locked, ...listed.filter(s => !locked.some(l => l.id === s.id))];
+}
+
+function parseRoleFile(file: string, key: TemplateKey, skills: ReadonlyMap<string, Skill>): { role: Role; order: number } {
+  const { head, body } = readParts(file);
+  const r = parsed(RoleHead, file, head);
+  if (r.department !== key) throw new Error(`${file} is in ${key} but says ${r.department}.`);
+  return {
+    order: r.order,
+    role: {
+      id: r.id,
+      department: r.department,
+      kind: r.kind,
+      title: r.title,
+      description: r.description,
+      tier: r.tier,
+      effort: r.effort,
+      perProduct: r.perProduct,
+      inDefault: r.default,
+      gate: r.gate ?? null,
+      gateTriggers: r.gateTriggers,
+      improvementLanes: r.improvementLanes,
+      schema: r.schema,
+      timer: r.timer ?? null,
+      skills: buildRoleSkills(file, r, skills),
+      body,
+      hash: textHash(body),
+    },
+  };
+}
+
+function loadRoles(dir: string, skills: ReadonlyMap<string, Skill>): { roles: Map<string, Role>; order: Map<string, number> } {
   const roles = new Map<string, Role>();
   const order = new Map<string, number>();
   for (const key of TEMPLATE_KEYS) {
     for (const f of markdown(join(dir, 'roles', key))) {
-      const file = join(dir, 'roles', key, f);
-      const { head, body } = readParts(file);
-      const r = parsed(RoleHead, file, head);
-      if (r.department !== key) throw new Error(`${file} is in ${key} but says ${r.department}.`);
-      const locked = [...CORE_SKILLS, ...(r.kind === 'head' ? HEAD_SKILLS : MEMBER_SKILLS)].map(id => ({ id, on: true, locked: true }));
-      const listed = r.skills.map(s => (typeof s === 'string' ? { id: s, on: true, locked: false } : { ...s, locked: false }));
-      for (const s of [...locked, ...listed]) if (!skills.has(s.id)) throw new Error(`${file} names the skill ${s.id}, which does not exist.`);
-      order.set(r.id, r.order);
-      roles.set(r.id, {
-        id: r.id,
-        department: r.department,
-        kind: r.kind,
-        title: r.title,
-        description: r.description,
-        tier: r.tier,
-        effort: r.effort,
-        perProduct: r.perProduct,
-        inDefault: r.default,
-        gate: r.gate ?? null,
-        gateTriggers: r.gateTriggers,
-        improvementLanes: r.improvementLanes,
-        schema: r.schema,
-        timer: r.timer ?? null,
-        skills: [...locked, ...listed.filter(s => !locked.some(l => l.id === s.id))],
-        body,
-        hash: textHash(body),
-      });
+      const { role, order: pos } = parseRoleFile(join(dir, 'roles', key, f), key, skills);
+      order.set(role.id, pos);
+      roles.set(role.id, role);
     }
   }
+  return { roles, order };
+}
 
-  /* The head first, then default members, then optional ones, each by its order. */
-  const rank = (r: Role) => (r.kind === 'head' ? 0 : r.inDefault ? 1 : 2);
-  return {
-    roles,
-    skills,
-    roster: key =>
-      [...roles.values()].filter(r => r.department === key).sort((a, b) => rank(a) - rank(b) || order.get(a.id)! - order.get(b.id)! || a.id.localeCompare(b.id)),
-  };
+/* The head first, then default members, then optional ones, each by its order. */
+const roleRank = (r: Role): number => (r.kind === 'head' ? 0 : r.inDefault ? 1 : 2);
+
+function sortDepartmentRoster(roles: Iterable<Role>, order: ReadonlyMap<string, number>, key: TemplateKey): Role[] {
+  return [...roles]
+    .filter(r => r.department === key)
+    .sort((a, b) => roleRank(a) - roleRank(b) || order.get(a.id)! - order.get(b.id)! || a.id.localeCompare(b.id));
+}
+
+export function loadTemplates(dir: string): Templates {
+  const skills = loadSkills(dir);
+  const { roles, order } = loadRoles(dir, skills);
+  return { roles, skills, roster: key => sortDepartmentRoster(roles.values(), order, key) };
 }
