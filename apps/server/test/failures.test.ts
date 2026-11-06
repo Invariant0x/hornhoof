@@ -174,7 +174,8 @@ describe('named turn failures', () => {
     await c.fail(c.first.id, kind ? failure(kind, kind !== 'refused') : undefined);
 
     const turns = await c.turnsOf();
-    expect((await c.log(carried!.id)).some(e => e.kind === 'continued')).toBe(true);
+    /* It goes on, and a failure does not count towards being stuck. */
+    expect((await c.log(carried!.id)).some(e => e.kind === 'continued')).toBe(false);
     expect(turns.filter(j => j.taskId === carried!.id && ['queued', 'running'].includes(j.status))).toHaveLength(1);
     const own = turns.filter(j => j.taskId === c.task.id && j.id !== c.first.id);
     expect(own).toHaveLength(kind === 'refused' ? 0 : 1);

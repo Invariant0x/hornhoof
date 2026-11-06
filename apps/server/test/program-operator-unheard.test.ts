@@ -191,7 +191,7 @@ it('each task that went along is told again when a retry of the cut turn takes i
   const { along, carrier } = await headTakesTaskAlong(c);
   await c.unrecordedIdle(c.head.id, carrier.id);
   await c.failedTurn(carrier.id);
-  const retry = await insertTurn(c.ctx, { companyId: c.companyId, agentId: c.head.id, prompt: 'Once more.', taskId: carrier.taskId ?? undefined, retryOf: carrier.id });
+  const retry = await insertTurn(c.ctx, { companyId: c.companyId, agentId: c.head.id, prompt: 'Once more.', createdBy: null, taskId: carrier.taskId ?? undefined, retryOf: carrier.id });
   await resumeOperatorProcess(c.ctx, c.head.id, c.identity.nodeId);
   expect(await c.caseOf(carrier.id)).toMatchObject({ recoveryHold: false, continuationJobId: retry });
   expect(await c.continuationsOf(along)).toHaveLength(1);
