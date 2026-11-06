@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
-import { NO_MODEL_YET, type Case, type CheckBinding, type CheckInput, type CheckReceipt, type RunModelCheck } from '../src/modules/model-checks/contract.js';
+import type { Case, CheckBinding, CheckInput, CheckReceipt } from '@hornhoof/protocol';
 import { parseDataset } from '../src/modules/model-checks/dataset.js';
 import { afterRun, bindingDigest } from '../src/modules/model-checks/lifecycle.js';
-import { evaluateCheck, reportText } from '../src/modules/model-checks/run.js';
+import { evaluateCheck, NO_MODEL_YET, reportText, type RunModelCheck } from '../src/modules/model-checks/run.js';
 import type { Thresholds } from '../src/modules/model-checks/score.js';
 import { RULES, asJsonl, binding, holdout, mustBlock, reviewCase } from './model-check-fixture.js';
 
@@ -17,7 +17,7 @@ const datasetOf = (rows: Case[]) => {
 };
 const subjectOf = (input: CheckInput) => input.subject.contentDigest;
 const receipt = (given: CheckBinding, input: CheckInput, decision: 'allow' | 'block' | 'escalate', more: Partial<CheckReceipt> = {}): CheckReceipt => ({
-  schemaVersion: 1, checkId: given.checkId, bindingDigest: bindingDigest(given), subjectDigest: subjectOf(input), reviewer: given.model, result: { kind: 'review', decision, reasonCodes: ['fixture'] }, ...more,
+  schemaVersion: 1, checkId: given.checkId, bindingDigest: bindingDigest(given), subjectDigest: subjectOf(input), reviewer: given.model, result: { kind: 'review', decision, reasonCodes: ['uncertain'] }, ...more,
 });
 const expectedDecision = (row: Case) => ('decision' in row.expected ? row.expected.decision : 'allow');
 

@@ -1,7 +1,13 @@
-import { CheckReceipt, type Case, type CheckBinding, type CheckResult, type RunModelCheck } from './contract.js';
+import { CheckReceipt, type Case, type CheckBinding, type CheckInput, type CheckResult, type CheckUnavailable } from '@hornhoof/protocol';
 import type { Dataset } from './dataset.js';
 import { bindingDigest, canonicalJson } from './lifecycle.js';
 import { decide, scoreCases, type Counts, type Decision, type Scored, type Thresholds } from './score.js';
+
+/* The port of a fresh, independent model call: #446 gives the call and #447 the evaluator. */
+export type RunModelCheck = (binding: CheckBinding, input: CheckInput) => Promise<CheckReceipt | CheckUnavailable>;
+
+/* What a run has until those land: no model. Nothing it says can pass a run, so no check can turn on without a real call. */
+export const NO_MODEL_YET: RunModelCheck = async () => ({ kind: 'unavailable', code: 'unavailable' });
 
 export type Evaluation = Omit<Scored, 'missedDevCases'> & { bindingDigest: string; reportId: string; datasetHash: string; evaluatedAt: string };
 export type Report = { status: Decision['status']; problems: Decision['problems']; infraErrors: number; mustBlockMisses: number; all: Counts; holdout: Counts; missedDevCases: string[] };

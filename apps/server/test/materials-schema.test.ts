@@ -66,7 +66,7 @@ it('upgrades the previous schema with original question/proposal evidence intact
   await cp(MIGRATIONS, directory, { recursive: true });
   const file = join(directory, 'meta/_journal.json');
   const journal = JSON.parse(await readFile(file, 'utf8')) as { entries: { tag: string }[] };
-  journal.entries = journal.entries.filter(entry => entry.tag !== '0067_request_materials');
+  journal.entries = journal.entries.filter(entry => entry.tag < '0067_request_materials');
   await writeFile(file, JSON.stringify(journal));
   const client = new PGlite();
   onTestFinished(() => client.close());
