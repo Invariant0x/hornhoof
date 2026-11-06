@@ -554,7 +554,10 @@ describe('templates', () => {
   it('runs developers as a pool that each own a whole feature, with a short architect step before large work', () => {
     const role = (id: string) => templates.roles.get(id)!;
     const body = (id: string) => templates.skills.get(id)!.body;
-    expect(role('DEV-ENG').body).toMatch(/whole feature with all parts \(plan, server, interface, tests, docs\) on one branch/);
+    expect(role('DEV-ENG').body).toMatch(/whole feature with whichever parts it has \(plan, server, interface, tests, docs\) on one branch/);
+    /* A product may have no server or no screen: the role's line names no part as if every feature had it. */
+    expect(role('DEV-ENG').description.en).not.toMatch(/server|interface/);
+    expect(role('DEV-ENG').description.ru).not.toMatch(/сервер|интерфейс/);
     expect(role('DEV-ENG').body).toMatch(/write each test before the code/);
     /* Debugging was taken off only to keep one prompt short; skills are files now. */
     for (const id of ['dev-implement', 'dev-migrations', 'dev-debugging', 'dev-frontend-ui', 'dev-browser-check']) expect(role('DEV-ENG').skills.find(k => k.id === id)?.on, id).toBe(true);
@@ -1899,6 +1902,8 @@ describe('skills are independent cubes: any can be on for any role and together 
       expect(withoutToolLimit, id).not.toMatch(/\b\d+\s+(?:minutes?|hours?|days?|weeks?)\b|\b(?:two|three|four) (?:hours|days|weeks)\b|\bper week\b|\bevery day\b/i);
     }
     expect(body('dev-gates')).toMatch(/never units of time/);
+    /* How often a role wakes belongs to its timer, which a company can change. */
+    for (const role of roles) expect(`${text(role)}\n${role.description.ru}`, role.id).not.toMatch(/every few hours|несколько часов/i);
   });
 
   it('keeps the four gates of a turn in order, with review and testing once per turn', () => {
