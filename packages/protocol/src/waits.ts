@@ -45,8 +45,8 @@ export const signalsOnce = (kind: WaitSourceKind, key: string): boolean => kind 
 export const WaitOwnerBinding = z.union([z.strictObject({ agentId: z.uuid() }), z.strictObject({ personId: z.uuid() })]);
 export type WaitOwnerBinding = z.infer<typeof WaitOwnerBinding>;
 
-/* A review goes on at its interval until the source ends. intervalMs null says it has no repeats, which only a source that
-   signals once may say: an external operation has one signal, kept unique by its recovery case. */
+/* A review goes on at its interval until the source ends. intervalMs null says it has no repeats, which is how a source that
+   signals once says it, and only such a source: an external operation has one signal, kept unique by its recovery case. */
 export const WaitFinalReview = z.strictObject({ headAgentId: z.uuid(), anchorAt: moment, intervalMs: z.number().int().positive().nullable() });
 export type WaitFinalReview = z.infer<typeof WaitFinalReview>;
 
@@ -86,7 +86,7 @@ export type WaitSourceState = z.infer<typeof WaitSourceState>;
 const sourceRevision = z.number().int().min(0);
 const keyFitsKind = (input: { kind: WaitSourceKind; sourceKey: string }) => validSourceKey(input.kind, input.sourceKey);
 const KEY_OF_ANOTHER_KIND = 'This source key does not name a source of this kind.';
-const repeatsUnlessOnce = (input: { kind: WaitSourceKind; sourceKey: string; plan: WaitPlan }) => input.plan.finalReview.intervalMs !== null || signalsOnce(input.kind, input.sourceKey);
+const repeatsUnlessOnce = (input: { kind: WaitSourceKind; sourceKey: string; plan: WaitPlan }) => (input.plan.finalReview.intervalMs === null) === signalsOnce(input.kind, input.sourceKey);
 
 export const SyncSourceWaits = z.strictObject({
   taskId: z.uuid(),
@@ -96,7 +96,7 @@ export const SyncSourceWaits = z.strictObject({
   ownerBinding: WaitOwnerBinding,
   plan: WaitPlan,
   sourceState: WaitSourceState,
-}).refine(keyFitsKind, KEY_OF_ANOTHER_KIND).refine(repeatsUnlessOnce, 'Only an external operation may review once, with no repeats.');
+}).refine(keyFitsKind, KEY_OF_ANOTHER_KIND).refine(repeatsUnlessOnce, 'An external operation reviews once, with no repeats; every other source repeats until it ends.');
 export type SyncSourceWaits = z.infer<typeof SyncSourceWaits>;
 
 export const EndSourceWait = z.strictObject({
