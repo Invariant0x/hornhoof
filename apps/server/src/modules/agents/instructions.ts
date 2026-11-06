@@ -89,47 +89,40 @@ const CANONICAL_SKILLS: ReadonlySet<string> = new Set(['hh-run-checks', 'hh-lead
 
 const movedSinceHire = (hired: Record<string, string>, id: string, hash: string): boolean => hired[id] !== undefined && hired[id] !== hash;
 
-function effectiveSkillIds(t: Templates, agent: AgentRow): string[] {
-  const locked = agent.kind === 'head' ? HEAD_SKILLS : MEMBER_SKILLS;
-  const required = [...CORE_SKILLS, ...locked].filter(id => t.skills.has(id));
+function lockedSkillIds(role: Role | undefined, agent: AgentRow): readonly string[] {
+  const head = role ? role.kind === 'head' : agent.kind === 'head';
+  return head ? HEAD_SKILLS : MEMBER_SKILLS;
+}
+
+function effectiveSkillIds(t: Templates, role: Role | undefined, agent: AgentRow): string[] {
+  const required = [...CORE_SKILLS, ...lockedSkillIds(role, agent)].filter(id => t.skills.has(id));
   return [...new Set([...required, ...agent.skills])];
 }
 
 function basePart(role: Role | undefined, agent: AgentRow): Part | null {
-  const text = agent.overrides.base ?? (role ? role.body : undefined);
+  const text = agent.overrides.base ?? role?.body;
   if (text === undefined) return null;
-  return {
-    kind: 'base',
-    id: role ? role.id : null,
-    title: role ? role.title : null,
-    text,
-    overridden: agent.overrides.base !== undefined,
-    templateChanged: role ? movedSinceHire(agent.templateHashes, role.id, role.hash) : false,
-  };
+  const meta = role
+    ? { id: role.id, title: role.title, templateChanged: movedSinceHire(agent.templateHashes, role.id, role.hash) }
+    : { id: null, title: null, templateChanged: false };
+  return { kind: 'base', ...meta, text, overridden: agent.overrides.base !== undefined };
 }
-
-const isCanonicalSkill = (id: string, skill: Skill | undefined): boolean => skill !== undefined && CANONICAL_SKILLS.has(id);
 
 function resolveSkillBody(
   skill: Skill | undefined,
   overrides: Record<string, string> | undefined,
   id: string,
 ): { body: string | undefined; overridden: boolean } {
-  if (isCanonicalSkill(id, skill)) return { body: skill?.body, overridden: false };
-  const own = overrides ? overrides[id] : undefined;
+  if (skill && CANONICAL_SKILLS.has(id)) return { body: skill.body, overridden: false };
+  const own = overrides?.[id];
   return { body: own ?? skill?.body, overridden: own !== undefined };
 }
 
 function buildSkillPart(id: string, skill: Skill | undefined, body: string, overridden: boolean, hired: Record<string, string>): Part {
-  const title = skill ? skill.title.en : id;
-  return {
-    kind: 'skill',
-    id,
-    title: skill ? skill.title : null,
-    text: skillBlock(id, title, body),
-    overridden,
-    templateChanged: skill ? movedSinceHire(hired, id, skill.hash) : false,
-  };
+  const meta = skill
+    ? { title: skill.title, text: skillBlock(id, skill.title.en, body), templateChanged: movedSinceHire(hired, id, skill.hash) }
+    : { title: null, text: skillBlock(id, id, body), templateChanged: false };
+  return { kind: 'skill', id, ...meta, overridden };
 }
 
 function renderSkillEntry(t: Templates, agent: AgentRow, id: string): { part: Part; kept?: string; file?: SkillFile } | null {
@@ -141,6 +134,20 @@ function renderSkillEntry(t: Templates, agent: AgentRow, id: string): { part: Pa
   return inline(skill) ? { part, kept: part.text } : { part, file: skillFile(id, skill, body) };
 }
 
+function collectSkills(t: Templates, role: Role | undefined, agent: AgentRow): { parts: Part[]; kept: string[]; files: SkillFile[] } {
+  const parts: Part[] = [];
+  const kept: string[] = [];
+  const files: SkillFile[] = [];
+  for (const id of effectiveSkillIds(t, role, agent)) {
+    const entry = renderSkillEntry(t, agent, id);
+    if (!entry) continue;
+    parts.push(entry.part);
+    if (entry.kept !== undefined) kept.push(entry.kept);
+    if (entry.file) files.push(entry.file);
+  }
+  return { parts, kept, files };
+}
+
 /* The header, the role's text and each enabled skill between markers; the employee's own text replaces a template's. */
 export function renderInstructions(t: Templates, agent: AgentRow, place: Place): Rendered {
   const role = agent.roleKey ? t.roles.get(agent.roleKey) : undefined;
@@ -150,19 +157,13 @@ export function renderInstructions(t: Templates, agent: AgentRow, place: Place):
   const parts: Part[] = [{ kind: 'header', id: null, title: null, text: said, overridden: false, templateChanged: false }];
   const base = basePart(role, agent);
   if (base) parts.push(base);
+  const initialKept = parts.map(p => p.text);
 
-  const kept = parts.map(p => p.text);
-  const skills: SkillFile[] = [];
-  for (const id of effectiveSkillIds(t, agent)) {
-    const entry = renderSkillEntry(t, agent, id);
-    if (!entry) continue;
-    parts.push(entry.part);
-    if (entry.kept !== undefined) kept.push(entry.kept);
-    if (entry.file) skills.push(entry.file);
-  }
+  const collected = collectSkills(t, role, agent);
+  parts.push(...collected.parts);
 
-  const text = told(kept, skills);
-  return { parts, raw: parts.map(p => p.text).join('\n\n'), text, hash: textHash(text), skills, whole: whole([plain, ...parts.slice(1).map(p => p.text)]) };
+  const text = told([...initialKept, ...collected.kept], collected.files);
+  return { parts, raw: parts.map(p => p.text).join('\n\n'), text, hash: textHash(text), skills: collected.files, whole: whole([plain, ...parts.slice(1).map(p => p.text)]) };
 }
 
 /* The names an employee's header uses: its company, department and product. */

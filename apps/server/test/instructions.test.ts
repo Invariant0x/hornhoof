@@ -258,10 +258,17 @@ describe('renderInstructions', () => {
 
     const rolelessWorker = renderInstructions(
       shipped,
-      agent({ kind: 'worker', roleKey: null, skills: ['retired-gone', 'retired-kept'], overrides: { skills: { 'retired-kept': 'Saved custom procedure.' } }, templateHashes: {} }),
+      agent({
+        kind: 'worker',
+        roleKey: null,
+        skills: ['retired-gone', 'retired-kept'],
+        overrides: { base: 'Roleless base.', skills: { 'retired-kept': 'Saved custom procedure.' } },
+        templateHashes: {},
+      }),
       PLACE,
     );
     expect(occurrences(rolelessWorker.text, marker)).toBe(1);
+    expect(rolelessWorker.text).toContain('Roleless base.');
     expect(rolelessWorker.text).toContain(canonicalChecks);
     expect(rolelessWorker.whole).toContain(canonicalChecks);
     expect(rolelessWorker.parts.some(p => p.id === 'retired-gone')).toBe(false);
@@ -304,5 +311,14 @@ describe('renderInstructions', () => {
     expect(Buffer.byteLength(rolelessHead.text)).toBeLessThan(24_000);
     expect(rolelessHead.text).toContain(canonicalLead);
     expect(rolelessHead.text).toContain(canonicalChecks);
+
+    const mktHead = shipped.roles.get('MKT-HEAD')!;
+    const headWithoutNotebookCast = renderInstructions(
+      shipped,
+      agent({ kind: 'worker', roleKey: 'MKT-HEAD', skills: mktHead.skills.filter(s => s.on).map(s => s.id), templateHashes: {} }),
+      PLACE,
+    );
+    expect(headWithoutNotebookCast.parts.some(p => p.id === 'hh-task-flow')).toBe(false);
+    expect(headWithoutNotebookCast.parts.some(p => p.id === 'hh-report-to-head')).toBe(false);
   });
 });
