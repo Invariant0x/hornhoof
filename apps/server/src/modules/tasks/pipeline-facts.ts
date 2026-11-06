@@ -1,5 +1,5 @@
 import { AGENT_TIMES, EXTERNAL_WAITS, KIND_LINES, PIPELINE_STAGES, type AgentTimeKind, type DoneTask, type ExternalWaitKind, type FileTime, type KindFacts, type KindLine, type PackageTime, type PartTimings, type PipelineFacts, type PipelineRow, type PipelineSection, type PipelineStage, type PipelineUnit, type RunWaits, type SlowTest, type Spread, type TestFileTiming, type TestsFacts, type Waited, type WorkKind } from '@hornhoof/protocol';
-import type { TaskEventKind, TaskStatus } from '../../db/schema.js';
+import type { TaskEventKind, TaskStatus, TestRunFileCache } from '../../db/schema.js';
 import type { AgentTime } from './tree.js';
 
 /* The facts of one turn as the database holds them, for all of a company or one department. Everything here is worked out
@@ -23,7 +23,7 @@ export type FactsTask = {
 export type FactsEvent = { taskId: string; kind: TaskEventKind; data: Record<string, unknown>; createdAt: Date };
 export type FactsRequest = { taskId: string; createdAt: Date; answeredAt: Date | null };
 export type FactsPart = { queuedAt: Date; startedAt: Date | null; finishedAt: Date | null };
-export type FactsRun = { id: string; taskId: string; kind: 'tests' | 'work'; createdAt: Date; finishedAt: Date | null; parts: FactsPart[] };
+export type FactsRun = { id: string; taskId: string; kind: 'tests' | 'work'; createdAt: Date; finishedAt: Date | null; parts: FactsPart[]; fileCache?: TestRunFileCache | null };
 export type FactsJob = { taskId: string | null; status: string; error: string | null; interrupted: boolean; createdAt: Date; startedAt: Date | null; finishedAt: Date | null };
 export type FactsTimings = PartTimings & { runId: string };
 export type FactsInput = {
@@ -342,11 +342,17 @@ export function pipelineFacts(input: FactsInput): PipelineFacts {
     submitsPerTask: roundedRatio(sum(handedIn.map(l => handInsOf(l).length)), handedIn.length),
     failures: input.jobs.filter(isFailure).length,
     interrupted: input.jobs.filter(j => j.interrupted).length,
-    selectionMisses: null,
+    selectionMisses: selectionMissesOf(input.runs),
     kinds: kindsOf(work),
     done: doneTasks(work),
     tests: testsFacts(input.timings),
   };
+}
+
+/* What the full runs of a turn found red that the kept results called green. No number where no full run could find any. */
+function selectionMissesOf(runs: FactsRun[]): number | null {
+  const full = runs.flatMap(run => run.fileCache?.mode === 'full' ? [run.fileCache] : []);
+  return full.length ? sum(full.map(cache => cache.mismatches.length)) : null;
 }
 
 /* A bug task made after the task it names as #number closed. */

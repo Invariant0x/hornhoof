@@ -1,6 +1,7 @@
 import { MAX_TEST_PARTS, TestExecution } from '@hornhoof/protocol';
-import { planEnvironmentParts, type PreparedEnvironmentPlanInput, type EnvironmentPartPlan } from './plan-environment.js';
+import { planEnvironmentParts, unitKey, type PreparedEnvironmentPlanInput, type EnvironmentPartPlan } from './plan-environment.js';
 import type { TestPartPlan } from './plan.js';
+import type { ReuseDecision } from './reuse.js';
 
 export type ProductPlan = { leaves: { selection: TestExecution['selection']; after: number[] }[]; estimate: TestPartPlan | null; reason: string };
 
@@ -22,8 +23,8 @@ function preparationFor(input: PreparedEnvironmentPlanInput) {
   const policy = manifest.execution.oncePreparation;
   return policy?.profiles.includes(input.snapshot.profile) ? policy : undefined;
 }
-function finalSuites(input: PreparedEnvironmentPlanInput, onceIds: string[]): string[] {
-  const selected = new Set([...input.units.map(unit => unit.suiteId), ...onceIds]);
+function finalSuites(input: PreparedEnvironmentPlanInput, remaining: PreparedEnvironmentPlanInput['units'], onceIds: string[]): string[] {
+  const selected = new Set([...remaining.map(unit => unit.suiteId), ...onceIds]);
   return input.snapshot.description.manifest.suites.filter(suite => selected.has(suite.id) && suite.finalChecks?.length).map(suite => suite.id);
 }
 async function remainingPlan(input: PreparedEnvironmentPlanInput, remaining: PreparedEnvironmentPlanInput['units']): Promise<EnvironmentPartPlan | null> {
@@ -33,7 +34,7 @@ async function remainingPlan(input: PreparedEnvironmentPlanInput, remaining: Pre
 }
 function planReason(preparation: ReturnType<typeof preparationFor>, planned: EnvironmentPartPlan | null): string {
   const prefix = preparation ? `One explicit preparation runs ${preparation.suiteIds.length} suites and ${preparation.commands.length} commands before batches. ` : '';
-  return prefix + (planned?.testPlan.reason ?? 'All selected suites run once in preparation; no batch is needed.');
+  return prefix + (planned?.testPlan.reason ?? (preparation ? 'All selected suites run once in preparation; no batch is needed.' : 'Every selected file was reused; nothing runs.'));
 }
 function preparationLeaves(input: PreparedEnvironmentPlanInput, preparation: ReturnType<typeof preparationFor>): ProductPlan['leaves'] {
   if (!preparation) return [];
@@ -43,9 +44,11 @@ function planEstimate(planned: EnvironmentPartPlan | null): TestPartPlan | null 
   if (!planned) return null;
   return planned.testPlan;
 }
-export async function planProductParts(input: PreparedEnvironmentPlanInput): Promise<ProductPlan> {
-  const preparation = preparationFor(input), onceIds = preparation?.suiteIds ?? [], finals = finalSuites(input, onceIds);
-  const remaining = input.units.filter(unit => !onceIds.includes(unit.suiteId));
+/* Plans what is left to run. Only what runs has final checks; a reused preparation leaves nothing for the rest to wait for. */
+export async function planProductParts(input: PreparedEnvironmentPlanInput & { reuse?: ReuseDecision }): Promise<ProductPlan> {
+  const policy = preparationFor(input), preparation = input.reuse?.preparation ? undefined : policy, onceIds = policy?.suiteIds ?? [];
+  const remaining = input.units.filter(unit => !onceIds.includes(unit.suiteId) && !input.reuse?.reused.has(unitKey(unit)));
+  const finals = finalSuites(input, remaining, preparation?.suiteIds ?? []);
   const budget = MAX_TEST_PARTS - (preparation ? 1 : 0) - finals.length;
   if (budget < (remaining.length ? 1 : 0)) throw new Error('The product plan exceeds the supported part count.');
   const availableMachines = Math.min(input.availableMachines, Math.max(0, budget));

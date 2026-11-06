@@ -32,6 +32,8 @@ const RULES: Record<string, string> = {
   test_parts: TESTS,
   turn_snapshots: 'Hornhoof works out the pipeline report itself: the tool only reads it.',
   test_part_timings: 'Hornhoof works out the pipeline report itself: the tool only reads it.',
+  test_file_results: 'Hornhoof keeps which test files passed itself, as a forged row would let a test go unrun: the tool only reads it.',
+  test_suite_memory: 'Hornhoof keeps what test runs leave for their next run itself: the tool only reads it.',
   departments: "A department's repository changes only with set_repository, which only the CEO may ask for.",
   agents:
     "Employees come by hire and go by fire_employee, and their skills and subscription change by change_employee, which make the CEO's checks; kind and role_key never change, and a head stays in its department.",

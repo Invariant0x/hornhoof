@@ -234,8 +234,16 @@ describe('returns, failures and interrupted turns', () => {
     expect(facts.interrupted).toBe(1);
   });
 
-  it('says it has no number for test selection misses', () => {
+  it('says it has no number for test selection misses while no full run could find any', () => {
     expect(pipelineFacts(input()).selectionMisses).toBeNull();
+    const cached = { mode: 'cached' as const, turn: 1, fingerprints: [], reused: 3, preparationReused: false, wouldSkip: [], mismatches: [] };
+    expect(pipelineFacts(input({ runs: [run({ fileCache: cached })] })).selectionMisses).toBeNull();
+  });
+
+  it('counts what the full runs of a turn found that the kept results called green', () => {
+    const full = (files: string[]) => ({ mode: 'full' as const, turn: 5, fingerprints: [], reused: 0, preparationReused: false, wouldSkip: [], mismatches: files.map(file => ({ suiteId: 'unit', file })) });
+    expect(pipelineFacts(input({ runs: [run({ fileCache: full([]) })] })).selectionMisses).toBe(0);
+    expect(pipelineFacts(input({ runs: [run({ fileCache: full(['a.ts', 'b.ts']) }), run({ fileCache: full(['c.ts']) })] })).selectionMisses).toBe(3);
   });
 });
 

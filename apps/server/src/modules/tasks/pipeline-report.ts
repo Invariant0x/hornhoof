@@ -37,7 +37,7 @@ const FACT_TASK = {
 type RawInput = Omit<FactsInput, 'agentTime' | 'openedAt' | 'until'>;
 
 async function readRuns(db: Reader, taskIds: string[]): Promise<FactsInput['runs']> {
-  const runs = await db.select({ id: testRuns.id, taskId: testRuns.taskId, kind: testRuns.kind, createdAt: testRuns.createdAt, finishedAt: testRuns.finishedAt }).from(testRuns).where(inArray(testRuns.taskId, taskIds));
+  const runs = await db.select({ id: testRuns.id, taskId: testRuns.taskId, kind: testRuns.kind, createdAt: testRuns.createdAt, finishedAt: testRuns.finishedAt, fileCache: testRuns.fileCache }).from(testRuns).where(inArray(testRuns.taskId, taskIds));
   if (!runs.length) return [];
   const parts = await db.select({ runId: testParts.runId, queuedAt: testParts.queuedAt, startedAt: testParts.startedAt, finishedAt: testParts.finishedAt }).from(testParts).where(inArray(testParts.runId, runs.map(r => r.id)));
   return runs.map(r => ({ ...r, parts: parts.filter(p => p.runId === r.id) }));

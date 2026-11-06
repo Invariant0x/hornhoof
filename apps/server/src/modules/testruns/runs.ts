@@ -1,5 +1,5 @@
 import type { NodeLoad, NodeMessage, RunKind, Workspace } from '@hornhoof/protocol';
-import { and, asc, count, eq, inArray, isNull, like, max, notInArray, sql, type SQL } from 'drizzle-orm';
+import { and, asc, count, eq, inArray, isNotNull, isNull, like, max, notInArray, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
 import { hashToken } from '../../crypto/tokens.js';
@@ -27,6 +27,7 @@ import { markPromise, markRun, type RunMark } from './github-status.js';
 import { forRun, noteProductOwner, productPlaces, together } from './load.js';
 import { cancelDescription, newEnvironmentRequest, pumpDescriptions, productReceipt, repositoryScope, testCapabilities, testRunMode, type TestRunMode } from './describe.js';
 import { pickMachine } from './pick.js';
+import { closeFileCache, keptFor, recordPartFiles, rememberKept, reuseLines, reuseView } from './reuse.js';
 
 type Run = typeof testRuns.$inferSelect;
 type Part = typeof testParts.$inferSelect;
@@ -145,7 +146,7 @@ const markLine = (kind: RunKind, found: { department: { repoFullTestCommand: str
 /* Hornhoof's account of a run that ended: each part, where it ran and how long, the end of what failed, and the files
    on the task. */
 function account(run: Run, task: Pick<Task, 'number'>, parts: Part[], files: Set<string>): string {
-  const lines = [`${named(run)} ${run.kind === 'work' && run.status === 'passed' ? 'is done' : run.status} after ${took((run.finishedAt ?? new Date()).getTime() - run.createdAt.getTime())}.${pinLine(run)}`];
+  const lines = [`${named(run)} ${run.kind === 'work' && run.status === 'passed' ? 'is done' : run.status} after ${took((run.finishedAt ?? new Date()).getTime() - run.createdAt.getTime())}.${pinLine(run)}`, ...reuseLines(run.fileCache, parts)];
   for (const p of parts) {
     const where = p.machineName ? ` on ${p.machineName}` : '';
     const time = p.startedAt && p.finishedAt ? ` in ${took(p.finishedAt.getTime() - p.startedAt.getTime())}` : '';
@@ -305,6 +306,8 @@ const partMessage = (run: Run, part: Part, repo: Repo | null, task: number) => (
 async function giveOut(ctx: Ctx): Promise<void> {
   const { db } = ctx;
   await pumpDescriptions(ctx, companyId => placesOf(ctx, companyId), run => targetOf(ctx, run), id => settleRun(ctx, id));
+  /* A run whose every file was reused has no part whose end would end it. */
+  for (const { id } of await db.select({ id: testRuns.id }).from(testRuns).where(and(eq(testRuns.status, 'running'), eq(testRuns.parts, 0), isNotNull(testRuns.environmentSnapshot)))) await settleRun(ctx, id);
   const waiting = await db
     .select({ part: testParts, run: testRuns, task: { number: tasks.number } })
     .from(testParts)
@@ -375,12 +378,13 @@ async function recordRunEnd(ctx: Ctx, runId: string, parts: Part[], status: 'pas
     const [found] = await tx.select({ task: tasks }).from(testRuns).innerJoin(tasks, eq(tasks.id, testRuns.taskId)).where(eq(testRuns.id, runId)).for('update', { of: tasks });
     if (!found) return null;
     const { task } = found;
-    const [run] = await tx
+    const [ended] = await tx
       .update(testRuns)
       .set({ status, finishedAt: new Date() })
       .where(and(eq(testRuns.id, runId), eq(testRuns.status, 'running')))
       .returning();
-    if (!run) return null;
+    if (!ended) return null;
+    const run = await closeFileCache(tx, ended, parts);
     if (await pendingAuthorCheckRun(tx, task.id, run.id)) {
       await endAuthorCheckWait(tx, run, task);
       return { authorCheck: run.agentId };
@@ -398,11 +402,18 @@ async function publishRunEnd(ctx: Ctx, runId: string, end: FinishedRun): Promise
   } else await told(ctx, end);
 }
 
+/* A described run planned with no part at all: nothing was left to run. Before its description a run has no parts either. */
+async function everythingReused(ctx: Ctx, runId: string): Promise<boolean> {
+  const [run] = await ctx.db.select({ id: testRuns.id }).from(testRuns).where(and(eq(testRuns.id, runId), eq(testRuns.parts, 0), isNotNull(testRuns.environmentSnapshot)));
+  return run !== undefined;
+}
+
 /* A run whose parts all ended ends with them, and its agent hears how it went on its task. The mark goes out before the
    write that ends the run, so the one result the agent hears says how it went; a crash in between ends and marks it again. */
 async function settleRun(ctx: Ctx, runId: string): Promise<void> {
   const parts = await ctx.db.select().from(testParts).where(eq(testParts.runId, runId)).orderBy(asc(testParts.part));
-  if (!parts.length || parts.some(p => p.status === 'queued' || p.status === 'running')) return;
+  if (parts.some(p => p.status === 'queued' || p.status === 'running')) return;
+  if (!parts.length && !await everythingReused(ctx, runId)) return;
   const status = parts.every(p => p.status === 'passed') ? 'passed' : 'failed';
   const mark = await markRun(ctx, runId, status);
   const end = await recordRunEnd(ctx, runId, parts, status, mark);
@@ -482,6 +493,12 @@ function partEnd(run: Pick<Run, 'commitSha'>, msg: Pick<TestsDone, 'ok' | 'commi
   return msg.ok ? { status: 'passed', error: null } : { status: 'failed', error: msg.error ?? 'failed' };
 }
 
+/* What a run keeps for later never decides how this one ends: without it, a later run only runs more. */
+async function keepPartResults(ctx: Ctx, run: Run, part: Part, ended: Part, msg: TestsDone): Promise<void> {
+  try { await recordPartFiles(ctx, run, part, ended, msg); await rememberKept(ctx, run, msg); }
+  catch (err) { ctx.log.error({ error: loggable(err), runId: run.id }, 'The results of a test part could not be kept.'); }
+}
+
 /* The node's end of a part: its result, and its log on the task, also for a part that ended here first. */
 export async function partDone(ctx: Ctx, id: NodeIdentity, msg: TestsDone): Promise<void> {
   const { db } = ctx;
@@ -494,6 +511,7 @@ export async function partDone(ctx: Ctx, id: NodeIdentity, msg: TestsDone): Prom
         .where(and(eq(testParts.id, msg.partId), eq(testParts.status, 'running')))
         .returning();
       await keepLog(ctx, found.run, found.part, msg.log);
+      if (ended) await keepPartResults(ctx, found.run, found.part, ended, msg);
       if (ended) await settleRun(ctx, found.run.id);
     }
   }
@@ -708,6 +726,7 @@ export async function runState(ctx: Ctx, job: ToolJob, number: number, kind: Run
     branch: work ? run.branch : (run.branch ?? `the task's own: task-${task.number} or the one that starts with task-${task.number}-`),
     command: run.command,
     ...productRunView(run),
+    ...reuseView(run.fileCache, parts),
     ...(work ? { files: run.files, memoryGb: run.memoryGb, repeatable: run.repeatable } : { commitSha: run.commitSha }),
     minutes: run.timeoutMs / 60_000,
     status: stateOf(run, run.status),
@@ -857,6 +876,7 @@ async function givePart(ctx: Ctx, { part, run, task }: { part: Part; run: Run; t
       return;
     }
     if (!await productPartReady(ctx, part)) return;
+    const kept = await keptFor(ctx, run, part);
     const candidates = await productPlaces(ctx, places.get(run.companyId)!, run, needOf(run, found.department) * GIB);
     const place = placeFor(candidates, run, part, found.department, reserved);
     if (!place) {
@@ -870,7 +890,7 @@ async function givePart(ctx: Ctx, { part, run, task }: { part: Part; run: Run; t
       .where(and(eq(testParts.id, part.id), eq(testParts.status, 'queued')))
       .returning();
     if (!taken) return;
-    const sent = !nodeHeld(ctx, place.node) && ctx.hub.send(place.node, partMessage(run, part, found.repo, task.number));
+    const sent = !nodeHeld(ctx, place.node) && ctx.hub.send(place.node, { ...partMessage(run, part, found.repo, task.number), ...(kept ? { kept } : {}) });
     /* The node went away or began to wait for an update meanwhile: the part waits for the next machine. */
     if (!sent) {
       await db
