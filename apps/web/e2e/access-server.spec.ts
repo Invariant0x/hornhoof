@@ -29,17 +29,20 @@ async function startServer(): Promise<Server> {
   let stderr = '';
   child.stderr.on('data', chunk => { stderr += String(chunk); });
   const boot = await new Promise<Boot>((done, fail) => {
-    createInterface({ input: child.stdout }).once('line', line => {
-      if (line.trim().startsWith('{')) done(JSON.parse(line) as Boot);
+    let started = false;
+    createInterface({ input: child.stdout }).on('line', line => {
+      if (started || !line.trim().startsWith('{"url"')) return;
+      started = true;
+      done(JSON.parse(line) as Boot);
     });
     child.once('exit', code => fail(new Error(`The server stopped early (${code}):\n${stderr}`)));
   });
   const pending = new Map<string, () => void>();
   child.stdout.on('data', chunk => {
     for (const line of String(chunk).split('\n')) {
-      if (!line) continue;
-      const value = JSON.parse(line) as { control?: string };
-      if (value.control) pending.get(value.control)?.();
+      if (!line.trim().startsWith('{"control"')) continue;
+      const value = JSON.parse(line) as { control: string };
+      pending.get(value.control)?.();
     }
   });
   const control = (command: string) => new Promise<void>(done => {
