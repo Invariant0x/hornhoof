@@ -185,6 +185,7 @@ describe('legacy scoped materials', () => {
 describe('native material boundaries', () => {
   async function native(kind: 'structure' | 'staff', state: 'legacy' | 'private-staging' | 'public-stamp') {
     const f = await legacy();
+    await listen(f.app);
     const items = kind === 'structure' ? [{ template: 'finance', note: 'Proposed department' }] : [{ role: 'DEV-DEV', name: 'New employee', model: 'default', subscription: f.author.subscriptionId, skills: [] }];
     const [proposal] = await f.db.insert(proposals).values({
       companyId: f.company.id, agentId: f.author.id, kind, departmentId: kind === 'staff' ? f.dev.id : null,
