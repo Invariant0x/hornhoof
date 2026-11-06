@@ -12,7 +12,6 @@ import type { WithEvent } from '../events/store.js';
 import { returnAlongLine } from '../org/map-state.js';
 import { carriesFile, encodedHint } from '../tasks/attachments.js';
 import { programRestartStatus, restartProgram } from '../tasks/program-restarts.js';
-import { CLOSED } from '../tasks/engine.js';
 import { queueTaskMessage, MESSAGE_TASK_HINT, TaskReference } from '../tasks/external-wait.js';
 import type { Grant } from '../templates/load.js';
 import { PROGRAM_OPERATOR_ROLE } from '@hornhoof/protocol/program-operator';
