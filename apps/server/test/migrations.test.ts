@@ -168,6 +168,29 @@ async function migrationsUpTo(tag: string): Promise<string> {
   return dir;
 }
 
+describe('model checks migration', () => {
+  it('adds its tables empty, with nobody given anything and no row of an older database touched', async () => {
+    const client = new PGlite();
+    onTestFinished(() => client.close());
+    const db = drizzle(client);
+    await migrate(db, { migrationsFolder: await migrationsUpTo('0067_request_materials') });
+    const company = (await db.execute<{ id: string }>(sql`insert into companies (name) values ('Acme') returning id`)).rows[0]!.id;
+    const person = (await db.execute<{ id: string }>(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Dana', 'dana@acme.example', 'active', 'listed') returning id`)).rows[0]!.id;
+    const department = (await db.execute<{ id: string }>(sql`insert into departments (company_id, template_key, role_code) values (${company}, 'support', 'SUP') returning id`)).rows[0]!.id;
+    await db.execute(sql`insert into person_access (company_id, person_id, department_id) values (${company}, ${person}, ${department})`);
+    const older = async () => Promise.all(['companies', 'people', 'departments', 'person_access'].map(async table => (await db.execute(sql.raw(`select to_jsonb(t) as row from ${table} t order by id`))).rows));
+    const before = await older();
+
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await migrate(db, { migrationsFolder: MIGRATIONS });
+
+    expect(await older()).toEqual(before);
+    for (const table of ['model_checks', 'model_check_revisions', 'model_check_datasets', 'model_check_evaluations']) {
+      expect((await db.execute(sql.raw(`select count(*)::int as n from ${table}`))).rows, table).toEqual([{ n: 0 }]);
+    }
+  });
+});
+
 describe('migration 0049', () => {
   it.each(['Acme', 'Moonfern'])('adds history indexes on an upgraded %s copy without changing old events', async name => {
     const source = new PGlite();

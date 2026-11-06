@@ -1,8 +1,10 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { decodeViewChallenge, decodeViewSignature, encodeViewChallenge, type BindViewRequest, type BindViewResponse, type ViewProof } from '@hornhoof/protocol';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
 import { AgentWindow } from '../src/screens/AgentWindow';
+import * as testTerminal from '../src/ui/AgentTerminal';
 import type { EventView, OrchestratorState } from '../src/types';
 import { ME, mockApi, ORG } from './api-mock';
 import { decl } from './css';
@@ -217,6 +219,8 @@ class FakeResizeObserver {
   }
 }
 
+const TEST_CURSOR = `ttc1.${'A'.repeat(43)}`;
+
 class FakeSocket {
   static all: FakeSocket[] = [];
   readyState = 0;
@@ -234,16 +238,28 @@ class FakeSocket {
     this.readyState = 3;
   }
   /* What the server does. */
-  opened(write = true, message = write) {
+  connected() {
     this.readyState = 1;
     this.onopen?.();
+  }
+  ready(write: boolean, message: boolean) {
     this.onmessage?.({ data: JSON.stringify({ type: 'ready', write, message }) });
+  }
+  opened(write = true, message = write) {
+    this.connected();
+    this.ready(write, message);
   }
   refused(reason: 'control' | 'message') {
     this.onmessage?.({ data: JSON.stringify({ type: 'refused', reason }) });
   }
   screen(data: string) {
     this.onmessage?.({ data: JSON.stringify({ type: 'data', data }) });
+  }
+  testScreen(data: string) {
+    this.onmessage?.({ data: JSON.stringify({ type: 'data', data, cursor: TEST_CURSOR }) });
+  }
+  testError(reason: 'denied' | 'expired' | 'unavailable' | 'unknown') {
+    this.onmessage?.({ data: JSON.stringify({ type: 'error', reason }) });
   }
   program(running: boolean) {
     this.onmessage?.({ data: JSON.stringify({ type: 'program', running }) });
@@ -370,12 +386,11 @@ describe("an agent's live terminal in its window", () => {
     expect(terms.at(-1)!.focused).toBe(1);
   });
 
-  it('leaves the focus to the line under it for someone who only watches', async () => {
+  it('takes the focus for a person who writes to an agent on the plan of someone else, with no line under it', async () => {
     open(true, { canType: false });
-    const line = await screen.findByRole('textbox', { name: 'Write to the orchestrator' });
     await socket();
-    expect(terms.at(-1)!.focused).toBe(0);
-    expect(line).toHaveFocus();
+    expect(terms.at(-1)!.focused).toBe(1);
+    expect(screen.queryByRole('textbox', { name: 'Write to the orchestrator' })).not.toBeInTheDocument();
   });
 
   it('offers Stop above the terminal while the agent works', async () => {
@@ -944,5 +959,209 @@ describe('pictures directly in the live terminal', () => {
     fireEvent.drop(container.querySelector<HTMLElement>('.t-xterm')!, dragged(png()));
     expect(await screen.findByText('No access.')).toHaveAttribute('role', 'alert');
     expect(ws.sent).toEqual([]);
+  });
+});
+
+
+describe('a test terminal browser key', () => {
+  const lease = {
+    leaseId: '7b1b70f3-f209-40f0-90b0-c06a52ca02a2',
+    expectedLeaseRevision: 3,
+    registrationId: 'eb21e51a-f597-47ae-bf74-317e529be02e',
+    expectedIdentityDigest: 'a'.repeat(64),
+  };
+
+  it('publishes only the frozen public binding and signs the exact bytes the server supplied', async () => {
+    const key = await testTerminal.createTestTerminalBrowserKey(lease);
+    expect(key.request).toEqual({
+      ...lease,
+      operationId: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/),
+      browserPublicKey: {
+        algorithm: 'P-256/SHA-256',
+        kty: 'EC',
+        crv: 'P-256',
+        x: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/),
+        y: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/),
+      },
+    });
+
+    const challenge = new TextEncoder().encode('exact server challenge bytes');
+    const signature = await key.sign(challenge);
+    const { kty, crv, x, y } = key.request.browserPublicKey;
+    const publicKey = await crypto.subtle.importKey('jwk', { kty, crv, x, y }, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
+    expect(await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, publicKey, signature, challenge)).toBe(true);
+    expect(signature.byteLength).toBe(64);
+  });
+});
+
+describe('a standalone test terminal', () => {
+  const lease = {
+    leaseId: '7b1b70f3-f209-40f0-90b0-c06a52ca02a2',
+    expectedLeaseRevision: 3,
+    registrationId: 'eb21e51a-f597-47ae-bf74-317e529be02e',
+    expectedIdentityDigest: 'a'.repeat(64),
+  };
+  const viewId = '0e4a50f7-40e2-45d8-9f45-c8b7ef8f3d84';
+  const firstNonceId = '6f1db92c-83c4-4e9d-b84d-c12b3e528c6a';
+  const secondNonceId = 'f280f8a7-5c64-48f2-b78b-f93ce76a7220';
+  const response = (nonceId: string, nonce: number): BindViewResponse => ({
+    viewId,
+    nonceId,
+    challenge: encodeViewChallenge(new Uint8Array(32).fill(nonce)),
+    role: 'observer',
+    rights: { control: false, message: false },
+  });
+
+  function openStandalone(bindView: (request: BindViewRequest) => Promise<BindViewResponse>, onGone = vi.fn()) {
+    const calls = mockApi({});
+    const rendered = render(
+      <LanguageProvider>
+        <testTerminal.AgentTerminal path="/api/not-a-test-terminal" program="Claude" onGone={onGone} testSession={{ ...lease, bindView }} />
+      </LanguageProvider>,
+    );
+    return { calls, rendered };
+  }
+
+  async function prove(ws: FakeSocket) {
+    act(() => ws.connected());
+    await waitFor(() => expect(ws.sent).toHaveLength(1));
+    return ws.sent[0] as ViewProof;
+  }
+
+  it('binds an in-memory key, signs the exact challenge and keeps an observer strictly local', async () => {
+    const bindResponse = response(firstNonceId, 7);
+    const bindView = vi.fn<(request: BindViewRequest) => Promise<BindViewResponse>>(async () => bindResponse);
+    const { calls, rendered } = openStandalone(bindView);
+    const ws = await socket();
+    expect(bindView).toHaveBeenCalledTimes(1);
+    expect(ws.url).toBe(`ws://${location.host}/api/test-terminals/views/${viewId}/stream`);
+    expect(ws.url).not.toContain('?');
+
+    const proof = await prove(ws);
+    expect(proof).toEqual({ type: 'proof', viewId, nonceId: firstNonceId, signature: expect.stringMatching(/^[A-Za-z0-9_-]{86}$/) });
+    const request = bindView.mock.calls[0]![0];
+    const { kty, crv, x, y } = request.browserPublicKey;
+    const publicKey = await crypto.subtle.importKey('jwk', { kty, crv, x, y }, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
+    expect(await crypto.subtle.verify(
+      { name: 'ECDSA', hash: 'SHA-256' },
+      publicKey,
+      new Uint8Array(decodeViewSignature(proof.signature)),
+      new Uint8Array(decodeViewChallenge(bindResponse.challenge)),
+    )).toBe(true);
+
+    act(() => {
+      ws.ready(false, false);
+      ws.testScreen('masked output');
+    });
+    const term = terms[0]!;
+    expect(term.written).toEqual(['masked output']);
+    const terminal = rendered.container.querySelector<HTMLElement>('.t-xterm')!;
+    fireEvent.paste(terminal, copied([png()]));
+    fireEvent.drop(terminal, dragged(png()));
+    act(() => {
+      term.type('ls\r\x03\x1b[I\x1b[>0;276;0c');
+      term.resized(132, 40);
+    });
+    expect(term.wheel(-3)).toBe(false);
+    expect(term.buffer.active.viewportY).toBe(197);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(ws.sent).toEqual([proof]);
+    expect(calls).toEqual([]);
+  });
+
+  it('renders no server frame before an accepted proof', async () => {
+    const bindView = vi.fn<(request: BindViewRequest) => Promise<BindViewResponse>>(async () => response(firstNonceId, 7));
+    const gone = vi.fn();
+    openStandalone(bindView, gone);
+    const ws = await socket();
+    act(() => {
+      ws.ready(false, false);
+      ws.testScreen('unauthenticated');
+      ws.testError('denied');
+    });
+    expect(terms[0]!.written).toEqual([]);
+    expect(ws.sent).toEqual([]);
+    act(() => ws.connected());
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(ws.sent).toEqual([]);
+    act(() => ws.ended(4403, 'denied'));
+    expect(gone).toHaveBeenCalledWith('denied');
+    expect(FakeSocket.all).toHaveLength(1);
+  });
+
+  it('rejects contradictory ready rights before the renderer and still sends only proof', async () => {
+    const bindView = vi.fn<(request: BindViewRequest) => Promise<BindViewResponse>>(async () => response(firstNonceId, 7));
+    const gone = vi.fn();
+    openStandalone(bindView, gone);
+    const ws = await socket();
+    const proof = await prove(ws);
+    act(() => {
+      ws.ready(true, true);
+      ws.testScreen('not allowed');
+      terms[0]!.type('ls\r');
+      terms[0]!.resized(132, 40);
+    });
+    expect(terms[0]!.written).toEqual([]);
+    expect(ws.sent).toEqual([proof]);
+    act(() => ws.ended(4500, 'unknown'));
+    expect(gone).toHaveBeenCalledWith('unknown');
+  });
+
+  it.each([
+    { reason: 'expired', code: 4408 },
+    { reason: 'unavailable', code: 4503 },
+  ] as const)('returns a post-proof $reason terminal state to its owner', async ({ reason, code }) => {
+    const bindView = vi.fn<(request: BindViewRequest) => Promise<BindViewResponse>>(async () => response(firstNonceId, 7));
+    const gone = vi.fn();
+    openStandalone(bindView, gone);
+    const ws = await socket();
+    await prove(ws);
+    act(() => ws.ready(false, false));
+    act(() => ws.testError(reason));
+    act(() => ws.ended(code, reason));
+    expect(gone).toHaveBeenCalledWith(reason);
+    expect(FakeSocket.all).toHaveLength(1);
+  });
+
+  it('does not reconnect itself and uses a fresh key, nonce and proof on explicit remount', async () => {
+    const responses = [response(firstNonceId, 7), response(secondNonceId, 8)];
+    const requests: BindViewRequest[] = [];
+    const bindView = vi.fn(async (request: BindViewRequest) => {
+      requests.push(request);
+      return responses[requests.length - 1]!;
+    });
+    const gone = vi.fn();
+    const first = openStandalone(bindView, gone);
+    const firstSocket = await socket();
+    const firstProof = await prove(firstSocket);
+    act(() => firstSocket.ready(false, false));
+    act(() => terms[0]!.type('never replay this'));
+
+    vi.useFakeTimers();
+    try {
+      act(() => {
+        firstSocket.ended(1006, '');
+        vi.advanceTimersByTime(11_000);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(gone).toHaveBeenCalledWith('unknown');
+    expect(FakeSocket.all).toHaveLength(1);
+    first.rendered.unmount();
+
+    openStandalone(bindView, gone);
+    await waitFor(() => expect(FakeSocket.all).toHaveLength(2));
+    const secondSocket = FakeSocket.all[1]!;
+    const secondProof = await prove(secondSocket);
+    expect(requests).toHaveLength(2);
+    expect(requests[1]!.operationId).not.toBe(requests[0]!.operationId);
+    expect(requests[1]!.browserPublicKey).not.toEqual(requests[0]!.browserPublicKey);
+    expect(secondProof.nonceId).toBe(secondNonceId);
+    expect(secondProof.signature).not.toBe(firstProof.signature);
+    expect(secondSocket.url).toBe(`ws://${location.host}/api/test-terminals/views/${viewId}/stream`);
+    expect(secondSocket.sent).toEqual([secondProof]);
   });
 });

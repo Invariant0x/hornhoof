@@ -1,8 +1,12 @@
+export * from './request-materials.js';
+export * from './questions.js';
 export { APPROVAL_CHANNELS, APPROVAL_MODES, ApprovalAmount, ApprovalChannel, ApprovalRule, DEFAULT_APPROVAL_RULE, approvalNeeded, kindKey, ruleOf, type ApprovalMode, type ApprovalWork, type StoredApprovalRule } from './approval-policy.js';
 export { NOTIFICATION_NAMES, NotificationSchema, NotificationSourceSchema, type Notification, type NotificationSource } from './notifications.js';
 export { MachineDrain, NodeWait } from './machine-drain.js';
 export { inLane } from './lane.js';
 export * from './pipeline-report.js';
+export * from './model-check.js';
+export * from './test-terminals.js';
 export { COMMIT_SHA, CommitSha, ownBranch } from './test-commit.js';
 export { runtimeVersionMatches, requiredTestRuntimes, supportsTestProfile, EnvironmentProblem, TestsDescribed, EnvironmentDescription, EnvironmentSnapshot, InputDigest, ProductCommitSha, RuntimeCapability, TestExecution, TestUnit, TestEnvironmentReceipt, TEST_DESCRIPTION_BYTES, validateEnvironmentDescription, Command, EnvironmentDigest, RepositoryPath, RepositoryScope, TestArtifact, TestEnvironmentV1, TestMutation, TestPrepare, TestReset, TestService, TestSplit, TestSuite, TEST_ENVIRONMENT_BYTES, hashTestEnvironment, parseTestEnvironment } from './test-environment.js';
 import { z } from 'zod';
@@ -10,14 +14,14 @@ import { NodeExit, NodeLog } from './node-exit.js';
 import { CommitSha } from './test-commit.js';
 import { RepositoryScope, RuntimeCapability, ProductCommitSha, TestExecution, TestEnvironmentReceipt, TestsDescribed } from './test-environment.js';
 import { CheckAcquire, CheckRelease, CheckQueueReply } from './check-queue.js';
+import { PROVIDER_IDS, type ProviderId } from './providers.js';
 export { CHECK_LEASE_MS, checkCapacity, CheckSlotQueue, CheckQueueRequest, CheckQueueReply, type CheckOptions } from './check-queue.js';
 
 export { NODE_LOG_BYTES, NODE_LOG_LINES, NodeExit, NodeLog, NodeStopReason } from './node-exit.js';
 
 /* Messages between the Hornhoof server and its nodes, one JSON object per WebSocket frame. */
 
-export const PROVIDER_IDS = ['claude', 'codex', 'kimi', 'glm', 'anthropic_api', 'openai_api', 'antigravity'] as const;
-export type ProviderId = (typeof PROVIDER_IDS)[number];
+export { PROVIDER_IDS, type ProviderId };
 
 export const JOB_ERRORS = ['timeout', 'agent_failed', 'not_logged_in', 'cancelled'] as const;
 export type JobError = (typeof JOB_ERRORS)[number];
@@ -690,6 +694,9 @@ const ServerMessage = z.discriminatedUnion('type', [
   /* Restart the agent's program in the same session, when it cannot come back by itself. The node checks the same
      conditions against its own events first, then types the note and the turn's words the program had not taken in. */
   z.object({ type: z.literal('agent.restart'), agentKey: Id, jobId: Id, note: z.string().max(4000) }),
+  /* The agent left this node's plan: its program goes once it is idle. jobId is the last turn it was sent here, so a word that
+     comes late does not close a program that ran a later one. */
+  z.object({ type: z.literal('agent.release'), agentKey: Id, jobId: Id }),
 ]);
 export type ServerMessage = z.infer<typeof ServerMessage>;
 

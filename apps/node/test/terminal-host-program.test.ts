@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { NodeMessage } from '@hornhoof/protocol';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SIGNED_OUT as AGY_SIGNED_OUT } from '../src/providers/antigravity.js';
 import type { TermJob } from '../src/terminal/host.js';
 import { agyProgram } from '../src/terminal/programs.js';
@@ -72,8 +72,8 @@ describe.skipIf(!hasTmux)("what a turn's program does, as the host tells Hornhoo
     await setUp({ lookMs: 200, secrets: () => ['WORK here'] });
     const jobId = `job-gone-${kind}`;
     const run = host.run(jobs[kind](`gone-${kind}`, 'WORK here', { jobId }));
-    /* agy can report idle before it accepts the prompt; kill only during the running turn. */
-    await until(() => told(jobId).some(message => message.state === 'thinking'), 10_000);
+    /* agy's turn counts as running while its prompt is on the way, with nothing on its screen yet: kill once it took the prompt. */
+    await until(() => host['agents'].get(`gone-${kind}`)?.took === true && told(jobId).some(message => message.state === 'thinking'), 10_000);
     process.kill((await tmux.programPid(`a-gone-${kind}`))!, 'SIGKILL');
     expect(await run).toMatchObject({ ok: false });
     const gone = told(jobId).at(-1)!;
@@ -81,6 +81,21 @@ describe.skipIf(!hasTmux)("what a turn's program does, as the host tells Hornhoo
     /* The program or the shell that ran it: tmux tells the signal, or the code a shell gives for it. */
     expect([{ exitCode: null, signal: 'SIGKILL' }, { exitCode: 137, signal: null }]).toContainEqual({ exitCode: gone.exitCode, signal: gone.signal });
     expect(gone.screen).not.toMatch(/\x1b|WORK here/);
+  });
+
+  it.each(['claude', 'codex', 'kimi', 'antigravity'] as const)('%s whose program ends as its prompt goes in is told gone, and the programs beside it run on', async kind => {
+    await setUp({ lookMs: 200 });
+    await tmux.launch('beside', { cwd: home, command: ['sleep', '60'], cols: 80, rows: 24 });
+    const paste = tmux.paste.bind(tmux);
+    vi.spyOn(tmux, 'paste').mockImplementation(async (name, text) => {
+      process.kill((await tmux.programPid(name))!, 'SIGKILL');
+      await until(async () => !(await tmux.alive(name)));
+      await paste(name, text);
+    });
+    const jobId = `job-ends-${kind}`;
+    expect(await host.run(jobs[kind](`ends-${kind}`, 'WORK here', { jobId }))).toMatchObject({ ok: false, error: 'agent_failed' });
+    expect(told(jobId).at(-1)).toMatchObject({ state: 'gone' });
+    expect(await tmux.alive('beside')).toBe(true);
   });
 
   it('tells a program that exits mid-turn gone, with its exit code', async () => {
