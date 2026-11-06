@@ -140,6 +140,8 @@ export const teams = pgTable('teams', {
   about: text('about').notNull().default(''),
   stage: integer('stage').notNull().default(0),
   gate: boolean('gate').notNull().default(false),
+  /* Its members take urgent work only. */
+  urgentOnly: boolean('urgent_only').notNull().default(false),
   createdAt: createdAt(),
 });
 
@@ -590,6 +592,8 @@ export const tasks = pgTable(
     /* What kind of work it is and what a mistake in it would cost, as whoever gave it out named them. */
     workKind: text('work_kind', { enum: WORK_KINDS }),
     riskClass: text('risk_class', { enum: RISK_CLASSES }),
+    /* Said by the CEO, never read from its words; work under a task is as urgent as it is. */
+    urgent: boolean('urgent').notNull().default(false),
     /* Grows with every move, so two moves that read the same task cannot both land. */
     version: integer('version').notNull().default(0),
     createdByPersonId: uuid('created_by_person_id').references(() => people.id),
