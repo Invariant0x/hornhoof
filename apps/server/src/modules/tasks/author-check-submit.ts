@@ -14,7 +14,7 @@ const Pending = z.object({
 }).strict();
 type PendingSubmission = z.infer<typeof Pending>;
 
-export async function submitWithAuthorCheck(ctx: Ctx, job: Pick<ToolJob, 'id' | 'companyId' | 'agentId'>, taskId: string, input: AuthorCheckSubmission): Promise<Moved> {
+export async function submitWithAuthorCheck(ctx: Ctx, job: Pick<ToolJob, 'id' | 'companyId' | 'agentId' | 'agentKind' | 'departmentId'>, taskId: string, input: AuthorCheckSubmission): Promise<Moved> {
   if (!ctx.config.authorCheck || !input.review?.authorCheckPlan) return submit(ctx, job.agentId, taskId, input);
   const pending = await samePending(ctx, taskId, input);
   if (pending) return { task: pending, wakes: [] };
@@ -30,7 +30,7 @@ export async function submitWithAuthorCheck(ctx: Ctx, job: Pick<ToolJob, 'id' | 
   const data: PendingSubmission = { version: 1, runId: run.id, summary: input.summary, evidence: input.evidence, baseCommit: review.source.baseCommit, authorCheckPlan: input.review.authorCheckPlan, review };
   const row = await move(ctx, task, {
     status: 'working', silent: 0,
-    externalWait: { reason: `Author check ${run.number} on ${review.commit}.`, since: new Date().toISOString(), until, operation: randomUUID(), on: { kind: 'external' }, run: run.id },
+    externalWait: { reason: `Author check ${run.number} on ${review.commit}.`, since: new Date().toISOString(), until, operation: randomUUID(), on: { kind: 'external', event: 'machine' }, run: run.id },
   }, { kind: 'updated', actor: { agentId: job.agentId }, text: `Author check ${run.number} runs on ${review.commit}.`, data: { authorCheckPending: data } });
   return { task: row, wakes: [] };
 }
