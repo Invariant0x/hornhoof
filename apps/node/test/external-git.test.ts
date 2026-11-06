@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { ExternalConsumer, ExternalGitIntent, ExternalGitOutcome } from '@hornhoof/protocol';
-import { GitAdapter, fetchTarget, parseGitMarker, type GitGrant, type GitJob, type GitOperationPort, type GitRecord, type GitRecordReply, type GitRegistration } from '../src/external-git.js';
+import { GitAdapter, fetchTarget, parseGitMarker, type GitGrant, type GitJob, type GitOperationPort, type GitReconciliation, type GitRecord, type GitRecordReply, type GitRegistration } from '../src/external-git.js';
 
 const SHIM = fileURLToPath(new URL('../hh-git.cjs', import.meta.url));
 const FAKE = fileURLToPath(new URL('./fakes/fake-git.mjs', import.meta.url));
@@ -91,6 +91,7 @@ const baseEnv = (s: Stand, extra: Env = {}): Env => ({ PATH: process.env.PATH, H
 class FakePort implements GitOperationPort {
   registered: Parameters<GitOperationPort['register']>[0][] = [];
   recorded: GitRecord[] = [];
+  reconciled: GitReconciliation[] = [];
   cancelled: Array<{ operationId: string; generation: number }> = [];
   replies: GitRecordReply[] = [];
   private generation = 1;
@@ -111,6 +112,12 @@ class FakePort implements GitOperationPort {
   async record(input: GitRecord): Promise<GitRecordReply> {
     if (this.recordFails) throw this.recordFails;
     this.recorded.push(input);
+    return this.replies.shift() ?? { accepted: true, state: 'satisfied' };
+  }
+
+  async reconcile(input: GitReconciliation): Promise<GitRecordReply> {
+    if (this.recordFails) throw this.recordFails;
+    this.reconciled.push(input);
     return this.replies.shift() ?? { accepted: true, state: 'satisfied' };
   }
 
@@ -848,14 +855,72 @@ describe('a push with an unknown outcome', () => {
     const port = new FakePort();
     port.replies = [{ accepted: true, state: 'outcome_unknown' }, { accepted: true, state: 'satisfied' }];
     const { env } = await serve(s, port);
-    const sha = head(s);
     const ran = runShim(['push', 'origin', 'task-1'], s.work, env);
     await vi.waitFor(() => { expect(port.recorded).toHaveLength(1); expect(ran.partial().stderr).toContain('not known yet'); }, { timeout: 5000 });
     expect(port.recorded[0]!.observedHead).toBeUndefined();
     port.release();
     const ended = await ran;
     expect(ended.code).toBe(0);
-    expect(port.recorded[1]).toMatchObject({ generation: 2, observedHead: sha, outcome: { exitCode: 128 } });
+    expect(calls(s, 'push')).toHaveLength(1);
+    expect(port.recorded).toHaveLength(1);
+  });
+
+  it('reports the read as evidence of the current grant, never the old child as a new attempt', async () => {
+    const s = stand();
+    planFor(s, { push: [{ do: 'accept_then_hang' }], 'ls-remote': [{ do: 'say', stderr: 'fatal: unable to access\n', exit: 128 }] });
+    const port = new FakePort();
+    port.replies = [{ accepted: true, state: 'outcome_unknown' }, { accepted: true, state: 'satisfied' }];
+    const { env } = await serve(s, port);
+    const sha = head(s);
+    const ran = runShim(['push', 'origin', 'task-1'], s.work, env);
+    await vi.waitFor(() => { expect(port.recorded).toHaveLength(1); }, { timeout: 5000 });
+    await vi.waitFor(() => { expect(ran.partial().stderr).toContain('not known yet'); }, { timeout: 5000 });
+    port.release();
+    await ran;
+    const [first] = port.recorded, [read] = port.reconciled;
+    expect(read).toEqual({
+      operationId: first!.operationId, generation: 2, attemptId: '40000000-0000-4000-8000-000000000002', observedHead: sha,
+      reconciles: { generation: 1, attemptId: first!.attemptId, receiptDigest: first!.receiptDigest },
+      receiptDigest: expect.stringMatching(/^[a-f0-9]{64}$/) as string,
+    });
+    expect(read).not.toHaveProperty('outcome');
+    expect(read).not.toHaveProperty('settled');
+    expect(read!.receiptDigest).not.toBe(first!.receiptDigest);
+  });
+
+  it('never pushes again while the target stays unreadable', async () => {
+    const s = stand();
+    const unreadable = { do: 'say', stderr: 'fatal: unable to access\n', exit: 128 };
+    planFor(s, { push: [{ do: 'refuse' }], 'ls-remote': [unreadable, unreadable] });
+    const port = new FakePort();
+    port.replies = [{ accepted: true, state: 'outcome_unknown' }, { accepted: true, state: 'outcome_unknown' }, { accepted: true, state: 'satisfied' }];
+    const { env } = await serve(s, port);
+    const ran = runShim(['push', 'origin', 'task-1'], s.work, env);
+    await vi.waitFor(() => { expect(port.recorded).toHaveLength(1); }, { timeout: 5000 });
+    port.release();
+    await vi.waitFor(() => { expect(port.reconciled).toHaveLength(1); }, { timeout: 5000 });
+    expect(port.reconciled[0]).not.toHaveProperty('observedHead');
+    expect(calls(s, 'push')).toHaveLength(1);
+    await vi.waitFor(() => { expect(ran.partial().stderr.match(/not known yet/g)).toHaveLength(2); }, { timeout: 5000 });
+    port.release();
+    expect((await ran).code).toBe(0);
+    expect(calls(s, 'push')).toHaveLength(2);
+    expect(port.recorded.map(record => record.generation)).toEqual([1, 3]);
+  });
+
+  it('gives the first answer back when the read cannot be reported', async () => {
+    const s = stand();
+    planFor(s, { push: [{ do: 'refuse' }], 'ls-remote': [{ do: 'say', stderr: 'fatal: unable to access\n', exit: 128 }, { do: 'say', stderr: 'fatal: unable to access\n', exit: 128 }] });
+    const port = new FakePort();
+    port.replies = [{ accepted: true, state: 'outcome_unknown' }];
+    const { env } = await serve(s, port);
+    const ran = runShim(['push', 'origin', 'task-1'], s.work, env);
+    await vi.waitFor(() => { expect(port.recorded).toHaveLength(1); }, { timeout: 5000 });
+    port.recordFails = new Error('no link');
+    port.release();
+    const ended = await ran;
+    expect(ended.code).toBe(1);
+    expect(ended.stderr).toContain('commit_refs_rules');
     expect(calls(s, 'push')).toHaveLength(1);
   });
 
@@ -872,6 +937,7 @@ describe('a push with an unknown outcome', () => {
     expect(calls(s, 'push')).toHaveLength(2);
     expect(calls(s, 'ls-remote').length).toBeGreaterThanOrEqual(2);
     expect(remoteRef(s, 'refs/heads/task-1')).toBe(head(s));
+    expect(port.reconciled).toEqual([]);
   });
 
   it('keeps the first answer when the node cannot record the result', async () => {
@@ -1220,16 +1286,19 @@ describe('the child the node owns', () => {
     expect(port.recorded[0]).toMatchObject({ settled: true, outcome: { kind: 'child', exitCode: null, signal: null, osCode: 'ENOENT' } });
   });
 
-  it('does not wait for a stray process that keeps the pipes open', async () => {
+  it('does not wait for a stray process that keeps the pipes open, and does not call that settled', async () => {
     const s = stand();
     planFor(s, { push: [{ do: 'leave_process' }] });
     const port = new FakePort();
+    port.replies = [{ accepted: true, state: 'outcome_unknown' }];
     const { env } = await serve(s, port, true, { exitGraceMs: 50 });
     const started = Date.now();
     const ran = await runShim(['push', 'origin', 'task-1'], s.work, env);
     expect(ran.code).toBe(0);
-    expect(Date.now() - started).toBeLessThan(20_000);
-    expect(port.recorded[0]).toMatchObject({ settled: true, outcome: { exitCode: 0 } });
+    expect(ran.stderr).toContain('-> task-1');
+    expect(ran.stderr).toMatch(/state=outcome_unknown$/m);
+    expect(Date.now() - started).toBeLessThan(10_000);
+    expect(port.recorded[0]).toMatchObject({ settled: false, outcome: { exitCode: 0 } });
   });
 
   it('reads the target again only for a push', async () => {
