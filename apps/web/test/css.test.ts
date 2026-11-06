@@ -54,6 +54,12 @@ it("paints what an agent does from the theme's tokens, and an alarm and the fram
     expect(decl(selector, '--on-red', media), selector).toMatch(/^#[0-9A-F]{6}$/);
   }
   expect(decl(':root', '--red')).not.toBe(decl(':root[data-theme="dark"]', '--red'));
-  /* What the agent does on a plate of the tree wraps instead of being cut. */
-  expect(decl('.tview .lchip .ast', 'white-space')).toBe('normal');
+  /* The tree's shared fixed-size Chip keeps the state badge visible and clips only long text on its single status line. */
+  expect(decl('.tview .tv-labs .dept-chip', 'position')).toBe('absolute');
+  expect(decl('.ast', 'flex')).toBe('none');
+  expect(decl('.ast', 'white-space')).toBe('nowrap');
+  expect(decl('.schip .r3 .ast', 'margin-right')).toBe('6px');
+  expect(decl('.schip .r3', 'white-space')).toBe('nowrap');
+  expect(decl('.schip .r3', 'overflow')).toBe('hidden');
+  expect(decl('.schip .r3', 'text-overflow')).toBe('ellipsis');
 });
