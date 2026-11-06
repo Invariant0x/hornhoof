@@ -2,10 +2,12 @@ import { randomUUID } from 'node:crypto';
 import { canonicalJson } from '@hornhoof/protocol';
 import cookie from '@fastify/cookie';
 import Fastify, { type FastifyInstance } from 'fastify';
+import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { encryptSecret } from '../src/crypto/secrets.js';
 import { ApiError } from '../src/errors.js';
 import {
+  agents,
   outboundAccounts,
   outboundApprovals,
   outboundAttempts,
@@ -18,6 +20,7 @@ import {
   outboundMessages,
   outboundPolicies,
   requests,
+  subscriptions,
   supportClassifications,
   supportTickets,
 } from '../src/db/schema.js';
@@ -526,6 +529,26 @@ describe('safe outbound & bound approval read views (#447 T8-17)', () => {
   it('distinguishes read-only whole-company viewers from decision owners and denies cross-department or unauthenticated callers', async () => {
     const w = await seedOutboundViewWorld();
 
+    const wesHidden = await w.viewApp.inject({
+      method: 'GET',
+      url: `/api/requests/${w.msgReq.id}/outbound-approval`,
+      ...as(w.c.wholeToken),
+    });
+    expect(wesHidden.statusCode).toBe(404);
+
+    const [wesSub] = await w.c.db
+      .insert(subscriptions)
+      .values({
+        companyId: w.c.companyId,
+        provider: 'claude',
+        kind: 'personal',
+        label: 'Wes Plan',
+        ownerPersonId: w.c.ids.wes,
+        status: 'ready',
+      })
+      .returning();
+    await w.c.db.update(agents).set({ subscriptionId: wesSub!.id }).where(eq(agents.id, w.c.seller.id));
+
     const wesOverview = await w.viewApp.inject({
       method: 'GET',
       url: '/api/outbound',
@@ -534,6 +557,7 @@ describe('safe outbound & bound approval read views (#447 T8-17)', () => {
     expect(wesOverview.statusCode).toBe(200);
     const wesDto = wesOverview.json();
     expect(wesDto.escalations[0].canAnswer).toBe(false);
+    expect(wesDto.approvals).toHaveLength(2);
     expect(wesDto.approvals.every((a: { canAnswer: boolean }) => a.canAnswer === false)).toBe(true);
 
     const wesBound = await w.viewApp.inject({
