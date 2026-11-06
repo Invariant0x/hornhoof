@@ -698,7 +698,7 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
   .t-access-more { width: 24px; }
   .t-access-count { padding: 0 2px; }
 }
-.notebook { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; font-family: var(--f-body); }
+.notebook { flex: 1 1 auto; min-height: 0; overflow: auto; scrollbar-gutter: stable; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; font-family: var(--f-body); }
 .notebook ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .notebook li { display: grid; grid-template-columns: auto 1fr auto auto auto; gap: 4px 10px; align-items: baseline; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
 .notebook li form { grid-column: 2 / -1; display: flex; flex-wrap: wrap; gap: 8px; }
