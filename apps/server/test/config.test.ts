@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config.js';
-import { TEST_SECRET } from './helpers.js';
+import { TEST_SECRET } from './helpers-basic.js';
 
 describe('loadConfig', () => {
   it('limits simultaneous parts on one host to a positive whole number, one by default', () => {
