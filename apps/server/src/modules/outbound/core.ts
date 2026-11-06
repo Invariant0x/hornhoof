@@ -688,12 +688,13 @@ export async function dueMessages(ctx: Pick<Ctx, 'db'>, now: Date, perAccount = 
       messageId: outboundMessages.id,
       revision: outboundMessages.revision,
       scheduledAt: outboundMessages.scheduledAt,
-      place: sql<number>`row_number() over (partition by ${outboundMessages.accountId} order by ${outboundMessages.scheduledAt}, ${outboundMessages.id})`.as('place'),
+      createdAt: outboundMessages.createdAt,
+      place: sql<number>`row_number() over (partition by ${outboundMessages.accountId} order by ${outboundMessages.scheduledAt}, ${outboundMessages.createdAt})`.as('place'),
     })
     .from(outboundMessages)
     .where(and(inArray(outboundMessages.status, ['scheduled', 'waiting_approval', 'reserved']), lte(outboundMessages.scheduledAt, now)))
     .as('ranked');
-  return ctx.db.select({ messageId: ranked.messageId, revision: ranked.revision }).from(ranked).where(lte(ranked.place, perAccount)).orderBy(ranked.scheduledAt);
+  return ctx.db.select({ messageId: ranked.messageId, revision: ranked.revision }).from(ranked).where(lte(ranked.place, perAccount)).orderBy(ranked.scheduledAt, ranked.createdAt);
 }
 
 export type Review = { messageId: string; revision: number; checkId: string; bindingDigest: string; subjectDigest: string; reviewer: typeof outboundReviewReceipts.$inferInsert.reviewer; result: typeof outboundReviewReceipts.$inferInsert.result };

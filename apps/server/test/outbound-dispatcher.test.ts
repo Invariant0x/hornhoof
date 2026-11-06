@@ -1,12 +1,13 @@
 import { createHmac, randomUUID } from 'node:crypto';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import Fastify from 'fastify';
 import { describe, expect, it } from 'vitest';
 import { encryptSecret } from '../src/crypto/secrets.js';
-import { outboundAccounts, outboundAttempts, outboundBindings, outboundChannels, outboundDailyUsage, outboundEvents, outboundMessages, waitNotices } from '../src/db/schema.js';
+import { outboundAccounts, outboundAttempts, outboundBindings, outboundChannels, outboundDailyUsage, outboundEvents, waitNotices } from '../src/db/schema.js';
 import { minuteRound, startTimers } from '../src/modules/agents/timers.js';
 import type { SmtpSettings } from '../src/modules/outbound/accounts.js';
-import { beginDispatch, dueMessages, reserveDispatch } from '../src/modules/outbound/core.js';
+import { beginDispatch, dueMessages, reserveDispatch, submitOutbound } from '../src/modules/outbound/core.js';
+import { createTask } from '../src/modules/tasks/engine.js';
 import { dispatchDue, noticeStops, reconcileOutbound, recordReceipts, sendBegun, type Senders } from '../src/modules/outbound/dispatcher.js';
 import type { ReconcileOutcome, SendOutcome } from '../src/modules/outbound/ports.js';
 import { stopByPerson } from '../src/modules/outbound/policies.js';
@@ -198,11 +199,11 @@ describe('sending what is due', () => {
     const w = await ready();
     for (let i = 0; i < 3; i += 1) await w.submit();
     const other = await anAccountOf(w.c, w.channel.id, w.c.head.id, 'Other');
-    const [last] = await w.c.db.select().from(outboundMessages).orderBy(desc(outboundMessages.scheduledAt), desc(outboundMessages.createdAt)).limit(1);
-    await w.c.db.update(outboundMessages).set({ accountId: other.account.id, bindingGeneration: other.binding.generation }).where(eq(outboundMessages.id, last!.id));
+    const hers = (await createTask(w.ctx, { agentId: w.c.head.id }, { title: 'Hers', brief: '', body: '', departmentId: w.c.dev.id, assigneeAgentId: w.c.head.id, executor: true, gates: [] })).task;
+    const last = await submitOutbound(w.ctx, { ...w.authority, agentId: w.c.head.id }, w.input({ task: hers.id, accountId: other.account.id, bindingGeneration: other.binding.generation }));
     const due = await dueMessages(w.ctx, new Date(), 1);
     expect(due).toHaveLength(2);
-    expect(due.map(m => m.messageId)).toContain(last!.id);
+    expect(due.map(m => m.messageId)).toContain(last.messageId);
   });
 });
 
