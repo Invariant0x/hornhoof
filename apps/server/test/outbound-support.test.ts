@@ -7,11 +7,12 @@ import {
   type CheckUnavailable,
   type ReasonCode,
 } from '@hornhoof/protocol';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { encryptSecret } from '../src/crypto/secrets.js';
 import {
   departments,
+  modelChecks,
   outboundAccounts,
   outboundApprovals,
   outboundChannels,
@@ -19,13 +20,13 @@ import {
   outboundMessageRevisions,
   outboundMessages,
   outboundPermissions,
-  outboundReviewReceipts,
   requests,
   supportClassifications,
   supportTickets,
 } from '../src/db/schema.js';
 import { readUnsubscribeToken, recipientDigest } from '../src/modules/outbound/contacts.js';
 import { outboundReviewRound } from '../src/modules/outbound/dispatcher.js';
+import { currentCheckBinding } from '../src/modules/outbound/evaluation-port.js';
 import { beginDispatch, reserveDispatch, settleAttempt } from '../src/modules/outbound/core.js';
 import { classifySupportTicket, containsForbiddenSupportPromise, containsSecretMaterial, containsThirdPartyPii, submitSupportReply } from '../src/modules/outbound/support.js';
 import { as } from './helpers.js';
@@ -695,8 +696,12 @@ describe('outbound support classification and reply gates (#447 T8-10, T8-15)', 
     const reviews = model.calls.filter(call => call.kind === 'support_reply_review').length;
     expect(reviews).toBe(1);
 
-    /* As after its check was certified again: a word given under the old one is no word now. */
-    await w.c.db.delete(outboundReviewReceipts).where(eq(outboundReviewReceipts.messageId, messageId));
+    /* Its check is certified again under other limits: a word given under the old one is no word now. */
+    const place = { companyId: w.c.companyId, departmentId: w.c.sales.id, productId: null, kind: 'support_reply_review' as const };
+    const [check] = await w.c.db.select().from(modelChecks).where(and(eq(modelChecks.departmentId, w.c.sales.id), eq(modelChecks.kind, place.kind)));
+    await w.c.db.update(modelChecks).set({ thresholds: { falseAllowRate: 0, falseDenyRate: 0.1, classErrorRate: 0 } }).where(eq(modelChecks.id, check!.id));
+    const certified = await currentCheckBinding(w.c.db, place);
+    await w.c.db.update(modelChecks).set({ bindingDigest: certified!.bindingDigest }).where(eq(modelChecks.id, check!.id));
     expect(await reserveDispatch(w.c.app.ctx, messageId, 1, NOW)).toEqual({ kind: 'refused', reasonCodes: ['review_unavailable', 'approval_required'] });
     expect((await w.c.db.select().from(outboundMessages).where(eq(outboundMessages.id, messageId)))[0]).toMatchObject({ status: 'waiting_checks' });
 
