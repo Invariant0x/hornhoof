@@ -1,13 +1,15 @@
-import { OutboundStatusInput, OutboundSubmit } from '@hornhoof/protocol';
+import { OutboundStatusInput, OutboundSubmit, SupportClassifyInput, SupportSubmit } from '@hornhoof/protocol';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { and, eq } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
-import { outboundAccounts, outboundBindings, outboundChannels, outboundContacts, outboundPermissions } from '../../db/schema.js';
+import { agents, jobs, outboundAccounts, outboundBindings, outboundChannels, outboundContacts, outboundPermissions, subscriptions } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { ownDepartment } from '../departments/approval-policy.js';
 import type { ToolJob } from '../tools/job.js';
 import { proposeRevision, ProposalInput } from './catalog.js';
 import { currentCatalog, outboundStatus, submitOutbound, type Authority } from './core.js';
+import { liveCheckPorts } from './live-checks.js';
+import { classifySupportTicket, submitSupportReply, SupportGatewayError, type SupportCaller } from './support.js';
 
 /* The gateway as an agent's tools. The same kernel as HTTP behind them, and nothing to say with: an author names published
    entries, never words, numbers, links or an address. These tools read no secret and start no transport. */
@@ -29,6 +31,7 @@ const answer = async (fn: () => Promise<unknown>) => {
     return say(JSON.stringify(await fn()));
   } catch (err) {
     if (err instanceof ApiError) return say(`${err.message}${reasonsOf(err)}`, true);
+    if (err instanceof SupportGatewayError) return say(`${err.message} (${err.code})`, true);
     throw err;
   }
 };
@@ -71,6 +74,17 @@ async function proposeAs(ctx: Ctx, job: ToolJob, input: ProposalInput) {
   return proposeRevision(ctx, { ...input, companyId: job.companyId, author: { kind: 'agent', id: job.agentId } });
 }
 
+/* An author of a reply, with the plan its turn runs on: a model of the same vendor may not review it. */
+async function supportCallerOf(ctx: Ctx, job: ToolJob): Promise<SupportCaller> {
+  const [turn] = await ctx.db
+    .select({ provider: subscriptions.provider, model: agents.model })
+    .from(jobs)
+    .innerJoin(agents, eq(agents.id, jobs.agentId))
+    .leftJoin(subscriptions, eq(subscriptions.id, jobs.subscriptionId))
+    .where(eq(jobs.id, job.id));
+  return { companyId: job.companyId, agentId: job.agentId, jobId: job.id, authorProvider: turn?.provider ?? null, authorVendorId: turn?.model ?? '' };
+}
+
 export function registerOutboundTools(server: McpServer, ctx: Ctx, job: ToolJob): void {
   server.registerTool(
     'outbound_options',
@@ -87,6 +101,24 @@ export function registerOutboundTools(server: McpServer, ctx: Ctx, job: ToolJob)
       inputSchema: OutboundSubmit,
     },
     input => answer(() => submitOutbound(ctx, authorityOf(job), input)),
+  );
+
+  server.registerTool(
+    'support_classify',
+    {
+      description: 'Has a fresh model of another vendor sort a ticket you hold, before you draft anything. It reads the ticket, not your draft. It answers ready or unavailable with a receipt id for support_submit.',
+      inputSchema: SupportClassifyInput,
+    },
+    input => answer(async () => classifySupportTicket(ctx, liveCheckPorts(ctx), await supportCallerOf(ctx, job), input)),
+  );
+
+  server.registerTool(
+    'support_submit',
+    {
+      description: 'The only way a reply to a ticket leaves. You name a published template and its blocks, as in outbound_submit, and the receipt of support_classify. It answers scheduled, waiting_checks, waiting_approval or rejected with reason codes; nothing has left yet at that point.',
+      inputSchema: SupportSubmit,
+    },
+    input => answer(async () => submitSupportReply(ctx, liveCheckPorts(ctx), await supportCallerOf(ctx, job), input)),
   );
 
   server.registerTool(
