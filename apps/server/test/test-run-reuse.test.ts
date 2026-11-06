@@ -119,6 +119,13 @@ describe('what a part leaves', () => {
     expect(partFileResults(snapshot, batch, true, files).green).toEqual([{ suiteId: 'a', file: 'a/2.ts' }]);
   });
 
+  it('that names a file twice, as two projects of a suite may run it: one failure is a failure', () => {
+    for (const files of [[{ suiteId: 'a', file: 'a/1.ts', status: 'failed' }, { suiteId: 'a', file: 'a/1.ts', status: 'passed' }], [{ suiteId: 'a', file: 'a/1.ts', status: 'passed' }, { suiteId: 'a', file: 'a/1.ts', status: 'failed' }]]) {
+      expect(partFileResults(snapshot, batch, false, files as never)).toEqual({ green: [], failed: [{ suiteId: 'a', file: 'a/1.ts' }] });
+      expect(partFileResults(snapshot, batch, true, files as never).green).toEqual([{ suiteId: 'a', file: 'a/2.ts' }]);
+    }
+  });
+
   it('that prepared: its suites and the preparation itself are green only when it passed', () => {
     expect(partFileResults(snapshot, prepare, true, undefined).green).toEqual([PREPARATION_UNIT, { suiteId: 'a', file: 'a/1.ts' }, { suiteId: 'a', file: 'a/2.ts' }]);
     const files = [{ suiteId: 'a', file: 'a/1.ts', status: 'passed' }] as never;

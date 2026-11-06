@@ -62,10 +62,16 @@ function selectedFiles(snapshot: EnvironmentSnapshot, selection: Selection): Tes
 }
 
 export type GreenFile = TestFileKey & { ms?: number; note?: string };
+/* What a runner said of each file. Two projects of a suite may run the same file, and one failure is a failure. */
+function saidOfEach(reported: FileOutcome[] | undefined): Map<string, FileOutcome> {
+  const said = new Map<string, FileOutcome>();
+  for (const item of reported ?? []) if (said.get(keyOf(item))?.status !== 'failed') said.set(keyOf(item), item);
+  return said;
+}
 /* What a part proved of its own files. A part that passed proves them all, but for one its runner still called failed. One that
    failed proves only what its runner named, and what it did not name stays unknown. */
 export function partFileResults(snapshot: EnvironmentSnapshot, selection: Selection, passed: boolean, reported: FileOutcome[] | undefined): { green: GreenFile[]; failed: TestFileKey[] } {
-  const files = selectedFiles(snapshot, selection), said = new Map((reported ?? []).map(item => [keyOf(item), item]));
+  const files = selectedFiles(snapshot, selection), said = saidOfEach(reported);
   const named = files.filter(file => said.has(keyOf(file)));
   const failed = named.filter(file => said.get(keyOf(file))!.status === 'failed');
   const proved = passed ? files.filter(file => said.get(keyOf(file))?.status !== 'failed') : named.filter(file => said.get(keyOf(file))!.status === 'passed');

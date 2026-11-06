@@ -31,12 +31,19 @@ export function outcomeOf(code, output) {
   return { status: 'passed', note: `${total[1]} killed, ${total[2]} survived, ${total[3]} uncovered of ${total[4]} sites` };
 }
 
+async function judge(file, tests, mutate) {
+  if (!tests.length) {
+    process.stdout.write(`${file}: no fast test reaches it, so mutation cannot judge it.\n`);
+    return { status: 'failed' };
+  }
+  const { code, output } = await mutate(file, tests);
+  return outcomeOf(code, output);
+}
+
 export async function mutateSources(sources, fastTests, mutate) {
   const files = [];
   for (const file of sources) {
-    const started = Date.now(), tests = fastTests.get(file) ?? [];
-    if (!tests.length) process.stdout.write(`${file}: no fast test reaches it, so mutation cannot judge it.\n`);
-    const outcome = tests.length ? outcomeOf(...Object.values(await mutate(file, tests))) : { status: 'failed' };
+    const started = Date.now(), outcome = await judge(file, fastTests.get(file) ?? [], mutate);
     files.push({ file, ...outcome, ms: Date.now() - started });
   }
   return files;
