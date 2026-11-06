@@ -35,7 +35,8 @@ const fontsSha256 = digest(JSON.stringify(fontAssets));
 /* The same small fixture data go through real setup/notebook routes in each source and engine. No external plan or job. */
 const author = 'Geometry Test Person With A Long Legal Name To Exercise The Real Notebook';
 const note = 'https://example.test/' + 'unbroken_identifier_'.repeat(13);
-const dataSha256 = digest(JSON.stringify({ author, note }));
+const departmentData = { name: 'Geometry Department With A Long Name For Narrow Panels', note: 'department/' + note };
+const dataSha256 = digest(JSON.stringify({ author, note, department: departmentData }));
 const secret = randomBytes(32).toString('base64');
 const client = new PGlite();
 const db = drizzle(client, { schema });
@@ -53,6 +54,16 @@ assert.ok(session, 'Real setup must issue its session');
 const added = await app.inject({ method: 'POST', url: '/api/notebook', cookies: { hh_session: session }, payload: { text: note } });
 assert.equal(added.statusCode, 201, 'Real notebook seed must succeed: ' + added.body);
 const number = added.json().note.number;
+/* Only the isolated fixture's structure is seeded directly; notebook content uses its real person-facing route. */
+const [company] = await db.select({ id: schema.companies.id }).from(schema.companies);
+assert.ok(company, 'Real setup must create the fixture company');
+const [departmentRow] = await db.insert(schema.departments)
+  .values({ companyId: company.id, templateKey: 'development', roleCode: 'DEV', name: departmentData.name }).returning({ id: schema.departments.id });
+assert.ok(departmentRow, 'The isolated fixture must contain its department');
+const departmentAdded = await app.inject({ method: 'POST', url: `/api/departments/${departmentRow.id}/notebook`,
+  cookies: { hh_session: session }, payload: { text: departmentData.note } });
+assert.equal(departmentAdded.statusCode, 201, 'Real department notebook seed must succeed: ' + departmentAdded.body);
+const department = { id: departmentRow.id, ...departmentData, number: departmentAdded.json().note.number };
 const localeKeys = {
   openOrchestrator: 'map.openOrchestrator', title: 'notebook.title', intro: 'notebook.intro',
   newNote: 'notebook.newNote', placeholder: 'notebook.placeholder', add: 'notebook.add',
@@ -86,7 +97,7 @@ locales.sort((a, b) => a.score - b.score || a.id.localeCompare(b.id));
 const selected = [...new Set([locales[0].id, locales.at(-1).id, ...locales.filter(x => x.direction === 'rtl').slice(0, 1).map(x => x.id)])];
 const origin = await app.listen({ host: '127.0.0.1', port: 0 });
 process.stdout.write('HH_GEOMETRY_BOOT ' + JSON.stringify({ origin, session, sourceSha: actual, author, note, number, locales, selected,
-  dataSha256, fontAssets, fontsSha256, localeKeys, localeArguments,
+  department, dataSha256, fontAssets, fontsSha256, localeKeys, localeArguments,
   dictionaryKeys: Object.keys(locales[0].labels), scoreUnit: 'Unicode code points in the actual strings of these two regression flows',
   shippedRtl: locales.some(x => x.direction === 'rtl'), lockfileBytes: readFileSync(join(source, 'package-lock.json')).length }) + '\n');
 let stopping;

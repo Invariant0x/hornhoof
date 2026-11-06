@@ -7,6 +7,7 @@ export type GeometryLabels = Record<'openOrchestrator' | 'title' | 'intro' | 'ne
 export type GeometryLocale = { id: string; direction: 'ltr' | 'rtl'; score: number; labels: GeometryLabels };
 export type GeometryBoot = {
   origin: string; session: string; sourceSha: string; author: string; note: string; number: number;
+  department: { id: string; name: string; note: string; number: number };
   locales: GeometryLocale[]; selected: string[]; dictionaryKeys: string[]; scoreUnit: string; shippedRtl: boolean;
   dataSha256: string; fontsSha256: string; fontAssets: { name: string; bytes: number; sha256: string }[];
   localeKeys: Record<keyof GeometryLabels, string>; localeArguments: Partial<Record<keyof GeometryLabels, number[]>>;
