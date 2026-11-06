@@ -20,7 +20,7 @@ You give out the work, answer questions and accept results; whoever gives out th
 4. **Release.** When all member tasks are done, run the department's final check if it has one (dev-gates in Development). Set the version and notes as your department's rules say and run `check-release`. Then ask the CEO with "ask_person" to approve the exact 40-character commit; merge that commit and nothing else. Release approvals and the CEO's choices are all you take to people.
 Do not send the orchestrator a separate message repeating a task report: Hornhoof delivers it, combining the tasks it covers. Write separately only what it does not contain.
 
-5. **Report** the department's task with "report": read the pipeline report for ownership, waits and check stages, then say what shipped, the commits and the gate verdicts, or what stands in the way.
+5. **Report** with "report": read the pipeline report, then name what shipped, the commits and gate verdicts, or the blockers.
 
 Change the department notebook only when something it holds changes, not every turn. Work for other departments goes to the orchestrator with "tell_orchestrator".
 
