@@ -45,23 +45,30 @@ function NotebookItems({ notes, editing, busy, onEdit, onSave, onCancel, onRemov
   if (!notes.length) return <p className="muted">{t.notebook.empty}</p>;
   const who = (n: NoteView) => (n.by?.kind === 'orchestrator' ? t.window.orchestrator : n.by ? n.by.name : '');
   return (
-    <ul aria-label={t.notebook.title}>
+    <ul className="entries" aria-label={t.notebook.title}>
       {notes.map(n => (
-        <li key={n.number}>
-          <b>#{n.number}</b>
+        <li className="entry" key={n.number}>
           {editing?.number === n.number ? (
             <form onSubmit={onSave}>
-              <textarea aria-label={t.notebook.note(n.number)} value={editing.text} maxLength={300} rows={2} onChange={e => onEdit({ ...n, text: e.target.value })} />
-              <button className="btn small" type="submit" disabled={busy}>{t.notebook.save}</button>
-              <button className="btn small ghost" type="button" onClick={onCancel}>{t.notebook.cancel}</button>
+              <div className="entry-main">
+                <b>#{n.number}</b>
+                <textarea aria-label={t.notebook.note(n.number)} value={editing.text} maxLength={300} rows={2} onChange={e => onEdit({ ...n, text: e.target.value })} />
+              </div>
+              <div className="form-foot" role="group" aria-label={t.notebook.note(n.number)}>
+                <button className="btn" type="submit" disabled={busy}>{t.notebook.save}</button>
+                <button className="btn ghost" type="button" onClick={onCancel}>{t.notebook.cancel}</button>
+              </div>
             </form>
           ) : (
             <>
-              <span>{n.text}</span>
-              <small>{who(n)}</small>
-              <div className="notebook-item-actions">
-                <button className="t-link" type="button" aria-label={t.notebook.changeNote(n.number)} onClick={() => onEdit(n)}>{t.notebook.change}</button>
-                <button className="t-link" type="button" aria-label={t.notebook.removeNote(n.number)} disabled={busy} onClick={() => onRemove(n)}>{t.notebook.remove}</button>
+              <div className="entry-main">
+                <b>#{n.number}</b>
+                <span>{n.text}</span>
+                <small className="entry-meta">{who(n)}</small>
+              </div>
+              <div className="entry-actions" role="group" aria-label={t.notebook.note(n.number)}>
+                <button className="act" type="button" aria-label={t.notebook.changeNote(n.number)} onClick={() => onEdit(n)}>{t.notebook.change}</button>
+                <button className="act danger" type="button" aria-label={t.notebook.removeNote(n.number)} disabled={busy} onClick={() => onRemove(n)}>{t.notebook.remove}</button>
               </div>
             </>
           )}
@@ -120,9 +127,9 @@ export function Notebook({ departmentId = null }: { departmentId?: string | null
       <NotebookItems notes={notes} editing={editing} busy={busy} onEdit={n => setEditing({ number: n.number, text: n.text })} onSave={e => void saveNote(e, editing, base, run, setEditing)} onCancel={() => setEditing(null)} onRemove={n => void run(() => api.del(`${base}/${n.number}`), () => {})} />
       <form className="notebook-add" onSubmit={e => void addNote(e, text, base, run, setText)}>
         <textarea aria-label={t.notebook.newNote} placeholder={t.notebook.placeholder} value={text} maxLength={300} rows={2} onChange={e => setText(e.target.value)} />
-        <button className="btn small" type="submit" disabled={busy || !text.trim()}>
-          {t.notebook.add}
-        </button>
+        <div className="form-foot" role="group" aria-label={t.notebook.newNote}>
+          <button className="btn" type="submit" disabled={busy || !text.trim()}>{t.notebook.add}</button>
+        </div>
       </form>
     </section>
   );
