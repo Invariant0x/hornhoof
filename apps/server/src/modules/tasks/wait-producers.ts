@@ -150,7 +150,7 @@ async function withoutDates(tx: Tx, source: { taskId: string; sourceKey: string;
   const last = await lastOfSource(tx, task, kind, source.sourceKey);
   if (!last || last.endedAt !== null) return recordLegacyWait(tx, { ...source, kind, sourceState: {} });
   await moveWaitOwner(tx, last, source.ownerBinding, source.actor);
-  return last;
+  return (await lastOfSource(tx, task, kind, source.sourceKey))!;
 }
 
 /* Keeps the wait of a question as the question is now, read under its locks: of an agent while it stays inside, of a person
@@ -179,18 +179,28 @@ export async function endQuestionWait(tx: Tx, guard: QuestionGuard & { outcome: 
   await endSourceWait(tx, { taskId: task.id, kind: kindOfQuestion(request), sourceKey: questionSourceKey(request.id), outcome: guard.outcome, proofRef: guard.proofRef, sourceRevision: request.routeRevision, actor: guard.actor });
 }
 
+/* Another holds the task: what was read of its questions before no longer acts on them, and what a person was shown of one no longer
+   stands. A goal in danger is about the goal and not about who holds the work. */
+async function questionsFollowHolder(tx: Tx, row: Task, actor: Actor): Promise<void> {
+  const open = await tx.select().from(requests).where(and(eq(requests.taskId, row.id), eq(requests.status, 'open'), isNull(requests.goalState))).for('update');
+  for (const question of open) {
+    const [moved] = await tx.update(requests).set({ routeRevision: question.routeRevision + 1 }).where(eq(requests.id, question.id)).returning();
+    if (moved!.audience === 'internal') await syncQuestionWait(tx, { taskId: row.id, requestId: moved!.id, expectedRevision: moved!.questionRevision, expectedRouteRevision: moved!.routeRevision, actor });
+  }
+}
+
 export type WaitStep = { kind: string; actor: Actor; eventId: number };
 
 const isQuestionWait = (w: TaskWait): boolean => w.kind === 'person' || (w.kind === 'external' && w.sourceKey.startsWith('question:'));
 
 /* Questions taken back in this move no longer wait for anybody. */
 async function endWithdrawn(tx: Tx, row: Task, step: WaitStep, open: TaskWait[]): Promise<void> {
-  const asked = new Map(open.filter(isQuestionWait).map(w => [w.sourceKey.slice(w.sourceKey.indexOf(':') + 1), w]));
-  if (!asked.size) return;
-  const gone = await tx.select({ id: requests.id, status: requests.status }).from(requests).where(and(inArray(requests.id, [...asked.keys()]), ne(requests.status, 'open')));
-  for (const request of gone) {
-    const wait = asked.get(request.id)!;
-    await endOpenSource(tx, { taskId: row.id, kind: wait.kind, sourceKey: wait.sourceKey, outcome: 'cancelled', proofRef: `request:${request.id}:${request.status}`, actor: step.actor });
+  const asked = open.filter(isQuestionWait).map(wait => ({ wait, id: wait.sourceKey.slice(wait.sourceKey.indexOf(':') + 1) }));
+  if (!asked.length) return;
+  const gone = new Map((await tx.select({ id: requests.id, status: requests.status }).from(requests).where(and(inArray(requests.id, asked.map(a => a.id)), ne(requests.status, 'open')))).map(r => [r.id, r.status]));
+  for (const { wait, id } of asked) {
+    const status = gone.get(id);
+    if (status) await endOpenSource(tx, { taskId: row.id, kind: wait.kind, sourceKey: wait.sourceKey, outcome: 'cancelled', proofRef: `request:${id}:${status}`, actor: step.actor });
   }
 }
 
@@ -242,6 +252,9 @@ export async function keepWaitsWithMove(tx: Tx, before: Task, row: Task, step: W
     await endTaskWaits(tx, { taskId: row.id, outcome: row.status === 'done' ? 'resolved' : 'cancelled', proofRef: `task:${row.id}:${row.status}`, actor: step.actor });
     return;
   }
-  if (row.assigneeAgentId !== before.assigneeAgentId) await followHolder(tx, row, step.actor);
+  if (row.assigneeAgentId !== before.assigneeAgentId) {
+    await followHolder(tx, row, step.actor);
+    await questionsFollowHolder(tx, row, step.actor);
+  }
   if (row.status !== before.status || row.stage !== before.stage) await endWaitFors(tx, row, step, open);
 }

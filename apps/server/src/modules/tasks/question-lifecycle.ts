@@ -4,16 +4,17 @@ import type { WaitPlan } from '@hornhoof/protocol/waits';
 import { and, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { agents, attachments, departments, requestInternal, requests, taskEvents, tasks } from '../../db/schema.js';
+import { agents, attachments, departments, requestInternal, requests, subscriptions, taskEvents, tasks } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { appendOutgoing } from '../events/store.js';
 import { agentParty } from '../events/parties.js';
-import { goesOnAfter, note, published, taskSpot, type Request, type Task, type Tx, type Wake } from './engine.js';
+import { goesOnAfter, note, ownNote, published, taskSpot, type Request, type Task, type Tx, type Wake } from './engine.js';
 import { recordCause } from './notification-cause.js';
 import { keepWakes } from './outbox.js';
 import { currentLeads, digestOf, internalRoute, operationConflict, questionAuthority, requireTriage, sourceClosed, staleRevision, staleRoute, type InternalRoute, type TriageCall } from './question-authority.js';
 import { handOff } from './pulses.js';
 import { endQuestionWait, syncQuestionWait } from './wait-producers.js';
+import { endOpenSource, requestSourceKey } from './wait-state.js';
 
 /* Every question of an agent starts inside the company: with its head, or the orchestrator. One row of requests keeps it from
    the first word to its end, with the words themselves in its private sidecar. A person sees it only once someone who may
@@ -307,4 +308,37 @@ export async function refuseWhatChanged(ctx: Pick<Ctx, 'db' | 'bus'>, requestId:
   if (!task) return;
   ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
   throw staleRoute();
+}
+
+/* Whether whoever has it can still look at it: still here, and if a head then of this place or of the Operations it was handed to. */
+async function stillHeld(tx: Tx, task: Task, request: Request): Promise<boolean> {
+  if (!request.triageAgentId) return false;
+  const [who] = await tx.select({ kind: agents.kind, removedAt: agents.removedAt, switchedOffAt: agents.switchedOffAt, planGone: subscriptions.removedAt, template: departments.templateKey }).from(agents)
+    .leftJoin(subscriptions, eq(subscriptions.id, agents.subscriptionId)).leftJoin(departments, eq(departments.id, agents.departmentId))
+    .where(eq(agents.id, request.triageAgentId));
+  if (!who || who.removedAt || who.switchedOffAt || who.planGone) return false;
+  if (who.kind !== 'head' || who.template === 'operations') return true;
+  return (await currentLeads(tx, { companyId: task.companyId, departmentId: task.departmentId })).head === request.triageAgentId;
+}
+
+/* A question nobody can look at now goes to who can, under a new revision: one kept from when nobody could, one whose head has gone,
+   and one from before questions started inside, whose old wait on a person ends here. Nothing happens until there is someone. */
+export async function claimQuestion(ctx: Pick<Ctx, 'db'>, id: string): Promise<Wake[]> {
+  return ctx.db.transaction(async tx => {
+    const [found] = await tx.select({ taskId: requests.taskId }).from(requests).where(eq(requests.id, id));
+    const [task] = await tx.select().from(tasks).where(eq(tasks.id, found!.taskId)).for('update');
+    const [request] = await tx.select().from(requests).where(eq(requests.id, id)).for('update');
+    if (request!.status !== 'open' || request!.audience !== 'internal' || await stillHeld(tx, task!, request!)) return [];
+    const route = await internalRoute(tx, { companyId: task!.companyId, departmentId: task!.departmentId }, request!.agentId);
+    if (!route) return [];
+    const [moved] = await tx.update(requests).set({ triageAgentId: route.agentId, routeRevision: request!.routeRevision + 1 }).where(eq(requests.id, id)).returning();
+    const actor = { agentId: route.agentId };
+    await endOpenSource(tx, { taskId: task!.id, kind: 'person', sourceKey: requestSourceKey(id), outcome: 'superseded', proofRef: `question:${id}:route:${moved!.routeRevision}`, actor });
+    await syncQuestionWait(tx, questionGuard(task!, moved!, route.agentId));
+    if (task!.status === 'open' || task!.status === 'working') await tx.update(tasks).set({ status: 'waiting', version: sql`${tasks.version} + 1`, updatedAt: new Date() }).where(eq(tasks.id, task!.id));
+    await ownNote(tx, task!, { kind: 'asked', text: 'Now with someone who can look at it.', data: { question: { transition: 'claimed', routeRevision: moved!.routeRevision } } });
+    const wakes = questionWakes(task!, request!.agentId, route, id);
+    await keepWakes(tx, task!.companyId, wakes);
+    return wakes;
+  });
 }

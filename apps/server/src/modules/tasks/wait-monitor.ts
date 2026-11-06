@@ -4,6 +4,7 @@ import { departments, turns } from '../../db/schema.js';
 import { notificationMessage } from '../events/notifications.js';
 import { quietRecipient, waitOrchestrator } from './wait-recipients.js';
 import { checkWaitDependencies } from './wait-dependencies.js';
+import { claimQuestions } from './question-intents.js';
 import { sweepWaits } from './wait-escalation.js';
 import { deliverWaitNotices, recordWaitNotice } from './wait-notices.js';
 import { quietDepartment, taskVersions, waitCycles, waitKey } from './wait-observations.js';
@@ -51,5 +52,6 @@ export async function checkWaitHealth(ctx: Ctx, now = new Date()): Promise<void>
   await recordCycles(ctx, now);
   await recordQuietDepartments(ctx, now);
   await sweepWaits(ctx, now);
+  await claimQuestions(ctx);
   await deliverWaitNotices(ctx, now);
 }

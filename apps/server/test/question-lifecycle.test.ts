@@ -1,10 +1,13 @@
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { randomUUID } from 'node:crypto';
-import { asc, eq } from 'drizzle-orm';
+import { asc, eq, inArray } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agents, approvalPolicies, jobs, pendingWakes, people, requestInternal, requests, subscriptions, taskEvents, tasks, taskWaits, waitPolicies } from '../src/db/schema.js';
 import { mayOpenRequest } from '../src/modules/tasks/decisions.js';
-import { answerDirectly, ask, createTask, type Task } from '../src/modules/tasks/engine.js';
+import { answerDirectly, ask, createTask, handOver, silentTurn, type Task } from '../src/modules/tasks/engine.js';
+import { claimQuestions } from '../src/modules/tasks/question-intents.js';
+import { wakeAll } from '../src/modules/tasks/wake.js';
+import { requestSourceKey } from '../src/modules/tasks/wait-state.js';
 import { questionSourceKey } from '../src/modules/tasks/wait-producers.js';
 import { as, invitePerson } from './helpers.js';
 import { waitCompany } from './wait-company.js';
@@ -587,5 +590,148 @@ describe('an approval a department asks for', () => {
     const res = await call(asker.client as Client, 'request_approval', { task: work.number, channel: 'price', kind: 'price change', amount: 40, text: 'Small change.' });
     expect(res.content[0]!.text).toContain('No approval needed');
     expect(await c.questionsOf(work)).toEqual([]);
+  });
+});
+
+describe('a task that stands still', () => {
+  async function still() {
+    const c = await company();
+    const work = await c.task();
+    const silence = async () => silentTurn(c.ctx, c.agent.id, (await c.db.select().from(tasks).where(eq(tasks.id, work.id)))[0]!);
+    return { ...c, work, silence };
+  }
+  const silent = async (c: Awaited<ReturnType<typeof still>>, times = 3) => {
+    for (let i = 0; i < times; i++) await wakeAll(c.ctx, (await c.silence()).wakes);
+  };
+
+  it('is told to its head on the third turn, once however often it is seen, and to no person', async () => {
+    const c = await still();
+    await silent(c);
+    const asked = await c.questionsOf(c.work);
+    expect(asked).toMatchObject([{ kind: 'stuck', audience: 'internal', triageAgentId: c.head.id, status: 'open' }]);
+    expect(asked[0]!.sourceKey).toMatch(new RegExp(`^stuck:${c.work.id}:`));
+    expect(await c.seen()).toMatchObject({ requests: [], counts: { total: 0 } });
+    expect(await c.statusOf(c.work)).toBe('waiting');
+    await silent(c);
+    expect(await c.questionsOf(c.work)).toHaveLength(1);
+    expect(await c.turnsFor(c.head.id)).toHaveLength(1);
+    expect(await c.turnsFor(c.orchestrator.id)).toEqual([]);
+  });
+
+  it('of a head is told to the orchestrator', async () => {
+    const c = await company();
+    const work = await c.held(c.head.id);
+    for (let i = 0; i < 3; i++) await wakeAll(c.ctx, (await silentTurn(c.ctx, c.head.id, (await c.db.select().from(tasks).where(eq(tasks.id, work.id)))[0]!)).wakes);
+    expect(await c.questionsOf(work)).toMatchObject([{ kind: 'stuck', triageAgentId: c.orchestrator.id, audience: 'internal' }]);
+    expect(await c.turnsFor(c.orchestrator.id)).toHaveLength(1);
+    expect(await c.seen()).toMatchObject({ requests: [], counts: { total: 0 } });
+  });
+
+  it('with nobody to tell is kept for when someone is: no wait, no date, no person told, and the task stays as it is', async () => {
+    const c = await still();
+    await c.db.update(agents).set({ removedAt: new Date() }).where(inArray(agents.id, [c.head.id, c.orchestrator.id]));
+    await silent(c);
+    const [question] = await c.questionsOf(c.work);
+    expect(question).toMatchObject({ audience: 'internal', triageAgentId: null, routeRevision: 1 });
+    expect((await c.sidecar(question!.id))?.recoveryIntent).toMatchObject({ sourceKey: questionSourceKey(question!.id), reason: 'internal_route_unavailable' });
+    expect(await c.waitsOf(c.work)).toEqual([]);
+    expect(await c.statusOf(c.work)).not.toBe('waiting');
+    expect(await c.seen()).toMatchObject({ requests: [], counts: { total: 0 } });
+    await silent(c);
+    expect(await c.questionsOf(c.work)).toHaveLength(1);
+  });
+
+  it('is picked up once someone can look, one time, with a new revision and its wait', async () => {
+    const c = await still();
+    await c.db.update(agents).set({ removedAt: new Date() }).where(inArray(agents.id, [c.head.id, c.orchestrator.id]));
+    await silent(c);
+    await claimQuestions(c.ctx);
+    expect((await c.questionsOf(c.work))[0]).toMatchObject({ triageAgentId: null, routeRevision: 1 });
+    await c.db.update(agents).set({ removedAt: null }).where(inArray(agents.id, [c.head.id, c.orchestrator.id]));
+    await claimQuestions(c.ctx);
+    await claimQuestions(c.ctx);
+    const [question] = await c.questionsOf(c.work);
+    expect(question).toMatchObject({ triageAgentId: c.head.id, routeRevision: 2 });
+    expect((await c.sidecar(question!.id))?.recoveryIntent).toMatchObject({ reason: 'plan_unavailable' });
+    expect(await c.waitsOf(c.work)).toMatchObject([{ kind: 'external', ownerAgentId: c.head.id, sourceRevision: 2 }]);
+    expect(await c.statusOf(c.work)).toBe('waiting');
+    expect(await c.turnsFor(c.head.id)).toHaveLength(1);
+  });
+});
+
+describe('a question whose route is no more', () => {
+  it('goes on to the orchestrator when its head has gone, told once', async () => {
+    const c = await company();
+    const work = await c.task();
+    await ask(c.ctx, c.agent.id, work.id, { kind: 'question', text: 'Which one?' });
+    await c.db.update(agents).set({ removedAt: new Date() }).where(eq(agents.id, c.head.id));
+    await claimQuestions(c.ctx);
+    await claimQuestions(c.ctx);
+    expect((await c.questionsOf(work))[0]).toMatchObject({ triageAgentId: c.orchestrator.id, routeRevision: 2, status: 'open' });
+    expect(await c.turnsFor(c.orchestrator.id)).toHaveLength(1);
+    expect(await c.waitsOf(work)).toMatchObject([{ ownerAgentId: c.orchestrator.id }]);
+  });
+
+  it('stays with Operations once handed there, while it can look', async () => {
+    const c = await company();
+    const work = await c.task();
+    const { request } = await ask(c.ctx, c.agent.id, work.id, { kind: 'question', text: 'Which one?' });
+    await c.db.update(requests).set({ triageAgentId: c.watcher.id }).where(eq(requests.id, request.id));
+    await claimQuestions(c.ctx);
+    expect((await c.questionsOf(work))[0]).toMatchObject({ triageAgentId: c.watcher.id, routeRevision: 1 });
+  });
+
+  it('gets a new revision when its task gets another holder, and what was read before no longer acts on it', async () => {
+    const c = await company();
+    const work = await c.task();
+    const { request } = await ask(c.ctx, c.agent.id, work.id, { kind: 'question', text: 'Which one?' });
+    const head = await c.run(c.head.id);
+    const [other] = await c.db.insert(agents).values({ companyId: c.companyId, name: 'Rita', kind: 'worker', roleKey: 'DEV-BE', departmentId: c.dev.id, subscriptionId: c.sub.id, model: '' }).returning();
+    await handOver(c.ctx, (await c.db.select().from(tasks).where(eq(tasks.id, work.id)))[0]!, other!.id, 'Over to Rita.');
+    expect((await c.questionsOf(work))[0]).toMatchObject({ routeRevision: 2, status: 'open' });
+    const stale = await call(head.client as Client, 'resolve_question', { operationId: randomUUID(), source: { kind: 'task_request', id: request.id }, expectedRevision: 1, expectedRouteRevision: 1, resolution: 'Old.' });
+    expect(stale.content[0]!.text).toContain('stale_route');
+  });
+});
+
+describe('what was already there when questions moved inside', () => {
+  /* As the migration leaves them: the same row, with no one yet to have it. */
+  async function legacy(status: 'open' | 'answered' | 'approved') {
+    const c = await company();
+    const work = await c.task();
+    const [ceo] = await c.db.select().from(people).where(eq(people.isOwner, true));
+    const closed = status === 'open' ? {} : { answeredBy: ceo!.id, answeredAt: new Date(), answer: 'As it was said.' };
+    const [request] = await c.db.insert(requests).values({ companyId: c.companyId, taskId: work.id, agentId: c.agent.id, kind: 'stuck', text: 'It stood still.', status, audience: status === 'open' ? 'internal' : 'legacy', ...closed }).returning();
+    await c.db.update(requests).set({ sourceKey: `legacy:task_request:${request!.id}` }).where(eq(requests.id, request!.id));
+    if (status === 'open') await c.db.update(tasks).set({ status: 'waiting' }).where(eq(tasks.id, work.id));
+    return { ...c, work, request: request!, ceoPerson: ceo! };
+  }
+
+  it('reaches its head through the same row and its history, with the old wait on a person over, and no person told', async () => {
+    const c = await legacy('open');
+    await c.db.insert(taskWaits).values({ companyId: c.companyId, taskId: c.work.id, kind: 'person', sourceKey: requestSourceKey(c.request.id), state: 'legacy_needs_plan', generation: 1, sourceRevision: 0, ownerPersonId: c.ceoPerson.id, sourceState: {} });
+    expect(await c.seen()).toMatchObject({ requests: [], counts: { total: 0 } });
+    await claimQuestions(c.ctx);
+    expect((await c.questionsOf(c.work))[0]).toMatchObject({ id: c.request.id, audience: 'internal', triageAgentId: c.head.id, routeRevision: 2, status: 'open', answeredBy: null });
+    const waits = await c.waitsOf(c.work);
+    expect(waits.find(w => w.kind === 'person')).toMatchObject({ state: 'superseded' });
+    expect(waits.find(w => w.kind === 'external')).toMatchObject({ ownerAgentId: c.head.id });
+    expect(await c.turnsFor(c.head.id)).toHaveLength(1);
+    expect(await c.seen()).toMatchObject({ requests: [], counts: { total: 0 } });
+  });
+
+  it('stays as it ended when it was answered, shown as it was, and is never asked again', async () => {
+    const c = await legacy('answered');
+    await claimQuestions(c.ctx);
+    expect((await c.questionsOf(c.work))[0]).toMatchObject({ audience: 'legacy', status: 'answered', answer: 'As it was said.', answeredBy: c.ceoPerson.id, routeRevision: 1, triageAgentId: null });
+    expect(await c.turnsFor(c.head.id)).toEqual([]);
+    const shown = (await c.app.inject({ url: `/api/tasks/${c.work.id}`, ...as(c.ceo) })).json();
+    expect(shown.task.requests[0]).toMatchObject({ text: 'It stood still.', answer: 'As it was said.', status: 'answered' });
+  });
+
+  it('keeps the words of an open one from those who see the task', async () => {
+    const c = await legacy('open');
+    const shown = (await c.app.inject({ url: `/api/tasks/${c.work.id}`, ...as(c.ceo) })).json();
+    expect(JSON.stringify(shown.task.requests)).not.toContain('It stood still.');
   });
 });

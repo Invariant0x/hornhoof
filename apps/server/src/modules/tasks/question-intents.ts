@@ -1,14 +1,14 @@
 import { QuestionClassificationInput } from '@hornhoof/protocol';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { and, asc, eq, gt, inArray, or, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, or } from 'drizzle-orm';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
-import { agents, departments, jobs, requestInternal, requests, tasks } from '../../db/schema.js';
-import { ApiError } from '../../errors.js';
+import { agents, departments, requestInternal, requests, tasks } from '../../db/schema.js';
+import { ApiError, loggable } from '../../errors.js';
 import { jobOf, type ToolJob } from '../tools/job.js';
 import { picturesOf } from './attachments.js';
-import { answerInternal, approvalDigest, classifyInternal, ResolveInput, RouteInput, routeInternal, type Settled } from './question-lifecycle.js';
+import { answerInternal, approvalDigest, claimQuestion, classifyInternal, ResolveInput, RouteInput, routeInternal, type Settled } from './question-lifecycle.js';
 import { wakeAll } from './wake.js';
 
 /* The same questions over tools and HTTP: what whoever has them reads, and the one way each is settled or put before a person. The
@@ -109,6 +109,18 @@ export function registerQuestionTools(server: McpServer, ctx: Ctx, job: ToolJob)
     },
     input => readable(async () => done(ctx, await classifyInternal(ctx, call(job), QuestionClassificationInput.parse(input)))),
   );
+}
+
+/* Called with the wait sweep: each question on its own, so that one that breaks leaves the others going. */
+export async function claimQuestions(ctx: Ctx): Promise<void> {
+  const open = await ctx.db.select({ id: requests.id }).from(requests).where(and(eq(requests.status, 'open'), eq(requests.audience, 'internal')));
+  for (const { id } of open) {
+    try {
+      await wakeAll(ctx, await claimQuestion(ctx, id));
+    } catch (err) {
+      ctx.log.error({ error: loggable(err) }, 'A question could not go to someone who can look at it and is tried again in a minute.');
+    }
+  }
 }
 
 const refused = async (req: FastifyRequest, ctx: Ctx): Promise<ToolJob> => jobOf(ctx, req);
