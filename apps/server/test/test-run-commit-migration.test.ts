@@ -1,28 +1,12 @@
-import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { PGlite } from '@electric-sql/pglite';
 import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { MIGRATIONS } from '../src/db/client.js';
+import { migrationsBefore } from './migrations-before.js';
 
 const SHA = 'a'.repeat(40);
-
-/* The migrations up to the one before this change, whatever number it has by the time it merges. */
-async function previousMigrations() {
-  const folder = await mkdtemp(join(tmpdir(), 'test-run-commit-migration-'));
-  onTestFinished(() => rm(folder, { recursive: true, force: true }));
-  await cp(MIGRATIONS, folder, { recursive: true });
-  const file = join(folder, 'meta/_journal.json');
-  const journal = JSON.parse(await readFile(file, 'utf8')) as { entries: { tag: string }[] };
-  const own = journal.entries.findIndex(entry => entry.tag.endsWith('_test_run_commit'));
-  expect(own).toBeGreaterThan(0);
-  journal.entries = journal.entries.slice(0, own);
-  await writeFile(file, JSON.stringify(journal));
-  return folder;
-}
 
 const columnOf = async (db: ReturnType<typeof drizzle>) =>
   (await db.execute(sql`select data_type, is_nullable, column_default from information_schema.columns where table_name = 'test_runs' and column_name = 'commit_sha'`)).rows;
@@ -40,7 +24,7 @@ describe('the pinned commit of a test run', () => {
     const client = new PGlite();
     onTestFinished(() => client.close());
     const db = drizzle(client);
-    await migrate(db, { migrationsFolder: await previousMigrations() });
+    await migrate(db, { migrationsFolder: await migrationsBefore('test_run_commit') });
     expect(await columnOf(db)).toEqual([]);
     await db.execute(sql`insert into companies (name) values ('Acme')`);
     await db.execute(sql`insert into people (company_id, name, email, status, scope_kind) select id, 'Ivan', 'ivan@acme.com', 'active', 'company' from companies`);
