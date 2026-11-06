@@ -641,6 +641,8 @@ export const tasks = pgTable(
     riskClass: text('risk_class', { enum: RISK_CLASSES }),
     /* Said by the CEO, never read from its words; work under a task is as urgent as it is. */
     urgent: boolean('urgent').notNull().default(false),
+    /* Marked by whoever gives the work out for the short path. */
+    small: boolean('small').notNull().default(false),
     /* Grows with every move, so two moves that read the same task cannot both land. */
     version: integer('version').notNull().default(0),
     createdByPersonId: uuid('created_by_person_id').references(() => people.id),

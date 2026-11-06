@@ -29,6 +29,7 @@ const FACT_TASK = {
   gates: tasks.gates,
   bounces: tasks.bounces,
   workKind: tasks.workKind,
+  small: tasks.small,
   firstLine: sql<string>`split_part(left(${tasks.body}, 200), E'\n', 1)`,
   createdAt: tasks.createdAt,
   closedAt: tasks.closedAt,

@@ -716,7 +716,8 @@ export const en = {
         hasAbout: 'Numbers of its own come from the description of the department; its tools do not send them to this report yet.',
         sections: { tasks: 'Tasks', time: 'How long it took', stages: 'Time by stage', agents: 'Time of the agents', waits: 'Waits by reason', problems: 'Hand-ins and failures', quality: 'Quality after release', kinds: 'By kind of task', tests: 'Test time' },
         metrics: {
-          'tasks.total': 'All tasks', 'tasks.done': 'Done', 'tasks.cancelled': 'Cancelled', 'tasks.open': 'Not finished',
+          'tasks.total': 'All tasks', 'tasks.done': 'Done', 'tasks.cancelled': 'Cancelled', 'tasks.open': 'Not finished', 'small.count': 'Small tasks',
+          'small.median': 'Small tasks, creation to closing, median',
           'toAcceptance.median': 'From issue to acceptance, median', 'toAcceptance.worst': 'From issue to acceptance, worst',
           'toFirstSubmit.median': 'From issue to first hand-in, median', 'toFirstSubmit.worst': 'From issue to first hand-in, worst',
           wholeTurn: 'Whole turn', criticalPath: 'Critical path', 'agents.total': 'All agents together',
