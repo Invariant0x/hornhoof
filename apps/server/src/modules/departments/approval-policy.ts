@@ -23,7 +23,7 @@ const OwnerBody = z.object({ personId: z.uuid().nullable() }).strict();
 const NO_ACCESS = 'Only an active person with access to this department can own it. Give them access first.';
 const ON_DEPARTMENT = 'A product has no owner or rules of its own: it goes by the department that holds it.';
 
-async function ownDepartment(db: Pick<Db, 'select'>, companyId: string, id: string): Promise<DeptRow> {
+export async function ownDepartment(db: Pick<Db, 'select'>, companyId: string, id: string): Promise<DeptRow> {
   const [dept] = await db.select().from(departments).where(and(eq(departments.id, id), eq(departments.companyId, companyId)));
   if (!dept) throw new ApiError(404, 'not_found', 'This department does not exist.', 'department_unknown');
   if (dept.parentId) throw new ApiError(400, 'validation', ON_DEPARTMENT, 'owner_on_department');
@@ -63,7 +63,7 @@ async function ownerCandidates(ctx: Pick<Ctx, 'db'>, companyId: string, departme
   return rows.filter(p => able.includes(p.id));
 }
 
-const mayChangeRules = async (db: Pick<Db, 'select'>, me: Person, departmentId: string) => actsAsCeo(me) || (await accessOf(db, me)).owns?.has(departmentId) === true;
+export const mayChangeRules = async (db: Pick<Db, 'select'>, me: Person, departmentId: string) => actsAsCeo(me) || (await accessOf(db, me)).owns?.has(departmentId) === true;
 
 async function policyView(ctx: Pick<Ctx, 'db'>, me: Person, dept: DeptRow) {
   const canSetOwner = actsAsCeo(me);

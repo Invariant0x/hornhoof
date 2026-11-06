@@ -13,7 +13,7 @@ import { prepareAndVerifyBrowser, readBrowserError, startupBrowserCheck, writeBr
 import { connect } from './connection.js';
 import type { ProgramNodeMessage, ProgramServerMessage } from '@hornhoof/protocol/program-operator';
 import { agentUser, builtinAdapters, secureNode, userFor, type JobUser } from './isolation.js';
-import { startCheckClient, stopChecks, isProgramControl, applyProgramControl, runQueuedPart, checkGuidance } from './check-runtime.js';
+import { startCheckClient, stopChecks, isProgramControl, applyProgramControl, runQueuedPart } from './check-runtime.js';
 import { TestPartUser, NodeTestMessages, isNodeTestMessage, nodeTestCapabilities, readTestEnvironment } from './test-environment.js';
 import { machineLoad } from './load.js';
 import { adapterFor, programFor } from './providers/index.js';
@@ -412,6 +412,8 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
         const result = host ? await host.restart(m.agentKey, m.jobId, m.note) : { ok: false, reason: 'The terminal host is not running.' };
         return void send?.({ type: 'agent.restarted', agentKey: m.agentKey, jobId: m.jobId, ...result });
       }
+      case 'agent.release':
+        return host?.release(m.agentKey, m.jobId);
       case 'cred.put':
         return inOrder(() => putCredential(m.kind, m.sealed));
       case 'cred.drop':
@@ -538,7 +540,7 @@ export async function runNode({ dir, adapter, builtin, terminal, login: loginSet
           return { ok: false, sessionId: null, result: '', output: `Could not install the program: ${message(err)}`, error: 'agent_failed', limits: null };
         }
         const version = async () => { await programs.ready(input.signal); return programs.version(terminal.program.kind); };
-        return host.run({ key: input.agentKey, program: terminal.program, bin: terminal.bin, home: terminal.home, signedOut: terminal.signedOut, input: checkGuidance(input), version, operatorDelivery: m.operatorDelivery, operatorSourceDelivery: m.operatorSourceDelivery });
+        return host.run({ key: input.agentKey, program: terminal.program, bin: terminal.bin, home: terminal.home, signedOut: terminal.signedOut, input, version, operatorDelivery: m.operatorDelivery, operatorSourceDelivery: m.operatorSourceDelivery });
       };
       const tracked: ProviderAdapter = {
         ...chosen,
