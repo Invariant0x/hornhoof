@@ -37,7 +37,7 @@ describe('stuck turn eligibility', () => {
     const work = await Promise.all(Array.from({ length: 10 }, (_, i) => c.taskFor(c.head.id, c.orchestrator.id, `Queued ${i}`)));
     for (const task of work) {
       await c.db.update(tasks).set({ silent: SILENT_TURNS - 1 }).where(eq(tasks.id, task.id));
-      await wakeAll(c.ctx, Array.from({ length: 3 }, () => ({ agentId: c.head.id, taskId: task.id, why: 'assigned' as const })));
+      await c.db.insert(jobs).values(Array.from({ length: 3 }, () => ({ companyId: task.companyId, subscriptionId: c.sub.id, agentId: c.head.id, taskId: task.id, kind: 'conversation' as const, prompt: 'Queued while the machine was off.', timeoutMs: 900000 })));
     }
     const queued = await c.db.select().from(jobs).where(eq(jobs.agentId, c.head.id)).orderBy(asc(jobs.createdAt));
     expect(queued).toHaveLength(30);
