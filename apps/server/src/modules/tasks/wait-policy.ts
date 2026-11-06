@@ -16,11 +16,18 @@ export function nextReview(review: WaitFinalReview, due: Date, at: Date): { at: 
 
 type PolicyPlace = { companyId: string; departmentId: string; kind: WaitSourceKind; stage: string; at: Date };
 
-async function headOf(tx: Tx, departmentId: string): Promise<string | null> {
+export async function departmentHead(tx: Tx, departmentId: string): Promise<string | null> {
   const [head] = await tx.select({ id: agents.id }).from(agents)
     .where(and(eq(agents.departmentId, departmentId), eq(agents.kind, 'head'), isNull(agents.removedAt)))
     .orderBy(asc(agents.createdAt)).limit(1);
   return head?.id ?? null;
+}
+
+/* A department that set any policy has said its waits have dates: from then on one with none is refused. Not while it has no
+   head: no dates can be made without one to look at what they miss, and setting more would not help whoever is refused. */
+export async function setsWaitDates(tx: Tx, companyId: string, departmentId: string): Promise<boolean> {
+  const [any] = await tx.select({ id: waitPolicies.id }).from(waitPolicies).where(and(eq(waitPolicies.companyId, companyId), eq(waitPolicies.departmentId, departmentId))).limit(1);
+  return Boolean(any) && (await departmentHead(tx, departmentId)) !== null;
 }
 
 /* A plan from the newest version a department set for this kind of wait at this stage, its dates counted from when the stage
@@ -30,7 +37,7 @@ export async function planFromPolicy(tx: Tx, place: PolicyPlace): Promise<WaitPl
     eq(waitPolicies.companyId, place.companyId), eq(waitPolicies.departmentId, place.departmentId), eq(waitPolicies.kind, place.kind), eq(waitPolicies.stage, place.stage),
   )).orderBy(desc(waitPolicies.version)).limit(1);
   if (!policy) return null;
-  const headAgentId = await headOf(tx, place.departmentId);
+  const headAgentId = await departmentHead(tx, place.departmentId);
   if (!headAgentId) return null;
   const after = (ms: number) => new Date(place.at.getTime() + ms).toISOString();
   return {

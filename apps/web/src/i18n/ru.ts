@@ -52,6 +52,9 @@ export const ru: Messages = {
     wait_unavailable: 'тот, кого ждут, недоступен',
     wait_cycle: 'круг ожиданий',
     department_quiet: 'тихий отдел',
+    wait_overdue: 'ожидание вышло за срок',
+    goal_risk: 'цель под угрозой',
+    turn_summary: 'итог хода',
     service: 'сохраненное служебное сообщение',
   },
   common: {
@@ -890,7 +893,7 @@ export const ru: Messages = {
   },
   failures: {
     overloaded: 'провайдер перегружен',
-    model_access_denied: 'нет доступа к модели',
+    model_access_denied: 'этот тариф не дает доступ к выбранной модели',
     rate_limited: 'слишком много запросов',
     usage_limit: 'лимит тарифа',
     auth: 'нужен вход',

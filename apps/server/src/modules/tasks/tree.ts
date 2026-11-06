@@ -1,4 +1,5 @@
 import type { TurnAlarm, TurnProgram } from '@hornhoof/protocol/map';
+import type { TaskWaitView } from '@hornhoof/protocol/waits';
 import { countedSegments, turnSegments, withExternalWait, withPrograms, type FactTurn } from './tree-programs.js';
 import { waitingAgents, type TreeWait, type WaitSpan } from './tree-waits.js';
 import type { REQUEST_STATUSES, TaskEventKind, TaskStatus } from '../../db/schema.js';
@@ -8,7 +9,7 @@ type RequestStatus = (typeof REQUEST_STATUSES)[number];
 const TEXT_MAX = 160;
 
 /* Hornhoof's own reminders on a quiet task are neither moves nor signs of life. */
-export const NUDGES: ReadonlySet<TaskEventKind> = new Set(['reminded', 'continued', 'stuck']);
+export const NUDGES: ReadonlySet<TaskEventKind> = new Set(['reminded', 'continued', 'stuck', 'wait_due', 'wait_card']);
 
 export type SegmentKind = 'work' | 'after' | 'person' | 'stall' | 'lost' | 'alarm' | 'queued' | 'unknown';
 /* to is null while it still goes on at `now`. */
@@ -35,6 +36,8 @@ export type TreeLine = {
   doneAt: string | null;
   /* Numbers of the tasks in tasks.after that are not done yet. */
   waitsFor: number[];
+  /* Who answers for each thing it waits on, by when. */
+  waits: TaskWaitView[];
   segments: TreeSegment[];
   moves: TreeMove[];
   /* The latest agent event of this agent's jobs on this task. */
@@ -82,6 +85,8 @@ export type DepartmentTree = {
 
 export type FactAgent = { id: string; name: string; createdAt: Date };
 export type FactTask = {
+  /* Who answers for each thing it waits on: for work going on now, not for a turn that is over. */
+  waits?: TaskWaitView[];
   id: string;
   number: number;
   title: string;
@@ -455,6 +460,7 @@ function buildLine(task: FactTask, ix: Indexed, now: Date): { line: TreeLine; id
     mergedAt: isoOrNull(ends.mergedAt),
     doneAt: isoOrNull(ends.doneAt),
     waitsFor,
+    waits: task.waits ?? [],
     segments,
     moves: moves.map(m => ({ kind: m.kind, at: m.createdAt.toISOString(), text: m.text.slice(0, TEXT_MAX) })),
     lastActionAt: job.lastActionAt,

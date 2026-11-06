@@ -63,3 +63,29 @@ it("paints what an agent does from the theme's tokens, and an alarm and the fram
   expect(decl('.schip .r3', 'overflow')).toBe('hidden');
   expect(decl('.schip .r3', 'text-overflow')).toBe('ellipsis');
 });
+
+it('wraps question materials and keeps their viewer and actions inside the available width', () => {
+  for (const selector of ['.mat-zone', '.mat-list', '.mat-row', '.mat-text', '.opts', '.opt', '.mv', '.mv-stage', '.mv-doc', '.mv-pdf', '.mv-page', '.mv-nav', '.mv-zoom']) {
+    expect(decl(selector, 'min-width'), selector).toBe('0');
+  }
+  expect(decl('.mat', 'grid-template-columns')).toBe('64px minmax(0, 1fr)');
+  expect(decl('.mat', 'inline-size')).toBe('100%');
+  expect(decl('.mat-name', 'overflow-wrap')).toBe('anywhere');
+  expect(decl('.mat-large .mat-thumb', 'inline-size')).toBe('100%');
+  expect(decl('.mat-large .mat-thumb', 'aspect-ratio')).toBe('16 / 10');
+  expect(decl('.opts', 'grid-template-columns')).toBe('repeat(auto-fit, minmax(min(100%, 280px), 1fr))');
+  expect(decl('.choice-list > .req-option', 'min-height')).toBe('44px');
+  expect(decl('.entry-actions', 'flex-wrap')).toBe('wrap');
+  expect(decl('.entry-actions', 'inline-size')).toBe('100%');
+  expect(decl('.entry-actions > :is(.act, .btn)', 'min-inline-size')).toBe('0');
+  expect(decl('.entry-actions > :is(.act, .btn)', 'max-inline-size')).toBe('100%');
+  expect(decl('.entry-actions > :is(.act, .btn)', 'white-space')).toBe('normal');
+  expect(decl('.mv-back', 'position')).toBe('fixed');
+  expect(decl('.mv-back', 'inset')).toBe('0');
+  expect(decl('.mv', 'grid-template-rows')).toBe('auto minmax(0, 1fr) auto');
+  expect(decl('.mv-stage', 'overflow')).toBe('auto');
+  expect(decl('.mv-pic.fit', 'grid-template')).toBe('minmax(0, 1fr) / minmax(0, 1fr)');
+  expect(decl('.mv-doc', 'max-inline-size')).toBe('760px');
+  expect(decl('.mv-plain', 'overflow-wrap')).toBe('anywhere');
+  expect(decl('.mv-acts > .act', 'min-height')).toBe('44px');
+});
