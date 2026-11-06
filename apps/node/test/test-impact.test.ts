@@ -78,6 +78,17 @@ describe('pure commit impact selection', () => {
     expect(files(result)).toEqual(['apps/server/test/c.test.ts']); expect(mode(result, 'server')).toBe('whole-package');
   });
 
+  it.each(['data', 'data/'])('honors the canonical literal directory policy %s', directory => {
+    const input = fixture(); input.changes = [{ path: 'data/table.dsl', kind: 'modified' }];
+    input.environment.impact.fullPackageGlobs = [{ globs: [directory], suiteIds: ['server'] }];
+    expect(files(selectAffectedTests(input))).toEqual(['apps/server/test/c.test.ts']);
+  });
+
+  it('keeps ordinary clock source changes narrow instead of treating them as lockfiles', () => {
+    const input = fixture(); input.changes[0]!.path = 'apps/node/src/clock.ts';
+    expect(files(selectAffectedTests(input))).toEqual(['apps/node/test/a.test.ts']);
+  });
+
   it.each([
     ['apps/node/migrations/001.sql', 'migration'], ['apps/node/src/schema.ts', 'schema'],
     ['apps/node/vitest.config.ts', 'configuration'], ['apps/node/.env.runtime', 'environment'],
@@ -99,6 +110,13 @@ describe('pure commit impact selection', () => {
 
   it('runs the complete package for an unsupported language', () => {
     const input = fixture(); input.changes = [{ path: 'native/main.go', kind: 'modified' }];
+    const result = selectAffectedTests(input);
+    expect(files(result)).toEqual(['native/unit_test.go']); expect(mode(result, 'native')).toBe('whole-package');
+  });
+
+  it.each(['constructor', 'toString', '__proto__'])('uses whole-package fallback for unregistered language %s', language => {
+    const input = fixture(); input.environment.packages[3]!.language = language;
+    input.changes = [{ path: 'native/main.go', kind: 'modified' }];
     const result = selectAffectedTests(input);
     expect(files(result)).toEqual(['native/unit_test.go']); expect(mode(result, 'native')).toBe('whole-package');
   });
