@@ -39,6 +39,7 @@ CREATE TABLE "computer_access_intents" (
 	CONSTRAINT "computer_access_intents_recovery_bound" CHECK (jsonb_typeof("computer_access_intents"."recovery_intent") = 'object' AND octet_length("computer_access_intents"."recovery_intent"::text) <= 32768),
 	CONSTRAINT "computer_access_intents_status" CHECK ("computer_access_intents"."status" IN ('open', 'resolved_internal', 'granted', 'declined', 'withdrawn', 'apply_unknown')),
 	CONSTRAINT "computer_access_intents_apply_whole" CHECK (num_nonnulls("computer_access_intents"."apply_operation_id", "computer_access_intents"."apply_revision", "computer_access_intents"."apply_route_revision", "computer_access_intents"."apply_control_revision", "computer_access_intents"."apply_target_until") IN (0, 5)),
+	CONSTRAINT "computer_access_intents_apply_started" CHECK ("computer_access_intents"."apply_operation_id" IS NULL OR "computer_access_intents"."status" IN ('apply_unknown', 'granted', 'declined', 'withdrawn')),
 	CONSTRAINT "computer_access_intents_apply_revision" CHECK ("computer_access_intents"."apply_revision" BETWEEN 1 AND 9007199254740991),
 	CONSTRAINT "computer_access_intents_apply_route_revision" CHECK ("computer_access_intents"."apply_route_revision" BETWEEN 1 AND 9007199254740991),
 	CONSTRAINT "computer_access_intents_apply_control_revision" CHECK ("computer_access_intents"."apply_control_revision" BETWEEN 0 AND 9007199254740991),

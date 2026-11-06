@@ -1,5 +1,5 @@
 {
-  "id": "38b469c2-dbd4-4bb7-b973-3107cee56811",
+  "id": "ab1d4c81-c9c4-44c5-bd35-1f6a5c6cb18e",
   "prevId": "7ce11bf3-89f6-48ff-8c2d-aafdb1b7da00",
   "version": "7",
   "dialect": "postgresql",
@@ -1497,6 +1497,10 @@
         "computer_access_intents_apply_whole": {
           "name": "computer_access_intents_apply_whole",
           "value": "num_nonnulls(\"computer_access_intents\".\"apply_operation_id\", \"computer_access_intents\".\"apply_revision\", \"computer_access_intents\".\"apply_route_revision\", \"computer_access_intents\".\"apply_control_revision\", \"computer_access_intents\".\"apply_target_until\") IN (0, 5)"
+        },
+        "computer_access_intents_apply_started": {
+          "name": "computer_access_intents_apply_started",
+          "value": "\"computer_access_intents\".\"apply_operation_id\" IS NULL OR \"computer_access_intents\".\"status\" IN ('apply_unknown', 'granted', 'declined', 'withdrawn')"
         },
         "computer_access_intents_apply_revision": {
           "name": "computer_access_intents_apply_revision",

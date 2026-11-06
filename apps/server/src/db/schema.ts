@@ -846,6 +846,7 @@ export const computerAccessIntents = pgTable('computer_access_intents', {
   ...resolutionChecks('computer_access_intents', t),
   check('computer_access_intents_status', sql`${t.status} IN ('open', 'resolved_internal', 'granted', 'declined', 'withdrawn', 'apply_unknown')`),
   check('computer_access_intents_apply_whole', sql`num_nonnulls(${t.applyOperationId}, ${t.applyRevision}, ${t.applyRouteRevision}, ${t.applyControlRevision}, ${t.applyTargetUntil}) IN (0, 5)`),
+  check('computer_access_intents_apply_started', sql`${t.applyOperationId} IS NULL OR ${t.status} IN ('apply_unknown', 'granted', 'declined', 'withdrawn')`),
   check('computer_access_intents_apply_revision', safeRevision(t.applyRevision)),
   check('computer_access_intents_apply_route_revision', safeRevision(t.applyRouteRevision)),
   check('computer_access_intents_apply_control_revision', safeSequence(t.applyControlRevision)),
