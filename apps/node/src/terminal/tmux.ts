@@ -202,13 +202,15 @@ export class Tmux {
     }
   }
 
-  /* Pastes text the way a terminal does, bracketed when the program asked for it, so a long prompt arrives as one paste. */
+  /* Pastes text the way a terminal does, bracketed when the program asked for it, so a long prompt arrives as one paste. A paste
+     into a pane whose program ended kills tmux 3.3a with every session it holds, so the server looks and pastes in one step, and
+     a program that ended gets nothing. */
   async paste(name: string, text: string): Promise<void> {
     const buffer = `hh-${randomBytes(6).toString('hex')}`;
     /* Embedded terminal controls must not end the paste or become keystrokes. Keep only newline and tab. */
     const clean = text.replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, '');
     await this.run(['load-buffer', '-b', buffer, '-'], clean);
-    await this.run(['paste-buffer', '-p', '-d', '-b', buffer, '-t', name]);
+    await this.run(['if-shell', '-F', '-t', name, '#{pane_dead}', `delete-buffer -b ${buffer}`, `paste-buffer -p -d -b ${buffer} -t ${quote(name)}`]);
   }
 
   async keys(name: string, ...keys: string[]): Promise<void> {
