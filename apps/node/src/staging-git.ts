@@ -19,6 +19,12 @@ export type StagingPreparationResult = { status: 'prepared'; ref: string; commit
 const TrialRequest = Request.pick({ batchId: true, trialId: true, turn: true }).extend({ commitSha: ProductCommitSha }).strict();
 export type StagingTrialPublicationRequest = z.infer<typeof TrialRequest>;
 export type StagingTrialPublicationResult = { status: 'published'; ref: string; commitSha: string } | { status: 'conflict' | 'unavailable' };
+const TargetRequest = TrialRequest.extend({ baseSha: ProductCommitSha, target: z.enum(['staging', 'turn']) }).strict();
+export type StagingTargetPublicationRequest = z.infer<typeof TargetRequest>;
+
+export async function publishStagingTarget(_request: StagingTargetPublicationRequest, _context: StagingGitContext): Promise<StagingTrialPublicationResult> {
+  return { status: 'unavailable' };
+}
 
 const trialName = (request: Pick<StagingPreparationRequest, 'turn' | 'batchId' | 'trialId'>) => `turn-${request.turn}-staging-${request.batchId}-${request.trialId}`;
 type RemoteTrial = { status: 'present'; commitSha: string } | { status: 'absent' | 'unavailable' };
