@@ -1,8 +1,9 @@
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { loadTemplates } from '../src/modules/templates/load.js';
 
 /* These tests read the skill's text. They show what the watchdog is told, not what a model does with it. */
-const body = loadTemplates().skills.get('ops-task-watch')!.body;
+const body = loadTemplates(fileURLToPath(new URL('../../../templates', import.meta.url))).skills.get('ops-task-watch')!.body;
 const step = body.split('\n').find(line => line.startsWith('6. ')) ?? '';
 
 describe('what the watchdog is told about people who stand free', () => {
