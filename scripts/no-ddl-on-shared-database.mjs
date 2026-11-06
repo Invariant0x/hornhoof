@@ -15,9 +15,12 @@ function startsAtExpect(node) {
   return node.type === 'CallExpression' && node.callee.name === 'expect';
 }
 
+const isMatcher = node => node.type === 'CallExpression'
+  && node.callee.type === 'MemberExpression' && startsAtExpect(node.callee.object);
+
 /* A matcher's argument is what a test expects to read, not what it runs. What it hands to expect() may well run. */
-const isExpectedText = ancestors => ancestors.some(node => node.type === 'CallExpression'
-  && node.callee.type === 'MemberExpression' && startsAtExpect(node.callee.object));
+const isExpectedText = (text, ancestors) => ancestors.some((node, at) => isMatcher(node)
+  && node.arguments.includes(ancestors[at + 1] ?? text));
 
 export default {
   meta: {
@@ -29,7 +32,7 @@ export default {
   create(context) {
     let own = false;
     const check = (node, text) => {
-      if (own || !DDL.test(text) || isExpectedText(context.sourceCode.getAncestors(node))) return;
+      if (own || !DDL.test(text) || isExpectedText(node, context.sourceCode.getAncestors(node))) return;
       context.report({ node, messageId: 'ddl' });
     };
     return {

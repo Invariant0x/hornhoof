@@ -120,6 +120,18 @@ describe('what a test changes beyond rows', { shuffle: false }, () => {
     await expect(db.select().from(companies)).resolves.toEqual([]);
   });
 
+  it('can be a setting no read depends on', async () => {
+    const db = await createTestDb();
+    await db.execute(sql`select set_config('application_name', 'left behind', false)`);
+    expect(await applicationName(db)).toEqual([{ name: 'left behind' }]);
+  });
+
+  it('does not reach the next test as such a setting', async () => {
+    const emptied = await createTestDb();
+    const copy = await createTestDb();
+    expect(await applicationName(emptied)).toEqual(await applicationName(copy));
+  });
+
   it('can be a statistic the planner goes by', async () => {
     const db = await createTestDb();
     await db.insert(companies).values({ name: 'Acme' });
@@ -132,6 +144,10 @@ describe('what a test changes beyond rows', { shuffle: false }, () => {
     expect((await statistics(db)).rows).toEqual([]);
   });
 });
+
+async function applicationName(db: Db): Promise<unknown[]> {
+  return (await db.execute(sql`select current_setting('application_name') as name`)).rows;
+}
 
 function statistics(db: Db) {
   return db.execute(sql`select attname from pg_stats where schemaname = 'public' and tablename = 'companies'`);

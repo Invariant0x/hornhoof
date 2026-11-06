@@ -1,8 +1,15 @@
 import { PGlite } from '@electric-sql/pglite';
-import { describe, expect, it, onTestFinished, vi } from 'vitest';
-import { freshPglite } from './helpers-db.js';
+import { describe, expect, it, onTestFinished } from 'vitest';
+import { freshPglite, ownDatabases } from './helpers-db.js';
 
-const dumps = vi.spyOn(PGlite.prototype, 'dumpDataDir');
+ownDatabases();
+
+let dumps = 0;
+const dumpDataDir = PGlite.prototype.dumpDataDir;
+PGlite.prototype.dumpDataDir = function counted(this: PGlite, ...args) {
+  dumps += 1;
+  return dumpDataDir.apply(this, args);
+};
 
 async function fresh(): Promise<PGlite> {
   const client = await freshPglite();
@@ -38,6 +45,6 @@ describe('a fresh database for a migration test', () => {
   it('runs initdb once however many a file opens', async () => {
     await fresh();
     await fresh();
-    expect(dumps).toHaveBeenCalledOnce();
+    expect(dumps).toBe(1);
   });
 });

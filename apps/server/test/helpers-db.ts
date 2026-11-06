@@ -65,7 +65,7 @@ const SHAPE = `select md5(string_agg(line, E'\n' order by line)) as shape from (
   union all select format('statistics %s', s.starelid::regclass) from pg_statistic s join pg_class c on c.oid = s.starelid join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public'
 ) lines`;
 
-async function shapeOf(client: PGlite): Promise<string> {
+export async function shapeOf(client: PGlite): Promise<string> {
   const { rows } = await client.query<{ shape: string }>(SHAPE);
   return rows[0]!.shape;
 }
