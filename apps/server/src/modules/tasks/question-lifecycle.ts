@@ -11,7 +11,7 @@ import { agentParty } from '../events/parties.js';
 import { goesOnAfter, note, ownNote, published, taskSpot, type Request, type Task, type Tx, type Wake } from './engine.js';
 import { recordCause } from './notification-cause.js';
 import { keepWakes } from './outbox.js';
-import { classificationRequired, currentLeads, digestOf, internalRoute, notAllowed, operationConflict, questionAuthority, requireTriage, sourceClosed, staleRevision, staleRoute, type InternalRoute, type TriageCall } from './question-authority.js';
+import { currentLeads, digestOf, internalRoute, operationConflict, questionAuthority, requireTriage, sourceClosed, staleRevision, staleRoute, type InternalRoute, type TriageCall } from './question-authority.js';
 import { handOff } from './pulses.js';
 import { endQuestionWait, syncQuestionWait } from './wait-producers.js';
 import { endOpenSource, requestSourceKey } from './wait-state.js';
