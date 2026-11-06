@@ -96,16 +96,22 @@ const RoleHead = z.object({
 
 export const textHash = (text: string): string => createHash('sha256').update(text).digest('hex').slice(0, 12);
 
+const yamlFailure = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+
+function parseFrontmatter(file: string, raw: string): unknown {
+  try {
+    return parse(raw);
+  } catch (err) {
+    throw new Error(`${file}: ${yamlFailure(err)}`);
+  }
+}
+
 /* A file is YAML frontmatter between --- lines, then the body. */
 function readParts(file: string): { head: unknown; body: string } {
   const text = readFileSync(file, 'utf8');
   const match = text.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
   if (!match) throw new Error(`${file} has no frontmatter.`);
-  try {
-    return { head: parse(match[1]!), body: match[2]!.trim() };
-  } catch (err) {
-    throw new Error(`${file}: ${err instanceof Error ? err.message : String(err)}`);
-  }
+  return { head: parseFrontmatter(file, match[1]!), body: match[2]!.trim() };
 }
 
 function parsed<T>(schema: z.ZodType<T>, file: string, head: unknown): T {
