@@ -38,7 +38,14 @@ it('serves the real browser integration', async () => {
   const input = createInterface({ input: process.stdin });
   input.on('line', line => {
     const { control } = JSON.parse(line);
-    void Promise.resolve(commands[control]?.()).then(() => process.stdout.write(JSON.stringify({ control }) + '\n'));
+    console.error('ACL CONTROL', control);
+    void Promise.resolve(commands[control]?.()).then(
+      () => {
+        console.error('ACL CONTROL DONE', control);
+        process.stdout.write(JSON.stringify({ control }) + '\n');
+      },
+      error => console.error('ACL CONTROL FAILED', control, error),
+    );
   });
   process.stdout.write(JSON.stringify({
     url: c.url.replace('ws://', 'http://'), tokens: c.tokens, ids: c.ids, plans: c.plans,

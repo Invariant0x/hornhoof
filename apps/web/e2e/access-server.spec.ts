@@ -28,7 +28,10 @@ async function startServer(): Promise<Server> {
   });
   const pages: Page[] = [];
   let stderr = '';
-  child.stderr.on('data', chunk => { stderr += String(chunk); });
+  child.stderr.on('data', chunk => {
+    stderr += String(chunk);
+    process.stderr.write(chunk);
+  });
   const boot = await new Promise<Boot>((done, fail) => {
     let started = false;
     createInterface({ input: child.stdout }).on('line', line => {
