@@ -16,9 +16,10 @@ export const POLICY: OutboundPolicyValue = {
 export const PRICE = { kind: 'price', amount: '10.00', currency: 'USD', scale: 2, rounding: 'half_up', discountId: null, termsId: null, validFrom: '2026-11-01T00:00:00.000Z', validUntil: null } as const;
 const NOW = new Date('2026-11-06T10:00:00.000Z');
 
-/* A company with a department and a product in it, a person who owns them, an author and a question of that author. */
+/* A company with a department and a product in it, a person who owns them and two possible authors. A deployment holds
+   one company, so any other is one only tests make, to prove that rows do not reach across. */
 export async function aCompany(db: TestDb, name = 'Acme') {
-  const [company] = await db.insert(companies).values({ name }).returning();
+  const [company] = await db.insert(companies).values({ name, singleton: name === 'Acme' }).returning();
   const companyId = company!.id;
   const [person] = await db.insert(people).values({ companyId, name: 'Dana', email: `dana@${name}.example`, status: 'active', scopeKind: 'listed' }).returning();
   const [department] = await db.insert(departments).values({ companyId, templateKey: 'sales', roleCode: 'SAL' }).returning();

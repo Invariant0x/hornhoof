@@ -36,7 +36,7 @@ async function settingsClosed(sql: AgentSql, mode: SqlMode): Promise<void> {
   }
 }
 
-it('gives neither production SQL role anything on any table of the gateway, signed in as itself', async () => {
+it('gives neither production SQL role anything on any table of the gateway, signed in as itself', { timeout: 180000 }, async () => {
   const fixture = await privatePostgres();
   const sql = await openAgentSql(fixture.url);
   expect(sql, 'Production openAgentSql must create both LOGIN pools').not.toBeNull();

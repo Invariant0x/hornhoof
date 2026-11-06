@@ -203,7 +203,7 @@ describe('outbound gateway migration', () => {
     const db = drizzle(client);
     await migrate(db, { migrationsFolder: await migrationsUpTo('0069_department_work_mode') });
     for (const name of ['Acme', 'Moonfern']) {
-      const company = (await db.execute<{ id: string }>(sql`insert into companies (name) values (${name}) returning id`)).rows[0]!.id;
+      const company = (await db.execute<{ id: string }>(sql`insert into companies (name, singleton) values (${name}, ${name === 'Acme'}) returning id`)).rows[0]!.id;
       const person = (await db.execute<{ id: string }>(sql`insert into people (company_id, name, email, status, scope_kind) values (${company}, 'Dana', ${`dana@${name}.example`}, 'active', 'listed') returning id`)).rows[0]!.id;
       const department = (await db.execute<{ id: string }>(sql`insert into departments (company_id, template_key, role_code, owner_person_id) values (${company}, 'sales', 'SAL', ${person}) returning id`)).rows[0]!.id;
       await db.execute(sql`insert into person_access (company_id, person_id, department_id) values (${company}, ${person}, ${department})`);
