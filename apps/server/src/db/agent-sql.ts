@@ -46,6 +46,8 @@ const READ_ONLY = [
 const AGENT_FIXED = ['kind', 'role_key', 'skills', 'subscription_id', 'node_id'];
 /* Where a department's agents push their work, and what lets a commit past GitHub's tests: set only with set_repository. */
 const REPOSITORY = ['repo_url', 'repo_branch', 'repo_token_last4', 'repo_author_name', 'repo_author_email', 'repo_full_test_command'];
+/* Settings change only through a person's guarded API, never through generic SQL. */
+const DEPARTMENT_SETTINGS = [...REPOSITORY, 'work_mode'];
 /* What of a turn the orchestrator may change, to close one that hangs. */
 const JOB_STATUS = ['status', 'error', 'finished_at'];
 const WRITES = new Set(['INSERT', 'UPDATE', 'DELETE', 'MERGE']);
@@ -91,7 +93,7 @@ export const grantsFor = (name: string) =>
     name,
     `${eachTable([...READ_ONLY, 'agents', 'jobs', 'departments', ...Object.keys(SECRET)], `GRANT SELECT, INSERT, UPDATE, DELETE ON %I TO "${name}"`)}
 ${READ_ONLY.map(table => `  EXECUTE format('GRANT SELECT (%s) ON ${table} TO "${name}"', ${visible(table)});`).join('\n')}
-  EXECUTE format('GRANT SELECT (%1$s), INSERT (%2$s), UPDATE (%2$s), DELETE ON departments TO "${name}"', ${visible('departments')}, ${columns('departments', [...SECRET.departments!, ...REPOSITORY])});
+  EXECUTE format('GRANT SELECT (%1$s), INSERT (%2$s), UPDATE (%2$s), DELETE ON departments TO "${name}"', ${visible('departments')}, ${columns('departments', [...SECRET.departments!, ...DEPARTMENT_SETTINGS])});
   EXECUTE format('GRANT SELECT (%s), UPDATE (%s) ON agents TO "${name}"', ${visible('agents')}, ${columns('agents', AGENT_FIXED)});
   EXECUTE format('GRANT SELECT (%s), UPDATE (${JOB_STATUS.join(', ')}) ON jobs TO "${name}"', ${visible('jobs')});
   GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO "${name}";
