@@ -2,12 +2,14 @@ import { randomUUID } from 'node:crypto';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { expect, it } from 'vitest';
 import { OPERATOR_CASE_MS, type OperatorRecoveryState } from '@hornhoof/protocol/program-operator';
-import { agentEvents, agents, departments, jobs, programInstances, programOperatorActions, programOperatorCases } from '../src/db/schema.js';
+import { agentEvents, agents, departments, jobs, machines, nodes, programDeliveries, programInstances, programOperatorActions, programOperatorCases, subscriptions } from '../src/db/schema.js';
+import { instructionsOf } from '../src/modules/agents/instructions.js';
 import { enqueueTurn, pump } from '../src/modules/conversation/queue.js';
 import { failOpenJobs } from '../src/modules/nodes/messages.js';
 import { createTask } from '../src/modules/tasks/engine.js';
 import { afterRestart, afterRestartOutsideTask } from '../src/modules/tasks/restarts.js';
 import { recordJobProgram } from '../src/modules/tasks/silent.js';
+import { reserveDelivery } from '../src/modules/program-operator/deliveries.js';
 import { acceptOperatorEvidence } from '../src/modules/program-operator/evidence.js';
 import { adoptOperatorOwnerTurn } from '../src/modules/program-operator/recovery.js';
 import { checkOperatorHealth } from '../src/modules/program-operator/health.js';
@@ -495,50 +497,98 @@ it('refuses a reliability engineer who is the one on hold', async () => {
   await expect(releaseRecoveryHold(c.ctx, own, { case: c.incident.id, reason: 'Me.' })).rejects.toMatchObject({ status: 403 });
 });
 
-it('keeps queue, start and deadline apart for an operator late behind other work: no action on the old case, and one delivery of the saved words', async () => {
+/* A second machine with a node of another plan, whose program lost its words too: #438 stood on another node than #455. */
+async function anotherNode(c: Awaited<ReturnType<typeof operatorCompany>>) {
+  const { id: _plan, ...plan } = c.sub;
+  const [sub] = await c.db.insert(subscriptions).values({ ...plan, kind: 'personal', provider: 'kimi', status: 'ready' }).returning();
+  const [machine] = await c.db.insert(machines).values({ companyId: c.companyId, personId: c.sub.ownerPersonId, machineKey: randomUUID(), hostname: 'Another node' }).returning();
+  const [node] = await c.db.insert(nodes).values({ companyId: c.companyId, machineId: machine!.id, subscriptionId: sub!.id, keyHash: randomUUID(), status: 'ready', version: '0.7.1' }).returning();
+  const [agent] = await c.db.insert(agents).values({ companyId: c.companyId, name: 'Dana', kind: 'worker', roleKey: 'DEV-FE', departmentId: c.agent.departmentId, subscriptionId: sub!.id, nodeId: node!.id, model: '' }).returning();
+  const [job] = await c.db.insert(jobs).values({ companyId: c.companyId, agentId: agent!.id, subscriptionId: sub!.id, nodeId: node!.id, kind: 'conversation', prompt: 'Words of the other node.', timeoutMs: 1000, status: 'running' }).returning();
+  const delivery = await reserveDelivery(c.db, { companyId: c.companyId, agentId: agent!.id, jobId: job!.id, nodeId: node!.id, kind: 'assignment', words: job!.prompt, reference: `job:${job!.id}` });
+  const [saved] = await c.db.select().from(programDeliveries).where(eq(programDeliveries.id, delivery.id));
+  const fact = { ...c.fact, agentKey: agent!.id, jobId: job!.id, instance: randomUUID(), deliveryId: delivery.id, deliveryOrdinal: delivery.ordinal, wordsDigest: saved!.digest };
+  return { agent: agent!, job: job!, node: node!, fact, identity: { kind: 'node' as const, nodeId: node!.id, keyHash: node!.keyHash! } };
+}
+
+it('keeps queue, start and deadline apart for one operator of two nodes: no action on the old case, and one delivery of the saved words on each', async () => {
   const c = await operatorCompany(true);
+  const b = await anotherNode(c);
+  const a = { agent: c.agent, job: c.job, fact: c.fact, identity: c.identity };
+  /* Turns that ran with the instructions their agents have now, so going on in their sessions is up to the node alone. */
+  const ran = async (side: typeof a | typeof b, sessionId: string) => c.db.update(jobs).set({ sessionId, createdBy: c.sub.ownerPersonId, instructionsHash: (await instructionsOf(c.ctx, side.agent, c.ctx.hub.takesSkillFiles(side.identity))).hash }).where(eq(jobs.id, side.job.id));
+  await ran(a, 'session-a');
+  await ran(b, 'session-b');
   const now = new Date(); let ordinal = 0;
-  const record = (input: Parameters<typeof acceptOperatorEvidence>[2]) => acceptOperatorEvidence(c.ctx, c.identity, { ...input, evidenceId: randomUUID(), ordinal: ordinal++ }, now);
-  const identity = { agentKey: c.agent.id, jobId: c.job.id, instance: c.fact.instance };
-  /* The operator works on another node's case when this one opens. */
-  const [other] = await c.db.insert(jobs).values({ companyId: c.companyId, agentId: c.operator!.id, subscriptionId: c.sub.id, kind: 'conversation', prompt: 'A case of another node.', timeoutMs: 1000, status: 'running', startedAt: now }).returning();
-  await record(c.fact);
-  await record({ type: 'program.operator_needed', ...identity, evidenceId: randomUUID(), ordinal: 0, reason: 'assignment_unrecorded', deliveryId: c.delivery.id, evidenceKey: c.delivery.id, elapsedMs: 60000, sinceLaunchMs: 60000, exit: null });
-  const [opened] = await c.db.select().from(programOperatorCases);
-  const notice = await c.jobOf(opened!.operatorJobId!);
+  const record = (side: typeof a | typeof b, input: Parameters<typeof acceptOperatorEvidence>[2]) => acceptOperatorEvidence(c.ctx, side.identity, { ...input, evidenceId: randomUUID(), ordinal: ordinal++ }, now);
+  const lostWords = async (side: typeof a | typeof b) => {
+    await record(side, side.fact);
+    await record(side, { type: 'program.operator_needed', agentKey: side.agent.id, jobId: side.job.id, instance: side.fact.instance, evidenceId: randomUUID(), ordinal: 0, reason: 'assignment_unrecorded', deliveryId: side.fact.deliveryId, evidenceKey: side.fact.deliveryId, elapsedMs: 60000, sinceLaunchMs: 60000, exit: null });
+    return (await c.db.select().from(programOperatorCases).where(eq(programOperatorCases.agentId, side.agent.id)))[0]!;
+  };
+
+  /* The other node's case comes first, and the operator works on it when this node's case opens behind it. */
+  const caseB = await lostWords(b);
+  const noticeB = await c.jobOf(caseB.operatorJobId!);
+  expect(noticeB.status).toBe('running');
+  const caseA = await lostWords(a);
+  expect(caseB.nodeId).toBe(b.node.id);
+  expect(caseA.nodeId).toBe(a.identity.nodeId);
+  expect(caseA.nodeId).not.toBe(caseB.nodeId);
+  const notice = await c.jobOf(caseA.operatorJobId!);
   expect(notice).toMatchObject({ status: 'queued', startedAt: null });
-  expect(+notice.createdAt).toBeLessThan(+opened!.deadlineAt);
-  expect(+opened!.deadlineAt - +opened!.openedAt).toBe(OPERATOR_CASE_MS);
+  expect(notice.agentId).toBe(noticeB.agentId);
+  expect(+notice.createdAt).toBeLessThan(+caseA.deadlineAt);
+  expect(+caseA.deadlineAt - +caseA.openedAt).toBe(OPERATOR_CASE_MS);
 
   /* The deadline comes while the notice still waits in the line: the timeout is not the operator's work. */
-  const late = new Date(+opened!.deadlineAt + 1);
+  const late = new Date(Math.max(+caseA.deadlineAt, +caseB.deadlineAt) + 1);
   await checkOperatorHealth(c.ctx, late);
-  const [expired] = await c.db.select().from(programOperatorCases);
-  expect(expired).toMatchObject({ status: 'escalated', recoveryHold: true, resolution: { outcome: 'operator_timeout' } });
+  const expired = async (id: string) => (await c.db.select().from(programOperatorCases).where(eq(programOperatorCases.id, id)))[0]!;
+  expect(await expired(caseA.id)).toMatchObject({ status: 'escalated', recoveryHold: true, resolution: { outcome: 'operator_timeout' } });
   expect(await c.jobOf(notice.id)).toMatchObject({ status: 'queued' });
 
-  /* The other work ends, and only now the notice starts, 158 s after the deadline as in #455. */
-  await c.db.update(jobs).set({ status: 'done', finishedAt: new Date(+late + 158_000) }).where(eq(jobs.id, other!.id));
+  /* The work on the other node's case ends, and only now the notice starts, 158 s after the deadline as in #455. */
+  await c.db.update(jobs).set({ status: 'done', finishedAt: new Date(+late + 158_000) }).where(eq(jobs.id, noticeB.id));
   await pump(c.ctx, c.operator!.id);
   const started = await c.jobOf(notice.id);
   expect(started.status).toBe('running');
   const caller = { id: notice.id, companyId: c.companyId, agentId: c.operator!.id };
-  await expect(readProgramScreen(c.ctx, caller, { employee: c.agent.id, case: opened!.id })).rejects.toMatchObject({ status: 403 });
-  await expect(sendProgramKey(c.ctx, caller, { employee: c.agent.id, case: opened!.id, snapshot: randomUUID(), key: 'Enter', reason: 'Too late.' })).rejects.toMatchObject({ status: 403 });
+  await expect(readProgramScreen(c.ctx, caller, { employee: a.agent.id, case: caseA.id })).rejects.toMatchObject({ status: 403 });
+  await expect(sendProgramKey(c.ctx, caller, { employee: a.agent.id, case: caseA.id, snapshot: randomUUID(), key: 'Enter', reason: 'Too late.' })).rejects.toMatchObject({ status: 403 });
   expect(await c.db.select().from(programOperatorActions)).toEqual([]);
   expect(c.sent.mock.calls.filter(([, frame]) => frame.type === 'program.key_send' || frame.type === 'program.screen_get')).toEqual([]);
 
-  /* The words stay and go once, however the late answers come in. */
-  await c.db.update(jobs).set({ status: 'failed', error: 'agent_failed', failure: { kind: 'unknown', text: `Program operator recovery ended: operator_timeout; case ${opened!.id}.`, retryable: false }, finishedAt: late, createdBy: c.sub.ownerPersonId }).where(eq(jobs.id, c.job.id));
-  const ready = (owner: boolean) => record({ type: 'program.recovery_ready', ...identity, evidenceId: randomUUID(), ordinal: 0, case: opened!.id, owner });
-  await ready(false); await ready(false); await ready(true);
+  /* The words stay and go once on each node, however the late answers come in, and no node answers for the other. */
+  const endWithTimeout = (side: typeof a | typeof b, id: string) => c.db.update(jobs).set({ status: 'failed', error: 'agent_failed', failure: { kind: 'unknown', text: `Program operator recovery ended: operator_timeout; case ${id}.`, retryable: false }, finishedAt: late }).where(eq(jobs.id, side.job.id));
+  await endWithTimeout(a, caseA.id);
+  await endWithTimeout(b, caseB.id);
+  const ready = (from: typeof a | typeof b, side: typeof a | typeof b, id: string, owner: boolean) => record(from, { type: 'program.recovery_ready', agentKey: side.agent.id, jobId: side.job.id, instance: side.fact.instance, evidenceId: randomUUID(), ordinal: 0, case: id, owner });
+  const childrenOf = (side: typeof a | typeof b) => c.db.select().from(jobs).where(eq(jobs.continueOf, side.job.id));
+  expect(await ready(b, a, caseA.id, false)).toBe(false);
+  expect(await childrenOf(a)).toEqual([]);
+  await ready(a, a, caseA.id, false); await ready(a, a, caseA.id, false); await ready(a, a, caseA.id, true);
   await checkOperatorHealth(c.ctx, new Date(+late + 200_000));
-  const children = await c.db.select().from(jobs).where(eq(jobs.continueOf, c.job.id));
+  const children = await childrenOf(a);
   expect(children).toHaveLength(1);
   expect(children[0]).toMatchObject({ createdBy: c.sub.ownerPersonId, prompt: expect.stringContaining('Words.') });
   expect(await principalOf(c, children[0]!.id)).toEqual([c.sub.ownerPersonId]);
-  const running = await c.db.select({ id: jobs.id }).from(jobs).where(sql`${jobs.agentId} = ${c.agent.id} and ${jobs.status} = 'running'`);
-  expect(running.length).toBeLessThanOrEqual(1);
+  expect(await childrenOf(b)).toEqual([]);
+  await ready(b, b, caseB.id, false);
+  const others = await childrenOf(b);
+  expect(others).toHaveLength(1);
+  expect(others[0]).toMatchObject({ createdBy: c.sub.ownerPersonId, prompt: expect.stringContaining('Words of the other node.') });
+  expect(await childrenOf(a)).toHaveLength(1);
+
+  /* Each goes on where its words were: on its own node, in its own session, one at a time. */
+  await pump(c.ctx, a.agent.id);
+  await pump(c.ctx, b.agent.id);
+  expect(await c.jobOf(children[0]!.id)).toMatchObject({ nodeId: a.identity.nodeId, sessionId: 'session-a' });
+  expect(await c.jobOf(others[0]!.id)).toMatchObject({ nodeId: b.node.id, sessionId: 'session-b' });
+  for (const side of [a, b]) {
+    const running = await c.db.select({ id: jobs.id }).from(jobs).where(sql`${jobs.agentId} = ${side.agent.id} and ${jobs.status} = 'running'`);
+    expect(running.length).toBeLessThanOrEqual(1);
+  }
 });
 
 it('a late receipt after an update wins over the delivery waiting to go, with no second run', async () => {

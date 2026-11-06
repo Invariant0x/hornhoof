@@ -77,14 +77,32 @@ A change to the database schema gets a new migration from `npx drizzle-kit gener
 
 ## Releasing a version
 
-A test on a screen a fake program draws proves little about a real one, and 0.7.0 went out that way. So every release passes a live check, and a push to `main` moves the tags machines read only for a commit that passed it.
+A test on a screen a fake program draws proves little about a real one, and 0.7.0 went out that way. So every release passes a live check, and nothing puts a build on a machine without it: not a push to `main`, the update button, a machine that joins, `install.sh --urgent` or `install.sh server`. A version from before 0.7.0 has no check to show and stays a way back.
 
-1. Build the candidate: run the Images workflow by hand on its branch. That pushes the app, node and updater images under the tag of the commit, and moves nothing else.
-2. On a free machine that runs no real work, start a separate server and a node of those exact images for each of Claude, Codex, Kimi and Antigravity. Each plan signs in through its own link on that server; no credential is copied from anywhere.
+1. On a free machine that runs no real work, build the candidate from its exact commit. Nothing of it is published:
+
+   ```sh
+   COMMIT=$(git rev-parse HEAD)
+   VERSION=$(node -p "require('./package.json').version")
+   NODE_BUILD=$(scripts/node-build.sh)
+   LABELS="--label org.opencontainers.image.version=$VERSION --label org.opencontainers.image.revision=$COMMIT"
+   docker build --build-arg HORNHOOF_VERSION=$VERSION --build-arg HORNHOOF_COMMIT=$COMMIT --build-arg HORNHOOF_NODE_BUILD=$NODE_BUILD $LABELS -t ghcr.io/invariant0x/hornhoof:$COMMIT .
+   docker build --build-arg HORNHOOF_NODE_BUILD=$NODE_BUILD -f apps/node/Dockerfile -t ghcr.io/invariant0x/hornhoof-node:$COMMIT .
+   docker build $LABELS -f apps/updater/Dockerfile -t ghcr.io/invariant0x/hornhoof-updater:$COMMIT .
+   ```
+
+2. Start its stand, the one kind of server that gives its nodes a build without a check. It must be a new server with a name of its own, which keeps its database, its port and its nodes to itself:
+
+   ```sh
+   HORNHOOF_VERSION=$COMMIT HORNHOOF_LIVE_CHECK_STAND=1 bash scripts/install.sh server --name live-check
+   ```
+
+   Connect a node for each of Claude, Codex, Kimi and Antigravity with the commands this server shows, on this same computer: its nodes start on the images you built, which no other computer has. Each plan signs in through its own link on that server; no credential is copied from anywhere.
 3. Give each agent a turn. For each program write down what its own journal shows: that it recorded the words, that it answered, and that its turn ended the usual way. Fixtures, wrappers around a program and another commit's build do not count.
-4. Write the proof: `schema`, `commit`, `version`, the digests of the three `images`, `checkedAt`, the digest of the cleaned evidence you keep with the release (`evidence`), and for each of the four programs its `outcome` with its `version`, `machine`, `node`, `session`, `job`, `instance`, `generations` and when it was `asked`, `recorded`, `answered` and `finished`. `packages/protocol/src/live-check.ts` is what it is judged by.
-5. After the owner approved that exact commit, run the Live check workflow from `main` with the proof. It refuses a proof that does not speak of exactly those images.
-6. Move `main` to that commit by fast-forward: a merge commit is another commit, with no check. If the publish job ran before the proof was out, run that job again.
+4. Show the owner that record for the exact commit, with the image IDs of what you built and the cleaned evidence.
+5. After the owner approved that exact commit, run the Images workflow by hand on it. That pushes the app, node and updater images under the tag of the commit and moves nothing else. They are other images than the ones you built, so check them the same way: a new stand with `HORNHOOF_VERSION=$COMMIT` downloads them over yours.
+6. Write the proof of those published images: `schema`, `commit`, `version`, the digests of the three `images`, `checkedAt`, the digest of the cleaned evidence you keep with the release (`evidence`), and for each of the four programs its `outcome` with its `version`, `machine`, `node`, `session`, `job`, `instance`, `generations` and when it was `asked`, `recorded`, `answered` and `finished`. `packages/protocol/src/live-check.ts` is what it is judged by. Run the Live check workflow from `main` with the proof. It refuses a proof that does not speak of exactly those images.
+7. Move `main` to that commit by fast-forward: a merge commit is another commit, with no check. If the publish job ran before the proof was out, run that job again.
 
 ## Rules for the code and the words
 

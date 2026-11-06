@@ -10,6 +10,7 @@ import { codexProgram } from '../src/terminal/programs.js';
 import { Tmux } from '../src/terminal/tmux.js';
 import { userMessage } from './fakes/word-receipts.mjs';
 import { until } from './terminal-host-helpers.js';
+import { codexPrompt } from './real-screens.js';
 
 const stops: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const stop of stops.splice(0)) await stop(); vi.restoreAllMocks(); });
@@ -50,7 +51,7 @@ async function started(program: Program, { plain = false, remember }: { plain?: 
   vi.spyOn(tmux, 'alive').mockResolvedValue(true);
   vi.spyOn(tmux, 'stopAll').mockResolvedValue();
   vi.spyOn(tmux, 'exitSnapshot').mockResolvedValue(null);
-  vi.spyOn(tmux, 'screen').mockImplementation(async () => `OpenAI Codex\n${program.status}\n› ${program.input}\n`);
+  vi.spyOn(tmux, 'screen').mockImplementation(async () => `OpenAI Codex\n${program.status}\n${codexPrompt(program.input)}`);
   const paste = vi.spyOn(tmux, 'paste').mockImplementation(async (_target, text) => program.onPaste(text));
   const keys = vi.spyOn(tmux, 'keys').mockImplementation(async (_target, ...pressed) => { if (pressed.includes('Enter')) program.onEnter(); });
   const host = new TerminalHost({

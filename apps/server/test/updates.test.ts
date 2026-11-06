@@ -13,6 +13,7 @@ import { publishWorking } from '../src/modules/events/store.js';
 import { as, connectNode, invitePerson, listen, sessionFrom, SETUP, setUpCompany, testApp, until } from './helpers.js';
 import { turnsHeld } from '../src/modules/updates/drain.js';
 import { liveCheckGate } from '../src/modules/updates/live-check.js';
+import { LIVE_CHECK_UNREAD } from '../src/modules/updates/live-check.js';
 
 /* Lets a test hold the next count of working agents the update routes read, so something can happen meanwhile. */
 const pause = vi.hoisted(() => ({ next: undefined as undefined | { reached: () => void; resume: Promise<void> } }));
@@ -151,13 +152,14 @@ async function fakeRegistry(
   };
 }
 
-async function company(registry: { base: string }, commit = 'aaa', control = mkdtempSync(join(tmpdir(), 'hh-control-'))) {
+async function company(registry: { base: string }, commit = 'aaa', control = mkdtempSync(join(tmpdir(), 'hh-control-')), env: NodeJS.ProcessEnv = {}) {
   const { app, db } = await testApp({
     HORNHOOF_IMAGE: 'ghcr.io/acme/hornhoof',
     REGISTRY_URL: registry.base,
     HORNHOOF_VERSION: '0.4.0',
     HORNHOOF_COMMIT: commit,
     HORNHOOF_CONTROL_DIR: control,
+    ...env,
   });
   return { app, db, control, ceo: await setUpCompany(app) };
 }
@@ -372,6 +374,12 @@ describe('the live check of a build', () => {
       run.on('close', status => done({ status, stderr }));
     });
 
+    it('says in its last line that it could not read a registry that does not answer', async () => {
+      const result = await gate({ base: 'http://127.0.0.1:9' }, '--commit', SHA);
+      expect(result.status).toBe(1);
+      expect(result.stderr.trim().split('\n').at(-1)).toBe(`${LIVE_CHECK_UNREAD} (unread)`);
+    });
+
     it('passes for exactly the build of the commit it names', async () => {
       const registry = await fakeRegistry({ [SHA]: LATEST }, [], { [SHA]: proofOf(SHA, LATEST) });
       const result = await gate(registry, '--commit', SHA);
@@ -467,9 +475,9 @@ describe('the live check of a build', () => {
 
   /* A node that wants its server's build first asks the server to let its work end: that is the way a build reaches nodes. */
   describe('of the build a server hands to its nodes', () => {
-    async function nodeAsking(proofs: Record<string, unknown>, commit = SHA, control?: string) {
+    async function nodeAsking(proofs: Record<string, unknown>, commit = SHA, control?: string, env?: NodeJS.ProcessEnv) {
       const registry = await fakeRegistry({ [SHA]: LATEST }, [], proofs);
-      const c = await company(registry, commit, control);
+      const c = await company(registry, commit, control, env);
       const made = (await c.app.inject({ method: 'POST', url: '/api/subscriptions/connect', payload: { providers: ['claude'] }, ...as(c.ceo) })).json();
       const joined = (await c.app.inject({ method: 'POST', url: '/api/nodes/join', payload: { code: /--join (\S+)/.exec(made.command)![1], machineId: 'mac-0001-abcd', hostname: 'ivan-mac', os: 'darwin', arch: 'arm64' } })).json();
       const ask = () => c.app.inject({ method: 'POST', url: '/api/nodes/update', headers: { authorization: `Bearer ${joined.nodes[0].key}` }, payload: {} });
@@ -485,6 +493,13 @@ describe('the live check of a build', () => {
       const res = await c.ask();
       expect(res.statusCode).toBe(409);
       expect(res.json().error.reason).toBe(reason);
+    });
+
+    it('lets a node of a live check stand go on, whose build is there to be checked', async () => {
+      const c = await nodeAsking({}, SHA, undefined, { HORNHOOF_LIVE_CHECK_STAND: '1' });
+      const res = await c.ask();
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ ready: true });
     });
 
     it('lets the node go on when the server runs a proven build', async () => {

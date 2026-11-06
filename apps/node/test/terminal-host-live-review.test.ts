@@ -7,6 +7,7 @@ import { UNHEARD_MS } from '@hornhoof/protocol';
 import { claudeQueue, userMessage } from './fakes/word-receipts.mjs';
 import { kimiScreen, until } from './terminal-host-helpers.js';
 import { cleanups, liveTerminal, TEXT } from './terminal-host-live-helpers.js';
+import { codexPrompt } from './real-screens.js';
 
 describe('reviewed live delivery through program events', () => {
   afterEach(async () => { for (const cleanup of cleanups.splice(0)) await cleanup(); vi.restoreAllMocks(); });
@@ -24,7 +25,7 @@ describe('reviewed live delivery through program events', () => {
 
   it('erases a held collapsed paste at expiry before the next prompt', async () => {
     const c = await liveTerminal('codex', 'lost');
-    c.screen.mockImplementation(async () => `OpenAI Codex\n› ${c.input() ? '[Pasted Content 3 lines]' : ''}\n`);
+    c.screen.mockImplementation(async () => `OpenAI Codex\n${codexPrompt(c.input() ? '[Pasted Content 3 lines]' : '')}`);
     expect(await c.host.say('receipt', TEXT)).toBe(true);
     c.finish(); await c.running;
     const now = Date.now.bind(Date);

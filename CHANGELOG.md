@@ -22,6 +22,9 @@ after a live check of its exact build on all four programs.
 - Operations hears of words on hold within five minutes and can release them with a checked tool that logs who did it and why.
 - An update is offered and installed only when its exact build passed a live check on Claude, Codex, Kimi Code and
   Antigravity. Without one, a machine stays on the version it runs, and asking for that version says why.
+- The installer holds to that check too: joining a machine, moving its nodes, `--urgent` and `install.sh server` stop with the
+  reason and change nothing for a build without one. Only a new server of its own, set up to run a live check, runs such a build.
+- A node no longer takes a person's draft for an empty Codex input: when nothing proves the input is empty, the words stay out.
 
 ## [0.7.0] - 2026-11-05
 

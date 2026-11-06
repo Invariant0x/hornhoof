@@ -10,6 +10,7 @@ import { claudeTranscript } from '../src/terminal/programs.js';
 import { Tmux } from '../src/terminal/tmux.js';
 import { claudePasted, claudeQueue, userMessage } from './fakes/word-receipts.mjs';
 import { codexJob, job, kimiJob, kimiScreen, until } from './terminal-host-helpers.js';
+import { codexPrompt } from './real-screens.js';
 
 export const SESSION = 'c3b66b04-872b-4fbe-a3a4-058a026ef20a';
 export const TEXT = 'From Hornhoof:\n\nKeep these exact words.';
@@ -38,7 +39,7 @@ export async function liveTerminal(kind: Kind = 'claude', mode: Mode = 'queued',
     return res.text();
   };
   const display = () => kind === 'kimi' ? kimiScreen(input)
-    : kind === 'claude' ? `────────────\n❯ ${input}\n────────────\n  ? for shortcuts\n` : `OpenAI Codex\n› ${input}\n`;
+    : kind === 'claude' ? `────────────\n❯ ${input}\n────────────\n  ? for shortcuts\n` : `OpenAI Codex\n${codexPrompt(input)}`;
   vi.spyOn(tmux, 'scratch').mockReturnValue(home);
   const launch = vi.spyOn(tmux, 'launch').mockImplementation(async (_name, spec) => {
     hookUrl = /^HH_BRIDGE='([^']+)'$/m.exec(readFileSync(spec.envFile!, 'utf8'))![1]!;

@@ -39,6 +39,15 @@ function parsedLabel(label: string | undefined): unknown {
   catch { return label; }
 }
 
+const unlessLacking = <T>(res: Response, read: () => Promise<T>): Promise<T | null> => (res.status === 404 ? Promise.resolve(null) : read());
+
+/* The proof is an image of one platform that carries it in a label; anything else under its tag proves nothing. */
+async function proofIn(manifest: Manifest, blob: (digest: string) => Promise<Response>): Promise<unknown> {
+  if (!manifest.config) return null;
+  const image = (await (await blob(manifest.config.digest)).json()) as ConfigBlob;
+  return parsedLabel(image.config?.Labels?.[LIVE_CHECK_LABEL]);
+}
+
 export function registry(opts: { image: string; arch: 'amd64' | 'arm64'; fetch?: typeof fetch; base?: string }): Registry {
   const slash = opts.image.indexOf('/');
   const path = opts.image.slice(slash + 1);
@@ -119,17 +128,12 @@ export function registry(opts: { image: string; arch: 'amd64' | 'arm64'; fetch?:
     async buildOf(tag) {
       const auth = await token();
       const res = await call(`/v2/${path}/manifests/${tag}`, auth, [...INDEX_TYPES, ...MANIFEST_TYPES], true);
-      return res.status === 404 ? null : build(auth, tag);
+      return unlessLacking(res, () => build(auth, tag));
     },
-    /* The proof is an image of one platform that carries it in a label; anything else under its tag proves nothing. */
     async liveCheck(commit) {
       const auth = await token();
       const res = await call(`/v2/${path}/manifests/${liveCheckTag(commit)}`, auth, MANIFEST_TYPES, true);
-      if (res.status === 404) return null;
-      const manifest = (await res.json()) as Manifest;
-      if (!manifest.config) return null;
-      const blob = (await (await call(`/v2/${path}/blobs/${manifest.config.digest}`, auth)).json()) as ConfigBlob;
-      return parsedLabel(blob.config?.Labels?.[LIVE_CHECK_LABEL]);
+      return unlessLacking(res, async () => proofIn((await res.json()) as Manifest, digest => call(`/v2/${path}/blobs/${digest}`, auth)));
     },
   };
 }

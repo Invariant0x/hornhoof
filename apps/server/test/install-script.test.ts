@@ -4,7 +4,9 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { LIVE_CHECK_REFUSALS, type LiveCheckReason, type LiveCheckVerdict } from '@hornhoof/protocol/live-check';
 import { describe, expect, it, vi } from 'vitest';
+import { LIVE_CHECK_UNREAD } from '../src/modules/updates/live-check.js';
 import { testApp } from './helpers.js';
 
 const SCRIPT = fileURLToPath(new URL('../../../scripts/install.sh', import.meta.url));
@@ -75,10 +77,12 @@ describe('install.sh a server serves', () => {
   const LOCAL_NOTE = 'no node image published for it';
   const NOT_PUBLISHED = 'may not be published yet';
 
-  /* The script GET /install.sh answers on a server of this commit, whose registry knows this digest of the node image. */
-  async function fromServer(digest: string, commit = COMMIT): Promise<string> {
-    const { app } = await testApp({ HORNHOOF_VERSION: '0.7.3', HORNHOOF_COMMIT: commit });
+  /* The script GET /install.sh answers on a server of this commit, whose registry knows this digest of the node image and
+     says this of the build's live check. */
+  async function fromServer(digest: string, commit = COMMIT, own: LiveCheckVerdict | Error = { ok: true }, env: Record<string, string> = {}): Promise<string> {
+    const { app } = await testApp({ HORNHOOF_VERSION: '0.7.3', HORNHOOF_COMMIT: commit, ...env });
     vi.spyOn(app.ctx.updates, 'siblings').mockResolvedValue({ node: digest, updater: '' });
+    vi.spyOn(app.ctx.updates, 'ownLiveCheck').mockImplementation(async () => { if (own instanceof Error) throw own; return own; });
     const file = join(mkdtempSync(join(tmpdir(), 'hh-served-')), 'install.sh');
     writeFileSync(file, (await app.inject({ url: '/install.sh' })).body);
     return file;
@@ -117,8 +121,8 @@ describe('install.sh a server serves', () => {
     expect(r.code).toBe(1);
     expect(r.out).toContain(`Could not download ${BY_TAG}`);
     expect(r.out).toContain(NOT_PUBLISHED);
-    /* An image that never comes, or a machine that cannot reach the registry, still has a way out. */
-    expect(r.out).toContain('set HORNHOOF_NODE_IMAGE');
+    /* Naming another image is no way out: that is how an unchecked build would reach a machine. */
+    expect(r.out).not.toContain('HORNHOOF_NODE_IMAGE');
     /* The command's code stays good, so the same command works once the image is out. */
     expect(r.calls.some(c => c.includes('/api/nodes/join'))).toBe(false);
     expect(r.calls.some(c => /^docker (run|rm|stop)/.test(c))).toBe(false);
@@ -159,19 +163,143 @@ describe('install.sh a server serves', () => {
     expect(r.calls.join('\n')).not.toContain(DIGEST);
   });
 
-  it('takes the image a person names over the one the server fills in, without a word about either', async () => {
+  it('takes the image a person names on a server CI did not build, without a word about either', async () => {
     const own = 'registry.acme.test/node:own';
-    for (const script of [await fromServer(DIGEST), await fromServer(DIGEST, 'local')]) {
-      const r = install({ script, env: { HORNHOOF_NODE_IMAGE: own } });
+    const script = await fromServer(DIGEST, 'local');
+    const r = install({ script, env: { HORNHOOF_NODE_IMAGE: own } });
+    expect(r.code).toBe(0);
+    expect(r.calls).toContain(`docker pull ${own}`);
+    expect(r.calls.filter(c => c.startsWith('docker run -d')).every(c => c.endsWith(own))).toBe(true);
+    expect(r.out).not.toContain(LOCAL_NOTE);
+    const failed = install({ script, env: { HORNHOOF_NODE_IMAGE: own, STUB_PULL: 'fail' } });
+    expect(failed.code).toBe(1);
+    expect(failed.out).toContain(`Could not download ${own}. Check the internet connection, then run this command again.`);
+    expect(failed.out).not.toContain(NOT_PUBLISHED);
+  });
+
+  describe('without the live check of its build', () => {
+    const REASONS: LiveCheckReason[] = ['missing', 'invalid', 'foreign', 'partial', 'stale'];
+    const nothingHappened = (r: ReturnType<typeof install>) => {
+      expect(r.code).toBe(1);
+      expect(r.calls.some(c => c.includes('/api/nodes/join'))).toBe(false);
+      expect(r.calls.some(c => /^docker (pull|run|rm|stop)/.test(c))).toBe(false);
+    };
+
+    it.each(REASONS)('stops a joining machine before its command is used up, for a live check that is %s', async reason => {
+      const r = install({ script: await fromServer(DIGEST, COMMIT, { ok: false, reason }) });
+      nothingHappened(r);
+      expect(r.out).toContain(LIVE_CHECK_REFUSALS[reason]);
+    });
+
+    it.each([[['--urgent']], [[]]])('leaves the nodes on this machine as they are with the arguments %j', async args => {
+      const r = install({ script: await fromServer(DIGEST, COMMIT, { ok: false, reason: 'missing' }), args, env: ON_MACHINE });
+      nothingHappened(r);
+      expect(r.out).toContain('stay as they are');
+    });
+
+    it('goes by what the registry can say, and says so when it cannot', async () => {
+      const r = install({ script: await fromServer(DIGEST, COMMIT, new Error('The registry answered 503.')) });
+      nothingHappened(r);
+      expect(r.out).toContain('Could not read the live check of this build');
+      expect(r.out).not.toContain('503');
+    });
+
+    it('still takes the nodes off a machine', async () => {
+      const script = await fromServer(DIGEST, COMMIT, { ok: false, reason: 'missing' });
+      const gone = install({ script, args: ['--uninstall'], tty: 'y\n', env: ON_MACHINE });
+      expect(gone.code).toBe(0);
+      expect(gone.calls).toContain(`docker rm -f ${NODE}`);
+    });
+
+    it('lets no one name another image instead, whatever that server has', async () => {
+      const own = 'ghcr.io/invariant0x/hornhoof-node:unchecked';
+      for (const script of [await fromServer(DIGEST, COMMIT, { ok: false, reason: 'missing' }), await fromServer(DIGEST), SCRIPT]) {
+        const r = install({ script, env: { ...ON_MACHINE, HORNHOOF_NODE_IMAGE: own } });
+        nothingHappened(r);
+        expect(r.calls.join('\n')).not.toContain(own);
+      }
+    });
+
+    /* No server's build stands for the latest image, so that tag answers for itself. Today it is 0.7.0. */
+    describe('where the latest image is what a machine would get', () => {
+      const LATE = { STUB_IMAGE_VERSION: '0.7.0', STUB_IMAGE_COMMIT: COMMIT };
+      const nothingOfItHappened = (r: ReturnType<typeof install>) => {
+        expect(r.code).toBe(1);
+        expect(r.out).toContain('stay as they are');
+        expect(r.calls.some(c => c.includes('/api/nodes/join'))).toBe(false);
+        expect(r.calls).not.toContain(`docker pull ${IMAGE}`);
+        expect(r.calls.some(c => /^docker (run -d|rm|stop)/.test(c))).toBe(false);
+      };
+
+      it.each([[['--join', CODE]], [['--urgent']], [[]]])('leaves a machine as it is for a script from the repository, with the arguments %j', args => {
+        for (const answer of ['no', 'no answer']) nothingOfItHappened(install({ args, env: { ...ON_MACHINE, ...LATE, STUB_LIVE_CHECK: answer } }));
+      });
+
+      it('leaves a machine as it is on a server CI did not build', async () => {
+        nothingOfItHappened(install({ script: await fromServer(DIGEST, 'local'), env: { ...LATE, STUB_LIVE_CHECK: 'no' } }));
+      });
+
+      it('asks the latest app image, by the same tag, and starts the nodes once it says yes', () => {
+        const r = install({ env: LATE });
+        expect(r.code).toBe(0);
+        expect(r.calls).toContain(`docker run --rm --entrypoint node ghcr.io/invariant0x/hornhoof:latest apps/server/dist/live-check-gate.js --image ghcr.io/invariant0x/hornhoof --commit ${COMMIT} --tag latest`);
+        expect(indexOf(r.calls, 'docker run --rm --entrypoint node')).toBeLessThan(r.calls.indexOf(`docker pull ${IMAGE}`));
+      });
+
+      it('takes a latest image from before live checks, which has none to show', () => {
+        const r = install({ env: { STUB_IMAGE_VERSION: '0.6.1', STUB_LIVE_CHECK: 'no' } });
+        expect(r.code).toBe(0);
+        expect(r.calls.some(c => c.includes('live-check-gate'))).toBe(false);
+      });
+
+      it('asks nothing of the image of a build its server says it may give', async () => {
+        const r = install({ script: await fromServer(DIGEST), env: { STUB_LIVE_CHECK: 'no' } });
+        expect(r.code).toBe(0);
+        expect(r.calls.some(c => c.includes('live-check-gate'))).toBe(false);
+      });
+    });
+
+    it('asks the registry rarely, as anyone may read install.sh', async () => {
+      const { app } = await testApp({ HORNHOOF_VERSION: '0.7.3', HORNHOOF_COMMIT: COMMIT });
+      vi.spyOn(app.ctx.updates, 'siblings').mockResolvedValue({ node: DIGEST, updater: '' });
+      const asked = vi.spyOn(app.ctx.updates, 'ownLiveCheck').mockResolvedValue({ ok: false, reason: 'missing' });
+      for (let i = 0; i < 3; i++) expect((await app.inject({ url: '/install.sh' })).body).toContain(LIVE_CHECK_REFUSALS.missing);
+      expect(asked).toHaveBeenCalledTimes(1);
+      /* Once the check is out it stays out, so nobody asks again. */
+      const { app: proven } = await testApp({ HORNHOOF_VERSION: '0.7.3', HORNHOOF_COMMIT: COMMIT });
+      vi.spyOn(proven.ctx.updates, 'siblings').mockResolvedValue({ node: DIGEST, updater: '' });
+      const once = vi.spyOn(proven.ctx.updates, 'ownLiveCheck').mockResolvedValue({ ok: true });
+      for (let i = 0; i < 2; i++) expect((await proven.inject({ url: '/install.sh' })).body).toContain('NO_NODE=""');
+      expect(once).toHaveBeenCalledTimes(1);
+    });
+
+    it('gives the nodes of its own build on a server that says it is a live check stand, and no other image', async () => {
+      const script = await fromServer(DIGEST, COMMIT, { ok: false, reason: 'missing' }, { HORNHOOF_LIVE_CHECK_STAND: '1' });
+      const r = install({ script });
       expect(r.code).toBe(0);
-      expect(r.calls).toContain(`docker pull ${own}`);
-      expect(r.calls.filter(c => c.startsWith('docker run -d')).every(c => c.endsWith(own))).toBe(true);
-      expect(r.out).not.toContain(LOCAL_NOTE);
-      const failed = install({ script, env: { HORNHOOF_NODE_IMAGE: own, STUB_PULL: 'fail' } });
-      expect(failed.code).toBe(1);
-      expect(failed.out).toContain(`Could not download ${own}. Check the internet connection, then run this command again.`);
-      expect(failed.out).not.toContain(NOT_PUBLISHED);
-    }
+      expect(r.calls).toContain(`docker pull ${BY_DIGEST}`);
+      expect(r.calls.filter(c => c.startsWith('docker run -d')).every(c => c.endsWith(BY_DIGEST))).toBe(true);
+      expect(install({ script, env: { HORNHOOF_NODE_IMAGE: 'registry.acme.test/node:own' } }).code).toBe(1);
+    });
+
+    it('starts the nodes of a candidate on a stand from the image on this computer, with nothing of it published', async () => {
+      const script = await fromServer('', COMMIT, new Error('The registry has never heard of it.'), { HORNHOOF_LIVE_CHECK_STAND: '1' });
+      const r = install({ script, env: { STUB_PULL: 'fail', STUB_IMAGE_LOCAL: '1' } });
+      expect(r.code).toBe(0);
+      expect(r.out).toContain('Using the local image.');
+      expect(r.calls.filter(c => c.startsWith('docker run -d')).every(c => c.endsWith(BY_TAG))).toBe(true);
+    });
+
+    it('takes nothing for a stand but what the server was told', async () => {
+      for (const flag of ['', '0', 'true']) {
+        const r = install({ script: await fromServer(DIGEST, COMMIT, { ok: false, reason: 'missing' }, { HORNHOOF_LIVE_CHECK_STAND: flag }) });
+        expect(r.code).toBe(1);
+      }
+    });
+  });
+
+  it('writes what a refusal says into the script as plain words', () => {
+    for (const words of [...Object.values(LIVE_CHECK_REFUSALS), LIVE_CHECK_UNREAD]) expect(words).not.toMatch(/["$`\\]/);
   });
 
   it('works as before when it comes from the repository and not from a server', () => {
@@ -180,7 +308,7 @@ describe('install.sh a server serves', () => {
     expect(r.calls).toContain(`docker pull ${IMAGE}`);
     expect(r.calls.filter(c => c.startsWith('docker run -d')).every(c => c.endsWith(IMAGE))).toBe(true);
     expect(r.out).not.toContain(LOCAL_NOTE);
-    const failed = install({ env: { STUB_PULL: 'fail' } });
+    const failed = install({ env: { STUB_PULL: 'node' } });
     expect(failed.code).toBe(1);
     expect(failed.out).toContain(`Could not download ${IMAGE}. Check the internet connection, then run this command again.`);
     expect(failed.out).not.toContain(NOT_PUBLISHED);
@@ -608,10 +736,14 @@ describe('install.sh', () => {
     expect(r.calls).toContain(`stdin http://host.docker.internal:8080 ${SUB_A} claude node-key-aaaaaaaaaaaaaaaa`);
   });
 
-  it('continues with the local image when the pull fails', () => {
-    const r = install({ env: { STUB_PULL: 'fail', STUB_IMAGE_LOCAL: '1' } });
-    expect(r.code).toBe(0);
-    expect(r.out).toContain('Using the local image.');
+  it('does not start a latest image it could not download: the live check speaks of the one published, not of what is here', () => {
+    for (const pull of ['fail', 'node']) {
+      const r = install({ env: { STUB_PULL: pull, STUB_IMAGE_LOCAL: '1' } });
+      expect(r.code).toBe(1);
+      expect(r.out).toContain('Could not download');
+      expect(r.calls.some(c => c.includes('/api/nodes/join'))).toBe(false);
+      expect(r.calls.some(c => c.startsWith('docker run -d'))).toBe(false);
+    }
   });
 
   it('stops when the pull fails and there is no local image', () => {
@@ -1109,5 +1241,181 @@ describe('install.sh', () => {
     const r = install({ args: ['--uninstall'], tty: 'n\n', env: { STUB_CONTAINERS: 'hornhoof-claude-1c07dac4' } });
     expect(r.code).toBe(0);
     expect(r.calls.some(c => c.startsWith('docker rm'))).toBe(false);
+  });
+});
+
+describe('install.sh server by hand and the live check', () => {
+  const SHA = 'a'.repeat(40);
+  const NEW = { STUB_IMAGE_VERSION: '0.7.1', STUB_IMAGE_COMMIT: SHA };
+  const gateOf = (tag: string) => `docker run --rm --entrypoint node ghcr.io/invariant0x/hornhoof:${tag} apps/server/dist/live-check-gate.js --image ghcr.io/invariant0x/hornhoof --commit ${SHA} --tag ${tag}`;
+  const WORKING = 'HORNHOOF_SECRET=keep-me\nNODE_KEY=k\nPUBLIC_URL=http://localhost:8080\nHORNHOOF_VERSION=0.6.1\nHORNHOOF_APP_REF=ghcr.io/invariant0x/hornhoof:0.6.1\nHORNHOOF_NODE_REF=ghcr.io/invariant0x/hornhoof-node:0.6.1\n';
+  const working = () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hh-server-'));
+    writeFileSync(join(dir, '.env'), WORKING);
+    return dir;
+  };
+
+  it.each([
+    ['a build named by its commit', { HORNHOOF_VERSION: SHA }, ['server'], SHA],
+    ['a build named by its version', { HORNHOOF_VERSION: '0.7.1' }, ['server'], '0.7.1'],
+    ['the latest build', {}, ['server'], 'latest'],
+    ['a build named with --urgent', { HORNHOOF_VERSION: SHA }, ['server', '--urgent'], SHA],
+  ] as const)('changes nothing on a working server for %s with no live check', (_name, pin, args, tag) => {
+    const dir = working();
+    const r = install({ args: [...args], tty: '', env: { ...NEW, ...pin, HORNHOOF_SERVER_DIR: dir, STUB_LIVE_CHECK: 'no' } });
+    expect(r.code).toBe(1);
+    expect(r.calls).toContain(gateOf(tag));
+    expect(r.out).toContain('This build has no live check');
+    expect(r.out).toContain('stays as it is');
+    expect(readFileSync(join(dir, '.env'), 'utf8')).toBe(WORKING);
+    expect(r.calls.some(c => /^docker compose .*\b(up|pull|stop)\b/.test(c))).toBe(false);
+    expect(r.calls.some(c => /^docker (stop|rm)\b/.test(c))).toBe(false);
+  });
+
+  it('leaves no folder behind on a computer it starts nothing on', () => {
+    const r = install({ args: ['server'], tty: '', env: { ...NEW, HORNHOOF_VERSION: SHA, STUB_LIVE_CHECK: 'no' } });
+    expect(r.code).toBe(1);
+    expect(existsSync(join(r.dir, 'home', 'hornhoof', '.env'))).toBe(false);
+  });
+
+  it('installs a build its live check speaks of, by the same tag it asked of', () => {
+    const r = install({ args: ['server'], tty: '\n', env: { ...NEW, HORNHOOF_VERSION: '0.7.1' } });
+    expect(r.code).toBe(0);
+    expect(r.calls).toContain(gateOf('0.7.1'));
+    const env = readFileSync(join(r.dir, 'home', 'hornhoof', '.env'), 'utf8');
+    expect(env).toMatch(/^HORNHOOF_VERSION=0\.7\.1$/m);
+    expect(env).not.toContain('HORNHOOF_LIVE_CHECK_STAND');
+    expect(indexOf(r.calls, 'docker run --rm --entrypoint node')).toBeLessThan(r.calls.findIndex(c => /^docker compose .*\bpull\b/.test(c)));
+  });
+
+  it('refuses 0.7.0, which went out without a check and has no way to answer', () => {
+    const r = install({ args: ['server'], tty: '', env: { HORNHOOF_VERSION: '0.7.0', STUB_IMAGE_VERSION: '0.7.0', STUB_IMAGE_COMMIT: SHA, STUB_LIVE_CHECK: 'no answer' } });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('stays as it is');
+    expect(r.out).toContain('cannot say');
+    expect(r.out).not.toContain('Cannot find module');
+  });
+
+  it('goes by the last line of the answer, whatever Docker said before it', () => {
+    const r = install({ args: ['server'], tty: '', env: { ...NEW, STUB_LIVE_CHECK: 'warned' } });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('This build has no live check');
+    expect(r.out).not.toContain('WARNING');
+  });
+
+  it('says it could not read the registry, and not that the build has no answer', () => {
+    const r = install({ args: ['server'], tty: '', env: { ...NEW, STUB_LIVE_CHECK: 'unread' } });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('Could not read the live check of this build');
+    expect(r.out).not.toContain('cannot say');
+    expect(r.out).not.toContain('429');
+  });
+
+  it('asks only the images of Hornhoof, whichever a person names', () => {
+    for (const args of [['server'], ['--join', CODE]]) {
+      const r = install({ args, tty: '\n', env: { ...NEW, HORNHOOF_APP_IMAGE: 'ghcr.io/acme/fork', STUB_LIVE_CHECK: 'no' } });
+      expect(r.code).toBe(1);
+      expect(r.calls.join('\n')).not.toContain('acme');
+    }
+  });
+
+  it('gives nobody but a stand the images on this computer: they answer for nothing', () => {
+    const r = install({ args: ['server'], tty: '\n', env: { ...NEW, HORNHOOF_VERSION: SHA, STUB_PULL: 'fail', STUB_IMAGE_LOCAL: '1' } });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('Could not download');
+    expect(r.calls.some(c => /^docker compose .*\b(up|pull)\b/.test(c))).toBe(false);
+  });
+
+  it('goes back to a version from before live checks, which has none to show', () => {
+    for (const version of ['0.6.1', '0.4.1']) {
+      const r = install({ args: ['server'], tty: '\n', env: { HORNHOOF_VERSION: version } });
+      expect(r.code).toBe(0);
+      expect(r.calls.some(c => c.includes('live-check-gate'))).toBe(false);
+    }
+  });
+
+  it.each([
+    ['HORNHOOF_APP_REF', 'ghcr.io/invariant0x/hornhoof:unchecked'],
+    ['HORNHOOF_NODE_REF', 'ghcr.io/invariant0x/hornhoof-node:unchecked'],
+    ['HORNHOOF_UPDATER_REF', 'ghcr.io/invariant0x/hornhoof-updater:unchecked'],
+    ['HORNHOOF_NODE_IMAGE', 'ghcr.io/invariant0x/hornhoof-node:unchecked'],
+  ])('does not take %s from a person: no check speaks of what it names', (name, image) => {
+    const dir = working();
+    const r = install({ args: ['server'], tty: '', env: { ...NEW, HORNHOOF_SERVER_DIR: dir, [name]: image } });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain(name);
+    expect(readFileSync(join(dir, '.env'), 'utf8')).toBe(WORKING);
+  });
+
+  it('asks nothing of a build the updater brings: its server asked before it let the update go', () => {
+    const dir = working();
+    const r = install({ args: ['server'], tty: '', env: { ...NEW, HORNHOOF_SERVER_DIR: dir, HORNHOOF_FROM_UPDATER: '1', HORNHOOF_VERSION: '0.7.1', STUB_LIVE_CHECK: 'no' } });
+    expect(r.code).toBe(0);
+    expect(r.calls.some(c => c.includes('live-check-gate'))).toBe(false);
+  });
+
+  describe('a live check stand', () => {
+    const STAND = { ...NEW, HORNHOOF_VERSION: SHA, HORNHOOF_LIVE_CHECK_STAND: '1', STUB_LIVE_CHECK: 'no' };
+
+    it('is a new server of its own, named, that says what it is and runs the build it checks', () => {
+      const r = install({ args: ['server', '--name', 'live-check'], tty: '\n', env: STAND });
+      expect(r.code).toBe(0);
+      expect(r.calls.some(c => c.includes('live-check-gate'))).toBe(false);
+      const env = readFileSync(join(r.dir, 'home', 'hornhoof-live-check', '.env'), 'utf8');
+      expect(env).toMatch(/^HORNHOOF_LIVE_CHECK_STAND=1$/m);
+      expect(env).toMatch(/^COMPOSE_PROJECT_NAME=hornhoof-live-check$/m);
+      expect(env).toMatch(new RegExp(`^HORNHOOF_NODE_REF=ghcr\\.io/invariant0x/hornhoof-node:${SHA}$`, 'm'));
+    });
+
+    it('is no way to put a build on the default server', () => {
+      const r = install({ args: ['server'], tty: '\n', env: STAND });
+      expect(r.code).toBe(1);
+      expect(r.out).toContain('--name');
+      expect(existsSync(join(r.dir, 'home', 'hornhoof', '.env'))).toBe(false);
+    });
+
+    it('never becomes one out of a server that already has its settings', () => {
+      const dir = working();
+      const r = install({ args: ['server', '--name', 'acme'], tty: '', env: { ...STAND, HORNHOOF_SERVER_DIR: dir } });
+      expect(r.code).toBe(1);
+      expect(r.out).toContain('new server');
+      expect(readFileSync(join(dir, '.env'), 'utf8')).toBe(WORKING);
+    });
+
+    it('runs a candidate built on this computer, with nothing of it published', () => {
+      const r = install({ args: ['server', '--name', 'live-check'], tty: '\n', env: { ...STAND, STUB_PULL: 'fail', STUB_IMAGE_LOCAL: '1' } });
+      expect(r.code).toBe(0);
+      expect(r.out).toContain('Using the images on this computer.');
+      expect(r.calls.some(c => /^docker compose .*\bup\b/.test(c))).toBe(true);
+    });
+
+    it('downloads all of a candidate once it is published, over what was built on this computer', () => {
+      const r = install({ args: ['server', '--name', 'live-check'], tty: '\n', env: { ...STAND, STUB_IMAGE_LOCAL: '1' } });
+      expect(r.code).toBe(0);
+      expect(r.calls.some(c => /^docker compose .*\bpull\b/.test(c))).toBe(true);
+      expect(r.out).not.toContain('Using the images on this computer.');
+    });
+
+    it('starts no part of a candidate: what is neither published nor here stops it', () => {
+      const r = install({ args: ['server', '--name', 'live-check'], tty: '\n', env: { ...STAND, STUB_PULL: 'node', STUB_IMAGE_LOCAL: 'app' } });
+      expect(r.code).toBe(1);
+      expect(r.out).toContain('Could not download the images');
+      expect(r.calls.some(c => /^docker compose .*\bup\b/.test(c))).toBe(false);
+    });
+
+    it('stops when that candidate is neither here nor published', () => {
+      const r = install({ args: ['server', '--name', 'live-check'], tty: '\n', env: { ...STAND, STUB_PULL: 'fail' } });
+      expect(r.code).toBe(1);
+      expect(r.out).toContain('Could not download');
+    });
+
+    it('stays one when it runs again, and moves nodes only of its own', () => {
+      const first = install({ args: ['server', '--name', 'live-check'], tty: '\n', env: STAND });
+      const dir = join(first.dir, 'home', 'hornhoof-live-check');
+      const again = install({ args: ['server', '--name', 'live-check'], tty: '', env: { ...NEW, HORNHOOF_SERVER_DIR: dir, HORNHOOF_VERSION: SHA, STUB_LIVE_CHECK: 'no', STUB_CONTAINERS: `hornhoof-claude-1c07dac4=${SERVER}` } });
+      expect(again.code).toBe(0);
+      expect(again.calls.some(c => c.includes('live-check-gate'))).toBe(false);
+      expect(again.calls.some(c => c.startsWith('docker stop') && c.includes('hornhoof-claude-1c07dac4'))).toBe(false);
+    });
   });
 });

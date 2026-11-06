@@ -19,22 +19,32 @@
 #
 # The server fills in its own address when it serves this file, and the node image of its own build: by digest, by its
 # commit's tag while the registry cannot say which digest, or "local" for a build CI did not make, which has no image
-# published. A script downloaded on its own and a local build take the latest image; HORNHOOF_NODE_IMAGE comes before
-# them all. The script arrives through a pipe, so every question is read from the terminal. It runs on the bash that
-# ships with macOS (3.2).
+# published. A script downloaded on its own and a local build take the latest image; a local build alone takes the one
+# HORNHOOF_NODE_IMAGE names. The script arrives through a pipe, so every question is read from the terminal. It runs on
+# the bash that ships with macOS (3.2).
+#
+# Nothing here puts a build on a machine without the live check of exactly its images, as the update button does not (see
+# guide/updates.md). A server of such a build says so in NO_NODE and gives no node of it. A server install, and a node that
+# would take the latest image, ask the build before anything changes. HORNHOOF_LIVE_CHECK_STAND=1 starts the one server that
+# runs a build to check it: a new one, named with --name, whose nodes are its own.
 set -euo pipefail
 
 SERVER="${HORNHOOF_SERVER:-__HORNHOOF_SERVER__}"
 TTY="${HORNHOOF_TTY:-/dev/tty}"
 STATE_DIR="${HORNHOOF_HOME:-$HOME/.hornhoof}"
 BUILD_IMAGE="__HORNHOOF_NODE_IMAGE__"
+LATEST_NODE=ghcr.io/invariant0x/hornhoof-node:latest
 case "$BUILD_IMAGE" in
-  __HORNHOOF_* | local) DEFAULT_IMAGE=ghcr.io/invariant0x/hornhoof-node:latest ;;
+  __HORNHOOF_* | local) DEFAULT_IMAGE=$LATEST_NODE ;;
   *) DEFAULT_IMAGE=$BUILD_IMAGE ;;
 esac
 IMAGE="${HORNHOOF_NODE_IMAGE:-$DEFAULT_IMAGE}"
+# Why this server gives no node of its build, in words the server fills in. Empty when it does.
+NO_NODE="__HORNHOOF_NO_NODE__"
+case "$NO_NODE" in __HORNHOOF_*) NO_NODE='' ;; esac
+STAND="${HORNHOOF_LIVE_CHECK_STAND:-}"
 COMPOSE_URL="${HORNHOOF_COMPOSE_URL:-}"
-APP_IMAGE="${HORNHOOF_APP_IMAGE:-ghcr.io/invariant0x/hornhoof}"
+APP_IMAGE=ghcr.io/invariant0x/hornhoof
 BASE_DIR="${HORNHOOF_DIR:-$HOME/hornhoof}"
 SERVER_DIR=$BASE_DIR
 NAME=''
@@ -281,7 +291,7 @@ pull_image() {
     if "${DOCKER[@]}" image inspect "$IMAGE" > /dev/null 2>&1; then
       say "Using the local image."
     elif [ "$IMAGE" = "$BUILD_IMAGE" ]; then
-      fail "Could not download $IMAGE, the node image of this Hornhoof's build. Check the internet connection. If this Hornhoof was updated in the last few minutes, the image may not be published yet. Then run this command again. To start another node image instead, set HORNHOOF_NODE_IMAGE to it."
+      fail "Could not download $IMAGE, the node image of this Hornhoof's build. Check the internet connection. If this Hornhoof was updated in the last few minutes, the image may not be published yet. Then run this command again."
     else
       fail "Could not download $IMAGE. Check the internet connection, then run this command again."
     fi
@@ -541,11 +551,27 @@ login_node() {
   wait "$watcher" 2> /dev/null || true
 }
 
+# No server's build stands for the latest image, so that tag answers for itself, and what this computer has under it for nothing.
+latest_node_answers() {
+  [ "$IMAGE" = "$LATEST_NODE" ] || return 0
+  ask_live_check latest 'So the nodes on this machine stay as they are.'
+  "${DOCKER[@]}" pull "$IMAGE" > /dev/null || fail "Could not download $IMAGE. Check the internet connection, then run this command again."
+}
+
+# A node goes to the build of its server, with or without --urgent, and a code stays good for when that build can go.
+refuse_unchecked_node() {
+  [ -z "$NO_NODE" ] || fail "$NO_NODE This Hornhoof gives no node of its build until that check is published, so the nodes on this machine stay as they are."
+  [ "$BUILD_IMAGE" = local ] || [ -z "${HORNHOOF_NODE_IMAGE:-}" ] ||
+    fail "HORNHOOF_NODE_IMAGE is for a Hornhoof built from source: no live check speaks of the image it names, so the nodes on this machine stay as they are."
+}
+
 node_mode() {
   local code=$1 entry name id provider key status removed='' existing joined_names='' waits='' late
+  refuse_unchecked_node
   detect_system
   check_server
   ensure_docker
+  latest_node_answers
   pull_image
   node_server
 
@@ -746,11 +772,36 @@ set_env() {
 
 env_value() { grep "^$1=" "$SERVER_DIR/.env" 2> /dev/null | tail -1 | cut -d= -f2- || true; }
 
+# The build of a tag answers before anything changes here: it carries the door the release went through. A version from before
+# live checks has none to show and stays a way back.
+ask_live_check() {
+  local image="$APP_IMAGE:$1" version commit why
+  say "Asking $image for its live check."
+  "${DOCKER[@]}" pull "$image" > /dev/null || fail "Could not download $image. Check the internet connection, then run this command again."
+  version=$("${DOCKER[@]}" image inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' "$image" 2> /dev/null || true)
+  case "$version" in 0.[0-6].*) return 0 ;; esac
+  commit=$("${DOCKER[@]}" image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$image" 2> /dev/null || true)
+  why=$("${DOCKER[@]}" run --rm --entrypoint node "$image" apps/server/dist/live-check-gate.js --image "$APP_IMAGE" --commit "$commit" --tag "$1" 2>&1) && return 0
+  # Its answer is its last line, whatever Docker said before it. A build from before the door has only a stack trace to show.
+  why=$(printf '%s\n' "$why" | tail -1)
+  case "$why" in *' ('[a-z]*')') ;; *) why='This build cannot say it has a live check.' ;; esac
+  fail "$why $2"
+}
+
+# A live check stand checks a candidate before anything of it is published: its images may be on this computer alone.
+stand_image_here() { [ "$STAND" = 1 ] && "${DOCKER[@]}" image inspect "$1" > /dev/null 2>&1; }
+
+# It starts all of a candidate from here or none of it, and only what compose could not download.
+stand_images_here() {
+  stand_image_here "$APP_REF" && stand_image_here "$NODE_REF" && stand_image_here "$UPDATER_REF" || return 1
+  say "Using the images on this computer."
+}
+
 # compose.yaml comes inside the app image, so the compose file always matches the build it starts.
 compose_from_image() {
   local image="$APP_IMAGE:${PIN:-latest}" cid
   say "Getting compose.yaml from $image."
-  "${DOCKER[@]}" pull "$image" > /dev/null || fail "Could not download $image. Check the internet connection, then run this command again."
+  "${DOCKER[@]}" pull "$image" > /dev/null || stand_image_here "$image" || fail "Could not download $image. Check the internet connection, then run this command again."
   cid=$("${DOCKER[@]}" create "$image") || fail "Could not read $image. Run this command again."
   if ! "${DOCKER[@]}" cp "$cid:/app/compose.yaml" "$SERVER_DIR/compose.yaml" > /dev/null; then
     "${DOCKER[@]}" rm "$cid" > /dev/null 2>&1 || true
@@ -849,6 +900,29 @@ start_server_services() {
   fi
 }
 
+# Whether this run is for a live check stand: a new server of its own, with a name, that runs a build to check it. A server
+# with work never becomes one, and an update of one stays one.
+live_check_stand() {
+  local said
+  said=$(env_value HORNHOOF_LIVE_CHECK_STAND)
+  [ -n "$STAND" ] || STAND=$said
+  [ "$STAND" = 1 ] || return 1
+  [ -n "$NAME" ] || fail "A live check stand is a server of its own: name it with --name, then run this command again."
+  [ ! -f "$SERVER_DIR/.env" ] || [ "$said" = 1 ] || fail "A live check stand is a new server of its own, and $SERVER_DIR has one already, which stays as it is. Name another with --name."
+}
+
+# A person gets a server only of a build whose live check speaks of exactly its images, as with the update button. The updater
+# brings only what its server asked of first.
+require_live_check() {
+  local name
+  [ -z "$FROM_UPDATER" ] || return 0
+  for name in HORNHOOF_APP_REF HORNHOOF_NODE_REF HORNHOOF_UPDATER_REF HORNHOOF_NODE_IMAGE; do
+    [ -z "${!name:-}" ] || fail "$name names an image no live check speaks of, so this Hornhoof stays as it is. Choose a build with HORNHOOF_VERSION."
+  done
+  if live_check_stand; then return 0; fi
+  ask_live_check "${PIN:-latest}" "So $APP_IMAGE:${PIN:-latest} goes nowhere, and this Hornhoof stays as it is."
+}
+
 server_mode() {
   local env_file url public port local_url project link fact id i=0
   local -a compose
@@ -868,6 +942,7 @@ server_mode() {
   # A named server is its own compose project, so its containers, network and volumes never meet another's.
   if [ -n "$NAME" ]; then compose+=(-p "hornhoof-$NAME"); fi
 
+  require_live_check
   mkdir -p "$SERVER_DIR"
   env_file="$SERVER_DIR/.env"
   if [ -n "$FROM_UPDATER" ] && [ ! -f "$env_file" ]; then fail "There is no $env_file to update."; fi
@@ -899,6 +974,7 @@ server_mode() {
   set_env COMPOSE_PROJECT_NAME "$project"
   set_env HORNHOOF_SERVER_DIR "$SERVER_DIR"
   set_env HORNHOOF_VERSION "${PIN:-latest}"
+  if [ "$STAND" = 1 ]; then set_env HORNHOOF_LIVE_CHECK_STAND 1; fi
   # The exact images compose starts.
   [ -n "$APP_REF" ] || APP_REF="$APP_IMAGE:${PIN:-latest}"
   [ -n "$NODE_REF" ] || NODE_REF="ghcr.io/invariant0x/hornhoof-node:${PIN:-latest}"
@@ -931,7 +1007,7 @@ server_mode() {
   # The updater downloads them before it saves the database; an updater from before leaves it to this.
   if [ -z "$PULLED" ]; then
     say "Downloading the Hornhoof images."
-    (cd "$SERVER_DIR" && "${compose[@]}" pull) || fail "Could not download the images. Check the internet connection, then run this command again."
+    (cd "$SERVER_DIR" && "${compose[@]}" pull) || stand_images_here || fail "Could not download the images. Check the internet connection, then run this command again."
   fi
   # The updater checks the new server's answer itself, and replaces itself once it comes.
   start_server_services "${compose[@]}"

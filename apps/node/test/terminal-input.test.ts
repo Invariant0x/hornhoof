@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { atEmptyPrompt, inputOf } from '../src/terminal/input.js';
+import { real, withoutFooter } from './real-screens.js';
 
 const screen = (name: string) => readFileSync(new URL(`./fixtures/${name}-screen.txt`, import.meta.url), 'utf8');
 
@@ -80,8 +81,6 @@ describe('the input shown by a terminal program', () => {
 });
 
 describe('the input on the real screens of the programs', () => {
-  const real = (name: string) => readFileSync(new URL(`./fixtures/real-screens/${name}.ansi`, import.meta.url), 'utf8');
-
   it.each(['codex-0.166.0-first', 'codex-0.166.0-idle', 'codex-0.166.0-busy', 'codex-0.166.0-retrying'])('reads %s as empty, whatever footer is under its input', name => {
     expect(inputOf('codex', real(name))).toBe('');
     expect(atEmptyPrompt('codex', real(name))).toBe(true);
@@ -90,6 +89,34 @@ describe('the input on the real screens of the programs', () => {
   it('reads what a person typed into real Codex and not its footer', () => {
     expect(inputOf('codex', real('codex-0.166.0-draft'))).toBe('abc draft');
     expect(inputOf('codex', real('codex-0.166.0-multi-line'))).toBe('first line\n  second line');
+  });
+
+  it.each([
+    ['the real draft under two empty rows', withoutFooter(real('codex-0.166.0-empty-rows-draft'))],
+    ['words under one empty row', 'OpenAI Codex\n› \n\nA draft under one empty row\n'],
+    ['words under two empty rows', 'OpenAI Codex\n› \n\n\nA draft under two empty rows\n'],
+    ['styled words under an empty row', '› \n\n\x1b[36m[Pasted Content 1200 chars]\x1b[39m\n'],
+  ])('does not call a Codex input empty with no footer under %s: they may be the rest of a draft', (_name, shown) => {
+    expect(inputOf('codex', shown)).toBeNull();
+    expect(atEmptyPrompt('codex', shown)).toBe(false);
+  });
+
+  it('does not take what stands under real Codex for a footer once its prompt shows no placeholder', () => {
+    const noPlaceholder = real('codex-0.166.0-idle').replace('\x1b[2mAsk Codex to do anything', '');
+    expect(inputOf('codex', noPlaceholder)).toBeNull();
+    expect(atEmptyPrompt('codex', noPlaceholder)).toBe(false);
+  });
+
+  it('goes by the placeholder Codex shows only while nothing is typed, with or without a footer under it', () => {
+    expect(inputOf('codex', withoutFooter(real('codex-0.166.0-idle')))).toBe('');
+    expect(atEmptyPrompt('codex', real('codex-0.166.0-long-session'))).toBe(true);
+  });
+
+  it('does not call a bare Codex prompt empty: its rows may not be drawn yet, or may not fit', () => {
+    for (const shown of ['OpenAI Codex\n› \n  \n\n', 'OpenAI Codex\n› \n', '› ']) {
+      expect(inputOf('codex', shown)).toBeNull();
+      expect(atEmptyPrompt('codex', shown)).toBe(false);
+    }
   });
 
   it.each(['kimi-2.2.0-first', 'kimi-2.3.3-first', 'kimi-2.4.1-first', 'kimi-2.5.1-first', 'kimi-2.5.1-after'])('reads %s as empty, in the box Kimi Code draws', name => {

@@ -47,21 +47,28 @@ function promptedInput(kind: 'claude' | 'codex', screen: string, shown: string):
   const prompt = [...screen.matchAll(new RegExp(`^[ \\t]*${marker}[ \\t]?(.*)$`, 'gm'))].at(-1);
   if (!prompt) return null;
   const rest = screen.slice(prompt.index + prompt[0].length);
+  if (kind === 'codex') return codexInput(prompt[1]!, rest, shown);
   /* An unfinished box may hide the rest of a person's draft. Wait for its closing rule before typing. */
   const above = screen.slice(0, prompt.index).trimEnd();
-  if (kind === 'claude' && /(?:^|\n)[ \t]*[─━═]{2,}[ \t]*$/.test(above)) return framedInput(prompt[1]!, rest);
-  const below = (kind === 'codex' ? overFooter(rest, shown) : rest).split(/\n[ \t]*[─━═╰└]/, 1)[0]!;
-  return `${prompt[1]}${below}`.replace(/[ \t]+$/gm, '').trim();
+  if (/(?:^|\n)[ \t]*[─━═]{2,}[ \t]*$/.test(above)) return framedInput(prompt[1]!, rest);
+  return inputRows(prompt[1]!, rest);
 }
 
+const inputRows = (first: string, below: string): string => `${first}${below.split(/\n[ \t]*[─━═╰└]/, 1)[0]!}`.replace(/[ \t]+$/gm, '').trim();
+
 /* Codex draws its footer last, under an empty row, in whatever words and style. A person's draft can hold empty rows too, so
-   only the last empty row of what the screen shows ends the input. */
-function overFooter(rest: string, shown: string): string {
+   only the last empty row of what the screen shows ends the input. That row and what is under it prove nothing by themselves:
+   they may be the rest of a draft whose first rows are empty, on a screen with no footer. Nor does a bare prompt, whose rows may
+   not be drawn yet or may not fit. So an input is empty only when Codex says so, with the dim placeholder it shows on its
+   prompt's row while nothing is typed. Otherwise nobody can tell, and the words stay out. */
+function codexInput(first: string, rest: string, shown: string): string | null {
   const rows = rest.split('\n');
   const seen = shown.split('\n').slice(-rows.length);
   const last = seen.findLastIndex(row => row.trim());
   const empty = seen.slice(0, last + 1).findLastIndex(row => !row.trim());
-  return rows.slice(0, empty < 0 ? last + 1 : empty).join('\n');
+  const input = inputRows(first, rows.slice(0, empty < 0 ? last + 1 : empty).join('\n'));
+  const proven = input || seen[0]!.replace(/^[ \t]*›/, '').trim();
+  return proven ? input : null;
 }
 
 function framedInput(first: string, rest: string): string | null {

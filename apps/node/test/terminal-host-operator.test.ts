@@ -10,6 +10,7 @@ import { codexProgram } from '../src/terminal/programs.js';
 import { Tmux } from '../src/terminal/tmux.js';
 import { userMessage } from './fakes/word-receipts.mjs';
 import { until } from './terminal-host-helpers.js';
+import { codexPrompt } from './real-screens.js';
 
 const stops: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const stop of stops.splice(0)) await stop(); vi.restoreAllMocks(); });
@@ -37,7 +38,7 @@ it.each([['stable', false, false], ['changing', true, false], ['cancelled', fals
     if (cancelled && ready && host['agents'].get(agentKey)?.typing === 'Check the checkout.') { ready = false; abort.abort(); }
     if (!ready) return 'Choose the new display theme. Press Enter.';
     if (changes && !changed) { changed = true; queueMicrotask(() => { ready = false; }); }
-    return `OpenAI Codex\n› ${pasted}\n`;
+    return `OpenAI Codex\n${codexPrompt(pasted)}`;
   });
   const paste = vi.spyOn(tmux, 'paste').mockImplementation(async (_target, text) => { pasted = text; });
   const keys = vi.spyOn(tmux, 'keys').mockImplementation(async (_target, ...pressed) => {

@@ -14,6 +14,7 @@ import { restartRefusal, TurnWords } from '../src/terminal/program-restart.js';
 import { Tmux } from '../src/terminal/tmux.js';
 import { claudePasted, claudeQueue, kimiSteer, userMessage } from './fakes/word-receipts.mjs';
 import { codexJob, job, kimiJob, kimiScreen, until } from './terminal-host-helpers.js';
+import { codexPrompt } from './real-screens.js';
 
 const SESSION = 'c3b66b04-872b-4fbe-a3a4-058a026ef20a';
 const HOOK = fileURLToPath(new URL('../hh-hook.cjs', import.meta.url));
@@ -34,7 +35,7 @@ async function atWork(kind: Kind, mode: Mode) {
   const tmux = new Tmux({ env: { HOME: home } });
   let input = '';
   let initial = true;
-  const screen = () => kind === 'claude' ? `❯ ${input}\n` : kind === 'codex' ? `OpenAI Codex\n› ${input}\n`
+  const screen = () => kind === 'claude' ? `❯ ${input}\n` : kind === 'codex' ? `OpenAI Codex\n${codexPrompt(input)}`
     : kimiScreen(input);
   vi.spyOn(tmux, 'scratch').mockReturnValue(home);
   vi.spyOn(tmux, 'launch').mockImplementation(async () => {

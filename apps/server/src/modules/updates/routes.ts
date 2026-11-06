@@ -6,11 +6,12 @@ import { requireCompanyScope, requirePerson } from '../../auth/session.js';
 import { ApiError, loggable } from '../../errors.js';
 import { pumpWaiting } from '../conversation/queue.js';
 import { workingCount } from '../events/store.js';
+import type { UpdateState } from './check.js';
 import { holdTurns } from './drain.js';
 import type { UpdateRequest, UpdaterView } from './control.js';
 import { FULL_SHA, type Build } from './registry.js';
 import { drainWork, serverNodes } from './drain-work.js';
-import { refusedLiveCheck } from './live-check.js';
+import { requireYes } from './live-check.js';
 
 /* urgent: a security update, which goes in at once and waits for no turn, and asks nobody about them. */
 export const UpdateBody = z.object({ version: z.string().min(1).max(128), whenIdle: z.boolean().default(true), confirmTurns: z.number().int().nonnegative().optional(), urgent: z.boolean().optional() });
@@ -49,6 +50,8 @@ function howFast(body: z.infer<typeof UpdateBody>): Pick<UpdateRequest, 'urgent'
   return body.whenIdle ? {} : { immediate: true };
 }
 
+const onOffer = (state: UpdateState, commit: string): boolean => Boolean(state.latest?.commit && state.latest.commit !== commit && state.liveCheck?.ok);
+
 /* The running build summary is for every signed-in person. Published builds and update controls
    are for people who see the whole company. */
 export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
@@ -68,7 +71,7 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
       status: ctx.updater.status(),
       waiting: waiting && { version: waiting.request.version, commit: waiting.request.commit },
     };
-    return { current: { version, commit, migrations }, available: Boolean(state.latest?.commit && state.latest.commit !== commit && state.liveCheck?.ok), ...state, updater };
+    return { current: { version, commit, migrations }, available: onOffer(state, commit), ...state, updater };
   }
 
   /* release: the turns held for the update start again; an update handed over keeps them for the restart. */
@@ -92,7 +95,7 @@ export function updateRoutes(app: FastifyInstance, ctx: Ctx): void {
       app.log.warn({ error: loggable(err) }, 'Could not read the node and updater images of the build and its live check.');
       throw new ApiError(503, 'unavailable', 'Could not read this version from the registry. Check the internet connection, then try again.', 'registry_unreachable');
     });
-    if (!verdict.ok) throw refusedLiveCheck(verdict.reason);
+    requireYes(verdict);
     return { id, version: build.version || build.tag, commit: build.commit, tag, digest: build.digest, nodeDigest: siblings.node, updaterDigest: siblings.updater };
   }
 

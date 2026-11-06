@@ -18,10 +18,11 @@ import { nodeCommandRoutes } from './command-routes.js';
 import { connectionRoutes } from './connection-routes.js';
 import { disconnectMachines } from './disconnect.js';
 import { BUILTIN, nodeIdentity, type NodeHub } from './hub.js';
-import { nodeImageOfBuild } from './image.js';
+import { nodeImageOfBuild, nodeRefusalOfBuild } from './image.js';
 import { builtinMachine, liveNode, otherBuild, settlePlans } from './nodes.js';
 import { machineProgramNodes, machineProgramState, machineProgramRoutes, programsFor } from './programs.js';
 import { machineDrain, nodeDrain } from '../updates/drain.js';
+import { needsNoProof } from '../updates/live-check.js';
 
 const JoinBody = z.object({
   code: z.string().min(1).max(200),
@@ -268,14 +269,27 @@ export function nodeRoutes(app: FastifyInstance, ctx: Ctx): void {
     onError: err => app.log.warn({ error: loggable(err) }, "Could not read this build's node image from the registry, so install.sh names it by its tag."),
   });
 
+  const nodeRefusal = refusalOfThisBuild(app, ctx);
+
   /* Every command that installs or updates a node runs this script, so the machine gets the node of this server's build. */
   app.get('/install.sh', async (_req, reply) => {
     const script = await readFile(config.installScript, 'utf8');
     const server = await publicUrl(db, config);
-    const image = await nodeImage();
+    const [image, refusal] = await Promise.all([nodeImage(), nodeRefusal()]);
     return reply
       .type('text/plain; charset=utf-8')
       .header('cache-control', 'no-cache')
-      .send(script.replaceAll('__HORNHOOF_SERVER__', server).replaceAll('__HORNHOOF_NODE_IMAGE__', image));
+      .send(script.replaceAll('__HORNHOOF_SERVER__', server).replaceAll('__HORNHOOF_NODE_IMAGE__', image).replaceAll('__HORNHOOF_NO_NODE__', refusal));
+  });
+}
+
+function refusalOfThisBuild(app: FastifyInstance, ctx: Ctx): () => Promise<string> {
+  const { commit, liveCheckStand } = ctx.config;
+  if (liveCheckStand) app.log.warn('This server is a live check stand: it gives its nodes its own build without a live check. Keep real work off it.');
+  return nodeRefusalOfBuild({
+    commit,
+    free: needsNoProof(ctx.config),
+    verdictOf: own => ctx.updates.ownLiveCheck(own),
+    onError: err => app.log.warn({ error: loggable(err) }, 'Could not read the live check of this build, so install.sh gives no node of it for now.'),
   });
 }

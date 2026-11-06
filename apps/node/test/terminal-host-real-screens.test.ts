@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { OperatorNodeMessage } from '@hornhoof/protocol/program-operator';
@@ -8,15 +8,15 @@ import { TerminalHost } from '../src/terminal/host.js';
 import { atEmptyPrompt, inputOf } from '../src/terminal/input.js';
 import { codexProgram, kimiProgram, type TermProgram } from '../src/terminal/programs.js';
 import { Tmux } from '../src/terminal/tmux.js';
+import { real, withoutFooter } from './real-screens.js';
 import { until } from './terminal-host-helpers.js';
 
-const real = (name: string) => readFileSync(new URL(`./fixtures/real-screens/${name}.ansi`, import.meta.url), 'utf8');
 const stops: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const stop of stops.splice(0)) await stop(); vi.restoreAllMocks(); });
 
 /* A node with an assignment for a program that waits at its empty prompt, on the screen that program really shows. The
    paste is what 0.7.0 never got to: its check took the footer for a person's words. */
-function assignment(program: TermProgram, ready: string, draft?: string) {
+function assignment(program: TermProgram, ready: string, draft?: string, shown = real(draft ?? ready)) {
   const home = mkdtempSync(join(tmpdir(), 'hh-real-screen-'));
   const agentKey = randomUUID(), jobId = randomUUID(), deliveryId = randomUUID();
   const workDir = join(home, 'work');
@@ -29,8 +29,8 @@ function assignment(program: TermProgram, ready: string, draft?: string) {
   vi.spyOn(tmux, 'alive').mockResolvedValue(true);
   vi.spyOn(tmux, 'stopAll').mockResolvedValue();
   vi.spyOn(tmux, 'exitSnapshot').mockResolvedValue(null);
-  vi.spyOn(tmux, 'keys').mockResolvedValue();
-  const screen = vi.spyOn(tmux, 'screen').mockResolvedValue(real(draft ?? ready));
+  const keys = vi.spyOn(tmux, 'keys').mockResolvedValue();
+  const screen = vi.spyOn(tmux, 'screen').mockResolvedValue(shown);
   const paste = vi.spyOn(tmux, 'paste').mockResolvedValue();
   const abort = new AbortController();
   const host = new TerminalHost({ tmux, hornhoof: 'http://127.0.0.1:9', send: () => {}, secrets: () => [], plugins: [], readyMs: 20, pollMs: 5, lookMs: 10, enterWaitMs: 10,
@@ -38,7 +38,7 @@ function assignment(program: TermProgram, ready: string, draft?: string) {
   });
   const running = host.run({ key: agentKey, program, bin: program.kind, home, signedOut: /signed out/i, operatorDelivery: { id: deliveryId, ordinal: 1 }, input: { agentKey, jobId, prompt: 'Check the checkout.', sessionId: null, model: null, workDir, secret: null, timeoutMs: 20000, instructions: null, tools: null, signal: abort.signal } });
   stops.push(async () => { abort.abort(); await host.stop(); await running; rmSync(home, { recursive: true, force: true }); });
-  return { host, tmux, agentKey, jobId, screen, paste, sent, deliveryId, styledLooks: () => screen.mock.calls.filter(([, , styled]) => styled).length };
+  return { host, tmux, agentKey, jobId, screen, paste, keys, sent, deliveryId, styledLooks: () => screen.mock.calls.filter(([, , styled]) => styled).length };
 }
 
 it.each([
@@ -82,6 +82,15 @@ it.each([
   const c = assignment(program, name, name);
   await until(() => c.styledLooks() > 0);
   expect(await recoveryState(c)).toMatchObject({ program: 'here', input });
+});
+
+it('types nothing, presses nothing and clears nothing while nothing proves real Codex has an empty input', async () => {
+  /* What a real Codex draft under empty rows would show without a footer: its words are the only thing that may be one. */
+  const c = assignment(codexProgram, 'codex-0.166.0-first', undefined, withoutFooter(real('codex-0.166.0-empty-rows-draft')));
+  await until(() => c.styledLooks() > 2);
+  expect(c.paste).not.toHaveBeenCalled();
+  expect(c.keys).not.toHaveBeenCalled();
+  expect(await recoveryState(c)).toMatchObject({ program: 'here', input: 'unknown' });
 });
 
 it('says a program is gone once its terminal is, whatever its screen last showed', async () => {
