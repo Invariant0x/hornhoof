@@ -5,6 +5,8 @@ description: { en: "Runs the check that proves the work before claiming it works
 kind: core
 sources: [obra/superpowers skills/verification-before-completion/SKILL.md]
 ---
+For `small: true`, still run and read the affected tests before claiming success. Keep that result in the check record and submit a line stating the change and commit SHA; detailed reports belong to the shared turn review. The report format below applies to other work.
+
 Before you write DONE, fixed, passing, sent or ready, prove it in this session:
 
 1. Name the check that would show the claim is true: the test command, the build, the page you open, the record you read back, the total you recompute.

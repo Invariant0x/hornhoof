@@ -5,6 +5,8 @@ description: { en: "Reviews each turn once, with every reviewer at the same time
 kind: procedure
 sources: [obra/superpowers skills/subagent-driven-development/SKILL.md, affaan-m/ECC skills/council-multi-model/SKILL.md, affaan-m/ECC skills/santa-method/SKILL.md]
 ---
+For `small: true`, there are no separate task gates: the executor runs only affected tests and merges into the turn's branch. Detailed reports, matrices, complexity metrics and duplicate checks belong to the shared turn review and checks, not the individual task.
+
 **One review per turn.** Work goes out without gates, under the department's task of the turn: each executor merges its branch into the turn's branch as soon as it hands the work in. When the department's last work of the turn is in, Hornhoof opens the review of the turn: of each gate role one reviewer of each provider, the least busy, checks everything the turn changed on its branch at the same time (dev-review-diff), and each runs its program's own review, crapper and dryer once for the whole turn.
 
 - **Code review** checks the code, the tests and obvious security problems. **Security**, when it is on, checks what touches access, sign-in, secrets or permissions. **Red team**, when on, checks the changed logic and flows. Security and red team join for declared money/access/security/data risk, sensitive changed paths, risky added diff or explicit pre-release mode. A missing or incomplete trusted comparison wakes both. Harmless UI/text outside these triggers does not wake either. Performance and released-version red-team improvement lanes are nonblocking and never task or turn gates.
@@ -18,7 +20,8 @@ The turn ends with one review, one final check, then the release with the CEO's 
 
 | Stage | Checks |
 |---|---|
-| In work | Tests selected by impact, types, lint, crapper and dryer (T2). |
+| Small task (`small: true`) | Failing test, change and only affected tests; extra checks at the shared turn review. |
+| In work (ordinary tasks) | Tests selected by impact, types, lint, crapper and dryer (T2). |
 | After a batch merges | The batch's affected tests on one pinned commit. |
 | Final turn candidate | The whole suite with typecheck of tests and every affected application, build, QA browser checks and real database tests (T1). |
 
