@@ -21,7 +21,25 @@ It checks only inside `run_tests`, which sets `HH_TEST_PART`, so no check uses t
 
 A suite run by neither Vitest nor `node --test` has no adapter: its whole package runs by its own one command from `test-environment.json`, its counts and CRAP stay unknown, and the record's scope says `package`.
 
-A change the selector answers with the whole fast suite does not run it: `tests` says `selection_is_whole_suite`. Add `--allow-whole` only when you were asked to run everything. Documents outside `templates/` select nothing.
+A change the selector answers with the whole fast suite does not run it: `tests` says `selection_is_whole_suite`, unless a shared package changed. Add `--allow-whole` only when you were asked to run everything. Documents outside `templates/` select nothing.
+
+## What a change runs
+
+The selection goes by the paths a change touches, and within a package by the import graph. A test that imports a file of another group runs when that file changes, and nothing else crosses a group.
+
+| Group | Paths | Runs |
+| --- | --- | --- |
+| Backend | `apps/server` | `server` by the graph; routes, configuration and fixtures take it whole |
+| Frontend | `apps/web` without `e2e` | `web` by the graph; strings and configuration take it whole |
+| Node and terminals | `apps/node` | `node` by the graph |
+| Shared protocol | `packages` | every suite of the fast profile, whole, without `--allow-whole` |
+| Database | `apps/server/drizzle`, `apps/server/src/db/schema.ts` | `server` whole; `server-postgres` runs in the final profile |
+| Templates and skills | `templates` | `server` and `node`, whole |
+| Browser scenarios | `apps/web/e2e`, and the screens under `apps/web/src` | no suite: `NOTE browser scenario` names a changed scenario and those named after a changed screen |
+| Build and release | `.github/workflows`, `scripts/install.sh`, `apps/updater`, `Dockerfile`, `compose.yaml`, `.dockerignore` | `release-scripts` and `server`, whole |
+| Everything | `package.json`, the lockfile, `tsconfig.base.json`, `eslint.config.js`, the test environment, the Vitest configs | `selection_is_whole_suite`, until `--allow-whole` |
+
+The rules are `impact.fullPackageGlobs` of `test-environment.json`, and `scripts/test/test-groups.test.mjs` holds them to the real graph. The machines of `run_tests` have no browsers yet, so a check names scenarios and does not run them. The whole suite runs once per release, by the tester.
 
 ## What decides
 

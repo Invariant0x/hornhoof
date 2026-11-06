@@ -388,8 +388,7 @@
           "package-lock.json",
           "tsconfig.base.json",
           "eslint.config.js",
-          ".hornhoof/test-environment.json",
-          ".github/workflows/**"
+          ".hornhoof/test-environment.json"
         ],
         "suiteIds": [
           "protocol",
@@ -440,6 +439,29 @@
           "web",
           "release-scripts",
           "server-postgres"
+        ]
+      },
+      {
+        "globs": [
+          "templates/**"
+        ],
+        "suiteIds": [
+          "server",
+          "node"
+        ]
+      },
+      {
+        "globs": [
+          ".github/workflows/**",
+          "scripts/install.sh",
+          "apps/updater/**",
+          "Dockerfile",
+          "compose.yaml",
+          ".dockerignore"
+        ],
+        "suiteIds": [
+          "release-scripts",
+          "server"
         ]
       }
     ],
