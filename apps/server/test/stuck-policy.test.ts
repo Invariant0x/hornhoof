@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agentEvents, agents, companies, departments, jobs, requestInternal, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
 import { GONE_ALONG } from '../src/modules/conversation/queue.js';
-import { createTask, GOING_ON_TURNS } from '../src/modules/tasks/engine.js';
+import { createTask, GOING_ON_TURNS, submit, verdict } from '../src/modules/tasks/engine.js';
 import { afterJob, checkLiveness, SILENT_TURNS, wakeAll } from '../src/modules/tasks/wake.js';
 import { as, listen, mcp, setUpCompany, testApp } from './helpers.js';
 
@@ -19,9 +19,10 @@ async function company() {
     (await db.insert(agents).values({ companyId: acme!.id, kind, name, departmentId: dev!.id, model: '', subscriptionId: sub!.id }).returning())[0]!;
   const head = await hire('Hana', 'head');
   const worker = await hire('Bruno', 'worker');
+  const reviewer = await hire('Rita', 'worker');
   const [orchestrator] = await db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
-  const taskFor = async (agentId: string, createdByAgentId: string, title = 'Checkout') =>
-    (await createTask(app.ctx, { agentId: createdByAgentId }, { title, brief: '', body: 'Finish the work.', departmentId: dev!.id, assigneeAgentId: agentId, executor: true, gates: [] })).task;
+  const taskFor = async (agentId: string, createdByAgentId: string, title = 'Checkout', gates: string[] = []) =>
+    (await createTask(app.ctx, { agentId: createdByAgentId }, { title, brief: '', body: 'Finish the work.', departmentId: dev!.id, assigneeAgentId: agentId, executor: true, gates })).task;
   const realProgram = async (jobId: string, agentId: string) => {
     const [job] = await db.select().from(jobs).where(eq(jobs.id, jobId));
     await db.insert(agentEvents).values({ companyId: job!.companyId, agentId, jobId, kind: 'program', data: { program: { state: 'thinking', since: Date.now() - 60_000, tool: null }, alarm: null } });
@@ -33,7 +34,15 @@ async function company() {
     await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, job!.id));
     await afterJob(app.ctx, job!.id);
   };
-  return { app, db, ctx: app.ctx, ceo, dev: dev!, sub: sub!, head, worker, orchestrator: orchestrator!, taskFor, realProgram, finish };
+  const commentByHead = async (taskId: string, text: string) => {
+    const [answering] = await db.insert(jobs).values({ companyId: dev!.companyId, subscriptionId: sub!.id, agentId: head.id, taskId, kind: 'conversation', prompt: 'Resolve the stuck request.', timeoutMs: 900000, status: 'running', toolTokenHash: hashToken(TOKEN) }).returning();
+    await listen(app);
+    const client = await mcp(app, TOKEN);
+    const result = await client.callTool({ name: 'comment', arguments: { task: taskId, text } });
+    await db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, answering!.id));
+    return { result, answering: answering! };
+  };
+  return { app, db, ctx: app.ctx, ceo, dev: dev!, sub: sub!, head, worker, reviewer, orchestrator: orchestrator!, taskFor, realProgram, finish, commentByHead };
 }
 
 describe('stuck turn eligibility', () => {
@@ -130,5 +139,56 @@ describe('internal stuck routing', () => {
     expect((await c.db.select().from(requestInternal).where(eq(requestInternal.requestId, request!.id)))[0]).toMatchObject({ resolvedByAgentId: c.orchestrator.id, resolvedByJobId: answering!.id, executorInstruction: 'Split the work and continue.' });
     expect((await c.db.select().from(tasks).where(eq(tasks.id, task.id)))[0]).toMatchObject({ status: 'working', silent: 0 });
     expect((await c.app.inject({ url: '/api/requests', ...as(c.ceo) })).json().requests).toEqual([]);
+  });
+
+  it("closes a member request when its head comments and reminds the member after the next quiet turn", async () => {
+    const c = await company();
+    const task = await c.taskFor(c.worker.id, c.head.id);
+    await wakeAll(c.ctx, [{ agentId: c.worker.id, taskId: task.id, why: 'assigned' }]);
+    for (let i = 0; i < SILENT_TURNS; i++) await c.finish(c.worker.id, task.id);
+    const [request] = await c.db.select().from(requests);
+
+    const { result, answering } = await c.commentByHead(task.id, 'Run the focused test, then continue.');
+
+    expect(result.isError).toBeFalsy();
+    expect((await c.db.select().from(requests).where(eq(requests.id, request!.id)))[0]).toMatchObject({ status: 'resolved_internal', answer: 'Run the focused test, then continue.' });
+    expect((await c.db.select().from(requestInternal).where(eq(requestInternal.requestId, request!.id)))[0]).toMatchObject({ resolvedByAgentId: c.head.id, resolvedByJobId: answering.id, executorInstruction: 'Run the focused test, then continue.' });
+    expect((await c.db.select().from(tasks).where(eq(tasks.id, task.id)))[0]).toMatchObject({ status: 'working', silent: 0 });
+
+    await c.finish(c.worker.id, task.id);
+
+    expect((await c.db.select().from(tasks).where(eq(tasks.id, task.id)))[0]).toMatchObject({ status: 'open', silent: 1 });
+    expect(await c.db.select().from(requests)).toHaveLength(1);
+    const reminders = await c.db.select().from(jobs).where(and(eq(jobs.agentId, c.worker.id), eq(jobs.taskId, task.id), eq(jobs.status, 'queued')));
+    expect(reminders).toHaveLength(1);
+    expect(reminders[0]!.prompt).toContain('without moving it');
+  });
+
+  it('does not treat an internal stuck request as a human question that blocks a gate verdict', async () => {
+    const c = await company();
+    const task = await c.taskFor(c.worker.id, c.head.id, 'Checkout', [c.reviewer.id]);
+    await submit(c.ctx, c.worker.id, task.id, { summary: 'Ready.', evidence: 'Focused tests passed.' });
+    await wakeAll(c.ctx, [{ agentId: c.reviewer.id, taskId: task.id, why: 'review' }]);
+    for (let i = 0; i < SILENT_TURNS; i++) await c.finish(c.reviewer.id, task.id);
+    const [request] = await c.db.select().from(requests);
+    expect(request).toMatchObject({ kind: 'stuck', audience: 'internal', triageAgentId: c.head.id, status: 'open' });
+
+    const decided = await verdict(c.ctx, c.reviewer.id, task.id, { pass: true, comment: 'Focused evidence covers the change.' });
+
+    expect(decided.task.status).toBe('done');
+    expect((await c.db.select().from(requests).where(eq(requests.id, request!.id)))[0]!.status).toBe('open');
+  });
+
+  it('assigns an orchestrator stuck on its own task to the live department head', async () => {
+    const c = await company();
+    const { task } = await createTask(c.ctx, { agentId: c.orchestrator.id }, { title: 'Turn plan', brief: '', body: 'Finish the plan.', departmentId: c.dev.id, assigneeAgentId: c.orchestrator.id });
+    await wakeAll(c.ctx, [{ agentId: c.orchestrator.id, taskId: task.id, why: 'assigned' }]);
+    for (let i = 0; i < SILENT_TURNS; i++) await c.finish(c.orchestrator.id, task.id);
+
+    const [request] = await c.db.select().from(requests);
+    expect(request).toMatchObject({ kind: 'stuck', audience: 'internal', triageAgentId: c.head.id, status: 'open' });
+    const addressed = await c.db.select().from(jobs).where(and(eq(jobs.agentId, c.head.id), eq(jobs.taskId, task.id), eq(jobs.status, 'queued')));
+    expect(addressed).toHaveLength(1);
+    expect(addressed[0]!.prompt).toContain(request!.id);
   });
 });

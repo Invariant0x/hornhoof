@@ -202,9 +202,10 @@ describe('decisions waiting for people', () => {
     const [stored] = await c.db.select({ topic: requests.decisionTopic }).from(requests).where(eq(requests.id, approval.request.id));
     expect(stored!.topic).toBe('release');
     const { task } = await createTask(c.ctx, { personId: c.ids.ivan }, { title: 'Launch', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.heads.dev.id });
-    await report(c.ctx, c.heads.dev.id, task.id, { done: false, summary: 'Stuck on the provider.' });
-    const [stuck] = await c.db.select({ topic: requests.decisionTopic, kind: requests.kind }).from(requests).where(eq(requests.taskId, task.id));
-    expect(stuck).toEqual({ topic: 'task', kind: 'stuck' });
+    const reported = await report(c.ctx, c.heads.dev.id, task.id, { done: false, summary: 'Stuck on the provider.' });
+    const [stuck] = await c.db.select({ topic: requests.decisionTopic, kind: requests.kind, audience: requests.audience, triageAgentId: requests.triageAgentId }).from(requests).where(eq(requests.taskId, task.id));
+    expect(stuck).toEqual({ topic: 'task', kind: 'stuck', audience: 'internal', triageAgentId: c.orchestrator.id });
+    expect(reported.wakes).toEqual([{ agentId: c.orchestrator.id, taskId: task.id, why: 'explain', text: stuck && (await c.db.select({ id: requests.id }).from(requests).where(eq(requests.taskId, task.id)))[0]!.id }]);
     const [internal] = await c.db.select().from(requests).where(eq(requests.taskId, task.id));
     expect(ownersOf(await c.view(c.tokens.ceo))[internal!.id]).toBeUndefined();
     expect((await c.app.inject({ method: 'POST', url: `/api/requests/${internal!.id}`, payload: { retry: true }, ...as(c.tokens.ceo) })).statusCode).toBe(409);
