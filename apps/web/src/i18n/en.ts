@@ -1075,6 +1075,7 @@ export const en = {
     givenBy: (name: string) => `Given by ${name}`,
     details: 'Details',
     subtasks: 'Subtasks',
+    independentPart: 'Can start now',
     files: 'Files',
     readFull: 'Read in full',
     showLess: 'Show less',

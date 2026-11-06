@@ -189,6 +189,26 @@ function TaskRelatedSection({ heading, ariaLabel, items, onOpen }: { heading: st
   );
 }
 
+function IndependentPartSection({ part, onOpen }: { part: TaskDetail['independentPart']; onOpen: (id: string) => void }) {
+  const t = useT();
+  if (!part) return null;
+  if ('reason' in part) {
+    return <section aria-label={t.tasks.independentPart}><h4>{t.tasks.independentPart}</h4><p>{part.reason}</p></section>;
+  }
+  return (
+    <section aria-label={t.tasks.independentPart}>
+      <h4>{t.tasks.independentPart}</h4>
+      {part.brief && <p className="muted">{part.brief}</p>}
+      <Markdown text={part.body} />
+      <p className="muted">{part.executor.name}</p>
+      <p>
+        <button className="linkish" type="button" onClick={() => onOpen(part.task.id)}>#{part.task.number} {part.task.title}</button>{' '}
+        <small>{t.tasks.states[part.task.status]}</small>
+      </p>
+    </section>
+  );
+}
+
 function TaskQuestionsSection({ requests }: { requests: TaskDetail['requests'] }) {
   const t = useT();
   if (requests.length === 0) return null;
@@ -251,6 +271,7 @@ function TaskBody({ task, onOpen, onChanged, waiting }: { task: TaskDetail; onOp
       )}
       <TaskGatesSection task={task} />
       <TaskRelatedSection heading={t.tasks.after} ariaLabel={t.tasks.after} items={task.after} onOpen={onOpen} />
+      <IndependentPartSection part={task.independentPart} onOpen={onOpen} />
       {task.brief && <p className="tp-brief">{task.brief}</p>}
       {task.body && (
         <section className="tp-body">

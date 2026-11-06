@@ -267,7 +267,7 @@ describe('lines to an employee whose turn a message started', () => {
   it('stay quiet while its task waits for another one', async () => {
     const { ctx, hana, bruno, felix, top, member, run, org } = await company();
     const schema = await member('Schema', felix.id);
-    await createTask(ctx, { agentId: hana.id }, { title: 'Checkout API', brief: '', body: '', departmentId: top.departmentId, parentId: top.id, assigneeAgentId: bruno.id, executor: true, after: [schema.id] });
+    await createTask(ctx, { agentId: hana.id }, { title: 'Checkout API', brief: '', body: '', departmentId: top.departmentId, parentId: top.id, assigneeAgentId: bruno.id, executor: true, after: [schema.id], independentNone: 'Genuine dependency in the existing behavior test.' });
     await run(bruno.id, null);
     expect(stateOf(await org(), hana, bruno)).toBe('quiet');
   });
@@ -629,7 +629,7 @@ describe('the lines of a company with a long history', () => {
     const { ctx, db, hana, bruno, felix, rita, top, member, run } = c;
     const api = await member('Checkout API', bruno.id);
     const docs = await member('Docs', felix.id);
-    const later = (await createTask(ctx, { agentId: hana.id }, { title: 'Release', brief: '', body: '', departmentId: c.dev.id, parentId: top.id, assigneeAgentId: rita.id, executor: true, after: [api.id] })).task;
+    const later = (await createTask(ctx, { agentId: hana.id }, { title: 'Release', brief: '', body: '', departmentId: c.dev.id, parentId: top.id, assigneeAgentId: rita.id, executor: true, after: [api.id], independentNone: 'Genuine dependency in the existing behavior test.' })).task;
     await run(bruno.id, api.id);
     await run(felix.id, docs.id);
     await db.transaction(tx => returnAlongLine(tx, { agentId: felix.id, sourceKey: 'docs-1', sourceTaskId: docs.id, returnedAt: new Date('2026-11-03T05:00:00Z') }));
