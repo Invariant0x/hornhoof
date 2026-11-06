@@ -6,6 +6,7 @@ import { copyFile, lstat, mkdir, mkdtemp, open, readFile, readdir, readlink, rea
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { EnvironmentDigest, RepositoryPath } from '@hornhoof/protocol';
 import { z } from 'zod';
+import { checkDeadline } from './test-context.js';
 
 const lockDescriptors = new AsyncLocalStorage<number[]>();
 export const cacheLockDescriptors = (): number[] => lockDescriptors.getStore() ?? [];
@@ -13,8 +14,7 @@ export const cacheLockDescriptors = (): number[] => lockDescriptors.getStore() ?
 export type CacheContext = { cacheRoot: string; deadline: number; signal: AbortSignal; log: (line: string) => void };
 
 export function checkCacheContext(context: CacheContext): void {
-  context.signal.throwIfAborted();
-  if (Date.now() >= context.deadline) throw new Error('The preparation deadline expired.');
+  checkDeadline(context, 'The preparation deadline expired.');
 }
 
 export async function privateCacheRoot(path: string): Promise<string> {

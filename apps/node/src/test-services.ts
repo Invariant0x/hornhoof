@@ -4,6 +4,8 @@ import { chmodSync, chownSync, closeSync, cpSync, existsSync, fsyncSync, lstatSy
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { redact } from './redact.js';
 import type { JobUser } from './isolation.js';
+import { checkDeadline } from './test-context.js';
+import { signalProcessGroup } from './process-group.js';
 
 export interface ServiceCommand { program: string; args: string[]; cwd: string }
 interface ServiceBase { id: string; runtime: string; profiles: string[] }
@@ -90,8 +92,7 @@ interface Running { result: Promise<ChildResult>; stop: (signal?: NodeJS.Signals
 interface Active extends OpenedServices { state: string }
 
 function check(context: ServiceContext): void {
-  context.signal.throwIfAborted();
-  if (Date.now() >= context.deadline) throw new Error('Service deadline exceeded');
+  checkDeadline(context, 'Service deadline exceeded');
 }
 function isolated(context: ServiceContext): void {
   check(context);
@@ -121,9 +122,7 @@ function ownTree(path: string, context: ServiceContext): void {
 }
 function kill(pid: number | undefined, signal: NodeJS.Signals): void {
   if (!pid) return;
-  try { process.kill(-pid, signal); } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
-  }
+  signalProcessGroup(pid, signal);
 }
 function pause(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {

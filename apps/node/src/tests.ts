@@ -617,6 +617,11 @@ async function productSuite(execution: TestExecution, operation: Extract<Product
   await productResets(execution, suite.id, state, env);
   await selectedProductCommand(state, invocation.command, { ...env, ...invocation.env });
 }
+function rememberProductFailure(error: unknown, firstFailure: ProductCommandFailure | undefined, state: ProductState): ProductCommandFailure | undefined {
+  if (error instanceof ProductCommandFailure) firstFailure ??= error;
+  state.exitCode = firstFailure?.exitCode ?? null;
+  return firstFailure;
+}
 async function versionedProductSelection(execution: TestExecution, state: ProductState, env: Record<string, string>): Promise<void> {
   const receipt = state.receipt;
   if (receipt.version !== 2) environmentError('environment_invalid', 'Versioned execution requires a complete receipt.');
@@ -629,8 +634,7 @@ async function versionedProductSelection(execution: TestExecution, state: Produc
       receipt.outcomes[index] = { index, status: 'passed', exitCode: 0 };
     } catch (error) {
       receipt.outcomes[index] = { index, status: 'failed', exitCode: error instanceof ProductCommandFailure ? error.exitCode : null };
-      if (error instanceof ProductCommandFailure) firstFailure ??= error;
-      state.exitCode = firstFailure?.exitCode ?? null;
+      firstFailure = rememberProductFailure(error, firstFailure, state);
       if (!(error instanceof ProductCommandFailure) || execution.selection.kind === 'prepare') throw error;
     }
   }
