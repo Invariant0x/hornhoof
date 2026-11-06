@@ -90,10 +90,6 @@ export class ComputerAccess {
     return { available: this.available(), until: this.openUntil(), asked: this.read().asked };
   }
 
-  ask(reason: string): void {
-    this.write({ ...this.read(), asked: { reason, at: new Date().toISOString() } });
-  }
-
   /* Opens access for a day from now. Each open and close moves the revision, so that an operation begun before it cannot undo it. */
   open(now = Date.now()): { until: string; asked: Asked | null } {
     const { asked, controlRevision } = this.read();
@@ -134,14 +130,6 @@ export class ComputerAccess {
   /* A request kept here before requests went inside the company, once it is kept there. */
   clearAsked(): void {
     this.write({ ...this.read(), asked: null });
-  }
-
-  /* Takes the orchestrator's request away; false when there was none. */
-  decline(): boolean {
-    const s = this.read();
-    if (!s.asked) return false;
-    this.write({ ...s, asked: null });
-    return true;
   }
 
   /* Hands a command to the updater; its id fetches the answer. */

@@ -256,7 +256,7 @@ export function registerTaskTools(server: McpServer, ctx: Ctx, job: ToolJob): vo
     'ask_person',
     {
       description:
-        'Asks the people responsible for the task a question, (with commit) for approval of that exact commit before a release, or (with options) to pick one of 2 to 4 ways. The task waits; you are woken with the answer. ' +
+        'Asks a question on the task, (with commit) for approval of that exact commit before a release, or (with options) to pick one of 2 to 4 ways. It goes first to your head, or a head\'s to the orchestrator: they settle it, and a person sees it only if they say it is a ready result or what only a person can do. The task waits; you are woken with the answer. ' +
         'Show what people judge instead of describing it: take screenshots, send each with the shell command `hh-attach FILE` and pass the ids it prints as images, or as an option\'s image. ' +
         'link: an https page where the work can be seen, like a branch comparison; an approval links its commit by itself. ' +
         'An approval tells you and the person which passed test run checked that very commit, or that none did. ' +

@@ -163,7 +163,7 @@ export function registerApprovalTools(server: McpServer, ctx: Ctx, job: ToolJob)
     {
       description:
         'Before work that may need a person\'s approval (a message out, a price, a publication, a spend and so on), ask here. It follows the policy of the task\'s department. ' +
-        'When the policy lets the work go, no person is asked: the answer says so and a line goes in the task\'s log, so go on with the work. Otherwise the task waits, the department\'s owner (with none, the CEO) is asked, and you are woken with the answer. ' +
+        'When the policy lets the work go, no person is asked: the answer says so and a line goes in the task\'s log, so go on with the work. Otherwise the task waits: your head or the orchestrator looks at it first, and puts it before the department\'s owner (with none, the CEO); you are woken with the answer. ' +
         'channel: message, price, publication, commit, spend, or other for anything else. kind: a short name of this kind of work, the same each time, like "welcome email". ' +
         'amount: how much this one is, in what the channel\'s limit counts. Without it, a limit never lets the work go. text: what you want to do, in plain words. link: an https page where it can be seen.' +
         ` Counts among the ${TURN_QUESTIONS} questions a turn may ask. To approve an exact commit for a release, use ask_person with commit, which always asks.`,

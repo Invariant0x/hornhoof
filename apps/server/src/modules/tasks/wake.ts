@@ -24,7 +24,7 @@ type Agent = typeof agents.$inferSelect;
 
 /* What finishes the task for whoever holds it, and what to do when that cannot happen. */
 function nextStep(task: Task, agentId: string): { finish: string; stuck: string } {
-  if (task.stage > 0 && task.panel.includes(agentId)) return { finish: 'give your verdict with your reasons', stuck: 'ask a person with ask_person' };
+  if (task.stage > 0 && task.panel.includes(agentId)) return { finish: 'give your verdict with your reasons', stuck: 'ask with ask_person' };
   if (task.merging && task.executorAgentId === agentId) return { finish: "merge your branch into the turn's branch and report it with submit", stuck: 'report what blocks the merge with blocked' };
   if (task.executorAgentId === agentId) return { finish: 'submit it with what you did and the evidence (the commands you ran and what they showed)', stuck: 'say so with blocked' };
   /* Member work that waits with whoever gave it out, while nobody who does or checks it is on. */
@@ -49,7 +49,7 @@ const READ_PROOF = 'For a pinned review, use review.commit and review.runs: veri
 function assignedPrompt(agent: Pick<Agent, 'kind'>, task: Task, w: Wake): string {
   const ref = `#${task.number} "${task.title}"`;
   const { finish, stuck } = nextStep(task, w.agentId);
-  if (task.executorAgentId) return `${ref} is yours to do. ${READ_TASK} Do the work, then ${finish}. If you cannot go on, ${stuck}; if only a person can answer, use ask_person.`;
+  if (task.executorAgentId) return `${ref} is yours to do. ${READ_TASK} Do the work, then ${finish}. If you cannot go on, ${stuck}; if you need an answer you cannot find yourself, use ask_person.`;
   if (agent.kind === 'orchestrator') return `${ref} is yours. ${READ_TASK} Lay the work out as tasks for the departments with add_tasks or plan_turn, and report it when every part is done.`;
   return `${ref} is your department's. ${READ_TASK} Give it out in 2-4 large self-contained pieces to different members at once with create_task, each under it (parent ${task.number}) with its executor and no gates for code: the review of the turn checks all of it once the last piece is in. Report it when they are done.`;
 }
