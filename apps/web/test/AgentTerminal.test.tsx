@@ -35,6 +35,7 @@ type FakeTerminal = {
     coreMouseService: { _protocols: Record<string, { events: number }>; fireProtocol(events: number): void };
   };
   type(data: string): void;
+  write(data: string): void;
   wheel(deltaY: number): boolean;
   pressKey(init: KeyboardEventInit): KeyboardEvent;
   selectText(text: string): void;
