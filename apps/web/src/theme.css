@@ -462,7 +462,7 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 /* The deputy CEO's mark by the name: a hat before a short word, which as one flex line never wraps. */
 .badge.deputy { flex: none; display: inline-flex; align-items: center; gap: 3px; }
 .badge.deputy .ic { width: 11px; height: 11px; }
-.status { font-size: 12px; font-weight: 600; padding: 2px 8px; border: 1px solid var(--line2); }
+.status { display: inline-block; max-inline-size: 100%; font-size: 12px; font-weight: 600; padding: 2px 8px; border: 1px solid var(--line2); }
 .status.active { color: var(--ok); border-color: currentColor; }
 .status.invited { color: var(--amber-ink); border-color: currentColor; }
 .fit { container: fit / inline-size; min-width: 0; }
@@ -486,8 +486,8 @@ button.hub:hover .hub-in, .hub.on .hub-in { stroke: var(--cyan); }
 .fit > :is(.ptable, .dt)[data-fit="entries"] tr:last-child { padding-block-end: 0; border-block-end: 0; }
 .fit > :is(.ptable, .dt)[data-fit="entries"] td, .fit > :is(.ptable, .dt)[data-fit="entries"] tr:last-child td { grid-column: 1 / -1; padding: 0; border: 0; min-width: 0; }
 .fit > :is(.ptable, .dt)[data-fit="entries"] td[data-label] { display: grid; grid-template-columns: subgrid; column-gap: 12px; align-items: baseline; }
-.fit > :is(.ptable, .dt)[data-fit="entries"] td[data-label]::before { content: attr(data-label); font-size: 12px; color: var(--muted); overflow-wrap: break-word; }
-.fit > :is(.ptable, .dt)[data-fit="entries"] td.row-actions { padding-block-start: 4px; white-space: normal; }
+.fit > :is(.ptable, .dt)[data-fit="entries"] td[data-label]::before { content: attr(data-label); font-size: 12px; font-weight: 400; color: var(--muted); overflow-wrap: break-word; }
+.fit > :is(.ptable, .dt)[data-fit="entries"] td.row-actions { padding-block-start: 8px; white-space: normal; }
 .row-actions { text-align: right; white-space: nowrap; }
 .row-actions .act + .act { margin: 0; }
 .people-foot { display: flex; align-items: center; gap: 8px; font-size: 13px; }

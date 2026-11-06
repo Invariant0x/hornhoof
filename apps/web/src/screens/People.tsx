@@ -248,13 +248,13 @@ function PersonRow({ p, me, org, routed, openPerson, newLink, setStatus }: { p: 
   const { manageable, titleOnly } = rightsOn(me, p);
   return (
     <tr className={p.status}>
-      <td data-label={t.people.columns.name}>
+      <td className="pname-cell">
         {routed ? <button className="linkish pname" type="button" onClick={() => openPerson(p)}><PersonIcon />{p.name}{p.isCeoDelegate && <DeputyMark />}</button> : <span className="pname"><PersonIcon />{p.name}{p.isCeoDelegate && <DeputyMark />}</span>}
       </td>
       <td data-label={t.people.columns.title}>{p.title}</td>
       <td data-label={t.people.columns.access}>{accessText(t, p.access, org)}</td>
       <td data-label={t.people.columns.status}><span className={`status ${p.status}`}>{t.people.status[p.status]}</span></td>
-      <td className="row-actions" data-label={t.people.columns.actions}>
+      <td className="row-actions">
         <div className="entry-actions" role="group" aria-label={`${t.people.columns.actions}: ${p.name}`}>
           {(manageable || titleOnly) && (
             <button className="act" type="button" aria-label={t.people.editLabel(p.name)} onClick={() => openPerson(p)}>{t.people.edit}</button>
