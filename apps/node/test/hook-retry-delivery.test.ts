@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Bridge } from '../src/terminal/bridge.js';
 import { fromAgent } from '../src/terminal/peer.js';
+import { hookClock } from './hook-test-clock.js';
 import { procFixture } from './terminal-proc-fixture.js';
 const HOOK = fileURLToPath(new URL('../hh-hook.cjs', import.meta.url));
 const CLOCK = fileURLToPath(new URL('./fakes/hook-clock.cjs', import.meta.url));
@@ -15,9 +16,14 @@ afterEach(() => close.splice(0).forEach(fn => fn()));
 describe('owner check outlasting the hook client deadline', () => {
   it('finishes hh-hook stop once after timeouts and client exit', async () => {
     let checks = 0;let turn = 'first';const ended: string[] = [];
+    let release!: () => void;
+    const busy = new Promise<void>(resolve => release = resolve);
+    let checking = 0;
     const fixture = procFixture('agent-1');
     const owns = fromAgent(async () => {
-      await new Promise(resolve => setTimeout(resolve, 350));checks++;
+      checking++;
+      await busy;
+      checks++;
       return [process.pid];
     }, fixture.proc);
     const bridge = new Bridge('http://127.0.0.1:9', (_key, event) => {
@@ -28,11 +34,23 @@ describe('owner check outlasting the hook client deadline', () => {
     fixture.listen(bridge, () => process.pid, () => caller);
     const dir = mkdtempSync(join(tmpdir(), 'hh-retry-'));
     const args = [HOOK, 'stop', '{}'];
-    const child = spawn('node', ['-r', CLOCK, ...args], { cwd: dir, env: { PATH: process.env.PATH, HOME: dir, HH_BRIDGE: bridge.agent('agent-1').hookUrl } });
+    const child = spawn('node', ['-r', CLOCK, ...args], { stdio: ['pipe', 'pipe', 'pipe', 'ipc'], cwd: dir, env: { PATH: process.env.PATH, HOME: dir, HH_BRIDGE: bridge.agent('agent-1').hookUrl } });
+    if (!child.stdin || !child.stdout || !child.stderr) throw new Error('Hook pipe streams unavailable');
     caller = child.pid!;
     close.push(() => void child.kill('SIGKILL'));child.stdout.resume();child.stderr.resume();
     child.stdin.end();
-    /* Each attempt gets 150 ms; ownership takes 350 ms. */
+    const clock = hookClock(child);
+    const exited = new Promise<void>(resolve => child.once('exit', () => resolve()));
+    close.push(release);
+    /* All three clients time out and exit before the ownership lookups finish. */
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      await vi.waitFor(() => expect(checking).toBe(attempt));
+      await clock.advance(15_000);
+    }
+    await exited;
+    expect(child.exitCode).toBe(0);
+    expect(ended).toEqual([]);
+    release();
     await vi.waitFor(() => expect(checks).toBe(3), { timeout: 4000 });
     expect(ended).toEqual(['first']);
     expect(turn).toBe('next');

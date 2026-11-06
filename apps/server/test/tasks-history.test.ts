@@ -3,8 +3,11 @@ import { and, eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { agents, companies, departments, people, subscriptions, taskEvents, tasks, turns } from '../src/db/schema.js';
 import { cancel, createTask, submit, verdict } from '../src/modules/tasks/engine.js';
-import { setUpCompany, statements, testApp } from './helpers.js';
+import { setUpCompany, statements, testApp, ownDatabases } from './helpers.js';
 import { readIn, type PlanNode } from './rows-read.js';
+
+/* A test here plans its reads by statistics it makes. */
+ownDatabases();
 
 const TURNS = 50;
 const PER_TURN = 40;

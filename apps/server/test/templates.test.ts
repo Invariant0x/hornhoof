@@ -614,7 +614,8 @@ describe('templates', () => {
     expect(all).not.toMatch(/Run the whole suite through run_tests/);
     expect(all).not.toMatch(/changed function at CRAP 10/);
     for (const id of ['DEV-ENG', 'DEV-REV']) expect(templates.roles.get(id)!.body, id).toMatch(/never run the project's whole test suite/);
-    expect(body('hh-task-flow')).not.toMatch(/run_tests/);
+    expect(body('hh-task-flow')).toMatch(/Completion of "run_tests" or "run_work"[\s\S]*ends that wait/);
+    expect(body('hh-task-flow')).not.toMatch(/npm test|whole test suite/);
     const test = templates.roles.get('DEV-TEST')!;
     expect(test.gate).toBeNull();
     expect(test.body).toMatch(/never a gate on a task/);

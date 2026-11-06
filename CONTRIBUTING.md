@@ -73,6 +73,10 @@ npm run test:browser -w apps/web
 
 The first line downloads the browser once on your own machine. A Hornhoof worker node prepares the lockfile's Chromium in `/data/browsers` automatically before handing out tasks.
 
+The server tests of one file share one database, emptied before each test, because opening a copy costs far more. A test that opens a second one gets a separate database. A file whose tests change more than rows, such as a trigger, a function, a table, a role or a grant, calls `ownDatabases()` at its top and gets a new database for each test; lint asks for that where it sees such a statement. A change lint cannot see is found after the test, and costs the next test a new copy.
+
+A timeout given at the root reaches every package: `npm test -- --testTimeout=60000`.
+
 A change to the database schema gets a new migration from `npx drizzle-kit generate` in `apps/server`. Never edit a migration that is already on `main`.
 
 ## Rules for the code and the words

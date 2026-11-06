@@ -34,6 +34,27 @@ test('ESLint rejects an unused variable in a server test instead of ignoring the
   assert.deepEqual(report.messages.map(message => message.ruleId), ['@typescript-eslint/no-unused-vars']);
 });
 
+const DDL_RULE = 'hornhoof/no-ddl-on-shared-database';
+function ddlFindings(t, folder, source) {
+  const dir = mkdtempSync(join(root, folder, 'eslint-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const file = join(dir, 'ddl.test.ts');
+  writeFileSync(file, source);
+  const result = spawnSync(process.execPath, [eslint, file, ...withoutPrograms], { cwd: root, encoding: 'utf8' });
+  return JSON.parse(result.stdout)[0].messages.filter(message => message.ruleId === DDL_RULE).map(message => message.line);
+}
+const ddlCall = "import { run } from './run.js';\nawait run('create table notes (id int)');\n";
+
+test('DDL in a server test on the shared database is an error, and passes in a file that asks for databases of its own', t => {
+  assert.deepEqual(ddlFindings(t, 'apps/server/test', ddlCall), [2]);
+  assert.deepEqual(ddlFindings(t, 'apps/server/test', `import { ownDatabases } from './helpers-db.js';\nownDatabases();\n${ddlCall}`), []);
+});
+
+test('real Postgres specs and other workspaces are outside the rule', t => {
+  assert.deepEqual(ddlFindings(t, 'apps/server/test/postgres', ddlCall), []);
+  assert.deepEqual(ddlFindings(t, 'apps/node/test', ddlCall), []);
+});
+
 test('tests and TypeScript configs keep every rule in server, node and protocol', t => {
   const files = [];
   for (const workspace of ['apps/server', 'apps/node', 'packages/protocol']) {

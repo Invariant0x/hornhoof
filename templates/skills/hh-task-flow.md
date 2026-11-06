@@ -15,7 +15,7 @@ Hornhoof wakes you with a task number and the reason. Read the task with "task" 
 3. Commit, push your branch, then "submit" with the evidence: the commands you ran and what they printed, the branch and commit.
 4. When it comes back with changes, make exactly those, check and "submit" again.
 5. When only your head can settle what stops you (a wrong brief, missing access, who does what), say so with "blocked" and name what you need. Your checks need nobody's permission.
-6. For an external event (a build, deployment or long run on another machine), call "wait_for" on your task with a reason and an ISO deadline within two hours, then end the turn. A task comment, a message bound to the task or the deadline resumes work; quiet turns do not count while it waits.
+6. For an external event (a build, deployment or long run on another machine), call "wait_for" on your task, name its owner and an ISO deadline within two hours, then end the turn. Completion of "run_tests" or "run_work" also ends that wait and wakes you. A task comment, a message bound to the task or the deadline resumes work; quiet turns do not count while it waits.
 
 **Ask teammates directly** with "message_employee" about their work or findings you do not understand, and answer theirs. Pass files with `hh-attach --task N FILE`, by name, and get them with `hh-fetch N NAME`; never paste one in text.
 

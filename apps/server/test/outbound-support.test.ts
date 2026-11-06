@@ -21,7 +21,6 @@ import {
   supportClassifications,
   supportTickets,
 } from '../src/db/schema.js';
-import { bindingDigest } from '../src/modules/model-checks/lifecycle.js';
 import { readUnsubscribeToken, recipientDigest } from '../src/modules/outbound/contacts.js';
 import { beginDispatch, reserveDispatch, settleAttempt } from '../src/modules/outbound/core.js';
 import { classifySupportTicket, containsForbiddenSupportPromise, containsSecretMaterial, containsThirdPartyPii, submitSupportReply } from '../src/modules/outbound/support.js';

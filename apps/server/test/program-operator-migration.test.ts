@@ -6,6 +6,7 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { expect, it, onTestFinished } from 'vitest';
 import { MIGRATIONS } from '../src/db/client.js';
+import { migrationsThrough } from './migrations-before.js';
 
 it('preserves existing company, job, event and attachment data when adding empty operator structures', async () => {
   const previous = await mkdtemp(join(tmpdir(), 'hh-operator-migration-'));
@@ -40,12 +41,15 @@ it('preserves existing company, job, event and attachment data when adding empty
   `);
   const tables = ['companies', 'people', 'subscriptions', 'agents', 'jobs', 'agent_events', 'attachments'];
   const before = await Promise.all(tables.map(table => client.query(`select to_jsonb(t) as row from ${table} t`)));
-  await migrate(db, { migrationsFolder: MIGRATIONS });
-  await migrate(db, { migrationsFolder: MIGRATIONS });
+  /* Twice through this migration alone: a column a later one adds is no part of what it keeps. */
+  const through = await migrationsThrough('program_operator');
+  await migrate(db, { migrationsFolder: through });
+  await migrate(db, { migrationsFolder: through });
   for (const [index, table] of tables.entries()) {
-    const excluded = table === 'attachments' ? " - 'operator_case_id'" : table === 'subscriptions' ? " - 'limits_updated_at'" : '';
+    const excluded = table === 'attachments' ? " - 'operator_case_id'" : '';
     expect((await client.query(`select to_jsonb(t)${excluded} as row from ${table} t`)).rows, table).toEqual(before[index]!.rows);
   }
+  await migrate(db, { migrationsFolder: MIGRATIONS });
   expect((await client.query('select operator_case_id from attachments')).rows).toEqual([{ operator_case_id: null }, { operator_case_id: null }]);
   expect((await client.query('select limits_updated_at from subscriptions')).rows).toEqual([{ limits_updated_at: null }]);
   expect((await client.query("select person_id, job_id, size, encode(bytes, 'hex') as payload from attachments where job_id is null")).rows).toEqual([{ person_id: '00000000-0000-4000-8000-000000000005', job_id: null, size: 3, payload: '040506' }]);
