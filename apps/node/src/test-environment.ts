@@ -96,7 +96,7 @@ export async function trustedTestRuntimes(context: CacheContext): Promise<Runtim
   const node = capability('node', process.versions.node, { abi: process.versions, npm });
   const [python, postgres] = await Promise.all([pythonRuntime(context), postgresRuntime(context)]);
   checkCacheContext(context);
-  return [node, ...python, ...postgres];
+  return [node, ...python, ...postgres, capability('hornhoof-test-execution', '2.0.0', { batch: 2, oncePreparation: 2 })];
 }
 
 
