@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import { taskEvents, testRuns } from '../src/db/schema.js';
@@ -26,10 +26,30 @@ describe('author check on submit', () => {
     await submitWithAuthorCheck(f.app.ctx, jobOf(f), f.task.id, { summary: 'Done', evidence: 'No adapter', review: { baseCommit: SHA } });
     await expectOldSubmission(f);
   });
+
+  it('pins one remote check on the submission SHA and reuses it for repeats and races', async () => {
+    const f = await qualityFixture();
+    f.app.ctx.config.authorCheck = true;
+    const input = { summary: 'Done', evidence: 'Remote check', review: { baseCommit: SHA, authorCheckPlan: 'plan-text' } };
+    const first = await submitWithAuthorCheck(f.app.ctx, jobOf(f), f.task.id, input);
+    const [run] = await authorRuns(f);
+    expect(run).toMatchObject({ commitSha: SHA, parts: 1 });
+    expect(run!.command).toContain(`--sha ${SHA} --base ${SHA} --plan 'plan-text'`);
+    expect(first.task.externalWait).toMatchObject({ run: run!.id });
+    const again = await submitWithAuthorCheck(f.app.ctx, jobOf(f), f.task.id, input);
+    expect(again.task.externalWait).toMatchObject({ run: run!.id });
+    await Promise.allSettled([submitWithAuthorCheck(f.app.ctx, jobOf(f), f.task.id, input), submitWithAuthorCheck(f.app.ctx, jobOf(f), f.task.id, input)]);
+    expect(await authorRuns(f)).toHaveLength(1);
+  });
 });
 
 function jobOf(f: Awaited<ReturnType<typeof qualityFixture>>) {
   return { id: f.job.id, companyId: f.author.companyId, agentId: f.author.id, agentKind: f.author.kind, roleKey: f.author.roleKey, departmentId: f.author.departmentId, skills: f.author.skills };
+}
+
+async function authorRuns(f: Awaited<ReturnType<typeof qualityFixture>>) {
+  const runs = await f.db.select().from(testRuns).where(eq(testRuns.taskId, f.task.id)).orderBy(desc(testRuns.number));
+  return runs.filter(run => run.command.includes('check:author'));
 }
 
 async function expectOldSubmission(f: Awaited<ReturnType<typeof qualityFixture>>) {
