@@ -63,7 +63,7 @@ describe('a task file', () => {
       expect(Buffer.compare(got.rawPayload, bytes)).toBe(0);
     }
     const detail = await taskDetail(app.ctx, (await app.ctx.db.select().from(tasks).where(eq(tasks.id, task.id)))[0]!, () => true);
-    expect(detail.files).toEqual([{ id, name: 'build.tar.gz', size: 200_000, by: { id: bruno.id, name: 'Bruno' }, at: expect.any(String) }]);
+    expect(detail.files).toEqual([{ id, name: 'build.tar.gz', size: 200_000, by: { id: bruno.id, name: 'Bruno' }, fromPerson: false, at: expect.any(String) }]);
   });
 
   it('keeps the newest of two files with one name, and only the name, never a folder', async () => {

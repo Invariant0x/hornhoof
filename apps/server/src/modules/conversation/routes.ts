@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { Text } from '../tasks/long-text.js';
 import type { Ctx } from '../../app.js';
+import { maskEvent, viewerOf } from '../../auth/agent-view.js';
 import { companies, departments, jobs } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
 import { agentFor } from '../agents/find.js';
@@ -12,7 +13,8 @@ import { listEvents } from '../events/store.js';
 import { isOperations } from '../operations/required.js';
 import { ownPictures, pictureRoutes, PICTURES_PER_MESSAGE, withPictures, type MessagePicture } from './pictures.js';
 import { FIRST_TURN, FIRST_TURN_TEMPLATE, turnPrompt } from './prompt.js';
-import { agentState, insertTurn, onAgent, pump, typesInTerminal } from './queue.js';
+import { terminalRights } from '../terminals/access.js';
+import { agentState, insertTurn, onAgent, pump } from './queue.js';
 import { cancelJob } from '../tasks/wake.js';
 import { queueTaskMessage, TaskReference } from '../tasks/external-wait.js';
 
@@ -39,7 +41,9 @@ export function conversationRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.get('/api/agents/:id/events', async req => {
     const { me, agent } = await agentFor(ctx, req);
     const { after } = EventsQuery.parse(req.query);
-    return { events: await listEvents(db, agent.id, after), state: { ...(await agentState(ctx, agent.id)), canType: await typesInTerminal(ctx, agent.id, me.id) } };
+    const viewer = await viewerOf(db, me);
+    const state = await agentState(ctx, agent.id);
+    return { events: (await listEvents(db, agent.id, after)).map(e => maskEvent(viewer, e)), state: { ...state, ...(await terminalRights(ctx, me, agent, state.terminal)) } };
   });
 
   app.post('/api/agents/:id/messages', async (req, reply) => {

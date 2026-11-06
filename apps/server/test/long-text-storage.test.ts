@@ -116,7 +116,7 @@ it('keeps full files scoped to their company and named task on both download pat
   const [viewer] = await c.db.insert(people).values({ companyId: c.company.id, name: 'No access', email: 'viewer@long-text.invalid', status: 'active', scopeKind: 'listed' }).returning();
   const viewerToken = 'viewer-long-text-session';
   await c.db.insert(sessions).values({ personId: viewer!.id, tokenHash: hashToken(viewerToken), expiresAt: new Date(Date.now() + 60_000) });
-  expect((await c.app.inject({ url, ...as(viewerToken) })).statusCode).toBe(404);
+  expect((await c.app.inject({ url, ...as(viewerToken) })).statusCode).toBe(403);
   const named = `/api/attachments/file?task=${c.task.number}&file=${file!.id}`;
   const fetched = await c.app.inject({ url: named, headers: { authorization: `Bearer ${c.token}` } });
   expect(fetched.statusCode, fetched.body).toBe(200);
@@ -131,7 +131,7 @@ it('leaves no full text file when a long unauthorized HTTP comment is rejected',
   const token = 'no-access-long-text-session';
   await c.db.insert(sessions).values({ personId: viewer!.id, tokenHash: hashToken(token), expiresAt: new Date(Date.now() + 60_000) });
   const result = await c.app.inject({ method: 'POST', url: `/api/tasks/${c.task.id}/comments`, payload: { text: WORDS }, ...as(token) });
-  expect(result.statusCode).toBe(404);
+  expect(result.statusCode).toBe(403);
   expect(await c.files()).toEqual([]);
   expect(await c.events('comment')).toEqual([]);
 });

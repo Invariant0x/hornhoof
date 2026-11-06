@@ -16,6 +16,14 @@ These rules are for anyone who changes this repository, people and agents alike.
 * Run the tests of what you changed before you push your branch. The whole suite, `npm test` from the repository root (including `npm run typecheck:tests` for server, node and protocol tests) and `npx tsc -p <app>/tsconfig.json --noEmit` for each app the turn touched, runs once per turn, on the merged turn branch, before it goes into main.
 * Do not reformat files you did not change, and do not run a formatter over the whole repository.
 
+## Interface and languages
+
+* Follow [`dev-frontend-ui`](templates/skills/dev-frontend-ui.md), [`docs/style-book.md`](docs/style-book.md) and [`CONTRIBUTING.md`](CONTRIBUTING.md#interface-panels-and-language-checks) on every `apps/web` change (do not invent unapproved tokens, colours or per-row spacing).
+* Non-visual work (server, data, API, logic, states, live data, behaviour tests and a simple temporary skeleton) runs in parallel without waiting on a mockup; only final visual styling waits for the approved Design reference and visual check.
+* Every panel, card, list item, settings row and table fits its container width with no sideways scroll: long words, identifiers, paths and URLs wrap, and when width is tight, an entry's action buttons wrap below the text as a whole group on one even row with shared edge and spacing across entries. Never hide, drop, clip or truncate text or buttons (`text-overflow: ellipsis` or clipped overflow) to disguise overflow.
+* Reset browser default margins, paddings, borders and backgrounds on interactive controls, and give each component explicit sizing, padding, border, background, font inheritance, centred icons and interactive states instead of relying on browser default geometry. Reserve scrollbar space in scrollable panels without assuming overlay scrollbars, and verify web layout and geometry across Chromium, Firefox and WebKit instead of a single browser engine.
+* Build layouts for 20 to 30 languages (`1.5x` to `2x` text expansion, taller line-heights for CJK and Devanagari, and mirrored RTL layout via logical CSS properties). Verify narrow/phone and desktop widths in light and dark themes on the dynamically longest and shortest actually shipped locales registered in `LANGUAGES` in [`apps/web/src/i18n/index.tsx`](apps/web/src/i18n/index.tsx) (summing the character lengths of the real strings rendered on the touched view across `apps/web/src/i18n/*.ts`), plus one shipped RTL locale once `LANGUAGES` includes one. Never hardcode two locale IDs forever, and never count a pseudo-locale or demo string as a shipped language.
+
 ## Templates
 
 Department, role and skill templates in `templates/` are the same for every company. Keep them general: no company, product, industry or programming language of one particular user in them. `templates/SOURCES.md` lists where each text comes from and under which license.

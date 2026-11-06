@@ -240,6 +240,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
     const before = await orchestratorOf(ctx, me.companyId);
     await db.update(agents).set(orchestratorOn(sub)).where(eq(agents.kind, 'orchestrator'));
     await orchestratorBack(before);
+    ctx.bus.accessChanged(me.companyId);
     return { subscription: await subView(db, online, sub.id, me) };
   });
 
@@ -301,6 +302,8 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (sub.kind === 'personal') for (const id of gone) hub.send(nodeIdentity(id), { type: 'remove' });
     else for (const jobId of ended) hub.send(BUILTIN, { type: 'job.cancel', jobId });
     await tryPlaceOperator(ctx, sub.companyId);
+    /* Who sees the agents that ran on it changed with it. */
+    ctx.bus.accessChanged(sub.companyId);
     return reply.code(204).send();
   });
 }

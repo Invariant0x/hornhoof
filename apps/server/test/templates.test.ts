@@ -1,4 +1,4 @@
-import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -326,6 +326,8 @@ describe('templates', () => {
     const ids = dev.filter(r => r.inDefault).map(r => r.id);
     expect(ids).toEqual(['DEV-HEAD', 'DEV-ENG', 'DEV-REV', 'DEV-SEC']);
     expect(dev.filter(r => !r.inDefault).map(r => r.id)).toEqual(['DEV-ARCH', 'DEV-BE', 'DEV-FE', 'DEV-TEST', 'DEV-OPS', 'DEV-RED', 'DEV-QA', 'DEV-DOCS', 'DEV-PERF']);
+    expect(templates.roles.get('DEV-FE')!.title).toEqual({ en: 'Frontend', ru: 'Фронтенд' });
+    expect(templates.roles.get('DEV-BE')!.title).toEqual({ en: 'Backend engineer', ru: 'Бэкенд-разработчик' });
     expect(templates.roles.get('DSN-UI')!.perProduct).toBe(true);
     for (const id of ['DEV-ENG', 'DEV-BE', 'DEV-FE', 'DEV-ARCH', 'DEV-REV']) expect(templates.roles.get(id)!.skills.find(s => s.id === 'dev-engineering-rules')?.on, id).toBe(true);
     for (const id of ['DEV-HEAD', 'DEV-ARCH', 'DEV-SEC']) expect(templates.roles.get(id)!.tier, id).toBe('deep');
@@ -417,10 +419,11 @@ describe('templates', () => {
     expect(sources).toContain('four task kinds');
   });
 
-  it("runs the reviewer's program's own review on what the branch changed, besides the tools and the checklists", () => {
+  it("runs the reviewer's program's own review on a first look only, without forcing high effort on repeats", () => {
     const body = (id: string) => templates.skills.get(id)!.body;
-    for (const words of ['code-review skill at high effort', 'codex review --base <main line>', 'review-agent', 'Kimi Code has none']) expect(body('dev-review-diff'), words).toContain(words);
-    for (const words of ['security-review skill', 'codex review --base <main line>', 'review-agent']) expect(body('dev-security-review'), words).toContain(words);
+    for (const words of ['first look', 'code-review skill', 'codex review --base <main line>', 'review-agent', 'Kimi Code has none']) expect(body('dev-review-diff'), words).toContain(words);
+    expect(body('dev-review-diff')).not.toContain('code-review skill at high effort');
+    for (const words of ['first look', 'security-review skill', 'codex review --base <main line>', 'review-agent']) expect(body('dev-security-review'), words).toContain(words);
     expect(body('dev-gates')).toMatch(/program's own review/);
     expect(body('dev-review-verdict')).toMatch(/program's own review[\s\S]*against the code/);
   });
@@ -661,4 +664,347 @@ describe('templates', () => {
     expect(check).not.toMatch(/hornhoof/i);
     for (const item of [...roles, ...skills]) expect(item.body, item.id).not.toMatch(/npx playwright install/);
   });
+
+  describe('differential second looks, vertical slices, author evidence and verified finding provenance', () => {
+    const current = (): ReviewSkills => ({
+      diff: templates.skills.get('dev-review-diff')!.body,
+      verdict: templates.skills.get('dev-review-verdict')!.body,
+      security: templates.skills.get('dev-security-review')!.body,
+    });
+
+    it('satisfies every differential review, T6/T10 evidence, slice and provenance rule in the shipped skills', () => {
+      expect(failedRuleIds(REVIEW_CONTRACT_RULES, current())).toEqual([]);
+      for (const id of ['dev-review-diff', 'dev-review-verdict']) expect(templates.skills.get(id)!.body, id).not.toMatch(/hornhoof/i);
+    });
+
+    it('rejects broken-meaning skills even when required substrings remain present', () => {
+      const base = current();
+      expect(failedRuleIds(REVIEW_CONTRACT_RULES, base)).toEqual([]);
+      expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, diff: `${base.diff}\nOn a second look, read the whole patch again alongside reviewedCommit..fixCommit.` })).toContain('no-repeat-full-read-or-high');
+      expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, diff: `${base.diff}\nOn a second look, rerun your program's own review after reading reviewedCommit..fixCommit.` })).toContain('no-repeat-full-read-or-high');
+      expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, diff: `${base.diff}\nIn Claude Code run its code-review skill at high effort on every round.` })).toEqual(
+        expect.arrayContaining(['native-review-first-look-only', 'no-repeat-full-read-or-high']),
+      );
+      expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, security: `${base.security}\nOn a second round, run codex review --base <main line> again.` })).toEqual(
+        expect.arrayContaining(['native-review-first-look-only', 'no-repeat-full-read-or-high']),
+      );
+      expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, diff: `${base.diff}\nThe general review of a turn has two rounds when fixes touch routes.` })).toContain('turn-review-one-round');
+      expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, verdict: `${base.verdict}\nVerify testEvidence run and commitSha, then rerun the author's test runs to confirm.` })).toContain('t10-verify-evidence-no-rerun');
+      expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, verdict: `${base.verdict}\nEven with harm to a person rules, low coverage alone is a blocking finding.` })).toContain('t6-named-harm-no-coverage-chasing');
+      expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, diff: `${base.diff}\nAbove 800 lines, split across two reviewers by folders after task.reviewPlan.` })).toContain('vertical-slices-above-800');
+      expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, verdict: `${base.verdict}\nA reviewer's own verdict marks its findingId confirmed for provider counts.` })).toContain('structured-findings-and-provenance');
+      expect(failedRuleIds(REVIEW_CONTRACT_RULES, { ...base, verdict: `${base.verdict}\nAuthors of internal role or skill rules may take release approval on main when docs have no gates.` })).toContain(
+        'no-self-or-role-rule-main-release-approval',
+      );
+    });
+  });
+
+  describe('mandatory UI panel wrapping, parallel non-visual work and dynamic language checks', () => {
+    const uiBody = () => templates.skills.get('dev-frontend-ui')!.body;
+
+    it('enables dev-frontend-ui by default on DEV-ENG and DEV-FE and satisfies every generic UI wrapping and language rule', () => {
+      for (const roleId of ['DEV-ENG', 'DEV-FE'] as const) {
+        expect(templates.roles.get(roleId)!.skills.find(s => s.id === 'dev-frontend-ui')?.on, roleId).toBe(true);
+      }
+      expect(failedRuleIds(FRONTEND_UI_RULES, uiBody())).toEqual([]);
+      const browserCheck = templates.skills.get('dev-browser-check')!.body;
+      expect(browserCheck).toMatch(/longest[\s\S]*shortest[\s\S]*shipped/i);
+      expect(browserCheck).toMatch(/Chromium[\s\S]*Firefox[\s\S]*WebKit/);
+      const agentsDoc = readFileSync(join(DIR, '../AGENTS.md'), 'utf8');
+      const contributingDoc = readFileSync(join(DIR, '../CONTRIBUTING.md'), 'utf8');
+      for (const doc of [agentsDoc, contributingDoc]) {
+        expect(doc).toContain('templates/skills/dev-frontend-ui.md');
+        expect(doc).toContain('(docs/style-book.md)');
+        expect(doc).toContain('apps/web/src/i18n/index.tsx');
+        expect(doc).toMatch(/longest[\s\S]*shortest|shortest[\s\S]*longest/i);
+        expect(doc).toMatch(/whole group|one group/i);
+        expect(doc).toMatch(/explicit[\s\S]*browser default/i);
+        expect(doc).toMatch(/scrollbar space/i);
+        expect(doc).toMatch(/Chromium[\s\S]*Firefox[\s\S]*WebKit/);
+        expect(doc).not.toMatch(/Add screenshots in English and Russian/);
+      }
+      expect(agentsDoc).toContain('CONTRIBUTING.md#interface-panels-and-language-checks');
+      expect(contributingDoc).toContain('### Interface panels and language checks');
+    });
+
+    it('ships the approved repository style book with matching theme tokens, existing source paths and dated exceptions', () => {
+      const root = join(DIR, '..');
+      const styleBook = readFileSync(join(root, 'docs/style-book.md'), 'utf8');
+      const themeCss = readFileSync(join(root, 'apps/web/src/theme.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+      expect(styleBook).toContain('Version 1.0, approved by the head of Design');
+      expect(styleBook).not.toMatch(/[\u2014\u0451\u0401]/);
+      for (const heading of [
+        '## 1. Colours',
+        '## 2. Type',
+        '## 3. Spacing and sizes',
+        '## 4. Components',
+        '## 5. Languages',
+        '## 6. Text wrap and action groups',
+        '## 7. Site and marketing',
+        '## 8. Using and changing this book',
+        '## 9. Browsers',
+      ]) {
+        expect(styleBook).toContain(heading);
+      }
+      expect(styleBook).toMatch(/ui\/Notebook\.tsx[\s\S]*Reviewed by 2027-02-05/);
+      expect(styleBook).toMatch(/\.chip[\s\S]*Reviewed by 2027-02-05/);
+      expect(styleBook).toMatch(/Close button of a panel[\s\S]*Reviewed by 2027-02-05/);
+      const light = themeDeclarations(themeCss, ':root {');
+      const dark = themeDeclarations(themeCss, ':root[data-theme="dark"]');
+      const colourSection = styleBook.slice(styleBook.indexOf('## 1. Colours'), styleBook.indexOf('### Contrast of text'));
+      const bookColours = Object.fromEntries(
+        [...colourSection.matchAll(/^\| `(--[\w-]+)` \| `([^`]+)` \| `([^`]+)` \|/gm)].map(m => [m[1]!, [m[2]!, m[3]!]]),
+      );
+      expect(Object.keys(bookColours).length).toBeGreaterThanOrEqual(27);
+      const actualColours = Object.fromEntries(Object.keys(bookColours).map(k => [k, [light[k], dark[k]]]));
+      expect(actualColours).toEqual(bookColours);
+      const typeSection = styleBook.slice(styleBook.indexOf('## 2. Type'), styleBook.indexOf('Fonts are imported'));
+      const bookFonts = Object.fromEntries([...typeSection.matchAll(/^\| `(--[\w-]+)` \| `([^`]+)` \|/gm)].map(m => [m[1]!, m[2]!]));
+      expect(Object.keys(bookFonts)).toEqual(['--f-display', '--f-body', '--f-mono']);
+      expect(Object.fromEntries(Object.keys(bookFonts).map(k => [k, light[k]]))).toEqual(bookFonts);
+      const sources = [...new Set(styleBookSources(styleBook))];
+      expect(sources.length).toBeGreaterThanOrEqual(46);
+      expect(sources.filter(rel => !existsSync(join(root, rel)))).toEqual([]);
+    });
+
+    it('rejects UI skill text that allows clipping, hiding button groups, blocking non-visual work or fixed/pseudo locales', () => {
+      const base = uiBody();
+      expect(failedRuleIds(FRONTEND_UI_RULES, base)).toEqual([]);
+      expect(failedRuleIds(FRONTEND_UI_RULES, `${base}\nWhen a narrow panel overflows, truncate text with ellipsis to prevent horizontal scroll.`)).toContain(
+        'panel-wrap-and-whole-button-group',
+      );
+      expect(failedRuleIds(FRONTEND_UI_RULES, `${base}\nWhen space runs short, hide secondary action buttons behind clipped overflow.`)).toContain(
+        'panel-wrap-and-whole-button-group',
+      );
+      expect(failedRuleIds(FRONTEND_UI_RULES, `${base}\nWrap action buttons one by one onto separate lines with custom per-row spacing.`)).toContain(
+        'panel-wrap-and-whole-button-group',
+      );
+      expect(failedRuleIds(FRONTEND_UI_RULES, `${base}\nWait on the design mockup before starting API, state logic or temporary skeleton work.`)).toContain(
+        'parallel-nonvisual-visual-only-waits',
+      );
+      expect(failedRuleIds(FRONTEND_UI_RULES, `${base}\nWhile waiting on Design, invent custom spacing tokens for visual polish.`)).toContain(
+        'parallel-nonvisual-visual-only-waits',
+      );
+      expect(failedRuleIds(FRONTEND_UI_RULES, `${base}\nCount a pseudo-locale or demo string as a shipped language during UI checks.`)).toContain(
+        'multilang-and-dynamic-shipped-locales',
+      );
+      expect(failedRuleIds(FRONTEND_UI_RULES, `${base}\nAlways check a fixed two-language pair forever instead of measuring shipped translations.`)).toContain(
+        'multilang-and-dynamic-shipped-locales',
+      );
+      expect(failedRuleIds(FRONTEND_UI_RULES, `${base}\nFollow Hornhoof's .notebook and theme.css rules in every company.`)).toContain(
+        'project-reference-without-company-lockin',
+      );
+      expect(failedRuleIds(FRONTEND_UI_RULES, `${base}\nRely on browser default geometry and padding for icon buttons.`)).toContain(
+        'explicit-component-geometry-and-scrollbar-space',
+      );
+      expect(failedRuleIds(FRONTEND_UI_RULES, `${base}\nAssume overlay scrollbars instead of reserving scrollbar space in scrollable panels.`)).toContain(
+        'explicit-component-geometry-and-scrollbar-space',
+      );
+      expect(failedRuleIds(FRONTEND_UI_RULES, `${base}\nCount a single browser engine run as cross-engine verification.`)).toContain(
+        'three-browser-engines-check',
+      );
+    });
+  });
 });
+
+type ReviewSkills = { diff: string; verdict: string; security: string };
+
+const NATIVE_TOOL_RE = /code-review skill|security-review skill|codex review --base|review-agent/i;
+
+const sentencesOf = (text: string): string[] =>
+  text.split(/(?<=[.!?])\s+|\n+/).map(line => line.trim()).filter(Boolean);
+
+const clausesOf = (text: string): string[] =>
+  text.split(/[.!?;,\n]+|\b(?:then|but|however|yet)\b/i).map(clause => clause.trim()).filter(Boolean);
+
+const negatesBefore = (clause: string, target: RegExp): boolean => {
+  const hit = target.exec(clause);
+  return !hit || /\b(never|not|don't|cannot|forbid\w*|skip\w*|without|instead of|no|neither|nor)\b/i.test(clause.slice(0, hit.index));
+};
+
+const forbids = (text: string, target: RegExp): boolean =>
+  clausesOf(text).every(clause => negatesBefore(clause, target));
+
+const scopesFirstLook = (sentence: string): boolean =>
+  /\bfirst look\b/i.test(sentence) && !/\b(?:second (?:look|round)|every round)\b/i.test(sentence);
+
+const allowsNativeMention = (sentence: string): boolean =>
+  scopesFirstLook(sentence) || forbids(sentence, NATIVE_TOOL_RE);
+
+const nativeReviewScoped = (text: string): boolean => {
+  const mentions = sentencesOf(text).filter(s => NATIVE_TOOL_RE.test(s));
+  return mentions.some(scopesFirstLook) && mentions.every(allowsNativeMention);
+};
+
+const secondLookSentences = (s: ReviewSkills): string =>
+  sentencesOf(`${s.diff}\n${s.verdict}\n${s.security}`).filter(line => /\b(?:second (?:look|round)|fixReview)\b/i.test(line)).join('\n');
+
+const REVIEW_CONTRACT_RULES: { id: string; holds: (s: ReviewSkills) => boolean }[] = [
+  {
+    id: 'native-review-first-look-only',
+    holds: s => nativeReviewScoped(s.diff) && nativeReviewScoped(s.security),
+  },
+  {
+    id: 'no-repeat-full-read-or-high',
+    holds: s => {
+      const all = `${s.diff}\n${s.verdict}\n${s.security}`;
+      const repeats = secondLookSentences(s);
+      return (
+        /\bfirst look[\s\S]*(?:role's|card)\b/i.test(all) &&
+        forbids(all, /\b(?:at|on|force|forcing|raise\s+effort\s+to)\s+high(?:\s+effort)?\b/i) &&
+        forbids(repeats, /\b(?:read|reread|re-read|inspect|review)\b[^.!?;,]*\b(?:whole|entire|full)\s+(?:patch|change|branch|diff)\b/i) &&
+        forbids(repeats, /\b(?:(?:re-?)?run\w*|use|invoke|repeat\w*)\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\b(?:program's own review|native review|code-review|security-review|codex review|review-agent)\b/i) &&
+        /\b(?:do not|never|skip|without|no second)\b[^.!?]*\b(?:program's own review|native review|whole (?:patch|change|branch))\b/i.test(s.diff)
+      );
+    },
+  },
+  {
+    id: 'immutable-fix-range-and-own-blocking-findings',
+    holds: s =>
+      forEvery([s.diff, s.verdict], text =>
+        /\btask\.fixReview\b/.test(text) &&
+        /\breviewedCommit\.\.fixCommit\b/.test(text) &&
+        /\breviewed_commit\.\.fix_commit\b/.test(text) &&
+        /\bsecurity\b[\s\S]*\bdata\b[\s\S]*\bspec\b/.test(text) &&
+        /\bsame reviewer\b/i.test(text) &&
+        /\bmedium\b/i.test(text) &&
+        /\bfindingIds\b/.test(text) &&
+        /\bunchanged code\b[^.!?]*\bno new\b/i.test(text),
+      ),
+  },
+  {
+    id: 'turn-review-one-round',
+    holds: s =>
+      forEvery([s.diff, s.verdict], text =>
+        /\breview of a turn\b[\s\S]*\bone round\b/i.test(text) &&
+        /\bfailing test\b[\s\S]*\bfinal check\b[\s\S]*\bQA\b/i.test(text),
+      ) && forbids(`${s.diff}\n${s.verdict}`, /\breview of a turn\b[^.!?;,]*\btwo rounds\b/i),
+  },
+  {
+    id: 't6-named-harm-no-coverage-chasing',
+    holds: s =>
+      forEvery([s.diff, s.verdict], text => /\bharm to a person\b/i.test(text) && /\bT6\b/.test(text) && /\bT1\b/.test(text) && /\blow coverage alone is not a finding\b/i.test(text)) &&
+      forbids(`${s.diff}\n${s.verdict}`, /\blow coverage(?:\s+alone)?\s+(?:blocks|counts as a finding|is a (?:blocking )?finding)\b/i),
+  },
+  {
+    id: 't10-verify-evidence-no-rerun',
+    holds: s =>
+      forEvery([s.diff, s.verdict], text =>
+        /\btask\.review\b/.test(text) &&
+        /\btestEvidence\b/.test(text) &&
+        /\bgateCounts\b/.test(text) &&
+        /\bproves\b/.test(text) &&
+        /\bT10\b/.test(text) &&
+        /\b(?:instead of rerunning|do not rerun|never rerun)\b/i.test(text),
+      ) && forbids(`${s.diff}\n${s.verdict}\n${s.security}`, /\b(?:re-?run\w*|re-?execut\w*)\b[^.!?;,]*\b(?:author'?s?\s+|submitted\s+|its\s+)?test(?:\s+runs?|\s+suites?|s)\b/i),
+  },
+  {
+    id: 'vertical-slices-above-800',
+    holds: s =>
+      /\btask\.reviewPlan\b/.test(s.diff) &&
+      /\b800\b/.test(s.diff) &&
+      /\bvertical task slices\b[\s\S]*\bnot by folders\b/i.test(s.diff) &&
+      /\bcommonContracts\b/.test(s.diff) &&
+      /\bpackages\/protocol\b[\s\S]*\bschema\.ts\b[\s\S]*\broute schemas\b/.test(s.diff) &&
+      /\bintegrationReviewerId\b/.test(s.diff) &&
+      /\bcross-slice\b/i.test(s.diff) &&
+      /\bauthorVendor\b/.test(s.diff) &&
+      /\bdegraded\b/.test(s.diff) &&
+      forbids(s.diff, /\bsplit\b[^.!?;,]*\bby (?:top-level )?folders\b/i),
+  },
+  {
+    id: 'structured-findings-and-provenance',
+    holds: s =>
+      /\breviewedCommit\b/.test(s.verdict) &&
+      /\bissues\b/.test(s.verdict) &&
+      /\bfindingId\b/.test(s.verdict) &&
+      /\bconfirm_finding\b/.test(s.verdict) &&
+      /\bfixCommit\b/.test(s.verdict) &&
+      /\breviewerVendor\b/.test(s.verdict) &&
+      /\blegacy\b/i.test(s.verdict) &&
+      /\bdoes not\b[^.!?]*\b(?:fixed|APPROVE)\b/i.test(s.verdict) &&
+      forbids(`${s.diff}\n${s.verdict}`, /\b(?:mark\w*|confirm\w*|count\w*)\b[^.!?;,]*\bfindingId\s+confirmed\b/i),
+  },
+  {
+    id: 'no-self-or-role-rule-main-release-approval',
+    holds: s =>
+      /\binternal role or skill rules\b[^.!?]*\bnever\b[^.!?]*\b(?:main|release) approval\b/i.test(s.verdict) &&
+      forbids(`${s.diff}\n${s.verdict}`, /\b(?:may|can)\s+(?:take|grant|claim)\b[^.!?;,]*\b(?:main|release)\s+approval\b/i),
+  },
+];
+
+const FRONTEND_UI_RULES: { id: string; holds: (text: string) => boolean }[] = [
+  {
+    id: 'panel-wrap-and-whole-button-group',
+    holds: text =>
+      /\b(?:panels?|rows?|cards?)\b[\s\S]*\bfull text\b[\s\S]*\bactions\b/i.test(text) &&
+      /\blong words\b[\s\S]*\bURLs?\b[\s\S]*\bwrap\b/i.test(text) &&
+      /\b(?:whole group|together as one group)\b[\s\S]*\b(?:one|single) even row\b/i.test(text) &&
+      /\b(?:same|shared|consistent) edge\b[\s\S]*\bspacing\b/i.test(text) &&
+      /\b(?:never|do not)\b[^.!?]*\b(?:hide|clip|truncate|ellipsis)\b/i.test(text) &&
+      forbids(text, /\b(?:truncate|clip)\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\b(?:text|words|buttons|actions|overflow|ellipsis)\b/i) &&
+      forbids(text, /\bhide\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\b(?:text|action|buttons?|controls?|group|overflow)\b/i) &&
+      forbids(text, /\bwrap\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\bbuttons?\s+one by one\b/i),
+  },
+  {
+    id: 'parallel-nonvisual-visual-only-waits',
+    holds: text =>
+      /\bnon-visual\b[\s\S]*\bdata\b[\s\S]*\bAPI\b[\s\S]*\blogic\b[\s\S]*\bstates\b[\s\S]*\bskeleton\b[\s\S]*\bin parallel\b/i.test(text) &&
+      /\bonly\b[^.!?]*\bvisual\b[^.!?]*\bwaits?\b/i.test(text) &&
+      /\b(?:never|do not)\b[^.!?]*\binvent\b[^.!?]*\b(?:tokens?|spacing)\b/i.test(text) &&
+      forbids(text, /\bwait\w*\b(?:(?!\b(?:without|instead of|only)\b)[^.!?;,])*\bdesign mockup\b[^.!?;,]*\bbefore\b[^.!?;,]*\b(?:API|state|logic|skeleton)\b/i) &&
+      forbids(text, /\binvent\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\b(?:tokens?|spacing)\b/i),
+  },
+  {
+    id: 'multilang-and-dynamic-shipped-locales',
+    holds: text =>
+      /\b20\s*(?:to|-)\s*30\s+languages\b/i.test(text) &&
+      /\b1\.5x?\b[\s\S]*\b2x?\b/i.test(text) &&
+      /\bCJK\b[\s\S]*\bDevanagari\b[\s\S]*\bline-height\b/i.test(text) &&
+      /\bRTL\b[\s\S]*\bmirror\w*\b/i.test(text) &&
+      /\blongest\b[\s\S]*\bshortest\b[\s\S]*\b(?:actually )?(?:shipped|supported)\b[\s\S]*\breal\b/i.test(text) &&
+      /\bRTL\b[^.!?]*\b(?:when|once)\b/i.test(text) &&
+      /\b(?:never|do not)\b[^.!?]*\bpseudo-locale\b/i.test(text) &&
+      forbids(text, /\bcount\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\b(?:pseudo-locale|demo string)\b[^.!?;,]*\bas a (?:real |shipped |supported )?language\b/i) &&
+      forbids(text, /\b(?:always )?check\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\bfixed two-language pair\b/i),
+  },
+  {
+    id: 'project-reference-without-company-lockin',
+    holds: text =>
+      /\brepository\b[\s\S]*\b(?:style book|design reference|UI reference)\b/i.test(text) &&
+      !/hornhoof|\.notebook|\.side-panel|theme\.css|\b(?:Russian|English)\b/i.test(text),
+  },
+  {
+    id: 'explicit-component-geometry-and-scrollbar-space',
+    holds: text =>
+      /\breset\b[\s\S]*\bexplicit\b[\s\S]*\bbrowser default\b/i.test(text) &&
+      /\bscrollbar space\b[\s\S]*\bscrollable panels?\b[\s\S]*\boverlay\b/i.test(text) &&
+      /\b(?:never|do not|instead of)\b[^.!?]*\bbrowser default\b/i.test(text) &&
+      forbids(text, /\brely\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\bbrowser default\b/i) &&
+      forbids(text, /\bassum\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\boverlay scrollbars?\b/i),
+  },
+  {
+    id: 'three-browser-engines-check',
+    holds: text =>
+      /\bChromium\b[\s\S]*\bFirefox\b[\s\S]*\bWebKit\b/.test(text) &&
+      /\b(?:never|do not|instead of)\b[^.!?]*\b(?:single|one) browser engine\b/i.test(text) &&
+      forbids(text, /\b(?:claim|count)\w*\b(?:(?!\b(?:without|instead of)\b)[^.!?;,])*\b(?:single|one) browser engine\b[^.!?;,]*\bas\b[^.!?;,]*\bcross-engine\b/i),
+  },
+];
+
+const forEvery = <Item>(items: Item[], predicate: (item: Item) => boolean): boolean => items.every(predicate);
+
+const failedRuleIds = <Input>(rules: { id: string; holds: (input: Input) => boolean }[], input: Input): string[] =>
+  rules.filter(rule => !rule.holds(input)).map(rule => rule.id);
+
+const themeDeclarations = (css: string, selector: string): Record<string, string> => {
+  const start = css.indexOf('{', css.indexOf(selector)) + 1;
+  const block = css.slice(start, css.indexOf('}', start));
+  return Object.fromEntries([...block.matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)].map(m => [m[1]!, m[2]!.trim().replace(/\s+/g, ' ')]));
+};
+
+const styleBookSources = (book: string): string[] => [
+  ...[...book.matchAll(/`((?:ui|screens)\/[\w./-]+\.tsx?)`/g)].map(m => `apps/web/src/${m[1]!}`),
+  ...[...book.matchAll(/`((?:apps|templates|guide|\.github)\/[\w./-]+\.\w+)`/g)].map(m => m[1]!),
+  ...[...book.matchAll(/`([A-Z_]+\.md)`/g)].map(m => m[1]!),
+];

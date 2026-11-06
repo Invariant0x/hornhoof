@@ -1,12 +1,21 @@
 import type { ServerResponse } from 'node:http';
 import type { FastifyInstance } from 'fastify';
 import type { Ctx } from '../../app.js';
-import { accessOf, canReach } from '../../auth/access.js';
-import { requirePerson } from '../../auth/session.js';
+import { canReach, type Access } from '../../auth/access.js';
+import { viewerOf } from '../../auth/agent-view.js';
+import { requirePerson, type Person } from '../../auth/session.js';
 import { canViewComputer } from '../computer/access.js';
+import type { StreamMessage } from './bus.js';
+import { heardBy } from './stream-view.js';
 
-/* One Server-Sent Events stream per open page. An agent's conversation goes only to people who reach where it works:
-   the orchestrator's to people who see the whole company. */
+/* Whether a message is for this person at all, by where they reach and what is theirs. */
+function isFor(m: StreamMessage, me: Person, access: Access): boolean {
+  if ('spot' in m && !canReach(access, m.spot)) return false;
+  if (m.type === 'computer' && !canViewComputer(me)) return false;
+  return m.type !== 'subscription.signin' || m.owner === me.id;
+}
+
+/* One Server-Sent Events stream per open page. What is said of an agent or its work goes only to people who see them. */
 export function streamRoutes(app: FastifyInstance, ctx: Ctx): void {
   const open = new Set<ServerResponse>();
   /* Before Fastify waits for requests to finish, since a stream never does. */
@@ -16,25 +25,35 @@ export function streamRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.get('/api/stream', async (req, reply) => {
     let me = await requirePerson(req, ctx.db);
-    let access = await accessOf(ctx.db, me);
+    let viewer = await viewerOf(ctx.db, me);
     const res = reply.raw;
     reply.hijack();
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive', 'x-accel-buffering': 'no' });
     res.write(': connected\n\n');
     open.add(res);
 
+    const send = (m: StreamMessage) => {
+      if (!res.writableEnded) res.write(`data: ${JSON.stringify(m)}\n\n`);
+    };
+    /* Without the full view each message waits to be checked, one after the other, so they keep their order. A message that
+       says the company changed may have moved who this person sees, so they look again before anything after it. */
+    let checked: Promise<void> = Promise.resolve();
+    const check = async (m: StreamMessage) => {
+      if (m.type === 'org') await look();
+      const heard = await heardBy(ctx.db, me.companyId, viewer, m);
+      if (heard) send(heard);
+    };
     const unsubscribe = ctx.bus.subscribe(me.companyId, m => {
-      if ('spot' in m && !canReach(access, m.spot)) return;
-      if (m.type === 'computer' && !canViewComputer(me)) return;
-      if (m.type === 'subscription.signin' && m.owner !== me.id) return;
-      res.write(`data: ${JSON.stringify(m)}\n\n`);
+      if (!isFor(m, me, viewer.access)) return;
+      if (viewer.full) send(m);
+      else checked = checked.then(() => check(m)).catch((err: unknown) => req.log.warn({ err }, 'A message of the stream was not checked, so it was not sent.'));
     });
     /* The ping keeps proxies from closing the stream and looks at the person again: a signed-out or disabled person stops
        hearing anything, and changed access applies from here on. A change of anyone's access looks at once. */
     const look = async () => {
       try {
         me = await requirePerson(req, ctx.db);
-        access = await accessOf(ctx.db, me);
+        viewer = await viewerOf(ctx.db, me);
         return true;
       } catch {
         res.end();

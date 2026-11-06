@@ -1,10 +1,11 @@
 /// <reference types="node" />
 import { spawn } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page, type Route, type TestInfo } from '@playwright/test';
+import { LANGUAGES, type Language } from '../src/i18n';
 import { en, type Messages } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import type { Decisions, Org, WaitingRequest } from '../src/types';
@@ -12,8 +13,82 @@ import { box, ME, serveApi, TASKS } from './api';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
-const MESSAGES: Record<'en' | 'ru', Messages> = { en, ru };
+const MESSAGES: Record<Language, Messages> = { en, ru };
 const SCREENSHOT_DIR = process.env.HH_SCREENSHOT_DIR;
+const RTL_LANGUAGE_CODES = new Set(['ar', 'he', 'fa', 'ur', 'ps', 'sd', 'ug', 'yi']);
+
+function requestCopyScore(t: Messages): number {
+  return [
+    t.tasks.yourAnswer,
+    t.tasks.sendAnswer,
+    t.tasks.approve,
+    t.tasks.decline,
+    t.tasks.decidedByCeo,
+    t.tasks.note,
+    t.tasks.choiceNote,
+    t.tasks.choiceHint,
+    t.tasks.sendFeedback,
+    t.tasks.sending,
+    t.tasks.cancelTask,
+    t.tasks.openTerminal('Agent'),
+    t.tasks.stuckText('Agent', 404),
+  ].join('').length;
+}
+
+const SORTED_SHIPPED_LOCALES = [...LANGUAGES]
+  .map(entry => ({ id: entry.id, score: requestCopyScore(MESSAGES[entry.id]) }))
+  .sort((a, b) => b.score - a.score);
+const LONGEST_SHIPPED_LOCALE = SORTED_SHIPPED_LOCALES[0]!.id;
+const SHORTEST_SHIPPED_LOCALE = SORTED_SHIPPED_LOCALES.at(-1)!.id;
+const SHIPPED_RTL_LOCALES = LANGUAGES.map(l => l.id).filter(id => RTL_LANGUAGE_CODES.has(id));
+const CHECKED_LOCALES: readonly Language[] = Array.from(new Set([LONGEST_SHIPPED_LOCALE, SHORTEST_SHIPPED_LOCALE]));
+
+type ShotProvenance = {
+  file: string;
+  provenance: 'playwright-route-fixture' | 'real-fastify-pglite-server';
+  lang: Language;
+  theme: 'light' | 'dark';
+  width: number;
+  surface: string;
+};
+
+const PROVENANCE: ShotProvenance[] = [];
+
+async function saveScreenshot(
+  page: Page,
+  info: TestInfo,
+  meta: ShotProvenance,
+  exportToDir = true,
+) {
+  await page.screenshot({ path: info.outputPath(meta.file), fullPage: true });
+  if (SCREENSHOT_DIR && exportToDir) {
+    mkdirSync(SCREENSHOT_DIR, { recursive: true });
+    await page.screenshot({ path: resolve(SCREENSHOT_DIR, meta.file), fullPage: true });
+    PROVENANCE.push(meta);
+  }
+}
+
+test.afterAll(() => {
+  if (!SCREENSHOT_DIR) return;
+  mkdirSync(SCREENSHOT_DIR, { recursive: true });
+  writeFileSync(
+    resolve(SCREENSHOT_DIR, 'requests-500-provenance.json'),
+    JSON.stringify(
+      {
+        shippedLocales: SORTED_SHIPPED_LOCALES,
+        longestLocale: LONGEST_SHIPPED_LOCALE,
+        shortestLocale: SHORTEST_SHIPPED_LOCALE,
+        rtlLocales: SHIPPED_RTL_LOCALES,
+        rtlStatus: SHIPPED_RTL_LOCALES.length === 0 ? 'NOT_AVAILABLE' : 'CHECKED',
+        visualVerdict: 'PENDING_DESIGN_478',
+        screenshots: PROVENANCE,
+      },
+      null,
+      2,
+    ) + '\n',
+    'utf8',
+  );
+});
 
 function svgPng(svg: string): Buffer {
   return Buffer.from(svg, 'utf8');
@@ -118,6 +193,51 @@ const ORG: Org = {
   ],
 };
 
+async function fulfillShellRequestsRoute(route: Route, getRequests: () => WaitingRequest[]): Promise<boolean> {
+  const url = new URL(route.request().url());
+  if (url.pathname === '/api/org') {
+    await route.fulfill({ json: ORG });
+    return true;
+  }
+  if (url.pathname === '/api/version') {
+    await route.fulfill({ json: { version: '0.7.0', commit: 'task-500' } });
+    return true;
+  }
+  if (url.pathname === '/api/updates') {
+    await route.fulfill({ json: { current: { version: '0.7.0', commit: 'task-500' }, available: false, latest: null, updater: { status: null, waiting: null } } });
+    return true;
+  }
+  if (url.pathname === '/api/restarts') {
+    await route.fulfill({ json: { restarts: [] } });
+    return true;
+  }
+  if (url.pathname === '/api/subscriptions') {
+    await route.fulfill({ json: { subscriptions: [] } });
+    return true;
+  }
+  if (url.pathname === '/api/machines') {
+    await route.fulfill({ json: { machines: [] } });
+    return true;
+  }
+  if (url.pathname === '/api/tasks' && url.search === '?status=all') {
+    await route.fulfill({ json: { tasks: TASKS.slice(0, 2) } });
+    return true;
+  }
+  if (url.pathname === '/api/requests' && route.request().method() === 'GET') {
+    const requests = getRequests();
+    await route.fulfill({
+      json: {
+        requests,
+        proposals: [],
+        computerAccess: null,
+        counts: { byPerson: {}, byAgent: {}, total: requests.length },
+      } satisfies Decisions,
+    });
+    return true;
+  }
+  return false;
+}
+
 async function openTasksWithChoice(page: Page, lang: 'en' | 'ru', theme: 'light' | 'dark', width: number) {
   await page.setViewportSize({ width, height: 960 });
   await page.addInitScript(
@@ -142,19 +262,9 @@ async function openTasksWithChoice(page: Page, lang: 'en' | 'ru', theme: 'light'
   const posts: { url: string; body: unknown }[] = [];
   let failNext = false;
 
-  await page.route('**/api/**', route => {
+  await page.route('**/api/**', async route => {
+    if (await fulfillShellRequestsRoute(route, () => current)) return;
     const url = new URL(route.request().url());
-    if (url.pathname === '/api/org') return route.fulfill({ json: ORG });
-    if (url.pathname === '/api/version') return route.fulfill({ json: { version: '0.7.0', commit: 'task-415' } });
-    if (url.pathname === '/api/updates') {
-      return route.fulfill({ json: { current: { version: '0.7.0', commit: 'task-415' }, available: false, latest: null, updater: { status: null, waiting: null } } });
-    }
-    if (url.pathname === '/api/restarts') return route.fulfill({ json: { restarts: [] } });
-    if (url.pathname === '/api/subscriptions') return route.fulfill({ json: { subscriptions: [] } });
-    if (url.pathname === '/api/machines') return route.fulfill({ json: { machines: [] } });
-    if (url.pathname === '/api/tasks' && url.search === '?status=all') {
-      return route.fulfill({ json: { tasks: TASKS.slice(0, 2) } });
-    }
     if (url.pathname === '/api/attachments/pic-overview') {
       return route.fulfill({ status: 200, contentType: 'image/svg+xml', body: svgPng(OVERVIEW_SVG) });
     }
@@ -163,15 +273,6 @@ async function openTasksWithChoice(page: Page, lang: 'en' | 'ru', theme: 'light'
     }
     if (url.pathname === '/api/attachments/pic-b') {
       return route.fulfill({ status: 200, contentType: 'image/svg+xml', body: svgPng(OPTION_B_SVG) });
-    }
-    if (url.pathname === '/api/requests') {
-      const body: Decisions = {
-        requests: current,
-        proposals: [],
-        computerAccess: null,
-        counts: { byPerson: {}, byAgent: {}, total: current.length },
-      };
-      return route.fulfill({ json: body });
     }
     if (url.pathname === '/api/requests/req-choice-demo' && route.request().method() === 'POST') {
       const body = route.request().postDataJSON() as unknown;
@@ -273,11 +374,14 @@ for (const lang of ['ru', 'en'] as const) {
         expect(sendBox.y).toBeGreaterThanOrEqual(fieldBox.y + fieldBox.height + 6);
 
         const shotName = `choice-feedback-${lang}-${theme}-${width}.png`;
-        await page.screenshot({ path: info.outputPath(shotName), fullPage: true });
-        if (SCREENSHOT_DIR) {
-          mkdirSync(SCREENSHOT_DIR, { recursive: true });
-          await page.screenshot({ path: resolve(SCREENSHOT_DIR, shotName), fullPage: true });
-        }
+        await saveScreenshot(page, info, {
+          file: shotName,
+          provenance: 'playwright-route-fixture',
+          lang,
+          theme,
+          width,
+          surface: '/tasks WaitingForYou choice card',
+        });
 
         await send.click();
         await expect.poll(() => posts.at(-1)).toEqual({
@@ -290,6 +394,339 @@ for (const lang of ['ru', 'en'] as const) {
     }
   }
 }
+
+function makePanelRequests(lang: Language): WaitingRequest[] {
+  const ruLang = lang === 'ru';
+  const taskOne = {
+    id: 't1',
+    number: 1,
+    title: TASKS[0]!.title,
+    department: { id: 'd2', name: ruLang ? 'Разработка' : 'Development' },
+  };
+  const sha = 'c4053494f51a1f26be4708a0124169ebc90ad4d7';
+  return [
+    {
+      id: 'req-approval-500',
+      kind: 'approval',
+      text: ruLang
+        ? 'Одобрить слияние артефакта https://internal.acme.example/releases/turn-8/artifacts/bundle_sha256_5477f3dd64688d1bac477a09d8aa66b8218ec0b3f8a0e361df1b229e13ad7f50 перед проверкой?'
+        : 'Approve merging artifact https://internal.acme.example/releases/turn-8/artifacts/bundle_sha256_5477f3dd64688d1bac477a09d8aa66b8218ec0b3f8a0e361df1b229e13ad7f50 before verification?',
+      explained: null,
+      explaining: false,
+      images: [],
+      options: [],
+      link: 'https://internal.acme.example/releases/turn-8/compare/3e372c980b2913e9df7ac24ab249416a60703df4',
+      commit: sha,
+      commitUrl: `https://github.com/acme/hornhoof/commit/${sha}`,
+      at: '2026-11-05T16:10:00.000Z',
+      ownerPersonId: 'p1',
+      canAnswer: true,
+      decidedBy: { kind: 'ceo_and_delegate', department: null },
+      agent: { id: 'agent-dev-1', name: ruLang ? 'Разработчик фронтенда (Алиса)' : 'Frontend Developer (Alice)' },
+      task: taskOne,
+    },
+    {
+      id: 'req-stuck-500',
+      kind: 'stuck',
+      text: '',
+      explained: null,
+      explaining: false,
+      images: [],
+      options: [],
+      link: null,
+      commit: null,
+      commitUrl: null,
+      at: '2026-11-05T16:12:00.000Z',
+      ownerPersonId: 'p1',
+      canAnswer: true,
+      decidedBy: { kind: 'ceo_and_delegate', department: null },
+      agent: { id: 'agent-dev-2', name: ruLang ? 'Инженер проверки (Борис)' : 'Verification Engineer (Boris)' },
+      task: taskOne,
+    },
+    {
+      id: 'req-readonly-500',
+      kind: 'choice',
+      text: ruLang
+        ? 'Выбор политики хранения отчетов для следующего шага.'
+        : 'Choose the report retention policy for the next step.',
+      explained: null,
+      explaining: false,
+      images: [],
+      options: [
+        { label: ruLang ? 'Вариант 1: хранить полные архивы 30 дней' : 'Option 1: retain full archives for 30 days', image: null },
+        { label: ruLang ? 'Вариант 2: хранить сводку и хеши 90 дней' : 'Option 2: retain summary and hashes for 90 days', image: null },
+      ],
+      link: null,
+      commit: null,
+      commitUrl: null,
+      at: '2026-11-05T16:14:00.000Z',
+      ownerPersonId: 'p2',
+      canAnswer: false,
+      decidedBy: { kind: 'department_and_ceo', department: taskOne.department },
+      agent: { id: 'agent-dev-3', name: ruLang ? 'Архитектор (Вера)' : 'Architect (Vera)' },
+      task: taskOne,
+    },
+  ];
+}
+
+async function assertRequestCardsFit(cards: Locator, rightLimit: number) {
+  const count = await cards.count();
+  expect(count).toBeGreaterThan(0);
+  for (let i = 0; i < count; i++) {
+    const card = cards.nth(i);
+    await expect(card).toBeVisible();
+    await expect(card).toHaveAttribute('aria-busy', 'false');
+    const cardBox = await box(card);
+    expect(cardBox.x).toBeGreaterThanOrEqual(0);
+    expect(cardBox.x + cardBox.width).toBeLessThanOrEqual(rightLimit + 1);
+    const cardOverflows = await card.evaluate((el: HTMLElement) => el.scrollWidth > el.clientWidth + 1);
+    expect(cardOverflows, 'request card has no internal horizontal overflow').toBe(false);
+
+    const term = card.locator('.req-term');
+    const termBox = await box(term);
+    expect(termBox.x).toBeGreaterThanOrEqual(cardBox.x - 1);
+    expect(termBox.x + termBox.width).toBeLessThanOrEqual(cardBox.x + cardBox.width + 1);
+
+    const commit = card.locator('.req-commit');
+    if ((await commit.count()) > 0) {
+      const commitBox = await box(commit);
+      expect(commitBox.x).toBeGreaterThanOrEqual(cardBox.x - 1);
+      expect(commitBox.x + commitBox.width).toBeLessThanOrEqual(cardBox.x + cardBox.width + 1);
+    }
+
+    const actions = card.locator('.req-actions');
+    if ((await actions.count()) > 0) {
+      const actionsBox = await box(actions);
+      expect(actionsBox.x).toBeGreaterThanOrEqual(cardBox.x - 1);
+      expect(actionsBox.x + actionsBox.width).toBeLessThanOrEqual(cardBox.x + cardBox.width + 1);
+      const btns = actions.locator('button');
+      const btnCount = await btns.count();
+      const boxes = [];
+      for (let b = 0; b < btnCount; b++) {
+        const btn = btns.nth(b);
+        await expect(btn).toBeVisible();
+        const bBox = await box(btn);
+        expect(bBox.height).toBeGreaterThanOrEqual(30);
+        expect(bBox.x).toBeGreaterThanOrEqual(actionsBox.x - 1);
+        expect(bBox.x + bBox.width).toBeLessThanOrEqual(cardBox.x + cardBox.width + 1);
+        const clipped = await btn.evaluate((el: HTMLElement) => el.scrollWidth > el.clientWidth + 1);
+        expect(clipped, 'action button label is not clipped').toBe(false);
+        boxes.push(bBox);
+      }
+      for (let a = 0; a < boxes.length; a++) {
+        for (let b = a + 1; b < boxes.length; b++) {
+          const left = boxes[a]!;
+          const right = boxes[b]!;
+          const separated =
+            left.x + left.width <= right.x + 1 ||
+            right.x + right.width <= left.x + 1 ||
+            left.y + left.height <= right.y + 1 ||
+            right.y + right.height <= left.y + 1;
+          expect(separated, 'action buttons never overlap').toBe(true);
+        }
+      }
+    }
+  }
+}
+
+test('derives longest and shortest shipped locales dynamically and records RTL availability honestly', () => {
+  expect(LONGEST_SHIPPED_LOCALE).toBe('ru');
+  expect(SHORTEST_SHIPPED_LOCALE).toBe('en');
+  expect(SHIPPED_RTL_LOCALES).toEqual([]);
+});
+
+for (const lang of CHECKED_LOCALES) {
+  for (const theme of ['light', 'dark'] as const) {
+    for (const width of [1440, 375] as const) {
+      test(`wraps action groups, commit SHAs, and long URLs in /tasks and narrow TaskPanel in ${lang}, ${theme}, at ${width}px`, async ({ page }, info) => {
+        await page.setViewportSize({ width, height: 960 });
+        await page.addInitScript(
+          ({ l, th }) => {
+            localStorage.setItem('hh-lang', l);
+            localStorage.setItem('hh-theme', th);
+          },
+          { l: lang, th: theme },
+        );
+        const errors: string[] = [];
+        page.on('pageerror', err => errors.push(err.message));
+        page.on('console', msg => {
+          if (msg.type() === 'error') errors.push(msg.text());
+        });
+
+        await serveApi(page);
+        const panelRequests = makePanelRequests(lang);
+        await page.route('**/api/**', async route => {
+          if (await fulfillShellRequestsRoute(route, () => panelRequests)) return;
+          return route.fallback();
+        });
+
+        await page.goto('/tasks');
+        const mainCards = page.locator('.page article.req');
+        await expect(mainCards).toHaveCount(3);
+        await page.evaluate(async () => {
+          await document.fonts.ready;
+        });
+
+        const mainScrollWidth = await page.evaluate(() => {
+          const scroller = document.querySelector<HTMLElement>('.screen, .page');
+          return Math.max(document.documentElement.scrollWidth, scroller?.scrollWidth ?? 0);
+        });
+        expect(mainScrollWidth).toBeLessThanOrEqual(width);
+        await assertRequestCardsFit(mainCards, width);
+
+        /* Open TaskPanel (aside) on #1 so the exact same 3 request cards render inside the narrow side panel. */
+        await mainCards.first().locator('header button.linkish').click();
+        const aside = page.locator('aside');
+        const panelCards = aside.locator('.tp-wait article.req');
+        await expect(panelCards).toHaveCount(3);
+
+        const asideOverflow = await aside.evaluate((el: HTMLElement) => {
+          const body = el.querySelector<HTMLElement>('.ac-body');
+          return el.scrollWidth > el.clientWidth + 1 || (body ? body.scrollWidth > body.clientWidth + 1 : false);
+        });
+        expect(asideOverflow, 'TaskPanel aside has no horizontal overflow').toBe(false);
+        const asideBox = await box(aside);
+        expect(asideBox.x + asideBox.width).toBeLessThanOrEqual(width + 1);
+        await assertRequestCardsFit(panelCards, asideBox.x + asideBox.width);
+
+        await saveScreenshot(
+          page,
+          info,
+          {
+            file: `requests-panel-${lang}-${theme}-${width}.png`,
+            provenance: 'playwright-route-fixture',
+            lang,
+            theme,
+            width,
+            surface: 'TaskPanel aside .tp-wait (approval + stuck + read-only choice)',
+          },
+          theme === 'dark',
+        );
+        expect(errors).toEqual([]);
+      });
+    }
+  }
+}
+
+test('shows accessible sending status, preserves draft on server failure, and supports keyboard and touch on 375px', async ({ browser }, info) => {
+  const context = await browser.newContext({ viewport: { width: 375, height: 900 }, hasTouch: true });
+  const page = await context.newPage();
+  try {
+    await page.addInitScript(() => {
+      localStorage.setItem('hh-lang', 'ru');
+      localStorage.setItem('hh-theme', 'dark');
+    });
+    const errors: string[] = [];
+    page.on('pageerror', err => errors.push(err.message));
+    page.on('console', msg => {
+      if (msg.type() === 'error') errors.push(msg.text());
+    });
+
+    await serveApi(page);
+    let current = makePanelRequests('ru').slice(0, 2);
+    const posts: { url: string; body: unknown }[] = [];
+    let releaseFirstPost: (() => void) | null = null;
+    let attempt = 0;
+
+    await page.route('**/api/**', async route => {
+      if (await fulfillShellRequestsRoute(route, () => current)) return;
+      const url = new URL(route.request().url());
+      if (url.pathname === '/api/requests/req-approval-500' && route.request().method() === 'POST') {
+        attempt += 1;
+        posts.push({ url: url.pathname, body: route.request().postDataJSON() });
+        if (attempt === 1) {
+          await new Promise<void>(resolvePost => {
+            releaseFirstPost = resolvePost;
+          });
+          return route.fulfill({ status: 503, json: { error: { code: 'unavailable' } } });
+        }
+        current = current.slice(1);
+        return route.fulfill({ json: { request: { id: 'req-approval-500', status: 'approved' } } });
+      }
+      if (url.pathname === '/api/tasks/t1/cancel' && route.request().method() === 'POST') {
+        posts.push({ url: url.pathname, body: route.request().postDataJSON() });
+        current = [];
+        return route.fulfill({ json: {} });
+      }
+      return route.fallback();
+    });
+
+    await page.goto('/tasks');
+    const cards = page.locator('.page article.req');
+    await expect(cards).toHaveCount(2);
+    const approvalCard = cards.nth(0);
+    const stuckCard = cards.nth(1);
+
+    const draft = 'Проверено по бюджету Q4.\nСохранить комментарий при ошибке сети.';
+    const noteField = approvalCard.getByLabel(ru.tasks.note);
+    const approveBtn = approvalCard.getByRole('button', { name: ru.tasks.approve, exact: true });
+    const declineBtn = approvalCard.getByRole('button', { name: ru.tasks.decline, exact: true });
+    await noteField.fill(draft);
+
+    /* Submit via keyboard Tab -> Enter and inspect live in-flight state before server responds. */
+    await noteField.focus();
+    await page.keyboard.press('Tab');
+    await expect(approveBtn).toBeFocused();
+    await page.keyboard.press('Enter');
+
+    await expect(approvalCard).toHaveAttribute('aria-busy', 'true');
+    const statusLine = approvalCard.getByRole('status');
+    await expect(statusLine).toHaveText(ru.tasks.sending);
+    await expect(approvalCard.getByRole('alert')).toHaveCount(0);
+    await expect(approveBtn).toBeDisabled();
+    await expect(declineBtn).toBeDisabled();
+    await expect(stuckCard).toHaveAttribute('aria-busy', 'false');
+
+    const cardBox = await box(approvalCard);
+    const statusBox = await box(statusLine);
+    expect(statusBox.x + statusBox.width).toBeLessThanOrEqual(cardBox.x + cardBox.width + 1);
+    await saveScreenshot(page, info, {
+      file: 'requests-sending-ru-dark-375.png',
+      provenance: 'playwright-route-fixture',
+      lang: 'ru',
+      theme: 'dark',
+      width: 375,
+      surface: '/tasks approval card in-flight sending state',
+    });
+
+    /* Complete first request with 503 and verify alert + preserved draft + no horizontal overflow. */
+    await expect.poll(() => releaseFirstPost !== null).toBe(true);
+    releaseFirstPost!();
+
+    const alertLine = approvalCard.getByRole('alert');
+    await expect(alertLine).toHaveText(ru.errors.codes.unavailable);
+    await expect(approvalCard).toHaveAttribute('aria-busy', 'false');
+    await expect(approvalCard.getByRole('status')).toHaveCount(0);
+    await expect(noteField).toHaveValue(draft);
+    await expect(approveBtn).toBeEnabled();
+    const alertBox = await box(alertLine);
+    expect(alertBox.x + alertBox.width).toBeLessThanOrEqual(cardBox.x + cardBox.width + 1);
+    await saveScreenshot(page, info, {
+      file: 'requests-error-ru-dark-375.png',
+      provenance: 'playwright-route-fixture',
+      lang: 'ru',
+      theme: 'dark',
+      width: 375,
+      surface: '/tasks approval card 503 failure state with preserved draft',
+    });
+
+    /* Retry via mobile touch tap, then cancel stuck task via touch tap without extra confirmation dialog. */
+    await approveBtn.tap();
+    await expect(cards).toHaveCount(1);
+    const cancelBtn = cards.nth(0).getByRole('button', { name: ru.tasks.cancelTask, exact: true });
+    await cancelBtn.tap();
+    await expect(cards).toHaveCount(0);
+
+    expect(posts).toEqual([
+      { url: '/api/requests/req-approval-500', body: { approve: true, answer: draft } },
+      { url: '/api/requests/req-approval-500', body: { approve: true, answer: draft } },
+      { url: '/api/tasks/t1/cancel', body: {} },
+    ]);
+    expect(errors).toEqual(['Failed to load resource: the server responded with a status of 503 (Service Unavailable)']);
+  } finally {
+    await context.close();
+  }
+});
 
 test('preserves multi-line feedback on server error and succeeds on retry, and keeps pick: 0 exact', async ({ page }) => {
   const { t, card, posts, failOnce } = await openTasksWithChoice(page, 'ru', 'dark', 1440);
@@ -514,7 +951,7 @@ async function startRealServer(publicUrl: string): Promise<RealServerBoot> {
   };
 }
 
-test('saves neutral feedback without pick, delivers words to author, and preserves explicit pick: 0 on a real server', async ({ page, baseURL }) => {
+test('saves neutral feedback without pick, delivers words to author, and preserves explicit pick: 0 on a real server', async ({ page, baseURL }, info) => {
   test.setTimeout(30_000);
   const webOrigin = baseURL ?? 'http://localhost:4179';
   const srv = await startRealServer(webOrigin);
@@ -544,10 +981,19 @@ test('saves neutral feedback without pick, delivers words to author, and preserv
     const pickCard = page.getByRole('article', { name: new RegExp(`^#${srv.pickTaskNumber} `) });
     await expect(freeCard).toBeVisible();
     await expect(pickCard).toBeVisible();
+    await expect(freeCard).toHaveAttribute('aria-busy', 'false');
 
     /* 1. Authorized person sends multi-line feedback without picking any option. */
     const freeFeedback = 'Ни один вариант пока не подходит.\nСделайте синие квадратики внутри существующих плашек отделов.';
     await freeCard.getByLabel(ru.tasks.choiceNote).fill(`  ${freeFeedback}  `);
+    await saveScreenshot(page, info, {
+      file: 'requests-real-server-before-ru-dark-1440.png',
+      provenance: 'real-fastify-pglite-server',
+      lang: 'ru',
+      theme: 'dark',
+      width: 1440,
+      surface: '/tasks WaitingForYou backed by real Fastify + PGlite server',
+    });
     await freeCard.getByRole('button', { name: ru.tasks.sendFeedback, exact: true }).click();
     await expect(freeCard).toBeHidden();
 
@@ -563,6 +1009,14 @@ test('saves neutral feedback without pick, delivers words to author, and preserv
     await expect(panel).toContainText(freeFeedback);
     await expect(panel).toContainText(ru.tasks.requestStates.answered);
     await expect(panel).not.toContainText(/Picked \d|Approved|Declined/);
+    await saveScreenshot(page, info, {
+      file: 'requests-real-server-after-ru-dark-1440.png',
+      provenance: 'real-fastify-pglite-server',
+      lang: 'ru',
+      theme: 'dark',
+      width: 1440,
+      surface: 'TaskPanel aside showing persisted answered request from real Fastify + PGlite server',
+    });
 
     /* Inspect real server database state, task detail API, and delivery to the asking designer agent. */
     const stateRes = await fetch(`${srv.origin}/__e2e/state`);

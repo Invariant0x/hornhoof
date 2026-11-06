@@ -1,0 +1,223 @@
+import { writeFileSync } from 'node:fs';
+import { eq } from 'drizzle-orm';
+import type { FastifyServerOptions, RouteOptions } from 'fastify';
+import { afterAll, describe, expect, it, vi } from 'vitest';
+import { attachments, improvements, jobs, machines, tasks, testParts, testRuns, turns } from '../src/db/schema.js';
+import { addNote, companyBook, departmentBook } from '../src/modules/notebook/book.js';
+import { ask } from '../src/modules/tasks/engine.js';
+import { as, testApp } from './helpers.js';
+import { aclCompany, type AclCompany } from './agent-view-company.js';
+
+const captured = vi.hoisted(() => [] as RouteOptions[]);
+vi.mock('fastify', async importOriginal => {
+  const actual = await importOriginal<typeof import('fastify')>();
+  return { ...actual, default: (options: FastifyServerOptions = {}) => {
+    const app = actual.default(options);
+    app.addHook('onRoute', route => { captured.push({ ...route }); });
+    return app;
+  } };
+});
+
+/* Every real route of the server has its place in this table, so a new one cannot show an agent by being forgotten. Run with
+   HH_ACL_TABLE=<file> it writes what the routes really answered, for the people who build on them. */
+const lines: string[] = [];
+const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
+
+type Crew = keyof AclCompany['crew'];
+type Viewer = keyof AclCompany['tokens'];
+type Call = { method: 'GET' | 'POST' | 'PATCH' | 'DELETE'; url: string; payload?: object };
+
+/* One thing of one agent, and how a route reaches it. companyOnly: the route asks for the whole company before anything. */
+type Pointed = { route: string; of: (c: AclCompany, agent: Crew) => Promise<Call>; companyOnly?: boolean };
+
+const anAgent = (method: Call['method'], end: string, payload?: object) => async (c: AclCompany, agent: Crew): Promise<Call> => ({ method, url: `/api/agents/${c.crew[agent].id}${end}`, ...(payload ? { payload } : {}) });
+const aTask = (method: Call['method'], end: string, payload?: object) => async (c: AclCompany, agent: Crew): Promise<Call> => {
+  const task = await c.work(`Work of ${String(agent)}`, c.crew[agent], c.crew[agent].departmentId!);
+  return { method, url: `/api/tasks/${task.id}${end}`, ...(payload ? { payload } : {}) };
+};
+const aJob = (method: Call['method'], end: string) => async (c: AclCompany, agent: Crew): Promise<Call> => {
+  const [job] = await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: c.crew[agent].subscriptionId!, agentId: c.crew[agent].id, kind: 'conversation', prompt: 'x', timeoutMs: 1000, status: 'done', finishedAt: new Date() }).returning();
+  return { method, url: `/api/jobs/${job!.id}${end}` };
+};
+const anIdea = (end: string) => async (c: AclCompany, agent: Crew): Promise<Call> => {
+  const [idea] = await c.db.insert(improvements).values({ companyId: c.companyId, agentId: c.crew[agent].id, title: 'Idea', text: 'x' }).returning();
+  return { method: 'POST', url: `/api/improvements/${idea!.id}/${end}` };
+};
+const aPicture = async (c: AclCompany, agent: Crew): Promise<Call> => {
+  const [picture] = await c.db.insert(attachments).values({ companyId: c.companyId, agentId: c.crew[agent].id, personId: c.ids.ceo, name: 'p.png', mediaType: 'image/png', bytes: PNG, size: PNG.length }).returning();
+  return { method: 'GET', url: `/api/attachments/${picture!.id}` };
+};
+
+const POINTED: Pointed[] = [
+  { route: 'GET /api/agents/:id', of: anAgent('GET', '') },
+  { route: 'PATCH /api/agents/:id', of: anAgent('PATCH', '', { effort: null }) },
+  { route: 'DELETE /api/agents/:id', of: anAgent('DELETE', ''), companyOnly: true },
+  { route: 'GET /api/agents/:id/events', of: anAgent('GET', '/events') },
+  { route: 'POST /api/agents/:id/messages', of: anAgent('POST', '/messages', { text: 'hi' }) },
+  { route: 'POST /api/agents/:id/pictures', of: async (c, agent) => ({ method: 'POST', url: `/api/agents/${c.crew[agent].id}/pictures`, payload: {} }) },
+  { route: 'POST /api/agents/:id/reset', of: anAgent('POST', '/reset', {}) },
+  { route: 'POST /api/agents/:id/start', of: anAgent('POST', '/start', {}) },
+  { route: 'POST /api/agents/:id/stop', of: anAgent('POST', '/stop', {}) },
+  { route: 'GET /api/agents/:id/terminal', of: anAgent('GET', '/terminal') },
+  { route: 'GET /api/tasks/:id', of: aTask('GET', '') },
+  { route: 'POST /api/tasks/:id/comments', of: aTask('POST', '/comments', { text: 'hi' }) },
+  { route: 'POST /api/tasks/:id/cancel', of: aTask('POST', '/cancel', {}) },
+  { route: 'GET /api/jobs/:id', of: aJob('GET', '') },
+  { route: 'POST /api/jobs/:id/cancel', of: aJob('POST', '/cancel'), companyOnly: true },
+  { route: 'POST /api/improvements/:id/take', of: anIdea('take'), companyOnly: true },
+  { route: 'POST /api/improvements/:id/dismiss', of: anIdea('dismiss'), companyOnly: true },
+  { route: 'GET /api/attachments/:id', of: aPicture },
+];
+
+/* Who asks about whose: closed in every case but their own agent and the full view. */
+const CASES: { name: string; viewer: Viewer; agent: Crew; closed: boolean }[] = [
+  { name: 'own plan, own department', viewer: 'ann', agent: 'mine', closed: false },
+  { name: "another's plan, own department", viewer: 'ann', agent: 'other', closed: true },
+  { name: 'own plan, other department', viewer: 'ann', agent: 'away', closed: true },
+  { name: "another's plan, other department", viewer: 'ann', agent: 'far', closed: true },
+  { name: 'department owner, own plan', viewer: 'olga', agent: 'owned', closed: false },
+  { name: "department owner, another's plan", viewer: 'olga', agent: 'other', closed: true },
+  { name: 'whole company, own plan', viewer: 'wes', agent: 'wide', closed: false },
+  { name: "whole company, another's plan", viewer: 'wes', agent: 'other', closed: true },
+  { name: 'delegate', viewer: 'lisa', agent: 'far', closed: false },
+  { name: 'CEO', viewer: 'ceo', agent: 'deputy', closed: false },
+];
+
+/* Lists, with what each person gets. */
+type Listed = { route: string; url: (c: AclCompany) => string; statuses: Partial<Record<Viewer, number>> };
+const ALL_OK = { ann: 200, olga: 200, wes: 200, lisa: 200, ceo: 200 };
+const WHOLE_ONLY = { ann: 403, olga: 403, wes: 200, lisa: 200, ceo: 200 };
+const LISTS: Listed[] = [
+  { route: 'GET /api/org', url: () => '/api/org', statuses: ALL_OK },
+  { route: 'GET /api/tasks', url: () => '/api/tasks?status=all', statuses: ALL_OK },
+  { route: 'GET /api/requests', url: () => '/api/requests', statuses: ALL_OK },
+  { route: 'GET /api/turns', url: () => '/api/turns', statuses: ALL_OK },
+  { route: 'GET /api/turns/current', url: () => '/api/turns/current', statuses: ALL_OK },
+  { route: 'GET /api/subscriptions', url: () => '/api/subscriptions', statuses: ALL_OK },
+  { route: 'GET /api/machines', url: () => '/api/machines', statuses: ALL_OK },
+  { route: 'GET /api/pool', url: () => '/api/pool', statuses: ALL_OK },
+  { route: 'GET /api/people', url: () => '/api/people', statuses: ALL_OK },
+  { route: 'GET /api/me', url: () => '/api/me', statuses: ALL_OK },
+  { route: 'GET /api/improvements', url: () => '/api/improvements', statuses: WHOLE_ONLY },
+  { route: 'GET /api/notebook', url: () => '/api/notebook', statuses: WHOLE_ONLY },
+  { route: 'GET /api/computer', url: () => '/api/computer', statuses: WHOLE_ONLY },
+  { route: 'GET /api/updates', url: () => '/api/updates', statuses: WHOLE_ONLY },
+  { route: 'GET /api/departments/:id/notebook', url: c => `/api/departments/${c.dev.id}/notebook`, statuses: ALL_OK },
+  { route: 'GET /api/departments/:id/tree', url: c => `/api/departments/${c.dev.id}/tree`, statuses: ALL_OK },
+  { route: 'GET /api/departments/:id/pipeline', url: c => `/api/departments/${c.dev.id}/pipeline`, statuses: { ann: 403, olga: 403, wes: 403, lisa: 200, ceo: 200 } },
+  { route: 'GET /api/departments/:id/roster', url: c => `/api/departments/${c.dev.id}/roster`, statuses: WHOLE_ONLY },
+  { route: 'GET /api/departments/:id/approval-policy', url: c => `/api/departments/${c.dev.id}/approval-policy`, statuses: ALL_OK },
+];
+
+/* Elsewhere, with the reason it is not a row above. */
+const ELSEWHERE: Record<string, string> = {
+  'GET /api/stream': 'agent-view-stream.test.ts: filtered per message',
+  'POST /api/requests/:id': 'agent-view-lists.test.ts: the request authority, 403 otherwise',
+  'POST /api/tasks': 'agent-view.test.ts: the answer is read as the person who gave it',
+  'POST /api/requests/:id/explained': 'the orchestrator alone',
+};
+
+/* Routes that show no agent and no work. Writes keep the rights they had; their answers name nothing of other agents. */
+const NO_AGENT_DATA: string[] = [
+  'POST /api/attachments', 'GET /api/attachments/file', 'POST /api/auth/login', 'POST /api/auth/logout',
+  'POST /api/computer/close', 'POST /api/computer/decline', 'POST /api/computer/open',
+  'PUT /api/departments/:id/approval-policy/:channel', 'POST /api/departments/:id/notebook', 'PATCH /api/departments/:id/notebook/:number', 'DELETE /api/departments/:id/notebook/:number',
+  'PUT /api/departments/:id/owner', 'PUT /api/departments/:id/repository', 'DELETE /api/departments/:id/repository', 'POST /api/departments/:id/staff',
+  'POST /api/departments/:id/teams', 'PATCH /api/departments/:id/teams/:teamId', 'DELETE /api/departments/:id/teams/:teamId', 'POST /api/departments/build',
+  'GET /api/health', 'GET /api/invites/:token', 'POST /api/invites/:token/accept',
+  'GET /api/link', 'PUT /api/link', 'DELETE /api/link', 'GET /api/link/names/:name',
+  'PATCH /api/machines/:id', 'GET /api/machines/:id/connections', 'POST /api/machines/:id/disconnect', 'POST /api/machines/:id/plans', 'POST /api/machines/:id/programs/update', 'POST /api/machines/command',
+  'GET /api/nodes/commands', 'POST /api/nodes/commands/:id/hide', 'POST /api/nodes/join', 'GET /api/nodes/socket', 'POST /api/nodes/update', 'DELETE /api/nodes/update',
+  'POST /api/notebook', 'PATCH /api/notebook/:number', 'DELETE /api/notebook/:number',
+  'GET /api/parts/:id/files/:name', 'PUT /api/parts/:id/files/:name',
+  'PATCH /api/people/:id', 'PUT /api/people/:id/ceo-delegate', 'POST /api/people/:id/invite', 'POST /api/people/invite',
+  'GET /api/setup', 'POST /api/setup', 'GET /api/setup/names/:name',
+  'POST /api/subscriptions', 'PATCH /api/subscriptions/:id', 'DELETE /api/subscriptions/:id', 'POST /api/subscriptions/:id/command', 'POST /api/subscriptions/:id/credential', 'POST /api/subscriptions/:id/orchestrator',
+  'GET /api/subscriptions/:id/recipients', 'POST /api/subscriptions/:id/signin', 'POST /api/subscriptions/:id/signin/stop', 'GET /api/subscriptions/:id/signin/terminal', 'POST /api/subscriptions/:id/test', 'POST /api/subscriptions/connect',
+  'POST /api/updates', 'DELETE /api/updates', 'POST /api/updates/check', 'GET /api/updates/current', 'GET /api/version', 'GET /install.sh', 'POST /mcp', 'GET /mcp', 'DELETE /mcp',
+];
+
+const call = (c: AclCompany, { method, url, payload }: Call, viewer: Viewer) => c.app.inject({ method, url, ...(payload ? { payload } : {}), ...as(c.tokens[viewer]) });
+
+/* A company with work in every corner: tasks, a turn, requests, notes, ideas and running parts of every agent. */
+async function busy() {
+  const c = await aclCompany();
+  const [turn] = await c.db.insert(turns).values({ companyId: c.companyId, number: 1, goal: 'Turn', status: 'open', messages: [{ by: 'Ivan', text: 'Secret words', at: new Date().toISOString() }], openedAt: new Date(Date.now() - 3_600_000) }).returning();
+  const [box] = await c.db.insert(machines).values({ companyId: c.companyId, personId: c.ids.wes, machineKey: 'wes-machine-12345', hostname: 'wes-box' }).returning();
+  const work: Partial<Record<Crew, typeof tasks.$inferSelect>> = {};
+  let number = 0;
+  for (const key of Object.keys(c.crew) as Crew[]) {
+    const agent = c.crew[key];
+    const task = await c.work(`Secret of ${agent.name}`, agent, agent.departmentId!);
+    work[key] = task;
+    await c.db.update(tasks).set({ turnId: turn!.id }).where(eq(tasks.id, task.id));
+    await ask(c.app.ctx, agent.id, task.id, { text: 'Please decide', kind: 'approval', approval: { channel: 'spend', kind: 'ads', amount: 1 } });
+    await c.db.insert(improvements).values({ companyId: c.companyId, agentId: agent.id, title: `Idea of ${agent.name}`, text: 'x' });
+    await addNote(c.app.ctx, agent.departmentId === c.dev.id ? departmentBook(c.dev) : departmentBook(c.sales), `Note ${number}`, { personId: null, byOrchestrator: false, agentId: agent.id });
+    await addNote(c.app.ctx, companyBook(c.companyId), `Company note ${number}`, { personId: null, byOrchestrator: false, agentId: agent.id });
+    const [job] = await c.db.insert(jobs).values({ companyId: c.companyId, subscriptionId: agent.subscriptionId!, agentId: agent.id, taskId: task.id, kind: 'conversation', prompt: 'x', timeoutMs: 1000, status: 'running', startedAt: new Date() }).returning();
+    const [run] = await c.db.insert(testRuns).values({ companyId: c.companyId, number: ++number, kind: 'tests', departmentId: agent.departmentId!, taskId: task.id, agentId: agent.id, jobId: job!.id, branch: 'main', command: 'echo ok', parts: 1, timeoutMs: 60_000, status: 'running' }).returning();
+    await c.db.insert(testParts).values({ runId: run!.id, companyId: c.companyId, part: 1, status: 'running', machineId: box!.id, startedAt: new Date() });
+  }
+  return { ...c, tasksOf: work as Record<Crew, typeof tasks.$inferSelect> };
+}
+
+/* What each person may read of the crew. */
+const SEEN: Partial<Record<Viewer, Crew[]>> = { ann: ['mine'], olga: ['owned'], wes: ['wide'] };
+
+describe('every real route', () => {
+  it('has its place in the table', async () => {
+    captured.length = 0;
+    await testApp();
+    const real = new Set(captured.flatMap(r => [r.method].flat().filter(m => m !== 'HEAD').map(m => `${String(m)} ${r.url}`)));
+    const placed = new Set([...POINTED.map(p => p.route), ...LISTS.map(l => l.route), ...Object.keys(ELSEWHERE), ...NO_AGENT_DATA]);
+    expect([...real].filter(r => !placed.has(r)).sort()).toEqual([]);
+    expect([...placed].filter(r => !real.has(r)).sort()).toEqual([]);
+  });
+});
+
+describe('one thing of one agent', () => {
+  it.each(POINTED)('$route', async ({ route, of, companyOnly }) => {
+    const c = await aclCompany();
+    const got: string[] = [];
+    /* Those that are closed first: what opens may change or remove what it is given. */
+    for (const { name, viewer, agent, closed } of [...CASES].sort((a, b) => Number(b.closed) - Number(a.closed))) {
+      const res = await call(c, await of(c, agent), viewer);
+      got.push(`${name}: ${res.statusCode}`);
+      const scoped = companyOnly && (viewer === 'ann' || viewer === 'olga');
+      if (closed || scoped) expect(res.statusCode, `${route}, ${name}`).toBe(403);
+      else expect(res.statusCode, `${route}, ${name}`).not.toBe(403);
+      if (closed) expect(res.body, `${route}, ${name}`).not.toContain(c.crew[agent].name);
+    }
+    lines.push(`| ${route} | ${got.join('; ')} |`);
+  });
+});
+
+describe('every list', () => {
+  it.each(LISTS)('$route shows each person only what they may see', async ({ route, url, statuses }) => {
+    const c = await busy();
+    const got: string[] = [];
+    for (const [viewer, status] of Object.entries(statuses) as [Viewer, number][]) {
+      const res = await c.get(url(c), c.tokens[viewer]);
+      got.push(`${viewer}: ${res.statusCode}`);
+      expect(res.statusCode, `${route} for ${viewer}`).toBe(status);
+      const seen = SEEN[viewer];
+      if (!seen) continue;
+      const hidden = (Object.keys(c.crew) as Crew[]).filter(k => !seen.includes(k));
+      for (const key of hidden) {
+        const words = [c.crew[key].id, c.crew[key].name, c.tasksOf[key].id, c.tasksOf[key].title];
+        for (const word of words) expect(res.body, `${route} for ${viewer}: ${word}`).not.toContain(word);
+      }
+      expect(res.body, `${route} for ${viewer}`).not.toContain('Secret words');
+      expect(res.body, `${route} for ${viewer}`).not.toContain(c.orchestrator.id);
+    }
+    lines.push(`| ${route} | ${got.join('; ')} |`);
+  });
+});
+
+afterAll(() => {
+  const file = process.env.HH_ACL_TABLE;
+  if (!file) return;
+  const elsewhere = Object.entries(ELSEWHERE).map(([route, why]) => `| ${route} | ${why} |`);
+  writeFileSync(file, ['| Route | Who gets what (real responses) |', '| --- | --- |', ...[...lines].sort(), ...elsewhere, '', `No agent or work data, rights unchanged: ${NO_AGENT_DATA.join(', ')}`, ''].join('\n'));
+});
