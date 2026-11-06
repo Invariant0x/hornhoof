@@ -649,5 +649,30 @@
       "fullSuiteStarted": false,
       "repeatCreated": false
     }
-  ]
+  ],
+  "compactFullRunProposal": {
+    "status": "NOT_EXECUTED",
+    "authorization": "Full pair NOT_AUTHORIZED; head requested exception via orchestrator",
+    "task": 378,
+    "branch": "task-378-fixed-pair-proposal",
+    "parts": 1,
+    "minutes": 120,
+    "control": "6d0c79b0ced4ab2fc4f771a46479680664d6b663",
+    "optimized": "b98035e6d1b6b75715a5839ff0a4ea243878e65a",
+    "commandFile": "docs/superpowers/reports/2026-11-06-compact-pair-command.sh.txt",
+    "commandSha256": "df0fb56755029e18dc9825e457219624bc24e0831fdab8b7e972b1719436aeaa",
+    "driverBytesUnchanged": true,
+    "driverNodeBuildBeforeCli": true,
+    "maxWorkers": 2,
+    "rawJournalAuthorDelivery": "NOT_PROVIDED: worker-local temporary files only",
+    "compactOutput": "all file/package timings, stages, hashes, resource summaries and bounded failure tails in native log",
+    "stdoutBudgetBytes": 716800,
+    "reservedBytes": 65536,
+    "old106NumericRecordSizeEstimateBytes": 252032,
+    "old106NumericRecordSizeEstimateRecords": 880,
+    "newCommandChecks": "NOT_RUN under explicit no-new-runs instruction",
+    "report": "2026-11-06-compact-pair-proposal.md",
+    "acceptedPerformanceResult": false,
+    "testOutcomeSummaries": "Original Vitest/TAP summaries retained; nonzero skip/todo/cancel detected as failure"
+  }
 }

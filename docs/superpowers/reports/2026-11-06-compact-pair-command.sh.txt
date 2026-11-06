@@ -1,0 +1,106 @@
+# DRAFT ONLY. No run is authorized by this file. Run exactly once only after the head's decision.
+# run_tests: task378, branch task-378-fixed-pair-proposal, parts1, minutes120.
+# The request also checks the exact published proposal SHA before executing this body.
+set -euo pipefail
+node --input-type=module <<'PAIR'
+import assert from 'node:assert/strict';
+import { spawn, execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { mkdtempSync, mkdirSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { gunzipSync } from 'node:zlib';
+
+const root = process.cwd();
+const control = '6d0c79b0ced4ab2fc4f771a46479680664d6b663';
+const optimized = 'b98035e6d1b6b75715a5839ff0a4ea243878e65a';
+const archive = join(root, 'docs/superpowers/reports/fixed-pair-assets/fixed-sources-6d0c79b0-b98035e6.tar.gz');
+const pinned = {
+  [archive]: '037b48a88284eebfca0f52c909731b338ab74cc45fe33972b882398614e5752d',
+  'scripts/benchmarks/linux-pair.mjs': '763cf461e67290355858d6f3064f2c6c9c14c93dfad0ae66255230110a6de293',
+  'scripts/benchmarks/linux-pair-evidence.mjs': 'ee255d499893cbbc814b016bee3806ceebaf3395f0924e570961ca7d66001ec9',
+};
+const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
+const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+// Reserve64KiB of the unchanged700KiB budget for runner command/clone lines and an INVALID footer.
+const budget = 700 * 1024 - 64 * 1024;
+let written = 0, overflow = false;
+function write(bytes) {
+  bytes = Buffer.from(bytes);
+  if (written + bytes.length > budget) { overflow = true; return; }
+  process.stdout.write(bytes); written += bytes.length;
+}
+function emit(kind, value) { write(kind + ' ' + JSON.stringify(value) + '\n'); }
+try {
+  assert.equal(process.platform, 'linux', 'Linux is required before any suite');
+  assert.equal(process.version, 'v22.23.4', 'Use the Node version from preflight369');
+  for (const [file, hash] of Object.entries(pinned)) assert.equal(sha256(readFileSync(file)), hash, 'Pinned payload differs: ' + file);
+  emit('HH_COMPACT_SCOPE', { source: git(root, 'rev-parse', 'HEAD'), control, optimized, pinned,
+    mode: 'one-part-sequential-four-logical-shards-per-variant', maxWorkers: 2, minutes: 120,
+    acceptedPerformanceResult: false, rawJournalDelivery: 'worker-local temporary files only; not author-readable export' });
+  const temp = mkdtempSync(join(tmpdir(), 'hh-378-full-'));
+  // The archive's exact bytes/member safety were verified by369; a changed archive fails the hash above.
+  execFileSync('tar', ['-xzf', archive, '-C', temp], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const bare = join(temp, 'source.git'), output = join(temp, 'local-driver-output'); mkdirSync(output);
+  assert.equal(git(bare, 'rev-parse', 'refs/heads/control'), control);
+  assert.equal(git(bare, 'rev-parse', 'refs/heads/optimized'), optimized);
+  git(bare, 'merge-base', '--is-ancestor', control, optimized);
+  git(root, 'fetch', '--no-tags', '--update-shallow', bare,
+    'refs/heads/control:refs/remotes/preflight/control', 'refs/heads/optimized:refs/remotes/preflight/optimized');
+  const stdout = [], stderr = [];
+  const child = spawn(process.execPath, ['scripts/benchmarks/linux-pair.mjs', control, optimized], { cwd: root,
+    env: { ...process.env, CI: 'true', NO_COLOR: '1', FORCE_COLOR: '0', VITEST_MAX_WORKERS: '2', HH_OUT: output },
+    stdio: ['ignore', 'pipe', 'pipe'] });
+  child.stdout.on('data', bytes => { stdout.push(bytes); write(bytes); });
+  child.stderr.on('data', bytes => { stderr.push(bytes); write(bytes); });
+  let spawnError;
+  child.once('error', error => { spawnError = error.message; });
+  const status = await new Promise(resolve => child.once('close', (code, signal) => resolve({ code: code ?? 1, signal })));
+  const consoleBytes = Buffer.concat(stdout), stderrBytes = Buffer.concat(stderr);
+  const frameLines = consoleBytes.toString().split('\n').filter(line => line.startsWith('HH_PAIR_EVIDENCE '));
+  assert.equal(frameLines.length, 1, 'Complete driver evidence footer is required');
+  const frame = JSON.parse(frameLines[0].slice('HH_PAIR_EVIDENCE '.length));
+  const gzipParts = frame.artifacts.filter(file => file.encoding === 'gzip').sort((a, b) => a.part - b.part);
+  assert.ok(gzipParts.length > 0, 'Complete local gzip journal is required for compaction');
+  const compressed = Buffer.concat(gzipParts.map(file => {
+    assert.match(file.name, /^[A-Za-z0-9._-]+$/, 'Invalid local evidence filename');
+    const bytes = readFileSync(join(output, file.name));
+    assert.equal(bytes.length, file.bytes); assert.equal(sha256(bytes), file.sha256); return bytes;
+  }));
+  const journal = gunzipSync(compressed), records = journal.toString().trimEnd().split('\n').map(line => JSON.parse(line));
+  const of = kind => records.filter(record => record.kind === kind).map(record => record.value);
+  const rawOutputs = of('HH_PAIR_OUTPUT').map(value => {
+    const bytes = Buffer.from(value.rawBase64, 'base64'); assert.equal(sha256(bytes), value.rawSha256);
+    const summaries = bytes.toString().split('\n').filter(line => /^\s*(Test Files|Tests|Duration)\s|^# (tests|suites|pass|fail|cancelled|skipped|todo)\s/.test(line));
+    return { variant: value.variant, part: value.part, stage: value.stage, bytes: bytes.length, sha256: value.rawSha256, summaries };
+  });
+  const stages = of('HH_PAIR_STAGE'), samples = of('HH_PAIR_RESOURCE');
+  const resources = stages.map(stage => {
+    const found = samples.filter(sample => sample.variant === stage.variant && sample.part === stage.part && sample.stage === stage.stage);
+    const memory = found.filter(sample => sample.memoryCurrent !== null).map(sample => Number(sample.memoryCurrent)).filter(Number.isFinite);
+    return { variant: stage.variant, part: stage.part, stage: stage.stage, samples: found.length,
+      first: found[0], last: found.at(-1),
+      memoryCurrentRange: memory.length ? [Math.min(...memory), Math.max(...memory)] : null };
+  });
+  // Stages/results were already relayed live. Keep every numeric file/package timing and command, without raw output.
+  const keep = new Set(['HH_PAIR_ENV', 'HH_PAIR_CONFIG', 'HH_PAIR_PART', 'HH_PAIR_COMMAND', 'HH_PAIR_TIMING', 'HH_PAIR_CHILD_ERROR']);
+  const expectedCounts = [['apps/node', 1712], ['apps/server', 2965], ['apps/web', 1430], ['packages/protocol', 218]];
+  const countsMatch = ['control', 'optimized'].every(variant => JSON.stringify(Object.entries(frame.result.counts?.[variant] ?? {}).sort()) === JSON.stringify(expectedCounts));
+  const skippedOrTodo = rawOutputs.some(row => row.summaries.some(line => /\b[1-9]\d*\s+(skipped|todo)\b|^# (skipped|todo|cancelled)\s+[1-9]/.test(line)));
+  const diagnostics = of('HH_PAIR_FAILED_OUTPUT').map(value => ({ variant: value.variant, part: value.part, stage: value.stage,
+    originalChars: value.output.length, excerptTruncated: value.output.length > 2048, tail: value.output.slice(-2048) }));
+  const packet = { version: 1, result: frame.result, driverStatus: { ...status, spawnError }, expectedStages: 62,
+    actualStages: stages.length, countsMatch, expectedCounts, skippedOrTodo, records: records.filter(record => keep.has(record.kind)), resources,
+    rawOutputs, diagnostics, localArtifacts: frame.artifacts, journal: { bytes: journal.length, sha256: sha256(journal) },
+    driverConsole: { bytes: consoleBytes.length, sha256: sha256(consoleBytes), stderrBytes: stderrBytes.length, stderrSha256: sha256(stderrBytes) },
+    rawJournalDelivery: 'not exported; hash is not the original bytes', acceptedPerformanceResult: false };
+  const line = 'HH_PAIR_COMPACT ' + JSON.stringify(packet) + '\n';
+  if (overflow || written + Buffer.byteLength(line) > budget) throw new Error('Complete compact report exceeds the unchanged console budget');
+  emit('HH_PAIR_COMPACT', packet);
+  process.exitCode = status.code || status.signal || spawnError || !frame.result.valid || frame.result.failed || !countsMatch || skippedOrTodo || stages.length !== 62 ? 1 : 0;
+} catch (error) {
+  // Never trim numeric evidence or promote an incomplete report to PASS.
+  console.log('HH_PAIR_COMPACT_INVALID ' + JSON.stringify({ message: error.message, written, overflow, acceptedPerformanceResult: false }));
+  process.exitCode = 1;
+}
+PAIR
