@@ -36,4 +36,3 @@ export async function planningEnvironment(options: { whole?: boolean; pythonFina
     durations: units.map(u => ({ suiteId: u.suiteId, file: u.file, ms: 30_000 })),
     availableMachines: 3, costs: { setupMs: 100, collectMs: 10 }, unknownFileMs: 30_000 };
 }
-
