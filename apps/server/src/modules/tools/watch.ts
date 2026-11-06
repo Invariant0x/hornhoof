@@ -18,6 +18,7 @@ import type { Grant } from '../templates/load.js';
 import { PROGRAM_OPERATOR_ROLE } from '@hornhoof/protocol/program-operator';
 import { registerOperatorTools } from '../program-operator/tools.js';
 import { INSTALL_HINT, installsIn, MISSING_HINT, missingIn, type Missing } from './stumbles.js';
+import { watchedTasks } from './watch-tasks.js';
 
 type ToolJob = { id: string; companyId: string; agentId: string; agentKind: string; roleKey?: string | null };
 
@@ -109,17 +110,15 @@ export function registerWatchTools(server: McpServer, ctx: Ctx, job: ToolJob, gr
       {
         description:
           'Every agent of the company as it is now: department, role, whether it is on and ready (and why not), until when its plan is at its limit, whether its machine is getting ready for an update (machineDrain: its turns wait, it has not hung), whether a turn runs and since when, ' +
-          'turns waiting, the open tasks it holds with when each last moved, its last activity, how its last turn ended, program state and signs of life, failures, waiting retries, and whether a safe program restart is allowed with the reason when it is not.',
+          'turns waiting, the open tasks it holds with when each last moved, its last activity, how its last turn ended, program state and signs of life, failures, waiting retries, and whether a safe program restart is allowed with the reason when it is not. ' +
+          "Each task's waitsFor lists only open prerequisite numbers in that task's department; externalWait gives its recorded reason and times, and waitingForPerson marks an open person request. Count a task as waiting for department work only when waitsFor is nonempty and neither a live externalWait nor waitingForPerson holds it.",
       },
       async () => {
         const staff = await db.select().from(agents).where(and(eq(agents.companyId, job.companyId), isNull(agents.removedAt)));
         const ids = staff.map(a => a.id);
         if (!ids.length) return json([]);
         const names = await deptNames();
-        const held = await db
-          .select({ number: tasks.number, title: tasks.title, status: tasks.status, updatedAt: tasks.updatedAt, holder: tasks.assigneeAgentId })
-          .from(tasks)
-          .where(and(eq(tasks.companyId, job.companyId), inArray(tasks.assigneeAgentId, ids), notInArray(tasks.status, [...CLOSED, 'planned'])));
+        const held = await watchedTasks(db, job.companyId, ids);
         const out = [];
         /* Each agent by its own indexes, so a round costs the same however long the company has run. */
         for (const a of staff) {
