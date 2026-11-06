@@ -1151,3 +1151,51 @@ describe('helpers', () => {
     expect(lastUrl('no link')).toBeNull();
   });
 });
+
+describe("a program with no terminal, in a task's folder", () => {
+  const taskFolder = () => {
+    const programDir = join(work, 'repo');
+    mkdirSync(programDir);
+    writeFileSync(join(programDir, 'AGENTS.md'), 'The rules of the repository.\n');
+    return programDir;
+  };
+  const CASES = [
+    ['claude', () => join(work, '.hh-instructions.md'), ''],
+    ['codex', () => join(work, 'AGENTS.md'), ''],
+    ['kimi', () => join(work, 'repo', '.kimi-code', 'AGENTS.md'), ''],
+    ['antigravity', () => join(work, 'repo', '.agents', 'rules', 'hornhoof.md'), '---\ntrigger: always_on\n---\n\n'],
+  ] as const;
+
+  it.each(CASES)('%s works there, and leaves the repository\'s AGENTS.md alone', async (provider, told, head) => {
+    const programDir = taskFolder();
+    await adapter(provider).run(input({ programDir, instructions: 'Be brief.' }));
+    expect(lastRun().cwd).toBe(programDir);
+    expect(readFileSync(told(), 'utf8')).toBe(`${head}Be brief.\n`);
+    expect(readFileSync(join(programDir, 'AGENTS.md'), 'utf8')).toBe('The rules of the repository.\n');
+  });
+
+  it('points Codex at the context folder as its root, starting and going on', async () => {
+    const programDir = taskFolder();
+    await adapter('codex').run(input({ programDir, instructions: 'Be brief.' }));
+    expect(lastRun().argv).toEqual(expect.arrayContaining(['-C', programDir, 'project_root_markers=[".hh-context-root"]']));
+    await adapter('codex').run(input({ programDir, sessionId: 'sess-1', instructions: 'Be brief.' }));
+    expect(lastRun().argv).toContain('project_root_markers=[".hh-context-root"]');
+  });
+
+  it('gives Antigravity its tools in the task\'s folder', async () => {
+    const programDir = taskFolder();
+    await adapter('antigravity').run(input({ programDir, tools: { url: 'http://x/mcp', token: 'tok-1' } }));
+    expect(lastRun().agyMcp!.json).toEqual({ mcpServers: { hornhoof: { serverUrl: 'http://x/mcp', headers: { Authorization: 'Bearer tok-1' } } } });
+    expect(existsSync(join(programDir, '.agents', 'mcp_config.json'))).toBe(false);
+    expect(existsSync(join(work, '.agents'))).toBe(false);
+  });
+
+  it('keeps the rule of Antigravity under what it reads, with its head', async () => {
+    const programDir = taskFolder();
+    const instructions = 'я'.repeat(11_990);
+    await adapter('antigravity').run(input({ programDir, instructions }));
+    expect(Buffer.byteLength(readFileSync(join(programDir, '.agents', 'rules', 'hornhoof.md')))).toBeLessThan(24_000);
+    expect(existsSync(join(work, '.hh-instructions.md'))).toBe(true);
+  });
+});
+

@@ -23,7 +23,7 @@ function shell(routes: Record<string, unknown> = {}) {
 }
 
 async function openTask(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(await screen.findByRole('button', { name: /^Tasks/ }));
+  await user.click(await screen.findByRole('button', { name: /^(Tasks|Задачи)/ }));
   await user.click(await screen.findByRole('button', { name: /#12/ }));
   return screen.findByRole('complementary', { name: '#12 Checkout API' });
 }
@@ -348,6 +348,39 @@ describe('a task', () => {
     const panel = await openTask(user);
     await user.click(within(panel).getByRole('button', { name: /#13 Refunds/ }));
     expect(await screen.findByRole('complementary', { name: '#13 Refunds' })).toBeInTheDocument();
+  });
+
+  it.each([
+    ['en', 'Can start now'],
+    ['ru', 'Можно начать сейчас'],
+  ])('shows the independent part and its linked child in %s', async (language, heading) => {
+    localStorage.setItem('hh-lang', language);
+    const user = userEvent.setup();
+    const independentPart = {
+      title: 'Contract tests', brief: 'Test first.', body: 'Cover the API contract.',
+      executor: { id: 'b1', name: 'Bruno', kind: 'worker' as const, role: null },
+      task: { id: 't13', number: 13, title: 'Contract tests', status: 'open' as const },
+    };
+    shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, independentPart } }] });
+    const panel = await openTask(user);
+    const part = within(panel).getByRole('region', { name: heading });
+    expect(part).toHaveTextContent('Cover the API contract.');
+    expect(part).toHaveTextContent('Bruno');
+    expect(within(part).getByRole('button', { name: '#13 Contract tests' })).toBeInTheDocument();
+    expect(part).toHaveTextContent(language === 'ru' ? 'Не начата' : 'Not started');
+  });
+
+  it.each([
+    ['en', 'Can start now'],
+    ['ru', 'Можно начать сейчас'],
+  ])('shows why no independent part exists in %s and nothing for an old task', async (language, heading) => {
+    localStorage.setItem('hh-lang', language);
+    const user = userEvent.setup();
+    shell({ 'GET /api/tasks/t12': [200, { task: { ...TASK_DETAIL, independentPart: { reason: 'The same author owns every file.' } } }] });
+    const panel = await openTask(user);
+    expect(within(panel).getByRole('region', { name: heading })).toHaveTextContent('The same author owns every file.');
+    expect(within(panel).getByRole('region', { name: heading })).not.toHaveTextContent('#13');
+    expect(within(panel).getByRole('region', { name: heading })).not.toHaveTextContent('Bruno');
   });
 
   it('closes with its cross and with Escape', async () => {

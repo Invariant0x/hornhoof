@@ -8,6 +8,7 @@ import { encryptSecret } from '../../crypto/secrets.js';
 import type { Db } from '../../db/client.js';
 import { agents, attachments, departments, jobs, machines, nodes, people, planCredentials, programDeliveries, programInstances, programOperatorActions, programOperatorCases, programOperatorSignals, subscriptions, teams, testParts, type SUBSCRIPTION_STATUSES } from '../../db/schema.js';
 import { ApiError } from '../../errors.js';
+import { releaseLeftProgram } from '../agents/left-programs.js';
 import { runningAgents } from '../agents/running.js';
 import { servesWholeCompany } from '../tools/staff.js';
 import { orchestratorOf, pumpWaiting } from '../conversation/queue.js';
@@ -152,8 +153,10 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
     effort: sql<string | null>`case when (select ${subscriptions.provider} from ${subscriptions} where ${subscriptions.id} = ${agents.subscriptionId}) = ${sub.provider} then ${agents.effort} end`,
   });
 
-  /* The orchestrator on a new subscription: his waiting turns go out on it, and when he had none, the tasks he missed. */
-  async function orchestratorBack(before: { id: string; subscriptionId: string | null } | null) {
+  /* The orchestrator on a new subscription: his program on the old one goes once it is idle, his waiting turns go out on the new
+     one, and when he had none, the tasks he missed. */
+  async function orchestratorBack(before: { id: string; subscriptionId: string | null } | null, plan: string) {
+    if (before?.subscriptionId && before.subscriptionId !== plan) await releaseLeftProgram(ctx, before.id, before.subscriptionId);
     if (before && !before.subscriptionId) await resumeAgent(ctx, before.id);
     await pumpWaiting(ctx);
   }
@@ -195,7 +198,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
       if (target.kind === 'orchestrator') await tx.update(agents).set(orchestratorOn({ id: sub!.id, provider: body.provider })).where(eq(agents.kind, 'orchestrator'));
       return sub!.id;
     });
-    if (target.kind === 'orchestrator') await orchestratorBack(orchestratorBefore);
+    if (target.kind === 'orchestrator') await orchestratorBack(orchestratorBefore, id);
     await tryPlaceOperator(ctx, me.companyId);
 
     reply.code(201);
@@ -239,7 +242,7 @@ export function subscriptionRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (!servesWholeCompany(sub, owner?.scopeKind)) throw notCompanyLevel();
     const before = await orchestratorOf(ctx, me.companyId);
     await db.update(agents).set(orchestratorOn(sub)).where(eq(agents.kind, 'orchestrator'));
-    await orchestratorBack(before);
+    await orchestratorBack(before, sub.id);
     ctx.bus.accessChanged(me.companyId);
     return { subscription: await subView(db, online, sub.id, me) };
   });

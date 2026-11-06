@@ -4,7 +4,7 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { MIGRATIONS } from '../src/db/client.js';
-import { migrationsBefore } from './migrations-before.js';
+import { migrationsBefore, migrationsThrough } from './migrations-before.js';
 
 const columnOf = async (db: ReturnType<typeof drizzle>) =>
   (await db.execute(sql`select data_type, is_nullable, column_default from information_schema.columns where table_name = 'departments' and column_name = 'repo_full_test_command'`)).rows;
@@ -30,7 +30,7 @@ describe("the repository's full test command", () => {
     const rows = async () => (await db.execute(sql`select to_jsonb(d) - 'repo_full_test_command' as data from departments d`)).rows;
     const before = await rows();
 
-    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await migrate(db, { migrationsFolder: await migrationsThrough('repo_full_test_command') });
 
     expect(await rows()).toEqual(before);
     expect((await db.execute(sql`select repo_full_test_command from departments`)).rows).toEqual([{ repo_full_test_command: null }]);

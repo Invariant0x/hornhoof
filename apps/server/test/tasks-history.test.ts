@@ -49,7 +49,7 @@ async function company() {
 
   const parent = (await createTask(ctx, { personId: ceo!.id }, { title: 'Payments', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: head.id })).task;
   const member = async (title: string, executor: string, after: string[] = []) =>
-    (await createTask(ctx, { agentId: head.id }, { title, brief: '', body: '', departmentId: dev!.id, parentId: parent.id, assigneeAgentId: executor, executor: true, gates: [rita.id], after })).task;
+    (await createTask(ctx, { agentId: head.id }, { title, brief: '', body: '', departmentId: dev!.id, parentId: parent.id, assigneeAgentId: executor, executor: true, gates: [rita.id], after, ...(after.length ? { independentNone: 'Genuine dependency in the existing behavior test.' } : {}) })).task;
   const read = async (id: string) => (await db.select().from(tasks).where(eq(tasks.id, id)))[0]!;
   const started = async (id: string) => (await db.select().from(taskEvents).where(and(eq(taskEvents.taskId, id), eq(taskEvents.kind, 'started')))).map(e => e.text);
   return { app, ctx, db, companyId, ceo: ceo!, orchestrator: orchestrator!, dev: dev!, open: open!, head, bruno, tess, rex, rita, parent, member, read, started };
@@ -80,7 +80,7 @@ describe('the move path in a company with a long history', () => {
     expect((await c.read(docs.id)).version).toBeGreaterThan(docs.version);
 
     /* Cancelled: whoever made each task that waits for it hears so, the orchestrator for the CEO's. */
-    const ceos = (await createTask(c.ctx, { personId: c.ceo.id }, { title: 'Launch', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.head.id, after: [schema.id] })).task;
+    const ceos = (await createTask(c.ctx, { personId: c.ceo.id }, { title: 'Launch', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.head.id, after: [schema.id], independentNone: 'Genuine dependency in the existing behavior test.' })).task;
     const gone = await cancel(c.ctx, { personId: c.ceo.id }, schema.id, 'Not needed.');
     const told = gone.wakes.filter(w => w.why === 'after_cancelled').map(w => [w.agentId, w.taskId, w.text]);
     expect(told).toEqual([
