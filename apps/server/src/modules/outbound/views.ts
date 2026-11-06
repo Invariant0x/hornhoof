@@ -422,14 +422,13 @@ async function loadMessageDtos(
   return msgs.map(m => toMessageDto(m, revMap, attemptMap, channelMap, accountMap));
 }
 
+const approvalMessageEntry = (row: ApprovalRow): readonly [string, ApprovalRow][] =>
+  row.messageId ? [[row.messageId, row]] : [];
+
 async function loadApprovalsByMessageId(db: Db, msgIds: readonly string[]): Promise<Map<string, ApprovalRow>> {
   if (msgIds.length === 0) return new Map();
   const rows = await db.select().from(outboundApprovals).where(inArray(outboundApprovals.messageId, [...msgIds]));
-  const map = new Map<string, ApprovalRow>();
-  for (const row of rows) {
-    if (row.messageId) map.set(row.messageId, row);
-  }
-  return map;
+  return new Map(rows.flatMap(approvalMessageEntry));
 }
 
 function indexFirstClassification(rows: readonly ClassificationRow[]): Map<string, ClassificationRow> {
@@ -441,13 +440,11 @@ function indexFirstClassification(rows: readonly ClassificationRow[]): Map<strin
   return map;
 }
 
-function indexTicketReplies(rows: readonly MessageRow[]): Map<string, MessageRow> {
-  const map = new Map<string, MessageRow>();
-  for (const row of rows) {
-    if (row.ticketId && row.ticketRevision !== null) map.set(pairKey(row.ticketId, row.ticketRevision), row);
-  }
-  return map;
-}
+const ticketReplyEntry = (row: MessageRow): readonly [string, MessageRow][] =>
+  row.ticketId ? [[`${row.ticketId}:${String(row.ticketRevision)}`, row]] : [];
+
+const indexTicketReplies = (rows: readonly MessageRow[]): Map<string, MessageRow> =>
+  new Map(rows.flatMap(ticketReplyEntry));
 
 function classificationFields(cls: ClassificationRow | undefined) {
   return cls ? { classId: cls.classId, reasonCodes: cls.reasonCodes } : { classId: null, reasonCodes: [] };

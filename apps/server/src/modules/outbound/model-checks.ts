@@ -318,13 +318,11 @@ async function fetchCatalogEntries(db: Pick<Db, 'select'>, companyId: string, en
     .where(and(eq(outboundCatalogRevisions.companyId, companyId), inArray(outboundCatalogRevisions.entryId, [...entryIds])));
 }
 
-function indexDiscounts(rows: readonly CatalogRow[]): Map<string, DiscountValue> {
-  const map = new Map<string, DiscountValue>();
-  for (const row of rows) {
-    if (row.value.kind === 'discount') map.set(row.entryId, row.value);
-  }
-  return map;
-}
+const discountEntry = (row: CatalogRow): readonly [string, DiscountValue][] =>
+  row.value.kind === 'discount' ? [[row.entryId, row.value]] : [];
+
+const indexDiscounts = (rows: readonly CatalogRow[]): Map<string, DiscountValue> =>
+  new Map(rows.flatMap(discountEntry));
 
 function toReviewFact(
   block: MessageDocument['blocks'][number],
