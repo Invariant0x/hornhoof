@@ -127,11 +127,14 @@ const ELSEWHERE: Record<string, string> = {
   'POST /api/waits/:id/replan': 'wait-policy-routes.test.ts: who answers for it, 403 otherwise',
   'GET /api/departments/:id/wait-policy': 'wait-policy-routes.test.ts: as the department',
   'PUT /api/departments/:id/wait-policy/:kind': 'wait-policy-routes.test.ts: who may change the department, 403 otherwise',
+  'GET /api/outbound': 'outbound-views.test.ts: channels and messages of the departments the person may see',
+  'GET /api/requests/:id/outbound-approval': 'outbound-views.test.ts: whoever may open the request',
 };
 
 /* Routes that show no agent and no work. Writes keep the rights they had; their answers name nothing of other agents. */
 const NO_AGENT_DATA: string[] = [
   'POST /api/attachments', 'GET /api/attachments/file', 'POST /api/auth/login', 'POST /api/auth/logout',
+  'POST /api/outbound/accounts', 'POST /api/outbound/accounts/:id/events', 'POST /api/outbound/accounts/:id/bind', 'POST /api/outbound/accounts/:id/release', 'POST /api/outbound/accounts/:id/revoke', 'POST /api/outbound/accounts/:id/rotate', 'POST /api/outbound/attempts/:id/settle', 'GET /api/outbound/channels/:id/accounts',
   'POST /api/outbound/messages', 'GET /api/outbound/messages/:id', 'POST /api/outbound/channels', 'POST /api/outbound/channels/:id/policies', 'POST /api/outbound/channels/:id/stop', 'POST /api/outbound/channels/:id/reopen',
   'POST /api/outbound/catalog', 'POST /api/outbound/catalog/:id/publish', 'POST /api/outbound/catalog/:id/revoke', 'POST /api/outbound/contacts', 'POST /api/outbound/contacts/:id/suppress', 'POST /api/outbound/permissions/:id/revoke',
   'GET /api/outbound/unsubscribe/*', 'POST /api/outbound/unsubscribe/*',
