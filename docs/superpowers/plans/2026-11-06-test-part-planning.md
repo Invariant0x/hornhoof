@@ -31,10 +31,10 @@ Files: create apps/server/src/modules/testruns/plan.ts and apps/server/test/test
 
 Interface: planTestParts({units, durations, availableMachines, costs:{setupMs,collectMs}, unknownFileMs}) returns nonempty parts with each selected unit exactly once, timing provenance, one-machine estimate, evaluated alternatives and a reason. Zero available machines produces one queued part, not a readiness claim. Whole-package selectionUnit groups remain indivisible. Equal-cost alternatives choose fewer parts.
 
-- [ ] Write behavioral tests for small/large runs, free/busy capacity, balanced uneven files, ten-part cap, extra-machine costs, unknown/zero timings, whole-package grouping, deterministic selection and invalid inputs.
-- [ ] Publish a minimal unimplemented entry and observe the targeted tests fail through run_tests.
-- [ ] Implement the cost comparison and balancing, then remotely verify tests/coverage/types/test-types/lint/CRAP/dryer.
-- [ ] Record exact source/run/part/stage and resource facts.
+- [x] Write behavioral tests for small/large runs, free/busy capacity, balanced uneven files, ten-part cap, extra-machine costs, unknown/zero timings, whole-package grouping, deterministic selection and invalid inputs.
+- [x] Publish a minimal unimplemented entry and observe the targeted tests fail through run_tests (751, 22/22).
+- [x] Implement the cost comparison and balancing, then remotely verify tests/coverage/types/test-types/lint/CRAP/dryer (798, 51/51 combined).
+- [x] Record exact source/run/part/stage and resource facts (798 on 8f54ed0705477aeb16ee75e6b19faf7b47d849d2).
 
 ### Increment 2: environment and history adapters
 
@@ -44,6 +44,8 @@ Files: new focused modules beside plan.ts and tests beside test-run-plan.test.ts
 - [ ] Write RED cases for scoped historical timing lookup, Vitest and pytest file selections, paths with spaces, whole-package units and unsupported split descriptions.
 - [ ] Implement only the agreed adapters, without a second inventory or arbitrary shell command/image authority.
 - [ ] Verify narrow adapter and existing environment regressions remotely, and hand the checked signature/SHA to staging.
+
+CLI acceptance lives in test/test-run-invocations.cli.ts with vitest.run-planning.config.ts because it requires a prepared fixture-local pytest interpreter. This separate fixture suite is not yet registered in the product descriptor; register its runtime and outside-graph node-helper dependency in the agreed serial integration before claiming final acceptance. The child fixture calls the existing node buildTestInvocation over literal descriptor data; it is not another production runner. Synthetic fixture weights are not performance measurements. Native Vitest --shard is checked separately from weighted explicit file lists; the latter must not be sharded a second time. Raw assertion/setup JSON and assertion/collection JUnit captures are format examples for staging, not culprit authority or new failure wire.
 
 ### Increment 3: final phases and runner integration
 
