@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LanguageProvider } from '../src/i18n';
@@ -17,6 +17,40 @@ describe('People', () => {
     expect(screen.getAllByRole('columnheader').map(h => h.textContent)).toEqual(['Name', 'Title', 'Access', 'Status', 'Actions']);
     expect(within(rowOf('Sasha')).getByText('Marketing / Social')).toBeInTheDocument();
     expect(within(rowOf('Sasha')).getByText('Invited')).toBeInTheDocument();
+  });
+
+  it('updates only your own row when your name changes outside this screen', async () => {
+    mockApi({ 'GET /api/people': [200, { people: PEOPLE }], 'GET /api/org': [200, ORG_WITH_TEAMS] });
+    const view = render(<People me={ME} />);
+    await screen.findByRole('cell', { name: 'Ivan' });
+    view.rerender(<People me={{ ...ME, person: { ...ME.person, name: 'Ivan K' } }} />);
+    expect(screen.getByRole('cell', { name: 'Ivan K' })).toBeInTheDocument();
+    expect(screen.queryByRole('cell', { name: 'Ivan' })).not.toBeInTheDocument();
+    expect(within(rowOf('Maria')).getByRole('cell', { name: 'Deputy CEO' })).toBeInTheDocument();
+    expect(within(rowOf('Sasha')).getByRole('cell', { name: 'SMM' })).toBeInTheDocument();
+  });
+
+  it('keeps the loaded names when your name has not changed', async () => {
+    const people = [{ ...PEOPLE[0]!, name: 'Ivan K' }, ...PEOPLE.slice(1)];
+    mockApi({ 'GET /api/people': [200, { people }], 'GET /api/org': [200, ORG_WITH_TEAMS] });
+    const view = render(<People me={ME} />);
+    await screen.findByRole('cell', { name: 'Ivan K' });
+    view.rerender(<People me={{ ...ME, person: { ...ME.person } }} />);
+    expect(screen.getByRole('cell', { name: 'Ivan K' })).toBeInTheDocument();
+    expect(screen.queryByRole('cell', { name: 'Ivan' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the people request pending when your name changes before it loads', async () => {
+    let finish!: (reply: [number, unknown]) => void;
+    mockApi({
+      'GET /api/people': () => new Promise(resolve => { finish = resolve; }),
+      'GET /api/org': [200, ORG_WITH_TEAMS],
+    });
+    const view = render(<People me={ME} />);
+    view.rerender(<People me={{ ...ME, person: { ...ME.person, name: 'Ivan K' } }} />);
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    await act(async () => { finish([200, { people: PEOPLE }]); });
+    expect(await screen.findByRole('cell', { name: 'Ivan' })).toBeInTheDocument();
   });
 
   it('invites a person to two departments by checkboxes', async () => {
