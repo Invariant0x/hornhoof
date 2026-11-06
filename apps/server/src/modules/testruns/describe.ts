@@ -1,4 +1,4 @@
-import { MAX_TEST_PARTS, EnvironmentSnapshot, TestExecution, supportsTestProfile, validateEnvironmentDescription, type EnvironmentDescription, type EnvironmentProblem, type RepositoryScope, type RunKind, type RuntimeCapability, type TestEnvironmentReceipt, type TestsDescribed, type Workspace } from '@hornhoof/protocol';
+import { MAX_TEST_PARTS, EnvironmentSnapshot, TestExecution, TestEnvironmentReceipt, supportsTestProfile, validateEnvironmentDescription, type EnvironmentDescription, type EnvironmentProblem, type RepositoryScope, type RunKind, type RuntimeCapability, type TestsDescribed, type Workspace } from '@hornhoof/protocol';
 import { randomUUID } from 'node:crypto';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
@@ -158,16 +158,29 @@ export async function pumpDescriptions(ctx: Ctx, open: (companyId: string) => Pr
 function receiptIdentity(snapshot: EnvironmentSnapshot, receipt: TestEnvironmentReceipt): boolean {
   return receipt.commitSha === snapshot.description.commitSha && receipt.manifestHash === snapshot.description.manifestHash;
 }
-function receiptSelection(selection: TestEnvironmentSelection, receipt: TestEnvironmentReceipt): boolean {
-  return receipt.kind === selection.selection.kind && receipt.suiteId === selection.selection.suiteId && JSON.stringify(receipt.files) === JSON.stringify(selection.selection.files);
+function receiptSelection(snapshot: EnvironmentSnapshot, selection: TestEnvironmentSelection, receipt: TestEnvironmentReceipt): boolean {
+  if (receipt.version === 1) {
+    const assigned = selection.selection;
+    return 'files' in assigned && receipt.kind === assigned.kind && receipt.suiteId === assigned.suiteId && JSON.stringify(receipt.files) === JSON.stringify(assigned.files);
+  }
+  const assigned = TestExecution.safeParse({ snapshot, selection: selection.selection }), reported = TestExecution.safeParse({ snapshot, selection: receipt.selection });
+  return receipt.profile === snapshot.profile && assigned.success && reported.success && JSON.stringify(assigned.data.selection) === JSON.stringify(reported.data.selection);
+}
+function receiptOutcomes(snapshot: EnvironmentSnapshot, receipt: TestEnvironmentReceipt, message: Extract<import('@hornhoof/protocol').NodeMessage, { type: 'tests.done' }>): boolean {
+  if (receipt.version === 1) return true;
+  const preparation = snapshot.description.manifest.execution?.oncePreparation;
+  const count = receipt.selection.kind === 'batch' ? receipt.selection.selections.length : (preparation?.suiteIds.length ?? 0) + (preparation?.commands.length ?? 0);
+  if (message.commit !== receipt.commitSha || receipt.outcomes.length !== count) return false;
+  return !message.ok || (message.exitCode === 0 && message.error === null && receipt.outcomes.every(outcome => outcome.status === 'passed'));
 }
 function receiptRuntimes(snapshot: EnvironmentSnapshot, receipt: TestEnvironmentReceipt, known: RuntimeCapability[]): boolean {
   return supportsTestProfile(snapshot, receipt.runtimes) && receipt.runtimes.every(actual => known.some(runtime => runtime.id === actual.id && runtime.fingerprint === actual.fingerprint && runtime.version === actual.version));
 }
 export function productReceipt(snapshot: EnvironmentSnapshot | null, selection: TestEnvironmentSelection | null, message: Extract<import('@hornhoof/protocol').NodeMessage, { type: 'tests.done' }>, known: RuntimeCapability[]): TestEnvironmentReceipt | null {
-  const receipt = message.environmentReceipt;
-  if (!snapshot || !selection || !receipt) return null;
-  return receiptIdentity(snapshot, receipt) && receiptSelection(selection, receipt) && receiptRuntimes(snapshot, receipt, known) ? receipt : null;
+  const parsed = TestEnvironmentReceipt.safeParse(message.environmentReceipt);
+  if (!snapshot || !selection || !parsed.success) return null;
+  const receipt = parsed.data;
+  return receiptIdentity(snapshot, receipt) && receiptSelection(snapshot, selection, receipt) && receiptOutcomes(snapshot, receipt, message) && receiptRuntimes(snapshot, receipt, known) ? receipt : null;
 }
 export function resetDescriptionDelivery(ctx: Ctx): void { sent.get(ctx)?.clear(); }
 
