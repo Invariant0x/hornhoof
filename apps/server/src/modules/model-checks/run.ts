@@ -1,6 +1,6 @@
-import { CheckReceipt, type Case, type CheckBinding, type CheckInput, type CheckResult, type CheckUnavailable } from '@hornhoof/protocol';
+import { canonicalJson, CheckReceipt, type Case, type CheckBinding, type CheckInput, type CheckResult, type CheckUnavailable } from '@hornhoof/protocol';
 import type { Dataset } from './dataset.js';
-import { bindingDigest, canonicalJson } from './lifecycle.js';
+import { bindingDigest } from './lifecycle.js';
 import { decide, scoreCases, type Counts, type Decision, type Scored, type Thresholds } from './score.js';
 
 /* The port of a fresh, independent model call: #446 gives the call and #447 the evaluator. */

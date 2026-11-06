@@ -94,6 +94,8 @@ export type ErrorReason =
   | 'task_not_yours'
   | 'test_mode_conflict'
   | 'task_invalid'
+  | 'urgent_not_allowed'
+  | 'urgent_follows_parent'
   | 'request_unknown'
   | 'request_closed'
   | 'improvement_unknown'
