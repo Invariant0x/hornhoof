@@ -135,7 +135,7 @@ describe('what a part leaves', () => {
 });
 
 describe('what the result says', () => {
-  const cache = (over: object) => ({ mode: 'cached', turn: 3, fingerprints: [], reused: 0, preparationReused: false, wouldSkip: [], mismatches: [], notes: [], ...over }) as never;
+  const cache = (over: object) => ({ mode: 'cached', turn: 3, mainLine: true, fingerprints: [], reused: 0, preparationReused: false, wouldSkip: [], compared: 0, mismatches: [], notes: [], ...over }) as never;
   const part = (failedFiles: object[] | null = null) => ({ failedFiles }) as never;
 
   it('nothing for a run without reuse', () => {
@@ -151,6 +151,7 @@ describe('what the result says', () => {
   it('that it was the full run', () => {
     expect(reuseLines(cache({ mode: 'full', turn: 5 }), [part()])).toEqual(['This was the full run of turn 5: nothing was reused.']);
     expect(reuseLines(cache({ mode: 'full', turn: null }), [part()])).toEqual(['This was a full run: nothing was reused.']);
+    expect(reuseLines(cache({ mode: 'full', turn: 5, mainLine: false }), [part()])).toEqual(['This was a full run: nothing was reused.']);
   });
 
   it('why nothing was reused', () => {

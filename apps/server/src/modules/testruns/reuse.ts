@@ -82,7 +82,7 @@ export function partFileResults(snapshot: EnvironmentSnapshot, selection: Select
 const listed = (items: string[], between: string): string => items.slice(0, SHOWN_FILES).join(between) + (items.length > SHOWN_FILES ? `, and ${items.length - SHOWN_FILES} more` : '');
 const names = (files: TestFileKey[]): string => listed([...new Set(files.map(file => file.file))], ', ');
 function modeLine(cache: TestRunFileCache, parts: Pick<Part, 'failedFiles'>[]): string[] {
-  if (cache.mode === 'full') return [`This was ${cache.turn === null ? 'a full run' : `the full run of turn ${cache.turn}`}: nothing was reused.`];
+  if (cache.mode === 'full') return [`This was ${cache.turn === null || !cache.mainLine ? 'a full run' : `the full run of turn ${cache.turn}`}: nothing was reused.`];
   if (cache.mode === 'off') return ['Nothing was reused: the machine that described this commit sent no fingerprints.'];
   if (!cache.reused) return [];
   return [`${cache.reused} test files kept their fingerprint and a green result, so ${parts.length ? 'they did not run again' : 'nothing had to run'}.`];
