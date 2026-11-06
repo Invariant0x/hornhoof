@@ -36,7 +36,7 @@ test('retains NOT_RUN as a missing measurement', () => {
 });
 
 test('rejects a duplicate engine/case even when its measurements agree', () => {
-  const input = rows(); input.push(structuredClone(input[0]));
+  const input = rows(); input.push(input[0]);
   assert.ok(codes(input).includes('duplicate-measurement'));
 });
 
@@ -57,7 +57,7 @@ test('compares against an explicit expected case list even when every engine omi
 });
 
 test('rejects unregistered measurements rather than hiding unexpected coverage', () => {
-  const input = rows(); input.push({ ...structuredClone(input[0]), caseId: 'unknown-panel' });
+  const input = rows(); input.push({ ...input[0], caseId: 'unknown-panel' });
   assert.ok(codes(input).includes('unexpected-case'));
 });
 
