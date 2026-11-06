@@ -5,7 +5,7 @@ import { migrate } from 'drizzle-orm/pglite/migrator';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { agentRole, grantsFor, readerGrantsFor, readerRole } from '../src/db/agent-sql.js';
 import { companies, departments } from '../src/db/schema.js';
-import { as, setUpCompany, testApp } from './helpers.js';
+import { as, createTestDb, setUpCompany, testApp } from './helpers.js';
 import { migrationsBefore, migrationsThrough } from './migrations-before.js';
 
 async function fixture() {
@@ -17,7 +17,7 @@ async function fixture() {
   const url = `/api/departments/${id}/repository`;
   const put = (body: object = {}) => app.inject({ method: 'PUT', url, payload: { url: 'https://example.test/acme/shop.git', branch: 'main', ...body }, ...as(ceo) });
   const clear = () => app.inject({ method: 'DELETE', url, ...as(ceo) });
-  const revision = async (departmentId = id) => (await db.execute<{ revision: number | null }>(sql`select to_jsonb(d)->'repo_token_revision' as revision from departments d where id = ${departmentId}`)).rows[0]!.revision;
+  const revision = async (departmentId = id) => (await db.select({ revision: sql<number | null>`to_jsonb(departments)->'repo_token_revision'` }).from(departments).where(eq(departments.id, departmentId)))[0]!.revision;
   return { app, db, ceo, companyId: company!.id, id, url, put, clear, revision };
 }
 
@@ -92,12 +92,12 @@ describe('private repository credential revision', () => {
   });
 
   it('refuses agent and reader SQL access to the private revision', async () => {
-    const c = await fixture();
-    expect(await c.revision()).toBe(1);
+    const { $client: client } = await createTestDb();
+    expect((await client.query<{ column_name: string }>("select column_name from information_schema.columns where table_name = 'departments' and column_name = 'repo_token_revision'")).rows).toEqual([{ column_name: 'repo_token_revision' }]);
     const roles = [agentRole('postgres'), readerRole('postgres')];
-    await c.db.$client.exec(`${grantsFor(roles[0]!)};\n${readerGrantsFor(roles[1]!)}`);
+    await client.exec(`${grantsFor(roles[0]!)};\n${readerGrantsFor(roles[1]!)}`);
     for (const role of roles) for (const statement of ['select repo_token_revision from departments', 'update departments set repo_token_revision = 999']) {
-      await expect(c.db.$client.transaction(async tx => {
+      await expect(client.transaction(async tx => {
         await tx.exec(`SET LOCAL ROLE "${role}"`);
         return tx.exec(statement);
       })).rejects.toThrow(/permission denied|read-only/);
