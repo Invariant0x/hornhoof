@@ -280,13 +280,7 @@ const tellOwnName = (me: Me, person: PersonView, onRenamed?: (name: string) => v
   if (person.id === me.person.id) onRenamed?.(person.name);
 };
 
-export function People({ me, selected, onSelect, onHome, onRenamed }: { me: Me; onRenamed?: (name: string) => void } & CardRoute) {
-  const t = useT();
-  const [people, setPeople] = useState<PersonView[] | null>(null);
-  const [org, setOrg] = useState<Org | null>(null);
-  const [panel, setPanel] = useState<Panel>(null);
-  const [failure, setFailure] = useState<unknown>(null);
-  const canManage = me.person.scopeKind === 'company';
+function usePeopleTable(people: PersonView[] | null) {
   const { language } = useLanguage();
   const tableHost = useRef<HTMLDivElement>(null);
 
@@ -303,6 +297,33 @@ export function People({ me, selected, onSelect, onHome, onRenamed }: { me: Me; 
     return () => observer.disconnect();
   }, [people, language]);
 
+  return tableHost;
+}
+
+function useOwnName(me: Me, setPeople: (update: (list: PersonView[] | null) => PersonView[] | null) => void) {
+  const previousName = useRef(me.person.name);
+  useEffect(() => {
+    if (previousName.current === me.person.name) return;
+    previousName.current = me.person.name;
+    setPeople(list => list?.map(p => p.id === me.person.id ? { ...p, name: me.person.name } : p) ?? null);
+  }, [me.person.id, me.person.name]);
+}
+
+function replacePerson(people: PersonView[] | null, person: PersonView): PersonView[] | null {
+  return people?.map(p => (p.id === person.id ? person : p)) ?? null;
+}
+
+const missingSelection = (selected: CardRoute['selected'], people: PersonView[] | null, person: PersonView | null | undefined) => selected && people && !person;
+
+export function People({ me, selected, onSelect, onHome, onRenamed }: { me: Me; onRenamed?: (name: string) => void } & CardRoute) {
+  const t = useT();
+  const [people, setPeople] = useState<PersonView[] | null>(null);
+  const [org, setOrg] = useState<Org | null>(null);
+  const [panel, setPanel] = useState<Panel>(null);
+  const [failure, setFailure] = useState<unknown>(null);
+  const canManage = me.person.scopeKind === 'company';
+  const tableHost = usePeopleTable(people);
+
   const load = useCallback(async () => {
     try {
       const [list, structure] = await Promise.all([api.get<{ people: PersonView[] }>('/api/people'), api.get<Org>('/api/org')]);
@@ -317,15 +338,10 @@ export function People({ me, selected, onSelect, onHome, onRenamed }: { me: Me; 
     void load();
   }, [load]);
 
-  const previousName = useRef(me.person.name);
-  useEffect(() => {
-    if (previousName.current === me.person.name) return;
-    previousName.current = me.person.name;
-    setPeople(list => list?.map(p => p.id === me.person.id ? { ...p, name: me.person.name } : p) ?? null);
-  }, [me.person.id, me.person.name]);
+  useOwnName(me, setPeople);
 
   const replace = (person: PersonView) => {
-    setPeople(list => list?.map(p => (p.id === person.id ? person : p)) ?? null);
+    setPeople(list => replacePerson(list, person));
     tellOwnName(me, person, onRenamed);
   };
   const { person, edit } = selectionOf(me, selected, people, panel);
@@ -354,7 +370,7 @@ export function People({ me, selected, onSelect, onHome, onRenamed }: { me: Me; 
       setPanel({ kind: 'link', name: res.person.name, url: res.inviteUrl });
     });
 
-  if (unavailableFailure(failure) || (selected && people && !person)) return <RouteUnavailable onHome={onHome} />;
+  if (unavailableFailure(failure) || missingSelection(selected, people, person)) return <RouteUnavailable onHome={onHome} />;
 
   return (
     <section className="people">

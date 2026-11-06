@@ -211,9 +211,13 @@ type Waiting = Pick<Props, 'decisions' | 'decisionsFailure' | 'onDecisionsChange
 
 type Shown = Pick<Decisions, 'requests' | 'proposals' | 'computerAccess'> & { machinesAway: MachineAwayCard[] };
 
+function ownedItems<T extends { ownerPersonId: string }>(items: T[], personId: string | null): T[] {
+  return personId ? items.filter(i => i.ownerPersonId === personId) : items;
+}
+
 /* What of the decisions the screen lists: all of them, or one person's; nothing before the first answer. */
 function shownOf(decisions: Decisions | undefined, personId: string | null): Shown {
-  const theirs = <T extends { ownerPersonId: string }>(items: T[]) => (personId ? items.filter(i => i.ownerPersonId === personId) : items);
+  const theirs = <T extends { ownerPersonId: string }>(items: T[]) => ownedItems(items, personId);
   const computer = decisions?.computerAccess ? theirs([decisions.computerAccess]) : [];
   return { requests: theirs(decisions?.requests ?? []), proposals: theirs(decisions?.proposals ?? []), computerAccess: computer[0] ?? null, machinesAway: decisions?.machinesAway ?? [] };
 }
@@ -271,6 +275,15 @@ function DecisionList({ shown, onDecisionsChanged, onOpenTask, onOpenAgent, onOp
   );
 }
 
+function DecisionsFailure({ failure, onRetry }: { failure: unknown; onRetry: () => void }) {
+  const t = useT();
+  if (failure === undefined || failure === null) return null;
+  return <div className="notebook-unread">
+    <p className="alert" role="alert">{errorText(t, failure)}</p>
+    <button className="btn small ghost" type="button" onClick={onRetry}>{t.app.tryAgain}</button>
+  </div>;
+}
+
 /* What waits for the person: what agents ask, the orchestrator's cards and his request for the computer. Opened from a
    person's card, only theirs, with the filter in sight. */
 function WaitingForYou({ decisions, decisionsFailure, personId, onClearPerson, ...rest }: Waiting) {
@@ -285,12 +298,7 @@ function WaitingForYou({ decisions, decisionsFailure, personId, onClearPerson, .
       {personId && <PersonFilter name={name} onClear={onClearPerson} />}
       <DecisionList shown={shown} onFailure={setFailure} {...rest} />
       {decisions && shownNone(shown) && <p className="muted">{personId ? t.tasks.nothingFor(name) : t.tasks.nothingWaiting}</p>}
-      {decisionsFailure !== undefined && decisionsFailure !== null && (
-        <div className="notebook-unread">
-          <p className="alert" role="alert">{errorText(t, decisionsFailure)}</p>
-          <button className="btn small ghost" type="button" onClick={rest.onDecisionsChanged}>{t.app.tryAgain}</button>
-        </div>
-      )}
+      <DecisionsFailure failure={decisionsFailure} onRetry={rest.onDecisionsChanged} />
       {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
     </section>
   );
