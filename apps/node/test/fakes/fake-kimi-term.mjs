@@ -39,7 +39,10 @@ const hook = (event, name, body) =>
     : Promise.resolve('');
 const record = (type, payload) => appendFileSync(wireOf(session), JSON.stringify({ type, agentId: 'main', ...payload, time: Date.now() }) + '\n');
 const print = text => process.stdout.write(text);
-const prompt = () => print(`── input ${'─'.repeat(60)}\n \n${'─'.repeat(69)}\ncontext: 0% (0/256k)\x1b[2A\r `);
+// Its input box as Kimi Code 2 draws it (fixtures/real-screens), with the cursor behind what is typed.
+const BOX = 69;
+const inputRow = text => `│ > ${text.padEnd(BOX - 4)} │\x1b[${text.length + 5}G`;
+const prompt = () => print(`╭${'─'.repeat(BOX)}╮\n${inputRow('')}\n╰${'─'.repeat(BOX)}╯\ncontext: 0% (0/256k)\x1b[2A\x1b[5G`);
 
 function listTools() {
   if (!process.env.FAKE_MCP_LIST_MS) return;
@@ -230,5 +233,5 @@ readKeys(key => {
   if (key === 'kill') typed = '';
   else if (key === 'erase') typed = typed.slice(0, -1);
   else typed += key.text;
-  print(`\r\x1b[2K ${typed.replaceAll('\n', ' ')}`);
+  print(`\r\x1b[2K${inputRow(typed.replaceAll('\n', ' '))}`);
 });

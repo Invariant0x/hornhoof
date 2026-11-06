@@ -529,6 +529,8 @@ const NodeMessage = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('job.program'),
     jobId: z.string(),
+    /* The session the program named by now: a node that restarts mid-turn can no longer say so when the turn ends. */
+    session: z.string().min(1).max(200).optional(),
     state: z.enum(PROGRAM_STATES),
     since: z.number().int().nonnegative(),
     tool: z.string().max(100).optional(),

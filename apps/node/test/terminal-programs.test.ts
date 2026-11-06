@@ -29,6 +29,11 @@ describe('program updates managed outside the agent terminal', () => {
     expect(command).toContain('check_for_update_on_startup=false');
     expect(command[command.indexOf('check_for_update_on_startup=false') - 1]).toBe('-c');
   });
+
+  it.each([null, 'existing-session'])('keeps Codex from asking which model to go on with near its limits, with session %s', sessionId => {
+    const { command } = codexProgram.launch({ ...launch, sessionId });
+    expect(command[command.indexOf('notice.hide_rate_limit_model_nudge=true') - 1]).toBe('-c');
+  });
 });
 
 describe('Claude Code in a terminal', () => {

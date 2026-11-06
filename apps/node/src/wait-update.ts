@@ -25,12 +25,20 @@ function sayOnce(io: Io, line: string, said: string): string {
   return line;
 }
 
+const Refusal = z.object({ error: z.object({ message: z.string().max(500) }) });
+
+/* What the server says, when it says it the usual way: it may be something the person who runs the installer can act on. */
+async function refusal(res: Response): Promise<string> {
+  const said = Refusal.safeParse(await res.json().catch(() => null));
+  return said.success ? said.data.error.message : `The server answered ${res.status}.`;
+}
+
 async function ask(server: string, key: string): Promise<Asked> {
   try {
     const res = await fetch(`${server}/api/nodes/update`, { method: 'POST', headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' }, body: '{}', signal: AbortSignal.timeout(ASK_MS) });
     if (res.status === 404) return { kind: 'too_old' };
     if (res.status >= 500) return { kind: 'away', why: `The server answered ${res.status}.` };
-    if (!res.ok) return { kind: 'refused', why: `The server answered ${res.status}.` };
+    if (!res.ok) return { kind: 'refused', why: await refusal(res) };
     return { kind: 'answer', answer: Answer.parse(await res.json()) };
   } catch (err) {
     return { kind: 'away', why: err instanceof Error ? err.message : String(err) };

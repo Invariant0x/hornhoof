@@ -2,16 +2,18 @@ import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { OperatorNodeMessage } from '@hornhoof/protocol/program-operator';
+import type { OperatorNodeMessage, OperatorRecoveryState } from '@hornhoof/protocol/program-operator';
 import { expect, it, onTestFinished } from 'vitest';
 import { OperatorRuntime } from '../src/terminal/operator-runtime.js';
 
-function fixture() {
+type RecoverySource = Pick<ConstructorParameters<typeof OperatorRuntime>[1], 'current' | 'recovery'>;
+
+function fixture(shown: Partial<RecoverySource> = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'hh-runtime-'));
   onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
   let now = 0;
   const sent: OperatorNodeMessage[] = [];
-  const runtime = new OperatorRuntime({ dir, now: () => now, connected: () => true, send: frame => { sent.push(frame); return true; } }, { inputLine: () => 'unknown', current: () => ({ agentProgram: true, alive: true, pasted: false, turnStarted: false, active: false, runningTool: false, retrying: false, wait: null }), capture: async () => ({ cols: 80, rows: 24, cells: 'Press Enter for a theme.' }), press: async () => {}, secrets: () => [] });
+  const runtime = new OperatorRuntime({ dir, now: () => now, connected: () => true, send: frame => { sent.push(frame); return true; } }, { inputLine: () => 'unknown', current: () => ({ agentProgram: true, alive: true, pasted: false, turnStarted: false, active: false, runningTool: false, retrying: false, wait: null }), capture: async () => ({ cols: 80, rows: 24, cells: 'Press Enter for a theme.' }), press: async () => {}, secrets: () => [], recovery: async () => ({ alive: true, input: '', busy: false }), ...shown });
   const agentKey = randomUUID(), jobId = randomUUID();
   const assignment = { id: randomUUID(), ordinal: 1 };
   runtime.begin(agentKey, jobId, assignment, 'Words.', false);
@@ -19,6 +21,49 @@ function fixture() {
   const identity = runtime.identity(agentKey)!;
   return { runtime, sent, identity, assignment, at: (value: number) => { now = value; } };
 }
+
+/* What a release of a hold rests on: the server asks, and takes the node's word over its own database. */
+const stateOf = async (c: ReturnType<typeof fixture>, agentKey = c.identity.agentKey) => {
+  const request = randomUUID();
+  await c.runtime.message({ type: 'program.recovery_state_get', ...c.identity, agentKey, request, case: randomUUID() });
+  expect(c.sent.at(-1)).toMatchObject({ type: 'program.recovery_state', request, agentKey, jobId: c.identity.jobId, instance: c.identity.instance });
+  return c.sent.at(-1);
+};
+const program = { agentProgram: true, alive: true, pasted: false, turnStarted: false, active: false, runningTool: false, retrying: false, wait: null };
+
+it('says a program is gone when it knows no such agent, or its program ended, and asks nothing of it', async () => {
+  const asked: string[] = [];
+  const c = fixture({ recovery: async key => { asked.push(key); return { alive: false, input: null, busy: false }; } });
+  expect(await stateOf(c, randomUUID())).toMatchObject({ program: 'gone', current: null, generation: 0, input: 'unknown', wait: null });
+  expect(asked).toEqual([]);
+  expect(await stateOf(c)).toMatchObject({ program: 'gone', current: null, generation: 0, input: 'unknown', wait: null, busy: false });
+  expect(asked).toEqual([c.identity.agentKey]);
+});
+
+it.each<[string, Partial<RecoverySource>, Record<string, unknown>]>([
+  ['an empty prompt', {}, { input: 'empty', wait: null, runningTool: false, retrying: false, busy: false }],
+  ['words in its input', { recovery: async () => ({ alive: true, input: 'a draft', busy: false }) }, { input: 'words' }],
+  ['an input it cannot read', { recovery: async () => ({ alive: true, input: null, busy: false }) }, { input: 'unknown' }],
+  ['a turn it works on', { recovery: async () => ({ alive: true, input: '', busy: true }) }, { input: 'empty', busy: true }],
+  ['a protected question', { current: () => ({ ...program, wait: { id: randomUUID(), kind: 'protected' } }) }, { wait: 'protected' }],
+  ['a menu', { current: () => ({ ...program, wait: { id: randomUUID(), kind: 'menu' } }) }, { wait: 'menu' }],
+  ['a wait that looks harmless, which is no free prompt either', { current: () => ({ ...program, wait: { id: randomUUID(), kind: 'harmless' } }) }, { wait: 'unknown' }],
+  ['a running tool', { current: () => ({ ...program, runningTool: true }) }, { runningTool: true }],
+  ['a retry of its model', { current: () => ({ ...program, retrying: true }) }, { retrying: true }],
+  ['nothing it can say of the program', { current: () => null }, { wait: null, runningTool: false, retrying: false }],
+])('says what it sees of a program with %s', async (_name, shown, facts) => {
+  const c = fixture(shown);
+  expect(await stateOf(c)).toMatchObject({ program: 'here', current: c.identity.instance, ...facts });
+});
+
+it('counts what a program did since the words as work it is on, and says which generation of it that is', async () => {
+  const c = fixture(), key = c.identity.agentKey;
+  c.runtime.typed(key);
+  const typed = await stateOf(c) as OperatorRecoveryState;
+  expect(typed).toMatchObject({ input: 'empty', busy: false });
+  c.runtime.activity(key);
+  expect(await stateOf(c)).toMatchObject({ input: 'empty', busy: true, generation: typed.generation + 1 });
+});
 
 it('ignores an older revoke and does not move a case deadline on replay', async () => {
   const c = fixture();
@@ -29,6 +74,16 @@ it('ignores an older revoke and does not move a case deadline on replay', async 
   c.at(100000); await c.runtime.message(command);
   c.at(600000); c.runtime.tick();
   expect(c.runtime.failure(c.identity.agentKey)).toBe('operator_timeout');
+});
+
+it('counts what a program does for its words only from the moment they go in', () => {
+  const c = fixture(), key = c.identity.agentKey;
+  c.runtime.activity(key);
+  expect(c.runtime.wordsWaiting(key)).toBe(false);
+  c.runtime.typed(key);
+  expect(c.runtime.wordsWaiting(key)).toBe(true);
+  c.runtime.activity(key);
+  expect(c.runtime.wordsWaiting(key)).toBe(false);
 });
 
 it('returns explicit no_program responses without creating a program for an unknown target', async () => {
@@ -93,16 +148,16 @@ it('stops question timers on cancellation and on process restoration', () => {
   expect(c.sent.some(f => f.type === 'program.operator_needed' && f.reason === 'question_waiting')).toBe(false);
 });
 
-it('retains the pre-work case after escalation and reports readiness once only after owner input', async () => {
+it('retains the pre-work case after escalation and reports readiness once by itself and once after owner input', async () => {
   const c = fixture();
   const command = { type: 'program.operator_case' as const, ...c.identity, case: randomUUID(), capability: randomUUID(), remainingMs: 600000, disposition: 'open' as const, revision: 1, reason: 'assignment_unrecorded' as const };
   await c.runtime.message(command);
   await c.runtime.message({ ...command, revision: 2, disposition: 'revoke', closedBecause: 'operator_unavailable' });
-  c.runtime.recoveryReady(c.identity.agentKey, true);
-  expect(c.sent.some(f => f.type === 'program.recovery_ready')).toBe(false);
+  c.runtime.recoveryReady(c.identity.agentKey, true); c.runtime.recoveryReady(c.identity.agentKey, true);
+  expect(c.sent.filter(f => f.type === 'program.recovery_ready')).toEqual([expect.objectContaining({ case: command.case, ...c.identity, owner: false })]);
   c.runtime.ownerInput(c.identity.agentKey);
   c.runtime.recoveryReady(c.identity.agentKey, true); c.runtime.recoveryReady(c.identity.agentKey, true);
-  expect(c.sent.filter(f => f.type === 'program.recovery_ready')).toEqual([expect.objectContaining({ case: command.case, ...c.identity })]);
+  expect(c.sent.filter(f => f.type === 'program.recovery_ready').map(f => f.type === 'program.recovery_ready' && f.owner)).toEqual([false, true]);
   expect(c.runtime.failureDetail(c.identity.agentKey)).toContain(command.case);
   expect(c.runtime.failureDetail(c.identity.agentKey)).toContain('operator_unavailable');
 });
