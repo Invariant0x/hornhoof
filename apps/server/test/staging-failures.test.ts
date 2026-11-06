@@ -89,9 +89,10 @@ describe('conservative staging failure text decoding', () => {
     expect(parseStagingFailureTests({ ...nodeScope(), files: ['apps/node/test/other.test.ts'] })).toBeNull();
   });
   it.each([
-    { root: '../private' }, { suiteId: '' }, { files: [] }, { files: [nodeFile, nodeFile] },
-    { log: `${vitestLog}\u001b[31m` }, { log: `${vitestLog}\u0000` },
-  ])('refuses malformed or unsafe decoder scope %j', change => {
+    { name: 'root', change: { root: '../private' } }, { name: 'suite', change: { suiteId: '' } },
+    { name: 'empty files', change: { files: [] } }, { name: 'duplicate files', change: { files: [nodeFile, nodeFile] } },
+    { name: 'terminal escape', change: { log: `${vitestLog}\u001b[31m` } }, { name: 'null byte', change: { log: `${vitestLog}\u0000` } },
+  ])('refuses malformed or unsafe decoder scope: $name', ({ change }) => {
     expect(parseStagingFailureTests({ ...nodeScope(), ...change })).toBeNull();
   });
 });
