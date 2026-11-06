@@ -145,6 +145,29 @@ describe('reusing green test results', () => {
     expect((await f.runOf(await f.start({ profile: 'final' }))).fileCache).toMatchObject({ mode: 'cached', turn: null });
   });
 
+  it('does not take one suite under the full profile for the full run of its turn', async () => {
+    const f = await fixture(5);
+    const one = await f.start({ profile: 'full', suite: 'unit' });
+    expect((await f.runOf(one)).fileCache).toMatchObject({ mode: 'cached', turn: 5 });
+    await f.finish(one);
+    const full = await f.start({ profile: 'final' });
+    expect(await f.ranFiles(full)).toEqual(FILES);
+    expect((await f.runOf(full)).fileCache).toMatchObject({ mode: 'full', turn: 5 });
+  });
+
+  it('runs everything again after a full run with a part that said nothing of its files, not after one that named what failed', async () => {
+    const f = await fixture(5);
+    await f.finish(await f.start({ profile: 'fast' }));
+    await f.finish(await f.start({ profile: 'final' }), { ok: false });
+    const again = await f.start({ profile: 'final' });
+    expect(await f.ranFiles(again)).toEqual(FILES);
+    expect((await f.runOf(again)).fileCache).toMatchObject({ mode: 'full', turn: 5 });
+    await f.finish(again, { ok: false, files: [{ suiteId: 'unit', file: 'test/a.test.ts', status: 'failed' }, { suiteId: 'unit', file: 'test/b.test.ts', status: 'passed' }, { suiteId: 'unit', file: 'test/c.test.ts', status: 'passed' }] });
+    const next = await f.start({ profile: 'final' });
+    expect((await f.runOf(next)).fileCache).toMatchObject({ mode: 'cached', turn: 5 });
+    expect(await f.ranFiles(next)).toEqual(['test/a.test.ts']);
+  });
+
   it('runs everything sooner at a lower number from the manifest', async () => {
     const f = await fixture(3, 3);
     const first = await f.start({ profile: 'fast' });

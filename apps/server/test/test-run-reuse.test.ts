@@ -43,6 +43,7 @@ describe('how a run chooses', () => {
     expect(chooseRunMode(manifest(fullRun), { profile: 'final' }, false, true)).toEqual({ mode: 'cached', profile: 'final' });
     expect(chooseRunMode(manifest(fullRun), {}, true, true)).toEqual({ mode: 'cached', profile: 'fast' });
     expect(chooseRunMode(manifest(fullRun), { profile: 'final', suite: 'unit' }, true, true)).toEqual({ mode: 'cached', profile: 'final' });
+    expect(chooseRunMode(manifest(fullRun), { profile: 'full', suite: 'unit' }, false, true)).toEqual({ mode: 'cached', profile: 'full' });
   });
 
   it('reuses nothing when asked for the full profile by name', () => {

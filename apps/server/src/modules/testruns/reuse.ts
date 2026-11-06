@@ -1,5 +1,5 @@
 import { KeptFiles, PREPARATION_UNIT, type EnvironmentSnapshot, type FileOutcome, type RepositoryScope, type TestEnvironmentV1, type TestExecution, type TestUnit, type UnitFingerprint } from '@hornhoof/protocol';
-import { and, eq, inArray, isNotNull, lt, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, isNull, lt, notExists, sql } from 'drizzle-orm';
 import type { Ctx } from '../../app.js';
 import { tasks, testFileResults, testParts, testRuns, testSuiteMemory, turns, type TestFileKey, type TestRunFileCache } from '../../db/schema.js';
 import { unitKey as keyOf } from './plan-environment.js';
@@ -14,7 +14,7 @@ type Db = Ctx['db'];
 type Selection = TestExecution['selection'];
 type Mode = TestRunFileCache['mode'];
 
-/* Results no run asked for in this long go. Whatever went is only run again. */
+/* Results no run proved again in this long go. Whatever went is only run again. */
 const KEPT_DAYS = 30;
 const SHOWN_FILES = 30;
 
@@ -26,12 +26,12 @@ export function fullRunDue({ turn, everyTurns, lastFullTurn }: { turn: number | 
   return turn % everyTurns === 0 || (lastFullTurn !== null && turn - lastFullTurn >= everyTurns);
 }
 
-/* A manifest that names no full run reuses nothing, as nothing would ever check what it reused. */
+/* A manifest that names no full run reuses nothing, as nothing would ever check what it reused. One suite is never the full run,
+   whatever its profile: it would stand in for the rest of its turn. */
 export function chooseRunMode(manifest: TestEnvironmentV1, request: { profile?: string; suite?: string }, due: boolean, printed: boolean): { mode: Mode; profile: string } | null {
   const fullRun = manifest.execution?.fullRun, profile = request.profile ?? manifest.defaultProfile;
   if (!fullRun) return null;
-  if (profile === fullRun.profile) return { mode: 'full', profile };
-  if (due && profile === fullRun.replaces && !request.suite) return { mode: 'full', profile: fullRun.profile };
+  if (!request.suite && (profile === fullRun.profile || (due && profile === fullRun.replaces))) return { mode: 'full', profile: fullRun.profile };
   return { mode: printed ? 'cached' : 'off', profile };
 }
 
@@ -115,11 +115,13 @@ async function turnOfRun(db: Db, run: Pick<Run, 'taskId' | 'companyId'>): Promis
   const [open] = await db.select({ number: turns.number }).from(turns).where(and(eq(turns.companyId, run.companyId), eq(turns.status, 'open')));
   return open?.number ?? null;
 }
-/* A full run stopped halfway proves nothing, so the next one is the full run; one still going counts, so two do not start. */
+/* A full run stopped halfway, or with a part that failed without naming a file (no machine, out of time, no preparation), did not
+   get to all it had to check, so the next one is the full run. One still going counts, so two do not start. */
 async function lastFullTurnOf(db: Db, run: Pick<Run, 'id' | 'companyId'>, scope: RepositoryScope): Promise<number | null> {
   const [last] = await db.select({ turn: sql<number | null>`max((${testRuns.fileCache}->>'turn')::int)` }).from(testRuns).where(and(
     eq(testRuns.companyId, run.companyId), eq(testRuns.departmentId, scope.repositoryOwnerId), inArray(testRuns.status, ['running', 'passed', 'failed']),
     sql`${testRuns.fileCache}->>'mode' = 'full'`, sql`${testRuns.environmentRequest}->'repositoryScope'->>'repoUrlHash' = ${scope.repoUrlHash}`,
+    notExists(db.select({ part: testParts.id }).from(testParts).where(and(eq(testParts.runId, testRuns.id), eq(testParts.status, 'failed'), isNull(testParts.failedFiles)))),
   ));
   return last?.turn ?? null;
 }
