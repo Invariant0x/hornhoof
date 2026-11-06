@@ -41,7 +41,7 @@ async function plannedVitestFixture(projects = false): Promise<Fixture> {
     ? "projects: [{ test: { name: 'first', include: ['tests/*.test.js'], sequence: { groupOrder: 0 } } }, { test: { name: 'second', include: ['tests/*.test.js'], sequence: { groupOrder: 1 } } }],"
     : "include: ['tests/*.test.js'],";
   await writeFile(join(fixture.root, 'vitest.config.mjs'), `import PlannedVitestSequencer from ${JSON.stringify(sequencer)};\nexport default { test: { ${test} pool: 'forks', maxWorkers: 1, sequence: { sequencer: PlannedVitestSequencer } } };\n`);
-  return { ...fixture, suite: { ...fixture.suite, split: { kind: 'json-file' } } };
+  return { ...fixture, suite: { ...fixture.suite, split: { kind: 'json-file' }, run: { ...fixture.suite.run, args: [...fixture.suite.run.args, '--reporter=default'] } } };
 }
 function python(): string {
   if (!process.env.HH588_PYTHON) throw new Error('The authorcheck must prepare its fixture-local pytest interpreter.');
@@ -103,9 +103,14 @@ describe('real framework invocations of planned fixture selections', () => {
 
   it('refuses a planned sequencer without --shard before the unselected failing file can run', async () => {
     const fixture = await plannedVitestFixture();
+    const marker = join(fixture.root, 'body-executed');
+    for (const file of [...fixture.files, 'tests/unselected-guard.test.js']) {
+      const source = await readFile(join(fixture.root, file), 'utf8');
+      await writeFile(join(fixture.root, file), `import { writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(marker)}, 'executed');\n` + source);
+    }
     const result = await invoke(fixture, 'vitest-planned-missing-shard', [fixture.files[0]!]);
     expect(result.code).toBe(1); expect(result.stderr).toContain('requires --shard');
-    expect(result.report).toBeNull();
+    expect(await readFile(marker, 'utf8').catch(() => null)).toBeNull();
   });
 
   it('runs the weighted Vitest file selections without discovering the failing unselected file', async () => {
