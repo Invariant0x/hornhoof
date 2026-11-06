@@ -1,15 +1,15 @@
+import type { NodeMessage } from '@hornhoof/protocol';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { NodeMessage } from '@hornhoof/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SIGNED_OUT as AGY_SIGNED_OUT } from '../src/providers/antigravity.js';
 import type { RunResult } from '../src/runner.js';
 import type { TermJob } from '../src/terminal/host.js';
+import { acceptedReports, cancelTurn } from './terminal-test-clock.js';
 import { agyProgram } from '../src/terminal/programs.js';
 import { hasTmux, home, host, sent, setUp, job, codexJob, kimiJob, tmux, until, endsLost, pastLostEndWindows } from './terminal-host-helpers.js';
 
 /* Quiet screens cannot end turns. Only the program, a person stopping it, or its exit can do so. */
-const WAIT_MS = 6500;
 const STILL_WAITING = 'still waiting';
 const FAKE_AGY = fileURLToPath(new URL('./fakes/fake-agy-term.mjs', import.meta.url));
 
@@ -17,6 +17,7 @@ const within = (run: Promise<RunResult>, ms: number) => Promise.race([run, new P
 const agyJob = (key: string, prompt: string, more: Partial<TermJob['input']> = {}) => ({ ...job(key, prompt, more), program: agyProgram, bin: FAKE_AGY, home: join(home, 'agy', key), signedOut: AGY_SIGNED_OUT });
 const jobs = { claude: job, codex: codexJob, kimi: kimiJob, antigravity: agyJob };
 const pidOf = (key: string) => tmux.programPid(`a-${key}`);
+const reports = (jobId: string) => acceptedReports(sent, jobId);
 const states = (jobId: string) => sent.flatMap(m => (m.type === 'job.program' && m.jobId === jobId ? [m.state] : []));
 
 /* The keys the host presses from now on, and whether it ends the program. */
@@ -60,8 +61,7 @@ describe.skipIf(!hasTmux)('turns end only on an explicit signal', () => {
     expect(await pidOf(key)).toBe(pid);
     expect(host['agents'].get(key)!.sessionId).toBe(sessionId);
     clock.mockRestore();
-    stop.abort();
-    expect(await run).toMatchObject({ ok: false, error: 'cancelled', sessionId });
+    expect(await cancelTurn(tmux, stop, run)).toMatchObject({ ok: false, error: 'cancelled', sessionId });
     expect(await pidOf(key)).toBe(pid);
   });
 
@@ -79,8 +79,7 @@ describe.skipIf(!hasTmux)('turns end only on an explicit signal', () => {
     expect(touched()).toEqual({ keys: [], killed: 0 });
     expect(await pidOf(key)).toBe(pid);
     clock.mockRestore();
-    stop.abort();
-    expect(await run).toMatchObject({ ok: false, error: 'cancelled' });
+    expect(await cancelTurn(tmux, stop, run)).toMatchObject({ ok: false, error: 'cancelled' });
   });
 
   it('keeps Claude Code thinking with its current spinner beyond three former lost-end windows and ends on its Stop hook', async () => {
@@ -102,13 +101,17 @@ describe.skipIf(!hasTmux)('turns end only on an explicit signal', () => {
   /* Kimi Code's screen does not tell that it works, and its log does: a turn it said it took and never said ended runs on,
      for Hornhoof's watch to see. */
   it('of Kimi Code, whose log says the turn runs, stays open though its prompt shows empty', async () => {
-    await setUp();
+    await setUp({ lookMs: 50, reportMs: 100 });
     const stop = new AbortController();
     const run = host.run(kimiJob('wait-kimi', 'HANG here', { jobId: 'job-wait-kimi', signal: stop.signal }));
-    expect(await within(run, WAIT_MS)).toBe(STILL_WAITING);
+    await until(() => states('job-wait-kimi').includes('thinking'));
+    const before = states('job-wait-kimi').length;
+    const clock = pastLostEndWindows();
+    await until(() => states('job-wait-kimi').length >= before + 3);
+    expect(await within(run, 400)).toBe(STILL_WAITING);
+    clock.mockRestore();
     expect(new Set(states('job-wait-kimi'))).toEqual(new Set(['thinking']));
-    stop.abort();
-    expect(await run).toMatchObject({ ok: false, error: 'cancelled' });
+    expect(await cancelTurn(tmux, stop, run)).toMatchObject({ ok: false, error: 'cancelled' });
   });
 
   /* agy's stream can break off mid-turn, as with a 503 from its backend, while agy works on and never says the turn
@@ -118,15 +121,19 @@ describe.skipIf(!hasTmux)('turns end only on an explicit signal', () => {
     await setUp({ lookMs: 100, reportMs: 400 });
     const stop = new AbortController();
     const run = host.run(agyJob('cut-agy', 'CUT here', { jobId: 'job-cut', signal: stop.signal }));
-    expect(await within(run, WAIT_MS)).toBe(STILL_WAITING);
+    await until(() => states('job-cut').includes('tool'));
+    const before = reports('job-cut').filter(m => m.state === 'tool').length;
+    const clock = pastLostEndWindows();
+    await until(() => reports('job-cut').filter(m => m.state === 'tool').length >= before + 3);
+    expect(await within(run, 400)).toBe(STILL_WAITING);
+    clock.mockRestore();
     const told = sent.filter((m): m is Extract<NodeMessage, { type: 'job.program' }> => m.type === 'job.program' && m.jobId === 'job-cut');
     expect(told.map(m => m.state)).not.toContain('idle');
     expect(told.at(-1)).toMatchObject({ state: 'tool', tool: 'run_command' });
     const tool = told.filter(m => m.state === 'tool');
     expect(tool.length).toBeGreaterThanOrEqual(3);
     expect(new Set(tool.map(m => m.screenAt)).size).toBe(1);
-    stop.abort();
-    expect(await run).toMatchObject({ ok: false, error: 'cancelled' });
+    expect(await cancelTurn(tmux, stop, run)).toMatchObject({ ok: false, error: 'cancelled' });
   });
 
   it.each([
