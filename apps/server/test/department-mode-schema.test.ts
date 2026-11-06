@@ -39,7 +39,10 @@ it('backfills existing template defaults without losing department data and repe
   await cp(MIGRATIONS, directory, { recursive: true });
   const file = join(directory, 'meta/_journal.json');
   const journal = JSON.parse(await readFile(file, 'utf8')) as { entries: { tag: string }[] };
-  journal.entries = journal.entries.filter(entry => !entry.tag.endsWith('_department_work_mode'));
+  const modeIndex = journal.entries.findIndex(entry => entry.tag === '0069_department_work_mode');
+  expect(modeIndex).toBeGreaterThanOrEqual(0);
+  const targetEntries = journal.entries.slice(0, modeIndex + 1);
+  journal.entries = targetEntries.slice(0, -1);
   await writeFile(file, JSON.stringify(journal));
   const client = new PGlite();
   onTestFinished(() => client.close());
@@ -53,7 +56,9 @@ it('backfills existing template defaults without losing department data and repe
       ('00000000-0000-4000-8000-000000000001',null,'CUSTOM','Retained custom');
   `);
   const before = await client.query('SELECT to_jsonb(d) AS row FROM departments d ORDER BY name');
-  await migrate(db, { migrationsFolder: MIGRATIONS });
+  journal.entries = targetEntries;
+  await writeFile(file, JSON.stringify(journal));
+  await migrate(db, { migrationsFolder: directory });
   expect((await client.query('SELECT name,work_mode FROM departments ORDER BY name')).rows).toEqual([
     { name: 'Retained custom', work_mode: 'turns' },
     { name: 'Retained development', work_mode: 'turns' },
@@ -61,7 +66,7 @@ it('backfills existing template defaults without losing department data and repe
   ]);
   expect((await client.query("SELECT to_jsonb(d) - 'work_mode' AS row FROM departments d ORDER BY name")).rows).toEqual(before.rows);
   const history = await client.query('SELECT * FROM drizzle.__drizzle_migrations ORDER BY id');
-  await migrate(db, { migrationsFolder: MIGRATIONS });
+  await migrate(db, { migrationsFolder: directory });
   expect((await client.query('SELECT * FROM drizzle.__drizzle_migrations ORDER BY id')).rows).toEqual(history.rows);
 });
 
