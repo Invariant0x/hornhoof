@@ -610,31 +610,43 @@ async function taskMovedInTurn(db: Ctx['db'], agentId: string, task: Task, start
   return false;
 }
 
-async function resumeAtPlanLimit(ctx: Ctx, agentId: string, task: Task, until: string) {
-  const { db } = ctx;
-  const other = await standIn(ctx, agentId, task);
-  const [me] = other ? await db.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId)) : [];
+type PlanStandIn = NonNullable<Awaited<ReturnType<typeof standIn>>>;
+
+const changedWhileResuming = (error: { reason?: string }) => error.reason === 'task_changed' ? null : Promise.reject(error);
+
+function planHandoffText(name: string | undefined, other: PlanStandIn, until: string): string {
   const at = `${until.slice(0, 16).replace('T', ' ')} UTC`;
-  const over = other
-    ? await handOver(ctx, task, other.id, `${me?.name ?? 'Its executor'}'s plan is at its limit until ${at}, so ${other.name} takes the work over on ${PROVIDER_NAMES[other.provider] ?? other.provider}.`).catch((err: { reason?: string }) => {
-        if (err.reason === 'task_changed') return null;
-        throw err;
-      })
-    : null;
+  return `${name ?? 'Its executor'}'s plan is at its limit until ${at}, so ${other.name} takes the work over on ${PROVIDER_NAMES[other.provider] ?? other.provider}.`;
+}
+
+async function handOverAtPlanLimit(ctx: Ctx, agentId: string, task: Task, until: string, other: PlanStandIn): Promise<Moved | null> {
+  const [me] = await ctx.db.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId));
+  return handOver(ctx, task, other.id, planHandoffText(me?.name, other, until)).catch(changedWhileResuming);
+}
+
+async function resumeAtPlanLimit(ctx: Ctx, agentId: string, task: Task, until: string) {
+  const other = await standIn(ctx, agentId, task);
+  const over = other ? await handOverAtPlanLimit(ctx, agentId, task, until, other) : null;
   return wakeAll(ctx, over ? over.wakes : [{ agentId, taskId: task.id, why: 'go_on' }]);
 }
 
 type HeldJob = typeof jobs.$inferSelect & { agentId: string; startedAt: Date };
 
-async function continueWorkedTurn(ctx: Ctx, agentId: string, task: Task, job: HeldJob) {
-  const { db } = ctx;
-  /* A timeout or a comment says the program worked and continues under the other counter. */
+async function commentsInTurn(db: Ctx['db'], agentId: string, task: Task, startedAt: Date): Promise<number> {
   const [told] = await db
     .select({ n: count() })
     .from(taskEvents)
-    .where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.agentId, agentId), gte(taskEvents.createdAt, job.startedAt), eq(taskEvents.kind, 'comment')));
-  const working = job.error === 'timeout' || Number(told?.n ?? 0) > 0;
-  const moved = await (working ? wentOn : silentTurn)(ctx, agentId, task).catch((err: { reason?: string }) => err.reason === 'task_changed' ? null : Promise.reject(err));
+    .where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.agentId, agentId), gte(taskEvents.createdAt, startedAt), eq(taskEvents.kind, 'comment')));
+  return Number(told?.n ?? 0);
+}
+
+const continuationOfTurn = (error: string | null, comments: number) => error === 'timeout' || comments > 0 ? wentOn : silentTurn;
+
+async function continueWorkedTurn(ctx: Ctx, agentId: string, task: Task, job: HeldJob) {
+  /* A timeout or a comment says the program worked and continues under the other counter. */
+  const comments = await commentsInTurn(ctx.db, agentId, task, job.startedAt);
+  const advance = continuationOfTurn(job.error, comments);
+  const moved = await advance(ctx, agentId, task).catch(changedWhileResuming);
   if (moved) await wakeAll(ctx, moved.wakes);
 }
 

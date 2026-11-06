@@ -64,6 +64,24 @@ describe('Department view', () => {
     expect(x + parseFloat(world.style.width) * k).toBeLessThanOrEqual(panel === 'window' ? 752 : 1440);
   });
 
+  it.each([
+    ['en', 'final_check', 'final turn check, once per turn'],
+    ['en', 'observer', 'turn observer'],
+    ['en', undefined, 'Builds the server side.'],
+    ['ru', 'final_check', 'финальная проверка хода, один раз за ход'],
+    ['ru', 'observer', 'наблюдатель хода'],
+    ['ru', undefined, 'Делает серверную часть.'],
+  ] as const)('describes the %s %s role frame', (language, schema, description) => {
+    localStorage.setItem('hh-lang', language);
+    const department = DEV_ORG.departments[0]!;
+    const role = { ...department.roles[1]!, schema };
+    mockApi({});
+    render(<LanguageProvider><DepartmentView me={ME} department={{ ...department, roles: [department.roles[0]!, role] }}
+      deputies={[]} selected={null} selectedTask={null} panel={null} onBack={() => {}} onHire={() => {}}
+      onOpen={() => {}} onOpenTask={() => {}} /></LanguageProvider>);
+    expect(screen.getByText(description)).toBeInTheDocument();
+  });
+
   it('flies into a department and shows its head and members', async () => {
     const user = userEvent.setup();
     shell();

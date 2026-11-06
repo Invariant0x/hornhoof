@@ -1079,11 +1079,31 @@ async function closeTurnReview(ctx: Live, task: Task, n: Note, given: Given[]): 
 }
 
 /* The owner of a task without an executor (a department's, the orchestrator's) closes it or says it cannot go on. */
-export async function report(ctx: Live, agentId: string, taskId: string, r: { done: boolean; summary: string }): Promise<Moved> {
-  const task = await loadTask(ctx.db, taskId);
+function requireReporter(task: Task, agentId: string): void {
   stillOpen(task);
   if (task.executorAgentId) throw refuse(400, 'task_invalid', `#${task.number} is a member task: submit it, or say it is blocked.`);
   if (task.assigneeAgentId !== agentId) throw notYours(task, 'is not yours to report');
+}
+
+async function reportToResolver(ctx: Live, agentId: string, task: Task, summary: string, n: Note): Promise<Moved> {
+  /* A person gave it, so an internal resolver has to unblock it. */
+  const [asker] = await ctx.db.select().from(agents).where(eq(agents.id, agentId));
+  const recipient = asker ? await stuckRecipient(ctx.db, asker, task) : null;
+  let wakes: Wake[] = [];
+  const row = await move(ctx, task, { status: 'waiting' }, n, async tx => {
+    await letStuckGo(tx, task.id);
+    const [note] = await tx.insert(requests).values({ companyId: task.companyId, taskId: task.id, agentId, kind: 'stuck', text: summary, decisionTopic: 'task', audience: 'internal', triageAgentId: recipient?.id ?? null }).returning();
+    await bindRequest(tx, task, note!, { agentId });
+    wakes = recipient ? [{ agentId: recipient.id, taskId: task.id, why: 'explain', text: note!.id }] : [];
+    await keepWakes(tx, task.companyId, wakes);
+  });
+  ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
+  return { task: row, wakes };
+}
+
+export async function report(ctx: Live, agentId: string, taskId: string, r: { done: boolean; summary: string }): Promise<Moved> {
+  const task = await loadTask(ctx.db, taskId);
+  requireReporter(task, agentId);
   await refuseWaiting(ctx.db, task);
   const n: Note = { kind: 'report', actor: { agentId }, text: r.summary, data: { done: r.done }, returned: true };
   const unstuck = stuckGoes(ctx, task);
@@ -1093,19 +1113,7 @@ export async function report(ctx: Live, agentId: string, taskId: string, r: { do
     unstuck.tell();
     return { task: row, wakes };
   }
-  /* A person gave it, so an internal resolver has to unblock it. */
-  const [asker] = await ctx.db.select().from(agents).where(eq(agents.id, agentId));
-  const recipient = asker ? await stuckRecipient(ctx.db, asker, task) : null;
-  let wakes: Wake[] = [];
-  const row = await move(ctx, task, { status: 'waiting' }, n, async tx => {
-    await letStuckGo(tx, task.id);
-    const [note] = await tx.insert(requests).values({ companyId: task.companyId, taskId, agentId, kind: 'stuck', text: r.summary, decisionTopic: 'task', audience: 'internal', triageAgentId: recipient?.id ?? null }).returning();
-    await bindRequest(tx, task, note!, { agentId });
-    wakes = recipient ? [{ agentId: recipient.id, taskId: task.id, why: 'explain', text: note!.id }] : [];
-    await keepWakes(tx, task.companyId, wakes);
-  });
-  ctx.bus.publish(task.companyId, { type: 'requests', spot: taskSpot(task) });
-  return { task: row, wakes };
+  return reportToResolver(ctx, agentId, task, r.summary, n);
 }
 
 /* The executor cannot go on without its head. */

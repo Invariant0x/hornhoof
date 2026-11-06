@@ -44,10 +44,13 @@ async function existingOutcome(ctx: Ctx, run: Run, task: Task): Promise<Moved> {
 }
 
 async function afterCompletionRace(ctx: Ctx, error: unknown, run: Run, task: Task): Promise<Moved> {
-  if (!(error instanceof ApiError)) throw error;
-  const latest = await taskLog(ctx, task.id);
-  if (!hasOutcome(latest, run.id)) throw error;
+  if (!await completedRace(ctx, error, run.id, task.id)) throw error;
   return { task: await loadTask(ctx.db, task.id), wakes: [] };
+}
+
+async function completedRace(ctx: Ctx, error: unknown, runId: string, taskId: string): Promise<boolean> {
+  if (!(error instanceof ApiError)) return false;
+  return hasOutcome(await taskLog(ctx, taskId), runId);
 }
 
 async function complete(ctx: Ctx, run: Run, task: Task, pending: PendingSubmission, events: Event[]): Promise<Moved> {
@@ -95,8 +98,15 @@ async function logFiles(ctx: Ctx, run: Run, task: Task, parts: Part[]): Promise<
 function readAuthorCheck(run: Run, parts: Part[], files: (typeof attachments.$inferSelect)[]): AuthorCheckResult | null {
   const part = parts[0];
   if (!part) return null;
+  return lastAuthorCheck(authorCheckLog(run, part, files), run, part);
+}
+
+function authorCheckLog(run: Run, part: Part, files: (typeof attachments.$inferSelect)[]): string {
   const file = files.find(candidate => candidate.name === `tests-${run.number}-${part.part}.log`);
-  const log = file ? Buffer.from(file.bytes).toString('utf8') : (part.tail ?? '');
+  return file ? Buffer.from(file.bytes).toString('utf8') : (part.tail ?? '');
+}
+
+function lastAuthorCheck(log: string, run: Run, part: Part): AuthorCheckResult | null {
   for (const line of log.split('\n').filter(line => line.startsWith('AUTHOR_CHECK ')).reverse()) {
     const parsed = parseAuthorCheckLine(line, run, part);
     if (parsed) return parsed;

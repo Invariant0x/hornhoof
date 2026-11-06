@@ -19,9 +19,12 @@ async function load(ctx: Ctx, requestId: string): Promise<Found | undefined> {
   return found;
 }
 
-async function answeringJob(ctx: Ctx, job: ToolJob, found: Found): Promise<void> {
+function requireRequestRecipient(job: ToolJob, found: Found): void {
   if (found.request.status !== 'open') throw refuse(409, 'request_closed', 'This request is answered already.');
   if (found.request.companyId !== job.companyId || found.request.triageAgentId !== job.agentId) throw refuse(403, 'decision_not_allowed', 'This stuck request belongs to another agent.');
+}
+
+async function requireResolverJob(ctx: Ctx, job: ToolJob): Promise<void> {
   const [running] = await ctx.db
     .select({ id: jobs.id })
     .from(jobs)
@@ -29,6 +32,11 @@ async function answeringJob(ctx: Ctx, job: ToolJob, found: Found): Promise<void>
     .where(and(eq(jobs.id, job.id), eq(jobs.companyId, job.companyId), eq(jobs.agentId, job.agentId), eq(jobs.kind, 'conversation'), eq(jobs.status, 'running'), inArray(agents.kind, ['head', 'orchestrator'])))
     .limit(1);
   if (!running) throw refuse(403, 'decision_context_missing', 'The current head or orchestrator answers an internal stuck request from its own running turn.');
+}
+
+async function answeringJob(ctx: Ctx, job: ToolJob, found: Found): Promise<void> {
+  requireRequestRecipient(job, found);
+  await requireResolverJob(ctx, job);
   const current = await stuckRecipient(ctx.db, found.asker, found.task);
   if (current?.id !== job.agentId) throw refuse(409, 'task_changed', 'The stuck request has another addressee now. Read it again.');
 }

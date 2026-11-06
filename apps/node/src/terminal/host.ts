@@ -2595,6 +2595,15 @@ export class TerminalHost {
     return { ok: true, reason: null };
   }
 
+  private beginProgramRestart(a: Agent, jobId: string): void {
+    const operator = this.operator;
+    if (!operator) return;
+    operator.intentional(a.key, 'restart');
+    operator.exited(a.key, { code: null, signal: null });
+    operator.begin(a.key, jobId, undefined, '', false);
+    operator.launch(a.key, 'attempt');
+  }
+
   /* Keeps the exact environment of the original launch while resuming its known session. */
   private async resumeSession(a: Agent, job: TermJob, spec: LaunchSpec, jobId: string): Promise<void> {
     const command = resumeCommand(job.program.kind, spec.command, a.sessionId!);
@@ -2603,10 +2612,7 @@ export class TerminalHost {
     a.oldLogs = null;
     a.tail = this.tailFor(a);
     const scratch = this.opts.tmux.scratch();
-    this.operator?.intentional(a.key, 'restart');
-    this.operator?.exited(a.key, { code: null, signal: null });
-    this.operator?.begin(a.key, jobId, undefined, '', false);
-    this.operator?.launch(a.key, 'attempt');
+    this.beginProgramRestart(a, jobId);
     await this.inputLane(a, () => this.opts.tmux.launch(a.name, { cwd: a.workDir, command: this.asAgent(command), cols: this.cols, rows: this.rows, envFile: envFile(scratch, { ...lasting(job.input.env), ...spec.env }), outputDir: scratch }));
     this.operator?.launch(a.key, 'started');
     if (!(await this.ready(a, { ...job, operatorDelivery: undefined }))) throw new Error('The restarted program did not become ready.');

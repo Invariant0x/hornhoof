@@ -66,11 +66,15 @@ export function writeTerminalData(term: Terminal, data: string, onWritten?: () =
   });
 }
 
+function wheelLines(viewport: WheelViewport | undefined, event: WheelEvent): number {
+  return viewport?.getLinesScrolled(event) ?? (event.deltaY < 0 ? -3 : 3);
+}
+
 /* Both xterm's mouse protocol and its alt-screen arrows are suppressed before they can become terminal data. */
 export function attachTerminalScroll(term: Terminal): void {
   const viewport = (term as unknown as { _core: XtermCore })._core.viewport;
   term.attachCustomWheelEventHandler(event => {
-    const amount = viewport?.getLinesScrolled(event) ?? (event.deltaY < 0 ? -3 : 3);
+    const amount = wheelLines(viewport, event);
     if (amount !== 0) scrollTerminal(term, amount);
     event.preventDefault();
     return false;
