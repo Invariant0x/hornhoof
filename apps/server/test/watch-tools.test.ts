@@ -122,7 +122,7 @@ describe('tools a skill grants', () => {
 
   it('shows only open prerequisites of the held task department, without task bodies or hidden references', async () => {
     const { app, db, acme, dev, ops, task } = await company(['ops-task-watch']);
-    const [foreign] = await db.insert(companies).values({ name: 'Unrelated company' }).returning();
+    const [foreign] = await db.insert(companies).values({ name: 'Unrelated company', singleton: false }).returning();
     const closedAt = new Date();
     const dependencies = await db.insert(tasks).values([
       { companyId: acme.id, departmentId: dev.id, number: 10, title: 'Private dependency title', body: 'Private dependency body' },
