@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -368,6 +368,10 @@ describe('install.sh a server serves', () => {
       expect(old.out).toContain('from before nodes wait');
     });
 
+    it('says by its digest which image the node runs, as a tag can move', () => {
+      expect(install({ args: check(), env: HERE }).out).toContain('ghcr.io/invariant0x/hornhoof-node@sha256:feed');
+    });
+
     it('stops with the way back in its words when the new container does not start', () => {
       const r = install({ args: check(), env: { ...HERE, STUB_RUN: 'fail' } });
       expect(r.code).toBe(1);
@@ -469,8 +473,30 @@ describe('install.sh a server serves', () => {
           expect(started.endsWith(BACK)).toBe(true);
         });
 
-        it.each([['another server', `${KIMI}=https://another.example.test=${ID}`], ['another node', `${KIMI}=${SERVER}=ffffffff-aaaa-4bbb-8ccc-dddddddddddd`], ['none', '']])('takes no volume that says it is of %s', (_of, STUB_VOLUMES) => {
+        it.each([['another server', `${KIMI}=https://another.example.test=${ID}`], ['another node', `${KIMI}=${SERVER}=ffffffff-aaaa-4bbb-8ccc-dddddddddddd`], ['an id no server gives', `${KIMI}=${SERVER}=${ID};x`], ['no id', `${KIMI}=${SERVER}=`]])('takes no volume that says it is of %s', (_of, STUB_VOLUMES) => {
           nothingHappened(install({ args: back(), env: { ...GONE, STUB_VOLUMES } }));
+        });
+
+        it('takes from the volume who the node is and never its key, as Docker keeps what a container prints in its logs', () => {
+          const read = install({ args: back(), env: { ...GONE, STUB_VOLUMES: `${KIMI}=${SERVER}=${ID}` } }).calls.find(c => c.includes('/data/node.json'))!;
+          expect(read).toContain('--entrypoint /bin/sed');
+          const settings = JSON.stringify({ server: SERVER, subscriptionId: ID, provider: 'kimi', key: 'the-key-of-the-node' }, null, 2);
+          const shown = execFileSync('sed', ['-n', '-E', /-n -E (.+) \/data\/node\.json$/.exec(read)![1]!], { input: settings, encoding: 'utf8' });
+          expect(shown).toContain(SERVER);
+          expect(shown).toContain(ID);
+          expect(shown).not.toContain('the-key-of-the-node');
+        });
+
+        it('reads nothing when there is no such volume, as docker run would make an empty one', () => {
+          const r = install({ args: back(), env: GONE });
+          nothingHappened(r);
+          expect(r.calls.some(c => c.includes('/data/node.json'))).toBe(false);
+        });
+
+        it('takes no name that is not the shape of a node, as -v would take it for a folder', () => {
+          const r = install({ args: ['back-node', '/etc'], env: { ...GONE, STUB_VOLUMES: `/etc=${SERVER}=${ID}` } });
+          nothingHappened(r);
+          expect(r.calls.some(c => c.includes('docker volume') || c.includes('/data/node.json'))).toBe(false);
         });
 
         it('does this on the way back alone', () => {

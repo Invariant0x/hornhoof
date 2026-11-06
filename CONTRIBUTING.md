@@ -79,7 +79,7 @@ A change to the database schema gets a new migration from `npx drizzle-kit gener
 
 A test on a screen a fake program draws proves little about a real one, and 0.7.0 went out that way. So every release passes a live check, and nothing puts a build on a machine without it: not a push to `main`, the update button, a machine that joins, `install.sh --urgent` or `install.sh server`. A version from before 0.7.0 has no check to show and stays a way back.
 
-The check runs on the nodes of our own plans, one node at a time, and each gets one short turn. `install.sh check-node` is the one way a build reaches such a node before its check exists. It names one node and a whole commit, takes only one node of a plan on a machine, and changes nothing else there. Everything else stays behind the door until all four have passed.
+The check runs on the nodes of our own plans, one node at a time, and each gets one short turn. `install.sh check-node` is the one way a build reaches such a node before its check exists. It names one node and a whole commit, refuses a second node of the same program on that build on a machine, and changes nothing else there. Which node goes when, across machines, is for people to keep. Everything else stays behind the door until all four have passed.
 
 1. After the owner approved the exact commit, run the Images workflow by hand on it. That pushes the app, node and updater images under the tag of the commit and moves nothing else.
 2. On each machine, get the installer of that commit before anything changes. It moves a node there and back:
@@ -87,20 +87,20 @@ The check runs on the nodes of our own plans, one node at a time, and each gets 
    ```sh
    COMMIT=<the whole commit>
    docker run --rm --entrypoint cat ghcr.io/invariant0x/hornhoof:$COMMIT scripts/install.sh > hornhoof-install.sh
-   export HORNHOOF_SERVER=<the address of your Hornhoof, as its nodes know it>
+   SERVER=<the address of your Hornhoof, as its nodes know it>
    ```
 
-3. Move one node, when the agents of its plan are not in the middle of a turn. It needs a server that can let a node's work end, 0.7.0 or later. It gets the published image and the way back first, lets the work of the node end, and says when the node reached its server:
+3. Move one node, when the agents of its plan are not in the middle of a turn. It needs a server that can let a node's work end, 0.7.0 or later. It gets the published image and the way back first, lets the work of the node end, says when the node reached its server, and gives the digest of the image for the record:
 
    ```sh
-   bash hornhoof-install.sh check-node hornhoof-kimi-1c07dac4 $COMMIT
+   HORNHOOF_SERVER=$SERVER bash hornhoof-install.sh check-node hornhoof-kimi-1c07dac4 $COMMIT
    ```
 
 4. Give an agent on that node one short turn. Write down what the program's own journal shows: that it recorded the words, that it answered, and that its turn ended the usual way. Fixtures, wrappers around a program and another commit's build do not count.
 5. If it passed, go on to the next node, until Kimi, Codex, Claude and Antigravity have each passed. If it did not, put that node back at once, leave the others as they are, and tell the developer why. The node goes without waiting for its work, from a copy of the image on this computer when there is one, and the command says how long it took:
 
    ```sh
-   bash hornhoof-install.sh back-node hornhoof-kimi-1c07dac4
+   HORNHOOF_SERVER=$SERVER bash hornhoof-install.sh back-node hornhoof-kimi-1c07dac4
    ```
 
 6. Show the owner the record of all four for the exact commit, with the cleaned evidence. After the owner approved it, write the proof of those images: `schema`, `commit`, `version`, the digests of the three `images`, `checkedAt`, the digest of the cleaned evidence you keep with the release (`evidence`), and for each of the four programs its `outcome` with its `version`, `machine`, `node`, `session`, `job`, `instance`, `generations` and when it was `asked`, `recorded`, `answered` and `finished`. `packages/protocol/src/live-check.ts` is what it is judged by. Run the Live check workflow from `main` with the proof. It refuses a proof that does not speak of exactly those images.

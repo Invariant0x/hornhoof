@@ -34,6 +34,7 @@ case "$1" in
       case "${4:-}" in
         *image.version*) echo "${STUB_IMAGE_VERSION:-${image##*:}}"; exit 0 ;;
         *image.revision*) echo "${STUB_IMAGE_COMMIT:-$image}"; exit 0 ;;
+        *RepoDigests*) echo "${image%%:*}@sha256:feed"; exit 0 ;;
       esac
       [ -n "${STUB_NODE_RUNNING:-}${STUB_IMAGE_IDS:-}" ] || exit 1
       id_of "${!#}"

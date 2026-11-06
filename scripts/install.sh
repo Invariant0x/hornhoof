@@ -700,12 +700,15 @@ provider_of() {
 }
 
 # A start that failed took the container and left the volume, whose settings say whose node it is. Only the way back goes from there.
+# Only those two lines leave the container: Docker's logs keep what a container prints, and the settings hold the node's key.
 lost_node() {
   local name=$1 settings id
+  case "$name" in *[!a-z0-9-]*) return 1 ;; hornhoof-*-*) ;; *) return 1 ;; esac
   "${DOCKER[@]}" volume inspect "$name" > /dev/null 2>&1 || return 1
-  settings=$("${DOCKER[@]}" run --rm --network none --user 0:0 --cap-drop ALL --cap-add DAC_OVERRIDE --security-opt no-new-privileges --entrypoint cat -v "$name:/data:ro" "$IMAGE" /data/node.json 2> /dev/null) || return 1
+  settings=$("${DOCKER[@]}" run --rm --network none --user 0:0 --cap-drop ALL --cap-add DAC_OVERRIDE --security-opt no-new-privileges --entrypoint /bin/sed -v "$name:/data:ro" "$IMAGE" -n -E '/^ *"(server|subscriptionId)":/p' /data/node.json 2> /dev/null) || return 1
   [ "$(printf '%s\n' "$settings" | sed -n 's/^ *"server": *"\([^"]*\)".*/\1/p')" = "$NODE_SERVER" ] || return 1
   id=$(printf '%s\n' "$settings" | sed -n 's/^ *"subscriptionId": *"\([^"]*\)".*/\1/p')
+  case "$id" in '' | *[!A-Za-z0-9_-]*) return 1 ;; esac
   [ "$(node_name "$id" "$(provider_of "$name")")" = "$name" ] || return 1
   printf '%s:%s' "$name" "$id"
 }
@@ -769,7 +772,7 @@ way_back_here() {
 # The live check of a release gives a real node of the build a turn, before the proof the door asks for can exist, so this does not ask
 # the door. Every machine and everything else still does. See CONTRIBUTING.md.
 check_node_mode() {
-  local entry
+  local entry digest
   [[ "$CHECK_COMMIT" =~ ^[0-9a-f]{40}$ ]] || fail "check-node takes a whole commit, 40 lowercase hex characters, never a tag that moves. Nothing changed."
   IMAGE=$NODE_REPOSITORY:$CHECK_COMMIT
   one_node_machine
@@ -781,6 +784,9 @@ check_node_mode() {
   way_back_here
   wait_for_node "$CHECK_NODE" || fail "Nothing changed on this machine."
   start_one "$entry"
+  # A tag can move, and the record of the check speaks of a digest.
+  digest=$("${DOCKER[@]}" image inspect --format '{{index .RepoDigests 0}}' "$IMAGE" 2> /dev/null || true)
+  say "For the record of the check, the image by its digest: ${digest:-could not be read, ask docker image inspect $IMAGE}."
 }
 
 # A node whose turn failed goes back at once, whatever it runs: its turns go on after it, as after any restart.
