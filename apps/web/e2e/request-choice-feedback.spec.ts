@@ -382,6 +382,16 @@ for (const lang of ['ru', 'en'] as const) {
           width,
           surface: '/tasks WaitingForYou choice card',
         });
+        await options.first().focus();
+        await expect(options.first()).toBeFocused();
+        await saveScreenshot(page, info, {
+          file: `choice-focus-${lang}-${theme}-${width}.png`,
+          provenance: 'playwright-route-fixture',
+          lang,
+          theme,
+          width,
+          surface: '/tasks WaitingForYou choice option keyboard focus',
+        });
 
         await send.click();
         await expect.poll(() => posts.at(-1)).toEqual({

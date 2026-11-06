@@ -6,6 +6,7 @@ import { SUB } from './agent-window-api';
 import { openAgent } from './agent-window-panels-api';
 import { serveApi, TASKS } from './api';
 import { serveRoutes } from './routes-api';
+import { serveTree } from './tree-api';
 
 const MESSAGES: Record<'en' | 'ru', Messages> = { en, ru };
 const PHASE = process.env.HH_PANEL_PHASE ?? 'after';
@@ -113,8 +114,10 @@ for (const lang of ['en', 'ru'] as const) {
           await expect(save).toHaveCSS('clip-path', 'none');
           await expect(save).toHaveCSS('outline-width', '2px');
           await expect(save).toHaveCSS('outline-style', 'solid');
+          await capture(page, info, `focus-btn-${look}`);
           await notebook.getByRole('button', { name: m.notebook.cancel, exact: true }).click();
           await change.focus();
+          await capture(page, info, `focus-act-${look}`);
           await page.keyboard.press('Enter');
           await expect(notebook.getByRole('textbox', { name: m.notebook.note(1), exact: true })).toBeVisible();
           await notebook.getByRole('button', { name: m.notebook.cancel, exact: true }).click();
@@ -123,6 +126,11 @@ for (const lang of ['en', 'ru'] as const) {
             await expect(notebook.getByRole('textbox', { name: m.notebook.note(1), exact: true })).toBeVisible();
             await notebook.getByRole('button', { name: m.notebook.cancel, exact: true }).tap();
           }
+          await remove.focus();
+          await capture(page, info, `focus-act-danger-${look}`);
+          const panelClose = notebook.getByRole('button', { name: m.window.close, exact: true });
+          await panelClose.focus();
+          await capture(page, info, `focus-panel-close-${look}`);
           await remove.click();
           await expect.poll(() => removed.length).toBe(1);
           expect(errors).toEqual([]);
@@ -140,7 +148,7 @@ for (const lang of ['en', 'ru'] as const) {
           await page.route('**/api/notebook/1', async route => {
             if (route.request().method() !== 'PATCH') return route.fallback();
             await new Promise<void>(resolve => { releaseSave = resolve; });
-            return route.fulfill({ status: 500, json: { error: { code: 'unknown', message: 'Save failed.' } } });
+            return route.fulfill({ status: 500, json: { error: { code: 'internal', message: 'Save failed.' } } });
           });
           let notebook = await openPanel('notebook');
           await expect(notebook.getByText(m.notebook.empty, { exact: true })).toBeVisible();
@@ -161,7 +169,7 @@ for (const lang of ['en', 'ru'] as const) {
           await expect(notebook.getByRole('status')).toHaveText(m.notebook.saving);
           await capture(page, info, `notebook-saving-${look}`);
           releaseSave();
-          await expect(notebook.getByRole('alert')).toContainText('Save failed.');
+          await expect(notebook.getByRole('alert')).toContainText(m.common.somethingWrong);
           await capture(page, info, `notebook-save-error-${look}`);
         });
       }
@@ -320,6 +328,46 @@ for (const lang of ['en', 'ru'] as const) {
         expect(errors).toEqual([]);
       });
 
+      test(`Map, schema and tree keyboard focus evidence: ${look}`, async ({ page }, info) => {
+        const errors = await prepareRoutes(page, lang, theme, width);
+        await serveTree(page, { during: true });
+        await page.goto('/');
+        const department = page.locator('button.dept').first();
+        await department.focus();
+        await expect(department).toBeFocused();
+        await capture(page, info, `focus-department-${look}`);
+        const person = page.locator('button.chip-btn').first();
+        await person.focus();
+        await expect(person).toBeFocused();
+        await capture(page, info, `focus-person-chip-${look}`);
+        await department.click();
+        const head = page.locator('button.shead').first();
+        await head.focus();
+        await expect(head).toBeFocused();
+        await capture(page, info, `focus-schema-head-${look}`);
+        const chip = page.locator('button.schip').first();
+        await chip.focus();
+        await expect(chip).toBeFocused();
+        await capture(page, info, `focus-schema-chip-${look}`);
+        await page.getByRole('button', { name: m.dept.treeButton, exact: true }).click();
+        const taskChip = page.locator('.tview .lchip').first();
+        await taskChip.focus();
+        await expect(taskChip).toBeFocused();
+        await capture(page, info, `focus-tree-chip-${look}`);
+        expect(errors).toEqual([]);
+      });
+
+      test(`Requests empty and read error evidence: ${look}`, async ({ page }, info) => {
+        await prepareRoutes(page, lang, theme, width);
+        await page.goto('/tasks');
+        await expect(page.locator('article.req')).toHaveCount(0);
+        await capture(page, info, `requests-empty-${look}`);
+        await page.route('**/api/requests', route => route.fulfill({ status: 500, json: { error: { code: 'internal', message: 'Read failed.' } } }));
+        await page.reload();
+        await expect(page.getByRole('alert').first()).toBeVisible();
+        await capture(page, info, `requests-read-error-${look}`);
+      });
+
       test(`A long machine confirmation keeps its whole action group below: ${look}`, async ({ page }, info) => {
         const errors = await prepareRoutes(page, lang, theme, width);
         await page.route('**/api/machines', route => route.fulfill({ json: { machines: [LONG_MACHINE] } }));
@@ -377,7 +425,7 @@ for (const lang of ['en', 'ru'] as const) {
         await page.goto('/machines/m1');
         const card = page.getByRole('article', { name: 'build-online', exact: true });
         await expect(card).toBeVisible();
-        await expect(card.locator('.card-t .status')).toHaveText(m.machines.online);
+        await expect(card.locator('.status.ready').first()).toHaveText(m.machines.online);
         await expect(card.locator('.plist')).toContainText('Codex');
         await capture(page, info, `machine-online-${look}`, true);
         expect(errors).toEqual([]);
