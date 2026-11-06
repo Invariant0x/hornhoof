@@ -2,6 +2,7 @@ import { expect, test, type Locator, type Page, type TestInfo } from '@playwrigh
 import { en, type Messages } from '../src/i18n/en';
 import { ru } from '../src/i18n/ru';
 import type { MachineView, NoteView, PersonView, ShownCommand } from '../src/types';
+import { SUB } from './agent-window-api';
 import { openAgent } from './agent-window-panels-api';
 import { serveApi, TASKS } from './api';
 import { serveRoutes } from './routes-api';
@@ -125,6 +126,43 @@ for (const lang of ['en', 'ru'] as const) {
           await remove.click();
           await expect.poll(() => removed.length).toBe(1);
           expect(errors).toEqual([]);
+        });
+
+        test(`Notebook empty, retry, editing and saving states: ${look}`, async ({ page }, info) => {
+          const m = MESSAGES[lang];
+          const { openPanel, toggle } = await openAgent(page, { lang, theme, width }, 'orchestrator');
+          let mode: 'empty' | 'error' | 'notes' = 'empty';
+          await page.route('**/api/notebook', route => {
+            if (mode === 'error') return route.fulfill({ status: 500, json: { error: { code: 'unknown', message: 'Read failed.' } } });
+            return route.fulfill({ json: { notes: mode === 'empty' ? [] : NOTES } });
+          });
+          let releaseSave!: () => void;
+          await page.route('**/api/notebook/1', async route => {
+            if (route.request().method() !== 'PATCH') return route.fallback();
+            await new Promise<void>(resolve => { releaseSave = resolve; });
+            return route.fulfill({ status: 500, json: { error: { code: 'unknown', message: 'Save failed.' } } });
+          });
+          let notebook = await openPanel('notebook');
+          await expect(notebook.getByText(m.notebook.empty, { exact: true })).toBeVisible();
+          await capture(page, info, `notebook-empty-${look}`);
+          await toggle('notebook').click();
+          mode = 'error';
+          notebook = await openPanel('notebook');
+          await expect(notebook.getByRole('alert')).toContainText(m.notebook.unread);
+          await capture(page, info, `notebook-read-error-${look}`);
+          mode = 'notes';
+          await notebook.getByRole('button', { name: m.app.tryAgain, exact: true }).click();
+          await expect(notebook.locator('.notebook ul')).toBeVisible();
+          await capture(page, info, `notebook-retry-${look}`);
+          await notebook.getByRole('button', { name: m.notebook.changeNote(1), exact: true }).click();
+          await expect(notebook.getByRole('textbox', { name: m.notebook.note(1), exact: true })).toBeVisible();
+          await capture(page, info, `notebook-editing-${look}`);
+          await notebook.getByRole('button', { name: m.notebook.save, exact: true }).click();
+          await expect(notebook.getByRole('status')).toHaveText(m.notebook.saving);
+          await capture(page, info, `notebook-saving-${look}`);
+          releaseSave();
+          await expect(notebook.getByRole('alert')).toContainText('Save failed.');
+          await capture(page, info, `notebook-save-error-${look}`);
         });
       }
 
@@ -272,6 +310,16 @@ for (const lang of ['en', 'ru'] as const) {
         expect(errors).toEqual([]);
       });
 
+      test(`People ordinary table and multiple records evidence: ${look}`, async ({ page }, info) => {
+        const errors = await prepareRoutes(page, lang, theme, width);
+        await page.goto('/people');
+        const rows = page.locator('.ptable tbody tr');
+        await expect(rows).toHaveCount(2);
+        if (width === 1440) await expect(page.locator('.ptable')).not.toHaveAttribute('data-fit', 'entries');
+        await capture(page, info, `people-ordinary-${look}`, true);
+        expect(errors).toEqual([]);
+      });
+
       test(`A long machine confirmation keeps its whole action group below: ${look}`, async ({ page }, info) => {
         const errors = await prepareRoutes(page, lang, theme, width);
         await page.route('**/api/machines', route => route.fulfill({ json: { machines: [LONG_MACHINE] } }));
@@ -312,6 +360,26 @@ for (const lang of ['en', 'ru'] as const) {
         expect(noBox.y).toBe(yesBox.y);
         await buttons.nth(1).click();
         await expect(ask).toHaveCount(0);
+        expect(errors).toEqual([]);
+      });
+
+      test(`Online machine with a subscription evidence: ${look}`, async ({ page }, info) => {
+        const errors = await prepareRoutes(page, lang, theme, width);
+        const machine: MachineView = {
+          ...LONG_MACHINE,
+          hostname: 'build-online',
+          online: true,
+          plans: [{ id: SUB.id, provider: SUB.provider, status: 'ready', online: true }],
+          load: { cpus: 8, load: 1, memFree: 10 * 1024 ** 3, memTotal: 16 * 1024 ** 3, jobs: 0, tests: 0, cpuModel: 'AMD EPYC', diskFree: 200 * 1024 ** 3, diskTotal: 500 * 1024 ** 3 },
+        };
+        await page.route('**/api/machines', route => route.fulfill({ json: { machines: [machine] } }));
+        await page.route('**/api/subscriptions', route => route.fulfill({ json: { subscriptions: [SUB] } }));
+        await page.goto('/machines/m1');
+        const card = page.getByRole('article', { name: 'build-online', exact: true });
+        await expect(card).toBeVisible();
+        await expect(card.locator('.card-t .status')).toHaveText(m.machines.online);
+        await expect(card.locator('.plist')).toContainText('Codex');
+        await capture(page, info, `machine-online-${look}`, true);
         expect(errors).toEqual([]);
       });
 
