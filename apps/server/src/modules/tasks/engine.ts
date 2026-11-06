@@ -1100,7 +1100,7 @@ export async function report(ctx: Live, agentId: string, taskId: string, r: { do
   const row = await move(ctx, task, { status: 'waiting' }, n, async tx => {
     await letStuckGo(tx, task.id);
     const [note] = await tx.insert(requests).values({ companyId: task.companyId, taskId, agentId, kind: 'stuck', text: r.summary, decisionTopic: 'task', audience: 'internal', triageAgentId: recipient?.id ?? null }).returning();
-    await bindRequest(tx, task, note!, { agentId }, { strict: false });
+    await bindRequest(tx, task, note!, { agentId });
     wakes = recipient ? [{ agentId: recipient.id, taskId: task.id, why: 'explain', text: note!.id }] : [];
     await keepWakes(tx, task.companyId, wakes);
   });
@@ -1590,8 +1590,6 @@ export type Ask = {
   topic?: DecisionTopic;
   /* Who answers by when, if someone promised dates. */
   plan?: WaitPlan;
-  /* What must reach a person even where the department set no dates for it. */
-  evenUnplanned?: boolean;
   /* A goal in danger, as someone who may say so said it. */
   goal?: NewGoal;
   /* The server's own: what must be kept in the step that makes the request. No tool passes it. */
@@ -1643,7 +1641,7 @@ export async function ask(ctx: Live, agentId: string, taskId: string, q: Ask): P
         ...goalColumns(q.goal),
       })
       .returning();
-    const wait = await bindRequest(tx, task, request!, { agentId }, { plan: q.plan, strict: !q.evenUnplanned });
+    const wait = await bindRequest(tx, task, request!, { agentId }, q.plan);
     if (q.goal) await alertGoal(tx, task, request!, wait);
     await q.onCreated?.(tx, request!);
     wakes = await explaining(tx, task, agentId, request!.id);

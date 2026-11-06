@@ -122,7 +122,7 @@ async function escalateGoal(ctx: Ctx, job: ToolJob, ref: number | string, said: 
   const open = await openGoal(ctx.db, task.companyId, goalRef);
   if (open) return say(await reviseGoal(ctx, { agentId: job.agentId }, open, said.impact) ? 'The CEO is told it is now missed.' : `The CEO has this already, on the question in #${task.number}. Nothing changed.`);
   try {
-    await askPerson(ctx, job, task, { kind: 'question', text: `${said.impact === 'missed' ? 'Missed goal' : 'Goal at risk'}: ${said.goal}. ${said.why}`, evenUnplanned: true, goal: { ref: goalRef, impact: said.impact } });
+    await askPerson(ctx, job, task, { kind: 'question', text: `${said.impact === 'missed' ? 'Missed goal' : 'Goal at risk'}: ${said.goal}. ${said.why}`, goal: { ref: goalRef, impact: said.impact } });
   } catch (err) {
     /* Another said it first: this one joins that episode. */
     const first = isUniqueViolation(err) ? await openGoal(ctx.db, task.companyId, goalRef) : null;
@@ -233,7 +233,7 @@ export function registerApprovalControlTools(server: McpServer, ctx: Ctx, app: F
     {
       description:
         'Sets how long a department gives a kind of wait: after, review, person, run or external, at a stage of a run or at all. ownerMs, headMs, decisionMs: when its owner, its head and then the department\'s owner are told, counted from when the wait began. reviewIntervalMs: how often the head looks at it again after that. ' +
-        'The first one set makes the department strict: from then on a wait of a kind with no dates set and no promise is refused, so set them all that are needed. Write down only what the person said: there are no standard numbers. ' +
+        'The first one set makes the department strict: from then on a wait of a kind with no dates set and no promise is refused, so set them all that are needed. A question to a person is never refused: it then waits with no dates. Write down only what the person said: there are no standard numbers. ' +
         "Only in a turn that answers the department's owner, the CEO or the CEO delegate, as their decision.",
       inputSchema: { department: Department, kind: z.enum(WAIT_SOURCE_KINDS), stage: z.string().trim().max(40).optional(), ownerMs: z.number().int().positive(), headMs: z.number().int().positive(), decisionMs: z.number().int().positive(), reviewIntervalMs: z.number().int().positive() },
     },

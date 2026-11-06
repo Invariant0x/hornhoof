@@ -1,18 +1,19 @@
 import { createHmac, randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import Fastify from 'fastify';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { encryptSecret } from '../src/crypto/secrets.js';
-import { outboundAccounts, outboundAttempts, outboundBindings, outboundChannels, outboundDailyUsage, outboundEvents, waitNotices } from '../src/db/schema.js';
+import { agents, modelChecks, outboundAccounts, outboundAttempts, outboundBindings, outboundCatalogRevisions, outboundChannels, outboundDailyUsage, outboundEvents, outboundMessageRevisions, outboundMessages, waitNotices } from '../src/db/schema.js';
 import { minuteRound, startTimers } from '../src/modules/agents/timers.js';
 import type { SmtpSettings } from '../src/modules/outbound/accounts.js';
 import { beginDispatch, dueMessages, reserveDispatch, submitOutbound } from '../src/modules/outbound/core.js';
 import { createTask } from '../src/modules/tasks/engine.js';
-import { dispatchDue, noticeStops, reconcileOutbound, recordReceipts, sendBegun, type Senders } from '../src/modules/outbound/dispatcher.js';
+import { dispatchDue, noticeStops, outboundRound, reconcileOutbound, recordReceipts, sendBegun, type Senders } from '../src/modules/outbound/dispatcher.js';
 import type { ReconcileOutcome, SendOutcome } from '../src/modules/outbound/ports.js';
 import { stopByPerson } from '../src/modules/outbound/policies.js';
 import { PASSWORD } from './outbound-receivers.js';
 import { QUIET, aCertifiedCheck, allowed, anAccountOf, dispatched, world, type World } from './outbound-world.js';
+import { sha } from './outbound-fixture.js';
 
 /* The dispatcher against a transport that records what it was handed and says what a test tells it to. The real wire is in the
    adapters' tests and outbound-live.integration.test.ts. */
@@ -38,6 +39,13 @@ function senders(say: () => Promise<SendOutcome> = async () => ACCEPTED, ask: ()
   };
   const webhook = { send: async () => { throw new Error('This test sends over SMTP.'); }, reconcile: async () => ({ kind: 'pending' as const }) };
   return { sent, asked, use: { smtp, webhook, deadlineMs } satisfies Senders };
+}
+
+/* Sent by the dispatcher's own steps, so its end stands as the transport says. */
+async function sendBegunOf(w: World, messageId: string, use: Senders): Promise<void> {
+  const begun = await dispatched(w, messageId);
+  if (begun.kind !== 'begun') throw new Error(`Expected it to begin, got ${begun.kind}`);
+  await sendBegun(w.ctx, begun, use);
 }
 
 async function ready(policy = QUIET, over: Parameters<typeof world>[1] = {}): Promise<World> {
@@ -205,6 +213,148 @@ describe('sending what is due', () => {
     expect(due).toHaveLength(2);
     expect(due.map(m => m.messageId)).toContain(last.messageId);
   });
+
+  it('looks at what can go now however many older ones wait for a person or a limit', async () => {
+    const w = await ready();
+    const waiting = await w.submit();
+    const limited = await w.submit();
+    const free = await w.submit();
+    await w.c.db.update(outboundMessages).set({ status: 'waiting_approval', reasonCodes: ['approval_required'] }).where(eq(outboundMessages.id, waiting.messageId));
+    await w.c.db.update(outboundMessages).set({ reasonCodes: ['daily_limit_exceeded'] }).where(eq(outboundMessages.id, limited.messageId));
+    expect((await dueMessages(w.ctx, new Date(), 1)).map(m => m.messageId)).toContain(free.messageId);
+  });
+
+  it('comes round to each one that is held, longest unseen first, however few it looks at', async () => {
+    const w = await ready();
+    const first = await w.submit();
+    const second = await w.submit();
+    await stopByPerson(w.ctx, w.channel.id);
+    const at = (minutes: number) => new Date(Date.now() + minutes * 60_000);
+    await reserveDispatch(w.ctx, first.messageId, 1, at(1));
+    await reserveDispatch(w.ctx, second.messageId, 1, at(2));
+    expect((await dueMessages(w.ctx, at(3), 1)).map(m => m.messageId)).toEqual([first.messageId]);
+    await reserveDispatch(w.ctx, first.messageId, 1, at(3));
+    expect((await dueMessages(w.ctx, at(4), 1)).map(m => m.messageId)).toEqual([second.messageId]);
+  });
+});
+
+describe('the time of a round that takes long', () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  const movingOn = (to: Date) => {
+    const made = senders();
+    const send = made.use.smtp.send;
+    made.use.smtp.send = async args => {
+      const said = await send(args);
+      vi.setSystemTime(to);
+      return said;
+    };
+    return made;
+  };
+
+  it('does not send on a template that ran out during the send before it', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const w = await ready();
+    const start = new Date();
+    const [template] = await w.c.db.insert(outboundCatalogRevisions).values({ ...w.template, id: randomUUID(), entryId: randomUUID(), validUntil: new Date(start.getTime() + 1000) }).returning();
+    const document = { ...w.document, templateId: template!.entryId };
+    await w.submit({ document });
+    await w.submit({ document });
+    const { sent, use } = movingOn(new Date(start.getTime() + 2000));
+    await dispatchDue(w.ctx, start, use);
+    expect(sent).toHaveLength(1);
+  });
+
+  it('does not send on a certificate that ran out during the send before it', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const w = await ready(QUIET, { status: 'new' });
+    const certified = await aCertifiedCheck(w);
+    const start = new Date();
+    for (let i = 0; i < 2; i += 1) {
+      const { messageId, contentDigest } = await w.submit();
+      await allowed(w, messageId, contentDigest, certified);
+    }
+    await w.c.db.update(modelChecks).set({ validUntil: new Date(start.getTime() + 1000) }).where(eq(modelChecks.id, certified.check.id));
+    const { sent, use } = movingOn(new Date(start.getTime() + 2000));
+    await dispatchDue(w.ctx, start, use);
+    expect(sent).toHaveLength(1);
+  });
+
+  it('counts a send past midnight in the new day', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const w = await ready({ ...QUIET, timezone: 'UTC' });
+    const midnight = new Date(Math.ceil(Date.now() / 86_400_000) * 86_400_000 + 86_400_000);
+    const start = new Date(midnight.getTime() - 1000);
+    vi.setSystemTime(start);
+    await w.submit();
+    await w.submit();
+    const { sent, use } = movingOn(new Date(midnight.getTime() + 1000));
+    await dispatchDue(w.ctx, start, use);
+    expect(sent).toHaveLength(2);
+    const buckets = await w.c.db.select().from(outboundDailyUsage).where(and(eq(outboundDailyUsage.scope, 'account'), eq(outboundDailyUsage.scopeKey, w.account.id)));
+    expect(buckets.map(b => [b.day, b.accepted]).toSorted()).toEqual([[start.toISOString().slice(0, 10), 1], [midnight.toISOString().slice(0, 10), 1]]);
+  });
+
+  it('counts a round from when it began, not from when its first step ended', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const w = await ready();
+    const start = new Date();
+    const [template] = await w.c.db.insert(outboundCatalogRevisions).values({ ...w.template, id: randomUUID(), entryId: randomUUID(), validUntil: new Date(start.getTime() + 1000) }).returning();
+    await w.submit({ document: { ...w.document, templateId: template!.entryId } });
+    const reconciled = await w.submit();
+    const { sent, use } = senders(async () => ({ kind: 'unknown', safeCode: 'timeout' }));
+    await sendBegunOf(w, reconciled.messageId, use);
+    use.smtp.reconcile = async () => {
+      vi.setSystemTime(new Date(start.getTime() + 2000));
+      return { kind: 'accepted', providerReceipt: '250 ok', acceptedAt: new Date().toISOString() };
+    };
+    sent.length = 0;
+    await outboundRound(w.ctx, start, use);
+    expect(sent).toEqual([]);
+  });
+});
+
+describe('what no one knows the end of', () => {
+  it('comes round to every one of them, and sends none of them again', async () => {
+    const w = await ready();
+    const { messageId } = await w.submit();
+    const { sent, use } = senders(async () => ({ kind: 'unknown', safeCode: 'timeout' }));
+    await dispatchDue(w.ctx, new Date(), use);
+    expect(sent).toHaveLength(1);
+    const [baseAttempt] = await attemptsOf(w, messageId);
+    const [baseMessage] = await w.c.db.select().from(outboundMessages).where(eq(outboundMessages.id, messageId));
+    const [baseRevision] = await w.c.db.select().from(outboundMessageRevisions).where(eq(outboundMessageRevisions.messageId, messageId));
+    const [baseAgent] = await w.c.db.select().from(agents).where(eq(agents.id, w.c.worker.id));
+    const [baseAccount] = await w.c.db.select().from(outboundAccounts).where(eq(outboundAccounts.id, w.account.id));
+    const [baseBucket] = await w.c.db.select().from(outboundDailyUsage).where(eq(outboundDailyUsage.id, baseAttempt!.accountBucketId));
+    await w.c.db.update(outboundDailyUsage).set({ unknown: 101 }).where(eq(outboundDailyUsage.id, baseAttempt!.domainBucketId));
+    let lastInserted = '';
+    for (let i = 1; i <= 100; i += 1) {
+      const agentId = randomUUID(), accountId = randomUUID(), nextMessageId = randomUUID(), bucketId = randomUUID(), attemptId = randomUUID();
+      await w.c.db.insert(agents).values({ ...baseAgent!, id: agentId, name: `Stuck author ${i}` });
+      await w.c.db.insert(outboundAccounts).values({ ...baseAccount!, id: accountId, label: `Stuck account ${i}` });
+      await w.c.db.insert(outboundBindings).values({ ...w.binding, id: randomUUID(), agentId, accountId });
+      await w.c.db.insert(outboundDailyUsage).values({ ...baseBucket!, id: bucketId, scopeKey: accountId });
+      await w.c.db.insert(outboundMessages).values({ ...baseMessage!, id: nextMessageId, authorAgentId: agentId, accountId, idempotencyKey: randomUUID() });
+      await w.c.db.insert(outboundMessageRevisions).values({ ...baseRevision!, id: randomUUID(), messageId: nextMessageId });
+      await w.c.db.insert(outboundAttempts).values({ ...baseAttempt!, id: attemptId, messageId: nextMessageId, accountId, accountBucketId: bucketId });
+      lastInserted = attemptId;
+    }
+    const asked = new Set<string>();
+    const everyAttempt = (await w.c.db.select({ id: outboundAttempts.id }).from(outboundAttempts)).map(a => a.id).toSorted();
+    const lastOfAll = everyAttempt.at(-1)!;
+    expect(everyAttempt).toContain(lastInserted);
+    use.smtp.reconcile = async ({ attemptId }) => {
+      asked.add(attemptId);
+      return attemptId === lastOfAll ? { kind: 'accepted', providerReceipt: '250 ok', acceptedAt: new Date().toISOString() } : { kind: 'pending' };
+    };
+    await reconcileOutbound(w.ctx, new Date(), use);
+    await reconcileOutbound(w.ctx, new Date(), use);
+    expect(asked.size).toBe(101);
+    expect((await w.c.db.select().from(outboundAttempts).where(eq(outboundAttempts.id, lastOfAll)))[0]!.status).toBe('accepted');
+    await dispatchDue(w.ctx, new Date(), use);
+    expect(sent).toHaveLength(1);
+  });
 });
 
 describe('what waits for a check of its words', () => {
@@ -221,6 +371,24 @@ describe('what waits for a check of its words', () => {
     await dispatchDue(w.ctx, LATER, use);
     expect(sent).toHaveLength(1);
     expect(await w.messageOf(messageId)).toMatchObject({ status: 'sent' });
+  });
+
+  it('asks the check again once it was certified anew, and then goes once', async () => {
+    const w = await ready(QUIET, { status: 'new' });
+    const certified = await aCertifiedCheck(w);
+    const { messageId, contentDigest } = await w.submit();
+    await allowed(w, messageId, contentDigest, certified);
+    const bindingDigest = sha('certified anew');
+    await w.c.db.update(modelChecks).set({ bindingDigest }).where(eq(modelChecks.id, certified.check.id));
+    const { sent, use } = senders();
+    await dispatchDue(w.ctx, new Date(), use);
+    expect(sent).toEqual([]);
+    expect(await w.messageOf(messageId)).toMatchObject({ status: 'waiting_checks', reasonCodes: ['review_unavailable'] });
+    await allowed(w, messageId, contentDigest, { check: certified.check, bindingDigest });
+    expect(await w.messageOf(messageId)).toMatchObject({ status: 'scheduled', reasonCodes: [] });
+    await dispatchDue(w.ctx, new Date(), use);
+    await dispatchDue(w.ctx, LATER, use);
+    expect(sent).toHaveLength(1);
   });
 
   it('ends with a failed check stopping everything after it, what had already passed included', async () => {

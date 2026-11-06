@@ -409,13 +409,27 @@ describe('the page for stopping messages', () => {
   it('takes what a browser and a mail program really send', async () => {
     const w = await world();
     const form = { 'content-type': 'application/x-www-form-urlencoded' };
-    const fromPage = await w.c.app.inject({ method: 'POST', url: `/api/outbound/unsubscribe/${tokenOf(w)}`, headers: { ...form, origin: 'https://hornhoof.example' }, payload: '' });
+    /* The page asks for no referrer, so a browser names no site for its form: "null". */
+    const fromPage = await w.c.app.inject({ method: 'POST', url: `/api/outbound/unsubscribe/${tokenOf(w)}`, headers: { ...form, origin: 'null' }, payload: '' });
     expect(fromPage.statusCode).toBe(200);
     expect(await suppressed(w)).toBe(true);
     const oneClick = await w.c.app.inject({ method: 'POST', url: `/api/outbound/unsubscribe/${tokenOf(w)}`, headers: form, payload: 'List-Unsubscribe=One-Click' });
     expect(oneClick.statusCode).toBe(200);
     const asParts = await w.c.app.inject({ method: 'POST', url: `/api/outbound/unsubscribe/${tokenOf(w)}`, headers: { 'content-type': 'multipart/form-data; boundary=x' }, payload: '--x\r\nContent-Disposition: form-data; name="List-Unsubscribe"\r\n\r\nOne-Click\r\n--x--\r\n' });
     expect(asParts.statusCode).toBe(200);
+  });
+
+  it('still refuses a page of another site, and a page that names none anywhere else', async () => {
+    const w = await world();
+    const form = { 'content-type': 'application/x-www-form-urlencoded' };
+    const foreign = await w.c.app.inject({ method: 'POST', url: `/api/outbound/unsubscribe/${tokenOf(w)}`, headers: { ...form, origin: 'https://other.example' }, payload: '' });
+    expect(foreign.statusCode).toBe(403);
+    expect(foreign.json().error.reason).toBe('cross_site');
+    expect(await suppressed(w)).toBe(false);
+    const elsewhere = await w.c.app.inject({ method: 'POST', url: `/api/outbound/contacts/${w.contact.id}/suppress`, ...as(w.c.ceoToken), headers: { origin: 'null' }, payload: { evidence: 'said so' } });
+    expect(elsewhere.statusCode).toBe(403);
+    expect(elsewhere.json().error.reason).toBe('cross_site');
+    expect(await suppressed(w)).toBe(false);
   });
 
   it('keeps its address to itself and stays out of frames', async () => {

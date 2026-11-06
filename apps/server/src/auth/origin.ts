@@ -6,6 +6,10 @@ import { linkOf } from '../modules/link/link.js';
 
 const READS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
+/* The stop link's own page asks for no referrer, so a browser names no site for its form, only "null". The link in the address
+   is the whole right here and a site that has it needs no browser, so this takes nothing from the rule below. */
+const namesNoSite = (req: FastifyRequest): boolean => req.headers.origin === 'null' && req.method === 'POST' && req.routeOptions.url === '/api/outbound/unsubscribe/*';
+
 /* A browser names the page each change and each socket comes from. One from a page of another site is refused, even
    with the person's cookie: that site cannot read the answer, but it could still stop an agent or type into a terminal.
    Hornhoof's own pages come from its public address, from its public link at hornhoof.org, or from the address the
@@ -16,6 +20,7 @@ export function fromOwnPages(config: Config, db: Db) {
     const origin = req.headers.origin;
     if (origin === undefined || origin === own) return;
     if (READS.has(req.method) && req.headers.upgrade?.toLowerCase() !== 'websocket') return;
+    if (namesNoSite(req)) return;
     const hosts = [req.headers.host, ...String(req.headers['x-forwarded-host'] ?? '').split(',')].map(h => h?.trim()).filter(Boolean);
     if (URL.canParse(origin) && hosts.includes(new URL(origin).host)) return;
     const link = await linkOf(db);
