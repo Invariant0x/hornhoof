@@ -262,11 +262,18 @@ async function runTicketModelClassification(
   return SupportClassifyResult.parse({ classificationReceiptId: saved!.id, status: 'ready' });
 }
 
+type InPlace = { departmentId: string | null; productId: string | null };
+
+/* What is for a whole department takes in each of its products; what is for a product, that product alone. */
+const takesIn = (wide: InPlace, narrow: InPlace): boolean => wide.departmentId === narrow.departmentId && (wide.productId === null || wide.productId === narrow.productId);
+
+/* A ticket outside the task's place is not there for its holder: the same answer as one that does not exist, before anything
+   of it is read or spent. */
 async function loadTicketRevision(
   db: Pick<Db, 'select'>,
   companyId: string,
-  ticketId: string,
-  ticketRevision: number,
+  input: { ticketId: string; ticketRevision: number },
+  task: InPlace,
 ): Promise<typeof supportTickets.$inferSelect> {
   const [ticket] = await db
     .select()
@@ -274,11 +281,11 @@ async function loadTicketRevision(
     .where(
       and(
         eq(supportTickets.companyId, companyId),
-        eq(supportTickets.ticketId, ticketId),
-        eq(supportTickets.revision, ticketRevision),
+        eq(supportTickets.ticketId, input.ticketId),
+        eq(supportTickets.revision, input.ticketRevision),
       ),
     );
-  if (!ticket) throw new SupportGatewayError(404, 'ticket_unknown', 'Support ticket revision was not found.');
+  if (!ticket || !takesIn(ticket, task)) throw new SupportGatewayError(404, 'ticket_unknown', 'Support ticket revision was not found.');
   return ticket;
 }
 
@@ -330,11 +337,11 @@ export async function classifySupportTicket(
   now: Date = new Date(),
 ): Promise<SupportClassifyResultDto> {
   const input = SupportClassifyInput.parse(rawInput);
-  await requireAssignedTask(ctx, caller, input.task);
+  const task = await requireAssignedTask(ctx, caller, input.task);
+  const ticket = await loadTicketRevision(ctx.db, caller.companyId, input, task);
   const replay = await existingClassificationByKey(ctx.db, caller.companyId, input);
   if (replay) return replay;
 
-  const ticket = await loadTicketRevision(ctx.db, caller.companyId, input.ticketId, input.ticketRevision);
   const checkInfo = await activeCheckBinding(
     ctx.db,
     { companyId: caller.companyId, departmentId: ticket.departmentId, productId: ticket.productId, kind: 'support_classification' },
@@ -417,17 +424,16 @@ async function checkImportedConsentOnly(
   }
 }
 
-async function loadSupportEntities(db: Pick<Db, 'select'>, companyId: string, input: SupportSubmitDto) {
-  const [[ticket], [channel], [account]] = await Promise.all([
-    db
-      .select()
-      .from(supportTickets)
-      .where(and(eq(supportTickets.companyId, companyId), eq(supportTickets.ticketId, input.ticketId), eq(supportTickets.revision, input.ticketRevision))),
+/* Ticket, channel and account of one place, the task's. A receipt belongs to its ticket, which matchesTicketClassification holds it to. */
+async function loadSupportEntities(db: Pick<Db, 'select'>, companyId: string, input: SupportSubmitDto, task: InPlace) {
+  const ticket = await loadTicketRevision(db, companyId, input, task);
+  const [[channel], [account]] = await Promise.all([
     db.select().from(outboundChannels).where(and(eq(outboundChannels.companyId, companyId), eq(outboundChannels.id, input.channelId))),
     db.select().from(outboundAccounts).where(and(eq(outboundAccounts.companyId, companyId), eq(outboundAccounts.id, input.accountId))),
   ]);
-  if (!ticket) throw new SupportGatewayError(404, 'ticket_unknown', 'Support ticket revision was not found.');
-  if (!channel || !account) throw new SupportGatewayError(404, 'outbound_unknown', 'Support channel or account was not found.');
+  if (!channel || !account || !takesIn(channel, ticket) || account.channelId !== channel.id) {
+    throw new SupportGatewayError(404, 'outbound_unknown', 'Support channel or account was not found.');
+  }
   const [contact] = await db
     .select()
     .from(outboundContacts)
@@ -467,7 +473,7 @@ export async function submitSupportReply(
 ): Promise<SubmitResultDto> {
   const input = SupportSubmit.parse(rawInput);
   const task = await requireAssignedTask(ctx, caller, input.task);
-  const { ticket, channel, contact } = await loadSupportEntities(ctx.db, caller.companyId, input);
+  const { ticket, channel, contact } = await loadSupportEntities(ctx.db, caller.companyId, input, task);
 
   const reasons = new Set<GateCode>();
   const [classification] = await ctx.db

@@ -1,5 +1,5 @@
 import { timingSafeEqual } from 'node:crypto';
-import { and, count, eq, gte, lt } from 'drizzle-orm';
+import { and, asc, count, eq, gt, gte, lt } from 'drizzle-orm';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from '../../app.js';
@@ -72,15 +72,22 @@ export async function sendBegun(ctx: Ctx, begun: Begun, senders: Senders = LIVE)
   if (outcome.kind === 'definitely_not_accepted' && outcome.safeCode === 'auth_refused') await markInvalid(ctx, begun.accountId, begun.configGeneration);
 }
 
-async function dispatchOne(ctx: Ctx, due: { messageId: string; revision: number }, now: Date, senders: Senders): Promise<void> {
-  const reserved = await reserveDispatch(ctx, due.messageId, due.revision, now);
+/* The time from a round's start as each step comes to it: a send before it may have taken minutes, over an expiry or midnight. */
+const clockFrom = (start: Date): (() => Date) => {
+  const at = Date.now();
+  return () => new Date(start.getTime() + Date.now() - at);
+};
+
+async function dispatchOne(ctx: Ctx, due: { messageId: string; revision: number }, clock: () => Date, senders: Senders): Promise<void> {
+  const reserved = await reserveDispatch(ctx, due.messageId, due.revision, clock());
   if (reserved.kind !== 'reserved') return;
-  const begun = await beginDispatch(ctx, due.messageId, due.revision, now);
+  const begun = await beginDispatch(ctx, due.messageId, due.revision, clock());
   if (begun.kind === 'begun') await sendBegun(ctx, begun, senders);
 }
 
 export async function dispatchDue(ctx: Ctx, now = new Date(), senders: Senders = LIVE): Promise<void> {
-  await eachOf(await dueMessages(ctx, now), due => dispatchOne(ctx, due, now, senders));
+  const clock = clockFrom(now);
+  await eachOf(await dueMessages(ctx, now), due => dispatchOne(ctx, due, clock, senders));
 }
 
 const askWith = (senders: Senders, settings: AccountSettings, attemptId: string): Promise<ReconcileOutcome> =>
@@ -93,13 +100,29 @@ async function askAbout(ctx: Ctx, attempt: Pick<Attempt, 'id' | 'accountId'>, se
   if (outcome.kind !== 'pending') await settleAttempt(ctx, attempt.id, outcome);
 }
 
+const askedUpTo = new WeakMap<object, string>();
+
+/* The next part of what is unknown, in one order that comes round to each, however many never get an answer. A server that starts
+   again starts it over, which costs one more pass. */
+async function nextUnknown(ctx: Ctx): Promise<Pick<Attempt, 'id' | 'accountId'>[]> {
+  const after = askedUpTo.get(ctx);
+  const part = await ctx.db
+    .select({ id: outboundAttempts.id, accountId: outboundAttempts.accountId })
+    .from(outboundAttempts)
+    .where(and(eq(outboundAttempts.status, 'unknown'), after ? gt(outboundAttempts.id, after) : undefined))
+    .orderBy(asc(outboundAttempts.id))
+    .limit(LOOKED_AT);
+  if (part.length === LOOKED_AT) askedUpTo.set(ctx, part.at(-1)!.id);
+  else askedUpTo.delete(ctx);
+  return part;
+}
+
 /* A worker gone past its lease may still be sending, so it becomes unknown and nothing else. Then each unknown one is asked about,
    by the one way of knowing its transport has. Neither touches who writes from the account. */
 export async function reconcileOutbound(ctx: Ctx, now = new Date(), senders: Senders = LIVE): Promise<void> {
   const expired = await ctx.db.select({ id: outboundAttempts.id }).from(outboundAttempts).where(and(eq(outboundAttempts.status, 'sending'), lt(outboundAttempts.leaseUntil, now))).limit(LOOKED_AT);
   await eachOf(expired, attempt => settleAttempt(ctx, attempt.id, { kind: 'unknown', safeCode: 'timeout' }, now));
-  const open = await ctx.db.select({ id: outboundAttempts.id, accountId: outboundAttempts.accountId }).from(outboundAttempts).where(eq(outboundAttempts.status, 'unknown')).limit(LOOKED_AT);
-  await eachOf(open, attempt => askAbout(ctx, attempt, senders));
+  await eachOf(await nextUnknown(ctx), attempt => askAbout(ctx, attempt, senders));
 }
 
 const STOP_FOR: readonly (readonly ['complaint' | 'refusal' | 'bounce', 'maxComplaints' | 'maxRefusals' | 'maxBounces', StopReason])[] = [
@@ -232,7 +255,8 @@ export async function outboundRound(ctx: Ctx, now: Date, senders: Senders = LIVE
   if (rounds.has(ctx)) return;
   rounds.add(ctx);
   try {
-    await eachOf<() => Promise<void>>([() => noticeStops(ctx), () => reconcileOutbound(ctx, now, senders), () => dispatchDue(ctx, now, senders)], step => step());
+    const clock = clockFrom(now);
+    await eachOf<() => Promise<void>>([() => noticeStops(ctx), () => reconcileOutbound(ctx, clock(), senders), () => dispatchDue(ctx, clock(), senders)], step => step());
   } finally {
     rounds.delete(ctx);
   }

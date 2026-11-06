@@ -503,8 +503,12 @@ type Refused = Extract<DispatchAdmission, { kind: 'refused' }>;
 const NOTHING: Refused = { kind: 'refused', reasonCodes: [] };
 const refusedFor = (reasonCodes: GateCode[]): Refused => ({ kind: 'refused', reasonCodes });
 
-/* A hold keeps a message for later: a person's answer it waits for shows on it. */
-const heldStatus = (hold: readonly GateCode[]): Message['status'] => (hold.includes('approval_required') ? 'waiting_approval' : 'scheduled');
+/* A hold keeps a message for later. A check that has not read it as it stands reads only what waits for one; a person's answer it
+   waits for shows on it. */
+const heldStatus = (hold: readonly GateCode[]): Message['status'] => {
+  if (hold.includes('review_unavailable')) return 'waiting_checks';
+  return hold.includes('approval_required') ? 'waiting_approval' : 'scheduled';
+};
 
 /* Takes the day's places of the account and its sender domain together. The domain counts company-wide, across its accounts
    and whatever policy each goes by, so it is one at a time per domain. */
@@ -680,8 +684,12 @@ export const settleAttempt: (...args: [...Parameters<SettleAttempt>, now?: Date]
   });
 };
 
-/* What the dispatcher may look at now, oldest first and a part of each account's queue, so a long or stuck one holds no other
-   back. Being listed decides nothing: its last look does. */
+/* What a person or a limit keeps. Each may have been let go since, which only a look finds out. */
+const heldBack = sql`(${outboundMessages.status} = 'waiting_approval' OR (${outboundMessages.status} = 'scheduled' AND jsonb_array_length(${outboundMessages.reasonCodes}) > 0))`;
+
+/* What the dispatcher may look at now, a part of each account's queue and of what it holds back, so a long or stuck one holds no
+   other back: what can go oldest first, what is held the longest unseen first, as each look writes on it. Being listed decides
+   nothing: its last look does. */
 export async function dueMessages(ctx: Pick<Ctx, 'db'>, now: Date, perAccount = 20): Promise<{ messageId: string; revision: number }[]> {
   const ranked = ctx.db
     .select({
@@ -689,7 +697,7 @@ export async function dueMessages(ctx: Pick<Ctx, 'db'>, now: Date, perAccount = 
       revision: outboundMessages.revision,
       scheduledAt: outboundMessages.scheduledAt,
       createdAt: outboundMessages.createdAt,
-      place: sql<number>`row_number() over (partition by ${outboundMessages.accountId} order by ${outboundMessages.scheduledAt}, ${outboundMessages.createdAt})`.as('place'),
+      place: sql<number>`row_number() over (partition by ${outboundMessages.accountId}, ${heldBack} order by case when ${heldBack} then ${outboundMessages.updatedAt} end, ${outboundMessages.scheduledAt}, ${outboundMessages.createdAt})`.as('place'),
     })
     .from(outboundMessages)
     .where(and(inArray(outboundMessages.status, ['scheduled', 'waiting_approval', 'reserved']), lte(outboundMessages.scheduledAt, now)))
