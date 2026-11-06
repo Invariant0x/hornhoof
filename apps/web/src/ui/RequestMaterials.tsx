@@ -162,7 +162,7 @@ function MaterialMeta({ item }: { item: MaterialItem }) {
     return (
       <span className="mat-meta">
         <span>{materialKindLabel(t, item)}</span>
-        <span className="mat-url" dir="ltr">
+        <span className="mat-url mv-url" dir="ltr" style={{ minWidth: 0 }}>
           {item.url}
         </span>
       </span>
@@ -180,7 +180,7 @@ function MaterialCard({ item, onOpen }: { item: MaterialItem; onOpen: (id: strin
   if (item.state !== 'available') {
     return (
       <div className="mat-row">
-        <div className={`${cardClass} mat-off`}>
+        <div className={`${cardClass} mat-off`} style={{ minWidth: 0 }}>
           <MaterialThumb item={item} imgFailed onImageError={() => {}} />
           <span className="mat-text">
             <span className="mat-name">{name}</span>
@@ -194,7 +194,7 @@ function MaterialCard({ item, onOpen }: { item: MaterialItem; onOpen: (id: strin
 
   const ariaLabel = t.tasks.materials.openMaterial(name, materialKindLabel(t, item));
   return (
-    <button className={cardClass} type="button" data-open={item.id} aria-label={ariaLabel} onClick={e => onOpen(item.id, e.currentTarget)}>
+    <button className={cardClass} style={{ minWidth: 0 }} type="button" data-open={item.id} aria-label={ariaLabel} onClick={e => onOpen(item.id, e.currentTarget)}>
       <MaterialThumb item={item} imgFailed={imgFailed} onImageError={() => setImgFailed(true)} />
       <span className="mat-text">
         <span className="mat-name">{name}</span>

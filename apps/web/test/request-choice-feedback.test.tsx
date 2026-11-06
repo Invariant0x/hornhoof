@@ -476,6 +476,7 @@ describe('choice request free-form feedback and option picking', () => {
       id: 'r-commit',
       commit: 'b'.repeat(40),
       commitUrl: 'https://github.com/acme/repo/commit/' + 'b'.repeat(40),
+      link: 'https://internal.acme.example/releases/turn-8/compare/' + 'b'.repeat(40),
     };
     const calls = mockApi({
       'POST /api/tasks/t402/cancel': [200, {}],
@@ -500,7 +501,10 @@ describe('choice request free-form feedback and option picking', () => {
     await user.type(within(policyCard!).getByLabelText(en.tasks.note), 'Needs budget sign-off');
     await user.click(within(policyCard!).getByRole('button', { name: en.tasks.decline }));
 
-    expect(within(commitCard!).getByRole('link', { name: 'b'.repeat(40) })).toHaveAttribute('href', linkedApproval.commitUrl);
+    const commitLink = within(commitCard!).getByRole('link', { name: 'b'.repeat(40) });
+    expect(commitLink).toHaveAttribute('href', linkedApproval.commitUrl);
+    expect(commitLink).toHaveStyle({ minWidth: '0px' });
+    expect(commitCard!.querySelector('.mat-url.mv-url')).toHaveStyle({ minWidth: '0px' });
     await user.type(within(commitCard!).getByLabelText(en.tasks.note), 'Looks clean');
     await user.click(within(commitCard!).getByRole('button', { name: en.tasks.approve }));
 

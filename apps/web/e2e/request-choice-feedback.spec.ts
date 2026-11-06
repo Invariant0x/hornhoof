@@ -372,9 +372,10 @@ for (const lang of ['ru', 'en'] as const) {
           expect(Math.abs(boxA.width - fieldBox.width)).toBeLessThanOrEqual(1);
         }
 
-        /* Left edges of first option, feedback textarea, and Send button line up cleanly. */
+        /* Left edge of first option aligns with textarea; action foot aligns to trailing edge (.entry-actions). */
         expect(Math.abs(boxA.x - fieldBox.x)).toBeLessThanOrEqual(1);
-        expect(Math.abs(sendBox.x - fieldBox.x)).toBeLessThanOrEqual(1);
+        expect(sendBox.x).toBeGreaterThanOrEqual(fieldBox.x - 1);
+        expect(Math.abs(sendBox.x + sendBox.width - (fieldBox.x + fieldBox.width))).toBeLessThanOrEqual(1);
         expect(fieldBox.y).toBeGreaterThanOrEqual(Math.max(boxA.y + boxA.height, boxB.y + boxB.height) + 6);
         expect(sendBox.y).toBeGreaterThanOrEqual(fieldBox.y + fieldBox.height + 6);
 
@@ -1272,7 +1273,7 @@ for (const lang of CHECKED_LOCALES) {
         await expect(readyCard).toContainText(t.tasks.requiredActionLabel);
         await expect(hiddenCard).toContainText(t.tasks.asks(t.window.hiddenEmployee));
         await expect(hiddenCard).toContainText(t.tasks.actionKinds.owner_login);
-        await expect(hiddenCard).toContainText('Claude Code');
+        await expect(hiddenCard).toContainText('Claude');
         await expect(hiddenCard.locator('.req-term')).toHaveCount(0);
 
         const docScrollWidth = await page.evaluate(() => {

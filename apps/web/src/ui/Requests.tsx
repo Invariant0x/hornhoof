@@ -450,9 +450,13 @@ function RequestItem({ request, onDone, ...shared }: Shared & { request: Waiting
 const ApprovedCommit = ({ request }: { request: WaitingRequest }) => (request.commit ? <Commit request={request} /> : <BoundApprovalSnapshot requestId={request.id} />);
 
 function Commit({ request }: { request: WaitingRequest }) {
-  const code = <code className="req-commit">{request.commit}</code>;
+  const code = (
+    <code className="req-commit" style={{ display: 'block', minWidth: 0 }}>
+      {request.commit}
+    </code>
+  );
   return request.commitUrl ? (
-    <a className="req-commit-link" href={request.commitUrl} target="_blank" rel="noreferrer">
+    <a className="req-commit-link" style={{ minWidth: 0 }} href={request.commitUrl} target="_blank" rel="noreferrer">
       {code}
     </a>
   ) : (
