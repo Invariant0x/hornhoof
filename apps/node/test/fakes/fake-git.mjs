@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // Stands in for /usr/bin/git in the external Git tests: a real remote behind a controlled refusal. Every other call goes
 // to real git, so what the remote holds afterwards is real evidence. plan.json names, per Git command, what its next
-// calls do; log.ndjson records every call with the credential it was given.
+// calls do; log.ndjson records every call with the credential it was given. Only --version answers as the git of the
+// node's image unless the plan says otherwise: from 2.48 on, as on GitHub's machines, a node leaves a configured fetch
+// to plain git, and nothing else in these tests is about the git of the machine they run on.
 import { spawn, spawnSync } from 'node:child_process';
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -15,13 +17,16 @@ function commandOf(args) {
   return args[i] ?? null;
 }
 
+const NODE_GIT = { do: 'say', stdout: 'git version 2.39.5\n', exit: 0 };
+
 function nextStep(command) {
+  const otherwise = command === '--version' ? NODE_GIT : { do: 'real' };
   const file = join(dir, 'plan.json');
-  if (!existsSync(file)) return { do: 'real' };
+  if (!existsSync(file)) return otherwise;
   const plan = JSON.parse(readFileSync(file, 'utf8'));
   const step = plan[command]?.shift();
   writeFileSync(file, JSON.stringify(plan));
-  return step ?? { do: 'real' };
+  return step ?? otherwise;
 }
 
 const real = () => spawnSync('/usr/bin/git', argv, { stdio: 'inherit' }).status ?? 1;
