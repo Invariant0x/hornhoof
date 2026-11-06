@@ -209,6 +209,9 @@ function namedBy(tree: Tree, from: string, literal: string): Named {
   return manyFiles(tree.builtFrom(inPackage) ?? namedFolder(tree, text, inPackage));
 }
 
+function globImports(tree: Tree, from: string, text: string): string[] {
+  return [...text.matchAll(GLOB_IMPORT)].flatMap(([, , literal]) => namedPattern(tree, literal!, posix.join(tree.rootOf(from), literal!)));
+}
 function scanCode(tree: Tree, from: string, source: string): Scan {
   const runs = new Set<string>(), many = new Set<string>(), text = source.replace(TYPE_ONLY, '');
   let opaque = COMPUTED.test(text);
@@ -222,7 +225,7 @@ function scanCode(tree: Tree, from: string, source: string): Scan {
     for (const path of named.file) runs.add(path);
     for (const path of named.many) many.add(path);
   }
-  for (const [, , literal] of text.matchAll(GLOB_IMPORT)) for (const path of namedPattern(tree, literal!, posix.join(tree.rootOf(from), literal!))) many.add(path);
+  for (const path of globImports(tree, from, text)) many.add(path);
   runs.delete(from); many.delete(from);
   return { edges: [...new Set([...runs, ...many])], runs: [...runs], opaque };
 }
