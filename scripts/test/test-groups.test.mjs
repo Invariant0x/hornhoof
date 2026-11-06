@@ -108,9 +108,8 @@ async function ranFiles(t, selection) {
   return JSON.parse(readFileSync(join(tmp, 'tests-protocol.json'), 'utf8')).testResults.map(item => relative(root, item.name)).sort();
 }
 
+/* One file and not its whole suite: a test of that suite writes scratch test files, which the lint test running beside this one would list. */
 test('the tests chosen run through the command of their real suite, and only they', { timeout: 120_000 }, async t => {
   const file = 'packages/protocol/test/test-environment.test.ts';
   assert.deepEqual(await ranFiles(t, { packages: [{ packageId: 'protocol', mode: 'related', units: [{ file }] }], notes: [] }), [file]);
-  const whole = await runs(file);
-  assert.deepEqual(await ranFiles(t, whole), whole.packages[0].units.map(unit => unit.file).sort());
 });
