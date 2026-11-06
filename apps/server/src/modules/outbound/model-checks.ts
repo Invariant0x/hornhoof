@@ -248,64 +248,108 @@ type CatalogRow = typeof outboundCatalogRevisions.$inferSelect;
 type MessageRow = typeof outboundMessages.$inferSelect;
 type RevisionRow = typeof outboundMessageRevisions.$inferSelect;
 type ChannelRow = typeof outboundChannels.$inferSelect;
+type DiscountValue = Extract<CatalogRow['value'], { kind: 'discount' }>;
+type PriceValue = Extract<CatalogRow['value'], { kind: 'price' }>;
+
+const firstVendorOrUnknown = (set: ReadonlySet<string> | null): string => (set ? [...set][0]! : 'unknown');
 
 function resolveHintedVendor(hint: AuthorVendorHint): string {
   const provider = typeof hint === 'string' ? null : (hint.provider ?? null);
   const vendorId = typeof hint === 'string' ? hint : hint.vendorId;
-  const set = resolveVendorSet(provider, vendorId);
-  return set ? [...set][0]! : 'unknown';
+  return firstVendorOrUnknown(resolveVendorSet(provider, vendorId));
+}
+
+async function fetchJobSubscriptionId(db: Pick<Db, 'select'>, jobId: string | null): Promise<string | null> {
+  if (!jobId) return null;
+  const [job] = await db.select({ subscriptionId: jobs.subscriptionId }).from(jobs).where(eq(jobs.id, jobId));
+  return job ? job.subscriptionId : null;
+}
+
+async function fetchSubscriptionProvider(db: Pick<Db, 'select'>, subId: string | null): Promise<ProviderId | null> {
+  if (!subId) return null;
+  const [sub] = await db.select({ provider: subscriptions.provider }).from(subscriptions).where(eq(subscriptions.id, subId));
+  return sub ? sub.provider : null;
+}
+
+function pickSubscriptionId(jobSubId: string | null, agentSubId: string | null | undefined): string | null {
+  if (jobSubId) return jobSubId;
+  return agentSubId ?? null;
 }
 
 async function resolveStoredAuthorVendor(db: Pick<Db, 'select'>, message: MessageRow): Promise<string> {
-  const [[agent], [job]] = await Promise.all([
+  const [[agent], jobSubId] = await Promise.all([
     db.select({ model: agents.model, subscriptionId: agents.subscriptionId }).from(agents).where(eq(agents.id, message.authorAgentId)),
-    message.authorJobId
-      ? db.select({ subscriptionId: jobs.subscriptionId }).from(jobs).where(eq(jobs.id, message.authorJobId))
-      : Promise.resolve([]),
+    fetchJobSubscriptionId(db, message.authorJobId),
   ]);
-  const subId = job?.subscriptionId ?? agent?.subscriptionId ?? null;
-  const [sub] = subId
-    ? await db.select({ provider: subscriptions.provider }).from(subscriptions).where(eq(subscriptions.id, subId))
-    : [];
-  const set = resolveVendorSet(sub?.provider ?? null, agent?.model ?? '');
-  return set ? [...set][0]! : 'unknown';
+  const provider = await fetchSubscriptionProvider(db, pickSubscriptionId(jobSubId, agent?.subscriptionId));
+  const model = agent ? agent.model : '';
+  return firstVendorOrUnknown(resolveVendorSet(provider, model));
 }
 
-function canonicalFactValue(row: CatalogRow, rows: readonly CatalogRow[], locale: string): string | null {
-  if (row.value.kind === 'link') return row.value.url;
-  if (row.value.kind === 'claim' || row.value.kind === 'knowledge') return row.value.text;
-  if (row.value.kind !== 'price') return null;
-  const price = row.value;
-  const discountRow = price.discountId ? rows.find(r => r.entryId === price.discountId && r.value.kind === 'discount') : undefined;
-  const discount = discountRow && discountRow.value.kind === 'discount' ? discountRow.value : null;
+function formatPriceFact(price: PriceValue, discountMap: ReadonlyMap<string, DiscountValue>, locale: string): string {
+  const discount = price.discountId ? (discountMap.get(price.discountId) ?? null) : null;
   const money = priceAfterDiscount(price, discount);
   return money ? formatMoney(money, locale) : `${price.amount} ${price.currency}`;
 }
 
-async function buildQueuedFacts(db: Pick<Db, 'select'>, companyId: string, document: MessageDocument): Promise<ReviewFactDto[]> {
-  if (document.blocks.length === 0) return [];
-  const blockIds = document.blocks.map(b => b.id);
-  const blockRows = await db
+function textOrLinkFact(value: CatalogRow['value']): string | null {
+  if (value.kind === 'link') return value.url;
+  return value.kind === 'claim' || value.kind === 'knowledge' ? value.text : null;
+}
+
+function canonicalFactValue(row: CatalogRow, discountMap: ReadonlyMap<string, DiscountValue>, locale: string): string | null {
+  if (row.value.kind === 'price') return formatPriceFact(row.value, discountMap, locale);
+  return textOrLinkFact(row.value);
+}
+
+function collectDiscountIds(rows: readonly CatalogRow[]): string[] {
+  const ids: string[] = [];
+  for (const row of rows) {
+    if (row.value.kind === 'price' && row.value.discountId) ids.push(row.value.discountId);
+  }
+  return ids;
+}
+
+async function fetchCatalogEntries(db: Pick<Db, 'select'>, companyId: string, entryIds: readonly string[]): Promise<CatalogRow[]> {
+  if (entryIds.length === 0) return [];
+  return db
     .select()
     .from(outboundCatalogRevisions)
-    .where(and(eq(outboundCatalogRevisions.companyId, companyId), inArray(outboundCatalogRevisions.entryId, blockIds)));
-  const discountIds = blockRows.flatMap(r => (r.value.kind === 'price' && r.value.discountId ? [r.value.discountId] : []));
-  const discountRows = discountIds.length
-    ? await db
-        .select()
-        .from(outboundCatalogRevisions)
-        .where(and(eq(outboundCatalogRevisions.companyId, companyId), inArray(outboundCatalogRevisions.entryId, discountIds)))
-    : [];
-  const allRows = [...blockRows, ...discountRows];
-  const facts: ReviewFactDto[] = [];
-  for (const block of document.blocks) {
-    const row = blockRows.find(r => r.entryId === block.id && r.revision === block.revision);
-    const canonicalValue = row ? canonicalFactValue(row, allRows, document.locale) : null;
-    if (row && canonicalValue !== null) {
-      facts.push({ kind: block.kind, id: row.entryId, revision: row.revision, canonicalValue, sourceId: row.id });
-    }
+    .where(and(eq(outboundCatalogRevisions.companyId, companyId), inArray(outboundCatalogRevisions.entryId, [...entryIds])));
+}
+
+function indexDiscounts(rows: readonly CatalogRow[]): Map<string, DiscountValue> {
+  const map = new Map<string, DiscountValue>();
+  for (const row of rows) {
+    if (row.value.kind === 'discount') map.set(row.entryId, row.value);
   }
-  return facts;
+  return map;
+}
+
+function toReviewFact(
+  block: MessageDocument['blocks'][number],
+  rowMap: ReadonlyMap<string, CatalogRow>,
+  discountMap: ReadonlyMap<string, DiscountValue>,
+  locale: string,
+): ReviewFactDto | null {
+  const row = rowMap.get(`${block.id}:${block.revision}`);
+  if (!row) return null;
+  const canonicalValue = canonicalFactValue(row, discountMap, locale);
+  return canonicalValue === null
+    ? null
+    : { kind: block.kind, id: row.entryId, revision: row.revision, canonicalValue, sourceId: row.id };
+}
+
+async function buildQueuedFacts(db: Pick<Db, 'select'>, companyId: string, document: MessageDocument): Promise<ReviewFactDto[]> {
+  const blockRows = await fetchCatalogEntries(db, companyId, document.blocks.map(b => b.id));
+  if (blockRows.length === 0) return [];
+  const discountRows = await fetchCatalogEntries(db, companyId, collectDiscountIds(blockRows));
+  const rowMap = new Map(blockRows.map(r => [`${r.entryId}:${r.revision}`, r] as const));
+  const discountMap = indexDiscounts(discountRows);
+  return document.blocks.flatMap(block => {
+    const fact = toReviewFact(block, rowMap, discountMap, document.locale);
+    return fact ? [fact] : [];
+  });
 }
 
 async function unsealForReview(

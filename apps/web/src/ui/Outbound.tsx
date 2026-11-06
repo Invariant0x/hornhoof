@@ -329,6 +329,69 @@ function isEmptyOverview(data: OutboundOverview): boolean {
   return noActivity && data.escalations.length === 0 && data.channels.length === 0;
 }
 
+function ApprovalsSection({ items, onChanged }: { items: BoundOutboundApproval[]; onChanged: () => void }) {
+  const t = useT();
+  return (
+    <section className="waiting" aria-label={t.outbound.approvalsHeading}>
+      <h2>{t.outbound.approvalsHeading}</h2>
+      {items.length === 0 ? (
+        <p className="muted">{t.outbound.approvalsEmpty}</p>
+      ) : (
+        <div className="reqs">
+          {items.map(item => (
+            <OutboundApprovalCard key={item.requestId} item={item} onChanged={onChanged} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function MessagesSection({ items, onOpenTask }: { items: OutboundMessageItem[]; onOpenTask: (id: string) => void }) {
+  const t = useT();
+  if (items.length === 0) return null;
+  return (
+    <section className="turns" aria-label={t.outbound.messagesHeading}>
+      <h2>{t.outbound.messagesHeading}</h2>
+      <div className="imps">
+        {items.map(msg => (
+          <OutboundMessageRow key={msg.id} item={msg} onOpenTask={onOpenTask} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function EscalationsSection({ items, onOpenTask }: { items: OutboundEscalationItem[]; onOpenTask: (id: string) => void }) {
+  const t = useT();
+  if (items.length === 0) return null;
+  return (
+    <section className="turns" aria-label={t.outbound.escalationsHeading}>
+      <h2>{t.outbound.escalationsHeading}</h2>
+      <div className="imps">
+        {items.map(esc => (
+          <EscalationRow key={`${esc.ticketId}-${esc.revision}`} item={esc} onOpenTask={onOpenTask} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ChannelsSection({ items }: { items: OutboundChannelItem[] }) {
+  const t = useT();
+  if (items.length === 0) return null;
+  return (
+    <section className="turns" aria-label={t.outbound.channelsHeading}>
+      <h2>{t.outbound.channelsHeading}</h2>
+      <div className="imps">
+        {items.map(ch => (
+          <ChannelRow key={ch.id} channel={ch} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function OutboundSections({
   data,
   onChanged,
@@ -338,53 +401,32 @@ function OutboundSections({
   onChanged: () => void;
   onOpenTask: (id: string) => void;
 }) {
-  const t = useT();
   return (
     <>
-      <section className="waiting" aria-label={t.outbound.approvalsHeading}>
-        <h2>{t.outbound.approvalsHeading}</h2>
-        {data.approvals.length === 0 ? (
-          <p className="muted">{t.outbound.approvalsEmpty}</p>
-        ) : (
-          <div className="reqs">
-            {data.approvals.map(item => (
-              <OutboundApprovalCard key={item.requestId} item={item} onChanged={onChanged} />
-            ))}
-          </div>
-        )}
-      </section>
-      {data.messages.length > 0 && (
-        <section className="turns" aria-label={t.outbound.messagesHeading}>
-          <h2>{t.outbound.messagesHeading}</h2>
-          <div className="imps">
-            {data.messages.map(msg => (
-              <OutboundMessageRow key={msg.id} item={msg} onOpenTask={onOpenTask} />
-            ))}
-          </div>
-        </section>
-      )}
-      {data.escalations.length > 0 && (
-        <section className="turns" aria-label={t.outbound.escalationsHeading}>
-          <h2>{t.outbound.escalationsHeading}</h2>
-          <div className="imps">
-            {data.escalations.map(esc => (
-              <EscalationRow key={`${esc.ticketId}-${esc.revision}`} item={esc} onOpenTask={onOpenTask} />
-            ))}
-          </div>
-        </section>
-      )}
-      {data.channels.length > 0 && (
-        <section className="turns" aria-label={t.outbound.channelsHeading}>
-          <h2>{t.outbound.channelsHeading}</h2>
-          <div className="imps">
-            {data.channels.map(ch => (
-              <ChannelRow key={ch.id} channel={ch} />
-            ))}
-          </div>
-        </section>
-      )}
+      <ApprovalsSection items={data.approvals} onChanged={onChanged} />
+      <MessagesSection items={data.messages} onOpenTask={onOpenTask} />
+      <EscalationsSection items={data.escalations} onOpenTask={onOpenTask} />
+      <ChannelsSection items={data.channels} />
     </>
   );
+}
+
+function OutboundBody({
+  data,
+  loading,
+  onChanged,
+  onOpenTask,
+}: {
+  data: OutboundOverview | null;
+  loading: boolean;
+  onChanged: () => void;
+  onOpenTask: (id: string) => void;
+}) {
+  const t = useT();
+  if (loading) return <p className="muted" role="status">{t.tasks.sending}</p>;
+  if (!data) return null;
+  if (isEmptyOverview(data)) return <p className="muted">{t.outbound.empty}</p>;
+  return <OutboundSections data={data} onChanged={onChanged} onOpenTask={onOpenTask} />;
 }
 
 export function Outbound({ onOpenTask, onHome }: { onOpenTask: (id: string) => void; onHome?: () => void }) {
@@ -405,6 +447,7 @@ export function Outbound({ onOpenTask, onHome }: { onOpenTask: (id: string) => v
   }, [load]);
 
   if (unavailableFailure(failure)) return <RouteUnavailable onHome={onHome} />;
+  const hasFailure = failure !== null;
 
   return (
     <section className="tasks">
@@ -414,10 +457,8 @@ export function Outbound({ onOpenTask, onHome }: { onOpenTask: (id: string) => v
           <p className="muted">{t.outbound.intro}</p>
         </div>
       </header>
-      {failure !== null && <p className="alert" role="alert">{errorText(t, failure)}</p>}
-      {!data && failure === null && <p className="muted" role="status">{t.tasks.sending}</p>}
-      {data && isEmptyOverview(data) && <p className="muted">{t.outbound.empty}</p>}
-      {data && !isEmptyOverview(data) && <OutboundSections data={data} onChanged={load} onOpenTask={onOpenTask} />}
+      {hasFailure && <p className="alert" role="alert">{errorText(t, failure)}</p>}
+      <OutboundBody data={data} loading={!data && !hasFailure} onChanged={load} onOpenTask={onOpenTask} />
     </section>
   );
 }

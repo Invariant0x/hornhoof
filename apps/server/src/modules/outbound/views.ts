@@ -42,23 +42,28 @@ function decidedByDto(d: DecidedBy, places: Places) {
   return { kind: d.kind, department: place ? { id: place.id, name: deptName(place) } : null };
 }
 
-function summarizeStructuredCatalog(value: CatalogValue): string | null {
-  if (value.kind === 'template') return value.subject ?? value.locale;
-  if (value.kind === 'price') return `${value.amount} ${value.currency}`;
-  if (value.kind === 'link') return value.url;
-  if (value.kind === 'discount') {
-    return value.off.kind === 'percent' ? `${value.off.value}%` : `${value.off.value} ${value.off.currency}`;
-  }
-  return null;
-}
+type CatalogSummarizers = {
+  readonly [K in CatalogValue['kind']]: (value: Extract<CatalogValue, { kind: K }>) => string;
+};
 
-function summarizeCatalogValue(value: CatalogValue): string {
-  const structured = summarizeStructuredCatalog(value);
-  if (structured !== null) return structured;
-  if (value.kind === 'segment' || value.kind === 'audience') return value.name;
-  if (value.kind === 'variable') return value.field;
-  if (value.kind === 'taxonomy') return `${value.classes.length} classes`;
-  return 'text' in value ? value.text.slice(0, 120) : value.kind;
+const CATALOG_SUMMARIZERS: CatalogSummarizers = {
+  template: v => v.subject ?? v.locale,
+  price: v => `${v.amount} ${v.currency}`,
+  discount: v => (v.off.kind === 'percent' ? `${v.off.value}%` : `${v.off.value} ${v.off.currency}`),
+  terms: v => v.text.slice(0, 120),
+  link: v => v.url,
+  claim: v => v.text.slice(0, 120),
+  knowledge: v => v.text.slice(0, 120),
+  unsubscribe: v => v.text.slice(0, 120),
+  segment: v => v.name,
+  audience: v => v.name,
+  variable: v => v.field,
+  taxonomy: v => `${v.classes.length} classes`,
+};
+
+function summarizeCatalogValue<K extends CatalogValue['kind']>(value: Extract<CatalogValue, { kind: K }>): string {
+  const summarize = CATALOG_SUMMARIZERS[value.kind] as (item: Extract<CatalogValue, { kind: K }>) => string;
+  return summarize(value);
 }
 
 function templatePreview(value: Extract<CatalogValue, { kind: 'template' }>): string {
@@ -92,26 +97,53 @@ async function catalogSourcesForRefs(
   });
 }
 
-async function buildMessageApprovalDto(
-  ctx: Ctx,
-  bound: ApprovalRow,
-  base: { requestId: string; status: RequestRow['status']; canAnswer: boolean; decidedBy: ReturnType<typeof decidedByDto> },
-) {
-  if (!bound.messageId || !bound.messageRevision || !bound.accountId || !bound.bindingGeneration || !bound.contentDigest) {
-    return null;
-  }
+type ApprovalBase = {
+  requestId: string;
+  status: RequestRow['status'];
+  canAnswer: boolean;
+  decidedBy: ReturnType<typeof decidedByDto>;
+};
+
+type MessageApprovalFields = {
+  messageId: string;
+  messageRevision: number;
+  accountId: string;
+  bindingGeneration: number;
+  contentDigest: string;
+};
+
+function readMessageApprovalFields(bound: ApprovalRow): MessageApprovalFields | null {
+  const present = [bound.messageId, bound.messageRevision, bound.accountId, bound.bindingGeneration, bound.contentDigest];
+  if (!present.every(Boolean)) return null;
+  return {
+    messageId: bound.messageId!,
+    messageRevision: bound.messageRevision!,
+    accountId: bound.accountId!,
+    bindingGeneration: bound.bindingGeneration!,
+    contentDigest: bound.contentDigest!,
+  };
+}
+
+async function loadMessageApprovalRows(db: Db, fields: MessageApprovalFields) {
   const [[msg], [rev], [account]] = await Promise.all([
-    ctx.db.select().from(outboundMessages).where(eq(outboundMessages.id, bound.messageId)),
-    ctx.db
+    db.select().from(outboundMessages).where(eq(outboundMessages.id, fields.messageId)),
+    db
       .select()
       .from(outboundMessageRevisions)
-      .where(and(eq(outboundMessageRevisions.messageId, bound.messageId), eq(outboundMessageRevisions.revision, bound.messageRevision))),
-    ctx.db.select().from(outboundAccounts).where(eq(outboundAccounts.id, bound.accountId)),
+      .where(and(eq(outboundMessageRevisions.messageId, fields.messageId), eq(outboundMessageRevisions.revision, fields.messageRevision))),
+    db.select().from(outboundAccounts).where(eq(outboundAccounts.id, fields.accountId)),
   ]);
-  if (!msg || !rev || !account) return null;
-  const [channel] = await ctx.db.select().from(outboundChannels).where(eq(outboundChannels.id, msg.channelId));
-  if (!channel) return null;
+  if (![msg, rev, account].every(Boolean)) return null;
+  const [channel] = await db.select().from(outboundChannels).where(eq(outboundChannels.id, msg!.channelId));
+  return channel ? { msg: msg!, rev: rev!, account: account!, channel } : null;
+}
 
+async function buildMessageApprovalDto(ctx: Ctx, bound: ApprovalRow, base: ApprovalBase) {
+  const fields = readMessageApprovalFields(bound);
+  if (!fields) return null;
+  const loaded = await loadMessageApprovalRows(ctx.db, fields);
+  if (!loaded) return null;
+  const { msg, rev, account, channel } = loaded;
   const refs = [
     { id: rev.document.templateId, revision: rev.document.templateRevision },
     ...rev.document.blocks.map(b => ({ id: b.id, revision: b.revision })),
@@ -125,12 +157,12 @@ async function buildMessageApprovalDto(
       id: account.id,
       label: account.label,
       senderDomain: account.senderDomain,
-      bindingGeneration: bound.bindingGeneration,
+      bindingGeneration: fields.bindingGeneration,
     },
     messageId: msg.id,
     revision: rev.revision,
     locale: rev.document.locale,
-    contentDigest: bound.contentDigest,
+    contentDigest: fields.contentDigest,
     policyDigest: bound.policyDigest,
     sourceRevisionsDigest: bound.sourceRevisionsDigest,
     rendered: decodeFrozenSubjectAndBody(rev.sealedEnc, ctx.config.secret),
@@ -148,27 +180,61 @@ async function latestCatalogRow(db: Pick<Db, 'select'>, companyId: string, entry
   return row ?? null;
 }
 
-async function buildApproachApprovalDto(
-  ctx: Ctx,
-  bound: ApprovalRow,
-  base: { requestId: string; status: RequestRow['status']; canAnswer: boolean; decidedBy: ReturnType<typeof decidedByDto> },
-) {
-  if (!bound.channelId || !bound.templateId || !bound.templateRevision || !bound.segmentId || !bound.locale) return null;
-  const [[channel], segRow, [tplRow]] = await Promise.all([
-    ctx.db.select().from(outboundChannels).where(eq(outboundChannels.id, bound.channelId)),
-    latestCatalogRow(ctx.db, bound.companyId, bound.segmentId),
-    ctx.db
+type ApproachApprovalFields = {
+  channelId: string;
+  templateId: string;
+  templateRevision: number;
+  segmentId: string;
+  locale: string;
+};
+
+function readApproachApprovalFields(bound: ApprovalRow): ApproachApprovalFields | null {
+  const present = [bound.channelId, bound.templateId, bound.templateRevision, bound.segmentId, bound.locale];
+  if (!present.every(Boolean)) return null;
+  return {
+    channelId: bound.channelId!,
+    templateId: bound.templateId!,
+    templateRevision: bound.templateRevision!,
+    segmentId: bound.segmentId!,
+    locale: bound.locale!,
+  };
+}
+
+type SegmentCatalogRow = CatalogRow & { value: Extract<CatalogValue, { kind: 'segment' }> };
+type TemplateCatalogRow = CatalogRow & { value: Extract<CatalogValue, { kind: 'template' }> };
+
+const asSegmentRow = (row: CatalogRow | null): SegmentCatalogRow | null =>
+  row && row.value.kind === 'segment' ? (row as SegmentCatalogRow) : null;
+
+const asTemplateRow = (row: CatalogRow | undefined): TemplateCatalogRow | null =>
+  row && row.value.kind === 'template' ? (row as TemplateCatalogRow) : null;
+
+async function loadApproachApprovalRows(db: Db, companyId: string, fields: ApproachApprovalFields) {
+  const [[channel], rawSeg, [rawTpl]] = await Promise.all([
+    db.select().from(outboundChannels).where(eq(outboundChannels.id, fields.channelId)),
+    latestCatalogRow(db, companyId, fields.segmentId),
+    db
       .select()
       .from(outboundCatalogRevisions)
       .where(
         and(
-          eq(outboundCatalogRevisions.companyId, bound.companyId),
-          eq(outboundCatalogRevisions.entryId, bound.templateId),
-          eq(outboundCatalogRevisions.revision, bound.templateRevision),
+          eq(outboundCatalogRevisions.companyId, companyId),
+          eq(outboundCatalogRevisions.entryId, fields.templateId),
+          eq(outboundCatalogRevisions.revision, fields.templateRevision),
         ),
       ),
   ]);
-  if (!channel || !segRow || segRow.value.kind !== 'segment' || !tplRow || tplRow.value.kind !== 'template') return null;
+  const segRow = asSegmentRow(rawSeg);
+  const tplRow = asTemplateRow(rawTpl);
+  return [channel, segRow, tplRow].every(Boolean) ? { channel: channel!, segRow: segRow!, tplRow: tplRow! } : null;
+}
+
+async function buildApproachApprovalDto(ctx: Ctx, bound: ApprovalRow, base: ApprovalBase) {
+  const fields = readApproachApprovalFields(bound);
+  if (!fields) return null;
+  const loaded = await loadApproachApprovalRows(ctx.db, bound.companyId, fields);
+  if (!loaded) return null;
+  const { channel, segRow, tplRow } = loaded;
   const sources = await catalogSourcesForRefs(ctx.db, bound.companyId, [
     { id: tplRow.entryId, revision: tplRow.revision },
     { id: segRow.entryId, revision: segRow.revision },
@@ -181,7 +247,7 @@ async function buildApproachApprovalDto(
     template: {
       id: tplRow.entryId,
       revision: tplRow.revision,
-      locale: bound.locale,
+      locale: fields.locale,
       subject: tplRow.value.subject ?? '',
       preview: templatePreview(tplRow.value),
     },
@@ -279,12 +345,62 @@ function unknownRecoveryDto(attempt: typeof outboundAttempts.$inferSelect | unde
   };
 }
 
+type MessageRow = typeof outboundMessages.$inferSelect;
+type RevisionRow = typeof outboundMessageRevisions.$inferSelect;
+type AttemptRow = typeof outboundAttempts.$inferSelect;
+type ChannelRow = typeof outboundChannels.$inferSelect;
+type AccountRow = typeof outboundAccounts.$inferSelect;
+type TicketRow = typeof supportTickets.$inferSelect;
+type ClassificationRow = typeof supportClassifications.$inferSelect;
+
+const pairKey = (id: string, revision: number): string => `${id}:${revision}`;
+
+function channelNameOf(channelMap: ReadonlyMap<string, ChannelRow>, channelId: string): string {
+  const ch = channelMap.get(channelId);
+  return ch ? ch.name : '';
+}
+
+function accountLabelsOf(accountMap: ReadonlyMap<string, AccountRow>, accountId: string) {
+  const acc = accountMap.get(accountId);
+  return acc ? { accountLabel: acc.label, senderDomain: acc.senderDomain } : { accountLabel: '', senderDomain: '' };
+}
+
+function toMessageDto(
+  m: MessageRow,
+  revMap: ReadonlyMap<string, RevisionRow>,
+  attemptMap: ReadonlyMap<string, AttemptRow>,
+  channelMap: ReadonlyMap<string, ChannelRow>,
+  accountMap: ReadonlyMap<string, AccountRow>,
+) {
+  const key = pairKey(m.id, m.revision);
+  const rev = revMap.get(key);
+  const { accountLabel, senderDomain } = accountLabelsOf(accountMap, m.accountId);
+  return {
+    id: m.id,
+    departmentId: m.departmentId,
+    productId: m.productId,
+    taskId: m.taskId,
+    channelId: m.channelId,
+    channelName: channelNameOf(channelMap, m.channelId),
+    accountId: m.accountId,
+    accountLabel,
+    senderDomain,
+    revision: m.revision,
+    contentDigest: rev ? rev.contentDigest : m.requestDigest,
+    status: m.status,
+    reasonCodes: m.reasonCodes,
+    scheduledAt: m.scheduledAt.toISOString(),
+    updatedAt: m.updatedAt.toISOString(),
+    unknownRecovery: m.status === 'unknown' ? unknownRecoveryDto(attemptMap.get(key)) : null,
+  };
+}
+
 async function loadMessageDtos(
   db: Db,
   companyId: string,
   deptIds: readonly string[],
-  channelMap: Map<string, typeof outboundChannels.$inferSelect>,
-  accountMap: Map<string, typeof outboundAccounts.$inferSelect>,
+  channelMap: Map<string, ChannelRow>,
+  accountMap: Map<string, AccountRow>,
 ) {
   if (deptIds.length === 0) return [];
   const msgs = await db
@@ -301,30 +417,80 @@ async function loadMessageDtos(
       .from(outboundAttempts)
       .where(and(inArray(outboundAttempts.messageId, msgIds), eq(outboundAttempts.status, 'unknown'))),
   ]);
-  return msgs.map(m => {
-    const rev = revs.find(r => r.messageId === m.id && r.revision === m.revision);
-    const attempt = unknownAttempts.find(a => a.messageId === m.id && a.messageRevision === m.revision);
-    const ch = channelMap.get(m.channelId);
-    const acc = accountMap.get(m.accountId);
-    return {
-      id: m.id,
-      departmentId: m.departmentId,
-      productId: m.productId,
-      taskId: m.taskId,
-      channelId: m.channelId,
-      channelName: ch?.name ?? '',
-      accountId: m.accountId,
-      accountLabel: acc?.label ?? '',
-      senderDomain: acc?.senderDomain ?? '',
-      revision: m.revision,
-      contentDigest: rev?.contentDigest ?? m.requestDigest,
-      status: m.status,
-      reasonCodes: m.reasonCodes,
-      scheduledAt: m.scheduledAt.toISOString(),
-      updatedAt: m.updatedAt.toISOString(),
-      unknownRecovery: m.status === 'unknown' ? unknownRecoveryDto(attempt) : null,
-    };
-  });
+  const revMap = new Map(revs.map(r => [pairKey(r.messageId, r.revision), r] as const));
+  const attemptMap = new Map(unknownAttempts.map(a => [pairKey(a.messageId, a.messageRevision), a] as const));
+  return msgs.map(m => toMessageDto(m, revMap, attemptMap, channelMap, accountMap));
+}
+
+async function loadApprovalsByMessageId(db: Db, msgIds: readonly string[]): Promise<Map<string, ApprovalRow>> {
+  if (msgIds.length === 0) return new Map();
+  const rows = await db.select().from(outboundApprovals).where(inArray(outboundApprovals.messageId, [...msgIds]));
+  const map = new Map<string, ApprovalRow>();
+  for (const row of rows) {
+    if (row.messageId) map.set(row.messageId, row);
+  }
+  return map;
+}
+
+function indexFirstClassification(rows: readonly ClassificationRow[]): Map<string, ClassificationRow> {
+  const map = new Map<string, ClassificationRow>();
+  for (const row of rows) {
+    const key = pairKey(row.ticketId, row.ticketRevision);
+    if (!map.has(key)) map.set(key, row);
+  }
+  return map;
+}
+
+function indexTicketReplies(rows: readonly MessageRow[]): Map<string, MessageRow> {
+  const map = new Map<string, MessageRow>();
+  for (const row of rows) {
+    if (row.ticketId && row.ticketRevision !== null) map.set(pairKey(row.ticketId, row.ticketRevision), row);
+  }
+  return map;
+}
+
+function classificationFields(cls: ClassificationRow | undefined) {
+  return cls ? { classId: cls.classId, reasonCodes: cls.reasonCodes } : { classId: null, reasonCodes: [] };
+}
+
+function replyLinkFields(msg: MessageRow | undefined, approvalMap: ReadonlyMap<string, ApprovalRow>) {
+  if (!msg) return { requestId: null, taskId: null };
+  const bound = approvalMap.get(msg.id);
+  return { requestId: bound ? bound.requestId : null, taskId: msg.taskId };
+}
+
+type EscalationContext = {
+  me: Person;
+  access: Access;
+  everyone: readonly Candidate[];
+  places: Places;
+  clsMap: ReadonlyMap<string, ClassificationRow>;
+  replyMap: ReadonlyMap<string, MessageRow>;
+  approvalMap: ReadonlyMap<string, ApprovalRow>;
+};
+
+function toEscalationDto(t: TicketRow, ctx: EscalationContext) {
+  const key = pairKey(t.ticketId, t.revision);
+  const subject: DecisionSubject = {
+    source: 'request',
+    kind: 'approval',
+    topic: 'task',
+    spot: taskSpot({ departmentId: t.departmentId, productId: t.productId }),
+  };
+  return {
+    ticketId: t.ticketId,
+    externalRef: t.externalRef,
+    revision: t.revision,
+    departmentId: t.departmentId,
+    productId: t.productId,
+    status: t.status,
+    ...classificationFields(ctx.clsMap.get(key)),
+    ...replyLinkFields(ctx.replyMap.get(key), ctx.approvalMap),
+    ownerPersonId: decisionOwner(subject, ctx.everyone),
+    canAnswer: canDecide(subject, ctx.me, ctx.access, ctx.me.companyId),
+    decidedBy: decidedByDto(decidedBy(subject, ctx.everyone), ctx.places),
+    createdAt: t.createdAt.toISOString(),
+  };
 }
 
 async function loadEscalationDtos(
@@ -354,38 +520,20 @@ async function loadEscalationDtos(
       .from(outboundMessages)
       .where(and(eq(outboundMessages.companyId, me.companyId), inArray(outboundMessages.ticketId, ticketUuids))),
   ]);
-  const msgIds = replyMsgs.map(m => m.id);
-  const approvals = msgIds.length
-    ? await db.select().from(outboundApprovals).where(inArray(outboundApprovals.messageId, msgIds))
-    : [];
-
-  return tickets.map(t => {
-    const cls = classifications.find(c => c.ticketId === t.ticketId && c.ticketRevision === t.revision);
-    const msg = replyMsgs.find(m => m.ticketId === t.ticketId && m.ticketRevision === t.revision);
-    const bound = msg ? approvals.find(a => a.messageId === msg.id) : undefined;
-    const subject: DecisionSubject = {
-      source: 'request',
-      kind: 'approval',
-      topic: 'task',
-      spot: taskSpot({ departmentId: t.departmentId, productId: t.productId }),
-    };
-    return {
-      ticketId: t.ticketId,
-      externalRef: t.externalRef,
-      revision: t.revision,
-      departmentId: t.departmentId,
-      productId: t.productId,
-      status: t.status,
-      classId: cls?.classId ?? null,
-      reasonCodes: cls?.reasonCodes ?? [],
-      requestId: bound?.requestId ?? null,
-      taskId: msg?.taskId ?? null,
-      ownerPersonId: decisionOwner(subject, everyone),
-      canAnswer: canDecide(subject, me, access, me.companyId),
-      decidedBy: decidedByDto(decidedBy(subject, everyone), places),
-      createdAt: t.createdAt.toISOString(),
-    };
-  });
+  const approvalMap = await loadApprovalsByMessageId(
+    db,
+    replyMsgs.map(m => m.id),
+  );
+  const escCtx: EscalationContext = {
+    me,
+    access,
+    everyone,
+    places,
+    clsMap: indexFirstClassification(classifications),
+    replyMap: indexTicketReplies(replyMsgs),
+    approvalMap,
+  };
+  return tickets.map(t => toEscalationDto(t, escCtx));
 }
 
 async function loadOpenApprovalDtos(

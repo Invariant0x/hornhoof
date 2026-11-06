@@ -82,10 +82,10 @@ const FORBIDDEN_PROMISE_PATTERNS: readonly RegExp[] = [
   /\b(?:by|before|on)\s+20\d{2}-\d{2}-\d{2}\b/i,
 ];
 
+const LUHN_DOUBLED = [0, 2, 4, 6, 8, 1, 3, 5, 7, 9] as const;
+
 function luhnDigit(digit: number, doubled: boolean): number {
-  if (!doubled) return digit;
-  const prod = digit * 2;
-  return prod > 9 ? prod - 9 : prod;
+  return doubled ? LUHN_DOUBLED[digit]! : digit;
 }
 
 function isValidLuhn(digits: string): boolean {
@@ -262,6 +262,66 @@ async function runTicketModelClassification(
   return SupportClassifyResult.parse({ classificationReceiptId: saved!.id, status: 'ready' });
 }
 
+async function loadTicketRevision(
+  db: Pick<Db, 'select'>,
+  companyId: string,
+  ticketId: string,
+  ticketRevision: number,
+): Promise<typeof supportTickets.$inferSelect> {
+  const [ticket] = await db
+    .select()
+    .from(supportTickets)
+    .where(
+      and(
+        eq(supportTickets.companyId, companyId),
+        eq(supportTickets.ticketId, ticketId),
+        eq(supportTickets.revision, ticketRevision),
+      ),
+    );
+  if (!ticket) throw new SupportGatewayError(404, 'ticket_unknown', 'Support ticket revision was not found.');
+  return ticket;
+}
+
+async function existingBindingClassification(
+  db: Pick<Db, 'select'>,
+  companyId: string,
+  input: SupportClassifyInputDto,
+  digest: string,
+): Promise<SupportClassifyResultDto | null> {
+  const [sameRev] = await db
+    .select()
+    .from(supportClassifications)
+    .where(
+      and(
+        eq(supportClassifications.companyId, companyId),
+        eq(supportClassifications.ticketId, input.ticketId),
+        eq(supportClassifications.ticketRevision, input.ticketRevision),
+        eq(supportClassifications.bindingDigest, digest),
+      ),
+    );
+  return sameRev ? SupportClassifyResult.parse({ classificationReceiptId: sameRev.id, status: sameRev.status }) : null;
+}
+
+async function decideNewTicketClassification(
+  ctx: Ctx,
+  ports: Pick<ModelCheckPorts, 'runModelCheck'>,
+  ticket: typeof supportTickets.$inferSelect,
+  idempotencyKey: string,
+  checkInfo: { binding: CheckBindingDto; digest: string } | null,
+  digest: string,
+  now: Date,
+): Promise<SupportClassifyResultDto> {
+  const ticketText = decryptSecret(ticket.textEnc, ctx.config.secret);
+  if (hasWithheldTicketData(ticketText)) {
+    return storeUnavailableClassification(ctx.db, ticket, digest, idempotencyKey, 'private_data', now);
+  }
+  const taxonomy = await publishedTaxonomy(ctx.db, ticket.companyId, ticket.departmentId, ticket.productId, now);
+  if (!checkInfo || !taxonomy) {
+    return storeUnavailableClassification(ctx.db, ticket, digest, idempotencyKey, 'uncertain', now);
+  }
+  return runTicketModelClassification(ctx, ports, ticket, ticketText, idempotencyKey, checkInfo, taxonomy, now);
+}
+
 export async function classifySupportTicket(
   ctx: Ctx,
   ports: Pick<ModelCheckPorts, 'runModelCheck'>,
@@ -274,47 +334,16 @@ export async function classifySupportTicket(
   const replay = await existingClassificationByKey(ctx.db, caller.companyId, input);
   if (replay) return replay;
 
-  const [ticket] = await ctx.db
-    .select()
-    .from(supportTickets)
-    .where(
-      and(
-        eq(supportTickets.companyId, caller.companyId),
-        eq(supportTickets.ticketId, input.ticketId),
-        eq(supportTickets.revision, input.ticketRevision),
-      ),
-    );
-  if (!ticket) throw new SupportGatewayError(404, 'ticket_unknown', 'Support ticket revision was not found.');
-
+  const ticket = await loadTicketRevision(ctx.db, caller.companyId, input.ticketId, input.ticketRevision);
   const checkInfo = await activeCheckBinding(
     ctx.db,
     { companyId: caller.companyId, departmentId: ticket.departmentId, productId: ticket.productId, kind: 'support_classification' },
     now,
   );
-  const digest = checkInfo?.digest ?? sha256(`uncertified:${ticket.departmentId}:support_classification`);
-  const [sameRev] = await ctx.db
-    .select()
-    .from(supportClassifications)
-    .where(
-      and(
-        eq(supportClassifications.companyId, caller.companyId),
-        eq(supportClassifications.ticketId, input.ticketId),
-        eq(supportClassifications.ticketRevision, input.ticketRevision),
-        eq(supportClassifications.bindingDigest, digest),
-      ),
-    );
-  if (sameRev) return SupportClassifyResult.parse({ classificationReceiptId: sameRev.id, status: sameRev.status });
-
-  const ticketText = decryptSecret(ticket.textEnc, ctx.config.secret);
-  if (hasWithheldTicketData(ticketText)) {
-    return storeUnavailableClassification(ctx.db, ticket, digest, input.idempotencyKey, 'private_data', now);
-  }
-
-  const taxonomy = await publishedTaxonomy(ctx.db, caller.companyId, ticket.departmentId, ticket.productId, now);
-  if (!checkInfo || !taxonomy) {
-    return storeUnavailableClassification(ctx.db, ticket, digest, input.idempotencyKey, 'uncertain', now);
-  }
-  return runTicketModelClassification(ctx, ports, ticket, ticketText, input.idempotencyKey, checkInfo, taxonomy, now);
+  const digest = checkInfo ? checkInfo.digest : sha256(`uncertified:${ticket.departmentId}:support_classification`);
+  const sameRev = await existingBindingClassification(ctx.db, caller.companyId, input, digest);
+  if (sameRev) return sameRev;
+  return decideNewTicketClassification(ctx, ports, ticket, input.idempotencyKey, checkInfo, digest, now);
 }
 
 function scanSupportText(text: string, reasons: Set<GateCode>): void {

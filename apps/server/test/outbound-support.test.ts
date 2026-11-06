@@ -793,6 +793,9 @@ describe('outbound support classification and reply gates (#447 T8-10, T8-15)', 
     const w = await seedSupportWorld();
     expect(containsSecretMaterial('token ghp_1234567890abcdefghijklmnopqrstuvwxyzABCD')).toBe(true);
     expect(containsThirdPartyPii('Write to other@domain.example')).toBe(true);
+    expect(containsThirdPartyPii('Card 4532 0151 1283 0366 on file')).toBe(true);
+    expect(containsThirdPartyPii('Order 4532 0151 1283 0367 reference')).toBe(false);
+    expect(containsThirdPartyPii('Short 123456789012')).toBe(false);
     expect(containsForbiddenSupportPromise('We guarantee a full refund by 2026-11-15 under contract clause 4.')).toBe(true);
 
     const badPromiseKb = await addCatalogRevision(w.c, {
