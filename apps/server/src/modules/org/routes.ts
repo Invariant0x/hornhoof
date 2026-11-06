@@ -241,7 +241,7 @@ export function orgRoutes(app: FastifyInstance, ctx: Ctx): void {
           name: d.name,
           templateKey: d.templateKey,
           workMode: d.workMode,
-          turnProgress: await departmentProgress(db, open, viewer, d),
+          turnProgress: await departmentProgress(db, open, viewer, d, { departments: depts, teams: allTeams }),
           roleCode: d.roleCode,
           about: d.about,
           ownerPersonId: ownerOf(owners, d.id),
