@@ -1,9 +1,10 @@
 import { hashTestEnvironment, parseTestEnvironment, type NodeMessage, type TestsDescribed } from '@hornhoof/protocol';
 import { asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agents, departments, jobs, tasks, testFileResults, testParts, testRuns, turns } from '../src/db/schema.js';
+import { agents, departments, jobs, tasks, testFileResults, testParts, testRuns, testSuiteMemory, turns } from '../src/db/schema.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { acceptDescription, newEnvironmentRequest, repositoryScope, testCapabilities } from '../src/modules/testruns/describe.js';
+import { keptFor, rememberKept } from '../src/modules/testruns/reuse.js';
 import { partDone, pumpTests, runState } from '../src/modules/testruns/runs.js';
 import { connectNode, listen, setUpCompany, testApp, TEST_COMMIT, until } from './helpers.js';
 
@@ -18,7 +19,7 @@ const manifest = (everyTurns = 5) => parseTestEnvironment({
   version: 1, defaultProfile: 'fast', runtimes: [{ id: 'node', version: '22' }],
   profiles: [{ id: 'fast', requiredSuiteIds: ['unit'] }, { id: 'final', requiredSuiteIds: ['unit'] }, { id: 'full', requiredSuiteIds: ['unit'] }],
   dependencies: { adapter: 'none', inputs: [], install: [], paths: [], cache: 'none' }, services: [], prepare: [], reset: null,
-  suites: [{ id: 'unit', root: '.', files: ['test/*.test.ts'], profiles: ['fast', 'final', 'full'], run: { program: 'node', args: ['--test'], cwd: '.' }, split: { kind: 'argv-files' } }],
+  suites: [{ id: 'unit', root: '.', files: ['test/*.test.ts'], profiles: ['fast', 'final', 'full'], run: { program: 'node', args: ['--test'], cwd: '.' }, split: { kind: 'argv-files' }, keep: ['.metrics/mutate'] }],
   impact: { adapter: 'whole-package', fullPackageGlobs: [], migrationCheck: { status: 'unsupported', reason: 'None.' } },
   mutation: { status: 'unsupported', language: 'typescript', reason: 'None.' },
   execution: { version: 2, fullRun: { everyTurns, replaces: 'final', profile: 'full' } },
@@ -62,7 +63,7 @@ async function fixture(turnNumber = 3, everyTurns = 5) {
     return selection.kind === 'batch' ? selection.selections.flatMap(member => member.files) : [];
   }).sort();
   /* The node's end of every open part of a run. */
-  const finish = async (runId: string, how: { ok?: boolean; files?: NodeMessage extends never ? never : { suiteId: string; file: string; status: 'passed' | 'failed' }[]; commit?: string; error?: string } = {}) => {
+  const finish = async (runId: string, how: { ok?: boolean; files?: { suiteId: string; file: string; status: 'passed' | 'failed'; note?: string }[]; commit?: string; error?: string } = {}) => {
     const { ok = true, commit = TEST_COMMIT } = how, run = await runOf(runId);
     for (const part of await partsOf(runId)) {
       if (part.status !== 'running') continue;
@@ -187,6 +188,47 @@ describe('reusing green test results', () => {
     expect(await none.greenRows()).toEqual([]);
     await until(async () => (await none.told()).includes('Test run 1 passed'));
     expect(await none.told()).toContain('Nothing was reused: the machine that described this commit sent no fingerprints.');
+  });
+
+  it('shows what a result came to, when the file runs and when it does not run again', async () => {
+    const f = await fixture(), note = '2 killed, 7 survived, 0 uncovered of 9 sites', line = `Notes on test files: test/a.test.ts: ${note}.`;
+    const first = await f.start({});
+    await f.finish(first, { files: [{ suiteId: 'unit', file: 'test/a.test.ts', status: 'passed', note }] });
+    await until(async () => (await f.told()).includes('Test run 1 passed'));
+    expect((await f.told()).split(line)).toHaveLength(2);
+    const second = await f.start({});
+    expect(await f.ranFiles(second)).toEqual([]);
+    await until(async () => (await f.told()).includes('Test run 2 passed'));
+    expect((await f.told()).split(line)).toHaveLength(3);
+    const shown = await runState(f.app.ctx, { id: f.job.id, companyId: f.companyId, agentId: f.agent.id, agentKind: 'orchestrator' } as never, 2);
+    expect(shown).toMatchObject({ reuse: { notes: [{ file: 'test/a.test.ts', note }] } });
+  });
+
+  it('forgets what a result came to once a passing run says nothing of the file', async () => {
+    const f = await fixture();
+    await f.finish(await f.start({}), { files: [{ suiteId: 'unit', file: 'test/a.test.ts', status: 'passed', note: 'old' }] });
+    await f.finish(await f.start({ profile: 'full' }));
+    expect((await f.greenRows()).map(row => row.note)).toEqual([null, null, null]);
+  });
+
+  it('keeps what each part of a run left, by file, whichever part ended last', async () => {
+    const f = await fixture(), run = await f.runOf(await f.start({}));
+    const remember = (...files: { path: string; text: string }[]) => rememberKept(f.app.ctx, run, { commit: TEST_COMMIT, kept: [{ suiteId: 'unit', files }] });
+    const memory = async () => (await f.db.select().from(testSuiteMemory))[0]!.files.map(file => `${file.path}=${file.text.slice(0, 3)}`).sort();
+    await remember({ path: '.metrics/mutate/a.edn', text: 'one' });
+    await remember({ path: '.metrics/mutate/b.edn', text: 'two' });
+    expect(await memory()).toEqual(['.metrics/mutate/a.edn=one', '.metrics/mutate/b.edn=two']);
+    await remember({ path: '.metrics/mutate/a.edn', text: 'new' });
+    expect(await memory()).toEqual(['.metrics/mutate/a.edn=new', '.metrics/mutate/b.edn=two']);
+  });
+
+  it('starts over from the last part when all that was kept no longer fits one message', async () => {
+    const f = await fixture(), run = await f.runOf(await f.start({}));
+    const remember = (path: string, text: string) => rememberKept(f.app.ctx, run, { commit: TEST_COMMIT, kept: [{ suiteId: 'unit', files: [{ path, text }] }] });
+    await remember('.metrics/mutate/a.edn', 'a'.repeat(600 * 1024));
+    await remember('.metrics/mutate/b.edn', 'b'.repeat(600 * 1024));
+    const [part] = await f.partsOf(run.id);
+    expect((await keptFor(f.app.ctx, run, part!))?.[0]?.files.map(file => file.path)).toEqual(['.metrics/mutate/b.edn']);
   });
 
   it('does not reuse the green result of another repository', async () => {

@@ -84,6 +84,13 @@ describe('what a part reports of its files', () => {
     expect(parseNodeMessage(JSON.stringify({ ...done, files: [file] }))).toMatchObject({ files: [file] });
   });
 
+  it('can say in one line what a result came to', () => {
+    const file = { suiteId: 'unit', file: 'test/a.ts', status: 'passed', note: '2 killed, 7 survived' };
+    expect(FileOutcome.parse(file)).toEqual(file);
+    expect(FileOutcome.safeParse({ ...file, note: 'two\nlines' }).success).toBe(false);
+    expect(FileOutcome.safeParse({ ...file, note: 'x'.repeat(301) }).success).toBe(false);
+  });
+
   it('refuses a status other than passed or failed', () => {
     expect(FileOutcome.safeParse({ suiteId: 'unit', file: 'test/a.ts', status: 'skipped' }).success).toBe(false);
   });

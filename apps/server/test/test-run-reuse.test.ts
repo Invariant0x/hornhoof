@@ -3,6 +3,14 @@ import { PREPARATION_UNIT } from '@hornhoof/protocol';
 import { describe, expect, it } from 'vitest';
 import { chooseRunMode, decideReuse, fullRunDue, partFileResults, reuseLines } from '../src/modules/testruns/reuse.js';
 
+describe('what a result came to', () => {
+  it('stays with the green file and is shown with the run', () => {
+    const snapshot = {} as never, batch = { kind: 'suite', suiteId: 'a', files: ['a/1.ts'] } as never;
+    expect(partFileResults(snapshot, batch, true, [{ suiteId: 'a', file: 'a/1.ts', status: 'passed', note: '2 killed, 7 survived' }]).green).toEqual([{ suiteId: 'a', file: 'a/1.ts', note: '2 killed, 7 survived' }]);
+    expect(reuseLines({ mode: 'cached', turn: 1, fingerprints: [], reused: 0, preparationReused: false, wouldSkip: [], mismatches: [], notes: [{ file: 'a/1.ts', note: '2 killed, 7 survived' }, { file: 'a/2.ts', note: 'all killed' }] }, [])).toEqual(['Notes on test files: a/1.ts: 2 killed, 7 survived; a/2.ts: all killed.']);
+  });
+});
+
 describe('when the full run is due', () => {
   it.each([
     { turn: 5, everyTurns: 5, lastFullTurn: null, due: true, why: 'on a multiple of the interval' },
@@ -119,7 +127,7 @@ describe('what a part leaves', () => {
 });
 
 describe('what the result says', () => {
-  const cache = (over: object) => ({ mode: 'cached', turn: 3, fingerprints: [], reused: 0, preparationReused: false, wouldSkip: [], mismatches: [], ...over }) as never;
+  const cache = (over: object) => ({ mode: 'cached', turn: 3, fingerprints: [], reused: 0, preparationReused: false, wouldSkip: [], mismatches: [], notes: [], ...over }) as never;
   const part = (failedFiles: object[] | null = null) => ({ failedFiles }) as never;
 
   it('nothing for a run without reuse', () => {

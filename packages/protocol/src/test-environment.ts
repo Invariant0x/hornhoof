@@ -307,7 +307,9 @@ export const UnitFingerprints = z.array(UnitFingerprint).max(10_001).refine(prin
 /* What stands for the one explicit preparation among the units: its work depends on the whole tree. */
 export const PREPARATION_UNIT = { suiteId: 'hornhoof-preparation', file: '.hornhoof/test-environment.json' } as const;
 /* How one test file went, as its runner reported it. */
-export const FileOutcome = z.strictObject({ suiteId: Id, file: RepositoryPath, status: z.enum(['passed', 'failed']), ms: Duration.optional() });
+/* What a result came to, in one line. It stays with the result and is shown again whenever that result is reused. */
+export const FileNote = z.string().min(1).max(300).regex(/^[^\p{Cc}\p{Zl}\p{Zp}]*$/u);
+export const FileOutcome = z.strictObject({ suiteId: Id, file: RepositoryPath, status: z.enum(['passed', 'failed']), ms: Duration.optional(), note: FileNote.optional() });
 export type FileOutcome = z.infer<typeof FileOutcome>;
 export const KEPT_BYTES = 1024 * 1024;
 /* What a suite's run left for its next run, as its manifest's keep names it. */

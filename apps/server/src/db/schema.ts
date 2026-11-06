@@ -1009,7 +1009,7 @@ export type TestFileKey = { suiteId: string; file: string };
    to go by. fingerprints and wouldSkip serve the run's parts and go when it ends. */
 export type TestRunFileCache = {
   mode: 'cached' | 'full' | 'off'; turn: number | null; fingerprints: UnitFingerprint[]; reused: number; preparationReused: boolean;
-  wouldSkip: TestFileKey[]; mismatches: TestFileKey[];
+  wouldSkip: TestFileKey[]; mismatches: TestFileKey[]; notes: { file: string; note: string }[];
 };
 
 export const testRuns = pgTable(
@@ -1124,6 +1124,8 @@ export const testFileResults = pgTable(
     runId: uuid('run_id').notNull().references(() => testRuns.id, { onDelete: 'cascade' }),
     commitSha: text('commit_sha').notNull(),
     ms: integer('ms'),
+    /* What the result came to, as its runner put it. */
+    note: text('note'),
     createdAt: createdAt(),
   },
   t => [primaryKey({ name: 'test_file_results_pk', columns: [t.companyId, t.repositoryOwnerId, t.repoUrlHash, t.fingerprint, t.suiteId, t.file] }), index('test_file_results_age').on(t.companyId, t.createdAt)],

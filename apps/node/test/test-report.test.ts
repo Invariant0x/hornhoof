@@ -28,7 +28,11 @@ describe('what a runner reports of its files', () => {
     expect(parseFileReport(report([{ file: 'test/a.test.ts', status: 'passed' }]), context({ suiteFailed: false }))).toEqual([{ suiteId: 'unit', file: 'test/a.test.ts', status: 'passed' }]);
   });
 
-  it.each([['not JSON', '{nope'], ['another shape', '{"files":{}}'], ['another status', report([{ file: 'test/a.test.ts', status: 'skipped' }])], ['a negative time', report([{ file: 'test/a.test.ts', status: 'passed', ms: -1 }])], ['no report', null]])('says nothing for %s', (_name, text) => {
+  it('passes on what a runner says a result came to', () => {
+    expect(parseFileReport(report([{ file: 'test/a.test.ts', status: 'passed', note: '2 killed, 7 survived' }]), context({ suiteFailed: false }))).toEqual([{ suiteId: 'unit', file: 'test/a.test.ts', status: 'passed', note: '2 killed, 7 survived' }]);
+  });
+
+  it.each([['a note the server would refuse', report([{ file: 'test/a.test.ts', status: 'failed', note: 'two\nlines' }])], ['not JSON', '{nope'], ['another shape', '{"files":{}}'], ['another status', report([{ file: 'test/a.test.ts', status: 'skipped' }])], ['a negative time', report([{ file: 'test/a.test.ts', status: 'passed', ms: -1 }])], ['no report', null]])('says nothing for %s', (_name, text) => {
     expect(parseFileReport(text, context())).toEqual([]);
   });
 });
@@ -57,6 +61,21 @@ describe('what a suite keeps between runs', () => {
     restoreKept(repo, ['.metrics/mutate'], kept);
     expect(readFileSync(join(repo, '.metrics/mutate/deep/b.edn'), 'utf8')).toBe('two');
     expect(collectKept(repo, ['.metrics/mutate'], me).sort((a, b) => a.path.localeCompare(b.path))).toEqual(kept);
+  });
+
+  it('leaves out what came back as it went in: another part of the run may change that file meanwhile', () => {
+    const repo = folder();
+    restoreKept(repo, ['.metrics/mutate'], kept);
+    writeFileSync(join(repo, '.metrics/mutate/a.edn'), 'changed');
+    writeFileSync(join(repo, '.metrics/mutate/new.edn'), 'new');
+    expect(collectKept(repo, ['.metrics/mutate'], me, kept).sort((a, b) => a.path.localeCompare(b.path))).toEqual([{ path: '.metrics/mutate/a.edn', text: 'changed' }, { path: '.metrics/mutate/new.edn', text: 'new' }]);
+  });
+
+  it('judges only what changed against the limit', () => {
+    const repo = folder(), large = [{ path: 'keep/large', text: 'x'.repeat(900 * 1024) }];
+    restoreKept(repo, ['keep'], large);
+    writeFileSync(join(repo, 'keep/more'), 'y'.repeat(900 * 1024));
+    expect(collectKept(repo, ['keep'], me, large).map(file => file.path)).toEqual(['keep/more']);
   });
 
   it('goes nowhere but under what its suite names', () => {

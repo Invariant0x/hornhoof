@@ -1,5 +1,5 @@
 {
-  "id": "b11c421b-646d-44df-a909-9ac1c2fec870",
+  "id": "70a040f5-ed5e-4009-b0f2-fa8c7421fc7a",
   "prevId": "2dd4a59c-8bee-4598-9b58-681f57a5c0f1",
   "version": "7",
   "dialect": "postgresql",
@@ -14648,6 +14648,12 @@
         "ms": {
           "name": "ms",
           "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },

@@ -629,12 +629,12 @@ function restoreProductKept(msg: TestRun, execution: TestExecution, state: Produ
   for (const { suiteId, files } of msg.kept ?? []) restoreKept(state.repo, suites.find(suite => suite.id === suiteId)?.keep ?? [], files);
 }
 /* Read once the job's processes have stopped, so nothing changes under the reading. What cannot be read only means less is reused. */
-function collectProductResults(execution: TestExecution, state: ProductState): void {
+function collectProductResults(execution: TestExecution, state: ProductState, restored: KeptFiles): void {
   try {
     const checkout = realpathSync(state.repo), { suites } = execution.snapshot.description.manifest;
     state.files = state.reports.flatMap(report => parseFileReport(readJobFile(report.path, state.user.uid, REPORT_BYTES), { checkout, suiteId: report.suiteId, selected: report.selected, suiteFailed: report.failed }));
     const ran = suites.filter(suite => suite.keep?.length && state.reports.some(report => report.suiteId === suite.id));
-    state.kept = KeptFiles.safeParse(ran.flatMap(suite => { const files = collectKept(checkout, suite.keep!, state.user.uid); return files.length ? [{ suiteId: suite.id, files }] : []; })).data ?? [];
+    state.kept = KeptFiles.safeParse(ran.flatMap(suite => { const files = collectKept(checkout, suite.keep!, state.user.uid, restored.find(kept => kept.suiteId === suite.id)?.files); return files.length ? [{ suiteId: suite.id, files }] : []; })).data ?? [];
   } catch (error) { state.out.line(`The results of the part's test files could not be read: ${error instanceof Error ? error.message : String(error)}`); }
 }
 function rememberProductFailure(error: unknown, firstFailure: ProductCommandFailure | undefined, state: ProductState): ProductCommandFailure | undefined {
@@ -674,7 +674,7 @@ async function executeProduct(msg: TestRun, state: ProductState, hidden: string[
     await timedPhase(state.receipt, 'commandMs', () => productSelection(msg, state, { ...state.base, ...services!.env, CI: 'true', NO_COLOR: '1', VITEST_MAX_WORKERS: vitestWorkers(state.options.cpus, state.options.env) }));
   } finally {
     await timedPhase(state.receipt, 'cleanupMs', async () => { try { await services?.close(); } finally { await stopTestUser(state.user, state.options.proc); } });
-    collectProductResults(execution, state);
+    collectProductResults(execution, state, msg.kept ?? []);
   }
 }
 function productFailure(error: unknown, signal: AbortSignal): TestError {
