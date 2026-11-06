@@ -60,7 +60,7 @@ async function company() {
     (await createTask(app.ctx, { agentId: head.id }, { title: 'Checkout', brief: '', body: '', departmentId: dev!.id, parentId, assigneeAgentId: bruno.id, executor: true, ...more })).task;
   const read = async (id: string) => (await db.select().from(tasks).where(eq(tasks.id, id)))[0]!;
   const elsewhere = async () => {
-    const [other] = await db.insert(companies).values({ name: 'Other' }).returning();
+    const [other] = await db.insert(companies).values({ name: 'Other', singleton: false }).returning();
     const [theirs] = await db.insert(departments).values({ companyId: other!.id, templateKey: 'development', roleCode: 'DEV' }).returning();
     const [team] = await db.insert(teams).values({ companyId: other!.id, departmentId: theirs!.id, name: 'Theirs', urgentOnly: true }).returning();
     const [agent] = await db.insert(agents).values({ companyId: other!.id, kind: 'worker', name: 'Olga', roleKey: 'DEV-BE', departmentId: theirs!.id, teamId: team!.id, model: '' }).returning();
@@ -273,7 +273,7 @@ describe('setting a task urgent', () => {
   it('is refused to a head, a worker and a person who does not act as the CEO', async () => {
     const c = await company();
     const top = await c.root();
-    const [person] = await c.db.insert(people).values({ companyId: c.companyId, name: 'Wes', email: 'wes@acme.com', scopeKind: 'company' }).returning();
+    const [person] = await c.db.insert(people).values({ companyId: c.companyId, name: 'Wes', email: 'wes@acme.com', status: 'active', scopeKind: 'company' }).returning();
     for (const actor of [{ agentId: c.head.id }, { agentId: c.bruno.id }, { personId: person!.id }]) {
       expect(await reason(setUrgent(c.ctx, actor, top.id, true))).toBe('urgent_not_allowed');
     }

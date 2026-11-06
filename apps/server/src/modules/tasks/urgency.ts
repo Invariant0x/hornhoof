@@ -1,8 +1,9 @@
 import { and, eq, inArray, sql } from 'drizzle-orm';
+import type { Ctx } from '../../app.js';
 import { actsAsCeo } from '../../auth/decisions.js';
 import type { Db } from '../../db/client.js';
 import { agents, companies, people, tasks, teams } from '../../db/schema.js';
-import { CLOSED, loadTask, note, published, refuse, type Actor, type Live, type Moved, type Task, type Tx } from './engine.js';
+import { CLOSED, loadTask, note, published, refuse, type Actor, type Moved, type Task, type Tx } from './engine.js';
 
 /* Whether work is urgent is data: the CEO says so through the orchestrator or a route, and nothing is read from its words.
    Work under a task is as urgent as it is. A team may take urgent work only, and who is in it says who that holds for. */
@@ -25,7 +26,7 @@ const notAllowed = () => refuse(403, 'urgent_not_allowed', 'Only the CEO or the 
 
 /* The orchestrator acts for the CEO: its tools check that the turn answers them. */
 async function maySayUrgent(db: Db | Tx, companyId: string, actor: Actor): Promise<boolean> {
-  if (actor.agentId) {
+  if (actor.agentId !== undefined) {
     const [agent] = await db.select({ kind: agents.kind }).from(agents).where(and(eq(agents.id, actor.agentId), eq(agents.companyId, companyId)));
     return agent?.kind === 'orchestrator';
   }
@@ -42,7 +43,7 @@ export async function urgencyOfNew(db: Db | Tx, companyId: string, actor: Actor,
 
 /* All that is under a task goes with it, closed work too: a tree has one urgency. Tasks are made one at a time in a company,
    so with the company held none comes up under it meanwhile. Nobody is woken, as it changes nothing of the work. */
-export async function setUrgent(ctx: Live, actor: Actor, taskId: string, urgent: boolean): Promise<Moved> {
+export async function setUrgent(ctx: Pick<Ctx, 'db' | 'bus'>, actor: Actor, taskId: string, urgent: boolean): Promise<Moved> {
   const task = await loadTask(ctx.db, taskId);
   if (!(await maySayUrgent(ctx.db, task.companyId, actor))) throw notAllowed();
   if (task.parentId) throw refuse(409, 'urgent_follows_parent', `#${task.number} is as urgent as the task above it. Change the top of its tree.`);

@@ -147,7 +147,7 @@ describe('migration 0050', () => {
     const beforeWakes = (await db.execute(sql`select to_jsonb(w) as data from pending_wakes w order by id`)).rows;
     await migrate(db, { migrationsFolder: MIGRATIONS });
     await migrate(db, { migrationsFolder: MIGRATIONS });
-    expect((await db.execute(sql`select to_jsonb(t) - 'external_wait' - 'work_kind' - 'risk_class' as data from tasks t order by number`)).rows).toEqual(before);
+    expect((await db.execute(sql`select to_jsonb(t) - 'external_wait' - 'work_kind' - 'risk_class' - 'urgent' as data from tasks t order by number`)).rows).toEqual(before);
     expect((await db.execute(sql`select to_jsonb(w) - 'task_version' - 'cause' as data from pending_wakes w order by id`)).rows).toEqual(beforeWakes);
     expect((await db.execute(sql`select task_version, cause from pending_wakes`)).rows).toEqual([{ task_version: null, cause: null }]);
     const rows = (await db.execute(sql`select * from tasks order by number`)).rows;
@@ -832,7 +832,7 @@ describe('migration 0045', () => {
       from generate_series(1, 20000) n`);
     await db.execute(sql`insert into tasks (company_id, number, title) values (${C}, 20001, 'No turn or product')`);
     /* Migrations 0050 and 0062 check their new nullable fields separately; every earlier field must stay identical. */
-    const fingerprint = sql`select count(*)::int as n, md5(string_agg((to_jsonb(t) - 'external_wait' - 'work_kind' - 'risk_class')::text, '' order by number)) as checksum from tasks t`;
+    const fingerprint = sql`select count(*)::int as n, md5(string_agg((to_jsonb(t) - 'external_wait' - 'work_kind' - 'risk_class' - 'urgent')::text, '' order by number)) as checksum from tasks t`;
     const before = await db.execute(fingerprint);
     expect(before.rows[0]).toMatchObject({ n: 20001 });
 
@@ -1094,7 +1094,7 @@ describe('migration 0062', () => {
       { number: 9, work_kind: null, risk_class: null },
       { number: 10, work_kind: 'bug', risk_class: null },
     ]);
-    expect((await db.execute(sql`select to_jsonb(t) - 'work_kind' - 'risk_class' as data from tasks t order by number`)).rows).toEqual(before);
+    expect((await db.execute(sql`select to_jsonb(t) - 'work_kind' - 'risk_class' - 'urgent' as data from tasks t order by number`)).rows).toEqual(before);
   });
 
   it('refuses a kind or a risk class it does not know', async () => {
