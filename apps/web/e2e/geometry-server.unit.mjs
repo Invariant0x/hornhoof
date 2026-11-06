@@ -35,7 +35,9 @@ test('real fixture binds API data, actual source dictionaries and built fonts to
   assert.equal(notes.length, 1); assert.equal(notes[0].number, fixture.number);
   assert.equal(notes[0].text, fixture.note); assert.equal(notes[0].by.name, fixture.author);
   assert.ok(fixture.note.length <= 300 && fixture.author.length <= 80, 'stress content must stay within real API limits');
-  assert.equal(fixture.dataSha256, digest(JSON.stringify({ author: fixture.author, note: fixture.note })));
+  assert.ok(fixture.department, 'real fixture must include the isolated department notebook seed');
+  assert.equal(fixture.dataSha256, digest(JSON.stringify({ author: fixture.author, note: fixture.note,
+    department: { name: fixture.department.name, note: fixture.department.note } })));
   assert.ok(Array.isArray(fixture.fontAssets) && fixture.fontAssets.length > 0, 'report actual built font files');
   for (const font of fixture.fontAssets) {
     assert.match(font.name, /^[a-zA-Z0-9_.-]+\.woff2?$/);
@@ -58,6 +60,35 @@ test('real fixture binds API data, actual source dictionaries and built fonts to
     fontsSha256: fixture.fontsSha256, fontAssets: fixture.fontAssets.length, localeKeys: fixture.localeKeys,
     localeArguments: fixture.localeArguments, rankings: fixture.locales.map(({ id, direction, score }) => ({ id, direction, score })),
     selected: fixture.selected, shippedRtl: fixture.shippedRtl, liveBrowsers: false }));
+});
+
+test('real department fixture keeps its notebook separate through read, write, change and removal', { timeout: 60000 }, async t => {
+  const fixture = await geometryServer();
+  t.after(() => fixture.stop());
+  assert.ok(fixture.department, 'real fixture must include the isolated department notebook seed');
+  const department = fixture.department;
+  assert.match(department.id, /^[a-f0-9-]{36}$/);
+  assert.ok(department.name.length > 0 && department.name.length <= 60);
+  assert.ok(department.note.length > 0 && department.note.length <= 300);
+  assert.notEqual(department.note, fixture.note, 'the two real notebooks must be distinguishable');
+  const headers = { cookie: 'hh_session=' + fixture.session, 'content-type': 'application/json' };
+  const base = fixture.origin + `/api/departments/${department.id}/notebook`;
+  const read = async url => { const response = await fetch(url, { headers }); assert.equal(response.status, 200); return (await response.json()).notes; };
+  const companyBefore = await read(fixture.origin + '/api/notebook');
+  assert.deepEqual((await read(base)).map(n => [n.number, n.text, n.by.name]), [[department.number, department.note, fixture.author]]);
+  const added = await fetch(base, { method: 'POST', headers, body: JSON.stringify({ text: 'Department fixture temporary note' }) });
+  assert.equal(added.status, 201);
+  const next = (await added.json()).note.number;
+  assert.notEqual(next, department.number);
+  const changed = await fetch(base + '/' + next, { method: 'PATCH', headers, body: JSON.stringify({ text: 'Department fixture changed note' }) });
+  assert.equal(changed.status, 200);
+  assert.equal((await read(base)).find(n => n.number === next).text, 'Department fixture changed note');
+  const removed = await fetch(base + '/' + next, { method: 'DELETE', headers });
+  assert.equal(removed.status, 204);
+  assert.deepEqual((await read(base)).map(n => [n.number, n.text]), [[department.number, department.note]]);
+  assert.deepEqual(await read(fixture.origin + '/api/notebook'), companyBefore);
+  console.log('HH_GEOMETRY_DEPARTMENT_FIXTURE ' + JSON.stringify({ sourceSha: fixture.sourceSha,
+    dataSha256: fixture.dataSha256, companyNotes: companyBefore.length, departmentNotes: 1, liveBrowsers: false }));
 });
 
 test('rejects a mismatched immutable source before listening', { timeout: 15000 }, () => {
