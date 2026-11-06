@@ -33,6 +33,7 @@ it('serves the real browser integration', async () => {
     'move-mine-bob': () => c.app.inject({ method: 'PATCH', url: '/api/agents/' + c.crew.mine.id, payload: { subscription: c.plans.bob.id }, cookies: { hh_session: c.tokens.ceo } }),
     'move-other-ann-running': async () => { await turnOn(c.crew.other.id, c.plans.bob.id); await onPlan(c.crew.other.id, c.plans.ann.id); },
     'move-other-ann-idle': async () => { await turnOn(c.crew.other.id, c.plans.bob.id, 'done'); await onPlan(c.crew.other.id, c.plans.ann.id); },
+    'turn-other-bob': () => turnOn(c.crew.other.id, c.plans.bob.id),
     'turn-other-ann': () => turnOn(c.crew.other.id, c.plans.ann.id),
   };
   const control = createServer(socket => {

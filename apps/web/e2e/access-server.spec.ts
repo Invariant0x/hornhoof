@@ -200,10 +200,11 @@ test('real server refuses an upgraded socket and drops the stale screen on termi
 test('real server drops the old owner view even while their program keeps running', async ({ browser }) => {
   const server = await startServer();
   try {
-    await server.control('move-other-ann-running');
+    await server.control('turn-other-bob');
     const bob = await signedIn(browser, server, 'bob', 'en', 'light', 1440);
     const window = await openAgent(bob, 'Otto');
     await expect(window.locator('.xterm-screen')).toContainText('Mina private terminal');
+    await server.control('move-other-ann-idle');
     await server.control('turn-other-ann');
     await expect(window.locator('.xterm-screen')).toHaveCount(0);
     await expect(window).toHaveCount(0);
