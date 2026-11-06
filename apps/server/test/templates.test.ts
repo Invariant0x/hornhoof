@@ -523,14 +523,16 @@ describe('templates', () => {
     expect(body('orch-plan-turn')).toMatch(/one task for the one department that owns it end to end/);
     expect(body('orch-plan-turn')).toMatch(/next turn[\s\S]*"now"/);
     for (const id of ['orch-plan-turn', 'hh-break-down']) expect(body(id), id).toMatch(/plans, contracts or proofs/);
-    expect(body('hh-break-down')).toMatch(/two to four/);
+    expect(body('hh-break-down')).toMatch(/one generalist developer[\s\S]*connected block[\s\S]*end to end/i);
+    expect(body('hh-break-down')).toMatch(/No chains or `after` between developers when one can do it/);
+    expect(body('hh-break-down')).not.toMatch(/two to four/);
     expect(body('hh-break-down')).not.toMatch(/a few hours of work/);
   });
 
   it('has heads give out big pieces at once, answer in comments and leave the work and the status to others', () => {
     const body = (id: string) => templates.skills.get(id)!.body;
     expect(body('hh-lead-tasks')).toMatch(/Give independent blocks to different members at once/);
-    expect(body('hh-break-down')).toMatch(/two to four/);
+    expect(body('hh-break-down')).toMatch(/Give independent blocks to different members at once/);
     for (const id of ['hh-lead-tasks', 'hh-brief-members']) expect(body(id), id).toMatch(/once/);
     /* A comment by whoever gave a blocked task out opens it again and wakes its executor, so a body is written once. */
     for (const id of ['hh-lead-tasks', 'hh-brief-members', 'hh-handle-reports']) expect(body(id), id).toMatch(/"comment"/);
