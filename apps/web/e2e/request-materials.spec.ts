@@ -490,7 +490,6 @@ const legacyTask = (await createTask(app.ctx, { personId: ceo.id }, {
 const [attA] = await db.insert(schema.attachments).values({
   companyId: acme.id,
   agentId: designer.id,
-  taskId: legacyTask.id,
   mediaType: 'image/png',
   bytes: png,
   size: png.byteLength,
@@ -498,7 +497,6 @@ const [attA] = await db.insert(schema.attachments).values({
 const [attB] = await db.insert(schema.attachments).values({
   companyId: acme.id,
   agentId: designer.id,
-  taskId: legacyTask.id,
   mediaType: 'image/png',
   bytes: png,
   size: png.byteLength,
@@ -702,6 +700,10 @@ test('renders real 2-page PDF via bundled pdfjs-dist without OpenAction or exter
 
   const twoPagePdf = buildTwoPagePdfBuffer(false);
   const encryptedPdf = buildTwoPagePdfBuffer(true);
+  const propId = 'prop-structure-512';
+  const propDocId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+  const propDigest = 'f'.repeat(64);
+  const posts: { url: string; body: unknown }[] = [];
   let externalPdfFetchCount = 0;
 
   await page.route('https://forbidden.invalid/**', async route => {
@@ -712,6 +714,10 @@ test('renders real 2-page PDF via bundled pdfjs-dist without OpenAction or exter
   await page.route('**/api/**', async route => {
     const req = route.request();
     const url = new URL(req.url());
+    if (req.method() === 'POST') {
+      posts.push({ url: url.pathname, body: req.postDataJSON() });
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+    }
     if (url.pathname === '/api/me') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(ME_CEO) });
     if (url.pathname === '/api/org') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(ORG_FIXTURE) });
     if (url.pathname === '/api/tasks') return route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
@@ -739,11 +745,53 @@ test('renders real 2-page PDF via bundled pdfjs-dist without OpenAction or exter
           ownerPersonId: 'p-ceo',
           canAnswer: true,
         } as unknown as WaitingRequest],
-        proposals: [],
+        proposals: [{
+          id: propId,
+          kind: 'structure',
+          agent: { id: 'a-orch', name: 'Orchestrator' },
+          department: null,
+          brief: 'Создать отдел поддержки и финансов.',
+          items: [{ template: 'support', checked: true, note: 'Поддержка клиентов.' }],
+          materialRevision: 2,
+          materialDigest: propDigest,
+          at: '2026-11-06T01:12:00.000Z',
+          ownerPersonId: 'p-ceo',
+          canAnswer: true,
+        }],
         computerAccess: null,
-        counts: { byPerson: { 'p-ceo': 1 }, byAgent: { 'a-dsn': 1 }, total: 1 },
+        counts: { byPerson: { 'p-ceo': 2 }, byAgent: { 'a-dsn': 1, 'a-orch': 1 }, total: 2 },
       };
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(payload) });
+    }
+    if (url.pathname === `/api/proposals/${propId}/materials`) {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          materialRevision: 2,
+          materialDigest: propDigest,
+          common: [{
+            id: propDocId,
+            name: 'План структуры компании.md',
+            kind: 'document',
+            format: 'markdown',
+            state: 'available',
+            contentUrl: `/api/proposals/${propId}/materials/${propDocId}/content`,
+            downloadUrl: null,
+            size: 196,
+            sha256: '9'.repeat(64),
+            mediaType: 'text/markdown',
+          }],
+          options: [],
+        }),
+      });
+    }
+    if (url.pathname === `/api/proposals/${propId}/materials/${propDocId}/content`) {
+      return route.fulfill({
+        status: 200,
+        contentType: 'text/markdown; charset=utf-8',
+        body: '## План структуры\n\nИсходный документ предложения: отдел поддержки клиентов.\n\nКОНЕЦ_ПЛАНА',
+      });
     }
     if (url.pathname === `/api/requests/${reqId}/materials`) {
       return route.fulfill({
@@ -848,4 +896,26 @@ test('renders real 2-page PDF via bundled pdfjs-dist without OpenAction or exter
   await expect(dialog.getByRole('alert')).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(card.getByLabel(ru.tasks.choiceNote)).toHaveValue(draft);
+
+  /* 5. Native stamped structure proposal rendered via Tasks.tsx opens sealed MaterialViewer with zero POSTs, then submits stamp. */
+  await page.getByRole('button', { name: /План структуры компании\.md/ }).click();
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText('КОНЕЦ_ПЛАНА');
+  await expect(dialog).toContainText(ru.tasks.materials.proposalNote);
+  await expect(dialog.getByRole('button', { name: ru.card.create(1) })).toHaveCount(0);
+  await saveShot(page, info, `viewer-native-proposal-ru-dark-1440-${SOURCE_SHA.slice(0, 8)}.png`, true);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  expect(posts).toEqual([]);
+
+  await page.getByRole('button', { name: ru.card.create(1) }).click();
+  await expect.poll(() => posts).toEqual([{
+    url: '/api/departments/build',
+    body: {
+      proposalId: propId,
+      materialRevision: 2,
+      materialDigest: propDigest,
+      items: [{ template: 'support', note: 'Поддержка клиентов.' }],
+    },
+  }]);
 });

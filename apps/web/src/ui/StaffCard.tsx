@@ -2,14 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { errorText, useLanguage, useT, type Language, type Messages } from '../i18n';
 import { PROVIDER_NAMES } from '../providers';
-import type { DecidedBy, ProviderId, RoleOption, Roster, Serving, StaffLine } from '../types';
+import type { DecidedBy, MaterialStampView, ProviderId, RoleOption, Roster, Serving, StaffLine } from '../types';
 import { Decides, frozenBy } from './DecidedBy';
 import { ProposalMaterialsSection, useProposalCardPost, useProposalMaterials } from './RequestMaterials';
 
 type Props = {
   department: { id: string; name: string };
   /* The orchestrator's card; without it, the department's default roster by hand. */
-  proposal?: { id: string; brief: string; people: StaffLine[] };
+  proposal?: MaterialStampView & { id: string; brief: string; people: StaffLine[] };
   onCorrect?(): void;
   /* Called once the people are hired. */
   onDone?(): void;
