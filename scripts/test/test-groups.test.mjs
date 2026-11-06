@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, relative } from 'node:path';
 import { before, test } from 'node:test';
 import { fileURLToPath, URL } from 'node:url';
-import { selectTests } from '../author-check/select.mjs';
+import { realPorts } from '../author-check/main.mjs';
+import { fastSuites, selectTests } from '../author-check/select.mjs';
+import { runStages } from '../author-check/stages.mjs';
 import { selectionPorts, tracked } from '../author-check/wired.mjs';
 
 /* The real test environment, the real selector and the real import graph: what a change of each group runs. */
@@ -60,12 +64,18 @@ test('a change a person sees names the browser scenarios of its screen, says whe
   assert.deepEqual(await named('apps/web/e2e/api.ts'), ['browser helper, its scenarios run at the release: apps/web/e2e/api.ts']);
   assert.deepEqual(await named('apps/web/src/ui/AgentTerminal.tsx'), ['browser scenario: apps/web/e2e/agent-terminal-fit.spec.ts']);
   assert.deepEqual(await named('apps/web/src/App.tsx'), ['browser scenario by hand, none is named after: apps/web/src/App.tsx']);
+  assert.deepEqual(await named('apps/web/src/theme.css'), ['browser scenario by hand, none is named after: apps/web/src/theme.css']);
   assert.deepEqual(await named('apps/server/src/modules/tasks/wait-policy.ts'), []);
 });
 
 test('a file moved into the scenarios still runs the tests of where it was', { timeout: 60_000 }, async () => {
   const selection = await select([{ kind: 'renamed', previousPath: 'apps/web/src/ui/AgentTerminal.tsx', path: 'apps/web/e2e/moved.ts' }]);
   assert.deepEqual(suites(selection), ['web']);
+});
+
+test('a renamed screen still names the scenarios of its old name', { timeout: 60_000 }, async () => {
+  const selection = await select([{ kind: 'renamed', previousPath: 'apps/web/src/ui/AgentTerminal.tsx', path: 'apps/web/src/ui/Console.tsx' }]);
+  assert.ok(selection.notes.includes('browser scenario: apps/web/e2e/agent-terminal-fit.spec.ts'), selection.notes.join('\n'));
 });
 
 test('a new test only the final profile runs does not stop the check, and says where it runs', { timeout: 60_000 }, async () => {
@@ -79,6 +89,28 @@ test('a new test only the final profile runs does not stop the check, and says w
 test('the shared protocol takes every suite without being asked, unless another path asks for everything by itself', { timeout: 60_000 }, async () => {
   const modified = path => ({ path, kind: 'modified' });
   assert.deepEqual(suites(await select(['packages/protocol/src/index.ts', 'apps/server/drizzle/0075_internal_first_questions.sql'].map(modified))), ALL);
+  for (const paths of [['Dockerfile', 'packages/protocol/src/index.ts'], ['packages/protocol/src/index.ts', 'Dockerfile'], ['apps/node/src/test-impact.ts', 'packages/protocol/src/index.ts']]) {
+    assert.deepEqual(suites(await select(paths.map(modified))), ALL, paths.join(' + '));
+  }
   assert.equal((await select(['package.json', 'packages/protocol/package.json'].map(modified))).unavailable, 'selection_is_whole_suite');
   assert.equal((await runs('package.json')).unavailable, 'selection_is_whole_suite');
+});
+
+/* The real command of a real suite: the fake ports of the check's own tests cannot tell that its config asks for more. */
+async function ranFiles(t, selection) {
+  const tmp = mkdtempSync(join(tmpdir(), 'hh-groups-'));
+  t.after(() => rmSync(tmp, { recursive: true, force: true }));
+  let output = '';
+  const real = { ...realPorts(root, text => { output += text; }), mkdir: () => {} };
+  const plan = { sha: 'a'.repeat(40), base: 'b'.repeat(40), changes: [], hunks: {}, grown: {} };
+  const result = await runStages({ sha: plan.sha, tmp, scripts: {}, suites: fastSuites(manifest).map(suite => ({ ...suite, finalChecks: [] })), plan, selection }, real);
+  assert.equal(result.stages.find(stage => stage.name === 'tests').status, 'passed', output);
+  return JSON.parse(readFileSync(join(tmp, 'tests-protocol.json'), 'utf8')).testResults.map(item => relative(root, item.name)).sort();
+}
+
+test('the tests chosen run through the command of their real suite, and only they', { timeout: 120_000 }, async t => {
+  const file = 'packages/protocol/test/test-environment.test.ts';
+  assert.deepEqual(await ranFiles(t, { packages: [{ packageId: 'protocol', mode: 'related', units: [{ file }] }], notes: [] }), [file]);
+  const whole = await runs(file);
+  assert.deepEqual(await ranFiles(t, whole), whole.packages[0].units.map(unit => unit.file).sort());
 });

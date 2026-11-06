@@ -7,7 +7,8 @@ const PROJECT_SUITES = {
 const ONLY_A_NOTE = 'migration_check_unsupported';
 const E2E = 'apps/web/e2e/';
 const SPEC = '.spec.ts';
-const SCREEN = /^apps\/web\/src\/(?:.*\/)?([^/]+)\.tsx$/;
+const SCREEN = /^apps\/web\/src\/(?:.*\/)?([^/]+)\.(?:tsx|css)$/;
+const CONSUMERS = 'policy_consumers';
 
 export function adapterOf(run) {
   if (run.args.includes('vitest')) return 'vitest';
@@ -64,9 +65,10 @@ function isWholeSuite(packages, suites) {
   return suites.every(suite => packages.some(item => item.packageId === suite.id && item.mode === 'whole-package'));
 }
 
-/* A shared package reaches everyone who uses it, so its whole selection needs no asking. Another path that takes every suite by itself still asks. */
+/* A shared package reaches everyone who uses it, so its whole selection needs no asking. Another path that takes every suite by itself still asks; one that only found the consumers of the change does not. */
 function reachesEveryone(packages) {
-  const everywhere = (packages[0]?.reasons ?? []).filter(reason => packages.every(item => item.reasons?.some(other => other.path === reason.path)));
+  const own = item => (item.reasons ?? []).filter(reason => reason.code !== CONSUMERS);
+  const everywhere = own(packages[0] ?? {}).filter(reason => packages.every(item => own(item).some(other => other.path === reason.path)));
   const shared = new Set(everywhere.filter(reason => reason.code === 'shared_package').map(reason => reason.path));
   return shared.size > 0 && everywhere.every(reason => shared.has(reason.path));
 }
@@ -86,7 +88,7 @@ function browserNote(path, specs) {
 
 function browserNotes(changes, tracked) {
   const specs = tracked.map(file => file.path).filter(path => path.startsWith(E2E) && path.endsWith(SPEC));
-  return [...new Set(changes.flatMap(change => browserNote(change.path, specs)))];
+  return [...new Set(changes.flatMap(change => [change.path, change.previousPath ?? change.path]).flatMap(path => browserNote(path, specs)))];
 }
 
 /* The tests only a later profile than this one runs. */
