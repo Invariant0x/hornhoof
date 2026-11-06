@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { agentEvents, agents, companies, departments, jobs, people, subscriptions, tasks } from '../src/db/schema.js';
-import { answer, ask, comment, createTask, report, submit, verdict } from '../src/modules/tasks/engine.js';
+import { answer, comment, createTask, report, submit, verdict } from '../src/modules/tasks/engine.js';
 import { wordsForTurn } from '../src/modules/conversation/turn-words.js';
 import { said } from '../src/modules/conversation/live.js';
 import { BUILTIN } from '../src/modules/nodes/hub.js';
@@ -12,7 +12,7 @@ import { wakeAll, wakeLeftBehind } from '../src/modules/tasks/wake.js';
 import { messageHeading } from '../src/modules/conversation/prompt.js';
 import { decisionPrincipal } from '../src/modules/conversation/decision-context.js';
 import { appendEvent, listEvents } from '../src/modules/events/store.js';
-import { setUpCompany, testApp } from './helpers.js';
+import { askedOfPerson, setUpCompany, testApp } from './helpers.js';
 
 async function fixture() {
   const { app, db } = await testApp();
@@ -54,7 +54,7 @@ describe('recorded action authors', () => {
   it.each([true, false])('attributes an approval decision (%s) to the recorded person', async approve => {
     const c = await fixture();
     const task = await c.make();
-    const requested = await ask(c.app.ctx, c.worker.id, task.id, { kind: 'approval', text: 'Approve release?', commit: 'a'.repeat(40) });
+    const requested = await askedOfPerson(c.app.ctx, c.worker.id, task.id, { kind: 'approval', text: 'Approve release?', commit: 'a'.repeat(40) });
     const moved = await answer(c.app.ctx, { personId: c.ceo.id }, requested.request.id, { approve });
     await wakeAll(c.app.ctx, moved.wakes);
     attributed((await c.notices(c.worker.id))[0]!, 'Ivan', approve ? 'approved' : 'declined');
@@ -63,7 +63,7 @@ describe('recorded action authors', () => {
   it('attributes a free text answer without trusting names in its text', async () => {
     const c = await fixture();
     const task = await c.make();
-    const requested = await ask(c.app.ctx, c.worker.id, task.id, { kind: 'question', text: 'Which currency?' });
+    const requested = await askedOfPerson(c.app.ctx, c.worker.id, task.id, { kind: 'question', text: 'Which currency?' });
     await wakeAll(c.app.ctx, (await answer(c.app.ctx, { personId: c.ceo.id }, requested.request.id, { answer: 'Hana says USD.' })).wakes);
     attributed((await c.notices(c.worker.id))[0]!, 'Ivan', 'answered');
   });

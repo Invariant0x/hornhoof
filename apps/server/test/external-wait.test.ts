@@ -14,7 +14,7 @@ import { discardStaleTurn } from '../src/modules/tasks/wake-state.js';
 import { checkExternalWaits, waitFor } from '../src/modules/tasks/external-wait.js';
 import { insertTurn } from '../src/modules/conversation/queue.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
-import { as, connectNode, listen, mcp, setUpCompany, testApp, until } from './helpers.js';
+import { allBeforePerson, as, connectNode, listen, mcp, setUpCompany, testApp, until } from './helpers.js';
 
 const NODE_KEY = 'external-wait-test-node-key-0123456789abcdef';
 
@@ -410,6 +410,7 @@ describe('external task wait', () => {
     expect(result.isError).toBeFalsy();
     const another = await (await c.tools()).callTool({ name: 'ask_person', arguments: { task: task.number, question: 'Which region?', topic: 'task' } });
     expect(another.isError).toBeFalsy();
+    await allBeforePerson(c, task.id);
     await c.wait(task.number, 'Images', new Date(Date.now() + 3_600_000).toISOString());
     const [request] = await c.db.select().from(requests).where(eq(requests.taskId, task.id));
     const response = await c.app.inject({ method: 'POST', url: `/api/requests/${request!.id}`, payload: { answer: 'The images are ready.' }, ...as(c.owner) });

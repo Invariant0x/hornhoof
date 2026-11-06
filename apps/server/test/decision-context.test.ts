@@ -13,7 +13,7 @@ import { appendEvent, appendOutgoing, earlierTalk, listEvents } from '../src/mod
 import { BUILTIN } from '../src/modules/nodes/hub.js';
 import { answerDirectly, ask, createTask } from '../src/modules/tasks/engine.js';
 import { logTurnFact } from '../src/modules/tasks/turn-log.js';
-import { as, invitePerson, listen, mcp, setUpCompany, testApp, until } from './helpers.js';
+import { as, askedOfPerson, invitePerson, listen, mcp, setUpCompany, testApp, until } from './helpers.js';
 
 const TOKEN = 'tool-token-decisions-0123456789abcdef';
 type Say = Extract<ServerMessage, { type: 'agent.say' }>;
@@ -50,7 +50,7 @@ async function company() {
   /* Words into the orchestrator's turn, kept as the window keeps them. */
   const wrote = async (personId: string | null, text = 'Go on.', extra: Record<string, unknown> = {}) =>
     (await appendEvent(ctx, { companyId: acme!.id, agentId: orchestrator!.id, jobId: job!.id, kind: 'message', data: { text, ...extra }, personId })).seq;
-  const asking = async (q: Parameters<typeof ask>[3]) => (await ask(ctx, bruno.id, task.id, q)).request;
+  const asking = async (q: Parameters<typeof ask>[3]) => (await askedOfPerson(ctx, bruno.id, task.id, q)).request;
   const open = async (id: string) => (await db.select().from(requests).where(eq(requests.id, id)))[0]!.status === 'open';
   return { app, db, ctx, acme: acme!, sub: sub!, orchestrator: orchestrator!, dev: dev!, hana, bruno, task, job: job!, tokens, ids, wrote, asking, open };
 }

@@ -318,8 +318,8 @@ describe('tools a skill grants', () => {
     ]);
     await db.insert(jobs).values({ companyId: acme.id, subscriptionId: sub.id, agentId: bruno.id, taskId: task.id, kind: 'conversation', prompt: 'x', timeoutMs: 1, status: 'done', result: '', tail: 'This content can’t be shown.', startedAt: ago(50), finishedAt: ago(45) });
     await db.insert(requests).values([
-      { companyId: acme.id, taskId: task.id, agentId: bruno.id, kind: 'stuck', text: 'Ended 3 turns in a row on #1 without moving it.', createdAt: ago(44) },
-      { companyId: acme.id, taskId: task.id, agentId: bruno.id, kind: 'question', text: 'Which payment provider?', status: 'answered', answer: 'Stripe', createdAt: ago(120) },
+      { companyId: acme.id, taskId: task.id, agentId: bruno.id, audience: 'human', kind: 'stuck', text: 'Ended 3 turns in a row on #1 without moving it.', createdAt: ago(44) },
+      { companyId: acme.id, taskId: task.id, agentId: bruno.id, audience: 'human', kind: 'question', text: 'Which payment provider?', status: 'answered', answer: 'Stripe', createdAt: ago(120) },
       { companyId: acme.id, taskId: task.id, agentId: bruno.id, kind: 'approval', text: 'Approve the commit.', commit: 'a'.repeat(40), createdAt: ago(10) },
     ]);
     const recent = JSON.parse((await call(await mcp(app, TOKEN), 'failures', { hours: 6 })).content[0]!.text);

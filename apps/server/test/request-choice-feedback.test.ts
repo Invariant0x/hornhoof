@@ -4,8 +4,8 @@ import { agentEvents, agents, companies, departments, jobs, people, requests, se
 import { hashToken } from '../src/crypto/tokens.js';
 import { orchestratorDecisionHeaders, orchestratorHeaders } from '../src/auth/internal.js';
 import { appendEvent } from '../src/modules/events/store.js';
-import { answer, ask, createTask } from '../src/modules/tasks/engine.js';
-import { as, invitePerson, setUpCompany, testApp } from './helpers.js';
+import { answer, createTask } from '../src/modules/tasks/engine.js';
+import { as, askedOfPerson, invitePerson, setUpCompany, testApp } from './helpers.js';
 
 const FEEDBACK = 'Neither option fits. Keep the labels readable.';
 
@@ -19,7 +19,7 @@ async function company() {
   const [dev] = await db.insert(departments).values({ companyId: acme!.id, templateKey: 'development', roleCode: 'DEV' }).returning();
   const [worker] = await db.insert(agents).values({ companyId: acme!.id, departmentId: dev!.id, subscriptionId: sub!.id, kind: 'worker', name: 'Fran', roleKey: 'DEV-FE', model: '' }).returning();
   const task = (await createTask(app.ctx, { personId: ceo!.id }, { title: 'Choose a preview', brief: '', body: '', departmentId: dev!.id, assigneeAgentId: worker!.id, executor: true, gates: [] })).task;
-  const request = (await ask(app.ctx, worker!.id, task.id, { kind: 'choice', topic: 'task', text: 'Which shape?', options: [{ label: 'Round', image: null }, { label: 'Square', image: null }] })).request;
+  const request = (await askedOfPerson(app.ctx, worker!.id, task.id, { kind: 'choice', topic: 'task', text: 'Which shape?', options: [{ label: 'Round', image: null }, { label: 'Square', image: null }] })).request;
   const saved = async () => (await db.select().from(requests).where(eq(requests.id, request.id)))[0]!;
   const answered = () => db.select().from(taskEvents).where(and(eq(taskEvents.taskId, task.id), eq(taskEvents.kind, 'answered')));
   return { app, db, session, ceo: ceo!, orchestrator: orchestrator!, companyId: acme!.id, sub: sub!, dev: dev!, worker: worker!, task, request, saved, answered };
@@ -93,7 +93,7 @@ it('keeps a 4000-character feedback after trimming', async () => {
 
 it('requires explicit approval for an approval request', async () => {
   const c = await company();
-  const approval = (await ask(c.app.ctx, c.worker.id, c.task.id, { kind: 'approval', text: 'Approve this test commit?', commit: 'a'.repeat(40) })).request;
+  const approval = (await askedOfPerson(c.app.ctx, c.worker.id, c.task.id, { kind: 'approval', text: 'Approve this test commit?', commit: 'a'.repeat(40) })).request;
   const feedback = await c.app.inject({ method: 'POST', url: `/api/requests/${approval.id}`, payload: { answer: FEEDBACK }, ...as(c.session) });
   expect(feedback.statusCode).toBe(400);
   expect((await c.db.select().from(requests).where(eq(requests.id, approval.id)))[0]).toMatchObject({ status: 'open', answeredBy: null });
@@ -164,7 +164,7 @@ it('preserves delegated identity and audit and rejects stale delegation', async 
   expect(await c.saved()).toMatchObject({ status: 'answered', picked: null, answer: FEEDBACK, answeredBy: c.ceo.id, answeredByAgentId: c.orchestrator.id, answerJobId: job!.id, answerSourceSeq: seq });
   const [event] = await c.answered();
   expect(event).toMatchObject({ agentId: c.orchestrator.id, personId: null, text: FEEDBACK, data: { onBehalfOfPersonId: c.ceo.id, jobId: job!.id, sourceSeq: seq } });
-  const next = (await ask(c.app.ctx, c.worker.id, c.task.id, { kind: 'choice', text: 'Try again?', options: [{ label: 'One', image: null }, { label: 'Two', image: null }] })).request;
+  const next = (await askedOfPerson(c.app.ctx, c.worker.id, c.task.id, { kind: 'choice', text: 'Try again?', options: [{ label: 'One', image: null }, { label: 'Two', image: null }] })).request;
   await appendEvent(c.app.ctx, { companyId: c.companyId, agentId: c.orchestrator.id, jobId: job!.id, kind: 'message', data: { text: 'New words' }, personId: c.ceo.id });
   const stale = await c.app.inject({ method: 'POST', url: `/api/requests/${next.id}`, payload: { answer: FEEDBACK }, headers });
   expect(stale.statusCode).toBe(409);

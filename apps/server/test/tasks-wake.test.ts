@@ -5,9 +5,9 @@ import { agentEvents, agents, companies, departments, jobs, machines, nodes, pen
 import { agentState, enqueueTurn } from '../src/modules/conversation/queue.js';
 import { said } from '../src/modules/conversation/live.js';
 import { identityOf, type NodeIdentity } from '../src/modules/nodes/hub.js';
-import { answer, ask, blocked, cancel, comment, createTask, GOING_ON_TURNS, report, submit, updateTask } from '../src/modules/tasks/engine.js';
+import { answer, blocked, cancel, comment, createTask, GOING_ON_TURNS, report, submit, updateTask } from '../src/modules/tasks/engine.js';
 import { afterJob, SILENT_TURNS, startWork, typedTurn, wakeAll, wakeLeftBehind, wakePrompt } from '../src/modules/tasks/wake.js';
-import { as, connectNode, listen, setUpCompany, statements, testApp, until, type FakeNode } from './helpers.js';
+import { as, askedOfPerson, beforePerson, connectNode, listen, setUpCompany, statements, testApp, type FakeNode, until } from './helpers.js';
 
 async function company(env?: NodeJS.ProcessEnv) {
   const { app, db } = await testApp(env);
@@ -67,6 +67,8 @@ describe('a person who speaks to an agent directly', () => {
 
   it("tells a stuck agent how to go on by typing into its terminal, and the task goes on", async () => {
     const c = await stuck();
+    const [note] = await c.db.select({ id: requests.id }).from(requests);
+    await beforePerson(c.ctx, note!.id);
     expect(await c.db.select({ status: tasks.status }).from(tasks).where(eq(tasks.id, c.task.id))).toEqual([{ status: 'waiting' }]);
     expect(await typedTurn(c.ctx, identityOf(c.sub, null)!, c.bruno.id, 'Run the tests first, then submit.', c.ceo.id)).not.toBeNull();
     expect(await requestsOf(c)).toEqual([{ kind: 'stuck', status: 'answered', answer: 'Run the tests first, then submit.', answeredBy: c.ceo.id }]);
@@ -91,8 +93,8 @@ describe('a person who speaks to an agent directly', () => {
     const { app, db, ceo, hire, task } = await withRepositories();
     const bruno = await hire('Bruno', null);
     const mine = await task(bruno.id);
-    await ask(app.ctx, bruno.id, mine.id, { kind: 'question', text: 'EUR or USD?' });
-    await ask(app.ctx, bruno.id, mine.id, { kind: 'approval', text: 'Merge it?', commit: 'a'.repeat(40) });
+    await askedOfPerson(app.ctx, bruno.id, mine.id, { kind: 'question', text: 'EUR or USD?' });
+    await askedOfPerson(app.ctx, bruno.id, mine.id, { kind: 'approval', text: 'Merge it?', commit: 'a'.repeat(40) });
     const [me] = await db.select().from(people);
     await until(async () => (await agentState(app.ctx, bruno.id)).ready);
     expect((await app.inject({ method: 'POST', url: `/api/agents/${bruno.id}/messages`, payload: { text: 'EUR only.' }, ...as(ceo) })).statusCode).toBe(202);
@@ -451,16 +453,16 @@ describe("Hornhoof's note that a task stands still", () => {
     const c = await stuck();
     await c.db.update(requests).set({ status: 'answered' });
     await c.db.update(tasks).set({ status: 'working' }).where(eq(tasks.id, c.task.id));
-    await ask(c.ctx, c.bruno.id, c.task.id, { kind: 'question', text: 'EUR or USD?' });
+    await askedOfPerson(c.ctx, c.bruno.id, c.task.id, { kind: 'question', text: 'EUR or USD?' });
     await expect(submit(c.ctx, c.bruno.id, c.task.id, { summary: 'Done.', evidence: 'npm test' })).rejects.toThrow(/waits for a person's answer/);
   });
 
-  it('asks the orchestrator to put the note into plain words for people', async () => {
+  it('asks whoever has it inside the company how it goes on', async () => {
     const c = await stuck();
-    const [note] = await c.db.select({ id: requests.id }).from(requests);
-    const asked = (await c.turnsOf(c.orchestrator.id)).filter(j => j.prompt.includes(note!.id));
+    const [note] = await c.db.select({ id: requests.id, triageAgentId: requests.triageAgentId }).from(requests);
+    const asked = (await c.turnsOf(note!.triageAgentId!)).filter(j => j.prompt.includes(note!.id));
     expect(asked).toHaveLength(1);
-    expect(asked[0]!.prompt).toContain('explain_request');
+    expect(asked[0]!.prompt).toContain('resolve_question');
   });
 
   it('wakes whoever holds the task now when a person says try again', async () => {
@@ -468,6 +470,7 @@ describe("Hornhoof's note that a task stands still", () => {
     /* Handed on before Hornhoof let such notes go. */
     await c.db.update(tasks).set({ executorAgentId: c.kai.id, assigneeAgentId: c.kai.id }).where(eq(tasks.id, c.task.id));
     const [note] = await c.db.select({ id: requests.id }).from(requests);
+    await beforePerson(c.ctx, note!.id);
     const { wakes } = await answer(c.ctx, { personId: c.ceo.id }, note!.id, { retry: true });
     expect(wakes.map(w => w.agentId)).toEqual([c.kai.id]);
   });

@@ -6,14 +6,17 @@ import { modelChecks, outboundAccounts, outboundApprovals, outboundBindings, out
 import { approvalNeed, authorityFingerprint } from '../src/modules/outbound/approvals.js';
 import { admit, recordReview, reserveDispatch } from '../src/modules/outbound/core.js';
 import { ask } from '../src/modules/tasks/engine.js';
-import { as } from './helpers.js';
+import { as, beforePerson } from './helpers.js';
 import { binding as checkBinding } from './model-check-fixture.js';
 import { sha } from './outbound-fixture.js';
 import { aPolicyOf, dispatched, published, QUIET, world, type World } from './outbound-world.js';
 
 const NOON = new Date('2026-11-06T12:00:00.000Z');
 const APPROVAL_REQUIRED = { kind: 'refused', reasonCodes: ['approval_required'] };
-const answerAs = (w: World, token: string, id: string, approve: boolean) => w.c.app.inject({ method: 'POST', url: `/api/requests/${id}`, payload: { approve }, ...as(token) });
+const answerAs = async (w: World, token: string, id: string, approve: boolean) => {
+  await beforePerson(w.c, id);
+  return w.c.app.inject({ method: 'POST', url: `/api/requests/${id}`, payload: { approve }, ...as(token) });
+};
 const openRequests = (w: World) => w.c.db.select().from(requests).where(eq(requests.status, 'open'));
 const bindingsOf = (w: World) => w.c.db.select().from(outboundApprovals);
 const statusOf = async (w: World, id: string) => (await w.messageOf(id)).status;

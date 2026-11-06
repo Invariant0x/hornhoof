@@ -1,9 +1,12 @@
 import { randomUUID } from 'node:crypto';
+import type { QuestionClassificationInput } from '@hornhoof/protocol';
 import type { WaitPlan } from '@hornhoof/protocol/waits';
 import { and, asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agents, companies, departments, people, subscriptions, taskEvents, tasks, taskWaits, waitPolicies } from '../src/db/schema.js';
-import { answer, ask, cancel, createTask, leaveWork, report, submit, updateTask, verdict, type Task } from '../src/modules/tasks/engine.js';
+import { agents, companies, departments, jobs, people, subscriptions, taskEvents, tasks, taskWaits, waitPolicies } from '../src/db/schema.js';
+import { answer, ask, cancel, createTask, leaveWork, report, submit, updateTask, verdict, type Request, type Task } from '../src/modules/tasks/engine.js';
+import { approvalDigest, classifyInternal } from '../src/modules/tasks/question-lifecycle.js';
+import { questionSourceKey } from '../src/modules/tasks/wait-producers.js';
 import { waitFor } from '../src/modules/tasks/external-wait.js';
 import { afterSourceKey, recordRunWait, requestSourceKey, reviewSourceKey, waitForSourceKey } from '../src/modules/tasks/wait-state.js';
 import { setUpCompany, testApp } from './helpers.js';
@@ -37,7 +40,7 @@ async function company() {
     finalReview: { headAgentId: head.id, anchorAt: later(4), intervalMs: HOUR },
     ...change,
   });
-  return { ctx, db, companyId, CEO, ceo: ceo!, dev: dev!, ops: ops!, head, bruno, rita, task, policy, waitsOf, plan, hire };
+  return { ctx, db, companyId, CEO, ceo: ceo!, sub: sub!, dev: dev!, ops: ops!, head, bruno, rita, task, policy, waitsOf, plan, hire };
 }
 
 const reason = (p: Promise<unknown>) => p.then(() => 'ok', (err: { reason?: string }) => err.reason ?? String(err));
@@ -301,20 +304,35 @@ describe('a task at its gate', () => {
 });
 
 describe('a question to a person', () => {
+  const COMMIT = 'a'.repeat(40);
+  const envelope = { situation: 'A release is ready.', requiredAction: 'Approve it or decline it.', options: [] };
+
+  /* What the head who has a question does to put it before a person: nothing else gets it there. */
+  async function putBefore(c: Awaited<ReturnType<typeof company>>, request: Request, artifact: Extract<QuestionClassificationInput['classification'], { kind: 'ready_result' }>['artifact']) {
+    const [job] = await c.db.insert(jobs).values({ companyId: c.companyId, agentId: c.head.id, subscriptionId: c.sub.id, kind: 'conversation', prompt: 'Work.', status: 'running', startedAt: new Date(), timeoutMs: 1000 }).returning();
+    const input = { operationId: randomUUID(), source: { kind: 'task_request' as const, id: request.id }, expectedRevision: request.questionRevision, expectedRouteRevision: request.routeRevision, classification: { kind: 'ready_result' as const, artifact }, humanEnvelope: envelope };
+    await classifyInternal(c.ctx, { jobId: job!.id, agentId: c.head.id, companyId: c.companyId }, input);
+    await c.db.update(jobs).set({ status: 'done', finishedAt: new Date() }).where(eq(jobs.id, job!.id));
+  }
+  const persons = async (c: Awaited<ReturnType<typeof company>>, work: Task) => (await c.waitsOf(work)).filter(w => w.kind === 'person');
+
   it('answers to the person whose decision it is, and only its own answer ends it', async () => {
     const c = await company();
     await c.policy({ kind: 'person' });
     const work = await c.task('Work');
-    const one = await ask(c.ctx, c.bruno.id, work.id, { kind: 'question', text: 'Which?' });
-    const two = await ask(c.ctx, c.bruno.id, work.id, { kind: 'question', text: 'And which?' });
-    expect(await c.waitsOf(work)).toMatchObject([
+    const other = 'b'.repeat(40);
+    const one = await ask(c.ctx, c.bruno.id, work.id, { kind: 'approval', text: 'This one?', commit: COMMIT });
+    const two = await ask(c.ctx, c.bruno.id, work.id, { kind: 'approval', text: 'And this one?', commit: other });
+    await putBefore(c, one.request, { kind: 'commit', sha: COMMIT });
+    await putBefore(c, two.request, { kind: 'commit', sha: other });
+    expect(await persons(c, work)).toMatchObject([
       { kind: 'person', state: 'active', ownerPersonId: c.ceo.id, ownerAgentId: null }, { kind: 'person', state: 'active', ownerPersonId: c.ceo.id },
     ]);
-    await answer(c.ctx, c.CEO, one.request.id, { answer: 'This.' });
-    const rows = await c.waitsOf(work);
+    await answer(c.ctx, c.CEO, one.request.id, { approve: true });
+    const rows = await persons(c, work);
     const states = Object.fromEntries(rows.map(w => [w.sourceKey, w.state]));
-    expect(states).toEqual({ [requestSourceKey(one.request.id)]: 'resolved', [requestSourceKey(two.request.id)]: 'active' });
-    expect(rows.find(w => w.state === 'resolved')!.proofRef).toBe(`request:${one.request.id}:answered`);
+    expect(states).toEqual({ [questionSourceKey(one.request.id)]: 'resolved', [questionSourceKey(two.request.id)]: 'active' });
+    expect(rows.find(w => w.state === 'resolved')!.proofRef).toBe(`request:${one.request.id}:approved`);
   });
 
   it('goes to the department\'s named owner for what the department decides', async () => {
@@ -324,7 +342,8 @@ describe('a question to a person', () => {
     await c.db.update(departments).set({ ownerPersonId: ann!.id }).where(eq(departments.id, c.dev.id));
     const work = await c.task('Work');
     const asked = await ask(c.ctx, c.bruno.id, work.id, { kind: 'approval', text: 'Send it?', approval: { channel: 'message', kind: 'welcome email', amount: null }, topic: 'task' });
-    expect(await c.waitsOf(work)).toMatchObject([{ ownerPersonId: ann!.id, sourceKey: requestSourceKey(asked.request.id) }]);
+    await putBefore(c, asked.request, { kind: 'policy', digest: approvalDigest(asked.request) });
+    expect(await persons(c, work)).toMatchObject([{ ownerPersonId: ann!.id, sourceKey: questionSourceKey(asked.request.id) }]);
   });
 
   it('leaves an approval of a commit as it was asked: who may take it, its exact commit, and that the answer ends only its wait', async () => {
@@ -336,20 +355,20 @@ describe('a question to a person', () => {
     ]).returning();
     await c.db.update(departments).set({ ownerPersonId: ann!.id }).where(eq(departments.id, c.dev.id));
     const work = await c.task('Work');
-    const commit = 'a'.repeat(40);
-    const asked = await ask(c.ctx, c.bruno.id, work.id, { kind: 'approval', text: 'Release?', commit });
-    expect(asked.request).toMatchObject({ commit, status: 'open', decisionTopic: 'release' });
-    expect(await c.waitsOf(work)).toMatchObject([{ ownerPersonId: ann!.id }]);
+    const asked = await ask(c.ctx, c.bruno.id, work.id, { kind: 'approval', text: 'Release?', commit: COMMIT });
+    expect(asked.request).toMatchObject({ commit: COMMIT, status: 'open', decisionTopic: 'release' });
+    await putBefore(c, asked.request, { kind: 'commit', sha: COMMIT });
+    expect(await persons(c, work)).toMatchObject([{ ownerPersonId: ann!.id }]);
     expect(await reason(answer(c.ctx, { personId: zed!.id }, asked.request.id, { approve: true }))).toBe('decision_not_allowed');
-    expect(await c.waitsOf(work)).toMatchObject([{ state: 'active' }]);
+    expect(await persons(c, work)).toMatchObject([{ state: 'active' }]);
     const answered = await answer(c.ctx, { personId: ann!.id }, asked.request.id, { approve: true });
-    expect(answered.request).toMatchObject({ commit, status: 'approved', answeredBy: ann!.id });
-    expect(await c.waitsOf(work)).toMatchObject([{ state: 'resolved', proofRef: `request:${asked.request.id}:approved` }]);
+    expect(answered.request).toMatchObject({ commit: COMMIT, status: 'approved', answeredBy: ann!.id });
+    expect(await persons(c, work)).toMatchObject([{ state: 'resolved', proofRef: `request:${asked.request.id}:approved` }]);
   });
 
   it('ends with the question when it is taken back, and with the task when it closes', async () => {
     const c = await company();
-    await c.policy({ kind: 'person' });
+    await c.policy({ kind: 'external' });
     const work = (await createTask(c.ctx, c.CEO, { title: 'Dept', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.head.id })).task;
     await report(c.ctx, c.head.id, work.id, { done: false, summary: 'Stuck.' });
     const [first] = await c.waitsOf(work);
@@ -357,20 +376,21 @@ describe('a question to a person', () => {
     await report(c.ctx, c.head.id, now!.id, { done: false, summary: 'Stuck still.' });
     const rows = await c.waitsOf(work);
     expect(rows.map(w => w.state)).toEqual(['cancelled', 'active']);
-    expect(rows[0]!.proofRef).toBe(`${first!.sourceKey}:withdrawn`);
+    expect(rows[0]!.proofRef).toBe(`request:${first!.sourceKey.slice('question:'.length)}:withdrawn`);
     await cancel(c.ctx, c.CEO, work.id, 'Not needed.');
     expect((await c.waitsOf(work)).map(w => w.state)).toEqual(['cancelled', 'cancelled']);
   });
 
-  it('in a department with no policy keeps its owner with no dates, and is refused whole where dates are set for others', async () => {
+  it('with no dates of its own is kept with who has it, where a department set dates for others as well: no question is lost', async () => {
     const c = await company();
     const work = await c.task('Work');
     await ask(c.ctx, c.bruno.id, work.id, { kind: 'question', text: 'Which?' });
-    expect(await c.waitsOf(work)).toMatchObject([{ state: 'legacy_needs_plan', ownerPersonId: c.ceo.id, ownerDueAt: null }]);
+    expect(await c.waitsOf(work)).toMatchObject([{ state: 'legacy_needs_plan', ownerAgentId: c.head.id, ownerDueAt: null }]);
     await c.policy({ kind: 'review' });
     const other = await c.task('Other');
-    expect(await reason(ask(c.ctx, c.bruno.id, other.id, { kind: 'question', text: 'Which?' }))).toBe('task_invalid');
-    expect((await c.db.select().from(tasks).where(eq(tasks.id, other.id)))[0]).toMatchObject({ status: 'open', version: other.version });
+    await ask(c.ctx, c.bruno.id, other.id, { kind: 'question', text: 'Which?' });
+    expect(await c.waitsOf(other)).toMatchObject([{ state: 'legacy_needs_plan', ownerAgentId: c.head.id, ownerDueAt: null }]);
+    expect((await c.db.select().from(tasks).where(eq(tasks.id, other.id)))[0]).toMatchObject({ status: 'waiting' });
   });
 
   it('takes a promise in place of a policy', async () => {
@@ -381,12 +401,13 @@ describe('a question to a person', () => {
     expect(await c.waitsOf(work)).toMatchObject([{ state: 'active', plan: { provenance: { kind: 'explicit_promise' } } }]);
   });
 
-  it('never refuses what Hornhoof asks by itself, or an owner who says a person must unblock it', async () => {
+  it('never refuses what Hornhoof asks by itself, or a head who says it cannot go on, and that goes to the orchestrator', async () => {
     const c = await company();
     await c.policy({ kind: 'review' });
     const work = (await createTask(c.ctx, c.CEO, { title: 'Dept', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.head.id })).task;
     await report(c.ctx, c.head.id, work.id, { done: false, summary: 'Stuck.' });
-    expect(await c.waitsOf(work)).toMatchObject([{ kind: 'person', state: 'legacy_needs_plan', ownerPersonId: c.ceo.id }]);
+    const [orchestrator] = await c.db.select().from(agents).where(eq(agents.kind, 'orchestrator'));
+    expect(await c.waitsOf(work)).toMatchObject([{ kind: 'external', state: 'legacy_needs_plan', ownerAgentId: orchestrator!.id, ownerPersonId: null }]);
   });
 });
 

@@ -8,6 +8,7 @@ import { agents, departments, requestInternal, requests, tasks } from '../../db/
 import { ApiError, loggable } from '../../errors.js';
 import { jobOf, type ToolJob } from '../tools/job.js';
 import { picturesOf } from './attachments.js';
+import type { Request } from './engine.js';
 import { answerInternal, approvalDigest, claimQuestion, classifyInternal, ResolveInput, RouteInput, routeInternal, type Settled } from './question-lifecycle.js';
 import { wakeAll } from './wake.js';
 
@@ -40,6 +41,22 @@ async function questionsOf(db: Ctx['db'], job: Pick<ToolJob, 'agentId' | 'compan
   return and(inside, or(mine, inArray(tasks.departmentId, [job.departmentId, ...products.map(p => p.id)])));
 }
 
+const afterCursor = (from: ReturnType<typeof decoded>) => (from ? or(gt(requests.createdAt, new Date(from.at)), and(eq(requests.createdAt, new Date(from.at)), gt(requests.id, from.id))) : undefined);
+
+const nextCursor = (rows: { request: Request }[]): string | null => {
+  const last = rows[PAGE - 1];
+  return rows.length > PAGE && last ? encoded({ at: last.request.createdAt.toISOString(), id: last.request.id }) : null;
+};
+
+const approvalOf = (r: Request) => (r.approvalChannel ? { channel: r.approvalChannel, kind: r.approvalKind, amount: r.approvalAmount, digest: approvalDigest(r) } : null);
+
+type QuestionRow = { request: Request; task: { id: string; number: number; title: string }; asker: { id: string; name: string }; words: string | null };
+
+const questionLine = ({ request: r, task, asker, words }: QuestionRow, images: unknown[]) => ({
+  source: { kind: 'task_request' as const, id: r.id }, kind: r.kind, text: words ?? r.text, revision: r.questionRevision, routeRevision: r.routeRevision, triageAgentId: r.triageAgentId,
+  task, asker, commit: r.commit, options: r.options, link: r.link, images, topic: r.decisionTopic, approval: approvalOf(r), at: r.createdAt.toISOString(),
+});
+
 export async function internalQuestions(ctx: Ctx, job: ToolJob, after?: string) {
   const from = decoded(after);
   const rows = await ctx.db
@@ -48,19 +65,12 @@ export async function internalQuestions(ctx: Ctx, job: ToolJob, after?: string) 
     .innerJoin(tasks, eq(tasks.id, requests.taskId))
     .innerJoin(agents, eq(agents.id, requests.agentId))
     .leftJoin(requestInternal, eq(requestInternal.requestId, requests.id))
-    .where(and(await questionsOf(ctx.db, job), from ? or(gt(requests.createdAt, new Date(from.at)), and(eq(requests.createdAt, new Date(from.at)), gt(requests.id, from.id))) : undefined))
+    .where(and(await questionsOf(ctx.db, job), afterCursor(from)))
     .orderBy(asc(requests.createdAt), asc(requests.id))
     .limit(PAGE + 1);
   const page = rows.slice(0, PAGE);
   const pictures = await picturesOf(ctx.db, page.map(r => r.request));
-  const last = page.at(-1);
-  return {
-    questions: page.map(({ request: r, task, asker, words }) => ({
-      source: { kind: 'task_request' as const, id: r.id }, kind: r.kind, text: words ?? r.text, revision: r.questionRevision, routeRevision: r.routeRevision, triageAgentId: r.triageAgentId,
-      task, asker, commit: r.commit, options: r.options, link: r.link, images: pictures.get(r.id) ?? [], topic: r.decisionTopic, approval: r.approvalChannel ? { channel: r.approvalChannel, kind: r.approvalKind, amount: r.approvalAmount, digest: approvalDigest(r) } : null, at: r.createdAt.toISOString(),
-    })),
-    next: rows.length > PAGE && last ? encoded({ at: last.request.createdAt.toISOString(), id: last.request.id }) : null,
-  };
+  return { questions: page.map(row => questionLine(row, pictures.get(row.request.id) ?? [])), next: nextCursor(rows) };
 }
 
 const call = (job: Pick<ToolJob, 'id' | 'agentId' | 'companyId'>) => ({ jobId: job.id, agentId: job.agentId, companyId: job.companyId });

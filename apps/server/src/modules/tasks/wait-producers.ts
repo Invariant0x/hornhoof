@@ -145,12 +145,20 @@ async function keepRecovery(tx: Tx, request: Request, reason: QuestionRecoveryIn
 
 const kindOfQuestion = (request: Pick<Request, 'audience'>): 'external' | 'person' => (request.audience === 'human' ? 'person' : 'external');
 
-/* With no dates the wait keeps what is known of it; another comes to answer for it without a plan by name alone. */
-async function withoutDates(tx: Tx, source: { taskId: string; sourceKey: string; sourceRevision: number; ownerBinding: WaitOwnerBinding; actor: Actor }, kind: 'external' | 'person', task: Task): Promise<TaskWait> {
+const onRoute = (request: Pick<Request, 'id' | 'routeRevision'>) => `question:${request.id}:route:${request.routeRevision}`;
+
+/* A promise given stays under the new route. With none the wait keeps what is known of it: another who comes to answer for it on
+   the same route does so by name alone, and a new route is a new wait under its own revision. */
+async function withoutDates(tx: Tx, source: { taskId: string; sourceKey: string; sourceRevision: number; ownerBinding: WaitOwnerBinding; actor: Actor }, kind: 'external' | 'person', task: Task, proofRef: string): Promise<TaskWait> {
   const last = await lastOfSource(tx, task, kind, source.sourceKey);
-  if (!last || last.endedAt !== null) return recordLegacyWait(tx, { ...source, kind, sourceState: {} });
-  await moveWaitOwner(tx, last, source.ownerBinding, source.actor);
-  return (await lastOfSource(tx, task, kind, source.sourceKey))!;
+  const open = last?.endedAt === null ? last : null;
+  if (open?.plan) return syncSourceWaits(tx, { ...source, kind, sourceState: open.sourceState, plan: open.plan });
+  if (open?.sourceRevision === source.sourceRevision) {
+    await moveWaitOwner(tx, open, source.ownerBinding, source.actor);
+    return (await lastOfSource(tx, task, kind, source.sourceKey))!;
+  }
+  if (open) await endOpenSource(tx, { taskId: source.taskId, kind, sourceKey: source.sourceKey, outcome: 'superseded', proofRef, actor: source.actor });
+  return recordLegacyWait(tx, { ...source, kind, sourceState: {} });
 }
 
 /* Keeps the wait of a question as the question is now, read under its locks: of an agent while it stays inside, of a person
@@ -161,16 +169,18 @@ export async function syncQuestionWait(tx: Tx, guard: QuestionGuard & { plan?: W
   if (request.status !== 'open') throw sourceClosed();
   const kind = kindOfQuestion(request);
   const sourceKey = questionSourceKey(request.id);
-  await endOpenSource(tx, { taskId: task.id, kind: kind === 'person' ? 'external' : 'person', sourceKey, outcome: 'superseded', proofRef: `question:${request.id}:route:${request.routeRevision}`, actor: guard.actor });
+  const proofRef = onRoute(request);
+  await endOpenSource(tx, { taskId: task.id, kind: kind === 'person' ? 'external' : 'person', sourceKey, outcome: 'superseded', proofRef, actor: guard.actor });
   const ownerBinding = await ownerOfQuestion(tx, task, request);
   if (!ownerBinding) {
+    await endOpenSource(tx, { taskId: task.id, kind, sourceKey, outcome: 'superseded', proofRef, actor: guard.actor });
     await keepRecovery(tx, request, 'internal_route_unavailable');
     return null;
   }
   const plan = guard.plan ?? await policyPlan(tx, task, { kind, sourceKey, owner: ownerBinding, actor: guard.actor });
   await keepRecovery(tx, request, plan ? null : 'plan_unavailable');
   const source = { taskId: task.id, sourceKey, sourceRevision: request.routeRevision, ownerBinding, actor: guard.actor };
-  return plan ? syncSourceWaits(tx, { ...source, kind, sourceState: {}, plan }) : withoutDates(tx, source, kind, task);
+  return plan ? syncSourceWaits(tx, { ...source, kind, sourceState: {}, plan }) : withoutDates(tx, source, kind, task, proofRef);
 }
 
 /* Ends the wait of that one question, of the kind it waits as now; the question itself ends in the write that calls this. */

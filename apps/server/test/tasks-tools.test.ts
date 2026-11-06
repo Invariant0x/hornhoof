@@ -89,9 +89,9 @@ describe('task tools', () => {
   it('gives each kind of agent its task tools', async () => {
     const { orchestrator, head, bruno, tools } = await company();
     const names = async (agent: { id: string }) => (await (await tools(agent)).listTools()).tools.map(t => t.name).sort();
-    expect(await names(orchestrator)).toEqual(['add_api_key', 'add_plan_to_machine', 'add_tasks', 'answer_request', 'approval_policy', 'ask_computer_access', 'ask_person', 'build_structure', 'cancel_task', 'cancel_update', 'change_employee', 'change_orchestrator', 'change_person', 'check_updates', 'close_improvement', 'comment', 'company', 'computer', 'computer_result', 'connect_plans', 'database', 'disconnect_machine', 'edit_turn', 'escalate_missed_goal', 'explain_request', 'fire_employee', 'forget', 'hire', 'improvements', 'invite_again', 'invite_person', 'lend_machine', 'machine_command', 'merge_turn', 'message_employee', 'move_orchestrator', 'notebook', 'outbound_channel_create', 'outbound_channel_reopen', 'outbound_channel_stop', 'outbound_contact_suppress', 'outbound_options', 'outbound_policy_set', 'outbound_propose', 'outbound_status', 'outbound_submit', 'pipeline_report', 'plan_command', 'plan_turn', 'pool', 'propose_staff', 'propose_structure', 'remember', 'remove_public_link', 'remove_repository', 'remove_subscription', 'replan_wait', 'report', 'request_approval', 'reset_employee', 'resolve_goal_risk', 'rewrite_note', 'set_approval_policy', 'set_budget', 'set_department_owner', 'set_public_link', 'set_repository', 'set_team_urgent_only', 'set_urgent', 'set_wait_policy', 'staffing_options', 'stop_employee', 'task', 'tasks', 'test_subscription', 'turns', 'update_hornhoof', 'update_task', 'view', 'wait_for']);
-    expect(await names(head)).toEqual(['approval_policy', 'ask_person', 'blocked', 'cancel_task', 'comment', 'company', 'confirm_finding', 'create_task', 'end_wait', 'escalate_missed_goal', 'forget', 'improvements', 'message_employee', 'notebook', 'outbound_options', 'outbound_propose', 'outbound_status', 'outbound_submit', 'propose_improvement', 'remember', 'replan_wait', 'report', 'request_approval', 'resolve_goal_risk', 'rewrite_note', 'run_tests', 'run_work', 'stop_tests', 'stop_work', 'submit', 'task', 'tasks', 'tell_orchestrator', 'test_run', 'update_task', 'verdict', 'wait_for', 'work_run']);
-    expect(await names(bruno)).toEqual(['approval_policy', 'ask_person', 'blocked', 'comment', 'company', 'confirm_finding', 'end_wait', 'message_employee', 'outbound_options', 'outbound_propose', 'outbound_status', 'outbound_submit', 'replan_wait', 'request_approval', 'run_tests', 'run_work', 'stop_tests', 'stop_work', 'submit', 'task', 'tasks', 'test_run', 'verdict', 'wait_for', 'work_run']);
+    expect(await names(orchestrator)).toEqual(['add_api_key', 'add_plan_to_machine', 'add_tasks', 'answer_request', 'approval_policy', 'ask_computer_access', 'ask_person', 'build_structure', 'cancel_task', 'cancel_update', 'change_employee', 'change_orchestrator', 'change_person', 'check_updates', 'classify_human_intent', 'close_improvement', 'comment', 'company', 'computer', 'computer_result', 'connect_plans', 'database', 'disconnect_machine', 'edit_turn', 'escalate_missed_goal', 'explain_request', 'fire_employee', 'forget', 'hire', 'improvements', 'internal_questions', 'invite_again', 'invite_person', 'lend_machine', 'machine_command', 'merge_turn', 'message_employee', 'move_orchestrator', 'notebook', 'outbound_channel_create', 'outbound_channel_reopen', 'outbound_channel_stop', 'outbound_contact_suppress', 'outbound_options', 'outbound_policy_set', 'outbound_propose', 'outbound_status', 'outbound_submit', 'pipeline_report', 'plan_command', 'plan_turn', 'pool', 'propose_staff', 'propose_structure', 'remember', 'remove_public_link', 'remove_repository', 'remove_subscription', 'replan_wait', 'report', 'request_approval', 'reset_employee', 'resolve_goal_risk', 'resolve_question', 'rewrite_note', 'route_question', 'set_approval_policy', 'set_budget', 'set_department_owner', 'set_public_link', 'set_repository', 'set_team_urgent_only', 'set_urgent', 'set_wait_policy', 'staffing_options', 'stop_employee', 'task', 'tasks', 'test_subscription', 'turns', 'update_hornhoof', 'update_task', 'view', 'wait_for']);
+    expect(await names(head)).toEqual(['approval_policy', 'ask_person', 'blocked', 'cancel_task', 'classify_human_intent', 'comment', 'company', 'confirm_finding', 'create_task', 'end_wait', 'escalate_missed_goal', 'forget', 'improvements', 'internal_questions', 'message_employee', 'notebook', 'outbound_options', 'outbound_propose', 'outbound_status', 'outbound_submit', 'propose_improvement', 'remember', 'replan_wait', 'report', 'request_approval', 'resolve_goal_risk', 'resolve_question', 'rewrite_note', 'route_question', 'run_tests', 'run_work', 'stop_tests', 'stop_work', 'submit', 'task', 'tasks', 'tell_orchestrator', 'test_run', 'update_task', 'verdict', 'wait_for', 'work_run']);
+    expect(await names(bruno)).toEqual(['approval_policy', 'ask_person', 'blocked', 'classify_human_intent', 'comment', 'company', 'confirm_finding', 'end_wait', 'internal_questions', 'message_employee', 'outbound_options', 'outbound_propose', 'outbound_status', 'outbound_submit', 'replan_wait', 'request_approval', 'resolve_question', 'route_question', 'run_tests', 'run_work', 'stop_tests', 'stop_work', 'submit', 'task', 'tasks', 'test_run', 'verdict', 'wait_for', 'work_run']);
   });
 
   it("tells a head to give work to members, and to itself only when no member can do it", async () => {
@@ -179,13 +179,13 @@ describe('task tools', () => {
 });
 
 describe('asking a person', () => {
-  it('keeps the question as an outgoing message to its responsible person', async () => {
-    const { ctx, db, dev, head, bruno, ceo, tools } = await company();
+  it('keeps the question as an outgoing message to whoever has it inside', async () => {
+    const { ctx, db, dev, head, bruno, tools } = await company();
     const { task } = await createTask(ctx, { agentId: head.id }, { title: 'Checkout API', brief: '', body: '', departmentId: dev.id, assigneeAgentId: bruno.id, executor: true, gates: [] });
     const asked = await call(await tools(bruno), 'ask_person', { task: task.number, question: 'Which cards do we take?' });
     expect(asked.isError).toBeFalsy();
     const outgoing = (await listEvents(db, bruno.id, 0)).find(e => e.message?.direction === 'out');
-    expect(outgoing).toMatchObject({ kind: 'message', data: { text: 'Which cards do we take?' }, message: { direction: 'out', from: { kind: 'agent', id: bruno.id, agentKind: 'worker' }, to: { kind: 'person', id: ceo.id, name: 'Ivan', role: { en: 'CEO', ru: 'CEO' } } } });
+    expect(outgoing).toMatchObject({ kind: 'message', data: { text: 'Which cards do we take?' }, message: { direction: 'out', from: { kind: 'agent', id: bruno.id, agentKind: 'worker' }, to: { kind: 'agent', id: head.id } } });
   });
 
   it('keeps what the question is about, and takes no topic it does not know', async () => {
@@ -324,20 +324,20 @@ describe('dates through the tools', () => {
     expect(await c.db.select().from(taskWaits).where(eq(taskWaits.taskId, later.id))).toMatchObject([{ state: 'active' }]);
   });
 
-  it('takes a promise in ask_person and request_approval, and says the same refusal without one', async () => {
+  it('takes a promise in ask_person and request_approval, and keeps what comes with none, undated', async () => {
     const c = await company();
     await strict(c);
     const client = await c.tools(c.bruno);
     const work = (await createTask(c.ctx, { agentId: c.head.id }, { title: 'Work', brief: '', body: '', departmentId: c.dev.id, assigneeAgentId: c.bruno.id, executor: true, gates: [] })).task;
-    const refused = await call(client, 'ask_person', { task: work.number, question: 'Which?', topic: 'task' });
-    expect(refused.isError).toBe(true);
-    expect(text(refused)).toContain('sets dates for its waits');
-    expect(await c.db.select().from(requests).where(eq(requests.taskId, work.id))).toEqual([]);
+    const undated = await call(client, 'ask_person', { task: work.number, question: 'Which?', topic: 'task' });
+    expect(undated.isError, text(undated)).toBeFalsy();
     const asked = await call(client, 'ask_person', { task: work.number, question: 'Which?', topic: 'task', plan: promise(c) });
     expect(asked.isError, text(asked)).toBeFalsy();
     const approval = await call(client, 'request_approval', { task: work.number, channel: 'message', kind: 'welcome email', text: 'Send it?', plan: promise(c) });
     expect(approval.isError, text(approval)).toBeFalsy();
-    expect((await c.db.select().from(taskWaits).where(eq(taskWaits.taskId, work.id))).map(w => w.kind)).toEqual(['person', 'person']);
+    const waits = await c.db.select().from(taskWaits).where(eq(taskWaits.taskId, work.id));
+    expect(waits.map(w => w.kind)).toEqual(['external', 'external', 'external']);
+    expect(waits.map(w => w.state).sort()).toEqual(['active', 'active', 'legacy_needs_plan']);
   });
 });
 

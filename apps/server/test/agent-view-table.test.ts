@@ -4,8 +4,8 @@ import type { FastifyServerOptions, RouteOptions } from 'fastify';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { attachments, improvements, jobs, machines, tasks, testParts, testRuns, turns } from '../src/db/schema.js';
 import { addNote, companyBook, departmentBook } from '../src/modules/notebook/book.js';
-import { ask } from '../src/modules/tasks/engine.js';
-import { as, testApp } from './helpers.js';
+
+import { as, askedOfPerson, testApp } from './helpers.js';
 import { aclCompany, type AclCompany } from './agent-view-company.js';
 
 const captured = vi.hoisted(() => [] as RouteOptions[]);
@@ -118,6 +118,15 @@ const ELSEWHERE: Record<string, string> = {
   'POST /api/requests/:id': 'agent-view-lists.test.ts: the request authority, 403 otherwise',
   'POST /api/tasks': 'agent-view.test.ts: the answer is read as the person who gave it',
   'POST /api/requests/:id/explained': 'the orchestrator alone',
+  'GET /api/internal-intents': 'question-lifecycle.test.ts: a turn, by its job token; a person gets 401',
+  'POST /api/internal-intents/resolve': 'question-lifecycle.test.ts: the turn of whoever may settle it',
+  'POST /api/internal-intents/classify': 'question-lifecycle.test.ts: the turn of the head or the orchestrator',
+  'GET /api/tasks/:id/waits': 'wait-views.test.ts: as the task, with owners as the reader sees them',
+  'GET /api/wait-cards': 'wait-escalation.test.ts: each person their own cards',
+  'POST /api/wait-cards/:id/ack': 'wait-escalation.test.ts: the person of the card, 403 otherwise',
+  'POST /api/waits/:id/replan': 'wait-policy-routes.test.ts: who answers for it, 403 otherwise',
+  'GET /api/departments/:id/wait-policy': 'wait-policy-routes.test.ts: as the department',
+  'PUT /api/departments/:id/wait-policy/:kind': 'wait-policy-routes.test.ts: who may change the department, 403 otherwise',
 };
 
 /* Routes that show no agent and no work. Writes keep the rights they had; their answers name nothing of other agents. */
@@ -159,7 +168,7 @@ async function busy() {
     const task = await c.work(`Secret of ${agent.name}`, agent, agent.departmentId!);
     work[key] = task;
     await c.db.update(tasks).set({ turnId: turn!.id }).where(eq(tasks.id, task.id));
-    await ask(c.app.ctx, agent.id, task.id, { text: 'Please decide', kind: 'approval', approval: { channel: 'spend', kind: 'ads', amount: 1 } });
+    await askedOfPerson(c.app.ctx, agent.id, task.id, { text: 'Please decide', kind: 'approval', approval: { channel: 'spend', kind: 'ads', amount: 1 } });
     await c.db.insert(improvements).values({ companyId: c.companyId, agentId: agent.id, title: `Idea of ${agent.name}`, text: 'x' });
     await addNote(c.app.ctx, agent.departmentId === c.dev.id ? departmentBook(c.dev) : departmentBook(c.sales), `Note ${number}`, { personId: null, byOrchestrator: false, agentId: agent.id });
     await addNote(c.app.ctx, companyBook(c.companyId), `Company note ${number}`, { personId: null, byOrchestrator: false, agentId: agent.id });

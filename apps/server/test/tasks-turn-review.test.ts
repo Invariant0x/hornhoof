@@ -2,10 +2,10 @@ import { and, eq } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, companies, departments, jobs, people, subscriptions, taskEvents, tasks, taskWaits, teams, turns, waitPolicies } from '../src/db/schema.js';
-import { answer, ask, createTask, leaveWork, submit, verdict, type Moved } from '../src/modules/tasks/engine.js';
+import { answer, createTask, leaveWork, submit, verdict, type Moved } from '../src/modules/tasks/engine.js';
 import { taskDetail } from '../src/modules/tasks/views.js';
 import { resumeAgent, wakePrompt } from '../src/modules/tasks/wake.js';
-import { listen, mcp, setUpCompany, statements, testApp } from './helpers.js';
+import { askedOfPerson, listen, mcp, setUpCompany, statements, testApp } from './helpers.js';
 
 /* Development works in a repository in turn 4: Bruno and Kai build, Rita (Claude) and Rex (Codex) review code, Sid
    reviews security. */
@@ -273,7 +273,7 @@ describe('the review of a turn', () => {
     const { ctx, ceo, bruno, rita, rex, sid, member, merged, reviews } = await company();
     await merged(bruno.id, (await member(bruno.id, 'Checkout API')).id);
     const [review] = await reviews();
-    const { request } = await ask(ctx, rex!.id, review!.id, { kind: 'question', text: 'Is tax in scope?' });
+    const { request } = await askedOfPerson(ctx, rex!.id, review!.id, { kind: 'question', text: 'Is tax in scope?' });
     const { wakes } = await answer(ctx, { personId: ceo.id }, request.id, { answer: 'Yes.' });
     expect(wakes.map(w => [w.agentId, w.why, w.text]).sort()).toEqual([[rex!.id, 'answered', 'Yes.'], [rita!.id, 'turn_review', 'turn-4'], [sid!.id, 'turn_review', 'turn-4']].sort());
   });

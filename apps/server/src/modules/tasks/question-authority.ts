@@ -62,15 +62,21 @@ export type TriageActor = { agentId: string; role: 'head' | 'orchestrator' | 'tr
 
 const notAllowed = () => new ApiError(403, 'forbidden', 'This question is not yours to settle or to put before a person.', 'question_not_allowed');
 
-/* Who may act now, in the write that acts: a head of the place or the orchestrator, in a turn of theirs that is running. Whoever
-   it was handed to, as Operations may be, may settle it and nothing more. A person's words in the turn give no right here. */
-export async function requireTriage(tx: Tx, call: TriageCall, on: TriagePlace, may: 'resolve' | 'classify'): Promise<TriageActor> {
+/* The turn that calls, of an agent still here in this company, as the server knows it: a job token says no more than this. */
+async function liveTurn(tx: Tx, call: TriageCall, on: TriagePlace) {
   const [row] = await tx.select({ jobStatus: jobs.status, jobAgent: jobs.agentId, kind: agents.kind, departmentId: agents.departmentId, removedAt: agents.removedAt }).from(jobs)
     .innerJoin(agents, eq(agents.id, jobs.agentId))
     .where(and(eq(jobs.id, call.jobId), eq(jobs.companyId, on.companyId)));
   if (!row || row.jobStatus !== 'running' || row.jobAgent !== call.agentId || row.removedAt) throw notAllowed();
-  if (row.kind === 'orchestrator') return { agentId: call.agentId, role: 'orchestrator' };
-  if (row.kind === 'head' && (await placesOf(tx, on.departmentId)).includes(row.departmentId ?? '')) return { agentId: call.agentId, role: 'head' };
+  return row;
+}
+
+/* Who may act now, in the write that acts: a head of the place or the orchestrator, in a turn of theirs that is running. Whoever
+   it was handed to, as Operations may be, may settle it and nothing more. A person's words in the turn give no right here. */
+export async function requireTriage(tx: Tx, call: TriageCall, on: TriagePlace, may: 'resolve' | 'classify'): Promise<TriageActor> {
+  const asker = await liveTurn(tx, call, on);
+  if (asker.kind === 'orchestrator') return { agentId: call.agentId, role: 'orchestrator' };
+  if (asker.kind === 'head' && (await placesOf(tx, on.departmentId)).includes(asker.departmentId ?? '')) return { agentId: call.agentId, role: 'head' };
   if (may === 'resolve' && on.triageAgentId === call.agentId) return { agentId: call.agentId, role: 'triage' };
   throw notAllowed();
 }

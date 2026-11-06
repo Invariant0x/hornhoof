@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { people, requests, tasks, taskWaits } from '../src/db/schema.js';
+import { people, requestInternal, requests, tasks, taskWaits } from '../src/db/schema.js';
 import { ask, cancel, type Request, type Task } from '../src/modules/tasks/engine.js';
 import { endQuestionWait, keepWaitsWithMove, questionSourceKey, syncQuestionWait, type QuestionGuard } from '../src/modules/tasks/wait-producers.js';
 import { requestSourceKey } from '../src/modules/tasks/wait-state.js';
@@ -83,6 +83,31 @@ describe('the wait of a question', () => {
     await c.db.update(requests).set({ triageAgentId: c.orchestrator.id, routeRevision: 2 }).where(eq(requests.id, c.request.id));
     const kept = await c.sync(c.guard({ ...c.request, routeRevision: 2 }));
     expect(kept).toMatchObject({ ownerAgentId: c.orchestrator.id, plan: null, state: 'legacy_needs_plan' });
+  });
+
+  it('with no dates carries the revision of its route, even with the same one having it, and a repeat changes nothing', async () => {
+    const c = await company();
+    await c.db.update(requests).set({ routeRevision: 2 }).where(eq(requests.id, c.request.id));
+    const guard = c.guard({ ...c.request, routeRevision: 2 });
+    const kept = await c.sync(guard);
+    expect(kept).toMatchObject({ ownerAgentId: c.head.id, sourceRevision: 2, state: 'legacy_needs_plan', ownerDueAt: null });
+    expect((await c.sync(guard))!.id).toBe(kept!.id);
+    expect((await c.waits()).filter(w => w.endedAt === null)).toHaveLength(1);
+  });
+
+  it('that was open ends once nobody can have it, and only the recovery intent stays', async () => {
+    const c = await company();
+    await c.db.update(requests).set({ triageAgentId: null, routeRevision: 2 }).where(eq(requests.id, c.request.id));
+    expect(await c.sync(c.guard({ ...c.request, routeRevision: 2 }))).toBeNull();
+    expect(await c.waits()).toMatchObject([{ outcome: 'superseded', proofRef: `question:${c.request.id}:route:2`, endedAt: expect.any(Date) }]);
+    expect((await c.db.select().from(requestInternal).where(eq(requestInternal.requestId, c.request.id)))[0]!.recoveryIntent).toMatchObject({ reason: 'internal_route_unavailable' });
+  });
+
+  it('keeps a promise given for it when another comes to have it, under the new route', async () => {
+    const c = await company();
+    await c.sync(c.guard(), c.plan());
+    await c.db.update(requests).set({ triageAgentId: c.orchestrator.id, routeRevision: 2 }).where(eq(requests.id, c.request.id));
+    expect(await c.sync(c.guard({ ...c.request, routeRevision: 2 }))).toMatchObject({ ownerAgentId: c.orchestrator.id, sourceRevision: 2, state: 'active', ownerDueAt: expect.any(Date) });
   });
 
   it('refuses what was read before, and a question of another task', async () => {

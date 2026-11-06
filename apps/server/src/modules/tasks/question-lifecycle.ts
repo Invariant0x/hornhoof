@@ -98,9 +98,6 @@ export async function askedWords(ctx: Pick<Ctx, 'db' | 'templates'>, job: { agen
   return `Asked ${who}. #${number} waits for the answer; you will be woken with it.`;
 }
 
-export const privateWords = async (db: Pick<Ctx['db'], 'select'>, id: string): Promise<string | null> =>
-  (await db.select({ text: requestInternal.technicalText }).from(requestInternal).where(eq(requestInternal.requestId, id)))[0]?.text ?? null;
-
 const Words = z.string().trim().min(1).max(4000);
 export const ResolveInput = z.strictObject({ ...QuestionMutationGuard.shape, resolution: Words, executorInstruction: Words.optional() });
 export type ResolveInput = z.infer<typeof ResolveInput>;
@@ -229,18 +226,30 @@ export const approvalDigest = (r: Pick<Request, 'id' | 'taskId' | 'text' | 'link
 
 const notThisResult = (what: string) => new ApiError(400, 'validation', `${what} Name exactly what this question shows.`, 'task_invalid');
 
+const asksToApprove = (request: Request, sha: string): boolean => request.kind === 'approval' && request.commit === sha;
+
+const asksThePolicy = (request: Request, digest: string): boolean => request.kind === 'approval' && request.approvalChannel !== null && digest === approvalDigest(request);
+
+async function showsThePictures(tx: Tx, request: Request, imageIds: readonly string[]): Promise<boolean> {
+  const shown = await tx.select({ id: attachments.id }).from(attachments).where(eq(attachments.requestId, request.id));
+  return shown.length === imageIds.length && shown.every(f => imageIds.includes(f.id));
+}
+
+type ReadyResult = Extract<QuestionClassificationInput['classification'], { kind: 'ready_result' }>['artifact'];
+
+/* What is wrong with naming this as what the question shows, if anything. */
+async function notWhatItShows(tx: Tx, request: Request, artifact: ReadyResult): Promise<string | null> {
+  if (artifact.kind === 'commit') return asksToApprove(request, artifact.sha) ? null : 'This question does not ask to approve that commit.';
+  if (artifact.kind === 'policy') return asksThePolicy(request, artifact.digest) ? null : 'This is not the approval this question asks for.';
+  if (artifact.kind === 'design') return (await showsThePictures(tx, request, artifact.imageIds)) ? null : 'These are not the pictures this question shows.';
+  return 'A card of the orchestrator is not a question on a task.';
+}
+
 /* A ready result is the exact thing the question shows, and not something like it. */
 async function requireTheResult(tx: Tx, request: Request, classification: QuestionClassificationInput['classification']): Promise<void> {
   if (classification.kind !== 'ready_result') return;
-  const { artifact } = classification;
-  if (artifact.kind === 'commit' && (request.kind !== 'approval' || request.commit !== artifact.sha)) throw notThisResult('This question does not ask to approve that commit.');
-  if (artifact.kind === 'staff' || artifact.kind === 'structure') throw notThisResult('A card of the orchestrator is not a question on a task.');
-  if (artifact.kind === 'policy' && (request.kind !== 'approval' || !request.approvalChannel || artifact.digest !== approvalDigest(request))) throw notThisResult('This is not the approval this question asks for.');
-  if (artifact.kind === 'design') {
-    const shown = await tx.select({ id: attachments.id }).from(attachments).where(eq(attachments.requestId, request.id));
-    const same = shown.length === artifact.imageIds.length && shown.every(f => artifact.imageIds.includes(f.id));
-    if (!same) throw notThisResult('These are not the pictures this question shows.');
-  }
+  const wrong = await notWhatItShows(tx, request, classification.artifact);
+  if (wrong) throw notThisResult(wrong);
 }
 
 const offerMismatch = () => new ApiError(400, 'validation', 'A choice is put before a person with its ways, each one once, in their order.', 'task_invalid');
@@ -274,19 +283,29 @@ export async function classifyInternal(ctx: Ctx, call: TriageCall, input: Questi
   return { result: moved.result, wakes: moved.wakes };
 }
 
+type Sealed = NonNullable<Request['classification']>;
+
+const sameRevisions = (request: Request, snapshot: Sealed): boolean => snapshot.revision === request.questionRevision && snapshot.routeRevision === request.routeRevision;
+
+const sameHolder = (task: Task, snapshot: Sealed): boolean => {
+  const was = snapshot.sourceBinding.taskAssignment;
+  return was?.assigneeAgentId === task.assigneeAgentId && was?.executorAgentId === task.executorAgentId && was?.stage === task.stage;
+};
+
+/* What the authority comes to now, or nothing if there is no longer anyone who could take it. */
+const authorityNow = (tx: Tx, task: Task, request: Request, snapshot: Sealed): Promise<string | null> =>
+  questionAuthority(tx, task, request, snapshot.classification).then(a => a.authorityDigest, (err: unknown) => {
+    if (err instanceof ApiError) return null;
+    throw err;
+  });
+
 /* Whether what a person was shown is still what it rested on: the same source, the same hands on the task, the same people to take
    it and the same work. */
 export async function staleClassification(tx: Tx, task: Task, request: Request): Promise<boolean> {
   const snapshot = request.classification;
   if (!snapshot) return false;
-  if (snapshot.revision !== request.questionRevision || snapshot.routeRevision !== request.routeRevision) return true;
-  const was = snapshot.sourceBinding.taskAssignment;
-  if (was?.assigneeAgentId !== task.assigneeAgentId || was?.executorAgentId !== task.executorAgentId || was?.stage !== task.stage) return true;
-  const authority = await questionAuthority(tx, task, request, snapshot.classification).catch((err: unknown) => {
-    if (err instanceof ApiError) return null;
-    throw err;
-  });
-  if (authority?.authorityDigest !== snapshot.authority.authorityDigest) return true;
+  if (!sameRevisions(request, snapshot) || !sameHolder(task, snapshot)) return true;
+  if ((await authorityNow(tx, task, request, snapshot)) !== snapshot.authority.authorityDigest) return true;
   return snapshot.classification.kind === 'ready_result' && (await materialStamp(tx, request)).materialDigest !== snapshot.materialDigest;
 }
 

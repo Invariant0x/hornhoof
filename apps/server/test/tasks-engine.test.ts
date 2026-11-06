@@ -1,9 +1,9 @@
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 import { agents, companies, departments, people, requests, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
-import { answer, ask, blocked, cancel, comment, createTask, leaveWork, report, submit, updateTask, verdict } from '../src/modules/tasks/engine.js';
+import { answer, blocked, cancel, comment, createTask, leaveWork, report, submit, updateTask, verdict } from '../src/modules/tasks/engine.js';
 import { wakePrompt } from '../src/modules/tasks/wake.js';
-import { setUpCompany, testApp } from './helpers.js';
+import { askedOfPerson, setUpCompany, testApp } from './helpers.js';
 
 async function company() {
   const { app, db } = await testApp();
@@ -169,7 +169,7 @@ describe('the task engine', () => {
     expect(['review', 'cancelled']).toContain((await read(task.id)).status);
   });
 
-  it('tells whoever gave a department task when its head reports, and asks a person when a head is blocked on theirs, whose question the orchestrator puts into plain words', async () => {
+  it('tells whoever gave a department task when its head reports, and asks the orchestrator when a head is blocked on theirs', async () => {
     const { ctx, db, orchestrator, dev, head, deptTask } = await company();
     const given = await createTask(ctx, { agentId: orchestrator.id }, { title: 'Pricing page', brief: '', body: '', departmentId: dev.id, assigneeAgentId: head.id });
     const done = await report(ctx, head.id, given.task.id, { done: true, summary: 'Shipped behind a flag.' });
@@ -178,7 +178,7 @@ describe('the task engine', () => {
     const mine = await deptTask();
     const stuck = await report(ctx, head.id, mine.id, { done: false, summary: 'Need a Stripe account.' });
     expect(stuck.task.status).toBe('waiting');
-    expect(woken(stuck)).toEqual([[orchestrator.id, 'explain']]);
+    expect(woken(stuck)).toEqual([[orchestrator.id, 'question']]);
     expect(await db.select({ kind: requests.kind, text: requests.text, status: requests.status }).from(requests)).toEqual([{ kind: 'stuck', text: 'Need a Stripe account.', status: 'open' }]);
   });
 
@@ -193,14 +193,14 @@ describe('the task engine', () => {
   it('waits for a person and wakes the agent with the answer', async () => {
     const { ctx, CEO, bruno, memberTask, read } = await company();
     const task = await memberTask();
-    const asked = await ask(ctx, bruno.id, task.id, { kind: 'question', text: 'Which currency?' });
+    const asked = await askedOfPerson(ctx, bruno.id, task.id, { kind: 'question', text: 'Which currency?' });
     expect((await read(task.id)).status).toBe('waiting');
     const answered = await answer(ctx, CEO, asked.request.id, { answer: 'EUR' });
     expect(answered.request).toMatchObject({ status: 'answered', answer: 'EUR', answeredBy: CEO.personId });
     expect((await read(task.id)).status).toBe('working');
     expect(woken(answered)).toEqual([[bruno.id, 'answered']]);
-    expect(await reason(ask(ctx, bruno.id, task.id, { kind: 'approval', text: 'Release?', commit: 'abc' }))).toBe('task_invalid');
-    const approval = await ask(ctx, bruno.id, task.id, { kind: 'approval', text: 'Release 0.5.0?', commit: 'a'.repeat(40) });
+    expect(await reason(askedOfPerson(ctx, bruno.id, task.id, { kind: 'approval', text: 'Release?', commit: 'abc' }))).toBe('task_invalid');
+    const approval = await askedOfPerson(ctx, bruno.id, task.id, { kind: 'approval', text: 'Release 0.5.0?', commit: 'a'.repeat(40) });
     expect(await reason(answer(ctx, CEO, approval.request.id, { answer: 'yes' }))).toBe('task_invalid');
     expect((await answer(ctx, CEO, approval.request.id, { approve: true })).request.status).toBe('approved');
     expect(await reason(answer(ctx, CEO, approval.request.id, { approve: false }))).toBe('request_closed');
@@ -209,7 +209,7 @@ describe('the task engine', () => {
   it('leaves a task that closed while a person answered it closed', async () => {
     const { ctx, db, CEO, bruno, memberTask, read } = await company();
     const task = await memberTask();
-    const asked = await ask(ctx, bruno.id, task.id, { kind: 'question', text: 'Which currency?' });
+    const asked = await askedOfPerson(ctx, bruno.id, task.id, { kind: 'question', text: 'Which currency?' });
     /* The task is cancelled after the answer read it and before the answer is written. */
     const begin = db.transaction.bind(db);
     vi.spyOn(db, 'transaction').mockImplementationOnce(async (fn, config) => {
@@ -283,7 +283,7 @@ describe('the task engine', () => {
     const { ctx, db, CEO, bruno, memberTask, read } = await company();
     const task = await memberTask();
     const commit = 'b'.repeat(40);
-    const approval = await ask(ctx, bruno.id, task.id, { kind: 'approval', text: 'Merge the checkout?', commit });
+    const approval = await askedOfPerson(ctx, bruno.id, task.id, { kind: 'approval', text: 'Merge the checkout?', commit });
     expect((await read(task.id)).status).toBe('waiting');
     const declined = await answer(ctx, CEO, approval.request.id, { approve: false, answer: 'Refunds first.' });
     expect(declined.request).toMatchObject({ status: 'declined', answer: 'Refunds first.', answeredBy: CEO.personId });

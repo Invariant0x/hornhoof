@@ -10,9 +10,8 @@ import { agentChanges, agentEvents, agents, companies, departments, jobs, machin
 import { afterJob } from '../src/modules/tasks/wake.js';
 import { identityOf } from '../src/modules/nodes/hub.js';
 import { ask, createTask } from '../src/modules/tasks/engine.js';
-import { wakeAll } from '../src/modules/tasks/wake.js';
 import { fakeRelay } from './fake-relay.js';
-import { as, connectNode, invitePerson, listen, mcp, setUpCompany, testApp, until, takePlan } from './helpers.js';
+import { as, askedOfPerson, connectNode, invitePerson, listen, mcp, setUpCompany, takePlan, testApp, until } from './helpers.js';
 import { said } from '../src/modules/conversation/live.js';
 
 const NODE_KEY = 'k'.repeat(40);
@@ -221,9 +220,11 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
   it('tells people when the turn that was to put a request into words ended without them', async () => {
     const { app, db, ceo, orchestrator, bruno, task } = await company();
     await db.delete(jobs).where(eq(jobs.agentId, orchestrator.id));
-    const { request, wakes } = await ask(app.ctx, bruno.id, task.id, { kind: 'question', text: 'JWT or sessions for /checkout?' });
-    await wakeAll(app.ctx, wakes);
-    const [asked] = await db.select().from(jobs).where(eq(jobs.agentId, orchestrator.id));
+    const { request } = await askedOfPerson(app.ctx, bruno.id, task.id, { kind: 'question', text: 'JWT or sessions for /checkout?' });
+    /* A turn from before questions went inside first: Hornhoof asks for no more of these, and what is under way still ends. */
+    const [asked] = await db.insert(jobs).values({ companyId: task.companyId, agentId: orchestrator.id, subscriptionId: orchestrator.subscriptionId!, kind: 'conversation', prompt: 'Put it in plain words.', status: 'running', startedAt: new Date(), timeoutMs: 1000 }).returning();
+    await db.insert(agentEvents).values({ companyId: task.companyId, agentId: orchestrator.id, jobId: asked!.id, kind: 'message', data: { text: 'Put it in plain words.', request: request.id } });
+    expect((await app.inject({ url: '/api/requests', ...as(ceo) })).json().requests).toMatchObject([{ id: request.id, explained: null, explaining: true }]);
     const heard: string[] = [];
     app.ctx.bus.subscribe(task.companyId, m => heard.push(m.type));
     await db.update(jobs).set({ status: 'failed', error: 'agent_failed', finishedAt: new Date() }).where(eq(jobs.id, asked!.id));
@@ -242,17 +243,10 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
     expect(applied!.personId).toBeNull();
   });
 
-  it('is asked to put what an employee asks a person into plain words, and its words show with the request', async () => {
+  it('can put what is before a person into plain words, and its words show with the request', async () => {
     const { app, db, ceo, orchestrator, bruno, task, running } = await company();
     await db.delete(jobs).where(eq(jobs.agentId, orchestrator.id));
-    const { request, wakes } = await ask(app.ctx, bruno.id, task.id, { kind: 'question', text: 'JWT or sessions for /checkout?' });
-    await wakeAll(app.ctx, wakes);
-    const [asked] = await db.select().from(jobs).where(eq(jobs.agentId, orchestrator.id));
-    expect(asked!.prompt).toContain(request.id);
-    expect(asked!.prompt).toContain('\n> JWT or sessions for /checkout?');
-    expect(asked!.prompt).toContain('explain_request');
-    /* People see that the orchestrator is on it while its turn waits or runs. */
-    expect((await app.inject({ url: '/api/requests', ...as(ceo) })).json().requests).toMatchObject([{ id: request.id, explained: null, explaining: true }]);
+    const { request } = await askedOfPerson(app.ctx, bruno.id, task.id, { kind: 'question', text: 'JWT or sessions for /checkout?' });
     await running(orchestrator.id, TOKEN);
     const plain = 'Бруно спрашивает, как входить в оплату. Нужно выбрать: проще (сессии) или для приложений тоже (JWT).';
     expect((await call(await mcp(app, TOKEN), 'explain_request', { request: request.id, text: plain })).isError).toBeFalsy();
@@ -265,7 +259,7 @@ describe('the orchestrator runs the company as the CEO can in Hornhoof', () => {
 
   it('answers an employee\'s question as itself, for the CEO its turn answers', async () => {
     const { app, db, ceoId, orchestrator, bruno, task } = await company();
-    const { request } = await ask(app.ctx, bruno.id, task.id, { kind: 'question', text: 'Is tax in scope?' });
+    const { request } = await askedOfPerson(app.ctx, bruno.id, task.id, { kind: 'question', text: 'Is tax in scope?' });
     const res = await call(await mcp(app, TOKEN), 'answer_request', { request: request.id, answer: 'Yes, with tax.' });
     expect(res.isError).toBeFalsy();
     const [job] = await db.select().from(jobs).where(eq(jobs.agentId, orchestrator.id));

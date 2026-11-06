@@ -2,9 +2,10 @@ import { TaskWaitView } from '@hornhoof/protocol/waits';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { taskWaits, turns, waitPolicies } from '../src/db/schema.js';
-import { ask, createTask, updateTask, type Task } from '../src/modules/tasks/engine.js';
+import { createTask, updateTask, type Task } from '../src/modules/tasks/engine.js';
 import { afterSourceKey } from '../src/modules/tasks/wait-state.js';
 import { aclCompany, leaks, type AclCompany } from './agent-view-company.js';
+import { askedOfPerson } from './helpers.js';
 
 const HOUR = 3_600_000;
 
@@ -66,7 +67,7 @@ describe('what people read of the waits on a task', () => {
     expect(leaks(res, [c.crew.other])).toEqual([]);
     expect(await waitsOn(c, follow, c.tokens.ceo)).toMatchObject([{ owner: { agentId: c.crew.other.id } }]);
     const asked = await c.work('Asked', c.crew.mine);
-    await ask(c.app.ctx, c.crew.mine.id, asked.id, { kind: 'approval', text: 'Send it?', approval: { channel: 'message', kind: 'welcome email', amount: null }, topic: 'task' });
+    await askedOfPerson(c.app.ctx, c.crew.mine.id, asked.id, { kind: 'approval', text: 'Send it?', approval: { channel: 'message', kind: 'welcome email', amount: null }, topic: 'task' });
     expect(await waitsOn(c, asked, c.tokens.ann)).toMatchObject([{ kind: 'person', owner: null }]);
     expect(await waitsOn(c, asked, c.tokens.olga).catch(() => null)).toBeNull();
     expect(await waitsOn(c, asked, c.tokens.ceo)).toMatchObject([{ kind: 'person', owner: { personId: c.ids.olga } }]);

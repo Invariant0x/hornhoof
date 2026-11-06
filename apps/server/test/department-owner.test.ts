@@ -4,9 +4,9 @@ import { WHOLE, accessOf, type Access, type Spot } from '../src/auth/access.js';
 import { decisionOwner, type Candidate, type DecisionSubject } from '../src/auth/decision-owner.js';
 import { canDecide, decidedBy, type Decider } from '../src/auth/decisions.js';
 import { companies, departments, people } from '../src/db/schema.js';
-import { ask } from '../src/modules/tasks/engine.js';
+
 import { company } from './department-owner-fixture.js';
-import { as, invitePerson } from './helpers.js';
+import { as, askedOfPerson, invitePerson } from './helpers.js';
 
 const C = 'acme';
 const listed = (departmentIds: string[], teamIds: string[] = [], owns: string[] = []): Access => ({ whole: false, departments: new Set(departmentIds), teams: new Set(teamIds), ...(owns.length ? { owns: new Set(owns) } : {}) });
@@ -221,7 +221,7 @@ type WaitingLine = { id: string; ownerPersonId: string; canAnswer: boolean; deci
 type Waiting = { requests: WaitingLine[]; addressed: WaitingLine[]; counts: { byPerson: Record<string, number>; total: number } };
 
 describe('approvals with a department owner', () => {
-  const asked = async (c: Awaited<ReturnType<typeof company>>) => (await ask(c.app.ctx, c.worker.id, c.task.id, { kind: 'approval', text: 'Merge?', commit: COMMIT })).request;
+  const asked = async (c: Awaited<ReturnType<typeof company>>) => (await askedOfPerson(c.app.ctx, c.worker.id, c.task.id, { kind: 'approval', text: 'Merge?', commit: COMMIT })).request;
   const waiting = async (c: Awaited<ReturnType<typeof company>>, token: string): Promise<Waiting> => (await c.app.inject({ method: 'GET', url: '/api/requests', ...as(token) })).json();
 
   it('sends an approval to the named owner, and shows it as theirs', async () => {

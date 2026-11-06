@@ -8,7 +8,7 @@ import { orchestratorHeaders } from '../src/auth/internal.js';
 import { agents, companies, departments, people, proposals, requests, subscriptions, teams } from '../src/db/schema.js';
 import { decisionOwner, type Candidate } from '../src/modules/tasks/decisions.js';
 import { ask, cancel, createTask, report } from '../src/modules/tasks/engine.js';
-import { as, invitePerson, listen, openStream, setUpCompany, testApp, until, ownPlan } from './helpers.js';
+import { as, askedOfPerson, invitePerson, listen, openStream, ownPlan, setUpCompany, testApp, until } from './helpers.js';
 
 const listed = (departmentIds: string[], teamIds: string[] = []): Access => ({ whole: false, departments: new Set(departmentIds), teams: new Set(teamIds) });
 const person = (id: string, access: Access, extra: Partial<Candidate> = {}): Candidate => ({ id, status: 'active', isOwner: false, access, ...extra });
@@ -112,7 +112,7 @@ async function company() {
   const asking = async (where: keyof typeof workers, q: Parameters<typeof ask>[3]) => {
     const deptId = { dev: dev.id, sales: sales.id, mkt: mkt.id }[where];
     const { task } = await createTask(ctx, { agentId: heads[where].id }, { title: `About ${q.text}`, brief: '', body: '', departmentId: deptId, assigneeAgentId: workers[where].id, executor: true, gates: [] });
-    return { task, request: (await ask(ctx, workers[where].id, task.id, q)).request };
+    return { task, request: (await askedOfPerson(ctx, workers[where].id, task.id, q)).request };
   };
   const view = async (token: string, query = ''): Promise<View> => (await app.inject({ url: `/api/requests${query}`, ...as(token) })).json();
   return { app, db, ctx, control, acme: acme!, sub: sub!, orchestrator: orchestrator!, dev, sales, mkt, devTeam: devTeam!, heads, workers, tokens, ids, asking, view };
@@ -165,7 +165,7 @@ describe('decisions waiting for people', () => {
   it("take in the orchestrator's own question and a release confirmation as the requests they are, both the CEO's", async () => {
     const c = await company();
     const { task } = await createTask(c.ctx, { personId: c.ids.ivan }, { title: 'Turn 3: Launch', brief: '', body: '', departmentId: null, assigneeAgentId: c.orchestrator.id });
-    const itsOwn = await ask(c.ctx, c.orchestrator.id, task.id, { kind: 'question', text: 'Which goal goes first?', topic: 'task' });
+    const itsOwn = await askedOfPerson(c.ctx, c.orchestrator.id, task.id, { kind: 'question', text: 'Which goal goes first?', topic: 'task' });
     const release = await c.asking('dev', { kind: 'approval', text: 'Release 0.6?', commit: 'c'.repeat(40) });
     const all = await c.view(c.tokens.ceo);
     expect(ownersOf(all)).toEqual({ [itsOwn.request.id]: c.ids.ivan, [release.request.id]: c.ids.ivan });

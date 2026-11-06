@@ -4,12 +4,12 @@ import { describe, expect, it, vi, onTestFinished } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, departments, jobs, people, requests, sessions, taskEvents, taskWaits, waitNotices, waitPolicies } from '../src/db/schema.js';
 import * as queue from '../src/modules/conversation/queue.js';
-import { answer, ask, cancel, comment, createTask, type Task } from '../src/modules/tasks/engine.js';
+import { answer, cancel, comment, createTask, type Task } from '../src/modules/tasks/engine.js';
 import { checkWaitHealth } from '../src/modules/tasks/wait-monitor.js';
 import * as notices from '../src/modules/tasks/wait-notices.js';
 import { sweepWaits } from '../src/modules/tasks/wait-escalation.js';
 import { moveWaitOwner, operationSourceKey, syncSourceWaits } from '../src/modules/tasks/wait-state.js';
-import { as } from './helpers.js';
+import { as, askedOfPerson } from './helpers.js';
 import { waitCompany } from './wait-company.js';
 
 const HOUR = 3_600_000;
@@ -233,7 +233,7 @@ describe('who hears of it in the end', () => {
     const c = await company();
     await c.policy('person');
     const task = await c.task(c.agent.id);
-    const { request } = await ask(c.ctx, c.agent.id, task.id, { kind: 'question', text: 'Which way?', topic: 'task' });
+    const { request } = await askedOfPerson(c.ctx, c.agent.id, task.id, { kind: 'question', text: 'Which way?', topic: 'task' });
     const [wait] = await c.db.select().from(taskWaits).where(eq(taskWaits.taskId, task.id));
     expect(wait).toMatchObject({ ownerPersonId: c.ceoPerson.id });
     await sweepWaits(c.ctx, at(wait!.ownerDueAt));
@@ -309,7 +309,7 @@ describe('a person\'s card', () => {
   it('is read by its person alone, and acknowledging it decides nothing', async () => {
     const c = await delivered();
     const asked = await c.task(c.agent.id);
-    const { request } = await ask(c.ctx, c.agent.id, asked.id, { kind: 'approval', text: 'Release?', commit: 'b'.repeat(40) });
+    const { request } = await askedOfPerson(c.ctx, c.agent.id, asked.id, { kind: 'approval', text: 'Release?', commit: 'b'.repeat(40) });
     const annToken = await c.tokenOf(c.ann.id);
     const list = await c.app.inject({ url: '/api/wait-cards', ...as(annToken) });
     expect(list.statusCode).toBe(200);

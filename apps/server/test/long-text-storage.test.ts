@@ -4,9 +4,9 @@ import { and, eq } from 'drizzle-orm';
 import { expect, it } from 'vitest';
 import { hashToken } from '../src/crypto/tokens.js';
 import { agents, attachments, companies, departments, jobs, people, requests, sessions, subscriptions, taskEvents, tasks } from '../src/db/schema.js';
-import { ask, comment, createTask, note, submit } from '../src/modules/tasks/engine.js';
+import { comment, createTask, note, submit } from '../src/modules/tasks/engine.js';
 import { dropOldFiles } from '../src/modules/tasks/attachments.js';
-import { as, listen, mcp, setUpCompany, testApp } from './helpers.js';
+import { as, askedOfPerson, listen, mcp, setUpCompany, testApp } from './helpers.js';
 
 const WORDS = ('Full text: права и данные 🌿.\n' + 'Keep every word and its author.\n'.repeat(500)).slice(0, 11999) + '!';
 const sha = (bytes: string | Buffer) => createHash('sha256').update(bytes).digest('hex');
@@ -172,7 +172,7 @@ it('keeps lightweight engine callers complete inline and leaves short comments u
 
 it('records one long answer and one full file when requests race', async () => {
   const c = await fixture();
-  const request = (await ask(c.app.ctx, c.worker.id, c.task.id, { kind: 'question', text: 'Please reply.' })).request;
+  const request = (await askedOfPerson(c.app.ctx, c.worker.id, c.task.id, { kind: 'question', text: 'Please reply.' })).request;
   const reply = () => c.app.inject({ method: 'POST', url: `/api/requests/${request.id}`, payload: { answer: WORDS }, ...as(c.session) });
   const replies = await Promise.all([reply(), reply()]);
   expect(replies.map(r => r.statusCode).sort()).toEqual([200, 409]);
